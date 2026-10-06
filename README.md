@@ -18,7 +18,13 @@ In the window: Space, Shift+Left/Right, / to search
 
 ## Files
 - `src-tauri/src/main.rs`: sign-in (OAuth with PKCE), token storage, API calls, media keys
-- `dist/`: the interface (index.html, style.css, app.js)
+- `dist/`: the interface (index.html, style.css)
+  - `app.js`: core player: views, track list, queue, playback, settings dialog. Loaded last; starts everything.
+  - `spotify.js`: Spotify sign-in, player and Web API calls
+  - `js/`: one file per feature (titles, appearance, playback, audio, stats, lyrics, integrations,
+    discover, library, widget, nav, platforms, requests, albums). Each declares its functions and an
+    `xxxInit()`; `js/init.js` calls them in order. They're plain scripts sharing globals, so the order
+    of the `<script>` tags in index.html matters only for code that runs as a file loads.
 
 ## Settings (gear in the sidebar)
 - Appearance: theme, accent color, list density (saved automatically)
