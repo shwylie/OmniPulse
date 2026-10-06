@@ -1,5 +1,4 @@
 const { invoke } = window.__TAURI__.core;
-const { listen } = window.__TAURI__.event;
 
 const $ = (id) => document.getElementById(id);
 const audio = new Audio();
@@ -108,7 +107,7 @@ function setBadge(box, t) {
 // ---------- state ----------
 let viewTracks = [];      // tracks shown in the main list
 let nextHref = "";        // path for "Load more"
-let view = "likes";       // likes | search | playlist | now
+let view = "likes";       // likes | search | playlist | artist | discover | rediscover | stats | now
 let back = "likes";       // list view to return to from Now Playing
 let query = "";
 let playlists = [];
@@ -148,7 +147,6 @@ function showView(v) {
   if (isNow) ensureLyrics();
   else if (lyricsMode) setLyricsMode(false);
   $("navDiscover").classList.toggle("active", v === "discover");
-  if (!isNow) $("q").placeholder = v === "spotify" ? "Search Spotify" : v === "mixes" ? "Search mixes" : "What do you want to play?";
   if (!isNow) $("chips").hidden = v !== "discover";
   if (!isNow) $("recLangSel").hidden = v !== "discover";
   $("navLikes").classList.toggle("active", v === "likes");
@@ -165,15 +163,10 @@ function renderHero() {
   if (v === "rediscover") {
     title = "Rediscover";
     sub = "Likes you haven't played in a while. ";
-  } else if (v === "mixes") {
-    title = mixQuery ? 'Mixes: "' + mixQuery + '"' : "Mixes";
-    sub = mixQuery ? "" : mixSrc === "following" ? "Long sets from artists you follow. " : "Long sets from your likes. ";
-  } else if (v === "spotify") {
-    title = "Spotify";
-    sub = spotifyQuery ? 'Results for "' + spotifyQuery + '". ' : "Your liked songs. ";
   } else if (v === "discover") {
     title = "Discover";
-    sub = "";
+    sub = discoverNote ? discoverNote + ". " : "";
+    if (recHidden) sub += recHidden + " hidden by the language filter. ";
   } else if (v === "search") {
     title = 'Results for "' + query + '"';
   } else if (v === "playlist" && currentPlaylist) {
@@ -186,7 +179,7 @@ function renderHero() {
   const n = viewTracks.length;
   $("viewTitle").textContent = title;
   $("refreshBtn").hidden = !(v === "discover" || v === "rediscover");
-  $("viewSub").textContent = v === "discover" ? "" : sub + (n ? n + (nextHref ? "+" : "") + (n === 1 ? " track" : " tracks") : "");
+  $("viewSub").textContent = v === "discover" ? sub : sub + (n ? n + (nextHref ? "+" : "") + (n === 1 ? " track" : " tracks") : "");
   const isArtist = v === "artist" && !!currentArtist;
   $("heroActions").hidden = n === 0 && !isArtist;
   $("playAll").hidden = n === 0;
@@ -351,8 +344,7 @@ async function loadTracks(paths, append, fallback) {
     let got = asList(data);
     if (view === "discover") got = recFilter(got);
     if (hideMixesIn(view)) got = got.filter((t) => !isMix(t));
-    if (view === "likes") got = platFilter(applyLikesFilter(got));
-    if (view === "search") got = platFilter(got);
+    if (view === "likes") got = applyLikesFilter(got);
     const fromLikes = used.startsWith("/me/likes/tracks");
     got.forEach((t) => {
       if (fromLikes) likeState.set(t.id, true);
@@ -563,11 +555,7 @@ $("bigSearchForm").addEventListener("submit", (e) => {
 $("searchForm").addEventListener("submit", (e) => {
   e.preventDefault();
   const q = $("q").value.trim();
-  if (!q) return;
-  const cv = view === "now" ? back : view;
-  if (cv === "spotify") openSpotify(q);
-  else if (cv === "mixes") openMixes("search", q);
-  else openSearch(q);
+  if (q) openSearch(q);
 });
 // Infinite scroll: load the next page when the end of the list comes near
 let loadingMore = false;

@@ -1,6 +1,4 @@
-// Extra features: shuffle and repeat, queue reordering, sleep timer, custom CSS,
-// album-art accent, listening stats, lyrics, Discord activity and Last.fm.
-// Loaded before app.js, so this file only declares things; app.js calls extrasInit().
+// Extra features, loaded before app.js: this file only declares things, and app.js calls extrasInit().
 
 // ---------- shuffle and repeat ----------
 let repeatMode = "off";   // off | all | one
@@ -66,7 +64,6 @@ function cycleRepeat() {
 }
 
 function onEnded() {
-  if (sleepMode === "end") { sleepSet("off"); say("Sleep timer: stopped after that track."); return; }
   if (repeatMode === "one") { audio.currentTime = 0; audio.play(); return; }
   if (qi < queue.length - 1) { step(1); return; }
   if (repeatMode === "all" && queue.length) { qi = 0; playCurrent(); }
@@ -110,38 +107,6 @@ function queueDndInit() {
   list.addEventListener("dragend", () => { from = -1; clear(); });
 }
 
-// ---------- sleep timer ----------
-const SLEEP_STEPS = ["off", "15", "30", "60", "end"];
-let sleepMode = "off";
-let sleepTimer = null;
-
-function pauseAll() {
-  audio.pause();
-  spotifyPause();
-}
-
-function sleepSet(mode) {
-  clearTimeout(sleepTimer);
-  sleepTimer = null;
-  sleepMode = mode;
-  if (mode !== "off" && mode !== "end") {
-    sleepTimer = setTimeout(() => {
-      pauseAll();
-      sleepSet("off");
-      say("Sleep timer: playback stopped.");
-    }, Number(mode) * 60000);
-  }
-  const b = $("sleepBtn");
-  if (!b) return;
-  b.classList.toggle("on", mode !== "off");
-  $("sleepLabel").textContent = mode === "off" ? "" : mode === "end" ? "end" : mode + "m";
-  b.title = "Sleep timer: " + (mode === "off" ? "off" : mode === "end" ? "stop after this track" : mode + " minutes");
-}
-
-function sleepCycle() {
-  sleepSet(SLEEP_STEPS[(SLEEP_STEPS.indexOf(sleepMode) + 1) % SLEEP_STEPS.length]);
-}
-
 // ---------- custom CSS ----------
 function applyUserCss() {
   let st = document.getElementById("userCss");
@@ -180,39 +145,6 @@ function hslToHex(h, s, l) {
     return Math.round(c * 255).toString(16).padStart(2, "0");
   };
   return "#" + f(0) + f(8) + f(4);
-}
-
-function dominantColor(url) {
-  return new Promise((resolve, reject) => {
-    const img = new Image();
-    img.crossOrigin = "anonymous";
-    img.onload = () => {
-      try {
-        const c = document.createElement("canvas");
-        c.width = c.height = 24;
-        const ctx = c.getContext("2d", { willReadFrequently: true });
-        ctx.drawImage(img, 0, 0, 24, 24);
-        const d = ctx.getImageData(0, 0, 24, 24).data;
-        let r = 0, g = 0, b = 0, w = 0;
-        for (let i = 0; i < d.length; i += 4) {
-          const [, s, l] = rgbToHsl(d[i], d[i + 1], d[i + 2]);
-          const weight = s * Math.max(0, 1 - Math.abs(l - 0.5) * 1.8);
-          if (weight > 0.05) { r += d[i] * weight; g += d[i + 1] * weight; b += d[i + 2] * weight; w += weight; }
-        }
-        if (!w) { reject(new Error("no color")); return; }
-        let [h, s, l] = rgbToHsl(r / w, g / w, b / w);
-        const theme = document.documentElement.dataset.theme;
-        const lightTheme = theme === "light" || theme === "paper";
-        s = Math.max(s, 0.5);
-        l = lightTheme ? Math.min(Math.max(l, 0.3), 0.45) : Math.min(Math.max(l, 0.58), 0.72);
-        resolve(hslToHex(h, s, l));
-      } catch (e) {
-        reject(e);
-      }
-    };
-    img.onerror = () => reject(new Error("cover could not be read"));
-    img.src = url;
-  });
 }
 
 let artColors = null;   // colours taken from the current cover, when that option is on
@@ -748,7 +680,6 @@ let recHidden = 0;
 
 function recFilter(list) {
   list = list.filter((t) => !isLikedTrack(t) && !hiddenRecs.has(String(t.id)));
-  list = platFilter(list);
   const want = prefs.recLang || "any";
   if (want === "any") return list;
   const kept = list.filter((t) => {
@@ -909,21 +840,10 @@ function uploaderNote(t) {
 // ---------- mixes: anything longer than 15 minutes ----------
 const MIX_MS = 15 * 60 * 1000;
 const isMix = (t) => !!t && (t.duration || 0) > MIX_MS;
-// Mixes stay out of these; they still show in Likes, playlists and the Mixes page
+// Mixes stay out of these; they still show in Likes (under Mixes) and playlists
 const hideMixesIn = (v) => v === "search" || v === "discover" || v === "artist";
-let mixSrc = "liked";
-let mixQuery = "";
 
-function renderMixChips() {
-  const box = $("mixChips");
-  box.replaceChildren();
-  [["liked", "From your likes"], ["following", "From artists you follow"]].forEach(([k, label]) => {
-    const b = el("button", "chip" + (k === mixSrc && !mixQuery ? " on" : ""), label);
-    b.dataset.src = k;
-    box.append(b);
-  });
-}
-
+// Follows next_href for up to "pages" pages and returns all the tracks
 async function collectPages(path, pages) {
   let out = [];
   let next = path;
@@ -933,41 +853,6 @@ async function collectPages(path, pages) {
     next = !Array.isArray(data) && data.next_href ? toPath(data.next_href) : "";
   }
   return out;
-}
-
-async function openMixes(src, q) {
-  if (src === "search") mixQuery = q || "";
-  else { mixSrc = src || mixSrc; mixQuery = ""; }
-  currentPlaylist = null;
-  currentArtist = null;
-  showView("mixes");
-  renderMixChips();
-  $("listView").scrollTop = 0;
-  const tok = ++loadToken;
-  say("Finding mixes...");
-  try {
-    let list;
-    if (mixQuery) {
-      list = await collectPages("/tracks?q=" + encodeURIComponent(mixQuery) + "&access=playable&limit=100&linked_partitioning=true", 2);
-    } else if (mixSrc === "following") {
-      list = await collectPages("/me/followings/tracks?access=playable&limit=100&linked_partitioning=true", 3);
-    } else {
-      list = await collectPages("/me/likes/tracks?access=playable&limit=200&linked_partitioning=true", 3);
-      list.forEach((t) => likeState.set(t.id, true));
-    }
-    if (tok !== loadToken) return;
-    const seen = new Set();
-    viewTracks = list.filter((t) => isMix(t) && !seen.has(t.id) && seen.add(t.id));
-    nextHref = "";
-    render();
-    say(viewTracks.length ? "" : mixQuery ? "No mixes found." : "No mixes here yet.");
-  } catch (e) {
-    if (tok !== loadToken) return;
-    viewTracks = [];
-    nextHref = "";
-    render();
-    say(String(e));
-  }
 }
 
 // ---------- your own playlists (saved to your SoundCloud account, private) ----------
@@ -1376,12 +1261,12 @@ let restoring = false;
 function pageSnapshot(v) {
   return {
     view: v, query, playlist: currentPlaylist, artist: currentArtist,
-    discoverSrc, likesFilter, spotifyQuery, plat: curPlat(v),
+    discoverSrc, likesFilter, plat: curPlat(v),
   };
 }
 
 function pageKey(p) {
-  return [p.view, p.query, p.playlist && p.playlist.id, p.artist && p.artist.id, p.discoverSrc, p.likesFilter, p.spotifyQuery, p.plat].join("|");
+  return [p.view, p.query, p.playlist && p.playlist.id, p.artist && p.artist.id, p.discoverSrc, p.likesFilter, p.plat].join("|");
 }
 
 // Called from showView: remembers where you were before this page
@@ -1409,7 +1294,6 @@ function restorePage(p) {
     case "artist": if (p.artist) openArtist(p.artist); else openLikes(); break;
     case "discover": openDiscover(p.discoverSrc); break;
     case "rediscover": openRediscover(); break;
-    case "spotify": openSpotify(p.spotifyQuery || ""); break;
     case "stats": showView("stats"); break;
     case "now": showView("now"); break;
     default: openLikes();
@@ -1441,17 +1325,6 @@ function applyLikesFilter(list) {
   if (likesFilter === "mixes") return list.filter(isMix);
   if (likesFilter === "tracks") return list.filter((t) => !isMix(t));
   return list;
-}
-
-// ---------- platform filter (shows once more than one platform is switched on) ----------
-function activePlatforms() {
-  const list = ["soundcloud"];
-  if (FEATURES.spotify && spotifyPremium) list.push("spotify");
-  return list;
-}
-
-function platFilter(list) {
-  return list;   // each list now comes from one platform, chosen with the platform switch
 }
 
 // ---------- platforms: one switch on each page, showing only what's linked ----------
@@ -1667,16 +1540,6 @@ async function localAddFolder() {
 }
 
 function v29Init() {
-  // platform switch
-  $("platChips").addEventListener("click", (e) => {
-    const b = e.target.closest("button[data-p]");
-    if (!b) return;
-    prefs.pagePlat = prefs.pagePlat || {};
-    prefs.pagePlat[view] = b.dataset.p;
-    savePrefs();
-    if (curPage) { restoring = true; try { restorePage(Object.assign({}, curPage, { plat: b.dataset.p })); } finally { restoring = false; } }
-  });
-
   // local music settings
   $("localOn").checked = prefs.localOn !== false;
   $("localOn").addEventListener("change", async () => {
@@ -1756,12 +1619,11 @@ async function openRediscover(fresh) {
     const monthAgo = Date.now() - 30 * 86400000;
     let pool = source.filter((t) =>
       !isMix(t) && !hiddenRecs.has(String(t.id)) && (lastPlayed.get(t.id) || 0) < monthAgo);
-    pool = platFilter(pool);
     shuffleInPlace(pool);
     pool.sort((a, b) => (lastPlayed.get(a.id) || 0) - (lastPlayed.get(b.id) || 0));   // never played first
     setLocalPool(pool);
     render();
-    say(viewTracks.length ? "" : likedTracks.length ? "You've played all your likes recently." : "No likes found.");
+    say(viewTracks.length ? "" : source.length ? "You've played all your likes recently." : "No likes found.");
   } catch (e) {
     if (tok !== loadToken) return;
     viewTracks = [];
@@ -1888,18 +1750,6 @@ function v26Init() {
     else if (view === "rediscover") openRediscover(true);
   });
 
-  // platform chips
-  $("platChips").addEventListener("click", (e) => {
-    const b = e.target.closest(".platChip");
-    if (!b) return;
-    const hidden = new Set(prefs.platHidden || []);
-    if (hidden.has(b.dataset.p)) hidden.delete(b.dataset.p);
-    else if (activePlatforms().filter((p) => !hidden.has(p)).length > 1) hidden.add(b.dataset.p);
-    prefs.platHidden = [...hidden];
-    savePrefs();
-    if (curPage) { restoring = true; try { restorePage(curPage); } finally { restoring = false; } }
-  });
-
   // removed recommendations
   hiddenRecs = new Set((prefs.hiddenRecs || []).map(String));
 
@@ -1921,11 +1771,6 @@ function v26Init() {
 
 
 // ---------- chat song requests ----------
-const REQ_NOTE = "Point your chat bot at the request address, swapping USER and SONG for the bot's own variables. " +
-  "Streamer.bot: a Fetch URL action with user=%user% and q=%rawInputUrlEncoded%. " +
-  "Mix It Up: a Web Request action with user=$username and q=$allargs. " +
-  "The reply is a ready-made chat message. A SoundCloud or Spotify link works as the song too.";
-
 function reqKeyNew() {
   const a = new Uint8Array(12);
   crypto.getRandomValues(a);
@@ -2081,6 +1926,8 @@ function v30Init() {
     prefs.req = $("reqOn").checked;
     savePrefs();
     reqApply();
+    reqQueueBtn();
+    spModePaint();
   });
   $("reqPort").addEventListener("change", () => {
     const p = Math.round(Number($("reqPort").value));
@@ -2111,12 +1958,7 @@ function v30Init() {
   };
   stepper("reqMax", 10, 1, 50, "reqMaxDown", "reqMaxUp");
   stepper("reqPerUser", 2, 1, 10, "reqUserDown", "reqUserUp");
-  $("reqClear").addEventListener("click", () => {
-    queue = queue.filter((t, i) => i <= qi || !t.requestedBy);
-    renderQueue();
-    reqPaint();
-    say("Waiting requests removed.");
-  });
+  $("reqClear").addEventListener("click", clearRequests);
   reqApply();
 }
 
@@ -2364,7 +2206,6 @@ function v33Init() {
   });
   $("msgReset").addEventListener("click", () => { prefs.reqMsgs = {}; savePrefs(); renderReqMsgs(); });
   $("qClearReq").addEventListener("click", clearRequests);
-  $("reqOn").addEventListener("change", () => { reqQueueBtn(); spModePaint(); });
   reqRenderBot();
   reqQueueBtn();
 
@@ -2912,7 +2753,6 @@ function extrasInit() {
   repeatMode = prefs.repeat || "off";
   shuffleOn = !!prefs.shuffle;
   paintModes();
-  sleepSet("off");
 
   $("shuffleBtn").addEventListener("click", toggleShuffle);
   $("repeatBtn").addEventListener("click", cycleRepeat);

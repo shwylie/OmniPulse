@@ -417,7 +417,6 @@ select.narrow { width: auto; min-width: 150px; }
   content: "1"; position: absolute; right: 3px; bottom: 2px;
   font-size: 9px; font-weight: 700; color: var(--accent);
 }
-#sleepBtn { width: auto; min-width: 34px; padding: 0 6px; border-radius: 999px; display: inline-flex; gap: 2px; align-items: center; }
 #sleepLabel { font-size: 11px; }
 
 /* queue drag and drop */
@@ -608,9 +607,6 @@ select.narrow { width: auto; min-width: 150px; }
 
 /* right-click menu */
 .menuSep { height: 1px; margin: 4px 6px; background: var(--line); }
-.platChip { display: inline-flex; align-items: center; gap: 4px; }
-.platChip svg { width: 14px; height: 14px; }
-.platChip:not(.on) { opacity: 0.5; }
 
 /* ===== v27 ===== */
 .titleRow { display: flex; align-items: center; gap: 12px; }
@@ -705,7 +701,6 @@ details.sub.inner { margin-top: 10px; }
   width: 220px; padding: 8px 10px; background: var(--elevated); color: var(--text);
   border: 1px solid var(--line); border-radius: 8px;
 }
-#platChips { display: none !important; }
 
 /* ===== v38: album tiles mixed into lists ===== */
 .albumToggle {

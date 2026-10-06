@@ -1,12 +1,12 @@
-// Spotify side of the app. It has its own tab, search and player, and its
-// tracks never share a queue with SoundCloud tracks. Loaded before app.js, so
+// Spotify side of the app: sign-in, the in-app web player or the desktop app, and the
+// Web API calls behind Likes, Search and playlists. Spotify tracks never share a queue
+// with other platforms. Loaded before app.js, so
 // this file only declares things; app.js calls spotifyInit() at startup.
 
 let spotifyPremium = false;
 let spotifyPlayer = null;
 let spotifyDeviceId = null;
 let spotifySdk = null;
-let spotifyQuery = "";
 let spotifyEnded = false;
 let spState = { pos: 0, ts: 0, playing: false, dur: 0 };
 
@@ -58,7 +58,6 @@ async function spotifyCheck() {
   if (typeof renderPlatChips === "function") renderPlatChips();
   syncSpotifySettings();
   if (typeof spModePaint === "function") spModePaint();
-  if ((!ok || prefs.spOn === false) && view === "spotify") openLikes();
   return ok;
 }
 
@@ -90,41 +89,6 @@ async function spotifyDisconnect() {
     fillNowPlaying(null);
     renderQueue();
   }
-  if (view === "spotify") openLikes();
-}
-
-// ---------- browsing ----------
-async function openSpotify(q) {
-  if (!spotifyPremium) return;
-  spotifyQuery = q || "";
-  currentPlaylist = null;
-  currentArtist = null;
-  showView("spotify");
-  $("listView").scrollTop = 0;
-  const tok = ++loadToken;
-  say("Loading...");
-  try {
-    let items;
-    if (spotifyQuery) {
-      const base = "/search?type=track&q=" + encodeURIComponent(spotifyQuery) + "&limit=";
-      let data;
-      try { data = await spApi("GET", base + "20"); } catch (e) { data = await spApi("GET", base + "10"); }
-      items = (data.tracks && data.tracks.items) || [];
-    } else {
-      const data = await spApi("GET", "/me/tracks?limit=50");
-      items = (data.items || []).map((x) => x.track);
-    }
-    if (tok !== loadToken) return;
-    viewTracks = items.filter((x) => x && x.id).map(spTrack);
-    nextHref = "";
-    say(viewTracks.length ? "" : "Nothing found.");
-  } catch (e) {
-    if (tok !== loadToken) return;
-    viewTracks = [];
-    nextHref = "";
-    say(String(e));
-  }
-  render();
 }
 
 // ---------- playback (Spotify's own web player, which acts as a device) ----------
