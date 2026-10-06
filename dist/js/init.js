@@ -18,6 +18,7 @@ function extrasSyncSettings() {
 // ready before anything pushes to it, and the audio chain is built after the UI is wired.
 function extrasInit() {
   playbackInit();
+  autoplayInit();
   lyricsInit();
   statsInit();
   appearanceInit();

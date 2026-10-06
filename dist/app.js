@@ -670,7 +670,7 @@ function playNext(t) {
 function addToQueue(t) {
   if (!t || !sameService(t)) return;
   if (qi < 0) { startList([t], 0, false); return; }
-  queue.push(t);
+  queue.splice(autoplayStart(), 0, t);   // ahead of any autoplay picks
   renderQueue();
 }
 
@@ -687,6 +687,7 @@ function queueRow(t, idx, removable) {
   const qa = el("div", "artist");
   qa.append(platformBadge(t), el("span", "", artistName(t)));
   if (t.requestedBy) qa.append(el("span", "reqBy", "requested by " + t.requestedBy));
+  else if (t.autoplay) qa.append(el("span", "reqBy", "autoplay"));
   meta.append(el("div", "title", t.title || "Untitled"), qa);
   li.append(img, meta);
   if (removable) {
@@ -713,7 +714,7 @@ function renderQueue() {
   if (t) nowBox.append(queueRow(t, qi, false));
   else nowBox.append(el("li", "qEmpty", "Nothing playing."));
   const upcoming = qi >= 0 ? queue.slice(qi + 1) : [];
-  if (!upcoming.length) nextBox.append(el("li", "qEmpty", "Nothing queued after this."));
+  if (!upcoming.length) nextBox.append(el("li", "qEmpty", autoplayNote()));
   // A long queue (all your likes, say) only draws the next stretch of it
   upcoming.slice(0, QUEUE_SHOWN).forEach((tr, k) => nextBox.append(queueRow(tr, qi + 1 + k, true)));
   if (upcoming.length > QUEUE_SHOWN) nextBox.append(el("li", "qEmpty", "...and " + (upcoming.length - QUEUE_SHOWN) + " more."));
@@ -1023,6 +1024,7 @@ function step(d) {
   const onSpotify = !!cur && srcOf(cur) === "spotify";
   if (d < 0 && onSpotify && spotifyPos() > 3000) { spotifySeek(0); return; }
   if (d < 0 && !onSpotify && audio.currentTime > 3) { audio.currentTime = 0; return; }
+  if (d > 0 && qi === queue.length - 1 && autoplayActive()) { autoplayAdvance(); return; }
   qi = (qi + d + queue.length) % queue.length;
   playCurrent();
 }

@@ -61,12 +61,19 @@ function cycleRepeat() {
   prefs.repeat = repeatMode;
   savePrefs();
   paintModes();
+  renderQueue();   // the autoplay note depends on repeat
 }
 
+// Called when a track finishes, from the audio element or the Spotify player
 function onEnded() {
-  if (repeatMode === "one") { audio.currentTime = 0; audio.play(); return; }
+  if (repeatMode === "one") {
+    if (srcOf(curTrack()) === "spotify") playCurrent();
+    else { audio.currentTime = 0; audio.play(); }
+    return;
+  }
   if (qi < queue.length - 1) { step(1); return; }
-  if (repeatMode === "all" && queue.length) { qi = 0; playCurrent(); }
+  if (repeatMode === "all" && queue.length) { qi = 0; playCurrent(); return; }
+  if (autoplayActive()) autoplayAdvance();
 }
 
 // ---------- queue drag and drop ----------

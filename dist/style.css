@@ -289,6 +289,12 @@ select {
 .qRow button:hover { color: var(--text); background: var(--panel); }
 .qRow button svg { width: 16px; height: 16px; }
 .qEmpty { padding: 6px; color: var(--muted); }
+.autoRow {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  margin: 16px 6px 0; padding-top: 12px; border-top: 1px solid var(--line);
+}
+.autoTitle { font-weight: 600; }
+.autoNote { margin-top: 2px; font-size: 12px; color: var(--muted); }
 
 /* Player bar extras */
 .now { cursor: pointer; border-radius: 8px; }

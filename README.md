@@ -189,3 +189,16 @@ Spotify playlists need a fresh Spotify sign-in once (Settings > Integrations > S
 Album tiles (bigger cover, track count, play button) appear among the tracks on Likes, Search, Discover,
 Rediscover and artist pages, for SoundCloud, Spotify and local files. The Albums button beside the page title
 hides them; tracks from albums are never hidden.
+
+## v39
+- Autoplay (switch at the bottom of the queue panel, on by default): about 30 seconds before the
+  queue runs out, about 10 similar tracks are added: SoundCloud related tracks, Spotify artists
+  similar to the current one (via Last.fm), or more by the same artist / album from your files.
+  Skips anything queued, removed from recommendations, or played in the last 3 hours, and keeps
+  the Discover language choice. Waits while repeat is on; switching it off removes unplayed picks.
+- "Add to queue" and chat requests go ahead of autoplay picks
+- Repeat one / all now work for Spotify tracks too
+- Long lists scroll faster (new pages are added instead of redrawing everything); the queue panel
+  shows the next 100 tracks
+- Discover shows why it picked tracks ("Because you liked ...") and how many the language filter hid
+- Code: extras.js is split into dist/js/ (see Files)

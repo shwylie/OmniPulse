@@ -33,14 +33,17 @@ let recHidden = 0;
 
 function recFilter(list) {
   list = list.filter((t) => !isLikedTrack(t) && !hiddenRecs.has(String(t.id)));
-  const want = prefs.recLang || "any";
-  if (want === "any") return list;
-  const kept = list.filter((t) => {
-    const d = detectLang(t);
-    return d === "unknown" || d.endsWith("?") || d === want;
-  });
+  const kept = list.filter(langOk);
   recHidden += list.length - kept.length;
   return kept;
+}
+
+// The Discover language picker; tracks it can't place are kept
+function langOk(t) {
+  const want = prefs.recLang || "any";
+  if (want === "any") return true;
+  const d = detectLang(t);
+  return d === "unknown" || d.endsWith("?") || d === want;
 }
 
 // Discover > Similar artists: Last.fm finds related artists, SoundCloud supplies their tracks

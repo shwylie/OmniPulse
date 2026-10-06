@@ -155,7 +155,7 @@ function spotifyTick() {
   paintSpotify();
   if (spState.playing && spState.dur && !spotifyEnded && spotifyPos() >= spState.dur - 400) {
     spotifyEnded = true;
-    if (qi < queue.length - 1) step(1);
+    onEnded();
   }
 }
 

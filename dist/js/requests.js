@@ -136,7 +136,7 @@ async function handleSongRequest(q, user) {
   addToQueue(t);
   reqPaint();
   reqQueueBtn();
-  const pos = queue.length - 1 - qi;
+  const pos = queue.indexOf(t) - qi;   // requests go ahead of autoplay picks, so not always last
   vars.position = pos;
   return {
     ok: true, title: t.title, artist: artistName(t), url: t.permalink_url || "", position: pos,
