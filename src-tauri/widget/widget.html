@@ -1,0 +1,303 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Now playing</title>
+<!--
+  Now playing widget for OBS (Browser Source). Pick the design and corners in the app's Settings.
+  Every design scales to whatever size you give the source:
+    Card 460x130, Slim bar 560x64, Square 300x380, Minimal 460x110, Pill 480x80,
+    Vinyl 460x150, Poster 480x270, Ticker 640x48 (the sizes they were drawn at).
+  It only displays what the app is playing; it never plays audio.
+  You can edit the look below; the widget reloads itself when the app is restarted with changes.
+-->
+<style>
+  @property --bg1 { syntax: "<color>"; inherits: true; initial-value: #14161d; }
+  @property --bg2 { syntax: "<color>"; inherits: true; initial-value: #14161d; }
+  @property --hi { syntax: "<color>"; inherits: true; initial-value: #8e9bff; }
+  :root { transition: --bg1 var(--cf, 1.2s) ease, --bg2 var(--cf, 1.2s) ease, --hi var(--cf, 1.2s) ease; }
+  html, body { margin: 0; height: 100%; background: transparent; overflow: hidden; }
+  body { font-family: "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif; }
+
+  #card {
+    position: absolute; inset: 0; overflow: hidden;
+    display: flex; align-items: center; gap: 0.875rem;
+    padding: 0.75rem; border-radius: 0.875rem; box-sizing: border-box;
+    background: linear-gradient(115deg, var(--bg1), var(--bg2));
+    color: #fff;
+    opacity: 0; transition: opacity 0.45s;
+  }
+  #card.show { opacity: 1; transform: none; }
+  #art {
+    height: 100%; aspect-ratio: 1; max-width: 45%; flex: none;
+    border-radius: 0.625rem; object-fit: cover; background: rgba(255, 255, 255, 0.12);
+    transition: opacity 0.3s ease;
+  }
+  #info { flex: 1; min-width: 0; display: flex; flex-direction: column; justify-content: center; transition: opacity 0.3s ease; font-size: calc(1rem * var(--ts, 1)); }
+  .fade { opacity: 0 !important; }
+  #title { font-size: 1.0625em; font-weight: 700; }
+  #who { display: flex; align-items: center; gap: 0.4rem; margin-top: 0.2rem; min-width: 0; }
+  #who svg { width: 0.95em; height: 0.95em; flex: none; }
+  #artist { flex: 1; min-width: 0; font-size: 0.875em; color: rgba(255, 255, 255, 0.78); }
+  #track { height: 0.25rem; margin-top: 0.7rem; border-radius: 0.25rem; background: rgba(255, 255, 255, 0.22); overflow: hidden; }
+  #bar { height: 100%; width: 0; border-radius: 0.25rem; background: rgba(255, 255, 255, 0.92); transition: opacity 0.3s; }
+  #card.paused #bar { opacity: 0.5; }
+  #times { display: flex; justify-content: space-between; margin-top: 0.3rem; font-size: 0.69em; color: rgba(255, 255, 255, 0.7); font-variant-numeric: tabular-nums; }
+
+  /* Slim bar */
+  body.bar #card { gap: 0.6rem; padding: 0.4rem 0.6rem 0.55rem; }
+  body.bar #title { font-size: 0.95em; }
+  body.bar #who { margin-top: 0; }
+  body.bar #artist { font-size: 0.78em; }
+  body.bar #times { display: none; }
+  body.bar #track { position: absolute; left: 0; right: 0; bottom: 0; height: 0.22rem; margin: 0; border-radius: 0; }
+  body.bar #bar { border-radius: 0; }
+
+  /* Square */
+  body.square #card { flex-direction: column; align-items: stretch; gap: 0.6rem; }
+  body.square #art { width: 100%; height: auto; max-width: none; min-height: 0; flex: 0 1 auto; }
+  body.square #info { flex: none; }
+  body.square #title { font-size: 1.15em; }
+
+  /* Minimal: no panel, just text over the stream */
+  body.minimal #card { background: none; box-shadow: none; padding: 0.3rem 0.5rem; }
+  body.minimal #art { height: 82%; }
+  body.minimal #title, body.minimal #artist, body.minimal #times { text-shadow: 0 0.06rem 0.3rem rgba(0, 0, 0, 0.85); }
+  body.minimal #track { background: rgba(255, 255, 255, 0.3); }
+  body.minimal #bar { background: var(--hi); }
+
+  /* Pill */
+  body.pill #card { border-radius: 999px; padding: 0.4rem 1.1rem 0.4rem 0.4rem; gap: 0.75rem; }
+  body.pill #art { border-radius: 50%; }
+  body.pill #times { display: none; }
+  body.pill #track { margin-top: 0.45rem; }
+
+  /* Vinyl: the cover spins like a record while playing */
+  @keyframes spin { to { transform: rotate(360deg); } }
+  body.vinyl #art {
+    height: calc(100% - 0.7rem); margin-left: 0.35rem; border-radius: 50%;
+    box-shadow: 0 0 0 0.3rem rgba(0, 0, 0, 0.55), 0 0 0 0.36rem rgba(255, 255, 255, 0.15);
+    animation: spin 6s linear infinite; animation-play-state: paused;
+  }
+  body.vinyl #card:not(.paused) #art { animation-play-state: running; }
+
+  /* Poster: the cover fills the card, text sits over a dark fade */
+  body.poster #card { align-items: flex-end; padding: 1rem; }
+  body.poster #art { position: absolute; inset: 0; width: 100%; height: 100%; max-width: none; aspect-ratio: auto; border-radius: 0; opacity: 0.85; }
+  body.poster #card::after { content: ""; position: absolute; inset: 0; background: linear-gradient(180deg, transparent 35%, rgba(0, 0, 0, 0.82)); pointer-events: none; }
+  body.poster #info { position: relative; z-index: 1; }
+  body.poster #title { font-size: 1.4em; }
+
+  /* Ticker: one line, no cover */
+  body.ticker #card { padding: 0 0.8rem; gap: 0.6rem; }
+  body.ticker #art { display: none; }
+  body.ticker #info { flex-direction: row; align-items: center; gap: 0.6rem; }
+  body.ticker #title { flex: 0 1 auto; max-width: 60%; font-size: 1em; }
+  body.ticker #who { margin: 0; flex: 1; }
+  body.ticker #times { display: none; }
+  body.ticker #track { position: absolute; left: 0; right: 0; bottom: 0; height: 0.18rem; margin: 0; border-radius: 0; }
+  body.ticker #bar { border-radius: 0; }
+
+  /* Animation options from the app */
+  body.nofade #card, body.nofade #art, body.nofade #info { transition: none !important; }
+  .marq { text-overflow: ellipsis; }
+  body.noscroll .marq span { display: inline; animation: none !important; }
+  body.vinyl.nospin #art { animation: none; }
+
+  /* Square corners */
+  body.sharp #card, body.sharp #art, body.sharp #track, body.sharp #bar { border-radius: 0; }
+  body.sharp.vinyl #art { border-radius: 50%; }
+
+  /* Long text scrolls back and forth instead of being cut off */
+  .marq { overflow: hidden; white-space: nowrap; }
+  .marq span { display: inline-block; }
+  .marq.run span { animation: marq var(--dur, 10s) ease-in-out infinite; }
+  @keyframes marq {
+    0%, 15% { transform: translateX(0); }
+    45%, 60% { transform: translateX(var(--shift)); }
+    90%, 100% { transform: translateX(0); }
+  }
+</style>
+</head>
+<body class="card">
+<div id="card">
+  <img id="art" alt="">
+  <div id="info">
+    <div id="title" class="marq"><span></span></div>
+    <div id="who"><svg viewBox="0 0 24 24"><path id="platIcon" d=""/></svg><div id="artist" class="marq"><span></span></div></div>
+    <div id="track"><div id="bar"></div></div>
+    <div id="times"><span id="cur">0:00</span><span id="dur">0:00</span></div>
+  </div>
+</div>
+<script>
+  const MY_VERSION = "__WIDGET_VERSION__";
+  const PLATFORMS = {
+    soundcloud: { d: "M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96z", color: "#ff5500" },
+    spotify: { d: "M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z", color: "#1db954" },
+  };
+  // The size each design was drawn at; everything scales from this
+  const BASE = {
+    card: [460, 130], bar: [560, 64], square: [300, 380], minimal: [460, 110],
+    pill: [480, 80], vinyl: [460, 150], poster: [480, 270], ticker: [640, 48],
+  };
+  const $ = (id) => document.getElementById(id);
+  let s = null;
+  let design = "card";
+  let shownKey = "";
+  let swapTimer = null;
+
+  function fit() {
+    const [bw, bh] = BASE[design] || BASE.card;
+    const k = Math.max(0.3, Math.min(innerWidth / bw, innerHeight / bh));
+    document.documentElement.style.fontSize = 16 * k + "px";
+    measure($("title"));
+    measure($("artist"));
+  }
+
+  function applyLook(d, rounded, anim) {
+    if (!BASE[d]) d = "card";
+    anim = anim || {};
+    const cls = d + (rounded ? "" : " sharp") + (anim.fade === false ? " nofade" : "") +
+      (anim.scroll === false ? " noscroll" : "") + (anim.spin === false ? " nospin" : "");
+    const cf = (anim.color === undefined ? 1.2 : Number(anim.color)) + "s";
+    document.documentElement.style.setProperty("--cf", cf);
+    if (document.body.className === cls) return;
+    document.body.className = cls;
+    design = d;
+    fit();
+  }
+
+  // Start or stop scrolling for one line of text
+  function measure(box) {
+    const span = box.firstElementChild;
+    box.classList.remove("run");
+    if (document.body.classList.contains("noscroll")) return;
+    const over = span.scrollWidth - box.clientWidth;
+    if (over > 2) {
+      span.style.setProperty("--shift", -(over + 4) + "px");
+      span.style.setProperty("--dur", Math.max(7, over / 25 + 5) + "s");
+      void span.offsetWidth;   // restart the animation from the start
+      box.classList.add("run");
+    }
+  }
+
+  // Catch text that started overflowing later (fonts loading, resizes)
+  function checkScroll(box) {
+    const span = box.firstElementChild;
+    const over = span.scrollWidth - box.clientWidth;
+    if ((over > 2) !== box.classList.contains("run")) measure(box);
+  }
+
+  function setText(box, text) {
+    const span = box.firstElementChild;
+    if (span.textContent === text) return;
+    span.textContent = text;
+    measure(box);
+  }
+
+  // Mix a colour with near-black so white text stays readable
+  function mix(hex, t) {
+    const n = parseInt((hex || "#8e9bff").replace("#", "").slice(0, 6), 16) || 0;
+    const rgb = [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+    const base = [11, 12, 16];
+    return "rgb(" + rgb.map((v, i) => Math.round(v * t + base[i] * (1 - t))).join(",") + ")";
+  }
+
+  function fmt(ms) {
+    const t = Math.max(0, Math.floor(ms / 1000));
+    return Math.floor(t / 60) + ":" + String(t % 60).padStart(2, "0");
+  }
+
+  function position() {
+    if (!s) return 0;
+    const p = s.position_ms + (s.playing ? Date.now() - s.updated_at : 0);
+    return s.duration_ms ? Math.min(p, s.duration_ms) : p;
+  }
+
+  function fill() {
+    setText($("title"), s.title);
+    setText($("artist"), s.artist || "");
+    const p = PLATFORMS[s.platform] || PLATFORMS.soundcloud;
+    $("platIcon").setAttribute("d", p.d);
+    $("platIcon").setAttribute("fill", p.color);
+    if (s.artwork) $("art").src = s.artwork; else $("art").removeAttribute("src");
+  }
+
+  // New track: fade the old one out, wait for the new cover, fade the new one in
+  function changeTrack(first) {
+    clearTimeout(swapTimer);
+    if (first || document.body.classList.contains("nofade")) { fill(); return; }
+    $("art").classList.add("fade");
+    $("info").classList.add("fade");
+    let done = false;
+    const go = () => {
+      if (done) return;
+      done = true;
+      fill();
+      requestAnimationFrame(() => {
+        $("art").classList.remove("fade");
+        $("info").classList.remove("fade");
+      });
+    };
+    const started = Date.now();
+    const pre = new Image();
+    pre.onload = pre.onerror = () => { swapTimer = setTimeout(go, Math.max(0, 300 - (Date.now() - started))); };
+    if (s.artwork) pre.src = s.artwork; else swapTimer = setTimeout(go, 300);
+    setTimeout(go, 1500);   // never wait longer than this
+  }
+
+  function paint() {
+    const has = !!(s && s.title);
+    $("card").classList.toggle("show", has);
+    if (!has) return;
+    applyLook(s.design || "card", s.rounded !== false, s.anim);
+    $("card").classList.toggle("paused", !s.playing);
+    const key = s.title + "\u0001" + (s.artist || "") + "\u0001" + (s.artwork || "");
+    if (key !== shownKey) {
+      const first = !shownKey;
+      shownKey = key;
+      changeTrack(first);
+    }
+    const root = document.documentElement.style;
+    root.setProperty("--bg1", mix(s.accent, 0.55));
+    root.setProperty("--bg2", mix(s.accent2 || s.accent, 0.42));
+    root.setProperty("--hi", s.accent || "#8e9bff");
+    const ts = String(s.text_scale || 1);
+    if (document.documentElement.style.getPropertyValue("--ts") !== ts) {
+      document.documentElement.style.setProperty("--ts", ts);
+      measure($("title"));
+      measure($("artist"));
+    }
+    checkScroll($("title"));
+    checkScroll($("artist"));
+    tick();
+  }
+
+  function tick() {
+    if (!s || !s.title) return;
+    const pos = position();
+    $("cur").textContent = fmt(pos);
+    $("dur").textContent = fmt(s.duration_ms || 0);
+    $("bar").style.width = (s.duration_ms ? Math.min(100, (pos / s.duration_ms) * 100) : 0) + "%";
+  }
+
+  async function poll() {
+    try {
+      const r = await fetch("/now.json", { cache: "no-store" });
+      s = await r.json();
+      if (s.v && s.v !== MY_VERSION) { location.reload(); return; }   // the app has a newer widget
+      paint();
+    } catch (e) {
+      $("card").classList.remove("show");   // the app is closed or the widget was switched off
+    }
+  }
+
+  $("art").addEventListener("error", () => { $("art").removeAttribute("src"); });
+  addEventListener("resize", fit);
+  fit();
+  poll();
+  setInterval(poll, 1000);
+  setInterval(tick, 250);
+</script>
+</body>
+</html>

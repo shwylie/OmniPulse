@@ -1,0 +1,16 @@
+{
+  "name": "sc-client",
+  "private": true,
+  "version": "0.1.0",
+  "scripts": {
+    "postinstall": "node scripts/copy-hls.mjs",
+    "dev": "tauri dev",
+    "build": "tauri build"
+  },
+  "dependencies": {
+    "hls.js": "^1.5.0"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2"
+  }
+}

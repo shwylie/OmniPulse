@@ -1,0 +1,549 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>SC Client</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="titlebar" data-tauri-drag-region>
+  <div class="titleLeft" data-tauri-drag-region>
+    <span id="titleText" data-tauri-drag-region title="Right-click to rename"></span>
+    <button id="titlePrompt" class="titlePrompt" hidden>Sign in to SoundCloud</button>
+    <div class="titlePlat" id="titlePlat" hidden></div>
+  </div>
+  <div class="winBtns">
+    <button id="winMin" aria-label="Minimize"><svg viewBox="0 0 12 12"><path d="M1 6h10"/></svg></button>
+    <button id="winMax" aria-label="Maximize">
+      <svg id="icoMax" viewBox="0 0 12 12"><rect x="1.5" y="1.5" width="9" height="9"/></svg>
+      <svg id="icoRestore" class="off" viewBox="0 0 12 12"><rect x="1.5" y="3.5" width="7" height="7"/><path d="M3.5 3.5V1.5h7v7h-2"/></svg>
+    </button>
+    <button id="winClose" class="close" aria-label="Close"><svg viewBox="0 0 12 12"><path d="M1.5 1.5l9 9M10.5 1.5l-9 9"/></svg></button>
+  </div>
+</div>
+
+<div class="app" id="app">
+
+  <aside class="sidebar">
+    <nav>
+      <button class="nav" id="navDiscover">
+        <svg viewBox="0 0 24 24"><path d="M12 10.9c-.61 0-1.1.49-1.1 1.1s.49 1.1 1.1 1.1c.61 0 1.1-.49 1.1-1.1s-.49-1.1-1.1-1.1zM12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm2.19 12.19L6 18l3.81-8.19L18 6l-3.81 8.19z"/></svg>
+        <span>Discover</span>
+      </button>
+      <button class="nav" id="navRediscover">
+        <svg viewBox="0 0 24 24"><path d="M13 3c-4.97 0-9 4.03-9 9H1l3.89 3.89.07.14L9 12H6c0-3.87 3.13-7 7-7s7 3.13 7 7-3.13 7-7 7c-1.93 0-3.68-.79-4.94-2.06l-1.42 1.42C8.27 19.99 10.51 21 13 21c4.97 0 9-4.03 9-9s-4.03-9-9-9zm-1 5v5l4.28 2.54.72-1.21-3.5-2.08V8H12z"/></svg>
+        <span>Rediscover</span>
+      </button>
+      <button class="nav active" id="navLikes">
+        <svg viewBox="0 0 24 24"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg>
+        <span>Likes</span>
+      </button>
+      <button class="nav" id="navSearch">
+        <svg viewBox="0 0 24 24"><path d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0016 9.5 6.5 6.5 0 109.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>
+        <span>Search</span>
+      </button>
+      <button class="nav" id="navStats">
+        <svg viewBox="0 0 24 24"><path d="M5 9.2h3V19H5zM10.6 5h2.8v14h-2.8zm5.6 8H19v6h-2.8z"/></svg>
+        <span>Stats</span>
+      </button>
+    </nav>
+    <div class="plScroll">
+      <div class="plHead">
+        <span id="plHeadText">Playlists</span>
+        <button id="plNew" class="plAdd" title="New playlist" aria-label="New playlist"><svg viewBox="0 0 24 24"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg></button>
+      </div>
+      <form id="plNewForm" class="plNewForm" hidden><input id="plNewName" type="text" placeholder="Playlist name" maxlength="100" autocomplete="off"></form>
+      <div class="plList" id="plList"></div>
+    </div>
+  </aside>
+
+  <section class="content">
+    <header class="top">
+      <button id="backBtn" class="backBtn" aria-label="Back" title="Back" disabled><svg viewBox="0 0 24 24"><path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z"/></svg></button>
+      <form id="searchForm" role="search">
+        <svg viewBox="0 0 24 24"><path d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0016 9.5 6.5 6.5 0 109.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>
+        <input id="q" type="search" placeholder="What do you want to play?" autocomplete="off">
+      </form>
+      <button id="openSettings" class="settingsBtn" aria-label="Settings">
+        <svg viewBox="0 0 24 24"><path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/></svg>
+        <span>Settings</span>
+      </button>
+    </header>
+
+    <div class="searchPane empty" id="searchPane" hidden>
+      <h1 class="searchTitle">Search</h1>
+      <form id="bigSearchForm" role="search">
+        <svg viewBox="0 0 24 24"><path d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0016 9.5 6.5 6.5 0 109.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>
+        <input id="bigQ" type="search" placeholder="Artists, tracks, remixes..." autocomplete="off">
+      </form>
+    </div>
+
+    <div class="scroller" id="listView">
+      <div class="hero">
+        <img id="heroAvatar" class="heroAvatar" alt="" hidden>
+        <div class="titleRow"><h1 id="viewTitle">Likes</h1><button id="albumToggle" class="albumToggle" title="Show or hide albums on this page" hidden><svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 14.5c-2.49 0-4.5-2.01-4.5-4.5S9.51 7.5 12 7.5s4.5 2.01 4.5 4.5-2.01 4.5-4.5 4.5zm0-5.5c-.55 0-1 .45-1 1s.45 1 1 1 1-.45 1-1-.45-1-1-1z"/></svg><span>Albums</span></button><button id="refreshBtn" class="ghost refreshBtn" title="New recommendations" aria-label="Refresh recommendations" hidden><svg viewBox="0 0 24 24"><path d="M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/></svg></button></div>
+        <p id="viewSub"></p>
+        <div class="chips" id="chips" hidden></div>
+        <div class="chips" id="likesChips" hidden></div>
+        <div class="chips" id="platChips" hidden></div>
+        <select id="recLangSel" class="narrow langSel" hidden title="Language of recommendations"><option value="any">Any language</option><option value="en">English</option><option value="es">Spanish</option><option value="pt">Portuguese</option><option value="fr">French</option><option value="de">German</option></select>
+        <div class="heroActions" id="heroActions" hidden>
+          <button id="playAll" class="bigPlay" aria-label="Play all"><svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg></button>
+          <button id="shuffleAll" class="pill">Shuffle</button>
+          <button id="followBtn" class="pill follow" hidden>Follow</button>
+          <button id="plDelete" class="pill" hidden>Delete playlist</button>
+        </div>
+      </div>
+      <p id="status"></p>
+      <div class="tableHead" id="tableHead" hidden><span>#</span><span>Title</span><span></span><span>Time</span></div>
+      <ul id="list"></ul>
+      <div class="moreRow"><button id="more" class="soft" hidden>Load more</button></div>
+    </div>
+
+    <div class="stats" id="statsView" hidden></div>
+
+    <div class="np" id="npView" hidden>
+      <img id="npArt" alt="" hidden>
+      <div class="npInfo">
+        <h1 id="npTitle">Nothing playing</h1>
+        <div class="artistRow"><span id="npPlat"></span><p id="npArtist"></p></div>
+        <p id="npMeta"></p>
+        <p id="npDesc"></p>
+        <div class="npActions"><button id="npLike" class="soft" hidden>Like</button><button id="npOpen" class="soft" hidden>Open on SoundCloud</button></div>
+        <div class="lyrics" id="npLyrics" hidden></div>
+      </div>
+    </div>
+  </section>
+
+  <aside class="queue" id="queue" hidden>
+    <div class="queueHead">
+      <h2>Queue</h2>
+      <button id="qClearReq" class="soft" hidden title="Remove waiting chat requests">Clear requests</button>
+      <button id="clearQueue" class="soft">Clear</button>
+    </div>
+    <h3>Now playing</h3>
+    <ul id="qNow"></ul>
+    <h3>Next up</h3>
+    <ul id="qNext"></ul>
+  </aside>
+
+  <footer class="player">
+    <div class="now" id="nowToggle" role="button" tabindex="0">
+      <img id="nowArt" alt="">
+      <div class="nowText">
+        <div id="nowTitle" title="Open Now Playing">Nothing playing</div>
+        <div class="artistRow"><span id="nowPlat"></span><div id="nowArtist" title="Open artist page"></div></div>
+      </div>
+      <button id="likeBtn" class="ghost" aria-label="Add to Likes" hidden></button>
+    </div>
+
+    <div class="center">
+      <div class="controls">
+        <button id="shuffleBtn" class="mode" aria-label="Shuffle"><svg viewBox="0 0 24 24"><path d="M10.59 9.17L5.41 4 4 5.41l5.17 5.17 1.42-1.41zM14.5 4l2.04 2.04L4 18.59 5.41 20 17.96 7.46 20 9.5V4h-5.5zm.33 9.41l-1.41 1.41 3.13 3.13L14.5 20H20v-5.5l-2.04 2.04-3.13-3.13z"/></svg></button>
+        <button id="prev" aria-label="Previous"><svg viewBox="0 0 24 24"><path d="M6 5h2v14H6zM20 5v14L9 12z"/></svg></button>
+        <button id="toggle" class="main" aria-label="Play or pause">
+          <svg id="icoPlay" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+          <svg id="icoPause" class="off" viewBox="0 0 24 24"><path d="M7 5h4v14H7zM13 5h4v14h-4z"/></svg>
+        </button>
+        <button id="next" aria-label="Next"><svg viewBox="0 0 24 24"><path d="M16 5h2v14h-2zM4 5v14l11-7z"/></svg></button>
+        <button id="repeatBtn" class="mode" aria-label="Repeat" data-mode="off"><svg viewBox="0 0 24 24"><path d="M7 7h10v3l4-4-4-4v3H5v6h2V7zm10 10H7v-3l-4 4 4 4v-3h12v-6h-2v4z"/></svg></button>
+      </div>
+      <div class="seekRow">
+        <span id="cur">0:00</span>
+        <input id="seek" type="range" min="0" max="1000" value="0" aria-label="Seek">
+        <span id="dur">0:00</span>
+      </div>
+    </div>
+
+    <div class="right">
+      <button id="lyricsBtn" class="ghost" aria-label="Lyrics" title="Lyrics"><svg viewBox="0 0 24 24"><path d="M3 18h12v-2H3v2zM3 6v2h18V6H3zm0 7h18v-2H3v2z"/></svg></button>
+      <button id="queueBtn" class="ghost" aria-label="Queue" title="Queue (Q)">
+        <svg viewBox="0 0 24 24"><path d="M15 6H3v2h12V6zm0 4H3v2h12v-2zM3 16h8v-2H3v2zM17 6v8.18c-.31-.11-.65-.18-1-.18-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3V8h3V6h-5z"/></svg>
+      </button>
+      <button id="outputBtn" class="ghost" aria-label="Choose output device" title="Output device">
+        <svg viewBox="0 0 24 24"><path d="M4 6h18V4H4c-1.1 0-2 .9-2 2v11H0v3h14v-3H4V6zm19 2h-6c-.55 0-1 .45-1 1v10c0 .55.45 1 1 1h6c.55 0 1-.45 1-1V9c0-.55-.45-1-1-1zm-1 9h-4v-7h4v7z"/></svg>
+      </button>
+      <button id="mute" class="ghost" aria-label="Mute">
+        <svg id="icoVol" viewBox="0 0 24 24"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/></svg>
+        <svg id="icoMute" class="off" viewBox="0 0 24 24"><path d="M16.5 12c0-1.77-1.02-3.29-2.5-4.03v2.21l2.45 2.45c.03-.2.05-.41.05-.63zm2.5 0c0 .94-.2 1.82-.54 2.64l1.51 1.51A8.796 8.796 0 0021 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3L3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06c1.38-.31 2.63-.95 3.69-1.81L19.73 21 21 19.73l-9-9L4.27 3zM12 4L9.91 6.09 12 8.18V4z"/></svg>
+      </button>
+      <input id="vol" type="range" min="0" max="100" value="80" aria-label="Volume">
+    </div>
+  </footer>
+</div>
+
+<div class="menu" id="plMenu" hidden></div>
+
+<dialog id="fixDialog" class="fixDialog">
+  <form id="fixForm" class="sheet">
+    <h2>Edit title and artist</h2>
+    <p class="note">Only changes how this track shows in the app. Saved on this PC, so you only do it once.</p>
+    <label class="lbl" for="fixTitle">Title</label>
+    <input id="fixTitle" type="text" maxlength="200" autocomplete="off" spellcheck="false">
+    <label class="lbl" for="fixArtist">Artist</label>
+    <input id="fixArtist" type="text" maxlength="120" autocomplete="off" spellcheck="false">
+    <div class="fixActions">
+      <button type="button" id="fixReset" class="soft">Undo my edit</button>
+      <span class="grow"></span>
+      <button type="button" id="fixCancel" class="soft">Cancel</button>
+      <button type="submit" class="soft fixSave">Save</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="settings">
+  <div class="sheet">
+    <div class="sheetHead">
+      <h2>Settings</h2>
+      <button id="closeSettings" class="ghost" aria-label="Close"><svg viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg></button>
+    </div>
+
+    <!-- ===================== Appearance ===================== -->
+    <section class="group">
+      <h3>Appearance</h3>
+      <div class="row">
+        <div class="lbl">Theme</div>
+        <select id="themeSel" class="narrow"><option value="dark">Dark</option><option value="midnight">Midnight</option><option value="graphite">Graphite</option><option value="forest">Forest</option><option value="rose">Rose</option><option value="light">Light</option><option value="paper">Paper</option></select>
+      </div>
+      <div class="row" id="accentRow">
+        <div class="lbl">Accent color</div>
+        <div class="swatches" id="swatches"></div>
+      </div>
+      <div class="row" id="accent2Row">
+        <div>
+          <div class="lbl">Second accent</div>
+          <div class="note">Blends with the first, like the album-art colours. The crossed-out swatch uses one colour.</div>
+        </div>
+        <div class="swatches" id="swatches2"></div>
+      </div>
+      <div class="row">
+        <div class="lbl">Track list density</div>
+        <div class="seg" id="densitySeg"><button data-v="comfortable">Comfortable</button><button data-v="compact">Compact</button></div>
+      </div>
+      <div class="row">
+        <div>
+          <div class="lbl">Match accent to album art</div>
+          <div class="note">Picks colours from the current cover. Falls back to your accent colours.</div>
+        </div>
+        <label class="switch"><input type="checkbox" id="artAccentToggle"><span></span></label>
+      </div>
+      <div class="row">
+        <div>
+          <div class="lbl">App name</div>
+          <div class="note">Shown in the title bar and on the taskbar. Leave empty for the default. You can also right-click the name in the title bar.</div>
+        </div>
+        <input id="appNameInput" class="nameInput" type="text" maxlength="60" autocomplete="off" spellcheck="false">
+      </div>
+      <div class="row">
+        <div>
+          <div class="lbl">Custom CSS</div>
+          <div class="note">Your own styling on top of the theme.</div>
+        </div>
+        <label class="switch"><input type="checkbox" id="cssOn"><span></span></label>
+      </div>
+      <details class="sub" id="cssSection" hidden>
+        <summary>Edit custom CSS</summary>
+        <textarea id="customCss" rows="6" spellcheck="false" placeholder=":root { --row-pad: 10px; }"></textarea>
+        <div class="note">Applied as you type.</div>
+      </details>
+    </section>
+
+    <!-- ===================== Integrations ===================== -->
+    <section class="group">
+      <h3>Integrations</h3>
+      <div class="row">
+        <div>
+          <div class="lbl">SoundCloud</div>
+          <div class="note" id="scNote">Not signed in.</div>
+          <button class="linkBtn" data-url="https://soundcloud.com/you/subscriptions" title="Go+, Artist Pro and other plans">Manage subscription</button>
+        </div>
+        <div class="rowEnd">
+          <label class="switch" title="Use SoundCloud (stays signed in when off)"><input type="checkbox" id="scOn"><span></span></label>
+          <button id="scAuth" class="soft">Sign in</button>
+        </div>
+      </div>
+
+      <div class="row">
+        <div>
+          <div class="lbl">Last.fm</div>
+          <div class="note" id="lfmNote">Not signed in. Needs lastfm_api_key and lastfm_secret in config.json.</div>
+          <button class="linkBtn" data-url="https://www.last.fm/settings/subscription" title="Last.fm Pro">Manage subscription</button>
+        </div>
+        <div class="rowEnd">
+          <label class="switch" title="Use Last.fm (stays signed in when off)"><input type="checkbox" id="lfmOn"><span></span></label>
+          <button id="lfmConnect" class="soft">Sign in</button>
+        </div>
+      </div>
+      <details class="sub" id="lastfmSection" hidden>
+        <summary>Last.fm options</summary>
+        <div class="row">
+          <div>
+            <div class="lbl">Scrobble plays</div>
+            <div class="note">Sends what you play to Last.fm.</div>
+          </div>
+          <label class="switch"><input type="checkbox" id="scrobbleToggle"><span></span></label>
+        </div>
+      </details>
+
+      <div class="row" id="spotifySection">
+        <div>
+          <div class="lbl">Spotify</div>
+          <div class="note" id="spStatus">Not signed in. Spotify only appears once you sign in with a Premium account.</div>
+          <button class="linkBtn" data-url="https://www.spotify.com/account/subscription/manage/" title="Premium and other plans">Manage subscription</button>
+        </div>
+        <div class="rowEnd">
+          <label class="switch" title="Use Spotify (stays signed in when off)"><input type="checkbox" id="spOn"><span></span></label>
+          <button id="spConnect" class="soft">Sign in</button>
+        </div>
+      </div>
+
+      <div class="row">
+        <div>
+          <div class="lbl">Local music</div>
+          <div class="note" id="localNote">Your own music files, from folders on this PC or a network drive.</div>
+        </div>
+        <label class="switch"><input type="checkbox" id="localOn"><span></span></label>
+      </div>
+      <details class="sub" id="localBody" hidden>
+        <summary>Music folders</summary>
+        <div class="folderList" id="localFolders"></div>
+        <div class="row">
+          <button id="localAdd" class="soft" title="Add a folder">+ Add folder</button>
+          <button id="localRescan" class="soft">Rescan</button>
+        </div>
+        <form id="localAddForm" class="row" hidden>
+          <input id="localAddPath" type="text" placeholder="D:\Music or \\NAS\Music" autocomplete="off" spellcheck="false">
+          <button class="soft">Add</button>
+        </form>
+      </details>
+    </section>
+
+    <!-- ===================== Output Preferences ===================== -->
+    <section class="group">
+      <h3>Output Preferences</h3>
+      <div class="row">
+        <div>
+          <div class="lbl">Discord Rich Presence</div>
+          <div class="note" id="presNote">Shows the track you're currently listening to as your Discord activity.</div>
+        </div>
+        <label class="switch"><input type="checkbox" id="presToggle"><span></span></label>
+      </div>
+
+      <div class="row">
+        <div>
+          <div class="lbl">Now playing widget</div>
+          <div class="note" id="widgetNote">A now-playing card for OBS or other streaming software. It only shows what's playing; it doesn't play audio.</div>
+        </div>
+        <label class="switch"><input type="checkbox" id="widgetToggle"><span></span></label>
+      </div>
+      <details class="sub" id="widgetSection" hidden>
+        <summary>Widget options</summary>
+        <div class="row widgetRow">
+          <input id="widgetUrl" type="text" readonly aria-label="Widget address">
+          <input id="widgetPort" type="number" min="1024" max="65535" aria-label="Port" title="Port">
+          <button id="widgetCopy" class="soft">Copy</button>
+        </div>
+        <div class="row">
+          <div class="note">In OBS: add a Browser Source with this address. Any size works; it scales to fit.</div>
+          <button id="widgetClear" class="soft" title="Hide the current track from the widget until the next one starts">Clear</button>
+        </div>
+        <div class="row">
+          <label class="hideOpt">Design
+            <select id="widgetDesign" class="narrow">
+              <option value="card">Card (460 &times; 130)</option>
+              <option value="bar">Slim bar (560 &times; 64)</option>
+              <option value="square">Square (300 &times; 380)</option>
+              <option value="minimal">Minimal (460 &times; 110)</option>
+              <option value="pill">Pill (480 &times; 80)</option>
+              <option value="vinyl">Vinyl (460 &times; 150)</option>
+              <option value="poster">Poster (480 &times; 270)</option>
+              <option value="ticker">Ticker (640 &times; 48)</option>
+            </select>
+          </label>
+          <label class="hideOpt"><input type="checkbox" id="widgetRounded"> Rounded corners</label>
+        </div>
+        <div class="row">
+          <div class="lbl">Text size</div>
+          <div class="stepper">
+            <button id="widgetTextDown" class="soft" aria-label="Smaller text">&minus;</button>
+            <span id="widgetTextVal">100%</span>
+            <button id="widgetTextUp" class="soft" aria-label="Larger text">+</button>
+          </div>
+        </div>
+        <div class="row">
+          <div class="lbl">Animations</div>
+          <div class="checks">
+            <label class="hideOpt"><input type="checkbox" id="wFade"> Fades</label>
+            <label class="hideOpt"><input type="checkbox" id="wScroll"> Scroll long text</label>
+            <label class="hideOpt"><input type="checkbox" id="wSpin"> Spin (Vinyl)</label>
+          </div>
+        </div>
+        <div class="row">
+          <div class="lbl">Colour change speed</div>
+          <select id="wColor" class="narrow"><option value="0">Instant</option><option value="0.5">Fast</option><option value="1.2">Normal</option><option value="2.5">Slow</option></select>
+        </div>
+      </details>
+
+      <div class="row">
+        <div>
+          <div class="lbl">Chat song requests</div>
+          <div class="note">Lets a chat bot add tracks to your queue, from whichever platform is selected in the title bar.</div>
+        </div>
+        <label class="switch"><input type="checkbox" id="reqOn"><span></span></label>
+      </div>
+      <details class="sub" id="requestSection" hidden>
+        <summary>Song request options</summary>
+        <div class="row">
+          <div class="lbl">Chat bot</div>
+          <select id="botSel" class="narrow"><option value="streamerbot">Streamer.bot</option><option value="mixitup">Mix It Up</option><option value="other">Another bot</option></select>
+        </div>
+        <p class="note" id="reqPlat"></p>
+        <p class="note warn" id="reqNote"></p>
+        <div class="row stack">
+          <label class="lbl" for="reqUrl" id="reqUrlLbl">Request address</label>
+          <div class="row widgetRow"><input id="reqUrl" type="text" readonly><button id="reqCopy" class="soft">Copy</button></div>
+        </div>
+        <div class="row stack">
+          <label class="lbl" for="reqNowUrl">Now playing address (for a !song command)</label>
+          <div class="row widgetRow"><input id="reqNowUrl" type="text" readonly><button id="reqNowCopy" class="soft">Copy</button></div>
+        </div>
+        <div class="botHelp" id="botHelp"></div>
+
+        <details class="sub inner">
+          <summary>Limits and waiting requests</summary>
+          <div class="row">
+            <div class="lbl">Most requests waiting at once</div>
+            <div class="stepper"><button id="reqMaxDown" class="soft" aria-label="Fewer">&minus;</button><span id="reqMaxVal">10</span><button id="reqMaxUp" class="soft" aria-label="More">+</button></div>
+          </div>
+          <div class="row">
+            <div class="lbl">Most requests per viewer</div>
+            <div class="stepper"><button id="reqUserDown" class="soft" aria-label="Fewer">&minus;</button><span id="reqUserVal">2</span><button id="reqUserUp" class="soft" aria-label="More">+</button></div>
+          </div>
+          <div class="row">
+            <div>
+              <div class="lbl">Waiting requests</div>
+              <div class="note" id="reqPending">None.</div>
+            </div>
+            <button id="reqClear" class="soft">Remove all</button>
+          </div>
+        </details>
+
+        <details class="sub inner">
+          <summary>Chat messages</summary>
+          <p class="note">What the bot posts. You can use {title}, {artist}, {user}, {position}, {platform}, {query} and {count}.</p>
+          <div id="reqMsgs"></div>
+          <button id="msgReset" class="soft">Reset to defaults</button>
+        </details>
+
+        <details class="sub inner">
+          <summary>Connection</summary>
+          <div class="row">
+            <div class="lbl">Port</div>
+            <div class="widgetRow"><input id="reqPort" type="number" min="1024" max="65535" aria-label="Port"></div>
+          </div>
+          <div class="row">
+            <div>
+              <div class="lbl">Secret key</div>
+              <div class="note">Part of the request address. Only requests with it are accepted; make a new one if it leaks.</div>
+            </div>
+            <button id="reqNewKey" class="soft">New key</button>
+          </div>
+        </details>
+      </details>
+    </section>
+
+    <!-- ===================== Audio ===================== -->
+    <section class="group" id="audioSection">
+      <h3>Audio</h3>
+      <div class="row">
+        <div>
+          <div class="lbl">Even out loudness</div>
+          <div class="note" id="normNote">Brings quiet tracks up and loud ones down, like a leveling compressor.</div>
+        </div>
+        <select id="normSel" class="narrow"><option value="off">Off</option><option value="gentle">Gentle</option><option value="strong">Strong</option></select>
+      </div>
+
+      <div class="row">
+        <div>
+          <div class="lbl">Equalizer</div>
+          <div class="note" id="eqNote">Ten bands, for SoundCloud and local files. Changes are heard straight away.</div>
+        </div>
+        <label class="switch"><input type="checkbox" id="eqOn"><span></span></label>
+      </div>
+      <details class="sub" id="eqSection" hidden>
+        <summary>Equalizer bands</summary>
+        <div class="row">
+          <select id="eqPreset" class="narrow" aria-label="Preset">
+            <option value="">Presets...</option><option value="flat">Flat</option><option value="bass">Bass boost</option>
+            <option value="vocal">Vocals</option><option value="treble">Treble boost</option><option value="smile">Loudness (smile)</option>
+          </select>
+          <button id="eqReset" class="soft">Flat</button>
+        </div>
+        <div class="eqBands" id="eqBands"></div>
+      </details>
+
+      <div class="row stack">
+        <label class="lbl" for="outputSel">Output device</label>
+        <select id="outputSel"></select>
+      </div>
+      <p class="note" id="outputNote"></p>
+      <button id="namesBtn" class="soft" hidden>Show device names</button>
+      <div class="row" id="safeRow" hidden>
+        <div>
+          <div class="lbl">Stream-safe output</div>
+          <div class="note">Never plays on your Windows default device, so music can't end up in your game or stream audio. If your chosen device is unplugged, playback pauses instead of falling back to the default.</div>
+        </div>
+        <label class="switch"><input type="checkbox" id="safeOut"><span></span></label>
+      </div>
+      <div class="row" id="spModeRow" hidden>
+        <div>
+          <div class="lbl">Spotify plays through</div>
+          <div class="note" id="spModeNote"></div>
+        </div>
+        <select id="spMode" class="narrow"><option value="app">This app</option><option value="desktop">Spotify desktop app</option></select>
+      </div>
+      <div class="row" id="spRoutedRow" hidden>
+        <div>
+          <div class="lbl">This app is routed away from my default device</div>
+          <div class="note">Tick this once you've set this app's output in Windows (Settings &gt; System &gt; Sound &gt; Volume mixer). Stream-safe output then lets Spotify play inside the app.</div>
+        </div>
+        <label class="switch"><input type="checkbox" id="spRouted"><span></span></label>
+      </div>
+    </section>
+
+    <!-- ===================== Performance ===================== -->
+    <section class="group">
+      <h3>Performance</h3>
+      <div class="row">
+        <div>
+          <div class="lbl">Hardware acceleration</div>
+          <div class="note">Draws the app with your GPU. Turn it off if you see glitches or want to avoid GPU memory use. It may raise CPU use slightly.</div>
+        </div>
+        <label class="switch"><input type="checkbox" id="gpuToggle"><span></span></label>
+      </div>
+      <p class="note" id="gpuNote" hidden>Restart SC Client to apply this. <button id="restartBtn" class="soft">Restart now</button></p>
+      <div class="row">
+        <div>
+          <div class="lbl">Animations</div>
+          <div class="note">Colour fades, cover fades and other motion in the app. Long titles still scroll when you hover them. The widget has its own animation options.</div>
+        </div>
+        <label class="switch"><input type="checkbox" id="animOn"><span></span></label>
+      </div>
+      <div class="row">
+        <div>
+          <div class="lbl">Close button hides to the tray</div>
+          <div class="note">Music keeps playing. Quit from the tray icon's menu.</div>
+        </div>
+        <label class="switch"><input type="checkbox" id="trayToggle"><span></span></label>
+      </div>
+    </section>
+  </div>
+</dialog>
+
+<script src="features.js"></script>
+<script src="hls.min.js"></script>
+<script src="spotify.js"></script>
+<script src="extras.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
