@@ -206,79 +206,90 @@ function openOnSoundCloud(t) {
 
 // ---------- track list ----------
 function render() {
+  $("list").replaceChildren(...viewTracks.map((t, i) => trackRow(t, i, curTrack())));
+  afterRender();
+}
+
+// Infinite scroll: add only the rows from "from" onwards instead of rebuilding the list
+function renderAppend(from) {
   const ul = $("list");
-  ul.replaceChildren();
+  ul.querySelectorAll(".albumTile").forEach((x) => x.remove());   // re-spaced by injectAlbums
+  const playing = curTrack();
+  ul.append(...viewTracks.slice(from).map((t, k) => trackRow(t, from + k, playing)));
+  afterRender();
+}
+
+function afterRender() {
   $("tableHead").hidden = viewTracks.length === 0;
   $("more").hidden = !nextHref;
-  const playing = curTrack();
-
-  viewTracks.forEach((t, i) => {
-    const li = el("li");
-    li.dataset.i = i;
-    if (playing && t.id === playing.id) li.classList.add("playing");
-
-    const num = el("div", "num");
-    num.append(el("span", "n", String(i + 1)), icon(ICON_PLAY));
-
-    const img = el("img");
-    img.loading = "lazy";
-    img.alt = "";
-    const src = artUrl(t, "t120x120");
-    if (src) img.src = src;
-    img.onerror = () => img.removeAttribute("src");
-
-    const meta = el("div", "meta");
-    const who = artistName(t);
-    const artistLine = el("div", "artist");
-    const whoEl = el("span", srcOf(t) === "soundcloud" ? "artistLink" : "artistName", who);
-    if (srcOf(t) === "soundcloud") whoEl.title = uploaderNote(t);
-    artistLine.append(platformBadge(t), whoEl);
-    meta.append(el("div", "title", t.title || "Untitled"), artistLine);
-    const cell = el("div", "trackCell");
-    cell.append(img, meta);
-
-    const acts = el("div", "acts");
-    const bNext = el("button");
-    bNext.dataset.act = "next";
-    bNext.title = "Play next";
-    bNext.setAttribute("aria-label", "Play next");
-    bNext.append(icon(ICON_NEXT));
-    const bAdd = el("button");
-    bAdd.dataset.act = "add";
-    bAdd.title = "Add to queue";
-    bAdd.setAttribute("aria-label", "Add to queue");
-    bAdd.append(icon(ICON_ADD));
-    const bLike = el("button");
-    bLike.dataset.act = "like";
-    bLike.setAttribute("aria-label", "Like");
-    setHeart(bLike, isLiked(t));
-    const bOpen = el("button");
-    bOpen.dataset.act = "open";
-    bOpen.title = srcOf(t) === "spotify" ? "Open in Spotify" : "Open on SoundCloud";
-    bOpen.setAttribute("aria-label", bOpen.title);
-    bOpen.append(icon(ICON_OPEN));
-    const bList = el("button");
-    bList.dataset.act = "plist";
-    bList.title = "Add to playlist";
-    bList.setAttribute("aria-label", "Add to playlist");
-    bList.append(icon(ICON_PLIST));
-    if (srcOf(t) === "spotify") acts.append(bNext, bAdd, bOpen);
-    else if (view === "playlist" && isOwnPlaylist(currentPlaylist)) {
-      const bRm = el("button");
-      bRm.dataset.act = "unlist";
-      bRm.title = "Remove from this playlist";
-      bRm.setAttribute("aria-label", bRm.title);
-      bRm.append(icon(ICON_CLOSE));
-      acts.append(bLike, bNext, bAdd, bList, bRm);
-    } else acts.append(bLike, bNext, bAdd, bList, bOpen);
-
-    li.append(num, cell, acts, el("div", "time", fmt(t.duration || 0)));
-    ul.append(li);
-  });
   renderHero();
   refreshLikeUI();
   renderPlatChips();
   injectAlbums();
+}
+
+function trackRow(t, i, playing) {
+  const li = el("li");
+  li.dataset.i = i;
+  if (playing && t.id === playing.id) li.classList.add("playing");
+
+  const num = el("div", "num");
+  num.append(el("span", "n", String(i + 1)), icon(ICON_PLAY));
+
+  const img = el("img");
+  img.loading = "lazy";
+  img.alt = "";
+  const src = artUrl(t, "t120x120");
+  if (src) img.src = src;
+  img.onerror = () => img.removeAttribute("src");
+
+  const meta = el("div", "meta");
+  const who = artistName(t);
+  const artistLine = el("div", "artist");
+  const whoEl = el("span", srcOf(t) === "soundcloud" ? "artistLink" : "artistName", who);
+  if (srcOf(t) === "soundcloud") whoEl.title = uploaderNote(t);
+  artistLine.append(platformBadge(t), whoEl);
+  meta.append(el("div", "title", t.title || "Untitled"), artistLine);
+  const cell = el("div", "trackCell");
+  cell.append(img, meta);
+
+  const acts = el("div", "acts");
+  const bNext = el("button");
+  bNext.dataset.act = "next";
+  bNext.title = "Play next";
+  bNext.setAttribute("aria-label", "Play next");
+  bNext.append(icon(ICON_NEXT));
+  const bAdd = el("button");
+  bAdd.dataset.act = "add";
+  bAdd.title = "Add to queue";
+  bAdd.setAttribute("aria-label", "Add to queue");
+  bAdd.append(icon(ICON_ADD));
+  const bLike = el("button");
+  bLike.dataset.act = "like";
+  bLike.setAttribute("aria-label", "Like");
+  setHeart(bLike, isLiked(t));
+  const bOpen = el("button");
+  bOpen.dataset.act = "open";
+  bOpen.title = srcOf(t) === "spotify" ? "Open in Spotify" : "Open on SoundCloud";
+  bOpen.setAttribute("aria-label", bOpen.title);
+  bOpen.append(icon(ICON_OPEN));
+  const bList = el("button");
+  bList.dataset.act = "plist";
+  bList.title = "Add to playlist";
+  bList.setAttribute("aria-label", "Add to playlist");
+  bList.append(icon(ICON_PLIST));
+  if (srcOf(t) === "spotify") acts.append(bNext, bAdd, bOpen);
+  else if (view === "playlist" && isOwnPlaylist(currentPlaylist)) {
+    const bRm = el("button");
+    bRm.dataset.act = "unlist";
+    bRm.title = "Remove from this playlist";
+    bRm.setAttribute("aria-label", bRm.title);
+    bRm.append(icon(ICON_CLOSE));
+    acts.append(bLike, bNext, bAdd, bList, bRm);
+  } else acts.append(bLike, bNext, bAdd, bList, bOpen);
+
+  li.append(num, cell, acts, el("div", "time", fmt(t.duration || 0)));
+  return li;
 }
 
 function markPlaying() {
@@ -339,6 +350,7 @@ async function loadTracks(paths, append, fallback) {
     }
   }
   if (tok !== loadToken) return;
+  const shown = viewTracks.length;
 
   if (data) {
     let got = asList(data);
@@ -361,7 +373,7 @@ async function loadTracks(paths, append, fallback) {
     say(String(err));
     if (!append) viewTracks = [];
   }
-  render();
+  if (append && data) renderAppend(shown); else render();
   if (!append) setTimeout(nearBottomCheck, 50);
 }
 
@@ -690,6 +702,8 @@ function queueRow(t, idx, removable) {
   return li;
 }
 
+const QUEUE_SHOWN = 100;
+
 function renderQueue() {
   const nowBox = $("qNow");
   const nextBox = $("qNext");
@@ -700,7 +714,9 @@ function renderQueue() {
   else nowBox.append(el("li", "qEmpty", "Nothing playing."));
   const upcoming = qi >= 0 ? queue.slice(qi + 1) : [];
   if (!upcoming.length) nextBox.append(el("li", "qEmpty", "Nothing queued after this."));
-  upcoming.forEach((tr, k) => nextBox.append(queueRow(tr, qi + 1 + k, true)));
+  // A long queue (all your likes, say) only draws the next stretch of it
+  upcoming.slice(0, QUEUE_SHOWN).forEach((tr, k) => nextBox.append(queueRow(tr, qi + 1 + k, true)));
+  if (upcoming.length > QUEUE_SHOWN) nextBox.append(el("li", "qEmpty", "...and " + (upcoming.length - QUEUE_SHOWN) + " more."));
   reqQueueBtn();
 }
 
@@ -809,7 +825,7 @@ function refreshLikeUI() {
   document.querySelectorAll("#list li").forEach((li) => {
     const t2 = viewTracks[Number(li.dataset.i)];
     const b = li.querySelector('button[data-act="like"]');
-    if (t2 && b) setHeart(b, isLiked(t2));
+    if (t2 && b && b.classList.contains("on") !== isLiked(t2)) setHeart(b, isLiked(t2));
   });
 }
 

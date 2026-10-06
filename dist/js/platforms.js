@@ -95,10 +95,11 @@ function setLocalPool(list) {
 function pageLocal() {
   if (!localPool) { nextHref = ""; return; }
   const more = localPool.slice(localPos, localPos + 60);
+  const shown = viewTracks.length;
   localPos += more.length;
   viewTracks = viewTracks.concat(more);
   nextHref = localPos < localPool.length ? "local:" : "";
-  render();
+  renderAppend(shown);
   setTimeout(nearBottomCheck, 50);
 }
 
