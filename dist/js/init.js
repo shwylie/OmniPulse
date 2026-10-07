@@ -24,6 +24,7 @@ function extrasInit() {
   libraryInit();
   xplInit();
   favouritesInit();
+  setsInit();
   dndInit();
   widgetInit();
   navInit();

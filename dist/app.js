@@ -179,6 +179,7 @@ function showView(v) {
   if (!isNow) $("langChip").hidden = v !== "discover";
   $("navLikes").classList.toggle("active", v === "likes");
   $("navFavourites").classList.toggle("active", v === "favourites");
+  $("navSets").classList.toggle("active", v === "sets");
   document.querySelectorAll(".plItem").forEach((b) => {
     b.classList.toggle("active", v === "playlist" && currentPlaylist && String(b.dataset.id) === String(currentPlaylist.id));
   });
@@ -191,6 +192,9 @@ function renderHero() {
   if (v === "rediscover") {
     title = "Rediscover";
     sub = "";   // set below, in two parts
+  } else if (v === "sets") {
+    title = "Sets & podcasts";
+    sub = "Long sets, mixes and podcasts: anything over 15 minutes.";
   } else if (v === "favourites") {
     title = "Favourites";
     sub = "Starred tracks from every platform, kept on this PC.";
@@ -315,12 +319,13 @@ function afterRender() {
 // Shown whenever any of them is, so the language filter stays reachable when it hid everything.
 function paintHeroActions() {
   $("favOnlyChip").hidden = !favOn() || ["favourites", "discover", "stats", "now"].includes(view) || (view === "search" && !query);
+  paintSetsChip();
   const hl = $("hideLikesChip");
   hl.hidden = view !== "search" || !query;
   hl.classList.toggle("on", !!prefs.hideLikes);
   hl.setAttribute("aria-pressed", prefs.hideLikes ? "true" : "false");
   hl.title = prefs.hideLikes ? "Your likes are hidden from these results. Click to show them." : "Leave tracks you've liked out of the results";
-  $("heroActions").hidden = !["playAll", "followBtn", "plDelete", "langChip", "favOnlyChip", "hideLikesChip", "albumToggle"].some((id) => !$(id).hidden);
+  $("heroActions").hidden = !["playAll", "followBtn", "plDelete", "langChip", "favOnlyChip", "setsLikedChip", "hideLikesChip", "albumToggle"].some((id) => !$(id).hidden);
 }
 
 function trackRow(t, i, playing) {
