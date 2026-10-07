@@ -187,8 +187,8 @@ function showView(v) {
 
 function renderHero() {
   const v = view === "now" ? back : view;
-  let title = "Likes";
-  let sub = "";
+  let title = "Library";
+  let sub = v === "likes" ? "Everything you've liked on each platform, plus your music files, in one list." : "";
   if (v === "rediscover") {
     title = "Rediscover";
     sub = "";   // set below, in two parts
@@ -843,6 +843,9 @@ function fillNowPlaying(t) {
   if (/^\d{4}$/.test(year)) bits.push(year);
   if (t && t.playback_count) bits.push(Number(t.playback_count).toLocaleString() + " plays");
   $("npMeta").textContent = bits.join(", ");
+  const album = t ? t.album || (t.spAlbum && t.spAlbum.name) || "" : "";
+  $("npAlbum").textContent = album;
+  $("npAlbum").hidden = !album;
   $("npDesc").textContent = t && t.description ? t.description.slice(0, 600) : "";
   const big = t ? artUrl(t, "t500x500") : "";
   if (big) { fadeImg($("npArt"), big); $("npArt").hidden = false; } else { $("npArt").hidden = true; }
@@ -1361,7 +1364,7 @@ $("scAuth").addEventListener("click", async () => {
 let lastSignedIn = false;
 
 function updateTitle(signedIn) {
-  $("scNote").textContent = signedIn ? "Signed in" + (userName ? " as " + userName : "") + "." : "Not signed in.";
+  $("scNote").textContent = signedIn ? "Signed in" + (userName ? " as " + userName : "") + (scTier ? " \u00b7 " + scTier : "") + "." : "Not signed in.";
   const text = $("titleText");
   const prompt = $("titlePrompt");
   lastSignedIn = signedIn;
@@ -1381,11 +1384,26 @@ function updateTitle(signedIn) {
   win.setTitle(title).catch(() => {});
 }
 
+// SoundCloud's plan names, from /me (its subscriptions, or the older "plan" field)
+let scTier = "";
+function soundcloudTier(me) {
+  const subs = (me && me.subscriptions) || [];
+  const ids = subs.map((s) => ((s.product && (s.product.id || s.product.name)) || "").toLowerCase());
+  if (ids.some((x) => /high.?tier|go\+|go plus/.test(x))) return "Go+";
+  if (ids.some((x) => /mid.?tier|\bgo\b/.test(x))) return "Go";
+  if (ids.some((x) => /unlimited|artist.?pro|creator/.test(x))) return "Artist Pro";
+  if (ids.some((x) => /\bpro\b|creator.?pro/.test(x))) return "Artist";
+  const plan = String((me && me.plan) || "").trim();
+  if (plan && !/^free$/i.test(plan)) return plan;
+  return "Free";
+}
+
 async function loadUser() {
   try {
     const me = await api("/me");
     userName = me.username || me.full_name || "";
     meId = me.id;
+    scTier = soundcloudTier(me);
   } catch (e) {
     userName = "";
   }

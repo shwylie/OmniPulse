@@ -44,7 +44,7 @@
       </button>
       <button class="nav active" id="navLikes">
         <svg viewBox="0 0 24 24"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg>
-        <span>Likes</span>
+        <span>Library</span>
       </button>
       <button class="nav" id="navFavourites">
         <svg viewBox="0 0 24 24"><path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"/></svg>
@@ -133,6 +133,7 @@
       <div class="npInfo">
         <h1 id="npTitle">Nothing playing</h1>
         <div class="artistRow"><span id="npPlat"></span><p id="npArtist"></p></div>
+        <p id="npAlbum"></p>
         <p id="npMeta"></p>
         <p id="npDesc"></p>
         <div class="npActions"><button id="npLike" class="soft" hidden>Like</button><button id="npFav" class="soft" hidden>Add to Favourites</button><button id="npOpen" class="soft" hidden>Open on SoundCloud</button></div>
@@ -332,7 +333,6 @@
     <!-- ===================== Accounts ===================== -->
     <section class="group">
       <h3>Accounts</h3>
-      <p class="note groupNote">Switching one off hides it everywhere; you stay signed in.</p>
       <div class="row">
         <div>
           <div class="lbl">SoundCloud</div>
@@ -420,6 +420,20 @@
         </div>
         <label class="switch"><input type="checkbox" id="favOn"><span></span></label>
       </div>
+      <div class="row">
+        <div>
+          <div class="lbl">Sets &amp; podcasts</div>
+          <div class="note">A page for anything over 15 minutes, with a Liked only filter.</div>
+        </div>
+        <label class="switch"><input type="checkbox" id="setsOn"><span></span></label>
+      </div>
+      <div class="row" id="hiddenPlRow">
+        <div>
+          <div class="lbl">Hidden playlists</div>
+          <div class="note" id="hiddenPlNote">Right-click a playlist in the sidebar to hide it.</div>
+        </div>
+      </div>
+      <div class="folderList" id="hiddenPlList"></div>
     </section>
 
     <!-- ===================== Sound ===================== -->
@@ -453,7 +467,7 @@
       <div class="row">
         <div>
           <div class="lbl">Output device</div>
-          <div class="note">Everything plays here, Spotify included.</div>
+          <div class="note">Where the app plays its sound.</div>
         </div>
         <select id="outputSel" class="narrow wide"></select>
       </div>

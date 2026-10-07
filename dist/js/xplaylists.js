@@ -187,6 +187,7 @@ function openPlaylistActions(p, x, y) {
     m.append(b);
   };
   add("Open", "open");
+  add("Hide playlist", "hide");
   if (isXpl(p)) {
     add("Rename...", "rename");
     add("Delete", "delete");
@@ -210,6 +211,37 @@ function runPlaylistAction(a) {
   else if (a === "switch") xplSwitch(p);
   else if (a === "rename") openRenameDialog(p);
   else if (a === "delete") deleteXpl(p);
+  else if (a === "hide") hidePlaylist(p, true);
+}
+
+// Playlists you hide are kept (and listed in Settings > Library), just not shown in the sidebar
+async function hidePlaylist(p, hide) {
+  const id = String(p.id);
+  const set = new Set((prefs.hiddenByYou || []).map(String));
+  if (hide) set.add(id); else set.delete(id);
+  prefs.hiddenByYou = [...set];
+  savePrefs();
+  await refreshSidebar();
+  paintHiddenPlaylists();
+  if (hide && view === "playlist" && currentPlaylist && String(currentPlaylist.id) === id) openLikes();
+  say(hide ? '"' + (p.title || "Playlist") + '" is hidden. Show it again from Settings > Library.' : "");
+}
+
+function paintHiddenPlaylists() {
+  const ids = (prefs.hiddenByYou || []).map(String);
+  const box = $("hiddenPlList");
+  box.replaceChildren();
+  ids.forEach((id) => {
+    const p = allPlaylists.find((x) => String(x.id) === id) || { id, title: "A playlist that isn't loaded right now" };
+    const row = el("div", "folderRow");
+    const show = el("button", "soft", "Show");
+    show.addEventListener("click", () => hidePlaylist(p, false));
+    row.append(el("span", "", p.title || "Untitled playlist"), show);
+    box.append(row);
+  });
+  $("hiddenPlNote").textContent = ids.length
+    ? ids.length + (ids.length === 1 ? " playlist is" : " playlists are") + " hidden from the sidebar."
+    : "Right-click a playlist in the sidebar to hide it.";
 }
 
 async function deleteXpl(p) {

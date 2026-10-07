@@ -39,7 +39,17 @@ function paintSetsChip() {
   c.title = prefs.setsLiked ? "Showing only the ones you've liked. Click to include artists you follow." : "Show only the ones you've liked";
 }
 
+const setsOn = () => prefs.setsOn !== false;
+
+function applySetsOn() {
+  $("setsOn").checked = setsOn();
+  $("navSets").hidden = !setsOn();
+  if (!setsOn() && view === "sets") openLikes();
+}
+
 function setsInit() {
+  $("setsOn").addEventListener("change", () => { prefs.setsOn = $("setsOn").checked; savePrefs(); applySetsOn(); });
+  applySetsOn();
   $("navSets").addEventListener("click", () => openSets());
   $("setsLikedChip").addEventListener("click", () => {
     prefs.setsLiked = !prefs.setsLiked;

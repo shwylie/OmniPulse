@@ -306,6 +306,7 @@ async function localAddFolder() {
 // SoundCloud: your playlists (and ones you liked). Spotify: your playlists. Local files: your albums.
 let sidebarKey = null;   // which platforms the sidebar was last built for
 let sidebarTok = 0;
+let allPlaylists = [];   // including hidden ones
 
 function localAlbums() {
   const albums = new Map();
@@ -341,7 +342,8 @@ async function refreshSidebar() {
   const parts = await Promise.all(plats.map((id) => sidebarItems(id).catch((e) => { notes.push(e.message || String(e)); return []; })));
   if (tok !== sidebarTok) return;   // switched platforms meanwhile
   // playlists on this PC first; platform playlists you switched to one of those stay hidden
-  const hidden = new Set((prefs.hiddenPlaylists || []).map(String));
+  const hidden = new Set((prefs.hiddenPlaylists || []).concat(prefs.hiddenByYou || []).map(String));
+  allPlaylists = xplSidebarItems().concat(parts.flat());   // for Settings > Library > Hidden playlists
   playlists = xplSidebarItems().concat(parts.flat().filter((p) => !hidden.has(String(p.id))));
   renderPlaylists(notes.join(" "));
 }

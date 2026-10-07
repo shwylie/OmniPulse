@@ -959,3 +959,9 @@ select.wide { max-width: 260px; }
 #settings .row > div:first-child { min-width: 0; }
 #settings .row .note { margin-bottom: 0; }
 #settings .linkBtn { margin-top: 2px; }
+
+/* ===== v45: colour-coded platform icons in the sidebar, so playlists are easy to tell apart ===== */
+.sideLists .plat.soundcloud svg { color: #ff5500; }
+.sideLists .plat.spotify svg { color: #1ed760; }
+.sideLists .plat.local svg { color: #f2b544; }
+#npAlbum { margin: 4px 0 0; color: var(--text); opacity: 0.85; font-weight: 600; }
