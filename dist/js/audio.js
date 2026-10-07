@@ -55,9 +55,13 @@ function normEnsure() {
   }
 }
 
+// The volume the app plays at: the slider's, or 100% with the volume control hidden (when it's set
+// on Windows' mixer, a Stream Deck or the like instead)
+const appVolume = () => (prefs.hideVolume ? 1 : prefs.volume);
+
 function normApply() {
   if (!norm.ctx) return;
-  setLevel(prefs.volume);
+  setLevel(appVolume());
   eqApply();
 }
 
@@ -87,7 +91,7 @@ function setLevel(v) {
 }
 
 function normMute(muted) {
-  if (norm.ctx) norm.master.gain.setTargetAtTime(muted ? 0 : prefs.volume, norm.ctx.currentTime, 0.02);
+  if (norm.ctx) norm.master.gain.setTargetAtTime(muted ? 0 : appVolume(), norm.ctx.currentTime, 0.02);
 }
 
 // ---------- equalizer ----------

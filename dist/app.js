@@ -1276,8 +1276,28 @@ $("seek").addEventListener("input", () => {
   if (d) audio.currentTime = rawAt(cur, frac, d) / 1000;
 });
 
-audio.volume = prefs.volume;
+audio.volume = appVolume();
 $("vol").value = String(Math.round(prefs.volume * 100));
+
+// Settings > Sound > Volume control: hidden, the app plays at 100% and isn't muted
+function paintVolumeControl() {
+  const hide = !!prefs.hideVolume;
+  $("volShowOn").checked = !hide;
+  document.querySelector(".volWrap").hidden = hide;
+  if (hide && audio.muted) {
+    audio.muted = false;
+    $("icoVol").classList.remove("off");
+    $("icoMute").classList.add("off");
+  }
+  setLevel(appVolume());
+}
+$("volShowOn").addEventListener("change", () => {
+  prefs.hideVolume = !$("volShowOn").checked;
+  savePrefs();
+  paintVolumeControl();
+  say(prefs.hideVolume ? "Volume control hidden: the app plays at 100%." : "Volume control is back.");
+});
+paintVolumeControl();
 $("vol").addEventListener("input", () => {
   prefs.volume = Number($("vol").value) / 100;
   setLevel(prefs.volume);
