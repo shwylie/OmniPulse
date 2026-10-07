@@ -204,7 +204,7 @@ function pluginPlatformsSync() {
   renderPlatChips();
 }
 
-// ---------- Settings > Integrations > Plugins ----------
+// ---------- Settings > Plugins ----------
 function pluginField(id, f) {
   const key = String(f.key || "");
   const vals = pluginSettings(id);

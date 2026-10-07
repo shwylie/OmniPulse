@@ -1,7 +1,7 @@
 # OmniPulse plugins
 
 A plugin adds a source of music: songs to search, play, and (optionally) a library of saved songs.
-Add one in **Settings > Integrations > Plugins > Add plugin**, from the web address of its
+Add one in **Settings > Plugins > Add plugin**, from the web address of its
 `manifest.json` or its folder. `internet-archive/` here is a working example.
 
 ## How plugins are kept safe
