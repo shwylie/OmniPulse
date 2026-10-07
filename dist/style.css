@@ -808,3 +808,10 @@ details.sub.inner { margin-top: 10px; }
 .whereOpt input { margin-top: 3px; accent-color: var(--accent); }
 .whereOpt .note { display: block; margin-top: 2px; }
 .menuGroup { padding-top: 8px; font-weight: 600; }
+
+/* ===== v42: drag and drop ===== */
+#list li[draggable="true"] { cursor: default; }
+#list li.dragging, .qRow.dragging { opacity: 0.45; }
+.plItem.dropOver { background: color-mix(in srgb, var(--accent) 22%, var(--elevated)); color: var(--text); box-shadow: inset 0 0 0 2px var(--accent); }
+.queue.dropOver { box-shadow: inset 0 0 0 2px var(--accent); }
+#queueBtn.dropOver { color: var(--accent); background: color-mix(in srgb, var(--accent) 20%, transparent); }

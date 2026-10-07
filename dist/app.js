@@ -246,6 +246,7 @@ function paintHeroActions() {
 function trackRow(t, i, playing) {
   const li = el("li");
   li.dataset.i = i;
+  li.draggable = true;   // onto a playlist or the queue (js/dnd.js)
   if (playing && t.id === playing.id) li.classList.add("playing");
 
   const num = el("div", "num");
@@ -765,6 +766,7 @@ function fillNowPlaying(t) {
   $("nowArtist").title = t ? uploaderNote(t) : "";
   $("nowAlbum").textContent = t ? t.album || (t.spAlbum && t.spAlbum.name) || "" : "";
   $("plAddBtn").hidden = !t;
+  $("nowToggle").draggable = !!t;
   $("moreBtn").hidden = !t;
   setBadge($("nowPlat"), t);
   const small = t ? artUrl(t, "t120x120") : "";

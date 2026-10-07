@@ -223,3 +223,22 @@ hides them; tracks from albums are never hidden.
   stop working when Spotify changes things, until librespot is updated (`cargo update -p librespot-core`).
 - How it works: src-tauri/src/spotify_engine.rs decodes and streams PCM over a Tauri channel;
   dist/js/spotify-worklet.js plays it into the audio chain and reports back how much it has played.
+
+## v42
+- Spotify gets Discord activity, the OBS widget, lyrics, listening stats and Last.fm, like everything else.
+- Platforms are merged: Likes, Search, Discover, Rediscover, album tiles and the sidebar show every
+  active platform together. The title-bar icons now switch a platform on or off (same as its switch in
+  Settings > Integrations). The queue can mix platforms; chat requests search the active platforms in
+  order (SoundCloud, Spotify, local), or the platform a pasted link points to.
+- Playlists on this PC: "+" in the sidebar (or New playlist... when adding a track) asks whether to keep
+  it on this PC (any platform, stored only in the app) or on SoundCloud. Right-click a sidebar playlist to
+  switch it to a playlist on this PC (the original stays on its platform and is just hidden; deleting the
+  copy brings it back), or to rename / delete one.
+- Drag tracks (from lists, the now-playing area or the queue) onto a playlist, the queue panel or the queue button.
+- Player bar: transport, seek and volume on the left; cover, title, artist and album in the middle; like,
+  add to playlist, lyrics, output device, more (...) and queue on the right. Right-clicking the
+  now-playing area or "..." opens the track menu.
+- Albums and the Discover language filter are chips beside Play / Shuffle; genre chips scroll sideways.
+- Spotify playback sign-in moved into Spotify options (under Spotify in Integrations).
+- Rediscover: "Fall in love all over again". Page subtitles no longer count tracks.
+- Go+ tracks still only come as 30-second previews: SoundCloud doesn't give full Go+ streams to other apps.

@@ -94,44 +94,6 @@ function onEnded() {
   if (autoplayActive()) autoplayAdvance();
 }
 
-// ---------- queue drag and drop ----------
-function queueDndInit() {
-  const list = $("qNext");
-  let from = -1;
-  const clear = () => document.querySelectorAll(".qRow.dragging, .qRow.over")
-    .forEach((x) => x.classList.remove("dragging", "over"));
-  list.addEventListener("dragstart", (e) => {
-    const li = e.target.closest(".qRow");
-    if (!li) return;
-    from = Number(li.dataset.q);
-    e.dataTransfer.effectAllowed = "move";
-    e.dataTransfer.setData("text/plain", String(from));
-    li.classList.add("dragging");
-  });
-  list.addEventListener("dragover", (e) => {
-    const li = e.target.closest(".qRow");
-    if (!li || from < 0) return;
-    e.preventDefault();
-    document.querySelectorAll(".qRow.over").forEach((x) => x.classList.remove("over"));
-    li.classList.add("over");
-  });
-  list.addEventListener("drop", (e) => {
-    e.preventDefault();
-    const li = e.target.closest(".qRow");
-    if (li && from > qi) {
-      const to = Number(li.dataset.q);
-      if (to > qi && to !== from) {
-        const [moved] = queue.splice(from, 1);
-        queue.splice(to, 0, moved);
-        renderQueue();
-      }
-    }
-    from = -1;
-    clear();
-  });
-  list.addEventListener("dragend", () => { from = -1; clear(); });
-}
-
 // ---------- hooks called from app.js ----------
 function trackStarted(t) {
   fadeIn(document.querySelector(".nowText"));
@@ -184,7 +146,6 @@ function playbackInit() {
 
   $("shuffleBtn").addEventListener("click", toggleShuffle);
   $("repeatBtn").addEventListener("click", cycleRepeat);
-  queueDndInit();
 
   audio.addEventListener("play", () => playbackState(true));
   audio.addEventListener("pause", () => playbackState(false));
