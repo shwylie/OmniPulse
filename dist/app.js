@@ -43,7 +43,22 @@ function el(tag, cls, text) {
   if (text !== undefined) n.textContent = text;
   return n;
 }
-const say = (msg) => { $("status").textContent = msg || ""; };
+// Status and error messages slide out in a strip above the player bar, then go again.
+// "Loading..." style messages stay until they're replaced or cleared; say("") clears.
+let statusTimer = null;
+function say(msg) {
+  const bar = $("statusBar");
+  clearTimeout(statusTimer);
+  msg = msg ? String(msg) : "";
+  if (!msg) { bar.classList.remove("show"); return; }
+  const busy = /(\.\.\.|\u2026)$/.test(msg);
+  const bad = !busy && /^(could not|couldn't|can't|error|stream error|scrobble failed)|failed|problem|expired|isn't available/i.test(msg);
+  $("statusText").textContent = msg;
+  bar.classList.toggle("busy", busy);
+  bar.classList.toggle("bad", bad);
+  bar.classList.add("show");
+  statusTimer = setTimeout(() => bar.classList.remove("show"), busy ? 30000 : bad ? 7000 : 4000);
+}
 const api = (path) => invoke("api_get", { path });
 
 const ICON_PLAY = "M8 5v14l11-7z";
@@ -170,7 +185,7 @@ function renderHero() {
   let sub = "";
   if (v === "rediscover") {
     title = "Rediscover";
-    sub = "Fall in love all over again";
+    sub = "";   // set below, in two parts
   } else if (v === "discover") {
     title = "Discover";
     sub = discoverNote ? discoverNote + ". " : "";
@@ -189,6 +204,10 @@ function renderHero() {
   $("viewTitle").textContent = title;
   $("refreshBtn").hidden = !(v === "discover" || v === "rediscover");
   $("viewSub").textContent = sub.trim();
+  if (v === "rediscover") {
+    $("viewSub").replaceChildren(el("span", "subLead", "Fall in love all over again"),
+      el("span", "", " with the likes you haven't heard in a while."));
+  }
   const isArtist = v === "artist" && !!currentArtist;
   $("playAll").hidden = n === 0;
   $("shuffleAll").hidden = n === 0;
@@ -1330,6 +1349,7 @@ async function loadUser() {
 }
 
 $("titlePrompt").addEventListener("click", signIn);
+$("statusBar").addEventListener("click", () => say(""));
 $("winMin").addEventListener("click", () => win.minimize());
 $("winMax").addEventListener("click", () => win.toggleMaximize());
 $("winClose").addEventListener("click", () => { if (prefs.closeToTray) win.hide(); else win.close(); });

@@ -98,7 +98,6 @@
           </div>
         </div>
       </div>
-      <p id="status"></p>
       <div class="tableHead" id="tableHead" hidden><span>#</span><span>Title</span><span></span><span>Time</span></div>
       <ul id="list"></ul>
       <div class="moreRow"><button id="more" class="soft" hidden>Load more</button></div>
@@ -139,6 +138,12 @@
   </aside>
 
   <footer class="player">
+    <div class="statusBar" id="statusBar" role="status" aria-live="polite" title="Click to dismiss">
+      <div class="statusInner">
+        <span class="statusIcon" aria-hidden="true"></span>
+        <span id="statusText"></span>
+      </div>
+    </div>
     <div class="transport">
       <button id="toggle" class="main" aria-label="Play or pause">
         <svg id="icoPlay" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
