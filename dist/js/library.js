@@ -203,12 +203,16 @@ async function openRediscover(fresh) {
   const tok = ++loadToken;
   say("Looking through your likes...");
   try {
-    const plat = curPlat("rediscover");
-    if (plat === "none") { viewTracks = []; nextHref = ""; render(); say("Nothing to show yet: switch on SoundCloud, Spotify or Local music in Settings > Integrations."); return; }
-    let source;
-    if (plat === "spotify") source = await spotifyLikedTracks(500);
-    else if (plat === "local") source = localTracks;
-    else { await ensureLikes(true); source = likedTracks.filter(isLikedTrack); }
+    const plats = activePlats("rediscover");
+    if (!plats.length) { showNothing(); return; }
+    // your likes from every active platform (local files count as liked)
+    const parts = await Promise.all(plats.map(async (id) => {
+      if (id === "spotify") return spotifyLikedTracks(500).catch(() => []);
+      if (id === "local") return localTracks;
+      await ensureLikes(true);
+      return likedTracks.filter(isLikedTrack);
+    }));
+    const source = parts.flat();
     if (tok !== loadToken) return;
     const lastPlayed = new Map();
     loadStats().forEach((x) => lastPlayed.set(x.id, Math.max(lastPlayed.get(x.id) || 0, x.ts)));

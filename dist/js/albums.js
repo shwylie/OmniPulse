@@ -51,9 +51,14 @@ async function scUserAlbums(uid) {
   return asItems(d).filter(isScAlbum).map(scAlbumTile);
 }
 
+// Album tiles from every active platform, mixed
 async function fetchAlbums(p) {
   if (p.view === "artist") return scUserAlbums(p.artist && p.artist.id);
-  const plat = curPlat(p.view);
+  const lists = await Promise.all(activePlats(p.view).map((id) => fetchAlbumsFor(p, id).catch(() => [])));
+  return interleave(lists);
+}
+
+async function fetchAlbumsFor(p, plat) {
   if (plat === "local") return localAlbumTiles(p.view, p.query);
   if (plat === "spotify") {
     if (p.view === "likes" || p.view === "rediscover") {
@@ -142,7 +147,7 @@ function injectAlbums() {
   if (!albumsShown() || !ALBUM_PAGES.includes(view)) return;
   if (view === "likes" && likesFilter !== "all") return;
   let tiles = viewAlbums.slice();
-  if ((view === "discover" || view === "search") && curPlat(view) === "spotify") {
+  if ((view === "discover" || view === "search") && activePlats(view).includes("spotify")) {
     const seen = new Set(tiles.map((a) => a.id));
     viewTracks.forEach((t) => {
       const a = t.spAlbum;

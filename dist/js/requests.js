@@ -10,9 +10,10 @@ function reqKeyNew() {
 const reqPendingList = () => queue.slice(qi + 1).filter((t) => t.requestedBy);
 
 function reqPaint() {
-  const rp = curPlat("search");
-  $("reqPlat").textContent = "Requests are going to: " + (rp === "none" ? "nowhere (no platform is switched on)" : PLATFORMS[rp].name) +
-    ". Change it with the platform icons in the title bar.";
+  const names = activePlats("search").map((id) => PLATFORMS[id].name);
+  $("reqPlat").textContent = names.length
+    ? "Requests search " + names.join(", then ") + " (a link goes straight to its own platform). Switch platforms with the icons in the title bar."
+    : "Requests are going nowhere: no platform is switched on.";
   $("reqMaxVal").textContent = prefs.reqMax || 10;
   $("reqUserVal").textContent = prefs.reqPerUser || 2;
   const p = reqPendingList();
@@ -92,12 +93,11 @@ const REQ_MSG_DEFAULTS = {
   perUser: "{user}, you already have {count} requests waiting.",
   duplicate: '"{title}" is already in the queue.',
   closed: "Song requests are closed right now.",
-  busy: "Requests are set to {platform}, but something else is playing right now. Try again soon!",
   empty: "Tell me what to play, for example: artist - song",
 };
 const REQ_MSG_LABELS = {
   added: "Added", playing: "Added, playing now", notFound: "Not found", full: "Queue full",
-  perUser: "Viewer limit", duplicate: "Already queued", closed: "Requests off", busy: "Other platform playing",
+  perUser: "Viewer limit", duplicate: "Already queued", closed: "Requests off",
   empty: "Nothing asked for",
 };
 
@@ -110,24 +110,25 @@ async function handleSongRequest(q, user) {
   if (!prefs.req) return { ok: false, message: reqMsg("closed", {}) };
   q = q.slice(0, 200);
   const who = user || "chat";
-  const plat = curPlat("search");
-  if (plat === "none") return { ok: false, message: reqMsg("closed", { user: who }) };
-  const platName = PLATFORMS[plat].name;
+  const plats = activePlats("search");
+  if (!plats.length) return { ok: false, message: reqMsg("closed", { user: who }) };
+  const platName = plats.map((id) => PLATFORMS[id].name).join(" or ");
   const base = { user: who, query: q, platform: platName };
   if (!q) return { ok: false, message: reqMsg("empty", base) };
   const pending = reqPendingList();
   if (pending.length >= (prefs.reqMax || 10)) return { ok: false, message: reqMsg("full", base) };
   const mine = pending.filter((t) => t.requestedBy.toLowerCase() === who.toLowerCase()).length;
   if (user && mine >= (prefs.reqPerUser || 2)) return { ok: false, message: reqMsg("perUser", Object.assign({ count: mine }, base)) };
-  const cur = curTrack();
-  if (cur && srcOf(cur) !== plat && (srcOf(cur) === "spotify" || plat === "spotify")) {
-    return { ok: false, message: reqMsg("busy", base) };
+  // A link goes to its own platform; otherwise the first active platform with a match wins
+  let order = plats;
+  if (/soundcloud\.com\//i.test(q)) order = plats.filter((id) => id === "soundcloud");
+  else if (/open\.spotify\.com\//i.test(q)) order = plats.filter((id) => id === "spotify");
+  const finders = { soundcloud: findRequested, spotify: findSpotifyRequested, local: async (x) => localSearch(x) };
+  let found = [];
+  for (const id of order) {
+    found = (await finders[id](q).catch(() => [])).filter((t) => !isMix(t));
+    if (found.length) break;
   }
-  let found;
-  if (plat === "spotify") found = await findSpotifyRequested(q);
-  else if (plat === "local") found = localSearch(q);
-  else found = await findRequested(q);
-  found = found.filter((t) => !isMix(t));
   if (!found.length) return { ok: false, message: reqMsg("notFound", base) };
   const t = found[0];
   const vars = Object.assign({ title: t.title, artist: artistName(t) }, base);

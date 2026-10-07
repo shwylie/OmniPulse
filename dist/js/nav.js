@@ -23,7 +23,7 @@ let restoring = false;
 function pageSnapshot(v) {
   return {
     view: v, query, playlist: currentPlaylist, artist: currentArtist,
-    discoverSrc, likesFilter, plat: curPlat(v),
+    discoverSrc, likesFilter, plat: activePlats(v).join(","),
   };
 }
 

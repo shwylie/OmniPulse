@@ -3,82 +3,166 @@
 const scOn = () => prefs.scOn !== false;
 
 function scApply() {
-  $("navDiscover").hidden = !platformsFor("discover").length;
   renderPlatChips();
 }
 
-// ---------- platforms: one switch on each page, showing only what's linked ----------
-// To add a platform later: give it an entry here (and an icon in PLATFORMS in app.js),
-// then teach loadPlatformList how to fetch its likes / search results.
+// ---------- platforms: every page shows all the active ones together ----------
+// A platform is available once it's set up (signed in, Premium, or has music folders), and active
+// while it's also switched on: in Settings > Integrations, or with its icon in the title bar.
+// To add a platform: an entry here (and an icon in PLATFORMS in app.js), then teach the feeds
+// below (and DISCOVER_PICKERS in app.js) how to fetch its tracks.
 const PLATFORM_LIST = [
-  { id: "soundcloud", pages: ["likes", "search", "discover", "rediscover"], linked: () => prefs.scOn !== false },
-  { id: "spotify", pages: ["likes", "search", "discover", "rediscover"], linked: () => FEATURES.spotify && spotifyPremium && prefs.spOn !== false },
-  { id: "local", pages: ["likes", "search", "rediscover"], linked: () => prefs.localOn !== false && localTracks.length > 0 },
-  { id: "youtube", pages: [], linked: () => false },
-  { id: "apple", pages: [], linked: () => false },
-  { id: "amazon", pages: [], linked: () => false },
+  { id: "soundcloud", pref: "scOn", pages: ["likes", "search", "discover", "rediscover"], available: () => lastSignedIn },
+  { id: "spotify", pref: "spOn", pages: ["likes", "search", "discover", "rediscover"], available: () => FEATURES.spotify && spotifyPremium },
+  { id: "local", pref: "localOn", pages: ["likes", "search", "rediscover"], available: () => localFolderList.length > 0 },
 ];
 
-function platformsFor(page) {
-  return PLATFORM_LIST.filter((p) => p.pages.includes(page) && p.linked());
+const platformOn = (p) => prefs[p.pref] !== false;
+
+// The ids of the active platforms (that a page supports, if one is given)
+function activePlats(page) {
+  return PLATFORM_LIST.filter((p) => (!page || p.pages.includes(page)) && p.available() && platformOn(p)).map((p) => p.id);
 }
 
-function curPlat(page) {
-  const avail = platformsFor(page);
-  const want = prefs.globalPlat || "soundcloud";
-  if (avail.some((p) => p.id === want)) return want;
-  return avail.length ? avail[0].id : "none";
-}
+const LIST_PAGES = ["likes", "search", "discover", "rediscover"];
+const NOTHING_ON = "Nothing to show yet: switch on SoundCloud, Spotify or Local music in Settings > Integrations, or with the icons in the title bar.";
 
-// Platform icons in the title bar: one choice for the whole app.
-// Pages that don't support the chosen platform (Discover is SoundCloud-only) use what they can.
+// Title bar: one icon per available platform, lit while it's active; click to switch it on or off
 function renderPlatChips() {
-  $("navDiscover").hidden = !platformsFor("discover").length;
-  // the sidebar's playlists follow the platform chosen here
-  const linkedNow = PLATFORM_LIST.filter((p) => p.pages.length && p.linked());
-  const chosen = linkedNow.some((p) => p.id === prefs.globalPlat) ? prefs.globalPlat : (linkedNow[0] ? linkedNow[0].id : "none");
-  if (chosen !== sidebarPlat) {
-    sidebarPlat = chosen;
+  $("navDiscover").hidden = !activePlats("discover").length;
+  // When the active platforms change (switched on or off, or Spotify / your files finished
+  // loading), rebuild the sidebar and reload the page so it shows the right mix
+  // (local files count as changed once their tracks arrive, which is a moment after their folders)
+  const active = activePlats();
+  const key = active.join(",") + (active.includes("local") && localTracks.length ? "+files" : "");
+  if (key !== sidebarKey) {
+    const first = sidebarKey === null;
+    sidebarKey = key;
     refreshSidebar();
+    if (!first && curPage && LIST_PAGES.includes(curPage.view)) {
+      restoring = true;
+      try { restorePage(curPage); } finally { restoring = false; }
+    }
   }
   const box = $("titlePlat");
-  const plats = PLATFORM_LIST.filter((p) => p.pages.length && p.linked());
+  const plats = PLATFORM_LIST.filter((p) => p.available());
   box.hidden = plats.length < 2;
-  if (plats.length < 2) return;
-  const cur = plats.some((p) => p.id === prefs.globalPlat) ? prefs.globalPlat : plats[0].id;
   box.replaceChildren();
+  if (plats.length < 2) return;
   plats.forEach((p) => {
-    const b = el("button", p.id === cur ? "on" : "");
+    const on = platformOn(p);
+    const b = el("button", on ? "on" : "");
     b.dataset.p = p.id;
-    b.title = PLATFORMS[p.id].name;
-    b.setAttribute("aria-label", "Show " + PLATFORMS[p.id].name);
+    b.title = PLATFORMS[p.id].name + (on ? " is on. Click to hide it everywhere." : " is off. Click to show it again.");
+    b.setAttribute("aria-label", PLATFORMS[p.id].name);
+    b.setAttribute("aria-pressed", on ? "true" : "false");
     b.append(icon(PLATFORMS[p.id].icon));
     box.append(b);
   });
 }
 
-// Likes / Search / Rediscover for platforms other than SoundCloud
-async function loadPlatformList(page, plat, q) {
-  const tok = ++loadToken;
-  say("Loading...");
-  try {
-    let list = [];
-    if (plat === "spotify") list = page === "search" ? await spotifySearchTracks(q) : await spotifyLikedTracks(500);
-    else if (plat === "local") list = page === "search" ? localSearch(q) : localTracks.slice();
-    if (tok !== loadToken) return;
-    if (page === "likes") list = applyLikesFilter(list);
-    if (page === "search") list = list.filter((t) => !isMix(t));
-    setLocalPool(list);
-    render();
-    say(viewTracks.length ? "" : "Nothing found.");
-    setTimeout(nearBottomCheck, 50);
-  } catch (e) {
-    if (tok !== loadToken) return;
-    viewTracks = [];
-    nextHref = "";
-    render();
-    say(String(e));
+// Switching a platform on or off, from Settings or the title bar
+async function setPlatformOn(id, on) {
+  const p = PLATFORM_LIST.find((x) => x.id === id);
+  prefs[p.pref] = on;
+  savePrefs();
+  $(p.pref).checked = on;   // the Settings switch has the same id as the pref
+  if (id === "local") {
+    await localLoad();
+    if (on) localRescan();
   }
+  if (id === "spotify") syncSpotifySettings();
+  renderPlatChips();   // reloads the page for the new mix
+  reqPaint();
+}
+
+// ---------- merged lists: Likes and Search across platforms ----------
+// A feed hands out one platform's tracks a page at a time: next() resolves to a list, or null at
+// the end. Each page of the view takes the next page from every feed and interleaves them.
+function arrayFeed(load) {
+  let list = null;
+  let pos = 0;
+  return {
+    next: async () => {
+      if (!list) list = await load();
+      if (pos >= list.length) return null;
+      const page = list.slice(pos, pos + 50);
+      pos += page.length;
+      return page;
+    },
+  };
+}
+
+function scFeed(path, onPage) {
+  let next = path;
+  return {
+    next: async () => {
+      if (!next) return null;
+      const data = await api(next);
+      next = !Array.isArray(data) && data.next_href ? toPath(data.next_href) : "";
+      const list = asList(data);
+      list.forEach((t) => { if (typeof t.user_favorite === "boolean") likeState.set(t.id, t.user_favorite); });
+      if (onPage) onPage(list);
+      return list;
+    },
+  };
+}
+
+const markLiked = (list) => list.forEach((t) => likeState.set(t.id, true));
+
+function likesFeed(id) {
+  if (id === "soundcloud") return scFeed(LIKES_PATH, markLiked);
+  if (id === "spotify") return arrayFeed(() => spotifyLikedTracks(500));
+  return arrayFeed(async () => localTracks.slice());
+}
+
+function searchFeed(id, q) {
+  if (id === "soundcloud") return scFeed("/tracks?q=" + encodeURIComponent(q) + "&access=playable&limit=30&linked_partitioning=true");
+  if (id === "spotify") return arrayFeed(() => spotifySearchTracks(q));
+  return arrayFeed(async () => localSearch(q));
+}
+
+let merged = null;   // { feeds, filter, tok, seen, errors } for the list on screen
+
+async function pullMerged() {
+  const m = merged;
+  const pages = await Promise.all(m.feeds.map(async (f) => {
+    if (f.done) return [];
+    try {
+      const page = await f.next();
+      if (page === null) { f.done = true; return []; }
+      return m.filter(page);
+    } catch (e) {
+      f.done = true;   // e.g. signed out of one platform: show the others
+      m.errors.push(e && e.message ? e.message : String(e));
+      return [];
+    }
+  }));
+  return interleave(pages).filter((t) => !m.seen.has(t.id) && m.seen.add(t.id));
+}
+
+async function loadMerged(feeds, filter) {
+  const tok = ++loadToken;
+  merged = { feeds, filter: filter || ((l) => l), tok, seen: new Set(), errors: [] };
+  say("Loading...");
+  const got = await pullMerged();
+  if (tok !== loadToken) return;
+  viewTracks = got;
+  nextHref = feeds.some((f) => !f.done) ? "merged:" : "";
+  render();
+  say(viewTracks.length ? "" : merged.errors[0] || "Nothing found.");
+  setTimeout(nearBottomCheck, 50);
+}
+
+async function pageMerged() {
+  const m = merged;
+  if (!m || m.tok !== loadToken) { nextHref = ""; return; }
+  const shown = viewTracks.length;
+  const got = await pullMerged();
+  if (m.tok !== loadToken) return;
+  viewTracks = viewTracks.concat(got);
+  nextHref = m.feeds.some((f) => !f.done) ? "merged:" : "";
+  renderAppend(shown);
 }
 
 // Lists the app already holds are shown 60 at a time and grow as you scroll
@@ -173,9 +257,7 @@ async function localLoad() {
   }
   paintLocal();
   renderPlatChips();
-  // With SoundCloud off, the first page may have opened before your files were ready
-  if (view === "likes" && !viewTracks.length && curPlat("likes") === "local") openLikes();
-  if (sidebarPlat === "local") refreshSidebar();   // albums come from your files
+  if (activePlats().includes("local")) refreshSidebar();   // albums come from your files
 }
 
 async function localRescan() {
@@ -220,50 +302,47 @@ async function localAddFolder() {
   $("localAddPath").focus();
 }
 
-// ---------- sidebar playlists for the chosen platform ----------
+// ---------- sidebar: playlists from every active platform ----------
 // SoundCloud: your playlists (and ones you liked). Spotify: your playlists. Local files: your albums.
-let sidebarPlat = null;
+let sidebarKey = null;   // which platforms the sidebar was last built for
+let sidebarTok = 0;
 
-async function refreshSidebar() {
-  const plat = sidebarPlat || "none";
-  document.querySelector(".plScroll").hidden = plat === "none";
-  $("plHeadText").textContent = plat === "local" ? "Albums" : "Playlists";
-  $("plNew").hidden = plat !== "soundcloud";
-  $("plNewForm").hidden = true;
-  if (plat === "soundcloud") {
-    if (await invoke("signed_in")) loadPlaylists();
-    else { playlists = []; renderPlaylists("Sign in to SoundCloud to see your playlists."); }
-    return;
-  }
-  if (plat === "spotify") {
-    playlists = [];
-    renderPlaylists("Loading...");
+function localAlbums() {
+  const albums = new Map();
+  localTracks.forEach((t) => {
+    const a = (t.album || "").trim();
+    if (a && !albums.has(a)) albums.set(a, { source: "local", group: "albums", id: "album:" + a, album: a, title: a, user: { username: artistName(t) } });
+  });
+  return [...albums.values()].sort((x, y) => x.title.localeCompare(y.title));
+}
+
+async function sidebarItems(id) {
+  if (id === "soundcloud") return (await invoke("signed_in")) ? scPlaylists() : [];
+  if (id === "spotify") {
     try {
-      const list = await spotifyPlaylists();
-      if (sidebarPlat !== "spotify") return;
-      playlists = list;
-      renderPlaylists();
+      return await spotifyPlaylists();
     } catch (e) {
-      if (sidebarPlat !== "spotify") return;
-      playlists = [];
-      renderPlaylists(/40[13]|scope/i.test(String(e))
+      throw new Error(/40[13]|scope/i.test(String(e))
         ? "Sign out of Spotify and back in (Settings > Integrations) to let the app read your playlists."
         : "Could not load your Spotify playlists.");
     }
-    return;
   }
-  if (plat === "local") {
-    const albums = new Map();
-    localTracks.forEach((t) => {
-      const a = (t.album || "").trim();
-      if (a && !albums.has(a)) albums.set(a, { source: "local", id: "album:" + a, album: a, title: a, user: { username: artistName(t) } });
-    });
-    playlists = [...albums.values()].sort((x, y) => x.title.localeCompare(y.title));
-    renderPlaylists(playlists.length ? "" : "No album names found in your files' tags.");
-    return;
-  }
-  playlists = [];
-  renderPlaylists();
+  return localAlbums();
+}
+
+async function refreshSidebar() {
+  const tok = ++sidebarTok;
+  const plats = activePlats();
+  document.querySelector(".plScroll").hidden = !plats.length;
+  $("plHeadText").textContent = "Playlists";
+  $("plNew").hidden = !plats.includes("soundcloud");
+  $("plNewForm").hidden = true;
+  if (!playlists.length) renderPlaylists("Loading...");
+  const notes = [];
+  const parts = await Promise.all(plats.map((id) => sidebarItems(id).catch((e) => { notes.push(e.message || String(e)); return []; })));
+  if (tok !== sidebarTok) return;   // switched platforms meanwhile
+  playlists = parts.flat();
+  renderPlaylists(notes.join(" "));
 }
 
 // Opening a Spotify playlist or a local album
@@ -292,43 +371,18 @@ async function loadPlatformPlaylist(p) {
 }
 
 function platformsInit() {
-  // Platform icons in the title bar: one choice for the whole app
+  // Platform icons in the title bar switch platforms on and off, like the switches in Settings
   $("titlePlat").addEventListener("click", (e) => {
     const b = e.target.closest("button[data-p]");
-    if (!b || b.classList.contains("on")) return;
-    prefs.globalPlat = b.dataset.p;
-    savePrefs();
-    renderPlatChips();
-    reqPaint();
-    if (curPage && curPage.view !== "now") { restoring = true; try { restorePage(curPage); } finally { restoring = false; } }
+    if (b) setPlatformOn(b.dataset.p, !b.classList.contains("on"));
   });
-
-  // SoundCloud and Spotify can be switched off without signing out
-  $("scOn").checked = scOn();
-  $("scOn").addEventListener("change", async () => {
-    prefs.scOn = $("scOn").checked;
-    savePrefs();
-    scApply();
-    refreshSidebar();
-    if (curPage && curPage.view !== "now") { restoring = true; try { restorePage(curPage); } finally { restoring = false; } }
-    else openLikes();
-  });
-  $("spOn").checked = prefs.spOn !== false;
-  $("spOn").addEventListener("change", () => {
-    prefs.spOn = $("spOn").checked;
-    savePrefs();
-    if (typeof spotifyCheck === "function") spotifyCheck();
-    renderPlatChips();
+  // Each platform can be switched off without signing out
+  PLATFORM_LIST.forEach((p) => {
+    $(p.pref).checked = platformOn(p);
+    $(p.pref).addEventListener("change", () => setPlatformOn(p.id, $(p.pref).checked));
   });
 
   // Local music settings
-  $("localOn").checked = prefs.localOn !== false;
-  $("localOn").addEventListener("change", async () => {
-    prefs.localOn = $("localOn").checked;
-    savePrefs();
-    await localLoad();
-    if (prefs.localOn) localRescan();
-  });
   $("localAdd").addEventListener("click", localAddFolder);
   $("localRescan").addEventListener("click", localRescan);
   $("localAddForm").addEventListener("submit", (e) => {

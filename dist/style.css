@@ -789,3 +789,9 @@ details.sub.inner { margin-top: 10px; }
 #chips::-webkit-scrollbar { display: none; }
 #chips .chip { flex: none; }
 #chips.atEnd { mask-image: none; }
+
+/* ===== v42: merged sidebar (playlists from every platform, then your albums) ===== */
+.plItem { display: flex; align-items: center; gap: 8px; }
+.plItem .plat { flex: none; margin: 0; opacity: 0.85; }
+.plName { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.plGroup { padding: 14px 12px 4px; color: var(--muted); font-size: 13px; font-weight: 600; }

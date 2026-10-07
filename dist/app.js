@@ -63,6 +63,13 @@ function artUrl(t, size) {
   const u = t.artwork_url || (t.user && t.user.avatar_url);
   return u ? u.replace("-large", "-" + size) : "";
 }
+// Round-robin: the first of each list, then the second of each, and so on
+function interleave(lists) {
+  const out = [];
+  const longest = Math.max(0, ...lists.map((l) => l.length));
+  for (let i = 0; i < longest; i++) lists.forEach((l) => { if (i < l.length) out.push(l[i]); });
+  return out;
+}
 function shuffleInPlace(a) {
   for (let i = a.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
@@ -387,10 +394,17 @@ function openLikes() {
   currentPlaylist = null;
   showView("likes");
   renderLikesChips();
-  const plat = curPlat("likes");
-  if (plat === "none") { viewTracks = []; nextHref = ""; render(); say("Nothing to show yet: switch on SoundCloud, Spotify or Local music in Settings > Integrations."); return; }
-  if (plat !== "soundcloud") { loadPlatformList("likes", plat); return; }
-  loadTracks(LIKES_PATH, false);
+  const plats = activePlats("likes");
+  if (!plats.length) { showNothing(); return; }
+  loadMerged(plats.map(likesFeed), applyLikesFilter);
+}
+
+function showNothing() {
+  ++loadToken;
+  viewTracks = [];
+  nextHref = "";
+  render();
+  say(NOTHING_ON);
 }
 
 function openSearch(q) {
@@ -398,10 +412,9 @@ function openSearch(q) {
   $("bigQ").value = q;
   currentPlaylist = null;
   showView("search");
-  const plat = curPlat("search");
-  if (plat === "none") { viewTracks = []; nextHref = ""; render(); say("Nothing to show yet: switch on SoundCloud, Spotify or Local music in Settings > Integrations."); return; }
-  if (plat !== "soundcloud") { loadPlatformList("search", plat, q); return; }
-  loadTracks("/tracks?q=" + encodeURIComponent(q) + "&access=playable&limit=30&linked_partitioning=true", false);
+  const plats = activePlats("search");
+  if (!plats.length) { showNothing(); return; }
+  loadMerged(plats.map((id) => searchFeed(id, q)), (list) => list.filter((t) => !isMix(t)));
 }
 
 function openPlaylist(p) {
@@ -435,15 +448,14 @@ function openArtist(u) {
 
 // ---------- discover ----------
 const GENRES = ["Electronic", "House", "Techno", "Hip-hop & Rap", "Pop", "Indie", "Ambient", "Lo-fi", "R&B", "Drum & Bass", "Jazz", "Rock"];
-const ACCESS = "access=playable";
 
 function renderChips() {
   const box = $("chips");
   box.replaceChildren();
-  // Spotify doesn't let this app see who you follow, so it has no "Following" chip
-  const first = curPlat("discover") === "spotify"
-    ? [["foryou", "For you"], ["similar", "Similar artists"]]
-    : [["foryou", "For you"], ["following", "Following"], ["similar", "Similar artists"]];
+  // "Following" needs SoundCloud: Spotify doesn't let this app see who you follow
+  const first = activePlats("discover").includes("soundcloud")
+    ? [["foryou", "For you"], ["following", "Following"], ["similar", "Similar artists"]]
+    : [["foryou", "For you"], ["similar", "Similar artists"]];
   const items = first.concat(GENRES.map((g) => ["genre:" + g, g]));
   items.forEach(([key, label]) => {
     const b = el("button", "chip" + (key === discoverSrc ? " on" : ""), label);
@@ -469,42 +481,14 @@ $("chips").addEventListener("scroll", () => {
   box.classList.toggle("atEnd", box.scrollLeft + box.clientWidth >= box.scrollWidth - 2);
 });
 
-// Suggestions: tracks related to a few of your likes, minus ones you already like
-async function loadForYou() {
-  const tok = ++loadToken;
-  say("Finding music for you...");
-  try {
-    const likes = asList(await api("/me/likes/tracks?limit=30&" + ACCESS + "&linked_partitioning=true"));
-    if (tok !== loadToken) return;
-    if (!likes.length) {
-      viewTracks = []; nextHref = ""; render();
-      say("Like a few tracks first, and Discover will suggest similar ones.");
-      return;
-    }
-    likes.forEach((t) => likeState.set(t.id, true));
-    const picks = shuffleInPlace(likes.slice()).slice(0, 3);
-    const lists = await Promise.all(picks.map((seed) =>
-      api("/tracks/" + seed.id + "/related?" + ACCESS + "&limit=20&linked_partitioning=true").then(asList).catch(() => [])
-    ));
-    if (tok !== loadToken) return;
-    const seen = new Set(likes.map((t) => t.id));
-    const out = [];
-    lists.flat().forEach((t) => { if (!seen.has(t.id)) { seen.add(t.id); out.push(t); } });
-    shuffleInPlace(out);
-    viewTracks = recFilter(out.filter((t) => !isMix(t)));
-    nextHref = "";
-    const names = picks.map((x) => x.title).join(", ");
-    discoverNote = "Because you liked " + (names.length > 90 ? names.slice(0, 90) + "..." : names);
-    render();
-    say(out.length ? "" : "No suggestions came back. Try a genre instead.");
-  } catch (e) {
-    say(String(e));
-  }
-}
+// Every active platform's picker runs at once (js/discover.js); their suggestions are mixed
+const DISCOVER_PICKERS = { soundcloud: (src) => scDiscover(src), spotify: (src) => spDiscover(src) };
 
 async function openDiscover(src, fresh) {
-  if (curPlat("discover") === "none") { openLikes(); return; }
+  const plats = activePlats("discover");
+  if (!plats.length) { openLikes(); return; }
   discoverSrc = src || "foryou";
+  if (discoverSrc === "following" && !plats.includes("soundcloud")) discoverSrc = "foryou";
   recHidden = 0;
   discoverNote = "";
   currentPlaylist = null;
@@ -513,20 +497,20 @@ async function openDiscover(src, fresh) {
   renderChips();
   if (!fresh && useCachedPage()) return;   // came back to it: keep the same list
   $("listView").scrollTop = 0;
-  if (curPlat("discover") === "spotify") return loadSpotifyDiscover(discoverSrc);
-  await ensureLikes();   // so nothing you already like gets recommended
-  if (discoverSrc === "foryou") return loadForYou();
-  if (discoverSrc === "similar") return loadSimilar();
-  if (discoverSrc === "following") {
-    await loadTracks("/me/followings/tracks?" + ACCESS + "&limit=30&linked_partitioning=true", false);
-    if (!viewTracks.length) say("Follow some artists on SoundCloud and their new tracks will show up here.");
-    return;
-  }
-  const g = encodeURIComponent(discoverSrc.slice(6));
-  return loadTracks([
-    "/tracks?genres=" + g + "&" + ACCESS + "&limit=30&linked_partitioning=true",
-    "/tracks?q=" + g + "&" + ACCESS + "&limit=30&linked_partitioning=true",
-  ], false);
+  const tok = ++loadToken;
+  say("Finding music for you...");
+  if (plats.includes("soundcloud")) await ensureLikes();   // so nothing you already like gets recommended
+  const results = await Promise.allSettled(plats.map((p) => DISCOVER_PICKERS[p](discoverSrc)));
+  if (tok !== loadToken) return;
+  const found = results.filter((r) => r.status === "fulfilled").map((r) => r.value);
+  const errors = results.filter((r) => r.status === "rejected").map((r) => (r.reason && r.reason.message) || String(r.reason));
+  const seen = new Set();
+  const list = interleave(found.map((r) => shuffleInPlace(r.list.slice()))).filter((t) => !seen.has(t.id) && seen.add(t.id));
+  discoverNote = found.map((r) => r.note).filter(Boolean).join(". ");
+  setLocalPool(list);
+  render();
+  const hints = found.map((r) => r.msg).filter(Boolean);
+  say(list.length ? hints.join(" ") : errors[0] || hints[0] || "No suggestions came back. Try another chip or a genre.");
 }
 
 $("navDiscover").addEventListener("click", () => openDiscover(discoverSrc || "foryou"));
@@ -596,7 +580,7 @@ async function loadMore() {
   $("more").disabled = true;
   $("more").textContent = "Loading more...";
   try {
-    await loadTracks(nextHref, true);
+    if (nextHref === "merged:") await pageMerged(); else await loadTracks(nextHref, true);
   } finally {
     loadingMore = false;
     $("more").disabled = false;
@@ -625,12 +609,20 @@ function renderPlaylists(note) {
   const box = $("plList");
   box.replaceChildren();
   if (note) box.append(el("div", "plNote", note));
-  playlists.forEach((p) => {
-    const b = el("button", "plItem", p.title || "Untitled playlist");
+  // playlists first, then albums from your files under their own heading
+  const item = (p) => {
+    const b = el("button", "plItem");
     b.dataset.id = p.id;
     b.title = p.title || "";
+    b.append(platformBadge({ source: p.source || "soundcloud" }), el("span", "plName", p.title || "Untitled playlist"));
     box.append(b);
-  });
+  };
+  const albums = playlists.filter((p) => p.group === "albums");
+  playlists.filter((p) => p.group !== "albums").forEach(item);
+  if (albums.length) {
+    box.append(el("div", "plGroup", "Albums"));
+    albums.forEach(item);
+  }
   if (!playlists.length && !note) box.append(el("div", "plNote", "No playlists yet."));
   showView(view);
 }
@@ -642,7 +634,8 @@ $("plList").addEventListener("click", (e) => {
   if (p) openPlaylist(p);
 });
 
-async function loadPlaylists() {
+// Your SoundCloud playlists and the ones you liked (refreshSidebar shows them with the others)
+async function scPlaylists() {
   const list = [];
   let failed = 0;
   for (const path of ["/me/playlists?limit=50&show_tracks=false", "/me/likes/playlists?limit=50"]) {
@@ -654,9 +647,12 @@ async function loadPlaylists() {
       failed++;
     }
   }
-  playlists = list;
-  renderPlaylists(failed && !list.length ? "Could not load playlists." : "");
+  if (failed === 2) throw new Error("Could not load your SoundCloud playlists.");
+  return list;
 }
+
+// After creating or deleting one
+const loadPlaylists = () => refreshSidebar();
 
 // ---------- queue ----------
 function startList(list, i, shuffle) {
@@ -668,25 +664,15 @@ function startList(list, i, shuffle) {
   playCurrent();
 }
 
-function sameService(t) {
-  // Spotify's rules don't allow its tracks to share a queue with other platforms
-  const a = qi >= 0 ? srcOf(queue[qi]) : "";
-  if (a && a !== srcOf(t) && (a === "spotify" || srcOf(t) === "spotify")) {
-    say("Spotify tracks can't share a queue with other platforms. Start a new list to switch.");
-    return false;
-  }
-  return true;
-}
-
 function playNext(t) {
-  if (!t || !sameService(t)) return;
+  if (!t) return;
   if (qi < 0) { startList([t], 0, false); return; }
   queue.splice(qi + 1, 0, t);
   renderQueue();
 }
 
 function addToQueue(t) {
-  if (!t || !sameService(t)) return;
+  if (!t) return;
   if (qi < 0) { startList([t], 0, false); return; }
   queue.splice(autoplayStart(), 0, t);   // ahead of any autoplay picks
   renderQueue();
@@ -1257,6 +1243,7 @@ async function refreshAuth() {
   const ok = await invoke("signed_in");
   $("scAuth").textContent = ok ? "Sign out" : "Sign in";
   updateTitle(ok);
+  renderPlatChips();   // SoundCloud is available while signed in
   return ok;
 }
 
@@ -1364,6 +1351,9 @@ syncMaximized();
   const signedIn = await refreshAuth();
   scApply();
   if (signedIn && scOn()) startSession();
-  else if (!scOn()) { loadUser(); openLikes(); }
-  else say("Sign in to load your likes, playlists and search.");
+  else {
+    loadUser();
+    openLikes();   // whatever else is active; more appears as Spotify and your files finish loading
+    if (!signedIn && !activePlats().length) say("Sign in to SoundCloud (or set up Spotify or local music) to load your likes, playlists and search.");
+  }
 })();
