@@ -724,6 +724,11 @@ const loadPlaylists = () => refreshSidebar();
 // ---------- queue ----------
 function startList(list, i, shuffle) {
   if (!list.length) return;
+  if (!prefs.queueSets && view !== "sets") {
+    const picked = shuffle ? null : list[i];
+    const kept = list.filter((t) => !isMix(t) || t === picked);
+    if (kept.length) { list = kept; i = picked ? list.indexOf(picked) : 0; }
+  }
   queue = list.slice();
   if (shuffle) { shuffleInPlace(queue); i = 0; }
   qi = i;
@@ -758,7 +763,6 @@ function queueRow(t, idx, removable) {
   const qa = el("div", "artist");
   qa.append(platformBadge(t), el("span", "", artistName(t)));
   if (t.requestedBy) qa.append(el("span", "reqBy", "requested by " + t.requestedBy));
-  else if (t.autoplay) qa.append(el("span", "reqBy", "autoplay"));
   meta.append(el("div", "title", t.title || "Untitled"), qa);
   li.append(img, meta);
   if (removable) {
@@ -779,17 +783,26 @@ const QUEUE_SHOWN = 100;
 function renderQueue() {
   const nowBox = $("qNow");
   const nextBox = $("qNext");
+  const autoBox = $("qAuto");
   nowBox.replaceChildren();
   nextBox.replaceChildren();
+  autoBox.replaceChildren();
   const t = curTrack();
   if (t) nowBox.append(queueRow(t, qi, false));
   else nowBox.append(el("li", "qEmpty", "Nothing playing."));
-  const upcoming = qi >= 0 ? queue.slice(qi + 1) : [];
-  if (!upcoming.length) nextBox.append(el("li", "qEmpty", autoplayNote()));
+  // yours first, then autoplay's picks
+  const split = qi >= 0 ? autoplayStart() : 0;
+  const mine = qi >= 0 ? queue.slice(qi + 1, split) : [];
+  const auto = qi >= 0 ? queue.slice(split) : [];
+  if (!mine.length) nextBox.append(el("li", "qEmpty", "Nothing queued. Add tracks with + or drag them here."));
   // A long queue (all your likes, say) only draws the next stretch of it
-  upcoming.slice(0, QUEUE_SHOWN).forEach((tr, k) => nextBox.append(queueRow(tr, qi + 1 + k, true)));
-  if (upcoming.length > QUEUE_SHOWN) nextBox.append(el("li", "qEmpty", "...and " + (upcoming.length - QUEUE_SHOWN) + " more."));
+  mine.slice(0, QUEUE_SHOWN).forEach((tr, k) => nextBox.append(queueRow(tr, qi + 1 + k, true)));
+  if (mine.length > QUEUE_SHOWN) nextBox.append(el("li", "qEmpty", "...and " + (mine.length - QUEUE_SHOWN) + " more."));
+  auto.forEach((tr, k) => autoBox.append(queueRow(tr, split + k, true)));
+  autoBox.hidden = !auto.length || !autoplayOn();
+  autoplayPaint();
   reqQueueBtn();
+  sessionSave();
 }
 
 $("queue").addEventListener("click", (e) => {
@@ -956,13 +969,15 @@ async function playCurrent() {
   markPlaying();
   renderQueue();
   say("");
+  const resumeAt = takeResume(t);
   try {
     if (srcOf(t) === "spotify") {
       audio.pause();
-      await spotifyStart(t);
+      await spotifyStart(t, resumeAt);
     } else {
       spotifyPause();
       await startStream(t);
+      if (resumeAt && curTrack() === t) audio.currentTime = resumeAt / 1000;
     }
   } catch (e) {
     if (e && e.name === "AbortError") return;   // skipped to another track
@@ -1057,6 +1072,9 @@ async function joinedMp3Url(m3u8Url, auth, depth) {
 async function startStream(t) {
   const mine = ++streamToken;
   if (srcOf(t) === "local") {
+    const live = liveLocal(t);   // a restored queue's files get this run's address
+    if (!live.url) throw new Error("this file isn't in your music folders any more");
+    t.url = live.url;
     await tryStream(t.url, false, null);
     if (mine === streamToken) say("");
     return;
@@ -1110,7 +1128,11 @@ async function startStream(t) {
 function toggle() {
   const cur = curTrack();
   if (cur && srcOf(cur) === "spotify") { spotifyToggle(); return; }
-  if (!audio.src) { if (viewTracks.length) startList(viewTracks, 0, false); return; }
+  if (!audio.src) {
+    if (cur) playCurrent();   // the queue from last time
+    else if (viewTracks.length) startList(viewTracks, 0, false);
+    return;
+  }
   if (audio.paused) audio.play(); else audio.pause();
 }
 
@@ -1436,6 +1458,7 @@ syncMaximized();
   render();
   $("spotifySection").hidden = !FEATURES.spotify;
   extrasInit();
+  sessionRestore();
   if (FEATURES.spotify) spotifyInit();
   const signedIn = await refreshAuth();
   scApply();

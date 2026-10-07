@@ -38,6 +38,13 @@ function dndInit() {
     if (!t) { e.preventDefault(); return; }
     dragStart(e, t);
   });
+  $("qAuto").addEventListener("dragstart", (e) => {
+    const li = e.target.closest(".qRow");
+    if (!li) return;
+    const i = Number(li.dataset.q);
+    li.classList.add("dragging");
+    dragStart(e, queue[i], i);
+  });
   $("qNext").addEventListener("dragstart", (e) => {
     const li = e.target.closest(".qRow");
     if (!li) return;
@@ -53,7 +60,7 @@ function dndInit() {
     if (!drag.track) return;
     e.preventDefault();
     e.dataTransfer.dropEffect = drag.from >= 0 ? "move" : "copy";
-    const li = e.target.closest("#qNext .qRow");
+    const li = e.target.closest("#qNext .qRow, #qAuto .qRow");
     document.querySelectorAll(".qRow.over").forEach((x) => { if (x !== li) x.classList.remove("over"); });
     if (li) li.classList.add("over");
     panel.classList.toggle("dropOver", !li && drag.from < 0);
@@ -67,13 +74,17 @@ function dndInit() {
   panel.addEventListener("drop", (e) => {
     if (!drag.track) return;
     e.preventDefault();
-    const li = e.target.closest("#qNext .qRow");
+    const li = e.target.closest("#qNext .qRow, #qAuto .qRow");
     const to = li ? Number(li.dataset.q) : -1;
+    const intoAuto = !!(li && li.closest("#qAuto"));
     if (drag.from > qi) {
-      // reorder within Next up
-      if (to > qi && to !== drag.from) {
+      // reorder; dropped among your tracks it's yours, among autoplay's it's autoplay's
+      const onEmptyNext = !li && e.target.closest("#qNext");
+      if ((to > qi && to !== drag.from) || onEmptyNext) {
         const [moved] = queue.splice(drag.from, 1);
-        queue.splice(to, 0, moved);
+        if (intoAuto) moved.autoplay = true; else delete moved.autoplay;
+        const at = onEmptyNext ? autoplayStart() : to;
+        queue.splice(at, 0, moved);
         renderQueue();
       }
     } else if (drag.from < 0) {

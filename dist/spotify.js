@@ -219,17 +219,18 @@ function spotifyTick() {
   if (spState.playing) playbackTick();
 }
 
-async function spotifyStart(t) {
+async function spotifyStart(t, startMs) {
+  startMs = startMs || 0;
   say("Starting Spotify...");
   await speSetup();
   if (norm.ctx.state === "suspended") await norm.ctx.resume().catch(() => {});
-  spe.basePos = 0;
+  spe.basePos = startMs;
   spe.endPending = false;
   spe.node.port.postMessage({ type: "play" });
-  const gen = await speCall("spe_play", { uri: t.uri, positionMs: 0 });
+  const gen = await speCall("spe_play", { uri: t.uri, positionMs: startMs });
   if (curTrack() !== t) return;   // skipped meanwhile
   if (gen > spe.gen) speFlush(gen);
-  spState = { pos: 0, ts: performance.now(), playing: true, dur: t.duration || 0 };
+  spState = { pos: startMs, ts: performance.now(), playing: true, dur: t.duration || 0 };
   say("");
   paintSpotify();
   playbackState(true);

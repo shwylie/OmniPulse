@@ -12,6 +12,7 @@ function saveStats(list) {
 }
 
 function countPlay(t) {
+  markHeard(t);
   const list = loadStats();
   list.push({
     ts: Date.now(),

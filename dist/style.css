@@ -965,3 +965,11 @@ select.wide { max-width: 260px; }
 .sideLists .plat.spotify svg { color: #1ed760; }
 .sideLists .plat.local svg { color: #f2b544; }
 #npAlbum { margin: 4px 0 0; color: var(--text); opacity: 0.85; font-weight: 600; }
+
+/* ===== v45: the queue: Now playing, Next up (yours), Autoplay ===== */
+.qAutoHead { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin: 16px 6px 6px; padding-top: 12px; border-top: 1px solid var(--line); }
+.qAutoHead h3 { margin: 0 0 2px; }
+.qAutoHead .switch { margin-top: 2px; }
+#qAuto .qRow { opacity: 0.85; }
+#qAuto .qRow:hover { opacity: 1; }
+.autoRow { display: none; }

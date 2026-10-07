@@ -152,13 +152,14 @@
     <ul id="qNow"></ul>
     <h3>Next up</h3>
     <ul id="qNext"></ul>
-    <div class="autoRow">
+    <div class="qAutoHead">
       <div>
-        <div class="autoTitle">Autoplay</div>
+        <h3>Autoplay</h3>
         <div class="autoNote" id="autoplayNote"></div>
       </div>
       <label class="switch" title="Keep playing similar tracks when the queue runs out"><input type="checkbox" id="autoplayOn" aria-label="Autoplay"><span></span></label>
     </div>
+    <ul id="qAuto" hidden></ul>
   </aside>
 
   <footer class="player">
@@ -436,6 +437,39 @@
       <div class="folderList" id="hiddenPlList"></div>
     </section>
 
+    <!-- ===================== Queue & autoplay ===================== -->
+    <section class="group">
+      <h3>Queue &amp; autoplay</h3>
+      <div class="row">
+        <div>
+          <div class="lbl">Sets &amp; podcasts in the queue</div>
+          <div class="note">Off: playing a list skips anything over 15 minutes, unless you pick it.</div>
+        </div>
+        <label class="switch"><input type="checkbox" id="queueSets"><span></span></label>
+      </div>
+      <div class="row">
+        <div>
+          <div class="lbl">Autoplay</div>
+          <div class="note">Keeps playing similar tracks from each platform, taking turns, when your queue runs out.</div>
+        </div>
+        <label class="switch"><input type="checkbox" id="apQueueOn"><span></span></label>
+      </div>
+      <div class="row">
+        <div>
+          <div class="lbl">Sets &amp; podcasts in autoplay</div>
+          <div class="note">Off: autoplay sticks to tracks under 15 minutes.</div>
+        </div>
+        <label class="switch"><input type="checkbox" id="autoplaySetsOn"><span></span></label>
+      </div>
+      <div class="row">
+        <div>
+          <div class="lbl">Avoid recently played</div>
+          <div class="note">Autoplay skips anything you've heard in the last three hours.</div>
+        </div>
+        <label class="switch"><input type="checkbox" id="avoidRecentOn"><span></span></label>
+      </div>
+    </section>
+
     <!-- ===================== Sound ===================== -->
     <section class="group" id="audioSection">
       <h3>Sound</h3>
@@ -651,6 +685,7 @@
 <script src="spotify.js"></script>
 <script src="js/titles.js"></script>
 <script src="js/appearance.js"></script>
+<script src="js/history.js"></script>
 <script src="js/playback.js"></script>
 <script src="js/autoplay.js"></script>
 <script src="js/audio.js"></script>
@@ -662,6 +697,7 @@
 <script src="js/xplaylists.js"></script>
 <script src="js/favourites.js"></script>
 <script src="js/sets.js"></script>
+<script src="js/session.js"></script>
 <script src="js/feed.js"></script>
 <script src="js/dnd.js"></script>
 <script src="js/widget.js"></script>

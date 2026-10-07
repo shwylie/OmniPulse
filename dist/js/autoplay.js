@@ -1,15 +1,19 @@
-// Autoplay: when the queue is about to run out, add similar tracks so the music keeps going.
-// Autoplay tracks sit at the end of the queue; anything you or chat add goes in front of them.
+// Autoplay: when the queue is about to run out, add similar tracks from every active platform,
+// taking turns between them (a SoundCloud track, then Spotify, then SoundCloud...). They're kept
+// apart from your own queue: the queue panel shows Next up (yours) and then Autoplay, and
+// anything you or chat add goes before the autoplay picks.
 
 const AUTOPLAY_BATCH = 10;
 const AUTOPLAY_LEAD_MS = 30000;          // start looking this long before the last track ends
-const AUTOPLAY_RECENT_MS = 3 * 3600000;  // skip tracks played in the last few hours
+const AUTOPLAY_RECENT_MS = 3 * 3600000;  // "recently played": the last three hours
 
 let autoplayBusy = null;
 let autoplayFailedFor = null;   // the seed track we last came up empty for, so we don't keep asking
 
 const autoplayOn = () => prefs.autoplay !== false;
 const autoplayActive = () => autoplayOn() && repeatMode === "off";
+const autoplaySets = () => !!prefs.autoplaySets;        // sets & podcasts in autoplay (off unless chosen)
+const avoidRecent = () => prefs.avoidRecent !== false;  // on unless switched off
 
 // Where "Add to queue" puts a track: after everything you queued, before the autoplay picks
 function autoplayStart() {
@@ -18,69 +22,95 @@ function autoplayStart() {
 }
 
 function autoplayNote() {
-  if (!autoplayOn()) return "Nothing queued after this.";
-  if (repeatMode !== "off") return "Nothing queued after this. Autoplay waits while repeat is on.";
-  return autoplayBusy ? "Finding similar tracks..." : "Autoplay will add similar tracks near the end of this one.";
+  if (!autoplayOn()) return "Off: playback stops at the end of your queue.";
+  if (repeatMode !== "off") return "Waiting while repeat is on.";
+  return autoplayBusy ? "Finding similar tracks..." : "Similar tracks will be added near the end of the queue.";
 }
 
 function autoplayPaint(msg) {
   $("autoplayOn").checked = autoplayOn();
-  $("autoplayNote").textContent = msg !== undefined ? msg
-    : autoplayOn() ? "Keeps playing similar tracks when the queue runs out." : "Off: playback stops at the end of the queue.";
+  $("apQueueOn").checked = autoplayOn();
+  $("autoplayNote").textContent = msg !== undefined ? msg : autoplayNote();
 }
 
-// ---------- finding candidates ----------
+// ---------- candidates from each platform, all seeded by the current track ----------
 function shuffled(list) { return shuffleInPlace(list.slice()); }
+const seedArtist = (seed) => (srcOf(seed) === "spotify" ? firstArtist(seed) : guessNames(seed).artist) || artistName(seed);
 
-async function autoplaySoundCloud(seed) {
+async function apSoundCloud(seed) {
   const related = (id) => api("/tracks/" + id + "/related?access=playable&limit=30&linked_partitioning=true").then(asList).catch(() => []);
-  let list = await related(seed.id);
-  // a thin result: also try something played earlier in this queue, for variety
-  if (list.length < AUTOPLAY_BATCH) {
-    const earlier = queue.slice(0, qi).filter((t) => srcOf(t) === "soundcloud" && t.id !== seed.id);
-    if (earlier.length) list = list.concat(await related(shuffled(earlier)[0].id));
+  const ids = [];
+  if (srcOf(seed) === "soundcloud") ids.push(seed.id);
+  const earlier = queue.slice(0, qi).filter((t) => srcOf(t) === "soundcloud" && t.id !== seed.id);
+  if (earlier.length) ids.push(shuffled(earlier)[0].id);
+  if (!ids.length) {
+    // the seed is from another platform: find it (or its artist) on SoundCloud first
+    const found = await api("/tracks?q=" + encodeURIComponent(seedArtist(seed) + " " + guessNames(seed).title) +
+      "&access=playable&limit=5&linked_partitioning=true").then(asList).catch(() => []);
+    if (found[0]) ids.push(found[0].id);
   }
-  return list;
+  return shuffled((await Promise.all(ids.slice(0, 2).map(related))).flat());
 }
 
-async function autoplaySpotify(seed) {
-  const artist = firstArtist(seed);
+async function apSpotify(seed) {
+  const artist = seedArtist(seed);
   if (!artist) return [];
   const names = shuffled(await lfmSimilarNames(artist, 10)).slice(0, 4);
-  const lists = await Promise.all((names.length ? names : [artist]).map(spArtistTracks));
-  return shuffled(lists.flat());
+  return shuffled((await Promise.all((names.length ? names : [artist]).map(spArtistTracks))).flat());
 }
 
-function autoplayLocal(seed) {
-  const who = artistName(seed).toLowerCase();
+async function apLocal(seed) {
+  if (!localTracks.length) return [];
+  const who = seedArtist(seed).toLowerCase();
   const album = (seed.album || "").trim();
   const sameArtist = localTracks.filter((t) => artistName(t).toLowerCase() === who);
   const sameAlbum = album ? localTracks.filter((t) => (t.album || "").trim() === album) : [];
   return shuffled(sameArtist).concat(shuffled(sameAlbum), shuffled(localTracks));
 }
 
-// What's worth adding: not already queued, not removed, not played lately, and mixes only after a mix
-function autoplayPick(seed, list) {
-  const queued = new Set(queue.map((t) => t.id));
-  const lastPlayed = new Map();
-  const since = Date.now() - AUTOPLAY_RECENT_MS;
-  loadStats().forEach((x) => { if (x.ts > since) lastPlayed.set(x.id, x.ts); });
+const AUTOPLAY_SOURCES = { soundcloud: apSoundCloud, spotify: apSpotify, local: apLocal };
+
+// What's worth adding: not queued, not removed, not heard lately (unless that's switched off),
+// sets & podcasts only if you've asked for them, and at most two per artist in a batch
+function autoplayPickable(taken, perArtist) {
+  return (t) => {
+    if (!t || taken.has(t.id) || hiddenRecs.has(String(t.id))) return false;
+    if (isMix(t) && !autoplaySets()) return false;
+    if (avoidRecent() && heardWithin(t, AUTOPLAY_RECENT_MS)) return false;
+    if (!langOk(t)) return false;
+    return (perArtist.get(artistName(t).toLowerCase()) || 0) < 2;
+  };
+}
+
+// Takes turns between the platforms' lists, starting with one other than the queue's last track.
+// A platform isn't used twice in a row unless it's the only one with anything to add.
+function autoplayTakeTurns(lists, lastPlat) {
+  const taken = new Set(queue.map((t) => t.id));
   const perArtist = new Map();
+  const ok = autoplayPickable(taken, perArtist);
+  let order = Object.keys(lists).filter((p) => lists[p].length);
+  const several = order.length > 1;
+  if (several && order[0] === lastPlat) order = order.slice(1).concat(order[0]);
   const out = [];
-  for (const t of list) {
-    if (out.length >= AUTOPLAY_BATCH) break;
-    if (!t || queued.has(t.id) || hiddenRecs.has(String(t.id)) || lastPlayed.has(t.id)) continue;
-    if (isMix(t) !== isMix(seed) || !langOk(t)) continue;
-    const a = artistName(t).toLowerCase();
-    if ((perArtist.get(a) || 0) >= 2) continue;   // a little variety
-    perArtist.set(a, (perArtist.get(a) || 0) + 1);
-    queued.add(t.id);
-    out.push(Object.assign({}, t, { autoplay: true, requestedBy: undefined }));
+  while (out.length < AUTOPLAY_BATCH && order.length) {
+    for (const p of order.slice()) {
+      if (out.length >= AUTOPLAY_BATCH) break;
+      const list = lists[p];
+      let t = list.shift();
+      while (t && !ok(t)) t = list.shift();
+      if (!t) { order = order.filter((x) => x !== p); continue; }
+      taken.add(t.id);
+      const a = artistName(t).toLowerCase();
+      perArtist.set(a, (perArtist.get(a) || 0) + 1);
+      out.push(Object.assign({}, t, { autoplay: true, requestedBy: undefined }));
+    }
+    // once only one platform has tracks left, stop rather than play it twice in a row
+    if (several && order.length === 1) break;
   }
   return out;
 }
 
-// Adds a batch of similar tracks after the current one. Safe to call often.
+// Adds a batch of similar tracks after the queue. Safe to call often.
 function autoplayFill() {
   if (autoplayBusy) return autoplayBusy;
   const seed = curTrack();
@@ -88,12 +118,12 @@ function autoplayFill() {
   autoplayBusy = (async () => {
     await null;   // let autoplayBusy be set first, so the queue shows "Finding..."
     try {
-      const src = srcOf(seed);
-      const list = src === "spotify" ? await autoplaySpotify(seed)
-        : src === "local" ? autoplayLocal(seed)
-        : await autoplaySoundCloud(seed);
+      const plats = activePlats().filter((p) => AUTOPLAY_SOURCES[p]);
+      const results = await Promise.allSettled(plats.map((p) => AUTOPLAY_SOURCES[p](seed)));
       if (curTrack() !== seed) return;   // you started something else meanwhile
-      const picks = autoplayPick(seed, list);
+      const lists = {};
+      plats.forEach((p, i) => { lists[p] = results[i].status === "fulfilled" ? results[i].value.slice() : []; });
+      const picks = autoplayTakeTurns(lists, srcOf(queue[queue.length - 1]));
       if (!picks.length) {
         autoplayFailedFor = seed.id;
         autoplayPaint("Autoplay couldn't find anything similar to this track.");
@@ -129,18 +159,30 @@ function autoplayTick() {
   if (!dur || dur - curPosMs() <= AUTOPLAY_LEAD_MS) autoplayFill();
 }
 
-function autoplayInit() {
+function setAutoplay(on) {
+  prefs.autoplay = on;
+  savePrefs();
+  if (!on) queue = queue.filter((t, i) => i <= qi || !t.autoplay);   // take back the unplayed picks
+  autoplayFailedFor = null;
   autoplayPaint();
-  $("autoplayOn").addEventListener("change", () => {
-    prefs.autoplay = $("autoplayOn").checked;
-    savePrefs();
-    if (!prefs.autoplay) {
-      // take back the suggestions that haven't played yet
-      queue = queue.filter((t, i) => i <= qi || !t.autoplay);
-    }
-    autoplayFailedFor = null;
-    autoplayPaint();
-    renderQueue();
-  });
+  renderQueue();
+}
+
+function autoplayInit() {
+  // the switch in the queue panel and the one in Settings are the same setting
+  $("autoplayOn").addEventListener("change", () => setAutoplay($("autoplayOn").checked));
+  $("apQueueOn").addEventListener("change", () => setAutoplay($("apQueueOn").checked));
+  const sw = (id, key, dflt) => {
+    $(id).checked = prefs[key] === undefined ? dflt : !!prefs[key];
+    $(id).addEventListener("change", () => {
+      prefs[key] = $(id).checked;
+      savePrefs();
+      if (key === "autoplaySets" || key === "avoidRecent") autoplayFailedFor = null;
+    });
+  };
+  sw("queueSets", "queueSets", false);
+  sw("autoplaySetsOn", "autoplaySets", false);
+  sw("avoidRecentOn", "avoidRecent", true);
+  autoplayPaint();
   setInterval(autoplayTick, 2000);
 }
