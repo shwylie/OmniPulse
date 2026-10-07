@@ -46,7 +46,7 @@ function normEnsure() {
     probe.connect(sinkhole);
     sinkhole.connect(ctx.destination);
     Object.assign(norm, { ctx, input, match, limiter, master, eq, probe });
-    if (prefs.sink && prefs.sink !== "default" && ctx.setSinkId) ctx.setSinkId(prefs.sink).catch(() => {});
+    if (prefs.sink && prefs.sink !== "default") mainSink(prefs.sink).catch(() => {});
     normApply();
     return true;
   } catch (e) {

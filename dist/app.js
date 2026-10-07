@@ -1402,10 +1402,12 @@ $("swatches").addEventListener("click", (e) => { const b = e.target.closest(".sw
 $("swatches").addEventListener("input", (e) => { if (e.target.id === "accentCustom") setPref("accent", e.target.value); });
 
 // ---------- settings: audio output ----------
+// The sound comes out of the audio chain (js/audio.js), so that's what's moved; the <audio> it reads
+// from is moved too, for when the chain isn't running
 async function applySink(id) {
-  if (!audio.setSinkId) throw new Error("This engine cannot choose an output device.");
-  await audio.setSinkId(id || "default");
-  if (norm.ctx && norm.ctx.setSinkId) await norm.ctx.setSinkId(id && id !== "default" ? id : "");
+  if (audio.setSinkId) await audio.setSinkId(id || "default").catch(() => {});
+  if (norm.ctx) await mainSink(id);
+  else if (!audio.setSinkId) throw new Error("This engine cannot choose an output device.");
 }
 
 async function refreshOutputs() {
@@ -1427,6 +1429,8 @@ async function refreshOutputs() {
   sel2.replaceChildren(...[...sel.options].map((o) => new Option(o.text, o.value)));
   sel2.value = [...sel2.options].some((o) => o.value === prefs.out2Sink) ? prefs.out2Sink : sel2.options[0] ? sel2.options[0].value : "";
   $("namesBtn").hidden = outs.length === 0 || outs.some((d) => d.label);
+  out2Default();
+  out2Help();
 }
 
 $("outputSel").addEventListener("change", async () => {
@@ -1437,7 +1441,7 @@ $("outputSel").addEventListener("change", async () => {
     savePrefs();
     $("outputNote").textContent = "";
   } catch (e) {
-    $("outputNote").textContent = "Could not switch output: " + e;
+    $("outputNote").textContent = "Couldn't play on that device: " + (e && e.message ? e.message : e) + " Windows may be holding it for another app, or it may not take this sound format (try its settings in Windows' Sound panel).";
   }
 });
 
