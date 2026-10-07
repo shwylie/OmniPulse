@@ -973,3 +973,53 @@ select.wide { max-width: 260px; }
 #qAuto .qRow { opacity: 0.85; }
 #qAuto .qRow:hover { opacity: 1; }
 .autoRow { display: none; }
+
+/* ===== v45: narrow windows ===== */
+/* Player bar: track info on top, controls on the left with the buttons on the right, and a thin
+   progress bar (not draggable) along the bottom in place of the seek bar */
+.miniProg { display: none; }
+@media (max-width: 1050px) {
+  .player {
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas: "status status" "now now" "transport right" "prog prog";
+    row-gap: 0; column-gap: 12px; padding: 10px 14px 10px;
+  }
+  .statusBar { grid-area: status; }
+  .player .now { grid-area: now; }
+  .transport { grid-area: transport; margin-top: 8px; min-width: 0; }
+  .player .right { grid-area: right; margin-top: 8px; }
+  .transport .seekRow { display: none; }
+  .miniProg {
+    display: block; grid-area: prog; height: 3px; margin-top: 10px; border-radius: 3px; overflow: hidden;
+    background: color-mix(in srgb, var(--text) 16%, transparent); pointer-events: none;
+  }
+  #miniBar { display: block; height: 100%; width: 0; background: var(--accent); transition: width 0.25s linear; }
+  .player #nowArt { width: 44px; height: 44px; }
+  .player .main { width: 40px; height: 40px; margin-right: 4px; }
+  .player .right .ghost { width: 34px; height: 34px; }
+}
+@media (max-width: 720px) {
+  #lyricsBtn, #outputBtn, #plAddBtn, .barSep { display: none; }
+}
+
+/* Track lists respond to the space they have (which the queue panel also takes from) */
+#listView { container-type: inline-size; container-name: list; }
+.heroActions { flex-wrap: wrap; row-gap: 10px; }
+@container list (max-width: 760px) {
+  .tableHead, #list li { grid-template-columns: 34px minmax(0, 1fr) 46px; column-gap: 10px; }
+  .tableHead span:nth-child(3) { display: none; }
+  #list li { position: relative; }
+  /* the buttons float over the right of the row while you point at it, instead of taking a column */
+  #list li .acts {
+    position: absolute; right: 58px; top: 50%; transform: translateY(-50%);
+    padding: 2px 4px; border-radius: 999px; background: var(--elevated);
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35); visibility: hidden;
+  }
+  #list li:hover .acts, #list li:focus-within .acts { visibility: visible; }
+  #list li .acts .actGap { display: none; }
+}
+@container list (max-width: 460px) {
+  .tableHead, #list li { grid-template-columns: minmax(0, 1fr) 42px; }
+  #list li .num, .tableHead span:first-child { display: none; }
+  #list li .acts { right: 50px; }
+}

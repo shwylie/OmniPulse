@@ -73,6 +73,13 @@ const ICON_OPEN = "M19 19H5V5h7V3H5c-1.11 0-2 .9-2 2v14c0 1.1.89 2 2 2h14c1.1 0 
 const ICON_PLIST = "M14 10H2v2h12v-2zm0-4H2v2h12V6zm4 8v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zM2 16h8v-2H2v2z";
 const ICON_CLOSE = "M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z";
 
+// The seek bar, and the thin bar that stands in for it when the window is narrow
+function paintProgress(frac) {
+  const f = Math.max(0, Math.min(1, frac || 0));
+  $("seek").value = String(Math.round(f * 1000));
+  $("miniBar").style.width = (f * 100).toFixed(2) + "%";
+}
+
 function fmt(ms) {
   const s = isFinite(ms) ? Math.max(0, Math.floor(ms / 1000)) : 0;
   return Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0");
@@ -1222,7 +1229,7 @@ audio.addEventListener("error", () => {
 audio.addEventListener("timeupdate", () => {
   $("cur").textContent = fmt(audio.currentTime * 1000);
   const d = curDurMs();
-  if (d) $("seek").value = String(Math.round(Math.min(1, (audio.currentTime * 1000) / d) * 1000));
+  if (d) paintProgress((audio.currentTime * 1000) / d);
 });
 audio.addEventListener("loadedmetadata", () => {
   if (isFinite(audio.duration) && audio.duration) $("dur").textContent = fmt(audio.duration * 1000);   // streams of unknown length report Infinity

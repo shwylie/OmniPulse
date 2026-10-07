@@ -47,7 +47,7 @@ function sessionRestore() {
   refreshLikeUI();
   renderQueue();
   $("cur").textContent = fmt(s.posMs || 0);
-  if (t.duration) $("seek").value = String(Math.round(Math.min(1, (s.posMs || 0) / t.duration) * 1000));
+  if (t.duration) paintProgress((s.posMs || 0) / t.duration);
   return true;
 }
 

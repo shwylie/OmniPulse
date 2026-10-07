@@ -203,7 +203,7 @@ function paintSpotify() {
   const pos = Math.min(spotifyPos(), spState.dur || Infinity);
   $("cur").textContent = fmt(pos);
   if (spState.dur) {
-    $("seek").value = String(Math.round(Math.min(1, pos / spState.dur) * 1000));
+    paintProgress(pos / spState.dur);
     $("dur").textContent = fmt(spState.dur);
   }
   $("icoPlay").classList.toggle("off", spState.playing);
