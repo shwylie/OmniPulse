@@ -10,7 +10,7 @@
 //          \-> second delay -> second volume -> a stream -> an <audio> on the second device
 
 const OUT2_MAX_MS = 5000;
-const out2 = { delay: null, gain: null, dest: null, el: null, mainDelay: null };
+const out2 = { delay: null, gain: null, dest: null, el: null, mainDelay: null, mainGain: null };
 
 // The main path's own delay sits in the chain from the start (it's 0 unless the offset is negative)
 // The main output, too, can need an <audio> on the device: the audio context can't open every device
@@ -85,9 +85,16 @@ function out2Default() {
 function out2Wire(ctx, master) {
   const mainDelay = ctx.createDelay(OUT2_MAX_MS / 1000 + 0.1);
   mainDelay.delayTime.value = 0;
-  master.connect(mainDelay);
+  const mainGain = ctx.createGain();   // 0 while casting (js/cast.js): the sound plays on the device instead
+  master.connect(mainGain);
+  mainGain.connect(mainDelay);
+  out2.mainGain = mainGain;
   mainDelay.connect(ctx.destination);
   out2.mainDelay = mainDelay;
+}
+
+function out2MainMute(muted) {
+  if (out2.mainGain) out2.mainGain.gain.setTargetAtTime(muted ? 0 : 1, norm.ctx.currentTime, 0.05);
 }
 
 async function out2Apply() {

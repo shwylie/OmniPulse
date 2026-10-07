@@ -42,6 +42,7 @@ function extrasInit() {
   out2Init();
   ytInit();
   pluginsInit();
+  castInit();
   artistsInit();
   searchPageInit();
   trimsInit();

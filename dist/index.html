@@ -220,6 +220,9 @@
       <button id="outputBtn" class="ghost" aria-label="Choose output device" title="Output device">
         <svg viewBox="0 0 24 24"><path d="M4 6h18V4H4c-1.1 0-2 .9-2 2v11H0v3h14v-3H4V6zm19 2h-6c-.55 0-1 .45-1 1v10c0 .55.45 1 1 1h6c.55 0 1-.45 1-1V9c0-.55-.45-1-1-1zm-1 9h-4v-7h4v7z"/></svg>
       </button>
+      <button id="castBtn" class="ghost" aria-label="Cast to a device" title="Cast to a device">
+        <svg viewBox="0 0 24 24"><path d="M21 3H3c-1.1 0-2 .9-2 2v3h2V5h18v14h-7v2h7c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zM1 18v3h3c0-1.66-1.34-3-3-3zm0-4v2c2.76 0 5 2.24 5 5h2c0-3.87-3.13-7-7-7zm0-4v2c4.97 0 9 4.03 9 9h2c0-6.08-4.93-11-11-11z"/></svg>
+      </button>
       <button id="moreBtn" class="ghost" aria-label="More options for this track" title="More" hidden>
         <svg viewBox="0 0 24 24"><path d="M6 10a2 2 0 100 4 2 2 0 000-4zm6 0a2 2 0 100 4 2 2 0 000-4zm6 0a2 2 0 100 4 2 2 0 000-4z"/></svg>
       </button>
@@ -617,6 +620,20 @@
       <button id="namesBtn" class="soft" hidden>Show device names</button>
       <div class="row">
         <div>
+          <div class="lbl">Casting</div>
+          <div class="note">The cast button in the player bar plays on a Chromecast, a Nest speaker or display, or a TV or speaker with Cast built in, on the same network. Everything plays as it does here (EQ and loudness too), a moment later; this PC goes quiet meanwhile.</div>
+        </div>
+      </div>
+      <details class="sub" id="castSection">
+        <summary>Display on screens</summary>
+        <p class="note">Screens show Google's player (title, artist and cover). OmniPulse's own display, with play, pause and skip buttons on touch screens, needs a Cast app ID of your own: see cast-receiver/README.md in the project. Leave this empty for Google's player.</p>
+        <div class="row">
+          <div class="lbl">Cast app ID</div>
+          <input id="castApp" class="narrow" type="text" maxlength="12" placeholder="Google's player" spellcheck="false" autocomplete="off">
+        </div>
+      </details>
+      <div class="row">
+        <div>
           <div class="lbl">Volume control</div>
           <div class="note">Off: no volume slider, and the app plays at 100%. For setting the volume on Windows' mixer or a Stream Deck instead.</div>
         </div>
@@ -891,6 +908,7 @@
 <script src="js/audio.js"></script>
 <script src="js/loudness.js"></script>
 <script src="js/output2.js"></script>
+<script src="js/cast.js"></script>
 <script src="js/youtube.js"></script>
 <script src="js/plugins.js"></script>
 <script src="js/stats.js"></script>

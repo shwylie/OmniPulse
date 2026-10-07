@@ -222,6 +222,39 @@ async fn plugin_http(id: String, url: String, method: String, headers: Vec<(Stri
     plugins::http(&id, &url, &method, headers, body).await
 }
 
+// ---------- casting ----------
+#[tauri::command]
+fn cast_devices() -> Result<Vec<omnipulse_core::cast::Device>, String> {
+    omnipulse_core::cast::discover_start()?;
+    Ok(omnipulse_core::cast::devices())
+}
+#[tauri::command]
+async fn cast_start(id: String, app: Option<String>, meta: Value, events: Channel<Value>) -> Result<omnipulse_core::cast::Device, String> {
+    tokio::task::spawn_blocking(move || {
+        omnipulse_core::cast::start(&id, app, meta, std::sync::Arc::new(move |v| { let _ = events.send(v); }))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+// the app's sound: 16-bit stereo PCM as the request's body, its rate in a header
+#[tauri::command]
+fn cast_pcm(request: tauri::ipc::Request) {
+    if let tauri::ipc::InvokeBody::Raw(bytes) = request.body() {
+        let rate = request.headers().get("x-rate").and_then(|v| v.to_str().ok()).and_then(|v| v.parse().ok()).unwrap_or(48000);
+        omnipulse_core::cast::push_pcm(bytes, rate);
+    }
+}
+#[tauri::command]
+fn cast_track(meta: Value) { omnipulse_core::cast::track(meta) }
+#[tauri::command]
+fn cast_state(state: Value) { omnipulse_core::cast::state(state) }
+#[tauri::command]
+fn cast_reload() { omnipulse_core::cast::reload() }
+#[tauri::command]
+fn cast_volume(level: f64) { omnipulse_core::cast::set_volume(level) }
+#[tauri::command]
+fn cast_stop() { omnipulse_core::cast::stop() }
+
 // ---------- app settings ----------
 #[tauri::command]
 fn get_settings() -> Settings { omnipulse_core::load_settings() }
@@ -626,6 +659,7 @@ fn main() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            cast_devices, cast_start, cast_pcm, cast_track, cast_state, cast_reload, cast_volume, cast_stop,
             login, signed_in, logout, api_get, stream_url, get_settings, set_gpu, restart_app, open_url, set_like, set_follow, playlist_write,
             spotify_login, spotify_signed_in, spotify_logout, spotify_token, spotify_api,
             lyrics_get, presence_set, presence_clear,

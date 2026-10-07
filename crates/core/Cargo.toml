@@ -25,6 +25,8 @@ futures = "0.3"
 symphonia = { version = "0.5", default-features = false, features = ["aac", "alac", "flac", "isomp4", "mp3", "ogg", "pcm", "vorbis", "wav", "aiff"] }
 ebur128 = "0.1"
 zip = { version = "2", default-features = false, features = ["deflate"] }
+mdns-sd = "0.13"
+native-tls = "0.2"
 
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "process", "time"] }
