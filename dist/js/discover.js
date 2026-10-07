@@ -55,7 +55,9 @@ async function scDiscover(src) {
   if (src === "foryou") return scForYou();
   if (src === "similar") return scSimilar();
   if (src === "following") {
-    const list = await collectPages("/me/followings/tracks?" + SC_Q + "&limit=50", 2);
+    const list = await collectPages("/me/followings/tracks?" + SC_Q + "&limit=50", 2).catch((e) => {
+      throw new Error("Couldn't load new tracks from artists you follow (" + (e && e.message ? e.message : e) + ").");
+    });
     if (!list.length) throw new Error("Follow some artists on SoundCloud and their new tracks will show up here.");
     return { list: recFilter(list.filter((t) => !isMix(t))) };
   }
