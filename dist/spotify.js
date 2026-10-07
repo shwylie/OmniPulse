@@ -50,21 +50,48 @@ function syncSpotifySettings() {
   }
 }
 
+// Checks the account (Premium or not). If Spotify can't be asked right now (rate limited, offline),
+// you stay signed in as you were last time and it's asked again in a minute; only Spotify turning the
+// sign-in down (a revoked or expired refresh token) needs a new sign-in.
+let spotifyCheckTimer = null;
+const spRevoked = (e) => /invalid_grant|invalid_client|revoked|connect again|Not connected/i.test(String(e));
+
 async function spotifyCheck() {
+  clearTimeout(spotifyCheckTimer);
   let ok = false;
+  let note = "";
   if (await invoke("spotify_signed_in")) {
     try {
       const me = await spApi("GET", "/me");
       ok = me.product === "premium";
       spotifyName = me.display_name || me.id || "";
       spotifyFree = !ok;
+      prefs.spAccount = { product: me.product || "", name: spotifyName };
+      savePrefs();
     } catch (e) {
-      $("spStatus").textContent = "Could not check your Spotify account: " + e;
+      const last = prefs.spAccount;
+      if (spRevoked(e)) {
+        spotifyFree = false;
+        note = "Spotify ended the sign-in. Sign in again.";
+      } else if (!last) {
+        // nothing known yet: hidden until the next try, which brings it back by itself
+        spotifyFree = false;
+        note = "Could not check your Spotify account (" + e + "): trying again in a minute.";
+        spotifyCheckTimer = setTimeout(spotifyCheck, 60000);
+      } else {
+        // still signed in, as last time; ask again in a minute
+        ok = last.product === "premium";
+        spotifyName = last.name || "";
+        spotifyFree = !ok;
+        note = (/limiting requests|429/i.test(String(e)) ? "Spotify is busy right now" : "Couldn't reach Spotify") + ": checking again in a minute.";
+        spotifyCheckTimer = setTimeout(spotifyCheck, 60000);
+      }
     }
   }
   spotifyPremium = ok;
   if (typeof renderPlatChips === "function") renderPlatChips();
   syncSpotifySettings();
+  if (note) $("spStatus").textContent = note;
   return ok;
 }
 

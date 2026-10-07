@@ -310,13 +310,11 @@ mod tests {
         w.finish().unwrap().into_inner()
     }
 
-    // these tests share the data folder and the progress, so they take turns
-    static SERIAL: Mutex<()> = Mutex::new(());
 
     // The crash: setting up from a thread with no async runtime (where Tauri runs plain commands)
     #[test]
     fn starts_from_a_thread_without_a_runtime() {
-        let _turn = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+        let _turn = crate::TEST_ENV.lock().unwrap_or_else(|e| e.into_inner());
         let base = serve(vec![]); // a GitHub with nothing on it: setup fails, but cleanly
         let src = Sources {
             ytdlp: format!("{base}/yt-dlp.exe"),
@@ -337,7 +335,7 @@ mod tests {
     #[tokio::test]
     #[allow(clippy::await_holding_lock)] // only makes the tests take turns; this one runs on one thread
     async fn downloads_checks_and_unpacks() {
-        let _turn = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+        let _turn = crate::TEST_ENV.lock().unwrap_or_else(|e| e.into_inner());
         let tmp = std::env::temp_dir().join(format!("omnipulse-tools-{}", std::process::id()));
         std::env::set_var("APPDATA", &tmp);
         let exe = b"MZ fake yt-dlp".to_vec();

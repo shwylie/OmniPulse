@@ -18,6 +18,10 @@ pub mod youtube;
 pub mod yt_stream;
 
 use serde::{Deserialize, Serialize};
+
+/// Tests that point APPDATA at a folder of their own take turns
+#[cfg(test)]
+pub(crate) static TEST_ENV: std::sync::Mutex<()> = std::sync::Mutex::new(());
 use std::{fs, path::PathBuf};
 
 // ---------- config and token storage ----------

@@ -51,6 +51,60 @@ pub async fn sp_token_request(params: &[(&str, &str)]) -> Result<(String, Option
     Ok((access, refresh, now_secs() + expires_in))
 }
 
+// ---------- staying signed in, and within Spotify's rate limits ----------
+// Spotify answers too many requests with 429 and a Retry-After; that's waited out (and other requests
+// hold off meanwhile) rather than treated as an error, and never as being signed out. Refreshing the
+// token happens one request at a time: Spotify may hand out a new refresh token each time, so racing
+// refreshes could leave a stale one saved.
+static REFRESHING: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+static GATE: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(4); // requests in flight at once
+static COOL_UNTIL: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0); // unix secs
+const WAIT_AT_MOST: u64 = 10; // seconds; longer than this and the request says so instead
+
+#[cfg(test)]
+static API_BASE: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+
+fn api_base() -> String {
+    #[cfg(test)]
+    if let Some(b) = API_BASE.lock().ok().and_then(|g| g.clone()) {
+        return b;
+    }
+    "https://api.spotify.com/v1".to_string()
+}
+
+/// Prefix of the error a rate limit gives, so the app can tell it from a real failure
+pub const RATE_LIMITED: &str = "Spotify is limiting requests";
+
+fn retry_after(res: &reqwest::Response) -> u64 {
+    res.headers().get("retry-after").and_then(|v| v.to_str().ok()).and_then(|s| s.trim().parse().ok()).unwrap_or(5).clamp(1, 3600)
+}
+
+// Waits out a rate limit if it's short; errors if it isn't
+async fn cool_down() -> Result<(), String> {
+    let until = COOL_UNTIL.load(std::sync::atomic::Ordering::SeqCst);
+    let now = now_secs();
+    if until > now {
+        let wait = until - now;
+        if wait > WAIT_AT_MOST {
+            return Err(format!("{RATE_LIMITED} right now: try again in {wait} s."));
+        }
+        tokio::time::sleep(std::time::Duration::from_secs(wait)).await;
+    }
+    Ok(())
+}
+
+/// A token that's good for at least a minute (refreshed if not, by one request at a time); with
+/// `rejected`, the token Spotify just refused is replaced, unless someone else replaced it meanwhile
+async fn usable_token(cfg: &Config, rejected: Option<&str>) -> Result<SpTokens, String> {
+    let _one_at_a_time = REFRESHING.lock().await;
+    let t = load_sp_tokens().ok_or("Not connected to Spotify")?;
+    let stale = match rejected {
+        Some(old) => t.access_token == old,
+        None => t.expires_at < now_secs() + 60,
+    };
+    if stale { sp_refresh(cfg, &t).await } else { Ok(t) }
+}
+
 pub async fn sp_refresh(cfg: &Config, old: &SpTokens) -> Result<SpTokens, String> {
     let rt = old
         .refresh_token
@@ -198,11 +252,7 @@ pub fn spotify_logout() -> Result<(), String> {
 // The Spotify player in the page asks for a token whenever it needs one
 pub async fn spotify_token() -> Result<String, String> {
     let cfg = load_config()?;
-    let mut t = load_sp_tokens().ok_or("Not connected to Spotify")?;
-    if t.expires_at < now_secs() + 120 {
-        t = sp_refresh(&cfg, &t).await?;
-    }
-    Ok(t.access_token)
+    Ok(usable_token(&cfg, None).await?.access_token)
 }
 
 pub async fn spotify_api(method: String, path: String, body: Option<Value>) -> Result<Value, String> {
@@ -219,12 +269,9 @@ pub async fn spotify_api(method: String, path: String, body: Option<Value>) -> R
         _ => return Err("That method is not allowed".to_string()),
     };
     let cfg = load_config()?;
-    let mut t = load_sp_tokens().ok_or("Not connected to Spotify")?;
-    if t.expires_at < now_secs() + 60 {
-        t = sp_refresh(&cfg, &t).await?;
-    }
+    let mut t = usable_token(&cfg, None).await?;
 
-    let url = format!("https://api.spotify.com/v1{path}");
+    let url = format!("{}{path}", api_base());
     let client = reqwest::Client::new();
     let send = |token: String| {
         let mut rb = client.request(m.clone(), &url).bearer_auth(token);
@@ -234,11 +281,26 @@ pub async fn spotify_api(method: String, path: String, body: Option<Value>) -> R
         rb.send()
     };
 
-    let mut res = send(t.access_token.clone()).await.map_err(|e| e.to_string())?;
-    if res.status().as_u16() == 401 {
-        t = sp_refresh(&cfg, &t).await?;
-        res = send(t.access_token.clone()).await.map_err(|e| e.to_string())?;
-    }
+    let mut tries = 0;
+    let res = loop {
+        cool_down().await?;
+        let res = {
+            let _slot = GATE.acquire().await.map_err(|e| e.to_string())?;
+            send(t.access_token.clone()).await.map_err(|e| e.to_string())?
+        };
+        tries += 1;
+        match res.status().as_u16() {
+            401 if tries < 3 => t = usable_token(&cfg, Some(&t.access_token)).await?,
+            429 => {
+                let wait = retry_after(&res);
+                COOL_UNTIL.fetch_max(now_secs() + wait, std::sync::atomic::Ordering::SeqCst);
+                if wait > WAIT_AT_MOST || tries >= 3 {
+                    return Err(format!("{RATE_LIMITED} right now: try again in {wait} s."));
+                }
+            }
+            _ => break res,
+        }
+    };
     let status = res.status();
     let text = res.text().await.map_err(|e| e.to_string())?;
     if !status.is_success() {
@@ -248,4 +310,62 @@ pub async fn spotify_api(method: String, path: String, body: Option<Value>) -> R
         return Ok(Value::Null);
     }
     serde_json::from_str(&text).map_err(|e| format!("Bad JSON from Spotify: {e}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
+
+    #[tokio::test]
+    #[allow(clippy::await_holding_lock)] // only makes the tests take turns
+    async fn waits_out_short_rate_limits_and_refuses_long_ones() {
+        let _turn = crate::TEST_ENV.lock().unwrap_or_else(|e| e.into_inner());
+        let tmp = std::env::temp_dir().join(format!("omnipulse-sp-{}", std::process::id()));
+        std::env::set_var("APPDATA", &tmp);
+        let dir = data_dir().unwrap();
+        std::fs::write(dir.join("config.json"), r#"{"client_id":"a","client_secret":"b","spotify_client_id":"c"}"#).unwrap();
+        save_sp_tokens(&SpTokens { access_token: "tok".into(), refresh_token: Some("r".into()), expires_at: now_secs() + 3600 }).unwrap();
+
+        // a fake Spotify: 429 (retry after 1 s), then 200, then 429 (retry after 60 s)
+        let server = tiny_http::Server::http("127.0.0.1:0").unwrap();
+        let port = server.server_addr().to_ip().unwrap().port();
+        let hits = Arc::new(AtomicUsize::new(0));
+        let seen = hits.clone();
+        std::thread::spawn(move || {
+            for req in server.incoming_requests() {
+                let n = seen.fetch_add(1, Ordering::SeqCst);
+                let (code, after, body) = match n { 0 => (429, "1", "{}"), 1 => (200, "", r#"{"id":"me"}"#), _ => (429, "60", "{}") };
+                let mut res = tiny_http::Response::from_string(body).with_status_code(code);
+                if !after.is_empty() {
+                    res.add_header(tiny_http::Header::from_bytes("Retry-After", after).unwrap());
+                }
+                let _ = req.respond(res);
+            }
+        });
+        *API_BASE.lock().unwrap() = Some(format!("http://127.0.0.1:{port}"));
+        COOL_UNTIL.store(0, std::sync::atomic::Ordering::SeqCst);
+
+        // a short limit is waited out
+        let t0 = std::time::Instant::now();
+        let v = spotify_api("GET".into(), "/me".into(), None).await.unwrap();
+        assert_eq!(v["id"], "me");
+        assert!(t0.elapsed() >= std::time::Duration::from_millis(900));
+        assert_eq!(hits.load(Ordering::SeqCst), 2);
+        // a long one is reported as a rate limit (not a sign-out)...
+        let e = spotify_api("GET".into(), "/me".into(), None).await.unwrap_err();
+        assert!(e.starts_with(RATE_LIMITED) && e.contains("60 s"), "{e}");
+        assert_eq!(hits.load(Ordering::SeqCst), 3);
+        // ...and nothing more is sent to Spotify while it lasts
+        let e = spotify_api("GET".into(), "/me".into(), None).await.unwrap_err();
+        assert!(e.starts_with(RATE_LIMITED), "{e}");
+        assert_eq!(hits.load(Ordering::SeqCst), 3);
+        // the sign-in is untouched
+        assert_eq!(load_sp_tokens().unwrap().access_token, "tok");
+
+        COOL_UNTIL.store(0, std::sync::atomic::Ordering::SeqCst);
+        *API_BASE.lock().unwrap() = None;
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
 }
