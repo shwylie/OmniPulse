@@ -349,3 +349,39 @@ pub async fn spe_playlist(uri: String) -> Result<Value, String> {
         .await;
     Ok(Value::Array(tracks))
 }
+
+// ---------- Spotify's own mixes ----------
+// Daily Mixes and the rest of "Made For You" are hidden from developer apps' Web API tokens
+// (since November 2024). The playback engine signs in as Spotify's own app, so its token can
+// read them. Only GET requests, only to api.spotify.com.
+#[tauri::command]
+pub async fn spe_web_get(path: String) -> Result<Value, String> {
+    if !path.starts_with('/') || path.contains("://") {
+        return Err("bad path".into());
+    }
+    let session = {
+        let guard = engine().await?;
+        guard.as_ref().unwrap().session.clone()
+    };
+    let token = match session.login5().auth_token().await {
+        Ok(t) => t.access_token,
+        Err(_) => session
+            .token_provider()
+            .get_token("playlist-read-private,user-read-private,user-library-read")
+            .await
+            .map_err(|e| format!("Spotify playback token: {e}"))?
+            .access_token,
+    };
+    let res = reqwest::Client::new()
+        .get(format!("https://api.spotify.com/v1{path}"))
+        .bearer_auth(token)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    let status = res.status();
+    let body = res.text().await.map_err(|e| e.to_string())?;
+    if !status.is_success() {
+        return Err(format!("Spotify said {}: {}", status.as_u16(), body.chars().take(200).collect::<String>()));
+    }
+    serde_json::from_str(&body).map_err(|e| e.to_string())
+}

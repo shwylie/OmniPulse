@@ -2260,7 +2260,7 @@ fn main() {
             widget_start, widget_stop, widget_update,
             local_folders, local_set_folders, local_scan, local_status, local_tracks, local_server,
             requests_start, requests_stop, request_result,
-            spe_signed_in, spe_login, spe_logout, spe_attach, spe_play, spe_pause, spe_resume, spe_seek, spe_stop, spe_played, spe_playlist
+            spe_signed_in, spe_login, spe_logout, spe_attach, spe_play, spe_pause, spe_resume, spe_seek, spe_stop, spe_played, spe_playlist, spe_web_get
         ])
         .run(tauri::generate_context!())
         .expect("error while running app");

@@ -1,10 +1,8 @@
-// Discover, as a feed of shelves: Daily Mixes and artist stations built from your likes, more of
-// what you like, new tracks from artists you follow, and genres. Every platform that's switched
-// on takes part; each tile shows where it comes from inside its cover. Tiles open as a playlist
-// page (built when first opened), or play straight away from their play button.
-//
-// Spotify doesn't let apps like this one read its own Daily Mixes or "Made for you" playlists
-// (since November 2024), and SoundCloud's stations aren't in its API, so these are made here.
+// Discover, as a feed of shelves: Spotify's own Daily Mixes and mixes, the app's cross-platform
+// Your Mixes and artist stations (seeded by what you like on SoundCloud), more of what you like,
+// new tracks from artists you follow, and genres. Each tile shows inside its cover which platforms
+// it draws on. Tiles open as a playlist page (built when first opened), or play from their button.
+// Spotify's mixes are read with the playback engine's token (developer apps can't see them).
 
 const GENRES = ["Electronic", "House", "Techno", "Dubstep", "Drum & Bass", "Hip-hop & Rap", "Pop", "Indie", "R&B", "Ambient", "Lo-fi", "Rock"];
 const MIX_BANDS = ["#3ee0d0", "#f5e663", "#ff5a4e", "#f28fd6", "#9ad94b", "#ffae4a"];   // Daily Mix label colours
@@ -16,23 +14,40 @@ const dedupeTracks = (list) => { const seen = new Set(); return list.filter((t) 
 const freshPick = (t) => !isMix(t) && langOk(t) && !hiddenRecs.has(String(t.id));
 const hueOf = (s) => [...String(s)].reduce((h, c) => (h * 31 + c.charCodeAt(0)) % 360, 7);
 
-// ---------- your top artists, from your likes and what you play ----------
+// ---------- your top artists, from your likes on every platform and what you play ----------
+// One entry per artist, whichever platforms you like them on, so a mix can draw on all of them.
+const artistKey = (s) => String(s || "").toLowerCase().replace(/[^a-z0-9À-ɏ]+/g, "");
+
 function feedArtists(plats) {
   const plays = new Map();
-  loadStats().forEach((x) => { const k = (x.artist || "").toLowerCase(); plays.set(k, (plays.get(k) || 0) + 1); });
+  loadStats().forEach((x) => { const k = artistKey(x.artist); plays.set(k, (plays.get(k) || 0) + 1); });
   const by = new Map();
   const add = (plat, t) => {
     const name = plat === "spotify" ? firstArtist(t) : artistName(t);
-    if (!name || isMix(t)) return;
-    const k = plat + "|" + name.toLowerCase();
-    if (!by.has(k)) by.set(k, { plat, name, tracks: [] });
-    by.get(k).tracks.push(t);
+    const k = artistKey(name);
+    if (!k || isMix(t)) return;
+    if (!by.has(k)) by.set(k, { key: k, name, liked: { soundcloud: [], spotify: [] } });
+    by.get(k).liked[plat].push(t);
   };
   if (plats.includes("soundcloud")) likedTracks.filter(isLikedTrack).forEach((t) => add("soundcloud", t));
   if (plats.includes("spotify")) (spLikedCache || []).forEach((t) => add("spotify", t));
-  const all = [...by.values()].map((a) => Object.assign(a, { score: a.tracks.length * 2 + (plays.get(a.name.toLowerCase()) || 0) }));
-  // each platform's artists by how much you like them, taking turns between platforms
-  return interleave(plats.map((p) => all.filter((a) => a.plat === p).sort((x, y) => y.score - x.score)));
+  const local = plats.includes("local") ? localTracks : [];
+  return [...by.values()]
+    // Spotify makes its own mixes now, so only artists you like on SoundCloud seed the app's ones
+    .filter((a) => a.liked.soundcloud.length)
+    .map((a) => Object.assign(a, {
+      files: local.filter((t) => artistKey(artistName(t)) === a.key),
+      score: (a.liked.soundcloud.length + a.liked.spotify.length) * 2 + (plays.get(a.key) || 0),
+    }))
+    .sort((x, y) => y.score - x.score);
+}
+
+// Which platforms a mix of these artists will draw on
+function crewPlats(crew, plats) {
+  const out = ["soundcloud"];
+  if (plats.includes("spotify")) out.push("spotify");
+  if (crew.some((a) => a.files.length)) out.push("local");
+  return out;
 }
 
 // ---------- building a mix's tracks (when it's first opened or played) ----------
@@ -47,24 +62,26 @@ async function spSimilarTracks(name, n) {
   return (await Promise.all(names.map(spArtistTracks))).flat();
 }
 
-// A Daily Mix: the artists' tracks you like, woven with new ones in the same vein
-async function buildDailyMix(artists) {
-  const plat = artists[0].plat;
-  const liked = artists.flatMap((a) => a.tracks);
-  const familiar = shuffledCopy(liked).slice(0, 18);
-  let fresh = plat === "spotify"
-    ? (await spSimilarTracks(artists[0].name, 3)).concat((await Promise.all(artists.map((a) => spArtistTracks(a.name)))).flat())
-    : await scRelatedTo(liked, 4);
-  fresh = shuffledCopy(fresh.filter((t) => freshPick(t) && !isLikedTrack(t)));
-  return dedupeTracks(interleave([familiar, fresh])).slice(0, 60);
+// New tracks in the vein of these artists, from every platform that's on
+async function freshFor(crew, plats) {
+  const sc = scRelatedTo(crew.flatMap((a) => a.liked.soundcloud), 4);
+  const sp = plats.includes("spotify")
+    ? Promise.all([spSimilarTracks(crew[0].name, 3), ...crew.map((a) => spArtistTracks(a.name))]).then((l) => l.flat())
+    : Promise.resolve([]);
+  const [a, b] = await Promise.all([sc, sp]);
+  return interleave([shuffledCopy(a), shuffledCopy(b)]).filter((t) => freshPick(t) && !isLikedTrack(t));
+}
+
+// Your Mix: what you like by these artists, on any platform (and your files), woven with new ones
+async function buildYourMix(crew, plats) {
+  const familiar = shuffledCopy(crew.flatMap((a) => a.liked.soundcloud.concat(a.liked.spotify, a.files))).slice(0, 18);
+  return dedupeTracks(interleave([familiar, await freshFor(crew, plats)])).slice(0, 60);
 }
 
 // An artist station: that sound, mostly from other artists
-async function buildStation(a) {
-  const fresh = a.plat === "spotify"
-    ? (await spSimilarTracks(a.name, 5)).concat(await spArtistTracks(a.name))
-    : await scRelatedTo(a.tracks, 4);
-  return dedupeTracks(shuffledCopy(a.tracks).slice(0, 4).concat(shuffledCopy(fresh.filter(freshPick)))).slice(0, 60);
+async function buildStation(a, plats) {
+  const own = shuffledCopy(a.liked.soundcloud.concat(a.liked.spotify, a.files)).slice(0, 4);
+  return dedupeTracks(own.concat(await freshFor([a], plats))).slice(0, 60);
 }
 
 // A genre, from every active platform
@@ -78,31 +95,42 @@ function makeMix(o) {
   return Object.assign({ source: "mix", tracks: null }, o);
 }
 
+// One of Spotify's own playlists (a Daily Mix, Discover Weekly, ...) as a tile
+function spotifyTile(p) {
+  const imgs = p.images || [];
+  return {
+    kind: "playlist", plats: ["spotify"], name: p.name, art: imgs.length ? imgs[0].url : "",
+    sub: (p.description || "Made by Spotify").replace(/<[^>]+>/g, ""),
+    mix: makeMix({ id: "mix:spotify:" + p.id, title: p.name, desc: (p.description || "Made for you by Spotify.").replace(/<[^>]+>/g, ""),
+      build: () => spotifyPlaylistTracks(p.id, 200) }),
+  };
+}
+
 async function buildFeed(plats) {
   if (plats.includes("soundcloud") || plats.includes("spotify")) await loadLikesFor(plats).catch(() => null);
   const artists = feedArtists(plats);
+  const fromSpotify = plats.includes("spotify") ? await spotifyMadeForYou().catch(() => ({ daily: [], other: [] })) : { daily: [], other: [] };
   const shelves = [];
 
-  // Made for you: Daily Mix 01-06, each one of your top artists plus two more from the same platform
+  // Made for you: Spotify's Daily Mixes, then Your Mix 01-06 (one of your top artists plus two more)
   const mains = artists.slice(0, 6);
-  if (mains.length) {
-    shelves.push({
-      title: "Made for you",
-      tiles: mains.map((a, i) => {
-        const same = artists.filter((x) => x.plat === a.plat && !mains.includes(x));
-        const crew = [a].concat(same.slice(i * 2, i * 2 + 2));
-        const n = String(i + 1).padStart(2, "0");
-        return {
-          kind: "daily", band: MIX_BANDS[i % MIX_BANDS.length], number: n, plats: [a.plat],
-          art: artUrl(a.tracks[0], "t500x500"),
-          sub: crew.map((x) => x.name).join(", ") + " and more",
-          mix: makeMix({ id: "mix:daily:" + a.plat + ":" + a.name, title: "Daily Mix " + n,
-            desc: crew.map((x) => x.name).join(", ") + " and more: tracks you like, mixed with new ones.",
-            build: () => buildDailyMix(crew) }),
-        };
-      }),
-    });
-  }
+  const yours = mains.map((a, i) => {
+    const crew = [a].concat(artists.filter((x) => !mains.includes(x)).slice(i * 2, i * 2 + 2));
+    const n = String(i + 1).padStart(2, "0");
+    const who = crew.map((x) => x.name).join(", ") + " and more";
+    return {
+      kind: "daily", band: MIX_BANDS[i % MIX_BANDS.length], number: n, plats: crewPlats(crew, plats),
+      art: artUrl(a.liked.soundcloud[0], "t500x500"), sub: who,
+      mix: makeMix({ id: "mix:yours:" + a.key, title: "Your Mix " + n,
+        desc: who + ": tracks you like, mixed with new ones from " + crewPlats(crew, plats).map((p) => PLATFORMS[p].name).join(", ") + ".",
+        build: () => buildYourMix(crew, plats) }),
+    };
+  });
+  const madeForYou = fromSpotify.daily.map(spotifyTile).concat(yours);
+  if (madeForYou.length) shelves.push({ title: "Made for you", tiles: madeForYou });
+
+  // Spotify's other mixes: Discover Weekly, Release Radar, your top mixes...
+  if (fromSpotify.other.length) shelves.push({ title: "More mixes from Spotify", tiles: fromSpotify.other.map(spotifyTile) });
 
   // Artist stations: the next artists you like, a little shuffled each time
   const stationArtists = shuffledCopy(artists.slice(6, 30)).slice(0, 8);
@@ -110,10 +138,10 @@ async function buildFeed(plats) {
     shelves.push({
       title: "Artist stations",
       tiles: stationArtists.map((a) => ({
-        kind: "station", plats: [a.plat], art: artUrl(a.tracks[0], "t500x500"), name: a.name, hue: hueOf(a.name),
+        kind: "station", plats: crewPlats([a], plats), art: artUrl(a.liked.soundcloud[0], "t500x500"), name: a.name, hue: hueOf(a.name),
         sub: "Artist station",
-        mix: makeMix({ id: "mix:station:" + a.plat + ":" + a.name, title: a.name + " station",
-          desc: "Music like " + a.name + ".", build: () => buildStation(a) }),
+        mix: makeMix({ id: "mix:station:" + a.key, title: a.name + " station",
+          desc: "Music like " + a.name + ".", build: () => buildStation(a, plats) }),
       })),
     });
   }
@@ -167,7 +195,7 @@ function tileEl(tile) {
     if (tile.art) { const img = el("img"); img.alt = ""; img.loading = "lazy"; img.src = tile.art; art.append(img); }
     const band = el("span", "tileBand");
     band.style.setProperty("--band", tile.band);
-    band.append(el("span", "", "Daily Mix"), el("b", "", tile.number));
+    band.append(el("span", "", "Your Mix"), el("b", "", tile.number));
     art.append(band);
   } else if (tile.kind === "station") {
     art.style.setProperty("--hue", tile.hue);
@@ -175,6 +203,8 @@ function tileEl(tile) {
     const lab = el("span", "tileLabel");
     lab.append(el("i", "", "Station"), el("span", "", tile.name));
     art.append(lab);
+  } else if (tile.kind === "playlist") {
+    if (tile.art) { const img = el("img"); img.alt = ""; img.loading = "lazy"; img.src = tile.art; art.append(img); }
   } else if (tile.kind === "genre") {
     art.style.setProperty("--hue", tile.hue);
     art.append(el("span", "tileGenre", tile.name));
@@ -294,13 +324,15 @@ async function openFeed(fresh) {
   if (tok !== loadToken) return;
   feedCache = { key, shelves };
   paintFeed(shelves);
+  // These finish even if you open a tile meanwhile, so the feed is complete when you come back
   const later = await trackShelves(plats);
-  if (tok !== loadToken) return;
+  if (!feedCache || feedCache.shelves !== shelves) return;   // refreshed since
   // "More of what you like" goes second, the rest at the end
   if (later.length) shelves.splice(Math.min(1, shelves.length), 0, later[0]);
   shelves.push(...later.slice(1));
+  if (view !== "discover") return;
   paintFeed(shelves);
-  say(shelves.length ? "" : "Like some tracks on SoundCloud or Spotify, and Discover will fill up with music for you.");
+  if (tok === loadToken) say(shelves.length ? "" : "Like some tracks on SoundCloud or Spotify, and Discover will fill up with music for you.");
 }
 
 function feedInit() {

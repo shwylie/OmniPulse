@@ -326,6 +326,35 @@ async function spotifyLikedTracks(max) {
   return out;
 }
 
+// ---------- Spotify's own mixes (Daily Mixes, Discover Weekly, ...) ----------
+// Developer apps' Web API tokens can't see these, so they're read with the playback engine's
+// token (spe_web_get): the "Made For You" category, or failing that, a search for your Daily Mixes.
+const MADE_FOR_YOU = "0JQ5DAt0tbjZptfcdMSKl3";
+
+async function spotifyMadeForYou() {
+  const keep = (list) => (list || []).filter((p) => p && p.id && p.owner && p.owner.id === "spotify");
+  let found = [];
+  try {
+    const d = await speCall("spe_web_get", { path: "/browse/categories/" + MADE_FOR_YOU + "/playlists?limit=50" });
+    found = keep(d.playlists && d.playlists.items);
+  } catch (e) {
+    // not offered any more: try a search instead
+  }
+  if (!found.some((p) => /^daily mix \d+$/i.test(p.name))) {
+    try {
+      const d = await speCall("spe_web_get", { path: "/search?type=playlist&limit=50&q=" + encodeURIComponent("Daily Mix") });
+      const seen = new Set(found.map((p) => p.id));
+      found = found.concat(keep(d.playlists && d.playlists.items).filter((p) => /^daily mix \d+$/i.test(p.name) && !seen.has(p.id)));
+    } catch (e) {
+      // offline, or playback isn't signed in
+    }
+  }
+  const num = (p) => Number((p.name.match(/\d+/) || [99])[0]);
+  const daily = found.filter((p) => /^daily mix \d+$/i.test(p.name)).sort((a, b) => num(a) - num(b));
+  const other = found.filter((p) => !daily.includes(p));
+  return { daily, other };
+}
+
 // ---------- likes (your Spotify library) ----------
 // Spotify replaced its track-specific endpoints with /me/library in February 2026: it takes URIs.
 async function spotifySetLiked(t, on) {

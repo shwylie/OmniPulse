@@ -270,3 +270,4 @@ hides them; tracks from albums are never hidden.
 - Settings reorganised into Look, Accounts, Library, Sound, Streaming and App, with shorter wording and
   the same row design throughout. Spotify shows the account you're signed in as.
 - Spotify playlists you follow (and Spotify's own) open again. Since February 2026 the Web API only lists the tracks of playlists you own, so the others are read through the Spotify playback engine (librespot), up to 1000 tracks.
+- Discover shows Spotify's own Daily Mixes (and Discover Weekly, Release Radar and your top mixes, under "More mixes from Spotify"), read with the playback engine's token. The app no longer builds Spotify-only mixes: its "Your Mix" and station tiles are seeded by what you like on SoundCloud and draw on every platform (your likes anywhere, your files, new tracks from SoundCloud and Spotify).
