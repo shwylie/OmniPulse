@@ -269,3 +269,4 @@ hides them; tracks from albums are never hidden.
   whole feature can be switched off in Settings > Library.
 - Settings reorganised into Look, Accounts, Library, Sound, Streaming and App, with shorter wording and
   the same row design throughout. Spotify shows the account you're signed in as.
+- Spotify playlists you follow (and Spotify's own) open again. Since February 2026 the Web API only lists the tracks of playlists you own, so the others are read through the Spotify playback engine (librespot), up to 1000 tracks.

@@ -390,24 +390,36 @@ async function spotifyPlaylists() {
   return out;
 }
 
+// Since February 2026 the Web API only lists the tracks of playlists you own; for anyone else's
+// (and Spotify's own) it returns no items. Those are read through the playback engine instead.
 async function spotifyPlaylistTracks(id, max) {
   const out = [];
   let offset = 0;
+  let refused = null;
   while (out.length < (max || 500)) {
     let data;
     try {
-      data = await spApi("GET", "/playlists/" + id + "/tracks?limit=50&offset=" + offset);
+      data = await spApi("GET", "/playlists/" + id + "/items?limit=50&offset=" + offset);
     } catch (e) {
-      data = await spApi("GET", "/playlists/" + id + "/items?limit=50&offset=" + offset);   // newer name for the same list
+      refused = e;
+      break;
     }
     const raw = data.items || [];
-    raw.map((x) => x.track || x.item)
+    raw.map((x) => x.item || x.track)
       .filter((x) => x && x.id && (!x.type || x.type === "track"))   // skip podcast episodes
       .forEach((x) => out.push(spTrack(x)));
     if (!data.next || !raw.length) break;
     offset += 50;
   }
-  return out;
+  if (out.length) return out;
+  try {
+    say("Opening this playlist through Spotify playback...");
+    const list = await speCall("spe_playlist", { uri: "spotify:playlist:" + id });
+    say("");
+    return list.slice(0, max || 1000).map(spTrack);
+  } catch (e) {
+    throw refused || e;
+  }
 }
 
 // ---------- album tracks ----------

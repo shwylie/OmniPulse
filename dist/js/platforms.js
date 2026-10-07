@@ -366,7 +366,7 @@ async function loadPlatformPlaylist(p) {
     nextHref = "";
     render();
     say(/40[13]/.test(String(e))
-      ? "Spotify wouldn't share this playlist with the app. Spotify limits new apps to playlists you own or follow, and some playlists are blocked."
+      ? "Couldn't open this playlist. Check Spotify playback is signed in (Settings > Accounts > Spotify options)."
       : String(e));
   }
 }
