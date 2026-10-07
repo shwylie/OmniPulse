@@ -255,3 +255,4 @@ hides them; tracks from albums are never hidden.
   platform, including local files. Favourites are kept on this PC and listed on the Favourites page.
 - Cover art on playlist, album and Favourites pages: an album shows its cover; a playlist shows up to four
   different covers from its tracks in one square, split diagonally (two halves, a "Y" of three, an "X" of four).
+- Search left the sidebar: click the magnifying glass in the search bar for the Search page (or to search for what you typed).

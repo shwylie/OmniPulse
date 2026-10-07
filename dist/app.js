@@ -179,7 +179,6 @@ function showView(v) {
   if (!isNow) $("langChip").hidden = v !== "discover";
   $("navLikes").classList.toggle("active", v === "likes");
   $("navFavourites").classList.toggle("active", v === "favourites");
-  $("navSearch").classList.toggle("active", v === "search");
   document.querySelectorAll(".plItem").forEach((b) => {
     b.classList.toggle("active", v === "playlist" && currentPlaylist && String(b.dataset.id) === String(currentPlaylist.id));
   });
@@ -645,7 +644,11 @@ function openSearchPage() {
   $("bigQ").value = "";
   $("bigQ").focus();
 }
-$("navSearch").addEventListener("click", openSearchPage);
+// The magnifying glass in the search bar opens the Search page (or searches, if something is typed)
+$("searchGo").addEventListener("click", () => {
+  const q = $("q").value.trim();
+  if (q) openSearch(q); else openSearchPage();
+});
 $("bigSearchForm").addEventListener("submit", (e) => {
   e.preventDefault();
   const q = $("bigQ").value.trim();
