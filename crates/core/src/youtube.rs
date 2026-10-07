@@ -275,6 +275,40 @@ pub async fn radio(video_id: &str) -> Result<Vec<YtTrack>, String> {
 
 // ---------- artists, albums and playlists ----------
 const ARTISTS: &str = "EgWKAQIgAWoMEA4QChADEAQQCRAF";
+// community playlists: the ones people made (YouTube Music's own "featured" ones are rarely on topic)
+const PLAYLISTS: &str = "EgeKAQQoAEABagwQDhAKEAMQBBAJEAU=";
+
+#[derive(Serialize, Clone, Debug, PartialEq, Default)]
+pub struct YtPlaylist {
+    /// "VL..."
+    pub id: String,
+    pub title: String,
+    pub author: String,
+    pub thumb: String,
+}
+
+/// A playlist row in search results
+pub fn parse_playlist_item(it: &Value) -> Option<YtPlaylist> {
+    let mut ids = Vec::new();
+    find_all(&it["navigationEndpoint"], "browseId", &mut ids);
+    let id = ids.iter().filter_map(|x| x.as_str()).find(|x| x.starts_with("VL"))?;
+    let cols = it["flexColumns"].as_array()?;
+    let col = |i: usize| cols.get(i).map(|c| text(&c["musicResponsiveListItemFlexColumnRenderer"]["text"])).unwrap_or_default();
+    let author = col(1).split(" • ").next().unwrap_or("").to_string();
+    Some(YtPlaylist { id: id.to_string(), title: col(0), author, thumb: thumb(&it["thumbnail"]) })
+}
+
+/// Playlists matching a search
+pub async fn search_playlists(query: &str) -> Result<Vec<YtPlaylist>, String> {
+    let q = query.trim();
+    if q.is_empty() {
+        return Ok(Vec::new());
+    }
+    let v = call("search", json!({ "query": q, "params": PLAYLISTS })).await?;
+    let mut items = Vec::new();
+    find_all(&v, "musicResponsiveListItemRenderer", &mut items);
+    Ok(items.into_iter().filter_map(parse_playlist_item).collect())
+}
 
 #[derive(Serialize, Clone, Debug, PartialEq, Default)]
 pub struct YtArtist {

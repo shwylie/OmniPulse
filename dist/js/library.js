@@ -149,11 +149,11 @@ function openPlaylistMenu(t, anchor) {
 let listFilter = "all";
 const LIST_FILTERS = {
   likes: ["all", "tracks", "albums", "mixes"],
-  search: ["all", "tracks", "albums", "mixes"],
+  search: ["all", "tracks", "artists", "albums", "playlists", "mixes"],
   rediscover: ["all", "tracks", "albums"],
   artist: ["all", "tracks", "albums"],
 };
-const FILTER_NAMES = { all: "All", tracks: "Tracks", albums: "Albums", mixes: "Sets & Podcasts" };
+const FILTER_NAMES = { all: "All", tracks: "Tracks", artists: "Artists", albums: "Albums", playlists: "Playlists", mixes: "Sets & Podcasts" };
 
 function renderListChips() {
   const box = $("listChips");
@@ -172,19 +172,21 @@ function renderListChips() {
 function applyListFilter(list) {
   if (listFilter === "mixes") return list.filter(isMix);
   if (listFilter === "tracks") return list.filter((t) => !isMix(t));
-  if (listFilter === "albums") return [];
+  if (listFilter === "albums" || listFilter === "artists" || listFilter === "playlists") return [];
   return list;
 }
 
-// With Albums chosen there are no tracks to load: the page shows only the album tiles
+// With Albums (or on Search, Artists or Playlists) chosen there are no tracks to load: the page
+// shows only those
 function albumsOnly() {
-  if (listFilter !== "albums") return false;
+  if (!["albums", "artists", "playlists"].includes(listFilter)) return false;
   ++loadToken;
   viewTracks = [];
   nextHref = "";
   localPool = null;
   render();
-  say("Loading albums...");
+  say("Loading " + FILTER_NAMES[listFilter].toLowerCase() + "...");
+  if (listFilter !== "albums") setTimeout(() => say(""), 1500);
   return true;
 }
 

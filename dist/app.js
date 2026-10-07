@@ -186,6 +186,7 @@ function showView(v) {
   else if (lyricsMode) setLyricsMode(false);
   $("navDiscover").classList.toggle("active", v === "discover");
   $("feed").hidden = v !== "discover";
+  if (v !== "search") $("searchShelves").hidden = true;
   $("list").hidden = v === "discover";
   if (!isNow) $("langChip").hidden = v !== "discover";
   $("navLikes").classList.toggle("active", v === "likes");
@@ -319,6 +320,7 @@ function renderAppend(from) {
 
 function afterRender() {
   $("tableHead").hidden = viewTracks.length === 0;
+  paintTrackHead();
   $("more").hidden = !nextHref;
   renderHero();
   refreshLikeUI();
@@ -585,14 +587,21 @@ function openSearch(q) {
   showView("search");
   const plats = activePlats("search");
   if (!plats.length) { showNothing(); return; }
+  searchMixes = [];
+  tracksExpanded = false;
+  paintSearchShelves(q);
   if (albumsOnly()) return;
+  const genre = genreOf(q);
   const tok = loadToken;
   // To leave your likes out, the app needs to know them first (both lists are cached)
   const ready = prefs.hideLikes ? loadLikesFor(plats) : Promise.resolve();
   ready.then(() => {
     if (tok !== loadToken || view !== "search" || query !== q) return;   // moved on meanwhile
-    loadMerged(plats.map((id) => searchFeed(id, q)),
-      (list) => list.filter((t) => (listFilter === "mixes" ? isMix(t) : !isMix(t)) && !(prefs.hideLikes && isLikedTrack(t))));
+    // a genre is searched as a genre on each platform; sets & podcasts get their own shelf under All
+    loadMerged(plats.map((id) => (genre && id !== "local" ? genreFeed(id, genre) : searchFeed(id, q))), (list) => {
+      searchSetsFound(list);
+      return list.filter((t) => (listFilter === "mixes" ? isMix(t) : !isMix(t)) && !(prefs.hideLikes && isLikedTrack(t)));
+    });
   });
 }
 
@@ -664,6 +673,7 @@ $("searchForm").addEventListener("submit", (e) => {
 // Infinite scroll: load the next page when the end of the list comes near
 let loadingMore = false;
 async function loadMore() {
+  if (tracksCollapsed()) return;   // Search's Tracks shows its first few until Show all
   if (!nextHref || loadingMore) return;
   if (nextHref === "local:") { pageLocal(); return; }   // lists held in the app, shown 60 at a time
   loadingMore = true;

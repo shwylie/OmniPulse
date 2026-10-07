@@ -391,7 +391,9 @@ async function openCachedList(key, fetchAll, emptyMsg) {
 
 async function loadPlatformPlaylist(p) {
   if (p.source === "youtube") {
-    return openCachedList("list:" + p.id, async () => (await invoke("yt_album", { id: p.ytAlbumId })).tracks.map(ytTrack), "Nothing in here yet.");
+    return openCachedList("list:" + p.id, async () => (p.ytPlaylistId
+      ? (await invoke("yt_playlist", { id: p.ytPlaylistId })).map(ytTrack)
+      : (await invoke("yt_album", { id: p.ytAlbumId })).tracks.map(ytTrack)), "Nothing in here yet.");
   }
   if (p.source === "spotify") {
     return openCachedList("list:" + p.id, () => (p.spAlbumId ? spotifyAlbumTracks(p.spAlbumId) : spotifyPlaylistTracks(p.spId)), "Nothing in here yet.");

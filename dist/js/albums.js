@@ -144,6 +144,7 @@ function albumTileEl(a) {
 
 function injectAlbums() {
   if (!albumsShown() || !ALBUM_PAGES.includes(view)) return;
+  if (view === "search" && listFilter === "all") return;   // Search shows them on their own shelf
   if (favOn() && prefs.favOnly) return;   // only favourite tracks are showing
   let tiles = viewAlbums.slice();
   if ((view === "discover" || view === "search") && activePlats(view).includes("spotify")) {

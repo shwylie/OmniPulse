@@ -140,7 +140,7 @@ pub async fn lastfm_call(method: String, params: Vec<(String, String)>) -> Resul
             }
             (true, true)
         }
-        "artist.getSimilar" | "artist.getTopTags" => (false, false),
+        "artist.getSimilar" | "artist.getTopTags" | "tag.getTopArtists" => (false, false),
         _ => return Err("That Last.fm method is not allowed".to_string()),
     };
     lfm_request(&cfg, &method, params, signed, post).await

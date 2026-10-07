@@ -190,17 +190,23 @@ async function openArtist(seed) {
   if (curPage) albumsOnPage(curPage);
   artistFollowCheck(a);
   if (onlyAlbums || tok !== loadToken) return;
+  const merged = await artistAllTracks(a, true);
+  if (tok !== loadToken || currentArtist !== a) return;
+  setLocalPool(applyListFilter(merged));
+  render();
+  say(viewTracks.length ? "" : "No tracks by " + a.name + " found.");
+  setTimeout(nearBottomCheck, 50);
+}
+
+// Everything by an artist, from every platform, each song once
+async function artistAllTracks(a, resolved) {
+  if (!resolved) await resolveArtist(a);
   const byPlat = {};
   await Promise.all(ARTIST_PLATS.filter((p) => a.on[p] && activePlats().includes(p)).map(async (p) => {
     byPlat[p] = await artistTracksOn(p, a.on[p], a).catch(() => []);
   }));
   if (activePlats().includes("local")) byPlat.local = artistFiles(a);
-  if (tok !== loadToken || currentArtist !== a) return;
-  const merged = mergeDupes(interleave(bestFirst(byPlat)));
-  setLocalPool(applyListFilter(merged));
-  render();
-  say(viewTracks.length ? "" : "No tracks by " + a.name + " found.");
-  setTimeout(nearBottomCheck, 50);
+  return mergeDupes(interleave(bestFirst(byPlat)));
 }
 
 function openArtistFor(t) {

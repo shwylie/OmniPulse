@@ -164,6 +164,8 @@ async fn yt_album(id: String) -> Result<Value, String> {
 }
 #[tauri::command]
 async fn yt_playlist(id: String) -> Result<Vec<youtube::YtTrack>, String> { youtube::playlist(&id).await }
+#[tauri::command]
+async fn yt_playlists(query: String) -> Result<Vec<youtube::YtPlaylist>, String> { youtube::search_playlists(&query).await }
 // Finds the audio ahead of playing (the player then fetches it through the local server's /yt)
 #[tauri::command]
 async fn yt_prepare(id: String) -> Result<(), String> { youtube::stream_url(&id, false).await.map(|_| ()) }
@@ -619,7 +621,7 @@ fn main() {
             local_folders, local_set_folders, local_scan, local_status, local_tracks, local_server,
             requests_start, requests_stop, request_result,
             spe_signed_in, spe_login, spe_logout, spe_attach, spe_play, spe_pause, spe_resume, spe_seek, spe_stop, spe_played, spe_playlist, spe_web_get, spe_set_normalisation, loudness_analyse,
-            resolve_yt_stream, yt_search, yt_radio, yt_status, yt_artists, yt_artist, yt_album, yt_playlist, yt_prepare, yt_setup, yt_remove, remote_start, remote_stop, remote_result
+            resolve_yt_stream, yt_search, yt_radio, yt_status, yt_artists, yt_artist, yt_album, yt_playlist, yt_playlists, yt_prepare, yt_setup, yt_remove, remote_start, remote_stop, remote_result
         ])
         .run(tauri::generate_context!())
         .expect("error while running app");

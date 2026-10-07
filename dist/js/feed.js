@@ -211,6 +211,10 @@ function tileEl(tile) {
     art.append(lab);
   } else if (tile.kind === "playlist") {
     if (tile.art) { const img = el("img"); img.alt = ""; img.loading = "lazy"; img.src = tile.art; art.append(img); }
+  } else if (tile.kind === "artist") {
+    art.style.setProperty("--hue", tile.hue);
+    if (tile.art) { const img = el("img", "tileRound"); img.alt = ""; img.loading = "lazy"; img.src = tile.art; art.append(img); }
+    else art.append(el("span", "tileInitial", (tile.name || "?").trim().charAt(0).toUpperCase()));
   } else if (tile.kind === "genre") {
     art.style.setProperty("--hue", tile.hue);
     art.append(el("span", "tileGenre", tile.name));
@@ -299,6 +303,7 @@ async function openMix(p) {
 }
 
 async function playTile(tile) {
+  if (tile.play) { tile.play(); return; }
   if (tile.kind === "track") { startList(tile.list, tile.index, false); return; }
   say("Putting your mix together...");
   try {
@@ -355,19 +360,26 @@ async function feelingLucky() {
   if (curTrack()) say("Feeling lucky: playing " + tile.mix.title + ".");
 }
 
-function feedInit() {
-  $("luckyBtn").addEventListener("click", feelingLucky);
-  $("feed").addEventListener("click", (e) => {
+// Clicks on shelves (Discover's, and Search's): the play button plays; the tile opens (its own page,
+// or a mix as a playlist); a track tile plays from there
+function wireShelves(box) {
+  box.addEventListener("click", (e) => {
     const node = e.target.closest(".tile");
     if (!node) return;
     const tile = node._tile;
     if (e.target.closest(".tilePlay") || tile.kind === "track") { playTile(tile); return; }
+    if (tile.open) { tile.open(); return; }
     openPlaylist(tile.mix);
   });
-  $("feed").addEventListener("contextmenu", (e) => {
+  box.addEventListener("contextmenu", (e) => {
     const node = e.target.closest(".tile-track");
     if (!node) return;
     e.preventDefault();
     openTrackMenu(node._tile.track, e.clientX, e.clientY);
   });
+}
+
+function feedInit() {
+  $("luckyBtn").addEventListener("click", feelingLucky);
+  wireShelves($("feed"));
 }
