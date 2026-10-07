@@ -15,6 +15,7 @@ const PLATFORM_LIST = [
   { id: "soundcloud", pref: "scOn", pages: ["likes", "search", "discover", "rediscover"], available: () => lastSignedIn },
   { id: "spotify", pref: "spOn", pages: ["likes", "search", "discover", "rediscover"], available: () => FEATURES.spotify && spotifyPremium },
   { id: "local", pref: "localOn", pages: ["likes", "search", "rediscover"], available: () => localFolderList.length > 0 },
+  { id: "youtube", pref: "ytOn", pages: ["likes", "search", "discover", "rediscover"], available: () => ytAvailable() },
 ];
 
 const platformOn = (p) => prefs[p.pref] !== false;
@@ -25,7 +26,7 @@ function activePlats(page) {
 }
 
 const LIST_PAGES = ["likes", "search", "discover", "rediscover"];
-const NOTHING_ON = "Nothing to show yet: switch on SoundCloud, Spotify or Local music in Settings > Integrations, or with the icons in the title bar.";
+const NOTHING_ON = "Nothing to show yet: switch on SoundCloud, Spotify, YouTube Music or Local music in Settings > Accounts, or with the icons in the title bar.";
 
 // Title bar: one icon per available platform, lit while it's active; click to switch it on or off
 function renderPlatChips() {
@@ -113,12 +114,14 @@ const markLiked = (list) => list.forEach((t) => likeState.set(t.id, true));
 function likesFeed(id) {
   if (id === "soundcloud") return scFeed(LIKES_PATH, markLiked);
   if (id === "spotify") return arrayFeed(() => spotifyLikedTracks(500));
+  if (id === "youtube") return arrayFeed(async () => ytLikedTracks());
   return arrayFeed(async () => localTracks.slice());
 }
 
 function searchFeed(id, q) {
   if (id === "soundcloud") return scFeed("/tracks?q=" + encodeURIComponent(q) + "&access=playable&limit=30&linked_partitioning=true");
   if (id === "spotify") return arrayFeed(() => spotifySearchTracks(q));
+  if (id === "youtube") return arrayFeed(() => ytSearch(q));
   return arrayFeed(async () => localSearch(q));
 }
 

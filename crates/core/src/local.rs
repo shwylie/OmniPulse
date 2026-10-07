@@ -310,6 +310,10 @@ pub fn handle_local_request(request: tiny_http::Request, token: &str) {
         return;
     }
     let id = query_param(&url, "id").unwrap_or_default();
+    if route == "/yt" {
+        serve_youtube(request, &id);
+        return;
+    }
     let Some(path) = local_path_for(&id) else {
         let _ = request.respond(tiny_http::Response::empty(404));
         return;
@@ -395,4 +399,72 @@ pub fn local_tracks() -> Value {
 pub fn local_server() -> Value {
     let info = LOCAL_SERVER.get_or_init(start_local_server);
     serde_json::json!({ "port": info.0, "token": info.1 })
+}
+
+// ---------- YouTube audio, passed through ----------
+// The player can't load YouTube's stream URLs itself (no CORS headers, and an open-ended request
+// gets throttled), so they're fetched here in pieces of YT_CHUNK bytes, the way YouTube's own
+// player asks for them. A URL that has expired is replaced once with a fresh one from yt-dlp.
+const YT_CHUNK: u64 = 4 * 1024 * 1024;
+
+fn serve_youtube(request: tiny_http::Request, video_id: &str) {
+    let range = request
+        .headers()
+        .iter()
+        .find(|h| h.field.equiv("Range"))
+        .and_then(|h| h.value.as_str().strip_prefix("bytes=").map(String::from));
+    let (start, want_end) = match range.as_deref().map(|r| r.splitn(2, '-').collect::<Vec<_>>()) {
+        Some(p) => (p[0].parse::<u64>().unwrap_or(0), p.get(1).and_then(|e| e.parse::<u64>().ok())),
+        None => (0, None),
+    };
+    let end = want_end.unwrap_or(u64::MAX).min(start + YT_CHUNK - 1);
+    let Ok(rt) = tokio::runtime::Builder::new_current_thread().enable_all().build() else {
+        let _ = request.respond(tiny_http::Response::empty(500));
+        return;
+    };
+    let client = reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .build()
+        .unwrap_or_default();
+    for fresh in [false, true] {
+        let url = match rt.block_on(crate::youtube::stream_url(video_id, fresh)) {
+            Ok(u) => u,
+            Err(e) => {
+                let _ = request.respond(tiny_http::Response::from_string(e).with_status_code(502));
+                return;
+            }
+        };
+        let res = match client.get(&url).header("Range", format!("bytes={start}-{end}")).send() {
+            Ok(r) => r,
+            Err(e) => {
+                let _ = request.respond(tiny_http::Response::from_string(e.to_string()).with_status_code(502));
+                return;
+            }
+        };
+        let status = res.status().as_u16();
+        if (status == 403 || status == 410) && !fresh {
+            continue; // the URL expired or was refused: once more with a new one
+        }
+        if status == 416 {
+            let _ = request.respond(tiny_http::Response::empty(416));
+            return;
+        }
+        if status != 200 && status != 206 {
+            let _ = request.respond(tiny_http::Response::empty(502));
+            return;
+        }
+        let header = |k: &str| res.headers().get(k).and_then(|v| v.to_str().ok()).map(String::from);
+        let ctype = header("content-type").unwrap_or_else(|| "audio/mp4".into());
+        let len = header("content-length").and_then(|l| l.parse::<usize>().ok());
+        let total = header("content-range").and_then(|r| r.rsplit('/').next().map(String::from));
+        let got_end = len.map(|l| start + l as u64 - 1).unwrap_or(end);
+        let mut resp = tiny_http::Response::new(tiny_http::StatusCode(206), Vec::new(), res, len, None);
+        add_header(&mut resp, "Content-Type", &ctype);
+        add_header(&mut resp, "Accept-Ranges", "bytes");
+        add_header(&mut resp, "Access-Control-Allow-Origin", "*");
+        add_header(&mut resp, "Content-Range", &format!("bytes {start}-{got_end}/{}", total.as_deref().unwrap_or("*")));
+        let _ = request.respond(resp);
+        return;
+    }
+    let _ = request.respond(tiny_http::Response::empty(502));
 }

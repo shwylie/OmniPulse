@@ -232,6 +232,7 @@ async function openRediscover(fresh) {
     const parts = await Promise.all(plats.map(async (id) => {
       if (id === "spotify") return spotifyLikedTracks(500).catch(() => []);
       if (id === "local") return localTracks;
+      if (id === "youtube") return ytLikedTracks();
       await ensureLikes();
       return likedTracks.filter(isLikedTrack);
     }));
@@ -297,7 +298,7 @@ function openTrackMenu(t, x, y, fromPlayer) {
   if (!fromPlayer && (view === "discover" || view === "rediscover")) add("Remove recommendation", "hide");
   if (t.permalink_url) {
     sep();
-    add(srcOf(t) === "spotify" ? "Open in Spotify" : "Open on SoundCloud", "open");
+    add(openLabel(t), "open");
     add("Copy link", "copy");
   }
   if (sc || srcOf(t) === "local") {

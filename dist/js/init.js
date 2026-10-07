@@ -39,6 +39,7 @@ function extrasInit() {
   albumsInit();
   audioInit();
   loudInit();
+  ytInit();
 
   $("trayToggle").addEventListener("change", () => {
     prefs.closeToTray = $("trayToggle").checked;

@@ -29,7 +29,7 @@ const loudTarget = () => LOUD_TARGETS[prefs.loudMatch] ?? null;
 function loudKey(t) {
   if (!t || isPreview(t)) return null;
   const src = srcOf(t);
-  return src === "local" || src === "soundcloud" ? src + ":" + t.id : null;
+  return src === "local" || src === "soundcloud" || src === "youtube" ? src + ":" + t.id : null;
 }
 
 function loudAnalyse(t) {
@@ -37,7 +37,9 @@ function loudAnalyse(t) {
   if (!key) return Promise.resolve(null);
   if (loudResults.has(key)) return Promise.resolve(loudResults.get(key));
   if (loudPending.has(key)) return loudPending.get(key);
-  const p = invoke("loudness_analyse", { source: srcOf(t), id: String(t.id) })
+  // local tracks are "local:<file id>"; the core knows files by their id alone
+  const id = srcOf(t) === "youtube" ? t.ytId : String(t.id).replace(/^local:/, "");
+  const p = invoke("loudness_analyse", { source: srcOf(t), id })
     .then((a) => a, () => null)
     .then((a) => { loudResults.set(key, a); loudPending.delete(key); return a; });
   loudPending.set(key, p);

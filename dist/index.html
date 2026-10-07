@@ -370,6 +370,21 @@
         </div>
       </details>
 
+      <div class="row" id="ytSection">
+        <div>
+          <div class="lbl">YouTube Music</div>
+          <div class="note" id="ytNote">Checking for yt-dlp...</div>
+        </div>
+        <div class="rowEnd">
+          <button id="ytCheck" class="soft">Check again</button>
+          <label class="switch" title="Use YouTube Music"><input type="checkbox" id="ytOn"><span></span></label>
+        </div>
+      </div>
+      <details class="sub" id="ytHelp" hidden>
+        <summary>Setting up YouTube Music</summary>
+        <div class="note botHelp">YouTube Music plays through <b>yt-dlp</b>, which needs a JavaScript runtime: <b>Deno</b> (or Node, if you already have it). Install them from a terminal, restart OmniPulse, then press Check again:<br><code>winget install yt-dlp.yt-dlp</code><br><code>winget install DenoLand.Deno</code><br>Nothing signs in: search, radio and playing work without a Google account, and likes are kept on this PC. Keep yt-dlp up to date (<code>yt-dlp -U</code>, or <code>winget upgrade yt-dlp.yt-dlp</code>) when YouTube stops playing.</div>
+      </details>
+
       <div class="row">
         <div>
           <div class="lbl">Local music</div>
@@ -761,6 +776,7 @@
 <script src="js/autoplay.js"></script>
 <script src="js/audio.js"></script>
 <script src="js/loudness.js"></script>
+<script src="js/youtube.js"></script>
 <script src="js/stats.js"></script>
 <script src="js/lyrics.js"></script>
 <script src="js/integrations.js"></script>

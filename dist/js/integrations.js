@@ -27,13 +27,13 @@ const tStamp = (ms) => { const s = Math.max(0, Math.floor(ms / 1000)); return Ma
 function presenceButtons(t) {
   const link = t.sharing === "private" ? "" : t.permalink_url || "";
   if (!link) return [];
-  const sp = srcOf(t) === "spotify";
+  const sp = srcOf(t) === "spotify" || srcOf(t) === "youtube";   // links that can't say where to start
   const out = [];
   if (presOpt("presListen")) {
     out.push({ label: "Listen along", url: sp ? link : link.split("#")[0] + "#t=" + tStamp(curPosMs()) });
   }
   if (presOpt("presLink") && !(sp && out.length)) {   // Spotify's would be the same link twice
-    out.push({ label: sp ? "Open in Spotify" : "Open on SoundCloud", url: link });
+    out.push({ label: openLabel(t), url: link });
   }
   return out;
 }

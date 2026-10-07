@@ -5,7 +5,7 @@
 
 use omnipulse_core::{
     discord, lastfm, local, loudness, lyrics, remote, requests, soundcloud as sc, spotify, spotify_engine as spe, widget,
-    yt_stream, Settings,
+    youtube, yt_stream, Settings,
 };
 use serde_json::Value;
 use std::sync::{Arc, OnceLock};
@@ -145,6 +145,17 @@ async fn lastfm_call(method: String, params: Vec<(String, String)>) -> Result<Va
 }
 #[tauri::command]
 async fn resolve_yt_stream(query: String) -> Result<String, String> { yt_stream::resolve_yt_stream(query).await }
+
+// ---------- YouTube Music ----------
+#[tauri::command]
+async fn yt_search(query: String) -> Result<Vec<youtube::YtTrack>, String> { youtube::search(&query).await }
+#[tauri::command]
+async fn yt_radio(id: String) -> Result<Vec<youtube::YtTrack>, String> { youtube::radio(&id).await }
+#[tauri::command]
+async fn yt_status() -> Value { yt_stream::status().await }
+// Finds the audio ahead of playing (the player then fetches it through the local server's /yt)
+#[tauri::command]
+async fn yt_prepare(id: String) -> Result<(), String> { youtube::stream_url(&id, false).await.map(|_| ()) }
 
 // ---------- OBS widget, local music, chat requests, Stream Deck remote ----------
 #[tauri::command]
@@ -587,7 +598,7 @@ fn main() {
             local_folders, local_set_folders, local_scan, local_status, local_tracks, local_server,
             requests_start, requests_stop, request_result,
             spe_signed_in, spe_login, spe_logout, spe_attach, spe_play, spe_pause, spe_resume, spe_seek, spe_stop, spe_played, spe_playlist, spe_web_get, spe_set_normalisation, loudness_analyse,
-            resolve_yt_stream, remote_start, remote_stop, remote_result
+            resolve_yt_stream, yt_search, yt_radio, yt_status, yt_prepare, remote_start, remote_stop, remote_result
         ])
         .run(tauri::generate_context!())
         .expect("error while running app");

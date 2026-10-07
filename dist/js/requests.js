@@ -126,6 +126,19 @@ async function likedMatch(q, plats) {
   return null;
 }
 
+// The video id in a YouTube or YouTube Music link
+function ytLinkId(q) {
+  const m = String(q).match(/(?:youtube\.com\/(?:watch\?(?:.*&)?v=|shorts\/)|youtu\.be\/)([\w-]{11})/i);
+  return m ? m[1] : "";
+}
+
+// A YouTube link plays that song (YouTube Music's radio for it starts with the song itself); words are searched
+async function findYouTubeRequested(q) {
+  const id = ytLinkId(q);
+  if (!id) return ytSearch(q);
+  return (await invoke("yt_radio", { id })).map(ytTrack).filter((t) => t.ytId === id).slice(0, 1);
+}
+
 async function handleSongRequest(q, user) {
   if (!prefs.req) return { ok: false, message: reqMsg("closed", {}) };
   q = q.slice(0, 200);
@@ -143,7 +156,8 @@ async function handleSongRequest(q, user) {
   let order = plats;
   if (/soundcloud\.com\//i.test(q)) order = plats.filter((id) => id === "soundcloud");
   else if (/open\.spotify\.com\//i.test(q)) order = plats.filter((id) => id === "spotify");
-  const finders = { soundcloud: findRequested, spotify: findSpotifyRequested, local: async (x) => localSearch(x) };
+  else if (ytLinkId(q)) order = plats.filter((id) => id === "youtube");
+  const finders = { soundcloud: findRequested, spotify: findSpotifyRequested, local: async (x) => localSearch(x), youtube: findYouTubeRequested };
   const isLink = /^https?:\/\//i.test(q);
   // Your liked songs come first: one whose title and artist contain every word asked for
   let t = isLink ? null : await likedMatch(q, order);

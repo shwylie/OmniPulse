@@ -31,7 +31,7 @@ use symphonia::core::{
 const VERSION: &str = "v1";
 const LONG_MS: u64 = 15 * 60 * 1000; // longer than this: only the start is measured
 const MEASURE_MS: u64 = 10 * 60 * 1000; // ...namely the first ten minutes
-const PROGRESSIVE_MAX_BYTES: u64 = 12 * 1024 * 1024; // ~12 minutes of 128 kbps MP3
+const PROGRESSIVE_MAX_BYTES: u64 = 10 * 1024 * 1024; // ~10 minutes at 128 kbps (YouTube serves at most this per request)
 const MAX_BYTES: usize = 120 * 1024 * 1024; // never hold more than this in memory
 const WINDOW_MS: u64 = 50; // silence is judged in windows this long
 const SILENT_RMS_DB: f64 = -55.0; // a window is silent below this level...
@@ -315,6 +315,22 @@ pub async fn analyse_soundcloud(id: &str) -> Result<Analysis, String> {
     Err(format!("couldn't measure this track ({})", failures.join("; ")))
 }
 
+// ---------- YouTube ----------
+
+pub async fn analyse_youtube(id: &str) -> Result<Analysis, String> {
+    let key = format!("{VERSION}:yt:{id}");
+    if let Some(a) = cached(&key) {
+        return Ok(a);
+    }
+    let url = crate::youtube::stream_url(id, false).await?;
+    let f = fetch_audio(&url, None).await?;
+    let a = tokio::task::spawn_blocking(move || measure(Box::new(Cursor::new(f.bytes)), f.ext, f.duration_ms))
+        .await
+        .map_err(|e| e.to_string())??;
+    remember(key, &a);
+    Ok(a)
+}
+
 pub struct Fetched {
     pub bytes: Vec<u8>,
     pub ext: Option<&'static str>,
@@ -571,7 +587,8 @@ pub async fn analyse(source: &str, id: &str) -> Result<Value, String> {
             }
             analyse_soundcloud(id).await?
         }
-        _ => return Err("only local files and SoundCloud tracks are measured".into()),
+        "youtube" => analyse_youtube(id).await?,
+        _ => return Err("only local files, SoundCloud and YouTube tracks are measured".into()),
     };
     serde_json::to_value(a).map_err(|e| e.to_string())
 }

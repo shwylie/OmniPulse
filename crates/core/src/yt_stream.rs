@@ -18,9 +18,33 @@ async fn resolve_with(program: impl AsRef<OsStr>, query: &str) -> Result<String,
     if query.is_empty() {
         return Err("Nothing to search for.".into());
     }
+    run(program, format!("ytsearch1:{query}"), query).await
+}
+
+// YouTube's player needs a JavaScript runtime (yt-dlp issue #15012). yt-dlp uses Deno by itself;
+// if only Node is installed, it's told to use that.
+fn js_runtime_args() -> Vec<&'static str> {
+    if !on_path("deno") && on_path("node") {
+        vec!["--js-runtimes", "node"]
+    } else {
+        Vec::new()
+    }
+}
+
+/// Whether a program is on the PATH
+pub fn on_path(name: &str) -> bool {
+    let exts: &[&str] = if cfg!(windows) { &[".exe", ".cmd", ".bat"] } else { &[""] };
+    std::env::var_os("PATH")
+        .map(|p| std::env::split_paths(&p).any(|dir| exts.iter().any(|e| dir.join(format!("{name}{e}")).is_file())))
+        .unwrap_or(false)
+}
+
+async fn run(program: impl AsRef<OsStr>, target: String, label: &str) -> Result<String, String> {
+    let query = label;
     let mut cmd = tokio::process::Command::new(program.as_ref());
-    cmd.arg(format!("ytsearch1:{query}"))
+    cmd.arg(target)
         .args(["-g", "-f", "ba[ext=m4a]/ba", "--no-playlist", "--no-warnings"])
+        .args(js_runtime_args())
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -55,6 +79,30 @@ async fn resolve_with(program: impl AsRef<OsStr>, query: &str) -> Result<String,
         .find(|l| l.starts_with("http://") || l.starts_with("https://"))
         .map(str::to_string)
         .ok_or_else(|| format!("yt-dlp found nothing to play for \"{query}\"."))
+}
+
+/// The audio of one YouTube video (the best M4A, or the best audio of any kind)
+pub async fn resolve_video(video_id: &str) -> Result<String, String> {
+    // always inside a URL, so an id can never be read as an option
+    run("yt-dlp", format!("https://music.youtube.com/watch?v={video_id}"), video_id).await
+}
+
+/// What's installed: yt-dlp's version (if it runs), and which JavaScript runtimes are on the PATH
+pub async fn status() -> serde_json::Value {
+    let mut cmd = tokio::process::Command::new("yt-dlp");
+    cmd.arg("--version").stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null()).kill_on_drop(true);
+    #[cfg(windows)]
+    cmd.creation_flags(0x0800_0000);
+    let version = match cmd.spawn() {
+        Ok(child) => tokio::time::timeout(Duration::from_secs(15), child.wait_with_output())
+            .await
+            .ok()
+            .and_then(|r| r.ok())
+            .filter(|o| o.status.success())
+            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string()),
+        Err(_) => None,
+    };
+    serde_json::json!({ "ytdlp": version, "deno": on_path("deno"), "node": on_path("node") })
 }
 
 pub async fn resolve_yt_stream(query: String) -> Result<String, String> {

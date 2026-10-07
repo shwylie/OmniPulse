@@ -26,18 +26,19 @@ function feedArtists(plats) {
     const name = plat === "spotify" ? firstArtist(t) : artistName(t);
     const k = artistKey(name);
     if (!k || isMix(t)) return;
-    if (!by.has(k)) by.set(k, { key: k, name, liked: { soundcloud: [], spotify: [] } });
+    if (!by.has(k)) by.set(k, { key: k, name, liked: { soundcloud: [], spotify: [], youtube: [] } });
     by.get(k).liked[plat].push(t);
   };
   if (plats.includes("soundcloud")) likedTracks.filter(isLikedTrack).forEach((t) => add("soundcloud", t));
   if (plats.includes("spotify")) (spLikedCache || []).forEach((t) => add("spotify", t));
+  if (plats.includes("youtube")) ytLikedTracks().forEach((t) => add("youtube", t));
   const local = plats.includes("local") ? localTracks : [];
   return [...by.values()]
     // Spotify makes its own mixes now, so only artists you like on SoundCloud seed the app's ones
     .filter((a) => a.liked.soundcloud.length)
     .map((a) => Object.assign(a, {
       files: local.filter((t) => artistKey(artistName(t)) === a.key),
-      score: (a.liked.soundcloud.length + a.liked.spotify.length) * 2 + (plays.get(a.key) || 0),
+      score: (a.liked.soundcloud.length + a.liked.spotify.length + a.liked.youtube.length) * 2 + (plays.get(a.key) || 0),
     }))
     .sort((x, y) => y.score - x.score);
 }
@@ -46,6 +47,7 @@ function feedArtists(plats) {
 function crewPlats(crew, plats) {
   const out = ["soundcloud"];
   if (plats.includes("spotify")) out.push("spotify");
+  if (plats.includes("youtube")) out.push("youtube");
   if (crew.some((a) => a.files.length)) out.push("local");
   return out;
 }
@@ -68,19 +70,23 @@ async function freshFor(crew, plats) {
   const sp = plats.includes("spotify")
     ? Promise.all([spSimilarTracks(crew[0].name, 3), ...crew.map((a) => spArtistTracks(a.name))]).then((l) => l.flat())
     : Promise.resolve([]);
-  const [a, b] = await Promise.all([sc, sp]);
-  return interleave([shuffledCopy(a), shuffledCopy(b)]).filter((t) => freshPick(t) && !isLikedTrack(t));
+  // YouTube Music's radio from the first artist's best-known song
+  const yt = plats.includes("youtube")
+    ? ytSearch(crew[0].name).then((found) => (found[0] ? ytRadio(found[0].ytId) : [])).catch(() => [])
+    : Promise.resolve([]);
+  const [a, b, c] = await Promise.all([sc, sp, yt]);
+  return interleave([shuffledCopy(a), shuffledCopy(b), shuffledCopy(c)]).filter((t) => freshPick(t) && !isLikedTrack(t));
 }
 
 // Your Mix: what you like by these artists, on any platform (and your files), woven with new ones
 async function buildYourMix(crew, plats) {
-  const familiar = shuffledCopy(crew.flatMap((a) => a.liked.soundcloud.concat(a.liked.spotify, a.files))).slice(0, 18);
+  const familiar = shuffledCopy(crew.flatMap((a) => a.liked.soundcloud.concat(a.liked.spotify, a.liked.youtube, a.files))).slice(0, 18);
   return dedupeTracks(interleave([familiar, await freshFor(crew, plats)])).slice(0, 60);
 }
 
 // An artist station: that sound, mostly from other artists
 async function buildStation(a, plats) {
-  const own = shuffledCopy(a.liked.soundcloud.concat(a.liked.spotify, a.files)).slice(0, 4);
+  const own = shuffledCopy(a.liked.soundcloud.concat(a.liked.spotify, a.liked.youtube, a.files)).slice(0, 4);
   return dedupeTracks(own.concat(await freshFor([a], plats))).slice(0, 60);
 }
 

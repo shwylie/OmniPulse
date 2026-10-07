@@ -301,3 +301,16 @@ hides them; tracks from albums are never hidden.
   moves on when the rest of it is silent. Where a track isn't measured (Spotify, the rest of a long set)
   it moves on after that long in silence.
 - To check a file: `cargo run -p omnipulse-core --example measure -- <file>`.
+
+## v47: YouTube Music
+- A fourth platform, next to SoundCloud, Spotify and your files: in Search, the Library, Discover's mixes
+  and genres, Rediscover, autoplay (YouTube Music's own radio) and chat requests (YouTube links work).
+- No sign-in: search and radio come from YouTube Music's web API (the client version is read from
+  music.youtube.com, so it doesn't go stale), likes are kept on this PC, and nothing touches a Google
+  account. This uses YouTube's private API, which YouTube's terms don't allow and which can change.
+- Audio comes from yt-dlp, which needs a JavaScript runtime (Deno, or Node if it's installed):
+  `winget install yt-dlp.yt-dlp` and `winget install DenoLand.Deno`, then restart the app. Update
+  yt-dlp when YouTube stops playing. The next track's audio is looked up ahead, and the local server
+  passes the audio through in 4 MB pieces (as YouTube's player asks for it).
+- YouTube tracks are measured for Match loudness from their audio, like SoundCloud's.
+- Try it from a terminal: `cargo run -p omnipulse-core --example yt -- <search words>`.

@@ -68,7 +68,8 @@ async function apLocal(seed) {
   return shuffled(sameArtist).concat(shuffled(sameAlbum), shuffled(localTracks));
 }
 
-const AUTOPLAY_SOURCES = { soundcloud: apSoundCloud, spotify: apSpotify, local: apLocal };
+// (YouTube's is in js/youtube.js, which loads later: looked up when it's used)
+const AUTOPLAY_SOURCES = { soundcloud: apSoundCloud, spotify: apSpotify, local: apLocal, youtube: (seed) => apYouTube(seed) };
 
 // What's worth adding: not queued, not removed, not heard lately (unless that's switched off),
 // sets & podcasts only if you've asked for them, and at most two per artist in a batch

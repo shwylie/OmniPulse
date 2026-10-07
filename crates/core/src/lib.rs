@@ -13,6 +13,7 @@ pub mod soundcloud;
 pub mod spotify;
 pub mod spotify_engine;
 pub mod widget;
+pub mod youtube;
 pub mod yt_stream;
 
 use serde::{Deserialize, Serialize};
@@ -102,9 +103,10 @@ pub fn open_url(url: String) -> Result<(), String> {
         || url.starts_with("https://www.soundcloud.com/")
         || url.starts_with("https://open.spotify.com/")
         || url.starts_with("https://www.spotify.com/")
-        || url.starts_with("https://www.last.fm/"))
+        || url.starts_with("https://www.last.fm/")
+        || url.starts_with("https://music.youtube.com/"))
     {
-        return Err("Only SoundCloud, Spotify and Last.fm links can be opened".to_string());
+        return Err("Only SoundCloud, Spotify, YouTube Music and Last.fm links can be opened".to_string());
     }
     opener::open(&url).map_err(|e| e.to_string())
 }
