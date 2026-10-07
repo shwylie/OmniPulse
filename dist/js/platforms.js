@@ -26,7 +26,7 @@ function activePlats(page) {
 }
 
 const LIST_PAGES = ["likes", "search", "discover", "rediscover"];
-const NOTHING_ON = "Nothing to show yet: switch on SoundCloud, Spotify, YouTube Music or Local music in Settings > Accounts, or with the icons in the title bar.";
+const NOTHING_ON = "Nothing to show yet: switch on SoundCloud, Spotify, YouTube Music or Local music in Settings > Integrations, or with the icons in the title bar.";
 
 // Title bar: one icon per available platform, lit while it's active; click to switch it on or off
 function renderPlatChips() {
@@ -384,7 +384,7 @@ async function openCachedList(key, fetchAll, emptyMsg) {
     if (tok !== loadToken) return;
     if (!viewTracks.length) { nextHref = ""; render(); }
     say((viewTracks.length ? "Showing the saved copy. " : "") + (/40[13]/.test(String(e))
-      ? "Couldn't open this playlist. Check Spotify playback is signed in (Settings > Accounts > Spotify options)."
+      ? "Couldn't open this playlist. Check Spotify playback is signed in (Settings > Integrations > Spotify options)."
       : String(e)));
   }
 }
@@ -416,7 +416,7 @@ async function loadPlatformPlaylist(p) {
     nextHref = "";
     render();
     say(/40[13]/.test(String(e))
-      ? "Couldn't open this playlist. Check Spotify playback is signed in (Settings > Accounts > Spotify options)."
+      ? "Couldn't open this playlist. Check Spotify playback is signed in (Settings > Integrations > Spotify options)."
       : String(e));
   }
 }

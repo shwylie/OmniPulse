@@ -52,15 +52,26 @@ const uploadTitle = (s) => String(s || "")
   .replace(/\s[|\uFF5C]\s.*$/, " ");
 const VERSION_WORDS = ["remix", "edit", "mix", "vip", "flip", "bootleg", "live", "acoustic", "instrumental", "remaster", "cover", "sped", "slowed", "nightcore", "karaoke"];
 
+// A track's title for matching: without "Artist - " in front (SoundCloud and uploads put it there) or
+// upload tags, but with its version: "(Remix)", "(Extended Mix)", Spotify's " - Radio Edit"
+function matchTitle(t) {
+  let title = String((t && t.title) || "").trim();
+  if (srcOf(t) !== "spotify") {
+    const m = title.match(/^(.+?)\s+[-\u2013\u2014]\s+(.+)$/);
+    if (m) title = m[2];
+  }
+  return uploadTitle(title);
+}
+
 function matchWords(s) {
-  return String(s || "").toLowerCase().normalize("NFKD").replace(/[\u0300-\u036f]/g, "")
+  return String(s || "").replace(/[(\[]\s*original( mix| version)?\s*[)\]]|\boriginal mix\b/gi, " ").toLowerCase().normalize("NFKD").replace(/[\u0300-\u036f]/g, "")
     .replace(/\b(feat|ft|featuring|prod|with)\b\.?/g, " ").replace(/[^a-z0-9]+/g, " ").trim().split(" ").filter(Boolean);
 }
 
 function ytMatchScore(t, c) {
   const names = guessNames(t);
   const artist = matchWords(names.artist || artistName(t));
-  const want = new Set(matchWords(names.title));
+  const want = new Set(matchWords(matchTitle(t)));
   // the artist's name in an upload's title ("Artist - Song") isn't part of the song's title
   const got = new Set(matchWords(uploadTitle(c.title)).filter((w) => !(artist.includes(w) && !want.has(w))));
   if (!want.size || !got.size) return 0;
@@ -85,20 +96,54 @@ function ytMatchScore(t, c) {
   return score;
 }
 
+const YT_NO_MATCH_TTL = 86400000;   // "no match" is looked for again after a day
+let ytLastMiss = null;              // { id, closest }: why the last match came up empty
+
+const ytSnap = (c) => ({ id: c.ytId, title: c.title, artists: artistName(c), album: c.album, duration_ms: c.duration, thumb: c.artwork_url });
+function ytMatchesLoad() {
+  if (!ytMatches) { try { ytMatches = JSON.parse(localStorage.getItem(YT_MATCH_KEY) || "{}"); } catch (e) { ytMatches = {}; } }
+  return ytMatches;
+}
+function ytMatchesSave() { try { localStorage.setItem(YT_MATCH_KEY, JSON.stringify(ytMatches)); } catch (e) {} }
+
+// The YouTube Music search for a track, best match first
+async function ytCandidates(t, query) {
+  const names = guessNames(t);
+  const found = await ytSearch(query || (names.artist || artistName(t)) + " " + names.title);
+  return found.slice(0, 10).map((c) => ({ c, score: ytMatchScore(t, c) })).sort((a, b) => b.score - a.score);
+}
+
 async function ytMatch(t) {
   if (srcOf(t) === "youtube") return t;
-  if (!ytMatches) { try { ytMatches = JSON.parse(localStorage.getItem(YT_MATCH_KEY) || "{}"); } catch (e) { ytMatches = {}; } }
-  if (t.id in ytMatches) return ytMatches[t.id] ? ytTrack(ytMatches[t.id]) : null;
-  const names = guessNames(t);
-  const found = await ytSearch((names.artist || artistName(t)) + " " + names.title).catch(() => null);
-  if (!found) return null;   // couldn't search: try again next time
-  let best = null;
-  let bestScore = 0;
-  found.slice(0, 10).forEach((c) => { const s = ytMatchScore(t, c); if (s > bestScore) { bestScore = s; best = c; } });
-  const ok = best && bestScore >= 0.8 ? best : null;
-  ytMatches[t.id] = ok ? { id: ok.ytId, title: ok.title, artists: artistName(ok), album: ok.album, duration_ms: ok.duration, thumb: ok.artwork_url } : null;
-  try { localStorage.setItem(YT_MATCH_KEY, JSON.stringify(ytMatches)); } catch (e) {}
+  const saved = ytMatchesLoad()[t.id];
+  if (saved && saved.id) return ytTrack(saved);
+  // (an old "none" without a date, or one more than a day old, is looked for again)
+  if (saved && saved.none && Date.now() - (saved.at || 0) < YT_NO_MATCH_TTL) { ytLastMiss = { id: t.id, closest: saved.closest || "" }; return null; }
+  let ranked;
+  try { ranked = await ytCandidates(t); } catch (e) { return null; }   // couldn't search: try again next time
+  const top = ranked[0];
+  const ok = top && top.score >= 0.8 ? top.c : null;
+  const closest = top ? '"' + top.c.title + '" by ' + artistName(top.c) : "";
+  ytMatches[t.id] = ok ? ytSnap(ok) : { none: true, at: Date.now(), closest };
+  ytMatchesSave();
+  if (!ok) ytLastMiss = { id: t.id, closest };
   return ok;
+}
+
+// Track preferences > Plays from YouTube Music: your choice wins over the automatic match
+function ytChooseMatch(t, c) {
+  ytMatchesLoad();
+  ytMatches[t.id] = Object.assign(ytSnap(c), { chosen: true });
+  ytMatchesSave();
+  delete t.ytVia;
+}
+
+// Why a track that should come from YouTube Music didn't
+function ytMissNote(t) {
+  if (!ytOn()) return "YouTube Music is off or not set up";
+  const miss = ytLastMiss && ytLastMiss.id === t.id ? ytLastMiss : null;
+  return "YouTube Music had no close match" + (miss && miss.closest ? " (the closest was " + miss.closest + ")" : "") +
+    ". Right-click > Track preferences to choose the version";
 }
 
 // Plays a track by its YouTube Music match; false if there's none (or YouTube Music is off)

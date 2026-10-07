@@ -1185,6 +1185,7 @@ async function startStream(t) {
   }
   // Go+: the full song from YouTube Music rather than SoundCloud's 30 seconds
   if (isPreview(t) && await playViaYouTube(t, mine, "Go+ track: playing the full song from YouTube Music.")) return;
+  if (mine !== streamToken) return;
   const info = await invoke("stream_url", { id: String(t.id) });
   if (mine !== streamToken) return;
   const failures = [];
@@ -1204,11 +1205,14 @@ async function startStream(t) {
     try {
       await tryStream(resolved.url, isHls, resolved.auth);
       if (mine !== streamToken) return;
-      if (c.name === "preview") {
-        say(isPreview(t) ? "Go+ track: playing the 30-second preview." : "Full stream unavailable, so this is only the short preview. " + (info.note || ""));
-      } else {
-        say("");
-      }
+      // a "full" stream that's only 30 seconds of a longer song is a preview, whatever it's called
+      const full = t.full_duration || t.duration || 0;
+      const got = isFinite(audio.duration) ? audio.duration * 1000 : 0;
+      const snippet = c.name === "preview" || (got > 0 && got < 35000 && full > 60000);
+      if (snippet && !isPreview(t) && await playViaYouTube(t, mine, "SoundCloud only sent a 30-second preview: playing the full song from YouTube Music.")) return;
+      if (mine !== streamToken) return;
+      if (snippet) say((isPreview(t) ? "Go+ track" : "SoundCloud only sent a preview") + ": playing the 30-second preview. " + ytMissNote(t) + ".");
+      else say("");
       return;
     } catch (e) {
       if (mine !== streamToken) return;

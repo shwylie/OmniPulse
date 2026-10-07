@@ -95,6 +95,18 @@ async function spotifyCheck() {
   return ok;
 }
 
+// Spotify turned a request down for a permission this sign-in doesn't have (one signed in before the
+// app asked for it, like following artists)
+const spScopeMissing = (e) => /insufficient client scope|\b403\b.*scope|scope/i.test(String(e));
+
+// Signs in to Spotify's Web API again, for the permissions the app asks for now. Spotify playback
+// (librespot) stays signed in.
+async function spotifyGrant() {
+  say("Finish in your browser: Spotify asks you to allow OmniPulse to see and change who you follow.");
+  await spotifyConnect();
+  if (spotifyPremium || spotifyFree) say("Thanks. Spotify can be used for following now.");
+}
+
 async function spotifyConnect() {
   $("spStatus").textContent = "Finish signing in in your browser...";
   try {

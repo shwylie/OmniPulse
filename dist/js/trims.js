@@ -72,8 +72,44 @@ function trimStartFor(t, resumeAt) {
 }
 
 // ---------- Track preferences ----------
+// For tracks that play from YouTube Music (Go+, Spotify without Premium): which version, and a search
+// to choose another
+function ytPickPaint(t) {
+  const wanted = srcOf(t) === "spotify" ? !spotifyPremium : srcOf(t) === "soundcloud" && isPreview(t);
+  $("ytPick").hidden = !wanted || !ytOn();
+  if ($("ytPick").hidden) return;
+  const m = ytMatchesLoad()[t.id];
+  $("ytPickNote").textContent = m && m.id ? "Plays " + '"' + m.title + '" by ' + m.artists + (m.chosen ? " (your choice)." : " (found by itself).") + " Pick another below if it's the wrong one."
+    : "No version found by itself" + (m && m.closest ? " (the closest was " + m.closest + ")" : "") + ". Search and pick one.";
+  const n = guessNames(t);
+  $("ytPickQ").value = (n.artist || artistName(t)) + " " + n.title;
+  $("ytPickList").replaceChildren();
+}
+
+async function ytPickSearch() {
+  const t = trimTarget;
+  const box = $("ytPickList");
+  box.replaceChildren(el("div", "note", "Searching..."));
+  let ranked = [];
+  try { ranked = await ytCandidates(t, $("ytPickQ").value.trim()); } catch (e) { box.replaceChildren(el("div", "note warn", String(e))); return; }
+  box.replaceChildren(...ranked.slice(0, 8).map(({ c }) => {
+    const b = el("button", "ytPickRow");
+    b.type = "button";
+    b.append(el("span", "ytPickTitle", c.title), el("span", "ytPickBy", artistName(c) + " \u00b7 " + fmt(c.duration || 0)));
+    b.addEventListener("click", () => {
+      ytChooseMatch(t, c);
+      ytPickPaint(t);
+      say("It'll play " + c.title + " from YouTube Music from now on.");
+      if (curTrack() && curTrack().id === t.id) playCurrent();
+    });
+    return b;
+  }));
+  if (!ranked.length) box.append(el("div", "note", "Nothing found."));
+}
+
 function trimDialogOpen(t) {
   trimTarget = t;
+  ytPickPaint(t);
   const tr = trimOf(t);
   trimDraft = { start: tr ? tr.start || 0 : 0, end: tr && tr.end ? tr.end : null };
   $("fixWhat").textContent = (t.title || "Untitled") + " · " + artistName(t);
@@ -245,6 +281,8 @@ function trimMark(t) {
 }
 
 function trimsInit() {
+  $("ytPickGo").addEventListener("click", ytPickSearch);
+  $("ytPickQ").addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); ytPickSearch(); } });
   setInterval(trimTick, 200);
   setInterval(() => { if ($("fixDialog").open) paintTrimHead(); }, 250);
   $("trimBar").addEventListener("pointerdown", trimDrag);

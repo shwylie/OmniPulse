@@ -58,7 +58,7 @@ async fn run(program: impl AsRef<OsStr>, target: String, label: &str) -> Result<
 
     let child = cmd.spawn().map_err(|e| {
         if e.kind() == std::io::ErrorKind::NotFound {
-            "yt-dlp isn't set up yet: Settings > Accounts > YouTube Music > Set up.".to_string()
+            "yt-dlp isn't set up yet: Settings > Integrations > YouTube Music > Set up.".to_string()
         } else {
             format!("Couldn't start yt-dlp: {e}")
         }

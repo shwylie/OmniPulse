@@ -268,6 +268,12 @@
     <input id="fixTitle" type="text" maxlength="200" autocomplete="off" spellcheck="false">
     <label class="lbl" for="fixArtist">Artist</label>
     <input id="fixArtist" type="text" maxlength="120" autocomplete="off" spellcheck="false">
+    <div id="ytPick" hidden>
+      <h3>Plays from YouTube Music</h3>
+      <p class="note" id="ytPickNote"></p>
+      <div class="trimRow"><input id="ytPickQ" type="text" placeholder="Search YouTube Music" autocomplete="off" spellcheck="false"><button type="button" id="ytPickGo" class="soft">Search</button></div>
+      <div class="ytPickList" id="ytPickList"></div>
+    </div>
     <h3>Start and end</h3>
     <p class="note">Play only part of this track: it starts and ends where you choose, and shows as that long. Shaded parts are silent.</p>
     <div class="trimBar" id="trimBar" title="Drag the handles, or click where the start or end should be">
@@ -364,9 +370,9 @@
       </details>
     </section>
 
-    <!-- ===================== Accounts ===================== -->
+    <!-- ===================== Integrations ===================== -->
     <section class="group">
-      <h3>Accounts</h3>
+      <h3>Integrations</h3>
       <div class="row">
         <div>
           <div class="lbl">SoundCloud</div>
@@ -763,11 +769,8 @@
           </div>
         </details>
       </details>
-    </section>
 
-    <!-- ===================== Remote control ===================== -->
-    <section class="group">
-      <h3>Stream Deck</h3>
+      <!-- Stream Deck & remote control, with the other streaming tools -->
       <div class="row">
         <div>
           <div class="lbl">Stream Deck &amp; remote control</div>

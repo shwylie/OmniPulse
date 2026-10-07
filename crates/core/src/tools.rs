@@ -1,5 +1,5 @@
 // yt-dlp and Deno, built in: YouTube Music needs yt-dlp (which finds a video's audio) and a JavaScript
-// runtime for it (YouTube's player is JavaScript; yt-dlp issue #15012). Settings > Accounts > YouTube
+// runtime for it (YouTube's player is JavaScript; yt-dlp issue #15012). Settings > Integrations > YouTube
 // Music > Set up downloads both from their official GitHub releases into <data dir>\bin, each checked
 // against the SHA-256 checksum published with the release. yt-dlp then updates itself once a day.
 //

@@ -10,6 +10,7 @@
 // Artists you newly follow on one platform are followed on the others as well (Settings > Library).
 
 const ARTIST_PLATS = ["soundcloud", "spotify", "youtube"];
+const SP_FOLLOW_NOTE = "Spotify hasn't let OmniPulse see or change who you follow yet: press Give Spotify permission.";
 const ARTIST_LINKS_KEY = "sc.artistLinks";
 const ARTIST_LINK_TTL = 7 * 86400000;
 const sameArtist = (a, b) => !!artistKey(a) && artistKey(a) === artistKey(b);
@@ -20,7 +21,7 @@ const sameArtist = (a, b) => !!artistKey(a) && artistKey(a) === artistKey(b);
 function songKey(t) {
   const n = guessNames(t);
   const artist = String(n.artist || artistName(t)).split(/,|&|\bx\b|\band\b|\bfeat\b|\bft\b/i)[0];
-  const title = matchWords(uploadTitle(n.title)).join(" ");
+  const title = matchWords(matchTitle(t)).join(" ");
   return title ? matchWords(artist).join("") + "|" + title : "";
 }
 
@@ -257,7 +258,7 @@ async function setFollowOn(plat, info, on) {
     try {
       await spApi(on ? "PUT" : "DELETE", "/me/library?uris=" + encodeURIComponent("spotify:artist:" + info.id));
     } catch (e) {
-      if (/40[13]|scope|permission/i.test(String(e))) throw new Error("Spotify needs a fresh sign-in to follow artists: Settings > Accounts > Spotify, Sign out, then Sign in.");
+      if (spScopeMissing(e) || /\b40[13]\b/.test(String(e))) throw new Error(SP_FOLLOW_NOTE);
       throw e;
     }
     return;
@@ -308,6 +309,7 @@ async function toggleFollowEverywhere(a) {
   if (currentArtist === a) { paintFollow(); renderHero(); }
   followedCache = null;
   sidebarArtists();
+  if (failed.some((f) => f.includes(SP_FOLLOW_NOTE)) && confirm("Spotify hasn't let OmniPulse change who you follow yet. Ask Spotify for permission now? (Your browser opens; playback stays signed in.)")) spotifyGrant();
   say(failed.length ? "Couldn't " + (on ? "follow" : "unfollow") + " everywhere. " + failed.join(" ") : (on ? "Following " : "Unfollowed ") + a.name + " on " + targets.map((p) => PLATFORMS[p].name).join(", ") + ".");
 }
 
@@ -342,7 +344,10 @@ async function loadFollowed() {
   const notes = [];
   await Promise.all(plats.map(async (p) => {
     let list = [];
-    try { list = await followedOn(p); } catch (e) { notes.push(PLATFORMS[p].name + ": " + (e.message || e)); return; }
+    try { list = await followedOn(p); } catch (e) {
+      notes.push(p === "spotify" && spScopeMissing(e) ? SP_FOLLOW_NOTE : PLATFORMS[p].name + ": " + (e.message || e));
+      return;
+    }
     list.forEach((info) => {
       const k = artistKey(info.name);
       if (!k) return;
@@ -399,7 +404,15 @@ function paintArtistsPage() {
   shelf.classList.add("expanded");
   shelf.querySelector(".shelfAll").hidden = true;
   box.replaceChildren(shelf);
-  if (followedNotes.length) box.append(el("p", "feedNote", followedNotes.join(" ")));
+  if (followedNotes.length) {
+    const note = el("p", "feedNote", followedNotes.join(" "));
+    if (followedNotes.includes(SP_FOLLOW_NOTE)) {
+      const b = el("button", "soft grantBtn", "Give Spotify permission");
+      b.addEventListener("click", async () => { await spotifyGrant(); followedCache = null; sidebarArtists(); });
+      note.append(" ", b);
+    }
+    box.append(note);
+  }
   if (!list.length) box.append(el("p", "feedNote", listFilter === "all" ? "Artists you follow show here. Follow them from their pages." : "You don't follow anyone on " + PLATFORMS[listFilter].name + " yet."));
 }
 
