@@ -9,7 +9,8 @@ function sessionSnapshot() {
   return {
     savedAt: Date.now(),
     qi,
-    posMs: Math.round(curPosMs()),
+    // until the restored track is played, keep the position it was restored at
+    posMs: Math.round(pendingResume && curTrack() && pendingResume.id === curTrack().id ? pendingResume.posMs : curPosMs()),
     // the same small snapshots as playlists on this PC, plus who asked for it and autoplay picks
     queue: queue.slice(0, 1000).map((t) => Object.assign(xplSnap(t),
       t.autoplay ? { autoplay: true } : {}, t.requestedBy ? { requestedBy: t.requestedBy } : {},
