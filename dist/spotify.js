@@ -1,15 +1,9 @@
-// Spotify side of the app: sign-in, Spotify's web player, and the Web API calls behind
-// Likes, Search and playlists. Spotify tracks never share a queue with other platforms.
-// The web player plays inside Spotify's own protected iframe, so its sound can't go through
-// the equalizer, the leveler or the output picker: it uses whatever device Windows gives
-// this app. Loaded before app.js, so this file only declares things; app.js calls
+// Spotify side of the app: sign-in, playback through the librespot engine on the Rust side,
+// and the Web API calls behind Likes, Search and playlists. Spotify tracks never share a queue
+// with other platforms. Loaded before app.js, so this file only declares things; app.js calls
 // spotifyInit() at startup.
 
 let spotifyPremium = false;
-let spotifyPlayer = null;
-let spotifyDeviceId = null;
-let spotifySdk = null;
-let spotifyEnded = false;
 let spState = { pos: 0, ts: 0, playing: false, dur: 0 };
 
 const spApi = (method, path, body) =>
@@ -75,11 +69,9 @@ async function spotifyConnect() {
 
 async function spotifyDisconnect() {
   spotifyPause();
-  if (spotifyPlayer) { try { spotifyPlayer.disconnect(); } catch (e) {} }
-  spotifyPlayer = null;
-  spotifyDeviceId = null;
-  spotifySdk = null;
   await invoke("spotify_logout");
+  await invoke("spe_logout").catch(() => {});   // playback too
+  speSettingsPaint();
   spotifyPremium = false;
   if (typeof renderPlatChips === "function") renderPlatChips();
   $("spStatus").textContent = SP_DEFAULT_NOTE;
@@ -92,44 +84,108 @@ async function spotifyDisconnect() {
   }
 }
 
-// ---------- playback (Spotify's own web player, which acts as a device) ----------
-function spotifyLoadSdk() {
-  if (spotifySdk) return spotifySdk;
-  spotifySdk = new Promise((resolve, reject) => {
-    window.onSpotifyWebPlaybackSDKReady = () => {
-      const p = new window.Spotify.Player({
-        name: "SC Client",
-        getOAuthToken: (cb) => {
-          invoke("spotify_token").then(cb).catch((e) => say("Spotify sign-in expired: " + e));
-        },
-        volume: prefs.volume,
-      });
-      p.addListener("ready", ({ device_id }) => { spotifyDeviceId = device_id; resolve(p); });
-      p.addListener("not_ready", () => { spotifyDeviceId = null; });
-      p.addListener("initialization_error", ({ message }) =>
-        reject(new Error("Spotify's player could not start in this app (" + message + ").")));
-      p.addListener("authentication_error", ({ message }) =>
-        reject(new Error("Spotify sign-in problem: " + message)));
-      p.addListener("account_error", ({ message }) =>
-        reject(new Error("Spotify account problem: " + message)));
-      p.addListener("playback_error", ({ message }) => say("Spotify playback error: " + message));
-      p.addListener("player_state_changed", spotifyState);
-      p.connect().then((ok) => { if (!ok) reject(new Error("Spotify's player could not connect.")); });
-      spotifyPlayer = p;
-    };
-    const s = document.createElement("script");
-    s.src = "https://sdk.scdn.co/spotify-player.js";
-    s.onerror = () => reject(new Error("Could not load Spotify's player (no internet?)."));
-    document.head.append(s);
-  });
-  spotifySdk.catch(() => { spotifySdk = null; spotifyPlayer = null; });   // allow a retry
-  return spotifySdk;
+// ---------- playback (librespot in the Rust side, played through the app's audio chain) ----------
+// The engine streams PCM over a Tauri channel; js/spotify-worklet.js plays it into norm.input,
+// so Spotify gets the equalizer, leveling, volume and output device like everything else.
+// Each load or seek starts a new "generation"; audio from an older one is dropped.
+const spe = { node: null, ready: null, gen: 0, basePos: 0, level: 0, endPending: false, seekTimer: null };
+
+function speFlush(gen) {
+  spe.gen = gen;
+  spe.level = 0;
+  spe.endPending = false;
+  if (spe.node) spe.node.port.postMessage({ type: "flush", gen });
 }
 
-function spotifyState(s) {
-  if (!s) { spState.playing = false; return; }
-  spState = { pos: s.position, ts: performance.now(), playing: !s.paused, dur: s.duration };
+function speAudio(msg) {
+  let buf = msg;
+  if (Array.isArray(buf)) buf = new Uint8Array(buf).buffer;
+  else if (ArrayBuffer.isView(buf)) buf = buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength);
+  if (!(buf instanceof ArrayBuffer) || buf.byteLength < 8) return;
+  const gen = new DataView(buf).getUint32(0, true);
+  if (gen < spe.gen) return;          // from before a seek or track change
+  if (gen > spe.gen) speFlush(gen);   // audio for a new load can beat the command's reply
+  const samples = new Float32Array(buf, 8);
+  spe.node.port.postMessage({ type: "pcm", gen, samples }, [buf]);
+}
+
+function speEvent(ev) {
+  if (!ev || !curTrack() || srcOf(curTrack()) !== "spotify") return;
+  if (ev.type === "end") {
+    // the whole track has been sent; it ends when the worklet has played the rest
+    spe.endPending = true;
+    spe.node.port.postMessage({ type: "eos", gen: spe.gen });
+    if (spe.level === 0) speEnded();
+  } else if (ev.type === "unavailable") {
+    say("This track isn't available to play on Spotify.");
+    spe.endPending = false;
+    spState.playing = false;
+    paintSpotify();
+    if (qi < queue.length - 1) step(1);
+  }
+}
+
+function speWorklet(e) {
+  const m = e.data;
+  if (m.gen !== spe.gen) return;
+  if (m.type === "played") {
+    spe.level = m.level;
+    spState.pos = spe.basePos + (m.frames / 44100) * 1000;
+    spState.ts = performance.now();
+    invoke("spe_played", { gen: m.gen, frames: m.frames }).catch(() => {});
+  } else if (m.type === "empty") {
+    spe.level = 0;
+    spState.pos = spe.basePos + (m.frames / 44100) * 1000;
+    spState.ts = performance.now();
+    invoke("spe_played", { gen: m.gen, frames: m.frames }).catch(() => {});
+    if (spe.endPending) speEnded();
+  }
+}
+
+function speEnded() {
+  spe.endPending = false;
+  spState.playing = false;
+  spState.pos = spState.dur;
   paintSpotify();
+  onEnded();
+}
+
+// Sets up the worklet and the channels once
+function speSetup() {
+  if (spe.ready) return spe.ready;
+  spe.ready = (async () => {
+    if (!normEnsure()) throw new Error("the audio engine couldn't start");
+    await norm.ctx.audioWorklet.addModule("js/spotify-worklet.js");
+    spe.node = new AudioWorkletNode(norm.ctx, "spotify-pcm", { numberOfInputs: 0, outputChannelCount: [2] });
+    spe.node.port.onmessage = speWorklet;
+    spe.node.connect(norm.input);
+    const { Channel } = window.__TAURI__.core;
+    const audioCh = new Channel();
+    audioCh.onmessage = speAudio;
+    const eventCh = new Channel();
+    eventCh.onmessage = speEvent;
+    await invoke("spe_attach", { audio: audioCh, events: eventCh });
+  })();
+  spe.ready.catch(() => { spe.ready = null; });   // allow a retry
+  return spe.ready;
+}
+
+// Spotify playback signs in separately from the Spotify account above (it needs Spotify's own
+// app id); it happens once, in the browser, the first time you play something
+async function speLogin() {
+  say("Approve Spotify playback in your browser (only needed once)...");
+  await invoke("spe_login");
+  speSettingsPaint();
+}
+
+async function speCall(cmd, args) {
+  try {
+    return await invoke(cmd, args);
+  } catch (e) {
+    if (String(e) !== "NOT_SIGNED_IN") throw e;
+    await speLogin();
+    return invoke(cmd, args);
+  }
 }
 
 function spotifyPos() {
@@ -139,7 +195,7 @@ function spotifyPos() {
 function paintSpotify() {
   const t = curTrack();
   if (!t || srcOf(t) !== "spotify") return;
-  const pos = spotifyPos();
+  const pos = Math.min(spotifyPos(), spState.dur || Infinity);
   $("cur").textContent = fmt(pos);
   if (spState.dur) {
     $("seek").value = String(Math.round(Math.min(1, pos / spState.dur) * 1000));
@@ -149,59 +205,99 @@ function paintSpotify() {
   $("icoPause").classList.toggle("off", !spState.playing);
 }
 
-// Moves the progress bar and starts the next queued track when this one ends
 function spotifyTick() {
   const t = curTrack();
-  if (!t || srcOf(t) !== "spotify") return;
-  paintSpotify();
-  if (spState.playing && spState.dur && !spotifyEnded && spotifyPos() >= spState.dur - 400) {
-    spotifyEnded = true;
-    onEnded();
-  }
+  if (t && srcOf(t) === "spotify") paintSpotify();
 }
 
 async function spotifyStart(t) {
-  spotifyEnded = false;
   say("Starting Spotify...");
-  const p = await spotifyLoadSdk();
-  if (p.activateElement) { try { await p.activateElement(); } catch (e) {} }
-  const play = () => spApi("PUT", "/me/player/play?device_id=" + encodeURIComponent(spotifyDeviceId), { uris: [t.uri] });
-  try {
-    await play();
-  } catch (e) {
-    await new Promise((r) => setTimeout(r, 1000));   // the new device can take a moment to register
-    await play();
-  }
+  await speSetup();
+  if (norm.ctx.state === "suspended") await norm.ctx.resume().catch(() => {});
+  spe.basePos = 0;
+  spe.endPending = false;
+  spe.node.port.postMessage({ type: "play" });
+  const gen = await speCall("spe_play", { uri: t.uri, positionMs: 0 });
+  if (curTrack() !== t) return;   // skipped meanwhile
+  if (gen > spe.gen) speFlush(gen);
   spState = { pos: 0, ts: performance.now(), playing: true, dur: t.duration || 0 };
   say("");
   paintSpotify();
+  playbackState(true);
 }
 
 function spotifyToggle() {
-  if (spotifyPlayer) spotifyPlayer.togglePlay();
+  if (spState.playing) { spotifyPause(); return; }
+  if (!spe.node) { const t = curTrack(); if (t) spotifyStart(t).catch((e) => say("Could not play this track: " + e)); return; }
+  if (norm.ctx.state === "suspended") norm.ctx.resume().catch(() => {});
+  spe.node.port.postMessage({ type: "play" });
+  invoke("spe_resume").catch((e) => say("Spotify: " + e));
+  spState.ts = performance.now();
+  spState.playing = true;
+  paintSpotify();
+  playbackState(true);
 }
+
 function spotifyPause() {
-  if (spotifyPlayer) { try { spotifyPlayer.pause(); } catch (e) {} }
-  spState.playing = false;
+  if (!spe.node) return;
+  spe.node.port.postMessage({ type: "pause" });   // silent straight away; the buffer is kept for resume
+  invoke("spe_pause").catch(() => {});
+  if (spState.playing) {
+    spState.pos = spotifyPos();
+    spState.playing = false;
+    paintSpotify();
+    playbackState(false);
+  }
 }
+
+// The seek bar fires continuously while dragging: move the bar now, seek once it settles
 function spotifySeek(frac) {
-  if (!spState.dur || !spotifyPlayer) return;
+  if (!spState.dur || !spe.node) return;
   const ms = Math.round(frac * spState.dur);
-  spotifyPlayer.seek(ms);
   spState.pos = ms;
   spState.ts = performance.now();
+  paintSpotify();
+  clearTimeout(spe.seekTimer);
+  spe.seekTimer = setTimeout(async () => {
+    try {
+      const gen = await invoke("spe_seek", { positionMs: ms });
+      if (gen > spe.gen) speFlush(gen);
+      spe.basePos = ms;
+    } catch (e) {
+      say("Spotify: " + e);
+    }
+  }, 150);
 }
-function spotifyVolume(v) {
-  if (spotifyPlayer) spotifyPlayer.setVolume(v);
+
+async function speSettingsPaint() {
+  const on = await invoke("spe_signed_in").catch(() => false);
+  $("speNote").textContent = on
+    ? "Playback is signed in. Spotify plays through the equalizer, leveling and your output device."
+    : "Signs in separately the first time you play a Spotify track.";
+  $("speAuth").textContent = on ? "Sign out" : "Sign in";
 }
-function spotifyMute(muted) { spotifyVolume(muted ? 0 : prefs.volume); }
 
 function spotifyInit() {
   $("spConnect").addEventListener("click", () => {
     if (spotifyPremium) spotifyDisconnect(); else spotifyConnect();
   });
+  $("speAuth").addEventListener("click", async () => {
+    try {
+      if (await invoke("spe_signed_in")) {
+        spotifyPause();
+        await invoke("spe_logout");
+      } else {
+        await speLogin();
+        say("");
+      }
+    } catch (e) {
+      say(String(e));
+    }
+    speSettingsPaint();
+  });
   setInterval(spotifyTick, 500);
   spotifyCheck();
+  speSettingsPaint();
 }
 
 // ---------- lists for the platform switch on Likes / Search / Rediscover ----------

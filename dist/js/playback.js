@@ -6,11 +6,16 @@ let shuffleOn = false;
 let shuffleBackup = null; // upcoming tracks in their original order, to undo shuffle
 
 // Taskbar thumbnail buttons: keep play/pause, shuffle and like icons current
+// Is anything audible right now? (Spotify plays through its own engine, not the <audio> element)
+function nowPlaying() {
+  const t = curTrack();
+  return !!t && (srcOf(t) === "spotify" ? spState.playing : !audio.paused);
+}
+
 function taskbarSync() {
   const t = curTrack();
-  const playing = !!t && (srcOf(t) === "spotify" ? spState.playing : !audio.paused);
   invoke("taskbar_state", {
-    playing,
+    playing: nowPlaying(),
     shuffle: shuffleOn,
     liked: isLiked(t),
     canLike: !!t && srcOf(t) === "soundcloud",

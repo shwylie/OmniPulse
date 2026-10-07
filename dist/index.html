@@ -302,6 +302,13 @@
           <button id="spConnect" class="soft">Sign in</button>
         </div>
       </div>
+      <div class="row" id="speRow">
+        <div>
+          <div class="lbl">Spotify playback</div>
+          <div class="note" id="speNote"></div>
+        </div>
+        <button id="speAuth" class="soft">Sign in</button>
+      </div>
 
       <div class="row">
         <div>
@@ -472,7 +479,7 @@
       <div class="row">
         <div>
           <div class="lbl">Equalizer</div>
-          <div class="note" id="eqNote">Ten bands, for SoundCloud and local files. Changes are heard straight away.</div>
+          <div class="note" id="eqNote">Ten bands, for everything the app plays. Changes are heard straight away.</div>
         </div>
         <label class="switch"><input type="checkbox" id="eqOn"><span></span></label>
       </div>
@@ -492,7 +499,7 @@
         <label class="lbl" for="outputSel">Output device</label>
         <select id="outputSel"></select>
       </div>
-      <p class="note">SoundCloud and local files. Spotify always plays where Windows sends this app (Settings &gt; System &gt; Sound &gt; Volume mixer), without the equalizer or leveling.</p>
+      <p class="note">Used for everything the app plays, Spotify included.</p>
       <p class="note" id="outputNote"></p>
       <button id="namesBtn" class="soft" hidden>Show device names</button>
     </section>

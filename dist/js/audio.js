@@ -1,4 +1,5 @@
-// The audio chain: loudness leveling and the equalizer.
+// The audio chain: loudness leveling and the equalizer. Everything the app plays goes in at
+// norm.input: the <audio> element (SoundCloud, local files) and the Spotify worklet.
 
 // ---------- loudness leveling ----------
 // Measures how loud the track is, slowly rides a gain toward a target level, then a
@@ -8,14 +9,16 @@ const NORM_PRESETS = {
   gentle: { target: -18, maxBoost: 9, maxCut: 12, thr: -20, ratio: 3, knee: 12, attack: 0.02, release: 0.3 },
   strong: { target: -15, maxBoost: 12, maxCut: 15, thr: -26, ratio: 5, knee: 10, attack: 0.008, release: 0.2 },
 };
-const norm = { ctx: null, agc: null, comp: null, master: null, analyser: null, buf: null, pow: 0, gainDb: 0, fastUntil: 0 };
+const norm = { ctx: null, input: null, agc: null, comp: null, master: null, analyser: null, buf: null, pow: 0, gainDb: 0, fastUntil: 0 };
 
 // Once the player is routed through the leveler it stays routed; "Off" simply sets it flat.
 function normEnsure() {
   if (norm.ctx) return true;
   try {
-    const ctx = new (window.AudioContext || window.webkitAudioContext)();
-    const src = ctx.createMediaElementSource(audio);
+    // 44.1 kHz to match Spotify's stream; the engine converts to the device's own rate
+    const ctx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 44100 });
+    const input = ctx.createGain();
+    ctx.createMediaElementSource(audio).connect(input);
     const analyser = ctx.createAnalyser();
     analyser.fftSize = 2048;
     const agc = ctx.createGain();
@@ -27,7 +30,7 @@ function normEnsure() {
     limiter.attack.value = 0.002;
     limiter.release.value = 0.12;
     const master = ctx.createGain();
-    src.connect(analyser);   // measure the track as it arrives
+    input.connect(analyser);   // measure the track as it arrives
     // 10-band equalizer (flat unless switched on)
     const eq = EQ_FREQS.map((f, i) => {
       const b = ctx.createBiquadFilter();
@@ -37,14 +40,14 @@ function normEnsure() {
       b.gain.value = 0;
       return b;
     });
-    let node = src;
+    let node = input;
     eq.forEach((b) => { node.connect(b); node = b; });
     node.connect(agc);
     agc.connect(comp);
     comp.connect(limiter);
     limiter.connect(master);
     master.connect(ctx.destination);
-    Object.assign(norm, { ctx, agc, comp, master, analyser, buf: new Float32Array(analyser.fftSize) });
+    Object.assign(norm, { ctx, input, agc, comp, master, analyser, buf: new Float32Array(analyser.fftSize) });
     norm.eq = eq;
     if (prefs.sink && prefs.sink !== "default" && ctx.setSinkId) ctx.setSinkId(prefs.sink).catch(() => {});
     normApply();
@@ -91,7 +94,7 @@ function normMute(muted) {
 }
 
 function normTick() {
-  if (!norm.ctx || audio.paused) return;
+  if (!norm.ctx || !nowPlaying()) return;
   const p = NORM_PRESETS[prefs.normalize];
   if (!p) return;
   norm.analyser.getFloatTimeDomainData(norm.buf);
@@ -180,7 +183,7 @@ function audioInit() {
     $("eqSection").hidden = !prefs.eqOn;
     if (prefs.eqOn) {
       $("eqSection").open = true;
-      $("eqNote").textContent = "Ten bands, for SoundCloud and local files. Changes are heard straight away.";
+      $("eqNote").textContent = "Ten bands, for everything the app plays. Changes are heard straight away.";
     }
     eqApply();
   });

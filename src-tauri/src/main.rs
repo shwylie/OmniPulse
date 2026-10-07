@@ -1,5 +1,8 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod spotify_engine;
+use spotify_engine::*;
+
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 use rand::RngCore;
 use serde::{Deserialize, Serialize};
@@ -57,7 +60,7 @@ struct Tokens {
     refresh_token: Option<String>,
 }
 
-fn data_dir() -> Result<PathBuf, String> {
+pub(crate) fn data_dir() -> Result<PathBuf, String> {
     let base = std::env::var("APPDATA").map_err(|_| "APPDATA is not set".to_string())?;
     let dir = PathBuf::from(base).join("sc-client");
     fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
@@ -2256,7 +2259,8 @@ fn main() {
             stream_resolve, presence_test, taskbar_state,
             widget_start, widget_stop, widget_update,
             local_folders, local_set_folders, local_scan, local_status, local_tracks, local_server,
-            requests_start, requests_stop, request_result
+            requests_start, requests_stop, request_result,
+            spe_signed_in, spe_login, spe_logout, spe_attach, spe_play, spe_pause, spe_resume, spe_seek, spe_stop, spe_played
         ])
         .run(tauri::generate_context!())
         .expect("error while running app");

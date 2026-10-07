@@ -210,3 +210,16 @@ hides them; tracks from albums are never hidden.
 - Spotify always plays in the app. Its sound comes from Spotify's protected player, which the app
   can't reach, so it follows the Windows routing above but skips the equalizer, leveling and the
   in-app output picker.
+
+## v41: Spotify through the app's audio chain
+- Spotify now plays through librespot (an unofficial open-source Spotify client, built into the
+  Rust side) instead of Spotify's web player, at 320 kbps. Its audio goes through the same chain as
+  everything else: equalizer, loudness leveling, volume and the output device in Settings.
+- The first time you play a Spotify track, a browser tab asks you to approve "Spotify playback".
+  This is a separate sign-in from the Spotify account above (it uses Spotify's own app id, which
+  librespot needs). It's remembered in %APPDATA%\sc-client\librespot; Settings > Integrations >
+  Spotify playback signs it in or out. Signing out of Spotify signs out of both.
+- Needs Premium. librespot isn't approved by Spotify and is against its terms of use; it can also
+  stop working when Spotify changes things, until librespot is updated (`cargo update -p librespot-core`).
+- How it works: src-tauri/src/spotify_engine.rs decodes and streams PCM over a Tauri channel;
+  dist/js/spotify-worklet.js plays it into the audio chain and reports back how much it has played.

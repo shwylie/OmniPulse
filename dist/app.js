@@ -1052,12 +1052,10 @@ $("vol").value = String(Math.round(prefs.volume * 100));
 $("vol").addEventListener("input", () => {
   prefs.volume = Number($("vol").value) / 100;
   setLevel(prefs.volume);
-  spotifyVolume(prefs.volume);
   savePrefs();
 });
 $("mute").addEventListener("click", () => {
   audio.muted = !audio.muted;
-  spotifyMute(audio.muted);
   normMute(audio.muted);
   $("icoVol").classList.toggle("off", audio.muted);
   $("icoMute").classList.toggle("off", !audio.muted);
@@ -1319,6 +1317,7 @@ syncMaximized();
   renderPlaylists();
   render();
   $("spotifySection").hidden = !FEATURES.spotify;
+  $("speRow").hidden = !FEATURES.spotify;
   extrasInit();
   if (FEATURES.spotify) spotifyInit();
   const signedIn = await refreshAuth();
