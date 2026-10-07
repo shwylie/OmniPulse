@@ -253,3 +253,5 @@ hides them; tracks from albums are never hidden.
   app is allowed to change your library.
 - Favourites: the star next to the heart (in lists, the player bar and Now Playing) works for every
   platform, including local files. Favourites are kept on this PC and listed on the Favourites page.
+- Cover art on playlist, album and Favourites pages: an album shows its cover; a playlist shows up to four
+  different covers from its tracks in one square, split diagonally (two halves, a "Y" of three, an "X" of four).

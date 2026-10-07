@@ -226,7 +226,53 @@ function renderHero() {
   const src = v === "artist" && currentArtist && currentArtist.avatar_url
     ? currentArtist.avatar_url.replace("-large", "-t200x200") : "";
   if (src) { av.src = src; av.hidden = false; } else { av.removeAttribute("src"); av.hidden = true; }
+  paintHeroCover(v);
   paintHeroActions();
+}
+
+// ---------- cover art for playlists, albums and Favourites ----------
+// An album shows its own cover. A playlist (and Favourites) shows up to four different covers from
+// its tracks in one square, split diagonally: two halves, a "Y" of three, or an "X" of four.
+const COVER_WEDGES = {
+  1: ["polygon(0 0, 100% 0, 100% 100%, 0 100%)"],
+  2: ["polygon(0 0, 100% 0, 0 100%)", "polygon(100% 0, 100% 100%, 0 100%)"],
+  3: ["polygon(0 0, 100% 0, 50% 50%)", "polygon(0 0, 50% 50%, 50% 100%, 0 100%)", "polygon(100% 0, 100% 100%, 50% 100%, 50% 50%)"],
+  4: ["polygon(0 0, 100% 0, 50% 50%)", "polygon(100% 0, 100% 100%, 50% 50%)", "polygon(0 100%, 100% 100%, 50% 50%)", "polygon(0 0, 0 100%, 50% 50%)"],
+};
+
+const isAlbumPage = (p) => !!p && (!!p.album || !!p.spAlbumId || isScAlbum(p));
+
+function heroCovers(v) {
+  if (v === "playlist" && isAlbumPage(currentPlaylist)) {
+    const own = currentPlaylist.artwork_url ? artUrl(currentPlaylist, "t500x500") : "";
+    const first = viewTracks.map((t) => artUrl(t, "t500x500")).find(Boolean);
+    return [own || first].filter(Boolean);
+  }
+  if (v !== "playlist" && v !== "favourites") return [];
+  const seen = new Set();
+  for (const t of viewTracks) {
+    const u = artUrl(t, "t500x500");
+    if (u && !seen.has(u)) seen.add(u);
+    if (seen.size === 4) break;
+  }
+  return [...seen];
+}
+
+function paintHeroCover(v) {
+  const box = $("heroCover");
+  const urls = heroCovers(v);
+  const key = urls.join("|");
+  box.hidden = !urls.length;
+  if (box.dataset.key === key) return;   // unchanged: don't reload the images
+  box.dataset.key = key;
+  box.replaceChildren(...urls.map((u, i) => {
+    const img = el("img");
+    img.alt = "";
+    img.src = u;
+    img.style.clipPath = COVER_WEDGES[urls.length][i];
+    img.onerror = () => { img.removeAttribute("src"); };
+    return img;
+  }));
 }
 
 // Go+ tracks are served to this app as 30-second previews only
