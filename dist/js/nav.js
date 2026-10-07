@@ -73,6 +73,50 @@ function goBack() {
   $("backBtn").disabled = navStack.length === 0;
 }
 
+// ---------- the sidebar's pages, in your order ----------
+// Drag a page up or down the list; the order is kept in prefs.navOrder (pages added later go last).
+function navOrderApply() {
+  const box = $("navList");
+  const order = prefs.navOrder || [];
+  const buttons = [...box.querySelectorAll(":scope > .nav")];
+  const rank = (b) => { const i = order.indexOf(b.id); return i < 0 ? order.length + buttons.indexOf(b) : i; };
+  buttons.slice().sort((a, b) => rank(a) - rank(b)).forEach((b) => box.append(b));
+}
+
+function navOrderInit() {
+  const box = $("navList");
+  let dragged = null;
+  box.querySelectorAll(":scope > .nav").forEach((b) => { b.draggable = true; });
+  box.addEventListener("dragstart", (e) => {
+    const b = e.target.closest(".nav");
+    if (!b) return;
+    dragged = b;
+    b.classList.add("dragging");
+    e.dataTransfer.effectAllowed = "move";
+    e.dataTransfer.setData("text/plain", b.id);
+  });
+  box.addEventListener("dragover", (e) => {
+    if (!dragged) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+    const over = e.target.closest(".nav");
+    if (!over || over === dragged) return;
+    const r = over.getBoundingClientRect();
+    box.insertBefore(dragged, e.clientY < r.top + r.height / 2 ? over : over.nextSibling);
+  });
+  const done = () => {
+    if (!dragged) return;
+    dragged.classList.remove("dragging");
+    dragged = null;
+    prefs.navOrder = [...box.querySelectorAll(":scope > .nav")].map((b) => b.id);
+    savePrefs();
+  };
+  box.addEventListener("drop", (e) => { if (dragged) { e.preventDefault(); done(); } });
+  box.addEventListener("dragend", done);
+  navOrderApply();
+}
+
 function navInit() {
   $("backBtn").addEventListener("click", goBack);
+  navOrderInit();
 }
