@@ -457,7 +457,6 @@ select.narrow { width: auto; min-width: 150px; }
 .pill:disabled { opacity: 0.6; cursor: default; }
 
 /* ===== v19: language filter ===== */
-.langSel { margin-top: 12px; }
 
 /* ===== v20 ===== */
 /* column header: plain, no panel behind it */
@@ -706,12 +705,6 @@ details.sub.inner { margin-top: 10px; }
 }
 
 /* ===== v38: album tiles mixed into lists ===== */
-.albumToggle {
-  display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 999px;
-  border: 1px solid var(--line); background: var(--elevated); color: var(--muted); font-weight: 600;
-}
-.albumToggle svg { width: 16px; height: 16px; }
-.albumToggle.on { border-color: var(--accent); color: var(--accent); }
 #list li.albumTile {
   display: grid; grid-template-columns: 96px minmax(0, 1fr) auto; gap: 16px; align-items: center;
   margin: 8px 0; padding: 12px; border-radius: 12px; cursor: pointer;
@@ -768,3 +761,31 @@ details.sub.inner { margin-top: 10px; }
   .player #nowArt { width: 52px; height: 52px; }
   #nowAlbum { display: none; }
 }
+
+/* ===== v42: view options (Albums, language) as chips beside Play / Shuffle ===== */
+.viewOpts { display: flex; align-items: center; gap: 8px; margin-left: auto; }
+.optChip { display: inline-flex; align-items: center; gap: 6px; height: 34px; padding: 0 14px; font-weight: 600; cursor: pointer; }
+.optChip svg { width: 16px; height: 16px; }
+.optChip:not(.on) { color: var(--muted); }
+.optChip:not(.on):hover { color: var(--text); }
+/* the language menu looks like a chip; the native list still opens on click */
+.chipSelect { position: relative; padding-right: 30px; }
+.chipSelect::after {
+  content: ""; position: absolute; right: 13px; top: 50%; width: 6px; height: 6px; margin-top: -5px;
+  border-right: 2px solid currentColor; border-bottom: 2px solid currentColor; transform: rotate(45deg); pointer-events: none;
+}
+.chipSelect select {
+  appearance: none; -webkit-appearance: none; background: transparent; border: 0; padding: 0; margin: 0;
+  color: inherit; font: inherit; width: auto; min-width: 0; cursor: pointer; outline: none;
+}
+.chipSelect select option { color: var(--text); background: var(--panel); }
+.chipSelect:focus-within { border-color: var(--accent); }
+
+/* genre chips: one line that scrolls sideways instead of wrapping */
+#chips {
+  flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; padding-bottom: 2px;
+  mask-image: linear-gradient(to right, #000 calc(100% - 48px), transparent);
+}
+#chips::-webkit-scrollbar { display: none; }
+#chips .chip { flex: none; }
+#chips.atEnd { mask-image: none; }

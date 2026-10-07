@@ -148,7 +148,7 @@ function showView(v) {
   else if (lyricsMode) setLyricsMode(false);
   $("navDiscover").classList.toggle("active", v === "discover");
   if (!isNow) $("chips").hidden = v !== "discover";
-  if (!isNow) $("recLangSel").hidden = v !== "discover";
+  if (!isNow) $("langChip").hidden = v !== "discover";
   $("navLikes").classList.toggle("active", v === "likes");
   $("navSearch").classList.toggle("active", v === "search");
   document.querySelectorAll(".plItem").forEach((b) => {
@@ -181,16 +181,15 @@ function renderHero() {
   $("refreshBtn").hidden = !(v === "discover" || v === "rediscover");
   $("viewSub").textContent = sub.trim();
   const isArtist = v === "artist" && !!currentArtist;
-  $("heroActions").hidden = n === 0 && !isArtist;
   $("playAll").hidden = n === 0;
   $("shuffleAll").hidden = n === 0;
   $("followBtn").hidden = !isArtist || (meId !== null && String(currentArtist.id) === String(meId));
   $("plDelete").hidden = !(v === "playlist" && isOwnPlaylist(currentPlaylist));
-  if (v === "playlist" && isOwnPlaylist(currentPlaylist)) $("heroActions").hidden = false;
   const av = $("heroAvatar");
   const src = v === "artist" && currentArtist && currentArtist.avatar_url
     ? currentArtist.avatar_url.replace("-large", "-t200x200") : "";
   if (src) { av.src = src; av.hidden = false; } else { av.removeAttribute("src"); av.hidden = true; }
+  paintHeroActions();
 }
 
 // Go+ tracks are served to this app as 30-second previews only
@@ -226,6 +225,13 @@ function afterRender() {
   refreshLikeUI();
   renderPlatChips();
   injectAlbums();
+  paintHeroActions();
+}
+
+// The row under the title: play / shuffle and page buttons, with the view options on the right.
+// Shown whenever any of them is, so the language filter stays reachable when it hid everything.
+function paintHeroActions() {
+  $("heroActions").hidden = !["playAll", "followBtn", "plDelete", "langChip", "albumToggle"].some((id) => !$(id).hidden);
 }
 
 function trackRow(t, i, playing) {
@@ -449,6 +455,18 @@ function renderChips() {
 $("chips").addEventListener("click", (e) => {
   const b = e.target.closest(".chip");
   if (b) openDiscover(b.dataset.src);
+});
+// The genre chips are one sideways-scrolling line: let the mouse wheel move it, and drop the
+// fade at the right once the end is reached
+$("chips").addEventListener("wheel", (e) => {
+  const box = $("chips");
+  if (box.scrollWidth <= box.clientWidth || Math.abs(e.deltaX) > Math.abs(e.deltaY)) return;
+  e.preventDefault();
+  box.scrollLeft += e.deltaY;
+}, { passive: false });
+$("chips").addEventListener("scroll", () => {
+  const box = $("chips");
+  box.classList.toggle("atEnd", box.scrollLeft + box.clientWidth >= box.scrollWidth - 2);
 });
 
 // Suggestions: tracks related to a few of your likes, minus ones you already like

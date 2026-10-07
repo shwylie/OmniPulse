@@ -81,16 +81,22 @@
     <div class="scroller" id="listView">
       <div class="hero">
         <img id="heroAvatar" class="heroAvatar" alt="" hidden>
-        <div class="titleRow"><h1 id="viewTitle">Likes</h1><button id="albumToggle" class="albumToggle" title="Show or hide albums on this page" hidden><svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 14.5c-2.49 0-4.5-2.01-4.5-4.5S9.51 7.5 12 7.5s4.5 2.01 4.5 4.5-2.01 4.5-4.5 4.5zm0-5.5c-.55 0-1 .45-1 1s.45 1 1 1 1-.45 1-1-.45-1-1-1z"/></svg><span>Albums</span></button><button id="refreshBtn" class="ghost refreshBtn" title="New recommendations" aria-label="Refresh recommendations" hidden><svg viewBox="0 0 24 24"><path d="M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/></svg></button></div>
+        <div class="titleRow"><h1 id="viewTitle">Likes</h1><button id="refreshBtn" class="ghost refreshBtn" title="New recommendations" aria-label="Refresh recommendations" hidden><svg viewBox="0 0 24 24"><path d="M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/></svg></button></div>
         <p id="viewSub"></p>
         <div class="chips" id="chips" hidden></div>
         <div class="chips" id="likesChips" hidden></div>
-        <select id="recLangSel" class="narrow langSel" hidden title="Language of recommendations"><option value="any">Any language</option><option value="en">English</option><option value="es">Spanish</option><option value="pt">Portuguese</option><option value="fr">French</option><option value="de">German</option></select>
         <div class="heroActions" id="heroActions" hidden>
           <button id="playAll" class="bigPlay" aria-label="Play all"><svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg></button>
           <button id="shuffleAll" class="pill">Shuffle</button>
           <button id="followBtn" class="pill follow" hidden>Follow</button>
           <button id="plDelete" class="pill" hidden>Delete playlist</button>
+          <div class="viewOpts">
+            <label class="chip optChip chipSelect" id="langChip" title="Language of recommendations" hidden>
+              <svg viewBox="0 0 24 24"><path d="M12 2a10 10 0 100 20 10 10 0 000-20zm6.93 6h-2.95a15.6 15.6 0 00-1.38-3.56A8.03 8.03 0 0118.93 8zM12 4.04c.83 1.2 1.48 2.53 1.91 3.96h-3.82c.43-1.43 1.08-2.76 1.91-3.96zM4.26 14a8.2 8.2 0 010-4h3.38a16.5 16.5 0 000 4H4.26zm.81 2h2.95c.32 1.25.78 2.45 1.38 3.56A7.99 7.99 0 015.07 16zm2.95-8H5.07a7.99 7.99 0 014.33-3.56A15.6 15.6 0 008.02 8zM12 19.96A14.1 14.1 0 0110.09 16h3.82A14.1 14.1 0 0112 19.96zM14.34 14H9.66a14.7 14.7 0 010-4h4.68a14.7 14.7 0 010 4zm.25 5.56c.6-1.11 1.06-2.31 1.38-3.56h2.95a8.03 8.03 0 01-4.33 3.56zM16.36 14a16.5 16.5 0 000-4h3.38a8.2 8.2 0 010 4h-3.38z"/></svg>
+              <select id="recLangSel" aria-label="Language of recommendations" title="Language of recommendations"><option value="any">Any language</option><option value="en">English</option><option value="es">Spanish</option><option value="pt">Portuguese</option><option value="fr">French</option><option value="de">German</option></select>
+            </label>
+            <button id="albumToggle" class="chip optChip" title="Show or hide albums on this page"><svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 14.5c-2.49 0-4.5-2.01-4.5-4.5S9.51 7.5 12 7.5s4.5 2.01 4.5 4.5-2.01 4.5-4.5 4.5zm0-5.5c-.55 0-1 .45-1 1s.45 1 1 1 1-.45 1-1-.45-1-1-1z"/></svg><span>Albums</span></button>
+          </div>
         </div>
       </div>
       <p id="status"></p>
