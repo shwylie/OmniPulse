@@ -894,6 +894,12 @@ fn discord_id() -> String {
     load_config().map(|c| c.discord_client_id).unwrap_or_default()
 }
 
+#[derive(Deserialize)]
+struct PresenceButton {
+    label: String,
+    url: String,
+}
+
 // Returns a note when Discord only accepted a simpler version of the activity
 #[tauri::command]
 async fn presence_set(
@@ -902,7 +908,7 @@ async fn presence_set(
     start: Option<i64>,
     end: Option<i64>,
     image: Option<String>,
-    url: Option<String>,
+    buttons: Option<Vec<PresenceButton>>,
 ) -> Result<String, String> {
     let id = discord_id();
     if id.trim().is_empty() {
@@ -936,18 +942,20 @@ async fn presence_set(
                 full["assets"] = serde_json::json!({ "large_image": img });
             }
         }
-        // A button other people can click to open the track
-        if let Some(u) = url {
-            let label = if u.starts_with("https://open.spotify.com/") {
-                "Open in Spotify"
-            } else if u.starts_with("https://soundcloud.com/") || u.starts_with("https://www.soundcloud.com/") {
-                "Listen on SoundCloud"
-            } else {
-                ""
-            };
-            if !label.is_empty() && u.len() <= 512 {
-                full["buttons"] = serde_json::json!([{ "label": label, "url": u }]);
-            }
+        // Buttons other people can click (Discord allows two; labels up to 32 characters)
+        let ok_url = |u: &str| {
+            u.len() <= 512
+                && (u.starts_with("https://open.spotify.com/") || u.starts_with("https://soundcloud.com/") || u.starts_with("https://www.soundcloud.com/"))
+        };
+        let list: Vec<Value> = buttons
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|b| ok_url(&b.url) && !b.label.trim().is_empty())
+            .take(2)
+            .map(|b| serde_json::json!({ "label": b.label.chars().take(32).collect::<String>(), "url": b.url }))
+            .collect();
+        if !list.is_empty() {
+            full["buttons"] = Value::Array(list);
         }
 
         // Try the full activity, then simpler versions if Discord rejects a part of it
@@ -963,7 +971,7 @@ async fn presence_set(
         }
         if had_link {
             match discord_send(&id, Some(no_link.clone())) {
-                Ok(()) => return Ok("Showing without the track link (Discord refused the button).".to_string()),
+                Ok(()) => return Ok("Showing without the buttons (Discord refused them).".to_string()),
                 Err(e) if !e.starts_with("Discord rejected") => return Err(e),
                 Err(_) => {}
             }

@@ -16,6 +16,28 @@ function presenceNote(msg, isError) {
   presenceLastMsg = msg;
 }
 
+// Discord options (Settings > Streaming > Discord options); all on unless switched off
+const presOpt = (key) => prefs[key] !== false;
+
+// "m:ss", as SoundCloud links take it after #t=
+const tStamp = (ms) => { const s = Math.max(0, Math.floor(ms / 1000)); return Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0"); };
+
+// The buttons other people see under your status (up to two). Listen along opens the track at about
+// where you are (SoundCloud links can say where to start; Spotify's can't, so it just opens the track).
+function presenceButtons(t) {
+  const link = t.sharing === "private" ? "" : t.permalink_url || "";
+  if (!link) return [];
+  const sp = srcOf(t) === "spotify";
+  const out = [];
+  if (presOpt("presListen")) {
+    out.push({ label: "Listen along", url: sp ? link : link.split("#")[0] + "#t=" + tStamp(curPosMs()) });
+  }
+  if (presOpt("presLink") && !(sp && out.length)) {   // Spotify's would be the same link twice
+    out.push({ label: sp ? "Open in Spotify" : "Open on SoundCloud", url: link });
+  }
+  return out;
+}
+
 async function sendPresence() {
   const t = curTrack();
   if (!prefs.presence || !t || !nowPlaying()) {
@@ -26,15 +48,16 @@ async function sendPresence() {
     const now = Math.floor(Date.now() / 1000);
     const start = now - Math.floor(curPosMs() / 1000);
     const end = t.duration ? start + Math.floor(t.duration / 1000) : null;
+    const showTime = presOpt("presTime");
     const note = await invoke("presence_set", {
       details: t.title || "Unknown",
       state: artistName(t) || "Unknown",
-      start,
-      end,
-      image: srcOf(t) === "local" ? null : (artUrl(t, "t500x500") || null),
-      url: t.sharing === "private" ? null : (t.permalink_url || null),
+      start: showTime ? start : null,
+      end: showTime ? end : null,
+      image: !presOpt("presArt") || srcOf(t) === "local" ? null : (artUrl(t, "t500x500") || null),
+      buttons: presenceButtons(t),
     });
-    presenceNote(note || "Showing on your Discord profile, with a link to the track.", false);
+    presenceNote(note || "Showing on your Discord profile.", false);
   } catch (e) {
     presenceNote(String(e), true);
   }
@@ -93,9 +116,18 @@ function lfmScrobble(t, startedAt) {
 }
 
 function integrationsInit() {
+  ["presArt", "presTime", "presLink", "presListen"].forEach((key) => {
+    $(key).checked = presOpt(key);
+    $(key).addEventListener("change", () => { prefs[key] = $(key).checked; savePrefs(); presenceUpdate(); });
+  });
+  // Listen along points at where you are: keep it roughly current while playing
+  // (Discord accepts an update every 15 s at most)
+  setInterval(() => { if (prefs.presence && presOpt("presListen") && nowPlaying()) presenceUpdate(); }, 30000);
+  $("presSection").hidden = !prefs.presence;
   $("presToggle").addEventListener("change", () => {
     prefs.presence = $("presToggle").checked;
     savePrefs();
+    $("presSection").hidden = !prefs.presence;   // its options fold out only while it's on
     presenceUpdate();
   });
   $("scrobbleToggle").addEventListener("change", () => {
