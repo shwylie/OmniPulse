@@ -721,13 +721,18 @@ details.sub.inner { margin-top: 10px; }
 
 /* ===== v42: player bar (transport | now playing | actions) ===== */
 .player {
-  grid-template-columns: minmax(380px, 1.25fr) minmax(0, 1fr) auto;
+  grid-template-columns: minmax(auto, 1.25fr) minmax(0, 1fr) auto;
   gap: 24px; padding: 10px 20px;
 }
-.transport { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.transport { display: flex; align-items: center; gap: 6px; }
 .player .main { width: 46px; height: 46px; display: grid; place-items: center; border: 0; border-radius: 50%; margin-right: 8px; }
 .player .main svg { width: 22px; height: 22px; }
-.transport .seekRow { flex: 1; min-width: 120px; margin-left: 8px; }
+.transport .seekRow { flex: 1; min-width: 190px; margin-left: 8px; }
+/* range inputs won't shrink below ~130px by themselves, which pushed the seek bar under the volume */
+.transport .seekRow input { min-width: 0; }
+.transport .seekRow span { flex: none; }
+/* while the volume slider is out, the seek bar gives up the room */
+.transport:has(.volWrap:hover, .volWrap:focus-within) .seekRow { min-width: 100px; }
 .transport .seekRow span { min-width: 34px; font-variant-numeric: tabular-nums; }
 .transport .seekRow span:first-child { text-align: right; }
 
@@ -753,7 +758,7 @@ details.sub.inner { margin-top: 10px; }
 .barSep { width: 1px; height: 28px; margin: 0 8px; background: var(--line); flex: none; }
 
 @media (max-width: 1100px) {
-  .player { grid-template-columns: minmax(320px, 1fr) minmax(0, 1fr) auto; gap: 14px; }
+  .player { grid-template-columns: minmax(auto, 1fr) minmax(0, 1fr) auto; gap: 14px; }
   .player #nowArt { width: 52px; height: 52px; }
   #nowAlbum { display: none; }
 }
