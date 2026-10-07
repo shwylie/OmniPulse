@@ -387,8 +387,6 @@ body { display: grid; grid-template-rows: auto minmax(0, 1fr); }
   font-size: 12px; color: var(--muted); white-space: nowrap;
 }
 .plat svg { width: 13px; height: 13px; }
-.plat.soundcloud svg { color: #ff5500; }
-.plat.spotify svg { color: #1db954; }
 .artistRow { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .artistRow .plat { margin-left: 0; flex: none; }
 .artistName { cursor: default; }
@@ -635,7 +633,6 @@ select.narrow { width: auto; min-width: 150px; }
 }
 .platSeg button svg { width: 15px; height: 15px; }
 .platSeg button.on { background: var(--accent); color: var(--on-accent); font-weight: 600; }
-.plat.local svg { color: var(--accent); }
 .folderList { display: flex; flex-direction: column; gap: 6px; margin: 8px 0; }
 .folderRow {
   display: flex; align-items: center; gap: 10px; padding: 7px 10px;
@@ -851,3 +848,13 @@ details.sub.inner { margin-top: 10px; }
 .sideSection .plList > * { flex: none; }   /* rows keep their height and the list scrolls */
 /* playlists on this PC can hold any platform: a rainbow icon */
 .plat.xpl svg { fill: url(#rainbow); }
+
+/* ===== v43: platform logos in plain black or white, to suit the theme ===== */
+:root { --logo: #ffffff; }
+:root[data-theme="light"], :root[data-theme="paper"] { --logo: #000000; }
+.plat svg { color: var(--logo); }
+.plat.xpl svg { color: inherit; }   /* playlists on this PC keep their rainbow */
+/* title bar: lit while a platform is on, faded while it's off */
+.titlePlat button { color: var(--logo); opacity: 0.35; }
+.titlePlat button:hover { color: var(--logo); opacity: 0.7; }
+.titlePlat button.on { background: color-mix(in srgb, var(--logo) 16%, transparent); color: var(--logo); opacity: 1; }

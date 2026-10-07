@@ -56,7 +56,7 @@ function renderPlatChips() {
     b.title = PLATFORMS[p.id].name + (on ? " is on. Click to hide it everywhere." : " is off. Click to show it again.");
     b.setAttribute("aria-label", PLATFORMS[p.id].name);
     b.setAttribute("aria-pressed", on ? "true" : "false");
-    b.append(icon(PLATFORMS[p.id].icon));
+    b.append(platIcon(p.id));
     box.append(b);
   });
 }
