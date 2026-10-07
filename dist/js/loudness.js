@@ -59,8 +59,13 @@ function loudGainFor(t) {
   return Math.max(-30, Math.min(LOUD_MAX_BOOST, target - lufs));
 }
 
+// The track picked but not yet heard: the one before it keeps playing (at its own level) while this
+// one loads, so its level is set the moment its sound starts, not when it was picked
+let loudWaiting = null;
+
 function loudApply(t, instant) {
   if (!norm.match) return;
+  if (loudWaiting === t) return;
   const db = loudGainFor(t);
   // nothing changed (the measurement was already known): leave the level set at the start alone
   if (!instant && Math.abs(db - loudGainNow) < 0.05) { loudPaint(); return; }
@@ -77,7 +82,8 @@ function loudApply(t, instant) {
 function loudTrackStarted(t) {
   silence.live = 0;
   silence.lastPos = -1;
-  loudApply(t, true);
+  if (onSpotifyEngine(t)) { loudWaiting = null; loudApply(t, true); }
+  else loudWaiting = t;
   if (loudTarget() === null && !Number(prefs.skipSilence)) return;
   loudAnalyse(t).then(() => {
     if (curTrack() !== t) return;
@@ -160,6 +166,7 @@ function loudSpotifySync() {
 }
 
 function loudInit() {
+  audio.addEventListener("playing", loudHeard);
   const sel = $("loudSel");
   const paint = () => {
     sel.value = prefs.loudMatch in LOUD_TARGETS ? prefs.loudMatch : "off";
@@ -189,4 +196,12 @@ function loudInit() {
     if (t && prefs.skipSilence) loudAnalyse(t);
   });
   setInterval(silenceTick, 250);
+}
+
+// The picked track's sound has started: now it gets its level
+function loudHeard() {
+  const t = loudWaiting;
+  if (!t || curTrack() !== t) return;
+  loudWaiting = null;
+  loudApply(t, true);
 }

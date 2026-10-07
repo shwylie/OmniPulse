@@ -43,7 +43,7 @@ async function searchArtists(q, plats, genre) {
       : [],
     plats.includes("spotify")
       ? spApi("GET", "/search?type=artist&limit=10&q=" + encodeURIComponent(genre ? 'genre:"' + genre + '"' : q))
-        .then((d) => ((d.artists && d.artists.items) || []).filter(Boolean).map((a) => ({ plat: "spotify", name: a.name, info: { id: a.id, name: a.name, img: (a.images && a.images[0] && a.images[0].url) || "", followers: (a.followers && a.followers.total) || 0 } }))).catch(() => [])
+        .then((d) => ((d.artists && d.artists.items) || []).filter(Boolean).map((a) => ({ plat: "spotify", name: a.name, info: { id: a.id, name: a.name, img: (a.images && a.images[0] && a.images[0].url) || "", followers: spFollowers(a) } }))).catch(() => [])
       : [],
     plats.includes("youtube") && !genre
       ? invoke("yt_artists", { query: q }).then((l) => l.map((a) => ({ plat: "youtube", name: a.name, info: { id: a.id, name: a.name, img: a.thumb, followers: a.subscribers } }))).catch(() => [])

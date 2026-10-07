@@ -72,7 +72,7 @@ async function findArtistOn(plat, name) {
     const d = await spApi("GET", "/search?type=artist&limit=10&q=" + encodeURIComponent(name));
     const a = ((d.artists && d.artists.items) || []).filter((x) => sameArtist(x.name, name))
       .sort((p, q) => ((q.followers && q.followers.total) || 0) - ((p.followers && p.followers.total) || 0))[0];
-    return a ? { id: a.id, name: a.name, img: (a.images && a.images[0] && a.images[0].url) || "", followers: (a.followers && a.followers.total) || 0, url: (a.external_urls && a.external_urls.spotify) || "" } : null;
+    return a ? { id: a.id, name: a.name, img: (a.images && a.images[0] && a.images[0].url) || "", followers: spFollowers(a), url: (a.external_urls && a.external_urls.spotify) || "" } : null;
   }
   if (plat === "youtube") {
     const a = (await invoke("yt_artists", { query: name })).find((x) => sameArtist(x.name, name));
@@ -122,7 +122,7 @@ async function resolveArtist(a) {
     try {
       const found = await findArtistOn(p, a.name);
       // an id we came with wins over a different same-named profile
-      a.on[p] = have && have.id && found && String(found.id) !== String(have.id) ? Object.assign({ img: "", followers: 0 }, have) : found;
+      a.on[p] = have && have.id && found && String(found.id) !== String(have.id) ? Object.assign({ img: "", followers: null }, have) : found;
     } catch (e) {
       if (have === undefined) delete a.on[p];   // try again next time
     }
@@ -220,7 +220,7 @@ function artistSubline(a) {
   ARTIST_PLATS.forEach((p) => {
     const info = a.on[p];
     if (!info) return;
-    const n = typeof info.followers === "number" ? info.followers.toLocaleString() + " followers" : info.followers ? info.followers + " subscribers" : "";
+    const n = typeof info.followers === "number" && (info.followers > 0 || p !== "spotify") ? info.followers.toLocaleString() + " followers" : info.followers ? info.followers + " subscribers" : "";
     const s = el("span", "artistOn");
     s.title = PLATFORMS[p].name + (artistFollow[p] ? ": following" : "");
     s.append(platIcon(p), el("span", "", n || PLATFORMS[p].name));
@@ -328,7 +328,7 @@ async function followedOn(plat) {
     for (let i = 0; i < 20; i++) {
       const d = await spApi("GET", "/me/following?type=artist&limit=50" + (after ? "&after=" + after : ""));
       const page = d.artists || {};
-      (page.items || []).forEach((a) => out.push({ id: a.id, name: a.name, img: (a.images && a.images[a.images.length - 1] && a.images[a.images.length - 1].url) || "", followers: (a.followers && a.followers.total) || 0, url: (a.external_urls && a.external_urls.spotify) || "" }));
+      (page.items || []).forEach((a) => out.push({ id: a.id, name: a.name, img: (a.images && a.images[a.images.length - 1] && a.images[a.images.length - 1].url) || "", followers: spFollowers(a), url: (a.external_urls && a.external_urls.spotify) || "" }));
       after = page.cursors && page.cursors.after;
       if (!after || !page.next) break;
     }
@@ -541,10 +541,10 @@ function artistMenu(a, x, y) {
 
 function artistsHeaderMenu(x, y) {
   const plats = ARTIST_PLATS.filter((p) => activePlats().includes(p));
-  const items = ["Follow on other platforms"];
+  const items = ["Follow everyone you follow on one platform on another too"];
   plats.forEach((from) => plats.filter((to) => to !== from).forEach((to) => {
     const n = (followedCache || []).filter((a) => a.followed[from] && !a.followed[to]).length;
-    if (n) items.push(["Everyone you follow on " + PLATFORMS[from].name + ", on " + PLATFORMS[to].name + " too (" + n + ")", () => batchFollow(from, to)]);
+    if (n) items.push([PLATFORMS[from].name + " → " + PLATFORMS[to].name + " (" + n + (n === 1 ? " artist)" : " artists)"), () => batchFollow(from, to)]);
   }));
   if (items.length === 1) items.push(["Nothing to do: everyone's followed everywhere", () => {}]);
   items.push("sep", ["Refresh", () => { followedCache = null; sidebarArtists(); }]);
@@ -573,4 +573,10 @@ function artistsInit() {
   }, true);
   $("followEverywhereOn").checked = prefs.followEverywhere !== false;
   $("followEverywhereOn").addEventListener("change", () => { prefs.followEverywhere = $("followEverywhereOn").checked; savePrefs(); });
+}
+
+// Spotify stopped sending follower counts (February 2026), so an artist without one shows just the
+// platform's name rather than "0 followers"
+function spFollowers(a) {
+  return a && a.followers && typeof a.followers.total === "number" && a.followers.total > 0 ? a.followers.total : null;
 }
