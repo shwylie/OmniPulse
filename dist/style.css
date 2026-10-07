@@ -1011,6 +1011,10 @@ select.wide { max-width: 260px; }
 .levSlider { display: flex; align-items: center; gap: 10px; }
 .levSlider input { width: 180px; }
 .levSlider span { min-width: 44px; text-align: right; font-variant-numeric: tabular-nums; color: var(--muted); font-size: 13px; }
+/* plugins */
+#plugSource { flex: 1; min-width: 0; }
+#plugPreview { margin: 10px 0; }
+#plugInstall { margin-left: 8px; }
 /* reordering the sidebar's pages */
 #navList .nav.dragging { opacity: 0.45; outline: 1px dashed var(--accent); }
 /* Go+ tracks that play from YouTube Music */

@@ -306,6 +306,24 @@
   </form>
 </dialog>
 
+<dialog id="plugDialog" class="fixDialog">
+  <div class="sheet">
+    <h2>Add a plugin</h2>
+    <p class="note">The web address of its manifest.json, or its folder on this PC. You'll see what it is and which sites it can reach before anything is installed.</p>
+    <div class="trimRow">
+      <input id="plugSource" type="text" placeholder="https://.../manifest.json or C:\...\my-plugin" autocomplete="off" spellcheck="false">
+      <button type="button" id="plugFolder" class="soft">Choose folder</button>
+      <button type="button" id="plugCheck" class="soft">Check</button>
+    </div>
+    <div id="plugPreview"></div>
+    <div class="fixActions">
+      <span class="grow"></span>
+      <button type="button" id="plugCancel" class="soft">Cancel</button>
+      <button type="button" id="plugInstall" class="soft fixSave" hidden>Install</button>
+    </div>
+  </div>
+</dialog>
+
 <dialog id="settings">
   <div class="sheet">
     <div class="sheetHead">
@@ -464,6 +482,15 @@
           <label class="switch"><input type="checkbox" id="scrobbleToggle"><span></span></label>
         </div>
       </details>
+
+      <div class="row">
+        <div>
+          <div class="lbl">Plugins</div>
+          <div class="note">Other sources of music, made by others. Each runs in a sandbox: it can't see your accounts, your files or the rest of the app, and can only reach the sites it lists.</div>
+        </div>
+        <button id="plugAdd" class="soft">Add plugin</button>
+      </div>
+      <div id="plugList"></div>
     </section>
 
     <!-- ===================== Library ===================== -->
@@ -864,6 +891,7 @@
 <script src="js/loudness.js"></script>
 <script src="js/output2.js"></script>
 <script src="js/youtube.js"></script>
+<script src="js/plugins.js"></script>
 <script src="js/stats.js"></script>
 <script src="js/lyrics.js"></script>
 <script src="js/integrations.js"></script>

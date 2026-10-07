@@ -41,6 +41,7 @@ function extrasInit() {
   loudInit();
   out2Init();
   ytInit();
+  pluginsInit();
   artistsInit();
   searchPageInit();
   trimsInit();

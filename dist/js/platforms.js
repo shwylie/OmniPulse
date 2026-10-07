@@ -115,6 +115,7 @@ function likesFeed(id) {
   if (id === "soundcloud") return scFeed(LIKES_PATH, markLiked);
   if (id === "spotify") return arrayFeed(() => spotifyLikedTracks(500));
   if (id === "youtube") return arrayFeed(async () => ytLikedTracks());
+  if (id.startsWith("plug:")) return arrayFeed(() => pluginLibraryOf(id.slice(5)));
   return arrayFeed(async () => localTracks.slice());
 }
 
@@ -122,6 +123,7 @@ function searchFeed(id, q) {
   if (id === "soundcloud") return scFeed("/tracks?q=" + encodeURIComponent(q) + "&access=playable&limit=30&linked_partitioning=true");
   if (id === "spotify") return arrayFeed(() => spotifySearchTracks(q));
   if (id === "youtube") return arrayFeed(() => ytSearch(q));
+  if (id.startsWith("plug:")) return arrayFeed(() => pluginSearch(id.slice(5), q));
   return arrayFeed(async () => localSearch(q));
 }
 

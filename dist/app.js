@@ -39,7 +39,9 @@ function icon(d, rule) {
   s.append(p);
   return s;
 }
-const platIcon = (key) => icon(PLATFORMS[key].icon, PLATFORMS[key].rule);
+// (a track from a plugin that's gone shows with a plain plugin icon)
+const platInfo = (key) => PLATFORMS[key] || { name: "Plugin", icon: "M20.5 11H19V7c0-1.1-.9-2-2-2h-4V3.5C13 2.12 11.88 1 10.5 1S8 2.12 8 3.5V5H4c-1.1 0-1.99.9-1.99 2v3.8H3.5c1.49 0 2.7 1.21 2.7 2.7s-1.21 2.7-2.7 2.7H2V20c0 1.1.9 2 2 2h3.8v-1.5c0-1.49 1.21-2.7 2.7-2.7 1.49 0 2.7 1.21 2.7 2.7V22H17c1.1 0 2-.9 2-2v-4h1.5c1.38 0 2.5-1.12 2.5-2.5S21.88 11 20.5 11z" };
+const platIcon = (key) => icon(platInfo(key).icon, platInfo(key).rule);
 function el(tag, cls, text) {
   const n = document.createElement(tag);
   if (cls) n.className = cls;
@@ -126,11 +128,12 @@ const srcOf = (t) => (t && t.source) || "soundcloud";
 // Likes are saved to SoundCloud, your Spotify library, or (YouTube Music) this PC; local files can only be favourited
 const canLike = (t) => !!t && (srcOf(t) === "soundcloud" || srcOf(t) === "youtube" || (srcOf(t) === "spotify" && !!t.uri));
 // "Open on SoundCloud", "Open in Spotify", "Open in YouTube Music"
-const openLabel = (t) => (srcOf(t) === "spotify" ? "Open in Spotify" : srcOf(t) === "youtube" ? "Open in YouTube Music" : "Open on SoundCloud");
+const openLabel = (t) => (srcOf(t) === "spotify" ? "Open in Spotify" : srcOf(t) === "youtube" ? "Open in YouTube Music"
+  : srcOf(t).startsWith("plug:") ? "Open on " + platInfo(srcOf(t)).name : "Open on SoundCloud");
 
 function platformBadge(t) {
   const key = srcOf(t);
-  const p = PLATFORMS[key];
+  const p = platInfo(key);
   const b = el("span", "plat " + key);
   b.title = "Playing from " + p.name;
   b.setAttribute("aria-label", p.name);
@@ -528,6 +531,7 @@ function libraryList(plats) {
     plats.includes("spotify") ? spLikedCache || [] : [],
     plats.includes("local") ? localTracks : [],
     plats.includes("youtube") ? ytLikedTracks() : [],
+    ...plats.filter((p) => p.startsWith("plug:")).map((p) => pluginLibrary.get(p) || []),
   ]));
 }
 
@@ -548,6 +552,8 @@ function showLibrary(list, keepPlace) {
 
 async function openLibrary(plats) {
   const tok = ++loadToken;
+  plats.filter((p) => p.startsWith("plug:") && !pluginLibrary.has(p)).forEach((p) =>
+    pluginLibraryOf(p.slice(5)).then(() => { if (view === "likes" && tok === loadToken) showLibrary(libraryList(plats), true); }).catch(() => {}));
   const online = plats.filter((p) => p !== "local");
   // what this PC already has (only reading the saved copies, nothing downloaded yet)
   await Promise.all([
@@ -1175,6 +1181,13 @@ async function startStream(t) {
     if (await playViaYouTube(t, mine, "Playing from YouTube Music (this Spotify account isn't Premium).")) return;
     if (mine !== streamToken) return;
     throw new Error(ytOn() ? "this song couldn't be found on YouTube Music" : "without Spotify Premium, Spotify tracks play from YouTube Music, which is switched off");
+  }
+  if (isPluginTrack(t)) {
+    const url = await pluginPlayUrl(t);
+    if (mine !== streamToken) return;
+    await tryStream(url, false, null);
+    if (mine === streamToken) say("");
+    return;
   }
   if (srcOf(t) === "youtube") {
     const url = await ytPlay(t);

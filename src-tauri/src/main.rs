@@ -4,7 +4,7 @@
 // wrappers that hand each call from the page to omnipulse-core (crates/core).
 
 use omnipulse_core::{
-    discord, lastfm, local, loudness, lyrics, remote, requests, soundcloud as sc, spotify, spotify_engine as spe, widget,
+    discord, lastfm, local, loudness, lyrics, plugins, remote, requests, soundcloud as sc, spotify, spotify_engine as spe, widget,
     tools, youtube, yt_stream, Settings,
 };
 use serde_json::Value;
@@ -207,6 +207,20 @@ fn remote_start(port: u16, key: String) -> Result<String, String> { remote::remo
 fn remote_stop() { remote::remote_stop() }
 #[tauri::command]
 fn remote_result(id: u64, state: Value) { remote::remote_result(id, state) }
+
+// ---------- plugins ----------
+#[tauri::command]
+async fn plugin_inspect(source: String) -> Result<plugins::Package, String> { plugins::inspect(&source).await }
+#[tauri::command]
+async fn plugin_install(source: String) -> Result<plugins::Manifest, String> { plugins::install(&source).await }
+#[tauri::command]
+fn plugin_list() -> Vec<plugins::Package> { plugins::list() }
+#[tauri::command]
+fn plugin_remove(id: String) -> Result<(), String> { plugins::remove(&id) }
+#[tauri::command]
+async fn plugin_http(id: String, url: String, method: String, headers: Vec<(String, String)>, body: Option<String>) -> Result<Value, String> {
+    plugins::http(&id, &url, &method, headers, body).await
+}
 
 // ---------- app settings ----------
 #[tauri::command]
@@ -621,7 +635,7 @@ fn main() {
             local_folders, local_set_folders, local_scan, local_status, local_tracks, local_server,
             requests_start, requests_stop, request_result,
             spe_signed_in, spe_login, spe_logout, spe_attach, spe_play, spe_pause, spe_resume, spe_seek, spe_stop, spe_played, spe_playlist, spe_web_get, spe_set_normalisation, loudness_analyse,
-            resolve_yt_stream, yt_search, yt_radio, yt_status, yt_artists, yt_artist, yt_album, yt_playlist, yt_playlists, yt_prepare, yt_setup, yt_remove, remote_start, remote_stop, remote_result
+            resolve_yt_stream, plugin_inspect, plugin_install, plugin_list, plugin_remove, plugin_http, yt_search, yt_radio, yt_status, yt_artists, yt_artist, yt_album, yt_playlist, yt_playlists, yt_prepare, yt_setup, yt_remove, remote_start, remote_stop, remote_result
         ])
         .run(tauri::generate_context!())
         .expect("error while running app");

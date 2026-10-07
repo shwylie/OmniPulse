@@ -7,6 +7,7 @@ pub mod lastfm;
 pub mod local;
 pub mod loudness;
 pub mod lyrics;
+pub mod plugins;
 pub mod remote;
 pub mod requests;
 pub mod soundcloud;

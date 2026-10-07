@@ -314,6 +314,12 @@ pub fn handle_local_request(request: tiny_http::Request, token: &str) {
         serve_youtube(request, &id);
         return;
     }
+    if route == "/plug" {
+        let plugin = query_param(&url, "p").unwrap_or_default();
+        let target = query_param(&url, "u").unwrap_or_default();
+        serve_plugin(request, &plugin, &target);
+        return;
+    }
     let Some(path) = local_path_for(&id) else {
         let _ = request.respond(tiny_http::Response::empty(404));
         return;
@@ -399,6 +405,63 @@ pub fn local_tracks() -> Value {
 pub fn local_server() -> Value {
     let info = LOCAL_SERVER.get_or_init(start_local_server);
     serde_json::json!({ "port": info.0, "token": info.1 })
+}
+
+// ---------- a plugin's audio, passed through ----------
+// Only from the plugin's own sites (redirects included), in ranges like the player asks for them.
+fn serve_plugin(request: tiny_http::Request, plugin: &str, target: &str) {
+    let Some(hosts) = crate::plugins::hosts_of(plugin) else {
+        let _ = request.respond(tiny_http::Response::empty(404));
+        return;
+    };
+    if !crate::plugins::host_allowed(&hosts, target) {
+        let _ = request.respond(tiny_http::Response::from_string("not one of the plugin's sites").with_status_code(403));
+        return;
+    }
+    let range = request
+        .headers()
+        .iter()
+        .find(|h| h.field.equiv("Range"))
+        .map(|h| h.value.as_str().to_string());
+    let client = reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .redirect(reqwest::redirect::Policy::custom(move |attempt| {
+            if attempt.previous().len() > 5 || !crate::plugins::host_allowed(&hosts, attempt.url().as_str()) {
+                attempt.stop()
+            } else {
+                attempt.follow()
+            }
+        }))
+        .build()
+        .unwrap_or_default();
+    let mut rb = client.get(target);
+    if let Some(r) = &range {
+        rb = rb.header("Range", r);
+    }
+    let res = match rb.send() {
+        Ok(r) => r,
+        Err(e) => {
+            let _ = request.respond(tiny_http::Response::from_string(e.to_string()).with_status_code(502));
+            return;
+        }
+    };
+    let status = res.status().as_u16();
+    if status != 200 && status != 206 {
+        let _ = request.respond(tiny_http::Response::empty(if status == 416 { 416 } else { 502 }));
+        return;
+    }
+    let header = |k: &str| res.headers().get(k).and_then(|v| v.to_str().ok()).map(String::from);
+    let ctype = header("content-type").unwrap_or_else(|| "application/octet-stream".into());
+    let len = header("content-length").and_then(|l| l.parse::<usize>().ok());
+    let crange = header("content-range");
+    let mut resp = tiny_http::Response::new(tiny_http::StatusCode(status), Vec::new(), res, len, None);
+    add_header(&mut resp, "Content-Type", &ctype);
+    add_header(&mut resp, "Accept-Ranges", "bytes");
+    add_header(&mut resp, "Access-Control-Allow-Origin", "*");
+    if let Some(cr) = crange {
+        add_header(&mut resp, "Content-Range", &cr);
+    }
+    let _ = request.respond(resp);
 }
 
 // ---------- YouTube audio, passed through ----------
