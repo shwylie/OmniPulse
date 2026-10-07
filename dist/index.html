@@ -134,46 +134,56 @@
   </aside>
 
   <footer class="player">
-    <div class="now" id="nowToggle" role="button" tabindex="0">
-      <img id="nowArt" alt="">
-      <div class="nowText">
-        <div id="nowTitle" title="Open Now Playing">Nothing playing</div>
-        <div class="artistRow"><span id="nowPlat"></span><div id="nowArtist" title="Open artist page"></div></div>
-      </div>
-      <button id="likeBtn" class="ghost" aria-label="Add to Likes" hidden></button>
-    </div>
-
-    <div class="center">
-      <div class="controls">
-        <button id="shuffleBtn" class="mode" aria-label="Shuffle"><svg viewBox="0 0 24 24"><path d="M10.59 9.17L5.41 4 4 5.41l5.17 5.17 1.42-1.41zM14.5 4l2.04 2.04L4 18.59 5.41 20 17.96 7.46 20 9.5V4h-5.5zm.33 9.41l-1.41 1.41 3.13 3.13L14.5 20H20v-5.5l-2.04 2.04-3.13-3.13z"/></svg></button>
-        <button id="prev" aria-label="Previous"><svg viewBox="0 0 24 24"><path d="M6 5h2v14H6zM20 5v14L9 12z"/></svg></button>
-        <button id="toggle" class="main" aria-label="Play or pause">
-          <svg id="icoPlay" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
-          <svg id="icoPause" class="off" viewBox="0 0 24 24"><path d="M7 5h4v14H7zM13 5h4v14h-4z"/></svg>
-        </button>
-        <button id="next" aria-label="Next"><svg viewBox="0 0 24 24"><path d="M16 5h2v14h-2zM4 5v14l11-7z"/></svg></button>
-        <button id="repeatBtn" class="mode" aria-label="Repeat" data-mode="off"><svg viewBox="0 0 24 24"><path d="M7 7h10v3l4-4-4-4v3H5v6h2V7zm10 10H7v-3l-4 4 4 4v-3h12v-6h-2v4z"/></svg></button>
-      </div>
+    <div class="transport">
+      <button id="toggle" class="main" aria-label="Play or pause">
+        <svg id="icoPlay" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+        <svg id="icoPause" class="off" viewBox="0 0 24 24"><path d="M7 5h4v14H7zM13 5h4v14h-4z"/></svg>
+      </button>
+      <button id="prev" class="ghost" aria-label="Previous" title="Previous"><svg viewBox="0 0 24 24"><path d="M6 5h2v14H6zM20 5v14L9 12z"/></svg></button>
+      <button id="next" class="ghost" aria-label="Next" title="Next"><svg viewBox="0 0 24 24"><path d="M16 5h2v14h-2zM4 5v14l11-7z"/></svg></button>
+      <button id="shuffleBtn" class="ghost mode" aria-label="Shuffle"><svg viewBox="0 0 24 24"><path d="M10.59 9.17L5.41 4 4 5.41l5.17 5.17 1.42-1.41zM14.5 4l2.04 2.04L4 18.59 5.41 20 17.96 7.46 20 9.5V4h-5.5zm.33 9.41l-1.41 1.41 3.13 3.13L14.5 20H20v-5.5l-2.04 2.04-3.13-3.13z"/></svg></button>
+      <button id="repeatBtn" class="ghost mode" aria-label="Repeat" data-mode="off"><svg viewBox="0 0 24 24"><path d="M7 7h10v3l4-4-4-4v3H5v6h2V7zm10 10H7v-3l-4 4 4 4v-3h12v-6h-2v4z"/></svg></button>
       <div class="seekRow">
         <span id="cur">0:00</span>
         <input id="seek" type="range" min="0" max="1000" value="0" aria-label="Seek">
         <span id="dur">0:00</span>
       </div>
+      <div class="volWrap">
+        <button id="mute" class="ghost" aria-label="Mute" title="Mute">
+          <svg id="icoVol" viewBox="0 0 24 24"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/></svg>
+          <svg id="icoMute" class="off" viewBox="0 0 24 24"><path d="M16.5 12c0-1.77-1.02-3.29-2.5-4.03v2.21l2.45 2.45c.03-.2.05-.41.05-.63zm2.5 0c0 .94-.2 1.82-.54 2.64l1.51 1.51A8.796 8.796 0 0021 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3L3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06c1.38-.31 2.63-.95 3.69-1.81L19.73 21 21 19.73l-9-9L4.27 3zM12 4L9.91 6.09 12 8.18V4z"/></svg>
+        </button>
+        <input id="vol" type="range" min="0" max="100" value="80" aria-label="Volume">
+      </div>
+    </div>
+
+    <div class="now" id="nowToggle" role="button" tabindex="0" title="Open Now Playing">
+      <img id="nowArt" alt="">
+      <div class="nowText">
+        <div id="nowTitle">Nothing playing</div>
+        <div class="artistRow"><span id="nowPlat"></span><div id="nowArtist" title="Open artist page"></div></div>
+        <div id="nowAlbum"></div>
+      </div>
     </div>
 
     <div class="right">
-      <button id="lyricsBtn" class="ghost" aria-label="Lyrics" title="Lyrics"><svg viewBox="0 0 24 24"><path d="M3 18h12v-2H3v2zM3 6v2h18V6H3zm0 7h18v-2H3v2z"/></svg></button>
-      <button id="queueBtn" class="ghost" aria-label="Queue" title="Queue (Q)">
-        <svg viewBox="0 0 24 24"><path d="M15 6H3v2h12V6zm0 4H3v2h12v-2zM3 16h8v-2H3v2zM17 6v8.18c-.31-.11-.65-.18-1-.18-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3V8h3V6h-5z"/></svg>
+      <button id="likeBtn" class="ghost" aria-label="Add to Likes" hidden></button>
+      <button id="plAddBtn" class="ghost" aria-label="Add to playlist" title="Add to playlist" hidden>
+        <svg viewBox="0 0 24 24"><path d="M19 3H5a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2V5a2 2 0 00-2-2zm0 16H5V5h14v14zm-8-2h2v-4h4v-2h-4V7h-2v4H7v2h4z"/></svg>
+      </button>
+      <button id="lyricsBtn" class="ghost" aria-label="Lyrics" title="Lyrics">
+        <svg viewBox="0 0 24 24"><path d="M3 6h12v2H3zm0 5h12v2H3zm0 5h8v2H3zM17 6v8.18A3 3 0 1019 17V8h3V6z"/></svg>
       </button>
       <button id="outputBtn" class="ghost" aria-label="Choose output device" title="Output device">
         <svg viewBox="0 0 24 24"><path d="M4 6h18V4H4c-1.1 0-2 .9-2 2v11H0v3h14v-3H4V6zm19 2h-6c-.55 0-1 .45-1 1v10c0 .55.45 1 1 1h6c.55 0 1-.45 1-1V9c0-.55-.45-1-1-1zm-1 9h-4v-7h4v7z"/></svg>
       </button>
-      <button id="mute" class="ghost" aria-label="Mute">
-        <svg id="icoVol" viewBox="0 0 24 24"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/></svg>
-        <svg id="icoMute" class="off" viewBox="0 0 24 24"><path d="M16.5 12c0-1.77-1.02-3.29-2.5-4.03v2.21l2.45 2.45c.03-.2.05-.41.05-.63zm2.5 0c0 .94-.2 1.82-.54 2.64l1.51 1.51A8.796 8.796 0 0021 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3L3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06c1.38-.31 2.63-.95 3.69-1.81L19.73 21 21 19.73l-9-9L4.27 3zM12 4L9.91 6.09 12 8.18V4z"/></svg>
+      <button id="moreBtn" class="ghost" aria-label="More options for this track" title="More" hidden>
+        <svg viewBox="0 0 24 24"><path d="M6 10a2 2 0 100 4 2 2 0 000-4zm6 0a2 2 0 100 4 2 2 0 000-4zm6 0a2 2 0 100 4 2 2 0 000-4z"/></svg>
       </button>
-      <input id="vol" type="range" min="0" max="100" value="80" aria-label="Volume">
+      <span class="barSep" aria-hidden="true"></span>
+      <button id="queueBtn" class="ghost" aria-label="Queue" title="Queue (Q)">
+        <svg viewBox="0 0 24 24"><path d="M4 5h16v3H4zm0 5.5h16v3H4zM4 16h16v3H4z" fill-rule="evenodd"/></svg>
+      </button>
     </div>
   </footer>
 </div>

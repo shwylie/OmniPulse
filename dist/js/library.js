@@ -244,7 +244,8 @@ function hideRecommendation(t) {
 let ctxTrack = null;
 let ctxAnchor = null;
 
-function openTrackMenu(t, x, y) {
+// fromPlayer: opened from the player bar, so leave out what only makes sense on a page
+function openTrackMenu(t, x, y, fromPlayer) {
   ctxTrack = t;
   ctxAnchor = { getBoundingClientRect: () => ({ left: x, right: x, top: y, bottom: y }) };
   const m = $("plMenu");
@@ -256,15 +257,15 @@ function openTrackMenu(t, x, y) {
   };
   const sep = () => m.append(el("div", "menuSep"));
   const sc = srcOf(t) === "soundcloud";
-  add("Play", "play");
+  if (!fromPlayer) add("Play", "play");   // it is already playing
   add("Play next", "next");
   add("Add to queue", "queue");
   add("Add to playlist...", "playlist");
   sep();
   if (sc) add(isLiked(t) ? "Remove from Likes" : "Add to Likes", "like");
   if (sc && t.user && t.user.id) add("Go to artist", "artist");
-  if (view === "playlist" && isOwnPlaylist(currentPlaylist)) add("Remove from this playlist", "unlist");
-  if (view === "discover" || view === "rediscover") add("Remove recommendation", "hide");
+  if (!fromPlayer && view === "playlist" && isOwnPlaylist(currentPlaylist)) add("Remove from this playlist", "unlist");
+  if (!fromPlayer && (view === "discover" || view === "rediscover")) add("Remove recommendation", "hide");
   if (t.permalink_url) {
     sep();
     add(srcOf(t) === "spotify" ? "Open in Spotify" : "Open on SoundCloud", "open");

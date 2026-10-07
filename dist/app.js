@@ -56,7 +56,7 @@ const ICON_PLIST = "M14 10H2v2h12v-2zm0-4H2v2h12V6zm4 8v-4h-2v4h-4v2h4v4h2v-4h4v
 const ICON_CLOSE = "M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z";
 
 function fmt(ms) {
-  const s = Math.max(0, Math.floor(ms / 1000));
+  const s = isFinite(ms) ? Math.max(0, Math.floor(ms / 1000)) : 0;
   return Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0");
 }
 function artUrl(t, size) {
@@ -754,6 +754,9 @@ function fillNowPlaying(t) {
   $("nowTitle").textContent = t ? t.title || "Untitled" : "Nothing playing";
   $("nowArtist").textContent = t ? artistName(t) : "";
   $("nowArtist").title = t ? uploaderNote(t) : "";
+  $("nowAlbum").textContent = t ? t.album || (t.spAlbum && t.spAlbum.name) || "" : "";
+  $("plAddBtn").hidden = !t;
+  $("moreBtn").hidden = !t;
   setBadge($("nowPlat"), t);
   const small = t ? artUrl(t, "t120x120") : "";
   fadeImg($("nowArt"), small);
@@ -845,6 +848,25 @@ async function toggleLike(t) {
 }
 
 $("likeBtn").addEventListener("click", (e) => { e.stopPropagation(); toggleLike(curTrack()); });
+
+// The track menu for what's playing: the "..." button, or right-click the now-playing area
+$("moreBtn").addEventListener("click", (e) => {
+  const t = curTrack();
+  if (!t) return;
+  e.stopPropagation();
+  const r = $("moreBtn").getBoundingClientRect();
+  openTrackMenu(t, r.left, r.top - 4, true);
+});
+$("nowToggle").addEventListener("contextmenu", (e) => {
+  e.preventDefault();
+  const t = curTrack();
+  if (t) openTrackMenu(t, e.clientX, e.clientY, true);
+});
+$("plAddBtn").addEventListener("click", (e) => {
+  e.stopPropagation();
+  const t = curTrack();
+  if (t) openPlaylistMenu(t, $("plAddBtn"));
+});
 $("npLike").addEventListener("click", () => toggleLike(curTrack()));
 
 // ---------- playback ----------
@@ -1035,16 +1057,18 @@ audio.addEventListener("error", () => {
 });
 audio.addEventListener("timeupdate", () => {
   $("cur").textContent = fmt(audio.currentTime * 1000);
-  if (audio.duration) $("seek").value = String(Math.round((audio.currentTime / audio.duration) * 1000));
+  const d = curDurMs();
+  if (d) $("seek").value = String(Math.round(Math.min(1, (audio.currentTime * 1000) / d) * 1000));
 });
 audio.addEventListener("loadedmetadata", () => {
-  if (audio.duration) $("dur").textContent = fmt(audio.duration * 1000);
+  if (isFinite(audio.duration) && audio.duration) $("dur").textContent = fmt(audio.duration * 1000);   // streams of unknown length report Infinity
 });
 
 $("seek").addEventListener("input", () => {
   const cur = curTrack();
   if (cur && srcOf(cur) === "spotify") { spotifySeek(Number($("seek").value) / 1000); return; }
-  if (audio.duration) audio.currentTime = (Number($("seek").value) / 1000) * audio.duration;
+  const d = curDurMs();
+  if (d) audio.currentTime = (Number($("seek").value) / 1000) * (d / 1000);
 });
 
 audio.volume = prefs.volume;
