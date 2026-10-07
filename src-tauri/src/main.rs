@@ -5,7 +5,7 @@
 
 use omnipulse_core::{
     discord, lastfm, local, loudness, lyrics, remote, requests, soundcloud as sc, spotify, spotify_engine as spe, widget,
-    youtube, yt_stream, Settings,
+    tools, youtube, yt_stream, Settings,
 };
 use serde_json::Value;
 use std::sync::{Arc, OnceLock};
@@ -156,6 +156,9 @@ async fn yt_status() -> Value { yt_stream::status().await }
 // Finds the audio ahead of playing (the player then fetches it through the local server's /yt)
 #[tauri::command]
 async fn yt_prepare(id: String) -> Result<(), String> { youtube::stream_url(&id, false).await.map(|_| ()) }
+// Downloads yt-dlp and Deno in the background; yt_status says how it's going
+#[tauri::command]
+fn yt_setup() { tools::start_install() }
 
 // ---------- OBS widget, local music, chat requests, Stream Deck remote ----------
 #[tauri::command]
@@ -515,6 +518,10 @@ fn main() {
             }
             let main_window = builder.build()?;
             let _ = APP.set(app.handle().clone());
+            // the built-in yt-dlp keeps up with YouTube: it updates itself once a day
+            tauri::async_runtime::spawn(async {
+                tools::update_ytdlp_daily().await;
+            });
             // Chat requests and Stream Deck presses are answered by the page
             requests::set_asker(Arc::new(|id, q, user| {
                 page_eval(format!(
@@ -598,7 +605,7 @@ fn main() {
             local_folders, local_set_folders, local_scan, local_status, local_tracks, local_server,
             requests_start, requests_stop, request_result,
             spe_signed_in, spe_login, spe_logout, spe_attach, spe_play, spe_pause, spe_resume, spe_seek, spe_stop, spe_played, spe_playlist, spe_web_get, spe_set_normalisation, loudness_analyse,
-            resolve_yt_stream, yt_search, yt_radio, yt_status, yt_prepare, remote_start, remote_stop, remote_result
+            resolve_yt_stream, yt_search, yt_radio, yt_status, yt_prepare, yt_setup, remote_start, remote_stop, remote_result
         ])
         .run(tauri::generate_context!())
         .expect("error while running app");

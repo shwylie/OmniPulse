@@ -78,34 +78,50 @@ async function ytDiscover(src) {
   return { list: await ytSearch(g + " music") };
 }
 
-// ---------- settings ----------
+// ---------- settings: setting up yt-dlp and Deno ----------
+let ytSetupTimer = null;
+
 function ytPaint() {
   const note = $("ytNote");
-  const help = $("ytHelp");
+  const btn = $("ytSetup");
   $("ytOn").checked = prefs.ytOn !== false;
-  if (!ytInfo.checked) { note.textContent = "Checking for yt-dlp..."; return; }
-  const runtime = ytInfo.deno ? "Deno" : ytInfo.node ? "Node" : "";
-  if (ytAvailable()) {
-    note.textContent = "Ready, with yt-dlp " + ytInfo.ytdlp + " and " + runtime + ". Nothing to sign in to: likes are kept on this PC.";
-  } else if (ytInfo.ytdlp) {
-    note.textContent = "yt-dlp " + ytInfo.ytdlp + " is installed, but YouTube also needs Deno. See below.";
-  } else {
-    note.textContent = "Needs yt-dlp and Deno. See below.";
+  if (!ytInfo.checked) { note.textContent = "Checking..."; btn.hidden = true; return; }
+  const setup = ytInfo.setup || {};
+  const mb = (n) => (n / 1048576).toFixed(0);
+  if (setup.busy) {
+    note.textContent = setup.step + (setup.total ? ": " + mb(setup.done) + " of " + mb(setup.total) + " MB" : "") + "...";
+    btn.hidden = true;
+    return;
   }
-  help.hidden = ytAvailable();
-  if (!ytAvailable()) help.open = true;
+  if (ytAvailable()) {
+    note.textContent = "Ready" + (ytInfo.builtIn ? "" : ", with your own yt-dlp " + ytInfo.ytdlp) + ". Nothing to sign in to: likes are kept on this PC.";
+    btn.hidden = true;
+    return;
+  }
+  note.textContent = setup.error
+    ? "Couldn't set up: " + setup.error
+    : "Needs yt-dlp and Deno to play (about 58 MB, downloaded from GitHub). Set up gets them.";
+  btn.textContent = setup.error ? "Try again" : "Set up";
+  btn.hidden = false;
 }
 
 async function ytCheck() {
   try { ytInfo = Object.assign(await invoke("yt_status"), { checked: true }); } catch (e) { ytInfo = { ytdlp: null, deno: false, node: false, checked: true }; }
   ytPaint();
   renderPlatChips();
+  const busy = ytInfo.setup && ytInfo.setup.busy;
+  clearTimeout(ytSetupTimer);
+  if (busy) ytSetupTimer = setTimeout(ytCheck, 700);   // follow the download
+  else if (ytAvailable() && ytInfo.setup && ytInfo.setup.step === "Done") say("YouTube Music is ready.");
 }
 
 function ytInit() {
   ytLikesLoad();
   ytPaint();
   $("ytOn").addEventListener("change", () => setPlatformOn("youtube", $("ytOn").checked));
-  $("ytCheck").addEventListener("click", () => { ytInfo.checked = false; ytPaint(); ytCheck(); });
+  $("ytSetup").addEventListener("click", async () => {
+    await invoke("yt_setup").catch((e) => say(String(e)));
+    ytCheck();
+  });
   ytCheck();
 }

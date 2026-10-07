@@ -376,13 +376,13 @@
           <div class="note" id="ytNote">Checking for yt-dlp...</div>
         </div>
         <div class="rowEnd">
-          <button id="ytCheck" class="soft">Check again</button>
+          <button id="ytSetup" class="soft" hidden>Set up</button>
           <label class="switch" title="Use YouTube Music"><input type="checkbox" id="ytOn"><span></span></label>
         </div>
       </div>
       <details class="sub" id="ytHelp" hidden>
-        <summary>Setting up YouTube Music</summary>
-        <div class="note botHelp">YouTube Music plays through <b>yt-dlp</b>, which needs a JavaScript runtime: <b>Deno</b> (or Node, if you already have it). Install them from a terminal, restart OmniPulse, then press Check again:<br><code>winget install yt-dlp.yt-dlp</code><br><code>winget install DenoLand.Deno</code><br>Nothing signs in: search, radio and playing work without a Google account, and likes are kept on this PC. Keep yt-dlp up to date (<code>yt-dlp -U</code>, or <code>winget upgrade yt-dlp.yt-dlp</code>) when YouTube stops playing.</div>
+        <summary>About YouTube Music</summary>
+        <div class="note botHelp">Playing needs <b>yt-dlp</b>, which finds each song's audio, and <b>Deno</b>, which runs YouTube's player code for it. Set up downloads both from their official GitHub releases into OmniPulse's folder (about 58 MB), each checked against the checksum published with it. yt-dlp then updates itself once a day, so it keeps up with YouTube. A yt-dlp or Deno you've installed yourself is used if OmniPulse doesn't have its own.<br>Nothing signs in: search, radio and playing work without a Google account, and likes are kept on this PC.</div>
       </details>
 
       <div class="row">

@@ -12,6 +12,7 @@ pub mod requests;
 pub mod soundcloud;
 pub mod spotify;
 pub mod spotify_engine;
+pub mod tools;
 pub mod widget;
 pub mod youtube;
 pub mod yt_stream;

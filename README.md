@@ -308,9 +308,9 @@ hides them; tracks from albums are never hidden.
 - No sign-in: search and radio come from YouTube Music's web API (the client version is read from
   music.youtube.com, so it doesn't go stale), likes are kept on this PC, and nothing touches a Google
   account. This uses YouTube's private API, which YouTube's terms don't allow and which can change.
-- Audio comes from yt-dlp, which needs a JavaScript runtime (Deno, or Node if it's installed):
-  `winget install yt-dlp.yt-dlp` and `winget install DenoLand.Deno`, then restart the app. Update
-  yt-dlp when YouTube stops playing. The next track's audio is looked up ahead, and the local server
+- Audio comes from yt-dlp, which needs a JavaScript runtime. Settings > Accounts > YouTube Music > Set up
+  downloads both from their GitHub releases into %APPDATA%sc-clientbin (about 58 MB, checked against
+  their published checksums), and yt-dlp updates itself daily. The next track's audio is looked up ahead, and the local server
   passes the audio through in 4 MB pieces (as YouTube's player asks for it).
 - YouTube tracks are measured for Match loudness from their audio, like SoundCloud's.
 - Try it from a terminal: `cargo run -p omnipulse-core --example yt -- <search words>`.

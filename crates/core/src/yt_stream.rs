@@ -21,11 +21,13 @@ async fn resolve_with(program: impl AsRef<OsStr>, query: &str) -> Result<String,
     run(program, format!("ytsearch1:{query}"), query).await
 }
 
-// YouTube's player needs a JavaScript runtime (yt-dlp issue #15012). yt-dlp uses Deno by itself;
-// if only Node is installed, it's told to use that.
-fn js_runtime_args() -> Vec<&'static str> {
-    if !on_path("deno") && on_path("node") {
-        vec!["--js-runtimes", "node"]
+// YouTube's player needs a JavaScript runtime (yt-dlp issue #15012): our own Deno (tools.rs) if it's
+// set up, otherwise yt-dlp finds Deno on the PATH by itself, or is told to use Node if that's all there is.
+fn js_runtime_args() -> Vec<String> {
+    if let Some(deno) = crate::tools::deno_path() {
+        vec!["--js-runtimes".into(), format!("deno:{}", deno.display())]
+    } else if !on_path("deno") && on_path("node") {
+        vec!["--js-runtimes".into(), "node".into()]
     } else {
         Vec::new()
     }
@@ -54,7 +56,7 @@ async fn run(program: impl AsRef<OsStr>, target: String, label: &str) -> Result<
 
     let child = cmd.spawn().map_err(|e| {
         if e.kind() == std::io::ErrorKind::NotFound {
-            "yt-dlp isn't installed, or isn't on your PATH. Install it from https://github.com/yt-dlp/yt-dlp and restart the app.".to_string()
+            "yt-dlp isn't set up yet: Settings > Accounts > YouTube Music > Set up.".to_string()
         } else {
             format!("Couldn't start yt-dlp: {e}")
         }
@@ -84,12 +86,13 @@ async fn run(program: impl AsRef<OsStr>, target: String, label: &str) -> Result<
 /// The audio of one YouTube video (the best M4A, or the best audio of any kind)
 pub async fn resolve_video(video_id: &str) -> Result<String, String> {
     // always inside a URL, so an id can never be read as an option
-    run("yt-dlp", format!("https://music.youtube.com/watch?v={video_id}"), video_id).await
+    run(crate::tools::ytdlp_program(), format!("https://music.youtube.com/watch?v={video_id}"), video_id).await
 }
 
-/// What's installed: yt-dlp's version (if it runs), and which JavaScript runtimes are on the PATH
+/// What's installed: yt-dlp's version (if it runs), the JavaScript runtimes, whether they're our
+/// built-in copies, and how setting them up is going
 pub async fn status() -> serde_json::Value {
-    let mut cmd = tokio::process::Command::new("yt-dlp");
+    let mut cmd = tokio::process::Command::new(crate::tools::ytdlp_program());
     cmd.arg("--version").stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null()).kill_on_drop(true);
     #[cfg(windows)]
     cmd.creation_flags(0x0800_0000);
@@ -102,7 +105,13 @@ pub async fn status() -> serde_json::Value {
             .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string()),
         Err(_) => None,
     };
-    serde_json::json!({ "ytdlp": version, "deno": on_path("deno"), "node": on_path("node") })
+    serde_json::json!({
+        "ytdlp": version,
+        "deno": crate::tools::deno_path().is_some() || on_path("deno"),
+        "node": on_path("node"),
+        "builtIn": crate::tools::ytdlp_path().is_some() && crate::tools::deno_path().is_some(),
+        "setup": crate::tools::progress(),
+    })
 }
 
 pub async fn resolve_yt_stream(query: String) -> Result<String, String> {
@@ -153,7 +162,7 @@ mod tests {
     #[tokio::test]
     async fn missing_yt_dlp_is_explained() {
         let e = resolve_with("yt-dlp-definitely-not-installed", "x").await.unwrap_err();
-        assert!(e.contains("isn't installed"), "{e}");
+        assert!(e.contains("isn't set up yet"), "{e}");
     }
 
     #[tokio::test]
