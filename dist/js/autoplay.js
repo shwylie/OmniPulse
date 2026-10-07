@@ -12,7 +12,7 @@ let autoplayFailedFor = null;   // the seed track we last came up empty for, so 
 
 const autoplayOn = () => prefs.autoplay !== false;
 const autoplayActive = () => autoplayOn() && repeatMode === "off";
-const autoplaySets = () => !!prefs.autoplaySets;        // sets & podcasts in autoplay (off unless chosen)
+const autoplaySets = () => !!prefs.queueSets;           // sets & podcasts in the queue and autoplay (one setting; off unless chosen)
 const avoidRecent = () => prefs.avoidRecent !== false;  // on unless switched off
 
 // Where "Add to queue" puts a track: after everything you queued, before the autoplay picks
@@ -178,11 +178,12 @@ function autoplayInit() {
     $(id).addEventListener("change", () => {
       prefs[key] = $(id).checked;
       savePrefs();
-      if (key === "autoplaySets" || key === "avoidRecent") autoplayFailedFor = null;
+      if (key === "queueSets" || key === "avoidRecent") autoplayFailedFor = null;
     });
   };
+  // there were two settings (queue, autoplay); either one on carries over
+  if (prefs.autoplaySets !== undefined) { prefs.queueSets = !!(prefs.queueSets || prefs.autoplaySets); delete prefs.autoplaySets; savePrefs(); }
   sw("queueSets", "queueSets", false);
-  sw("autoplaySetsOn", "autoplaySets", false);
   sw("avoidRecentOn", "avoidRecent", true);
   autoplayPaint();
   setInterval(autoplayTick, 2000);

@@ -13,7 +13,7 @@ function remoteState() {
     liked: isLiked(t),
     canLike: canLike(t),
     favourite: favOn() && isFav(t),
-    setsAllowed: !!(prefs.queueSets || prefs.autoplaySets),
+    setsAllowed: !!prefs.queueSets,
     requests: reqPendingList().length,
   };
 }
@@ -36,12 +36,10 @@ const REMOTE_ACTIONS = {
   },
   // sets & podcasts in (or out of) both the queue and autoplay
   sets: () => {
-    const on = !(prefs.queueSets || prefs.autoplaySets);
+    const on = !prefs.queueSets;
     prefs.queueSets = on;
-    prefs.autoplaySets = on;
     savePrefs();
     $("queueSets").checked = on;
-    $("autoplaySetsOn").checked = on;
     autoplayFailedFor = null;
     say(on ? "Sets & Podcasts are back in the queue and autoplay." : "Sets & Podcasts are out of the queue and autoplay.");
   },
