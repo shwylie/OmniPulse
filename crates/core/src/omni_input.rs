@@ -84,8 +84,9 @@ pub(crate) fn fill(out: &mut [f32], channels: usize, out_rate: u32) {
     }
 }
 
-/// Starts playing (on the default playback device); returns that device's name
-pub fn start() -> Result<String, String> {
+/// Starts playing (on the default playback device); returns that device's name. `muted`: start muted
+/// in Windows' mixer (where it can be unmuted once it's routed)
+pub fn start(muted: bool) -> Result<String, String> {
     stop();
     let alive = Arc::new(AtomicBool::new(true));
     {
@@ -121,7 +122,7 @@ pub fn start() -> Result<String, String> {
             }
             .map_err(|e| e.to_string())?;
             stream.play().map_err(|e| e.to_string())?;
-            name_session();
+            name_session(muted);
             Ok((stream, name))
         })();
         match made {
@@ -166,7 +167,7 @@ pub fn running() -> bool {
 // Windows' mixer (and Wave Link) shows this stream as "OmniPulse Input": the name of this process's
 // audio session on the default device, which is the session this stream plays in
 #[cfg(windows)]
-fn name_session() {
+fn name_session(muted: bool) {
     use windows::core::HSTRING;
     use windows::Win32::Media::Audio::{eConsole, eRender, IAudioSessionManager, IMMDeviceEnumerator, MMDeviceEnumerator};
     use windows::Win32::System::Com::{CoCreateInstance, CoInitializeEx, CLSCTX_ALL, COINIT_MULTITHREADED};
@@ -178,6 +179,9 @@ fn name_session() {
             let mgr: IAudioSessionManager = dev.Activate(CLSCTX_ALL, None)?;
             let ctl = mgr.GetAudioSessionControl(None, 0)?;
             ctl.SetDisplayName(&HSTRING::from(SESSION_NAME), std::ptr::null())?;
+            if muted {
+                mgr.GetSimpleAudioVolume(None, 0)?.SetMute(true, std::ptr::null())?;
+            }
             Ok(())
         })();
         if let Err(e) = r {
@@ -187,7 +191,7 @@ fn name_session() {
 }
 
 #[cfg(not(windows))]
-fn name_session() {}
+fn name_session(_muted: bool) {}
 
 #[cfg(test)]
 mod tests {
@@ -229,11 +233,27 @@ mod live {
     #[test]
     #[ignore]
     fn omni_live() {
-        let name = super::start().expect("starts");
+        let name = super::start(true).expect("starts");
         println!("playing on {name}");
         super::push_pcm(&vec![0u8; 48000 * 4 / 2], 48000);
         std::thread::sleep(std::time::Duration::from_millis(1500));
         assert!(super::running());
+        #[cfg(windows)]
+        unsafe {
+            use windows::Win32::Media::Audio::{eConsole, eRender, IAudioSessionManager, IMMDeviceEnumerator, MMDeviceEnumerator};
+            use windows::Win32::System::Com::{CoCreateInstance, CoInitializeEx, CLSCTX_ALL, COINIT_MULTITHREADED};
+            let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
+            let en: IMMDeviceEnumerator = CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL).unwrap();
+            let mgr: IAudioSessionManager = en.GetDefaultAudioEndpoint(eRender, eConsole).unwrap().Activate(CLSCTX_ALL, None).unwrap();
+            let vol = mgr.GetSimpleAudioVolume(None, 0).unwrap();
+            let muted = vol.GetMute().unwrap().as_bool();
+            let name = mgr.GetAudioSessionControl(None, 0).unwrap().GetDisplayName().unwrap().to_string().unwrap();
+            println!("session: {name}, muted: {muted}");
+            // leave the test program's session as it was
+            vol.SetMute(false, std::ptr::null()).unwrap();
+            assert!(muted);
+            assert_eq!(name, super::SESSION_NAME);
+        }
         super::stop();
     }
 }

@@ -10,7 +10,8 @@ function applyUserCss() {
     st.id = "userCss";
     document.head.append(st);
   }
-  st.textContent = cssEnabled() ? prefs.css || "" : "";
+  const css = cssEnabled() ? prefs.css || "" : "";
+  if (st.textContent !== css) st.textContent = css;   // unchanged: left alone, so nothing is restyled
 }
 
 // ---------- accent from album art ----------

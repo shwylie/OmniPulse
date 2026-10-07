@@ -224,8 +224,8 @@ async fn plugin_http(id: String, url: String, method: String, headers: Vec<(Stri
 
 // ---------- the OmniPulse Input ----------
 #[tauri::command]
-async fn omni_input_start() -> Result<String, String> {
-    tokio::task::spawn_blocking(omnipulse_core::omni_input::start).await.map_err(|e| e.to_string())?
+async fn omni_input_start(muted: bool) -> Result<String, String> {
+    tokio::task::spawn_blocking(move || omnipulse_core::omni_input::start(muted)).await.map_err(|e| e.to_string())?
 }
 #[tauri::command]
 fn omni_input_pcm(request: tauri::ipc::Request) {

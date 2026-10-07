@@ -83,10 +83,14 @@ function out2MainMute(muted) {
   if (out2.mainGain) out2.mainGain.gain.setTargetAtTime(muted ? 0 : 1, norm.ctx.currentTime, 0.05);
 }
 
+const out2StartMuted = () => prefs.out2Muted !== false;
+
 const OUT2_ROUTE = "Please route OmniPulse appropriately first to prevent playback echo.\n\n" +
   "The OmniPulse Input plays the app's sound a second time, as its own app named \"OmniPulse Input\", on your default playback device. " +
   "Before turning it on, send it where only your stream hears it: in Elgato Wave Link, put OmniPulse Input on a channel that goes to the Stream mix and not your Monitor mix; " +
   "otherwise you'll hear the music twice.\n\nTurn on the OmniPulse Input now?";
+const OUT2_ROUTE_MUTED = "The OmniPulse Input plays the app's sound a second time, as its own app named \"OmniPulse Input\", on your default playback device.\n\n" +
+  "It starts muted in the Windows Sound Mixer, so there's no echo. Route it first (in Elgato Wave Link: a channel that goes to the Stream mix and not your Monitor mix), then unmute it in the Sound Mixer.\n\nTurn on the OmniPulse Input now?";
 
 function out2Teardown() {
   if (out2.tap) { out2.tap.port.onmessage = null; try { out2.tap.disconnect(); } catch (e) {} }
@@ -131,10 +135,10 @@ async function out2Apply() {
     out2.delay.delayTime.setValueAtTime(offset > 0 ? offset / 1000 : 0, now);
     out2.gain.gain.setTargetAtTime(prefs.out2Volume ?? 1, now, 0.02);
     if (!out2.running) {
-      const device = await invoke("omni_input_start");
+      const device = await invoke("omni_input_start", { muted: out2StartMuted() });
       out2.running = true;
       $("out2Note").textContent = "";
-      $("out2Help").textContent = "Playing as \"OmniPulse Input\" on " + device + ". In Wave Link, send it to the Stream mix only, so you don't hear it twice. (It follows the default playback device as of when it was turned on.)";
+      $("out2Help").textContent = "Playing as \"OmniPulse Input\" on " + device + (out2StartMuted() ? ", muted in the Windows Sound Mixer until you unmute it there" : "") + ". In Wave Link, send it to the Stream mix only, so you don't hear it twice. (It uses the default playback device of when it was turned on.)";
     }
     if (ctx.state === "suspended") ctx.resume().catch(() => {});
   } catch (e) {
@@ -148,11 +152,13 @@ function out2Init() {
   if (!prefs.out2Input) { prefs.out2On = false; prefs.out2Input = 1; savePrefs(); }
   $("out2Help").textContent = "Plays the app's sound a second time, as its own app named \"OmniPulse Input\", on your default playback device. Route it first (in Wave Link: the Stream mix only), so you don't hear it twice.";
   $("out2On").addEventListener("change", () => {
-    if ($("out2On").checked && !confirm(OUT2_ROUTE)) { $("out2On").checked = false; return; }
+    if ($("out2On").checked && !confirm(out2StartMuted() ? OUT2_ROUTE_MUTED : OUT2_ROUTE)) { $("out2On").checked = false; return; }
     prefs.out2On = $("out2On").checked;
     savePrefs();
     out2Apply();
   });
+  $("out2Muted").checked = out2StartMuted();
+  $("out2Muted").addEventListener("change", () => { prefs.out2Muted = $("out2Muted").checked; savePrefs(); });
   $("out2Offset").addEventListener("change", () => {
     const v = Math.round(Number($("out2Offset").value));
     prefs.out2Offset = Number.isFinite(v) ? Math.max(-OUT2_MAX_MS, Math.min(OUT2_MAX_MS, v)) : 0;
