@@ -258,3 +258,14 @@ hides them; tracks from albums are never hidden.
 - Search left the sidebar: click the magnifying glass in the search bar for the Search page (or to search for what you typed).
 - Search: "Hide likes" (beside Albums) leaves tracks you have liked on SoundCloud or Spotify out of the results.
 - Chat requests prefer your likes: a liked song whose title and artist contain every word asked for wins; otherwise a liked track among the top 5 results beats the first result. Links still play exactly what was linked.
+
+## v44
+- Discover is a feed of shelves, like SoundCloud's feed and Spotify's home: Daily Mixes and artist stations
+  made from your likes, More of what you like, New from artists you follow, Trending by genre. Every
+  platform takes part and each tile shows its platform's logo. Shelves scroll sideways (or Show all).
+  Spotify's own Daily Mixes can't be read by apps like this one, so these are made by the app.
+- Sets & podcasts page in the sidebar (anything over 15 minutes), with a "Liked only" chip.
+- Favourites: starring a track likes it too (unstarring keeps the like); a "Favourites only" chip; the
+  whole feature can be switched off in Settings > Library.
+- Settings reorganised into Look, Accounts, Library, Sound, Streaming and App, with shorter wording and
+  the same row design throughout. Spotify shows the account you're signed in as.

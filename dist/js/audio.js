@@ -167,7 +167,7 @@ function audioInit() {
     savePrefs();
     if (norm.ctx) {
       normApply();
-      $("normNote").textContent = "Brings quiet tracks up and loud ones down, like a leveling compressor.";
+      $("normNote").textContent = "Brings quiet tracks up and loud ones down.";
     } else if (prefs.normalize !== "off") {
       $("normNote").textContent = "Starts with the next track you play.";
     }
@@ -183,7 +183,7 @@ function audioInit() {
     $("eqSection").hidden = !prefs.eqOn;
     if (prefs.eqOn) {
       $("eqSection").open = true;
-      $("eqNote").textContent = "Ten bands, for everything the app plays. Changes are heard straight away.";
+      $("eqNote").textContent = "Ten bands. Changes are heard straight away.";
     }
     eqApply();
   });

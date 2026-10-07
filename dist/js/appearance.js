@@ -171,8 +171,7 @@ function buildSwatches2() {
   const off = el("button", "swatch none");
   off.dataset.c = "";
   off.title = "One colour";
-  off.setAttribute("aria-label", "No second accent");
-  box.append(off);
+  off.setAttribute("aria-label", "No second colour");
   ACCENTS.forEach((c) => {
     const b = el("button", "swatch");
     b.style.background = c;
@@ -183,8 +182,8 @@ function buildSwatches2() {
   const custom = el("input");
   custom.type = "color";
   custom.id = "accent2Custom";
-  custom.setAttribute("aria-label", "Custom second accent");
-  box.append(custom);
+  custom.setAttribute("aria-label", "Custom second colour");
+  box.append(custom, off);
 }
 
 // Marks the chosen second accent, and greys out both accent rows while album-art colours are on

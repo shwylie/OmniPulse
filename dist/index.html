@@ -272,66 +272,67 @@
       <button id="closeSettings" class="ghost" aria-label="Close"><svg viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg></button>
     </div>
 
-    <!-- ===================== Appearance ===================== -->
+    <!-- ===================== Look ===================== -->
     <section class="group">
-      <h3>Appearance</h3>
+      <h3>Look</h3>
       <div class="row">
         <div class="lbl">Theme</div>
         <select id="themeSel" class="narrow"><option value="dark">Dark</option><option value="midnight">Midnight</option><option value="graphite">Graphite</option><option value="forest">Forest</option><option value="rose">Rose</option><option value="light">Light</option><option value="paper">Paper</option></select>
       </div>
       <div class="row" id="accentRow">
-        <div class="lbl">Accent color</div>
+        <div class="lbl">Accent</div>
         <div class="swatches" id="swatches"></div>
       </div>
       <div class="row" id="accent2Row">
         <div>
-          <div class="lbl">Second accent</div>
-          <div class="note">Blends with the first, like the album-art colours. The crossed-out swatch uses one colour.</div>
+          <div class="lbl">Second colour</div>
+          <div class="note">Blends with the accent. Pick the crossed-out one for a single colour.</div>
         </div>
         <div class="swatches" id="swatches2"></div>
       </div>
       <div class="row">
-        <div class="lbl">Track list density</div>
-        <div class="seg" id="densitySeg"><button data-v="comfortable">Comfortable</button><button data-v="compact">Compact</button></div>
-      </div>
-      <div class="row">
         <div>
-          <div class="lbl">Match accent to album art</div>
-          <div class="note">Picks colours from the current cover. Falls back to your accent colours.</div>
+          <div class="lbl">Album art colours</div>
+          <div class="note">Takes both colours from the cover that's playing.</div>
         </div>
         <label class="switch"><input type="checkbox" id="artAccentToggle"><span></span></label>
       </div>
       <div class="row">
+        <div class="lbl">List density</div>
+        <div class="seg" id="densitySeg"><button data-v="comfortable">Comfortable</button><button data-v="compact">Compact</button></div>
+      </div>
+      <div class="row">
+        <div>
+          <div class="lbl">Animations</div>
+          <div class="note">Fades and motion in the app. The stream widget has its own.</div>
+        </div>
+        <label class="switch"><input type="checkbox" id="animOn"><span></span></label>
+      </div>
+      <div class="row">
         <div>
           <div class="lbl">App name</div>
-          <div class="note">Shown in the title bar and on the taskbar. Leave empty for the default. You can also right-click the name in the title bar.</div>
+          <div class="note">In the title bar and taskbar. You can also right-click the title.</div>
         </div>
         <input id="appNameInput" class="nameInput" type="text" maxlength="60" autocomplete="off" spellcheck="false">
       </div>
       <div class="row">
         <div>
-          <div class="lbl">Favourites</div>
-          <div class="note">A star next to the heart, a Favourites page and filter.</div>
-        </div>
-        <label class="switch"><input type="checkbox" id="favOn"><span></span></label>
-      </div>
-      <div class="row">
-        <div>
           <div class="lbl">Custom CSS</div>
-          <div class="note">Your own styling on top of the theme.</div>
+          <div class="note">Your own styles, on top of the theme.</div>
         </div>
         <label class="switch"><input type="checkbox" id="cssOn"><span></span></label>
       </div>
       <details class="sub" id="cssSection" hidden>
-        <summary>Edit custom CSS</summary>
+        <summary>Edit CSS</summary>
         <textarea id="customCss" rows="6" spellcheck="false" placeholder=":root { --row-pad: 10px; }"></textarea>
-        <div class="note">Applied as you type.</div>
+        <div class="note">Applies as you type.</div>
       </details>
     </section>
 
-    <!-- ===================== Integrations ===================== -->
+    <!-- ===================== Accounts ===================== -->
     <section class="group">
-      <h3>Integrations</h3>
+      <h3>Accounts</h3>
+      <p class="note groupNote">Switching one off hides it everywhere; you stay signed in.</p>
       <div class="row">
         <div>
           <div class="lbl">SoundCloud</div>
@@ -339,49 +340,27 @@
           <button class="linkBtn" data-url="https://soundcloud.com/you/subscriptions" title="Go+, Artist Pro and other plans">Manage subscription</button>
         </div>
         <div class="rowEnd">
-          <label class="switch" title="Use SoundCloud (stays signed in when off)"><input type="checkbox" id="scOn"><span></span></label>
           <button id="scAuth" class="soft">Sign in</button>
+          <label class="switch" title="Use SoundCloud"><input type="checkbox" id="scOn"><span></span></label>
         </div>
       </div>
-
-      <div class="row">
-        <div>
-          <div class="lbl">Last.fm</div>
-          <div class="note" id="lfmNote">Not signed in. Needs lastfm_api_key and lastfm_secret in config.json.</div>
-          <button class="linkBtn" data-url="https://www.last.fm/settings/subscription" title="Last.fm Pro">Manage subscription</button>
-        </div>
-        <div class="rowEnd">
-          <label class="switch" title="Use Last.fm (stays signed in when off)"><input type="checkbox" id="lfmOn"><span></span></label>
-          <button id="lfmConnect" class="soft">Sign in</button>
-        </div>
-      </div>
-      <details class="sub" id="lastfmSection" hidden>
-        <summary>Last.fm options</summary>
-        <div class="row">
-          <div>
-            <div class="lbl">Scrobble plays</div>
-            <div class="note">Sends what you play to Last.fm.</div>
-          </div>
-          <label class="switch"><input type="checkbox" id="scrobbleToggle"><span></span></label>
-        </div>
-      </details>
 
       <div class="row" id="spotifySection">
         <div>
           <div class="lbl">Spotify</div>
-          <div class="note" id="spStatus">Not signed in. Spotify only appears once you sign in with a Premium account.</div>
+          <div class="note" id="spStatus">Not signed in. Needs a Premium account.</div>
           <button class="linkBtn" data-url="https://www.spotify.com/account/subscription/manage/" title="Premium and other plans">Manage subscription</button>
         </div>
         <div class="rowEnd">
-          <label class="switch" title="Use Spotify (stays signed in when off)"><input type="checkbox" id="spOn"><span></span></label>
           <button id="spConnect" class="soft">Sign in</button>
+          <label class="switch" title="Use Spotify"><input type="checkbox" id="spOn"><span></span></label>
         </div>
       </div>
       <details class="sub" id="spotifyOptions" hidden>
         <summary>Spotify options</summary>
         <div class="row">
           <div>
-            <div class="lbl">Spotify playback</div>
+            <div class="lbl">Playback</div>
             <div class="note" id="speNote"></div>
           </div>
           <button id="speAuth" class="soft">Sign in</button>
@@ -391,15 +370,15 @@
       <div class="row">
         <div>
           <div class="lbl">Local music</div>
-          <div class="note" id="localNote">Your own music files, from folders on this PC or a network drive.</div>
+          <div class="note" id="localNote">Music files from folders on this PC or a network drive.</div>
         </div>
-        <label class="switch"><input type="checkbox" id="localOn"><span></span></label>
+        <label class="switch" title="Use local music"><input type="checkbox" id="localOn"><span></span></label>
       </div>
       <details class="sub" id="localBody" hidden>
         <summary>Music folders</summary>
         <div class="folderList" id="localFolders"></div>
-        <div class="row">
-          <button id="localAdd" class="soft" title="Add a folder">+ Add folder</button>
+        <div class="row rowStart">
+          <button id="localAdd" class="soft" title="Add a folder">Add folder</button>
           <button id="localRescan" class="soft">Rescan</button>
         </div>
         <form id="localAddForm" class="row" hidden>
@@ -407,51 +386,128 @@
           <button class="soft">Add</button>
         </form>
       </details>
-    </section>
 
-    <!-- ===================== Output Preferences ===================== -->
-    <section class="group">
-      <h3>Output Preferences</h3>
       <div class="row">
         <div>
-          <div class="lbl">Discord Rich Presence</div>
-          <div class="note" id="presNote">Shows the track you're currently listening to as your Discord activity.</div>
+          <div class="lbl">Last.fm</div>
+          <div class="note" id="lfmNote">Not signed in. Needs lastfm_api_key and lastfm_secret in config.json.</div>
+          <button class="linkBtn" data-url="https://www.last.fm/settings/subscription" title="Last.fm Pro">Manage subscription</button>
+        </div>
+        <div class="rowEnd">
+          <button id="lfmConnect" class="soft">Sign in</button>
+          <label class="switch" title="Use Last.fm"><input type="checkbox" id="lfmOn"><span></span></label>
+        </div>
+      </div>
+      <details class="sub" id="lastfmSection" hidden>
+        <summary>Last.fm options</summary>
+        <div class="row">
+          <div>
+            <div class="lbl">Scrobble</div>
+            <div class="note">Sends what you play to Last.fm.</div>
+          </div>
+          <label class="switch"><input type="checkbox" id="scrobbleToggle"><span></span></label>
+        </div>
+      </details>
+    </section>
+
+    <!-- ===================== Library ===================== -->
+    <section class="group">
+      <h3>Library</h3>
+      <div class="row">
+        <div>
+          <div class="lbl">Favourites</div>
+          <div class="note">A star next to the heart, with its own page and filter. Starring a track likes it too.</div>
+        </div>
+        <label class="switch"><input type="checkbox" id="favOn"><span></span></label>
+      </div>
+    </section>
+
+    <!-- ===================== Sound ===================== -->
+    <section class="group" id="audioSection">
+      <h3>Sound</h3>
+      <div class="row">
+        <div>
+          <div class="lbl">Even out loudness</div>
+          <div class="note" id="normNote">Brings quiet tracks up and loud ones down.</div>
+        </div>
+        <select id="normSel" class="narrow"><option value="off">Off</option><option value="gentle">Gentle</option><option value="strong">Strong</option></select>
+      </div>
+      <div class="row">
+        <div>
+          <div class="lbl">Equalizer</div>
+          <div class="note" id="eqNote">Ten bands. Changes are heard straight away.</div>
+        </div>
+        <label class="switch"><input type="checkbox" id="eqOn"><span></span></label>
+      </div>
+      <details class="sub" id="eqSection" hidden>
+        <summary>Bands</summary>
+        <div class="row">
+          <select id="eqPreset" class="narrow" aria-label="Preset">
+            <option value="">Presets...</option><option value="flat">Flat</option><option value="bass">Bass boost</option>
+            <option value="vocal">Vocals</option><option value="treble">Treble boost</option><option value="smile">Loudness (smile)</option>
+          </select>
+          <button id="eqReset" class="soft">Reset</button>
+        </div>
+        <div class="eqBands" id="eqBands"></div>
+      </details>
+      <div class="row">
+        <div>
+          <div class="lbl">Output device</div>
+          <div class="note">Everything plays here, Spotify included.</div>
+        </div>
+        <select id="outputSel" class="narrow wide"></select>
+      </div>
+      <p class="note" id="outputNote"></p>
+      <button id="namesBtn" class="soft" hidden>Show device names</button>
+    </section>
+
+    <!-- ===================== Streaming ===================== -->
+    <section class="group">
+      <h3>Streaming</h3>
+      <div class="row">
+        <div>
+          <div class="lbl">Discord status</div>
+          <div class="note" id="presNote">Shows what you're playing on your Discord profile.</div>
         </div>
         <label class="switch"><input type="checkbox" id="presToggle"><span></span></label>
       </div>
 
       <div class="row">
         <div>
-          <div class="lbl">Now playing widget</div>
-          <div class="note" id="widgetNote">A now-playing card for OBS or other streaming software. It only shows what's playing; it doesn't play audio.</div>
+          <div class="lbl">Stream widget</div>
+          <div class="note" id="widgetNote">A now-playing card for OBS. It shows the track; it doesn't play audio.</div>
         </div>
         <label class="switch"><input type="checkbox" id="widgetToggle"><span></span></label>
       </div>
       <details class="sub" id="widgetSection" hidden>
         <summary>Widget options</summary>
-        <div class="row widgetRow">
-          <input id="widgetUrl" type="text" readonly aria-label="Widget address">
-          <input id="widgetPort" type="number" min="1024" max="65535" aria-label="Port" title="Port">
-          <button id="widgetCopy" class="soft">Copy</button>
+        <div class="row stack">
+          <div>
+            <div class="lbl">Address</div>
+            <div class="note">Add it to OBS as a Browser Source. Any size works.</div>
+          </div>
+          <div class="widgetRow">
+            <input id="widgetUrl" type="text" readonly aria-label="Widget address">
+            <input id="widgetPort" type="number" min="1024" max="65535" aria-label="Port" title="Port">
+            <button id="widgetCopy" class="soft">Copy</button>
+          </div>
         </div>
         <div class="row">
-          <div class="note">In OBS: add a Browser Source with this address. Any size works; it scales to fit.</div>
-          <button id="widgetClear" class="soft" title="Hide the current track from the widget until the next one starts">Clear</button>
+          <div class="lbl">Design</div>
+          <select id="widgetDesign" class="narrow">
+            <option value="card">Card (460 &times; 130)</option>
+            <option value="bar">Slim bar (560 &times; 64)</option>
+            <option value="square">Square (300 &times; 380)</option>
+            <option value="minimal">Minimal (460 &times; 110)</option>
+            <option value="pill">Pill (480 &times; 80)</option>
+            <option value="vinyl">Vinyl (460 &times; 150)</option>
+            <option value="poster">Poster (480 &times; 270)</option>
+            <option value="ticker">Ticker (640 &times; 48)</option>
+          </select>
         </div>
         <div class="row">
-          <label class="hideOpt">Design
-            <select id="widgetDesign" class="narrow">
-              <option value="card">Card (460 &times; 130)</option>
-              <option value="bar">Slim bar (560 &times; 64)</option>
-              <option value="square">Square (300 &times; 380)</option>
-              <option value="minimal">Minimal (460 &times; 110)</option>
-              <option value="pill">Pill (480 &times; 80)</option>
-              <option value="vinyl">Vinyl (460 &times; 150)</option>
-              <option value="poster">Poster (480 &times; 270)</option>
-              <option value="ticker">Ticker (640 &times; 48)</option>
-            </select>
-          </label>
-          <label class="hideOpt"><input type="checkbox" id="widgetRounded"> Rounded corners</label>
+          <div class="lbl">Rounded corners</div>
+          <label class="switch"><input type="checkbox" id="widgetRounded"><span></span></label>
         </div>
         <div class="row">
           <div class="lbl">Text size</div>
@@ -462,28 +518,39 @@
           </div>
         </div>
         <div class="row">
-          <div class="lbl">Animations</div>
-          <div class="checks">
-            <label class="hideOpt"><input type="checkbox" id="wFade"> Fades</label>
-            <label class="hideOpt"><input type="checkbox" id="wScroll"> Scroll long text</label>
-            <label class="hideOpt"><input type="checkbox" id="wSpin"> Spin the record</label>
-          </div>
+          <div class="lbl">Fade between tracks</div>
+          <label class="switch"><input type="checkbox" id="wFade"><span></span></label>
         </div>
         <div class="row">
-          <div class="lbl">Colour change speed</div>
+          <div class="lbl">Scroll long text</div>
+          <label class="switch"><input type="checkbox" id="wScroll"><span></span></label>
+        </div>
+        <div class="row">
+          <div class="lbl">Spin the record</div>
+          <label class="switch"><input type="checkbox" id="wSpin"><span></span></label>
+        </div>
+        <div class="row">
+          <div class="lbl">Colour change</div>
           <select id="wColor" class="narrow"><option value="0">Instant</option><option value="0.5">Fast</option><option value="1.2">Normal</option><option value="2.5">Slow</option></select>
+        </div>
+        <div class="row">
+          <div>
+            <div class="lbl">Hide this track</div>
+            <div class="note">Clears the widget until the next track starts.</div>
+          </div>
+          <button id="widgetClear" class="soft">Hide</button>
         </div>
       </details>
 
       <div class="row">
         <div>
           <div class="lbl">Chat song requests</div>
-          <div class="note">Lets a chat bot add tracks to your queue, from whichever platform is selected in the title bar.</div>
+          <div class="note">Lets your chat bot add songs to the queue.</div>
         </div>
         <label class="switch"><input type="checkbox" id="reqOn"><span></span></label>
       </div>
       <details class="sub" id="requestSection" hidden>
-        <summary>Song request options</summary>
+        <summary>Request options</summary>
         <div class="row">
           <div class="lbl">Chat bot</div>
           <select id="botSel" class="narrow"><option value="streamerbot">Streamer.bot</option><option value="mixitup">Mix It Up</option><option value="other">Another bot</option></select>
@@ -492,27 +559,27 @@
         <p class="note warn" id="reqNote"></p>
         <div class="row stack">
           <label class="lbl" for="reqUrl" id="reqUrlLbl">Request address</label>
-          <div class="row widgetRow"><input id="reqUrl" type="text" readonly><button id="reqCopy" class="soft">Copy</button></div>
+          <div class="widgetRow"><input id="reqUrl" type="text" readonly><button id="reqCopy" class="soft">Copy</button></div>
         </div>
         <div class="row stack">
-          <label class="lbl" for="reqNowUrl">Now playing address (for a !song command)</label>
-          <div class="row widgetRow"><input id="reqNowUrl" type="text" readonly><button id="reqNowCopy" class="soft">Copy</button></div>
+          <label class="lbl" for="reqNowUrl">Now playing address (for !song)</label>
+          <div class="widgetRow"><input id="reqNowUrl" type="text" readonly><button id="reqNowCopy" class="soft">Copy</button></div>
         </div>
         <div class="botHelp" id="botHelp"></div>
 
         <details class="sub inner">
-          <summary>Limits and waiting requests</summary>
+          <summary>Limits</summary>
           <div class="row">
-            <div class="lbl">Most requests waiting at once</div>
+            <div class="lbl">Waiting requests, at most</div>
             <div class="stepper"><button id="reqMaxDown" class="soft" aria-label="Fewer">&minus;</button><span id="reqMaxVal">10</span><button id="reqMaxUp" class="soft" aria-label="More">+</button></div>
           </div>
           <div class="row">
-            <div class="lbl">Most requests per viewer</div>
+            <div class="lbl">Per viewer, at most</div>
             <div class="stepper"><button id="reqUserDown" class="soft" aria-label="Fewer">&minus;</button><span id="reqUserVal">2</span><button id="reqUserUp" class="soft" aria-label="More">+</button></div>
           </div>
           <div class="row">
             <div>
-              <div class="lbl">Waiting requests</div>
+              <div class="lbl">Waiting now</div>
               <div class="note" id="reqPending">None.</div>
             </div>
             <button id="reqClear" class="soft">Remove all</button>
@@ -520,8 +587,8 @@
         </details>
 
         <details class="sub inner">
-          <summary>Chat messages</summary>
-          <p class="note">What the bot posts. You can use {title}, {artist}, {user}, {position}, {platform}, {query} and {count}.</p>
+          <summary>Chat replies</summary>
+          <p class="note">What the bot says. You can use {title}, {artist}, {user}, {position}, {platform}, {query} and {count}.</p>
           <div id="reqMsgs"></div>
           <button id="msgReset" class="soft">Reset to defaults</button>
         </details>
@@ -535,7 +602,7 @@
           <div class="row">
             <div>
               <div class="lbl">Secret key</div>
-              <div class="note">Part of the request address. Only requests with it are accepted; make a new one if it leaks.</div>
+              <div class="note">Part of the request address. Make a new one if it leaks.</div>
             </div>
             <button id="reqNewKey" class="soft">New key</button>
           </div>
@@ -543,67 +610,21 @@
       </details>
     </section>
 
-    <!-- ===================== Audio ===================== -->
-    <section class="group" id="audioSection">
-      <h3>Audio</h3>
-      <div class="row">
-        <div>
-          <div class="lbl">Even out loudness</div>
-          <div class="note" id="normNote">Brings quiet tracks up and loud ones down, like a leveling compressor.</div>
-        </div>
-        <select id="normSel" class="narrow"><option value="off">Off</option><option value="gentle">Gentle</option><option value="strong">Strong</option></select>
-      </div>
-
-      <div class="row">
-        <div>
-          <div class="lbl">Equalizer</div>
-          <div class="note" id="eqNote">Ten bands, for everything the app plays. Changes are heard straight away.</div>
-        </div>
-        <label class="switch"><input type="checkbox" id="eqOn"><span></span></label>
-      </div>
-      <details class="sub" id="eqSection" hidden>
-        <summary>Equalizer bands</summary>
-        <div class="row">
-          <select id="eqPreset" class="narrow" aria-label="Preset">
-            <option value="">Presets...</option><option value="flat">Flat</option><option value="bass">Bass boost</option>
-            <option value="vocal">Vocals</option><option value="treble">Treble boost</option><option value="smile">Loudness (smile)</option>
-          </select>
-          <button id="eqReset" class="soft">Flat</button>
-        </div>
-        <div class="eqBands" id="eqBands"></div>
-      </details>
-
-      <div class="row stack">
-        <label class="lbl" for="outputSel">Output device</label>
-        <select id="outputSel"></select>
-      </div>
-      <p class="note">Used for everything the app plays, Spotify included.</p>
-      <p class="note" id="outputNote"></p>
-      <button id="namesBtn" class="soft" hidden>Show device names</button>
-    </section>
-
-    <!-- ===================== Performance ===================== -->
+    <!-- ===================== App ===================== -->
     <section class="group">
-      <h3>Performance</h3>
+      <h3>App</h3>
       <div class="row">
         <div>
           <div class="lbl">Hardware acceleration</div>
-          <div class="note">Draws the app with your GPU. Turn it off if you see glitches or want to avoid GPU memory use. It may raise CPU use slightly.</div>
+          <div class="note">Uses your graphics card. Turn it off if you see glitches.</div>
         </div>
         <label class="switch"><input type="checkbox" id="gpuToggle"><span></span></label>
       </div>
       <p class="note" id="gpuNote" hidden>Restart SC Client to apply this. <button id="restartBtn" class="soft">Restart now</button></p>
       <div class="row">
         <div>
-          <div class="lbl">Animations</div>
-          <div class="note">Colour fades, cover fades and other motion in the app. Long titles still scroll when you hover them. The widget has its own animation options.</div>
-        </div>
-        <label class="switch"><input type="checkbox" id="animOn"><span></span></label>
-      </div>
-      <div class="row">
-        <div>
-          <div class="lbl">Close button hides to the tray</div>
-          <div class="note">Music keeps playing. Quit from the tray icon's menu.</div>
+          <div class="lbl">Close to tray</div>
+          <div class="note">The close button hides the window and music keeps playing. Quit from the tray icon.</div>
         </div>
         <label class="switch"><input type="checkbox" id="trayToggle"><span></span></label>
       </div>

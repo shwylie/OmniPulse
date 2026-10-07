@@ -4,6 +4,7 @@
 // spotifyInit() at startup.
 
 let spotifyPremium = false;
+let spotifyName = "";
 let spState = { pos: 0, ts: 0, playing: false, dur: 0 };
 
 const spApi = (method, path, body) =>
@@ -29,13 +30,13 @@ function spTrack(x) {
 }
 
 // ---------- account: Spotify stays hidden unless this is a Premium account ----------
-const SP_DEFAULT_NOTE = "Not signed in. Spotify only appears once you sign in with a Premium account.";
+const SP_DEFAULT_NOTE = "Not signed in. Needs a Premium account.";
 
 function syncSpotifySettings() {
   // like Last.fm's options: they fold out under Spotify once it's signed in and switched on
   $("spotifyOptions").hidden = !(FEATURES.spotify && spotifyPremium && prefs.spOn !== false);
   $("spConnect").textContent = spotifyPremium ? "Sign out" : "Sign in";
-  if (spotifyPremium) $("spStatus").textContent = "Signed in with a Premium account.";
+  if (spotifyPremium) $("spStatus").textContent = "Signed in as " + (spotifyName || "you") + " \u00b7 Premium.";
 }
 
 async function spotifyCheck() {
@@ -44,9 +45,10 @@ async function spotifyCheck() {
     try {
       const me = await spApi("GET", "/me");
       ok = me.product === "premium";
+      spotifyName = me.display_name || me.id || "";
       if (!ok) {
         await invoke("spotify_logout");
-        $("spStatus").textContent = "Spotify stays hidden: this account is not Premium.";
+        $("spStatus").textContent = "Hidden: " + (spotifyName || "this account") + " isn't a Premium account.";
       }
     } catch (e) {
       $("spStatus").textContent = "Could not check your Spotify account: " + e;
@@ -281,8 +283,8 @@ function spotifySeek(frac) {
 async function speSettingsPaint() {
   const on = await invoke("spe_signed_in").catch(() => false);
   $("speNote").textContent = on
-    ? "Playback is signed in. Spotify plays through the equalizer, leveling and your output device."
-    : "Signs in separately the first time you play a Spotify track.";
+    ? "Signed in. Spotify plays through your equalizer and output device."
+    : "A separate sign-in, asked for the first time you play Spotify.";
   $("speAuth").textContent = on ? "Sign out" : "Sign in";
 }
 

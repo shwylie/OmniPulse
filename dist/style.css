@@ -183,7 +183,7 @@ select {
   border: 2px solid transparent; box-shadow: 0 0 0 1px var(--line);
 }
 .swatch.on { border-color: var(--panel); box-shadow: 0 0 0 2px var(--text); }
-#accentCustom { width: 28px; height: 28px; padding: 0; border: 0; background: none; cursor: pointer; }
+
 
 .switch { position: relative; flex: none; width: 44px; height: 26px; }
 .switch input { position: absolute; opacity: 0; inset: 0; margin: 0; cursor: pointer; z-index: 1; }
@@ -943,3 +943,19 @@ details.sub.inner { margin-top: 10px; }
 .tileLabel i { display: block; font-size: 11px; font-weight: 800; letter-spacing: 2px; text-transform: uppercase; }
 .tileLabel span { display: block; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tileGenre { position: absolute; left: 12px; right: 12px; bottom: 14px; color: #fff; font-size: 22px; font-weight: 800; line-height: 1.1; }
+
+/* ===== v44: Settings, one design throughout ===== */
+/* both colour rows: the same 8 slots, lined up from the left, so each colour sits over its twin */
+.swatches { flex-wrap: nowrap; justify-content: flex-start; gap: 8px; width: calc(8 * 24px + 7 * 8px); flex: none; }
+.swatches input[type="color"] {
+  -webkit-appearance: none; appearance: none; width: 24px; height: 24px; padding: 0; flex: none;
+  border: 2px solid transparent; border-radius: 50%; background: none; cursor: pointer; box-shadow: 0 0 0 1px var(--line);
+}
+.swatches input[type="color"]::-webkit-color-swatch-wrapper { padding: 0; }
+.swatches input[type="color"]::-webkit-color-swatch { border: 0; border-radius: 50%; }
+.groupNote { margin: -4px 0 4px; }
+.row.rowStart { justify-content: flex-start; gap: 10px; }
+select.wide { max-width: 260px; }
+#settings .row > div:first-child { min-width: 0; }
+#settings .row .note { margin-bottom: 0; }
+#settings .linkBtn { margin-top: 2px; }

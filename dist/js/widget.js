@@ -1,7 +1,7 @@
 // The now-playing widget for OBS.
 
 // ---------- now playing widget for OBS ----------
-const WIDGET_NOTE = "A now-playing card for OBS or other streaming software. It only shows what's playing; it doesn't play audio.";
+const WIDGET_NOTE = "A now-playing card for OBS. It shows the track; it doesn't play audio.";
 
 let widgetReady = false;
 let widgetCleared = false;   // "Clear" hides the card until the next track starts
@@ -62,7 +62,7 @@ const WIDGET_ANIM_DESIGNS = { wSpin: ["vinyl"] };
 
 function paintWidgetAnims() {
   const d = prefs.widgetDesign || "card";
-  Object.entries(WIDGET_ANIM_DESIGNS).forEach(([id, designs]) => { $(id).closest("label").hidden = !designs.includes(d); });
+  Object.entries(WIDGET_ANIM_DESIGNS).forEach(([id, designs]) => { $(id).closest(".row").hidden = !designs.includes(d); });
 }
 
 function widgetInit() {

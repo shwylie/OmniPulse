@@ -232,9 +232,9 @@ function paintLocal(status) {
     box.append(row);
   });
   if (!on) {
-    $("localNote").textContent = "Switched off. Your folders are kept for when you switch it back on.";
+    $("localNote").textContent = "Off. Your folders are kept.";
   } else if (!localFolderList.length) {
-    $("localNote").textContent = "Add a folder to get started. Your files appear as a platform on Likes, Search and Rediscover.";
+    $("localNote").textContent = "Add a folder to get started.";
   } else if (status && status.scanning) {
     $("localNote").textContent = "Scanning your folders... " + status.count + " tracks so far.";
   } else {
