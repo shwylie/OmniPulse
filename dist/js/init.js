@@ -22,6 +22,7 @@ function extrasInit() {
   appearanceInit();
   integrationsInit();
   libraryInit();
+  xplInit();
   widgetInit();
   navInit();
   discoverInit();

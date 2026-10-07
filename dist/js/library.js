@@ -19,7 +19,8 @@ async function collectPages(path, pages) {
 }
 
 // ---------- your own playlists (saved to your SoundCloud account, private) ----------
-const isOwnPlaylist = (p) => !!p && !!p.user && meId !== null && String(p.user.id) === String(meId);
+// Yours to change: playlists on this PC, and your own on SoundCloud
+const isOwnPlaylist = (p) => isXpl(p) || (!!p && !!p.user && meId !== null && String(p.user.id) === String(meId));
 
 async function playlistTrackIds(id) {
   const p = await api("/playlists/" + id + "?show_tracks=true");
@@ -42,6 +43,14 @@ async function createPlaylist(title, firstTrack) {
 }
 
 async function addToPlaylist(p, t) {
+  if (isXpl(p)) {
+    const n = xplAdd(p.id, [t]);
+    say(n ? "Added to " + p.title + "." : "Already in " + p.title + ".");
+    if (view === "playlist" && currentPlaylist && currentPlaylist.id === p.id) openPlaylist(currentPlaylist);
+    refreshSidebar();
+    return;
+  }
+  if (srcOf(t) !== "soundcloud") { say("SoundCloud playlists only take SoundCloud tracks. Use a playlist on this PC for anything else."); return; }
   try {
     const ids = await playlistTrackIds(p.id);
     if (ids.includes(t.id)) { say("Already in " + (p.title || "that playlist") + "."); return; }
@@ -57,6 +66,14 @@ async function addToPlaylist(p, t) {
 async function removeFromPlaylist(t) {
   const p = currentPlaylist;
   if (!p || !t) return;
+  if (isXpl(p)) {
+    xplRemove(p.id, t.id);
+    viewTracks = viewTracks.filter((x) => x.id !== t.id);
+    render();
+    refreshSidebar();
+    say("Removed from " + p.title + ".");
+    return;
+  }
   try {
     const ids = (await playlistTrackIds(p.id)).filter((x) => x !== t.id);
     await savePlaylistTracks(p.id, ids);
@@ -70,6 +87,7 @@ async function removeFromPlaylist(t) {
 
 async function deletePlaylist() {
   const p = currentPlaylist;
+  if (isXpl(p)) { deleteXpl(p); return; }
   if (!p || !confirm('Delete the playlist "' + (p.title || "Untitled") + '" from your SoundCloud account?')) return;
   try {
     await invoke("playlist_write", { method: "DELETE", path: "/playlists/" + p.id, body: null });
@@ -101,13 +119,21 @@ function openPlaylistMenu(t, anchor) {
   menuTrack = t;
   const m = $("plMenu");
   m.replaceChildren(el("div", "menuHead", "Add to playlist"));
-  const mine = playlists.filter(isOwnPlaylist);
-  mine.forEach((p) => {
-    const b = el("button", "menuItem", p.title || "Untitled");
-    b.dataset.id = p.id;
-    m.append(b);
-  });
-  if (!mine.length) m.append(el("div", "menuNote", "You have no playlists yet."));
+  // playlists on this PC take anything; SoundCloud ones only SoundCloud tracks
+  const here = playlists.filter(isXpl);
+  const sc = srcOf(t) === "soundcloud" ? playlists.filter((p) => !isXpl(p) && isOwnPlaylist(p)) : [];
+  const group = (label, list) => {
+    if (!list.length) return;
+    if (here.length && sc.length) m.append(el("div", "menuNote menuGroup", label));
+    list.forEach((p) => {
+      const b = el("button", "menuItem", p.title || "Untitled");
+      b.dataset.id = p.id;
+      m.append(b);
+    });
+  };
+  group("On this PC", here);
+  group("On SoundCloud", sc);
+  if (!here.length && !sc.length) m.append(el("div", "menuNote", "You have no playlists yet."));
   const nb = el("button", "menuItem menuNew", "New playlist...");
   nb.dataset.new = "1";
   m.append(nb);
@@ -115,32 +141,6 @@ function openPlaylistMenu(t, anchor) {
   placeMenu(anchor);
   m.dataset.anchor = "";
   m._anchor = anchor;
-}
-
-function menuNewPlaylist() {
-  const m = $("plMenu");
-  const track = menuTrack;
-  m.replaceChildren(el("div", "menuHead", "New playlist"));
-  const f = el("form");
-  const inp = el("input");
-  inp.placeholder = "Playlist name";
-  inp.maxLength = 100;
-  f.append(inp);
-  m.append(f);
-  if (m._anchor) placeMenu(m._anchor);
-  inp.focus();
-  f.addEventListener("submit", async (e) => {
-    e.preventDefault();
-    const name = inp.value.trim();
-    if (!name) return;
-    closeMenu();
-    try {
-      await createPlaylist(name, track);
-      say('Created "' + name + '"' + (track ? " with that track in it." : "."));
-    } catch (err) {
-      say("Could not create the playlist: " + err);
-    }
-  });
 }
 
 // ---------- Likes filter: All / Tracks / Mixes ----------
@@ -315,7 +315,8 @@ function libraryInit() {
     const b = e.target.closest(".menuItem");
     if (!b) return;
     if (b.dataset.action) { runMenuAction(b.dataset.action); return; }
-    if (b.dataset.new) { menuNewPlaylist(); return; }
+    if (b.dataset.paction) { runPlaylistAction(b.dataset.paction); return; }
+    if (b.dataset.new) { const t = menuTrack; closeMenu(); openNewPlaylistDialog(t); return; }
     const p = playlists.find((x) => String(x.id) === b.dataset.id);
     const t = menuTrack;
     closeMenu();
@@ -328,27 +329,8 @@ function libraryInit() {
   document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeMenu(); });
   $("listView").addEventListener("scroll", () => { if (!$("plMenu").hidden) closeMenu(); });
 
-  // Sidebar "+": name it, press Enter
-  $("plNew").addEventListener("click", () => {
-    const f = $("plNewForm");
-    f.hidden = !f.hidden;
-    if (!f.hidden) { $("plNewName").value = ""; $("plNewName").focus(); }
-  });
-  $("plNewName").addEventListener("keydown", (e) => { if (e.key === "Escape") $("plNewForm").hidden = true; });
-  $("plNewForm").addEventListener("submit", async (e) => {
-    e.preventDefault();
-    const name = $("plNewName").value.trim();
-    if (!name) return;
-    $("plNewForm").hidden = true;
-    try {
-      const created = await createPlaylist(name, null);
-      const p = (created && playlists.find((x) => x.id === created.id)) || created;
-      if (p && p.id) openPlaylist(p);
-      say('Created "' + name + '". Add tracks with the playlist button on any track.');
-    } catch (err) {
-      say("Could not create the playlist: " + err);
-    }
-  });
+  // Sidebar "+": the New playlist dialog (on this PC, or on SoundCloud)
+  $("plNew").addEventListener("click", () => openNewPlaylistDialog(null));
   $("plDelete").addEventListener("click", deletePlaylist);
 
   // Likes: All / Tracks / Mixes

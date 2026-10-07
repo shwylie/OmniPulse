@@ -89,6 +89,7 @@ function toPath(href) {
 const PLATFORMS = {
   soundcloud: { name: "SoundCloud", icon: "M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96z" },
   spotify: { name: "Spotify", icon: "M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z" },
+  xpl: { name: "Playlist on this PC", icon: "M15 6H3v2h12V6zm0 4H3v2h12v-2zM3 16h8v-2H3v2zM17 6v8.18c-.31-.11-.65-.18-1-.18-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3V8h3V6h-5z" },
   local: { name: "Local files", icon: "M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z" },
   youtube: { name: "YouTube Music", icon: "M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z" },
   apple: { name: "Apple Music", icon: "M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z" },
@@ -178,7 +179,8 @@ function renderHero() {
     title = 'Results for "' + query + '"';
   } else if (v === "playlist" && currentPlaylist) {
     title = currentPlaylist.title || "Playlist";
-    if (currentPlaylist.user && currentPlaylist.user.username) sub = "By " + currentPlaylist.user.username + ". ";
+    if (isXpl(currentPlaylist)) sub = "On this PC. Holds tracks from any platform.";
+    else if (currentPlaylist.user && currentPlaylist.user.username) sub = "By " + currentPlaylist.user.username + ". ";
   } else if (v === "artist" && currentArtist) {
     title = currentArtist.username || "Artist";
     if (currentArtist.followers_count) sub = Number(currentArtist.followers_count).toLocaleString() + " followers. ";
@@ -291,15 +293,17 @@ function trackRow(t, i, playing) {
   bList.title = "Add to playlist";
   bList.setAttribute("aria-label", "Add to playlist");
   bList.append(icon(ICON_PLIST));
-  if (srcOf(t) === "spotify") acts.append(bNext, bAdd, bOpen);
-  else if (view === "playlist" && isOwnPlaylist(currentPlaylist)) {
+  // Liking is SoundCloud-only; every track can go in a playlist (on this PC, if not SoundCloud)
+  if (srcOf(t) === "soundcloud") acts.append(bLike);
+  acts.append(bNext, bAdd, bList);
+  if (view === "playlist" && isOwnPlaylist(currentPlaylist)) {
     const bRm = el("button");
     bRm.dataset.act = "unlist";
     bRm.title = "Remove from this playlist";
     bRm.setAttribute("aria-label", bRm.title);
     bRm.append(icon(ICON_CLOSE));
-    acts.append(bLike, bNext, bAdd, bList, bRm);
-  } else acts.append(bLike, bNext, bAdd, bList, bOpen);
+    acts.append(bRm);
+  } else if (t.permalink_url) acts.append(bOpen);
 
   li.append(num, cell, acts, el("div", "time", fmt(t.duration || 0)));
   return li;
@@ -420,6 +424,7 @@ function openSearch(q) {
 function openPlaylist(p) {
   currentPlaylist = p;
   showView("playlist");
+  if (isXpl(p)) { ++loadToken; $("listView").scrollTop = 0; setLocalPool(xplTracks(xplFind(p.id) || { tracks: [] })); render(); say(viewTracks.length ? "" : "Nothing in here yet. Add tracks with the playlist button on any track, or drag them onto this playlist."); return; }
   if (p.source === "spotify" || p.source === "local") { loadPlatformPlaylist(p); return; }
   loadTracks("/playlists/" + p.id + "/tracks?access=playable&limit=50&linked_partitioning=true", false, p.tracks);
 }

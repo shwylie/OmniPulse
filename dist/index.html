@@ -52,7 +52,6 @@
         <span id="plHeadText">Playlists</span>
         <button id="plNew" class="plAdd" title="New playlist" aria-label="New playlist"><svg viewBox="0 0 24 24"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg></button>
       </div>
-      <form id="plNewForm" class="plNewForm" hidden><input id="plNewName" type="text" placeholder="Playlist name" maxlength="100" autocomplete="off"></form>
       <div class="plList" id="plList"></div>
     </div>
   </aside>
@@ -195,6 +194,30 @@
 </div>
 
 <div class="menu" id="plMenu" hidden></div>
+
+<dialog id="newPlDialog" class="fixDialog">
+  <form id="newPlForm" class="sheet">
+    <h2 id="newPlHead">New playlist</h2>
+    <label class="lbl" for="newPlName">Name</label>
+    <input id="newPlName" type="text" maxlength="100" autocomplete="off" spellcheck="false" placeholder="Playlist name">
+    <fieldset id="newPlWhere" class="whereSet">
+      <legend class="lbl">Keep it</legend>
+      <label class="whereOpt">
+        <input type="radio" name="newPlWhere" id="newPlLocal" value="local" checked>
+        <span><b>On this PC</b><span class="note">Any platform: SoundCloud, Spotify and your files together. Nothing is added to your accounts.</span></span>
+      </label>
+      <label class="whereOpt">
+        <input type="radio" name="newPlWhere" id="newPlSc" value="soundcloud">
+        <span><b>On SoundCloud</b><span class="note" id="newPlScNote"></span></span>
+      </label>
+    </fieldset>
+    <div class="fixActions">
+      <span class="grow"></span>
+      <button type="button" id="newPlCancel" class="soft">Cancel</button>
+      <button type="submit" id="newPlSave" class="soft fixSave">Create</button>
+    </div>
+  </form>
+</dialog>
 
 <dialog id="fixDialog" class="fixDialog">
   <form id="fixForm" class="sheet">
@@ -565,6 +588,7 @@
 <script src="js/integrations.js"></script>
 <script src="js/discover.js"></script>
 <script src="js/library.js"></script>
+<script src="js/xplaylists.js"></script>
 <script src="js/widget.js"></script>
 <script src="js/nav.js"></script>
 <script src="js/platforms.js"></script>

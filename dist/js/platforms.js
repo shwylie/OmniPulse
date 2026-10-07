@@ -333,15 +333,16 @@ async function sidebarItems(id) {
 async function refreshSidebar() {
   const tok = ++sidebarTok;
   const plats = activePlats();
-  document.querySelector(".plScroll").hidden = !plats.length;
+  document.querySelector(".plScroll").hidden = !plats.length && !xpls.length;
   $("plHeadText").textContent = "Playlists";
-  $("plNew").hidden = !plats.includes("soundcloud");
-  $("plNewForm").hidden = true;
+  $("plNew").hidden = false;
   if (!playlists.length) renderPlaylists("Loading...");
   const notes = [];
   const parts = await Promise.all(plats.map((id) => sidebarItems(id).catch((e) => { notes.push(e.message || String(e)); return []; })));
   if (tok !== sidebarTok) return;   // switched platforms meanwhile
-  playlists = parts.flat();
+  // playlists on this PC first; platform playlists you switched to one of those stay hidden
+  const hidden = new Set((prefs.hiddenPlaylists || []).map(String));
+  playlists = xplSidebarItems().concat(parts.flat().filter((p) => !hidden.has(String(p.id))));
   renderPlaylists(notes.join(" "));
 }
 
