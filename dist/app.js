@@ -1369,7 +1369,7 @@ $("namesBtn").addEventListener("click", async () => {
     $("outputNote").textContent = "";
   } catch (e) {
     $("outputNote").textContent = e && e.name === "NotAllowedError"
-      ? "Access is still blocked from an earlier choice. Close SC Client, delete the folder %LOCALAPPDATA%\\dev.scclient.app\\EBWebView, then reopen it."
+      ? "Access is still blocked from an earlier choice. Close OmniPulse, delete the folder %LOCALAPPDATA%\\dev.scclient.app\\EBWebView, then reopen it."
       : "Could not read device names (no microphone found?). Devices are listed as Output 1, 2, and so on.";
   }
   refreshOutputs();
@@ -1466,7 +1466,7 @@ function updateTitle(signedIn) {
   const custom = (prefs.appName || "").trim();
   let title;
   if (signedIn || custom || !scOn()) {
-    title = custom || (userName ? userName + "'s Music" : "Your Music");
+    title = custom || "OmniPulse";
     text.textContent = title;
     text.hidden = false;
     prompt.hidden = true;

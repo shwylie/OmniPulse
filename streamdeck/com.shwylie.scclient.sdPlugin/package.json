@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "description": "Stream Deck plugin for SC Client",
+  "description": "Stream Deck plugin for OmniPulse",
   "dependencies": {
     "@elgato/streamdeck": "^1.4.1"
   }

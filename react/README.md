@@ -1,7 +1,7 @@
 # StreamPlayer (React)
 
 A standalone React component that plays a `{ title, streamUrl }` payload through an HTML5 `<audio>` element.
-It is **not used by SC Client itself**, which has no React or build step. Copy `StreamPlayer.jsx`
+It is **not used by OmniPulse itself**, which has no React or build step. Copy `StreamPlayer.jsx`
 into any React 18+ app.
 
 ```jsx

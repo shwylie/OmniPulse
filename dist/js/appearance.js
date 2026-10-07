@@ -293,7 +293,7 @@ function appearanceInit() {
   // App name: Settings > Appearance, or right-click the name in the title bar
   $("titleText").addEventListener("contextmenu", (e) => { e.preventDefault(); editAppName(); });
   $("appNameInput").value = prefs.appName || "";
-  $("appNameInput").placeholder = userName ? userName + "'s Music" : "Your Music";
+  $("appNameInput").placeholder = "OmniPulse";
   $("appNameInput").addEventListener("input", () => {
     prefs.appName = $("appNameInput").value;
     savePrefs();

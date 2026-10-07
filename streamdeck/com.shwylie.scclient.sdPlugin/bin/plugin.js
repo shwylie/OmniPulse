@@ -1,5 +1,5 @@
-// The SC Client Stream Deck plugin. Each key calls the app's remote control (Settings > Stream Deck
-// in SC Client, served on 127.0.0.1 by src-tauri/src/remote.rs). The app writes its port and key
+// The OmniPulse Stream Deck plugin. Each key calls the app's remote control (Settings > Stream Deck
+// in OmniPulse, served on 127.0.0.1 by src-tauri/src/remote.rs). The app writes its port and key
 // to %APPDATA%\sc-client\remote.json while remote control is on, so there's nothing to set up here.
 // Toggle keys (play/pause, like, favourite, shuffle, repeat, sets & podcasts) show the app's state.
 
@@ -29,12 +29,12 @@ async function call(action) {
   try {
     info = JSON.parse(await readFile(INFO, "utf8"));
   } catch {
-    throw new Error("SC Client isn't running, or Stream Deck is switched off in its Settings.");
+    throw new Error("OmniPulse isn't running, or Stream Deck is switched off in its Settings.");
   }
   const path = action ? `control?action=${encodeURIComponent(action)}&` : "state?";
   const res = await fetch(`http://127.0.0.1:${info.port}/${path}key=${encodeURIComponent(info.key)}`, { signal: AbortSignal.timeout(6000) });
   const state = await res.json();
-  if (!res.ok || !state.ok) throw new Error(state.message || `SC Client said ${res.status}`);
+  if (!res.ok || !state.ok) throw new Error(state.message || `OmniPulse said ${res.status}`);
   return state;
 }
 

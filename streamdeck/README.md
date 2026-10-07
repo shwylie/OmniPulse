@@ -1,12 +1,12 @@
-# SC Client for Stream Deck
+# OmniPulse for Stream Deck
 
-Keys for SC Client: Play, Pause, Play / Pause, Next, Previous, Like, Favourite, Shuffle, Repeat,
+Keys for OmniPulse: Play, Pause, Play / Pause, Next, Previous, Like, Favourite, Shuffle, Repeat,
 Clear requests, Clear queue, and Sets & podcasts (lets them in or keeps them out of the queue and autoplay).
 Play / Pause, Like, Favourite, Shuffle, Repeat and Sets & podcasts light up to show what the app is doing.
 
 ## Install
 
-1. In SC Client, open Settings > App > Stream Deck and switch it on.
+1. In OmniPulse, open Settings > App > Stream Deck and switch it on.
 2. Install Node.js 20 or newer, then in this folder:
 
    ```
@@ -23,9 +23,9 @@ Play / Pause, Like, Favourite, Shuffle, Repeat and Sets & podcasts light up to s
 
    (Or, with the Elgato CLI: `npm i -g @elgato/cli`, then `streamdeck link com.shwylie.scclient.sdPlugin`.)
 
-4. Drag keys from the "SC Client" category.
+4. Drag keys from the "OmniPulse" category.
 
-There is nothing to set up in the plugin: SC Client writes its port and secret key to
+There is nothing to set up in the plugin: OmniPulse writes its port and secret key to
 `%APPDATA%\sc-client\remote.json` while Stream Deck control is on, and the plugin reads it on every press.
 A key shows a warning triangle when the app isn't running or control is switched off.
 

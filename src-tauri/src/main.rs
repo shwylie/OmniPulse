@@ -209,7 +209,7 @@ async fn login() -> Result<(), String> {
                         }
                     }
                 }
-                let body = "<html><body style=\"font-family:sans-serif;background:#0f1117;color:#e9eaf2;padding:40px\">Signed in. You can close this tab and go back to SC Client.</body></html>";
+                let body = "<html><body style=\"font-family:sans-serif;background:#0f1117;color:#e9eaf2;padding:40px\">Signed in. You can close this tab and go back to OmniPulse.</body></html>";
                 let resp = format!(
                     "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
                     body.len(),
@@ -637,7 +637,7 @@ async fn wait_for_callback(bind: String, url: String) -> Result<(String, String)
                     }
                 }
             }
-            let body = "<html><body style=\"font-family:sans-serif;background:#0f1117;color:#e9eaf2;padding:40px\">Connected. You can close this tab and go back to SC Client.</body></html>";
+            let body = "<html><body style=\"font-family:sans-serif;background:#0f1117;color:#e9eaf2;padding:40px\">Connected. You can close this tab and go back to OmniPulse.</body></html>";
             let resp = format!(
                 "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
                 body.len(),
@@ -780,7 +780,7 @@ async fn lyrics_get(url: String) -> Result<Value, String> {
     }
     let res = reqwest::Client::new()
         .get(&url)
-        .header("User-Agent", "SC Client (personal music player)")
+        .header("User-Agent", "OmniPulse (personal music player)")
         .send()
         .await
         .map_err(|e| e.to_string())?;
@@ -2187,7 +2187,7 @@ fn main() {
             #[allow(unused_mut)]
             let mut builder =
                 WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
-                    .title("SC Client")
+                    .title("OmniPulse")
                     .inner_size(1180.0, 760.0)
                     .min_inner_size(820.0, 520.0)
                     .decorations(false)

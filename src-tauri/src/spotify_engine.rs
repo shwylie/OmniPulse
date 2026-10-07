@@ -199,7 +199,7 @@ pub async fn spe_login() -> Result<(), String> {
     let client_id = SessionConfig::default().client_id;
     let client = OAuthClientBuilder::new(&client_id, OAUTH_REDIRECT, OAUTH_SCOPES.to_vec())
         .open_in_browser()
-        .with_custom_message("Signed in to Spotify playback. You can close this tab and go back to SC Client.")
+        .with_custom_message("Signed in to Spotify playback. You can close this tab and go back to OmniPulse.")
         .build()
         .map_err(|e| format!("Spotify sign-in: {e}"))?;
     let token = client

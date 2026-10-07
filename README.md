@@ -1,4 +1,4 @@
-# SC Client
+# OmniPulse
 
 A small SoundCloud player built on the official API. Personal use only.
 
@@ -206,7 +206,7 @@ hides them; tracks from albums are never hidden.
 ## v40
 - Removed stream-safe output, "Spotify plays through" (the Spotify desktop app mode) and
   "This app is routed away from my default device". Route the app in Windows instead:
-  Settings > System > Sound > Volume mixer > SC Client.
+  Settings > System > Sound > Volume mixer > OmniPulse.
 - Spotify always plays in the app. Its sound comes from Spotify's protected player, which the app
   can't reach, so it follows the Windows routing above but skips the equalizer, leveling and the
   in-app output picker.
