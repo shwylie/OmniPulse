@@ -157,8 +157,9 @@ async fn yt_status() -> Value { yt_stream::status().await }
 #[tauri::command]
 async fn yt_prepare(id: String) -> Result<(), String> { youtube::stream_url(&id, false).await.map(|_| ()) }
 // Downloads yt-dlp and Deno in the background; yt_status says how it's going
+// async, so it runs on Tauri's async runtime rather than the window's thread
 #[tauri::command]
-fn yt_setup() { tools::start_install() }
+async fn yt_setup() { tools::start_install() }
 
 // ---------- OBS widget, local music, chat requests, Stream Deck remote ----------
 #[tauri::command]

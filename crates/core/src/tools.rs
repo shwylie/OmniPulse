@@ -166,19 +166,40 @@ pub async fn install(src: &Sources) -> Result<(), String> {
 
 /// Starts setting up in the background (if it isn't already)
 pub fn start_install() {
+    start_install_from(Sources::default());
+}
+
+// Callable from anywhere: inside an async runtime it's spawned there, otherwise (a window's thread,
+// say) it gets a thread and runtime of its own. tokio::spawn alone panics outside a runtime, and a
+// panic in a WebView2 callback can't unwind, so it took the whole app down.
+pub fn start_install_from(src: Sources) {
     let already = PROGRESS.lock().ok().and_then(|g| g.as_ref().map(|p| p.busy)).unwrap_or(false);
     if already {
         return;
     }
     set_progress(|p| *p = Progress { busy: true, step: "Starting".into(), ..Default::default() });
-    tokio::spawn(async {
-        let r = install(&Sources::default()).await;
+    let job = async move {
+        let r = install(&src).await;
         set_progress(|p| {
             p.busy = false;
             p.error = r.err();
             p.step = if p.error.is_some() { "Couldn't finish".into() } else { "Done".into() };
         });
-    });
+    };
+    match tokio::runtime::Handle::try_current() {
+        Ok(handle) => {
+            handle.spawn(job);
+        }
+        Err(_) => {
+            std::thread::spawn(move || match tokio::runtime::Builder::new_current_thread().enable_all().build() {
+                Ok(rt) => rt.block_on(job),
+                Err(e) => set_progress(|p| {
+                    p.busy = false;
+                    p.error = Some(format!("couldn't start the download: {e}"));
+                }),
+            });
+        }
+    }
 }
 
 pub fn progress() -> Value {
@@ -238,6 +259,26 @@ mod tests {
         w.start_file("deno.exe", zip::write::SimpleFileOptions::default()).unwrap();
         w.write_all(exe).unwrap();
         w.finish().unwrap().into_inner()
+    }
+
+    // The crash: setting up from a thread with no async runtime (where Tauri runs plain commands)
+    #[test]
+    fn starts_from_a_thread_without_a_runtime() {
+        let base = serve(vec![]); // a GitHub with nothing on it: setup fails, but cleanly
+        let src = Sources {
+            ytdlp: format!("{base}/yt-dlp.exe"),
+            ytdlp_sums: format!("{base}/sums"),
+            deno_zip: format!("{base}/deno.zip"),
+            deno_sum: format!("{base}/deno.zip.sha256sum"),
+        };
+        std::thread::spawn(move || start_install_from(src)).join().expect("starting setup panicked");
+        let t0 = std::time::Instant::now();
+        while progress()["busy"] == true && t0.elapsed() < Duration::from_secs(10) {
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        let p = progress();
+        assert_eq!(p["busy"], false, "{p}");
+        assert!(p["error"].as_str().unwrap_or("").contains("404") || ytdlp_path().is_some(), "{p}");
     }
 
     #[tokio::test]
