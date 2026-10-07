@@ -163,7 +163,8 @@ async function handleSongRequest(q, user) {
   addToQueue(t);
   reqPaint();
   reqQueueBtn();
-  const pos = queue.indexOf(t) - qi;   // requests go ahead of autoplay picks, so not always last
+  // requests go ahead of autoplay picks, so not always last (and the queue holds a copy)
+  const pos = queue.findIndex((x, k) => k > qi && x.id === t.id && x.requestedBy === who) - qi;
   vars.position = pos;
   return {
     ok: true, title: t.title, artist: artistName(t), url: t.permalink_url || "", position: pos,

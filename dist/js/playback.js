@@ -49,8 +49,11 @@ function shuffleUpcoming() {
   if (qi < 0) return;
   const rest = queue.slice(qi + 1);
   shuffleBackup = rest.slice();
-  shuffleInPlace(rest);
-  queue = queue.slice(0, qi + 1).concat(rest);
+  // what you queued yourself and chat requests keep their place; autoplay's picks stay last
+  const kept = rest.filter((t) => t.queuedByYou || t.requestedBy);
+  const auto = rest.filter((t) => t.autoplay && !kept.includes(t));
+  const others = rest.filter((t) => !kept.includes(t) && !auto.includes(t));
+  queue = queue.slice(0, qi + 1).concat(kept, shuffledOrder(others), auto);
   renderQueue();
 }
 

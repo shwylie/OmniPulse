@@ -668,7 +668,11 @@ new IntersectionObserver((entries) => {
   if (entries.some((e) => e.isIntersecting)) loadMore();
 }, { root: $("listView"), rootMargin: "600px" }).observe(document.querySelector(".moreRow"));
 $("playAll").addEventListener("click", () => startList(viewTracks, 0, false));
-$("shuffleAll").addEventListener("click", () => startList(viewTracks, 0, true));
+$("shuffleAll").addEventListener("click", async () => {
+  const from = view;
+  const list = await shuffleSource();
+  if (view === from && list.length) startList(list, 0, true);
+});
 
 // ---------- playlists (sidebar) ----------
 function renderPlaylists(note) {
@@ -730,23 +734,25 @@ function startList(list, i, shuffle) {
     if (kept.length) { list = kept; i = picked ? list.indexOf(picked) : 0; }
   }
   queue = list.slice();
-  if (shuffle) { shuffleInPlace(queue); i = 0; }
+  if (shuffle) { queue = shuffledOrder(queue); i = 0; }   // fair: long-unheard tracks first (js/shuffle.js)
   qi = i;
   if (shuffleOn && !shuffle) shuffleUpcoming();
   playCurrent();
 }
 
+const queuedByYou = (t) => Object.assign({}, t, { queuedByYou: true, autoplay: undefined });
+
 function playNext(t) {
   if (!t) return;
   if (qi < 0) { startList([t], 0, false); return; }
-  queue.splice(qi + 1, 0, t);
+  queue.splice(qi + 1, 0, queuedByYou(t));
   renderQueue();
 }
 
 function addToQueue(t) {
   if (!t) return;
   if (qi < 0) { startList([t], 0, false); return; }
-  queue.splice(autoplayStart(), 0, t);   // ahead of any autoplay picks
+  queue.splice(autoplayStart(), 0, queuedByYou(t));   // ahead of any autoplay picks
   renderQueue();
 }
 

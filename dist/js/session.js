@@ -12,7 +12,8 @@ function sessionSnapshot() {
     posMs: Math.round(curPosMs()),
     // the same small snapshots as playlists on this PC, plus who asked for it and autoplay picks
     queue: queue.slice(0, 1000).map((t) => Object.assign(xplSnap(t),
-      t.autoplay ? { autoplay: true } : {}, t.requestedBy ? { requestedBy: t.requestedBy } : {})),
+      t.autoplay ? { autoplay: true } : {}, t.requestedBy ? { requestedBy: t.requestedBy } : {},
+      t.queuedByYou ? { queuedByYou: true } : {})),
   };
 }
 

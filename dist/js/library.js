@@ -221,6 +221,7 @@ async function openRediscover(fresh) {
       !isMix(t) && !hiddenRecs.has(String(t.id)) && (lastPlayed.get(t.id) || 0) < monthAgo);
     shuffleInPlace(pool);
     pool.sort((a, b) => (lastPlayed.get(a.id) || 0) - (lastPlayed.get(b.id) || 0));   // never played first
+    pool = alternatePlatforms(pool);   // an even split, one platform then the next (js/shuffle.js)
     setLocalPool(pool);
     render();
     say(viewTracks.length ? "" : source.length ? "You've played all your likes recently." : "No likes found.");
