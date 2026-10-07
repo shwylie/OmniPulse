@@ -143,23 +143,49 @@ function openPlaylistMenu(t, anchor) {
   m._anchor = anchor;
 }
 
-// ---------- Likes filter: All / Tracks / Mixes ----------
-let likesFilter = "all";
+// ---------- list filters: All / Tracks / Albums / Sets & Podcasts ----------
+// All mixes album tiles in among the tracks; Albums shows only albums; Tracks and Sets & Podcasts
+// leave albums out. Rediscover and artist pages have no sets & podcasts of their own to filter.
+let listFilter = "all";
+const LIST_FILTERS = {
+  likes: ["all", "tracks", "albums", "mixes"],
+  search: ["all", "tracks", "albums", "mixes"],
+  rediscover: ["all", "tracks", "albums"],
+  artist: ["all", "tracks", "albums"],
+};
+const FILTER_NAMES = { all: "All", tracks: "Tracks", albums: "Albums", mixes: "Sets & Podcasts" };
 
-function renderLikesChips() {
-  const box = $("likesChips");
+function renderListChips() {
+  const box = $("listChips");
   box.replaceChildren();
-  [["all", "All"], ["tracks", "Tracks"], ["mixes", "Sets & Podcasts"]].forEach(([k, label]) => {
-    const b = el("button", "chip" + (k === likesFilter ? " on" : ""), label);
+  const list = LIST_FILTERS[view];
+  box.hidden = !list || (view === "search" && !query);
+  if (box.hidden) return;
+  if (!list.includes(listFilter)) listFilter = "all";
+  list.forEach((k) => {
+    const b = el("button", "chip" + (k === listFilter ? " on" : ""), FILTER_NAMES[k]);
     b.dataset.f = k;
     box.append(b);
   });
 }
 
-function applyLikesFilter(list) {
-  if (likesFilter === "mixes") return list.filter(isMix);
-  if (likesFilter === "tracks") return list.filter((t) => !isMix(t));
+function applyListFilter(list) {
+  if (listFilter === "mixes") return list.filter(isMix);
+  if (listFilter === "tracks") return list.filter((t) => !isMix(t));
+  if (listFilter === "albums") return [];
   return list;
+}
+
+// With Albums chosen there are no tracks to load: the page shows only the album tiles
+function albumsOnly() {
+  if (listFilter !== "albums") return false;
+  ++loadToken;
+  viewTracks = [];
+  nextHref = "";
+  localPool = null;
+  render();
+  say("Loading albums...");
+  return true;
 }
 
 // ---------- everything you've liked (for Discover and Rediscover) ----------
@@ -221,6 +247,7 @@ async function openRediscover(fresh) {
   currentPlaylist = null;
   currentArtist = null;
   showView("rediscover");
+  if (albumsOnly()) return;
   if (!fresh && useCachedPage()) return;
   $("listView").scrollTop = 0;
   const tok = ++loadToken;
@@ -360,12 +387,12 @@ function libraryInit() {
   $("plNew").addEventListener("click", () => openNewPlaylistDialog(null));
   $("plDelete").addEventListener("click", deletePlaylist);
 
-  // Likes: All / Tracks / Mixes
-  $("likesChips").addEventListener("click", (e) => {
+  // All / Tracks / Albums / Sets & Podcasts: the same page again, without a step in the Back history
+  $("listChips").addEventListener("click", (e) => {
     const b = e.target.closest(".chip");
-    if (!b) return;
-    likesFilter = b.dataset.f;
-    openLikes();
+    if (!b || !curPage || b.dataset.f === listFilter) return;
+    restoring = true;
+    try { restorePage(Object.assign({}, curPage, { listFilter: b.dataset.f })); } finally { restoring = false; }
   });
 
   // Rediscover

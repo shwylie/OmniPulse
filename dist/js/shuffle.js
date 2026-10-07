@@ -42,7 +42,7 @@ async function shuffleSource() {
       .concat(plats.includes("soundcloud") ? likedTracks.filter(isLikedTrack) : [])
       .concat(plats.includes("spotify") ? spLikedCache || [] : [])
       .concat(plats.includes("local") ? localTracks : []);
-    if (all.length) return applyLikesFilter(all);
+    if (all.length) return applyListFilter(all);
   }
   if (localPool && localPool.length > viewTracks.length && nextHref === "local:") return localPool.slice();
   return viewTracks.slice();

@@ -23,12 +23,12 @@ let restoring = false;
 function pageSnapshot(v) {
   return {
     view: v, query, playlist: currentPlaylist, artist: currentArtist,
-    discoverSrc, likesFilter, plat: activePlats(v).join(","),
+    discoverSrc, listFilter, plat: activePlats(v).join(","),
   };
 }
 
 function pageKey(p) {
-  return [p.view, p.query, p.playlist && p.playlist.id, p.artist && p.artist.id, p.discoverSrc, p.likesFilter, p.plat].join("|");
+  return [p.view, p.query, p.playlist && p.playlist.id, p.artist && p.artist.id, p.discoverSrc, p.listFilter, p.plat].join("|");
 }
 
 // Called from showView: remembers where you were before this page
@@ -48,7 +48,7 @@ function navTrack(v) {
 }
 
 function restorePage(p) {
-  likesFilter = p.likesFilter || "all";
+  listFilter = p.listFilter || "all";
   switch (p.view) {
     case "likes": openLikes(); break;
     case "favourites": openFavourites(); break;

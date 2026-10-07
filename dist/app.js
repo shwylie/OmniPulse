@@ -166,6 +166,7 @@ let discoverSrc = "";
 
 // ---------- views ----------
 function showView(v) {
+  if (!restoring && v !== view) listFilter = "all";
   view = v;
   const isNow = v === "now";
   if (!isNow) back = v;
@@ -173,7 +174,7 @@ function showView(v) {
   $("searchPane").hidden = v !== "search";
   $("searchPane").classList.toggle("empty", v === "search" && !query);
   $("searchForm").style.visibility = v === "search" ? "hidden" : "";
-  $("likesChips").hidden = v !== "likes";
+  renderListChips();
   $("navRediscover").classList.toggle("active", v === "rediscover");
   navTrack(v);
   $("npView").hidden = !isNow;
@@ -336,7 +337,7 @@ function paintHeroActions() {
   hl.classList.toggle("on", !!prefs.hideLikes);
   hl.setAttribute("aria-pressed", prefs.hideLikes ? "true" : "false");
   hl.title = prefs.hideLikes ? "Your likes are hidden from these results. Click to show them." : "Leave tracks you've liked out of the results";
-  $("heroActions").hidden = !["playAll", "followBtn", "plDelete", "luckyBtn", "langChip", "favOnlyChip", "setsLikedChip", "hideLikesChip", "albumToggle"].some((id) => !$(id).hidden);
+  $("heroActions").hidden = !["playAll", "followBtn", "plDelete", "luckyBtn", "langChip", "favOnlyChip", "setsLikedChip", "hideLikesChip"].some((id) => !$(id).hidden);
 }
 
 function trackRow(t, i, playing) {
@@ -475,7 +476,7 @@ async function loadTracks(paths, append, fallback) {
     let got = asList(data);
     if (view === "discover") got = recFilter(got);
     if (hideMixesIn(view)) got = got.filter((t) => !isMix(t));
-    if (view === "likes") got = applyLikesFilter(got);
+    if (LIST_FILTERS[view]) got = applyListFilter(got);
     const fromLikes = used.startsWith("/me/likes/tracks");
     got.forEach((t) => {
       if (fromLikes) likeState.set(t.id, true);
@@ -499,9 +500,9 @@ async function loadTracks(paths, append, fallback) {
 function openLikes() {
   currentPlaylist = null;
   showView("likes");
-  renderLikesChips();
   const plats = activePlats("likes");
   if (!plats.length) { showNothing(); return; }
+  if (albumsOnly()) return;
   openLibrary(plats);
 }
 
@@ -511,6 +512,7 @@ function libraryList(plats) {
     plats.includes("soundcloud") ? likedTracks.filter(isLikedTrack) : [],
     plats.includes("spotify") ? spLikedCache || [] : [],
     plats.includes("local") ? localTracks : [],
+    plats.includes("youtube") ? ytLikedTracks() : [],
   ]);
 }
 
@@ -518,7 +520,7 @@ function libraryList(plats) {
 function showLibrary(list, keepPlace) {
   const top = $("listView").scrollTop;
   const shown = viewTracks.length;
-  setLocalPool(applyLikesFilter(list));
+  setLocalPool(applyListFilter(list));
   if (keepPlace && shown > viewTracks.length) {
     localPos = Math.min(localPool.length, shown);
     viewTracks = localPool.slice(0, localPos);
@@ -541,7 +543,7 @@ async function openLibrary(plats) {
   const have = (plats.includes("soundcloud") && likedTracks.length) || (plats.includes("spotify") && spLikedCache && spLikedCache.length);
   if (!have && online.length) {
     // the very first time: page by page as before, while the full lists are saved for next time
-    loadMerged(plats.map(likesFeed), applyLikesFilter);
+    loadMerged(plats.map(likesFeed), applyListFilter);
     if (plats.includes("soundcloud")) ensureLikes();   // saves the copy for next time
     if (plats.includes("spotify")) spLiked().catch(() => null);
     return;
@@ -577,13 +579,14 @@ function openSearch(q) {
   showView("search");
   const plats = activePlats("search");
   if (!plats.length) { showNothing(); return; }
+  if (albumsOnly()) return;
   const tok = loadToken;
   // To leave your likes out, the app needs to know them first (both lists are cached)
   const ready = prefs.hideLikes ? loadLikesFor(plats) : Promise.resolve();
   ready.then(() => {
     if (tok !== loadToken || view !== "search" || query !== q) return;   // moved on meanwhile
     loadMerged(plats.map((id) => searchFeed(id, q)),
-      (list) => list.filter((t) => !isMix(t) && !(prefs.hideLikes && isLikedTrack(t))));
+      (list) => list.filter((t) => (listFilter === "mixes" ? isMix(t) : !isMix(t)) && !(prefs.hideLikes && isLikedTrack(t))));
   });
 }
 
@@ -613,7 +616,7 @@ function openArtist(u) {
   currentPlaylist = null;
   showView("artist");
   $("listView").scrollTop = 0;
-  loadTracks("/users/" + u.id + "/tracks?access=playable&limit=50&linked_partitioning=true", false);
+  if (!albumsOnly()) loadTracks("/users/" + u.id + "/tracks?access=playable&limit=50&linked_partitioning=true", false);
   // Are we following this artist? A 404 from SoundCloud means no.
   artistFollowing = null;
   paintFollow();

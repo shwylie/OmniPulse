@@ -2,13 +2,13 @@
 
 // ---------- albums mixed into lists ----------
 // Album tiles sit among the tracks (one every 6 rows) on Likes, Search, Discover, Rediscover and artist pages.
-// The Albums button beside the title hides them; tracks from albums always stay in the list.
+// The list filters decide: All mixes them in, Albums shows only them, Tracks and Sets & Podcasts leave them out.
 const ALBUM_PAGES = ["likes", "search", "rediscover", "artist"];
 const PLAY_ICON = "M8 5v14l11-7z";
 let viewAlbums = [];
 let albumsKey = "";
 
-const albumsShown = () => prefs.showAlbums !== false;
+const albumsShown = () => listFilter === "all" || listFilter === "albums";
 const asItems = (d) => (Array.isArray(d) ? d : (d && d.collection) || []);
 const isScAlbum = (p) => !!p && (/album|ep|compilation/i.test(p.playlist_type || p.set_type || "") || p.is_album === true);
 
@@ -107,15 +107,8 @@ function albumsOnPage(p) {
     if (albumsKey !== key) return;
     viewAlbums = list || [];
     render();
-  }).catch(() => {});
-}
-
-function paintAlbumToggle() {
-  const b = $("albumToggle");
-  b.hidden = !ALBUM_PAGES.includes(view);
-  b.classList.toggle("on", albumsShown());
-  b.setAttribute("aria-pressed", albumsShown() ? "true" : "false");
-  b.title = albumsShown() ? "Hide albums (their tracks stay in the list)" : "Show albums";
+    if (listFilter === "albums") say(viewAlbums.length ? "" : "No albums here.");
+  }).catch((e) => { if (albumsKey === key && listFilter === "albums") say("Couldn't load albums: " + e); });
 }
 
 function albumTileEl(a) {
@@ -143,9 +136,7 @@ function albumTileEl(a) {
 }
 
 function injectAlbums() {
-  paintAlbumToggle();
   if (!albumsShown() || !ALBUM_PAGES.includes(view)) return;
-  if (view === "likes" && likesFilter !== "all") return;
   if (favOn() && prefs.favOnly) return;   // only favourite tracks are showing
   let tiles = viewAlbums.slice();
   if ((view === "discover" || view === "search") && activePlats(view).includes("spotify")) {
@@ -161,6 +152,7 @@ function injectAlbums() {
   }
   if (!tiles.length) return;
   const box = $("list");
+  if (listFilter === "albums") { tiles.forEach((a) => box.append(albumTileEl(a))); return; }
   const rows = [...box.children];
   // one tile every 6 tracks; a couple more at the end, and more appear as the list grows
   tiles.slice(0, Math.ceil(rows.length / 6) + 2).forEach((a, k) => {
@@ -195,13 +187,6 @@ async function playAlbum(a) {
 }
 
 function albumsInit() {
-  $("albumToggle").addEventListener("click", () => {
-    prefs.showAlbums = !albumsShown();
-    savePrefs();
-    albumsKey = "";
-    if (albumsShown() && curPage) albumsOnPage(curPage);
-    render();
-  });
   // Album tiles handle their own clicks, ahead of the track-row handlers
   const tileOf = (e) => e.target.closest && e.target.closest(".albumTile");
   $("list").addEventListener("click", (e) => {
