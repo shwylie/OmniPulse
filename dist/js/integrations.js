@@ -18,13 +18,13 @@ function presenceNote(msg, isError) {
 
 async function sendPresence() {
   const t = curTrack();
-  if (!prefs.presence || !t || srcOf(t) === "spotify" || audio.paused) {
+  if (!prefs.presence || !t || !nowPlaying()) {
     invoke("presence_clear").catch(() => {});
     return;
   }
   try {
     const now = Math.floor(Date.now() / 1000);
-    const start = now - Math.floor(audio.currentTime || 0);
+    const start = now - Math.floor(curPosMs() / 1000);
     const end = t.duration ? start + Math.floor(t.duration / 1000) : null;
     const note = await invoke("presence_set", {
       details: t.title || "Unknown",
@@ -81,12 +81,12 @@ function lfmTrackParams(t) {
 }
 
 function lfmNowPlaying(t) {
-  if (!lfmActive() || !prefs.scrobble || srcOf(t) === "spotify") return;
+  if (!lfmActive() || !prefs.scrobble) return;
   invoke("lastfm_call", { method: "track.updateNowPlaying", params: lfmTrackParams(t) }).catch(() => {});
 }
 
 function lfmScrobble(t, startedAt) {
-  if (!lfmActive() || !prefs.scrobble || srcOf(t) === "spotify") return;
+  if (!lfmActive() || !prefs.scrobble) return;
   const params = lfmTrackParams(t);
   params.push(["timestamp", String(Math.floor(startedAt / 1000))]);
   invoke("lastfm_call", { method: "track.scrobble", params }).catch((e) => say("Scrobble failed: " + e));

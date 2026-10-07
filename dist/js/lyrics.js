@@ -24,8 +24,14 @@ let lyricsActive = -1;
 function guessNames(t) {
   let title = (t.title || "").trim();
   let artist = artistName(t).trim();
-  const m = title.match(/^(.+?)\s+[-\u2013\u2014]\s+(.+)$/);
-  if (m) { artist = m[1].trim(); title = m[2].trim(); }
+  if (srcOf(t) === "spotify") {
+    // Spotify's tags are clean: "A, B" is a list of artists, and " - Radio Edit" is a version name
+    artist = artist.split(",")[0].trim();
+    title = title.replace(/\s+[-\u2013\u2014]\s+[^-\u2013\u2014]*$/, "").trim() || title;
+  } else {
+    const m = title.match(/^(.+?)\s+[-\u2013\u2014]\s+(.+)$/);
+    if (m) { artist = m[1].trim(); title = m[2].trim(); }
+  }
   title = title.replace(/\s*[\(\[][^\)\]]*[\)\]]\s*/g, " ").replace(/\s+/g, " ").trim() || title;
   return { artist, title };
 }
@@ -83,7 +89,7 @@ async function ensureLyrics() {
   const t = curTrack();
   const box = $("npLyrics");
   if (!lyricsMode) { box.hidden = true; return; }
-  if (!t || srcOf(t) === "spotify") { box.hidden = true; lyricsFor = ""; lyricsLines = null; return; }
+  if (!t) { box.hidden = true; lyricsFor = ""; lyricsLines = null; return; }
   box.hidden = false;
   if (lyricsFor === t.id) return;
   lyricsFor = t.id;
@@ -110,7 +116,7 @@ async function ensureLyrics() {
   }
   if (lyricsFor !== t.id) return;
   renderLyrics(data);
-  highlightLyric(audio.currentTime);
+  highlightLyric(curPosMs() / 1000);
 }
 
 function lyricsInit() {

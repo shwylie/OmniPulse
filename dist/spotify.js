@@ -205,9 +205,13 @@ function paintSpotify() {
   $("icoPause").classList.toggle("off", !spState.playing);
 }
 
+// Progress bar, plus what the <audio> element's timeupdate does for other tracks: stats,
+// scrobbling and the lyrics highlight
 function spotifyTick() {
   const t = curTrack();
-  if (t && srcOf(t) === "spotify") paintSpotify();
+  if (!t || srcOf(t) !== "spotify") return;
+  paintSpotify();
+  if (spState.playing) playbackTick();
 }
 
 async function spotifyStart(t) {
@@ -263,6 +267,8 @@ function spotifySeek(frac) {
       const gen = await invoke("spe_seek", { positionMs: ms });
       if (gen > spe.gen) speFlush(gen);
       spe.basePos = ms;
+      presenceUpdate();   // what the <audio> element's "seeked" event does for other tracks
+      widgetPush();
     } catch (e) {
       say("Spotify: " + e);
     }

@@ -125,10 +125,8 @@ async function autoplayAdvance() {
 function autoplayTick() {
   const t = curTrack();
   if (!t || !autoplayActive() || autoplayBusy || qi < queue.length - 1) return;
-  const pos = srcOf(t) === "spotify" ? spotifyPos() : (audio.currentTime || 0) * 1000;
-  const dur = srcOf(t) === "spotify" ? (spState.dur || t.duration || 0)
-    : (isFinite(audio.duration) && audio.duration ? audio.duration * 1000 : t.duration || 0);
-  if (!dur || dur - pos <= AUTOPLAY_LEAD_MS) autoplayFill();
+  const dur = curDurMs();
+  if (!dur || dur - curPosMs() <= AUTOPLAY_LEAD_MS) autoplayFill();
 }
 
 function autoplayInit() {

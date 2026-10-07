@@ -9,16 +9,15 @@ let widgetCleared = false;   // "Clear" hides the card until the next track star
 function widgetState() {
   const t = curTrack();
   if (!t || widgetCleared) return { playing: false };
-  const spot = srcOf(t) === "spotify";
   return {
-    playing: spot ? spState.playing : !audio.paused,
+    playing: nowPlaying(),
     title: t.title || "",
     artist: artistName(t),
     artwork: artUrl(t, "t500x500") || "",
     url: t.permalink_url || "",
     platform: srcOf(t),
-    duration_ms: t.duration || (isFinite(audio.duration) ? audio.duration * 1000 : 0),
-    position_ms: spot ? spotifyPos() : (audio.currentTime || 0) * 1000,
+    duration_ms: t.duration || curDurMs(),
+    position_ms: curPosMs(),
     updated_at: Date.now(),
     accent: accentNow[0],
     accent2: accentNow[1],
@@ -95,8 +94,8 @@ function widgetInit() {
       $("widgetUrl").select();
     }
   });
-  audio.addEventListener("seeked", widgetPush);
-  setInterval(() => { if ((prefs.widget || prefs.req) && !audio.paused) widgetPush(); }, 5000);
+  audio.addEventListener("seeked", widgetPush);   // Spotify seeks push from spotifySeek
+  setInterval(() => { if ((prefs.widget || prefs.req) && nowPlaying()) widgetPush(); }, 5000);
   const paintText = () => { $("widgetTextVal").textContent = Math.round((prefs.widgetText || 1) * 100) + "%"; };
   const stepText = (d) => {
     prefs.widgetText = Math.min(1.6, Math.max(0.7, Math.round(((prefs.widgetText || 1) + d) * 10) / 10));

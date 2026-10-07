@@ -12,6 +12,19 @@ function nowPlaying() {
   return !!t && (srcOf(t) === "spotify" ? spState.playing : !audio.paused);
 }
 
+// Where the current track is up to, and how long it is, in ms, whichever engine is playing it
+function curPosMs() {
+  const t = curTrack();
+  if (!t) return 0;
+  return srcOf(t) === "spotify" ? spotifyPos() : (audio.currentTime || 0) * 1000;
+}
+function curDurMs() {
+  const t = curTrack();
+  if (!t) return 0;
+  if (srcOf(t) === "spotify") return spState.dur || t.duration || 0;
+  return isFinite(audio.duration) && audio.duration ? audio.duration * 1000 : t.duration || 0;
+}
+
 function taskbarSync() {
   const t = curTrack();
   invoke("taskbar_state", {
@@ -135,14 +148,14 @@ function trackStarted(t) {
 
 function playbackTick() {
   const t = curTrack();
-  if (!t || srcOf(t) === "spotify" || !session || session.id !== t.id) return;
-  const now = audio.currentTime;
+  if (!t || !session || session.id !== t.id) return;
+  const now = curPosMs() / 1000;
   if (session.last !== null) {
     const d = now - session.last;
     if (d > 0 && d < 2) session.secs += d;
   }
   session.last = now;
-  const durS = (t.duration || (isFinite(audio.duration) ? audio.duration * 1000 : 0)) / 1000;
+  const durS = (t.duration || curDurMs()) / 1000;
   if (!session.counted && session.secs >= Math.min(30, durS ? durS / 2 : 30)) {
     session.counted = true;
     countPlay(t);
