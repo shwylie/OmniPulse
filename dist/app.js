@@ -154,7 +154,6 @@ let meId = null;
 let artistFollowing = null;   // true / false, or null while checking
 let currentArtist = null;
 let discoverSrc = "";
-let discoverNote = "";
 
 // ---------- views ----------
 function showView(v) {
@@ -175,7 +174,8 @@ function showView(v) {
   if (isNow) ensureLyrics();
   else if (lyricsMode) setLyricsMode(false);
   $("navDiscover").classList.toggle("active", v === "discover");
-  if (!isNow) $("chips").hidden = v !== "discover";
+  $("feed").hidden = v !== "discover";
+  $("list").hidden = v === "discover";
   if (!isNow) $("langChip").hidden = v !== "discover";
   $("navLikes").classList.toggle("active", v === "likes");
   $("navFavourites").classList.toggle("active", v === "favourites");
@@ -200,13 +200,14 @@ function renderHero() {
     sub = "Starred tracks from every platform, kept on this PC.";
   } else if (v === "discover") {
     title = "Discover";
-    sub = discoverNote ? discoverNote + ". " : "";
-    if (recHidden) sub += recHidden + " hidden by the language filter. ";
+    const names = activePlats("discover").map((p) => PLATFORMS[p].name);
+    sub = "Mixes and stations made from what you like" + (names.length ? " on " + names.join(" and ") : "") + ".";
   } else if (v === "search") {
     title = 'Results for "' + query + '"';
   } else if (v === "playlist" && currentPlaylist) {
     title = currentPlaylist.title || "Playlist";
-    if (isXpl(currentPlaylist)) sub = "On this PC. Holds tracks from any platform.";
+    if (currentPlaylist.source === "mix") sub = currentPlaylist.desc || "";
+    else if (isXpl(currentPlaylist)) sub = "On this PC. Holds tracks from any platform.";
     else if (currentPlaylist.user && currentPlaylist.user.username) sub = "By " + currentPlaylist.user.username + ". ";
   } else if (v === "artist" && currentArtist) {
     title = currentArtist.username || "Artist";
@@ -531,6 +532,7 @@ function loadLikesFor(plats) {
 function openPlaylist(p) {
   currentPlaylist = p;
   showView("playlist");
+  if (p.source === "mix") { openMix(p); return; }   // a Discover mix or station
   if (isXpl(p)) { ++loadToken; $("listView").scrollTop = 0; setLocalPool(xplTracks(xplFind(p.id) || { tracks: [] })); render(); say(viewTracks.length ? "" : "Nothing in here yet. Add tracks with the playlist button on any track, or drag them onto this playlist."); return; }
   if (p.source === "spotify" || p.source === "local") { loadPlatformPlaylist(p); return; }
   loadTracks("/playlists/" + p.id + "/tracks?access=playable&limit=50&linked_partitioning=true", false, p.tracks);
@@ -559,73 +561,16 @@ function openArtist(u) {
 }
 
 // ---------- discover ----------
-const GENRES = ["Electronic", "House", "Techno", "Hip-hop & Rap", "Pop", "Indie", "Ambient", "Lo-fi", "R&B", "Drum & Bass", "Jazz", "Rock"];
-
-function renderChips() {
-  const box = $("chips");
-  box.replaceChildren();
-  // "Following" needs SoundCloud: Spotify doesn't let this app see who you follow
-  const first = activePlats("discover").includes("soundcloud")
-    ? [["foryou", "For you"], ["following", "Following"], ["similar", "Similar artists"]]
-    : [["foryou", "For you"], ["similar", "Similar artists"]];
-  const items = first.concat(GENRES.map((g) => ["genre:" + g, g]));
-  items.forEach(([key, label]) => {
-    const b = el("button", "chip" + (key === discoverSrc ? " on" : ""), label);
-    b.dataset.src = key;
-    box.append(b);
-  });
-}
-
-$("chips").addEventListener("click", (e) => {
-  const b = e.target.closest(".chip");
-  if (b) openDiscover(b.dataset.src);
-});
-// The genre chips are one sideways-scrolling line: let the mouse wheel move it, and drop the
-// fade at the right once the end is reached
-$("chips").addEventListener("wheel", (e) => {
-  const box = $("chips");
-  if (box.scrollWidth <= box.clientWidth || Math.abs(e.deltaX) > Math.abs(e.deltaY)) return;
-  e.preventDefault();
-  box.scrollLeft += e.deltaY;
-}, { passive: false });
-$("chips").addEventListener("scroll", () => {
-  const box = $("chips");
-  box.classList.toggle("atEnd", box.scrollLeft + box.clientWidth >= box.scrollWidth - 2);
-});
-
-// Every active platform's picker runs at once (js/discover.js); their suggestions are mixed
+// Discover is a feed of shelves (js/feed.js); each platform's picker (js/discover.js) supplies
+// "More of what you like" and the genre mixes
 const DISCOVER_PICKERS = { soundcloud: (src) => scDiscover(src), spotify: (src) => spDiscover(src) };
 
-async function openDiscover(src, fresh) {
-  const plats = activePlats("discover");
-  if (!plats.length) { openLikes(); return; }
-  discoverSrc = src || "foryou";
-  if (discoverSrc === "following" && !plats.includes("soundcloud")) discoverSrc = "foryou";
-  recHidden = 0;
-  discoverNote = "";
-  currentPlaylist = null;
-  currentArtist = null;
-  showView("discover");
-  renderChips();
-  if (!fresh && useCachedPage()) return;   // came back to it: keep the same list
-  $("listView").scrollTop = 0;
-  const tok = ++loadToken;
-  say("Finding music for you...");
-  if (plats.includes("soundcloud")) await ensureLikes();   // so nothing you already like gets recommended
-  const results = await Promise.allSettled(plats.map((p) => DISCOVER_PICKERS[p](discoverSrc)));
-  if (tok !== loadToken) return;
-  const found = results.filter((r) => r.status === "fulfilled").map((r) => r.value);
-  const errors = results.filter((r) => r.status === "rejected").map((r) => (r.reason && r.reason.message) || String(r.reason));
-  const seen = new Set();
-  const list = interleave(found.map((r) => shuffleInPlace(r.list.slice()))).filter((t) => !seen.has(t.id) && seen.add(t.id));
-  discoverNote = found.map((r) => r.note).filter(Boolean).join(". ");
-  setLocalPool(list);
-  render();
-  const hints = found.map((r) => r.msg).filter(Boolean);
-  say(list.length ? hints.join(" ") : errors[0] || hints[0] || "No suggestions came back. Try another chip or a genre.");
+function openDiscover(src, fresh) {
+  if (!activePlats("discover").length) { openLikes(); return; }
+  return openFeed(fresh);
 }
 
-$("navDiscover").addEventListener("click", () => openDiscover(discoverSrc || "foryou"));
+$("navDiscover").addEventListener("click", () => openDiscover());
 function paintFollow() {
   const b = $("followBtn");
   b.disabled = artistFollowing === null;

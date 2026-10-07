@@ -777,14 +777,6 @@ details.sub.inner { margin-top: 10px; }
 .chipSelect select option { color: var(--text); background: var(--panel); }
 .chipSelect:focus-within { border-color: var(--accent); }
 
-/* genre chips: one line that scrolls sideways instead of wrapping */
-#chips {
-  flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; padding-bottom: 2px;
-  mask-image: linear-gradient(to right, #000 calc(100% - 48px), transparent);
-}
-#chips::-webkit-scrollbar { display: none; }
-#chips .chip { flex: none; }
-#chips.atEnd { mask-image: none; }
 
 /* ===== v42: merged sidebar (playlists from every platform, then your albums) ===== */
 .plItem { display: flex; align-items: center; gap: 8px; }
@@ -883,3 +875,71 @@ details.sub.inner { margin-top: 10px; }
 :root.noFav .acts button[data-act="fav"], :root.noFav #favBtn, :root.noFav #npFav,
 :root.noFav #navFavourites, :root.noFav #favOnlyChip { display: none !important; }
 #list.favOnly li.notFav { display: none; }
+
+/* ===== v44: Discover feed: shelves of tiles that scroll sideways ===== */
+.feed { display: flex; flex-direction: column; gap: 30px; padding: 8px 0 24px; }
+.feedNote { color: var(--muted); }
+.shelf { position: relative; }
+.shelfHead { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 12px; }
+.shelfHead h2 { margin: 0; font-size: 22px; }
+.shelfAll { border: 0; background: none; color: var(--muted); font-weight: 700; font-size: 13px; cursor: pointer; }
+.shelfAll:hover { color: var(--text); text-decoration: underline; }
+.shelfRow {
+  display: grid; grid-auto-flow: column; grid-auto-columns: 168px; gap: 18px;
+  overflow-x: auto; scroll-snap-type: x proximity; scrollbar-width: none; padding-bottom: 4px;
+}
+.shelfRow::-webkit-scrollbar { display: none; }
+.shelf.expanded .shelfRow { grid-auto-flow: row; grid-template-columns: repeat(auto-fill, minmax(168px, 1fr)); overflow: visible; }
+.shelfNav {
+  position: absolute; top: 96px; width: 36px; height: 36px; display: grid; place-items: center; z-index: 2;
+  border: 0; border-radius: 50%; background: color-mix(in srgb, var(--panel) 88%, transparent); color: var(--text);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4); opacity: 0; transition: opacity 0.15s; cursor: pointer;
+}
+.shelfNav.prev { left: -10px; }
+.shelfNav.next { right: -10px; }
+.shelf:hover .shelfNav { opacity: 1; }
+
+.tile { scroll-snap-align: start; cursor: pointer; min-width: 0; }
+.tileArt {
+  position: relative; aspect-ratio: 1; border-radius: 8px; overflow: hidden; background: var(--elevated);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.3);
+}
+.tileArt > img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.tileTitle { margin-top: 10px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tileSub {
+  margin-top: 2px; color: var(--muted); font-size: 13px; line-height: 1.35;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
+/* which platform it comes from, inside the cover: always white on a dark disc, so it reads on any art */
+.tileBadges { position: absolute; top: 8px; left: 8px; display: flex; gap: 4px; z-index: 1; }
+.tileBadge {
+  width: 24px; height: 24px; display: grid; place-items: center; border-radius: 50%;
+  background: rgba(0, 0, 0, 0.62); color: #fff; backdrop-filter: blur(4px);
+}
+.tileBadge svg { width: 15px; height: 15px; color: #fff; }
+.tilePlay {
+  position: absolute; right: 10px; bottom: 10px; z-index: 1; width: 44px; height: 44px; display: grid; place-items: center;
+  border: 0; border-radius: 50%; background: var(--accent); color: var(--on-accent); cursor: pointer;
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.45); opacity: 0; transform: translateY(6px); transition: opacity 0.15s, transform 0.15s;
+}
+.tile:hover .tilePlay, .tilePlay:focus-visible { opacity: 1; transform: none; }
+.tile-daily .tilePlay, .tile-station .tilePlay { bottom: 44px; }
+/* Daily Mix: a coloured label band across the cover */
+.tileBand {
+  position: absolute; left: 0; right: 0; bottom: 12px; display: flex; align-items: center; justify-content: space-between;
+  padding: 0 8px; font-weight: 800; color: #111; pointer-events: none;
+}
+.tileBand span { background: var(--band); padding: 2px 6px; font-size: 13px; }
+.tileBand b { background: #111; color: var(--band); padding: 0 6px; font-size: 22px; letter-spacing: -1px; border: 2px solid var(--band); }
+/* stations and genres: a coloured cover */
+.tile-station .tileArt, .tile-genre .tileArt {
+  background: radial-gradient(circle at 30% 30%, hsl(var(--hue) 70% 45%), hsl(calc(var(--hue) + 40) 60% 16%));
+}
+.tileRound {
+  position: absolute; top: 18%; left: 50%; width: 56%; aspect-ratio: 1; transform: translateX(-50%);
+  border-radius: 50%; object-fit: cover; border: 3px solid rgba(255, 255, 255, 0.85); box-shadow: 0 6px 18px rgba(0, 0, 0, 0.5);
+}
+.tileLabel { position: absolute; left: 12px; right: 12px; bottom: 10px; color: #fff; text-shadow: 0 1px 6px rgba(0, 0, 0, 0.6); pointer-events: none; }
+.tileLabel i { display: block; font-size: 11px; font-weight: 800; letter-spacing: 2px; text-transform: uppercase; }
+.tileLabel span { display: block; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tileGenre { position: absolute; left: 12px; right: 12px; bottom: 14px; color: #fff; font-size: 22px; font-weight: 800; line-height: 1.1; }

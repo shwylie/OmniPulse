@@ -3,7 +3,7 @@
 // ---------- albums mixed into lists ----------
 // Album tiles sit among the tracks (one every 6 rows) on Likes, Search, Discover, Rediscover and artist pages.
 // The Albums button beside the title hides them; tracks from albums always stay in the list.
-const ALBUM_PAGES = ["likes", "search", "discover", "rediscover", "artist"];
+const ALBUM_PAGES = ["likes", "search", "rediscover", "artist"];
 const PLAY_ICON = "M8 5v14l11-7z";
 let viewAlbums = [];
 let albumsKey = "";

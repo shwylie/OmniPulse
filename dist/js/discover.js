@@ -29,12 +29,10 @@ function detectLang(t) {
   return bestScore >= 2 ? best : best + "?";   // "?" = only a weak hint
 }
 
-let recHidden = 0;
 
 function recFilter(list) {
   list = list.filter((t) => !isLikedTrack(t) && !hiddenRecs.has(String(t.id)));
   const kept = list.filter(langOk);
-  recHidden += list.length - kept.length;
   return kept;
 }
 
