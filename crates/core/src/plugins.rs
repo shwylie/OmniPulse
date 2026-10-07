@@ -52,6 +52,55 @@ fn default_main() -> String {
 pub struct Package {
     pub manifest: Manifest,
     pub code: String,
+    /// what was read (manifest and script): installing checks it's still the same
+    pub digest: String,
+}
+
+fn digest_of(manifest_text: &str, code: &str) -> String {
+    use sha2::{Digest, Sha256};
+    let mut h = Sha256::new();
+    h.update(manifest_text.as_bytes());
+    h.update([0u8]);
+    h.update(code.as_bytes());
+    h.finalize().iter().map(|b| format!("{b:02x}")).collect()
+}
+
+/// The largest .omniplugin package taken
+const MAX_PACKAGE: u64 = 4 * 1024 * 1024;
+
+/// An .omniplugin file: a zip with manifest.json and its script, at the top or in one folder
+fn read_package(path: &Path) -> Result<(String, String), String> {
+    use std::io::Read;
+    let f = std::fs::File::open(path).map_err(|e| format!("Couldn't open {}: {e}", path.display()))?;
+    if f.metadata().map(|m| m.len()).unwrap_or(0) > MAX_PACKAGE {
+        return Err("That plugin file is too big.".into());
+    }
+    let mut zip = zip::ZipArchive::new(f).map_err(|_| "That isn't an OmniPulse plugin file (it should be a .omniplugin package).".to_string())?;
+    let names: Vec<String> = zip.file_names().map(String::from).collect();
+    let man = names
+        .iter()
+        .filter(|n| n.ends_with("manifest.json") && n.matches('/').count() <= 1)
+        .min_by_key(|n| n.len())
+        .cloned()
+        .ok_or("There's no manifest.json in that plugin file.")?;
+    let dir = &man[..man.len() - "manifest.json".len()];
+    let mut read = |name: &str, limit: usize| -> Result<String, String> {
+        let mut e = zip.by_name(name).map_err(|_| format!("There's no {} in that plugin file.", &name[dir.len()..]))?;
+        if e.size() as usize > limit {
+            return Err(format!("{} in that plugin file is too big.", &name[dir.len()..]));
+        }
+        let mut s = String::new();
+        e.by_ref().take(limit as u64 + 1).read_to_string(&mut s).map_err(|_| format!("{} in that plugin file isn't text.", &name[dir.len()..]))?;
+        if s.len() > limit {
+            return Err(format!("{} in that plugin file is too big.", &name[dir.len()..]));
+        }
+        Ok(s)
+    };
+    let manifest_text = read(&man, 256 * 1024)?;
+    let m: Manifest = serde_json::from_str(&manifest_text).map_err(|e| format!("That plugin's manifest.json isn't valid: {e}"))?;
+    check_manifest(&m)?;
+    let code = read(&format!("{dir}{}", m.main), MAX_SCRIPT)?;
+    Ok((manifest_text, code))
 }
 
 fn plugins_dir() -> Result<PathBuf, String> {
@@ -125,7 +174,8 @@ async fn get_text(url: &str, limit: usize) -> Result<String, String> {
 }
 
 /// Reads a plugin without installing it, so you can see what it is and asks for: from the web address
-/// of its manifest.json, or a folder (or manifest.json) on this PC
+/// of its manifest.json, or one file on this PC (an .omniplugin package, or a manifest.json with its
+/// script beside it). Folders aren't taken: adding a plugin is meant to be one deliberate pick.
 pub async fn inspect(source: &str) -> Result<Package, String> {
     let source = source.trim().trim_matches('"');
     let (manifest_text, code) = if source.starts_with("https://") || source.starts_with("http://") {
@@ -137,23 +187,38 @@ pub async fn inspect(source: &str) -> Result<Package, String> {
         (manifest_text, get_text(script.as_str(), MAX_SCRIPT).await?)
     } else {
         let p = Path::new(source);
-        let dir = if p.is_dir() { p.to_path_buf() } else { p.parent().map(Path::to_path_buf).unwrap_or_default() };
-        let manifest_text = std::fs::read_to_string(dir.join("manifest.json")).map_err(|_| format!("No manifest.json in {}", dir.display()))?;
-        let m: Manifest = serde_json::from_str(&manifest_text).map_err(|e| format!("That manifest.json isn't valid: {e}"))?;
-        check_manifest(&m)?;
-        let code = std::fs::read_to_string(dir.join(&m.main)).map_err(|_| format!("No {} next to the manifest", m.main))?;
-        if code.len() > MAX_SCRIPT {
-            return Err("The plugin's script is too big.".into());
+        if p.is_dir() {
+            return Err("Pick the plugin's file (an .omniplugin package, or its manifest.json), not a folder.".into());
         }
-        (manifest_text, code)
+        let ext = p.extension().and_then(|e| e.to_str()).unwrap_or("").to_ascii_lowercase();
+        if ext == "omniplugin" || ext == "zip" {
+            read_package(p)?
+        } else if p.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.eq_ignore_ascii_case("manifest.json")) {
+            let manifest_text = std::fs::read_to_string(p).map_err(|_| format!("Couldn't read {}", p.display()))?;
+            let m: Manifest = serde_json::from_str(&manifest_text).map_err(|e| format!("That manifest.json isn't valid: {e}"))?;
+            check_manifest(&m)?;
+            let dir = p.parent().map(Path::to_path_buf).unwrap_or_default();
+            let code = std::fs::read_to_string(dir.join(&m.main)).map_err(|_| format!("No {} next to the manifest", m.main))?;
+            if code.len() > MAX_SCRIPT {
+                return Err("The plugin's script is too big.".into());
+            }
+            (manifest_text, code)
+        } else {
+            return Err("That isn't a plugin file: pick an .omniplugin package or a plugin's manifest.json.".into());
+        }
     };
     let manifest: Manifest = serde_json::from_str(&manifest_text).map_err(|e| e.to_string())?;
-    Ok(Package { manifest, code })
+    let digest = digest_of(&manifest_text, &code);
+    Ok(Package { manifest, code, digest })
 }
 
-/// Installs what inspect() found (again from the source, so what's installed is what was read)
-pub async fn install(source: &str) -> Result<Manifest, String> {
+/// Installs what inspect() found and you agreed to: read again from the source, and only if it's
+/// still exactly what you saw
+pub async fn install(source: &str, digest: &str) -> Result<Manifest, String> {
     let pkg = inspect(source).await?;
+    if pkg.digest != digest {
+        return Err("The plugin has changed since you looked at it, so it wasn't added. Check it again.".into());
+    }
     let dir = plugins_dir()?.join(&pkg.manifest.id);
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     std::fs::write(dir.join("manifest.json"), serde_json::to_string_pretty(&pkg.manifest).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
@@ -171,7 +236,7 @@ pub fn list() -> Vec<Package> {
             let m: Manifest = serde_json::from_str(&std::fs::read_to_string(e.path().join("manifest.json")).ok()?).ok()?;
             check_manifest(&m).ok()?;
             let code = std::fs::read_to_string(e.path().join("main.js")).ok()?;
-            Some(Package { manifest: m, code })
+            Some(Package { manifest: m, code, digest: String::new() })
         })
         .collect();
     out.sort_by_key(|p| p.manifest.name.to_lowercase());
@@ -284,8 +349,17 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn reads_the_example_package() {
+        let pack = concat!(env!("CARGO_MANIFEST_DIR"), "/../../plugins/internet-archive.omniplugin");
+        let pkg = inspect(pack).await.unwrap();
+        assert_eq!(pkg.manifest.id, "internet-archive");
+        assert!(pkg.code.contains("OmniPulse.register"));
+        assert_eq!(pkg.digest.len(), 64);
+    }
+
+    #[tokio::test]
     #[allow(clippy::await_holding_lock)] // only makes the tests take turns
-    async fn installs_from_a_folder_and_refuses_other_sites() {
+    async fn installs_from_one_file_and_refuses_other_sites() {
         let _turn = crate::TEST_ENV.lock().unwrap_or_else(|e| e.into_inner());
         let tmp = std::env::temp_dir().join(format!("omnipulse-plugins-{}", std::process::id()));
         std::env::set_var("APPDATA", tmp.join("appdata"));
@@ -293,9 +367,29 @@ mod tests {
         std::fs::create_dir_all(&src).unwrap();
         std::fs::write(src.join("manifest.json"), r#"{"id":"demo","name":"Demo","hosts":["127.0.0.1"],"capabilities":["search","play"]}"#).unwrap();
         std::fs::write(src.join("main.js"), "OmniPulse.register({});").unwrap();
-        let pkg = inspect(src.to_str().unwrap()).await.unwrap();
+        // a folder isn't taken; its manifest.json is
+        assert!(inspect(src.to_str().unwrap()).await.unwrap_err().contains("not a folder"));
+        let man = src.join("manifest.json");
+        let pkg = inspect(man.to_str().unwrap()).await.unwrap();
         assert_eq!(pkg.manifest.id, "demo");
-        install(src.to_str().unwrap()).await.unwrap();
+        // changed after it was looked at: not added
+        std::fs::write(src.join("main.js"), "OmniPulse.register({ search() {} });").unwrap();
+        assert!(install(man.to_str().unwrap(), &pkg.digest).await.unwrap_err().contains("changed"));
+        // an .omniplugin package (a zip, here with its files in a folder)
+        let pack = tmp.join("demo.omniplugin");
+        {
+            use std::io::Write;
+            let mut z = zip::ZipWriter::new(std::fs::File::create(&pack).unwrap());
+            let o = zip::write::SimpleFileOptions::default();
+            z.start_file("demo/manifest.json", o).unwrap();
+            z.write_all(std::fs::read(&man).unwrap().as_slice()).unwrap();
+            z.start_file("demo/main.js", o).unwrap();
+            z.write_all(b"OmniPulse.register({});").unwrap();
+            z.finish().unwrap();
+        }
+        let pkg = inspect(pack.to_str().unwrap()).await.unwrap();
+        assert_eq!(pkg.code, "OmniPulse.register({});");
+        install(pack.to_str().unwrap(), &pkg.digest).await.unwrap();
         assert_eq!(list().len(), 1);
         let err = http("demo", "https://example.com/", "GET", vec![], None).await.unwrap_err();
         assert!(err.contains("may only reach"), "{err}");

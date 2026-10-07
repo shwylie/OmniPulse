@@ -1016,6 +1016,12 @@ select.wide { max-width: 260px; }
 .trimRow input { width: 90px; }
 .trimMark { margin-left: 4px; padding: 0 3px; border: 0; background: none; color: var(--accent); font: inherit; font-weight: 700; cursor: pointer; }
 #outputBtn.on { color: var(--accent); }
+/* adding a plugin: what it will and won't be able to do */
+.plugName { margin: 14px 0 2px; font-size: 16px; }
+.plugAccess { margin: 10px 0; padding: 8px 12px; border-radius: 8px; background: var(--elevated); }
+.plugAccessHead { font-weight: 600; margin-bottom: 4px; }
+.plugAccess ul { margin: 0; padding-left: 20px; color: var(--muted); font-size: 13px; line-height: 1.5; }
+.plugAccess.can .plugAccessHead { color: var(--accent); }
 .menuItem.menuOn { color: var(--accent); font-weight: 600; }
 .menuItem.menuOn::before { content: "\2713"; display: inline-block; width: 1.2em; }
 /* dropping a track on the open playlist's page */

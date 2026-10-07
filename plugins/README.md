@@ -1,8 +1,19 @@
 # OmniPulse plugins
 
 A plugin adds a source of music: songs to search, play, and (optionally) a library of saved songs.
-Add one in **Settings > Plugins > Add plugin**, from the web address of its
-`manifest.json` or its folder. `internet-archive/` here is a working example.
+Add one in **Settings > Plugins > Add plugin**: choose its file, or paste the web address of its
+`manifest.json`. OmniPulse reads it first and shows, in plain words, what it will and won't be able
+to do; it's added only if you agree, and only if it's still exactly what you saw.
+
+`internet-archive/` here is a working example, and `internet-archive.omniplugin` is the same plugin
+as one file.
+
+## One file: .omniplugin
+
+An `.omniplugin` file is a zip with `manifest.json` and the script, at the top or in one folder. To
+make one on Windows: select both files, right-click > Send to > Compressed (zipped) folder, then
+rename the .zip to .omniplugin. (A plugin's `manifest.json` can also be chosen directly while you
+work on it; its script is read from beside it.)
 
 ## How plugins are kept safe
 

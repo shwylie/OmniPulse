@@ -310,27 +310,78 @@ async function pluginsLoad() {
 }
 
 // ---------- adding one ----------
-let plugPending = "";
+// One file (an .omniplugin package or a manifest.json) or a web address. It's read first, and what it
+// will and won't be able to do is shown in plain words; it's only added once you agree, and only if
+// it's still exactly what you saw.
+let plugPending = null;   // { source, digest }
+
+const andList = (l) => l.length < 2 ? l.join("") : l.slice(0, -1).join(", ") + " and " + l[l.length - 1];
+
+// What a plugin can and can't do, from its manifest (the sandbox enforces the rest)
+function plugAccess(m) {
+  const can = [], cannot = [], warn = [];
+  const caps = new Set(m.capabilities || []);
+  const hosts = m.hosts || [];
+  const local = hosts.filter((h) => h === "127.0.0.1" || h === "localhost");
+  // "example.com" and "*.example.com" read as one site
+  const bare = [...new Set(hosts.filter((h) => !local.includes(h)).map((h) => h.replace(/^\*\./, "")))];
+  const web = bare.map((h) => hosts.includes("*." + h) ? h + " (any part of it)" : h);
+  if (caps.has("search") || !caps.size) can.push("Show its songs in your search results, so it sees what you search for");
+  if (caps.has("play") || !caps.size) can.push("Play its songs, from its own sites, and know when you play one");
+  if (caps.has("library")) can.push("Add its saved songs to your Library");
+  if (web.length) can.push("Connect to " + andList(web));
+  if (local.length) warn.push("It can connect to programs running on this PC (" + local.join(", ") + "). Only allow this if you know what it talks to.");
+  const sets = Array.isArray(m.settings) ? m.settings : [];
+  if (sets.some((x) => x && x.type === "password")) can.push("Keep a password or key you give it, on this PC; it can send that to the sites above");
+  else if (sets.length) can.push("Keep its own settings, on this PC");
+  if (!hosts.length) cannot.push("Connect to the internet");
+  else cannot.push("Connect to any other site");
+  cannot.push(
+    "See your accounts or sign-ins (SoundCloud, Spotify, YouTube Music, Last.fm, Discord)",
+    "Open, read or change your files",
+    "See your playlists, Library, listening history or settings",
+    "Change anything else in the app",
+  );
+  return { can, cannot, warn };
+}
+
+function plugList(title, items, cls) {
+  const box = el("div", "plugAccess " + cls);
+  box.append(el("div", "plugAccessHead", title));
+  const ul = el("ul");
+  items.forEach((t) => ul.append(el("li", "", t)));
+  box.append(ul);
+  return box;
+}
 
 async function plugCheck() {
   const src = $("plugSource").value.trim();
   const box = $("plugPreview");
-  $("plugInstall").hidden = true;
-  plugPending = "";
+  $("plugInstall").hidden = $("plugDeny").hidden = true;
+  $("plugCancel").hidden = false;
+  plugPending = null;
   if (!src) return;
   box.replaceChildren(el("p", "note", "Reading it..."));
   try {
     const pkg = await invoke("plugin_inspect", { source: src });
     const m = pkg.manifest;
     const have = pluginPackages.find((p) => p.manifest.id === m.id);
+    const acc = plugAccess(m);
+    const kb = Math.max(1, Math.round((pkg.code || "").length / 1024));
     box.replaceChildren(
-      el("div", "lbl", m.name + (m.version ? " " + m.version : "") + (m.author ? " by " + m.author : "")),
+      el("h3", "plugName", "Add " + m.name + "?"),
+      el("p", "note", [m.version && "Version " + m.version, m.author && "by " + m.author, kb + " KB"].filter(Boolean).join(" \u00b7 ")),
       el("p", "note", m.description || ""),
-      el("p", "note", "It can reach: " + (m.hosts.length ? m.hosts.join(", ") : "no sites at all") + "."),
-      el("p", "note", "Plugins run in a sandbox: they can't see your accounts, your files or the rest of the app, only the sites above." + (have ? " This replaces the " + (have.manifest.version || "installed") + " version you have." : "")),
+      plugList("It will be able to", acc.can, "can"),
+      plugList("It won't be able to", acc.cannot, "cannot"),
+      ...acc.warn.map((w) => el("p", "note warn", w)),
+      el("p", "note", "It runs walled off from the rest of OmniPulse, and you can turn it off or remove it any time in Settings > Plugins." + (have ? " Adding it replaces the " + (have.manifest.version || "installed") + " version you have." : "")),
     );
-    plugPending = src;
-    $("plugInstall").hidden = false;
+    plugPending = { source: src, digest: pkg.digest };
+    $("plugInstall").textContent = have ? "Update plugin" : "Add plugin";
+    $("plugInstall").hidden = $("plugDeny").hidden = false;
+    $("plugCancel").hidden = true;
+    $("plugInstall").focus();
   } catch (e) {
     box.replaceChildren(el("p", "note warn", String(e)));
   }
@@ -339,7 +390,7 @@ async function plugCheck() {
 async function plugInstallNow() {
   if (!plugPending) return;
   try {
-    const m = await invoke("plugin_install", { source: plugPending });
+    const m = await invoke("plugin_install", plugPending);
     pluginStop(m.id);
     $("plugDialog").close();
     await pluginsLoad();
@@ -349,23 +400,34 @@ async function plugInstallNow() {
   }
 }
 
+function plugReset() {
+  plugPending = null;
+  $("plugPreview").replaceChildren();
+  $("plugInstall").hidden = $("plugDeny").hidden = true;
+  $("plugCancel").hidden = false;
+}
+
 function pluginsInit() {
   $("plugAdd").addEventListener("click", () => {
     $("plugSource").value = "";
-    $("plugPreview").replaceChildren();
-    $("plugInstall").hidden = true;
+    plugReset();
     $("plugDialog").showModal();
     $("plugSource").focus();
   });
   $("plugCheck").addEventListener("click", plugCheck);
   $("plugSource").addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); plugCheck(); } });
+  $("plugSource").addEventListener("input", plugReset);
   $("plugInstall").addEventListener("click", plugInstallNow);
+  $("plugDeny").addEventListener("click", () => { $("plugDialog").close(); say("Not added."); });
   $("plugCancel").addEventListener("click", () => $("plugDialog").close());
-  $("plugFolder").addEventListener("click", async () => {
+  $("plugFile").addEventListener("click", async () => {
     const dlg = window.__TAURI__ && window.__TAURI__.dialog;
-    if (!dlg || !dlg.open) { say("Type the plugin folder's path instead."); return; }
-    const dir = await dlg.open({ directory: true, title: "The plugin's folder (with manifest.json)" }).catch(() => null);
-    if (dir) { $("plugSource").value = String(dir); plugCheck(); }
+    if (!dlg || !dlg.open) { say("Type the plugin file's path instead."); return; }
+    const file = await dlg.open({
+      multiple: false, directory: false, title: "Choose a plugin",
+      filters: [{ name: "OmniPulse plugin", extensions: ["omniplugin", "json"] }],
+    }).catch(() => null);
+    if (file) { $("plugSource").value = String(file); plugCheck(); }
   });
   pluginsLoad();
 }

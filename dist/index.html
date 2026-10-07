@@ -309,17 +309,18 @@
 <dialog id="plugDialog" class="fixDialog">
   <div class="sheet">
     <h2>Add a plugin</h2>
-    <p class="note">The web address of its manifest.json, or its folder on this PC. You'll see what it is and which sites it can reach before anything is installed.</p>
+    <p class="note">Choose the plugin's file (an .omniplugin package, or its manifest.json), or paste the web address of its manifest.json. You'll see what it will be able to do before anything is added.</p>
     <div class="trimRow">
-      <input id="plugSource" type="text" placeholder="https://.../manifest.json or C:\...\my-plugin" autocomplete="off" spellcheck="false">
-      <button type="button" id="plugFolder" class="soft">Choose folder</button>
+      <input id="plugSource" type="text" placeholder="https://.../manifest.json" autocomplete="off" spellcheck="false">
+      <button type="button" id="plugFile" class="soft">Choose file...</button>
       <button type="button" id="plugCheck" class="soft">Check</button>
     </div>
     <div id="plugPreview"></div>
     <div class="fixActions">
       <span class="grow"></span>
       <button type="button" id="plugCancel" class="soft">Cancel</button>
-      <button type="button" id="plugInstall" class="soft fixSave" hidden>Install</button>
+      <button type="button" id="plugDeny" class="soft" hidden>Don't add</button>
+      <button type="button" id="plugInstall" class="soft fixSave" hidden>Add plugin</button>
     </div>
   </div>
 </dialog>

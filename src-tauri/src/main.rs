@@ -212,7 +212,7 @@ fn remote_result(id: u64, state: Value) { remote::remote_result(id, state) }
 #[tauri::command]
 async fn plugin_inspect(source: String) -> Result<plugins::Package, String> { plugins::inspect(&source).await }
 #[tauri::command]
-async fn plugin_install(source: String) -> Result<plugins::Manifest, String> { plugins::install(&source).await }
+async fn plugin_install(source: String, digest: String) -> Result<plugins::Manifest, String> { plugins::install(&source, &digest).await }
 #[tauri::command]
 fn plugin_list() -> Vec<plugins::Package> { plugins::list() }
 #[tauri::command]
