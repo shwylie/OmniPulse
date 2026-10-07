@@ -267,7 +267,7 @@ function openTrackMenu(t, x, y, fromPlayer) {
   add("Add to playlist...", "playlist");
   sep();
   if (canLike(t)) add(isLiked(t) ? "Remove from Likes" : "Add to Likes", "like");
-  add(isFav(t) ? "Remove from Favourites" : "Add to Favourites", "fav");
+  if (favOn()) add(isFav(t) ? "Remove from Favourites" : "Add to Favourites", "fav");
   if (sc && t.user && t.user.id) add("Go to artist", "artist");
   if (!fromPlayer && view === "playlist" && isOwnPlaylist(currentPlaylist)) add("Remove from this playlist", "unlist");
   if (!fromPlayer && (view === "discover" || view === "rediscover")) add("Remove recommendation", "hide");

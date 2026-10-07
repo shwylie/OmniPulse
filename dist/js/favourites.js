@@ -10,6 +10,26 @@ try { favs = JSON.parse(localStorage.getItem(FAV_KEY) || "[]"); } catch (e) { fa
 let favIds = new Set(favs.map((s) => s.id));
 
 const isFav = (t) => !!t && favIds.has(t.id);
+const favOn = () => prefs.favOn !== false;
+
+// Switching favourites off hides every star, the page and the filter; your favourites are kept
+function applyFavOn() {
+  document.documentElement.classList.toggle("noFav", !favOn());
+  $("favOn").checked = favOn();
+  if (!favOn() && prefs.favOnly) { prefs.favOnly = false; savePrefs(); }
+  if (!favOn() && view === "favourites") openLikes();
+  paintFavOnly();
+}
+
+// "Favourites only": hides the rows that aren't favourites, on any list
+function paintFavOnly() {
+  const on = favOn() && !!prefs.favOnly;
+  $("list").classList.toggle("favOnly", on);
+  const c = $("favOnlyChip");
+  c.classList.toggle("on", on);
+  c.setAttribute("aria-pressed", on ? "true" : "false");
+  c.title = on ? "Showing only your favourites. Click to show everything." : "Show only your favourites";
+}
 
 function favSave() {
   try { localStorage.setItem(FAV_KEY, JSON.stringify(favs)); } catch (e) { say("Could not save your favourites: " + e); }
@@ -32,6 +52,7 @@ function toggleFav(t) {
     favs.unshift(xplSnap(t));
     favIds.add(t.id);
     say("Added to Favourites.");
+    if (canLike(t) && !isLiked(t)) toggleLike(t);   // a favourite is a like too
   }
   favSave();
   if (view === "favourites") {
@@ -51,10 +72,11 @@ function refreshFavUI() {
     nb.textContent = isFav(t) ? "Favourite" : "Add to Favourites";
     nb.classList.toggle("on", isFav(t));
   }
-  document.querySelectorAll("#list li").forEach((li) => {
+  document.querySelectorAll("#list li[data-i]").forEach((li) => {
     const t2 = viewTracks[Number(li.dataset.i)];
     const b = li.querySelector('button[data-act="fav"]');
     if (t2 && b && b.classList.contains("on") !== isFav(t2)) setStar(b, isFav(t2));
+    if (t2) li.classList.toggle("notFav", !isFav(t2));
   });
 }
 
@@ -70,6 +92,14 @@ function openFavourites() {
 }
 
 function favouritesInit() {
+  $("favOn").addEventListener("change", () => { prefs.favOn = $("favOn").checked; savePrefs(); applyFavOn(); });
+  $("favOnlyChip").addEventListener("click", () => {
+    prefs.favOnly = !prefs.favOnly;
+    savePrefs();
+    paintFavOnly();
+    render();   // album tiles step aside while it's on
+  });
+  applyFavOn();
   $("navFavourites").addEventListener("click", openFavourites);
   $("favBtn").addEventListener("click", (e) => { e.stopPropagation(); toggleFav(curTrack()); });
   $("npFav").addEventListener("click", () => toggleFav(curTrack()));

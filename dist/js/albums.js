@@ -146,6 +146,7 @@ function injectAlbums() {
   paintAlbumToggle();
   if (!albumsShown() || !ALBUM_PAGES.includes(view)) return;
   if (view === "likes" && likesFilter !== "all") return;
+  if (favOn() && prefs.favOnly) return;   // only favourite tracks are showing
   let tiles = viewAlbums.slice();
   if ((view === "discover" || view === "search") && activePlats(view).includes("spotify")) {
     const seen = new Set(tiles.map((a) => a.id));
