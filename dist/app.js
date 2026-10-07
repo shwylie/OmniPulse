@@ -21,7 +21,7 @@ function applyPrefs() {
   const root = document.documentElement;
   root.dataset.theme = prefs.theme;
   root.dataset.density = prefs.density;
-  if (prefs.artAccent && artColors) setAccentColors(artColors[0], artColors[1]);
+  if (prefs.artAccent && artColors && !artPaused) setAccentColors(artColors[0], artColors[1]);
   else setAccentColors(prefs.accent, prefs.accent2 || prefs.accent);
   applyUserCss();
 }
@@ -202,7 +202,7 @@ function renderHero() {
     title = "Rediscover";
     sub = "";   // set below, in two parts
   } else if (v === "sets") {
-    title = "Sets & podcasts";
+    title = "Sets & Podcasts";
     sub = "Long sets, mixes and podcasts: anything over 15 minutes.";
   } else if (v === "favourites") {
     title = "Favourites";

@@ -149,7 +149,7 @@ let likesFilter = "all";
 function renderLikesChips() {
   const box = $("likesChips");
   box.replaceChildren();
-  [["all", "All"], ["tracks", "Tracks"], ["mixes", "Sets & podcasts"]].forEach(([k, label]) => {
+  [["all", "All"], ["tracks", "Tracks"], ["mixes", "Sets & Podcasts"]].forEach(([k, label]) => {
     const b = el("button", "chip" + (k === likesFilter ? " on" : ""), label);
     b.dataset.f = k;
     box.append(b);

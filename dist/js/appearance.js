@@ -100,6 +100,22 @@ function artPalette(url) {
   });
 }
 
+// The cover's colours only while something plays: paused (or nothing playing yet), the accent you
+// chose comes back. A pause that's only the gap between two tracks doesn't count.
+let artPaused = true;
+let artPauseTimer = null;
+
+function accentFollowPlayback(playing) {
+  clearTimeout(artPauseTimer);
+  if (playing) {
+    if (artPaused) { artPaused = false; applyPrefs(); }
+    return;
+  }
+  artPauseTimer = setTimeout(() => {
+    if (!nowPlaying() && !artPaused) { artPaused = true; applyPrefs(); }
+  }, 600);
+}
+
 async function updateArtAccent(t) {
   const tok = ++artToken;
   if (!prefs.artAccent) { artColors = null; applyPrefs(); return; }
@@ -109,7 +125,7 @@ async function updateArtAccent(t) {
     const [c1, c2] = await artPalette(url);
     if (tok !== artToken || !prefs.artAccent) return;
     artColors = [c1, c2];
-    setAccentColors(c1, c2);
+    if (!artPaused) setAccentColors(c1, c2);
   } catch (e) {
     if (tok === artToken) { artColors = null; applyPrefs(); }
   }

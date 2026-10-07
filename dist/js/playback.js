@@ -136,6 +136,7 @@ function playbackTick() {
 
 function playbackState(playing) {
   widgetPush();
+  accentFollowPlayback(playing);
   if (playing && norm.ctx && norm.ctx.state === "suspended") norm.ctx.resume().catch(() => {});
   taskbarSync();
   if ("mediaSession" in navigator) {

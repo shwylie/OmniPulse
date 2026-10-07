@@ -43,7 +43,7 @@ const REMOTE_ACTIONS = {
     $("queueSets").checked = on;
     $("autoplaySetsOn").checked = on;
     autoplayFailedFor = null;
-    say(on ? "Sets & podcasts are back in the queue and autoplay." : "Sets & podcasts are out of the queue and autoplay.");
+    say(on ? "Sets & Podcasts are back in the queue and autoplay." : "Sets & Podcasts are out of the queue and autoplay.");
   },
   state: () => {},
 };
