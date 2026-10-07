@@ -13,7 +13,7 @@ function scApply() {
 // below (and DISCOVER_PICKERS in app.js) how to fetch its tracks.
 const PLATFORM_LIST = [
   { id: "soundcloud", pref: "scOn", pages: ["likes", "search", "discover", "rediscover"], available: () => lastSignedIn },
-  { id: "spotify", pref: "spOn", pages: ["likes", "search", "discover", "rediscover"], available: () => FEATURES.spotify && spotifyPremium },
+  { id: "spotify", pref: "spOn", pages: ["likes", "search", "discover", "rediscover"], available: () => spotifyUsable() },
   { id: "local", pref: "localOn", pages: ["likes", "search", "rediscover"], available: () => localFolderList.length > 0 },
   { id: "youtube", pref: "ytOn", pages: ["likes", "search", "discover", "rediscover"], available: () => ytAvailable() },
 ];
@@ -72,7 +72,7 @@ async function setPlatformOn(id, on) {
     await localLoad();
     if (on) localRescan();
   }
-  if (id === "spotify") syncSpotifySettings();
+  if (id === "spotify" || id === "youtube") syncSpotifySettings();   // a free Spotify account plays through YouTube
   renderPlatChips();   // reloads the page for the new mix
   reqPaint();
 }

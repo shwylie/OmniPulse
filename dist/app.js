@@ -1058,7 +1058,7 @@ async function playCurrent() {
   say("");
   const resumeAt = takeResume(t);
   try {
-    if (srcOf(t) === "spotify") {
+    if (onSpotifyEngine(t)) {
       audio.pause();
       await spotifyStart(t, resumeAt);
     } else {
@@ -1166,6 +1166,12 @@ async function startStream(t) {
     if (mine === streamToken) say("");
     return;
   }
+  // Spotify without Premium: the same song from YouTube Music
+  if (srcOf(t) === "spotify") {
+    if (await playViaYouTube(t, mine, "Playing from YouTube Music (this Spotify account isn't Premium).")) return;
+    if (mine !== streamToken) return;
+    throw new Error(ytOn() ? "this song couldn't be found on YouTube Music" : "without Spotify Premium, Spotify tracks play from YouTube Music, which is switched off");
+  }
   if (srcOf(t) === "youtube") {
     const url = await ytPlay(t);
     if (mine !== streamToken) return;
@@ -1226,7 +1232,7 @@ async function startStream(t) {
 
 function toggle() {
   const cur = curTrack();
-  if (cur && srcOf(cur) === "spotify") { spotifyToggle(); return; }
+  if (onSpotifyEngine(cur)) { spotifyToggle(); return; }
   if (!audio.src) {
     if (cur) playCurrent();   // the queue from last time
     else if (viewTracks.length) startList(viewTracks, 0, false);
@@ -1239,7 +1245,7 @@ function step(d) {
   if (!queue.length) return;
   // Previous restarts the track if it has been playing for a few seconds
   const cur = curTrack();
-  const onSpotify = !!cur && srcOf(cur) === "spotify";
+  const onSpotify = onSpotifyEngine(cur);
   if (d < 0 && onSpotify && spotifyPos() > 3000) { spotifySeek(0); return; }
   if (d < 0 && !onSpotify && audio.currentTime > 3) { audio.currentTime = 0; return; }
   if (d > 0 && qi === queue.length - 1 && autoplayActive()) { autoplayAdvance(); return; }
@@ -1264,7 +1270,7 @@ audio.addEventListener("loadedmetadata", () => {
 
 $("seek").addEventListener("input", () => {
   const cur = curTrack();
-  if (cur && srcOf(cur) === "spotify") { spotifySeek(Number($("seek").value) / 1000); return; }
+  if (onSpotifyEngine(cur)) { spotifySeek(Number($("seek").value) / 1000); return; }
   const d = curDurMs();
   if (d) audio.currentTime = (Number($("seek").value) / 1000) * (d / 1000);
 });

@@ -4,6 +4,12 @@
 // spotifyInit() at startup.
 
 let spotifyPremium = false;
+let spotifyFree = false;   // signed in without Premium: your library and search, played from YouTube Music
+
+// Spotify's own player only plays for Premium; without it a Spotify track plays from YouTube Music
+// (in the app's <audio> player like everything else)
+const onSpotifyEngine = (t) => !!t && srcOf(t) === "spotify" && spotifyPremium && !t.ytVia;
+const spotifyUsable = () => FEATURES.spotify && (spotifyPremium || (spotifyFree && ytOn()));
 let spotifyName = "";
 let spState = { pos: 0, ts: 0, playing: false, dur: 0 };
 
@@ -30,13 +36,17 @@ function spTrack(x) {
 }
 
 // ---------- account: Spotify stays hidden unless this is a Premium account ----------
-const SP_DEFAULT_NOTE = "Not signed in. Needs a Premium account.";
+const SP_DEFAULT_NOTE = "Not signed in. Without Premium, Spotify tracks play from YouTube Music.";
 
 function syncSpotifySettings() {
   // like Last.fm's options: they fold out under Spotify once it's signed in and switched on
   $("spotifyOptions").hidden = !(FEATURES.spotify && spotifyPremium && prefs.spOn !== false);
-  $("spConnect").textContent = spotifyPremium ? "Sign out" : "Sign in";
+  $("spConnect").textContent = spotifyPremium || spotifyFree ? "Sign out" : "Sign in";
   if (spotifyPremium) $("spStatus").textContent = "Signed in as " + (spotifyName || "you") + " \u00b7 Premium.";
+  else if (spotifyFree) {
+    $("spStatus").textContent = "Signed in as " + (spotifyName || "you") + " \u00b7 Free. " +
+      (ytOn() ? "Spotify tracks play from YouTube Music." : "Switch on YouTube Music to play your Spotify library.");
+  }
 }
 
 async function spotifyCheck() {
@@ -46,10 +56,7 @@ async function spotifyCheck() {
       const me = await spApi("GET", "/me");
       ok = me.product === "premium";
       spotifyName = me.display_name || me.id || "";
-      if (!ok) {
-        await invoke("spotify_logout");
-        $("spStatus").textContent = "Hidden: " + (spotifyName || "this account") + " isn't a Premium account.";
-      }
+      spotifyFree = !ok;
     } catch (e) {
       $("spStatus").textContent = "Could not check your Spotify account: " + e;
     }
@@ -77,6 +84,7 @@ async function spotifyDisconnect() {
   await invoke("spe_logout").catch(() => {});   // playback too
   speSettingsPaint();
   spotifyPremium = false;
+  spotifyFree = false;
   if (typeof renderPlatChips === "function") renderPlatChips();
   syncSpotifySettings();
   $("spStatus").textContent = SP_DEFAULT_NOTE;
@@ -115,7 +123,7 @@ function speAudio(msg) {
 }
 
 function speEvent(ev) {
-  if (!ev || !curTrack() || srcOf(curTrack()) !== "spotify") return;
+  if (!ev || !onSpotifyEngine(curTrack())) return;
   if (ev.type === "end") {
     // the whole track has been sent; it ends when the worklet has played the rest
     spe.endPending = true;
@@ -199,7 +207,7 @@ function spotifyPos() {
 
 function paintSpotify() {
   const t = curTrack();
-  if (!t || srcOf(t) !== "spotify") return;
+  if (!onSpotifyEngine(t)) return;
   const pos = Math.min(spotifyPos(), spState.dur || Infinity);
   $("cur").textContent = fmt(pos);
   if (spState.dur) {
@@ -214,7 +222,7 @@ function paintSpotify() {
 // scrobbling and the lyrics highlight
 function spotifyTick() {
   const t = curTrack();
-  if (!t || srcOf(t) !== "spotify") return;
+  if (!onSpotifyEngine(t)) return;
   paintSpotify();
   if (spState.playing) playbackTick();
 }
@@ -372,7 +380,7 @@ async function spotifySetLiked(t, on) {
 // Whether Spotify tracks on screen are in your library, asked 40 at a time
 const spLikeAsked = new Set();
 async function spotifyLikeCheck(list) {
-  if (!spotifyPremium) return;
+  if (!spotifyPremium && !spotifyFree) return;
   const todo = list.filter((t) => srcOf(t) === "spotify" && t.uri && !likeState.has(t.id) && !spLikeAsked.has(t.id));
   for (let i = 0; i < todo.length; i += 40) {
     const batch = todo.slice(i, i + 40);

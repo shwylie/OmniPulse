@@ -53,7 +53,7 @@ const loudFor = (t) => (loudKey(t) ? loudResults.get(loudKey(t)) : undefined);  
 // The gain for a track, in dB
 function loudGainFor(t) {
   const target = loudTarget();
-  if (target === null || !t || srcOf(t) === "spotify") return 0;
+  if (target === null || !t || onSpotifyEngine(t)) return 0;
   const a = loudFor(t);
   const lufs = a ? a.lufs : LOUD_TYPICAL_LUFS;
   return Math.max(-30, Math.min(LOUD_MAX_BOOST, target - lufs));
@@ -95,7 +95,7 @@ function loudPaint() {
   const t = curTrack();
   if (!t || loudTarget() === null) { box.hidden = true; return; }
   box.hidden = false;
-  if (srcOf(t) === "spotify") { box.textContent = "Now playing: Spotify's own loudness value for this track."; return; }
+  if (onSpotifyEngine(t)) { box.textContent = "Now playing: Spotify's own loudness value for this track."; return; }
   const a = loudFor(t);
   const change = (db) => (Math.abs(db) < 0.1 ? "played as it is" : (db > 0 ? "turned up " : "turned down ") + Math.abs(db).toFixed(1) + " dB");
   if (a) {
@@ -123,7 +123,7 @@ function silenceTick() {
   const pos = curPosMs();
   const moving = silence.lastPos >= 0 && pos > silence.lastPos;
   silence.lastPos = pos;
-  const a = srcOf(t) === "spotify" ? null : loudFor(t);
+  const a = onSpotifyEngine(t) ? null : loudFor(t);
 
   if (a && pos < a.analysed_ms) {
     silence.live = 0;

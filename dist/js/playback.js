@@ -9,19 +9,19 @@ let shuffleBackup = null; // upcoming tracks in their original order, to undo sh
 // Is anything audible right now? (Spotify plays through its own engine, not the <audio> element)
 function nowPlaying() {
   const t = curTrack();
-  return !!t && (srcOf(t) === "spotify" ? spState.playing : !audio.paused);
+  return !!t && (onSpotifyEngine(t) ? spState.playing : !audio.paused);
 }
 
 // Where the current track is up to, and how long it is, in ms, whichever engine is playing it
 function curPosMs() {
   const t = curTrack();
   if (!t) return 0;
-  return srcOf(t) === "spotify" ? spotifyPos() : (audio.currentTime || 0) * 1000;
+  return onSpotifyEngine(t) ? spotifyPos() : (audio.currentTime || 0) * 1000;
 }
 function curDurMs() {
   const t = curTrack();
   if (!t) return 0;
-  if (srcOf(t) === "spotify") return spState.dur || t.duration || 0;
+  if (onSpotifyEngine(t)) return spState.dur || t.duration || 0;
   return isFinite(audio.duration) && audio.duration ? audio.duration * 1000 : t.duration || 0;
 }
 
@@ -88,7 +88,7 @@ function cycleRepeat() {
 // Called when a track finishes, from the audio element or the Spotify player
 function onEnded() {
   if (repeatMode === "one") {
-    if (srcOf(curTrack()) === "spotify") playCurrent();
+    if (onSpotifyEngine(curTrack())) playCurrent();
     else { audio.currentTime = 0; audio.play(); }
     return;
   }

@@ -43,21 +43,25 @@ const YT_MATCH_KEY = "sc.ytMatch";
 let ytMatches = null;   // track id -> YouTube track snapshot, or null for "none found"
 
 const ytOn = () => ytWanted() && ytAvailable();
-// words YouTube uploads add that say nothing about which song it is
-const NOISE_WORDS = new Set(["official", "audio", "video", "music", "lyrics", "lyric", "hd", "hq", "4k", "visualizer", "visualiser", "topic", "full", "song", "mv"]);
+// What uploads add to a title that says nothing about the song: "(Official Audio)", "[Lyric Video]",
+// "| Official Music Video". Only bracketed or trailing parts go, so "Video Games" stays a title.
+const UPLOAD_TAG = /\b(official|audio|video|lyrics?|visuali[sz]er|hd|hq|4k|mv|m\/v)\b/i;
+const uploadTitle = (s) => String(s || "")
+  .replace(/[(\[]([^)\]]*)[)\]]/g, (m, inner) => (UPLOAD_TAG.test(inner) ? " " : m))
+  .replace(/\s[|\uFF5C]\s.*$/, " ");
 const VERSION_WORDS = ["remix", "edit", "mix", "vip", "flip", "bootleg", "live", "acoustic", "instrumental", "remaster", "cover", "sped", "slowed", "nightcore", "karaoke"];
 
 function matchWords(s) {
-  return String(s || "").toLowerCase().normalize("NFKD").replace(/[̀-ͯ]/g, "")
-    .replace(/(feat|ft|featuring|prod|with).?/g, " ").replace(/[^a-z0-9]+/g, " ").trim().split(" ").filter(Boolean);
+  return String(s || "").toLowerCase().normalize("NFKD").replace(/[\u0300-\u036f]/g, "")
+    .replace(/\b(feat|ft|featuring|prod|with)\b\.?/g, " ").replace(/[^a-z0-9]+/g, " ").trim().split(" ").filter(Boolean);
 }
 
 function ytMatchScore(t, c) {
   const names = guessNames(t);
   const artist = matchWords(names.artist || artistName(t));
-  const want = new Set(matchWords(names.title).filter((w) => !NOISE_WORDS.has(w)));
+  const want = new Set(matchWords(names.title));
   // the artist's name in an upload's title ("Artist - Song") isn't part of the song's title
-  const got = new Set(matchWords(c.title).filter((w) => !NOISE_WORDS.has(w) && !(artist.includes(w) && !want.has(w))));
+  const got = new Set(matchWords(uploadTitle(c.title)).filter((w) => !(artist.includes(w) && !want.has(w))));
   if (!want.size || !got.size) return 0;
   let shared = 0;
   want.forEach((w) => { if (got.has(w)) shared++; });
@@ -208,6 +212,7 @@ async function ytCheck() {
   try { ytInfo = Object.assign(await invoke("yt_status"), { checked: true }); } catch (e) { ytInfo = { ytdlp: null, deno: false, node: false, checked: true }; }
   const setup = ytInfo.setup || {};
   ytPaint();
+  syncSpotifySettings();   // a free Spotify account plays through YouTube Music
   renderPlatChips();
   clearTimeout(ytSetupTimer);
   if (setup.busy) { ytSetupTimer = setTimeout(ytCheck, 700); return; }   // follow the download
