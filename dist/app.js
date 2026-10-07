@@ -162,7 +162,7 @@ function renderHero() {
   let sub = "";
   if (v === "rediscover") {
     title = "Rediscover";
-    sub = "Likes you haven't played in a while. ";
+    sub = "Fall in love all over again";
   } else if (v === "discover") {
     title = "Discover";
     sub = discoverNote ? discoverNote + ". " : "";
@@ -179,7 +179,7 @@ function renderHero() {
   const n = viewTracks.length;
   $("viewTitle").textContent = title;
   $("refreshBtn").hidden = !(v === "discover" || v === "rediscover");
-  $("viewSub").textContent = v === "discover" ? sub : sub + (n ? n + (nextHref ? "+" : "") + (n === 1 ? " track" : " tracks") : "");
+  $("viewSub").textContent = sub.trim();
   const isArtist = v === "artist" && !!currentArtist;
   $("heroActions").hidden = n === 0 && !isArtist;
   $("playAll").hidden = n === 0;
@@ -1317,7 +1317,6 @@ syncMaximized();
   renderPlaylists();
   render();
   $("spotifySection").hidden = !FEATURES.spotify;
-  $("speRow").hidden = !FEATURES.spotify;
   extrasInit();
   if (FEATURES.spotify) spotifyInit();
   const signedIn = await refreshAuth();

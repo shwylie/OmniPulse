@@ -32,6 +32,8 @@ function spTrack(x) {
 const SP_DEFAULT_NOTE = "Not signed in. Spotify only appears once you sign in with a Premium account.";
 
 function syncSpotifySettings() {
+  // like Last.fm's options: they fold out under Spotify once it's signed in and switched on
+  $("spotifyOptions").hidden = !(FEATURES.spotify && spotifyPremium && prefs.spOn !== false);
   $("spConnect").textContent = spotifyPremium ? "Sign out" : "Sign in";
   if (spotifyPremium) $("spStatus").textContent = "Signed in with a Premium account.";
 }
@@ -74,6 +76,7 @@ async function spotifyDisconnect() {
   speSettingsPaint();
   spotifyPremium = false;
   if (typeof renderPlatChips === "function") renderPlatChips();
+  syncSpotifySettings();
   $("spStatus").textContent = SP_DEFAULT_NOTE;
   $("spConnect").textContent = "Sign in";
   if (queue.length && srcOf(queue[0]) === "spotify") {
