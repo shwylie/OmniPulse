@@ -333,7 +333,7 @@ async function sidebarItems(id) {
 async function refreshSidebar() {
   const tok = ++sidebarTok;
   const plats = activePlats();
-  document.querySelector(".plScroll").hidden = !plats.length && !xpls.length;
+  $("sideLists").hidden = !plats.length && !xpls.length;
   $("plHeadText").textContent = "Playlists";
   $("plNew").hidden = false;
   if (!playlists.length) renderPlaylists("Loading...");

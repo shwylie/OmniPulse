@@ -223,7 +223,7 @@ async function deleteXpl(p) {
 function xplInit() {
   $("newPlForm").addEventListener("submit", newPlaylistSubmit);
   $("newPlCancel").addEventListener("click", () => $("newPlDialog").close());
-  $("plList").addEventListener("contextmenu", (e) => {
+  $("sideLists").addEventListener("contextmenu", (e) => {
     const b = e.target.closest(".plItem");
     if (!b) return;
     e.preventDefault();

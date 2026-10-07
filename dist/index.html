@@ -6,6 +6,14 @@
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+  <defs>
+    <linearGradient id="rainbow" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#ff5f6d"/><stop offset="0.25" stop-color="#ffc371"/><stop offset="0.5" stop-color="#47e891"/>
+      <stop offset="0.75" stop-color="#3fa9ff"/><stop offset="1" stop-color="#b06bff"/>
+    </linearGradient>
+  </defs>
+</svg>
 <div class="titlebar" data-tauri-drag-region>
   <div class="titleLeft" data-tauri-drag-region>
     <span id="titleText" data-tauri-drag-region title="Right-click to rename"></span>
@@ -47,12 +55,19 @@
         <span>Stats</span>
       </button>
     </nav>
-    <div class="plScroll">
-      <div class="plHead">
-        <span id="plHeadText">Playlists</span>
-        <button id="plNew" class="plAdd" title="New playlist" aria-label="New playlist"><svg viewBox="0 0 24 24"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg></button>
-      </div>
-      <div class="plList" id="plList"></div>
+    <!-- the space below the pages is shared evenly; each list scrolls on its own -->
+    <div class="sideLists" id="sideLists">
+      <section class="sideSection" id="plSection">
+        <div class="plHead">
+          <span id="plHeadText">Playlists</span>
+          <button id="plNew" class="plAdd" title="New playlist" aria-label="New playlist"><svg viewBox="0 0 24 24"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg></button>
+        </div>
+        <div class="plList" id="plList"></div>
+      </section>
+      <section class="sideSection" id="albumSection" hidden>
+        <div class="plHead"><span>Albums</span></div>
+        <div class="plList" id="albumList"></div>
+      </section>
     </div>
   </aside>
 

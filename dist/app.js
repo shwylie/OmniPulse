@@ -635,24 +635,25 @@ function renderPlaylists(note) {
   box.replaceChildren();
   if (note) box.append(el("div", "plNote", note));
   // playlists first, then albums from your files under their own heading
-  const item = (p) => {
+  const item = (p, into) => {
     const b = el("button", "plItem");
     b.dataset.id = p.id;
     b.title = p.title || "";
     b.append(platformBadge({ source: p.source || "soundcloud" }), el("span", "plName", p.title || "Untitled playlist"));
-    box.append(b);
+    into.append(b);
   };
+  // your albums get their own section below, which scrolls separately
   const albums = playlists.filter((p) => p.group === "albums");
-  playlists.filter((p) => p.group !== "albums").forEach(item);
-  if (albums.length) {
-    box.append(el("div", "plGroup", "Albums"));
-    albums.forEach(item);
-  }
+  playlists.filter((p) => p.group !== "albums").forEach((p) => item(p, box));
+  const abox = $("albumList");
+  abox.replaceChildren();
+  albums.forEach((p) => item(p, abox));
+  $("albumSection").hidden = !albums.length;
   if (!playlists.length && !note) box.append(el("div", "plNote", "No playlists yet."));
   showView(view);
 }
 
-$("plList").addEventListener("click", (e) => {
+$("sideLists").addEventListener("click", (e) => {
   const b = e.target.closest(".plItem");
   if (!b) return;
   const p = playlists.find((x) => String(x.id) === b.dataset.id);
