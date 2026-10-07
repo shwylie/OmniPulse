@@ -1,9 +1,10 @@
 // Spotify playback through librespot, so Spotify audio goes through the app's own audio chain
 // (equalizer, leveling, volume, output device) like SoundCloud and local files.
 //
-// librespot decodes the track; PcmSink below hands the samples to the page over a Tauri
-// channel as interleaved stereo f32 at 44.1 kHz, where an AudioWorklet plays them. The page
-// reports how much it has played, and the sink waits so it stays about LEAD_FRAMES ahead.
+// librespot decodes the track; PcmSink below hands the samples, interleaved stereo f32 at 44.1 kHz,
+// to whatever the app attached (spe_attach): the Tauri app forwards them to an AudioWorklet, the
+// native app plays them itself. The app reports how much it has played (spe_played), and the sink
+// waits so it stays about LEAD_FRAMES ahead.
 //
 // librespot is an unofficial client. It signs in once with its own OAuth flow (Spotify's
 // desktop client id) and keeps reusable credentials in <data dir>/librespot.
@@ -25,7 +26,15 @@ use serde_json::{json, Value};
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
-use tauri::ipc::{Channel, InvokeResponseBody};
+
+/// Where the decoded audio goes: interleaved stereo f32 at 44.1 kHz, tagged with the generation
+/// it belongs to. Returns false if it couldn't be delivered.
+pub trait PcmOut: Send + Sync {
+    fn send(&self, gen: u32, samples: &[f32]) -> bool;
+}
+
+/// Player events: {"type": "playing" | "paused" | "end" | "unavailable" | "stopped", ...}
+pub type EventOut = Arc<dyn Fn(Value) + Send + Sync>;
 
 const RATE: u64 = 44100;
 const LEAD_FRAMES: u64 = RATE * 3 / 4; // how far ahead of what's audible the sink may get
@@ -42,8 +51,8 @@ const OAUTH_SCOPES: &[&str] = &[
 ];
 
 // Shared between the commands, the sink (on librespot's player thread) and the event task
-static PCM: Mutex<Option<Channel<InvokeResponseBody>>> = Mutex::new(None);
-static EVENTS: Mutex<Option<Channel<Value>>> = Mutex::new(None);
+static PCM: Mutex<Option<Arc<dyn PcmOut>>> = Mutex::new(None);
+static EVENTS: Mutex<Option<EventOut>> = Mutex::new(None);
 static GEN: AtomicU32 = AtomicU32::new(0); // bumped on every load / seek; older audio is dropped
 static SENT: AtomicU64 = AtomicU64::new(0); // frames sent for the current GEN
 static PLAYED: AtomicU64 = AtomicU64::new(0); // frames the page has played for the current GEN
@@ -65,8 +74,9 @@ fn cache() -> Result<Cache, String> {
 }
 
 fn emit(v: Value) {
-    if let Some(ch) = EVENTS.lock().unwrap().as_ref() {
-        let _ = ch.send(v);
+    let out = EVENTS.lock().unwrap().clone();
+    if let Some(out) = out {
+        out(v);
     }
 }
 
@@ -91,17 +101,10 @@ impl PcmSink {
         }
         let gen = self.batch_gen;
         let frames = (self.batch.len() / 2) as u64;
-        // [gen: u32][reserved: u32][f32 samples...], little endian
-        let mut bytes = Vec::with_capacity(8 + self.batch.len() * 4);
-        bytes.extend_from_slice(&gen.to_le_bytes());
-        bytes.extend_from_slice(&0u32.to_le_bytes());
-        for s in &self.batch {
-            bytes.extend_from_slice(&s.to_le_bytes());
-        }
+        let out = PCM.lock().unwrap().clone();
+        let delivered = out.is_some_and(|out| out.send(gen, &self.batch));
         self.batch.clear();
-        let ch = PCM.lock().unwrap().clone();
-        let Some(ch) = ch else { return };
-        if ch.send(InvokeResponseBody::Raw(bytes)).is_err() {
+        if !delivered {
             return;
         }
         SENT.fetch_add(frames, Ordering::SeqCst);
@@ -153,7 +156,7 @@ async fn connect(credentials: Credentials) -> Result<Engine, String> {
             as Box<dyn Sink>
     });
     let mut events = player.get_player_event_channel();
-    tauri::async_runtime::spawn(async move {
+    tokio::spawn(async move {
         while let Some(ev) = events.recv().await {
             match ev {
                 PlayerEvent::Playing { position_ms, .. } => emit(json!({ "type": "playing", "position_ms": position_ms })),
@@ -189,12 +192,10 @@ fn track_uri(uri: &str) -> Result<SpotifyUri, String> {
 }
 
 // ---------- commands ----------
-#[tauri::command]
 pub fn spe_signed_in() -> bool {
     cache().ok().and_then(|c| c.credentials()).is_some()
 }
 
-#[tauri::command]
 pub async fn spe_login() -> Result<(), String> {
     let client_id = SessionConfig::default().client_id;
     let client = OAuthClientBuilder::new(&client_id, OAUTH_REDIRECT, OAUTH_SCOPES.to_vec())
@@ -211,7 +212,6 @@ pub async fn spe_login() -> Result<(), String> {
     Ok(())
 }
 
-#[tauri::command]
 pub async fn spe_logout() -> Result<(), String> {
     if let Some(e) = ENGINE.lock().await.take() {
         e.player.stop();
@@ -224,15 +224,13 @@ pub async fn spe_logout() -> Result<(), String> {
     Ok(())
 }
 
-// The page hands over two channels: raw audio, and player events
-#[tauri::command]
-pub fn spe_attach(audio: Channel<InvokeResponseBody>, events: Channel<Value>) {
+// The app hands over where the audio and the player events go
+pub fn spe_attach(audio: Arc<dyn PcmOut>, events: EventOut) {
     *PCM.lock().unwrap() = Some(audio);
     *EVENTS.lock().unwrap() = Some(events);
 }
 
 // Returns the generation number the page should accept audio for
-#[tauri::command]
 pub async fn spe_play(uri: String, position_ms: u32) -> Result<u32, String> {
     let track = track_uri(&uri)?;
     let guard = engine().await?;
@@ -243,7 +241,6 @@ pub async fn spe_play(uri: String, position_ms: u32) -> Result<u32, String> {
     Ok(gen)
 }
 
-#[tauri::command]
 pub async fn spe_pause() -> Result<(), String> {
     PAUSED.store(true, Ordering::SeqCst);
     if let Some(e) = ENGINE.lock().await.as_ref() {
@@ -252,7 +249,6 @@ pub async fn spe_pause() -> Result<(), String> {
     Ok(())
 }
 
-#[tauri::command]
 pub async fn spe_resume() -> Result<(), String> {
     PAUSED.store(false, Ordering::SeqCst);
     if let Some(e) = ENGINE.lock().await.as_ref() {
@@ -261,7 +257,6 @@ pub async fn spe_resume() -> Result<(), String> {
     Ok(())
 }
 
-#[tauri::command]
 pub async fn spe_seek(position_ms: u32) -> Result<u32, String> {
     let guard = ENGINE.lock().await;
     let e = guard.as_ref().ok_or("Spotify playback isn't running")?;
@@ -270,7 +265,6 @@ pub async fn spe_seek(position_ms: u32) -> Result<u32, String> {
     Ok(gen)
 }
 
-#[tauri::command]
 pub async fn spe_stop() -> Result<(), String> {
     new_gen();
     if let Some(e) = ENGINE.lock().await.as_ref() {
@@ -279,8 +273,7 @@ pub async fn spe_stop() -> Result<(), String> {
     Ok(())
 }
 
-// The page's worklet reports how many frames of this generation it has played
-#[tauri::command]
+// The app reports how many frames of this generation it has played
 pub fn spe_played(gen: u32, frames: u64) {
     if gen == GEN.load(Ordering::SeqCst) {
         PLAYED.store(frames, Ordering::SeqCst);
@@ -322,7 +315,6 @@ fn track_json(t: &librespot_metadata::Track) -> Value {
     })
 }
 
-#[tauri::command]
 pub async fn spe_playlist(uri: String) -> Result<Value, String> {
     use futures::stream::{self, StreamExt};
     use librespot_metadata::{Metadata, Playlist, Track};
@@ -354,7 +346,6 @@ pub async fn spe_playlist(uri: String) -> Result<Value, String> {
 // Daily Mixes and the rest of "Made For You" are hidden from developer apps' Web API tokens
 // (since November 2024). The playback engine signs in as Spotify's own app, so its token can
 // read them. Only GET requests, only to api.spotify.com.
-#[tauri::command]
 pub async fn spe_web_get(path: String) -> Result<Value, String> {
     if !path.starts_with('/') || path.contains("://") {
         return Err("bad path".into());

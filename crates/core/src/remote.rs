@@ -7,15 +7,26 @@
 //
 // It only listens on 127.0.0.1 and needs the secret key from Settings. While it runs, the port and
 // key are written to <data dir>/remote.json, which is where the Stream Deck plugin finds them.
+//
+// The app registers the handler (set_handler): it presses the button, then answers with remote_result.
 
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::io::{ErrorKind, Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{mpsc, Mutex, OnceLock};
+use std::sync::{mpsc, Arc, Mutex, OnceLock};
 use std::time::Duration;
-use tauri::Manager;
+
+/// Called with (request id, action) for each button press
+pub type Handler = Arc<dyn Fn(u64, &str) + Send + Sync>;
+static HANDLER: Mutex<Option<Handler>> = Mutex::new(None);
+
+pub fn set_handler(f: Handler) {
+    if let Ok(mut h) = HANDLER.lock() {
+        *h = Some(f);
+    }
+}
 
 const ACTIONS: &[&str] = &[
     "play", "pause", "toggle", "next", "previous", "like", "favourite", "shuffle", "repeat",
@@ -39,9 +50,9 @@ fn param(url: &str, key: &str) -> Option<String> {
     })
 }
 
-// Hands the action to the page (window.__remote), then waits for the state it sends back
+// Hands the action to the app, then waits for the state it sends back
 fn ask_page(action: &str) -> Value {
-    let Some(w) = crate::APP.get().and_then(|app| app.get_webview_window("main")) else {
+    let Some(handler) = HANDLER.lock().ok().and_then(|h| h.clone()) else {
         return json!({ "ok": false, "message": "The music app isn't ready yet." });
     };
     let id = NEXT.fetch_add(1, Ordering::SeqCst);
@@ -49,8 +60,7 @@ fn ask_page(action: &str) -> Value {
     if let Ok(mut m) = waiting().lock() {
         m.insert(id, tx);
     }
-    // the action is one of ACTIONS, so it's safe to put in the script
-    let _ = w.eval(format!("window.__remote && window.__remote({id}, {})", json!(action)));
+    handler(id, action);
     let answer = rx.recv_timeout(Duration::from_secs(5));
     if let Ok(mut m) = waiting().lock() {
         m.remove(&id);
@@ -103,7 +113,6 @@ fn info_file() -> Option<std::path::PathBuf> {
     crate::data_dir().ok().map(|d| d.join("remote.json"))
 }
 
-#[tauri::command]
 pub fn remote_start(port: u16, key: String) -> Result<String, String> {
     if key.len() < 16 {
         return Err("The key is too short.".into());
@@ -131,7 +140,6 @@ pub fn remote_start(port: u16, key: String) -> Result<String, String> {
     Err(format!("Port {port} is in use or blocked ({last}). Try another port."))
 }
 
-#[tauri::command]
 pub fn remote_stop() {
     GEN.fetch_add(1, Ordering::SeqCst);
     if let Ok(mut k) = KEY.lock() {
@@ -142,8 +150,7 @@ pub fn remote_stop() {
     }
 }
 
-// The page's answer: the state after the action
-#[tauri::command]
+// The app's answer: the state after the action
 pub fn remote_result(id: u64, state: Value) {
     if let Ok(m) = waiting().lock() {
         if let Some(tx) = m.get(&id) {
@@ -183,9 +190,16 @@ mod tests {
         assert!(get("/state?key=wrong").starts_with("HTTP/1.1 403"));
         assert!(get("/control?key=0123456789abcdef0123&action=format-c").starts_with("HTTP/1.1 400"));
         assert!(get("/elsewhere").starts_with("HTTP/1.1 404"));
-        // a valid request reaches the page; with no app running it says so instead of hanging
+        // a valid request reaches the app; with no app running it says so instead of hanging
         let ok = get("/control?key=0123456789abcdef0123&action=next");
         assert!(ok.starts_with("HTTP/1.1 200") && ok.contains("isn't ready"), "{ok}");
+        // with an app: it gets the action and its answer comes back as the reply
+        set_handler(Arc::new(|id, action| {
+            let action = action.to_string();
+            std::thread::spawn(move || remote_result(id, json!({ "ok": true, "did": action })));
+        }));
+        let ok = get("/control?key=0123456789abcdef0123&action=shuffle");
+        assert!(ok.starts_with("HTTP/1.1 200") && ok.contains(r#""did":"shuffle""#), "{ok}");
         GEN.fetch_add(1, Ordering::SeqCst);
     }
 }

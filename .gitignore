@@ -2,3 +2,4 @@
 src-tauri/target/
 src-tauri/gen/
 dist/hls.min.js
+/target/

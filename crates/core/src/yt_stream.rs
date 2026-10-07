@@ -57,7 +57,6 @@ async fn resolve_with(program: impl AsRef<OsStr>, query: &str) -> Result<String,
         .ok_or_else(|| format!("yt-dlp found nothing to play for \"{query}\"."))
 }
 
-#[tauri::command]
 pub async fn resolve_yt_stream(query: String) -> Result<String, String> {
     resolve_with("yt-dlp", &query).await
 }
