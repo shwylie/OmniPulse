@@ -1023,3 +1023,4 @@ select.wide { max-width: 260px; }
   #list li .num, .tableHead span:first-child { display: none; }
   #list li .acts { right: 50px; }
 }
+.pill.lucky { background: linear-gradient(100deg, var(--accent), var(--accent-2)); color: var(--on-accent); border-color: transparent; font-weight: 700; }

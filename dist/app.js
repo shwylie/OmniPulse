@@ -326,6 +326,7 @@ function afterRender() {
 // The row under the title: play / shuffle and page buttons, with the view options on the right.
 // Shown whenever any of them is, so the language filter stays reachable when it hid everything.
 function paintHeroActions() {
+  $("luckyBtn").hidden = view !== "discover";
   $("favOnlyChip").hidden = !favOn() || ["favourites", "discover", "stats", "now"].includes(view) || (view === "search" && !query);
   paintSetsChip();
   const hl = $("hideLikesChip");
@@ -333,7 +334,7 @@ function paintHeroActions() {
   hl.classList.toggle("on", !!prefs.hideLikes);
   hl.setAttribute("aria-pressed", prefs.hideLikes ? "true" : "false");
   hl.title = prefs.hideLikes ? "Your likes are hidden from these results. Click to show them." : "Leave tracks you've liked out of the results";
-  $("heroActions").hidden = !["playAll", "followBtn", "plDelete", "langChip", "favOnlyChip", "setsLikedChip", "hideLikesChip", "albumToggle"].some((id) => !$(id).hidden);
+  $("heroActions").hidden = !["playAll", "followBtn", "plDelete", "luckyBtn", "langChip", "favOnlyChip", "setsLikedChip", "hideLikesChip", "albumToggle"].some((id) => !$(id).hidden);
 }
 
 function trackRow(t, i, playing) {

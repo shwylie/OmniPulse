@@ -335,7 +335,22 @@ async function openFeed(fresh) {
   if (tok === loadToken) say(shelves.length ? "" : "Like some tracks on SoundCloud or Spotify, and Discover will fill up with music for you.");
 }
 
+// I'm Feeling Lucky: a random mix that draws on more than one platform (any mix if there's none)
+async function feelingLucky() {
+  if (!feedCache) { say("Finding music for you..."); await openFeed(); }
+  const tiles = (feedCache ? feedCache.shelves : []).flatMap((s) => s.tiles || [])
+    .filter((t) => t.mix && t.mix.build && t.kind !== "playlist");
+  const mixed = tiles.filter((t) => t.plats.length > 1);
+  const pool = mixed.length ? mixed : tiles;
+  if (!pool.length) { say("Nothing to pick from yet. Like a few tracks, and Discover will fill up."); return; }
+  const tile = pool[Math.floor(Math.random() * pool.length)];
+  say("Feeling lucky: " + tile.mix.title + "...");
+  await playTile(tile);
+  if (curTrack()) say("Feeling lucky: playing " + tile.mix.title + ".");
+}
+
 function feedInit() {
+  $("luckyBtn").addEventListener("click", feelingLucky);
   $("feed").addEventListener("click", (e) => {
     const node = e.target.closest(".tile");
     if (!node) return;
