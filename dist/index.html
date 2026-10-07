@@ -702,6 +702,40 @@
       </details>
     </section>
 
+    <!-- ===================== Remote control ===================== -->
+    <section class="group">
+      <h3>Stream Deck</h3>
+      <div class="row">
+        <div>
+          <div class="lbl">Stream Deck &amp; remote control</div>
+          <div class="note">Lets the SC Client Stream Deck plugin (in the project's streamdeck folder) control playback. Only programs on this PC can reach it.</div>
+        </div>
+        <label class="switch"><input type="checkbox" id="remoteOn"><span></span></label>
+      </div>
+      <details class="sub" id="remoteSection" hidden>
+        <summary>Remote options</summary>
+        <div class="row stack">
+          <div>
+            <div class="lbl">Address</div>
+            <div class="note">The plugin finds the port and key by itself. Other tools can call this, with action= play, pause, toggle, next, previous, like, favourite, shuffle, repeat, clear-requests, clear-queue or sets.</div>
+          </div>
+          <div class="widgetRow"><input id="remoteUrl" type="text" readonly aria-label="Remote address"><button id="remoteCopy" class="soft">Copy</button></div>
+        </div>
+        <p class="note warn" id="remoteNote"></p>
+        <div class="row">
+          <div class="lbl">Port</div>
+          <div class="widgetRow"><input id="remotePort" type="number" min="1024" max="65535" aria-label="Port"></div>
+        </div>
+        <div class="row">
+          <div>
+            <div class="lbl">Secret key</div>
+            <div class="note">Part of the address. Make a new one if it leaks.</div>
+          </div>
+          <button id="remoteNewKey" class="soft">New key</button>
+        </div>
+      </details>
+    </section>
+
     <!-- ===================== App ===================== -->
     <section class="group">
       <h3>App</h3>
@@ -750,6 +784,7 @@
 <script src="js/nav.js"></script>
 <script src="js/platforms.js"></script>
 <script src="js/requests.js"></script>
+<script src="js/remote.js"></script>
 <script src="js/albums.js"></script>
 <script src="js/init.js"></script>
 <script src="app.js"></script>

@@ -28,6 +28,7 @@ function extrasInit() {
   setsInit();
   feedInit();
   sessionInit();
+  remoteInit();
   dndInit();
   widgetInit();
   navInit();

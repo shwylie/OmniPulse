@@ -271,3 +271,18 @@ hides them; tracks from albums are never hidden.
   the same row design throughout. Spotify shows the account you're signed in as.
 - Spotify playlists you follow (and Spotify's own) open again. Since February 2026 the Web API only lists the tracks of playlists you own, so the others are read through the Spotify playback engine (librespot), up to 1000 tracks.
 - Discover shows Spotify's own Daily Mixes (and Discover Weekly, Release Radar and your top mixes, under "More mixes from Spotify"), read with the playback engine's token. The app no longer builds Spotify-only mixes: its "Your Mix" and station tiles are seeded by what you like on SoundCloud and draw on every platform (your likes anywhere, your files, new tracks from SoundCloud and Spotify).
+
+## v45
+- Likes is now Library: everything you've liked on each platform plus your music files. It opens at once
+  from a cache and checks for updates in the background (playlists too).
+- Queue: Now Playing, Next up (what you queued) and Autoplay, which can be switched off. The queue and
+  position come back when you restart. Autoplay takes turns between platforms, can avoid tracks played in
+  the last few hours, and can leave out sets & podcasts.
+- Shuffle is fair: tracks you haven't heard (or not for longest) come first, remembered between sessions.
+  Tracks you queued and chat requests aren't shuffled. Rediscover alternates platforms evenly.
+- Discover: I'm Feeling Lucky plays a random mix from every platform.
+- Even out loudness works like RoughRider (a compressor that rides the level), with a Custom strength.
+- Discord: choose what's shown (art, time, links) and a Listen along button.
+- Stream Deck: switch on in Settings > App, then install the plugin in `streamdeck/` (see its README).
+- Also: album on Now Playing, hidden playlists, coloured platform icons, your SoundCloud plan in Settings,
+  and a player bar and track list that fit narrow windows.

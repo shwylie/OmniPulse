@@ -1,0 +1,226 @@
+{
+  "$schema": "https://schemas.elgato.com/streamdeck/plugins/manifest.json",
+  "Name": "SC Client",
+  "Version": "1.0.0.0",
+  "Author": "SHWYLiE",
+  "Description": "Playback controls for SC Client: play, pause, skip, like, favourite, shuffle, repeat, and clearing the queue or chat requests.",
+  "UUID": "com.shwylie.scclient",
+  "Icon": "imgs/plugin",
+  "Category": "SC Client",
+  "CategoryIcon": "imgs/category",
+  "CodePath": "bin/plugin.js",
+  "SDKVersion": 2,
+  "Software": {
+    "MinimumVersion": "6.5"
+  },
+  "OS": [
+    {
+      "Platform": "windows",
+      "MinimumVersion": "10"
+    }
+  ],
+  "Nodejs": {
+    "Version": "20",
+    "Debug": "enabled"
+  },
+  "Actions": [
+    {
+      "Name": "Play",
+      "UUID": "com.shwylie.scclient.play",
+      "Icon": "imgs/actions/play",
+      "Tooltip": "Starts playback (does nothing if it's already playing)",
+      "Controllers": [
+        "Keypad"
+      ],
+      "States": [
+        {
+          "Image": "imgs/actions/play-key"
+        }
+      ],
+      "UserTitleEnabled": true
+    },
+    {
+      "Name": "Pause",
+      "UUID": "com.shwylie.scclient.pause",
+      "Icon": "imgs/actions/pause",
+      "Tooltip": "Pauses playback",
+      "Controllers": [
+        "Keypad"
+      ],
+      "States": [
+        {
+          "Image": "imgs/actions/pause-key"
+        }
+      ],
+      "UserTitleEnabled": true
+    },
+    {
+      "Name": "Play / Pause",
+      "UUID": "com.shwylie.scclient.toggle",
+      "Icon": "imgs/actions/toggle",
+      "Tooltip": "Plays or pauses",
+      "Controllers": [
+        "Keypad"
+      ],
+      "States": [
+        {
+          "Image": "imgs/actions/toggle-key"
+        },
+        {
+          "Image": "imgs/actions/toggle-on"
+        }
+      ],
+      "UserTitleEnabled": true
+    },
+    {
+      "Name": "Next",
+      "UUID": "com.shwylie.scclient.next",
+      "Icon": "imgs/actions/next",
+      "Tooltip": "Skips to the next track",
+      "Controllers": [
+        "Keypad"
+      ],
+      "States": [
+        {
+          "Image": "imgs/actions/next-key"
+        }
+      ],
+      "UserTitleEnabled": true
+    },
+    {
+      "Name": "Previous",
+      "UUID": "com.shwylie.scclient.previous",
+      "Icon": "imgs/actions/previous",
+      "Tooltip": "Restarts the track, or goes back one",
+      "Controllers": [
+        "Keypad"
+      ],
+      "States": [
+        {
+          "Image": "imgs/actions/previous-key"
+        }
+      ],
+      "UserTitleEnabled": true
+    },
+    {
+      "Name": "Like",
+      "UUID": "com.shwylie.scclient.like",
+      "Icon": "imgs/actions/like",
+      "Tooltip": "Likes or unlikes the current track (SoundCloud and Spotify)",
+      "Controllers": [
+        "Keypad"
+      ],
+      "States": [
+        {
+          "Image": "imgs/actions/like-key"
+        },
+        {
+          "Image": "imgs/actions/like-on"
+        }
+      ],
+      "UserTitleEnabled": true
+    },
+    {
+      "Name": "Favourite",
+      "UUID": "com.shwylie.scclient.favourite",
+      "Icon": "imgs/actions/favourite",
+      "Tooltip": "Stars or unstars the current track",
+      "Controllers": [
+        "Keypad"
+      ],
+      "States": [
+        {
+          "Image": "imgs/actions/favourite-key"
+        },
+        {
+          "Image": "imgs/actions/favourite-on"
+        }
+      ],
+      "UserTitleEnabled": true
+    },
+    {
+      "Name": "Shuffle",
+      "UUID": "com.shwylie.scclient.shuffle",
+      "Icon": "imgs/actions/shuffle",
+      "Tooltip": "Shuffle on or off",
+      "Controllers": [
+        "Keypad"
+      ],
+      "States": [
+        {
+          "Image": "imgs/actions/shuffle-key"
+        },
+        {
+          "Image": "imgs/actions/shuffle-on"
+        }
+      ],
+      "UserTitleEnabled": true
+    },
+    {
+      "Name": "Repeat",
+      "UUID": "com.shwylie.scclient.repeat",
+      "Icon": "imgs/actions/repeat",
+      "Tooltip": "Repeat off, all, or this track",
+      "Controllers": [
+        "Keypad"
+      ],
+      "States": [
+        {
+          "Image": "imgs/actions/repeat-key"
+        },
+        {
+          "Image": "imgs/actions/repeat-on"
+        }
+      ],
+      "UserTitleEnabled": true
+    },
+    {
+      "Name": "Clear requests",
+      "UUID": "com.shwylie.scclient.clear-requests",
+      "Icon": "imgs/actions/clear-requests",
+      "Tooltip": "Removes waiting chat requests from the queue",
+      "Controllers": [
+        "Keypad"
+      ],
+      "States": [
+        {
+          "Image": "imgs/actions/clear-requests-key"
+        }
+      ],
+      "UserTitleEnabled": true
+    },
+    {
+      "Name": "Clear queue",
+      "UUID": "com.shwylie.scclient.clear-queue",
+      "Icon": "imgs/actions/clear-queue",
+      "Tooltip": "Keeps only what's playing",
+      "Controllers": [
+        "Keypad"
+      ],
+      "States": [
+        {
+          "Image": "imgs/actions/clear-queue-key"
+        }
+      ],
+      "UserTitleEnabled": true
+    },
+    {
+      "Name": "Sets & podcasts",
+      "UUID": "com.shwylie.scclient.sets",
+      "Icon": "imgs/actions/sets",
+      "Tooltip": "Lets sets & podcasts into the queue and autoplay, or keeps them out",
+      "Controllers": [
+        "Keypad"
+      ],
+      "States": [
+        {
+          "Image": "imgs/actions/sets-key"
+        },
+        {
+          "Image": "imgs/actions/sets-on"
+        }
+      ],
+      "UserTitleEnabled": true
+    }
+  ]
+}

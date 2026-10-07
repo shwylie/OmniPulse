@@ -1,0 +1,10 @@
+{
+  "name": "sc-client-streamdeck",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Stream Deck plugin for SC Client",
+  "dependencies": {
+    "@elgato/streamdeck": "^1.4.1"
+  }
+}

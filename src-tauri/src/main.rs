@@ -2,8 +2,10 @@
 
 mod spotify_engine;
 mod yt_stream;
+mod remote;
 use spotify_engine::*;
 use yt_stream::resolve_yt_stream;
+use remote::{remote_result, remote_start, remote_stop};
 
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 use rand::RngCore;
@@ -1939,7 +1941,7 @@ fn local_server() -> Value {
 // Replies are plain text, ready to post in chat (add &format=json for JSON).
 // Only listens on 127.0.0.1, and requests need the secret key from Settings.
 
-static APP: OnceLock<AppHandle> = OnceLock::new();
+pub(crate) static APP: OnceLock<AppHandle> = OnceLock::new();
 static REQ_GEN: AtomicU64 = AtomicU64::new(0);
 static REQ_NEXT: AtomicU64 = AtomicU64::new(1);
 static REQ_KEY: Mutex<String> = Mutex::new(String::new());
@@ -2271,7 +2273,7 @@ fn main() {
             local_folders, local_set_folders, local_scan, local_status, local_tracks, local_server,
             requests_start, requests_stop, request_result,
             spe_signed_in, spe_login, spe_logout, spe_attach, spe_play, spe_pause, spe_resume, spe_seek, spe_stop, spe_played, spe_playlist, spe_web_get,
-            resolve_yt_stream
+            resolve_yt_stream, remote_start, remote_stop, remote_result
         ])
         .run(tauri::generate_context!())
         .expect("error while running app");
