@@ -192,6 +192,8 @@ function showView(v) {
   $("navLikes").classList.toggle("active", v === "likes");
   $("navFavourites").classList.toggle("active", v === "favourites");
   $("navSets").classList.toggle("active", v === "sets");
+  $("navArtists").classList.toggle("active", v === "artists");
+  $("artistsPage").hidden = v !== "artists";
   document.querySelectorAll(".plItem").forEach((b) => {
     b.classList.toggle("active", v === "playlist" && currentPlaylist && String(b.dataset.id) === String(currentPlaylist.id));
   });
@@ -207,6 +209,10 @@ function renderHero() {
   } else if (v === "sets") {
     title = "Sets & Podcasts";
     sub = "Long sets, mixes and podcasts: anything over 15 minutes.";
+  } else if (v === "artists") {
+    title = "Artists";
+    sub = "Everyone you follow on " + ARTIST_PLATS.filter((p) => activePlats().includes(p)).map((p) => PLATFORMS[p].name).join(", ") +
+      ". Right-click an artist to follow them on your other platforms too.";
   } else if (v === "favourites") {
     title = "Favourites";
     sub = "Starred tracks from every platform, kept on this PC.";
@@ -236,6 +242,7 @@ function renderHero() {
   const isArtist = v === "artist" && !!currentArtist;
   $("playAll").hidden = n === 0;
   $("shuffleAll").hidden = n === 0;
+  $("artistsBatch").hidden = v !== "artists";
   $("followBtn").hidden = !isArtist || !followPlats(currentArtist).length ||
     (meId !== null && currentArtist.on && currentArtist.on.soundcloud && String(currentArtist.on.soundcloud.id) === String(meId));
   $("plDelete").hidden = !(v === "playlist" && isOwnPlaylist(currentPlaylist));
@@ -334,14 +341,14 @@ function afterRender() {
 // Shown whenever any of them is, so the language filter stays reachable when it hid everything.
 function paintHeroActions() {
   $("luckyBtn").hidden = view !== "discover";
-  $("favOnlyChip").hidden = !favOn() || ["favourites", "discover", "stats", "now"].includes(view) || (view === "search" && !query);
+  $("favOnlyChip").hidden = !favOn() || ["favourites", "discover", "stats", "now", "artists"].includes(view) || (view === "search" && !query);
   paintSetsChip();
   const hl = $("hideLikesChip");
   hl.hidden = view !== "search" || !query;
   hl.classList.toggle("on", !!prefs.hideLikes);
   hl.setAttribute("aria-pressed", prefs.hideLikes ? "true" : "false");
   hl.title = prefs.hideLikes ? "Your likes are hidden from these results. Click to show them." : "Leave tracks you've liked out of the results";
-  $("heroActions").hidden = !["playAll", "followBtn", "plDelete", "luckyBtn", "langChip", "favOnlyChip", "setsLikedChip", "hideLikesChip"].some((id) => !$(id).hidden);
+  $("heroActions").hidden = !["playAll", "followBtn", "plDelete", "luckyBtn", "langChip", "favOnlyChip", "setsLikedChip", "hideLikesChip", "artistsBatch"].some((id) => !$(id).hidden);
 }
 
 function trackRow(t, i, playing) {

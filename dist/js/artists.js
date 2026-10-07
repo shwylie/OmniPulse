@@ -5,8 +5,8 @@
 // of them, plus your files. The same song on several platforms shows once; it counts as liked if it's
 // liked on any of them. Following follows on every platform the artist is on.
 //
-// The Artists list in the sidebar is everyone you follow anywhere (YouTube Music follows are kept on this
-// PC), with right-click to follow them on the other platforms too, one at a time or all at once.
+// The Artists page is everyone you follow anywhere (YouTube Music follows are kept on this PC), with
+// right-click to follow them on the other platforms too, one at a time or all at once.
 // Artists you newly follow on one platform are followed on the others as well (Settings > Library).
 
 const ARTIST_PLATS = ["soundcloud", "spotify", "youtube"];
@@ -311,7 +311,7 @@ async function toggleFollowEverywhere(a) {
   say(failed.length ? "Couldn't " + (on ? "follow" : "unfollow") + " everywhere. " + failed.join(" ") : (on ? "Following " : "Unfollowed ") + a.name + " on " + targets.map((p) => PLATFORMS[p].name).join(", ") + ".");
 }
 
-// ---------- the Artists list in the sidebar ----------
+// ---------- the Artists page ----------
 let followedCache = null;   // [{ key, name, img, on: {plat: info}, followed: {plat: true} }]
 let artistsSideTok = 0;
 
@@ -357,35 +357,63 @@ async function loadFollowed() {
   return { list, notes, plats };
 }
 
+let followedNotes = [];
+
+// Who you follow (loaded once, and again when the platforms change); new follows are followed
+// everywhere. Paints the Artists page if it's open.
 async function sidebarArtists() {
   const tok = ++artistsSideTok;
-  const box = $("artistList");
   const plats = ARTIST_PLATS.filter((p) => activePlats().includes(p));
-  $("artistSection").hidden = !plats.length;
+  $("navArtists").hidden = !plats.length;
   if (!plats.length) return;
   if (!followedCache) {
-    if (!box.children.length) box.replaceChildren(el("div", "plNote", "Loading..."));
+    if (view === "artists") paintArtistsPage();
     const got = await loadFollowed();
     if (tok !== artistsSideTok) return;
     followedCache = got.list;
-    if (got.notes.length) box.dataset.note = got.notes.join(" ");
+    followedNotes = got.notes;
     followNewEverywhere(got);
   }
-  box.replaceChildren();
-  followedCache.forEach((a) => {
-    const b = el("button", "plItem artistItem");
-    b.dataset.key = a.key;
-    b.title = a.name + ": following on " + Object.keys(a.followed).map((p) => PLATFORMS[p].name).join(", ");
-    const img = el("img", "artistDot");
-    img.alt = "";
-    img.loading = "lazy";
-    if (a.img) img.src = a.img;
-    const marks = el("span", "artistMarks");
-    Object.keys(a.followed).forEach((p) => marks.append(platIcon(p)));
-    b.append(img, el("span", "plName", a.name), marks);
-    box.append(b);
-  });
-  if (!followedCache.length) box.append(el("div", "plNote", "Artists you follow show here."));
+  if (view === "artists") paintArtistsPage();
+}
+
+const seedOf = (a) => artistFrom({ name: a.name, sc: a.on.soundcloud, sp: a.on.spotify, yt: a.on.youtube });
+
+function paintArtistsPage() {
+  const box = $("artistsPage");
+  if (!followedCache) { box.replaceChildren(el("p", "feedNote", "Loading the artists you follow...")); return; }
+  const list = followedCache.filter((a) => listFilter === "all" || a.followed[listFilter]);
+  const tiles = list.map((a) => ({
+    kind: "artist", name: a.name, art: a.img, hue: hueOf(a.name), plats: Object.keys(a.followed), _artist: a,
+    sub: Object.keys(a.followed).map((p) => PLATFORMS[p].name).join(" \u00b7 "),
+    open: () => openArtist(seedOf(a)),
+    play: async () => {
+      say("Gathering " + a.name + "'s music...");
+      const tracks = await artistAllTracks(seedOf(a));
+      if (!tracks.length) { say("No tracks by " + a.name + " found."); return; }
+      say("");
+      startList(tracks, 0, false, a.name);
+    },
+  }));
+  const shelf = shelfEl({ title: list.length + (list.length === 1 ? " artist" : " artists"), tiles });
+  shelf.classList.add("expanded");
+  shelf.querySelector(".shelfAll").hidden = true;
+  box.replaceChildren(shelf);
+  if (followedNotes.length) box.append(el("p", "feedNote", followedNotes.join(" ")));
+  if (!list.length) box.append(el("p", "feedNote", listFilter === "all" ? "Artists you follow show here. Follow them from their pages." : "You don't follow anyone on " + PLATFORMS[listFilter].name + " yet."));
+}
+
+function openArtistsPage() {
+  currentPlaylist = null;
+  currentArtist = null;
+  showView("artists");
+  ++loadToken;
+  viewTracks = [];
+  nextHref = "";
+  render();
+  say("");
+  $("listView").scrollTop = 0;
+  if (!followedCache) sidebarArtists(); else paintArtistsPage();
 }
 
 // ---------- following the same artists on other platforms ----------
@@ -481,7 +509,7 @@ function showMenuAt(x, y, items) {
 }
 
 function artistMenu(a, x, y) {
-  const items = [a.name, ["Open", () => openArtist(artistFrom({ name: a.name, sc: a.on.soundcloud, sp: a.on.spotify, yt: a.on.youtube }))]];
+  const items = [a.name, ["Open", () => openArtist(seedOf(a))]];
   const missing = ARTIST_PLATS.filter((p) => activePlats().includes(p) && !a.followed[p]);
   if (missing.length) items.push("sep");
   missing.forEach((p) => items.push(["Follow on " + PLATFORMS[p].name + " too", async () => {
@@ -512,21 +540,16 @@ function artistsHeaderMenu(x, y) {
 
 function artistsInit() {
   $("followBtn").addEventListener("click", () => { if (currentArtist && currentArtist.on) toggleFollowEverywhere(currentArtist); });
-  $("artistList").addEventListener("click", (e) => {
-    const b = e.target.closest(".artistItem");
-    const a = b && (followedCache || []).find((x) => x.key === b.dataset.key);
-    if (a) openArtist(artistFrom({ name: a.name, sc: a.on.soundcloud, sp: a.on.spotify, yt: a.on.youtube }));
-  });
-  $("artistList").addEventListener("contextmenu", (e) => {
-    const b = e.target.closest(".artistItem");
-    const a = b && (followedCache || []).find((x) => x.key === b.dataset.key);
-    if (!a) return;
+  $("navArtists").addEventListener("click", openArtistsPage);
+  wireShelves($("artistsPage"));
+  $("artistsPage").addEventListener("contextmenu", (e) => {
+    const node = e.target.closest(".tile-artist");
+    if (!node || !node._tile._artist) return;
     e.preventDefault();
     e.stopPropagation();
-    artistMenu(a, e.clientX, e.clientY);
+    artistMenu(node._tile._artist, e.clientX, e.clientY);
   });
-  $("artistHead").addEventListener("contextmenu", (e) => { e.preventDefault(); e.stopPropagation(); artistsHeaderMenu(e.clientX, e.clientY); });
-  $("artistMore").addEventListener("click", (e) => { e.stopPropagation(); const r = $("artistMore").getBoundingClientRect(); artistsHeaderMenu(r.left, r.bottom + 4); });
+  $("artistsBatch").addEventListener("click", (e) => { e.stopPropagation(); const r = $("artistsBatch").getBoundingClientRect(); artistsHeaderMenu(r.left, r.bottom + 4); });
   $("plMenu").addEventListener("click", (e) => {
     const b = e.target.closest(".menuItem[data-fn]");
     if (!b) return;

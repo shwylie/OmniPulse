@@ -972,10 +972,6 @@ select.wide { max-width: 260px; }
 .sideLists .plat.local svg { color: #f2b544; }
 .sideLists .plat.youtube svg { color: #ff0033; }
 /* Artists: the sidebar list and the artist page's platforms */
-.artistItem { display: flex; align-items: center; gap: 8px; }
-.artistDot { width: 22px; height: 22px; flex: none; border-radius: 50%; object-fit: cover; background: var(--elevated); }
-.artistMarks { display: inline-flex; gap: 3px; margin-left: auto; flex: none; opacity: 0.8; }
-.artistMarks svg { width: 11px; height: 11px; color: var(--logo); }
 #viewSub .artistOn { display: inline-flex; align-items: center; gap: 5px; margin-right: 14px; }
 #viewSub .artistOn svg { width: 13px; height: 13px; color: var(--logo); }
 #viewSub .artistOn.following span { color: var(--text); font-weight: 600; }

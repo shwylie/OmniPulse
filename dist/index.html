@@ -54,6 +54,10 @@
         <svg viewBox="0 0 24 24"><path d="M12 3a9 9 0 00-9 9v7c0 1.1.9 2 2 2h3v-8H5v-1a7 7 0 0114 0v1h-3v8h3c1.1 0 2-.9 2-2v-7a9 9 0 00-9-9z"/></svg>
         <span>Sets &amp; Podcasts</span>
       </button>
+      <button class="nav" id="navArtists">
+        <svg viewBox="0 0 24 24"><path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/></svg>
+        <span>Artists</span>
+      </button>
       <button class="nav" id="navStats">
         <svg viewBox="0 0 24 24"><path d="M5 9.2h3V19H5zM10.6 5h2.8v14h-2.8zm5.6 8H19v6h-2.8z"/></svg>
         <span>Stats</span>
@@ -67,13 +71,6 @@
           <button id="plNew" class="plAdd" title="New playlist" aria-label="New playlist"><svg viewBox="0 0 24 24"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg></button>
         </div>
         <div class="plList" id="plList"></div>
-      </section>
-      <section class="sideSection" id="artistSection" hidden>
-        <div class="plHead" id="artistHead" title="Right-click to follow these artists on your other platforms too">
-          <span>Artists</span>
-          <button id="artistMore" class="plAdd" title="Follow on other platforms" aria-label="Follow on other platforms"><svg viewBox="0 0 24 24"><path d="M6 10c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm12 0c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm-6 0c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z"/></svg></button>
-        </div>
-        <div class="plList" id="artistList"></div>
       </section>
       <section class="sideSection" id="albumSection" hidden>
         <div class="plHead"><span>Albums</span></div>
@@ -115,6 +112,7 @@
           <button id="shuffleAll" class="pill">Shuffle</button>
           <button id="followBtn" class="pill follow" hidden>Follow</button>
           <button id="plDelete" class="pill" hidden>Delete playlist</button>
+          <button id="artistsBatch" class="pill" hidden title="Follow the artists you follow on one platform on another too">Follow on other platforms</button>
           <button id="luckyBtn" class="pill lucky" hidden title="Play a random mix that mixes platforms">I&#39;m Feeling Lucky</button>
           <div class="viewOpts">
             <label class="chip optChip chipSelect" id="langChip" title="Language of recommendations" hidden>
@@ -131,6 +129,7 @@
       <div class="shelfHead trackHead" id="trackHead" hidden><h2>Tracks</h2><button id="trackAll" class="shelfAll">Show all</button></div>
       <div class="tableHead" id="tableHead" hidden><span>#</span><span>Title</span><span></span><span>Time</span></div>
       <div id="feed" class="feed" hidden></div>
+      <div id="artistsPage" class="feed artistsPage" hidden></div>
       <ul id="list"></ul>
       <div class="moreRow"><button id="more" class="soft" hidden>Load more</button></div>
     </div>

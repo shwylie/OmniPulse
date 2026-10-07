@@ -152,14 +152,16 @@ const LIST_FILTERS = {
   search: ["all", "tracks", "artists", "albums", "playlists", "mixes"],
   rediscover: ["all", "tracks", "albums"],
   artist: ["all", "tracks", "albums"],
+  artists: ["all", "soundcloud", "spotify", "youtube"],
 };
-const FILTER_NAMES = { all: "All", tracks: "Tracks", artists: "Artists", albums: "Albums", playlists: "Playlists", mixes: "Sets & Podcasts" };
+const FILTER_NAMES = { all: "All", tracks: "Tracks", artists: "Artists", albums: "Albums", playlists: "Playlists", mixes: "Sets & Podcasts", soundcloud: "SoundCloud", spotify: "Spotify", youtube: "YouTube Music" };
 
 function renderListChips() {
   const box = $("listChips");
   box.replaceChildren();
-  const list = LIST_FILTERS[view];
-  box.hidden = !list || (view === "search" && !query);
+  let list = LIST_FILTERS[view];
+  if (view === "artists") list = list.filter((k) => k === "all" || activePlats().includes(k));   // platforms that are on
+  box.hidden = !list || (view === "search" && !query) || (view === "artists" && list.length < 3);
   if (box.hidden) return;
   if (!list.includes(listFilter)) listFilter = "all";
   list.forEach((k) => {
