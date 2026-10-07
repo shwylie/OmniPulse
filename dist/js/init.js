@@ -5,7 +5,7 @@ function extrasSyncSettings() {
   paintHiddenPlaylists();
   reqPaint();
   $("artAccentToggle").checked = !!prefs.artAccent;
-  paintLeveler();
+  loudPaint();
   $("customCss").value = prefs.css || "";
   $("presToggle").checked = !!prefs.presence;
   $("scrobbleToggle").checked = !!prefs.scrobble;
@@ -38,6 +38,7 @@ function extrasInit() {
   requestsInit();
   albumsInit();
   audioInit();
+  loudInit();
 
   $("trayToggle").addEventListener("change", () => {
     prefs.closeToTray = $("trayToggle").checked;

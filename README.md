@@ -286,3 +286,18 @@ hides them; tracks from albums are never hidden.
 - Stream Deck: switch on in Settings > App, then install the plugin in `streamdeck/` (see its README).
 - Also: album on Now Playing, hidden playlists, coloured platform icons, your SoundCloud plan in Settings,
   and a player bar and track list that fit narrow windows.
+
+## v46: match loudness, skip silences
+- Settings > Sound > Match loudness (Off, Quiet, Normal, Loud) replaces Even out loudness. Each track is
+  measured over its whole length (integrated loudness in LUFS, as Spotify and YouTube do) and played at
+  one fixed gain, so tracks match without being squashed. Normal is -14 LUFS, Quiet -18, Loud -11.
+  - Local files are measured from disk, SoundCloud tracks by downloading the stream (the next track in
+    the queue is measured ahead, so it starts at the right level). Sets and podcasts over 15 minutes are
+    measured from their first 10 minutes. Results are kept in %APPDATA%\sc-client\loudness.json.
+  - Spotify uses Spotify's own whole-track values (librespot's normalisation), from the next track.
+  - Quiet tracks are turned up at most 9 dB; the limiter stops peaks clipping.
+  - Settings shows what the current track measured and how much it's turned up or down.
+- Settings > Sound > Skip long silences (Off, 5, 8, 15 or 30 s): jumps over silence inside a track, and
+  moves on when the rest of it is silent. Where a track isn't measured (Spotify, the rest of a long set)
+  it moves on after that long in silence.
+- To check a file: `cargo run -p omnipulse-core --example measure -- <file>`.

@@ -176,6 +176,12 @@ pub fn local_scan_blocking() {
     LOCAL_SCANNING.store(false, Ordering::SeqCst);
 }
 
+// The indexed file with this id (its path, size and change time)
+pub fn local_entry(id: &str) -> Option<LocalEntry> {
+    local_load_index();
+    LOCAL.lock().ok()?.iter().find(|e| e.id == id).cloned()
+}
+
 pub fn local_path_for(id: &str) -> Option<PathBuf> {
     LOCAL
         .lock()

@@ -5,6 +5,7 @@
 pub mod discord;
 pub mod lastfm;
 pub mod local;
+pub mod loudness;
 pub mod lyrics;
 pub mod remote;
 pub mod requests;

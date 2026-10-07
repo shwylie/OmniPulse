@@ -5,7 +5,7 @@ const audio = new Audio();
 const win = window.__TAURI__.window.getCurrentWindow();
 
 // ---------- preferences (stored in this app's browser profile) ----------
-const DEFAULTS = { theme: "dark", accent: "#8e9bff", density: "comfortable", sink: "default", volume: 0.8, queue: false, repeat: "off", shuffle: false, artAccent: false, css: "", presence: true, scrobble: true, closeToTray: false, normalize: "off", recLang: "en" };
+const DEFAULTS = { theme: "dark", accent: "#8e9bff", density: "comfortable", sink: "default", volume: 0.8, queue: false, repeat: "off", shuffle: false, artAccent: false, css: "", presence: true, scrobble: true, closeToTray: false, loudMatch: "normal", skipSilence: 8, recLang: "en" };
 let prefs = { ...DEFAULTS };
 try { prefs = { ...DEFAULTS, ...JSON.parse(localStorage.getItem("sc.prefs") || "{}") }; } catch (e) {}
 const savePrefs = () => { try { localStorage.setItem("sc.prefs", JSON.stringify(prefs)); } catch (e) {} };

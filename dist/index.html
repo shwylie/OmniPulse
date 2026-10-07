@@ -477,28 +477,19 @@
       <h3>Sound</h3>
       <div class="row">
         <div>
-          <div class="lbl">Even out loudness</div>
-          <div class="note" id="normNote">Brings quiet tracks up and loud ones down.</div>
+          <div class="lbl">Match loudness</div>
+          <div class="note" id="loudNote">Every track at the same loudness, measured over the whole track.</div>
+          <div class="note" id="loudNow" hidden></div>
         </div>
-        <select id="normSel" class="narrow"><option value="off">Off</option><option value="gentle">Gentle</option><option value="strong">Strong</option><option value="custom">Custom</option></select>
+        <select id="loudSel" class="narrow"><option value="off">Off</option><option value="quiet">Quiet</option><option value="normal">Normal</option><option value="loud">Loud</option></select>
       </div>
-      <details class="sub" id="levCustom" open hidden>
-        <summary>Strength</summary>
-        <div class="row">
-          <div class="lbl">Strength</div>
-          <div class="levSlider">
-            <input id="levStrength" type="range" min="0" max="100" step="1" value="50" aria-label="Leveler strength">
-            <span id="levStrengthVal">50%</span>
-          </div>
+      <div class="row">
+        <div>
+          <div class="lbl">Skip long silences</div>
+          <div class="note">Jumps over silence inside a track, and moves on when the rest of it is silent.</div>
         </div>
-        <div class="row">
-          <div>
-            <div class="lbl">Turning down</div>
-            <div class="note">How hard it's working on what's playing now.</div>
-          </div>
-          <div class="levMeter"><div class="levMeterTrack"><span id="levMeterBar"></span></div><span id="levMeterVal">0.0 dB</span></div>
-        </div>
-      </details>
+        <select id="silenceSel" class="narrow"><option value="0">Off</option><option value="5">After 5 s</option><option value="8">After 8 s</option><option value="15">After 15 s</option><option value="30">After 30 s</option></select>
+      </div>
       <div class="row">
         <div>
           <div class="lbl">Equalizer</div>
@@ -769,6 +760,7 @@
 <script src="js/playback.js"></script>
 <script src="js/autoplay.js"></script>
 <script src="js/audio.js"></script>
+<script src="js/loudness.js"></script>
 <script src="js/stats.js"></script>
 <script src="js/lyrics.js"></script>
 <script src="js/integrations.js"></script>

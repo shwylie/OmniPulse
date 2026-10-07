@@ -16,7 +16,7 @@ use librespot_core::{
 use librespot_oauth::OAuthClientBuilder;
 use librespot_playback::{
     audio_backend::{Sink, SinkResult},
-    config::{Bitrate, PlayerConfig},
+    config::{Bitrate, NormalisationMethod, NormalisationType, PlayerConfig},
     convert::Converter,
     decoder::AudioPacket,
     mixer::NoOpVolume,
@@ -61,6 +61,46 @@ static PAUSED: AtomicBool = AtomicBool::new(false);
 struct Engine {
     session: Session,
     player: Arc<Player>,
+    norm: Norm,
+}
+
+// Whole-track loudness: Spotify's files carry their own loudness values, aimed at -14 LUFS, and
+// librespot applies them. (on, target LUFS); a change takes effect from the next track.
+type Norm = (bool, f64);
+static NORM: Mutex<Norm> = Mutex::new((false, -14.0));
+
+pub fn spe_set_normalisation(on: bool, target_lufs: f64) {
+    *NORM.lock().unwrap() = (on, target_lufs.clamp(-30.0, -5.0));
+}
+
+fn make_player(session: &Session, norm: Norm) -> Arc<Player> {
+    let config = PlayerConfig {
+        bitrate: Bitrate::Bitrate320, // Premium quality
+        normalisation: norm.0,
+        normalisation_type: NormalisationType::Track,
+        // Dynamic can turn quiet tracks up (with librespot's limiter); Basic only ever turns down
+        normalisation_method: NormalisationMethod::Dynamic,
+        normalisation_pregain_db: norm.1 + 14.0,
+        ..PlayerConfig::default()
+    };
+    let player = Player::new(config, session.clone(), Box::new(NoOpVolume), || {
+        Box::new(PcmSink { batch: Vec::with_capacity(BATCH_FRAMES * 2 + 4096), batch_gen: GEN.load(Ordering::SeqCst) })
+            as Box<dyn Sink>
+    });
+    let mut events = player.get_player_event_channel();
+    tokio::spawn(async move {
+        while let Some(ev) = events.recv().await {
+            match ev {
+                PlayerEvent::Playing { position_ms, .. } => emit(json!({ "type": "playing", "position_ms": position_ms })),
+                PlayerEvent::Paused { position_ms, .. } => emit(json!({ "type": "paused", "position_ms": position_ms })),
+                PlayerEvent::EndOfTrack { .. } => emit(json!({ "type": "end" })),
+                PlayerEvent::Unavailable { .. } => emit(json!({ "type": "unavailable" })),
+                PlayerEvent::Stopped { .. } => emit(json!({ "type": "stopped" })),
+                _ => {}
+            }
+        }
+    });
+    player
 }
 static ENGINE: tokio::sync::Mutex<Option<Engine>> = tokio::sync::Mutex::const_new(None);
 
@@ -150,25 +190,9 @@ async fn connect(credentials: Credentials) -> Result<Engine, String> {
         .connect(credentials, true)
         .await
         .map_err(|e| format!("Spotify playback sign-in failed: {e}"))?;
-    let config = PlayerConfig { bitrate: Bitrate::Bitrate320, ..PlayerConfig::default() };   // Premium quality
-    let player = Player::new(config, session.clone(), Box::new(NoOpVolume), || {
-        Box::new(PcmSink { batch: Vec::with_capacity(BATCH_FRAMES * 2 + 4096), batch_gen: GEN.load(Ordering::SeqCst) })
-            as Box<dyn Sink>
-    });
-    let mut events = player.get_player_event_channel();
-    tokio::spawn(async move {
-        while let Some(ev) = events.recv().await {
-            match ev {
-                PlayerEvent::Playing { position_ms, .. } => emit(json!({ "type": "playing", "position_ms": position_ms })),
-                PlayerEvent::Paused { position_ms, .. } => emit(json!({ "type": "paused", "position_ms": position_ms })),
-                PlayerEvent::EndOfTrack { .. } => emit(json!({ "type": "end" })),
-                PlayerEvent::Unavailable { .. } => emit(json!({ "type": "unavailable" })),
-                PlayerEvent::Stopped { .. } => emit(json!({ "type": "stopped" })),
-                _ => {}
-            }
-        }
-    });
-    Ok(Engine { session, player })
+    let norm = *NORM.lock().unwrap();
+    let player = make_player(&session, norm);
+    Ok(Engine { session, player, norm })
 }
 
 // The running engine, reconnecting from saved credentials if needed
@@ -233,8 +257,15 @@ pub fn spe_attach(audio: Arc<dyn PcmOut>, events: EventOut) {
 // Returns the generation number the page should accept audio for
 pub async fn spe_play(uri: String, position_ms: u32) -> Result<u32, String> {
     let track = track_uri(&uri)?;
-    let guard = engine().await?;
-    let e = guard.as_ref().unwrap();
+    let mut guard = engine().await?;
+    let e = guard.as_mut().unwrap();
+    let norm = *NORM.lock().unwrap();
+    if e.norm != norm {
+        // the loudness setting changed: a player with the new setting, from this track on
+        e.player.stop();
+        e.player = make_player(&e.session, norm);
+        e.norm = norm;
+    }
     PAUSED.store(false, Ordering::SeqCst);
     let gen = new_gen();
     e.player.load(track, true, position_ms);

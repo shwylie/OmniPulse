@@ -1025,11 +1025,5 @@ select.wide { max-width: 260px; }
 }
 .pill.lucky { background: linear-gradient(100deg, var(--accent), var(--accent-2)); color: var(--on-accent); border-color: transparent; font-weight: 700; }
 
-/* ===== v45: the leveler's Custom strength and meter ===== */
-.levSlider { display: flex; align-items: center; gap: 10px; }
-.levSlider input { width: 180px; }
-.levSlider span, #levMeterVal { min-width: 44px; text-align: right; font-variant-numeric: tabular-nums; color: var(--muted); font-size: 13px; }
-.levMeter { display: flex; align-items: center; gap: 10px; }
-.levMeterTrack { width: 180px; height: 6px; border-radius: 3px; background: var(--line); overflow: hidden; }
-#levMeterBar { display: block; height: 100%; width: 0; background: var(--accent); transition: width 0.08s linear; }
-#levMeterVal { min-width: 120px; }
+/* ===== v46: what the current track measured ===== */
+#loudNow { margin-top: 4px; font-variant-numeric: tabular-nums; }

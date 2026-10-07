@@ -4,7 +4,7 @@
 // wrappers that hand each call from the page to omnipulse-core (crates/core).
 
 use omnipulse_core::{
-    discord, lastfm, local, lyrics, remote, requests, soundcloud as sc, spotify, spotify_engine as spe, widget,
+    discord, lastfm, local, loudness, lyrics, remote, requests, soundcloud as sc, spotify, spotify_engine as spe, widget,
     yt_stream, Settings,
 };
 use serde_json::Value;
@@ -108,6 +108,12 @@ fn spe_played(gen: u32, frames: u64) { spe::spe_played(gen, frames) }
 async fn spe_playlist(uri: String) -> Result<Value, String> { spe::spe_playlist(uri).await }
 #[tauri::command]
 async fn spe_web_get(path: String) -> Result<Value, String> { spe::spe_web_get(path).await }
+#[tauri::command]
+fn spe_set_normalisation(on: bool, target_lufs: f64) { spe::spe_set_normalisation(on, target_lufs) }
+
+// ---------- whole-track loudness and silences ----------
+#[tauri::command]
+async fn loudness_analyse(source: String, id: String) -> Result<Value, String> { loudness::analyse(&source, &id).await }
 
 // ---------- lyrics, Discord, Last.fm, yt-dlp ----------
 #[tauri::command]
@@ -580,7 +586,7 @@ fn main() {
             widget_start, widget_stop, widget_update,
             local_folders, local_set_folders, local_scan, local_status, local_tracks, local_server,
             requests_start, requests_stop, request_result,
-            spe_signed_in, spe_login, spe_logout, spe_attach, spe_play, spe_pause, spe_resume, spe_seek, spe_stop, spe_played, spe_playlist, spe_web_get,
+            spe_signed_in, spe_login, spe_logout, spe_attach, spe_play, spe_pause, spe_resume, spe_seek, spe_stop, spe_played, spe_playlist, spe_web_get, spe_set_normalisation, loudness_analyse,
             resolve_yt_stream, remote_start, remote_stop, remote_result
         ])
         .run(tauri::generate_context!())
