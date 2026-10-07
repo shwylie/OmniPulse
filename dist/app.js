@@ -114,6 +114,8 @@ const PLATFORMS = {
   amazon: { name: "Amazon Music", icon: "M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z" },
 };
 const srcOf = (t) => (t && t.source) || "soundcloud";
+// Likes are saved to SoundCloud or to your Spotify library; local files can only be favourited
+const canLike = (t) => !!t && (srcOf(t) === "soundcloud" || (srcOf(t) === "spotify" && !!t.uri));
 
 function platformBadge(t) {
   const key = srcOf(t);
@@ -176,6 +178,7 @@ function showView(v) {
   if (!isNow) $("chips").hidden = v !== "discover";
   if (!isNow) $("langChip").hidden = v !== "discover";
   $("navLikes").classList.toggle("active", v === "likes");
+  $("navFavourites").classList.toggle("active", v === "favourites");
   $("navSearch").classList.toggle("active", v === "search");
   document.querySelectorAll(".plItem").forEach((b) => {
     b.classList.toggle("active", v === "playlist" && currentPlaylist && String(b.dataset.id) === String(currentPlaylist.id));
@@ -189,6 +192,9 @@ function renderHero() {
   if (v === "rediscover") {
     title = "Rediscover";
     sub = "";   // set below, in two parts
+  } else if (v === "favourites") {
+    title = "Favourites";
+    sub = "Starred tracks from every platform, kept on this PC.";
   } else if (v === "discover") {
     title = "Discover";
     sub = discoverNote ? discoverNote + ". " : "";
@@ -257,6 +263,7 @@ function afterRender() {
   renderPlatChips();
   injectAlbums();
   paintHeroActions();
+  spotifyLikeCheck(viewTracks);
 }
 
 // The row under the title: play / shuffle and page buttons, with the view options on the right.
@@ -317,8 +324,11 @@ function trackRow(t, i, playing) {
   bList.setAttribute("aria-label", "Add to playlist");
   bList.append(icon(ICON_PLIST));
   // Liking is SoundCloud-only; every track can go in a playlist (on this PC, if not SoundCloud)
-  if (srcOf(t) === "soundcloud") acts.append(bLike);
-  acts.append(bNext, bAdd, bList);
+  const bFav = el("button");
+  bFav.dataset.act = "fav";
+  setStar(bFav, isFav(t));
+  acts.append(canLike(t) ? bLike : el("span", "actGap"));   // keeps the stars lined up
+  acts.append(bFav, bNext, bAdd, bList);
   if (view === "playlist" && isOwnPlaylist(currentPlaylist)) {
     const bRm = el("button");
     bRm.dataset.act = "unlist";
@@ -347,6 +357,7 @@ $("list").addEventListener("click", (e) => {
   const btn = e.target.closest("button[data-act]");
   if (btn) {
     if (btn.dataset.act === "like") toggleLike(viewTracks[i]);
+    else if (btn.dataset.act === "fav") toggleFav(viewTracks[i]);
     else if (btn.dataset.act === "next") playNext(viewTracks[i]);
     else if (btn.dataset.act === "plist") openPlaylistMenu(viewTracks[i], btn);
     else if (btn.dataset.act === "unlist") removeFromPlaylist(viewTracks[i]);
@@ -852,10 +863,10 @@ function refreshLikeUI() {
   taskbarSync();
   const t = curTrack();
   const lb = $("likeBtn");
-  lb.hidden = !t || srcOf(t) !== "soundcloud";
+  lb.hidden = !canLike(t);
   if (t) setHeart(lb, isLiked(t));
   const nb = $("npLike");
-  nb.hidden = !t || srcOf(t) !== "soundcloud";
+  nb.hidden = !canLike(t);
   if (t) {
     nb.textContent = isLiked(t) ? "Liked" : "Like";
     nb.classList.toggle("on", isLiked(t));
@@ -865,15 +876,17 @@ function refreshLikeUI() {
     const b = li.querySelector('button[data-act="like"]');
     if (t2 && b && b.classList.contains("on") !== isLiked(t2)) setHeart(b, isLiked(t2));
   });
+  refreshFavUI();
 }
 
 async function toggleLike(t) {
-  if (!t || srcOf(t) !== "soundcloud") return;
+  if (!canLike(t)) return;
   const next = !isLiked(t);
-  likeState.set(t.id, next);       // update right away, undo if SoundCloud refuses
+  likeState.set(t.id, next);       // update right away, undo if the platform refuses
   refreshLikeUI();
   try {
-    await invoke("set_like", { id: String(t.id), like: next });
+    if (srcOf(t) === "spotify") await spotifySetLiked(t, next);
+    else await invoke("set_like", { id: String(t.id), like: next });
   } catch (e) {
     likeState.set(t.id, !next);
     refreshLikeUI();

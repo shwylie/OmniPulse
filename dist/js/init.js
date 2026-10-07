@@ -23,6 +23,7 @@ function extrasInit() {
   integrationsInit();
   libraryInit();
   xplInit();
+  favouritesInit();
   dndInit();
   widgetInit();
   navInit();

@@ -316,11 +316,43 @@ async function spotifyLikedTracks(max) {
   while (out.length < (max || 50)) {
     const data = await spApi("GET", "/me/tracks?limit=50&offset=" + offset);
     const items = (data.items || []).map((x) => x.track).filter((x) => x && x.id).map(spTrack);
+    items.forEach((t) => likeState.set(t.id, true));
     out.push(...items);
     if (!data.next || !items.length) break;
     offset += 50;
   }
   return out;
+}
+
+// ---------- likes (your Spotify library) ----------
+// Spotify replaced its track-specific endpoints with /me/library in February 2026: it takes URIs.
+async function spotifySetLiked(t, on) {
+  try {
+    await spApi(on ? "PUT" : "DELETE", "/me/library?uris=" + encodeURIComponent(t.uri));
+  } catch (e) {
+    if (/40[13]|scope|permission/i.test(String(e))) {
+      throw new Error("Spotify needs a fresh sign-in to change your likes. Settings > Integrations > Spotify: Sign out, then Sign in.");
+    }
+    throw e;
+  }
+}
+
+// Whether Spotify tracks on screen are in your library, asked 40 at a time
+const spLikeAsked = new Set();
+async function spotifyLikeCheck(list) {
+  if (!spotifyPremium) return;
+  const todo = list.filter((t) => srcOf(t) === "spotify" && t.uri && !likeState.has(t.id) && !spLikeAsked.has(t.id));
+  for (let i = 0; i < todo.length; i += 40) {
+    const batch = todo.slice(i, i + 40);
+    batch.forEach((t) => spLikeAsked.add(t.id));
+    try {
+      const res = await spApi("GET", "/me/library/contains?uris=" + encodeURIComponent(batch.map((t) => t.uri).join(",")));
+      if (Array.isArray(res)) batch.forEach((t, k) => likeState.set(t.id, !!res[k]));
+    } catch (e) {
+      return;   // not allowed yet, or offline: hearts just show as not liked
+    }
+  }
+  if (todo.length) refreshLikeUI();
 }
 
 async function spotifySearchTracks(q) {

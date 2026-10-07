@@ -858,3 +858,8 @@ details.sub.inner { margin-top: 10px; }
 .titlePlat button { color: var(--logo); opacity: 0.35; }
 .titlePlat button:hover { color: var(--logo); opacity: 0.7; }
 .titlePlat button.on { background: color-mix(in srgb, var(--logo) 16%, transparent); color: var(--logo); opacity: 1; }
+
+/* ===== v43: favourites (stars) next to the hearts ===== */
+.tableHead, #list li { grid-template-columns: 40px minmax(0, 1fr) 200px 64px; }
+#favBtn.on, .acts button[data-act="fav"].on { color: #ffc531; }
+.actGap { width: 30px; flex: none; }

@@ -266,7 +266,8 @@ function openTrackMenu(t, x, y, fromPlayer) {
   add("Add to queue", "queue");
   add("Add to playlist...", "playlist");
   sep();
-  if (sc) add(isLiked(t) ? "Remove from Likes" : "Add to Likes", "like");
+  if (canLike(t)) add(isLiked(t) ? "Remove from Likes" : "Add to Likes", "like");
+  add(isFav(t) ? "Remove from Favourites" : "Add to Favourites", "fav");
   if (sc && t.user && t.user.id) add("Go to artist", "artist");
   if (!fromPlayer && view === "playlist" && isOwnPlaylist(currentPlaylist)) add("Remove from this playlist", "unlist");
   if (!fromPlayer && (view === "discover" || view === "rediscover")) add("Remove recommendation", "hide");
@@ -297,6 +298,7 @@ function runMenuAction(a) {
     case "queue": addToQueue(t); break;
     case "playlist": openPlaylistMenu(t, ctxAnchor); break;
     case "like": toggleLike(t); break;
+    case "fav": toggleFav(t); break;
     case "artist": openArtist(t.user); break;
     case "unlist": removeFromPlaylist(t); break;
     case "hide": hideRecommendation(t); break;

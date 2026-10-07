@@ -31,7 +31,7 @@ function taskbarSync() {
     playing: nowPlaying(),
     shuffle: shuffleOn,
     liked: isLiked(t),
-    canLike: !!t && srcOf(t) === "soundcloud",
+    canLike: canLike(t),
   }).catch(() => {});
 }
 

@@ -51,6 +51,7 @@ function restorePage(p) {
   likesFilter = p.likesFilter || "all";
   switch (p.view) {
     case "likes": openLikes(); break;
+    case "favourites": openFavourites(); break;
     case "search": if (p.query) openSearch(p.query); else openSearchPage(); break;
     case "playlist": if (p.playlist) openPlaylist(p.playlist); else openLikes(); break;
     case "artist": if (p.artist) openArtist(p.artist); else openLikes(); break;

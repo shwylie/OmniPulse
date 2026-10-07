@@ -247,3 +247,9 @@ hides them; tracks from albums are never hidden.
 - Status and error messages slide out above the player bar for a few seconds instead of sitting under the page title.
 - The widget settings only show animation options the chosen design uses ("Spin the record" is Vinyl-only).
 - Long tracks (over 15 minutes) are called "Sets & podcasts" now, so they aren't confused with Spotify's own mixes.
+- Sidebar: Playlists and Albums split the space below the pages and scroll separately.
+- Platform logos are plain white (dark themes) or black (Light, Paper); Spotify uses its own mark.
+- Spotify tracks can be liked (saved to your Spotify library). Sign out of Spotify and back in once so the
+  app is allowed to change your library.
+- Favourites: the star next to the heart (in lists, the player bar and Now Playing) works for every
+  platform, including local files. Favourites are kept on this PC and listed on the Favourites page.
