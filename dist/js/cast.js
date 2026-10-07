@@ -58,10 +58,10 @@ async function castStart(d) {
     cast.device = await invoke("cast_start", { id: d.id, app, meta: castMeta(), events: ch });
     cast.on = true;
     cast.devPaused = false;
-    out2MainMute(true);
+    castLocalApply();
     castPaint();
     castPush();
-    say("Casting to " + d.name + ". It plays there a moment after it does here.");
+    say("Casting to " + d.name + "." + (prefs.castLocal ? " Playing here too." : " It plays there a moment after it does here."));
   } catch (e) {
     castTapStop();
     cast.on = false;
@@ -75,7 +75,7 @@ function castEnd(note) {
   if (!cast.on) return;
   cast.on = false;
   castTapStop();
-  out2MainMute(false);
+  castLocalApply();
   const name = cast.device ? cast.device.name : "the device";
   cast.device = null;
   castPaint();
@@ -172,7 +172,30 @@ async function outputPick(id) {
   if ($("outputNote").textContent) say($("outputNote").textContent);
 }
 
+// Playing on this PC as well while casting, held back to line up with the device (its buffer)
+const castLocalDelay = () => (cast.on && prefs.castLocal ? Math.max(0, Math.min(5000, Number(prefs.castLocalDelay) || 0)) : 0);
+
+function castLocalApply() {
+  out2MainMute(cast.on && !prefs.castLocal);
+  out2MainDelay();
+}
+
+function castLocalPaint() {
+  $("castLocal").checked = !!prefs.castLocal;
+  $("castLocalRow").hidden = !prefs.castLocal;
+  $("castLocalDelay").value = String(Number(prefs.castLocalDelay) || 0);
+}
+
 function castInit() {
+  castLocalPaint();
+  $("castLocal").addEventListener("change", () => { prefs.castLocal = $("castLocal").checked; savePrefs(); castLocalPaint(); castLocalApply(); });
+  $("castLocalDelay").addEventListener("change", () => {
+    const v = Math.round(Number($("castLocalDelay").value));
+    prefs.castLocalDelay = Number.isFinite(v) ? Math.max(0, Math.min(5000, v)) : 0;
+    savePrefs();
+    castLocalPaint();
+    castLocalApply();
+  });
   $("castApp").value = prefs.castApp || "";
   $("castApp").addEventListener("change", () => {
     prefs.castApp = $("castApp").value.trim().toUpperCase().replace(/[^0-9A-F]/g, "");

@@ -170,7 +170,8 @@ let discoverSrc = "";
 
 // ---------- views ----------
 function showView(v) {
-  if (!restoring && v !== view) listFilter = "all";
+  // each page opens on the filter last picked there
+  if (!restoring && v !== view) listFilter = (prefs.pageFilters && prefs.pageFilters[v]) || "all";
   view = v;
   const isNow = v === "now";
   if (!isNow) back = v;

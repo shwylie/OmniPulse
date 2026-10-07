@@ -456,6 +456,8 @@ function libraryInit() {
   $("listChips").addEventListener("click", (e) => {
     const b = e.target.closest(".chip");
     if (!b || !curPage || b.dataset.f === listFilter) return;
+    prefs.pageFilters = Object.assign({}, prefs.pageFilters, { [view]: b.dataset.f });
+    savePrefs();
     restoring = true;
     try { restorePage(Object.assign({}, curPage, { listFilter: b.dataset.f })); } finally { restoring = false; }
   });

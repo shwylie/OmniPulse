@@ -93,6 +93,15 @@ function out2Wire(ctx, master) {
   out2.mainDelay = mainDelay;
 }
 
+// The PC's own delay: the OmniPulse input's offset when that's below 0, plus, while casting with this PC
+// playing too, the delay that lines it up with the device
+function out2MainDelay() {
+  if (!out2.mainDelay) return;
+  const offset = prefs.out2On ? Math.max(-OUT2_MAX_MS, Math.min(OUT2_MAX_MS, Number(prefs.out2Offset) || 0)) : 0;
+  const ms = Math.min(OUT2_MAX_MS, (offset < 0 ? -offset : 0) + castLocalDelay());
+  out2.mainDelay.delayTime.setValueAtTime(ms / 1000, norm.ctx.currentTime);
+}
+
 function out2MainMute(muted) {
   if (out2.mainGain) out2.mainGain.gain.setTargetAtTime(muted ? 0 : 1, norm.ctx.currentTime, 0.05);
 }
@@ -108,7 +117,7 @@ async function out2Apply() {
   if (!normEnsure()) return;
   const ctx = norm.ctx;
   const now = ctx.currentTime;
-  if (out2.mainDelay) out2.mainDelay.delayTime.setValueAtTime(on && offset < 0 ? -offset / 1000 : 0, now);
+  out2MainDelay();
   if (!on) {
     if (out2.el) { out2.el.pause(); out2.el.srcObject = null; }
     if (out2.delay) { try { norm.limiter.disconnect(out2.delay); } catch (e) {} }
