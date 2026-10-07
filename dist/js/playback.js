@@ -103,7 +103,7 @@ function trackStarted(t) {
   fadeIn(document.querySelector(".npInfo"));
   widgetCleared = false;
   setTimeout(widgetPush, 300);
-  if ((prefs.normalize !== "off" || prefs.eqOn) && normEnsure()) norm.fastUntil = performance.now() + 4000;
+  if (normEnsure()) levelerNewTrack();
   session = { id: t.id, secs: 0, last: null, counted: false, scrobbled: false, startedAt: Date.now() };
   presenceUpdate();
   if (prefs.artAccent) updateArtAccent(t);

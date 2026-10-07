@@ -480,8 +480,25 @@
           <div class="lbl">Even out loudness</div>
           <div class="note" id="normNote">Brings quiet tracks up and loud ones down.</div>
         </div>
-        <select id="normSel" class="narrow"><option value="off">Off</option><option value="gentle">Gentle</option><option value="strong">Strong</option></select>
+        <select id="normSel" class="narrow"><option value="off">Off</option><option value="gentle">Gentle</option><option value="strong">Strong</option><option value="custom">Custom</option></select>
       </div>
+      <details class="sub" id="levCustom" open hidden>
+        <summary>Strength</summary>
+        <div class="row">
+          <div class="lbl">Strength</div>
+          <div class="levSlider">
+            <input id="levStrength" type="range" min="0" max="100" step="1" value="50" aria-label="Leveler strength">
+            <span id="levStrengthVal">50%</span>
+          </div>
+        </div>
+        <div class="row">
+          <div>
+            <div class="lbl">Turning down</div>
+            <div class="note">How hard it's working on what's playing now.</div>
+          </div>
+          <div class="levMeter"><div class="levMeterTrack"><span id="levMeterBar"></span></div><span id="levMeterVal">0.0 dB</span></div>
+        </div>
+      </details>
       <div class="row">
         <div>
           <div class="lbl">Equalizer</div>

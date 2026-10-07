@@ -5,7 +5,7 @@ function extrasSyncSettings() {
   paintHiddenPlaylists();
   reqPaint();
   $("artAccentToggle").checked = !!prefs.artAccent;
-  $("normSel").value = prefs.normalize || "off";
+  paintLeveler();
   $("customCss").value = prefs.css || "";
   $("presToggle").checked = !!prefs.presence;
   $("scrobbleToggle").checked = !!prefs.scrobble;

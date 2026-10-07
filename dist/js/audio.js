@@ -1,17 +1,17 @@
-// The audio chain: loudness leveling and the equalizer. Everything the app plays goes in at
+// The audio chain: equalizer, loudness leveler, limiter, volume. Everything the app plays goes in at
 // norm.input: the <audio> element (SoundCloud, local files) and the Spotify worklet.
 
-// ---------- loudness leveling ----------
-// Measures how loud the track is, slowly rides a gain toward a target level, then a
-// compressor smooths what's left and a limiter stops peaks clipping. It's built from the
-// browser engine's own audio nodes, so it costs very little.
-const NORM_PRESETS = {
-  gentle: { target: -18, maxBoost: 9, maxCut: 12, thr: -20, ratio: 3, knee: 12, attack: 0.02, release: 0.3 },
-  strong: { target: -15, maxBoost: 12, maxCut: 15, thr: -26, ratio: 5, knee: 10, attack: 0.008, release: 0.2 },
-};
-const norm = { ctx: null, input: null, agc: null, comp: null, master: null, analyser: null, buf: null, pow: 0, gainDb: 0, fastUntil: 0 };
+// ---------- loudness leveler ----------
+// A compressor in the spirit of RoughRider, on the audio thread (js/leveler-worklet.js), with one
+// Strength control: Gentle and Strong are fixed points on it, Custom is your own.
+const LEVELER_STRENGTH = { gentle: 0.3, strong: 0.65 };
+const norm = { ctx: null, input: null, leveler: null, slot: null, limiter: null, master: null };
 
-// Once the player is routed through the leveler it stays routed; "Off" simply sets it flat.
+const levelerStrength = () => (prefs.normalize === "custom"
+  ? Math.max(0, Math.min(100, Number(prefs.normStrength ?? 50))) / 100
+  : LEVELER_STRENGTH[prefs.normalize] ?? 0);
+
+// Once the player is routed through the chain it stays routed; "Off" simply passes it through.
 function normEnsure() {
   if (norm.ctx) return true;
   try {
@@ -19,10 +19,8 @@ function normEnsure() {
     const ctx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 44100 });
     const input = ctx.createGain();
     ctx.createMediaElementSource(audio).connect(input);
-    const analyser = ctx.createAnalyser();
-    analyser.fftSize = 2048;
-    const agc = ctx.createGain();
-    const comp = ctx.createDynamicsCompressor();
+    // where the leveler goes, once its worklet has loaded (straight through until then)
+    const slot = ctx.createGain();
     const limiter = ctx.createDynamicsCompressor();
     limiter.threshold.value = -1.5;
     limiter.knee.value = 0;
@@ -30,7 +28,6 @@ function normEnsure() {
     limiter.attack.value = 0.002;
     limiter.release.value = 0.12;
     const master = ctx.createGain();
-    input.connect(analyser);   // measure the track as it arrives
     // 10-band equalizer (flat unless switched on)
     const eq = EQ_FREQS.map((f, i) => {
       const b = ctx.createBiquadFilter();
@@ -42,41 +39,51 @@ function normEnsure() {
     });
     let node = input;
     eq.forEach((b) => { node.connect(b); node = b; });
-    node.connect(agc);
-    agc.connect(comp);
-    comp.connect(limiter);
+    node.connect(slot);
+    slot.connect(limiter);
     limiter.connect(master);
     master.connect(ctx.destination);
-    Object.assign(norm, { ctx, input, agc, comp, master, analyser, buf: new Float32Array(analyser.fftSize) });
-    norm.eq = eq;
+    Object.assign(norm, { ctx, input, slot, limiter, master, eq });
     if (prefs.sink && prefs.sink !== "default" && ctx.setSinkId) ctx.setSinkId(prefs.sink).catch(() => {});
+    ctx.audioWorklet.addModule("js/leveler-worklet.js").then(() => {
+      const lev = new AudioWorkletNode(ctx, "leveler", { outputChannelCount: [2] });
+      lev.port.onmessage = (e) => { if (e.data.type === "meter") paintLevelerMeter(e.data); };
+      slot.disconnect();
+      slot.connect(lev);
+      lev.connect(limiter);
+      norm.leveler = lev;
+      normApply();
+    }).catch((e) => say("The loudness leveler couldn't start: " + e));
     normApply();
     return true;
   } catch (e) {
-    say("Could not start loudness leveling: " + e);
+    say("Could not start the audio chain: " + e);
     return false;
   }
 }
 
 function normApply() {
   if (!norm.ctx) return;
-  const p = NORM_PRESETS[prefs.normalize];
-  const now = norm.ctx.currentTime;
-  const c = norm.comp;
-  if (p) {
-    c.threshold.setValueAtTime(p.thr, now);
-    c.ratio.setValueAtTime(p.ratio, now);
-    c.knee.setValueAtTime(p.knee, now);
-    c.attack.setValueAtTime(p.attack, now);
-    c.release.setValueAtTime(p.release, now);
-  } else {
-    c.threshold.setValueAtTime(0, now);
-    c.ratio.setValueAtTime(1, now);
-    norm.gainDb = 0;
-    norm.agc.gain.setTargetAtTime(1, now, 0.1);
-  }
+  if (norm.leveler) norm.leveler.port.postMessage({ type: "set", on: prefs.normalize && prefs.normalize !== "off" && levelerStrength() > 0, strength: levelerStrength() });
   setLevel(prefs.volume);
   eqApply();
+}
+
+// A new track: let the leveler settle on its level quickly
+function levelerNewTrack() {
+  if (norm.leveler) norm.leveler.port.postMessage({ type: "newTrack" });
+}
+
+// The meter under Custom: how much it's turning down right now, and the rider's gain
+function paintLevelerMeter(m) {
+  const gr = Math.min(0, m.gr);
+  $("levMeterBar").style.width = Math.min(100, (-gr / 18) * 100).toFixed(1) + "%";
+  $("levMeterVal").textContent = (gr > -0.05 ? "0.0" : gr.toFixed(1)) + " dB" +
+    (Math.abs(m.ride) >= 0.1 ? ", level " + (m.ride > 0 ? "+" : "") + m.ride.toFixed(1) + " dB" : "");
+}
+
+function setLevelerMetering(on) {
+  if (norm.leveler) norm.leveler.port.postMessage({ type: "meter", on });
 }
 
 // The volume slider sits after the leveler, so leveling doesn't fight it
@@ -93,20 +100,20 @@ function normMute(muted) {
   if (norm.ctx) norm.master.gain.setTargetAtTime(muted ? 0 : prefs.volume, norm.ctx.currentTime, 0.02);
 }
 
-function normTick() {
-  if (!norm.ctx || !nowPlaying()) return;
-  const p = NORM_PRESETS[prefs.normalize];
-  if (!p) return;
-  norm.analyser.getFloatTimeDomainData(norm.buf);
-  let sum = 0;
-  for (let i = 0; i < norm.buf.length; i++) sum += norm.buf[i] * norm.buf[i];
-  const fast = performance.now() < norm.fastUntil;
-  norm.pow = norm.pow * (fast ? 0.6 : 0.9) + (sum / norm.buf.length) * (fast ? 0.4 : 0.1);
-  const db = 10 * Math.log10(norm.pow + 1e-12);
-  if (db < -50) return;   // silence or a very quiet intro: leave the gain where it is
-  const want = Math.max(-p.maxCut, Math.min(p.maxBoost, p.target - db));
-  norm.gainDb += (want - norm.gainDb) * (fast ? 0.25 : 0.04);
-  norm.agc.gain.setTargetAtTime(Math.pow(10, norm.gainDb / 20), norm.ctx.currentTime, 0.25);
+const NORM_NOTES = {
+  off: "Brings quiet tracks up and loud ones down.",
+  gentle: "Light, transparent levelling.",
+  strong: "Tighter: everything sits at a similar loudness.",
+  custom: "Set the strength yourself.",
+};
+function paintLeveler() {
+  const mode = prefs.normalize || "off";
+  $("normSel").value = mode;
+  $("normNote").textContent = NORM_NOTES[mode] || NORM_NOTES.off;
+  $("levCustom").hidden = mode !== "custom";
+  const s = Math.round(levelerStrength() * 100);
+  $("levStrength").value = String(mode === "custom" ? s : Math.round((prefs.normStrength ?? 50)));
+  $("levStrengthVal").textContent = $("levStrength").value + "%";
 }
 
 // ---------- equalizer ----------
@@ -158,20 +165,25 @@ function audioInit() {
   // immediately rather than from the next track (it has to be in place before audio loads)
   audio.crossOrigin = "anonymous";
   normEnsure();
-  setInterval(normTick, 100);
 
-  // Loudness leveling
-  $("normSel").value = prefs.normalize || "off";
+  // Loudness leveler
+  paintLeveler();
   $("normSel").addEventListener("change", () => {
     prefs.normalize = $("normSel").value;
     savePrefs();
-    if (norm.ctx) {
-      normApply();
-      $("normNote").textContent = "Brings quiet tracks up and loud ones down.";
-    } else if (prefs.normalize !== "off") {
-      $("normNote").textContent = "Starts with the next track you play.";
-    }
+    paintLeveler();
+    normApply();
+    setLevelerMetering(prefs.normalize === "custom" && $("settings").open);
   });
+  $("levStrength").addEventListener("input", () => {
+    prefs.normStrength = Number($("levStrength").value);
+    savePrefs();
+    $("levStrengthVal").textContent = prefs.normStrength + "%";
+    normApply();
+  });
+  // the meter only runs while you can see it
+  new MutationObserver(() => setLevelerMetering(prefs.normalize === "custom" && $("settings").open))
+    .observe($("settings"), { attributes: true, attributeFilter: ["open"] });
 
   // Equalizer
   $("eqOn").checked = !!prefs.eqOn;
