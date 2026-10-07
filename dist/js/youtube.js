@@ -12,6 +12,7 @@ function ytTrack(x) {
     ytId: x.id,
     title: x.title,
     user: { username: x.artists || "Unknown artist" },
+    ytArtistId: x.artist_id || "",
     album: x.album || "",
     duration: x.duration_ms || 0,
     artwork_url: x.thumb || "",

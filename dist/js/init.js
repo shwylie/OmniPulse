@@ -40,6 +40,7 @@ function extrasInit() {
   audioInit();
   loudInit();
   ytInit();
+  artistsInit();
 
   $("trayToggle").addEventListener("change", () => {
     prefs.closeToTray = $("trayToggle").checked;

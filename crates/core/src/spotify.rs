@@ -153,7 +153,7 @@ pub async fn spotify_login() -> Result<(), String> {
     rand::thread_rng().fill_bytes(&mut buf);
     let state = URL_SAFE_NO_PAD.encode(buf);
 
-    let scope = "streaming user-read-email user-read-private user-library-read user-library-modify user-read-playback-state user-modify-playback-state playlist-read-private playlist-read-collaborative";
+    let scope = "streaming user-read-email user-read-private user-library-read user-library-modify user-read-playback-state user-modify-playback-state playlist-read-private playlist-read-collaborative user-follow-read user-follow-modify";
     let url = format!(
         "https://accounts.spotify.com/authorize?response_type=code&client_id={}&scope={}&redirect_uri={}&code_challenge_method=S256&code_challenge={}&state={}",
         urlencoding::encode(&cfg.spotify_client_id),
@@ -214,6 +214,8 @@ pub async fn spotify_api(method: String, path: String, body: Option<Value>) -> R
         "GET" => reqwest::Method::GET,
         "PUT" => reqwest::Method::PUT,
         "POST" => reqwest::Method::POST,
+        // unliking and unfollowing (DELETE /me/library) since Spotify's February 2026 changes
+        "DELETE" => reqwest::Method::DELETE,
         _ => return Err("That method is not allowed".to_string()),
     };
     let cfg = load_config()?;

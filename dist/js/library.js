@@ -239,7 +239,7 @@ async function ensureLikes(force) {
 
 function isLikedTrack(t) {
   const s = likeState.get(t.id);
-  return s === true || (s !== false && likedIds.has(t.id));
+  return s === true || (s !== false && likedIds.has(t.id)) || (t.dupes || []).some((d) => likeState.get(d.id) === true || likedIds.has(d.id));
 }
 
 // Rediscover: your own likes you haven't played in the last month
@@ -320,7 +320,7 @@ function openTrackMenu(t, x, y, fromPlayer) {
   sep();
   if (canLike(t)) add(isLiked(t) ? "Remove from Likes" : "Add to Likes", "like");
   if (favOn()) add(isFav(t) ? "Remove from Favourites" : "Add to Favourites", "fav");
-  if (sc && t.user && t.user.id) add("Go to artist", "artist");
+  add("Go to artist", "artist");
   if (!fromPlayer && view === "playlist" && isOwnPlaylist(currentPlaylist)) add("Remove from this playlist", "unlist");
   if (!fromPlayer && (view === "discover" || view === "rediscover")) add("Remove recommendation", "hide");
   if (t.permalink_url) {
@@ -351,7 +351,7 @@ function runMenuAction(a) {
     case "playlist": openPlaylistMenu(t, ctxAnchor); break;
     case "like": toggleLike(t); break;
     case "fav": toggleFav(t); break;
-    case "artist": openArtist(t.user); break;
+    case "artist": openArtistFor(t); break;
     case "unlist": removeFromPlaylist(t); break;
     case "hide": hideRecommendation(t); break;
     case "fix": openFixDialog(t); break;

@@ -159,10 +159,9 @@ const curTrack = () => (qi >= 0 ? queue[qi] : null);
 // Whether each track is liked. Filled from the likes list and from the
 // "user_favorite" flag when the API provides it; updated when you like or unlike.
 const likeState = new Map();
-const isLiked = (t) => !!t && likeState.get(t.id) === true;
+const isLiked = (t) => !!t && (likeState.get(t.id) === true || (t.dupes || []).some((d) => likeState.get(d.id) === true));
 let userName = "";
 let meId = null;
-let artistFollowing = null;   // true / false, or null while checking
 let currentArtist = null;
 let discoverSrc = "";
 
@@ -222,13 +221,13 @@ function renderHero() {
     else if (isXpl(currentPlaylist)) sub = "On this PC. Holds tracks from any platform.";
     else if (currentPlaylist.user && currentPlaylist.user.username) sub = "By " + currentPlaylist.user.username + ". ";
   } else if (v === "artist" && currentArtist) {
-    title = currentArtist.username || "Artist";
-    if (currentArtist.followers_count) sub = Number(currentArtist.followers_count).toLocaleString() + " followers. ";
+    title = currentArtist.name || currentArtist.username || "Artist";
   }
   const n = viewTracks.length;
   $("viewTitle").textContent = title;
   $("refreshBtn").hidden = !(v === "discover" || v === "rediscover");
   $("viewSub").textContent = sub.trim();
+  if (v === "artist" && currentArtist && currentArtist.on) $("viewSub").replaceChildren(...artistSubline(currentArtist));
   if (v === "rediscover") {
     $("viewSub").replaceChildren(el("span", "subLead", "Fall in love all over again"),
       el("span", "", " with the likes you haven't heard in a while."));
@@ -236,11 +235,11 @@ function renderHero() {
   const isArtist = v === "artist" && !!currentArtist;
   $("playAll").hidden = n === 0;
   $("shuffleAll").hidden = n === 0;
-  $("followBtn").hidden = !isArtist || (meId !== null && String(currentArtist.id) === String(meId));
+  $("followBtn").hidden = !isArtist || !followPlats(currentArtist).length ||
+    (meId !== null && currentArtist.on && currentArtist.on.soundcloud && String(currentArtist.on.soundcloud.id) === String(meId));
   $("plDelete").hidden = !(v === "playlist" && isOwnPlaylist(currentPlaylist));
   const av = $("heroAvatar");
-  const src = v === "artist" && currentArtist && currentArtist.avatar_url
-    ? currentArtist.avatar_url.replace("-large", "-t200x200") : "";
+  const src = v === "artist" ? artistImage(currentArtist) : "";
   if (src) { av.src = src; av.hidden = false; } else { av.removeAttribute("src"); av.hidden = true; }
   paintHeroCover(v);
   paintHeroActions();
@@ -256,7 +255,7 @@ const COVER_WEDGES = {
   4: ["polygon(0 0, 100% 0, 50% 50%)", "polygon(100% 0, 100% 100%, 50% 50%)", "polygon(0 100%, 100% 100%, 50% 50%)", "polygon(0 0, 0 100%, 50% 50%)"],
 };
 
-const isAlbumPage = (p) => !!p && (!!p.album || !!p.spAlbumId || isScAlbum(p));
+const isAlbumPage = (p) => !!p && (!!p.album || !!p.spAlbumId || !!p.ytAlbumId || isScAlbum(p));
 
 function heroCovers(v) {
   if (v === "playlist" && isAlbumPage(currentPlaylist)) {
@@ -363,7 +362,7 @@ function trackRow(t, i, playing) {
   const meta = el("div", "meta");
   const who = artistName(t);
   const artistLine = el("div", "artist");
-  const whoEl = el("span", srcOf(t) === "soundcloud" ? "artistLink" : "artistName", who);
+  const whoEl = el("span", "artistLink", who);
   if (srcOf(t) === "soundcloud") whoEl.title = uploaderNote(t);
   artistLine.append(platformBadge(t), whoEl);
   if (srcOf(t) === "soundcloud" && isPreview(t)) {
@@ -443,8 +442,7 @@ $("list").addEventListener("click", (e) => {
     return;
   }
   if (e.target.closest(".artistLink")) {
-    const u = viewTracks[i].user;
-    if (u) openArtist(u);
+    openArtistFor(viewTracks[i]);
     return;
   }
   startList(viewTracks, i, false);
@@ -516,12 +514,12 @@ function openLikes() {
 
 // Your whole library, platforms taking turns, from the likes in memory (cached or fresh)
 function libraryList(plats) {
-  return interleave([
+  return mergeDupes(interleave([
     plats.includes("soundcloud") ? likedTracks.filter((t) => isLikedTrack(t) && !isUnplayable(t)) : [],
     plats.includes("spotify") ? spLikedCache || [] : [],
     plats.includes("local") ? localTracks : [],
     plats.includes("youtube") ? ytLikedTracks() : [],
-  ]);
+  ]));
 }
 
 // Shows the list without losing your place (keeps as many rows loaded and the scroll position)
@@ -612,32 +610,10 @@ function openPlaylist(p) {
   showView("playlist");
   if (p.source === "mix") { openMix(p); return; }   // a Discover mix or station
   if (isXpl(p)) { ++loadToken; $("listView").scrollTop = 0; setLocalPool(xplTracks(xplFind(p.id) || { tracks: [] })); render(); say(viewTracks.length ? "" : "Nothing in here yet. Add tracks with the playlist button on any track, or drag them onto this playlist."); return; }
-  if (p.source === "spotify" || p.source === "local") { loadPlatformPlaylist(p); return; }
+  if (p.source === "spotify" || p.source === "local" || p.source === "youtube") { loadPlatformPlaylist(p); return; }
   openCachedList("list:sc:" + p.id,
     () => collectPages("/playlists/" + p.id + "/tracks?access=playable&limit=200&linked_partitioning=true", 10),
     "Nothing in here yet.");
-}
-
-function openArtist(u) {
-  if (!u || !u.id) return;
-  currentArtist = { id: u.id, username: u.username, avatar_url: u.avatar_url };
-  currentPlaylist = null;
-  showView("artist");
-  $("listView").scrollTop = 0;
-  if (!albumsOnly()) loadTracks("/users/" + u.id + "/tracks?access=playable&limit=50&linked_partitioning=true", false);
-  // Are we following this artist? A 404 from SoundCloud means no.
-  artistFollowing = null;
-  paintFollow();
-  api("/me/followings/" + u.id)
-    .then(() => { if (currentArtist && currentArtist.id === u.id) { artistFollowing = true; paintFollow(); } })
-    .catch(() => { if (currentArtist && currentArtist.id === u.id) { artistFollowing = false; paintFollow(); } });
-  // Fetch follower count and a larger picture; fine if this fails
-  api("/users/" + u.id).then((full) => {
-    if (currentArtist && currentArtist.id === u.id) {
-      currentArtist = { ...currentArtist, ...full };
-      renderHero();
-    }
-  }).catch(() => {});
 }
 
 // ---------- discover ----------
@@ -651,38 +627,6 @@ function openDiscover(src, fresh) {
 }
 
 $("navDiscover").addEventListener("click", () => openDiscover());
-function paintFollow() {
-  const b = $("followBtn");
-  b.disabled = artistFollowing === null;
-  b.classList.toggle("on", artistFollowing === true);
-  b.textContent = artistFollowing ? "Following" : "Follow";
-  b.title = artistFollowing ? "Click to unfollow" : "Follow this artist";
-}
-
-$("followBtn").addEventListener("click", async () => {
-  if (!currentArtist || artistFollowing === null) return;
-  const id = currentArtist.id;
-  const next = !artistFollowing;
-  const bump = (d) => {
-    if (typeof currentArtist.followers_count === "number") currentArtist.followers_count += d;
-  };
-  artistFollowing = next;          // update right away, undo if SoundCloud refuses
-  bump(next ? 1 : -1);
-  paintFollow();
-  renderHero();
-  try {
-    await invoke("set_follow", { id: String(id), follow: next });
-  } catch (e) {
-    if (currentArtist && currentArtist.id === id) {
-      artistFollowing = !next;
-      bump(next ? -1 : 1);
-      paintFollow();
-      renderHero();
-    }
-    say("Could not " + (next ? "follow" : "unfollow") + ": " + e);
-  }
-});
-
 $("navLikes").addEventListener("click", openLikes);
 // The Search tab is its own page: empty, with one big search box in the middle
 function openSearchPage() {
@@ -964,7 +908,7 @@ function fillNowPlaying(t) {
 function openCurrentArtist(e) {
   e.stopPropagation();
   const t = curTrack();
-  if (t && t.user && srcOf(t) === "soundcloud") openArtist(t.user);
+  if (t) openArtistFor(t);
 }
 $("nowArtist").addEventListener("click", openCurrentArtist);
 $("npArtist").addEventListener("click", openCurrentArtist);
@@ -1008,19 +952,28 @@ function refreshLikeUI() {
   refreshFavUI();
 }
 
+async function setLikedOn(t, on) {
+  if (srcOf(t) === "spotify") await spotifySetLiked(t, on);
+  else if (srcOf(t) === "youtube") ytSetLiked(t, on);
+  else await invoke("set_like", { id: String(t.id), like: on });
+}
+
+// Liking likes this copy of the song; unliking unlikes it wherever it's liked (the same song on
+// other platforms shows as one row, liked if any of them is)
 async function toggleLike(t) {
   if (!canLike(t)) return;
   const next = !isLiked(t);
-  likeState.set(t.id, next);       // update right away, undo if the platform refuses
+  const targets = next ? [t] : [t].concat(t.dupes || []).filter((x) => canLike(x) && likeState.get(x.id) === true);
+  targets.forEach((x) => likeState.set(x.id, next));   // update right away, undo if the platform refuses
   refreshLikeUI();
-  try {
-    if (srcOf(t) === "spotify") await spotifySetLiked(t, next);
-    else if (srcOf(t) === "youtube") ytSetLiked(t, next);
-    else await invoke("set_like", { id: String(t.id), like: next });
-  } catch (e) {
-    likeState.set(t.id, !next);
-    refreshLikeUI();
-    say("Could not " + (next ? "like" : "unlike") + " this track: " + e);
+  for (const x of targets) {
+    try {
+      await setLikedOn(x, next);
+    } catch (e) {
+      likeState.set(x.id, !next);
+      refreshLikeUI();
+      say("Could not " + (next ? "like" : "unlike") + " this track: " + e);
+    }
   }
 }
 

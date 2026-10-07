@@ -141,12 +141,13 @@ async function pullMerged() {
       return [];
     }
   }));
-  return interleave(pages).filter((t) => !m.seen.has(t.id) && m.seen.add(t.id));
+  // the same song from another platform joins the row already shown (js/artists.js mergeDupes)
+  return mergeDupes(interleave(pages).filter((t) => !m.seen.has(t.id) && m.seen.add(t.id)), m.keys);
 }
 
 async function loadMerged(feeds, filter) {
   const tok = ++loadToken;
-  merged = { feeds, filter: filter || ((l) => l), tok, seen: new Set(), errors: [] };
+  merged = { feeds, filter: filter || ((l) => l), tok, seen: new Set(), keys: new Map(), errors: [] };
   say("Loading...");
   const got = await pullMerged();
   if (tok !== loadToken) return;
@@ -349,6 +350,8 @@ async function refreshSidebar() {
   allPlaylists = xplSidebarItems().concat(parts.flat());   // for Settings > Library > Hidden playlists
   playlists = xplSidebarItems().concat(parts.flat().filter((p) => !hidden.has(String(p.id))));
   renderPlaylists(notes.join(" "));
+  followedCache = null;   // the platforms changed: the artists you follow too
+  sidebarArtists();
 }
 
 // Opening a Spotify playlist or a local album
@@ -387,6 +390,9 @@ async function openCachedList(key, fetchAll, emptyMsg) {
 }
 
 async function loadPlatformPlaylist(p) {
+  if (p.source === "youtube") {
+    return openCachedList("list:" + p.id, async () => (await invoke("yt_album", { id: p.ytAlbumId })).tracks.map(ytTrack), "Nothing in here yet.");
+  }
   if (p.source === "spotify") {
     return openCachedList("list:" + p.id, () => (p.spAlbumId ? spotifyAlbumTracks(p.spAlbumId) : spotifyPlaylistTracks(p.spId)), "Nothing in here yet.");
   }

@@ -153,6 +153,17 @@ async fn yt_search(query: String) -> Result<Vec<youtube::YtTrack>, String> { you
 async fn yt_radio(id: String) -> Result<Vec<youtube::YtTrack>, String> { youtube::radio(&id).await }
 #[tauri::command]
 async fn yt_status() -> Value { yt_stream::status().await }
+#[tauri::command]
+async fn yt_artists(query: String) -> Result<Vec<youtube::YtArtist>, String> { youtube::search_artists(&query).await }
+#[tauri::command]
+async fn yt_artist(id: String) -> Result<youtube::YtArtistPage, String> { youtube::artist(&id).await }
+#[tauri::command]
+async fn yt_album(id: String) -> Result<Value, String> {
+    let (album, tracks) = youtube::album(&id).await?;
+    Ok(serde_json::json!({ "album": album, "tracks": tracks }))
+}
+#[tauri::command]
+async fn yt_playlist(id: String) -> Result<Vec<youtube::YtTrack>, String> { youtube::playlist(&id).await }
 // Finds the audio ahead of playing (the player then fetches it through the local server's /yt)
 #[tauri::command]
 async fn yt_prepare(id: String) -> Result<(), String> { youtube::stream_url(&id, false).await.map(|_| ()) }
@@ -608,7 +619,7 @@ fn main() {
             local_folders, local_set_folders, local_scan, local_status, local_tracks, local_server,
             requests_start, requests_stop, request_result,
             spe_signed_in, spe_login, spe_logout, spe_attach, spe_play, spe_pause, spe_resume, spe_seek, spe_stop, spe_played, spe_playlist, spe_web_get, spe_set_normalisation, loudness_analyse,
-            resolve_yt_stream, yt_search, yt_radio, yt_status, yt_prepare, yt_setup, yt_remove, remote_start, remote_stop, remote_result
+            resolve_yt_stream, yt_search, yt_radio, yt_status, yt_artists, yt_artist, yt_album, yt_playlist, yt_prepare, yt_setup, yt_remove, remote_start, remote_stop, remote_result
         ])
         .run(tauri::generate_context!())
         .expect("error while running app");

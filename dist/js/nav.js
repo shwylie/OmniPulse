@@ -55,7 +55,7 @@ function restorePage(p) {
     case "sets": openSets(); break;
     case "search": if (p.query) openSearch(p.query); else openSearchPage(); break;
     case "playlist": if (p.playlist) openPlaylist(p.playlist); else openLikes(); break;
-    case "artist": if (p.artist) openArtist(p.artist); else openLikes(); break;
+    case "artist": if (p.artist) openArtist(p.artist); else openLikes(); break;   // the merged artist (js/artists.js)
     case "discover": openDiscover(p.discoverSrc); break;
     case "rediscover": openRediscover(); break;
     case "stats": showView("stats"); break;

@@ -19,6 +19,13 @@ function scAlbumTile(p) {
   };
 }
 
+function ytAlbumTile(a) {
+  return {
+    source: "youtube", id: "yta:" + a.id, ytAlbumId: a.id, title: a.title || "Untitled album",
+    artist: a.artists || "", count: 0, art: a.thumb || "", kind: a.kind,
+  };
+}
+
 function spAlbumTile(a) {
   const imgs = a.images || [];
   return {
@@ -53,7 +60,7 @@ async function scUserAlbums(uid) {
 
 // Album tiles from every active platform, mixed
 async function fetchAlbums(p) {
-  if (p.view === "artist") return scUserAlbums(p.artist && p.artist.id);
+  if (p.view === "artist") return artistAlbums(p.artist);
   const lists = await Promise.all(activePlats(p.view).map((id) => fetchAlbumsFor(p, id).catch(() => [])));
   return interleave(lists);
 }
@@ -165,12 +172,14 @@ function injectAlbums() {
 function albumAsPlaylist(a) {
   if (a.source === "soundcloud") return Object.assign({}, a.raw);
   if (a.source === "spotify") return { source: "spotify", id: a.id, spAlbumId: a.spAlbumId, title: a.title, user: { username: a.artist } };
+  if (a.source === "youtube") return { source: "youtube", id: a.id, ytAlbumId: a.ytAlbumId, title: a.title, user: { username: a.artist } };
   return { source: "local", id: "album:" + a.title, album: a.title, title: a.title, user: { username: a.artist } };
 }
 
 async function albumTracks(a) {
   if (a.source === "local") return localTracks.filter((t) => (t.album || "").trim() === a.title);
   if (a.source === "spotify") return spotifyAlbumTracks(a.spAlbumId);
+  if (a.source === "youtube") return (await invoke("yt_album", { id: a.ytAlbumId })).tracks.map(ytTrack);
   return asList(await api("/playlists/" + a.raw.id + "/tracks?access=playable&limit=200&linked_partitioning=true"));
 }
 

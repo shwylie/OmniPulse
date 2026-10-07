@@ -68,6 +68,13 @@
         </div>
         <div class="plList" id="plList"></div>
       </section>
+      <section class="sideSection" id="artistSection" hidden>
+        <div class="plHead" id="artistHead" title="Right-click to follow these artists on your other platforms too">
+          <span>Artists</span>
+          <button id="artistMore" class="plAdd" title="Follow on other platforms" aria-label="Follow on other platforms"><svg viewBox="0 0 24 24"><path d="M6 10c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm12 0c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm-6 0c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z"/></svg></button>
+        </div>
+        <div class="plList" id="artistList"></div>
+      </section>
       <section class="sideSection" id="albumSection" hidden>
         <div class="plHead"><span>Albums</span></div>
         <div class="plList" id="albumList"></div>
@@ -433,6 +440,13 @@
       <h3>Library</h3>
       <div class="row">
         <div>
+          <div class="lbl">Follow new artists everywhere</div>
+          <div class="note">When you follow someone on one platform, they're followed on your others too (matched by name).</div>
+        </div>
+        <label class="switch"><input type="checkbox" id="followEverywhereOn"><span></span></label>
+      </div>
+      <div class="row">
+        <div>
           <div class="lbl">Favourites</div>
           <div class="note">A star next to the heart, with its own page and filter. Starring a track likes it too.</div>
         </div>
@@ -794,6 +808,7 @@
 <script src="js/requests.js"></script>
 <script src="js/remote.js"></script>
 <script src="js/albums.js"></script>
+<script src="js/artists.js"></script>
 <script src="js/init.js"></script>
 <script src="app.js"></script>
 </body>

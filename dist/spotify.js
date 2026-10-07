@@ -25,6 +25,7 @@ function spTrack(x) {
     uri: x.uri,
     title: x.name,
     user: { username: (x.artists || []).map((a) => a.name).join(", ") },
+    spArtistId: (x.artists && x.artists[0] && x.artists[0].id) || "",
     artwork_url: img,
     duration: x.duration_ms,
     permalink_url: x.external_urls && x.external_urls.spotify,
