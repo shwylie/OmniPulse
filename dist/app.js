@@ -62,7 +62,9 @@ function say(msg) {
   bar.classList.add("show");
   statusTimer = setTimeout(() => bar.classList.remove("show"), busy ? 30000 : bad ? 7000 : 4000);
 }
-const api = (path) => invoke("api_get", { path });
+// With YouTube Music on, SoundCloud lists include Go+ tracks too: they play from YouTube Music
+// (once: SoundCloud's next-page links already carry it)
+const api = (path) => invoke("api_get", { path: ytOn() ? path.replace(/access=playable(?=&|$)/, "access=playable,preview") : path });
 
 const ICON_PLAY = "M8 5v14l11-7z";
 const ICON_ADD = "M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z";
@@ -292,8 +294,9 @@ function paintHeroCover(v) {
 // Go+ tracks are served to this app as 30-second previews only
 function isPreview(t) { return !!t && (t.access === "preview" || t.policy === "SNIP"); }
 // Go+ previews and blocked tracks are never shown
+// Go+ tracks are shown when YouTube Music can play them in full
 function isUnplayable(t) {
-  return isPreview(t) || (!!t && t.access === "blocked") || (!!t && /\bpreview\b/i.test(t.title || ""));
+  return (isPreview(t) && !ytOn()) || (!!t && t.access === "blocked") || (!!t && /\bpreview\b/i.test(t.title || ""));
 }
 
 function openOnSoundCloud(t) {
@@ -363,6 +366,11 @@ function trackRow(t, i, playing) {
   const whoEl = el("span", srcOf(t) === "soundcloud" ? "artistLink" : "artistName", who);
   if (srcOf(t) === "soundcloud") whoEl.title = uploaderNote(t);
   artistLine.append(platformBadge(t), whoEl);
+  if (srcOf(t) === "soundcloud" && isPreview(t)) {
+    const tag = el("span", "goPlus", "Go+");
+    tag.title = "A Go+ track: the full song plays from YouTube Music";
+    artistLine.insertBefore(tag, whoEl);
+  }
   meta.append(el("div", "title", t.title || "Untitled"), artistLine);
   const cell = el("div", "trackCell");
   cell.append(img, meta);
@@ -509,7 +517,7 @@ function openLikes() {
 // Your whole library, platforms taking turns, from the likes in memory (cached or fresh)
 function libraryList(plats) {
   return interleave([
-    plats.includes("soundcloud") ? likedTracks.filter(isLikedTrack) : [],
+    plats.includes("soundcloud") ? likedTracks.filter((t) => isLikedTrack(t) && !isUnplayable(t)) : [],
     plats.includes("spotify") ? spLikedCache || [] : [],
     plats.includes("local") ? localTracks : [],
     plats.includes("youtube") ? ytLikedTracks() : [],
@@ -1165,10 +1173,15 @@ async function startStream(t) {
     if (mine === streamToken) say("");
     return;
   }
+  // Go+: the full song from YouTube Music rather than SoundCloud's 30 seconds
+  if (isPreview(t) && await playViaYouTube(t, mine, "Go+ track: playing the full song from YouTube Music.")) return;
   const info = await invoke("stream_url", { id: String(t.id) });
   if (mine !== streamToken) return;
   const failures = [];
   for (const c of info.candidates || []) {
+    // only the preview left: YouTube Music's full song is better, if it has it
+    if (c.name === "preview" && await playViaYouTube(t, mine, "SoundCloud only had a preview: playing the full song from YouTube Music.")) return;
+    if (mine !== streamToken) return;
     let resolved;
     try {
       resolved = await invoke("stream_resolve", { url: c.url });

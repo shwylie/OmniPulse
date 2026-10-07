@@ -27,6 +27,7 @@ let loudGainNow = 0;             // dB, what the current track is playing at
 const loudTarget = () => LOUD_TARGETS[prefs.loudMatch] ?? null;
 
 function loudKey(t) {
+  if (t && t.ytVia) return "youtube:" + t.ytVia;   // played from YouTube Music instead
   if (!t || isPreview(t)) return null;
   const src = srcOf(t);
   return src === "local" || src === "soundcloud" || src === "youtube" ? src + ":" + t.id : null;
@@ -38,8 +39,9 @@ function loudAnalyse(t) {
   if (loudResults.has(key)) return Promise.resolve(loudResults.get(key));
   if (loudPending.has(key)) return loudPending.get(key);
   // local tracks are "local:<file id>"; the core knows files by their id alone
-  const id = srcOf(t) === "youtube" ? t.ytId : String(t.id).replace(/^local:/, "");
-  const p = invoke("loudness_analyse", { source: srcOf(t), id })
+  const yt = t.ytVia || (srcOf(t) === "youtube" ? t.ytId : "");
+  const id = yt || String(t.id).replace(/^local:/, "");
+  const p = invoke("loudness_analyse", { source: yt ? "youtube" : srcOf(t), id })
     .then((a) => a, () => null)
     .then((a) => { loudResults.set(key, a); loudPending.delete(key); return a; });
   loudPending.set(key, p);

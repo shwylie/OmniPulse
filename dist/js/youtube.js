@@ -35,6 +35,82 @@ async function ytFind(t) {
   return found[0] || null;
 }
 
+// ---------- the same song on YouTube Music ----------
+// For tracks that can't be played where they're from (Go+ previews, Spotify without Premium). The
+// search results are scored on title words, artist, length and version tags (remix, live, ...), and
+// a weak best match counts as none rather than playing the wrong song. Matches are remembered.
+const YT_MATCH_KEY = "sc.ytMatch";
+let ytMatches = null;   // track id -> YouTube track snapshot, or null for "none found"
+
+const ytOn = () => ytWanted() && ytAvailable();
+// words YouTube uploads add that say nothing about which song it is
+const NOISE_WORDS = new Set(["official", "audio", "video", "music", "lyrics", "lyric", "hd", "hq", "4k", "visualizer", "visualiser", "topic", "full", "song", "mv"]);
+const VERSION_WORDS = ["remix", "edit", "mix", "vip", "flip", "bootleg", "live", "acoustic", "instrumental", "remaster", "cover", "sped", "slowed", "nightcore", "karaoke"];
+
+function matchWords(s) {
+  return String(s || "").toLowerCase().normalize("NFKD").replace(/[̀-ͯ]/g, "")
+    .replace(/(feat|ft|featuring|prod|with).?/g, " ").replace(/[^a-z0-9]+/g, " ").trim().split(" ").filter(Boolean);
+}
+
+function ytMatchScore(t, c) {
+  const names = guessNames(t);
+  const artist = matchWords(names.artist || artistName(t));
+  const want = new Set(matchWords(names.title).filter((w) => !NOISE_WORDS.has(w)));
+  // the artist's name in an upload's title ("Artist - Song") isn't part of the song's title
+  const got = new Set(matchWords(c.title).filter((w) => !NOISE_WORDS.has(w) && !(artist.includes(w) && !want.has(w))));
+  if (!want.size || !got.size) return 0;
+  let shared = 0;
+  want.forEach((w) => { if (got.has(w)) shared++; });
+  // the title has to be (nearly) the same: "Track 7" is not "Track 8"
+  let score = shared / Math.max(want.size, got.size);
+  if (score < 0.75) return 0;
+  // and so does the artist (credited, or named in the title): otherwise it's likely a cover
+  const where = new Set(matchWords(artistName(c) + " " + c.title));
+  if (artist.length && artist.some((w) => where.has(w))) score += 0.3;
+  else score -= 0.6;
+  // a remix isn't the original (and the other way round)
+  VERSION_WORDS.forEach((v) => { if (want.has(v) !== got.has(v)) score -= 0.6; });
+  // the length, when both are known
+  const d1 = t.full_duration || t.duration || 0;
+  const d2 = c.duration || 0;
+  if (d1 > 40000 && d2) {
+    const off = Math.abs(d1 - d2) / d1;
+    score += off < 0.03 ? 0.3 : off < 0.1 ? 0.1 : off > 0.25 ? -0.5 : 0;
+  }
+  return score;
+}
+
+async function ytMatch(t) {
+  if (srcOf(t) === "youtube") return t;
+  if (!ytMatches) { try { ytMatches = JSON.parse(localStorage.getItem(YT_MATCH_KEY) || "{}"); } catch (e) { ytMatches = {}; } }
+  if (t.id in ytMatches) return ytMatches[t.id] ? ytTrack(ytMatches[t.id]) : null;
+  const names = guessNames(t);
+  const found = await ytSearch((names.artist || artistName(t)) + " " + names.title).catch(() => null);
+  if (!found) return null;   // couldn't search: try again next time
+  let best = null;
+  let bestScore = 0;
+  found.slice(0, 10).forEach((c) => { const s = ytMatchScore(t, c); if (s > bestScore) { bestScore = s; best = c; } });
+  const ok = best && bestScore >= 0.8 ? best : null;
+  ytMatches[t.id] = ok ? { id: ok.ytId, title: ok.title, artists: artistName(ok), album: ok.album, duration_ms: ok.duration, thumb: ok.artwork_url } : null;
+  try { localStorage.setItem(YT_MATCH_KEY, JSON.stringify(ytMatches)); } catch (e) {}
+  return ok;
+}
+
+// Plays a track by its YouTube Music match; false if there's none (or YouTube Music is off)
+async function playViaYouTube(t, mine, note) {
+  if (!ytOn()) return false;
+  const m = await ytMatch(t).catch(() => null);
+  if (!m || mine !== streamToken) return false;
+  t.ytVia = m.ytId;   // loudness and silences are measured on what's actually playing
+  const url = await ytPlay(m);
+  if (mine !== streamToken) return true;
+  await tryStream(url, false, null);
+  if (mine !== streamToken) return true;
+  say(note);
+  loudAnalyse(t).then(() => { if (curTrack() === t) loudApply(t, false); });
+  return true;
+}
+
 // ---------- likes, kept on this PC ----------
 const YT_LIKES_KEY = "sc.ytLikes";
 let ytLikes = [];   // newest first

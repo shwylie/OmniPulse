@@ -965,6 +965,8 @@ select.wide { max-width: 260px; }
 .sideLists .plat.spotify svg { color: #1ed760; }
 .sideLists .plat.local svg { color: #f2b544; }
 .sideLists .plat.youtube svg { color: #ff0033; }
+/* Go+ tracks that play from YouTube Music */
+.goPlus { flex: none; margin-right: 6px; padding: 0 5px; border-radius: 4px; font-size: 10px; font-weight: 700; line-height: 15px; color: #ff6a3d; border: 1px solid color-mix(in srgb, #ff6a3d 55%, transparent); }
 #npAlbum { margin: 4px 0 0; color: var(--text); opacity: 0.85; font-weight: 600; }
 
 /* ===== v45: the queue: Now playing, Next up (yours), Autoplay ===== */
