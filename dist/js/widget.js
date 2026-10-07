@@ -56,6 +56,15 @@ async function widgetApply() {
   }
 }
 
+// Animation options that only some designs use (the rest, fades, scrolling and colour speed, apply
+// to every design). Options for other designs are hidden.
+const WIDGET_ANIM_DESIGNS = { wSpin: ["vinyl"] };
+
+function paintWidgetAnims() {
+  const d = prefs.widgetDesign || "card";
+  Object.entries(WIDGET_ANIM_DESIGNS).forEach(([id, designs]) => { $(id).closest("label").hidden = !designs.includes(d); });
+}
+
 function widgetInit() {
   $("widgetToggle").checked = !!prefs.widget;
   $("widgetPort").value = prefs.widgetPort || 7878;
@@ -64,6 +73,7 @@ function widgetInit() {
   $("widgetDesign").addEventListener("change", () => {
     prefs.widgetDesign = $("widgetDesign").value;
     savePrefs();
+    paintWidgetAnims();
     widgetPush();
   });
   $("widgetRounded").addEventListener("change", () => {
@@ -108,6 +118,7 @@ function widgetInit() {
   paintText();
 
   // Animation options
+  paintWidgetAnims();
   $("wFade").checked = prefs.wFade !== false;
   $("wScroll").checked = prefs.wScroll !== false;
   $("wSpin").checked = prefs.wSpin !== false;
