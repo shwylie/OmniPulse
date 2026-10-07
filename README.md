@@ -314,3 +314,21 @@ hides them; tracks from albums are never hidden.
   passes the audio through in 4 MB pieces (as YouTube's player asks for it).
 - YouTube tracks are measured for Match loudness from their audio, like SoundCloud's.
 - Try it from a terminal: `cargo run -p omnipulse-core --example yt -- <search words>`.
+
+## v48
+- YouTube Music sets itself up the first time it's on (yt-dlp and Deno, about 58 MB, from their GitHub
+  releases), can be switched off, and Remove (Settings > Accounts > YouTube Music) deletes them with
+  their caches.
+- Go+ tracks show again and play in full from YouTube Music; with YouTube Music off they're hidden.
+- Spotify without Premium: your library, search and playlists work, and tracks play from YouTube Music.
+- Artists: one page per artist across every platform (each song once, liked if liked anywhere), Follow
+  follows everywhere, and the Artists list in the sidebar shows everyone you follow anywhere. Right-click
+  an artist (or the Artists heading) to follow them on your other platforms too. Settings > Library >
+  Follow new artists everywhere does it by itself for new follows. Spotify needs one fresh sign-in for
+  this (Sign out, Sign in).
+- Search in categories (Artists, Albums, Playlists, Sets & Podcasts, Tracks), each expandable; a genre
+  search gets the genre's trending mix and top artists first.
+- List filters: All / Tracks / Albums / Sets & Podcasts everywhere the Albums toggle was.
+- Track preferences (right-click a track): title and artist, and start and end times, with a timeline,
+  preview and "Use current position". Trimmed tracks show as their trimmed length, marked with *.
+- With the album-art accent on, pausing brings back your own accent colours.
