@@ -492,7 +492,64 @@ function openLikes() {
   renderLikesChips();
   const plats = activePlats("likes");
   if (!plats.length) { showNothing(); return; }
-  loadMerged(plats.map(likesFeed), applyLikesFilter);
+  openLibrary(plats);
+}
+
+// Your whole library, platforms taking turns, from the likes in memory (cached or fresh)
+function libraryList(plats) {
+  return interleave([
+    plats.includes("soundcloud") ? likedTracks.filter(isLikedTrack) : [],
+    plats.includes("spotify") ? spLikedCache || [] : [],
+    plats.includes("local") ? localTracks : [],
+  ]);
+}
+
+// Shows the list without losing your place (keeps as many rows loaded and the scroll position)
+function showLibrary(list, keepPlace) {
+  const top = $("listView").scrollTop;
+  const shown = viewTracks.length;
+  setLocalPool(applyLikesFilter(list));
+  if (keepPlace && shown > viewTracks.length) {
+    localPos = Math.min(localPool.length, shown);
+    viewTracks = localPool.slice(0, localPos);
+    nextHref = localPos < localPool.length ? "local:" : "";
+  }
+  render();
+  if (keepPlace) $("listView").scrollTop = top;
+  else setTimeout(nearBottomCheck, 50);
+}
+
+async function openLibrary(plats) {
+  const tok = ++loadToken;
+  const online = plats.filter((p) => p !== "local");
+  // what this PC already has (only reading the saved copies, nothing downloaded yet)
+  await Promise.all([
+    plats.includes("soundcloud") && prefs.scOn !== false ? likesFromCache() : null,
+    plats.includes("spotify") ? spLikedFromCache() : null,
+  ]);
+  if (tok !== loadToken || view !== "likes") return;
+  const have = (plats.includes("soundcloud") && likedTracks.length) || (plats.includes("spotify") && spLikedCache && spLikedCache.length);
+  if (!have && online.length) {
+    // the very first time: page by page as before, while the full lists are saved for next time
+    loadMerged(plats.map(likesFeed), applyLikesFilter);
+    if (plats.includes("soundcloud")) ensureLikes();   // saves the copy for next time
+    if (plats.includes("spotify")) spLiked().catch(() => null);
+    return;
+  }
+  const before = libraryList(plats);
+  showLibrary(before, false);
+  if (!online.length) { say(viewTracks.length ? "" : "Nothing here yet."); return; }
+  // then catch up, while the page stays usable
+  say("Checking for updates...");
+  await Promise.all([
+    plats.includes("soundcloud") ? ensureLikes(true).catch(() => null) : null,
+    plats.includes("spotify") ? spLiked(true).catch(() => null) : null,
+  ]);
+  if (tok !== loadToken || view !== "likes") return;
+  const after = libraryList(plats);
+  const same = after.length === before.length && after.every((t, i) => t.id === before[i].id && t.artwork_url === before[i].artwork_url);
+  if (!same) showLibrary(after, true);
+  say(same ? "" : "Library updated.");
 }
 
 function showNothing() {
@@ -535,7 +592,9 @@ function openPlaylist(p) {
   if (p.source === "mix") { openMix(p); return; }   // a Discover mix or station
   if (isXpl(p)) { ++loadToken; $("listView").scrollTop = 0; setLocalPool(xplTracks(xplFind(p.id) || { tracks: [] })); render(); say(viewTracks.length ? "" : "Nothing in here yet. Add tracks with the playlist button on any track, or drag them onto this playlist."); return; }
   if (p.source === "spotify" || p.source === "local") { loadPlatformPlaylist(p); return; }
-  loadTracks("/playlists/" + p.id + "/tracks?access=playable&limit=50&linked_partitioning=true", false, p.tracks);
+  openCachedList("list:sc:" + p.id,
+    () => collectPages("/playlists/" + p.id + "/tracks?access=playable&limit=200&linked_partitioning=true", 10),
+    "Nothing in here yet.");
 }
 
 function openArtist(u) {

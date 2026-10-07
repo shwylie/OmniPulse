@@ -349,7 +349,44 @@ async function refreshSidebar() {
 }
 
 // Opening a Spotify playlist or a local album
+// A playlist's tracks from this PC's copy at once, then "Checking for updates..." while it's
+// fetched again; the page stays usable, and keeps your place if the list changed
+async function openCachedList(key, fetchAll, emptyMsg) {
+  const tok = ++loadToken;
+  const p = currentPlaylist;
+  $("listView").scrollTop = 0;
+  const c = await cachedTracks(key);
+  if (tok !== loadToken) return;
+  if (c && c.tracks.length) { setLocalPool(c.tracks); render(); say("Checking for updates..."); }
+  else { viewTracks = []; render(); say("Loading..."); }
+  try {
+    const list = await fetchAll();
+    cacheTracks(key, list);
+    if (tok !== loadToken || currentPlaylist !== p) return;
+    const same = c && list.length === c.tracks.length && list.every((t, i) => t.id === c.tracks[i].id && t.artwork_url === c.tracks[i].artwork_url);
+    if (!same) {
+      const top = $("listView").scrollTop;
+      const shown = viewTracks.length;
+      setLocalPool(list);
+      if (shown > viewTracks.length) { localPos = Math.min(list.length, shown); viewTracks = list.slice(0, localPos); nextHref = localPos < list.length ? "local:" : ""; }
+      render();
+      $("listView").scrollTop = top;
+    }
+    say(viewTracks.length ? "" : emptyMsg);
+    setTimeout(nearBottomCheck, 50);
+  } catch (e) {
+    if (tok !== loadToken) return;
+    if (!viewTracks.length) { nextHref = ""; render(); }
+    say((viewTracks.length ? "Showing the saved copy. " : "") + (/40[13]/.test(String(e))
+      ? "Couldn't open this playlist. Check Spotify playback is signed in (Settings > Accounts > Spotify options)."
+      : String(e)));
+  }
+}
+
 async function loadPlatformPlaylist(p) {
+  if (p.source === "spotify") {
+    return openCachedList("list:" + p.id, () => (p.spAlbumId ? spotifyAlbumTracks(p.spAlbumId) : spotifyPlaylistTracks(p.spId)), "Nothing in here yet.");
+  }
   const tok = ++loadToken;
   $("listView").scrollTop = 0;
   say("Loading...");

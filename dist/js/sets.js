@@ -17,15 +17,26 @@ async function openSets() {
     .concat(plats.includes("spotify") ? spLikedCache || [] : [])
     .concat(plats.includes("local") ? localTracks : [])
     .filter(isMix);
-  let more = [];
+  const seen = new Set();
+  const dedupe = (list) => list.filter((t) => !seen.has(t.id) && seen.add(t.id));
+  const mine = dedupe(liked);
+  setLocalPool(mine);
+  render();
   if (!prefs.setsLiked && plats.includes("soundcloud")) {
-    more = (await collectPages("/me/followings/tracks?access=playable&limit=100&linked_partitioning=true", 3).catch(() => []))
+    if (mine.length) say("Checking artists you follow...");
+    const more = (await collectPages("/me/followings/tracks?access=playable&limit=100&linked_partitioning=true", 3).catch(() => []))
       .filter((t) => isMix(t) && !isLikedTrack(t) && !hiddenRecs.has(String(t.id)));
     if (tok !== loadToken) return;
+    const extra = dedupe(more);
+    if (extra.length) {
+      const top = $("listView").scrollTop;
+      const shown = viewTracks.length;
+      setLocalPool(mine.concat(extra));
+      if (shown > viewTracks.length) { localPos = Math.min(localPool.length, shown); viewTracks = localPool.slice(0, localPos); nextHref = localPos < localPool.length ? "local:" : ""; }
+      render();
+      $("listView").scrollTop = top;
+    }
   }
-  const seen = new Set();
-  setLocalPool(liked.concat(more).filter((t) => !seen.has(t.id) && seen.add(t.id)));
-  render();
   say(viewTracks.length ? "" : prefs.setsLiked
     ? "No sets or podcasts in your likes yet. Anything over 15 minutes counts."
     : "No sets or podcasts found. Anything over 15 minutes counts.");

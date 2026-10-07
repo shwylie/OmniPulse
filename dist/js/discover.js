@@ -110,11 +110,33 @@ async function scSimilar() {
 let spLikedCache = null;
 let spLikedAt = 0;
 
-async function spLiked() {
-  if (!spLikedCache || Date.now() - spLikedAt > 10 * 60000) {
-    spLikedCache = await spotifyLikedTracks(500);
+let spLikedFetching = null;
+let spLikedCacheRead = null;
+
+function spLikedFetch() {
+  spLikedFetching ??= spotifyLikedTracks(500).then((list) => {
+    spLikedCache = list;
     spLikedAt = Date.now();
-  }
+    cacheTracks("likes:spotify", list);
+    return list;
+  }).finally(() => { spLikedFetching = null; });
+  return spLikedFetching;
+}
+
+// Your Spotify likes, from this PC's copy when there is one (refreshed in the background when
+// it's over ten minutes old); force waits for a fresh copy
+function spLikedFromCache() {
+  spLikedCacheRead ??= cachedTracks("likes:spotify").then((c) => {
+    if (c && !spLikedCache) { spLikedCache = c.tracks; spLikedAt = c.at; c.tracks.forEach((t) => likeState.set(t.id, true)); }
+  });
+  return spLikedCacheRead;
+}
+
+async function spLiked(force) {
+  await spLikedFromCache();
+  const stale = !spLikedAt || Date.now() - spLikedAt > 10 * 60000;
+  if (force || (stale && !spLikedCache)) return spLikedFetch();
+  if (stale) spLikedFetch().catch(() => null);
   return spLikedCache;
 }
 

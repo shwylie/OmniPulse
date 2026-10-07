@@ -168,17 +168,31 @@ let likedIds = new Set();
 let likesLoadedAt = 0;
 let likesLoading = null;
 
-function ensureLikes(force) {
-  if (prefs.scOn === false) return Promise.resolve();
+// Your SoundCloud likes are kept on this PC (js/store.js), so pages that use them open at once;
+// they're refreshed in the background when they're more than ten minutes old.
+let likesCacheRead = null;
+
+function useLikes(all) {
+  likedTracks = all;
+  likedIds = new Set(all.map((t) => t.id));
+  all.forEach((t) => likeState.set(t.id, true));
+}
+
+function likesFromCache() {
+  likesCacheRead ??= cachedTracks("likes:soundcloud").then((c) => {
+    if (c && !likedTracks.length) { useLikes(c.tracks); likesLoadedAt = c.at; }
+  });
+  return likesCacheRead;
+}
+
+function likesFetch() {
   if (likesLoading) return likesLoading;
-  if (!force && likesLoadedAt && Date.now() - likesLoadedAt < 10 * 60000) return Promise.resolve();
   likesLoading = (async () => {
     try {
       const all = await collectPages("/me/likes/tracks?access=playable&limit=200&linked_partitioning=true", 25);
-      likedTracks = all;
-      likedIds = new Set(all.map((t) => t.id));
-      all.forEach((t) => likeState.set(t.id, true));
+      useLikes(all);
       likesLoadedAt = Date.now();
+      cacheTracks("likes:soundcloud", all);
     } catch (e) {
       // offline or signed out: Discover still works, it just can't skip your likes
     } finally {
@@ -186,6 +200,15 @@ function ensureLikes(force) {
     }
   })();
   return likesLoading;
+}
+
+// force: wait for a fresh copy. Otherwise this returns as soon as there's any copy, cached or not.
+async function ensureLikes(force) {
+  if (prefs.scOn === false) return;
+  await likesFromCache();
+  const stale = !likesLoadedAt || Date.now() - likesLoadedAt > 10 * 60000;
+  if (force || (stale && !likedTracks.length)) return likesFetch();
+  if (stale) likesFetch();   // in the background
 }
 
 function isLikedTrack(t) {
@@ -209,7 +232,7 @@ async function openRediscover(fresh) {
     const parts = await Promise.all(plats.map(async (id) => {
       if (id === "spotify") return spotifyLikedTracks(500).catch(() => []);
       if (id === "local") return localTracks;
-      await ensureLikes(true);
+      await ensureLikes();
       return likedTracks.filter(isLikedTrack);
     }));
     const source = parts.flat();
