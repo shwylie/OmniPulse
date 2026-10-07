@@ -314,7 +314,6 @@ function openTrackMenu(t, x, y, fromPlayer) {
     m.append(b);
   };
   const sep = () => m.append(el("div", "menuSep"));
-  const sc = srcOf(t) === "soundcloud";
   if (!fromPlayer) add("Play", "play");   // it is already playing
   add("Play next", "next");
   add("Add to queue", "queue");
@@ -330,10 +329,8 @@ function openTrackMenu(t, x, y, fromPlayer) {
     add(openLabel(t), "open");
     add("Copy link", "copy");
   }
-  if (sc || srcOf(t) === "local") {
-    sep();
-    add("Edit title and artist...", "fix");
-  }
+  sep();
+  add("Track preferences...", "fix");
   m.hidden = false;
   const w = m.offsetWidth;
   const h = m.offsetHeight;

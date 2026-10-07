@@ -89,7 +89,7 @@ function cycleRepeat() {
 function onEnded() {
   if (repeatMode === "one") {
     if (onSpotifyEngine(curTrack())) playCurrent();
-    else { audio.currentTime = 0; audio.play(); }
+    else { audio.currentTime = trimStart(curTrack()) / 1000; audio.play(); }
     return;
   }
   if (qi < queue.length - 1) { step(1); return; }

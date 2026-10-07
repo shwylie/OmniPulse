@@ -42,6 +42,7 @@ function extrasInit() {
   ytInit();
   artistsInit();
   searchPageInit();
+  trimsInit();
 
   $("trayToggle").addEventListener("change", () => {
     prefs.closeToTray = $("trayToggle").checked;

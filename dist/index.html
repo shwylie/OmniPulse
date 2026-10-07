@@ -262,14 +262,39 @@
 
 <dialog id="fixDialog" class="fixDialog">
   <form id="fixForm" class="sheet">
-    <h2>Edit title and artist</h2>
+    <h2>Track preferences</h2>
+    <p class="note fixWhat" id="fixWhat"></p>
+    <h3>Title and artist</h3>
     <p class="note">Only changes how this track shows in the app. Saved on this PC, so you only do it once.</p>
     <label class="lbl" for="fixTitle">Title</label>
     <input id="fixTitle" type="text" maxlength="200" autocomplete="off" spellcheck="false">
     <label class="lbl" for="fixArtist">Artist</label>
     <input id="fixArtist" type="text" maxlength="120" autocomplete="off" spellcheck="false">
+    <h3>Start and end</h3>
+    <p class="note">Play only part of this track: it starts and ends where you choose, and shows as that long. Shaded parts are silent.</p>
+    <div class="trimBar" id="trimBar" title="Drag the handles, or click where the start or end should be">
+      <div class="trimSilence" id="trimSilence"></div>
+      <div class="trimSel" id="trimSel"></div>
+      <span class="trimHead" id="trimHead" hidden></span>
+      <button type="button" class="trimHandle" id="trimStartH" aria-label="Start"></button>
+      <button type="button" class="trimHandle" id="trimEndH" aria-label="End"></button>
+    </div>
+    <div class="trimRow">
+      <label class="lbl" for="trimStartIn">Start</label>
+      <input id="trimStartIn" type="text" placeholder="0:00" autocomplete="off" spellcheck="false">
+      <button type="button" id="trimStartNow" class="soft" title="Where this track is playing now">Use current position</button>
+      <button type="button" id="trimPrevStart" class="soft">Preview</button>
+    </div>
+    <div class="trimRow">
+      <label class="lbl" for="trimEndIn">End</label>
+      <input id="trimEndIn" type="text" autocomplete="off" spellcheck="false">
+      <button type="button" id="trimEndNow" class="soft" title="Where this track is playing now">Use current position</button>
+      <button type="button" id="trimPrevEnd" class="soft">Preview</button>
+    </div>
+    <p class="note" id="trimNote"></p>
     <div class="fixActions">
-      <button type="button" id="fixReset" class="soft">Undo my edit</button>
+      <button type="button" id="trimClear" class="soft">Whole track</button>
+      <button type="button" id="fixReset" class="soft">Undo my changes</button>
       <span class="grow"></span>
       <button type="button" id="fixCancel" class="soft">Cancel</button>
       <button type="submit" class="soft fixSave">Save</button>
@@ -812,6 +837,7 @@
 <script src="js/albums.js"></script>
 <script src="js/artists.js"></script>
 <script src="js/searchpage.js"></script>
+<script src="js/trims.js"></script>
 <script src="js/init.js"></script>
 <script src="app.js"></script>
 </body>

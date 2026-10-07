@@ -156,7 +156,7 @@ async function autoplayAdvance() {
 function autoplayTick() {
   const t = curTrack();
   if (!t || !autoplayActive() || autoplayBusy || qi < queue.length - 1) return;
-  const dur = curDurMs();
+  const dur = trimmedEnd(t, curDurMs());
   if (!dur || dur - curPosMs() <= AUTOPLAY_LEAD_MS) autoplayFill();
 }
 

@@ -78,7 +78,8 @@ function openFixDialog(t) {
   const guess = !fx && looksLikeFile ? guessFromFilename(t) : { title: t.title, artist: artistName(t) };
   $("fixTitle").value = guess.title || "";
   $("fixArtist").value = guess.artist || "";
-  $("fixReset").hidden = !fx;
+  $("fixReset").hidden = !fx && !trimOf(t);
+  trimDialogOpen(t);
   $("fixDialog").showModal();
   $("fixTitle").focus();
   $("fixTitle").select();
@@ -88,8 +89,15 @@ function saveFix(e) {
   e.preventDefault();
   const t = fixTarget;
   if (!t) return;
+  if (!trimDialogSave()) return;   // the start and end times (js/trims.js)
   const title = $("fixTitle").value.trim();
   const artist = $("fixArtist").value.trim();
+  // the title and artist only count as an edit if they were changed
+  if (!(prefs.trackFixes || {})[t.id] && title === (t.title || "") && artist === artistName(t)) {
+    $("fixDialog").close();
+    say("Saved.");
+    return;
+  }
   prefs.trackFixes = prefs.trackFixes || {};
   prefs.trackFixes[t.id] = { title: title || t._auto.title, artist: artist || null };
   savePrefs();
@@ -107,6 +115,7 @@ function resetFix() {
   const t = fixTarget;
   if (!t) return;
   if (prefs.trackFixes) delete prefs.trackFixes[t.id];
+  trimReset(t);
   savePrefs();
   forEachCopy(t.id, (x) => {
     if (x._auto) { x.title = x._auto.title; x.displayArtist = x._auto.artist || undefined; }

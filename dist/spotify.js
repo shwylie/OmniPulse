@@ -210,10 +210,11 @@ function paintSpotify() {
   const t = curTrack();
   if (!onSpotifyEngine(t)) return;
   const pos = Math.min(spotifyPos(), spState.dur || Infinity);
-  $("cur").textContent = fmt(pos);
+  $("cur").textContent = fmt(viewPos(t, pos));
   if (spState.dur) {
-    paintProgress(pos / spState.dur);
-    $("dur").textContent = fmt(spState.dur);
+    const d = viewDur(t, spState.dur);
+    paintProgress(d ? viewPos(t, pos) / d : 0);
+    $("dur").textContent = fmt(d);
   }
   $("icoPlay").classList.toggle("off", spState.playing);
   $("icoPause").classList.toggle("off", !spState.playing);

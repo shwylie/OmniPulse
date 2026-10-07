@@ -46,8 +46,8 @@ async function sendPresence() {
   }
   try {
     const now = Math.floor(Date.now() / 1000);
-    const start = now - Math.floor(curPosMs() / 1000);
-    const end = t.duration ? start + Math.floor(t.duration / 1000) : null;
+    const start = now - Math.floor(viewPos(t, curPosMs()) / 1000);
+    const end = t.duration ? start + Math.floor(viewDur(t, t.duration) / 1000) : null;
     const showTime = presOpt("presTime");
     const note = await invoke("presence_set", {
       details: t.title || "Unknown",

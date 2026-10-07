@@ -416,7 +416,7 @@ function trackRow(t, i, playing) {
     acts.append(bRm);
   } else if (t.permalink_url) acts.append(bOpen);
 
-  li.append(num, cell, acts, el("div", "time", fmt(t.duration || 0)));
+  li.append(num, cell, acts, el("div", "time", fmt(viewDur(t, t.duration || 0)) + (trimOf(t) ? "*" : "")));
   return li;
 }
 
@@ -887,6 +887,7 @@ function fillNowPlaying(t) {
   fadeImg($("nowArt"), small);
 
   $("npTitle").textContent = t ? t.title || "Untitled" : "Nothing playing";
+  if (t && trimOf(t)) { $("npTitle").append(trimMark(t)); $("nowTitle").append(trimMark(t)); }
   $("npArtist").textContent = t ? artistName(t) : "";
   $("npArtist").title = t ? uploaderNote(t) : "";
   setBadge($("npPlat"), t);
@@ -904,7 +905,7 @@ function fillNowPlaying(t) {
   if (big) { fadeImg($("npArt"), big); $("npArt").hidden = false; } else { $("npArt").hidden = true; }
   $("npOpen").hidden = !(t && t.permalink_url);
   $("npOpen").textContent = t ? openLabel(t) : "";
-  $("dur").textContent = fmt(t ? t.duration || 0 : 0);
+  $("dur").textContent = fmt(t ? viewDur(t, t.duration || 0) : 0);
 
   if (t && "mediaSession" in navigator) {
     navigator.mediaSession.metadata = new MediaMetadata({
@@ -1019,15 +1020,15 @@ async function playCurrent() {
   markPlaying();
   renderQueue();
   say("");
-  const resumeAt = takeResume(t);
+  const startAt = trimStartFor(t, takeResume(t));   // a resumed position, or where it's set to start
   try {
     if (onSpotifyEngine(t)) {
       audio.pause();
-      await spotifyStart(t, resumeAt);
+      await spotifyStart(t, startAt);
     } else {
       spotifyPause();
       await startStream(t);
-      if (resumeAt && curTrack() === t) audio.currentTime = resumeAt / 1000;
+      if (startAt && curTrack() === t) audio.currentTime = startAt / 1000;
     }
   } catch (e) {
     if (e && e.name === "AbortError") return;   // skipped to another track
@@ -1209,8 +1210,9 @@ function step(d) {
   // Previous restarts the track if it has been playing for a few seconds
   const cur = curTrack();
   const onSpotify = onSpotifyEngine(cur);
-  if (d < 0 && onSpotify && spotifyPos() > 3000) { spotifySeek(0); return; }
-  if (d < 0 && !onSpotify && audio.currentTime > 3) { audio.currentTime = 0; return; }
+  // (back to where the track's set to start)
+  if (d < 0 && onSpotify && spotifyPos() > trimStart(cur) + 3000) { spotifySeek(spState.dur ? trimStart(cur) / spState.dur : 0); return; }
+  if (d < 0 && !onSpotify && audio.currentTime * 1000 > trimStart(cur) + 3000) { audio.currentTime = trimStart(cur) / 1000; return; }
   if (d > 0 && qi === queue.length - 1 && autoplayActive()) { autoplayAdvance(); return; }
   qi = (qi + d + queue.length) % queue.length;
   playCurrent();
@@ -1222,20 +1224,23 @@ audio.addEventListener("ended", onEnded);
 audio.addEventListener("error", () => {
   say("The player could not decode this stream" + (audio.error ? " (code " + audio.error.code + ")" : "") + ".");
 });
+// positions and lengths as shown: within the part of the track that plays (js/trims.js)
 audio.addEventListener("timeupdate", () => {
-  $("cur").textContent = fmt(audio.currentTime * 1000);
-  const d = curDurMs();
-  if (d) paintProgress((audio.currentTime * 1000) / d);
+  const t = curTrack();
+  $("cur").textContent = fmt(viewPos(t, audio.currentTime * 1000));
+  const d = viewDur(t, curDurMs());
+  if (d) paintProgress(viewPos(t, audio.currentTime * 1000) / d);
 });
 audio.addEventListener("loadedmetadata", () => {
-  if (isFinite(audio.duration) && audio.duration) $("dur").textContent = fmt(audio.duration * 1000);   // streams of unknown length report Infinity
+  if (isFinite(audio.duration) && audio.duration) $("dur").textContent = fmt(viewDur(curTrack(), audio.duration * 1000));   // streams of unknown length report Infinity
 });
 
 $("seek").addEventListener("input", () => {
   const cur = curTrack();
-  if (onSpotifyEngine(cur)) { spotifySeek(Number($("seek").value) / 1000); return; }
+  const frac = Number($("seek").value) / 1000;
+  if (onSpotifyEngine(cur)) { if (spState.dur) spotifySeek(rawAt(cur, frac, spState.dur) / spState.dur); return; }
   const d = curDurMs();
-  if (d) audio.currentTime = (Number($("seek").value) / 1000) * (d / 1000);
+  if (d) audio.currentTime = rawAt(cur, frac, d) / 1000;
 });
 
 audio.volume = prefs.volume;
