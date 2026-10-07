@@ -857,8 +857,6 @@ async function playCurrent() {
   markPlaying();
   renderQueue();
   say("");
-  const blocked = routeBlock(t);   // stream-safe output
-  if (blocked) { audio.pause(); spotifyPause(); say(blocked); return; }
   try {
     if (srcOf(t) === "spotify") {
       audio.pause();
@@ -1158,10 +1156,6 @@ async function refreshOutputs() {
 
 $("outputSel").addEventListener("change", async () => {
   const id = $("outputSel").value;
-  if (prefs.req && prefs.safeOutput !== false && (!id || id === "default" || id === "communications") && !audio.paused) {
-    audio.pause();
-    say("Paused: stream-safe output won't play on your default device.");
-  }
   try {
     await applySink(id);
     prefs.sink = id;

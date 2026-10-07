@@ -237,7 +237,6 @@ function requestsInit() {
     savePrefs();
     reqApply();
     reqQueueBtn();
-    spModePaint();
   });
   $("reqPort").addEventListener("change", () => {
     const p = Math.round(Number($("reqPort").value));

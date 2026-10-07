@@ -202,3 +202,11 @@ hides them; tracks from albums are never hidden.
   shows the next 100 tracks
 - Discover shows why it picked tracks ("Because you liked ...") and how many the language filter hid
 - Code: extras.js is split into dist/js/ (see Files)
+
+## v40
+- Removed stream-safe output, "Spotify plays through" (the Spotify desktop app mode) and
+  "This app is routed away from my default device". Route the app in Windows instead:
+  Settings > System > Sound > Volume mixer > SC Client.
+- Spotify always plays in the app. Its sound comes from Spotify's protected player, which the app
+  can't reach, so it follows the Windows routing above but skips the equalizer, leveling and the
+  in-app output picker.

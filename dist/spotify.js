@@ -1,7 +1,9 @@
-// Spotify side of the app: sign-in, the in-app web player or the desktop app, and the
-// Web API calls behind Likes, Search and playlists. Spotify tracks never share a queue
-// with other platforms. Loaded before app.js, so
-// this file only declares things; app.js calls spotifyInit() at startup.
+// Spotify side of the app: sign-in, Spotify's web player, and the Web API calls behind
+// Likes, Search and playlists. Spotify tracks never share a queue with other platforms.
+// The web player plays inside Spotify's own protected iframe, so its sound can't go through
+// the equalizer, the leveler or the output picker: it uses whatever device Windows gives
+// this app. Loaded before app.js, so this file only declares things; app.js calls
+// spotifyInit() at startup.
 
 let spotifyPremium = false;
 let spotifyPlayer = null;
@@ -57,7 +59,6 @@ async function spotifyCheck() {
   spotifyPremium = ok;
   if (typeof renderPlatChips === "function") renderPlatChips();
   syncSpotifySettings();
-  if (typeof spModePaint === "function") spModePaint();
   return ok;
 }
 
@@ -162,15 +163,6 @@ function spotifyTick() {
 async function spotifyStart(t) {
   spotifyEnded = false;
   say("Starting Spotify...");
-  if (prefs.spMode === "desktop") {
-    // Remote-control the Spotify app on this PC; it does the playing (and has its own Windows output)
-    const id = await spotifyDesktopDevice();
-    await spApi("PUT", "/me/player/play?device_id=" + encodeURIComponent(id), { uris: [t.uri] });
-    spState = { pos: 0, ts: performance.now(), playing: true, dur: t.duration || 0 };
-    say("");
-    paintSpotify();
-    return;
-  }
   const p = await spotifyLoadSdk();
   if (p.activateElement) { try { await p.activateElement(); } catch (e) {} }
   const play = () => spApi("PUT", "/me/player/play?device_id=" + encodeURIComponent(spotifyDeviceId), { uris: [t.uri] });
@@ -186,75 +178,29 @@ async function spotifyStart(t) {
 }
 
 function spotifyToggle() {
-  if (prefs.spMode === "desktop") {
-    const next = !spState.playing;
-    spApi("PUT", next ? "/me/player/play" : "/me/player/pause").catch((e) => say("Spotify: " + e));
-    spState = { pos: spotifyPos(), ts: performance.now(), playing: next, dur: spState.dur };
-    paintSpotify();
-    return;
-  }
   if (spotifyPlayer) spotifyPlayer.togglePlay();
 }
 function spotifyPause() {
   if (spotifyPlayer) { try { spotifyPlayer.pause(); } catch (e) {} }
-  if (prefs.spMode === "desktop" && spState.playing) spApi("PUT", "/me/player/pause").catch(() => {});
   spState.playing = false;
 }
 function spotifySeek(frac) {
-  if (!spState.dur) return;
+  if (!spState.dur || !spotifyPlayer) return;
   const ms = Math.round(frac * spState.dur);
-  if (prefs.spMode === "desktop") spApi("PUT", "/me/player/seek?position_ms=" + ms).catch(() => {});
-  else if (spotifyPlayer) spotifyPlayer.seek(ms);
-  else return;
+  spotifyPlayer.seek(ms);
   spState.pos = ms;
   spState.ts = performance.now();
 }
-let spVolTimer = null;
 function spotifyVolume(v) {
-  if (prefs.spMode === "desktop") {
-    clearTimeout(spVolTimer);   // the slider moves a lot; send the last value only
-    spVolTimer = setTimeout(() => {
-      const t = curTrack();
-      if (t && srcOf(t) === "spotify") spApi("PUT", "/me/player/volume?volume_percent=" + Math.round(v * 100)).catch(() => {});
-    }, 300);
-    return;
-  }
   if (spotifyPlayer) spotifyPlayer.setVolume(v);
 }
 function spotifyMute(muted) { spotifyVolume(muted ? 0 : prefs.volume); }
-
-// The Spotify app on this PC (not this app's own Spotify player)
-async function spotifyDesktopDevice() {
-  const d = await spApi("GET", "/me/player/devices");
-  const list = ((d && d.devices) || []).filter((x) => x.name !== "SC Client");
-  const pick = list.find((x) => x.type === "Computer" && x.is_active) || list.find((x) => x.type === "Computer");
-  if (!pick) throw new Error("Open the Spotify app on this PC first, then try again.");
-  return pick.id;
-}
-
-// In desktop mode, read where the Spotify app is up to
-async function spotifyDesktopPoll() {
-  const t = curTrack();
-  if (prefs.spMode !== "desktop" || !t || srcOf(t) !== "spotify") return;
-  try {
-    const s = await spApi("GET", "/me/player");
-    if (!s || !s.item || s.item.uri !== t.uri) {
-      if (spState.playing) { spState.playing = false; paintSpotify(); }
-      return;
-    }
-    spState = { pos: s.progress_ms || 0, ts: performance.now(), playing: !!s.is_playing, dur: s.item.duration_ms || t.duration || 0 };
-    paintSpotify();
-  } catch (e) {
-    // the Spotify app was closed; try again on the next check
-  }
-}
 
 function spotifyInit() {
   $("spConnect").addEventListener("click", () => {
     if (spotifyPremium) spotifyDisconnect(); else spotifyConnect();
   });
   setInterval(spotifyTick, 500);
-  setInterval(spotifyDesktopPoll, 1500);
   spotifyCheck();
 }
 

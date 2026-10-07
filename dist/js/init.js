@@ -2,8 +2,6 @@
 
 // Called by openSettings in app.js: copies the current prefs into the dialog
 function extrasSyncSettings() {
-  spModePaint();
-  $("safeOut").checked = prefs.safeOutput !== false;
   reqPaint();
   $("artAccentToggle").checked = !!prefs.artAccent;
   $("normSel").value = prefs.normalize || "off";

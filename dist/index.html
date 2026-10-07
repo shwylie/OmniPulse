@@ -492,29 +492,9 @@
         <label class="lbl" for="outputSel">Output device</label>
         <select id="outputSel"></select>
       </div>
+      <p class="note">SoundCloud and local files. Spotify always plays where Windows sends this app (Settings &gt; System &gt; Sound &gt; Volume mixer), without the equalizer or leveling.</p>
       <p class="note" id="outputNote"></p>
       <button id="namesBtn" class="soft" hidden>Show device names</button>
-      <div class="row" id="safeRow" hidden>
-        <div>
-          <div class="lbl">Stream-safe output</div>
-          <div class="note">Never plays on your Windows default device, so music can't end up in your game or stream audio. If your chosen device is unplugged, playback pauses instead of falling back to the default.</div>
-        </div>
-        <label class="switch"><input type="checkbox" id="safeOut"><span></span></label>
-      </div>
-      <div class="row" id="spModeRow" hidden>
-        <div>
-          <div class="lbl">Spotify plays through</div>
-          <div class="note" id="spModeNote"></div>
-        </div>
-        <select id="spMode" class="narrow"><option value="app">This app</option><option value="desktop">Spotify desktop app</option></select>
-      </div>
-      <div class="row" id="spRoutedRow" hidden>
-        <div>
-          <div class="lbl">This app is routed away from my default device</div>
-          <div class="note">Tick this once you've set this app's output in Windows (Settings &gt; System &gt; Sound &gt; Volume mixer). Stream-safe output then lets Spotify play inside the app.</div>
-        </div>
-        <label class="switch"><input type="checkbox" id="spRouted"><span></span></label>
-      </div>
     </section>
 
     <!-- ===================== Performance ===================== -->

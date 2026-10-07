@@ -1,4 +1,4 @@
-// The audio chain: loudness leveling, equalizer and stream-safe output.
+// The audio chain: loudness leveling and the equalizer.
 
 // ---------- loudness leveling ----------
 // Measures how loud the track is, slowly rides a gain toward a target level, then a
@@ -150,37 +150,6 @@ function setEq(gains) {
   eqApply();
 }
 
-// ---------- stream-safe output ----------
-const isDefaultSink = () => !prefs.sink || prefs.sink === "default" || prefs.sink === "communications";
-
-// Returns a reason not to play, or "" when the audio is going somewhere safe
-function routeBlock(t) {
-  if (prefs.safeOutput === false || !prefs.req) return "";
-  if (srcOf(t) === "spotify") {
-    return prefs.spMode === "desktop" || prefs.spAppRouted ? "" :
-      "Stream-safe output: Spotify playing inside this app always uses your default device. " +
-      "In Settings > Output Preferences, set \"Spotify plays through\" to the Spotify desktop app.";
-  }
-  if (isDefaultSink()) {
-    return "Stream-safe output: choose an output device in Settings > Output Preferences first, " +
-      "so nothing plays on your default device.";
-  }
-  return "";
-}
-
-function spModePaint() {
-  const linked = FEATURES.spotify && spotifyPremium && prefs.spOn !== false;
-  $("spModeRow").hidden = !linked;
-  $("safeRow").hidden = !prefs.req;
-  $("spRoutedRow").hidden = !prefs.req || !linked || prefs.spMode === "desktop";
-  $("spMode").value = prefs.spMode === "desktop" ? "desktop" : "app";
-  $("spModeNote").textContent = prefs.spMode === "desktop"
-    ? "The Spotify app on this PC does the playing; keep it open. Choose its output in Windows: " +
-      "Settings > System > Sound > Volume mixer > Spotify."
-    : "Plays inside this app, using whatever output Windows gives this app. To keep it off your game audio, " +
-      "route this app in Windows' Volume mixer (below), or use the desktop app.";
-}
-
 function audioInit() {
   // Route the player through the equalizer / leveler from the start, so changes are heard
   // immediately rather than from the next track (it has to be in place before audio loads)
@@ -231,38 +200,4 @@ function audioInit() {
     $("eqPreset").value = "";
   });
   $("eqReset").addEventListener("click", () => setEq(EQ_PRESETS.flat));
-
-  // Stream-safe output
-  $("safeOut").checked = prefs.safeOutput !== false;
-  $("safeOut").addEventListener("change", () => {
-    prefs.safeOutput = $("safeOut").checked;
-    savePrefs();
-    const t = curTrack();
-    if (t && !audio.paused && routeBlock(t)) { audio.pause(); say(routeBlock(t)); }
-  });
-  $("spMode").addEventListener("change", () => {
-    const t = curTrack();
-    if (t && srcOf(t) === "spotify") spotifyPause();   // stop it where it was playing
-    prefs.spMode = $("spMode").value;
-    savePrefs();
-    spModePaint();
-  });
-  // Spotify inside the app, once the app is routed in Windows
-  $("spRouted").checked = !!prefs.spAppRouted;
-  $("spRouted").addEventListener("change", () => { prefs.spAppRouted = $("spRouted").checked; savePrefs(); });
-  spModePaint();
-
-  // If the chosen device is unplugged, Windows would move the sound to the default device: pause instead
-  if (navigator.mediaDevices && navigator.mediaDevices.addEventListener) {
-    navigator.mediaDevices.addEventListener("devicechange", async () => {
-      if (prefs.safeOutput === false || !prefs.req || isDefaultSink() || audio.paused) return;
-      try {
-        const outs = (await navigator.mediaDevices.enumerateDevices()).filter((d) => d.kind === "audiooutput");
-        if (!outs.some((d) => d.deviceId === prefs.sink)) {
-          audio.pause();
-          say("Your output device disconnected, so playback paused to keep it off your default device.");
-        }
-      } catch (e) {}
-    });
-  }
 }
