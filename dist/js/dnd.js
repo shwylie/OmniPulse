@@ -81,15 +81,20 @@ function dndInit() {
       // reorder; dropped among your tracks it's yours, among autoplay's it's autoplay's
       const onEmptyNext = !li && e.target.closest("#qNext");
       if ((to > qi && to !== drag.from) || onEmptyNext) {
+        const target = li ? queue[to] : null;
         const [moved] = queue.splice(drag.from, 1);
         if (intoAuto) moved.autoplay = true; else delete moved.autoplay;
+        // it joins the part it's dropped in: what you queued, or the rest of the list
+        if (!intoAuto && target && !moved.requestedBy) {
+          if (isQueuedByYou(target)) moved.queuedByYou = true; else delete moved.queuedByYou;
+        }
         const at = onEmptyNext ? autoplayStart() : to;
         queue.splice(at, 0, moved);
         renderQueue();
       }
     } else if (drag.from < 0) {
-      if (to > qi && qi >= 0) {   // just before the row it was dropped on
-        queue.splice(to, 0, drag.track);
+      if (to > qi && qi >= 0) {   // just before the row it was dropped on, as something you queued
+        queue.splice(to, 0, queuedByYou(drag.track));
         renderQueue();
         say("Added to the queue.");
       } else {

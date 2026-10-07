@@ -286,6 +286,12 @@ select {
 .qRow button:hover { color: var(--text); background: var(--panel); }
 .qRow button svg { width: 16px; height: 16px; }
 .qEmpty { padding: 6px; color: var(--muted); }
+/* the queue's parts: what you queued, and the rest of the list that's playing */
+#qNext .qGroup { margin: 14px 0 4px; padding: 0 6px; font-size: 13px; font-weight: 700; color: var(--muted); list-style: none; text-transform: none; }
+#qNext .qGroup:first-child { margin-top: 8px; }
+#qNext .qGroup.qMine { color: var(--accent); }
+#qNext .qGroup.qList { padding-top: 12px; border-top: 1px solid var(--line); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#qNext .qGroup.qList:first-child { padding-top: 0; border-top: 0; }
 .autoRow {
   display: flex; align-items: center; justify-content: space-between; gap: 12px;
   margin: 16px 6px 0; padding-top: 12px; border-top: 1px solid var(--line);

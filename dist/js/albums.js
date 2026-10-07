@@ -190,7 +190,7 @@ async function playAlbum(a) {
     const list = await albumTracks(a);
     if (!list.length) { say("No playable tracks in this album."); return; }
     say("");
-    startList(list, 0, false);
+    startList(list, 0, false, a.title);
   } catch (e) {
     say(String(e));
   }

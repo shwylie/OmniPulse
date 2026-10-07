@@ -9,6 +9,7 @@ function sessionSnapshot() {
   return {
     savedAt: Date.now(),
     qi,
+    listName: queueListName,
     // until the restored track is played, keep the position it was restored at
     posMs: Math.round(pendingResume && curTrack() && pendingResume.id === curTrack().id ? pendingResume.posMs : curPosMs()),
     // the same small snapshots as playlists on this PC, plus who asked for it and autoplay picks
@@ -41,6 +42,7 @@ function sessionRestore() {
   try { s = JSON.parse(localStorage.getItem(SESSION_KEY) || "null"); } catch (e) {}
   if (!s || !Array.isArray(s.queue) || !s.queue.length || s.qi < 0 || s.qi >= s.queue.length) return false;
   queue = s.queue.map((x) => Object.assign({}, x, { user: Object.assign({}, x.user) }));
+  queueListName = s.listName || "";
   qi = s.qi;
   const t = curTrack();
   pendingResume = { id: t.id, posMs: s.posMs || 0 };

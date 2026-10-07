@@ -310,7 +310,7 @@ async function playTile(tile) {
     const list = await mixTracks(tile.mix);
     if (!list.length) { say("Nothing came back for this one."); return; }
     say("");
-    startList(list, 0, false);
+    startList(list, 0, false, tile.mix.title || tile.name);
   } catch (e) {
     say("Couldn't make this mix: " + (e && e.message ? e.message : e));
   }

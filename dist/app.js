@@ -760,8 +760,21 @@ async function scPlaylists() {
 const loadPlaylists = () => refreshSidebar();
 
 // ---------- queue ----------
-function startList(list, i, shuffle) {
+// The queue is: what's playing, then what you queued (and chat requests), then the rest of the list
+// you started (a playlist, an album, your Library...), then autoplay's picks. Each part shows on its own.
+let queueListName = "";
+
+function listNameHere() {
+  const v = view === "now" ? back : view;
+  if (v === "search" && query) return 'Search: "' + query + '"';
+  return ($("viewTitle").textContent || "").trim() || "your list";
+}
+
+const isQueuedByYou = (t) => !!t && (t.queuedByYou || !!t.requestedBy);
+
+function startList(list, i, shuffle, name) {
   if (!list.length) return;
+  queueListName = name || listNameHere();
   if (!prefs.queueSets && view !== "sets") {
     const picked = shuffle ? null : list[i];
     const kept = list.filter((t) => !isMix(t) || t === picked);
@@ -783,10 +796,18 @@ function playNext(t) {
   renderQueue();
 }
 
+// Where "Add to queue" puts a track: after what's playing and anything else you've queued, ahead of
+// the rest of the list that's playing (and of autoplay's picks)
+function queuedEnd() {
+  let i = qi + 1;
+  while (i < queue.length && isQueuedByYou(queue[i])) i++;
+  return i;
+}
+
 function addToQueue(t) {
   if (!t) return;
   if (qi < 0) { startList([t], 0, false); return; }
-  queue.splice(autoplayStart(), 0, queuedByYou(t));   // ahead of any autoplay picks
+  queue.splice(queuedEnd(), 0, queuedByYou(t));
   renderQueue();
 }
 
@@ -830,14 +851,25 @@ function renderQueue() {
   const t = curTrack();
   if (t) nowBox.append(queueRow(t, qi, false));
   else nowBox.append(el("li", "qEmpty", "Nothing playing."));
-  // yours first, then autoplay's picks
+  // what you queued, then the rest of the list, then autoplay's picks; each run gets its own heading
   const split = qi >= 0 ? autoplayStart() : 0;
-  const mine = qi >= 0 ? queue.slice(qi + 1, split) : [];
+  const next = qi >= 0 ? queue.slice(qi + 1, split) : [];
   const auto = qi >= 0 ? queue.slice(split) : [];
-  if (!mine.length) nextBox.append(el("li", "qEmpty", "Nothing queued. Add tracks with + or drag them here."));
+  if (!next.length) {
+    nextBox.append(el("li", "qGroup", "Next in queue"), el("li", "qEmpty", "Nothing queued. Add tracks with + or drag them here."));
+  }
   // A long queue (all your likes, say) only draws the next stretch of it
-  mine.slice(0, QUEUE_SHOWN).forEach((tr, k) => nextBox.append(queueRow(tr, qi + 1 + k, true)));
-  if (mine.length > QUEUE_SHOWN) nextBox.append(el("li", "qEmpty", "...and " + (mine.length - QUEUE_SHOWN) + " more."));
+  let kind = null;
+  let shown = 0;
+  next.forEach((tr, k) => {
+    const mine = isQueuedByYou(tr);
+    if (mine !== kind) {
+      kind = mine;
+      nextBox.append(el("li", "qGroup" + (mine ? " qMine" : " qList"), mine ? "Next in queue" : "Next from " + (queueListName || "your list")));
+    }
+    if (shown++ < QUEUE_SHOWN) nextBox.append(queueRow(tr, qi + 1 + k, true));
+  });
+  if (next.length > QUEUE_SHOWN) nextBox.append(el("li", "qEmpty", "...and " + (next.length - QUEUE_SHOWN) + " more."));
   auto.forEach((tr, k) => autoBox.append(queueRow(tr, split + k, true)));
   autoBox.hidden = !auto.length || !autoplayOn();
   autoplayPaint();
@@ -859,6 +891,7 @@ $("queue").addEventListener("click", (e) => {
 });
 
 $("clearQueue").addEventListener("click", () => {
+  queueListName = "";
   queue = qi >= 0 ? [queue[qi]] : [];
   qi = queue.length ? 0 : -1;
   renderQueue();
