@@ -757,11 +757,6 @@ details.sub.inner { margin-top: 10px; }
 .player .right .ghost svg { width: 22px; height: 22px; }
 .barSep { width: 1px; height: 28px; margin: 0 8px; background: var(--line); flex: none; }
 
-@media (max-width: 1100px) {
-  .player { grid-template-columns: minmax(auto, 1fr) minmax(0, 1fr) auto; gap: 14px; }
-  .player #nowArt { width: 52px; height: 52px; }
-  #nowAlbum { display: none; }
-}
 
 /* ===== v42: view options (Albums, language) as chips beside Play / Shuffle ===== */
 .viewOpts { display: flex; align-items: center; gap: 8px; margin-left: auto; }
