@@ -39,6 +39,7 @@ function extrasInit() {
   albumsInit();
   audioInit();
   loudInit();
+  out2Init();
   ytInit();
   artistsInit();
   searchPageInit();

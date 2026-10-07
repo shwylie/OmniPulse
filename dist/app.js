@@ -1409,6 +1409,10 @@ async function refreshOutputs() {
   });
   if (![...sel.options].some((o) => o.value === prefs.sink)) sel.selectedIndex = 0;
   else sel.value = prefs.sink;
+  // the second output picks from the same devices
+  const sel2 = $("out2Sel");
+  sel2.replaceChildren(...[...sel.options].map((o) => new Option(o.text, o.value)));
+  sel2.value = [...sel2.options].some((o) => o.value === prefs.out2Sink) ? prefs.out2Sink : sel2.options[0] ? sel2.options[0].value : "";
   $("namesBtn").hidden = outs.length === 0 || outs.some((d) => d.label);
 }
 

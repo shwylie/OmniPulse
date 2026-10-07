@@ -36,7 +36,7 @@ function normEnsure() {
     eq.forEach((b) => { node.connect(b); node = b; });
     node.connect(limiter);
     limiter.connect(master);
-    master.connect(ctx.destination);
+    out2Wire(ctx, master);   // master -> main delay -> the device (js/output2.js)
     // the probe has to lead somewhere to be run: into a silent gain
     const probe = ctx.createAnalyser();
     probe.fftSize = 2048;

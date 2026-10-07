@@ -590,6 +590,32 @@
       <button id="namesBtn" class="soft" hidden>Show device names</button>
       <div class="row">
         <div>
+          <div class="lbl">Second output</div>
+          <div class="note">The same sound on another device as well, with an offset to line them up (like OBS's sync offset).</div>
+        </div>
+        <label class="switch"><input type="checkbox" id="out2On"><span></span></label>
+      </div>
+      <details class="sub" id="out2Body" open hidden>
+        <summary>Second output</summary>
+        <div class="row">
+          <div class="lbl">Device</div>
+          <select id="out2Sel" class="narrow wide"></select>
+        </div>
+        <div class="row">
+          <div>
+            <div class="lbl">Offset</div>
+            <div class="note">In milliseconds. Above 0 the second output plays later; below 0 the main output does.</div>
+          </div>
+          <div class="widgetRow"><input id="out2Offset" type="number" min="-5000" max="5000" step="10" aria-label="Offset in milliseconds"><span class="note">ms</span></div>
+        </div>
+        <div class="row">
+          <div class="lbl">Volume</div>
+          <div class="levSlider"><input id="out2Vol" type="range" min="0" max="100" step="1" aria-label="Second output volume"><span id="out2VolVal">100%</span></div>
+        </div>
+        <p class="note warn" id="out2Note"></p>
+      </details>
+      <div class="row">
+        <div>
           <div class="lbl">Volume control</div>
           <div class="note">Off: no volume slider, and the app plays at 100%. For setting the volume on Windows' mixer or a Stream Deck instead.</div>
         </div>
@@ -836,6 +862,7 @@
 <script src="js/autoplay.js"></script>
 <script src="js/audio.js"></script>
 <script src="js/loudness.js"></script>
+<script src="js/output2.js"></script>
 <script src="js/youtube.js"></script>
 <script src="js/stats.js"></script>
 <script src="js/lyrics.js"></script>

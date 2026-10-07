@@ -1008,6 +1008,9 @@ select.wide { max-width: 260px; }
 .ytPickRow:hover { border-color: var(--accent); }
 .ytPickTitle { font-weight: 600; }
 .ytPickBy { font-size: 12px; color: var(--muted); }
+.levSlider { display: flex; align-items: center; gap: 10px; }
+.levSlider input { width: 180px; }
+.levSlider span { min-width: 44px; text-align: right; font-variant-numeric: tabular-nums; color: var(--muted); font-size: 13px; }
 /* reordering the sidebar's pages */
 #navList .nav.dragging { opacity: 0.45; outline: 1px dashed var(--accent); }
 /* Go+ tracks that play from YouTube Music */
