@@ -160,6 +160,8 @@ async fn yt_prepare(id: String) -> Result<(), String> { youtube::stream_url(&id,
 // async, so it runs on Tauri's async runtime rather than the window's thread
 #[tauri::command]
 async fn yt_setup() { tools::start_install() }
+#[tauri::command]
+fn yt_remove() -> Result<u64, String> { tools::uninstall() }
 
 // ---------- OBS widget, local music, chat requests, Stream Deck remote ----------
 #[tauri::command]
@@ -606,7 +608,7 @@ fn main() {
             local_folders, local_set_folders, local_scan, local_status, local_tracks, local_server,
             requests_start, requests_stop, request_result,
             spe_signed_in, spe_login, spe_logout, spe_attach, spe_play, spe_pause, spe_resume, spe_seek, spe_stop, spe_played, spe_playlist, spe_web_get, spe_set_normalisation, loudness_analyse,
-            resolve_yt_stream, yt_search, yt_radio, yt_status, yt_prepare, yt_setup, remote_start, remote_stop, remote_result
+            resolve_yt_stream, yt_search, yt_radio, yt_status, yt_prepare, yt_setup, yt_remove, remote_start, remote_stop, remote_result
         ])
         .run(tauri::generate_context!())
         .expect("error while running app");

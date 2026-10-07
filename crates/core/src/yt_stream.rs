@@ -47,6 +47,8 @@ async fn run(program: impl AsRef<OsStr>, target: String, label: &str) -> Result<
     cmd.arg(target)
         .args(["-g", "-f", "ba[ext=m4a]/ba", "--no-playlist", "--no-warnings"])
         .args(js_runtime_args())
+        .args(crate::tools::cache_args())
+        .envs(crate::tools::cache_env())
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -110,6 +112,7 @@ pub async fn status() -> serde_json::Value {
         "deno": crate::tools::deno_path().is_some() || on_path("deno"),
         "node": on_path("node"),
         "builtIn": crate::tools::ytdlp_path().is_some() && crate::tools::deno_path().is_some(),
+        "diskUse": crate::tools::disk_use(),
         "setup": crate::tools::progress(),
     })
 }

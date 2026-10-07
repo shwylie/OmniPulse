@@ -78,50 +78,101 @@ async function ytDiscover(src) {
   return { list: await ytSearch(g + " music") };
 }
 
-// ---------- settings: setting up yt-dlp and Deno ----------
+// ---------- settings: setting up, switching off, removing ----------
+// With YouTube Music switched on (the default), yt-dlp and Deno are set up by themselves the first
+// time; switched off, YouTube isn't used anywhere. Remove takes them (and their caches) off this PC.
 let ytSetupTimer = null;
+let ytAutoTried = false;   // set up by itself once per run; after a failure it waits for Try again
+
+const ytWanted = () => prefs.ytOn !== false;
+const mbOf = (n) => (n / 1048576).toFixed(0);
 
 function ytPaint() {
   const note = $("ytNote");
-  const btn = $("ytSetup");
-  $("ytOn").checked = prefs.ytOn !== false;
-  if (!ytInfo.checked) { note.textContent = "Checking..."; btn.hidden = true; return; }
+  const setupBtn = $("ytSetup");
+  const removeBtn = $("ytRemove");
+  $("ytOn").checked = ytWanted();
   const setup = ytInfo.setup || {};
-  const mb = (n) => (n / 1048576).toFixed(0);
+  removeBtn.hidden = !ytInfo.checked || setup.busy || !ytInfo.diskUse;
+  removeBtn.title = ytInfo.diskUse ? "Remove yt-dlp, Deno and their caches (" + mbOf(ytInfo.diskUse) + " MB)" : "";
+  setupBtn.hidden = true;
+  if (!ytInfo.checked) { note.textContent = "Checking..."; return; }
   if (setup.busy) {
-    note.textContent = setup.step + (setup.total ? ": " + mb(setup.done) + " of " + mb(setup.total) + " MB" : "") + "...";
-    btn.hidden = true;
+    note.textContent = "Setting up: " + setup.step.toLowerCase() + (setup.total ? ", " + mbOf(setup.done) + " of " + mbOf(setup.total) + " MB" : "") + "...";
+    return;
+  }
+  if (!ytWanted()) {
+    note.textContent = "Off" + (ytInfo.diskUse ? ". yt-dlp and Deno are still on this PC (" + mbOf(ytInfo.diskUse) + " MB): Remove takes them off." : ". Switch on to set it up (about 58 MB).");
     return;
   }
   if (ytAvailable()) {
-    note.textContent = "Ready" + (ytInfo.builtIn ? "" : ", with your own yt-dlp " + ytInfo.ytdlp) + ". Nothing to sign in to: likes are kept on this PC.";
-    btn.hidden = true;
+    note.textContent = ytInfo.builtIn
+      ? "Ready (" + mbOf(ytInfo.diskUse) + " MB on this PC). Nothing to sign in to: likes are kept on this PC."
+      : "Ready, with your own yt-dlp " + ytInfo.ytdlp + ". Nothing to sign in to: likes are kept on this PC.";
     return;
   }
-  note.textContent = setup.error
-    ? "Couldn't set up: " + setup.error
-    : "Needs yt-dlp and Deno to play (about 58 MB, downloaded from GitHub). Set up gets them.";
-  btn.textContent = setup.error ? "Try again" : "Set up";
-  btn.hidden = false;
+  if (setup.error) {
+    note.textContent = "Couldn't set up: " + setup.error;
+    setupBtn.textContent = "Try again";
+    setupBtn.hidden = false;
+  } else {
+    note.textContent = "Needs yt-dlp and Deno to play (about 58 MB from GitHub).";
+    setupBtn.textContent = "Set up";
+    setupBtn.hidden = false;
+  }
+}
+
+async function ytStartSetup() {
+  await invoke("yt_setup").catch((e) => say(String(e)));
+  say("Setting up YouTube Music (about 58 MB)...");
+  ytCheck();
 }
 
 async function ytCheck() {
   try { ytInfo = Object.assign(await invoke("yt_status"), { checked: true }); } catch (e) { ytInfo = { ytdlp: null, deno: false, node: false, checked: true }; }
+  const setup = ytInfo.setup || {};
   ytPaint();
   renderPlatChips();
-  const busy = ytInfo.setup && ytInfo.setup.busy;
   clearTimeout(ytSetupTimer);
-  if (busy) ytSetupTimer = setTimeout(ytCheck, 700);   // follow the download
-  else if (ytAvailable() && ytInfo.setup && ytInfo.setup.step === "Done") say("YouTube Music is ready.");
+  if (setup.busy) { ytSetupTimer = setTimeout(ytCheck, 700); return; }   // follow the download
+  if (setup.step === "Done" && ytAvailable()) {
+    ytInfo.setup = {};
+    say("YouTube Music is ready.");
+    return;
+  }
+  if (setup.error) { say("YouTube Music couldn't be set up: " + setup.error); return; }
+  // the first time (or after Remove and switching on again): set up without being asked
+  if (ytWanted() && !ytAvailable() && !ytAutoTried) {
+    ytAutoTried = true;
+    ytStartSetup();
+  }
+}
+
+async function ytRemove() {
+  const mb = mbOf(ytInfo.diskUse || 0);
+  if (!confirm("Remove YouTube Music's yt-dlp and Deno from this PC (" + mb + " MB, caches included)? YouTube Music will be switched off. Your YouTube likes are kept, in case you set it up again.")) return;
+  try {
+    const freed = await invoke("yt_remove");
+    prefs.ytOn = false;
+    savePrefs();
+    ytAutoTried = true;   // switched off now: nothing to set up
+    await setPlatformOn("youtube", false);
+    say("Removed yt-dlp and Deno (" + mbOf(freed) + " MB freed).");
+  } catch (e) {
+    say("Couldn't remove them: " + e);
+  }
+  ytCheck();
 }
 
 function ytInit() {
   ytLikesLoad();
   ytPaint();
-  $("ytOn").addEventListener("change", () => setPlatformOn("youtube", $("ytOn").checked));
-  $("ytSetup").addEventListener("click", async () => {
-    await invoke("yt_setup").catch((e) => say(String(e)));
+  $("ytOn").addEventListener("change", async () => {
+    await setPlatformOn("youtube", $("ytOn").checked);
+    ytAutoTried = false;   // switched on: set up if it isn't yet
     ytCheck();
   });
+  $("ytSetup").addEventListener("click", ytStartSetup);
+  $("ytRemove").addEventListener("click", ytRemove);
   ytCheck();
 }

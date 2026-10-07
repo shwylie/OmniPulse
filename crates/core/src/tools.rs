@@ -3,7 +3,8 @@
 // Music > Set up downloads both from their official GitHub releases into <data dir>\bin, each checked
 // against the SHA-256 checksum published with the release. yt-dlp then updates itself once a day.
 //
-// A yt-dlp or Deno already on the PATH is used if there's none in our folder.
+// A yt-dlp or Deno already on the PATH is used if there's none in our folder. Their caches are kept in
+// <data dir>incache too (yt-dlp's --cache-dir, Deno's DENO_DIR), so Remove (uninstall) leaves nothing.
 
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
@@ -67,6 +68,54 @@ pub fn ytdlp_path() -> Option<PathBuf> {
 
 pub fn deno_path() -> Option<PathBuf> {
     ours("deno.exe")
+}
+
+fn cache_dir() -> Option<PathBuf> {
+    bin_dir().ok().map(|d| d.join("cache"))
+}
+
+/// yt-dlp's cache, in our folder
+pub fn cache_args() -> Vec<String> {
+    cache_dir().map(|d| vec!["--cache-dir".into(), d.join("yt-dlp").display().to_string()]).unwrap_or_default()
+}
+
+/// The environment for yt-dlp, so the Deno it starts caches in our folder
+pub fn cache_env() -> Vec<(String, String)> {
+    cache_dir().map(|d| vec![("DENO_DIR".into(), d.join("deno").display().to_string())]).unwrap_or_default()
+}
+
+fn dir_size(p: &std::path::Path) -> u64 {
+    std::fs::read_dir(p)
+        .map(|rd| {
+            rd.flatten()
+                .map(|e| match e.metadata() {
+                    Ok(m) if m.is_dir() => dir_size(&e.path()),
+                    Ok(m) => m.len(),
+                    Err(_) => 0,
+                })
+                .sum()
+        })
+        .unwrap_or(0)
+}
+
+/// How much space our yt-dlp, Deno and their caches take
+pub fn disk_use() -> u64 {
+    bin_dir().map(|d| dir_size(&d)).unwrap_or(0)
+}
+
+/// Removes our yt-dlp and Deno, their caches, and what was remembered about YouTube tracks
+/// (loudness measurements, stream addresses); returns the bytes freed
+pub fn uninstall() -> Result<u64, String> {
+    if PROGRESS.lock().ok().and_then(|g| g.as_ref().map(|p| p.busy)).unwrap_or(false) {
+        return Err("it's still being set up: try again when that's finished".into());
+    }
+    let dir = bin_dir()?;
+    let freed = dir_size(&dir);
+    std::fs::remove_dir_all(&dir).map_err(|e| format!("couldn't remove {}: {e}", dir.display()))?;
+    crate::loudness::forget("v1:yt:");
+    crate::youtube::forget_streams();
+    set_progress(|p| *p = Progress::default());
+    Ok(freed)
 }
 
 /// The yt-dlp to run: ours, or one on the PATH
@@ -218,7 +267,7 @@ pub async fn update_ytdlp_daily() -> Option<String> {
     }
     let _ = std::fs::write(&stamp, now.to_string());
     let mut cmd = tokio::process::Command::new(exe);
-    cmd.arg("-U").stdin(std::process::Stdio::null()).kill_on_drop(true);
+    cmd.arg("-U").args(cache_args()).envs(cache_env()).stdin(std::process::Stdio::null()).kill_on_drop(true);
     #[cfg(windows)]
     cmd.creation_flags(0x0800_0000); // no console window
     let out = tokio::time::timeout(Duration::from_secs(120), cmd.output()).await.ok()?.ok()?;
@@ -261,9 +310,13 @@ mod tests {
         w.finish().unwrap().into_inner()
     }
 
+    // these tests share the data folder and the progress, so they take turns
+    static SERIAL: Mutex<()> = Mutex::new(());
+
     // The crash: setting up from a thread with no async runtime (where Tauri runs plain commands)
     #[test]
     fn starts_from_a_thread_without_a_runtime() {
+        let _turn = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
         let base = serve(vec![]); // a GitHub with nothing on it: setup fails, but cleanly
         let src = Sources {
             ytdlp: format!("{base}/yt-dlp.exe"),
@@ -282,7 +335,9 @@ mod tests {
     }
 
     #[tokio::test]
+    #[allow(clippy::await_holding_lock)] // only makes the tests take turns; this one runs on one thread
     async fn downloads_checks_and_unpacks() {
+        let _turn = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
         let tmp = std::env::temp_dir().join(format!("omnipulse-tools-{}", std::process::id()));
         std::env::set_var("APPDATA", &tmp);
         let exe = b"MZ fake yt-dlp".to_vec();
@@ -316,6 +371,13 @@ mod tests {
         assert_eq!(ytdlp_program(), ytdlp_path().unwrap().into_os_string());
         // already there: nothing is fetched again (the bad server would fail it)
         install(&src(&bad)).await.unwrap();
+        // Remove takes everything, caches included
+        std::fs::create_dir_all(bin_dir().unwrap().join("cache").join("deno")).unwrap();
+        std::fs::write(bin_dir().unwrap().join("cache").join("deno").join("x"), b"cached").unwrap();
+        assert!(disk_use() > 0);
+        assert!(uninstall().unwrap() > 0);
+        assert!(ytdlp_path().is_none() && deno_path().is_none());
+        assert!(!tmp.join("sc-client").join("bin").join("cache").exists());
         let _ = std::fs::remove_dir_all(&tmp);
     }
 }

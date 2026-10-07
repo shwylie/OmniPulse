@@ -376,12 +376,13 @@
         </div>
         <div class="rowEnd">
           <button id="ytSetup" class="soft" hidden>Set up</button>
+          <button id="ytRemove" class="soft" hidden>Remove</button>
           <label class="switch" title="Use YouTube Music"><input type="checkbox" id="ytOn"><span></span></label>
         </div>
       </div>
       <details class="sub" id="ytHelp" hidden>
         <summary>About YouTube Music</summary>
-        <div class="note botHelp">Playing needs <b>yt-dlp</b>, which finds each song's audio, and <b>Deno</b>, which runs YouTube's player code for it. Set up downloads both from their official GitHub releases into OmniPulse's folder (about 58 MB), each checked against the checksum published with it. yt-dlp then updates itself once a day, so it keeps up with YouTube. A yt-dlp or Deno you've installed yourself is used if OmniPulse doesn't have its own.<br>Nothing signs in: search, radio and playing work without a Google account, and likes are kept on this PC.</div>
+        <div class="note botHelp">Playing needs <b>yt-dlp</b>, which finds each song's audio, and <b>Deno</b>, which runs YouTube's player code for it. The first time YouTube Music is on, OmniPulse downloads both from their official GitHub releases into its own folder (about 58 MB), each checked against the checksum published with it, and yt-dlp updates itself once a day after that. Their caches stay in that folder too, so Remove takes everything off this PC. A yt-dlp or Deno you've installed yourself is used if OmniPulse doesn't have its own. Switching YouTube Music off stops it being used anywhere.<br>Nothing signs in: search, radio and playing work without a Google account, and likes are kept on this PC.</div>
       </details>
 
       <div class="row">

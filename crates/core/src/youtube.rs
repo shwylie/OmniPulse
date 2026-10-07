@@ -270,6 +270,12 @@ pub async fn radio(video_id: &str) -> Result<Vec<YtTrack>, String> {
 
 static STREAMS: Mutex<Vec<(String, String, u64)>> = Mutex::new(Vec::new()); // (id, url, expires at)
 
+pub fn forget_streams() {
+    if let Ok(mut g) = STREAMS.lock() {
+        g.clear();
+    }
+}
+
 fn expiry(url: &str) -> u64 {
     reqwest::Url::parse(url)
         .ok()

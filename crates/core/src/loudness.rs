@@ -242,6 +242,18 @@ fn cached(key: &str) -> Option<Analysis> {
     g.as_ref()?.get(key).cloned()
 }
 
+/// Drops the remembered measurements whose keys start with this
+pub fn forget(prefix: &str) {
+    let _ = cached(""); // makes sure the file has been read
+    let Ok(mut g) = CACHE.lock() else { return };
+    if let Some(map) = g.as_mut() {
+        map.retain(|k, _| !k.starts_with(prefix));
+        if let (Some(f), Ok(text)) = (cache_file(), serde_json::to_string(&*map)) {
+            let _ = std::fs::write(f, text);
+        }
+    }
+}
+
 fn remember(key: String, a: &Analysis) {
     let Ok(mut g) = CACHE.lock() else { return };
     let map = g.get_or_insert_with(HashMap::new);
