@@ -352,7 +352,13 @@ async function spotifyLikeCheck(list) {
       return;   // not allowed yet, or offline: hearts just show as not liked
     }
   }
-  if (todo.length) refreshLikeUI();
+  if (!todo.length) return;
+  if (view === "search" && prefs.hideLikes && viewTracks.some(isLikedTrack)) {
+    viewTracks = viewTracks.filter((t) => !isLikedTrack(t));
+    render();
+  } else {
+    refreshLikeUI();
+  }
 }
 
 async function spotifySearchTracks(q) {

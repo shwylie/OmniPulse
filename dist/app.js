@@ -314,7 +314,12 @@ function afterRender() {
 // The row under the title: play / shuffle and page buttons, with the view options on the right.
 // Shown whenever any of them is, so the language filter stays reachable when it hid everything.
 function paintHeroActions() {
-  $("heroActions").hidden = !["playAll", "followBtn", "plDelete", "langChip", "albumToggle"].some((id) => !$(id).hidden);
+  const hl = $("hideLikesChip");
+  hl.hidden = view !== "search" || !query;
+  hl.classList.toggle("on", !!prefs.hideLikes);
+  hl.setAttribute("aria-pressed", prefs.hideLikes ? "true" : "false");
+  hl.title = prefs.hideLikes ? "Your likes are hidden from these results. Click to show them." : "Leave tracks you've liked out of the results";
+  $("heroActions").hidden = !["playAll", "followBtn", "plDelete", "langChip", "hideLikesChip", "albumToggle"].some((id) => !$(id).hidden);
 }
 
 function trackRow(t, i, playing) {
@@ -497,7 +502,23 @@ function openSearch(q) {
   showView("search");
   const plats = activePlats("search");
   if (!plats.length) { showNothing(); return; }
-  loadMerged(plats.map((id) => searchFeed(id, q)), (list) => list.filter((t) => !isMix(t)));
+  const tok = loadToken;
+  // To leave your likes out, the app needs to know them first (both lists are cached)
+  const ready = prefs.hideLikes ? loadLikesFor(plats) : Promise.resolve();
+  ready.then(() => {
+    if (tok !== loadToken || view !== "search" || query !== q) return;   // moved on meanwhile
+    loadMerged(plats.map((id) => searchFeed(id, q)),
+      (list) => list.filter((t) => !isMix(t) && !(prefs.hideLikes && isLikedTrack(t))));
+  });
+}
+
+// Your SoundCloud and Spotify likes, so liked tracks can be recognised in other lists
+function loadLikesFor(plats) {
+  if (prefs.hideLikes) say("Loading...");
+  return Promise.all([
+    plats.includes("soundcloud") ? ensureLikes() : null,
+    plats.includes("spotify") ? spLiked().catch(() => null) : null,
+  ]);
 }
 
 function openPlaylist(p) {
@@ -653,6 +674,11 @@ $("bigSearchForm").addEventListener("submit", (e) => {
   e.preventDefault();
   const q = $("bigQ").value.trim();
   if (q) openSearch(q);
+});
+$("hideLikesChip").addEventListener("click", () => {
+  prefs.hideLikes = !prefs.hideLikes;
+  savePrefs();
+  if (view === "search" && query) openSearch(query);
 });
 $("searchForm").addEventListener("submit", (e) => {
   e.preventDefault();

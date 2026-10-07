@@ -106,6 +106,26 @@ function reqMsg(key, vars) {
   return tpl.replace(/\{(\w+)\}/g, (m, k) => (vars && vars[k] !== undefined ? String(vars[k]) : m));
 }
 
+// The words in a request or a title, for matching against your likes
+const reqWords = (s) => String(s).toLowerCase().normalize("NFKD").replace(/[\u0300-\u036f]/g, "")
+  .split(/[^a-z0-9\u00c0-\u024f\u0400-\u04ff\u3040-\u9fff]+/).filter((w) => w.length > 1 || /\d/.test(w));
+
+async function likedMatch(q, plats) {
+  const want = reqWords(q);
+  if (!want.length) return null;
+  await loadLikesFor(plats).catch(() => null);
+  const pools = { soundcloud: () => likedTracks.filter(isLikedTrack), spotify: () => spLikedCache || [], local: () => [] };
+  for (const id of plats) {
+    const hit = pools[id]().find((t) => {
+      if (isMix(t)) return false;
+      const have = new Set(reqWords(t.title + " " + artistName(t)));
+      return want.every((w) => have.has(w));
+    });
+    if (hit) return Object.assign({}, hit);   // a copy, so "requested by" stays on the queued one
+  }
+  return null;
+}
+
 async function handleSongRequest(q, user) {
   if (!prefs.req) return { ok: false, message: reqMsg("closed", {}) };
   q = q.slice(0, 200);
@@ -124,13 +144,19 @@ async function handleSongRequest(q, user) {
   if (/soundcloud\.com\//i.test(q)) order = plats.filter((id) => id === "soundcloud");
   else if (/open\.spotify\.com\//i.test(q)) order = plats.filter((id) => id === "spotify");
   const finders = { soundcloud: findRequested, spotify: findSpotifyRequested, local: async (x) => localSearch(x) };
-  let found = [];
-  for (const id of order) {
-    found = (await finders[id](q).catch(() => [])).filter((t) => !isMix(t));
-    if (found.length) break;
+  const isLink = /^https?:\/\//i.test(q);
+  // Your liked songs come first: one whose title and artist contain every word asked for
+  let t = isLink ? null : await likedMatch(q, order);
+  if (!t) {
+    // otherwise a search, where a liked track among the top few beats one you haven't liked
+    let found = [];
+    for (const id of order) {
+      found = (await finders[id](q).catch(() => [])).filter((x) => !isMix(x));
+      if (found.length) break;
+    }
+    if (!found.length) return { ok: false, message: reqMsg("notFound", base) };
+    t = (!isLink && found.slice(0, 5).find(isLikedTrack)) || found[0];
   }
-  if (!found.length) return { ok: false, message: reqMsg("notFound", base) };
-  const t = found[0];
   const vars = Object.assign({ title: t.title, artist: artistName(t) }, base);
   if (queue.slice(Math.max(qi, 0)).some((x) => x.id === t.id)) return { ok: false, message: reqMsg("duplicate", vars) };
   t.requestedBy = who;

@@ -256,3 +256,5 @@ hides them; tracks from albums are never hidden.
 - Cover art on playlist, album and Favourites pages: an album shows its cover; a playlist shows up to four
   different covers from its tracks in one square, split diagonally (two halves, a "Y" of three, an "X" of four).
 - Search left the sidebar: click the magnifying glass in the search bar for the Search page (or to search for what you typed).
+- Search: "Hide likes" (beside Albums) leaves tracks you have liked on SoundCloud or Spotify out of the results.
+- Chat requests prefer your likes: a liked song whose title and artist contain every word asked for wins; otherwise a liked track among the top 5 results beats the first result. Links still play exactly what was linked.
