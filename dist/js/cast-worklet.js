@@ -1,10 +1,11 @@
-// Casting: the app's sound (after volume) as 16-bit stereo PCM, about a tenth of a second at a time,
-// for the live stream the device plays (crates/core/src/cast.rs). Silence keeps flowing while
+// The app's sound as 16-bit stereo PCM, a piece at a time (a tenth of a second unless told otherwise):
+// for casting's live stream (crates/core/src/cast.rs) and the OmniPulse Input (omni_input.rs). Silence keeps flowing while
 // nothing plays, so the device's stream never runs dry.
 class CastTap extends AudioWorkletProcessor {
-  constructor() {
+  constructor(options) {
     super();
-    this.frames = Math.round(sampleRate / 10);
+    const ms = (options && options.processorOptions && options.processorOptions.ms) || 100;
+    this.frames = Math.round(sampleRate * ms / 1000);
     this.buf = new Int16Array(this.frames * 2);
     this.n = 0;
   }

@@ -222,6 +222,21 @@ async fn plugin_http(id: String, url: String, method: String, headers: Vec<(Stri
     plugins::http(&id, &url, &method, headers, body).await
 }
 
+// ---------- the OmniPulse Input ----------
+#[tauri::command]
+async fn omni_input_start() -> Result<String, String> {
+    tokio::task::spawn_blocking(omnipulse_core::omni_input::start).await.map_err(|e| e.to_string())?
+}
+#[tauri::command]
+fn omni_input_pcm(request: tauri::ipc::Request) {
+    if let tauri::ipc::InvokeBody::Raw(bytes) = request.body() {
+        let rate = request.headers().get("x-rate").and_then(|v| v.to_str().ok()).and_then(|v| v.parse().ok()).unwrap_or(48000);
+        omnipulse_core::omni_input::push_pcm(bytes, rate);
+    }
+}
+#[tauri::command]
+fn omni_input_stop() { omnipulse_core::omni_input::stop() }
+
 // ---------- casting ----------
 #[tauri::command]
 fn cast_devices() -> Result<Vec<omnipulse_core::cast::Device>, String> {
@@ -659,6 +674,7 @@ fn main() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            omni_input_start, omni_input_pcm, omni_input_stop,
             cast_devices, cast_start, cast_pcm, cast_track, cast_state, cast_reload, cast_volume, cast_stop,
             login, signed_in, logout, api_get, stream_url, get_settings, set_gpu, restart_app, open_url, set_like, set_follow, playlist_write,
             spotify_login, spotify_signed_in, spotify_logout, spotify_token, spotify_api,

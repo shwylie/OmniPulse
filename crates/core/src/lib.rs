@@ -9,6 +9,7 @@ pub mod loudness;
 pub mod lyrics;
 pub mod plugins;
 pub mod cast;
+pub mod omni_input;
 pub mod remote;
 pub mod requests;
 pub mod soundcloud;

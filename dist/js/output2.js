@@ -1,16 +1,14 @@
-// The OmniPulse input (Settings > Streaming): the same sound sent to a second device as well, with an
-// offset to line the two up, like OBS's sync offset. Above 0 it's later; below 0 the main output is
-// held back instead. It has its own volume, and plays whether or not the main one is muted.
-//
-// Windows only adds an input device through a driver, so the sound goes to a virtual cable that has
-// one: a Wave Link channel, VB-CABLE or the like. Its input side is what OBS or Discord picks up, and
-// it can carry the name OmniPulse (a Wave Link channel of that name, or the cable renamed in Windows).
+// The OmniPulse Input (Settings > Streaming): the same sound played a second time, as its own app
+// called "OmniPulse Input" (crates/core/src/omni_input.rs plays it on the default playback device),
+// with its own volume and an offset to line the two up, like OBS's sync offset. Above 0 it's later;
+// below 0 the main output is held back instead. In Elgato Wave Link, Windows' mixer or the like it
+// shows apart from the app's main sound, so it can go to a stream mix only. No driver is involved.
 //
 //   ... limiter -> master (volume) -> main delay -> your output device
-//          \-> second delay -> second volume -> a stream -> an <audio> on the second device
+//          \-> input delay -> input volume -> a tap (js/cast-worklet.js) -> OmniPulse Input
 
 const OUT2_MAX_MS = 5000;
-const out2 = { delay: null, gain: null, dest: null, el: null, mainDelay: null, mainGain: null };
+const out2 = { delay: null, gain: null, tap: null, sink: null, running: false, mainDelay: null, mainGain: null };
 
 // The main path's own delay sits in the chain from the start (it's 0 unless the offset is negative)
 // The main output, too, can need an <audio> on the device: the audio context can't open every device
@@ -61,27 +59,6 @@ async function mainViaElement(id) {
   await mainOut.el.play();
 }
 
-// Devices that are virtual cables, so the help can point at them
-const OUT2_CABLE = /omnipulse|cable input|vb-audio|voicemeeter|wave ?link|elgato virtual|virtual audio/i;
-
-function out2Help() {
-  const opts = [...$("out2Sel").options];
-  const cables = opts.filter((o) => OUT2_CABLE.test(o.text));
-  const named = cables.find((o) => /omnipulse/i.test(o.text));
-  $("out2Help").textContent = named
-    ? "Sending to " + named.text + ": pick its input in OBS (Audio Input Capture) or Discord."
-    : cables.length
-      ? "Pick a virtual cable below (" + cables.slice(0, 2).map((o) => o.text).join(", ") + "). To have it called OmniPulse: in Wave Link, add a channel named OmniPulse and pick it here; or rename the cable's recording device to OmniPulse in Windows' Sound settings. Then use that input in OBS or Discord."
-      : "Windows needs a driver to add an input device, so this sends to a virtual cable: add a channel named OmniPulse in Elgato Wave Link, or install VB-CABLE (free, from vb-audio.com) and rename its recording device to OmniPulse in Windows' Sound settings. Then pick it below and restart the app if it isn't listed.";
-}
-
-// The first time, start on a device called OmniPulse if there is one
-function out2Default() {
-  if (prefs.out2Sink) return;
-  const o = [...$("out2Sel").options].find((x) => /omnipulse/i.test(x.text));
-  if (o) { $("out2Sel").value = o.value; prefs.out2Sink = o.value; savePrefs(); }
-}
-
 function out2Wire(ctx, master) {
   const mainDelay = ctx.createDelay(OUT2_MAX_MS / 1000 + 0.1);
   mainDelay.delayTime.value = 0;
@@ -106,6 +83,19 @@ function out2MainMute(muted) {
   if (out2.mainGain) out2.mainGain.gain.setTargetAtTime(muted ? 0 : 1, norm.ctx.currentTime, 0.05);
 }
 
+const OUT2_ROUTE = "Please route OmniPulse appropriately first to prevent playback echo.\n\n" +
+  "The OmniPulse Input plays the app's sound a second time, as its own app named \"OmniPulse Input\", on your default playback device. " +
+  "Before turning it on, send it where only your stream hears it: in Elgato Wave Link, put OmniPulse Input on a channel that goes to the Stream mix and not your Monitor mix; " +
+  "otherwise you'll hear the music twice.\n\nTurn on the OmniPulse Input now?";
+
+function out2Teardown() {
+  if (out2.tap) { out2.tap.port.onmessage = null; try { out2.tap.disconnect(); } catch (e) {} }
+  if (out2.delay) { try { norm.limiter.disconnect(out2.delay); } catch (e) {} }
+  out2.delay = out2.gain = out2.tap = out2.sink = null;
+  if (out2.running) invoke("omni_input_stop").catch(() => {});
+  out2.running = false;
+}
+
 async function out2Apply() {
   const on = !!prefs.out2On;
   $("out2On").checked = on;
@@ -118,41 +108,51 @@ async function out2Apply() {
   const ctx = norm.ctx;
   const now = ctx.currentTime;
   out2MainDelay();
-  if (!on) {
-    if (out2.el) { out2.el.pause(); out2.el.srcObject = null; }
-    if (out2.delay) { try { norm.limiter.disconnect(out2.delay); } catch (e) {} }
-    out2.delay = out2.gain = out2.dest = out2.el = null;
-    $("out2Note").textContent = "";
-    return;
-  }
-  out2Default();
-  out2Help();
-  if (!out2.delay) {
-    out2.delay = ctx.createDelay(OUT2_MAX_MS / 1000 + 0.1);
-    out2.gain = ctx.createGain();
-    out2.dest = ctx.createMediaStreamDestination();
-    norm.limiter.connect(out2.delay);
-    out2.delay.connect(out2.gain);
-    out2.gain.connect(out2.dest);
-    out2.el = new Audio();
-    out2.el.srcObject = out2.dest.stream;
-  }
-  out2.delay.delayTime.setValueAtTime(offset > 0 ? offset / 1000 : 0, now);
-  out2.gain.gain.setTargetAtTime(prefs.out2Volume ?? 1, now, 0.02);
+  if (!on) { out2Teardown(); $("out2Note").textContent = ""; return; }
   try {
-    if (!out2.el.setSinkId) throw new Error("this engine can't choose a device for it");
-    const id = prefs.out2Sink || "default";
-    if (out2.el.sinkId !== id) await out2.el.setSinkId(id);
-    await out2.el.play();
-    $("out2Note").textContent = id === (prefs.sink || "default") ? "That's your main output too, so you'll hear it twice. Pick a virtual cable instead." : "";
+    if (!out2.delay) {
+      await ctx.audioWorklet.addModule("js/cast-worklet.js");
+      out2.delay = ctx.createDelay(OUT2_MAX_MS / 1000 + 0.1);
+      out2.gain = ctx.createGain();
+      // small pieces, so it stays close to the main sound
+      out2.tap = new AudioWorkletNode(ctx, "cast-tap", { numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [2], processorOptions: { ms: 20 } });
+      out2.sink = ctx.createGain();
+      out2.sink.gain.value = 0;
+      norm.limiter.connect(out2.delay);
+      out2.delay.connect(out2.gain);
+      out2.gain.connect(out2.tap);
+      out2.tap.connect(out2.sink);
+      out2.sink.connect(ctx.destination);
+      const rate = String(ctx.sampleRate);
+      out2.tap.port.onmessage = (e) => {
+        if (out2.running) invoke("omni_input_pcm", new Uint8Array(e.data), { headers: { "x-rate": rate } }).catch(() => {});
+      };
+    }
+    out2.delay.delayTime.setValueAtTime(offset > 0 ? offset / 1000 : 0, now);
+    out2.gain.gain.setTargetAtTime(prefs.out2Volume ?? 1, now, 0.02);
+    if (!out2.running) {
+      const device = await invoke("omni_input_start");
+      out2.running = true;
+      $("out2Note").textContent = "";
+      $("out2Help").textContent = "Playing as \"OmniPulse Input\" on " + device + ". In Wave Link, send it to the Stream mix only, so you don't hear it twice. (It follows the default playback device as of when it was turned on.)";
+    }
+    if (ctx.state === "suspended") ctx.resume().catch(() => {});
   } catch (e) {
-    $("out2Note").textContent = "Couldn't play on that device: " + (e && e.message ? e.message : e);
+    out2Teardown();
+    $("out2Note").textContent = (e && e.message) || String(e);
   }
 }
 
 function out2Init() {
-  $("out2On").addEventListener("change", () => { prefs.out2On = $("out2On").checked; savePrefs(); out2Apply(); });
-  $("out2Sel").addEventListener("change", () => { prefs.out2Sink = $("out2Sel").value; savePrefs(); out2Apply(); });
+  // it used to send to another device; that was a different thing, so it starts off this time
+  if (!prefs.out2Input) { prefs.out2On = false; prefs.out2Input = 1; savePrefs(); }
+  $("out2Help").textContent = "Plays the app's sound a second time, as its own app named \"OmniPulse Input\", on your default playback device. Route it first (in Wave Link: the Stream mix only), so you don't hear it twice.";
+  $("out2On").addEventListener("change", () => {
+    if ($("out2On").checked && !confirm(OUT2_ROUTE)) { $("out2On").checked = false; return; }
+    prefs.out2On = $("out2On").checked;
+    savePrefs();
+    out2Apply();
+  });
   $("out2Offset").addEventListener("change", () => {
     const v = Math.round(Number($("out2Offset").value));
     prefs.out2Offset = Number.isFinite(v) ? Math.max(-OUT2_MAX_MS, Math.min(OUT2_MAX_MS, v)) : 0;
