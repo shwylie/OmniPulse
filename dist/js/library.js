@@ -1,9 +1,9 @@
 // Mixes, your playlists, the Likes filter, Rediscover, and the track right-click menu.
 
-// ---------- mixes: anything longer than 15 minutes ----------
+// ---------- sets and podcasts ("mixes" in the code): anything longer than 15 minutes ----------
 const MIX_MS = 15 * 60 * 1000;
 const isMix = (t) => !!t && (t.duration || 0) > MIX_MS;
-// Mixes stay out of these; they still show in Likes (under Mixes) and playlists
+// They stay out of these; they still show in Likes (under Sets & podcasts) and playlists
 const hideMixesIn = (v) => v === "search" || v === "discover" || v === "artist";
 
 // Follows next_href for up to "pages" pages and returns all the tracks
@@ -149,7 +149,7 @@ let likesFilter = "all";
 function renderLikesChips() {
   const box = $("likesChips");
   box.replaceChildren();
-  [["all", "All"], ["tracks", "Tracks"], ["mixes", "Mixes"]].forEach(([k, label]) => {
+  [["all", "All"], ["tracks", "Tracks"], ["mixes", "Sets & podcasts"]].forEach(([k, label]) => {
     const b = el("button", "chip" + (k === likesFilter ? " on" : ""), label);
     b.dataset.f = k;
     box.append(b);

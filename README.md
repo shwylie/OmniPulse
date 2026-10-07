@@ -242,3 +242,8 @@ hides them; tracks from albums are never hidden.
 - Spotify playback sign-in moved into Spotify options (under Spotify in Integrations).
 - Rediscover: "Fall in love all over again". Page subtitles no longer count tracks.
 - Go+ tracks still only come as 30-second previews: SoundCloud doesn't give full Go+ streams to other apps.
+
+## v43
+- Status and error messages slide out above the player bar for a few seconds instead of sitting under the page title.
+- The widget settings only show animation options the chosen design uses ("Spin the record" is Vinyl-only).
+- Long tracks (over 15 minutes) are called "Sets & podcasts" now, so they aren't confused with Spotify's own mixes.
