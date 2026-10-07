@@ -1433,8 +1433,8 @@ async function refreshOutputs() {
   out2Help();
 }
 
-$("outputSel").addEventListener("change", async () => {
-  const id = $("outputSel").value;
+// Switches the PC's output (Settings, or the output button's menu)
+async function setOutput(id) {
   try {
     await applySink(id);
     prefs.sink = id;
@@ -1443,7 +1443,8 @@ $("outputSel").addEventListener("change", async () => {
   } catch (e) {
     $("outputNote").textContent = "Couldn't play on that device: " + (e && e.message ? e.message : e) + " Windows may be holding it for another app, or it may not take this sound format (try its settings in Windows' Sound panel).";
   }
-});
+}
+$("outputSel").addEventListener("change", () => { if (cast.on) castStop(); setOutput($("outputSel").value); });
 
 // Browsers only reveal device names after a microphone permission is granted.
 // We open the mic for an instant and close it right away. Nothing is recorded.
@@ -1487,7 +1488,7 @@ async function openSettings(focusId) {
   if (focusId) $(focusId).scrollIntoView({ block: "start" });
 }
 $("openSettings").addEventListener("click", () => openSettings());
-$("outputBtn").addEventListener("click", () => openSettings("audioSection"));
+$("outputBtn").addEventListener("click", (e) => { e.stopPropagation(); outputMenu(); });
 $("closeSettings").addEventListener("click", () => dlg.close());
 dlg.addEventListener("click", (e) => { if (e.target === dlg) dlg.close(); });
 

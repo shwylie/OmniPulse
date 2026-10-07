@@ -510,6 +510,7 @@ function showMenuAt(x, y, items) {
     if (it === "sep") { m.append(el("div", "menuSep")); return; }
     if (typeof it === "string") { m.append(el("div", "menuHead", it)); return; }
     const b = el("button", "menuItem", it[0]);
+    if (it[2]) b.classList.add(it[2]);
     b.dataset.fn = String(menuFns.length);
     menuFns.push(it[1]);
     m.append(b);

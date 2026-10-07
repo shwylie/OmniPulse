@@ -1,4 +1,4 @@
-// Casting (the cast button in the player bar): plays on a Chromecast, a Nest speaker or display, or a
+// Casting (the output button in the player bar): plays on a Chromecast, a Nest speaker or display, or a
 // TV or speaker with Cast built in, on the same network.
 //
 // The app stays the player. Its sound, after the EQ, loudness match, limiter and volume, goes to the
@@ -121,30 +121,58 @@ function castPush() {
 }
 
 function castPaint() {
-  const b = $("castBtn");
+  const b = $("outputBtn");
   b.classList.toggle("on", cast.on);
-  b.title = cast.on && cast.device ? "Casting to " + cast.device.name : "Cast to a device";
+  b.title = cast.on && cast.device ? "Casting to " + cast.device.name : "Output device and casting";
 }
 
-async function castMenu() {
-  const r = $("castBtn").getBoundingClientRect();
-  const items = [cast.on && cast.device ? "Casting to " + cast.device.name : "Cast to a device on your network"];
-  if (cast.on) items.push(["Stop casting", castStop], "sep");
-  showMenuAt(r.left, r.top - 4, items.concat(["Looking for devices..."]));
-  // devices answer within a second or two of the first look
-  let list = await castDevices();
-  if (!list.length) { await new Promise((ok) => setTimeout(ok, 1800)); list = await castDevices(); }
-  if ($("plMenu").hidden) return;
-  const devs = list.filter((d) => !cast.device || d.id !== cast.device.id).map((d) => [
-    d.name + (d.group ? " (group)" : d.display ? " (display)" : ""), () => castStart(d),
-  ]);
-  if (!devs.length) devs.push(list.length ? "No other devices found." : "No devices found. They need to be on the same network as this PC, and Windows may ask to let OmniPulse through its firewall.");
-  devs.push("sep", ["Refresh", () => castMenu()]);
-  showMenuAt(r.left, r.top - 4, items.concat(devs));
+// The output button's menu: where the sound plays, this PC's devices first, then Cast devices
+let castSearching = false;
+
+async function outputMenu() {
+  const r = $("outputBtn").getBoundingClientRect();
+  const at = () => showMenuAt(r.left, r.top - 4, items);
+  let outs = [];
+  try { outs = (await navigator.mediaDevices.enumerateDevices()).filter((d) => d.kind === "audiooutput"); } catch (e) {}
+  const items = ["This PC"];
+  const cur = prefs.sink || "default";
+  if (!outs.length) outs = [{ deviceId: "default", label: "System default" }];
+  outs.forEach((d, i) => {
+    const name = d.label || (d.deviceId === "default" ? "System default" : "Output " + (i + 1));
+    items.push([name, () => outputPick(d.deviceId), !cast.on && d.deviceId === cur ? "menuOn" : ""]);
+  });
+  if (outs.some((d) => !d.label) && outs.length > 1) items.push(["Show device names", () => { $("namesBtn").click(); setTimeout(outputMenu, 600); }]);
+  items.push("sep", "Cast");
+  if (cast.on && cast.device) items.push([cast.device.name, () => {}, "menuOn"], ["Stop casting", castStop]);
+  const list = (await castDevices()).filter((d) => !cast.device || d.id !== cast.device.id);
+  list.forEach((d) => items.push([d.name + (d.group ? " (group)" : d.display ? " (display)" : ""), () => castStart(d)]));
+  if (castSearching) items.push("Searching for Cast devices...");
+  else {
+    if (!list.length && !cast.on) items.push("No Cast devices found. They need to be on the same network as this PC, and Windows may ask to let OmniPulse through its firewall.");
+    items.push(["Search for Cast devices", castSearch, "menuNew"]);
+  }
+  items.push("sep", ["Sound settings...", () => openSettings("audioSection")]);
+  at();
+}
+
+// Looks again for a few seconds (devices answer within a second or two), keeping the menu open
+async function castSearch() {
+  castSearching = true;
+  await outputMenu();
+  await castDevices();
+  await new Promise((ok) => setTimeout(ok, 2500));
+  castSearching = false;
+  await outputMenu();
+}
+
+async function outputPick(id) {
+  if (cast.on) castStop();
+  await setOutput(id);
+  if ($("outputSel")) $("outputSel").value = id;
+  if ($("outputNote").textContent) say($("outputNote").textContent);
 }
 
 function castInit() {
-  $("castBtn").addEventListener("click", (e) => { e.stopPropagation(); castMenu(); });
   $("castApp").value = prefs.castApp || "";
   $("castApp").addEventListener("change", () => {
     prefs.castApp = $("castApp").value.trim().toUpperCase().replace(/[^0-9A-F]/g, "");
