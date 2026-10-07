@@ -11,7 +11,7 @@ let feedCache = null;   // { key, shelves } so going back to Discover shows the 
 
 const shuffledCopy = (list) => shuffleInPlace(list.slice());
 const dedupeTracks = (list) => { const seen = new Set(); return list.filter((t) => t && !seen.has(t.id) && seen.add(t.id)); };
-const freshPick = (t) => !isMix(t) && langOk(t) && !hiddenRecs.has(String(t.id));
+const freshPick = (t) => !isMix(t) && langOk(t) && recOk(t);
 const hueOf = (s) => [...String(s)].reduce((h, c) => (h * 31 + c.charCodeAt(0)) % 360, 7);
 
 // ---------- your top artists, from your likes on every platform and what you play ----------
@@ -25,7 +25,7 @@ function feedArtists(plats) {
   const add = (plat, t) => {
     const name = plat === "spotify" ? firstArtist(t) : artistName(t);
     const k = artistKey(name);
-    if (!k || isMix(t)) return;
+    if (!k || isMix(t) || hiddenArtists.has(k)) return;
     if (!by.has(k)) by.set(k, { key: k, name, liked: { soundcloud: [], spotify: [], youtube: [] } });
     by.get(k).liked[plat].push(t);
   };

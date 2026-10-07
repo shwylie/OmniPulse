@@ -814,7 +814,7 @@ function addToQueue(t) {
 function queueRow(t, idx, removable) {
   const li = el("li", "qRow" + (idx === qi ? " cur" : ""));
   li.dataset.q = idx;
-  if (removable) li.draggable = true;
+  li.draggable = true;   // onto a playlist (what's playing is copied, not moved)
   const img = el("img");
   img.alt = "";
   img.loading = "lazy";

@@ -75,7 +75,7 @@ const AUTOPLAY_SOURCES = { soundcloud: apSoundCloud, spotify: apSpotify, local: 
 // sets & podcasts only if you've asked for them, and at most two per artist in a batch
 function autoplayPickable(taken, perArtist) {
   return (t) => {
-    if (!t || taken.has(t.id) || hiddenRecs.has(String(t.id))) return false;
+    if (!t || taken.has(t.id) || !recOk(t)) return false;
     if (isMix(t) && !autoplaySets()) return false;
     if (avoidRecent() && heardWithin(t, AUTOPLAY_RECENT_MS)) return false;
     if (!langOk(t)) return false;

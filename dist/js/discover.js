@@ -31,7 +31,7 @@ function detectLang(t) {
 
 
 function recFilter(list) {
-  list = list.filter((t) => !isLikedTrack(t) && !hiddenRecs.has(String(t.id)));
+  list = list.filter((t) => !isLikedTrack(t) && recOk(t));
   const kept = list.filter(langOk);
   return kept;
 }

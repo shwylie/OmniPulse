@@ -271,7 +271,7 @@ async function openRediscover(fresh) {
     loadStats().forEach((x) => lastPlayed.set(x.id, Math.max(lastPlayed.get(x.id) || 0, x.ts)));
     const monthAgo = Date.now() - 30 * 86400000;
     let pool = source.filter((t) =>
-      !isMix(t) && !hiddenRecs.has(String(t.id)) && (lastPlayed.get(t.id) || 0) < monthAgo);
+      !isMix(t) && recOk(t) && (lastPlayed.get(t.id) || 0) < monthAgo);
     shuffleInPlace(pool);
     pool.sort((a, b) => (lastPlayed.get(a.id) || 0) - (lastPlayed.get(b.id) || 0));   // never played first
     pool = alternatePlatforms(pool);   // an even split, one platform then the next (js/shuffle.js)
@@ -286,16 +286,77 @@ async function openRediscover(fresh) {
   }
 }
 
-// ---------- "Remove recommendation" ----------
+// ---------- "Don't recommend this track / this artist" ----------
+// Tracks (by id) and artists (by name) left out of everything the app picks for you: Discover's mixes
+// and stations, Rediscover, autoplay and radio, and the sets & podcasts from artists you follow.
+// Searching still finds them. Settings > Library > Not recommended undoes it.
 let hiddenRecs = new Set();
+let hiddenArtists = new Set();
+
+// The artist a track is "by", as the menu names it: the one in "Artist - Title", or who's credited
+const recArtistName = (t) => (guessNames(t).artist || artistName(t) || "").trim();
+
+function hiddenArtistOf(t) {
+  if (!hiddenArtists.size || !t) return false;
+  const names = [guessNames(t).artist, ...String(artistName(t)).split(/,|&/), t.user && t.user.username];
+  return names.some((n) => n && hiddenArtists.has(artistKey(n)));
+}
+
+// Whether the app may recommend this track
+const recOk = (t) => !!t && !hiddenRecs.has(String(t.id)) && !hiddenArtistOf(t);
+
+// on pages of recommendations, it goes straight away
+const onRecPage = () => view === "discover" || view === "rediscover" || (view === "playlist" && currentPlaylist && currentPlaylist.source === "mix");
 
 function hideRecommendation(t) {
   hiddenRecs.add(String(t.id));
   prefs.hiddenRecs = [...hiddenRecs].slice(-3000);
   savePrefs();
-  viewTracks = viewTracks.filter((x) => x.id !== t.id);
-  render();
-  say("Removed. It won't be recommended again.");
+  if (onRecPage()) { viewTracks = viewTracks.filter((x) => x.id !== t.id); render(); }
+  dropFromAutoplay();
+  paintNotRecommended();
+  say("It won't be recommended again.");
+}
+
+function hideArtist(t) {
+  const name = recArtistName(t);
+  const key = artistKey(name);
+  if (!key) return;
+  hiddenArtists.add(key);
+  prefs.hiddenArtists = Object.assign({}, prefs.hiddenArtists || {}, { [key]: name });
+  savePrefs();
+  if (onRecPage()) { viewTracks = viewTracks.filter((x) => !hiddenArtistOf(x)); render(); }
+  dropFromAutoplay();
+  paintNotRecommended();
+  say(name + " won't be recommended again.");
+}
+
+// autoplay's picks that are now hidden leave the queue
+function dropFromAutoplay() {
+  const before = queue.length;
+  queue = queue.filter((x, i) => i <= qi || !x.autoplay || recOk(x));
+  if (queue.length !== before) renderQueue();
+}
+
+// Settings > Library > Not recommended
+function paintNotRecommended() {
+  const names = prefs.hiddenArtists || {};
+  const n = hiddenRecs.size;
+  const a = Object.keys(names).length;
+  $("notRecNote").textContent = !n && !a ? "Nothing yet. Right-click a track: Don't recommend this track, or this artist."
+    : [n ? n + (n === 1 ? " track" : " tracks") : "", a ? a + (a === 1 ? " artist" : " artists") : ""].filter(Boolean).join(" and ") + " won't be recommended.";
+  $("notRecTracks").hidden = !n;
+  const box = $("notRecArtists");
+  box.replaceChildren(...Object.entries(names).sort((x, y) => x[1].localeCompare(y[1])).map(([key, name]) => {
+    const row = el("div", "folderRow");
+    const rm = el("button", "", "\u00d7");
+    rm.title = "Recommend " + name + " again";
+    rm.setAttribute("aria-label", rm.title);
+    rm.dataset.key = key;
+    row.append(el("span", "", name), rm);
+    return row;
+  }));
+  $("notRecBody").hidden = !a && !n;
 }
 
 // ---------- right-click menu on tracks ----------
@@ -323,7 +384,9 @@ function openTrackMenu(t, x, y, fromPlayer) {
   if (favOn()) add(isFav(t) ? "Remove from Favourites" : "Add to Favourites", "fav");
   add("Go to artist", "artist");
   if (!fromPlayer && view === "playlist" && isOwnPlaylist(currentPlaylist)) add("Remove from this playlist", "unlist");
-  if (!fromPlayer && (view === "discover" || view === "rediscover")) add("Remove recommendation", "hide");
+  sep();
+  add("Don't recommend this track", "hide");
+  if (recArtistName(t)) add("Don't recommend " + recArtistName(t), "hideArtist");
   if (t.permalink_url) {
     sep();
     add(openLabel(t), "open");
@@ -353,6 +416,7 @@ function runMenuAction(a) {
     case "artist": openArtistFor(t); break;
     case "unlist": removeFromPlaylist(t); break;
     case "hide": hideRecommendation(t); break;
+    case "hideArtist": hideArtist(t); break;
     case "fix": openFixDialog(t); break;
     case "open": openOnSoundCloud(t); break;
     case "copy":
@@ -399,6 +463,27 @@ function libraryInit() {
 
   // removed recommendations
   hiddenRecs = new Set((prefs.hiddenRecs || []).map(String));
+  hiddenArtists = new Set(Object.keys(prefs.hiddenArtists || {}));
+  paintNotRecommended();
+  $("notRecArtists").addEventListener("click", (e) => {
+    const b = e.target.closest("button[data-key]");
+    if (!b) return;
+    const names = Object.assign({}, prefs.hiddenArtists || {});
+    const name = names[b.dataset.key];
+    delete names[b.dataset.key];
+    prefs.hiddenArtists = names;
+    hiddenArtists = new Set(Object.keys(names));
+    savePrefs();
+    paintNotRecommended();
+    say(name + " can be recommended again.");
+  });
+  $("notRecTracks").addEventListener("click", () => {
+    hiddenRecs = new Set();
+    prefs.hiddenRecs = [];
+    savePrefs();
+    paintNotRecommended();
+    say("Those tracks can be recommended again.");
+  });
 
   // right-click: our menu on tracks, and no browser menu anywhere except text boxes
   $("list").addEventListener("contextmenu", (e) => {

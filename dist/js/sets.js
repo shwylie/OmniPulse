@@ -25,7 +25,7 @@ async function openSets() {
   if (!prefs.setsLiked && plats.includes("soundcloud")) {
     if (mine.length) say("Checking artists you follow...");
     const more = (await collectPages("/me/followings/tracks?access=playable&limit=100&linked_partitioning=true", 3).catch(() => []))
-      .filter((t) => isMix(t) && !isLikedTrack(t) && !hiddenRecs.has(String(t.id)));
+      .filter((t) => isMix(t) && !isLikedTrack(t) && recOk(t));
     if (tok !== loadToken) return;
     const extra = dedupe(more);
     if (extra.length) {

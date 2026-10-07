@@ -2,11 +2,12 @@
 // sidebar, onto the queue panel (before a row, or at the end) or onto the queue button; and
 // reordering what's next in the queue.
 
-const drag = { track: null, from: -1 };   // from: the track's place in the queue, when dragged from there
+const drag = { track: null, from: -1, fromList: false };   // from: the track's place in the queue; fromList: dragged from the page's own list
 
 function dragClear() {
   drag.track = null;
   drag.from = -1;
+  drag.fromList = false;
   document.body.classList.remove("trackDrag");
   document.querySelectorAll(".dragging, .over, .dropOver").forEach((x) => x.classList.remove("dragging", "over", "dropOver"));
 }
@@ -32,6 +33,7 @@ function dndInit() {
     if (!t) return;
     li.classList.add("dragging");
     dragStart(e, t);
+    drag.fromList = true;
   });
   $("nowToggle").addEventListener("dragstart", (e) => {
     const t = curTrack();
@@ -44,6 +46,11 @@ function dndInit() {
     const i = Number(li.dataset.q);
     li.classList.add("dragging");
     dragStart(e, queue[i], i);
+  });
+  $("qNow").addEventListener("dragstart", (e) => {
+    const t = curTrack();
+    if (!t) return;
+    dragStart(e, t);   // what's playing: copied (to a playlist), not moved
   });
   $("qNext").addEventListener("dragstart", (e) => {
     const li = e.target.closest(".qRow");
@@ -119,6 +126,25 @@ function dndInit() {
     e.preventDefault();
     addToQueue(drag.track);
     say("Added to the queue.");
+    dragClear();
+  });
+
+  // ---------- the playlist that's open: drop a track anywhere on its page ----------
+  const page = $("listView");
+  const pageTakes = () => !!drag.track && !drag.fromList && view === "playlist" && playlistTakes(currentPlaylist, drag.track);
+  page.addEventListener("dragover", (e) => {
+    if (!pageTakes()) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "copy";
+    page.classList.add("dropOver");
+    page.dataset.drop = "Add to " + (currentPlaylist.title || "this playlist");
+  });
+  page.addEventListener("dragleave", (e) => { if (!page.contains(e.relatedTarget)) page.classList.remove("dropOver"); });
+  page.addEventListener("drop", (e) => {
+    if (!pageTakes()) return;
+    e.preventDefault();
+    page.classList.remove("dropOver");
+    addToPlaylist(currentPlaylist, drag.track);
     dragClear();
   });
 
