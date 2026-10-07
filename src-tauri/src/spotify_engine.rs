@@ -171,7 +171,7 @@ async fn connect(credentials: Credentials) -> Result<Engine, String> {
 // The running engine, reconnecting from saved credentials if needed
 async fn engine() -> Result<tokio::sync::MutexGuard<'static, Option<Engine>>, String> {
     let mut guard = ENGINE.lock().await;
-    let healthy = guard.as_ref().map_or(false, |e| !e.session.is_invalid() && !e.player.is_invalid());
+    let healthy = guard.as_ref().is_some_and(|e| !e.session.is_invalid() && !e.player.is_invalid());
     if !healthy {
         *guard = None;
         let creds = cache()?

@@ -17,7 +17,7 @@ base64 = "0.22"
 rand = "0.8"
 urlencoding = "2"
 md5 = "0.7"
-tokio = { version = "1", features = ["time"] }
+tokio = { version = "1", features = ["time", "process"] }
 lofty = "0.22"
 tiny_http = "0.12"
 tauri-plugin-dialog = "2"
@@ -37,3 +37,6 @@ lto = true
 codegen-units = 1
 panic = "abort"
 strip = true
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "process", "time"] }
