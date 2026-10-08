@@ -1475,7 +1475,9 @@ body.streamSafe .notSafe { display: none !important; }
 
 /* the collage's tile colours */
 .palSwatch { width: 22px; height: 22px; border-radius: 6px; border: 1px solid var(--line); display: inline-block; }
-#alertCPalSwatches input[type="color"] { width: 32px; height: 26px; padding: 0; border: 0; background: none; }
+.alertCollagePal { display: grid; gap: 6px; margin-top: 4px; }
+.alertCollagePal .note { margin: 0; }
+.alertCollagePal input[type="color"] { width: 32px; height: 26px; padding: 0; border: 0; background: none; }
 .palRemove { padding: 0 6px; margin-left: -4px; font-size: 12px; }
 
 /* the collage's pictures and icons, one at a time */

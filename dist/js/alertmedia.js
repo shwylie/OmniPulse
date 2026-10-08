@@ -380,7 +380,7 @@ function alertCollageEditor(kind) {
   wrap.append(chips, row, el("div", "note", (chosen.size || pics.some(Boolean)
     ? "Its tiles show its own picture, then these."
     : "Nothing chosen: its icon, with a couple that go with it.") + " With the Collage transition."));
-  wrap.append(collageItemEditor(kind, [...chosen], pics));
+  wrap.append(collagePaletteEditor(kind), collageItemEditor(kind, [...chosen], pics));
   return wrap;
 }
 

@@ -515,7 +515,9 @@
     const c1 = k.color || acfg.accent || "";
     const c2 = k.color ? k.color2 || k.color : acfg.accent2 || acfg.accent || "";
     const hi = c1 || getComputedStyle(document.documentElement).getPropertyValue("--hi").trim() || "#8e9bff";
-    return { a, k, c1, c2, hi, lo: c2 || hi, own: !!k.color, words: alertWords(a) };
+    // its collage's tile colours: a palette of its own, or (none) its two colours
+    const pal = (Array.isArray(k.colors) ? k.colors : []).filter((x) => /^#[0-9a-f]{6}$/i.test(x));
+    return { a, k, c1, c2, hi, lo: c2 || hi, pal, own: !!k.color, words: alertWords(a) };
   }
 
   // A picture of yours, cropped as you set it (Settings > Widget > Alerts > the alert > Picture)
@@ -754,7 +756,6 @@
       return sx > -size && sx < w + size && sy > -size && sy < h + size;
     };
     const set = collageSet(to);
-    const pal = (Array.isArray(opt.colors) ? opt.colors : []).filter((x) => /^#[0-9a-f]{6}$/i.test(x));
     const way = opt.dir || "diag";
     // the order they come in: a number for each tile, the smaller the sooner
     const seed = (r, c) => ((r * 73856093) ^ (c * 19349663)) % 1000 / 1000;
@@ -774,12 +775,13 @@
       // the colours: the first alert's up to halfway, then this one's, blending smoothly across the middle
       const mid = from === to ? 1 : Math.min(1, Math.max(0, (at - 0.3) / 0.4));
       const ease = mid * mid * (3 - 2 * mid);
-      const hi = blend(from.hi, to.hi, from === to ? 0 : ease), lo = blend(from.lo, to.lo, from === to ? 0 : ease);
+      // a tile's colour in one alert's look: from its palette, or its two colours
+      const tone = (L) => (L.pal.length ? mix(L.pal[Math.floor(seed(r + 7, c + 11) * 997) % L.pal.length], 0.62 + 0.2 * seed(r + 1, c + 2))
+        : mix((r + c) % 3 === 1 ? L.lo : L.hi, [0.62, 0.48, 0.7, 0.55][(r * 3 + c) % 4]));
+      const bg = from === to ? tone(to) : blend(tone(from), tone(to), ease);
       // each tile turns a little as it pops in, one way or the other
       t.style.cssText = "left:" + c * size + "px;top:" + r * size + "px;width:" + (size + 1) + "px;height:" + (size + 1) + "px;" +
-        // its colour: from the alerts' own two, or from the collage's palette (Settings > Collage > Tile Colours)
-        "background:" + (pal.length ? mix(pal[Math.floor(seed(r + 7, c + 11) * 997) % pal.length], 0.62 + 0.2 * seed(r + 1, c + 2))
-          : mix((r + c) % 3 === 1 ? lo : hi, [0.62, 0.48, 0.7, 0.55][(r * 3 + c) % 4])) + ";" +
+        "background:" + bg + ";" +
         "--r:" + ((r + c) % 2 ? 1 : -1) * (12 + 22 * seed(r + 3, c + 5)) + "deg";
       t.dataset.at = String(at);
       const pick = set[(r * cols + c + r) % set.length];
