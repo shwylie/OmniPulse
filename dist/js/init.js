@@ -44,6 +44,7 @@ function extrasInit() {
   pluginsInit();
   castInit();
   nativeOutInit();
+  togetherInit();
   artistsInit();
   searchPageInit();
   trimsInit();

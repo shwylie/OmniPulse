@@ -27,6 +27,23 @@ fn page_eval(js: String) {
     }
 }
 
+// ---------- omnipulse:// links (Listen Along and Jam invites) ----------
+// Links that arrive (opening the app, or reaching it while it runs) wait here until the page takes them
+static LINKS: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+
+fn link_arrived(url: String) {
+    if !url.starts_with("omnipulse://") || url.len() > 2000 {
+        return;
+    }
+    LINKS.lock().unwrap().push(url);
+    page_eval("window.__deepLink && window.__deepLink()".into());
+}
+
+#[tauri::command]
+fn deep_links_take() -> Vec<String> {
+    std::mem::take(&mut *LINKS.lock().unwrap())
+}
+
 // ---------- SoundCloud ----------
 #[tauri::command]
 async fn login() -> Result<(), String> { sc::login().await }
@@ -576,6 +593,15 @@ fn main() {
     let prev = Shortcut::new(None, Code::MediaTrackPrevious);
 
     tauri::Builder::default()
+        // one OmniPulse at a time: opening it again (or a link to it) brings this one forward
+        .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+            if let Some(w) = app.get_webview_window("main") {
+                let _ = w.show();
+                let _ = w.unminimize();
+                let _ = w.set_focus();
+            }
+        }))
+        .plugin(tauri_plugin_deep_link::init())
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
                 .with_shortcuts([play, next, prev])
@@ -618,6 +644,18 @@ fn main() {
             }
             let main_window = builder.build()?;
             let _ = APP.set(app.handle().clone());
+            // omnipulse:// links: registered for this Windows account, and taken as they arrive
+            {
+                use tauri_plugin_deep_link::DeepLinkExt;
+                #[cfg(any(windows, target_os = "linux"))]
+                let _ = app.deep_link().register_all();
+                if let Ok(Some(urls)) = app.deep_link().get_current() {
+                    urls.into_iter().for_each(|u| link_arrived(u.to_string()));
+                }
+                app.deep_link().on_open_url(|event| {
+                    event.urls().into_iter().for_each(|u| link_arrived(u.to_string()));
+                });
+            }
             // the built-in yt-dlp keeps up with YouTube: it updates itself once a day
             tauri::async_runtime::spawn(async {
                 tools::update_ytdlp_daily().await;
@@ -696,6 +734,7 @@ fn main() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            deep_links_take,
             omni_input_start, omni_input_pcm, omni_input_stop,
             main_out_start, main_out_pcm, main_out_flush, main_out_volume, main_out_stop,
             cast_devices, cast_start, cast_pcm, cast_track, cast_reload, cast_volume, cast_stop,

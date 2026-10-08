@@ -17,6 +17,8 @@ let trimEndedAt = "";       // the track the end time just ended (so it's only d
 
 // ---------- the times ----------
 function trimOf(t) {
+  const host = typeof hostTrimOf === "function" ? hostTrimOf(t) : undefined;
+  if (host !== undefined) return host;   // listening along: the host's (js/together.js)
   const x = t && (prefs.trackTrims || {})[t.id];
   return x && (x.start > 0 || x.end > 0) ? x : null;
 }

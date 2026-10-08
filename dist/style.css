@@ -1012,6 +1012,11 @@ select.wide { max-width: 260px; }
 .trimRow input { width: 90px; }
 .trimMark { margin-left: 4px; padding: 0 3px; border: 0; background: none; color: var(--accent); font: inherit; font-weight: 700; cursor: pointer; }
 #outputBtn.on { color: var(--accent); }
+/* listening together: who's in, and a way out */
+.togetherBar { display: flex; align-items: center; gap: 10px; margin: 0 0 12px; padding: 10px 12px; border-radius: 10px;
+  background: color-mix(in srgb, var(--accent) 16%, var(--elevated)); font-size: 13px; }
+.togetherBar span { flex: 1; min-width: 0; }
+#jamBtn.on { color: var(--accent); }
 /* ===== Stats, Wrapped-style ===== */
 .wHead { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 18px; }
 .wHead h1 { margin: 0; font-size: 34px; letter-spacing: -0.5px; }

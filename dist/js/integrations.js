@@ -24,8 +24,14 @@ const tStamp = (ms) => { const s = Math.max(0, Math.floor(ms / 1000)); return Ma
 
 // The buttons other people see under your status (up to two). Listen along opens the track at about
 // where you are (SoundCloud links can say where to start; Spotify's can't, so it just opens the track).
-function presenceButtons(t) {
+function presenceButtons(t, joinUrl) {
   const link = t.sharing === "private" ? "" : t.permalink_url || "";
+  if (joinUrl) {
+    // Listen along opens OmniPulse (or offers it) and joins your queue, through your relay
+    const out = [{ label: "Listen along", url: joinUrl }];
+    if (link && presOpt("presLink")) out.push({ label: openLabel(t), url: link });
+    return out;
+  }
   if (!link) return [];
   const sp = srcOf(t) === "spotify" || srcOf(t) === "youtube";   // links that can't say where to start
   const out = [];
@@ -46,6 +52,7 @@ async function sendPresence() {
     return;
   }
   try {
+    const joinUrl = await togetherEnsureListen();
     const now = Math.floor(Date.now() / 1000);
     const start = now - Math.floor(viewPos(t, curPosMs()) / 1000);
     const end = t.duration ? start + Math.floor(viewDur(t, t.duration) / 1000) : null;
@@ -56,7 +63,7 @@ async function sendPresence() {
       start: showTime ? start : null,
       end: showTime ? end : null,
       image: !presOpt("presArt") || srcOf(t) === "local" ? null : (artUrl(t, "t500x500") || null),
-      buttons: presenceButtons(t),
+      buttons: presenceButtons(t, joinUrl),
     });
     presenceNote(note || "Showing on your Discord profile.", false);
   } catch (e) {

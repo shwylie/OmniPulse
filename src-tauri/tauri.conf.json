@@ -28,5 +28,14 @@
     "externalBin": [
       "binaries/omnipulse-input"
     ]
+  },
+  "plugins": {
+    "deep-link": {
+      "desktop": {
+        "schemes": [
+          "omnipulse"
+        ]
+      }
+    }
   }
 }

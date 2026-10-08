@@ -159,8 +159,10 @@
     <div class="queueHead">
       <h2>Queue</h2>
       <button id="qClearReq" class="soft" hidden title="Remove waiting chat requests">Clear requests</button>
+      <button id="jamBtn" class="soft" hidden title="Listen together: an invite-only Jam">Start a Jam</button>
       <button id="clearQueue" class="soft">Clear</button>
     </div>
+    <div class="togetherBar" id="togetherBar" hidden><span id="togetherText"></span><button id="togetherLeave" class="soft">Leave</button></div>
     <h3>Now playing</h3>
     <ul id="qNow"></ul>
     <ul id="qNext"></ul>
@@ -310,6 +312,21 @@
       <button type="submit" class="soft fixSave">Save</button>
     </div>
   </form>
+</dialog>
+
+<dialog id="jamDialog" class="fixDialog">
+  <div class="sheet">
+    <h2>Your Jam</h2>
+    <p class="note">Only people with this link can join. They hear what you play, as you play it, and can add songs (shown as theirs). Send it to the friends you want in.</p>
+    <div class="trimRow"><input id="jamLink" type="text" readonly><button type="button" id="jamCopy" class="soft">Copy</button></div>
+    <h3>In the Jam</h3>
+    <p class="note" id="jamMembers"></p>
+    <div class="fixActions">
+      <button type="button" id="jamEnd" class="soft">End Jam</button>
+      <span class="grow"></span>
+      <button type="button" id="jamClose" class="soft fixSave">Done</button>
+    </div>
+  </div>
 </dialog>
 
 <dialog id="plugDialog" class="fixDialog">
@@ -710,6 +727,27 @@
       </details>
       <div class="row">
         <div>
+          <div class="lbl">Listen Along &amp; Jams</div>
+          <div class="note">Friends join your queue in their own OmniPulse: from Listen Along on your Discord status, or an invite-only Jam (in the queue). Needs your relay (jam-server/README.md).</div>
+        </div>
+      </div>
+      <details class="sub" id="togetherSection">
+        <summary>Listen Along &amp; Jams</summary>
+        <div class="row">
+          <div class="lbl">Relay Address</div>
+          <input id="relayUrl" class="narrow wide" type="text" placeholder="https://omnipulse-jam.you.workers.dev" spellcheck="false" autocomplete="off">
+        </div>
+        <p class="note warn" id="relayNote"></p>
+        <div class="row">
+          <div>
+            <div class="lbl">Your Name</div>
+            <div class="note">What listeners see.</div>
+          </div>
+          <input id="togetherName" class="narrow" type="text" maxlength="40" spellcheck="false" autocomplete="off">
+        </div>
+      </details>
+      <div class="row">
+        <div>
           <div class="lbl">Discord Status</div>
           <div class="note" id="presNote">Shows what you're playing on your profile.</div>
         </div>
@@ -977,6 +1015,7 @@
 <script src="js/artists.js"></script>
 <script src="js/searchpage.js"></script>
 <script src="js/trims.js"></script>
+<script src="js/together.js"></script>
 <script src="js/init.js"></script>
 <script src="app.js"></script>
 </body>

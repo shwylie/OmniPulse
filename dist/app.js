@@ -902,6 +902,7 @@ function queueRow(t, idx, removable) {
 const QUEUE_SHOWN = 100;
 
 function renderQueue() {
+  hostPush();   // listeners see the queue coming up (js/together.js)
   const nowBox = $("qNow");
   const nextBox = $("qNext");
   const autoBox = $("qAuto");
@@ -1156,6 +1157,8 @@ async function playCurrent() {
     }
   } catch (e) {
     if (e && e.name === "AbortError") return;   // skipped to another track
+    // listening along: what can't play here comes from YouTube Music, or waits for the next one
+    if (together.role === "listener" && curTrack() === t) { listenerFallback(t, String(e && e.message ? e.message : e).replace(/^Error: /, "")); return; }
     say("Could not play this track: " + e);
   }
 }
