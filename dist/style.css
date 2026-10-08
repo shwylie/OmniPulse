@@ -1369,3 +1369,29 @@ select.wide { max-width: 260px; }
 #tintRow .stepWrap { padding-bottom: 4px; }
 #tintRow.dimmed .note { opacity: 0.6; }
 .tintSwatch { display: inline-block; width: 12px; height: 12px; margin-left: 6px; border-radius: 50%; vertical-align: -1px; border: 1px solid var(--line); }
+
+/* ---------- Streamer Mode ---------- */
+/* the switch, before the platforms: grey when off; on, it pulses YouTube red, Twitch purple, Kick green */
+.streamerBtn { width: 28px; height: 28px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 8px; background: transparent; color: var(--muted); opacity: 0.55; cursor: pointer; flex: none; }
+.streamerBtn svg { width: 17px; height: 17px; }
+.streamerBtn:hover { opacity: 0.9; background: var(--elevated); }
+.streamerBtn.on { opacity: 1; animation: streamerPulse 3.6s ease-in-out infinite; }
+@keyframes streamerPulse { 0%, 100% { color: #ff0033; } 33% { color: #9146ff; } 66% { color: #53fc18; } }
+.noAnim .streamerBtn.on { animation: none; color: #9146ff; }
+/* what's hidden: not blurred (that can be read back), covered */
+body.streamer .sensitive {
+  color: transparent !important; caret-color: transparent; text-shadow: none !important; -webkit-text-security: disc;
+  background: repeating-linear-gradient(135deg, var(--elevated) 0 6px, var(--line) 6px 12px) !important;
+  border-radius: 4px; user-select: none; pointer-events: none;
+}
+body.streamer span.sensitive, body.streamer code.sensitive { padding: 0 0.6em; }
+body.streamer #pluginsSection { display: none !important; }
+/* the platforms in the title bar: in their own colours when on, black or white (as the theme) when off */
+.titlePlat button:not(.on) { color: var(--text); opacity: 0.4; filter: grayscale(1); }
+.titlePlat button:not(.on):hover { opacity: 0.7; }
+.titlePlat button.on { opacity: 1; filter: none; }
+.titlePlat button.on[data-p="soundcloud"] { color: #ff5500; background: color-mix(in srgb, #ff5500 16%, transparent); }
+.titlePlat button.on[data-p="spotify"] { color: #1ed760; background: color-mix(in srgb, #1ed760 16%, transparent); }
+.titlePlat button.on[data-p="youtube"] { color: #ff0033; background: color-mix(in srgb, #ff0033 16%, transparent); }
+.titlePlat button.on[data-p="local"] { color: #f2b544; background: color-mix(in srgb, #f2b544 16%, transparent); }
+.titlePlat button.on[data-p^="plug:"] { color: #38bdf8; background: color-mix(in srgb, #38bdf8 16%, transparent); }

@@ -81,9 +81,8 @@ async function lfmRefresh() {
     lfmConnected = !!s.connected;
     $("lastfmSection").hidden = !(lfmConnected && prefs.lfmOn !== false);
     $("lfmOn").checked = prefs.lfmOn !== false;
-    $("lfmNote").textContent = lfmConnected
-      ? "Signed in as " + (s.name || "your account") + "."
-      : "Not signed in. Needs lastfm_api_key and lastfm_secret in config.json.";
+    if (lfmConnected) nameNote($("lfmNote"), "Signed in as ", s.name || "your account", ".");
+    else $("lfmNote").textContent = "Not signed in. Needs lastfm_api_key and lastfm_secret in config.json.";
     $("lfmConnect").textContent = lfmConnected ? "Sign out" : "Sign in";
   } catch (e) {}
 }

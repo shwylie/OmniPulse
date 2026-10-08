@@ -632,6 +632,7 @@ function alertsPaint() {
     );
     help.append(ol, botRemoteBlock("alerts", port, "/alert?" + keyPart + vars));
   }
+  markSensitive(help);
   if (typeof stateNotes === "function") stateNotes();
 }
 

@@ -220,8 +220,9 @@ function ytAccPaint() {
   $("ytAccOn").disabled = ytAcc.busy;
   $("ytMirrorRow").hidden = !ytAcc.connected;
   $("ytMirror").checked = !!prefs.ytMirror;
+  if (!ytAcc.busy && ytAcc.connected && ytAcc.name) { nameNote($("ytAccNote"), "Connected as ", ytAcc.name, ". Likes here are likes on YouTube and YouTube Music too."); return; }
   $("ytAccNote").textContent = ytAcc.busy ? "Finish signing in in your browser, then come back here..."
-    : ytAcc.connected ? "Connected" + (ytAcc.name ? " as " + ytAcc.name : "") + ". Likes here are likes on YouTube and YouTube Music too."
+    : ytAcc.connected ? "Connected. Likes here are likes on YouTube and YouTube Music too."
     : ytAcc.configured === false ? "Optional. Needs youtube_client_id and youtube_client_secret in config.json (see the README)."
     : "Optional. Connected, a like here is a like on YouTube and YouTube Music too.";
 }

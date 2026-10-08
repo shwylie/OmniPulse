@@ -33,6 +33,13 @@ function extrasInit() {
   dndInit();
   selectInit();
   ytAccInit();
+  streamerPaint();
+  $("streamerBtn").addEventListener("click", () => {
+    prefs.streamerMode = !prefs.streamerMode;
+    savePrefs();
+    streamerPaint();
+    say(prefs.streamerMode ? "Streamer Mode on: account names, keys, addresses and plugin settings are hidden." : "Streamer Mode off.");
+  });
   widgetInit();
   navInit();
   discoverInit();

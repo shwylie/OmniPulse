@@ -28,6 +28,29 @@ function applyPrefs() {
 applyPrefs();
 
 // ---------- helpers ----------
+// A line with an account name in it: the name in a span of its own, which Streamer Mode hides
+function nameNote(box, before, name, after) {
+  box.replaceChildren(document.createTextNode(before), el("span", "sensitive", name), document.createTextNode(after || ""));
+}
+
+// ---------- Streamer Mode: account names, keys, addresses and ports, and plugin settings, hidden ----------
+function streamerPaint() {
+  const on = !!prefs.streamerMode;
+  document.body.classList.toggle("streamer", on);
+  const b = $("streamerBtn");
+  b.classList.toggle("on", on);
+  b.setAttribute("aria-pressed", on ? "true" : "false");
+  b.title = on ? "Streamer Mode: on. Account names, keys, addresses and ports, and plugin settings are hidden. Click to show them."
+    : "Streamer Mode: off. Hides account names, keys, addresses and ports, and plugin settings.";
+  markSensitive(document);
+}
+
+// What a bot's steps show that's yours alone: an address, a port, a key, an IP
+function markSensitive(root) {
+  root.querySelectorAll(".botHelp code, .botRemote code").forEach((c) => {
+    if (/:\/\/|\bkey=|\b\d{1,3}(\.\d{1,3}){3}\b|^\d{2,5}$|THIS-PC/.test(c.textContent)) c.classList.add("sensitive");
+  });
+}
 // "a", "a and b", "a, b and c"
 const andList = (l) => l.length < 2 ? l.join("") : l.slice(0, -1).join(", ") + " and " + l[l.length - 1];
 const SVGNS = "http://www.w3.org/2000/svg";
@@ -1695,7 +1718,8 @@ $("scAuth").addEventListener("click", async () => {
 let lastSignedIn = false;
 
 function updateTitle(signedIn) {
-  $("scNote").textContent = signedIn ? "Signed in" + (userName ? " as " + userName : "") + (scTier ? " \u00b7 " + scTier : "") + "." : "Not signed in.";
+  if (signedIn && userName) nameNote($("scNote"), "Signed in as ", userName, (scTier ? " \u00b7 " + scTier : "") + ".");
+  else $("scNote").textContent = signedIn ? "Signed in" + (scTier ? " \u00b7 " + scTier : "") + "." : "Not signed in.";
   const text = $("titleText");
   const prompt = $("titlePrompt");
   lastSignedIn = signedIn;

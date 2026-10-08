@@ -60,10 +60,10 @@ function syncSpotifySettings() {
   // like Last.fm's options: they fold out under Spotify once it's signed in and switched on
   $("spotifyOptions").hidden = !(FEATURES.spotify && spotifyPremium && prefs.spOn !== false);
   $("spConnect").textContent = spotifyPremium || spotifyFree ? "Sign out" : "Sign in";
-  if (spotifyPremium) $("spStatus").textContent = "Signed in as " + (spotifyName || "you") + " \u00b7 Premium.";
+  if (spotifyPremium) nameNote($("spStatus"), "Signed in as ", spotifyName || "you", " \u00b7 Premium.");
   else if (spotifyFree) {
-    $("spStatus").textContent = "Signed in as " + (spotifyName || "you") + " \u00b7 Free. " +
-      (ytOn() ? "Spotify tracks play from YouTube Music." : "Switch on YouTube Music to play your Spotify library.");
+    nameNote($("spStatus"), "Signed in as ", spotifyName || "you", " \u00b7 Free. " +
+      (ytOn() ? "Spotify tracks play from YouTube Music." : "Switch on YouTube Music to play your Spotify library."));
   }
 }
 
@@ -103,7 +103,7 @@ async function spotifyCheck() {
         const wait = spWaitSecs(e);
         if (wait) {
           // Spotify asked for a pause: nothing is sent until it's over, then it carries on by itself
-          note = "Signed in as " + (spotifyName || "you") + ". Spotify asked OmniPulse to slow down, so it's back at " + spWaitUntilText(wait) + " by itself.";
+          note = ["Signed in as ", spotifyName || "you", ". Spotify asked OmniPulse to slow down, so it's back at " + spWaitUntilText(wait) + " by itself."];
           spotifyCheckTimer = setTimeout(spotifyCheck, Math.max(60, wait + 3) * 1000);
         } else {
           note = "Couldn't reach Spotify: checking again in a minute.";
@@ -115,7 +115,8 @@ async function spotifyCheck() {
   spotifyPremium = ok;
   if (typeof renderPlatChips === "function") renderPlatChips();
   syncSpotifySettings();
-  if (note) $("spStatus").textContent = note;
+  if (Array.isArray(note)) nameNote($("spStatus"), note[0], note[1], note[2]);   // the name hidden in Streamer Mode
+  else if (note) $("spStatus").textContent = note;
   return ok;
 }
 

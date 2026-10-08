@@ -321,6 +321,7 @@ function reqRenderBot() {
       botRemoteBlock("requests", port, "/request?key=" + key + "&user=USERNAME&q=SONG"),
     );
   }
+  markSensitive(help);
 }
 
 function reqQueueBtn() {

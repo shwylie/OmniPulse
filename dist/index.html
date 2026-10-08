@@ -17,6 +17,9 @@
 <div class="titlebar" data-tauri-drag-region>
   <div class="titleLeft" data-tauri-drag-region>
     <span id="titleText" data-tauri-drag-region title="Right-click to rename"></span>
+    <button id="streamerBtn" class="streamerBtn" aria-pressed="false" title="Streamer Mode: off. Hides account names, keys, addresses and ports, and plugin settings.">
+      <svg viewBox="0 0 24 24"><path d="M12 9.6a2.4 2.4 0 1 0 0 4.8 2.4 2.4 0 0 0 0-4.8zM7.05 7.05a7 7 0 0 0 0 9.9l1.42-1.42a5 5 0 0 1 0-7.07zm9.9 0-1.42 1.41a5 5 0 0 1 0 7.07l1.42 1.42a7 7 0 0 0 0-9.9zM4.22 4.22a11 11 0 0 0 0 15.56l1.42-1.42a9 9 0 0 1 0-12.72zm15.56 0-1.42 1.42a9 9 0 0 1 0 12.72l1.42 1.42a11 11 0 0 0 0-15.56z"/></svg>
+    </button>
     <button id="titlePrompt" class="titlePrompt" hidden>Sign in to SoundCloud</button>
     <div class="titlePlat" id="titlePlat" hidden></div>
   </div>
@@ -322,7 +325,7 @@
   <div class="sheet">
     <h2>Your Jam</h2>
     <p class="note">Only people with this link can join. They hear what you play, as you play it, and can add songs (shown as theirs). Send it to the friends you want in.</p>
-    <div class="trimRow"><input id="jamLink" type="text" readonly><button type="button" id="jamCopy" class="soft">Copy</button></div>
+    <div class="trimRow"><input id="jamLink" class="sensitive" type="text" readonly><button type="button" id="jamCopy" class="soft">Copy</button></div>
     <h3>In the Jam</h3>
     <p class="note" id="jamMembers"></p>
     <div class="fixActions">
@@ -824,8 +827,8 @@
             <div class="note">Add it in OBS as a Browser Source, any size.</div>
           </div>
           <div class="widgetRow">
-            <input id="widgetUrl" type="text" readonly aria-label="Widget address">
-            <input id="widgetPort" type="number" min="1024" max="65535" aria-label="Port" title="Port">
+            <input id="widgetUrl" class="sensitive" type="text" readonly aria-label="Widget address">
+            <input id="widgetPort" class="sensitive" type="number" min="1024" max="65535" aria-label="Port" title="Port">
             <button id="widgetCopy" class="soft">Copy</button>
           </div>
         </div>
@@ -904,7 +907,7 @@
             <div>
               <div class="lbl">Streamer.bot</div>
               <div class="note">Its WebSocket server (Servers/Clients &gt; WebSocket Server), started.</div>
-              <input id="sbHost" type="text" spellcheck="false" aria-label="Streamer.bot WebSocket address" placeholder="127.0.0.1:8080">
+              <input id="sbHost" class="sensitive" type="text" spellcheck="false" aria-label="Streamer.bot WebSocket address" placeholder="127.0.0.1:8080">
             </div>
             <label class="switch"><input type="checkbox" id="sbOn"><span></span></label>
           </div>
@@ -914,7 +917,7 @@
               <div class="note" id="alertWebNote"></div>
             </div>
             <div class="widgetRow">
-              <input id="alertUrl" type="text" readonly aria-label="Alert address">
+              <input id="alertUrl" class="sensitive" type="text" readonly aria-label="Alert address">
               <button id="alertCopy" class="soft">Copy</button>
             </div>
           </div>
@@ -998,11 +1001,11 @@
         <p class="note warn" id="reqNote"></p>
         <div class="row stack">
           <label class="lbl" for="reqUrl" id="reqUrlLbl">Request Address</label>
-          <div class="widgetRow"><input id="reqUrl" type="text" readonly><button id="reqCopy" class="soft">Copy</button></div>
+          <div class="widgetRow"><input id="reqUrl" class="sensitive" type="text" readonly><button id="reqCopy" class="soft">Copy</button></div>
         </div>
         <div class="row stack">
           <label class="lbl" for="reqNowUrl">Now Playing Address (!song)</label>
-          <div class="widgetRow"><input id="reqNowUrl" type="text" readonly><button id="reqNowCopy" class="soft">Copy</button></div>
+          <div class="widgetRow"><input id="reqNowUrl" class="sensitive" type="text" readonly><button id="reqNowCopy" class="soft">Copy</button></div>
         </div>
         <div class="botHelp" id="botHelp"></div>
 
@@ -1044,7 +1047,7 @@
           <summary>Connection</summary>
           <div class="row">
             <div class="lbl">Port</div>
-            <div class="widgetRow"><input id="reqPort" type="number" min="1024" max="65535" aria-label="Port"></div>
+            <div class="widgetRow"><input id="reqPort" class="sensitive" type="number" min="1024" max="65535" aria-label="Port"></div>
           </div>
           <div class="row">
             <div>
@@ -1071,12 +1074,12 @@
             <div class="lbl">Address</div>
             <div class="note">The plugin finds it by itself. Other tools add action= play, pause, toggle, next, previous, like, favourite, shuffle, repeat, clear-requests, clear-queue or sets.</div>
           </div>
-          <div class="widgetRow"><input id="remoteUrl" type="text" readonly aria-label="Remote address"><button id="remoteCopy" class="soft">Copy</button></div>
+          <div class="widgetRow"><input id="remoteUrl" class="sensitive" type="text" readonly aria-label="Remote address"><button id="remoteCopy" class="soft">Copy</button></div>
         </div>
         <p class="note warn" id="remoteNote"></p>
         <div class="row">
           <div class="lbl">Port</div>
-          <div class="widgetRow"><input id="remotePort" type="number" min="1024" max="65535" aria-label="Port"></div>
+          <div class="widgetRow"><input id="remotePort" class="sensitive" type="number" min="1024" max="65535" aria-label="Port"></div>
         </div>
         <div class="row">
           <div>
