@@ -100,6 +100,7 @@ function out2Teardown() {
   out2.delay = out2.gain = out2.tap = out2.sink = null;
   if (out2.running) invoke("omni_input_stop").catch(() => {});
   out2.running = false;
+  if (out2.gate) out2.gate(false);
 }
 
 async function out2Apply() {
@@ -130,15 +131,14 @@ async function out2Apply() {
       out2.tap.connect(out2.sink);
       out2.sink.connect(ctx.destination);
       const rate = String(ctx.sampleRate);
-      out2.tap.port.onmessage = (e) => {
-        if (out2.running) invoke("omni_input_pcm", new Uint8Array(e.data), { headers: { "x-rate": rate } }).catch(() => {});
-      };
+      out2.gate = await pcmRoute(out2.tap, "input", rate, (d) => invoke("omni_input_pcm", new Uint8Array(d), { headers: { "x-rate": rate } }).catch(() => {}));
     }
     out2.delay.delayTime.setValueAtTime(offset > 0 ? offset / 1000 : 0, now);
     out2.gain.gain.setTargetAtTime(prefs.out2Volume ?? 1, now, 0.02);
     if (!out2.running) {
       const device = await invoke("omni_input_start", { muted: out2StartMuted() });
       out2.running = true;
+      if (out2.gate) out2.gate(true);
       $("out2Note").textContent = "";
       $("out2Help").textContent = "Playing on " + device + (out2StartMuted() ? ", muted in the Sound Mixer" : "") + ".";
     }

@@ -33,6 +33,8 @@ struct Feed {
     primed: bool,
     prefill_ms: usize,
     max_ms: usize,
+    /// it ran out mid-play (rather than not having started)
+    ran_dry: bool,
 }
 
 struct Inner {
@@ -50,7 +52,7 @@ impl Player {
     /// Opens the device and starts playing (silence until sound arrives); errors say why it can't
     pub fn start(opts: Options) -> Result<Self, String> {
         let inner = Arc::new(Inner {
-            feed: Mutex::new(Feed { frames: VecDeque::new(), rate: 48000, phase: 0.0, primed: false, prefill_ms: opts.prefill_ms, max_ms: opts.max_ms }),
+            feed: Mutex::new(Feed { frames: VecDeque::new(), rate: 48000, phase: 0.0, primed: false, ran_dry: false, prefill_ms: opts.prefill_ms, max_ms: opts.max_ms }),
             volume: AtomicU32::new(1.0f32.to_bits()),
             alive: AtomicBool::new(true),
             device: Mutex::new(String::new()),
@@ -205,12 +207,16 @@ fn run(inner: Arc<Inner>, opts: Options, tx: mpsc::Sender<Result<String, String>
 fn fill_from(feed: &Mutex<Feed>, out: &mut [f32], channels: usize, out_rate: u32) {
     let mut f = feed.lock().unwrap();
     let step = f.rate as f64 / out_rate as f64;
-    let prefill = f.rate as usize * f.prefill_ms / 1000;
+    // (after running dry it starts again on a third of that, so a gap lasts no longer than the hold-up
+    // behind it; the full amount is kept ready at the start)
+    let prefill = f.rate as usize * f.prefill_ms / 1000 / if f.ran_dry { 3 } else { 1 };
     if !f.primed && f.frames.len() >= prefill.max(2) {
         f.primed = true;
+        f.ran_dry = false;
     }
     for frame in out.chunks_mut(channels.max(1)) {
         if !f.primed || f.frames.len() < 2 {
+            if f.primed { f.ran_dry = true; }
             f.primed = false;
             frame.iter_mut().for_each(|s| *s = 0.0);
             continue;
@@ -267,7 +273,7 @@ mod tests {
     use super::*;
 
     fn feed(prefill_ms: usize) -> Mutex<Feed> {
-        Mutex::new(Feed { frames: VecDeque::new(), rate: 48000, phase: 0.0, primed: false, prefill_ms, max_ms: 400 })
+        Mutex::new(Feed { frames: VecDeque::new(), rate: 48000, phase: 0.0, primed: false, ran_dry: false, prefill_ms, max_ms: 400 })
     }
 
     fn push(feed: &Mutex<Feed>, frames: usize, l: f32, r: f32) {

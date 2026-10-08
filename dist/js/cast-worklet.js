@@ -8,6 +8,9 @@ class CastTap extends AudioWorkletProcessor {
     this.frames = Math.round(sampleRate * ms / 1000);
     this.buf = new Int16Array(this.frames * 2);
     this.n = 0;
+    // the pieces can go somewhere else: the sound worker's port (js/pcm.js), past the page's main thread
+    this.out = this.port;
+    this.port.onmessage = (e) => { if (e.data && e.data.port) this.out = e.data.port; };
   }
   process(inputs) {
     const inp = inputs[0] || [];
@@ -19,7 +22,7 @@ class CastTap extends AudioWorkletProcessor {
       this.buf[this.n++] = a < 0 ? a * 32768 : a * 32767;
       this.buf[this.n++] = b < 0 ? b * 32768 : b * 32767;
       if (this.n >= this.buf.length) {
-        this.port.postMessage(this.buf.buffer, [this.buf.buffer]);
+        this.out.postMessage(this.buf.buffer, [this.buf.buffer]);
         this.buf = new Int16Array(this.frames * 2);
         this.n = 0;
       }

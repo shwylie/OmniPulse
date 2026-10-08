@@ -28,9 +28,7 @@ async function castTapStart() {
     cast.pre.connect(cast.node);
     cast.sink.connect(ctx.destination);
     const rate = String(ctx.sampleRate);
-    cast.node.port.onmessage = (e) => {
-      if (cast.on || cast.starting) invoke("cast_pcm", new Uint8Array(e.data), { headers: { "x-rate": rate } }).catch(() => {});
-    };
+    cast.gate = await pcmRoute(cast.node, "cast", rate, (d) => invoke("cast_pcm", new Uint8Array(d), { headers: { "x-rate": rate } }).catch(() => {}));
   }
   cast.pre.gain.value = audio.muted ? 0 : 1;
   try { norm.limiter.connect(cast.pre); } catch (e) {}
@@ -59,6 +57,7 @@ async function castStart(d) {
   say("Connecting to " + d.name + "...");
   try {
     await castTapStart();
+    cast.gate(true);
     const ch = new window.__TAURI__.core.Channel();
     ch.onmessage = castEvent;
     cast.device = await invoke("cast_start", { id: d.id, meta: castMeta(), events: ch });
@@ -70,6 +69,7 @@ async function castStart(d) {
   } catch (e) {
     castTapStop();
     cast.on = false;
+    if (cast.gate) cast.gate(false);
     say("Couldn't cast to " + d.name + ": " + (e && e.message ? e.message : e));
   } finally {
     cast.starting = false;
@@ -79,6 +79,7 @@ async function castStart(d) {
 function castEnd(note) {
   if (!cast.on) return;
   cast.on = false;
+  if (cast.gate) cast.gate(false);
   castTapStop();
   out2MainMute(false);
   cast.level = null;

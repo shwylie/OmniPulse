@@ -9,7 +9,7 @@
 // The volume is applied there, and what's waiting is dropped on a pause, a seek or a new track, so
 // those are heard at once; the sound itself is about a tenth of a second behind the page.
 
-const nativeOut = { on: false, tap: null, sink: null, starting: null };
+const nativeOut = { on: false, tap: null, sink: null, starting: null, gate: null };
 const nativeOutWanted = () => !!window.__TAURI__;
 
 // The device's name as Windows has it, from the page's device id ("" for the default)
@@ -34,14 +34,14 @@ function nativeOutStart() {
       tap.connect(sink);
       sink.connect(ctx.destination);
       const rate = String(ctx.sampleRate);
-      tap.port.onmessage = (e) => {
-        if (nativeOut.on) invoke("main_out_pcm", new Uint8Array(e.data), { headers: { "x-rate": rate } }).catch(() => {});
-      };
+      // through the sound worker, so a busy page can't make it stutter (js/pcm.js)
+      nativeOut.gate = await pcmRoute(tap, "main", rate, (d) => invoke("main_out_pcm", new Uint8Array(d), { headers: { "x-rate": rate } }).catch(() => {}));
       // the WebView's own output goes quiet; the sound goes to the tap instead
       await mainViaElement("").catch(() => {});
       out2.mainDelay.connect(tap);
       try { out2.mainDelay.disconnect(ctx.destination); } catch (e) {}
       Object.assign(nativeOut, { on: true, tap, sink });
+      nativeOut.gate(true);
       setLevel(appVolume());
     } catch (e) {
       say("Discord & OBS Capture couldn't start, so the sound plays as before: " + (e && e.message ? e.message : e));
@@ -54,7 +54,9 @@ function nativeOutStart() {
 
 // What's waiting would be heard late: dropped on a pause, a seek or a new track
 function nativeOutFlush() {
-  if (nativeOut.on) invoke("main_out_flush").catch(() => {});
+  if (!nativeOut.on) return;
+  pcmDrop("main");
+  invoke("main_out_flush").catch(() => {});
 }
 
 function nativeOutVolume(v) {

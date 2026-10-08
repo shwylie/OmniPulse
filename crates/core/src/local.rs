@@ -309,6 +309,23 @@ pub fn handle_local_request(request: tiny_http::Request, token: &str) {
         let _ = request.respond(tiny_http::Response::empty(403));
         return;
     }
+    // the app's sound, from the page's sound worker (dist/js/pcm-worker.js): to OmniPulse.exe's own
+    // output, OmniPulse Offset or a cast. It comes here rather than through the page's own calls so a
+    // busy page (drawing a long list) can't hold it up and make it stutter.
+    if route == "/pcm" {
+        let mut request = request;
+        let rate = query_param(&url, "rate").and_then(|r| r.parse().ok()).unwrap_or(48000);
+        let mut body = Vec::new();
+        let _ = std::io::Read::read_to_end(request.as_reader(), &mut body);
+        match query_param(&url, "to").as_deref() {
+            Some("main") => crate::main_out::push(&body, rate),
+            Some("input") => crate::omni_input::push_pcm(&body, rate),
+            Some("cast") => crate::cast::push_pcm(&body, rate),
+            _ => {}
+        }
+        let _ = request.respond(tiny_http::Response::empty(204));
+        return;
+    }
     let id = query_param(&url, "id").unwrap_or_default();
     if route == "/yt" {
         serve_youtube(request, &id);
