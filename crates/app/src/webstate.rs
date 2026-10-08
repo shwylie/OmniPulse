@@ -47,6 +47,28 @@ fn native_stats_file() -> Option<std::path::PathBuf> {
     Some(d.join("native-stats.json"))
 }
 
+fn native_prefs_file() -> Option<std::path::PathBuf> {
+    let d = omnipulse_core::data_dir().ok()?.join("state");
+    std::fs::create_dir_all(&d).ok()?;
+    Some(d.join("native-prefs.json"))
+}
+
+fn native_prefs() -> Value {
+    native_prefs_file().and_then(|p| std::fs::read_to_string(p).ok()).and_then(|t| serde_json::from_str(&t).ok()).unwrap_or(Value::Null)
+}
+
+/// A setting changed in this app (it wins over the web app's from then on)
+pub fn save_pref(key: &str, value: Value) {
+    let mut all = native_prefs();
+    if !all.is_object() {
+        all = Value::Object(Default::default());
+    }
+    all[key] = value;
+    if let (Some(p), Ok(text)) = (native_prefs_file(), serde_json::to_string(&all)) {
+        let _ = std::fs::write(p, text);
+    }
+}
+
 pub fn native_plays() -> Vec<Play> {
     native_stats_file().and_then(|p| std::fs::read_to_string(p).ok()).and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default()
 }
@@ -91,6 +113,13 @@ pub fn load() -> WebState {
                 s.own_playlists.push(Playlist { plat: "local", id: p["id"].as_str().unwrap_or("").to_string(), title: p["title"].as_str().unwrap_or("Playlist").to_string(), tracks: Some(tracks) });
             }
         }
+    }
+    // settings changed in this app, over the web app's
+    if !s.prefs.is_object() {
+        s.prefs = Value::Object(Default::default());
+    }
+    if let (Some(mine), Some(all)) = (native_prefs().as_object().cloned(), s.prefs.as_object_mut()) {
+        all.extend(mine);
     }
     // this app's own plays count too
     for p in native_plays() {

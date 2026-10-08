@@ -7,6 +7,7 @@
 
 mod desktop;
 mod integrations;
+mod look;
 mod player;
 mod queue;
 mod requests;
@@ -164,6 +165,15 @@ fn open_page(shared: &Shared, page: &str) {
         }
         "discover" => open_discover(shared),
         "stats" => open_stats(shared, 1),
+        "settings" => {
+            let mut a = shared.borrow_mut();
+            a.page = "settings".into();
+            ui.set_page("settings".into());
+            ui.set_page_kind("settings".into());
+            ui.set_page_title("Settings".into());
+            ui.set_page_sub("".into());
+            ui.set_chips(ModelRc::default());
+        }
         "now" => {
             let mut a = shared.borrow_mut();
             a.page = "now".into();
@@ -657,6 +667,7 @@ fn start(shared: &Shared) {
                 }
                 if let Some(px) = art {
                     shared.borrow_mut().accent = integrations::accents(&px);
+                    apply_look(&shared);
                     push_out(&shared, false);
                     let img = slint::Image::from_rgba8(px);
                     ui.set_now_art(img.clone());
@@ -1104,6 +1115,64 @@ fn window_hwnd(ui: &AppWindow) -> Option<isize> {
     })?
 }
 
+// ---------- the look: the theme, its tint, the accent (or the album art's) ----------
+const ACCENTS: [&str; 6] = ["#8e9bff", "#1ed760", "#fa586a", "#ff9f43", "#4cc9f0", "#c77dff"];
+
+fn apply_look(shared: &Shared) {
+    let a = shared.borrow();
+    let Some(ui) = a.ui.upgrade() else { return };
+    let prefs = &a.web.prefs;
+    let (step, hue, strength) = look::from_prefs(prefs);
+    let p = look::palette(step, hue, strength);
+    let t = ui.global::<Theme>();
+    t.set_bg(p.bg.slint());
+    t.set_panel(p.panel.slint());
+    t.set_elevated(p.elevated.slint());
+    t.set_line(p.line.slint());
+    t.set_text(p.text.slint());
+    t.set_muted(p.muted.slint());
+    // the accent: the album art's while something plays (if asked for), or the one picked
+    let art = integrations::set(prefs, "artAccent") && a.loaded;
+    let (c1, c2) = if art {
+        let parse = |s: &str| look::Rgb::parse(s).map(|c| look::tune_art(c, p.light));
+        (parse(&a.accent.0), parse(&a.accent.1))
+    } else {
+        let mine = look::Rgb::parse(prefs["accent"].as_str().unwrap_or(ACCENTS[0]));
+        (mine, prefs["accent2"].as_str().and_then(look::Rgb::parse).or(mine))
+    };
+    let c1 = c1.unwrap_or(look::Rgb(0x8e, 0x9b, 0xff));
+    t.set_accent(c1.slint());
+    t.set_accent_2(c2.unwrap_or(c1).slint());
+    t.set_on_accent(look::on_accent(c1).slint());
+    ui.set_light_theme(p.light);
+    // and Settings > Look shows where things are
+    ui.set_theme_step(step as f32);
+    ui.set_tint_hue(hue);
+    ui.set_tint_strength(strength as f32);
+    ui.set_theme_step_name(look::STEPS[step].0.into());
+    ui.set_tint_strength_name(look::STRENGTHS[strength].into());
+    ui.set_tint_preview(if strength > 0 { look::hsl(hue, 0.7, if p.light { 55.0 } else { 60.0 }).slint() } else { slint::Color::from_argb_u8(0, 0, 0, 0) });
+    ui.set_accent_list(ModelRc::from(Rc::new(VecModel::from(ACCENTS.iter().filter_map(|c| look::Rgb::parse(c)).map(|c| c.slint()).collect::<Vec<_>>()))));
+    let picked = prefs["accent"].as_str().unwrap_or(ACCENTS[0]).to_lowercase();
+    ui.set_accent_on(ACCENTS.iter().position(|c| *c == picked).map_or(-1, |i| i as i32));
+    ui.set_art_accent(integrations::set(prefs, "artAccent"));
+}
+
+/// A Look setting changed here: kept (over the web app's), and shown at once
+fn set_look_pref(shared: &Shared, key: &str, value: serde_json::Value) {
+    {
+        let mut a = shared.borrow_mut();
+        if let Some(o) = a.web.prefs.as_object_mut() {
+            o.insert(key.to_string(), value.clone());
+        }
+    }
+    // (the self-test tries a theme without keeping it)
+    if std::env::var_os("OMNIPULSE_SELFTEST").is_none() {
+        webstate::save_pref(key, value);
+    }
+    apply_look(shared);
+}
+
 fn toggle(shared: &Shared) {
     // a restored session starts on the first press, where it was
     if !shared.borrow().loaded {
@@ -1144,6 +1213,21 @@ fn main() -> Result<(), slint::PlatformError> {
     SHARED.with(|s| *s.borrow_mut() = Some(shared.clone()));
     ui.set_page_sub("Loading your Library...".into());
     restore_session(&shared);
+    apply_look(&shared);
+    let s = shared.clone();
+    ui.on_look_changed(move |key, v| {
+        // the step settings keep to their steps
+        let v = if key == "tintHue" { v.round().clamp(0.0, 359.0) } else { v.round() };
+        set_look_pref(&s, &key, serde_json::json!(v));
+    });
+    let s = shared.clone();
+    ui.on_accent_picked(move |i| {
+        if let Some(c) = ACCENTS.get(i as usize) {
+            set_look_pref(&s, "accent", serde_json::json!(c));
+        }
+    });
+    let s = shared.clone();
+    ui.on_art_accent_changed(move |on| set_look_pref(&s, "artAccent", serde_json::json!(on)));
     if std::env::var_os("OMNIPULSE_SELFTEST").is_some() {
         // the self-test's own: the widget and requests on ports of their own, key "selftest" (not the
         // remote: starting it writes remote.json, which would point the Stream Deck at the test)
@@ -1378,7 +1462,7 @@ fn main() -> Result<(), slint::PlatformError> {
         let s = shared.clone();
         let started = std::time::Instant::now();
         let mut step_no = 0usize;
-        let plan: [(u64, &str); 10] = [(9, "play"), (13, "library"), (16, "discover"), (24, "rediscover"), (27, "sets"), (31, "stats"), (35, "now"), (39, "search"), (46, "autoplay"), (58, "end")];
+        let plan: [(u64, &str); 12] = [(9, "play"), (13, "library"), (16, "discover"), (24, "rediscover"), (27, "sets"), (31, "stats"), (35, "now"), (39, "search"), (42, "settings"), (44, "light"), (46, "autoplay"), (58, "end")];
         t.start(slint::TimerMode::Repeated, std::time::Duration::from_millis(250), move || {
             let Some(&(at, what)) = plan.get(step_no) else { return };
             if started.elapsed().as_secs() < at { return; }
@@ -1393,6 +1477,12 @@ fn main() -> Result<(), slint::PlatformError> {
             step_no += 1;
             match what {
                 "play" => { if ui.get_rows().row_count() > 0 { ui.invoke_play_row(0); } }
+                // a light theme with a tint, for its picture
+                "light" => {
+                    ui.invoke_look_changed("themeStep".into(), 0.0);
+                    ui.invoke_look_changed("tintHue".into(), 340.0);
+                    ui.invoke_look_changed("tintStrength".into(), 2.0);
+                }
                 // the queue down to what's playing, so autoplay has to add some
                 "autoplay" => {
                     {

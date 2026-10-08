@@ -1,18 +1,18 @@
 // OmniPulse, native: the window, title bar, sidebar, pages, queue and player bar.
 // Colours, sizes and icons follow the web app's dark theme (dist/style.css).
 
-import { ListView, Slider, LineEdit, ScrollView, Switch } from "std-widgets.slint";
+import { ListView, Slider, LineEdit, ScrollView, Switch, Palette } from "std-widgets.slint";
 
 export global Theme {
-    out property <color> bg: #08090c;
-    out property <color> panel: #111318;
-    out property <color> elevated: #1a1d25;
-    out property <color> line: #262a35;
-    out property <color> text: #e9ebf2;
-    out property <color> muted: #9097a8;
-    out property <color> accent: #8e9bff;
-    out property <color> accent-2: #b48eff;
-    out property <color> on-accent: #111318;
+    in-out property <color> bg: #08090c;
+    in-out property <color> panel: #111318;
+    in-out property <color> elevated: #1a1d25;
+    in-out property <color> line: #262a35;
+    in-out property <color> text: #e9ebf2;
+    in-out property <color> muted: #9097a8;
+    in-out property <color> accent: #8e9bff;
+    in-out property <color> accent-2: #b48eff;
+    in-out property <color> on-accent: #111318;
     out property <length> radius: 10px;
 }
 
@@ -36,6 +36,7 @@ global Icons {
     out property <string> star: "M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z";
     out property <string> sets: "M12 3a9 9 0 00-9 9v7c0 1.1.9 2 2 2h4v-8H5v-1a7 7 0 0114 0v1h-4v8h4c1.1 0 2-.9 2-2v-7a9 9 0 00-9-9z";
     out property <string> stats: "M5 9.2h3V19H5zM10.6 5h2.8v14h-2.8zm5.6 8H19v6h-2.8z";
+    out property <string> gear: "M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58a.49.49 0 0 0 .12-.61l-1.92-3.32a.49.49 0 0 0-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54a.48.48 0 0 0-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96a.49.49 0 0 0-.59.22L2.74 8.87a.48.48 0 0 0 .12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58a.49.49 0 0 0-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32a.48.48 0 0 0-.12-.61l-2.01-1.58zM12 15.6A3.6 3.6 0 1 1 12 8.4a3.6 3.6 0 0 1 0 7.2z";
     out property <string> soundcloud: "M1 14.5c0-1.1.8-2 1.9-2.1.4-2.5 2.5-4.4 5.1-4.4.6 0 1.2.1 1.7.3C10.6 6.4 12.6 5 15 5c3.3 0 6 2.7 6 6 0 .2 0 .4-.1.6.7.5 1.1 1.3 1.1 2.2 0 1.5-1.2 2.7-2.7 2.7H3.6C2.2 16.5 1 15.6 1 14.5z";
     out property <string> spotify: "M12 2a10 10 0 100 20 10 10 0 000-20zm4.6 14.4c-.2.3-.6.4-.9.2-2.5-1.5-5.6-1.9-9.3-1-.3.1-.7-.1-.8-.5-.1-.3.1-.7.5-.8 4-.9 7.5-.5 10.3 1.2.3.2.4.6.2.9zm1.2-2.7c-.2.4-.7.5-1.1.3-2.9-1.8-7.2-2.3-10.6-1.2-.4.1-.9-.1-1-.5-.1-.4.1-.9.5-1 3.9-1.2 8.7-.6 12 1.4.4.2.5.7.2 1zm.1-2.8C14.5 8.8 8.9 8.6 5.6 9.6c-.5.2-1.1-.1-1.2-.6-.2-.5.1-1.1.6-1.2 3.8-1.1 10-.9 13.9 1.4.5.3.6.9.4 1.4-.3.4-.9.6-1.4.3z";
     out property <string> youtube: "M12 2a10 10 0 100 20 10 10 0 000-20zm-2 14.5v-9l6 4.5-6 4.5z";
@@ -179,7 +180,7 @@ component Card inherits Rectangle {
     border-radius: 18px;
     background: fill;
     border-width: 1px;
-    border-color: #262a3580;
+    border-color: Theme.line;
 }
 
 export component AppWindow inherits Window {
@@ -225,6 +226,19 @@ export component AppWindow inherits Window {
     in property <[Line]> lyrics;
     in property <int> lyric-on: -1;
     in property <bool> st-empty;
+    // Settings > Look (and the built-in controls, light or dark to match)
+    in property <bool> light-theme;
+    changed light-theme => { Palette.color-scheme = self.light-theme ? ColorScheme.light : ColorScheme.dark; }
+    init => { Palette.color-scheme = self.light-theme ? ColorScheme.light : ColorScheme.dark; }
+    in-out property <float> theme-step: 3;
+    in-out property <float> tint-hue: 225;
+    in-out property <float> tint-strength: 1;
+    in property <string> theme-step-name;
+    in property <string> tint-strength-name;
+    in property <color> tint-preview;
+    in property <[color]> accent-list;
+    in property <int> accent-on: -1;
+    in-out property <bool> art-accent;
     in property <string> lyrics-note;
     // the queue and the bar
     in property <[Row]> queue-rows;
@@ -256,6 +270,9 @@ export component AppWindow inherits Window {
     callback row-action(int, string);
     callback queue-action(int, string);
     callback shuffle();
+    callback look-changed(string, float);
+    callback accent-picked(int);
+    callback art-accent-changed(bool);
     callback autoplay-changed(bool);
     callback toggle();
     callback next();
@@ -324,6 +341,7 @@ export component AppWindow inherits Window {
                             sta := TouchArea { clicked => { root.side(i); } }
                         }
                     }
+                    NavItem { label: "Settings"; d: Icons.gear; active: root.page == "settings"; clicked => { root.nav("settings"); } }
                 }
             }
             // ---------- the page ----------
@@ -530,6 +548,85 @@ export component AppWindow inherits Window {
                             }
                         }
                     }
+                    // Settings
+                    if root.page-kind == "settings": ScrollView {
+                        vertical-stretch: 1;
+                        VerticalLayout {
+                            alignment: start;
+                            spacing: 14px;
+                            padding-right: 14px;
+                            Text { text: "Look"; color: Theme.text; font-size: 20px; font-weight: 800; }
+                            Card {
+                                VerticalLayout {
+                                    alignment: start;
+                                    padding: 18px;
+                                    spacing: 8px;
+                                    HorizontalLayout {
+                                        alignment: start;
+                                        spacing: 8px;
+                                        Text { text: "Theme"; color: Theme.text; font-weight: 700; }
+                                        Text { text: root.theme-step-name; color: Theme.muted; font-weight: 600; }
+                                    }
+                                    // steps from light to dark: it stops at each, never in between
+                                    Slider { minimum: 0; maximum: 4; value <=> root.theme-step; changed(v) => { self.value = round(v); root.look-changed("themeStep", round(v)); } }
+                                    HorizontalLayout {
+                                        for n[i] in ["Bright", "Soft", "Dim", "Dark", "Black"]: Text { text: n; color: Theme.muted; font-size: 12px; horizontal-stretch: 1; horizontal-alignment: i == 0 ? left : i == 4 ? right : center; }
+                                    }
+                                    Rectangle { height: 8px; }
+                                    HorizontalLayout {
+                                        alignment: start;
+                                        spacing: 8px;
+                                        Text { text: "Tint"; color: Theme.text; font-weight: 700; }
+                                        Rectangle { width: 12px; height: 12px; y: 3px; border-radius: 6px; background: root.tint-preview; border-width: 1px; border-color: Theme.line; }
+                                    }
+                                    Text { text: "A colour through the whole theme. Accent and album art colours still show on top."; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
+                                    Rectangle {
+                                        height: 8px;
+                                        border-radius: 4px;
+                                        opacity: root.tint-strength > 0.5 ? 1 : 0.35;
+                                        background: @linear-gradient(90deg, #e04848 0%, #e0e048 17%, #48d848 33%, #48d8d8 50%, #6a72ec 67%, #d84ad6 83%, #e04848 100%);
+                                    }
+                                    Slider { minimum: 0; maximum: 359; value <=> root.tint-hue; enabled: root.tint-strength > 0.5; changed(v) => { root.look-changed("tintHue", round(v)); } }
+                                    Rectangle { height: 8px; }
+                                    HorizontalLayout {
+                                        alignment: start;
+                                        spacing: 8px;
+                                        Text { text: "Tint Strength"; color: Theme.text; font-weight: 700; }
+                                        Text { text: root.tint-strength-name; color: Theme.muted; font-weight: 600; }
+                                    }
+                                    Slider { minimum: 0; maximum: 3; value <=> root.tint-strength; changed(v) => { self.value = round(v); root.look-changed("tintStrength", round(v)); } }
+                                    HorizontalLayout {
+                                        for n[i] in ["Off", "Subtle", "Medium", "Strong"]: Text { text: n; color: Theme.muted; font-size: 12px; horizontal-stretch: 1; horizontal-alignment: i == 0 ? left : i == 3 ? right : center; }
+                                    }
+                                    Rectangle { height: 8px; }
+                                    Text { text: "Accent"; color: Theme.text; font-weight: 700; }
+                                    HorizontalLayout {
+                                        alignment: start;
+                                        spacing: 10px;
+                                        for c[i] in root.accent-list: Rectangle {
+                                            width: 28px;
+                                            height: 28px;
+                                            border-radius: 14px;
+                                            background: c;
+                                            border-width: root.accent-on == i ? 3px : 0px;
+                                            border-color: Theme.text;
+                                            TouchArea { clicked => { root.accent-picked(i); } }
+                                        }
+                                    }
+                                    Rectangle { height: 8px; }
+                                    HorizontalLayout {
+                                        VerticalLayout {
+                                            horizontal-stretch: 1;
+                                            Text { text: "Colours from Album Art"; color: Theme.text; font-weight: 700; }
+                                            Text { text: "Both colours come from the cover that's playing."; color: Theme.muted; font-size: 12px; }
+                                        }
+                                        Switch { checked <=> root.art-accent; toggled => { root.art-accent-changed(self.checked); } }
+                                    }
+                                }
+                            }
+                            Text { text: "The rest of Settings is still the web app's for now: this app follows what's set there."; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
+                        }
+                    }
                     // Now Playing: the cover, and the lyrics as they're sung
                     if root.page-kind == "now": HorizontalLayout {
                         vertical-stretch: 1;
@@ -627,7 +724,7 @@ export component AppWindow inherits Window {
                 y: 8px;
                 width: parent.width - 16px;
                 height: parent.height - 16px;
-                background: #2b2f45;
+                background: Theme.panel.mix(Theme.accent, 0.86);
                 border-radius: Theme.radius;
                 HorizontalLayout {
                     padding-left: 14px;
