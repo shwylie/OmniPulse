@@ -41,6 +41,18 @@ function spTrack(x) {
   });
 }
 
+// ---------- Spotify asking the app to wait (too many requests) ----------
+// It says how long; the app waits all of it (crates/core/src/spotify.rs), and says until when
+function spWaitSecs(e) {
+  const m = /limiting requests[^]*?(\d+)\s*s\b/i.exec(String(e));
+  return m ? Number(m[1]) : 0;
+}
+function spWaitUntilText(secs) {
+  const at = new Date(Date.now() + secs * 1000);
+  const sameDay = at.toDateString() === new Date().toDateString();
+  return (sameDay ? "" : at.toLocaleDateString(undefined, { weekday: "long" }) + " ") + at.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+}
+
 // ---------- account: Spotify stays hidden unless this is a Premium account ----------
 const SP_DEFAULT_NOTE = "Not signed in. Without Premium, songs play from YouTube Music.";
 
@@ -88,8 +100,15 @@ async function spotifyCheck() {
         ok = last.product === "premium";
         spotifyName = last.name || "";
         spotifyFree = !ok;
-        note = (/limiting requests|429/i.test(String(e)) ? "Spotify is busy right now" : "Couldn't reach Spotify") + ": checking again in a minute.";
-        spotifyCheckTimer = setTimeout(spotifyCheck, 60000);
+        const wait = spWaitSecs(e);
+        if (wait) {
+          // Spotify asked for a pause: nothing is sent until it's over, then it carries on by itself
+          note = "Signed in as " + (spotifyName || "you") + ". Spotify asked OmniPulse to slow down, so it's back at " + spWaitUntilText(wait) + " by itself.";
+          spotifyCheckTimer = setTimeout(spotifyCheck, Math.max(60, wait + 3) * 1000);
+        } else {
+          note = "Couldn't reach Spotify: checking again in a minute.";
+          spotifyCheckTimer = setTimeout(spotifyCheck, 60000);
+        }
       }
     }
   }

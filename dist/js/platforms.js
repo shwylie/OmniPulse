@@ -323,12 +323,20 @@ function localAlbums() {
   return [...albums.values()].sort((x, y) => x.title.localeCompare(y.title));
 }
 
+let spPlaylistsRetry = null;   // Spotify asked to wait: the sidebar tries again when that's over
 async function sidebarItems(id) {
   if (id === "soundcloud") return (await invoke("signed_in")) ? scPlaylists() : [];
   if (id === "spotify") {
     try {
       return await spotifyPlaylists();
     } catch (e) {
+      const wait = spWaitSecs(e);
+      if (wait) {
+        // loads by itself once Spotify's wait is over
+        clearTimeout(spPlaylistsRetry);
+        spPlaylistsRetry = setTimeout(() => refreshSidebar(), (wait + 3) * 1000);
+        throw new Error("Your Spotify playlists load at " + spWaitUntilText(wait) + ": Spotify asked OmniPulse to slow down for a while.");
+      }
       throw new Error(/40[13]|scope/i.test(String(e))
         ? "Sign out of Spotify and back in (Settings > Integrations) to let the app read your playlists."
         : "Could not load your Spotify playlists.");

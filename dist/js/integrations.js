@@ -29,12 +29,13 @@ function presenceButtons(t) {
   if (!link) return [];
   const sp = srcOf(t) === "spotify" || srcOf(t) === "youtube";   // links that can't say where to start
   const out = [];
-  if (presOpt("presListen")) {
-    out.push({ label: "Listen along", url: sp ? link : link.split("#")[0] + "#t=" + tStamp(curPosMs()) });
+  if (sp) {
+    // Spotify's and YouTube's links only open the track, so one button, named for what it does
+    if (presOpt("presListen") || presOpt("presLink")) out.push({ label: openLabel(t), url: link });
+    return out;
   }
-  if (presOpt("presLink") && !(sp && out.length)) {   // Spotify's would be the same link twice
-    out.push({ label: openLabel(t), url: link });
-  }
+  if (presOpt("presListen")) out.push({ label: "Listen along", url: link.split("#")[0] + "#t=" + tStamp(curPosMs()) });
+  if (presOpt("presLink")) out.push({ label: openLabel(t), url: link });
   return out;
 }
 

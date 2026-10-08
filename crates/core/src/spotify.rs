@@ -75,13 +75,57 @@ fn api_base() -> String {
 /// Prefix of the error a rate limit gives, so the app can tell it from a real failure
 pub const RATE_LIMITED: &str = "Spotify is limiting requests";
 
+// The whole wait Spotify asks for (it can be hours after a burst): knocking again sooner only makes it
+// longer. Kept on disk too, so reopening the app doesn't knock either.
 fn retry_after(res: &reqwest::Response) -> u64 {
-    res.headers().get("retry-after").and_then(|v| v.to_str().ok()).and_then(|s| s.trim().parse().ok()).unwrap_or(5).clamp(1, 3600)
+    res.headers().get("retry-after").and_then(|v| v.to_str().ok()).and_then(|s| s.trim().parse().ok()).unwrap_or(5).clamp(1, 86400)
+}
+
+static COOL_LOADED: std::sync::Once = std::sync::Once::new();
+
+fn cool_file() -> Option<std::path::PathBuf> {
+    data_dir().ok().map(|d| d.join("spotify_wait.txt"))
+}
+
+fn cool_until() -> u64 {
+    COOL_LOADED.call_once(|| {
+        let saved = cool_file().and_then(|p| std::fs::read_to_string(p).ok()).and_then(|s| s.trim().parse::<u64>().ok()).unwrap_or(0);
+        COOL_UNTIL.fetch_max(saved, std::sync::atomic::Ordering::SeqCst);
+    });
+    COOL_UNTIL.load(std::sync::atomic::Ordering::SeqCst)
+}
+
+fn set_cool_until(until: u64) {
+    let _ = cool_until();
+    COOL_UNTIL.fetch_max(until, std::sync::atomic::Ordering::SeqCst);
+    if let Some(p) = cool_file() {
+        let _ = std::fs::write(p, COOL_UNTIL.load(std::sync::atomic::Ordering::SeqCst).to_string());
+    }
+}
+
+/// Seconds left before Spotify takes requests again (0: now)
+pub fn spotify_wait() -> u64 {
+    cool_until().saturating_sub(now_secs())
+}
+
+// Requests at least this far apart, so a burst (following many artists, say) doesn't trip the limit
+const SPACING: std::time::Duration = std::time::Duration::from_millis(120);
+static NEXT_SEND: tokio::sync::Mutex<Option<tokio::time::Instant>> = tokio::sync::Mutex::const_new(None);
+
+async fn pace() {
+    let mut next = NEXT_SEND.lock().await;
+    let now = tokio::time::Instant::now();
+    if let Some(at) = *next {
+        if at > now {
+            tokio::time::sleep_until(at).await;
+        }
+    }
+    *next = Some(tokio::time::Instant::now().max(now) + SPACING);
 }
 
 // Waits out a rate limit if it's short; errors if it isn't
 async fn cool_down() -> Result<(), String> {
-    let until = COOL_UNTIL.load(std::sync::atomic::Ordering::SeqCst);
+    let until = cool_until();
     let now = now_secs();
     if until > now {
         let wait = until - now;
@@ -286,6 +330,7 @@ pub async fn spotify_api(method: String, path: String, body: Option<Value>) -> R
         cool_down().await?;
         let res = {
             let _slot = GATE.acquire().await.map_err(|e| e.to_string())?;
+            pace().await;
             send(t.access_token.clone()).await.map_err(|e| e.to_string())?
         };
         tries += 1;
@@ -293,7 +338,7 @@ pub async fn spotify_api(method: String, path: String, body: Option<Value>) -> R
             401 if tries < 3 => t = usable_token(&cfg, Some(&t.access_token)).await?,
             429 => {
                 let wait = retry_after(&res);
-                COOL_UNTIL.fetch_max(now_secs() + wait, std::sync::atomic::Ordering::SeqCst);
+                set_cool_until(now_secs() + wait);
                 if wait > WAIT_AT_MOST || tries >= 3 {
                     return Err(format!("{RATE_LIMITED} right now: try again in {wait} s."));
                 }
@@ -361,6 +406,10 @@ mod tests {
         let e = spotify_api("GET".into(), "/me".into(), None).await.unwrap_err();
         assert!(e.starts_with(RATE_LIMITED), "{e}");
         assert_eq!(hits.load(Ordering::SeqCst), 3);
+        // the wait is known (for the app to say when), and kept for the next time the app opens
+        assert!(spotify_wait() >= 58, "{}", spotify_wait());
+        let saved: u64 = std::fs::read_to_string(dir.join("spotify_wait.txt")).unwrap().trim().parse().unwrap();
+        assert!(saved >= now_secs() + 58);
         // the sign-in is untouched
         assert_eq!(load_sp_tokens().unwrap().access_token, "tok");
 

@@ -143,6 +143,9 @@ async fn lastfm_connect() -> Result<String, String> { lastfm::lastfm_connect().a
 async fn lastfm_call(method: String, params: Vec<(String, String)>) -> Result<Value, String> {
     lastfm::lastfm_call(method, params).await
 }
+/// Seconds before Spotify takes requests again (0: now)
+#[tauri::command]
+fn spotify_wait() -> u64 { omnipulse_core::spotify::spotify_wait() }
 #[tauri::command]
 async fn lastfm_recent(from: i64, pages: u32) -> Result<Value, String> { lastfm::lastfm_recent(from, pages).await }
 #[tauri::command]
@@ -699,7 +702,7 @@ fn main() {
             login, signed_in, logout, api_get, stream_url, get_settings, set_gpu, restart_app, open_url, set_like, set_follow, playlist_write,
             spotify_login, spotify_signed_in, spotify_logout, spotify_token, spotify_api,
             lyrics_get, presence_set, presence_clear,
-            lastfm_status, lastfm_connect, lastfm_disconnect, lastfm_call, lastfm_recent,
+            lastfm_status, lastfm_connect, lastfm_disconnect, lastfm_call, lastfm_recent, spotify_wait,
             stream_resolve, presence_test, taskbar_state,
             widget_start, widget_stop, widget_update,
             local_folders, local_set_folders, local_scan, local_status, local_tracks, local_server,
