@@ -27,6 +27,10 @@ fn page_eval(js: String) {
     }
 }
 
+// ---------- the page's saved data, copied out for the native app ----------
+#[tauri::command]
+fn web_export(data: String) -> Result<(), String> { omnipulse_core::save_web_export(&data) }
+
 // ---------- omnipulse:// links (Listen Along and Jam invites) ----------
 // Links that arrive (opening the app, or reaching it while it runs) wait here until the page takes them
 static LINKS: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
@@ -734,7 +738,7 @@ fn main() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            deep_links_take,
+            deep_links_take, web_export,
             omni_input_start, omni_input_pcm, omni_input_stop,
             main_out_start, main_out_pcm, main_out_flush, main_out_volume, main_out_stop,
             cast_devices, cast_start, cast_pcm, cast_track, cast_reload, cast_volume, cast_stop,

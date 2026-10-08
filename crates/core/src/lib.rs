@@ -149,3 +149,27 @@ pub fn set_gpu(enabled: bool) -> Result<(), String> {
     let text = serde_json::to_string(&Settings { gpu: enabled }).map_err(|e| e.to_string())?;
     fs::write(data_dir()?.join("settings.json"), text).map_err(|e| e.to_string())
 }
+
+// ---------- the web app's saved data, for the native app ----------
+// The web app keeps its favourites, stats, settings and playlists on this PC in the WebView's own
+// storage, which nothing else can read. It writes a copy here as it goes, and the native app reads it.
+const WEB_EXPORT: &str = "web-export.json";
+const WEB_EXPORT_MAX: usize = 32 * 1024 * 1024;
+
+pub fn save_web_export(text: &str) -> Result<(), String> {
+    if text.len() > WEB_EXPORT_MAX {
+        return Err("too big".into());
+    }
+    serde_json::from_str::<serde_json::Value>(text).map_err(|e| format!("not JSON: {e}"))?;
+    let dir = data_dir()?;
+    let tmp = dir.join(format!("{WEB_EXPORT}.tmp"));
+    std::fs::write(&tmp, text).map_err(|e| e.to_string())?;
+    std::fs::rename(&tmp, dir.join(WEB_EXPORT)).map_err(|e| e.to_string())
+}
+
+/// What the web app last wrote: { "sc.favourites": "...", "sc.stats": "...", ... } (each value as it
+/// was stored, a JSON string), with "savedAt"
+pub fn load_web_export() -> Option<serde_json::Value> {
+    let text = std::fs::read_to_string(data_dir().ok()?.join(WEB_EXPORT)).ok()?;
+    serde_json::from_str(&text).ok()
+}
