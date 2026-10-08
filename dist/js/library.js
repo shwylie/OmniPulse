@@ -150,7 +150,7 @@ let listFilter = "all";
 const LIST_FILTERS = {
   likes: ["all", "tracks", "albums", "mixes"],
   search: ["all", "tracks", "artists", "albums", "playlists", "mixes"],
-  rediscover: ["all", "tracks", "albums"],
+  rediscover: ["all", "tracks", "albums", "mixes"],
   artist: ["all", "tracks", "albums"],
   artists: ["all", "soundcloud", "spotify", "youtube"],
 };
@@ -272,14 +272,17 @@ async function openRediscover(fresh) {
     const lastPlayed = new Map();
     loadStats().forEach((x) => lastPlayed.set(x.id, Math.max(lastPlayed.get(x.id) || 0, x.ts)));
     const monthAgo = Date.now() - 30 * 86400000;
+    // sets & podcasts too, like Library (the Sets & Podcasts filter picks them out)
     let pool = source.filter((t) =>
-      !isMix(t) && recOk(t) && (lastPlayed.get(t.id) || 0) < monthAgo);
+      recOk(t) && (lastPlayed.get(t.id) || 0) < monthAgo);
     shuffleInPlace(pool);
     pool.sort((a, b) => (lastPlayed.get(a.id) || 0) - (lastPlayed.get(b.id) || 0));   // never played first
     pool = alternatePlatforms(pool);   // an even split, one platform then the next (js/shuffle.js)
+    pool = applyListFilter(pool);   // All, Tracks or Sets & Podcasts
     setLocalPool(pool);
     render();
-    say(viewTracks.length ? "" : source.length ? "You've played all your likes recently." : "No likes found.");
+    say(viewTracks.length ? "" : !source.length ? "No likes found."
+      : listFilter === "mixes" ? "No sets or podcasts in your likes to rediscover." : "You've played all your likes recently.");
   } catch (e) {
     if (tok !== loadToken) return;
     viewTracks = [];

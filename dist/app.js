@@ -271,8 +271,7 @@ function renderHero() {
     sub = "Starred tracks from every platform, kept on this PC.";
   } else if (v === "discover") {
     title = "Discover";
-    const names = activePlats("discover").map((p) => PLATFORMS[p].name);
-    sub = "Mixes and stations made from what you like" + (names.length ? " on " + names.join(" and ") : "") + ".";
+    sub = "Mixes and stations made from what you like.";
   } else if (v === "search") {
     title = 'Results for "' + query + '"';
   } else if (v === "playlist" && currentPlaylist) {
