@@ -5,8 +5,10 @@
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod integrations;
 mod player;
 mod queue;
+mod requests;
 mod sources;
 mod track;
 mod webstate;
@@ -55,6 +57,10 @@ struct App {
     resume_ms: Option<u64>,
     /// something has been loaded into the engine (not just restored)
     loaded: bool,
+    /// the cover's colours, for the widget
+    accent: (String, String),
+    /// when this track started, for scrobbling
+    started_secs: u64,
     token: u64,
     lyrics: Vec<player::Line>,
     /// listening to this track: (its key, seconds heard, counted yet)
@@ -201,7 +207,7 @@ fn track_from_play(p: &webstate::Play) -> Option<Track> {
         "local" => track::Src::Local(omnipulse_core::local::local_path_for(&p.id)?.to_string_lossy().into_owned()),
         _ => track::Src::SoundCloud(p.id.parse().ok()?),
     };
-    Some(Track { src, key: p.id.clone(), title: p.title.clone(), artist: p.artist.clone(), album: String::new(), ms: p.ms, art: p.art.clone(), genre: p.genre.clone() })
+    Some(Track { src, key: p.id.clone(), title: p.title.clone(), artist: p.artist.clone(), album: String::new(), ms: p.ms, art: p.art.clone(), genre: p.genre.clone(), link: String::new() })
 }
 
 fn top_lately(web: &WebState, library: &[Track], days: u64, n: usize) -> Vec<Track> {
@@ -535,6 +541,12 @@ fn start(shared: &Shared) {
                         engine.play();
                         ui.set_playing(true);
                         ui.set_status("".into());
+                        {
+                            let mut a = shared.borrow_mut();
+                            a.started_secs = omnipulse_core::now_secs();
+                            integrations::lastfm_now_playing(&a.rt, &a.web.prefs, &t);
+                        }
+                        push_out(&shared, true);
                     }
                     Err(e) => ui.set_status(format!("Couldn't play \"{}\": {e}", t.title).into()),
                 }
@@ -551,6 +563,8 @@ fn start(shared: &Shared) {
                     return;
                 }
                 if let Some(px) = art {
+                    shared.borrow_mut().accent = integrations::accents(&px);
+                    push_out(&shared, false);
                     let img = slint::Image::from_rgba8(px);
                     ui.set_now_art(img.clone());
                     ui.set_now_art_big(img);
@@ -608,9 +622,11 @@ fn step(shared: &Shared, d: i32) {
         // the end of the queue: autoplay adds some, then carries on
         None if d > 0 && !autoplay_fill(shared, true) => {
             engine.stop();
+            shared.borrow_mut().loaded = false;
             if let Some(ui) = shared.borrow().ui.upgrade() {
                 ui.set_playing(false);
             }
+            push_out(shared, true);
         }
         None => {}
     }
@@ -684,7 +700,7 @@ fn autoplay_fill(shared: &Shared, then_play: bool) -> bool {
                     if picks.is_empty() {
                         a.ap_failed = Some(seed.key.clone());
                     }
-                    a.queue.items.extend(picks.into_iter().map(|t| queue::QItem { t, auto: true }));
+                    a.queue.items.extend(picks.into_iter().map(queue::QItem::auto));
                     paint_queue(&mut a);
                     save_session(&a);
                     then_play && a.queue.qi.is_some_and(|i| i + 1 < a.queue.items.len())
@@ -728,10 +744,13 @@ fn tick(shared: &Shared, events: &std::sync::mpsc::Receiver<Event>, n: u64) {
             if let Some(t) = a.queue.current().cloned() {
                 webstate::count_play(&t);
                 a.web.last_played.insert(t.key.clone(), now_ms());
+                integrations::lastfm_scrobble(&a.rt, &a.web.prefs, &t, a.started_secs);
             }
         }
         if n.is_multiple_of(20) && !engine.is_paused() {
             save_session(&a);
+            let s = shared.clone();
+            slint::Timer::single_shot(std::time::Duration::ZERO, move || push_out(&s, false));
         }
         let last = a.queue.qi.is_some_and(|i| i + 1 >= a.queue.items.len());
         last && dur > 0 && dur.saturating_sub(pos) <= queue::AUTOPLAY_LEAD_MS && !a.ap_busy
@@ -782,6 +801,190 @@ fn restore_session(shared: &Shared) {
     });
 }
 
+// ---------- the outside world: Discord, Last.fm, the OBS widget, the Stream Deck, chat requests ----------
+/// Tells Discord (if `presence`) and the widget what's playing now
+fn push_out(shared: &Shared, presence: bool) {
+    let a = shared.borrow();
+    let (pos, dur, playing) = (a.engine.position_ms(), a.engine.duration_ms(), a.loaded && !a.engine.is_paused());
+    let t = a.queue.current();
+    let prefs = &a.web.prefs;
+    if integrations::set(prefs, "widget") || integrations::set(prefs, "req") {
+        integrations::widget_update(prefs, t, pos, dur, playing, (&a.accent.0, &a.accent.1));
+    }
+    if presence {
+        integrations::presence(&a.rt, prefs, t, pos, playing);
+    }
+}
+
+/// The Stream Deck plugin's state, as remoteState in js/remote.js
+fn remote_state(a: &App) -> serde_json::Value {
+    let t = a.queue.current();
+    serde_json::json!({
+        "ok": true,
+        "playing": a.loaded && !a.engine.is_paused(),
+        "title": t.map(|t| t.title.clone()).unwrap_or_default(),
+        "artist": t.map(|t| t.artist.clone()).unwrap_or_default(),
+        "shuffle": false, "repeat": "off", "liked": false, "canLike": false, "favourite": false,
+        "setsAllowed": a.web.prefs["queueSets"].as_bool().unwrap_or(false),
+        "requests": a.queue.pending_requests().count(),
+    })
+}
+
+/// A Stream Deck button (through core's remote server); answers with the state once it's settled
+fn remote_action(shared: &Shared, id: u64, action: &str) {
+    let mut note = None;
+    match action {
+        "play" => if !shared.borrow().loaded || shared.borrow().engine.is_paused() { toggle(shared) },
+        "pause" => if shared.borrow().loaded && !shared.borrow().engine.is_paused() { toggle(shared) },
+        "toggle" => toggle(shared),
+        "next" => step(shared, 1),
+        "previous" => step(shared, -1),
+        "shuffle" => {
+            let mut a = shared.borrow_mut();
+            let lp = a.web.last_played.clone();
+            a.queue.shuffle_rest(&lp);
+            paint_queue(&mut a);
+        }
+        "clear-queue" => {
+            let mut a = shared.borrow_mut();
+            let keep = a.queue.qi.map_or(0, |i| i + 1);
+            a.queue.items.truncate(keep);
+            paint_queue(&mut a);
+            save_session(&a);
+        }
+        "clear-requests" => {
+            let mut a = shared.borrow_mut();
+            let cur = a.queue.qi.unwrap_or(0);
+            let mut k = 0;
+            a.queue.items.retain(|q| { let keep = k <= cur || q.by.is_empty(); k += 1; keep });
+            paint_queue(&mut a);
+            save_session(&a);
+        }
+        "sets" => {
+            let mut a = shared.borrow_mut();
+            let now = !a.web.prefs["queueSets"].as_bool().unwrap_or(false);
+            if let Some(o) = a.web.prefs.as_object_mut() { o.insert("queueSets".into(), serde_json::json!(now)); }
+            a.ap_failed = None;
+        }
+        "state" => {}
+        _ => note = Some("That button isn't in the native app yet."),
+    }
+    let s = shared.clone();
+    slint::Timer::single_shot(std::time::Duration::from_millis(if action == "state" { 0 } else { 150 }), move || {
+        let mut state = remote_state(&s.borrow());
+        if let Some(n) = note {
+            state["ok"] = serde_json::json!(false);
+            state["message"] = serde_json::json!(n);
+        }
+        omnipulse_core::remote::remote_result(id, state);
+    });
+}
+
+/// A request that can't be added: the reply for it, in your words if you've set them
+fn req_fail(prefs: &serde_json::Value, base: &[(&str, String)], key: &str, extra: Vec<(&str, String)>) -> serde_json::Value {
+    let vars: Vec<(&str, String)> = base.iter().cloned().chain(extra).collect();
+    serde_json::json!({ "ok": false, "message": requests::msg(prefs, key, &vars) })
+}
+
+/// A song request from chat (through core's requests server); the reply goes back to the bot
+fn song_request(shared: &Shared, id: u64, q: String, user: String) {
+    let reply = move |v: serde_json::Value| omnipulse_core::requests::request_result(id, v);
+    let a = shared.borrow();
+    let prefs = a.web.prefs.clone();
+    let q: String = q.trim().chars().take(200).collect();
+    let who = if user.trim().is_empty() { "chat".to_string() } else { user.trim().to_string() };
+    // the platforms that are on (and signed in), as for search
+    let mut plats: Vec<&'static str> = Vec::new();
+    if integrations::on(&prefs, "scOn") && omnipulse_core::soundcloud::signed_in() { plats.push("soundcloud"); }
+    if integrations::on(&prefs, "spOn") && omnipulse_core::spotify::spotify_signed_in() { plats.push("spotify"); }
+    let local: Vec<Track> = a.library.iter().filter(|t| t.plat() == "local").cloned().collect();
+    if integrations::on(&prefs, "localOn") && !local.is_empty() { plats.push("local"); }
+    if integrations::on(&prefs, "ytOn") { plats.push("youtube"); }
+    let names = plats.iter().map(|p| match *p { "soundcloud" => "SoundCloud", "spotify" => "Spotify", "local" => "your files", _ => "YouTube Music" }).collect::<Vec<_>>().join(" or ");
+    let base = vec![("user", who.clone()), ("query", q.clone()), ("platform", names)];
+    if !integrations::set(&prefs, "req") || plats.is_empty() { reply(req_fail(&prefs, &base, "closed", vec![])); return; }
+    if q.is_empty() { reply(req_fail(&prefs, &base, "empty", vec![])); return; }
+    let pending: Vec<String> = a.queue.pending_requests().map(|x| x.by.to_lowercase()).collect();
+    if pending.len() as u64 >= prefs["reqMax"].as_u64().unwrap_or(10) { reply(req_fail(&prefs, &base, "full", vec![])); return; }
+    let mine = pending.iter().filter(|b| **b == who.to_lowercase()).count();
+    if !user.trim().is_empty() && mine as u64 >= prefs["reqPerUser"].as_u64().unwrap_or(2) {
+        reply(req_fail(&prefs, &base, "perUser", vec![("count", mine.to_string())]));
+        return;
+    }
+    let likes: Vec<Track> = a.library.iter().filter(|t| t.plat() != "local").cloned().collect();
+    let prefer_radio = integrations::set(&prefs, "reqRadioEdit");
+    let (rt, weak) = (a.rt.clone(), a.ui.clone());
+    drop(a);
+    rt.spawn(async move {
+        let picked = requests::pick(&q, &plats, &likes, &local, prefer_radio).await;
+        let _ = weak.upgrade_in_event_loop(move |_| {
+            SHARED.with(|s| {
+                let Some(shared) = s.borrow().clone() else { return };
+                let t = match picked {
+                    Ok(t) => t,
+                    Err(key) => { reply(req_fail(&prefs, &base, key, vec![])); return; }
+                };
+                let vars: Vec<(&str, String)> = base.iter().cloned().chain([("title", t.title.clone()), ("artist", t.artist.clone())]).collect();
+                let (pos, idle) = {
+                    let mut a = shared.borrow_mut();
+                    let from = a.queue.qi.unwrap_or(0);
+                    if a.queue.items.iter().skip(from).any(|x| x.t.key == t.key) {
+                        reply(serde_json::json!({ "ok": false, "message": requests::msg(&prefs, "duplicate", &vars) }));
+                        return;
+                    }
+                    let pos = a.queue.add_request(t.clone(), &who);
+                    paint_queue(&mut a);
+                    save_session(&a);
+                    (pos, !a.loaded)
+                };
+                if idle { start(&shared); }
+                let vars: Vec<(&str, String)> = vars.into_iter().chain([("position", pos.to_string())]).collect();
+                reply(serde_json::json!({
+                    "ok": true, "title": t.title, "artist": t.artist, "url": t.web_link(), "position": pos,
+                    "message": requests::msg(&prefs, if pos > 0 { "added" } else { "playing" }, &vars),
+                }));
+            });
+        });
+    });
+}
+
+/// The servers the web app's settings have on: the widget, the Stream Deck's remote, chat requests
+fn outside_start(shared: &Shared) {
+    let prefs = shared.borrow().web.prefs.clone();
+    integrations::widget_start(&prefs);
+    if integrations::set(&prefs, "remoteOn") {
+        if let Some(key) = prefs["remoteKey"].as_str().filter(|k| !k.is_empty()) {
+            omnipulse_core::remote::set_handler(std::sync::Arc::new(|id, action: &str| {
+                let action = action.to_string();
+                let _ = slint::invoke_from_event_loop(move || SHARED.with(|s| { if let Some(sh) = s.borrow().clone() { remote_action(&sh, id, &action); } }));
+            }));
+            let _ = omnipulse_core::remote::remote_start(prefs["remotePort"].as_u64().unwrap_or(7880) as u16, key.to_string());
+        }
+    }
+    if integrations::set(&prefs, "req") {
+        if let Some(key) = prefs["reqKey"].as_str().filter(|k| !k.is_empty()) {
+            omnipulse_core::requests::set_asker(std::sync::Arc::new(|id, q, user| {
+                let _ = slint::invoke_from_event_loop(move || SHARED.with(|s| { if let Some(sh) = s.borrow().clone() { song_request(&sh, id, q, user); } }));
+            }));
+            let _ = omnipulse_core::requests::requests_start(prefs["reqPort"].as_u64().unwrap_or(7879) as u16, key.to_string());
+        }
+    }
+    push_out(shared, false);
+}
+
+fn toggle(shared: &Shared) {
+    // a restored session starts on the first press, where it was
+    if !shared.borrow().loaded {
+        start(shared);
+        return;
+    }
+    let (engine, weak) = { let a = shared.borrow(); (a.engine.clone(), a.ui.clone()) };
+    let Some(ui) = weak.upgrade() else { return };
+    if engine.is_paused() { engine.play(); ui.set_playing(true); } else { engine.pause(); ui.set_playing(false); }
+    save_session(&shared.borrow());
+    push_out(shared, true);
+}
+
 fn main() -> Result<(), slint::PlatformError> {
     let rt = tokio::runtime::Builder::new_multi_thread().worker_threads(2).enable_all().build().expect("runtime");
     // Slint's software renderer to start with: measured at 38 MB and ~3% of a core while playing,
@@ -803,12 +1006,27 @@ fn main() -> Result<(), slint::PlatformError> {
         rt: rt.handle().clone(), engine: engine.clone(), ui: ui.as_weak(), rows, qrows, lyric_lines,
         library: Vec::new(), playlists: Vec::new(), web: webstate::load(), page: "library".into(),
         page_all: Vec::new(), page_tracks: Vec::new(), chip: 0, shelves: Vec::new(), queue: queue::Queue::default(), panel_map: Vec::new(),
-        autoplay: true, ap_busy: false, ap_then_play: false, ap_failed: None, resume_ms: None, loaded: false, token: 0,
+        autoplay: true, ap_busy: false, ap_then_play: false, ap_failed: None, resume_ms: None, loaded: false, accent: ("#8e9bff".into(), "#8e9bff".into()), started_secs: 0, token: 0,
         lyrics: Vec::new(), heard: (String::new(), 0.0, false), last_pos: 0,
     }));
     SHARED.with(|s| *s.borrow_mut() = Some(shared.clone()));
     ui.set_page_sub("Loading your Library...".into());
     restore_session(&shared);
+    if std::env::var_os("OMNIPULSE_SELFTEST").is_some() {
+        // the self-test's own: the widget and requests on ports of their own, key "selftest" (not the
+        // remote: starting it writes remote.json, which would point the Stream Deck at the test)
+        let mut a = shared.borrow_mut();
+        if !a.web.prefs.is_object() {
+            a.web.prefs = serde_json::json!({});
+        }
+        if let Some(o) = a.web.prefs.as_object_mut() {
+            for (k, v) in [("widget", serde_json::json!(true)), ("widgetPort", serde_json::json!(7979)), ("remoteOn", serde_json::json!(false)), ("req", serde_json::json!(true)), ("reqPort", serde_json::json!(7982)), ("reqKey", serde_json::json!("selftest")), ("presence", serde_json::json!(false))] {
+                o.insert(k.into(), v);
+            }
+        }
+        drop(a);
+    }
+    outside_start(&shared);
 
     // the Library and your playlists, in the background
     {
@@ -956,18 +1174,17 @@ fn main() -> Result<(), slint::PlatformError> {
     let s = shared.clone();
     ui.on_prev(move || step(&s, -1));
     let s = shared.clone();
-    ui.on_toggle(move || {
-        // a restored session starts on the first press, where it was
-        if !s.borrow().loaded {
-            start(&s);
-            return;
+    ui.on_toggle(move || toggle(&s));
+    let s = shared.clone();
+    ui.on_seek(move |f| {
+        let engine = s.borrow().engine.clone();
+        let d = engine.duration_ms();
+        if d > 0 {
+            engine.seek((f.clamp(0.0, 1.0) as f64 * d as f64) as u64);
+            let s2 = s.clone();
+            slint::Timer::single_shot(std::time::Duration::from_millis(300), move || push_out(&s2, true));
         }
-        let (engine, weak) = { let a = s.borrow(); (a.engine.clone(), a.ui.clone()) };
-        let ui = weak.upgrade().unwrap();
-        if engine.is_paused() { engine.play(); ui.set_playing(true); } else { engine.pause(); ui.set_playing(false); }
-        save_session(&s.borrow());
     });
-    ui.on_seek({ let engine = engine.clone(); move |f| { let d = engine.duration_ms(); if d > 0 { engine.seek((f.clamp(0.0, 1.0) as f64 * d as f64) as u64); } } });
     ui.on_volume_changed({ let engine = engine.clone(); move |v| engine.set_volume(v) });
 
     // the window: dragged by the title bar, its own buttons
@@ -1039,7 +1256,8 @@ fn main() -> Result<(), slint::PlatformError> {
                 }
                 "search" => { ui.set_search_text("deadmau5".into()); ui.invoke_search("deadmau5".into()); }
                 "end" => {
-                    println!("selftest: queue {} ({} autoplay), {}", s.borrow().queue.items.len(), s.borrow().queue.items.iter().filter(|q| q.auto).count(), ui.get_autoplay_note());
+                    println!("selftest: remote state {}", remote_state(&s.borrow()));
+                    println!("selftest: queue {} ({} autoplay, {} requested), {}", s.borrow().queue.items.len(), s.borrow().queue.items.iter().filter(|q| q.auto).count(), s.borrow().queue.items.iter().filter(|q| !q.by.is_empty()).count(), ui.get_autoplay_note());
                     println!("selftest: library {} tracks, playlists {}, playing \"{}\" {} / {}, lyrics {}", s.borrow().library.len(), s.borrow().playlists.len(), ui.get_now_title(), ui.get_pos_text(), ui.get_dur_text(), s.borrow().lyrics.len());
                     let _ = slint::quit_event_loop();
                 }

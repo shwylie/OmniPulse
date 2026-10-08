@@ -22,6 +22,8 @@ pub struct Track {
     pub ms: u64,
     pub art: String,
     pub genre: String,
+    /// its page on the platform (SoundCloud's; the others' are made from the id: see web_link)
+    pub link: String,
 }
 
 /// Sets & Podcasts: anything over 15 minutes
@@ -34,6 +36,18 @@ impl Track {
             Src::Spotify(_) => "spotify",
             Src::YouTube(_) => "youtube",
             Src::Local(_) => "local",
+        }
+    }
+
+    /// Where the track is on the web, for Discord's button and the like ("" for your files)
+    pub fn web_link(&self) -> String {
+        if !self.link.is_empty() {
+            return self.link.clone();
+        }
+        match &self.src {
+            Src::Spotify(uri) => format!("https://open.spotify.com/track/{}", uri.rsplit(':').next().unwrap_or("")),
+            Src::YouTube(id) => format!("https://music.youtube.com/watch?v={id}"),
+            _ => String::new(),
         }
     }
 
@@ -84,6 +98,7 @@ impl Track {
             ms: t["full_duration"].as_u64().or(t["duration"].as_u64()).unwrap_or(0),
             art: t["artwork_url"].as_str().or(t["user"]["avatar_url"].as_str()).unwrap_or("").replace("-large", "-t200x200"),
             genre: t["genre"].as_str().unwrap_or("").to_string(),
+            link: if t["sharing"].as_str() == Some("private") { String::new() } else { t["permalink_url"].as_str().unwrap_or("").to_string() },
         }
         .split_artist())
     }
@@ -102,6 +117,7 @@ impl Track {
             ms: t["duration_ms"].as_u64().unwrap_or(0),
             art: t["album"]["images"].as_array().and_then(|i| i.get(1).or(i.first())).and_then(|i| i["url"].as_str()).unwrap_or("").to_string(),
             genre: String::new(),
+            link: String::new(),
         })
     }
 
@@ -115,6 +131,7 @@ impl Track {
             ms: t.duration_ms,
             art: t.thumb.clone(),
             genre: String::new(),
+            link: String::new(),
         }
     }
 
@@ -123,6 +140,7 @@ impl Track {
         let mut s = serde_json::json!({
             "id": self.key, "source": self.plat(), "title": self.title, "displayArtist": self.artist,
             "album": self.album, "duration": self.ms, "artwork_url": self.art, "genre": self.genre,
+            "permalink_url": self.link,
         });
         if let Src::Spotify(uri) = &self.src {
             s["uri"] = serde_json::json!(uri);
@@ -152,6 +170,7 @@ impl Track {
             ms: s["duration"].as_u64().unwrap_or(0),
             art: s["artwork_url"].as_str().unwrap_or("").to_string(),
             genre: s["genre"].as_str().unwrap_or("").to_string(),
+            link: s["permalink_url"].as_str().unwrap_or("").to_string(),
         })
     }
 }

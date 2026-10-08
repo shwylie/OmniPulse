@@ -11,6 +11,17 @@ pub struct QItem {
     pub t: Track,
     /// added by autoplay (not by you)
     pub auto: bool,
+    /// who asked for it in chat ("" for you)
+    pub by: String,
+}
+
+impl QItem {
+    pub fn mine(t: Track) -> QItem {
+        QItem { t, auto: false, by: String::new() }
+    }
+    pub fn auto(t: Track) -> QItem {
+        QItem { t, auto: true, by: String::new() }
+    }
 }
 
 #[derive(Default)]
@@ -32,16 +43,16 @@ impl Queue {
 
     /// A list to play from `start` (a playlist, the Library...): the queue becomes it
     pub fn set_list(&mut self, list: Vec<Track>, start: usize) {
-        self.items = list.into_iter().skip(start).take(1000).map(|t| QItem { t, auto: false }).collect();
+        self.items = list.into_iter().skip(start).take(1000).map(QItem::mine).collect();
         self.qi = if self.items.is_empty() { None } else { Some(0) };
     }
 
     /// One track (from search, or a shelf): it takes the current one's place, the rest stays
     pub fn replace_current(&mut self, t: Track) {
         match self.qi {
-            Some(i) if i < self.items.len() => self.items[i] = QItem { t, auto: false },
+            Some(i) if i < self.items.len() => self.items[i] = QItem::mine(t),
             _ => {
-                self.items.push(QItem { t, auto: false });
+                self.items.push(QItem::mine(t));
                 self.qi = Some(self.items.len() - 1);
             }
         }
@@ -49,7 +60,7 @@ impl Queue {
 
     pub fn play_next(&mut self, t: Track) {
         let at = self.qi.map_or(0, |i| i + 1).min(self.items.len());
-        self.items.insert(at, QItem { t, auto: false });
+        self.items.insert(at, QItem::mine(t));
         if self.qi.is_none() {
             self.qi = Some(0);
         }
@@ -57,10 +68,25 @@ impl Queue {
 
     pub fn add(&mut self, t: Track) {
         let at = self.autoplay_start();
-        self.items.insert(at, QItem { t, auto: false });
+        self.items.insert(at, QItem::mine(t));
         if self.qi.is_none() {
             self.qi = Some(0);
         }
+    }
+
+    /// A chat request: queued like Add to Queue, with who asked; its place in the queue (0: playing)
+    pub fn add_request(&mut self, t: Track, by: &str) -> usize {
+        let at = self.autoplay_start();
+        self.items.insert(at, QItem { t, auto: false, by: by.to_string() });
+        if self.qi.is_none() {
+            self.qi = Some(0);
+        }
+        at - self.qi.unwrap_or(0)
+    }
+
+    /// Chat requests still to play
+    pub fn pending_requests(&self) -> impl Iterator<Item = &QItem> {
+        self.items.iter().skip(self.qi.map_or(0, |i| i + 1)).filter(|q| !q.by.is_empty())
     }
 
     /// Moves a queued track to play next
@@ -104,10 +130,12 @@ impl Queue {
         if start <= from + 1 {
             return;
         }
+        let by: HashMap<String, String> = self.items[from..start].iter().map(|q| (q.t.key.clone(), q.by.clone())).collect();
         let mine: Vec<Track> = self.items[from..start].iter().map(|q| q.t.clone()).collect();
         let shuffled = fair_shuffle(mine, last_played);
         for (k, t) in shuffled.into_iter().enumerate() {
-            self.items[from + k] = QItem { t, auto: false };
+            let who = by.get(&t.key).cloned().unwrap_or_default();
+            self.items[from + k] = QItem { t, auto: false, by: who };
         }
     }
 
@@ -133,13 +161,14 @@ impl Queue {
             "queue": self.items.iter().take(1000).map(|q| {
                 let mut s = q.t.to_snapshot();
                 if q.auto { s["autoplay"] = json!(true); }
+                if !q.by.is_empty() { s["requestedBy"] = json!(q.by); }
                 s
             }).collect::<Vec<_>>(),
         })
     }
 
     pub fn from_session(v: &Value) -> Option<(Queue, u64)> {
-        let items: Vec<QItem> = v["queue"].as_array()?.iter().filter_map(|s| Track::from_snapshot(s).map(|t| QItem { t, auto: s["autoplay"].as_bool().unwrap_or(false) })).collect();
+        let items: Vec<QItem> = v["queue"].as_array()?.iter().filter_map(|s| Track::from_snapshot(s).map(|t| QItem { t, auto: s["autoplay"].as_bool().unwrap_or(false), by: s["requestedBy"].as_str().unwrap_or("").to_string() })).collect();
         let qi = v["qi"].as_u64()? as usize;
         if qi >= items.len() {
             return None;
@@ -256,14 +285,14 @@ mod tests {
     use crate::track::Src;
 
     fn t(key: &str, artist: &str, sc: bool) -> Track {
-        Track { src: if sc { Src::SoundCloud(1) } else { Src::YouTube(key.into()) }, key: key.into(), title: key.into(), artist: artist.into(), album: String::new(), ms: 200_000, art: String::new(), genre: String::new() }
+        Track { src: if sc { Src::SoundCloud(1) } else { Src::YouTube(key.into()) }, key: key.into(), title: key.into(), artist: artist.into(), album: String::new(), ms: 200_000, art: String::new(), genre: String::new(), link: String::new() }
     }
 
     #[test]
     fn your_tracks_go_before_autoplay() {
         let mut q = Queue::default();
         q.set_list(vec![t("a", "x", true), t("b", "x", true)], 0);
-        q.items.push(QItem { t: t("auto1", "y", true), auto: true });
+        q.items.push(QItem::auto(t("auto1", "y", true)));
         q.add(t("mine", "z", true));
         let keys: Vec<&str> = q.items.iter().map(|i| i.t.key.as_str()).collect();
         assert_eq!(keys, ["a", "b", "mine", "auto1"]);

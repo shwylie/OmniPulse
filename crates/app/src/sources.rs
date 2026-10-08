@@ -82,6 +82,7 @@ pub fn local_files() -> Vec<Track> {
                     ms: e.duration,
                     art: String::new(),
                     genre: String::new(),
+                    link: String::new(),
                 })
                 .collect()
         })
@@ -188,11 +189,11 @@ pub async fn related(t: &Track) -> Vec<Track> {
 }
 
 // ---------- autoplay: tracks like the one playing, from each platform ----------
-async fn sc_search(q: &str, limit: usize) -> Vec<Track> {
+pub async fn sc_search(q: &str, limit: usize) -> Vec<Track> {
     core::soundcloud::api_get(format!("/tracks?q={}&limit={limit}&access=playable&linked_partitioning=true", urlencode(q))).await.map(|v| items(&v).iter().filter_map(Track::soundcloud).collect()).unwrap_or_default()
 }
 
-async fn sp_search(q: &str) -> Vec<Track> {
+pub async fn sp_search(q: &str) -> Vec<Track> {
     core::spotify::spotify_api("GET".into(), format!("/search?type=track&limit=10&market=from_token&q={}", urlencode(q)), None)
         .await
         .map(|v| v["tracks"]["items"].as_array().cloned().unwrap_or_default().iter().filter_map(Track::spotify).collect())
@@ -290,7 +291,7 @@ pub fn autoplay_local(seed: &Track, local: &[Track]) -> Vec<Track> {
     same
 }
 
-fn urlencode(s: &str) -> String {
+pub fn urlencode(s: &str) -> String {
     s.bytes()
         .map(|b| match b {
             b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => (b as char).to_string(),
