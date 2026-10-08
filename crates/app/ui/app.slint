@@ -38,6 +38,7 @@ global Icons {
     out property <string> sets: "M12 3a9 9 0 00-9 9v7c0 1.1.9 2 2 2h4v-8H5v-1a7 7 0 0114 0v1h-4v8h4c1.1 0 2-.9 2-2v-7a9 9 0 00-9-9z";
     out property <string> stats: "M5 9.2h3V19H5zM10.6 5h2.8v14h-2.8zm5.6 8H19v6h-2.8z";
     out property <string> broadcast: "M12 9.6a2.4 2.4 0 1 0 0 4.8 2.4 2.4 0 0 0 0-4.8zM7.05 7.05a7 7 0 0 0 0 9.9l1.42-1.42a5 5 0 0 1 0-7.07zm9.9 0-1.42 1.41a5 5 0 0 1 0 7.07l1.42 1.42a7 7 0 0 0 0-9.9zM4.22 4.22a11 11 0 0 0 0 15.56l1.42-1.42a9 9 0 0 1 0-12.72zm15.56 0-1.42 1.42a9 9 0 0 1 0 12.72l1.42 1.42a11 11 0 0 0 0-15.56z";
+    out property <string> person: "M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z";
     out property <string> back: "M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z";
     out property <string> search: "M15.5 14h-.79l-.28-.27A6.471 6.471 0 0016 9.5 6.5 6.5 0 109.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z";
     out property <string> shuffle: "M10.59 9.17L5.41 4 4 5.41l5.17 5.17 1.42-1.41zM14.5 4l2.04 2.04L4 18.59 5.41 20 17.96 7.46 20 9.5V4h-5.5zm.33 9.41l-1.41 1.41 3.13 3.13L14.5 20H20v-5.5l-2.04 2.04-3.13-3.13z";
@@ -250,6 +251,7 @@ export component AppWindow inherits Window {
     in property <[Shelf]> shelves;
     in-out property <string> search-text;
     in property <bool> can-back;
+    in property <[Item]> artists;
     in-out property <bool> fav-only;
     in property <bool> shuffle-on;
     in property <string> repeat-mode: "off";
@@ -322,6 +324,7 @@ export component AppWindow inherits Window {
     callback queue-action(int, string);
     callback shuffle();
     callback play-page();
+    callback artist(int);
     callback back();
     callback fav-only-changed(bool);
     callback shuffle-toggle();
@@ -431,6 +434,7 @@ export component AppWindow inherits Window {
                     NavItem { label: "Library"; d: Icons.library; active: root.page == "library"; clicked => { root.nav("library"); } }
                     NavItem { label: "Favourites"; d: Icons.star; active: root.page == "favourites"; clicked => { root.nav("favourites"); } }
                     NavItem { label: "Sets & Podcasts"; d: Icons.sets; active: root.page == "sets"; clicked => { root.nav("sets"); } }
+                    NavItem { label: "Artists"; d: Icons.person; active: root.page == "artists" || root.page == "artist"; clicked => { root.nav("artists"); } }
                     NavItem { label: "Stats"; d: Icons.stats; active: root.page == "stats"; clicked => { root.nav("stats"); } }
                     Rectangle { height: 10px; }
                     Text { text: "Playlists"; color: Theme.muted; font-size: 12px; font-weight: 700; x: 12px; }
@@ -556,6 +560,35 @@ export component AppWindow inherits Window {
                         changed count => { root.rows-in-view(self.first, self.count); }
                         init => { root.rows-in-view(self.first, self.count); }
                         for r[i] in root.rows: TrackRow { item: r; index: i; play => { root.play-row(i); } act(a) => { root.row-action(i, a); } }
+                    }
+                    // Artists: everyone you follow, round, A to Z
+                    if root.page-kind == "artists": grid := ScrollView {
+                        vertical-stretch: 1;
+                        property <int> cols: max(1, floor(self.visible-width / 186px));
+                        content-width: self.visible-width;
+                        content-height: ceil(root.artists.length / self.cols) * 240px;
+                        for a[i] in root.artists: Rectangle {
+                            x: mod(i, grid.cols) * 186px;
+                            y: floor(i / grid.cols) * 240px;
+                            width: 170px;
+                            height: 228px;
+                            VerticalLayout {
+                                spacing: 8px;
+                                Rectangle {
+                                    height: 170px;
+                                    border-radius: 85px;
+                                    clip: true;
+                                    background: Theme.elevated;
+                                    Glyph { d: Icons.person; width: 64px; height: 64px; fill: Theme.muted; }
+                                    Image { source: a.art; width: parent.width; height: parent.height; image-fit: cover; }
+                                    if ata.has-hover: Rectangle { x: parent.width - 52px; y: parent.height - 52px; width: 42px; height: 42px; border-radius: 21px; background: Theme.accent;
+                                        Glyph { d: Icons.play; width: 22px; height: 22px; fill: Theme.on-accent; } }
+                                }
+                                Text { text: a.name; color: Theme.text; font-weight: 700; font-size: 13px; overflow: elide; horizontal-alignment: center; }
+                                Text { text: a.sub; color: Theme.muted; font-size: 12px; overflow: elide; horizontal-alignment: center; }
+                            }
+                            ata := TouchArea { clicked => { root.artist(i); } }
+                        }
                     }
                     // Discover: shelves
                     if root.page-kind == "discover": ScrollView {

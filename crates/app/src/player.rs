@@ -97,6 +97,29 @@ pub async fn fetch_art(url: String, size: u32) -> Option<SharedPixelBuffer<Rgba8
     Some(SharedPixelBuffer::clone_from_slice(img.as_raw(), img.width(), img.height()))
 }
 
+/// A picture as a circle (an artist's): cropped square from its middle, the corners clear, the edge
+/// smoothed. (The renderer can't clip to a round shape itself.)
+pub async fn fetch_round(url: String, size: u32) -> Option<SharedPixelBuffer<Rgba8Pixel>> {
+    if url.is_empty() {
+        return None;
+    }
+    let bytes = reqwest::get(&url).await.ok()?.bytes().await.ok()?;
+    let img = image::load_from_memory(&bytes).ok()?;
+    let side = img.width().min(img.height());
+    let sq = img.crop_imm((img.width() - side) / 2, (img.height() - side) / 2, side, side).thumbnail(size, size).to_rgba8();
+    let n = sq.width();
+    let mut px = sq.into_raw();
+    let r = n as f32 / 2.0;
+    for y in 0..n {
+        for x in 0..n {
+            let d = ((x as f32 + 0.5 - r).powi(2) + (y as f32 + 0.5 - r).powi(2)).sqrt();
+            let i = ((y * n + x) * 4 + 3) as usize;
+            px[i] = (px[i] as f32 * (r - d + 0.5).clamp(0.0, 1.0)) as u8;
+        }
+    }
+    Some(SharedPixelBuffer::clone_from_slice(&px, n, n))
+}
+
 // ---------- lyrics, from lrclib.net ----------
 #[derive(Clone, Debug, PartialEq)]
 pub struct Line {

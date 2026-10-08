@@ -55,6 +55,8 @@ struct App {
     /// where you are, and where you've been (the header's back button)
     here: Option<Place>,
     history: Vec<Place>,
+    /// who you follow (loaded once, for the Artists page)
+    artists: Option<Vec<sources::Artist>>,
     /// Favourites only (the track list's pill)
     fav_only: bool,
     /// shuffle (the player bar's): on, and the upcoming tracks' order before it, to undo it
@@ -152,6 +154,7 @@ enum Place {
     Page(String),
     Playlist(usize),
     Search(String),
+    Artist(usize),
 }
 
 /// Opens a place, remembering the one you were on (so Back returns to it)
@@ -181,6 +184,7 @@ fn open_place(shared: &Shared, place: &Place) {
         Place::Page(p) => open_page(shared, p),
         Place::Playlist(i) => open_playlist(shared, *i),
         Place::Search(q) => open_search(shared, q.clone()),
+        Place::Artist(i) => open_artist(shared, *i),
     }
     let a = shared.borrow();
     if let Some(ui) = a.ui.upgrade() { ui.set_can_back(!a.history.is_empty()); }
@@ -222,6 +226,7 @@ fn open_page(shared: &Shared, page: &str) {
             show_tracks(shared, "rediscover", "Rediscover", sub, pool, true);
         }
         "discover" => open_discover(shared),
+        "artists" => open_artists(shared),
         "stats" => open_stats(shared, 1),
         "settings" => {
             let mut a = shared.borrow_mut();
@@ -324,6 +329,82 @@ fn open_search(shared: &Shared, q: String) {
     load_into(shared, "search", format!("Results for \"{q}\""), async move {
         let t = sources::search(&q).await;
         let sub = if t.is_empty() { "Nothing found.".into() } else { plural(t.len(), "track", "tracks") + " from SoundCloud, Spotify and YouTube Music." };
+        (t, sub)
+    });
+}
+
+// ---------- Artists: who you follow, and each one's tracks ----------
+fn open_artists(shared: &Shared) {
+    let ui = shared.borrow().ui.upgrade().unwrap();
+    {
+        let mut a = shared.borrow_mut();
+        a.page = "artists".into();
+        a.token += 1;
+    }
+    ui.set_page("artists".into());
+    ui.set_page_kind("artists".into());
+    ui.set_page_title("Artists".into());
+    ui.set_chips(ModelRc::default());
+    let cached = shared.borrow().artists.clone();
+    if let Some(list) = cached {
+        paint_artists(shared, &list);
+        return;
+    }
+    ui.set_page_sub("Loading the artists you follow...".into());
+    ui.set_artists(ModelRc::default());
+    let (rt, weak) = { let a = shared.borrow(); (a.rt.clone(), a.ui.clone()) };
+    SHARED.with(|s| *s.borrow_mut() = Some(shared.clone()));
+    rt.spawn(async move {
+        let list = sources::followed_artists().await;
+        let _ = weak.upgrade_in_event_loop(move |_| {
+            SHARED.with(|s| {
+                let Some(shared) = s.borrow().clone() else { return };
+                shared.borrow_mut().artists = Some(list.clone());
+                if shared.borrow().page == "artists" { paint_artists(&shared, &list); }
+            });
+        });
+    });
+}
+
+fn paint_artists(shared: &Shared, list: &[sources::Artist]) {
+    let (ui, rt, weak) = { let a = shared.borrow(); (a.ui.upgrade().unwrap(), a.rt.clone(), a.ui.clone()) };
+    let name = |p: &str| match p { "spotify" => "Spotify", _ => "SoundCloud" };
+    let items: Vec<Item> = list.iter().map(|a| Item {
+        name: a.name.clone().into(),
+        sub: a.plats().into_iter().map(name).collect::<Vec<_>>().join(" \u{b7} ").into(),
+        art: slint::Image::default(),
+        plat: a.plats().first().copied().unwrap_or("soundcloud").into(),
+    }).collect();
+    ui.set_page_sub(if list.is_empty() { "Artists you follow on SoundCloud and Spotify show here.".into() } else { format!("{} you follow on SoundCloud and Spotify.", plural(list.len(), "artist", "artists")).into() });
+    let model = Rc::new(VecModel::from(items));
+    ui.set_artists(ModelRc::from(model.clone()));
+    ARTIST_MODEL.with(|m| *m.borrow_mut() = Some(model));
+    // their pictures, as they come
+    let urls: Vec<String> = list.iter().map(|a| a.img.clone()).collect();
+    rt.spawn(async move {
+        for (k, url) in urls.into_iter().enumerate() {
+            if url.is_empty() { continue; }
+            if let Some(px) = player::fetch_round(url, 170).await {
+                let _ = weak.upgrade_in_event_loop(move |_| {
+                    ARTIST_MODEL.with(|m| {
+                        if let Some(model) = m.borrow().as_ref() {
+                            if let Some(mut it) = model.row_data(k) { it.art = slint::Image::from_rgba8(px); model.set_row_data(k, it); }
+                        }
+                    });
+                });
+            }
+        }
+    });
+}
+
+fn open_artist(shared: &Shared, i: usize) {
+    let Some(a) = shared.borrow().artists.as_ref().and_then(|l| l.get(i).cloned()) else { return };
+    let name = |p: &str| match p { "spotify" => "Spotify", _ => "SoundCloud" };
+    let on = a.plats().into_iter().map(name).collect::<Vec<_>>().join(" and ");
+    show_tracks(shared, "artist", &a.name, "Loading...".into(), Vec::new(), true);
+    load_into(shared, "artist", a.name.clone(), async move {
+        let t = sources::artist_tracks(&a).await;
+        let sub = format!("You follow them on {on}. {}.", plural(t.len(), "track", "tracks"));
         (t, sub)
     });
 }
@@ -1361,7 +1442,7 @@ fn main() -> Result<(), slint::PlatformError> {
         rt: rt.handle().clone(), engine: engine.clone(), ui: ui.as_weak(), rows, qrows, lyric_lines,
         library: Vec::new(), playlists: Vec::new(), web: webstate::load(), page: "library".into(),
         page_all: Vec::new(), page_tracks: Vec::new(), chip: 0, shelves: Vec::new(), queue: queue::Queue::default(), panel_map: Vec::new(), side_map: Vec::new(),
-        here: None, history: Vec::new(), fav_only: false, shuffle_on: false, shuffle_backup: None, repeat: "off".into(),
+        here: None, history: Vec::new(), artists: None, fav_only: false, shuffle_on: false, shuffle_backup: None, repeat: "off".into(),
         autoplay: true, ap_busy: false, ap_then_play: false, ap_failed: None, resume_ms: None, loaded: false, accent: ("#8e9bff".into(), "#8e9bff".into()), started_secs: 0, token: 0,
         lyrics: Vec::new(), heard: (String::new(), 0.0, false), last_pos: 0,
     }));
@@ -1451,6 +1532,8 @@ fn main() -> Result<(), slint::PlatformError> {
     ui.on_nav(move |p| go(&s, Place::Page(p.into())));
     let s = shared.clone();
     ui.on_back(move || go_back(&s));
+    let s = shared.clone();
+    ui.on_artist(move |i| go(&s, Place::Artist(i as usize)));
     let s = shared.clone();
     ui.on_side(move |i| {
         let at = s.borrow().side_map.get(i as usize).copied();
@@ -1659,7 +1742,7 @@ fn main() -> Result<(), slint::PlatformError> {
         let s = shared.clone();
         let started = std::time::Instant::now();
         let mut step_no = 0usize;
-        let plan: [(u64, &str); 14] = [(9, "play"), (13, "library"), (14, "scoff"), (15, "scon"), (16, "discover"), (24, "rediscover"), (27, "sets"), (31, "stats"), (35, "now"), (39, "search"), (42, "settings"), (44, "light"), (46, "autoplay"), (58, "end")];
+        let plan: [(u64, &str); 16] = [(9, "play"), (13, "library"), (14, "scoff"), (15, "scon"), (16, "discover"), (24, "rediscover"), (27, "sets"), (31, "stats"), (35, "now"), (39, "search"), (42, "settings"), (44, "light"), (46, "artists"), (54, "artist"), (60, "autoplay"), (72, "end")];
         t.start(slint::TimerMode::Repeated, std::time::Duration::from_millis(250), move || {
             let Some(&(at, what)) = plan.get(step_no) else { return };
             if started.elapsed().as_secs() < at { return; }
@@ -1694,6 +1777,8 @@ fn main() -> Result<(), slint::PlatformError> {
                     ui.set_queue_open(true);
                 }
                 "search" => { ui.set_search_text("deadmau5".into()); ui.invoke_search("deadmau5".into()); }
+                // the first artist you follow
+                "artist" => { println!("selftest: following {} artists", ui.get_artists().row_count()); if ui.get_artists().row_count() > 0 { ui.invoke_artist(0); } }
                 "end" => {
                     println!("selftest: remote state {}", remote_state(&s.borrow()));
                     println!("selftest: queue {} ({} autoplay, {} requested), {}", s.borrow().queue.items.len(), s.borrow().queue.items.iter().filter(|q| q.auto).count(), s.borrow().queue.items.iter().filter(|q| !q.by.is_empty()).count(), ui.get_autoplay_note());
@@ -1715,6 +1800,7 @@ thread_local! {
     static ROW_ART: RefCell<ArtCache> = RefCell::new(ArtCache::default());
     static SHARED: RefCell<Option<Shared>> = const { RefCell::new(None) };
     static SHELF_MODELS: RefCell<Vec<Rc<VecModel<Tile>>>> = const { RefCell::new(Vec::new()) };
+    static ARTIST_MODEL: RefCell<Option<Rc<VecModel<Item>>>> = const { RefCell::new(None) };
     #[allow(clippy::type_complexity)]
     static STAT_MODELS: RefCell<Option<(Rc<VecModel<Item>>, Rc<VecModel<Item>>)>> = const { RefCell::new(None) };
 }

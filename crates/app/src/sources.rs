@@ -25,12 +25,15 @@ fn next_path(v: &Value) -> Option<String> {
 async fn sc_pages(first: String, max: usize) -> Vec<Track> {
     let mut out = Vec::new();
     let mut path = first;
+    let mut empty = 0;
     while out.len() < max {
         let Ok(v) = core::soundcloud::api_get(path.clone()).await else { break };
         let list = items(&v);
         out.extend(list.iter().filter_map(Track::soundcloud));
+        // (a page can come back empty, with more after it: a few of those in a row and it stops)
+        empty = if list.is_empty() { empty + 1 } else { 0 };
         match next_path(&v) {
-            Some(n) if !list.is_empty() => path = n,
+            Some(n) if empty < 4 => path = n,
             _ => break,
         }
     }
@@ -162,6 +165,99 @@ pub fn interleave(lists: Vec<Vec<Track>>) -> Vec<Track> {
             return out;
         }
     }
+}
+
+// ---------- the artists you follow (the Artists page) ----------
+#[derive(Clone, Debug, Default)]
+pub struct Artist {
+    pub name: String,
+    pub img: String,
+    /// their SoundCloud user id and Spotify artist id, where you follow them
+    pub sc: Option<u64>,
+    pub sp: Option<String>,
+}
+
+impl Artist {
+    pub fn plats(&self) -> Vec<&'static str> {
+        [self.sc.is_some().then_some("soundcloud"), self.sp.is_some().then_some("spotify")].into_iter().flatten().collect()
+    }
+}
+
+fn name_key(s: &str) -> String {
+    s.to_lowercase().chars().filter(|c| c.is_alphanumeric()).collect()
+}
+
+/// Everyone you follow on SoundCloud and Spotify, as one list (the same name is one artist), A to Z
+pub async fn followed_artists() -> Vec<Artist> {
+    let mut by: std::collections::BTreeMap<String, Artist> = Default::default();
+    let mut add = |name: &str, img: &str, sc: Option<u64>, sp: Option<String>| {
+        let k = name_key(name);
+        if k.is_empty() {
+            return;
+        }
+        let a = by.entry(k).or_insert_with(|| Artist { name: name.to_string(), ..Default::default() });
+        if a.img.is_empty() {
+            a.img = img.to_string();
+        }
+        if sc.is_some() { a.sc = sc; }
+        if sp.is_some() { a.sp = sp; }
+    };
+    if core::soundcloud::signed_in() {
+        let mut path = "/me/followings?limit=200&linked_partitioning=true".to_string();
+        for _ in 0..10 {
+            let Ok(v) = core::soundcloud::api_get(path.clone()).await else { break };
+            for u in items(&v) {
+                let img = u["avatar_url"].as_str().unwrap_or("").replace("-large", "-t200x200");
+                add(u["username"].as_str().unwrap_or(""), &img, u["id"].as_u64(), None);
+            }
+            match next_path(&v) { Some(n) => path = n, None => break }
+        }
+    }
+    if core::spotify::spotify_signed_in() {
+        let mut after = String::new();
+        for _ in 0..20 {
+            let q = format!("/me/following?type=artist&limit=50{}", if after.is_empty() { String::new() } else { format!("&after={after}") });
+            let Ok(v) = core::spotify::spotify_api("GET".into(), q, None).await else { break };
+            let page = &v["artists"];
+            for a in page["items"].as_array().cloned().unwrap_or_default() {
+                let img = a["images"].as_array().and_then(|i| i.last()).and_then(|i| i["url"].as_str()).unwrap_or("").to_string();
+                add(a["name"].as_str().unwrap_or(""), &img, None, a["id"].as_str().map(String::from));
+            }
+            after = page["cursors"]["after"].as_str().unwrap_or("").to_string();
+            if after.is_empty() || page["next"].is_null() { break; }
+        }
+    }
+    let mut list: Vec<Artist> = by.into_values().collect();
+    list.sort_by_key(|a| a.name.to_lowercase());
+    list
+}
+
+/// An artist's tracks: their SoundCloud uploads and their songs on Spotify, taking turns
+pub async fn artist_tracks(a: &Artist) -> Vec<Track> {
+    let sc = async {
+        match a.sc {
+            Some(id) => sc_pages(format!("/users/{id}/tracks?access=playable&limit=50&linked_partitioning=true"), 100).await,
+            None => Vec::new(),
+        }
+    };
+    let sp = async {
+        if a.sp.is_none() {
+            return Vec::new();
+        }
+        let want = name_key(&a.name);
+        let q = urlencode(&format!("artist:\"{}\"", a.name.replace('"', "")));
+        // (Spotify gives an app 10 at a time: three pages of them)
+        let mut out = Vec::new();
+        for offset in [0, 10, 20] {
+            let Ok(v) = core::spotify::spotify_api("GET".into(), format!("/search?type=track&limit=10&offset={offset}&market=from_token&q={q}"), None).await else { break };
+            let page = v["tracks"]["items"].as_array().cloned().unwrap_or_default();
+            out.extend(page.iter().filter_map(Track::spotify).filter(|t| t.artist.split(", ").any(|n| name_key(n) == want)));
+            if page.len() < 10 { break; }
+        }
+        out
+    };
+    let (sc, sp) = tokio::join!(sc, sp);
+    interleave(vec![sc, sp])
 }
 
 /// New from the artists you follow on SoundCloud
