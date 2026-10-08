@@ -14,6 +14,17 @@ const dedupeTracks = (list) => { const seen = new Set(); return list.filter((t) 
 const freshPick = (t) => !isMix(t) && langOk(t) && recOk(t);
 const hueOf = (s) => [...String(s)].reduce((h, c) => (h * 31 + c.charCodeAt(0)) % 360, 7);
 
+// Already in your likes: that very track, or the same song liked on any platform (by its name)
+function likedSongs() {
+  const keys = new Set();
+  const add = (t) => { const k = songKey(t); if (k) keys.add(k); };
+  likedTracks.filter(isLikedTrack).forEach(add);
+  (spLikedCache || []).forEach(add);
+  ytLikedTracks().forEach(add);
+  return keys;
+}
+const notLiked = (keys) => (t) => !isLikedTrack(t) && !keys.has(songKey(t));
+
 // ---------- your top artists, from your likes on every platform and what you play ----------
 // One entry per artist, whichever platforms you like them on, so a mix can draw on all of them.
 const artistKey = (s) => String(s || "").toLowerCase().replace(/[^a-z0-9À-ɏ]+/g, "");
@@ -75,19 +86,34 @@ async function freshFor(crew, plats) {
     ? ytSearch(crew[0].name).then((found) => (found[0] ? ytRadio(found[0].ytId) : [])).catch(() => [])
     : Promise.resolve([]);
   const [a, b, c] = await Promise.all([sc, sp, yt]);
-  return withoutRecent(interleave([shuffledCopy(a), shuffledCopy(b), shuffledCopy(c)]).filter((t) => freshPick(t) && !isLikedTrack(t)));
+  const fresh = notLiked(likedSongs());
+  return withoutRecent(interleave([shuffledCopy(a), shuffledCopy(b), shuffledCopy(c)]).filter((t) => freshPick(t) && fresh(t)));
 }
 
-// Your Mix: what you like by these artists, on any platform (and your files), woven with new ones
+// Your Mix: mostly new music in the vein of these artists, with some you like by them (on any
+// platform, and your files) woven in: two new ones for each one you know
 async function buildYourMix(crew, plats) {
-  const familiar = shuffledCopy(crew.flatMap((a) => a.liked.soundcloud.concat(a.liked.spotify, a.liked.youtube, a.files))).slice(0, 18);
-  return dedupeTracks(interleave([familiar, await freshFor(crew, plats)])).slice(0, 60);
+  const familiar = shuffledCopy(crew.flatMap((a) => a.liked.soundcloud.concat(a.liked.spotify, a.liked.youtube, a.files))).slice(0, 12);
+  const fresh = await freshFor(crew, plats);
+  const out = [];
+  for (let i = 0, k = 0; i < fresh.length || k < familiar.length; ) {
+    if (i < fresh.length) out.push(fresh[i++]);
+    if (i < fresh.length) out.push(fresh[i++]);
+    if (k < familiar.length) out.push(familiar[k++]);
+  }
+  return dedupeTracks(out).slice(0, 60);
 }
 
 // An artist station: that sound, mostly from other artists
 async function buildStation(a, plats) {
   const own = shuffledCopy(a.liked.soundcloud.concat(a.liked.spotify, a.liked.youtube, a.files)).slice(0, 4);
   return dedupeTracks(own.concat(await freshFor([a], plats))).slice(0, 60);
+}
+
+// The same mix with only music you haven't liked (I'm Feeling Lucky)
+async function onlyNew(build) {
+  const keep = notLiked(likedSongs());
+  return dedupeTracks((await build()).filter((t) => !isMix(t) && keep(t)));
 }
 
 // A genre, from every active platform
@@ -129,7 +155,7 @@ async function buildFeed(plats) {
       art: artUrl(a.liked.soundcloud[0], "t500x500"), sub: who,
       mix: makeMix({ id: "mix:yours:" + a.key, title: "Your Mix " + n,
         desc: who + ": tracks you like, mixed with new ones from " + crewPlats(crew, plats).map((p) => PLATFORMS[p].name).join(", ") + ".",
-        build: () => buildYourMix(crew, plats) }),
+        build: () => buildYourMix(crew, plats), fresh: () => onlyNew(() => freshFor(crew, plats)) }),
     };
   });
   const madeForYou = fromSpotify.daily.map(spotifyTile).concat(yours);
@@ -147,7 +173,7 @@ async function buildFeed(plats) {
         kind: "station", plats: crewPlats([a], plats), art: artUrl(a.liked.soundcloud[0], "t500x500"), name: a.name, hue: hueOf(a.name),
         sub: "Artist station",
         mix: makeMix({ id: "mix:station:" + a.key, title: a.name + " station",
-          desc: "Music like " + a.name + ".", build: () => buildStation(a, plats) }),
+          desc: "Music like " + a.name + ".", build: () => buildStation(a, plats), fresh: () => onlyNew(() => freshFor([a], plats)) }),
       })),
     });
   }
@@ -160,7 +186,7 @@ async function buildFeed(plats) {
       tiles: GENRES.map((g) => ({
         kind: "genre", plats: genrePlats, name: g, hue: hueOf(g), sub: "Trending",
         mix: makeMix({ id: "mix:genre:" + g, title: g, desc: "Trending " + g + ", from " + genrePlats.map((p) => PLATFORMS[p].name).join(" and ") + ".",
-          build: () => buildGenre(g, genrePlats) }),
+          build: () => buildGenre(g, genrePlats), fresh: () => onlyNew(() => buildGenre(g, genrePlats)) }),
       })),
     });
   }
@@ -171,13 +197,15 @@ async function buildFeed(plats) {
 async function trackShelves(plats) {
   const out = [];
   const pickers = plats.filter((p) => DISCOVER_PICKERS[p]);
-  const likes = await Promise.allSettled(pickers.map((p) => DISCOVER_PICKERS[p]("foryou")));
-  const more = dedupeTracks(interleave(likes.filter((r) => r.status === "fulfilled").map((r) => shuffledCopy(r.value.list)))).slice(0, 30);
-  if (more.length) out.push({ title: "More of what you like", tracks: more });
+  const keep = notLiked(likedSongs());
   if (plats.includes("soundcloud")) {
     const f = await scDiscover("following").catch(() => null);
-    if (f && f.list.length) out.push({ title: "New from artists you follow", tracks: f.list.slice(0, 30) });
+    const newest = f ? f.list.filter(keep).sort((a, b) => String(b.created_at || "").localeCompare(String(a.created_at || ""))) : [];
+    if (newest.length) out.push({ title: "New from artists you follow", tracks: newest.slice(0, 30) });
   }
+  const likes = await Promise.allSettled(pickers.map((p) => DISCOVER_PICKERS[p]("foryou")));
+  const more = dedupeTracks(interleave(likes.filter((r) => r.status === "fulfilled").map((r) => shuffledCopy(r.value.list)))).filter(keep).slice(0, 30);
+  if (more.length) out.push({ title: "New for you", tracks: more });
   return out;
 }
 
@@ -375,26 +403,32 @@ async function openFeed(fresh) {
   // These finish even if you open a tile meanwhile, so the feed is complete when you come back
   const later = await trackShelves(plats);
   if (!feedCache || feedCache.shelves !== shelves) return;   // refreshed since
-  // "More of what you like" goes second, the rest at the end
-  if (later.length) shelves.splice(Math.min(1, shelves.length), 0, later[0]);
-  shelves.push(...later.slice(1));
+  // new music first: new from artists you follow, and new for you, above the mixes
+  shelves.unshift(...later);
   if (view !== "discover") return;
   paintFeed(shelves);
   if (tok === loadToken) say(shelves.length ? "" : "Like some tracks on SoundCloud or Spotify, and Discover will fill up with music for you.");
 }
 
-// I'm Feeling Lucky: a random mix that draws on more than one platform (any mix if there's none)
+// I'm Feeling Lucky: a random mix (one that draws on more than one platform, if there are any), made
+// only of music you haven't liked anywhere. One that comes back too short is passed over for another.
 async function feelingLucky() {
   if (!feedCache) { say("Finding music for you..."); await openFeed(); }
   const tiles = (feedCache ? feedCache.shelves : []).flatMap((s) => s.tiles || [])
-    .filter((t) => t.mix && t.mix.build && t.kind !== "playlist");
+    .filter((t) => t.mix && t.mix.fresh && t.kind !== "playlist");
   const mixed = tiles.filter((t) => t.plats.length > 1);
-  const pool = mixed.length ? mixed : tiles;
+  const pool = shuffleInPlace((mixed.length ? mixed : tiles).slice());
   if (!pool.length) { say("Nothing to pick from yet. Like a few tracks, and Discover will fill up."); return; }
-  const tile = pool[Math.floor(Math.random() * pool.length)];
-  say("Feeling lucky: " + tile.mix.title + "...");
-  await playTile(tile);
-  if (curTrack()) say("Feeling lucky: playing " + tile.mix.title + ".");
+  for (const tile of pool.slice(0, 4)) {
+    say("Feeling lucky: " + tile.mix.title + "...");
+    let list = [];
+    try { list = await tile.mix.fresh(); } catch (e) { list = []; }
+    if (list.length < 8) continue;
+    startList(list, 0, false, tile.mix.title + " (all new)");
+    say("Feeling lucky: " + tile.mix.title + ", all music you haven't liked.");
+    return;
+  }
+  say("Couldn't find enough new music for a mix just now. Try again in a bit.");
 }
 
 // Clicks on shelves (Discover's, and Search's): the play button plays; the tile opens (its own page,
