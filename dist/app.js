@@ -154,11 +154,18 @@ function platformButton(t) {
   return b;
 }
 
-// A track's artists: "A, B & C" (or "A x B") is three, each a link to their own page; one is the usual
-// link. The line keeps its own commas, ampersands and x's. An X that ends a name ("Lil Nas X & ...")
-// isn't one: it's followed by another separator, or nothing.
-const ARTIST_SEP = /(\s*,\s*|\s+&\s+|\s+[xX×]\s+(?![&,]|$))/;
-const artistNames = (t) => String(artistName(t) || "").split(ARTIST_SEP).filter((x, i) => i % 2 === 0 && x.trim()).map((x) => x.trim());
+// A track's artists: "A, B & C" (or "A x B", "A feat. B", "A ft. B", "A (feat. B)") is three, each a
+// link to their own page; one is the usual link. The line keeps its own commas, ampersands, x's and
+// feat.s. An X that ends a name ("Lil Nas X & ...") isn't one: it's followed by another separator, or
+// nothing. "ft" inside a name ("Daft Punk", "Swift") isn't either: it has to start a word after
+// another name ("Ft Lauderdale" at the start is a name).
+const ARTIST_SEP = /(\s*,\s*|\s+&\s+|\s+[x×]\s+(?![&,]|$)|(?:\s+\(?|\s*\()(?:feat\.?|ft\.?|featuring)\s+)/i;
+// a bracketed feat.'s closing bracket isn't part of the name (a name's own brackets are)
+const artistPart = (part) => {
+  const p = part.trim();
+  return p.endsWith(")") && !p.includes("(") ? { name: p.slice(0, -1).trim(), close: ")" } : { name: p, close: "" };
+};
+const artistNames = (t) => String(artistName(t) || "").split(ARTIST_SEP).filter((x, i) => i % 2 === 0 && x.trim()).map((x) => artistPart(x).name).filter(Boolean);
 
 function fillArtists(box, t) {
   box.replaceChildren();
@@ -171,13 +178,14 @@ function fillArtists(box, t) {
     return;
   }
   String(artistName(t)).split(ARTIST_SEP).forEach((part, i) => {
-    if (i % 2) { box.append(part); return; }   // the comma or " & " between them
-    const n = part.trim();
+    if (i % 2) { box.append(part); return; }   // the comma, " & " or " feat. " between them
+    const { name: n, close } = artistPart(part);
     if (!n) return;
     const s = el("span", "artistPart", n);
     s.dataset.name = n;
     s.title = "Open " + n + "'s page";
     box.append(s);
+    if (close) box.append(close);
   });
 }
 
