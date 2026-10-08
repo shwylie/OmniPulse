@@ -895,22 +895,30 @@
           <summary>Alert Options</summary>
           <div class="row">
             <div>
+              <div class="lbl">Your Bot</div>
+              <div class="note">What sends the alerts. Its setup shows below.</div>
+            </div>
+            <select id="alertBot" class="narrow"><option value="streamerbot">Streamer.bot</option><option value="mixitup">Mix It Up</option><option value="generic">Generic</option></select>
+          </div>
+          <div class="row" id="sbRow">
+            <div>
               <div class="lbl">Streamer.bot</div>
               <div class="note">Its WebSocket server (Servers/Clients &gt; WebSocket Server), started.</div>
               <input id="sbHost" type="text" spellcheck="false" aria-label="Streamer.bot WebSocket address" placeholder="127.0.0.1:8080">
             </div>
             <label class="switch"><input type="checkbox" id="sbOn"><span></span></label>
           </div>
-          <div class="row stack">
+          <div class="row stack" id="alertWebRow">
             <div>
               <div class="lbl">Web Request</div>
-              <div class="note">For Mix It Up's Web Request action, or anything else. Type: follow, sub, gift, bits, kicks, donation, raid, hypetrain, poll, ban, watchstreak or a custom alert's trigger; then user, amount and message.</div>
+              <div class="note" id="alertWebNote"></div>
             </div>
             <div class="widgetRow">
               <input id="alertUrl" type="text" readonly aria-label="Alert address">
               <button id="alertCopy" class="soft">Copy</button>
             </div>
           </div>
+          <div class="botHelp" id="alertBotHelp"></div>
           <div class="row">
             <div>
               <div class="lbl">Transition</div>
@@ -984,7 +992,7 @@
         <summary>Request Options</summary>
         <div class="row">
           <div class="lbl">Chat Bot</div>
-          <select id="botSel" class="narrow"><option value="streamerbot">Streamer.bot</option><option value="mixitup">Mix It Up</option><option value="other">Another bot</option></select>
+          <select id="botSel" class="narrow"><option value="streamerbot">Streamer.bot</option><option value="mixitup">Mix It Up</option><option value="other">Generic</option></select>
         </div>
         <p class="note" id="reqPlat"></p>
         <p class="note warn" id="reqNote"></p>

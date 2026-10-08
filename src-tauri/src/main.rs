@@ -204,7 +204,12 @@ fn yt_remove() -> Result<u64, String> { tools::uninstall() }
 
 // ---------- OBS widget, local music, chat requests, Stream Deck remote ----------
 #[tauri::command]
-fn widget_start(port: u16) -> Result<String, String> { widget::widget_start(port) }
+fn widget_start(port: u16, remote: Option<bool>, key: Option<String>) -> Result<String, String> {
+    widget::widget_start(port, remote.unwrap_or(false), &key.unwrap_or_default())
+}
+/// This PC's address on your network, for bots on other devices
+#[tauri::command]
+fn lan_ip() -> Option<String> { omnipulse_core::lan_ip() }
 #[tauri::command]
 fn widget_stop() { widget::widget_stop() }
 #[tauri::command]
@@ -249,7 +254,7 @@ fn local_tracks() -> Value { local::local_tracks() }
 #[tauri::command]
 fn local_server() -> Value { local::local_server() }
 #[tauri::command]
-fn requests_start(port: u16, key: String) -> Result<String, String> { requests::requests_start(port, key) }
+fn requests_start(port: u16, key: String, remote: Option<bool>) -> Result<String, String> { requests::requests_start(port, key, remote.unwrap_or(false)) }
 #[tauri::command]
 fn requests_stop() { requests::requests_stop() }
 #[tauri::command]
@@ -774,7 +779,7 @@ fn main() {
             lyrics_get, presence_set, presence_clear,
             lastfm_status, lastfm_connect, lastfm_disconnect, lastfm_call, lastfm_recent, spotify_wait,
             stream_resolve, presence_test, taskbar_state,
-            widget_start, widget_stop, widget_update, widget_alert, alert_media_set, alert_media_clear,
+            widget_start, lan_ip, widget_stop, widget_update, widget_alert, alert_media_set, alert_media_clear,
             youtube_status, youtube_connect, youtube_disconnect, like_youtube_track, unlike_youtube_track,
             local_folders, local_set_folders, local_scan, local_status, local_tracks, local_server,
             requests_start, requests_stop, request_result,

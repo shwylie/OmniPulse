@@ -25,6 +25,9 @@ pub const ALERT_KINDS: [&str; 11] = ["follow", "sub", "gift", "bits", "kicks", "
 /// The last few alerts, for the page to pick up (it shows the ones newer than it has seen)
 static ALERTS: Mutex<VecDeque<Value>> = Mutex::new(VecDeque::new());
 static ALERT_ID: AtomicU64 = AtomicU64::new(0);
+/// With bots on other devices allowed (widget_start's remote), the key their /alert requests need.
+/// Programs on this PC never need it; other devices can only reach /alert, never the widget itself.
+static ALERT_KEY: Mutex<String> = Mutex::new(String::new());
 const ALERTS_KEPT: usize = 20;
 
 // Changes whenever widget.html changes; an open widget compares it and reloads itself
@@ -198,7 +201,7 @@ pub fn widget_serve(listener: TcpListener, gen: u64) {
             break; // switched off or restarted
         }
         match listener.accept() {
-            Ok((mut stream, _)) => {
+            Ok((mut stream, peer)) => {
                 let _ = stream.set_nonblocking(false);
                 let _ = stream.set_read_timeout(Some(Duration::from_secs(2)));
                 let mut buf = vec![0u8; 8192];
@@ -208,6 +211,15 @@ pub fn widget_serve(listener: TcpListener, gen: u64) {
                 let method = first.next().unwrap_or("GET").to_string();
                 let target = first.next().unwrap_or("/").to_string();
                 let (path, query) = target.split_once('?').unwrap_or((target.as_str(), ""));
+                // another device (a bot elsewhere, through your router): only /alert, and only with the key
+                if !peer.ip().is_loopback() {
+                    let key = ALERT_KEY.lock().map(|k| k.clone()).unwrap_or_default();
+                    let given = query_map(query).get("key").and_then(|v| v.as_str().map(String::from)).unwrap_or_default();
+                    if path != "/alert" || key.is_empty() || given != key {
+                        reply(&mut stream, "403 Forbidden", "application/json", json!({ "ok": false, "error": "Wrong or missing key." }).to_string().as_bytes());
+                        continue;
+                    }
+                }
                 match path {
                     "/now.json" => {
                         let mut v = WIDGET_STATE.lock().ok().and_then(|g| g.clone()).unwrap_or_else(|| json!({ "playing": false }));
@@ -257,12 +269,17 @@ pub fn widget_serve(listener: TcpListener, gen: u64) {
     }
 }
 
-pub fn widget_start(port: u16) -> Result<String, String> {
+/// remote: bots on other devices may send alerts too (they need key); otherwise only this PC is heard
+pub fn widget_start(port: u16, remote: bool, key: &str) -> Result<String, String> {
     // Stops any earlier server first
     let gen = WIDGET_GEN.fetch_add(1, Ordering::SeqCst) + 1;
+    if let Ok(mut k) = ALERT_KEY.lock() {
+        *k = if remote { key.to_string() } else { String::new() };
+    }
+    let host = if remote { "0.0.0.0" } else { "127.0.0.1" };
     let mut last_err = String::new();
     for _ in 0..15 {
-        match TcpListener::bind(("127.0.0.1", port)) {
+        match TcpListener::bind((host, port)) {
             Ok(listener) => {
                 std::thread::spawn(move || widget_serve(listener, gen));
                 return Ok(format!("http://127.0.0.1:{port}/"));

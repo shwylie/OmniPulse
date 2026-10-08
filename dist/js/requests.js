@@ -34,7 +34,7 @@ async function reqApply() {
   const port = Number(prefs.reqPort) || 7879;
   $("reqPort").value = port;
   try {
-    await invoke("requests_start", { port, key: prefs.reqKey });
+    await invoke("requests_start", { port, key: prefs.reqKey, remote: !!prefs.botRemote });
     const base = "http://127.0.0.1:" + port;
     $("reqUrl").value = base + "/request?key=" + prefs.reqKey + "&user=USER&q=SONG";
     $("reqNowUrl").value = base + "/now";
@@ -317,8 +317,8 @@ function reqRenderBot() {
         li("The reply is one line of plain text, ready to post in chat. Add ", code("&format=json"),
            " to get JSON instead: ok, message, title, artist, url and position."),
         li("Call ", code(base + "/now"), " for the current song (no key needed). It also supports ", code("&format=json"), "."),
-        li("Only programs on this PC can reach these addresses."),
       ); return l; })(),
+      botRemoteBlock("requests", port, "/request?key=" + key + "&user=USERNAME&q=SONG"),
     );
   }
 }

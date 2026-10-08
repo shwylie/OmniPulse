@@ -112,7 +112,7 @@ pub fn widget_start(prefs: &Value) -> Option<String> {
     if !set(prefs, "widget") {
         return None;
     }
-    core::widget::widget_start(prefs["widgetPort"].as_u64().map(|p| p as u16).unwrap_or(7878)).ok()
+    core::widget::widget_start(prefs["widgetPort"].as_u64().map(|p| p as u16).unwrap_or(7878), false, "").ok()
 }
 
 /// The alerts' settings, for the widget (as alertsCfg in js/widget.js)

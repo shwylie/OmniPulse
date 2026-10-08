@@ -59,7 +59,8 @@ async function widgetApply() {
     return;
   }
   try {
-    const url = await invoke("widget_start", { port: Number(prefs.widgetPort) || 7878 });
+    if (prefs.botRemote && !prefs.alertKey) { prefs.alertKey = reqKeyNew() + reqKeyNew(); savePrefs(); }
+    const url = await invoke("widget_start", { port: Number(prefs.widgetPort) || 7878, remote: !!prefs.botRemote && alertsOn(), key: prefs.alertKey || "" });
     $("widgetUrl").value = url;
     alertsPaint();   // its web request address goes by the same port
     $("widgetNote").textContent = WIDGET_NOTE;
@@ -530,6 +531,51 @@ function alertsDrag() {
   list.addEventListener("dragend", done);
 }
 
+// ---------- bots that aren't on this PC (Generic) ----------
+// Off unless switched on: then the alerts and song request servers listen to other devices too
+// (alerts need a key from them; requests always do). An online bot needs the port forwarded on your
+// router, and your public IP address, which is yours to keep to yourself.
+let lanIp = "";
+async function botRemoteSet(on) {
+  prefs.botRemote = on;
+  if (on && !prefs.alertKey) prefs.alertKey = reqKeyNew() + reqKeyNew();
+  savePrefs();
+  await widgetApply();
+  if (typeof reqApply === "function") await reqApply();
+  document.querySelectorAll(".botRemoteOn").forEach((b) => { b.checked = on; });
+  alertsPaint();
+  if (typeof reqRenderBot === "function") reqRenderBot();
+}
+
+// The part of a bot's setup about bots elsewhere: what, how, and a word of warning. what: "alerts" or "requests"
+function botRemoteBlock(what, port, path) {
+  const box = el("div", "botRemote");
+  const row = el("div", "row");
+  const txt = el("div");
+  txt.append(el("div", "lbl", "Bots on Other Devices"), el("div", "note", "Off: only programs on this PC can reach these addresses. On: other devices can too" + (what === "alerts" ? " (with the key in their address)." : " (with the key).")));
+  const sw = el("label", "switch");
+  const cb = el("input", "botRemoteOn");
+  cb.type = "checkbox";
+  cb.checked = !!prefs.botRemote;
+  cb.addEventListener("change", () => botRemoteSet(cb.checked));
+  sw.append(cb, el("span"));
+  row.append(txt, sw);
+  box.append(row);
+  if (prefs.botRemote) {
+    if (!lanIp) invoke("lan_ip").then((ip) => { if (ip) { lanIp = ip; alertsPaint(); if (typeof reqRenderBot === "function") reqRenderBot(); } }).catch(() => {});
+    const ip = lanIp || "THIS-PC";
+    const l = el("ol");
+    const li = (...parts) => { const x = el("li"); parts.forEach((p) => x.append(typeof p === "string" ? document.createTextNode(p) : p)); return x; };
+    l.append(
+      li("A bot on another computer at home: give it ", el("code", "", "http://" + ip + ":" + port + path), " in place of 127.0.0.1."),
+      li("An online bot (one that isn't on your network): on your router, forward port ", el("code", "", String(port)), " (TCP) to this PC, ", el("code", "", ip), ". Then give the bot the same address with your public IP address in place of ", el("code", "", ip), "."),
+    );
+    box.append(l);
+    box.append(el("p", "note warn", "Careful: your public IP address points to your home. Don't show it on stream or in screenshots, and don't share it; keep Streamer Mode on while you set this up. With it and the key, anyone could " + (what === "alerts" ? "send alerts to your stream." : "request songs.")));
+  }
+  return box;
+}
+
 function alertsPaint() {
   $("alertsOn").checked = alertsOn();
   $("alertsBody").hidden = !alertsOn();
@@ -549,8 +595,43 @@ function alertsPaint() {
   const v = prefs.alertVol === undefined ? 0.8 : Number(prefs.alertVol);
   $("alertVol").value = String(Math.round(v * 100));
   $("alertVolVal").textContent = Math.round(v * 100) + "%";
-  const base = ($("widgetUrl").value || "http://127.0.0.1:" + (Number(prefs.widgetPort) || 7878) + "/").replace(/\/$/, "");
-  $("alertUrl").value = base + "/alert?type=follow&user=NAME&amount=&message=";
+  const port = Number(prefs.widgetPort) || 7878;
+  const bot = prefs.alertBot || (prefs.reqBot === "mixitup" ? "mixitup" : prefs.reqBot === "other" ? "generic" : "streamerbot");
+  $("alertBot").value = bot;
+  $("sbRow").hidden = bot !== "streamerbot";
+  $("alertWebRow").hidden = bot === "streamerbot";
+  const vars = bot === "mixitup" ? "type=follow&user=$username" : "type=follow&user=NAME&amount=&message=";
+  const keyPart = prefs.botRemote && prefs.alertKey ? "key=" + prefs.alertKey + "&" : "";
+  $("alertUrl").value = "http://127.0.0.1:" + port + "/alert?" + keyPart + vars;
+  $("alertWebNote").textContent = bot === "mixitup" ? "In Mix It Up, its Web Request action, with this address." : "Your bot opens this address when something happens.";
+  const help = $("alertBotHelp");
+  help.replaceChildren();
+  const code = (s) => el("code", "", s);
+  const li = (...parts) => { const x = el("li"); parts.forEach((p) => x.append(typeof p === "string" ? document.createTextNode(p) : p)); return x; };
+  const ol = el("ol");
+  const TYPES = "follow, sub, gift, bits, kicks, donation, raid, hypetrain, poll, ban, watchstreak";
+  if (bot === "streamerbot") {
+    ol.append(
+      li("In Streamer.bot: Servers/Clients > WebSocket Server. Tick Auto Start, then Start Server."),
+      li("Put its address and port here (", code("127.0.0.1:8080"), " unless you've changed it), and switch it on."),
+      li("That's all: follows, subs, bits, raids and the rest come through by themselves."),
+    );
+    help.append(ol);
+  } else if (bot === "mixitup") {
+    ol.append(
+      li("In Mix It Up, open the event to alert on (a follow, a sub, bits...) and add a Web Request action."),
+      li("Paste the address above, with ", code("type="), " set to that event: ", code(TYPES), "."),
+      li("Put Mix It Up's special identifiers in: ", code("user=$username"), ", and the amount and message for that event (its list of special identifiers has the right names, such as the bits or months)."),
+    );
+    help.append(ol);
+  } else {
+    ol.append(
+      li("When something happens, have your bot open the address above."),
+      li("Swap ", code("NAME"), " for your bot's name for the viewer, and fill in ", code("amount"), " and ", code("message"), " if it has them (or leave them empty)."),
+      li(code("type"), " says what happened: ", code(TYPES), ", or one of your own alerts' triggers."),
+    );
+    help.append(ol, botRemoteBlock("alerts", port, "/alert?" + keyPart + vars));
+  }
   if (typeof stateNotes === "function") stateNotes();
 }
 
@@ -563,6 +644,7 @@ function alertsInit() {
     alertsSave();
   });
   $("alertAnim").addEventListener("change", () => { prefs.alertAnim = $("alertAnim").value; alertsSave(); });
+  $("alertBot").addEventListener("change", () => { prefs.alertBot = $("alertBot").value; savePrefs(); alertsPaint(); });
   $("alertTrans").addEventListener("change", () => { prefs.alertTrans = $("alertTrans").value; alertsSave(); });
   $("alertSecs").addEventListener("change", () => { prefs.alertSecs = Number($("alertSecs").value); alertsSave(); });
   const stepIcon = (d) => { prefs.alertIcon = Math.round(Math.min(2, Math.max(0.6, alertIconScale() + d)) * 10) / 10; alertsSave(); alertsPaint(); };

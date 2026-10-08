@@ -138,14 +138,15 @@ pub fn req_serve(listener: TcpListener, gen: u64) {
     }
 }
 
-pub fn requests_start(port: u16, key: String) -> Result<String, String> {
+/// remote: bots on other devices may ask too (requests always need the key); otherwise only this PC
+pub fn requests_start(port: u16, key: String, remote: bool) -> Result<String, String> {
     if let Ok(mut k) = REQ_KEY.lock() {
         *k = key;
     }
     let gen = REQ_GEN.fetch_add(1, Ordering::SeqCst) + 1;
     let mut last_err = String::new();
     for _ in 0..15 {
-        match TcpListener::bind(("127.0.0.1", port)) {
+        match TcpListener::bind((if remote { "0.0.0.0" } else { "127.0.0.1" }, port)) {
             Ok(listener) => {
                 std::thread::spawn(move || req_serve(listener, gen));
                 return Ok(format!("http://127.0.0.1:{port}/"));

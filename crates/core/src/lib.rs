@@ -114,6 +114,13 @@ pub fn now_secs() -> u64 {
 }
 
 // Opens a SoundCloud page in the default browser (only soundcloud.com links).
+/// This PC's address on your network (where a bot on another device reaches it)
+pub fn lan_ip() -> Option<String> {
+    let s = std::net::UdpSocket::bind("0.0.0.0:0").ok()?;
+    s.connect(("192.0.2.1", 9)).ok()?;   // a documentation address: nothing is sent, it only picks the route
+    Some(s.local_addr().ok()?.ip().to_string())
+}
+
 pub fn open_url(url: String) -> Result<(), String> {
     if !(url.starts_with("https://soundcloud.com/")
         || url.starts_with("https://www.soundcloud.com/")

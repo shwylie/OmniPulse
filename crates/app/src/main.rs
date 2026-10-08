@@ -1071,7 +1071,7 @@ fn outside_start(shared: &Shared) {
             omnipulse_core::requests::set_asker(std::sync::Arc::new(|id, q, user| {
                 let _ = slint::invoke_from_event_loop(move || SHARED.with(|s| { if let Some(sh) = s.borrow().clone() { song_request(&sh, id, q, user); } }));
             }));
-            let _ = omnipulse_core::requests::requests_start(prefs["reqPort"].as_u64().unwrap_or(7879) as u16, key.to_string());
+            let _ = omnipulse_core::requests::requests_start(prefs["reqPort"].as_u64().unwrap_or(7879) as u16, key.to_string(), false);
         }
     }
     push_out(shared, false);
