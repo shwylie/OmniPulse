@@ -8,7 +8,12 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 
 const PREFIX = "com.shwylie.scclient.";
-const INFO = join(process.env.APPDATA || "", "sc-client", "remote.json");
+const INFOS = ["OmniPulse", "sc-client"].map((d) => join(process.env.APPDATA || "", d, "remote.json"));
+// the app's remote.json: in its folder, or the folder older versions used
+async function readInfo() {
+  for (const f of INFOS) { try { return await readFile(f, "utf8"); } catch (e) { /* try the next */ } }
+  throw new Error("OmniPulse isn't running with Stream Deck control on");
+}
 const POLL_MS = 2000;
 
 // which state each toggle key shows (1 = on), from the app's state
@@ -27,7 +32,7 @@ let last = null;
 async function call(action) {
   let info;
   try {
-    info = JSON.parse(await readFile(INFO, "utf8"));
+    info = JSON.parse(await readInfo());
   } catch {
     throw new Error("OmniPulse isn't running, or Stream Deck is switched off in its Settings.");
   }

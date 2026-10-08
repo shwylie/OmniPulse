@@ -3,11 +3,14 @@
 A small SoundCloud player built on the official API. Personal use only.
 
 ## Setup (Windows)
-1. Create the file `%APPDATA%\sc-client\config.json` (paste that path into File Explorer) containing:
+1. SoundCloud's keys are built into the app: put them in `crates/core/keys.local.json` (git-ignored) before building:
 
-       { "client_id": "YOUR_CLIENT_ID", "client_secret": "YOUR_CLIENT_SECRET" }
+       { "soundcloud_client_id": "...", "soundcloud_client_secret": "...", "soundcloud_redirect_uri": "http://localhost:8080/callback" }
 
-   The redirect URI defaults to `http://localhost:8080/callback`. It must be added to your app at https://soundcloud.com/you/apps. To use another one, add `"redirect_uri": "..."` to the file.
+   `crates/core/build.rs` scrambles them into the build. Without that file, put `"client_id"` and `"client_secret"` in
+   `%APPDATA%\OmniPulse\config.json` instead (keys there always win). The redirect URI must be added to the app at
+   https://soundcloud.com/you/apps. Discord's application id is built in too (crates/core/src/bundled.rs). Your own keys
+   for Spotify, Last.fm and a YouTube account are set up from Settings > Integrations.
 2. `npm install`
 3. Icons: copy the `src-tauri\icons` folder from your sc-lite project, or run `npx tauri icon C:\dev\extra\sc-logo.png`
 4. `npm run dev` to run, `npm run build` for an installer.
@@ -46,7 +49,7 @@ Full tracks are streamed over HLS using hls.js. `npm install` fetches it and cop
 ## Spotify (optional, Premium only)
 1. Create an app at https://developer.spotify.com/dashboard and tick Web API and Web Playback SDK.
 2. Add this redirect URI to the app: http://127.0.0.1:8081/callback
-3. Add your Client ID to %APPDATA%\sc-client\config.json:
+3. Add your Client ID to %APPDATA%\OmniPulse\config.json:
    { "client_id": "...", "client_secret": "...", "spotify_client_id": "YOUR_SPOTIFY_CLIENT_ID" }
 4. Settings > Spotify > Connect. The Spotify tab appears only for a Premium account.
 Spotify and SoundCloud tracks never share a queue or a list.
@@ -231,7 +234,7 @@ hides them; tracks from albums are never hidden.
   everything else: equalizer, loudness leveling, volume and the output device in Settings.
 - The first time you play a Spotify track, a browser tab asks you to approve "Spotify playback".
   This is a separate sign-in from the Spotify account above (it uses Spotify's own app id, which
-  librespot needs). It's remembered in %APPDATA%\sc-client\librespot; Settings > Integrations >
+  librespot needs). It's remembered in %APPDATA%\OmniPulse\librespot; Settings > Integrations >
   Spotify playback signs it in or out. Signing out of Spotify signs out of both.
 - Needs Premium. librespot isn't approved by Spotify and is against its terms of use; it can also
   stop working when Spotify changes things, until librespot is updated (`cargo update -p librespot-core`).
@@ -307,7 +310,7 @@ hides them; tracks from albums are never hidden.
   one fixed gain, so tracks match without being squashed. Normal is -14 LUFS, Quiet -18, Loud -11.
   - Local files are measured from disk, SoundCloud tracks by downloading the stream (the next track in
     the queue is measured ahead, so it starts at the right level). Sets and podcasts over 15 minutes are
-    measured from their first 10 minutes. Results are kept in %APPDATA%\sc-client\loudness.json.
+    measured from their first 10 minutes. Results are kept in %APPDATA%\OmniPulse\loudness.json.
   - Spotify uses Spotify's own whole-track values (librespot's normalisation), from the next track.
   - Quiet tracks are turned up at most 9 dB; the limiter stops peaks clipping.
   - Settings shows what the current track measured and how much it's turned up or down.
@@ -323,7 +326,7 @@ hides them; tracks from albums are never hidden.
   music.youtube.com, so it doesn't go stale), likes are kept on this PC, and nothing touches a Google
   account. This uses YouTube's private API, which YouTube's terms don't allow and which can change.
 - Audio comes from yt-dlp, which needs a JavaScript runtime. Settings > Integrations > YouTube Music > Set up
-  downloads both from their GitHub releases into %APPDATA%sc-clientbin (about 58 MB, checked against
+  downloads both from their GitHub releases into %APPDATA%OmniPulsein (about 58 MB, checked against
   their published checksums), and yt-dlp updates itself daily. The next track's audio is looked up ahead, and the local server
   passes the audio through in 4 MB pieces (as YouTube's player asks for it).
 - YouTube tracks are measured for Match loudness from their audio, like SoundCloud's.

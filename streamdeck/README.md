@@ -26,7 +26,7 @@ Play / Pause, Like, Favourite, Shuffle, Repeat and Sets & podcasts light up to s
 4. Drag keys from the "OmniPulse" category.
 
 There is nothing to set up in the plugin: OmniPulse writes its port and secret key to
-`%APPDATA%\sc-client\remote.json` while Stream Deck control is on, and the plugin reads it on every press.
+`%APPDATA%\OmniPulse\remote.json` while Stream Deck control is on, and the plugin reads it on every press.
 A key shows a warning triangle when the app isn't running or control is switched off.
 
 ## Without the plugin

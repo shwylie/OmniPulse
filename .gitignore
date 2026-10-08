@@ -4,3 +4,5 @@ src-tauri/gen/
 dist/hls.min.js
 /target/
 src-tauri/binaries/
+# the app's own SoundCloud keys, built in scrambled (crates/core/build.rs): never committed
+crates/core/keys.local.json

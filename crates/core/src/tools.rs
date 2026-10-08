@@ -375,7 +375,7 @@ mod tests {
         assert!(disk_use() > 0);
         assert!(uninstall().unwrap() > 0);
         assert!(ytdlp_path().is_none() && deno_path().is_none());
-        assert!(!tmp.join("sc-client").join("bin").join("cache").exists());
+        assert!(!tmp.join("OmniPulse").join("bin").join("cache").exists());
         let _ = std::fs::remove_dir_all(&tmp);
     }
 }

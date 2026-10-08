@@ -2,6 +2,7 @@
 // SoundCloud / Spotify / Last.fm / Discord / lyrics, local music, and the local servers.
 // Nothing here knows about a window; the apps pass in callbacks where the page used to be called.
 
+pub mod bundled;
 pub mod discord;
 pub mod lastfm;
 pub mod local;
@@ -31,13 +32,15 @@ pub(crate) static TEST_ENV: std::sync::Mutex<()> = std::sync::Mutex::new(());
 use std::{fs, path::PathBuf};
 
 // ---------- config and token storage ----------
-// Config lives in %APPDATA%\sc-client\config.json:
-//   { "client_id": "...", "client_secret": "..." }
-// The secret stays on this PC and is only read by the Rust side, never the web page.
+// Your own keys live in %APPDATA%\OmniPulse\config.json (Spotify, Last.fm, a YouTube account...).
+// The app's own (SoundCloud's, Discord's) are built in (bundled.rs) and never written there; any you
+// put in config.json win over them. Secrets are only read by the Rust side, never the web page.
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Default)]
 pub struct Config {
+    #[serde(default)]
     pub client_id: String,
+    #[serde(default)]
     pub client_secret: String,
     #[serde(default = "default_redirect")]
     pub redirect_uri: String,
@@ -72,18 +75,95 @@ pub struct Tokens {
     pub refresh_token: Option<String>,
 }
 
+/// %APPDATA%\OmniPulse. The first time, the old %APPDATA%\sc-client is moved there (if it can't be
+/// moved yet, say a file in it is in use, the old one is used until it can).
 pub fn data_dir() -> Result<PathBuf, String> {
-    let base = std::env::var("APPDATA").map_err(|_| "APPDATA is not set".to_string())?;
-    let dir = PathBuf::from(base).join("sc-client");
+    let base = PathBuf::from(std::env::var("APPDATA").map_err(|_| "APPDATA is not set".to_string())?);
+    let dir = base.join("OmniPulse");
+    let old = base.join("sc-client");
+    if !dir.exists() && old.is_dir() {
+        match fs::rename(&old, &dir) {
+            Ok(()) => tidy_config(&dir),
+            Err(_) => return Ok(old),
+        }
+    }
     fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     Ok(dir)
 }
 
+/// The app's own keys out of config.json: they're built in now. Yours stay.
+fn tidy_config(dir: &std::path::Path) {
+    let path = dir.join("config.json");
+    let Ok(text) = fs::read_to_string(&path) else { return };
+    let Ok(serde_json::Value::Object(mut o)) = serde_json::from_str::<serde_json::Value>(&text) else { return };
+    let mut gone = false;
+    let mut drop_if = |k: &str, v: &str| {
+        if !v.is_empty() && o.get(k).and_then(|x| x.as_str()) == Some(v) {
+            o.remove(k);
+            gone = true;
+        }
+    };
+    if let Some((id, secret, redirect)) = bundled::soundcloud() {
+        drop_if("client_id", &id);
+        drop_if("client_secret", &secret);
+        drop_if("redirect_uri", &redirect);
+    }
+    drop_if("discord_client_id", bundled::DISCORD_CLIENT_ID);
+    if gone {
+        let _ = fs::write(&path, serde_json::to_string_pretty(&serde_json::Value::Object(o)).unwrap_or_default());
+    }
+}
+
+/// Your keys from config.json (it's fine for it to be missing), with the app's own filling the gaps
 pub fn load_config() -> Result<Config, String> {
     let path = data_dir()?.join("config.json");
-    let text = fs::read_to_string(&path)
-        .map_err(|_| format!("Missing config file: {}", path.display()))?;
-    serde_json::from_str(&text).map_err(|e| format!("Bad config.json: {e}"))
+    let mut cfg: Config = match fs::read_to_string(&path) {
+        Ok(text) if !text.trim().is_empty() => serde_json::from_str(text.trim_start_matches('\u{feff}')).map_err(|e| format!("Bad config.json: {e}"))?,
+        _ => serde_json::from_str("{}").map_err(|e| e.to_string())?,
+    };
+    if cfg.client_id.trim().is_empty() || cfg.client_secret.trim().is_empty() {
+        if let Some((id, secret, redirect)) = bundled::soundcloud() {
+            cfg.client_id = id;
+            cfg.client_secret = secret;
+            if !fs::read_to_string(&path).unwrap_or_default().contains("\"redirect_uri\"") {
+                cfg.redirect_uri = redirect;
+            }
+        }
+    }
+    if cfg.discord_client_id.trim().is_empty() {
+        cfg.discord_client_id = bundled::DISCORD_CLIENT_ID.to_string();
+    }
+    Ok(cfg)
+}
+
+/// Saves keys you set up in the app (Settings > Integrations > Set up) into config.json, keeping the rest
+pub fn config_set(fields: &serde_json::Map<String, serde_json::Value>) -> Result<(), String> {
+    const ALLOWED: [&str; 6] = ["spotify_client_id", "lastfm_api_key", "lastfm_secret", "youtube_client_id", "youtube_client_secret", "discord_client_id"];
+    let path = data_dir()?.join("config.json");
+    let mut o = match fs::read_to_string(&path).ok().and_then(|t| serde_json::from_str::<serde_json::Value>(t.trim_start_matches('\u{feff}')).ok()) {
+        Some(serde_json::Value::Object(o)) => o,
+        _ => serde_json::Map::new(),
+    };
+    for (k, v) in fields {
+        if !ALLOWED.contains(&k.as_str()) {
+            return Err(format!("{k} can't be set from the app"));
+        }
+        let v = v.as_str().unwrap_or("").trim();
+        if v.is_empty() { o.remove(k); } else { o.insert(k.clone(), serde_json::Value::String(v.to_string())); }
+    }
+    fs::write(&path, serde_json::to_string_pretty(&serde_json::Value::Object(o)).map_err(|e| e.to_string())?).map_err(|e| e.to_string())
+}
+
+/// Which of your own keys are set (not the keys), for Settings
+pub fn config_status() -> serde_json::Value {
+    let c = load_config().unwrap_or_default();
+    serde_json::json!({
+        "spotify": !c.spotify_client_id.trim().is_empty(),
+        "lastfm": !c.lastfm_api_key.trim().is_empty() && !c.lastfm_secret.trim().is_empty(),
+        "youtube": !c.youtube_client_id.trim().is_empty() && !c.youtube_client_secret.trim().is_empty(),
+        "soundcloud": !c.client_id.trim().is_empty(),
+        "spotify_redirect": c.spotify_redirect_uri,
+    })
 }
 
 pub fn load_tokens() -> Option<Tokens> {
