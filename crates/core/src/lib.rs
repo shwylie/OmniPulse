@@ -82,10 +82,18 @@ pub fn data_dir() -> Result<PathBuf, String> {
     let base = PathBuf::from(std::env::var("APPDATA").map_err(|_| "APPDATA is not set".to_string())?);
     let dir = base.join("OmniPulse");
     let old = base.join("sc-client");
+    // one move at a time: several parts of the app ask for the folder at once on the first start, and
+    // one that lost the race mustn't go back to the old folder (and make it again)
+    static MOVING: std::sync::Mutex<()> = std::sync::Mutex::new(());
     if !dir.exists() && old.is_dir() {
-        match fs::rename(&old, &dir) {
-            Ok(()) => tidy_config(&dir),
-            Err(_) => return Ok(old),
+        let _one = MOVING.lock().unwrap_or_else(|e| e.into_inner());
+        if !dir.exists() && old.is_dir() {
+            match fs::rename(&old, &dir) {
+                Ok(()) => tidy_config(&dir),
+                // in use: the old one, until it can be moved
+                Err(_) if !dir.exists() => return Ok(old),
+                Err(_) => {}
+            }
         }
     }
     fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
