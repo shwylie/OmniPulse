@@ -14,6 +14,7 @@ function widgetState() {
     accent2: accentNow[1],
     design: prefs.widgetDesign || "card",
     rounded: prefs.widgetRounded !== false,
+    align: prefs.widgetAlign === "right" ? "right" : "left",
     text_scale: prefs.widgetText || 1,
     alerts_cfg: alertsCfg(),
   };
@@ -33,6 +34,7 @@ function widgetState() {
     accent2: accentNow[1],
     design: prefs.widgetDesign || "card",
     rounded: prefs.widgetRounded !== false,
+    align: look.align,
     text_scale: prefs.widgetText || 1,
     anim: {
       fade: prefs.wFade !== false,
@@ -82,6 +84,17 @@ function widgetInit() {
   $("widgetPort").value = prefs.widgetPort || 7878;
   $("widgetDesign").value = prefs.widgetDesign || "card";
   $("widgetRounded").checked = prefs.widgetRounded !== false;
+  // Alignment: left or right
+  const paintAlign = () => document.querySelectorAll("#widgetAlignSeg button").forEach((b) => b.classList.toggle("on", b.dataset.v === (prefs.widgetAlign === "right" ? "right" : "left")));
+  $("widgetAlignSeg").addEventListener("click", (e) => {
+    const b = e.target.closest("button");
+    if (!b) return;
+    prefs.widgetAlign = b.dataset.v;
+    savePrefs();
+    paintAlign();
+    widgetPush();
+  });
+  paintAlign();
   $("widgetDesign").addEventListener("change", () => {
     prefs.widgetDesign = $("widgetDesign").value;
     savePrefs();

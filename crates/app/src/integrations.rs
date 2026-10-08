@@ -184,6 +184,7 @@ pub fn widget_update(prefs: &Value, t: Option<&Track>, pos_ms: u64, dur_ms: u64,
         "accent": accent.0, "accent2": accent.1,
         "design": prefs["widgetDesign"].as_str().unwrap_or("card"),
         "rounded": on(prefs, "widgetRounded"),
+        "align": if prefs["widgetAlign"].as_str() == Some("right") { "right" } else { "left" },
         "text_scale": prefs["widgetText"].as_f64().unwrap_or(1.0),
         "alerts_cfg": alerts_cfg(prefs),
     });

@@ -102,6 +102,19 @@
   body.ticker #track { position: absolute; left: 0; right: 0; bottom: 0; height: 0.18rem; margin: 0; border-radius: 0; }
   body.ticker #bar { border-radius: 0; }
 
+  /* Aligned right: the cover (or icon) on the right, the words lined up to the right */
+  body.right #card, body.right #alert { flex-direction: row-reverse; }
+  body.right #info, body.right #aText { text-align: right; }
+  body.right #who { flex-direction: row-reverse; }
+  body.right.vinyl #art, body.right.vinyl #aIcon { margin-left: 0; margin-right: 0.35rem; }
+  body.right.pill #card, body.right.pill #alert { padding: 0.4rem 0.4rem 0.4rem 1.1rem; }
+  body.right.square #card, body.right.square #alert, body.right.poster #card, body.right.poster #alert { flex-direction: column; }
+  body.right.poster #card { align-items: flex-end; }
+  body.right.ticker #info { justify-content: flex-end; }
+  body.right.ticker #who, body.right.ticker #artist { flex: 0 1 auto; }
+  /* the words still read left to right, lined up against the icon on the right */
+  body.right.ticker #aText { flex-direction: row; justify-content: flex-end; }
+  body.right.ticker #aMsg { flex: 0 1 auto; }
   /* Animation options from the app */
   body.nofade #card, body.nofade #art, body.nofade #info { transition: none !important; }
   .marq { text-overflow: ellipsis; }
@@ -210,11 +223,14 @@
   body.poster #alert { flex-direction: column; justify-content: center; text-align: center; padding: 1rem; }
   body.poster #aIcon { height: 45%; max-width: none; }
   body.poster #aMain { font-size: 1.6em; }
+  /* Ticker: one line from the left, as the track's: a small icon, the heading, the main line, the message */
   body.ticker #alert { padding: 0 0.8rem; gap: 0.6rem; }
-  body.ticker #aIcon { height: 70%; background: none; }
-  body.ticker #aText { flex-direction: row; align-items: center; gap: 0.6rem; }
-  body.ticker #aMain { font-size: 1em; margin: 0; }
-  body.ticker #aMsg { margin: 0; }
+  body.ticker #aIcon { height: 1.35em; max-width: none; flex: none; background: none; border-radius: 0; font-size: calc(1rem * var(--ts, 1)); }
+  body.ticker #aIcon svg { width: calc(100% * min(1, var(--ai, 1))); height: calc(100% * min(1, var(--ai, 1))); }
+  body.ticker #aText { flex: 1; flex-direction: row; justify-content: flex-start; align-items: baseline; gap: 0.6rem; }
+  body.ticker #aHead { flex: none; font-size: 0.7em; }
+  body.ticker #aMain { flex: 0 1 auto; font-size: 1em; margin: 0; }
+  body.ticker #aMsg { flex: 1 1 0; min-width: 0; margin: 0; font-size: 0.85em; }
   body.sharp #alert, body.sharp #aIcon { border-radius: 0; }
   body.sharp.vinyl #aIcon { border-radius: 50%; }
 
@@ -276,10 +292,10 @@
     measure($("artist"));
   }
 
-  function applyLook(d, rounded, anim) {
+  function applyLook(d, rounded, anim, align) {
     if (!BASE[d]) d = "card";
     anim = anim || {};
-    const cls = d + (rounded ? "" : " sharp") + (anim.fade === false ? " nofade" : "") +
+    const cls = d + (rounded ? "" : " sharp") + (align === "right" ? " right" : "") + (anim.fade === false ? " nofade" : "") +
       (anim.scroll === false ? " noscroll" : "") + (anim.spin === false ? " nospin" : "");
     const cf = (anim.color === undefined ? 1.2 : Number(anim.color)) + "s";
     document.documentElement.style.setProperty("--cf", cf);
@@ -377,7 +393,7 @@
     // paused: the card steps away until it plays again (alerts still show)
     $("card").classList.toggle("show", has && !!s.playing);
     if (!has) return;
-    applyLook(s.design || "card", s.rounded !== false, s.anim);
+    applyLook(s.design || "card", s.rounded !== false, s.anim, s.align);
     $("card").classList.toggle("paused", !s.playing);
     const key = s.title + "\u0001" + (s.artist || "") + "\u0001" + (s.artwork || "");
     if (key !== shownKey) {
@@ -790,7 +806,7 @@
       alertConfig(s.alerts_cfg);
       if (s.alerts_cfg && s.alerts_cfg.on && !s.title) {
         // nothing playing: alerts still show, in the chosen look and colours
-        applyLook(s.design || "card", s.rounded !== false, s.anim);
+        applyLook(s.design || "card", s.rounded !== false, s.anim, s.align);
         const root = document.documentElement.style;
         root.setProperty("--bg1", mix(s.accent, 0.55));
         root.setProperty("--bg2", mix(s.accent2 || s.accent, 0.42));
