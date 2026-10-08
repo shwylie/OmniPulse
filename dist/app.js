@@ -154,10 +154,10 @@ function platformButton(t) {
   return b;
 }
 
-// A track's artists: several ("A, B, C") are each a link to their own page; one is the usual link
-// A track's artists: "A, B & C" is three, each a link to their own page; one is the usual link.
-// The line keeps its own commas and ampersands.
-const ARTIST_SEP = /(\s*,\s*|\s+&\s+)/;
+// A track's artists: "A, B & C" (or "A x B") is three, each a link to their own page; one is the usual
+// link. The line keeps its own commas, ampersands and x's. An X that ends a name ("Lil Nas X & ...")
+// isn't one: it's followed by another separator, or nothing.
+const ARTIST_SEP = /(\s*,\s*|\s+&\s+|\s+[xX×]\s+(?![&,]|$))/;
 const artistNames = (t) => String(artistName(t) || "").split(ARTIST_SEP).filter((x, i) => i % 2 === 0 && x.trim()).map((x) => x.trim());
 
 function fillArtists(box, t) {
