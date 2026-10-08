@@ -510,17 +510,6 @@
       </div>
       <div class="row">
         <div>
-          <div class="lbl">Not recommended</div>
-          <div class="note" id="notRecNote"></div>
-        </div>
-        <button id="notRecTracks" class="soft" hidden>Allow all tracks again</button>
-      </div>
-      <details class="sub" id="notRecBody" hidden>
-        <summary>Artists</summary>
-        <div class="folderList" id="notRecArtists"></div>
-      </details>
-      <div class="row">
-        <div>
           <div class="lbl">Favourites</div>
           <div class="note">A star next to the heart, with its own page and filter. Starring a track likes it too.</div>
         </div>
@@ -533,13 +522,28 @@
         </div>
         <label class="switch"><input type="checkbox" id="setsOn"><span></span></label>
       </div>
-      <div class="row" id="hiddenPlRow">
+      <div class="row">
         <div>
-          <div class="lbl">Hidden playlists</div>
-          <div class="note" id="hiddenPlNote">Right-click a playlist in the sidebar to hide it.</div>
+          <div class="lbl">Hidden &amp; not recommended</div>
+          <div class="note" id="hiddenNote"></div>
         </div>
       </div>
-      <div class="folderList" id="hiddenPlList"></div>
+      <details class="sub" id="hidArtistsBox" hidden>
+        <summary id="hidArtistsSum">Artists not recommended</summary>
+        <p class="note">Left out of Discover, Rediscover, autoplay and radio. Search still finds them.</p>
+        <div class="folderList" id="notRecArtists"></div>
+      </details>
+      <details class="sub" id="hidTracksBox" hidden>
+        <summary id="hidTracksSum">Tracks not recommended</summary>
+        <p class="note">Left out of Discover, Rediscover, autoplay and radio. Search still finds them.</p>
+        <div class="folderList" id="notRecTrackList"></div>
+        <button id="notRecTracks" class="soft">Recommend them all again</button>
+      </details>
+      <details class="sub" id="hidPlBox" hidden>
+        <summary id="hidPlSum">Hidden playlists</summary>
+        <p class="note">Hidden from the sidebar. Their songs still play and show in your Library.</p>
+        <div class="folderList" id="hiddenPlList"></div>
+      </details>
     </section>
 
     <!-- ===================== Queue & autoplay ===================== -->

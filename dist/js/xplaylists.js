@@ -224,7 +224,7 @@ async function hidePlaylist(p, hide) {
   await refreshSidebar();
   paintHiddenPlaylists();
   if (hide && view === "playlist" && currentPlaylist && String(currentPlaylist.id) === id) openLikes();
-  say(hide ? '"' + (p.title || "Playlist") + '" is hidden. Show it again from Settings > Library.' : "");
+  say(hide ? '"' + (p.title || "Playlist") + '" is hidden. Show it again from Settings > Library > Hidden & not recommended.' : "");
 }
 
 function paintHiddenPlaylists() {
@@ -239,9 +239,9 @@ function paintHiddenPlaylists() {
     row.append(el("span", "", p.title || "Untitled playlist"), show);
     box.append(row);
   });
-  $("hiddenPlNote").textContent = ids.length
-    ? ids.length + (ids.length === 1 ? " playlist is" : " playlists are") + " hidden from the sidebar."
-    : "Right-click a playlist in the sidebar to hide it.";
+  $("hidPlSum").textContent = "Hidden playlists (" + ids.length + ")";
+  $("hidPlBox").hidden = !ids.length;
+  paintHiddenSummary();
 }
 
 async function deleteXpl(p) {

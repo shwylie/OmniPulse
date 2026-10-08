@@ -291,7 +291,7 @@ async function openRediscover(fresh) {
 // ---------- "Don't recommend this track / this artist" ----------
 // Tracks (by id) and artists (by name) left out of everything the app picks for you: Discover's mixes
 // and stations, Rediscover, autoplay and radio, and the sets & podcasts from artists you follow.
-// Searching still finds them. Settings > Library > Not recommended undoes it.
+// Searching still finds them. Settings > Library > Hidden & not recommended undoes it.
 let hiddenRecs = new Set();
 let hiddenArtists = new Set();
 
@@ -313,6 +313,12 @@ const onRecPage = () => view === "discover" || view === "rediscover" || (view ==
 function hideRecommendation(t) {
   hiddenRecs.add(String(t.id));
   prefs.hiddenRecs = [...hiddenRecs].slice(-3000);
+  // its name, for the list in Settings
+  const names = Object.assign({}, prefs.hiddenRecNames || {});
+  names[String(t.id)] = (t.title || "Untitled") + (artistName(t) ? " \u2014 " + artistName(t) : "");
+  const keep = new Set(prefs.hiddenRecs);
+  Object.keys(names).forEach((k) => { if (!keep.has(k)) delete names[k]; });
+  prefs.hiddenRecNames = names;
   savePrefs();
   if (onRecPage()) { viewTracks = viewTracks.filter((x) => x.id !== t.id); render(); }
   dropFromAutoplay();
@@ -340,25 +346,48 @@ function dropFromAutoplay() {
   if (queue.length !== before) renderQueue();
 }
 
-// Settings > Library > Not recommended
+// Settings > Library > Hidden & not recommended: a line saying what's there, and a folded list for
+// each kind (artists, tracks, playlists), shown only when it has something in it
+function paintHiddenSummary() {
+  const a = Object.keys(prefs.hiddenArtists || {}).length;
+  const n = hiddenRecs.size;
+  const p = (prefs.hiddenByYou || []).length;
+  const plural = (k, one, many) => k + " " + (k === 1 ? one : many);
+  const rec = [a && plural(a, "artist", "artists"), n && plural(n, "track", "tracks")].filter(Boolean);
+  const parts = [];
+  if (rec.length) parts.push(rec.join(" and ") + (a + n === 1 ? " isn't" : " aren't") + " recommended");
+  if (p) parts.push(plural(p, "playlist is", "playlists are") + " hidden from the sidebar");
+  $("hiddenNote").textContent = parts.length
+    ? parts.join("; ") + "."
+    : "Nothing yet. Right-click a track to stop an artist or track being recommended, or a playlist in the sidebar to hide it.";
+}
+
+function hiddenRow(name, btn, title, data) {
+  const row = el("div", "folderRow");
+  const b = el("button", btn === "\u00d7" ? "" : "soft", btn);
+  b.title = title;
+  b.setAttribute("aria-label", title);
+  Object.assign(b.dataset, data);
+  row.append(el("span", "", name), b);
+  return row;
+}
+
 function paintNotRecommended() {
   const names = prefs.hiddenArtists || {};
-  const n = hiddenRecs.size;
-  const a = Object.keys(names).length;
-  $("notRecNote").textContent = !n && !a ? "Nothing yet. Right-click a track: Don't recommend this track, or this artist."
-    : [n ? n + (n === 1 ? " track" : " tracks") : "", a ? a + (a === 1 ? " artist" : " artists") : ""].filter(Boolean).join(" and ") + " won't be recommended.";
-  $("notRecTracks").hidden = !n;
-  const box = $("notRecArtists");
-  box.replaceChildren(...Object.entries(names).sort((x, y) => x[1].localeCompare(y[1])).map(([key, name]) => {
-    const row = el("div", "folderRow");
-    const rm = el("button", "", "\u00d7");
-    rm.title = "Recommend " + name + " again";
-    rm.setAttribute("aria-label", rm.title);
-    rm.dataset.key = key;
-    row.append(el("span", "", name), rm);
-    return row;
-  }));
-  $("notRecBody").hidden = !a && !n;
+  const a = Object.entries(names).sort((x, y) => x[1].localeCompare(y[1]));
+  $("notRecArtists").replaceChildren(...a.map(([key, name]) => hiddenRow(name, "\u00d7", "Recommend " + name + " again", { key })));
+  $("hidArtistsSum").textContent = "Artists not recommended (" + a.length + ")";
+  $("hidArtistsBox").hidden = !a.length;
+  const tn = prefs.hiddenRecNames || {};
+  const ids = [...hiddenRecs];
+  const named = ids.filter((id) => tn[id]).sort((x, y) => tn[x].localeCompare(tn[y]));
+  const unnamed = ids.length - named.length;
+  const rows = named.map((id) => hiddenRow(tn[id], "\u00d7", "Recommend it again", { track: id }));
+  if (unnamed) rows.push(el("p", "note", unnamed + (unnamed === 1 ? " track" : " tracks") + " from before names were kept here."));
+  $("notRecTrackList").replaceChildren(...rows);
+  $("hidTracksSum").textContent = "Tracks not recommended (" + ids.length + ")";
+  $("hidTracksBox").hidden = !ids.length;
+  paintHiddenSummary();
 }
 
 // ---------- right-click menu on tracks ----------
@@ -481,9 +510,23 @@ function libraryInit() {
     paintNotRecommended();
     say(name + " can be recommended again.");
   });
+  $("notRecTrackList").addEventListener("click", (e) => {
+    const b = e.target.closest("button[data-track]");
+    if (!b) return;
+    hiddenRecs.delete(b.dataset.track);
+    prefs.hiddenRecs = [...hiddenRecs];
+    const names = Object.assign({}, prefs.hiddenRecNames || {});
+    const name = names[b.dataset.track];
+    delete names[b.dataset.track];
+    prefs.hiddenRecNames = names;
+    savePrefs();
+    paintNotRecommended();
+    say((name ? '"' + name.split(" \u2014 ")[0] + '"' : "That track") + " can be recommended again.");
+  });
   $("notRecTracks").addEventListener("click", () => {
     hiddenRecs = new Set();
     prefs.hiddenRecs = [];
+    prefs.hiddenRecNames = {};
     savePrefs();
     paintNotRecommended();
     say("Those tracks can be recommended again.");
