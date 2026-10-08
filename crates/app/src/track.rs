@@ -66,6 +66,7 @@ impl Track {
             head: Default::default(),
             auto: false,
             art: Default::default(),
+            liked: false,
         }
     }
 

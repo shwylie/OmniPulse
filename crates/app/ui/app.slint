@@ -16,7 +16,7 @@ export global Theme {
     out property <length> radius: 10px;
 }
 
-export struct Row { title: string, artist: string, album: string, dur: string, plat: string, playing: bool, head: string, auto: bool, art: image }
+export struct Row { title: string, artist: string, album: string, dur: string, plat: string, playing: bool, head: string, auto: bool, art: image, liked: bool }
 export struct Side { title: string, plat: string }
 export struct Plat { id: string, on: bool, name: string }
 export struct Tile { title: string, sub: string, art: image, plat: string }
@@ -38,6 +38,11 @@ global Icons {
     out property <string> sets: "M12 3a9 9 0 00-9 9v7c0 1.1.9 2 2 2h4v-8H5v-1a7 7 0 0114 0v1h-4v8h4c1.1 0 2-.9 2-2v-7a9 9 0 00-9-9z";
     out property <string> stats: "M5 9.2h3V19H5zM10.6 5h2.8v14h-2.8zm5.6 8H19v6h-2.8z";
     out property <string> broadcast: "M12 9.6a2.4 2.4 0 1 0 0 4.8 2.4 2.4 0 0 0 0-4.8zM7.05 7.05a7 7 0 0 0 0 9.9l1.42-1.42a5 5 0 0 1 0-7.07zm9.9 0-1.42 1.41a5 5 0 0 1 0 7.07l1.42 1.42a7 7 0 0 0 0-9.9zM4.22 4.22a11 11 0 0 0 0 15.56l1.42-1.42a9 9 0 0 1 0-12.72zm15.56 0-1.42 1.42a9 9 0 0 1 0 12.72l1.42 1.42a11 11 0 0 0 0-15.56z";
+    out property <string> back: "M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z";
+    out property <string> search: "M15.5 14h-.79l-.28-.27A6.471 6.471 0 0016 9.5 6.5 6.5 0 109.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z";
+    out property <string> shuffle: "M10.59 9.17L5.41 4 4 5.41l5.17 5.17 1.42-1.41zM14.5 4l2.04 2.04L4 18.59 5.41 20 17.96 7.46 20 9.5V4h-5.5zm.33 9.41l-1.41 1.41 3.13 3.13L14.5 20H20v-5.5l-2.04 2.04-3.13-3.13z";
+    out property <string> repeat: "M7 7h10v3l4-4-4-4v3H5v6h2V7zm10 10H7v-3l-4 4 4 4v-3h12v-6h-2v4z";
+    out property <string> volume: "M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z";
     out property <string> gear: "M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58a.49.49 0 0 0 .12-.61l-1.92-3.32a.49.49 0 0 0-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54a.48.48 0 0 0-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96a.49.49 0 0 0-.59.22L2.74 8.87a.48.48 0 0 0 .12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58a.49.49 0 0 0-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32a.48.48 0 0 0-.12-.61l-2.01-1.58zM12 15.6A3.6 3.6 0 1 1 12 8.4a3.6 3.6 0 0 1 0 7.2z";
     out property <string> soundcloud: "M1 14.5c0-1.1.8-2 1.9-2.1.4-2.5 2.5-4.4 5.1-4.4.6 0 1.2.1 1.7.3C10.6 6.4 12.6 5 15 5c3.3 0 6 2.7 6 6 0 .2 0 .4-.1.6.7.5 1.1 1.3 1.1 2.2 0 1.5-1.2 2.7-2.7 2.7H3.6C2.2 16.5 1 15.6 1 14.5z";
     out property <string> spotify: "M12 2a10 10 0 100 20 10 10 0 000-20zm4.6 14.4c-.2.3-.6.4-.9.2-2.5-1.5-5.6-1.9-9.3-1-.3.1-.7-.1-.8-.5-.1-.3.1-.7.5-.8 4-.9 7.5-.5 10.3 1.2.3.2.4.6.2.9zm1.2-2.7c-.2.4-.7.5-1.1.3-2.9-1.8-7.2-2.3-10.6-1.2-.4.1-.9-.1-1-.5-.1-.4.1-.9.5-1 3.9-1.2 8.7-.6 12 1.4.4.2.5.7.2 1zm.1-2.8C14.5 8.8 8.9 8.6 5.6 9.6c-.5.2-1.1-.1-1.2-.6-.2-.5.1-1.1.6-1.2 3.8-1.1 10-.9 13.9 1.4.5.3.6.9.4 1.4-.3.4-.9.6-1.4.3z";
@@ -64,6 +69,39 @@ component IconButton inherits Rectangle {
     border-radius: size / 2;
     background: filled ? Theme.accent : (ta.has-hover ? Theme.elevated : transparent);
     Glyph { d: root.d; width: root.size * 0.55; height: root.size * 0.55; fill: filled ? Theme.on-accent : (ta.has-hover ? Theme.text : root.tint); }
+    ta := TouchArea { clicked => { root.clicked(); } }
+}
+
+component RoundButton inherits Rectangle {
+    in property <string> d;
+    in property <bool> enabled: true;
+    callback clicked;
+    width: 40px;
+    height: 40px;
+    border-radius: 20px;
+    background: Theme.bg.mix(Theme.panel, ta.has-hover && root.enabled ? 0.45 : 0.7);
+    opacity: root.enabled ? 1 : 0.45;
+    Glyph { d: root.d; width: 20px; height: 20px; fill: Theme.text; }
+    ta := TouchArea { enabled: root.enabled; clicked => { root.clicked(); } }
+}
+
+component Pill inherits Rectangle {
+    in property <string> label;
+    in property <string> d;
+    in property <bool> on;
+    callback clicked;
+    height: 38px;
+    width: t.preferred-width + 36px + (root.d != "" ? 20px : 0px);
+    border-radius: 19px;
+    border-width: 1px;
+    border-color: root.on ? Theme.accent : (ta.has-hover ? Theme.muted : Theme.line);
+    background: root.on ? Theme.accent.with-alpha(0.14) : transparent;
+    HorizontalLayout {
+        spacing: 6px;
+        alignment: center;
+        if root.d != "": Glyph { d: root.d; width: 14px; height: 14px; y: (parent.height - self.height) / 2; fill: root.on ? Theme.accent : Theme.muted; }
+        t := Text { text: root.label; color: Theme.text; font-size: 13px; font-weight: 600; vertical-alignment: center; }
+    }
     ta := TouchArea { clicked => { root.clicked(); } }
 }
 
@@ -107,36 +145,40 @@ component TrackRow inherits Rectangle {
     in property <int> index;
     callback play();
     callback act(string);
-    height: 56px;
+    height: 60px;
     border-radius: 6px;
     background: ta.has-hover ? Theme.elevated : transparent;
     HorizontalLayout {
         padding-left: 8px;
-        padding-right: 12px;
-        spacing: 12px;
+        padding-right: 16px;
+        spacing: 16px;
         Rectangle {
-            width: 32px;
-            if !ta.has-hover && !root.item.playing: Text { text: index + 1; width: parent.width; height: parent.height; color: Theme.muted; horizontal-alignment: right; vertical-alignment: center; font-size: 13px; }
-            if ta.has-hover || root.item.playing: Path { commands: Icons.play; x: parent.width - 16px; y: (parent.height - 16px) / 2; width: 16px; height: 16px; fill: Theme.accent; }
+            width: 28px;
+            if !ta.has-hover && !root.item.playing: Text { text: index + 1; width: parent.width; height: parent.height; color: Theme.muted; horizontal-alignment: center; vertical-alignment: center; font-size: 13px; }
+            if ta.has-hover || root.item.playing: Path { commands: Icons.play; x: (parent.width - 16px) / 2; y: (parent.height - 16px) / 2; width: 16px; height: 16px; fill: Theme.accent; }
         }
         Rectangle {
-            width: 40px;
-            height: 40px;
+            width: 44px;
+            height: 44px;
             y: (parent.height - self.height) / 2;
             border-radius: 4px;
             clip: true;
             background: Theme.elevated;
             Image { source: root.item.art; width: parent.width; height: parent.height; image-fit: cover; }
         }
-        PlatIcon { plat: root.item.plat; width: 18px; height: 18px; y: (parent.height - self.height) / 2; }
+        PlatIcon { plat: root.item.plat; width: 18px; height: 18px; y: (parent.height - self.height) / 2; fill: Theme.muted; }
         VerticalLayout {
             alignment: center;
             spacing: 2px;
             Text { text: root.item.title; color: root.item.playing ? Theme.accent : Theme.text; font-weight: 700; font-size: 14px; overflow: elide; }
             Text { text: root.item.artist; color: Theme.muted; font-size: 13px; overflow: elide; }
         }
-        Text { text: root.item.album; width: 28%; color: Theme.muted; font-size: 13px; overflow: elide; vertical-alignment: center; }
-        Text { text: root.item.dur; width: 52px; color: Theme.muted; font-size: 13px; horizontal-alignment: right; vertical-alignment: center; }
+        Text { text: root.item.album; width: 26%; color: Theme.muted; font-size: 13px; overflow: elide; vertical-alignment: center; }
+        Rectangle {
+            width: 24px;
+            if root.item.liked: Glyph { d: Icons.library; width: 18px; height: 18px; y: (parent.height - self.height) / 2; fill: Theme.accent; }
+        }
+        Text { text: root.item.dur; width: 48px; color: Theme.muted; font-size: 13px; horizontal-alignment: right; vertical-alignment: center; }
     }
     ContextMenuArea {
         Menu {
@@ -207,6 +249,10 @@ export component AppWindow inherits Window {
     in property <int> side-on: -1;
     in property <[Shelf]> shelves;
     in-out property <string> search-text;
+    in property <bool> can-back;
+    in-out property <bool> fav-only;
+    in property <bool> shuffle-on;
+    in property <string> repeat-mode: "off";
     // stats
     in property <string> st-big;
     in property <string> st-sub;
@@ -275,6 +321,11 @@ export component AppWindow inherits Window {
     callback row-action(int, string);
     callback queue-action(int, string);
     callback shuffle();
+    callback play-page();
+    callback back();
+    callback fav-only-changed(bool);
+    callback shuffle-toggle();
+    callback repeat-cycle();
     callback look-changed(string, float);
     callback streamer-changed(bool);
     callback plat-toggle(string);
@@ -398,7 +449,6 @@ export component AppWindow inherits Window {
                             sta := TouchArea { clicked => { root.side(i); } }
                         }
                     }
-                    NavItem { label: "Settings"; d: Icons.gear; active: root.page == "settings"; clicked => { root.nav("settings"); } }
                 }
             }
             // ---------- the page ----------
@@ -407,34 +457,101 @@ export component AppWindow inherits Window {
                 background: Theme.panel;
                 border-radius: Theme.radius;
                 clip: true;
+                // the accent's glow at the top, fading into the panel
+                Rectangle {
+                    y: 0;
+                    height: 340px;
+                    background: @linear-gradient(180deg, Theme.panel.mix(Theme.accent, 0.7) 0%, Theme.panel 100%);
+                }
                 VerticalLayout {
-                    padding: 20px;
+                    padding: 24px;
+                    padding-top: 14px;
                     padding-bottom: 6px;
                     spacing: 6px;
                     HorizontalLayout {
-                        alignment: start;
-                        LineEdit {
-                            width: 360px;
-                            placeholder-text: "What do you want to play?";
-                            text <=> root.search-text;
-                            accepted(t) => { root.search(t); }
+                        spacing: 12px;
+                        RoundButton { d: Icons.back; enabled: root.can-back; clicked => { root.back(); } }
+                        Rectangle { horizontal-stretch: 1; }
+                        // the search bar: a pill in the middle
+                        Rectangle {
+                            preferred-width: 440px;
+                            min-width: 180px;
+                            horizontal-stretch: 0;
+                            height: 40px;
+                            border-radius: 20px;
+                            background: Theme.bg.mix(Theme.panel, 0.7);
+                            border-width: 1px;
+                            border-color: ti.has-focus ? Theme.accent.with-alpha(0.6) : transparent;
+                            Glyph { d: Icons.search; x: 16px; width: 20px; height: 20px; fill: Theme.muted; }
+                            if root.search-text == "": Text {
+                                x: 48px;
+                                text: "Search everywhere";
+                                color: Theme.muted;
+                                font-size: 14px;
+                                vertical-alignment: center;
+                            }
+                            ti := TextInput {
+                                x: 48px;
+                                width: parent.width - 64px;
+                                height: parent.height;
+                                vertical-alignment: center;
+                                color: Theme.text;
+                                font-size: 14px;
+                                single-line: true;
+                                text <=> root.search-text;
+                                accepted => { root.search(self.text); }
+                            }
                         }
+                        Rectangle { horizontal-stretch: 1; }
+                        RoundButton { d: Icons.gear; clicked => { root.nav("settings"); } }
                     }
-                    if root.page-kind != "now": Text { text: root.page-title; color: Theme.text; font-size: 38px; font-weight: 800; overflow: elide; }
-                    if root.page-kind != "now" && root.page-sub != "": Text { text: root.page-sub; color: Theme.muted; font-size: 13px; overflow: elide; }
-                    if root.chips.length > 0 || (root.page-kind == "tracks" && root.rows.length > 1): HorizontalLayout {
+                    Rectangle { height: 10px; }
+                    if root.page-kind != "now": Text { text: root.page-title; color: Theme.text; font-size: 44px; font-weight: 800; overflow: elide; }
+                    if root.page-kind != "now" && root.page-sub != "": Text { text: root.page-sub; color: Theme.muted; font-size: 14px; overflow: elide; }
+                    if root.chips.length > 0: HorizontalLayout {
                         alignment: start;
                         spacing: 8px;
-                        padding-top: 4px;
-                        if root.page-kind == "tracks" && root.rows.length > 1: Chip { label: "Shuffle"; on: true; clicked => { root.shuffle(); } }
+                        padding-top: 8px;
                         for c[i] in root.chips: Chip { label: c; on: root.chip-on == i; clicked => { root.chip(i); } }
                     }
-                    Rectangle { height: 4px; }
+                    // play the page, shuffle it; Favourites only on the right
+                    if root.page-kind == "tracks": HorizontalLayout {
+                        spacing: 14px;
+                        padding-top: 10px;
+                        padding-bottom: 6px;
+                        Rectangle {
+                            width: 52px;
+                            height: 52px;
+                            border-radius: 26px;
+                            background: pa.has-hover ? Theme.accent.brighter(0.08) : Theme.accent;
+                            opacity: root.rows.length > 0 ? 1 : 0.5;
+                            Glyph { d: Icons.play; width: 24px; height: 24px; fill: Theme.on-accent; }
+                            pa := TouchArea { enabled: root.rows.length > 0; clicked => { root.play-page(); } }
+                        }
+                        Pill { label: "Shuffle"; y: 7px; clicked => { root.shuffle(); } }
+                        Rectangle { horizontal-stretch: 1; }
+                        Pill { label: "Favourites only"; d: Icons.star; on: root.fav-only; y: 7px; clicked => { root.fav-only = !root.fav-only; root.fav-only-changed(root.fav-only); } }
+                    }
+                    // the list's column heads
+                    if root.page-kind == "tracks": VerticalLayout {
+                        HorizontalLayout {
+                            height: 30px;
+                            padding-left: 8px;
+                            padding-right: 16px;
+                            spacing: 16px;
+                            Text { text: "#"; width: 28px; color: Theme.muted; font-size: 13px; horizontal-alignment: center; vertical-alignment: center; }
+                            Text { text: "Title"; color: Theme.muted; font-size: 13px; vertical-alignment: center; horizontal-stretch: 1; }
+                            Text { text: "Time"; width: 48px; color: Theme.muted; font-size: 13px; horizontal-alignment: right; vertical-alignment: center; }
+                        }
+                        Rectangle { height: 1px; background: Theme.line; }
+                        Rectangle { height: 6px; }
+                    }
+                    if root.page-kind != "tracks": Rectangle { height: 4px; }
                     // a list of tracks (Library, playlists, Search, Favourites, Sets, Rediscover)
                     if root.page-kind == "tracks": track-list := ListView {
                         vertical-stretch: 1;
-                        property <int> first: max(0, floor(-self.content-y / 56px));
-                        property <int> count: ceil(self.visible-height / 56px) + 1;
+                        property <int> first: max(0, floor(-self.content-y / 60px));
+                        property <int> count: ceil(self.visible-height / 60px) + 1;
                         changed first => { root.rows-in-view(self.first, self.count); }
                         changed count => { root.rows-in-view(self.first, self.count); }
                         init => { root.rows-in-view(self.first, self.count); }
@@ -784,53 +901,57 @@ export component AppWindow inherits Window {
                 background: Theme.panel.mix(Theme.accent, 0.86);
                 border-radius: Theme.radius;
                 HorizontalLayout {
-                    padding-left: 14px;
-                    padding-right: 14px;
-                    spacing: 14px;
+                    padding-left: 18px;
+                    padding-right: 18px;
+                    spacing: 6px;
+                    // the controls, the seek bar and the volume
+                    HorizontalLayout {
+                        width: 40%;
+                        spacing: 4px;
+                        alignment: start;
+                        IconButton { d: root.playing ? Icons.pause : Icons.play; filled: true; size: 46px; y: (parent.height - self.height) / 2; clicked => { root.toggle(); } }
+                        Rectangle { width: 8px; }
+                        IconButton { d: Icons.prev; y: (parent.height - self.height) / 2; clicked => { root.prev(); } }
+                        IconButton { d: Icons.next; y: (parent.height - self.height) / 2; clicked => { root.next(); } }
+                        IconButton { d: Icons.shuffle; tint: root.shuffle-on ? Theme.accent : Theme.muted; y: (parent.height - self.height) / 2; clicked => { root.shuffle-toggle(); } }
+                        Rectangle {
+                            width: 36px;
+                            IconButton { d: Icons.repeat; tint: root.repeat-mode != "off" ? Theme.accent : Theme.muted; y: (parent.height - self.height) / 2; clicked => { root.repeat-cycle(); } }
+                            if root.repeat-mode == "one": Text { text: "1"; x: 23px; y: parent.height / 2 - 14px; color: Theme.accent; font-size: 9px; font-weight: 800; }
+                        }
+                        Rectangle { width: 10px; }
+                        Text { text: root.pos-text; color: Theme.muted; font-size: 12px; width: 34px; horizontal-alignment: right; vertical-alignment: center; }
+                        Slider { min-width: 80px; horizontal-stretch: 1; minimum: 0; maximum: 1000; value: root.pos-frac * 1000; released(v) => { root.seek(v / 1000); } }
+                        Text { text: root.dur-text; color: Theme.muted; font-size: 12px; width: 34px; vertical-alignment: center; }
+                        Glyph { d: Icons.volume; width: 20px; height: 20px; y: (parent.height - self.height) / 2; fill: Theme.muted; }
+                        Slider { width: 80px; minimum: 0; maximum: 100; value <=> root.volume; changed(v) => { root.volume-changed(v / 100); } }
+                    }
                     // now playing: opens Now Playing
                     Rectangle {
-                        width: 30%;
+                        horizontal-stretch: 1;
                         HorizontalLayout {
+                            alignment: center;
                             spacing: 12px;
-                            Cover { art: root.now-art; initial: ""; width: 56px; height: 56px; y: (parent.height - self.height) / 2; border-radius: 6px; }
+                            Cover { art: root.now-art; initial: ""; width: 64px; height: 64px; y: (parent.height - self.height) / 2; border-radius: 6px; }
                             VerticalLayout {
                                 alignment: center;
                                 spacing: 2px;
-                                Text { text: root.now-title; color: Theme.text; font-weight: 700; font-size: 15px; overflow: elide; }
+                                Text { text: root.now-title; color: Theme.text; font-weight: 700; font-size: 15px; overflow: elide; max-width: 260px; }
                                 HorizontalLayout {
                                     spacing: 6px;
                                     if root.now-plat != "": PlatIcon { plat: root.now-plat; width: 14px; height: 14px; }
-                                    Text { text: root.now-artist; color: Theme.muted; font-size: 13px; overflow: elide; }
+                                    Text { text: root.now-artist; color: Theme.muted; font-size: 13px; overflow: elide; max-width: 240px; }
                                 }
                             }
                         }
                         TouchArea { clicked => { root.nav(root.page == "now" ? "library" : "now"); } }
                     }
-                    VerticalLayout {
-                        horizontal-stretch: 1;
-                        alignment: center;
-                        spacing: 4px;
-                        HorizontalLayout {
-                            alignment: center;
-                            spacing: 10px;
-                            IconButton { d: Icons.prev; clicked => { root.prev(); } }
-                            IconButton { d: root.playing ? Icons.pause : Icons.play; filled: true; size: 42px; clicked => { root.toggle(); } }
-                            IconButton { d: Icons.next; clicked => { root.next(); } }
-                        }
-                        HorizontalLayout {
-                            spacing: 10px;
-                            Text { text: root.pos-text; color: Theme.muted; font-size: 12px; width: 40px; horizontal-alignment: right; vertical-alignment: center; }
-                            Slider { minimum: 0; maximum: 1000; value: root.pos-frac * 1000; released(v) => { root.seek(v / 1000); } }
-                            Text { text: root.dur-text; color: Theme.muted; font-size: 12px; width: 40px; vertical-alignment: center; }
-                        }
-                    }
                     HorizontalLayout {
-                        width: 24%;
+                        width: 18%;
                         alignment: end;
                         spacing: 8px;
-                        IconButton { d: Icons.lyrics; tint: root.page == "now" ? Theme.accent : Theme.muted; clicked => { root.nav(root.page == "now" ? "library" : "now"); } }
-                        Slider { width: 110px; minimum: 0; maximum: 100; value <=> root.volume; changed(v) => { root.volume-changed(v / 100); } }
-                        IconButton { d: Icons.queue; tint: root.queue-open ? Theme.accent : Theme.muted; clicked => { root.queue-open = !root.queue-open; } }
+                        IconButton { d: Icons.lyrics; tint: root.page == "now" ? Theme.accent : Theme.muted; y: (parent.height - self.height) / 2; clicked => { root.nav(root.page == "now" ? "library" : "now"); } }
+                        IconButton { d: Icons.queue; tint: root.queue-open ? Theme.accent : Theme.muted; y: (parent.height - self.height) / 2; clicked => { root.queue-open = !root.queue-open; } }
                     }
                 }
             }

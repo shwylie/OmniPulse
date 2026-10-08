@@ -52,6 +52,16 @@ struct App {
     panel_map: Vec<usize>,
     /// the sidebar's playlists: their place in playlists (those of platforms switched off are left out)
     side_map: Vec<usize>,
+    /// where you are, and where you've been (the header's back button)
+    here: Option<Place>,
+    history: Vec<Place>,
+    /// Favourites only (the track list's pill)
+    fav_only: bool,
+    /// shuffle (the player bar's): on, and the upcoming tracks' order before it, to undo it
+    shuffle_on: bool,
+    shuffle_backup: Option<Vec<String>>,
+    /// repeat: "off", "all" (the queue) or "one" (this track)
+    repeat: String,
     autoplay: bool,
     ap_busy: bool,
     ap_then_play: bool,
@@ -82,14 +92,17 @@ fn now_ms() -> u64 {
 fn apply_filter(app: &mut App) {
     let chip = app.chip;
     let prefs = app.web.prefs.clone();
-    let shown = |t: &&Track| plat_on(&prefs, t.plat());
+    let favs: std::collections::HashSet<&str> = app.web.favourites.iter().map(|t| t.key.as_str()).collect();
+    let fav_only = app.fav_only;
+    let shown = |t: &&Track| plat_on(&prefs, t.plat()) && (!fav_only || favs.contains(t.key.as_str()));
     let filtered: Vec<Track> = match (app.page.as_str(), chip) {
         ("library" | "rediscover" | "favourites" | "search" | "playlist", 1) => app.page_all.iter().filter(shown).filter(|t| !t.is_mix()).cloned().collect(),
         ("library" | "rediscover" | "favourites" | "search" | "playlist", 2) => app.page_all.iter().filter(shown).filter(|t| t.is_mix()).cloned().collect(),
         _ => app.page_all.iter().filter(shown).cloned().collect(),
     };
     let playing = app.queue.current().map(|t| t.key.clone()).unwrap_or_default();
-    app.rows.set_vec(filtered.iter().map(|t| t.row(t.key == playing)).collect::<Vec<_>>());
+    let liked: std::collections::HashSet<&str> = app.library.iter().map(|t| t.key.as_str()).collect();
+    app.rows.set_vec(filtered.iter().map(|t| Row { liked: liked.contains(t.key.as_str()), ..t.row(t.key == playing) }).collect::<Vec<_>>());
     app.page_tracks = filtered;
     // its covers, once this is done with the app
     slint::Timer::single_shot(std::time::Duration::ZERO, || SHARED.with(|s| { if let Some(sh) = s.borrow().clone() { rows_art(&sh); } }));
@@ -130,6 +143,46 @@ fn load_into(shared: &Shared, page: &'static str, title: String, fut: impl std::
 
 fn plural(n: usize, one: &str, many: &str) -> String {
     format!("{n} {}", if n == 1 { one } else { many })
+}
+
+// ---------- where you are: pages, playlists and searches, and the way back ----------
+#[derive(Clone, PartialEq)]
+enum Place {
+    Page(String),
+    Playlist(usize),
+    Search(String),
+}
+
+/// Opens a place, remembering the one you were on (so Back returns to it)
+fn go(shared: &Shared, place: Place) {
+    {
+        let mut a = shared.borrow_mut();
+        if let Some(here) = a.here.take() {
+            if here != place {
+                a.history.push(here);
+                let n = a.history.len();
+                if n > 50 { a.history.drain(..n - 50); }
+            }
+        }
+        a.here = Some(place.clone());
+    }
+    open_place(shared, &place);
+}
+
+fn go_back(shared: &Shared) {
+    let Some(place) = shared.borrow_mut().history.pop() else { return };
+    shared.borrow_mut().here = Some(place.clone());
+    open_place(shared, &place);
+}
+
+fn open_place(shared: &Shared, place: &Place) {
+    match place {
+        Place::Page(p) => open_page(shared, p),
+        Place::Playlist(i) => open_playlist(shared, *i),
+        Place::Search(q) => open_search(shared, q.clone()),
+    }
+    let a = shared.borrow();
+    if let Some(ui) = a.ui.upgrade() { ui.set_can_back(!a.history.is_empty()); }
 }
 
 fn open_page(shared: &Shared, page: &str) {
@@ -785,6 +838,11 @@ fn step(shared: &Shared, d: i32) {
             shared.borrow_mut().queue.qi = Some(n as usize);
             start(shared);
         }
+        // the end of the queue with repeat on: back to the start
+        None if d > 0 && shared.borrow().repeat == "all" && !shared.borrow().queue.items.is_empty() => {
+            shared.borrow_mut().queue.qi = Some(0);
+            start(shared);
+        }
         // the end of the queue: autoplay adds some, then carries on
         None if d > 0 && !autoplay_fill(shared, true) => {
             engine.stop();
@@ -798,6 +856,32 @@ fn step(shared: &Shared, d: i32) {
     }
 }
 
+// ---------- shuffle (the player bar's) ----------
+// On: what's after this track, in a fair order (long-unheard first), keeping what you queued and
+// autoplay's picks where they are. Off: back in the order it had, with anything added since after.
+fn shuffle_toggle(shared: &Shared) {
+    let mut a = shared.borrow_mut();
+    a.shuffle_on = !a.shuffle_on;
+    let from = a.queue.qi.map_or(0, |i| i + 1);
+    if a.shuffle_on {
+        a.shuffle_backup = Some(a.queue.items.iter().skip(from).map(|q| q.t.key.clone()).collect());
+        let lp = a.web.last_played.clone();
+        a.queue.shuffle_rest(&lp);
+    } else if let Some(order) = a.shuffle_backup.take() {
+        let place = |k: &str| order.iter().position(|o| o == k).unwrap_or(usize::MAX);
+        if from <= a.queue.items.len() {
+            a.queue.items[from..].sort_by_key(|q| place(&q.t.key));
+        }
+    }
+    if let Some(ui) = a.ui.upgrade() {
+        ui.set_shuffle_on(a.shuffle_on);
+        ui.set_status((if a.shuffle_on { "Shuffle on." } else { "Shuffle off." }).into());
+    }
+    if std::env::var_os("OMNIPULSE_SELFTEST").is_none() { webstate::save_pref("shuffle", serde_json::json!(a.shuffle_on)); }
+    paint_queue(&mut a);
+    save_session(&a);
+}
+
 // ---------- autoplay ----------
 fn pref_on(prefs: &serde_json::Value, key: &str) -> bool {
     prefs[key].as_bool() != Some(false)
@@ -809,7 +893,7 @@ fn autoplay_fill(shared: &Shared, then_play: bool) -> bool {
     let (seed, rt, weak, local, last_plat, taken, prefs, last_played) = {
         let mut a = shared.borrow_mut();
         let Some(seed) = a.queue.current().cloned() else { return false };
-        if !a.autoplay || a.ap_failed.as_deref() == Some(seed.key.as_str()) {
+        if !a.autoplay || a.repeat != "off" || a.ap_failed.as_deref() == Some(seed.key.as_str()) {
             return false;
         }
         if a.ap_busy {
@@ -926,6 +1010,7 @@ fn tick(shared: &Shared, events: &std::sync::mpsc::Receiver<Event>, n: u64) {
     }
     while let Ok(ev) = events.try_recv() {
         match ev {
+            Event::Ended if shared.borrow().repeat == "one" => start(shared),
             Event::Ended => step(shared, 1),
             Event::Error(e) => ui.set_status(e.into()),
         }
@@ -1269,6 +1354,7 @@ fn main() -> Result<(), slint::PlatformError> {
         rt: rt.handle().clone(), engine: engine.clone(), ui: ui.as_weak(), rows, qrows, lyric_lines,
         library: Vec::new(), playlists: Vec::new(), web: webstate::load(), page: "library".into(),
         page_all: Vec::new(), page_tracks: Vec::new(), chip: 0, shelves: Vec::new(), queue: queue::Queue::default(), panel_map: Vec::new(), side_map: Vec::new(),
+        here: None, history: Vec::new(), fav_only: false, shuffle_on: false, shuffle_backup: None, repeat: "off".into(),
         autoplay: true, ap_busy: false, ap_then_play: false, ap_failed: None, resume_ms: None, loaded: false, accent: ("#8e9bff".into(), "#8e9bff".into()), started_secs: 0, token: 0,
         lyrics: Vec::new(), heard: (String::new(), 0.0, false), last_pos: 0,
     }));
@@ -1343,6 +1429,7 @@ fn main() -> Result<(), slint::PlatformError> {
                         paint_plats(&a);
                     }
                     if shared.borrow().page == "library" {
+                        shared.borrow_mut().here = Some(Place::Page("library".into()));
                         open_page(&shared, "library");
                         ui.set_page_sub(format!("{} Loaded in {secs:.1} s.", ui.get_page_sub()).into());
                     }
@@ -1352,14 +1439,40 @@ fn main() -> Result<(), slint::PlatformError> {
     }
 
     let s = shared.clone();
-    ui.on_nav(move |p| open_page(&s, &p));
+    ui.on_nav(move |p| go(&s, Place::Page(p.into())));
+    let s = shared.clone();
+    ui.on_back(move || go_back(&s));
     let s = shared.clone();
     ui.on_side(move |i| {
         let at = s.borrow().side_map.get(i as usize).copied();
-        if let Some(at) = at { open_playlist(&s, at); }
+        if let Some(at) = at { go(&s, Place::Playlist(at)); }
     });
     let s = shared.clone();
-    ui.on_search(move |q| open_search(&s, q.into()));
+    ui.on_search(move |q| { if !q.trim().is_empty() { go(&s, Place::Search(q.trim().into())); } });
+    let s = shared.clone();
+    ui.on_fav_only_changed(move |on| {
+        let mut a = s.borrow_mut();
+        a.fav_only = on;
+        apply_filter(&mut a);
+    });
+    let s = shared.clone();
+    ui.on_play_page(move || {
+        let list = s.borrow().page_tracks.clone();
+        if !list.is_empty() { play_list(&s, list, 0); }
+    });
+    let s = shared.clone();
+    ui.on_shuffle_toggle(move || shuffle_toggle(&s));
+    let s = shared.clone();
+    ui.on_repeat_cycle(move || {
+        let mut a = s.borrow_mut();
+        a.repeat = match a.repeat.as_str() { "off" => "all", "all" => "one", _ => "off" }.into();
+        if let Some(ui) = a.ui.upgrade() {
+            ui.set_repeat_mode(a.repeat.clone().into());
+            ui.set_status(match a.repeat.as_str() { "all" => "Repeat the queue.", "one" => "Repeat this track.", _ => "Repeat off." }.into());
+        }
+        if std::env::var_os("OMNIPULSE_SELFTEST").is_none() { webstate::save_pref("repeat", serde_json::json!(a.repeat)); }
+        paint_queue(&mut a);
+    });
     let s = shared.clone();
     ui.on_chip(move |i| {
         let page = s.borrow().page.clone();
