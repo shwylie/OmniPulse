@@ -209,6 +209,7 @@ function alertsCfg() {
     custom: alertCustom().map((c) => c.id),
     kinds,
     anim: prefs.alertAnim || "slide",
+    transition: prefs.alertTrans || "seamless",
     secs: Number(prefs.alertSecs) || 5,
     // their own colours (else the widget's, from the album art), and which way the gradient runs
     accent: prefs.alertOwnCol ? prefs.alertCol1 || "#8e9bff" : "",
@@ -522,6 +523,7 @@ function alertsPaint() {
   $("sbOn").checked = prefs.sbOn !== false;
   $("sbHost").value = prefs.sbHost || "127.0.0.1:8080";
   $("alertAnim").value = prefs.alertAnim || "slide";
+  $("alertTrans").value = prefs.alertTrans || "seamless";
   $("alertSecs").value = String(Number(prefs.alertSecs) || 5);
   $("alertIconVal").textContent = Math.round(alertIconScale() * 100) + "%";
   $("alertIconDown").disabled = alertIconScale() <= 0.6;
@@ -548,6 +550,7 @@ function alertsInit() {
     alertsSave();
   });
   $("alertAnim").addEventListener("change", () => { prefs.alertAnim = $("alertAnim").value; alertsSave(); });
+  $("alertTrans").addEventListener("change", () => { prefs.alertTrans = $("alertTrans").value; alertsSave(); });
   $("alertSecs").addEventListener("change", () => { prefs.alertSecs = Number($("alertSecs").value); alertsSave(); });
   const stepIcon = (d) => { prefs.alertIcon = Math.round(Math.min(2, Math.max(0.6, alertIconScale() + d)) * 10) / 10; alertsSave(); alertsPaint(); };
   $("alertIconDown").addEventListener("click", () => stepIcon(-0.1));

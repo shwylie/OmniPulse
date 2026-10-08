@@ -147,9 +147,36 @@
   #aMain, #aMsg { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   #aMsg:empty { display: none; }
   /* the card steps back while an alert is up */
-  body.alerting #card { opacity: 0 !important; }
-  /* Minimal has no panel behind it: the card goes at once, so the two never show over each other */
-  body.minimal.alerting #card { transition: none; visibility: hidden; }
+  /* ---------- the card and an alert, handing over (Settings > Alert Options > Transition) ---------- */
+  #card { transition: opacity 0.45s, transform 0.55s cubic-bezier(0.2, 0.8, 0.2, 1); }
+  #art, #info { transition: opacity 0.35s ease, filter 0.35s ease; }
+  /* Over the Top and Crossfade: the card fades away under the alert */
+  body.alerting[data-tr="overlay"] #card, body.alerting[data-tr="crossfade"] #card { opacity: 0 !important; }
+  body[data-tr="crossfade"] #card { transition: opacity 0.6s ease; }
+  /* Minimal has no panel behind it: over the top, the card goes at once, so the two never show together */
+  body.minimal.alerting[data-tr="overlay"] #card { transition: none; visibility: hidden; }
+  /* Seamless: the panel stays where it is; only what's on it changes, and its colours blend */
+  body.alerting[data-tr="seamless"] #art, body.alerting[data-tr="seamless"] #info { opacity: 0; filter: blur(6px); }
+  body[data-tr="seamless"]:not(.alerting) #art, body[data-tr="seamless"]:not(.alerting) #info { transition-delay: 0.15s; }
+  #alert.seam { background: none !important; box-shadow: none; }
+  #alert.seam.in { animation: none; }
+  #alert.seam.in #aIcon, #alert.seam.in #aText { animation: seamIn 0.5s ease var(--a-delay, 0.25s) both; }
+  #alert.seam.out { animation: none; }
+  #alert.seam.out #aIcon, #alert.seam.out #aText { animation: seamOut 0.35s ease both; }
+  @keyframes seamIn { from { opacity: 0; filter: blur(6px); transform: scale(0.96); } }
+  @keyframes seamOut { to { opacity: 0; filter: blur(6px); transform: scale(0.96); } }
+  /* Slide Across: the card goes out one side as the alert comes in the other, and back again */
+  body.alerting[data-tr="push"] #card { transform: translateX(-104%); }
+  @keyframes aPushIn { from { transform: translateX(104%); } }
+  @keyframes aPushOut { to { transform: translateX(104%); } }
+  /* Flip: the card turns over, the alert is on its back */
+  body[data-tr="flip"] #card { transition: transform 0.3s ease; }
+  body.alerting[data-tr="flip"] #card { transform: perspective(40rem) rotateX(90deg); }
+  @keyframes aFlipBackIn { from { transform: perspective(40rem) rotateX(-90deg); } }
+  @keyframes aFlipBackOut { to { transform: perspective(40rem) rotateX(-90deg); } }
+  /* Wipe: the alert sweeps across the card, and away again */
+  @keyframes aWipeIn { from { clip-path: inset(0 100% 0 0); } to { clip-path: inset(0 0 0 0); } }
+  @keyframes aWipeOut { from { clip-path: inset(0 0 0 0); } to { clip-path: inset(0 0 0 100%); } }
   /* Vinyl, with the record spinning: the alert's icon spins too */
   body.vinyl:not(.nospin) #aIcon svg, body.vinyl:not(.nospin) #aIcon img { animation: spin 6s linear infinite; }
 
@@ -178,8 +205,8 @@
   body.sharp.vinyl #aIcon { border-radius: 50%; }
 
   /* the animations, in and out */
-  #alert.in { animation: var(--a-in) 0.55s cubic-bezier(0.2, 0.9, 0.3, 1.15) both; }
-  #alert.out { animation: var(--a-out) 0.45s ease-in both; }
+  #alert.in { animation: var(--a-in) var(--a-dur-in, 0.55s) cubic-bezier(0.2, 0.9, 0.3, 1.15) var(--a-delay, 0s) both; }
+  #alert.out { animation: var(--a-out) var(--a-dur-out, 0.45s) ease-in both; }
   #alert.in #aIcon { animation: aIconIn 0.7s 0.15s cubic-bezier(0.2, 0.9, 0.3, 1.3) both; }
   @keyframes aFadeIn { from { opacity: 0; } }
   @keyframes aFadeOut { to { opacity: 0; } }
@@ -344,9 +371,7 @@
       changeTrack(first);
     }
     const root = document.documentElement.style;
-    root.setProperty("--bg1", mix(s.accent, 0.55));
-    root.setProperty("--bg2", mix(s.accent2 || s.accent, 0.42));
-    root.setProperty("--hi", s.accent || "#8e9bff");
+    if (!seamColours) cardColours();
     const ts = String(s.text_scale || 1);
     if (document.documentElement.style.getPropertyValue("--ts") !== ts) {
       document.documentElement.style.setProperty("--ts", ts);
@@ -356,6 +381,16 @@
     checkScroll($("title"));
     checkScroll($("artist"));
     tick();
+  }
+
+  // the card's colours, from the album art (a seamless alert borrows the panel for a while)
+  let seamColours = false;
+  function cardColours() {
+    if (!s) return;
+    const root = document.documentElement.style;
+    root.setProperty("--bg1", mix(s.accent, 0.55));
+    root.setProperty("--bg2", mix(s.accent2 || s.accent, 0.42));
+    root.setProperty("--hi", s.accent || "#8e9bff");
   }
 
   function tick() {
@@ -478,12 +513,44 @@
     box.style.setProperty("--ai", String(Math.min(2, Math.max(0.6, Number(acfg.icon_scale) || 1))));
     const dir = acfg.dir || "115deg";
     box.style.setProperty("--a-dir", dir === "glow" ? "115deg" : dir);
-    box.style.setProperty("--a-in", inA);
-    box.style.setProperty("--a-out", outA);
-    box.className = "on" + (dir === "glow" ? " glow" : "");
+    // how the card hands over: from the card (playing), the chosen transition; from another alert,
+    // seamless stays seamless and the rest use the alert's own animation; with no card, the latter
+    const body = document.body;
+    const handing = !body.classList.contains("alerting");
+    if (handing) {
+      let t = $("card").classList.contains("show") ? acfg.transition || "seamless" : "overlay";
+      // with no panel (Minimal) the card and alert mustn't show together: those become seamless
+      if (design === "minimal" && (t === "crossfade" || t === "wipe")) t = "seamless";
+      body.dataset.tr = t;
+    }
+    const mode = body.dataset.tr === "seamless" ? "seam" : handing ? body.dataset.tr : "overlay";
+    const MODES = {
+      seam: [inA, outA, "0.5s", "0.35s", handing ? "0.25s" : "0.05s", 350],
+      crossfade: ["aFadeIn", "aFadeOut", "0.6s", "0.6s", "0s", 600],
+      push: ["aPushIn", "aPushOut", "0.55s", "0.55s", "0s", 550],
+      flip: ["aFlipBackIn", "aFlipBackOut", "0.3s", "0.3s", "0.3s", 300],
+      wipe: ["aWipeIn", "aWipeOut", "0.6s", "0.6s", "0s", 600],
+      overlay: [inA, outA, "0.55s", "0.45s", "0s", 450],
+    };
+    const [mIn, mOut, dIn, dOut, delay, outMs] = MODES[mode] || MODES.overlay;
+    box.style.setProperty("--a-in", mIn);
+    box.style.setProperty("--a-out", mOut);
+    box.style.setProperty("--a-dur-in", dIn);
+    box.style.setProperty("--a-dur-out", dOut);
+    box.style.setProperty("--a-delay", delay);
+    // seamless: the panel takes the alert's colours, blending across
+    if (mode === "seam" && c1) {
+      seamColours = true;
+      const root = document.documentElement.style;
+      root.setProperty("--cf", "0.6s");
+      root.setProperty("--bg1", mix(c1, 0.55));
+      root.setProperty("--bg2", mix(c2, k.color ? 0.38 : 0.42));
+      root.setProperty("--hi", c1);
+    }
+    box.className = "on" + (dir === "glow" ? " glow" : "") + (mode === "seam" ? " seam" : "");
     void box.offsetWidth;
     box.classList.add("in");
-    document.body.classList.add("alerting");
+    body.classList.add("alerting");
     if (acfg.sounds && acfg.sounds[a.type]) {
       const snd = new Audio("/sound/" + a.type + "?s=" + encodeURIComponent(acfg.sounds[a.type]));
       snd.volume = Math.max(0, Math.min(1, acfg.volume === undefined ? 0.8 : Number(acfg.volume)));
@@ -493,12 +560,26 @@
     setTimeout(() => {
       box.classList.remove("in");
       box.classList.add("out");
+      // the last one: the card comes back as the alert goes (a flip turns it back once the alert's gone)
+      const last = !waiting.length;
+      if (last && mode !== "overlay" && mode !== "flip") alertsDone();
       setTimeout(() => {
         box.className = "";
-        if (!waiting.length) document.body.classList.remove("alerting");
-        setTimeout(alertNext, waiting.length ? 400 : 0);
-      }, 450);
+        if (!waiting.length) alertsDone();
+        setTimeout(alertNext, waiting.length ? (mode === "seam" ? 120 : 400) : 0);
+      }, outMs);
     }, secs * 1000);
+  }
+
+  // No alerts left: the card back, with its own colours
+  function alertsDone() {
+    document.body.classList.remove("alerting");
+    if (seamColours) {
+      seamColours = false;
+      cardColours();
+      const cf = s && s.anim && s.anim.color !== undefined ? Number(s.anim.color) : 1.2;
+      setTimeout(() => document.documentElement.style.setProperty("--cf", cf + "s"), 700);
+    }
   }
 
   // the ones from /alert, in now.json

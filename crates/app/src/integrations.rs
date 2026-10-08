@@ -163,6 +163,7 @@ pub fn alerts_cfg(prefs: &Value) -> Value {
         "custom": custom.iter().map(|c| c.0.clone()).collect::<Vec<_>>(),
         "kinds": kinds,
         "anim": prefs["alertAnim"].as_str().unwrap_or("slide"),
+        "transition": prefs["alertTrans"].as_str().unwrap_or("seamless"),
         "accent": if set(prefs, "alertOwnCol") { prefs["alertCol1"].as_str().unwrap_or("#8e9bff") } else { "" },
         "accent2": if set(prefs, "alertOwnCol") { prefs["alertCol2"].as_str().or(prefs["alertCol1"].as_str()).unwrap_or("#b38cff") } else { "" },
         "dir": prefs["alertDir"].as_str().unwrap_or("115deg"),
