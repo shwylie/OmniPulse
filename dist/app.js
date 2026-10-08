@@ -165,7 +165,35 @@ const artistPart = (part) => {
   const p = part.trim();
   return p.endsWith(")") && !p.includes("(") ? { name: p.slice(0, -1).trim(), close: ")" } : { name: p, close: "" };
 };
-const artistNames = (t) => String(artistName(t) || "").split(ARTIST_SEP).filter((x, i) => i % 2 === 0 && x.trim()).map((x) => artistPart(x).name).filter(Boolean);
+// Names with "&" in them that are one artist, not two ("Pete & Bas", "Above & Beyond"): what Spotify and
+// YouTube Music credit as one artist (they list several with commas, so an "&" inside one is part of the
+// name), from this track and every one seen so far, a few well known ones, and "X & the Y" bands
+const ARTIST_WHOLE = new Set(["pete & bas", "above & beyond", "chase & status", "simon & garfunkel", "hall & oates", "mumford & sons",
+  "belle & sebastian", "brooks & dunn", "camo & krooked", "dimitri vegas & like mike", "drumsound & bassline smith", "krept & konan",
+  "nico & vinz", "angus & julia stone", "matt & kim", "sam & dave", "ike & tina turner", "iron & wine", "macklemore & ryan lewis",
+  "sunnery james & ryan marciano", "aly & fila", "bob & earl", "zion & lennox", "wisin & yandel"]);
+function artistLearn(t) {
+  const src = srcOf(t);
+  const names = src === "spotify" ? (t.spArtists || []).map((a) => a.name)
+    : src === "youtube" ? String((t.user && t.user.username) || "").split(/\s*,\s*/) : [];
+  names.forEach((n) => { if (n && n.includes("&")) ARTIST_WHOLE.add(n.toLowerCase().trim()); });
+}
+// The artist line in pieces: [name, separator, name, ...], with whole names kept together
+function artistSplit(t) {
+  artistLearn(t);
+  const parts = String(artistName(t) || "").split(ARTIST_SEP);
+  for (let i = 1; i < parts.length - 1; i += 2) {
+    if (!/^\s+&\s+$/.test(parts[i])) continue;
+    const a = parts[i - 1].trim(), b = parts[i + 1].trim();
+    const whole = (a + " & " + b).toLowerCase();
+    if (ARTIST_WHOLE.has(whole) || /^the\s/i.test(b)) {
+      parts.splice(i - 1, 3, a + " & " + b);
+      i -= 2;
+    }
+  }
+  return parts;
+}
+const artistNames = (t) => artistSplit(t).filter((x, i) => i % 2 === 0 && x.trim()).map((x) => artistPart(x).name).filter(Boolean);
 
 function fillArtists(box, t) {
   box.replaceChildren();
@@ -177,7 +205,7 @@ function fillArtists(box, t) {
     box.append(s);
     return;
   }
-  String(artistName(t)).split(ARTIST_SEP).forEach((part, i) => {
+  artistSplit(t).forEach((part, i) => {
     if (i % 2) { box.append(part); return; }   // the comma, " & " or " feat. " between them
     const { name: n, close } = artistPart(part);
     if (!n) return;
@@ -413,6 +441,7 @@ function paintHeroActions() {
 }
 
 function trackRow(t, i, playing) {
+  applyFix(t);   // your own title and artist, whichever copy this is (js/titles.js)
   const li = el("li");
   li.dataset.i = i;
   li.draggable = true;   // onto a playlist or the queue (js/dnd.js)
@@ -888,6 +917,7 @@ function addToQueue(t) {
 }
 
 function queueRow(t, idx, removable) {
+  applyFix(t);
   const li = el("li", "qRow" + (idx === qi ? " cur" : ""));
   li.dataset.q = idx;
   li.draggable = true;   // onto a playlist (what's playing is copied, not moved)
@@ -1011,6 +1041,7 @@ $("queueBtn").addEventListener("click", () => setQueueOpen(!prefs.queue));
 
 // ---------- now playing ----------
 function fillNowPlaying(t) {
+  applyFix(t);
   $("nowTitle").textContent = t ? t.title || "Untitled" : "Nothing playing";
   fillArtists($("nowArtist"), t);
   $("nowAlbum").textContent = t ? albumShown(t) : "";

@@ -81,12 +81,23 @@ function albumShown(t) {
 }
 
 // ---------- your own title / artist fixes (right-click > Edit title and artist) ----------
+// Applied wherever a track is shown (a list row, the queue, now playing, a tile), not only when it's
+// loaded: copies held elsewhere (YouTube Music and Spotify likes, your files, playlists on this PC, a
+// page kept from before) show the change too, and go back when it's undone.
 function applyFix(t) {
+  if (!t) return t;
   const fx = (prefs.trackFixes || {})[t.id];
   if (!t._auto) t._auto = { title: t.title, artist: t.displayArtist || null };
-  if (!fx) return;
-  if (fx.title) t.title = fx.title;
-  if (fx.artist) t.displayArtist = fx.artist;
+  if (fx) {
+    if (fx.title) t.title = fx.title;
+    t.displayArtist = fx.artist || t._auto.artist || undefined;
+    t._fixed = true;
+  } else if (t._fixed) {
+    t.title = t._auto.title;
+    t.displayArtist = t._auto.artist || undefined;
+    t._fixed = false;
+  }
+  return t;
 }
 
 // Every copy of a track the app is holding (lists, queue, likes) gets the change

@@ -194,6 +194,7 @@ function platBadges(plats) {
 }
 
 function tileEl(tile) {
+  if (tile.track) applyFix(tile.track);
   const node = el("div", "tile tile-" + tile.kind);
   node._tile = tile;
   const art = el("div", "tileArt");

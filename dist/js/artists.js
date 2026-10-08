@@ -105,7 +105,9 @@ function artistOfTrack(t) {
     const u = t.user;
     return artistFrom({ name: u.username, sc: { id: u.id, name: u.username, img: (u.avatar_url || "").replace("-large", "-t500x500"), followers: u.followers_count || 0, url: u.permalink_url || "" } });
   }
-  const name = src === "spotify" ? firstArtist(t) : guessNames(t).artist || artistName(t);
+  // YouTube: the artist it was uploaded under (an edited artist line doesn't change who uploaded it)
+  const ytUploader = src === "youtube" && t.user && t.user.username ? String(t.user.username).split(/\s*,\s*/)[0] : "";
+  const name = src === "spotify" ? firstArtist(t) : ytUploader || guessNames(t).artist || artistName(t);
   return artistFrom({
     name,
     sp: src === "spotify" && t.spArtistId ? { id: t.spArtistId, name } : undefined,
