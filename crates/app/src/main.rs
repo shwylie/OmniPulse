@@ -8,6 +8,7 @@
 mod desktop;
 mod integrations;
 mod look;
+mod titles;
 mod player;
 mod queue;
 mod requests;
@@ -1057,6 +1058,21 @@ fn tick(shared: &Shared, events: &std::sync::mpsc::Receiver<Event>, n: u64) {
     // the narrow layout below 980 px across, as the web app's
     let w = ui.window().size().to_logical(ui.window().scale_factor()).width;
     if (w < 980.0) != ui.get_narrow() { ui.set_narrow(w < 980.0); }
+    // status messages go after a while, as the web app's: four seconds, or seven for a problem;
+    // "Loading..." ones stay until they're replaced
+    STATUS_SEEN.with(|seen| {
+        let mut seen = seen.borrow_mut();
+        let now = ui.get_status().to_string();
+        if now != seen.0 {
+            *seen = (now, std::time::Instant::now());
+            return;
+        }
+        let bad = { let l = now.to_lowercase(); l.starts_with("couldn") || l.starts_with("can't") || l.contains("failed") || l.contains("error") };
+        let keep = if bad { 7 } else { 4 };
+        if !now.is_empty() && !now.ends_with("...") && !now.ends_with('…') && seen.1.elapsed().as_secs() >= keep {
+            ui.set_status("".into());
+        }
+    });
     let engine = shared.borrow().engine.clone();
     if !shared.borrow().loaded {
         return; // a restored session, not started yet: the bar shows where it was
@@ -1806,6 +1822,8 @@ thread_local! {
     static SHARED: RefCell<Option<Shared>> = const { RefCell::new(None) };
     static SHELF_MODELS: RefCell<Vec<Rc<VecModel<Tile>>>> = const { RefCell::new(Vec::new()) };
     static ARTIST_MODEL: RefCell<Option<Rc<VecModel<Item>>>> = const { RefCell::new(None) };
+    /// the status line as it was last seen, and since when (it goes after a while)
+    static STATUS_SEEN: RefCell<(String, std::time::Instant)> = RefCell::new((String::new(), std::time::Instant::now()));
     #[allow(clippy::type_complexity)]
     static STAT_MODELS: RefCell<Option<(Rc<VecModel<Item>>, Rc<VecModel<Item>>)>> = const { RefCell::new(None) };
 }

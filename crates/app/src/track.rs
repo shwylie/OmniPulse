@@ -59,7 +59,7 @@ impl Track {
         crate::Row {
             title: self.title.clone().into(),
             artist: self.artist.clone().into(),
-            album: self.album.clone().into(),
+            album: crate::titles::album_shown(&self.album, &self.title, &self.artist).into(),
             dur: fmt_ms(self.ms).into(),
             plat: self.plat().into(),
             playing,
@@ -68,6 +68,17 @@ impl Track {
             art: Default::default(),
             liked: false,
         }
+    }
+
+    /// Its title tidied as the web app does (crate::titles): promo tags out, "Artist - Song" split
+    /// (SoundCloud), and featured artists out of the title and into the artists
+    pub fn tidied(mut self) -> Self {
+        self.title = crate::titles::clean_title(&self.title);
+        let mut t = self.split_artist();
+        let (title, artist) = crate::titles::tidy_feat(&t.title, &t.artist);
+        t.title = title;
+        t.artist = artist;
+        t
     }
 
     /// A SoundCloud upload titled "Artist - Song": the artist from the title, as the web app shows it
@@ -102,7 +113,7 @@ impl Track {
             genre: t["genre"].as_str().unwrap_or("").to_string(),
             link: if t["sharing"].as_str() == Some("private") { String::new() } else { t["permalink_url"].as_str().unwrap_or("").to_string() },
         }
-        .split_artist())
+        .tidied())
     }
 
     pub fn spotify(t: &Value) -> Option<Track> {
@@ -120,7 +131,7 @@ impl Track {
             art: t["album"]["images"].as_array().and_then(|i| i.get(1).or(i.first())).and_then(|i| i["url"].as_str()).unwrap_or("").to_string(),
             genre: String::new(),
             link: String::new(),
-        })
+        }.tidied())
     }
 
     pub fn youtube(t: &omnipulse_core::youtube::YtTrack) -> Track {
@@ -135,6 +146,7 @@ impl Track {
             genre: String::new(),
             link: String::new(),
         }
+        .tidied()
     }
 
     /// The same saved form, for the session (read back with from_snapshot)
