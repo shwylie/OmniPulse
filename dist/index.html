@@ -365,6 +365,80 @@
       <button id="closeSettings" class="ghost" aria-label="Close"><svg viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg></button>
     </div>
 
+    <!-- ===================== App ===================== -->
+    <section class="group">
+      <h3>App</h3>
+      <div class="row">
+        <div>
+          <div class="lbl">Hardware Acceleration</div>
+          <div class="note">Turn off if you see glitches.</div>
+        </div>
+        <label class="switch"><input type="checkbox" id="gpuToggle"><span></span></label>
+      </div>
+      <p class="note" id="gpuNote" hidden>Restart OmniPulse to apply this. <button id="restartBtn" class="soft">Restart now</button></p>
+      <div class="row">
+        <div>
+          <div class="lbl">Close to Tray</div>
+          <div class="note">Closing hides the window; music keeps playing. Quit from the tray.</div>
+        </div>
+        <label class="switch"><input type="checkbox" id="trayToggle"><span></span></label>
+      </div>
+      <div class="row">
+        <div>
+          <div class="lbl">Listen Along &amp; Jams</div>
+          <div class="note">Friends join your queue in their own OmniPulse: from Listen Along on your Discord status, or an invite-only Jam (in the queue). Needs your relay (jam-server/README.md).</div>
+        </div>
+      </div>
+      <details class="sub" id="togetherSection">
+        <summary>Listen Along &amp; Jams</summary>
+        <div class="row">
+          <div class="lbl">Relay Address</div>
+          <input id="relayUrl" class="narrow wide" type="text" placeholder="https://omnipulse-jam.you.workers.dev" spellcheck="false" autocomplete="off">
+        </div>
+        <p class="note warn" id="relayNote"></p>
+        <div class="row">
+          <div>
+            <div class="lbl">Your Name</div>
+            <div class="note">What listeners see.</div>
+          </div>
+          <input id="togetherName" class="narrow" type="text" maxlength="40" spellcheck="false" autocomplete="off">
+        </div>
+      </details>
+      <div class="row">
+        <div>
+          <div class="lbl">Discord Status</div>
+          <div class="note" id="presNote">Shows what you're playing on your profile.</div>
+        </div>
+        <label class="switch"><input type="checkbox" id="presToggle"><span></span></label>
+      </div>
+      <details class="sub" id="presSection">
+        <summary>Discord Options</summary>
+        <div class="row">
+          <div class="lbl">Cover Art</div>
+          <label class="switch"><input type="checkbox" id="presArt"><span></span></label>
+        </div>
+        <div class="row">
+          <div class="lbl">Time</div>
+          <label class="switch"><input type="checkbox" id="presTime"><span></span></label>
+        </div>
+        <div class="row">
+          <div>
+            <div class="lbl">Listen Along Button</div>
+            <div class="note">Friends join at your spot (SoundCloud) or open the track (Spotify).</div>
+          </div>
+          <label class="switch"><input type="checkbox" id="presListen"><span></span></label>
+        </div>
+        <div class="row">
+          <div>
+            <div class="lbl">Open Track Button</div>
+            <div class="note">Only others see the buttons.</div>
+          </div>
+          <label class="switch"><input type="checkbox" id="presLink"><span></span></label>
+        </div>
+      </details>
+
+    </section>
+
     <!-- ===================== Look ===================== -->
     <section class="group">
       <h3>Look</h3>
@@ -583,10 +657,24 @@
       </div>
       <div class="row">
         <div>
-          <div class="lbl">Sets &amp; Podcasts</div>
+          <div class="lbl">Sets &amp; Podcasts Page</div>
           <div class="note">A page for anything over 15 minutes, in the sidebar. Right-click it there to hide it.</div>
         </div>
         <label class="switch"><input type="checkbox" id="setsOn"><span></span></label>
+      </div>
+      <div class="row">
+        <div>
+          <div class="lbl">Sets &amp; Podcasts in the Queue</div>
+          <div class="note" data-on="Lists and autoplay include sets, mixes and podcasts (anything over 15 minutes)." data-off="Lists and autoplay skip anything over 15 minutes, unless you pick it. Works with or without the page.">Lists and autoplay skip anything over 15 minutes, unless you pick it. Works with or without the page.</div>
+        </div>
+        <label class="switch"><input type="checkbox" id="queueSets"><span></span></label>
+      </div>
+      <div class="row">
+        <div>
+          <div class="lbl">Autoplay</div>
+          <div class="note">Plays similar tracks when the queue runs out.</div>
+        </div>
+        <label class="switch"><input type="checkbox" id="apQueueOn"><span></span></label>
       </div>
       <div class="row">
         <div>
@@ -640,25 +728,6 @@
         <p class="note">Hidden from the sidebar only.</p>
         <div class="folderList" id="hiddenPlList"></div>
       </details>
-      </div>
-    </section>
-
-    <!-- ===================== Queueing ===================== -->
-    <section class="group">
-      <h3>Queueing</h3>
-      <div class="row">
-        <div>
-          <div class="lbl">Play Sets &amp; Podcasts</div>
-          <div class="note" data-on="Lists and autoplay include sets, mixes and podcasts (anything over 15 minutes)." data-off="Lists and autoplay skip anything over 15 minutes, unless you pick it.">Lists and autoplay skip anything over 15 minutes, unless you pick it.</div>
-        </div>
-        <label class="switch"><input type="checkbox" id="queueSets"><span></span></label>
-      </div>
-      <div class="row">
-        <div>
-          <div class="lbl">Autoplay</div>
-          <div class="note">Plays similar tracks when the queue runs out.</div>
-        </div>
-        <label class="switch"><input type="checkbox" id="apQueueOn"><span></span></label>
       </div>
     </section>
 
@@ -770,13 +839,13 @@
       </details>
       <div class="row">
         <div>
-          <div class="lbl">Offset OmniPulse</div>
-          <div class="note">The sound again, as its own app, for Wave Link or OBS.</div>
+          <div class="lbl">OmniPulse Offset</div>
+          <div class="note">Your music again as its own app, a little earlier or later, to line it up with a delayed mic or camera. Handy for karaoke on stream.</div>
         </div>
         <label class="switch"><input type="checkbox" id="out2On"><span></span></label>
       </div>
       <details class="sub" id="out2Body" open hidden>
-        <summary>Offset OmniPulse</summary>
+        <summary>OmniPulse Offset Options</summary>
         <p class="note" id="out2Help"></p>
         <div class="row">
           <div>
@@ -794,64 +863,10 @@
         </div>
         <div class="row">
           <div class="lbl">Volume</div>
-          <div class="levSlider"><input id="out2Vol" type="range" min="0" max="100" step="1" aria-label="Offset OmniPulse volume"><span id="out2VolVal">100%</span></div>
+          <div class="levSlider"><input id="out2Vol" type="range" min="0" max="100" step="1" aria-label="OmniPulse Offset volume"><span id="out2VolVal">100%</span></div>
         </div>
         <p class="note warn" id="out2Note"></p>
       </details>
-      <div class="row">
-        <div>
-          <div class="lbl">Listen Along &amp; Jams</div>
-          <div class="note">Friends join your queue in their own OmniPulse: from Listen Along on your Discord status, or an invite-only Jam (in the queue). Needs your relay (jam-server/README.md).</div>
-        </div>
-      </div>
-      <details class="sub" id="togetherSection">
-        <summary>Listen Along &amp; Jams</summary>
-        <div class="row">
-          <div class="lbl">Relay Address</div>
-          <input id="relayUrl" class="narrow wide" type="text" placeholder="https://omnipulse-jam.you.workers.dev" spellcheck="false" autocomplete="off">
-        </div>
-        <p class="note warn" id="relayNote"></p>
-        <div class="row">
-          <div>
-            <div class="lbl">Your Name</div>
-            <div class="note">What listeners see.</div>
-          </div>
-          <input id="togetherName" class="narrow" type="text" maxlength="40" spellcheck="false" autocomplete="off">
-        </div>
-      </details>
-      <div class="row">
-        <div>
-          <div class="lbl">Discord Status</div>
-          <div class="note" id="presNote">Shows what you're playing on your profile.</div>
-        </div>
-        <label class="switch"><input type="checkbox" id="presToggle"><span></span></label>
-      </div>
-      <details class="sub" id="presSection">
-        <summary>Discord Options</summary>
-        <div class="row">
-          <div class="lbl">Cover Art</div>
-          <label class="switch"><input type="checkbox" id="presArt"><span></span></label>
-        </div>
-        <div class="row">
-          <div class="lbl">Time</div>
-          <label class="switch"><input type="checkbox" id="presTime"><span></span></label>
-        </div>
-        <div class="row">
-          <div>
-            <div class="lbl">Listen Along Button</div>
-            <div class="note">Friends join at your spot (SoundCloud) or open the track (Spotify).</div>
-          </div>
-          <label class="switch"><input type="checkbox" id="presListen"><span></span></label>
-        </div>
-        <div class="row">
-          <div>
-            <div class="lbl">Open Track Button</div>
-            <div class="note">Only others see the buttons.</div>
-          </div>
-          <label class="switch"><input type="checkbox" id="presLink"><span></span></label>
-        </div>
-      </details>
-
       <div class="row">
         <div>
           <div class="lbl">Stream Widget</div>
@@ -1131,25 +1146,6 @@
       </details>
     </section>
 
-    <!-- ===================== App ===================== -->
-    <section class="group">
-      <h3>App</h3>
-      <div class="row">
-        <div>
-          <div class="lbl">Hardware Acceleration</div>
-          <div class="note">Turn off if you see glitches.</div>
-        </div>
-        <label class="switch"><input type="checkbox" id="gpuToggle"><span></span></label>
-      </div>
-      <p class="note" id="gpuNote" hidden>Restart OmniPulse to apply this. <button id="restartBtn" class="soft">Restart now</button></p>
-      <div class="row">
-        <div>
-          <div class="lbl">Close to Tray</div>
-          <div class="note">Closing hides the window; music keeps playing. Quit from the tray.</div>
-        </div>
-        <label class="switch"><input type="checkbox" id="trayToggle"><span></span></label>
-      </div>
-    </section>
   </div>
 </dialog>
 

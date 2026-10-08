@@ -16,7 +16,7 @@ function presenceNote(msg, isError) {
   presenceLastMsg = msg;
 }
 
-// Discord options (Settings > Streaming > Discord options); all on unless switched off
+// Discord options (Settings > App > Discord options); all on unless switched off
 const presOpt = (key) => prefs[key] !== false;
 
 // "m:ss", as SoundCloud links take it after #t=

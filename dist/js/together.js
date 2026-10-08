@@ -73,7 +73,7 @@ function roomConnect(url, onMessage) {
 // ---------- hosting ----------
 async function hostOpen(kind) {
   const relay = relayUrl();
-  if (!relay) throw new Error("set your relay's address in Settings > Streaming > Listen Along & Jams first");
+  if (!relay) throw new Error("set your relay's address in Settings > App > Listen Along & Jams first");
   if (together.role) await togetherEnd(true);
   const res = await fetch(relay + "/api/rooms", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ kind, host: myName() }) });
   if (!res.ok) throw new Error("the relay answered " + res.status);
