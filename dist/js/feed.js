@@ -234,42 +234,73 @@ function tileEl(tile) {
   return node;
 }
 
+// A shelf moves sideways with its own buttons and bar, not the scroll wheel (which scrolls the page)
 function shelfEl(shelf) {
   const sec = el("section", "shelf");
   const head = el("div", "shelfHead");
   const all = el("button", "shelfAll", "Show all");
-  head.append(el("h2", "", shelf.title), all);
+  const nav = el("div", "shelfNavs");
   const row = el("div", "shelfRow");
   const tiles = shelf.tiles || shelf.tracks.map((t, i) => ({
     kind: "track", track: t, index: i, list: shelf.tracks, plats: [srcOf(t)], sub: artistName(t),
   }));
   tiles.forEach((t) => row.append(tileEl(t)));
-  const prev = el("button", "shelfNav prev");
-  const next = el("button", "shelfNav next");
+  const prev = el("button", "shelfNav");
+  const next = el("button", "shelfNav");
   prev.setAttribute("aria-label", "Scroll left");
   next.setAttribute("aria-label", "Scroll right");
+  prev.title = "Back";
+  next.title = "More";
   prev.append(icon("M15.4 7.4L14 6l-6 6 6 6 1.4-1.4L10.8 12z"));
   next.append(icon("M8.6 16.6L10 18l6-6-6-6-1.4 1.4 4.6 4.6z"));
+  nav.append(prev, next);
+  head.append(el("h2", "", shelf.title), nav, all);
+  // the bar: where in the row you are, and how much of it shows; click or drag it to move
+  const bar = el("div", "shelfBar");
+  const thumb = el("div", "shelfThumb");
+  bar.append(thumb);
+  const smooth = () => (prefs.animOn === false ? "auto" : "smooth");
   const paintNav = () => {
-    prev.hidden = row.scrollLeft <= 2 || sec.classList.contains("expanded");
-    next.hidden = row.scrollLeft + row.clientWidth >= row.scrollWidth - 2 || sec.classList.contains("expanded");
+    const over = row.scrollWidth > row.clientWidth + 2 && !sec.classList.contains("expanded");
+    nav.hidden = !over;
+    bar.hidden = !over;
+    if (!over) return;
+    prev.disabled = row.scrollLeft <= 2;
+    next.disabled = row.scrollLeft + row.clientWidth >= row.scrollWidth - 2;
+    thumb.style.width = (row.clientWidth / row.scrollWidth) * 100 + "%";
+    thumb.style.left = (row.scrollLeft / row.scrollWidth) * 100 + "%";
   };
-  const page = (d) => row.scrollBy({ left: d * row.clientWidth * 0.9, behavior: prefs.animOn === false ? "auto" : "smooth" });
+  const page = (d) => row.scrollBy({ left: d * row.clientWidth * 0.9, behavior: smooth() });
   prev.addEventListener("click", () => page(-1));
   next.addEventListener("click", () => page(1));
   row.addEventListener("scroll", paintNav, { passive: true });
-  row.addEventListener("wheel", (e) => {
-    if (sec.classList.contains("expanded") || row.scrollWidth <= row.clientWidth || Math.abs(e.deltaX) > Math.abs(e.deltaY)) return;
+  bar.addEventListener("pointerdown", (e) => {
+    const r = bar.getBoundingClientRect();
+    const span = row.scrollWidth - row.clientWidth;
+    if (e.target !== thumb) {
+      // a click beside the thumb centres the view there
+      const frac = (e.clientX - r.left) / r.width;
+      row.scrollTo({ left: frac * row.scrollWidth - row.clientWidth / 2, behavior: smooth() });
+      return;
+    }
     e.preventDefault();
-    row.scrollLeft += e.deltaY;
-  }, { passive: false });
+    const x0 = e.clientX, left0 = row.scrollLeft;
+    thumb.setPointerCapture(e.pointerId);
+    bar.classList.add("dragging");
+    const move = (m) => { row.scrollLeft = Math.max(0, Math.min(span, left0 + (m.clientX - x0) * row.scrollWidth / r.width)); };
+    const up = () => { thumb.removeEventListener("pointermove", move); bar.classList.remove("dragging"); };
+    thumb.addEventListener("pointermove", move);
+    thumb.addEventListener("pointerup", up, { once: true });
+    thumb.addEventListener("pointercancel", up, { once: true });
+  });
   all.addEventListener("click", () => {
     const open = sec.classList.toggle("expanded");
     all.textContent = open ? "Show less" : "Show all";
     paintNav();
   });
-  sec.append(head, row, prev, next);
+  sec.append(head, row, bar);
   requestAnimationFrame(paintNav);
+  if (typeof ResizeObserver === "function") new ResizeObserver(paintNav).observe(row);
   return sec;
 }
 
