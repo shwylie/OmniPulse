@@ -19,7 +19,7 @@ const spApi = (method, path, body) =>
 function spTrack(x) {
   const imgs = (x.album && x.album.images) || [];
   const img = imgs.length ? (imgs[1] || imgs[0]).url : "";
-  return {
+  return tidyFeat({
     source: "spotify",
     id: "sp:" + x.id,
     uri: x.uri,
@@ -34,7 +34,7 @@ function spTrack(x) {
       id: x.album.id, name: x.album.name, images: x.album.images || [],
       total_tracks: x.album.total_tracks, album_type: x.album.album_type, artists: x.album.artists || [],
     } : null,
-  };
+  });
 }
 
 // ---------- account: Spotify stays hidden unless this is a Premium account ----------
@@ -249,6 +249,7 @@ function spotifyPos() {
 function paintSpotify() {
   const t = curTrack();
   if (!onSpotifyEngine(t)) return;
+  if (pendingResume && pendingResume.id === t.id) return;   // restored, not started: the restored position stays shown
   const pos = Math.min(spotifyPos(), spState.dur || Infinity);
   $("cur").textContent = fmt(viewPos(t, pos));
   if (spState.dur) {
@@ -288,7 +289,8 @@ async function spotifyStart(t, startMs) {
 
 function spotifyToggle() {
   if (spState.playing) { spotifyPause(); return; }
-  if (!spe.node) { const t = curTrack(); if (t) spotifyStart(t).catch((e) => say("Could not play this track: " + e)); return; }
+  // not started yet (a restored session, say): from where it was left, or its set start
+  if (!spe.node) { if (curTrack()) playCurrent(); return; }
   if (norm.ctx.state === "suspended") norm.ctx.resume().catch(() => {});
   spe.node.port.postMessage({ type: "play" });
   invoke("spe_resume").catch((e) => say("Spotify: " + e));

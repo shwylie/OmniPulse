@@ -504,7 +504,7 @@ $("list").addEventListener("click", (e) => {
     openArtistClicked(viewTracks[i], e.target);
     return;
   }
-  startList(viewTracks, i, false);
+  playFromPage(i);
 });
 
 // ---------- loading ----------
@@ -950,6 +950,16 @@ $("queue").addEventListener("click", (e) => {
   if (idx !== qi) { qi = idx; playCurrent(); }
 });
 
+// right-click a queue row: the same menu as anywhere else (what's playing gets the player's)
+$("queue").addEventListener("contextmenu", (e) => {
+  const li = e.target.closest(".qRow");
+  if (!li) return;
+  e.preventDefault();
+  e.stopPropagation();
+  const idx = Number(li.dataset.q);
+  if (queue[idx]) openTrackMenu(queue[idx], e.clientX, e.clientY, idx === qi, idx);
+});
+
 $("clearQueue").addEventListener("click", () => {
   queueListName = "";
   queue = qi >= 0 ? [queue[qi]] : [];
@@ -970,7 +980,7 @@ $("queueBtn").addEventListener("click", () => setQueueOpen(!prefs.queue));
 function fillNowPlaying(t) {
   $("nowTitle").textContent = t ? t.title || "Untitled" : "Nothing playing";
   fillArtists($("nowArtist"), t);
-  $("nowAlbum").textContent = t ? t.album || (t.spAlbum && t.spAlbum.name) || "" : "";
+  $("nowAlbum").textContent = t ? albumShown(t) : "";
   $("plAddBtn").hidden = !t;
   $("nowToggle").draggable = !!t;
   $("moreBtn").hidden = !t;
@@ -988,7 +998,7 @@ function fillNowPlaying(t) {
   if (/^\d{4}$/.test(year)) bits.push(year);
   if (t && t.playback_count) bits.push(Number(t.playback_count).toLocaleString() + " plays");
   $("npMeta").textContent = bits.join(", ");
-  const album = t ? t.album || (t.spAlbum && t.spAlbum.name) || "" : "";
+  const album = t ? albumShown(t) : "";
   $("npAlbum").textContent = album;
   $("npAlbum").hidden = !album;
   $("npDesc").textContent = t && t.description ? t.description.slice(0, 600) : "";
@@ -1107,6 +1117,21 @@ $("plAddBtn").addEventListener("click", (e) => {
   if (t) openPlaylistMenu(t, $("plAddBtn"));
 });
 $("npLike").addEventListener("click", () => toggleLike(curTrack()));
+
+// A track picked on a page: from a playlist (or Library, Favourites and the like) the list becomes the
+// queue; from Search or an artist's page it only takes the place of what's playing, and the queue
+// you had carries on after it
+function playFromPage(i) {
+  const t = viewTracks[i];
+  if (!t) return;
+  if ((view === "search" || view === "artist") && queue.length && qi >= 0) {
+    queue[qi] = Object.assign({}, t, { autoplay: undefined, requestedBy: undefined });
+    playCurrent();
+    return;
+  }
+  if (view === "search" || view === "artist") { startList([t], 0, false); return; }
+  startList(viewTracks, i, false);
+}
 
 // ---------- playback ----------
 async function playCurrent() {

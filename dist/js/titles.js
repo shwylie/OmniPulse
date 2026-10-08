@@ -34,8 +34,50 @@ function cleanTitle(title) {
 function tidyTrack(t) {
   if (t && t.title) t.title = cleanTitle(t.title);
   if (t && t.title && !t.displayArtist) splitArtist(t);
+  if (t) tidyFeat(t);
   if (t) applyFix(t);
   return t;
+}
+
+// ---------- featured artists ----------
+// "Song (feat. X) (feat. X)": the repeat goes, and X joins the artists (if they aren't there already),
+// so the title is just the song and X is a link like the others. Repeated tags ("(Remix) (Remix)")
+// are kept once.
+const FEAT_RE = /\s*[(\[]\s*(?:feat\.?|ft\.?|featuring)\s+([^)\]]+)[)\]]|\s+(?:feat\.?|ft\.?|featuring)\s+([^()\[\]]+?)\s*$/gi;
+const nameKey = (s) => String(s).toLowerCase().normalize("NFKD").replace(/[^a-z0-9\u00c0-\u024f\u0400-\u04ff\u3040-\u9fff]/g, "");
+const splitNames = (s) => String(s).split(/\s*(?:,|&|\band\b|\bx\b|\bvs\.?\b)\s*/i).map((x) => x.trim()).filter(Boolean);
+
+function tidyFeat(t) {
+  if (!t || !t.title) return t;
+  const featured = [];
+  let title = t.title.replace(FEAT_RE, (m, a, b) => { featured.push(...splitNames(a || b)); return ""; });
+  // the same tag twice
+  const seen = new Set();
+  title = title.replace(/\s*([(\[])([^)\]]+)([)\]])/g, (m, o, inner) => {
+    const k = nameKey(inner);
+    if (seen.has(k)) return "";
+    seen.add(k);
+    return m;
+  }).replace(/\s{2,}/g, " ").trim();
+  if (!featured.length) { if (title && title !== t.title) t.title = title; return t; }
+  const artist = artistName(t);
+  const have = new Set(splitNames(artist).map(nameKey));
+  const add = [];
+  featured.forEach((n) => { const k = nameKey(n); if (k && !have.has(k)) { have.add(k); add.push(n); } });
+  if (title) t.title = title;
+  if (add.length) t.displayArtist = [artist].concat(add).filter(Boolean).join(", ");
+  return t;
+}
+
+// The album line, only when it says something the title and artist don't: "Artist - Song" or the
+// song's own name as its album (a single) aren't shown
+const ALBUM_FILLER = new Set(["single", "ep", "the", "a", "feat", "ft", "featuring", "x", "and", "vs"]);
+function albumShown(t) {
+  const album = (t && (t.album || (t.spAlbum && t.spAlbum.name))) || "";
+  if (!album) return "";
+  const words = (s) => String(s).toLowerCase().normalize("NFKD").split(/[^a-z0-9\u00c0-\u024f\u0400-\u04ff\u3040-\u9fff]+/).filter(Boolean);
+  const have = new Set(words((t.title || "") + " " + artistName(t)));
+  return words(album).every((w) => have.has(w) || ALBUM_FILLER.has(w)) ? "" : album;
 }
 
 // ---------- your own title / artist fixes (right-click > Edit title and artist) ----------

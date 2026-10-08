@@ -81,7 +81,8 @@ function highlightLyric(time) {
   const cur = box.querySelector('.lyLine[data-i="' + i + '"]');
   if (cur) {
     cur.classList.add("on");
-    box.scrollTop = cur.offsetTop - box.offsetTop - box.clientHeight / 2 + cur.clientHeight / 2;
+    const top = cur.offsetTop - box.offsetTop - box.clientHeight / 2 + cur.clientHeight / 2;
+    box.scrollTo({ top, behavior: prefs.animOn === false ? "auto" : "smooth" });   // glides to the new line
   }
 }
 

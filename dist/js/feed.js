@@ -304,7 +304,12 @@ async function openMix(p) {
 
 async function playTile(tile) {
   if (tile.play) { tile.play(); return; }
-  if (tile.kind === "track") { startList(tile.list, tile.index, false); return; }
+  if (tile.kind === "track") {
+    // on Search and artist pages a track takes the playing one's place (see playFromPage)
+    if ((view === "search" || view === "artist") && queue.length && qi >= 0) { queue[qi] = Object.assign({}, tile.track, { autoplay: undefined, requestedBy: undefined }); playCurrent(); return; }
+    startList(tile.list, tile.index, false);
+    return;
+  }
   say("Putting your mix together...");
   try {
     const list = await mixTracks(tile.mix);

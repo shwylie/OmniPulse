@@ -440,8 +440,11 @@ let ctxTrack = null;
 let ctxAnchor = null;
 
 // fromPlayer: opened from the player bar, so leave out what only makes sense on a page
-function openTrackMenu(t, x, y, fromPlayer) {
+// queueIdx: opened on a queue row (its place in the queue)
+let ctxQueueIdx = null;
+function openTrackMenu(t, x, y, fromPlayer, queueIdx) {
   ctxTrack = t;
+  ctxQueueIdx = queueIdx === undefined ? null : queueIdx;
   ctxAnchor = { getBoundingClientRect: () => ({ left: x, right: x, top: y, bottom: y }) };
   const m = $("plMenu");
   m.replaceChildren();
@@ -455,6 +458,7 @@ function openTrackMenu(t, x, y, fromPlayer) {
   add("Play next", "next");
   add("Add to queue", "queue");
   add("Add to playlist...", "playlist");
+  if (ctxQueueIdx !== null && ctxQueueIdx > qi) add("Remove from queue", "unqueue");
   sep();
   if (canLike(t)) add(isLiked(t) ? "Remove from Likes" : "Add to Likes", "like");
   if (favOn()) add(isFav(t) ? "Remove from Favourites" : "Add to Favourites", "fav");
@@ -487,7 +491,11 @@ function runMenuAction(a) {
   const i = viewTracks.indexOf(t);
   if (a.startsWith("artist:")) { openArtistNamed(t, artistNames(t)[Number(a.slice(7))]); return; }
   switch (a) {
-    case "play": if (i >= 0) startList(viewTracks, i, false); else startList([t], 0, false); break;
+    case "play":
+      if (ctxQueueIdx !== null) { qi = ctxQueueIdx; playCurrent(); }   // a queue row: play it there
+      else if (i >= 0) playFromPage(i); else startList([t], 0, false);
+      break;
+    case "unqueue": if (ctxQueueIdx > qi && queue[ctxQueueIdx] === t) { queue.splice(ctxQueueIdx, 1); renderQueue(); } break;
     case "next": playNext(t); break;
     case "queue": addToQueue(t); break;
     case "playlist": openPlaylistMenu(t, ctxAnchor); break;

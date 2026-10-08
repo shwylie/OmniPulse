@@ -16,6 +16,8 @@ function nowPlaying() {
 function curPosMs() {
   const t = curTrack();
   if (!t) return 0;
+  // restored but not started yet: where it will start
+  if (pendingResume && pendingResume.id === t.id) return pendingResume.posMs;
   return onSpotifyEngine(t) ? spotifyPos() : (audio.currentTime || 0) * 1000;
 }
 function curDurMs() {
