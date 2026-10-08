@@ -211,9 +211,16 @@ function alertsCfg() {
   alertOrder().forEach((k) => {
     const e = alertEdits(k), img = (prefs.alertImages || {})[k];
     const c = {};
-    ["head", "main", "color", "anim", "icon"].forEach((f) => { if (e[f]) c[f] = e[f]; });
-    if (e.secs) c.secs = Number(e.secs);
+    ["head", "main", "color", "anim", "icon", "crop", "cicons", "music"].forEach((f) => { if (e[f]) c[f] = e[f]; });
+    if (e.color && e.color2) c.color2 = e.color2;
+    if (e.secs) c.secs = e.secs === "sound" ? "sound" : Number(e.secs);
+    if (e.sdelay) c.sdelay = Number(e.sdelay);
     if (img && img.at) c.image = String(img.at);
+    // its collage pictures (by place, so a gap stays a gap), and its sound's level and length
+    const cp = (prefs.alertCollage || {})[k];
+    if (cp && cp.some(Boolean)) c.cpics = cp.map((p) => (p ? String(p.at) : ""));
+    const lv = (prefs.alertLevels || {})[k];
+    if (lv && (prefs.alertSounds || {})[k]) { c.gain = alertGainDb(k); c.sndMs = lv.ms; }
     if (!alertBuiltin(k)) c.name = alertName(k);
     if (Object.keys(c).length) kinds[k] = c;
   });
@@ -224,6 +231,7 @@ function alertsCfg() {
     kinds,
     anim: prefs.alertAnim || "slide",
     transition: prefs.alertTrans || "seamless",
+    collage: { size: prefs.alertCSize || "medium", dir: prefs.alertCDir || "diag", rot: prefs.alertCRot === undefined ? 30 : Number(prefs.alertCRot), spin: prefs.alertCSpin || "mixed" },
     secs: Number(prefs.alertSecs) || 5,
     // their own colours (else the widget's, from the album art), and which way the gradient runs
     accent: prefs.alertOwnCol ? prefs.alertCol1 || "#8e9bff" : "",
@@ -358,15 +366,42 @@ function alertEditor(kind) {
   col.type = "color";
   col.value = e.color || "#8e9bff";
   col.disabled = !e.color;
-  own.addEventListener("change", () => { col.disabled = !own.checked; alertEditSet(kind, "color", own.checked ? col.value : ""); });
+  col.setAttribute("aria-label", "Its first colour");
+  // a second colour for its gradient (and its collage's tiles); the same as the first unless chosen
+  const col2 = el("input");
+  col2.type = "color";
+  col2.value = e.color2 || e.color || "#b38cff";
+  col2.disabled = !e.color;
+  col2.setAttribute("aria-label", "Its second colour");
+  const swap = el("button", "soft alertSwap", "⇄");
+  swap.title = "Swap the two colours";
+  swap.disabled = !e.color;
+  own.addEventListener("change", () => {
+    [col, col2, swap].forEach((x) => { x.disabled = !own.checked; });
+    alertEditSet(kind, "color", own.checked ? col.value : "");
+    alertEditSet(kind, "color2", own.checked && col2.value !== col.value ? col2.value : "");
+  });
   col.addEventListener("change", () => alertEditSet(kind, "color", col.value));
+  col2.addEventListener("change", () => alertEditSet(kind, "color2", col2.value));
+  swap.addEventListener("click", () => {
+    const a = col.value;
+    col.value = col2.value;
+    col2.value = a;
+    alertEditSet(kind, "color", col.value);
+    alertEditSet(kind, "color2", col2.value);
+  });
   const ownLbl = el("label", "alertCheck");
-  ownLbl.append(own, document.createTextNode(" Its own colour"));
-  colRow.append(ownLbl, col);
-  box.append(field("Colour", colRow));
+  ownLbl.append(own, document.createTextNode(" Its own colours"));
+  colRow.append(ownLbl, col, col2, swap);
+  box.append(field("Colours", colRow, "Its gradient runs from the first to the second, as set under Gradient."));
+  const hasSound = !!(prefs.alertSounds || {})[kind];
+  const secsOpts = [["", "As set above"]].concat(hasSound || e.secs === "sound" ? [["sound", "As long as its sound"]] : [], ALERT_SECS.map((s) => [String(s), s + " s"]));
+  const animSel = select([["", "As set above"]].concat(ALERT_ANIMS), e.anim || "", (v) => alertEditSet(kind, "anim", v));
+  const collageOn = (prefs.alertTrans || "seamless") === "collage";
+  animSel.disabled = collageOn;
   box.append(
-    field("Show For", select([["", "As set above"]].concat(ALERT_SECS.map((s) => [String(s), s + " s"])), String(e.secs || ""), (v) => alertEditSet(kind, "secs", v ? Number(v) : ""))),
-    field("Animation", select([["", "As set above"]].concat(ALERT_ANIMS), e.anim || "", (v) => alertEditSet(kind, "anim", v))),
+    field("Show For", select(secsOpts, String(e.secs || ""), (v) => alertEditSet(kind, "secs", v === "sound" ? "sound" : v ? Number(v) : ""))),
+    field("Animation", animSel, collageOn ? "Not used with Collage: its tiles bring the alert in." : ""),
   );
   // the picture: an icon, or your own image or GIF
   const img = (prefs.alertImages || {})[kind];
@@ -386,6 +421,9 @@ function alertEditor(kind) {
     picRow.append(pick);
   }
   box.append(field("Picture", picRow));
+  if (img) box.append(field("Crop", alertCropEditor(kind)));
+  box.append(field("Collage", alertCollageEditor(kind)));
+  box.append(field("Sound", alertSoundEditor(kind)));
   const foot = el("div", "alertInline alertFoot");
   if (custom) {
     const del = el("button", "soft danger", "Delete This Alert");
@@ -421,7 +459,9 @@ function alertRename(kind, v) {
   prefs.alertEdit = move(prefs.alertEdit);
   prefs.alertOrder = (prefs.alertOrder || []).map((k) => (k === kind ? id : k));
   prefs.alertOff = (prefs.alertOff || []).map((k) => (k === kind ? id : k));
-  // its sound and picture are files named after the trigger: those are picked again
+  // its sound, picture and collage are files named after the trigger: those are picked again
+  alertCollageDrop(kind);
+  if (prefs.alertLevels && prefs.alertLevels[kind]) { prefs.alertLevels = Object.assign({}, prefs.alertLevels); delete prefs.alertLevels[kind]; }
   ["sound", "image"].forEach((slot) => {
     const key = slot === "sound" ? "alertSounds" : "alertImages";
     if (prefs[key] && prefs[key][kind]) { invoke("alert_media_clear", { kind, slot }).catch(() => {}); prefs[key] = Object.assign({}, prefs[key]); delete prefs[key][kind]; }
@@ -444,7 +484,8 @@ function alertAdd() {
 
 function alertDelete(kind) {
   prefs.alertCustom = alertCustom().filter((c) => c.id !== kind);
-  ["alertEdit", "alertSounds", "alertImages"].forEach((key) => { if (prefs[key] && prefs[key][kind]) { prefs[key] = Object.assign({}, prefs[key]); delete prefs[key][kind]; } });
+  alertCollageDrop(kind);
+  ["alertEdit", "alertSounds", "alertImages", "alertLevels"].forEach((key) => { if (prefs[key] && prefs[key][kind]) { prefs[key] = Object.assign({}, prefs[key]); delete prefs[key][kind]; } });
   prefs.alertOrder = (prefs.alertOrder || []).filter((k) => k !== kind);
   prefs.alertOff = (prefs.alertOff || []).filter((k) => k !== kind);
   ["sound", "image"].forEach((slot) => invoke("alert_media_clear", { kind, slot }).catch(() => {}));
@@ -473,7 +514,10 @@ async function alertPickMedia(kind, slot) {
     const name = await invoke("alert_media_set", { kind, slot, path: String(path) });
     const key = image ? "alertImages" : "alertSounds";
     prefs[key] = Object.assign({}, prefs[key], { [kind]: { name, at: Date.now() } });
+    // a new picture starts uncropped; a new sound is measured, so it plays as loud as the others
+    if (image) alertEditSet(kind, "crop", "");
     alertsSave();
+    if (!image) { await alertAnalyse(kind, false); alertOpen = kind; }
     alertsPaintList();
   } catch (e) {
     say(String(e && e.message ? e.message : e));
@@ -484,6 +528,7 @@ async function alertClearMedia(kind, slot) {
   await invoke("alert_media_clear", { kind, slot }).catch(() => {});
   const key = slot === "image" ? "alertImages" : "alertSounds";
   if (prefs[key]) { prefs[key] = Object.assign({}, prefs[key]); delete prefs[key][kind]; }
+  if (slot === "sound") alertLevelSet(kind, null);
   alertsSave();
   alertsPaintList();
 }
@@ -583,6 +628,15 @@ function alertsPaint() {
   $("sbHost").value = prefs.sbHost || "127.0.0.1:8080";
   $("alertAnim").value = prefs.alertAnim || "slide";
   $("alertTrans").value = prefs.alertTrans || "seamless";
+  const collage = (prefs.alertTrans || "seamless") === "collage";
+  $("alertCollageBox").hidden = !collage;
+  $("alertAnim").disabled = collage;
+  $("alertAnimNote").textContent = collage ? "Not used with Collage: its tiles bring each alert in, even with nothing playing." : "With Over the Top, and while nothing's playing.";
+  $("alertCSize").value = prefs.alertCSize || "medium";
+  $("alertCDir").value = prefs.alertCDir || "diag";
+  $("alertCSpin").value = prefs.alertCSpin || "mixed";
+  $("alertCRot").value = String(prefs.alertCRot === undefined ? 30 : prefs.alertCRot);
+  $("alertCRotVal").textContent = $("alertCRot").value + "\u00b0";
   $("alertSecs").value = String(Number(prefs.alertSecs) || 5);
   $("alertIconVal").textContent = Math.round(alertIconScale() * 100) + "%";
   $("alertIconDown").disabled = alertIconScale() <= 0.6;
@@ -646,7 +700,10 @@ function alertsInit() {
   });
   $("alertAnim").addEventListener("change", () => { prefs.alertAnim = $("alertAnim").value; alertsSave(); });
   $("alertBot").addEventListener("change", () => { prefs.alertBot = $("alertBot").value; savePrefs(); alertsPaint(); });
-  $("alertTrans").addEventListener("change", () => { prefs.alertTrans = $("alertTrans").value; alertsSave(); });
+  $("alertTrans").addEventListener("change", () => { prefs.alertTrans = $("alertTrans").value; alertsSave(); alertsPaint(); alertsPaintList(); });
+  ["alertCSize", "alertCDir", "alertCSpin"].forEach((id) => $(id).addEventListener("change", () => { prefs[id] = $(id).value; alertsSave(); }));
+  $("alertCRot").addEventListener("input", () => { $("alertCRotVal").textContent = $("alertCRot").value + "\u00b0"; });
+  $("alertCRot").addEventListener("change", () => { prefs.alertCRot = Number($("alertCRot").value); alertsSave(); });
   $("alertSecs").addEventListener("change", () => { prefs.alertSecs = Number($("alertSecs").value); alertsSave(); });
   const stepIcon = (d) => { prefs.alertIcon = Math.round(Math.min(2, Math.max(0.6, alertIconScale() + d)) * 10) / 10; alertsSave(); alertsPaint(); };
   $("alertIconDown").addEventListener("click", () => stepIcon(-0.1));

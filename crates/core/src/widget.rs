@@ -3,7 +3,8 @@
 // music. It can also show stream alerts over the card (follows, subs, bits...): they come from
 // Streamer.bot's WebSocket (the page connects to it itself) or from a web request to /alert (Mix It
 // Up's Web Request action, Streamer.bot's Fetch URL, anything), and each kind can have a sound,
-// served from /sound/<kind> and played by the page, so OBS can route it.
+// served from /sound/<kind> and played by the page, so OBS can route it. A musical alert's sound is
+// played by the app instead (it pauses the music for it): the page says when it shows one (/shown).
 
 use serde_json::{json, Value};
 use std::{
@@ -29,6 +30,15 @@ static ALERT_ID: AtomicU64 = AtomicU64::new(0);
 /// Programs on this PC never need it; other devices can only reach /alert, never the widget itself.
 static ALERT_KEY: Mutex<String> = Mutex::new(String::new());
 const ALERTS_KEPT: usize = 20;
+
+/// Told when the page shows an alert (its kind), for the app to play a musical one's sound itself
+pub type ShownHandler = std::sync::Arc<dyn Fn(&str) + Send + Sync>;
+static ON_SHOWN: Mutex<Option<ShownHandler>> = Mutex::new(None);
+pub fn set_shown_handler(f: ShownHandler) {
+    if let Ok(mut h) = ON_SHOWN.lock() {
+        *h = Some(f);
+    }
+}
 
 // Changes whenever widget.html changes; an open widget compares it and reloads itself
 pub fn widget_version() -> String {
@@ -128,8 +138,13 @@ pub fn kind_ok(kind: &str) -> bool {
 }
 
 // ---------- an alert's sound and picture: one file each, in <data>/alert-sounds and alert-images ----------
+// (and its collage's pictures, in alert-collage, named <kind>-<n>)
 fn media_dir(slot: &str) -> Result<std::path::PathBuf, String> {
-    let d = crate::data_dir()?.join(if slot == "image" { "alert-images" } else { "alert-sounds" });
+    let d = crate::data_dir()?.join(match slot {
+        "image" => "alert-images",
+        "collage" => "alert-collage",
+        _ => "alert-sounds",
+    });
     std::fs::create_dir_all(&d).map_err(|e| e.to_string())?;
     Ok(d)
 }
@@ -147,11 +162,12 @@ pub fn alert_media_set(kind: &str, slot: &str, path: &str) -> Result<String, Str
     if !kind_ok(kind) {
         return Err("unknown alert type".into());
     }
-    let exts: &[&str] = if slot == "image" { &IMAGE_EXTS } else { &SOUND_EXTS };
+    let pic = slot == "image" || slot == "collage";
+    let exts: &[&str] = if pic { &IMAGE_EXTS } else { &SOUND_EXTS };
     let src = std::path::Path::new(path);
     let ext = src.extension().and_then(|e| e.to_str()).map(|e| e.to_lowercase()).unwrap_or_default();
     if !exts.contains(&ext.as_str()) {
-        return Err(format!("Pick {} file ({}).", if slot == "image" { "an image or GIF" } else { "a sound" }, exts.join(", ")));
+        return Err(format!("Pick {} file ({}).", if pic { "an image or GIF" } else { "a sound" }, exts.join(", ")));
     }
     let size = std::fs::metadata(src).map_err(|e| e.to_string())?.len();
     if size > 20 * 1024 * 1024 {
@@ -169,6 +185,12 @@ pub fn alert_media_clear(kind: &str, slot: &str) {
     if let Some(p) = media_file(kind, slot) {
         let _ = std::fs::remove_file(p);
     }
+}
+
+/// An alert's sound or picture as it's kept, for the app to measure (a sound's loudness) or show
+pub fn alert_media_bytes(kind: &str, slot: &str) -> Result<Vec<u8>, String> {
+    let f = kind_ok(kind).then(|| media_file(kind, slot)).flatten().ok_or("That alert has no file there.")?;
+    std::fs::read(f).map_err(|e| e.to_string())
 }
 
 fn media_type(p: &std::path::Path) -> &'static str {
@@ -252,8 +274,18 @@ pub fn widget_serve(listener: TcpListener, gen: u64) {
                             Err(e) => reply(&mut stream, "400 Bad Request", "application/json", json!({ "ok": false, "error": e }).to_string().as_bytes()),
                         }
                     }
-                    // an alert's sound or picture
-                    p if p.starts_with("/sound/") || p.starts_with("/image/") => {
+                    // the page is showing an alert: the app plays a musical one's sound
+                    "/shown" => {
+                        let kind = query_map(query).get("type").and_then(|v| v.as_str().map(String::from)).unwrap_or_default();
+                        if kind_ok(&kind) {
+                            if let Some(h) = ON_SHOWN.lock().ok().and_then(|h| h.clone()) {
+                                h(&kind);
+                            }
+                        }
+                        reply(&mut stream, "204 No Content", "text/plain", b"");
+                    }
+                    // an alert's sound, picture or collage picture
+                    p if p.starts_with("/sound/") || p.starts_with("/image/") || p.starts_with("/collage/") => {
                         let (slot, kind) = p[1..].split_once('/').unwrap_or(("", ""));
                         match kind_ok(kind).then(|| media_file(kind, slot)).flatten().and_then(|f| std::fs::read(&f).ok().map(|b| (f, b))) {
                             Some((f, bytes)) => reply(&mut stream, "200 OK", media_type(&f), &bytes),

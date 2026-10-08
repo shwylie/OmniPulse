@@ -150,15 +150,15 @@
     border-radius: 0.625rem; background: color-mix(in srgb, var(--hi) 45%, rgba(255, 255, 255, 0.12));
   }
   #aIcon svg { width: calc(50% * var(--ai, 1)); height: calc(50% * var(--ai, 1)); fill: #fff; }
-  #aIcon.pic { background: none; }
+  #aIcon.pic { background: none; overflow: hidden; }
   #aIcon.pic svg { display: none; }
   #aIcon img { width: 100%; height: 100%; object-fit: contain; }
   #aText { flex: 1; min-width: 0; display: flex; flex-direction: column; justify-content: center; font-size: calc(1rem * var(--ts, 1)); }
   #aHead { font-size: 0.72em; font-weight: 800; letter-spacing: 0.12em; text-transform: uppercase; color: rgba(255, 255, 255, 0.78); }
   #aMain { font-size: 1.25em; font-weight: 800; margin-top: 0.1rem; }
   #aMsg { font-size: 0.82em; color: rgba(255, 255, 255, 0.82); margin-top: 0.2rem; }
-  #aMain, #aMsg { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  #aMsg:empty { display: none; }
+  #aMain, #aMsg { white-space: nowrap; overflow: hidden; }
+  #aMsg[hidden] { display: none; }
   /* the card steps back while an alert is up */
   /* ---------- the card and an alert, handing over (Settings > Alert Options > Transition) ---------- */
   #card { transition: opacity 0.45s, transform 0.55s cubic-bezier(0.2, 0.8, 0.2, 1); }
@@ -193,7 +193,7 @@
   #collage { position: absolute; inset: 0; z-index: 3; overflow: hidden; pointer-events: none; border-radius: 0.875rem; }
   body.pill #collage { border-radius: 999px; }
   body.sharp #collage { border-radius: 0; }
-  .cTile { position: absolute; display: grid; place-items: center; transform: scale(0); opacity: 0; }
+  .cTile { position: absolute; display: grid; place-items: center; transform: scale(0); opacity: 0; overflow: hidden; }
   .cTile svg { width: 56%; height: 56%; fill: #fff; filter: drop-shadow(0 0.1rem 0.3rem rgba(0, 0, 0, 0.35)); }
   .cTile img { width: 78%; height: 78%; object-fit: contain; }
   .cTile.cin { animation: cTileIn 0.32s cubic-bezier(0.2, 0.9, 0.3, 1.25) var(--d) both; }
@@ -229,7 +229,7 @@
   body.ticker #aIcon svg { width: calc(100% * min(1, var(--ai, 1))); height: calc(100% * min(1, var(--ai, 1))); }
   body.ticker #aText { flex: 1; flex-direction: row; justify-content: flex-start; align-items: baseline; gap: 0.6rem; }
   body.ticker #aHead { flex: none; font-size: 0.7em; }
-  body.ticker #aMain { flex: 0 1 auto; font-size: 1em; margin: 0; }
+  body.ticker #aMain { flex: 0 1 auto; min-width: 0; font-size: 1em; margin: 0; }
   body.ticker #aMsg { flex: 1 1 0; min-width: 0; margin: 0; font-size: 0.85em; }
   body.sharp #alert, body.sharp #aIcon { border-radius: 0; }
   body.sharp.vinyl #aIcon { border-radius: 50%; }
@@ -264,7 +264,7 @@
 <div id="collage"></div>
 <div id="alert">
   <div id="aIcon"><svg viewBox="0 0 24 24"><path id="aPath" d=""/></svg></div>
-  <div id="aText"><div id="aHead"></div><div id="aMain"></div><div id="aMsg"></div></div>
+  <div id="aText"><div id="aHead"></div><div id="aMain" class="marq"><span></span></div><div id="aMsg" class="marq"><span></span></div></div>
 </div>
 <script>
   const MY_VERSION = "__WIDGET_VERSION__";
@@ -506,37 +506,52 @@
     if (!showing) alertNext();
   }
 
-  function alertNext() {
-    if (!waiting.length) { showing = false; return; }
-    const order = acfg.order || [];
-    const rank = (a) => { const i = order.indexOf(a.type); return i < 0 ? order.length : i; };
-    let best = 0;
-    waiting.forEach((a, i) => { if (rank(a) < rank(waiting[best])) best = i; });
-    const a = waiting.splice(best, 1)[0];
-    showing = true;
-    const [head, main, msg] = alertWords(a);
-    $("aHead").textContent = head;
-    $("aMain").textContent = main;
-    $("aMsg").textContent = msg || "";
+  // An alert's look, worked out once: its words, colours, picture or icon, and timing
+  function alertLook(a) {
     const k = kindCfg(a.type);
+    // its own colours (two, or one and a shade of it), or the alerts' colours, or the widget's (from the album art)
+    const c1 = k.color || acfg.accent || "";
+    const c2 = k.color ? k.color2 || k.color : acfg.accent2 || acfg.accent || "";
+    const hi = c1 || getComputedStyle(document.documentElement).getPropertyValue("--hi").trim() || "#8e9bff";
+    return { a, k, c1, c2, hi, lo: c2 || hi, own: !!k.color, words: alertWords(a) };
+  }
+
+  // A picture of yours, cropped as you set it (Settings > Widget > Alerts > the alert > Picture)
+  function cropImg(img, crop) {
+    const c = crop || {};
+    const x = Math.max(0, Math.min(100, c.x === undefined ? 50 : Number(c.x)));
+    const y = Math.max(0, Math.min(100, c.y === undefined ? 50 : Number(c.y)));
+    const z = Math.max(1, Math.min(4, Number(c.z) || 1));
+    img.style.objectFit = c.fit === "cover" ? "cover" : "contain";
+    img.style.objectPosition = x + "% " + y + "%";
+    img.style.transformOrigin = x + "% " + y + "%";
+    img.style.transform = z > 1 ? "scale(" + z + ")" : "";
+  }
+
+  // The alert on the box (under a collage, or about to come in)
+  function alertFill(look) {
+    const { a, k, c1, c2 } = look;
+    const [head, main, msg] = look.words;
+    $("aHead").textContent = head;
+    $("aMain").firstElementChild.textContent = main;
+    $("aMsg").firstElementChild.textContent = msg || "";
+    $("aMsg").hidden = !msg;
     const icon = $("aIcon");
     icon.classList.toggle("pic", !!k.image);
     if (k.image) {
       // your own picture (a GIF, say) in place of the icon; the address changes with the file so a new one shows
       const img = icon.querySelector("img") || icon.appendChild(document.createElement("img"));
       img.src = "/image/" + a.type + "?s=" + encodeURIComponent(k.image);
+      cropImg(img, k.crop);
     } else {
       const img = icon.querySelector("img");
       if (img) img.remove();
       $("aPath").setAttribute("d", ALERT_ICONS[k.icon] || ALERT_ICONS[a.type] || ALERT_ICONS.bell);
     }
-    const [inA, outA] = ANIMS[k.anim] || ANIMS[acfg.anim] || ANIMS.slide;
     const box = $("alert");
-    // its own colour, or the alerts' colours, or the widget's (from the album art)
-    const c1 = k.color || acfg.accent, c2 = k.color || acfg.accent2 || acfg.accent;
     if (c1) {
       box.style.setProperty("--bg1", mix(c1, 0.55));
-      box.style.setProperty("--bg2", mix(c2, k.color ? 0.38 : 0.42));
+      box.style.setProperty("--bg2", mix(c2, look.own && c2 === c1 ? 0.38 : 0.42));
       box.style.setProperty("--hi", c1);
     } else {
       ["--bg1", "--bg2", "--hi"].forEach((v) => box.style.removeProperty(v));
@@ -544,17 +559,75 @@
     box.style.setProperty("--ai", String(Math.min(2, Math.max(0.6, Number(acfg.icon_scale) || 1))));
     const dir = acfg.dir || "115deg";
     box.style.setProperty("--a-dir", dir === "glow" ? "115deg" : dir);
+  }
+
+  // Long lines scroll, as the track's do
+  function alertScroll() {
+    ["aMain", "aMsg"].forEach((id) => measure($(id)));
+  }
+
+  // Its sound: on the widget (so OBS can route it), at its measured loudness and your adjustment, after
+  // its delay; a musical alert's is played by the app instead, which pauses the music for it
+  let alertCtx = null;
+  function alertSound(look) {
+    const { a, k } = look;
+    if (!acfg.sounds || !acfg.sounds[a.type]) return;
+    if (k.music) { fetch("/shown?type=" + encodeURIComponent(a.type)).catch(() => {}); return; }
+    const vol = Math.max(0, Math.min(1, acfg.volume === undefined ? 0.8 : Number(acfg.volume)));
+    const gain = vol * Math.pow(10, (Number(k.gain) || 0) / 20);
+    const snd = new Audio("/sound/" + a.type + "?s=" + encodeURIComponent(acfg.sounds[a.type]));
+    try {
+      // through a gain, so a quiet sound can be turned up past 100%
+      alertCtx = alertCtx || new AudioContext();
+      const g = alertCtx.createGain();
+      g.gain.value = gain;
+      alertCtx.createMediaElementSource(snd).connect(g).connect(alertCtx.destination);
+      if (alertCtx.state === "suspended") alertCtx.resume().catch(() => {});
+    } catch (e) {
+      snd.volume = Math.min(1, gain);
+    }
+    setTimeout(() => snd.play().catch(() => {}), Math.max(0, Number(k.sdelay) || 0));
+  }
+
+  // How long it stays: its own time, the alerts' time, or as long as its sound
+  function alertSecs(look) {
+    const k = look.k;
+    if (k.secs === "sound" && k.sndMs) return Math.max(2, Math.min(60, (Number(k.sndMs) + (Number(k.sdelay) || 0)) / 1000 + 0.6));
+    return Math.max(2, Math.min(30, Number(k.secs) || Number(acfg.secs) || 5));
+  }
+
+  function takeNext() {
+    const order = acfg.order || [];
+    const rank = (a) => { const i = order.indexOf(a.type); return i < 0 ? order.length : i; };
+    let best = 0;
+    waiting.forEach((a, i) => { if (rank(a) < rank(waiting[best])) best = i; });
+    return waiting.splice(best, 1)[0];
+  }
+
+  // prev: the alert showing now, when a collage carries straight on from it to this one
+  function alertNext(prev) {
+    if (!waiting.length) { showing = false; return; }
+    const look = alertLook(takeNext());
+    showing = true;
+    const { k, c1, c2 } = look;
+    const [inA, outA] = ANIMS[k.anim] || ANIMS[acfg.anim] || ANIMS.slide;
+    const box = $("alert");
+    const dir = acfg.dir || "115deg";
     // how the card hands over: from the card (playing), the chosen transition; from another alert,
-    // seamless stays seamless and the rest use the alert's own animation; with no card, the latter
+    // a collage carries on as one, seamless stays seamless and the rest use the alert's own animation
     const body = document.body;
     const handing = !body.classList.contains("alerting");
     if (handing) {
-      let t = $("card").classList.contains("show") ? acfg.transition || "seamless" : "overlay";
+      const playing = $("card").classList.contains("show");
+      let t = acfg.transition || "seamless";
+      // with no card: a collage still sweeps in; the rest come in with their animation
+      if (!playing && t !== "collage") t = "overlay";
       // with no panel (Minimal) the card and alert mustn't show together: those become seamless
       if (design === "minimal" && (t === "crossfade" || t === "wipe")) t = "seamless";
       body.dataset.tr = t;
     }
-    const mode = body.dataset.tr === "seamless" ? "seam" : handing ? body.dataset.tr : "overlay";
+    const tr = body.dataset.tr;
+    const mode = tr === "seamless" ? "seam" : tr === "collage" ? "collage" : handing ? tr : "overlay";
     const MODES = {
       seam: [inA, outA, "0.5s", "0.35s", handing ? "0.25s" : "0.05s", 350],
       crossfade: ["aFadeIn", "aFadeOut", "0.6s", "0.6s", "0s", 600],
@@ -565,43 +638,43 @@
       overlay: [inA, outA, "0.55s", "0.45s", "0s", 450],
     };
     const [mIn, mOut, dIn, dOut, delay, outMs] = MODES[mode] || MODES.overlay;
-    box.style.setProperty("--a-in", mIn);
-    box.style.setProperty("--a-out", mOut);
-    box.style.setProperty("--a-dur-in", dIn);
-    box.style.setProperty("--a-dur-out", dOut);
-    box.style.setProperty("--a-delay", delay);
-    // seamless: the panel takes the alert's colours, blending across
-    if (mode === "seam" && c1) {
-      seamColours = true;
-      const root = document.documentElement.style;
-      root.setProperty("--cf", "0.6s");
-      root.setProperty("--bg1", mix(c1, 0.55));
-      root.setProperty("--bg2", mix(c2, k.color ? 0.38 : 0.42));
-      root.setProperty("--hi", c1);
-    }
-    const secs = Math.max(2, Math.min(30, Number(k.secs) || Number(acfg.secs) || 5));
     const showIt = () => {
+      alertFill(look);
+      box.style.setProperty("--a-in", mIn);
+      box.style.setProperty("--a-out", mOut);
+      box.style.setProperty("--a-dur-in", dIn);
+      box.style.setProperty("--a-dur-out", dOut);
+      box.style.setProperty("--a-delay", delay);
+      // seamless: the panel takes the alert's colours, blending across
+      if (mode === "seam" && c1) {
+        seamColours = true;
+        const root = document.documentElement.style;
+        root.setProperty("--cf", "0.6s");
+        root.setProperty("--bg1", mix(c1, 0.55));
+        root.setProperty("--bg2", mix(c2, look.own && c2 === c1 ? 0.38 : 0.42));
+        root.setProperty("--hi", c1);
+      }
       box.className = "on" + (dir === "glow" ? " glow" : "") + (mode === "seam" ? " seam" : "");
       void box.offsetWidth;
       box.classList.add("in");
       body.classList.add("alerting");
-      if (acfg.sounds && acfg.sounds[a.type]) {
-        const snd = new Audio("/sound/" + a.type + "?s=" + encodeURIComponent(acfg.sounds[a.type]));
-        snd.volume = Math.max(0, Math.min(1, acfg.volume === undefined ? 0.8 : Number(acfg.volume)));
-        snd.play().catch(() => {});
-      }
-      setTimeout(leave, secs * 1000);
+      alertScroll();
+      alertSound(look);
+      setTimeout(leave, alertSecs(look) * 1000);
     };
-    // a collage: the tiles cover the card, the alert takes its place under them, and they clear
+    // a collage: the tiles cover the card (or the alert before), this alert takes its place under
+    // them, and they clear. From another alert, the tiles start in its colours and end in this one's.
     if (mode === "collage") {
-      const c = collage(a, k, c1, c2);
+      const c = collage(prev || look, look);
       c.cover().then(() => { showIt(); return c.reveal(); });
     } else showIt();
     function leave() {
-      // the last one after a collage: the tiles again, then the card back under them
-      if (!waiting.length && body.dataset.tr === "collage") {
-        const c = collage(a, k, c1, c2);
-        c.cover().then(() => { box.className = ""; alertsDone(); return c.reveal(); }).then(alertNext);
+      if (body.dataset.tr === "collage") {
+        // another waiting: one collage, from this alert into the next
+        if (waiting.length) { alertNext(look); return; }
+        // the last: the tiles again (this one's), then the card back under them
+        const c = collage(look, look);
+        c.cover().then(() => { box.className = ""; alertsDone(); return c.reveal(); }).then(() => alertNext());
         return;
       }
       box.classList.remove("in");
@@ -612,61 +685,102 @@
       setTimeout(() => {
         box.className = "";
         if (!waiting.length) alertsDone();
-        setTimeout(alertNext, waiting.length ? (mode === "seam" ? 120 : 400) : 0);
+        setTimeout(() => alertNext(), waiting.length ? (mode === "seam" ? 120 : 400) : 0);
       }, outMs);
     }
   }
 
   // ---------- the collage ----------
-  // The alert's own icon on most tiles, with a couple that go with it (a ban's hammers, a raid's
-  // rockets...), or its picture if it has one; in its colours. They sweep in corner to corner.
+  // Tiles of the alert's pictures sweep in over what's showing, then away again. Each alert's set: its
+  // own picture or icon, the icons and collage pictures you chose for it (Settings > the alert >
+  // Collage), or by default its icon with a couple that go with it (a ban's hammers, a raid's rockets).
+  // Settings > Alert Options > Collage: the tiles' size, which way they sweep, and how much they turn.
   const COLLAGE_WITH = {
     follow: ["sparkle", "follow"], sub: ["sparkle", "trophy"], gift: ["sparkle", "follow"], bits: ["sparkle", "kicks"],
     kicks: ["sparkle", "bits"], donation: ["follow", "sparkle"], raid: ["rocket", "sparkle"], hypetrain: ["rocket", "sparkle"],
     poll: ["bell", "sparkle"], ban: ["hammer", "hammer"], watchstreak: ["trophy", "sparkle"],
   };
-  function collage(a, k, c1, c2) {
+  function collageSet(look) {
+    const { a, k } = look;
+    const own = k.image ? { img: "/image/" + a.type + "?s=" + encodeURIComponent(k.image), crop: k.crop }
+      : { icon: ALERT_ICONS[k.icon] ? k.icon : ALERT_ICONS[a.type] ? a.type : "bell" };
+    const pics = (k.cpics || []).map((at, i) => (at ? { img: "/collage/" + a.type + "-" + (i + 1) + "?s=" + encodeURIComponent(at) } : null)).filter(Boolean);
+    const icons = (k.cicons || []).filter((n) => ALERT_ICONS[n]).map((n) => ({ icon: n }));
+    // nothing chosen: two in three tiles its own, the rest the ones that go with it
+    if (!pics.length && !icons.length) return [own, own].concat((COLLAGE_WITH[a.type] || ["sparkle", "follow"]).slice(0, 1).map((n) => ({ icon: n })));
+    return [own].concat(pics, icons);
+  }
+
+  // Blend two colours (#rrggbb or rgb()), t from 0 (a) to 1 (b)
+  function rgbOf(c) {
+    const m = String(c).match(/\d+/g);
+    if (String(c).startsWith("rgb") && m) return m.slice(0, 3).map(Number);
+    const n = parseInt(String(c || "#8e9bff").replace("#", "").slice(0, 6), 16) || 0;
+    return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+  }
+  function blend(a, b, t) {
+    const x = rgbOf(a), y = rgbOf(b);
+    return "#" + x.map((v, i) => Math.round(v + (y[i] - v) * t).toString(16).padStart(2, "0")).join("");
+  }
+
+  // from, to: the looks it starts and ends in (the same one, to and from the card)
+  function collage(from, to) {
     const box = $("collage");
     box.replaceChildren();
+    const opt = acfg.collage || {};
     const w = box.clientWidth || innerWidth, h = box.clientHeight || innerHeight;
-    const rows = h < 90 ? 1 : h < 220 ? 2 : h < 420 ? 3 : 4;
+    let rows = h < 90 ? 1 : h < 220 ? 2 : h < 420 ? 3 : 4;
+    if (opt.size === "small") rows += 1;
+    else if (opt.size === "large") rows = Math.max(1, rows - 1);
     const size = h / rows;
     const cols = Math.ceil(w / size);
-    const own = ALERT_ICONS[k.icon] ? k.icon : ALERT_ICONS[a.type] ? a.type : "bell";
-    const extras = COLLAGE_WITH[a.type] || ["sparkle", "follow"];
-    const base = c1 || getComputedStyle(document.documentElement).getPropertyValue("--hi").trim() || "#8e9bff";
-    const second = c2 || base;
+    const set = collageSet(to);
+    const turn = Math.max(0, Math.min(180, opt.rot === undefined ? 30 : Number(opt.rot)));
+    const way = opt.dir || "diag";
+    // the order they come in: a number for each tile, the smaller the sooner
+    const seed = (r, c) => ((r * 73856093) ^ (c * 19349663)) % 1000 / 1000;
+    const order = (r, c) => way === "ltr" ? c : way === "rtl" ? cols - 1 - c : way === "ttb" ? r : way === "btt" ? rows - 1 - r
+      : way === "centre" ? Math.hypot(c - (cols - 1) / 2, (r - (rows - 1) / 2) * 1.4) : way === "random" ? seed(r + 1, c + 1) * (rows + cols)
+      : way === "diag-up" ? c + (rows - 1 - r) : r + c;
+    let most = 0;
+    for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) most = Math.max(most, order(r, c));
+    most = most || 1;
     const tiles = [];
     for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
       const t = document.createElement("div");
       t.className = "cTile";
+      const at = order(r, c) / most;
+      // the colours: the first alert's up to halfway, then this one's, blending smoothly across the middle
+      const mid = from === to ? 1 : Math.min(1, Math.max(0, (at - 0.3) / 0.4));
+      const ease = mid * mid * (3 - 2 * mid);
+      const hi = blend(from.hi, to.hi, from === to ? 0 : ease), lo = blend(from.lo, to.lo, from === to ? 0 : ease);
+      const sign = opt.spin === "cw" ? 1 : opt.spin === "ccw" ? -1 : (r + c) % 2 ? 1 : -1;
       t.style.cssText = "left:" + c * size + "px;top:" + r * size + "px;width:" + (size + 1) + "px;height:" + (size + 1) + "px;" +
-        "background:" + mix((r + c) % 3 === 1 ? second : base, [0.62, 0.48, 0.7, 0.55][(r * 3 + c) % 4]) + ";" +
-        "--r:" + ((r + c) % 2 ? 1 : -1) * (12 + ((r * 7 + c * 13) % 22)) + "deg";
-      t.dataset.d = String(r + c);
-      // the alert's own picture, or its icon (two in three tiles) and the ones that go with it
-      if (k.image) {
+        "background:" + mix((r + c) % 3 === 1 ? lo : hi, [0.62, 0.48, 0.7, 0.55][(r * 3 + c) % 4]) + ";" +
+        "--r:" + sign * turn * (0.55 + 0.45 * seed(r + 3, c + 5)) + "deg";
+      t.dataset.at = String(at);
+      const pick = set[(r * cols + c + r) % set.length];
+      if (pick.img) {
         const img = document.createElement("img");
-        img.src = "/image/" + a.type + "?s=" + encodeURIComponent(k.image);
+        img.src = pick.img;
+        if (pick.crop) cropImg(img, pick.crop);
         t.append(img);
       } else {
-        const pick = (r * cols + c) % 3 === 2 ? extras[(r + c) % extras.length] : own;
         const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
         svg.setAttribute("viewBox", "0 0 24 24");
         const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
-        path.setAttribute("d", ALERT_ICONS[pick] || ALERT_ICONS.bell);
+        path.setAttribute("d", ALERT_ICONS[pick.icon] || ALERT_ICONS.bell);
         svg.append(path);
         t.append(svg);
       }
       box.append(t);
       tiles.push(t);
     }
-    const step = 40, span = (rows + cols - 2) * step;
+    const span = Math.min(1100, Math.max(320, (rows + cols - 2) * 40));
     const instant = document.body.classList.contains("nofade");
-    const run = (cls, reverse) => new Promise((done) => {
+    const run = (cls) => new Promise((done) => {
       tiles.forEach((t) => {
-        const d = Number(t.dataset.d) * step;
-        t.style.setProperty("--d", (reverse ? span - d : d) + "ms");
+        t.style.setProperty("--d", Math.round(Number(t.dataset.at) * span) + "ms");
         t.classList.remove("cin", "cout");
         void t.offsetWidth;
         t.classList.add(cls);
@@ -674,9 +788,9 @@
       setTimeout(done, instant ? 20 : span + 340);
     });
     return {
-      cover: () => run("cin", false),
+      cover: () => run("cin"),
       // they go the way they came, so the sweep carries on across
-      reveal: () => run("cout", false).then(() => box.replaceChildren()),
+      reveal: () => run("cout").then(() => box.replaceChildren()),
     };
   }
 

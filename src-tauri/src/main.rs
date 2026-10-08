@@ -246,6 +246,11 @@ fn widget_alert(alert: Value) -> Result<Value, String> {
 fn alert_media_set(kind: String, slot: String, path: String) -> Result<String, String> { widget::alert_media_set(&kind, &slot, &path) }
 #[tauri::command]
 fn alert_media_clear(kind: String, slot: String) { widget::alert_media_clear(&kind, &slot) }
+/// An alert's file as it's kept (a sound, to measure its loudness and preview it)
+#[tauri::command]
+fn alert_media_bytes(kind: String, slot: String) -> Result<tauri::ipc::Response, String> {
+    widget::alert_media_bytes(&kind, &slot).map(tauri::ipc::Response::new)
+}
 #[tauri::command]
 fn local_folders() -> Vec<String> { local::local_folders() }
 #[tauri::command]
@@ -710,6 +715,10 @@ fn main() {
                 ));
             }));
             // the action is one of remote's ACTIONS, so it's safe to put in the script
+            // the widget is showing an alert: a musical one's sound is played here (js/alertsound.js)
+            widget::set_shown_handler(Arc::new(|kind| {
+                page_eval(format!("window.__alertShown && window.__alertShown({})", serde_json::json!(kind)));
+            }));
             remote::set_handler(Arc::new(|id, action| {
                 page_eval(format!("window.__remote && window.__remote({id}, {})", serde_json::json!(action)));
             }));
@@ -784,7 +793,7 @@ fn main() {
             lyrics_get, presence_set, presence_clear,
             lastfm_status, lastfm_connect, lastfm_disconnect, lastfm_call, lastfm_recent, spotify_wait,
             stream_resolve, presence_test, taskbar_state,
-            widget_start, lan_ip, widget_stop, widget_update, widget_alert, alert_media_set, alert_media_clear,
+            widget_start, lan_ip, widget_stop, widget_update, widget_alert, alert_media_set, alert_media_clear, alert_media_bytes,
             youtube_status, youtube_connect, youtube_disconnect, youtube_licences, like_youtube_track, unlike_youtube_track,
             local_folders, local_set_folders, local_scan, local_status, local_tracks, local_server,
             requests_start, requests_stop, request_result,

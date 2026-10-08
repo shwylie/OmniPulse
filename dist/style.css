@@ -1428,3 +1428,31 @@ body.streamSafe .notSafe { display: none !important; }
 #clearedAdd input { flex: 1; min-width: 0; }
 #clearedAdd { gap: 8px; }
 #clearedAdd select { width: auto; min-width: 96px; }
+
+/* an alert's settings: its sound's levels, its picture's crop, its collage */
+.alertSoundEd, .alertCollageEd { display: grid; gap: 6px; min-width: 0; }
+.alertSoundEd .alertField { grid-template-columns: 64px 1fr; }
+.alertLevelView { display: flex; gap: 8px; align-items: stretch; }
+.alertLevels { width: 100%; max-width: 320px; height: 56px; background: var(--elevated); border-radius: 6px; }
+.alertMeter { width: 8px; border-radius: 4px; background: var(--elevated); display: flex; align-items: flex-end; overflow: hidden; }
+.alertMeter span { display: block; width: 100%; height: 0; background: var(--accent); transition: height 0.05s linear; }
+.alertMeter span.hot { background: #ff5a5a; }
+.alertAdjVal { font-size: 12px; color: var(--muted); min-width: 46px; }
+.alertSwap { padding: 2px 8px; }
+.alertCrop { display: flex; gap: 12px; align-items: flex-start; flex-wrap: wrap; }
+.cropFrame { width: 112px; height: 112px; border-radius: 10px; overflow: hidden; background: var(--elevated); cursor: grab; touch-action: none; position: relative; flex: none; }
+.cropFrame.round { border-radius: 50%; }
+.cropFrame:active { cursor: grabbing; }
+.cropFrame img { width: 100%; height: 100%; display: block; user-select: none; pointer-events: none; }
+.cropSide { display: grid; gap: 4px; min-width: 140px; flex: 1; }
+.cropSide .note { margin: 0; }
+.alertIconChips { display: flex; flex-wrap: wrap; gap: 4px; }
+.alertIconChip { width: 30px; height: 30px; padding: 0; display: grid; place-items: center; border-radius: 8px; border: 1px solid var(--line); background: transparent; color: var(--muted); cursor: pointer; }
+.alertIconChip svg { width: 16px; height: 16px; fill: currentColor; }
+.alertIconChip.on { background: color-mix(in srgb, var(--accent) 22%, transparent); border-color: var(--accent); color: var(--text); }
+.alertCollagePics { display: flex; gap: 6px; flex-wrap: wrap; }
+.collageSlot { width: 48px; height: 48px; border-radius: 8px; background: var(--elevated); position: relative; overflow: hidden; display: grid; place-items: center; }
+.collageSlot img { width: 100%; height: 100%; object-fit: cover; }
+.collageSlot > button { position: absolute; top: 2px; right: 2px; width: 18px; height: 18px; padding: 0; border-radius: 50%; border: 0; font-size: 12px; line-height: 1; background: rgba(0, 0, 0, 0.6); color: #fff; cursor: pointer; }
+.collageSlot > .collageAdd { position: static; width: 100%; height: 100%; border-radius: 8px; background: transparent; color: var(--muted); font-size: 20px; border: 1px dashed var(--line); }
+.collageSlot > .collageAdd:hover { color: var(--text); border-color: var(--accent); }

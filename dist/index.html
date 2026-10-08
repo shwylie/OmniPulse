@@ -984,10 +984,34 @@
             </div>
             <select id="alertTrans" class="narrow"><option value="seamless">Seamless</option><option value="crossfade">Crossfade</option><option value="push">Slide Across</option><option value="flip">Flip</option><option value="wipe">Wipe</option><option value="collage">Collage</option><option value="overlay">Over the Top</option></select>
           </div>
+          <div id="alertCollageBox" hidden>
+            <div class="row">
+              <div>
+                <div class="lbl">Collage Tiles</div>
+                <div class="note">Each alert's pictures: set in its own settings (the pencil).</div>
+              </div>
+              <select id="alertCSize" class="narrow"><option value="small">Small</option><option value="medium">Medium</option><option value="large">Large</option></select>
+            </div>
+            <div class="row">
+              <div class="lbl">Sweep</div>
+              <select id="alertCDir" class="narrow"><option value="diag">Corner to Corner</option><option value="diag-up">Corner to Corner, Rising</option><option value="ltr">Left to Right</option><option value="rtl">Right to Left</option><option value="ttb">Top to Bottom</option><option value="btt">Bottom to Top</option><option value="centre">From the Middle</option><option value="random">Scattered</option></select>
+            </div>
+            <div class="row">
+              <div>
+                <div class="lbl">Turn</div>
+                <div class="note">How far each tile turns as it comes in (0: none).</div>
+              </div>
+              <div class="levSlider"><input id="alertCRot" type="range" min="0" max="180" step="5" aria-label="How far the tiles turn"><span id="alertCRotVal">30°</span></div>
+            </div>
+            <div class="row">
+              <div class="lbl">Turn Which Way</div>
+              <select id="alertCSpin" class="narrow"><option value="mixed">Both Ways</option><option value="cw">Clockwise</option><option value="ccw">Anticlockwise</option></select>
+            </div>
+          </div>
           <div class="row">
             <div>
               <div class="lbl">Animation</div>
-              <div class="note">With Over the Top, and while nothing's playing.</div>
+              <div class="note" id="alertAnimNote">With Over the Top, and while nothing's playing.</div>
             </div>
             <select id="alertAnim" class="narrow"><option value="slide">Slide</option><option value="pop">Pop</option><option value="fade">Fade</option><option value="bounce">Bounce</option><option value="flip">Flip</option></select>
           </div>
@@ -1193,6 +1217,7 @@
 <script src="js/pagefind.js"></script>
 <script src="js/export.js"></script>
 <script src="js/streamsafe.js"></script>
+<script src="js/alertmedia.js"></script>
 <script src="js/init.js"></script>
 <script src="app.js"></script>
 </body>
