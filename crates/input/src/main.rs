@@ -3,29 +3,31 @@
 //
 // OmniPulse starts it (omnipulse-input [--muted]) while the OmniPulse Input is on and sends it the
 // sound on its standard input: pieces of [rate: u32 LE][length: u32 LE][16-bit stereo PCM]. It
-// answers one line ("ok <device>" or "error <why>") and stops when its input closes, which is also
-// what happens if OmniPulse closes or crashes.
+// answers one line ("ok <device>" or "error <why>"), then "moved <device>" when it follows its
+// routing somewhere else, and stops when its input closes, which is also what happens if OmniPulse
+// closes or crashes.
 
 #![windows_subsystem = "windows"]
 
-mod player;
-
+use omnipulse_pcmout::{Options, Player};
 use std::io::{Read, Write};
 
 fn main() {
     let muted = std::env::args().any(|a| a == "--muted");
     let mut out = std::io::stdout();
-    match player::start(muted) {
-        Ok(device) => {
-            let _ = writeln!(out, "ok {device}");
+    let player = match Player::start(Options { name: "OmniPulse Input", muted, device: None, prefill_ms: 60, max_ms: 400 }) {
+        Ok(p) => {
+            let _ = writeln!(out, "ok {}", p.device());
+            p
         }
         Err(e) => {
             let _ = writeln!(out, "error {e}");
             let _ = out.flush();
             return;
         }
-    }
+    };
     let _ = out.flush();
+    let mut last = player.device();
     let mut input = std::io::stdin().lock();
     let mut head = [0u8; 8];
     let mut pcm = Vec::new();
@@ -39,7 +41,12 @@ fn main() {
         if input.read_exact(&mut pcm).is_err() {
             break;
         }
-        player::push_pcm(&pcm, rate);
+        player.push(&pcm, rate);
+        let now = player.device();
+        if now != last {
+            let _ = writeln!(out, "moved {now}");
+            let _ = out.flush();
+            last = now;
+        }
     }
-    player::stop();
 }

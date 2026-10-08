@@ -315,6 +315,7 @@ function spotifyPause() {
 // The seek bar fires continuously while dragging: move the bar now, seek once it settles
 function spotifySeek(frac) {
   if (!spState.dur || !spe.node) return;
+  nativeOutFlush();
   const ms = Math.round(frac * spState.dur);
   spState.pos = ms;
   spState.ts = performance.now();

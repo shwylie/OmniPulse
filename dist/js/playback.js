@@ -138,6 +138,7 @@ function playbackTick() {
 }
 
 function playbackState(playing) {
+  if (!playing) nativeOutFlush();
   widgetPush();
   accentFollowPlayback(playing);
   if (playing && norm.ctx && norm.ctx.state === "suspended") norm.ctx.resume().catch(() => {});

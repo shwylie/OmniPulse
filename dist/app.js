@@ -1137,6 +1137,7 @@ function playFromPage(i) {
 async function playCurrent() {
   const t = curTrack();
   if (!t) return;
+  nativeOutFlush();   // the last track's tail isn't heard over the new one
   fillNowPlaying(t);
   refreshLikeUI();
   trackStarted(t);

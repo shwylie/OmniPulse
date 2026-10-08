@@ -224,6 +224,25 @@ async fn plugin_http(id: String, url: String, method: String, headers: Vec<(Stri
     plugins::http(&id, &url, &method, headers, body).await
 }
 
+// ---------- OmniPulse's own sound, from this process ----------
+#[tauri::command]
+async fn main_out_start(device: String) -> Result<String, String> {
+    tokio::task::spawn_blocking(move || omnipulse_core::main_out::start(&device)).await.map_err(|e| e.to_string())?
+}
+#[tauri::command]
+fn main_out_pcm(request: tauri::ipc::Request) {
+    if let tauri::ipc::InvokeBody::Raw(bytes) = request.body() {
+        let rate = request.headers().get("x-rate").and_then(|v| v.to_str().ok()).and_then(|v| v.parse().ok()).unwrap_or(48000);
+        omnipulse_core::main_out::push(bytes, rate);
+    }
+}
+#[tauri::command]
+fn main_out_flush() { omnipulse_core::main_out::flush() }
+#[tauri::command]
+fn main_out_volume(volume: f32) { omnipulse_core::main_out::set_volume(volume) }
+#[tauri::command]
+fn main_out_stop() { omnipulse_core::main_out::stop() }
+
 // ---------- the OmniPulse Input ----------
 #[tauri::command]
 async fn omni_input_start(muted: bool) -> Result<String, String> {
@@ -675,6 +694,7 @@ fn main() {
         })
         .invoke_handler(tauri::generate_handler![
             omni_input_start, omni_input_pcm, omni_input_stop,
+            main_out_start, main_out_pcm, main_out_flush, main_out_volume, main_out_stop,
             cast_devices, cast_start, cast_pcm, cast_track, cast_reload, cast_volume, cast_stop,
             login, signed_in, logout, api_get, stream_url, get_settings, set_gpu, restart_app, open_url, set_like, set_follow, playlist_write,
             spotify_login, spotify_signed_in, spotify_logout, spotify_token, spotify_api,

@@ -10,6 +10,8 @@ pub mod lyrics;
 pub mod plugins;
 pub mod cast;
 pub mod omni_input;
+pub mod main_out;
+mod capture_diag;
 pub mod remote;
 pub mod requests;
 pub mod soundcloud;

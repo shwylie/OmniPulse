@@ -18,6 +18,12 @@ const mainOut = { dest: null, el: null };
 async function mainSink(id) {
   const ctx = norm.ctx;
   if (!ctx || !out2.mainDelay) return;
+  // played from OmniPulse.exe: that's what moves (js/mainout.js)
+  if (nativeOut.on) {
+    await invoke("main_out_start", { device: await sinkLabel(id) });
+    setLevel(appVolume());
+    return;
+  }
   const want = id && id !== "default" ? id : "";
   let first = null;
   if (ctx.setSinkId) {

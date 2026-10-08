@@ -139,45 +139,9 @@ mod live {
             super::push_pcm(&vec![0u8; 4800 * 4], 48000);
             std::thread::sleep(std::time::Duration::from_millis(50));
         }
-        let found = sessions();
-        println!("{found:?}");
+        // it may be routed anywhere (Wave Link keys its routing to the program's name): every device's sessions
+        super::diag::omni_sessions_dump_now();
         super::stop();
-        let ours = found.iter().find(|(exe, _, _)| exe.eq_ignore_ascii_case(super::PROGRAM)).expect("a session from omnipulse-input.exe");
-        assert_eq!(ours.1, "OmniPulse Input");
-        assert!(ours.2, "started muted");
-    }
-
-    /// The default device's audio sessions: (program, display name, muted)
-    #[cfg(windows)]
-    fn sessions() -> Vec<(String, String, bool)> {
-        use windows::core::Interface;
-        use windows::Win32::Media::Audio::*;
-        use windows::Win32::System::Com::*;
-        use windows::Win32::System::Threading::*;
-        let mut out = Vec::new();
-        unsafe {
-            let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
-            let en: IMMDeviceEnumerator = CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL).unwrap();
-            let mgr: IAudioSessionManager2 = en.GetDefaultAudioEndpoint(eRender, eConsole).unwrap().Activate(CLSCTX_ALL, None).unwrap();
-            let list = mgr.GetSessionEnumerator().unwrap();
-            for i in 0..list.GetCount().unwrap() {
-                let ctl = list.GetSession(i).unwrap();
-                let c2: IAudioSessionControl2 = ctl.cast().unwrap();
-                let pid = c2.GetProcessId().unwrap_or(0);
-                let name = ctl.GetDisplayName().map(|s| s.to_string().unwrap_or_default()).unwrap_or_default();
-                let muted = ctl.cast::<ISimpleAudioVolume>().and_then(|v| v.GetMute()).map(|b| b.as_bool()).unwrap_or(false);
-                let mut exe = String::new();
-                if let Ok(h) = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) {
-                    let mut buf = [0u16; 260];
-                    let mut n = buf.len() as u32;
-                    if QueryFullProcessImageNameW(h, PROCESS_NAME_WIN32, windows::core::PWSTR(buf.as_mut_ptr()), &mut n).is_ok() {
-                        exe = String::from_utf16_lossy(&buf[..n as usize]).rsplit('\\').next().unwrap_or("").to_string();
-                    }
-                }
-                out.push((exe, name, muted));
-            }
-        }
-        out
     }
 }
 

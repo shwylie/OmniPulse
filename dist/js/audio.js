@@ -46,8 +46,9 @@ function normEnsure() {
     probe.connect(sinkhole);
     sinkhole.connect(ctx.destination);
     Object.assign(norm, { ctx, input, match, limiter, master, eq, probe });
-    if (prefs.sink && prefs.sink !== "default") mainSink(prefs.sink).catch(() => {});
+    if (prefs.sink && prefs.sink !== "default" && !nativeOutWanted()) mainSink(prefs.sink).catch(() => {});
     normApply();
+    nativeOutStart();   // OmniPulse.exe plays the sound (js/mainout.js)
     return true;
   } catch (e) {
     say("Could not start the audio chain: " + e);
@@ -82,7 +83,12 @@ function probeLevel() {
 
 // The volume slider sits at the end of the chain
 function setLevel(v) {
-  if (norm.ctx) {
+  if (norm.ctx && nativeOut.on) {
+    // played from OmniPulse.exe: the volume is applied there, at once (js/mainout.js)
+    audio.volume = 1;
+    norm.master.gain.setTargetAtTime(1, norm.ctx.currentTime, 0.02);
+    nativeOutVolume(audio.muted ? 0 : v);
+  } else if (norm.ctx) {
     audio.volume = 1;
     norm.master.gain.setTargetAtTime(audio.muted ? 0 : v, norm.ctx.currentTime, 0.02);
   } else {
@@ -91,6 +97,7 @@ function setLevel(v) {
 }
 
 function normMute(muted) {
+  if (nativeOut.on) { nativeOutVolume(muted ? 0 : appVolume()); return; }
   if (norm.ctx) norm.master.gain.setTargetAtTime(muted ? 0 : appVolume(), norm.ctx.currentTime, 0.02);
 }
 

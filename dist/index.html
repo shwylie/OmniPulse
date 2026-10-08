@@ -631,6 +631,13 @@
         <select id="outputSel" class="narrow wide"></select>
       </div>
       <p class="note" id="outputNote"></p>
+      <div class="row">
+        <div>
+          <div class="lbl">Discord &amp; OBS Capture</div>
+          <div class="note">Plays from OmniPulse itself, so sharing its window shares its sound.</div>
+        </div>
+        <label class="switch"><input type="checkbox" id="nativeOutOn"><span></span></label>
+      </div>
       <button id="namesBtn" class="soft" hidden>Show device names</button>
       <div class="row">
         <div class="lbl">Chromecast</div>
@@ -939,6 +946,7 @@
 <script src="js/audio.js"></script>
 <script src="js/loudness.js"></script>
 <script src="js/output2.js"></script>
+<script src="js/mainout.js"></script>
 <script src="js/cast.js"></script>
 <script src="js/youtube.js"></script>
 <script src="js/plugins.js"></script>

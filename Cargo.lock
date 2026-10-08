@@ -3250,6 +3250,7 @@ dependencies = [
  "md5",
  "mdns-sd",
  "native-tls",
+ "omnipulse-pcmout",
  "opener",
  "rand 0.8.8",
  "reqwest 0.12.28",
@@ -3261,6 +3262,7 @@ dependencies = [
  "tokio",
  "urlencoding",
  "windows 0.62.2",
+ "windows-core 0.62.2",
  "zip",
 ]
 
@@ -3268,8 +3270,15 @@ dependencies = [
 name = "omnipulse-input"
 version = "0.1.0"
 dependencies = [
- "cpal",
+ "omnipulse-pcmout",
  "tauri-winres",
+]
+
+[[package]]
+name = "omnipulse-pcmout"
+version = "0.1.0"
+dependencies = [
+ "cpal",
  "windows 0.62.2",
 ]
 
