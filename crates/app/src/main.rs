@@ -1054,6 +1054,9 @@ fn autoplay_fill(shared: &Shared, then_play: bool) -> bool {
 // session, the track's end
 fn tick(shared: &Shared, events: &std::sync::mpsc::Receiver<Event>, n: u64) {
     let Some(ui) = shared.borrow().ui.upgrade() else { return };
+    // the narrow layout below 980 px across, as the web app's
+    let w = ui.window().size().to_logical(ui.window().scale_factor()).width;
+    if (w < 980.0) != ui.get_narrow() { ui.set_narrow(w < 980.0); }
     let engine = shared.borrow().engine.clone();
     if !shared.borrow().loaded {
         return; // a restored session, not started yet: the bar shows where it was
@@ -1742,7 +1745,7 @@ fn main() -> Result<(), slint::PlatformError> {
         let s = shared.clone();
         let started = std::time::Instant::now();
         let mut step_no = 0usize;
-        let plan: [(u64, &str); 16] = [(9, "play"), (13, "library"), (14, "scoff"), (15, "scon"), (16, "discover"), (24, "rediscover"), (27, "sets"), (31, "stats"), (35, "now"), (39, "search"), (42, "settings"), (44, "light"), (46, "artists"), (54, "artist"), (60, "autoplay"), (72, "end")];
+        let plan: [(u64, &str); 17] = [(9, "play"), (13, "library"), (14, "scoff"), (15, "scon"), (16, "discover"), (24, "rediscover"), (27, "sets"), (31, "stats"), (35, "now"), (39, "search"), (42, "settings"), (44, "light"), (46, "artists"), (54, "artist"), (60, "autoplay"), (70, "narrow"), (72, "end")];
         t.start(slint::TimerMode::Repeated, std::time::Duration::from_millis(250), move || {
             let Some(&(at, what)) = plan.get(step_no) else { return };
             if started.elapsed().as_secs() < at { return; }
@@ -1777,6 +1780,8 @@ fn main() -> Result<(), slint::PlatformError> {
                     ui.set_queue_open(true);
                 }
                 "search" => { ui.set_search_text("deadmau5".into()); ui.invoke_search("deadmau5".into()); }
+                // the narrow layout, for its picture
+                "narrow" => { ui.window().set_size(slint::LogicalSize::new(900.0, 700.0)); }
                 // the first artist you follow
                 "artist" => { println!("selftest: following {} artists", ui.get_artists().row_count()); if ui.get_artists().row_count() > 0 { ui.invoke_artist(0); } }
                 "end" => {

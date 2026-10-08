@@ -116,15 +116,18 @@ component NavItem inherits Rectangle {
     in property <string> label;
     in property <string> d;
     in property <bool> active;
+    /// the narrow window: the icon alone, in the middle
+    in property <bool> compact;
     callback clicked;
     height: 38px;
     border-radius: 8px;
     background: active ? Theme.elevated : (ta.has-hover ? #ffffff08 : transparent);
     HorizontalLayout {
-        padding-left: 12px;
+        padding-left: root.compact ? 0px : 12px;
         spacing: 12px;
+        alignment: root.compact ? center : start;
         Glyph { d: root.d; width: 20px; height: 20px; y: (parent.height - self.height) / 2; fill: active ? Theme.text : Theme.muted; }
-        Text { text: root.label; color: active ? Theme.text : Theme.muted; font-size: 14px; font-weight: active ? 700 : 500; vertical-alignment: center; overflow: elide; }
+        if !root.compact: Text { text: root.label; color: active ? Theme.text : Theme.muted; font-size: 14px; font-weight: active ? 700 : 500; vertical-alignment: center; overflow: elide; }
     }
     ta := TouchArea { clicked => { root.clicked(); } }
 }
@@ -144,6 +147,8 @@ component Chip inherits Rectangle {
 component TrackRow inherits Rectangle {
     in property <Row> item;
     in property <int> index;
+    /// little room: no album column
+    in property <bool> compact;
     callback play();
     callback act(string);
     height: 60px;
@@ -174,7 +179,7 @@ component TrackRow inherits Rectangle {
             Text { text: root.item.title; color: root.item.playing ? Theme.accent : Theme.text; font-weight: 700; font-size: 14px; overflow: elide; }
             Text { text: root.item.artist; color: Theme.muted; font-size: 13px; overflow: elide; }
         }
-        Text { text: root.item.album; width: 26%; color: Theme.muted; font-size: 13px; overflow: elide; vertical-alignment: center; }
+        if !root.compact: Text { text: root.item.album; width: 26%; color: Theme.muted; font-size: 13px; overflow: elide; vertical-alignment: center; }
         Rectangle {
             width: 24px;
             if root.item.liked: Glyph { d: Icons.library; width: 18px; height: 18px; y: (parent.height - self.height) / 2; fill: Theme.accent; }
@@ -251,6 +256,9 @@ export component AppWindow inherits Window {
     in property <[Shelf]> shelves;
     in-out property <string> search-text;
     in property <bool> can-back;
+    // narrower than 980 px (as the web app: set from Rust as the window changes): the sidebar down to
+    // its icons, no volume slider
+    in property <bool> narrow;
     in property <[Item]> artists;
     in-out property <bool> fav-only;
     in property <bool> shuffle-on;
@@ -423,21 +431,22 @@ export component AppWindow inherits Window {
             vertical-stretch: 1;
             // ---------- sidebar ----------
             Rectangle {
-                width: 230px;
+                width: root.narrow ? 68px : 230px;
                 background: Theme.panel;
                 border-radius: Theme.radius;
                 VerticalLayout {
                     padding: 10px;
                     spacing: 2px;
-                    NavItem { label: "Discover"; d: Icons.discover; active: root.page == "discover"; clicked => { root.nav("discover"); } }
-                    NavItem { label: "Rediscover"; d: Icons.rediscover; active: root.page == "rediscover"; clicked => { root.nav("rediscover"); } }
-                    NavItem { label: "Library"; d: Icons.library; active: root.page == "library"; clicked => { root.nav("library"); } }
-                    NavItem { label: "Favourites"; d: Icons.star; active: root.page == "favourites"; clicked => { root.nav("favourites"); } }
-                    NavItem { label: "Sets & Podcasts"; d: Icons.sets; active: root.page == "sets"; clicked => { root.nav("sets"); } }
-                    NavItem { label: "Artists"; d: Icons.person; active: root.page == "artists" || root.page == "artist"; clicked => { root.nav("artists"); } }
-                    NavItem { label: "Stats"; d: Icons.stats; active: root.page == "stats"; clicked => { root.nav("stats"); } }
+                    NavItem { label: "Discover"; d: Icons.discover; compact: root.narrow; active: root.page == "discover"; clicked => { root.nav("discover"); } }
+                    NavItem { label: "Rediscover"; d: Icons.rediscover; compact: root.narrow; active: root.page == "rediscover"; clicked => { root.nav("rediscover"); } }
+                    NavItem { label: "Library"; d: Icons.library; compact: root.narrow; active: root.page == "library"; clicked => { root.nav("library"); } }
+                    NavItem { label: "Favourites"; d: Icons.star; compact: root.narrow; active: root.page == "favourites"; clicked => { root.nav("favourites"); } }
+                    NavItem { label: "Sets & Podcasts"; d: Icons.sets; compact: root.narrow; active: root.page == "sets"; clicked => { root.nav("sets"); } }
+                    NavItem { label: "Artists"; d: Icons.person; compact: root.narrow; active: root.page == "artists" || root.page == "artist"; clicked => { root.nav("artists"); } }
+                    NavItem { label: "Stats"; d: Icons.stats; compact: root.narrow; active: root.page == "stats"; clicked => { root.nav("stats"); } }
                     Rectangle { height: 10px; }
-                    Text { text: "Playlists"; color: Theme.muted; font-size: 12px; font-weight: 700; x: 12px; }
+                    if !root.narrow: Text { text: "Playlists"; color: Theme.muted; font-size: 12px; font-weight: 700; x: 12px; }
+                    if root.narrow: Rectangle { height: 1px; background: Theme.line; }
                     ListView {
                         vertical-stretch: 1;
                         for s[i] in root.sides: Rectangle {
@@ -445,10 +454,11 @@ export component AppWindow inherits Window {
                             border-radius: 6px;
                             background: root.side-on == i ? Theme.elevated : (sta.has-hover ? #ffffff08 : transparent);
                             HorizontalLayout {
-                                padding-left: 12px;
+                                padding-left: root.narrow ? 0px : 12px;
                                 spacing: 10px;
+                                alignment: root.narrow ? center : start;
                                 PlatIcon { plat: s.plat; width: 14px; height: 14px; y: (parent.height - self.height) / 2; }
-                                Text { text: s.title; color: root.side-on == i ? Theme.text : Theme.muted; font-size: 13px; vertical-alignment: center; overflow: elide; }
+                                if !root.narrow: Text { text: s.title; color: root.side-on == i ? Theme.text : Theme.muted; font-size: 13px; vertical-alignment: center; overflow: elide; }
                             }
                             sta := TouchArea { clicked => { root.side(i); } }
                         }
@@ -559,7 +569,7 @@ export component AppWindow inherits Window {
                         changed first => { root.rows-in-view(self.first, self.count); }
                         changed count => { root.rows-in-view(self.first, self.count); }
                         init => { root.rows-in-view(self.first, self.count); }
-                        for r[i] in root.rows: TrackRow { item: r; index: i; play => { root.play-row(i); } act(a) => { root.row-action(i, a); } }
+                        for r[i] in root.rows: TrackRow { item: r; index: i; compact: root.narrow || root.queue-open; play => { root.play-row(i); } act(a) => { root.row-action(i, a); } }
                     }
                     // Artists: everyone you follow, round, A to Z
                     if root.page-kind == "artists": grid := ScrollView {
@@ -957,7 +967,7 @@ export component AppWindow inherits Window {
                         Slider { min-width: 80px; horizontal-stretch: 1; minimum: 0; maximum: 1000; value: root.pos-frac * 1000; released(v) => { root.seek(v / 1000); } }
                         Text { text: root.dur-text; color: Theme.muted; font-size: 12px; width: 34px; vertical-alignment: center; }
                         Glyph { d: Icons.volume; width: 20px; height: 20px; y: (parent.height - self.height) / 2; fill: Theme.muted; }
-                        Slider { width: 80px; minimum: 0; maximum: 100; value <=> root.volume; changed(v) => { root.volume-changed(v / 100); } }
+                        if !root.narrow: Slider { width: 80px; minimum: 0; maximum: 100; value <=> root.volume; changed(v) => { root.volume-changed(v / 100); } }
                     }
                     // now playing: opens Now Playing
                     Rectangle {
