@@ -210,6 +210,10 @@ function alertsCfg() {
     kinds,
     anim: prefs.alertAnim || "slide",
     secs: Number(prefs.alertSecs) || 5,
+    // their own colours (else the widget's, from the album art), and which way the gradient runs
+    accent: prefs.alertOwnCol ? prefs.alertCol1 || "#8e9bff" : "",
+    accent2: prefs.alertOwnCol ? prefs.alertCol2 || prefs.alertCol1 || "#b38cff" : "",
+    dir: prefs.alertDir || "115deg",
     volume: prefs.alertVol === undefined ? 0.8 : Number(prefs.alertVol),
     sounds,
     sb: { on: prefs.sbOn !== false, host: prefs.sbHost || "127.0.0.1:8080" },
@@ -515,6 +519,11 @@ function alertsPaint() {
   $("sbHost").value = prefs.sbHost || "127.0.0.1:8080";
   $("alertAnim").value = prefs.alertAnim || "slide";
   $("alertSecs").value = String(Number(prefs.alertSecs) || 5);
+  $("alertOwnCol").checked = !!prefs.alertOwnCol;
+  $("alertColRow").hidden = !prefs.alertOwnCol;
+  $("alertCol1").value = prefs.alertCol1 || "#8e9bff";
+  $("alertCol2").value = prefs.alertCol2 || "#b38cff";
+  $("alertDir").value = prefs.alertDir || "115deg";
   const v = prefs.alertVol === undefined ? 0.8 : Number(prefs.alertVol);
   $("alertVol").value = String(Math.round(v * 100));
   $("alertVolVal").textContent = Math.round(v * 100) + "%";
@@ -533,6 +542,10 @@ function alertsInit() {
   });
   $("alertAnim").addEventListener("change", () => { prefs.alertAnim = $("alertAnim").value; alertsSave(); });
   $("alertSecs").addEventListener("change", () => { prefs.alertSecs = Number($("alertSecs").value); alertsSave(); });
+  $("alertOwnCol").addEventListener("change", () => { prefs.alertOwnCol = $("alertOwnCol").checked; alertsSave(); alertsPaint(); });
+  $("alertCol1").addEventListener("change", () => { prefs.alertCol1 = $("alertCol1").value; alertsSave(); });
+  $("alertCol2").addEventListener("change", () => { prefs.alertCol2 = $("alertCol2").value; alertsSave(); });
+  $("alertDir").addEventListener("change", () => { prefs.alertDir = $("alertDir").value; alertsSave(); });
   $("alertVol").addEventListener("input", () => {
     prefs.alertVol = Number($("alertVol").value) / 100;
     $("alertVolVal").textContent = $("alertVol").value + "%";

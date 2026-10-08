@@ -1257,8 +1257,11 @@ select.wide { max-width: 260px; }
 .alertSound { max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .alertClear { padding: 4px 8px; }
 .alertRow .switch { flex: none; }
-#sbHost { width: 140px; min-width: 0; }
-#alertsBody .widgetRow { flex-wrap: nowrap; }
+#sbHost {
+  display: block; width: 170px; max-width: 100%; margin-top: 8px; padding: 7px 10px; box-sizing: border-box;
+  font-family: Consolas, "Cascadia Mono", monospace; font-size: 13px;
+  background: var(--elevated); color: var(--text); border: 1px solid var(--line); border-radius: 8px;
+}
 
 /* the pencil by an alert's name (on hover), and its settings under its row */
 .alertName { display: flex; align-items: center; gap: 6px; }

@@ -862,11 +862,9 @@
             <div>
               <div class="lbl">Streamer.bot</div>
               <div class="note">Its WebSocket server (Servers/Clients &gt; WebSocket Server), started.</div>
+              <input id="sbHost" type="text" spellcheck="false" aria-label="Streamer.bot WebSocket address" placeholder="127.0.0.1:8080">
             </div>
-            <div class="widgetRow">
-              <input id="sbHost" type="text" class="narrow" spellcheck="false" aria-label="Streamer.bot WebSocket address" placeholder="127.0.0.1:8080">
-              <label class="switch"><input type="checkbox" id="sbOn"><span></span></label>
-            </div>
+            <label class="switch"><input type="checkbox" id="sbOn"><span></span></label>
           </div>
           <div class="row stack">
             <div>
@@ -881,6 +879,21 @@
           <div class="row">
             <div class="lbl">Animation</div>
             <select id="alertAnim" class="narrow"><option value="slide">Slide</option><option value="pop">Pop</option><option value="fade">Fade</option><option value="bounce">Bounce</option><option value="flip">Flip</option></select>
+          </div>
+          <div class="row">
+            <div>
+              <div class="lbl">Their Own Colours</div>
+              <div class="note" data-on="The colours below, instead of the album art's." data-off="Off: the widget's colours, from the album art.">Off: the widget's colours, from the album art.</div>
+            </div>
+            <label class="switch"><input type="checkbox" id="alertOwnCol"><span></span></label>
+          </div>
+          <div class="row" id="alertColRow" hidden>
+            <div class="lbl">Accent Colours</div>
+            <div class="alertInline"><input id="alertCol1" type="color" aria-label="First alert colour"><input id="alertCol2" type="color" aria-label="Second alert colour"></div>
+          </div>
+          <div class="row">
+            <div class="lbl">Gradient</div>
+            <select id="alertDir" class="narrow"><option value="115deg">Diagonal</option><option value="90deg">Left to Right</option><option value="180deg">Top to Bottom</option><option value="65deg">Diagonal, Rising</option><option value="glow">Glow</option></select>
           </div>
           <div class="row">
             <div class="lbl">Show For</div>

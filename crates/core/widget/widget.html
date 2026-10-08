@@ -127,9 +127,10 @@
     position: absolute; inset: 0; overflow: hidden; z-index: 2;
     display: flex; align-items: center; gap: 0.875rem;
     padding: 0.75rem; border-radius: 0.875rem; box-sizing: border-box;
-    background: linear-gradient(115deg, var(--bg1), var(--bg2));
+    background: linear-gradient(var(--a-dir, 115deg), var(--bg1), var(--bg2));
     color: #fff; visibility: hidden; pointer-events: none;
   }
+  #alert.glow { background: radial-gradient(circle at 25% 30%, var(--bg1), var(--bg2) 75%); }
   #alert.on { visibility: visible; }
   #aIcon {
     height: 100%; aspect-ratio: 1; max-width: 45%; flex: none; display: grid; place-items: center;
@@ -147,6 +148,10 @@
   #aMsg:empty { display: none; }
   /* the card steps back while an alert is up */
   body.alerting #card { opacity: 0 !important; }
+  /* Minimal has no panel behind it: the card goes at once, so the two never show over each other */
+  body.minimal.alerting #card { transition: none; visibility: hidden; }
+  /* Vinyl, with the record spinning: the alert's icon spins too */
+  body.vinyl:not(.nospin) #aIcon svg, body.vinyl:not(.nospin) #aIcon img { animation: spin 6s linear infinite; }
 
   /* the designs, as for the card */
   body.bar #alert { gap: 0.6rem; padding: 0.4rem 0.6rem; }
@@ -218,6 +223,7 @@
   let s = null;
   let design = "card";
   let shownKey = "";
+  let lookCls = "";   // the design classes last set on the page
   let swapTimer = null;
 
   function fit() {
@@ -235,8 +241,11 @@
       (anim.scroll === false ? " noscroll" : "") + (anim.spin === false ? " nospin" : "");
     const cf = (anim.color === undefined ? 1.2 : Number(anim.color)) + "s";
     document.documentElement.style.setProperty("--cf", cf);
-    if (document.body.className === cls) return;
-    document.body.className = cls;
+    // the look's own classes only: an alert that's showing (alerting) is left as it is
+    if (lookCls === cls) return;
+    lookCls = cls;
+    const alerting = document.body.classList.contains("alerting");
+    document.body.className = cls + (alerting ? " alerting" : "");
     design = d;
     fit();
   }
@@ -323,7 +332,8 @@
 
   function paint() {
     const has = !!(s && s.title);
-    $("card").classList.toggle("show", has);
+    // paused: the card steps away until it plays again (alerts still show)
+    $("card").classList.toggle("show", has && !!s.playing);
     if (!has) return;
     applyLook(s.design || "card", s.rounded !== false, s.anim);
     $("card").classList.toggle("paused", !s.playing);
@@ -456,17 +466,20 @@
     }
     const [inA, outA] = ANIMS[k.anim] || ANIMS[acfg.anim] || ANIMS.slide;
     const box = $("alert");
-    // its own colour, or the widget's
-    if (k.color) {
-      box.style.setProperty("--bg1", mix(k.color, 0.55));
-      box.style.setProperty("--bg2", mix(k.color, 0.38));
-      box.style.setProperty("--hi", k.color);
+    // its own colour, or the alerts' colours, or the widget's (from the album art)
+    const c1 = k.color || acfg.accent, c2 = k.color || acfg.accent2 || acfg.accent;
+    if (c1) {
+      box.style.setProperty("--bg1", mix(c1, 0.55));
+      box.style.setProperty("--bg2", mix(c2, k.color ? 0.38 : 0.42));
+      box.style.setProperty("--hi", c1);
     } else {
       ["--bg1", "--bg2", "--hi"].forEach((v) => box.style.removeProperty(v));
     }
+    const dir = acfg.dir || "115deg";
+    box.style.setProperty("--a-dir", dir === "glow" ? "115deg" : dir);
     box.style.setProperty("--a-in", inA);
     box.style.setProperty("--a-out", outA);
-    box.className = "on";
+    box.className = "on" + (dir === "glow" ? " glow" : "");
     void box.offsetWidth;
     box.classList.add("in");
     document.body.classList.add("alerting");
