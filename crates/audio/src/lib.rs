@@ -2,9 +2,11 @@
 
 pub mod dsp;
 pub mod engine;
+pub mod http;
 pub mod source;
 
 pub use engine::{render, Engine, Event};
+pub use http::open_url;
 pub use source::{Decoded, Source, Tone};
 
 #[cfg(test)]
@@ -58,6 +60,59 @@ mod tests {
         let mut src = Decoded::open_file(&wav).unwrap();
         let at = src.seek(500).unwrap();
         assert!((at as i64 - 500).abs() < 30, "{at}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_web_address_plays_and_seeks_with_ranges() {
+        // a small server for a 3 s WAV that answers range requests, like SoundCloud's or YouTube's
+        let dir = std::env::temp_dir().join(format!("op-audio-http-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let wav = dir.join("t.wav");
+        let tone: Vec<f32> = (0..3 * 44100).flat_map(|i| {
+            let v = 0.25 * (2.0 * std::f32::consts::PI * 440.0 * i as f32 / 44100.0).sin();
+            [v, v]
+        }).collect();
+        write_wav(&wav, 44100, &tone);
+        let bytes = std::sync::Arc::new(std::fs::read(&wav).unwrap());
+        let server = tiny_http::Server::http("127.0.0.1:0").unwrap();
+        let port = server.server_addr().to_ip().unwrap().port();
+        let ranged = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        {
+            let (bytes, ranged) = (bytes.clone(), ranged.clone());
+            std::thread::spawn(move || {
+                for req in server.incoming_requests() {
+                    let range = req.headers().iter().find(|h| h.field.equiv("Range")).map(|h| h.value.as_str().to_string());
+                    let total = bytes.len();
+                    match range.and_then(|r| r.strip_prefix("bytes=").map(String::from)) {
+                        Some(r) => {
+                            ranged.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                            let (a, b) = r.split_once('-').unwrap();
+                            let a: usize = a.parse().unwrap();
+                            let b: usize = b.parse::<usize>().unwrap_or(total - 1).min(total - 1);
+                            let body = bytes[a..=b].to_vec();
+                            let res = tiny_http::Response::from_data(body).with_status_code(206)
+                                .with_header(tiny_http::Header::from_bytes("Content-Range", format!("bytes {a}-{b}/{total}")).unwrap());
+                            let _ = req.respond(res);
+                        }
+                        None => { let _ = req.respond(tiny_http::Response::from_data(bytes.to_vec())); }
+                    }
+                }
+            });
+        }
+        let url = format!("http://127.0.0.1:{port}/t.wav");
+        let src = open_url(&url, "wav").unwrap();
+        assert_eq!(src.duration_ms(), Some(3000));
+        let out = render(Box::new(src), 48000, &[0.0; 10], 0.0, 10.0).unwrap();
+        assert!((out.len() as i64 / 2 - 3 * 48000).abs() < 1500, "{}", out.len() / 2);
+        // a seek near the end fetches only from there
+        let mut src = open_url(&url, "wav").unwrap();
+        let before = ranged.load(std::sync::atomic::Ordering::SeqCst);
+        let at = src.seek(2500).unwrap();
+        assert!((at as i64 - 2500).abs() < 30, "{at}");
+        let mut piece = Vec::new();
+        assert!(src.read(&mut piece).unwrap() && !piece.is_empty());
+        assert!(ranged.load(std::sync::atomic::Ordering::SeqCst) - before <= 2);
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

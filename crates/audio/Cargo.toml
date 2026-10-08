@@ -8,6 +8,10 @@ description = "OmniPulse's playback engine: decoding, the sound chain (loudness 
 symphonia = { version = "0.5", default-features = false, features = ["aac", "alac", "flac", "isomp4", "mp3", "ogg", "pcm", "vorbis", "wav", "aiff"] }
 cpal = "0.15"
 rubato = "0.16"
+reqwest = { version = "0.12", features = ["blocking"] }
+
+[dev-dependencies]
+tiny_http = "0.12"
 
 [[bin]]
 name = "op-play"
