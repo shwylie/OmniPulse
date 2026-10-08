@@ -233,7 +233,7 @@ function ytAccPaint() {
   if (!ytAcc.busy && ytAcc.connected && ytAcc.name) { nameNote($("ytAccNote"), "Connected as ", ytAcc.name, ". Likes here are likes on YouTube and YouTube Music too."); return; }
   $("ytAccNote").textContent = ytAcc.busy ? "Finish signing in in your browser, then come back here..."
     : ytAcc.connected ? "Signed in. Likes here are likes on YouTube and YouTube Music too."
-    : ytAcc.configured === false ? "Optional. Needs youtube_client_id and youtube_client_secret in config.json (see the README)."
+    : ytAcc.configured === false ? "Optional. Set up gets your own free Google keys first; then sign in."
     : "Optional. Signed in, a like here is a like on YouTube and YouTube Music too. Without it, likes are kept on this PC.";
 }
 
@@ -306,7 +306,7 @@ function ytPaint() {
   const removeBtn = $("ytRemove");
   $("ytOn").checked = ytWanted();
   $("ytOptions").hidden = !ytWanted();
-  $("ytAccBtn").hidden = !ytWanted();
+  $("ytAccBtn").hidden = !ytWanted() || ytAcc.configured === false;
   const setup = ytInfo.setup || {};
   removeBtn.hidden = !ytInfo.checked || setup.busy || !ytInfo.diskUse;
   removeBtn.title = ytInfo.diskUse ? "Remove yt-dlp, Deno and their caches (" + mbOf(ytInfo.diskUse) + " MB)" : "";

@@ -82,7 +82,7 @@ async function lfmRefresh() {
     $("lastfmSection").hidden = !(lfmConnected && prefs.lfmOn !== false);
     $("lfmOn").checked = prefs.lfmOn !== false;
     if (lfmConnected) nameNote($("lfmNote"), "Signed in as ", s.name || "your account", ".");
-    else $("lfmNote").textContent = "Not signed in. Needs lastfm_api_key and lastfm_secret in config.json.";
+    else $("lfmNote").textContent = s.configured === false ? "Not set up: Set up gets your own free Last.fm keys." : "Not signed in.";
     $("lfmConnect").textContent = lfmConnected ? "Sign out" : "Sign in";
   } catch (e) {}
 }

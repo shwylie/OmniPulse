@@ -83,9 +83,11 @@ pub async fn lfm_request(
 }
 
 pub fn lastfm_status() -> Value {
+    // configured: there are keys to sign in with (your own, set up in Settings)
+    let configured = load_config().map(|c| !c.lastfm_api_key.trim().is_empty() && !c.lastfm_secret.trim().is_empty()).unwrap_or(false);
     match load_lfm() {
-        Some(s) => serde_json::json!({ "connected": true, "name": s.name }),
-        None => serde_json::json!({ "connected": false, "name": "" }),
+        Some(s) => serde_json::json!({ "connected": true, "name": s.name, "configured": configured }),
+        None => serde_json::json!({ "connected": false, "name": "", "configured": configured }),
     }
 }
 

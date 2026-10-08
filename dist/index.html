@@ -276,6 +276,22 @@
   </form>
 </dialog>
 
+<dialog id="keySetup" class="fixDialog keySetup">
+  <form id="ksForm" class="sheet">
+    <h2 id="ksHead">Set Up</h2>
+    <p class="note">Free, and about five minutes. The pages open in your browser, where you're signed in already. Paste what you copy anywhere in this window and it goes in the right box.</p>
+    <ol id="ksSteps" class="ksSteps"></ol>
+    <div id="ksFields" class="ksFields"></div>
+    <p class="note" id="ksNote"></p>
+    <p class="note">Kept on this PC only, in OmniPulse's config.json.</p>
+    <div class="fixActions">
+      <span class="grow"></span>
+      <button type="button" id="ksCancel" class="soft">Cancel</button>
+      <button type="submit" id="ksSave" class="soft fixSave" disabled>Save</button>
+    </div>
+  </form>
+</dialog>
+
 <dialog id="fixDialog" class="fixDialog">
   <form id="fixForm" class="sheet">
     <h2>Track preferences</h2>
@@ -537,8 +553,10 @@
           <div class="lbl">Spotify</div>
           <div class="note" id="spStatus">Not signed in.</div>
           <button class="linkBtn" data-url="https://www.spotify.com/account/subscription/manage/" title="Premium and other plans">Manage subscription</button>
+          <button class="linkBtn" id="spKeys" type="button" hidden title="Change the Spotify keys you set up">Your keys</button>
         </div>
         <div class="rowEnd">
+          <button id="spSetup" class="soft" title="Get your own free Spotify keys" hidden>Set up</button>
           <button id="spConnect" class="soft">Sign in</button>
           <label class="switch" title="Use Spotify"><input type="checkbox" id="spOn"><span></span></label>
         </div>
@@ -572,7 +590,9 @@
           <div>
             <div class="lbl">Your Account</div>
             <div class="note" id="ytAccNote">Optional. Signed in, a like here is a like on YouTube and YouTube Music too.</div>
+            <button class="linkBtn" id="ytKeys" type="button" hidden title="Change the Google keys you set up">Your keys</button>
           </div>
+          <button id="ytAccSetup" class="soft" title="Get your own free Google keys" hidden>Set up</button>
         </div>
         <div class="row" id="ytMirrorRow" hidden>
           <div>
@@ -593,10 +613,12 @@
       <div class="row">
         <div>
           <div class="lbl">Last.fm</div>
-          <div class="note" id="lfmNote">Not signed in. Needs lastfm_api_key and lastfm_secret in config.json.</div>
+          <div class="note" id="lfmNote">Not signed in.</div>
           <button class="linkBtn" data-url="https://www.last.fm/settings/subscription" title="Last.fm Pro">Manage subscription</button>
+          <button class="linkBtn" id="lfmKeys" type="button" hidden title="Change the Last.fm keys you set up">Your keys</button>
         </div>
         <div class="rowEnd">
+          <button id="lfmSetup" class="soft" title="Get your own free Last.fm keys" hidden>Set up</button>
           <button id="lfmConnect" class="soft">Sign in</button>
           <label class="switch" title="Use Last.fm"><input type="checkbox" id="lfmOn"><span></span></label>
         </div>
@@ -1211,6 +1233,7 @@
 <script src="js/export.js"></script>
 <script src="js/streamsafe.js"></script>
 <script src="js/alertmedia.js"></script>
+<script src="js/apisetup.js"></script>
 <script src="js/init.js"></script>
 <script src="app.js"></script>
 </body>

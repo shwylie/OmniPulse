@@ -35,6 +35,7 @@ function extrasInit() {
   ytAccInit();
   streamerPaint();
   streamSafeInit();
+  keySetupInit();
   safePaint();
   $("safeBtn").addEventListener("click", () => safeSet(!streamSafe()));
   $("smSafe").addEventListener("change", () => safeSet($("smSafe").checked));

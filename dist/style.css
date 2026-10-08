@@ -1456,3 +1456,19 @@ body.streamSafe .notSafe { display: none !important; }
 .collageSlot > button { position: absolute; top: 2px; right: 2px; width: 18px; height: 18px; padding: 0; border-radius: 50%; border: 0; font-size: 12px; line-height: 1; background: rgba(0, 0, 0, 0.6); color: #fff; cursor: pointer; }
 .collageSlot > .collageAdd { position: static; width: 100%; height: 100%; border-radius: 8px; background: transparent; color: var(--muted); font-size: 20px; border: 1px dashed var(--line); }
 .collageSlot > .collageAdd:hover { color: var(--text); border-color: var(--accent); }
+
+/* Set up (your own keys): the steps, values to copy, and boxes to paste into */
+.keySetup .sheet { max-width: 560px; }
+.ksSteps { margin: 8px 0 12px; padding-left: 20px; display: grid; gap: 10px; font-size: 13px; }
+.ksSteps li > span { display: block; }
+.ksCopy { display: flex; align-items: center; gap: 8px; margin-top: 6px; flex-wrap: wrap; }
+.ksCopy .note { margin: 0; min-width: 96px; }
+.ksCopy code { background: var(--elevated); padding: 3px 8px; border-radius: 6px; font-size: 12px; user-select: all; }
+.ksCopy button, .ksOpen { padding: 3px 10px; font-size: 12px; }
+.ksOpen { margin-top: 6px; }
+.ksFields { display: grid; gap: 8px; }
+.ksField { display: grid; grid-template-columns: 110px 1fr; align-items: center; gap: 10px; }
+.ksField input { width: 100%; font-family: ui-monospace, Consolas, monospace; font-size: 12px; }
+.ksField input.bad { border-color: #ff5a5a; }
+.keySetup .fixActions { display: flex; justify-content: flex-end; gap: 8px; }
+.keySetup #ksSave:disabled { opacity: 0.45; }

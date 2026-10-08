@@ -201,6 +201,15 @@ pub fn lan_ip() -> Option<String> {
     Some(s.local_addr().ok()?.ip().to_string())
 }
 
+/// A platform's developer pages, in your browser, for setting up your own keys (only those)
+pub fn open_setup_page(url: &str) -> Result<(), String> {
+    const OK: [&str; 3] = ["https://developer.spotify.com/", "https://www.last.fm/api/", "https://console.cloud.google.com/"];
+    if !OK.iter().any(|p| url.starts_with(p)) {
+        return Err("Only Spotify's, Last.fm's and Google Cloud's developer pages open from here".into());
+    }
+    opener::open(url).map_err(|e| e.to_string())
+}
+
 pub fn open_url(url: String) -> Result<(), String> {
     if !(url.starts_with("https://soundcloud.com/")
         || url.starts_with("https://www.soundcloud.com/")
@@ -265,4 +274,53 @@ pub fn save_web_export(text: &str) -> Result<(), String> {
 pub fn load_web_export() -> Option<serde_json::Value> {
     let text = std::fs::read_to_string(data_dir().ok()?.join(WEB_EXPORT)).ok()?;
     serde_json::from_str(&text).ok()
+}
+
+#[cfg(test)]
+mod config_tests {
+    use super::*;
+
+    #[test]
+    fn the_old_folder_moves_and_only_your_keys_stay() {
+        let _turn = TEST_ENV.lock().unwrap_or_else(|e| e.into_inner());
+        let tmp = std::env::temp_dir().join(format!("omnipulse-cfg-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&tmp);
+        fs::create_dir_all(tmp.join("sc-client")).unwrap();
+        std::env::set_var("APPDATA", &tmp);
+        let theirs = bundled::soundcloud();
+        let mut old = serde_json::json!({ "spotify_client_id": "mine", "discord_client_id": bundled::DISCORD_CLIENT_ID });
+        if let Some((id, secret, _)) = &theirs {
+            old["client_id"] = serde_json::json!(id);
+            old["client_secret"] = serde_json::json!(secret);
+        }
+        fs::write(tmp.join("sc-client").join("config.json"), old.to_string()).unwrap();
+        fs::write(tmp.join("sc-client").join("tokens.json"), "{}").unwrap();
+
+        let dir = data_dir().unwrap();
+        assert_eq!(dir, tmp.join("OmniPulse"));
+        assert!(!tmp.join("sc-client").exists() && dir.join("tokens.json").exists());
+        let kept: serde_json::Value = serde_json::from_str(&fs::read_to_string(dir.join("config.json")).unwrap()).unwrap();
+        assert_eq!(kept["spotify_client_id"], "mine");
+        assert!(kept.get("discord_client_id").is_none());
+        if theirs.is_some() {
+            assert!(kept.get("client_secret").is_none());
+        }
+        // and the app's own still fill in, unwritten
+        assert_eq!(load_config().unwrap().discord_client_id, bundled::DISCORD_CLIENT_ID);
+
+        // keys set up in the app: only the allowed ones, and an empty one removes it
+        let mut f = serde_json::Map::new();
+        f.insert("lastfm_api_key".into(), serde_json::json!("k"));
+        f.insert("lastfm_secret".into(), serde_json::json!("s"));
+        config_set(&f).unwrap();
+        assert_eq!(config_status()["lastfm"], true);
+        let mut bad = serde_json::Map::new();
+        bad.insert("client_secret".into(), serde_json::json!("x"));
+        assert!(config_set(&bad).is_err());
+        let mut clear = serde_json::Map::new();
+        clear.insert("lastfm_secret".into(), serde_json::json!(""));
+        config_set(&clear).unwrap();
+        assert_eq!(config_status()["lastfm"], false);
+        let _ = fs::remove_dir_all(&tmp);
+    }
 }
