@@ -323,23 +323,64 @@ function localAlbums() {
   return [...albums.values()].sort((x, y) => x.title.localeCompare(y.title));
 }
 
+// Spotify's playlists are kept on this PC too: the saved copy shows at once (their tracks are saved
+// as you open them, so they play), and the list is checked for changes once each run, in the
+// background. If Spotify asks the app to wait, that's a passing status message, not a note that stays.
+const SP_LISTS_KEY = "sc.spPlaylists";
 let spPlaylistsRetry = null;   // Spotify asked to wait: the sidebar tries again when that's over
+let spListsChecked = false;    // checked against Spotify this run
+
+function spListsSaved() {
+  try { const l = JSON.parse(localStorage.getItem(SP_LISTS_KEY) || "null"); return Array.isArray(l) ? l : null; } catch (e) { return null; }
+}
+
+function spListsSave(list) {
+  try { localStorage.setItem(SP_LISTS_KEY, JSON.stringify(list)); } catch (e) {}
+}
+
+// Why the list couldn't be checked, briefly; after a wait, it tries again by itself
+function spListsProblem(e, saved) {
+  const wait = spWaitSecs(e);
+  if (wait) {
+    clearTimeout(spPlaylistsRetry);
+    spPlaylistsRetry = setTimeout(() => { spListsChecked = false; refreshSidebar(); }, (wait + 3) * 1000);
+    say(saved
+      ? "Showing your saved Spotify playlists. Spotify asked OmniPulse to slow down; they'll update at " + spWaitUntilText(wait) + "."
+      : "Spotify asked OmniPulse to slow down; your playlists will load at " + spWaitUntilText(wait) + ".");
+    return;
+  }
+  if (/40[13]|scope/i.test(String(e))) say("Sign out of Spotify and back in (Settings > Integrations) to let the app read your playlists.");
+  else say(saved ? "Couldn't check your Spotify playlists for changes: showing the saved copy." : "Could not load your Spotify playlists.");
+}
+
+// The saved copy is showing: fetch the list, and redraw the sidebar if it changed
+async function spListsCheck(saved) {
+  spListsChecked = true;
+  try {
+    const list = await spotifyPlaylists();
+    spListsSave(list);
+    if (JSON.stringify(list) !== JSON.stringify(saved)) refreshSidebar();
+  } catch (e) {
+    spListsProblem(e, true);
+  }
+}
+
 async function sidebarItems(id) {
   if (id === "soundcloud") return (await invoke("signed_in")) ? scPlaylists() : [];
   if (id === "spotify") {
+    const saved = spListsSaved();
+    if (saved) {
+      if (!spListsChecked) spListsCheck(saved);
+      return saved;
+    }
     try {
-      return await spotifyPlaylists();
+      const list = await spotifyPlaylists();
+      spListsSave(list);
+      spListsChecked = true;
+      return list;
     } catch (e) {
-      const wait = spWaitSecs(e);
-      if (wait) {
-        // loads by itself once Spotify's wait is over
-        clearTimeout(spPlaylistsRetry);
-        spPlaylistsRetry = setTimeout(() => refreshSidebar(), (wait + 3) * 1000);
-        throw new Error("Your Spotify playlists load at " + spWaitUntilText(wait) + ": Spotify asked OmniPulse to slow down for a while.");
-      }
-      throw new Error(/40[13]|scope/i.test(String(e))
-        ? "Sign out of Spotify and back in (Settings > Integrations) to let the app read your playlists."
-        : "Could not load your Spotify playlists.");
+      spListsProblem(e, false);
+      return [];
     }
   }
   return localAlbums();

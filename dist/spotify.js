@@ -146,6 +146,9 @@ async function spotifyDisconnect() {
   spotifyPause();
   await invoke("spotify_logout");
   await invoke("spe_logout").catch(() => {});   // playback too
+  // the saved playlist list was this account's (js/platforms.js)
+  try { localStorage.removeItem("sc.spPlaylists"); } catch (e) {}
+  spListsChecked = false;
   speSettingsPaint();
   spotifyPremium = false;
   spotifyFree = false;
