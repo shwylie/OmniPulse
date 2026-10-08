@@ -882,7 +882,9 @@ function queueRow(t, idx, removable) {
   if (src) img.src = src;
   const meta = el("div", "meta");
   const qa = el("div", "artist");
-  qa.append(platformBadge(t), el("span", "", artistName(t)));
+  const who = el("span", "artistLink");
+  fillArtists(who, t);   // each artist lights up and opens their page; dragging still takes the track
+  qa.append(platformBadge(t), who);
   if (t.requestedBy) qa.append(el("span", "reqBy", "requested by " + t.requestedBy));
   meta.append(el("div", "title", t.title || "Untitled"), qa);
   li.append(img, meta);
@@ -948,6 +950,7 @@ $("queue").addEventListener("click", (e) => {
   const li = e.target.closest(".qRow");
   if (!li) return;
   const idx = Number(li.dataset.q);
+  if (e.target.closest(".artistLink") && queue[idx]) { openArtistClicked(queue[idx], e.target); return; }
   if (idx !== qi) { qi = idx; playCurrent(); }
 });
 
