@@ -18,6 +18,7 @@ function extrasSyncSettings() {
 function extrasInit() {
   playbackInit();
   autoplayInit();
+  stateNotes();
   lyricsInit();
   statsInit();
   appearanceInit();

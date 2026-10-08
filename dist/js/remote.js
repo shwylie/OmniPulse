@@ -40,6 +40,7 @@ const REMOTE_ACTIONS = {
     prefs.queueSets = on;
     savePrefs();
     $("queueSets").checked = on;
+    stateNotes();
     autoplayFailedFor = null;
     say(on ? "Sets & Podcasts are back in the queue and autoplay." : "Sets & Podcasts are out of the queue and autoplay.");
   },

@@ -1431,6 +1431,7 @@ function paintVolumeControl() {
   }
   setLevel(appVolume());
   castVolPaint();
+  stateNotes();
 }
 $("volShowOn").addEventListener("change", () => {
   prefs.hideVolume = !$("volShowOn").checked;
