@@ -114,7 +114,12 @@ function autoplayTakeTurnsOnce(lists, lastPlat) {
       const list = lists[p];
       let t = list.shift();
       while (t && !ok(t)) t = list.shift();
-      if (!t) { order = order.filter((x) => x !== p); continue; }
+      if (!t) {
+        order = order.filter((x) => x !== p);
+        // one platform left: it would play twice in a row (it had the last turn)
+        if (several && order.length === 1) return out;
+        continue;
+      }
       taken.add(t.id);
       const a = artistName(t).toLowerCase();
       perArtist.set(a, (perArtist.get(a) || 0) + 1);
