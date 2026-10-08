@@ -1,5 +1,5 @@
 // The app's sound as 16-bit stereo PCM, a piece at a time (a tenth of a second unless told otherwise):
-// for casting's live stream (crates/core/src/cast.rs) and the OmniPulse Input (omni_input.rs). Silence keeps flowing while
+// for casting's live stream (crates/core/src/cast.rs) and Offset OmniPulse (omni_input.rs). Silence keeps flowing while
 // nothing plays, so the device's stream never runs dry.
 class CastTap extends AudioWorkletProcessor {
   constructor(options) {

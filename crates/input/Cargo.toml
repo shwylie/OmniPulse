@@ -1,11 +1,11 @@
 [package]
-name = "omnipulse-input"
+name = "offset-omnipulse"
 version = "0.1.0"
 edition = "2021"
-description = "OmniPulse Input: plays the app's sound a second time as its own program, for Wave Link and the like"
+description = "Offset OmniPulse: plays the app's sound a second time as its own program, for Wave Link and the like"
 
 [[bin]]
-name = "omnipulse-input"
+name = "offset-omnipulse"
 path = "src/main.rs"
 
 [dependencies]

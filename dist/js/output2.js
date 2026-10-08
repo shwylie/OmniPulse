@@ -1,11 +1,11 @@
-// The OmniPulse Input (Settings > Streaming): the same sound played a second time, as its own app
-// called "OmniPulse Input" (crates/core/src/omni_input.rs plays it on the default playback device),
+// Offset OmniPulse (Settings > Streaming): the same sound played a second time, as its own app
+// called "Offset OmniPulse" (crates/core/src/omni_input.rs plays it on the default playback device),
 // with its own volume and an offset to line the two up, like OBS's sync offset. Above 0 it's later;
 // below 0 the main output is held back instead. In Elgato Wave Link, Windows' mixer or the like it
 // shows apart from the app's main sound, so it can go to a stream mix only. No driver is involved.
 //
 //   ... limiter -> master (volume) -> main delay -> your output device
-//          \-> input delay -> input volume -> a tap (js/cast-worklet.js) -> OmniPulse Input
+//          \-> input delay -> input volume -> a tap (js/cast-worklet.js) -> Offset OmniPulse
 
 const OUT2_MAX_MS = 5000;
 const out2 = { delay: null, gain: null, tap: null, sink: null, running: false, mainDelay: null, mainGain: null };
@@ -91,8 +91,8 @@ function out2MainMute(muted) {
 
 const out2StartMuted = () => prefs.out2Muted !== false;
 
-const OUT2_ROUTE = "Please route OmniPulse appropriately first to prevent playback echo.\n\nTurn on the OmniPulse Input?";
-const OUT2_ROUTE_MUTED = "OmniPulse Input starts muted in the Windows Sound Mixer. Route it (in Wave Link: the Stream mix only), then unmute it there.\n\nTurn it on?";
+const OUT2_ROUTE = "Please route OmniPulse appropriately first to prevent playback echo.\n\nTurn on Offset OmniPulse?";
+const OUT2_ROUTE_MUTED = "Offset OmniPulse starts muted in the Windows Sound Mixer. Route it (in Wave Link: the Stream mix only), then unmute it there.\n\nTurn it on?";
 
 function out2Teardown() {
   if (out2.tap) { out2.tap.port.onmessage = null; try { out2.tap.disconnect(); } catch (e) {} }

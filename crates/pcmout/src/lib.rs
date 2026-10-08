@@ -3,7 +3,7 @@
 //   - OmniPulse's own sound, from OmniPulse.exe itself, so programs that capture an app's sound by its
 //     window (Discord's screen share, OBS's Application Audio Capture) hear it; the WebView's own
 //     sound comes from another process they don't count as the app
-//   - the OmniPulse Input, from its own program (crates/input), so Wave Link lists it apart
+//   - Offset OmniPulse, from its own program (crates/input), so Wave Link lists it apart
 //
 // Its audio session gets a name, can start muted in the Sound Mixer, and with no device chosen it
 // follows wherever Windows routes the program (Wave Link, Windows' per-app sound settings).

@@ -1,8 +1,8 @@
-// The OmniPulse Input (Settings > Streaming): the app's sound, with its own volume and offset, played
+// Offset OmniPulse (Settings > Streaming): the app's sound, with its own volume and offset, played
 // a second time so it can be routed apart from the main sound (to a stream mix only, say).
 //
 // Wave Link and the Sound Mixer list apps by program, so it's played by a small program of its own,
-// omnipulse-input.exe (crates/input), shown as "OmniPulse Input". It runs only while the setting is
+// offset-omnipulse.exe (crates/input), shown as "Offset OmniPulse". It runs only while the setting is
 // on: this starts it, sends it the page's sound on its standard input, and stops it by closing that.
 
 use std::io::{BufRead, BufReader, Write};
@@ -11,7 +11,7 @@ use std::sync::mpsc::{self, SyncSender, TrySendError};
 use std::sync::Mutex;
 use std::time::Duration;
 
-pub const PROGRAM: &str = "omnipulse-input.exe";
+pub const PROGRAM: &str = "offset-omnipulse.exe";
 
 struct Running {
     child: Child,
@@ -52,7 +52,7 @@ pub fn start(muted: bool) -> Result<String, String> {
         use std::os::windows::process::CommandExt;
         cmd.creation_flags(0x0800_0000); // no console window
     }
-    let mut child = cmd.spawn().map_err(|e| format!("Couldn't start the OmniPulse Input: {e}"))?;
+    let mut child = cmd.spawn().map_err(|e| format!("Couldn't start Offset OmniPulse: {e}"))?;
     let stdout = child.stdout.take().ok_or("no output")?;
     let (line_tx, line_rx) = mpsc::channel();
     std::thread::spawn(move || {
@@ -71,7 +71,7 @@ pub fn start(muted: bool) -> Result<String, String> {
     let Some(device) = line.strip_prefix("ok ") else {
         let _ = child.kill();
         let why = line.strip_prefix("error ").unwrap_or("it didn't answer");
-        return Err(format!("Couldn't start the OmniPulse Input: {why}"));
+        return Err(format!("Couldn't start Offset OmniPulse: {why}"));
     };
     // the sound goes through a short queue, so a slow moment there never holds up the app
     let mut stdin = child.stdin.take().ok_or("no input")?;
@@ -129,7 +129,7 @@ pub fn running() -> bool {
 #[cfg(test)]
 mod live {
     // the real thing on this PC's default device, silent: build the program first
-    // (cargo build -p omnipulse-input), then cargo test -p omnipulse-core omni_program_live -- --ignored --nocapture
+    // (cargo build -p offset-omnipulse), then cargo test -p omnipulse-core omni_program_live -- --ignored --nocapture
     #[test]
     #[ignore]
     fn omni_program_live() {
@@ -204,7 +204,7 @@ mod diag {
 
 #[cfg(test)]
 mod diag_installed {
-    // starts the installed omnipulse-input.exe (silent) to see which device Windows puts it on:
+    // starts the installed offset-omnipulse.exe (silent) to see which device Windows puts it on:
     // cargo test -p omnipulse-core omni_installed_device -- --ignored --nocapture
     #[test]
     #[ignore]

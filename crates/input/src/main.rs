@@ -1,7 +1,7 @@
-// OmniPulse Input, as its own program: Wave Link, the Sound Mixer and the like list apps by program,
+// Offset OmniPulse, as its own program: Wave Link, the Sound Mixer and the like list apps by program,
 // so the app's second stream has to come from one of its own to be routed apart from its main sound.
 //
-// OmniPulse starts it (omnipulse-input [--muted]) while the OmniPulse Input is on and sends it the
+// OmniPulse starts it (offset-omnipulse [--muted]) while Offset OmniPulse is on and sends it the
 // sound on its standard input: pieces of [rate: u32 LE][length: u32 LE][16-bit stereo PCM]. It
 // answers one line ("ok <device>" or "error <why>"), then "moved <device>" when it follows its
 // routing somewhere else, and stops when its input closes, which is also what happens if OmniPulse
@@ -15,7 +15,7 @@ use std::io::{Read, Write};
 fn main() {
     let muted = std::env::args().any(|a| a == "--muted");
     let mut out = std::io::stdout();
-    let player = match Player::start(Options { name: "OmniPulse Input", muted, device: None, prefill_ms: 60, max_ms: 400 }) {
+    let player = match Player::start(Options { name: "Offset OmniPulse", muted, device: None, prefill_ms: 60, max_ms: 400 }) {
         Ok(p) => {
             let _ = writeln!(out, "ok {}", p.device());
             p
