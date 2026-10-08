@@ -529,6 +529,17 @@
       </div>
       <div class="row">
         <div>
+          <div class="lbl">Avoid Recent Plays</div>
+          <div class="note">Recommendations and autoplay skip what you've heard lately.</div>
+        </div>
+        <label class="switch"><input type="checkbox" id="avoidRecentOn"><span></span></label>
+      </div>
+      <div class="row" id="recentRow" hidden>
+        <div class="lbl">Time Frame</div>
+        <select id="recentSel" class="narrow"><option value="day">Past day</option><option value="week">Past week</option><option value="month">Past month</option></select>
+      </div>
+      <div class="row">
+        <div>
           <div class="lbl">Hidden &amp; Not Recommended</div>
           <div class="note" id="hiddenNote"></div>
         </div>
@@ -572,13 +583,6 @@
           <div class="note">Plays similar tracks when the queue runs out.</div>
         </div>
         <label class="switch"><input type="checkbox" id="apQueueOn"><span></span></label>
-      </div>
-      <div class="row">
-        <div>
-          <div class="lbl">Avoid Recent Plays</div>
-          <div class="note">Autoplay skips what you've heard in the last week.</div>
-        </div>
-        <label class="switch"><input type="checkbox" id="avoidRecentOn"><span></span></label>
       </div>
     </section>
 

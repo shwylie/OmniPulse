@@ -56,15 +56,28 @@ function markHeard(t) {
   heardSongsSave();
 }
 
-// Last.fm (when you're signed in there): what you scrobbled this past week, on any device, counts too
-const LFM_HEARD_DAYS = 7;
+// Avoid Recent Plays (Settings > Library): recommendations, Discover, Sets & Podcasts and autoplay
+// skip what you've heard within the time frame chosen (a day, a week or a month)
+const RECENT_WINDOWS = { day: 86400000, week: 7 * 86400000, month: 30 * 86400000 };
+const avoidRecent = () => prefs.avoidRecent !== false;   // on unless switched off
+const recentWindowMs = () => RECENT_WINDOWS[prefs.recentWindow] || RECENT_WINDOWS.week;
+const recentOk = (t) => !avoidRecent() || !heardWithin(t, recentWindowMs());
+
+// Leaves out recent plays, unless that would leave too little to choose from
+function withoutRecent(list, keep) {
+  if (!avoidRecent()) return list;
+  const fresh = list.filter(recentOk);
+  return fresh.length >= Math.min(keep || 10, Math.ceil(list.length / 3)) ? fresh : list;
+}
+
+// Last.fm (when you're signed in there): what you scrobbled within the time frame, on any device, counts too
 let lfmHeardAt = 0;
 async function lfmHeardSync() {
   if (typeof lfmActive !== "function" || !lfmActive() || Date.now() - lfmHeardAt < 30 * 60000) return;
   lfmHeardAt = Date.now();
   try {
-    const from = Math.floor((Date.now() - LFM_HEARD_DAYS * 86400000) / 1000);
-    const list = await invoke("lastfm_recent", { from, pages: 5 });
+    const from = Math.floor((Date.now() - recentWindowMs()) / 1000);
+    const list = await invoke("lastfm_recent", { from, pages: prefs.recentWindow === "month" ? 10 : 5 });
     list.forEach((x) => heardSong(songKey({ title: x.title, user: { username: x.artist } }), x.ts));
     heardSongsSave();
   } catch (e) {

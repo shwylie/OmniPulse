@@ -5,9 +5,8 @@
 
 const AUTOPLAY_BATCH = 10;
 const AUTOPLAY_LEAD_MS = 30000;          // start looking this long before the last track ends
-const AUTOPLAY_RECENT_MS = 7 * 86400000;     // "recently played": the last week
-const AUTOPLAY_RECENT_MIN_MS = 3 * 3600000;  // if that leaves nothing to add, just the last three hours
-let autoplayRecentMs = AUTOPLAY_RECENT_MS;
+const AUTOPLAY_RECENT_MIN_MS = 3 * 3600000;  // if Avoid Recent Plays leaves nothing to add, just the last three hours
+let autoplayRecentMs = 0;                    // 0: the time frame chosen in Settings (js/history.js)
 
 let autoplayBusy = null;
 let autoplayFailedFor = null;   // the seed track we last came up empty for, so we don't keep asking
@@ -15,7 +14,6 @@ let autoplayFailedFor = null;   // the seed track we last came up empty for, so 
 const autoplayOn = () => prefs.autoplay !== false;
 const autoplayActive = () => autoplayOn() && repeatMode === "off";
 const autoplaySets = () => !!prefs.queueSets;           // sets & podcasts in the queue and autoplay (one setting; off unless chosen)
-const avoidRecent = () => prefs.avoidRecent !== false;  // on unless switched off
 
 // Where "Add to queue" puts a track: after everything you queued, before the autoplay picks
 function autoplayStart() {
@@ -79,7 +77,7 @@ function autoplayPickable(taken, perArtist) {
   return (t) => {
     if (!t || taken.has(t.id) || !recOk(t)) return false;
     if (isMix(t) && !autoplaySets()) return false;
-    if (avoidRecent() && heardWithin(t, autoplayRecentMs)) return false;
+    if (avoidRecent() && heardWithin(t, autoplayRecentMs || recentWindowMs())) return false;
     if (!langOk(t)) return false;
     return (perArtist.get(artistName(t).toLowerCase()) || 0) < 2;
   };
@@ -91,12 +89,12 @@ function autoplayTakeTurns(lists, lastPlat) {
   // a week of plays can rule out everything similar: then only the last few hours count
   const copy = {};
   Object.keys(lists).forEach((p) => { copy[p] = lists[p].slice(); });
-  autoplayRecentMs = AUTOPLAY_RECENT_MS;
+  autoplayRecentMs = 0;
   let out = autoplayTakeTurnsOnce(lists, lastPlat);
   if (!out.length && avoidRecent()) {
     autoplayRecentMs = AUTOPLAY_RECENT_MIN_MS;
     out = autoplayTakeTurnsOnce(copy, lastPlat);
-    autoplayRecentMs = AUTOPLAY_RECENT_MS;
+    autoplayRecentMs = 0;
   }
   return out;
 }
@@ -201,6 +199,17 @@ function autoplayInit() {
   if (prefs.autoplaySets !== undefined) { prefs.queueSets = !!(prefs.queueSets || prefs.autoplaySets); delete prefs.autoplaySets; savePrefs(); }
   sw("queueSets", "queueSets", false);
   sw("avoidRecentOn", "avoidRecent", true);
+  const recentPaint = () => { $("recentRow").hidden = !avoidRecent(); };
+  $("avoidRecentOn").addEventListener("change", recentPaint);
+  $("recentSel").value = prefs.recentWindow in RECENT_WINDOWS ? prefs.recentWindow : "week";
+  $("recentSel").addEventListener("change", () => {
+    prefs.recentWindow = $("recentSel").value;
+    savePrefs();
+    autoplayFailedFor = null;
+    lfmHeardAt = 0;
+    lfmHeardSync();   // a longer time frame needs more of Last.fm's history
+  });
+  recentPaint();
   autoplayPaint();
   setInterval(autoplayTick, 2000);
   setTimeout(lfmHeardSync, 8000);

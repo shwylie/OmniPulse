@@ -75,7 +75,7 @@ async function freshFor(crew, plats) {
     ? ytSearch(crew[0].name).then((found) => (found[0] ? ytRadio(found[0].ytId) : [])).catch(() => [])
     : Promise.resolve([]);
   const [a, b, c] = await Promise.all([sc, sp, yt]);
-  return interleave([shuffledCopy(a), shuffledCopy(b), shuffledCopy(c)]).filter((t) => freshPick(t) && !isLikedTrack(t));
+  return withoutRecent(interleave([shuffledCopy(a), shuffledCopy(b), shuffledCopy(c)]).filter((t) => freshPick(t) && !isLikedTrack(t)));
 }
 
 // Your Mix: what you like by these artists, on any platform (and your files), woven with new ones

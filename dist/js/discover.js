@@ -31,7 +31,7 @@ function detectLang(t) {
 
 
 function recFilter(list) {
-  list = list.filter((t) => !isLikedTrack(t) && recOk(t));
+  list = withoutRecent(list.filter((t) => !isLikedTrack(t) && recOk(t)));
   const kept = list.filter(langOk);
   return kept;
 }
