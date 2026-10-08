@@ -100,6 +100,7 @@ function setLevel(v) {
 }
 
 function normMute(muted) {
+  castMute(muted);
   if (nativeOut.on) { nativeOutVolume(muted ? 0 : appVolume()); return; }
   if (norm.ctx) norm.master.gain.setTargetAtTime(muted ? 0 : appVolume(), norm.ctx.currentTime, 0.02);
 }

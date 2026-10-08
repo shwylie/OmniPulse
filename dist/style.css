@@ -743,8 +743,17 @@ details.sub.inner { margin-top: 10px; }
 
 /* volume: the speaker, with the slider sliding out while you point at it */
 .volWrap { display: flex; align-items: center; flex: none; }
-.volWrap #vol { width: 0; opacity: 0; margin: 0; transition: width 0.18s ease, opacity 0.18s ease, margin 0.18s ease; }
-.volWrap:hover #vol, .volWrap:focus-within #vol { width: 84px; opacity: 1; margin-left: 4px; }
+.volWrap .volSliders { display: flex; flex-direction: column; justify-content: center; gap: 2px; }
+.volWrap input[type="range"] { width: 0; opacity: 0; margin: 0; transition: width 0.18s ease, opacity 0.18s ease, margin 0.18s ease; }
+.volWrap:hover input[type="range"], .volWrap:focus-within input[type="range"] { width: 84px; opacity: 1; margin-left: 4px; }
+/* casting: the device's volume, below this PC's when both play (marked with the Cast icon), or alone */
+.castVolRow { display: flex; align-items: center; }
+.castVolRow[hidden] { display: none; }
+.castVolRow svg { width: 0; height: 12px; fill: var(--muted); flex: none; transition: width 0.18s ease; }
+.volWrap.both .castVolRow input[type="range"] { width: 0; }
+.volWrap.both:hover .castVolRow svg, .volWrap.both:focus-within .castVolRow svg { width: 12px; margin-left: 4px; }
+.volWrap.both:hover .castVolRow input[type="range"], .volWrap.both:focus-within .castVolRow input[type="range"] { width: 68px; }
+.volWrap.both .volSliders input[type="range"] { height: 12px; }
 
 .player .now { justify-content: flex-start; gap: 14px; padding: 2px; }
 .player #nowArt { width: 64px; height: 64px; border-radius: 6px; flex: none; }

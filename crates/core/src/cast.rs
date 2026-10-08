@@ -14,7 +14,7 @@ use serde_json::{json, Value};
 use std::collections::{HashMap, VecDeque};
 use std::io::{Read, Write};
 use std::net::{IpAddr, TcpListener, TcpStream, UdpSocket};
-use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering};
 use std::sync::{mpsc, Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
@@ -195,6 +195,9 @@ struct Live {
     more: Condvar,
 }
 
+/// Where in the sound the device's stream began (bytes), so its position tells how far behind it plays
+static SERVED_FROM: AtomicU64 = AtomicU64::new(0);
+
 static LIVE: Live = Live { ring: Mutex::new(Ring { data: VecDeque::new(), start: 0, mark: 0, rate: 48000 }), more: Condvar::new() };
 
 /// 16-bit stereo PCM from the page, at its audio context's rate
@@ -283,6 +286,7 @@ fn serve_conn(mut conn: TcpStream, path: &str, alive: &AtomicBool) -> std::io::R
         let r = LIVE.ring.lock().unwrap();
         (r.mark.max(r.start), r.rate)
     };
+    SERVED_FROM.store(pos, Ordering::SeqCst);
     conn.write_all(&wav_header(rate))?;
     conn.set_write_timeout(Some(Duration::from_secs(10)))?;
     let mut chunk = Vec::with_capacity(65536);
@@ -420,6 +424,7 @@ pub fn start(device_id: &str, meta: Value, events: Events) -> Result<Device, Str
             let mut tmp = [0u8; 16384];
             let mut last_ping = Instant::now();
             let mut last_heard = Instant::now();
+            let mut last_status = Instant::now();
             let started = Instant::now();
             let mut why = String::new();
             while sess.alive.load(Ordering::SeqCst) {
@@ -432,6 +437,14 @@ pub fn start(device_id: &str, meta: Value, events: Events) -> Result<Device, Str
                 if last_ping.elapsed() > Duration::from_secs(5) {
                     let _ = stream.write_all(&encode(SENDER, "receiver-0", NS_HEART, r#"{"type":"PING"}"#));
                     last_ping = Instant::now();
+                }
+                // where the device is in the stream, every few seconds (for lining this PC up with it)
+                if last_status.elapsed() > Duration::from_secs(3) {
+                    if let Some(id) = *sess.media.lock().unwrap() {
+                        let t = sess.transport.lock().unwrap().clone();
+                        let _ = stream.write_all(&encode(SENDER, &t, NS_MEDIA, &json!({ "type": "GET_STATUS", "requestId": sess.next_req(), "mediaSessionId": id }).to_string()));
+                    }
+                    last_status = Instant::now();
                 }
                 if last_heard.elapsed() > Duration::from_secs(20) {
                     why = "The device stopped answering.".into();
@@ -499,6 +512,11 @@ pub fn start(device_id: &str, meta: Value, events: Events) -> Result<Device, Str
                                     *sess.media.lock().unwrap() = Some(id);
                                 }
                                 events(json!({ "type": "media", "state": s["playerState"], "idleReason": s["idleReason"] }));
+                                if let (Some(t), Some("PLAYING")) = (s["currentTime"].as_f64(), s["playerState"].as_str()) {
+                                    if let Some(ms) = lag_ms(t) {
+                                        events(json!({ "type": "lag", "ms": ms }));
+                                    }
+                                }
                             }
                         }
                         (NS_MEDIA, "LOAD_FAILED") | (NS_MEDIA, "LOAD_CANCELLED") | (NS_MEDIA, "INVALID_REQUEST") => {
@@ -527,6 +545,15 @@ pub fn start(device_id: &str, meta: Value, events: Events) -> Result<Device, Str
         Ok(Err(e)) => { stop(); Err(e) }
         Err(_) => { stop(); Err(format!("{} didn't answer.", device.name)) }
     }
+}
+
+/// How far behind this PC the device plays, from its position in the stream: the sound made here
+/// since the stream began, less what the device has played of it
+fn lag_ms(device_secs: f64) -> Option<u64> {
+    let r = LIVE.ring.lock().unwrap();
+    let made = (r.start + r.data.len() as u64).checked_sub(SERVED_FROM.load(Ordering::SeqCst))? as f64 / (r.rate as f64 * 4.0);
+    let lag = (made - device_secs) * 1000.0;
+    (lag.is_finite() && (0.0..=5000.0).contains(&lag)).then_some(lag.round() as u64)
 }
 
 fn current() -> Option<Arc<Session>> {

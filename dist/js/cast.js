@@ -5,15 +5,17 @@
 // device as one live stream (crates/core/src/cast.rs), so every source, trims and the queue work as
 // they do here; the PC's own output is muted meanwhile (unless Keep Playing on This PC is on). A device
 // with a screen shows Google's own player, with the title, artist and cover.
-// There's a short delay (the device's buffer) between pressing play here and hearing it there.
+// There's a short delay (the device's buffer) between pressing play here and hearing it there; with
+// Keep Playing on This PC, the PC is held back by it, measured from where the device is in the stream.
+// The device's volume is its own: a second slider under this PC's, or the only one while just it plays.
 
-const cast = { on: false, device: null, node: null, sink: null, devPaused: false, starting: false };
+const cast = { on: false, device: null, node: null, pre: null, sink: null, devPaused: false, starting: false, level: null, volAt: 0, lag: null, fresh: true, applied: 0 };
 
 async function castDevices() {
   try { return await invoke("cast_devices"); } catch (e) { say(String(e)); return []; }
 }
 
-// The sound, tapped after the volume
+// The sound, tapped before this PC's volume (the device has its own), muted with the mute button
 async function castTapStart() {
   if (!normEnsure()) throw new Error("the audio chain isn't running");
   const ctx = norm.ctx;
@@ -23,18 +25,25 @@ async function castTapStart() {
     cast.sink = ctx.createGain();
     cast.sink.gain.value = 0;
     cast.node.connect(cast.sink);
+    cast.pre = ctx.createGain();
+    cast.pre.connect(cast.node);
     cast.sink.connect(ctx.destination);
     const rate = String(ctx.sampleRate);
     cast.node.port.onmessage = (e) => {
       if (cast.on || cast.starting) invoke("cast_pcm", new Uint8Array(e.data), { headers: { "x-rate": rate } }).catch(() => {});
     };
   }
-  try { norm.master.connect(cast.node); } catch (e) {}
+  cast.pre.gain.value = audio.muted ? 0 : 1;
+  try { norm.limiter.connect(cast.pre); } catch (e) {}
   if (ctx.state === "suspended") ctx.resume().catch(() => {});
 }
 
 function castTapStop() {
-  if (cast.node) { try { norm.master.disconnect(cast.node); } catch (e) {} }
+  if (cast.pre) { try { norm.limiter.disconnect(cast.pre); } catch (e) {} }
+}
+
+function castMute(muted) {
+  if (cast.pre) cast.pre.gain.setTargetAtTime(muted ? 0 : 1, norm.ctx.currentTime, 0.02);
 }
 
 function castMeta() {
@@ -56,6 +65,8 @@ async function castStart(d) {
     cast.device = await invoke("cast_start", { id: d.id, meta: castMeta(), events: ch });
     cast.on = true;
     cast.devPaused = false;
+    cast.lag = null;
+    cast.fresh = true;
     castLocalApply();
     castPaint();
     say("Casting to " + d.name + "." + (prefs.castLocal ? " Playing here too." : " It plays there a moment after it does here."));
@@ -89,12 +100,15 @@ function castEvent(m) {
   if (!m || !cast.on) return;
   if (m.type === "ended") castEnd(m.message ? "Casting stopped: " + m.message : "");
   else if (m.type === "error") say(m.message);
+  else if (m.type === "volume") { cast.level = m.muted ? 0 : m.level; castVolPaint(); }
+  else if (m.type === "lag") castLag(m.ms);
   else if (m.type === "media") {
     // paused or played with the device's own controls (Google's player)
     if (m.state === "PAUSED" && nowPlaying()) { cast.devPaused = true; toggle(); }
     else if (m.state === "PAUSED") cast.devPaused = true;
     else if (m.state === "PLAYING" && cast.devPaused) {
       cast.devPaused = false;
+      cast.fresh = true;
       invoke("cast_reload").catch(() => {});   // what it had buffered is old
       if (!nowPlaying()) toggle();
     } else if (m.state === "IDLE" && m.idleReason === "ERROR") say((cast.device ? cast.device.name : "The device") + " couldn't play the stream.");
@@ -103,7 +117,43 @@ function castEvent(m) {
 
 // Track changes and play/pause, from trackStarted and widgetPush
 function castTrack() {
-  if (cast.on) invoke("cast_track", { meta: castMeta() }).catch(() => {});
+  if (!cast.on) return;
+  cast.fresh = true;   // the device starts the stream again, so it's a new delay
+  invoke("cast_track", { meta: castMeta() }).catch(() => {});
+}
+
+// ---------- the device's volume ----------
+function castVolPaint() {
+  const wrap = document.querySelector(".volWrap");
+  const only = cast.on && !prefs.castLocal;
+  wrap.classList.toggle("both", cast.on && !only && !prefs.hideVolume);
+  wrap.hidden = !!prefs.hideVolume && !cast.on;
+  $("vol").hidden = only || !!prefs.hideVolume;
+  $("castVolRow").hidden = !cast.on;
+  $("mute").title = only && cast.device ? "Mute " + cast.device.name : "Mute";
+  // the device's own level, unless it's being dragged here
+  if (cast.level != null && Date.now() - cast.volAt > 1500) $("castVol").value = String(Math.round(cast.level * 100));
+}
+
+let castVolSent = 0;
+function castVolInput() {
+  cast.level = Number($("castVol").value) / 100;
+  cast.volAt = Date.now();
+  const send = () => { castVolSent = Date.now(); invoke("cast_volume", { level: cast.level }).catch(() => {}); };
+  clearTimeout(cast.volTimer);
+  if (Date.now() - castVolSent > 120) send();
+  else cast.volTimer = setTimeout(send, 130);
+}
+
+// ---------- lining this PC up with the device ----------
+const castAuto = () => prefs.castLocalAuto !== false;
+
+function castLag(ms) {
+  cast.lag = cast.fresh || cast.lag == null ? ms : Math.round(cast.lag * 0.6 + ms * 0.4);
+  cast.fresh = false;
+  if (!prefs.castLocal || !castAuto()) return;
+  $("castAutoNote").textContent = "The device plays " + (cast.lag / 1000).toFixed(1) + " s behind; this PC is held back to match.";
+  if (Math.abs(cast.lag - cast.applied) >= 60) castLocalApply();
 }
 
 
@@ -111,6 +161,7 @@ function castPaint() {
   const b = $("outputBtn");
   b.classList.toggle("on", cast.on);
   b.title = cast.on && cast.device ? "Casting to " + cast.device.name : "Output device and casting";
+  castVolPaint();
 }
 
 // The output button's menu: where the sound plays, this PC's devices first, then Cast devices
@@ -166,7 +217,12 @@ async function outputPick(id) {
 }
 
 // Playing on this PC as well while casting, held back to line up with the device (its buffer)
-const castLocalDelay = () => (cast.on && prefs.castLocal ? Math.max(0, Math.min(5000, Number(prefs.castLocalDelay) || 0)) : 0);
+function castLocalDelay() {
+  if (!cast.on || !prefs.castLocal) return 0;
+  const ms = castAuto() && cast.lag != null ? cast.lag : Number(prefs.castLocalDelay) || 0;
+  cast.applied = Math.max(0, Math.min(5000, ms));
+  return cast.applied;
+}
 
 function castLocalApply() {
   out2MainMute(cast.on && !prefs.castLocal);
@@ -177,6 +233,10 @@ function castLocalPaint() {
   $("castLocal").checked = !!prefs.castLocal;
   $("castLocalRow").hidden = !prefs.castLocal;
   $("castLocalDelay").value = String(Number(prefs.castLocalDelay) || 0);
+  $("castLocalAuto").checked = castAuto();
+  $("castDelayRow").hidden = castAuto();
+  if (!cast.on || cast.lag == null) $("castAutoNote").textContent = "Measures how late the device plays, and holds this PC back to match.";
+  castVolPaint();
 }
 
 const castEnabled = () => !!prefs.castOn;
@@ -198,6 +258,8 @@ function castInit() {
   castOnPaint();
   $("castOn").addEventListener("change", () => castSetOn($("castOn").checked));
   castLocalPaint();
+  $("castLocalAuto").addEventListener("change", () => { prefs.castLocalAuto = $("castLocalAuto").checked; savePrefs(); castLocalPaint(); castLocalApply(); });
+  $("castVol").addEventListener("input", castVolInput);
   $("castLocal").addEventListener("change", () => { prefs.castLocal = $("castLocal").checked; savePrefs(); castLocalPaint(); castLocalApply(); });
   $("castLocalDelay").addEventListener("change", () => {
     const v = Math.round(Number($("castLocalDelay").value));

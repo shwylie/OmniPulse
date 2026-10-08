@@ -1430,6 +1430,7 @@ function paintVolumeControl() {
     $("icoMute").classList.add("off");
   }
   setLevel(appVolume());
+  castVolPaint();
 }
 $("volShowOn").addEventListener("change", () => {
   prefs.hideVolume = !$("volShowOn").checked;

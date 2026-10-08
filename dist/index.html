@@ -203,7 +203,10 @@
           <svg id="icoVol" viewBox="0 0 24 24"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/></svg>
           <svg id="icoMute" class="off" viewBox="0 0 24 24"><path d="M16.5 12c0-1.77-1.02-3.29-2.5-4.03v2.21l2.45 2.45c.03-.2.05-.41.05-.63zm2.5 0c0 .94-.2 1.82-.54 2.64l1.51 1.51A8.796 8.796 0 0021 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3L3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06c1.38-.31 2.63-.95 3.69-1.81L19.73 21 21 19.73l-9-9L4.27 3zM12 4L9.91 6.09 12 8.18V4z"/></svg>
         </button>
-        <input id="vol" type="range" min="0" max="100" value="80" aria-label="Volume">
+        <div class="volSliders">
+          <input id="vol" type="range" min="0" max="100" value="80" aria-label="Volume" title="Volume">
+          <div id="castVolRow" class="castVolRow" hidden><svg viewBox="0 0 24 24"><path d="M21 3H3c-1.1 0-2 .9-2 2v3h2V5h18v14h-7v2h7c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zM1 18v3h3c0-1.66-1.34-3-3-3zm0-4v2c2.76 0 5 2.24 5 5h2c0-3.87-3.13-7-7-7zm0-4v2c4.97 0 9 4.03 9 9h2c0-6.08-4.93-11-11-11z"/></svg><input id="castVol" type="range" min="0" max="100" value="50" aria-label="Chromecast volume" title="Chromecast volume"></div>
+        </div>
       </div>
     </div>
 
@@ -690,12 +693,21 @@
         </div>
         <label class="switch"><input type="checkbox" id="castLocal"><span></span></label>
       </div>
-      <div class="row" id="castLocalRow" hidden>
+      <div id="castLocalRow" hidden>
+      <div class="row">
+        <div>
+          <div class="lbl">Line Up Automatically</div>
+          <div class="note" id="castAutoNote">Measures how late the device plays, and holds this PC back to match.</div>
+        </div>
+        <label class="switch"><input type="checkbox" id="castLocalAuto"><span></span></label>
+      </div>
+      <div class="row" id="castDelayRow">
         <div>
           <div class="lbl">Delay This PC</div>
           <div class="note">How late the device plays, so the two line up.</div>
         </div>
         <div class="widgetRow"><input id="castLocalDelay" type="number" min="0" max="5000" step="50" aria-label="Delay this PC in milliseconds"><span class="note">ms</span></div>
+      </div>
       </div>
       </div>
       <div class="row">
