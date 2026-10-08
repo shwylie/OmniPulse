@@ -380,6 +380,134 @@ function alertCollageEditor(kind) {
   wrap.append(chips, row, el("div", "note", (chosen.size || pics.some(Boolean)
     ? "Its tiles show its own picture, then these."
     : "Nothing chosen: its icon, with a couple that go with it.") + " With the Collage transition."));
+  wrap.append(collageItemEditor(kind, [...chosen], pics));
+  return wrap;
+}
+
+// ---------- one of the collage's pictures or icons, edited ----------
+// Pick one (its own picture or icon, a chosen icon, a collage picture): drag it about and zoom it in
+// its tile (a picture can fill the tile or fit in it), and give it a background colour of its own,
+// which stays whatever the palette. Kept as cstyle: { "own" | "icon:<name>" | "pic:<n>": { x, y, z, fit, bg } }.
+let collageEditing = null;   // "kind|key"
+
+function collageItemEditor(kind, icons, pics) {
+  const wrap = el("div", "collageItemEd");
+  const e = alertEdits(kind);
+  const img = (prefs.alertImages || {})[kind];
+  const ownIcon = e.icon || (alertBuiltin(kind) ? kind : "bell");
+  const items = [["own", img ? "Its Picture" : "Its Icon", img ? { kind, slot: "image", at: img.at, name: img.name } : { icon: ownIcon }]]
+    .concat(icons.map((n) => ["icon:" + n, (ALERT_ICON_NAMES.find((x) => x[0] === n) || [n, n])[1], { icon: n }]))
+    .concat(pics.map((p, i) => (p ? ["pic:" + (i + 1), "Picture " + (i + 1), { kind: kind + "-" + (i + 1), slot: "collage", at: p.at, name: p.name }] : null)).filter(Boolean));
+  const picks = el("div", "alertInline collagePicks");
+  const at = collageEditing && collageEditing.startsWith(kind + "|") ? collageEditing.slice(kind.length + 1) : "";
+  items.forEach(([key, label]) => {
+    const b = el("button", "soft" + (key === at ? " on" : ""), label);
+    b.type = "button";
+    b.addEventListener("click", () => { collageEditing = key === at ? null : kind + "|" + key; alertsPaintList(); });
+    picks.append(b);
+  });
+  wrap.append(el("div", "note", "Edit one:"), picks);
+  const item = items.find((x) => x[0] === at);
+  if (!item) return wrap;
+  const [key, , what] = item;
+  const all = Object.assign({}, e.cstyle);
+  const st = Object.assign({ x: 50, y: 50, z: 1, fit: "contain" }, all[key]);
+  const save = () => {
+    const keep = { x: Math.round(st.x), y: Math.round(st.y), z: Math.round(st.z * 100) / 100 };
+    if (!what.icon) keep.fit = st.fit;
+    if (st.bg) keep.bg = st.bg;
+    const next = Object.assign({}, alertEdits(kind).cstyle, { [key]: keep });
+    alertEditSet(kind, "cstyle", next);
+  };
+  // the tile: as the collage shows it (a sample colour unless its own is locked)
+  const frame = el("div", "cropFrame collageTileFrame");
+  const paint = () => {
+    frame.style.background = st.bg || "color-mix(in srgb, var(--accent) 55%, #0b0c10)";
+    const shown = frame.firstElementChild;
+    if (!shown) return;
+    if (what.icon) shown.style.transform = "translate(" + (st.x - 50) + "%, " + (st.y - 50) + "%) scale(" + st.z + ")";
+    else alertCropImg(shown, st);
+  };
+  if (what.icon) {
+    const svg = icon(ALERT_ICON_PATHS[what.icon] || ALERT_ICON_PATHS.bell);
+    svg.classList.add("collageTileIcon");
+    frame.append(svg);
+  } else {
+    const pic = el("img");
+    pic.alt = "";
+    pic.draggable = false;
+    frame.append(pic);
+    alertMediaUrl(what.kind, what.slot, what.at, what.name).then((u) => { pic.src = u; }).catch(() => {});
+  }
+  paint();
+  frame.addEventListener("pointerdown", (ev) => {
+    frame.setPointerCapture(ev.pointerId);
+    const sx = ev.clientX, sy = ev.clientY, ox = st.x, oy = st.y, size = frame.clientWidth;
+    // an icon goes where you drag it; a picture moves under its tile
+    const k = what.icon ? 1 : -1 / st.z;
+    const move = (m) => {
+      st.x = Math.max(0, Math.min(100, ox + k * ((m.clientX - sx) / size) * 100));
+      st.y = Math.max(0, Math.min(100, oy + k * ((m.clientY - sy) / size) * 100));
+      paint();
+    };
+    const up = () => { frame.removeEventListener("pointermove", move); frame.removeEventListener("pointerup", up); save(); };
+    frame.addEventListener("pointermove", move);
+    frame.addEventListener("pointerup", up);
+  });
+  const zoom = el("input");
+  zoom.type = "range";
+  zoom.min = what.icon ? "0.4" : "1";
+  zoom.max = what.icon ? "3" : "4";
+  zoom.step = "0.05";
+  zoom.value = String(st.z);
+  zoom.setAttribute("aria-label", "Size");
+  zoom.addEventListener("input", () => { st.z = Number(zoom.value); paint(); });
+  zoom.addEventListener("change", save);
+  frame.addEventListener("wheel", (ev) => {
+    ev.preventDefault();
+    st.z = Math.max(Number(zoom.min), Math.min(Number(zoom.max), st.z * (ev.deltaY < 0 ? 1.08 : 1 / 1.08)));
+    zoom.value = String(st.z);
+    paint();
+    clearTimeout(frame._t);
+    frame._t = setTimeout(save, 300);
+  }, { passive: false });
+  const side = el("div", "cropSide");
+  if (!what.icon) {
+    const fit = el("select", "narrow");
+    [["contain", "Fit in the Tile"], ["cover", "Fill the Tile"]].forEach(([v, n]) => { const o = el("option", "", n); o.value = v; fit.append(o); });
+    fit.value = st.fit;
+    fit.addEventListener("change", () => { st.fit = fit.value; paint(); save(); });
+    side.append(fit);
+  }
+  // its own background colour, locked
+  const lock = el("input");
+  lock.type = "checkbox";
+  lock.checked = !!st.bg;
+  const col = el("input");
+  col.type = "color";
+  col.value = st.bg || "#5b6cff";
+  col.disabled = !st.bg;
+  col.setAttribute("aria-label", "Its background colour");
+  lock.addEventListener("change", () => { st.bg = lock.checked ? col.value : ""; col.disabled = !lock.checked; paint(); save(); });
+  col.addEventListener("input", () => { if (lock.checked) { st.bg = col.value; paint(); } });
+  col.addEventListener("change", save);
+  const lockRow = el("label", "alertCheck");
+  lockRow.append(lock, document.createTextNode(" Its own background"));
+  const bgRow = el("div", "alertInline");
+  bgRow.append(lockRow, col);
+  const reset = el("button", "soft", "Reset");
+  reset.type = "button";
+  reset.addEventListener("click", () => {
+    const next = Object.assign({}, alertEdits(kind).cstyle);
+    delete next[key];
+    alertEditSet(kind, "cstyle", Object.keys(next).length ? next : "");
+    alertsPaintList();
+  });
+  side.append(el("label", "note", what.icon ? "Size" : "Zoom"), zoom, bgRow,
+    el("div", "note", "Drag it to move it; scroll to zoom."), reset);
+  const ed = el("div", "alertCrop");
+  ed.append(frame, side);
+  wrap.append(ed);
   return wrap;
 }
 

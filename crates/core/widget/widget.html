@@ -702,12 +702,15 @@
     kicks: ["sparkle", "bits"], donation: ["follow", "sparkle"], raid: ["rocket", "sparkle"], hypetrain: ["rocket", "sparkle"],
     poll: ["bell", "sparkle"], ban: ["hammer", "hammer"], watchstreak: ["trophy", "sparkle"],
   };
+  // Each one's own look in the collage (Settings > the alert > Collage > Edit): moved and zoomed
+  // (and for a picture, filling its tile or fitting in it), and a background colour of its own
   function collageSet(look) {
     const { a, k } = look;
-    const own = k.image ? { img: "/image/" + a.type + "?s=" + encodeURIComponent(k.image), crop: k.crop }
-      : { icon: ALERT_ICONS[k.icon] ? k.icon : ALERT_ICONS[a.type] ? a.type : "bell" };
-    const pics = (k.cpics || []).map((at, i) => (at ? { img: "/collage/" + a.type + "-" + (i + 1) + "?s=" + encodeURIComponent(at) } : null)).filter(Boolean);
-    const icons = (k.cicons || []).filter((n) => ALERT_ICONS[n]).map((n) => ({ icon: n }));
+    const style = (key) => (k.cstyle && k.cstyle[key]) || {};
+    const own = k.image ? { img: "/image/" + a.type + "?s=" + encodeURIComponent(k.image), crop: Object.assign({}, k.crop, style("own")), bg: style("own").bg }
+      : { icon: ALERT_ICONS[k.icon] ? k.icon : ALERT_ICONS[a.type] ? a.type : "bell", fit: style("own"), bg: style("own").bg };
+    const pics = (k.cpics || []).map((at, i) => (at ? { img: "/collage/" + a.type + "-" + (i + 1) + "?s=" + encodeURIComponent(at), crop: style("pic:" + (i + 1)), bg: style("pic:" + (i + 1)).bg } : null)).filter(Boolean);
+    const icons = (k.cicons || []).filter((n) => ALERT_ICONS[n]).map((n) => ({ icon: n, fit: style("icon:" + n), bg: style("icon:" + n).bg }));
     // nothing chosen: two in three tiles its own, the rest the ones that go with it
     if (!pics.length && !icons.length) return [own, own].concat((COLLAGE_WITH[a.type] || ["sparkle", "follow"]).slice(0, 1).map((n) => ({ icon: n })));
     return [own].concat(pics, icons);
@@ -780,6 +783,8 @@
         "--r:" + ((r + c) % 2 ? 1 : -1) * (12 + 22 * seed(r + 3, c + 5)) + "deg";
       t.dataset.at = String(at);
       const pick = set[(r * cols + c + r) % set.length];
+      // a background of its own stays the same, whatever the palette
+      if (/^#[0-9a-f]{6}$/i.test(pick.bg || "")) t.style.background = pick.bg;
       if (pick.img) {
         const img = document.createElement("img");
         img.src = pick.img;
@@ -788,6 +793,11 @@
       } else {
         const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
         svg.setAttribute("viewBox", "0 0 24 24");
+        // an icon moved and zoomed: about its middle
+        const f = pick.fit || {};
+        const z = Math.max(0.4, Math.min(3, Number(f.z) || 1));
+        const dx = (f.x === undefined ? 0 : Number(f.x) - 50), dy = (f.y === undefined ? 0 : Number(f.y) - 50);
+        if (z !== 1 || dx || dy) svg.style.transform = "translate(" + dx + "%, " + dy + "%) scale(" + z + ")";
         const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
         path.setAttribute("d", ALERT_ICONS[pick.icon] || ALERT_ICONS.bell);
         svg.append(path);

@@ -211,7 +211,7 @@ function alertsCfg() {
   alertOrder().forEach((k) => {
     const e = alertEdits(k), img = (prefs.alertImages || {})[k];
     const c = {};
-    ["head", "main", "color", "anim", "icon", "crop", "cicons", "music"].forEach((f) => { if (e[f]) c[f] = e[f]; });
+    ["head", "main", "color", "anim", "icon", "crop", "cicons", "cstyle", "music"].forEach((f) => { if (e[f]) c[f] = e[f]; });
     if (e.color && e.color2) c.color2 = e.color2;
     if (e.secs) c.secs = e.secs === "sound" ? "sound" : Number(e.secs);
     if (e.sdelay) c.sdelay = Number(e.sdelay);
