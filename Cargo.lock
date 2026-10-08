@@ -3480,10 +3480,12 @@ name = "omnipulse-audio"
 version = "0.1.0"
 dependencies = [
  "cpal",
+ "omnipulse-core",
  "reqwest 0.12.28",
  "rubato",
  "symphonia",
  "tiny_http",
+ "tokio",
 ]
 
 [[package]]

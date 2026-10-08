@@ -12,6 +12,8 @@ reqwest = { version = "0.12", features = ["blocking"] }
 
 [dev-dependencies]
 tiny_http = "0.12"
+omnipulse-core = { path = "../core" }
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 
 [[bin]]
 name = "op-play"

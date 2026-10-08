@@ -4,12 +4,14 @@ pub mod dsp;
 pub mod engine;
 pub mod hls;
 pub mod http;
+pub mod push;
 pub mod source;
 pub mod ts;
 
 pub use engine::{render, Engine, Event};
 pub use hls::HlsSource;
 pub use http::open_url;
+pub use push::{PushFeed, PushSource};
 pub use source::{Decoded, Source, Tone};
 
 #[cfg(test)]
