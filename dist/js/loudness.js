@@ -13,9 +13,9 @@
 const LOUD_TARGETS = { quiet: -18, normal: -14, loud: -11 };
 const LOUD_NOTES = {
   off: "Tracks play as loud as they were made.",
-  quiet: "Every track at the same loudness, measured over the whole track (-18 LUFS, the most room for dynamic tracks).",
-  normal: "Every track at the same loudness, measured over the whole track (-14 LUFS, like Spotify and YouTube).",
-  loud: "Every track at the same loudness, measured over the whole track (-11 LUFS, like Spotify's Loud).",
+  quiet: "Every track at the same loudness.",
+  normal: "Every track at the same loudness.",
+  loud: "Every track at the same loudness.",
 };
 const LOUD_MAX_BOOST = 9;        // dB: quiet tracks are raised at most this much (the limiter catches peaks)
 const LOUD_TYPICAL_LUFS = -10;   // until a track is measured, it's assumed to be this loud (most releases are close)

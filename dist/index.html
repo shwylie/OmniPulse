@@ -589,8 +589,7 @@
       <div class="row">
         <div>
           <div class="lbl">Match loudness</div>
-          <div class="note" id="loudNote">Every track at the same loudness, measured over the whole track.</div>
-          <div class="note" id="loudNow" hidden></div>
+          <div class="note" id="loudNote">Every track at the same loudness.</div>
         </div>
         <select id="loudSel" class="narrow"><option value="off">Off</option><option value="quiet">Quiet</option><option value="normal">Normal</option><option value="loud">Loud</option></select>
       </div>
@@ -629,37 +628,37 @@
       <p class="note" id="outputNote"></p>
       <button id="namesBtn" class="soft" hidden>Show device names</button>
       <div class="row">
-        <div>
-          <div class="lbl">Casting</div>
-          <div class="note">The output button in the player bar also plays on a Chromecast, a Nest speaker or display, or a TV or speaker with Cast built in, on the same network. Everything plays as it does here (EQ and loudness too), a moment later; this PC goes quiet meanwhile.</div>
-        </div>
+        <div class="lbl">Chromecast</div>
+        <label class="switch"><input type="checkbox" id="castOn"><span></span></label>
       </div>
+      <div id="castBody" hidden>
       <div class="row">
         <div>
           <div class="lbl">Keep playing on this PC</div>
-          <div class="note">While casting, play here as well as on the device.</div>
+          <div class="note">While casting, play here too.</div>
         </div>
         <label class="switch"><input type="checkbox" id="castLocal"><span></span></label>
       </div>
       <div class="row" id="castLocalRow" hidden>
         <div>
           <div class="lbl">Delay this PC</div>
-          <div class="note">The device plays a moment late (it buffers the stream). Hold this PC back by as much, in milliseconds, so the two play together.</div>
+          <div class="note">How late the device plays, so the two line up.</div>
         </div>
         <div class="widgetRow"><input id="castLocalDelay" type="number" min="0" max="5000" step="50" aria-label="Delay this PC in milliseconds"><span class="note">ms</span></div>
       </div>
       <details class="sub" id="castSection">
         <summary>Display on screens</summary>
-        <p class="note">Screens show Google's player (title, artist and cover). OmniPulse's own display, with play, pause and skip buttons on touch screens, needs a Cast app ID of your own: see cast-receiver/README.md in the project. Leave this empty for Google's player.</p>
+        <p class="note">Empty: Google's player. OmniPulse's own display needs a Cast app ID (see cast-receiver/README.md).</p>
         <div class="row">
           <div class="lbl">Cast app ID</div>
           <input id="castApp" class="narrow" type="text" maxlength="12" placeholder="Google's player" spellcheck="false" autocomplete="off">
         </div>
       </details>
+      </div>
       <div class="row">
         <div>
           <div class="lbl">Volume control</div>
-          <div class="note">Off: no volume slider, and the app plays at 100%. For setting the volume on Windows' mixer or a Stream Deck instead.</div>
+          <div class="note">Off: no volume slider, and the app plays at 100%.</div>
         </div>
         <label class="switch"><input type="checkbox" id="volShowOn"><span></span></label>
       </div>
@@ -671,14 +670,14 @@
       <div class="row">
         <div>
           <div class="lbl">OmniPulse Input</div>
-          <div class="note">The app's sound a second time, as its own app named "OmniPulse Input", to route in Elgato Wave Link or capture in OBS, with its own volume and an offset to line it up (like OBS's sync offset). Please route it first, so you don't hear the music twice.</div>
+          <div class="note">The sound again, as its own app, for Wave Link or OBS.</div>
         </div>
         <label class="switch"><input type="checkbox" id="out2On"><span></span></label>
       </div>
       <div class="row">
         <div>
           <div class="lbl">Start muted in the Windows Sound Mixer</div>
-          <div class="note">It starts muted each time, so you never hear it twice; unmute "OmniPulse Input" in the Sound Mixer once it's routed. Off: it starts as it was left there.</div>
+          <div class="note">No echo until you've routed it and unmuted it there.</div>
         </div>
         <label class="switch"><input type="checkbox" id="out2Muted"><span></span></label>
       </div>
@@ -688,7 +687,7 @@
         <div class="row">
           <div>
             <div class="lbl">Offset</div>
-            <div class="note">In milliseconds. Above 0 the input is later than your speakers; below 0 your speakers are.</div>
+            <div class="note">Above 0 it's later than your speakers; below 0, earlier.</div>
           </div>
           <div class="widgetRow"><input id="out2Offset" type="number" min="-5000" max="5000" step="10" aria-label="Offset in milliseconds"><span class="note">ms</span></div>
         </div>

@@ -142,7 +142,13 @@ async function outputMenu() {
     items.push([name, () => outputPick(d.deviceId), !cast.on && d.deviceId === cur ? "menuOn" : ""]);
   });
   if (outs.some((d) => !d.label) && outs.length > 1) items.push(["Show device names", () => { $("namesBtn").click(); setTimeout(outputMenu, 600); }]);
-  items.push("sep", "Cast");
+  items.push("sep", "Chromecast");
+  if (!castEnabled()) {
+    items.push(["Turn on Chromecast", () => { castSetOn(true); castSearch(); }, "menuNew"]);
+    items.push("sep", ["Sound settings...", () => openSettings("audioSection")]);
+    at();
+    return;
+  }
   if (cast.on && cast.device) items.push([cast.device.name, () => {}, "menuOn"], ["Stop casting", castStop]);
   const list = (await castDevices()).filter((d) => !cast.device || d.id !== cast.device.id);
   list.forEach((d) => items.push([d.name + (d.group ? " (group)" : d.display ? " (display)" : ""), () => castStart(d)]));
@@ -186,7 +192,24 @@ function castLocalPaint() {
   $("castLocalDelay").value = String(Number(prefs.castLocalDelay) || 0);
 }
 
+const castEnabled = () => !!prefs.castOn;
+
+function castOnPaint() {
+  $("castOn").checked = castEnabled();
+  $("castBody").hidden = !castEnabled();
+}
+
+function castSetOn(on) {
+  prefs.castOn = on;
+  savePrefs();
+  castOnPaint();
+  if (on) invoke("cast_devices").catch(() => {});
+  else if (cast.on) castStop();
+}
+
 function castInit() {
+  castOnPaint();
+  $("castOn").addEventListener("change", () => castSetOn($("castOn").checked));
   castLocalPaint();
   $("castLocal").addEventListener("change", () => { prefs.castLocal = $("castLocal").checked; savePrefs(); castLocalPaint(); castLocalApply(); });
   $("castLocalDelay").addEventListener("change", () => {
@@ -204,5 +227,5 @@ function castInit() {
   });
   castPaint();
   // start listening for devices early, so the menu has them
-  setTimeout(() => invoke("cast_devices").catch(() => {}), 3000);
+  if (castEnabled()) setTimeout(() => invoke("cast_devices").catch(() => {}), 3000);
 }
