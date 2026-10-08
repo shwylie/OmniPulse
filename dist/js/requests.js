@@ -114,8 +114,9 @@ async function likedMatch(q, plats) {
   const want = reqWords(q);
   if (!want.length) return null;
   await loadLikesFor(plats).catch(() => null);
-  const pools = { soundcloud: () => likedTracks.filter(isLikedTrack), spotify: () => spLikedCache || [], local: () => [] };
+  const pools = { soundcloud: () => likedTracks.filter(isLikedTrack), spotify: () => spLikedCache || [], youtube: () => ytLikes, local: () => [] };
   for (const id of plats) {
+    if (!pools[id]) continue;   // plugins: no likes kept here
     const hit = pools[id]().find((t) => {
       if (isMix(t)) return false;
       const have = new Set(reqWords(t.title + " " + artistName(t)));
@@ -124,6 +125,80 @@ async function likedMatch(q, plats) {
     if (hit) return Object.assign({}, hit);   // a copy, so "requested by" stays on the queued one
   }
   return null;
+}
+
+// ---------- what chat asked for, tidied ----------
+// Punctuation is dropped ("Artist - Song", "Song: Part 2", quotes, brackets), so it never breaks a
+// search, and "Song by Artist" is searched as "artist song". A title with "by" in it still works:
+// the words as typed (minus punctuation) are searched too if that finds nothing.
+function reqClean(q) {
+  return String(q).normalize("NFKC").toLowerCase()
+    .replace(/[\u2018\u2019\u02bc]/g, "'")
+    .replace(/(^|\s)'+|'+(\s|$)/g, " ")             // quotes around words, not apostrophes in them
+    .replace(/[^\p{L}\p{N}'&+#$!]+/gu, " ")          // - : | / , . ( ) [ ] " and the like
+    .replace(/(\s)[!]+|[!]+(\s|$)/g, " ")             // "!" between words, not in names like P!nk
+    .replace(/\s+/g, " ").trim();
+}
+
+// The searches to try, best first: { q, artist } where artist (from "song by artist") has to match
+// a result's artist, so "Stand by Me" isn't taken as a song called "Stand" by "Me"
+function reqQueries(q) {
+  const plain = reqClean(q);
+  const m = plain.match(/^(.+) by (.+)$/);
+  const out = [];
+  if (m) out.push({ q: m[2] + " " + m[1], artist: m[2] });   // "i remember by deadmau5" -> "deadmau5 i remember"
+  if (plain) out.push({ q: plain });
+  return out;
+}
+
+const reqByArtist = (list, artist) => !artist ? list : list.filter((t) => {
+  // the artist, or the "Artist - " an uploader often puts in front of the title
+  const lead = String(t.title || "").includes(" - ") ? String(t.title).split(" - ")[0] : "";
+  const have = new Set(reqWords(artistName(t) + " " + lead));
+  return reqWords(artist).every((w) => have.has(w));
+});
+
+// ---------- radio edits ----------
+// Words a version of the same song may add to its title without being another song (a remix, a live
+// recording, a cover); version words that make it a different take aren't here
+const REQ_VERSION_WORDS = new Set(["radio", "edit", "mix", "version", "original", "single", "short", "clean", "explicit", "the", "a", "and", "feat", "ft", "featuring", "with", "x", "vs", "remastered", "remaster", "mono", "stereo"]);
+const REQ_RADIO = /\b(radio (edit|mix|version)|single (edit|version)|short (edit|version)|edit)\b/i;
+const REQ_LONG_MS = 6 * 60 * 1000;
+
+const reqLen = (t) => Number(t.duration || t.full_duration || t.duration_ms || 0);
+
+// Whether a track is the same song as the request: every word asked for is there, and anything else in
+// its title is only a version word (or the artist's name)
+function reqSameSong(t, q) {
+  const want = reqWords(q);
+  const artist = new Set(reqWords(artistName(t)));
+  const title = reqWords(t.title || "");
+  const have = new Set(title.concat([...artist]));
+  if (!want.every((w) => have.has(w))) return false;
+  const asked = new Set(want);
+  return title.every((w) => asked.has(w) || artist.has(w) || REQ_VERSION_WORDS.has(w) || /^\d{4}$/.test(w));
+}
+
+function reqRadioPick(list, q) {
+  const same = list.filter((t) => reqSameSong(t, q) && reqLen(t) >= 90 * 1000);
+  const radio = same.filter((t) => REQ_RADIO.test(t.title || ""));
+  if (radio.length) return radio.sort((a, b) => reqLen(a) - reqLen(b))[0];
+  const short = same.filter((t) => reqLen(t) < REQ_LONG_MS);
+  return short.length ? short[0] : null;
+}
+
+// With "Prefer radio edits" on: a long track gives way to a radio edit of the same song, from the same
+// results or a search for one
+async function reqPreferRadio(t, found, q, order, finders) {
+  if (!prefs.reqRadioEdit || !t || reqLen(t) < REQ_LONG_MS || REQ_RADIO.test(t.title || "")) return t;
+  const pick = reqRadioPick(found, q);
+  if (pick) return pick;
+  for (const id of order) {
+    const more = (await finders[id](q + " radio edit").catch(() => [])).filter((x) => !isMix(x));
+    const p = reqRadioPick(more, q);
+    if (p) return p;
+  }
+  return t;
 }
 
 // The video id in a YouTube or YouTube Music link
@@ -158,19 +233,26 @@ async function handleSongRequest(q, user) {
   else if (/open\.spotify\.com\//i.test(q)) order = plats.filter((id) => id === "spotify");
   else if (ytLinkId(q)) order = plats.filter((id) => id === "youtube");
   const finders = { soundcloud: findRequested, spotify: findSpotifyRequested, local: async (x) => localSearch(x), youtube: findYouTubeRequested };
+  order.filter((id) => id.startsWith("plug:")).forEach((id) => { finders[id] = (x) => pluginSearch(id.slice(5), x); });
   const isLink = /^https?:\/\//i.test(q);
+  // words are tidied (no punctuation, "song by artist" as "artist song"); links are left as they are
+  const queries = isLink ? [{ q }] : reqQueries(q);
+  if (!queries.length) return { ok: false, message: reqMsg("empty", base) };
   // Your liked songs come first: one whose title and artist contain every word asked for
-  let t = isLink ? null : await likedMatch(q, order);
+  let t = null, found = [], asked = queries[0].q;
+  if (!isLink) for (const qq of queries) { t = await likedMatch(qq.q, order); if (t) { asked = qq.q; break; } }
+  // otherwise a search, where a liked track among the top few beats one you haven't liked
   if (!t) {
-    // otherwise a search, where a liked track among the top few beats one you haven't liked
-    let found = [];
-    for (const id of order) {
-      found = (await finders[id](q).catch(() => [])).filter((x) => !isMix(x));
-      if (found.length) break;
+    search: for (const qq of queries) {
+      for (const id of order) {
+        found = reqByArtist((await finders[id](qq.q).catch(() => [])).filter((x) => !isMix(x)), qq.artist);
+        if (found.length) { asked = qq.q; break search; }
+      }
     }
     if (!found.length) return { ok: false, message: reqMsg("notFound", base) };
     t = (!isLink && found.slice(0, 5).find(isLikedTrack)) || found[0];
   }
+  if (!isLink) t = await reqPreferRadio(t, found, asked, order, finders);
   const vars = Object.assign({ title: t.title, artist: artistName(t) }, base);
   if (queue.slice(Math.max(qi, 0)).some((x) => x.id === t.id)) return { ok: false, message: reqMsg("duplicate", vars) };
   t.requestedBy = who;
@@ -274,6 +356,8 @@ function renderReqMsgs() {
 }
 
 function requestsInit() {
+  $("reqRadioOn").checked = !!prefs.reqRadioEdit;
+  $("reqRadioOn").addEventListener("change", () => { prefs.reqRadioEdit = $("reqRadioOn").checked; savePrefs(); });
   $("reqOn").addEventListener("change", () => {
     prefs.req = $("reqOn").checked;
     savePrefs();
