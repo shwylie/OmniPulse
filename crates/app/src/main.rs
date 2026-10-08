@@ -50,6 +50,8 @@ struct App {
     queue: queue::Queue,
     /// the queue panel's rows: their place in the queue
     panel_map: Vec<usize>,
+    /// the sidebar's playlists: their place in playlists (those of platforms switched off are left out)
+    side_map: Vec<usize>,
     autoplay: bool,
     ap_busy: bool,
     ap_then_play: bool,
@@ -79,10 +81,12 @@ fn now_ms() -> u64 {
 // ---------- pages ----------
 fn apply_filter(app: &mut App) {
     let chip = app.chip;
+    let prefs = app.web.prefs.clone();
+    let shown = |t: &&Track| plat_on(&prefs, t.plat());
     let filtered: Vec<Track> = match (app.page.as_str(), chip) {
-        ("library" | "rediscover" | "favourites" | "search" | "playlist", 1) => app.page_all.iter().filter(|t| !t.is_mix()).cloned().collect(),
-        ("library" | "rediscover" | "favourites" | "search" | "playlist", 2) => app.page_all.iter().filter(|t| t.is_mix()).cloned().collect(),
-        _ => app.page_all.clone(),
+        ("library" | "rediscover" | "favourites" | "search" | "playlist", 1) => app.page_all.iter().filter(shown).filter(|t| !t.is_mix()).cloned().collect(),
+        ("library" | "rediscover" | "favourites" | "search" | "playlist", 2) => app.page_all.iter().filter(shown).filter(|t| t.is_mix()).cloned().collect(),
+        _ => app.page_all.iter().filter(shown).cloned().collect(),
     };
     let playing = app.queue.current().map(|t| t.key.clone()).unwrap_or_default();
     app.rows.set_vec(filtered.iter().map(|t| t.row(t.key == playing)).collect::<Vec<_>>());
@@ -185,11 +189,69 @@ fn open_page(shared: &Shared, page: &str) {
     }
 }
 
+// ---------- the platforms, each on or off (the title bar), as the web app's scOn, spOn, ytOn, localOn ----------
+fn plat_key(plat: &str) -> &'static str {
+    match plat {
+        "spotify" => "spOn",
+        "youtube" => "ytOn",
+        "local" => "localOn",
+        _ => "scOn",
+    }
+}
+
+fn plat_on(prefs: &serde_json::Value, plat: &str) -> bool {
+    integrations::on(prefs, plat_key(plat))
+}
+
+/// The platforms you have (signed in, or with files), for the title bar
+fn paint_plats(a: &App) {
+    let Some(ui) = a.ui.upgrade() else { return };
+    let mut list: Vec<Plat> = Vec::new();
+    let mut add = |id: &str, name: &str| list.push(Plat { id: id.into(), on: plat_on(&a.web.prefs, id), name: name.into() });
+    if omnipulse_core::soundcloud::signed_in() { add("soundcloud", "SoundCloud"); }
+    if omnipulse_core::spotify::spotify_signed_in() { add("spotify", "Spotify"); }
+    add("youtube", "YouTube Music");
+    if a.library.iter().any(|t| t.plat() == "local") { add("local", "Your files"); }
+    ui.set_plats(ModelRc::from(Rc::new(VecModel::from(list))));
+}
+
+/// The sidebar's playlists: those of platforms switched off are left out
+fn paint_sides(a: &mut App) {
+    let Some(ui) = a.ui.upgrade() else { return };
+    let prefs = a.web.prefs.clone();
+    a.side_map = (0..a.playlists.len()).filter(|&i| plat_on(&prefs, a.playlists[i].plat) || a.playlists[i].plat == "local").collect();
+    let sides: Vec<Side> = a.side_map.iter().map(|&i| Side { title: a.playlists[i].title.clone().into(), plat: a.playlists[i].plat.into() }).collect();
+    ui.set_sides(ModelRc::from(Rc::new(VecModel::from(sides))));
+}
+
+fn plat_toggle(shared: &Shared, plat: &str) {
+    let key = plat_key(plat);
+    let now = {
+        let mut a = shared.borrow_mut();
+        let now = !plat_on(&a.web.prefs, plat);
+        if let Some(o) = a.web.prefs.as_object_mut() {
+            o.insert(key.into(), serde_json::json!(now));
+        }
+        paint_sides(&mut a);
+        paint_plats(&a);
+        apply_filter(&mut a);
+        a.ap_failed = None;
+        if let Some(ui) = a.ui.upgrade() {
+            let name = match plat { "spotify" => "Spotify", "youtube" => "YouTube Music", "local" => "Your files", _ => "SoundCloud" };
+            ui.set_status(format!("{name} is {}.", if now { "back" } else { "hidden everywhere" }).into());
+        }
+        now
+    };
+    if std::env::var_os("OMNIPULSE_SELFTEST").is_none() {
+        webstate::save_pref(key, serde_json::json!(now));
+    }
+}
+
 fn open_playlist(shared: &Shared, i: usize) {
     let Some(p) = shared.borrow().playlists.get(i).cloned() else { return };
     let ui = shared.borrow().ui.upgrade().unwrap();
     show_tracks(shared, "playlist", &p.title, "Loading...".into(), Vec::new(), true);
-    ui.set_side_on(i as i32);
+    ui.set_side_on(shared.borrow().side_map.iter().position(|&k| k == i).map_or(-1, |k| k as i32));
     let title = p.title.clone();
     let by = match p.plat { "spotify" => "On Spotify", "soundcloud" => "On SoundCloud", _ => "On this PC" };
     load_into(shared, "playlist", title, async move {
@@ -1206,7 +1268,7 @@ fn main() -> Result<(), slint::PlatformError> {
     let shared: Shared = Rc::new(RefCell::new(App {
         rt: rt.handle().clone(), engine: engine.clone(), ui: ui.as_weak(), rows, qrows, lyric_lines,
         library: Vec::new(), playlists: Vec::new(), web: webstate::load(), page: "library".into(),
-        page_all: Vec::new(), page_tracks: Vec::new(), chip: 0, shelves: Vec::new(), queue: queue::Queue::default(), panel_map: Vec::new(),
+        page_all: Vec::new(), page_tracks: Vec::new(), chip: 0, shelves: Vec::new(), queue: queue::Queue::default(), panel_map: Vec::new(), side_map: Vec::new(),
         autoplay: true, ap_busy: false, ap_then_play: false, ap_failed: None, resume_ms: None, loaded: false, accent: ("#8e9bff".into(), "#8e9bff".into()), started_secs: 0, token: 0,
         lyrics: Vec::new(), heard: (String::new(), 0.0, false), last_pos: 0,
     }));
@@ -1228,6 +1290,16 @@ fn main() -> Result<(), slint::PlatformError> {
     });
     let s = shared.clone();
     ui.on_art_accent_changed(move |on| set_look_pref(&s, "artAccent", serde_json::json!(on)));
+    let s = shared.clone();
+    ui.on_plat_toggle(move |p| plat_toggle(&s, &p));
+    // Streamer Mode (as the web app's): kept with the rest of this app's settings
+    ui.set_streamer(integrations::set(&shared.borrow().web.prefs, "streamerMode"));
+    let s = shared.clone();
+    ui.on_streamer_changed(move |on| {
+        if let Some(o) = s.borrow_mut().web.prefs.as_object_mut() { o.insert("streamerMode".into(), serde_json::json!(on)); }
+        if std::env::var_os("OMNIPULSE_SELFTEST").is_none() { webstate::save_pref("streamerMode", serde_json::json!(on)); }
+    });
+    paint_plats(&shared.borrow());
     if std::env::var_os("OMNIPULSE_SELFTEST").is_some() {
         // the self-test's own: the widget and requests on ports of their own, key "selftest" (not the
         // remote: starting it writes remote.json, which would point the Stream Deck at the test)
@@ -1263,12 +1335,12 @@ fn main() -> Result<(), slint::PlatformError> {
             let _ = weak.upgrade_in_event_loop(move |ui| {
                 SHARED.with(|s| {
                     let Some(shared) = s.borrow().clone() else { return };
-                    let sides: Vec<Side> = playlists.iter().map(|p| Side { title: p.title.clone().into(), plat: p.plat.into() }).collect();
-                    ui.set_sides(ModelRc::from(Rc::new(VecModel::from(sides))));
                     {
                         let mut a = shared.borrow_mut();
                         a.library = all;
                         a.playlists = playlists;
+                        paint_sides(&mut a);
+                        paint_plats(&a);
                     }
                     if shared.borrow().page == "library" {
                         open_page(&shared, "library");
@@ -1282,7 +1354,10 @@ fn main() -> Result<(), slint::PlatformError> {
     let s = shared.clone();
     ui.on_nav(move |p| open_page(&s, &p));
     let s = shared.clone();
-    ui.on_side(move |i| open_playlist(&s, i as usize));
+    ui.on_side(move |i| {
+        let at = s.borrow().side_map.get(i as usize).copied();
+        if let Some(at) = at { open_playlist(&s, at); }
+    });
     let s = shared.clone();
     ui.on_search(move |q| open_search(&s, q.into()));
     let s = shared.clone();
@@ -1462,7 +1537,7 @@ fn main() -> Result<(), slint::PlatformError> {
         let s = shared.clone();
         let started = std::time::Instant::now();
         let mut step_no = 0usize;
-        let plan: [(u64, &str); 12] = [(9, "play"), (13, "library"), (16, "discover"), (24, "rediscover"), (27, "sets"), (31, "stats"), (35, "now"), (39, "search"), (42, "settings"), (44, "light"), (46, "autoplay"), (58, "end")];
+        let plan: [(u64, &str); 14] = [(9, "play"), (13, "library"), (14, "scoff"), (15, "scon"), (16, "discover"), (24, "rediscover"), (27, "sets"), (31, "stats"), (35, "now"), (39, "search"), (42, "settings"), (44, "light"), (46, "autoplay"), (58, "end")];
         t.start(slint::TimerMode::Repeated, std::time::Duration::from_millis(250), move || {
             let Some(&(at, what)) = plan.get(step_no) else { return };
             if started.elapsed().as_secs() < at { return; }
@@ -1477,6 +1552,9 @@ fn main() -> Result<(), slint::PlatformError> {
             step_no += 1;
             match what {
                 "play" => { if ui.get_rows().row_count() > 0 { ui.invoke_play_row(0); } }
+                // SoundCloud switched off (and Streamer Mode on), then back
+                "scoff" => { ui.invoke_plat_toggle("soundcloud".into()); ui.set_streamer(true); println!("selftest: soundcloud off, {} rows", ui.get_rows().row_count()); }
+                "scon" => { ui.invoke_plat_toggle("soundcloud".into()); ui.set_streamer(false); println!("selftest: soundcloud on, {} rows", ui.get_rows().row_count()); }
                 // a light theme with a tint, for its picture
                 "light" => {
                     ui.invoke_look_changed("themeStep".into(), 0.0);
