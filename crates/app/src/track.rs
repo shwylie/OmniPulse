@@ -49,6 +49,8 @@ impl Track {
             dur: fmt_ms(self.ms).into(),
             plat: self.plat().into(),
             playing,
+            head: Default::default(),
+            auto: false,
         }
     }
 
@@ -114,6 +116,18 @@ impl Track {
             art: t.thumb.clone(),
             genre: String::new(),
         }
+    }
+
+    /// The same saved form, for the session (read back with from_snapshot)
+    pub fn to_snapshot(&self) -> Value {
+        let mut s = serde_json::json!({
+            "id": self.key, "source": self.plat(), "title": self.title, "displayArtist": self.artist,
+            "album": self.album, "duration": self.ms, "artwork_url": self.art, "genre": self.genre,
+        });
+        if let Src::Spotify(uri) = &self.src {
+            s["uri"] = serde_json::json!(uri);
+        }
+        s
     }
 
     /// The web app's saved form of a track (favourites, its own playlists, YouTube Music likes)

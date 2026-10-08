@@ -1,7 +1,7 @@
 // OmniPulse, native: the window, title bar, sidebar, pages, queue and player bar.
 // Colours, sizes and icons follow the web app's dark theme (dist/style.css).
 
-import { ListView, Slider, LineEdit, ScrollView } from "std-widgets.slint";
+import { ListView, Slider, LineEdit, ScrollView, Switch } from "std-widgets.slint";
 
 export global Theme {
     out property <color> bg: #08090c;
@@ -16,7 +16,7 @@ export global Theme {
     out property <length> radius: 10px;
 }
 
-export struct Row { title: string, artist: string, album: string, dur: string, plat: string, playing: bool }
+export struct Row { title: string, artist: string, album: string, dur: string, plat: string, playing: bool, head: string, auto: bool }
 export struct Side { title: string, plat: string }
 export struct Tile { title: string, sub: string, art: image, plat: string }
 export struct Shelf { title: string, tiles: [Tile] }
@@ -103,6 +103,7 @@ component TrackRow inherits Rectangle {
     in property <Row> item;
     in property <int> index;
     callback play();
+    callback act(string);
     height: 56px;
     border-radius: 6px;
     background: ta.has-hover ? Theme.elevated : transparent;
@@ -121,7 +122,13 @@ component TrackRow inherits Rectangle {
         Text { text: root.item.album; width: 28%; color: Theme.muted; font-size: 13px; overflow: elide; vertical-alignment: center; }
         Text { text: root.item.dur; width: 52px; color: Theme.muted; font-size: 13px; horizontal-alignment: right; vertical-alignment: center; }
     }
-    ta := TouchArea { clicked => { root.play(); } }
+    ContextMenuArea {
+        Menu {
+            MenuItem { title: "Play Next"; activated => { root.act("next"); } }
+            MenuItem { title: "Add to Queue"; activated => { root.act("add"); } }
+        }
+        ta := TouchArea { clicked => { root.play(); } }
+    }
 }
 
 component Cover inherits Rectangle {
@@ -219,6 +226,8 @@ export component AppWindow inherits Window {
     in property <string> dur-text: "0:00";
     in-out property <float> volume: 80;
     in-out property <bool> queue-open: false;
+    in-out property <bool> autoplay: true;
+    in property <string> autoplay-note;
     in property <bool> is-max;
 
     callback nav(string);
@@ -229,6 +238,10 @@ export component AppWindow inherits Window {
     callback lucky();
     callback search(string);
     callback play-queue(int);
+    callback row-action(int, string);
+    callback queue-action(int, string);
+    callback shuffle();
+    callback autoplay-changed(bool);
     callback toggle();
     callback next();
     callback prev();
@@ -319,17 +332,18 @@ export component AppWindow inherits Window {
                     }
                     if root.page-kind != "now": Text { text: root.page-title; color: Theme.text; font-size: 38px; font-weight: 800; overflow: elide; }
                     if root.page-kind != "now" && root.page-sub != "": Text { text: root.page-sub; color: Theme.muted; font-size: 13px; overflow: elide; }
-                    if root.chips.length > 0: HorizontalLayout {
+                    if root.chips.length > 0 || (root.page-kind == "tracks" && root.rows.length > 1): HorizontalLayout {
                         alignment: start;
                         spacing: 8px;
                         padding-top: 4px;
+                        if root.page-kind == "tracks" && root.rows.length > 1: Chip { label: "Shuffle"; on: true; clicked => { root.shuffle(); } }
                         for c[i] in root.chips: Chip { label: c; on: root.chip-on == i; clicked => { root.chip(i); } }
                     }
                     Rectangle { height: 4px; }
                     // a list of tracks (Library, playlists, Search, Favourites, Sets, Rediscover)
                     if root.page-kind == "tracks": ListView {
                         vertical-stretch: 1;
-                        for r[i] in root.rows: TrackRow { item: r; index: i; play => { root.play-row(i); } }
+                        for r[i] in root.rows: TrackRow { item: r; index: i; play => { root.play-row(i); } act(a) => { root.row-action(i, a); } }
                     }
                     // Discover: shelves
                     if root.page-kind == "discover": ScrollView {
@@ -545,24 +559,40 @@ export component AppWindow inherits Window {
                 VerticalLayout {
                     padding: 16px;
                     spacing: 8px;
-                    Text { text: "Queue"; color: Theme.text; font-size: 18px; font-weight: 800; }
+                    HorizontalLayout {
+                        Text { text: "Queue"; color: Theme.text; font-size: 18px; font-weight: 800; vertical-alignment: center; horizontal-stretch: 1; }
+                        Text { text: "Autoplay"; color: Theme.muted; font-size: 12px; vertical-alignment: center; }
+                        Switch { checked <=> root.autoplay; toggled => { root.autoplay-changed(self.checked); } }
+                    }
+                    if root.autoplay-note != "": Text { text: root.autoplay-note; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
+                    if root.queue-rows.length == 0: Text { text: "Nothing queued. Play something, or right-click a track to add it."; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
                     ListView {
                         vertical-stretch: 1;
-                        for q[i] in root.queue-rows: Rectangle {
-                            height: 48px;
-                            border-radius: 6px;
-                            background: qta.has-hover ? Theme.elevated : transparent;
-                            HorizontalLayout {
-                                padding-left: 6px;
-                                spacing: 10px;
-                                PlatIcon { plat: q.plat; width: 16px; height: 16px; y: (parent.height - self.height) / 2; }
-                                VerticalLayout {
-                                    alignment: center;
-                                    Text { text: q.title; color: q.playing ? Theme.accent : Theme.text; font-weight: 600; font-size: 13px; overflow: elide; }
-                                    Text { text: q.artist; color: Theme.muted; font-size: 12px; overflow: elide; }
+                        for q[i] in root.queue-rows: VerticalLayout {
+                            if q.head != "": Text { text: q.head; color: Theme.muted; font-size: 11px; font-weight: 800; letter-spacing: 1px; height: 26px; vertical-alignment: bottom; }
+                            Rectangle {
+                                height: 48px;
+                                border-radius: 6px;
+                                background: qta.has-hover ? Theme.elevated : transparent;
+                                HorizontalLayout {
+                                    padding-left: 6px;
+                                    spacing: 10px;
+                                    PlatIcon { plat: q.plat; width: 16px; height: 16px; y: (parent.height - self.height) / 2; opacity: q.auto ? 0.7 : 1; }
+                                    VerticalLayout {
+                                        alignment: center;
+                                        Text { text: q.title; color: q.playing ? Theme.accent : Theme.text; font-weight: 600; font-size: 13px; overflow: elide; }
+                                        Text { text: q.artist; color: Theme.muted; font-size: 12px; overflow: elide; }
+                                    }
+                                }
+                                ContextMenuArea {
+                                    Menu {
+                                        if !q.playing: MenuItem { title: "Play Next"; activated => { root.queue-action(i, "next"); } }
+                                        if !q.playing: MenuItem { title: "Remove from Queue"; activated => { root.queue-action(i, "remove"); } }
+                                        MenuItem { title: "Shuffle Next Up"; activated => { root.queue-action(i, "shuffle"); } }
+                                    }
+                                    qta := TouchArea { clicked => { root.play-queue(i); } }
                                 }
                             }
-                            qta := TouchArea { clicked => { root.play-queue(i); } }
                         }
                     }
                 }

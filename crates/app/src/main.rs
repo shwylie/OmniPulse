@@ -6,6 +6,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod player;
+mod queue;
 mod sources;
 mod track;
 mod webstate;
@@ -42,8 +43,18 @@ struct App {
     page_tracks: Vec<Track>,
     chip: usize,
     shelves: Vec<Vec<Track>>,
-    queue: Vec<Track>,
-    qi: Option<usize>,
+    queue: queue::Queue,
+    /// the queue panel's rows: their place in the queue
+    panel_map: Vec<usize>,
+    autoplay: bool,
+    ap_busy: bool,
+    ap_then_play: bool,
+    /// the track autoplay last came up empty for, so it doesn't keep asking
+    ap_failed: Option<String>,
+    /// a restored session: where to start its track when it's played
+    resume_ms: Option<u64>,
+    /// something has been loaded into the engine (not just restored)
+    loaded: bool,
     token: u64,
     lyrics: Vec<player::Line>,
     /// listening to this track: (its key, seconds heard, counted yet)
@@ -57,17 +68,6 @@ fn now_ms() -> u64 {
     omnipulse_core::now_secs() * 1000
 }
 
-fn shuffle<T>(v: &mut [T]) {
-    // a small xorshift, seeded by the clock: no dependency for something this simple
-    let mut x = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos() as u64).unwrap_or(7) | 1;
-    for i in (1..v.len()).rev() {
-        x ^= x << 13;
-        x ^= x >> 7;
-        x ^= x << 17;
-        v.swap(i, (x % (i as u64 + 1)) as usize);
-    }
-}
-
 // ---------- pages ----------
 fn apply_filter(app: &mut App) {
     let chip = app.chip;
@@ -76,7 +76,7 @@ fn apply_filter(app: &mut App) {
         ("library" | "rediscover" | "favourites" | "search" | "playlist", 2) => app.page_all.iter().filter(|t| t.is_mix()).cloned().collect(),
         _ => app.page_all.clone(),
     };
-    let playing = app.qi.and_then(|i| app.queue.get(i)).map(|t| t.key.clone()).unwrap_or_default();
+    let playing = app.queue.current().map(|t| t.key.clone()).unwrap_or_default();
     app.rows.set_vec(filtered.iter().map(|t| t.row(t.key == playing)).collect::<Vec<_>>());
     app.page_tracks = filtered;
 }
@@ -148,7 +148,7 @@ fn open_page(shared: &Shared, page: &str) {
             let (mut pool, lp) = { let a = shared.borrow(); (a.library.clone(), a.web.last_played.clone()) };
             let cut = now_ms().saturating_sub(MONTH_MS);
             pool.retain(|t| lp.get(&t.key).copied().unwrap_or(0) < cut);
-            shuffle(&mut pool);
+            queue::shuffle_in_place(&mut pool);
             pool.sort_by_key(|t| lp.get(&t.key).copied().unwrap_or(0));   // never played first
             let sub = if pool.is_empty() { "You've played all your likes recently.".to_string() } else { "Likes you haven't heard in a month or more, the longest-forgotten first.".to_string() };
             show_tracks(shared, "rediscover", "Rediscover", sub, pool, true);
@@ -233,7 +233,7 @@ fn open_discover(shared: &Shared) {
         let top = top_lately(&a.web, &a.library, 30, 20);
         let cut = now_ms().saturating_sub(MONTH_MS);
         let mut f: Vec<Track> = a.library.iter().filter(|t| a.web.last_played.get(&t.key).copied().unwrap_or(0) < cut && !t.is_mix()).cloned().collect();
-        shuffle(&mut f);
+        queue::shuffle_in_place(&mut f);
         f.truncate(20);
         (a.library.clone(), top, f, a.rt.clone(), a.ui.clone(), a.token)
     };
@@ -242,10 +242,10 @@ fn open_discover(shared: &Shared) {
         let mut seeds: Vec<Track> = top.iter().take(6).cloned().collect();
         if seeds.len() < 2 {
             let mut l: Vec<Track> = library.iter().filter(|t| !t.is_mix()).cloned().collect();
-            shuffle(&mut l);
+            queue::shuffle_in_place(&mut l);
             seeds = l.into_iter().take(6).collect();
         }
-        shuffle(&mut seeds);
+        queue::shuffle_in_place(&mut seeds);
         let s1 = seeds.first().cloned();
         let s2 = seeds.iter().find(|t| s1.as_ref().is_none_or(|a| a.artist != t.artist)).cloned();
         let rel = |s: Option<Track>| async move { match s { Some(t) => (format!("Because you like {}", t.artist), sources::related(&t).await), None => (String::new(), Vec::new()) } };
@@ -385,7 +385,7 @@ fn open_stats(shared: &Shared, period: usize) {
         let days_ago = (now.saturating_sub(first.ts)) / 86_400_000;
         facts.push(format!("Since the start: your listening here goes back {}.", plural(days_ago as usize, "day", "days")));
     }
-    shuffle(&mut facts);
+    queue::shuffle_in_place(&mut facts);
     facts.truncate(2);
     ui.set_st_facts(ModelRc::from(Rc::new(VecModel::from(facts.into_iter().map(Into::into).collect::<Vec<slint::SharedString>>()))));
     // covers
@@ -442,36 +442,76 @@ fn windows_offset() -> i64 {
     0
 }
 
+// ---------- the queue panel ----------
+fn paint_queue(a: &mut App) {
+    let panel = a.queue.panel();
+    let map: Vec<usize> = panel.iter().map(|p| p.0).collect();
+    let rows: Vec<Row> = panel
+        .iter()
+        .map(|(i, q, head)| {
+            let mut r = q.t.row(Some(*i) == a.queue.qi);
+            r.head = (*head).into();
+            r.auto = q.auto;
+            r
+        })
+        .collect();
+    a.panel_map = map;
+    a.qrows.set_vec(rows);
+    if let Some(ui) = a.ui.upgrade() {
+        ui.set_autoplay(a.autoplay);
+        ui.set_autoplay_note(autoplay_note(a).into());
+    }
+}
+
+fn autoplay_note(a: &App) -> String {
+    if !a.autoplay {
+        "Off: playback stops at the end of your queue.".into()
+    } else if a.ap_busy {
+        "Finding similar tracks...".into()
+    } else if a.ap_failed.is_some() && a.ap_failed.as_deref() == a.queue.current().map(|t| t.key.as_str()) {
+        "Autoplay couldn't find anything similar to this track.".into()
+    } else {
+        String::new()
+    }
+}
+
+fn save_session(a: &App) {
+    let pos = a.resume_ms.unwrap_or_else(|| a.engine.position_ms());
+    let mut v = a.queue.to_session(pos);
+    v["autoplay"] = serde_json::json!(a.autoplay);
+    queue::save_session(&v);
+}
+
 // ---------- playing ----------
 fn start(shared: &Shared) {
-    let (t, token, engine, rt, weak) = {
+    let (t, token, engine, rt, weak, resume) = {
         let mut a = shared.borrow_mut();
-        let Some(i) = a.qi else { return };
-        let Some(t) = a.queue.get(i).cloned() else { return };
+        let Some(t) = a.queue.current().cloned() else { return };
         a.token += 1;
         a.heard = (t.key.clone(), 0.0, false);
         a.last_pos = 0;
         a.lyrics.clear();
-        (t, a.token, a.engine.clone(), a.rt.clone(), a.ui.clone())
+        a.loaded = true;
+        let resume = a.resume_ms.take().filter(|&ms| ms > 3000 && (t.ms == 0 || ms + 3000 < t.ms)).unwrap_or(0);
+        paint_queue(&mut a);
+        save_session(&a);
+        (t, a.token, a.engine.clone(), a.rt.clone(), a.ui.clone(), resume)
     };
     let ui = weak.upgrade().unwrap();
-    ui.set_now_title(t.title.clone().into());
-    ui.set_now_artist(t.artist.clone().into());
-    ui.set_now_album(t.album.clone().into());
-    ui.set_now_plat(t.plat().into());
-    ui.set_now_art(slint::Image::default());
-    ui.set_now_art_big(slint::Image::default());
+    show_now(&ui, &t);
     ui.set_status(format!("Loading \"{}\"...", t.title).into());
     ui.set_lyrics_note("Looking for lyrics...".into());
     ui.set_lyric_on(-1);
     {
         let a = shared.borrow();
         a.lyric_lines.set_vec(Vec::new());
-        a.qrows.set_vec(a.queue.iter().enumerate().map(|(k, x)| x.row(Some(k) == a.qi)).collect::<Vec<_>>());
         for k in 0..a.rows.row_count() {
             if let (Some(mut r), Some(x)) = (a.rows.row_data(k), a.page_tracks.get(k)) {
                 let on = x.key == t.key;
-                if r.playing != on { r.playing = on; a.rows.set_row_data(k, r); }
+                if r.playing != on {
+                    r.playing = on;
+                    a.rows.set_row_data(k, r);
+                }
             }
         }
     }
@@ -483,10 +523,15 @@ fn start(shared: &Shared) {
         let _ = weak.upgrade_in_event_loop(move |ui| {
             SHARED.with(|s| {
                 let Some(shared) = s.borrow().clone() else { return };
-                if shared.borrow().token != token { return; }
+                if shared.borrow().token != token {
+                    return;
+                }
                 match src {
                     Ok(src) => {
                         engine.load(src, 0.0);
+                        if resume > 0 {
+                            engine.seek(resume);
+                        }
                         engine.play();
                         ui.set_playing(true);
                         ui.set_status("".into());
@@ -502,7 +547,9 @@ fn start(shared: &Shared) {
         let _ = weak2.upgrade_in_event_loop(move |ui| {
             SHARED.with(|s| {
                 let Some(shared) = s.borrow().clone() else { return };
-                if shared.borrow().token < token { return; }
+                if shared.borrow().token < token {
+                    return;
+                }
                 if let Some(px) = art {
                     let img = slint::Image::from_rgba8(px);
                     ui.set_now_art(img.clone());
@@ -517,11 +564,28 @@ fn start(shared: &Shared) {
     });
 }
 
+/// The player bar's track, without playing it (a restored session shows it paused)
+fn show_now(ui: &AppWindow, t: &Track) {
+    ui.set_now_title(t.title.clone().into());
+    ui.set_now_artist(t.artist.clone().into());
+    ui.set_now_album(t.album.clone().into());
+    ui.set_now_plat(t.plat().into());
+    ui.set_now_art(slint::Image::default());
+    ui.set_now_art_big(slint::Image::default());
+}
+
+/// Playing from a page: a list (Library, a playlist...) becomes the queue; one track from Search
+/// takes the current one's place and leaves the rest of the queue as it was
 fn play_list(shared: &Shared, list: Vec<Track>, i: usize) {
     {
         let mut a = shared.borrow_mut();
-        a.queue = list.into_iter().skip(i).take(500).collect();
-        a.qi = Some(0);
+        if a.page == "search" {
+            let Some(t) = list.get(i).cloned() else { return };
+            a.queue.replace_current(t);
+        } else {
+            a.queue.set_list(list, i);
+        }
+        a.ap_failed = None;
     }
     start(shared);
 }
@@ -534,33 +598,124 @@ fn step(shared: &Shared, d: i32) {
     }
     let next = {
         let a = shared.borrow();
-        a.qi.map(|i| i as i32 + d).filter(|&n| n >= 0 && (n as usize) < a.queue.len())
+        a.queue.qi.map(|i| i as i32 + d).filter(|&n| n >= 0 && (n as usize) < a.queue.items.len())
     };
     match next {
         Some(n) => {
-            shared.borrow_mut().qi = Some(n as usize);
+            shared.borrow_mut().queue.qi = Some(n as usize);
             start(shared);
         }
-        None if d > 0 => {
+        // the end of the queue: autoplay adds some, then carries on
+        None if d > 0 && !autoplay_fill(shared, true) => {
             engine.stop();
-            if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_playing(false); }
+            if let Some(ui) = shared.borrow().ui.upgrade() {
+                ui.set_playing(false);
+            }
         }
         None => {}
     }
 }
 
-// four times a second: the position, the lyric being sung, counting the play, the track's end
-fn tick(shared: &Shared, events: &std::sync::mpsc::Receiver<Event>) {
+// ---------- autoplay ----------
+fn pref_on(prefs: &serde_json::Value, key: &str) -> bool {
+    prefs[key].as_bool() != Some(false)
+}
+
+/// Adds a batch of similar tracks after the queue (`then_play`: and moves on to them). False if
+/// autoplay won't (off, or it came up empty for this track already).
+fn autoplay_fill(shared: &Shared, then_play: bool) -> bool {
+    let (seed, rt, weak, local, last_plat, taken, prefs, last_played) = {
+        let mut a = shared.borrow_mut();
+        let Some(seed) = a.queue.current().cloned() else { return false };
+        if !a.autoplay || a.ap_failed.as_deref() == Some(seed.key.as_str()) {
+            return false;
+        }
+        if a.ap_busy {
+            a.ap_then_play |= then_play;
+            return true;
+        }
+        a.ap_busy = true;
+        a.ap_then_play = then_play;
+        paint_queue(&mut a);
+        let local: Vec<Track> = a.library.iter().filter(|t| t.plat() == "local").cloned().collect();
+        let last_plat = a.queue.items.last().map(|q| q.t.plat()).unwrap_or("");
+        let taken: std::collections::HashSet<String> = a.queue.items.iter().map(|q| q.t.key.clone()).collect();
+        (seed, a.rt.clone(), a.ui.clone(), local, last_plat, taken, a.web.prefs.clone(), a.web.last_played.clone())
+    };
+    rt.spawn(async move {
+        let want = |p: &str, key: &str| pref_on(&prefs, key) && (p != "local" || !local.is_empty());
+        let (sc, sp, yt) = tokio::join!(
+            async { if want("soundcloud", "scOn") { sources::autoplay_soundcloud(&seed).await } else { Vec::new() } },
+            async { if want("spotify", "spOn") { sources::autoplay_spotify(&seed).await } else { Vec::new() } },
+            async { if want("youtube", "ytOn") { sources::autoplay_youtube(&seed).await } else { Vec::new() } },
+        );
+        let lc = if want("local", "localOn") { sources::autoplay_local(&seed, &local) } else { Vec::new() };
+        let lists = vec![("soundcloud", sc), ("spotify", sp), ("youtube", yt), ("local", lc)];
+        // sets & podcasts only if you've asked for them; nothing heard lately (Avoid Recent Plays),
+        // or if that leaves nothing, nothing from the last three hours
+        let sets = prefs["queueSets"].as_bool().unwrap_or(false);
+        let window = match prefs["recentWindow"].as_str() {
+            Some("day") => 86_400_000,
+            Some("month") => MONTH_MS,
+            _ => 7 * 86_400_000,
+        };
+        let avoid = pref_on(&prefs, "avoidRecent");
+        let now = now_ms();
+        let ok = |within: u64| {
+            let lp = &last_played;
+            move |t: &Track| (sets || !t.is_mix()) && !(avoid && lp.get(&t.key).is_some_and(|&ts| now.saturating_sub(ts) < within))
+        };
+        let mut picks = queue::take_turns(lists.clone(), last_plat, &taken, ok(window));
+        if picks.is_empty() && avoid {
+            picks = queue::take_turns(lists, last_plat, &taken, ok(3 * 3_600_000));
+        }
+        let _ = weak.upgrade_in_event_loop(move |_| {
+            SHARED.with(|s| {
+                let Some(shared) = s.borrow().clone() else { return };
+                let go = {
+                    let mut a = shared.borrow_mut();
+                    a.ap_busy = false;
+                    let then_play = std::mem::take(&mut a.ap_then_play);
+                    // you started something else meanwhile, or switched autoplay off
+                    if a.queue.current().map(|t| &t.key) != Some(&seed.key) || !a.autoplay {
+                        paint_queue(&mut a);
+                        return;
+                    }
+                    if picks.is_empty() {
+                        a.ap_failed = Some(seed.key.clone());
+                    }
+                    a.queue.items.extend(picks.into_iter().map(|t| queue::QItem { t, auto: true }));
+                    paint_queue(&mut a);
+                    save_session(&a);
+                    then_play && a.queue.qi.is_some_and(|i| i + 1 < a.queue.items.len())
+                };
+                if go {
+                    step(&shared, 1);
+                }
+            });
+        });
+    });
+    true
+}
+
+// four times a second: the position, the lyric being sung, counting the play, autoplay, the
+// session, the track's end
+fn tick(shared: &Shared, events: &std::sync::mpsc::Receiver<Event>, n: u64) {
     let Some(ui) = shared.borrow().ui.upgrade() else { return };
     let engine = shared.borrow().engine.clone();
+    if !shared.borrow().loaded {
+        return; // a restored session, not started yet: the bar shows where it was
+    }
     let (pos, dur) = (engine.position_ms(), engine.duration_ms());
     ui.set_pos_text(fmt_ms(pos).into());
     ui.set_dur_text(fmt_ms(dur).into());
     ui.set_pos_frac(if dur > 0 { (pos as f32 / dur as f32).min(1.0) } else { 0.0 });
-    {
+    let near_end = {
         let mut a = shared.borrow_mut();
         if let Some(i) = a.lyrics.iter().rposition(|l| l.ms > 0 && l.ms <= pos + 200) {
-            if ui.get_lyric_on() != i as i32 { ui.set_lyric_on(i as i32); }
+            if ui.get_lyric_on() != i as i32 {
+                ui.set_lyric_on(i as i32);
+            }
         }
         // a play counts after 30 s, or half of a short track (as in the web app)
         if !engine.is_paused() && pos > a.last_pos && pos - a.last_pos < 2000 {
@@ -570,11 +725,19 @@ fn tick(shared: &Shared, events: &std::sync::mpsc::Receiver<Event>) {
         let need = if dur > 0 { (dur as f32 / 2000.0).min(30.0) } else { 30.0 };
         if !a.heard.2 && a.heard.1 >= need {
             a.heard.2 = true;
-            if let Some(t) = a.qi.and_then(|i| a.queue.get(i)).cloned() {
+            if let Some(t) = a.queue.current().cloned() {
                 webstate::count_play(&t);
                 a.web.last_played.insert(t.key.clone(), now_ms());
             }
         }
+        if n.is_multiple_of(20) && !engine.is_paused() {
+            save_session(&a);
+        }
+        let last = a.queue.qi.is_some_and(|i| i + 1 >= a.queue.items.len());
+        last && dur > 0 && dur.saturating_sub(pos) <= queue::AUTOPLAY_LEAD_MS && !a.ap_busy
+    };
+    if near_end {
+        autoplay_fill(shared, false);
     }
     while let Ok(ev) = events.try_recv() {
         match ev {
@@ -582,6 +745,41 @@ fn tick(shared: &Shared, events: &std::sync::mpsc::Receiver<Event>) {
             Event::Error(e) => ui.set_status(e.into()),
         }
     }
+}
+
+/// Where you left off: the queue, and the track paused where it was. Play carries on.
+fn restore_session(shared: &Shared) {
+    if std::env::var_os("OMNIPULSE_SELFTEST").is_some() {
+        return; // the self-test starts from nothing
+    }
+    omnipulse_core::local::local_load_index();
+    let Some((q, pos)) = queue::load_session() else { return };
+    let autoplay = std::fs::read_to_string(omnipulse_core::data_dir().map(|d| d.join("state").join("native-session.json")).unwrap_or_default())
+        .ok()
+        .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok())
+        .and_then(|v| v["autoplay"].as_bool())
+        .unwrap_or(true);
+    let mut a = shared.borrow_mut();
+    a.queue = q;
+    a.autoplay = autoplay;
+    a.resume_ms = Some(pos);
+    paint_queue(&mut a);
+    let Some(t) = a.queue.current().cloned() else { return };
+    let Some(ui) = a.ui.upgrade() else { return };
+    show_now(&ui, &t);
+    ui.set_pos_text(fmt_ms(pos).into());
+    ui.set_dur_text(fmt_ms(t.ms).into());
+    ui.set_pos_frac(if t.ms > 0 { (pos as f32 / t.ms as f32).min(1.0) } else { 0.0 });
+    let (rt, weak, art) = (a.rt.clone(), a.ui.clone(), t.art.replace("-t200x200", "-t500x500"));
+    rt.spawn(async move {
+        if let Some(px) = player::fetch_art(art, 500).await {
+            let _ = weak.upgrade_in_event_loop(move |ui| {
+                let img = slint::Image::from_rgba8(px);
+                ui.set_now_art(img.clone());
+                ui.set_now_art_big(img);
+            });
+        }
+    });
 }
 
 fn main() -> Result<(), slint::PlatformError> {
@@ -604,11 +802,13 @@ fn main() -> Result<(), slint::PlatformError> {
     let shared: Shared = Rc::new(RefCell::new(App {
         rt: rt.handle().clone(), engine: engine.clone(), ui: ui.as_weak(), rows, qrows, lyric_lines,
         library: Vec::new(), playlists: Vec::new(), web: webstate::load(), page: "library".into(),
-        page_all: Vec::new(), page_tracks: Vec::new(), chip: 0, shelves: Vec::new(), queue: Vec::new(), qi: None, token: 0,
+        page_all: Vec::new(), page_tracks: Vec::new(), chip: 0, shelves: Vec::new(), queue: queue::Queue::default(), panel_map: Vec::new(),
+        autoplay: true, ap_busy: false, ap_then_play: false, ap_failed: None, resume_ms: None, loaded: false, token: 0,
         lyrics: Vec::new(), heard: (String::new(), 0.0, false), last_pos: 0,
     }));
     SHARED.with(|s| *s.borrow_mut() = Some(shared.clone()));
     ui.set_page_sub("Loading your Library...".into());
+    restore_session(&shared);
 
     // the Library and your playlists, in the background
     {
@@ -680,7 +880,7 @@ fn main() -> Result<(), slint::PlatformError> {
         let (seed, rt, weak) = {
             let a = s.borrow();
             let mut pool: Vec<Track> = a.library.iter().filter(|t| !t.is_mix()).cloned().collect();
-            shuffle(&mut pool);
+            queue::shuffle_in_place(&mut pool);
             (pool.into_iter().next(), a.rt.clone(), a.ui.clone())
         };
         let Some(seed) = seed else { return };
@@ -693,20 +893,79 @@ fn main() -> Result<(), slint::PlatformError> {
     });
     let s = shared.clone();
     ui.on_play_queue(move |i| {
-        s.borrow_mut().qi = Some(i as usize);
+        let at = s.borrow().panel_map.get(i as usize).copied();
+        if let Some(at) = at {
+            s.borrow_mut().queue.qi = Some(at);
+            start(&s);
+        }
+    });
+    let s = shared.clone();
+    ui.on_row_action(move |i, act| {
+        let mut a = s.borrow_mut();
+        let Some(t) = a.page_tracks.get(i as usize).cloned() else { return };
+        let empty = a.queue.current().is_none();
+        let title = t.title.clone();
+        if act == "next" { a.queue.play_next(t); } else { a.queue.add(t); }
+        paint_queue(&mut a);
+        save_session(&a);
+        if let Some(ui) = a.ui.upgrade() {
+            ui.set_status(format!("{} \"{title}\".", if act == "next" { "Playing next:" } else { "Added to the queue:" }).into());
+        }
+        drop(a);
+        if empty { start(&s); }
+    });
+    let s = shared.clone();
+    ui.on_queue_action(move |i, act| {
+        let mut a = s.borrow_mut();
+        let Some(at) = a.panel_map.get(i as usize).copied() else { return };
+        match act.as_str() {
+            "next" => a.queue.move_next(at),
+            "remove" => a.queue.remove(at),
+            _ => {
+                let lp = a.web.last_played.clone();
+                a.queue.shuffle_rest(&lp);
+            }
+        }
+        paint_queue(&mut a);
+        save_session(&a);
+    });
+    let s = shared.clone();
+    ui.on_shuffle(move || {
+        let list = {
+            let a = s.borrow();
+            queue::fair_shuffle(a.page_tracks.clone(), &a.web.last_played)
+        };
+        {
+            let mut a = s.borrow_mut();
+            a.queue.set_list(list, 0);
+            a.ap_failed = None;
+        }
         start(&s);
+    });
+    let s = shared.clone();
+    ui.on_autoplay_changed(move |on| {
+        let mut a = s.borrow_mut();
+        a.autoplay = on;
+        a.ap_failed = None;
+        if !on { a.queue.drop_autoplay(); }
+        paint_queue(&mut a);
+        save_session(&a);
     });
     let s = shared.clone();
     ui.on_next(move || step(&s, 1));
     let s = shared.clone();
     ui.on_prev(move || step(&s, -1));
-    ui.on_toggle({
-        let engine = engine.clone();
-        let weak = ui.as_weak();
-        move || {
-            let ui = weak.upgrade().unwrap();
-            if engine.is_paused() { engine.play(); ui.set_playing(true); } else { engine.pause(); ui.set_playing(false); }
+    let s = shared.clone();
+    ui.on_toggle(move || {
+        // a restored session starts on the first press, where it was
+        if !s.borrow().loaded {
+            start(&s);
+            return;
         }
+        let (engine, weak) = { let a = s.borrow(); (a.engine.clone(), a.ui.clone()) };
+        let ui = weak.upgrade().unwrap();
+        if engine.is_paused() { engine.play(); ui.set_playing(true); } else { engine.pause(); ui.set_playing(false); }
+        save_session(&s.borrow());
     });
     ui.on_seek({ let engine = engine.clone(); move |f| { let d = engine.duration_ms(); if d > 0 { engine.seek((f.clamp(0.0, 1.0) as f64 * d as f64) as u64); } } });
     ui.on_volume_changed({ let engine = engine.clone(); move |v| engine.set_volume(v) });
@@ -730,11 +989,19 @@ fn main() -> Result<(), slint::PlatformError> {
             ui.set_is_max(m);
         }
     });
-    ui.on_close_window(|| { let _ = slint::quit_event_loop(); });
+    let s = shared.clone();
+    ui.on_close_window(move || {
+        save_session(&s.borrow());
+        let _ = slint::quit_event_loop();
+    });
 
     let timer = slint::Timer::default();
     let s = shared.clone();
-    timer.start(slint::TimerMode::Repeated, std::time::Duration::from_millis(250), move || tick(&s, &events));
+    let mut n = 0u64;
+    timer.start(slint::TimerMode::Repeated, std::time::Duration::from_millis(250), move || {
+        n += 1;
+        tick(&s, &events, n);
+    });
 
     // OMNIPULSE_SELFTEST=<folder>: visits each page, plays the first track silently, saves a picture of
     // each page and quits (for checking the app without anyone at the screen)
@@ -745,7 +1012,7 @@ fn main() -> Result<(), slint::PlatformError> {
         let s = shared.clone();
         let started = std::time::Instant::now();
         let mut step_no = 0usize;
-        let plan: [(u64, &str); 9] = [(9, "play"), (13, "library"), (16, "discover"), (24, "rediscover"), (27, "sets"), (31, "stats"), (35, "now"), (39, "search"), (46, "end")];
+        let plan: [(u64, &str); 10] = [(9, "play"), (13, "library"), (16, "discover"), (24, "rediscover"), (27, "sets"), (31, "stats"), (35, "now"), (39, "search"), (46, "autoplay"), (58, "end")];
         t.start(slint::TimerMode::Repeated, std::time::Duration::from_millis(250), move || {
             let Some(&(at, what)) = plan.get(step_no) else { return };
             if started.elapsed().as_secs() < at { return; }
@@ -760,8 +1027,19 @@ fn main() -> Result<(), slint::PlatformError> {
             step_no += 1;
             match what {
                 "play" => { if ui.get_rows().row_count() > 0 { ui.invoke_play_row(0); } }
+                // the queue down to what's playing, so autoplay has to add some
+                "autoplay" => {
+                    {
+                        let mut a = s.borrow_mut();
+                        let keep = a.queue.qi.map_or(0, |i| i + 1);
+                        a.queue.items.truncate(keep);
+                    }
+                    autoplay_fill(&s, false);
+                    ui.set_queue_open(true);
+                }
                 "search" => { ui.set_search_text("deadmau5".into()); ui.invoke_search("deadmau5".into()); }
                 "end" => {
+                    println!("selftest: queue {} ({} autoplay), {}", s.borrow().queue.items.len(), s.borrow().queue.items.iter().filter(|q| q.auto).count(), ui.get_autoplay_note());
                     println!("selftest: library {} tracks, playlists {}, playing \"{}\" {} / {}, lyrics {}", s.borrow().library.len(), s.borrow().playlists.len(), ui.get_now_title(), ui.get_pos_text(), ui.get_dur_text(), s.borrow().lyrics.len());
                     let _ = slint::quit_event_loop();
                 }

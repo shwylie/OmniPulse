@@ -187,6 +187,109 @@ pub async fn related(t: &Track) -> Vec<Track> {
     }
 }
 
+// ---------- autoplay: tracks like the one playing, from each platform ----------
+async fn sc_search(q: &str, limit: usize) -> Vec<Track> {
+    core::soundcloud::api_get(format!("/tracks?q={}&limit={limit}&access=playable&linked_partitioning=true", urlencode(q))).await.map(|v| items(&v).iter().filter_map(Track::soundcloud).collect()).unwrap_or_default()
+}
+
+async fn sp_search(q: &str) -> Vec<Track> {
+    core::spotify::spotify_api("GET".into(), format!("/search?type=track&limit=10&market=from_token&q={}", urlencode(q)), None)
+        .await
+        .map(|v| v["tracks"]["items"].as_array().cloned().unwrap_or_default().iter().filter_map(Track::spotify).collect())
+        .unwrap_or_default()
+}
+
+/// Artists like this one, from Last.fm (Spotify no longer offers related artists)
+async fn similar_artists(artist: &str, n: usize) -> Vec<String> {
+    core::lastfm::lastfm_call("artist.getSimilar".into(), vec![("artist".into(), artist.into()), ("limit".into(), n.to_string())])
+        .await
+        .ok()
+        .and_then(|v| v["similarartists"]["artist"].as_array().map(|a| a.iter().filter_map(|x| x["name"].as_str().map(String::from)).collect()))
+        .unwrap_or_default()
+}
+
+fn first_artist(t: &Track) -> String {
+    t.artist.split([',', '&']).next().unwrap_or("").trim().to_string()
+}
+
+pub async fn autoplay_soundcloud(seed: &Track) -> Vec<Track> {
+    if !core::soundcloud::signed_in() {
+        return Vec::new();
+    }
+    let mut out = match &seed.src {
+        Src::SoundCloud(_) => related(seed).await,
+        _ => match sc_search(&format!("{} {}", first_artist(seed), seed.title), 5).await.into_iter().next() {
+            Some(found) => related(&found).await,
+            None => Vec::new(),
+        },
+    };
+    crate::queue::shuffle_in_place(&mut out);
+    out
+}
+
+pub async fn autoplay_spotify(seed: &Track) -> Vec<Track> {
+    if !core::spotify::spotify_signed_in() {
+        return Vec::new();
+    }
+    let artist = first_artist(seed);
+    if artist.is_empty() {
+        return Vec::new();
+    }
+    let mut names = similar_artists(&artist, 10).await;
+    crate::queue::shuffle_in_place(&mut names);
+    names.truncate(4);
+    if names.is_empty() {
+        names.push(artist);
+    }
+    let lists = futures_join_all(names.iter().map(|n| sp_search_owned(format!("artist:\"{}\"", n.replace('"', ""))))).await;
+    let mut out: Vec<Track> = lists.into_iter().flatten().collect();
+    crate::queue::shuffle_in_place(&mut out);
+    out
+}
+
+async fn sp_search_owned(q: String) -> Vec<Track> {
+    sp_search(&q).await
+}
+
+/// A few futures at once, without another dependency
+async fn futures_join_all<F: std::future::Future<Output = Vec<Track>> + Send + 'static>(futs: impl Iterator<Item = F>) -> Vec<Vec<Track>> {
+    let handles: Vec<_> = futs.map(tokio::spawn).collect();
+    let mut out = Vec::new();
+    for h in handles {
+        out.push(h.await.unwrap_or_default());
+    }
+    out
+}
+
+pub async fn autoplay_youtube(seed: &Track) -> Vec<Track> {
+    let mut out = match &seed.src {
+        Src::YouTube(_) => related(seed).await,
+        _ => {
+            let q = format!("{} {}", first_artist(seed), seed.title);
+            match core::youtube::search(&q).await.ok().and_then(|l| l.into_iter().next()) {
+                Some(first) => core::youtube::radio(&first.id).await.map(|l| l.iter().map(Track::youtube).skip(1).collect()).unwrap_or_default(),
+                None => Vec::new(),
+            }
+        }
+    };
+    crate::queue::shuffle_in_place(&mut out);
+    out
+}
+
+/// Your files: the same artist, the same album, then anything
+pub fn autoplay_local(seed: &Track, local: &[Track]) -> Vec<Track> {
+    let who = first_artist(seed).to_lowercase();
+    let mut same: Vec<Track> = local.iter().filter(|t| first_artist(t).to_lowercase() == who).cloned().collect();
+    let mut album: Vec<Track> = if seed.album.is_empty() { Vec::new() } else { local.iter().filter(|t| t.album == seed.album).cloned().collect() };
+    let mut rest = local.to_vec();
+    crate::queue::shuffle_in_place(&mut same);
+    crate::queue::shuffle_in_place(&mut album);
+    crate::queue::shuffle_in_place(&mut rest);
+    same.extend(album);
+    same.extend(rest);
+    same
+}
+
 fn urlencode(s: &str) -> String {
     s.bytes()
         .map(|b| match b {
