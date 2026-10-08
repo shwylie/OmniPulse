@@ -286,7 +286,6 @@ mod config_tests {
         let tmp = std::env::temp_dir().join(format!("omnipulse-cfg-{}", std::process::id()));
         let _ = fs::remove_dir_all(&tmp);
         fs::create_dir_all(tmp.join("sc-client")).unwrap();
-        std::env::set_var("APPDATA", &tmp);
         let theirs = bundled::soundcloud();
         let mut old = serde_json::json!({ "spotify_client_id": "mine", "discord_client_id": bundled::DISCORD_CLIENT_ID });
         if let Some((id, secret, _)) = &theirs {
@@ -295,6 +294,8 @@ mod config_tests {
         }
         fs::write(tmp.join("sc-client").join("config.json"), old.to_string()).unwrap();
         fs::write(tmp.join("sc-client").join("tokens.json"), "{}").unwrap();
+        // (only now: other tests read the data folder, and would move it half-made)
+        std::env::set_var("APPDATA", &tmp);
 
         let dir = data_dir().unwrap();
         assert_eq!(dir, tmp.join("OmniPulse"));
