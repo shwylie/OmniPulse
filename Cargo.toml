@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["src-tauri", "crates/core", "crates/audio", "crates/input", "crates/pcmout"]
+members = ["src-tauri", "crates/core", "crates/audio", "crates/input", "crates/pcmout", "crates/app"]
 
 [profile.release]
 opt-level = "s"

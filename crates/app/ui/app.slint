@@ -1,0 +1,328 @@
+// OmniPulse, native: the window, title bar, sidebar, Library list, queue and player bar.
+// Colours, sizes and icons follow the web app's dark theme (dist/style.css).
+
+import { ListView, Slider } from "std-widgets.slint";
+
+export global Theme {
+    out property <color> bg: #08090c;
+    out property <color> panel: #111318;
+    out property <color> elevated: #1a1d25;
+    out property <color> line: #262a35;
+    out property <color> text: #e9ebf2;
+    out property <color> muted: #9097a8;
+    out property <color> accent: #8e9bff;
+    out property <color> on-accent: #111318;
+    out property <length> radius: 10px;
+}
+
+export struct Row {
+    title: string,
+    artist: string,
+    album: string,
+    dur: string,
+    plat: string,
+    playing: bool,
+}
+
+// the platform logos, as in the web app (24x24 paths)
+global Icons {
+    out property <string> play: "M8 5v14l11-7z";
+    out property <string> pause: "M6 19h4V5H6v14zm8-14v14h4V5h-4z";
+    out property <string> next: "M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z";
+    out property <string> prev: "M6 6h2v12H6zm3.5 6l8.5 6V6z";
+    out property <string> queue: "M4 5h16v3H4zm0 5.5h16v3H4zM4 16h16v3H4z";
+    out property <string> library: "M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z";
+    out property <string> discover: "M12 2a10 10 0 100 20 10 10 0 000-20zm2.19 12.19L6 18l3.81-8.19L18 6l-3.81 8.19zM12 10.9a1.1 1.1 0 100 2.2 1.1 1.1 0 000-2.2z";
+    out property <string> soundcloud: "M1 14.5c0-1.1.8-2 1.9-2.1.4-2.5 2.5-4.4 5.1-4.4.6 0 1.2.1 1.7.3C10.6 6.4 12.6 5 15 5c3.3 0 6 2.7 6 6 0 .2 0 .4-.1.6.7.5 1.1 1.3 1.1 2.2 0 1.5-1.2 2.7-2.7 2.7H3.6C2.2 16.5 1 15.6 1 14.5z";
+    out property <string> spotify: "M12 2a10 10 0 100 20 10 10 0 000-20zm4.6 14.4c-.2.3-.6.4-.9.2-2.5-1.5-5.6-1.9-9.3-1-.3.1-.7-.1-.8-.5-.1-.3.1-.7.5-.8 4-.9 7.5-.5 10.3 1.2.3.2.4.6.2.9zm1.2-2.7c-.2.4-.7.5-1.1.3-2.9-1.8-7.2-2.3-10.6-1.2-.4.1-.9-.1-1-.5-.1-.4.1-.9.5-1 3.9-1.2 8.7-.6 12 1.4.4.2.5.7.2 1zm.1-2.8C14.5 8.8 8.9 8.6 5.6 9.6c-.5.2-1.1-.1-1.2-.6-.2-.5.1-1.1.6-1.2 3.8-1.1 10-.9 13.9 1.4.5.3.6.9.4 1.4-.3.4-.9.6-1.4.3z";
+    out property <string> youtube: "M12 2a10 10 0 100 20 10 10 0 000-20zm-2 14.5v-9l6 4.5-6 4.5z";
+    out property <string> local: "M10 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z";
+}
+
+component Glyph inherits Path {
+    in property <string> d;
+    commands: d;
+    viewbox-width: 24;
+    viewbox-height: 24;
+    stroke-width: 0;
+}
+
+component IconButton inherits Rectangle {
+    in property <string> d;
+    in property <length> size: 36px;
+    in property <bool> filled: false;
+    in property <color> tint: Theme.muted;
+    callback clicked;
+    width: size;
+    height: size;
+    border-radius: size / 2;
+    background: filled ? Theme.accent : (ta.has-hover ? Theme.elevated : transparent);
+    Glyph {
+        d: root.d;
+        width: root.size * 0.55;
+        height: root.size * 0.55;
+        fill: filled ? Theme.on-accent : (ta.has-hover ? Theme.text : root.tint);
+    }
+    ta := TouchArea { clicked => { root.clicked(); } }
+}
+
+component PlatIcon inherits Glyph {
+    in property <string> plat;
+    d: plat == "spotify" ? Icons.spotify : plat == "youtube" ? Icons.youtube : plat == "local" ? Icons.local : Icons.soundcloud;
+    fill: Theme.muted;
+}
+
+component NavItem inherits Rectangle {
+    in property <string> label;
+    in property <string> d;
+    in property <bool> active;
+    callback clicked;
+    height: 40px;
+    border-radius: 8px;
+    background: active ? Theme.elevated : (ta.has-hover ? #ffffff08 : transparent);
+    HorizontalLayout {
+        padding-left: 12px;
+        spacing: 12px;
+        Glyph { d: root.d; width: 20px; height: 20px; y: (parent.height - self.height) / 2; fill: active ? Theme.text : Theme.muted; }
+        Text { text: root.label; color: active ? Theme.text : Theme.muted; font-size: 14px; font-weight: active ? 700 : 500; vertical-alignment: center; }
+    }
+    ta := TouchArea { clicked => { root.clicked(); } }
+}
+
+component TrackRow inherits Rectangle {
+    in property <Row> item;
+    in property <int> index;
+    callback play();
+    height: 56px;
+    border-radius: 6px;
+    background: ta.has-hover ? Theme.elevated : transparent;
+    HorizontalLayout {
+        padding-left: 8px;
+        padding-right: 12px;
+        spacing: 12px;
+        Text { text: index + 1; width: 32px; color: root.item.playing ? Theme.accent : Theme.muted; horizontal-alignment: right; vertical-alignment: center; font-size: 13px; }
+        PlatIcon { plat: root.item.plat; width: 18px; height: 18px; y: (parent.height - self.height) / 2; }
+        VerticalLayout {
+            alignment: center;
+            spacing: 2px;
+            Text { text: root.item.title; color: root.item.playing ? Theme.accent : Theme.text; font-weight: 700; font-size: 14px; overflow: elide; }
+            Text { text: root.item.artist; color: Theme.muted; font-size: 13px; overflow: elide; }
+        }
+        Text { text: root.item.album; width: 30%; color: Theme.muted; font-size: 13px; overflow: elide; vertical-alignment: center; }
+        Text { text: root.item.dur; width: 48px; color: Theme.muted; font-size: 13px; horizontal-alignment: right; vertical-alignment: center; }
+    }
+    ta := TouchArea { double-clicked => { root.play(); } clicked => { root.play(); } }
+}
+
+export component AppWindow inherits Window {
+    title: "OmniPulse";
+    no-frame: true;
+    background: Theme.bg;
+    preferred-width: 1180px;
+    preferred-height: 760px;
+    min-width: 820px;
+    min-height: 520px;
+    default-font-family: "Segoe UI Variable Text";
+
+    in property <[Row]> rows;
+    in property <[Row]> queue-rows;
+    in property <string> page-title: "Library";
+    in property <string> page-sub;
+    in property <string> page: "library";
+    in property <string> status;
+    in property <string> now-title: "Nothing playing";
+    in property <string> now-artist;
+    in property <string> now-plat;
+    in property <image> now-art;
+    in property <bool> playing;
+    in property <float> pos-frac;
+    in property <string> pos-text: "0:00";
+    in property <string> dur-text: "0:00";
+    in-out property <float> volume: 80;
+    in-out property <bool> queue-open: false;
+    in property <bool> is-max;
+
+    callback play-row(int);
+    callback play-queue(int);
+    callback toggle();
+    callback next();
+    callback prev();
+    callback seek(float);
+    callback volume-changed(float);
+    callback nav(string);
+    callback drag();
+    callback minimize();
+    callback maximize();
+    callback close-window();
+
+    VerticalLayout {
+        // ---------- title bar ----------
+        Rectangle {
+            height: 34px;
+            TouchArea {
+                pointer-event(e) => { if (e.kind == PointerEventKind.down && e.button == PointerEventButton.left) { root.drag(); } }
+                double-clicked => { root.maximize(); }
+            }
+            HorizontalLayout {
+                padding-left: 14px;
+                Text { text: "OmniPulse"; color: Theme.text; font-weight: 700; font-size: 13px; vertical-alignment: center; }
+                Rectangle { horizontal-stretch: 1; }
+                for b[i] in [{ d: "M1 6h10", act: "min" }, { d: root.is-max ? "M3.5 3.5V1.5h7v7h-2M1.5 3.5h7v7h-7z" : "M1.5 1.5h9v9h-9z", act: "max" }, { d: "M1.5 1.5l9 9M10.5 1.5l-9 9", act: "close" }]: Rectangle {
+                    width: 46px;
+                    background: wta.has-hover ? (b.act == "close" ? #e81123 : Theme.elevated) : transparent;
+                    Path { commands: b.d; viewbox-width: 12; viewbox-height: 12; width: 11px; height: 11px; stroke: wta.has-hover && b.act == "close" ? white : Theme.muted; stroke-width: 1.2px; fill: transparent; }
+                    wta := TouchArea { clicked => { if (b.act == "min") { root.minimize(); } else if (b.act == "max") { root.maximize(); } else { root.close-window(); } } }
+                }
+            }
+        }
+
+        // ---------- sidebar, page, queue ----------
+        HorizontalLayout {
+            padding-left: 8px;
+            padding-right: 8px;
+            spacing: 8px;
+            vertical-stretch: 1;
+            Rectangle {
+                width: 220px;
+                background: Theme.panel;
+                border-radius: Theme.radius;
+                VerticalLayout {
+                    padding: 10px;
+                    spacing: 2px;
+                    alignment: start;
+                    NavItem { label: "Discover"; d: Icons.discover; active: root.page == "discover"; clicked => { root.nav("discover"); } }
+                    NavItem { label: "Library"; d: Icons.library; active: root.page == "library"; clicked => { root.nav("library"); } }
+                }
+            }
+            Rectangle {
+                horizontal-stretch: 1;
+                background: Theme.panel;
+                border-radius: Theme.radius;
+                clip: true;
+                VerticalLayout {
+                    padding: 20px;
+                    padding-bottom: 6px;
+                    spacing: 6px;
+                    Text { text: root.page-title; color: Theme.text; font-size: 40px; font-weight: 800; }
+                    Text { text: root.page-sub; color: Theme.muted; font-size: 13px; }
+                    Rectangle { height: 8px; }
+                    if root.page == "library": ListView {
+                        vertical-stretch: 1;
+                        for r[i] in root.rows: TrackRow { item: r; index: i; play => { root.play-row(i); } }
+                    }
+                    if root.page != "library": Text { text: "Discover comes in a later phase. Your Library is here now."; color: Theme.muted; vertical-stretch: 1; }
+                }
+            }
+            if root.queue-open: Rectangle {
+                width: 300px;
+                background: Theme.panel;
+                border-radius: Theme.radius;
+                VerticalLayout {
+                    padding: 16px;
+                    spacing: 8px;
+                    Text { text: "Queue"; color: Theme.text; font-size: 18px; font-weight: 800; }
+                    ListView {
+                        vertical-stretch: 1;
+                        for q[i] in root.queue-rows: Rectangle {
+                            height: 48px;
+                            border-radius: 6px;
+                            background: qta.has-hover ? Theme.elevated : transparent;
+                            HorizontalLayout {
+                                padding-left: 6px;
+                                spacing: 10px;
+                                PlatIcon { plat: q.plat; width: 16px; height: 16px; y: (parent.height - self.height) / 2; }
+                                VerticalLayout {
+                                    alignment: center;
+                                    Text { text: q.title; color: q.playing ? Theme.accent : Theme.text; font-weight: 600; font-size: 13px; overflow: elide; }
+                                    Text { text: q.artist; color: Theme.muted; font-size: 12px; overflow: elide; }
+                                }
+                            }
+                            qta := TouchArea { clicked => { root.play-queue(i); } }
+                        }
+                    }
+                }
+            }
+        }
+
+        // ---------- player bar ----------
+        Rectangle {
+            height: 96px;
+            Rectangle {
+                x: 8px;
+                y: 8px;
+                width: parent.width - 16px;
+                height: parent.height - 16px;
+                background: #2b2f45;
+                border-radius: Theme.radius;
+                HorizontalLayout {
+                    padding-left: 14px;
+                    padding-right: 14px;
+                    spacing: 14px;
+                    // now playing
+                    HorizontalLayout {
+                        width: 30%;
+                        spacing: 12px;
+                        Rectangle {
+                            width: 56px;
+                            height: 56px;
+                            y: (parent.height - self.height) / 2;
+                            border-radius: 6px;
+                            background: Theme.elevated;
+                            clip: true;
+                            Image { source: root.now-art; width: parent.width; height: parent.height; image-fit: cover; }
+                        }
+                        VerticalLayout {
+                            alignment: center;
+                            spacing: 2px;
+                            Text { text: root.now-title; color: Theme.text; font-weight: 700; font-size: 15px; overflow: elide; }
+                            HorizontalLayout {
+                                spacing: 6px;
+                                if root.now-plat != "": PlatIcon { plat: root.now-plat; width: 14px; height: 14px; }
+                                Text { text: root.now-artist; color: Theme.muted; font-size: 13px; overflow: elide; }
+                            }
+                        }
+                    }
+                    // controls and progress
+                    VerticalLayout {
+                        horizontal-stretch: 1;
+                        alignment: center;
+                        spacing: 4px;
+                        HorizontalLayout {
+                            alignment: center;
+                            spacing: 10px;
+                            IconButton { d: Icons.prev; clicked => { root.prev(); } }
+                            IconButton { d: root.playing ? Icons.pause : Icons.play; filled: true; size: 42px; clicked => { root.toggle(); } }
+                            IconButton { d: Icons.next; clicked => { root.next(); } }
+                        }
+                        HorizontalLayout {
+                            spacing: 10px;
+                            Text { text: root.pos-text; color: Theme.muted; font-size: 12px; width: 40px; horizontal-alignment: right; vertical-alignment: center; }
+                            Slider {
+                                minimum: 0;
+                                maximum: 1000;
+                                value: root.pos-frac * 1000;
+                                released(v) => { root.seek(v / 1000); }
+                            }
+                            Text { text: root.dur-text; color: Theme.muted; font-size: 12px; width: 40px; vertical-alignment: center; }
+                        }
+                    }
+                    // volume and queue
+                    HorizontalLayout {
+                        width: 22%;
+                        alignment: end;
+                        spacing: 8px;
+                        Slider {
+                            width: 110px;
+                            minimum: 0;
+                            maximum: 100;
+                            value <=> root.volume;
+                            changed(v) => { root.volume-changed(v / 100); }
+                        }
+                        IconButton { d: Icons.queue; tint: root.queue-open ? Theme.accent : Theme.muted; clicked => { root.queue-open = !root.queue-open; } }
+                    }
+                }
+            }
+        }
+        if root.status != "": Text { text: root.status; color: Theme.muted; font-size: 12px; horizontal-alignment: center; height: 18px; }
+    }
+}
