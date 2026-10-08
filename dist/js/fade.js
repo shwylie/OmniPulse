@@ -1,0 +1,75 @@
+// Fade Between Tracks (Settings > Sound): each track fades out over its last seconds and the next fades
+// in, as heard: its own start and end times count. Skipping fades the old one out quickly. A stand-in
+// in a Jam (js/together.js) always fades, over its own fixed length, whatever the setting.
+//
+//   input -> fade -> match -> EQ -> limiter -> volume   (js/audio.js)
+
+const FADE_STANDIN_MS = 2000;
+const FADE_SKIP_MS = 300;
+const fadeState = { out: false, pendingIn: false, forceIn: 0 };
+
+// How long a track fades for: a stand-in's own, the setting's, or not at all
+function fadeMsFor(t) {
+  if (t && t.standInFor) return FADE_STANDIN_MS;
+  return prefs.fadeOn ? Math.max(500, Math.min(10000, Number(prefs.fadeMs) || 3000)) : 0;
+}
+
+function fadeTo(value, ms) {
+  if (!norm.fade) return;
+  const g = norm.fade.gain, now = norm.ctx.currentTime;
+  g.cancelScheduledValues(now);
+  g.setValueAtTime(Math.max(0.0001, g.value), now);
+  if (ms > 0) g.linearRampToValueAtTime(Math.max(0.0001, value), now + ms / 1000);
+  else g.setValueAtTime(value, now);
+}
+
+// A new track is about to play: the one still heard fades out quickly if fading's on (or it's a
+// stand-in), and the new one fades in once its sound starts
+function fadeTrackChange(prev, next) {
+  fadeState.pendingIn = true;
+  fadeState.out = false;
+  // after a stand-in, the Jam's next track fades in too
+  fadeState.forceIn = prev && prev.standInFor ? FADE_STANDIN_MS : 0;
+  if (prev && nowPlaying() && (fadeMsFor(prev) || fadeMsFor(next))) fadeTo(0, FADE_SKIP_MS);
+}
+
+// The new track's sound has started
+function fadeHeard() {
+  if (!fadeState.pendingIn) return;
+  fadeState.pendingIn = false;
+  const ms = Math.max(fadeMsFor(curTrack()), fadeState.forceIn);
+  fadeState.forceIn = 0;
+  if (!norm.fade) return;
+  const g = norm.fade.gain, now = norm.ctx.currentTime;
+  g.cancelScheduledValues(now);
+  if (ms) { g.setValueAtTime(0.0001, now); g.linearRampToValueAtTime(1, now + ms / 1000); } else g.setValueAtTime(1, now);
+}
+
+// Near the end: down to silence over the fade's length (and back up if you seek away from the end)
+function fadeTick() {
+  const t = curTrack();
+  if (!t || !norm.fade || !nowPlaying() || fadeState.pendingIn) return;
+  const ms = fadeMsFor(t);
+  if (!ms) { if (fadeState.out) { fadeState.out = false; fadeTo(1, 0); } return; }
+  const end = trimmedEnd(t, t.duration || curDurMs());
+  if (!end) return;
+  const left = end - curPosMs();
+  if (!fadeState.out && left > 0 && left <= ms) {
+    fadeState.out = true;
+    fadeTo(0, left);
+  } else if (fadeState.out && left > ms + 400) {
+    fadeState.out = false;
+    fadeTo(1, 200);
+  }
+}
+
+function fadeInit() {
+  $("fadeOn").checked = !!prefs.fadeOn;
+  $("fadeMs").value = String(prefs.fadeMs || 3000);
+  const paint = () => { $("fadeSection").hidden = !prefs.fadeOn; };
+  $("fadeOn").addEventListener("change", () => { prefs.fadeOn = $("fadeOn").checked; savePrefs(); paint(); });
+  $("fadeMs").addEventListener("change", () => { prefs.fadeMs = Number($("fadeMs").value); savePrefs(); });
+  paint();
+  audio.addEventListener("playing", fadeHeard);
+  setInterval(fadeTick, 100);
+}

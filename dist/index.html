@@ -625,6 +625,20 @@
       </div>
       <div class="row">
         <div>
+          <div class="lbl">Fade Between Tracks</div>
+          <div class="note">Each track fades out at its end and the next fades in.</div>
+        </div>
+        <label class="switch"><input type="checkbox" id="fadeOn"><span></span></label>
+      </div>
+      <details class="sub" id="fadeSection" open hidden>
+        <summary>Fade Between Tracks</summary>
+        <div class="row">
+          <div class="lbl">Fade Length</div>
+          <select id="fadeMs" class="narrow"><option value="1000">1 s</option><option value="2000">2 s</option><option value="3000">3 s</option><option value="5000">5 s</option><option value="8000">8 s</option></select>
+        </div>
+      </details>
+      <div class="row">
+        <div>
           <div class="lbl">Skip Silences</div>
           <div class="note">Jumps over long silences, and moves on when the rest is silent.</div>
         </div>
@@ -990,6 +1004,7 @@
 <script src="js/autoplay.js"></script>
 <script src="js/audio.js"></script>
 <script src="js/loudness.js"></script>
+<script src="js/fade.js"></script>
 <script src="js/output2.js"></script>
 <script src="js/mainout.js"></script>
 <script src="js/cast.js"></script>

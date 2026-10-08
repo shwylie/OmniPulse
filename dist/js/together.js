@@ -210,6 +210,7 @@ function listenerFollow(s) {
   const cur = curTrack();
   const onTarget = cur && (cur.id === target.id || (cur.standInFor && cur.standInFor.id === target.id));
   if (!onTarget) {
+    if (cur && cur.standInFor && nowPlaying()) fadeTo(0, FADE_SKIP_MS);   // the stand-in bows out gently
     queue = [freshCopy(target)].concat(upcoming);
     qi = 0;
     queueListName = together.hostName + (together.kind === "jam" ? "'s Jam" : " (Listen Along)");

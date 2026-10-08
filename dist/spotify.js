@@ -317,6 +317,7 @@ async function spotifyStart(t, startMs) {
   if (curTrack() !== t) return;   // skipped meanwhile
   if (gen > spe.gen) speFlush(gen);
   spState = { pos: startMs, ts: performance.now(), playing: true, dur: t.duration || 0 };
+  fadeHeard();
   say("");
   paintSpotify();
   playbackState(true);

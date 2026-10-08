@@ -1,9 +1,9 @@
 // The audio chain: loudness match, equalizer, limiter, volume. Everything the app plays goes in at
 // norm.input: the <audio> element (SoundCloud, local files) and the Spotify worklet.
 //
-//   input -> match (each track's gain, js/loudness.js) -> 10-band EQ -> limiter -> master (volume)
+//   input -> fade (js/fade.js) -> match (each track's gain, js/loudness.js) -> 10-band EQ -> limiter -> master (volume)
 //      -> probe (an analyser: how loud it is right now, for skipping silence)
-const norm = { ctx: null, input: null, match: null, eq: null, limiter: null, master: null, probe: null };
+const norm = { ctx: null, input: null, fade: null, match: null, eq: null, limiter: null, master: null, probe: null };
 
 // Once the player is routed through the chain it stays routed
 function normEnsure() {
@@ -31,7 +31,10 @@ function normEnsure() {
       b.gain.value = 0;
       return b;
     });
-    input.connect(match);
+    // fading between tracks (js/fade.js), before everything else
+    const fade = ctx.createGain();
+    input.connect(fade);
+    fade.connect(match);
     let node = match;
     eq.forEach((b) => { node.connect(b); node = b; });
     node.connect(limiter);
@@ -45,7 +48,7 @@ function normEnsure() {
     input.connect(probe);
     probe.connect(sinkhole);
     sinkhole.connect(ctx.destination);
-    Object.assign(norm, { ctx, input, match, limiter, master, eq, probe });
+    Object.assign(norm, { ctx, input, fade, match, limiter, master, eq, probe });
     if (prefs.sink && prefs.sink !== "default" && !nativeOutWanted()) mainSink(prefs.sink).catch(() => {});
     normApply();
     nativeOutStart();   // OmniPulse.exe plays the sound (js/mainout.js)

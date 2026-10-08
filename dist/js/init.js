@@ -45,6 +45,7 @@ function extrasInit() {
   castInit();
   nativeOutInit();
   togetherInit();
+  fadeInit();
   artistsInit();
   searchPageInit();
   trimsInit();

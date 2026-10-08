@@ -1159,6 +1159,8 @@ function playFromPage(i) {
 async function playCurrent() {
   const t = curTrack();
   if (!t) return;
+  fadeTrackChange(fadeState.last, t);   // the old one fades out, this one in (js/fade.js)
+  fadeState.last = t;
   nativeOutFlush();   // the last track's tail isn't heard over the new one
   fillNowPlaying(t);
   refreshLikeUI();
