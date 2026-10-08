@@ -268,6 +268,7 @@ function editAppName() {
 }
 
 function appearanceInit() {
+  themeInit();
   $("artAccentToggle").addEventListener("change", () => {
     prefs.artAccent = $("artAccentToggle").checked;
     savePrefs();
@@ -318,4 +319,105 @@ function appearanceInit() {
   });
 
   marqueeInit();
+}
+
+// ---------- the theme: how light or dark, and a tint ----------
+// A slider of steps from light to dark (no step in between, where text would be hard to read), a tint
+// (a hue), and how strongly it shows. The colours are worked out here, then checked: text and muted
+// text are moved lighter or darker until they read well on every surface, whatever the tint.
+const THEME_STEPS = [
+  // [name, light?, background, panel, raised, lines, text, muted]  (lightness, %)
+  ["Bright", true, 92, 100, 95.5, 88.5, 11, 42],
+  ["Soft", true, 87.5, 96.5, 92.5, 84, 12, 40],
+  ["Dim", false, 13, 17, 21.5, 27.5, 94, 68],
+  ["Dark", false, 4.5, 8.5, 12.5, 18, 94, 64],
+  ["Black", false, 0, 4.5, 8, 14, 93, 62],
+];
+const TINT_STRENGTHS = ["Off", "Subtle", "Medium", "Strong"];
+// how much colour the surfaces get at each strength: less on light themes, where it washes out text
+const TINT_SAT = { dark: [0, 0.2, 0.36, 0.55], light: [0, 0.14, 0.26, 0.4] };
+// the old named themes, as steps and tints
+const THEME_FROM_NAME = {
+  dark: [3, 225, 1], midnight: [3, 230, 2], graphite: [3, 0, 0], forest: [3, 145, 2], rose: [3, 340, 2], light: [0, 240, 1], paper: [1, 42, 1],
+};
+
+function hslHex(h, s, l) {
+  return hslToHex(((h % 360) + 360) % 360 / 360, Math.max(0, Math.min(1, s)), Math.max(0, Math.min(1, l / 100)));
+}
+
+function luminance(hex) {
+  const n = parseInt(hex.slice(1), 16);
+  const ch = (v) => { v /= 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); };
+  return 0.2126 * ch((n >> 16) & 255) + 0.7152 * ch((n >> 8) & 255) + 0.0722 * ch(n & 255);
+}
+const contrast = (a, b) => { const x = luminance(a), y = luminance(b); return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05); };
+
+function themeStep() { return Math.max(0, Math.min(THEME_STEPS.length - 1, Math.round(Number(prefs.themeStep)))); }
+
+// The theme's colours for a step, hue and strength
+function themePalette(step, hue, strength) {
+  const [, light, bg, panel, raised, line, text, muted] = THEME_STEPS[step];
+  const sat = TINT_SAT[light ? "light" : "dark"][strength] || 0;
+  const p = {
+    bg: hslHex(hue, sat, bg),
+    panel: hslHex(hue, sat * (light ? 0.6 : 1), panel),
+    elevated: hslHex(hue, sat, raised),
+    line: hslHex(hue, sat * 0.9, line),
+  };
+  // text first a little of the tint, then pushed until it reads: 7:1 for text, 4.5:1 for muted (the
+  // accessibility guidelines' AAA and AA), on every surface it sits on
+  const fit = (l, s, need) => {
+    let c = hslHex(hue, s, l);
+    for (let i = 0; i < 60 && ["bg", "panel", "elevated"].some((k) => contrast(c, p[k]) < need); i++) {
+      l += light ? -1 : 1;
+      c = hslHex(hue, s, l);
+    }
+    return c;
+  };
+  p.text = fit(text, sat * 0.3, 7);
+  p.muted = fit(muted, sat * 0.55, 4.5);
+  return p;
+}
+
+function applyTheme() {
+  const root = document.documentElement;
+  // the old named theme, the first time
+  if (prefs.themeStep === undefined) {
+    const [st, h, k] = THEME_FROM_NAME[prefs.theme] || THEME_FROM_NAME.dark;
+    prefs.themeStep = st; prefs.tintHue = h; prefs.tintStrength = k;
+  }
+  const step = themeStep();
+  const light = THEME_STEPS[step][1];
+  const p = themePalette(step, Number(prefs.tintHue) || 0, Math.max(0, Math.min(3, Number(prefs.tintStrength) || 0)));
+  prefs.theme = light ? "light" : "dark";   // what the rest of the app (and its styles) go by
+  root.dataset.theme = prefs.theme;
+  Object.entries(p).forEach(([k, v]) => root.style.setProperty("--" + k, v));
+}
+
+function themePaint() {
+  const st = themeStep();
+  $("themeStep").value = String(st);
+  $("themeStepName").textContent = THEME_STEPS[st][0];
+  const k = Math.max(0, Math.min(3, Number(prefs.tintStrength) || 0));
+  $("tintStrength").value = String(k);
+  $("tintStrengthName").textContent = TINT_STRENGTHS[k];
+  $("tintHue").value = String(Number(prefs.tintHue) || 0);
+  $("tintHue").disabled = k === 0;
+  $("tintRow").classList.toggle("dimmed", k === 0);
+  $("tintSwatch").style.background = k ? hslHex(Number(prefs.tintHue) || 0, 0.7, THEME_STEPS[st][1] ? 55 : 60) : "transparent";
+}
+
+function themeInit() {
+  const changed = () => {
+    savePrefs();
+    applyTheme();
+    themePaint();
+    // the cover's colours are tuned for light or dark: work them out again
+    if (prefs.artAccent && curTrack()) updateArtAccent(curTrack());
+    else applyPrefs();
+  };
+  $("themeStep").addEventListener("input", () => { prefs.themeStep = Number($("themeStep").value); changed(); });
+  $("tintHue").addEventListener("input", () => { prefs.tintHue = Number($("tintHue").value); changed(); });
+  $("tintStrength").addEventListener("input", () => { prefs.tintStrength = Number($("tintStrength").value); changed(); });
+  themePaint();
 }

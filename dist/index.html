@@ -362,9 +362,23 @@
     <!-- ===================== Look ===================== -->
     <section class="group">
       <h3>Look</h3>
-      <div class="row">
-        <div class="lbl">Theme</div>
-        <select id="themeSel" class="narrow"><option value="dark">Dark</option><option value="midnight">Midnight</option><option value="graphite">Graphite</option><option value="forest">Forest</option><option value="rose">Rose</option><option value="light">Light</option><option value="paper">Paper</option></select>
+      <div class="row stack">
+        <div><div class="lbl">Theme <span class="stepName" id="themeStepName"></span></div></div>
+        <div class="stepWrap">
+          <input id="themeStep" type="range" min="0" max="4" step="1" class="stepSlider" aria-label="Theme, from light to dark">
+          <div class="stepTicks"><span style="left:0%">Bright</span><span style="left:25%">Soft</span><span style="left:50%">Dim</span><span style="left:75%">Dark</span><span style="left:100%">Black</span><i class="stepGap" style="left:37.5%"></i></div>
+        </div>
+      </div>
+      <div class="row stack" id="tintRow">
+        <div><div class="lbl">Tint <span class="tintSwatch" id="tintSwatch"></span></div><div class="note">A colour through the whole theme. Accent and album art colours still show on top.</div></div>
+        <div class="stepWrap"><input id="tintHue" type="range" min="0" max="359" step="1" class="hueSlider" aria-label="Tint colour"></div>
+      </div>
+      <div class="row stack">
+        <div><div class="lbl">Tint Strength <span class="stepName" id="tintStrengthName"></span></div></div>
+        <div class="stepWrap">
+          <input id="tintStrength" type="range" min="0" max="3" step="1" class="stepSlider" aria-label="Tint strength">
+          <div class="stepTicks"><span style="left:0%">Off</span><span style="left:33.33333333333333%">Subtle</span><span style="left:66.66666666666666%">Medium</span><span style="left:100%">Strong</span></div>
+        </div>
       </div>
       <div class="row" id="accentRow">
         <div class="lbl">Accent</div>
