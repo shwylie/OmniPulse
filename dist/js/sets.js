@@ -62,6 +62,17 @@ function setsInit() {
   $("setsOn").addEventListener("change", () => { prefs.setsOn = $("setsOn").checked; savePrefs(); applySetsOn(); });
   applySetsOn();
   $("navSets").addEventListener("click", () => openSets());
+  // right-click to hide it, like Stats (Settings > Library brings it back)
+  $("navSets").addEventListener("contextmenu", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    showMenuAt(e.clientX, e.clientY, ["Sets & Podcasts", ["Hide Sets & Podcasts from the sidebar", () => {
+      prefs.setsOn = false;
+      savePrefs();
+      applySetsOn();
+      say("Sets & Podcasts is hidden. Bring it back in Settings > Library.");
+    }]]);
+  });
   $("setsLikedChip").addEventListener("click", () => {
     prefs.setsLiked = !prefs.setsLiked;
     savePrefs();
