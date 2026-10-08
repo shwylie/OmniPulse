@@ -2,12 +2,13 @@
 // sidebar, onto the queue panel (before a row, or at the end) or onto the queue button; and
 // reordering what's next in the queue.
 
-const drag = { track: null, from: -1, fromList: false };   // from: the track's place in the queue; fromList: dragged from the page's own list
+const drag = { track: null, from: -1, fromList: false, many: null };   // from: the track's place in the queue; fromList: dragged from the page's own list; many: several picked ones (js/select.js)
 
 function dragClear() {
   drag.track = null;
   drag.from = -1;
   drag.fromList = false;
+  drag.many = null;
   document.body.classList.remove("trackDrag");
   document.querySelectorAll(".dragging, .over, .dropOver").forEach((x) => x.classList.remove("dragging", "over", "dropOver"));
 }
@@ -22,6 +23,8 @@ function dragStart(e, t, from) {
 
 // Playlists on this PC take anything; your SoundCloud playlists only SoundCloud tracks
 function playlistTakes(p, t) {
+  // several: your SoundCloud playlist takes the SoundCloud ones among them (the rest are left out, and said so)
+  if (drag.many && p) return isXpl(p) || (isOwnPlaylist(p) && drag.many.some((x) => srcOf(x) === "soundcloud"));
   return !!p && !!t && (isXpl(p) || (isOwnPlaylist(p) && srcOf(t) === "soundcloud"));
 }
 
@@ -34,6 +37,16 @@ function dndInit() {
     li.classList.add("dragging");
     dragStart(e, t);
     drag.fromList = true;
+    // one of several picked: all of them go
+    const picked = sel.keys.has(selKey(t)) && sel.keys.size > 1 ? selTracks() : null;
+    if (picked) {
+      drag.many = picked;
+      e.dataTransfer.setData("text/plain", picked.length + " tracks");
+      const tag = el("div", "dragTag", picked.length + " tracks");
+      document.body.append(tag);
+      e.dataTransfer.setDragImage(tag, 10, 10);
+      setTimeout(() => tag.remove(), 0);
+    }
   });
   $("nowToggle").addEventListener("dragstart", (e) => {
     const t = curTrack();
@@ -100,7 +113,10 @@ function dndInit() {
         renderQueue();
       }
     } else if (drag.from < 0) {
-      if (to > qi && qi >= 0) {   // just before the row it was dropped on, as something you queued
+      if (drag.many) {
+        if (to > qi && qi >= 0) { queue.splice(to, 0, ...drag.many.map((t) => queuedByYou(t))); renderQueue(); say("Added " + drag.many.length + " tracks to the queue."); }
+        else selPasteQueue(drag.many);
+      } else if (to > qi && qi >= 0) {   // just before the row it was dropped on, as something you queued
         queue.splice(to, 0, queuedByYou(drag.track));
         renderQueue();
         say("Added to the queue.");
@@ -124,8 +140,8 @@ function dndInit() {
   qb.addEventListener("drop", (e) => {
     if (!drag.track || drag.from >= 0) return;
     e.preventDefault();
-    addToQueue(drag.track);
-    say("Added to the queue.");
+    if (drag.many) selPasteQueue(drag.many);
+    else { addToQueue(drag.track); say("Added to the queue."); }
     dragClear();
   });
 
@@ -144,7 +160,8 @@ function dndInit() {
     if (!pageTakes()) return;
     e.preventDefault();
     page.classList.remove("dropOver");
-    addToPlaylist(currentPlaylist, drag.track);
+    if (drag.many) selPasteInto(currentPlaylist, drag.many);
+    else addToPlaylist(currentPlaylist, drag.track);
     dragClear();
   });
 
@@ -170,7 +187,8 @@ function dndInit() {
     const hit = drag.track && target(e);
     if (!hit) return;
     e.preventDefault();
-    addToPlaylist(hit.p, drag.track);
+    if (drag.many) selPasteInto(hit.p, drag.many);
+    else addToPlaylist(hit.p, drag.track);
     dragClear();
   });
 }
