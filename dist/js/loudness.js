@@ -84,7 +84,8 @@ function loudTrackStarted(t) {
   silence.lastPos = -1;
   if (onSpotifyEngine(t)) { loudWaiting = null; loudApply(t, true); }
   else loudWaiting = t;
-  if (loudTarget() === null && !Number(prefs.skipSilence)) return;
+  // measured for matching, skipping silences, or fading where the sound ends (js/fade.js)
+  if (loudTarget() === null && !Number(prefs.skipSilence) && !prefs.fadeOn) return;
   loudAnalyse(t).then(() => {
     if (curTrack() !== t) return;
     loudApply(t, false);

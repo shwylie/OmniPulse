@@ -1,17 +1,27 @@
 // Fade Between Tracks (Settings > Sound): each track fades out over its last seconds and the next fades
 // in, as heard: its own start and end times count. Skipping fades the old one out quickly. A stand-in
 // in a Jam (js/together.js) always fades, over its own fixed length, whatever the setting.
+// "Its last seconds" are the last of its sound: many tracks fade themselves out, or end on a quiet
+// tail, so the fade ends where the measured sound does (js/loudness.js, audible_ms) and the next
+// track starts there, rather than fading over the near-silence at the end of the file.
 //
 //   input -> fade -> match -> EQ -> limiter -> volume   (js/audio.js)
 
 const FADE_STANDIN_MS = 2000;
 const FADE_SKIP_MS = 300;
-const fadeState = { out: false, pendingIn: false, forceIn: 0 };
+const fadeState = { out: false, pendingIn: false, forceIn: 0, movedOn: null };
 
 // How long a track fades for: a stand-in's own, the setting's, or not at all
 function fadeMsFor(t) {
   if (t && t.standInFor) return FADE_STANDIN_MS;
   return prefs.fadeOn ? Math.max(500, Math.min(10000, Number(prefs.fadeMs) || 3000)) : 0;
+}
+
+// Where the track's sound ends: its measured end, if that's before the file's (or its own end time)
+function fadeEndMs(t) {
+  const end = trimmedEnd(t, curDurMs());
+  const a = onSpotifyEngine(t) ? null : loudFor(t);
+  return a && a.audible_ms > 0 && a.audible_ms < end ? a.audible_ms : end;
 }
 
 function fadeTo(value, ms) {
@@ -28,6 +38,7 @@ function fadeTo(value, ms) {
 function fadeTrackChange(prev, next) {
   fadeState.pendingIn = true;
   fadeState.out = false;
+  fadeState.movedOn = null;
   // after a stand-in, the Jam's next track fades in too
   fadeState.forceIn = prev && prev.standInFor ? FADE_STANDIN_MS : 0;
   if (prev && nowPlaying() && (fadeMsFor(prev) || fadeMsFor(next))) fadeTo(0, FADE_SKIP_MS);
@@ -51,9 +62,15 @@ function fadeTick() {
   if (!t || !norm.fade || !nowPlaying() || fadeState.pendingIn) return;
   const ms = fadeMsFor(t);
   if (!ms) { if (fadeState.out) { fadeState.out = false; fadeTo(1, 0); } return; }
-  const end = trimmedEnd(t, t.duration || curDurMs());
+  const end = fadeEndMs(t);
   if (!end) return;
   const left = end - curPosMs();
+  // faded out where the sound ends: on to the next one, without the quiet tail
+  if (fadeState.out && left <= 0 && end < trimmedEnd(t, curDurMs()) - 300 && fadeState.movedOn !== t) {
+    fadeState.movedOn = t;
+    onEnded();
+    return;
+  }
   if (!fadeState.out && left > 0 && left <= ms) {
     fadeState.out = true;
     fadeTo(0, left);

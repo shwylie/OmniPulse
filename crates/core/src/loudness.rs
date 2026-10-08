@@ -28,7 +28,7 @@ use symphonia::core::{
     probe::Hint,
 };
 
-const VERSION: &str = "v1";
+const VERSION: &str = "v2"; // v2: audible_ms
 const LONG_MS: u64 = 15 * 60 * 1000; // longer than this: only the start is measured
 const MEASURE_MS: u64 = 10 * 60 * 1000; // ...namely the first ten minutes
 const PROGRESSIVE_MAX_BYTES: u64 = 10 * 1024 * 1024; // ~10 minutes at 128 kbps (YouTube serves at most this per request)
@@ -37,6 +37,10 @@ const WINDOW_MS: u64 = 50; // silence is judged in windows this long
 const SILENT_RMS_DB: f64 = -55.0; // a window is silent below this level...
 const SILENT_PEAK_DB: f64 = -40.0; // ...with no peak above this
 const MIN_SILENCE_MS: u64 = 2000; // shorter silences aren't noted
+// Where the sound really ends: after the last window within this much of the track's own loudness
+// (a fade-out or a quiet tail is already past it), but never below AUDIBLE_FLOOR_DB
+const AUDIBLE_BELOW_LUFS_DB: f64 = 20.0;
+const AUDIBLE_FLOOR_DB: f64 = -50.0;
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct Analysis {
@@ -50,6 +54,10 @@ pub struct Analysis {
     pub analysed_ms: u64,
     /// Silent stretches of MIN_SILENCE_MS or more, [from, to] in ms
     pub silences: Vec<[u64; 2]>,
+    /// Where the sound really ends (its fade-out or quiet tail starts), in ms; 0 when not known
+    /// (only part of the track was measured). Fade Between Tracks fades out before it.
+    #[serde(default)]
+    pub audible_ms: u64,
 }
 
 // ---------- measuring ----------
@@ -66,6 +74,8 @@ struct Meter {
     silent_from: Option<u64>, // frame where the current silent stretch began
     silences: Vec<[u64; 2]>,
     peak: f32,
+    /// each window's level, dB rms, for finding where the sound ends
+    levels: Vec<f32>,
 }
 
 impl Meter {
@@ -84,6 +94,7 @@ impl Meter {
             silent_from: None,
             silences: Vec::new(),
             peak: 0.0,
+            levels: Vec::new(),
         })
     }
 
@@ -104,6 +115,7 @@ impl Meter {
         let rms = (self.win_sq / (self.win_n.max(1) * self.channels as u64) as f64).sqrt();
         let silent = db(rms) < SILENT_RMS_DB && db(self.win_peak as f64) < SILENT_PEAK_DB;
         let start = self.frames - self.win_n;
+        self.levels.push(db(rms) as f32);
         if silent {
             self.silent_from.get_or_insert(start);
         } else {
@@ -147,6 +159,13 @@ impl Meter {
         // all of it, otherwise only as far as we know
         self.close_silence(self.frames);
         let lufs = self.r128.loudness_global().map_err(|e| format!("loudness meter: {e:?}"))?;
+        // the end of the last window loud enough to count, when the whole track was measured
+        let audible_ms = if lufs.is_finite() && analysed_ms + 1500 >= duration_ms {
+            let floor = (lufs - AUDIBLE_BELOW_LUFS_DB).max(AUDIBLE_FLOOR_DB) as f32;
+            self.levels.iter().rposition(|&l| l >= floor).map_or(0, |i| ((i as u64 + 1) * WINDOW_MS).min(analysed_ms))
+        } else {
+            0
+        };
         Ok(Analysis {
             // all silence (or too short to measure) comes out as -inf: call it very quiet
             lufs: if lufs.is_finite() { round1(lufs) } else { -70.0 },
@@ -154,6 +173,7 @@ impl Meter {
             duration_ms,
             analysed_ms,
             silences: self.silences,
+            audible_ms,
         })
     }
 }
@@ -677,6 +697,16 @@ mod tests {
         assert!(near(a.silences[1][0], 7000) && near(a.silences[1][1], 13000), "{a:?}");
         assert!(near(a.silences[2][0], 17000) && near(a.silences[2][1], 29000), "{a:?}");
         assert_eq!(a.duration_ms, 29_000);
+    }
+
+    #[test]
+    fn the_sound_ends_where_its_fade_out_goes_quiet() {
+        // a half-scale sine (-9 dB rms, about -6 LUFS), then a fade-out: 2 s at -23 dB (still the
+        // music), 2 s at -29 dB and 2 s at -49 dB (past the end: more than 20 dB under), then silence
+        let a = m(&[(10.0, 0.5), (2.0, 0.1), (2.0, 0.05), (2.0, 0.005), (2.0, 0.0)]);
+        assert!((11_900..=12_000).contains(&a.audible_ms), "{a:?}");
+        let quiet = m(&[(10.0, 0.02), (3.0, 0.0)]); // a quiet track keeps its own sound
+        assert!((9_900..=10_000).contains(&quiet.audible_ms), "{quiet:?}");
     }
 
     #[test]
