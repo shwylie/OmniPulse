@@ -1,0 +1,14 @@
+[package]
+name = "omnipulse-audio"
+version = "0.1.0"
+edition = "2021"
+description = "OmniPulse's playback engine: decoding, the sound chain (loudness match, EQ, limiter, volume) and output"
+
+[dependencies]
+symphonia = { version = "0.5", default-features = false, features = ["aac", "alac", "flac", "isomp4", "mp3", "ogg", "pcm", "vorbis", "wav", "aiff"] }
+cpal = "0.15"
+rubato = "0.16"
+
+[[bin]]
+name = "op-play"
+path = "src/bin/op-play.rs"
