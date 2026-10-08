@@ -117,11 +117,8 @@ async function likedMatch(q, plats) {
   const pools = { soundcloud: () => likedTracks.filter(isLikedTrack), spotify: () => spLikedCache || [], youtube: () => ytLikes, local: () => [] };
   for (const id of plats) {
     if (!pools[id]) continue;   // plugins: no likes kept here
-    const hit = pools[id]().find((t) => {
-      if (isMix(t)) return false;
-      const have = new Set(reqWords(t.title + " " + artistName(t)));
-      return want.every((w) => have.has(w));
-    });
+    // the same song, not just one with those words in it ("Beauty and a Strobe" isn't "Strobe")
+    const hit = pools[id]().find((t) => !isMix(t) && reqSameSong(t, q));
     if (hit) return Object.assign({}, hit);   // a copy, so "requested by" stays on the queued one
   }
   return null;
@@ -250,7 +247,9 @@ async function handleSongRequest(q, user) {
       }
     }
     if (!found.length) return { ok: false, message: reqMsg("notFound", base) };
-    t = (!isLink && found.slice(0, 5).find(isLikedTrack)) || found[0];
+    // among the top five: the song asked for that you like, the song asked for, one you like
+    const top = found.slice(0, 5), same = (x) => reqSameSong(x, asked);
+    t = (!isLink && (top.find((x) => same(x) && isLikedTrack(x)) || top.find(same) || top.find(isLikedTrack))) || found[0];
   }
   if (!isLink) t = await reqPreferRadio(t, found, asked, order, finders);
   const vars = Object.assign({ title: t.title, artist: artistName(t) }, base);
