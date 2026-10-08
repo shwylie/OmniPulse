@@ -351,20 +351,20 @@
       </div>
       <div class="row" id="accent2Row">
         <div>
-          <div class="lbl">Second colour</div>
+          <div class="lbl">Second Colour</div>
           <div class="note">Blends with the accent. Crossed out: none.</div>
         </div>
         <div class="swatches" id="swatches2"></div>
       </div>
       <div class="row">
         <div>
-          <div class="lbl">Colours from album art</div>
+          <div class="lbl">Colours from Album Art</div>
           <div class="note">Both colours come from the cover that's playing.</div>
         </div>
         <label class="switch"><input type="checkbox" id="artAccentToggle"><span></span></label>
       </div>
       <div class="row">
-        <div class="lbl">List density</div>
+        <div class="lbl">List Density</div>
         <div class="seg" id="densitySeg"><button data-v="comfortable">Comfortable</button><button data-v="compact">Compact</button></div>
       </div>
       <div class="row">
@@ -376,7 +376,7 @@
       </div>
       <div class="row">
         <div>
-          <div class="lbl">Display name</div>
+          <div class="lbl">Display Name</div>
           <div class="note">Shown in the title bar and taskbar.</div>
         </div>
         <input id="appNameInput" class="nameInput" type="text" maxlength="60" autocomplete="off" spellcheck="false">
@@ -422,7 +422,7 @@
         </div>
       </div>
       <details class="sub" id="spotifyOptions" hidden>
-        <summary>Spotify options</summary>
+        <summary>Spotify Options</summary>
         <div class="row">
           <div>
             <div class="lbl">Playback</div>
@@ -450,13 +450,13 @@
 
       <div class="row">
         <div>
-          <div class="lbl">Local music</div>
+          <div class="lbl">Local Music</div>
           <div class="note" id="localNote">Folders on this PC or a network drive.</div>
         </div>
         <label class="switch" title="Use local music"><input type="checkbox" id="localOn"><span></span></label>
       </div>
       <details class="sub" id="localBody" hidden>
-        <summary>Music folders</summary>
+        <summary>Music Folders</summary>
         <div class="folderList" id="localFolders"></div>
         <div class="row rowStart">
           <button id="localAdd" class="soft" title="Add a folder">Add folder</button>
@@ -480,7 +480,7 @@
         </div>
       </div>
       <details class="sub" id="lastfmSection" hidden>
-        <summary>Last.fm options</summary>
+        <summary>Last.fm Options</summary>
         <div class="row">
           <div>
             <div class="lbl">Scrobble</div>
@@ -495,7 +495,7 @@
       <h3>Plugins</h3>
       <div class="row">
         <div>
-          <div class="lbl">Add a plugin</div>
+          <div class="lbl">Add a Plugin</div>
           <div class="note">Music sources made by others. Each is walled off and only reaches the sites it lists.</div>
         </div>
         <button id="plugAdd" class="soft">Add plugin</button>
@@ -508,7 +508,7 @@
       <h3>Library</h3>
       <div class="row">
         <div>
-          <div class="lbl">Follow everywhere</div>
+          <div class="lbl">Follow Everywhere</div>
           <div class="note">Following an artist on one platform follows them on the others.</div>
         </div>
         <label class="switch"><input type="checkbox" id="followEverywhereOn"><span></span></label>
@@ -529,28 +529,31 @@
       </div>
       <div class="row">
         <div>
-          <div class="lbl">Hidden &amp; not recommended</div>
+          <div class="lbl">Hidden &amp; Not Recommended</div>
           <div class="note" id="hiddenNote"></div>
         </div>
+        <label class="switch"><input type="checkbox" id="hideOn"><span></span></label>
       </div>
+      <div id="hiddenBody">
       <details class="sub" id="hidArtistsBox" hidden>
-        <summary id="hidArtistsSum">Artists not recommended</summary>
+        <summary id="hidArtistsSum">Artists Not Recommended</summary>
         <div class="folderList" id="notRecArtists"></div>
       </details>
       <details class="sub" id="hidAlbumsBox" hidden>
-        <summary id="hidAlbumsSum">Albums not recommended</summary>
+        <summary id="hidAlbumsSum">Albums Not Recommended</summary>
         <div class="folderList" id="notRecAlbums"></div>
       </details>
       <details class="sub" id="hidTracksBox" hidden>
-        <summary id="hidTracksSum">Tracks not recommended</summary>
+        <summary id="hidTracksSum">Tracks Not Recommended</summary>
         <div class="folderList" id="notRecTrackList"></div>
         <button id="notRecTracks" class="soft">Recommend them all again</button>
       </details>
       <details class="sub" id="hidPlBox" hidden>
-        <summary id="hidPlSum">Hidden playlists</summary>
+        <summary id="hidPlSum">Hidden Playlists</summary>
         <p class="note">Hidden from the sidebar only.</p>
         <div class="folderList" id="hiddenPlList"></div>
       </details>
+      </div>
     </section>
 
     <!-- ===================== Queue & autoplay ===================== -->
@@ -572,7 +575,7 @@
       </div>
       <div class="row">
         <div>
-          <div class="lbl">Avoid recent plays</div>
+          <div class="lbl">Avoid Recent Plays</div>
           <div class="note">Autoplay skips what you've heard in the last 3 hours.</div>
         </div>
         <label class="switch"><input type="checkbox" id="avoidRecentOn"><span></span></label>
@@ -584,14 +587,14 @@
       <h3>Sound</h3>
       <div class="row">
         <div>
-          <div class="lbl">Match loudness</div>
+          <div class="lbl">Match Loudness</div>
           <div class="note" id="loudNote">Every track at the same loudness.</div>
         </div>
         <select id="loudSel" class="narrow"><option value="off">Off</option><option value="quiet">Quiet</option><option value="normal">Normal</option><option value="loud">Loud</option></select>
       </div>
       <div class="row">
         <div>
-          <div class="lbl">Skip silences</div>
+          <div class="lbl">Skip Silences</div>
           <div class="note">Jumps over long silences, and moves on when the rest is silent.</div>
         </div>
         <select id="silenceSel" class="narrow"><option value="0">Off</option><option value="5">After 5 s</option><option value="8">After 8 s</option><option value="15">After 15 s</option><option value="30">After 30 s</option></select>
@@ -616,7 +619,7 @@
       </details>
       <div class="row">
         <div>
-          <div class="lbl">Output device</div>
+          <div class="lbl">Output Device</div>
         </div>
         <select id="outputSel" class="narrow wide"></select>
       </div>
@@ -629,30 +632,22 @@
       <div id="castBody" hidden>
       <div class="row">
         <div>
-          <div class="lbl">Keep playing on this PC</div>
+          <div class="lbl">Keep Playing on This PC</div>
           <div class="note">While casting, play here too.</div>
         </div>
         <label class="switch"><input type="checkbox" id="castLocal"><span></span></label>
       </div>
       <div class="row" id="castLocalRow" hidden>
         <div>
-          <div class="lbl">Delay this PC</div>
+          <div class="lbl">Delay This PC</div>
           <div class="note">How late the device plays, so the two line up.</div>
         </div>
         <div class="widgetRow"><input id="castLocalDelay" type="number" min="0" max="5000" step="50" aria-label="Delay this PC in milliseconds"><span class="note">ms</span></div>
       </div>
-      <details class="sub" id="castSection">
-        <summary>Display on screens</summary>
-        <p class="note">Empty: Google's player. OmniPulse's own display needs a Cast app ID (see cast-receiver/README.md).</p>
-        <div class="row">
-          <div class="lbl">Cast app ID</div>
-          <input id="castApp" class="narrow" type="text" maxlength="12" placeholder="Google's player" spellcheck="false" autocomplete="off">
-        </div>
-      </details>
       </div>
       <div class="row">
         <div>
-          <div class="lbl">Volume slider</div>
+          <div class="lbl">Volume Slider</div>
           <div class="note">Off: plays at 100%.</div>
         </div>
         <label class="switch"><input type="checkbox" id="volShowOn"><span></span></label>
@@ -671,7 +666,7 @@
       </div>
       <div class="row">
         <div>
-          <div class="lbl">Start muted</div>
+          <div class="lbl">Start Muted</div>
           <div class="note">In the Windows Sound Mixer, until you've routed it.</div>
         </div>
         <label class="switch"><input type="checkbox" id="out2Muted"><span></span></label>
@@ -694,15 +689,15 @@
       </details>
       <div class="row">
         <div>
-          <div class="lbl">Discord status</div>
+          <div class="lbl">Discord Status</div>
           <div class="note" id="presNote">Shows what you're playing on your profile.</div>
         </div>
         <label class="switch"><input type="checkbox" id="presToggle"><span></span></label>
       </div>
       <details class="sub" id="presSection">
-        <summary>Discord options</summary>
+        <summary>Discord Options</summary>
         <div class="row">
-          <div class="lbl">Cover art</div>
+          <div class="lbl">Cover Art</div>
           <label class="switch"><input type="checkbox" id="presArt"><span></span></label>
         </div>
         <div class="row">
@@ -711,14 +706,14 @@
         </div>
         <div class="row">
           <div>
-            <div class="lbl">Listen along button</div>
+            <div class="lbl">Listen Along Button</div>
             <div class="note">Friends join at your spot (SoundCloud) or open the track (Spotify).</div>
           </div>
           <label class="switch"><input type="checkbox" id="presListen"><span></span></label>
         </div>
         <div class="row">
           <div>
-            <div class="lbl">Open track button</div>
+            <div class="lbl">Open Track Button</div>
             <div class="note">Only others see the buttons.</div>
           </div>
           <label class="switch"><input type="checkbox" id="presLink"><span></span></label>
@@ -727,13 +722,13 @@
 
       <div class="row">
         <div>
-          <div class="lbl">Stream widget</div>
+          <div class="lbl">Stream Widget</div>
           <div class="note" id="widgetNote">A now-playing card for OBS.</div>
         </div>
         <label class="switch"><input type="checkbox" id="widgetToggle"><span></span></label>
       </div>
       <details class="sub" id="widgetSection" hidden>
-        <summary>Widget options</summary>
+        <summary>Widget Options</summary>
         <div class="row stack">
           <div>
             <div class="lbl">Address</div>
@@ -759,11 +754,11 @@
           </select>
         </div>
         <div class="row">
-          <div class="lbl">Rounded corners</div>
+          <div class="lbl">Rounded Corners</div>
           <label class="switch"><input type="checkbox" id="widgetRounded"><span></span></label>
         </div>
         <div class="row">
-          <div class="lbl">Text size</div>
+          <div class="lbl">Text Size</div>
           <div class="stepper">
             <button id="widgetTextDown" class="soft" aria-label="Smaller text">&minus;</button>
             <span id="widgetTextVal">100%</span>
@@ -771,24 +766,24 @@
           </div>
         </div>
         <div class="row">
-          <div class="lbl">Fade between tracks</div>
+          <div class="lbl">Fade Between Tracks</div>
           <label class="switch"><input type="checkbox" id="wFade"><span></span></label>
         </div>
         <div class="row">
-          <div class="lbl">Scroll long text</div>
+          <div class="lbl">Scroll Long Text</div>
           <label class="switch"><input type="checkbox" id="wScroll"><span></span></label>
         </div>
         <div class="row">
-          <div class="lbl">Spin the record</div>
+          <div class="lbl">Spin the Record</div>
           <label class="switch"><input type="checkbox" id="wSpin"><span></span></label>
         </div>
         <div class="row">
-          <div class="lbl">Colour change</div>
+          <div class="lbl">Colour Change</div>
           <select id="wColor" class="narrow"><option value="0">Instant</option><option value="0.5">Fast</option><option value="1.2">Normal</option><option value="2.5">Slow</option></select>
         </div>
         <div class="row">
           <div>
-            <div class="lbl">Hide this track</div>
+            <div class="lbl">Hide This Track</div>
             <div class="note">Until the next track.</div>
           </div>
           <button id="widgetClear" class="soft">Hide</button>
@@ -797,32 +792,32 @@
 
       <div class="row">
         <div>
-          <div class="lbl">Song requests</div>
+          <div class="lbl">Song Requests</div>
           <div class="note">Your chat bot adds songs to the queue.</div>
         </div>
         <label class="switch"><input type="checkbox" id="reqOn"><span></span></label>
       </div>
       <details class="sub" id="requestSection" hidden>
-        <summary>Request options</summary>
+        <summary>Request Options</summary>
         <div class="row">
-          <div class="lbl">Chat bot</div>
+          <div class="lbl">Chat Bot</div>
           <select id="botSel" class="narrow"><option value="streamerbot">Streamer.bot</option><option value="mixitup">Mix It Up</option><option value="other">Another bot</option></select>
         </div>
         <p class="note" id="reqPlat"></p>
         <p class="note warn" id="reqNote"></p>
         <div class="row stack">
-          <label class="lbl" for="reqUrl" id="reqUrlLbl">Request address</label>
+          <label class="lbl" for="reqUrl" id="reqUrlLbl">Request Address</label>
           <div class="widgetRow"><input id="reqUrl" type="text" readonly><button id="reqCopy" class="soft">Copy</button></div>
         </div>
         <div class="row stack">
-          <label class="lbl" for="reqNowUrl">Now playing address (!song)</label>
+          <label class="lbl" for="reqNowUrl">Now Playing Address (!song)</label>
           <div class="widgetRow"><input id="reqNowUrl" type="text" readonly><button id="reqNowCopy" class="soft">Copy</button></div>
         </div>
         <div class="botHelp" id="botHelp"></div>
 
         <div class="row">
           <div>
-            <div class="lbl">Prefer radio edits</div>
+            <div class="lbl">Prefer Radio Edits</div>
             <div class="note">Plays a long song's radio edit, if there is one.</div>
           </div>
           <label class="switch"><input type="checkbox" id="reqRadioOn"><span></span></label>
@@ -831,16 +826,16 @@
         <details class="sub inner">
           <summary>Limits</summary>
           <div class="row">
-            <div class="lbl">Most waiting</div>
+            <div class="lbl">Most Waiting</div>
             <div class="stepper"><button id="reqMaxDown" class="soft" aria-label="Fewer">&minus;</button><span id="reqMaxVal">10</span><button id="reqMaxUp" class="soft" aria-label="More">+</button></div>
           </div>
           <div class="row">
-            <div class="lbl">Most per viewer</div>
+            <div class="lbl">Most per Viewer</div>
             <div class="stepper"><button id="reqUserDown" class="soft" aria-label="Fewer">&minus;</button><span id="reqUserVal">2</span><button id="reqUserUp" class="soft" aria-label="More">+</button></div>
           </div>
           <div class="row">
             <div>
-              <div class="lbl">Waiting now</div>
+              <div class="lbl">Waiting Now</div>
               <div class="note" id="reqPending">None.</div>
             </div>
             <button id="reqClear" class="soft">Remove all</button>
@@ -848,7 +843,7 @@
         </details>
 
         <details class="sub inner">
-          <summary>Chat replies</summary>
+          <summary>Chat Replies</summary>
           <p class="note">Placeholders: {title} {artist} {user} {position} {platform} {query} {count}</p>
           <div id="reqMsgs"></div>
           <button id="msgReset" class="soft">Reset to defaults</button>
@@ -862,7 +857,7 @@
           </div>
           <div class="row">
             <div>
-              <div class="lbl">Secret key</div>
+              <div class="lbl">Secret Key</div>
               <div class="note">Make a new one if it leaks.</div>
             </div>
             <button id="reqNewKey" class="soft">New key</button>
@@ -873,13 +868,13 @@
       <!-- Stream Deck & remote control, with the other streaming tools -->
       <div class="row">
         <div>
-          <div class="lbl">Stream Deck &amp; remote</div>
+          <div class="lbl">Stream Deck &amp; Remote</div>
           <div class="note">For the OmniPulse Stream Deck plugin. Only this PC can reach it.</div>
         </div>
         <label class="switch"><input type="checkbox" id="remoteOn"><span></span></label>
       </div>
       <details class="sub" id="remoteSection" hidden>
-        <summary>Remote options</summary>
+        <summary>Remote Options</summary>
         <div class="row stack">
           <div>
             <div class="lbl">Address</div>
@@ -894,7 +889,7 @@
         </div>
         <div class="row">
           <div>
-            <div class="lbl">Secret key</div>
+            <div class="lbl">Secret Key</div>
             <div class="note">Make a new one if it leaks.</div>
           </div>
           <button id="remoteNewKey" class="soft">New key</button>
@@ -907,7 +902,7 @@
       <h3>App</h3>
       <div class="row">
         <div>
-          <div class="lbl">Hardware acceleration</div>
+          <div class="lbl">Hardware Acceleration</div>
           <div class="note">Turn off if you see glitches.</div>
         </div>
         <label class="switch"><input type="checkbox" id="gpuToggle"><span></span></label>
@@ -915,7 +910,7 @@
       <p class="note" id="gpuNote" hidden>Restart OmniPulse to apply this. <button id="restartBtn" class="soft">Restart now</button></p>
       <div class="row">
         <div>
-          <div class="lbl">Close to tray</div>
+          <div class="lbl">Close to Tray</div>
           <div class="note">Closing hides the window; music keeps playing. Quit from the tray.</div>
         </div>
         <label class="switch"><input type="checkbox" id="trayToggle"><span></span></label>

@@ -348,7 +348,7 @@ async function refreshSidebar() {
   const parts = await Promise.all(plats.map((id) => sidebarItems(id).catch((e) => { notes.push(e.message || String(e)); return []; })));
   if (tok !== sidebarTok) return;   // switched platforms meanwhile
   // playlists on this PC first; platform playlists you switched to one of those stay hidden
-  const hidden = new Set((prefs.hiddenPlaylists || []).concat(prefs.hiddenByYou || []).map(String));
+  const hidden = new Set((prefs.hiddenPlaylists || []).concat(prefs.hideOn !== false ? prefs.hiddenByYou || [] : []).map(String));
   allPlaylists = xplSidebarItems().concat(parts.flat());   // for Settings > Library > Hidden playlists
   playlists = xplSidebarItems().concat(parts.flat().filter((p) => !hidden.has(String(p.id))));
   renderPlaylists(notes.join(" "));

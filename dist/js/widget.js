@@ -34,7 +34,6 @@ function widgetState() {
 }
 
 function widgetPush() {
-  castPush();
   if (prefs.widget || prefs.req) invoke("widget_update", { state: widgetState() }).catch(() => {});
 }
 

@@ -216,6 +216,7 @@ function runPlaylistAction(a) {
 
 // Playlists you hide are kept (and listed in Settings > Library), just not shown in the sidebar
 async function hidePlaylist(p, hide) {
+  if (hide && prefs.hideOn === false) { prefs.hideOn = true; savePrefs(); }
   const id = String(p.id);
   const set = new Set((prefs.hiddenByYou || []).map(String));
   if (hide) set.add(id); else set.delete(id);
@@ -239,7 +240,7 @@ function paintHiddenPlaylists() {
     row.append(el("span", "", p.title || "Untitled playlist"), show);
     box.append(row);
   });
-  $("hidPlSum").textContent = "Hidden playlists (" + ids.length + ")";
+  $("hidPlSum").textContent = "Hidden Playlists (" + ids.length + ")";
   $("hidPlBox").hidden = !ids.length;
   paintHiddenSummary();
 }

@@ -304,7 +304,7 @@ const albumKeyOf = (title, artist) => {
 };
 const trackAlbumName = (t) => (t && (t.album || (t.spAlbum && t.spAlbum.name))) || "";
 const trackAlbumKey = (t) => albumKeyOf(trackAlbumName(t), t && t.spAlbum && t.spAlbum.artists && t.spAlbum.artists[0] ? t.spAlbum.artists[0].name : recArtistName(t));
-const albumHidden = (a) => hiddenAlbums.size > 0 && hiddenAlbums.has(albumKeyOf(a.title, a.artist));
+const albumHidden = (a) => hidingOn() && hiddenAlbums.size > 0 && hiddenAlbums.has(albumKeyOf(a.title, a.artist));
 
 // The artist a track is "by", as the menu names it: the one in "Artist - Title", or who's credited
 const recArtistName = (t) => (guessNames(t).artist || artistName(t) || "").trim();
@@ -315,13 +315,24 @@ function hiddenArtistOf(t) {
   return names.some((n) => n && hiddenArtists.has(artistKey(n)));
 }
 
+// Off (Settings > Library > Hidden & not recommended), nothing is left out; the lists are kept
+const hidingOn = () => prefs.hideOn !== false;
+function hidingTurnOn() {
+  if (hidingOn()) return;
+  prefs.hideOn = true;
+  savePrefs();
+  paintHiddenSummary();
+  if (typeof refreshSidebar === "function") refreshSidebar();
+}
+
 // Whether the app may recommend this track
-const recOk = (t) => !!t && !hiddenRecs.has(String(t.id)) && !hiddenArtistOf(t) && !(hiddenAlbums.size && hiddenAlbums.has(trackAlbumKey(t)));
+const recOk = (t) => !hidingOn() ? !!t : !!t && !hiddenRecs.has(String(t.id)) && !hiddenArtistOf(t) && !(hiddenAlbums.size && hiddenAlbums.has(trackAlbumKey(t)));
 
 // on pages of recommendations, it goes straight away
 const onRecPage = () => view === "discover" || view === "rediscover" || (view === "playlist" && currentPlaylist && currentPlaylist.source === "mix");
 
 function hideRecommendation(t) {
+  hidingTurnOn();
   hiddenRecs.add(String(t.id));
   prefs.hiddenRecs = [...hiddenRecs].slice(-3000);
   // its name, for the list in Settings
@@ -341,6 +352,7 @@ function hideRecommendation(t) {
 function hideAlbum(title, artist) {
   const key = albumKeyOf(title, artist);
   if (!key) return;
+  hidingTurnOn();
   hiddenAlbums.add(key);
   prefs.hiddenAlbums = Object.assign({}, prefs.hiddenAlbums || {}, { [key]: title + (artist ? " \u2014 " + artist : "") });
   savePrefs();
@@ -354,6 +366,7 @@ function hideArtist(t) {
   const name = recArtistName(t);
   const key = artistKey(name);
   if (!key) return;
+  hidingTurnOn();
   hiddenArtists.add(key);
   prefs.hiddenArtists = Object.assign({}, prefs.hiddenArtists || {}, { [key]: name });
   savePrefs();
@@ -373,6 +386,8 @@ function dropFromAutoplay() {
 // Settings > Library > Hidden & not recommended: a line saying what's there, and a folded list for
 // each kind (artists, tracks, playlists), shown only when it has something in it
 function paintHiddenSummary() {
+  $("hideOn").checked = hidingOn();
+  $("hiddenBody").hidden = !hidingOn();
   const a = Object.keys(prefs.hiddenArtists || {}).length;
   const al = Object.keys(prefs.hiddenAlbums || {}).length;
   const n = hiddenRecs.size;
@@ -382,6 +397,7 @@ function paintHiddenSummary() {
   const parts = [];
   if (rec.length) parts.push(andList(rec) + (a + al + n === 1 ? " isn't" : " aren't") + " recommended");
   if (p) parts.push(plural(p, "playlist is", "playlists are") + " hidden from the sidebar");
+  if (!hidingOn()) { $("hiddenNote").textContent = "Off: nothing is hidden or left out. Your lists are kept."; return; }
   $("hiddenNote").textContent = parts.length
     ? parts.join("; ") + "."
     : "Nothing yet. Right-click a track or album to stop it (or its artist) being recommended, or a playlist in the sidebar to hide it.";
@@ -401,11 +417,11 @@ function paintNotRecommended() {
   const names = prefs.hiddenArtists || {};
   const a = Object.entries(names).sort((x, y) => x[1].localeCompare(y[1]));
   $("notRecArtists").replaceChildren(...a.map(([key, name]) => hiddenRow(name, "\u00d7", "Recommend " + name + " again", { key })));
-  $("hidArtistsSum").textContent = "Artists not recommended (" + a.length + ")";
+  $("hidArtistsSum").textContent = "Artists Not Recommended (" + a.length + ")";
   $("hidArtistsBox").hidden = !a.length;
   const al = Object.entries(prefs.hiddenAlbums || {}).sort((x, y) => x[1].localeCompare(y[1]));
   $("notRecAlbums").replaceChildren(...al.map(([key, name]) => hiddenRow(name, "\u00d7", "Recommend it again", { album: key })));
-  $("hidAlbumsSum").textContent = "Albums not recommended (" + al.length + ")";
+  $("hidAlbumsSum").textContent = "Albums Not Recommended (" + al.length + ")";
   $("hidAlbumsBox").hidden = !al.length;
   const tn = prefs.hiddenRecNames || {};
   const ids = [...hiddenRecs];
@@ -414,7 +430,7 @@ function paintNotRecommended() {
   const rows = named.map((id) => hiddenRow(tn[id], "\u00d7", "Recommend it again", { track: id }));
   if (unnamed) rows.push(el("p", "note", unnamed + (unnamed === 1 ? " track" : " tracks") + " from before names were kept here."));
   $("notRecTrackList").replaceChildren(...rows);
-  $("hidTracksSum").textContent = "Tracks not recommended (" + ids.length + ")";
+  $("hidTracksSum").textContent = "Tracks Not Recommended (" + ids.length + ")";
   $("hidTracksBox").hidden = !ids.length;
   paintHiddenSummary();
 }
@@ -533,6 +549,13 @@ function libraryInit() {
   hiddenArtists = new Set(Object.keys(prefs.hiddenArtists || {}));
   hiddenAlbums = new Set(Object.keys(prefs.hiddenAlbums || {}));
   paintNotRecommended();
+  $("hideOn").addEventListener("change", () => {
+    prefs.hideOn = $("hideOn").checked;
+    savePrefs();
+    paintHiddenSummary();
+    refreshSidebar();
+    say(prefs.hideOn ? "Hidden and not recommended things are left out again." : "Nothing is hidden or left out now. Your lists are kept.");
+  });
   $("notRecAlbums").addEventListener("click", (e) => {
     const b = e.target.closest("button[data-album]");
     if (!b) return;

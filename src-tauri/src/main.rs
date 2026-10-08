@@ -244,9 +244,9 @@ fn cast_devices() -> Result<Vec<omnipulse_core::cast::Device>, String> {
     Ok(omnipulse_core::cast::devices())
 }
 #[tauri::command]
-async fn cast_start(id: String, app: Option<String>, meta: Value, events: Channel<Value>) -> Result<omnipulse_core::cast::Device, String> {
+async fn cast_start(id: String, meta: Value, events: Channel<Value>) -> Result<omnipulse_core::cast::Device, String> {
     tokio::task::spawn_blocking(move || {
-        omnipulse_core::cast::start(&id, app, meta, std::sync::Arc::new(move |v| { let _ = events.send(v); }))
+        omnipulse_core::cast::start(&id, meta, std::sync::Arc::new(move |v| { let _ = events.send(v); }))
     })
     .await
     .map_err(|e| e.to_string())?
@@ -261,8 +261,6 @@ fn cast_pcm(request: tauri::ipc::Request) {
 }
 #[tauri::command]
 fn cast_track(meta: Value) { omnipulse_core::cast::track(meta) }
-#[tauri::command]
-fn cast_state(state: Value) { omnipulse_core::cast::state(state) }
 #[tauri::command]
 fn cast_reload() { omnipulse_core::cast::reload() }
 #[tauri::command]
@@ -675,7 +673,7 @@ fn main() {
         })
         .invoke_handler(tauri::generate_handler![
             omni_input_start, omni_input_pcm, omni_input_stop,
-            cast_devices, cast_start, cast_pcm, cast_track, cast_state, cast_reload, cast_volume, cast_stop,
+            cast_devices, cast_start, cast_pcm, cast_track, cast_reload, cast_volume, cast_stop,
             login, signed_in, logout, api_get, stream_url, get_settings, set_gpu, restart_app, open_url, set_like, set_follow, playlist_write,
             spotify_login, spotify_signed_in, spotify_logout, spotify_token, spotify_api,
             lyrics_get, presence_set, presence_clear,

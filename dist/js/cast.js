@@ -3,9 +3,8 @@
 //
 // The app stays the player. Its sound, after the EQ, loudness match, limiter and volume, goes to the
 // device as one live stream (crates/core/src/cast.rs), so every source, trims and the queue work as
-// they do here; the PC's own output is muted meanwhile. A device with a screen shows what's playing:
-// OmniPulse's own display (cast-receiver/, once it's set up in Settings > Sound > Casting) with play,
-// pause and skip buttons, or otherwise Google's player with the title, artist and cover.
+// they do here; the PC's own output is muted meanwhile (unless Keep Playing on This PC is on). A device
+// with a screen shows Google's own player, with the title, artist and cover.
 // There's a short delay (the device's buffer) between pressing play here and hearing it there.
 
 const cast = { on: false, device: null, node: null, sink: null, devPaused: false, starting: false };
@@ -54,13 +53,11 @@ async function castStart(d) {
     await castTapStart();
     const ch = new window.__TAURI__.core.Channel();
     ch.onmessage = castEvent;
-    const app = d.display && prefs.castApp ? prefs.castApp : null;
-    cast.device = await invoke("cast_start", { id: d.id, app, meta: castMeta(), events: ch });
+    cast.device = await invoke("cast_start", { id: d.id, meta: castMeta(), events: ch });
     cast.on = true;
     cast.devPaused = false;
     castLocalApply();
     castPaint();
-    castPush();
     say("Casting to " + d.name + "." + (prefs.castLocal ? " Playing here too." : " It plays there a moment after it does here."));
   } catch (e) {
     castTapStop();
@@ -101,14 +98,6 @@ function castEvent(m) {
       invoke("cast_reload").catch(() => {});   // what it had buffered is old
       if (!nowPlaying()) toggle();
     } else if (m.state === "IDLE" && m.idleReason === "ERROR") say((cast.device ? cast.device.name : "The device") + " couldn't play the stream.");
-  } else if (m.type === "app" && m.message) {
-    const a = m.message;
-    if (a.type === "hello") { invoke("cast_track", { meta: castMeta() }).catch(() => {}); castPush(); }
-    else if (a.type === "command") {
-      if (a.action === "toggle") toggle();
-      else if (a.action === "next") step(1);
-      else if (a.action === "prev") step(-1);
-    }
   }
 }
 
@@ -116,9 +105,7 @@ function castEvent(m) {
 function castTrack() {
   if (cast.on) invoke("cast_track", { meta: castMeta() }).catch(() => {});
 }
-function castPush() {
-  if (cast.on) invoke("cast_state", { state: widgetState() }).catch(() => {});
-}
+
 
 function castPaint() {
   const b = $("outputBtn");
@@ -218,12 +205,6 @@ function castInit() {
     savePrefs();
     castLocalPaint();
     castLocalApply();
-  });
-  $("castApp").value = prefs.castApp || "";
-  $("castApp").addEventListener("change", () => {
-    prefs.castApp = $("castApp").value.trim().toUpperCase().replace(/[^0-9A-F]/g, "");
-    $("castApp").value = prefs.castApp;
-    savePrefs();
   });
   castPaint();
   // start listening for devices early, so the menu has them

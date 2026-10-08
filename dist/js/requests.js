@@ -289,7 +289,7 @@ function reqRenderBot() {
   const li = (...parts) => { const x = el("li"); parts.forEach((p) => x.append(typeof p === "string" ? document.createTextNode(p) : p)); return x; };
   const ol = el("ol");
   if (bot === "streamerbot") {
-    $("reqUrlLbl").textContent = "Fetch URL address (variables already filled in)";
+    $("reqUrlLbl").textContent = "Fetch URL Address (variables already filled in)";
     ol.append(
       li("Create an Action called Song request, with a Command trigger such as ", code("!sr"), "."),
       li("Add the sub-action Core > Network > Fetch URL, paste the address above, and set its variable name to ", code("reply"), "."),
@@ -298,7 +298,7 @@ function reqRenderBot() {
     );
     help.append(ol, el("p", "note", "If your version names things slightly differently, look for the sub-action that fetches a URL and saves the reply in a variable."));
   } else if (bot === "mixitup") {
-    $("reqUrlLbl").textContent = "Web Request address (special identifiers already filled in)";
+    $("reqUrlLbl").textContent = "Web Request Address (special identifiers already filled in)";
     ol.append(
       li("Create a Chat Command such as ", code("!sr"), "."),
       li("Add a Web Request action, paste the address above, and set the response to plain text."),
@@ -307,7 +307,7 @@ function reqRenderBot() {
     );
     help.append(ol, el("p", "note", "If $webrequestresult doesn't post anything in your version, check Mix It Up's list of special identifiers for the web request result."));
   } else {
-    $("reqUrlLbl").textContent = "Request address (replace USERNAME and SONG with your bot's variables)";
+    $("reqUrlLbl").textContent = "Request Address (replace USERNAME and SONG with your bot's variables)";
     help.append(
       el("p", "", "Any bot that can call a web address and post the reply in chat will work:"),
       (() => { const l = el("ol"); l.append(

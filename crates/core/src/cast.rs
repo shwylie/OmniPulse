@@ -24,8 +24,6 @@ const NS_CONN: &str = "urn:x-cast:com.google.cast.tp.connection";
 const NS_HEART: &str = "urn:x-cast:com.google.cast.tp.heartbeat";
 const NS_RECV: &str = "urn:x-cast:com.google.cast.receiver";
 const NS_MEDIA: &str = "urn:x-cast:com.google.cast.media";
-/// OmniPulse's own receiver (cast-receiver/): track info and its buttons
-pub const NS_APP: &str = "urn:x-cast:com.omnipulse.app";
 const SENDER: &str = "sender-omnipulse";
 
 #[derive(Clone, Serialize, Debug)]
@@ -35,7 +33,7 @@ pub struct Device {
     pub model: String,
     pub host: String,
     pub port: u16,
-    /// has a screen (a Nest Hub, a TV): gets the now-playing display
+    /// has a screen (a Nest Hub, a TV)
     pub display: bool,
     /// a speaker group
     pub group: bool,
@@ -346,19 +344,6 @@ impl Session {
     fn next_req(&self) -> i64 {
         self.req.fetch_add(1, Ordering::SeqCst)
     }
-    fn to_app(&self, ns: &str, mut payload: Value) {
-        let t = self.transport.lock().unwrap().clone();
-        if t.is_empty() {
-            return;
-        }
-        if ns == NS_MEDIA {
-            payload["requestId"] = json!(self.next_req());
-            if let Some(id) = *self.media.lock().unwrap() {
-                payload["mediaSessionId"] = json!(id);
-            }
-        }
-        self.send(&t, ns, payload);
-    }
     fn load(&self) {
         let meta = self.meta.lock().unwrap().clone();
         let mut m = json!({ "metadataType": 3 });
@@ -385,12 +370,12 @@ fn local_ip_for(host: &str, port: u16) -> Result<IpAddr, String> {
     Ok(s.local_addr().map_err(|e| e.to_string())?.ip())
 }
 
-/// Casts to a device: opens the receiver (OmniPulse's own one when `app` is set and the device has a
-/// screen, otherwise Google's), and plays the live stream there. `meta`: { title, artist, album, art }.
-pub fn start(device_id: &str, app: Option<String>, meta: Value, events: Events) -> Result<Device, String> {
+/// Casts to a device: opens Google's player there and plays the live stream. `meta`: { title, artist,
+/// album, art }, which its screen (if it has one) shows.
+pub fn start(device_id: &str, meta: Value, events: Events) -> Result<Device, String> {
     stop();
     let device = devices().into_iter().find(|d| d.id == device_id).ok_or("That device isn't on the network any more.")?;
-    let app = app.filter(|a| !a.trim().is_empty() && device.display).map(|a| a.trim().to_uppercase()).unwrap_or_else(|| DEFAULT_APP.into());
+    let app = DEFAULT_APP.to_string();
 
     // the stream, on the address that reaches the device
     let ip = local_ip_for(&device.host, device.port)?;
@@ -520,7 +505,6 @@ pub fn start(device_id: &str, app: Option<String>, meta: Value, events: Events) 
                             events(json!({ "type": "error", "message": format!("{} couldn't play the stream ({kind}).", sess.device.name) }));
                         }
                         (NS_CONN, "CLOSE") => { why = format!("{} ended the cast.", sess.device.name); break; }
-                        (NS_APP, _) => events(json!({ "type": "app", "message": p })),
                         _ => {}
                     }
                 }
@@ -549,26 +533,13 @@ fn current() -> Option<Arc<Session>> {
     SESSION.lock().unwrap().clone()
 }
 
-/// A new track: OmniPulse's receiver is told what it is; Google's has the stream loaded again with
-/// the new title (it starts from where the track started, so nothing is missed)
+/// A new track: the stream is loaded again with the new title (from where the track started, so
+/// nothing is missed)
 pub fn track(meta: Value) {
     mark();
     let Some(s) = current() else { return };
-    *s.meta.lock().unwrap() = meta.clone();
-    if s.app == DEFAULT_APP {
-        s.load();
-    } else {
-        s.to_app(NS_APP, json!({ "type": "track", "track": meta }));
-    }
-}
-
-/// Playing or paused, and where in the track (OmniPulse's receiver shows it)
-pub fn state(st: Value) {
-    if let Some(s) = current() {
-        if s.app != DEFAULT_APP {
-            s.to_app(NS_APP, json!({ "type": "state", "state": st }));
-        }
-    }
+    *s.meta.lock().unwrap() = meta;
+    s.load();
 }
 
 /// The stream again from now (after the device was paused, its buffer is old)
