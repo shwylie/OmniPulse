@@ -89,6 +89,7 @@ function cycleRepeat() {
 
 // Called when a track finishes, from the audio element or the Spotify player
 function onEnded() {
+  if (closestNote) closestAccept();   // a closest version heard to the end: kept (app.js)
   if (repeatMode === "one") {
     if (onSpotifyEngine(curTrack())) playCurrent();
     else { audio.currentTime = trimStart(curTrack()) / 1000; audio.play(); }

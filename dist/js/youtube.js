@@ -131,7 +131,7 @@ async function ytMatch(t, any) {
   const saved = ytMatchesLoad()[t.id];
   if (saved && saved.id) return ytTrack(saved);
   // (an old "none" without a date, or one more than a day old, is looked for again; so is a strict one when any will do)
-  if (saved && saved.none && (saved.any || !any) && Date.now() - (saved.at || 0) < YT_NO_MATCH_TTL) { ytLastMiss = { id: t.id, closest: saved.closest || "" }; return null; }
+  if (saved && saved.none && (saved.any || !any) && Date.now() - (saved.at || 0) < YT_NO_MATCH_TTL) { ytLastMiss = { id: t.id, closest: saved.closest || "", near: saved.near || null }; return null; }
   let ranked;
   try { ranked = await ytCandidates(t); } catch (e) { return null; }   // couldn't search: try again next time
   // nothing close: once more, by the song's own title
@@ -142,9 +142,11 @@ async function ytMatch(t, any) {
   const pick = any ? ranked.find((x) => x.score >= 0.5 && artistHit(t, x.c)) : top && top.score >= 0.8 ? top : null;
   const ok = pick ? pick.c : null;
   const closest = top ? '"' + top.c.title + '" by ' + artistName(top.c) : "";
-  ytMatches[t.id] = ok ? ytSnap(ok) : { none: true, at: Date.now(), closest, any: !!any };
+  // (the closest one is kept too: a Go+ track with no match plays it rather than nothing)
+  const near = top ? ytSnap(top.c) : null;
+  ytMatches[t.id] = ok ? ytSnap(ok) : { none: true, at: Date.now(), closest, near, any: !!any };
   ytMatchesSave();
-  if (!ok) ytLastMiss = { id: t.id, closest };
+  if (!ok) ytLastMiss = { id: t.id, closest, near };
   return ok;
 }
 
@@ -156,11 +158,22 @@ function ytChooseMatch(t, c) {
   delete t.ytVia;
 }
 
+// The closest YouTube Music version found for a track that had no match (or null)
+function ytClosest(t) {
+  const miss = ytLastMiss && ytLastMiss.id === t.id ? ytLastMiss : (ytMatchesLoad()[t.id] || {});
+  return miss.near && miss.near.id ? ytTrack(miss.near) : null;
+}
+
 // Plays a track by its YouTube Music match; false if there's none (or YouTube Music is off)
 async function playViaYouTube(t, mine, note, any) {
   if (!ytOn()) return false;
   const m = await ytMatch(t, any).catch(() => null);
   if (!m || mine !== streamToken) return false;
+  return playYouTubeVersion(t, m, mine, note);
+}
+
+// Plays a track as a YouTube Music version of it (its match, or the closest one)
+async function playYouTubeVersion(t, m, mine, note) {
   t.ytVia = m.ytId;   // loudness and silences are measured on what's actually playing
   const url = await ytPlay(m);
   if (mine !== streamToken) return true;

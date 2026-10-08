@@ -1307,6 +1307,7 @@ function playFromPage(i) {
 async function playCurrent() {
   const t = curTrack();
   if (!t) return;
+  if (closestNote && closestNote.t !== t) { closestNote = null; say("", { force: true }); }
   if (!safeOk(t)) { safeSkip(t); return; }
   fadeTrackChange(fadeState.last, t);   // the old one fades out, this one in (js/fade.js)
   fadeState.last = t;
@@ -1537,7 +1538,48 @@ async function playFullElsewhere(t, mine, why) {
     setTimeout(() => playCurrent().then(() => { if (curTrack() === sp) say(why + ": playing the full song from Spotify."); }), 0);
     return;
   }
+  // nothing close enough: the closest there is, so it keeps playing; a note says so while it plays
+  const near = ytOn() ? ytClosest(t) : null;
+  if (near && curTrack() === t) {
+    const ok = await playYouTubeVersion(t, near, mine, "").catch(() => false);
+    if (mine !== streamToken) return;
+    if (ok) { closestShow(t, near, why); return; }
+  }
   noVersionSkip(t, why);
+}
+
+// ---------- the closest version, playing ----------
+// While it plays, a note says which it is, with Choose a version and Skip. Heard to the end, it's
+// kept for that track from then on, and its artist is shown as that version's.
+let closestNote = null;   // { t, near }
+function closestShow(t, near, why) {
+  closestNote = { t, near };
+  say(why + ": no exact match, so it's playing the closest, \"" + near.title + "\" by " + artistName(near) + ", from YouTube Music. Wrong one?", {
+    stay: true,
+    actions: [["Choose a version", () => { closestNote = null; openFixDialog(t); }], ["Skip", () => { closestNote = null; step(1); }]],
+  });
+}
+
+// It played to the end: that version it is
+function closestAccept() {
+  const n = closestNote;
+  closestNote = null;
+  if (!n || curTrack() !== n.t) return;
+  const t = n.t;
+  ytChooseMatch(t, n.near);
+  const theirs = artistName(n.near);
+  if (theirs && theirs.toLowerCase() !== String(artistName(t)).toLowerCase()) {
+    const old = (prefs.trackFixes || {})[t.id];
+    prefs.trackFixes = Object.assign({}, prefs.trackFixes, { [t.id]: { title: (old && old.title) || (t._auto ? t._auto.title : t.title), artist: theirs } });
+    savePrefs();
+    forEachCopy(t.id, (x) => {
+      if (!x._auto) x._auto = { title: x.title, artist: x.displayArtist || null };
+      x.displayArtist = theirs;
+    });
+    refreshAfterFix(t.id);
+  }
+  say("", { force: true });
+  say('"' + (t.title || "That track") + "\" plays that version from now on" + (theirs ? ", by " + theirs : "") + ".");
 }
 
 function noVersionSkip(t, why) {
