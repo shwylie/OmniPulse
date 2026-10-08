@@ -24,6 +24,9 @@
     ],
     "resources": [
       "icons/taskbar/*"
+    ],
+    "externalBin": [
+      "binaries/omnipulse-input"
     ]
   }
 }

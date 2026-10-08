@@ -3240,7 +3240,6 @@ name = "omnipulse-core"
 version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
- "cpal",
  "ebur128",
  "futures",
  "librespot-core",
@@ -3263,6 +3262,15 @@ dependencies = [
  "urlencoding",
  "windows 0.62.2",
  "zip",
+]
+
+[[package]]
+name = "omnipulse-input"
+version = "0.1.0"
+dependencies = [
+ "cpal",
+ "tauri-winres",
+ "windows 0.62.2",
 ]
 
 [[package]]

@@ -1,259 +1,168 @@
 // The OmniPulse Input (Settings > Streaming): the app's sound, with its own volume and offset, played
-// a second time from this process as its own app, "OmniPulse Input", on the default playback device.
-// The main sound plays from the WebView, so the two show up separately in Windows' mixer, Elgato
-// Wave Link and the like, where this one can be sent to a stream mix only. No driver is involved.
+// a second time so it can be routed apart from the main sound (to a stream mix only, say).
 //
-// The page sends 16-bit stereo PCM (at its audio context's rate); it's resampled to the device's rate
-// here and played through cpal (WASAPI, shared mode).
+// Wave Link and the Sound Mixer list apps by program, so it's played by a small program of its own,
+// omnipulse-input.exe (crates/input), shown as "OmniPulse Input". It runs only while the setting is
+// on: this starts it, sends it the page's sound on its standard input, and stops it by closing that.
 
-use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-use std::collections::VecDeque;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{mpsc, Arc, Mutex};
+use std::io::{BufRead, BufReader, Write};
+use std::process::{Child, Command, Stdio};
+use std::sync::mpsc::{self, SyncSender, TrySendError};
+use std::sync::Mutex;
+use std::time::Duration;
 
-pub const SESSION_NAME: &str = "OmniPulse Input";
+pub const PROGRAM: &str = "omnipulse-input.exe";
 
-struct Feed {
-    frames: VecDeque<[f32; 2]>,
-    rate: u32,
-    phase: f64,
-    primed: bool,
+struct Running {
+    child: Child,
+    tx: SyncSender<Vec<u8>>,
 }
 
-static FEED: Mutex<Feed> = Mutex::new(Feed { frames: VecDeque::new(), rate: 48000, phase: 0.0, primed: false });
-static RUNNING: Mutex<Option<Arc<AtomicBool>>> = Mutex::new(None);
+static RUNNING: Mutex<Option<Running>> = Mutex::new(None);
 
-// how much is kept ready (it starts playing once there's this much), and the most it may lag by
-const PREFILL_MS: usize = 60;
-const MAX_MS: usize = 400;
-
-pub fn push_pcm(bytes: &[u8], rate: u32) {
-    if RUNNING.lock().unwrap().is_none() {
-        return;
+/// Where the program is: next to OmniPulse (the installer puts it there; so does a build)
+fn program_path() -> Result<std::path::PathBuf, String> {
+    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+    let dir = exe.parent().ok_or("no folder")?;
+    let p = dir.join(PROGRAM);
+    if p.exists() {
+        return Ok(p);
     }
-    let mut f = FEED.lock().unwrap();
-    if rate > 0 && rate != f.rate {
-        f.rate = rate;
-        f.frames.clear();
-        f.primed = false;
-    }
-    for c in bytes.as_chunks::<4>().0 {
-        let l = i16::from_le_bytes([c[0], c[1]]) as f32 / 32768.0;
-        let r = i16::from_le_bytes([c[2], c[3]]) as f32 / 32768.0;
-        f.frames.push_back([l, r]);
-    }
-    let max = f.rate as usize * MAX_MS / 1000;
-    if f.frames.len() > max {
-        // fell behind (the device stalled): drop the oldest, back to the usual margin
-        let keep = f.rate as usize * PREFILL_MS * 2 / 1000;
-        let drop = f.frames.len() - keep;
-        f.frames.drain(..drop);
+    // a test build of the core sits a folder deeper (target/debug/deps)
+    let up = dir.parent().map(|d| d.join(PROGRAM));
+    match up {
+        Some(p) if p.exists() => Ok(p),
+        _ => Err(format!("{PROGRAM} is missing next to OmniPulse; reinstalling should bring it back.")),
     }
 }
 
-/// Fills one device buffer: linear resampling from the page's rate, silence while there's too little
-pub(crate) fn fill(out: &mut [f32], channels: usize, out_rate: u32) {
-    let mut f = FEED.lock().unwrap();
-    let step = f.rate as f64 / out_rate as f64;
-    let prefill = f.rate as usize * PREFILL_MS / 1000;
-    if !f.primed && f.frames.len() >= prefill.max(2) {
-        f.primed = true;
-    }
-    for frame in out.chunks_mut(channels.max(1)) {
-        if !f.primed || f.frames.len() < 2 {
-            f.primed = false;
-            frame.iter_mut().for_each(|s| *s = 0.0);
-            continue;
-        }
-        let (a, b, t) = (f.frames[0], f.frames[1], f.phase as f32);
-        let l = a[0] + (b[0] - a[0]) * t;
-        let r = a[1] + (b[1] - a[1]) * t;
-        match frame.len() {
-            1 => frame[0] = (l + r) * 0.5,
-            _ => {
-                frame[0] = l;
-                frame[1] = r;
-                frame[2..].iter_mut().for_each(|s| *s = 0.0);
-            }
-        }
-        f.phase += step;
-        while f.phase >= 1.0 && !f.frames.is_empty() {
-            f.frames.pop_front();
-            f.phase -= 1.0;
-        }
-    }
-}
-
-/// Starts playing (on the default playback device); returns that device's name. `muted`: start muted
-/// in Windows' mixer (where it can be unmuted once it's routed)
+/// Starts it (playing on the default playback device, muted in the Sound Mixer if asked); returns that
+/// device's name
 pub fn start(muted: bool) -> Result<String, String> {
     stop();
-    let alive = Arc::new(AtomicBool::new(true));
-    {
-        let mut f = FEED.lock().unwrap();
-        f.frames.clear();
-        f.primed = false;
-        f.phase = 0.0;
+    let mut cmd = Command::new(program_path()?);
+    if muted {
+        cmd.arg("--muted");
     }
-    let (tx, rx) = mpsc::channel::<Result<String, String>>();
-    let flag = alive.clone();
-    // a cpal stream stays on the thread that made it
+    cmd.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::null());
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x0800_0000); // no console window
+    }
+    let mut child = cmd.spawn().map_err(|e| format!("Couldn't start the OmniPulse Input: {e}"))?;
+    let stdout = child.stdout.take().ok_or("no output")?;
+    let (line_tx, line_rx) = mpsc::channel();
     std::thread::spawn(move || {
-        let made = (|| -> Result<(cpal::Stream, String), String> {
-            let host = cpal::default_host();
-            let dev = host.default_output_device().ok_or("There's no playback device.")?;
-            let name = dev.name().unwrap_or_else(|_| "the default device".into());
-            let sup = dev.default_output_config().map_err(|e| e.to_string())?;
-            let fmt = sup.sample_format();
-            let cfg: cpal::StreamConfig = sup.into();
-            let (ch, rate) = (cfg.channels as usize, cfg.sample_rate.0);
-            let err = |e| eprintln!("OmniPulse Input: {e}");
-            let stream = match fmt {
-                cpal::SampleFormat::F32 => dev.build_output_stream(&cfg, move |d: &mut [f32], _| fill(d, ch, rate), err, None),
-                cpal::SampleFormat::I16 => {
-                    let mut tmp = Vec::new();
-                    dev.build_output_stream(&cfg, move |d: &mut [i16], _| {
-                        tmp.resize(d.len(), 0.0);
-                        fill(&mut tmp, ch, rate);
-                        d.iter_mut().zip(&tmp).for_each(|(o, s)| *o = (s.clamp(-1.0, 1.0) * 32767.0) as i16);
-                    }, err, None)
-                }
-                other => return Err(format!("The playback device uses a sample format ({other}) this can't play.")),
-            }
-            .map_err(|e| e.to_string())?;
-            stream.play().map_err(|e| e.to_string())?;
-            name_session(muted);
-            Ok((stream, name))
-        })();
-        match made {
-            Ok((stream, name)) => {
-                let _ = tx.send(Ok(name));
-                while flag.load(Ordering::SeqCst) {
-                    std::thread::park_timeout(std::time::Duration::from_millis(500));
-                }
-                drop(stream);
-            }
-            Err(e) => {
-                let _ = tx.send(Err(e));
+        let mut line = String::new();
+        let _ = BufReader::new(stdout).read_line(&mut line);
+        let _ = line_tx.send(line);
+    });
+    let line = line_rx.recv_timeout(Duration::from_secs(10)).unwrap_or_default();
+    let line = line.trim();
+    let Some(device) = line.strip_prefix("ok ") else {
+        let _ = child.kill();
+        let why = line.strip_prefix("error ").unwrap_or("it didn't answer");
+        return Err(format!("Couldn't start the OmniPulse Input: {why}"));
+    };
+    // the sound goes through a short queue, so a slow moment there never holds up the app
+    let mut stdin = child.stdin.take().ok_or("no input")?;
+    let (tx, rx) = mpsc::sync_channel::<Vec<u8>>(32);
+    std::thread::spawn(move || {
+        while let Ok(piece) = rx.recv() {
+            if stdin.write_all(&piece).is_err() {
+                break;
             }
         }
     });
-    match rx.recv_timeout(std::time::Duration::from_secs(10)) {
-        Ok(Ok(name)) => {
-            *RUNNING.lock().unwrap() = Some(alive);
-            Ok(name)
-        }
-        Ok(Err(e)) => {
-            alive.store(false, Ordering::SeqCst);
-            Err(format!("Couldn't start the OmniPulse Input: {e}"))
-        }
-        Err(_) => {
-            alive.store(false, Ordering::SeqCst);
-            Err("Couldn't start the OmniPulse Input: the playback device didn't answer.".into())
-        }
+    *RUNNING.lock().unwrap() = Some(Running { child, tx });
+    Ok(device.to_string())
+}
+
+/// 16-bit stereo PCM from the page, at its rate
+pub fn push_pcm(bytes: &[u8], rate: u32) {
+    let guard = RUNNING.lock().unwrap();
+    let Some(r) = guard.as_ref() else { return };
+    let mut piece = Vec::with_capacity(8 + bytes.len());
+    piece.extend_from_slice(&rate.to_le_bytes());
+    piece.extend_from_slice(&(bytes.len() as u32).to_le_bytes());
+    piece.extend_from_slice(bytes);
+    match r.tx.try_send(piece) {
+        Ok(()) | Err(TrySendError::Full(_)) => {} // full: this piece is dropped rather than waited for
+        Err(TrySendError::Disconnected(_)) => {}
     }
 }
 
+/// Stops it: its input closes and it ends by itself (and is ended if it doesn't)
 pub fn stop() {
-    if let Some(a) = RUNNING.lock().unwrap().take() {
-        a.store(false, Ordering::SeqCst);
-    }
+    let Some(mut r) = RUNNING.lock().unwrap().take() else { return };
+    drop(r.tx);
+    std::thread::spawn(move || {
+        for _ in 0..20 {
+            if matches!(r.child.try_wait(), Ok(Some(_))) {
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(100));
+        }
+        let _ = r.child.kill();
+    });
 }
 
 pub fn running() -> bool {
     RUNNING.lock().unwrap().is_some()
 }
 
-// Windows' mixer (and Wave Link) shows this stream as "OmniPulse Input": the name of this process's
-// audio session on the default device, which is the session this stream plays in
-#[cfg(windows)]
-fn name_session(muted: bool) {
-    use windows::core::HSTRING;
-    use windows::Win32::Media::Audio::{eConsole, eRender, IAudioSessionManager, IMMDeviceEnumerator, MMDeviceEnumerator};
-    use windows::Win32::System::Com::{CoCreateInstance, CoInitializeEx, CLSCTX_ALL, COINIT_MULTITHREADED};
-    unsafe {
-        let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
-        let r = (|| -> windows::core::Result<()> {
-            let en: IMMDeviceEnumerator = CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL)?;
-            let dev = en.GetDefaultAudioEndpoint(eRender, eConsole)?;
-            let mgr: IAudioSessionManager = dev.Activate(CLSCTX_ALL, None)?;
-            let ctl = mgr.GetAudioSessionControl(None, 0)?;
-            ctl.SetDisplayName(&HSTRING::from(SESSION_NAME), std::ptr::null())?;
-            if muted {
-                mgr.GetSimpleAudioVolume(None, 0)?.SetMute(true, std::ptr::null())?;
-            }
-            Ok(())
-        })();
-        if let Err(e) = r {
-            eprintln!("OmniPulse Input: couldn't name the session: {e}");
-        }
-    }
-}
-
-#[cfg(not(windows))]
-fn name_session(_muted: bool) {}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn resamples_and_waits_for_enough() {
-        *RUNNING.lock().unwrap() = Some(Arc::new(AtomicBool::new(true)));
-        {
-            let mut f = FEED.lock().unwrap();
-            f.frames.clear();
-            f.primed = false;
-            f.phase = 0.0;
-        }
-        // too little yet: silence
-        let one: Vec<u8> = [16384i16, -16384].iter().flat_map(|s| s.to_le_bytes()).collect();
-        push_pcm(&one.repeat(10), 48000);
-        let mut out = vec![1.0f32; 8];
-        fill(&mut out, 2, 48000);
-        assert!(out.iter().all(|&s| s == 0.0));
-        // enough: the sound, at the device's rate (44.1 kHz from 48 kHz takes fewer frames)
-        push_pcm(&one.repeat(4800), 48000);
-        let mut out = vec![0.0f32; 2 * 441];
-        fill(&mut out, 2, 44100);
-        assert!((out[0] - 0.5).abs() < 1e-3 && (out[1] + 0.5).abs() < 1e-3);
-        let left = FEED.lock().unwrap().frames.len();
-        assert!((4810 - 480 - 2..=4810 - 480 + 2).contains(&left), "{left}");
-        // a 6-channel device gets the sound on the front pair only
-        let mut out = vec![9.0f32; 12];
-        fill(&mut out, 6, 48000);
-        assert_eq!(&out[2..6], &[0.0; 4]);
-        stop();
-    }
-}
-
 #[cfg(test)]
 mod live {
-    // a real (silent) stream on this PC's default device: cargo test -p omnipulse-core omni_live -- --ignored --nocapture
+    // the real thing on this PC's default device, silent: build the program first
+    // (cargo build -p omnipulse-input), then cargo test -p omnipulse-core omni_program_live -- --ignored --nocapture
     #[test]
     #[ignore]
-    fn omni_live() {
-        let name = super::start(true).expect("starts");
-        println!("playing on {name}");
-        super::push_pcm(&vec![0u8; 48000 * 4 / 2], 48000);
-        std::thread::sleep(std::time::Duration::from_millis(1500));
-        assert!(super::running());
-        #[cfg(windows)]
+    fn omni_program_live() {
+        let device = super::start(true).expect("starts");
+        println!("playing on {device}");
+        for _ in 0..30 {
+            super::push_pcm(&vec![0u8; 4800 * 4], 48000);
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+        let found = sessions();
+        println!("{found:?}");
+        super::stop();
+        let ours = found.iter().find(|(exe, _, _)| exe.eq_ignore_ascii_case(super::PROGRAM)).expect("a session from omnipulse-input.exe");
+        assert_eq!(ours.1, "OmniPulse Input");
+        assert!(ours.2, "started muted");
+    }
+
+    /// The default device's audio sessions: (program, display name, muted)
+    #[cfg(windows)]
+    fn sessions() -> Vec<(String, String, bool)> {
+        use windows::core::Interface;
+        use windows::Win32::Media::Audio::*;
+        use windows::Win32::System::Com::*;
+        use windows::Win32::System::Threading::*;
+        let mut out = Vec::new();
         unsafe {
-            use windows::Win32::Media::Audio::{eConsole, eRender, IAudioSessionManager, IMMDeviceEnumerator, MMDeviceEnumerator};
-            use windows::Win32::System::Com::{CoCreateInstance, CoInitializeEx, CLSCTX_ALL, COINIT_MULTITHREADED};
             let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
             let en: IMMDeviceEnumerator = CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL).unwrap();
-            let mgr: IAudioSessionManager = en.GetDefaultAudioEndpoint(eRender, eConsole).unwrap().Activate(CLSCTX_ALL, None).unwrap();
-            let vol = mgr.GetSimpleAudioVolume(None, 0).unwrap();
-            let muted = vol.GetMute().unwrap().as_bool();
-            let name = mgr.GetAudioSessionControl(None, 0).unwrap().GetDisplayName().unwrap().to_string().unwrap();
-            println!("session: {name}, muted: {muted}");
-            // leave the test program's session as it was
-            vol.SetMute(false, std::ptr::null()).unwrap();
-            assert!(muted);
-            assert_eq!(name, super::SESSION_NAME);
+            let mgr: IAudioSessionManager2 = en.GetDefaultAudioEndpoint(eRender, eConsole).unwrap().Activate(CLSCTX_ALL, None).unwrap();
+            let list = mgr.GetSessionEnumerator().unwrap();
+            for i in 0..list.GetCount().unwrap() {
+                let ctl = list.GetSession(i).unwrap();
+                let c2: IAudioSessionControl2 = ctl.cast().unwrap();
+                let pid = c2.GetProcessId().unwrap_or(0);
+                let name = ctl.GetDisplayName().map(|s| s.to_string().unwrap_or_default()).unwrap_or_default();
+                let muted = ctl.cast::<ISimpleAudioVolume>().and_then(|v| v.GetMute()).map(|b| b.as_bool()).unwrap_or(false);
+                let mut exe = String::new();
+                if let Ok(h) = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) {
+                    let mut buf = [0u16; 260];
+                    let mut n = buf.len() as u32;
+                    if QueryFullProcessImageNameW(h, PROCESS_NAME_WIN32, windows::core::PWSTR(buf.as_mut_ptr()), &mut n).is_ok() {
+                        exe = String::from_utf16_lossy(&buf[..n as usize]).rsplit('\\').next().unwrap_or("").to_string();
+                    }
+                }
+                out.push((exe, name, muted));
+            }
         }
-        super::stop();
+        out
     }
 }
