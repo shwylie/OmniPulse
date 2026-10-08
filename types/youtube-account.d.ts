@@ -29,6 +29,8 @@ export interface YoutubeCommands {
   like_youtube_track(args: YoutubeRateArgs): Promise<string>;
   /** takes the like back (rating: none); resolves with the video id used */
   unlike_youtube_track(args: YoutubeRateArgs): Promise<string>;
+  /** each video's licence, for Stream-Safe Music (videos YouTube doesn't know are left out) */
+  youtube_licences(args: { ids: string[] }): Promise<Record<string, "creativeCommon" | "youtube">>;
 }
 
 /** A typed invoke for these commands */

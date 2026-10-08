@@ -93,12 +93,12 @@ const REQ_MSG_DEFAULTS = {
   perUser: "{user}, you already have {count} requests waiting.",
   duplicate: '"{title}" is already in the queue.',
   closed: "Song requests are closed right now.",
-  notSafe: 'Only openly licensed (Creative Commons) music plays on stream right now, and nothing for "{query}" is.',
+  notSafe: 'Only music that\'s safe on stream plays right now, and nothing for "{query}" is.',
   empty: "Tell me what to play, for example: artist - song",
 };
 const REQ_MSG_LABELS = {
   added: "Added", playing: "Added, playing now", notFound: "Not found", full: "Queue full",
-  perUser: "Viewer limit", duplicate: "Already queued", closed: "Requests off", notSafe: "Not openly licensed",
+  perUser: "Viewer limit", duplicate: "Already queued", closed: "Requests off", notSafe: "Not safe on stream",
   empty: "Nothing asked for",
 };
 
@@ -245,7 +245,12 @@ async function handleSongRequest(q, user) {
     search: for (const qq of queries) {
       for (const id of order) {
         found = reqByArtist((await finders[id](qq.q).catch(() => [])).filter((x) => !isMix(x)), qq.artist);
-        if (found.length && streamSafe()) { const open = found.filter(openLicence); unsafe = unsafe || !open.length; found = open; }
+        if (found.length && streamSafe()) {
+          await streamLookups(found.slice(0, 20));
+          const open = found.filter(streamOk);
+          unsafe = unsafe || !open.length;
+          found = open;
+        }
         if (found.length) { asked = qq.q; break search; }
       }
     }

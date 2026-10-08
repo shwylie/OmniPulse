@@ -752,11 +752,22 @@
       <div class="row">
         <div>
           <div class="lbl">Streamer Mode: Stream-Safe Music</div>
-          <div class="note" data-on="On: only openly licensed music shows and plays, chat requests included. Everything else is hidden from every list and skipped. Also the pulsing button at the top of the queue." data-off="Only music under an open licence (Creative Commons, or no rights reserved) shows and plays, so nothing copyrighted reaches your stream. Also the button at the top of the queue."></div>
-          <div class="note">Only SoundCloud says how a track is licensed: on SoundCloud, open licences are the uploader's choice. Spotify, YouTube Music and your own files don't say, so none of theirs plays while this is on.</div>
+          <div class="note" data-on="On: only music that's safe on stream shows and plays, chat requests included. Everything else is hidden from every list and skipped. Also the pulsing button at the top of the queue." data-off="Only music that's safe on stream shows and plays: under an open licence (Creative Commons, or no rights reserved), or by an artist or label cleared for streaming. Also the button at the top of the queue."></div>
         </div>
         <label class="switch"><input type="checkbox" id="smSafe"><span></span></label>
       </div>
+      <details class="sub" id="clearedBox">
+        <summary>What Counts as Safe</summary>
+        <p class="note">SoundCloud tracks under an open licence (the uploader's choice), and plugin tracks that give one. Your own files don't say, so they don't count.</p>
+        <p class="note" id="clearedYt"></p>
+        <p class="note">Cleared for streaming: copyrighted music whose owners let streamers play it. Spotify tracks are checked by their record label, the rest by artist (and SoundCloud's by label too, when they give one). Some clear you only once you've signed up with them, so those start off. Check each one's current terms: this list can't promise a track won't be claimed.</p>
+        <div class="clearedList" id="clearedList"></div>
+        <form id="clearedAdd" class="row rowStart">
+          <select id="clearedKind" aria-label="Artist or label"><option value="artist">Artist</option><option value="label">Label</option></select>
+          <input id="clearedName" type="text" placeholder="Name, spelt as the platform does" autocomplete="off" spellcheck="false" aria-label="Artist or label name">
+          <button class="soft">Add</button>
+        </form>
+      </details>
       <div class="row">
         <div>
           <div class="lbl">Offset OmniPulse</div>
@@ -1185,6 +1196,7 @@
 <script src="js/together.js"></script>
 <script src="js/pagefind.js"></script>
 <script src="js/export.js"></script>
+<script src="js/streamsafe.js"></script>
 <script src="js/init.js"></script>
 <script src="app.js"></script>
 </body>

@@ -1416,3 +1416,15 @@ body.streamer #pluginsSection { display: none !important; }
 /* Stream-Safe Music: what isn't openly licensed is hidden everywhere */
 body.streamSafe .notSafe { display: none !important; }
 .queueHead #safeBtn { margin-left: 2px; }
+
+/* Stream-Safe Music > What Counts as Safe: each artist or label, with its note and switch */
+.clearedList { display: grid; gap: 2px; margin: 6px 0; }
+.clearedRow { display: flex; align-items: center; gap: 10px; padding: 6px 2px; border-bottom: 1px solid var(--line); }
+.clearedText { flex: 1; min-width: 0; display: grid; gap: 2px; }
+.clearedText .lbl { font-size: 13px; }
+.clearedRow > button { width: 26px; height: 26px; padding: 0; border-radius: 50%; border: 0; background: transparent; color: var(--muted); cursor: pointer; }
+.clearedRow > button:hover { background: var(--elevated); color: var(--text); }
+#clearedAdd select { flex: none; }
+#clearedAdd input { flex: 1; min-width: 0; }
+#clearedAdd { gap: 8px; }
+#clearedAdd select { width: auto; min-width: 96px; }

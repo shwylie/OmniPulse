@@ -433,7 +433,7 @@ function isPreview(t) { return !!t && (t.access === "preview" || t.policy === "S
 // (Spotify, YouTube Music, your files, plugins without a licence), so none of it counts as open.
 const streamSafe = () => !!prefs.streamSafe;
 const openLicence = (t) => !!t && /^(cc-|cc0$|no-rights-reserved$)/i.test(String(t.license || ""));
-const safeOk = (t) => !streamSafe() || openLicence(t);
+const safeOk = (t) => !streamSafe() || streamOk(t);   // (js/streamsafe.js: open licences, and what's cleared for streaming)
 
 function safePaint() {
   const on = streamSafe();
@@ -441,8 +441,8 @@ function safePaint() {
   const b = $("safeBtn");
   b.classList.toggle("on", on);
   b.setAttribute("aria-pressed", on ? "true" : "false");
-  b.title = on ? "Stream-Safe Music: on. Only openly licensed (Creative Commons) music shows and plays. Click to turn it off."
-    : "Stream-Safe Music: off. Turn on to show and play only openly licensed (Creative Commons) music.";
+  b.title = on ? "Stream-Safe Music: on. Only music that's safe on stream (openly licensed, or cleared for streaming) shows and plays. Click to turn it off."
+    : "Stream-Safe Music: off. Turn on to show and play only music that's safe on stream.";
   $("smSafe").checked = on;
   stateNotes();
 }
@@ -453,20 +453,21 @@ function safeSet(on) {
   safePaint();
   render();
   renderQueue();
-  say(on ? "Stream-Safe Music on: only openly licensed music shows and plays." : "Stream-Safe Music off.", { force: true });
+  say(on ? "Stream-Safe Music on: only music that's safe on stream shows and plays." : "Stream-Safe Music off.", { force: true });
+  streamLookSoon();
   // what's playing now, if it isn't open, goes
   const cur = curTrack();
-  if (on && cur && !openLicence(cur)) safeSkip(cur);
+  if (on && cur && !streamOk(cur)) safeSkip(cur);
 }
 
 // Not open, with Stream-Safe Music on: on to the next one that is (or stop)
 function safeSkip(t) {
   audio.pause();
   if (typeof spotifyPause === "function") spotifyPause();
-  const next = queue.findIndex((x, k) => k > qi && openLicence(x));
+  const next = queue.findIndex((x, k) => k > qi && streamOk(x));
   if (next > 0) { qi = next; playCurrent(); return; }
   if (autoplayActive()) { qi = queue.length - 1; autoplayAdvance(); return; }
-  say('Stream-Safe Music: "' + (t.title || "That track") + "\" isn't openly licensed, and nothing after it in the queue is.", { force: true });
+  say('Stream-Safe Music: "' + (t.title || "That track") + "\" isn't safe on stream, and nothing after it in the queue is.", { force: true });
 }
 
 // Go+ previews and blocked tracks are never shown.
@@ -507,6 +508,7 @@ function afterRender() {
   injectAlbums();
   paintHeroActions();
   spotifyLikeCheck(viewTracks);
+  streamLookSoon();   // labels and licences, for Stream-Safe Music (js/streamsafe.js)
   if (pageQuery) pageFilterApply();   // the search bar's filter on this page (js/pagefind.js)
 }
 
@@ -530,7 +532,7 @@ function trackRow(t, i, playing) {
   li.dataset.i = i;
   li.draggable = true;   // onto a playlist or the queue (js/dnd.js)
   if (!isFav(t)) li.classList.add("notFav");   // hidden while "Favourites only" is on
-  if (!openLicence(t)) li.classList.add("notSafe");   // hidden while Stream-Safe Music is on
+  if (!streamOk(t)) li.classList.add("notSafe");   // hidden while Stream-Safe Music is on
   if (playing && t.id === playing.id) li.classList.add("playing");
 
   const num = el("div", "num");
@@ -972,8 +974,8 @@ function startList(list, i, shuffle, name) {
   }
   if (streamSafe()) {
     const picked = list[i];
-    list = list.filter(openLicence);
-    if (!list.length) { say("Stream-Safe Music is on, and nothing here is openly licensed.", { force: true }); return; }
+    list = list.filter(streamOk);
+    if (!list.length) { say("Stream-Safe Music is on, and nothing here is safe on stream.", { force: true }); return; }
     i = Math.max(0, list.indexOf(picked));
   }
   queue = list.slice();
@@ -987,7 +989,7 @@ const queuedByYou = (t) => Object.assign({}, t, { queuedByYou: true, autoplay: u
 
 function playNext(t) {
   if (!t) return;
-  if (!safeOk(t)) { say("Stream-Safe Music is on, and that track isn't openly licensed.", { force: true }); return; }
+  if (!safeOk(t)) { say("Stream-Safe Music is on, and that track isn't safe on stream.", { force: true }); return; }
   if (qi < 0) { startList([t], 0, false); return; }
   queue.splice(qi + 1, 0, queuedByYou(t));
   renderQueue();
@@ -1003,7 +1005,7 @@ function queuedEnd() {
 
 function addToQueue(t) {
   if (!t) return;
-  if (!safeOk(t)) { say("Stream-Safe Music is on, and that track isn't openly licensed.", { force: true }); return; }
+  if (!safeOk(t)) { say("Stream-Safe Music is on, and that track isn't safe on stream.", { force: true }); return; }
   if (qi < 0) { startList([t], 0, false); return; }
   queue.splice(queuedEnd(), 0, queuedByYou(t));
   renderQueue();
@@ -1011,7 +1013,7 @@ function addToQueue(t) {
 
 function queueRow(t, idx, removable) {
   applyFix(t);
-  const li = el("li", "qRow" + (idx === qi ? " cur" : "") + (openLicence(t) ? "" : " notSafe"));
+  const li = el("li", "qRow" + (idx === qi ? " cur" : "") + (streamOk(t) ? "" : " notSafe"));
   li.dataset.q = idx;
   li.draggable = true;   // onto a playlist (what's playing is copied, not moved)
   const img = el("img");

@@ -477,6 +477,8 @@ function openTrackMenu(t, x, y, fromPlayer, queueIdx) {
   add("Don't recommend this track", "hide");
   if (trackAlbumName(t)) add("Don't recommend this album", "hideAlbum");
   if (recArtistName(t)) add("Don't recommend " + recArtistName(t), "hideArtist");
+  const cl = clearedMenuLabel(t);   // Stream-Safe Music (js/streamsafe.js)
+  if (cl) add(cl[0], cl[1]);
   if (t.permalink_url) {
     sep();
     add(openLabel(t), "open");
@@ -511,6 +513,7 @@ function runMenuAction(a) {
     case "artist": openArtistFor(t); break;
     case "unlist": removeFromPlaylist(t); break;
     case "hide": hideRecommendation(t); break;
+    case "clear": case "unclear": clearedMenuRun(t, a); break;
     case "hideArtist": hideArtist(t); break;
     case "hideAlbum": hideAlbum(trackAlbumName(t), t.spAlbum && t.spAlbum.artists && t.spAlbum.artists[0] ? t.spAlbum.artists[0].name : recArtistName(t)); break;
     case "fix": openFixDialog(t); break;

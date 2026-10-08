@@ -228,6 +228,7 @@ function ytAccPaint() {
   btn.title = ytAcc.configured === false ? "Needs youtube_client_id and youtube_client_secret in config.json" : "Optional: your YouTube account, for likes there";
   $("ytMirrorRow").hidden = !ytAcc.connected;
   if (typeof ytPaint === "function") ytPaint();
+  if ($("clearedYt")) clearedPaint();   // (js/streamsafe.js)
   $("ytMirror").checked = !!prefs.ytMirror;
   if (!ytAcc.busy && ytAcc.connected && ytAcc.name) { nameNote($("ytAccNote"), "Connected as ", ytAcc.name, ". Likes here are likes on YouTube and YouTube Music too."); return; }
   $("ytAccNote").textContent = ytAcc.busy ? "Finish signing in in your browser, then come back here..."

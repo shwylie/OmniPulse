@@ -245,6 +245,26 @@ pub async fn rate(video_id: Option<String>, title: &str, artist: &str, like: boo
     Ok(id)
 }
 
+// ---------- licences ----------
+/// Each video's licence on YouTube, by id: "creativeCommon" (the uploader chose Creative Commons) or
+/// "youtube" (the standard licence), 50 videos to a call, each call 1 unit of the daily allowance.
+/// For Stream-Safe Music; ids YouTube doesn't know are left out.
+pub async fn licences(ids: Vec<String>) -> Result<Value, String> {
+    let mut tok = load().ok_or("Connect your YouTube account in Settings first.")?;
+    let ids: Vec<String> = ids.into_iter().filter(|i| !i.is_empty() && i.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')).collect();
+    let mut out = serde_json::Map::new();
+    for chunk in ids.chunks(50) {
+        let url = format!("{API}/videos?part=status&maxResults=50&id={}", urlencoding::encode(&chunk.join(",")));
+        let v = authed(&mut tok, reqwest::Method::GET, &url, None).await?;
+        for it in v["items"].as_array().into_iter().flatten() {
+            if let (Some(id), Some(l)) = (it["id"].as_str(), it["status"]["license"].as_str()) {
+                out.insert(id.to_string(), Value::from(l));
+            }
+        }
+    }
+    Ok(Value::Object(out))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

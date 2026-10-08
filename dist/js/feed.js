@@ -195,7 +195,7 @@ function platBadges(plats) {
 
 function tileEl(tile) {
   if (tile.track) applyFix(tile.track);
-  const node = el("div", "tile tile-" + tile.kind + (tile.track && openLicence(tile.track) ? "" : " notSafe"));
+  const node = el("div", "tile tile-" + tile.kind + (tile.track && streamOk(tile.track) ? "" : " notSafe"));
   node._tile = tile;
   const art = el("div", "tileArt");
   if (tile.kind === "daily") {

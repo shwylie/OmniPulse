@@ -231,6 +231,11 @@ async fn like_youtube_track(video_id: Option<String>, title: String, artist: Str
 async fn unlike_youtube_track(video_id: Option<String>, title: String, artist: String) -> Result<String, String> {
     omnipulse_core::yt_account::rate(video_id, &title, &artist, false).await
 }
+/// Each YouTube video's licence ("creativeCommon" or "youtube"), for Stream-Safe Music
+#[tauri::command]
+async fn youtube_licences(ids: Vec<String>) -> Result<Value, String> {
+    omnipulse_core::yt_account::licences(ids).await
+}
 /// An alert from the app's Test buttons
 #[tauri::command]
 fn widget_alert(alert: Value) -> Result<Value, String> {
@@ -780,7 +785,7 @@ fn main() {
             lastfm_status, lastfm_connect, lastfm_disconnect, lastfm_call, lastfm_recent, spotify_wait,
             stream_resolve, presence_test, taskbar_state,
             widget_start, lan_ip, widget_stop, widget_update, widget_alert, alert_media_set, alert_media_clear,
-            youtube_status, youtube_connect, youtube_disconnect, like_youtube_track, unlike_youtube_track,
+            youtube_status, youtube_connect, youtube_disconnect, youtube_licences, like_youtube_track, unlike_youtube_track,
             local_folders, local_set_folders, local_scan, local_status, local_tracks, local_server,
             requests_start, requests_stop, request_result,
             spe_signed_in, spe_login, spe_logout, spe_attach, spe_play, spe_pause, spe_resume, spe_seek, spe_stop, spe_played, spe_playlist, spe_web_get, spe_set_normalisation, loudness_analyse,
