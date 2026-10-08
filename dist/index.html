@@ -1013,14 +1013,10 @@
             </div>
             <div class="row">
               <div>
-                <div class="lbl">Turn</div>
-                <div class="note">How far each tile turns as it comes in (0: none).</div>
+                <div class="lbl">Angle</div>
+                <div class="note">Turns the whole collage: a sweep that comes in straight (|) comes in slanted (/). 0°: as it is.</div>
               </div>
-              <div class="levSlider"><input id="alertCRot" type="range" min="0" max="180" step="5" aria-label="How far the tiles turn"><span id="alertCRotVal">30°</span></div>
-            </div>
-            <div class="row">
-              <div class="lbl">Turn Which Way</div>
-              <select id="alertCSpin" class="narrow"><option value="mixed">Both Ways</option><option value="cw">Clockwise</option><option value="ccw">Anticlockwise</option></select>
+              <div class="levSlider"><input id="alertCAngle" type="range" min="-90" max="90" step="5" aria-label="The collage's angle"><span id="alertCAngleVal">0°</span></div>
             </div>
           </div>
           <div class="row">

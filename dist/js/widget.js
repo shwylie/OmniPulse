@@ -231,7 +231,7 @@ function alertsCfg() {
     kinds,
     anim: prefs.alertAnim || "slide",
     transition: prefs.alertTrans || "seamless",
-    collage: { size: prefs.alertCSize || "medium", dir: prefs.alertCDir || "diag", rot: prefs.alertCRot === undefined ? 30 : Number(prefs.alertCRot), spin: prefs.alertCSpin || "mixed" },
+    collage: { size: prefs.alertCSize || "medium", dir: prefs.alertCDir || "diag", angle: Number(prefs.alertCAngle) || 0 },
     secs: Number(prefs.alertSecs) || 5,
     // their own colours (else the widget's, from the album art), and which way the gradient runs
     accent: prefs.alertOwnCol ? prefs.alertCol1 || "#8e9bff" : "",
@@ -634,9 +634,8 @@ function alertsPaint() {
   $("alertAnimNote").textContent = collage ? "Not used with Collage: its tiles bring each alert in, even with nothing playing." : "With Over the Top, and while nothing's playing.";
   $("alertCSize").value = prefs.alertCSize || "medium";
   $("alertCDir").value = prefs.alertCDir || "diag";
-  $("alertCSpin").value = prefs.alertCSpin || "mixed";
-  $("alertCRot").value = String(prefs.alertCRot === undefined ? 30 : prefs.alertCRot);
-  $("alertCRotVal").textContent = $("alertCRot").value + "\u00b0";
+  $("alertCAngle").value = String(Number(prefs.alertCAngle) || 0);
+  $("alertCAngleVal").textContent = $("alertCAngle").value + "\u00b0";
   $("alertSecs").value = String(Number(prefs.alertSecs) || 5);
   $("alertIconVal").textContent = Math.round(alertIconScale() * 100) + "%";
   $("alertIconDown").disabled = alertIconScale() <= 0.6;
@@ -701,9 +700,9 @@ function alertsInit() {
   $("alertAnim").addEventListener("change", () => { prefs.alertAnim = $("alertAnim").value; alertsSave(); });
   $("alertBot").addEventListener("change", () => { prefs.alertBot = $("alertBot").value; savePrefs(); alertsPaint(); });
   $("alertTrans").addEventListener("change", () => { prefs.alertTrans = $("alertTrans").value; alertsSave(); alertsPaint(); alertsPaintList(); });
-  ["alertCSize", "alertCDir", "alertCSpin"].forEach((id) => $(id).addEventListener("change", () => { prefs[id] = $(id).value; alertsSave(); }));
-  $("alertCRot").addEventListener("input", () => { $("alertCRotVal").textContent = $("alertCRot").value + "\u00b0"; });
-  $("alertCRot").addEventListener("change", () => { prefs.alertCRot = Number($("alertCRot").value); alertsSave(); });
+  ["alertCSize", "alertCDir"].forEach((id) => $(id).addEventListener("change", () => { prefs[id] = $(id).value; alertsSave(); }));
+  $("alertCAngle").addEventListener("input", () => { $("alertCAngleVal").textContent = $("alertCAngle").value + "\u00b0"; });
+  $("alertCAngle").addEventListener("change", () => { prefs.alertCAngle = Number($("alertCAngle").value); delete prefs.alertCRot; delete prefs.alertCSpin; alertsSave(); });
   $("alertSecs").addEventListener("change", () => { prefs.alertSecs = Number($("alertSecs").value); alertsSave(); });
   const stepIcon = (d) => { prefs.alertIcon = Math.round(Math.min(2, Math.max(0.6, alertIconScale() + d)) * 10) / 10; alertsSave(); alertsPaint(); };
   $("alertIconDown").addEventListener("click", () => stepIcon(-0.1));
