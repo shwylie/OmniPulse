@@ -1016,6 +1016,33 @@ select.wide { max-width: 260px; }
 .trimRow input { width: 90px; }
 .trimMark { margin-left: 4px; padding: 0 3px; border: 0; background: none; color: var(--accent); font: inherit; font-weight: 700; cursor: pointer; }
 #outputBtn.on { color: var(--accent); }
+/* the platform icon beside a track's title, artist and album: one size however many lines there are,
+   the platform's own colour on hover (never the accent), opens the uploader's page */
+.platSlot { display: contents; }
+.plat.platBig {
+  flex: none; display: grid; place-items: center; width: 30px; height: 30px; margin: 0; padding: 0;
+  border-radius: 50%; color: var(--muted); cursor: pointer; transition: color 0.15s, background-color 0.15s;
+}
+.plat.platBig svg { width: 20px; height: 20px; color: inherit; }
+.plat.platBig:hover { color: var(--plat-c, var(--text)); background: color-mix(in srgb, var(--plat-c, var(--text)) 14%, transparent); }
+.platBig.soundcloud { --plat-c: #ff5500; }
+.platBig.spotify { --plat-c: #1ed760; }
+.platBig.local { --plat-c: #f2b544; }
+.platBig.youtube { --plat-c: #ff0033; }
+.platBig[class*="plug:"] { --plat-c: #38bdf8; }
+#list .plat.platBig { width: 26px; height: 26px; }
+#list .plat.platBig svg { width: 17px; height: 17px; }
+.player .now { gap: 10px; }
+.npHead { display: flex; align-items: center; gap: 14px; min-width: 0; }
+.npHeadText { min-width: 0; flex: 1; }
+.npHead .plat.platBig { width: 44px; height: 44px; }
+.npHead .plat.platBig svg { width: 28px; height: 28px; }
+/* several artists: each lights up on its own */
+.artistPart[data-name] { cursor: pointer; }
+.artistPart[data-name]:hover { color: var(--text); text-decoration: underline; }
+.artistLink:has(.artistPart[data-name]):hover { text-decoration: none; }
+#nowArtist .artistPart, #npArtist .artistPart { cursor: pointer; }
+#nowArtist .artistPart:hover, #npArtist .artistPart:hover { color: var(--text); text-decoration: underline; }
 /* adding a plugin: what it will and won't be able to do */
 .plugName { margin: 14px 0 2px; font-size: 16px; }
 .plugAccess { margin: 10px 0; padding: 8px 12px; border-radius: 8px; background: var(--elevated); }

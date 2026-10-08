@@ -294,6 +294,17 @@ async function openRediscover(fresh) {
 // Searching still finds them. Settings > Library > Hidden & not recommended undoes it.
 let hiddenRecs = new Set();
 let hiddenArtists = new Set();
+let hiddenAlbums = new Set();
+
+// An album, the same on every platform: its first artist and its title, without "(Deluxe)" and the like
+const albumKeyOf = (title, artist) => {
+  const t = String(title || "").toLowerCase().replace(/\s*[([][^)\]]*(deluxe|edition|remaster(ed)?|expanded|bonus)[^)\]]*[)\]]/g, "").replace(/\s+/g, " ").trim();
+  const a = artistKey(String(artist || "").split(",")[0]);
+  return t ? a + "|" + t : "";
+};
+const trackAlbumName = (t) => (t && (t.album || (t.spAlbum && t.spAlbum.name))) || "";
+const trackAlbumKey = (t) => albumKeyOf(trackAlbumName(t), t && t.spAlbum && t.spAlbum.artists && t.spAlbum.artists[0] ? t.spAlbum.artists[0].name : recArtistName(t));
+const albumHidden = (a) => hiddenAlbums.size > 0 && hiddenAlbums.has(albumKeyOf(a.title, a.artist));
 
 // The artist a track is "by", as the menu names it: the one in "Artist - Title", or who's credited
 const recArtistName = (t) => (guessNames(t).artist || artistName(t) || "").trim();
@@ -305,7 +316,7 @@ function hiddenArtistOf(t) {
 }
 
 // Whether the app may recommend this track
-const recOk = (t) => !!t && !hiddenRecs.has(String(t.id)) && !hiddenArtistOf(t);
+const recOk = (t) => !!t && !hiddenRecs.has(String(t.id)) && !hiddenArtistOf(t) && !(hiddenAlbums.size && hiddenAlbums.has(trackAlbumKey(t)));
 
 // on pages of recommendations, it goes straight away
 const onRecPage = () => view === "discover" || view === "rediscover" || (view === "playlist" && currentPlaylist && currentPlaylist.source === "mix");
@@ -324,6 +335,19 @@ function hideRecommendation(t) {
   dropFromAutoplay();
   paintNotRecommended();
   say("It won't be recommended again.");
+}
+
+// An album (from its tile, or one of its tracks): its tracks and its tile are left out of recommendations
+function hideAlbum(title, artist) {
+  const key = albumKeyOf(title, artist);
+  if (!key) return;
+  hiddenAlbums.add(key);
+  prefs.hiddenAlbums = Object.assign({}, prefs.hiddenAlbums || {}, { [key]: title + (artist ? " \u2014 " + artist : "") });
+  savePrefs();
+  if (onRecPage()) { viewTracks = viewTracks.filter(recOk); viewAlbums = viewAlbums.filter((a) => !albumHidden(a)); render(); }
+  dropFromAutoplay();
+  paintNotRecommended();
+  say('"' + title + '" won\'t be recommended again.');
 }
 
 function hideArtist(t) {
@@ -350,16 +374,17 @@ function dropFromAutoplay() {
 // each kind (artists, tracks, playlists), shown only when it has something in it
 function paintHiddenSummary() {
   const a = Object.keys(prefs.hiddenArtists || {}).length;
+  const al = Object.keys(prefs.hiddenAlbums || {}).length;
   const n = hiddenRecs.size;
   const p = (prefs.hiddenByYou || []).length;
   const plural = (k, one, many) => k + " " + (k === 1 ? one : many);
-  const rec = [a && plural(a, "artist", "artists"), n && plural(n, "track", "tracks")].filter(Boolean);
+  const rec = [a && plural(a, "artist", "artists"), al && plural(al, "album", "albums"), n && plural(n, "track", "tracks")].filter(Boolean);
   const parts = [];
-  if (rec.length) parts.push(rec.join(" and ") + (a + n === 1 ? " isn't" : " aren't") + " recommended");
+  if (rec.length) parts.push(andList(rec) + (a + al + n === 1 ? " isn't" : " aren't") + " recommended");
   if (p) parts.push(plural(p, "playlist is", "playlists are") + " hidden from the sidebar");
   $("hiddenNote").textContent = parts.length
     ? parts.join("; ") + "."
-    : "Nothing yet. Right-click a track to stop an artist or track being recommended, or a playlist in the sidebar to hide it.";
+    : "Nothing yet. Right-click a track or album to stop it (or its artist) being recommended, or a playlist in the sidebar to hide it.";
 }
 
 function hiddenRow(name, btn, title, data) {
@@ -378,6 +403,10 @@ function paintNotRecommended() {
   $("notRecArtists").replaceChildren(...a.map(([key, name]) => hiddenRow(name, "\u00d7", "Recommend " + name + " again", { key })));
   $("hidArtistsSum").textContent = "Artists not recommended (" + a.length + ")";
   $("hidArtistsBox").hidden = !a.length;
+  const al = Object.entries(prefs.hiddenAlbums || {}).sort((x, y) => x[1].localeCompare(y[1]));
+  $("notRecAlbums").replaceChildren(...al.map(([key, name]) => hiddenRow(name, "\u00d7", "Recommend it again", { album: key })));
+  $("hidAlbumsSum").textContent = "Albums not recommended (" + al.length + ")";
+  $("hidAlbumsBox").hidden = !al.length;
   const tn = prefs.hiddenRecNames || {};
   const ids = [...hiddenRecs];
   const named = ids.filter((id) => tn[id]).sort((x, y) => tn[x].localeCompare(tn[y]));
@@ -413,10 +442,13 @@ function openTrackMenu(t, x, y, fromPlayer) {
   sep();
   if (canLike(t)) add(isLiked(t) ? "Remove from Likes" : "Add to Likes", "like");
   if (favOn()) add(isFav(t) ? "Remove from Favourites" : "Add to Favourites", "fav");
-  add("Go to artist", "artist");
+  const names = artistNames(t);
+  if (names.length > 1) names.forEach((n, k) => add("Go to " + n, "artist:" + k));
+  else add("Go to artist", "artist");
   if (!fromPlayer && view === "playlist" && isOwnPlaylist(currentPlaylist)) add("Remove from this playlist", "unlist");
   sep();
   add("Don't recommend this track", "hide");
+  if (trackAlbumName(t)) add("Don't recommend this album", "hideAlbum");
   if (recArtistName(t)) add("Don't recommend " + recArtistName(t), "hideArtist");
   if (t.permalink_url) {
     sep();
@@ -437,6 +469,7 @@ function runMenuAction(a) {
   closeMenu();
   if (!t) return;
   const i = viewTracks.indexOf(t);
+  if (a.startsWith("artist:")) { openArtistNamed(t, artistNames(t)[Number(a.slice(7))]); return; }
   switch (a) {
     case "play": if (i >= 0) startList(viewTracks, i, false); else startList([t], 0, false); break;
     case "next": playNext(t); break;
@@ -448,6 +481,7 @@ function runMenuAction(a) {
     case "unlist": removeFromPlaylist(t); break;
     case "hide": hideRecommendation(t); break;
     case "hideArtist": hideArtist(t); break;
+    case "hideAlbum": hideAlbum(trackAlbumName(t), t.spAlbum && t.spAlbum.artists && t.spAlbum.artists[0] ? t.spAlbum.artists[0].name : recArtistName(t)); break;
     case "fix": openFixDialog(t); break;
     case "open": openOnSoundCloud(t); break;
     case "copy":
@@ -497,7 +531,20 @@ function libraryInit() {
   // removed recommendations
   hiddenRecs = new Set((prefs.hiddenRecs || []).map(String));
   hiddenArtists = new Set(Object.keys(prefs.hiddenArtists || {}));
+  hiddenAlbums = new Set(Object.keys(prefs.hiddenAlbums || {}));
   paintNotRecommended();
+  $("notRecAlbums").addEventListener("click", (e) => {
+    const b = e.target.closest("button[data-album]");
+    if (!b) return;
+    const names = Object.assign({}, prefs.hiddenAlbums || {});
+    const name = names[b.dataset.album];
+    delete names[b.dataset.album];
+    prefs.hiddenAlbums = names;
+    hiddenAlbums = new Set(Object.keys(names));
+    savePrefs();
+    paintNotRecommended();
+    say('"' + String(name || "That album").split(" \u2014 ")[0] + '" can be recommended again.');
+  });
   $("notRecArtists").addEventListener("click", (e) => {
     const b = e.target.closest("button[data-key]");
     if (!b) return;

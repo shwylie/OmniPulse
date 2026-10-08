@@ -158,6 +158,7 @@ function injectAlbums() {
     });
     tiles = tiles.slice(0, 10);
   }
+  if (view === "discover" || view === "rediscover") tiles = tiles.filter((a) => !albumHidden(a));
   if (!tiles.length) return;
   const box = $("list");
   if (listFilter === "albums") { tiles.forEach((a) => box.append(albumTileEl(a))); return; }
@@ -207,8 +208,17 @@ function albumsInit() {
     else openPlaylist(albumAsPlaylist(li._album));
   }, true);
   ["dblclick", "contextmenu"].forEach((type) => $("list").addEventListener(type, (e) => {
-    if (!tileOf(e)) return;
+    const li = tileOf(e);
+    if (!li) return;
     e.stopPropagation();
-    if (type === "contextmenu") e.preventDefault();
+    if (type !== "contextmenu") return;
+    e.preventDefault();
+    const a = li._album;
+    showMenuAt(e.clientX, e.clientY, [a.title,
+      ["Open", () => openPlaylist(albumAsPlaylist(a))],
+      ["Play", () => playAlbum(a)],
+      "sep",
+      ["Don't recommend this album", () => hideAlbum(a.title, a.artist)],
+    ]);
   }, true));
 }

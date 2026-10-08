@@ -28,6 +28,8 @@ function applyPrefs() {
 applyPrefs();
 
 // ---------- helpers ----------
+// "a", "a and b", "a, b and c"
+const andList = (l) => l.length < 2 ? l.join("") : l.slice(0, -1).join(", ") + " and " + l[l.length - 1];
 const SVGNS = "http://www.w3.org/2000/svg";
 // rule: "evenodd" for shapes with holes cut out (like Spotify's mark)
 function icon(d, rule) {
@@ -141,9 +143,50 @@ function platformBadge(t) {
   return b;
 }
 
-function setBadge(box, t) {
+// The bigger platform icon left of a track's title, artist and album: it lights up in the platform's
+// own colour on hover, and opens the uploader's page (who put it there), whatever the credits say
+function platformButton(t) {
+  const b = platformBadge(t);
+  b.classList.add("platBig");
+  const up = t ? artistOfTrack(t).name : "";
+  b.title = platInfo(srcOf(t)).name + (up ? ". Click to open " + up + "'s page" : "");
+  b.setAttribute("role", "button");
+  return b;
+}
+
+// A track's artists: several ("A, B, C") are each a link to their own page; one is the usual link
+const artistNames = (t) => String(artistName(t) || "").split(/\s*,\s*/).filter(Boolean);
+
+function fillArtists(box, t) {
   box.replaceChildren();
-  if (t) box.append(platformBadge(t));
+  if (!t) return;
+  const names = artistNames(t);
+  if (names.length < 2) {
+    const s = el("span", "artistPart", artistName(t));
+    s.title = uploaderNote(t);
+    box.append(s);
+    return;
+  }
+  names.forEach((n, i) => {
+    if (i) box.append(", ");
+    const s = el("span", "artistPart", n);
+    s.dataset.name = n;
+    s.title = "Open " + n + "'s page";
+    box.append(s);
+  });
+}
+
+// The page for one of a track's artists (by name, with its Spotify id when there is one)
+function openArtistNamed(t, name) {
+  const sp = (t.spArtists || []).find((a) => a.name === name);
+  openArtist(artistFrom({ name, sp: sp && sp.id ? { id: sp.id, name } : undefined }));
+}
+
+// A click in an artist line: the artist clicked, or the track's artist
+function openArtistClicked(t, target) {
+  const part = target && target.closest && target.closest(".artistPart[data-name]");
+  if (part) openArtistNamed(t, part.dataset.name);
+  else openArtistFor(t);
 }
 
 // ---------- state ----------
@@ -373,11 +416,10 @@ function trackRow(t, i, playing) {
   img.onerror = () => img.removeAttribute("src");
 
   const meta = el("div", "meta");
-  const who = artistName(t);
   const artistLine = el("div", "artist");
-  const whoEl = el("span", "artistLink", who);
-  if (srcOf(t) === "soundcloud") whoEl.title = uploaderNote(t);
-  artistLine.append(platformBadge(t), whoEl);
+  const whoEl = el("span", "artistLink");
+  fillArtists(whoEl, t);
+  artistLine.append(whoEl);
   if (srcOf(t) === "soundcloud" && isPreview(t)) {
     const tag = el("span", "goPlus", "Go+");
     tag.title = "A Go+ track: the full song plays from YouTube Music";
@@ -385,7 +427,7 @@ function trackRow(t, i, playing) {
   }
   meta.append(el("div", "title", t.title || "Untitled"), artistLine);
   const cell = el("div", "trackCell");
-  cell.append(img, meta);
+  cell.append(img, platformButton(t), meta);
 
   const acts = el("div", "acts");
   const bNext = el("button");
@@ -454,8 +496,12 @@ $("list").addEventListener("click", (e) => {
     else addToQueue(viewTracks[i]);
     return;
   }
+  if (e.target.closest(".platBig")) {
+    openArtistFor(viewTracks[i]);   // the uploader
+    return;
+  }
   if (e.target.closest(".artistLink")) {
-    openArtistFor(viewTracks[i]);
+    openArtistClicked(viewTracks[i], e.target);
     return;
   }
   startList(viewTracks, i, false);
@@ -923,21 +969,19 @@ $("queueBtn").addEventListener("click", () => setQueueOpen(!prefs.queue));
 // ---------- now playing ----------
 function fillNowPlaying(t) {
   $("nowTitle").textContent = t ? t.title || "Untitled" : "Nothing playing";
-  $("nowArtist").textContent = t ? artistName(t) : "";
-  $("nowArtist").title = t ? uploaderNote(t) : "";
+  fillArtists($("nowArtist"), t);
   $("nowAlbum").textContent = t ? t.album || (t.spAlbum && t.spAlbum.name) || "" : "";
   $("plAddBtn").hidden = !t;
   $("nowToggle").draggable = !!t;
   $("moreBtn").hidden = !t;
-  setBadge($("nowPlat"), t);
+  $("nowPlat").replaceChildren(...(t ? [platformButton(t)] : []));
   const small = t ? artUrl(t, "t120x120") : "";
   fadeImg($("nowArt"), small);
 
   $("npTitle").textContent = t ? t.title || "Untitled" : "Nothing playing";
   if (t && trimOf(t)) { $("npTitle").append(trimMark(t)); $("nowTitle").append(trimMark(t)); }
-  $("npArtist").textContent = t ? artistName(t) : "";
-  $("npArtist").title = t ? uploaderNote(t) : "";
-  setBadge($("npPlat"), t);
+  fillArtists($("npArtist"), t);
+  $("npPlat").replaceChildren(...(t ? [platformButton(t)] : []));
   const bits = [];
   if (t && t.genre) bits.push(t.genre);
   const year = t && t.created_at ? String(t.created_at).slice(0, 4) : "";
@@ -966,10 +1010,17 @@ function fillNowPlaying(t) {
 function openCurrentArtist(e) {
   e.stopPropagation();
   const t = curTrack();
-  if (t) openArtistFor(t);
+  if (t) openArtistClicked(t, e.target);
 }
 $("nowArtist").addEventListener("click", openCurrentArtist);
 $("npArtist").addEventListener("click", openCurrentArtist);
+// the platform icon: the uploader's page
+["nowPlat", "npPlat"].forEach((id) => $(id).addEventListener("click", (e) => {
+  if (!e.target.closest(".platBig")) return;
+  e.stopPropagation();
+  const t = curTrack();
+  if (t) openArtistFor(t);
+}));
 
 function toggleNowView() { showView(view === "now" ? back : "now"); }
 $("nowToggle").addEventListener("click", toggleNowView);

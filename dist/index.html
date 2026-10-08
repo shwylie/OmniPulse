@@ -139,9 +139,14 @@
     <div class="np" id="npView" hidden>
       <img id="npArt" alt="" hidden>
       <div class="npInfo">
-        <h1 id="npTitle">Nothing playing</h1>
-        <div class="artistRow"><span id="npPlat"></span><p id="npArtist"></p></div>
-        <p id="npAlbum"></p>
+        <div class="npHead">
+          <span id="npPlat" class="platSlot"></span>
+          <div class="npHeadText">
+            <h1 id="npTitle">Nothing playing</h1>
+            <div class="artistRow"><p id="npArtist"></p></div>
+            <p id="npAlbum"></p>
+          </div>
+        </div>
         <p id="npMeta"></p>
         <p id="npDesc"></p>
         <div class="npActions"><button id="npLike" class="soft" hidden>Like</button><button id="npFav" class="soft" hidden>Add to Favourites</button><button id="npOpen" class="soft" hidden>Open on SoundCloud</button></div>
@@ -201,9 +206,10 @@
 
     <div class="now" id="nowToggle" role="button" tabindex="0" title="Open Now Playing">
       <img id="nowArt" alt="">
+      <span id="nowPlat" class="platSlot"></span>
       <div class="nowText">
         <div id="nowTitle">Nothing playing</div>
-        <div class="artistRow"><span id="nowPlat"></span><div id="nowArtist" title="Open artist page"></div></div>
+        <div class="artistRow"><div id="nowArtist"></div></div>
         <div id="nowAlbum"></div>
       </div>
     </div>
@@ -532,6 +538,11 @@
         <summary id="hidArtistsSum">Artists not recommended</summary>
         <p class="note">Left out of Discover, Rediscover, autoplay and radio. Search still finds them.</p>
         <div class="folderList" id="notRecArtists"></div>
+      </details>
+      <details class="sub" id="hidAlbumsBox" hidden>
+        <summary id="hidAlbumsSum">Albums not recommended</summary>
+        <p class="note">Their tracks and their tiles are left out of Discover, Rediscover, autoplay and radio. Search still finds them.</p>
+        <div class="folderList" id="notRecAlbums"></div>
       </details>
       <details class="sub" id="hidTracksBox" hidden>
         <summary id="hidTracksSum">Tracks not recommended</summary>

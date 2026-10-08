@@ -315,8 +315,6 @@ async function pluginsLoad() {
 // it's still exactly what you saw.
 let plugPending = null;   // { source, digest }
 
-const andList = (l) => l.length < 2 ? l.join("") : l.slice(0, -1).join(", ") + " and " + l[l.length - 1];
-
 // What a plugin can and can't do, from its manifest (the sandbox enforces the rest)
 function plugAccess(m) {
   const can = [], cannot = [], warn = [];
