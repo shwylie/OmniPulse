@@ -163,6 +163,12 @@ fn config_status() -> Value { omnipulse_core::config_status() }
 /// Saves keys you pasted in, into config.json (only the ones the app lets you set)
 #[tauri::command]
 fn config_set(fields: serde_json::Map<String, Value>) -> Result<(), String> { omnipulse_core::config_set(&fields) }
+/// Settings > App > Back Up: settings and what you've added, into a .zip (crates/core/src/backup.rs)
+#[tauri::command]
+fn backup_create(dest: String, web: String) -> Result<usize, String> { omnipulse_core::backup::create(&dest, &web) }
+/// Puts a backup back; returns the page's saved data from it
+#[tauri::command]
+fn backup_restore(src: String) -> Result<String, String> { omnipulse_core::backup::restore(&src) }
 /// Opens a platform's developer pages in your browser (only those)
 #[tauri::command]
 fn open_setup_page(url: String) -> Result<(), String> { omnipulse_core::open_setup_page(&url) }
@@ -804,7 +810,7 @@ fn main() {
             lastfm_status, lastfm_connect, lastfm_disconnect, lastfm_call, lastfm_recent, spotify_wait,
             stream_resolve, presence_test, taskbar_state,
             widget_start, lan_ip, widget_stop, widget_update, widget_alert, alert_media_set, alert_media_clear, alert_media_bytes,
-            config_status, config_set, open_setup_page, youtube_status, youtube_connect, youtube_disconnect, youtube_licences, like_youtube_track, unlike_youtube_track,
+            config_status, config_set, open_setup_page, backup_create, backup_restore, youtube_status, youtube_connect, youtube_disconnect, youtube_licences, like_youtube_track, unlike_youtube_track,
             local_folders, local_set_folders, local_scan, local_status, local_tracks, local_server,
             requests_start, requests_stop, request_result,
             spe_signed_in, spe_login, spe_logout, spe_attach, spe_play, spe_pause, spe_resume, spe_seek, spe_stop, spe_played, spe_playlist, spe_web_get, spe_set_normalisation, loudness_analyse,
