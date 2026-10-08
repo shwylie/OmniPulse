@@ -145,3 +145,58 @@ pub async fn lastfm_call(method: String, params: Vec<(String, String)>) -> Resul
     };
     lfm_request(&cfg, &method, params, signed, post).await
 }
+
+/// What you've scrobbled since `from` (unix seconds), newest first, as text only:
+/// [{ artist, title, ts }] (ts in ms). Only your own account's, up to `pages` pages of 200.
+pub async fn lastfm_recent(from: i64, pages: u32) -> Result<Value, String> {
+    let cfg = load_config()?;
+    let user = load_lfm().ok_or("Not connected to Last.fm")?.name;
+    let mut out = Vec::new();
+    for page in 1..=pages.clamp(1, 10) {
+        let params = vec![
+            ("user".to_string(), user.clone()),
+            ("from".to_string(), from.to_string()),
+            ("limit".to_string(), "200".to_string()),
+            ("page".to_string(), page.to_string()),
+        ];
+        let v = lfm_request(&cfg, "user.getRecentTracks", params, false, false).await?;
+        let list = &v["recenttracks"]["track"];
+        let items: Vec<&Value> = match list {
+            Value::Array(a) => a.iter().collect(),
+            Value::Object(_) => vec![list],
+            _ => Vec::new(),
+        };
+        for t in items {
+            // the track playing right now has no date yet
+            let Some(uts) = t["date"]["uts"].as_str().and_then(|s| s.parse::<i64>().ok()) else { continue };
+            let artist = t["artist"]["#text"].as_str().or(t["artist"]["name"].as_str()).unwrap_or("");
+            let title = t["name"].as_str().unwrap_or("");
+            if !artist.is_empty() && !title.is_empty() {
+                out.push(serde_json::json!({ "artist": artist, "title": title, "ts": uts * 1000 }));
+            }
+        }
+        let total: u32 = v["recenttracks"]["@attr"]["totalPages"].as_str().and_then(|s| s.parse().ok()).unwrap_or(1);
+        if page >= total {
+            break;
+        }
+    }
+    Ok(Value::Array(out))
+}
+
+#[cfg(test)]
+mod live {
+    // your own scrobbles from the past week (read-only): cargo test -p omnipulse-core lfm_recent_live -- --ignored --nocapture
+    #[tokio::test]
+    #[ignore]
+    async fn lfm_recent_live() {
+        let from = (std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() - 7 * 86400) as i64;
+        match super::lastfm_recent(from, 5).await {
+            Ok(v) => {
+                let n = v.as_array().map(|a| a.len()).unwrap_or(0);
+                let ok = v.as_array().unwrap().iter().all(|x| x["artist"].is_string() && x["title"].is_string() && x["ts"].is_i64());
+                println!("scrobbles this week: {n}, all with artist/title/time: {ok}");
+            }
+            Err(e) => println!("not available: {e}"),
+        }
+    }
+}

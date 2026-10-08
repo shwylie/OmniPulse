@@ -144,6 +144,8 @@ async fn lastfm_call(method: String, params: Vec<(String, String)>) -> Result<Va
     lastfm::lastfm_call(method, params).await
 }
 #[tauri::command]
+async fn lastfm_recent(from: i64, pages: u32) -> Result<Value, String> { lastfm::lastfm_recent(from, pages).await }
+#[tauri::command]
 async fn resolve_yt_stream(query: String) -> Result<String, String> { yt_stream::resolve_yt_stream(query).await }
 
 // ---------- YouTube Music ----------
@@ -677,7 +679,7 @@ fn main() {
             login, signed_in, logout, api_get, stream_url, get_settings, set_gpu, restart_app, open_url, set_like, set_follow, playlist_write,
             spotify_login, spotify_signed_in, spotify_logout, spotify_token, spotify_api,
             lyrics_get, presence_set, presence_clear,
-            lastfm_status, lastfm_connect, lastfm_disconnect, lastfm_call,
+            lastfm_status, lastfm_connect, lastfm_disconnect, lastfm_call, lastfm_recent,
             stream_resolve, presence_test, taskbar_state,
             widget_start, widget_stop, widget_update,
             local_folders, local_set_folders, local_scan, local_status, local_tracks, local_server,

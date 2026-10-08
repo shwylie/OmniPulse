@@ -5,7 +5,9 @@
 
 const AUTOPLAY_BATCH = 10;
 const AUTOPLAY_LEAD_MS = 30000;          // start looking this long before the last track ends
-const AUTOPLAY_RECENT_MS = 3 * 3600000;  // "recently played": the last three hours
+const AUTOPLAY_RECENT_MS = 7 * 86400000;     // "recently played": the last week
+const AUTOPLAY_RECENT_MIN_MS = 3 * 3600000;  // if that leaves nothing to add, just the last three hours
+let autoplayRecentMs = AUTOPLAY_RECENT_MS;
 
 let autoplayBusy = null;
 let autoplayFailedFor = null;   // the seed track we last came up empty for, so we don't keep asking
@@ -77,7 +79,7 @@ function autoplayPickable(taken, perArtist) {
   return (t) => {
     if (!t || taken.has(t.id) || !recOk(t)) return false;
     if (isMix(t) && !autoplaySets()) return false;
-    if (avoidRecent() && heardWithin(t, AUTOPLAY_RECENT_MS)) return false;
+    if (avoidRecent() && heardWithin(t, autoplayRecentMs)) return false;
     if (!langOk(t)) return false;
     return (perArtist.get(artistName(t).toLowerCase()) || 0) < 2;
   };
@@ -86,6 +88,20 @@ function autoplayPickable(taken, perArtist) {
 // Takes turns between the platforms' lists, starting with one other than the queue's last track.
 // A platform isn't used twice in a row unless it's the only one with anything to add.
 function autoplayTakeTurns(lists, lastPlat) {
+  // a week of plays can rule out everything similar: then only the last few hours count
+  const copy = {};
+  Object.keys(lists).forEach((p) => { copy[p] = lists[p].slice(); });
+  autoplayRecentMs = AUTOPLAY_RECENT_MS;
+  let out = autoplayTakeTurnsOnce(lists, lastPlat);
+  if (!out.length && avoidRecent()) {
+    autoplayRecentMs = AUTOPLAY_RECENT_MIN_MS;
+    out = autoplayTakeTurnsOnce(copy, lastPlat);
+    autoplayRecentMs = AUTOPLAY_RECENT_MS;
+  }
+  return out;
+}
+
+function autoplayTakeTurnsOnce(lists, lastPlat) {
   const taken = new Set(queue.map((t) => t.id));
   const perArtist = new Map();
   const ok = autoplayPickable(taken, perArtist);
@@ -187,4 +203,6 @@ function autoplayInit() {
   sw("avoidRecentOn", "avoidRecent", true);
   autoplayPaint();
   setInterval(autoplayTick, 2000);
+  setTimeout(lfmHeardSync, 8000);
+  setInterval(lfmHeardSync, 5 * 60000);
 }
