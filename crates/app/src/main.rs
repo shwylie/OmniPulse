@@ -5,6 +5,7 @@
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod desktop;
 mod integrations;
 mod player;
 mod queue;
@@ -906,6 +907,7 @@ fn push_out(shared: &Shared, presence: bool) {
     if presence {
         integrations::presence(&a.rt, prefs, t, pos, playing);
     }
+    desktop::taskbar::state(playing, false, false, false);
 }
 
 /// The Stream Deck plugin's state, as remoteState in js/remote.js
@@ -1062,6 +1064,44 @@ fn outside_start(shared: &Shared) {
         }
     }
     push_out(shared, false);
+}
+
+/// A media key, the tray's menu or a taskbar button
+fn desktop_action(shared: &Shared, action: &str) {
+    match action {
+        "play" => toggle(shared),
+        "next" => step(shared, 1),
+        "prev" => step(shared, -1),
+        "shuffle" => {
+            let mut a = shared.borrow_mut();
+            let lp = a.web.last_played.clone();
+            a.queue.shuffle_rest(&lp);
+            paint_queue(&mut a);
+        }
+        "show" => {
+            if let Some(ui) = shared.borrow().ui.upgrade() {
+                use slint::winit_030::WinitWindowAccessor;
+                let _ = ui.window().show();
+                ui.window().set_minimized(false);
+                ui.window().with_winit_window(|w| w.focus_window());
+            }
+        }
+        "quit" => {
+            save_session(&shared.borrow());
+            let _ = slint::quit_event_loop();
+        }
+        _ => {}
+    }
+}
+
+/// The window's handle, once it exists (for the taskbar buttons)
+fn window_hwnd(ui: &AppWindow) -> Option<isize> {
+    use slint::winit_030::winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
+    use slint::winit_030::WinitWindowAccessor;
+    ui.window().with_winit_window(|w| match w.window_handle().map(|h| h.as_raw()) {
+        Ok(RawWindowHandle::Win32(h)) => Some(h.hwnd.get()),
+        _ => None,
+    })?
 }
 
 fn toggle(shared: &Shared) {
@@ -1309,12 +1349,24 @@ fn main() -> Result<(), slint::PlatformError> {
         let _ = slint::quit_event_loop();
     });
 
+    // the media keys and the tray (made here, on the window's thread, which has the message loop they need)
+    let desk = desktop::Desktop::start();
     let timer = slint::Timer::default();
     let s = shared.clone();
     let mut n = 0u64;
     timer.start(slint::TimerMode::Repeated, std::time::Duration::from_millis(250), move || {
         n += 1;
         tick(&s, &events, n);
+        for a in desk.poll() {
+            desktop_action(&s, a);
+        }
+    });
+    // the taskbar buttons, once the window is up
+    let weak = ui.as_weak();
+    slint::Timer::single_shot(std::time::Duration::from_millis(500), move || {
+        if let Some(h) = weak.upgrade().as_ref().and_then(window_hwnd) {
+            desktop::taskbar::attach(h);
+        }
     });
 
     // OMNIPULSE_SELFTEST=<folder>: visits each page, plays the first track silently, saves a picture of
