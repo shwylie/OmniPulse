@@ -155,7 +155,10 @@ function platformButton(t) {
 }
 
 // A track's artists: several ("A, B, C") are each a link to their own page; one is the usual link
-const artistNames = (t) => String(artistName(t) || "").split(/\s*,\s*/).filter(Boolean);
+// A track's artists: "A, B & C" is three, each a link to their own page; one is the usual link.
+// The line keeps its own commas and ampersands.
+const ARTIST_SEP = /(\s*,\s*|\s+&\s+)/;
+const artistNames = (t) => String(artistName(t) || "").split(ARTIST_SEP).filter((x, i) => i % 2 === 0 && x.trim()).map((x) => x.trim());
 
 function fillArtists(box, t) {
   box.replaceChildren();
@@ -167,8 +170,10 @@ function fillArtists(box, t) {
     box.append(s);
     return;
   }
-  names.forEach((n, i) => {
-    if (i) box.append(", ");
+  String(artistName(t)).split(ARTIST_SEP).forEach((part, i) => {
+    if (i % 2) { box.append(part); return; }   // the comma or " & " between them
+    const n = part.trim();
+    if (!n) return;
     const s = el("span", "artistPart", n);
     s.dataset.name = n;
     s.title = "Open " + n + "'s page";
