@@ -3,7 +3,7 @@
 // platform. Local files are kept by id and looked up again, since their addresses change per run.
 
 const XPL_KEY = "sc.xplaylists";
-const XPL_FIELDS = ["source", "id", "uri", "kind", "title", "displayArtist", "duration", "artwork_url", "permalink_url",
+const XPL_FIELDS = ["source", "id", "ytId", "ytArtistId", "spArtists", "uri", "kind", "title", "displayArtist", "duration", "artwork_url", "permalink_url",
   "album", "spAlbum", "genre", "created_at", "playback_count", "sharing", "access", "policy"];
 
 let xpls = [];

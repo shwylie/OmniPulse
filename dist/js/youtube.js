@@ -5,6 +5,10 @@
 let ytInfo = { ytdlp: null, deno: false, node: false, checked: false };
 const ytAvailable = () => !!ytInfo.ytdlp && (ytInfo.deno || ytInfo.node);
 
+// A YouTube track's video id: its own, or from its id ("yt:<video>"). Tracks kept on this PC (likes,
+// playlists, the queue) were saved without ytId before, so it's never taken for granted.
+const ytIdOf = (t) => (t && (t.ytId || (String(t.id || "").startsWith("yt:") ? String(t.id).slice(3) : ""))) || "";
+
 function ytTrack(x) {
   return tidyTrack({
     source: "youtube",
@@ -99,7 +103,7 @@ function ytMatchScore(t, c) {
 const YT_NO_MATCH_TTL = 86400000;   // "no match" is looked for again after a day
 let ytLastMiss = null;              // { id, closest }: why the last match came up empty
 
-const ytSnap = (c) => ({ id: c.ytId, title: c.title, artists: artistName(c), album: c.album, duration_ms: c.duration, thumb: c.artwork_url });
+const ytSnap = (c) => ({ id: ytIdOf(c), title: c.title, artists: artistName(c), album: c.album, duration_ms: c.duration, thumb: c.artwork_url });
 function ytMatchesLoad() {
   if (!ytMatches) { try { ytMatches = JSON.parse(localStorage.getItem(YT_MATCH_KEY) || "{}"); } catch (e) { ytMatches = {}; } }
   return ytMatches;
@@ -175,7 +179,7 @@ function ytSetLiked(t, on) {
   if (on) ytLikes.unshift(xplSnap(t));
   try { localStorage.setItem(YT_LIKES_KEY, JSON.stringify(ytLikes)); } catch (e) {}
   // with your YouTube account connected, the like is made there too (the one here stays either way)
-  if (ytAcc.connected) ytRate(t, on, t.ytId || String(t.id).replace(/^yt:/, ""));
+  if (ytAcc.connected) ytRate(t, on, ytIdOf(t));
 }
 
 // ---------- your YouTube account (optional) ----------
@@ -251,15 +255,17 @@ const ytLikedTracks = () => ytLikes.map((x) => Object.assign({}, x, { user: Obje
 // ---------- playing ----------
 // Finds the audio first (so a missing yt-dlp gets a clear message), then plays it through the local server
 async function ytPlay(t) {
-  await invoke("yt_prepare", { id: t.ytId });
+  const vid = ytIdOf(t);
+  if (!vid) throw new Error("this YouTube track has no video id");
+  await invoke("yt_prepare", { id: vid });
   if (!localInfo) localInfo = await invoke("local_server");
-  return localUrl("yt", t.ytId);
+  return localUrl("yt", vid);
 }
 
 // The next track's audio is looked up while this one plays, so it starts straight away
 function ytPrepareNext() {
   const next = queue[qi + 1];
-  if (next && srcOf(next) === "youtube" && ytAvailable()) invoke("yt_prepare", { id: next.ytId }).catch(() => {});
+  if (next && srcOf(next) === "youtube" && ytAvailable()) invoke("yt_prepare", { id: ytIdOf(next) }).catch(() => {});
 }
 
 // ---------- autoplay and Discover ----------

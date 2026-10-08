@@ -39,7 +39,7 @@ function loudAnalyse(t) {
   if (loudResults.has(key)) return Promise.resolve(loudResults.get(key));
   if (loudPending.has(key)) return loudPending.get(key);
   // local tracks are "local:<file id>"; the core knows files by their id alone
-  const yt = t.ytVia || (srcOf(t) === "youtube" ? t.ytId : "");
+  const yt = t.ytVia || (srcOf(t) === "youtube" ? ytIdOf(t) : "");
   const id = yt || String(t.id).replace(/^local:/, "");
   const p = invoke("loudness_analyse", { source: yt ? "youtube" : srcOf(t), id })
     .then((a) => a, () => null)
