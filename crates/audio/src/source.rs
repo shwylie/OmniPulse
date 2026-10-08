@@ -31,6 +31,8 @@ pub struct Decoded {
     rate: u32,
     duration_ms: Option<u64>,
     buf: Option<SampleBuffer<f32>>,
+    /// sound already decoded, handed out first (what's left after skipping into a block)
+    carry: Vec<f32>,
 }
 
 impl Decoded {
@@ -69,7 +71,14 @@ impl Decoded {
         let decoder = symphonia::default::get_codecs()
             .make(&params, &DecoderOptions::default())
             .map_err(|e| format!("Can't decode it: {e}"))?;
-        Ok(Self { format, decoder, track: track_id, rate, duration_ms, buf: None })
+        Ok(Self { format, decoder, track: track_id, rate, duration_ms, buf: None, carry: Vec::new() })
+    }
+}
+
+impl Decoded {
+    /// Hands this out before decoding any more
+    pub fn carry(&mut self, rest: Vec<f32>) {
+        self.carry = rest;
     }
 }
 
@@ -83,6 +92,10 @@ impl Source for Decoded {
     }
 
     fn read(&mut self, out: &mut Vec<f32>) -> Result<bool, String> {
+        if !self.carry.is_empty() {
+            out.append(&mut self.carry);
+            return Ok(true);
+        }
         loop {
             let packet = match self.format.next_packet() {
                 Ok(p) => p,

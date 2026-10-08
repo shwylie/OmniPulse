@@ -2,10 +2,13 @@
 
 pub mod dsp;
 pub mod engine;
+pub mod hls;
 pub mod http;
 pub mod source;
+pub mod ts;
 
 pub use engine::{render, Engine, Event};
+pub use hls::HlsSource;
 pub use http::open_url;
 pub use source::{Decoded, Source, Tone};
 

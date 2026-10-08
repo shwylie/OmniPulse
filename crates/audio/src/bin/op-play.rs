@@ -4,7 +4,7 @@
 //   op-play --devices                lists output devices
 //   op-play --tone                   a quiet 440 Hz tone, for checking the output
 
-use omnipulse_audio::{render, Decoded, Engine, Event, Source, Tone};
+use omnipulse_audio::{open_url, render, Decoded, Engine, Event, HlsSource, Source, Tone};
 use std::time::{Duration, Instant};
 
 fn preset(name: &str) -> [f32; 10] {
@@ -32,12 +32,23 @@ fn main() {
             return Box::new(Tone::new(48000, 440.0, 0.05, 3.0));
         }
         let path = args.iter().find(|a| !a.starts_with("--") && !args.iter().any(|b| b.starts_with("--") && opt(b).as_deref() == Some(a.as_str()))).expect("a file to play");
-        Box::new(Decoded::open_file(std::path::Path::new(path)).unwrap_or_else(|e| { eprintln!("{e}"); std::process::exit(1) }))
+        // a web address: an HLS playlist, or a file on the web
+        let opened: Result<Box<dyn Source>, String> = if path.starts_with("http") {
+            if path.contains(".m3u8") || path.contains("playlist") { HlsSource::open(path).map(|h| Box::new(h) as Box<dyn Source>) }
+            else { open_url(path, "").map(|d| Box::new(d) as Box<dyn Source>) }
+        } else {
+            Decoded::open_file(std::path::Path::new(path)).map(|d| Box::new(d) as Box<dyn Source>)
+        };
+        opened.unwrap_or_else(|e| { eprintln!("{e}"); std::process::exit(1) })
     };
 
     if let Some(out) = opt("--wav") {
         let t = Instant::now();
-        let pcm = render(open(), 48000, &eq, match_db, secs.min(600.0)).unwrap_or_else(|e| { eprintln!("{e}"); std::process::exit(1) });
+        let mut src = open();
+        if let Some(at) = opt("--seek").and_then(|v| v.parse::<u64>().ok()) {
+            src.seek(at * 1000).unwrap_or_else(|e| { eprintln!("{e}"); std::process::exit(1) });
+        }
+        let pcm = render(src, 48000, &eq, match_db, secs.min(600.0)).unwrap_or_else(|e| { eprintln!("{e}"); std::process::exit(1) });
         let secs_out = pcm.len() as f32 / 2.0 / 48000.0;
         let mut b = Vec::new();
         let data = (pcm.len() * 2) as u32;

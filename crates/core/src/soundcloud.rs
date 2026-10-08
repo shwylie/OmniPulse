@@ -411,3 +411,34 @@ pub async fn playlist_write(method: String, path: String, body: Option<Value>) -
     }
     Ok(serde_json::from_str(&text).unwrap_or(Value::Null))
 }
+
+#[cfg(test)]
+mod hls_probe {
+    // which container SoundCloud's HLS segments use (read-only, one liked track):
+    // cargo test -p omnipulse-core sc_hls_probe -- --ignored --nocapture
+    #[tokio::test]
+    #[ignore]
+    async fn sc_hls_probe() {
+        let likes = super::api_get("/me/likes/tracks?limit=3&access=playable".into()).await.expect("likes");
+        let list = likes.as_array().cloned().or_else(|| likes["collection"].as_array().cloned()).unwrap_or_default();
+        let id = list.iter().find_map(|t| t["id"].as_u64().or(t["track"]["id"].as_u64())).expect("a liked track");
+        let v = super::stream_url(id.to_string()).await.expect("streams");
+        println!("stream kinds: {:?}", v["candidates"].as_array().map(|a| a.iter().map(|c| c["name"].as_str().unwrap_or("")).collect::<Vec<_>>()));
+        for c in v["candidates"].as_array().cloned().unwrap_or_default() {
+            let name = c["name"].as_str().unwrap_or("").to_string();
+            if !name.starts_with("hls") { continue; }
+            let url = c["url"].as_str().unwrap_or("").to_string();
+            let real = if url.starts_with("https://api.soundcloud.com") { super::resolve_api_url(&url).await.unwrap_or(url) } else { url };
+            let m3u8 = reqwest::get(&real).await.unwrap().text().await.unwrap();
+            let lines: Vec<&str> = m3u8.lines().collect();
+            let tags: Vec<&&str> = lines.iter().filter(|l| l.starts_with("#EXT-X-MAP") || l.starts_with("#EXT-X-KEY") || l.starts_with("#EXT-X-VERSION")).collect();
+            let seg = lines.iter().find(|l| !l.starts_with('#') && !l.is_empty()).map(|s| s.to_string()).unwrap_or_default();
+            let seg_url = if seg.starts_with("http") { seg } else { real.rsplit_once('/').map(|(b, _)| format!("{b}/{seg}")).unwrap_or(seg) };
+            let bytes = reqwest::get(&seg_url).await.unwrap().bytes().await.unwrap();
+            let head: Vec<u8> = bytes.iter().take(12).copied().collect();
+            let kind = if head.first() == Some(&0x47) { "MPEG-TS" } else if head.len() > 8 && (&head[4..8] == b"moof" || &head[4..8] == b"ftyp" || &head[4..8] == b"styp") { "fragmented MP4" } else { "something else" };
+            println!("{name} playlist: {real}");
+            println!("{name}: {} segments, tags {:?}, first segment {} bytes, starts {:02x?} = {kind}", lines.iter().filter(|l| l.starts_with("#EXTINF")).count(), tags, bytes.len(), head);
+        }
+    }
+}
