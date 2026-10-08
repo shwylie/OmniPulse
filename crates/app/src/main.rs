@@ -108,8 +108,9 @@ fn apply_filter(app: &mut App) {
     slint::Timer::single_shot(std::time::Duration::ZERO, || SHARED.with(|s| { if let Some(sh) = s.borrow().clone() { rows_art(&sh); } }));
 }
 
-fn show_tracks(shared: &Shared, page: &str, title: &str, sub: String, tracks: Vec<Track>, chips: bool) {
+fn show_tracks(shared: &Shared, page: &str, title: &str, sub: String, mut tracks: Vec<Track>, chips: bool) {
     let mut app = shared.borrow_mut();
+    track::apply_fixes(&app.web.prefs, &mut tracks);
     let Some(ui) = app.ui.upgrade() else { return };
     app.page = page.to_string();
     app.page_all = tracks;
@@ -397,6 +398,8 @@ fn open_discover(shared: &Shared) {
             SHARED.with(|s| {
                 let Some(shared) = s.borrow().clone() else { return };
                 if shared.borrow().token != token { return; }
+                let mut shelves = shelves;
+                { let prefs = shared.borrow().web.prefs.clone(); shelves.iter_mut().for_each(|(_, l)| track::apply_fixes(&prefs, l)); }
                 let models: Vec<Rc<VecModel<Tile>>> = shelves.iter().map(|(_, l)| Rc::new(VecModel::from(l.iter().map(|t| Tile { title: t.title.clone().into(), sub: t.artist.clone().into(), art: slint::Image::default(), plat: t.plat().into() }).collect::<Vec<_>>()))).collect();
                 let rows: Vec<Shelf> = shelves.iter().zip(&models).map(|((title, _), m)| Shelf { title: title.clone().into(), tiles: ModelRc::from(m.clone()) }).collect();
                 ui.set_shelves(ModelRc::from(Rc::new(VecModel::from(rows))));
@@ -950,6 +953,8 @@ fn autoplay_fill(shared: &Shared, then_play: bool) -> bool {
                     if picks.is_empty() {
                         a.ap_failed = Some(seed.key.clone());
                     }
+                    let mut picks = picks;
+                    track::apply_fixes(&a.web.prefs, &mut picks);
                     a.queue.items.extend(picks.into_iter().map(queue::QItem::auto));
                     paint_queue(&mut a);
                     save_session(&a);
@@ -1184,6 +1189,8 @@ fn song_request(shared: &Shared, id: u64, q: String, user: String) {
                         reply(serde_json::json!({ "ok": false, "message": requests::msg(&prefs, "duplicate", &vars) }));
                         return;
                     }
+                    let mut t = t.clone();
+                    track::apply_fixes(&a.web.prefs, std::slice::from_mut(&mut t));
                     let pos = a.queue.add_request(t.clone(), &who);
                     paint_queue(&mut a);
                     save_session(&a);
@@ -1424,6 +1431,8 @@ fn main() -> Result<(), slint::PlatformError> {
                     {
                         let mut a = shared.borrow_mut();
                         a.library = all;
+                        let prefs = a.web.prefs.clone();
+                        track::apply_fixes(&prefs, &mut a.library);
                         a.playlists = playlists;
                         paint_sides(&mut a);
                         paint_plats(&a);

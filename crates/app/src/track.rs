@@ -207,3 +207,40 @@ mod tests {
         assert_eq!(sc.src, Src::SoundCloud(123));
     }
 }
+
+/// Your own title and artist for tracks (the web app's Track preferences: prefs.trackFixes, by the
+/// track's id, which is its key here too). An empty artist there means its own.
+pub fn apply_fixes(prefs: &Value, list: &mut [Track]) {
+    let Some(fixes) = prefs["trackFixes"].as_object() else { return };
+    if fixes.is_empty() {
+        return;
+    }
+    for t in list.iter_mut() {
+        if let Some(fx) = fixes.get(&t.key) {
+            if let Some(title) = fx["title"].as_str().filter(|s| !s.trim().is_empty()) {
+                t.title = title.to_string();
+            }
+            if let Some(artist) = fx["artist"].as_str().filter(|s| !s.trim().is_empty()) {
+                t.artist = artist.to_string();
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod fix_tests {
+    use super::*;
+
+    #[test]
+    fn your_titles_and_artists_win() {
+        let mut list = vec![Track::youtube(&omnipulse_core::youtube::YtTrack { id: "abc".into(), title: "Song (feat. X) feat. X".into(), artists: "Label".into(), ..Default::default() })];
+        let prefs = serde_json::json!({ "trackFixes": { "yt:abc": { "title": "Song (feat. X)", "artist": "Marc Benjamin" } } });
+        apply_fixes(&prefs, &mut list);
+        assert_eq!(list[0].title, "Song (feat. X)");
+        assert_eq!(list[0].artist, "Marc Benjamin");
+        // a title-only edit keeps the artist
+        let prefs = serde_json::json!({ "trackFixes": { "yt:abc": { "title": "Other", "artist": null } } });
+        apply_fixes(&prefs, &mut list);
+        assert_eq!((list[0].title.as_str(), list[0].artist.as_str()), ("Other", "Marc Benjamin"));
+    }
+}
