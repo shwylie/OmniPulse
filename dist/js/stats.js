@@ -156,6 +156,70 @@ function card(cls, ...kids) {
   return c;
 }
 
+// ---------- songs and artists on this page behave as they do everywhere ----------
+// A recorded play, as a track to play: the app's own copy if it has one, otherwise rebuilt from what
+// was recorded (enough to play it from its platform)
+function statTrack(x) {
+  const id = String(x.id);
+  const pools = [queue, viewTracks, typeof likedTracks !== "undefined" ? likedTracks : [], typeof spLikedCache !== "undefined" ? spLikedCache || [] : [],
+    typeof localTracks !== "undefined" ? localTracks : [], typeof ytLikes !== "undefined" ? ytLikes : []];
+  for (const pool of pools) {
+    const hit = (pool || []).find((t) => t && String(t.id) === id);
+    if (hit) return Object.assign({}, hit, { autoplay: undefined, requestedBy: undefined });
+  }
+  const base = { id: x.id, title: x.title, duration: x.ms || 0, artwork_url: x.art || "", genre: x.genre || "", album: x.album || "" };
+  if (x.src === "spotify") return tidyTrack(Object.assign(base, { source: "spotify", uri: "spotify:track:" + id.replace(/^sp:/, ""), displayArtist: x.artist, user: { username: x.artist } }));
+  if (x.src === "youtube") { const v = id.replace(/^yt:/, ""); return tidyTrack(Object.assign(base, { source: "youtube", ytId: v, user: { username: x.artist }, permalink_url: "https://music.youtube.com/watch?v=" + v })); }
+  if (x.src === "local") return Object.assign(base, { source: "local", user: { username: x.artist }, missing: true });
+  return tidyTrack(Object.assign(base, { kind: "track", user: { username: x.artist } }));
+}
+
+const openArtistNamedStat = (name) => openArtist(artistFrom({ name }));
+
+// A track line: clicks play (from here down the list), right-click has the usual menu, artists open
+function statSongRow(t, list, i, rank, sub) {
+  const li = el("li", "wSongRow");
+  li.title = "Play";
+  if (rank) li.append(el("span", "wRank", String(rank)));
+  li.append(cover(artUrl(t, "t200x200") || t.artwork_url, "", t.title));
+  const txt = el("div", "wText");
+  const who = el("span", "artistLink");
+  fillArtists(who, t);
+  const subLine = el("div", "wSub");
+  subLine.append(who);
+  if (sub) subLine.append(document.createTextNode(" · " + sub));
+  txt.append(el("div", "wTitle", t.title || "Untitled"), subLine);
+  li.append(txt);
+  li.addEventListener("click", (e) => {
+    e.stopPropagation();
+    if (e.target.closest(".artistLink")) { openArtistClicked(t, e.target); return; }
+    startList(list, i, false, "Your Listening");
+  });
+  li.addEventListener("contextmenu", (e) => { e.preventDefault(); e.stopPropagation(); openTrackMenu(t, e.clientX, e.clientY); });
+  return li;
+}
+
+function statArtistLink(name, cls) {
+  const a = el("span", "wArtistLink " + (cls || ""), name);
+  a.title = "Open " + name + "'s page";
+  a.addEventListener("click", (e) => { e.stopPropagation(); openArtistNamedStat(name); });
+  return a;
+}
+
+// A tile that opens a closer look at itself
+function goCard(c, detail) {
+  c.classList.add("go");
+  c.tabIndex = 0;
+  c.setAttribute("role", "button");
+  const open = () => { statsDetail = detail; renderStats(); $("listView").scrollTop = 0; };
+  c.addEventListener("click", open);
+  c.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); open(); } });
+  c.append(el("span", "wMore", "›"));
+  return c;
+}
+
+let statsDetail = null;   // the tile looked at more closely, or null for them all
+
 function renderStats() {
   const box = $("statsView");
   box.replaceChildren();
@@ -165,7 +229,11 @@ function renderStats() {
   const list = all.filter((x) => x.ts >= since);
 
   const head = el("div", "wHead");
-  head.append(el("h1", "", "Your Listening"));
+  if (statsDetail) {
+    const back = el("button", "soft wBack", "‹ Your Listening");
+    back.addEventListener("click", () => { statsDetail = null; renderStats(); });
+    head.append(back);
+  } else head.append(el("h1", "", "Your Listening"));
   const chips = el("div", "chips wChips");
   Object.entries(STATS_PERIODS).forEach(([k, v]) => {
     const b = el("button", "chip" + (k === p ? " on" : ""), v.name);
@@ -179,51 +247,48 @@ function renderStats() {
     box.append(card("wEmpty", el("h2", "", "Nothing here yet"), el("p", "", all.length ? "No plays " + STATS_PERIODS[p].label + ". Try a longer stretch above." : "Play some music and your stats will grow here.")));
     return;
   }
+  if (statsDetail) { renderStatsDetail(box, statsDetail, list, all, p); return; }
 
   const ms = list.reduce((n, x) => n + (x.ms || 0), 0);
   const tracks = tally(list, (x) => x.title + "|" + x.artist);
   const artists = tally(list, firstArtistOf);
+  const songTracks = tracks.map((t) => statTrack(t.last));
   const grid = el("div", "wGrid");
 
   // the big number
-  grid.append(card("wHero",
+  grid.append(goCard(card("wHero",
     el("div", "wKicker", "You listened for"),
     el("div", "wBig", fmtHours(ms)),
-    el("div", "wSub", plural(list.length, "play", "plays") + " · " + plural(artists.length, "artist", "artists") + " · " + plural(tracks.length, "song", "songs") + " " + STATS_PERIODS[p].label)));
+    el("div", "wSub", plural(list.length, "play", "plays") + " · " + plural(artists.length, "artist", "artists") + " · " + plural(tracks.length, "song", "songs") + " " + STATS_PERIODS[p].label)), "time"));
 
   // the top artist
   const top = artists[0];
   const share = Math.round((top.plays / list.length) * 100);
   const spot = card("wSpot", cover(artistArt(top.key, list), "round big", top.key),
     el("div", "wKicker", "Your top artist"),
-    el("div", "wName", top.key),
+    statArtistLink(top.key, "wName"),
     el("div", "wSub", plural(top.plays, "play", "plays") + " · " + share + "% of everything you played"));
   spot.style.setProperty("--hue", hueOf(top.key));
-  grid.append(spot);
+  grid.append(goCard(spot, "artists"));
 
   // top songs
   const songs = card("wSongs", el("div", "wKicker", "Your top songs"));
   const ol = el("ol", "wList");
-  tracks.slice(0, 5).forEach((t, i) => {
-    const li = el("li");
-    li.append(el("span", "wRank", String(i + 1)), cover(statArt(t.last), "", t.last.title));
-    const txt = el("div", "wText");
-    txt.append(el("div", "wTitle", t.last.title), el("div", "wSub", t.last.artist + " · " + plural(t.plays, "play", "plays")));
-    li.append(txt);
-    ol.append(li);
-  });
+  tracks.slice(0, 5).forEach((t, i) => ol.append(statSongRow(songTracks[i], songTracks, i, i + 1, plural(t.plays, "play", "plays"))));
   songs.append(ol);
-  grid.append(songs);
+  grid.append(goCard(songs, "songs"));
 
   // top artists
   if (artists.length > 1) {
     const row = el("div", "wArtists");
     artists.slice(0, 6).forEach((a) => {
       const b = el("div", "wArtist");
+      b.title = "Open " + a.key + "'s page";
       b.append(cover(artistArt(a.key, list), "round", a.key), el("div", "wTitle", a.key), el("div", "wSub", plural(a.plays, "play", "plays")));
+      b.addEventListener("click", (e) => { e.stopPropagation(); openArtistNamedStat(a.key); });
       row.append(b);
     });
-    grid.append(card("wArtistsCard", el("div", "wKicker", "Your top artists"), row));
+    grid.append(goCard(card("wArtistsCard", el("div", "wKicker", "Your top artists"), row), "artists"));
   }
 
   // when you listen
@@ -232,47 +297,27 @@ function renderStats() {
   list.forEach((x) => { const d = new Date(x.ts); hours[d.getHours()] += (x.ms || 180000); days[d.getDay()] += 1; });
   const kind = listenerType(hours);
   const peak = hours.indexOf(Math.max(...hours));
-  const clock = el("div", "wClock");
-  const maxH = Math.max(...hours) || 1;
-  hours.forEach((v, h) => {
-    const bar = el("span", h === peak ? "on" : "");
-    bar.style.height = Math.max(4, Math.round((v / maxH) * 100)) + "%";
-    bar.title = hourName(h) + ": " + fmtHours(v);
-    clock.append(bar);
-  });
-  const clockLabels = el("div", "wClockLabels");
-  ["12 am", "6 am", "noon", "6 pm", ""].forEach((t) => clockLabels.append(el("span", "", t)));
   const busiest = days.indexOf(Math.max(...days));
-  grid.append(card("wWhen", el("div", "wKicker", "You're a"), el("div", "wName", kind.name), el("div", "wSub", kind.note + " Your peak hour: " + hourName(peak) + ". Busiest on " + DAYS[busiest] + "."), clock, clockLabels));
+  grid.append(goCard(card("wWhen", el("div", "wKicker", "You're a"), el("div", "wName", kind.name), el("div", "wSub", kind.note + " Your peak hour: " + hourName(peak) + ". Busiest on " + DAYS[busiest] + "."), statClock(hours, peak), statClockLabels()), "when"));
 
   // where it comes from
   const plats = tally(list, (x) => x.src || "other");
-  if (plats.length) {
-    const bar = el("div", "wPlatBar");
-    const legend = el("div", "wLegend");
-    plats.forEach((pl) => {
-      const part = el("span", "wPlat " + pl.key);
-      part.style.flexGrow = String(pl.plays);
-      part.title = platInfo(pl.key).name + ": " + plural(pl.plays, "play", "plays");
-      bar.append(part);
-      const lg = el("span", "wLg " + pl.key);
-      lg.append(el("i"), document.createTextNode(platInfo(pl.key).name + " " + Math.round((pl.plays / list.length) * 100) + "%"));
-      legend.append(lg);
-    });
-    grid.append(card("wWhere", el("div", "wKicker", "Where it came from"), bar, legend));
-  }
+  if (plats.length) grid.append(goCard(card("wWhere", el("div", "wKicker", "Where it came from"), ...statPlatBar(plats, list.length)), "where"));
 
   // streaks and the song on repeat
   const st = streaks(all);
   const perDay = tally(list, (x) => dayKey(x.ts) + "|" + x.title + "|" + x.artist)[0];
-  grid.append(card("wStreak",
+  grid.append(goCard(card("wStreak",
     el("div", "wKicker", "Streak"),
     el("div", "wBig small", plural(st.now, "day", "days")),
-    el("div", "wSub", "in a row" + (st.best > st.now ? ", your best is " + plural(st.best, "day", "days") : st.now > 1 ? ": your best yet" : ""))));
+    el("div", "wSub", "in a row" + (st.best > st.now ? ", your best is " + plural(st.best, "day", "days") : st.now > 1 ? ": your best yet" : ""))), "streak"));
   if (perDay && perDay.plays > 2) {
-    grid.append(card("wRepeat", el("div", "wKicker", "On repeat"), cover(statArt(perDay.last), "", perDay.last.title),
-      el("div", "wTitle", perDay.last.title),
-      el("div", "wSub", plural(perDay.plays, "time", "times") + " in one day, " + new Date(perDay.last.ts).toLocaleDateString(undefined, { weekday: "long", month: "short", day: "numeric" }))));
+    const rt = statTrack(perDay.last);
+    const rep = card("wRepeat", el("div", "wKicker", "On repeat"));
+    const ul = el("ol", "wList");
+    ul.append(statSongRow(rt, [rt], 0, 0, plural(perDay.plays, "time", "times") + " in one day, " + new Date(perDay.last.ts).toLocaleDateString(undefined, { weekday: "long", month: "short", day: "numeric" })));
+    rep.append(ul);
+    grid.append(rep);
   }
 
   // a few facts, different each visit
@@ -289,6 +334,151 @@ function renderStats() {
   box.append(clear);
 }
 
+function statClock(hours, peak) {
+  const clock = el("div", "wClock");
+  const maxH = Math.max(...hours) || 1;
+  hours.forEach((v, h) => {
+    const bar = el("span", h === peak ? "on" : "");
+    bar.style.height = Math.max(4, Math.round((v / maxH) * 100)) + "%";
+    bar.title = hourName(h) + ": " + fmtHours(v);
+    clock.append(bar);
+  });
+  return clock;
+}
+
+function statClockLabels() {
+  const l = el("div", "wClockLabels");
+  ["12 am", "6 am", "noon", "6 pm", ""].forEach((t) => l.append(el("span", "", t)));
+  return l;
+}
+
+function statPlatBar(plats, total) {
+  const bar = el("div", "wPlatBar");
+  const legend = el("div", "wLegend");
+  plats.forEach((pl) => {
+    const part = el("span", "wPlat " + pl.key);
+    part.style.flexGrow = String(pl.plays);
+    part.title = platInfo(pl.key).name + ": " + plural(pl.plays, "play", "plays");
+    bar.append(part);
+    const lg = el("span", "wLg " + pl.key);
+    lg.append(el("i"), document.createTextNode(platInfo(pl.key).name + " " + Math.round((pl.plays / total) * 100) + "%"));
+    legend.append(lg);
+  });
+  return [bar, legend];
+}
+
+// Bars with labels under them: [label, value, title]
+function statBars(items, cls) {
+  const wrap = el("div", "wBars " + (cls || ""));
+  const max = Math.max(1, ...items.map((x) => x[1]));
+  items.forEach(([label, v, tip]) => {
+    const col = el("div", "wBarCol");
+    const bar = el("span", "wBar" + (v === max && v > 0 ? " on" : ""));
+    bar.style.height = Math.max(v ? 4 : 1, Math.round((v / max) * 100)) + "%";
+    col.title = tip || label;
+    col.append(el("div", "wBarSlot"), el("div", "wBarLbl", label));
+    col.firstChild.append(bar);
+    wrap.append(col);
+  });
+  return wrap;
+}
+
+// ---------- a closer look at one tile ----------
+function renderStatsDetail(box, which, list, all, p) {
+  const grid = el("div", "wDetail");
+  const ms = list.reduce((n, x) => n + (x.ms || 0), 0);
+  const label = STATS_PERIODS[p].label;
+  const h1 = (t) => box.append(el("h1", "wDetailHead", t));
+  if (which === "time") {
+    h1("You listened for " + fmtHours(ms) + " " + label);
+    // by day (or by month, over a year or more)
+    const byMonth = p === "year" || p === "all";
+    const m = new Map();
+    list.forEach((x) => {
+      const d = new Date(x.ts);
+      const k = byMonth ? d.getFullYear() + "-" + String(d.getMonth()).padStart(2, "0") : dayKey(x.ts);
+      const e = m.get(k) || { ms: 0, plays: 0, d };
+      e.ms += x.ms || 0;
+      e.plays++;
+      m.set(k, e);
+    });
+    const items = [...m.values()].sort((a, b) => a.d - b.d).slice(-60).map((e) => [
+      byMonth ? e.d.toLocaleDateString(undefined, { month: "short" }) : e.d.toLocaleDateString(undefined, { day: "numeric", month: "short" }),
+      e.ms, fmtHours(e.ms) + ", " + plural(e.plays, "play", "plays")]);
+    const span = Math.max(1, (Date.now() - Math.max(list[0].ts, STATS_PERIODS[p].since())) / 86400000);
+    grid.append(card("wWide", el("div", "wKicker", byMonth ? "By month" : "By day"), statBars(items, "time")),
+      card("", el("div", "wKicker", "On average"), el("div", "wBig small", fmtHours(ms / Math.max(1, Math.ceil(span)))), el("div", "wSub", "a day, " + plural(list.length, "play", "plays") + " in all")),
+      card("", el("div", "wKicker", "Your biggest day"), (() => { const best = tally(list, (x) => dayKey(x.ts)).sort((a, b) => b.ms - a.ms)[0]; return el("div", "wName", new Date(best.last.ts).toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" })); })(),
+        el("div", "wSub", fmtHours(tally(list, (x) => dayKey(x.ts)).sort((a, b) => b.ms - a.ms)[0].ms))));
+  } else if (which === "artists") {
+    const artists = tally(list, firstArtistOf).slice(0, 50);
+    h1("Your top artists " + label);
+    const ol = el("ol", "wList wRanked");
+    artists.forEach((a, i) => {
+      const li = el("li", "wArtistRow");
+      li.append(el("span", "wRank", String(i + 1)), cover(artistArt(a.key, list), "round", a.key));
+      const txt = el("div", "wText");
+      txt.append(statArtistLink(a.key, "wTitle"), el("div", "wSub", plural(a.plays, "play", "plays") + " · " + fmtHours(a.ms)));
+      const bar = el("div", "wShare");
+      bar.append(el("span"));
+      bar.firstChild.style.width = Math.round((a.plays / artists[0].plays) * 100) + "%";
+      li.append(txt, bar);
+      li.addEventListener("click", () => openArtistNamedStat(a.key));
+      ol.append(li);
+    });
+    grid.append(card("wWide", ol));
+  } else if (which === "songs") {
+    const tracks = tally(list, (x) => x.title + "|" + x.artist).slice(0, 50);
+    const ts = tracks.map((t) => statTrack(t.last));
+    h1("Your top songs " + label);
+    const ol = el("ol", "wList wRanked");
+    tracks.forEach((t, i) => ol.append(statSongRow(ts[i], ts, i, i + 1, plural(t.plays, "play", "plays") + " · " + fmtHours(t.ms))));
+    const play = el("button", "soft", "Play These");
+    play.addEventListener("click", () => startList(ts, 0, false, "Your top songs"));
+    grid.append(card("wWide", play, ol));
+  } else if (which === "when") {
+    const hours = Array(24).fill(0), days = Array(7).fill(0);
+    list.forEach((x) => { const d = new Date(x.ts); hours[d.getHours()] += (x.ms || 180000); days[d.getDay()] += x.ms || 180000; });
+    const kind = listenerType(hours);
+    h1("You're a " + kind.name);
+    grid.append(card("wWide", el("div", "wKicker", "By hour"), statBars(hours.map((v, h) => [h % 3 === 0 ? hourName(h).replace(" am", "a").replace(" pm", "p").replace("midnight", "12a") : "", v, hourName(h) + ": " + fmtHours(v)]), "hours")),
+      card("wWide", el("div", "wKicker", "By day"), statBars(days.map((v, d) => [DAYS[d].slice(0, 3), v, DAYS[d] + ": " + fmtHours(v)]), "days")),
+      card("", el("p", "", kind.note)));
+  } else if (which === "where") {
+    const plats = tally(list, (x) => x.src || "other");
+    h1("Where it came from");
+    grid.append(card("wWide", ...statPlatBar(plats, list.length)));
+    plats.forEach((pl) => {
+      const of = list.filter((x) => (x.src || "other") === pl.key);
+      const topA = tally(of, firstArtistOf).slice(0, 3);
+      const c = card("", el("div", "wKicker", platInfo(pl.key).name), el("div", "wBig small", Math.round((pl.plays / list.length) * 100) + "%"),
+        el("div", "wSub", plural(pl.plays, "play", "plays") + " · " + fmtHours(pl.ms)));
+      const tops = el("div", "wSub wTops");
+      topA.forEach((a, i) => { if (i) tops.append(document.createTextNode(", ")); tops.append(statArtistLink(a.key)); });
+      if (topA.length) c.append(el("div", "wSub", "Most played:"), tops);
+      grid.append(c);
+    });
+  } else if (which === "streak") {
+    const st = streaks(all);
+    h1(plural(st.now, "day", "days") + " in a row");
+    // the last twelve weeks, a square a day
+    const daysWith = new Map();
+    all.forEach((x) => daysWith.set(dayKey(x.ts), (daysWith.get(dayKey(x.ts)) || 0) + 1));
+    const cal = el("div", "wCal");
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    const start = new Date(today); start.setDate(start.getDate() - 83 - start.getDay());
+    for (let d = new Date(start); d <= today; d.setDate(d.getDate() + 1)) {
+      const n = daysWith.get(dayKey(d.getTime())) || 0;
+      const sq = el("span", n ? "on" + (n > 20 ? " lots" : n > 5 ? " some" : "") : "");
+      sq.title = d.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" }) + ": " + plural(n, "play", "plays");
+      cal.append(sq);
+    }
+    grid.append(card("wWide", el("div", "wKicker", "The last twelve weeks"), cal),
+      card("", el("div", "wKicker", "Your best"), el("div", "wBig small", plural(st.best, "day", "days")), el("div", "wSub", "in a row")));
+  }
+  box.append(grid);
+}
+
 // ---------- the Stats button: right-click to hide it (Settings > Library brings it back) ----------
 function statsNavPaint() {
   const shown = prefs.statsShown !== false;
@@ -298,7 +488,7 @@ function statsNavPaint() {
 }
 
 function statsInit() {
-  $("navStats").addEventListener("click", () => showView("stats"));
+  $("navStats").addEventListener("click", () => { statsDetail = null; showView("stats"); });
   $("navStats").addEventListener("contextmenu", (e) => {
     e.preventDefault();
     e.stopPropagation();
