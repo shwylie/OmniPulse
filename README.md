@@ -142,7 +142,7 @@ SoundCloud sign in / sign out is now in Settings > Integrations.
   in local_index.json; files play through a small server on 127.0.0.1 only.
 
 ## v30: chat song requests
-Settings > Integrations > Chat song requests, then the Song Requests section:
+Settings > Streaming > Song requests:
 - Request address: http://127.0.0.1:7879/request?key=YOURKEY&user=USER&q=SONG (plain-text reply for chat; add &format=json for JSON)
 - Now playing: http://127.0.0.1:7879/now
 - Streamer.bot: Fetch URL with user=%user% and q=%rawInputUrlEncoded%. Mix It Up: Web Request with user=$username and q=$allargs.
@@ -297,7 +297,7 @@ hides them; tracks from albums are never hidden.
   - Spotify uses Spotify's own whole-track values (librespot's normalisation), from the next track.
   - Quiet tracks are turned up at most 9 dB; the limiter stops peaks clipping.
   - Settings shows what the current track measured and how much it's turned up or down.
-- Settings > Sound > Skip long silences (Off, 5, 8, 15 or 30 s): jumps over silence inside a track, and
+- Settings > Sound > Skip silences (Off, 5, 8, 15 or 30 s): jumps over silence inside a track, and
   moves on when the rest of it is silent. Where a track isn't measured (Spotify, the rest of a long set)
   it moves on after that long in silence.
 - To check a file: `cargo run -p omnipulse-core --example measure -- <file>`.
@@ -324,7 +324,7 @@ hides them; tracks from albums are never hidden.
 - Artists: one page per artist across every platform (each song once, liked if liked anywhere), Follow
   follows everywhere, and the Artists list in the sidebar shows everyone you follow anywhere. Right-click
   an artist (or the Artists heading) to follow them on your other platforms too. Settings > Library >
-  Follow new artists everywhere does it by itself for new follows. Spotify needs one fresh sign-in for
+  Follow everywhere (Settings > Library) does it by itself for new follows. Spotify needs one fresh sign-in for
   this (Sign out, Sign in).
 - Search in categories (Artists, Albums, Playlists, Sets & Podcasts, Tracks), each expandable; a genre
   search gets the genre's trending mix and top artists first.

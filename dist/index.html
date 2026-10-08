@@ -352,14 +352,14 @@
       <div class="row" id="accent2Row">
         <div>
           <div class="lbl">Second colour</div>
-          <div class="note">Blends with the accent. Pick the crossed-out one for a single colour.</div>
+          <div class="note">Blends with the accent. Crossed out: none.</div>
         </div>
         <div class="swatches" id="swatches2"></div>
       </div>
       <div class="row">
         <div>
-          <div class="lbl">Album art colours</div>
-          <div class="note">Takes both colours from the cover that's playing.</div>
+          <div class="lbl">Colours from album art</div>
+          <div class="note">Both colours come from the cover that's playing.</div>
         </div>
         <label class="switch"><input type="checkbox" id="artAccentToggle"><span></span></label>
       </div>
@@ -370,21 +370,21 @@
       <div class="row">
         <div>
           <div class="lbl">Animations</div>
-          <div class="note">Fades and motion in the app. The stream widget has its own.</div>
+          <div class="note">Fades and motion.</div>
         </div>
         <label class="switch"><input type="checkbox" id="animOn"><span></span></label>
       </div>
       <div class="row">
         <div>
           <div class="lbl">Display name</div>
-          <div class="note">In the title bar and taskbar, instead of OmniPulse. You can also right-click the title.</div>
+          <div class="note">Shown in the title bar and taskbar.</div>
         </div>
         <input id="appNameInput" class="nameInput" type="text" maxlength="60" autocomplete="off" spellcheck="false">
       </div>
       <div class="row">
         <div>
           <div class="lbl">Custom CSS</div>
-          <div class="note">Your own styles, on top of the theme.</div>
+          <div class="note">Your own styles, over the theme.</div>
         </div>
         <label class="switch"><input type="checkbox" id="cssOn"><span></span></label>
       </div>
@@ -413,7 +413,7 @@
       <div class="row" id="spotifySection">
         <div>
           <div class="lbl">Spotify</div>
-          <div class="note" id="spStatus">Not signed in. Needs a Premium account.</div>
+          <div class="note" id="spStatus">Not signed in.</div>
           <button class="linkBtn" data-url="https://www.spotify.com/account/subscription/manage/" title="Premium and other plans">Manage subscription</button>
         </div>
         <div class="rowEnd">
@@ -451,7 +451,7 @@
       <div class="row">
         <div>
           <div class="lbl">Local music</div>
-          <div class="note" id="localNote">Music files from folders on this PC or a network drive.</div>
+          <div class="note" id="localNote">Folders on this PC or a network drive.</div>
         </div>
         <label class="switch" title="Use local music"><input type="checkbox" id="localOn"><span></span></label>
       </div>
@@ -484,7 +484,6 @@
         <div class="row">
           <div>
             <div class="lbl">Scrobble</div>
-            <div class="note">Sends what you play to Last.fm.</div>
           </div>
           <label class="switch"><input type="checkbox" id="scrobbleToggle"><span></span></label>
         </div>
@@ -497,7 +496,7 @@
       <div class="row">
         <div>
           <div class="lbl">Add a plugin</div>
-          <div class="note">Other sources of music, made by others. Each runs in a sandbox: it can't see your accounts, your files or the rest of the app, and can only reach the sites it lists.</div>
+          <div class="note">Music sources made by others. Each is walled off and only reaches the sites it lists.</div>
         </div>
         <button id="plugAdd" class="soft">Add plugin</button>
       </div>
@@ -509,22 +508,22 @@
       <h3>Library</h3>
       <div class="row">
         <div>
-          <div class="lbl">Follow new artists everywhere</div>
-          <div class="note">When you follow someone on one platform, they're followed on your others too (matched by name).</div>
+          <div class="lbl">Follow everywhere</div>
+          <div class="note">Following an artist on one platform follows them on the others.</div>
         </div>
         <label class="switch"><input type="checkbox" id="followEverywhereOn"><span></span></label>
       </div>
       <div class="row">
         <div>
           <div class="lbl">Favourites</div>
-          <div class="note">A star next to the heart, with its own page and filter. Starring a track likes it too.</div>
+          <div class="note">A star beside the heart, with its own page. Starring also likes.</div>
         </div>
         <label class="switch"><input type="checkbox" id="favOn"><span></span></label>
       </div>
       <div class="row">
         <div>
           <div class="lbl">Sets &amp; Podcasts</div>
-          <div class="note">A page for anything over 15 minutes, with a Liked only filter.</div>
+          <div class="note">A page for anything over 15 minutes.</div>
         </div>
         <label class="switch"><input type="checkbox" id="setsOn"><span></span></label>
       </div>
@@ -536,23 +535,20 @@
       </div>
       <details class="sub" id="hidArtistsBox" hidden>
         <summary id="hidArtistsSum">Artists not recommended</summary>
-        <p class="note">Left out of Discover, Rediscover, autoplay and radio. Search still finds them.</p>
         <div class="folderList" id="notRecArtists"></div>
       </details>
       <details class="sub" id="hidAlbumsBox" hidden>
         <summary id="hidAlbumsSum">Albums not recommended</summary>
-        <p class="note">Their tracks and their tiles are left out of Discover, Rediscover, autoplay and radio. Search still finds them.</p>
         <div class="folderList" id="notRecAlbums"></div>
       </details>
       <details class="sub" id="hidTracksBox" hidden>
         <summary id="hidTracksSum">Tracks not recommended</summary>
-        <p class="note">Left out of Discover, Rediscover, autoplay and radio. Search still finds them.</p>
         <div class="folderList" id="notRecTrackList"></div>
         <button id="notRecTracks" class="soft">Recommend them all again</button>
       </details>
       <details class="sub" id="hidPlBox" hidden>
         <summary id="hidPlSum">Hidden playlists</summary>
-        <p class="note">Hidden from the sidebar. Their songs still play and show in your Library.</p>
+        <p class="note">Hidden from the sidebar only.</p>
         <div class="folderList" id="hiddenPlList"></div>
       </details>
     </section>
@@ -562,22 +558,22 @@
       <h3>Queue &amp; autoplay</h3>
       <div class="row">
         <div>
-          <div class="lbl">Sets &amp; Podcasts in the queue and autoplay</div>
-          <div class="note">Off: playing a list skips anything over 15 minutes unless you pick it, and autoplay sticks to tracks under 15 minutes.</div>
+          <div class="lbl">Play Sets &amp; Podcasts</div>
+          <div class="note">Off: lists and autoplay skip anything over 15 minutes, unless you pick it.</div>
         </div>
         <label class="switch"><input type="checkbox" id="queueSets"><span></span></label>
       </div>
       <div class="row">
         <div>
           <div class="lbl">Autoplay</div>
-          <div class="note">Keeps playing similar tracks from each platform, taking turns, when your queue runs out.</div>
+          <div class="note">Plays similar tracks when the queue runs out.</div>
         </div>
         <label class="switch"><input type="checkbox" id="apQueueOn"><span></span></label>
       </div>
       <div class="row">
         <div>
-          <div class="lbl">Avoid recently played</div>
-          <div class="note">Autoplay skips anything you've heard in the last three hours.</div>
+          <div class="lbl">Avoid recent plays</div>
+          <div class="note">Autoplay skips what you've heard in the last 3 hours.</div>
         </div>
         <label class="switch"><input type="checkbox" id="avoidRecentOn"><span></span></label>
       </div>
@@ -595,15 +591,15 @@
       </div>
       <div class="row">
         <div>
-          <div class="lbl">Skip long silences</div>
-          <div class="note">Jumps over silence inside a track, and moves on when the rest of it is silent.</div>
+          <div class="lbl">Skip silences</div>
+          <div class="note">Jumps over long silences, and moves on when the rest is silent.</div>
         </div>
         <select id="silenceSel" class="narrow"><option value="0">Off</option><option value="5">After 5 s</option><option value="8">After 8 s</option><option value="15">After 15 s</option><option value="30">After 30 s</option></select>
       </div>
       <div class="row">
         <div>
           <div class="lbl">Equalizer</div>
-          <div class="note" id="eqNote">Ten bands. Changes are heard straight away.</div>
+          <div class="note" id="eqNote">Ten bands.</div>
         </div>
         <label class="switch"><input type="checkbox" id="eqOn"><span></span></label>
       </div>
@@ -621,7 +617,6 @@
       <div class="row">
         <div>
           <div class="lbl">Output device</div>
-          <div class="note">Where the app plays its sound.</div>
         </div>
         <select id="outputSel" class="narrow wide"></select>
       </div>
@@ -657,8 +652,8 @@
       </div>
       <div class="row">
         <div>
-          <div class="lbl">Volume control</div>
-          <div class="note">Off: no volume slider, and the app plays at 100%.</div>
+          <div class="lbl">Volume slider</div>
+          <div class="note">Off: plays at 100%.</div>
         </div>
         <label class="switch"><input type="checkbox" id="volShowOn"><span></span></label>
       </div>
@@ -676,8 +671,8 @@
       </div>
       <div class="row">
         <div>
-          <div class="lbl">Start muted in the Windows Sound Mixer</div>
-          <div class="note">No echo until you've routed it and unmuted it there.</div>
+          <div class="lbl">Start muted</div>
+          <div class="note">In the Windows Sound Mixer, until you've routed it.</div>
         </div>
         <label class="switch"><input type="checkbox" id="out2Muted"><span></span></label>
       </div>
@@ -700,7 +695,7 @@
       <div class="row">
         <div>
           <div class="lbl">Discord status</div>
-          <div class="note" id="presNote">Shows what you're playing on your Discord profile.</div>
+          <div class="note" id="presNote">Shows what you're playing on your profile.</div>
         </div>
         <label class="switch"><input type="checkbox" id="presToggle"><span></span></label>
       </div>
@@ -717,14 +712,14 @@
         <div class="row">
           <div>
             <div class="lbl">Listen along button</div>
-            <div class="note">Lets friends jump into the track at about where you are (SoundCloud), or open it (Spotify). Discord's own Listen Along only works with its Spotify connection.</div>
+            <div class="note">Friends join at your spot (SoundCloud) or open the track (Spotify).</div>
           </div>
           <label class="switch"><input type="checkbox" id="presListen"><span></span></label>
         </div>
         <div class="row">
           <div>
             <div class="lbl">Open track button</div>
-            <div class="note">Buttons show to other people, not on your own profile.</div>
+            <div class="note">Only others see the buttons.</div>
           </div>
           <label class="switch"><input type="checkbox" id="presLink"><span></span></label>
         </div>
@@ -733,7 +728,7 @@
       <div class="row">
         <div>
           <div class="lbl">Stream widget</div>
-          <div class="note" id="widgetNote">A now-playing card for OBS. It shows the track; it doesn't play audio.</div>
+          <div class="note" id="widgetNote">A now-playing card for OBS.</div>
         </div>
         <label class="switch"><input type="checkbox" id="widgetToggle"><span></span></label>
       </div>
@@ -742,7 +737,7 @@
         <div class="row stack">
           <div>
             <div class="lbl">Address</div>
-            <div class="note">Add it to OBS as a Browser Source. Any size works.</div>
+            <div class="note">Add it in OBS as a Browser Source, any size.</div>
           </div>
           <div class="widgetRow">
             <input id="widgetUrl" type="text" readonly aria-label="Widget address">
@@ -794,7 +789,7 @@
         <div class="row">
           <div>
             <div class="lbl">Hide this track</div>
-            <div class="note">Clears the widget until the next track starts.</div>
+            <div class="note">Until the next track.</div>
           </div>
           <button id="widgetClear" class="soft">Hide</button>
         </div>
@@ -802,8 +797,8 @@
 
       <div class="row">
         <div>
-          <div class="lbl">Chat song requests</div>
-          <div class="note">Lets your chat bot add songs to the queue.</div>
+          <div class="lbl">Song requests</div>
+          <div class="note">Your chat bot adds songs to the queue.</div>
         </div>
         <label class="switch"><input type="checkbox" id="reqOn"><span></span></label>
       </div>
@@ -820,7 +815,7 @@
           <div class="widgetRow"><input id="reqUrl" type="text" readonly><button id="reqCopy" class="soft">Copy</button></div>
         </div>
         <div class="row stack">
-          <label class="lbl" for="reqNowUrl">Now playing address (for !song)</label>
+          <label class="lbl" for="reqNowUrl">Now playing address (!song)</label>
           <div class="widgetRow"><input id="reqNowUrl" type="text" readonly><button id="reqNowCopy" class="soft">Copy</button></div>
         </div>
         <div class="botHelp" id="botHelp"></div>
@@ -828,7 +823,7 @@
         <div class="row">
           <div>
             <div class="lbl">Prefer radio edits</div>
-            <div class="note">When a requested song comes long, play its radio edit if there is one: the 3-minute "I Remember" rather than the 10-minute one.</div>
+            <div class="note">Plays a long song's radio edit, if there is one.</div>
           </div>
           <label class="switch"><input type="checkbox" id="reqRadioOn"><span></span></label>
         </div>
@@ -836,11 +831,11 @@
         <details class="sub inner">
           <summary>Limits</summary>
           <div class="row">
-            <div class="lbl">Waiting requests, at most</div>
+            <div class="lbl">Most waiting</div>
             <div class="stepper"><button id="reqMaxDown" class="soft" aria-label="Fewer">&minus;</button><span id="reqMaxVal">10</span><button id="reqMaxUp" class="soft" aria-label="More">+</button></div>
           </div>
           <div class="row">
-            <div class="lbl">Per viewer, at most</div>
+            <div class="lbl">Most per viewer</div>
             <div class="stepper"><button id="reqUserDown" class="soft" aria-label="Fewer">&minus;</button><span id="reqUserVal">2</span><button id="reqUserUp" class="soft" aria-label="More">+</button></div>
           </div>
           <div class="row">
@@ -854,7 +849,7 @@
 
         <details class="sub inner">
           <summary>Chat replies</summary>
-          <p class="note">What the bot says. You can use {title}, {artist}, {user}, {position}, {platform}, {query} and {count}.</p>
+          <p class="note">Placeholders: {title} {artist} {user} {position} {platform} {query} {count}</p>
           <div id="reqMsgs"></div>
           <button id="msgReset" class="soft">Reset to defaults</button>
         </details>
@@ -868,7 +863,7 @@
           <div class="row">
             <div>
               <div class="lbl">Secret key</div>
-              <div class="note">Part of the request address. Make a new one if it leaks.</div>
+              <div class="note">Make a new one if it leaks.</div>
             </div>
             <button id="reqNewKey" class="soft">New key</button>
           </div>
@@ -878,8 +873,8 @@
       <!-- Stream Deck & remote control, with the other streaming tools -->
       <div class="row">
         <div>
-          <div class="lbl">Stream Deck &amp; remote control</div>
-          <div class="note">Lets the OmniPulse Stream Deck plugin (in the project's streamdeck folder) control playback. Only programs on this PC can reach it.</div>
+          <div class="lbl">Stream Deck &amp; remote</div>
+          <div class="note">For the OmniPulse Stream Deck plugin. Only this PC can reach it.</div>
         </div>
         <label class="switch"><input type="checkbox" id="remoteOn"><span></span></label>
       </div>
@@ -888,7 +883,7 @@
         <div class="row stack">
           <div>
             <div class="lbl">Address</div>
-            <div class="note">The plugin finds the port and key by itself. Other tools can call this, with action= play, pause, toggle, next, previous, like, favourite, shuffle, repeat, clear-requests, clear-queue or sets.</div>
+            <div class="note">The plugin finds it by itself. Other tools add action= play, pause, toggle, next, previous, like, favourite, shuffle, repeat, clear-requests, clear-queue or sets.</div>
           </div>
           <div class="widgetRow"><input id="remoteUrl" type="text" readonly aria-label="Remote address"><button id="remoteCopy" class="soft">Copy</button></div>
         </div>
@@ -900,7 +895,7 @@
         <div class="row">
           <div>
             <div class="lbl">Secret key</div>
-            <div class="note">Part of the address. Make a new one if it leaks.</div>
+            <div class="note">Make a new one if it leaks.</div>
           </div>
           <button id="remoteNewKey" class="soft">New key</button>
         </div>
@@ -913,7 +908,7 @@
       <div class="row">
         <div>
           <div class="lbl">Hardware acceleration</div>
-          <div class="note">Uses your graphics card. Turn it off if you see glitches.</div>
+          <div class="note">Turn off if you see glitches.</div>
         </div>
         <label class="switch"><input type="checkbox" id="gpuToggle"><span></span></label>
       </div>
@@ -921,7 +916,7 @@
       <div class="row">
         <div>
           <div class="lbl">Close to tray</div>
-          <div class="note">The close button hides the window and music keeps playing. Quit from the tray icon.</div>
+          <div class="note">Closing hides the window; music keeps playing. Quit from the tray.</div>
         </div>
         <label class="switch"><input type="checkbox" id="trayToggle"><span></span></label>
       </div>

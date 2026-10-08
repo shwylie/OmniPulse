@@ -154,7 +154,7 @@ function audioInit() {
     $("eqSection").hidden = !prefs.eqOn;
     if (prefs.eqOn) {
       $("eqSection").open = true;
-      $("eqNote").textContent = "Ten bands. Changes are heard straight away.";
+      $("eqNote").textContent = "Ten bands.";
     }
     eqApply();
   });

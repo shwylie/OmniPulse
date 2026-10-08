@@ -38,7 +38,7 @@ function spTrack(x) {
 }
 
 // ---------- account: Spotify stays hidden unless this is a Premium account ----------
-const SP_DEFAULT_NOTE = "Not signed in. Without Premium, Spotify tracks play from YouTube Music.";
+const SP_DEFAULT_NOTE = "Not signed in. Without Premium, songs play from YouTube Music.";
 
 function syncSpotifySettings() {
   // like Last.fm's options: they fold out under Spotify once it's signed in and switched on

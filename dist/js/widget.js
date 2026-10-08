@@ -1,7 +1,7 @@
 // The now-playing widget for OBS.
 
 // ---------- now playing widget for OBS ----------
-const WIDGET_NOTE = "A now-playing card for OBS. It shows the track; it doesn't play audio.";
+const WIDGET_NOTE = "A now-playing card for OBS.";
 
 let widgetReady = false;
 let widgetCleared = false;   // "Clear" hides the card until the next track starts
