@@ -93,11 +93,12 @@ const REQ_MSG_DEFAULTS = {
   perUser: "{user}, you already have {count} requests waiting.",
   duplicate: '"{title}" is already in the queue.',
   closed: "Song requests are closed right now.",
+  notSafe: 'Only openly licensed (Creative Commons) music plays on stream right now, and nothing for "{query}" is.',
   empty: "Tell me what to play, for example: artist - song",
 };
 const REQ_MSG_LABELS = {
   added: "Added", playing: "Added, playing now", notFound: "Not found", full: "Queue full",
-  perUser: "Viewer limit", duplicate: "Already queued", closed: "Requests off",
+  perUser: "Viewer limit", duplicate: "Already queued", closed: "Requests off", notSafe: "Not openly licensed",
   empty: "Nothing asked for",
 };
 
@@ -237,21 +238,24 @@ async function handleSongRequest(q, user) {
   if (!queries.length) return { ok: false, message: reqMsg("empty", base) };
   // Your liked songs come first: one whose title and artist contain every word asked for
   let t = null, found = [], asked = queries[0].q;
-  if (!isLink) for (const qq of queries) { t = await likedMatch(qq.q, order); if (t) { asked = qq.q; break; } }
+  if (!isLink) for (const qq of queries) { t = await likedMatch(qq.q, order); if (t && !safeOk(t)) t = null; if (t) { asked = qq.q; break; } }
+  let unsafe = false;
   // otherwise a search, where a liked track among the top few beats one you haven't liked
   if (!t) {
     search: for (const qq of queries) {
       for (const id of order) {
         found = reqByArtist((await finders[id](qq.q).catch(() => [])).filter((x) => !isMix(x)), qq.artist);
+        if (found.length && streamSafe()) { const open = found.filter(openLicence); unsafe = unsafe || !open.length; found = open; }
         if (found.length) { asked = qq.q; break search; }
       }
     }
-    if (!found.length) return { ok: false, message: reqMsg("notFound", base) };
+    if (!found.length) return { ok: false, message: reqMsg(unsafe ? "notSafe" : "notFound", base) };
     // among the top five: the song asked for that you like, the song asked for, one you like
     const top = found.slice(0, 5), same = (x) => reqSameSong(x, asked);
     t = (!isLink && (top.find((x) => same(x) && isLikedTrack(x)) || top.find(same) || top.find(isLikedTrack))) || found[0];
   }
   if (!isLink) t = await reqPreferRadio(t, found, asked, order, finders);
+  if (!safeOk(t)) return { ok: false, message: reqMsg("notSafe", base) };
   const vars = Object.assign({ title: t.title, artist: artistName(t) }, base);
   if (queue.slice(Math.max(qi, 0)).some((x) => x.id === t.id)) return { ok: false, message: reqMsg("duplicate", vars) };
   t.requestedBy = who;

@@ -162,6 +162,7 @@ function pluginTrack(id, x) {
     duration: Number(x.duration_ms) || 0,
     artwork_url: x.artwork ? String(x.artwork) : "",
     permalink_url: x.link && /^https:\/\//.test(String(x.link)) ? String(x.link) : "",
+    license: x.license ? String(x.license) : "",
   });
 }
 

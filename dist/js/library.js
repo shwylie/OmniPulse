@@ -329,7 +329,7 @@ function hidingTurnOn() {
 }
 
 // Whether the app may recommend this track
-const recOk = (t) => !hidingOn() ? !!t : !!t && !hiddenRecs.has(String(t.id)) && !hiddenArtistOf(t) && !(hiddenAlbums.size && hiddenAlbums.has(trackAlbumKey(t)));
+const recOk = (t) => !safeOk(t) ? false : !hidingOn() ? !!t : !!t && !hiddenRecs.has(String(t.id)) && !hiddenArtistOf(t) && !(hiddenAlbums.size && hiddenAlbums.has(trackAlbumKey(t)));
 
 // on pages of recommendations, it goes straight away
 const onRecPage = () => view === "discover" || view === "rediscover" || (view === "playlist" && currentPlaylist && currentPlaylist.source === "mix");
@@ -435,6 +435,10 @@ function paintNotRecommended() {
   $("notRecTrackList").replaceChildren(...rows);
   $("hidTracksSum").textContent = "Tracks Not Recommended (" + ids.length + ")";
   $("hidTracksBox").hidden = !ids.length;
+  const nv = Object.entries(prefs.noVersion || {}).sort((x, y) => x[1].localeCompare(y[1]));
+  $("noVerList").replaceChildren(...nv.map(([id, name]) => hiddenRow(name, "\u00d7", "Show it again", { track: id })));
+  $("noVerSum").textContent = "Hidden: No Full Version (" + nv.length + ")";
+  $("noVerBox").hidden = !nv.length;
   paintHiddenSummary();
 }
 
@@ -603,6 +607,18 @@ function libraryInit() {
     savePrefs();
     paintNotRecommended();
     say((name ? '"' + name.split(" \u2014 ")[0] + '"' : "That track") + " can be recommended again.");
+  });
+  $("noVerList").addEventListener("click", (e) => {
+    const b = e.target.closest("button[data-track]");
+    if (!b) return;
+    const all = Object.assign({}, prefs.noVersion || {});
+    const name = all[b.dataset.track];
+    delete all[b.dataset.track];
+    prefs.noVersion = all;
+    savePrefs();
+    paintNotRecommended();
+    render();
+    say((name ? '"' + name.split(" \u2014 ")[0] + '"' : "That track") + " is shown again.");
   });
   $("notRecTracks").addEventListener("click", () => {
     hiddenRecs = new Set();

@@ -11,6 +11,15 @@ function seconds(len) {
   return Number(s) || 0;
 }
 
+// The licence an item is shared under, from its licence link: "cc-by-nc-sa" and the like, "cc0" for the
+// public domain, or "" when it doesn't say (Stream-Safe Music plays only the open ones)
+function licenceOf(url) {
+  const u = String(url || "").toLowerCase();
+  const m = u.match(/creativecommons\.org\/licenses\/([a-z-]+)/);
+  if (m) return "cc-" + m[1];
+  return /creativecommons\.org\/publicdomain\//.test(u) ? "cc0" : "";
+}
+
 // One track per song: the FLAC original and its MP3 copy share a name ("...t01.flac" / "...t01.mp3")
 function tracksOf(id, meta, lossless) {
   const files = (meta.files || []).filter((f) => /^(flac|24bit flac|vbr mp3|mp3|128kbps mp3|ogg vorbis)$/i.test(f.format || ""));
@@ -22,6 +31,7 @@ function tracksOf(id, meta, lossless) {
   });
   const by = (meta.metadata && meta.metadata.creator) || "";
   const album = (meta.metadata && meta.metadata.title) || id;
+  const license = licenceOf(meta.metadata && meta.metadata.licenseurl);
   const out = [];
   songs.forEach((list, base) => {
     const flac = list.find((f) => /flac/i.test(f.format));
@@ -40,6 +50,7 @@ function tracksOf(id, meta, lossless) {
       file: pick.name,
       item: id,
       track: Number(named.track) || 0,
+      license,
     });
   });
   out.sort((x, y) => (x.track || 0) - (y.track || 0) || x.file.localeCompare(y.file));

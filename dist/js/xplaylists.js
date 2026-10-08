@@ -4,7 +4,7 @@
 
 const XPL_KEY = "sc.xplaylists";
 const XPL_FIELDS = ["source", "id", "ytId", "ytArtistId", "spArtists", "uri", "kind", "title", "displayArtist", "duration", "artwork_url", "permalink_url",
-  "album", "spAlbum", "genre", "created_at", "playback_count", "sharing", "access", "policy"];
+  "album", "spAlbum", "genre", "created_at", "playback_count", "sharing", "access", "policy", "license"];
 
 let xpls = [];
 try { xpls = JSON.parse(localStorage.getItem(XPL_KEY) || "[]"); } catch (e) { xpls = []; }

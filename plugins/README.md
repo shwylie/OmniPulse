@@ -66,7 +66,9 @@ OmniPulse.register({
     const data = await r.json();
     return data.items.map((x) => ({
       id: x.id, title: x.title, artist: x.artist, album: x.album,
-      duration_ms: x.ms, artwork: x.cover, link: x.pageUrl,   // and anything else you need later
+      duration_ms: x.ms, artwork: x.cover, link: x.pageUrl,
+      license: x.licence,   // optional: "cc-by", "cc-by-nc-sa" and the like, or "cc0"; only these play with Stream-Safe Music on
+      // and anything else you need later
     }));
   },
   // required: a playable address for one of them (any format the app's player takes: MP3, AAC, FLAC, Ogg, Opus, WAV)

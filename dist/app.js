@@ -42,6 +42,8 @@ function streamerPaint() {
   b.setAttribute("aria-pressed", on ? "true" : "false");
   b.title = on ? "Streamer Mode: on. Account names, keys, addresses and ports, and plugin settings are hidden. Click to show them."
     : "Streamer Mode: off. Hides account names, keys, addresses and ports, and plugin settings.";
+  $("smPrivate").checked = on;
+  stateNotes();
   markSensitive(document);
 }
 
@@ -75,19 +77,32 @@ function el(tag, cls, text) {
 }
 // Status and error messages slide out in a strip above the player bar, then go again.
 // "Loading..." style messages stay until they're replaced or cleared; say("") clears.
+// say(msg, { stay: true, actions: [[label, fn], ...] }): stays until it's dismissed (a click on it, or
+// one of its buttons), and the passing messages of what plays next don't replace it.
 let statusTimer = null;
-function say(msg) {
+let statusStays = false;
+function say(msg, opts) {
   const bar = $("statusBar");
-  clearTimeout(statusTimer);
   msg = msg ? String(msg) : "";
+  opts = opts || {};
+  if (statusStays && !opts.stay && !opts.force) return;
+  clearTimeout(statusTimer);
+  statusStays = !!opts.stay && !!msg;
+  bar.classList.toggle("stays", statusStays);
+  $("statusActions").replaceChildren(...(msg && opts.actions ? opts.actions : []).map(([label, fn]) => {
+    const b = el("button", "soft", label);
+    b.type = "button";
+    b.addEventListener("click", (e) => { e.stopPropagation(); say("", { force: true }); fn(); });
+    return b;
+  }));
   if (!msg) { bar.classList.remove("show"); return; }
   const busy = /(\.\.\.|\u2026)$/.test(msg);
-  const bad = !busy && /^(could not|couldn't|can't|error|stream error|scrobble failed)|failed|problem|expired|isn't available/i.test(msg);
+  const bad = !busy && (!!opts.bad || /^(could not|couldn't|can't|error|stream error|scrobble failed)|failed|problem|expired|isn't available/i.test(msg));
   $("statusText").textContent = msg;
   bar.classList.toggle("busy", busy);
   bar.classList.toggle("bad", bad);
   bar.classList.add("show");
-  statusTimer = setTimeout(() => bar.classList.remove("show"), busy ? 30000 : bad ? 7000 : 4000);
+  if (!statusStays) statusTimer = setTimeout(() => bar.classList.remove("show"), busy ? 30000 : bad ? 7000 : 4000);
 }
 // With YouTube Music on, SoundCloud lists include Go+ tracks too: they play from YouTube Music
 // (once: SoundCloud's next-page links already carry it)
@@ -412,10 +427,55 @@ function paintHeroCover(v) {
 
 // Go+ tracks are served to this app as 30-second previews only
 function isPreview(t) { return !!t && (t.access === "preview" || t.policy === "SNIP"); }
-// Go+ previews and blocked tracks are never shown
-// Go+ tracks are shown when YouTube Music can play them in full
+// ---------- Streamer Mode: Stream-Safe Music ----------
+// On, only tracks under an open licence are shown and played: SoundCloud's Creative Commons licences
+// ("cc-by", "cc-by-nc-sa" and the rest) and "no-rights-reserved". Nothing else says how it's licensed
+// (Spotify, YouTube Music, your files, plugins without a licence), so none of it counts as open.
+const streamSafe = () => !!prefs.streamSafe;
+const openLicence = (t) => !!t && /^(cc-|cc0$|no-rights-reserved$)/i.test(String(t.license || ""));
+const safeOk = (t) => !streamSafe() || openLicence(t);
+
+function safePaint() {
+  const on = streamSafe();
+  document.body.classList.toggle("streamSafe", on);
+  const b = $("safeBtn");
+  b.classList.toggle("on", on);
+  b.setAttribute("aria-pressed", on ? "true" : "false");
+  b.title = on ? "Stream-Safe Music: on. Only openly licensed (Creative Commons) music shows and plays. Click to turn it off."
+    : "Stream-Safe Music: off. Turn on to show and play only openly licensed (Creative Commons) music.";
+  $("smSafe").checked = on;
+  stateNotes();
+}
+
+function safeSet(on) {
+  prefs.streamSafe = !!on;
+  savePrefs();
+  safePaint();
+  render();
+  renderQueue();
+  say(on ? "Stream-Safe Music on: only openly licensed music shows and plays." : "Stream-Safe Music off.", { force: true });
+  // what's playing now, if it isn't open, goes
+  const cur = curTrack();
+  if (on && cur && !openLicence(cur)) safeSkip(cur);
+}
+
+// Not open, with Stream-Safe Music on: on to the next one that is (or stop)
+function safeSkip(t) {
+  audio.pause();
+  if (typeof spotifyPause === "function") spotifyPause();
+  const next = queue.findIndex((x, k) => k > qi && openLicence(x));
+  if (next > 0) { qi = next; playCurrent(); return; }
+  if (autoplayActive()) { qi = queue.length - 1; autoplayAdvance(); return; }
+  say('Stream-Safe Music: "' + (t.title || "That track") + "\" isn't openly licensed, and nothing after it in the queue is.", { force: true });
+}
+
+// Go+ previews and blocked tracks are never shown.
+// Go+ tracks are shown when YouTube Music (or Spotify Premium) can play them in full, unless you've
+// hidden one that had no full version anywhere.
+const spFullOn = () => typeof spotifyPremium !== "undefined" && spotifyPremium && prefs.spOn !== false;
+const noVersionHidden = (t) => !!t && !!prefs.noVersion && !!prefs.noVersion[String(t.id)];
 function isUnplayable(t) {
-  return (isPreview(t) && !ytOn()) || (!!t && t.access === "blocked") || (!!t && /\bpreview\b/i.test(t.title || ""));
+  return noVersionHidden(t) || (isPreview(t) && !ytOn() && !spFullOn()) || (!!t && t.access === "blocked") || (!!t && /\bpreview\b/i.test(t.title || ""));
 }
 
 function openOnSoundCloud(t) {
@@ -470,6 +530,7 @@ function trackRow(t, i, playing) {
   li.dataset.i = i;
   li.draggable = true;   // onto a playlist or the queue (js/dnd.js)
   if (!isFav(t)) li.classList.add("notFav");   // hidden while "Favourites only" is on
+  if (!openLicence(t)) li.classList.add("notSafe");   // hidden while Stream-Safe Music is on
   if (playing && t.id === playing.id) li.classList.add("playing");
 
   const num = el("div", "num");
@@ -909,6 +970,12 @@ function startList(list, i, shuffle, name) {
     const kept = list.filter((t) => !isMix(t) || t === picked);
     if (kept.length) { list = kept; i = picked ? list.indexOf(picked) : 0; }
   }
+  if (streamSafe()) {
+    const picked = list[i];
+    list = list.filter(openLicence);
+    if (!list.length) { say("Stream-Safe Music is on, and nothing here is openly licensed.", { force: true }); return; }
+    i = Math.max(0, list.indexOf(picked));
+  }
   queue = list.slice();
   if (shuffle) { queue = shuffledOrder(queue); i = 0; }   // fair: long-unheard tracks first (js/shuffle.js)
   qi = i;
@@ -920,6 +987,7 @@ const queuedByYou = (t) => Object.assign({}, t, { queuedByYou: true, autoplay: u
 
 function playNext(t) {
   if (!t) return;
+  if (!safeOk(t)) { say("Stream-Safe Music is on, and that track isn't openly licensed.", { force: true }); return; }
   if (qi < 0) { startList([t], 0, false); return; }
   queue.splice(qi + 1, 0, queuedByYou(t));
   renderQueue();
@@ -935,6 +1003,7 @@ function queuedEnd() {
 
 function addToQueue(t) {
   if (!t) return;
+  if (!safeOk(t)) { say("Stream-Safe Music is on, and that track isn't openly licensed.", { force: true }); return; }
   if (qi < 0) { startList([t], 0, false); return; }
   queue.splice(queuedEnd(), 0, queuedByYou(t));
   renderQueue();
@@ -942,7 +1011,7 @@ function addToQueue(t) {
 
 function queueRow(t, idx, removable) {
   applyFix(t);
-  const li = el("li", "qRow" + (idx === qi ? " cur" : ""));
+  const li = el("li", "qRow" + (idx === qi ? " cur" : "") + (openLicence(t) ? "" : " notSafe"));
   li.dataset.q = idx;
   li.draggable = true;   // onto a playlist (what's playing is copied, not moved)
   const img = el("img");
@@ -1226,6 +1295,7 @@ function playFromPage(i) {
 async function playCurrent() {
   const t = curTrack();
   if (!t) return;
+  if (!safeOk(t)) { safeSkip(t); return; }
   fadeTrackChange(fadeState.last, t);   // the old one fades out, this one in (js/fade.js)
   fadeState.last = t;
   nativeOutFlush();   // the last track's tail isn't heard over the new one
@@ -1376,16 +1446,14 @@ async function startStream(t) {
     if (mine === streamToken) say("");
     return;
   }
-  // Go+: the full song from YouTube Music rather than SoundCloud's 30 seconds
-  if (isPreview(t) && await playViaYouTube(t, mine, "Go+ track: playing the full song from YouTube Music.")) return;
-  if (mine !== streamToken) return;
+  // Go+: the full song from YouTube Music (or Spotify), never SoundCloud's 30 seconds
+  if (isPreview(t)) { await playFullElsewhere(t, mine, "Go+ track"); return; }
   const info = await invoke("stream_url", { id: String(t.id) });
   if (mine !== streamToken) return;
   const failures = [];
   for (const c of info.candidates || []) {
-    // only the preview left: YouTube Music's full song is better, if it has it
-    if (c.name === "preview" && await playViaYouTube(t, mine, "SoundCloud only had a preview: playing the full song from YouTube Music.")) return;
-    if (mine !== streamToken) return;
+    // only the preview left: the full song from elsewhere, or nothing
+    if (c.name === "preview") { await playFullElsewhere(t, mine, "SoundCloud only had a preview"); return; }
     let resolved;
     try {
       resolved = await invoke("stream_resolve", { url: c.url });
@@ -1401,11 +1469,8 @@ async function startStream(t) {
       // a "full" stream that's only 30 seconds of a longer song is a preview, whatever it's called
       const full = t.full_duration || t.duration || 0;
       const got = isFinite(audio.duration) ? audio.duration * 1000 : 0;
-      const snippet = c.name === "preview" || (got > 0 && got < 35000 && full > 60000);
-      if (snippet && !isPreview(t) && await playViaYouTube(t, mine, "SoundCloud only sent a 30-second preview: playing the full song from YouTube Music.")) return;
-      if (mine !== streamToken) return;
-      if (snippet) say((isPreview(t) ? "Go+ track" : "SoundCloud only sent a preview") + ": playing the 30-second preview. " + ytMissNote(t) + ".");
-      else say("");
+      if (got > 0 && got < 35000 && full > 60000) { audio.pause(); await playFullElsewhere(t, mine, "SoundCloud only sent a 30-second preview"); return; }
+      say("");
       return;
     } catch (e) {
       if (mine !== streamToken) return;
@@ -1429,6 +1494,60 @@ async function startStream(t) {
     }
   }
   throw new Error("none of SoundCloud's formats would play (" + failures.join("; ") + ")");
+}
+
+// ---------- Go+ and other preview-only tracks ----------
+// The full song from YouTube Music (its best match, picked by itself) or, with Spotify Premium, from
+// Spotify. With neither, the track is skipped, and a note stays up saying so and offering to hide it.
+const spVersions = new Map();   // SoundCloud id -> the Spotify track found for it (or null)
+
+async function spotifyVersion(t) {
+  if (!spFullOn()) return null;
+  const key = String(t.id);
+  if (spVersions.has(key)) return spVersions.get(key);
+  const n = guessNames(t);
+  let found = [];
+  try { found = await spotifySearchTracks((n.artist || artistName(t)) + " " + matchTitle(t)); } catch (e) { return null; }
+  const best = found.map((c) => ({ c, score: ytMatchScore(t, c) })).sort((a, b) => b.score - a.score).find((x) => x.score >= 0.5 && artistHit(t, x.c));
+  const sp = best ? best.c : null;
+  spVersions.set(key, sp);
+  return sp;
+}
+
+async function playFullElsewhere(t, mine, why) {
+  if (await playViaYouTube(t, mine, why + ": playing the full song from YouTube Music.", true)) return;
+  if (mine !== streamToken) return;
+  const sp = await spotifyVersion(t);
+  if (mine !== streamToken) return;
+  if (sp && curTrack() === t) {
+    // the Spotify version takes its place in the queue
+    queue[qi] = sp;
+    setTimeout(() => playCurrent().then(() => { if (curTrack() === sp) say(why + ": playing the full song from Spotify."); }), 0);
+    return;
+  }
+  noVersionSkip(t, why);
+}
+
+function noVersionSkip(t, why) {
+  audio.pause();
+  const where = [ytOn() ? "YouTube Music" : "", spFullOn() ? "Spotify" : ""].filter(Boolean);
+  const actions = [["Hide it", () => noVersionHide(t)]];
+  if (ytOn()) actions.push(["Choose a version", () => openFixDialog(t)]);
+  say("Skipped \"" + (t.title || "this track") + "\" (" + why + "): " +
+    (where.length ? "no full version turned up on " + where.join(" or ") : "nothing you use can play the full song") +
+    (ytLastMiss && ytLastMiss.id === t.id && ytLastMiss.closest ? " (the closest was " + ytLastMiss.closest + ")" : "") + ".",
+    { stay: true, bad: true, actions });
+  setTimeout(() => { if (curTrack() === t) { if (qi < queue.length - 1) step(1); else if (autoplayActive()) autoplayAdvance(); } }, 300);
+}
+
+// Hidden from every list, until it's shown again (Settings > Library > Hidden & Not Recommended)
+function noVersionHide(t) {
+  prefs.noVersion = Object.assign({}, prefs.noVersion, { [String(t.id)]: (t.title || "Untitled") + " \u2014 " + artistName(t) });
+  savePrefs();
+  if (typeof paintNotRecommended === "function") paintNotRecommended();
+  viewTracks = viewTracks.filter((x) => x !== t && String(x.id) !== String(t.id));
+  render();
+  say("Hidden. Settings > Library > Hidden & Not Recommended shows it again.");
 }
 
 function toggle() {
@@ -1767,7 +1886,7 @@ async function loadUser() {
 }
 
 $("titlePrompt").addEventListener("click", signIn);
-$("statusBar").addEventListener("click", () => say(""));
+$("statusBar").addEventListener("click", () => say("", { force: true }));
 $("winMin").addEventListener("click", () => win.minimize());
 $("winMax").addEventListener("click", () => win.toggleMaximize());
 $("winClose").addEventListener("click", () => { if (prefs.closeToTray) win.hide(); else win.close(); });

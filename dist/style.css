@@ -1406,3 +1406,13 @@ body.streamer #pluginsSection { display: none !important; }
   box-shadow: 0 0 14px color-mix(in srgb, var(--accent) 28%, transparent);
 }
 .pill.followMore:hover { background: linear-gradient(color-mix(in srgb, var(--accent) 14%, var(--panel)), color-mix(in srgb, var(--accent) 14%, var(--panel))) padding-box, linear-gradient(100deg, var(--accent), var(--accent-2)) border-box; }
+
+/* a note that stays until it's dismissed, with its own buttons (a track with no full version) */
+.statusActions { display: flex; gap: 6px; flex: none; margin-left: auto; }
+.statusActions:empty { display: none; }
+.statusActions button { padding: 3px 10px; font-size: 12px; }
+.statusBar.stays #statusText { white-space: normal; }
+
+/* Stream-Safe Music: what isn't openly licensed is hidden everywhere */
+body.streamSafe .notSafe { display: none !important; }
+.queueHead #safeBtn { margin-left: 2px; }

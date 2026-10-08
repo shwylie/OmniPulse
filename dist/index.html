@@ -166,6 +166,7 @@
       <h2>Queue</h2>
       <button id="qClearReq" class="soft" hidden title="Remove waiting chat requests">Clear requests</button>
       <button id="clearQueue" class="soft">Clear</button>
+      <button id="safeBtn" class="streamerBtn" aria-pressed="false"><svg viewBox="0 0 24 24"><path d="M12 9.6a2.4 2.4 0 1 0 0 4.8 2.4 2.4 0 0 0 0-4.8zM7.05 7.05a7 7 0 0 0 0 9.9l1.42-1.42a5 5 0 0 1 0-7.07zm9.9 0-1.42 1.41a5 5 0 0 1 0 7.07l1.42 1.42a7 7 0 0 0 0-9.9zM4.22 4.22a11 11 0 0 0 0 15.56l1.42-1.42a9 9 0 0 1 0-12.72zm15.56 0-1.42 1.42a9 9 0 0 1 0 12.72l1.42 1.42a11 11 0 0 0 0-15.56z"/></svg></button>
     </div>
     <div class="togetherBar" id="togetherBar" hidden><span id="togetherText"></span><button id="togetherLeave" class="soft">Leave</button></div>
     <h3>Now playing</h3>
@@ -186,6 +187,7 @@
       <div class="statusInner">
         <span class="statusIcon" aria-hidden="true"></span>
         <span id="statusText"></span>
+        <span class="statusActions" id="statusActions"></span>
       </div>
     </div>
     <div class="transport">
@@ -475,16 +477,57 @@
         <div>
           <div class="lbl">YouTube Music</div>
           <div class="note" id="ytNote">Checking for yt-dlp...</div>
+          <button class="linkBtn" data-url="https://www.youtube.com/paid_memberships" title="YouTube Premium and other plans">Manage subscription</button>
         </div>
         <div class="rowEnd">
           <button id="ytSetup" class="soft" hidden>Set up</button>
-          <button id="ytRemove" class="soft" hidden>Remove</button>
+          <button id="ytAccBtn" class="soft" title="Optional: connect your YouTube account">Sign in</button>
           <label class="switch" title="Use YouTube Music"><input type="checkbox" id="ytOn"><span></span></label>
         </div>
       </div>
-      <details class="sub" id="ytHelp" hidden>
-        <summary>About YouTube Music</summary>
-        <div class="note botHelp">Playing needs <b>yt-dlp</b>, which finds each song's audio, and <b>Deno</b>, which runs YouTube's player code for it. The first time YouTube Music is on, OmniPulse downloads both from their official GitHub releases into its own folder (about 58 MB), each checked against the checksum published with it, and yt-dlp updates itself once a day after that. Their caches stay in that folder too, so Remove takes everything off this PC. A yt-dlp or Deno you've installed yourself is used if OmniPulse doesn't have its own. Switching YouTube Music off stops it being used anywhere.<br>Nothing signs in: search, radio and playing work without a Google account, and likes are kept on this PC.</div>
+      <details class="sub" id="ytOptions" hidden>
+        <summary>YouTube Music Options</summary>
+        <div class="row">
+          <div>
+            <div class="lbl">Your Account</div>
+            <div class="note" id="ytAccNote">Optional. Signed in, a like here is a like on YouTube and YouTube Music too.</div>
+          </div>
+        </div>
+        <div class="row" id="ytMirrorRow" hidden>
+          <div>
+            <div class="lbl">Like Other Tracks There Too</div>
+            <div class="note">Liking a SoundCloud or Spotify track likes the same song on YouTube.</div>
+          </div>
+          <label class="switch"><input type="checkbox" id="ytMirror"><span></span></label>
+        </div>
+        <div class="row">
+          <div>
+            <div class="lbl">yt-dlp &amp; Deno</div>
+            <div class="note">Playing needs <b>yt-dlp</b>, which finds each song's audio, and <b>Deno</b>, which runs YouTube's player code for it. OmniPulse downloads both from their official GitHub releases into its own folder (about 58 MB), each checked against the checksum published with it, and yt-dlp updates itself once a day. A yt-dlp or Deno you've installed yourself is used if OmniPulse doesn't have its own. Remove takes them and their caches off this PC.</div>
+          </div>
+          <button id="ytRemove" class="soft" hidden>Remove</button>
+        </div>
+      </details>
+
+      <div class="row">
+        <div>
+          <div class="lbl">Last.fm</div>
+          <div class="note" id="lfmNote">Not signed in. Needs lastfm_api_key and lastfm_secret in config.json.</div>
+          <button class="linkBtn" data-url="https://www.last.fm/settings/subscription" title="Last.fm Pro">Manage subscription</button>
+        </div>
+        <div class="rowEnd">
+          <button id="lfmConnect" class="soft">Sign in</button>
+          <label class="switch" title="Use Last.fm"><input type="checkbox" id="lfmOn"><span></span></label>
+        </div>
+      </div>
+      <details class="sub" id="lastfmSection" hidden>
+        <summary>Last.fm Options</summary>
+        <div class="row">
+          <div>
+            <div class="lbl">Scrobble</div>
+          </div>
+          <label class="switch"><input type="checkbox" id="scrobbleToggle"><span></span></label>
+        </div>
       </details>
 
       <div class="row">
@@ -505,41 +548,6 @@
           <input id="localAddPath" type="text" placeholder="D:\Music or \\NAS\Music" autocomplete="off" spellcheck="false">
           <button class="soft">Add</button>
         </form>
-      </details>
-
-      <div class="row">
-        <div>
-          <div class="lbl">YouTube Account</div>
-          <div class="note" id="ytAccNote">Optional. Connected, a like here is a like on YouTube and YouTube Music too.</div>
-        </div>
-        <label class="switch" title="Connect your YouTube account"><input type="checkbox" id="ytAccOn"><span></span></label>
-      </div>
-      <div class="row sub" id="ytMirrorRow" hidden>
-        <div>
-          <div class="lbl">Like Other Tracks There Too</div>
-          <div class="note">Liking a SoundCloud or Spotify track likes the same song on YouTube.</div>
-        </div>
-        <label class="switch"><input type="checkbox" id="ytMirror"><span></span></label>
-      </div>
-      <div class="row">
-        <div>
-          <div class="lbl">Last.fm</div>
-          <div class="note" id="lfmNote">Not signed in. Needs lastfm_api_key and lastfm_secret in config.json.</div>
-          <button class="linkBtn" data-url="https://www.last.fm/settings/subscription" title="Last.fm Pro">Manage subscription</button>
-        </div>
-        <div class="rowEnd">
-          <button id="lfmConnect" class="soft">Sign in</button>
-          <label class="switch" title="Use Last.fm"><input type="checkbox" id="lfmOn"><span></span></label>
-        </div>
-      </div>
-      <details class="sub" id="lastfmSection" hidden>
-        <summary>Last.fm Options</summary>
-        <div class="row">
-          <div>
-            <div class="lbl">Scrobble</div>
-          </div>
-          <label class="switch"><input type="checkbox" id="scrobbleToggle"><span></span></label>
-        </div>
       </details>
     </section>
 
@@ -621,6 +629,11 @@
         <summary id="hidTracksSum">Tracks Not Recommended</summary>
         <div class="folderList" id="notRecTrackList"></div>
         <button id="notRecTracks" class="soft">Recommend them all again</button>
+      </details>
+      <details class="sub" id="noVerBox" hidden>
+        <summary id="noVerSum">Hidden: No Full Version</summary>
+        <p class="note">Go+ tracks nothing you use could play in full. Shown again, they're tried again.</p>
+        <div class="folderList" id="noVerList"></div>
       </details>
       <details class="sub" id="hidPlBox" hidden>
         <summary id="hidPlSum">Hidden Playlists</summary>
@@ -731,13 +744,28 @@
       <h3>Streaming</h3>
       <div class="row">
         <div>
-          <div class="lbl">OmniPulse Input</div>
+          <div class="lbl">Streamer Mode: Private Info</div>
+          <div class="note" data-on="On: account names, keys, addresses and ports, and plugin settings are hidden. Also the pulsing button in the title bar." data-off="Hides account names, keys, addresses and ports, and plugin settings. Also the button in the title bar."></div>
+        </div>
+        <label class="switch"><input type="checkbox" id="smPrivate"><span></span></label>
+      </div>
+      <div class="row">
+        <div>
+          <div class="lbl">Streamer Mode: Stream-Safe Music</div>
+          <div class="note" data-on="On: only openly licensed music shows and plays, chat requests included. Everything else is hidden from every list and skipped. Also the pulsing button at the top of the queue." data-off="Only music under an open licence (Creative Commons, or no rights reserved) shows and plays, so nothing copyrighted reaches your stream. Also the button at the top of the queue."></div>
+          <div class="note">Only SoundCloud says how a track is licensed: on SoundCloud, open licences are the uploader's choice. Spotify, YouTube Music and your own files don't say, so none of theirs plays while this is on.</div>
+        </div>
+        <label class="switch"><input type="checkbox" id="smSafe"><span></span></label>
+      </div>
+      <div class="row">
+        <div>
+          <div class="lbl">Offset OmniPulse</div>
           <div class="note">The sound again, as its own app, for Wave Link or OBS.</div>
         </div>
         <label class="switch"><input type="checkbox" id="out2On"><span></span></label>
       </div>
       <details class="sub" id="out2Body" open hidden>
-        <summary>OmniPulse Input</summary>
+        <summary>Offset OmniPulse</summary>
         <p class="note" id="out2Help"></p>
         <div class="row">
           <div>
@@ -755,7 +783,7 @@
         </div>
         <div class="row">
           <div class="lbl">Volume</div>
-          <div class="levSlider"><input id="out2Vol" type="range" min="0" max="100" step="1" aria-label="OmniPulse Input volume"><span id="out2VolVal">100%</span></div>
+          <div class="levSlider"><input id="out2Vol" type="range" min="0" max="100" step="1" aria-label="Offset OmniPulse volume"><span id="out2VolVal">100%</span></div>
         </div>
         <p class="note warn" id="out2Note"></p>
       </details>

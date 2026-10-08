@@ -100,6 +100,13 @@ function ytMatchScore(t, c) {
   return score;
 }
 
+// The artist is credited (or named in the title): not a cover
+function artistHit(t, c) {
+  const artist = matchWords(guessNames(t).artist || artistName(t));
+  const where = new Set(matchWords(artistName(c) + " " + c.title));
+  return !artist.length || artist.some((w) => where.has(w));
+}
+
 const YT_NO_MATCH_TTL = 86400000;   // "no match" is looked for again after a day
 let ytLastMiss = null;              // { id, closest }: why the last match came up empty
 
@@ -117,18 +124,25 @@ async function ytCandidates(t, query) {
   return found.slice(0, 10).map((c) => ({ c, score: ytMatchScore(t, c) })).sort((a, b) => b.score - a.score);
 }
 
-async function ytMatch(t) {
+// any: for a track that can't play at all otherwise (Go+), the best of the close ones is taken, even if
+// it's another version or a different length, as long as the title and the artist match
+async function ytMatch(t, any) {
   if (srcOf(t) === "youtube") return t;
   const saved = ytMatchesLoad()[t.id];
   if (saved && saved.id) return ytTrack(saved);
-  // (an old "none" without a date, or one more than a day old, is looked for again)
-  if (saved && saved.none && Date.now() - (saved.at || 0) < YT_NO_MATCH_TTL) { ytLastMiss = { id: t.id, closest: saved.closest || "" }; return null; }
+  // (an old "none" without a date, or one more than a day old, is looked for again; so is a strict one when any will do)
+  if (saved && saved.none && (saved.any || !any) && Date.now() - (saved.at || 0) < YT_NO_MATCH_TTL) { ytLastMiss = { id: t.id, closest: saved.closest || "" }; return null; }
   let ranked;
   try { ranked = await ytCandidates(t); } catch (e) { return null; }   // couldn't search: try again next time
+  // nothing close: once more, by the song's own title
+  if (any && !(ranked[0] && ranked[0].score >= 0.5)) {
+    try { ranked = ranked.concat(await ytCandidates(t, artistName(t) + " " + matchTitle(t))).sort((a, b) => b.score - a.score); } catch (e) {}
+  }
   const top = ranked[0];
-  const ok = top && top.score >= 0.8 ? top.c : null;
+  const pick = any ? ranked.find((x) => x.score >= 0.5 && artistHit(t, x.c)) : top && top.score >= 0.8 ? top : null;
+  const ok = pick ? pick.c : null;
   const closest = top ? '"' + top.c.title + '" by ' + artistName(top.c) : "";
-  ytMatches[t.id] = ok ? ytSnap(ok) : { none: true, at: Date.now(), closest };
+  ytMatches[t.id] = ok ? ytSnap(ok) : { none: true, at: Date.now(), closest, any: !!any };
   ytMatchesSave();
   if (!ok) ytLastMiss = { id: t.id, closest };
   return ok;
@@ -142,18 +156,10 @@ function ytChooseMatch(t, c) {
   delete t.ytVia;
 }
 
-// Why a track that should come from YouTube Music didn't
-function ytMissNote(t) {
-  if (!ytOn()) return "YouTube Music is off or not set up";
-  const miss = ytLastMiss && ytLastMiss.id === t.id ? ytLastMiss : null;
-  return "YouTube Music had no close match" + (miss && miss.closest ? " (the closest was " + miss.closest + ")" : "") +
-    ". Right-click > Track preferences to choose the version";
-}
-
 // Plays a track by its YouTube Music match; false if there's none (or YouTube Music is off)
-async function playViaYouTube(t, mine, note) {
+async function playViaYouTube(t, mine, note, any) {
   if (!ytOn()) return false;
-  const m = await ytMatch(t).catch(() => null);
+  const m = await ytMatch(t, any).catch(() => null);
   if (!m || mine !== streamToken) return false;
   t.ytVia = m.ytId;   // loudness and silences are measured on what's actually playing
   const url = await ytPlay(m);
@@ -216,35 +222,38 @@ async function ytAccRefresh() {
 }
 
 function ytAccPaint() {
-  $("ytAccOn").checked = ytAcc.connected;
-  $("ytAccOn").disabled = ytAcc.busy;
+  const btn = $("ytAccBtn");
+  btn.textContent = ytAcc.busy ? "Signing in..." : ytAcc.connected ? "Sign out" : "Sign in";
+  btn.disabled = ytAcc.busy || (!ytAcc.connected && ytAcc.configured === false);
+  btn.title = ytAcc.configured === false ? "Needs youtube_client_id and youtube_client_secret in config.json" : "Optional: your YouTube account, for likes there";
   $("ytMirrorRow").hidden = !ytAcc.connected;
+  if (typeof ytPaint === "function") ytPaint();
   $("ytMirror").checked = !!prefs.ytMirror;
   if (!ytAcc.busy && ytAcc.connected && ytAcc.name) { nameNote($("ytAccNote"), "Connected as ", ytAcc.name, ". Likes here are likes on YouTube and YouTube Music too."); return; }
   $("ytAccNote").textContent = ytAcc.busy ? "Finish signing in in your browser, then come back here..."
-    : ytAcc.connected ? "Connected. Likes here are likes on YouTube and YouTube Music too."
+    : ytAcc.connected ? "Signed in. Likes here are likes on YouTube and YouTube Music too."
     : ytAcc.configured === false ? "Optional. Needs youtube_client_id and youtube_client_secret in config.json (see the README)."
-    : "Optional. Connected, a like here is a like on YouTube and YouTube Music too.";
+    : "Optional. Signed in, a like here is a like on YouTube and YouTube Music too. Without it, likes are kept on this PC.";
 }
 
 function ytAccInit() {
-  $("ytAccOn").addEventListener("change", async () => {
-    if ($("ytAccOn").checked) {
+  $("ytAccBtn").addEventListener("click", async () => {
+    if (!ytAcc.connected) {
       ytAcc.busy = true;
       ytAccPaint();
       try {
         Object.assign(ytAcc, await invoke("youtube_connect"));
-        say("YouTube account connected" + (ytAcc.name ? " (" + ytAcc.name + ")" : "") + ".");
+        say("Signed in to YouTube" + (ytAcc.name ? " as " + ytAcc.name : "") + ".");
       } catch (e) {
-        say("Couldn't connect your YouTube account: " + e);
+        say("Couldn't sign in to YouTube: " + e);
       }
       ytAcc.busy = false;
       await ytAccRefresh();
     } else {
-      if (!confirm("Disconnect your YouTube account? Likes stay on YouTube; new ones won't be sent there.")) { ytAccPaint(); return; }
+      if (!confirm("Sign out of YouTube? Likes stay on YouTube; new ones won't be sent there.")) return;
       try { await invoke("youtube_disconnect"); } catch (e) { say(String(e)); }
       await ytAccRefresh();
-      say("YouTube account disconnected.");
+      say("Signed out of YouTube.");
     }
   });
   $("ytMirror").addEventListener("change", () => { prefs.ytMirror = $("ytMirror").checked; savePrefs(); });
@@ -295,6 +304,8 @@ function ytPaint() {
   const setupBtn = $("ytSetup");
   const removeBtn = $("ytRemove");
   $("ytOn").checked = ytWanted();
+  $("ytOptions").hidden = !ytWanted();
+  $("ytAccBtn").hidden = !ytWanted();
   const setup = ytInfo.setup || {};
   removeBtn.hidden = !ytInfo.checked || setup.busy || !ytInfo.diskUse;
   removeBtn.title = ytInfo.diskUse ? "Remove yt-dlp, Deno and their caches (" + mbOf(ytInfo.diskUse) + " MB)" : "";
@@ -310,8 +321,8 @@ function ytPaint() {
   }
   if (ytAvailable()) {
     note.textContent = ytInfo.builtIn
-      ? "Ready (" + mbOf(ytInfo.diskUse) + " MB on this PC). Nothing to sign in to: likes are kept on this PC."
-      : "Ready, with your own yt-dlp " + ytInfo.ytdlp + ". Nothing to sign in to: likes are kept on this PC.";
+      ? "Ready. " + (ytAcc.connected ? "Signed in: likes go to YouTube too." : "Likes are kept on this PC; sign in to like on YouTube too.")
+      : "Ready, with your own yt-dlp " + ytInfo.ytdlp + ". " + (ytAcc.connected ? "Signed in: likes go to YouTube too." : "Likes are kept on this PC; sign in to like on YouTube too.");
     return;
   }
   if (setup.error) {
