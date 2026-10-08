@@ -534,10 +534,13 @@
         </div>
         <label class="switch"><input type="checkbox" id="avoidRecentOn"><span></span></label>
       </div>
-      <div class="row" id="recentRow" hidden>
-        <div class="lbl">Time Frame</div>
-        <select id="recentSel" class="narrow"><option value="day">Past day</option><option value="week">Past week</option><option value="month">Past month</option></select>
-      </div>
+      <details class="sub" id="recentRow" open hidden>
+        <summary>Avoid Recent Plays</summary>
+        <div class="row">
+          <div class="lbl">Time Frame</div>
+          <select id="recentSel" class="narrow"><option value="day">Past day</option><option value="week">Past week</option><option value="month">Past month</option></select>
+        </div>
+      </details>
       <div class="row">
         <div>
           <div class="lbl">Hidden &amp; Not Recommended</div>
