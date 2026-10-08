@@ -81,7 +81,7 @@ function out2Wire(ctx, master) {
 function out2MainDelay() {
   if (!out2.mainDelay) return;
   const offset = prefs.out2On ? Math.max(-OUT2_MAX_MS, Math.min(OUT2_MAX_MS, Number(prefs.out2Offset) || 0)) : 0;
-  const ms = Math.min(OUT2_MAX_MS, (offset < 0 ? -offset : 0) + castLocalDelay());
+  const ms = Math.min(OUT2_MAX_MS, offset < 0 ? -offset : 0);
   out2.mainDelay.delayTime.setValueAtTime(ms / 1000, norm.ctx.currentTime);
 }
 
