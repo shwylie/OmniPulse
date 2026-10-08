@@ -1,7 +1,7 @@
-// OmniPulse, native: the window, title bar, sidebar, Library list, queue and player bar.
+// OmniPulse, native: the window, title bar, sidebar, pages, queue and player bar.
 // Colours, sizes and icons follow the web app's dark theme (dist/style.css).
 
-import { ListView, Slider } from "std-widgets.slint";
+import { ListView, Slider, LineEdit, ScrollView } from "std-widgets.slint";
 
 export global Theme {
     out property <color> bg: #08090c;
@@ -11,28 +11,31 @@ export global Theme {
     out property <color> text: #e9ebf2;
     out property <color> muted: #9097a8;
     out property <color> accent: #8e9bff;
+    out property <color> accent-2: #b48eff;
     out property <color> on-accent: #111318;
     out property <length> radius: 10px;
 }
 
-export struct Row {
-    title: string,
-    artist: string,
-    album: string,
-    dur: string,
-    plat: string,
-    playing: bool,
-}
+export struct Row { title: string, artist: string, album: string, dur: string, plat: string, playing: bool }
+export struct Side { title: string, plat: string }
+export struct Tile { title: string, sub: string, art: image, plat: string }
+export struct Shelf { title: string, tiles: [Tile] }
+export struct Line { text: string }
+export struct Item { name: string, sub: string, art: image, plat: string }
 
-// the platform logos, as in the web app (24x24 paths)
 global Icons {
     out property <string> play: "M8 5v14l11-7z";
     out property <string> pause: "M6 19h4V5H6v14zm8-14v14h4V5h-4z";
     out property <string> next: "M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z";
     out property <string> prev: "M6 6h2v12H6zm3.5 6l8.5 6V6z";
     out property <string> queue: "M4 5h16v3H4zm0 5.5h16v3H4zM4 16h16v3H4z";
+    out property <string> lyrics: "M3 6h12v2H3zm0 5h12v2H3zm0 5h8v2H3zM17 6v8.18A3 3 0 1019 17V8h3V6z";
     out property <string> library: "M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z";
     out property <string> discover: "M12 2a10 10 0 100 20 10 10 0 000-20zm2.19 12.19L6 18l3.81-8.19L18 6l-3.81 8.19zM12 10.9a1.1 1.1 0 100 2.2 1.1 1.1 0 000-2.2z";
+    out property <string> rediscover: "M13 3a9 9 0 00-9 9H1l3.89 3.89.07.14L9 12H6c0-3.87 3.13-7 7-7s7 3.13 7 7-3.13 7-7 7c-1.93 0-3.68-.79-4.94-2.06l-1.42 1.42A8.954 8.954 0 0013 21a9 9 0 000-18zm-1 5v5l4.28 2.54.72-1.21-3.5-2.08V8H12z";
+    out property <string> star: "M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z";
+    out property <string> sets: "M12 3a9 9 0 00-9 9v7c0 1.1.9 2 2 2h4v-8H5v-1a7 7 0 0114 0v1h-4v8h4c1.1 0 2-.9 2-2v-7a9 9 0 00-9-9z";
+    out property <string> stats: "M5 9.2h3V19H5zM10.6 5h2.8v14h-2.8zm5.6 8H19v6h-2.8z";
     out property <string> soundcloud: "M1 14.5c0-1.1.8-2 1.9-2.1.4-2.5 2.5-4.4 5.1-4.4.6 0 1.2.1 1.7.3C10.6 6.4 12.6 5 15 5c3.3 0 6 2.7 6 6 0 .2 0 .4-.1.6.7.5 1.1 1.3 1.1 2.2 0 1.5-1.2 2.7-2.7 2.7H3.6C2.2 16.5 1 15.6 1 14.5z";
     out property <string> spotify: "M12 2a10 10 0 100 20 10 10 0 000-20zm4.6 14.4c-.2.3-.6.4-.9.2-2.5-1.5-5.6-1.9-9.3-1-.3.1-.7-.1-.8-.5-.1-.3.1-.7.5-.8 4-.9 7.5-.5 10.3 1.2.3.2.4.6.2.9zm1.2-2.7c-.2.4-.7.5-1.1.3-2.9-1.8-7.2-2.3-10.6-1.2-.4.1-.9-.1-1-.5-.1-.4.1-.9.5-1 3.9-1.2 8.7-.6 12 1.4.4.2.5.7.2 1zm.1-2.8C14.5 8.8 8.9 8.6 5.6 9.6c-.5.2-1.1-.1-1.2-.6-.2-.5.1-1.1.6-1.2 3.8-1.1 10-.9 13.9 1.4.5.3.6.9.4 1.4-.3.4-.9.6-1.4.3z";
     out property <string> youtube: "M12 2a10 10 0 100 20 10 10 0 000-20zm-2 14.5v-9l6 4.5-6 4.5z";
@@ -57,19 +60,14 @@ component IconButton inherits Rectangle {
     height: size;
     border-radius: size / 2;
     background: filled ? Theme.accent : (ta.has-hover ? Theme.elevated : transparent);
-    Glyph {
-        d: root.d;
-        width: root.size * 0.55;
-        height: root.size * 0.55;
-        fill: filled ? Theme.on-accent : (ta.has-hover ? Theme.text : root.tint);
-    }
+    Glyph { d: root.d; width: root.size * 0.55; height: root.size * 0.55; fill: filled ? Theme.on-accent : (ta.has-hover ? Theme.text : root.tint); }
     ta := TouchArea { clicked => { root.clicked(); } }
 }
 
 component PlatIcon inherits Glyph {
     in property <string> plat;
     d: plat == "spotify" ? Icons.spotify : plat == "youtube" ? Icons.youtube : plat == "local" ? Icons.local : Icons.soundcloud;
-    fill: Theme.muted;
+    fill: plat == "spotify" ? #1ed760 : plat == "youtube" ? #ff0033 : plat == "local" ? #f2b544 : #ff5500;
 }
 
 component NavItem inherits Rectangle {
@@ -77,15 +75,27 @@ component NavItem inherits Rectangle {
     in property <string> d;
     in property <bool> active;
     callback clicked;
-    height: 40px;
+    height: 38px;
     border-radius: 8px;
     background: active ? Theme.elevated : (ta.has-hover ? #ffffff08 : transparent);
     HorizontalLayout {
         padding-left: 12px;
         spacing: 12px;
         Glyph { d: root.d; width: 20px; height: 20px; y: (parent.height - self.height) / 2; fill: active ? Theme.text : Theme.muted; }
-        Text { text: root.label; color: active ? Theme.text : Theme.muted; font-size: 14px; font-weight: active ? 700 : 500; vertical-alignment: center; }
+        Text { text: root.label; color: active ? Theme.text : Theme.muted; font-size: 14px; font-weight: active ? 700 : 500; vertical-alignment: center; overflow: elide; }
     }
+    ta := TouchArea { clicked => { root.clicked(); } }
+}
+
+component Chip inherits Rectangle {
+    in property <string> label;
+    in property <bool> on;
+    callback clicked;
+    height: 32px;
+    width: t.preferred-width + 28px;
+    border-radius: 16px;
+    background: on ? Theme.accent : (ta.has-hover ? Theme.line : Theme.elevated);
+    t := Text { text: root.label; color: on ? Theme.on-accent : Theme.text; font-size: 13px; font-weight: 600; }
     ta := TouchArea { clicked => { root.clicked(); } }
 }
 
@@ -108,10 +118,48 @@ component TrackRow inherits Rectangle {
             Text { text: root.item.title; color: root.item.playing ? Theme.accent : Theme.text; font-weight: 700; font-size: 14px; overflow: elide; }
             Text { text: root.item.artist; color: Theme.muted; font-size: 13px; overflow: elide; }
         }
-        Text { text: root.item.album; width: 30%; color: Theme.muted; font-size: 13px; overflow: elide; vertical-alignment: center; }
-        Text { text: root.item.dur; width: 48px; color: Theme.muted; font-size: 13px; horizontal-alignment: right; vertical-alignment: center; }
+        Text { text: root.item.album; width: 28%; color: Theme.muted; font-size: 13px; overflow: elide; vertical-alignment: center; }
+        Text { text: root.item.dur; width: 52px; color: Theme.muted; font-size: 13px; horizontal-alignment: right; vertical-alignment: center; }
     }
-    ta := TouchArea { double-clicked => { root.play(); } clicked => { root.play(); } }
+    ta := TouchArea { clicked => { root.play(); } }
+}
+
+component Cover inherits Rectangle {
+    in property <image> art;
+    in property <string> initial;
+    border-radius: 8px;
+    background: Theme.elevated;
+    clip: true;
+    Text { text: root.initial; color: Theme.muted; font-size: root.height * 0.35; font-weight: 800; }
+    Image { source: root.art; width: parent.width; height: parent.height; image-fit: cover; }
+}
+
+component TileView inherits Rectangle {
+    in property <Tile> tile;
+    callback clicked;
+    width: 170px;
+    height: 226px;
+    VerticalLayout {
+        spacing: 8px;
+        Rectangle {
+            height: 170px;
+            Cover { art: root.tile.art; initial: root.tile.title; width: 100%; height: 100%; }
+            if ta.has-hover: Rectangle { x: parent.width - 52px; y: parent.height - 52px; width: 42px; height: 42px; border-radius: 21px; background: Theme.accent;
+                Glyph { d: Icons.play; width: 22px; height: 22px; fill: Theme.on-accent; } }
+            PlatIcon { plat: root.tile.plat; x: 8px; y: 8px; width: 18px; height: 18px; }
+        }
+        Text { text: root.tile.title; color: Theme.text; font-weight: 700; font-size: 13px; overflow: elide; }
+        Text { text: root.tile.sub; color: Theme.muted; font-size: 12px; overflow: elide; }
+    }
+    ta := TouchArea { clicked => { root.clicked(); } }
+}
+
+component Card inherits Rectangle {
+    in property <brush> fill: Theme.panel;
+    border-radius: 18px;
+    background: fill;
+    border-width: 1px;
+    border-color: #262a3580;
 }
 
 export component AppWindow inherits Window {
@@ -124,11 +172,42 @@ export component AppWindow inherits Window {
     min-height: 520px;
     default-font-family: "Segoe UI Variable Text";
 
-    in property <[Row]> rows;
-    in property <[Row]> queue-rows;
+    // pages
+    in property <string> page: "library";
+    in property <string> page-kind: "tracks";
     in property <string> page-title: "Library";
     in property <string> page-sub;
-    in property <string> page: "library";
+    in property <[string]> chips;
+    in property <int> chip-on;
+    in property <[Row]> rows;
+    in property <[Side]> sides;
+    in property <int> side-on: -1;
+    in property <[Shelf]> shelves;
+    in-out property <string> search-text;
+    // stats
+    in property <string> st-big;
+    in property <string> st-sub;
+    in property <string> st-top-name;
+    in property <string> st-top-sub;
+    in property <image> st-top-art;
+    in property <[Item]> st-songs;
+    in property <[Item]> st-artists;
+    in property <string> st-kind;
+    in property <string> st-kind-sub;
+    in property <[float]> st-clock;
+    in property <string> st-streak;
+    in property <string> st-streak-sub;
+    in property <[Item]> st-plats;
+    in property <[string]> st-facts;
+    // now playing
+    in property <image> now-art-big;
+    in property <string> now-album;
+    in property <[Line]> lyrics;
+    in property <int> lyric-on: -1;
+    in property <bool> st-empty;
+    in property <string> lyrics-note;
+    // the queue and the bar
+    in property <[Row]> queue-rows;
     in property <string> status;
     in property <string> now-title: "Nothing playing";
     in property <string> now-artist;
@@ -142,14 +221,19 @@ export component AppWindow inherits Window {
     in-out property <bool> queue-open: false;
     in property <bool> is-max;
 
+    callback nav(string);
+    callback side(int);
+    callback chip(int);
     callback play-row(int);
+    callback tile(int, int);
+    callback lucky();
+    callback search(string);
     callback play-queue(int);
     callback toggle();
     callback next();
     callback prev();
     callback seek(float);
     callback volume-changed(float);
-    callback nav(string);
     callback drag();
     callback minimize();
     callback maximize();
@@ -167,7 +251,7 @@ export component AppWindow inherits Window {
                 padding-left: 14px;
                 Text { text: "OmniPulse"; color: Theme.text; font-weight: 700; font-size: 13px; vertical-alignment: center; }
                 Rectangle { horizontal-stretch: 1; }
-                for b[i] in [{ d: "M1 6h10", act: "min" }, { d: root.is-max ? "M3.5 3.5V1.5h7v7h-2M1.5 3.5h7v7h-7z" : "M1.5 1.5h9v9h-9z", act: "max" }, { d: "M1.5 1.5l9 9M10.5 1.5l-9 9", act: "close" }]: Rectangle {
+                for b in [{ d: "M1 6h10", act: "min" }, { d: root.is-max ? "M3.5 3.5V1.5h7v7h-2M1.5 3.5h7v7h-7z" : "M1.5 1.5h9v9h-9z", act: "max" }, { d: "M1.5 1.5l9 9M10.5 1.5l-9 9", act: "close" }]: Rectangle {
                     width: 46px;
                     background: wta.has-hover ? (b.act == "close" ? #e81123 : Theme.elevated) : transparent;
                     Path { commands: b.d; viewbox-width: 12; viewbox-height: 12; width: 11px; height: 11px; stroke: wta.has-hover && b.act == "close" ? white : Theme.muted; stroke-width: 1.2px; fill: transparent; }
@@ -176,24 +260,45 @@ export component AppWindow inherits Window {
             }
         }
 
-        // ---------- sidebar, page, queue ----------
         HorizontalLayout {
             padding-left: 8px;
             padding-right: 8px;
             spacing: 8px;
             vertical-stretch: 1;
+            // ---------- sidebar ----------
             Rectangle {
-                width: 220px;
+                width: 230px;
                 background: Theme.panel;
                 border-radius: Theme.radius;
                 VerticalLayout {
                     padding: 10px;
                     spacing: 2px;
-                    alignment: start;
                     NavItem { label: "Discover"; d: Icons.discover; active: root.page == "discover"; clicked => { root.nav("discover"); } }
+                    NavItem { label: "Rediscover"; d: Icons.rediscover; active: root.page == "rediscover"; clicked => { root.nav("rediscover"); } }
                     NavItem { label: "Library"; d: Icons.library; active: root.page == "library"; clicked => { root.nav("library"); } }
+                    NavItem { label: "Favourites"; d: Icons.star; active: root.page == "favourites"; clicked => { root.nav("favourites"); } }
+                    NavItem { label: "Sets & Podcasts"; d: Icons.sets; active: root.page == "sets"; clicked => { root.nav("sets"); } }
+                    NavItem { label: "Stats"; d: Icons.stats; active: root.page == "stats"; clicked => { root.nav("stats"); } }
+                    Rectangle { height: 10px; }
+                    Text { text: "Playlists"; color: Theme.muted; font-size: 12px; font-weight: 700; x: 12px; }
+                    ListView {
+                        vertical-stretch: 1;
+                        for s[i] in root.sides: Rectangle {
+                            height: 32px;
+                            border-radius: 6px;
+                            background: root.side-on == i ? Theme.elevated : (sta.has-hover ? #ffffff08 : transparent);
+                            HorizontalLayout {
+                                padding-left: 12px;
+                                spacing: 10px;
+                                PlatIcon { plat: s.plat; width: 14px; height: 14px; y: (parent.height - self.height) / 2; }
+                                Text { text: s.title; color: root.side-on == i ? Theme.text : Theme.muted; font-size: 13px; vertical-alignment: center; overflow: elide; }
+                            }
+                            sta := TouchArea { clicked => { root.side(i); } }
+                        }
+                    }
                 }
             }
+            // ---------- the page ----------
             Rectangle {
                 horizontal-stretch: 1;
                 background: Theme.panel;
@@ -203,16 +308,236 @@ export component AppWindow inherits Window {
                     padding: 20px;
                     padding-bottom: 6px;
                     spacing: 6px;
-                    Text { text: root.page-title; color: Theme.text; font-size: 40px; font-weight: 800; }
-                    Text { text: root.page-sub; color: Theme.muted; font-size: 13px; }
-                    Rectangle { height: 8px; }
-                    if root.page == "library": ListView {
+                    HorizontalLayout {
+                        alignment: start;
+                        LineEdit {
+                            width: 360px;
+                            placeholder-text: "What do you want to play?";
+                            text <=> root.search-text;
+                            accepted(t) => { root.search(t); }
+                        }
+                    }
+                    if root.page-kind != "now": Text { text: root.page-title; color: Theme.text; font-size: 38px; font-weight: 800; overflow: elide; }
+                    if root.page-kind != "now" && root.page-sub != "": Text { text: root.page-sub; color: Theme.muted; font-size: 13px; overflow: elide; }
+                    if root.chips.length > 0: HorizontalLayout {
+                        alignment: start;
+                        spacing: 8px;
+                        padding-top: 4px;
+                        for c[i] in root.chips: Chip { label: c; on: root.chip-on == i; clicked => { root.chip(i); } }
+                    }
+                    Rectangle { height: 4px; }
+                    // a list of tracks (Library, playlists, Search, Favourites, Sets, Rediscover)
+                    if root.page-kind == "tracks": ListView {
                         vertical-stretch: 1;
                         for r[i] in root.rows: TrackRow { item: r; index: i; play => { root.play-row(i); } }
                     }
-                    if root.page != "library": Text { text: "Discover comes in a later phase. Your Library is here now."; color: Theme.muted; vertical-stretch: 1; }
+                    // Discover: shelves
+                    if root.page-kind == "discover": ScrollView {
+                        vertical-stretch: 1;
+                        VerticalLayout {
+                            spacing: 22px;
+                            HorizontalLayout {
+                                alignment: start;
+                                Chip { label: "I'm Feeling Lucky"; on: true; clicked => { root.lucky(); } }
+                            }
+                            for sh[s] in root.shelves: VerticalLayout {
+                                spacing: 10px;
+                                Text { text: sh.title; color: Theme.text; font-size: 20px; font-weight: 800; }
+                                Flickable {
+                                    height: 230px;
+                                    content-width: sh.tiles.length * 186px;
+                                    HorizontalLayout {
+                                        spacing: 16px;
+                                        alignment: start;
+                                        for t[k] in sh.tiles: TileView { tile: t; clicked => { root.tile(s, k); } }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    // Stats, Wrapped-style
+                    if root.page-kind == "stats": ScrollView {
+                        vertical-stretch: 1;
+                        VerticalLayout {
+                            alignment: start;
+                            spacing: 14px;
+                            padding-right: 14px;
+                            Card {
+                                height: 150px;
+                                fill: @linear-gradient(135deg, Theme.accent 0%, Theme.accent-2 100%);
+                                border-width: 0px;
+                                VerticalLayout {
+                                    padding: 20px;
+                                    alignment: center;
+                                    Text { text: "YOU LISTENED FOR"; color: Theme.on-accent; font-size: 12px; font-weight: 800; letter-spacing: 1.5px; }
+                                    Text { text: root.st-big; color: Theme.on-accent; font-size: 56px; font-weight: 800; }
+                                    Text { text: root.st-sub; color: Theme.on-accent; font-size: 13px; }
+                                }
+                            }
+                            if !root.st-empty: VerticalLayout {
+                                alignment: start;
+                                spacing: 14px;
+                                HorizontalLayout {
+                                    spacing: 14px;
+                                    Card {
+                                        height: 150px;
+                                        fill: @radial-gradient(circle, #4b52b8 0%, #171a2e 100%);
+                                        border-width: 0px;
+                                        HorizontalLayout {
+                                            padding: 20px;
+                                            spacing: 16px;
+                                            Cover { art: root.st-top-art; initial: root.st-top-name; width: 100px; height: 100px; border-radius: 50px; y: (parent.height - self.height) / 2; }
+                                            VerticalLayout {
+                                                alignment: center;
+                                                Text { text: "YOUR TOP ARTIST"; color: #ffffffcc; font-size: 12px; font-weight: 800; letter-spacing: 1.5px; }
+                                                Text { text: root.st-top-name; color: white; font-size: 26px; font-weight: 800; overflow: elide; }
+                                                Text { text: root.st-top-sub; color: #ffffffcc; font-size: 13px; }
+                                            }
+                                        }
+                                    }
+                                    Card {
+                                        height: 150px;
+                                        width: 330px;
+                                        VerticalLayout {
+                                            alignment: start;
+                                            padding: 20px;
+                                            spacing: 4px;
+                                            Text { text: "YOU'RE A"; color: Theme.muted; font-size: 12px; font-weight: 800; letter-spacing: 1.5px; }
+                                            Text { text: root.st-kind; color: Theme.text; font-size: 24px; font-weight: 800; }
+                                            Text { text: root.st-kind-sub; color: Theme.muted; font-size: 12px; overflow: elide; }
+                                            HorizontalLayout {
+                                                spacing: 3px;
+                                                height: 40px;
+                                                for v in root.st-clock: Rectangle {
+                                                    VerticalLayout {
+                                                        alignment: end;
+                                                        Rectangle { height: max(3px, 40px * v); border-radius: 2px; background: v >= 0.999 ? Theme.accent : #8e9bff66; }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                                HorizontalLayout {
+                                    spacing: 14px;
+                                    Card {
+                                        VerticalLayout {
+                                            alignment: start;
+                                            padding: 20px;
+                                            spacing: 10px;
+                                            Text { text: "YOUR TOP SONGS"; color: Theme.muted; font-size: 12px; font-weight: 800; letter-spacing: 1.5px; }
+                                            for it[i] in root.st-songs: HorizontalLayout {
+                                                spacing: 12px;
+                                                height: 48px;
+                                                Text { text: i + 1; width: 22px; color: Theme.accent; font-size: 22px; font-weight: 800; vertical-alignment: center; }
+                                                Cover { art: it.art; initial: it.name; width: 48px; height: 48px; }
+                                                VerticalLayout {
+                                                    alignment: center;
+                                                    Text { text: it.name; color: Theme.text; font-weight: 700; overflow: elide; }
+                                                    Text { text: it.sub; color: Theme.muted; font-size: 12px; overflow: elide; }
+                                                }
+                                            }
+                                        }
+                                    }
+                                    VerticalLayout {
+                                        alignment: start;
+                                        spacing: 14px;
+                                        Card {
+                                            height: 110px;
+                                            VerticalLayout {
+                                                alignment: start;
+                                                padding: 20px;
+                                                Text { text: "STREAK"; color: Theme.muted; font-size: 12px; font-weight: 800; letter-spacing: 1.5px; }
+                                                Text { text: root.st-streak; color: Theme.text; font-size: 34px; font-weight: 800; }
+                                                Text { text: root.st-streak-sub; color: Theme.muted; font-size: 12px; }
+                                            }
+                                        }
+                                        Card {
+                                            VerticalLayout {
+                                                alignment: start;
+                                                padding: 20px;
+                                                spacing: 8px;
+                                                Text { text: "WHERE IT CAME FROM"; color: Theme.muted; font-size: 12px; font-weight: 800; letter-spacing: 1.5px; }
+                                                for p in root.st-plats: HorizontalLayout {
+                                                    alignment: start;
+                                                    spacing: 8px;
+                                                    PlatIcon { plat: p.plat; width: 16px; height: 16px; }
+                                                    Text { text: p.name; color: Theme.text; font-size: 13px; }
+                                                    Text { text: p.sub; color: Theme.muted; font-size: 13px; }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                                Card {
+                                    VerticalLayout {
+                                        alignment: start;
+                                        padding: 20px;
+                                        spacing: 10px;
+                                        Text { text: "YOUR TOP ARTISTS"; color: Theme.muted; font-size: 12px; font-weight: 800; letter-spacing: 1.5px; }
+                                        HorizontalLayout {
+                                            spacing: 16px;
+                                            alignment: start;
+                                            for a in root.st-artists: VerticalLayout {
+                                                alignment: start;
+                                                width: 96px;
+                                                spacing: 6px;
+                                                Cover { art: a.art; initial: a.name; width: 80px; height: 80px; border-radius: 40px; }
+                                                Text { text: a.name; color: Theme.text; font-weight: 700; font-size: 12px; overflow: elide; horizontal-alignment: center; }
+                                                Text { text: a.sub; color: Theme.muted; font-size: 11px; horizontal-alignment: center; }
+                                            }
+                                        }
+                                    }
+                                }
+                                for f in root.st-facts: Card {
+                                    fill: #8e9bff1a;
+                                    VerticalLayout { padding: 18px; Text { text: f; color: Theme.text; font-size: 15px; wrap: word-wrap; } }
+                                }
+                            }
+                        }
+                    }
+                    // Now Playing: the cover, and the lyrics as they're sung
+                    if root.page-kind == "now": HorizontalLayout {
+                        vertical-stretch: 1;
+                        spacing: 30px;
+                        padding-top: 10px;
+                        VerticalLayout {
+                            width: 360px;
+                            spacing: 10px;
+                            Cover { art: root.now-art-big; initial: root.now-title; height: 360px; border-radius: 14px; }
+                            Text { text: root.now-title; color: Theme.text; font-size: 26px; font-weight: 800; wrap: word-wrap; }
+                            Text { text: root.now-artist; color: Theme.accent; font-size: 16px; font-weight: 600; }
+                            Text { text: root.now-album; color: Theme.muted; font-size: 13px; }
+                            Rectangle { vertical-stretch: 1; }
+                        }
+                        VerticalLayout {
+                            horizontal-stretch: 1;
+                            if root.lyrics-note != "": Text { text: root.lyrics-note; color: Theme.muted; }
+                            lv := ListView {
+                                vertical-stretch: 1;
+                                for l[i] in root.lyrics: Rectangle {
+                                    height: 40px;
+                                    Text {
+                                        x: 0;
+                                        text: l.text;
+                                        color: i == root.lyric-on ? Theme.text : Theme.muted;
+                                        opacity: i == root.lyric-on ? 1 : 0.65;
+                                        font-size: i == root.lyric-on ? 21px : 19px;
+                                        font-weight: 700;
+                                        overflow: elide;
+                                        animate color, opacity, font-size { duration: 400ms; easing: ease-out; }
+                                    }
+                                }
+                            }
+                            property <int> on: root.lyric-on;
+                            changed on => {
+                                lv.content-y = min(0px, -(root.lyric-on * 40px) + lv.visible-height / 2 - 20px);
+                            }
+                        }
+                    }
                 }
             }
+            // ---------- the queue ----------
             if root.queue-open: Rectangle {
                 width: 300px;
                 background: Theme.panel;
@@ -258,31 +583,25 @@ export component AppWindow inherits Window {
                     padding-left: 14px;
                     padding-right: 14px;
                     spacing: 14px;
-                    // now playing
-                    HorizontalLayout {
+                    // now playing: opens Now Playing
+                    Rectangle {
                         width: 30%;
-                        spacing: 12px;
-                        Rectangle {
-                            width: 56px;
-                            height: 56px;
-                            y: (parent.height - self.height) / 2;
-                            border-radius: 6px;
-                            background: Theme.elevated;
-                            clip: true;
-                            Image { source: root.now-art; width: parent.width; height: parent.height; image-fit: cover; }
-                        }
-                        VerticalLayout {
-                            alignment: center;
-                            spacing: 2px;
-                            Text { text: root.now-title; color: Theme.text; font-weight: 700; font-size: 15px; overflow: elide; }
-                            HorizontalLayout {
-                                spacing: 6px;
-                                if root.now-plat != "": PlatIcon { plat: root.now-plat; width: 14px; height: 14px; }
-                                Text { text: root.now-artist; color: Theme.muted; font-size: 13px; overflow: elide; }
+                        HorizontalLayout {
+                            spacing: 12px;
+                            Cover { art: root.now-art; initial: ""; width: 56px; height: 56px; y: (parent.height - self.height) / 2; border-radius: 6px; }
+                            VerticalLayout {
+                                alignment: center;
+                                spacing: 2px;
+                                Text { text: root.now-title; color: Theme.text; font-weight: 700; font-size: 15px; overflow: elide; }
+                                HorizontalLayout {
+                                    spacing: 6px;
+                                    if root.now-plat != "": PlatIcon { plat: root.now-plat; width: 14px; height: 14px; }
+                                    Text { text: root.now-artist; color: Theme.muted; font-size: 13px; overflow: elide; }
+                                }
                             }
                         }
+                        TouchArea { clicked => { root.nav(root.page == "now" ? "library" : "now"); } }
                     }
-                    // controls and progress
                     VerticalLayout {
                         horizontal-stretch: 1;
                         alignment: center;
@@ -297,27 +616,16 @@ export component AppWindow inherits Window {
                         HorizontalLayout {
                             spacing: 10px;
                             Text { text: root.pos-text; color: Theme.muted; font-size: 12px; width: 40px; horizontal-alignment: right; vertical-alignment: center; }
-                            Slider {
-                                minimum: 0;
-                                maximum: 1000;
-                                value: root.pos-frac * 1000;
-                                released(v) => { root.seek(v / 1000); }
-                            }
+                            Slider { minimum: 0; maximum: 1000; value: root.pos-frac * 1000; released(v) => { root.seek(v / 1000); } }
                             Text { text: root.dur-text; color: Theme.muted; font-size: 12px; width: 40px; vertical-alignment: center; }
                         }
                     }
-                    // volume and queue
                     HorizontalLayout {
-                        width: 22%;
+                        width: 24%;
                         alignment: end;
                         spacing: 8px;
-                        Slider {
-                            width: 110px;
-                            minimum: 0;
-                            maximum: 100;
-                            value <=> root.volume;
-                            changed(v) => { root.volume-changed(v / 100); }
-                        }
+                        IconButton { d: Icons.lyrics; tint: root.page == "now" ? Theme.accent : Theme.muted; clicked => { root.nav(root.page == "now" ? "library" : "now"); } }
+                        Slider { width: 110px; minimum: 0; maximum: 100; value <=> root.volume; changed(v) => { root.volume-changed(v / 100); } }
                         IconButton { d: Icons.queue; tint: root.queue-open ? Theme.accent : Theme.muted; clicked => { root.queue-open = !root.queue-open; } }
                     }
                 }

@@ -5318,6 +5318,7 @@ dependencies = [
  "omnipulse-audio",
  "omnipulse-core",
  "reqwest 0.12.28",
+ "serde",
  "serde_json",
  "slint",
  "slint-build",

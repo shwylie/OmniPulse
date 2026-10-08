@@ -1,0 +1,174 @@
+// A track, from any platform, the way the app shows and plays it. Its key matches the web app's ids
+// (SoundCloud's number, "sp:<id>", "yt:<id>", a local file's id), so favourites, stats and play
+// history from the web app line up.
+
+use serde_json::Value;
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum Src {
+    SoundCloud(u64),
+    Spotify(String),
+    YouTube(String),
+    Local(String),
+}
+
+#[derive(Clone, Debug)]
+pub struct Track {
+    pub src: Src,
+    pub key: String,
+    pub title: String,
+    pub artist: String,
+    pub album: String,
+    pub ms: u64,
+    pub art: String,
+    pub genre: String,
+}
+
+/// Sets & Podcasts: anything over 15 minutes
+pub const MIX_MS: u64 = 15 * 60 * 1000;
+
+impl Track {
+    pub fn plat(&self) -> &'static str {
+        match self.src {
+            Src::SoundCloud(_) => "soundcloud",
+            Src::Spotify(_) => "spotify",
+            Src::YouTube(_) => "youtube",
+            Src::Local(_) => "local",
+        }
+    }
+
+    pub fn is_mix(&self) -> bool {
+        self.ms > MIX_MS
+    }
+
+    pub fn row(&self, playing: bool) -> crate::Row {
+        crate::Row {
+            title: self.title.clone().into(),
+            artist: self.artist.clone().into(),
+            album: self.album.clone().into(),
+            dur: fmt_ms(self.ms).into(),
+            plat: self.plat().into(),
+            playing,
+        }
+    }
+
+    /// A SoundCloud upload titled "Artist - Song": the artist from the title, as the web app shows it
+    pub fn split_artist(mut self) -> Self {
+        if let Src::SoundCloud(_) = self.src {
+            if let Some((a, t)) = self.title.split_once(" - ") {
+                let (a, t) = (a.trim(), t.trim());
+                let version_only = t.split_whitespace().count() <= 3 && ["mix", "edit", "remix", "version", "vip", "bootleg"].iter().any(|w| t.to_lowercase().ends_with(w));
+                if !a.is_empty() && !t.is_empty() && a.len() <= 80 && !a.contains('(') && !version_only {
+                    self.artist = a.to_string();
+                    self.title = t.to_string();
+                }
+            }
+        }
+        self
+    }
+
+    pub fn soundcloud(t: &Value) -> Option<Track> {
+        let t = if t.get("track").is_some() { &t["track"] } else { t };
+        let id = t["id"].as_u64()?;
+        if t["kind"].as_str().is_some_and(|k| k != "track") {
+            return None;
+        }
+        Some(Track {
+            src: Src::SoundCloud(id),
+            key: id.to_string(),
+            title: t["title"].as_str().unwrap_or("Untitled").to_string(),
+            artist: t["user"]["username"].as_str().unwrap_or("").to_string(),
+            album: String::new(),
+            ms: t["full_duration"].as_u64().or(t["duration"].as_u64()).unwrap_or(0),
+            art: t["artwork_url"].as_str().or(t["user"]["avatar_url"].as_str()).unwrap_or("").replace("-large", "-t200x200"),
+            genre: t["genre"].as_str().unwrap_or("").to_string(),
+        }
+        .split_artist())
+    }
+
+    pub fn spotify(t: &Value) -> Option<Track> {
+        let uri = t["uri"].as_str()?;
+        if t["is_playable"].as_bool() == Some(false) {
+            return None;
+        }
+        Some(Track {
+            src: Src::Spotify(uri.to_string()),
+            key: format!("sp:{}", t["id"].as_str().unwrap_or("")),
+            title: t["name"].as_str().unwrap_or("Untitled").to_string(),
+            artist: t["artists"].as_array().map(|a| a.iter().filter_map(|x| x["name"].as_str()).collect::<Vec<_>>().join(", ")).unwrap_or_default(),
+            album: t["album"]["name"].as_str().unwrap_or("").to_string(),
+            ms: t["duration_ms"].as_u64().unwrap_or(0),
+            art: t["album"]["images"].as_array().and_then(|i| i.get(1).or(i.first())).and_then(|i| i["url"].as_str()).unwrap_or("").to_string(),
+            genre: String::new(),
+        })
+    }
+
+    pub fn youtube(t: &omnipulse_core::youtube::YtTrack) -> Track {
+        Track {
+            src: Src::YouTube(t.id.clone()),
+            key: format!("yt:{}", t.id),
+            title: t.title.clone(),
+            artist: t.artists.clone(),
+            album: t.album.clone(),
+            ms: t.duration_ms,
+            art: t.thumb.clone(),
+            genre: String::new(),
+        }
+    }
+
+    /// The web app's saved form of a track (favourites, its own playlists, YouTube Music likes)
+    pub fn from_snapshot(s: &Value) -> Option<Track> {
+        let id = s["id"].as_str().map(String::from).or_else(|| s["id"].as_u64().map(|n| n.to_string()))?;
+        let source = s["source"].as_str().unwrap_or("soundcloud");
+        let src = match source {
+            "spotify" => Src::Spotify(s["uri"].as_str().map(String::from).unwrap_or_else(|| format!("spotify:track:{}", id.trim_start_matches("sp:")))),
+            "youtube" => Src::YouTube(id.trim_start_matches("yt:").to_string()),
+            "local" => {
+                let path = omnipulse_core::local::local_path_for(&id)?;
+                Src::Local(path.to_string_lossy().into_owned())
+            }
+            _ => Src::SoundCloud(id.parse().ok()?),
+        };
+        Some(Track {
+            src,
+            key: id,
+            title: s["title"].as_str().unwrap_or("Untitled").to_string(),
+            artist: s["displayArtist"].as_str().or(s["user"]["username"].as_str()).unwrap_or("").to_string(),
+            album: s["album"].as_str().or(s["spAlbum"]["name"].as_str()).unwrap_or("").to_string(),
+            ms: s["duration"].as_u64().unwrap_or(0),
+            art: s["artwork_url"].as_str().unwrap_or("").to_string(),
+            genre: s["genre"].as_str().unwrap_or("").to_string(),
+        })
+    }
+}
+
+pub fn fmt_ms(ms: u64) -> String {
+    let s = ms / 1000;
+    if s >= 3600 { format!("{}:{:02}:{:02}", s / 3600, s / 60 % 60, s % 60) } else { format!("{}:{:02}", s / 60, s % 60) }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn soundcloud_titles_name_their_artist() {
+        let t = Track::soundcloud(&serde_json::json!({ "id": 5, "kind": "track", "title": "Krewella - Alive (Sumant Remix)", "user": { "username": "sumant" }, "duration": 180000 })).unwrap();
+        assert_eq!((t.artist.as_str(), t.title.as_str()), ("Krewella", "Alive (Sumant Remix)"));
+        let t = Track::soundcloud(&serde_json::json!({ "id": 6, "title": "Song - Extended Mix", "user": { "username": "x" } })).unwrap();
+        assert_eq!(t.title, "Song - Extended Mix");
+        assert_eq!(t.key, "6");
+    }
+
+    #[test]
+    fn web_snapshots_become_tracks() {
+        let s = serde_json::json!({ "source": "spotify", "id": "sp:abc", "uri": "spotify:track:abc", "title": "X", "user": { "username": "A, B" }, "duration": 200000 });
+        let t = Track::from_snapshot(&s).unwrap();
+        assert_eq!(t.src, Src::Spotify("spotify:track:abc".into()));
+        assert_eq!((t.key.as_str(), t.artist.as_str()), ("sp:abc", "A, B"));
+        let y = Track::from_snapshot(&serde_json::json!({ "source": "youtube", "id": "yt:dQw4w9WgXcQ", "title": "Y" })).unwrap();
+        assert_eq!(y.src, Src::YouTube("dQw4w9WgXcQ".into()));
+        let sc = Track::from_snapshot(&serde_json::json!({ "id": 123, "title": "Z" })).unwrap();
+        assert_eq!(sc.src, Src::SoundCloud(123));
+    }
+}
