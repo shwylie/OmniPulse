@@ -3,7 +3,6 @@
 // Only text is kept: track ids, "artist|title" keys and times, never the music itself.
 
 const HISTORY_KEY = "sc.lastPlayed";
-const HISTORY_MAX = 20000;
 
 let lastPlayedMap = new Map();
 try { lastPlayedMap = new Map(JSON.parse(localStorage.getItem(HISTORY_KEY) || "[]")); } catch (e) { lastPlayedMap = new Map(); }
@@ -20,12 +19,7 @@ let historyTimer = null;
 function historySave() {
   clearTimeout(historyTimer);
   historyTimer = setTimeout(() => {
-    let entries = [...lastPlayedMap];
-    if (entries.length > HISTORY_MAX) {
-      entries = entries.sort((a, b) => b[1] - a[1]).slice(0, HISTORY_MAX);
-      lastPlayedMap = new Map(entries);
-    }
-    try { localStorage.setItem(HISTORY_KEY, JSON.stringify(entries)); } catch (e) {}
+    try { localStorage.setItem(HISTORY_KEY, JSON.stringify([...lastPlayedMap])); } catch (e) {}
   }, 1000);
 }
 
