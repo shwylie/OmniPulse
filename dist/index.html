@@ -856,7 +856,8 @@
           </div>
           <label class="switch"><input type="checkbox" id="alertsOn"><span></span></label>
         </div>
-        <div id="alertsBody" class="alertsBody" hidden>
+        <details class="sub alertsBody" id="alertsBody" open hidden>
+          <summary>Alert Options</summary>
           <div class="row">
             <div>
               <div class="lbl">Streamer.bot</div>
@@ -870,7 +871,7 @@
           <div class="row stack">
             <div>
               <div class="lbl">Web Request</div>
-              <div class="note">For Mix It Up's Web Request action, or anything else. Type: follow, sub, gift, bits, donation, hypetrain, poll, ban or watchstreak; then user, amount and message.</div>
+              <div class="note">For Mix It Up's Web Request action, or anything else. Type: follow, sub, gift, bits, kicks, donation, raid, hypetrain, poll, ban, watchstreak or a custom alert's trigger; then user, amount and message.</div>
             </div>
             <div class="widgetRow">
               <input id="alertUrl" type="text" readonly aria-label="Alert address">
@@ -892,14 +893,15 @@
             </div>
             <div class="levSlider"><input id="alertVol" type="range" min="0" max="100" step="1" aria-label="Alert sound volume"><span id="alertVolVal">80%</span></div>
           </div>
-          <div class="row stack">
+          <div class="row">
             <div>
               <div class="lbl">Alerts and Their Order</div>
-              <div class="note">Drag to set which goes first when several arrive at once.</div>
+              <div class="note">Drag to set which goes first when several arrive at once. The pencil by a name edits it.</div>
             </div>
+            <button id="alertAdd" class="soft alertAdd" title="Add a custom alert, set off by a web request" aria-label="Add a custom alert">+</button>
           </div>
           <ul id="alertList" class="alertList"></ul>
-        </div>
+        </details>
       </details>
 
       <div class="row">

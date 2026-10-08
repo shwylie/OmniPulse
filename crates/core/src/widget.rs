@@ -20,7 +20,8 @@ pub static WIDGET_GEN: AtomicU64 = AtomicU64::new(0);
 pub const WIDGET_HTML: &str = include_str!("../widget/widget.html");
 
 /// The kinds of alert, as /alert?type= names them
-pub const ALERT_KINDS: [&str; 9] = ["follow", "sub", "gift", "bits", "donation", "hypetrain", "poll", "ban", "watchstreak"];
+/// (custom ones, set up in the app, come on top: see custom_kinds)
+pub const ALERT_KINDS: [&str; 11] = ["follow", "sub", "gift", "bits", "kicks", "donation", "raid", "hypetrain", "poll", "ban", "watchstreak"];
 /// The last few alerts, for the page to pick up (it shows the ones newer than it has seen)
 static ALERTS: Mutex<VecDeque<Value>> = Mutex::new(VecDeque::new());
 static ALERT_ID: AtomicU64 = AtomicU64::new(0);
@@ -68,23 +69,29 @@ fn query_map(q: &str) -> serde_json::Map<String, Value> {
 }
 
 /// An alert, from a web request's fields or the app's Test button: { type, user, amount, message }.
-/// Unknown kinds are refused, so a typo shows up in the reply.
+/// The type is one of ALERT_KINDS or a custom alert's trigger name (set up in the app); unknown
+/// ones are refused, so a typo shows up in the reply.
 pub fn alert_push(fields: &serde_json::Map<String, Value>) -> Result<Value, String> {
     let get = |k: &str| fields.get(k).map(|v| v.as_str().map(String::from).unwrap_or_else(|| v.to_string())).unwrap_or_default();
-    let kind = get("type").to_lowercase();
+    let kind = get("type").trim().to_lowercase();
     let kind = match kind.as_str() {
         "follower" | "follows" => "follow".to_string(),
         "subscription" | "subscriber" | "resub" => "sub".to_string(),
         "giftsub" | "gifted" | "giftbomb" | "gifts" => "gift".to_string(),
         "cheer" | "bit" => "bits".to_string(),
+        "kick" | "kicksgifted" | "kicks_gifted" => "kicks".to_string(),
         "tip" | "donate" => "donation".to_string(),
         "hype" | "hype_train" | "hypetrainstart" | "hypetrainlevelup" | "hypetrainend" => "hypetrain".to_string(),
+        "host" | "hosts" | "raids" => "raid".to_string(),
         "banned" => "ban".to_string(),
         "watch_streak" | "streak" => "watchstreak".to_string(),
         other => other.to_string(),
     };
-    if !ALERT_KINDS.contains(&kind.as_str()) {
-        return Err(format!("Unknown alert type \"{kind}\". Use one of: {}.", ALERT_KINDS.join(", ")));
+    let custom = custom_kinds();
+    if !ALERT_KINDS.contains(&kind.as_str()) && !custom.contains(&kind) {
+        let mut all: Vec<String> = ALERT_KINDS.iter().map(|k| k.to_string()).collect();
+        all.extend(custom);
+        return Err(format!("Unknown alert type \"{kind}\". Use one of: {}.", all.join(", ")));
     }
     let a = json!({
         "id": ALERT_ID.fetch_add(1, Ordering::SeqCst) + 1,
@@ -103,51 +110,74 @@ pub fn alert_push(fields: &serde_json::Map<String, Value>) -> Result<Value, Stri
     Ok(a)
 }
 
-// ---------- alert sounds: one file per kind, in <data>/alert-sounds/<kind>.<ext> ----------
-fn sounds_dir() -> Result<std::path::PathBuf, String> {
-    let d = crate::data_dir()?.join("alert-sounds");
+/// The custom alerts' trigger names, from the settings the app last sent
+fn custom_kinds() -> Vec<String> {
+    WIDGET_STATE
+        .lock()
+        .ok()
+        .and_then(|g| g.as_ref().and_then(|s| s["alerts_cfg"]["custom"].as_array().map(|a| a.iter().filter_map(|x| x.as_str().map(String::from)).collect())))
+        .unwrap_or_default()
+}
+
+/// A custom alert's trigger name: lower-case letters, digits, - and _ (it goes in a web address and a file name)
+pub fn kind_ok(kind: &str) -> bool {
+    !kind.is_empty() && kind.len() <= 32 && kind.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-' || b == b'_')
+}
+
+// ---------- an alert's sound and picture: one file each, in <data>/alert-sounds and alert-images ----------
+fn media_dir(slot: &str) -> Result<std::path::PathBuf, String> {
+    let d = crate::data_dir()?.join(if slot == "image" { "alert-images" } else { "alert-sounds" });
     std::fs::create_dir_all(&d).map_err(|e| e.to_string())?;
     Ok(d)
 }
 
-fn sound_file(kind: &str) -> Option<std::path::PathBuf> {
-    let d = sounds_dir().ok()?;
+fn media_file(kind: &str, slot: &str) -> Option<std::path::PathBuf> {
+    let d = media_dir(slot).ok()?;
     std::fs::read_dir(d).ok()?.flatten().map(|e| e.path()).find(|p| p.file_stem().and_then(|s| s.to_str()) == Some(kind))
 }
 
 const SOUND_EXTS: [&str; 6] = ["mp3", "wav", "ogg", "m4a", "aac", "flac"];
+pub const IMAGE_EXTS: [&str; 5] = ["gif", "png", "webp", "jpg", "jpeg"];
 
-/// Copies a sound in for one kind of alert (replacing its old one); returns its file name
-pub fn alert_sound_set(kind: &str, path: &str) -> Result<String, String> {
-    if !ALERT_KINDS.contains(&kind) {
+/// Copies a sound or a picture (a GIF, say) in for one alert, replacing its old one; returns its file name
+pub fn alert_media_set(kind: &str, slot: &str, path: &str) -> Result<String, String> {
+    if !kind_ok(kind) {
         return Err("unknown alert type".into());
     }
+    let exts: &[&str] = if slot == "image" { &IMAGE_EXTS } else { &SOUND_EXTS };
     let src = std::path::Path::new(path);
     let ext = src.extension().and_then(|e| e.to_str()).map(|e| e.to_lowercase()).unwrap_or_default();
-    if !SOUND_EXTS.contains(&ext.as_str()) {
-        return Err(format!("Pick a sound file ({}).", SOUND_EXTS.join(", ")));
+    if !exts.contains(&ext.as_str()) {
+        return Err(format!("Pick {} file ({}).", if slot == "image" { "an image or GIF" } else { "a sound" }, exts.join(", ")));
     }
     let size = std::fs::metadata(src).map_err(|e| e.to_string())?.len();
-    if size > 10 * 1024 * 1024 {
-        return Err("That sound is over 10 MB; alerts want something short.".into());
+    if size > 20 * 1024 * 1024 {
+        return Err("That file is over 20 MB; alerts want something smaller.".into());
     }
-    alert_sound_clear(kind);
-    std::fs::copy(src, sounds_dir()?.join(format!("{kind}.{ext}"))).map_err(|e| e.to_string())?;
-    Ok(src.file_name().and_then(|n| n.to_str()).unwrap_or("sound").to_string())
+    alert_media_clear(kind, slot);
+    std::fs::copy(src, media_dir(slot)?.join(format!("{kind}.{ext}"))).map_err(|e| e.to_string())?;
+    Ok(src.file_name().and_then(|n| n.to_str()).unwrap_or("file").to_string())
 }
 
-pub fn alert_sound_clear(kind: &str) {
-    if let Some(p) = sound_file(kind) {
+pub fn alert_media_clear(kind: &str, slot: &str) {
+    if !kind_ok(kind) {
+        return;
+    }
+    if let Some(p) = media_file(kind, slot) {
         let _ = std::fs::remove_file(p);
     }
 }
 
-fn sound_type(p: &std::path::Path) -> &'static str {
+fn media_type(p: &std::path::Path) -> &'static str {
     match p.extension().and_then(|e| e.to_str()).map(|e| e.to_lowercase()).as_deref() {
         Some("wav") => "audio/wav",
         Some("ogg") => "audio/ogg",
         Some("m4a") | Some("aac") => "audio/mp4",
         Some("flac") => "audio/flac",
+        Some("gif") => "image/gif",
+        Some("png") => "image/png",
+        Some("webp") => "image/webp",
+        Some("jpg") | Some("jpeg") => "image/jpeg",
         _ => "audio/mpeg",
     }
 }
@@ -210,11 +240,12 @@ pub fn widget_serve(listener: TcpListener, gen: u64) {
                             Err(e) => reply(&mut stream, "400 Bad Request", "application/json", json!({ "ok": false, "error": e }).to_string().as_bytes()),
                         }
                     }
-                    p if p.starts_with("/sound/") => {
-                        let kind = &p["/sound/".len()..];
-                        match ALERT_KINDS.contains(&kind).then(|| sound_file(kind)).flatten().and_then(|f| std::fs::read(&f).ok().map(|b| (f, b))) {
-                            Some((f, bytes)) => reply(&mut stream, "200 OK", sound_type(&f), &bytes),
-                            None => reply(&mut stream, "404 Not Found", "text/plain", b"No sound"),
+                    // an alert's sound or picture
+                    p if p.starts_with("/sound/") || p.starts_with("/image/") => {
+                        let (slot, kind) = p[1..].split_once('/').unwrap_or(("", ""));
+                        match kind_ok(kind).then(|| media_file(kind, slot)).flatten().and_then(|f| std::fs::read(&f).ok().map(|b| (f, b))) {
+                            Some((f, bytes)) => reply(&mut stream, "200 OK", media_type(&f), &bytes),
+                            None => reply(&mut stream, "404 Not Found", "text/plain", b"Nothing there"),
                         }
                     }
                     _ => reply(&mut stream, "404 Not Found", "text/plain", b"Not found"),
@@ -267,5 +298,11 @@ mod tests {
         let a = alert_push(&m).unwrap();
         assert_eq!((a["type"].as_str(), a["user"].as_str(), a["amount"].as_str(), a["message"].as_str()), (Some("bits"), Some("Ninja Fan"), Some("500"), Some("gg wp")));
         assert!(alert_push(&query_map("type=raidd&user=x")).is_err());
+        assert_eq!(alert_push(&query_map("type=host&user=x&amount=12")).unwrap()["type"], "raid");
+        // a custom alert works once the app has said it exists
+        assert!(alert_push(&query_map("type=hydrate")).is_err());
+        widget_update(json!({ "alerts_cfg": { "custom": ["hydrate"] } }));
+        assert_eq!(alert_push(&query_map("type=Hydrate&user=Me")).unwrap()["type"], "hydrate");
+        assert!(kind_ok("hydrate_2") && !kind_ok("../x") && !kind_ok("Ab"));
     }
 }

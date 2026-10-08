@@ -214,10 +214,11 @@ fn widget_update(state: Value) { widget::widget_update(state) }
 fn widget_alert(alert: Value) -> Result<Value, String> {
     widget::alert_push(alert.as_object().ok_or("an alert is { type, user, amount, message }")?)
 }
+/// An alert's sound or picture ("sound" / "image"), copied into the data folder
 #[tauri::command]
-fn alert_sound_set(kind: String, path: String) -> Result<String, String> { widget::alert_sound_set(&kind, &path) }
+fn alert_media_set(kind: String, slot: String, path: String) -> Result<String, String> { widget::alert_media_set(&kind, &slot, &path) }
 #[tauri::command]
-fn alert_sound_clear(kind: String) { widget::alert_sound_clear(&kind) }
+fn alert_media_clear(kind: String, slot: String) { widget::alert_media_clear(&kind, &slot) }
 #[tauri::command]
 fn local_folders() -> Vec<String> { local::local_folders() }
 #[tauri::command]
@@ -756,7 +757,7 @@ fn main() {
             lyrics_get, presence_set, presence_clear,
             lastfm_status, lastfm_connect, lastfm_disconnect, lastfm_call, lastfm_recent, spotify_wait,
             stream_resolve, presence_test, taskbar_state,
-            widget_start, widget_stop, widget_update, widget_alert, alert_sound_set, alert_sound_clear,
+            widget_start, widget_stop, widget_update, widget_alert, alert_media_set, alert_media_clear,
             local_folders, local_set_folders, local_scan, local_status, local_tracks, local_server,
             requests_start, requests_stop, request_result,
             spe_signed_in, spe_login, spe_logout, spe_attach, spe_play, spe_pause, spe_resume, spe_seek, spe_stop, spe_played, spe_playlist, spe_web_get, spe_set_normalisation, loudness_analyse,

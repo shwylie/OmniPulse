@@ -136,6 +136,9 @@
     border-radius: 0.625rem; background: color-mix(in srgb, var(--hi) 45%, rgba(255, 255, 255, 0.12));
   }
   #aIcon svg { width: 50%; height: 50%; fill: #fff; }
+  #aIcon.pic { background: none; }
+  #aIcon.pic svg { display: none; }
+  #aIcon img { width: 100%; height: 100%; object-fit: contain; }
   #aText { flex: 1; min-width: 0; display: flex; flex-direction: column; justify-content: center; font-size: calc(1rem * var(--ts, 1)); }
   #aHead { font-size: 0.72em; font-weight: 800; letter-spacing: 0.12em; text-transform: uppercase; color: rgba(255, 255, 255, 0.78); }
   #aMain { font-size: 1.25em; font-weight: 800; margin-top: 0.1rem; }
@@ -369,25 +372,46 @@
     ban: "M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zM4 12c0-4.42 3.58-8 8-8 1.85 0 3.55.63 4.9 1.69L5.69 16.9C4.63 15.55 4 13.85 4 12zm8 8c-1.85 0-3.55-.63-4.9-1.69L18.31 7.1C19.37 8.45 20 10.15 20 12c0 4.42-3.58 8-8 8z",
     watchstreak: "M13.5.67s.74 2.65.74 4.8c0 2.06-1.35 3.73-3.41 3.73-2.07 0-3.63-1.67-3.63-3.73l.03-.36C5.21 7.51 4 10.62 4 14c0 4.42 3.58 8 8 8s8-3.58 8-8C20 8.61 17.41 3.8 13.5.67zM11.71 19c-1.78 0-3.22-1.4-3.22-3.14 0-1.62 1.05-2.76 2.81-3.12 1.77-.36 3.6-1.21 4.62-2.58.39 1.29.59 2.65.59 4.04 0 2.65-2.15 4.8-4.8 4.8z",
   };
+  Object.assign(ALERT_ICONS, {
+    raid: "M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5c-1.66 0-3 1.34-3 3s1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5C6.34 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z",
+    kicks: "M7 2v11h3v9l7-12h-4l4-8z",
+    bell: "M12 22c1.1 0 2-.9 2-2h-4c0 1.1.89 2 2 2zm6-6v-5c0-3.07-1.64-5.64-4.5-6.32V4c0-.83-.67-1.5-1.5-1.5s-1.5.67-1.5 1.5v.68C7.63 5.36 6 7.92 6 11v5l-2 2v1h16v-1l-2-2z",
+    trophy: "M19 5h-2V3H7v2H5c-1.1 0-2 .9-2 2v1c0 2.55 1.92 4.63 4.39 4.94.63 1.5 1.98 2.63 3.61 2.96V19H7v2h10v-2h-4v-3.1c1.63-.33 2.98-1.46 3.61-2.96C19.08 12.63 21 10.55 21 8V7c0-1.1-.9-2-2-2zM5 8V7h2v3.82C5.84 10.4 5 9.3 5 8zm14 0c0 1.3-.84 2.4-2 2.82V7h2v1z",
+    hammer: "M2 19.63L13.43 8.2l-.71-.71 1.42-1.41-2.13-2.12 3.53-3.54 2.13 2.12 1.41-1.41 2.83 2.83-1.41 1.41 1.41 1.42-2.12 2.12-1.42-1.41-.7.7L5.24 21.63z",
+    rocket: "M12 2.5s4.5 2.04 4.5 10.5c0 2.49-1.04 5.57-1.6 7H9.1c-.56-1.43-1.6-4.51-1.6-7C7.5 4.54 12 2.5 12 2.5zm2 8.5c0-1.1-.9-2-2-2s-2 .9-2 2 .9 2 2 2 2-.9 2-2zm-6.31 9.52c-.48-1.23-1.52-4.17-1.67-6.87l-1.13.75c-.56.38-.89 1-.89 1.67V22l3.69-1.48zM20 22v-5.93c0-.67-.33-1.29-.89-1.66l-1.13-.75c-.15 2.69-1.2 5.64-1.67 6.87L20 22z",
+    music: "M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z",
+    sparkle: "M19 9l1.25-2.75L23 5l-2.75-1.25L19 1l-1.25 2.75L15 5l2.75 1.25L19 9zm-7.5.5L9 4 6.5 9.5 1 12l5.5 2.5L9 20l2.5-5.5L17 12l-5.5-2.5zM19 15l-1.25 2.75L15 19l2.75 1.25L19 23l1.25-2.75L23 19l-2.75-1.25L19 15z",
+  });
   const ANIMS = {
     slide: ["aSlideIn", "aSlideOut"], pop: ["aPopIn", "aPopOut"], fade: ["aFadeIn", "aFadeOut"],
     bounce: ["aBounceIn", "aFadeOut"], flip: ["aFlipIn", "aFlipOut"],
   };
   const plural = (n, one, many) => (Number(n) === 1 ? one : many);
   // what an alert says: [heading, main line, message]
+  // an alert's own settings (Settings > Widget > Alerts): its words, colour, timing, picture
+  const kindCfg = (t) => (acfg.kinds && acfg.kinds[t]) || {};
+  const fillIn = (tpl, a) => String(tpl).replace(/\{(user|amount|message)\}/g, (m, k) => a[k] || "")
+    .replace(/^[\s\u00b7:,\-]+|[\s\u00b7:,\-]+$/g, "").replace(/\s{2,}/g, " ");
   function alertWords(a) {
+    const k = kindCfg(a.type);
+    const [h, m, x] = alertDefaultWords(a);
+    return [k.head ? fillIn(k.head, a) : h, k.main ? fillIn(k.main, a) : m, x];
+  }
+  function alertDefaultWords(a) {
     const u = a.user || "Someone", n = a.amount;
     switch (a.type) {
       case "follow": return ["New Follower", u, a.message];
       case "sub": return [Number(n) > 1 ? n + " Months" : "New Subscriber", u, a.message];
       case "gift": return ["Gifted Subs", u + " gifted " + (n || 1) + plural(n || 1, " sub", " subs"), a.message];
       case "bits": return [(n ? n + " " : "") + "Bits", u, a.message];
+      case "kicks": return [(n ? n + " " : "") + "Kicks", u, a.message];
+      case "raid": return [n ? Number(n) + plural(n, " Raider", " Raiders") : "Raid", a.user ? a.user + " is here!" : "Incoming raid!", a.message];
       case "donation": return ["Donation", n ? u + " · " + n : u, a.message];
       case "hypetrain": return ["Hype Train", n ? "Level " + n : a.user || "All aboard!", a.message];
       case "poll": return ["Poll", a.user || "A new poll", a.message];
       case "ban": return ["Banned", u, a.message];
       case "watchstreak": return ["Watch Streak", n ? u + " · " + n + plural(n, " stream", " streams") : u, a.message];
-      default: return ["Alert", u, a.message];
+      default: return [kindCfg(a.type).name || "Alert", a.user || "", a.message];
     }
   }
 
@@ -418,9 +442,28 @@
     $("aHead").textContent = head;
     $("aMain").textContent = main;
     $("aMsg").textContent = msg || "";
-    $("aPath").setAttribute("d", ALERT_ICONS[a.type] || ALERT_ICONS.follow);
-    const [inA, outA] = ANIMS[acfg.anim] || ANIMS.slide;
+    const k = kindCfg(a.type);
+    const icon = $("aIcon");
+    icon.classList.toggle("pic", !!k.image);
+    if (k.image) {
+      // your own picture (a GIF, say) in place of the icon; the address changes with the file so a new one shows
+      const img = icon.querySelector("img") || icon.appendChild(document.createElement("img"));
+      img.src = "/image/" + a.type + "?s=" + encodeURIComponent(k.image);
+    } else {
+      const img = icon.querySelector("img");
+      if (img) img.remove();
+      $("aPath").setAttribute("d", ALERT_ICONS[k.icon] || ALERT_ICONS[a.type] || ALERT_ICONS.bell);
+    }
+    const [inA, outA] = ANIMS[k.anim] || ANIMS[acfg.anim] || ANIMS.slide;
     const box = $("alert");
+    // its own colour, or the widget's
+    if (k.color) {
+      box.style.setProperty("--bg1", mix(k.color, 0.55));
+      box.style.setProperty("--bg2", mix(k.color, 0.38));
+      box.style.setProperty("--hi", k.color);
+    } else {
+      ["--bg1", "--bg2", "--hi"].forEach((v) => box.style.removeProperty(v));
+    }
     box.style.setProperty("--a-in", inA);
     box.style.setProperty("--a-out", outA);
     box.className = "on";
@@ -432,7 +475,7 @@
       snd.volume = Math.max(0, Math.min(1, acfg.volume === undefined ? 0.8 : Number(acfg.volume)));
       snd.play().catch(() => {});
     }
-    const secs = Math.max(2, Math.min(20, Number(acfg.secs) || 5));
+    const secs = Math.max(2, Math.min(30, Number(k.secs) || Number(acfg.secs) || 5));
     setTimeout(() => {
       box.classList.remove("in");
       box.classList.add("out");
@@ -462,7 +505,8 @@
   // ---------- Streamer.bot: its WebSocket server (Servers/Clients > WebSocket Server in Streamer.bot) ----------
   const SB_EVENTS = {
     Twitch: ["Follow", "Sub", "ReSub", "GiftSub", "GiftBomb", "Cheer", "HypeTrainStart", "HypeTrainLevelUp", "HypeTrainEnd",
-      "PollCreated", "PollCompleted", "UserBanned", "WatchStreak"],
+      "PollCreated", "PollCompleted", "UserBanned", "WatchStreak", "Raid"],
+    Kick: ["Follow", "Subscription", "Resubscription", "GiftSubscription", "GiftedSubscriptions", "MassGiftSubscription", "KicksGifted", "Host", "Raid", "UserBanned"],
     StreamElements: ["Tip"], Streamlabs: ["Donation"], Kofi: ["Donation"], TipeeeStream: ["Donation"],
   };
   let sb = null, sbUrl = "", sbRetry = null, sbReq = 0;
@@ -477,6 +521,7 @@
   // Streamer.bot's event, as an alert (or nothing)
   function sbAlert(source, type, d) {
     d = d || {};
+    if (source === "Kick") return kickAlert(type, d);
     if (source !== "Twitch") return type === "Tip" || type === "Donation" ? { type: "donation", user: sbUser(d), amount: money(d), message: sbText(d) } : null;
     switch (type) {
       case "Follow": return { type: "follow", user: sbUser(d) };
@@ -498,6 +543,22 @@
       }
       case "UserBanned": return { type: "ban", user: d.user_name || d.targetUserName || d.target_user_name || sbUser(d), message: d.reason || "" };
       case "WatchStreak": return { type: "watchstreak", user: sbUser(d), amount: String(d.watchStreak || d.watch_streak || d.streak || d.count || ""), message: sbText(d) };
+      case "Raid": return { type: "raid", user: d.from_broadcaster_user_name || d.fromBroadcasterUserName || sbUser(d), amount: String(d.viewers || d.viewerCount || d.viewer_count || "") };
+      default: return null;
+    }
+  }
+
+  // Kick, as Streamer.bot passes it on (its names vary by version, so several are tried)
+  function kickAlert(type, d) {
+    const n = (...keys) => String(keys.map((k) => d[k]).find((v) => v !== undefined && v !== null && v !== "") || "");
+    switch (type) {
+      case "Follow": return { type: "follow", user: sbUser(d) };
+      case "Subscription": case "Resubscription": return { type: "sub", user: sbUser(d), amount: n("months", "duration", "cumulativeMonths"), message: sbText(d) };
+      case "GiftSubscription": case "GiftedSubscriptions": case "MassGiftSubscription":
+        return { type: "gift", user: anon(d), amount: n("gifts", "quantity", "count", "total") || "1" };
+      case "KicksGifted": return { type: "kicks", user: anon(d), amount: n("kicks", "amount", "quantity"), message: sbText(d) };
+      case "Host": case "Raid": return { type: "raid", user: sbUser(d), amount: n("viewers", "viewerCount", "numberOfViewers") };
+      case "UserBanned": return { type: "ban", user: d.bannedUser || d.banned_user || sbUser(d), message: d.reason || "" };
       default: return null;
     }
   }

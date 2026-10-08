@@ -120,11 +120,36 @@ pub fn alerts_cfg(prefs: &Value) -> Value {
     if !set(prefs, "alertsOn") {
         return json!({ "on": false });
     }
-    let all = core::widget::ALERT_KINDS;
-    let mut order: Vec<String> = prefs["alertOrder"].as_array().map(|a| a.iter().filter_map(|x| x.as_str()).filter(|k| all.contains(k)).map(String::from).collect()).unwrap_or_default();
-    for k in all {
-        if !order.iter().any(|o| o == k) {
-            order.push(k.to_string());
+    // the built-in kinds and your own (custom alerts, by their trigger names)
+    let custom: Vec<(String, String)> = prefs["alertCustom"].as_array().map(|a| a.iter().filter_map(|c| Some((c["id"].as_str()?.to_string(), c["name"].as_str().unwrap_or("").to_string()))).collect()).unwrap_or_default();
+    let all: Vec<String> = core::widget::ALERT_KINDS.iter().map(|k| k.to_string()).chain(custom.iter().map(|c| c.0.clone())).collect();
+    let mut order: Vec<String> = prefs["alertOrder"].as_array().map(|a| a.iter().filter_map(|x| x.as_str()).filter(|k| all.iter().any(|x| x == k)).map(String::from).collect()).unwrap_or_default();
+    for k in &all {
+        if !order.contains(k) {
+            order.push(k.clone());
+        }
+    }
+    // each one's own settings: words, colour, length, animation, icon or picture
+    let mut kinds = serde_json::Map::new();
+    for k in &all {
+        let e = &prefs["alertEdit"][k];
+        let mut c = serde_json::Map::new();
+        for f in ["head", "main", "color", "anim", "icon"] {
+            if let Some(v) = e[f].as_str().filter(|v| !v.is_empty()) {
+                c.insert(f.into(), json!(v));
+            }
+        }
+        if let Some(s) = e["secs"].as_u64() {
+            c.insert("secs".into(), json!(s));
+        }
+        if let Some(at) = prefs["alertImages"][k]["at"].as_u64() {
+            c.insert("image".into(), json!(at.to_string()));
+        }
+        if let Some((_, name)) = custom.iter().find(|x| &x.0 == k) {
+            c.insert("name".into(), json!(e["name"].as_str().filter(|v| !v.is_empty()).unwrap_or(name)));
+        }
+        if !c.is_empty() {
+            kinds.insert(k.clone(), Value::Object(c));
         }
     }
     let off: Vec<&str> = prefs["alertOff"].as_array().map(|a| a.iter().filter_map(|x| x.as_str()).collect()).unwrap_or_default();
@@ -135,6 +160,8 @@ pub fn alerts_cfg(prefs: &Value) -> Value {
     json!({
         "on": true,
         "order": order.into_iter().filter(|k| !off.contains(&k.as_str())).collect::<Vec<_>>(),
+        "custom": custom.iter().map(|c| c.0.clone()).collect::<Vec<_>>(),
+        "kinds": kinds,
         "anim": prefs["alertAnim"].as_str().unwrap_or("slide"),
         "secs": prefs["alertSecs"].as_u64().unwrap_or(5),
         "volume": prefs["alertVol"].as_f64().unwrap_or(0.8),
@@ -220,6 +247,11 @@ mod tests {
         assert!(!order.contains(&"ban") && !order.contains(&"nonsense") && order.contains(&"watchstreak"));
         assert_eq!(c["sounds"]["follow"], "5");
         assert_eq!(alerts_cfg(&json!({}))["on"], false);
+        let c = alerts_cfg(&json!({ "alertsOn": true, "alertCustom": [{ "id": "hydrate", "name": "Hydrate" }], "alertEdit": { "ban": { "color": "#ff0000", "secs": 8 } }, "alertImages": { "ban": { "at": 7 } } }));
+        assert_eq!(c["custom"][0], "hydrate");
+        assert_eq!((c["kinds"]["ban"]["color"].as_str(), c["kinds"]["ban"]["secs"].as_u64(), c["kinds"]["ban"]["image"].as_str()), (Some("#ff0000"), Some(8), Some("7")));
+        assert_eq!(c["kinds"]["hydrate"]["name"], "Hydrate");
+        assert!(c["order"].as_array().unwrap().iter().any(|k| k == "hydrate"));
     }
 
     #[test]

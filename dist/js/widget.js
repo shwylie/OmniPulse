@@ -147,36 +147,67 @@ function widgetInit() {
 // ---------- stream alerts, shown by the widget (crates/core/widget/widget.html) ----------
 // From Streamer.bot (the widget connects to its WebSocket server) or web requests to /alert (Mix It
 // Up's Web Request action, Streamer.bot's Fetch URL...). Each kind can be off, have a sound, and be
-// tried with Test; dragging sets which goes first when several are waiting.
+// tried with Test; dragging sets which goes first when several are waiting. The pencil by a name
+// opens its own settings: its name and words, colour, length, animation, icon or picture. + adds a
+// custom alert, set off by a web request with its trigger name.
+//   [id, name in Settings, test values, heading, main line, icon]
 const ALERT_KINDS = [
-  ["follow", "Follows", { user: "A new friend" }],
-  ["sub", "Subscriptions", { user: "A loyal viewer", amount: "6", message: "Six months already!" }],
-  ["gift", "Gifted Subs", { user: "A generous viewer", amount: "5" }],
-  ["bits", "Bits", { user: "A cheerful viewer", amount: "500", message: "gg!" }],
-  ["donation", "Donations", { user: "A kind viewer", amount: "$10.00", message: "Love the stream" }],
-  ["hypetrain", "Hype Trains", { amount: "3" }],
-  ["poll", "Polls", { user: "Which track next?", message: "Vote now!" }],
-  ["ban", "Bans", { user: "A troll" }],
-  ["watchstreak", "Watch Streaks", { user: "A regular", amount: "10" }],
+  ["follow", "Follows", { user: "A new friend" }, "New Follower", "{user}"],
+  ["sub", "Subscriptions", { user: "A loyal viewer", amount: "6", message: "Six months already!" }, "New Subscriber", "{user}"],
+  ["gift", "Gifted Subs", { user: "A generous viewer", amount: "5" }, "Gifted Subs", "{user} gifted {amount} subs"],
+  ["bits", "Bits", { user: "A cheerful viewer", amount: "500", message: "gg!" }, "{amount} Bits", "{user}"],
+  ["kicks", "Kicks", { user: "A kind viewer", amount: "100", message: "Love it" }, "{amount} Kicks", "{user}"],
+  ["donation", "Donations", { user: "A kind viewer", amount: "$10.00", message: "Love the stream" }, "Donation", "{user} · {amount}"],
+  ["raid", "Raids & Hosts", { user: "A fellow streamer", amount: "42" }, "{amount} Raiders", "{user} is here!"],
+  ["hypetrain", "Hype Trains", { amount: "3" }, "Hype Train", "Level {amount}"],
+  ["poll", "Polls", { user: "Which track next?", message: "Vote now!" }, "Poll", "{user}"],
+  ["ban", "Bans", { user: "A troll" }, "Banned", "{user}"],
+  ["watchstreak", "Watch Streaks", { user: "A regular", amount: "10" }, "Watch Streak", "{user} · {amount} streams"],
+];
+const ALERT_ICON_NAMES = [
+  ["follow", "Heart"], ["sub", "Star"], ["gift", "Gift"], ["bits", "Gem"], ["kicks", "Lightning"], ["donation", "Money"],
+  ["raid", "People"], ["hypetrain", "Train"], ["poll", "Chart"], ["ban", "No Entry"], ["watchstreak", "Flame"],
+  ["bell", "Bell"], ["trophy", "Trophy"], ["hammer", "Hammer"], ["rocket", "Rocket"], ["music", "Music"], ["sparkle", "Sparkles"],
 ];
 const ALERT_SOUND_EXTS = ["mp3", "wav", "ogg", "m4a", "aac", "flac"];
+const ALERT_IMAGE_EXTS = ["gif", "png", "webp", "jpg", "jpeg"];
+const ALERT_SECS = [3, 5, 8, 12, 20];
+const ALERT_ANIMS = [["slide", "Slide"], ["pop", "Pop"], ["fade", "Fade"], ["bounce", "Bounce"], ["flip", "Flip"]];
 
 const alertsOn = () => !!prefs.alertsOn;
+const alertBuiltin = (k) => ALERT_KINDS.find((x) => x[0] === k);
+const alertCustom = () => (prefs.alertCustom || []).filter((c) => c && c.id);
+const alertEdits = (k) => (prefs.alertEdit || {})[k] || {};
+function alertName(k) {
+  const b = alertBuiltin(k), c = alertCustom().find((x) => x.id === k);
+  return alertEdits(k).name || (b ? b[1] : c ? c.name : k);
+}
 function alertOrder() {
-  const all = ALERT_KINDS.map((k) => k[0]);
+  const all = ALERT_KINDS.map((k) => k[0]).concat(alertCustom().map((c) => c.id));
   const saved = (prefs.alertOrder || []).filter((k) => all.includes(k));
   return saved.concat(all.filter((k) => !saved.includes(k)));
 }
 
-// What the widget needs: the switched-on kinds in priority order, the look of them, and their sounds
+// What the widget needs: the switched-on kinds in priority order, how each looks, and their sounds
 function alertsCfg() {
   if (!alertsOn()) return { on: false };
   const off = new Set(prefs.alertOff || []);
-  const sounds = {};
+  const sounds = {}, kinds = {};
   Object.entries(prefs.alertSounds || {}).forEach(([k, v]) => { if (v && v.at) sounds[k] = String(v.at); });
+  alertOrder().forEach((k) => {
+    const e = alertEdits(k), img = (prefs.alertImages || {})[k];
+    const c = {};
+    ["head", "main", "color", "anim", "icon"].forEach((f) => { if (e[f]) c[f] = e[f]; });
+    if (e.secs) c.secs = Number(e.secs);
+    if (img && img.at) c.image = String(img.at);
+    if (!alertBuiltin(k)) c.name = alertName(k);
+    if (Object.keys(c).length) kinds[k] = c;
+  });
   return {
     on: true,
     order: alertOrder().filter((k) => !off.has(k)),
+    custom: alertCustom().map((c) => c.id),
+    kinds,
     anim: prefs.alertAnim || "slide",
     secs: Number(prefs.alertSecs) || 5,
     volume: prefs.alertVol === undefined ? 0.8 : Number(prefs.alertVol),
@@ -190,7 +221,18 @@ function alertsSave() {
   widgetPush();
 }
 
-function alertRow(kind, name) {
+function alertEditSet(kind, field, value) {
+  const all = Object.assign({}, prefs.alertEdit);
+  const e = Object.assign({}, all[kind]);
+  if (value === "" || value === null || value === undefined) delete e[field]; else e[field] = value;
+  all[kind] = e;
+  prefs.alertEdit = all;
+  alertsSave();
+}
+
+let alertOpen = null;   // the alert whose settings are open
+
+function alertRow(kind) {
   const off = new Set(prefs.alertOff || []);
   const snd = (prefs.alertSounds || {})[kind];
   const li = el("li", "alertRow" + (off.has(kind) ? " alertIsOff" : ""));
@@ -198,21 +240,23 @@ function alertRow(kind, name) {
   li.dataset.kind = kind;
   const grip = el("span", "alertGrip", "☰");
   grip.title = "Drag to reorder";
-  const label = el("span", "alertName", name);
+  const label = el("span", "alertName");
+  label.append(el("span", "", alertName(kind)));
+  const pen = el("button", "alertPen");
+  pen.title = "Edit this alert";
+  pen.setAttribute("aria-label", "Edit " + alertName(kind));
+  pen.append(icon("M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04a1 1 0 0 0 0-1.41l-2.34-2.34a1 1 0 0 0-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"));
+  pen.addEventListener("click", () => { alertOpen = alertOpen === kind ? null : kind; alertsPaintList(); });
+  label.append(pen);
   const sound = el("button", "soft alertSound", snd ? snd.name : "Add Sound");
   sound.title = snd ? "Change the sound" : "Pick a sound to play with this alert";
-  sound.addEventListener("click", () => alertPickSound(kind));
+  sound.addEventListener("click", () => alertPickMedia(kind, "sound"));
   const parts = [grip, label, sound];
   if (snd) {
     const clear = el("button", "soft alertClear", "×");
     clear.title = "No sound";
     clear.setAttribute("aria-label", "Remove the sound");
-    clear.addEventListener("click", async () => {
-      await invoke("alert_sound_clear", { kind }).catch(() => {});
-      delete prefs.alertSounds[kind];
-      alertsSave();
-      alertsPaintList();
-    });
+    clear.addEventListener("click", () => alertClearMedia(kind, "sound"));
     parts.push(clear);
   }
   const test = el("button", "soft", "Test");
@@ -222,7 +266,7 @@ function alertRow(kind, name) {
   const box = el("input");
   box.type = "checkbox";
   box.checked = !off.has(kind);
-  box.setAttribute("aria-label", name);
+  box.setAttribute("aria-label", alertName(kind));
   box.addEventListener("change", () => {
     const s = new Set(prefs.alertOff || []);
     if (box.checked) s.delete(kind); else s.add(kind);
@@ -236,19 +280,176 @@ function alertRow(kind, name) {
   return li;
 }
 
-function alertsPaintList() {
-  const names = Object.fromEntries(ALERT_KINDS.map((k) => [k[0], k[1]]));
-  $("alertList").replaceChildren(...alertOrder().map((k) => alertRow(k, names[k])));
+// ---------- one alert's own settings, under its row ----------
+function alertEditor(kind) {
+  const b = alertBuiltin(kind);
+  const custom = !b;
+  const e = alertEdits(kind);
+  const box = el("li", "alertEdit");
+  box.dataset.for = kind;
+  const field = (label, input, note) => {
+    const r = el("div", "alertField");
+    r.append(el("label", "", label), input);
+    if (note) r.append(el("div", "note", note));
+    return r;
+  };
+  const text = (value, placeholder, onChange) => {
+    const i = el("input");
+    i.type = "text";
+    i.value = value || "";
+    i.placeholder = placeholder || "";
+    i.spellcheck = false;
+    i.addEventListener("change", () => onChange(i.value.trim()));
+    return i;
+  };
+  const select = (opts, value, onChange) => {
+    const s = el("select", "narrow");
+    opts.forEach(([v, n]) => { const o = el("option", "", n); o.value = v; s.append(o); });
+    s.value = value;
+    s.addEventListener("change", () => onChange(s.value));
+    return s;
+  };
+  const defName = b ? b[1] : (alertCustom().find((c) => c.id === kind) || {}).name || "";
+  box.append(field("Name", text(custom ? alertName(kind) : e.name, defName, (v) => {
+    if (custom) {
+      prefs.alertCustom = alertCustom().map((c) => (c.id === kind ? Object.assign({}, c, { name: v || c.name }) : c));
+      alertsSave();
+    } else alertEditSet(kind, "name", v);
+    alertsPaintList();
+  })));
+  if (custom) {
+    const url = ($("alertUrl").value || "").replace(/type=[^&]*/, "type=" + kind);
+    const trig = text(kind, "", (v) => alertRename(kind, v));
+    box.append(field("Trigger", trig, "Its web request: " + url));
+  }
+  box.append(
+    field("Heading", text(e.head, b ? b[3] : alertName(kind), (v) => alertEditSet(kind, "head", v))),
+    field("Main Line", text(e.main, b ? b[4] : "{user}", (v) => alertEditSet(kind, "main", v)), "{user}, {amount} and {message} are filled in. Empty: as shown faintly."),
+  );
+  // colour: its own, or the widget's
+  const colRow = el("div", "alertInline");
+  const own = el("input");
+  own.type = "checkbox";
+  own.checked = !!e.color;
+  const col = el("input");
+  col.type = "color";
+  col.value = e.color || "#8e9bff";
+  col.disabled = !e.color;
+  own.addEventListener("change", () => { col.disabled = !own.checked; alertEditSet(kind, "color", own.checked ? col.value : ""); });
+  col.addEventListener("change", () => alertEditSet(kind, "color", col.value));
+  const ownLbl = el("label", "alertCheck");
+  ownLbl.append(own, document.createTextNode(" Its own colour"));
+  colRow.append(ownLbl, col);
+  box.append(field("Colour", colRow));
+  box.append(
+    field("Show For", select([["", "As set above"]].concat(ALERT_SECS.map((s) => [String(s), s + " s"])), String(e.secs || ""), (v) => alertEditSet(kind, "secs", v ? Number(v) : ""))),
+    field("Animation", select([["", "As set above"]].concat(ALERT_ANIMS), e.anim || "", (v) => alertEditSet(kind, "anim", v))),
+  );
+  // the picture: an icon, or your own image or GIF
+  const img = (prefs.alertImages || {})[kind];
+  const picRow = el("div", "alertInline");
+  if (img) {
+    picRow.append(el("span", "alertFile", img.name));
+    const change = el("button", "soft", "Change");
+    change.addEventListener("click", () => alertPickMedia(kind, "image"));
+    const rm = el("button", "soft", "Use an Icon");
+    rm.addEventListener("click", () => alertClearMedia(kind, "image"));
+    picRow.append(change, rm);
+  } else {
+    picRow.append(select(ALERT_ICON_NAMES, e.icon || (b ? kind : "bell"), (v) => alertEditSet(kind, "icon", v === (b ? kind : "bell") ? "" : v)));
+    const pick = el("button", "soft", "Image or GIF...");
+    pick.title = "Show your own picture (a GIF, say) in place of the icon";
+    pick.addEventListener("click", () => alertPickMedia(kind, "image"));
+    picRow.append(pick);
+  }
+  box.append(field("Picture", picRow));
+  const foot = el("div", "alertInline alertFoot");
+  if (custom) {
+    const del = el("button", "soft danger", "Delete This Alert");
+    del.addEventListener("click", () => alertDelete(kind));
+    foot.append(del);
+  } else if (Object.keys(e).length) {
+    const reset = el("button", "soft", "Back to How It Was");
+    reset.addEventListener("click", () => {
+      const all = Object.assign({}, prefs.alertEdit);
+      delete all[kind];
+      prefs.alertEdit = all;
+      alertsSave();
+      alertsPaintList();
+    });
+    foot.append(reset);
+  }
+  const done = el("button", "soft", "Done");
+  done.addEventListener("click", () => { alertOpen = null; alertsPaintList(); });
+  foot.append(done);
+  box.append(foot);
+  return box;
 }
 
-async function alertPickSound(kind) {
+// A trigger name: what a web request's type= says (letters, digits, - and _)
+const alertSlug = (s) => String(s).toLowerCase().normalize("NFKD").replace(/[^a-z0-9_-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 32);
+
+function alertRename(kind, v) {
+  const id = alertSlug(v);
+  if (!id || id === kind) { alertsPaintList(); return; }
+  if (alertBuiltin(id) || alertCustom().some((c) => c.id === id)) { say("\"" + id + "\" is already an alert's trigger."); alertsPaintList(); return; }
+  const move = (o) => { if (o && o[kind] !== undefined) { o = Object.assign({}, o); o[id] = o[kind]; delete o[kind]; } return o; };
+  prefs.alertCustom = alertCustom().map((c) => (c.id === kind ? Object.assign({}, c, { id }) : c));
+  prefs.alertEdit = move(prefs.alertEdit);
+  prefs.alertOrder = (prefs.alertOrder || []).map((k) => (k === kind ? id : k));
+  prefs.alertOff = (prefs.alertOff || []).map((k) => (k === kind ? id : k));
+  // its sound and picture are files named after the trigger: those are picked again
+  ["sound", "image"].forEach((slot) => {
+    const key = slot === "sound" ? "alertSounds" : "alertImages";
+    if (prefs[key] && prefs[key][kind]) { invoke("alert_media_clear", { kind, slot }).catch(() => {}); prefs[key] = Object.assign({}, prefs[key]); delete prefs[key][kind]; }
+  });
+  alertOpen = id;
+  alertsSave();
+  alertsPaintList();
+}
+
+function alertAdd() {
+  let n = 1, id = "custom";
+  while (alertBuiltin(id) || alertCustom().some((c) => c.id === id)) id = "custom-" + ++n;
+  prefs.alertCustom = alertCustom().concat([{ id, name: "New Alert" + (n > 1 ? " " + n : "") }]);
+  alertOpen = id;
+  alertsSave();
+  alertsPaintList();
+  const ed = document.querySelector('#alertList .alertEdit[data-for="' + id + '"]');
+  if (ed) { ed.scrollIntoView({ block: "nearest" }); const first = ed.querySelector("input"); if (first) { first.focus(); first.select(); } }
+}
+
+function alertDelete(kind) {
+  prefs.alertCustom = alertCustom().filter((c) => c.id !== kind);
+  ["alertEdit", "alertSounds", "alertImages"].forEach((key) => { if (prefs[key] && prefs[key][kind]) { prefs[key] = Object.assign({}, prefs[key]); delete prefs[key][kind]; } });
+  prefs.alertOrder = (prefs.alertOrder || []).filter((k) => k !== kind);
+  prefs.alertOff = (prefs.alertOff || []).filter((k) => k !== kind);
+  ["sound", "image"].forEach((slot) => invoke("alert_media_clear", { kind, slot }).catch(() => {}));
+  alertOpen = null;
+  alertsSave();
+  alertsPaintList();
+}
+
+function alertsPaintList() {
+  const items = [];
+  alertOrder().forEach((k) => {
+    items.push(alertRow(k));
+    if (alertOpen === k) items.push(alertEditor(k));
+  });
+  $("alertList").replaceChildren(...items);
+}
+
+async function alertPickMedia(kind, slot) {
   const dlg = window.__TAURI__ && window.__TAURI__.dialog;
-  if (!dlg) { say("Picking a sound needs the app."); return; }
+  if (!dlg) { say("Picking a file needs the app."); return; }
+  const image = slot === "image";
   try {
-    const path = await dlg.open({ multiple: false, title: "Choose a sound for this alert", filters: [{ name: "Sounds", extensions: ALERT_SOUND_EXTS }] });
+    const path = await dlg.open({ multiple: false, title: image ? "Choose a picture or GIF for this alert" : "Choose a sound for this alert",
+      filters: [{ name: image ? "Pictures" : "Sounds", extensions: image ? ALERT_IMAGE_EXTS : ALERT_SOUND_EXTS }] });
     if (!path) return;
-    const name = await invoke("alert_sound_set", { kind, path: String(path) });
-    prefs.alertSounds = Object.assign({}, prefs.alertSounds, { [kind]: { name, at: Date.now() } });
+    const name = await invoke("alert_media_set", { kind, slot, path: String(path) });
+    const key = image ? "alertImages" : "alertSounds";
+    prefs[key] = Object.assign({}, prefs[key], { [kind]: { name, at: Date.now() } });
     alertsSave();
     alertsPaintList();
   } catch (e) {
@@ -256,9 +457,19 @@ async function alertPickSound(kind) {
   }
 }
 
+async function alertClearMedia(kind, slot) {
+  await invoke("alert_media_clear", { kind, slot }).catch(() => {});
+  const key = slot === "image" ? "alertImages" : "alertSounds";
+  if (prefs[key]) { prefs[key] = Object.assign({}, prefs[key]); delete prefs[key][kind]; }
+  alertsSave();
+  alertsPaintList();
+}
+
 async function alertTest(kind) {
   if (!prefs.widget) { say("Switch on the widget first."); return; }
-  const sample = (ALERT_KINDS.find((k) => k[0] === kind) || [])[2] || {};
+  const b = alertBuiltin(kind);
+  const sample = b ? b[2] : { user: "Someone", amount: "1", message: "" };
+  widgetPush();   // the widget has this alert's newest settings first
   try {
     await invoke("widget_alert", { alert: Object.assign({ type: kind, user: "", amount: "", message: "" }, sample, { test: true }) });
     say("Sent a test alert to the widget.");
@@ -267,13 +478,14 @@ async function alertTest(kind) {
   }
 }
 
-// Dragging a row to reorder them
+// Dragging a row to reorder them (an open editor closes first, so it doesn't get left behind)
 function alertsDrag() {
   const list = $("alertList");
   let dragging = null;
   list.addEventListener("dragstart", (e) => {
-    dragging = e.target.closest(".alertRow");
-    if (!dragging) return;
+    dragging = e.target.closest && e.target.closest(".alertRow");
+    if (!dragging || e.target.closest("input, select, button")) { dragging = null; return; }
+    if (alertOpen) { const ed = list.querySelector(".alertEdit"); if (ed) ed.remove(); alertOpen = null; }
     dragging.classList.add("dragging");
     e.dataTransfer.effectAllowed = "move";
     e.dataTransfer.setData("text/plain", dragging.dataset.kind);
@@ -335,7 +547,11 @@ function alertsInit() {
       $("alertUrl").select();
     }
   });
+  $("alertAdd").addEventListener("click", alertAdd);
+  // the section folds away, and stays as you left it
+  $("alertsBody").open = prefs.alertsOpen !== false;
+  $("alertsBody").addEventListener("toggle", () => { prefs.alertsOpen = $("alertsBody").open; savePrefs(); });
   alertsDrag();
-  alertsPaintList();
   alertsPaint();
+  alertsPaintList();
 }
