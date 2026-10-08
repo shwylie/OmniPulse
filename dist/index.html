@@ -505,6 +505,20 @@
 
       <div class="row">
         <div>
+          <div class="lbl">YouTube Account</div>
+          <div class="note" id="ytAccNote">Optional. Connected, a like here is a like on YouTube and YouTube Music too.</div>
+        </div>
+        <label class="switch" title="Connect your YouTube account"><input type="checkbox" id="ytAccOn"><span></span></label>
+      </div>
+      <div class="row sub" id="ytMirrorRow" hidden>
+        <div>
+          <div class="lbl">Like Other Tracks There Too</div>
+          <div class="note">Liking a SoundCloud or Spotify track likes the same song on YouTube.</div>
+        </div>
+        <label class="switch"><input type="checkbox" id="ytMirror"><span></span></label>
+      </div>
+      <div class="row">
+        <div>
           <div class="lbl">Last.fm</div>
           <div class="note" id="lfmNote">Not signed in. Needs lastfm_api_key and lastfm_secret in config.json.</div>
           <button class="linkBtn" data-url="https://www.last.fm/settings/subscription" title="Last.fm Pro">Manage subscription</button>

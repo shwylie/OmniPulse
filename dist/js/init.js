@@ -32,6 +32,7 @@ function extrasInit() {
   remoteInit();
   dndInit();
   selectInit();
+  ytAccInit();
   widgetInit();
   navInit();
   discoverInit();

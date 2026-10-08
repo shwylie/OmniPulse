@@ -20,6 +20,7 @@ pub mod spotify_engine;
 pub mod tools;
 pub mod widget;
 pub mod youtube;
+pub mod yt_account;
 pub mod yt_stream;
 
 use serde::{Deserialize, Serialize};
@@ -50,6 +51,11 @@ pub struct Config {
     pub lastfm_api_key: String,
     #[serde(default)]
     pub lastfm_secret: String,
+    /// a Google Cloud OAuth client (Desktop app), for the optional YouTube account (yt_account.rs)
+    #[serde(default)]
+    pub youtube_client_id: String,
+    #[serde(default)]
+    pub youtube_client_secret: String,
 }
 
 pub fn default_spotify_redirect() -> String {

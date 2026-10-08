@@ -173,6 +173,11 @@ pub async fn sp_refresh(cfg: &Config, old: &SpTokens) -> Result<SpTokens, String
 pub async fn wait_for_callback(bind: String, url: String) -> Result<(String, String), String> {
     let listener = TcpListener::bind(&bind)
         .map_err(|e| format!("Could not listen for the sign-in callback (is the port busy?): {e}"))?;
+    wait_on(listener, url).await
+}
+
+/// The same, on a listener that's already open (Google's sign-in picks a free port first)
+pub async fn wait_on(listener: TcpListener, url: String) -> Result<(String, String), String> {
     listener.set_nonblocking(true).map_err(|e| e.to_string())?;
     opener::open(&url).map_err(|e| e.to_string())?;
 
@@ -226,7 +231,7 @@ pub async fn wait_for_callback(bind: String, url: String) -> Result<(String, Str
             );
             let _ = stream.write_all(resp.as_bytes());
             if !err.is_empty() {
-                return Err(format!("Spotify returned an error: {err}"));
+                return Err(format!("The sign-in page returned an error: {err}"));
             }
             if !code.is_empty() {
                 return Ok((code, st));

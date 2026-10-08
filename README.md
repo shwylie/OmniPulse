@@ -72,6 +72,20 @@ The Spotify code is still in the project (dist/spotify.js and the Spotify comman
 1. Get an API key at https://www.last.fm/api/account/create
 2. Add "lastfm_api_key" and "lastfm_secret" to config.json, then Settings > Integrations > Connect.
 
+### YouTube account (optional: likes on YouTube and YouTube Music)
+Without it, YouTube Music search and playback work as before, and likes stay on this PC.
+1. At https://console.cloud.google.com create a project, and switch on the "YouTube Data API v3"
+   (APIs & Services > Library).
+2. APIs & Services > OAuth consent screen: set it up (External is fine), and add your own Google
+   account as a test user.
+3. APIs & Services > Credentials > Create credentials > OAuth client ID, type "Desktop app".
+4. Copy its client ID and client secret into config.json as "youtube_client_id" and
+   "youtube_client_secret", then Settings > Integrations > YouTube Account.
+The sign-in is kept encrypted for your Windows account (youtube_account.bin in the data folder).
+Likes use YouTube's free daily allowance (50 units each, of 10,000); a song from another platform
+is matched through YouTube Music first, which costs nothing, and only searched for through the API
+(100 units) if that finds nothing. TypeScript definitions for the commands: types/youtube-account.d.ts.
+
 ## Taskbar buttons (v15)
 Hover the app on the taskbar for Shuffle / Previous / Play-Pause / Next / Like, like VLC. The button icons are in src-tauri/icons/taskbar.
 

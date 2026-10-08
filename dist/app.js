@@ -1108,6 +1108,7 @@ async function setLikedOn(t, on) {
   if (srcOf(t) === "spotify") await spotifySetLiked(t, on);
   else if (srcOf(t) === "youtube") ytSetLiked(t, on);
   else await invoke("set_like", { id: String(t.id), like: on });
+  ytMirrorLike(t, on);   // and on YouTube, with your account connected and that asked for (js/youtube.js)
 }
 
 // Liking likes this copy of the song; unliking unlikes it wherever it's liked (the same song on

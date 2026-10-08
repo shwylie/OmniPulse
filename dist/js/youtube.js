@@ -174,6 +174,76 @@ function ytSetLiked(t, on) {
   ytLikes = ytLikes.filter((x) => x.id !== t.id);
   if (on) ytLikes.unshift(xplSnap(t));
   try { localStorage.setItem(YT_LIKES_KEY, JSON.stringify(ytLikes)); } catch (e) {}
+  // with your YouTube account connected, the like is made there too (the one here stays either way)
+  if (ytAcc.connected) ytRate(t, on, t.ytId || String(t.id).replace(/^yt:/, ""));
+}
+
+// ---------- your YouTube account (optional) ----------
+// Connected (Settings > Integrations), liking a YouTube track likes it on YouTube and YouTube Music;
+// with "Like Other Tracks There Too", liking any other track likes the same song there as well. The
+// video a track was matched to is remembered, so unliking takes back the same like.
+const YT_MIRROR_KEY = "sc.ytMirror";
+const ytAcc = { connected: false, name: "", configured: false, busy: false };
+let ytMirrorIds = {};
+try { ytMirrorIds = JSON.parse(localStorage.getItem(YT_MIRROR_KEY) || "{}"); } catch (e) { ytMirrorIds = {}; }
+
+async function ytRate(t, on, videoId) {
+  const n = guessNames(t);
+  try {
+    const id = await invoke(on ? "like_youtube_track" : "unlike_youtube_track", { videoId: videoId || ytMirrorIds[t.id] || null, title: n.title || t.title || "", artist: n.artist || artistName(t) || "" });
+    if (srcOf(t) !== "youtube") {
+      if (on) ytMirrorIds[t.id] = id; else delete ytMirrorIds[t.id];
+      try { localStorage.setItem(YT_MIRROR_KEY, JSON.stringify(ytMirrorIds)); } catch (e) {}
+    }
+  } catch (e) {
+    say((on ? "Liked here, but not on YouTube: " : "Unliked here, but not on YouTube: ") + e);
+    if (/connect your youtube account/i.test(String(e))) ytAccRefresh();
+  }
+}
+
+// Liking a track from another platform: the same song on YouTube too, if you've asked for that
+function ytMirrorLike(t, on) {
+  if (ytAcc.connected && prefs.ytMirror && srcOf(t) !== "youtube" && srcOf(t) !== "local") ytRate(t, on, null);
+}
+
+async function ytAccRefresh() {
+  try { Object.assign(ytAcc, await invoke("youtube_status")); } catch (e) { ytAcc.connected = false; }
+  ytAccPaint();
+}
+
+function ytAccPaint() {
+  $("ytAccOn").checked = ytAcc.connected;
+  $("ytAccOn").disabled = ytAcc.busy;
+  $("ytMirrorRow").hidden = !ytAcc.connected;
+  $("ytMirror").checked = !!prefs.ytMirror;
+  $("ytAccNote").textContent = ytAcc.busy ? "Finish signing in in your browser, then come back here..."
+    : ytAcc.connected ? "Connected" + (ytAcc.name ? " as " + ytAcc.name : "") + ". Likes here are likes on YouTube and YouTube Music too."
+    : ytAcc.configured === false ? "Optional. Needs youtube_client_id and youtube_client_secret in config.json (see the README)."
+    : "Optional. Connected, a like here is a like on YouTube and YouTube Music too.";
+}
+
+function ytAccInit() {
+  $("ytAccOn").addEventListener("change", async () => {
+    if ($("ytAccOn").checked) {
+      ytAcc.busy = true;
+      ytAccPaint();
+      try {
+        Object.assign(ytAcc, await invoke("youtube_connect"));
+        say("YouTube account connected" + (ytAcc.name ? " (" + ytAcc.name + ")" : "") + ".");
+      } catch (e) {
+        say("Couldn't connect your YouTube account: " + e);
+      }
+      ytAcc.busy = false;
+      await ytAccRefresh();
+    } else {
+      if (!confirm("Disconnect your YouTube account? Likes stay on YouTube; new ones won't be sent there.")) { ytAccPaint(); return; }
+      try { await invoke("youtube_disconnect"); } catch (e) { say(String(e)); }
+      await ytAccRefresh();
+      say("YouTube account disconnected.");
+    }
+  });
+  $("ytMirror").addEventListener("change", () => { prefs.ytMirror = $("ytMirror").checked; savePrefs(); });
+  ytAccRefresh();
 }
 
 const ytLikedTracks = () => ytLikes.map((x) => Object.assign({}, x, { user: Object.assign({}, x.user) }));
