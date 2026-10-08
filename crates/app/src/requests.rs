@@ -241,7 +241,7 @@ mod tests {
     use super::*;
 
     fn t(title: &str, artist: &str, ms: u64) -> Track {
-        Track { src: Src::YouTube(title.into()), key: title.into(), title: title.into(), artist: artist.into(), album: String::new(), ms, art: String::new(), genre: String::new(), link: String::new() }
+        Track { src: Src::YouTube(title.into()), key: title.into(), title: title.into(), artist: artist.into(), album: String::new(), ms, art: String::new(), genre: String::new(), link: String::new(), go_plus: false }
     }
 
     #[test]

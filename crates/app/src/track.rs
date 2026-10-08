@@ -24,6 +24,9 @@ pub struct Track {
     pub genre: String,
     /// its page on the platform (SoundCloud's; the others' are made from the id: see web_link)
     pub link: String,
+    /// a SoundCloud Go+ track: SoundCloud only gives this app its 30-second preview, so it plays from
+    /// YouTube Music instead (crate::versions)
+    pub go_plus: bool,
 }
 
 /// Sets & Podcasts: anything over 15 minutes
@@ -112,6 +115,7 @@ impl Track {
             art: t["artwork_url"].as_str().or(t["user"]["avatar_url"].as_str()).unwrap_or("").replace("-large", "-t200x200"),
             genre: t["genre"].as_str().unwrap_or("").to_string(),
             link: if t["sharing"].as_str() == Some("private") { String::new() } else { t["permalink_url"].as_str().unwrap_or("").to_string() },
+            go_plus: t["access"].as_str() == Some("preview") || t["policy"].as_str() == Some("SNIP"),
         }
         .tidied())
     }
@@ -131,6 +135,7 @@ impl Track {
             art: t["album"]["images"].as_array().and_then(|i| i.get(1).or(i.first())).and_then(|i| i["url"].as_str()).unwrap_or("").to_string(),
             genre: String::new(),
             link: String::new(),
+            go_plus: false,
         }.tidied())
     }
 
@@ -145,6 +150,7 @@ impl Track {
             art: t.thumb.clone(),
             genre: String::new(),
             link: String::new(),
+            go_plus: false,
         }
         .tidied()
     }
@@ -185,6 +191,7 @@ impl Track {
             art: s["artwork_url"].as_str().unwrap_or("").to_string(),
             genre: s["genre"].as_str().unwrap_or("").to_string(),
             link: s["permalink_url"].as_str().unwrap_or("").to_string(),
+            go_plus: s["access"].as_str() == Some("preview") || s["policy"].as_str() == Some("SNIP"),
         })
     }
 }

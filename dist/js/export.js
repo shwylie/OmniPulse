@@ -2,7 +2,7 @@
 // this PC, YouTube Music likes, play history), written to the data folder for the native OmniPulse,
 // which can't read the WebView's storage. When the app opens, every two minutes, and as it closes.
 
-const EXPORT_KEYS = ["sc.favourites", "sc.stats", "sc.prefs", "sc.xplaylists", "sc.ytLikes", "sc.lastPlayed", "sc.heardSongs"];
+const EXPORT_KEYS = ["sc.favourites", "sc.stats", "sc.prefs", "sc.xplaylists", "sc.ytLikes", "sc.lastPlayed", "sc.heardSongs", "sc.ytMatch"];
 let exportLast = "";
 
 function webExport() {

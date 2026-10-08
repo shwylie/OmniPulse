@@ -285,7 +285,7 @@ mod tests {
     use crate::track::Src;
 
     fn t(key: &str, artist: &str, sc: bool) -> Track {
-        Track { src: if sc { Src::SoundCloud(1) } else { Src::YouTube(key.into()) }, key: key.into(), title: key.into(), artist: artist.into(), album: String::new(), ms: 200_000, art: String::new(), genre: String::new(), link: String::new() }
+        Track { src: if sc { Src::SoundCloud(1) } else { Src::YouTube(key.into()) }, key: key.into(), title: key.into(), artist: artist.into(), album: String::new(), ms: 200_000, art: String::new(), genre: String::new(), link: String::new(), go_plus: false }
     }
 
     #[test]

@@ -13,6 +13,14 @@ pub struct Playlist {
     pub tracks: Option<Vec<Track>>,
 }
 
+/// Go+ tracks in SoundCloud's lists: only while YouTube Music can play them in full (set from main)
+pub static GO_PLUS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// A SoundCloud request, asking for Go+ tracks too when they can be played
+fn sc_path(path: String) -> String {
+    if GO_PLUS.load(std::sync::atomic::Ordering::Relaxed) { path.replace("access=playable", "access=playable,preview") } else { path }
+}
+
 fn items(v: &Value) -> Vec<Value> {
     v["collection"].as_array().cloned().or_else(|| v.as_array().cloned()).unwrap_or_default()
 }
@@ -27,7 +35,7 @@ async fn sc_pages(first: String, max: usize) -> Vec<Track> {
     let mut path = first;
     let mut empty = 0;
     while out.len() < max {
-        let Ok(v) = core::soundcloud::api_get(path.clone()).await else { break };
+        let Ok(v) = core::soundcloud::api_get(sc_path(path.clone())).await else { break };
         let list = items(&v);
         out.extend(list.iter().filter_map(Track::soundcloud));
         // (a page can come back empty, with more after it: a few of those in a row and it stops)
@@ -86,6 +94,7 @@ pub fn local_files() -> Vec<Track> {
                     art: String::new(),
                     genre: String::new(),
                     link: String::new(),
+                    go_plus: false,
                 })
                 .collect()
         })
@@ -134,7 +143,7 @@ pub async fn search(q: &str) -> Vec<Track> {
         if !core::soundcloud::signed_in() {
             return Vec::new();
         }
-        core::soundcloud::api_get(format!("/tracks?q={enc}&limit=50&access=playable&linked_partitioning=true")).await.map(|v| items(&v).iter().filter_map(Track::soundcloud).collect()).unwrap_or_default()
+        core::soundcloud::api_get(sc_path(format!("/tracks?q={enc}&limit=50&access=playable&linked_partitioning=true"))).await.map(|v| items(&v).iter().filter_map(Track::soundcloud).collect()).unwrap_or_default()
     };
     let sp = async {
         if !core::spotify::spotify_signed_in() {
@@ -205,7 +214,7 @@ pub async fn followed_artists() -> Vec<Artist> {
     if core::soundcloud::signed_in() {
         let mut path = "/me/followings?limit=200&linked_partitioning=true".to_string();
         for _ in 0..10 {
-            let Ok(v) = core::soundcloud::api_get(path.clone()).await else { break };
+            let Ok(v) = core::soundcloud::api_get(sc_path(path.clone())).await else { break };
             for u in items(&v) {
                 let img = u["avatar_url"].as_str().unwrap_or("").replace("-large", "-t200x200");
                 add(u["username"].as_str().unwrap_or(""), &img, u["id"].as_u64(), None);
@@ -271,7 +280,7 @@ pub async fn following_tracks(max: usize) -> Vec<Track> {
 /// Tracks like this one: SoundCloud's related tracks, or YouTube Music's radio
 pub async fn related(t: &Track) -> Vec<Track> {
     match &t.src {
-        Src::SoundCloud(id) => core::soundcloud::api_get(format!("/tracks/{id}/related?access=playable&limit=30")).await.map(|v| items(&v).iter().filter_map(Track::soundcloud).collect()).unwrap_or_default(),
+        Src::SoundCloud(id) => core::soundcloud::api_get(sc_path(format!("/tracks/{id}/related?access=playable&limit=30"))).await.map(|v| items(&v).iter().filter_map(Track::soundcloud).collect()).unwrap_or_default(),
         Src::YouTube(id) => core::youtube::radio(id).await.map(|l| l.iter().map(Track::youtube).skip(1).collect()).unwrap_or_default(),
         _ => {
             // elsewhere: YouTube Music's radio for the same song
@@ -286,7 +295,7 @@ pub async fn related(t: &Track) -> Vec<Track> {
 
 // ---------- autoplay: tracks like the one playing, from each platform ----------
 pub async fn sc_search(q: &str, limit: usize) -> Vec<Track> {
-    core::soundcloud::api_get(format!("/tracks?q={}&limit={limit}&access=playable&linked_partitioning=true", urlencode(q))).await.map(|v| items(&v).iter().filter_map(Track::soundcloud).collect()).unwrap_or_default()
+    core::soundcloud::api_get(sc_path(format!("/tracks?q={}&limit={limit}&access=playable&linked_partitioning=true", urlencode(q)))).await.map(|v| items(&v).iter().filter_map(Track::soundcloud).collect()).unwrap_or_default()
 }
 
 pub async fn sp_search(q: &str) -> Vec<Track> {

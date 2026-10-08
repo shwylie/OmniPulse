@@ -9,6 +9,7 @@ mod desktop;
 mod integrations;
 mod look;
 mod titles;
+mod versions;
 mod player;
 mod queue;
 mod requests;
@@ -65,6 +66,8 @@ struct App {
     shuffle_backup: Option<Vec<String>>,
     /// repeat: "off", "all" (the queue) or "one" (this track)
     repeat: String,
+    /// a Go+ track playing its closest YouTube Music version: (its key, that version)
+    closest: Option<(String, omnipulse_core::youtube::YtTrack)>,
     autoplay: bool,
     ap_busy: bool,
     ap_then_play: bool,
@@ -284,6 +287,12 @@ fn paint_sides(a: &mut App) {
     ui.set_sides(ModelRc::from(Rc::new(VecModel::from(sides))));
 }
 
+/// Go+ tracks are listed only while YouTube Music can play them in full: switched on, and yt-dlp here
+fn go_plus_set(prefs: &serde_json::Value) {
+    let on = plat_on(prefs, "youtube") && omnipulse_core::tools::ytdlp_path().is_some();
+    sources::GO_PLUS.store(on, std::sync::atomic::Ordering::Relaxed);
+}
+
 fn plat_toggle(shared: &Shared, plat: &str) {
     let key = plat_key(plat);
     let now = {
@@ -294,6 +303,7 @@ fn plat_toggle(shared: &Shared, plat: &str) {
         }
         paint_sides(&mut a);
         paint_plats(&a);
+        go_plus_set(&a.web.prefs);
         apply_filter(&mut a);
         a.ap_failed = None;
         if let Some(ui) = a.ui.upgrade() {
@@ -418,7 +428,7 @@ fn track_from_play(p: &webstate::Play) -> Option<Track> {
         "local" => track::Src::Local(omnipulse_core::local::local_path_for(&p.id)?.to_string_lossy().into_owned()),
         _ => track::Src::SoundCloud(p.id.parse().ok()?),
     };
-    Some(Track { src, key: p.id.clone(), title: p.title.clone(), artist: p.artist.clone(), album: String::new(), ms: p.ms, art: p.art.clone(), genre: p.genre.clone(), link: String::new() })
+    Some(Track { src, key: p.id.clone(), title: p.title.clone(), artist: p.artist.clone(), album: String::new(), ms: p.ms, art: p.art.clone(), genre: p.genre.clone(), link: String::new(), go_plus: false })
 }
 
 fn top_lately(web: &WebState, library: &[Track], days: u64, n: usize) -> Vec<Track> {
@@ -827,8 +837,17 @@ fn start(shared: &Shared) {
     let h = rt.clone();
     let weak2 = weak.clone();
     let t2 = t.clone();
+    STATUS_HOLD.with(|h| *h.borrow_mut() = None);
     rt.spawn(async move {
-        let src = player::open_source(&t, h.clone()).await;
+        // a Go+ track: never the preview, but its version on YouTube Music (crate::versions)
+        let (src, version) = if t.go_plus {
+            match versions::find(&t).await {
+                Some(v) => (player::open_source(&Track::youtube(&v.yt), h.clone()).await, Some(v)),
+                None => (Err("there's no version of it on YouTube Music".to_string()), None),
+            }
+        } else {
+            (player::open_source(&t, h.clone()).await, None)
+        };
         let _ = weak.upgrade_in_event_loop(move |ui| {
             SHARED.with(|s| {
                 let Some(shared) = s.borrow().clone() else { return };
@@ -844,12 +863,29 @@ fn start(shared: &Shared) {
                         engine.play();
                         ui.set_playing(true);
                         ui.set_status("".into());
+                        // which version a Go+ track is playing; the closest one's note stays while it plays
+                        if let Some(v) = &version {
+                            if v.exact {
+                                ui.set_status("Go+ track: playing the full song from YouTube Music.".into());
+                            } else {
+                                let note = format!("Go+ track: no exact match, so it's playing the closest, \"{}\" by {}, from YouTube Music.", v.yt.title, v.yt.artists);
+                                ui.set_status(note.clone().into());
+                                STATUS_HOLD.with(|h| *h.borrow_mut() = Some(note));
+                            }
+                        }
                         {
                             let mut a = shared.borrow_mut();
+                            a.closest = version.filter(|v| !v.exact).map(|v| (t.key.clone(), v.yt));
                             a.started_secs = omnipulse_core::now_secs();
                             integrations::lastfm_now_playing(&a.rt, &a.web.prefs, &t);
                         }
                         push_out(&shared, true);
+                    }
+                    // a Go+ track with no version anywhere: skipped, not its preview
+                    Err(e) if t.go_plus => {
+                        ui.set_status(format!("Skipped \"{}\" (Go+ track): {e}.", t.title).into());
+                        let s2 = shared.clone();
+                        slint::Timer::single_shot(std::time::Duration::from_millis(400), move || step(&s2, 1));
                     }
                     Err(e) => ui.set_status(format!("Couldn't play \"{}\": {e}", t.title).into()),
                 }
@@ -1067,6 +1103,9 @@ fn tick(shared: &Shared, events: &std::sync::mpsc::Receiver<Event>, n: u64) {
             *seen = (now, std::time::Instant::now());
             return;
         }
+        if STATUS_HOLD.with(|h| h.borrow().as_deref() == Some(now.as_str())) {
+            return;
+        }
         let bad = { let l = now.to_lowercase(); l.starts_with("couldn") || l.starts_with("can't") || l.contains("failed") || l.contains("error") };
         let keep = if bad { 7 } else { 4 };
         if !now.is_empty() && !now.ends_with("...") && !now.ends_with('…') && seen.1.elapsed().as_secs() >= keep {
@@ -1116,6 +1155,17 @@ fn tick(shared: &Shared, events: &std::sync::mpsc::Receiver<Event>, n: u64) {
     while let Ok(ev) = events.try_recv() {
         match ev {
             Event::Ended if shared.borrow().repeat == "one" => start(shared),
+            Event::Ended if shared.borrow().closest.is_some() => {
+                let (done, cur) = { let a = shared.borrow(); (a.closest.clone(), a.queue.current().cloned()) };
+                if let (Some((key, yt)), Some(t)) = (done, cur) {
+                    if t.key == key {
+                        versions::keep(&t, &yt);
+                        ui.set_status(format!("\"{}\" plays that version from now on.", t.title).into());
+                    }
+                }
+                shared.borrow_mut().closest = None;
+                step(shared, 1);
+            }
             Event::Ended => step(shared, 1),
             Event::Error(e) => ui.set_status(e.into()),
         }
@@ -1461,10 +1511,13 @@ fn main() -> Result<(), slint::PlatformError> {
         rt: rt.handle().clone(), engine: engine.clone(), ui: ui.as_weak(), rows, qrows, lyric_lines,
         library: Vec::new(), playlists: Vec::new(), web: webstate::load(), page: "library".into(),
         page_all: Vec::new(), page_tracks: Vec::new(), chip: 0, shelves: Vec::new(), queue: queue::Queue::default(), panel_map: Vec::new(), side_map: Vec::new(),
-        here: None, history: Vec::new(), artists: None, fav_only: false, shuffle_on: false, shuffle_backup: None, repeat: "off".into(),
+        here: None, history: Vec::new(), artists: None, fav_only: false, shuffle_on: false, shuffle_backup: None, repeat: "off".into(), closest: None,
         autoplay: true, ap_busy: false, ap_then_play: false, ap_failed: None, resume_ms: None, loaded: false, accent: ("#8e9bff".into(), "#8e9bff".into()), started_secs: 0, token: 0,
         lyrics: Vec::new(), heard: (String::new(), 0.0, false), last_pos: 0,
     }));
+    // (before anything is listed: Go+ tracks only while YouTube Music can play them)
+    go_plus_set(&shared.borrow().web.prefs);
+
     SHARED.with(|s| *s.borrow_mut() = Some(shared.clone()));
     ui.set_page_sub("Loading your Library...".into());
     restore_session(&shared);
@@ -1761,7 +1814,7 @@ fn main() -> Result<(), slint::PlatformError> {
         let s = shared.clone();
         let started = std::time::Instant::now();
         let mut step_no = 0usize;
-        let plan: [(u64, &str); 17] = [(9, "play"), (13, "library"), (14, "scoff"), (15, "scon"), (16, "discover"), (24, "rediscover"), (27, "sets"), (31, "stats"), (35, "now"), (39, "search"), (42, "settings"), (44, "light"), (46, "artists"), (54, "artist"), (60, "autoplay"), (70, "narrow"), (72, "end")];
+        let plan: [(u64, &str); 18] = [(9, "play"), (13, "library"), (14, "scoff"), (15, "scon"), (16, "discover"), (24, "rediscover"), (27, "sets"), (31, "stats"), (35, "now"), (39, "search"), (42, "settings"), (44, "light"), (46, "artists"), (54, "artist"), (60, "autoplay"), (70, "narrow"), (72, "goplus"), (84, "end")];
         t.start(slint::TimerMode::Repeated, std::time::Duration::from_millis(250), move || {
             let Some(&(at, what)) = plan.get(step_no) else { return };
             if started.elapsed().as_secs() < at { return; }
@@ -1796,11 +1849,19 @@ fn main() -> Result<(), slint::PlatformError> {
                     ui.set_queue_open(true);
                 }
                 "search" => { ui.set_search_text("deadmau5".into()); ui.invoke_search("deadmau5".into()); }
+                // a Go+ track: it plays from YouTube Music, never its preview
+                "goplus" => {
+                    open_page(&s, "library");
+                    let at = s.borrow().page_tracks.iter().position(|t| t.go_plus);
+                    println!("selftest: go+ tracks listed {}", s.borrow().page_tracks.iter().filter(|t| t.go_plus).count());
+                    if let Some(i) = at { ui.invoke_play_row(i as i32); }
+                }
                 // the narrow layout, for its picture
                 "narrow" => { ui.window().set_size(slint::LogicalSize::new(900.0, 700.0)); }
                 // the first artist you follow
                 "artist" => { println!("selftest: following {} artists", ui.get_artists().row_count()); if ui.get_artists().row_count() > 0 { ui.invoke_artist(0); } }
                 "end" => {
+                    println!("selftest: status \"{}\"", ui.get_status());
                     println!("selftest: remote state {}", remote_state(&s.borrow()));
                     println!("selftest: queue {} ({} autoplay, {} requested), {}", s.borrow().queue.items.len(), s.borrow().queue.items.iter().filter(|q| q.auto).count(), s.borrow().queue.items.iter().filter(|q| !q.by.is_empty()).count(), ui.get_autoplay_note());
                     println!("selftest: library {} tracks, playlists {}, playing \"{}\" {} / {}, lyrics {}", s.borrow().library.len(), s.borrow().playlists.len(), ui.get_now_title(), ui.get_pos_text(), ui.get_dur_text(), s.borrow().lyrics.len());
@@ -1824,6 +1885,8 @@ thread_local! {
     static ARTIST_MODEL: RefCell<Option<Rc<VecModel<Item>>>> = const { RefCell::new(None) };
     /// the status line as it was last seen, and since when (it goes after a while)
     static STATUS_SEEN: RefCell<(String, std::time::Instant)> = RefCell::new((String::new(), std::time::Instant::now()));
+    /// a note that stays while its track plays (a Go+ track's closest version)
+    static STATUS_HOLD: RefCell<Option<String>> = const { RefCell::new(None) };
     #[allow(clippy::type_complexity)]
     static STAT_MODELS: RefCell<Option<(Rc<VecModel<Item>>, Rc<VecModel<Item>>)>> = const { RefCell::new(None) };
 }
