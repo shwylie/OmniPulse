@@ -231,7 +231,7 @@ function alertsCfg() {
     kinds,
     anim: prefs.alertAnim || "slide",
     transition: prefs.alertTrans || "seamless",
-    collage: { size: prefs.alertCSize || "medium", dir: prefs.alertCDir || "diag", angle: Number(prefs.alertCAngle) || 0 },
+    collage: { size: prefs.alertCSize || "medium", dir: prefs.alertCDir || "diag", angle: Number(prefs.alertCAngle) || 0, colors: collageColours() },
     secs: Number(prefs.alertSecs) || 5,
     // their own colours (else the widget's, from the album art), and which way the gradient runs
     accent: prefs.alertOwnCol ? prefs.alertCol1 || "#8e9bff" : "",
@@ -242,6 +242,61 @@ function alertsCfg() {
     sounds,
     sb: { on: prefs.sbOn !== false, host: prefs.sbHost || "127.0.0.1:8080" },
   };
+}
+
+// ---------- the collage's tile colours: each alert's own, a preset, or your own (up to six) ----------
+const COLLAGE_PALETTES = [
+  ["alert", "Alert's Colours", []],
+  ["rainbow", "Rainbow", ["#ff4d4d", "#ff9f1c", "#ffe74c", "#3ddc84", "#3a86ff", "#8338ec"]],
+  ["neon", "Neon", ["#ff00e5", "#00f0ff", "#39ff14", "#fff000", "#ff3131"]],
+  ["sunset", "Sunset", ["#ff6b6b", "#ff9e57", "#ffd166", "#c94b7d", "#6a4c93"]],
+  ["ocean", "Ocean", ["#0077b6", "#00b4d8", "#48cae4", "#90e0ef", "#023e8a"]],
+  ["forest", "Forest", ["#2d6a4f", "#40916c", "#74c69d", "#b7e4c7", "#95d5b2"]],
+  ["candy", "Candy", ["#ff8fab", "#ffc2d1", "#cdb4db", "#a2d2ff", "#bde0fe"]],
+  ["fire", "Fire", ["#d00000", "#e85d04", "#faa307", "#ffba08", "#9d0208"]],
+  ["streamer", "Streaming Sites", ["#ff0033", "#9146ff", "#53fc18", "#ff5500", "#1ed760"]],
+  ["mono", "Black & White", ["#f5f5f5", "#bdbdbd", "#757575", "#424242"]],
+  ["custom", "Your Own", null],
+];
+const collagePalette = () => prefs.alertCPal || "alert";
+const collageCustom = () => (Array.isArray(prefs.alertCPalOwn) && prefs.alertCPalOwn.length ? prefs.alertCPalOwn : ["#ff4d6d", "#ffb703", "#4cc9f0"]).slice(0, 6);
+function collageColours() {
+  const p = COLLAGE_PALETTES.find((x) => x[0] === collagePalette()) || COLLAGE_PALETTES[0];
+  return p[0] === "custom" ? collageCustom() : p[2];
+}
+
+// The picker: a swatch each, and + / x for your own
+function collagePalettePaint() {
+  const sel = $("alertCPal");
+  if (!sel.options.length) COLLAGE_PALETTES.forEach(([id, name]) => { const o = el("option", "", name); o.value = id; sel.append(o); });
+  sel.value = collagePalette();
+  const own = collagePalette() === "custom";
+  $("alertCPalNote").textContent = collagePalette() === "alert" ? "Each alert's own two (blending from one alert's to the next)." : "Tiles in these colours, for every alert.";
+  $("alertCPalRow").hidden = collagePalette() === "alert";
+  const box = $("alertCPalSwatches");
+  box.replaceChildren();
+  collageColours().forEach((c, i) => {
+    if (!own) { const sw = el("span", "palSwatch"); sw.style.background = c; box.append(sw); return; }
+    const inp = el("input");
+    inp.type = "color";
+    inp.value = c;
+    inp.setAttribute("aria-label", "Colour " + (i + 1));
+    inp.addEventListener("change", () => { const l = collageCustom().slice(); l[i] = inp.value; prefs.alertCPalOwn = l; alertsSave(); });
+    box.append(inp);
+    if (collageCustom().length > 2) {
+      const x = el("button", "soft palRemove", "\u00d7");
+      x.type = "button";
+      x.title = "Take this colour out";
+      x.addEventListener("click", () => { const l = collageCustom().slice(); l.splice(i, 1); prefs.alertCPalOwn = l; alertsSave(); collagePalettePaint(); });
+      box.append(x);
+    }
+  });
+  if (own && collageCustom().length < 6) {
+    const add = el("button", "soft", "+ Colour");
+    add.type = "button";
+    add.addEventListener("click", () => { prefs.alertCPalOwn = collageCustom().concat(["#ffffff"]); alertsSave(); collagePalettePaint(); });
+    box.append(add);
+  }
 }
 
 // The icons' size: 60% to 200% of how they started (200% fills the tile), in steps of 10%
@@ -634,6 +689,7 @@ function alertsPaint() {
   $("alertAnimNote").textContent = collage ? "Not used with Collage: its tiles bring each alert in, even with nothing playing." : "With Over the Top, and while nothing's playing.";
   $("alertCSize").value = prefs.alertCSize || "medium";
   $("alertCDir").value = prefs.alertCDir || "diag";
+  collagePalettePaint();
   $("alertCAngle").value = String(Number(prefs.alertCAngle) || 0);
   $("alertCAngleVal").textContent = $("alertCAngle").value + "\u00b0";
   $("alertSecs").value = String(Number(prefs.alertSecs) || 5);
@@ -701,6 +757,7 @@ function alertsInit() {
   $("alertBot").addEventListener("change", () => { prefs.alertBot = $("alertBot").value; savePrefs(); alertsPaint(); });
   $("alertTrans").addEventListener("change", () => { prefs.alertTrans = $("alertTrans").value; alertsSave(); alertsPaint(); alertsPaintList(); });
   ["alertCSize", "alertCDir"].forEach((id) => $(id).addEventListener("change", () => { prefs[id] = $(id).value; alertsSave(); }));
+  $("alertCPal").addEventListener("change", () => { prefs.alertCPal = $("alertCPal").value; alertsSave(); collagePalettePaint(); });
   $("alertCAngle").addEventListener("input", () => { $("alertCAngleVal").textContent = $("alertCAngle").value + "\u00b0"; });
   $("alertCAngle").addEventListener("change", () => { prefs.alertCAngle = Number($("alertCAngle").value); delete prefs.alertCRot; delete prefs.alertCSpin; alertsSave(); });
   $("alertSecs").addEventListener("change", () => { prefs.alertSecs = Number($("alertSecs").value); alertsSave(); });

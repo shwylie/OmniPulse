@@ -751,6 +751,7 @@
       return sx > -size && sx < w + size && sy > -size && sy < h + size;
     };
     const set = collageSet(to);
+    const pal = (Array.isArray(opt.colors) ? opt.colors : []).filter((x) => /^#[0-9a-f]{6}$/i.test(x));
     const way = opt.dir || "diag";
     // the order they come in: a number for each tile, the smaller the sooner
     const seed = (r, c) => ((r * 73856093) ^ (c * 19349663)) % 1000 / 1000;
@@ -773,7 +774,9 @@
       const hi = blend(from.hi, to.hi, from === to ? 0 : ease), lo = blend(from.lo, to.lo, from === to ? 0 : ease);
       // each tile turns a little as it pops in, one way or the other
       t.style.cssText = "left:" + c * size + "px;top:" + r * size + "px;width:" + (size + 1) + "px;height:" + (size + 1) + "px;" +
-        "background:" + mix((r + c) % 3 === 1 ? lo : hi, [0.62, 0.48, 0.7, 0.55][(r * 3 + c) % 4]) + ";" +
+        // its colour: from the alerts' own two, or from the collage's palette (Settings > Collage > Tile Colours)
+        "background:" + (pal.length ? mix(pal[Math.floor(seed(r + 7, c + 11) * 997) % pal.length], 0.62 + 0.2 * seed(r + 1, c + 2))
+          : mix((r + c) % 3 === 1 ? lo : hi, [0.62, 0.48, 0.7, 0.55][(r * 3 + c) % 4])) + ";" +
         "--r:" + ((r + c) % 2 ? 1 : -1) * (12 + 22 * seed(r + 3, c + 5)) + "deg";
       t.dataset.at = String(at);
       const pick = set[(r * cols + c + r) % set.length];

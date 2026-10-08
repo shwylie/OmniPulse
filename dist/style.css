@@ -1472,3 +1472,8 @@ body.streamSafe .notSafe { display: none !important; }
 .ksField input.bad { border-color: #ff5a5a; }
 .keySetup .fixActions { display: flex; justify-content: flex-end; gap: 8px; }
 .keySetup #ksSave:disabled { opacity: 0.45; }
+
+/* the collage's tile colours */
+.palSwatch { width: 22px; height: 22px; border-radius: 6px; border: 1px solid var(--line); display: inline-block; }
+#alertCPalSwatches input[type="color"] { width: 32px; height: 26px; padding: 0; border: 0; background: none; }
+.palRemove { padding: 0 6px; margin-left: -4px; font-size: 12px; }
