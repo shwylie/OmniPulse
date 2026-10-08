@@ -377,9 +377,9 @@ body { display: grid; grid-template-rows: auto minmax(0, 1fr); }
   border-radius: 50%; object-fit: cover; background: var(--line);
 }
 .artistLink { cursor: pointer; }
-.artistLink:hover { color: var(--text); text-decoration: underline; }
-#nowArtist, #npArtist { width: fit-content; max-width: 100%; cursor: pointer; }
-#nowArtist:hover, #npArtist:hover { text-decoration: underline; }
+/* only the artist under the pointer lights up (the whole line is one artist when there is one) */
+.artistLink .artistPart:hover { color: var(--text); text-decoration: underline; }
+#nowArtist, #npArtist { width: fit-content; max-width: 100%; }
 
 /* ===== v9: discover ===== */
 .chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
@@ -1040,7 +1040,6 @@ select.wide { max-width: 260px; }
 /* several artists: each lights up on its own */
 .artistPart[data-name] { cursor: pointer; }
 .artistPart[data-name]:hover { color: var(--text); text-decoration: underline; }
-.artistLink:has(.artistPart[data-name]):hover { text-decoration: none; }
 #nowArtist .artistPart, #npArtist .artistPart { cursor: pointer; }
 #nowArtist .artistPart:hover, #npArtist .artistPart:hover { color: var(--text); text-decoration: underline; }
 /* adding a plugin: what it will and won't be able to do */
