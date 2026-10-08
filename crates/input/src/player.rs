@@ -80,8 +80,46 @@ pub(crate) fn fill(out: &mut [f32], channels: usize, out_rate: u32) {
     }
 }
 
+/// Opens a stream on the playback device Windows gives this program: the default one, or the one
+/// it has been routed to (Wave Link, or Windows' own per-app sound settings)
+fn open(muted: bool) -> Result<(cpal::Stream, String), String> {
+    let host = cpal::default_host();
+    let dev = host.default_output_device().ok_or("There's no playback device.")?;
+    let name = dev.name().unwrap_or_else(|_| "the default device".into());
+    let sup = dev.default_output_config().map_err(|e| e.to_string())?;
+    let fmt = sup.sample_format();
+    let cfg: cpal::StreamConfig = sup.into();
+    let (ch, rate) = (cfg.channels as usize, cfg.sample_rate.0);
+    let err = |e| eprintln!("OmniPulse Input: {e}");
+    let stream = match fmt {
+        cpal::SampleFormat::F32 => dev.build_output_stream(&cfg, move |d: &mut [f32], _| fill(d, ch, rate), err, None),
+        cpal::SampleFormat::I16 => {
+            let mut tmp = Vec::new();
+            dev.build_output_stream(&cfg, move |d: &mut [i16], _| {
+                tmp.resize(d.len(), 0.0);
+                fill(&mut tmp, ch, rate);
+                d.iter_mut().zip(&tmp).for_each(|(o, s)| *o = (s.clamp(-1.0, 1.0) * 32767.0) as i16);
+            }, err, None)
+        }
+        other => return Err(format!("The playback device uses a sample format ({other}) this can't play.")),
+    }
+    .map_err(|e| e.to_string())?;
+    stream.play().map_err(|e| e.to_string())?;
+    name_session(muted);
+    Ok((stream, name))
+}
+
+/// The device Windows would give this program right now
+fn wanted_device() -> Option<String> {
+    cpal::default_host().default_output_device().and_then(|d| d.name().ok())
+}
+
 /// Starts playing (on the default playback device); returns that device's name. `muted`: start muted
-/// in Windows' mixer (where it can be unmuted once it's routed)
+/// in Windows' mixer (where it can be unmuted once it's routed).
+///
+/// An open stream stays where it was opened, so when this program is routed somewhere else (a new
+/// Wave Link channel for it, say) it follows: about once a second it checks where Windows would put
+/// it, and moves there. It isn't muted on the new device, since being routed is what the mute waits for.
 pub fn start(muted: bool) -> Result<String, String> {
     stop();
     let alive = Arc::new(AtomicBool::new(true));
@@ -94,44 +132,31 @@ pub fn start(muted: bool) -> Result<String, String> {
     let (tx, rx) = mpsc::channel::<Result<String, String>>();
     let flag = alive.clone();
     // a cpal stream stays on the thread that made it
-    std::thread::spawn(move || {
-        let made = (|| -> Result<(cpal::Stream, String), String> {
-            let host = cpal::default_host();
-            let dev = host.default_output_device().ok_or("There's no playback device.")?;
-            let name = dev.name().unwrap_or_else(|_| "the default device".into());
-            let sup = dev.default_output_config().map_err(|e| e.to_string())?;
-            let fmt = sup.sample_format();
-            let cfg: cpal::StreamConfig = sup.into();
-            let (ch, rate) = (cfg.channels as usize, cfg.sample_rate.0);
-            let err = |e| eprintln!("OmniPulse Input: {e}");
-            let stream = match fmt {
-                cpal::SampleFormat::F32 => dev.build_output_stream(&cfg, move |d: &mut [f32], _| fill(d, ch, rate), err, None),
-                cpal::SampleFormat::I16 => {
-                    let mut tmp = Vec::new();
-                    dev.build_output_stream(&cfg, move |d: &mut [i16], _| {
-                        tmp.resize(d.len(), 0.0);
-                        fill(&mut tmp, ch, rate);
-                        d.iter_mut().zip(&tmp).for_each(|(o, s)| *o = (s.clamp(-1.0, 1.0) * 32767.0) as i16);
-                    }, err, None)
+    std::thread::spawn(move || match open(muted) {
+        Ok((mut stream, mut name)) => {
+            let _ = tx.send(Ok(name.clone()));
+            let mut ticks = 0u32;
+            while flag.load(Ordering::SeqCst) {
+                std::thread::park_timeout(std::time::Duration::from_millis(250));
+                ticks += 1;
+                if !ticks.is_multiple_of(4) {
+                    continue;
                 }
-                other => return Err(format!("The playback device uses a sample format ({other}) this can't play.")),
-            }
-            .map_err(|e| e.to_string())?;
-            stream.play().map_err(|e| e.to_string())?;
-            name_session(muted);
-            Ok((stream, name))
-        })();
-        match made {
-            Ok((stream, name)) => {
-                let _ = tx.send(Ok(name));
-                while flag.load(Ordering::SeqCst) {
-                    std::thread::park_timeout(std::time::Duration::from_millis(500));
+                match wanted_device() {
+                    Some(w) if w != name => {
+                        if let Ok((s, n)) = open(false) {
+                            stream = s; // the old one stops as it's dropped
+                            name = n;
+                            println!("moved {name}");
+                        }
+                    }
+                    _ => {}
                 }
-                drop(stream);
             }
-            Err(e) => {
-                let _ = tx.send(Err(e));
-            }
+            drop(stream);
+        }
+        Err(e) => {
+            let _ = tx.send(Err(e));
         }
     });
     match rx.recv_timeout(std::time::Duration::from_secs(10)) {

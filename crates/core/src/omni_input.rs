@@ -19,6 +19,8 @@ struct Running {
 }
 
 static RUNNING: Mutex<Option<Running>> = Mutex::new(None);
+/// The device it's playing on (it follows wherever it's routed)
+static DEVICE: Mutex<String> = Mutex::new(String::new());
 
 /// Where the program is: next to OmniPulse (the installer puts it there; so does a build)
 fn program_path() -> Result<std::path::PathBuf, String> {
@@ -54,9 +56,15 @@ pub fn start(muted: bool) -> Result<String, String> {
     let stdout = child.stdout.take().ok_or("no output")?;
     let (line_tx, line_rx) = mpsc::channel();
     std::thread::spawn(move || {
-        let mut line = String::new();
-        let _ = BufReader::new(stdout).read_line(&mut line);
-        let _ = line_tx.send(line);
+        // its first line answers; later ones ("moved <device>") are read so its output never fills up
+        let mut lines = BufReader::new(stdout).lines();
+        let first = lines.next().and_then(|l| l.ok()).unwrap_or_default();
+        let _ = line_tx.send(first);
+        for l in lines.map_while(Result::ok) {
+            if let Some(d) = l.strip_prefix("moved ") {
+                *DEVICE.lock().unwrap() = d.to_string();
+            }
+        }
     });
     let line = line_rx.recv_timeout(Duration::from_secs(10)).unwrap_or_default();
     let line = line.trim();
@@ -76,6 +84,7 @@ pub fn start(muted: bool) -> Result<String, String> {
         }
     });
     *RUNNING.lock().unwrap() = Some(Running { child, tx });
+    *DEVICE.lock().unwrap() = device.to_string();
     Ok(device.to_string())
 }
 
@@ -106,6 +115,11 @@ pub fn stop() {
         }
         let _ = r.child.kill();
     });
+}
+
+/// Where it's playing now
+pub fn device() -> String {
+    DEVICE.lock().unwrap().clone()
 }
 
 pub fn running() -> bool {
@@ -164,5 +178,89 @@ mod live {
             }
         }
         out
+    }
+}
+
+#[cfg(test)]
+mod diag {
+    // every output device's sessions, with mute and how loud each is right now:
+    // cargo test -p omnipulse-core omni_sessions_dump -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    #[cfg(windows)]
+    fn omni_sessions_dump() {
+        omni_sessions_dump_now();
+    }
+
+    #[cfg(windows)]
+    pub(super) fn omni_sessions_dump_now() {
+        use windows::core::Interface;
+        use windows::Win32::Media::Audio::Endpoints::IAudioMeterInformation;
+        use windows::Win32::Media::Audio::*;
+        use windows::Win32::System::Com::StructuredStorage::PropVariantToStringAlloc;
+        use windows::Win32::System::Com::*;
+        use windows::Win32::System::Threading::*;
+        use windows::Win32::Foundation::PROPERTYKEY;
+        unsafe {
+            let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
+            let en: IMMDeviceEnumerator = CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL).unwrap();
+            let devs = en.EnumAudioEndpoints(eRender, DEVICE_STATE_ACTIVE).unwrap();
+            let name_key = PROPERTYKEY { fmtid: windows::core::GUID::from_u128(0xa45c254e_df1c_4efd_8020_67d146a850e0), pid: 14 };
+            for d in 0..devs.GetCount().unwrap() {
+                let dev = devs.Item(d).unwrap();
+                let props = dev.OpenPropertyStore(STGM_READ).unwrap();
+                let dname = props.GetValue(&name_key).ok().and_then(|v| PropVariantToStringAlloc(&v).ok()).map(|p| p.to_string().unwrap_or_default()).unwrap_or_default();
+                let mgr: IAudioSessionManager2 = dev.Activate(CLSCTX_ALL, None).unwrap();
+                let list = mgr.GetSessionEnumerator().unwrap();
+                for i in 0..list.GetCount().unwrap() {
+                    let ctl = list.GetSession(i).unwrap();
+                    let c2: IAudioSessionControl2 = ctl.cast().unwrap();
+                    let pid = c2.GetProcessId().unwrap_or(0);
+                    let mut exe = String::new();
+                    if let Ok(h) = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) {
+                        let mut buf = [0u16; 260];
+                        let mut n = buf.len() as u32;
+                        if QueryFullProcessImageNameW(h, PROCESS_NAME_WIN32, windows::core::PWSTR(buf.as_mut_ptr()), &mut n).is_ok() {
+                            exe = String::from_utf16_lossy(&buf[..n as usize]).rsplit('\\').next().unwrap_or("").to_string();
+                        }
+                    }
+                    if !exe.to_lowercase().contains("omnipulse") && !exe.to_lowercase().contains("webview") {
+                        continue;
+                    }
+                    let state = ctl.GetState().map(|s| s.0).unwrap_or(-1);
+                    let muted = ctl.cast::<ISimpleAudioVolume>().and_then(|v| v.GetMute()).map(|b| b.as_bool()).unwrap_or(false);
+                    let peak = ctl.cast::<IAudioMeterInformation>().and_then(|m| m.GetPeakValue()).unwrap_or(-1.0);
+                    let disp = ctl.GetDisplayName().map(|s| s.to_string().unwrap_or_default()).unwrap_or_default();
+                    println!("{dname} | {exe} (pid {pid}) | \"{disp}\" | state {state} (1 = active) | muted {muted} | peak {peak:.3}");
+                }
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod diag_installed {
+    // starts the installed omnipulse-input.exe (silent) to see which device Windows puts it on:
+    // cargo test -p omnipulse-core omni_installed_device -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn omni_installed_device() {
+        use std::io::{BufRead, BufReader, Write};
+        let exe = std::path::Path::new(&std::env::var("LOCALAPPDATA").unwrap()).join("OmniPulse").join(super::PROGRAM);
+        let mut child = std::process::Command::new(&exe).stdin(std::process::Stdio::piped()).stdout(std::process::Stdio::piped()).spawn().expect("installed program");
+        let mut line = String::new();
+        BufReader::new(child.stdout.take().unwrap()).read_line(&mut line).unwrap();
+        println!("it says: {}", line.trim());
+        let mut stdin = child.stdin.take().unwrap();
+        for _ in 0..20 {
+            let mut piece = 48000u32.to_le_bytes().to_vec();
+            piece.extend_from_slice(&(4800u32 * 4).to_le_bytes());
+            piece.extend(vec![0u8; 4800 * 4]);
+            let _ = stdin.write_all(&piece);
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+        super::diag::omni_sessions_dump_now();
+        drop(stdin);
+        let _ = child.wait();
     }
 }
