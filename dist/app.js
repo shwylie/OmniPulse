@@ -356,6 +356,7 @@ function renderHero() {
   $("artistsBatch").hidden = v !== "artists";
   $("followBtn").hidden = !isArtist || !followPlats(currentArtist).length ||
     (meId !== null && currentArtist.on && currentArtist.on.soundcloud && String(currentArtist.on.soundcloud.id) === String(meId));
+  if ($("followBtn").hidden) $("followMoreBtn").hidden = true; else paintFollow();   // "Also follow on ...", now Follow shows
   $("plDelete").hidden = !(v === "playlist" && isOwnPlaylist(currentPlaylist));
   const av = $("heroAvatar");
   const src = v === "artist" ? artistImage(currentArtist) : "";

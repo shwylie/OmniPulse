@@ -1395,3 +1395,14 @@ body.streamer #pluginsSection { display: none !important; }
 .titlePlat button.on[data-p="youtube"] { color: #ff0033; background: color-mix(in srgb, #ff0033 16%, transparent); }
 .titlePlat button.on[data-p="local"] { color: #f2b544; background: color-mix(in srgb, #f2b544 16%, transparent); }
 .titlePlat button.on[data-p^="plug:"] { color: #38bdf8; background: color-mix(in srgb, #38bdf8 16%, transparent); }
+
+/* Unfollow looks like any other button (not greyed out); "Also follow on ...": the same pill, with a
+   touch of the accent so it stands out */
+.pill.follow.on { border-color: var(--line); color: var(--text); }
+.pill.follow.on:hover { border-color: var(--accent); }
+.pill.followMore {
+  border-color: transparent; color: var(--text); font-weight: 600;
+  background: linear-gradient(var(--panel), var(--panel)) padding-box, linear-gradient(100deg, var(--accent), var(--accent-2)) border-box;
+  box-shadow: 0 0 14px color-mix(in srgb, var(--accent) 28%, transparent);
+}
+.pill.followMore:hover { background: linear-gradient(color-mix(in srgb, var(--accent) 14%, var(--panel)), color-mix(in srgb, var(--accent) 14%, var(--panel))) padding-box, linear-gradient(100deg, var(--accent), var(--accent-2)) border-box; }

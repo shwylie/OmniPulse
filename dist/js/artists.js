@@ -174,12 +174,14 @@ async function artistAlbums(a) {
 
 // ---------- the artist page ----------
 let artistFollow = {};   // platform -> true / false, or missing while unknown
+let artistFollowDone = false;   // the platforms have been asked (what they couldn't say stays unknown)
 
 async function openArtist(seed) {
   const a = artistFrom(seed);
   currentArtist = a;
   currentPlaylist = null;
   artistFollow = {};
+  artistFollowDone = false;
   showView("artist");
   $("listView").scrollTop = 0;
   paintFollow();
@@ -277,33 +279,41 @@ async function artistFollowCheck(a) {
     const s = await followStateOn(p, a.on[p]).catch(() => null);
     if (s !== null) artistFollow[p] = s;
   }));
-  if (currentArtist === a) { paintFollow(); renderHero(); }
+  if (currentArtist === a) { artistFollowDone = true; paintFollow(); renderHero(); }
 }
 
 const followPlats = (a) => ARTIST_PLATS.filter((p) => a && a.on[p] && activePlats().includes(p));
 
+// Follow (everywhere) or Unfollow (wherever you follow them); right-click for one platform at a time.
+// Followed on some of their platforms but not all: a second button follows them on the rest.
+const platNames = (list) => andList(list.map((p) => PLATFORMS[p].name));
+
 function paintFollow() {
   const b = $("followBtn");
+  const more = $("followMoreBtn");
   const a = currentArtist;
   const plats = followPlats(a);
-  const known = plats.filter((p) => p in artistFollow);
-  const yes = known.filter((p) => artistFollow[p]);
-  const no = known.filter((p) => !artistFollow[p]);
-  b.disabled = !plats.length || known.length < plats.length;
-  b.classList.toggle("on", !!yes.length && !no.length);
-  b.textContent = !yes.length ? "Follow" : no.length ? "Follow everywhere" : "Following";
-  b.title = !plats.length ? "" : no.length
-    ? "Follow on " + no.map((p) => PLATFORMS[p].name).join(", ")
-    : "Following on " + yes.map((p) => PLATFORMS[p].name).join(", ") + ". Click to unfollow everywhere.";
+  const yes = plats.filter((p) => artistFollow[p] === true);
+  const rest = plats.filter((p) => artistFollow[p] !== true);
+  // only while the platforms are being asked; one that can't say doesn't hold it up
+  b.disabled = !plats.length || !artistFollowDone;
+  b.classList.toggle("on", yes.length > 0);
+  b.textContent = yes.length ? "Unfollow" : "Follow";
+  b.title = !plats.length ? "" : (yes.length
+    ? "Following on " + platNames(yes) + ". Click to unfollow there"
+    : "Follow on " + platNames(plats)) + "; right-click for one platform.";
+  // followed on some, not all: the rest, in one go
+  more.hidden = b.hidden || !artistFollowDone || !yes.length || !rest.length;
+  if (!more.hidden) {
+    more.textContent = rest.length === 1 ? "Also follow on " + PLATFORMS[rest[0]].name : "Also follow on " + rest.length + " more";
+    more.title = "Follow " + a.name + " on " + platNames(rest) + " too.";
+  }
 }
 
-// Follows wherever you don't yet; if you follow everywhere already, unfollows everywhere
-async function toggleFollowEverywhere(a) {
-  const plats = followPlats(a);
-  const no = plats.filter((p) => !artistFollow[p]);
-  const on = no.length > 0;
-  const targets = on ? no : plats;
-  if (!on && !confirm("Unfollow " + a.name + " on " + targets.map((p) => PLATFORMS[p].name).join(", ") + "?")) return;
+// Follows or unfollows on the platforms given, and says how that went
+async function followSet(a, targets, on) {
+  if (!targets.length) return;
+  if (!on && !confirm("Unfollow " + a.name + " on " + platNames(targets) + "?")) return;
   const failed = [];
   await Promise.all(targets.map(async (p) => {
     try { await setFollowOn(p, a.on[p], on); artistFollow[p] = on; } catch (e) { failed.push(PLATFORMS[p].name + ": " + (e.message || e)); }
@@ -312,7 +322,24 @@ async function toggleFollowEverywhere(a) {
   followedCache = null;
   sidebarArtists();
   if (failed.some((f) => f.includes(SP_FOLLOW_NOTE)) && confirm("Spotify hasn't let OmniPulse change who you follow yet. Ask Spotify for permission now? (Your browser opens; playback stays signed in.)")) spotifyGrant();
-  say(failed.length ? "Couldn't " + (on ? "follow" : "unfollow") + " everywhere. " + failed.join(" ") : (on ? "Following " : "Unfollowed ") + a.name + " on " + targets.map((p) => PLATFORMS[p].name).join(", ") + ".");
+  say(failed.length ? "Couldn't " + (on ? "follow" : "unfollow") + " everywhere. " + failed.join(" ") : (on ? "Following " : "Unfollowed ") + a.name + " on " + platNames(targets) + ".");
+}
+
+// The button: unfollows wherever you follow them; if nowhere, follows everywhere
+function toggleFollowEverywhere(a) {
+  const plats = followPlats(a);
+  const yes = plats.filter((p) => artistFollow[p] === true);
+  return yes.length ? followSet(a, yes, false) : followSet(a, plats, true);
+}
+
+// Right-click: each platform on its own
+function followMenu(a, x, y) {
+  const items = [a.name];
+  followPlats(a).forEach((p) => {
+    const on = artistFollow[p] === true;
+    items.push([(on ? "Unfollow on " : "Follow on ") + PLATFORMS[p].name, () => followSet(a, [p], !on)]);
+  });
+  showMenuAt(x, y, items);
 }
 
 // ---------- the Artists page ----------
@@ -556,6 +583,15 @@ function artistsHeaderMenu(x, y) {
 
 function artistsInit() {
   $("followBtn").addEventListener("click", () => { if (currentArtist && currentArtist.on) toggleFollowEverywhere(currentArtist); });
+  $("followBtn").addEventListener("contextmenu", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (currentArtist && currentArtist.on && !$("followBtn").disabled) followMenu(currentArtist, e.clientX, e.clientY);
+  });
+  $("followMoreBtn").addEventListener("click", () => {
+    const a = currentArtist;
+    if (a && a.on) followSet(a, followPlats(a).filter((p) => artistFollow[p] !== true), true);
+  });
   $("navArtists").addEventListener("click", openArtistsPage);
   wireShelves($("artistsPage"));
   $("artistsPage").addEventListener("contextmenu", (e) => {
