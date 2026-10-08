@@ -16,7 +16,7 @@ export global Theme {
     out property <length> radius: 10px;
 }
 
-export struct Row { title: string, artist: string, album: string, dur: string, plat: string, playing: bool, head: string, auto: bool }
+export struct Row { title: string, artist: string, album: string, dur: string, plat: string, playing: bool, head: string, auto: bool, art: image }
 export struct Side { title: string, plat: string }
 export struct Tile { title: string, sub: string, art: image, plat: string }
 export struct Shelf { title: string, tiles: [Tile] }
@@ -111,7 +111,20 @@ component TrackRow inherits Rectangle {
         padding-left: 8px;
         padding-right: 12px;
         spacing: 12px;
-        Text { text: index + 1; width: 32px; color: root.item.playing ? Theme.accent : Theme.muted; horizontal-alignment: right; vertical-alignment: center; font-size: 13px; }
+        Rectangle {
+            width: 32px;
+            if !ta.has-hover && !root.item.playing: Text { text: index + 1; width: parent.width; height: parent.height; color: Theme.muted; horizontal-alignment: right; vertical-alignment: center; font-size: 13px; }
+            if ta.has-hover || root.item.playing: Path { commands: Icons.play; x: parent.width - 16px; y: (parent.height - 16px) / 2; width: 16px; height: 16px; fill: Theme.accent; }
+        }
+        Rectangle {
+            width: 40px;
+            height: 40px;
+            y: (parent.height - self.height) / 2;
+            border-radius: 4px;
+            clip: true;
+            background: Theme.elevated;
+            Image { source: root.item.art; width: parent.width; height: parent.height; image-fit: cover; }
+        }
         PlatIcon { plat: root.item.plat; width: 18px; height: 18px; y: (parent.height - self.height) / 2; }
         VerticalLayout {
             alignment: center;
@@ -234,6 +247,8 @@ export component AppWindow inherits Window {
     callback side(int);
     callback chip(int);
     callback play-row(int);
+    /// the track list's rows in view (first, how many), for loading their covers
+    callback rows-in-view(int, int);
     callback tile(int, int);
     callback lucky();
     callback search(string);
@@ -341,8 +356,13 @@ export component AppWindow inherits Window {
                     }
                     Rectangle { height: 4px; }
                     // a list of tracks (Library, playlists, Search, Favourites, Sets, Rediscover)
-                    if root.page-kind == "tracks": ListView {
+                    if root.page-kind == "tracks": track-list := ListView {
                         vertical-stretch: 1;
+                        property <int> first: max(0, floor(-self.content-y / 56px));
+                        property <int> count: ceil(self.visible-height / 56px) + 1;
+                        changed first => { root.rows-in-view(self.first, self.count); }
+                        changed count => { root.rows-in-view(self.first, self.count); }
+                        init => { root.rows-in-view(self.first, self.count); }
                         for r[i] in root.rows: TrackRow { item: r; index: i; play => { root.play-row(i); } act(a) => { root.row-action(i, a); } }
                     }
                     // Discover: shelves

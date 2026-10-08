@@ -65,6 +65,7 @@ impl Track {
             playing,
             head: Default::default(),
             auto: false,
+            art: Default::default(),
         }
     }
 

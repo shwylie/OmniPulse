@@ -85,6 +85,8 @@ fn apply_filter(app: &mut App) {
     let playing = app.queue.current().map(|t| t.key.clone()).unwrap_or_default();
     app.rows.set_vec(filtered.iter().map(|t| t.row(t.key == playing)).collect::<Vec<_>>());
     app.page_tracks = filtered;
+    // its covers, once this is done with the app
+    slint::Timer::single_shot(std::time::Duration::ZERO, || SHARED.with(|s| { if let Some(sh) = s.borrow().clone() { rows_art(&sh); } }));
 }
 
 fn show_tracks(shared: &Shared, page: &str, title: &str, sub: String, tracks: Vec<Track>, chips: bool) {
@@ -446,6 +448,96 @@ fn windows_offset() -> i64 {
 #[cfg(not(windows))]
 fn windows_offset() -> i64 {
     0
+}
+
+// ---------- covers in the track list ----------
+// Only the rows in view (and a few either side) get theirs, a few at a time, kept in a small cache,
+// so a list of thousands stays light. The list says which rows are in view (rows-in-view).
+const ART_KEEP: usize = 600;
+const ART_AT_ONCE: usize = 8;
+
+#[derive(Default)]
+struct ArtCache {
+    map: HashMap<String, slint::Image>,
+    order: std::collections::VecDeque<String>,
+    loading: std::collections::HashSet<String>,
+    /// the rows in view, as the list last said
+    view: (usize, usize),
+}
+
+/// A small cover's address (SoundCloud's are sized in the address)
+fn thumb_url(t: &Track) -> String {
+    t.art.replace("-t200x200", "-t120x120")
+}
+
+fn rows_art(shared: &Shared) {
+    let a = shared.borrow();
+    let (first, count) = ROW_ART.with(|c| c.borrow().view);
+    let from = first.saturating_sub(5);
+    let to = (first + count + 15).min(a.page_tracks.len()).min(a.rows.row_count());
+    let mut want: Vec<String> = Vec::new();
+    ROW_ART.with(|c| {
+        let c = c.borrow();
+        for k in from..to {
+            let url = thumb_url(&a.page_tracks[k]);
+            if url.is_empty() {
+                continue;
+            }
+            match c.map.get(&url) {
+                Some(img) => {
+                    if let Some(mut r) = a.rows.row_data(k) {
+                        if r.art.size().width == 0 {
+                            r.art = img.clone();
+                            a.rows.set_row_data(k, r);
+                        }
+                    }
+                }
+                None if !c.loading.contains(&url) && !want.contains(&url) => want.push(url),
+                None => {}
+            }
+        }
+    });
+    let rt = a.rt.clone();
+    let weak = a.ui.clone();
+    drop(a);
+    for url in want {
+        let busy = ROW_ART.with(|c| {
+            let mut c = c.borrow_mut();
+            if c.loading.len() >= ART_AT_ONCE {
+                return true;
+            }
+            c.loading.insert(url.clone());
+            false
+        });
+        if busy {
+            break; // the rest when these are in
+        }
+        let weak = weak.clone();
+        rt.spawn(async move {
+            let px = player::fetch_art(url.clone(), 80).await;
+            let _ = weak.upgrade_in_event_loop(move |_| {
+                ROW_ART.with(|c| {
+                    let mut c = c.borrow_mut();
+                    c.loading.remove(&url);
+                    // a missing cover is remembered as an empty one, so it isn't asked for again
+                    let img = px.map(slint::Image::from_rgba8).unwrap_or_default();
+                    if c.map.insert(url.clone(), img).is_none() {
+                        c.order.push_back(url);
+                    }
+                    while c.order.len() > ART_KEEP {
+                        if let Some(old) = c.order.pop_front() {
+                            c.map.remove(&old);
+                        }
+                    }
+                });
+                SHARED.with(|s| {
+                    if let Some(sh) = s.borrow().clone() {
+                        rows_art(&sh);
+                    }
+                });
+            });
+        });
+    }
 }
 
 // ---------- the queue panel ----------
@@ -1083,6 +1175,11 @@ fn main() -> Result<(), slint::PlatformError> {
         apply_filter(&mut a);
     });
     let s = shared.clone();
+    ui.on_rows_in_view(move |first, count| {
+        ROW_ART.with(|c| c.borrow_mut().view = (first.max(0) as usize, count.max(0) as usize));
+        rows_art(&s);
+    });
+    let s = shared.clone();
     ui.on_play_row(move |i| {
         let list = s.borrow().page_tracks.clone();
         play_list(&s, list, i as usize);
@@ -1273,6 +1370,7 @@ fn main() -> Result<(), slint::PlatformError> {
 }
 
 thread_local! {
+    static ROW_ART: RefCell<ArtCache> = RefCell::new(ArtCache::default());
     static SHARED: RefCell<Option<Shared>> = const { RefCell::new(None) };
     static SHELF_MODELS: RefCell<Vec<Rc<VecModel<Tile>>>> = const { RefCell::new(Vec::new()) };
     #[allow(clippy::type_complexity)]
