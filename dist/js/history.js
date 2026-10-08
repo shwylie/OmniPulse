@@ -39,11 +39,21 @@ let heardSongsTimer = null;
 function heardSongsSave() {
   clearTimeout(heardSongsTimer);
   heardSongsTimer = setTimeout(() => {
-    const cut = Date.now() - HEARD_SONGS_DAYS * 86400000;
-    [...heardSongs].forEach(([k, ts]) => { if (ts < cut) heardSongs.delete(k); });
     try { localStorage.setItem(HEARD_SONGS_KEY, JSON.stringify([...heardSongs])); } catch (e) {}
   }, 1000);
 }
+// Once, as the app opens: entries older than a month go, one by one (the rest of the history stays).
+// Nothing is trimmed while the app runs. Your Stats are kept separately and aren't touched.
+(function historyTrim() {
+  const cut = Date.now() - HEARD_SONGS_DAYS * 86400000;
+  let gone = 0;
+  for (const [k, ts] of heardSongs) if (ts < cut) { heardSongs.delete(k); gone++; }
+  if (gone) { try { localStorage.setItem(HEARD_SONGS_KEY, JSON.stringify([...heardSongs])); } catch (e) {} }
+  let goneIds = 0;
+  for (const [id, ts] of lastPlayedMap) if (ts < cut) { lastPlayedMap.delete(id); goneIds++; }
+  if (goneIds) { try { localStorage.setItem(HISTORY_KEY, JSON.stringify([...lastPlayedMap])); } catch (e) {} }
+})();
+
 function heardSong(key, ts) {
   if (key && ts > (heardSongs.get(key) || 0)) heardSongs.set(key, ts);
 }
