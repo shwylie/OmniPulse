@@ -12,7 +12,8 @@ let autoplayBusy = null;
 let autoplayFailedFor = null;   // the seed track we last came up empty for, so we don't keep asking
 
 const autoplayOn = () => prefs.autoplay !== false;
-const autoplayActive = () => autoplayOn() && repeatMode === "off";
+// listening along with someone, their queue is what plays: no picks of your own (js/together.js)
+const autoplayActive = () => autoplayOn() && repeatMode === "off" && !(typeof together !== "undefined" && together.role === "listener");
 const autoplaySets = () => !!prefs.queueSets;           // sets & podcasts in the queue and autoplay (one setting; off unless chosen)
 
 // Where "Add to queue" puts a track: after everything you queued, before the autoplay picks

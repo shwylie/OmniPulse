@@ -19,7 +19,7 @@ const together = {
   kind: null,          // "listen" | "jam"
   code: "", hostKey: "", inviteKey: "", joinUrl: "", relay: "",
   ws: null, members: [], hostName: "", canAdd: false,
-  state: null, stateAt: 0, trims: {}, saved: null, localPause: false, closing: false, pushTimer: null,
+  state: null, stateAt: 0, trims: {}, picks: {}, saved: null, localPause: false, closing: false, pushTimer: null,
 };
 
 const relayUrl = () => String(prefs.relayUrl || "").trim().replace(/\/+$/, "");
@@ -35,24 +35,26 @@ function hostTrimOf(t) {
 
 const snapOf = (t) => Object.assign(xplSnap(t), trimOf(t) ? { trim: trimOf(t) } : {}, t.requestedBy ? { requestedBy: t.requestedBy } : {});
 
+// The title bar's button: Start a Jam, your Jam (who's in, the invite, End), or Leave when you've
+// joined someone. The bar in the queue shows only while you're listening along with someone; who's
+// listening along with you isn't shown.
 function paintTogether() {
-  const bar = $("togetherBar");
   const jamBtn = $("jamBtn");
-  jamBtn.hidden = !relayUrl() || together.role === "listener";
-  jamBtn.textContent = together.role === "host" && together.kind === "jam" ? "Jam" : "Start a Jam";
-  jamBtn.classList.toggle("on", together.role === "host" && together.kind === "jam");
-  if (together.role === "listener") {
-    bar.hidden = false;
+  const listening = together.role === "listener";
+  const hostingJam = together.role === "host" && together.kind === "jam";
+  jamBtn.hidden = !relayUrl() && !listening;
+  jamBtn.textContent = listening ? (together.kind === "jam" ? "Leave Jam" : "Leave Listen Along")
+    : hostingJam ? "Jam" + (together.members.length ? " · " + together.members.length : "") : "Start a Jam";
+  jamBtn.classList.toggle("on", hostingJam || listening);
+  if (hostingJam && $("jamDialog").open) $("jamMembers").textContent = together.members.length ? together.members.join(", ") : "Nobody has joined yet.";
+  $("togetherBar").hidden = !listening;
+  // the queue is the host's: nothing to clear, no autoplay of your own
+  $("clearQueue").hidden = listening;
+  document.querySelectorAll(".qAutoHead").forEach((x) => { x.hidden = listening; });
+  if (listening) {
     $("togetherText").textContent = (together.kind === "jam" ? "In " + together.hostName + "'s Jam" : "Listening along with " + together.hostName) +
       (together.members.length > 1 ? " · " + together.members.length + " listening" : "");
-  } else if (together.role === "host") {
-    bar.hidden = false;
-    const n = together.members.length;
-    $("togetherText").textContent = (together.kind === "jam" ? "Your Jam" : "Listen Along") + ": " + (n ? n + (n === 1 ? " listener" : " listeners") + " (" + together.members.slice(0, 3).join(", ") + (n > 3 ? "..." : "") + ")" : "nobody yet");
-  } else {
-    bar.hidden = true;
   }
-  $("togetherLeave").textContent = together.role === "host" ? "End" : "Leave";
 }
 
 // ---------- a connection to a room ----------
@@ -151,7 +153,7 @@ async function togetherEnd(quiet) {
     try { together.ws.close(); } catch (e) {}
   }
   if (was === "listener") listenerRestore();
-  Object.assign(together, { role: null, kind: null, code: "", hostKey: "", inviteKey: "", joinUrl: "", ws: null, members: [], state: null, trims: {}, canAdd: false, localPause: false });
+  Object.assign(together, { role: null, kind: null, code: "", hostKey: "", inviteKey: "", joinUrl: "", ws: null, members: [], state: null, trims: {}, picks: {}, canAdd: false, localPause: false });
   paintTogether();
   if (!quiet) say(was === "host" ? "Ended. Listeners carry on with their own music." : "You left. Back to your own queue.");
   if (was === "host") presenceUpdate();
@@ -204,13 +206,21 @@ function listenerFollow(s) {
   const target = s.track;
   if (!target) { if (nowPlaying()) togetherOrig.toggle(); return; }
   const upcoming = (s.next || []).map(freshCopy);
+  listenerPrepare(s.next);
   const cur = curTrack();
-  if (!cur || cur.id !== target.id) {
+  const onTarget = cur && (cur.id === target.id || (cur.standInFor && cur.standInFor.id === target.id));
+  if (!onTarget) {
     queue = [freshCopy(target)].concat(upcoming);
     qi = 0;
     queueListName = together.hostName + (together.kind === "jam" ? "'s Jam" : " (Listen Along)");
-    pendingResume = { id: target.id, posMs: Math.max(0, hostPos()) };
     together.localPause = false;
+    if (!canPlayHere(target)) {
+      // nothing here can play it: a stand-in of the same length (the queue shows the Jam's track)
+      playStandIn(target, Math.max(0, ((target.trim && target.trim.end) || target.duration || 0) - hostPos()) || hostLenMs(target));
+      renderQueue();
+      return;
+    }
+    pendingResume = { id: target.id, posMs: Math.max(0, hostPos()) };
     togetherOrig.playCurrent().then(() => { if (!s.playing && nowPlaying()) togetherOrig.toggle(); });
     renderQueue();
     return;
@@ -221,7 +231,7 @@ function listenerFollow(s) {
   if (together.localPause) return;   // paused here on purpose: it catches up when played again
   if (s.playing && !nowPlaying()) togetherOrig.toggle();
   else if (!s.playing && nowPlaying()) togetherOrig.toggle();
-  if (s.playing) {
+  if (s.playing && !cur.standInFor) {
     const want = hostPos(), have = curPosMs();
     if (Math.abs(want - have) > 3000) seekToMs(want);   // drifted: back in step
   }
@@ -246,12 +256,70 @@ function listenerRestore() {
   if (curTrack()) { fillNowPlaying(curTrack()); refreshLikeUI(); }
 }
 
-// Something a listener can't play directly: YouTube Music, or skipped with a note
+// ---------- what a listener can't play: a stand-in of the same length ----------
+// Whether this app can play a track as it is (its own account, file or plugin)
+function canPlayDirect(t) {
+  const src = srcOf(t);
+  if (src === "local") return localTracks.some((x) => x.id === t.id);
+  if (src === "spotify") return spotifyPremium && !t.spGone;
+  if (src === "soundcloud") return meId !== null;
+  if (src === "youtube") return ytOn();
+  if (src.startsWith("plug:")) return pluginRuns.has(src.slice(5));
+  return false;
+}
+// ...or at all (YouTube Music can stand in for the rest, if it finds the song)
+const canPlayHere = (t) => canPlayDirect(t) || ytOn();
+
+// How long the host will play a track: its own start and end times count (the length as it plays)
+const hostLenMs = (s) => Math.max(0, ((s.trim && s.trim.end) || s.duration || 0) - ((s.trim && s.trim.start) || 0));
+
+// A track of your own about as long as the time to fill: the closest that's at least as long, or else
+// the longest there is. From your likes, your files and your own queue (set aside while listening).
+function pickStandIn(ms, avoid) {
+  const pool = [].concat(
+    (together.saved && together.saved.queue) || [], localTracks, likedTracks.filter(isLikedTrack),
+    (typeof spLikedCache !== "undefined" && spLikedCache) || [], (typeof ytLikes !== "undefined" && ytLikes) || [],
+  ).filter((t) => t && t.duration > 30000 && !isMix(t) && canPlayDirect(t) && !(avoid || []).includes(t.id));
+  if (!pool.length) return null;
+  const longer = pool.filter((t) => t.duration >= ms).sort((a, b) => a.duration - b.duration);
+  if (longer.length) return longer[Math.floor(Math.random() * Math.min(3, longer.length))];   // one of the closest, so it varies
+  return pool.sort((a, b) => b.duration - a.duration)[0];
+}
+
+// Plays a stand-in for the Jam's track: the queue still shows the Jam's (greyed), and a note says why
+function playStandIn(hostTrack, ms) {
+  const pick = (together.picks[hostTrack.id] && canPlayDirect(together.picks[hostTrack.id]) && together.picks[hostTrack.id]) || pickStandIn(ms, [hostTrack.id]);
+  delete together.picks[hostTrack.id];
+  if (!pick) {
+    say('"' + (hostTrack.title || "This song") + "\" isn't available on your end, and there's nothing of yours to play meanwhile.");
+    return false;
+  }
+  const t = Object.assign({}, pick, { user: Object.assign({}, pick.user), standInFor: hostTrack, autoplay: undefined, requestedBy: undefined });
+  queue[qi] = t;
+  pendingResume = null;
+  together.trims[t.id] = null;   // the stand-in plays from its start
+  togetherOrig.playCurrent().then(() => {
+    say('"' + (hostTrack.title || "This song") + '" isn\'t available on your end, so "' + (t.title || "a song of yours") + '" plays in its place until the ' + (together.kind === "jam" ? "Jam" : "host") + " moves on.");
+  });
+  return true;
+}
+
+// Something a listener can't play directly: YouTube Music, or a stand-in of the same length
 async function listenerFallback(t, why) {
   const mine = streamToken;
-  if (await playViaYouTube(t, mine, "Playing this one from YouTube Music (" + why + ").")) return true;
-  say('Couldn\'t play "' + (t.title || "this song") + '" here (' + why + "): waiting for the next one.");
-  return false;
+  if (ytOn() && await playViaYouTube(t, mine, "Playing this one from YouTube Music (" + why + ").")) return true;
+  if (mine !== streamToken) return true;
+  const left = Math.max(0, ((t.trim && t.trim.end) || (together.trims[t.id] && together.trims[t.id].end) || t.duration || 0) - hostPos());
+  return playStandIn(t, left || hostLenMs(t));
+}
+
+// Ahead of time: a stand-in ready for each of the next few the listener can't play
+function listenerPrepare(next) {
+  (next || []).slice(0, 3).forEach((s) => {
+    if (canPlayHere(s) || together.picks[s.id]) return;
+    const pick = pickStandIn(hostLenMs(s), [s.id]);
+    if (pick) together.picks[s.id] = pick;
+  });
 }
 
 // ---------- while listening along, the queue is the host's ----------
@@ -298,7 +366,11 @@ function togetherInit() {
   $("togetherName").value = prefs.togetherName || "";
   $("togetherName").placeholder = myName();
   $("togetherName").addEventListener("change", () => { prefs.togetherName = $("togetherName").value.trim(); savePrefs(); });
-  $("jamBtn").addEventListener("click", () => { if (together.role === "host" && together.kind === "jam") jamDialog(); else jamStart(); });
+  $("jamBtn").addEventListener("click", () => {
+    if (together.role === "listener") togetherEnd(false);
+    else if (together.role === "host" && together.kind === "jam") jamDialog();
+    else jamStart();
+  });
   $("togetherLeave").addEventListener("click", () => togetherEnd(false));
   $("jamCopy").addEventListener("click", async () => { try { await navigator.clipboard.writeText($("jamLink").value); say("Invite link copied."); } catch (e) {} });
   $("jamEnd").addEventListener("click", () => { $("jamDialog").close(); togetherEnd(false); });

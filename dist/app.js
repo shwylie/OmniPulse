@@ -917,7 +917,13 @@ function renderQueue() {
   nextBox.replaceChildren();
   autoBox.replaceChildren();
   const t = curTrack();
-  if (t) nowBox.append(queueRow(t, qi, false));
+  if (t && t.standInFor) {
+    // listening along: the Jam's track, greyed, with what plays in its place (js/together.js)
+    const li = queueRow(t.standInFor, qi, false);
+    li.classList.add("qUnavail");
+    li.querySelector(".meta").append(el("div", "qNote", "Not available on your end \u00b7 playing " + (t.title || "a song of yours")));
+    nowBox.append(li);
+  } else if (t) nowBox.append(queueRow(t, qi, false));
   else nowBox.append(el("li", "qEmpty", "Nothing playing."));
   // what you queued, then the rest of the list, then autoplay's picks; each run gets its own heading
   const split = qi >= 0 ? autoplayStart() : 0;
@@ -935,7 +941,14 @@ function renderQueue() {
       kind = mine;
       nextBox.append(el("li", "qGroup" + (mine ? " qMine" : " qList"), mine ? "Next in queue" : "Next from " + (queueListName || "your list")));
     }
-    if (shown++ < QUEUE_SHOWN) nextBox.append(queueRow(tr, qi + 1 + k, true));
+    if (shown++ < QUEUE_SHOWN) {
+      const li = queueRow(tr, qi + 1 + k, together.role !== "listener");
+      if (together.role === "listener" && !canPlayHere(tr)) {
+        li.classList.add("qUnavail");
+        li.querySelector(".meta").append(el("div", "qNote", "Not available on your end: a song of yours plays in its place"));
+      }
+      nextBox.append(li);
+    }
   });
   if (next.length > QUEUE_SHOWN) nextBox.append(el("li", "qEmpty", "...and " + (next.length - QUEUE_SHOWN) + " more."));
   auto.forEach((tr, k) => autoBox.append(queueRow(tr, split + k, true)));
@@ -1271,6 +1284,8 @@ async function startStream(t) {
     if (await playViaYouTube(t, mine, note)) return;
     if (mine !== streamToken) return;
     if (t.spGone) {
+      // listening along: a song of yours plays in its place (js/together.js)
+      if (together.role === "listener") { playStandIn(t, Math.max(0, (t.duration || 0) - hostPos()) || hostLenMs(t)); return; }
       // nothing to play it from: say so, and carry on with the queue
       say('"' + (t.title || "This song") + '" was removed from Spotify' + (ytOn() ? " and isn't on YouTube Music either" : " (and YouTube Music is off)") + ", so it was skipped.");
       setTimeout(() => { if (curTrack() === t) { if (qi < queue.length - 1) step(1); else if (autoplayActive()) autoplayAdvance(); } }, 1500);
