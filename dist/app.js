@@ -972,6 +972,16 @@ function startList(list, i, shuffle, name) {
     const kept = list.filter((t) => !isMix(t) || t === picked);
     if (kept.length) { list = kept; i = picked ? list.indexOf(picked) : 0; }
   }
+  // Avoid Recent Plays: what you heard lately is left out of what plays from a list (not the track you
+  // picked, and not from a search); a list that's nearly all recent plays as it is
+  if (avoidRecent() && view !== "search" && list.length > 1) {
+    const picked = shuffle ? null : list[i];
+    const rest = withoutRecent(list.filter((t) => t !== picked), 3);
+    if (rest.length < list.length - (picked ? 1 : 0)) {
+      list = picked ? list.filter((t) => t === picked || rest.includes(t)) : rest;
+      i = picked ? list.indexOf(picked) : 0;
+    }
+  }
   if (streamSafe()) {
     const picked = list[i];
     list = list.filter(streamOk);

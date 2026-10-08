@@ -385,6 +385,13 @@
       </div>
       <div class="row">
         <div>
+          <div class="lbl">Volume Slider</div>
+          <div class="note" data-on="In the player bar, by the speaker." data-off="Hidden: the app plays at 100%.">Hidden: the app plays at 100%.</div>
+        </div>
+        <label class="switch"><input type="checkbox" id="volShowOn"><span></span></label>
+      </div>
+      <div class="row">
+        <div>
           <div class="lbl">Listen Along &amp; Jams</div>
           <div class="note">Friends join your queue in their own OmniPulse: from Listen Along on your Discord status, or an invite-only Jam (in the queue). Needs your relay (jam-server/README.md).</div>
         </div>
@@ -686,7 +693,7 @@
       <div class="row">
         <div>
           <div class="lbl">Avoid Recent Plays</div>
-          <div class="note">Recommendations and autoplay skip what you've heard lately.</div>
+          <div class="note">Everything the app plays for you skips what you've heard lately. Searches, the track you pick, and song requests still play.</div>
         </div>
         <label class="switch"><input type="checkbox" id="avoidRecentOn"><span></span></label>
       </div>
@@ -787,24 +794,10 @@
         <select id="outputSel" class="narrow wide"></select>
       </div>
       <p class="note" id="outputNote"></p>
-      <div class="row">
-        <div>
-          <div class="lbl">Discord &amp; OBS Capture</div>
-          <div class="note">Plays from OmniPulse itself, so sharing its window shares its sound.</div>
-        </div>
-        <label class="switch"><input type="checkbox" id="nativeOutOn"><span></span></label>
-      </div>
       <button id="namesBtn" class="soft" hidden>Show device names</button>
       <div class="row">
         <div class="lbl">Chromecast</div>
         <label class="switch"><input type="checkbox" id="castOn"><span></span></label>
-      </div>
-      <div class="row">
-        <div>
-          <div class="lbl">Volume Slider</div>
-          <div class="note" data-on="In the player bar, by the speaker." data-off="Hidden: the app plays at 100%.">Hidden: the app plays at 100%.</div>
-        </div>
-        <label class="switch"><input type="checkbox" id="volShowOn"><span></span></label>
       </div>
     </section>
 

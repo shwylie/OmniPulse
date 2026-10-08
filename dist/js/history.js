@@ -60,8 +60,10 @@ function markHeard(t) {
   heardSongsSave();
 }
 
-// Avoid Recent Plays (Settings > Library): recommendations, Discover, Sets & Podcasts and autoplay
-// skip what you've heard within the time frame chosen (a day, a week or a month)
+// Avoid Recent Plays (Settings > Library): everything the app plays for you skips what you've heard
+// within the time frame chosen (a day, a week or a month): lists you play (your library, playlists,
+// albums, shuffle), recommendations, Discover, Sets & Podcasts and autoplay. Searches, the track you
+// pick yourself, Play Next / Add to Queue and song requests aren't held back.
 const RECENT_WINDOWS = { day: 86400000, week: 7 * 86400000, month: 30 * 86400000 };
 const avoidRecent = () => prefs.avoidRecent !== false;   // on unless switched off
 const recentWindowMs = () => RECENT_WINDOWS[prefs.recentWindow] || RECENT_WINDOWS.week;
