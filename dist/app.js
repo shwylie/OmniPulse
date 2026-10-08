@@ -218,6 +218,7 @@ let discoverSrc = "";
 
 // ---------- views ----------
 function showView(v) {
+  if (v !== view && typeof pageFilterClear === "function") pageFilterClear();
   // each page opens on the filter last picked there
   if (!restoring && v !== view) listFilter = (prefs.pageFilters && prefs.pageFilters[v]) || "all";
   view = v;
@@ -387,6 +388,7 @@ function afterRender() {
   injectAlbums();
   paintHeroActions();
   spotifyLikeCheck(viewTracks);
+  if (pageQuery) pageFilterApply();   // the search bar's filter on this page (js/pagefind.js)
 }
 
 // The row under the title: play / shuffle and page buttons, with the view options on the right.
@@ -733,7 +735,9 @@ $("hideLikesChip").addEventListener("click", () => {
 $("searchForm").addEventListener("submit", (e) => {
   e.preventDefault();
   const q = $("q").value.trim();
-  if (q) openSearch(q);
+  if (!q) return;
+  pageFilterClear();
+  openSearch(q);
 });
 // Infinite scroll: load the next page when the end of the list comes near
 let loadingMore = false;

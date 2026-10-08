@@ -1012,6 +1012,9 @@ select.wide { max-width: 260px; }
 .trimRow input { width: 90px; }
 .trimMark { margin-left: 4px; padding: 0 3px; border: 0; background: none; color: var(--accent); font: inherit; font-weight: 700; cursor: pointer; }
 #outputBtn.on { color: var(--accent); }
+/* the search bar filtering this page */
+.pageMiss { display: none !important; }
+.pageFindNote { margin: 4px 0 10px; color: var(--muted); font-size: 13px; }
 /* listening together: what can't play on this end, greyed */
 .qRow.qUnavail img, .qRow.qUnavail .title, .qRow.qUnavail .artist { opacity: 0.45; }
 .qRow.qUnavail .title { text-decoration: line-through; text-decoration-color: color-mix(in srgb, var(--muted) 60%, transparent); }

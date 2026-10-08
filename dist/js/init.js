@@ -46,6 +46,7 @@ function extrasInit() {
   nativeOutInit();
   togetherInit();
   fadeInit();
+  pageFindInit();
   artistsInit();
   searchPageInit();
   trimsInit();
