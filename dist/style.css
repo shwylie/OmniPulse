@@ -1243,3 +1243,19 @@ select.wide { max-width: 260px; }
 
 /* ===== v46: what the current track measured ===== */
 #loudNow { margin-top: 4px; font-variant-numeric: tabular-nums; }
+
+/* Settings > Widget > Alerts: a list to drag into order, each with its sound, a test and a switch */
+.alertList { list-style: none; margin: 4px 0 8px; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.alertRow {
+  display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 8px;
+  background: var(--elevated); cursor: grab; transition: opacity 0.15s, box-shadow 0.15s;
+}
+.alertRow.dragging { opacity: 0.6; box-shadow: 0 0 0 2px var(--accent); cursor: grabbing; }
+.alertRow.alertIsOff .alertName, .alertRow.alertIsOff .alertSound { opacity: 0.45; }
+.alertGrip { color: var(--muted); font-size: 13px; width: 16px; text-align: center; flex: none; }
+.alertName { flex: 1; min-width: 0; font-weight: 600; }
+.alertSound { max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.alertClear { padding: 4px 8px; }
+.alertRow .switch { flex: none; }
+#sbHost { width: 140px; min-width: 0; }
+#alertsBody .widgetRow { flex-wrap: nowrap; }

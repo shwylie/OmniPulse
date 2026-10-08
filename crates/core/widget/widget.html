@@ -4,6 +4,10 @@
 <meta charset="utf-8">
 <title>Now playing</title>
 <!--
+  Stream alerts: with them on (in the app), follows, subs, bits and the rest show over the card in
+  the same look, from Streamer.bot (its WebSocket server) or web requests to /alert. For their sounds,
+  tick "Control audio via OBS" on the Browser Source to route them.
+
   Now playing widget for OBS (Browser Source). Pick the design and corners in the app's Settings.
   Every design scales to whatever size you give the source:
     Card 460x130, Slim bar 560x64, Square 300x380, Minimal 460x110, Pill 480x80,
@@ -117,6 +121,69 @@
     45%, 60% { transform: translateX(var(--shift)); }
     90%, 100% { transform: translateX(0); }
   }
+
+  /* ---------- alerts: over the card, in the card's own look (shape, colours, type) ---------- */
+  #alert {
+    position: absolute; inset: 0; overflow: hidden; z-index: 2;
+    display: flex; align-items: center; gap: 0.875rem;
+    padding: 0.75rem; border-radius: 0.875rem; box-sizing: border-box;
+    background: linear-gradient(115deg, var(--bg1), var(--bg2));
+    color: #fff; visibility: hidden; pointer-events: none;
+  }
+  #alert.on { visibility: visible; }
+  #aIcon {
+    height: 100%; aspect-ratio: 1; max-width: 45%; flex: none; display: grid; place-items: center;
+    border-radius: 0.625rem; background: color-mix(in srgb, var(--hi) 45%, rgba(255, 255, 255, 0.12));
+  }
+  #aIcon svg { width: 50%; height: 50%; fill: #fff; }
+  #aText { flex: 1; min-width: 0; display: flex; flex-direction: column; justify-content: center; font-size: calc(1rem * var(--ts, 1)); }
+  #aHead { font-size: 0.72em; font-weight: 800; letter-spacing: 0.12em; text-transform: uppercase; color: rgba(255, 255, 255, 0.78); }
+  #aMain { font-size: 1.25em; font-weight: 800; margin-top: 0.1rem; }
+  #aMsg { font-size: 0.82em; color: rgba(255, 255, 255, 0.82); margin-top: 0.2rem; }
+  #aMain, #aMsg { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #aMsg:empty { display: none; }
+  /* the card steps back while an alert is up */
+  body.alerting #card { opacity: 0 !important; }
+
+  /* the designs, as for the card */
+  body.bar #alert { gap: 0.6rem; padding: 0.4rem 0.6rem; }
+  body.bar #aMain { font-size: 1em; margin: 0; }
+  body.bar #aMsg { display: none; }
+  body.square #alert { flex-direction: column; align-items: stretch; text-align: center; }
+  body.square #aIcon { width: 100%; height: auto; max-width: none; flex: 1 1 auto; aspect-ratio: auto; }
+  body.minimal #alert { background: none; padding: 0.3rem 0.5rem; }
+  body.minimal #aIcon { height: 82%; }
+  body.minimal #aText { text-shadow: 0 0.06rem 0.3rem rgba(0, 0, 0, 0.85); }
+  body.pill #alert { border-radius: 999px; padding: 0.4rem 1.1rem 0.4rem 0.4rem; gap: 0.75rem; }
+  body.pill #aIcon, body.vinyl #aIcon { border-radius: 50%; }
+  body.vinyl #aIcon { height: calc(100% - 0.7rem); margin-left: 0.35rem; box-shadow: 0 0 0 0.3rem rgba(0, 0, 0, 0.55); }
+  body.pill #aMsg { display: none; }
+  body.poster #alert { flex-direction: column; justify-content: center; text-align: center; padding: 1rem; }
+  body.poster #aIcon { height: 45%; max-width: none; }
+  body.poster #aMain { font-size: 1.6em; }
+  body.ticker #alert { padding: 0 0.8rem; gap: 0.6rem; }
+  body.ticker #aIcon { height: 70%; background: none; }
+  body.ticker #aText { flex-direction: row; align-items: center; gap: 0.6rem; }
+  body.ticker #aMain { font-size: 1em; margin: 0; }
+  body.ticker #aMsg { margin: 0; }
+  body.sharp #alert, body.sharp #aIcon { border-radius: 0; }
+  body.sharp.vinyl #aIcon { border-radius: 50%; }
+
+  /* the animations, in and out */
+  #alert.in { animation: var(--a-in) 0.55s cubic-bezier(0.2, 0.9, 0.3, 1.15) both; }
+  #alert.out { animation: var(--a-out) 0.45s ease-in both; }
+  #alert.in #aIcon { animation: aIconIn 0.7s 0.15s cubic-bezier(0.2, 0.9, 0.3, 1.3) both; }
+  @keyframes aFadeIn { from { opacity: 0; } }
+  @keyframes aFadeOut { to { opacity: 0; } }
+  @keyframes aSlideIn { from { opacity: 0; transform: translateY(110%); } }
+  @keyframes aSlideOut { to { opacity: 0; transform: translateY(-110%); } }
+  @keyframes aPopIn { 0% { opacity: 0; transform: scale(0.6); } 70% { opacity: 1; transform: scale(1.06); } }
+  @keyframes aPopOut { to { opacity: 0; transform: scale(0.8); } }
+  @keyframes aBounceIn { 0% { opacity: 0; transform: translateY(-120%); } 55% { opacity: 1; transform: translateY(8%); } 75% { transform: translateY(-4%); } 90% { transform: translateY(2%); } }
+  @keyframes aFlipIn { from { opacity: 0; transform: perspective(40rem) rotateX(-90deg); } }
+  @keyframes aFlipOut { to { opacity: 0; transform: perspective(40rem) rotateX(90deg); } }
+  @keyframes aIconIn { from { transform: scale(0.3) rotate(-25deg); } }
+  body.nofade #alert.in, body.nofade #alert.out { animation-duration: 0.01s; }
 </style>
 </head>
 <body class="card">
@@ -128,6 +195,10 @@
     <div id="track"><div id="bar"></div></div>
     <div id="times"><span id="cur">0:00</span><span id="dur">0:00</span></div>
   </div>
+</div>
+<div id="alert">
+  <div id="aIcon"><svg viewBox="0 0 24 24"><path id="aPath" d=""/></svg></div>
+  <div id="aText"><div id="aHead"></div><div id="aMain"></div><div id="aMsg"></div></div>
 </div>
 <script>
   const MY_VERSION = "__WIDGET_VERSION__";
@@ -282,11 +353,203 @@
     $("bar").style.width = (s.duration_ms ? Math.min(100, (pos / s.duration_ms) * 100) : 0) + "%";
   }
 
+
+  // ---------- alerts ----------
+  // From Streamer.bot (its WebSocket server, which the page connects to) and from web requests to
+  // /alert (picked up with /now.json). The highest-priority waiting alert goes next, in the order
+  // set in the app; each can have a sound, played here so OBS can route it.
+  const ALERT_ICONS = {
+    follow: "M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z",
+    sub: "M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z",
+    gift: "M20 6h-2.18c.11-.31.18-.65.18-1 0-1.66-1.34-3-3-3-1.05 0-1.96.54-2.5 1.35l-.5.67-.5-.68C10.96 2.54 10.05 2 9 2 7.34 2 6 3.34 6 5c0 .35.07.69.18 1H4c-1.11 0-1.99.89-1.99 2L2 19c0 1.11.89 2 2 2h16c1.11 0 2-.89 2-2V8c0-1.11-.89-2-2-2zm-5-2c.55 0 1 .45 1 1s-.45 1-1 1-1-.45-1-1 .45-1 1-1zM9 4c.55 0 1 .45 1 1s-.45 1-1 1-1-.45-1-1 .45-1 1-1zm11 15H4v-2h16v2zm0-5H4V8h5.08L7 10.83 8.62 12 12 7.4l3.38 4.6L17 10.83 14.92 8H20v6z",
+    bits: "M12 2L4 9l8 13 8-13-8-7zm0 3.2L16.9 9H7.1L12 5.2z",
+    donation: "M11.8 10.9c-2.27-.59-3-1.2-3-2.15 0-1.09 1.01-1.85 2.7-1.85 1.78 0 2.44.85 2.5 2.1h2.21c-.07-1.72-1.12-3.3-3.21-3.81V3h-3v2.16c-1.94.42-3.5 1.68-3.5 3.61 0 2.31 1.91 3.46 4.7 4.13 2.5.6 3 1.48 3 2.41 0 .69-.49 1.79-2.7 1.79-2.06 0-2.87-.92-2.98-2.1h-2.2c.12 2.19 1.76 3.42 3.68 3.83V21h3v-2.15c1.95-.37 3.5-1.5 3.5-3.55 0-2.84-2.43-3.81-4.7-4.4z",
+    hypetrain: "M12 2c-4 0-8 .5-8 4v9.5C4 17.43 5.57 19 7.5 19L6 20.5v.5h2.23l2-2H14l2 2h2v-.5L16.5 19c1.93 0 3.5-1.57 3.5-3.5V6c0-3.5-3.58-4-8-4zM7.5 17c-.83 0-1.5-.67-1.5-1.5S6.67 14 7.5 14s1.5.67 1.5 1.5S8.33 17 7.5 17zm3.5-7H6V6h5v4zm2 0V6h5v4h-5zm3.5 7c-.83 0-1.5-.67-1.5-1.5s.67-1.5 1.5-1.5 1.5.67 1.5 1.5-.67 1.5-1.5 1.5z",
+    poll: "M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zM9 17H7v-7h2v7zm4 0h-2V7h2v10zm4 0h-2v-4h2v4z",
+    ban: "M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zM4 12c0-4.42 3.58-8 8-8 1.85 0 3.55.63 4.9 1.69L5.69 16.9C4.63 15.55 4 13.85 4 12zm8 8c-1.85 0-3.55-.63-4.9-1.69L18.31 7.1C19.37 8.45 20 10.15 20 12c0 4.42-3.58 8-8 8z",
+    watchstreak: "M13.5.67s.74 2.65.74 4.8c0 2.06-1.35 3.73-3.41 3.73-2.07 0-3.63-1.67-3.63-3.73l.03-.36C5.21 7.51 4 10.62 4 14c0 4.42 3.58 8 8 8s8-3.58 8-8C20 8.61 17.41 3.8 13.5.67zM11.71 19c-1.78 0-3.22-1.4-3.22-3.14 0-1.62 1.05-2.76 2.81-3.12 1.77-.36 3.6-1.21 4.62-2.58.39 1.29.59 2.65.59 4.04 0 2.65-2.15 4.8-4.8 4.8z",
+  };
+  const ANIMS = {
+    slide: ["aSlideIn", "aSlideOut"], pop: ["aPopIn", "aPopOut"], fade: ["aFadeIn", "aFadeOut"],
+    bounce: ["aBounceIn", "aFadeOut"], flip: ["aFlipIn", "aFlipOut"],
+  };
+  const plural = (n, one, many) => (Number(n) === 1 ? one : many);
+  // what an alert says: [heading, main line, message]
+  function alertWords(a) {
+    const u = a.user || "Someone", n = a.amount;
+    switch (a.type) {
+      case "follow": return ["New Follower", u, a.message];
+      case "sub": return [Number(n) > 1 ? n + " Months" : "New Subscriber", u, a.message];
+      case "gift": return ["Gifted Subs", u + " gifted " + (n || 1) + plural(n || 1, " sub", " subs"), a.message];
+      case "bits": return [(n ? n + " " : "") + "Bits", u, a.message];
+      case "donation": return ["Donation", n ? u + " · " + n : u, a.message];
+      case "hypetrain": return ["Hype Train", n ? "Level " + n : a.user || "All aboard!", a.message];
+      case "poll": return ["Poll", a.user || "A new poll", a.message];
+      case "ban": return ["Banned", u, a.message];
+      case "watchstreak": return ["Watch Streak", n ? u + " · " + n + plural(n, " stream", " streams") : u, a.message];
+      default: return ["Alert", u, a.message];
+    }
+  }
+
+  let acfg = { on: false };
+  const waiting = [];
+  let showing = false;
+  let lastAlertId = null;   // the newest seen from /alert (none replayed after a reload)
+
+  function alertAllowed(a) {
+    return acfg.on && (a.test || (acfg.order || []).includes(a.type));
+  }
+
+  function alertQueue(a) {
+    if (!alertAllowed(a)) return;
+    waiting.push(a);
+    if (!showing) alertNext();
+  }
+
+  function alertNext() {
+    if (!waiting.length) { showing = false; return; }
+    const order = acfg.order || [];
+    const rank = (a) => { const i = order.indexOf(a.type); return i < 0 ? order.length : i; };
+    let best = 0;
+    waiting.forEach((a, i) => { if (rank(a) < rank(waiting[best])) best = i; });
+    const a = waiting.splice(best, 1)[0];
+    showing = true;
+    const [head, main, msg] = alertWords(a);
+    $("aHead").textContent = head;
+    $("aMain").textContent = main;
+    $("aMsg").textContent = msg || "";
+    $("aPath").setAttribute("d", ALERT_ICONS[a.type] || ALERT_ICONS.follow);
+    const [inA, outA] = ANIMS[acfg.anim] || ANIMS.slide;
+    const box = $("alert");
+    box.style.setProperty("--a-in", inA);
+    box.style.setProperty("--a-out", outA);
+    box.className = "on";
+    void box.offsetWidth;
+    box.classList.add("in");
+    document.body.classList.add("alerting");
+    if (acfg.sounds && acfg.sounds[a.type]) {
+      const snd = new Audio("/sound/" + a.type + "?s=" + encodeURIComponent(acfg.sounds[a.type]));
+      snd.volume = Math.max(0, Math.min(1, acfg.volume === undefined ? 0.8 : Number(acfg.volume)));
+      snd.play().catch(() => {});
+    }
+    const secs = Math.max(2, Math.min(20, Number(acfg.secs) || 5));
+    setTimeout(() => {
+      box.classList.remove("in");
+      box.classList.add("out");
+      setTimeout(() => {
+        box.className = "";
+        if (!waiting.length) document.body.classList.remove("alerting");
+        setTimeout(alertNext, waiting.length ? 400 : 0);
+      }, 450);
+    }, secs * 1000);
+  }
+
+  // the ones from /alert, in now.json
+  function alertsFromPoll(list) {
+    if (!Array.isArray(list)) return;
+    const newest = list.reduce((m, a) => Math.max(m, a.id || 0), 0);
+    if (lastAlertId === null) {
+      // just opened: only what arrived in the last few seconds
+      list.filter((a) => Date.now() - a.ts < 4000).forEach(alertQueue);
+    } else if (newest < lastAlertId) {
+      list.forEach(alertQueue);   // the app restarted, and its numbering with it
+    } else {
+      list.filter((a) => a.id > lastAlertId).forEach(alertQueue);
+    }
+    lastAlertId = newest;
+  }
+
+  // ---------- Streamer.bot: its WebSocket server (Servers/Clients > WebSocket Server in Streamer.bot) ----------
+  const SB_EVENTS = {
+    Twitch: ["Follow", "Sub", "ReSub", "GiftSub", "GiftBomb", "Cheer", "HypeTrainStart", "HypeTrainLevelUp", "HypeTrainEnd",
+      "PollCreated", "PollCompleted", "UserBanned", "WatchStreak"],
+    StreamElements: ["Tip"], Streamlabs: ["Donation"], Kofi: ["Donation"], TipeeeStream: ["Donation"],
+  };
+  let sb = null, sbUrl = "", sbRetry = null, sbReq = 0;
+
+  const sbUser = (d) => (d && (d.user_name || d.userName || d.displayName || d.display_name ||
+    (d.user && (d.user.name || d.user.display_name || d.user.login)) || d.username || d.from || d.name ||
+    (d.message && typeof d.message === "object" && (d.message.displayName || d.message.username)))) || "";
+  const sbText = (d) => (d && ((d.message && (d.message.message || (typeof d.message === "string" ? d.message : ""))) || d.text || d.userInput)) || "";
+  const money = (d) => (d.amount !== undefined ? (d.currency ? d.currency + " " : "") + d.amount : d.formattedAmount || "");
+  const anon = (d) => (d.isAnonymous || d.anonymous ? "Anonymous" : sbUser(d));
+
+  // Streamer.bot's event, as an alert (or nothing)
+  function sbAlert(source, type, d) {
+    d = d || {};
+    if (source !== "Twitch") return type === "Tip" || type === "Donation" ? { type: "donation", user: sbUser(d), amount: money(d), message: sbText(d) } : null;
+    switch (type) {
+      case "Follow": return { type: "follow", user: sbUser(d) };
+      case "Sub": case "ReSub":
+        return { type: "sub", user: sbUser(d), amount: String(d.cumulativeMonths || d.cumulative_months || d.months || d.cumulative || ""), message: sbText(d) };
+      case "GiftSub":
+        // the single gifts in a gift bomb are counted by the bomb's own alert
+        if (d.fromSubBomb || d.fromGiftBomb || d.isFromSubBomb || d.fromCommunitySubGift || d.from_community_sub_gift) return null;
+        return { type: "gift", user: anon(d), amount: "1" };
+      case "GiftBomb": return { type: "gift", user: anon(d), amount: String(d.gifts || d.total || d.amount || "") };
+      case "Cheer": return { type: "bits", user: anon(d), amount: String(d.bits || (d.message && d.message.bits) || d.amount || ""), message: sbText(d) };
+      case "HypeTrainStart": return { type: "hypetrain", user: "All aboard!", message: "A Hype Train has started" };
+      case "HypeTrainLevelUp": return { type: "hypetrain", amount: String(d.level || d.levelNumber || "") };
+      case "HypeTrainEnd": return { type: "hypetrain", user: "Ended", message: d.level ? "Reached level " + d.level : "" };
+      case "PollCreated": return { type: "poll", user: d.title || "A new poll", message: "Vote now!" };
+      case "PollCompleted": {
+        const w = d.winningChoice || d.winner || {};
+        return { type: "poll", user: d.title || "Poll results", message: w.title ? "Winner: " + w.title : "" };
+      }
+      case "UserBanned": return { type: "ban", user: d.user_name || d.targetUserName || d.target_user_name || sbUser(d), message: d.reason || "" };
+      case "WatchStreak": return { type: "watchstreak", user: sbUser(d), amount: String(d.watchStreak || d.watch_streak || d.streak || d.count || ""), message: sbText(d) };
+      default: return null;
+    }
+  }
+
+  function sbConnect() {
+    const host = String((acfg.sb && acfg.sb.host) || "127.0.0.1:8080").replace(/^wss?:\/\//, "").replace(/\/+$/, "");
+    const want = acfg.on && acfg.sb && acfg.sb.on ? "ws://" + host + "/" : "";
+    if (want === sbUrl) return;
+    sbUrl = want;
+    clearTimeout(sbRetry);
+    if (sb) { sb.onclose = null; sb.close(); sb = null; }
+    if (!want) return;
+    const retry = () => { sb = null; sbRetry = setTimeout(() => { if (sbUrl === want) { sbUrl = ""; sbConnect(); } }, 5000); };
+    try { sb = new WebSocket(want); } catch (e) { retry(); return; }
+    sb.onopen = () => {
+      // one request each, so an event this Streamer.bot doesn't know can't stop the rest
+      Object.entries(SB_EVENTS).forEach(([source, types]) => types.forEach((t) =>
+        sb.send(JSON.stringify({ request: "Subscribe", id: "op" + (++sbReq), events: { [source]: [t] } }))));
+    };
+    sb.onmessage = (e) => {
+      let m;
+      try { m = JSON.parse(e.data); } catch (x) { return; }
+      if (!m || !m.event) return;
+      const a = sbAlert(m.event.source, m.event.type, m.data);
+      if (a) alertQueue(Object.assign({ user: "", amount: "", message: "" }, a));
+    };
+    sb.onclose = retry;
+  }
+
+  function alertConfig(c) {
+    acfg = c || { on: false };
+    if (!acfg.on) waiting.length = 0;
+    sbConnect();
+  }
+
   async function poll() {
     try {
       const r = await fetch("/now.json", { cache: "no-store" });
       s = await r.json();
       if (s.v && s.v !== MY_VERSION) { location.reload(); return; }   // the app has a newer widget
+      alertConfig(s.alerts_cfg);
+      if (s.alerts_cfg && s.alerts_cfg.on && !s.title) {
+        // nothing playing: alerts still show, in the chosen look and colours
+        applyLook(s.design || "card", s.rounded !== false, s.anim);
+        const root = document.documentElement.style;
+        root.setProperty("--bg1", mix(s.accent, 0.55));
+        root.setProperty("--bg2", mix(s.accent2 || s.accent, 0.42));
+        root.setProperty("--hi", s.accent || "#8e9bff");
+        const ts = String(s.text_scale || 1);
+        root.setProperty("--ts", ts);
+      }
+      alertsFromPoll(s.alerts);
       paint();
     } catch (e) {
       $("card").classList.remove("show");   // the app is closed or the widget was switched off
