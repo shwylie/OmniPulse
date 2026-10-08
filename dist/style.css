@@ -449,14 +449,6 @@ select.narrow { width: auto; min-width: 150px; }
 
 /* stats */
 .stats { position: relative; flex: 1; overflow-y: auto; padding: 28px 24px; }
-.statsSub { color: var(--muted); margin: 6px 0 20px; }
-.statBlock { margin-bottom: 26px; max-width: 720px; }
-.statBlock h2 { font-size: 17px; margin: 0 0 10px; }
-.statBlock ol { list-style: none; margin: 0; padding: 0; }
-.statRow { display: grid; grid-template-columns: minmax(0, 1fr) 44px; gap: 12px; align-items: center; padding: 5px 0; }
-.statName { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.statBar { grid-column: 1 / -1; height: 4px; border-radius: 4px; background: var(--accent); opacity: 0.7; }
-.statCount { color: var(--muted); text-align: right; }
 
 @media (prefers-reduced-motion: reduce) { .lyLine { transition: none; } }
 
@@ -1020,6 +1012,83 @@ select.wide { max-width: 260px; }
 .trimRow input { width: 90px; }
 .trimMark { margin-left: 4px; padding: 0 3px; border: 0; background: none; color: var(--accent); font: inherit; font-weight: 700; cursor: pointer; }
 #outputBtn.on { color: var(--accent); }
+/* ===== Stats, Wrapped-style ===== */
+.wHead { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 18px; }
+.wHead h1 { margin: 0; font-size: 34px; letter-spacing: -0.5px; }
+.wChips { margin: 0; }
+.stats { container-type: inline-size; }
+.wGrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(260px, 100%), 1fr)); gap: 14px; max-width: 1100px; }
+.wCard {
+  position: relative; overflow: hidden; padding: 20px; border-radius: 18px; background: var(--panel);
+  border: 1px solid color-mix(in srgb, var(--line) 60%, transparent); min-width: 0;
+  animation: wIn 0.5s ease both;
+}
+.wGrid > .wCard:nth-child(2) { animation-delay: 0.05s; }
+.wGrid > .wCard:nth-child(3) { animation-delay: 0.1s; }
+.wGrid > .wCard:nth-child(4) { animation-delay: 0.15s; }
+.wGrid > .wCard:nth-child(n+5) { animation-delay: 0.2s; }
+@keyframes wIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+.noAnim .wCard { animation: none; }
+.wKicker { font-size: 12px; font-weight: 800; letter-spacing: 1.5px; text-transform: uppercase; opacity: 0.8; }
+.wBig { margin: 6px 0 4px; font-size: 52px; font-weight: 800; line-height: 1.05; letter-spacing: -1px; }
+.wBig.small { font-size: 40px; }
+.wName { margin: 4px 0; font-size: 28px; font-weight: 800; line-height: 1.15; overflow-wrap: anywhere; }
+.wSub { color: var(--muted); font-size: 13px; line-height: 1.4; }
+.wTitle { font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.wCard p { margin: 8px 0 0; font-size: 16px; line-height: 1.45; }
+/* the big number: in the accent colours */
+.wHero { grid-column: span 2; color: var(--on-accent); background: linear-gradient(135deg, var(--accent), var(--accent-2)); border: 0; }
+.wHero .wSub { color: inherit; opacity: 0.85; }
+.wHero .wBig { font-size: 64px; }
+/* the top artist: a colour of their own */
+.wSpot { display: grid; grid-template-columns: auto 1fr; column-gap: 16px; align-content: center;
+  background: radial-gradient(circle at 15% 20%, hsl(var(--hue, 220) 65% 38%), hsl(calc(var(--hue, 220) + 40) 45% 14%)); color: #fff; border: 0; }
+.wSpot .wCover { grid-row: span 3; }
+.wSpot .wSub { color: rgba(255, 255, 255, 0.8); }
+.wCover { flex: none; width: 52px; height: 52px; border-radius: 8px; overflow: hidden; display: grid; place-items: center;
+  background: var(--elevated); color: var(--muted); font-weight: 800; }
+.wCover img { width: 100%; height: 100%; object-fit: cover; }
+.wCover.round { border-radius: 50%; }
+.wCover.big { width: 96px; height: 96px; font-size: 34px; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35); }
+.wSongs { grid-row: span 2; }
+.wList { list-style: none; margin: 12px 0 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.wList li { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.wRank { width: 22px; flex: none; font-size: 22px; font-weight: 800; color: var(--accent); text-align: center; }
+.wText { min-width: 0; flex: 1; }
+.wArtistsCard { grid-column: span 2; }
+.wArtists { display: grid; grid-template-columns: repeat(auto-fill, minmax(90px, 1fr)); gap: 14px; margin-top: 14px; }
+.wArtist { text-align: center; min-width: 0; }
+.wArtist .wCover { width: 76px; height: 76px; margin: 0 auto 8px; font-size: 26px; }
+/* the listening clock */
+.wClock { display: flex; align-items: flex-end; gap: 3px; height: 70px; margin-top: 14px; }
+.wClock span { flex: 1; border-radius: 3px 3px 1px 1px; background: color-mix(in srgb, var(--accent) 40%, var(--elevated)); }
+.wClock span.on { background: var(--accent); }
+.wClockLabels { display: flex; justify-content: space-between; margin-top: 4px; color: var(--muted); font-size: 11px; }
+/* where it came from, in each platform's own colour */
+.wPlatBar { display: flex; height: 14px; border-radius: 7px; overflow: hidden; margin: 14px 0 10px; gap: 2px; }
+.wPlat, .wLg i { background: #8a93a8; }
+.wPlat.soundcloud, .wLg.soundcloud i { background: #ff5500; }
+.wPlat.spotify, .wLg.spotify i { background: #1ed760; }
+.wPlat.youtube, .wLg.youtube i { background: #ff0033; }
+.wPlat.local, .wLg.local i { background: #f2b544; }
+.wPlat[class*="plug:"], .wLg[class*="plug:"] i { background: #38bdf8; }
+.wLegend { display: flex; flex-wrap: wrap; gap: 6px 14px; color: var(--muted); font-size: 13px; }
+.wLg i { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 6px; }
+.wRepeat { display: grid; grid-template-columns: auto 1fr; column-gap: 12px; align-content: start; }
+.wRepeat .wKicker { grid-column: 1 / -1; margin-bottom: 10px; }
+.wRepeat .wCover { grid-row: span 2; }
+.wFact { background: color-mix(in srgb, var(--accent) 10%, var(--panel)); }
+.wFact .wKicker { color: var(--accent); }
+.wEmpty { max-width: 520px; }
+.wClear { margin-top: 22px; }
+/* narrow (the queue open, a small window): one column, smaller type */
+@container (max-width: 600px) {
+  .wHero, .wArtistsCard { grid-column: auto; }
+  .wSongs { grid-row: auto; }
+  .wHead h1 { font-size: 28px; }
+  .wHero .wBig { font-size: 44px; }
+  .wBig { font-size: 40px; }
+}
 /* the platform icon beside a track's title, artist and album: one size however many lines there are,
    the platform's own colour on hover (never the accent), opens the uploader's page */
 .platSlot { display: contents; }
