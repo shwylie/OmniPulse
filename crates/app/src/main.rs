@@ -478,11 +478,15 @@ fn open_discover(shared: &Shared) {
         let rel = |s: Option<Track>| async move { match s { Some(t) => (format!("Because you like {}", t.artist), sources::related(&t).await), None => (String::new(), Vec::new()) } };
         let (follow, r1, r2) = tokio::join!(sources::following_tracks(60), rel(s1), rel(s2));
         let mut shelves: Vec<(String, Vec<Track>)> = Vec::new();
-        let follow: Vec<Track> = follow.into_iter().filter(|t| !t.is_mix()).take(20).collect();
+        // new music first, and none of it already in your likes (on any platform)
+        let liked = track::Liked::of(&library);
+        let fresh = |l: Vec<Track>| -> Vec<Track> { l.into_iter().filter(|t| !t.is_mix() && !liked.has(t)).take(20).collect() };
+        let follow = fresh(follow);
+        let (r1, r2) = ((r1.0, fresh(r1.1)), (r2.0, fresh(r2.1)));
         if !follow.is_empty() { shelves.push(("New from artists you follow".into(), follow)); }
-        if !r1.1.is_empty() { shelves.push((r1.0, r1.1.into_iter().take(20).collect())); }
+        if !r1.1.is_empty() { shelves.push((r1.0, r1.1)); }
+        if !r2.1.is_empty() { shelves.push((r2.0, r2.1)); }
         if !top.is_empty() { shelves.push(("Your top tracks lately".into(), top)); }
-        if !r2.1.is_empty() { shelves.push((r2.0, r2.1.into_iter().take(20).collect())); }
         if !forgotten.is_empty() { shelves.push(("Rediscover".into(), forgotten)); }
         let arts: Vec<Vec<String>> = shelves.iter().map(|(_, l)| l.iter().map(|t| t.art.clone()).collect()).collect();
         let weak2 = weak.clone();
@@ -1667,19 +1671,28 @@ fn main() -> Result<(), slint::PlatformError> {
     });
     let s = shared.clone();
     ui.on_lucky(move || {
-        // a station from something you like, straight away
-        let (seed, rt, weak) = {
+        // a station in the vein of something you like, made only of music you haven't liked anywhere
+        let (seeds, rt, weak, liked) = {
             let a = s.borrow();
             let mut pool: Vec<Track> = a.library.iter().filter(|t| !t.is_mix()).cloned().collect();
             queue::shuffle_in_place(&mut pool);
-            (pool.into_iter().next(), a.rt.clone(), a.ui.clone())
+            (pool.into_iter().take(3).collect::<Vec<_>>(), a.rt.clone(), a.ui.clone(), track::Liked::of(&a.library))
         };
-        let Some(seed) = seed else { return };
-        if let Some(ui) = weak.upgrade() { ui.set_status(format!("Feeling lucky: a station from {}...", seed.artist).into()); }
+        if seeds.is_empty() { return; }
+        if let Some(ui) = weak.upgrade() { ui.set_status(format!("Feeling lucky: new music like {}...", seeds[0].artist).into()); }
         rt.spawn(async move {
-            let mut list = vec![seed.clone()];
-            list.extend(sources::related(&seed).await);
-            let _ = weak.upgrade_in_event_loop(move |_| SHARED.with(|s| if let Some(sh) = s.borrow().clone() { play_list(&sh, list, 0); }));
+            // (one that comes back too short is passed over for the next)
+            for seed in seeds {
+                let list: Vec<Track> = sources::related(&seed).await.into_iter().filter(|t| !t.is_mix() && !liked.has(t)).collect();
+                if list.len() < 8 { continue; }
+                let who = seed.artist.clone();
+                let _ = weak.upgrade_in_event_loop(move |ui| SHARED.with(|s| if let Some(sh) = s.borrow().clone() {
+                    play_list(&sh, list, 0);
+                    ui.set_status(format!("Feeling lucky: new music like {who}, none of it in your likes.").into());
+                }));
+                return;
+            }
+            let _ = weak.upgrade_in_event_loop(|ui| ui.set_status("Couldn't find enough new music for a mix just now. Try again in a bit.".into()));
         });
     });
     let s = shared.clone();

@@ -263,3 +263,53 @@ mod fix_tests {
         assert_eq!((list[0].title.as_str(), list[0].artist.as_str()), ("Other", "Marc Benjamin"));
     }
 }
+
+/// The same song on any platform: its first artist and its title's words (no tags in brackets)
+pub fn song_key(t: &Track) -> String {
+    let words = |s: &str| s.to_lowercase().split(|c: char| !c.is_alphanumeric()).filter(|w| !w.is_empty()).map(String::from).collect::<Vec<_>>();
+    let mut title = String::new();
+    let mut depth = 0;
+    for c in t.title.chars() {
+        match c {
+            '(' | '[' => depth += 1,
+            ')' | ']' => depth = (depth - 1).max(0),
+            _ if depth == 0 => title.push(c),
+            _ => {}
+        }
+    }
+    let artist = t.artist.split([',', '&']).next().unwrap_or("");
+    let title = words(&title).join(" ");
+    if title.is_empty() { String::new() } else { format!("{}|{title}", words(artist).join("")) }
+}
+
+/// What's in your likes, as keys and as songs, to leave out of new music
+pub struct Liked {
+    keys: std::collections::HashSet<String>,
+    songs: std::collections::HashSet<String>,
+}
+
+impl Liked {
+    pub fn of(list: &[Track]) -> Liked {
+        Liked { keys: list.iter().map(|t| t.key.clone()).collect(), songs: list.iter().map(song_key).filter(|k| !k.is_empty()).collect() }
+    }
+    pub fn has(&self, t: &Track) -> bool {
+        self.keys.contains(&t.key) || self.songs.contains(&song_key(t))
+    }
+}
+
+#[cfg(test)]
+mod liked_tests {
+    use super::*;
+
+    fn t(src: Src, key: &str, title: &str, artist: &str) -> Track {
+        Track { src, key: key.into(), title: title.into(), artist: artist.into(), album: String::new(), ms: 0, art: String::new(), genre: String::new(), link: String::new(), go_plus: false }
+    }
+
+    #[test]
+    fn a_song_liked_anywhere_counts() {
+        let liked = Liked::of(&[t(Src::Spotify("spotify:track:a".into()), "sp:a", "Strobe", "deadmau5")]);
+        // the same song on YouTube Music, with its tags
+        assert!(liked.has(&t(Src::YouTube("v".into()), "yt:v", "Strobe (Club Edit)", "deadmau5, Someone")));
+        assert!(!liked.has(&t(Src::YouTube("w".into()), "yt:w", "Ghosts 'n' Stuff", "deadmau5")));
+    }
+}
