@@ -214,11 +214,15 @@ function alertsCfg() {
     accent: prefs.alertOwnCol ? prefs.alertCol1 || "#8e9bff" : "",
     accent2: prefs.alertOwnCol ? prefs.alertCol2 || prefs.alertCol1 || "#b38cff" : "",
     dir: prefs.alertDir || "115deg",
+    icon_scale: alertIconScale(),
     volume: prefs.alertVol === undefined ? 0.8 : Number(prefs.alertVol),
     sounds,
     sb: { on: prefs.sbOn !== false, host: prefs.sbHost || "127.0.0.1:8080" },
   };
 }
+
+// The icons' size: 60% to 200% of how they started (200% fills the tile), in steps of 10%
+const alertIconScale = () => Math.min(2, Math.max(0.6, Number(prefs.alertIcon) || 1));
 
 function alertsSave() {
   savePrefs();
@@ -519,6 +523,9 @@ function alertsPaint() {
   $("sbHost").value = prefs.sbHost || "127.0.0.1:8080";
   $("alertAnim").value = prefs.alertAnim || "slide";
   $("alertSecs").value = String(Number(prefs.alertSecs) || 5);
+  $("alertIconVal").textContent = Math.round(alertIconScale() * 100) + "%";
+  $("alertIconDown").disabled = alertIconScale() <= 0.6;
+  $("alertIconUp").disabled = alertIconScale() >= 2;
   $("alertOwnCol").checked = !!prefs.alertOwnCol;
   $("alertColRow").hidden = !prefs.alertOwnCol;
   $("alertCol1").value = prefs.alertCol1 || "#8e9bff";
@@ -542,6 +549,9 @@ function alertsInit() {
   });
   $("alertAnim").addEventListener("change", () => { prefs.alertAnim = $("alertAnim").value; alertsSave(); });
   $("alertSecs").addEventListener("change", () => { prefs.alertSecs = Number($("alertSecs").value); alertsSave(); });
+  const stepIcon = (d) => { prefs.alertIcon = Math.round(Math.min(2, Math.max(0.6, alertIconScale() + d)) * 10) / 10; alertsSave(); alertsPaint(); };
+  $("alertIconDown").addEventListener("click", () => stepIcon(-0.1));
+  $("alertIconUp").addEventListener("click", () => stepIcon(0.1));
   $("alertOwnCol").addEventListener("change", () => { prefs.alertOwnCol = $("alertOwnCol").checked; alertsSave(); alertsPaint(); });
   $("alertCol1").addEventListener("change", () => { prefs.alertCol1 = $("alertCol1").value; alertsSave(); });
   $("alertCol2").addEventListener("change", () => { prefs.alertCol2 = $("alertCol2").value; alertsSave(); });

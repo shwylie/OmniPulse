@@ -166,6 +166,7 @@ pub fn alerts_cfg(prefs: &Value) -> Value {
         "accent": if set(prefs, "alertOwnCol") { prefs["alertCol1"].as_str().unwrap_or("#8e9bff") } else { "" },
         "accent2": if set(prefs, "alertOwnCol") { prefs["alertCol2"].as_str().or(prefs["alertCol1"].as_str()).unwrap_or("#b38cff") } else { "" },
         "dir": prefs["alertDir"].as_str().unwrap_or("115deg"),
+        "icon_scale": prefs["alertIcon"].as_f64().unwrap_or(1.0).clamp(0.6, 2.0),
         "secs": prefs["alertSecs"].as_u64().unwrap_or(5),
         "volume": prefs["alertVol"].as_f64().unwrap_or(0.8),
         "sounds": sounds,
