@@ -889,24 +889,34 @@ details.sub.inner { margin-top: 10px; }
 .feed { display: flex; flex-direction: column; gap: 30px; padding: 8px 0 24px; }
 .feedNote { color: var(--muted); }
 .shelf { position: relative; }
-.shelfHead { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 12px; }
+.shelfHead { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+.shelfHead h2 { flex: 1; min-width: 0; }
 .shelfHead h2 { margin: 0; font-size: 22px; }
 .shelfAll { border: 0; background: none; color: var(--muted); font-weight: 700; font-size: 13px; cursor: pointer; }
 .shelfAll:hover { color: var(--text); text-decoration: underline; }
 .shelfRow {
   display: grid; grid-auto-flow: column; grid-auto-columns: 168px; gap: 18px;
-  overflow-x: auto; scroll-snap-type: x proximity; scrollbar-width: none; padding-bottom: 4px;
+  overflow-x: hidden; scroll-snap-type: x proximity; scrollbar-width: none; padding-bottom: 4px;
 }
 .shelfRow::-webkit-scrollbar { display: none; }
 .shelf.expanded .shelfRow { grid-auto-flow: row; grid-template-columns: repeat(auto-fill, minmax(168px, 1fr)); overflow: visible; }
+/* sideways: the shelf's own buttons (in its heading) and bar (under it), not the scroll wheel */
+.shelfNavs { display: flex; gap: 6px; flex: none; }
+.shelfNavs[hidden] { display: none; }
 .shelfNav {
-  position: absolute; top: 96px; width: 36px; height: 36px; display: grid; place-items: center; z-index: 2;
-  border: 0; border-radius: 50%; background: color-mix(in srgb, var(--panel) 88%, transparent); color: var(--text);
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4); opacity: 0; transition: opacity 0.15s; cursor: pointer;
+  width: 30px; height: 30px; display: grid; place-items: center; padding: 0;
+  border: 0; border-radius: 50%; background: var(--elevated); color: var(--text); cursor: pointer;
+  transition: background 0.15s, opacity 0.15s;
 }
-.shelfNav.prev { left: -10px; }
-.shelfNav.next { right: -10px; }
-.shelf:hover .shelfNav { opacity: 1; }
+.shelfNav svg { width: 18px; height: 18px; }
+.shelfNav:hover:not(:disabled) { background: color-mix(in srgb, var(--accent) 30%, var(--elevated)); }
+.shelfNav:disabled { opacity: 0.35; cursor: default; }
+.shelfBar { position: relative; height: 4px; margin: 10px 0 2px; border-radius: 2px; background: var(--elevated); cursor: pointer; }
+.shelfBar[hidden] { display: none; }
+.shelfBar::before { content: ""; position: absolute; left: 0; right: 0; top: -6px; bottom: -6px; }
+.shelfThumb { position: absolute; top: 0; bottom: 0; border-radius: 2px; background: color-mix(in srgb, var(--muted) 70%, transparent); cursor: grab; touch-action: none; }
+.shelfBar:hover .shelfThumb, .shelfBar.dragging .shelfThumb { background: var(--accent); }
+.shelfBar.dragging .shelfThumb { cursor: grabbing; }
 
 .tile { scroll-snap-align: start; cursor: pointer; min-width: 0; }
 .tileArt {
@@ -947,6 +957,10 @@ details.sub.inner { margin-top: 10px; }
 .tileRound {
   position: absolute; top: 18%; left: 50%; width: 56%; aspect-ratio: 1; transform: translateX(-50%);
   border-radius: 50%; object-fit: cover; border: 3px solid rgba(255, 255, 255, 0.85); box-shadow: 0 6px 18px rgba(0, 0, 0, 0.5);
+}
+/* (the cover's own image rule, .tileArt > img, would stretch it over the whole cover) */
+.tile-station .tileArt > img.tileRound {
+  inset: auto; top: 14%; left: 50%; width: 54%; height: auto; aspect-ratio: 1; transform: translateX(-50%);
 }
 .tileLabel { position: absolute; left: 12px; right: 12px; bottom: 10px; color: #fff; text-shadow: 0 1px 6px rgba(0, 0, 0, 0.6); pointer-events: none; }
 .tileLabel i { display: block; font-size: 11px; font-weight: 800; letter-spacing: 2px; text-transform: uppercase; }
