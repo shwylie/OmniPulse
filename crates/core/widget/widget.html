@@ -175,6 +175,20 @@
   @keyframes aFlipBackIn { from { transform: perspective(40rem) rotateX(-90deg); } }
   @keyframes aFlipBackOut { to { transform: perspective(40rem) rotateX(-90deg); } }
   /* Wipe: the alert sweeps across the card, and away again */
+  /* Collage: tiles of the alert's icons sweep in over the card, the alert is under them as they go,
+     and the same on the way back */
+  #collage { position: absolute; inset: 0; z-index: 3; overflow: hidden; pointer-events: none; border-radius: 0.875rem; }
+  body.pill #collage { border-radius: 999px; }
+  body.sharp #collage { border-radius: 0; }
+  .cTile { position: absolute; display: grid; place-items: center; transform: scale(0); opacity: 0; }
+  .cTile svg { width: 56%; height: 56%; fill: #fff; filter: drop-shadow(0 0.1rem 0.3rem rgba(0, 0, 0, 0.35)); }
+  .cTile img { width: 78%; height: 78%; object-fit: contain; }
+  .cTile.cin { animation: cTileIn 0.32s cubic-bezier(0.2, 0.9, 0.3, 1.25) var(--d) both; }
+  .cTile.cout { transform: none; opacity: 1; animation: cTileOut 0.3s ease-in var(--d) both; }
+  @keyframes cTileIn { from { transform: scale(0) rotate(var(--r)); opacity: 0; } to { transform: scale(1.02) rotate(0deg); opacity: 1; } }
+  @keyframes cTileOut { from { transform: scale(1.02); opacity: 1; } to { transform: scale(0) rotate(var(--r)); opacity: 0; } }
+  body.alerting[data-tr="collage"] #card { opacity: 0 !important; transition: none; }
+  body.nofade .cTile.cin, body.nofade .cTile.cout { animation-duration: 0.01s; animation-delay: 0s; }
   @keyframes aWipeIn { from { clip-path: inset(0 100% 0 0); } to { clip-path: inset(0 0 0 0); } }
   @keyframes aWipeOut { from { clip-path: inset(0 0 0 0); } to { clip-path: inset(0 0 0 100%); } }
   /* Vinyl, with the record spinning: the alert's icon spins too */
@@ -231,6 +245,7 @@
     <div id="times"><span id="cur">0:00</span><span id="dur">0:00</span></div>
   </div>
 </div>
+<div id="collage"></div>
 <div id="alert">
   <div id="aIcon"><svg viewBox="0 0 24 24"><path id="aPath" d=""/></svg></div>
   <div id="aText"><div id="aHead"></div><div id="aMain"></div><div id="aMsg"></div></div>
@@ -530,6 +545,7 @@
       push: ["aPushIn", "aPushOut", "0.55s", "0.55s", "0s", 550],
       flip: ["aFlipBackIn", "aFlipBackOut", "0.3s", "0.3s", "0.3s", 300],
       wipe: ["aWipeIn", "aWipeOut", "0.6s", "0.6s", "0s", 600],
+      collage: ["aFadeIn", "aFadeOut", "0.01s", "0.35s", "0s", 350],
       overlay: [inA, outA, "0.55s", "0.45s", "0s", 450],
     };
     const [mIn, mOut, dIn, dOut, delay, outMs] = MODES[mode] || MODES.overlay;
@@ -547,17 +563,31 @@
       root.setProperty("--bg2", mix(c2, k.color ? 0.38 : 0.42));
       root.setProperty("--hi", c1);
     }
-    box.className = "on" + (dir === "glow" ? " glow" : "") + (mode === "seam" ? " seam" : "");
-    void box.offsetWidth;
-    box.classList.add("in");
-    body.classList.add("alerting");
-    if (acfg.sounds && acfg.sounds[a.type]) {
-      const snd = new Audio("/sound/" + a.type + "?s=" + encodeURIComponent(acfg.sounds[a.type]));
-      snd.volume = Math.max(0, Math.min(1, acfg.volume === undefined ? 0.8 : Number(acfg.volume)));
-      snd.play().catch(() => {});
-    }
     const secs = Math.max(2, Math.min(30, Number(k.secs) || Number(acfg.secs) || 5));
-    setTimeout(() => {
+    const showIt = () => {
+      box.className = "on" + (dir === "glow" ? " glow" : "") + (mode === "seam" ? " seam" : "");
+      void box.offsetWidth;
+      box.classList.add("in");
+      body.classList.add("alerting");
+      if (acfg.sounds && acfg.sounds[a.type]) {
+        const snd = new Audio("/sound/" + a.type + "?s=" + encodeURIComponent(acfg.sounds[a.type]));
+        snd.volume = Math.max(0, Math.min(1, acfg.volume === undefined ? 0.8 : Number(acfg.volume)));
+        snd.play().catch(() => {});
+      }
+      setTimeout(leave, secs * 1000);
+    };
+    // a collage: the tiles cover the card, the alert takes its place under them, and they clear
+    if (mode === "collage") {
+      const c = collage(a, k, c1, c2);
+      c.cover().then(() => { showIt(); return c.reveal(); });
+    } else showIt();
+    function leave() {
+      // the last one after a collage: the tiles again, then the card back under them
+      if (!waiting.length && body.dataset.tr === "collage") {
+        const c = collage(a, k, c1, c2);
+        c.cover().then(() => { box.className = ""; alertsDone(); return c.reveal(); }).then(alertNext);
+        return;
+      }
       box.classList.remove("in");
       box.classList.add("out");
       // the last one: the card comes back as the alert goes (a flip turns it back once the alert's gone)
@@ -568,7 +598,70 @@
         if (!waiting.length) alertsDone();
         setTimeout(alertNext, waiting.length ? (mode === "seam" ? 120 : 400) : 0);
       }, outMs);
-    }, secs * 1000);
+    }
+  }
+
+  // ---------- the collage ----------
+  // The alert's own icon on most tiles, with a couple that go with it (a ban's hammers, a raid's
+  // rockets...), or its picture if it has one; in its colours. They sweep in corner to corner.
+  const COLLAGE_WITH = {
+    follow: ["sparkle", "follow"], sub: ["sparkle", "trophy"], gift: ["sparkle", "follow"], bits: ["sparkle", "kicks"],
+    kicks: ["sparkle", "bits"], donation: ["follow", "sparkle"], raid: ["rocket", "sparkle"], hypetrain: ["rocket", "sparkle"],
+    poll: ["bell", "sparkle"], ban: ["hammer", "hammer"], watchstreak: ["trophy", "sparkle"],
+  };
+  function collage(a, k, c1, c2) {
+    const box = $("collage");
+    box.replaceChildren();
+    const w = box.clientWidth || innerWidth, h = box.clientHeight || innerHeight;
+    const rows = h < 90 ? 1 : h < 220 ? 2 : h < 420 ? 3 : 4;
+    const size = h / rows;
+    const cols = Math.ceil(w / size);
+    const own = ALERT_ICONS[k.icon] ? k.icon : ALERT_ICONS[a.type] ? a.type : "bell";
+    const extras = COLLAGE_WITH[a.type] || ["sparkle", "follow"];
+    const base = c1 || getComputedStyle(document.documentElement).getPropertyValue("--hi").trim() || "#8e9bff";
+    const second = c2 || base;
+    const tiles = [];
+    for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
+      const t = document.createElement("div");
+      t.className = "cTile";
+      t.style.cssText = "left:" + c * size + "px;top:" + r * size + "px;width:" + (size + 1) + "px;height:" + (size + 1) + "px;" +
+        "background:" + mix((r + c) % 3 === 1 ? second : base, [0.62, 0.48, 0.7, 0.55][(r * 3 + c) % 4]) + ";" +
+        "--r:" + ((r + c) % 2 ? 1 : -1) * (12 + ((r * 7 + c * 13) % 22)) + "deg";
+      t.dataset.d = String(r + c);
+      // the alert's own picture, or its icon (two in three tiles) and the ones that go with it
+      if (k.image) {
+        const img = document.createElement("img");
+        img.src = "/image/" + a.type + "?s=" + encodeURIComponent(k.image);
+        t.append(img);
+      } else {
+        const pick = (r * cols + c) % 3 === 2 ? extras[(r + c) % extras.length] : own;
+        const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+        svg.setAttribute("viewBox", "0 0 24 24");
+        const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+        path.setAttribute("d", ALERT_ICONS[pick] || ALERT_ICONS.bell);
+        svg.append(path);
+        t.append(svg);
+      }
+      box.append(t);
+      tiles.push(t);
+    }
+    const step = 40, span = (rows + cols - 2) * step;
+    const instant = document.body.classList.contains("nofade");
+    const run = (cls, reverse) => new Promise((done) => {
+      tiles.forEach((t) => {
+        const d = Number(t.dataset.d) * step;
+        t.style.setProperty("--d", (reverse ? span - d : d) + "ms");
+        t.classList.remove("cin", "cout");
+        void t.offsetWidth;
+        t.classList.add(cls);
+      });
+      setTimeout(done, instant ? 20 : span + 340);
+    });
+    return {
+      cover: () => run("cin", false),
+      // they go the way they came, so the sweep carries on across
+      reveal: () => run("cout", false).then(() => box.replaceChildren()),
+    };
   }
 
   // No alerts left: the card back, with its own colours
