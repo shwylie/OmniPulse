@@ -1254,10 +1254,17 @@ async function startStream(t) {
     if (mine === streamToken) say("");
     return;
   }
-  // Spotify without Premium: the same song from YouTube Music
+  // Spotify without Premium, or a song removed from Spotify: the same song from YouTube Music
   if (srcOf(t) === "spotify") {
-    if (await playViaYouTube(t, mine, "Playing from YouTube Music (this Spotify account isn't Premium).")) return;
+    const note = t.spGone ? "This song was removed from Spotify: playing it from YouTube Music." : "Playing from YouTube Music (this Spotify account isn't Premium).";
+    if (await playViaYouTube(t, mine, note)) return;
     if (mine !== streamToken) return;
+    if (t.spGone) {
+      // nothing to play it from: say so, and carry on with the queue
+      say('"' + (t.title || "This song") + '" was removed from Spotify' + (ytOn() ? " and isn't on YouTube Music either" : " (and YouTube Music is off)") + ", so it was skipped.");
+      setTimeout(() => { if (curTrack() === t) { if (qi < queue.length - 1) step(1); else if (autoplayActive()) autoplayAdvance(); } }, 1500);
+      return;
+    }
     throw new Error(ytOn() ? "this song couldn't be found on YouTube Music" : "without Spotify Premium, Spotify tracks play from YouTube Music, which is switched off");
   }
   if (isPluginTrack(t)) {

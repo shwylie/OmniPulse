@@ -8,13 +8,16 @@ let spotifyFree = false;   // signed in without Premium: your library and search
 
 // Spotify's own player only plays for Premium; without it a Spotify track plays from YouTube Music
 // (in the app's <audio> player like everything else)
-const onSpotifyEngine = (t) => !!t && srcOf(t) === "spotify" && spotifyPremium && !t.ytVia;
+const onSpotifyEngine = (t) => !!t && srcOf(t) === "spotify" && spotifyPremium && !t.ytVia && !t.spGone;
 const spotifyUsable = () => FEATURES.spotify && (spotifyPremium || (spotifyFree && ytOn()));
 let spotifyName = "";
 let spState = { pos: 0, ts: 0, playing: false, dur: 0 };
 
-const spApi = (method, path, body) =>
-  invoke("spotify_api", { method, path, body: body === undefined ? null : body });
+const SP_MARKET_PATHS = /^\/(me\/tracks|playlists\/[^/]+\/items|albums\/|search\?type=track|tracks\/)/;
+const spApi = (method, path, body) => {
+  if (method === "GET" && SP_MARKET_PATHS.test(path) && !/[?&]market=/.test(path)) path += (path.includes("?") ? "&" : "?") + "market=from_token";
+  return invoke("spotify_api", { method, path, body: body === undefined ? null : body });
+};
 
 function spTrack(x) {
   const imgs = (x.album && x.album.images) || [];
@@ -26,6 +29,7 @@ function spTrack(x) {
     title: x.name,
     user: { username: (x.artists || []).map((a) => a.name).join(", ") },
     spArtistId: (x.artists && x.artists[0] && x.artists[0].id) || "",
+    spGone: x.is_playable === false || undefined,   // removed from Spotify (greyed out in its app)
     spArtists: (x.artists || []).map((a) => ({ id: a.id, name: a.name })),
     artwork_url: img,
     duration: x.duration_ms,
@@ -171,12 +175,24 @@ function speEvent(ev) {
     spe.node.port.postMessage({ type: "eos", gen: spe.gen });
     if (spe.level === 0) speEnded();
   } else if (ev.type === "unavailable") {
-    say("This track isn't available to play on Spotify.");
-    spe.endPending = false;
-    spState.playing = false;
-    paintSpotify();
-    if (qi < queue.length - 1) step(1);
+    spGoneNow(curTrack());
+  } else if (ev.type === "alternative") {
+    // librespot played another release in its place: fine if it's the same song, not if it isn't
+    const t = curTrack();
+    const alt = { title: ev.title || "", user: { username: ev.artists || artistName(t) } };
+    const same = matchWords(matchTitle(alt)).join(" ") === matchWords(matchTitle(t)).join(" ");
+    if (!same) spGoneNow(t);
   }
+}
+
+// A Spotify track that can't be played there any more: the same song from YouTube Music instead
+function spGoneNow(t) {
+  if (!t) return;
+  spe.endPending = false;
+  spotifyPause();
+  t.spGone = true;
+  forEachCopy(t.id, (x) => { x.spGone = true; });
+  playCurrent();
 }
 
 function speWorklet(e) {

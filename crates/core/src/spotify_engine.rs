@@ -95,6 +95,14 @@ fn make_player(session: &Session, norm: Norm) -> Arc<Player> {
                 PlayerEvent::Paused { position_ms, .. } => emit(json!({ "type": "paused", "position_ms": position_ms })),
                 PlayerEvent::EndOfTrack { .. } => emit(json!({ "type": "end" })),
                 PlayerEvent::Unavailable { .. } => emit(json!({ "type": "unavailable" })),
+                // a track with nothing left to play is swapped by librespot for an "alternative"
+                // (another release), which can be a different song: the page checks
+                PlayerEvent::TrackChanged { audio_item } => {
+                    let asked = REQUESTED.lock().unwrap().clone();
+                    if !asked.is_empty() && audio_item.uri != asked {
+                        emit(json!({ "type": "alternative", "title": audio_item.name, "artists": audio_item_artists(&audio_item) }));
+                    }
+                }
                 PlayerEvent::Stopped { .. } => emit(json!({ "type": "stopped" })),
                 _ => {}
             }
@@ -103,6 +111,15 @@ fn make_player(session: &Session, norm: Norm) -> Arc<Player> {
     player
 }
 static ENGINE: tokio::sync::Mutex<Option<Engine>> = tokio::sync::Mutex::const_new(None);
+/// The track the page asked for (to spot an alternative played in its place)
+static REQUESTED: std::sync::Mutex<String> = std::sync::Mutex::new(String::new());
+
+fn audio_item_artists(a: &librespot_metadata::audio::AudioItem) -> String {
+    match &a.unique_fields {
+        librespot_metadata::audio::UniqueFields::Track { album_artists, .. } => album_artists.join(", "),
+        _ => String::new(),
+    }
+}
 
 fn cache_dir() -> Result<std::path::PathBuf, String> {
     Ok(crate::data_dir()?.join("librespot"))
@@ -257,6 +274,7 @@ pub fn spe_attach(audio: Arc<dyn PcmOut>, events: EventOut) {
 // Returns the generation number the page should accept audio for
 pub async fn spe_play(uri: String, position_ms: u32) -> Result<u32, String> {
     let track = track_uri(&uri)?;
+    *REQUESTED.lock().unwrap() = uri.clone();
     let mut guard = engine().await?;
     let e = guard.as_mut().unwrap();
     let norm = *NORM.lock().unwrap();
