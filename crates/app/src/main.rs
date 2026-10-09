@@ -14,6 +14,7 @@ mod versions;
 mod player;
 mod queue;
 mod requests;
+mod sound;
 mod sources;
 mod streamsafe;
 mod track;
@@ -92,6 +93,9 @@ struct App {
     /// your playlists on this PC (crate::xpl), and what the naming dialog is for
     xpl: serde_json::Value,
     naming: Option<Naming>,
+    /// tracks' measured loudness ("soundcloud:123" -> LUFS), and the equalizer's bands as shown
+    loud: HashMap<String, f64>,
+    eq_model: Rc<VecModel<f32>>,
 }
 
 enum Naming {
@@ -932,7 +936,12 @@ fn start(shared: &Shared) {
                 }
                 match src {
                     Ok(src) => {
-                        engine.load(src, 0.0);
+                        let what = sound::loud_source(&t, version.as_ref().map(|v| v.yt.id.as_str()));
+                        let known = what.as_ref().and_then(|(s, id)| shared.borrow().loud.get(&format!("{s}:{id}")).copied());
+                        engine.load(src, sound::loud_db(&shared.borrow().web.prefs, &t, known));
+                        if let (Some((src_kind, id)), None) = (what, known) {
+                            loud_measure(&shared, &t, src_kind, id, token);
+                        }
                         if resume > 0 {
                             engine.seek(resume);
                         }
@@ -1574,6 +1583,60 @@ fn set_toggle(shared: &Shared, i: usize) {
     paint_settings(&shared.borrow());
 }
 
+// ---------- Settings > Sound (crate::sound) ----------
+/// Measures a track's loudness, then plays it at the gain for that (if it's still the one playing)
+fn loud_measure(shared: &Shared, t: &Track, kind: &'static str, id: String, token: u64) {
+    if sound::loud_db(&shared.borrow().web.prefs, t, None) == 0.0 && sound::loud_step(&shared.borrow().web.prefs) == "off" {
+        return;
+    }
+    let (rt, weak, t) = (shared.borrow().rt.clone(), shared.borrow().ui.clone(), t.clone());
+    rt.spawn(async move {
+        let Ok(a) = omnipulse_core::loudness::analyse(kind, &id).await else { return };
+        let Some(lufs) = a["lufs"].as_f64() else { return };
+        let _ = weak.upgrade_in_event_loop(move |_| SHARED.with(|s| {
+            let Some(shared) = s.borrow().clone() else { return };
+            shared.borrow_mut().loud.insert(format!("{kind}:{id}"), lufs);
+            let a = shared.borrow();
+            if a.token == token {
+                a.engine.set_match_db(sound::loud_db(&a.web.prefs, &t, Some(lufs)), false);
+            }
+        }));
+    });
+}
+
+/// The Sound settings shown, and the equalizer as heard
+fn sound_paint(a: &App) {
+    let Some(ui) = a.ui.upgrade() else { return };
+    ui.set_loud_on(sound::loud_step(&a.web.prefs).into());
+    ui.set_eq_on(a.web.prefs["eqOn"].as_bool() == Some(true));
+    let bands = sound::eq_bands(&a.web.prefs);
+    for (i, g) in bands.iter().enumerate() {
+        if a.eq_model.row_data(i) != Some(*g) { a.eq_model.set_row_data(i, *g); }
+    }
+    a.engine.set_eq(&sound::eq_heard(&a.web.prefs));
+}
+
+fn sound_set(shared: &Shared, key: &str, v: serde_json::Value) {
+    {
+        let mut a = shared.borrow_mut();
+        if let Some(o) = a.web.prefs.as_object_mut() { o.insert(key.into(), v.clone()); }
+    }
+    if std::env::var_os("OMNIPULSE_SELFTEST").is_none() { webstate::save_pref(key, v); }
+    sound_paint(&shared.borrow());
+}
+
+fn loud_pick(shared: &Shared, step: &str) {
+    sound_set(shared, "loudMatch", serde_json::json!(step));
+    // what's playing: at the new target straight away
+    let (t, token) = { let a = shared.borrow(); (a.queue.current().cloned(), a.token) };
+    let Some(t) = t else { return };
+    let ver = shared.borrow().closest.as_ref().filter(|(k, _)| *k == t.key).map(|(_, v)| v.id.clone());
+    let what = sound::loud_source(&t, ver.as_deref());
+    let known = what.as_ref().and_then(|(s, id)| shared.borrow().loud.get(&format!("{s}:{id}")).copied());
+    { let a = shared.borrow(); a.engine.set_match_db(sound::loud_db(&a.web.prefs, &t, known), false); }
+    if let (Some((kind, id)), None) = (what, known) { loud_measure(shared, &t, kind, id, token); }
+}
+
 // ---------- your playlists on this PC (crate::xpl) ----------
 /// The playlists changed: kept, and shown again (the sidebar, the menus, and the page if it's one)
 fn xpl_changed(shared: &Shared) {
@@ -2046,6 +2109,7 @@ fn main() -> Result<(), slint::PlatformError> {
         here: None, history: Vec::new(), artists: None, fav_only: false, shuffle_on: false, shuffle_backup: None, repeat: "off".into(), closest: None,
         autoplay: true, ap_busy: false, ap_then_play: false, ap_failed: None, resume_ms: None, loaded: false, accent: ("#8e9bff".into(), "#8e9bff".into()), started_secs: 0, token: 0,
         lyrics: Vec::new(), heard: (String::new(), 0.0, false), last_pos: 0, xpl: xpl::load(), naming: None,
+        loud: HashMap::new(), eq_model: Rc::new(VecModel::from(vec![0.0f32; 10])),
     }));
     // (before anything is listed: Go+ tracks only while YouTube Music can play them)
     go_plus_set(&shared.borrow().web.prefs);
@@ -2073,6 +2137,23 @@ fn main() -> Result<(), slint::PlatformError> {
     ui.on_sort_pick(move |by| lib_sort_pick(&s, &by));
     let s = shared.clone();
     ui.on_backup_make(move || backup_make(&s));
+    ui.set_eq_gains(ModelRc::from(shared.borrow().eq_model.clone()));
+    ui.set_eq_presets(ModelRc::from(Rc::new(VecModel::from(sound::EQ_PRESETS.iter().map(|(n, _)| slint::SharedString::from(*n)).collect::<Vec<_>>()))));
+    sound_paint(&shared.borrow());
+    let s = shared.clone();
+    ui.on_loud_pick(move |step| loud_pick(&s, &step));
+    let s = shared.clone();
+    ui.on_eq_on_changed(move |on| sound_set(&s, "eqOn", serde_json::json!(on)));
+    let s = shared.clone();
+    ui.on_eq_band(move |i, g| {
+        let mut bands = sound::eq_bands(&s.borrow().web.prefs);
+        if let Some(b) = bands.get_mut(i as usize) { *b = g.clamp(-12.0, 12.0); }
+        sound_set(&s, "eq", serde_json::json!(bands));
+    });
+    let s = shared.clone();
+    ui.on_eq_preset(move |i| {
+        if let Some((_, g)) = sound::EQ_PRESETS.get(i as usize) { sound_set(&s, "eq", serde_json::json!(g)); }
+    });
     let s = shared.clone();
     ui.on_pl_new(move || name_ask(&s, Naming::New(Vec::new())));
     let s = shared.clone();

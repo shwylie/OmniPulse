@@ -555,6 +555,15 @@ export component AppWindow inherits Window {
     in property <string> sort-by;
     in property <int> sort-dir;
     callback sort-pick(string);
+    // Settings > Sound: Match Loudness ("off" / "quiet" / "normal" / "loud"), the equalizer
+    in property <string> loud-on;
+    in property <[float]> eq-gains;
+    in-out property <bool> eq-on;
+    in property <[string]> eq-presets;
+    callback loud-pick(string);
+    callback eq-on-changed(bool);
+    callback eq-band(int, float);
+    callback eq-preset(int);
     callback backup-make();
     callback backup-restore();
     callback plat-toggle(string);
@@ -1115,6 +1124,54 @@ export component AppWindow inherits Window {
                                         }
                                         Chip { label: "Left"; on: !root.tab-right; y: (parent.height - self.height) / 2; clicked => { root.tab-align-picked("left"); } }
                                         Chip { label: "Right"; on: root.tab-right; y: (parent.height - self.height) / 2; clicked => { root.tab-align-picked("right"); } }
+                                    }
+                                }
+                            }
+                            // Sound
+                            Text { text: "Sound"; color: Theme.text; font-size: 20px; font-weight: 800; }
+                            Card {
+                                VerticalLayout {
+                                    padding: 16px;
+                                    spacing: 12px;
+                                    HorizontalLayout {
+                                        spacing: 8px;
+                                        VerticalLayout {
+                                            horizontal-stretch: 1;
+                                            alignment: center;
+                                            Text { text: "Match Loudness"; color: Theme.text; font-weight: 700; }
+                                            Text { text: root.loud-on == "off" ? "Tracks play as loud as they were made." : "Every track at the same loudness."; color: Theme.muted; font-size: 12px; }
+                                        }
+                                        for k[i] in ["off", "quiet", "normal", "loud"]: Chip {
+                                            label: ["Off", "Quiet", "Normal", "Loud"][i];
+                                            on: root.loud-on == k;
+                                            y: (parent.height - self.height) / 2;
+                                            clicked => { root.loud-pick(k); }
+                                        }
+                                    }
+                                    Rectangle { height: 1px; background: Theme.line; }
+                                    HorizontalLayout {
+                                        VerticalLayout {
+                                            horizontal-stretch: 1;
+                                            alignment: center;
+                                            Text { text: "Equalizer"; color: Theme.text; font-weight: 700; }
+                                            Text { text: "Ten bands."; color: Theme.muted; font-size: 12px; }
+                                        }
+                                        Toggle { checked <=> root.eq-on; y: (parent.height - self.height) / 2; toggled => { root.eq-on-changed(self.checked); } }
+                                    }
+                                    if root.eq-on: HorizontalLayout {
+                                        alignment: start;
+                                        spacing: 8px;
+                                        for p[i] in root.eq-presets: Chip { label: p; clicked => { root.eq-preset(i); } }
+                                    }
+                                    // (the bands from 0 to 24, as the slider doesn't go below zero: 12 is flat)
+                                    if root.eq-on: VerticalLayout {
+                                        spacing: 6px;
+                                        for g[i] in root.eq-gains: HorizontalLayout {
+                                            spacing: 12px;
+                                            Text { text: ["31 Hz", "62 Hz", "125 Hz", "250 Hz", "500 Hz", "1 kHz", "2 kHz", "4 kHz", "8 kHz", "16 kHz"][i]; width: 56px; color: Theme.muted; font-size: 12px; vertical-alignment: center; }
+                                            Range { minimum: 0; maximum: 24; value: g + 12; changed(v) => { root.eq-band(i, round(v) - 12); } }
+                                            Text { text: (g > 0 ? "+" : "") + round(g) + " dB"; width: 52px; color: Theme.text; font-size: 12px; horizontal-alignment: right; vertical-alignment: center; }
+                                        }
                                     }
                                 }
                             }
