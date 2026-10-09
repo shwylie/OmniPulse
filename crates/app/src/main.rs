@@ -1431,7 +1431,13 @@ fn remote_state(a: &App) -> serde_json::Value {
         "playing": a.loaded && !a.engine.is_paused(),
         "title": t.map(|t| t.title.clone()).unwrap_or_default(),
         "artist": t.map(|t| t.artist.clone()).unwrap_or_default(),
-        "shuffle": false, "repeat": "off", "liked": false, "canLike": false, "favourite": false,
+        // its cover, for the Play / Pause keys (a size that fills one)
+        "art": t.map(|t| t.art.replace("-t200x200", "-t300x300")).filter(|u| u.starts_with("http")).unwrap_or_default(),
+        "shuffle": a.shuffle_on,
+        "repeat": a.repeat,
+        "liked": t.is_some_and(|t| a.library.iter().any(|x| x.key == t.key)),
+        "canLike": t.is_some_and(|t| !matches!(t.src, track::Src::Local(_))),
+        "favourite": t.is_some_and(|t| marks::favourites(&a.web.favourites).iter().any(|x| x.key == t.key)),
         "setsAllowed": a.web.prefs["queueSets"].as_bool().unwrap_or(false),
         "requests": a.queue.pending_requests().count(),
     })

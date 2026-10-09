@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>OmniPulse key</title>
+<!-- A Play / Pause key's settings (bin/plugin.js reads them): the cover of what's playing, and the
+     key's sign over it. Both on unless switched off. -->
+<style>
+  body { margin: 0; padding: 10px 14px; font: 13px "Segoe UI", system-ui, sans-serif; color: #d8d8d8; background: #2d2d2d; }
+  label { display: flex; align-items: center; gap: 10px; margin: 8px 0; cursor: pointer; }
+  input { width: 16px; height: 16px; accent-color: #ff2bd6; margin: 0; }
+  .note { color: #969696; font-size: 12px; margin: 2px 0 10px 26px; }
+</style>
+</head>
+<body>
+  <label><input type="checkbox" id="art"> Show the cover of what's playing</label>
+  <div class="note">Dimmed while it's paused.</div>
+  <label><input type="checkbox" id="sign"> Play / Pause sign in the corner</label>
+<script>
+  let socket = null, context = "", settings = {};
+  const art = document.getElementById("art"), sign = document.getElementById("sign");
+  function paint() {
+    art.checked = settings.art !== false;
+    sign.checked = settings.sign !== false;
+    sign.disabled = !art.checked;
+  }
+  function save() {
+    settings = Object.assign({}, settings, { art: art.checked, sign: sign.checked });
+    paint();
+    if (socket && socket.readyState === 1) socket.send(JSON.stringify({ event: "setSettings", context, payload: settings }));
+  }
+  art.addEventListener("change", save);
+  sign.addEventListener("change", save);
+  // Stream Deck calls this when the page opens
+  window.connectElgatoStreamDeckSocket = (port, uuid, registerEvent, info, actionInfo) => {
+    context = uuid;
+    try { settings = (JSON.parse(actionInfo).payload || {}).settings || {}; } catch (e) { settings = {}; }
+    paint();
+    socket = new WebSocket("ws://127.0.0.1:" + port);
+    socket.onopen = () => socket.send(JSON.stringify({ event: registerEvent, uuid }));
+    socket.onmessage = (m) => {
+      try {
+        const msg = JSON.parse(m.data);
+        if (msg.event === "didReceiveSettings") { settings = (msg.payload || {}).settings || {}; paint(); }
+      } catch (e) { /* not for this page */ }
+    };
+  };
+  paint();
+</script>
+</body>
+</html>

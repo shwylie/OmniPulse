@@ -37,7 +37,8 @@
           "Image": "imgs/actions/play-key"
         }
       ],
-      "UserTitleEnabled": true
+      "UserTitleEnabled": true,
+      "PropertyInspectorPath": "ui/art.html"
     },
     {
       "Name": "Pause",
@@ -52,7 +53,8 @@
           "Image": "imgs/actions/pause-key"
         }
       ],
-      "UserTitleEnabled": true
+      "UserTitleEnabled": true,
+      "PropertyInspectorPath": "ui/art.html"
     },
     {
       "Name": "Play / Pause",
@@ -70,7 +72,8 @@
           "Image": "imgs/actions/toggle-on"
         }
       ],
-      "UserTitleEnabled": true
+      "UserTitleEnabled": true,
+      "PropertyInspectorPath": "ui/art.html"
     },
     {
       "Name": "Next",

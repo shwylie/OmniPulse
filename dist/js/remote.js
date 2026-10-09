@@ -8,6 +8,8 @@ function remoteState() {
     playing: nowPlaying(),
     title: t ? t.title || "" : "",
     artist: t ? artistName(t) : "",
+    // its cover, for the Play / Pause keys (a size that fills one)
+    art: t && /^https?:\/\//.test(t.artwork_url || "") ? String(t.artwork_url).replace("-large", "-t300x300") : "",
     shuffle: shuffleOn,
     repeat: repeatMode,
     liked: isLiked(t),

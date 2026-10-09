@@ -6,3 +6,6 @@ dist/hls.min.js
 src-tauri/binaries/
 # the app's own SoundCloud keys, built in scrambled (crates/core/build.rs): never committed
 crates/core/keys.local.json
+
+# the Stream Deck plugin's own logs
+streamdeck/com.shwylie.scclient.sdPlugin/logs/
