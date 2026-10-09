@@ -103,17 +103,64 @@ fn apply_filter(app: &mut App) {
     let favs: std::collections::HashSet<&str> = app.web.favourites.iter().map(|t| t.key.as_str()).collect();
     let fav_only = app.fav_only;
     let shown = |t: &&Track| plat_on(&prefs, t.plat()) && (!fav_only || favs.contains(t.key.as_str())) && streamsafe::allowed(&prefs, t);
-    let filtered: Vec<Track> = match (app.page.as_str(), chip) {
+    let mut filtered: Vec<Track> = match (app.page.as_str(), chip) {
         ("library" | "rediscover" | "favourites" | "search" | "playlist", 1) => app.page_all.iter().filter(shown).filter(|t| !t.is_mix()).cloned().collect(),
         ("library" | "rediscover" | "favourites" | "search" | "playlist", 2) => app.page_all.iter().filter(shown).filter(|t| t.is_mix()).cloned().collect(),
         _ => app.page_all.iter().filter(shown).cloned().collect(),
     };
+    if app.page == "library" {
+        lib_sort(&prefs, &mut filtered);
+    }
     let playing = app.queue.current().map(|t| t.key.clone()).unwrap_or_default();
     let liked: std::collections::HashSet<&str> = app.library.iter().map(|t| t.key.as_str()).collect();
     app.rows.set_vec(filtered.iter().map(|t| Row { liked: liked.contains(t.key.as_str()), ..t.row(t.key == playing) }).collect::<Vec<_>>());
     app.page_tracks = filtered;
     // its covers, once this is done with the app
     slint::Timer::single_shot(std::time::Duration::ZERO, || SHARED.with(|s| { if let Some(sh) = s.borrow().clone() { rows_art(&sh); } }));
+}
+
+// ---------- the Library's order (as the web app's sort chips, kept in the same setting) ----------
+fn lib_sort_of(prefs: &serde_json::Value) -> (&str, i64) {
+    let s = &prefs["libSort"];
+    match s["by"].as_str() {
+        Some(by @ ("artist" | "title")) => (by, if s["dir"].as_i64() == Some(-1) { -1 } else { 1 }),
+        _ => ("", 1),
+    }
+}
+
+fn lib_sort(prefs: &serde_json::Value, list: &mut [Track]) {
+    let (by, dir) = lib_sort_of(prefs);
+    if by.is_empty() {
+        return;
+    }
+    // ignoring case and a leading "The"
+    let key = |s: &str| {
+        let s = s.trim().to_lowercase();
+        s.strip_prefix("the ").map(str::to_string).unwrap_or(s)
+    };
+    list.sort_by(|x, y| {
+        let (a, b) = ((key(&x.artist), key(&x.title)), (key(&y.artist), key(&y.title)));
+        let o = if by == "artist" { a.cmp(&b) } else { (a.1, a.0).cmp(&(b.1, b.0)) };
+        if dir < 0 { o.reverse() } else { o }
+    });
+}
+
+fn lib_sort_paint(a: &App) {
+    let Some(ui) = a.ui.upgrade() else { return };
+    let (by, dir) = lib_sort_of(&a.web.prefs);
+    ui.set_sort_by(by.into());
+    ui.set_sort_dir(dir as i32);
+}
+
+/// A sort chip: A to Z, then Z to A, then off (as you liked them)
+fn lib_sort_pick(shared: &Shared, by: &str) {
+    let mut a = shared.borrow_mut();
+    let (cur, dir) = lib_sort_of(&a.web.prefs);
+    let next = if cur != by { serde_json::json!({ "by": by, "dir": 1 }) } else if dir > 0 { serde_json::json!({ "by": by, "dir": -1 }) } else { serde_json::json!({ "by": "added", "dir": 1 }) };
+    if let Some(o) = a.web.prefs.as_object_mut() { o.insert("libSort".into(), next.clone()); }
+    if std::env::var_os("OMNIPULSE_SELFTEST").is_none() { webstate::save_pref("libSort", next); }
+    lib_sort_paint(&a);
+    apply_filter(&mut a);
 }
 
 fn show_tracks(shared: &Shared, page: &str, title: &str, sub: String, mut tracks: Vec<Track>, chips: bool) {
@@ -1834,6 +1881,9 @@ fn main() -> Result<(), slint::PlatformError> {
     });
     let s = shared.clone();
     ui.on_art_accent_changed(move |on| set_look_pref(&s, "artAccent", serde_json::json!(on)));
+    lib_sort_paint(&shared.borrow());
+    let s = shared.clone();
+    ui.on_sort_pick(move |by| lib_sort_pick(&s, &by));
     let s = shared.clone();
     ui.on_tab_align_picked(move |side| set_look_pref(&s, "tabAlign", serde_json::json!(side.as_str())));
     let s = shared.clone();
@@ -2197,7 +2247,7 @@ fn main() -> Result<(), slint::PlatformError> {
         let s = shared.clone();
         let started = std::time::Instant::now();
         let mut step_no = 0usize;
-        let plan: [(u64, &str); 22] = [(9, "play"), (13, "library"), (14, "scoff"), (15, "scon"), (16, "discover"), (24, "rediscover"), (27, "sets"), (31, "stats"), (35, "now"), (39, "search"), (42, "settings"), (44, "light"), (46, "artists"), (54, "artist"), (60, "autoplay"), (70, "narrow"), (72, "goplus"), (80, "tabright"), (84, "musical"), (88, "musical2"), (90, "safe"), (93, "end")];
+        let plan: [(u64, &str); 23] = [(9, "play"), (13, "library"), (14, "scoff"), (15, "scon"), (16, "discover"), (24, "rediscover"), (27, "sets"), (31, "stats"), (35, "now"), (39, "search"), (42, "settings"), (44, "light"), (46, "artists"), (54, "artist"), (60, "autoplay"), (70, "narrow"), (72, "goplus"), (80, "tabright"), (84, "musical"), (88, "musical2"), (90, "safe"), (91, "sort"), (94, "end")];
         t.start(slint::TimerMode::Repeated, std::time::Duration::from_millis(250), move || {
             let Some(&(at, what)) = plan.get(step_no) else { return };
             if started.elapsed().as_secs() < at { return; }
@@ -2264,6 +2314,14 @@ fn main() -> Result<(), slint::PlatformError> {
                     println!("selftest: musical alert: music back after it {}", !s.borrow().engine.is_paused());
                     ui.invoke_tab_align_picked("left".into());
                     let _ = std::fs::remove_file(omnipulse_core::data_dir().unwrap().join("alert-sounds").join("selftest-alert.wav"));
+                }
+                // the Library by artist, Z to A
+                "sort" => {
+                    open_page(&s, "library");
+                    ui.invoke_sort_pick("artist".into());
+                    ui.invoke_sort_pick("artist".into());
+                    let first: Vec<String> = s.borrow().page_tracks.iter().take(3).map(|t| t.artist.clone()).collect();
+                    println!("selftest: sort {} {}, first {:?}", ui.get_sort_by(), ui.get_sort_dir(), first);
                 }
                 // the Streamer Mode button twice: private info, then only what is safe on stream
                 "safe" => {

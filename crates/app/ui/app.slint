@@ -527,6 +527,10 @@ export component AppWindow inherits Window {
     // the Streamer Mode button's next step: off -> private info hidden -> and safe music only -> off
     callback streamer-step();
     in property <bool> stream-safe;
+    // the Library's order: "artist" / "title" (1 A to Z, -1 Z to A), or "" as you liked them
+    in property <string> sort-by;
+    in property <int> sort-dir;
+    callback sort-pick(string);
     callback plat-toggle(string);
     callback accent-picked(int);
     callback art-accent-changed(bool);
@@ -750,6 +754,25 @@ export component AppWindow inherits Window {
                         }
                         Pill { label: "Shuffle"; y: 7px; clicked => { root.shuffle(); } }
                         Rectangle { horizontal-stretch: 1; }
+                        // the Library's sort, clicked through: A to Z, Z to A, off
+                        if root.page == "library": Rectangle {
+                            y: 7px;
+                            height: 38px;
+                            width: sorts.preferred-width + 8px;
+                            border-radius: 19px;
+                            border-width: 1px;
+                            border-color: Theme.line;
+                            sorts := HorizontalLayout {
+                                x: 4px;
+                                y: 3px;
+                                spacing: 4px;
+                                for k[i] in ["artist", "title"]: Chip {
+                                    label: (i == 0 ? "Artist" : "Title") + (root.sort-by == k ? (root.sort-dir > 0 ? " ↑" : " ↓") : "");
+                                    on: root.sort-by == k;
+                                    clicked => { root.sort-pick(k); }
+                                }
+                            }
+                        }
                         Pill { label: "Favourites only"; d: Icons.star; on: root.fav-only; y: 7px; clicked => { root.fav-only = !root.fav-only; root.fav-only-changed(root.fav-only); } }
                     }
                     // the list's column heads
