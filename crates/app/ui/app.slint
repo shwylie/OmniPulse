@@ -108,6 +108,58 @@ component Pill inherits Rectangle {
     ta := TouchArea { clicked => { root.clicked(); } }
 }
 
+component Range inherits Rectangle {
+    in property <float> minimum: 0;
+    in property <float> maximum: 100;
+    in property <float> value;
+    in property <bool> enabled: true;
+    /// as it's dragged, and where it's let go
+    callback changed(float);
+    callback released(float);
+    height: 20px;
+    min-width: 40px;
+    property <float> drag: -1;
+    property <float> shown: root.drag >= 0 ? root.drag : root.value;
+    property <float> frac: max(0, min(1, (root.shown - root.minimum) / max(0.0001, root.maximum - root.minimum)));
+    property <float> at: max(0, min(1, ta.mouse-x / max(1px, root.width)));
+    opacity: root.enabled ? 1 : 0.45;
+    Rectangle {
+        y: (parent.height - 4px) / 2;
+        height: 4px;
+        border-radius: 2px;
+        background: Theme.text.with-alpha(0.18);
+        Rectangle { x: 0; width: parent.width * root.frac; height: 100%; border-radius: 2px; background: Theme.accent; }
+    }
+    Rectangle {
+        x: (root.width - 14px) * root.frac;
+        y: (root.height - 14px) / 2;
+        width: 14px;
+        height: 14px;
+        border-radius: 7px;
+        background: ta.has-hover || ta.pressed ? Theme.accent.brighter(0.15) : Theme.accent;
+        border-width: 2px;
+        border-color: Theme.panel;
+    }
+    ta := TouchArea {
+        enabled: root.enabled;
+        pointer-event(e) => {
+            if (e.button == PointerEventButton.left && e.kind == PointerEventKind.down) {
+                root.drag = root.minimum + root.at * (root.maximum - root.minimum);
+                root.changed(root.drag);
+            } else if (e.button == PointerEventButton.left && e.kind == PointerEventKind.up && root.drag >= 0) {
+                root.released(root.drag);
+                root.drag = -1;
+            }
+        }
+        moved => {
+            if (self.pressed) {
+                root.drag = root.minimum + root.at * (root.maximum - root.minimum);
+                root.changed(root.drag);
+            }
+        }
+    }
+}
+
 component PlatIcon inherits Glyph {
     in property <string> plat;
     d: plat == "spotify" ? Icons.spotify : plat == "youtube" ? Icons.youtube : plat == "local" ? Icons.local : Icons.soundcloud;
@@ -316,6 +368,10 @@ export component AppWindow inherits Window {
     // the queue and the bar
     in property <[Row]> queue-rows;
     in property <string> status;
+    /// the status is a problem (red, as the web app's)
+    out property <bool> status-bad: {
+        root.status.to-lowercase().starts-with("couldn") || root.status.to-lowercase().starts-with("can't") || root.status.to-lowercase().starts-with("error") || root.status.to-lowercase().starts-with("skipped")
+    }
     in property <string> now-title: "Nothing playing";
     in property <string> now-artist;
     in property <string> now-plat;
@@ -797,7 +853,7 @@ export component AppWindow inherits Window {
                                         Text { text: root.theme-step-name; color: Theme.muted; font-weight: 600; }
                                     }
                                     // steps from light to dark: it stops at each, never in between
-                                    Slider { minimum: 0; maximum: 4; value <=> root.theme-step; changed(v) => { self.value = round(v); root.look-changed("themeStep", round(v)); } }
+                                    Range { minimum: 0; maximum: 4; value: root.theme-step; changed(v) => { root.theme-step = round(v); root.look-changed("themeStep", round(v)); } }
                                     HorizontalLayout {
                                         for n[i] in ["Bright", "Soft", "Dim", "Dark", "Black"]: Text { text: n; color: Theme.muted; font-size: 12px; horizontal-stretch: 1; horizontal-alignment: i == 0 ? left : i == 4 ? right : center; }
                                     }
@@ -815,7 +871,7 @@ export component AppWindow inherits Window {
                                         opacity: root.tint-strength > 0.5 ? 1 : 0.35;
                                         background: @linear-gradient(90deg, #e04848 0%, #e0e048 17%, #48d848 33%, #48d8d8 50%, #6a72ec 67%, #d84ad6 83%, #e04848 100%);
                                     }
-                                    Slider { minimum: 0; maximum: 359; value <=> root.tint-hue; enabled: root.tint-strength > 0.5; changed(v) => { root.look-changed("tintHue", round(v)); } }
+                                    Range { minimum: 0; maximum: 359; value: root.tint-hue; enabled: root.tint-strength > 0.5; changed(v) => { root.tint-hue = v; root.look-changed("tintHue", round(v)); } }
                                     Rectangle { height: 8px; }
                                     HorizontalLayout {
                                         alignment: start;
@@ -823,7 +879,7 @@ export component AppWindow inherits Window {
                                         Text { text: "Tint Strength"; color: Theme.text; font-weight: 700; }
                                         Text { text: root.tint-strength-name; color: Theme.muted; font-weight: 600; }
                                     }
-                                    Slider { minimum: 0; maximum: 3; value <=> root.tint-strength; changed(v) => { self.value = round(v); root.look-changed("tintStrength", round(v)); } }
+                                    Range { minimum: 0; maximum: 3; value: root.tint-strength; changed(v) => { root.tint-strength = round(v); root.look-changed("tintStrength", round(v)); } }
                                     HorizontalLayout {
                                         for n[i] in ["Off", "Subtle", "Medium", "Strong"]: Text { text: n; color: Theme.muted; font-size: 12px; horizontal-stretch: 1; horizontal-alignment: i == 0 ? left : i == 3 ? right : center; }
                                     }
@@ -947,7 +1003,9 @@ export component AppWindow inherits Window {
 
         // ---------- player bar ----------
         Rectangle {
-            height: 96px;
+            // (an 88 px bar, as the web app's; the status strip adds its own height on top)
+            height: root.status != "" ? 135px : 104px;
+            animate height { duration: 220ms; easing: ease-out; }
             Rectangle {
                 x: 8px;
                 y: 8px;
@@ -955,9 +1013,26 @@ export component AppWindow inherits Window {
                 height: parent.height - 16px;
                 background: Theme.panel.mix(Theme.accent, 0.86);
                 border-radius: Theme.radius;
+                clip: true;
+                VerticalLayout {
+                if root.status != "": VerticalLayout {
+                    padding-left: 18px;
+                    padding-right: 18px;
+                    padding-top: 8px;
+                    HorizontalLayout {
+                        height: 22px;
+                        spacing: 10px;
+                        property <bool> bad: root.status-bad;
+                        Rectangle { width: 8px; height: 8px; y: (parent.height - self.height) / 2; border-radius: 4px; background: parent.bad ? #ff8a80 : Theme.accent; }
+                        Text { text: root.status; color: parent.bad ? #ff8a80 : Theme.text; font-size: 13px; vertical-alignment: center; overflow: elide; }
+                    }
+                    Rectangle { height: 1px; background: Theme.line; }
+                }
                 HorizontalLayout {
                     padding-left: 18px;
                     padding-right: 18px;
+                    padding-top: 12px;
+                    padding-bottom: 12px;
                     spacing: 6px;
                     // the controls, the seek bar and the volume
                     HorizontalLayout {
@@ -976,10 +1051,10 @@ export component AppWindow inherits Window {
                         }
                         Rectangle { width: 10px; }
                         Text { text: root.pos-text; color: Theme.muted; font-size: 12px; width: 34px; horizontal-alignment: right; vertical-alignment: center; }
-                        Slider { min-width: 80px; horizontal-stretch: 1; minimum: 0; maximum: 1000; value: root.pos-frac * 1000; released(v) => { root.seek(v / 1000); } }
+                        Range { min-width: 80px; horizontal-stretch: 1; y: (parent.height - self.height) / 2; minimum: 0; maximum: 1000; value: root.pos-frac * 1000; released(v) => { root.seek(v / 1000); } }
                         Text { text: root.dur-text; color: Theme.muted; font-size: 12px; width: 34px; vertical-alignment: center; }
                         Glyph { d: Icons.volume; width: 20px; height: 20px; y: (parent.height - self.height) / 2; fill: Theme.muted; }
-                        Slider { width: root.narrow ? 64px : 80px; minimum: 0; maximum: 100; value <=> root.volume; changed(v) => { root.volume-changed(v / 100); } }
+                        Range { width: root.narrow ? 64px : 80px; y: (parent.height - self.height) / 2; minimum: 0; maximum: 100; value: root.volume; changed(v) => { root.volume = v; root.volume-changed(v / 100); } }
                     }
                     // now playing: opens Now Playing
                     Rectangle {
@@ -1009,8 +1084,8 @@ export component AppWindow inherits Window {
                         IconButton { d: Icons.queue; tint: root.queue-open ? Theme.accent : Theme.muted; y: (parent.height - self.height) / 2; clicked => { root.queue-open = !root.queue-open; } }
                     }
                 }
+                }
             }
         }
-        if root.status != "": Text { text: root.status; color: Theme.muted; font-size: 12px; horizontal-alignment: center; height: 18px; }
     }
 }
