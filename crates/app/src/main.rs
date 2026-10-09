@@ -1485,8 +1485,68 @@ fn set_toggle(shared: &Shared, i: usize) {
     paint_settings(&shared.borrow());
 }
 
+// ---------- musical alerts (as js/alertmedia.js): the widget says it's showing one ----------
+// The music pauses, the alert's sound plays here (after its delay, at its measured level and the
+// alerts' volume), and the music fades back in once it's done.
+fn alert_sound_file(kind: &str) -> Option<std::path::PathBuf> {
+    let dir = omnipulse_core::data_dir().ok()?.join("alert-sounds");
+    std::fs::read_dir(dir).ok()?.flatten().map(|e| e.path()).find(|p| p.file_stem().and_then(|s| s.to_str()) == Some(kind))
+}
+
+fn alert_shown(shared: &Shared, kind: &str) {
+    let (e, vol, gain, engine, music_vol) = {
+        let a = shared.borrow();
+        let e = a.web.prefs["alertEdit"][kind].clone();
+        let lv = &a.web.prefs["alertLevels"][kind];
+        let gain = lv["auto"].as_f64().unwrap_or(0.0) + lv["adj"].as_f64().unwrap_or(0.0);
+        let vol = a.web.prefs["alertVol"].as_f64().unwrap_or(0.8);
+        let music_vol = a.ui.upgrade().map_or(0.8, |ui| ui.get_volume() / 100.0);
+        (e, vol, gain, a.engine.clone(), music_vol)
+    };
+    if e["music"].as_bool() != Some(true) { return; }
+    let Some(path) = alert_sound_file(kind) else { return };
+    let Ok(src) = omnipulse_audio::Decoded::open_file(&path) else { return };
+    let device = webstate::native_pref("nativeDevice").and_then(|v| v.as_str().map(String::from)).unwrap_or_default();
+    let Ok(player) = omnipulse_audio::Engine::new(&device) else { return };
+    let player = Arc::new(player);
+    let was_playing = shared.borrow().loaded && !engine.is_paused();
+    if was_playing { engine.pause(); }
+    player.load(Box::new(src), 0.0);
+    player.set_volume(((vol * 10f64.powf(gain / 20.0)) as f32).clamp(0.0, 1.0));
+    let events = player.events();
+    let delay = e["sdelay"].as_u64().unwrap_or(0);
+    let p2 = player.clone();
+    slint::Timer::single_shot(std::time::Duration::from_millis(delay), move || p2.play());
+    // done: the music back, faded in over a second and a half
+    let s = shared.clone();
+    let t = slint::Timer::default();
+    let mut fading: Option<u32> = None;
+    t.start(slint::TimerMode::Repeated, std::time::Duration::from_millis(100), move || {
+        let _keep = &player;
+        if fading.is_none() {
+            let ended = events.as_ref().is_some_and(|rx| rx.try_iter().any(|ev| matches!(ev, omnipulse_audio::Event::Ended | omnipulse_audio::Event::Error(_))));
+            if !ended { return; }
+            if !was_playing || !s.borrow().engine.is_paused() { ALERT_TIMER.with(|x| *x.borrow_mut() = None); return; }
+            let e = s.borrow().engine.clone();
+            e.set_volume(0.0);
+            e.play();
+            fading = Some(0);
+            return;
+        }
+        let n = fading.unwrap() + 1;
+        fading = Some(n);
+        s.borrow().engine.set_volume(music_vol * (n as f32 / 15.0).min(1.0));
+        if n >= 15 { ALERT_TIMER.with(|x| *x.borrow_mut() = None); }
+    });
+    ALERT_TIMER.with(|x| *x.borrow_mut() = Some(t));
+}
+
 fn outside_start(shared: &Shared) {
     let prefs = shared.borrow().web.prefs.clone();
+    omnipulse_core::widget::set_shown_handler(std::sync::Arc::new(|kind: &str| {
+        let kind = kind.to_string();
+        let _ = slint::invoke_from_event_loop(move || SHARED.with(|s| { if let Some(sh) = s.borrow().clone() { alert_shown(&sh, &kind); } }));
+    }));
     integrations::widget_start(&prefs);
     if integrations::set(&prefs, "remoteOn") {
         if let Some(key) = prefs["remoteKey"].as_str().filter(|k| !k.is_empty()) {
@@ -2025,7 +2085,7 @@ fn main() -> Result<(), slint::PlatformError> {
         let s = shared.clone();
         let started = std::time::Instant::now();
         let mut step_no = 0usize;
-        let plan: [(u64, &str); 18] = [(9, "play"), (13, "library"), (14, "scoff"), (15, "scon"), (16, "discover"), (24, "rediscover"), (27, "sets"), (31, "stats"), (35, "now"), (39, "search"), (42, "settings"), (44, "light"), (46, "artists"), (54, "artist"), (60, "autoplay"), (70, "narrow"), (72, "goplus"), (84, "end")];
+        let plan: [(u64, &str); 20] = [(9, "play"), (13, "library"), (14, "scoff"), (15, "scon"), (16, "discover"), (24, "rediscover"), (27, "sets"), (31, "stats"), (35, "now"), (39, "search"), (42, "settings"), (44, "light"), (46, "artists"), (54, "artist"), (60, "autoplay"), (70, "narrow"), (72, "goplus"), (84, "musical"), (88, "musical2"), (92, "end")];
         t.start(slint::TimerMode::Repeated, std::time::Duration::from_millis(250), move || {
             let Some(&(at, what)) = plan.get(step_no) else { return };
             if started.elapsed().as_secs() < at { return; }
@@ -2067,6 +2127,31 @@ fn main() -> Result<(), slint::PlatformError> {
                     println!("selftest: go+ tracks listed {}", s.borrow().page_tracks.iter().filter(|t| t.go_plus).count());
                     if let Some(i) = at { ui.invoke_play_row(i as i32); }
                 }
+                // a musical alert while music plays: the music pauses, then comes back (a short tone,
+                // written for the test and taken away after)
+                "musical" => {
+                    let dir = omnipulse_core::data_dir().unwrap().join("alert-sounds");
+                    let _ = std::fs::create_dir_all(&dir);
+                    let rate = 22050u32;
+                    let n = rate as usize; // a second
+                    let mut wav = Vec::new();
+                    wav.extend(b"RIFF"); wav.extend(((36 + n * 2) as u32).to_le_bytes()); wav.extend(b"WAVEfmt ");
+                    wav.extend(16u32.to_le_bytes()); wav.extend(1u16.to_le_bytes()); wav.extend(1u16.to_le_bytes());
+                    wav.extend(rate.to_le_bytes()); wav.extend((rate * 2).to_le_bytes()); wav.extend(2u16.to_le_bytes()); wav.extend(16u16.to_le_bytes());
+                    wav.extend(b"data"); wav.extend(((n * 2) as u32).to_le_bytes());
+                    for i in 0..n { wav.extend((((i as f32 / rate as f32 * 2.0 * std::f32::consts::PI * 440.0).sin() * 3000.0) as i16).to_le_bytes()); }
+                    let _ = std::fs::write(dir.join("selftest-alert.wav"), wav);
+                    if let Some(o) = s.borrow_mut().web.prefs.as_object_mut() {
+                        o.insert("alertEdit".into(), serde_json::json!({ "selftest-alert": { "music": true } }));
+                    }
+                    let before = !s.borrow().engine.is_paused();
+                    alert_shown(&s, "selftest-alert");
+                    println!("selftest: musical alert: playing before {before}, paused for it {}", s.borrow().engine.is_paused());
+                }
+                "musical2" => {
+                    println!("selftest: musical alert: music back after it {}", !s.borrow().engine.is_paused());
+                    let _ = std::fs::remove_file(omnipulse_core::data_dir().unwrap().join("alert-sounds").join("selftest-alert.wav"));
+                }
                 // the narrow layout, for its picture
                 "narrow" => { ui.window().set_size(slint::LogicalSize::new(900.0, 700.0)); }
                 // the first artist you follow
@@ -2099,6 +2184,8 @@ thread_local! {
     static STATUS_SEEN: RefCell<(String, std::time::Instant)> = RefCell::new((String::new(), std::time::Instant::now()));
     /// a note that stays while its track plays (a Go+ track's closest version)
     static STATUS_HOLD: RefCell<Option<String>> = const { RefCell::new(None) };
+    /// a musical alert playing: the timer that brings the music back after it
+    static ALERT_TIMER: RefCell<Option<slint::Timer>> = const { RefCell::new(None) };
     #[allow(clippy::type_complexity)]
     static STAT_MODELS: RefCell<Option<(Rc<VecModel<Item>>, Rc<VecModel<Item>>)>> = const { RefCell::new(None) };
 }

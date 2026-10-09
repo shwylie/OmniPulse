@@ -116,6 +116,29 @@ pub fn widget_start(prefs: &Value) -> Option<String> {
 }
 
 /// The alerts' settings, for the widget (as alertsCfg in js/widget.js)
+/// The collage's palettes (as js/widget.js COLLAGE_PALETTES): "alert" is each alert's own colours
+const PALETTES: [(&str, &[&str]); 9] = [
+    ("rainbow", &["#ff4d4d", "#ff9f1c", "#ffe74c", "#3ddc84", "#3a86ff", "#8338ec"]),
+    ("neon", &["#ff00e5", "#00f0ff", "#39ff14", "#fff000", "#ff3131"]),
+    ("sunset", &["#ff6b6b", "#ff9e57", "#ffd166", "#c94b7d", "#6a4c93"]),
+    ("ocean", &["#0077b6", "#00b4d8", "#48cae4", "#90e0ef", "#023e8a"]),
+    ("forest", &["#2d6a4f", "#40916c", "#74c69d", "#b7e4c7", "#95d5b2"]),
+    ("candy", &["#ff8fab", "#ffc2d1", "#cdb4db", "#a2d2ff", "#bde0fe"]),
+    ("fire", &["#d00000", "#e85d04", "#faa307", "#ffba08", "#9d0208"]),
+    ("streamer", &["#ff0033", "#9146ff", "#53fc18", "#ff5500", "#1ed760"]),
+    ("mono", &["#f5f5f5", "#bdbdbd", "#757575", "#424242"]),
+];
+
+/// An alert's collage colours: a preset, your own, or none (its own two)
+fn alert_palette(e: &Value) -> Option<Value> {
+    let id = e["cpal"].as_str().filter(|p| !p.is_empty() && *p != "alert")?;
+    if id == "custom" {
+        let own: Vec<Value> = e["cpalOwn"].as_array().cloned().unwrap_or_default().into_iter().take(6).collect();
+        return Some(Value::Array(if own.is_empty() { vec![json!("#ff4d6d"), json!("#ffb703"), json!("#4cc9f0")] } else { own }));
+    }
+    PALETTES.iter().find(|(p, _)| *p == id).map(|(_, c)| json!(c))
+}
+
 pub fn alerts_cfg(prefs: &Value) -> Value {
     if !set(prefs, "alertsOn") {
         return json!({ "on": false });
@@ -139,11 +162,32 @@ pub fn alerts_cfg(prefs: &Value) -> Value {
                 c.insert(f.into(), json!(v));
             }
         }
-        if let Some(s) = e["secs"].as_u64() {
+        // its second colour, picture's crop, collage icons and their edits, and whether it's musical
+        if e["color"].as_str().is_some_and(|v| !v.is_empty()) {
+            if let Some(v) = e["color2"].as_str().filter(|v| !v.is_empty()) { c.insert("color2".into(), json!(v)); }
+        }
+        for f in ["crop", "cicons", "cstyle"] {
+            if !e[f].is_null() && e[f] != json!("") { c.insert(f.into(), e[f].clone()); }
+        }
+        if e["music"].as_bool() == Some(true) { c.insert("music".into(), json!(true)); }
+        if let Some(p) = alert_palette(e) { c.insert("colors".into(), p); }
+        if e["secs"].as_str() == Some("sound") {
+            c.insert("secs".into(), json!("sound"));
+        } else if let Some(s) = e["secs"].as_u64() {
             c.insert("secs".into(), json!(s));
         }
+        if let Some(d) = e["sdelay"].as_u64() { c.insert("sdelay".into(), json!(d)); }
         if let Some(at) = prefs["alertImages"][k]["at"].as_u64() {
             c.insert("image".into(), json!(at.to_string()));
+        }
+        // its collage pictures (by place, so a gap stays a gap), and its sound's level and length
+        if let Some(cp) = prefs["alertCollage"][k].as_array().filter(|a| a.iter().any(|x| !x.is_null())) {
+            c.insert("cpics".into(), Value::Array(cp.iter().map(|p| json!(p["at"].as_u64().map(|a| a.to_string()).unwrap_or_default())).collect()));
+        }
+        let lv = &prefs["alertLevels"][k];
+        if lv.is_object() && prefs["alertSounds"][k].is_object() {
+            c.insert("gain".into(), json!(lv["auto"].as_f64().unwrap_or(0.0) + lv["adj"].as_f64().unwrap_or(0.0)));
+            c.insert("sndMs".into(), lv["ms"].clone());
         }
         if let Some((_, name)) = custom.iter().find(|x| &x.0 == k) {
             c.insert("name".into(), json!(e["name"].as_str().filter(|v| !v.is_empty()).unwrap_or(name)));
@@ -164,6 +208,7 @@ pub fn alerts_cfg(prefs: &Value) -> Value {
         "kinds": kinds,
         "anim": prefs["alertAnim"].as_str().unwrap_or("slide"),
         "transition": prefs["alertTrans"].as_str().unwrap_or("seamless"),
+        "collage": { "size": prefs["alertCSize"].as_str().unwrap_or("medium"), "dir": prefs["alertCDir"].as_str().unwrap_or("diag"), "angle": prefs["alertCAngle"].as_f64().unwrap_or(0.0) },
         "accent": if set(prefs, "alertOwnCol") { prefs["alertCol1"].as_str().unwrap_or("#8e9bff") } else { "" },
         "accent2": if set(prefs, "alertOwnCol") { prefs["alertCol2"].as_str().or(prefs["alertCol1"].as_str()).unwrap_or("#b38cff") } else { "" },
         "dir": prefs["alertDir"].as_str().unwrap_or("115deg"),
@@ -268,5 +313,32 @@ mod tests {
         }
         let (a, b) = accents(&px);
         assert!(a.starts_with("#c8") && a == b, "{a} {b}");
+    }
+}
+
+#[cfg(test)]
+mod alert_tests {
+    use super::*;
+
+    #[test]
+    fn the_widget_hears_each_alerts_own_settings() {
+        let prefs = json!({
+            "alertsOn": true, "alertTrans": "collage", "alertCAngle": 30, "alertCDir": "ltr",
+            "alertEdit": { "follow": { "color": "#2ecc71", "color2": "#3b82f6", "cpal": "sunset", "cicons": ["rocket"], "cstyle": { "icon:rocket": { "bg": "#ff8800" } }, "music": true, "secs": "sound", "sdelay": 500, "crop": { "x": 70 } } },
+            "alertSounds": { "follow": { "name": "ding.wav", "at": 1 } },
+            "alertLevels": { "follow": { "auto": -1.0, "adj": 2.0, "ms": 1200 } },
+            "alertCollage": { "follow": [{ "name": "a.png", "at": 5 }, null] },
+        });
+        let c = alerts_cfg(&prefs);
+        let f = &c["kinds"]["follow"];
+        assert_eq!(f["color2"], "#3b82f6");
+        assert_eq!(f["colors"][0], "#ff6b6b");
+        assert_eq!(f["cicons"][0], "rocket");
+        assert_eq!(f["cstyle"]["icon:rocket"]["bg"], "#ff8800");
+        assert_eq!((f["music"].clone(), f["secs"].clone(), f["sdelay"].clone()), (json!(true), json!("sound"), json!(500)));
+        assert_eq!((f["gain"].as_f64(), f["sndMs"].as_u64()), (Some(1.0), Some(1200)));
+        assert_eq!(f["cpics"], json!(["5", ""]));
+        assert_eq!(c["collage"]["angle"], 30.0);
+        assert_eq!(c["collage"]["dir"], "ltr");
     }
 }
