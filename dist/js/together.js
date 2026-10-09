@@ -487,7 +487,7 @@ function canPlayDirect(t) {
   const src = srcOf(t);
   if (src === "local") return localTracks.some((x) => x.id === t.id);
   if (src === "spotify") return spotifyPremium && !t.spGone;
-  if (src === "soundcloud") return meId !== null;
+  if (src === "soundcloud") return meId !== null || ytAvailable();   // (signed out: through yt-dlp)
   if (src === "youtube") return ytOn();
   if (src.startsWith("plug:")) return pluginRuns.has(src.slice(5));
   return false;

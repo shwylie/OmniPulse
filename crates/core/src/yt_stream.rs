@@ -18,7 +18,7 @@ async fn resolve_with(program: impl AsRef<OsStr>, query: &str) -> Result<String,
     if query.is_empty() {
         return Err("Nothing to search for.".into());
     }
-    run(program, format!("ytsearch1:{query}"), query).await
+    run(program, format!("ytsearch1:{query}"), query, "ba[ext=m4a]/ba").await
 }
 
 // YouTube's player needs a JavaScript runtime (yt-dlp issue #15012): our own Deno (tools.rs) if it's
@@ -41,11 +41,11 @@ pub fn on_path(name: &str) -> bool {
         .unwrap_or(false)
 }
 
-async fn run(program: impl AsRef<OsStr>, target: String, label: &str) -> Result<String, String> {
+async fn run(program: impl AsRef<OsStr>, target: String, label: &str, format: &str) -> Result<String, String> {
     let query = label;
     let mut cmd = tokio::process::Command::new(program.as_ref());
     cmd.arg(target)
-        .args(["-g", "-f", "ba[ext=m4a]/ba", "--no-playlist", "--no-warnings"])
+        .args(["-g", "-f", format, "--no-playlist", "--no-warnings"])
         .args(js_runtime_args())
         .args(crate::tools::cache_args())
         .envs(crate::tools::cache_env())
@@ -88,7 +88,21 @@ async fn run(program: impl AsRef<OsStr>, target: String, label: &str) -> Result<
 /// The audio of one YouTube video (the best M4A, or the best audio of any kind)
 pub async fn resolve_video(video_id: &str) -> Result<String, String> {
     // always inside a URL, so an id can never be read as an option
-    run(crate::tools::ytdlp_program(), format!("https://music.youtube.com/watch?v={video_id}"), video_id).await
+    run(crate::tools::ytdlp_program(), format!("https://music.youtube.com/watch?v={video_id}"), video_id, "ba[ext=m4a]/ba").await
+}
+
+/// A SoundCloud track's own audio without signing in to SoundCloud (yt-dlp's public access): a
+/// plain download if there is one, else its HLS stream. Only soundcloud.com track links are taken.
+pub async fn resolve_soundcloud(url: &str) -> Result<String, String> {
+    if !soundcloud_link(url) {
+        return Err("Only a SoundCloud track's link can be played this way.".into());
+    }
+    run(crate::tools::ytdlp_program(), url.to_string(), url, "ba[protocol=https]/ba[protocol=http]/ba").await
+}
+
+fn soundcloud_link(url: &str) -> bool {
+    let rest = url.strip_prefix("https://soundcloud.com/").or_else(|| url.strip_prefix("https://m.soundcloud.com/"));
+    rest.is_some_and(|r| !r.is_empty() && r.len() < 300 && r.chars().all(|c| c.is_ascii_alphanumeric() || "-_/.%".contains(c)) && r.contains('/'))
 }
 
 /// What's installed: yt-dlp's version (if it runs), the JavaScript runtimes, whether they're our
@@ -171,5 +185,14 @@ mod tests {
     #[tokio::test]
     async fn empty_query_is_refused() {
         assert!(resolve_with("yt-dlp", "   ").await.is_err());
+    }
+
+    #[test]
+    fn soundcloud_links_only() {
+        assert!(super::soundcloud_link("https://soundcloud.com/artist/a-song"));
+        assert!(!super::soundcloud_link("https://soundcloud.com/artist"));
+        assert!(!super::soundcloud_link("https://soundcloud.com/a/b?x=--exec"));
+        assert!(!super::soundcloud_link("https://evil.com/soundcloud.com/a/b"));
+        assert!(!super::soundcloud_link("--exec=calc"));
     }
 }

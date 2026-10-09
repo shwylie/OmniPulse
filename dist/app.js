@@ -1719,6 +1719,23 @@ async function startStream(t) {
   }
   // Go+: the full song from YouTube Music (or Spotify), never SoundCloud's 30 seconds
   if (isPreview(t)) { await playFullElsewhere(t, mine, "Go+ track"); return; }
+  // not signed in to SoundCloud (a friend in your Jam, say): the track's own audio through yt-dlp
+  if (meId === null && /^https:\/\/(m\.)?soundcloud\.com\//.test(t.permalink_url || "") && ytAvailable()) {
+    try {
+      const url = await invoke("sc_ytdlp", { url: String(t.permalink_url).split(/[?#]/)[0] });
+      if (mine !== streamToken) return;
+      await tryStream(url, /\.m3u8(\?|$)/i.test(url), null);
+      if (mine !== streamToken) return;
+      const full = t.full_duration || t.duration || 0;
+      const got = isFinite(audio.duration) ? audio.duration * 1000 : 0;
+      if (got > 0 && got < 35000 && full > 60000) { audio.pause(); await playFullElsewhere(t, mine, "SoundCloud only had a preview"); return; }
+      say("");
+      return;
+    } catch (e) {
+      if (mine !== streamToken) return;
+      throw new Error("not signed in to SoundCloud, and yt-dlp couldn't get it either (" + String(e && e.message ? e.message : e).replace(/^Error: /, "") + ")");
+    }
+  }
   const info = await invoke("stream_url", { id: String(t.id) });
   if (mine !== streamToken) return;
   const failures = [];
