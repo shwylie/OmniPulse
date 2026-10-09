@@ -1089,11 +1089,12 @@ function startList(list, i, shuffle, name) {
     if (kept.length) { list = kept; i = picked ? list.indexOf(picked) : 0; }
   }
   // your Library and playlists: shuffled, recent plays are spaced out instead of left out (and played
-  // in order, they play as they are)
+  // in order, they play as they are). With repeat on, nothing is held back: you asked to hear it again.
   queueSpaced = view === "likes" || view === "playlist";
+  const holdBack = repeatMode === "off";
   // Avoid Recent Plays: what you heard lately is left out of what plays from a list (not the track you
   // picked, and not from a search); a list that's nearly all recent plays as it is
-  if (!queueSpaced && avoidRecent() && view !== "search" && list.length > 1) {
+  if (holdBack && !queueSpaced && avoidRecent() && view !== "search" && list.length > 1) {
     const picked = shuffle ? null : list[i];
     const rest = withoutRecent(list.filter((t) => t !== picked), 3);
     if (rest.length < list.length - (picked ? 1 : 0)) {
@@ -1108,7 +1109,7 @@ function startList(list, i, shuffle, name) {
     i = Math.max(0, list.indexOf(picked));
   }
   queue = list.slice();
-  if (shuffle) { queue = shuffledOrder(queue); if (queueSpaced) queue = spaceRecent(queue); i = 0; }   // fair: long-unheard tracks first (js/shuffle.js)
+  if (shuffle) { queue = shuffledOrder(queue); if (queueSpaced && holdBack) queue = spaceRecent(queue); i = 0; }   // fair: long-unheard tracks first (js/shuffle.js)
   qi = i;
   if (shuffleOn && !shuffle) shuffleUpcoming();
   playCurrent();

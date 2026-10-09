@@ -1191,7 +1191,8 @@ fn recent_window(prefs: &serde_json::Value) -> u64 {
 }
 
 fn spacing(a: &App) -> Option<(u64, u64)> {
-    a.queue_spaced.then(|| (recent_window(&a.web.prefs), now_ms()))
+    // (with repeat on, nothing is held back)
+    (a.queue_spaced && a.repeat == "off").then(|| (recent_window(&a.web.prefs), now_ms()))
 }
 
 fn pref_on(prefs: &serde_json::Value, key: &str) -> bool {
@@ -2666,7 +2667,7 @@ fn main() -> Result<(), slint::PlatformError> {
             let a = s.borrow();
             let spaced = a.page == "library" || a.page == "playlist";
             let list = queue::fair_shuffle(a.page_tracks.clone(), &a.web.last_played);
-            (if spaced { queue::space_recent(list, &a.web.last_played, recent_window(&a.web.prefs), now_ms()) } else { list }, spaced)
+            (if spaced && a.repeat == "off" { queue::space_recent(list, &a.web.last_played, recent_window(&a.web.prefs), now_ms()) } else { list }, spaced)
         };
         {
             let mut a = s.borrow_mut();
