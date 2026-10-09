@@ -189,17 +189,27 @@ const REQ_SAME_SONG_PHRASES = /\b(radio (edit|mix|version)|single (edit|version)
 const REQ_VERSION_MARK = /\b(remix|rmx|bootleg|boot|flip|vip|mash ?up|cover|live|acoustic|instrumental|sped ?up|slowed|nightcore|karaoke|rework|refix|re-?edit|dub|edit|mix|version|vs)\b/i;
 const reqIsVersion = (s) => REQ_VERSION_MARK.test(String(s || "").replace(REQ_SAME_SONG_PHRASES, " "));
 
+// Whether every word asked for is in a track's title or artist (more words are fine)
+function reqHasAll(t, q) {
+  const have = new Set(reqWords((t.title || "") + " " + artistName(t)));
+  return reqWords(q).every((w) => have.has(w));
+}
+
 // The best of a search for what was asked for, and how good (lower is better): the song itself that
-// you like, the song itself, one you like, then anything. Unless a version was asked for ("... remix"),
-// other versions only come after the song itself.
+// you like, the song itself, one with every word asked for in it, one you like, then anything. Unless a
+// version was asked for ("... remix"), other versions only come after the song itself; but one with
+// every word in it beats one without them ("ghosts n stuff ginsu" is Ginsu's mashup, not the original).
 function reqRank(found, asked, isLink) {
   if (isLink) return found.length ? { t: found[0], tier: 0 } : null;
   const wantVersion = reqIsVersion(asked);
   const top = found.slice(0, 10).filter((x) => wantVersion || !reqIsVersion(x.title));
   const same = (x) => reqSameSong(x, asked);
+  const all = (x) => reqHasAll(x, asked);
   const tiers = [
     top.slice(0, 5).find((x) => same(x) && isLikedTrack(x)),
     top.find(same),
+    top.find(all),
+    found.slice(0, 10).find(all),
     top.slice(0, 5).find(isLikedTrack),
     top[0],
     found.slice(0, 5).find(isLikedTrack),
@@ -297,7 +307,11 @@ async function handleSongRequest(q, user) {
   if (!isLink) t = await reqPreferRadio(t, found, asked, order, finders);
   if (!safeOk(t)) return { ok: false, message: reqMsg("notSafe", base) };
   const vars = Object.assign({ title: t.title, artist: artistName(t) }, base);
-  if (queue.slice(Math.max(qi, 0)).some((x) => x.id === t.id)) return { ok: false, message: reqMsg("duplicate", vars) };
+  // already coming up: it moves up to play next (after the other requests), unless it's playing or
+  // someone's requested it already
+  const at = queue.findIndex((x, k) => k > qi && x.id === t.id);
+  if ((qi >= 0 && queue[qi] && queue[qi].id === t.id) || (at > qi && queue[at].requestedBy)) return { ok: false, message: reqMsg("duplicate", vars) };
+  if (at > qi) t = queue.splice(at, 1)[0];
   t.requestedBy = who;
   t.requestedAt = Date.now();   // (which is their last, for !wrongsong)
   addToQueue(t);
