@@ -64,8 +64,10 @@ async function castStart(d) {
     cast.on = true;
     cast.devPaused = false;
     out2MainMute(true);
+    // OmniPulse Offset rests while casting (js/output2.js), and comes back after
+    if (prefs.out2On) { out2Apply(); say("Casting to " + d.name + ". OmniPulse Offset is paused until you stop."); }
     castPaint();
-    say("Casting to " + d.name + ". It plays there a moment after it does here.");
+    if (!prefs.out2On) say("Casting to " + d.name + ". It plays there a moment after it does here.");
   } catch (e) {
     castTapStop();
     cast.on = false;
@@ -82,6 +84,7 @@ function castEnd(note) {
   if (cast.gate) cast.gate(false);
   castTapStop();
   out2MainMute(false);
+  if (prefs.out2On) out2Apply();   // OmniPulse Offset back, as it was
   cast.level = null;
   const name = cast.device ? cast.device.name : "the device";
   cast.device = null;

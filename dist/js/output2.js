@@ -102,9 +102,12 @@ function out2Teardown() {
 }
 
 async function out2Apply() {
-  const on = !!prefs.out2On;
-  $("out2On").checked = on;
-  $("out2Body").hidden = !on;
+  // (while casting it rests: the sound is on the device, so it would only echo; it's back after)
+  const casting = typeof cast !== "undefined" && cast.on;
+  const on = !!prefs.out2On && !casting;
+  $("out2On").checked = !!prefs.out2On;
+  $("out2Body").hidden = !prefs.out2On;
+  if (prefs.out2On && casting) $("out2Note").textContent = "Paused while you're casting. It comes back when casting ends.";
   const offset = Math.max(-OUT2_MAX_MS, Math.min(OUT2_MAX_MS, Number(prefs.out2Offset) || 0));
   $("out2Offset").value = String(offset);
   $("out2Vol").value = String(Math.round((prefs.out2Volume ?? 1) * 100));
@@ -116,7 +119,7 @@ async function out2Apply() {
   // Discord & OBS Capture goes off while this is on, and back on after: with both, sharing the
   // window shares the sound twice (an echo)
   if (on) nativeOutStop(); else nativeOutStart();
-  if (!on) { out2Teardown(); $("out2Note").textContent = ""; return; }
+  if (!on) { out2Teardown(); if (!casting) $("out2Note").textContent = ""; return; }
   try {
     if (!out2.delay) {
       await ctx.audioWorklet.addModule("js/cast-worklet.js");
