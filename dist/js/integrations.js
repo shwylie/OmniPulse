@@ -25,7 +25,8 @@ const tStamp = (ms) => { const s = Math.max(0, Math.floor(ms / 1000)); return Ma
 // The buttons other people see under your status (up to two). Listen along opens the track at about
 // where you are (SoundCloud links can say where to start; Spotify's can't, so it just opens the track).
 function presenceButtons(t, joinUrl) {
-  const link = t.sharing === "private" ? "" : t.permalink_url || "";
+  // (YouTube Music songs as plain YouTube links, which open for anyone, saved ones included)
+  const link = t.sharing === "private" ? "" : String(t.permalink_url || "").replace(/^https:\/\/music\.youtube\.com\//, "https://www.youtube.com/");
   // in your Jam: friends ask to join it (you let them in from the Jam button)
   if (togetherOn() && prefs.presAsk && together.role === "host" && together.kind === "jam" && together.code) {
     const out = [{ label: "Ask to join", url: relayUrl() + "/ask/" + together.code }];

@@ -162,7 +162,7 @@ pub async fn presence_set(
         // Buttons other people can click (Discord allows two; labels up to 32 characters)
         let ok_url = |u: &str| {
             u.len() <= 512
-                && (u.starts_with("https://open.spotify.com/") || u.starts_with("https://soundcloud.com/") || u.starts_with("https://www.soundcloud.com/") || u.starts_with("https://music.youtube.com/"))
+                && (u.starts_with("https://open.spotify.com/") || u.starts_with("https://soundcloud.com/") || u.starts_with("https://www.soundcloud.com/") || u.starts_with("https://music.youtube.com/") || u.starts_with("https://www.youtube.com/"))
         };
         let list: Vec<Value> = buttons
             .unwrap_or_default()

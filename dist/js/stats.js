@@ -169,7 +169,7 @@ function statTrack(x) {
   }
   const base = { id: x.id, title: x.title, duration: x.ms || 0, artwork_url: x.art || "", genre: x.genre || "", album: x.album || "" };
   if (x.src === "spotify") return tidyTrack(Object.assign(base, { source: "spotify", uri: "spotify:track:" + id.replace(/^sp:/, ""), displayArtist: x.artist, user: { username: x.artist } }));
-  if (x.src === "youtube") { const v = id.replace(/^yt:/, ""); return tidyTrack(Object.assign(base, { source: "youtube", ytId: v, user: { username: x.artist }, permalink_url: "https://music.youtube.com/watch?v=" + v })); }
+  if (x.src === "youtube") { const v = id.replace(/^yt:/, ""); return tidyTrack(Object.assign(base, { source: "youtube", ytId: v, user: { username: x.artist }, permalink_url: "https://www.youtube.com/watch?v=" + v })); }
   if (x.src === "local") return Object.assign(base, { source: "local", user: { username: x.artist }, missing: true });
   return tidyTrack(Object.assign(base, { kind: "track", user: { username: x.artist } }));
 }

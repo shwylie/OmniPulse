@@ -76,7 +76,7 @@ async function findArtistOn(plat, name) {
   }
   if (plat === "youtube") {
     const a = (await invoke("yt_artists", { query: name })).find((x) => sameArtist(x.name, name));
-    return a ? { id: a.id, name: a.name, img: a.thumb, followers: a.subscribers, url: "https://music.youtube.com/channel/" + a.id } : null;
+    return a ? { id: a.id, name: a.name, img: a.thumb, followers: a.subscribers, url: "https://www.youtube.com/channel/" + a.id } : null;
   }
   return null;
 }

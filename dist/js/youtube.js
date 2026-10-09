@@ -20,7 +20,7 @@ function ytTrack(x) {
     album: x.album || "",
     duration: x.duration_ms || 0,
     artwork_url: x.thumb || "",
-    permalink_url: "https://music.youtube.com/watch?v=" + x.id,
+    permalink_url: "https://www.youtube.com/watch?v=" + x.id,
   });
 }
 
@@ -311,6 +311,8 @@ let ytSetupTimer = null;
 let ytAutoTried = false;   // set up by itself once per run; after a failure it waits for Try again
 
 const ytWanted = () => prefs.ytOn !== false;
+// A song's link is plain YouTube (it opens for anyone); you open it in YouTube Music
+const ytMusicLink = (u) => String(u || "").replace(/^https:\/\/www\.youtube\.com\/(watch|channel)/,"https://music.youtube.com/$1");
 const mbOf = (n) => (n / 1048576).toFixed(0);
 
 function ytPaint() {

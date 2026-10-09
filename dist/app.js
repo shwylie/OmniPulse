@@ -589,7 +589,7 @@ function isUnplayable(t) {
 }
 
 function openOnSoundCloud(t) {
-  if (t && t.permalink_url) invoke("open_url", { url: t.permalink_url }).catch((e) => say(String(e)));
+  if (t && t.permalink_url) invoke("open_url", { url: ytMusicLink(t.permalink_url) }).catch((e) => say(String(e)));
 }
 
 // ---------- track list ----------
@@ -1459,7 +1459,7 @@ $("nowToggle").addEventListener("keydown", (e) => {
 });
 $("npOpen").addEventListener("click", () => {
   const t = curTrack();
-  if (t && t.permalink_url) invoke("open_url", { url: t.permalink_url }).catch((e) => say(String(e)));
+  if (t && t.permalink_url) invoke("open_url", { url: ytMusicLink(t.permalink_url) }).catch((e) => say(String(e)));
 });
 
 // ---------- like / unlike ----------

@@ -21,11 +21,11 @@ function shareLinks(t) {
   const spLink = (uri) => "https://open.spotify.com/track/" + String(uri).split(":").pop();
   if (src === "soundcloud" && t.permalink_url && t.sharing !== "private") links.soundcloud = t.permalink_url;
   if (src === "spotify" && t.uri) links.spotify = spLink(t.uri);
-  if (src === "youtube") links.youtube = "https://music.youtube.com/watch?v=" + ytIdOf(t);
+  if (src === "youtube") links.youtube = "https://www.youtube.com/watch?v=" + ytIdOf(t);
   const m = xmMatchesLoad()[String(t.id)] || {};
   if (!links.spotify && m.spotify && m.spotify.id) links.spotify = spLink(m.spotify.id);
   const yt = ytMatchesLoad()[t.id];
-  if (!links.youtube && yt && yt.id) links.youtube = "https://music.youtube.com/watch?v=" + yt.id;
+  if (!links.youtube && yt && yt.id) links.youtube = "https://www.youtube.com/watch?v=" + yt.id;
   return links;
 }
 
