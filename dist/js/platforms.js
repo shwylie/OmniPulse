@@ -149,12 +149,14 @@ async function pullMerged() {
     }
   }));
   // the same song from another platform joins the row already shown (js/artists.js mergeDupes)
-  return mergeDupes(interleave(pages).filter((t) => !m.seen.has(t.id) && m.seen.add(t.id)), m.keys);
+  const fresh = interleave(pages).filter((t) => !m.seen.has(t.id) && m.seen.add(t.id));
+  return mergeDupes(m.rank ? m.rank(fresh) : fresh, m.keys);
 }
 
-async function loadMerged(feeds, filter) {
+// (rank: puts each batch in order, best first, as search does)
+async function loadMerged(feeds, filter, rank) {
   const tok = ++loadToken;
-  merged = { feeds, filter: filter || ((l) => l), tok, seen: new Set(), keys: new Map(), errors: [] };
+  merged = { feeds, filter: filter || ((l) => l), rank: rank || null, tok, seen: new Set(), keys: new Map(), errors: [] };
   say("Loading...");
   const got = await pullMerged();
   if (tok !== loadToken) return;

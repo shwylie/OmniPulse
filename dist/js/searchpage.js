@@ -1,12 +1,25 @@
-// Search results in categories. Under "All": Artists, Albums, Playlists and Sets & Podcasts as shelves
-// (one row each; Show all opens them up), then Tracks (the first few; Show all lists every one). The
-// filter chips show one category on its own.
+// Search results in categories. Under "All": Tracks first (the first few, best match first; Show all
+// lists every one), then Artists, Albums, Playlists and Sets & Podcasts as shelves (one row each; Show
+// all opens them up). The filter chips show one category on its own.
 //
 // A search for a genre ("house", "melodic dubstep") also gets that genre's own section first: a mix of
 // what's trending in it on every platform and its top artists, and the tracks are found by genre (as
 // SoundCloud's genre tag, Spotify's genre: filter and YouTube Music's own search) rather than by title.
 
 const SEARCH_TRACKS_SHOWN = 8;
+
+// Best match first: a track with every word searched for (in its title or artist) beats one with
+// fewer; otherwise the platforms take turns, as they came. ("ginsu ghosts n stuff" puts Ginsu's
+// "Ghosts n Stuff" above the original and its other remixes.)
+function searchRanker(q) {
+  const want = [...new Set(reqWords(q))];
+  if (!want.length) return null;
+  const score = (t) => {
+    const have = new Set(reqWords((t.title || "") + " " + artistName(t)));
+    return want.filter((w) => have.has(w)).length / want.length;
+  };
+  return (list) => list.map((t, i) => ({ t, i, s: score(t) })).sort((a, b) => b.s - a.s || a.i - b.i).map((x) => x.t);
+}
 let searchShelfTok = 0;
 let searchMixes = [];       // sets & podcasts among the search results, for their own shelf
 let tracksExpanded = false;

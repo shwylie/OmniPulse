@@ -1005,7 +1005,7 @@ function openSearch(q) {
     loadMerged(plats.map((id) => (genre && id !== "local" ? genreFeed(id, genre) : searchFeed(id, q))), (list) => {
       searchSetsFound(list);
       return list.filter((t) => (listFilter === "mixes" ? isMix(t) : !isMix(t)) && !(prefs.hideLikes && isLikedTrack(t)));
-    });
+    }, genre ? null : searchRanker(q));
   });
 }
 
