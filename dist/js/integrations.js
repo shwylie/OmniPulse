@@ -27,7 +27,7 @@ const tStamp = (ms) => { const s = Math.max(0, Math.floor(ms / 1000)); return Ma
 function presenceButtons(t, joinUrl) {
   const link = t.sharing === "private" ? "" : t.permalink_url || "";
   // in your Jam: friends ask to join it (you let them in from the Jam button)
-  if (prefs.presAsk && together.role === "host" && together.kind === "jam" && together.code) {
+  if (togetherOn() && prefs.presAsk && together.role === "host" && together.kind === "jam" && together.code) {
     const out = [{ label: "Ask to join", url: relayUrl() + "/ask/" + together.code }];
     if (link && presOpt("presLink")) out.push({ label: openLabel(t), url: link });
     return out;

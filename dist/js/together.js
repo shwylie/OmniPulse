@@ -28,6 +28,8 @@ const RELAY_URL = "https://omnipulse-jam.shwylie101.workers.dev";
 const relayUrl = () => (String(prefs.relayUrl || "").trim() || RELAY_URL).replace(/\/+$/, "");
 const myName = () => (prefs.togetherName || "").trim() || (typeof spotifyName === "string" && spotifyName) || userName || "Someone";
 const wsBase = (relay) => relay.replace(/^http/i, "ws");
+// Settings > Listen Along & Jams (on unless switched off)
+const togetherOn = () => prefs.jamsOn !== false;
 // This app's own id, so the relay can keep each person to one request waiting (and to none, once
 // declined), whatever name they give
 function myCid() {
@@ -55,11 +57,26 @@ function paintTogether() {
   const jamBtn = $("jamBtn");
   const listening = together.role === "listener";
   const hostingJam = together.role === "host" && together.kind === "jam";
-  jamBtn.hidden = (!relayUrl() && !listening) || (typeof jamAsk !== "undefined" && !!jamAsk);
-  jamBtn.textContent = listening ? (together.kind === "jam" ? "Leave Jam" : "Leave Listen Along")
-    : hostingJam ? "Jam" + (together.members.length ? " · " + together.members.length : "") + (together.joinAsks.length ? " · " + together.joinAsks.length + " waiting" : "") : "Start a Jam";
+  jamBtn.hidden = (!relayUrl() && !listening) || (typeof jamAsk !== "undefined" && !!jamAsk) || !togetherOn();
+  // the title bar says it all: your Jam (who's in, who's waiting), the one you're in, or your own
+  // request waiting for an answer
+  const waitingHere = listening && together.waiting;
+  const asking = typeof myAsk !== "undefined" && myAsk && !listening;
+  const label = waitingHere ? "Waiting for " + together.hostName + "..." : asking ? "Asked " + myAsk.host + "..."
+    : listening ? (together.kind === "jam" ? "Leave Jam" : "Leave Listen Along")
+    : hostingJam ? "Jam" + (together.members.length ? " \u00b7 " + together.members.length : "") : "Start a Jam";
+  const live = (hostingJam || (listening && together.kind === "jam")) && !waitingHere;
+  jamBtn.replaceChildren(...[
+    live ? (() => { const b = el("span", "jamBars"); b.append(el("i"), el("i"), el("i")); return b; })() : null,
+    el("span", "jamText", label),
+    hostingJam && together.joinAsks.length ? el("span", "jamWait", together.joinAsks.length + " waiting") : null,
+  ].filter(Boolean));
+  jamBtn.title = hostingJam ? (together.joinAsks.length ? "People are waiting to join: click to let them in" : "Your Jam: the invite, and who's in")
+    : waitingHere || asking ? "Your request is waiting for an answer" : listening ? "Leave and go back to your own music" : "Listen together: an invite-only Jam";
   jamBtn.classList.toggle("asks", hostingJam && together.joinAsks.length > 0);
-  jamBtn.classList.toggle("on", hostingJam || listening);
+  jamBtn.classList.toggle("on", (hostingJam || listening) && !waitingHere);
+  jamBtn.classList.toggle("live", live);
+  jamBtn.classList.toggle("pendingAsk", !!(waitingHere || asking));
   if (hostingJam && $("jamDialog").open) { $("jamMembers").textContent = together.members.length ? together.members.join(", ") : "Nobody has joined yet."; jamWaitPaint(); }
   $("togetherBar").hidden = !listening;
   // the queue is the host's: nothing to clear, no autoplay of your own
@@ -123,11 +140,12 @@ function hostMessage(m) {
 
 // ---------- asks to join your Jam: each person once, waiting until you let them in or not ----------
 function jamJoinAsked(id, name, cid) {
+  if (!togetherOn()) { try { together.ws.send(JSON.stringify({ type: "admit", id, ok: false })); } catch (e) {} return; }
   const same = together.joinAsks.find((x) => (cid && x.cid === cid) || x.id === id);
   if (same) { same.id = id; return; }   // (the same person again: once in the list, at their newest ask)
   together.joinAsks.push({ id, name, cid });
   paintTogether();
-  say(name + " wants to join your Jam.", { force: true, actions: [["Review", jamDialog]] });
+  // (the title bar's Jam button says so: "1 waiting")
 }
 
 function jamWaitPaint() {
@@ -164,6 +182,7 @@ function jamAskReply(id, ok, url, busy) {
 }
 
 function jamAsked(id, name, cid) {
+  if (!togetherOn()) { jamAskReply(id, false); return; }
   // the same person again: the one prompt they have already
   if (jamAsk && cid && jamAsk.cid === cid) { jamAsk.id = id; return; }
   // one at a time: anyone else asking meanwhile is told you're busy
@@ -211,6 +230,7 @@ let myAsk = null;   // { host, what }
 const askPendingSay = () => say("Your request " + myAsk.what + " is still waiting. You'll hear back here.", { force: true });
 
 async function jamAskSend(code, relay) {
+  if (!togetherOn()) { say("Listen Along & Jams are switched off (Settings > App & Look).", { force: true }); return; }
   if (myAsk) { askPendingSay(); return; }
   let info = null;
   try { info = await (await fetch(relay + "/api/rooms/" + code)).json(); } catch (e) {}
@@ -221,9 +241,9 @@ async function jamAskSend(code, relay) {
   myAsk = { host, what: join ? "to join " + host + "'s Jam" : "for " + host + " to start a Jam" };
   const ws = new WebSocket(wsBase(relay) + "/ws/" + code + "?role=asker&name=" + encodeURIComponent(myName()) + "&cid=" + myCid());
   let answered = false, opened = false;
-  const done = (note) => { if (answered) return; answered = true; myAsk = null; if (note) say(note, { force: true }); };
+  const done = (note) => { if (answered) return; answered = true; myAsk = null; paintTogether(); if (note) say(note, { force: true }); };
   ws.onopen = () => { opened = true; };
-  say(join ? "Asked to join " + host + "'s Jam. Waiting for them..." : "Asked " + host + " to start a Jam. Waiting for them...", { stay: true, force: true });
+  paintTogether();   // (the title bar says it's waiting)
   ws.onmessage = (e) => {
     let m; try { m = JSON.parse(e.data); } catch (x) { return; }
     if (m.type === "declined") { done(host + " didn't let you in this time."); return; }
@@ -274,7 +294,7 @@ function jamAdded(s, by) {
 
 // Listen Along for the Discord buttons: a room while you're playing with Listen along or Ask to Jam on
 async function togetherEnsureListen() {
-  const want = !!(relayUrl() && prefs.presence && (prefs.presListen !== false || prefs.presAsk) && nowPlaying() && together.role !== "listener");
+  const want = !!(togetherOn() && relayUrl() && prefs.presence && (prefs.presListen !== false || prefs.presAsk) && nowPlaying() && together.role !== "listener");
   if (!want) {
     if (together.role === "host" && together.kind === "listen") togetherEnd(true);
     return "";
@@ -332,6 +352,7 @@ async function togetherLink(link, asked) {
     return;
   }
   if (!kind || !/^[a-z0-9]{8}$/.test(code) || !relayOk(relay)) { say("That link isn't an OmniPulse invite."); return; }
+  if (!togetherOn()) { say("Listen Along & Jams are switched off (Settings > App & Look).", { force: true }); return; }
   let info = null;
   try { info = await (await fetch(relay + "/api/rooms/" + code)).json(); } catch (e) {}
   if (!info || info.error) { say("That session has ended."); return; }
@@ -359,7 +380,7 @@ function listenerMessage(m) {
   if (m.type === "waiting") {
     together.waiting = true;
     myAsk = { host: together.hostName, what: "to join " + together.hostName + "'s Jam" };
-    say("Waiting for " + together.hostName + " to let you into the Jam...", { stay: true, force: true });
+    paintTogether();   // (the title bar says it's waiting)
     return;
   }
   if (m.type === "admitted") {
@@ -549,6 +570,18 @@ function togetherInit() {
   $("togetherName").value = prefs.togetherName || "";
   $("togetherName").placeholder = myName();
   $("togetherName").addEventListener("change", () => { prefs.togetherName = $("togetherName").value.trim(); savePrefs(); });
+  $("jamsOn").checked = togetherOn();
+  $("jamsOn").addEventListener("change", async () => {
+    prefs.jamsOn = $("jamsOn").checked;
+    savePrefs();
+    // off: out of whatever's going on, and any ask waiting declined
+    if (!prefs.jamsOn) {
+      if (jamAsk) { jamAskReply(jamAsk.id, false); jamAskClose(); }
+      if (together.role) await togetherEnd(true);
+    }
+    paintTogether();
+    presenceUpdate();
+  });
   $("jamAskYes").addEventListener("click", jamAskAccept);
   $("jamAskNo").addEventListener("click", () => { if (jamAsk) jamAskReply(jamAsk.id, false); jamAskClose(); });
   $("jamBtn").addEventListener("click", () => {
