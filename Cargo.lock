@@ -5376,14 +5376,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "offset-omnipulse"
-version = "0.1.0"
-dependencies = [
- "omnipulse-pcmout",
- "tauri-winres",
-]
-
-[[package]]
 name = "ogg_pager"
 version = "0.7.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5455,6 +5447,14 @@ dependencies = [
  "windows 0.62.2",
  "windows-core 0.62.2",
  "zip",
+]
+
+[[package]]
+name = "omnipulse-offset"
+version = "0.1.0"
+dependencies = [
+ "omnipulse-pcmout",
+ "tauri-winres",
 ]
 
 [[package]]
