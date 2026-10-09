@@ -1,5 +1,5 @@
-// The OmniPulse Stream Deck plugin. Each key calls the app's remote control (Settings > Stream Deck
-// in OmniPulse, served on 127.0.0.1 by src-tauri/src/remote.rs). The app writes its port and key
+// The OmniPulse Stream Deck plugin. Each key calls the app's remote control (Settings >
+// Streaming > Stream Deck & Remote in OmniPulse, served on 127.0.0.1 by src-tauri/src/remote.rs). The app writes its port and key
 // to %APPDATA%\sc-client\remote.json while remote control is on, so there's nothing to set up here.
 // Toggle keys (play/pause, like, favourite, shuffle, repeat, sets & podcasts) show the app's state.
 

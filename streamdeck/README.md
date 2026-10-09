@@ -6,7 +6,7 @@ Play / Pause, Like, Favourite, Shuffle, Repeat and Sets & podcasts light up to s
 
 ## Install
 
-1. In OmniPulse, open Settings > App > Stream Deck and switch it on.
+1. In OmniPulse, open Settings > Streaming > Stream Deck & Remote and switch it on.
 2. Install Node.js 20 or newer, then in this folder:
 
    ```
