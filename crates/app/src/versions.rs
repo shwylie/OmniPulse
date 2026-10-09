@@ -212,7 +212,7 @@ mod tests {
     use super::*;
 
     fn sc(title: &str, artist: &str, ms: u64) -> Track {
-        Track { src: Src::SoundCloud(1), key: "1".into(), title: title.into(), artist: artist.into(), album: String::new(), ms, art: String::new(), genre: String::new(), link: String::new(), go_plus: true }
+        Track { src: Src::SoundCloud(1), key: "1".into(), title: title.into(), artist: artist.into(), album: String::new(), ms, art: String::new(), genre: String::new(), link: String::new(), go_plus: true, ..Default::default() }
     }
     fn yt(title: &str, artists: &str, ms: u64) -> YtTrack {
         YtTrack { id: "v".into(), title: title.into(), artists: artists.into(), duration_ms: ms, ..Default::default() }

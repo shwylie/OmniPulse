@@ -15,6 +15,7 @@ mod player;
 mod queue;
 mod requests;
 mod sources;
+mod streamsafe;
 mod track;
 mod webstate;
 
@@ -101,7 +102,7 @@ fn apply_filter(app: &mut App) {
     let prefs = app.web.prefs.clone();
     let favs: std::collections::HashSet<&str> = app.web.favourites.iter().map(|t| t.key.as_str()).collect();
     let fav_only = app.fav_only;
-    let shown = |t: &&Track| plat_on(&prefs, t.plat()) && (!fav_only || favs.contains(t.key.as_str()));
+    let shown = |t: &&Track| plat_on(&prefs, t.plat()) && (!fav_only || favs.contains(t.key.as_str())) && streamsafe::allowed(&prefs, t);
     let filtered: Vec<Track> = match (app.page.as_str(), chip) {
         ("library" | "rediscover" | "favourites" | "search" | "playlist", 1) => app.page_all.iter().filter(shown).filter(|t| !t.is_mix()).cloned().collect(),
         ("library" | "rediscover" | "favourites" | "search" | "playlist", 2) => app.page_all.iter().filter(shown).filter(|t| t.is_mix()).cloned().collect(),
@@ -430,7 +431,7 @@ fn track_from_play(p: &webstate::Play) -> Option<Track> {
         "local" => track::Src::Local(omnipulse_core::local::local_path_for(&p.id)?.to_string_lossy().into_owned()),
         _ => track::Src::SoundCloud(p.id.parse().ok()?),
     };
-    Some(Track { src, key: p.id.clone(), title: p.title.clone(), artist: p.artist.clone(), album: String::new(), ms: p.ms, art: p.art.clone(), genre: p.genre.clone(), link: String::new(), go_plus: false })
+    Some(Track { src, key: p.id.clone(), title: p.title.clone(), artist: p.artist.clone(), album: String::new(), ms: p.ms, art: p.art.clone(), genre: p.genre.clone(), link: String::new(), go_plus: false, ..Default::default() })
 }
 
 fn top_lately(web: &WebState, library: &[Track], days: u64, n: usize) -> Vec<Track> {
@@ -809,6 +810,9 @@ fn save_session(a: &App) {
 
 // ---------- playing ----------
 fn start(shared: &Shared) {
+    if safe_skip(shared) {
+        return;
+    }
     let (t, token, engine, rt, weak, resume) = {
         let mut a = shared.borrow_mut();
         let Some(t) = a.queue.current().cloned() else { return };
@@ -993,6 +997,21 @@ fn fav_toggle(shared: &Shared) {
 /// Playing from a page: a list (Library, a playlist...) becomes the queue; one track from Search
 /// takes the current one's place and leaves the rest of the queue as it was
 fn play_list(shared: &Shared, list: Vec<Track>, i: usize) {
+    let (list, i) = {
+        let a = shared.borrow();
+        if streamsafe::on(&a.web.prefs) {
+            let picked = list.get(i).map(|t| t.key.clone());
+            let list: Vec<Track> = list.into_iter().filter(|t| streamsafe::ok(&a.web.prefs, t)).collect();
+            if list.is_empty() {
+                if let Some(ui) = a.ui.upgrade() { ui.set_status("Stream-Safe Music is on, and nothing here is safe on stream.".into()); }
+                return;
+            }
+            let i = picked.and_then(|k| list.iter().position(|t| t.key == k)).unwrap_or(0);
+            (list, i)
+        } else {
+            (list, i)
+        }
+    };
     {
         let mut a = shared.borrow_mut();
         if a.page == "search" {
@@ -1112,7 +1131,8 @@ fn autoplay_fill(shared: &Shared, then_play: bool) -> bool {
         let now = now_ms();
         let ok = |within: u64| {
             let lp = &last_played;
-            move |t: &Track| (sets || !t.is_mix()) && !(avoid && lp.get(&t.key).is_some_and(|&ts| now.saturating_sub(ts) < within))
+            let prefs = &prefs;
+            move |t: &Track| (sets || !t.is_mix()) && !(avoid && lp.get(&t.key).is_some_and(|&ts| now.saturating_sub(ts) < within)) && streamsafe::allowed(prefs, t)
         };
         let mut picks = queue::take_turns(lists.clone(), last_plat, &taken, ok(window));
         if picks.is_empty() && avoid {
@@ -1387,7 +1407,8 @@ fn song_request(shared: &Shared, id: u64, q: String, user: String) {
     let (rt, weak) = (a.rt.clone(), a.ui.clone());
     drop(a);
     rt.spawn(async move {
-        let picked = requests::pick(&q, &plats, &likes, &local, prefer_radio).await;
+        let safe = { let p = prefs.clone(); move |t: &Track| streamsafe::allowed(&p, t) };
+        let picked = requests::pick(&q, &plats, &likes, &local, prefer_radio, &safe).await;
         let _ = weak.upgrade_in_event_loop(move |_| {
             SHARED.with(|s| {
                 let Some(shared) = s.borrow().clone() else { return };
@@ -1424,13 +1445,14 @@ fn song_request(shared: &Shared, id: u64, q: String, user: String) {
 /// The servers the web app's settings have on: the widget, the Stream Deck's remote, chat requests
 // ---------- Settings: the switches beyond Look ----------
 // (section, label, note, key, on unless switched off)
-const SET_ROWS: [(&str, &str, &str, &str, bool); 10] = [
+const SET_ROWS: [(&str, &str, &str, &str, bool); 11] = [
     ("Library", "Sets & Podcasts in the Queue", "Lists and autoplay include anything over 15 minutes. Off: only when you pick one.", "queueSets", false),
     ("Library", "Autoplay", "Plays similar tracks when the queue runs out.", "autoplay", true),
     ("Integrations", "SoundCloud", "Its likes, playlists and search.", "scOn", true),
     ("Integrations", "Spotify", "Its likes, playlists and search.", "spOn", true),
     ("Integrations", "YouTube Music", "Search, radio, and Go+ tracks in full.", "ytOn", true),
     ("Integrations", "Last.fm Scrobbling", "What you play goes to your Last.fm profile.", "scrobble", true),
+    ("Streaming", "Stream-Safe Music", "Only tracks under an open licence, or by artists and labels cleared for streaming, show and play.", "streamSafe", false),
     ("Streaming", "Discord Status", "Shows what you're playing on your Discord profile.", "presence", false),
     ("Streaming", "Stream Widget", "A now-playing card for OBS, with alerts.", "widget", false),
     ("Streaming", "Song Requests", "Chat asks for songs through your bot.", "req", false),
@@ -1460,6 +1482,7 @@ fn set_toggle(shared: &Shared, i: usize) {
             let on = !shared.borrow().autoplay;
             if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_autoplay(on); ui.invoke_autoplay_changed(on); }
         }
+        "streamSafe" => { let on = !streamsafe::on(&shared.borrow().web.prefs); safe_set(shared, on); }
         "scOn" | "spOn" | "ytOn" => plat_toggle(shared, match key { "spOn" => "spotify", "ytOn" => "youtube", _ => "soundcloud" }),
         _ => {
             let on = {
@@ -1483,6 +1506,89 @@ fn set_toggle(shared: &Shared, i: usize) {
         }
     }
     paint_settings(&shared.borrow());
+}
+
+// ---------- Streamer Mode and Stream-Safe Music (as the web app's) ----------
+fn streamer_step(shared: &Shared) {
+    let (private, safe) = {
+        let a = shared.borrow();
+        (integrations::set(&a.web.prefs, "streamerMode"), streamsafe::on(&a.web.prefs))
+    };
+    let set_private = |on: bool| {
+        if let Some(o) = shared.borrow_mut().web.prefs.as_object_mut() { o.insert("streamerMode".into(), serde_json::json!(on)); }
+        if std::env::var_os("OMNIPULSE_SELFTEST").is_none() { webstate::save_pref("streamerMode", serde_json::json!(on)); }
+        if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_streamer(on); }
+    };
+    if !private && !safe {
+        set_private(true);
+        if let Some(ui) = shared.borrow().ui.upgrade() {
+            ui.set_status("Streamer Mode: account names, keys and addresses are hidden. Click again to leave out copyrighted music too.".into());
+        }
+    } else if private && !safe {
+        safe_set(shared, true);
+    } else {
+        set_private(false);
+        safe_set(shared, false);
+        if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_status("Streamer Mode off.".into()); }
+    }
+}
+
+fn safe_set(shared: &Shared, on: bool) {
+    {
+        let mut a = shared.borrow_mut();
+        if let Some(o) = a.web.prefs.as_object_mut() { o.insert("streamSafe".into(), serde_json::json!(on)); }
+        if std::env::var_os("OMNIPULSE_SELFTEST").is_none() { webstate::save_pref("streamSafe", serde_json::json!(on)); }
+        a.ap_failed = None;
+        apply_filter(&mut a);
+        paint_settings(&a);
+        if let Some(ui) = a.ui.upgrade() {
+            ui.set_stream_safe(on);
+            let private = integrations::set(&a.web.prefs, "streamerMode");
+            ui.set_status(if on { format!("Streamer Mode: only music that's safe on stream shows and plays{}", if private { ", and private info is hidden." } else { "." }) } else { "Stream-Safe Music off.".to_string() }.into());
+        }
+    }
+    // what's playing now, if it isn't safe, goes
+    if on && shared.borrow().loaded && !shared.borrow().queue.current().is_some_and(|t| streamsafe::ok(&shared.borrow().web.prefs, t)) {
+        start(shared);
+    }
+}
+
+/// With Stream-Safe Music on, a track that isn't safe: on to the next one in the queue that is, or
+/// autoplay's, or a stop. True if the track was skipped.
+fn safe_skip(shared: &Shared) -> bool {
+    let (next, title) = {
+        let a = shared.borrow();
+        let Some(t) = a.queue.current() else { return false };
+        if streamsafe::allowed(&a.web.prefs, t) {
+            return false;
+        }
+        let from = a.queue.qi.unwrap_or(0);
+        (a.queue.items.iter().enumerate().skip(from + 1).find(|(_, q)| streamsafe::ok(&a.web.prefs, &q.t)).map(|(k, _)| k), t.title.clone())
+    };
+    match next {
+        Some(k) => {
+            shared.borrow_mut().queue.qi = Some(k);
+            start(shared);
+        }
+        None => {
+            // to the end: autoplay finds safe ones from there, if it's on
+            let last = shared.borrow().queue.items.len().saturating_sub(1);
+            shared.borrow_mut().queue.qi = Some(last);
+            let ap = shared.borrow().queue.current().is_some_and(|t| streamsafe::ok(&shared.borrow().web.prefs, t));
+            if ap {
+                start(shared);
+                return true;
+            }
+            let engine = shared.borrow().engine.clone();
+            engine.stop();
+            shared.borrow_mut().loaded = false;
+            if let Some(ui) = shared.borrow().ui.upgrade() {
+                ui.set_playing(false);
+                ui.set_status(format!("Stream-Safe Music: \"{title}\" isn't safe on stream, and nothing after it in the queue is.").into());
+            }
+        }
+    }
+    true
 }
 
 // ---------- musical alerts (as js/alertmedia.js): the widget says it's showing one ----------
@@ -1734,6 +1840,9 @@ fn main() -> Result<(), slint::PlatformError> {
     ui.on_plat_toggle(move |p| plat_toggle(&s, &p));
     // Streamer Mode (as the web app's): kept with the rest of this app's settings
     ui.set_streamer(integrations::set(&shared.borrow().web.prefs, "streamerMode"));
+    ui.set_stream_safe(streamsafe::on(&shared.borrow().web.prefs));
+    let s = shared.clone();
+    ui.on_streamer_step(move || streamer_step(&s));
     let s = shared.clone();
     ui.on_streamer_changed(move |on| {
         if let Some(o) = s.borrow_mut().web.prefs.as_object_mut() { o.insert("streamerMode".into(), serde_json::json!(on)); }
@@ -2088,7 +2197,7 @@ fn main() -> Result<(), slint::PlatformError> {
         let s = shared.clone();
         let started = std::time::Instant::now();
         let mut step_no = 0usize;
-        let plan: [(u64, &str); 21] = [(9, "play"), (13, "library"), (14, "scoff"), (15, "scon"), (16, "discover"), (24, "rediscover"), (27, "sets"), (31, "stats"), (35, "now"), (39, "search"), (42, "settings"), (44, "light"), (46, "artists"), (54, "artist"), (60, "autoplay"), (70, "narrow"), (72, "goplus"), (80, "tabright"), (84, "musical"), (88, "musical2"), (92, "end")];
+        let plan: [(u64, &str); 22] = [(9, "play"), (13, "library"), (14, "scoff"), (15, "scon"), (16, "discover"), (24, "rediscover"), (27, "sets"), (31, "stats"), (35, "now"), (39, "search"), (42, "settings"), (44, "light"), (46, "artists"), (54, "artist"), (60, "autoplay"), (70, "narrow"), (72, "goplus"), (80, "tabright"), (84, "musical"), (88, "musical2"), (90, "safe"), (93, "end")];
         t.start(slint::TimerMode::Repeated, std::time::Duration::from_millis(250), move || {
             let Some(&(at, what)) = plan.get(step_no) else { return };
             if started.elapsed().as_secs() < at { return; }
@@ -2155,6 +2264,12 @@ fn main() -> Result<(), slint::PlatformError> {
                     println!("selftest: musical alert: music back after it {}", !s.borrow().engine.is_paused());
                     ui.invoke_tab_align_picked("left".into());
                     let _ = std::fs::remove_file(omnipulse_core::data_dir().unwrap().join("alert-sounds").join("selftest-alert.wav"));
+                }
+                // the Streamer Mode button twice: private info, then only what is safe on stream
+                "safe" => {
+                    ui.invoke_streamer_step();
+                    ui.invoke_streamer_step();
+                    println!("selftest: stream-safe {}, rows shown {}, status \"{}\"", ui.get_stream_safe(), ui.get_rows().row_count(), ui.get_status());
                 }
                 // the track info tab at the right end, for its picture (and back after)
                 "tabright" => { ui.invoke_tab_align_picked("right".into()); println!("selftest: tab right {}", ui.get_tab_right()); }

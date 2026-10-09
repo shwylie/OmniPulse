@@ -97,6 +97,7 @@ fn default_msg(key: &str) -> &'static str {
         "perUser" => "{user}, you already have {count} requests waiting.",
         "duplicate" => "\"{title}\" is already in the queue.",
         "closed" => "Song requests are closed right now.",
+        "notSafe" => "Only music that's safe on stream plays right now, and nothing for \"{query}\" is.",
         _ => "Tell me what to play, for example: artist - song",
     }
 }
@@ -162,7 +163,7 @@ pub async fn find(plat: &str, q: &str, local: &[Track]) -> Vec<Track> {
 /// The track for a request: a liked one with every word asked for, or the first match on the first
 /// platform that has one (a liked one among its top five preferred), then a radio edit if wanted.
 /// Err is the reply's key (notFound / empty).
-pub async fn pick(q: &str, plats: &[&'static str], likes: &[Track], local: &[Track], prefer_radio: bool) -> Result<Track, &'static str> {
+pub async fn pick(q: &str, plats: &[&'static str], likes: &[Track], local: &[Track], prefer_radio: bool, safe: &(dyn Fn(&Track) -> bool + Sync)) -> Result<Track, &'static str> {
     let is_link = q.starts_with("http://") || q.starts_with("https://");
     let order: Vec<&str> = if q.contains("soundcloud.com/") {
         plats.iter().copied().filter(|p| *p == "soundcloud").collect()
@@ -188,7 +189,7 @@ pub async fn pick(q: &str, plats: &[&'static str], likes: &[Track], local: &[Tra
                 continue;
             }
             // the same song, not just one with those words in it ("Beauty and a Strobe" isn't "Strobe")
-            for t in likes.iter().filter(|t| order.contains(&t.plat()) && !t.is_mix()) {
+            for t in likes.iter().filter(|t| order.contains(&t.plat()) && !t.is_mix() && safe(t)) {
                 if same_song(t, qq) {
                     chosen = Some(t.clone());
                     asked = qq.clone();
@@ -198,9 +199,14 @@ pub async fn pick(q: &str, plats: &[&'static str], likes: &[Track], local: &[Tra
         }
     }
     if chosen.is_none() {
+        // (with Stream-Safe Music on, only what's safe; none of it at all is its own reply)
+        let mut unsafe_only = false;
         'search: for (qq, artist) in &qs {
             for p in &order {
                 found = by_artist(find(p, qq, local).await.into_iter().filter(|t| !t.is_mix()).collect(), artist);
+                let all = found.len();
+                found.retain(|t| safe(t));
+                unsafe_only |= all > 0 && found.is_empty();
                 if !found.is_empty() {
                     asked = qq.clone();
                     break 'search;
@@ -208,7 +214,7 @@ pub async fn pick(q: &str, plats: &[&'static str], likes: &[Track], local: &[Tra
             }
         }
         if found.is_empty() {
-            return Err("notFound");
+            return Err(if unsafe_only { "notSafe" } else { "notFound" });
         }
         // among the top five: the song asked for that you like, the song asked for, one you like
         chosen = Some(if is_link {
@@ -225,7 +231,7 @@ pub async fn pick(q: &str, plats: &[&'static str], likes: &[Track], local: &[Tra
             t = r;
         } else {
             for p in &order {
-                let more: Vec<Track> = find(p, &format!("{asked} radio edit"), local).await.into_iter().filter(|x| !x.is_mix()).collect();
+                let more: Vec<Track> = find(p, &format!("{asked} radio edit"), local).await.into_iter().filter(|x| !x.is_mix() && safe(x)).collect();
                 if let Some(r) = radio_pick(&more, &asked) {
                     t = r;
                     break;
@@ -241,7 +247,7 @@ mod tests {
     use super::*;
 
     fn t(title: &str, artist: &str, ms: u64) -> Track {
-        Track { src: Src::YouTube(title.into()), key: title.into(), title: title.into(), artist: artist.into(), album: String::new(), ms, art: String::new(), genre: String::new(), link: String::new(), go_plus: false }
+        Track { src: Src::YouTube(title.into()), key: title.into(), title: title.into(), artist: artist.into(), album: String::new(), ms, art: String::new(), genre: String::new(), link: String::new(), go_plus: false, ..Default::default() }
     }
 
     #[test]

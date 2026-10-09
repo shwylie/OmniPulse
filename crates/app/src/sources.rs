@@ -94,7 +94,7 @@ pub fn local_files() -> Vec<Track> {
                     art: String::new(),
                     genre: String::new(),
                     link: String::new(),
-                    go_plus: false,
+                    go_plus: false, ..Default::default()
                 })
                 .collect()
         })

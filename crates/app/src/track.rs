@@ -12,7 +12,7 @@ pub enum Src {
     Local(String),
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct Track {
     pub src: Src,
     pub key: String,
@@ -27,6 +27,16 @@ pub struct Track {
     /// a SoundCloud Go+ track: SoundCloud only gives this app its 30-second preview, so it plays from
     /// YouTube Music instead (crate::versions)
     pub go_plus: bool,
+    /// its licence, as SoundCloud gives it ("cc-by", "all-rights-reserved"...; "" from elsewhere)
+    pub licence: String,
+    /// its record label, where it's given (for Stream-Safe Music)
+    pub label: String,
+}
+
+impl Default for Src {
+    fn default() -> Src {
+        Src::Local(String::new())
+    }
 }
 
 /// Sets & Podcasts: anything over 15 minutes
@@ -116,6 +126,8 @@ impl Track {
             genre: t["genre"].as_str().unwrap_or("").to_string(),
             link: if t["sharing"].as_str() == Some("private") { String::new() } else { t["permalink_url"].as_str().unwrap_or("").to_string() },
             go_plus: t["access"].as_str() == Some("preview") || t["policy"].as_str() == Some("SNIP"),
+            licence: t["license"].as_str().unwrap_or("").to_string(),
+            label: t["label_name"].as_str().unwrap_or("").to_string(),
         }
         .tidied())
     }
@@ -135,7 +147,7 @@ impl Track {
             art: t["album"]["images"].as_array().and_then(|i| i.get(1).or(i.first())).and_then(|i| i["url"].as_str()).unwrap_or("").to_string(),
             genre: String::new(),
             link: String::new(),
-            go_plus: false,
+            go_plus: false, ..Default::default()
         }.tidied())
     }
 
@@ -150,7 +162,7 @@ impl Track {
             art: t.thumb.clone(),
             genre: String::new(),
             link: String::new(),
-            go_plus: false,
+            go_plus: false, ..Default::default()
         }
         .tidied()
     }
@@ -162,6 +174,12 @@ impl Track {
             "album": self.album, "duration": self.ms, "artwork_url": self.art, "genre": self.genre,
             "permalink_url": self.link,
         });
+        if !self.licence.is_empty() {
+            s["license"] = serde_json::json!(self.licence);
+        }
+        if !self.label.is_empty() {
+            s["label_name"] = serde_json::json!(self.label);
+        }
         if let Src::Spotify(uri) = &self.src {
             s["uri"] = serde_json::json!(uri);
         }
@@ -192,6 +210,8 @@ impl Track {
             genre: s["genre"].as_str().unwrap_or("").to_string(),
             link: s["permalink_url"].as_str().unwrap_or("").to_string(),
             go_plus: s["access"].as_str() == Some("preview") || s["policy"].as_str() == Some("SNIP"),
+            licence: s["license"].as_str().unwrap_or("").to_string(),
+            label: s["label_name"].as_str().unwrap_or("").to_string(),
         })
     }
 }
@@ -302,7 +322,7 @@ mod liked_tests {
     use super::*;
 
     fn t(src: Src, key: &str, title: &str, artist: &str) -> Track {
-        Track { src, key: key.into(), title: title.into(), artist: artist.into(), album: String::new(), ms: 0, art: String::new(), genre: String::new(), link: String::new(), go_plus: false }
+        Track { src, key: key.into(), title: title.into(), artist: artist.into(), album: String::new(), ms: 0, art: String::new(), genre: String::new(), link: String::new(), go_plus: false, ..Default::default() }
     }
 
     #[test]

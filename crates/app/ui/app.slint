@@ -524,6 +524,9 @@ export component AppWindow inherits Window {
     callback repeat-cycle();
     callback look-changed(string, float);
     callback streamer-changed(bool);
+    // the Streamer Mode button's next step: off -> private info hidden -> and safe music only -> off
+    callback streamer-step();
+    in property <bool> stream-safe;
     callback plat-toggle(string);
     callback accent-picked(int);
     callback art-accent-changed(bool);
@@ -564,13 +567,15 @@ export component AppWindow inherits Window {
                         height: 16px;
                         x: 5px;
                         y: 5px;
-                        fill: !root.streamer ? Theme.muted
+                        fill: !root.streamer && !root.stream-safe ? Theme.muted
                             : parent.phase < 1 ? #ff0033.mix(#9146ff, 1 - parent.phase)
                             : parent.phase < 2 ? #9146ff.mix(#53fc18, 2 - parent.phase)
                             : #53fc18.mix(#ff0033, 3 - parent.phase);
-                        opacity: root.streamer ? 1 : 0.55;
+                        opacity: root.streamer || root.stream-safe ? 1 : 0.55;
                     }
-                    sta-s := TouchArea { clicked => { root.streamer = !root.streamer; root.streamer-changed(root.streamer); } }
+                    // Stream-Safe Music on: a dot
+                    if root.stream-safe: Rectangle { x: 18px; y: 2px; width: 7px; height: 7px; border-radius: 3.5px; background: #53fc18; }
+                    sta-s := TouchArea { clicked => { root.streamer-step(); } }
                 }
                 // the platforms: in their colours when on, plain when off
                 if root.plats.length > 1: Rectangle {

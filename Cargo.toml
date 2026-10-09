@@ -8,3 +8,11 @@ lto = true
 codegen-units = 1
 panic = "abort"
 strip = true
+
+# Dev builds: no debug info for dependencies, and line numbers only for our own crates (full debug
+# info grew target/debug past 50 GB)
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+debug = false
