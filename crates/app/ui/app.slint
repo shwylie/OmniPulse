@@ -707,7 +707,9 @@ export component AppWindow inherits Window {
                     if root.narrow: Rectangle { height: 1px; background: Theme.line; }
                     ListView {
                         vertical-stretch: 1;
-                        for s[i] in root.sides: Rectangle {
+                        // (the last one with room below it, clear of the track tab)
+                        for s[i] in root.sides: VerticalLayout {
+                          Rectangle {
                             height: 32px;
                             border-radius: 6px;
                             background: root.side-on == i ? Theme.elevated : (sta.has-hover ? #ffffff08 : transparent);
@@ -729,6 +731,8 @@ export component AppWindow inherits Window {
                                 }
                                 sta := TouchArea { clicked => { root.side(i); } }
                             }
+                          }
+                          if i == root.sides.length - 1: Rectangle { height: 76px; }
                         }
                     }
                 }
@@ -866,7 +870,11 @@ export component AppWindow inherits Window {
                         changed first => { root.rows-in-view(self.first, self.count); }
                         changed count => { root.rows-in-view(self.first, self.count); }
                         init => { root.rows-in-view(self.first, self.count); }
-                        for r[i] in root.rows: TrackRow { item: r; index: i; compact: root.narrow || root.queue-open; lists: root.own-lists; removable: root.own-page; play => { root.play-row(i); } act(a) => { root.row-action(i, a); } }
+                        // (the last one with room below it, so it scrolls clear of the track tab)
+                        for r[i] in root.rows: VerticalLayout {
+                            TrackRow { item: r; index: i; compact: root.narrow || root.queue-open; lists: root.own-lists; removable: root.own-page; play => { root.play-row(i); } act(a) => { root.row-action(i, a); } }
+                            if i == root.rows.length - 1: Rectangle { height: 76px; }
+                        }
                     }
                     // Artists: everyone you follow, round, A to Z
                     if root.page-kind == "artists": grid := ScrollView {
