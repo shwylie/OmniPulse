@@ -792,7 +792,7 @@ function libraryList(plats) {
 }
 
 // Shows the list without losing your place (keeps as many rows loaded and the scroll position)
-// The Library's order (its sort chips): as you liked them, or by artist or title, either way
+// The Library's order (its sort chips): by artist or title, either way, or neither (as you liked them)
 const libSortOf = () => Object.assign({ by: "added", dir: 1 }, prefs.libSort);
 const sortText = (s) => String(s || "").replace(/^the\s+/i, "").trim();
 function libSorted(list) {
@@ -812,14 +812,14 @@ function libSortPaint() {
     b.setAttribute("aria-pressed", on ? "true" : "false");
     const arrow = b.querySelector(".sortArrow");
     if (arrow) arrow.textContent = on ? (dir > 0 ? " \u2191" : " \u2193") : "";
-    if (b.dataset.by !== "added") b.title = on ? (dir > 0 ? "A to Z: click for Z to A" : "Z to A: click for A to Z") : "By " + b.dataset.by;
+    b.title = on ? (dir > 0 ? "A to Z: click for Z to A" : "Z to A: click to go back to the order you liked them") : "By " + b.dataset.by;
   });
 }
 
-// a chip: another order, or the same one the other way round
+// a chip, clicked through: A to Z, Z to A, then off (as you liked them)
 function libSortPick(by) {
   const cur = libSortOf();
-  prefs.libSort = cur.by === by && by !== "added" ? { by, dir: -cur.dir } : { by, dir: 1 };
+  prefs.libSort = cur.by !== by ? { by, dir: 1 } : cur.dir > 0 ? { by, dir: -1 } : { by: "added", dir: 1 };
   savePrefs();
   libSortPaint();
   if (view === "likes") showLibrary(libraryList(activePlats("likes")), false);
