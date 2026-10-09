@@ -62,7 +62,7 @@ function joinPage(env, info, appLink) {
   <h1>${esc(title)}</h1>${now}
   ${info ? `<a class="btn open" id="open" href="${esc(appLink)}">Open in OmniPulse</a>` : ""}
   ${download ? `<a class="btn get" href="${esc(download)}">Download OmniPulse</a>` : ""}
-  <p class="small">${info ? "Have OmniPulse? It opens by itself. If nothing happens, download it, install it, then open this link again." : "Ask them to send a new link."}</p>
+  <p class="small">${info ? (download ? "Have OmniPulse? It opens by itself. If nothing happens, download it, install it, then open this link again." : "It opens in OmniPulse by itself. If nothing happens, click Open in OmniPulse.") : "Ask them to send a new link."}</p>
 </main>
 ${info ? `<script>setTimeout(function () { location.href = ${JSON.stringify(appLink)}; }, 400);</script>` : ""}
 </body></html>`;
