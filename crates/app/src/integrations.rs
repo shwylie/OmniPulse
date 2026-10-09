@@ -221,7 +221,8 @@ pub fn alerts_cfg(prefs: &Value) -> Value {
 }
 
 /// What the widget shows: the track, where it's up to, its colours, and the look set in Settings
-pub fn widget_update(prefs: &Value, t: Option<&Track>, pos_ms: u64, dur_ms: u64, playing: bool, accent: (&str, &str)) {
+/// by: who asked for it in chat ("" for none)
+pub fn widget_update(prefs: &Value, t: Option<&Track>, by: &str, pos_ms: u64, dur_ms: u64, playing: bool, accent: (&str, &str)) {
     if !set(prefs, "widget") {
         return;
     }
@@ -238,6 +239,7 @@ pub fn widget_update(prefs: &Value, t: Option<&Track>, pos_ms: u64, dur_ms: u64,
         Some(t) => json!({
             "playing": playing,
             "title": t.title, "artist": t.artist, "artwork": big_art(t), "url": t.web_link(), "platform": t.plat(),
+            "requested_by": if on(prefs, "wRequester") { by } else { "" },
             "duration_ms": if dur_ms > 0 { dur_ms } else { t.ms }, "position_ms": pos_ms,
             "updated_at": core::now_secs() * 1000 + (std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.subsec_millis() as u64).unwrap_or(0)),
             "anim": {

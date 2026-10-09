@@ -1445,7 +1445,8 @@ fn push_out(shared: &Shared, presence: bool) {
     let t = a.queue.current();
     let prefs = &a.web.prefs;
     if integrations::set(prefs, "widget") || integrations::set(prefs, "req") {
-        integrations::widget_update(prefs, t, pos, dur, playing, (&a.accent.0, &a.accent.1));
+        let by = a.queue.qi.and_then(|i| a.queue.items.get(i)).map(|q| q.by.as_str()).unwrap_or("");
+        integrations::widget_update(prefs, t, by, pos, dur, playing, (&a.accent.0, &a.accent.1));
     }
     if presence {
         integrations::presence(&a.rt, prefs, t, pos, playing);

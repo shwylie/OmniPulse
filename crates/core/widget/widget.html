@@ -359,7 +359,8 @@
 
   function fill() {
     setText($("title"), s.title);
-    setText($("artist"), s.artist || "");
+    // a song request: who asked for it, after the artist
+    setText($("artist"), (s.artist || "") + (s.requested_by ? (s.artist ? "  \u00b7  " : "") + "requested by " + s.requested_by : ""));
     const p = PLATFORMS[s.platform] || PLATFORMS.soundcloud;
     $("platIcon").setAttribute("d", p.d);
     $("platIcon").setAttribute("fill", p.color);
@@ -397,7 +398,7 @@
     if (!has) return;
     applyLook(s.design || "card", s.rounded !== false, s.anim, s.align);
     $("card").classList.toggle("paused", !s.playing);
-    const key = s.title + "\u0001" + (s.artist || "") + "\u0001" + (s.artwork || "");
+    const key = s.title + "\u0001" + (s.artist || "") + "\u0001" + (s.artwork || "") + "\u0001" + (s.requested_by || "");
     if (key !== shownKey) {
       const first = !shownKey;
       shownKey = key;

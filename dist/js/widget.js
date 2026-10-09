@@ -24,6 +24,8 @@ function widgetState() {
     playing: nowPlaying(),
     title: t.title || "",
     artist: artistName(t),
+    // who asked for it in chat (Settings: Show Who Requested It)
+    requested_by: prefs.wRequester !== false && t.requestedBy ? String(t.requestedBy) : "",
     artwork: artUrl(t, "t500x500") || "",
     url: t.permalink_url || "",
     platform: srcOf(t),
@@ -148,8 +150,9 @@ function widgetInit() {
   $("wFade").checked = prefs.wFade !== false;
   $("wScroll").checked = prefs.wScroll !== false;
   $("wSpin").checked = prefs.wSpin !== false;
+  $("wRequester").checked = prefs.wRequester !== false;
   $("wColor").value = String(prefs.wColor === undefined ? 1.2 : prefs.wColor);
-  ["wFade", "wScroll", "wSpin"].forEach((key) =>
+  ["wFade", "wScroll", "wSpin", "wRequester"].forEach((key) =>
     $(key).addEventListener("change", () => { prefs[key] = $(key).checked; savePrefs(); widgetPush(); }));
   $("wColor").addEventListener("change", () => { prefs.wColor = Number($("wColor").value); savePrefs(); widgetPush(); });
 
