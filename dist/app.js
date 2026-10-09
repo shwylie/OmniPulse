@@ -1584,6 +1584,8 @@ async function playCurrent() {
     }
   } catch (e) {
     if (e && e.name === "AbortError") return;   // skipped to another track
+    // only for signed-in adults on YouTube, with no other upload: skipped, saying why (js/youtube.js)
+    if (ytAgeBlocked(e) && curTrack() === t) { ytAgeSkip(t); return; }
     // listening along: what can't play here comes from YouTube Music, or waits for the next one
     if (together.role === "listener" && curTrack() === t) { listenerFallback(t, String(e && e.message ? e.message : e).replace(/^Error: /, "")); return; }
     say("Could not play this track: " + e);
@@ -1709,7 +1711,7 @@ async function startStream(t) {
     return;
   }
   if (srcOf(t) === "youtube") {
-    const url = await ytPlay(t);
+    const url = await ytPlayAnyUpload(t);
     if (mine !== streamToken) return;
     await tryStream(url, false, null);
     if (mine === streamToken) say("");

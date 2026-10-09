@@ -175,7 +175,8 @@ async function playViaYouTube(t, mine, note, any) {
 // Plays a track as a YouTube Music version of it (its match, or the closest one)
 async function playYouTubeVersion(t, m, mine, note) {
   t.ytVia = m.ytId;   // loudness and silences are measured on what's actually playing
-  const url = await ytPlay(m);
+  const url = await ytPlayAnyUpload(m);
+  if (m.ytVia && m !== t) t.ytVia = m.ytVia;
   if (mine !== streamToken) return true;
   await tryStream(url, false, null);
   if (mine !== streamToken) return true;
@@ -284,6 +285,27 @@ async function ytPlay(t) {
   await invoke("yt_prepare", { id: vid });
   if (!localInfo) localInfo = await invoke("local_server");
   return localUrl("yt", vid);
+}
+
+// An age-restricted video: YouTube only plays it to a signed-in adult, which yt-dlp can't be. Another
+// upload of the same song often isn't restricted (the YouTube Music "song" next to a video, a lyric
+// video...), so the closest few are tried; with none, it's skipped (ytAgeSkip) and said why.
+const ytAgeBlocked = (e) => /confirm your age|age[- ]restrict|inappropriate for some users/i.test(String(e && e.message ? e.message : e));
+async function ytPlayAnyUpload(t) {
+  try { return await ytPlay(t); } catch (e) {
+    if (!ytAgeBlocked(e)) throw e;
+    const ranked = await ytCandidates(t).catch(() => []);
+    for (const r of ranked.filter((x) => x.score >= 0.8 && ytIdOf(x.c) !== ytIdOf(t)).slice(0, 3)) {
+      try { const url = await ytPlay(r.c); t.ytVia = ytIdOf(r.c); return url; } catch (e2) { if (!ytAgeBlocked(e2)) break; }
+    }
+    throw e;
+  }
+}
+function ytAgeSkip(t) {
+  const note = 'Skipped "' + (t.title || "a song") + "\": YouTube only plays it to signed-in adults, and there's no other upload of it.";
+  if (together.role === "listener") { playStandIn(t, Math.max(0, (t.duration || 0) - hostPos()) || hostLenMs(t)); return; }
+  if (qi < queue.length - 1) step(1); else if (typeof autoplayActive === "function" && autoplayActive()) autoplayAdvance();
+  setTimeout(() => say(note, { force: true }), 1200);   // (after the next one has started)
 }
 
 // The next track's audio is looked up while this one plays, so it starts straight away
