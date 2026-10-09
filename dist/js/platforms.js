@@ -14,10 +14,10 @@ function scApply() {
 const PLATFORM_LIST = [
   { id: "soundcloud", pref: "scOn", pages: ["likes", "search", "discover", "rediscover"], available: () => lastSignedIn },
   { id: "spotify", pref: "spOn", pages: ["likes", "search", "discover", "rediscover"], available: () => spotifyUsable() },
-  { id: "local", pref: "localOn", pages: ["likes", "search", "rediscover"], available: () => localFolderList.length > 0 },
+  { id: "local", pref: "localOn", pages: ["likes", "search", "rediscover"], available: () => localFolderList.length > 0, noChip: true },
   { id: "youtube", pref: "ytOn", pages: ["likes", "search", "discover", "rediscover"], available: () => ytAvailable() },
   // an open catalogue, no account: search only, played from YouTube Music (js/musicbrainz.js)
-  { id: "musicbrainz", pref: "mbOn", pages: ["search"], available: () => ytOn() },
+  { id: "musicbrainz", pref: "mbOn", pages: ["search"], available: () => ytOn(), noChip: true },
 ];
 
 const platformOn = (p) => prefs[p.pref] !== false;
@@ -31,7 +31,8 @@ const LIST_PAGES = ["likes", "search", "discover", "rediscover"];
 const NOTHING_ON = "Nothing to show yet: switch on SoundCloud, Spotify, YouTube Music or Local music in Settings > Integrations, or with the icons in the title bar.";
 
 // Title bar: one icon per platform, in its colours while it's set up (signed in) and on; one that isn't
-// set up yet is grey, and clicking it opens its place in Settings
+// set up yet is grey, and clicking it opens its place in Settings. Local files and MusicBrainz have no
+// icon (nothing to sign in to): they switch on and off in Settings only.
 function renderPlatChips() {
   $("navDiscover").hidden = !activePlats("discover").length;
   // When the active platforms change (switched on or off, or Spotify / your files finished
@@ -51,7 +52,7 @@ function renderPlatChips() {
   const box = $("titlePlat");
   box.hidden = false;
   box.replaceChildren();
-  PLATFORM_LIST.forEach((p) => {
+  PLATFORM_LIST.filter((p) => !p.noChip).forEach((p) => {
     const ready = p.available();
     const on = ready && platformOn(p);
     const b = el("button", on ? "on" : ready ? "" : "unset");
