@@ -117,7 +117,7 @@ pub fn load() -> WebState {
         if let Some(a) = key(&v, "sc.xplaylists").as_array() {
             for p in a {
                 let tracks: Vec<Track> = p["tracks"].as_array().map(|t| t.iter().filter_map(Track::from_snapshot).collect()).unwrap_or_default();
-                s.own_playlists.push(Playlist { plat: "local", id: p["id"].as_str().unwrap_or("").to_string(), title: p["title"].as_str().unwrap_or("Playlist").to_string(), tracks: Some(tracks) });
+                s.own_playlists.push(Playlist { plat: "local", id: p["id"].as_str().unwrap_or("").to_string(), title: p["title"].as_str().unwrap_or("Playlist").to_string(), tracks: Some(tracks), own: true });
             }
         }
     }

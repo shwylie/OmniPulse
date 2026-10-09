@@ -71,7 +71,7 @@ fn rx(cell: &'static OnceLock<Regex>, src: &str) -> &'static Regex {
 const VERSION_WORDS: [&str; 15] = ["remix", "edit", "mix", "vip", "flip", "bootleg", "live", "acoustic", "instrumental", "remaster", "cover", "sped", "slowed", "nightcore", "karaoke"];
 
 /// "Artist - Song" (or Spotify's own), its artist and title, without bracketed tags
-fn guess_names(t: &Track) -> (String, String) {
+pub fn guess_names(t: &Track) -> (String, String) {
     static DASH: OnceLock<Regex> = OnceLock::new();
     static SP_SUFFIX: OnceLock<Regex> = OnceLock::new();
     static BRACKETS: OnceLock<Regex> = OnceLock::new();
@@ -99,7 +99,7 @@ fn upload_title(s: &str) -> String {
 }
 
 /// The title to match on: without "Artist - " (SoundCloud and uploads put it there), with its version
-fn match_title(t: &Track) -> String {
+pub fn match_title(t: &Track) -> String {
     static DASH: OnceLock<Regex> = OnceLock::new();
     let title = t.title.trim();
     let title = if matches!(t.src, Src::Spotify(_)) { title.to_string() } else {
@@ -117,7 +117,7 @@ fn match_words(s: &str) -> Vec<String> {
 }
 
 /// The artist is credited, or named in the title: not a cover
-fn artist_hit(t: &Track, c: &YtTrack) -> bool {
+pub fn artist_hit(t: &Track, c: &YtTrack) -> bool {
     let (ga, _) = guess_names(t);
     let artist = match_words(if ga.is_empty() { &t.artist } else { &ga });
     let place: HashSet<String> = match_words(&format!("{} {}", c.artists, c.title)).into_iter().collect();

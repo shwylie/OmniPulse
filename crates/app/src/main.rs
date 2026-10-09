@@ -9,6 +9,7 @@ mod desktop;
 mod integrations;
 mod look;
 mod marks;
+mod mirror;
 mod titles;
 mod versions;
 mod player;
@@ -96,11 +97,11 @@ struct App {
     /// tracks' measured loudness ("soundcloud:123" -> LUFS), and the equalizer's bands as shown
     loud: HashMap<String, f64>,
     eq_model: Rc<VecModel<f32>>,
+    /// the playlists "Add to Playlist" offers (yours here, then the platforms'), by id
+    add_map: Vec<String>,
 }
 
 enum Naming {
-    /// a new playlist, with these in it
-    New(Vec<Track>),
     Rename(String),
 }
 
@@ -352,11 +353,22 @@ fn paint_plats(a: &App) {
 fn paint_sides(a: &mut App) {
     let Some(ui) = a.ui.upgrade() else { return };
     let prefs = a.web.prefs.clone();
-    a.side_map = (0..a.playlists.len()).filter(|&i| plat_on(&prefs, a.playlists[i].plat) || a.playlists[i].plat == "local").collect();
+    let hidden: std::collections::HashSet<String> = prefs["hiddenPlaylists"].as_array().into_iter().flatten().filter_map(|x| x.as_str().map(String::from)).collect();
+    a.side_map = (0..a.playlists.len())
+        .filter(|&i| plat_on(&prefs, a.playlists[i].plat) || a.playlists[i].plat == "local")
+        .filter(|&i| !hidden.contains(&mirror::side_id(a.playlists[i].plat, &a.playlists[i].id)))
+        .collect();
     let sides: Vec<Side> = a.side_map.iter().map(|&i| Side { title: a.playlists[i].title.clone().into(), plat: a.playlists[i].plat.into(), own: xpl::is_own(&a.playlists[i].id) }).collect();
     ui.set_sides(ModelRc::from(Rc::new(VecModel::from(sides))));
-    let own: Vec<slint::SharedString> = a.playlists.iter().filter(|p| xpl::is_own(&p.id)).map(|p| p.title.clone().into()).collect();
-    ui.set_own_lists(ModelRc::from(Rc::new(VecModel::from(own))));
+    // Add to Playlist: yours here first, then the platforms' (one of those becomes a playlist here)
+    let mut order: Vec<usize> = a.side_map.iter().copied().filter(|&i| xpl::is_own(&a.playlists[i].id)).collect();
+    order.extend(a.side_map.iter().copied().filter(|&i| !xpl::is_own(&a.playlists[i].id) && a.playlists[i].plat != "local"));
+    let names: Vec<slint::SharedString> = order.iter().map(|&i| {
+        let p = &a.playlists[i];
+        match p.plat { "spotify" => format!("{} (Spotify)", p.title), "soundcloud" if !xpl::is_own(&p.id) => format!("{} (SoundCloud)", p.title), _ => p.title.clone() }.into()
+    }).collect();
+    a.add_map = order.iter().map(|&i| a.playlists[i].id.clone()).collect();
+    ui.set_own_lists(ModelRc::from(Rc::new(VecModel::from(names))));
 }
 
 /// Go+ tracks are listed only while YouTube Music can play them in full: switched on, and yt-dlp here
@@ -1640,6 +1652,12 @@ fn loud_pick(shared: &Shared, step: &str) {
 // ---------- your playlists on this PC (crate::xpl) ----------
 /// The playlists changed: kept, and shown again (the sidebar, the menus, and the page if it's one)
 fn xpl_changed(shared: &Shared) {
+    xpl_shown(shared);
+    sync_soon(shared, 2000);
+}
+
+/// Kept and shown again, without keeping the platforms in step (that's done already)
+fn xpl_shown(shared: &Shared) {
     let reopen = {
         let mut a = shared.borrow_mut();
         xpl::save(&a.xpl);
@@ -1654,13 +1672,179 @@ fn xpl_changed(shared: &Shared) {
     }
 }
 
-fn own_id(a: &App, k: usize) -> Option<String> {
-    a.playlists.iter().filter(|p| xpl::is_own(&p.id)).nth(k).map(|p| p.id.clone())
+/// A new playlist: made straight away, here, taking songs from any platform (and kept on SoundCloud
+/// and Spotify by itself, crate::mirror). Right-click it to rename it.
+fn pl_create(shared: &Shared, tracks: Vec<Track>) {
+    let name = {
+        let taken: std::collections::HashSet<String> = shared.borrow().playlists.iter().map(|p| p.title.clone()).collect();
+        let mut name = "New Playlist".to_string();
+        let mut n = 2;
+        while taken.contains(&name) { name = format!("New Playlist {n}"); n += 1; }
+        name
+    };
+    let id = xpl::create(&mut shared.borrow_mut().xpl, &name, &tracks);
+    xpl_changed(shared);
+    if tracks.is_empty() {
+        go(shared, Place::Playlist(id));
+    }
+    if let Some(ui) = shared.borrow().ui.upgrade() {
+        ui.set_status(format!("Created \"{name}\"{}. Right-click it in the sidebar to rename it.", if tracks.is_empty() { "" } else { " with that track in it" }).into());
+    }
+}
+
+// ---------- keeping them on the platforms (crate::mirror) ----------
+thread_local! {
+    static SYNC_TIMER: RefCell<Option<slint::Timer>> = const { RefCell::new(None) };
+    static SYNC_EVERY: RefCell<Option<slint::Timer>> = const { RefCell::new(None) };
+    static SYNC_BUSY: std::cell::Cell<(bool, bool)> = const { std::cell::Cell::new((false, false)) };
+    static SYNC_SAID: RefCell<std::collections::HashSet<String>> = RefCell::new(std::collections::HashSet::new());
+}
+
+fn sync_soon(shared: &Shared, ms: u64) {
+    let s = shared.clone();
+    let t = slint::Timer::default();
+    t.start(slint::TimerMode::SingleShot, std::time::Duration::from_millis(ms), move || sync_all(&s, false));
+    SYNC_TIMER.with(|x| *x.borrow_mut() = Some(t));
+}
+
+fn sync_plats(prefs: &serde_json::Value) -> Vec<&'static str> {
+    let mut on = Vec::new();
+    if plat_on(prefs, "soundcloud") && omnipulse_core::soundcloud::signed_in() { on.push("soundcloud"); }
+    if plat_on(prefs, "spotify") && omnipulse_core::spotify::spotify_signed_in() { on.push("spotify"); }
+    on
+}
+
+/// Every playlist here, on the platforms (pull: and what changed over there brought in)
+fn sync_all(shared: &Shared, pull: bool) {
+    // (never in the self-test: it would make playlists on your accounts)
+    if std::env::var_os("OMNIPULSE_SELFTEST").is_some() {
+        return;
+    }
+    let (busy, _) = SYNC_BUSY.with(|b| b.get());
+    if busy {
+        SYNC_BUSY.with(|b| b.set((true, true)));
+        return;
+    }
+    SYNC_BUSY.with(|b| b.set((true, false)));
+    let (all, on, rt, weak) = { let a = shared.borrow(); (a.xpl.clone(), sync_plats(&a.web.prefs), a.rt.clone(), a.ui.clone()) };
+    rt.spawn(async move {
+        let mut done = Vec::new();
+        for p in all.as_array().cloned().unwrap_or_default() {
+            let before = json_sig(&p);
+            let mut p = p;
+            let out = mirror::sync_one(&mut p, &on, pull).await;
+            done.push((before, p, out));
+        }
+        let _ = weak.upgrade_in_event_loop(move |_| SHARED.with(|s| {
+            let Some(shared) = s.borrow().clone() else { return };
+            sync_apply(&shared, done);
+            let (_, again) = SYNC_BUSY.with(|b| b.get());
+            SYNC_BUSY.with(|b| b.set((false, false)));
+            if again { sync_soon(&shared, 500); }
+        }));
+    });
+}
+
+fn json_sig(p: &serde_json::Value) -> String {
+    serde_json::json!([p["title"], p["tracks"]]).to_string()
+}
+
+fn sync_apply(shared: &Shared, done: Vec<(String, serde_json::Value, mirror::Outcome)>) {
+    let mut changed = false;
+    let mut again = false;
+    let mut hide: Vec<String> = Vec::new();
+    let mut notes: Vec<String> = Vec::new();
+    {
+        let mut a = shared.borrow_mut();
+        let Some(list) = a.xpl.as_array_mut() else { return };
+        for (before, p, out) in done {
+            let Some(mine) = list.iter_mut().find(|x| x["id"] == p["id"]) else { continue };
+            if json_sig(mine) == before {
+                *mine = p;
+                changed |= out.changed;
+            } else {
+                // changed here meanwhile: what was learned is kept, and it's written again
+                for k in ["mirrors", "made"] { if p[k].is_object() { mine[k] = p[k].clone(); } }
+                if p["follow"].is_object() { mine["follow"]["seen"] = p["follow"]["seen"].clone(); }
+                again = true;
+            }
+            hide.extend(out.hide);
+            notes.extend(out.errors);
+        }
+    }
+    if !hide.is_empty() {
+        let mut a = shared.borrow_mut();
+        let mut h: Vec<serde_json::Value> = a.web.prefs["hiddenPlaylists"].as_array().cloned().unwrap_or_default();
+        for x in hide { if !h.iter().any(|y| y.as_str() == Some(x.as_str())) { h.push(serde_json::json!(x)); } }
+        if let Some(o) = a.web.prefs.as_object_mut() { o.insert("hiddenPlaylists".into(), serde_json::json!(h.clone())); }
+        webstate::save_pref("hiddenPlaylists", serde_json::json!(h));
+    }
+    xpl::save(&shared.borrow().xpl);
+    if changed { xpl_shown(shared); } else { paint_sides(&mut shared.borrow_mut()); }
+    if let Some(n) = notes.into_iter().find(|n| SYNC_SAID.with(|s| s.borrow_mut().insert(n.clone()))) {
+        if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_status(n.into()); }
+    }
+    if again { sync_soon(shared, 2000); }
+}
+
+fn hidden_set(shared: &Shared, id: &str, hide: bool) {
+    let mut a = shared.borrow_mut();
+    let mut h: Vec<serde_json::Value> = a.web.prefs["hiddenPlaylists"].as_array().cloned().unwrap_or_default();
+    h.retain(|y| y.as_str() != Some(id));
+    if hide { h.push(serde_json::json!(id)); }
+    if let Some(o) = a.web.prefs.as_object_mut() { o.insert("hiddenPlaylists".into(), serde_json::json!(h.clone())); }
+    if std::env::var_os("OMNIPULSE_SELFTEST").is_none() { webstate::save_pref("hiddenPlaylists", serde_json::json!(h)); }
+}
+
+/// A song added to one of the platforms' playlists: as it is, if it's yours and the song is from
+/// there; otherwise that playlist becomes one here (crate::mirror::adopt)
+fn pl_add_platform(shared: &Shared, p: sources::Playlist, t: Track) {
+    let (rt, weak) = { let a = shared.borrow(); (a.rt.clone(), a.ui.clone()) };
+    let native = p.own && t.plat() == p.plat;
+    rt.spawn(async move {
+        if native {
+            let done = match &t.src {
+                track::Src::Spotify(uri) => omnipulse_core::spotify::spotify_api("POST".into(), format!("/playlists/{}/items", p.id), Some(serde_json::json!({ "uris": [uri] }))).await.map(|_| ()),
+                track::Src::SoundCloud(n) => {
+                    let n = *n;
+                    match omnipulse_core::soundcloud::api_get(format!("/playlists/{}?show_tracks=true", p.id)).await {
+                        Ok(v) => {
+                            let mut ids: Vec<u64> = v["tracks"].as_array().into_iter().flatten().filter_map(|x| x["id"].as_u64()).collect();
+                            if !ids.contains(&n) { ids.push(n); }
+                            let tracks: Vec<serde_json::Value> = ids.iter().map(|x| serde_json::json!({ "id": x })).collect();
+                            omnipulse_core::soundcloud::playlist_write("PUT".into(), format!("/playlists/{}", p.id), Some(serde_json::json!({ "playlist": { "tracks": tracks } }))).await.map(|_| ())
+                        }
+                        Err(e) => Err(e),
+                    }
+                }
+                _ => Ok(()),
+            };
+            let note = match done { Ok(()) => format!("Added to {}.", p.title), Err(e) => format!("Could not add to the playlist: {e}") };
+            let _ = weak.upgrade_in_event_loop(move |ui| ui.set_status(note.into()));
+            return;
+        }
+        let copy = mirror::adopt(&p).await;
+        let _ = weak.upgrade_in_event_loop(move |ui| SHARED.with(|s| {
+            let Some(shared) = s.borrow().clone() else { return };
+            let id = copy["id"].as_str().unwrap_or("").to_string();
+            {
+                let mut a = shared.borrow_mut();
+                if let Some(list) = a.xpl.as_array_mut() { list.insert(0, copy); } else { a.xpl = serde_json::json!([copy]); }
+                xpl::add(&mut a.xpl, &id, std::slice::from_ref(&t));
+            }
+            hidden_set(&shared, &mirror::side_id(p.plat, &p.id), true);
+            xpl_changed(&shared);
+            let where_ = if p.plat == "spotify" { "Spotify" } else { "SoundCloud" };
+            // (said once: from now on it's a playlist here)
+            ui.set_status(if p.own { format!("\"{}\" now takes songs from any platform, and stays up to date on {where_}.", p.title) } else { format!("You can't edit this playlist on {where_}, so your changes are saved on this PC only.") }.into());
+            let showing = matches!(&shared.borrow().here, Some(Place::Playlist(x)) if *x == p.id);
+            if showing { go(&shared, Place::Playlist(id)); }
+        }));
+    });
 }
 
 fn name_ask(shared: &Shared, naming: Naming) {
     let (head, ok, text) = match &naming {
-        Naming::New(_) => ("New playlist", "Create", String::new()),
         Naming::Rename(id) => ("Rename playlist", "Save", shared.borrow().playlists.iter().find(|p| &p.id == id).map(|p| p.title.clone()).unwrap_or_default()),
     };
     shared.borrow_mut().naming = Some(naming);
@@ -1680,16 +1864,6 @@ fn name_done(shared: &Shared, name: &str) {
     let Some(naming) = shared.borrow_mut().naming.take() else { return };
     if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_name_open(false); }
     match naming {
-        Naming::New(tracks) => {
-            let id = xpl::create(&mut shared.borrow_mut().xpl, &name, &tracks);
-            xpl_changed(shared);
-            if tracks.is_empty() {
-                go(shared, Place::Playlist(id));
-            }
-            if let Some(ui) = shared.borrow().ui.upgrade() {
-                ui.set_status(format!("Created \"{name}\"{}", if tracks.is_empty() { ". Add tracks with the playlist button, or right-click any track." } else { " with that track in it." }).into());
-            }
-        }
         Naming::Rename(id) => {
             xpl::rename(&mut shared.borrow_mut().xpl, &id, &name);
             xpl_changed(shared);
@@ -1698,7 +1872,12 @@ fn name_done(shared: &Shared, name: &str) {
 }
 
 fn pl_add(shared: &Shared, k: usize, t: Track) {
-    let Some(id) = own_id(&shared.borrow(), k) else { return };
+    let Some(id) = shared.borrow().add_map.get(k).cloned() else { return };
+    if !xpl::is_own(&id) {
+        let p = shared.borrow().playlists.iter().find(|p| p.id == id).cloned();
+        if let Some(p) = p { pl_add_platform(shared, p, t); }
+        return;
+    }
     let title = shared.borrow().playlists.iter().find(|p| p.id == id).map(|p| p.title.clone()).unwrap_or_default();
     let n = xpl::add(&mut shared.borrow_mut().xpl, &id, std::slice::from_ref(&t));
     xpl_changed(shared);
@@ -1709,7 +1888,7 @@ fn pl_add(shared: &Shared, k: usize, t: Track) {
 
 fn pl_row_action(shared: &Shared, act: &str, t: Track) {
     match act {
-        "plnew" => name_ask(shared, Naming::New(vec![t])),
+        "plnew" => pl_create(shared, vec![t]),
         "plremove" => {
             let id = match &shared.borrow().here { Some(Place::Playlist(id)) if xpl::is_own(id) => id.clone(), _ => return };
             xpl::remove(&mut shared.borrow_mut().xpl, &id, &t.key);
@@ -1736,6 +1915,16 @@ fn side_action(shared: &Shared, i: usize, act: &str) {
     if !sure {
         return;
     }
+    let gone = shared.borrow().xpl.as_array().and_then(|l| l.iter().find(|x| x["id"].as_str() == Some(p.id.as_str())).cloned()).unwrap_or_default();
+    for plat in mirror::PLATS {
+        if gone["made"][plat].as_bool() == Some(true) {
+            if let Some(mid) = gone["mirrors"][plat].as_str().map(String::from) {
+                hidden_set(shared, &mirror::side_id(plat, &mid), false);
+                if std::env::var_os("OMNIPULSE_SELFTEST").is_none() { shared.borrow().rt.spawn(async move { mirror::remove(plat, &mid).await; }); }
+            }
+        }
+    }
+    if let Some(from) = gone["from"].as_str() { hidden_set(shared, from, false); }
     xpl::delete(&mut shared.borrow_mut().xpl, &p.id);
     let was_open = matches!(&shared.borrow().here, Some(Place::Playlist(id)) if *id == p.id);
     xpl_changed(shared);
@@ -2109,7 +2298,7 @@ fn main() -> Result<(), slint::PlatformError> {
         here: None, history: Vec::new(), artists: None, fav_only: false, shuffle_on: false, shuffle_backup: None, repeat: "off".into(), closest: None,
         autoplay: true, ap_busy: false, ap_then_play: false, ap_failed: None, resume_ms: None, loaded: false, accent: ("#8e9bff".into(), "#8e9bff".into()), started_secs: 0, token: 0,
         lyrics: Vec::new(), heard: (String::new(), 0.0, false), last_pos: 0, xpl: xpl::load(), naming: None,
-        loud: HashMap::new(), eq_model: Rc::new(VecModel::from(vec![0.0f32; 10])),
+        loud: HashMap::new(), eq_model: Rc::new(VecModel::from(vec![0.0f32; 10])), add_map: Vec::new(),
     }));
     // (before anything is listed: Go+ tracks only while YouTube Music can play them)
     go_plus_set(&shared.borrow().web.prefs);
@@ -2155,7 +2344,7 @@ fn main() -> Result<(), slint::PlatformError> {
         if let Some((_, g)) = sound::EQ_PRESETS.get(i as usize) { sound_set(&s, "eq", serde_json::json!(g)); }
     });
     let s = shared.clone();
-    ui.on_pl_new(move || name_ask(&s, Naming::New(Vec::new())));
+    ui.on_pl_new(move || pl_create(&s, Vec::new()));
     let s = shared.clone();
     ui.on_name_done(move |name| name_done(&s, &name));
     let s = shared.clone();
@@ -2163,7 +2352,7 @@ fn main() -> Result<(), slint::PlatformError> {
     let s = shared.clone();
     ui.on_bar_pl(move |k| {
         let Some(t) = s.borrow().queue.current().cloned() else { return };
-        if k < 0 { name_ask(&s, Naming::New(vec![t])); } else { pl_add(&s, k as usize, t); }
+        if k < 0 { pl_create(&s, vec![t]); } else { pl_add(&s, k as usize, t); }
     });
     let s = shared.clone();
     ui.on_backup_restore(move || backup_restore(&s));
@@ -2230,6 +2419,11 @@ fn main() -> Result<(), slint::PlatformError> {
                         paint_sides(&mut a);
                         paint_plats(&a);
                     }
+                    sync_all(&shared, true);
+                    let s2 = shared.clone();
+                    let every = slint::Timer::default();
+                    every.start(slint::TimerMode::Repeated, std::time::Duration::from_secs(600), move || sync_all(&s2, true));
+                    SYNC_EVERY.with(|x| *x.borrow_mut() = Some(every));
                     if shared.borrow().page == "library" {
                         shared.borrow_mut().here = Some(Place::Page("library".into()));
                         open_page(&shared, "library");
@@ -2606,7 +2800,9 @@ fn main() -> Result<(), slint::PlatformError> {
                 // a playlist on this PC: named (its picture), made with a track in it, another added, deleted
                 "xpl" => {
                     let t = s.borrow().library.first().cloned();
-                    if let Some(t) = t { name_ask(&s, Naming::New(vec![t])); }
+                    if let Some(t) = t { pl_create(&s, vec![t]); }
+                    let id = xpl::playlists(&s.borrow().xpl).first().map(|p| p.id.clone());
+                    if let Some(id) = id { name_ask(&s, Naming::Rename(id)); }
                 }
                 "xpl2" => {
                     name_done(&s, "Self-test list");

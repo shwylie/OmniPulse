@@ -11,6 +11,8 @@ pub struct Playlist {
     pub title: String,
     /// the web app's own playlists come with their tracks
     pub tracks: Option<Vec<Track>>,
+    /// yours to change (one you only follow, or anyone else's, isn't)
+    pub own: bool,
 }
 
 /// Go+ tracks in SoundCloud's lists: only while YouTube Music can play them in full (set from main)
@@ -108,16 +110,17 @@ pub async fn playlists() -> Vec<Playlist> {
         if let Ok(v) = core::soundcloud::api_get("/me/playlists?limit=200&linked_partitioning=true&show_tracks=false".into()).await {
             for p in items(&v) {
                 if let (Some(id), Some(title)) = (p["id"].as_u64(), p["title"].as_str()) {
-                    out.push(Playlist { plat: "soundcloud", id: id.to_string(), title: title.to_string(), tracks: None });
+                    out.push(Playlist { plat: "soundcloud", id: id.to_string(), title: title.to_string(), tracks: None, own: true });
                 }
             }
         }
     }
     if core::spotify::spotify_signed_in() {
+        let me = core::spotify::spotify_api("GET".into(), "/me".into(), None).await.ok().and_then(|m| m["id"].as_str().map(String::from)).unwrap_or_default();
         if let Ok(v) = core::spotify::spotify_api("GET".into(), "/me/playlists?limit=50".into(), None).await {
             for p in v["items"].as_array().cloned().unwrap_or_default() {
                 if let (Some(id), Some(title)) = (p["id"].as_str(), p["name"].as_str()) {
-                    out.push(Playlist { plat: "spotify", id: id.to_string(), title: title.to_string(), tracks: None });
+                    out.push(Playlist { plat: "spotify", id: id.to_string(), title: title.to_string(), tracks: None, own: !me.is_empty() && p["owner"]["id"].as_str() == Some(me.as_str()) });
                 }
             }
         }
@@ -296,6 +299,11 @@ pub async fn related(t: &Track) -> Vec<Track> {
 // ---------- autoplay: tracks like the one playing, from each platform ----------
 pub async fn sc_search(q: &str, limit: usize) -> Vec<Track> {
     core::soundcloud::api_get(sc_path(format!("/tracks?q={}&limit={limit}&access=playable&linked_partitioning=true", urlencode(q)))).await.map(|v| items(&v).iter().filter_map(Track::soundcloud).collect()).unwrap_or_default()
+}
+
+/// A SoundCloud search with its Go+ uploads in it (for matching songs from other platforms)
+pub async fn sc_search_previews(q: &str, limit: usize) -> Vec<Track> {
+    core::soundcloud::api_get(format!("/tracks?q={}&limit={limit}&access=playable,preview&linked_partitioning=true", urlencode(q))).await.map(|v| items(&v).iter().filter_map(Track::soundcloud).collect()).unwrap_or_default()
 }
 
 pub async fn sp_search(q: &str) -> Vec<Track> {

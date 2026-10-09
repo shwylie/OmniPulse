@@ -44,6 +44,7 @@ pub fn playlists(all: &Value) -> Vec<Playlist> {
         id: p["id"].as_str().unwrap_or("").to_string(),
         title: p["title"].as_str().unwrap_or("Untitled playlist").to_string(),
         tracks: Some(p["tracks"].as_array().map(|t| t.iter().filter_map(Track::from_snapshot).collect()).unwrap_or_default()),
+        own: true,
     }).collect()
 }
 
@@ -51,7 +52,7 @@ pub fn is_own(id: &str) -> bool {
     id.starts_with("xpl:")
 }
 
-fn snap(t: &Track) -> Value {
+pub fn snap(t: &Track) -> Value {
     let mut s = t.to_snapshot();
     // a file's address changes from run to run: it's found again by its id
     if t.plat() == "local" {
