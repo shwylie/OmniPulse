@@ -115,6 +115,9 @@ async function out2Apply() {
   const ctx = norm.ctx;
   const now = ctx.currentTime;
   out2MainDelay();
+  // Discord & OBS Capture goes off while this is on, and back on after: with both, sharing the
+  // window shares the sound twice (an echo)
+  if (on) nativeOutStop(); else nativeOutStart();
   if (!on) { out2Teardown(); $("out2Note").textContent = ""; return; }
   try {
     if (!out2.delay) {

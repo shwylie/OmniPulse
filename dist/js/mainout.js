@@ -1,4 +1,5 @@
-// Discord & OBS Capture (always on): OmniPulse's sound is played from OmniPulse.exe itself
+// Discord & OBS Capture (on unless OmniPulse Offset is: with both, a shared window is heard twice,
+// an echo): OmniPulse's sound is played from OmniPulse.exe itself
 // (crates/core/src/main_out.rs) instead of the WebView. Programs that capture an app's sound by its
 // window (Discord's screen share with sound, OBS's Application Audio Capture) only hear OmniPulse.exe,
 // and the WebView plays from a process they don't count as the app. If it can't start, the WebView
@@ -10,7 +11,7 @@
 // those are heard at once; the sound itself is about a tenth of a second behind the page.
 
 const nativeOut = { on: false, tap: null, sink: null, starting: null, gate: null };
-const nativeOutWanted = () => !!window.__TAURI__;
+const nativeOutWanted = () => !!window.__TAURI__ && !prefs.out2On;
 
 // The device's name as Windows has it, from the page's device id ("" for the default)
 async function sinkLabel(id) {
@@ -50,6 +51,20 @@ function nativeOutStart() {
     }
   })();
   return nativeOut.starting;
+}
+
+// Back to the WebView playing the sound (OmniPulse Offset switched on)
+function nativeOutStop() {
+  if (!nativeOut.on) return;
+  nativeOut.on = false;
+  if (nativeOut.gate) nativeOut.gate(false);
+  try { out2.mainDelay.disconnect(nativeOut.tap); } catch (e) {}
+  out2.mainDelay.connect(norm.ctx.destination);
+  try { nativeOut.tap.disconnect(); } catch (e) {}
+  nativeOut.tap = nativeOut.sink = null;
+  invoke("main_out_stop").catch(() => {});
+  setLevel(appVolume());
+  if (prefs.sink && prefs.sink !== "default") mainSink(prefs.sink).catch(() => {});
 }
 
 // What's waiting would be heard late: dropped on a pause, a seek or a new track
