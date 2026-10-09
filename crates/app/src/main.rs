@@ -1545,7 +1545,7 @@ fn wrong_song(shared: &Shared, id: u64, user: &str, is_mod: bool) {
     let found = {
         let a = shared.borrow();
         let from = a.queue.qi.unwrap_or(0);
-        a.queue.items.iter().enumerate().skip(from).filter(|(_, q)| !q.by.is_empty() && (is_mod || q.by.eq_ignore_ascii_case(&who))).map(|(i, q)| (i, q.t.clone(), q.by.clone())).last()
+        a.queue.items.iter().enumerate().skip(from).filter(|(_, q)| !q.by.is_empty() && (is_mod || q.by.eq_ignore_ascii_case(&who))).map(|(i, q)| (i, q.t.clone(), q.by.clone())).next_back()
     };
     let Some((i, t, by)) = found else {
         reply(req_fail(&prefs, &base, if is_mod { "noRequests" } else { "noRequest" }, vec![]));
@@ -2740,7 +2740,7 @@ fn apply_look(shared: &Shared) {
     ui.set_accent_on(ACCENTS.iter().position(|c| *c == picked).map_or(-1, |i| i as i32));
     ui.set_art_accent(integrations::set(prefs, "artAccent"));
     ui.set_tab_right(prefs["tabAlign"].as_str() == Some("right"));
-    ui.set_player_style(match prefs["playerStyle"].as_str() { Some(s @ ("bar" | "float" | "minimal")) => s, _ => "tab" }.into());
+    ui.set_player_style(prefs["playerStyle"].as_str().filter(|s| matches!(*s, "bar" | "float" | "minimal")).unwrap_or("tab").into());
 }
 
 /// A Look setting changed here: kept (over the web app's), and shown at once
