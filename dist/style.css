@@ -1584,3 +1584,7 @@ body.streamSafe #navSets, body.streamSafe #navArtists, body.streamSafe #plSectio
 :root[data-tab="right"] .player .now { flex-direction: row-reverse; padding: 10px 14px 8px 24px; }
 :root[data-tab="right"] .player .nowText { align-items: flex-end; text-align: right; }
 :root[data-tab="right"] .player .now .artistRow { justify-content: flex-end; }
+
+/* a pill with only an icon (the playlist page's Share) */
+.pill.iconPill { display: inline-grid; place-items: center; width: 40px; height: 40px; box-sizing: border-box; padding: 0; }
+.pill.iconPill svg { width: 18px; height: 18px; fill: currentColor; }
