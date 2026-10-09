@@ -82,6 +82,7 @@ function extrasInit() {
   ytInit();
   mbInit();
   pluginsInit();
+  updateInit();
   castInit();
   nativeOutInit();
   togetherInit();

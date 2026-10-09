@@ -214,6 +214,37 @@ async fn yt_prepare(id: String) -> Result<(), String> { youtube::stream_url(&id,
 // a SoundCloud track's own audio, through yt-dlp, for whoever isn't signed in to SoundCloud
 #[tauri::command]
 async fn sc_ytdlp(url: String) -> Result<String, String> { yt_stream::resolve_soundcloud(&url).await }
+// ---------- updates: from the public releases repo (tauri.conf.json > plugins > updater) ----------
+// Each release is signed with OmniPulse's own key and checked against the public key built in here,
+// so only a build signed with it installs, wherever it was downloaded from.
+#[tauri::command]
+async fn update_check(app: AppHandle) -> Result<Option<Value>, String> {
+    use tauri_plugin_updater::UpdaterExt;
+    let found = app.updater().map_err(|e| e.to_string())?.check().await.map_err(|e| e.to_string())?;
+    Ok(found.map(|u| serde_json::json!({ "version": u.version, "current": u.current_version, "notes": u.body.unwrap_or_default() })))
+}
+
+/// Downloads the update (progress as { done, total } on the channel), installs it and restarts
+#[tauri::command]
+async fn update_install(app: AppHandle, progress: Channel<Value>) -> Result<(), String> {
+    use tauri_plugin_updater::UpdaterExt;
+    let Some(update) = app.updater().map_err(|e| e.to_string())?.check().await.map_err(|e| e.to_string())? else {
+        return Err("You're up to date.".into());
+    };
+    let mut done: u64 = 0;
+    update
+        .download_and_install(
+            |chunk, total| {
+                done += chunk as u64;
+                let _ = progress.send(serde_json::json!({ "done": done, "total": total }));
+            },
+            || {},
+        )
+        .await
+        .map_err(|e| e.to_string())?;
+    app.restart();
+}
+
 // MusicBrainz: songs to find with no account (played from YouTube Music)
 #[tauri::command]
 async fn mb_search(query: String) -> Result<Vec<Value>, String> { omnipulse_core::musicbrainz::search(&query).await }
@@ -692,6 +723,7 @@ fn main() {
                 .build(),
         )
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
             let gpu = omnipulse_core::load_settings().gpu;
             #[allow(unused_mut)]
@@ -821,7 +853,7 @@ fn main() {
             local_folders, local_set_folders, local_scan, local_status, local_tracks, local_server,
             requests_start, requests_stop, request_result,
             spe_signed_in, spe_login, spe_logout, spe_attach, spe_play, spe_pause, spe_resume, spe_seek, spe_stop, spe_played, spe_playlist, spe_web_get, spe_set_normalisation, loudness_analyse,
-            resolve_yt_stream, plugin_inspect, plugin_install, plugin_list, plugin_remove, plugin_http, yt_search, yt_radio, yt_status, yt_artists, yt_artist, yt_album, yt_playlist, yt_playlists, yt_prepare, sc_ytdlp, mb_search, yt_setup, yt_remove, remote_start, remote_stop, remote_result
+            resolve_yt_stream, plugin_inspect, plugin_install, plugin_list, plugin_remove, plugin_http, yt_search, yt_radio, yt_status, yt_artists, yt_artist, yt_album, yt_playlist, yt_playlists, yt_prepare, sc_ytdlp, mb_search, update_check, update_install, yt_setup, yt_remove, remote_start, remote_stop, remote_result
         ])
         .run(tauri::generate_context!())
         .expect("error while running app");
