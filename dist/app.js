@@ -73,11 +73,13 @@ function streamerPaint() {
   b.classList.toggle("on", on || safe);
   b.classList.toggle("safe", safe);
   b.setAttribute("aria-pressed", on || safe ? "true" : "false");
-  b.title = safe && on ? "Streamer Mode: private info hidden, and only music that's safe on stream. Click to turn both off."
-    : safe ? "Streamer Mode: only music that's safe on stream. Click to turn it off."
-    : on ? "Streamer Mode: private info hidden. Click again to leave out copyrighted music too."
-    : "Streamer Mode: off. Click to hide account names, keys, addresses and plugin settings; again to leave out copyrighted music too.";
+  b.title = safe ? "Streamer Mode, Extended: private info hidden, and only music that's safe on stream. Click to turn it off."
+    : on ? "Streamer Mode: private info hidden. Click again for Extended (only music that's safe on stream)."
+    : "Streamer Mode: off. Click to hide private info; again for Extended (only music that's safe on stream).";
   $("smPrivate").checked = on;
+  // Extended only with Streamer Mode, and what counts as safe only with Extended
+  $("smSafeRow").hidden = !on;
+  $("clearedBox").hidden = !on || !safe;
   stateNotes();
   markSensitive(document);
 }

@@ -44,13 +44,31 @@ function extrasInit() {
   streamerPageInit();
   safePaint();
   $("smSafe").addEventListener("change", () => safeSet($("smSafe").checked));
-  // the two settings still go on and off on their own
+  // Extended goes with Streamer Mode: off with it (and never on without it)
+  if (streamSafe() && !prefs.streamerMode) { prefs.streamerMode = true; savePrefs(); streamerPaint(); }
   $("smPrivate").addEventListener("change", () => {
     prefs.streamerMode = $("smPrivate").checked;
     savePrefs();
+    if (!prefs.streamerMode && streamSafe()) safeSet(false);
     streamerPaint();
   });
   $("streamerBtn").addEventListener("click", streamerStep);
+  // Settings' categories: opened and closed at their titles, and kept that way
+  document.querySelectorAll("#settings .group > h3").forEach((h3) => {
+    const key = h3.textContent.trim();
+    const group = h3.parentElement;
+    group.classList.toggle("collapsed", !!(prefs.setClosed || {})[key]);
+    h3.setAttribute("role", "button");
+    h3.tabIndex = 0;
+    const flip = () => {
+      const closed = !group.classList.contains("collapsed");
+      group.classList.toggle("collapsed", closed);
+      prefs.setClosed = Object.assign({}, prefs.setClosed, { [key]: closed });
+      savePrefs();
+    };
+    h3.addEventListener("click", flip);
+    h3.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); flip(); } });
+  });
   widgetInit();
   navInit();
   discoverInit();

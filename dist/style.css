@@ -1655,3 +1655,15 @@ body.streamSafe #navSets, body.streamSafe #navArtists, body.streamSafe #plSectio
 }
 .content:has(#npView:not([hidden]))::before { display: none; }
 .content:has(#npView:not([hidden])) .np { background: none; }
+
+/* Settings: each category opens and closes at its title */
+#settings .group > h3 { display: flex; align-items: center; justify-content: space-between; cursor: pointer; user-select: none; }
+#settings .group > h3::after {
+  content: ""; width: 8px; height: 8px; margin-right: 6px; border-right: 2px solid var(--muted); border-bottom: 2px solid var(--muted);
+  transform: rotate(45deg); transition: transform 0.18s ease;
+}
+#settings .group > h3:hover::after { border-color: var(--text); }
+#settings .group.collapsed > h3::after { transform: rotate(-45deg); }
+#settings .group.collapsed > :not(h3) { display: none !important; }
+/* Extended, under Streamer Mode */
+.row.subRow { padding-left: 18px; border-left: 2px solid color-mix(in srgb, var(--accent) 45%, transparent); margin-left: 4px; }

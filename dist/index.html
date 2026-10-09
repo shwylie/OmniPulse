@@ -378,95 +378,9 @@
       <button id="closeSettings" class="ghost" aria-label="Close"><svg viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg></button>
     </div>
 
-    <!-- ===================== App ===================== -->
+    <!-- ===================== App & Look ===================== -->
     <section class="group">
-      <h3>App</h3>
-      <div class="row">
-        <div>
-          <div class="lbl">Rounded Corners</div>
-          <div class="note">On the sidebar, the page and the queue. Off: square.</div>
-        </div>
-        <label class="switch"><input type="checkbox" id="roundedOn"><span></span></label>
-      </div>
-      <div class="row">
-        <div>
-          <div class="lbl">Hardware Acceleration</div>
-          <div class="note">Turn off if you see glitches.</div>
-        </div>
-        <label class="switch"><input type="checkbox" id="gpuToggle"><span></span></label>
-      </div>
-      <p class="note" id="gpuNote" hidden>Restart OmniPulse to apply this. <button id="restartBtn" class="soft">Restart now</button></p>
-      <div class="row">
-        <div>
-          <div class="lbl">Close to Tray</div>
-          <div class="note">Closing hides the window; music keeps playing. Quit from the tray.</div>
-        </div>
-        <label class="switch"><input type="checkbox" id="trayToggle"><span></span></label>
-      </div>
-      <div class="row">
-        <div>
-          <div class="lbl">Back Up &amp; Restore</div>
-          <div class="note">Your settings, keys, favourites, playlists, stats, and the alerts' sounds and pictures, in one file. Sign-ins aren't in it.</div>
-        </div>
-        <div class="rowEnd">
-          <button id="backupMake" class="soft">Back up</button>
-          <button id="backupRestore" class="soft">Restore</button>
-        </div>
-      </div>
-      <div class="row">
-        <div>
-          <div class="lbl">Listen Along &amp; Jams</div>
-          <div class="note">Friends join your queue in their own OmniPulse: from Listen Along on your Discord status, or an invite-only Jam (in the queue).</div>
-        </div>
-      </div>
-      <details class="sub" id="togetherSection">
-        <summary>Listen Along &amp; Jams</summary>
-        <div class="row">
-          <div>
-            <div class="lbl">Your Name</div>
-            <div class="note">What listeners see.</div>
-          </div>
-          <input id="togetherName" class="nameInput" type="text" maxlength="40" spellcheck="false" autocomplete="off">
-        </div>
-      </details>
-      <div class="row">
-        <div>
-          <div class="lbl">Discord Status</div>
-          <div class="note" id="presNote">Shows what you're playing on your profile.</div>
-        </div>
-        <label class="switch"><input type="checkbox" id="presToggle"><span></span></label>
-      </div>
-      <details class="sub" id="presSection">
-        <summary>Discord Options</summary>
-        <div class="row">
-          <div class="lbl">Cover Art</div>
-          <label class="switch"><input type="checkbox" id="presArt"><span></span></label>
-        </div>
-        <div class="row">
-          <div class="lbl">Time</div>
-          <label class="switch"><input type="checkbox" id="presTime"><span></span></label>
-        </div>
-        <div class="row">
-          <div>
-            <div class="lbl">Listen Along Button</div>
-            <div class="note">Friends join at your spot (SoundCloud) or open the track (Spotify).</div>
-          </div>
-          <label class="switch"><input type="checkbox" id="presListen"><span></span></label>
-        </div>
-        <div class="row">
-          <div>
-            <div class="lbl">Open Track Button</div>
-            <div class="note">Only others see the buttons.</div>
-          </div>
-          <label class="switch"><input type="checkbox" id="presLink"><span></span></label>
-        </div>
-      </details>
-
-    </section>
-
-    <!-- ===================== Look ===================== -->
-    <section class="group">
-      <h3>Look</h3>
+      <h3>App &amp; Look</h3>
       <div class="row stack">
         <div><div class="lbl">Theme <span class="stepName" id="themeStepName"></span></div></div>
         <div class="stepWrap">
@@ -523,6 +437,13 @@
         <div class="seg" id="tabAlignSeg"><button data-v="left">Left</button><button data-v="right">Right</button></div>
       </div>
       <div class="row">
+        <div>
+          <div class="lbl">Rounded Corners</div>
+          <div class="note">On the sidebar, the page and the queue. Off: square.</div>
+        </div>
+        <label class="switch"><input type="checkbox" id="roundedOn"><span></span></label>
+      </div>
+      <div class="row">
         <div class="lbl">List Density</div>
         <div class="seg" id="densitySeg"><button data-v="comfortable">Comfortable</button><button data-v="compact">Compact</button></div>
       </div>
@@ -532,13 +453,6 @@
           <div class="note">Fades and motion.</div>
         </div>
         <label class="switch"><input type="checkbox" id="animOn"><span></span></label>
-      </div>
-      <div class="row">
-        <div>
-          <div class="lbl">Display Name</div>
-          <div class="note">Shown in the title bar and taskbar.</div>
-        </div>
-        <input id="appNameInput" class="nameInput" type="text" maxlength="60" autocomplete="off" spellcheck="false">
       </div>
       <div class="row">
         <div>
@@ -552,6 +466,84 @@
         <textarea id="customCss" rows="6" spellcheck="false" placeholder=":root { --row-pad: 10px; }"></textarea>
         <div class="note">Applies as you type.</div>
       </details>
+      <div class="row">
+        <div>
+          <div class="lbl">Hardware Acceleration</div>
+          <div class="note">Turn off if you see glitches.</div>
+        </div>
+        <label class="switch"><input type="checkbox" id="gpuToggle"><span></span></label>
+      </div>
+      <p class="note" id="gpuNote" hidden>Restart OmniPulse to apply this. <button id="restartBtn" class="soft">Restart now</button></p>
+      <div class="row">
+        <div>
+          <div class="lbl">Close to Tray</div>
+          <div class="note">Closing hides the window; music keeps playing. Quit from the tray.</div>
+        </div>
+        <label class="switch"><input type="checkbox" id="trayToggle"><span></span></label>
+      </div>
+      <div class="row">
+        <div>
+          <div class="lbl">Back Up &amp; Restore</div>
+          <div class="note">Your settings, keys, favourites, playlists, stats, and the alerts' sounds and pictures, in one file. Sign-ins aren't in it.</div>
+        </div>
+        <div class="rowEnd">
+          <button id="backupMake" class="soft">Back up</button>
+          <button id="backupRestore" class="soft">Restore</button>
+        </div>
+      </div>
+      <div class="row">
+        <div>
+          <div class="lbl">Listen Along &amp; Jams</div>
+          <div class="note">Listen together with friends: they join from the Listen Along button on your Discord status, or from a Jam invite.</div>
+        </div>
+      </div>
+      <div class="row">
+        <div>
+          <div class="lbl">Your Name</div>
+          <div class="note">What friends see when they listen with you.</div>
+        </div>
+        <input id="togetherName" class="nameInput" type="text" maxlength="40" spellcheck="false" autocomplete="off">
+      </div>
+      <div class="row">
+        <div>
+          <div class="lbl">Display Name</div>
+          <div class="note">Shown in the title bar and taskbar.</div>
+        </div>
+        <input id="appNameInput" class="nameInput" type="text" maxlength="60" autocomplete="off" spellcheck="false">
+      </div>
+      <div class="row">
+        <div>
+          <div class="lbl">Discord Status</div>
+          <div class="note" id="presNote">Shows what you're playing on your profile.</div>
+        </div>
+        <label class="switch"><input type="checkbox" id="presToggle"><span></span></label>
+      </div>
+      <details class="sub" id="presSection">
+        <summary>Discord Options</summary>
+        <div class="row">
+          <div class="lbl">Cover Art</div>
+          <label class="switch"><input type="checkbox" id="presArt"><span></span></label>
+        </div>
+        <div class="row">
+          <div class="lbl">Time</div>
+          <label class="switch"><input type="checkbox" id="presTime"><span></span></label>
+        </div>
+        <div class="row">
+          <div>
+            <div class="lbl">Listen Along Button</div>
+            <div class="note">Friends join at your spot (SoundCloud) or open the track (Spotify).</div>
+          </div>
+          <label class="switch"><input type="checkbox" id="presListen"><span></span></label>
+        </div>
+        <div class="row">
+          <div>
+            <div class="lbl">Open Track Button</div>
+            <div class="note">Only others see the buttons.</div>
+          </div>
+          <label class="switch"><input type="checkbox" id="presLink"><span></span></label>
+        </div>
+      </details>
+
     </section>
 
     <!-- ===================== Integrations ===================== -->
@@ -849,19 +841,19 @@
       <h3>Streaming</h3>
       <div class="row">
         <div>
-          <div class="lbl">Streamer Mode: Private Info</div>
-          <div class="note" data-on="On: account names, keys, addresses and ports, and plugin settings are hidden. Also the pulsing button in the title bar." data-off="Hides account names, keys, addresses and ports, and plugin settings. Also the button in the title bar."></div>
+          <div class="lbl">Streamer Mode</div>
+          <div class="note" data-on="Account names, keys, addresses and plugin settings are hidden." data-off="Hides account names, keys, addresses and plugin settings. The title bar's button does this too."></div>
         </div>
         <label class="switch"><input type="checkbox" id="smPrivate"><span></span></label>
       </div>
-      <div class="row">
+      <div class="row subRow" id="smSafeRow" hidden>
         <div>
-          <div class="lbl">Streamer Mode: Stream-Safe Music</div>
-          <div class="note" data-on="On: only music that's safe on stream shows and plays, chat requests included. Everything else is hidden from every list and skipped. The title bar's button glows while it's on." data-off="Only music that's safe on stream shows and plays: under an open licence (Creative Commons, or no rights reserved), or by an artist or label cleared for streaming. Also a second click of the title bar's button."></div>
+          <div class="lbl">Extended</div>
+          <div class="note" data-on="Only music that's safe on stream shows and plays, chat requests included." data-off="Also leaves out music that isn't safe on stream. A second click of the title bar's button does this too."></div>
         </div>
         <label class="switch"><input type="checkbox" id="smSafe"><span></span></label>
       </div>
-      <details class="sub" id="clearedBox">
+      <details class="sub" id="clearedBox" hidden>
         <summary>What Counts as Safe</summary>
         <p class="note">SoundCloud tracks under an open licence (the uploader's choice), and plugin tracks that give one. Your own files don't say, so they don't count.</p>
         <p class="note" id="clearedYt"></p>
