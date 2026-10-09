@@ -1270,6 +1270,9 @@ function tabFit() {
   n.style.width = Math.ceil(want) + "px";
 }
 addEventListener("resize", () => requestAnimationFrame(tabFit));
+// (and whenever what it shows changes: an album name, say, comes in after the track has started)
+if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => requestAnimationFrame(tabFit));
+new MutationObserver(() => requestAnimationFrame(tabFit)).observe($("nowToggle").querySelector(".nowText"), { childList: true, subtree: true, characterData: true });
 
 function fillNowPlaying(t) {
   requestAnimationFrame(tabFit);
