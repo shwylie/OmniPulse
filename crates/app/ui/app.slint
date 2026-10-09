@@ -1523,7 +1523,10 @@ export component AppWindow inherits Window {
                     height: 64px;
                     tab := Rectangle {
                         x: root.tab-right ? parent.width - self.width : 0;
-                        width: min(info.preferred-width + 38px, root.width - 40px);
+                        // never narrower than the panel above it: the sidebar (on the left), or the queue
+                        // (on the right, while it's open), so their edges line up
+                        property <length> floor: root.tab-right ? (root.queue-open ? 300px : 0) : (root.narrow ? 68px : 230px);
+                        width: min(max(info.preferred-width + 38px, self.floor), root.width - 40px);
                         animate width { duration: 320ms; easing: cubic-bezier(0.2, 0.8, 0.2, 1); }
                         height: parent.height;
                         // the gap around it
