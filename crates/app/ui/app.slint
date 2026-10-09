@@ -16,8 +16,8 @@ export global Theme {
     out property <length> radius: 10px;
 }
 
-export struct Row { title: string, artist: string, album: string, dur: string, plat: string, playing: bool, head: string, auto: bool, art: image, liked: bool }
-export struct Side { title: string, plat: string, own: bool }
+export struct Row { title: string, artist: string, album: string, dur: string, plat: string, playing: bool, head: string, auto: bool, art: image, liked: bool, sc-link: bool, sp-link: bool, yt-link: bool }
+export struct Side { title: string, plat: string, own: bool, share: bool, sc: bool, sp: bool }
 export struct Plat { id: string, on: bool, name: string }
 export struct Tile { title: string, sub: string, art: image, plat: string }
 export struct Shelf { title: string, tiles: [Tile] }
@@ -363,6 +363,9 @@ component TrackRow inherits Rectangle {
                 MenuItem { title: "New Playlist..."; activated => { root.act("plnew"); } }
             }
             if root.removable: MenuItem { title: "Remove from This Playlist"; activated => { root.act("plremove"); } }
+            if root.item.sc-link: MenuItem { title: "Copy SoundCloud Link"; activated => { root.act("link:soundcloud"); } }
+            if root.item.sp-link: MenuItem { title: "Copy Spotify Link"; activated => { root.act("link:spotify"); } }
+            if root.item.yt-link: MenuItem { title: "Copy YouTube Music Link"; activated => { root.act("link:youtube"); } }
         }
         ta := TouchArea { clicked => { root.play(); } }
     }
@@ -716,10 +719,13 @@ export component AppWindow inherits Window {
                                 if !root.narrow: Text { text: s.title; color: root.side-on == i ? Theme.text : Theme.muted; font-size: 13px; vertical-alignment: center; overflow: elide; }
                             }
                             ContextMenuArea {
-                                enabled: s.own;
+                                enabled: s.share || s.own;
                                 Menu {
-                                    MenuItem { title: "Rename..."; activated => { root.side-action(i, "rename"); } }
-                                    MenuItem { title: "Delete"; activated => { root.side-action(i, "delete"); } }
+                                    if s.share: MenuItem { title: "Share"; activated => { root.side-action(i, "share"); } }
+                                    if s.sc: MenuItem { title: "Copy SoundCloud Link"; activated => { root.side-action(i, "link:soundcloud"); } }
+                                    if s.sp: MenuItem { title: "Copy Spotify Link"; activated => { root.side-action(i, "link:spotify"); } }
+                                    if s.own: MenuItem { title: "Rename..."; activated => { root.side-action(i, "rename"); } }
+                                    if s.own: MenuItem { title: "Delete"; activated => { root.side-action(i, "delete"); } }
                                 }
                                 sta := TouchArea { clicked => { root.side(i); } }
                             }
@@ -1391,6 +1397,9 @@ export component AppWindow inherits Window {
                                         if !q.playing: MenuItem { title: "Play Next"; activated => { root.queue-action(i, "next"); } }
                                         if !q.playing: MenuItem { title: "Remove from Queue"; activated => { root.queue-action(i, "remove"); } }
                                         MenuItem { title: "Shuffle Next Up"; activated => { root.queue-action(i, "shuffle"); } }
+                                        if q.sc-link: MenuItem { title: "Copy SoundCloud Link"; activated => { root.queue-action(i, "link:soundcloud"); } }
+                                        if q.sp-link: MenuItem { title: "Copy Spotify Link"; activated => { root.queue-action(i, "link:spotify"); } }
+                                        if q.yt-link: MenuItem { title: "Copy YouTube Music Link"; activated => { root.queue-action(i, "link:youtube"); } }
                                     }
                                     qta := TouchArea { clicked => { root.play-queue(i); } }
                                 }

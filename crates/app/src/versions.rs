@@ -27,6 +27,11 @@ fn with_saved<R>(f: impl FnOnce(&mut HashMap<String, Value>) -> R) -> R {
     f(map)
 }
 
+/// Its YouTube Music version, if one's known already (for share links)
+pub fn saved_id(key: &str) -> Option<String> {
+    with_saved(|m| m.get(key).and_then(|v| v["id"].as_str().map(String::from)))
+}
+
 fn save_all() {
     let text = with_saved(|m| serde_json::to_string(m).unwrap_or_default());
     if let Some(p) = file() {

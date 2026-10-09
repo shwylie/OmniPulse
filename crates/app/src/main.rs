@@ -16,6 +16,7 @@ mod player;
 mod queue;
 mod requests;
 mod sound;
+mod share;
 mod sources;
 mod streamsafe;
 mod track;
@@ -112,6 +113,19 @@ enum Naming {
 }
 
 type Shared = Rc<RefCell<App>>;
+
+/// A track row's share links (Copy SoundCloud / Spotify / YouTube Music Link in its menu)
+pub fn share_flags(t: &Track) -> Row {
+    let links = share::links(t);
+    let has = |p: &str| links.iter().any(|(k, _)| *k == p);
+    Row { sc_link: has("soundcloud"), sp_link: has("spotify"), yt_link: has("youtube"), ..Default::default() }
+}
+
+fn copy_track_link(shared: &Shared, t: &Track, plat: &str) {
+    let Some((_, url)) = share::links(t).into_iter().find(|(k, _)| *k == plat) else { return };
+    let note = match share::copy(&url) { Ok(()) => format!("{} link copied.", share::name(plat)), Err(e) => e };
+    if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_status(note.into()); }
+}
 
 fn now_ms() -> u64 {
     omnipulse_core::now_secs() * 1000
@@ -364,7 +378,7 @@ fn paint_sides(a: &mut App) {
         .filter(|&i| plat_on(&prefs, a.playlists[i].plat) || a.playlists[i].plat == "local")
         .filter(|&i| !hidden.contains(&mirror::side_id(a.playlists[i].plat, &a.playlists[i].id)))
         .collect();
-    let sides: Vec<Side> = a.side_map.iter().map(|&i| Side { title: a.playlists[i].title.clone().into(), plat: a.playlists[i].plat.into(), own: xpl::is_own(&a.playlists[i].id) }).collect();
+    let sides: Vec<Side> = a.side_map.iter().map(|&i| Side { title: a.playlists[i].title.clone().into(), plat: a.playlists[i].plat.into(), own: xpl::is_own(&a.playlists[i].id), share: a.playlists[i].plat != "local" || xpl::is_own(&a.playlists[i].id), sc: share::platform_id(&a.playlists[i], &a.xpl, "soundcloud").is_some(), sp: share::platform_id(&a.playlists[i], &a.xpl, "spotify").is_some() }).collect();
     ui.set_sides(ModelRc::from(Rc::new(VecModel::from(sides))));
     // Add to Playlist: yours here first, then the platforms' (one of those becomes a playlist here)
     let mut order: Vec<usize> = a.side_map.iter().copied().filter(|&i| xpl::is_own(&a.playlists[i].id)).collect();
@@ -2230,6 +2244,12 @@ fn pl_row_action(shared: &Shared, act: &str, t: Track) {
 
 fn side_action(shared: &Shared, i: usize, act: &str) {
     let Some(p) = shared.borrow().side_map.get(i).and_then(|&at| shared.borrow().playlists.get(at).cloned()) else { return };
+    if act == "share" {
+        return share_playlist(shared, p);
+    }
+    if let Some(plat) = act.strip_prefix("link:") {
+        return share_platform(shared, p, plat);
+    }
     if !xpl::is_own(&p.id) {
         return;
     }
@@ -2258,6 +2278,82 @@ fn side_action(shared: &Shared, i: usize, act: &str) {
         go(shared, Place::Page("library".into()));
     }
     if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_status("Playlist deleted.".into()); }
+}
+
+// ---------- sharing a playlist (crate::share) ----------
+fn share_status(shared: &Shared, note: String) {
+    if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_status(note.into()); }
+}
+
+/// Its page on your relay, every platform together; the link copied (the same link as before, if
+/// it was shared already: up to date now)
+fn share_playlist(shared: &Shared, p: sources::Playlist) {
+    let (relay, by, was, rt, weak) = {
+        let a = shared.borrow();
+        let relay = a.web.prefs["relayUrl"].as_str().unwrap_or("").trim().trim_end_matches('/').to_string();
+        let by = a.web.prefs["togetherName"].as_str().map(str::trim).filter(|s| !s.is_empty()).map(String::from)
+            .or_else(|| ACCOUNT_NAMES.with(|n| n.borrow().get("spotify").cloned()).filter(|s| !s.is_empty()))
+            .unwrap_or_else(|| "Someone".into());
+        let was = if xpl::is_own(&p.id) {
+            a.xpl.as_array().and_then(|l| l.iter().find(|x| x["id"].as_str() == Some(p.id.as_str()))).map(|x| x["share"].clone()).unwrap_or_default()
+        } else {
+            a.web.prefs["shares"][&p.id].clone()
+        };
+        (relay, by, was, a.rt.clone(), a.ui.clone())
+    };
+    if relay.is_empty() {
+        return share_status(shared, "Set your relay's address first (in the web app: Settings > Streaming > Listen Along & Jams): shared playlists live there.".into());
+    }
+    share_status(shared, "Sharing...".into());
+    rt.spawn(async move {
+        let tracks = sources::playlist_tracks(&p).await;
+        let done = share::share_playlist(&relay, &p.title, &by, &tracks, &was).await;
+        let _ = weak.upgrade_in_event_loop(move |_| SHARED.with(|s| {
+            let Some(shared) = s.borrow().clone() else { return };
+            match done {
+                Ok((url, info)) => {
+                    let same = info == was;
+                    {
+                        let mut a = shared.borrow_mut();
+                        if xpl::is_own(&p.id) {
+                            if let Some(x) = a.xpl.as_array_mut().and_then(|l| l.iter_mut().find(|x| x["id"].as_str() == Some(p.id.as_str()))) { x["share"] = info; }
+                            xpl::save(&a.xpl);
+                        } else {
+                            if !a.web.prefs["shares"].is_object() { a.web.prefs["shares"] = serde_json::json!({}); }
+                            a.web.prefs["shares"][&p.id] = info;
+                            let all = a.web.prefs["shares"].clone();
+                            if std::env::var_os("OMNIPULSE_SELFTEST").is_none() { webstate::save_pref("shares", all); }
+                        }
+                    }
+                    share_status(&shared, match share::copy(&url) {
+                        Ok(()) => format!("Link copied: anyone can see its songs on every platform, and open it in OmniPulse.{}", if same { " (The same link as before, now up to date.)" } else { "" }),
+                        Err(e) => e,
+                    });
+                }
+                Err(e) => share_status(&shared, format!("Couldn't share it: {e}")),
+            }
+        }));
+    });
+}
+
+/// The SoundCloud or Spotify copy's own link
+fn share_platform(shared: &Shared, p: sources::Playlist, plat: &str) {
+    let (id, made, rt, weak) = {
+        let a = shared.borrow();
+        let made = a.xpl.as_array().and_then(|l| l.iter().find(|x| x["id"].as_str() == Some(p.id.as_str()))).is_some_and(|x| x["made"][plat].as_bool() == Some(true));
+        (share::platform_id(&p, &a.xpl, plat), made, a.rt.clone(), a.ui.clone())
+    };
+    let Some(id) = id else { return };
+    let plat = plat.to_string();
+    rt.spawn(async move {
+        let link = share::platform_link(&plat, &id, made).await;
+        let _ = weak.upgrade_in_event_loop(move |ui| {
+            ui.set_status(match link.and_then(|u| share::copy(&u)) {
+                Ok(()) => format!("{} link copied: only this playlist's songs that are on {}.", share::name(&plat), share::name(&plat)),
+                Err(e) => format!("Couldn't get its link: {e}"),
+            }.into());
+        });
+    });
 }
 
 // ---------- Back Up & Restore (Settings > App; crates/core/src/backup.rs, as the web app's) ----------
@@ -2797,6 +2893,7 @@ fn main() -> Result<(), slint::PlatformError> {
             if !t.web_link().is_empty() { items.push(format!("Open on {}", match t.plat() { "spotify" => "Spotify", "youtube" => "YouTube Music", _ => "SoundCloud" }).into()); }
             if !t.artist.is_empty() { items.push(format!("Search for {}", t.artist.split(", ").next().unwrap_or("")).into()); }
             items.push("Search for this song".into());
+            for (plat, _) in share::links(t) { items.push(format!("Copy {} link", share::name(plat)).into()); }
         }
         ui.set_more_items(ModelRc::from(Rc::new(VecModel::from(items))));
     });
@@ -2805,7 +2902,9 @@ fn main() -> Result<(), slint::PlatformError> {
         let Some(ui) = s.borrow().ui.upgrade() else { return };
         let Some(item) = ui.get_more_items().row_data(i as usize).map(|x| x.to_string()) else { return };
         let Some(t) = s.borrow().queue.current().cloned() else { return };
-        if item.starts_with("Open on") {
+        if let Some(name) = item.strip_prefix("Copy ").and_then(|x| x.strip_suffix(" link")) {
+            if let Some((plat, _)) = share::PLATS.iter().find(|(_, n)| *n == name) { copy_track_link(&s, &t, plat); }
+        } else if item.starts_with("Open on") {
             if let Err(e) = omnipulse_core::open_url(t.web_link()) { ui.set_status(e.into()); }
         } else {
             let q = if item == "Search for this song" { format!("{} {}", t.artist.split(", ").next().unwrap_or(""), t.title) } else { t.artist.split(", ").next().unwrap_or("").to_string() };
@@ -2917,6 +3016,10 @@ fn main() -> Result<(), slint::PlatformError> {
             drop(a);
             return pl_row_action(&s, &act, t);
         }
+        if let Some(plat) = act.strip_prefix("link:") {
+            drop(a);
+            return copy_track_link(&s, &t, plat);
+        }
         let empty = a.queue.current().is_none();
         let title = t.title.clone();
         if act == "next" { a.queue.play_next(t); } else { a.queue.add(t); }
@@ -2932,6 +3035,11 @@ fn main() -> Result<(), slint::PlatformError> {
     ui.on_queue_action(move |i, act| {
         let mut a = s.borrow_mut();
         let Some(at) = a.panel_map.get(i as usize).copied() else { return };
+        if let Some(plat) = act.strip_prefix("link:") {
+            let Some(t) = a.queue.items.get(at).map(|q| q.t.clone()) else { return };
+            drop(a);
+            return copy_track_link(&s, &t, plat);
+        }
         match act.as_str() {
             "next" => a.queue.move_next(at),
             "remove" => a.queue.remove(at),
@@ -3169,6 +3277,7 @@ fn main() -> Result<(), slint::PlatformError> {
                     println!("selftest: settings rows {}", ui.get_set_rows().iter().map(|r| format!("{}{}", r.label, if r.on { "+" } else { "-" })).collect::<Vec<_>>().join(", "));
                     println!("selftest: remote state {}", remote_state(&s.borrow()));
                     println!("selftest: folders {:?}, {}", ui.get_folders().iter().map(|f| f.to_string()).collect::<Vec<_>>(), ui.get_folders_note());
+                    println!("selftest: share: first rows {:?}, sidebar {:?}", ui.get_rows().iter().take(3).map(|r| (r.sc_link, r.sp_link, r.yt_link)).collect::<Vec<_>>(), ui.get_sides().iter().take(3).map(|x| (x.title.to_string(), x.share, x.sc, x.sp)).collect::<Vec<_>>());
                     println!("selftest: accounts {}", ui.get_accounts().iter().map(|r| format!("{}: {}{}", r.name, if r.signed { "in, " } else { "out, " }, r.status)).collect::<Vec<_>>().join(" | "));
                     println!("selftest: queue {} ({} autoplay, {} requested), {}", s.borrow().queue.items.len(), s.borrow().queue.items.iter().filter(|q| q.auto).count(), s.borrow().queue.items.iter().filter(|q| !q.by.is_empty()).count(), ui.get_autoplay_note());
                     println!("selftest: library {} tracks, playlists {}, playing \"{}\" {} / {}, lyrics {}", s.borrow().library.len(), s.borrow().playlists.len(), ui.get_now_title(), ui.get_pos_text(), ui.get_dur_text(), s.borrow().lyrics.len());

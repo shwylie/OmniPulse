@@ -91,6 +91,12 @@ async fn find_sp(t: &Track) -> Option<String> {
         .max_by(|a, b| a.1.total_cmp(&b.1)).and_then(|(c, _)| if let Src::Spotify(uri) = &c.src { Some(uri.clone()) } else { None })
 }
 
+/// The same song on a platform, if it's been found already (no search: for share links)
+pub fn matched(t: &Track, plat: &str) -> Option<String> {
+    let saved = with_matches(|m| m[&t.key][plat].clone());
+    saved["id"].as_str().map(String::from)
+}
+
 /// The song's id on a platform (a SoundCloud id, a Spotify uri), or None if it isn't there
 pub async fn counterpart(t: &Track, plat: &str) -> Option<String> {
     match (&t.src, plat) {

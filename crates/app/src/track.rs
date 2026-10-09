@@ -80,6 +80,7 @@ impl Track {
             auto: false,
             art: Default::default(),
             liked: false,
+            ..crate::share_flags(self)
         }
     }
 
