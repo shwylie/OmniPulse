@@ -283,6 +283,7 @@
   let s = null;
   let design = "card";
   let shownKey = "";
+  let shownNote = "";
   let lookCls = "";   // the design classes last set on the page
   let swapTimer = null;
 
@@ -357,10 +358,15 @@
     return s.duration_ms ? Math.min(p, s.duration_ms) : p;
   }
 
+  // the artist, then who requested it (a song request), or for a few seconds after it's liked, a word for them
+  function artistLine() {
+    if (s.like_note) return s.like_note;
+    return (s.artist || "") + (s.requested_by ? (s.artist ? "  \u00b7  " : "") + "requested by " + s.requested_by : "");
+  }
+
   function fill() {
     setText($("title"), s.title);
-    // a song request: who asked for it, after the artist
-    setText($("artist"), (s.artist || "") + (s.requested_by ? (s.artist ? "  \u00b7  " : "") + "requested by " + s.requested_by : ""));
+    setText($("artist"), artistLine());
     const p = PLATFORMS[s.platform] || PLATFORMS.soundcloud;
     $("platIcon").setAttribute("d", p.d);
     $("platIcon").setAttribute("fill", p.color);
@@ -402,7 +408,18 @@
     if (key !== shownKey) {
       const first = !shownKey;
       shownKey = key;
+      shownNote = s.like_note || "";
       changeTrack(first);
+    } else if ((s.like_note || "") !== shownNote) {
+      // the like's note coming and going: only the words change, with a quick fade
+      shownNote = s.like_note || "";
+      const info = $("info");
+      const swap = () => { setText($("artist"), artistLine()); measure($("artist")); checkScroll($("artist")); };
+      if (document.body.classList.contains("nofade")) swap();
+      else {
+        info.classList.add("fade");
+        setTimeout(() => { swap(); requestAnimationFrame(() => info.classList.remove("fade")); }, 300);
+      }
     }
     const root = document.documentElement.style;
     if (!seamColours) cardColours();

@@ -6,6 +6,24 @@ const WIDGET_NOTE = "A now-playing card for OBS.";
 let widgetReady = false;
 let widgetCleared = false;   // "Clear" hides the card until the next track starts
 
+// Liking a song someone requested: the card says so for a few seconds, with a word for them (a
+// different one each time)
+const WIDGET_LIKE_LINES = [
+  "Good choice, {user}!", "{user} has taste.", "Certified banger, {user}.", "Nice one, {user}!",
+  "{user} gets it.", "This one's a keeper, {user}.", "Top-tier pick, {user}.", "{user} cooked with this one.",
+  "Straight into the likes, thanks {user}!", "Great call, {user}.", "{user} knows what's up.", "Taste confirmed, {user}.",
+];
+let widgetLikeNote = null;   // { text, until }
+let widgetLikeOrder = [];
+function widgetLiked(t) {
+  if (!t || !t.requestedBy || t !== curTrack()) return;
+  if (!widgetLikeOrder.length) widgetLikeOrder = shuffledOrder(WIDGET_LIKE_LINES.map((x, i) => i));   // each once before any repeats
+  const line = WIDGET_LIKE_LINES[widgetLikeOrder.shift()];
+  widgetLikeNote = { text: "♥ Liked · " + line.replace("{user}", String(t.requestedBy)), until: Date.now() + 8000 };
+  widgetPush();
+  setTimeout(widgetPush, 8100);
+}
+
 function widgetState() {
   const t = curTrack();
   // the look and the alerts' settings go along even with nothing playing (alerts still show)
@@ -26,6 +44,7 @@ function widgetState() {
     artist: artistName(t),
     // who asked for it in chat (Settings: Show Who Requested It)
     requested_by: prefs.wRequester !== false && t.requestedBy ? String(t.requestedBy) : "",
+    like_note: widgetLikeNote && Date.now() < widgetLikeNote.until && t.requestedBy ? widgetLikeNote.text : "",
     artwork: artUrl(t, "t500x500") || "",
     url: t.permalink_url || "",
     platform: srcOf(t),

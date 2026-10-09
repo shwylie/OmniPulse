@@ -1514,6 +1514,7 @@ async function toggleLike(t) {
       say("Could not " + (next ? "like" : "unlike") + " this track: " + e);
     }
   }
+  if (next && likeState.get(t.id) === true) widgetLiked(t);   // a request: the widget cheers them on
 }
 
 $("likeBtn").addEventListener("click", (e) => { e.stopPropagation(); toggleLike(curTrack()); });
