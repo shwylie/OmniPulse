@@ -567,6 +567,12 @@ export component AppWindow inherits Window {
     callback eq-band(int, float);
     callback eq-preset(int);
     in property <[Account]> accounts;
+    // your music folders (Settings > Your Music), and what's been found in them
+    in property <[string]> folders;
+    in property <string> folders-note;
+    callback folder-add();
+    callback folder-remove(int);
+    callback folders-rescan();
     callback account-act(int);
     callback backup-make();
     callback backup-restore();
@@ -1158,6 +1164,28 @@ export component AppWindow inherits Window {
                                                 clicked => { if (!acc.busy) { root.account-act(i); } }
                                             }
                                         }
+                                    }
+                                }
+                            }
+                            // your own music files
+                            Text { text: "Your Music"; color: Theme.text; font-size: 20px; font-weight: 800; }
+                            Card {
+                                VerticalLayout {
+                                    padding: 16px;
+                                    spacing: 10px;
+                                    Text { text: "Music Folders"; color: Theme.text; font-weight: 700; }
+                                    Text { text: root.folders-note; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
+                                    for f[i] in root.folders: HorizontalLayout {
+                                        spacing: 10px;
+                                        Glyph { d: Icons.local; width: 16px; height: 16px; y: (parent.height - self.height) / 2; fill: Theme.muted; }
+                                        Text { text: f; color: Theme.text; font-size: 13px; vertical-alignment: center; overflow: elide; horizontal-stretch: 1; }
+                                        Pill { label: "Remove"; clicked => { root.folder-remove(i); } }
+                                    }
+                                    HorizontalLayout {
+                                        alignment: start;
+                                        spacing: 8px;
+                                        Pill { label: "Add folder"; clicked => { root.folder-add(); } }
+                                        if root.folders.length > 0: Pill { label: "Rescan"; clicked => { root.folders-rescan(); } }
                                     }
                                 }
                             }

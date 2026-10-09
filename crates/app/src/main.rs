@@ -1683,6 +1683,49 @@ fn library_load(shared: &Shared) {
     }
 }
 
+// ---------- Settings > Your Music: the folders your own files are in ----------
+fn folders_paint(shared: &Shared) {
+    let Some(ui) = shared.borrow().ui.upgrade() else { return };
+    let folders = omnipulse_core::local::local_folders();
+    let st = omnipulse_core::local::local_status();
+    let n = st["count"].as_u64().unwrap_or(0) as usize;
+    ui.set_folders_note(if st["scanning"].as_bool() == Some(true) {
+        format!("Looking through them... {} so far.", plural(n, "file", "files"))
+    } else if folders.is_empty() {
+        "Folders on this PC or a network drive. Their music shows in your Library.".to_string()
+    } else {
+        format!("{} found.", plural(n, "file", "files"))
+    }.into());
+    ui.set_folders(ModelRc::from(Rc::new(VecModel::from(folders.into_iter().map(slint::SharedString::from).collect::<Vec<_>>()))));
+}
+
+thread_local! {
+    static SCAN_TIMER: RefCell<Option<slint::Timer>> = const { RefCell::new(None) };
+}
+
+/// Looks through the folders again; the Library loads again once that's done
+fn folders_rescan(shared: &Shared) {
+    omnipulse_core::local::local_scan();
+    folders_paint(shared);
+    let s = shared.clone();
+    let t = slint::Timer::default();
+    t.start(slint::TimerMode::Repeated, std::time::Duration::from_millis(700), move || {
+        folders_paint(&s);
+        if omnipulse_core::local::local_status()["scanning"].as_bool() != Some(true) {
+            library_load(&s);
+            SCAN_TIMER.with(|x| *x.borrow_mut() = None);
+        }
+    });
+    SCAN_TIMER.with(|x| *x.borrow_mut() = Some(t));
+}
+
+fn folders_set(shared: &Shared, folders: Vec<String>) {
+    match omnipulse_core::local::local_set_folders(folders) {
+        Ok(_) => folders_rescan(shared),
+        Err(e) => { if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_status(e.into()); } }
+    }
+}
+
 // ---------- Settings > Accounts ----------
 // (key, name): SoundCloud and Spotify for your library and search, Spotify's own sign-in for playing
 // it in full (Premium), your YouTube account for likes there, and Last.fm for scrobbling
@@ -2533,6 +2576,22 @@ fn main() -> Result<(), slint::PlatformError> {
     accounts_refresh(&shared);
     let s = shared.clone();
     ui.on_account_act(move |i| account_act(&s, i as usize));
+    folders_paint(&shared);
+    let s = shared.clone();
+    ui.on_folder_add(move || {
+        let Some(dir) = rfd::FileDialog::new().set_title("Add a music folder").pick_folder() else { return };
+        let mut folders = omnipulse_core::local::local_folders();
+        folders.push(dir.to_string_lossy().into_owned());
+        folders_set(&s, folders);
+    });
+    let s = shared.clone();
+    ui.on_folder_remove(move |i| {
+        let mut folders = omnipulse_core::local::local_folders();
+        if (i as usize) < folders.len() { folders.remove(i as usize); }
+        folders_set(&s, folders);
+    });
+    let s = shared.clone();
+    ui.on_folders_rescan(move || folders_rescan(&s));
     ui.set_eq_gains(ModelRc::from(shared.borrow().eq_model.clone()));
     ui.set_eq_presets(ModelRc::from(Rc::new(VecModel::from(sound::EQ_PRESETS.iter().map(|(n, _)| slint::SharedString::from(*n)).collect::<Vec<_>>()))));
     sound_paint(&shared.borrow());
@@ -3005,6 +3064,7 @@ fn main() -> Result<(), slint::PlatformError> {
                     println!("selftest: status \"{}\"", ui.get_status());
                     println!("selftest: settings rows {}", ui.get_set_rows().iter().map(|r| format!("{}{}", r.label, if r.on { "+" } else { "-" })).collect::<Vec<_>>().join(", "));
                     println!("selftest: remote state {}", remote_state(&s.borrow()));
+                    println!("selftest: folders {:?}, {}", ui.get_folders().iter().map(|f| f.to_string()).collect::<Vec<_>>(), ui.get_folders_note());
                     println!("selftest: accounts {}", ui.get_accounts().iter().map(|r| format!("{}: {}{}", r.name, if r.signed { "in, " } else { "out, " }, r.status)).collect::<Vec<_>>().join(" | "));
                     println!("selftest: queue {} ({} autoplay, {} requested), {}", s.borrow().queue.items.len(), s.borrow().queue.items.iter().filter(|q| q.auto).count(), s.borrow().queue.items.iter().filter(|q| !q.by.is_empty()).count(), ui.get_autoplay_note());
                     println!("selftest: library {} tracks, playlists {}, playing \"{}\" {} / {}, lyrics {}", s.borrow().library.len(), s.borrow().playlists.len(), ui.get_now_title(), ui.get_pos_text(), ui.get_dur_text(), s.borrow().lyrics.len());
