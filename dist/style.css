@@ -1507,3 +1507,9 @@ body.streamSafe .notSafe { display: none !important; }
 .lyrics { overflow-x: hidden; scrollbar-width: none; -webkit-mask-image: linear-gradient(transparent, #000 7%, #000 93%, transparent); mask-image: linear-gradient(transparent, #000 7%, #000 93%, transparent); }
 .lyrics::-webkit-scrollbar { display: none; }
 .lyLine { padding-right: 4%; }
+
+/* Streamer Mode (Stream-Safe Music on): its page in place of the pages of everything else */
+#navStreamer { display: none; }
+body.streamSafe #navStreamer { display: flex; }
+body.streamSafe #navDiscover, body.streamSafe #navRediscover, body.streamSafe #navLikes, body.streamSafe #navFavourites,
+body.streamSafe #navSets, body.streamSafe #navArtists, body.streamSafe #plSection, body.streamSafe #albumSection { display: none !important; }

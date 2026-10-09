@@ -39,6 +39,7 @@ function extrasInit() {
   document.querySelectorAll("#libSort button").forEach((b) => b.addEventListener("click", () => libSortPick(b.dataset.by)));
   libSortPaint();
   backupInit();
+  streamerPageInit();
   safePaint();
   $("smSafe").addEventListener("change", () => safeSet($("smSafe").checked));
   // the two settings still go on and off on their own

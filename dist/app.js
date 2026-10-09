@@ -318,9 +318,10 @@ function showView(v) {
   if (isNow) ensureLyrics();
   else if (lyricsMode) setLyricsMode(false);
   $("navDiscover").classList.toggle("active", v === "discover");
-  $("feed").hidden = v !== "discover";
+  $("navStreamer").classList.toggle("active", v === "streamer");
+  $("feed").hidden = v !== "discover" && v !== "streamer";
   if (v !== "search") $("searchShelves").hidden = true;
-  $("list").hidden = v === "discover";
+  $("list").hidden = v === "discover" || v === "streamer";
   if (!isNow) $("langChip").hidden = v !== "discover";
   $("navLikes").classList.toggle("active", v === "likes");
   $("navFavourites").classList.toggle("active", v === "favourites");
@@ -352,6 +353,9 @@ function renderHero() {
   } else if (v === "discover") {
     title = "Discover";
     sub = "Mixes and stations made from what you like.";
+  } else if (v === "streamer") {
+    title = "Streamer Mode";
+    sub = "Only music that's safe on stream: openly licensed, or by artists and labels cleared for streaming. Autoplay adds from these collections too.";
   } else if (v === "search") {
     title = 'Results for "' + query + '"';
   } else if (v === "playlist" && currentPlaylist) {
@@ -470,6 +474,8 @@ function safeSet(on) {
   prefs.streamSafe = !!on;
   savePrefs();
   safePaint();
+  streamerPageSync(!!on);   // the Streamer Mode page in place of the others (js/streamerpage.js)
+  autoplayPaint();
   render();
   renderQueue();
   say(on ? "Streamer Mode: only music that's safe on stream shows and plays" + (prefs.streamerMode ? ", and private info is hidden." : ".") : "Stream-Safe Music off.", { force: true });

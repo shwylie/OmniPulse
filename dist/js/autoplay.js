@@ -11,7 +11,8 @@ let autoplayRecentMs = 0;                    // 0: the time frame chosen in Sett
 let autoplayBusy = null;
 let autoplayFailedFor = null;   // the seed track we last came up empty for, so we don't keep asking
 
-const autoplayOn = () => prefs.autoplay !== false;
+// (Streamer Mode keeps its own: on unless switched off there)
+const autoplayOn = () => (typeof streamSafe === "function" && streamSafe() ? prefs.apStream !== false : prefs.autoplay !== false);
 // listening along with someone, their queue is what plays: no picks of your own (js/together.js)
 const autoplayActive = () => autoplayOn() && repeatMode === "off" && !(typeof together !== "undefined" && together.role === "listener");
 const autoplaySets = () => !!prefs.queueSets;           // sets & podcasts in the queue and autoplay (one setting; off unless chosen)
@@ -139,11 +140,17 @@ function autoplayFill() {
   autoplayBusy = (async () => {
     await null;   // let autoplayBusy be set first, so the queue shows "Finding..."
     try {
-      const plats = activePlats().filter((p) => AUTOPLAY_SOURCES[p]);
-      const results = await Promise.allSettled(plats.map((p) => AUTOPLAY_SOURCES[p](seed)));
-      if (curTrack() !== seed) return;   // you started something else meanwhile
       const lists = {};
-      plats.forEach((p, i) => { lists[p] = results[i].status === "fulfilled" ? results[i].value.slice() : []; });
+      if (streamSafe()) {
+        // Streamer Mode: only from its own collections (js/streamerpage.js)
+        lists.stream = await streamAutoplayPool();
+        if (curTrack() !== seed) return;
+      } else {
+        const plats = activePlats().filter((p) => AUTOPLAY_SOURCES[p]);
+        const results = await Promise.allSettled(plats.map((p) => AUTOPLAY_SOURCES[p](seed)));
+        if (curTrack() !== seed) return;   // you started something else meanwhile
+        plats.forEach((p, i) => { lists[p] = results[i].status === "fulfilled" ? results[i].value.slice() : []; });
+      }
       const picks = autoplayTakeTurns(lists, srcOf(queue[queue.length - 1]));
       if (!picks.length) {
         autoplayFailedFor = seed.id;
@@ -181,7 +188,7 @@ function autoplayTick() {
 }
 
 function setAutoplay(on) {
-  prefs.autoplay = on;
+  if (streamSafe()) prefs.apStream = on; else prefs.autoplay = on;
   savePrefs();
   if (!on) queue = queue.filter((t, i) => i <= qi || !t.autoplay);   // take back the unplayed picks
   autoplayFailedFor = null;
