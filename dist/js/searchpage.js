@@ -8,17 +8,31 @@
 
 const SEARCH_TRACKS_SHOWN = 8;
 
-// Best match first: a track with every word searched for (in its title or artist) beats one with
-// fewer; otherwise the platforms take turns, as they came. ("ginsu ghosts n stuff" puts Ginsu's
-// "Ghosts n Stuff" above the original and its other remixes.)
+// Best match first:
+//   1. a track with every word searched for (in its title or artist) beats one with fewer
+//      ("ginsu ghosts n stuff" puts Ginsu's "Ghosts n Stuff" above the original and its remixes)
+//   2. then one whose title is just what was searched ("hello": "Hello" before "Hello Hello")
+//   3. then the more played, across platforms ("hello": Adele's before one with a 25th of the plays)
+// and otherwise the platforms take turns, as they came.
+// Plays: SoundCloud's and YouTube Music's counts; Spotify gives a 0-100 popularity instead, read as
+// plays on a log scale (50 is about 300 thousand, 80 about 40 million). Unknown (your files,
+// MusicBrainz) counts as middling.
+const searchPlays = (t) => {
+  if (t.playback_count) return Number(t.playback_count);
+  if (typeof t.spPop === "number") return Math.pow(10, 2 + t.spPop * 0.07);
+  return 1e5;
+};
 function searchRanker(q) {
   const want = [...new Set(reqWords(q))];
   if (!want.length) return null;
+  const asked = reqWords(q).join(" ");
   const score = (t) => {
     const have = new Set(reqWords((t.title || "") + " " + artistName(t)));
     return want.filter((w) => have.has(w)).length / want.length;
   };
-  return (list) => list.map((t, i) => ({ t, i, s: score(t) })).sort((a, b) => b.s - a.s || a.i - b.i).map((x) => x.t);
+  const exact = (t) => (reqWords(t.title || "").join(" ") === asked ? 1 : 0);
+  return (list) => list.map((t, i) => ({ t, i, s: score(t), e: exact(t), p: Math.log10(1 + searchPlays(t)) }))
+    .sort((a, b) => b.s - a.s || b.e - a.e || b.p - a.p || a.i - b.i).map((x) => x.t);
 }
 let searchShelfTok = 0;
 let searchMixes = [];       // sets & podcasts among the search results, for their own shelf

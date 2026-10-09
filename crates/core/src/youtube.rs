@@ -31,6 +31,8 @@ pub struct YtTrack {
     pub album_id: String,
     pub duration_ms: u64,
     pub thumb: String,
+    /// how many times it's been played ("2.4B plays" in search results), 0 when not shown
+    pub plays: u64,
 }
 
 #[derive(Clone, Debug)]
@@ -151,6 +153,20 @@ pub fn parse_duration(s: &str) -> Option<u64> {
     Some(parts.iter().fold(0, |acc, p| acc * 60 + p) * 1000)
 }
 
+/// "21m plays", "1.2M views", "950K plays", "2.4B plays" as a number
+pub fn parse_plays(s: &str) -> Option<u64> {
+    // (YouTube puts a non-breaking space before "plays")
+    let s = s.replace('\u{a0}', " ").trim().to_lowercase();
+    let num = s.strip_suffix(" plays").or_else(|| s.strip_suffix(" views")).or_else(|| s.strip_suffix(" play")).or_else(|| s.strip_suffix(" view"))?.trim();
+    // ("bn" is how YouTube Music writes billions; "mn" turns up too)
+    let (digits, mult) = [("bn", 1e9), ("mn", 1e6), ("k", 1e3), ("m", 1e6), ("b", 1e9)]
+        .iter()
+        .find_map(|(suf, m)| num.strip_suffix(suf).map(|d| (d, *m)))
+        .unwrap_or((num, 1.0));
+    let n: f64 = digits.trim().replace(',', "").parse().ok()?;
+    Some((n * mult).round() as u64)
+}
+
 // The biggest thumbnail, asked for at 544 px (Google's image URLs take the size as a suffix)
 fn thumb(v: &Value) -> String {
     let mut all = Vec::new();
@@ -216,6 +232,12 @@ pub fn parse_list_item(it: &Value) -> Option<YtTrack> {
     if let Some(c) = col(1) {
         byline(&mut t, &runs(c));
     }
+    // the play count: a column of its own, or a part of the byline
+    t.plays = cols
+        .iter()
+        .flat_map(|c| runs(&c["musicResponsiveListItemFlexColumnRenderer"]["text"]))
+        .find_map(|r| parse_plays(r["text"].as_str().unwrap_or("")))
+        .unwrap_or(0);
     if t.duration_ms == 0 {
         // sometimes the length sits in a fixed column on the right
         let mut fixed = Vec::new();
@@ -573,6 +595,7 @@ mod tests {
         assert_eq!(t.artists, "Porter Robinson, Madeon");
         assert_eq!((t.album.as_str(), t.album_id.as_str()), ("Language", "MPREb_FWVn0qzn7aW"));
         assert_eq!(t.duration_ms, 368_000);
+        assert_eq!(t.plays, 21_000_000);
         assert_eq!(t.thumb, "https://yt3.googleusercontent.com/abc=w544-h544-l90-rj");
     }
 
@@ -583,6 +606,19 @@ mod tests {
             "lengthText": { "runs": [{ "text": "5:51" }] } });
         let t = parse_panel_item(&row).unwrap();
         assert_eq!((t.title.as_str(), t.artists.as_str(), t.duration_ms), ("Sad Machine", "Some Uploader", 351_000));
+    }
+
+    #[test]
+    fn reads_play_counts() {
+        assert_eq!(parse_plays("2.4B plays"), Some(2_400_000_000));
+        assert_eq!(parse_plays("3.5bn plays"), Some(3_500_000_000));
+        assert_eq!(parse_plays("653k plays"), Some(653_000));
+        assert_eq!(parse_plays("291k\u{a0}plays"), Some(291_000));
+        assert_eq!(parse_plays("291k plays"), Some(291_000));
+        assert_eq!(parse_plays("950K views"), Some(950_000));
+        assert_eq!(parse_plays("1,234 plays"), Some(1_234));
+        assert_eq!(parse_plays("6:08"), None);
+        assert_eq!(parse_plays("Language"), None);
     }
 
     #[test]

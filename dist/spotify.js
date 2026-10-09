@@ -34,6 +34,7 @@ function spTrack(x) {
     spArtists: (x.artists || []).map((a) => ({ id: a.id, name: a.name })),
     artwork_url: img,
     duration: x.duration_ms,
+    spPop: typeof x.popularity === "number" ? x.popularity : undefined,   // 0-100 (search ranks by it)
     permalink_url: x.external_urls && x.external_urls.spotify,
     spAlbum: x.album && x.album.id ? {
       id: x.album.id, name: x.album.name, images: x.album.images || [],

@@ -21,6 +21,7 @@ function ytTrack(x) {
     duration: x.duration_ms || 0,
     artwork_url: x.thumb || "",
     permalink_url: "https://www.youtube.com/watch?v=" + x.id,
+    playback_count: x.plays || undefined,   // (search results say how often it's been played)
   });
 }
 
