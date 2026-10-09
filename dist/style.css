@@ -1504,3 +1504,9 @@ body.streamSafe .notSafe { display: none !important; }
 .sortChips .chip { padding: 5px 12px; border: 0; }
 .sortChips .chip.on { background: color-mix(in srgb, var(--accent) 20%, transparent); color: var(--text); }
 .sortArrow { color: var(--accent); font-weight: 800; }
+
+/* lyrics: no scroll bars (the wheel still scrolls them, and they follow the song); the line being sung
+   grows a little, so nothing scrolls sideways; the top and bottom fade, so you can tell there's more */
+.lyrics { overflow-x: hidden; scrollbar-width: none; -webkit-mask-image: linear-gradient(transparent, #000 7%, #000 93%, transparent); mask-image: linear-gradient(transparent, #000 7%, #000 93%, transparent); }
+.lyrics::-webkit-scrollbar { display: none; }
+.lyLine { padding-right: 4%; }
