@@ -8,9 +8,13 @@
 //   POST /api/rooms                 open a room: { kind: "listen" | "jam", host }  ->  { code, hostKey, inviteKey?, joinUrl }
 //   GET  /join/<code>               the page a Listen Along button opens (open in OmniPulse, or download it)
 //   GET  /jam/<code>?k=<invite>     the same for a Jam invite
+//   GET  /ask/<code>                the page the Discord "Ask to Jam" button opens (it asks the host)
 //   GET  /api/rooms/<code>          who's hosting and what's playing (for that page)
 //   GET  /ws/<code>?role=host&key=<hostKey>              the host's connection
 //   GET  /ws/<code>?role=listener&name=<n>[&k=<invite>]  a listener's (a Jam needs its invite)
+//   GET  /ws/<code>?role=asker&name=<n>                  someone asking the host to start a Jam (a Listen
+//        Along room): the host is told { type: "ask", id, name }, answers { type: "askReply", id, ok, url },
+//        and the asker is told { type: "askReply", ok, url } (the Jam's invite, if it was started)
 //
 // Shared playlists (a playlist on someone's PC, with each song's links on every platform it's on):
 //   POST /api/shares                { title, by, tracks }  ->  { code, key, url }
@@ -40,8 +44,8 @@ function randomCode(n, alphabet = "abcdefghjkmnpqrstuvwxyz23456789") {
 
 const esc = (s) => String(s || "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
-function joinPage(env, info, appLink) {
-  const title = info ? (info.kind === "jam" ? "Join " + info.host + "'s Jam" : "Listen along with " + info.host) : "This session has ended";
+function joinPage(env, info, appLink, ask) {
+  const title = info ? (ask ? "Ask " + info.host + " to start a Jam" : info.kind === "jam" ? "Join " + info.host + "'s Jam" : "Listen along with " + info.host) : "This session has ended";
   const now = info && info.track ? `<p class="now">Now playing <b>${esc(info.track.title)}</b>${info.track.artist ? " by " + esc(info.track.artist) : ""}</p>` : "";
   const download = env.DOWNLOAD_URL || "";
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
@@ -170,12 +174,12 @@ export default {
     const stub = env.ROOMS.get(env.ROOMS.idFromName(code));
 
     if (parts[0] === "api" && parts[1] === "rooms" && req.method === "GET") return stub.fetch("https://room/info");
-    if (parts[0] === "join" || parts[0] === "jam") {
+    if (parts[0] === "join" || parts[0] === "jam" || parts[0] === "ask") {
       const info = await (await stub.fetch("https://room/info")).json().catch(() => null);
-      const ok = info && !info.error && (parts[0] === "join" ? info.kind === "listen" : info.kind === "jam");
+      const ok = info && !info.error && (parts[0] === "jam" ? info.kind === "jam" : info.kind === "listen");
       const scheme = env.APP_SCHEME || "omnipulse";
       const appLink = `${scheme}://${parts[0]}/${code}` + (parts[0] === "jam" ? "?k=" + encodeURIComponent(url.searchParams.get("k") || "") + "&relay=" + encodeURIComponent(url.origin) : "?relay=" + encodeURIComponent(url.origin));
-      return new Response(joinPage(env, ok ? info : null, appLink), { headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" } });
+      return new Response(joinPage(env, ok ? info : null, appLink, parts[0] === "ask"), { headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" } });
     }
     if (parts[0] === "ws") {
       if (req.headers.get("Upgrade") !== "websocket") return json({ error: "expected a websocket" }, 426);
@@ -212,6 +216,20 @@ export class Room {
     }
     // a connection
     const role = url.searchParams.get("role");
+    if (role === "asker") {
+      // asking a Listen Along room's host to start a Jam
+      if (meta.kind !== "listen") return json({ error: "they're not taking requests for a Jam right now" }, 409);
+      if (!this.ctx.getWebSockets("host").length) return json({ error: "they're not here right now" }, 409);
+      if (this.ctx.getWebSockets("asker").length >= 5) return json({ error: "they're being asked already" }, 429);
+      const pair = new WebSocketPair();
+      const name = String(url.searchParams.get("name") || "Someone").slice(0, 40);
+      const id = randomCode(10);
+      this.ctx.acceptWebSocket(pair[1], ["asker"]);
+      pair[1].serializeAttachment({ role: "asker", name, id });
+      const msg = JSON.stringify({ type: "ask", id, name });
+      this.ctx.getWebSockets("host").forEach((w) => { try { w.send(msg); } catch (e) {} });
+      return new Response(null, { status: 101, webSocket: pair[0] });
+    }
     if (role === "host") {
       if (url.searchParams.get("key") !== meta.hostKey) return json({ error: "not the host" }, 403);
       this.ctx.getWebSockets("host").forEach((w) => { try { w.close(4000, "the host connected again"); } catch (e) {} });
@@ -263,6 +281,12 @@ export class Room {
         const msg = JSON.stringify({ type: "state", state: m.state });
         this.listeners().forEach((w) => { try { w.send(msg); } catch (e) {} });
         await this.touch();
+      } else if (m.type === "askReply" && typeof m.id === "string") {
+        // the host's answer, to whoever asked
+        const msg = JSON.stringify({ type: "askReply", ok: !!m.ok, url: typeof m.url === "string" ? m.url.slice(0, 300) : "", host: (await this.meta() || {}).host || "" });
+        this.ctx.getWebSockets("asker").forEach((w) => {
+          if ((w.deserializeAttachment() || {}).id === m.id) { try { w.send(msg); w.close(1000, "answered"); } catch (e) {} }
+        });
       } else if (m.type === "end") {
         const msg = JSON.stringify({ type: "ended" });
         this.listeners().forEach((w) => { try { w.send(msg); w.close(1000, "ended"); } catch (e) {} });
@@ -280,6 +304,13 @@ export class Room {
 
   async webSocketClose(ws) {
     try { ws.close(); } catch (e) {}
+    const who = ws.deserializeAttachment() || {};
+    // someone who asked, gone before an answer: the host's prompt goes too
+    if (who.role === "asker") {
+      const msg = JSON.stringify({ type: "askGone", id: who.id });
+      this.ctx.getWebSockets("host").forEach((w) => { try { w.send(msg); } catch (e) {} });
+      return;
+    }
     this.sendMembers();
   }
 

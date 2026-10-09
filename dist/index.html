@@ -17,13 +17,19 @@
 <div class="titlebar" data-tauri-drag-region>
   <div class="titleLeft" data-tauri-drag-region>
     <span id="titleText" data-tauri-drag-region title="Right-click to rename"></span>
-    <button id="streamerBtn" class="streamerBtn" aria-pressed="false" title="Streamer Mode: off. Hides account names, keys, addresses and ports, and plugin settings.">
+    <button id="streamerBtn" class="streamerBtn" aria-pressed="false" title="Streamer Mode: off. Click to hide private info; again for Extended (only music that's safe on stream).">
       <svg viewBox="0 0 24 24"><path d="M12 9.6a2.4 2.4 0 1 0 0 4.8 2.4 2.4 0 0 0 0-4.8zM7.05 7.05a7 7 0 0 0 0 9.9l1.42-1.42a5 5 0 0 1 0-7.07zm9.9 0-1.42 1.41a5 5 0 0 1 0 7.07l1.42 1.42a7 7 0 0 0 0-9.9zM4.22 4.22a11 11 0 0 0 0 15.56l1.42-1.42a9 9 0 0 1 0-12.72zm15.56 0-1.42 1.42a9 9 0 0 1 0 12.72l1.42 1.42a11 11 0 0 0 0-15.56z"/></svg>
     </button>
     <button id="titlePrompt" class="titlePrompt" hidden>Sign in to SoundCloud</button>
     <div class="titlePlat" id="titlePlat" hidden></div>
   </div>
   <button id="jamBtn" class="titleJam" hidden title="Listen together: an invite-only Jam">Start a Jam</button>
+  <div id="jamAsk" class="titleJam jamAsk" hidden role="alert">
+    <svg class="askRing" viewBox="0 0 20 20" aria-hidden="true"><circle class="askRingBack" cx="10" cy="11" r="7"/><circle class="askRingLeft" id="askRingLeft" cx="10" cy="11" r="7"/><path class="askRingTop" d="M8 2h4M10 2v2"/></svg>
+    <span id="jamAskText"></span>
+    <button id="jamAskYes" class="askYes">Accept</button>
+    <button id="jamAskNo" class="askNo">Decline</button>
+  </div>
   <div class="winBtns">
     <button id="winMin" aria-label="Minimize"><svg viewBox="0 0 12 12"><path d="M1 6h10"/></svg></button>
     <button id="winMax" aria-label="Maximize">
@@ -534,6 +540,13 @@
             <div class="note">Friends join at your spot (SoundCloud) or open the track (Spotify).</div>
           </div>
           <label class="switch"><input type="checkbox" id="presListen"><span></span></label>
+        </div>
+        <div class="row">
+          <div>
+            <div class="lbl">Ask to Jam Button</div>
+            <div class="note">Friends can ask you to start a Jam; you're asked at the top of the app. Discord shows two buttons at most.</div>
+          </div>
+          <label class="switch"><input type="checkbox" id="presAsk"><span></span></label>
         </div>
         <div class="row">
           <div>

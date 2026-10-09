@@ -27,10 +27,13 @@ const tStamp = (ms) => { const s = Math.max(0, Math.floor(ms / 1000)); return Ma
 function presenceButtons(t, joinUrl) {
   const link = t.sharing === "private" ? "" : t.permalink_url || "";
   if (joinUrl) {
-    // Listen along opens OmniPulse (or offers it) and joins your queue, through your relay
-    const out = [{ label: "Listen along", url: joinUrl }];
+    // Listen along opens OmniPulse (or offers it) and joins your queue, through your relay; Ask to Jam
+    // asks you (at the top of the app) to start a Jam with them. Discord shows two at most.
+    const out = [];
+    if (presOpt("presListen")) out.push({ label: "Listen along", url: joinUrl });
+    if (prefs.presAsk) out.push({ label: "Ask to Jam", url: joinUrl.replace("/join/", "/ask/") });
     if (link && presOpt("presLink")) out.push({ label: openLabel(t), url: link });
-    return out;
+    return out.slice(0, 2);
   }
   if (!link) return [];
   const sp = srcOf(t) === "spotify" || srcOf(t) === "youtube";   // links that can't say where to start
@@ -123,6 +126,8 @@ function lfmScrobble(t, startedAt) {
 }
 
 function integrationsInit() {
+  $("presAsk").checked = !!prefs.presAsk;
+  $("presAsk").addEventListener("change", () => { prefs.presAsk = $("presAsk").checked; savePrefs(); presenceUpdate(); });
   ["presArt", "presTime", "presLink", "presListen"].forEach((key) => {
     $(key).checked = presOpt(key);
     $(key).addEventListener("change", () => { prefs[key] = $(key).checked; savePrefs(); presenceUpdate(); });

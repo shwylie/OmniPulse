@@ -45,7 +45,7 @@ function paintTogether() {
   const jamBtn = $("jamBtn");
   const listening = together.role === "listener";
   const hostingJam = together.role === "host" && together.kind === "jam";
-  jamBtn.hidden = !relayUrl() && !listening;
+  jamBtn.hidden = (!relayUrl() && !listening) || (typeof jamAsk !== "undefined" && !!jamAsk);
   jamBtn.textContent = listening ? (together.kind === "jam" ? "Leave Jam" : "Leave Listen Along")
     : hostingJam ? "Jam" + (together.members.length ? " · " + together.members.length : "") : "Start a Jam";
   jamBtn.classList.toggle("on", hostingJam || listening);
@@ -74,12 +74,18 @@ function roomConnect(url, onMessage) {
 }
 
 // ---------- hosting ----------
-async function hostOpen(kind) {
+// A new room on the relay
+async function roomCreate(kind) {
+  const res = await fetch(relayUrl() + "/api/rooms", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ kind, host: myName() }) });
+  if (!res.ok) throw new Error("the relay answered " + res.status);
+  return res.json();
+}
+
+// (made: a room made already, by roomCreate)
+async function hostOpen(kind, made) {
   const relay = relayUrl();
   if (together.role) await togetherEnd(true);
-  const res = await fetch(relay + "/api/rooms", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ kind, host: myName() }) });
-  if (!res.ok) throw new Error("the relay answered " + res.status);
-  const r = await res.json();
+  const r = made || await roomCreate(kind);
   Object.assign(together, { role: "host", kind, code: r.code, hostKey: r.hostKey, inviteKey: r.inviteKey || "", joinUrl: r.joinUrl, relay, members: [], closing: false });
   roomConnect(wsBase(relay) + "/ws/" + r.code + "?role=host&key=" + encodeURIComponent(r.hostKey), hostMessage);
   together.ws.addEventListener("open", () => hostPush(true));
@@ -90,6 +96,83 @@ async function hostOpen(kind) {
 function hostMessage(m) {
   if (m.type === "members") { together.members = m.list || []; paintTogether(); }
   else if (m.type === "add" && together.kind === "jam" && m.track) jamAdded(m.track, m.by);
+  else if (m.type === "ask" && m.id) jamAsked(m.id, m.name || "Someone");
+  else if (m.type === "askGone" && jamAsk && jamAsk.id === m.id) jamAskClose();
+}
+
+// ---------- Ask to Jam (the Discord button): someone asks you to start a Jam ----------
+// In the Start a Jam button's place: "<name> wants you to Start a Jam", Accept or Decline, for a minute
+// (a ring empties as it runs out); then it's declined and the button is back. Accepting starts the
+// Jam and joins them to it.
+const JAM_ASK_MS = 60000;
+let jamAsk = null;   // { id, name, timer }
+
+function jamAskReply(id, ok, url) {
+  try { together.ws.send(JSON.stringify({ type: "askReply", id, ok, url: url || "" })); } catch (e) {}
+}
+
+function jamAsked(id, name) {
+  // one at a time: anyone else asking meanwhile is told no
+  if (jamAsk || (together.role === "host" && together.kind === "jam")) { jamAskReply(id, false); return; }
+  jamAsk = { id, name, timer: setTimeout(() => { jamAskReply(id, false); jamAskClose(); }, JAM_ASK_MS) };
+  $("jamAskText").textContent = name + " wants you to Start a Jam";
+  const ring = $("askRingLeft");
+  ring.classList.remove("run");
+  void ring.getBoundingClientRect();
+  ring.classList.add("run");
+  $("jamAsk").hidden = false;
+  $("jamBtn").hidden = true;
+}
+
+function jamAskClose() {
+  if (jamAsk) clearTimeout(jamAsk.timer);
+  jamAsk = null;
+  $("jamAsk").hidden = true;
+  $("askRingLeft").classList.remove("run");
+  paintTogether();
+}
+
+async function jamAskAccept() {
+  if (!jamAsk) return;
+  const { id, name } = jamAsk;
+  jamAskClose();
+  try {
+    // the Jam first, so they're sent its invite on the room they asked in, then the move to it
+    const r = await roomCreate("jam");
+    jamAskReply(id, true, r.joinUrl);
+    await new Promise((res) => setTimeout(res, 400));
+    await hostOpen("jam", r);
+    say("Jam started with " + name + ". Invite more friends from the Jam button.", { force: true });
+  } catch (e) {
+    jamAskReply(id, false);
+    say("Couldn't start a Jam: " + (e && e.message ? e.message : e), { force: true });
+  }
+}
+
+// Asking someone (their Discord status's Ask to Jam button opened omnipulse://ask/<code>)
+async function jamAskSend(code, relay) {
+  let info = null;
+  try { info = await (await fetch(relay + "/api/rooms/" + code)).json(); } catch (e) {}
+  if (!info || info.error || info.kind !== "listen") { say("They're not taking requests for a Jam right now."); return; }
+  const host = info.host || "They";
+  const ws = new WebSocket(wsBase(relay) + "/ws/" + code + "?role=asker&name=" + encodeURIComponent(myName()));
+  let answered = false;
+  say("Asked " + host + " to start a Jam. Waiting for them...", { stay: true, force: true });
+  ws.onmessage = (e) => {
+    let m; try { m = JSON.parse(e.data); } catch (x) { return; }
+    if (m.type !== "askReply") return;
+    answered = true;
+    if (m.ok && m.url) {
+      // the Jam's invite (its web page's address), as the app link that page would open
+      say("", { force: true });
+      let link = m.url;
+      try { const w = new URL(m.url); link = "omnipulse:/" + w.pathname + "?k=" + encodeURIComponent(w.searchParams.get("k") || "") + "&relay=" + encodeURIComponent(w.origin); } catch (x) {}
+      togetherLink(link, true);
+    }
+    else say(host + " didn't start a Jam this time.", { force: true });
+  };
+  ws.onclose = () => { if (!answered) say(host + " didn't answer.", { force: true }); };
+  setTimeout(() => { if (!answered) { answered = true; try { ws.close(); } catch (e) {} say(host + " didn't answer.", { force: true }); } }, JAM_ASK_MS + 10000);
 }
 
 function hostSnapshot() {
@@ -119,9 +202,9 @@ function jamAdded(s, by) {
   hostPush(true);
 }
 
-// Listen Along for the Discord button: a room while you're playing with the button on
+// Listen Along for the Discord buttons: a room while you're playing with Listen along or Ask to Jam on
 async function togetherEnsureListen() {
-  const want = !!(relayUrl() && prefs.presence && prefs.presListen !== false && nowPlaying() && together.role !== "listener");
+  const want = !!(relayUrl() && prefs.presence && (prefs.presListen !== false || prefs.presAsk) && nowPlaying() && together.role !== "listener");
   if (!want) {
     if (together.role === "host" && together.kind === "listen") togetherEnd(true);
     return "";
@@ -162,12 +245,17 @@ async function togetherEnd(quiet) {
 }
 
 // ---------- listening along ----------
-async function togetherLink(link) {
+// (asked: the Jam you asked for, so you're not asked again whether to join)
+async function togetherLink(link, asked) {
   let u;
   try { u = new URL(link); } catch (e) { return; }
   const kind = u.host === "jam" ? "jam" : u.host === "join" ? "listen" : null;
   const code = u.pathname.replace(/^\//, "");
   const relay = (u.searchParams.get("relay") || relayUrl()).replace(/\/+$/, "");
+  if (u.host === "ask") {
+    if (/^[a-z0-9]{8}$/.test(code) && relayOk(relay)) await jamAskSend(code, relay); else say("That link isn't an OmniPulse invite.");
+    return;
+  }
   if (u.host === "playlist") {
     if (/^[a-z0-9]{8}$/.test(code) && relayOk(relay)) await shareOpen(code, relay); else say("That link isn't an OmniPulse playlist.");
     return;
@@ -178,7 +266,7 @@ async function togetherLink(link) {
   if (!info || info.error) { say("That session has ended."); return; }
   const what = kind === "jam" ? "Join " + info.host + "'s Jam?" : "Listen along with " + info.host + "?";
   const more = kind === "jam" ? " You can add songs; " + info.host + " picks what plays." : " You'll hear what they play, as they play it.";
-  if (!confirm(what + more + " Your own queue is set aside until you leave, and your EQ and loudness stay yours.")) return;
+  if (!asked && !confirm(what + more + " Your own queue is set aside until you leave, and your EQ and loudness stay yours.")) return;
   if (together.role) await togetherEnd(true);
   together.saved = { queue: queue.slice(), qi, listName: queueListName, wasPlaying: nowPlaying() };
   if (nowPlaying()) toggle();
@@ -363,6 +451,8 @@ function togetherInit() {
   $("togetherName").value = prefs.togetherName || "";
   $("togetherName").placeholder = myName();
   $("togetherName").addEventListener("change", () => { prefs.togetherName = $("togetherName").value.trim(); savePrefs(); });
+  $("jamAskYes").addEventListener("click", jamAskAccept);
+  $("jamAskNo").addEventListener("click", () => { if (jamAsk) jamAskReply(jamAsk.id, false); jamAskClose(); });
   $("jamBtn").addEventListener("click", () => {
     if (together.role === "listener") togetherEnd(false);
     else if (together.role === "host" && together.kind === "jam") jamDialog();
