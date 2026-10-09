@@ -17,7 +17,7 @@ export global Theme {
 }
 
 export struct Row { title: string, artist: string, album: string, dur: string, plat: string, playing: bool, head: string, auto: bool, art: image, liked: bool }
-export struct Side { title: string, plat: string }
+export struct Side { title: string, plat: string, own: bool }
 export struct Plat { id: string, on: bool, name: string }
 export struct Tile { title: string, sub: string, art: image, plat: string }
 export struct Shelf { title: string, tiles: [Tile] }
@@ -44,6 +44,8 @@ global Icons {
     out property <string> heart-out: "M16.5 3c-1.74 0-3.41.81-4.5 2.09C10.91 3.81 9.24 3 7.5 3 4.42 3 2 5.42 2 8.5c0 3.78 3.4 6.86 8.55 11.54L12 21.35l1.45-1.32C18.6 15.36 22 12.28 22 8.5 22 5.42 19.58 3 16.5 3zm-4.4 15.55l-.1.1-.1-.1C7.14 14.24 4 11.39 4 8.5 4 6.5 5.5 5 7.5 5c1.54 0 3.04.99 3.57 2.36h1.87C13.46 5.99 14.96 5 16.5 5c2 0 3.5 1.5 3.5 3.5 0 2.89-3.14 5.74-7.9 10.05z";
     out property <string> star-out: "M22 9.24l-7.19-.62L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21 12 17.27 18.18 21l-1.63-7.03L22 9.24zM12 15.4l-3.76 2.27 1-4.28-3.32-2.88 4.38-.38L12 6.1l1.71 4.04 4.38.38-3.32 2.88 1 4.28L12 15.4z";
     out property <string> output: "M4 6h18V4H4c-1.1 0-2 .9-2 2v11H0v3h14v-3H4V6zm19 2h-6c-.55 0-1 .45-1 1v10c0 .55.45 1 1 1h6c.55 0 1-.45 1-1V9c0-.55-.45-1-1-1zm-1 9h-4v-7h4v7z";
+    out property <string> add: "M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z";
+    out property <string> playlist-add: "M19 3H5a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2V5a2 2 0 00-2-2zm0 16H5V5h14v14zm-8-2h2v-4h4v-2h-4V7h-2v4H7v2h4z";
     out property <string> more: "M6 10a2 2 0 100 4 2 2 0 000-4zm6 0a2 2 0 100 4 2 2 0 000-4zm6 0a2 2 0 100 4 2 2 0 000-4z";
     out property <string> refresh: "M17.65 6.35A7.958 7.958 0 0012 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08A5.99 5.99 0 0112 18c-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z";
     out property <string> back: "M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z";
@@ -309,6 +311,9 @@ component TrackRow inherits Rectangle {
     in property <int> index;
     /// little room: no album column
     in property <bool> compact;
+    /// your playlists on this PC (to add to), and whether this list is one of them
+    in property <[string]> lists;
+    in property <bool> removable;
     callback play();
     callback act(string);
     height: 60px;
@@ -350,6 +355,12 @@ component TrackRow inherits Rectangle {
         Menu {
             MenuItem { title: "Play Next"; activated => { root.act("next"); } }
             MenuItem { title: "Add to Queue"; activated => { root.act("add"); } }
+            Menu {
+                title: "Add to Playlist";
+                for l[k] in root.lists: MenuItem { title: l; activated => { root.act("pl" + k); } }
+                MenuItem { title: "New Playlist..."; activated => { root.act("plnew"); } }
+            }
+            if root.removable: MenuItem { title: "Remove from This Playlist"; activated => { root.act("plremove"); } }
         }
         ta := TouchArea { clicked => { root.play(); } }
     }
@@ -412,6 +423,19 @@ export component AppWindow inherits Window {
     in property <int> chip-on;
     in property <[Row]> rows;
     in property <[Side]> sides;
+    // your playlists on this PC, by name; the page is one of them
+    in property <[string]> own-lists;
+    in property <bool> own-page;
+    // the naming dialog (a new playlist, or renaming one)
+    in-out property <bool> name-open;
+    in-out property <string> name-text;
+    in property <string> name-head;
+    in property <string> name-ok;
+    callback name-done(string);
+    callback pl-new();
+    callback side-action(int, string);
+    // the bar's playlist button: one of yours (by its place in own-lists), or -1 for a new one
+    callback bar-pl(int);
     in property <int> side-on: -1;
     in property <[Shelf]> shelves;
     in-out property <string> search-text;
@@ -647,7 +671,11 @@ export component AppWindow inherits Window {
                     NavItem { label: "Artists"; d: Icons.person; compact: root.narrow; active: root.page == "artists" || root.page == "artist"; clicked => { root.nav("artists"); } }
                     NavItem { label: "Stats"; d: Icons.stats; compact: root.narrow; active: root.page == "stats"; clicked => { root.nav("stats"); } }
                     Rectangle { height: 10px; }
-                    if !root.narrow: Text { text: "Playlists"; color: Theme.muted; font-size: 12px; font-weight: 700; x: 12px; }
+                    if !root.narrow: HorizontalLayout {
+                        padding-left: 12px;
+                        Text { text: "Playlists"; color: Theme.muted; font-size: 12px; font-weight: 700; vertical-alignment: center; horizontal-stretch: 1; }
+                        IconButton { d: Icons.add; size: 26px; clicked => { root.pl-new(); } }
+                    }
                     if root.narrow: Rectangle { height: 1px; background: Theme.line; }
                     ListView {
                         vertical-stretch: 1;
@@ -662,7 +690,14 @@ export component AppWindow inherits Window {
                                 PlatIcon { plat: s.plat; width: 14px; height: 14px; y: (parent.height - self.height) / 2; }
                                 if !root.narrow: Text { text: s.title; color: root.side-on == i ? Theme.text : Theme.muted; font-size: 13px; vertical-alignment: center; overflow: elide; }
                             }
-                            sta := TouchArea { clicked => { root.side(i); } }
+                            ContextMenuArea {
+                                enabled: s.own;
+                                Menu {
+                                    MenuItem { title: "Rename..."; activated => { root.side-action(i, "rename"); } }
+                                    MenuItem { title: "Delete"; activated => { root.side-action(i, "delete"); } }
+                                }
+                                sta := TouchArea { clicked => { root.side(i); } }
+                            }
                         }
                     }
                 }
@@ -800,7 +835,7 @@ export component AppWindow inherits Window {
                         changed first => { root.rows-in-view(self.first, self.count); }
                         changed count => { root.rows-in-view(self.first, self.count); }
                         init => { root.rows-in-view(self.first, self.count); }
-                        for r[i] in root.rows: TrackRow { item: r; index: i; compact: root.narrow || root.queue-open; play => { root.play-row(i); } act(a) => { root.row-action(i, a); } }
+                        for r[i] in root.rows: TrackRow { item: r; index: i; compact: root.narrow || root.queue-open; lists: root.own-lists; removable: root.own-page; play => { root.play-row(i); } act(a) => { root.row-action(i, a); } }
                     }
                     // Artists: everyone you follow, round, A to Z
                     if root.page-kind == "artists": grid := ScrollView {
@@ -1335,6 +1370,27 @@ export component AppWindow inherits Window {
                         // like and favourite, as the web app's (on the track that's playing)
                         if root.can-like: IconButton { d: root.now-liked ? Icons.library : Icons.heart-out; tint: root.now-liked ? Theme.accent : Theme.muted; y: (parent.height - self.height) / 2; clicked => { root.like-toggle(); } }
                         if root.can-like: IconButton { d: root.now-fav ? Icons.star : Icons.star-out; tint: root.now-fav ? Theme.accent : Theme.muted; y: (parent.height - self.height) / 2; clicked => { root.fav-toggle(); } }
+                        if root.now-plat != "": Rectangle {
+                            width: 36px;
+                            IconButton { d: Icons.playlist-add; y: (parent.height - self.height) / 2; clicked => { pl-menu.show(); } }
+                            pl-menu := PopupWindow {
+                                x: parent.width - 240px;
+                                y: -12px - (root.own-lists.length + 2) * 32px - 16px;
+                                width: 240px;
+                                Rectangle {
+                                    background: Theme.elevated;
+                                    border-radius: 10px;
+                                    border-width: 1px;
+                                    border-color: Theme.line;
+                                    VerticalLayout {
+                                        padding: 6px;
+                                        Text { text: "Add to playlist"; color: Theme.muted; font-size: 12px; font-weight: 700; height: 32px; vertical-alignment: center; x: 10px; }
+                                        for l[k] in root.own-lists: MenuRow { label: l; clicked => { root.bar-pl(k); } }
+                                        MenuRow { label: "New playlist..."; clicked => { root.bar-pl(-1); } }
+                                    }
+                                }
+                            }
+                        }
                         IconButton { d: Icons.lyrics; tint: root.page == "now" ? Theme.accent : Theme.muted; y: (parent.height - self.height) / 2; clicked => { root.nav(root.page == "now" ? "library" : "now"); } }
                         // where the sound plays
                         Rectangle {
@@ -1386,6 +1442,56 @@ export component AppWindow inherits Window {
                 }
             }
         }
+        }
+    }
+    // naming a playlist: a new one, or a new name for one of yours
+    if root.name-open: Rectangle {
+        x: 0;
+        y: 0;
+        width: root.width;
+        height: root.height;
+        background: #00000080;
+        TouchArea { clicked => { root.name-open = false; } }
+        Rectangle {
+            width: 380px;
+            height: 176px;
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            background: Theme.elevated;
+            border-radius: 12px;
+            border-width: 1px;
+            border-color: Theme.line;
+            TouchArea { }
+            VerticalLayout {
+                padding: 20px;
+                spacing: 14px;
+                Text { text: root.name-head; color: Theme.text; font-size: 18px; font-weight: 800; }
+                Rectangle {
+                    height: 38px;
+                    border-radius: 8px;
+                    background: Theme.panel;
+                    border-width: 1px;
+                    border-color: Theme.accent;
+                    TextInput {
+                        x: 12px;
+                        width: parent.width - 24px;
+                        height: parent.height;
+                        vertical-alignment: center;
+                        color: Theme.text;
+                        font-size: 14px;
+                        single-line: true;
+                        text <=> root.name-text;
+                        accepted => { root.name-done(self.text); }
+                        init => { self.focus(); self.select-all(); }
+                    }
+                }
+                HorizontalLayout {
+                    alignment: end;
+                    spacing: 8px;
+                    Pill { label: "Cancel"; clicked => { root.name-open = false; } }
+                    Pill { label: root.name-ok; on: true; clicked => { root.name-done(root.name-text); } }
+                }
+            }
         }
     }
 }
