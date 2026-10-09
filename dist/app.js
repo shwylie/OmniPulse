@@ -2202,6 +2202,8 @@ $("statusBar").addEventListener("click", () => say("", { force: true }));
 $("winMin").addEventListener("click", () => win.minimize());
 $("winMax").addEventListener("click", () => win.toggleMaximize());
 $("winClose").addEventListener("click", () => { if (prefs.closeToTray) win.hide(); else win.close(); });
+// ...and closing it any other way (the taskbar's Close window, Alt+F4): the same choice
+win.onCloseRequested((e) => { if (prefs.closeToTray) { e.preventDefault(); win.hide(); } }).catch(() => {});
 
 async function syncMaximized() {
   try {
