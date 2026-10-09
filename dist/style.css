@@ -1645,3 +1645,13 @@ body.streamSafe #navSets, body.streamSafe #navArtists, body.streamSafe #plSectio
 :root[data-player="minimal"] .player #nowArtist { font-size: 12px; }
 :root[data-player="minimal"] .player #nowAlbum { display: none; }
 :root[data-player="minimal"] .player .transport, :root[data-player="minimal"] .player .right { margin-top: 0; }
+/* Now Playing (and its lyrics): one glow across the whole page, the top bar included, instead of the
+   page's own top gradient meeting the view's at a visible edge */
+.content:has(#npView:not([hidden])) {
+  background:
+    radial-gradient(circle at 22% 30%, color-mix(in srgb, var(--accent) 30%, transparent), transparent 60%),
+    radial-gradient(circle at 85% 80%, color-mix(in srgb, var(--accent-2) 26%, transparent), transparent 60%),
+    var(--panel);
+}
+.content:has(#npView:not([hidden]))::before { display: none; }
+.content:has(#npView:not([hidden])) .np { background: none; }
