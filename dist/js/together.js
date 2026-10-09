@@ -23,7 +23,9 @@ const together = {
   state: null, stateAt: 0, trims: {}, picks: {}, saved: null, localPause: false, closing: false, pushTimer: null,
 };
 
-const relayUrl = () => String(prefs.relayUrl || "").trim().replace(/\/+$/, "");
+// OmniPulse's relay (jam-server/, on Cloudflare); one set by hand before there was a built-in one still wins
+const RELAY_URL = "https://omnipulse-jam.shwylie101.workers.dev";
+const relayUrl = () => (String(prefs.relayUrl || "").trim() || RELAY_URL).replace(/\/+$/, "");
 const myName = () => (prefs.togetherName || "").trim() || (typeof spotifyName === "string" && spotifyName) || userName || "Someone";
 const wsBase = (relay) => relay.replace(/^http/i, "ws");
 // only a relay on the web (https), or one on this PC while testing
@@ -74,7 +76,6 @@ function roomConnect(url, onMessage) {
 // ---------- hosting ----------
 async function hostOpen(kind) {
   const relay = relayUrl();
-  if (!relay) throw new Error("set your relay's address in Settings > App > Listen Along & Jams first");
   if (together.role) await togetherEnd(true);
   const res = await fetch(relay + "/api/rooms", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ kind, host: myName() }) });
   if (!res.ok) throw new Error("the relay answered " + res.status);
@@ -359,16 +360,6 @@ const addToQueueHere = (t) => togetherOrig.addToQueue(t);
 
 function togetherInit() {
   togetherGuard();
-  $("relayUrl").value = prefs.relayUrl || "";
-  $("relayUrl").addEventListener("change", () => {
-    const v = $("relayUrl").value.trim().replace(/\/+$/, "");
-    if (v && !relayOk(v)) { $("relayNote").textContent = "That needs to be an https:// address (like https://omnipulse-jam.you.workers.dev)."; return; }
-    prefs.relayUrl = v;
-    savePrefs();
-    $("relayNote").textContent = "";
-    paintTogether();
-    presenceUpdate();
-  });
   $("togetherName").value = prefs.togetherName || "";
   $("togetherName").placeholder = myName();
   $("togetherName").addEventListener("change", () => { prefs.togetherName = $("togetherName").value.trim(); savePrefs(); });

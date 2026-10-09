@@ -2321,7 +2321,7 @@ fn share_status(shared: &Shared, note: String) {
 fn share_playlist(shared: &Shared, p: sources::Playlist) {
     let (relay, by, was, rt, weak) = {
         let a = shared.borrow();
-        let relay = a.web.prefs["relayUrl"].as_str().unwrap_or("").trim().trim_end_matches('/').to_string();
+        let relay = a.web.prefs["relayUrl"].as_str().map(str::trim).filter(|s| !s.is_empty()).unwrap_or(share::RELAY_URL).trim_end_matches('/').to_string();
         let by = a.web.prefs["togetherName"].as_str().map(str::trim).filter(|s| !s.is_empty()).map(String::from)
             .or_else(|| ACCOUNT_NAMES.with(|n| n.borrow().get("spotify").cloned()).filter(|s| !s.is_empty()))
             .unwrap_or_else(|| "Someone".into());
@@ -2332,9 +2332,6 @@ fn share_playlist(shared: &Shared, p: sources::Playlist) {
         };
         (relay, by, was, a.rt.clone(), a.ui.clone())
     };
-    if relay.is_empty() {
-        return share_status(shared, "Set your relay's address first (in the web app: Settings > Streaming > Listen Along & Jams): shared playlists live there.".into());
-    }
     share_status(shared, "Sharing...".into());
     rt.spawn(async move {
         let tracks = sources::playlist_tracks(&p).await;
@@ -2672,7 +2669,7 @@ fn apply_look(shared: &Shared) {
     let t = ui.global::<Theme>();
     // Settings > App > Rounded Corners (the web app's setting too)
     let rounded = prefs["appRounded"].as_bool() != Some(false);
-    t.set_radius(if rounded { 10.0 } else { 0.0 });
+    t.set_panel_radius(if rounded { 10.0 } else { 0.0 });
     ui.set_rounded(rounded);
     t.set_bg(p.bg.slint());
     t.set_panel(p.panel.slint());

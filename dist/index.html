@@ -384,7 +384,7 @@
       <div class="row">
         <div>
           <div class="lbl">Rounded Corners</div>
-          <div class="note">On the app's panels, the player bar and its track tab. Off: square.</div>
+          <div class="note">On the sidebar, the page and the queue. Off: square.</div>
         </div>
         <label class="switch"><input type="checkbox" id="roundedOn"><span></span></label>
       </div>
@@ -416,22 +416,17 @@
       <div class="row">
         <div>
           <div class="lbl">Listen Along &amp; Jams</div>
-          <div class="note">Friends join your queue in their own OmniPulse: from Listen Along on your Discord status, or an invite-only Jam (in the queue). Needs your relay (jam-server/README.md).</div>
+          <div class="note">Friends join your queue in their own OmniPulse: from Listen Along on your Discord status, or an invite-only Jam (in the queue).</div>
         </div>
       </div>
       <details class="sub" id="togetherSection">
         <summary>Listen Along &amp; Jams</summary>
         <div class="row">
-          <div class="lbl">Relay Address</div>
-          <input id="relayUrl" class="narrow wide" type="text" placeholder="https://omnipulse-jam.you.workers.dev" spellcheck="false" autocomplete="off">
-        </div>
-        <p class="note warn" id="relayNote"></p>
-        <div class="row">
           <div>
             <div class="lbl">Your Name</div>
             <div class="note">What listeners see.</div>
           </div>
-          <input id="togetherName" class="narrow" type="text" maxlength="40" spellcheck="false" autocomplete="off">
+          <input id="togetherName" class="nameInput" type="text" maxlength="40" spellcheck="false" autocomplete="off">
         </div>
       </details>
       <div class="row">

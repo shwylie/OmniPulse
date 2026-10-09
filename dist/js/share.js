@@ -31,7 +31,6 @@ function shareLinks(t) {
 
 async function sharePlaylist(p) {
   const relay = relayUrl();
-  if (!relay) { say("Set your relay's address first (Settings > Streaming > Listen Along & Jams): shared playlists live there.", { force: true }); return; }
   say("Sharing...");
   let tracks;
   try { tracks = isXpl(p) ? xplTracks(xplFind(p.id) || { tracks: [] }) : await platformPlaylistTracks(p); }

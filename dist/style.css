@@ -1593,8 +1593,12 @@ body.streamSafe #navSets, body.streamSafe #navArtists, body.streamSafe #plSectio
 .np { padding-bottom: calc(32px + var(--tabH) + 8px); scroll-padding-bottom: calc(var(--tabH) + 16px); }
 .stats { padding-bottom: calc(28px + var(--tabH) + 8px); }
 
-/* Rounded Corners off (Settings > App): the panels, the player bar and its track tab square, the tab
-   meeting the bar without its curve (the widget has its own setting) */
-:root.square .sidebar, :root.square .content, :root.square .queue,
-:root.square .player::before, :root.square .player .now, :root.square .player .now::before { border-radius: 0 !important; }
-:root.square .player .now::after { display: none; }
+/* Rounded Corners off (Settings > App): the sidebar, the page and the queue square (the player bar and
+   its track tab keep their corners; the widget has its own setting) */
+:root.square .sidebar, :root.square .content, :root.square .queue { border-radius: 0 !important; }
+
+/* name boxes (the app's name, yours in Listen Along & Jams): the theme's own colours, the accent while typing */
+.nameInput { box-sizing: border-box; font: inherit; outline: none; transition: border-color 0.15s; }
+.nameInput::placeholder { color: var(--muted); opacity: 0.8; }
+.nameInput:hover { border-color: color-mix(in srgb, var(--accent) 45%, var(--line)); }
+.nameInput:focus { border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent); }

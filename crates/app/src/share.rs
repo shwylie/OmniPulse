@@ -8,6 +8,9 @@ use crate::track::{Src, Track};
 use omnipulse_core as core;
 use serde_json::{json, Value};
 
+/// OmniPulse's relay (jam-server/, on Cloudflare), unless one was set by hand before
+pub const RELAY_URL: &str = "https://omnipulse-jam.shwylie101.workers.dev";
+
 pub const PLATS: [(&str, &str); 3] = [("soundcloud", "SoundCloud"), ("spotify", "Spotify"), ("youtube", "YouTube Music")];
 
 pub fn name(plat: &str) -> &'static str {
