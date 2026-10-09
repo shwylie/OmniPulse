@@ -318,7 +318,11 @@ async function spotifyStart(t, startMs) {
   spe.endPending = false;
   spe.node.port.postMessage({ type: "play" });
   const gen = await speCall("spe_play", { uri: t.uri, positionMs: startMs });
-  if (curTrack() !== t) return;   // skipped meanwhile
+  if (curTrack() !== t) {
+    // skipped meanwhile: to another Spotify track, which starts itself; to anything else, this stops
+    if (!onSpotifyEngine(curTrack())) { spe.node.port.postMessage({ type: "pause" }); invoke("spe_pause").catch(() => {}); }
+    return;
+  }
   if (gen > spe.gen) speFlush(gen);
   spState = { pos: startMs, ts: performance.now(), playing: true, dur: t.duration || 0 };
   fadeHeard();

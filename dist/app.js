@@ -1452,6 +1452,9 @@ async function playCurrent() {
   const startAt = trimStartFor(t, takeResume(t));   // a resumed position, or where it's set to start
   try {
     if (onSpotifyEngine(t)) {
+      // a stream still loading for the track before (SoundCloud, YouTube...) mustn't start under this one
+      streamToken++;
+      if (hls) { hls.destroy(); hls = null; }
       audio.pause();
       await spotifyStart(t, startAt);
     } else {
@@ -1470,6 +1473,8 @@ async function playCurrent() {
 // Full tracks arrive as HLS, which the browser engine can't play without hls.js
 let hls = null;
 let streamToken = 0;   // ignore results for tracks we've already skipped past
+// and whatever still starts the <audio> element late, under a Spotify track, is stopped
+audio.addEventListener("playing", () => { if (onSpotifyEngine(curTrack())) audio.pause(); });
 
 const streamName = (name) => String(name).replace(/_url$/, "");
 
