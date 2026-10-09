@@ -1111,7 +1111,7 @@ fn play_list(shared: &Shared, list: Vec<Track>, i: usize) {
             a.queue_spaced = a.page == "library" || a.page == "playlist";
             // shuffle on: the rest after the one picked, shuffled (in order, it plays as it is)
             if a.shuffle_on {
-                let lp = a.web.last_played.clone();
+                let lp = shuffle_basis(&a);
                 let sp = spacing(&a);
                 a.queue.shuffle_rest(&lp, sp);
             }
@@ -1163,7 +1163,7 @@ fn shuffle_toggle(shared: &Shared) {
     let from = a.queue.qi.map_or(0, |i| i + 1);
     if a.shuffle_on {
         a.shuffle_backup = Some(a.queue.items.iter().skip(from).map(|q| q.t.key.clone()).collect());
-        let lp = a.web.last_played.clone();
+        let lp = shuffle_basis(&a);
         let sp = spacing(&a);
         a.queue.shuffle_rest(&lp, sp);
     } else if let Some(order) = a.shuffle_backup.take() {
@@ -1188,6 +1188,12 @@ fn recent_window(prefs: &serde_json::Value) -> u64 {
         Some("month") => MONTH_MS,
         _ => 7 * 86_400_000,
     }
+}
+
+/// What shuffling goes by: when you last heard each track (long-unheard first), or, with repeat on,
+/// nothing (plainly random: it all comes round again anyway)
+fn shuffle_basis(a: &App) -> HashMap<String, u64> {
+    if a.repeat == "off" { a.web.last_played.clone() } else { HashMap::new() }
 }
 
 fn spacing(a: &App) -> Option<(u64, u64)> {
@@ -1442,7 +1448,7 @@ fn remote_action(shared: &Shared, id: u64, action: &str) {
         "previous" => step(shared, -1),
         "shuffle" => {
             let mut a = shared.borrow_mut();
-            let lp = a.web.last_played.clone();
+            let lp = shuffle_basis(&a);
             let sp = spacing(&a);
             a.queue.shuffle_rest(&lp, sp);
             paint_queue(&mut a);
@@ -2192,7 +2198,7 @@ fn desktop_action(shared: &Shared, action: &str) {
         "prev" => step(shared, -1),
         "shuffle" => {
             let mut a = shared.borrow_mut();
-            let lp = a.web.last_played.clone();
+            let lp = shuffle_basis(&a);
             let sp = spacing(&a);
             a.queue.shuffle_rest(&lp, sp);
             paint_queue(&mut a);
@@ -2653,7 +2659,7 @@ fn main() -> Result<(), slint::PlatformError> {
             "next" => a.queue.move_next(at),
             "remove" => a.queue.remove(at),
             _ => {
-                let lp = a.web.last_played.clone();
+                let lp = shuffle_basis(&a);
                 let sp = spacing(&a);
                 a.queue.shuffle_rest(&lp, sp);
             }
@@ -2666,7 +2672,7 @@ fn main() -> Result<(), slint::PlatformError> {
         let (list, spaced) = {
             let a = s.borrow();
             let spaced = a.page == "library" || a.page == "playlist";
-            let list = queue::fair_shuffle(a.page_tracks.clone(), &a.web.last_played);
+            let list = queue::fair_shuffle(a.page_tracks.clone(), &shuffle_basis(&a));
             (if spaced && a.repeat == "off" { queue::space_recent(list, &a.web.last_played, recent_window(&a.web.prefs), now_ms()) } else { list }, spaced)
         };
         {

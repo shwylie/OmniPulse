@@ -48,8 +48,10 @@ async function shuffleSource() {
   return viewTracks.slice();
 }
 
-// The order a shuffled list plays in: fair, and on Rediscover still taking turns between platforms
+// The order a shuffled list plays in: fair, and on Rediscover still taking turns between platforms.
+// With repeat on, plainly random: everything comes round again anyway.
 function shuffledOrder(list) {
+  if (repeatMode !== "off") return shuffleInPlace(list.slice());
   if (view !== "rediscover") return fairShuffle(list);
   const by = new Map();
   list.forEach((t) => { const p = srcOf(t); if (!by.has(p)) by.set(p, []); by.get(p).push(t); });
