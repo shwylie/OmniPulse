@@ -1077,6 +1077,8 @@ function listNameHere() {
 }
 
 const isQueuedByYou = (t) => !!t && (t.queuedByYou || !!t.requestedBy);
+// the queue came from your Library or a playlist: shuffled, its recent plays are spaced out (spaceRecent)
+let queueSpaced = false;
 
 function startList(list, i, shuffle, name) {
   if (!list.length) return;
@@ -1086,9 +1088,12 @@ function startList(list, i, shuffle, name) {
     const kept = list.filter((t) => !isMix(t) || t === picked);
     if (kept.length) { list = kept; i = picked ? list.indexOf(picked) : 0; }
   }
+  // your Library and playlists: shuffled, recent plays are spaced out instead of left out (and played
+  // in order, they play as they are)
+  queueSpaced = view === "likes" || view === "playlist";
   // Avoid Recent Plays: what you heard lately is left out of what plays from a list (not the track you
   // picked, and not from a search); a list that's nearly all recent plays as it is
-  if (avoidRecent() && view !== "search" && list.length > 1) {
+  if (!queueSpaced && avoidRecent() && view !== "search" && list.length > 1) {
     const picked = shuffle ? null : list[i];
     const rest = withoutRecent(list.filter((t) => t !== picked), 3);
     if (rest.length < list.length - (picked ? 1 : 0)) {
@@ -1103,7 +1108,7 @@ function startList(list, i, shuffle, name) {
     i = Math.max(0, list.indexOf(picked));
   }
   queue = list.slice();
-  if (shuffle) { queue = shuffledOrder(queue); i = 0; }   // fair: long-unheard tracks first (js/shuffle.js)
+  if (shuffle) { queue = shuffledOrder(queue); if (queueSpaced) queue = spaceRecent(queue); i = 0; }   // fair: long-unheard tracks first (js/shuffle.js)
   qi = i;
   if (shuffleOn && !shuffle) shuffleUpcoming();
   playCurrent();

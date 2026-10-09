@@ -55,7 +55,8 @@ function shuffleUpcoming() {
   const kept = rest.filter((t) => t.queuedByYou || t.requestedBy);
   const auto = rest.filter((t) => t.autoplay && !kept.includes(t));
   const others = rest.filter((t) => !kept.includes(t) && !auto.includes(t));
-  queue = queue.slice(0, qi + 1).concat(kept, shuffledOrder(others), auto);
+  const mixed = shuffledOrder(others);
+  queue = queue.slice(0, qi + 1).concat(kept, queueSpaced ? spaceRecent(mixed) : mixed, auto);
   renderQueue();
 }
 

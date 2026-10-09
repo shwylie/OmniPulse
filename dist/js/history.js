@@ -69,6 +69,23 @@ const avoidRecent = () => prefs.avoidRecent !== false;   // on unless switched o
 const recentWindowMs = () => RECENT_WINDOWS[prefs.recentWindow] || RECENT_WINDOWS.week;
 const recentOk = (t) => !avoidRecent() || !heardWithin(t, recentWindowMs());
 
+// Shuffling your Library or a playlist spaces out what you've heard lately (within the Avoid Recent
+// Plays time frame, whether or not that's switched on) by how much of the list it is: with 10% of it
+// heard lately, one of those comes up once every 10 songs; with 50%, once every 2. The rest play in
+// between, in the shuffled order. Played in order, the list plays as it is.
+function spaceRecent(list) {
+  const win = recentWindowMs();
+  const recent = list.filter((t) => heardWithin(t, win));
+  if (!recent.length || recent.length === list.length) return list;
+  const every = Math.max(1, Math.round(list.length / recent.length));
+  const fresh = list.filter((t) => !recent.includes(t));
+  const out = [];
+  for (let k = 1; fresh.length || recent.length; k++) {
+    out.push((k % every === 0 && recent.length) || !fresh.length ? recent.shift() : fresh.shift());
+  }
+  return out;
+}
+
 // Leaves out recent plays, unless that would leave too little to choose from
 function withoutRecent(list, keep) {
   if (!avoidRecent()) return list;
