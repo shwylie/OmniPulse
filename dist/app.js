@@ -19,6 +19,7 @@ function onAccent(hex) {
 
 function applyPrefs() {
   const root = document.documentElement;
+  root.dataset.tab = prefs.tabAlign === "right" ? "right" : "left";
   applyTheme();   // light or dark, and its tint (js/appearance.js)
   root.dataset.density = prefs.density;
   if (prefs.artAccent && artColors && !artPaused) setAccentColors(artColors[0], artColors[1]);
@@ -1868,6 +1869,7 @@ buildSwatches();
 
 function syncAppearance() {
   document.querySelectorAll("#densitySeg button").forEach((b) => b.classList.toggle("on", b.dataset.v === prefs.density));
+  document.querySelectorAll("#tabAlignSeg button").forEach((b) => b.classList.toggle("on", b.dataset.v === (prefs.tabAlign === "right" ? "right" : "left")));
   document.querySelectorAll(".swatch").forEach((b) => b.classList.toggle("on", b.dataset.c === prefs.accent));
   $("accentCustom").value = prefs.accent;
   syncAccent2();
@@ -1881,6 +1883,7 @@ function setPref(key, value) {
 }
 
 $("densitySeg").addEventListener("click", (e) => { const b = e.target.closest("button"); if (b) setPref("density", b.dataset.v); });
+$("tabAlignSeg").addEventListener("click", (e) => { const b = e.target.closest("button"); if (b) { setPref("tabAlign", b.dataset.v); requestAnimationFrame(tabFit); } });
 $("swatches").addEventListener("click", (e) => { const b = e.target.closest(".swatch"); if (b) setPref("accent", b.dataset.c); });
 $("swatches").addEventListener("input", (e) => { if (e.target.id === "accentCustom") setPref("accent", e.target.value); });
 
