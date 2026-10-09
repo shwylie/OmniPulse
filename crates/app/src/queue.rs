@@ -124,7 +124,9 @@ impl Queue {
     }
 
     /// What's still to come, shuffled fairly (the current track stays where it is)
-    pub fn shuffle_rest(&mut self, last_played: &HashMap<String, u64>) {
+    /// recent: (the Avoid Recent Plays time frame, now), for a queue from your Library or a playlist,
+    /// whose recent plays are spaced out (space_recent)
+    pub fn shuffle_rest(&mut self, last_played: &HashMap<String, u64>, recent: Option<(u64, u64)>) {
         let from = self.qi.map_or(0, |i| i + 1);
         let start = self.autoplay_start();
         if start <= from + 1 {
@@ -132,7 +134,10 @@ impl Queue {
         }
         let by: HashMap<String, String> = self.items[from..start].iter().map(|q| (q.t.key.clone(), q.by.clone())).collect();
         let mine: Vec<Track> = self.items[from..start].iter().map(|q| q.t.clone()).collect();
-        let shuffled = fair_shuffle(mine, last_played);
+        let mut shuffled = fair_shuffle(mine, last_played);
+        if let Some((window, now)) = recent {
+            shuffled = space_recent(shuffled, last_played, window, now);
+        }
         for (k, t) in shuffled.into_iter().enumerate() {
             let who = by.get(&t.key).cloned().unwrap_or_default();
             self.items[from + k] = QItem { t, auto: false, by: who };
@@ -221,6 +226,27 @@ pub fn fair_shuffle(list: Vec<Track>, last_played: &HashMap<String, u64>) -> Vec
     }
     never.extend(heard);
     never
+}
+
+/// Shuffling your Library or a playlist (as the web app's spaceRecent): what you've heard within the
+/// time frame comes up by how much of the list it is: 10% of it, once every 10 songs; 50%, once every
+/// 2. The rest play in between, in the order given.
+pub fn space_recent(list: Vec<Track>, last_played: &HashMap<String, u64>, window_ms: u64, now_ms: u64) -> Vec<Track> {
+    let len = list.len();
+    let (mut recent, mut fresh): (std::collections::VecDeque<Track>, std::collections::VecDeque<Track>) =
+        list.into_iter().partition(|t| last_played.get(&t.key).is_some_and(|&ts| now_ms.saturating_sub(ts) < window_ms));
+    if recent.is_empty() || fresh.is_empty() {
+        return recent.into_iter().chain(fresh).collect();
+    }
+    let every = ((len as f64 / recent.len() as f64).round() as usize).max(1);
+    let mut out = Vec::with_capacity(len);
+    let mut k = 1;
+    while !recent.is_empty() || !fresh.is_empty() {
+        let take_recent = (k % every == 0 && !recent.is_empty()) || fresh.is_empty();
+        out.extend(if take_recent { recent.pop_front() } else { fresh.pop_front() });
+        k += 1;
+    }
+    out
 }
 
 // ---------- autoplay ----------
@@ -337,4 +363,18 @@ mod tests {
         let (back, pos) = Queue::from_session(&v).unwrap();
         assert_eq!((back.qi, pos, back.items.len(), back.items[1].auto), (Some(1), 42_000, 2, true));
     }
+
+    #[test]
+    fn recent_plays_are_spaced_by_their_share() {
+        let now = 100 * 86_400_000u64;
+        let list: Vec<Track> = (0..100).map(|i| t(&format!("k{i}"), "A", true)).collect();
+        for (share, every) in [(10, 10), (50, 2)] {
+            let lp: HashMap<String, u64> = (0..share).map(|i| (format!("k{i}"), now - 1000)).collect();
+            let out = space_recent(list.clone(), &lp, 7 * 86_400_000, now);
+            let at: Vec<usize> = out.iter().enumerate().filter(|(_, x)| lp.contains_key(&x.key)).map(|(k, _)| k + 1).collect();
+            assert_eq!(out.len(), 100);
+            assert!(at.iter().take(5).enumerate().all(|(n, &p)| p == (n + 1) * every), "{share}%: {at:?}");
+        }
+    }
+
 }

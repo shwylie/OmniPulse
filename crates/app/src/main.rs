@@ -99,6 +99,8 @@ struct App {
     eq_model: Rc<VecModel<f32>>,
     /// the playlists "Add to Playlist" offers (yours here, then the platforms'), by id
     add_map: Vec<String>,
+    /// the queue came from your Library or a playlist: shuffled, its recent plays are spaced out
+    queue_spaced: bool,
 }
 
 enum Naming {
@@ -1106,6 +1108,13 @@ fn play_list(shared: &Shared, list: Vec<Track>, i: usize) {
             a.queue.replace_current(t);
         } else {
             a.queue.set_list(list, i);
+            a.queue_spaced = a.page == "library" || a.page == "playlist";
+            // shuffle on: the rest after the one picked, shuffled (in order, it plays as it is)
+            if a.shuffle_on {
+                let lp = a.web.last_played.clone();
+                let sp = spacing(&a);
+                a.queue.shuffle_rest(&lp, sp);
+            }
         }
         a.ap_failed = None;
     }
@@ -1155,7 +1164,8 @@ fn shuffle_toggle(shared: &Shared) {
     if a.shuffle_on {
         a.shuffle_backup = Some(a.queue.items.iter().skip(from).map(|q| q.t.key.clone()).collect());
         let lp = a.web.last_played.clone();
-        a.queue.shuffle_rest(&lp);
+        let sp = spacing(&a);
+        a.queue.shuffle_rest(&lp, sp);
     } else if let Some(order) = a.shuffle_backup.take() {
         let place = |k: &str| order.iter().position(|o| o == k).unwrap_or(usize::MAX);
         if from <= a.queue.items.len() {
@@ -1172,6 +1182,18 @@ fn shuffle_toggle(shared: &Shared) {
 }
 
 // ---------- autoplay ----------
+fn recent_window(prefs: &serde_json::Value) -> u64 {
+    match prefs["recentWindow"].as_str() {
+        Some("day") => 86_400_000,
+        Some("month") => MONTH_MS,
+        _ => 7 * 86_400_000,
+    }
+}
+
+fn spacing(a: &App) -> Option<(u64, u64)> {
+    a.queue_spaced.then(|| (recent_window(&a.web.prefs), now_ms()))
+}
+
 fn pref_on(prefs: &serde_json::Value, key: &str) -> bool {
     prefs[key].as_bool() != Some(false)
 }
@@ -1420,7 +1442,8 @@ fn remote_action(shared: &Shared, id: u64, action: &str) {
         "shuffle" => {
             let mut a = shared.borrow_mut();
             let lp = a.web.last_played.clone();
-            a.queue.shuffle_rest(&lp);
+            let sp = spacing(&a);
+            a.queue.shuffle_rest(&lp, sp);
             paint_queue(&mut a);
         }
         "clear-queue" => {
@@ -2169,7 +2192,8 @@ fn desktop_action(shared: &Shared, action: &str) {
         "shuffle" => {
             let mut a = shared.borrow_mut();
             let lp = a.web.last_played.clone();
-            a.queue.shuffle_rest(&lp);
+            let sp = spacing(&a);
+            a.queue.shuffle_rest(&lp, sp);
             paint_queue(&mut a);
         }
         "show" => {
@@ -2298,7 +2322,7 @@ fn main() -> Result<(), slint::PlatformError> {
         here: None, history: Vec::new(), artists: None, fav_only: false, shuffle_on: false, shuffle_backup: None, repeat: "off".into(), closest: None,
         autoplay: true, ap_busy: false, ap_then_play: false, ap_failed: None, resume_ms: None, loaded: false, accent: ("#8e9bff".into(), "#8e9bff".into()), started_secs: 0, token: 0,
         lyrics: Vec::new(), heard: (String::new(), 0.0, false), last_pos: 0, xpl: xpl::load(), naming: None,
-        loud: HashMap::new(), eq_model: Rc::new(VecModel::from(vec![0.0f32; 10])), add_map: Vec::new(),
+        loud: HashMap::new(), eq_model: Rc::new(VecModel::from(vec![0.0f32; 10])), add_map: Vec::new(), queue_spaced: false,
     }));
     // (before anything is listed: Go+ tracks only while YouTube Music can play them)
     go_plus_set(&shared.borrow().web.prefs);
@@ -2629,7 +2653,8 @@ fn main() -> Result<(), slint::PlatformError> {
             "remove" => a.queue.remove(at),
             _ => {
                 let lp = a.web.last_played.clone();
-                a.queue.shuffle_rest(&lp);
+                let sp = spacing(&a);
+                a.queue.shuffle_rest(&lp, sp);
             }
         }
         paint_queue(&mut a);
@@ -2637,13 +2662,16 @@ fn main() -> Result<(), slint::PlatformError> {
     });
     let s = shared.clone();
     ui.on_shuffle(move || {
-        let list = {
+        let (list, spaced) = {
             let a = s.borrow();
-            queue::fair_shuffle(a.page_tracks.clone(), &a.web.last_played)
+            let spaced = a.page == "library" || a.page == "playlist";
+            let list = queue::fair_shuffle(a.page_tracks.clone(), &a.web.last_played);
+            (if spaced { queue::space_recent(list, &a.web.last_played, recent_window(&a.web.prefs), now_ms()) } else { list }, spaced)
         };
         {
             let mut a = s.borrow_mut();
             a.queue.set_list(list, 0);
+            a.queue_spaced = spaced;
             a.ap_failed = None;
         }
         start(&s);
