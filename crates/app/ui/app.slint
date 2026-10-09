@@ -13,7 +13,8 @@ export global Theme {
     in-out property <color> accent: #8e9bff;
     in-out property <color> accent-2: #b48eff;
     in-out property <color> on-accent: #111318;
-    out property <length> radius: 10px;
+    // (0 with Rounded Corners off: Settings > App)
+    in-out property <length> radius: 10px;
 }
 
 export struct Row { title: string, artist: string, album: string, dur: string, plat: string, playing: bool, head: string, auto: bool, art: image, liked: bool, sc-link: bool, sp-link: bool, yt-link: bool }
@@ -583,6 +584,8 @@ export component AppWindow inherits Window {
     callback folder-remove(int);
     callback folders-rescan();
     callback account-act(int);
+    in-out property <bool> rounded: true;
+    callback rounded-changed(bool);
     callback backup-make();
     callback backup-restore();
     callback plat-toggle(string);
@@ -1311,6 +1314,21 @@ export component AppWindow inherits Window {
                                     padding: 16px;
                                     padding-top: 12px;
                                     padding-bottom: 12px;
+                                    VerticalLayout {
+                                        horizontal-stretch: 1;
+                                        alignment: center;
+                                        spacing: 2px;
+                                        Text { text: "Rounded Corners"; color: Theme.text; font-weight: 700; }
+                                        Text { text: "On the app's panels, the player bar and its track tab. Off: square."; color: Theme.muted; font-size: 12px; }
+                                    }
+                                    Toggle { checked <=> root.rounded; y: (parent.height - self.height) / 2; toggled => { root.rounded-changed(self.checked); } }
+                                }
+                            }
+                            Card {
+                                HorizontalLayout {
+                                    padding: 16px;
+                                    padding-top: 12px;
+                                    padding-bottom: 12px;
                                     spacing: 10px;
                                     VerticalLayout {
                                         horizontal-stretch: 1;
@@ -1446,8 +1464,8 @@ export component AppWindow inherits Window {
                             width: parent.width + 16px;
                             height: parent.height + 8px;
                             background: Theme.bg;
-                            border-top-left-radius: Theme.radius + 8px;
-                            border-top-right-radius: Theme.radius + 8px;
+                            border-top-left-radius: Theme.radius > 0 ? Theme.radius + 8px : 0;
+                            border-top-right-radius: Theme.radius > 0 ? Theme.radius + 8px : 0;
                         }
                         Rectangle {
                             background: Theme.panel.mix(Theme.accent, 0.86);
@@ -1480,8 +1498,8 @@ export component AppWindow inherits Window {
                             TouchArea { clicked => { root.nav(root.page == "now" ? "library" : "now"); } }
                         }
                     }
-                    // the curve: the body's colour, with the gap's quarter circle cut from it
-                    Rectangle {
+                    // the curve: the body's colour, with the gap's quarter circle cut from it (none when square)
+                    if Theme.radius > 0: Rectangle {
                         x: root.tab-right ? tab.x - 8px : tab.width;
                         y: parent.height - 8px;
                         width: 8px;

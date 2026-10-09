@@ -20,6 +20,7 @@ function onAccent(hex) {
 function applyPrefs() {
   const root = document.documentElement;
   root.dataset.tab = prefs.tabAlign === "right" ? "right" : "left";
+  root.classList.toggle("square", prefs.appRounded === false);   // Settings > App > Rounded Corners
   applyTheme();   // light or dark, and its tint (js/appearance.js)
   root.dataset.density = prefs.density;
   if (prefs.artAccent && artColors && !artPaused) setAccentColors(artColors[0], artColors[1]);
@@ -1878,6 +1879,8 @@ function setPref(key, value) {
   syncAppearance();
 }
 
+$("roundedOn").checked = prefs.appRounded !== false;
+$("roundedOn").addEventListener("change", () => setPref("appRounded", $("roundedOn").checked));
 $("densitySeg").addEventListener("click", (e) => { const b = e.target.closest("button"); if (b) setPref("density", b.dataset.v); });
 $("tabAlignSeg").addEventListener("click", (e) => { const b = e.target.closest("button"); if (b) { setPref("tabAlign", b.dataset.v); requestAnimationFrame(tabFit); } });
 $("swatches").addEventListener("click", (e) => { const b = e.target.closest(".swatch"); if (b) setPref("accent", b.dataset.c); });

@@ -2670,6 +2670,10 @@ fn apply_look(shared: &Shared) {
     let (step, hue, strength) = look::from_prefs(prefs);
     let p = look::palette(step, hue, strength);
     let t = ui.global::<Theme>();
+    // Settings > App > Rounded Corners (the web app's setting too)
+    let rounded = prefs["appRounded"].as_bool() != Some(false);
+    t.set_radius(if rounded { 10.0 } else { 0.0 });
+    ui.set_rounded(rounded);
     t.set_bg(p.bg.slint());
     t.set_panel(p.panel.slint());
     t.set_elevated(p.elevated.slint());
@@ -2843,6 +2847,8 @@ fn main() -> Result<(), slint::PlatformError> {
     });
     let s = shared.clone();
     ui.on_backup_restore(move || backup_restore(&s));
+    let s = shared.clone();
+    ui.on_rounded_changed(move |on| set_look_pref(&s, "appRounded", serde_json::json!(on)));
     let s = shared.clone();
     ui.on_tab_align_picked(move |side| set_look_pref(&s, "tabAlign", serde_json::json!(side.as_str())));
     let s = shared.clone();

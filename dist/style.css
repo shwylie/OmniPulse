@@ -1592,3 +1592,9 @@ body.streamSafe #navSets, body.streamSafe #navArtists, body.streamSafe #plSectio
    bottom (the Like / Favourites / Open buttons) stays under it */
 .np { padding-bottom: calc(32px + var(--tabH) + 8px); scroll-padding-bottom: calc(var(--tabH) + 16px); }
 .stats { padding-bottom: calc(28px + var(--tabH) + 8px); }
+
+/* Rounded Corners off (Settings > App): the panels, the player bar and its track tab square, the tab
+   meeting the bar without its curve (the widget has its own setting) */
+:root.square .sidebar, :root.square .content, :root.square .queue,
+:root.square .player::before, :root.square .player .now, :root.square .player .now::before { border-radius: 0 !important; }
+:root.square .player .now::after { display: none; }
