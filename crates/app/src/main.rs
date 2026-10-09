@@ -1629,14 +1629,15 @@ fn song_request(shared: &Shared, id: u64, q: String, user: String) {
 /// The servers the web app's settings have on: the widget, the Stream Deck's remote, chat requests
 // ---------- Settings: the switches beyond Look ----------
 // (section, label, note, key, on unless switched off)
-const SET_ROWS: [(&str, &str, &str, &str, bool); 11] = [
+const SET_ROWS: [(&str, &str, &str, &str, bool); 12] = [
     ("Library", "Sets & Podcasts in the Queue", "Lists and autoplay include anything over 15 minutes. Off: only when you pick one.", "queueSets", false),
     ("Library", "Autoplay", "Plays similar tracks when the queue runs out.", "autoplay", true),
     ("Integrations", "SoundCloud", "Its likes, playlists and search.", "scOn", true),
     ("Integrations", "Spotify", "Its likes, playlists and search.", "spOn", true),
     ("Integrations", "YouTube Music", "Search, radio, and Go+ tracks in full.", "ytOn", true),
     ("Integrations", "Last.fm Scrobbling", "What you play goes to your Last.fm profile.", "scrobble", true),
-    ("Streaming", "Stream-Safe Music", "Only tracks under an open licence, or by artists and labels cleared for streaming, show and play.", "streamSafe", false),
+    ("Streaming", "Streamer Mode", "Hides account names, keys, addresses and plugin settings. The title bar's button does this too.", "streamerMode", false),
+    ("Streaming", "Extended", "Also leaves out music that isn't safe on stream: only open licences, and artists and labels cleared for streaming.", "streamSafe", false),
     ("Streaming", "Discord Status", "Shows what you're playing on your Discord profile.", "presence", false),
     ("Streaming", "Stream Widget", "A now-playing card for OBS, with alerts.", "widget", false),
     ("Streaming", "Song Requests", "Chat asks for songs through your bot.", "req", false),
@@ -1649,24 +1650,58 @@ fn set_row_on(prefs: &serde_json::Value, key: &str, dflt: bool) -> bool {
 
 fn paint_settings(a: &App) {
     let Some(ui) = a.ui.upgrade() else { return };
-    let mut last = "";
-    let rows: Vec<SetRow> = SET_ROWS.iter().map(|(sec, label, note, key, dflt)| {
-        let head = if *sec != last { last = sec; (*sec).into() } else { slint::SharedString::default() };
-        let on = if *key == "autoplay" { a.autoplay } else { set_row_on(&a.web.prefs, key, *dflt) };
-        SetRow { head, label: (*label).into(), note: (*note).into(), on, key: (*key).into() }
-    }).collect();
-    ui.set_set_rows(ModelRc::from(Rc::new(VecModel::from(rows))));
+    let streamer = integrations::set(&a.web.prefs, "streamerMode");
+    let rows = |sec: &str| -> ModelRc<SetRow> {
+        let list: Vec<SetRow> = SET_ROWS.iter().filter(|(s, ..)| *s == sec)
+            // Extended only shows with Streamer Mode on
+            .filter(|(_, _, _, key, _)| *key != "streamSafe" || streamer)
+            .map(|(_, label, note, key, dflt)| {
+                let on = if *key == "autoplay" { a.autoplay } else { set_row_on(&a.web.prefs, key, *dflt) };
+                SetRow { head: Default::default(), label: (*label).into(), note: (*note).into(), on, key: (*key).into(), sub: *key == "streamSafe" }
+            }).collect();
+        ModelRc::from(Rc::new(VecModel::from(list)))
+    };
+    ui.set_set_rows_integrations(rows("Integrations"));
+    ui.set_set_rows_library(rows("Library"));
+    ui.set_set_rows_streaming(rows("Streaming"));
+    // the closed categories (the web app's setting too: by their titles)
+    let closed = |t: &str| a.web.prefs["setClosed"][t].as_bool() == Some(true);
+    ui.set_closed_look(closed("App & Look"));
+    ui.set_closed_integrations(closed("Integrations"));
+    ui.set_closed_library(closed("Library"));
+    ui.set_closed_sound(closed("Sound"));
+    ui.set_closed_streaming(closed("Streaming"));
+}
+
+fn section_flip(shared: &Shared, title: &str) {
+    {
+        let mut a = shared.borrow_mut();
+        let now = a.web.prefs["setClosed"][title].as_bool() != Some(true);
+        if !a.web.prefs["setClosed"].is_object() { a.web.prefs["setClosed"] = serde_json::json!({}); }
+        a.web.prefs["setClosed"][title] = serde_json::json!(now);
+        let all = a.web.prefs["setClosed"].clone();
+        if std::env::var_os("OMNIPULSE_SELFTEST").is_none() { webstate::save_pref("setClosed", all); }
+    }
+    paint_settings(&shared.borrow());
 }
 
 /// A switch in Settings: kept with this app's settings, and done straight away
-fn set_toggle(shared: &Shared, i: usize) {
-    let Some(&(_, label, _, key, dflt)) = SET_ROWS.get(i) else { return };
+fn set_toggle(shared: &Shared, key: &str) {
+    let Some(&(_, label, _, key, dflt)) = SET_ROWS.iter().find(|r| r.3 == key) else { return };
     match key {
         "autoplay" => {
             let on = !shared.borrow().autoplay;
             if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_autoplay(on); ui.invoke_autoplay_changed(on); }
         }
         "streamSafe" => { let on = !streamsafe::on(&shared.borrow().web.prefs); safe_set(shared, on); }
+        // Streamer Mode: Extended goes off with it
+        "streamerMode" => {
+            let on = !integrations::set(&shared.borrow().web.prefs, "streamerMode");
+            if let Some(o) = shared.borrow_mut().web.prefs.as_object_mut() { o.insert("streamerMode".into(), serde_json::json!(on)); }
+            if std::env::var_os("OMNIPULSE_SELFTEST").is_none() { webstate::save_pref("streamerMode", serde_json::json!(on)); }
+            if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_streamer(on); ui.set_status(if on { "Streamer Mode on." } else { "Streamer Mode off." }.into()); }
+            if !on && streamsafe::on(&shared.borrow().web.prefs) { safe_set(shared, false); }
+        }
         "scOn" | "spOn" | "ytOn" => plat_toggle(shared, match key { "spOn" => "spotify", "ytOn" => "youtube", _ => "soundcloud" }),
         _ => {
             let on = {
@@ -2892,7 +2927,9 @@ fn main() -> Result<(), slint::PlatformError> {
         open_page(&s, &page);
     });
     let s = shared.clone();
-    ui.on_set_toggle(move |i| set_toggle(&s, i as usize));
+    ui.on_set_toggle(move |key| set_toggle(&s, &key));
+    let s = shared.clone();
+    ui.on_section_flip(move |t| section_flip(&s, &t));
     paint_settings(&shared.borrow());
     let s = shared.clone();
     ui.on_like_toggle(move || like_toggle(&s));
@@ -3191,7 +3228,7 @@ fn main() -> Result<(), slint::PlatformError> {
         let s = shared.clone();
         let started = std::time::Instant::now();
         let mut step_no = 0usize;
-        let plan: [(u64, &str); 27] = [(9, "play"), (13, "library"), (14, "scoff"), (15, "scon"), (16, "discover"), (24, "rediscover"), (27, "sets"), (31, "stats"), (35, "now"), (39, "search"), (42, "settings"), (44, "light"), (46, "artists"), (54, "artist"), (60, "autoplay"), (70, "narrow"), (72, "goplus"), (80, "tabright"), (84, "musical"), (88, "musical2"), (90, "safe"), (91, "sort"), (93, "xpl"), (95, "xpl2"), (97, "fade"), (101, "fade2"), (103, "end")];
+        let plan: [(u64, &str); 28] = [(9, "play"), (13, "library"), (14, "scoff"), (15, "scon"), (16, "discover"), (24, "rediscover"), (27, "sets"), (31, "stats"), (35, "now"), (39, "search"), (42, "settings"), (44, "light"), (45, "collapse"), (46, "artists"), (54, "artist"), (60, "autoplay"), (70, "narrow"), (72, "goplus"), (80, "tabright"), (84, "musical"), (88, "musical2"), (90, "safe"), (91, "sort"), (93, "xpl"), (95, "xpl2"), (97, "fade"), (101, "fade2"), (103, "end")];
         t.start(slint::TimerMode::Repeated, std::time::Duration::from_millis(250), move || {
             let Some(&(at, what)) = plan.get(step_no) else { return };
             if started.elapsed().as_secs() < at { return; }
@@ -3294,6 +3331,8 @@ fn main() -> Result<(), slint::PlatformError> {
                     println!("selftest: fade: now playing {key}, fading out {}, moved on from {:?}", FADE.with(|f| f.borrow().0), FADE.with(|f| f.borrow().1.clone()));
                     if let Some(o) = s.borrow_mut().web.prefs.as_object_mut() { o.insert("fadeOn".into(), serde_json::json!(false)); }
                 }
+                // Settings: App & Look closed (its picture), then open again for the rest
+                "collapse" => { section_flip(&s, "App & Look"); slint::Timer::single_shot(std::time::Duration::from_millis(1600), { let s = s.clone(); move || section_flip(&s, "App & Look") }); }
                 // the Library by artist, Z to A
                 "sort" => {
                     open_page(&s, "library");
@@ -3316,7 +3355,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 "artist" => { println!("selftest: following {} artists", ui.get_artists().row_count()); if ui.get_artists().row_count() > 0 { ui.invoke_artist(0); } }
                 "end" => {
                     println!("selftest: status \"{}\"", ui.get_status());
-                    println!("selftest: settings rows {}", ui.get_set_rows().iter().map(|r| format!("{}{}", r.label, if r.on { "+" } else { "-" })).collect::<Vec<_>>().join(", "));
+                    println!("selftest: settings rows {}", ui.get_set_rows_integrations().iter().chain(ui.get_set_rows_library().iter()).chain(ui.get_set_rows_streaming().iter()).map(|r| format!("{}{}", r.label, if r.on { "+" } else { "-" })).collect::<Vec<_>>().join(", "));
                     println!("selftest: remote state {}", remote_state(&s.borrow()));
                     println!("selftest: folders {:?}, {}", ui.get_folders().iter().map(|f| f.to_string()).collect::<Vec<_>>(), ui.get_folders_note());
                     println!("selftest: share: first rows {:?}, sidebar {:?}", ui.get_rows().iter().take(3).map(|r| (r.sc_link, r.sp_link, r.yt_link)).collect::<Vec<_>>(), ui.get_sides().iter().take(3).map(|x| (x.title.to_string(), x.share, x.sc, x.sp)).collect::<Vec<_>>());

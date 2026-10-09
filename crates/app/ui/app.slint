@@ -27,7 +27,7 @@ export struct Line { text: string }
 /// A switch in Settings: under its section's heading (head, on the first of a section)
 /// An account in Settings: its name, what's known (who's signed in, or what it needs), and its button
 export struct Account { name: string, status: string, signed: bool, busy: bool }
-export struct SetRow { head: string, label: string, note: string, on: bool, key: string }
+export struct SetRow { head: string, label: string, note: string, on: bool, key: string, sub: bool }
 export struct Item { name: string, sub: string, art: image, plat: string }
 
 global Icons {
@@ -403,6 +403,20 @@ component TileView inherits Rectangle {
     ta := TouchArea { clicked => { root.clicked(); } }
 }
 
+/// A Settings category's title: a click opens or closes it
+component SectionHead inherits Rectangle {
+    in property <string> label;
+    in property <bool> closed;
+    callback clicked;
+    height: 34px;
+    HorizontalLayout {
+        Text { text: root.label; color: Theme.text; font-size: 20px; font-weight: 800; vertical-alignment: center; horizontal-stretch: 1; }
+        // the arrow: down while open, right while closed
+        Glyph { d: root.closed ? "M9 6l6 6-6 6-1.4-1.4L12.2 12 7.6 7.4z" : "M6 9l6 6 6-6-1.4-1.4L12 12.2 7.4 7.6z"; width: 20px; height: 20px; y: (parent.height - self.height) / 2; fill: ta.has-hover ? Theme.text : Theme.muted; }
+    }
+    ta := TouchArea { mouse-cursor: pointer; clicked => { root.clicked(); } }
+}
+
 component Card inherits Rectangle {
     in property <brush> fill: Theme.panel;
     border-radius: 18px;
@@ -519,7 +533,16 @@ export component AppWindow inherits Window {
     in property <int> device-on: -1;
     in property <[string]> more-items;
     // Settings, beyond Look: its switches, section by section
-    in property <[SetRow]> set-rows;
+    // Settings' switches, by category, and which categories are closed
+    in property <[SetRow]> set-rows-integrations;
+    in property <[SetRow]> set-rows-library;
+    in property <[SetRow]> set-rows-streaming;
+    in property <bool> closed-look;
+    in property <bool> closed-integrations;
+    in property <bool> closed-library;
+    in property <bool> closed-sound;
+    in property <bool> closed-streaming;
+    callback section-flip(string);
     in-out property <float> volume: 80;
     in-out property <bool> queue-open: false;
     in-out property <bool> autoplay: true;
@@ -541,7 +564,7 @@ export component AppWindow inherits Window {
     callback shuffle();
     callback play-page();
     callback refresh();
-    callback set-toggle(int);
+    callback set-toggle(string);
     callback like-toggle();
     callback fav-toggle();
     callback devices-want();
@@ -1081,223 +1104,160 @@ export component AppWindow inherits Window {
                             alignment: start;
                             spacing: 14px;
                             padding-right: 14px;
-                            Text { text: "Look"; color: Theme.text; font-size: 20px; font-weight: 800; }
-                            Card {
-                                VerticalLayout {
-                                    alignment: start;
-                                    padding: 18px;
-                                    spacing: 8px;
-                                    HorizontalLayout {
+                            SectionHead { label: "App & Look"; closed: root.closed-look; clicked => { root.section-flip("App & Look"); } }
+                            if !root.closed-look: VerticalLayout {
+                                spacing: 14px;
+                                Card {
+                                    VerticalLayout {
                                         alignment: start;
+                                        padding: 18px;
                                         spacing: 8px;
-                                        Text { text: "Theme"; color: Theme.text; font-weight: 700; }
-                                        Text { text: root.theme-step-name; color: Theme.muted; font-weight: 600; }
-                                    }
-                                    // steps from light to dark: it stops at each, never in between
-                                    Range { minimum: 0; maximum: 4; value: root.theme-step; changed(v) => { root.theme-step = round(v); root.look-changed("themeStep", round(v)); } }
-                                    HorizontalLayout {
-                                        for n[i] in ["Bright", "Soft", "Dim", "Dark", "Black"]: Text { text: n; color: Theme.muted; font-size: 12px; horizontal-stretch: 1; horizontal-alignment: i == 0 ? left : i == 4 ? right : center; }
-                                    }
-                                    Rectangle { height: 8px; }
-                                    HorizontalLayout {
-                                        alignment: start;
-                                        spacing: 8px;
-                                        Text { text: "Tint"; color: Theme.text; font-weight: 700; }
-                                        Rectangle { width: 12px; height: 12px; y: 3px; border-radius: 6px; background: root.tint-preview; border-width: 1px; border-color: Theme.line; }
-                                    }
-                                    Text { text: "A colour through the whole theme. Accent and album art colours still show on top."; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
-                                    Rectangle {
-                                        height: 8px;
-                                        border-radius: 4px;
-                                        opacity: root.tint-strength > 0.5 ? 1 : 0.35;
-                                        background: @linear-gradient(90deg, #e04848 0%, #e0e048 17%, #48d848 33%, #48d8d8 50%, #6a72ec 67%, #d84ad6 83%, #e04848 100%);
-                                    }
-                                    Range { minimum: 0; maximum: 359; value: root.tint-hue; enabled: root.tint-strength > 0.5; changed(v) => { root.tint-hue = v; root.look-changed("tintHue", round(v)); } }
-                                    Rectangle { height: 8px; }
-                                    HorizontalLayout {
-                                        alignment: start;
-                                        spacing: 8px;
-                                        Text { text: "Tint Strength"; color: Theme.text; font-weight: 700; }
-                                        Text { text: root.tint-strength-name; color: Theme.muted; font-weight: 600; }
-                                    }
-                                    Range { minimum: 0; maximum: 3; value: root.tint-strength; changed(v) => { root.tint-strength = round(v); root.look-changed("tintStrength", round(v)); } }
-                                    HorizontalLayout {
-                                        for n[i] in ["Off", "Subtle", "Medium", "Strong"]: Text { text: n; color: Theme.muted; font-size: 12px; horizontal-stretch: 1; horizontal-alignment: i == 0 ? left : i == 3 ? right : center; }
-                                    }
-                                    Rectangle { height: 8px; }
-                                    Text { text: "Accent"; color: Theme.text; font-weight: 700; }
-                                    HorizontalLayout {
-                                        alignment: start;
-                                        spacing: 10px;
-                                        for c[i] in root.accent-list: Rectangle {
-                                            width: 28px;
-                                            height: 28px;
-                                            border-radius: 14px;
-                                            background: c;
-                                            border-width: root.accent-on == i ? 3px : 0px;
-                                            border-color: Theme.text;
-                                            TouchArea { clicked => { root.accent-picked(i); } }
-                                        }
-                                    }
-                                    Rectangle { height: 8px; }
-                                    HorizontalLayout {
-                                        VerticalLayout {
-                                            horizontal-stretch: 1;
-                                            Text { text: "Colours from Album Art"; color: Theme.text; font-weight: 700; }
-                                            Text { text: "Both colours come from the cover that's playing."; color: Theme.muted; font-size: 12px; }
-                                        }
-                                        Toggle { checked <=> root.art-accent; y: (parent.height - self.height) / 2; toggled => { root.art-accent-changed(self.checked); } }
-                                    }
-                                    Rectangle { height: 8px; }
-                                    HorizontalLayout {
-                                        spacing: 8px;
-                                        VerticalLayout {
-                                            horizontal-stretch: 1;
-                                            Text { text: "Track Info Tab"; color: Theme.text; font-weight: 700; }
-                                            Text { text: "Which end of the player bar the tab with what's playing sits at."; color: Theme.muted; font-size: 12px; }
-                                        }
-                                        Chip { label: "Left"; on: !root.tab-right; y: (parent.height - self.height) / 2; clicked => { root.tab-align-picked("left"); } }
-                                        Chip { label: "Right"; on: root.tab-right; y: (parent.height - self.height) / 2; clicked => { root.tab-align-picked("right"); } }
-                                    }
-                                }
-                            }
-                            // Accounts: signing in and out
-                            Text { text: "Accounts"; color: Theme.text; font-size: 20px; font-weight: 800; }
-                            Card {
-                                VerticalLayout {
-                                    padding: 16px;
-                                    padding-top: 8px;
-                                    padding-bottom: 8px;
-                                    for acc[i] in root.accounts: VerticalLayout {
-                                        if i > 0: Rectangle { height: 1px; background: Theme.line; }
                                         HorizontalLayout {
-                                            padding-top: 8px;
-                                            padding-bottom: 8px;
-                                            spacing: 12px;
+                                            alignment: start;
+                                            spacing: 8px;
+                                            Text { text: "Theme"; color: Theme.text; font-weight: 700; }
+                                            Text { text: root.theme-step-name; color: Theme.muted; font-weight: 600; }
+                                        }
+                                        // steps from light to dark: it stops at each, never in between
+                                        Range { minimum: 0; maximum: 4; value: root.theme-step; changed(v) => { root.theme-step = round(v); root.look-changed("themeStep", round(v)); } }
+                                        HorizontalLayout {
+                                            for n[i] in ["Bright", "Soft", "Dim", "Dark", "Black"]: Text { text: n; color: Theme.muted; font-size: 12px; horizontal-stretch: 1; horizontal-alignment: i == 0 ? left : i == 4 ? right : center; }
+                                        }
+                                        Rectangle { height: 8px; }
+                                        HorizontalLayout {
+                                            alignment: start;
+                                            spacing: 8px;
+                                            Text { text: "Tint"; color: Theme.text; font-weight: 700; }
+                                            Rectangle { width: 12px; height: 12px; y: 3px; border-radius: 6px; background: root.tint-preview; border-width: 1px; border-color: Theme.line; }
+                                        }
+                                        Text { text: "A colour through the whole theme. Accent and album art colours still show on top."; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
+                                        Rectangle {
+                                            height: 8px;
+                                            border-radius: 4px;
+                                            opacity: root.tint-strength > 0.5 ? 1 : 0.35;
+                                            background: @linear-gradient(90deg, #e04848 0%, #e0e048 17%, #48d848 33%, #48d8d8 50%, #6a72ec 67%, #d84ad6 83%, #e04848 100%);
+                                        }
+                                        Range { minimum: 0; maximum: 359; value: root.tint-hue; enabled: root.tint-strength > 0.5; changed(v) => { root.tint-hue = v; root.look-changed("tintHue", round(v)); } }
+                                        Rectangle { height: 8px; }
+                                        HorizontalLayout {
+                                            alignment: start;
+                                            spacing: 8px;
+                                            Text { text: "Tint Strength"; color: Theme.text; font-weight: 700; }
+                                            Text { text: root.tint-strength-name; color: Theme.muted; font-weight: 600; }
+                                        }
+                                        Range { minimum: 0; maximum: 3; value: root.tint-strength; changed(v) => { root.tint-strength = round(v); root.look-changed("tintStrength", round(v)); } }
+                                        HorizontalLayout {
+                                            for n[i] in ["Off", "Subtle", "Medium", "Strong"]: Text { text: n; color: Theme.muted; font-size: 12px; horizontal-stretch: 1; horizontal-alignment: i == 0 ? left : i == 3 ? right : center; }
+                                        }
+                                        Rectangle { height: 8px; }
+                                        Text { text: "Accent"; color: Theme.text; font-weight: 700; }
+                                        HorizontalLayout {
+                                            alignment: start;
+                                            spacing: 10px;
+                                            for c[i] in root.accent-list: Rectangle {
+                                                width: 28px;
+                                                height: 28px;
+                                                border-radius: 14px;
+                                                background: c;
+                                                border-width: root.accent-on == i ? 3px : 0px;
+                                                border-color: Theme.text;
+                                                TouchArea { clicked => { root.accent-picked(i); } }
+                                            }
+                                        }
+                                        Rectangle { height: 8px; }
+                                        HorizontalLayout {
                                             VerticalLayout {
                                                 horizontal-stretch: 1;
-                                                alignment: center;
-                                                spacing: 2px;
-                                                Text { text: acc.name; color: Theme.text; font-weight: 700; }
-                                                Text { text: acc.status; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
+                                                Text { text: "Colours from Album Art"; color: Theme.text; font-weight: 700; }
+                                                Text { text: "Both colours come from the cover that's playing."; color: Theme.muted; font-size: 12px; }
                                             }
-                                            Pill {
-                                                label: acc.busy ? "Waiting..." : acc.signed ? "Sign out" : "Sign in";
-                                                on: !acc.signed && !acc.busy;
-                                                y: (parent.height - self.height) / 2;
-                                                clicked => { if (!acc.busy) { root.account-act(i); } }
+                                            Toggle { checked <=> root.art-accent; y: (parent.height - self.height) / 2; toggled => { root.art-accent-changed(self.checked); } }
+                                        }
+                                        Rectangle { height: 8px; }
+                                        HorizontalLayout {
+                                            spacing: 8px;
+                                            VerticalLayout {
+                                                horizontal-stretch: 1;
+                                                Text { text: "Track Info Tab"; color: Theme.text; font-weight: 700; }
+                                                Text { text: "Which end of the player bar the tab with what's playing sits at."; color: Theme.muted; font-size: 12px; }
                                             }
+                                            Chip { label: "Left"; on: !root.tab-right; y: (parent.height - self.height) / 2; clicked => { root.tab-align-picked("left"); } }
+                                            Chip { label: "Right"; on: root.tab-right; y: (parent.height - self.height) / 2; clicked => { root.tab-align-picked("right"); } }
                                         }
                                     }
                                 }
-                            }
-                            // your own music files
-                            Text { text: "Your Music"; color: Theme.text; font-size: 20px; font-weight: 800; }
-                            Card {
-                                VerticalLayout {
-                                    padding: 16px;
-                                    spacing: 10px;
-                                    Text { text: "Music Folders"; color: Theme.text; font-weight: 700; }
-                                    Text { text: root.folders-note; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
-                                    for f[i] in root.folders: HorizontalLayout {
-                                        spacing: 10px;
-                                        Glyph { d: Icons.local; width: 16px; height: 16px; y: (parent.height - self.height) / 2; fill: Theme.muted; }
-                                        Text { text: f; color: Theme.text; font-size: 13px; vertical-alignment: center; overflow: elide; horizontal-stretch: 1; }
-                                        Pill { label: "Remove"; clicked => { root.folder-remove(i); } }
-                                    }
-                                    HorizontalLayout {
-                                        alignment: start;
-                                        spacing: 8px;
-                                        Pill { label: "Add folder"; clicked => { root.folder-add(); } }
-                                        if root.folders.length > 0: Pill { label: "Rescan"; clicked => { root.folders-rescan(); } }
-                                    }
-                                }
-                            }
-                            // Sound
-                            Text { text: "Sound"; color: Theme.text; font-size: 20px; font-weight: 800; }
-                            Card {
-                                VerticalLayout {
-                                    padding: 16px;
-                                    spacing: 12px;
-                                    HorizontalLayout {
-                                        spacing: 8px;
-                                        VerticalLayout {
-                                            horizontal-stretch: 1;
-                                            alignment: center;
-                                            Text { text: "Match Loudness"; color: Theme.text; font-weight: 700; }
-                                            Text { text: root.loud-on == "off" ? "Tracks play as loud as they were made." : "Every track at the same loudness."; color: Theme.muted; font-size: 12px; }
-                                        }
-                                        for k[i] in ["off", "quiet", "normal", "loud"]: Chip {
-                                            label: ["Off", "Quiet", "Normal", "Loud"][i];
-                                            on: root.loud-on == k;
-                                            y: (parent.height - self.height) / 2;
-                                            clicked => { root.loud-pick(k); }
-                                        }
-                                    }
-                                    Rectangle { height: 1px; background: Theme.line; }
-                                    HorizontalLayout {
-                                        VerticalLayout {
-                                            horizontal-stretch: 1;
-                                            alignment: center;
-                                            Text { text: "Fade Between Tracks"; color: Theme.text; font-weight: 700; }
-                                            Text { text: "Each track fades out where its sound ends, and the next fades in."; color: Theme.muted; font-size: 12px; }
-                                        }
-                                        Toggle { checked <=> root.fade-on; y: (parent.height - self.height) / 2; toggled => { root.fade-on-changed(self.checked); } }
-                                    }
-                                    if root.fade-on: HorizontalLayout {
-                                        alignment: start;
-                                        spacing: 8px;
-                                        Text { text: "Fade Length"; color: Theme.muted; font-size: 12px; vertical-alignment: center; }
-                                        for ms in [1000, 2000, 3000, 5000, 8000]: Chip { label: (ms / 1000) + " s"; on: root.fade-ms == ms; clicked => { root.fade-ms-pick(ms); } }
-                                    }
-                                    Rectangle { height: 1px; background: Theme.line; }
-                                    HorizontalLayout {
-                                        spacing: 8px;
-                                        VerticalLayout {
-                                            horizontal-stretch: 1;
-                                            alignment: center;
-                                            Text { text: "Skip Silences"; color: Theme.text; font-weight: 700; }
-                                            Text { text: "Jumps over long silences, and moves on when the rest is silent."; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
-                                        }
-                                        for s in [0, 5, 8, 15, 30]: Chip { label: s == 0 ? "Off" : s + " s"; on: root.skip-silence == s; y: (parent.height - self.height) / 2; clicked => { root.skip-pick(s); } }
-                                    }
-                                    Rectangle { height: 1px; background: Theme.line; }
-                                    HorizontalLayout {
-                                        VerticalLayout {
-                                            horizontal-stretch: 1;
-                                            alignment: center;
-                                            Text { text: "Equalizer"; color: Theme.text; font-weight: 700; }
-                                            Text { text: "Ten bands."; color: Theme.muted; font-size: 12px; }
-                                        }
-                                        Toggle { checked <=> root.eq-on; y: (parent.height - self.height) / 2; toggled => { root.eq-on-changed(self.checked); } }
-                                    }
-                                    if root.eq-on: HorizontalLayout {
-                                        alignment: start;
-                                        spacing: 8px;
-                                        for p[i] in root.eq-presets: Chip { label: p; clicked => { root.eq-preset(i); } }
-                                    }
-                                    // (the bands from 0 to 24, as the slider doesn't go below zero: 12 is flat)
-                                    if root.eq-on: VerticalLayout {
-                                        spacing: 6px;
-                                        for g[i] in root.eq-gains: HorizontalLayout {
-                                            spacing: 12px;
-                                            Text { text: ["31 Hz", "62 Hz", "125 Hz", "250 Hz", "500 Hz", "1 kHz", "2 kHz", "4 kHz", "8 kHz", "16 kHz"][i]; width: 56px; color: Theme.muted; font-size: 12px; vertical-alignment: center; }
-                                            Range { minimum: 0; maximum: 24; value: g + 12; changed(v) => { root.eq-band(i, round(v) - 12); } }
-                                            Text { text: (g > 0 ? "+" : "") + round(g) + " dB"; width: 52px; color: Theme.text; font-size: 12px; horizontal-alignment: right; vertical-alignment: center; }
-                                        }
-                                    }
-                                }
-                            }
-                            // the other sections: a card of switches each
-                            for r[i] in root.set-rows: VerticalLayout {
-                                spacing: 8px;
-                                if r.head != "": Text { text: r.head; color: Theme.text; font-size: 20px; font-weight: 800; }
                                 Card {
                                     HorizontalLayout {
                                         padding: 16px;
                                         padding-top: 12px;
                                         padding-bottom: 12px;
+                                        VerticalLayout {
+                                            horizontal-stretch: 1;
+                                            alignment: center;
+                                            spacing: 2px;
+                                            Text { text: "Rounded Corners"; color: Theme.text; font-weight: 700; }
+                                            Text { text: "On the sidebar, the page and the queue. Off: square."; color: Theme.muted; font-size: 12px; }
+                                        }
+                                        Toggle { checked <=> root.rounded; y: (parent.height - self.height) / 2; toggled => { root.rounded-changed(self.checked); } }
+                                    }
+                                }
+                                Card {
+                                    HorizontalLayout {
+                                        padding: 16px;
+                                        padding-top: 12px;
+                                        padding-bottom: 12px;
+                                        spacing: 10px;
+                                        VerticalLayout {
+                                            horizontal-stretch: 1;
+                                            alignment: center;
+                                            spacing: 2px;
+                                            Text { text: "Back Up & Restore"; color: Theme.text; font-weight: 700; }
+                                            Text { text: "Your settings, keys, favourites, playlists, stats and alerts, in one .zip. Sign-ins aren't in it."; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
+                                        }
+                                        Pill { label: "Back up"; y: (parent.height - self.height) / 2; clicked => { root.backup-make(); } }
+                                        Pill { label: "Restore"; y: (parent.height - self.height) / 2; clicked => { root.backup-restore(); } }
+                                    }
+                                }
+                            }
+                            SectionHead { label: "Integrations"; closed: root.closed-integrations; clicked => { root.section-flip("Integrations"); } }
+                            if !root.closed-integrations: VerticalLayout {
+                                spacing: 14px;
+                                Card {
+                                    VerticalLayout {
+                                        padding: 16px;
+                                        padding-top: 8px;
+                                        padding-bottom: 8px;
+                                        for acc[i] in root.accounts: VerticalLayout {
+                                            if i > 0: Rectangle { height: 1px; background: Theme.line; }
+                                            HorizontalLayout {
+                                                padding-top: 8px;
+                                                padding-bottom: 8px;
+                                                spacing: 12px;
+                                                VerticalLayout {
+                                                    horizontal-stretch: 1;
+                                                    alignment: center;
+                                                    spacing: 2px;
+                                                    Text { text: acc.name; color: Theme.text; font-weight: 700; }
+                                                    Text { text: acc.status; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
+                                                }
+                                                Pill {
+                                                    label: acc.busy ? "Waiting..." : acc.signed ? "Sign out" : "Sign in";
+                                                    on: !acc.signed && !acc.busy;
+                                                    y: (parent.height - self.height) / 2;
+                                                    clicked => { if (!acc.busy) { root.account-act(i); } }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                                for r[i] in root.set-rows-integrations: Card {
+                                    HorizontalLayout {
+                                        padding: 16px;
+                                        padding-top: 12px;
+                                        padding-bottom: 12px;
+                                        padding-left: r.sub ? 34px : 16px;
                                         spacing: 14px;
+                                        if r.sub: Rectangle { width: 2px; background: Theme.accent.with-alpha(0.5); }
                                         VerticalLayout {
                                             horizontal-stretch: 1;
                                             alignment: center;
@@ -1305,41 +1265,149 @@ export component AppWindow inherits Window {
                                             Text { text: r.label; color: Theme.text; font-weight: 700; }
                                             if r.note != "": Text { text: r.note; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
                                         }
-                                        Toggle { checked: r.on; y: (parent.height - self.height) / 2; toggled => { root.set-toggle(i); } }
+                                        Toggle { checked: r.on; y: (parent.height - self.height) / 2; toggled => { root.set-toggle(r.key); } }
                                     }
                                 }
                             }
-                            Text { text: "App"; color: Theme.text; font-size: 20px; font-weight: 800; }
-                            Card {
-                                HorizontalLayout {
-                                    padding: 16px;
-                                    padding-top: 12px;
-                                    padding-bottom: 12px;
+                            SectionHead { label: "Library"; closed: root.closed-library; clicked => { root.section-flip("Library"); } }
+                            if !root.closed-library: VerticalLayout {
+                                spacing: 14px;
+                                Card {
                                     VerticalLayout {
-                                        horizontal-stretch: 1;
-                                        alignment: center;
-                                        spacing: 2px;
-                                        Text { text: "Rounded Corners"; color: Theme.text; font-weight: 700; }
-                                        Text { text: "On the sidebar, the page and the queue. Off: square."; color: Theme.muted; font-size: 12px; }
+                                        padding: 16px;
+                                        spacing: 10px;
+                                        Text { text: "Music Folders"; color: Theme.text; font-weight: 700; }
+                                        Text { text: root.folders-note; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
+                                        for f[i] in root.folders: HorizontalLayout {
+                                            spacing: 10px;
+                                            Glyph { d: Icons.local; width: 16px; height: 16px; y: (parent.height - self.height) / 2; fill: Theme.muted; }
+                                            Text { text: f; color: Theme.text; font-size: 13px; vertical-alignment: center; overflow: elide; horizontal-stretch: 1; }
+                                            Pill { label: "Remove"; clicked => { root.folder-remove(i); } }
+                                        }
+                                        HorizontalLayout {
+                                            alignment: start;
+                                            spacing: 8px;
+                                            Pill { label: "Add folder"; clicked => { root.folder-add(); } }
+                                            if root.folders.length > 0: Pill { label: "Rescan"; clicked => { root.folders-rescan(); } }
+                                        }
                                     }
-                                    Toggle { checked <=> root.rounded; y: (parent.height - self.height) / 2; toggled => { root.rounded-changed(self.checked); } }
+                                }
+                                for r[i] in root.set-rows-library: Card {
+                                    HorizontalLayout {
+                                        padding: 16px;
+                                        padding-top: 12px;
+                                        padding-bottom: 12px;
+                                        padding-left: r.sub ? 34px : 16px;
+                                        spacing: 14px;
+                                        if r.sub: Rectangle { width: 2px; background: Theme.accent.with-alpha(0.5); }
+                                        VerticalLayout {
+                                            horizontal-stretch: 1;
+                                            alignment: center;
+                                            spacing: 2px;
+                                            Text { text: r.label; color: Theme.text; font-weight: 700; }
+                                            if r.note != "": Text { text: r.note; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
+                                        }
+                                        Toggle { checked: r.on; y: (parent.height - self.height) / 2; toggled => { root.set-toggle(r.key); } }
+                                    }
                                 }
                             }
-                            Card {
-                                HorizontalLayout {
-                                    padding: 16px;
-                                    padding-top: 12px;
-                                    padding-bottom: 12px;
-                                    spacing: 10px;
+                            SectionHead { label: "Sound"; closed: root.closed-sound; clicked => { root.section-flip("Sound"); } }
+                            if !root.closed-sound: VerticalLayout {
+                                spacing: 14px;
+                                Card {
                                     VerticalLayout {
-                                        horizontal-stretch: 1;
-                                        alignment: center;
-                                        spacing: 2px;
-                                        Text { text: "Back Up & Restore"; color: Theme.text; font-weight: 700; }
-                                        Text { text: "Your settings, keys, favourites, playlists, stats and alerts, in one .zip. Sign-ins aren't in it."; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
+                                        padding: 16px;
+                                        spacing: 12px;
+                                        HorizontalLayout {
+                                            spacing: 8px;
+                                            VerticalLayout {
+                                                horizontal-stretch: 1;
+                                                alignment: center;
+                                                Text { text: "Match Loudness"; color: Theme.text; font-weight: 700; }
+                                                Text { text: root.loud-on == "off" ? "Tracks play as loud as they were made." : "Every track at the same loudness."; color: Theme.muted; font-size: 12px; }
+                                            }
+                                            for k[i] in ["off", "quiet", "normal", "loud"]: Chip {
+                                                label: ["Off", "Quiet", "Normal", "Loud"][i];
+                                                on: root.loud-on == k;
+                                                y: (parent.height - self.height) / 2;
+                                                clicked => { root.loud-pick(k); }
+                                            }
+                                        }
+                                        Rectangle { height: 1px; background: Theme.line; }
+                                        HorizontalLayout {
+                                            VerticalLayout {
+                                                horizontal-stretch: 1;
+                                                alignment: center;
+                                                Text { text: "Fade Between Tracks"; color: Theme.text; font-weight: 700; }
+                                                Text { text: "Each track fades out where its sound ends, and the next fades in."; color: Theme.muted; font-size: 12px; }
+                                            }
+                                            Toggle { checked <=> root.fade-on; y: (parent.height - self.height) / 2; toggled => { root.fade-on-changed(self.checked); } }
+                                        }
+                                        if root.fade-on: HorizontalLayout {
+                                            alignment: start;
+                                            spacing: 8px;
+                                            Text { text: "Fade Length"; color: Theme.muted; font-size: 12px; vertical-alignment: center; }
+                                            for ms in [1000, 2000, 3000, 5000, 8000]: Chip { label: (ms / 1000) + " s"; on: root.fade-ms == ms; clicked => { root.fade-ms-pick(ms); } }
+                                        }
+                                        Rectangle { height: 1px; background: Theme.line; }
+                                        HorizontalLayout {
+                                            spacing: 8px;
+                                            VerticalLayout {
+                                                horizontal-stretch: 1;
+                                                alignment: center;
+                                                Text { text: "Skip Silences"; color: Theme.text; font-weight: 700; }
+                                                Text { text: "Jumps over long silences, and moves on when the rest is silent."; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
+                                            }
+                                            for s in [0, 5, 8, 15, 30]: Chip { label: s == 0 ? "Off" : s + " s"; on: root.skip-silence == s; y: (parent.height - self.height) / 2; clicked => { root.skip-pick(s); } }
+                                        }
+                                        Rectangle { height: 1px; background: Theme.line; }
+                                        HorizontalLayout {
+                                            VerticalLayout {
+                                                horizontal-stretch: 1;
+                                                alignment: center;
+                                                Text { text: "Equalizer"; color: Theme.text; font-weight: 700; }
+                                                Text { text: "Ten bands."; color: Theme.muted; font-size: 12px; }
+                                            }
+                                            Toggle { checked <=> root.eq-on; y: (parent.height - self.height) / 2; toggled => { root.eq-on-changed(self.checked); } }
+                                        }
+                                        if root.eq-on: HorizontalLayout {
+                                            alignment: start;
+                                            spacing: 8px;
+                                            for p[i] in root.eq-presets: Chip { label: p; clicked => { root.eq-preset(i); } }
+                                        }
+                                        // (the bands from 0 to 24, as the slider doesn't go below zero: 12 is flat)
+                                        if root.eq-on: VerticalLayout {
+                                            spacing: 6px;
+                                            for g[i] in root.eq-gains: HorizontalLayout {
+                                                spacing: 12px;
+                                                Text { text: ["31 Hz", "62 Hz", "125 Hz", "250 Hz", "500 Hz", "1 kHz", "2 kHz", "4 kHz", "8 kHz", "16 kHz"][i]; width: 56px; color: Theme.muted; font-size: 12px; vertical-alignment: center; }
+                                                Range { minimum: 0; maximum: 24; value: g + 12; changed(v) => { root.eq-band(i, round(v) - 12); } }
+                                                Text { text: (g > 0 ? "+" : "") + round(g) + " dB"; width: 52px; color: Theme.text; font-size: 12px; horizontal-alignment: right; vertical-alignment: center; }
+                                            }
+                                        }
                                     }
-                                    Pill { label: "Back up"; y: (parent.height - self.height) / 2; clicked => { root.backup-make(); } }
-                                    Pill { label: "Restore"; y: (parent.height - self.height) / 2; clicked => { root.backup-restore(); } }
+                                }
+                            }
+                            SectionHead { label: "Streaming"; closed: root.closed-streaming; clicked => { root.section-flip("Streaming"); } }
+                            if !root.closed-streaming: VerticalLayout {
+                                spacing: 14px;
+                                for r[i] in root.set-rows-streaming: Card {
+                                    HorizontalLayout {
+                                        padding: 16px;
+                                        padding-top: 12px;
+                                        padding-bottom: 12px;
+                                        padding-left: r.sub ? 34px : 16px;
+                                        spacing: 14px;
+                                        if r.sub: Rectangle { width: 2px; background: Theme.accent.with-alpha(0.5); }
+                                        VerticalLayout {
+                                            horizontal-stretch: 1;
+                                            alignment: center;
+                                            spacing: 2px;
+                                            Text { text: r.label; color: Theme.text; font-weight: 700; }
+                                            if r.note != "": Text { text: r.note; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
+                                        }
+                                        Toggle { checked: r.on; y: (parent.height - self.height) / 2; toggled => { root.set-toggle(r.key); } }
+                                    }
                                 }
                             }
                             Text { text: "Settings not here yet are the web app's: this app follows what's set there."; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
