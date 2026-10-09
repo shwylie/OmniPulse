@@ -121,11 +121,11 @@ function castTrack() {
 }
 
 // ---------- the device's volume ----------
-// It takes the volume slider's place while casting, even when the slider is hidden for playing here
+// It takes the volume slider's place while casting
 function castVolPaint() {
   const wrap = document.querySelector(".volWrap");
-  wrap.hidden = !!prefs.hideVolume && !cast.on;
-  $("vol").hidden = cast.on || !!prefs.hideVolume;
+  wrap.hidden = false;
+  $("vol").hidden = cast.on;
   $("castVolRow").hidden = !cast.on;
   $("mute").title = cast.on && cast.device ? "Mute " + cast.device.name : "Mute";
   // the device's own level, unless it's being dragged here

@@ -1787,27 +1787,10 @@ $("seek").addEventListener("input", () => {
 audio.volume = appVolume();
 $("vol").value = String(Math.round(prefs.volume * 100));
 
-// Settings > Sound > Volume slider: hidden, the app plays at 100% and isn't muted
-function paintVolumeControl() {
-  const hide = !!prefs.hideVolume;
-  $("volShowOn").checked = !hide;
-  document.querySelector(".volWrap").hidden = hide;
-  if (hide && audio.muted) {
-    audio.muted = false;
-    $("icoVol").classList.remove("off");
-    $("icoMute").classList.add("off");
-  }
-  setLevel(appVolume());
-  castVolPaint();
-  stateNotes();
-}
-$("volShowOn").addEventListener("change", () => {
-  prefs.hideVolume = !$("volShowOn").checked;
-  savePrefs();
-  paintVolumeControl();
-  say(prefs.hideVolume ? "Volume slider hidden: the app plays at 100%." : "Volume slider is back.");
-});
-paintVolumeControl();
+// (the volume slider is always in the player bar; an old "hidden" setting is let go)
+delete prefs.hideVolume;
+setLevel(appVolume());
+castVolPaint();
 $("vol").addEventListener("input", () => {
   prefs.volume = Number($("vol").value) / 100;
   setLevel(prefs.volume);

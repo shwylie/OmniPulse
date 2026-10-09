@@ -61,7 +61,7 @@ function normEnsure() {
 
 // The volume the app plays at: the slider's, or 100% with the volume control hidden (when it's set
 // on Windows' mixer, a Stream Deck or the like instead)
-const appVolume = () => (prefs.hideVolume ? 1 : prefs.volume);
+const appVolume = () => prefs.volume;
 
 function normApply() {
   if (!norm.ctx) return;
