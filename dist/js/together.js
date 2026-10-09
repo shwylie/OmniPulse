@@ -7,7 +7,7 @@
 // (no Spotify Premium, no SoundCloud sign-in, the host's own files, a plugin they don't have) plays
 // from YouTube Music, or is skipped with a note.
 //
-//   Listen Along: from the "Listen along" button on your Discord status; anyone can listen, nobody
+//   Listen Along: from the "Listen in" button on your Discord status; anyone can listen, nobody
 //                 can change anything
 //   Jam:          invite-only (a link you send); members can add songs, shown as added by them
 //
@@ -437,7 +437,16 @@ function listenerFollow(s) {
       return;
     }
     pendingResume = { id: target.id, posMs: Math.max(0, hostPos()) };
-    togetherOrig.playCurrent().then(() => { if (!s.playing && nowPlaying()) togetherOrig.toggle(); });
+    const late = hostPos() > 2000;
+    const started = togetherOrig.playCurrent();
+    // joining partway (or this one loading slower than the host's): it fades in, where the host is
+    if (late) fadeState.forceIn = Math.max(fadeState.forceIn, 1500);
+    started.then(() => {
+      if (!s.playing) { if (nowPlaying()) togetherOrig.toggle(); return; }
+      // the host always wins: what loading took (Spotify's start especially) is caught up straight away
+      const t = curTrack();
+      if (t && t.id === target.id && together.role === "listener" && Math.abs(hostPos() - curPosMs()) > 1500) seekToMs(hostPos());
+    });
     renderQueue();
     return;
   }

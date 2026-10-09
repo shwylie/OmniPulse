@@ -37,7 +37,7 @@ function presenceButtons(t, joinUrl) {
     // Listen along opens OmniPulse (or offers it) and joins your queue, through your relay; Ask to Jam
     // asks you (at the top of the app) to start a Jam with them. Discord shows two at most.
     const out = [];
-    if (presOpt("presListen")) out.push({ label: "Listen along", url: joinUrl });
+    if (presOpt("presListen")) out.push({ label: "Listen in", url: joinUrl });
     if (prefs.presAsk) out.push({ label: "Ask to Jam", url: joinUrl.replace("/join/", "/ask/") });
     if (link && presOpt("presLink")) out.push({ label: openLabel(t), url: link });
     return out.slice(0, 2);
@@ -50,7 +50,7 @@ function presenceButtons(t, joinUrl) {
     if (presOpt("presListen") || presOpt("presLink")) out.push({ label: openLabel(t), url: link });
     return out;
   }
-  if (presOpt("presListen")) out.push({ label: "Listen along", url: link.split("#")[0] + "#t=" + tStamp(curPosMs()) });
+  if (presOpt("presListen")) out.push({ label: "Listen in", url: link.split("#")[0] + "#t=" + tStamp(curPosMs()) });
   if (presOpt("presLink")) out.push({ label: openLabel(t), url: link });
   return out;
 }
