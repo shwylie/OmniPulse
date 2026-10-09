@@ -1647,6 +1647,7 @@ fn apply_look(shared: &Shared) {
     let picked = prefs["accent"].as_str().unwrap_or(ACCENTS[0]).to_lowercase();
     ui.set_accent_on(ACCENTS.iter().position(|c| *c == picked).map_or(-1, |i| i as i32));
     ui.set_art_accent(integrations::set(prefs, "artAccent"));
+    ui.set_tab_right(prefs["tabAlign"].as_str() == Some("right"));
 }
 
 /// A Look setting changed here: kept (over the web app's), and shown at once
@@ -1727,6 +1728,8 @@ fn main() -> Result<(), slint::PlatformError> {
     });
     let s = shared.clone();
     ui.on_art_accent_changed(move |on| set_look_pref(&s, "artAccent", serde_json::json!(on)));
+    let s = shared.clone();
+    ui.on_tab_align_picked(move |side| set_look_pref(&s, "tabAlign", serde_json::json!(side.as_str())));
     let s = shared.clone();
     ui.on_plat_toggle(move |p| plat_toggle(&s, &p));
     // Streamer Mode (as the web app's): kept with the rest of this app's settings
@@ -2085,7 +2088,7 @@ fn main() -> Result<(), slint::PlatformError> {
         let s = shared.clone();
         let started = std::time::Instant::now();
         let mut step_no = 0usize;
-        let plan: [(u64, &str); 20] = [(9, "play"), (13, "library"), (14, "scoff"), (15, "scon"), (16, "discover"), (24, "rediscover"), (27, "sets"), (31, "stats"), (35, "now"), (39, "search"), (42, "settings"), (44, "light"), (46, "artists"), (54, "artist"), (60, "autoplay"), (70, "narrow"), (72, "goplus"), (84, "musical"), (88, "musical2"), (92, "end")];
+        let plan: [(u64, &str); 21] = [(9, "play"), (13, "library"), (14, "scoff"), (15, "scon"), (16, "discover"), (24, "rediscover"), (27, "sets"), (31, "stats"), (35, "now"), (39, "search"), (42, "settings"), (44, "light"), (46, "artists"), (54, "artist"), (60, "autoplay"), (70, "narrow"), (72, "goplus"), (80, "tabright"), (84, "musical"), (88, "musical2"), (92, "end")];
         t.start(slint::TimerMode::Repeated, std::time::Duration::from_millis(250), move || {
             let Some(&(at, what)) = plan.get(step_no) else { return };
             if started.elapsed().as_secs() < at { return; }
@@ -2150,8 +2153,11 @@ fn main() -> Result<(), slint::PlatformError> {
                 }
                 "musical2" => {
                     println!("selftest: musical alert: music back after it {}", !s.borrow().engine.is_paused());
+                    ui.invoke_tab_align_picked("left".into());
                     let _ = std::fs::remove_file(omnipulse_core::data_dir().unwrap().join("alert-sounds").join("selftest-alert.wav"));
                 }
+                // the track info tab at the right end, for its picture (and back after)
+                "tabright" => { ui.invoke_tab_align_picked("right".into()); println!("selftest: tab right {}", ui.get_tab_right()); }
                 // the narrow layout, for its picture
                 "narrow" => { ui.window().set_size(slint::LogicalSize::new(900.0, 700.0)); }
                 // the first artist you follow

@@ -457,6 +457,9 @@ export component AppWindow inherits Window {
     in property <[color]> accent-list;
     in property <int> accent-on: -1;
     in-out property <bool> art-accent;
+    // the track info tab at the bar's right end instead of its left (Settings > Look)
+    in property <bool> tab-right;
+    callback tab-align-picked(string);
     // the title bar: Streamer Mode, and each platform on or off
     in-out property <bool> streamer;
     in property <[Plat]> plats;
@@ -1037,6 +1040,17 @@ export component AppWindow inherits Window {
                                         }
                                         Toggle { checked <=> root.art-accent; y: (parent.height - self.height) / 2; toggled => { root.art-accent-changed(self.checked); } }
                                     }
+                                    Rectangle { height: 8px; }
+                                    HorizontalLayout {
+                                        spacing: 8px;
+                                        VerticalLayout {
+                                            horizontal-stretch: 1;
+                                            Text { text: "Track Info Tab"; color: Theme.text; font-weight: 700; }
+                                            Text { text: "Which end of the player bar the tab with what's playing sits at."; color: Theme.muted; font-size: 12px; }
+                                        }
+                                        Chip { label: "Left"; on: !root.tab-right; y: (parent.height - self.height) / 2; clicked => { root.tab-align-picked("left"); } }
+                                        Chip { label: "Right"; on: root.tab-right; y: (parent.height - self.height) / 2; clicked => { root.tab-align-picked("right"); } }
+                                    }
                                 }
                             }
                             // the other sections: a card of switches each
@@ -1169,7 +1183,7 @@ export component AppWindow inherits Window {
                 Rectangle {
                     height: 64px;
                     tab := Rectangle {
-                        x: 0;
+                        x: root.tab-right ? parent.width - self.width : 0;
                         width: min(info.preferred-width + 38px, root.width - 40px);
                         animate width { duration: 320ms; easing: cubic-bezier(0.2, 0.8, 0.2, 1); }
                         height: parent.height;
@@ -1208,20 +1222,21 @@ export component AppWindow inherits Window {
                     }
                     // the curve: the body's colour, with the gap's quarter circle cut from it
                     Rectangle {
-                        x: tab.width;
+                        x: root.tab-right ? tab.x - 8px : tab.width;
                         y: parent.height - 8px;
                         width: 8px;
                         height: 8px;
                         clip: true;
                         background: Theme.panel.mix(Theme.accent, 0.86);
-                        Rectangle { x: 0px; y: -8px; width: 16px; height: 16px; border-radius: 8px; background: Theme.bg; }
+                        Rectangle { x: root.tab-right ? -8px : 0px; y: -8px; width: 16px; height: 16px; border-radius: 8px; background: Theme.bg; }
                     }
                 }
                 // the body: the status, the controls and the progress
                 Rectangle {
                     vertical-stretch: 1;
                     background: Theme.panel.mix(Theme.accent, 0.86);
-                    border-top-right-radius: Theme.radius;
+                    border-top-left-radius: root.tab-right ? Theme.radius : 0;
+                    border-top-right-radius: root.tab-right ? 0 : Theme.radius;
                     border-bottom-left-radius: Theme.radius;
                     border-bottom-right-radius: Theme.radius;
                     VerticalLayout {
