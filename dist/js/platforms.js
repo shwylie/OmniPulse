@@ -30,7 +30,8 @@ function activePlats(page) {
 const LIST_PAGES = ["likes", "search", "discover", "rediscover"];
 const NOTHING_ON = "Nothing to show yet: switch on SoundCloud, Spotify, YouTube Music or Local music in Settings > Integrations, or with the icons in the title bar.";
 
-// Title bar: one icon per available platform, lit while it's active; click to switch it on or off
+// Title bar: one icon per platform, in its colours while it's set up (signed in) and on; one that isn't
+// set up yet is grey, and clicking it opens its place in Settings
 function renderPlatChips() {
   $("navDiscover").hidden = !activePlats("discover").length;
   // When the active platforms change (switched on or off, or Spotify / your files finished
@@ -48,16 +49,16 @@ function renderPlatChips() {
     }
   }
   const box = $("titlePlat");
-  const plats = PLATFORM_LIST.filter((p) => p.available());
-  box.hidden = plats.length < 2;
+  box.hidden = false;
   box.replaceChildren();
-  if (plats.length < 2) return;
-  plats.forEach((p) => {
-    const on = platformOn(p);
-    const b = el("button", on ? "on" : "");
+  PLATFORM_LIST.forEach((p) => {
+    const ready = p.available();
+    const on = ready && platformOn(p);
+    const b = el("button", on ? "on" : ready ? "" : "unset");
     b.dataset.p = p.id;
-    b.title = PLATFORMS[p.id].name + (on ? " is on. Click to hide it everywhere." : " is off. Click to show it again.");
-    b.setAttribute("aria-label", PLATFORMS[p.id].name);
+    b.title = PLATFORMS[p.id] ? PLATFORMS[p.id].name : platInfo(p.id).name;
+    b.title += !ready ? ": not set up yet. Click to set it up." : on ? " is on. Click to hide it everywhere." : " is off. Click to show it again.";
+    b.setAttribute("aria-label", platInfo(p.id).name);
     b.setAttribute("aria-pressed", on ? "true" : "false");
     b.append(platIcon(p.id));
     box.append(b);
@@ -479,7 +480,16 @@ function platformsInit() {
   // Platform icons in the title bar switch platforms on and off, like the switches in Settings
   $("titlePlat").addEventListener("click", (e) => {
     const b = e.target.closest("button[data-p]");
-    if (b) setPlatformOn(b.dataset.p, !b.classList.contains("on"));
+    if (!b) return;
+    if (b.classList.contains("unset")) {
+      // not set up: its switch in Settings, with its section opened
+      const p = PLATFORM_LIST.find((x) => x.id === b.dataset.p);
+      const sw = p && $(p.plugin ? "pluginsSection" : p.pref);
+      if (sw) for (let d = sw.closest("details"); d; d = d.parentElement && d.parentElement.closest("details")) d.open = true;
+      openSettings(sw ? sw.id : undefined);
+      return;
+    }
+    setPlatformOn(b.dataset.p, !b.classList.contains("on"));
   });
   // Each platform can be switched off without signing out
   PLATFORM_LIST.forEach((p) => {

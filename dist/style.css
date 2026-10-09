@@ -1396,6 +1396,8 @@ body.streamer #pluginsSection { display: none !important; }
 .titlePlat button.on[data-p="spotify"] { color: #1ed760; background: color-mix(in srgb, #1ed760 16%, transparent); }
 .titlePlat button.on[data-p="youtube"] { color: #ff0033; background: color-mix(in srgb, #ff0033 16%, transparent); }
 .titlePlat button.on[data-p="local"] { color: #f2b544; background: color-mix(in srgb, #f2b544 16%, transparent); }
+.titlePlat button.on[data-p="musicbrainz"] { color: #ba478f; background: color-mix(in srgb, #ba478f 16%, transparent); }
+.titlePlat button.unset { opacity: 0.25; }
 .titlePlat button.on[data-p^="plug:"] { color: #38bdf8; background: color-mix(in srgb, #38bdf8 16%, transparent); }
 
 /* Unfollow looks like any other button (not greyed out); "Also follow on ...": the same pill, with a

@@ -18,8 +18,5 @@ function mbPaint() {
 
 function mbInit() {
   mbPaint();
-  $("mbOn").addEventListener("change", async () => {
-    await setPlatformOn("musicbrainz", $("mbOn").checked);
-    mbPaint();
-  });
+  $("mbOn").addEventListener("change", () => setTimeout(mbPaint, 0));   // (js/platforms.js switches it)
 }
