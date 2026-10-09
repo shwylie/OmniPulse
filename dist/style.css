@@ -1564,3 +1564,9 @@ body.streamSafe #navSets, body.streamSafe #navArtists, body.streamSafe #plSectio
 /* what's at the bottom of a page can still be scrolled clear of the tab */
 #listView, .sideLists { scroll-padding-bottom: calc(var(--tabH) + 16px); }
 #listView > :last-child, .sideLists > :last-child { margin-bottom: calc(var(--tabH) + 8px); }
+/* with an album line too, the three lines are a little smaller and closer, so they sit inside the
+   tab with room above and below (two lines keep their size) */
+.player .now:has(#nowAlbum:not(:empty)) .nowText { gap: 0; }
+.player .now:has(#nowAlbum:not(:empty)) #nowTitle { font-size: 14px; line-height: 1.2; }
+.player .now:has(#nowAlbum:not(:empty)) #nowArtist, .player .now:has(#nowAlbum:not(:empty)) #nowAlbum { font-size: 12px; line-height: 1.25; }
+.player:has(#nowAlbum:not(:empty)) { --tabH: 68px; }
