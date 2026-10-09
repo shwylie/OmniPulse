@@ -130,7 +130,7 @@ streamDeck.actions.onWillDisappear((ev) => {
   visible.delete(ev.action.id);
   shown.delete(ev.action.id);
 });
-streamDeck.actions.onDidReceiveSettings((ev) => {
+streamDeck.settings.onDidReceiveSettings((ev) => {
   settings.set(ev.action.id, ev.payload.settings || {});
   if (last) paint(last);
 });
