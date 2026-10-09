@@ -58,8 +58,8 @@ function spWaitUntilText(secs) {
 const SP_DEFAULT_NOTE = "Not signed in. Without Premium, songs play from YouTube Music.";
 
 function syncSpotifySettings() {
-  // like Last.fm's options: they fold out under Spotify once it's signed in and switched on
-  $("spotifyOptions").hidden = !(FEATURES.spotify && spotifyPremium && prefs.spOn !== false);
+  // its options (Your Keys) fold out under Spotify once it's set up and switched on (js/apisetup.js)
+  if (typeof keySetupStatus === "function") keySetupStatus();
   $("spConnect").textContent = spotifyPremium || spotifyFree ? "Sign out" : "Sign in";
   if (spotifyPremium) nameNote($("spStatus"), "Signed in as ", spotifyName || "you", " \u00b7 Premium.");
   else if (spotifyFree) {
@@ -143,6 +143,11 @@ async function spotifyConnect() {
     return;
   }
   await spotifyCheck();
+  // with Premium, playback's own approval straight after, in the same go (it needs Spotify's own app
+  // id, so it's a second page in the browser)
+  if (spotifyPremium && !(await invoke("spe_signed_in").catch(() => true))) {
+    try { await speLogin(); say("Signed in to Spotify.", { force: true }); } catch (e) { say("Spotify playback: " + e, { force: true }); }
+  }
 }
 
 async function spotifyDisconnect() {
@@ -268,7 +273,7 @@ function speSetup() {
 // Spotify playback signs in separately from the Spotify account above (it needs Spotify's own
 // app id); it happens once, in the browser, the first time you play something
 async function speLogin() {
-  say("Approve Spotify playback in your browser (only needed once)...");
+  say("One more step: approve Spotify playback in your browser (only needed once)...", { stay: true, force: true });
   await invoke("spe_login");
   speSettingsPaint();
 }
@@ -380,31 +385,12 @@ function spotifySeek(frac) {
   }, 150);
 }
 
-async function speSettingsPaint() {
-  const on = await invoke("spe_signed_in").catch(() => false);
-  $("speNote").textContent = on
-    ? "Signed in. Spotify plays through your equalizer and output device."
-    : "A separate sign-in, asked for the first time you play Spotify.";
-  $("speAuth").textContent = on ? "Sign out" : "Sign in";
-}
+// (playback signs in with the account now: nothing of its own to show)
+function speSettingsPaint() {}
 
 function spotifyInit() {
   $("spConnect").addEventListener("click", () => {
     if (spotifyPremium) spotifyDisconnect(); else spotifyConnect();
-  });
-  $("speAuth").addEventListener("click", async () => {
-    try {
-      if (await invoke("spe_signed_in")) {
-        spotifyPause();
-        await invoke("spe_logout");
-      } else {
-        await speLogin();
-        say("");
-      }
-    } catch (e) {
-      say(String(e));
-    }
-    speSettingsPaint();
   });
   setInterval(spotifyTick, 500);
   spotifyCheck();

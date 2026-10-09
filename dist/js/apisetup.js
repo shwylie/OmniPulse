@@ -165,6 +165,8 @@ async function keySetupStatus() {
     $(keys).hidden = !has;
     if (!has) $(signIn).hidden = true;
     else if (plat !== "youtube" || ytWanted()) $(signIn).hidden = false;
+    // Spotify's options (Your Keys) once it has keys, while it's switched on
+    if (plat === "spotify") $("spotifyOptions").hidden = !(FEATURES.spotify && has && prefs.spOn !== false);
   });
 }
 
