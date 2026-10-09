@@ -17,9 +17,36 @@ function onAccent(hex) {
   return 0.299 * r + 0.587 * g + 0.114 * b > 150 ? "#111318" : "#ffffff";
 }
 
+// Settings > Look > Player Style: a whole look for the player bar (painted further down)
+// min: the window's narrowest for it (the others put everything on one row, so they need more room)
+const PLAYER_STYLES = {
+  tab: { note: "What's playing on a tab above the controls, as wide as it needs.", min: 820 },
+  bar: { note: "Everything on one full-width bar: what's playing on the left, the controls in the middle.", min: 1000 },
+  float: { note: "One bar too, floating above the bottom of the window with rounded ends.", min: 1040 },
+  minimal: { note: "A slim row in the panel colour, with the progress as a thin line along its top.", min: 960 },
+};
+const playerStyle = () => (PLAYER_STYLES[prefs.playerStyle] ? prefs.playerStyle : "tab");
+
+let playerMinNow = 0;
+function playerMinWidth(w) {
+  if (w === playerMinNow) return;
+  playerMinNow = w;
+  const api = window.__TAURI__ && window.__TAURI__.window;
+  const Size = (window.__TAURI__ && window.__TAURI__.dpi && window.__TAURI__.dpi.LogicalSize) || (api && api.LogicalSize);
+  if (!api || !Size) return;
+  win.setMinSize(new Size(w, 520)).catch(() => {});
+  // narrower than that right now: as wide as it needs
+  if (innerWidth < w) win.setSize(new Size(w, Math.max(520, innerHeight))).catch(() => {});
+}
+
 function applyPrefs() {
   const root = document.documentElement;
   root.dataset.tab = prefs.tabAlign === "right" ? "right" : "left";
+  // Settings > Look > Player Style (and the window's narrowest, so it always fits)
+  const ps = playerStyle();
+  root.dataset.player = ps;
+  root.classList.toggle("noTab", ps !== "tab");
+  playerMinWidth(PLAYER_STYLES[ps].min);
   root.classList.toggle("square", prefs.appRounded === false);   // Settings > App > Rounded Corners
   applyTheme();   // light or dark, and its tint (js/appearance.js)
   root.dataset.density = prefs.density;
@@ -1270,6 +1297,8 @@ $("queueBtn").addEventListener("click", () => setQueueOpen(!prefs.queue));
 function tabFit() {
   const n = $("nowToggle");
   if (!n) return;
+  // (only the Tab style's track info is a tab that sizes itself)
+  if (playerStyle() !== "tab") { n.style.width = ""; return; }
   const was = n.getBoundingClientRect().width;
   n.style.transition = "none";
   n.style.width = "auto";
@@ -1878,6 +1907,20 @@ function setPref(key, value) {
   applyPrefs();
   syncAppearance();
 }
+
+// ---------- Settings > Look > Player Style: a whole look for the player bar ----------
+function playerStylePaint() {
+  const ps = playerStyle();
+  $("playerStyleSel").value = ps;
+  $("playerStyleNote").textContent = PLAYER_STYLES[ps].note + (ps === "tab" ? "" : " Needs the window at least " + PLAYER_STYLES[ps].min + " px wide.");
+  $("tabAlignRow").hidden = ps !== "tab";
+}
+playerStylePaint();
+$("playerStyleSel").addEventListener("change", () => {
+  setPref("playerStyle", $("playerStyleSel").value);
+  playerStylePaint();
+  requestAnimationFrame(tabFit);
+});
 
 $("roundedOn").checked = prefs.appRounded !== false;
 $("roundedOn").addEventListener("change", () => setPref("appRounded", $("roundedOn").checked));

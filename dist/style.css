@@ -1602,3 +1602,46 @@ body.streamSafe #navSets, body.streamSafe #navArtists, body.streamSafe #plSectio
 .nameInput::placeholder { color: var(--muted); opacity: 0.8; }
 .nameInput:hover { border-color: color-mix(in srgb, var(--accent) 45%, var(--line)); }
 .nameInput:focus { border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent); }
+
+/* ===== Player styles (Settings > Look > Player Style); Tab, the default, is the look above ===== */
+/* The others: no tab. What's playing, the controls and the buttons share one row, the status above
+   them and the progress along the bottom, on one background that covers the whole bar. */
+:root.noTab { --tabH: 0px; }
+:root.noTab .player {
+  margin-top: 0;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  grid-template-areas: "status status status" "now transport right" "prog prog prog";
+  column-gap: 16px;
+}
+:root.noTab .player::before { grid-row: 1 / -1; border-radius: 10px !important; }
+:root.noTab[data-tab] .player .now {
+  justify-self: start; width: auto; height: auto; max-width: 100%;
+  flex-direction: row; padding: 10px 0 0 14px;
+  background: none; border-radius: 0;
+}
+:root.noTab .player .now::before, :root.noTab .player .now::after { display: none; }
+:root.noTab[data-tab] .player .nowText { align-items: stretch; text-align: left; }
+:root.noTab[data-tab] .player .now .artistRow { justify-content: flex-start; }
+:root.noTab .player .transport { justify-self: center; padding-left: 0; margin-top: 10px; }
+:root.noTab .player .right { justify-self: end; margin-top: 10px; }
+:root.noTab .player .miniProg { margin-top: 6px; }
+
+/* Floating: off the window's edges, with round ends and a shadow */
+:root[data-player="float"] .player { margin: 0 6px 8px; }
+:root[data-player="float"] .player::before { border-radius: 22px !important; box-shadow: 0 14px 36px rgba(0, 0, 0, 0.38), 0 0 0 1px color-mix(in srgb, var(--text) 8%, transparent); }
+:root[data-player="float"] .player .now { padding-left: 20px; }
+:root[data-player="float"] .player .right { padding-right: 20px; }
+:root[data-player="float"] .player .miniProg { margin-left: 20px; margin-right: 20px; padding-bottom: 10px; }
+
+/* Minimal: the panel's own colour, a smaller cover and one line each, the progress a thin line on top */
+:root[data-player="minimal"] .player { grid-template-areas: "prog prog prog" "status status status" "now transport right"; }
+:root[data-player="minimal"] .player::before { background: var(--panel); background-attachment: scroll; }
+:root[data-player="minimal"] .player .miniProg { margin: 0 14px; padding: 0 0 2px; }
+:root[data-player="minimal"] .player .miniTrack { height: 2px; }
+:root[data-player="minimal"] .player .miniProg:hover .miniTrack { height: 4px; }
+:root[data-player="minimal"] .player .now { padding-top: 8px; padding-bottom: 8px; }
+:root[data-player="minimal"] .player #nowArt { width: 36px; height: 36px; }
+:root[data-player="minimal"] .player #nowTitle { font-size: 14px; -webkit-line-clamp: 1; }
+:root[data-player="minimal"] .player #nowArtist { font-size: 12px; }
+:root[data-player="minimal"] .player #nowAlbum { display: none; }
+:root[data-player="minimal"] .player .transport, :root[data-player="minimal"] .player .right { margin-top: 0; }
