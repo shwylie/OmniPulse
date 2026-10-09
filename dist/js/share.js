@@ -4,6 +4,8 @@
 // theirs). Sharing it again updates that same page. A right-click offers the SoundCloud or Spotify
 // copy instead (js/xplmirror.js), as those platforms' own links.
 
+const SHARE_PLATS = [["soundcloud", "SoundCloud"], ["spotify", "Spotify"], ["youtube", "YouTube Music"]];
+
 const shareInfoFor = (p) => (isXpl(p) ? (xplFind(p.id) || {}).share : (prefs.shares || {})[String(p.id)]) || null;
 function shareInfoSet(p, info) {
   if (isXpl(p)) { const x = xplFind(p.id); if (x) { x.share = info; xplSave(true); } return; }
@@ -14,9 +16,10 @@ function shareInfoSet(p, info) {
 // Where a song is on each platform: its own, and the matches found for it
 function shareLinks(t) {
   const links = {};
+  if (!t) return links;
   const src = srcOf(t);
   const spLink = (uri) => "https://open.spotify.com/track/" + String(uri).split(":").pop();
-  if (src === "soundcloud" && t.permalink_url) links.soundcloud = t.permalink_url;
+  if (src === "soundcloud" && t.permalink_url && t.sharing !== "private") links.soundcloud = t.permalink_url;
   if (src === "spotify" && t.uri) links.spotify = spLink(t.uri);
   if (src === "youtube") links.youtube = "https://music.youtube.com/watch?v=" + ytIdOf(t);
   const m = xmMatchesLoad()[String(t.id)] || {};
@@ -61,11 +64,23 @@ async function sharePlaylist(p) {
   }
 }
 
+// A track's own link on one platform (not an OmniPulse one)
+async function shareTrackLink(t, plat) {
+  const url = shareLinks(t)[plat];
+  if (!url) return;
+  try {
+    await navigator.clipboard.writeText(url);
+    say((SHARE_PLATS.find(([k]) => k === plat) || ["", "The"])[1] + " link copied.", { force: true });
+  } catch (e) {
+    say("Could not copy the link.");
+  }
+}
+
 // The playlist on one platform: the copy kept there (or the playlist itself, if it's one of theirs)
 function sharePlatformId(p, plat) {
   if (isXpl(p)) return (xplFind(p.id) || {}).mirrors ? xplFind(p.id).mirrors[plat] || null : null;
   if (plat === "spotify") return p.source === "spotify" ? p.spId : null;
-  return p.source !== "spotify" && p.source !== "local" ? String(p.id) : null;
+  return plat === "soundcloud" && (!p.source || p.source === "soundcloud") ? String(p.id) : null;
 }
 
 async function sharePlatform(p, plat) {
@@ -93,7 +108,7 @@ function shareMenu(p, anchor) {
   const m = $("plMenu");
   m.replaceChildren(el("div", "menuHead", "Share on one platform"));
   let any = false;
-  [["soundcloud", "SoundCloud"], ["spotify", "Spotify"]].forEach(([plat, name]) => {
+  SHARE_PLATS.forEach(([plat, name]) => {
     if (!sharePlatformId(p, plat)) return;
     const b = el("button", "menuItem", "Copy " + name + " link");
     b.dataset.share = plat;

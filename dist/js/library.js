@@ -490,11 +490,11 @@ function openTrackMenu(t, x, y, fromPlayer, queueIdx) {
   if (recArtistName(t)) add("Don't recommend " + recArtistName(t), "hideArtist");
   const cl = clearedMenuLabel(t);   // Stream-Safe Music (js/streamsafe.js)
   if (cl) add(cl[0], cl[1]);
-  if (t.permalink_url) {
-    sep();
-    add(openLabel(t), "open");
-    add("Copy link", "copy");
-  }
+  const links = shareLinks(t);   // its own platform's, and the same song found on the others (js/share.js)
+  const plats = SHARE_PLATS.filter(([k]) => links[k]);
+  if (t.permalink_url || plats.length) sep();
+  if (t.permalink_url) add(openLabel(t), "open");
+  plats.forEach(([k, name]) => add("Copy " + name + " link", "share:" + k));
   sep();
   add("Track preferences...", "fix");
   m.hidden = false;
@@ -510,6 +510,7 @@ function runMenuAction(a) {
   if (!t) return;
   const i = viewTracks.indexOf(t);
   if (a.startsWith("artist:")) { openArtistNamed(t, artistNames(t)[Number(a.slice(7))]); return; }
+  if (a.startsWith("share:")) { shareTrackLink(t, a.slice(6)); return; }
   switch (a) {
     case "play":
       if (ctxQueueIdx !== null) { qi = ctxQueueIdx; playCurrent(); }   // a queue row: play it there
@@ -529,11 +530,6 @@ function runMenuAction(a) {
     case "hideAlbum": hideAlbum(trackAlbumName(t), t.spAlbum && t.spAlbum.artists && t.spAlbum.artists[0] ? t.spAlbum.artists[0].name : recArtistName(t)); break;
     case "fix": openFixDialog(t); break;
     case "open": openOnSoundCloud(t); break;
-    case "copy":
-      navigator.clipboard.writeText(t.permalink_url)
-        .then(() => say("Link copied."))
-        .catch(() => say("Could not copy the link."));
-      break;
   }
 }
 

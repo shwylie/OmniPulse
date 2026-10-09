@@ -175,6 +175,8 @@ function openPlaylistActions(p, x, y) {
     m.append(b);
   };
   add("Open", "open");
+  add("Share", "share");
+  SHARE_PLATS.forEach(([plat, name]) => { if (sharePlatformId(p, plat)) add("Copy " + name + " link", "share:" + plat); });
   add("Hide playlist", "hide");
   if (isXpl(p)) {
     add("Rename...", "rename");
@@ -196,6 +198,8 @@ function runPlaylistAction(a) {
   closeMenu();
   if (!p) return;
   if (a === "open") openPlaylist(p);
+  else if (a === "share") sharePlaylist(p);
+  else if (a.startsWith("share:")) sharePlatform(p, a.slice(6));
   else if (a === "switch") xplSwitch(p);
   else if (a === "rename") openRenameDialog(p);
   else if (a === "delete") deleteXpl(p);
