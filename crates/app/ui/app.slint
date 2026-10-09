@@ -531,6 +531,8 @@ export component AppWindow inherits Window {
     in property <string> sort-by;
     in property <int> sort-dir;
     callback sort-pick(string);
+    callback backup-make();
+    callback backup-restore();
     callback plat-toggle(string);
     callback accent-picked(int);
     callback art-accent-changed(bool);
@@ -1100,6 +1102,24 @@ export component AppWindow inherits Window {
                                         }
                                         Toggle { checked: r.on; y: (parent.height - self.height) / 2; toggled => { root.set-toggle(i); } }
                                     }
+                                }
+                            }
+                            Text { text: "App"; color: Theme.text; font-size: 20px; font-weight: 800; }
+                            Card {
+                                HorizontalLayout {
+                                    padding: 16px;
+                                    padding-top: 12px;
+                                    padding-bottom: 12px;
+                                    spacing: 10px;
+                                    VerticalLayout {
+                                        horizontal-stretch: 1;
+                                        alignment: center;
+                                        spacing: 2px;
+                                        Text { text: "Back Up & Restore"; color: Theme.text; font-weight: 700; }
+                                        Text { text: "Your settings, keys, favourites, playlists, stats and alerts, in one .zip. Sign-ins aren't in it."; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
+                                    }
+                                    Pill { label: "Back up"; y: (parent.height - self.height) / 2; clicked => { root.backup-make(); } }
+                                    Pill { label: "Restore"; y: (parent.height - self.height) / 2; clicked => { root.backup-restore(); } }
                                 }
                             }
                             Text { text: "Settings not here yet are the web app's: this app follows what's set there."; color: Theme.muted; font-size: 12px; wrap: word-wrap; }

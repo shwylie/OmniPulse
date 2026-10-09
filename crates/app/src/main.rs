@@ -1555,6 +1555,66 @@ fn set_toggle(shared: &Shared, i: usize) {
     paint_settings(&shared.borrow());
 }
 
+// ---------- Back Up & Restore (Settings > App; crates/core/src/backup.rs, as the web app's) ----------
+// The backup's "web" part is the web app's saved data: here, the copy it last wrote for this app.
+// This app's own settings and state are files in the data folder, and go in with the rest.
+fn backup_web() -> String {
+    let mut v = omnipulse_core::load_web_export().unwrap_or_else(|| serde_json::json!({}));
+    if let Some(o) = v.as_object_mut() {
+        o.retain(|k, _| k.starts_with("sc."));
+    }
+    v.to_string()
+}
+
+fn backup_make(shared: &Shared) {
+    let day = {
+        let d = omnipulse_core::now_secs() / 86_400;
+        // days since 1970 to a date (civil from days, Howard Hinnant's)
+        let z = d as i64 + 719_468;
+        let era = z.div_euclid(146_097);
+        let doe = z - era * 146_097;
+        let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+        let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+        let mp = (5 * doy + 2) / 153;
+        let (dd, mm) = (doy - (153 * mp + 2) / 5 + 1, if mp < 10 { mp + 3 } else { mp - 9 });
+        format!("{}-{mm:02}-{dd:02}", yoe + era * 400 + i64::from(mm <= 2))
+    };
+    let Some(dest) = rfd::FileDialog::new().set_title("Back up OmniPulse").set_file_name(format!("OmniPulse Backup {day}.zip")).add_filter("OmniPulse backup", &["zip"]).save_file() else { return };
+    let msg = match omnipulse_core::backup::create(&dest.to_string_lossy(), &backup_web()) {
+        Ok(n) => format!("Backed up: your settings and {n} {}.", if n == 1 { "file" } else { "files" }),
+        Err(e) => format!("Couldn't back up: {e}"),
+    };
+    if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_status(msg.into()); }
+}
+
+fn backup_restore(shared: &Shared) {
+    let Some(src) = rfd::FileDialog::new().set_title("Restore an OmniPulse backup").add_filter("OmniPulse backup", &["zip"]).pick_file() else { return };
+    let sure = rfd::MessageDialog::new()
+        .set_title("Restore this backup?")
+        .set_description("Your settings, favourites, playlists, stats and alerts are replaced with the backup's, and OmniPulse starts again.")
+        .set_buttons(rfd::MessageButtons::OkCancel)
+        .show();
+    if sure != rfd::MessageDialogResult::Ok {
+        return;
+    }
+    let status = |m: String| if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_status(m.into()); };
+    let web = match omnipulse_core::backup::restore(&src.to_string_lossy()) {
+        Ok(w) => w,
+        Err(e) => return status(format!("Couldn't restore it: {e}")),
+    };
+    // the web app's part, where this app reads it (the web app takes it from the .zip itself)
+    let mut v: serde_json::Value = serde_json::from_str(&web).unwrap_or_else(|_| serde_json::json!({}));
+    v["savedAt"] = serde_json::json!(now_ms());
+    if let Err(e) = omnipulse_core::save_web_export(&v.to_string()) {
+        return status(format!("The files are back, but the settings couldn't be: {e}"));
+    }
+    // and again, with it all read fresh
+    if let Ok(me) = std::env::current_exe() {
+        let _ = std::process::Command::new(me).spawn();
+    }
+    let _ = slint::quit_event_loop();
+}
+
 // ---------- Streamer Mode and Stream-Safe Music (as the web app's) ----------
 fn streamer_step(shared: &Shared) {
     let (private, safe) = {
@@ -1884,6 +1944,10 @@ fn main() -> Result<(), slint::PlatformError> {
     lib_sort_paint(&shared.borrow());
     let s = shared.clone();
     ui.on_sort_pick(move |by| lib_sort_pick(&s, &by));
+    let s = shared.clone();
+    ui.on_backup_make(move || backup_make(&s));
+    let s = shared.clone();
+    ui.on_backup_restore(move || backup_restore(&s));
     let s = shared.clone();
     ui.on_tab_align_picked(move |side| set_look_pref(&s, "tabAlign", serde_json::json!(side.as_str())));
     let s = shared.clone();
