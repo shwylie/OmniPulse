@@ -9,8 +9,10 @@ const XPL_FIELDS = ["source", "id", "ytId", "ytArtistId", "spArtists", "uri", "k
 let xpls = [];
 try { xpls = JSON.parse(localStorage.getItem(XPL_KEY) || "[]"); } catch (e) { xpls = []; }
 
-function xplSave() {
+// (quiet: without keeping the platforms in step again, js/xplmirror.js)
+function xplSave(quiet) {
   try { localStorage.setItem(XPL_KEY, JSON.stringify(xpls)); } catch (e) { say("Could not save your playlists on this PC: " + e); }
+  if (!quiet && typeof xmSoon === "function") xmSoon();
 }
 
 const isXpl = (p) => !!p && p.source === "xpl";
@@ -83,7 +85,15 @@ function xplDelete(id) {
   const p = xplFind(id);
   if (!p) return;
   xpls = xpls.filter((x) => x !== p);
-  xplSave();
+  xplSave(true);
+  // the hidden copies made for it on the platforms go too (one of yours it was made from stays)
+  Object.keys(p.made || {}).forEach((plat) => {
+    const id = p.mirrors && p.mirrors[plat];
+    if (!id) return;
+    xmRemove(plat, id);
+    prefs.hiddenPlaylists = (prefs.hiddenPlaylists || []).filter((x) => x !== xmSideId(plat, id));
+  });
+  savePrefs();
   if (p.from) {
     prefs.hiddenPlaylists = (prefs.hiddenPlaylists || []).filter((x) => x !== p.from);
     savePrefs();
@@ -115,31 +125,24 @@ async function xplSwitch(p) {
 }
 
 // ---------- the New playlist / Rename dialog ----------
-let newPlTrack = null;   // a track to put in the new playlist
 let renameId = null;
 
-function openNewPlaylistDialog(track) {
-  newPlTrack = track || null;
-  renameId = null;
-  const scOk = activePlats().includes("soundcloud") && (!track || srcOf(track) === "soundcloud");
-  $("newPlHead").textContent = "New playlist";
-  $("newPlName").value = "";
-  $("newPlWhere").hidden = false;
-  $("newPlSc").disabled = !scOk;
-  $("newPlScNote").textContent = scOk ? "Private, on your SoundCloud account. SoundCloud tracks only."
-    : track ? "Only for SoundCloud tracks." : "Needs SoundCloud switched on.";
-  $("newPlLocal").checked = true;
-  $("newPlSave").textContent = "Create";
-  $("newPlDialog").showModal();
-  $("newPlName").focus();
+// A new playlist: made straight away, here, taking songs from any platform (and kept on SoundCloud
+// and Spotify by itself, js/xplmirror.js). Right-click it to rename it.
+async function openNewPlaylistDialog(track) {
+  const taken = new Set(xpls.map((p) => p.title));
+  let name = "New Playlist";
+  for (let n = 2; taken.has(name); n++) name = "New Playlist " + n;
+  const p = xplCreate(name, track ? [track] : []);
+  await refreshSidebar();
+  if (!track) openPlaylist(playlists.find((x) => x.id === p.id));
+  say('Created "' + name + '"' + (track ? " with that track in it" : "") + ". Right-click it in the sidebar to rename it.");
 }
 
 function openRenameDialog(p) {
   renameId = p.id;
-  newPlTrack = null;
   $("newPlHead").textContent = "Rename playlist";
   $("newPlName").value = p.title || "";
-  $("newPlWhere").hidden = true;
   $("newPlSave").textContent = "Save";
   $("newPlDialog").showModal();
   $("newPlName").select();
@@ -156,21 +159,6 @@ async function newPlaylistSubmit(e) {
     await refreshSidebar();
     if (view === "playlist") renderHero();
     return;
-  }
-  const track = newPlTrack;
-  try {
-    if ($("newPlSc").checked && !$("newPlSc").disabled) {
-      const created = await createPlaylist(name, track);   // on SoundCloud
-      const p = created && playlists.find((x) => String(x.id) === String(created.id));
-      if (p && !track) openPlaylist(p);
-    } else {
-      const p = xplCreate(name, track ? [track] : []);
-      await refreshSidebar();
-      if (!track) openPlaylist(playlists.find((x) => x.id === p.id));
-    }
-    say('Created "' + name + '"' + (track ? " with that track in it." : ". Add tracks with the playlist button on any track, or drag them here."));
-  } catch (err) {
-    say("Could not create the playlist: " + err);
   }
 }
 

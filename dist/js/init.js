@@ -25,6 +25,7 @@ function extrasInit() {
   integrationsInit();
   libraryInit();
   xplInit();
+  xmInit();
   favouritesInit();
   setsInit();
   feedInit();

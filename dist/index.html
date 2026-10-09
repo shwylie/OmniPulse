@@ -264,17 +264,6 @@
     <h2 id="newPlHead">New playlist</h2>
     <label class="lbl" for="newPlName">Name</label>
     <input id="newPlName" type="text" maxlength="100" autocomplete="off" spellcheck="false" placeholder="Playlist name">
-    <fieldset id="newPlWhere" class="whereSet">
-      <legend class="lbl">Keep it</legend>
-      <label class="whereOpt">
-        <input type="radio" name="newPlWhere" id="newPlLocal" value="local" checked>
-        <span><b>On this PC</b><span class="note">Any platform: SoundCloud, Spotify and your files together. Nothing is added to your accounts.</span></span>
-      </label>
-      <label class="whereOpt">
-        <input type="radio" name="newPlWhere" id="newPlSc" value="soundcloud">
-        <span><b>On SoundCloud</b><span class="note" id="newPlScNote"></span></span>
-      </label>
-    </fieldset>
     <div class="fixActions">
       <span class="grow"></span>
       <button type="button" id="newPlCancel" class="soft">Cancel</button>
@@ -1227,6 +1216,7 @@
 <script src="js/discover.js"></script>
 <script src="js/library.js"></script>
 <script src="js/xplaylists.js"></script>
+<script src="js/xplmirror.js"></script>
 <script src="js/favourites.js"></script>
 <script src="js/sets.js"></script>
 <script src="js/session.js"></script>

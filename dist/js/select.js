@@ -157,13 +157,14 @@ function selAsk(conflicts) {
 // Adds several to a playlist, as asked about above; tells you what happened
 async function selPasteInto(p, tracks) {
   if (!p || !tracks.length) return;
-  let skipped = 0;
   if (!isXpl(p)) {
-    // your SoundCloud playlists only take SoundCloud tracks
-    const sc = tracks.filter((t) => srcOf(t) === "soundcloud");
-    skipped = tracks.length - sc.length;
-    tracks = sc;
-    if (!tracks.length) { say("SoundCloud playlists only take SoundCloud tracks. Use a playlist on this PC for the rest."); return; }
+    // one of your SoundCloud playlists, with only SoundCloud songs: as it is. Anything else becomes a
+    // playlist here (js/xplmirror.js), which takes them all.
+    const asIs = p.source !== "spotify" && isMyPlatformList(p) && tracks.every((t) => srcOf(t) === "soundcloud");
+    if (!asIs) {
+      try { await xplAdopt(p, tracks); } catch (e) { say("Could not add to the playlist: " + e); }
+      return;
+    }
   }
   let have = [];
   try {
@@ -197,7 +198,7 @@ async function selPasteInto(p, tracks) {
   say((changed ? (plan.add.length ? "Added " + plural(plan.add.length, "track", "tracks") : "") +
       (plan.replace.length ? (plan.add.length ? ", " : "") + "swapped in " + plural(plan.replace.length, "track", "tracks") : "") + " to " + (p.title || "the playlist")
     : "Nothing new for " + (p.title || "the playlist")) +
-    (left > 0 ? " (" + plural(left, "was", "were") + " there already)" : "") + (skipped ? "; " + skipped + " not from SoundCloud left out" : "") + ".");
+    (left > 0 ? " (" + plural(left, "was", "were") + " there already)" : "") + ".");
   if (view === "playlist" && currentPlaylist && String(currentPlaylist.id) === String(p.id)) openPlaylist(currentPlaylist);
   refreshSidebar();
 }

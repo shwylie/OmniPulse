@@ -11,6 +11,7 @@ let spotifyFree = false;   // signed in without Premium: your library and search
 const onSpotifyEngine = (t) => !!t && srcOf(t) === "spotify" && spotifyPremium && !t.ytVia && !t.spGone;
 const spotifyUsable = () => FEATURES.spotify && (spotifyPremium || (spotifyFree && ytOn()));
 let spotifyName = "";
+let spotifyMeId = "";   // your Spotify user id (which playlists are yours to change)
 let spState = { pos: 0, ts: 0, playing: false, dur: 0 };
 
 const SP_MARKET_PATHS = /^\/(me\/tracks|playlists\/[^/]+\/items|albums\/|search\?type=track|tracks\/)/;
@@ -82,6 +83,7 @@ async function spotifyCheck() {
       const me = await spApi("GET", "/me");
       ok = me.product === "premium";
       spotifyName = me.display_name || me.id || "";
+      spotifyMeId = me.id || "";
       spotifyFree = !ok;
       prefs.spAccount = { product: me.product || "", name: spotifyName };
       savePrefs();
@@ -510,6 +512,7 @@ async function spotifyPlaylists() {
       spId: x.id,
       title: x.name || "Untitled playlist",
       user: { username: (x.owner && x.owner.display_name) || "" },
+      own: !!(x.owner && spotifyMeId && x.owner.id === spotifyMeId),
     }));
     if (!data.next || !items.length) break;
     offset += 50;

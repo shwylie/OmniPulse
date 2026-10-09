@@ -35,13 +35,6 @@ async function savePlaylistTracks(id, ids) {
   });
 }
 
-async function createPlaylist(title, firstTrack) {
-  const body = { playlist: { title, sharing: "private", tracks: firstTrack ? [{ id: firstTrack.id }] : [] } };
-  const created = await invoke("playlist_write", { method: "POST", path: "/playlists", body });
-  await loadPlaylists();
-  return created;
-}
-
 async function addToPlaylist(p, t) {
   if (isXpl(p)) {
     const n = xplAdd(p.id, [t]);
@@ -50,7 +43,22 @@ async function addToPlaylist(p, t) {
     refreshSidebar();
     return;
   }
-  if (srcOf(t) !== "soundcloud") { say("SoundCloud playlists only take SoundCloud tracks. Use a playlist on this PC for anything else."); return; }
+  // a song from another platform, or a playlist that isn't yours: a playlist here from now on
+  const native = isMyPlatformList(p) && srcOf(t) === xmPlatOf(p);
+  if (!native) {
+    try { await xplAdopt(p, [t]); } catch (e) { say("Could not add to the playlist: " + e); }
+    return;
+  }
+  if (p.source === "spotify") {
+    try {
+      await spApi("POST", "/playlists/" + p.spId + "/items", { uris: [t.uri] });
+      say("Added to " + (p.title || "playlist") + ".");
+      if (view === "playlist" && currentPlaylist && currentPlaylist.id === p.id) openPlaylist(currentPlaylist);
+    } catch (e) {
+      say("Could not add to the playlist: " + e);
+    }
+    return;
+  }
   try {
     const ids = await playlistTrackIds(p.id);
     if (ids.includes(t.id)) { say("Already in " + (p.title || "that playlist") + "."); return; }
@@ -121,10 +129,12 @@ function openPlaylistMenu(t, anchor) {
   m.replaceChildren(el("div", "menuHead", "Add to playlist"));
   // playlists on this PC take anything; SoundCloud ones only SoundCloud tracks
   const here = playlists.filter(isXpl);
-  const sc = srcOf(t) === "soundcloud" ? playlists.filter((p) => !isXpl(p) && isOwnPlaylist(p)) : [];
+  // (any song goes in any of yours: one from another platform makes it a playlist here, js/xplmirror.js)
+  const sc = playlists.filter((p) => isMyPlatformList(p) && p.source !== "spotify");
+  const sp = playlists.filter((p) => isMyPlatformList(p) && p.source === "spotify");
   const group = (label, list) => {
     if (!list.length) return;
-    if (here.length && sc.length) m.append(el("div", "menuNote menuGroup", label));
+    if ([here, sc, sp].filter((x) => x.length).length > 1) m.append(el("div", "menuNote menuGroup", label));
     list.forEach((p) => {
       const b = el("button", "menuItem", p.title || "Untitled");
       b.dataset.id = p.id;
@@ -133,7 +143,8 @@ function openPlaylistMenu(t, anchor) {
   };
   group("On this PC", here);
   group("On SoundCloud", sc);
-  if (!here.length && !sc.length) m.append(el("div", "menuNote", "You have no playlists yet."));
+  group("On Spotify", sp);
+  if (!here.length && !sc.length && !sp.length) m.append(el("div", "menuNote", "You have no playlists yet."));
   const nb = el("button", "menuItem menuNew", "New playlist...");
   nb.dataset.new = "1";
   m.append(nb);

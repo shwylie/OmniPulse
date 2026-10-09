@@ -24,8 +24,9 @@ function dragStart(e, t, from) {
 // Playlists on this PC take anything; your SoundCloud playlists only SoundCloud tracks
 function playlistTakes(p, t) {
   // several: your SoundCloud playlist takes the SoundCloud ones among them (the rest are left out, and said so)
-  if (drag.many && p) return isXpl(p) || (isOwnPlaylist(p) && drag.many.some((x) => srcOf(x) === "soundcloud"));
-  return !!p && !!t && (isXpl(p) || (isOwnPlaylist(p) && srcOf(t) === "soundcloud"));
+  // (any playlist but your local albums: one that can't take a song as it is becomes a playlist here)
+  if (drag.many && p) return isXpl(p) || p.source !== "local";
+  return !!p && !!t && (isXpl(p) || p.source !== "local");
 }
 
 function dndInit() {
