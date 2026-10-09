@@ -67,13 +67,24 @@ pub fn ask_page(ask: Value) -> Value {
     answer.unwrap_or_else(|_| serde_json::json!({ "ok": false, "message": "The music app didn't answer in time." }))
 }
 
+/// Whether the bot says this viewer is a moderator (or the streamer): a flag (True, 1, yes), or a list
+/// of their roles (Mix It Up's $userroles: "User, Follower, Moderator")
+pub fn is_moderator(said: &str) -> bool {
+    said.to_lowercase()
+        .split(|c: char| c == ',' || c == ';' || c == '|' || c.is_whitespace())
+        .any(|w| matches!(w, "true" | "1" | "yes" | "y" | "mod" | "moderator" | "broadcaster" | "streamer" | "owner"))
+}
+
 pub fn handle_req(mut stream: TcpStream) {
     let _ = stream.set_nonblocking(false);
     let _ = stream.set_read_timeout(Some(Duration::from_secs(2)));
     let mut buf = [0u8; 4096];
     let n = stream.read(&mut buf).unwrap_or(0);
     let req = String::from_utf8_lossy(&buf[..n]).to_string();
-    let url = req.split_whitespace().nth(1).unwrap_or("/").to_string();
+    // the address: everything between the method and " HTTP/" (a bot that leaves spaces in it unencoded,
+    // as in a list of roles, still gets all of it)
+    let line = req.lines().next().unwrap_or("");
+    let url = line.split_once(' ').map(|(_, rest)| rest.rfind(" HTTP/").map_or(rest, |at| &rest[..at])).unwrap_or("/").trim().to_string();
     let route = url.split('?').next().unwrap_or("/").to_string();
     let as_json = req_param(&url, "format").as_deref() == Some("json");
 
@@ -117,9 +128,7 @@ pub fn handle_req(mut stream: TcpStream) {
                 ("403 Forbidden", serde_json::json!({ "ok": false, "message": "Wrong or missing key." }))
             } else {
                 let user = req_param(&url, "user").unwrap_or_default();
-                // a moderator: however the bot says so (True, 1, yes, mod, broadcaster...)
-                let m = req_param(&url, "mod").unwrap_or_default().trim().to_lowercase();
-                let is_mod = matches!(m.as_str(), "true" | "1" | "yes" | "y" | "mod" | "moderator" | "broadcaster" | "streamer" | "owner");
+                let is_mod = is_moderator(&req_param(&url, "mod").unwrap_or_default());
                 ("200 OK", ask_page(serde_json::json!({ "action": "wrongsong", "q": "", "user": user, "mod": is_mod })))
             }
         }
@@ -188,5 +197,22 @@ pub fn request_result(id: u64, result: Value) {
         if let Some(tx) = m.get(&id) {
             let _ = tx.send(result);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn moderators_however_the_bot_says_so() {
+        assert!(is_moderator("True") && is_moderator("1"));
+        assert!(is_moderator("User, Follower, Moderator, TwitchChannelEditor"));
+        assert!(is_moderator("User, TwitchAffiliate, Subscriber, Streamer"));
+        // Kick, through Mix It Up
+        assert!(is_moderator("User, Moderator") && is_moderator("User, Streamer"));
+        assert!(!is_moderator("User, Follower, Subscriber") && !is_moderator("False") && !is_moderator(""));
+        // spaces left unencoded in the address: the whole of it is still read
+        assert_eq!(req_param("/wrongsong?key=k&user=a&mod=User, Follower, Moderator", "mod").as_deref(), Some("User, Follower, Moderator"));
     }
 }

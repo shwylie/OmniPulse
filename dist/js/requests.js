@@ -344,7 +344,7 @@ function reqRenderBot() {
   const key = prefs.reqKey || "";
   const vars = {
     streamerbot: { user: "%user%", q: "%rawInputUrlEncoded%", mod: "%isModerator%" },
-    mixitup: { user: "$username", q: "$allargs", mod: "MOD" },
+    mixitup: { user: "$username", q: "$allargs", mod: "$userroles" },
     other: { user: "USERNAME", q: "SONG", mod: "MOD" },
   }[bot];
   const reqAddr = base + "/request?key=" + key + "&user=" + vars.user + "&q=" + vars.q;
@@ -373,7 +373,7 @@ function reqRenderBot() {
       li("Add a Web Request action, paste the address above, and set the response to plain text."),
       li("Add a Chat action that sends ", code("$webrequestresult"), "."),
       li("For ", code("!song"), ": the same again with the now playing address."),
-      li("For ", code("!wrongsong"), ": the same again with the wrong song address, with ", code("MOD"), " replaced by Mix It Up's special identifier that says whether the user is a moderator (it needs to come out as True for a mod). A viewer takes back their last request; a moderator takes back the last one anyone made."),
+      li("For ", code("!wrongsong"), ": the same again with the wrong song address (", code("$userroles"), " tells it who's a moderator). A viewer takes back their last request; a moderator, or you, takes back the last one anyone made."),
     );
     help.append(ol, el("p", "note", "If $webrequestresult doesn't post anything in your version, check Mix It Up's list of special identifiers for the web request result."));
   } else {
@@ -389,7 +389,7 @@ function reqRenderBot() {
            " to get JSON instead: ok, message, title, artist, url and position."),
         li("Call ", code(base + "/now"), " for the current song (no key needed). It also supports ", code("&format=json"), "."),
         li("Call ", code(base + "/wrongsong"), " with ", code("key"), ", ", code("user"), " and ", code("mod"),
-           " (true for a moderator) to take back that viewer's last request; a moderator's takes back the last one anyone made."),
+           " (true for a moderator, or a list of their roles with Moderator or Streamer in it) to take back that viewer's last request; a moderator's takes back the last one anyone made."),
       ); return l; })(),
       botRemoteBlock("requests", port, "/request?key=" + key + "&user=USERNAME&q=SONG"),
     );
