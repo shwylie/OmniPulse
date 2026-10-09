@@ -2,7 +2,7 @@
 name = "omnipulse-pcmout"
 version = "0.1.0"
 edition = "2021"
-description = "Plays PCM sent in pieces on a playback device (OmniPulse's own sound, and Offset OmniPulse)"
+description = "Plays PCM sent in pieces on a playback device (OmniPulse's own sound, and OmniPulse Offset)"
 
 [dependencies]
 cpal = "0.15"

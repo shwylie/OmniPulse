@@ -722,7 +722,7 @@
       <div class="row">
         <div>
           <div class="lbl">Avoid Recent Plays</div>
-          <div class="note">Everything the app plays for you skips what you've heard lately. Searches, the track you pick, and song requests still play. Shuffling your Library or a playlist spaces those out instead, whether this is on or not: the more of it you've heard lately, the more often one comes up. With repeat on, nothing is held back.</div>
+          <div class="note">Skips songs you've heard lately in what the app picks for you. What you choose yourself still plays.</div>
         </div>
         <label class="switch"><input type="checkbox" id="avoidRecentOn"><span></span></label>
       </div>
@@ -862,20 +862,13 @@
       <div class="row">
         <div>
           <div class="lbl">OmniPulse Offset</div>
-          <div class="note">Your music again as its own app, a little earlier or later, to line it up with a delayed mic or camera. Handy for karaoke on stream. While it's on, Discord &amp; OBS Capture is off, so a shared window isn't heard twice.</div>
+          <div class="note">Your music again as its own app, a little earlier or later, to line it up with a delayed mic or camera. Handy for karaoke on stream.</div>
         </div>
         <label class="switch"><input type="checkbox" id="out2On"><span></span></label>
       </div>
       <details class="sub" id="out2Body" open hidden>
         <summary>OmniPulse Offset Options</summary>
         <p class="note" id="out2Help"></p>
-        <div class="row">
-          <div>
-            <div class="lbl">Start Muted</div>
-            <div class="note">In the Windows Sound Mixer, until you've routed it.</div>
-          </div>
-          <label class="switch"><input type="checkbox" id="out2Muted"><span></span></label>
-        </div>
         <div class="row">
           <div>
             <div class="lbl">Offset</div>
@@ -886,6 +879,13 @@
         <div class="row">
           <div class="lbl">Volume</div>
           <div class="levSlider"><input id="out2Vol" type="range" min="0" max="100" step="1" aria-label="OmniPulse Offset volume"><span id="out2VolVal">100%</span></div>
+        </div>
+        <div class="row">
+          <div>
+            <div class="lbl">Not Being Heard?</div>
+            <div class="note">Starts OmniPulse Offset again, fresh, without stopping your music.</div>
+          </div>
+          <button id="out2Restart" class="soft">Restart OmniPulse Offset</button>
         </div>
         <p class="note warn" id="out2Note"></p>
       </details>

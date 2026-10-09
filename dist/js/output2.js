@@ -1,11 +1,11 @@
-// OmniPulse Offset (Settings > Streaming; its program is "Offset OmniPulse"): the same sound played a second time, as its own app
-// called "Offset OmniPulse" (crates/core/src/omni_input.rs plays it on the default playback device),
+// OmniPulse Offset (Settings > Streaming): the same sound played a second time, as its own app
+// called "OmniPulse Offset" (crates/core/src/omni_input.rs plays it on the default playback device),
 // with its own volume and an offset to line the two up, like OBS's sync offset. Above 0 it's later;
 // below 0 the main output is held back instead. In Elgato Wave Link, Windows' mixer or the like it
 // shows apart from the app's main sound, so it can go to a stream mix only. No driver is involved.
 //
 //   ... limiter -> master (volume) -> main delay -> your output device
-//          \-> input delay -> input volume -> a tap (js/cast-worklet.js) -> Offset OmniPulse
+//          \-> input delay -> input volume -> a tap (js/cast-worklet.js) -> OmniPulse Offset
 
 const OUT2_MAX_MS = 5000;
 const out2 = { delay: null, gain: null, tap: null, sink: null, running: false, mainDelay: null, mainGain: null };
@@ -89,10 +89,8 @@ function out2MainMute(muted) {
   if (out2.mainGain) out2.mainGain.gain.setTargetAtTime(muted ? 0 : 1, norm.ctx.currentTime, 0.05);
 }
 
-const out2StartMuted = () => prefs.out2Muted !== false;
-
-const OUT2_ROUTE = "Please route OmniPulse appropriately first to prevent playback echo.\n\nTurn on OmniPulse Offset?";
-const OUT2_ROUTE_MUTED = "OmniPulse Offset starts muted in the Windows Sound Mixer (it's called Offset OmniPulse there). Route it (in Wave Link: the Stream mix only), then unmute it there.\n\nTurn it on?";
+// Turned on: the music waits while you route it (both playing at once is heard as an echo)
+const OUT2_ROUTE = "OmniPulse Offset is on. Route it first (in Wave Link: the Stream mix only), so it isn't heard twice, then carry on.";
 
 function out2Teardown() {
   if (out2.tap) { out2.tap.port.onmessage = null; try { out2.tap.disconnect(); } catch (e) {} }
@@ -139,11 +137,11 @@ async function out2Apply() {
     out2.delay.delayTime.setValueAtTime(offset > 0 ? offset / 1000 : 0, now);
     out2.gain.gain.setTargetAtTime(prefs.out2Volume ?? 1, now, 0.02);
     if (!out2.running) {
-      const device = await invoke("omni_input_start", { muted: out2StartMuted() });
+      const device = await invoke("omni_input_start", { muted: false });
       out2.running = true;
       if (out2.gate) out2.gate(true);
       $("out2Note").textContent = "";
-      $("out2Help").textContent = "Playing on " + device + (out2StartMuted() ? ", muted in the Sound Mixer" : "") + ".";
+      $("out2Help").textContent = "Playing on " + device + ".";
     }
     if (ctx.state === "suspended") ctx.resume().catch(() => {});
   } catch (e) {
@@ -157,13 +155,21 @@ function out2Init() {
   if (!prefs.out2Input) { prefs.out2On = false; prefs.out2Input = 1; savePrefs(); }
   $("out2Help").textContent = "";
   $("out2On").addEventListener("change", () => {
-    if ($("out2On").checked && !confirm(out2StartMuted() ? OUT2_ROUTE_MUTED : OUT2_ROUTE)) { $("out2On").checked = false; return; }
     prefs.out2On = $("out2On").checked;
     savePrefs();
     out2Apply();
+    if (prefs.out2On) {
+      const was = nowPlaying();
+      if (was) toggle();
+      say(OUT2_ROUTE, { stay: true, force: true, actions: [[was ? "Resume" : "OK", () => { say("", { force: true }); if (was && !nowPlaying()) toggle(); }]] });
+    }
   });
-  $("out2Muted").checked = out2StartMuted();
-  $("out2Muted").addEventListener("change", () => { prefs.out2Muted = $("out2Muted").checked; savePrefs(); });
+  // everything about it again, fresh: its program, and the sound's way to it
+  $("out2Restart").addEventListener("click", async () => {
+    out2Teardown();
+    await out2Apply();
+    if (!$("out2Note").textContent) say("OmniPulse Offset started again.", { force: true });
+  });
   $("out2Offset").addEventListener("change", () => {
     const v = Math.round(Number($("out2Offset").value));
     prefs.out2Offset = Number.isFinite(v) ? Math.max(-OUT2_MAX_MS, Math.min(OUT2_MAX_MS, v)) : 0;

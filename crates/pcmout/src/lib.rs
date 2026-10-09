@@ -3,7 +3,7 @@
 //   - OmniPulse's own sound, from OmniPulse.exe itself, so programs that capture an app's sound by its
 //     window (Discord's screen share, OBS's Application Audio Capture) hear it; the WebView's own
 //     sound comes from another process they don't count as the app
-//   - Offset OmniPulse, from its own program (crates/input), so Wave Link lists it apart
+//   - OmniPulse Offset, from its own program (crates/input), so Wave Link lists it apart
 //
 // Its audio session gets a name, can start muted in the Sound Mixer, and with no device chosen it
 // follows wherever Windows routes the program (Wave Link, Windows' per-app sound settings).
@@ -254,9 +254,9 @@ fn name_session(name: &str, muted: bool) {
             let dev = en.GetDefaultAudioEndpoint(eRender, eConsole)?;
             let mgr: IAudioSessionManager = dev.Activate(CLSCTX_ALL, None)?;
             mgr.GetAudioSessionControl(None, 0)?.SetDisplayName(&HSTRING::from(name), std::ptr::null())?;
-            if muted {
-                mgr.GetSimpleAudioVolume(None, 0)?.SetMute(true, std::ptr::null())?;
-            }
+            // (set either way: Windows remembers a program's mute from one run to the next, so one left
+            // muted would otherwise stay silent)
+            mgr.GetSimpleAudioVolume(None, 0)?.SetMute(muted, std::ptr::null())?;
             Ok(())
         })();
         if let Err(e) = r {

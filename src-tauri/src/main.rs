@@ -325,7 +325,7 @@ fn main_out_volume(volume: f32) { omnipulse_core::main_out::set_volume(volume) }
 #[tauri::command]
 fn main_out_stop() { omnipulse_core::main_out::stop() }
 
-// ---------- Offset OmniPulse ----------
+// ---------- OmniPulse Offset ----------
 #[tauri::command]
 async fn omni_input_start(muted: bool) -> Result<String, String> {
     tokio::task::spawn_blocking(move || omnipulse_core::omni_input::start(muted)).await.map_err(|e| e.to_string())?
