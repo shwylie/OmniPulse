@@ -206,7 +206,7 @@ select {
   .app { grid-template-columns: 68px minmax(0, 1fr); }
   .brand, .nav span { display: none; }
   .nav { justify-content: center; }
-  #vol { display: none; }
+  .volWrap input[type="range"] { width: 64px; }
 }
 
 /* ===== v3: playlists, queue, now playing ===== */
@@ -736,16 +736,13 @@ details.sub.inner { margin-top: 10px; }
 /* range inputs won't shrink below ~130px by themselves, which pushed the seek bar under the volume */
 .transport .seekRow input { min-width: 0; }
 .transport .seekRow span { flex: none; }
-/* while the volume slider is out, the seek bar gives up the room */
-.transport:has(.volWrap:hover, .volWrap:focus-within) .seekRow { min-width: 100px; }
 .transport .seekRow span { min-width: 34px; font-variant-numeric: tabular-nums; }
 .transport .seekRow span:first-child { text-align: right; }
 
-/* volume: the speaker, with the slider sliding out while you point at it */
+/* volume: the speaker and its slider, always there (Settings > App > Volume Slider), so nothing moves */
 .volWrap { display: flex; align-items: center; flex: none; }
 .volWrap .volSliders { display: flex; flex-direction: column; justify-content: center; gap: 2px; }
-.volWrap input[type="range"] { width: 0; opacity: 0; margin: 0; transition: width 0.18s ease, opacity 0.18s ease, margin 0.18s ease; }
-.volWrap:hover input[type="range"], .volWrap:focus-within input[type="range"] { width: 84px; opacity: 1; margin-left: 4px; }
+.volWrap input[type="range"] { width: 84px; margin: 0 0 0 4px; }
 /* casting: the device's volume, in the slider's place */
 .castVolRow { display: flex; align-items: center; }
 .castVolRow[hidden] { display: none; }

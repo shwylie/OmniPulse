@@ -979,7 +979,7 @@ export component AppWindow inherits Window {
                         Slider { min-width: 80px; horizontal-stretch: 1; minimum: 0; maximum: 1000; value: root.pos-frac * 1000; released(v) => { root.seek(v / 1000); } }
                         Text { text: root.dur-text; color: Theme.muted; font-size: 12px; width: 34px; vertical-alignment: center; }
                         Glyph { d: Icons.volume; width: 20px; height: 20px; y: (parent.height - self.height) / 2; fill: Theme.muted; }
-                        if !root.narrow: Slider { width: 80px; minimum: 0; maximum: 100; value <=> root.volume; changed(v) => { root.volume-changed(v / 100); } }
+                        Slider { width: root.narrow ? 64px : 80px; minimum: 0; maximum: 100; value <=> root.volume; changed(v) => { root.volume-changed(v / 100); } }
                     }
                     // now playing: opens Now Playing
                     Rectangle {
