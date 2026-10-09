@@ -606,11 +606,17 @@ export component AppWindow inherits Window {
             }
         }
 
+        // the pages, reaching down to the bar's body (its tab is drawn over their bottom)
+        Rectangle {
+            vertical-stretch: 1;
+            property <length> body-h: root.status != "" ? 99px : 68px;
+            animate body-h { duration: 220ms; easing: ease-out; }
         HorizontalLayout {
+            y: 0;
+            height: parent.height - parent.body-h - 16px;
             padding-left: 8px;
             padding-right: 8px;
             spacing: 8px;
-            vertical-stretch: 1;
             // ---------- sidebar ----------
             Rectangle {
                 width: root.narrow ? 68px : 230px;
@@ -1148,19 +1154,77 @@ export component AppWindow inherits Window {
 
         // ---------- player bar ----------
         Rectangle {
-            // (the web app's compact bar: track info, then the controls, then the progress line; the
-            // status strip adds its own height on top)
-            height: root.status != "" ? 171px : 140px;
-            animate height { duration: 220ms; easing: ease-out; }
-            Rectangle {
+            // (as the web app's: the track info on a tab only as wide as it needs, on top of the
+            // body with the controls and the progress; the status strip, under the tab, adds its height)
+            y: parent.height - self.height;
+            height: parent.body-h + 80px;
+            VerticalLayout {
                 x: 8px;
                 y: 8px;
                 width: parent.width - 16px;
                 height: parent.height - 16px;
-                background: Theme.panel.mix(Theme.accent, 0.86);
-                border-radius: Theme.radius;
-                clip: true;
-                VerticalLayout {
+                // the tab: what's playing (opens Now Playing), as wide as it needs and sliding there; drawn
+                // over the bottom of the pages, inside a gap of the window's colour, with an inward curve
+                // where its side meets the body
+                Rectangle {
+                    height: 64px;
+                    tab := Rectangle {
+                        x: 0;
+                        width: min(info.preferred-width + 38px, root.width - 40px);
+                        animate width { duration: 320ms; easing: cubic-bezier(0.2, 0.8, 0.2, 1); }
+                        height: parent.height;
+                        // the gap around it
+                        Rectangle {
+                            x: -8px;
+                            y: -8px;
+                            width: parent.width + 16px;
+                            height: parent.height + 8px;
+                            background: Theme.bg;
+                            border-top-left-radius: Theme.radius + 8px;
+                            border-top-right-radius: Theme.radius + 8px;
+                        }
+                        Rectangle {
+                            background: Theme.panel.mix(Theme.accent, 0.86);
+                            border-top-left-radius: Theme.radius;
+                            border-top-right-radius: Theme.radius;
+                            clip: true;
+                            info := HorizontalLayout {
+                                x: 14px;
+                                y: 10px;
+                                width: parent.width - 38px;
+                                height: 44px;
+                                spacing: 12px;
+                                Cover { art: root.now-art; initial: ""; width: 44px; height: 44px; border-radius: 6px; }
+                                if root.now-plat != "": PlatIcon { plat: root.now-plat; width: 20px; height: 20px; y: (parent.height - self.height) / 2; fill: Theme.muted; }
+                                VerticalLayout {
+                                    alignment: center;
+                                    spacing: 2px;
+                                    Text { text: root.now-title; color: Theme.text; font-weight: 700; font-size: 15px; overflow: elide; }
+                                    Text { text: root.now-artist; color: Theme.muted; font-size: 13px; overflow: elide; }
+                                }
+                            }
+                            TouchArea { clicked => { root.nav(root.page == "now" ? "library" : "now"); } }
+                        }
+                    }
+                    // the curve: the body's colour, with the gap's quarter circle cut from it
+                    Rectangle {
+                        x: tab.width;
+                        y: parent.height - 8px;
+                        width: 8px;
+                        height: 8px;
+                        clip: true;
+                        background: Theme.panel.mix(Theme.accent, 0.86);
+                        Rectangle { x: 0px; y: -8px; width: 16px; height: 16px; border-radius: 8px; background: Theme.bg; }
+                    }
+                }
+                // the body: the status, the controls and the progress
+                Rectangle {
+                    vertical-stretch: 1;
+                    background: Theme.panel.mix(Theme.accent, 0.86);
+                    border-top-right-radius: Theme.radius;
+                    border-bottom-left-radius: Theme.radius;
+                    border-bottom-right-radius: Theme.radius;
+                    VerticalLayout {
                 if root.status != "": VerticalLayout {
                     padding-left: 18px;
                     padding-right: 18px;
@@ -1177,27 +1241,9 @@ export component AppWindow inherits Window {
                 VerticalLayout {
                     padding-left: 14px;
                     padding-right: 14px;
-                    padding-top: 10px;
+                    padding-top: 6px;
                     padding-bottom: 4px;
-                    // what's playing: opens Now Playing
-                    Rectangle {
-                        height: 44px;
-                        HorizontalLayout {
-                            spacing: 12px;
-                            alignment: start;
-                            Cover { art: root.now-art; initial: ""; width: 44px; height: 44px; border-radius: 6px; }
-                            if root.now-plat != "": PlatIcon { plat: root.now-plat; width: 20px; height: 20px; y: (parent.height - self.height) / 2; fill: Theme.muted; }
-                            VerticalLayout {
-                                alignment: center;
-                                spacing: 2px;
-                                Text { text: root.now-title; color: Theme.text; font-weight: 700; font-size: 15px; overflow: elide; }
-                                Text { text: root.now-artist; color: Theme.muted; font-size: 13px; overflow: elide; }
-                            }
-                        }
-                        TouchArea { clicked => { root.nav(root.page == "now" ? "library" : "now"); } }
-                    }
                     // the controls and the volume on the left, the buttons on the right
-                    Rectangle { height: 8px; }
                     HorizontalLayout {
                         height: 42px;
                         spacing: 4px;
@@ -1265,8 +1311,10 @@ export component AppWindow inherits Window {
                     // the progress: click or drag along it
                     Progress { value: root.pos-frac; length-secs: root.dur-secs; released(v) => { root.seek(v); } }
                 }
+                    }
                 }
             }
+        }
         }
     }
 }
