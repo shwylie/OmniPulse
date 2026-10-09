@@ -197,10 +197,63 @@ async function openArtist(seed) {
   if (onlyAlbums || tok !== loadToken) return;
   const merged = await artistAllTracks(a, true);
   if (tok !== loadToken || currentArtist !== a) return;
-  setLocalPool(applyListFilter(merged));
+  setLocalPool(groupVersions(applyListFilter(merged)));
   render();
   say(viewTracks.length ? "" : "No tracks by " + a.name + " found.");
   setTimeout(nearBottomCheck, 50);
+}
+
+// ---------- versions of the same song, together (artist pages) ----------
+// A song's versions (its radio edit, extended mix, remixes, a live one...) under one row: the original
+// shows, and the rest open beneath it (js/app.js: versionsPanel), with More versions to search for it.
+// "Song (Radio Edit)", "Song - Extended Mix" and "Song [VIP]" are all "song".
+// The title, without an "Artist - " in front (only when that part is the artist: "Song - Extended Mix" stays)
+function versionTitle(t) {
+  const title = String(t.title || "");
+  const m = title.match(/^(.+?)\s+[-–—]\s+(.+)$/);
+  if (!m) return title;
+  // (the track's own artist and uploader, not one guessed from this same title)
+  const who = new Set(matchWords(artistName(t) + " " + ((t.user && t.user.username) || "") + " " + ((currentArtist && currentArtist.name) || "")));
+  return matchWords(m[1]).every((w) => who.has(w)) ? m[2] : title;
+}
+// What a version adds (in brackets, or after " - "): only these words make a part of a title its version
+// ("Pt. II (Dusk)" is another song)
+const VERSION_WORDS_RX = /\b(remix|rmx|mix|edit|version|remaster(ed)?|live|vip|flip|bootleg|mash ?up|cover|acoustic|instrumental|extended|radio|rework|refix|dub|demo|sped ?up|slowed|nightcore|club|original|re-?edit|session)\b/i;
+// The title without its version parts: the song's own name
+function versionStrip(title) {
+  return String(title || "")
+    .replace(/\s*[(\[]([^)\]]*)[)\]]/g, (m, inner) => (VERSION_WORDS_RX.test(inner) || /^\s*(feat|ft|featuring|with)\b/i.test(inner) ? " " : m))
+    .replace(/\s+[-–—|]\s+(.*)$/, (m, rest) => (VERSION_WORDS_RX.test(rest) ? " " : m))
+    .replace(/\s+(feat|ft|featuring)\b.*$/i, " ");
+}
+function versionBase(t) {
+  return versionStrip(versionTitle(t)).toLowerCase().replace(/[^a-z0-9À-ɏ]+/g, " ").trim();
+}
+// Which goes on top: the song itself (or its original mix), then edits of it, then other versions
+function versionRank(t) {
+  const title = versionTitle(t).toLowerCase();
+  // what's added to the song's name (a featured artist isn't a version)
+  const bare = title.replace(/[(\[]\s*(feat|ft|featuring|with)\b[^)\]]*[)\]]/g, " ").replace(/\s+(feat|ft|featuring)\b.*$/, " ");
+  const extra = bare.replace(/[^a-z0-9À-ɏ]+/g, " ").trim().replace(versionBase(t), "").trim();
+  if (!extra || /\boriginal (mix|version)\b/.test(title) && !/\b(remix|rmx|bootleg|vip|flip|live)\b/.test(title)) return 0;
+  if (/\b(radio|single|album|extended|clean|explicit|remaster(ed)?|edit)\b/.test(extra) && !/\b(remix|rmx|bootleg|vip|flip|mash ?up|live|acoustic|cover|rework|refix|dub)\b/.test(extra)) return 1;
+  return 2;
+}
+function groupVersions(list) {
+  const groups = new Map();
+  const order = [];
+  list.forEach((t, k) => {
+    const base = versionBase(t);
+    const key = base.length >= 2 ? base : "\u0000" + k;   // (nothing to go by: on its own)
+    if (!groups.has(key)) { groups.set(key, []); order.push(key); }
+    groups.get(key).push(t);
+  });
+  return order.map((key) => {
+    const g = groups.get(key);
+    if (g.length < 2) return g[0];
+    const sorted = g.map((t, k) => [t, versionRank(t), k]).sort((a, b) => a[1] - b[1] || a[2] - b[2]).map((x) => x[0]);
+    return Object.assign({}, sorted[0], { _versions: sorted.slice(1) });
+  });
 }
 
 // Everything by an artist, from every platform, each song once

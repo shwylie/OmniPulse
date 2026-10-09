@@ -607,7 +607,66 @@ function renderAppend(from) {
   afterRender();
 }
 
+// ---------- versions of a song, beneath its row (artist pages: js/artists.js groupVersions) ----------
+const versionsOpen = new Set();   // the songs whose versions are open, by id
+let versionPool = [];             // the version rows' tracks (their rows say which by data-v)
+
+function versionsPanel(i) {
+  const t = viewTracks[i];
+  const li = el("li", "versionsPanel");
+  li.dataset.p = i;
+  const ul = el("ul", "versionsList");
+  const playing = curTrack();
+  t._versions.forEach((v) => {
+    const row = trackRow(v, i, playing);
+    delete row.dataset.i;
+    row.draggable = false;
+    row.dataset.v = versionPool.push(v) - 1;
+    row.dataset.p = i;
+    row.querySelector(".num .n").textContent = "";
+    ul.append(row);
+  });
+  const more = el("div", "versionsMore");
+  const b = el("button", "soft", "More versions");
+  b.title = "Search everywhere for this song";
+  b.addEventListener("click", () => openSearch(((guessNames(t).artist || artistName(t)) + " " + versionBaseTitle(t)).trim()));
+  more.append(b);
+  li.append(ul, more);
+  return li;
+}
+// The song's own name, for More versions' search ("Song", not "Song (Radio Edit)")
+const versionBaseTitle = (t) => versionStrip(versionTitle(t)).replace(/\s+/g, " ").trim();
+
+function versionsPaint() {
+  const ul = $("list");
+  ul.querySelectorAll(".versionsPanel").forEach((x) => x.remove());
+  versionPool = [];
+  if (view !== "artist") return;
+  ul.querySelectorAll("li[data-i]").forEach((li) => {
+    const t = viewTracks[Number(li.dataset.i)];
+    if (t && t._versions && versionsOpen.has(String(t.id))) li.after(versionsPanel(Number(li.dataset.i)));
+  });
+}
+
+function versionsToggle(i) {
+  const t = viewTracks[i];
+  if (!t || !t._versions) return;
+  const id = String(t.id);
+  if (versionsOpen.has(id)) versionsOpen.delete(id); else versionsOpen.add(id);
+  const row = $("list").querySelector('li[data-i="' + i + '"]');
+  if (row) { const b = row.querySelector(".versionsBtn"); if (b) b.classList.toggle("open", versionsOpen.has(id)); }
+  versionsPaint();
+}
+
+// A version, played in the page's list in the song's place
+function playVersion(p, v) {
+  const list = viewTracks.slice();
+  list[p] = v;
+  startList(list, p, false);
+}
+
 function afterRender() {
+  versionsPaint();
   $("tableHead").hidden = viewTracks.length === 0;
   paintTrackHead();
   $("more").hidden = !nextHref;
@@ -666,6 +725,13 @@ function trackRow(t, i, playing) {
     artistLine.insertBefore(tag, whoEl);
   }
   meta.append(el("div", "title", t.title || "Untitled"), artistLine);
+  // other versions of it (artist pages): opened beneath the row
+  if (t._versions && t._versions.length) {
+    const vb = el("button", "versionsBtn" + (versionsOpen.has(String(t.id)) ? " open" : ""), t._versions.length + (t._versions.length === 1 ? " more version" : " more versions"));
+    vb.dataset.act = "versions";
+    vb.title = "Its other versions: remixes, edits and the like";
+    artistLine.append(vb);
+  }
   const cell = el("div", "trackCell");
   cell.append(img, platformButton(t), meta);
 
@@ -723,28 +789,32 @@ function markPlaying() {
 
 $("list").addEventListener("click", (e) => {
   const li = e.target.closest("li");
-  if (!li) return;
-  const i = Number(li.dataset.i);
+  if (!li || li.classList.contains("versionsPanel")) return;
+  // (a version's row, beneath its song's: its own track)
+  const isVersion = li.dataset.v !== undefined;
+  const i = Number(isVersion ? li.dataset.p : li.dataset.i);
+  const t = isVersion ? versionPool[Number(li.dataset.v)] : viewTracks[i];
   const btn = e.target.closest("button[data-act]");
   if (btn) {
-    if (btn.dataset.act === "like") toggleLike(viewTracks[i]);
-    else if (btn.dataset.act === "fav") toggleFav(viewTracks[i]);
-    else if (btn.dataset.act === "next") playNext(viewTracks[i]);
-    else if (btn.dataset.act === "plist") openPlaylistMenu(viewTracks[i], btn);
-    else if (btn.dataset.act === "unlist") removeFromPlaylist(viewTracks[i]);
-    else if (btn.dataset.act === "open") openOnSoundCloud(viewTracks[i]);
-    else addToQueue(viewTracks[i]);
+    if (btn.dataset.act === "versions") versionsToggle(i);
+    else if (btn.dataset.act === "like") toggleLike(t);
+    else if (btn.dataset.act === "fav") toggleFav(t);
+    else if (btn.dataset.act === "next") playNext(t);
+    else if (btn.dataset.act === "plist") openPlaylistMenu(t, btn);
+    else if (btn.dataset.act === "unlist") removeFromPlaylist(t);
+    else if (btn.dataset.act === "open") openOnSoundCloud(t);
+    else addToQueue(t);
     return;
   }
   if (e.target.closest(".platBig")) {
-    openArtistFor(viewTracks[i]);   // the uploader
+    openArtistFor(t);   // the uploader
     return;
   }
   if (e.target.closest(".artistLink")) {
-    openArtistClicked(viewTracks[i], e.target);
+    openArtistClicked(t, e.target);
     return;
   }
-  playFromPage(i);
+  if (isVersion) playVersion(i, t); else playFromPage(i);
 });
 
 // ---------- loading ----------

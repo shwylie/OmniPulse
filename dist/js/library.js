@@ -645,7 +645,7 @@ function libraryInit() {
     const li = e.target.closest("li");
     if (!li) return;
     e.preventDefault();
-    const t = viewTracks[Number(li.dataset.i)];
+    const t = li.dataset.v !== undefined ? versionPool[Number(li.dataset.v)] : viewTracks[Number(li.dataset.i)];
     if (t) openTrackMenu(t, e.clientX, e.clientY);
   });
   document.addEventListener("contextmenu", (e) => {

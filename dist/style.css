@@ -1686,3 +1686,14 @@ body.streamSafe #navSets, body.streamSafe #navArtists, body.streamSafe #plSectio
 .jamAsk .askYes { background: var(--on-accent); color: var(--accent); }
 .jamAsk .askNo { background: color-mix(in srgb, var(--on-accent) 18%, transparent); color: var(--on-accent); }
 .jamAsk button:hover { filter: brightness(1.08); }
+
+/* Artist pages: a song's other versions, opened beneath its row */
+.versionsBtn { margin-left: 8px; padding: 1px 9px; border-radius: 999px; border: 1px solid var(--line); background: transparent;
+  color: var(--muted); font-size: 11px; font-weight: 700; cursor: pointer; white-space: nowrap; }
+.versionsBtn::after { content: " \25BE"; }
+.versionsBtn.open::after { content: " \25B4"; }
+.versionsBtn:hover, .versionsBtn.open { color: var(--text); border-color: color-mix(in srgb, var(--accent) 55%, var(--line)); }
+#list li.versionsPanel { display: block; padding: 0 0 8px 34px; background: none; cursor: default; }
+#list li.versionsPanel:hover { background: none; }
+.versionsList { list-style: none; margin: 0; padding: 0 0 0 12px; border-left: 2px solid color-mix(in srgb, var(--accent) 40%, transparent); }
+.versionsMore { padding: 8px 0 2px 12px; }
