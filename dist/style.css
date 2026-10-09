@@ -1187,30 +1187,34 @@ select.wide { max-width: 260px; }
 #qAuto .qRow:hover { opacity: 1; }
 .autoRow { display: none; }
 
-/* ===== v45: narrow windows ===== */
-/* Player bar: track info on top, controls on the left with the buttons on the right, and a thin
-   progress bar (not draggable) along the bottom in place of the seek bar */
-.miniProg { display: none; }
-@media (max-width: 1050px) {
-  .player {
-    grid-template-columns: minmax(0, 1fr) auto;
-    grid-template-areas: "status status" "now now" "transport right" "prog prog";
-    row-gap: 0; column-gap: 12px; padding: 10px 14px 10px;
-  }
-  .statusBar { grid-area: status; }
-  .player .now { grid-area: now; }
-  .transport { grid-area: transport; margin-top: 8px; min-width: 0; }
-  .player .right { grid-area: right; margin-top: 8px; }
-  .transport .seekRow { display: none; }
-  .miniProg {
-    display: block; grid-area: prog; height: 3px; margin-top: 10px; border-radius: 3px; overflow: hidden;
-    background: color-mix(in srgb, var(--text) 16%, transparent); pointer-events: none;
-  }
-  #miniBar { display: block; height: 100%; width: 0; background: var(--accent); transition: width 0.25s linear; }
-  .player #nowArt { width: 44px; height: 44px; }
-  .player .main { width: 40px; height: 40px; margin-right: 4px; }
-  .player .right .ghost { width: 34px; height: 34px; }
+/* ===== v45: the player bar ===== */
+/* Track info on top, the controls on the left with the buttons on the right, and the progress along
+   the bottom: a thin line you can click or drag to move through the track (it grows while pointed at) */
+.player {
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas: "status status" "now now" "transport right" "prog prog";
+  row-gap: 0; column-gap: 12px; padding: 10px 14px 6px;
 }
+.statusBar { grid-area: status; }
+.player .now { grid-area: now; }
+.transport { grid-area: transport; margin-top: 8px; min-width: 0; }
+.player .right { grid-area: right; margin-top: 8px; }
+.transport .seekRow { display: none; }
+.miniProg {
+  display: block; grid-area: prog; position: relative; margin-top: 4px; padding: 6px 0;
+  cursor: pointer; touch-action: none;
+}
+.miniTrack { display: block; height: 3px; border-radius: 3px; overflow: hidden; background: color-mix(in srgb, var(--text) 16%, transparent); transition: height 0.12s ease; }
+#miniBar { display: block; height: 100%; width: 0; background: var(--accent); transition: width 0.25s linear; }
+.miniProg:hover .miniTrack, .miniProg.drag .miniTrack { height: 6px; }
+.miniProg.drag #miniBar { transition: none; }
+.miniKnob { position: absolute; top: 50%; width: 12px; height: 12px; margin: -6px 0 0 -6px; border-radius: 50%; background: var(--accent); opacity: 0; transition: opacity 0.12s ease; pointer-events: none; }
+.miniProg:hover .miniKnob, .miniProg.drag .miniKnob { opacity: 1; }
+.miniTime { position: absolute; bottom: 100%; transform: translateX(-50%); padding: 2px 6px; border-radius: 6px; font-size: 11px; background: var(--elevated); color: var(--text); white-space: nowrap; opacity: 0; pointer-events: none; font-variant-numeric: tabular-nums; }
+.miniProg:hover .miniTime, .miniProg.drag .miniTime { opacity: 1; }
+.player #nowArt { width: 44px; height: 44px; }
+.player .main { width: 40px; height: 40px; margin-right: 4px; }
+.player .right .ghost { width: 34px; height: 34px; }
 @media (max-width: 720px) {
   #lyricsBtn, #outputBtn, #plAddBtn, .barSep { display: none; }
 }

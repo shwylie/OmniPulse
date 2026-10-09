@@ -127,8 +127,59 @@ const ICON_CLOSE = "M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.4
 function paintProgress(frac) {
   const f = Math.max(0, Math.min(1, frac || 0));
   $("seek").value = String(Math.round(f * 1000));
-  $("miniBar").style.width = (f * 100).toFixed(2) + "%";
+  if (miniDrag === null) {
+    $("miniBar").style.width = (f * 100).toFixed(2) + "%";
+    $("miniKnob").style.left = (f * 100).toFixed(2) + "%";
+  }
 }
+
+// The progress line: click or drag along it to move through the track (the seek bar, which it stands
+// in for, does the moving). While dragging it follows the pointer, and it moves there when let go.
+let miniDrag = null;
+function miniAt(e) {
+  const r = $("miniProg").getBoundingClientRect();
+  return Math.max(0, Math.min(1, (e.clientX - r.left) / Math.max(1, r.width)));
+}
+function miniShow(f) {
+  $("miniBar").style.width = (f * 100).toFixed(2) + "%";
+  $("miniKnob").style.left = (f * 100).toFixed(2) + "%";
+}
+function miniTip(f) {
+  const t = curTrack(), tip = $("miniTime");
+  tip.style.left = (f * 100).toFixed(2) + "%";
+  tip.textContent = t ? fmt(f * viewDur(t, curDurMs() || t.duration || 0)) : "";
+}
+function miniSeek(f) {
+  $("seek").value = String(Math.round(f * 1000));
+  $("seek").dispatchEvent(new Event("input"));
+  $("seek").dispatchEvent(new Event("change"));
+}
+$("miniProg").addEventListener("pointerdown", (e) => {
+  if (e.button !== 0 || !curTrack()) return;
+  $("miniProg").setPointerCapture(e.pointerId);
+  $("miniProg").classList.add("drag");
+  miniDrag = miniAt(e);
+  miniShow(miniDrag);
+  miniTip(miniDrag);
+});
+$("miniProg").addEventListener("pointermove", (e) => {
+  const f = miniAt(e);
+  miniTip(f);
+  if (miniDrag !== null) { miniDrag = f; miniShow(f); }
+});
+$("miniProg").addEventListener("pointerup", () => {
+  if (miniDrag === null) return;
+  const f = miniDrag;
+  miniDrag = null;
+  $("miniProg").classList.remove("drag");
+  miniSeek(f);
+});
+$("miniProg").addEventListener("keydown", (e) => {
+  const d = curDurMs();
+  if (!d || (e.key !== "ArrowLeft" && e.key !== "ArrowRight")) return;
+  e.preventDefault();
+  miniSeek(Math.max(0, Math.min(1, Number($("seek").value) / 1000 + (e.key === "ArrowRight" ? 5000 : -5000) / d)));
+});
 
 function fmt(ms) {
   const s = isFinite(ms) ? Math.max(0, Math.floor(ms / 1000)) : 0;
