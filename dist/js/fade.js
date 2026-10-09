@@ -9,7 +9,7 @@
 
 const FADE_STANDIN_MS = 2000;
 const FADE_SKIP_MS = 300;
-const fadeState = { out: false, pendingIn: false, forceIn: 0, movedOn: null };
+const fadeState = { out: false, pendingIn: false, forceIn: 0, movedOn: null, waitPos: null, quietSince: 0 };
 
 // How long a track fades for: a stand-in's own, the setting's, or not at all
 function fadeMsFor(t) {
@@ -37,6 +37,7 @@ function fadeTo(value, ms) {
 // stand-in), and the new one fades in once its sound starts
 function fadeTrackChange(prev, next) {
   fadeState.pendingIn = true;
+  fadeState.waitPos = null;
   fadeState.out = false;
   fadeState.movedOn = null;
   // after a stand-in, the Jam's next track fades in too
@@ -59,7 +60,20 @@ function fadeHeard() {
 // Near the end: down to silence over the fade's length (and back up if you seek away from the end)
 function fadeTick() {
   const t = curTrack();
-  if (!t || !norm.fade || !nowPlaying() || fadeState.pendingIn) return;
+  if (!t || !norm.fade || !nowPlaying()) return;
+  // Never stuck silent: skipping quickly can miss the moment a track's sound starts, which leaves
+  // its fade-in waiting (and the volume down) while it plays. Playing on for a moment counts as
+  // started; and turned down while not fading out, it comes back up.
+  if (fadeState.pendingIn) {
+    const p = curPosMs();
+    if (fadeState.waitPos === null) fadeState.waitPos = p;
+    else if (p - fadeState.waitPos > 700) fadeHeard();
+    return;
+  }
+  if (!fadeState.out && norm.fade.gain.value < 0.05) {
+    if (!fadeState.quietSince) fadeState.quietSince = performance.now();
+    else if (performance.now() - fadeState.quietSince > 1500) { fadeState.quietSince = 0; fadeTo(1, 300); }
+  } else fadeState.quietSince = 0;
   const ms = fadeMsFor(t);
   if (!ms) { if (fadeState.out) { fadeState.out = false; fadeTo(1, 0); } return; }
   const end = fadeEndMs(t);
