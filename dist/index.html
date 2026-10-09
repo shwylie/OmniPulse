@@ -120,6 +120,11 @@
           <button id="artistsBatch" class="pill" hidden title="Follow the artists you follow on one platform on another too">Follow on other platforms</button>
           <button id="luckyBtn" class="pill lucky" hidden title="Play a random mix that mixes platforms">I&#39;m Feeling Lucky</button>
           <div class="viewOpts">
+            <div class="sortChips" id="libSort" role="group" aria-label="Sort the Library" hidden>
+              <button class="chip optChip" data-by="added" title="In the order you liked them">Added</button>
+              <button class="chip optChip" data-by="artist" title="By artist">Artist<span class="sortArrow"></span></button>
+              <button class="chip optChip" data-by="title" title="By title">Title<span class="sortArrow"></span></button>
+            </div>
             <label class="chip optChip chipSelect" id="langChip" title="Language of recommendations" hidden>
               <svg viewBox="0 0 24 24"><path d="M12 2a10 10 0 100 20 10 10 0 000-20zm6.93 6h-2.95a15.6 15.6 0 00-1.38-3.56A8.03 8.03 0 0118.93 8zM12 4.04c.83 1.2 1.48 2.53 1.91 3.96h-3.82c.43-1.43 1.08-2.76 1.91-3.96zM4.26 14a8.2 8.2 0 010-4h3.38a16.5 16.5 0 000 4H4.26zm.81 2h2.95c.32 1.25.78 2.45 1.38 3.56A7.99 7.99 0 015.07 16zm2.95-8H5.07a7.99 7.99 0 014.33-3.56A15.6 15.6 0 008.02 8zM12 19.96A14.1 14.1 0 0110.09 16h3.82A14.1 14.1 0 0112 19.96zM14.34 14H9.66a14.7 14.7 0 010-4h4.68a14.7 14.7 0 010 4zm.25 5.56c.6-1.11 1.06-2.31 1.38-3.56h2.95a8.03 8.03 0 01-4.33 3.56zM16.36 14a16.5 16.5 0 000-4h3.38a8.2 8.2 0 010 4h-3.38z"/></svg>
               <select id="recLangSel" aria-label="Language of recommendations" title="Language of recommendations"><option value="any">Any language</option><option value="en">English</option><option value="es">Spanish</option><option value="pt">Portuguese</option><option value="fr">French</option><option value="de">German</option></select>
@@ -166,7 +171,6 @@
       <h2>Queue</h2>
       <button id="qClearReq" class="soft" hidden title="Remove waiting chat requests">Clear requests</button>
       <button id="clearQueue" class="soft">Clear</button>
-      <button id="safeBtn" class="streamerBtn" aria-pressed="false"><svg viewBox="0 0 24 24"><path d="M12 9.6a2.4 2.4 0 1 0 0 4.8 2.4 2.4 0 0 0 0-4.8zM7.05 7.05a7 7 0 0 0 0 9.9l1.42-1.42a5 5 0 0 1 0-7.07zm9.9 0-1.42 1.41a5 5 0 0 1 0 7.07l1.42 1.42a7 7 0 0 0 0-9.9zM4.22 4.22a11 11 0 0 0 0 15.56l1.42-1.42a9 9 0 0 1 0-12.72zm15.56 0-1.42 1.42a9 9 0 0 1 0 12.72l1.42 1.42a11 11 0 0 0 0-15.56z"/></svg></button>
     </div>
     <div class="togetherBar" id="togetherBar" hidden><span id="togetherText"></span><button id="togetherLeave" class="soft">Leave</button></div>
     <h3>Now playing</h3>
@@ -846,7 +850,7 @@
       <div class="row">
         <div>
           <div class="lbl">Streamer Mode: Stream-Safe Music</div>
-          <div class="note" data-on="On: only music that's safe on stream shows and plays, chat requests included. Everything else is hidden from every list and skipped. Also the pulsing button at the top of the queue." data-off="Only music that's safe on stream shows and plays: under an open licence (Creative Commons, or no rights reserved), or by an artist or label cleared for streaming. Also the button at the top of the queue."></div>
+          <div class="note" data-on="On: only music that's safe on stream shows and plays, chat requests included. Everything else is hidden from every list and skipped. The title bar's button glows while it's on." data-off="Only music that's safe on stream shows and plays: under an open licence (Creative Commons, or no rights reserved), or by an artist or label cleared for streaming. Also a second click of the title bar's button."></div>
         </div>
         <label class="switch"><input type="checkbox" id="smSafe"><span></span></label>
       </div>

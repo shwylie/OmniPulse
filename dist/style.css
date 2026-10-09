@@ -1415,7 +1415,6 @@ body.streamer #pluginsSection { display: none !important; }
 
 /* Stream-Safe Music: what isn't openly licensed is hidden everywhere */
 body.streamSafe .notSafe { display: none !important; }
-.queueHead #safeBtn { margin-left: 2px; }
 
 /* Stream-Safe Music > What Counts as Safe: each artist or label, with its note and switch */
 .clearedList { display: grid; gap: 2px; margin: 6px 0; }
@@ -1488,3 +1487,20 @@ body.streamSafe .notSafe { display: none !important; }
 .collageTileFrame { display: grid; place-items: center; }
 .collageTileFrame .collageTileIcon { width: 56%; height: 56%; fill: #fff; pointer-events: none; filter: drop-shadow(0 1px 4px rgba(0, 0, 0, 0.35)); }
 .collageTileFrame img { width: 78%; height: 78%; }
+
+/* Favourites in the sidebar: its star turns slowly while it's pointed at */
+#navFavourites svg { transition: transform 0.3s ease; }
+#navFavourites:hover svg { animation: favSpin 4s linear infinite; }
+@keyframes favSpin { to { transform: rotate(360deg); } }
+.noAnim #navFavourites:hover svg { animation: none; }
+@media (prefers-reduced-motion: reduce) { #navFavourites:hover svg { animation: none; } }
+
+/* Streamer Mode's second step (copyrighted music left out too): a glow around the pulsing icon */
+.streamerBtn.safe { background: color-mix(in srgb, currentColor 16%, transparent); box-shadow: 0 0 10px 1px color-mix(in srgb, currentColor 55%, transparent); }
+.streamerBtn.safe svg { filter: drop-shadow(0 0 3px currentColor); }
+
+/* the Library's sort: three small chips, the one in use marked, its arrow saying which way */
+.sortChips { display: inline-flex; gap: 4px; padding: 3px; border: 1px solid var(--line); border-radius: 999px; }
+.sortChips .chip { padding: 5px 12px; border: 0; }
+.sortChips .chip.on { background: color-mix(in srgb, var(--accent) 20%, transparent); color: var(--text); }
+.sortArrow { color: var(--accent); font-weight: 800; }

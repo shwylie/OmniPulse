@@ -34,14 +34,20 @@ function nameNote(box, before, name, after) {
 }
 
 // ---------- Streamer Mode: account names, keys, addresses and ports, and plugin settings, hidden ----------
+// The title bar's button does both Streamer Modes, a click at a time: off, then private info hidden
+// (it pulses), then copyrighted music left out too (it glows as well), then both off again.
 function streamerPaint() {
   const on = !!prefs.streamerMode;
   document.body.classList.toggle("streamer", on);
   const b = $("streamerBtn");
-  b.classList.toggle("on", on);
-  b.setAttribute("aria-pressed", on ? "true" : "false");
-  b.title = on ? "Streamer Mode: on. Account names, keys, addresses and ports, and plugin settings are hidden. Click to show them."
-    : "Streamer Mode: off. Hides account names, keys, addresses and ports, and plugin settings.";
+  const safe = typeof streamSafe === "function" && streamSafe();
+  b.classList.toggle("on", on || safe);
+  b.classList.toggle("safe", safe);
+  b.setAttribute("aria-pressed", on || safe ? "true" : "false");
+  b.title = safe && on ? "Streamer Mode: private info hidden, and only music that's safe on stream. Click to turn both off."
+    : safe ? "Streamer Mode: only music that's safe on stream. Click to turn it off."
+    : on ? "Streamer Mode: private info hidden. Click again to leave out copyrighted music too."
+    : "Streamer Mode: off. Click to hide account names, keys, addresses and plugin settings; again to leave out copyrighted music too.";
   $("smPrivate").checked = on;
   stateNotes();
   markSensitive(document);
@@ -160,7 +166,7 @@ const PLATFORMS = {
   spotify: { name: "Spotify", icon: "M12 2a10 10 0 1 0 0 20 10 10 0 1 0 0-20zM6.6 9.1c3.5-1.1 7.9-.8 11 1l-.9 1.5c-2.7-1.6-6.6-1.9-9.6-.9zM7.3 12.6c2.9-.8 6.3-.5 8.8 1l-.8 1.3c-2.2-1.3-5.2-1.6-7.6-.9zM8 15.8c2.2-.5 4.5-.3 6.4.8l-.7 1.1c-1.6-.9-3.6-1.1-5.4-.7z", rule: "evenodd" },
   xpl: { name: "Playlist on this PC", icon: "M15 6H3v2h12V6zm0 4H3v2h12v-2zM3 16h8v-2H3v2zM17 6v8.18c-.31-.11-.65-.18-1-.18-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3V8h3V6h-5z" },
   local: { name: "Local files", icon: "M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z" },
-  youtube: { name: "YouTube Music", icon: "M12 2a10 10 0 1 0 0 20a10 10 0 1 0 0-20zm0 2.2a7.8 7.8 0 1 1 0 15.6a7.8 7.8 0 1 1 0-15.6zM9.8 8.3v7.4l6-3.7z", rule: "evenodd" },
+  youtube: { name: "YouTube Music", icon: "M5 3h14a3 3 0 0 1 3 3v9a3 3 0 0 1-3 3H5a3 3 0 0 1-3-3V6a3 3 0 0 1 3-3zm0 2.2a.8.8 0 0 0-.8.8v9c0 .44.36.8.8.8h14a.8.8 0 0 0 .8-.8V6a.8.8 0 0 0-.8-.8zM8 20h8v1.8H8z", rule: "evenodd" },   // a screen, with nothing in it: not a play button
   apple: { name: "Apple Music", icon: "M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z" },
   amazon: { name: "Amazon Music", icon: "M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z" },
 };
@@ -438,13 +444,26 @@ const safeOk = (t) => !streamSafe() || streamOk(t);   // (js/streamsafe.js: open
 function safePaint() {
   const on = streamSafe();
   document.body.classList.toggle("streamSafe", on);
-  const b = $("safeBtn");
-  b.classList.toggle("on", on);
-  b.setAttribute("aria-pressed", on ? "true" : "false");
-  b.title = on ? "Stream-Safe Music: on. Only music that's safe on stream (openly licensed, or cleared for streaming) shows and plays. Click to turn it off."
-    : "Stream-Safe Music: off. Turn on to show and play only music that's safe on stream.";
   $("smSafe").checked = on;
-  stateNotes();
+  streamerPaint();
+}
+
+// The button's next step: off -> private info -> and safe music -> off
+function streamerStep() {
+  const priv = !!prefs.streamerMode, safe = streamSafe();
+  if (!priv && !safe) {
+    prefs.streamerMode = true;
+    savePrefs();
+    streamerPaint();
+    say("Streamer Mode: account names, keys, addresses and plugin settings are hidden. Click again to leave out copyrighted music too.", { force: true });
+  } else if (priv && !safe) {
+    safeSet(true);
+  } else {
+    prefs.streamerMode = false;
+    savePrefs();
+    safeSet(false);
+    say("Streamer Mode off.", { force: true });
+  }
 }
 
 function safeSet(on) {
@@ -453,7 +472,7 @@ function safeSet(on) {
   safePaint();
   render();
   renderQueue();
-  say(on ? "Stream-Safe Music on: only music that's safe on stream shows and plays." : "Stream-Safe Music off.", { force: true });
+  say(on ? "Streamer Mode: only music that's safe on stream shows and plays" + (prefs.streamerMode ? ", and private info is hidden." : ".") : "Stream-Safe Music off.", { force: true });
   streamLookSoon();
   // what's playing now, if it isn't open, goes
   const cur = curTrack();
@@ -516,6 +535,7 @@ function afterRender() {
 // Shown whenever any of them is, so the language filter stays reachable when it hid everything.
 function paintHeroActions() {
   $("luckyBtn").hidden = view !== "discover";
+  $("libSort").hidden = view !== "likes" || albumsOnly();
   $("favOnlyChip").hidden = !favOn() || ["favourites", "discover", "stats", "now", "artists"].includes(view) || (view === "search" && !query);
   paintSetsChip();
   const hl = $("hideLikesChip");
@@ -523,7 +543,7 @@ function paintHeroActions() {
   hl.classList.toggle("on", !!prefs.hideLikes);
   hl.setAttribute("aria-pressed", prefs.hideLikes ? "true" : "false");
   hl.title = prefs.hideLikes ? "Your likes are hidden from these results. Click to show them." : "Leave tracks you've liked out of the results";
-  $("heroActions").hidden = !["playAll", "followBtn", "plDelete", "luckyBtn", "langChip", "favOnlyChip", "setsLikedChip", "hideLikesChip", "artistsBatch"].some((id) => !$(id).hidden);
+  $("heroActions").hidden = !["playAll", "followBtn", "plDelete", "luckyBtn", "libSort", "langChip", "favOnlyChip", "setsLikedChip", "hideLikesChip", "artistsBatch"].some((id) => !$(id).hidden);
 }
 
 function trackRow(t, i, playing) {
@@ -713,10 +733,43 @@ function libraryList(plats) {
 }
 
 // Shows the list without losing your place (keeps as many rows loaded and the scroll position)
+// The Library's order (its sort chips): as you liked them, or by artist or title, either way
+const libSortOf = () => Object.assign({ by: "added", dir: 1 }, prefs.libSort);
+const sortText = (s) => String(s || "").replace(/^the\s+/i, "").trim();
+function libSorted(list) {
+  const { by, dir } = libSortOf();
+  if (by === "added") return list;
+  const cmp = (a, b) => sortText(a).localeCompare(sortText(b), undefined, { sensitivity: "base", numeric: true });
+  return list.slice().sort((x, y) => dir * (by === "artist"
+    ? cmp(artistName(x), artistName(y)) || cmp(x.title, y.title)
+    : cmp(x.title, y.title) || cmp(artistName(x), artistName(y))));
+}
+
+function libSortPaint() {
+  const { by, dir } = libSortOf();
+  document.querySelectorAll("#libSort button").forEach((b) => {
+    const on = b.dataset.by === by;
+    b.classList.toggle("on", on);
+    b.setAttribute("aria-pressed", on ? "true" : "false");
+    const arrow = b.querySelector(".sortArrow");
+    if (arrow) arrow.textContent = on ? (dir > 0 ? " \u2191" : " \u2193") : "";
+    if (b.dataset.by !== "added") b.title = on ? (dir > 0 ? "A to Z: click for Z to A" : "Z to A: click for A to Z") : "By " + b.dataset.by;
+  });
+}
+
+// a chip: another order, or the same one the other way round
+function libSortPick(by) {
+  const cur = libSortOf();
+  prefs.libSort = cur.by === by && by !== "added" ? { by, dir: -cur.dir } : { by, dir: 1 };
+  savePrefs();
+  libSortPaint();
+  if (view === "likes") showLibrary(libraryList(activePlats("likes")), false);
+}
+
 function showLibrary(list, keepPlace) {
   const top = $("listView").scrollTop;
   const shown = viewTracks.length;
-  setLocalPool(applyListFilter(list));
+  setLocalPool(libSorted(applyListFilter(list)));
   if (keepPlace && shown > viewTracks.length) {
     localPos = Math.min(localPool.length, shown);
     viewTracks = localPool.slice(0, localPos);

@@ -36,17 +36,18 @@ function extrasInit() {
   streamerPaint();
   streamSafeInit();
   keySetupInit();
+  document.querySelectorAll("#libSort button").forEach((b) => b.addEventListener("click", () => libSortPick(b.dataset.by)));
+  libSortPaint();
   backupInit();
   safePaint();
-  $("safeBtn").addEventListener("click", () => safeSet(!streamSafe()));
   $("smSafe").addEventListener("change", () => safeSet($("smSafe").checked));
-  $("smPrivate").addEventListener("change", () => $("streamerBtn").click());
-  $("streamerBtn").addEventListener("click", () => {
-    prefs.streamerMode = !prefs.streamerMode;
+  // the two settings still go on and off on their own
+  $("smPrivate").addEventListener("change", () => {
+    prefs.streamerMode = $("smPrivate").checked;
     savePrefs();
     streamerPaint();
-    say(prefs.streamerMode ? "Streamer Mode on: account names, keys, addresses and plugin settings are hidden." : "Streamer Mode off.");
   });
+  $("streamerBtn").addEventListener("click", streamerStep);
   widgetInit();
   navInit();
   discoverInit();
