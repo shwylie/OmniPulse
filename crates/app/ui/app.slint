@@ -39,6 +39,11 @@ global Icons {
     out property <string> stats: "M5 9.2h3V19H5zM10.6 5h2.8v14h-2.8zm5.6 8H19v6h-2.8z";
     out property <string> broadcast: "M12 9.6a2.4 2.4 0 1 0 0 4.8 2.4 2.4 0 0 0 0-4.8zM7.05 7.05a7 7 0 0 0 0 9.9l1.42-1.42a5 5 0 0 1 0-7.07zm9.9 0-1.42 1.41a5 5 0 0 1 0 7.07l1.42 1.42a7 7 0 0 0 0-9.9zM4.22 4.22a11 11 0 0 0 0 15.56l1.42-1.42a9 9 0 0 1 0-12.72zm15.56 0-1.42 1.42a9 9 0 0 1 0 12.72l1.42 1.42a11 11 0 0 0 0-15.56z";
     out property <string> person: "M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z";
+    out property <string> heart-out: "M16.5 3c-1.74 0-3.41.81-4.5 2.09C10.91 3.81 9.24 3 7.5 3 4.42 3 2 5.42 2 8.5c0 3.78 3.4 6.86 8.55 11.54L12 21.35l1.45-1.32C18.6 15.36 22 12.28 22 8.5 22 5.42 19.58 3 16.5 3zm-4.4 15.55l-.1.1-.1-.1C7.14 14.24 4 11.39 4 8.5 4 6.5 5.5 5 7.5 5c1.54 0 3.04.99 3.57 2.36h1.87C13.46 5.99 14.96 5 16.5 5c2 0 3.5 1.5 3.5 3.5 0 2.89-3.14 5.74-7.9 10.05z";
+    out property <string> star-out: "M22 9.24l-7.19-.62L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21 12 17.27 18.18 21l-1.63-7.03L22 9.24zM12 15.4l-3.76 2.27 1-4.28-3.32-2.88 4.38-.38L12 6.1l1.71 4.04 4.38.38-3.32 2.88 1 4.28L12 15.4z";
+    out property <string> output: "M4 6h18V4H4c-1.1 0-2 .9-2 2v11H0v3h14v-3H4V6zm19 2h-6c-.55 0-1 .45-1 1v10c0 .55.45 1 1 1h6c.55 0 1-.45 1-1V9c0-.55-.45-1-1-1zm-1 9h-4v-7h4v7z";
+    out property <string> more: "M6 10a2 2 0 100 4 2 2 0 000-4zm6 0a2 2 0 100 4 2 2 0 000-4zm6 0a2 2 0 100 4 2 2 0 000-4z";
+    out property <string> refresh: "M17.65 6.35A7.958 7.958 0 0012 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08A5.99 5.99 0 0112 18c-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z";
     out property <string> back: "M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z";
     out property <string> search: "M15.5 14h-.79l-.28-.27A6.471 6.471 0 0016 9.5 6.5 6.5 0 109.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z";
     out property <string> shuffle: "M10.59 9.17L5.41 4 4 5.41l5.17 5.17 1.42-1.41zM14.5 4l2.04 2.04L4 18.59 5.41 20 17.96 7.46 20 9.5V4h-5.5zm.33 9.41l-1.41 1.41 3.13 3.13L14.5 20H20v-5.5l-2.04 2.04-3.13-3.13z";
@@ -158,6 +163,75 @@ component Range inherits Rectangle {
             }
         }
     }
+}
+
+component Progress inherits Rectangle {
+    /// where it is (0 to 1), and the track's length in seconds (for the time shown while pointed at)
+    in property <float> value;
+    in property <float> length-secs;
+    callback released(float);
+    height: 16px;
+    property <float> drag: -1;
+    property <float> at: max(0, min(1, ta.mouse-x / max(1px, root.width)));
+    property <float> frac: max(0, min(1, root.drag >= 0 ? root.drag : root.value));
+    property <bool> live: ta.has-hover || root.drag >= 0;
+    property <float> tip-secs: (root.drag >= 0 ? root.drag : root.at) * root.length-secs;
+    Rectangle {
+        y: (parent.height - self.height) / 2;
+        height: root.live ? 6px : 3px;
+        animate height { duration: 120ms; }
+        border-radius: 3px;
+        background: Theme.text.with-alpha(0.16);
+        clip: true;
+        Rectangle { x: 0; width: parent.width * root.frac; height: 100%; background: Theme.accent; }
+    }
+    // the time there, above it
+    if root.live && root.length-secs > 0: Rectangle {
+        property <int> secs: floor(root.tip-secs);
+        x: max(0px, min(root.width - self.width, root.width * (root.drag >= 0 ? root.drag : root.at) - self.width / 2));
+        y: -22px;
+        width: tip.preferred-width + 12px;
+        height: 18px;
+        border-radius: 6px;
+        background: Theme.elevated;
+        tip := Text { text: floor(parent.secs / 60) + ":" + (mod(parent.secs, 60) < 10 ? "0" : "") + mod(parent.secs, 60); color: Theme.text; font-size: 11px; }
+    }
+    if root.live: Rectangle {
+        x: root.width * root.frac - 6px;
+        y: (root.height - 12px) / 2;
+        width: 12px;
+        height: 12px;
+        border-radius: 6px;
+        background: Theme.accent;
+    }
+    ta := TouchArea {
+        pointer-event(e) => {
+            if (e.button == PointerEventButton.left && e.kind == PointerEventKind.down) {
+                root.drag = root.at;
+            } else if (e.button == PointerEventButton.left && e.kind == PointerEventKind.up && root.drag >= 0) {
+                root.released(root.drag);
+                root.drag = -1;
+            }
+        }
+        moved => { if (self.pressed) { root.drag = root.at; } }
+    }
+}
+
+component MenuRow inherits Rectangle {
+    in property <string> label;
+    in property <bool> on;
+    callback clicked;
+    height: 32px;
+    border-radius: 6px;
+    background: ta.has-hover ? Theme.line : transparent;
+    HorizontalLayout {
+        padding-left: 10px;
+        padding-right: 10px;
+        spacing: 8px;
+        Rectangle { width: 8px; Rectangle { width: 8px; height: 8px; y: (parent.height - self.height) / 2; border-radius: 4px; background: root.on ? Theme.accent : transparent; } }
+        Text { text: root.label; color: Theme.text; font-size: 13px; vertical-alignment: center; overflow: elide; }
+    }
+    ta := TouchArea { clicked => { root.clicked(); } }
 }
 
 component PlatIcon inherits Glyph {
@@ -380,6 +454,14 @@ export component AppWindow inherits Window {
     in property <float> pos-frac;
     in property <string> pos-text: "0:00";
     in property <string> dur-text: "0:00";
+    in property <float> dur-secs;
+    // the bar's heart and star, the output devices, and the track's menu
+    in property <bool> now-liked;
+    in property <bool> now-fav;
+    in property <bool> can-like;
+    in property <[string]> devices;
+    in property <int> device-on: -1;
+    in property <[string]> more-items;
     in-out property <float> volume: 80;
     in-out property <bool> queue-open: false;
     in-out property <bool> autoplay: true;
@@ -400,6 +482,13 @@ export component AppWindow inherits Window {
     callback queue-action(int, string);
     callback shuffle();
     callback play-page();
+    callback refresh();
+    callback like-toggle();
+    callback fav-toggle();
+    callback devices-want();
+    callback device-pick(int);
+    callback more-want();
+    callback more-pick(int);
     callback artist(int);
     callback back();
     callback fav-only-changed(bool);
@@ -588,7 +677,17 @@ export component AppWindow inherits Window {
                         RoundButton { d: Icons.gear; clicked => { root.nav("settings"); } }
                     }
                     Rectangle { height: 10px; }
-                    if root.page-kind != "now": Text { text: root.page-title; color: Theme.text; font-size: 44px; font-weight: 800; overflow: elide; }
+                    // the title, and (on pages made from what the platforms send) fetching them again
+                    if root.page-kind != "now": HorizontalLayout {
+                        spacing: 14px;
+                        Text { text: root.page-title; color: Theme.text; font-size: 44px; font-weight: 800; overflow: elide; horizontal-stretch: 0; }
+                        if root.page == "discover" || root.page == "rediscover" || root.page == "sets" || root.page == "artists": RoundButton {
+                            d: Icons.refresh;
+                            y: (parent.height - self.height) / 2;
+                            clicked => { root.refresh(); }
+                        }
+                        Rectangle { horizontal-stretch: 1; }
+                    }
                     if root.page-kind != "now" && root.page-sub != "": Text { text: root.page-sub; color: Theme.muted; font-size: 14px; overflow: elide; }
                     if root.chips.length > 0: HorizontalLayout {
                         alignment: start;
@@ -1003,8 +1102,9 @@ export component AppWindow inherits Window {
 
         // ---------- player bar ----------
         Rectangle {
-            // (an 88 px bar, as the web app's; the status strip adds its own height on top)
-            height: root.status != "" ? 135px : 104px;
+            // (the web app's compact bar: track info, then the controls, then the progress line; the
+            // status strip adds its own height on top)
+            height: root.status != "" ? 171px : 140px;
             animate height { duration: 220ms; easing: ease-out; }
             Rectangle {
                 x: 8px;
@@ -1028,19 +1128,35 @@ export component AppWindow inherits Window {
                     }
                     Rectangle { height: 1px; background: Theme.line; }
                 }
-                HorizontalLayout {
-                    padding-left: 18px;
-                    padding-right: 18px;
-                    padding-top: 12px;
-                    padding-bottom: 12px;
-                    spacing: 6px;
-                    // the controls, the seek bar and the volume
+                VerticalLayout {
+                    padding-left: 14px;
+                    padding-right: 14px;
+                    padding-top: 10px;
+                    padding-bottom: 4px;
+                    // what's playing: opens Now Playing
+                    Rectangle {
+                        height: 44px;
+                        HorizontalLayout {
+                            spacing: 12px;
+                            alignment: start;
+                            Cover { art: root.now-art; initial: ""; width: 44px; height: 44px; border-radius: 6px; }
+                            if root.now-plat != "": PlatIcon { plat: root.now-plat; width: 20px; height: 20px; y: (parent.height - self.height) / 2; fill: Theme.muted; }
+                            VerticalLayout {
+                                alignment: center;
+                                spacing: 2px;
+                                Text { text: root.now-title; color: Theme.text; font-weight: 700; font-size: 15px; overflow: elide; }
+                                Text { text: root.now-artist; color: Theme.muted; font-size: 13px; overflow: elide; }
+                            }
+                        }
+                        TouchArea { clicked => { root.nav(root.page == "now" ? "library" : "now"); } }
+                    }
+                    // the controls and the volume on the left, the buttons on the right
+                    Rectangle { height: 8px; }
                     HorizontalLayout {
-                        width: 40%;
+                        height: 42px;
                         spacing: 4px;
-                        alignment: start;
-                        IconButton { d: root.playing ? Icons.pause : Icons.play; filled: true; size: 46px; y: (parent.height - self.height) / 2; clicked => { root.toggle(); } }
-                        Rectangle { width: 8px; }
+                        IconButton { d: root.playing ? Icons.pause : Icons.play; filled: true; size: 40px; y: (parent.height - self.height) / 2; clicked => { root.toggle(); } }
+                        Rectangle { width: 6px; }
                         IconButton { d: Icons.prev; y: (parent.height - self.height) / 2; clicked => { root.prev(); } }
                         IconButton { d: Icons.next; y: (parent.height - self.height) / 2; clicked => { root.next(); } }
                         IconButton { d: Icons.shuffle; tint: root.shuffle-on ? Theme.accent : Theme.muted; y: (parent.height - self.height) / 2; clicked => { root.shuffle-toggle(); } }
@@ -1049,40 +1165,59 @@ export component AppWindow inherits Window {
                             IconButton { d: Icons.repeat; tint: root.repeat-mode != "off" ? Theme.accent : Theme.muted; y: (parent.height - self.height) / 2; clicked => { root.repeat-cycle(); } }
                             if root.repeat-mode == "one": Text { text: "1"; x: 23px; y: parent.height / 2 - 14px; color: Theme.accent; font-size: 9px; font-weight: 800; }
                         }
-                        Rectangle { width: 10px; }
-                        Text { text: root.pos-text; color: Theme.muted; font-size: 12px; width: 34px; horizontal-alignment: right; vertical-alignment: center; }
-                        Range { min-width: 80px; horizontal-stretch: 1; y: (parent.height - self.height) / 2; minimum: 0; maximum: 1000; value: root.pos-frac * 1000; released(v) => { root.seek(v / 1000); } }
-                        Text { text: root.dur-text; color: Theme.muted; font-size: 12px; width: 34px; vertical-alignment: center; }
+                        Rectangle { width: 4px; }
                         Glyph { d: Icons.volume; width: 20px; height: 20px; y: (parent.height - self.height) / 2; fill: Theme.muted; }
-                        Range { width: root.narrow ? 64px : 80px; y: (parent.height - self.height) / 2; minimum: 0; maximum: 100; value: root.volume; changed(v) => { root.volume = v; root.volume-changed(v / 100); } }
-                    }
-                    // now playing: opens Now Playing
-                    Rectangle {
-                        horizontal-stretch: 1;
-                        HorizontalLayout {
-                            alignment: center;
-                            spacing: 12px;
-                            Cover { art: root.now-art; initial: ""; width: 64px; height: 64px; y: (parent.height - self.height) / 2; border-radius: 6px; }
-                            VerticalLayout {
-                                alignment: center;
-                                spacing: 2px;
-                                Text { text: root.now-title; color: Theme.text; font-weight: 700; font-size: 15px; overflow: elide; max-width: 260px; }
-                                HorizontalLayout {
-                                    spacing: 6px;
-                                    if root.now-plat != "": PlatIcon { plat: root.now-plat; width: 14px; height: 14px; }
-                                    Text { text: root.now-artist; color: Theme.muted; font-size: 13px; overflow: elide; max-width: 240px; }
+                        Range { width: root.narrow ? 64px : 84px; y: (parent.height - self.height) / 2; minimum: 0; maximum: 100; value: root.volume; changed(v) => { root.volume = v; root.volume-changed(v / 100); } }
+                        Rectangle { horizontal-stretch: 1; }
+                        // like and favourite, as the web app's (on the track that's playing)
+                        if root.can-like: IconButton { d: root.now-liked ? Icons.library : Icons.heart-out; tint: root.now-liked ? Theme.accent : Theme.muted; y: (parent.height - self.height) / 2; clicked => { root.like-toggle(); } }
+                        if root.can-like: IconButton { d: root.now-fav ? Icons.star : Icons.star-out; tint: root.now-fav ? Theme.accent : Theme.muted; y: (parent.height - self.height) / 2; clicked => { root.fav-toggle(); } }
+                        IconButton { d: Icons.lyrics; tint: root.page == "now" ? Theme.accent : Theme.muted; y: (parent.height - self.height) / 2; clicked => { root.nav(root.page == "now" ? "library" : "now"); } }
+                        // where the sound plays
+                        Rectangle {
+                            width: 36px;
+                            IconButton { d: Icons.output; y: (parent.height - self.height) / 2; clicked => { root.devices-want(); devices-menu.show(); } }
+                            devices-menu := PopupWindow {
+                                x: parent.width - 280px;
+                                y: -12px - root.devices.length * 32px - 16px;
+                                width: 280px;
+                                Rectangle {
+                                    background: Theme.elevated;
+                                    border-radius: 10px;
+                                    border-width: 1px;
+                                    border-color: Theme.line;
+                                    VerticalLayout {
+                                        padding: 6px;
+                                        for d[i] in root.devices: MenuRow { label: d; on: root.device-on == i; clicked => { root.device-pick(i); } }
+                                    }
                                 }
                             }
                         }
-                        TouchArea { clicked => { root.nav(root.page == "now" ? "library" : "now"); } }
-                    }
-                    HorizontalLayout {
-                        width: 18%;
-                        alignment: end;
-                        spacing: 8px;
-                        IconButton { d: Icons.lyrics; tint: root.page == "now" ? Theme.accent : Theme.muted; y: (parent.height - self.height) / 2; clicked => { root.nav(root.page == "now" ? "library" : "now"); } }
+                        // the track's menu: open it on its platform, look for its artist
+                        Rectangle {
+                            width: 36px;
+                            IconButton { d: Icons.more; y: (parent.height - self.height) / 2; clicked => { root.more-want(); more-menu.show(); } }
+                            more-menu := PopupWindow {
+                                x: parent.width - 240px;
+                                y: -12px - root.more-items.length * 32px - 16px;
+                                width: 240px;
+                                Rectangle {
+                                    background: Theme.elevated;
+                                    border-radius: 10px;
+                                    border-width: 1px;
+                                    border-color: Theme.line;
+                                    VerticalLayout {
+                                        padding: 6px;
+                                        for m[i] in root.more-items: MenuRow { label: m; clicked => { root.more-pick(i); } }
+                                    }
+                                }
+                            }
+                        }
+                        Rectangle { width: 1px; height: 24px; y: (parent.height - self.height) / 2; background: Theme.line; }
                         IconButton { d: Icons.queue; tint: root.queue-open ? Theme.accent : Theme.muted; y: (parent.height - self.height) / 2; clicked => { root.queue-open = !root.queue-open; } }
                     }
+                    // the progress: click or drag along it
+                    Progress { value: root.pos-frac; length-secs: root.dur-secs; released(v) => { root.seek(v); } }
                 }
                 }
             }

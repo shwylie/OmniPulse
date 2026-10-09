@@ -8,6 +8,7 @@
 mod desktop;
 mod integrations;
 mod look;
+mod marks;
 mod titles;
 mod versions;
 mod player;
@@ -204,7 +205,7 @@ fn open_page(shared: &Shared, page: &str) {
             show_tracks(shared, "library", "Library", sub, lib, true);
         }
         "favourites" => {
-            let fav = shared.borrow().web.favourites.clone();
+            let fav = marks::favourites(&shared.borrow().web.favourites);
             let sub = if fav.is_empty() { "Starred tracks show here (from the web app, until this one can star them).".to_string() } else { format!("Starred tracks from every platform. {}.", plural(fav.len(), "track", "tracks")) };
             show_tracks(shared, "favourites", "Favourites", sub, fav, true);
         }
@@ -924,12 +925,68 @@ fn start(shared: &Shared) {
 
 /// The player bar's track, without playing it (a restored session shows it paused)
 fn show_now(ui: &AppWindow, t: &Track) {
+    paint_marks(ui, t);
     ui.set_now_title(t.title.clone().into());
     ui.set_now_artist(t.artist.clone().into());
     ui.set_now_album(t.album.clone().into());
     ui.set_now_plat(t.plat().into());
     ui.set_now_art(slint::Image::default());
     ui.set_now_art_big(slint::Image::default());
+}
+
+/// The bar's heart and star for this track
+fn paint_marks(ui: &AppWindow, t: &Track) {
+    SHARED.with(|s| {
+        let Some(sh) = s.borrow().clone() else { return };
+        let Ok(a) = sh.try_borrow() else { return };
+        ui.set_can_like(!matches!(t.src, track::Src::Local(_)));
+        ui.set_now_liked(a.library.iter().any(|x| x.key == t.key));
+        ui.set_now_fav(marks::favourites(&a.web.favourites).iter().any(|x| x.key == t.key));
+    });
+}
+
+/// The heart: likes or unlikes what's playing, where it's from (put right back if that fails)
+fn like_toggle(shared: &Shared) {
+    let (t, on, rt, weak) = {
+        let mut a = shared.borrow_mut();
+        let Some(t) = a.queue.current().cloned() else { return };
+        let on = !a.library.iter().any(|x| x.key == t.key);
+        if on { a.library.insert(0, t.clone()); } else { a.library.retain(|x| x.key != t.key); }
+        (t, on, a.rt.clone(), a.ui.clone())
+    };
+    if let Some(ui) = weak.upgrade() {
+        ui.set_now_liked(on);
+        ui.set_status(format!("{} \"{}\".", if on { "Liked" } else { "Took the like off" }, t.title).into());
+    }
+    rt.spawn(async move {
+        let r = marks::set_like(&t, on).await;
+        let _ = weak.upgrade_in_event_loop(move |ui| SHARED.with(|s| {
+            let Some(sh) = s.borrow().clone() else { return };
+            if let Err(e) = r {
+                let mut a = sh.borrow_mut();
+                if on { a.library.retain(|x| x.key != t.key); } else { a.library.insert(0, t.clone()); }
+                if a.queue.current().is_some_and(|c| c.key == t.key) { ui.set_now_liked(!on); }
+                ui.set_status(format!("Couldn't {} \"{}\": {e}", if on { "like" } else { "unlike" }, t.title).into());
+            }
+        }));
+    });
+}
+
+/// The star: a favourite (which also likes it), or not
+fn fav_toggle(shared: &Shared) {
+    let (t, on, liked) = {
+        let a = shared.borrow();
+        let Some(t) = a.queue.current().cloned() else { return };
+        let on = !marks::favourites(&a.web.favourites).iter().any(|x| x.key == t.key);
+        let liked = a.library.iter().any(|x| x.key == t.key);
+        (t, on, liked)
+    };
+    marks::set_favourite(&t, on);
+    if let Some(ui) = shared.borrow().ui.upgrade() {
+        ui.set_now_fav(on);
+        ui.set_status(format!("{} \"{}\".", if on { "Starred" } else { "Took the star off" }, t.title).into());
+    }
+    if on && !liked { like_toggle(shared); }
 }
 
 /// Playing from a page: a list (Library, a playlist...) becomes the queue; one track from Search
@@ -1123,6 +1180,7 @@ fn tick(shared: &Shared, events: &std::sync::mpsc::Receiver<Event>, n: u64) {
     let (pos, dur) = (engine.position_ms(), engine.duration_ms());
     ui.set_pos_text(fmt_ms(pos).into());
     ui.set_dur_text(fmt_ms(dur).into());
+    ui.set_dur_secs(dur as f32 / 1000.0);
     ui.set_pos_frac(if dur > 0 { (pos as f32 / dur as f32).min(1.0) } else { 0.0 });
     let near_end = {
         let mut a = shared.borrow_mut();
@@ -1198,6 +1256,7 @@ fn restore_session(shared: &Shared) {
     show_now(&ui, &t);
     ui.set_pos_text(fmt_ms(pos).into());
     ui.set_dur_text(fmt_ms(t.ms).into());
+    ui.set_dur_secs(t.ms as f32 / 1000.0);
     ui.set_pos_frac(if t.ms > 0 { (pos as f32 / t.ms as f32).min(1.0) } else { 0.0 });
     let (rt, weak, art) = (a.rt.clone(), a.ui.clone(), t.art.replace("-t200x200", "-t500x500"));
     rt.spawn(async move {
@@ -1505,6 +1564,10 @@ fn main() -> Result<(), slint::PlatformError> {
     let engine = Arc::new(Engine::new("").map_err(slint::PlatformError::Other)?);
     let events = engine.events().expect("events");
     engine.set_volume(0.8);
+    // the output device picked last time (in the bar's menu), if it's still there
+    if let Some(name) = webstate::native_pref("nativeDevice").and_then(|v| v.as_str().map(String::from)).filter(|n| !n.is_empty()) {
+        let _ = engine.set_device(&name);
+    }
     let rows = Rc::new(VecModel::default());
     let qrows = Rc::new(VecModel::default());
     let lyric_lines = Rc::new(VecModel::default());
@@ -1578,6 +1641,10 @@ fn main() -> Result<(), slint::PlatformError> {
             all.extend(sc);
             all.extend(sp);
             all.extend(yt_likes);
+            // YouTube Music likes made here (the web app's are already in)
+            all.extend(marks::yt_likes());
+            let mut seen = std::collections::HashSet::new();
+            all.retain(|t| seen.insert(t.key.clone()));
             all.extend(sources::local_files());
             let secs = t0.elapsed().as_secs_f32();
             let mut playlists = own;
@@ -1608,6 +1675,70 @@ fn main() -> Result<(), slint::PlatformError> {
     ui.on_nav(move |p| go(&s, Place::Page(p.into())));
     let s = shared.clone();
     ui.on_back(move || go_back(&s));
+    // a page fetched again (Discover, Rediscover, Sets & Podcasts, Artists)
+    let s = shared.clone();
+    ui.on_refresh(move || {
+        let page = s.borrow().page.clone();
+        if page == "artists" { s.borrow_mut().artists = None; }
+        open_page(&s, &page);
+    });
+    let s = shared.clone();
+    ui.on_like_toggle(move || like_toggle(&s));
+    let s = shared.clone();
+    ui.on_fav_toggle(move || fav_toggle(&s));
+    // where the sound plays: Windows' devices, the one in use marked; kept for next time
+    {
+        let weak = ui.as_weak();
+        ui.on_devices_want(move || {
+            let Some(ui) = weak.upgrade() else { return };
+            let mut list = vec!["Windows' default".to_string()];
+            list.extend(omnipulse_audio::Engine::devices());
+            let want = webstate::native_pref("nativeDevice").and_then(|v| v.as_str().map(String::from)).unwrap_or_default();
+            ui.set_device_on(list.iter().position(|d| *d == want).map_or(0, |i| i as i32));
+            ui.set_devices(ModelRc::from(Rc::new(VecModel::from(list.into_iter().map(slint::SharedString::from).collect::<Vec<_>>()))));
+        });
+    }
+    let s = shared.clone();
+    ui.on_device_pick(move |i| {
+        let Some(ui) = s.borrow().ui.upgrade() else { return };
+        let Some(name) = ui.get_devices().row_data(i as usize).map(|d| d.to_string()) else { return };
+        let engine = s.borrow().engine.clone();
+        let use_name = if i == 0 { String::new() } else { name.clone() };
+        match engine.set_device(&use_name) {
+            Ok(()) => {
+                ui.set_device_on(i);
+                webstate::save_pref("nativeDevice", serde_json::json!(use_name));
+                ui.set_status(format!("Playing on {name}.").into());
+            }
+            Err(e) => ui.set_status(format!("Couldn't play on {name}: {e}").into()),
+        }
+    });
+    // the track's menu
+    let s = shared.clone();
+    ui.on_more_want(move || {
+        let a = s.borrow();
+        let Some(ui) = a.ui.upgrade() else { return };
+        let mut items: Vec<slint::SharedString> = Vec::new();
+        if let Some(t) = a.queue.current() {
+            if !t.web_link().is_empty() { items.push(format!("Open on {}", match t.plat() { "spotify" => "Spotify", "youtube" => "YouTube Music", _ => "SoundCloud" }).into()); }
+            if !t.artist.is_empty() { items.push(format!("Search for {}", t.artist.split(", ").next().unwrap_or("")).into()); }
+            items.push("Search for this song".into());
+        }
+        ui.set_more_items(ModelRc::from(Rc::new(VecModel::from(items))));
+    });
+    let s = shared.clone();
+    ui.on_more_pick(move |i| {
+        let Some(ui) = s.borrow().ui.upgrade() else { return };
+        let Some(item) = ui.get_more_items().row_data(i as usize).map(|x| x.to_string()) else { return };
+        let Some(t) = s.borrow().queue.current().cloned() else { return };
+        if item.starts_with("Open on") {
+            if let Err(e) = omnipulse_core::open_url(t.web_link()) { ui.set_status(e.into()); }
+        } else {
+            let q = if item == "Search for this song" { format!("{} {}", t.artist.split(", ").next().unwrap_or(""), t.title) } else { t.artist.split(", ").next().unwrap_or("").to_string() };
+            ui.set_search_text(q.clone().into());
+            go(&s, Place::Search(q));
+        }
+    });
     let s = shared.clone();
     ui.on_artist(move |i| go(&s, Place::Artist(i as usize)));
     let s = shared.clone();

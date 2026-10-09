@@ -57,6 +57,11 @@ fn native_prefs() -> Value {
     native_prefs_file().and_then(|p| std::fs::read_to_string(p).ok()).and_then(|t| serde_json::from_str(&t).ok()).unwrap_or(Value::Null)
 }
 
+/// One of this app's own settings (state/native-prefs.json)
+pub fn native_pref(key: &str) -> Option<Value> {
+    native_prefs().get(key).cloned()
+}
+
 /// A setting changed in this app (it wins over the web app's from then on)
 pub fn save_pref(key: &str, value: Value) {
     let mut all = native_prefs();
