@@ -11,7 +11,8 @@
 //                 can change anything
 //   Jam:          invite-only (a link you send); members can add songs, shown as added by them
 //
-// Links (omnipulse://join/<code>, omnipulse://jam/<code>?k=<invite>) come from the relay's join page,
+// Links (omnipulse://join/<code>, omnipulse://jam/<code>?k=<invite>, and omnipulse://playlist/<code> for a
+// shared playlist, js/share.js) come from the relay's pages,
 // which opens the app, or offers to download it.
 
 const together = {
@@ -166,6 +167,10 @@ async function togetherLink(link) {
   const kind = u.host === "jam" ? "jam" : u.host === "join" ? "listen" : null;
   const code = u.pathname.replace(/^\//, "");
   const relay = (u.searchParams.get("relay") || relayUrl()).replace(/\/+$/, "");
+  if (u.host === "playlist") {
+    if (/^[a-z0-9]{8}$/.test(code) && relayOk(relay)) await shareOpen(code, relay); else say("That link isn't an OmniPulse playlist.");
+    return;
+  }
   if (!kind || !/^[a-z0-9]{8}$/.test(code) || !relayOk(relay)) { say("That link isn't an OmniPulse invite."); return; }
   let info = null;
   try { info = await (await fetch(relay + "/api/rooms/" + code)).json(); } catch (e) {}

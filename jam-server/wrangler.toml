@@ -12,6 +12,15 @@ APP_SCHEME = "omnipulse"
 name = "ROOMS"
 class_name = "Room"
 
+[[durable_objects.bindings]]
+name = "SHARES"
+class_name = "Share"
+
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["Room"]
+
+# shared playlists (added later: deploying again adds them)
+[[migrations]]
+tag = "v2"
+new_sqlite_classes = ["Share"]

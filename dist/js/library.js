@@ -543,6 +543,7 @@ function libraryInit() {
     if (!b) return;
     if (b.dataset.action) { runMenuAction(b.dataset.action); return; }
     if (b.dataset.paction) { runPlaylistAction(b.dataset.paction); return; }
+    if (b.dataset.share) { const p = currentPlaylist; closeMenu(); if (p) sharePlatform(p, b.dataset.share); return; }
     if (b.dataset.new) { const t = menuTrack; closeMenu(); openNewPlaylistDialog(t); return; }
     const p = playlists.find((x) => String(x.id) === b.dataset.id);
     const t = menuTrack;

@@ -436,6 +436,7 @@ function renderHero() {
     (meId !== null && currentArtist.on && currentArtist.on.soundcloud && String(currentArtist.on.soundcloud.id) === String(meId));
   if ($("followBtn").hidden) $("followMoreBtn").hidden = true; else paintFollow();   // "Also follow on ...", now Follow shows
   $("plDelete").hidden = !(v === "playlist" && isOwnPlaylist(currentPlaylist));
+  $("plShare").hidden = !(v === "playlist" && currentPlaylist && currentPlaylist.source !== "local");
   const av = $("heroAvatar");
   const src = v === "artist" ? artistImage(currentArtist) : "";
   if (src) { av.src = src; av.hidden = false; } else { av.removeAttribute("src"); av.hidden = true; }
@@ -602,7 +603,7 @@ function paintHeroActions() {
   hl.classList.toggle("on", !!prefs.hideLikes);
   hl.setAttribute("aria-pressed", prefs.hideLikes ? "true" : "false");
   hl.title = prefs.hideLikes ? "Your likes are hidden from these results. Click to show them." : "Leave tracks you've liked out of the results";
-  $("heroActions").hidden = !["playAll", "followBtn", "plDelete", "luckyBtn", "libSort", "langChip", "favOnlyChip", "setsLikedChip", "hideLikesChip", "artistsBatch"].some((id) => !$(id).hidden);
+  $("heroActions").hidden = !["playAll", "followBtn", "plDelete", "plShare", "luckyBtn", "libSort", "langChip", "favOnlyChip", "setsLikedChip", "hideLikesChip", "artistsBatch"].some((id) => !$(id).hidden);
 }
 
 function trackRow(t, i, playing) {

@@ -20,6 +20,8 @@ if it's installed, and offers to download it if it isn't.
    It prints your relay's address, like `https://omnipulse-jam.<your-name>.workers.dev`.
 3. In OmniPulse: **Settings > Streaming > Listen Along & Jams > Relay Address**, paste that address.
 
+It also keeps **shared playlists**: a playlist page's **Share** button puts the playlist here, as a page listing each song with its links on SoundCloud, Spotify and YouTube Music, and **Open in OmniPulse** to add it. Already set up the relay before this? Run `npx wrangler deploy` in this folder again to add it.
+
 That's all. With **Discord Status** and its **Listen Along Button** on, your status gets a "Listen
 along" button while you play. The queue panel has **Start a Jam** for invite-only sessions.
 

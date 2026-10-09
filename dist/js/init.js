@@ -26,6 +26,7 @@ function extrasInit() {
   libraryInit();
   xplInit();
   xmInit();
+  shareInit();
   favouritesInit();
   setsInit();
   feedInit();
