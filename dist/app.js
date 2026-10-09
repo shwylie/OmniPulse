@@ -1256,7 +1256,23 @@ function setQueueOpen(open) {
 $("queueBtn").addEventListener("click", () => setQueueOpen(!prefs.queue));
 
 // ---------- now playing ----------
+// The bar's tab: as wide as the track's title and artist need, sliding there from the width before
+function tabFit() {
+  const n = $("nowToggle");
+  if (!n) return;
+  const was = n.getBoundingClientRect().width;
+  n.style.transition = "none";
+  n.style.width = "auto";
+  const want = Math.min(n.getBoundingClientRect().width, n.parentElement.getBoundingClientRect().width);
+  n.style.width = was + "px";
+  void n.offsetWidth;
+  n.style.transition = "";
+  n.style.width = Math.ceil(want) + "px";
+}
+addEventListener("resize", () => requestAnimationFrame(tabFit));
+
 function fillNowPlaying(t) {
+  requestAnimationFrame(tabFit);
   applyFix(t);
   $("nowTitle").textContent = t ? t.title || "Untitled" : "Nothing playing";
   fillArtists($("nowArtist"), t);

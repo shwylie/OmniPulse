@@ -1533,7 +1533,7 @@ body.streamSafe #navSets, body.streamSafe #navArtists, body.streamSafe #plSectio
   background: var(--barBg); background-attachment: fixed; border-radius: 0 10px 10px 10px;
 }
 .player .now {
-  justify-self: start; max-width: 100%; padding: 10px 18px 8px 14px; border-radius: 10px 10px 0 0;
+  justify-self: start; max-width: 100%; padding: 10px 24px 8px 14px; border-radius: 10px 10px 0 0;
   background: var(--barBg); background-attachment: fixed;
 }
 .player .statusBar { padding: 0 14px; }
@@ -1541,3 +1541,26 @@ body.streamSafe #navSets, body.streamSafe #navArtists, body.streamSafe #plSectio
 .player .transport { padding-left: 14px; margin-top: 4px; }
 .player .right { padding-right: 14px; margin-top: 4px; }
 .player .miniProg { margin: 4px 14px 0; padding-bottom: 8px; }
+/* where the tab's right side meets the body: an inward curve (an L), so the two read as one piece */
+.player .now { position: relative; }
+.player .now::after {
+  content: ""; position: absolute; left: 100%; bottom: 0; width: 8px; height: 8px; pointer-events: none;
+  background: var(--barBg); background-attachment: fixed;
+  -webkit-mask: radial-gradient(circle at 100% 0, transparent 7.5px, #000 8px);
+  mask: radial-gradient(circle at 100% 0, transparent 7.5px, #000 8px);
+}
+
+/* The pages reach down to the bar's body, around the tab: the bar is drawn over the bottom of them,
+   the tab inside a gap of the window's own colour (as wide as the gaps between the panels), with
+   the curve where its side meets the body. The tab slides between widths as the track changes. */
+:root { --tabH: 62px; }
+.player { margin-top: calc(-1 * var(--tabH)); z-index: 3; }
+.player .now { height: var(--tabH); box-sizing: border-box; transition: width 0.32s cubic-bezier(0.2, 0.8, 0.2, 1); overflow: visible; }
+.player .now::before {
+  content: ""; position: absolute; left: -8px; right: -8px; top: -8px; bottom: 0; z-index: -1;
+  background: var(--bg); border-radius: 18px 18px 0 0; pointer-events: none;
+}
+.player .now .nowText { min-width: 0; overflow: hidden; }
+/* what's at the bottom of a page can still be scrolled clear of the tab */
+#listView, .sideLists { scroll-padding-bottom: calc(var(--tabH) + 16px); }
+#listView > :last-child, .sideLists > :last-child { margin-bottom: calc(var(--tabH) + 8px); }
