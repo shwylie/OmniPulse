@@ -419,7 +419,8 @@ function renderHero() {
   }
   const n = viewTracks.length;
   $("viewTitle").textContent = title;
-  $("refreshBtn").hidden = !(v === "discover" || v === "rediscover");
+  // pages made from what the platforms send: fetched again with the refresh button
+  $("refreshBtn").hidden = !["discover", "rediscover", "sets", "artists", "streamer"].includes(v);
   $("viewSub").textContent = sub.trim();
   if (v === "artist" && currentArtist && currentArtist.on) $("viewSub").replaceChildren(...artistSubline(currentArtist));
   if (v === "rediscover") {

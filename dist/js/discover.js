@@ -204,6 +204,9 @@ function discoverInit() {
   $("refreshBtn").addEventListener("click", () => {
     if (view === "discover") openDiscover(discoverSrc, true);
     else if (view === "rediscover") openRediscover(true);
+    else if (view === "sets") openSets();
+    else if (view === "artists") { followedCache = null; openArtistsPage(); }
+    else if (view === "streamer") { streamColl.clear(); streamShelves = null; openStreamer(); }
   });
   $("recLangSel").value = prefs.recLang || "any";
   $("recLangSel").addEventListener("change", () => {
