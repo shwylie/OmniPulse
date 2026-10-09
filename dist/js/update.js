@@ -1,4 +1,4 @@
-// Updates (Settings > App & Look > Updates): a little after each launch, the public releases repo is
+// Updates (Settings > Updates & Backups): a little after each launch, the public releases repo is
 // asked whether there's a newer OmniPulse; if there is, the status bar offers it. Update downloads it,
 // installs it (the installer's progress window, no questions) and starts the new one. Every release
 // is signed with OmniPulse's key and checked against it before it installs (src-tauri: update_*).
