@@ -1580,3 +1580,7 @@ body.streamSafe #navSets, body.streamSafe #navArtists, body.streamSafe #plSectio
   -webkit-mask: radial-gradient(circle at 0 0, transparent 7.5px, #000 8px);
   mask: radial-gradient(circle at 0 0, transparent 7.5px, #000 8px);
 }
+/* and inside it, mirrored: the cover at the window's edge, the text beside it lined up to the right */
+:root[data-tab="right"] .player .now { flex-direction: row-reverse; padding: 10px 14px 8px 24px; }
+:root[data-tab="right"] .player .nowText { align-items: flex-end; text-align: right; }
+:root[data-tab="right"] .player .now .artistRow { justify-content: flex-end; }
