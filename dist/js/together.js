@@ -18,7 +18,7 @@
 const together = {
   role: null,          // "host" | "listener"
   kind: null,          // "listen" | "jam"
-  code: "", hostKey: "", inviteKey: "", joinUrl: "", relay: "",
+  code: "", hostKey: "", inviteKey: "", joinUrl: "", relay: "", joinAsks: [], waiting: false, url: "",
   ws: null, members: [], hostName: "", canAdd: false,
   state: null, stateAt: 0, trims: {}, picks: {}, saved: null, localPause: false, closing: false, pushTimer: null,
 };
@@ -28,6 +28,16 @@ const RELAY_URL = "https://omnipulse-jam.shwylie101.workers.dev";
 const relayUrl = () => (String(prefs.relayUrl || "").trim() || RELAY_URL).replace(/\/+$/, "");
 const myName = () => (prefs.togetherName || "").trim() || (typeof spotifyName === "string" && spotifyName) || userName || "Someone";
 const wsBase = (relay) => relay.replace(/^http/i, "ws");
+// This app's own id, so the relay can keep each person to one request waiting (and to none, once
+// declined), whatever name they give
+function myCid() {
+  if (!/^[a-z0-9]{20}$/.test(prefs.clientId || "")) {
+    const abc = "abcdefghijklmnopqrstuvwxyz0123456789";
+    prefs.clientId = [...crypto.getRandomValues(new Uint8Array(20))].map((b) => abc[b % abc.length]).join("");
+    savePrefs();
+  }
+  return prefs.clientId;
+}
 // only a relay on the web (https), or one on this PC while testing
 const relayOk = (u) => /^https:\/\/[^/\s]+$/i.test(u) || /^http:\/\/(127\.0\.0\.1|localhost)(:\d+)?$/i.test(u);
 
@@ -47,9 +57,10 @@ function paintTogether() {
   const hostingJam = together.role === "host" && together.kind === "jam";
   jamBtn.hidden = (!relayUrl() && !listening) || (typeof jamAsk !== "undefined" && !!jamAsk);
   jamBtn.textContent = listening ? (together.kind === "jam" ? "Leave Jam" : "Leave Listen Along")
-    : hostingJam ? "Jam" + (together.members.length ? " · " + together.members.length : "") : "Start a Jam";
+    : hostingJam ? "Jam" + (together.members.length ? " · " + together.members.length : "") + (together.joinAsks.length ? " · " + together.joinAsks.length + " waiting" : "") : "Start a Jam";
+  jamBtn.classList.toggle("asks", hostingJam && together.joinAsks.length > 0);
   jamBtn.classList.toggle("on", hostingJam || listening);
-  if (hostingJam && $("jamDialog").open) $("jamMembers").textContent = together.members.length ? together.members.join(", ") : "Nobody has joined yet.";
+  if (hostingJam && $("jamDialog").open) { $("jamMembers").textContent = together.members.length ? together.members.join(", ") : "Nobody has joined yet."; jamWaitPaint(); }
   $("togetherBar").hidden = !listening;
   // the queue is the host's: nothing to clear, no autoplay of your own
   $("clearQueue").hidden = listening;
@@ -61,12 +72,16 @@ function paintTogether() {
 }
 
 // ---------- a connection to a room ----------
-function roomConnect(url, onMessage) {
+// (refused: called if the relay turns it away before it ever opens, instead of trying again)
+function roomConnect(url, onMessage, refused) {
   const ws = new WebSocket(url);
   together.ws = ws;
+  let opened = false;
+  ws.onopen = () => { opened = true; };
   ws.onmessage = (e) => { let m; try { m = JSON.parse(e.data); } catch (x) { return; } onMessage(m); };
   ws.onclose = () => {
     if (together.ws !== ws || together.closing) return;
+    if (!opened && refused) { refused(); return; }
     // dropped: try again in a few seconds, while still in the room
     setTimeout(() => { if (together.ws === ws && !together.closing && together.role) roomConnect(url, onMessage); }, 4000);
   };
@@ -75,8 +90,9 @@ function roomConnect(url, onMessage) {
 
 // ---------- hosting ----------
 // A new room on the relay
-async function roomCreate(kind) {
-  const res = await fetch(relayUrl() + "/api/rooms", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ kind, host: myName() }) });
+// (admit: app ids let into a Jam already)
+async function roomCreate(kind, admit) {
+  const res = await fetch(relayUrl() + "/api/rooms", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ kind, host: myName(), admit: admit || [] }) });
   if (!res.ok) throw new Error("the relay answered " + res.status);
   return res.json();
 }
@@ -96,8 +112,43 @@ async function hostOpen(kind, made) {
 function hostMessage(m) {
   if (m.type === "members") { together.members = m.list || []; paintTogether(); }
   else if (m.type === "add" && together.kind === "jam" && m.track) jamAdded(m.track, m.by);
-  else if (m.type === "ask" && m.id) jamAsked(m.id, m.name || "Someone");
-  else if (m.type === "askGone" && jamAsk && jamAsk.id === m.id) jamAskClose();
+  else if (m.type === "ask" && m.id) jamAsked(m.id, m.name || "Someone", m.cid || "");
+  else if (m.type === "joinAsk" && m.id) jamJoinAsked(m.id, m.name || "Someone", m.cid || "");
+  else if (m.type === "askGone") {
+    if (jamAsk && jamAsk.id === m.id) jamAskClose();
+    together.joinAsks = together.joinAsks.filter((x) => x.id !== m.id);
+    paintTogether();
+  }
+}
+
+// ---------- asks to join your Jam: each person once, waiting until you let them in or not ----------
+function jamJoinAsked(id, name, cid) {
+  const same = together.joinAsks.find((x) => (cid && x.cid === cid) || x.id === id);
+  if (same) { same.id = id; return; }   // (the same person again: once in the list, at their newest ask)
+  together.joinAsks.push({ id, name, cid });
+  paintTogether();
+  say(name + " wants to join your Jam.", { force: true, actions: [["Review", jamDialog]] });
+}
+
+function jamWaitPaint() {
+  const box = $("jamWaiting");
+  box.replaceChildren(...together.joinAsks.map((x) => {
+    const row = el("div", "jamWaitRow");
+    const yes = el("button", "soft fixSave", "Let In"), no = el("button", "soft", "Decline");
+    yes.addEventListener("click", () => jamAdmit(x, true));
+    no.addEventListener("click", () => jamAdmit(x, false));
+    row.append(el("span", "who", x.name), yes, no);
+    return row;
+  }));
+  $("jamWaitBox").hidden = !together.joinAsks.length;
+}
+
+function jamAdmit(x, ok) {
+  try { together.ws.send(JSON.stringify({ type: "admit", id: x.id, ok, url: together.joinUrl })); } catch (e) {}
+  together.joinAsks = together.joinAsks.filter((y) => y !== x);
+  paintTogether();
+  jamWaitPaint();
+  if (ok) say(x.name + " is joining your Jam.", { force: true });
 }
 
 // ---------- Ask to Jam (the Discord button): someone asks you to start a Jam ----------
@@ -107,14 +158,17 @@ function hostMessage(m) {
 const JAM_ASK_MS = 60000;
 let jamAsk = null;   // { id, name, timer }
 
-function jamAskReply(id, ok, url) {
-  try { together.ws.send(JSON.stringify({ type: "askReply", id, ok, url: url || "" })); } catch (e) {}
+// (busy: "not right now", which isn't a decline: they can ask again later)
+function jamAskReply(id, ok, url, busy) {
+  try { together.ws.send(JSON.stringify({ type: "askReply", id, ok, url: url || "", busy: !!busy })); } catch (e) {}
 }
 
-function jamAsked(id, name) {
-  // one at a time: anyone else asking meanwhile is told no
-  if (jamAsk || (together.role === "host" && together.kind === "jam")) { jamAskReply(id, false); return; }
-  jamAsk = { id, name, timer: setTimeout(() => { jamAskReply(id, false); jamAskClose(); }, JAM_ASK_MS) };
+function jamAsked(id, name, cid) {
+  // the same person again: the one prompt they have already
+  if (jamAsk && cid && jamAsk.cid === cid) { jamAsk.id = id; return; }
+  // one at a time: anyone else asking meanwhile is told you're busy
+  if (jamAsk || (together.role === "host" && together.kind === "jam")) { jamAskReply(id, false, "", true); return; }
+  jamAsk = { id, name, cid, timer: setTimeout(() => { jamAskReply(id, false); jamAskClose(); }, JAM_ASK_MS) };
   $("jamAskText").textContent = name + " wants you to Start a Jam";
   const ring = $("askRingLeft");
   ring.classList.remove("run");
@@ -134,11 +188,12 @@ function jamAskClose() {
 
 async function jamAskAccept() {
   if (!jamAsk) return;
-  const { id, name } = jamAsk;
+  const { id, name, cid } = jamAsk;
   jamAskClose();
   try {
-    // the Jam first, so they're sent its invite on the room they asked in, then the move to it
-    const r = await roomCreate("jam");
+    // the Jam first (with them let in already), so they're sent its invite on the room they asked
+    // in, then the move to it
+    const r = await roomCreate("jam", cid ? [cid] : []);
     jamAskReply(id, true, r.joinUrl);
     await new Promise((res) => setTimeout(res, 400));
     await hostOpen("jam", r);
@@ -150,18 +205,32 @@ async function jamAskAccept() {
 }
 
 // Asking someone (their Discord status's Ask to Jam button opened omnipulse://ask/<code>)
+// A request of yours that's still waiting (to start a Jam, or to be let into one): while it is, no other
+// is sent
+let myAsk = null;   // { host, what }
+const askPendingSay = () => say("Your request " + myAsk.what + " is still waiting. You'll hear back here.", { force: true });
+
 async function jamAskSend(code, relay) {
+  if (myAsk) { askPendingSay(); return; }
   let info = null;
   try { info = await (await fetch(relay + "/api/rooms/" + code)).json(); } catch (e) {}
-  if (!info || info.error || info.kind !== "listen") { say("They're not taking requests for a Jam right now."); return; }
+  if (!info || info.error) { say("They're not taking requests right now."); return; }
   const host = info.host || "They";
-  const ws = new WebSocket(wsBase(relay) + "/ws/" + code + "?role=asker&name=" + encodeURIComponent(myName()));
-  let answered = false;
-  say("Asked " + host + " to start a Jam. Waiting for them...", { stay: true, force: true });
+  const join = info.kind === "jam";
+  if (together.role === "listener" && together.code === code) { say("You're in " + host + "'s Jam already."); return; }
+  myAsk = { host, what: join ? "to join " + host + "'s Jam" : "for " + host + " to start a Jam" };
+  const ws = new WebSocket(wsBase(relay) + "/ws/" + code + "?role=asker&name=" + encodeURIComponent(myName()) + "&cid=" + myCid());
+  let answered = false, opened = false;
+  const done = (note) => { if (answered) return; answered = true; myAsk = null; if (note) say(note, { force: true }); };
+  ws.onopen = () => { opened = true; };
+  say(join ? "Asked to join " + host + "'s Jam. Waiting for them..." : "Asked " + host + " to start a Jam. Waiting for them...", { stay: true, force: true });
   ws.onmessage = (e) => {
     let m; try { m = JSON.parse(e.data); } catch (x) { return; }
+    if (m.type === "declined") { done(host + " didn't let you in this time."); return; }
+    if (m.type === "admitted") m = { type: "askReply", ok: true, url: m.url };
     if (m.type !== "askReply") return;
-    answered = true;
+    if (!m.ok) { done(m.busy ? host + " is answering someone else right now. Try again in a minute." : host + " didn't start a Jam this time."); return; }
+    done("");
     if (m.ok && m.url) {
       // the Jam's invite (its web page's address), as the app link that page would open
       say("", { force: true });
@@ -169,10 +238,11 @@ async function jamAskSend(code, relay) {
       try { const w = new URL(m.url); link = "omnipulse:/" + w.pathname + "?k=" + encodeURIComponent(w.searchParams.get("k") || "") + "&relay=" + encodeURIComponent(w.origin); } catch (x) {}
       togetherLink(link, true);
     }
-    else say(host + " didn't start a Jam this time.", { force: true });
   };
-  ws.onclose = () => { if (!answered) say(host + " didn't answer.", { force: true }); };
-  setTimeout(() => { if (!answered) { answered = true; try { ws.close(); } catch (e) {} say(host + " didn't answer.", { force: true }); } }, JAM_ASK_MS + 10000);
+  // (refused before it was even asked: they declined you before, or there are too many asking)
+  ws.onclose = () => done(opened ? host + " didn't answer." : "Couldn't ask " + host + ": they may have declined you already, or have too many requests waiting.");
+  // a Jam's host has as long as they like; starting one, a minute
+  if (!join) setTimeout(() => { if (!answered) { try { ws.close(); } catch (e) {} done(host + " didn't answer."); } }, JAM_ASK_MS + 10000);
 }
 
 function hostSnapshot() {
@@ -238,7 +308,8 @@ async function togetherEnd(quiet) {
     try { together.ws.close(); } catch (e) {}
   }
   if (was === "listener") listenerRestore();
-  Object.assign(together, { role: null, kind: null, code: "", hostKey: "", inviteKey: "", joinUrl: "", ws: null, members: [], state: null, trims: {}, picks: {}, canAdd: false, localPause: false });
+  Object.assign(together, { role: null, kind: null, code: "", hostKey: "", inviteKey: "", joinUrl: "", ws: null, members: [], joinAsks: [], waiting: false, url: "", state: null, trims: {}, picks: {}, canAdd: false, localPause: false });
+  if (was === "listener") myAsk = null;
   paintTogether();
   if (!quiet) say(was === "host" ? "Ended. Listeners carry on with their own music." : "You left. Back to your own queue.");
   if (was === "host") presenceUpdate();
@@ -266,19 +337,46 @@ async function togetherLink(link, asked) {
   if (!info || info.error) { say("That session has ended."); return; }
   const what = kind === "jam" ? "Join " + info.host + "'s Jam?" : "Listen along with " + info.host + "?";
   const more = kind === "jam" ? " You can add songs; " + info.host + " picks what plays." : " You'll hear what they play, as they play it.";
+  if (myAsk) { askPendingSay(); return; }
+  if (together.role === "listener" && together.code === code) { say(together.waiting ? "Your request to join " + info.host + "'s Jam is still waiting." : "You're in " + info.host + "'s Jam already."); return; }
   if (!asked && !confirm(what + more + " Your own queue is set aside until you leave, and your EQ and loudness stay yours.")) return;
   if (together.role) await togetherEnd(true);
   together.saved = { queue: queue.slice(), qi, listName: queueListName, wasPlaying: nowPlaying() };
   if (nowPlaying()) toggle();
   Object.assign(together, { role: "listener", kind, code, relay, hostName: info.host, closing: false, trims: {}, members: [] });
   const k = u.searchParams.get("k") || "";
-  roomConnect(wsBase(relay) + "/ws/" + code + "?role=listener&name=" + encodeURIComponent(myName()) + (k ? "&k=" + encodeURIComponent(k) : ""), listenerMessage);
+  together.url = wsBase(relay) + "/ws/" + code + "?role=listener&name=" + encodeURIComponent(myName()) + "&cid=" + myCid() + (k ? "&k=" + encodeURIComponent(k) : "");
+  roomConnect(together.url, listenerMessage, () => {
+    // refused at the door: declined before, too many waiting, or the Jam's over
+    togetherEnd(true).then(() => say("Couldn't join " + info.host + "'s " + (kind === "jam" ? "Jam" : "session") + ": they may have declined you already, or have too many requests waiting.", { force: true }));
+  });
   paintTogether();
-  say(kind === "jam" ? "Joined " + info.host + "'s Jam." : "Listening along with " + info.host + ".");
+  say(kind === "jam" ? "Joining " + info.host + "'s Jam..." : "Listening along with " + info.host + ".");
 }
 
 function listenerMessage(m) {
-  if (m.type === "hello") { together.hostName = m.host || together.hostName; together.canAdd = !!m.canAdd; paintTogether(); }
+  // a Jam: waiting for the host to let you in, then in (connected again), or not
+  if (m.type === "waiting") {
+    together.waiting = true;
+    myAsk = { host: together.hostName, what: "to join " + together.hostName + "'s Jam" };
+    say("Waiting for " + together.hostName + " to let you into the Jam...", { stay: true, force: true });
+    return;
+  }
+  if (m.type === "admitted") {
+    together.waiting = false;
+    myAsk = null;
+    say("", { force: true });
+    if (together.ws) { const old = together.ws; together.ws = null; try { old.close(); } catch (e) {} }
+    roomConnect(together.url, listenerMessage);
+    return;
+  }
+  if (m.type === "declined") {
+    myAsk = null;
+    const host = together.hostName;
+    togetherEnd(true).then(() => say(host + " didn't let you in this time.", { force: true }));
+    return;
+  }
+  if (m.type === "hello") { together.hostName = m.host || together.hostName; together.canAdd = !!m.canAdd; together.waiting = false; if (together.kind === "jam") say("Joined " + together.hostName + "'s Jam.", { force: true }); paintTogether(); }
   else if (m.type === "members") { together.members = m.list || []; paintTogether(); }
   else if (m.type === "state" && m.state) listenerFollow(m.state);
   else if (m.type === "ended") togetherEnd(true).then(() => say((together.hostName || "The host") + " ended the session. Back to your own queue."));

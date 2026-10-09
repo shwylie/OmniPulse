@@ -346,8 +346,12 @@
 <dialog id="jamDialog" class="fixDialog">
   <div class="sheet">
     <h2>Your Jam</h2>
-    <p class="note">Only people with this link can join. They hear what you play, as you play it, and can add songs (shown as theirs). Send it to the friends you want in.</p>
+    <p class="note">Send this link to the friends you want in. You let each one in: they hear what you play, as you play it, and can add songs (shown as theirs).</p>
     <div class="trimRow"><input id="jamLink" class="sensitive" type="text" readonly><button type="button" id="jamCopy" class="soft">Copy</button></div>
+    <div id="jamWaitBox" hidden>
+      <h3>Waiting to Join</h3>
+      <div class="jamWaiting" id="jamWaiting"></div>
+    </div>
     <h3>In the Jam</h3>
     <p class="note" id="jamMembers"></p>
     <div class="fixActions">

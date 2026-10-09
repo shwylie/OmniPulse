@@ -12,9 +12,14 @@
 //   GET  /api/rooms/<code>          who's hosting and what's playing (for that page)
 //   GET  /ws/<code>?role=host&key=<hostKey>              the host's connection
 //   GET  /ws/<code>?role=listener&name=<n>[&k=<invite>]  a listener's (a Jam needs its invite)
-//   GET  /ws/<code>?role=asker&name=<n>                  someone asking the host to start a Jam (a Listen
-//        Along room): the host is told { type: "ask", id, name }, answers { type: "askReply", id, ok, url },
-//        and the asker is told { type: "askReply", ok, url } (the Jam's invite, if it was started)
+//   GET  /ws/<code>?role=asker&name=<n>&cid=<app id>     someone asking: in a Listen Along room, for a Jam
+//        (the host is told { type: "ask", id, name, cid }, answers { type: "askReply", id, ok, url, busy },
+//        the asker is told { type: "askReply", ok, url }); in a Jam, to join it (the host is told
+//        { type: "joinAsk", ... }, answers { type: "admit", id, ok, url }, the asker is told
+//        { type: "admitted", url } or { type: "declined" })
+//   A Jam's listeners need the host's approval too: one whose app id isn't let in yet waits (told
+//   { type: "waiting" }), the host is told { type: "joinAsk", id, name, cid }, and it's { type: "admitted" }
+//   (connect again) or { type: "declined" }. POST /api/rooms takes { admit: [app ids] } let in already.
 //
 // Shared playlists (a playlist on someone's PC, with each song's links on every platform it's on):
 //   POST /api/shares                { title, by, tracks }  ->  { code, key, url }
@@ -28,6 +33,10 @@
 const ROOM_IDLE_MS = 12 * 3600 * 1000;   // a room nobody has used for this long goes away
 const MAX_LISTENERS = 50;
 const MAX_MESSAGE = 64 * 1024;
+// asking to join: each app (by its id) has one request waiting at a time, a network at most two,
+// a room at most ten; someone declined can't ask again in that room
+const MAX_WAITING = 10;
+const MAX_WAITING_PER_IP = 2;
 const SHARE_IDLE_MS = 180 * 86400 * 1000;   // a shared playlist nobody has updated or opened for this long goes away
 const MAX_SHARE = 1024 * 1024;
 const MAX_SHARE_TRACKS = 2000;
@@ -45,7 +54,7 @@ function randomCode(n, alphabet = "abcdefghjkmnpqrstuvwxyz23456789") {
 const esc = (s) => String(s || "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
 function joinPage(env, info, appLink, ask) {
-  const title = info ? (ask ? "Ask " + info.host + " to start a Jam" : info.kind === "jam" ? "Join " + info.host + "'s Jam" : "Listen along with " + info.host) : "This session has ended";
+  const title = info ? (ask ? (info.kind === "jam" ? "Ask to join " + info.host + "'s Jam" : "Ask " + info.host + " to start a Jam") : info.kind === "jam" ? "Join " + info.host + "'s Jam" : "Listen along with " + info.host) : "This session has ended";
   const now = info && info.track ? `<p class="now">Now playing <b>${esc(info.track.title)}</b>${info.track.artist ? " by " + esc(info.track.artist) : ""}</p>` : "";
   const download = env.DOWNLOAD_URL || "";
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
@@ -163,7 +172,8 @@ export default {
       const hostKey = randomCode(32);
       const inviteKey = kind === "jam" ? randomCode(16) : "";
       const stub = env.ROOMS.get(env.ROOMS.idFromName(code));
-      await stub.fetch("https://room/init", { method: "POST", body: JSON.stringify({ kind, host: String(body.host || "Someone").slice(0, 40), hostKey, inviteKey }) });
+      const admitted = (Array.isArray(body.admit) ? body.admit : []).filter((c) => typeof c === "string" && /^[a-z0-9]{8,40}$/.test(c)).slice(0, 5);
+      await stub.fetch("https://room/init", { method: "POST", body: JSON.stringify({ kind, host: String(body.host || "Someone").slice(0, 40), hostKey, inviteKey, admitted, declined: [] }) });
       const base = url.origin;
       return json({ code, hostKey, inviteKey, joinUrl: kind === "jam" ? `${base}/jam/${code}?k=${inviteKey}` : `${base}/join/${code}` });
     }
@@ -176,7 +186,7 @@ export default {
     if (parts[0] === "api" && parts[1] === "rooms" && req.method === "GET") return stub.fetch("https://room/info");
     if (parts[0] === "join" || parts[0] === "jam" || parts[0] === "ask") {
       const info = await (await stub.fetch("https://room/info")).json().catch(() => null);
-      const ok = info && !info.error && (parts[0] === "jam" ? info.kind === "jam" : info.kind === "listen");
+      const ok = info && !info.error && (parts[0] === "jam" ? info.kind === "jam" : parts[0] === "ask" || info.kind === "listen");
       const scheme = env.APP_SCHEME || "omnipulse";
       const appLink = `${scheme}://${parts[0]}/${code}` + (parts[0] === "jam" ? "?k=" + encodeURIComponent(url.searchParams.get("k") || "") + "&relay=" + encodeURIComponent(url.origin) : "?relay=" + encodeURIComponent(url.origin));
       return new Response(joinPage(env, ok ? info : null, appLink, parts[0] === "ask"), { headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" } });
@@ -216,19 +226,30 @@ export class Room {
     }
     // a connection
     const role = url.searchParams.get("role");
-    if (role === "asker") {
-      // asking a Listen Along room's host to start a Jam
-      if (meta.kind !== "listen") return json({ error: "they're not taking requests for a Jam right now" }, 409);
-      if (!this.ctx.getWebSockets("host").length) return json({ error: "they're not here right now" }, 409);
-      if (this.ctx.getWebSockets("asker").length >= 5) return json({ error: "they're being asked already" }, 429);
+    const name = String(url.searchParams.get("name") || (role === "asker" ? "Someone" : "A listener")).slice(0, 40);
+    const cid = String(url.searchParams.get("cid") || "");
+    const ip = req.headers.get("CF-Connecting-IP") || "";
+    const hosted = this.ctx.getWebSockets("host").length > 0;
+    // someone wanting in (asking, or a Jam listener not let in yet): told to wait, the host asked
+    const wait = (kind) => {
+      if (!/^[a-z0-9]{8,40}$/.test(cid)) return json({ error: "this needs an up-to-date OmniPulse" }, 400);
+      if ((meta.declined || []).includes(cid)) return json({ error: "declined" }, 403);
+      const waiting = this.ctx.getWebSockets("asker").concat(this.ctx.getWebSockets("pending")).map((w) => w.deserializeAttachment() || {});
+      if (waiting.some((w) => w.cid === cid)) return json({ error: "a request is already waiting" }, 409);
+      if (ip && waiting.filter((w) => w.ip === ip).length >= MAX_WAITING_PER_IP) return json({ error: "too many requests from here" }, 429);
+      if (waiting.length >= MAX_WAITING) return json({ error: "they have too many requests waiting" }, 429);
       const pair = new WebSocketPair();
-      const name = String(url.searchParams.get("name") || "Someone").slice(0, 40);
       const id = randomCode(10);
-      this.ctx.acceptWebSocket(pair[1], ["asker"]);
-      pair[1].serializeAttachment({ role: "asker", name, id });
-      const msg = JSON.stringify({ type: "ask", id, name });
+      this.ctx.acceptWebSocket(pair[1], [kind]);
+      pair[1].serializeAttachment({ role: kind, name, id, cid, ip });
+      const msg = JSON.stringify({ type: meta.kind === "jam" ? "joinAsk" : "ask", id, name, cid });
       this.ctx.getWebSockets("host").forEach((w) => { try { w.send(msg); } catch (e) {} });
+      if (kind === "pending") pair[1].send(JSON.stringify({ type: "waiting", host: meta.host }));
       return new Response(null, { status: 101, webSocket: pair[0] });
+    };
+    if (role === "asker") {
+      if (!hosted) return json({ error: "they're not here right now" }, 409);
+      return wait("asker");
     }
     if (role === "host") {
       if (url.searchParams.get("key") !== meta.hostKey) return json({ error: "not the host" }, 403);
@@ -236,16 +257,27 @@ export class Room {
     } else {
       if (meta.kind === "jam" && url.searchParams.get("k") !== meta.inviteKey) return json({ error: "this Jam needs an invite" }, 403);
       if (this.listeners().length >= MAX_LISTENERS) return json({ error: "this session is full" }, 429);
+      // a Jam: only those the host has let in
+      if (meta.kind === "jam" && !(meta.admitted || []).includes(cid)) {
+        if (!hosted) return json({ error: "they're not here right now" }, 409);
+        return wait("pending");
+      }
     }
     const pair = new WebSocketPair();
-    const name = String(url.searchParams.get("name") || "A listener").slice(0, 40);
     const id = randomCode(10);
     this.ctx.acceptWebSocket(pair[1], [role === "host" ? "host" : "listener"]);
-    pair[1].serializeAttachment({ role: role === "host" ? "host" : "listener", name, id });
+    pair[1].serializeAttachment({ role: role === "host" ? "host" : "listener", name, id, cid });
     if (role !== "host") {
       const state = await this.ctx.storage.get("state");
       pair[1].send(JSON.stringify({ type: "hello", kind: meta.kind, host: meta.host, canAdd: meta.kind === "jam", you: id }));
       if (state) pair[1].send(JSON.stringify({ type: "state", state }));
+    }
+    // (the host back: anyone still waiting is asked about again)
+    if (role === "host") {
+      this.ctx.getWebSockets("asker").concat(this.ctx.getWebSockets("pending")).forEach((w) => {
+        const x = w.deserializeAttachment() || {};
+        try { pair[1].send(JSON.stringify({ type: meta.kind === "jam" ? "joinAsk" : "ask", id: x.id, name: x.name, cid: x.cid })); } catch (e) {}
+      });
     }
     await this.touch();
     this.sendMembers();
@@ -281,12 +313,23 @@ export class Room {
         const msg = JSON.stringify({ type: "state", state: m.state });
         this.listeners().forEach((w) => { try { w.send(msg); } catch (e) {} });
         await this.touch();
-      } else if (m.type === "askReply" && typeof m.id === "string") {
-        // the host's answer, to whoever asked
-        const msg = JSON.stringify({ type: "askReply", ok: !!m.ok, url: typeof m.url === "string" ? m.url.slice(0, 300) : "", host: (await this.meta() || {}).host || "" });
-        this.ctx.getWebSockets("asker").forEach((w) => {
-          if ((w.deserializeAttachment() || {}).id === m.id) { try { w.send(msg); w.close(1000, "answered"); } catch (e) {} }
+      } else if ((m.type === "askReply" || m.type === "admit") && typeof m.id === "string") {
+        // the host's answer, to whoever asked (a decline is kept: they can't ask again here; "busy"
+        // isn't a decline, only a "not right now")
+        const meta = await this.meta();
+        if (!meta) return;
+        const url = typeof m.url === "string" ? m.url.slice(0, 300) : "";
+        this.ctx.getWebSockets("asker").concat(this.ctx.getWebSockets("pending")).forEach((w) => {
+          const x = w.deserializeAttachment() || {};
+          if (x.id !== m.id) return;
+          if (m.ok && x.cid && !(meta.admitted || []).includes(x.cid)) meta.admitted = (meta.admitted || []).concat(x.cid).slice(-200);
+          if (!m.ok && !m.busy && x.cid && !(meta.declined || []).includes(x.cid)) meta.declined = (meta.declined || []).concat(x.cid).slice(-500);
+          const msg = m.type === "askReply" && x.role === "asker" && meta.kind === "listen"
+            ? { type: "askReply", ok: !!m.ok, url, host: meta.host || "", busy: !!m.busy }
+            : m.ok ? { type: "admitted", url, host: meta.host || "" } : { type: "declined", host: meta.host || "" };
+          try { w.send(JSON.stringify(msg)); w.close(1000, "answered"); } catch (e) {}
         });
+        await this.ctx.storage.put("meta", meta);
       } else if (m.type === "end") {
         const msg = JSON.stringify({ type: "ended" });
         this.listeners().forEach((w) => { try { w.send(msg); w.close(1000, "ended"); } catch (e) {} });
@@ -305,8 +348,8 @@ export class Room {
   async webSocketClose(ws) {
     try { ws.close(); } catch (e) {}
     const who = ws.deserializeAttachment() || {};
-    // someone who asked, gone before an answer: the host's prompt goes too
-    if (who.role === "asker") {
+    // someone who asked (or was waiting to be let in), gone before an answer: the host's prompt goes too
+    if (who.role === "asker" || who.role === "pending") {
       const msg = JSON.stringify({ type: "askGone", id: who.id });
       this.ctx.getWebSockets("host").forEach((w) => { try { w.send(msg); } catch (e) {} });
       return;

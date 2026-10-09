@@ -26,6 +26,12 @@ const tStamp = (ms) => { const s = Math.max(0, Math.floor(ms / 1000)); return Ma
 // where you are (SoundCloud links can say where to start; Spotify's can't, so it just opens the track).
 function presenceButtons(t, joinUrl) {
   const link = t.sharing === "private" ? "" : t.permalink_url || "";
+  // in your Jam: friends ask to join it (you let them in from the Jam button)
+  if (prefs.presAsk && together.role === "host" && together.kind === "jam" && together.code) {
+    const out = [{ label: "Ask to join", url: relayUrl() + "/ask/" + together.code }];
+    if (link && presOpt("presLink")) out.push({ label: openLabel(t), url: link });
+    return out;
+  }
   if (joinUrl) {
     // Listen along opens OmniPulse (or offers it) and joins your queue, through your relay; Ask to Jam
     // asks you (at the top of the app) to start a Jam with them. Discord shows two at most.
