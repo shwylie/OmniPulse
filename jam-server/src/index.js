@@ -17,9 +17,8 @@
 //        the asker is told { type: "askReply", ok, url }); in a Jam, to join it (the host is told
 //        { type: "joinAsk", ... }, answers { type: "admit", id, ok, url }, the asker is told
 //        { type: "admitted", url } or { type: "declined" })
-//   A Jam's listeners need the host's approval too: one whose app id isn't let in yet waits (told
-//   { type: "waiting" }), the host is told { type: "joinAsk", id, name, cid }, and it's { type: "admitted" }
-//   (connect again) or { type: "declined" }. POST /api/rooms takes { admit: [app ids] } let in already.
+//   A Jam's invite lets you straight in (unless the host turned you away before). A Jam member can
+//   send { type: "add", track, next } and { type: "skip", d }, passed to the host to do.
 //
 // Shared playlists (a playlist on someone's PC, with each song's links on every platform it's on):
 //   POST /api/shares                { title, by, tracks }  ->  { code, key, url }
@@ -257,11 +256,8 @@ export class Room {
     } else {
       if (meta.kind === "jam" && url.searchParams.get("k") !== meta.inviteKey) return json({ error: "this Jam needs an invite" }, 403);
       if (this.listeners().length >= MAX_LISTENERS) return json({ error: "this session is full" }, 429);
-      // a Jam: only those the host has let in
-      if (meta.kind === "jam" && !(meta.admitted || []).includes(cid)) {
-        if (!hosted) return json({ error: "they're not here right now" }, 409);
-        return wait("pending");
-      }
+      // a Jam: the invite is the host's say-so (only someone they've turned away is kept out)
+      if (meta.kind === "jam" && (meta.declined || []).includes(cid)) return json({ error: "declined" }, 403);
     }
     const pair = new WebSocketPair();
     const id = randomCode(10);
@@ -288,10 +284,11 @@ export class Room {
     return this.ctx.getWebSockets("listener");
   }
 
-  sendMembers() {
-    const list = this.listeners().map((w) => (w.deserializeAttachment() || {}).name || "A listener");
+  // (gone: a socket that's closing is still listed while its close is handled, so it's left out)
+  sendMembers(gone) {
+    const list = this.listeners().filter((w) => w !== gone).map((w) => (w.deserializeAttachment() || {}).name || "A listener");
     const msg = JSON.stringify({ type: "members", list });
-    this.ctx.getWebSockets().forEach((w) => { try { w.send(msg); } catch (e) {} });
+    this.ctx.getWebSockets().forEach((w) => { if (w !== gone) { try { w.send(msg); } catch (e) {} } });
   }
 
   async touch() {
@@ -340,7 +337,12 @@ export class Room {
     // a Jam member adding a song: passed to the host, who adds it
     const meta = await this.meta();
     if (m.type === "add" && meta && meta.kind === "jam" && m.track && typeof m.track === "object") {
-      const msg = JSON.stringify({ type: "add", track: m.track, by: who.name || "A listener" });
+      const msg = JSON.stringify({ type: "add", track: m.track, next: !!m.next, by: who.name || "A listener" });
+      this.ctx.getWebSockets("host").forEach((w) => { try { w.send(msg); } catch (e) {} });
+    }
+    // ...or skipping (back or on): the host's player does it, for everyone
+    if (m.type === "skip" && meta && meta.kind === "jam") {
+      const msg = JSON.stringify({ type: "skip", d: m.d === -1 ? -1 : 1, by: who.name || "A listener" });
       this.ctx.getWebSockets("host").forEach((w) => { try { w.send(msg); } catch (e) {} });
     }
   }
@@ -354,11 +356,11 @@ export class Room {
       this.ctx.getWebSockets("host").forEach((w) => { try { w.send(msg); } catch (e) {} });
       return;
     }
-    this.sendMembers();
+    this.sendMembers(ws);
   }
 
-  async webSocketError() {
-    this.sendMembers();
+  async webSocketError(ws) {
+    this.sendMembers(ws);
   }
 
   // nobody's used it in a while: it goes

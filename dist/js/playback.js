@@ -169,8 +169,8 @@ function playbackInit() {
     const handlers = [
       ["play", () => { if (audio.paused) toggle(); }],
       ["pause", () => { if (!audio.paused) toggle(); }],
-      ["previoustrack", () => step(-1)],
-      ["nexttrack", () => step(1)],
+      ["previoustrack", () => skipPress(-1)],
+      ["nexttrack", () => skipPress(1)],
     ];
     handlers.forEach(([action, fn]) => { try { navigator.mediaSession.setActionHandler(action, fn); } catch (e) {} });
   }

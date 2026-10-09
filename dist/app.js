@@ -1928,14 +1928,16 @@ $("mute").addEventListener("click", () => {
 });
 
 $("toggle").addEventListener("click", toggle);
-$("prev").addEventListener("click", () => step(-1));
-$("next").addEventListener("click", () => step(1));
+// Skipping by hand (buttons, keys, the remote): listening along, it goes to the Jam instead (js/together.js)
+function skipPress(d) { step(d); }
+$("prev").addEventListener("click", () => skipPress(-1));
+$("next").addEventListener("click", () => skipPress(1));
 
 // Media keys, the tray menu and the taskbar buttons call this from the Rust side
 window.__mediaAction = (a) => {
   if (a === "play") toggle();
-  else if (a === "next") step(1);
-  else if (a === "prev") step(-1);
+  else if (a === "next") skipPress(1);
+  else if (a === "prev") skipPress(-1);
   else if (a === "shuffle") toggleShuffle();
   else if (a === "like") toggleLike(curTrack());
 };
@@ -1946,8 +1948,8 @@ document.addEventListener("keydown", (e) => {
   if (e.target.closest("input, select, textarea, button, [role='button']")) return;
   if (e.ctrlKey || e.altKey || e.metaKey) return;
   if (e.code === "Space") { e.preventDefault(); toggle(); }
-  else if (e.shiftKey && e.code === "ArrowRight") step(1);
-  else if (e.shiftKey && e.code === "ArrowLeft") step(-1);
+  else if (e.shiftKey && e.code === "ArrowRight") skipPress(1);
+  else if (e.shiftKey && e.code === "ArrowLeft") skipPress(-1);
   else if (e.key === "/") { e.preventDefault(); $("q").focus(); }
   else if (e.key === "q") setQueueOpen(!prefs.queue);
   else if (e.key === "l") toggleLike(curTrack());

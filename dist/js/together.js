@@ -128,7 +128,11 @@ async function hostOpen(kind, made) {
 
 function hostMessage(m) {
   if (m.type === "members") { together.members = m.list || []; paintTogether(); }
-  else if (m.type === "add" && together.kind === "jam" && m.track) jamAdded(m.track, m.by);
+  else if (m.type === "add" && together.kind === "jam" && m.track) jamAdded(m.track, m.by, m.next);
+  else if (m.type === "skip" && together.kind === "jam") {
+    togetherOrig.skipPress(m.d === -1 ? -1 : 1);
+    say((m.by || "Someone") + (m.d === -1 ? " went back a song." : " skipped the song."));
+  }
   else if (m.type === "ask" && m.id) jamAsked(m.id, m.name || "Someone", m.cid || "");
   else if (m.type === "joinAsk" && m.id) jamJoinAsked(m.id, m.name || "Someone", m.cid || "");
   else if (m.type === "askGone") {
@@ -284,11 +288,11 @@ function hostPush(now) {
 }
 
 // A song a Jam member added: it goes in the queue, shown as theirs
-function jamAdded(s, by) {
+function jamAdded(s, by, next) {
   const t = Object.assign({}, s, { user: Object.assign({}, s.user), requestedBy: (by || "Someone") + " (Jam)" });
   delete t.trim;
-  addToQueueHere(t);
-  say((by || "Someone") + ' added "' + (t.title || "a song") + '" to the Jam.');
+  if (next) togetherOrig.playNext(t); else addToQueueHere(t);
+  say((by || "Someone") + (next ? ' put "' + (t.title || "a song") + '" on next.' : ' added "' + (t.title || "a song") + '" to the Jam.'));
   hostPush(true);
 }
 
@@ -356,11 +360,9 @@ async function togetherLink(link, asked) {
   let info = null;
   try { info = await (await fetch(relay + "/api/rooms/" + code)).json(); } catch (e) {}
   if (!info || info.error) { say("That session has ended."); return; }
-  const what = kind === "jam" ? "Join " + info.host + "'s Jam?" : "Listen along with " + info.host + "?";
-  const more = kind === "jam" ? " You can add songs; " + info.host + " picks what plays." : " You'll hear what they play, as they play it.";
+  const more = kind === "jam" ? " You can add songs and skip them too." : " You'll hear what they play, as they play it.";
   if (myAsk) { askPendingSay(); return; }
   if (together.role === "listener" && together.code === code) { say(together.waiting ? "Your request to join " + info.host + "'s Jam is still waiting." : "You're in " + info.host + "'s Jam already."); return; }
-  if (!asked && !confirm(what + more + " Your own queue is set aside until you leave, and your EQ and loudness stay yours.")) return;
   if (together.role) await togetherEnd(true);
   together.saved = { queue: queue.slice(), qi, listName: queueListName, wasPlaying: nowPlaying() };
   if (nowPlaying()) toggle();
@@ -372,7 +374,7 @@ async function togetherLink(link, asked) {
     togetherEnd(true).then(() => say("Couldn't join " + info.host + "'s " + (kind === "jam" ? "Jam" : "session") + ": they may have declined you already, or have too many requests waiting.", { force: true }));
   });
   paintTogether();
-  say(kind === "jam" ? "Joining " + info.host + "'s Jam..." : "Listening along with " + info.host + ".");
+  say((kind === "jam" ? "Joining " + info.host + "'s Jam." : "Listening along with " + info.host + ".") + more + " Your own queue is set aside until you leave.", { force: true, actions: [["Leave", () => togetherEnd(false)]] });
 }
 
 function listenerMessage(m) {
@@ -397,7 +399,7 @@ function listenerMessage(m) {
     togetherEnd(true).then(() => say(host + " didn't let you in this time.", { force: true }));
     return;
   }
-  if (m.type === "hello") { together.hostName = m.host || together.hostName; together.canAdd = !!m.canAdd; together.waiting = false; if (together.kind === "jam") say("Joined " + together.hostName + "'s Jam.", { force: true }); paintTogether(); }
+  if (m.type === "hello") { together.hostName = m.host || together.hostName; together.canAdd = !!m.canAdd; together.waiting = false; paintTogether(); }
   else if (m.type === "members") { together.members = m.list || []; paintTogether(); }
   else if (m.type === "state" && m.state) listenerFollow(m.state);
   else if (m.type === "ended") togetherEnd(true).then(() => say((together.hostName || "The host") + " ended the session. Back to your own queue."));
@@ -539,15 +541,24 @@ function listenerPrepare(next) {
 // ---------- while listening along, the queue is the host's ----------
 const togetherOrig = {};
 function togetherGuard() {
-  ["startList", "step", "playNext", "playFromPage", "addToQueue", "playCurrent", "onEnded", "toggle"].forEach((n) => { togetherOrig[n] = window[n]; });
+  ["startList", "step", "skipPress", "playNext", "playFromPage", "addToQueue", "playCurrent", "onEnded", "toggle"].forEach((n) => { togetherOrig[n] = window[n]; });
+  const send = (m) => { try { together.ws.send(JSON.stringify(m)); return true; } catch (e) { say("Couldn't reach the Jam."); return false; } };
   const askLeave = () => confirm("Leave listening along to play this? You'll go back to your own music.");
   const guard = (n) => function (...args) {
     if (together.role !== "listener") return togetherOrig[n].apply(this, args);
-    if (n === "addToQueue" && together.canAdd && args[0]) {
-      try { together.ws.send(JSON.stringify({ type: "add", track: snapOf(args[0]) })); say('Sent "' + (args[0].title || "the song") + '" to the Jam.'); } catch (e) { say("Couldn't reach the Jam."); }
+    if (n === "addToQueue" || n === "playNext") {
+      if (!args[0]) return;
+      if (!together.canAdd) { say("You're listening along with " + together.hostName + ": only a Jam takes songs from listeners.", { force: true }); return; }
+      if (send({ type: "add", track: snapOf(args[0]), next: n === "playNext" })) say('Sent "' + (args[0].title || "the song") + '" to the Jam' + (n === "playNext" ? ", to play next." : "."));
       return;
     }
-    if (n === "onEnded") return;   // the host moves on, and so does this
+    if (n === "skipPress") {
+      if (together.kind !== "jam") { say(together.hostName + " picks what plays while you listen along.", { force: true }); return; }
+      if (send({ type: "skip", d: args[0] === -1 ? -1 : 1 })) say(args[0] === -1 ? "Going back a song for the Jam..." : "Skipping for the Jam...");
+      return;
+    }
+    // the player moving itself on (a song that ended, or couldn't play): the host decides what's next
+    if (n === "onEnded" || n === "step") return;
     if (n === "playCurrent") return togetherOrig[n].apply(this, args);
     if (n === "toggle") {
       // a pause here is yours; playing again catches up with the host
@@ -560,7 +571,7 @@ function togetherGuard() {
     if (!askLeave()) return;
     return togetherEnd(true).then(() => togetherOrig[n].apply(this, args));
   };
-  ["startList", "step", "playNext", "playFromPage", "addToQueue", "onEnded", "toggle"].forEach((n) => { window[n] = guard(n); });
+  ["startList", "step", "skipPress", "playNext", "playFromPage", "addToQueue", "onEnded", "toggle"].forEach((n) => { window[n] = guard(n); });
 }
 // the host's own adds (from a Jam member) go straight in
 const addToQueueHere = (t) => togetherOrig.addToQueue(t);
