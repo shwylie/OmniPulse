@@ -15,7 +15,7 @@ use std::time::{Duration, Instant};
 
 const API: &str = "https://musicbrainz.org/ws/2/recording";
 /// Who's asking, as MusicBrainz asks: the app, its version, and where its maintainer can be reached
-const USER_AGENT: &str = concat!("OmniPulse/", env!("CARGO_PKG_VERSION"), " ( https://omnipulse-jam.shwylie101.workers.dev )");
+const USER_AGENT: &str = concat!("OmniPulse/", env!("CARGO_PKG_VERSION"), " ( https://github.com/shwylie/OmniPulse )");
 const GAP: Duration = Duration::from_millis(1100);
 /// A search that would wait longer than this for its turn is refused (typing faster than 1/s)
 const MAX_WAIT: Duration = Duration::from_secs(5);
