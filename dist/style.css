@@ -1517,3 +1517,27 @@ body.streamSafe .notSafe { display: none !important; }
 body.streamSafe #navStreamer { display: flex; }
 body.streamSafe #navDiscover, body.streamSafe #navRediscover, body.streamSafe #navLikes, body.streamSafe #navFavourites,
 body.streamSafe #navSets, body.streamSafe #navArtists, body.streamSafe #plSection, body.streamSafe #albumSection { display: none !important; }
+
+/* ===== the player bar as a tab and a body ===== */
+/* The track info sits on a tab only as wide as it needs (it grows and shrinks with the title and
+   artist), on top of the full-width body with the controls and the progress. Both share one gradient
+   (fixed to the window), so they read as one piece. */
+.player {
+  --barBg: linear-gradient(100deg, color-mix(in srgb, var(--accent) 24%, var(--panel)), color-mix(in srgb, var(--accent-2) 24%, var(--panel)));
+  position: relative; isolation: isolate;
+  background: none; padding: 0; border-radius: 0;
+  grid-template-areas: "now now" "status status" "transport right" "prog prog";
+}
+.player::before {
+  content: ""; grid-column: 1 / -1; grid-row: 2 / -1; z-index: -1; align-self: stretch;
+  background: var(--barBg); background-attachment: fixed; border-radius: 0 10px 10px 10px;
+}
+.player .now {
+  justify-self: start; max-width: 100%; padding: 10px 18px 8px 14px; border-radius: 10px 10px 0 0;
+  background: var(--barBg); background-attachment: fixed;
+}
+.player .statusBar { padding: 0 14px; }
+.player .statusBar.show .statusInner { padding-top: 8px; margin-bottom: 0; }
+.player .transport { padding-left: 14px; margin-top: 4px; }
+.player .right { padding-right: 14px; margin-top: 4px; }
+.player .miniProg { margin: 4px 14px 0; padding-bottom: 8px; }
