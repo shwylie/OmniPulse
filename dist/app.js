@@ -23,7 +23,7 @@ const PLAYER_STYLES = {
   tab: { note: "What's playing on a tab above the controls, as wide as it needs.", min: 820 },
   bar: { note: "Everything on one full-width bar: what's playing on the left, the controls in the middle.", min: 1000 },
   float: { note: "One bar too, floating above the bottom of the window with rounded ends.", min: 1040 },
-  minimal: { note: "A slim row in the panel colour, with the progress as a thin line along its top.", min: 960 },
+  minimal: { note: "A slim row in the panel colour, with the progress as a thin line along its top.", min: 1000 },
 };
 const playerStyle = () => (PLAYER_STYLES[prefs.playerStyle] ? prefs.playerStyle : "tab");
 
