@@ -80,6 +80,7 @@ function extrasInit() {
   loudInit();
   out2Init();
   ytInit();
+  mbInit();
   pluginsInit();
   castInit();
   nativeOutInit();

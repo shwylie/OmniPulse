@@ -9,6 +9,7 @@ pub mod lastfm;
 pub mod local;
 pub mod loudness;
 pub mod lyrics;
+pub mod musicbrainz;
 pub mod plugins;
 pub mod cast;
 pub mod omni_input;
@@ -226,9 +227,10 @@ pub fn open_url(url: String) -> Result<(), String> {
         || url.starts_with("https://www.spotify.com/")
         || url.starts_with("https://www.last.fm/")
         || url.starts_with("https://music.youtube.com/")
-        || url.starts_with("https://www.youtube.com/"))
+        || url.starts_with("https://www.youtube.com/")
+        || url.starts_with("https://musicbrainz.org/"))
     {
-        return Err("Only SoundCloud, Spotify, YouTube and Last.fm links can be opened".to_string());
+        return Err("Only SoundCloud, Spotify, YouTube, MusicBrainz and Last.fm links can be opened".to_string());
     }
     opener::open(&url).map_err(|e| e.to_string())
 }

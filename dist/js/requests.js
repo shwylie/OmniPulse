@@ -272,7 +272,7 @@ async function handleSongRequest(q, user) {
   if (/soundcloud\.com\//i.test(q)) order = plats.filter((id) => id === "soundcloud");
   else if (/open\.spotify\.com\//i.test(q)) order = plats.filter((id) => id === "spotify");
   else if (ytLinkId(q)) order = plats.filter((id) => id === "youtube");
-  const finders = { soundcloud: findRequested, spotify: findSpotifyRequested, local: async (x) => localSearch(x), youtube: findYouTubeRequested };
+  const finders = { soundcloud: findRequested, spotify: findSpotifyRequested, local: async (x) => localSearch(x), youtube: findYouTubeRequested, musicbrainz: mbSearch };
   order.filter((id) => id.startsWith("plug:")).forEach((id) => { finders[id] = (x) => pluginSearch(id.slice(5), x); });
   const isLink = /^https?:\/\//i.test(q);
   // words are tidied (no punctuation, "song by artist" as "artist song"); links are left as they are

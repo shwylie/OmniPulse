@@ -338,6 +338,7 @@ const ytMusicLink = (u) => String(u || "").replace(/^https:\/\/www\.youtube\.com
 const mbOf = (n) => (n / 1048576).toFixed(0);
 
 function ytPaint() {
+  if (typeof mbPaint === "function") mbPaint();   // (MusicBrainz plays through YouTube Music)
   const note = $("ytNote");
   const setupBtn = $("ytSetup");
   const removeBtn = $("ytRemove");

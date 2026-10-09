@@ -214,6 +214,9 @@ async fn yt_prepare(id: String) -> Result<(), String> { youtube::stream_url(&id,
 // a SoundCloud track's own audio, through yt-dlp, for whoever isn't signed in to SoundCloud
 #[tauri::command]
 async fn sc_ytdlp(url: String) -> Result<String, String> { yt_stream::resolve_soundcloud(&url).await }
+// MusicBrainz: songs to find with no account (played from YouTube Music)
+#[tauri::command]
+async fn mb_search(query: String) -> Result<Vec<Value>, String> { omnipulse_core::musicbrainz::search(&query).await }
 // Downloads yt-dlp and Deno in the background; yt_status says how it's going
 // async, so it runs on Tauri's async runtime rather than the window's thread
 #[tauri::command]
@@ -818,7 +821,7 @@ fn main() {
             local_folders, local_set_folders, local_scan, local_status, local_tracks, local_server,
             requests_start, requests_stop, request_result,
             spe_signed_in, spe_login, spe_logout, spe_attach, spe_play, spe_pause, spe_resume, spe_seek, spe_stop, spe_played, spe_playlist, spe_web_get, spe_set_normalisation, loudness_analyse,
-            resolve_yt_stream, plugin_inspect, plugin_install, plugin_list, plugin_remove, plugin_http, yt_search, yt_radio, yt_status, yt_artists, yt_artist, yt_album, yt_playlist, yt_playlists, yt_prepare, sc_ytdlp, yt_setup, yt_remove, remote_start, remote_stop, remote_result
+            resolve_yt_stream, plugin_inspect, plugin_install, plugin_list, plugin_remove, plugin_http, yt_search, yt_radio, yt_status, yt_artists, yt_artist, yt_album, yt_playlist, yt_playlists, yt_prepare, sc_ytdlp, mb_search, yt_setup, yt_remove, remote_start, remote_stop, remote_result
         ])
         .run(tauri::generate_context!())
         .expect("error while running app");

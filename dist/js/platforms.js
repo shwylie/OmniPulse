@@ -16,6 +16,8 @@ const PLATFORM_LIST = [
   { id: "spotify", pref: "spOn", pages: ["likes", "search", "discover", "rediscover"], available: () => spotifyUsable() },
   { id: "local", pref: "localOn", pages: ["likes", "search", "rediscover"], available: () => localFolderList.length > 0 },
   { id: "youtube", pref: "ytOn", pages: ["likes", "search", "discover", "rediscover"], available: () => ytAvailable() },
+  // an open catalogue, no account: search only, played from YouTube Music (js/musicbrainz.js)
+  { id: "musicbrainz", pref: "mbOn", pages: ["search"], available: () => ytOn() },
 ];
 
 const platformOn = (p) => prefs[p.pref] !== false;
@@ -123,6 +125,7 @@ function searchFeed(id, q) {
   if (id === "soundcloud") return scFeed("/tracks?q=" + encodeURIComponent(q) + "&access=playable&limit=30&linked_partitioning=true");
   if (id === "spotify") return arrayFeed(() => spotifySearchTracks(q));
   if (id === "youtube") return arrayFeed(() => ytSearch(q));
+  if (id === "musicbrainz") return arrayFeed(() => mbSearch(q));
   if (id.startsWith("plug:")) return arrayFeed(() => pluginSearch(id.slice(5), q));
   return arrayFeed(async () => localSearch(q));
 }

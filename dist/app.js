@@ -249,6 +249,7 @@ const PLATFORMS = {
   xpl: { name: "Playlist on this PC", icon: "M15 6H3v2h12V6zm0 4H3v2h12v-2zM3 16h8v-2H3v2zM17 6v8.18c-.31-.11-.65-.18-1-.18-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3V8h3V6h-5z" },
   local: { name: "Local files", icon: "M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z" },
   youtube: { name: "YouTube Music", icon: "M5 3h14a3 3 0 0 1 3 3v9a3 3 0 0 1-3 3H5a3 3 0 0 1-3-3V6a3 3 0 0 1 3-3zm0 2.2a.8.8 0 0 0-.8.8v9c0 .44.36.8.8.8h14a.8.8 0 0 0 .8-.8V6a.8.8 0 0 0-.8-.8zM8 20h8v1.8H8z", rule: "evenodd" },   // a screen, with nothing in it: not a play button
+  musicbrainz: { name: "MusicBrainz", icon: "M12 2a10 10 0 1 0 0 20 10 10 0 1 0 0-20zm0 6.5a3.5 3.5 0 1 1 0 7 3.5 3.5 0 0 1 0-7zm0 2a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3z", rule: "evenodd" },   // a record
   apple: { name: "Apple Music", icon: "M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z" },
   amazon: { name: "Amazon Music", icon: "M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z" },
 };
@@ -256,7 +257,7 @@ const srcOf = (t) => (t && t.source) || "soundcloud";
 // Likes are saved to SoundCloud, your Spotify library, or (YouTube Music) this PC; local files can only be favourited
 const canLike = (t) => !!t && (srcOf(t) === "soundcloud" || srcOf(t) === "youtube" || (srcOf(t) === "spotify" && !!t.uri));
 // "Open on SoundCloud", "Open in Spotify", "Open in YouTube Music"
-const openLabel = (t) => (srcOf(t) === "spotify" ? "Open in Spotify" : srcOf(t) === "youtube" ? "Open in YouTube Music"
+const openLabel = (t) => (srcOf(t) === "spotify" ? "Open in Spotify" : srcOf(t) === "youtube" ? "Open in YouTube Music" : srcOf(t) === "musicbrainz" ? "Open on MusicBrainz"
   : srcOf(t).startsWith("plug:") ? "Open on " + platInfo(srcOf(t)).name : "Open on SoundCloud");
 
 function platformBadge(t) {
@@ -1702,6 +1703,12 @@ async function startStream(t) {
       return;
     }
     throw new Error(ytOn() ? "this song couldn't be found on YouTube Music" : "without Spotify Premium, Spotify tracks play from YouTube Music, which is switched off");
+  }
+  // MusicBrainz knows the song, YouTube Music has it to play
+  if (srcOf(t) === "musicbrainz") {
+    if (await playViaYouTube(t, mine, "", true)) return;
+    if (mine !== streamToken) return;
+    throw new Error(ytOn() ? "this song couldn't be found on YouTube Music" : "MusicBrainz songs play from YouTube Music, which is switched off");
   }
   if (isPluginTrack(t)) {
     const url = await pluginPlayUrl(t);
