@@ -1318,7 +1318,9 @@ fn tick(shared: &Shared, events: &std::sync::mpsc::Receiver<Event>, n: u64) {
     let Some(ui) = shared.borrow().ui.upgrade() else { return };
     // the narrow layout below 980 px across, as the web app's
     let w = ui.window().size().to_logical(ui.window().scale_factor()).width;
-    if (w < 980.0) != ui.get_narrow() { ui.set_narrow(w < 980.0); }
+    // (with the queue open too, the full sidebar needs more room: narrow up to 1100 px then)
+    let narrow = w < if ui.get_queue_open() { 1100.0 } else { 980.0 };
+    if narrow != ui.get_narrow() { ui.set_narrow(narrow); }
     // status messages go after a while, as the web app's: four seconds, or seven for a problem;
     // "Loading..." ones stay until they're replaced
     STATUS_SEEN.with(|seen| {
@@ -2738,6 +2740,7 @@ fn apply_look(shared: &Shared) {
     ui.set_accent_on(ACCENTS.iter().position(|c| *c == picked).map_or(-1, |i| i as i32));
     ui.set_art_accent(integrations::set(prefs, "artAccent"));
     ui.set_tab_right(prefs["tabAlign"].as_str() == Some("right"));
+    ui.set_player_style(match prefs["playerStyle"].as_str() { Some(s @ ("bar" | "float" | "minimal")) => s, _ => "tab" }.into());
 }
 
 /// A Look setting changed here: kept (over the web app's), and shown at once
@@ -2881,6 +2884,8 @@ fn main() -> Result<(), slint::PlatformError> {
     ui.on_backup_restore(move || backup_restore(&s));
     let s = shared.clone();
     ui.on_rounded_changed(move |on| set_look_pref(&s, "appRounded", serde_json::json!(on)));
+    let s = shared.clone();
+    ui.on_player_style_picked(move |style| set_look_pref(&s, "playerStyle", serde_json::json!(style.as_str())));
     let s = shared.clone();
     ui.on_tab_align_picked(move |side| set_look_pref(&s, "tabAlign", serde_json::json!(side.as_str())));
     let s = shared.clone();
@@ -3228,7 +3233,7 @@ fn main() -> Result<(), slint::PlatformError> {
         let s = shared.clone();
         let started = std::time::Instant::now();
         let mut step_no = 0usize;
-        let plan: [(u64, &str); 28] = [(9, "play"), (13, "library"), (14, "scoff"), (15, "scon"), (16, "discover"), (24, "rediscover"), (27, "sets"), (31, "stats"), (35, "now"), (39, "search"), (42, "settings"), (44, "light"), (45, "collapse"), (46, "artists"), (54, "artist"), (60, "autoplay"), (70, "narrow"), (72, "goplus"), (80, "tabright"), (84, "musical"), (88, "musical2"), (90, "safe"), (91, "sort"), (93, "xpl"), (95, "xpl2"), (97, "fade"), (101, "fade2"), (103, "end")];
+        let plan: [(u64, &str); 31] = [(9, "play"), (13, "library"), (14, "scoff"), (15, "scon"), (16, "discover"), (24, "rediscover"), (27, "sets"), (31, "stats"), (35, "now"), (39, "search"), (42, "settings"), (44, "light"), (45, "collapse"), (46, "artists"), (54, "artist"), (60, "autoplay"), (70, "narrow"), (72, "goplus"), (80, "tabright"), (81, "pbar"), (82, "pfloat"), (83, "pminimal"), (84, "musical"), (88, "musical2"), (90, "safe"), (91, "sort"), (93, "xpl"), (95, "xpl2"), (97, "fade"), (101, "fade2"), (103, "end")];
         t.start(slint::TimerMode::Repeated, std::time::Duration::from_millis(250), move || {
             let Some(&(at, what)) = plan.get(step_no) else { return };
             if started.elapsed().as_secs() < at { return; }
@@ -3273,6 +3278,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 // a musical alert while music plays: the music pauses, then comes back (a short tone,
                 // written for the test and taken away after)
                 "musical" => {
+                    ui.invoke_player_style_picked("tab".into());
                     let dir = omnipulse_core::data_dir().unwrap().join("alert-sounds");
                     let _ = std::fs::create_dir_all(&dir);
                     let rate = 22050u32;
@@ -3333,6 +3339,10 @@ fn main() -> Result<(), slint::PlatformError> {
                 }
                 // Settings: App & Look closed (its picture), then open again for the rest
                 "collapse" => { section_flip(&s, "App & Look"); slint::Timer::single_shot(std::time::Duration::from_millis(1600), { let s = s.clone(); move || section_flip(&s, "App & Look") }); }
+                // the player styles, for their pictures (the tab on the left again first; back to Tab after)
+                "pbar" => { ui.invoke_tab_align_picked("left".into()); ui.invoke_player_style_picked("bar".into()); }
+                "pfloat" => ui.invoke_player_style_picked("float".into()),
+                "pminimal" => ui.invoke_player_style_picked("minimal".into()),
                 // the Library by artist, Z to A
                 "sort" => {
                     open_page(&s, "library");
