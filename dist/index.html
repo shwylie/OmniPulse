@@ -1172,10 +1172,17 @@
         <details class="sub inner">
           <summary>Limits</summary>
           <div class="row">
+            <div>
+              <div class="lbl">Limit Requests</div>
+              <div class="note">Off: chat can request as many songs as it likes, as often as it likes.</div>
+            </div>
+            <label class="switch"><input type="checkbox" id="reqLimitsOn"><span></span></label>
+          </div>
+          <div class="row" id="reqMaxRow">
             <div class="lbl">Most Waiting</div>
             <div class="stepper"><button id="reqMaxDown" class="soft" aria-label="Fewer">&minus;</button><span id="reqMaxVal">10</span><button id="reqMaxUp" class="soft" aria-label="More">+</button></div>
           </div>
-          <div class="row">
+          <div class="row" id="reqUserRow">
             <div class="lbl">Most per Viewer</div>
             <div class="stepper"><button id="reqUserDown" class="soft" aria-label="Fewer">&minus;</button><span id="reqUserVal">2</span><button id="reqUserUp" class="soft" aria-label="More">+</button></div>
           </div>

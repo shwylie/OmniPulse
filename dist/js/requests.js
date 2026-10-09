@@ -8,12 +8,16 @@ function reqKeyNew() {
 }
 
 const reqPendingList = () => queue.slice(qi + 1).filter((t) => t.requestedBy);
+// Settings > Song Requests > Limits: on unless switched off (then no most waiting, none per viewer)
+const reqLimited = () => prefs.reqLimits !== false;
 
 function reqPaint() {
   const names = activePlats("search").map((id) => PLATFORMS[id].name);
   $("reqPlat").textContent = names.length
     ? "Requests search " + names.join(", then ") + " (a link goes straight to its own platform). Switch platforms with the icons in the title bar."
     : "Requests are going nowhere: no platform is switched on.";
+  $("reqLimitsOn").checked = reqLimited();
+  $("reqMaxRow").hidden = $("reqUserRow").hidden = !reqLimited();
   $("reqMaxVal").textContent = prefs.reqMax || 10;
   $("reqUserVal").textContent = prefs.reqPerUser || 2;
   const p = reqPendingList();
@@ -264,9 +268,9 @@ async function handleSongRequest(q, user) {
   const base = { user: who, query: q, platform: platName };
   if (!q) return { ok: false, message: reqMsg("empty", base) };
   const pending = reqPendingList();
-  if (pending.length >= (prefs.reqMax || 10)) return { ok: false, message: reqMsg("full", base) };
+  if (reqLimited() && pending.length >= (prefs.reqMax || 10)) return { ok: false, message: reqMsg("full", base) };
   const mine = pending.filter((t) => t.requestedBy.toLowerCase() === who.toLowerCase()).length;
-  if (user && mine >= (prefs.reqPerUser || 2)) return { ok: false, message: reqMsg("perUser", Object.assign({ count: mine }, base)) };
+  if (reqLimited() && user && mine >= (prefs.reqPerUser || 2)) return { ok: false, message: reqMsg("perUser", Object.assign({ count: mine }, base)) };
   // A link goes to its own platform; otherwise the first active platform with a match wins
   let order = plats;
   if (/soundcloud\.com\//i.test(q)) order = plats.filter((id) => id === "soundcloud");
@@ -481,6 +485,7 @@ function requestsInit() {
   };
   stepper("reqMax", 10, 1, 50, "reqMaxDown", "reqMaxUp");
   stepper("reqPerUser", 2, 1, 10, "reqUserDown", "reqUserUp");
+  $("reqLimitsOn").addEventListener("change", () => { prefs.reqLimits = $("reqLimitsOn").checked; savePrefs(); reqPaint(); });
   $("reqClear").addEventListener("click", clearRequests);
   $("qClearReq").addEventListener("click", clearRequests);
 
