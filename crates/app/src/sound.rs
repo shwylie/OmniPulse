@@ -30,6 +30,16 @@ pub fn eq_heard(prefs: &Value) -> [f32; 10] {
     if prefs["eqOn"].as_bool() == Some(true) { eq_bands(prefs) } else { [0.0; 10] }
 }
 
+/// Fade Between Tracks: how long, if it's on (1 to 8 seconds; 3 unless set)
+pub fn fade_ms(prefs: &Value) -> Option<u64> {
+    (prefs["fadeOn"].as_bool() == Some(true)).then(|| prefs["fadeMs"].as_u64().unwrap_or(3000).clamp(500, 10_000))
+}
+
+/// Skip Silences: silences this long (or longer) are jumped over; 0 is off (8 s unless set)
+pub fn skip_silence_ms(prefs: &Value) -> u64 {
+    prefs["skipSilence"].as_u64().unwrap_or(8) * 1000
+}
+
 pub const LOUD_STEPS: [(&str, &str); 4] = [("off", "Off"), ("quiet", "Quiet"), ("normal", "Normal"), ("loud", "Loud")];
 const LOUD_MAX_BOOST: f64 = 9.0;
 const LOUD_TYPICAL_LUFS: f64 = -10.0;

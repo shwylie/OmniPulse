@@ -101,6 +101,10 @@ struct App {
     add_map: Vec<String>,
     /// the queue came from your Library or a playlist: shuffled, its recent plays are spaced out
     queue_spaced: bool,
+    /// tracks' measurements (loudness, silences, where the sound ends), by what was measured, and
+    /// which one is the track playing's
+    analysis: HashMap<String, serde_json::Value>,
+    cur_loud: Option<String>,
 }
 
 enum Naming {
@@ -901,6 +905,9 @@ fn start(shared: &Shared) {
         let mut a = shared.borrow_mut();
         let Some(t) = a.queue.current().cloned() else { return };
         a.token += 1;
+        // (the last track's measurement and fade aren't this one's, while it loads)
+        a.cur_loud = None;
+        FADE.with(|f| *f.borrow_mut() = (false, String::new()));
         a.heard = (t.key.clone(), 0.0, false);
         a.last_pos = 0;
         a.lyrics.clear();
@@ -951,6 +958,12 @@ fn start(shared: &Shared) {
                 match src {
                     Ok(src) => {
                         let what = sound::loud_source(&t, version.as_ref().map(|v| v.yt.id.as_str()));
+                        shared.borrow_mut().cur_loud = what.as_ref().map(|(k, id)| format!("{k}:{id}"));
+                        FADE.with(|f| *f.borrow_mut() = (false, String::new()));
+                        match sound::fade_ms(&shared.borrow().web.prefs) {
+                            Some(ms) => engine.fade(Some(0.0), 1.0, ms),
+                            None => engine.fade(Some(1.0), 1.0, 0),
+                        }
                         let known = what.as_ref().and_then(|(s, id)| shared.borrow().loud.get(&format!("{s}:{id}")).copied());
                         engine.load(src, sound::loud_db(&shared.borrow().web.prefs, &t, known));
                         if let (Some((src_kind, id)), None) = (what, known) {
@@ -1350,6 +1363,9 @@ fn tick(shared: &Shared, events: &std::sync::mpsc::Receiver<Event>, n: u64) {
     };
     if near_end {
         autoplay_fill(shared, false);
+    }
+    if !engine.is_paused() && fade_and_silences(shared, pos, dur) {
+        return;
     }
     while let Ok(ev) = events.try_recv() {
         match ev {
@@ -1841,11 +1857,71 @@ fn account_act(shared: &Shared, i: usize) {
     });
 }
 
+// ---------- Fade Between Tracks and Skip Silences (as the web app's js/fade.js and js/loudness.js) ----------
+thread_local! {
+    /// fading out at the end (and the track that's moved on from, so it's only once)
+    static FADE: RefCell<(bool, String)> = const { RefCell::new((false, String::new())) };
+}
+
+/// Each tick while playing: long silences jumped over, the fade out at the end. True if it moved on.
+fn fade_and_silences(shared: &Shared, pos: u64, dur: u64) -> bool {
+    let (an, key, fade, skip, engine) = {
+        let a = shared.borrow();
+        let Some(t) = a.queue.current() else { return false };
+        let an = a.cur_loud.as_ref().and_then(|k| a.analysis.get(k)).cloned();
+        (an, t.key.clone(), sound::fade_ms(&a.web.prefs), sound::skip_silence_ms(&a.web.prefs), a.engine.clone())
+    };
+    let Some(an) = an else { return false };
+    if dur == 0 {
+        return false;
+    }
+    // a silence of the chosen length or more: over it, or on to the next track if it runs to the end
+    if skip > 0 {
+        let measured = an["analysed_ms"].as_u64().unwrap_or(0);
+        for s in an["silences"].as_array().into_iter().flatten() {
+            let (from, to) = (s[0].as_u64().unwrap_or(0), s[1].as_u64().unwrap_or(0));
+            if to.saturating_sub(from) < skip || pos < from || pos + 500 >= to {
+                continue;
+            }
+            if to + 1500 >= dur && measured + 1500 >= dur {
+                step(shared, 1);
+                return true;
+            }
+            engine.seek(to);
+            if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_status(format!("Skipped {} s of silence.", (to - from) / 1000).into()); }
+            return false;
+        }
+    }
+    let Some(ms) = fade else { return false };
+    // where the sound ends: its measured end, if that's before the file's
+    let audible = an["audible_ms"].as_u64().unwrap_or(0);
+    let end = if audible > 0 && audible < dur { audible } else { dur };
+    let left = end as i64 - pos as i64;
+    let (out, moved) = FADE.with(|f| f.borrow().clone());
+    if !out && left > 0 && left as u64 <= ms {
+        engine.fade(None, 0.0, left as u64);
+        FADE.with(|f| f.borrow_mut().0 = true);
+    } else if out && left > ms as i64 + 400 {
+        // sought back from the end: up again
+        engine.fade(None, 1.0, 200);
+        FADE.with(|f| f.borrow_mut().0 = false);
+    } else if out && left <= 0 && end + 300 < dur && moved != key {
+        // faded out where the sound ends: on, without the quiet tail
+        FADE.with(|f| f.borrow_mut().1 = key);
+        step(shared, 1);
+        return true;
+    }
+    false
+}
+
 // ---------- Settings > Sound (crate::sound) ----------
 /// Measures a track's loudness, then plays it at the gain for that (if it's still the one playing)
 fn loud_measure(shared: &Shared, t: &Track, kind: &'static str, id: String, token: u64) {
-    if sound::loud_db(&shared.borrow().web.prefs, t, None) == 0.0 && sound::loud_step(&shared.borrow().web.prefs) == "off" {
-        return;
+    {
+        let p = &shared.borrow().web.prefs;
+        if sound::loud_step(p) == "off" && sound::fade_ms(p).is_none() && sound::skip_silence_ms(p) == 0 {
+            return;
+        }
     }
     let (rt, weak, t) = (shared.borrow().rt.clone(), shared.borrow().ui.clone(), t.clone());
     rt.spawn(async move {
@@ -1854,6 +1930,7 @@ fn loud_measure(shared: &Shared, t: &Track, kind: &'static str, id: String, toke
         let _ = weak.upgrade_in_event_loop(move |_| SHARED.with(|s| {
             let Some(shared) = s.borrow().clone() else { return };
             shared.borrow_mut().loud.insert(format!("{kind}:{id}"), lufs);
+            shared.borrow_mut().analysis.insert(format!("{kind}:{id}"), a.clone());
             let a = shared.borrow();
             if a.token == token {
                 a.engine.set_match_db(sound::loud_db(&a.web.prefs, &t, Some(lufs)), false);
@@ -1867,6 +1944,9 @@ fn sound_paint(a: &App) {
     let Some(ui) = a.ui.upgrade() else { return };
     ui.set_loud_on(sound::loud_step(&a.web.prefs).into());
     ui.set_eq_on(a.web.prefs["eqOn"].as_bool() == Some(true));
+    ui.set_fade_on(a.web.prefs["fadeOn"].as_bool() == Some(true));
+    ui.set_fade_ms(a.web.prefs["fadeMs"].as_u64().unwrap_or(3000) as i32);
+    ui.set_skip_silence((sound::skip_silence_ms(&a.web.prefs) / 1000) as i32);
     let bands = sound::eq_bands(&a.web.prefs);
     for (i, g) in bands.iter().enumerate() {
         if a.eq_model.row_data(i) != Some(*g) { a.eq_model.set_row_data(i, *g); }
@@ -2545,7 +2625,7 @@ fn main() -> Result<(), slint::PlatformError> {
         here: None, history: Vec::new(), artists: None, fav_only: false, shuffle_on: false, shuffle_backup: None, repeat: "off".into(), closest: None,
         autoplay: true, ap_busy: false, ap_then_play: false, ap_failed: None, resume_ms: None, loaded: false, accent: ("#8e9bff".into(), "#8e9bff".into()), started_secs: 0, token: 0,
         lyrics: Vec::new(), heard: (String::new(), 0.0, false), last_pos: 0, xpl: xpl::load(), naming: None,
-        loud: HashMap::new(), eq_model: Rc::new(VecModel::from(vec![0.0f32; 10])), add_map: Vec::new(), queue_spaced: false,
+        loud: HashMap::new(), eq_model: Rc::new(VecModel::from(vec![0.0f32; 10])), add_map: Vec::new(), queue_spaced: false, analysis: HashMap::new(), cur_loud: None,
     }));
     // (before anything is listed: Go+ tracks only while YouTube Music can play them)
     go_plus_set(&shared.borrow().web.prefs);
@@ -2597,6 +2677,12 @@ fn main() -> Result<(), slint::PlatformError> {
     sound_paint(&shared.borrow());
     let s = shared.clone();
     ui.on_loud_pick(move |step| loud_pick(&s, &step));
+    let s = shared.clone();
+    ui.on_fade_on_changed(move |on| sound_set(&s, "fadeOn", serde_json::json!(on)));
+    let s = shared.clone();
+    ui.on_fade_ms_pick(move |ms| sound_set(&s, "fadeMs", serde_json::json!(ms)));
+    let s = shared.clone();
+    ui.on_skip_pick(move |secs| sound_set(&s, "skipSilence", serde_json::json!(secs)));
     let s = shared.clone();
     ui.on_eq_on_changed(move |on| sound_set(&s, "eqOn", serde_json::json!(on)));
     let s = shared.clone();
@@ -2955,7 +3041,7 @@ fn main() -> Result<(), slint::PlatformError> {
         let s = shared.clone();
         let started = std::time::Instant::now();
         let mut step_no = 0usize;
-        let plan: [(u64, &str); 25] = [(9, "play"), (13, "library"), (14, "scoff"), (15, "scon"), (16, "discover"), (24, "rediscover"), (27, "sets"), (31, "stats"), (35, "now"), (39, "search"), (42, "settings"), (44, "light"), (46, "artists"), (54, "artist"), (60, "autoplay"), (70, "narrow"), (72, "goplus"), (80, "tabright"), (84, "musical"), (88, "musical2"), (90, "safe"), (91, "sort"), (93, "xpl"), (95, "xpl2"), (97, "end")];
+        let plan: [(u64, &str); 27] = [(9, "play"), (13, "library"), (14, "scoff"), (15, "scon"), (16, "discover"), (24, "rediscover"), (27, "sets"), (31, "stats"), (35, "now"), (39, "search"), (42, "settings"), (44, "light"), (46, "artists"), (54, "artist"), (60, "autoplay"), (70, "narrow"), (72, "goplus"), (80, "tabright"), (84, "musical"), (88, "musical2"), (90, "safe"), (91, "sort"), (93, "xpl"), (95, "xpl2"), (97, "fade"), (101, "fade2"), (103, "end")];
         t.start(slint::TimerMode::Repeated, std::time::Duration::from_millis(250), move || {
             let Some(&(at, what)) = plan.get(step_no) else { return };
             if started.elapsed().as_secs() < at { return; }
@@ -3039,6 +3125,24 @@ fn main() -> Result<(), slint::PlatformError> {
                     let at = s.borrow().side_map.iter().position(|&i| s.borrow().playlists[i].title == "Self-test list");
                     if let Some(i) = at { side_action(&s, i, "delete"); }
                     println!("selftest: after delete, own lists {}", ui.get_own_lists().row_count());
+                }
+                // Fade Between Tracks: the sound "ends" just ahead (a made-up measurement), so it fades
+                // out there and moves on
+                "fade" => {
+                    let pos = s.borrow().engine.position_ms();
+                    let key = s.borrow().queue.current().map(|t| t.key.clone()).unwrap_or_default();
+                    {
+                        let mut a = s.borrow_mut();
+                        if let Some(o) = a.web.prefs.as_object_mut() { o.insert("fadeOn".into(), serde_json::json!(true)); o.insert("fadeMs".into(), serde_json::json!(2000)); }
+                        a.analysis.insert("selftest".into(), serde_json::json!({ "audible_ms": pos + 1200, "analysed_ms": 0, "silences": [] }));
+                        a.cur_loud = Some("selftest".into());
+                    }
+                    println!("selftest: fade from {key} at {pos} ms");
+                }
+                "fade2" => {
+                    let key = s.borrow().queue.current().map(|t| t.key.clone()).unwrap_or_default();
+                    println!("selftest: fade: now playing {key}, fading out {}, moved on from {:?}", FADE.with(|f| f.borrow().0), FADE.with(|f| f.borrow().1.clone()));
+                    if let Some(o) = s.borrow_mut().web.prefs.as_object_mut() { o.insert("fadeOn".into(), serde_json::json!(false)); }
                 }
                 // the Library by artist, Z to A
                 "sort" => {

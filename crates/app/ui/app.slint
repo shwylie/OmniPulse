@@ -566,6 +566,12 @@ export component AppWindow inherits Window {
     callback eq-on-changed(bool);
     callback eq-band(int, float);
     callback eq-preset(int);
+    in-out property <bool> fade-on;
+    in property <int> fade-ms;
+    in property <int> skip-silence;
+    callback fade-on-changed(bool);
+    callback fade-ms-pick(int);
+    callback skip-pick(int);
     in property <[Account]> accounts;
     // your music folders (Settings > Your Music), and what's been found in them
     in property <[string]> folders;
@@ -1209,6 +1215,33 @@ export component AppWindow inherits Window {
                                             y: (parent.height - self.height) / 2;
                                             clicked => { root.loud-pick(k); }
                                         }
+                                    }
+                                    Rectangle { height: 1px; background: Theme.line; }
+                                    HorizontalLayout {
+                                        VerticalLayout {
+                                            horizontal-stretch: 1;
+                                            alignment: center;
+                                            Text { text: "Fade Between Tracks"; color: Theme.text; font-weight: 700; }
+                                            Text { text: "Each track fades out where its sound ends, and the next fades in."; color: Theme.muted; font-size: 12px; }
+                                        }
+                                        Toggle { checked <=> root.fade-on; y: (parent.height - self.height) / 2; toggled => { root.fade-on-changed(self.checked); } }
+                                    }
+                                    if root.fade-on: HorizontalLayout {
+                                        alignment: start;
+                                        spacing: 8px;
+                                        Text { text: "Fade Length"; color: Theme.muted; font-size: 12px; vertical-alignment: center; }
+                                        for ms in [1000, 2000, 3000, 5000, 8000]: Chip { label: (ms / 1000) + " s"; on: root.fade-ms == ms; clicked => { root.fade-ms-pick(ms); } }
+                                    }
+                                    Rectangle { height: 1px; background: Theme.line; }
+                                    HorizontalLayout {
+                                        spacing: 8px;
+                                        VerticalLayout {
+                                            horizontal-stretch: 1;
+                                            alignment: center;
+                                            Text { text: "Skip Silences"; color: Theme.text; font-weight: 700; }
+                                            Text { text: "Jumps over long silences, and moves on when the rest is silent."; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
+                                        }
+                                        for s in [0, 5, 8, 15, 30]: Chip { label: s == 0 ? "Off" : s + " s"; on: root.skip-silence == s; y: (parent.height - self.height) / 2; clicked => { root.skip-pick(s); } }
                                     }
                                     Rectangle { height: 1px; background: Theme.line; }
                                     HorizontalLayout {

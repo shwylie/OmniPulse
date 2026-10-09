@@ -149,6 +149,11 @@ struct Shared {
     rate: AtomicU32,
     level: Mutex<(f32, f32)>,
     source_done: AtomicBool,
+    /// Fade Between Tracks: where the fade is going, how far it moves each frame, and where to start
+    /// it from first (NaN: from where it is)
+    fade_target: AtomicU32,
+    fade_step: AtomicU32,
+    fade_from: AtomicU32,
 }
 
 pub struct Engine {
@@ -178,6 +183,9 @@ impl Engine {
             duration_ms: AtomicU64::new(0),
             rate: AtomicU32::new(48000),
             level: Mutex::new((-180.0, -180.0)),
+            fade_target: AtomicU32::new(1.0f32.to_bits()),
+            fade_step: AtomicU32::new(1.0f32.to_bits()),
+            fade_from: AtomicU32::new(f32::NAN.to_bits()),
             source_done: AtomicBool::new(false),
         });
         let (cmd, cmd_rx) = mpsc::channel();
@@ -281,6 +289,17 @@ impl Engine {
         let _ = self.cmd.send(Cmd::Eq(gains.to_vec()));
     }
     /// A track's loudness gain: at once (a track starting) or eased in (a measurement arriving)
+    /// A fade to `to` (0 silent, 1 full) over `ms` (0: at once), from `from` if given, or from
+    /// where it is. It's on top of the volume.
+    pub fn fade(&self, from: Option<f32>, to: f32, ms: u64) {
+        let rate = self.shared.rate.load(Ordering::Relaxed).max(1) as f32;
+        let step = if ms == 0 { 1.0 } else { 1000.0 / (ms as f32 * rate) };
+        self.shared.fade_step.store(step.to_bits(), Ordering::Relaxed);
+        self.shared.fade_target.store(to.clamp(0.0, 1.0).to_bits(), Ordering::Relaxed);
+        if let Some(f) = from {
+            self.shared.fade_from.store(f.clamp(0.0, 1.0).to_bits(), Ordering::Relaxed);
+        }
+    }
     pub fn set_match_db(&self, db: f32, at_once: bool) {
         let _ = self.cmd.send(Cmd::Match(db, at_once));
     }
@@ -324,9 +343,13 @@ fn build_output(name: &str, shared: Arc<Shared>, ev: Sender<Event>) -> Result<(c
     let cfg: cpal::StreamConfig = sup.into();
     let (ch, rate) = (cfg.channels as usize, cfg.sample_rate.0);
     let mut vol = Smoothed::new(f32_load(&shared.volume), 0.02, rate as f32);
+    let mut fade = 1.0f32;
     let mut fill = move |out: &mut [f32]| {
         let target = if shared.muted.load(Ordering::Relaxed) { 0.0 } else { f32_load(&shared.volume) };
         vol.set(target);
+        let from = f32::from_bits(shared.fade_from.swap(f32::NAN.to_bits(), Ordering::Relaxed));
+        if !from.is_nan() { fade = from; }
+        let (fade_to, fade_step) = (f32_load(&shared.fade_target), f32_load(&shared.fade_step));
         if shared.paused.load(Ordering::Relaxed) {
             out.iter_mut().for_each(|s| *s = 0.0);
             return;
@@ -341,7 +364,8 @@ fn build_output(name: &str, shared: Arc<Shared>, ev: Sender<Event>) -> Result<(c
                 }
                 _ => (0.0, 0.0),
             };
-            let g = vol.step();
+            if fade < fade_to { fade = (fade + fade_step).min(fade_to); } else if fade > fade_to { fade = (fade - fade_step).max(fade_to); }
+            let g = vol.step() * fade;
             match fr.len() {
                 1 => fr[0] = (l + r) * 0.5 * g,
                 _ => {
