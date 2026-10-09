@@ -77,6 +77,34 @@ pub fn same_song(t: &Track, q: &str) -> bool {
     title.iter().all(|w| want.contains(w) || artist.contains(w) || VERSION_WORDS.contains(&w.as_str()) || (w.len() == 4 && w.chars().all(|c| c.is_ascii_digit())))
 }
 
+/// Another version of a song (a remix, bootleg, flip, VIP, mashup, cover, live...), as opposed to the
+/// song itself (a radio edit, the original mix, a remaster are the song itself)
+pub fn is_version(s: &str) -> bool {
+    static SAME: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    static MARK: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    let same = SAME.get_or_init(|| regex::Regex::new(r"(?i)\b(radio (edit|mix|version)|single (edit|version)|short (edit|version)|clean (edit|version)|album (version|edit)|original (mix|version)|remaster(ed)?( \d{4})?|\d{4} remaster(ed)?)\b").expect("same"));
+    let mark = MARK.get_or_init(|| regex::Regex::new(r"(?i)\b(remix|rmx|bootleg|boot|flip|vip|mash ?up|cover|live|acoustic|instrumental|sped ?up|slowed|nightcore|karaoke|rework|refix|re-?edit|dub|edit|mix|version|vs)\b").expect("mark"));
+    mark.is_match(&same.replace_all(s, " "))
+}
+
+/// The best of a search for what was asked for, and how good (lower is better): the song itself that
+/// you like, the song itself, one you like, then anything. Unless a version was asked for, other
+/// versions only come after the song itself.
+fn rank<'a>(found: &'a [Track], asked: &str, liked: &dyn Fn(&Track) -> bool) -> Option<(&'a Track, usize)> {
+    let want_version = is_version(asked);
+    let top: Vec<&Track> = found.iter().take(10).filter(|x| want_version || !is_version(&x.title)).collect();
+    let same = |x: &&&Track| same_song(x, asked);
+    let tiers = [
+        top.iter().take(5).find(|x| same(x) && liked(x)).copied(),
+        top.iter().find(same).copied(),
+        top.iter().take(5).find(|x| liked(x)).copied(),
+        top.first().copied(),
+        found.iter().take(5).find(|x| liked(x)),
+        found.first(),
+    ];
+    tiers.iter().position(Option::is_some).map(|i| (tiers[i].unwrap(), i))
+}
+
 pub fn radio_pick(list: &[Track], q: &str) -> Option<Track> {
     let same: Vec<&Track> = list.iter().filter(|t| same_song(t, q) && t.ms >= 90_000).collect();
     let mut radio: Vec<&&Track> = same.iter().filter(|t| is_radio(&t.title)).collect();
@@ -97,6 +125,9 @@ fn default_msg(key: &str) -> &'static str {
         "perUser" => "{user}, you already have {count} requests waiting.",
         "duplicate" => "\"{title}\" is already in the queue.",
         "closed" => "Song requests are closed right now.",
+        "wrongSong" => "Removed \"{title}\" by {artist} (asked for by {by}).",
+        "noRequest" => "{user}, you don't have a request waiting.",
+        "noRequests" => "There's no request waiting.",
         "notSafe" => "Only music that's safe on stream plays right now, and nothing for \"{query}\" is.",
         _ => "Tell me what to play, for example: artist - song",
     }
@@ -199,31 +230,34 @@ pub async fn pick(q: &str, plats: &[&'static str], likes: &[Track], local: &[Tra
         }
     }
     if chosen.is_none() {
-        // (with Stream-Safe Music on, only what's safe; none of it at all is its own reply)
+        // the song itself (yours if you like it) on the first platform that has it; if none has it,
+        // the best that was found anywhere (with Stream-Safe Music on, only what's safe; none of it at
+        // all is its own reply)
         let mut unsafe_only = false;
+        let mut best: Option<(usize, Vec<Track>, String, usize)> = None;   // (tier, found, asked, at)
         'search: for (qq, artist) in &qs {
             for p in &order {
-                found = by_artist(find(p, qq, local).await.into_iter().filter(|t| !t.is_mix()).collect(), artist);
-                let all = found.len();
-                found.retain(|t| safe(t));
-                unsafe_only |= all > 0 && found.is_empty();
-                if !found.is_empty() {
-                    asked = qq.clone();
+                let mut got = by_artist(find(p, qq, local).await.into_iter().filter(|t| !t.is_mix()).collect(), artist);
+                let all = got.len();
+                got.retain(|t| safe(t));
+                unsafe_only |= all > 0 && got.is_empty();
+                let r = if is_link { got.first().map(|_| (0usize, 0usize)) } else { rank(&got, qq, &liked).map(|(t, tier)| (tier, got.iter().position(|x| std::ptr::eq(x, t)).unwrap_or(0))) };
+                if let Some((tier, at)) = r {
+                    if best.as_ref().is_none_or(|b| tier < b.0) {
+                        best = Some((tier, got, qq.clone(), at));
+                    }
+                }
+                if best.as_ref().is_some_and(|b| b.0 <= 1) {
                     break 'search;
                 }
             }
         }
-        if found.is_empty() {
+        let Some((_, got, best_asked, at)) = best else {
             return Err(if unsafe_only { "notSafe" } else { "notFound" });
-        }
-        // among the top five: the song asked for that you like, the song asked for, one you like
-        chosen = Some(if is_link {
-            found[0].clone()
-        } else {
-            let top: Vec<&Track> = found.iter().take(5).collect();
-            let same = |t: &&&Track| same_song(t, &asked);
-            top.iter().find(|t| same(t) && liked(t)).or_else(|| top.iter().find(same)).or_else(|| top.iter().find(|t| liked(t))).copied().unwrap_or(&found[0]).clone()
-        });
+        };
+        found = got;
+        asked = best_asked;
+        chosen = Some(found[at].clone());
     }
     let mut t = chosen.unwrap();
     if prefer_radio && !is_link && t.ms >= LONG_MS && !is_radio(&t.title) {
@@ -271,4 +305,18 @@ mod tests {
         let prefs = serde_json::json!({ "reqMsgs": { "added": "  " } });
         assert_eq!(msg(&prefs, "added", &[("title", "Strobe".into()), ("artist", "deadmau5".into()), ("position", "2".into())]), "Added \"Strobe\" by deadmau5 (#2 in the queue).");
     }
+
+    #[test]
+    fn the_song_itself_beats_a_liked_bootleg_unless_one_is_asked_for() {
+        let boot = t("Colourfast (Labmig & Gimbal On & On Epic Bootleg)", "Pendulum", 240_000);
+        let orig = t("Colourfast", "Pendulum", 230_000);
+        let found = vec![boot.clone(), orig.clone()];
+        let liked = |x: &Track| x.title == boot.title;
+        assert_eq!(rank(&found, "pendulum colourfast", &liked).map(|(x, tier)| (x.title.as_str(), tier)), Some(("Colourfast", 1)));
+        assert_eq!(rank(&found, "pendulum colourfast bootleg", &liked).map(|(x, _)| x.title.as_str()), Some(boot.title.as_str()));
+        // a radio edit or a remaster is the song itself
+        assert!(!is_version("Colourfast (Radio Edit)") && !is_version("Invisible Touch - 2007 Remaster"));
+        assert!(is_version("Colourfast (VIP)") && is_version("Colourfast (Sub Focus Remix)"));
+    }
+
 }

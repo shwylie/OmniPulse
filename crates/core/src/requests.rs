@@ -1,5 +1,7 @@
 // Song requests for chat bots (Streamer.bot, Mix It Up, ...)
 // GET /request?key=...&user=...&q=...  adds a SoundCloud track to the end of the queue.
+// GET /wrongsong?key=...&user=...&mod=... takes back that viewer's last request (a moderator's:
+//                                      the last request anyone made).
 // GET /now                             says what's playing.
 // Replies are plain text, ready to post in chat (add &format=json for JSON).
 // Only listens on 127.0.0.1, and requests need the secret key from Settings.
@@ -15,8 +17,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
-/// Called with (request id, what was asked for, who asked) for each request
-pub type Asker = Arc<dyn Fn(u64, String, String) + Send + Sync>;
+/// Called with (request id, the request) for each one: { action: "request" | "wrongsong", q, user, mod }
+pub type Asker = Arc<dyn Fn(u64, Value) + Send + Sync>;
 static ASKER: Mutex<Option<Asker>> = Mutex::new(None);
 
 pub fn set_asker(f: Asker) {
@@ -48,7 +50,7 @@ pub fn req_param(url: &str, key: &str) -> Option<String> {
 }
 
 // Hands the request to the page (which searches and queues), then waits for its answer
-pub fn ask_page(q: String, user: String) -> Value {
+pub fn ask_page(ask: Value) -> Value {
     let Some(asker) = ASKER.lock().ok().and_then(|a| a.clone()) else {
         return serde_json::json!({ "ok": false, "message": "The music app isn't ready yet." });
     };
@@ -57,7 +59,7 @@ pub fn ask_page(q: String, user: String) -> Value {
     if let Ok(mut m) = req_wait().lock() {
         m.insert(id, tx);
     }
-    asker(id, q, user);
+    asker(id, ask);
     let answer = rx.recv_timeout(Duration::from_secs(12));
     if let Ok(mut m) = req_wait().lock() {
         m.remove(&id);
@@ -105,7 +107,20 @@ pub fn handle_req(mut stream: TcpStream) {
             } else {
                 let q = req_param(&url, "q").unwrap_or_default();
                 let user = req_param(&url, "user").unwrap_or_default();
-                ("200 OK", ask_page(q, user))
+                ("200 OK", ask_page(serde_json::json!({ "action": "request", "q": q, "user": user, "mod": false })))
+            }
+        }
+        "/wrongsong" => {
+            let expected = REQ_KEY.lock().map(|k| k.clone()).unwrap_or_default();
+            let key = req_param(&url, "key").unwrap_or_default();
+            if expected.is_empty() || key != expected {
+                ("403 Forbidden", serde_json::json!({ "ok": false, "message": "Wrong or missing key." }))
+            } else {
+                let user = req_param(&url, "user").unwrap_or_default();
+                // a moderator: however the bot says so (True, 1, yes, mod, broadcaster...)
+                let m = req_param(&url, "mod").unwrap_or_default().trim().to_lowercase();
+                let is_mod = matches!(m.as_str(), "true" | "1" | "yes" | "y" | "mod" | "moderator" | "broadcaster" | "streamer" | "owner");
+                ("200 OK", ask_page(serde_json::json!({ "action": "wrongsong", "q": "", "user": user, "mod": is_mod })))
             }
         }
         _ => ("404 Not Found", serde_json::json!({ "ok": false, "message": "Not found." })),

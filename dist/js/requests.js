@@ -48,10 +48,12 @@ async function reqApply() {
 }
 
 // Called from the Rust side for each request; it answers with request_result
-window.__songRequest = async (id, q, user) => {
+window.__songRequest = async (id, q, user, ask) => {
   let result;
   try {
-    result = await handleSongRequest(String(q || "").trim(), String(user || "").trim());
+    result = ask && ask.action === "wrongsong"
+      ? handleWrongSong(String(user || "").trim(), !!ask.mod)
+      : await handleSongRequest(String(q || "").trim(), String(user || "").trim());
   } catch (e) {
     result = { ok: false, message: "Couldn't add that one: " + e };
   }
@@ -95,11 +97,15 @@ const REQ_MSG_DEFAULTS = {
   closed: "Song requests are closed right now.",
   notSafe: 'Only music that\'s safe on stream plays right now, and nothing for "{query}" is.',
   empty: "Tell me what to play, for example: artist - song",
+  wrongSong: 'Removed "{title}" by {artist} (asked for by {by}).',
+  noRequest: "{user}, you don't have a request waiting.",
+  noRequests: "There's no request waiting.",
 };
 const REQ_MSG_LABELS = {
   added: "Added", playing: "Added, playing now", notFound: "Not found", full: "Queue full",
   perUser: "Viewer limit", duplicate: "Already queued", closed: "Requests off", notSafe: "Not safe on stream",
   empty: "Nothing asked for",
+  wrongSong: "!wrongsong: removed", noRequest: "!wrongsong: none of theirs", noRequests: "!wrongsong: none at all (a mod)",
 };
 
 function reqMsg(key, vars) {
@@ -177,6 +183,32 @@ function reqSameSong(t, q) {
   return title.every((w) => asked.has(w) || artist.has(w) || REQ_VERSION_WORDS.has(w) || /^\d{4}$/.test(w));
 }
 
+// Another version of a song (a remix, bootleg, flip, VIP, mashup, cover, live...), as opposed to
+// the song itself (a radio edit, the original mix, a remaster are the song itself)
+const REQ_SAME_SONG_PHRASES = /\b(radio (edit|mix|version)|single (edit|version)|short (edit|version)|clean (edit|version)|album (version|edit)|original (mix|version)|remaster(ed)?( \d{4})?|\d{4} remaster(ed)?)\b/gi;
+const REQ_VERSION_MARK = /\b(remix|rmx|bootleg|boot|flip|vip|mash ?up|cover|live|acoustic|instrumental|sped ?up|slowed|nightcore|karaoke|rework|refix|re-?edit|dub|edit|mix|version|vs)\b/i;
+const reqIsVersion = (s) => REQ_VERSION_MARK.test(String(s || "").replace(REQ_SAME_SONG_PHRASES, " "));
+
+// The best of a search for what was asked for, and how good (lower is better): the song itself that
+// you like, the song itself, one you like, then anything. Unless a version was asked for ("... remix"),
+// other versions only come after the song itself.
+function reqRank(found, asked, isLink) {
+  if (isLink) return found.length ? { t: found[0], tier: 0 } : null;
+  const wantVersion = reqIsVersion(asked);
+  const top = found.slice(0, 10).filter((x) => wantVersion || !reqIsVersion(x.title));
+  const same = (x) => reqSameSong(x, asked);
+  const tiers = [
+    top.slice(0, 5).find((x) => same(x) && isLikedTrack(x)),
+    top.find(same),
+    top.slice(0, 5).find(isLikedTrack),
+    top[0],
+    found.slice(0, 5).find(isLikedTrack),
+    found[0],
+  ];
+  const tier = tiers.findIndex(Boolean);
+  return tier < 0 ? null : { t: tiers[tier], tier };
+}
+
 function reqRadioPick(list, q) {
   const same = list.filter((t) => reqSameSong(t, q) && reqLen(t) >= 90 * 1000);
   const radio = same.filter((t) => REQ_RADIO.test(t.title || ""));
@@ -240,30 +272,34 @@ async function handleSongRequest(q, user) {
   let t = null, found = [], asked = queries[0].q;
   if (!isLink) for (const qq of queries) { t = await likedMatch(qq.q, order); if (t && !safeOk(t)) t = null; if (t) { asked = qq.q; break; } }
   let unsafe = false;
-  // otherwise a search, where a liked track among the top few beats one you haven't liked
+  // otherwise a search: the song itself (yours if you like it) on the first platform that has it;
+  // if none has it, the best that was found anywhere
+  let best = null;
   if (!t) {
     search: for (const qq of queries) {
       for (const id of order) {
-        found = reqByArtist((await finders[id](qq.q).catch(() => [])).filter((x) => !isMix(x)), qq.artist);
-        if (found.length && streamSafe()) {
-          await streamLookups(found.slice(0, 20));
-          const open = found.filter(streamOk);
+        let got = reqByArtist((await finders[id](qq.q).catch(() => [])).filter((x) => !isMix(x)), qq.artist);
+        if (got.length && streamSafe()) {
+          await streamLookups(got.slice(0, 20));
+          const open = got.filter(streamOk);
           unsafe = unsafe || !open.length;
-          found = open;
+          got = open;
         }
-        if (found.length) { asked = qq.q; break search; }
+        const r = reqRank(got, qq.q, isLink);
+        if (r && (!best || r.tier < best.tier)) best = Object.assign(r, { found: got, asked: qq.q });
+        if (best && best.tier <= 1) break search;
       }
     }
+    if (best) { found = best.found; asked = best.asked; }
     if (!found.length) return { ok: false, message: reqMsg(unsafe ? "notSafe" : "notFound", base) };
-    // among the top five: the song asked for that you like, the song asked for, one you like
-    const top = found.slice(0, 5), same = (x) => reqSameSong(x, asked);
-    t = (!isLink && (top.find((x) => same(x) && isLikedTrack(x)) || top.find(same) || top.find(isLikedTrack))) || found[0];
+    t = best.t;
   }
   if (!isLink) t = await reqPreferRadio(t, found, asked, order, finders);
   if (!safeOk(t)) return { ok: false, message: reqMsg("notSafe", base) };
   const vars = Object.assign({ title: t.title, artist: artistName(t) }, base);
   if (queue.slice(Math.max(qi, 0)).some((x) => x.id === t.id)) return { ok: false, message: reqMsg("duplicate", vars) };
   t.requestedBy = who;
+  t.requestedAt = Date.now();   // (which is their last, for !wrongsong)
   addToQueue(t);
   reqPaint();
   reqQueueBtn();
@@ -276,6 +312,29 @@ async function handleSongRequest(q, user) {
   };
 }
 
+// !wrongsong: takes back the viewer's last request; a moderator's takes back the last one anyone made.
+// One that's playing already is skipped.
+function handleWrongSong(user, isMod) {
+  const base = { user: user || "chat" };
+  if (!prefs.req) return { ok: false, message: reqMsg("closed", base) };
+  const mine = (t) => isMod || (!!user && String(t.requestedBy).toLowerCase() === user.toLowerCase());
+  // what's waiting, and what's playing if it was a request
+  const cands = queue.map((t, i) => [t, i]).filter(([t, i]) => i >= Math.max(qi, 0) && t.requestedBy && mine(t));
+  if (!cands.length) return { ok: false, message: reqMsg(isMod ? "noRequests" : "noRequest", base) };
+  // the last asked for (by when; one from before that was kept, by its place)
+  const [t, i] = cands.reduce((a, b) => ((b[0].requestedAt || 0) > (a[0].requestedAt || 0) || ((b[0].requestedAt || 0) === (a[0].requestedAt || 0) && b[1] > a[1]) ? b : a));
+  const vars = Object.assign({ title: t.title, artist: artistName(t), by: t.requestedBy }, base);
+  if (i === qi) {
+    if (qi < queue.length - 1) step(1); else if (typeof autoplayActive === "function" && autoplayActive()) autoplayAdvance(); else { audio.pause(); if (typeof spotifyPause === "function") spotifyPause(); }
+  } else {
+    queue.splice(i, 1);
+    renderQueue();
+  }
+  reqPaint();
+  reqQueueBtn();
+  return { ok: true, title: t.title, artist: artistName(t), message: reqMsg("wrongSong", vars) };
+}
+
 // Chat bot instructions: only the one you use
 function reqRenderBot() {
   const bot = prefs.reqBot || "streamerbot";
@@ -284,13 +343,14 @@ function reqRenderBot() {
   const base = "http://127.0.0.1:" + port;
   const key = prefs.reqKey || "";
   const vars = {
-    streamerbot: { user: "%user%", q: "%rawInputUrlEncoded%" },
-    mixitup: { user: "$username", q: "$allargs" },
-    other: { user: "USERNAME", q: "SONG" },
+    streamerbot: { user: "%user%", q: "%rawInputUrlEncoded%", mod: "%isModerator%" },
+    mixitup: { user: "$username", q: "$allargs", mod: "MOD" },
+    other: { user: "USERNAME", q: "SONG", mod: "MOD" },
   }[bot];
   const reqAddr = base + "/request?key=" + key + "&user=" + vars.user + "&q=" + vars.q;
   $("reqUrl").value = reqAddr;
   $("reqNowUrl").value = base + "/now";
+  $("reqWrongUrl").value = base + "/wrongsong?key=" + key + "&user=" + vars.user + "&mod=" + vars.mod;
   const help = $("botHelp");
   help.replaceChildren();
   const code = (s) => { const c = el("code", "", s); return c; };
@@ -303,6 +363,7 @@ function reqRenderBot() {
       li("Add the sub-action Core > Network > Fetch URL, paste the address above, and set its variable name to ", code("reply"), "."),
       li("Add the sub-action Twitch > Chat > Send Message to Channel with the message ", code("%reply%"), "."),
       li("For ", code("!song"), ": the same again with the now playing address."),
+      li("For ", code("!wrongsong"), ": the same again with the wrong song address. A viewer takes back their last request; a moderator takes back the last one anyone made."),
     );
     help.append(ol, el("p", "note", "If your version names things slightly differently, look for the sub-action that fetches a URL and saves the reply in a variable."));
   } else if (bot === "mixitup") {
@@ -312,6 +373,7 @@ function reqRenderBot() {
       li("Add a Web Request action, paste the address above, and set the response to plain text."),
       li("Add a Chat action that sends ", code("$webrequestresult"), "."),
       li("For ", code("!song"), ": the same again with the now playing address."),
+      li("For ", code("!wrongsong"), ": the same again with the wrong song address, with ", code("MOD"), " replaced by Mix It Up's special identifier that says whether the user is a moderator (it needs to come out as True for a mod). A viewer takes back their last request; a moderator takes back the last one anyone made."),
     );
     help.append(ol, el("p", "note", "If $webrequestresult doesn't post anything in your version, check Mix It Up's list of special identifiers for the web request result."));
   } else {
@@ -326,6 +388,8 @@ function reqRenderBot() {
         li("The reply is one line of plain text, ready to post in chat. Add ", code("&format=json"),
            " to get JSON instead: ok, message, title, artist, url and position."),
         li("Call ", code(base + "/now"), " for the current song (no key needed). It also supports ", code("&format=json"), "."),
+        li("Call ", code(base + "/wrongsong"), " with ", code("key"), ", ", code("user"), " and ", code("mod"),
+           " (true for a moderator) to take back that viewer's last request; a moderator's takes back the last one anyone made."),
       ); return l; })(),
       botRemoteBlock("requests", port, "/request?key=" + key + "&user=USERNAME&q=SONG"),
     );
@@ -395,6 +459,7 @@ function requestsInit() {
   });
   copy("reqUrl", "reqCopy");
   copy("reqNowUrl", "reqNowCopy");
+  copy("reqWrongUrl", "reqWrongCopy");
   const stepper = (key, def, min, max, down, up) => {
     const set = (d) => { prefs[key] = Math.min(max, Math.max(min, (prefs[key] || def) + d)); savePrefs(); reqPaint(); };
     $(down).addEventListener("click", () => set(-1));

@@ -1530,6 +1530,36 @@ fn req_fail(prefs: &serde_json::Value, base: &[(&str, String)], key: &str, extra
     serde_json::json!({ "ok": false, "message": requests::msg(prefs, key, &vars) })
 }
 
+/// !wrongsong (as the web app's): takes back the viewer's last request; a moderator's takes back the
+/// last one anyone made. One that's playing already is skipped.
+fn wrong_song(shared: &Shared, id: u64, user: &str, is_mod: bool) {
+    let reply = move |v: serde_json::Value| omnipulse_core::requests::request_result(id, v);
+    let prefs = shared.borrow().web.prefs.clone();
+    let who = if user.trim().is_empty() { "chat".to_string() } else { user.trim().to_string() };
+    let base = vec![("user", who.clone())];
+    if !integrations::set(&prefs, "req") { reply(req_fail(&prefs, &base, "closed", vec![])); return; }
+    // the last one asked for: requests are queued in turn, so the last of them in the queue
+    let found = {
+        let a = shared.borrow();
+        let from = a.queue.qi.unwrap_or(0);
+        a.queue.items.iter().enumerate().skip(from).filter(|(_, q)| !q.by.is_empty() && (is_mod || q.by.eq_ignore_ascii_case(&who))).map(|(i, q)| (i, q.t.clone(), q.by.clone())).last()
+    };
+    let Some((i, t, by)) = found else {
+        reply(req_fail(&prefs, &base, if is_mod { "noRequests" } else { "noRequest" }, vec![]));
+        return;
+    };
+    if Some(i) == shared.borrow().queue.qi {
+        step(shared, 1);
+    } else {
+        let mut a = shared.borrow_mut();
+        a.queue.remove(i);
+        paint_queue(&mut a);
+        save_session(&a);
+    }
+    let vars: Vec<(&str, String)> = base.iter().cloned().chain([("title", t.title.clone()), ("artist", t.artist.clone()), ("by", by)]).collect();
+    reply(serde_json::json!({ "ok": true, "title": t.title, "artist": t.artist, "message": requests::msg(&prefs, "wrongSong", &vars) }));
+}
+
 /// A song request from chat (through core's requests server); the reply goes back to the bot
 fn song_request(shared: &Shared, id: u64, q: String, user: String) {
     let reply = move |v: serde_json::Value| omnipulse_core::requests::request_result(id, v);
@@ -2573,8 +2603,16 @@ fn outside_start(shared: &Shared) {
     }
     if integrations::set(&prefs, "req") {
         if let Some(key) = prefs["reqKey"].as_str().filter(|k| !k.is_empty()) {
-            omnipulse_core::requests::set_asker(std::sync::Arc::new(|id, q, user| {
-                let _ = slint::invoke_from_event_loop(move || SHARED.with(|s| { if let Some(sh) = s.borrow().clone() { song_request(&sh, id, q, user); } }));
+            omnipulse_core::requests::set_asker(std::sync::Arc::new(|id, ask: serde_json::Value| {
+                let _ = slint::invoke_from_event_loop(move || SHARED.with(|s| {
+                    let Some(sh) = s.borrow().clone() else { return };
+                    let user = ask["user"].as_str().unwrap_or("").to_string();
+                    if ask["action"].as_str() == Some("wrongsong") {
+                        wrong_song(&sh, id, &user, ask["mod"].as_bool() == Some(true));
+                    } else {
+                        song_request(&sh, id, ask["q"].as_str().unwrap_or("").to_string(), user);
+                    }
+                }));
             }));
             let _ = omnipulse_core::requests::requests_start(prefs["reqPort"].as_u64().unwrap_or(7879) as u16, key.to_string(), false);
         }

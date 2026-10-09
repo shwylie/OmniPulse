@@ -723,11 +723,12 @@ fn main() {
                 tools::update_ytdlp_daily().await;
             });
             // Chat requests and Stream Deck presses are answered by the page
-            requests::set_asker(Arc::new(|id, q, user| {
+            requests::set_asker(Arc::new(|id, ask| {
                 page_eval(format!(
-                    "window.__songRequest && window.__songRequest({id}, {}, {})",
-                    serde_json::to_string(&q).unwrap_or_else(|_| "\"\"".to_string()),
-                    serde_json::to_string(&user).unwrap_or_else(|_| "\"\"".to_string())
+                    "window.__songRequest && window.__songRequest({id}, {}, {}, {})",
+                    serde_json::to_string(&ask["q"]).unwrap_or_else(|_| "\"\"".to_string()),
+                    serde_json::to_string(&ask["user"]).unwrap_or_else(|_| "\"\"".to_string()),
+                    ask
                 ));
             }));
             // the action is one of remote's ACTIONS, so it's safe to put in the script
