@@ -305,6 +305,7 @@ fn plat_toggle(shared: &Shared, plat: &str) {
         paint_sides(&mut a);
         paint_plats(&a);
         go_plus_set(&a.web.prefs);
+        paint_settings(&a);
         apply_filter(&mut a);
         a.ap_failed = None;
         if let Some(ui) = a.ui.upgrade() {
@@ -1421,6 +1422,69 @@ fn song_request(shared: &Shared, id: u64, q: String, user: String) {
 }
 
 /// The servers the web app's settings have on: the widget, the Stream Deck's remote, chat requests
+// ---------- Settings: the switches beyond Look ----------
+// (section, label, note, key, on unless switched off)
+const SET_ROWS: [(&str, &str, &str, &str, bool); 10] = [
+    ("Library", "Sets & Podcasts in the Queue", "Lists and autoplay include anything over 15 minutes. Off: only when you pick one.", "queueSets", false),
+    ("Library", "Autoplay", "Plays similar tracks when the queue runs out.", "autoplay", true),
+    ("Integrations", "SoundCloud", "Its likes, playlists and search.", "scOn", true),
+    ("Integrations", "Spotify", "Its likes, playlists and search.", "spOn", true),
+    ("Integrations", "YouTube Music", "Search, radio, and Go+ tracks in full.", "ytOn", true),
+    ("Integrations", "Last.fm Scrobbling", "What you play goes to your Last.fm profile.", "scrobble", true),
+    ("Streaming", "Discord Status", "Shows what you're playing on your Discord profile.", "presence", false),
+    ("Streaming", "Stream Widget", "A now-playing card for OBS, with alerts.", "widget", false),
+    ("Streaming", "Song Requests", "Chat asks for songs through your bot.", "req", false),
+    ("Streaming", "Stream Deck & Remote", "Control the app from a Stream Deck or another device.", "remoteOn", false),
+];
+
+fn set_row_on(prefs: &serde_json::Value, key: &str, dflt: bool) -> bool {
+    prefs[key].as_bool().unwrap_or(dflt)
+}
+
+fn paint_settings(a: &App) {
+    let Some(ui) = a.ui.upgrade() else { return };
+    let mut last = "";
+    let rows: Vec<SetRow> = SET_ROWS.iter().map(|(sec, label, note, key, dflt)| {
+        let head = if *sec != last { last = sec; (*sec).into() } else { slint::SharedString::default() };
+        let on = if *key == "autoplay" { a.autoplay } else { set_row_on(&a.web.prefs, key, *dflt) };
+        SetRow { head, label: (*label).into(), note: (*note).into(), on, key: (*key).into() }
+    }).collect();
+    ui.set_set_rows(ModelRc::from(Rc::new(VecModel::from(rows))));
+}
+
+/// A switch in Settings: kept with this app's settings, and done straight away
+fn set_toggle(shared: &Shared, i: usize) {
+    let Some(&(_, label, _, key, dflt)) = SET_ROWS.get(i) else { return };
+    match key {
+        "autoplay" => {
+            let on = !shared.borrow().autoplay;
+            if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_autoplay(on); ui.invoke_autoplay_changed(on); }
+        }
+        "scOn" | "spOn" | "ytOn" => plat_toggle(shared, match key { "spOn" => "spotify", "ytOn" => "youtube", _ => "soundcloud" }),
+        _ => {
+            let on = {
+                let mut a = shared.borrow_mut();
+                let on = !set_row_on(&a.web.prefs, key, dflt);
+                if let Some(o) = a.web.prefs.as_object_mut() { o.insert(key.into(), serde_json::json!(on)); }
+                on
+            };
+            if std::env::var_os("OMNIPULSE_SELFTEST").is_none() { webstate::save_pref(key, serde_json::json!(on)); }
+            // the servers stop, and start again with what's set now
+            match key {
+                "widget" => omnipulse_core::widget::widget_stop(),
+                "req" => omnipulse_core::requests::requests_stop(),
+                "remoteOn" => omnipulse_core::remote::remote_stop(),
+                "presence" if !on => integrations::presence(&shared.borrow().rt, &shared.borrow().web.prefs, None, 0, false),
+                _ => {}
+            }
+            if matches!(key, "widget" | "req" | "remoteOn") && on { outside_start(shared); }
+            if key == "presence" && on { push_out(shared, true); }
+            if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_status(format!("{label} {}.", if on { "on" } else { "off" }).into()); }
+        }
+    }
+    paint_settings(&shared.borrow());
+}
+
 fn outside_start(shared: &Shared) {
     let prefs = shared.borrow().web.prefs.clone();
     integrations::widget_start(&prefs);
@@ -1682,6 +1746,9 @@ fn main() -> Result<(), slint::PlatformError> {
         if page == "artists" { s.borrow_mut().artists = None; }
         open_page(&s, &page);
     });
+    let s = shared.clone();
+    ui.on_set_toggle(move |i| set_toggle(&s, i as usize));
+    paint_settings(&shared.borrow());
     let s = shared.clone();
     ui.on_like_toggle(move || like_toggle(&s));
     let s = shared.clone();
@@ -2006,6 +2073,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 "artist" => { println!("selftest: following {} artists", ui.get_artists().row_count()); if ui.get_artists().row_count() > 0 { ui.invoke_artist(0); } }
                 "end" => {
                     println!("selftest: status \"{}\"", ui.get_status());
+                    println!("selftest: settings rows {}", ui.get_set_rows().iter().map(|r| format!("{}{}", r.label, if r.on { "+" } else { "-" })).collect::<Vec<_>>().join(", "));
                     println!("selftest: remote state {}", remote_state(&s.borrow()));
                     println!("selftest: queue {} ({} autoplay, {} requested), {}", s.borrow().queue.items.len(), s.borrow().queue.items.iter().filter(|q| q.auto).count(), s.borrow().queue.items.iter().filter(|q| !q.by.is_empty()).count(), ui.get_autoplay_note());
                     println!("selftest: library {} tracks, playlists {}, playing \"{}\" {} / {}, lyrics {}", s.borrow().library.len(), s.borrow().playlists.len(), ui.get_now_title(), ui.get_pos_text(), ui.get_dur_text(), s.borrow().lyrics.len());

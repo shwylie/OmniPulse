@@ -22,6 +22,8 @@ export struct Plat { id: string, on: bool, name: string }
 export struct Tile { title: string, sub: string, art: image, plat: string }
 export struct Shelf { title: string, tiles: [Tile] }
 export struct Line { text: string }
+/// A switch in Settings: under its section's heading (head, on the first of a section)
+export struct SetRow { head: string, label: string, note: string, on: bool, key: string }
 export struct Item { name: string, sub: string, art: image, plat: string }
 
 global Icons {
@@ -232,6 +234,26 @@ component MenuRow inherits Rectangle {
         Text { text: root.label; color: Theme.text; font-size: 13px; vertical-alignment: center; overflow: elide; }
     }
     ta := TouchArea { clicked => { root.clicked(); } }
+}
+
+component Toggle inherits Rectangle {
+    in-out property <bool> checked;
+    callback toggled();
+    width: 42px;
+    height: 24px;
+    border-radius: 12px;
+    background: root.checked ? Theme.accent : Theme.line;
+    animate background { duration: 150ms; }
+    Rectangle {
+        x: root.checked ? parent.width - self.width - 3px : 3px;
+        animate x { duration: 150ms; easing: ease-out; }
+        y: 3px;
+        width: 18px;
+        height: 18px;
+        border-radius: 9px;
+        background: root.checked ? Theme.on-accent : Theme.muted;
+    }
+    TouchArea { clicked => { root.checked = !root.checked; root.toggled(); } }
 }
 
 component PlatIcon inherits Glyph {
@@ -462,6 +484,8 @@ export component AppWindow inherits Window {
     in property <[string]> devices;
     in property <int> device-on: -1;
     in property <[string]> more-items;
+    // Settings, beyond Look: its switches, section by section
+    in property <[SetRow]> set-rows;
     in-out property <float> volume: 80;
     in-out property <bool> queue-open: false;
     in-out property <bool> autoplay: true;
@@ -483,6 +507,7 @@ export component AppWindow inherits Window {
     callback shuffle();
     callback play-page();
     callback refresh();
+    callback set-toggle(int);
     callback like-toggle();
     callback fav-toggle();
     callback devices-want();
@@ -1004,11 +1029,32 @@ export component AppWindow inherits Window {
                                             Text { text: "Colours from Album Art"; color: Theme.text; font-weight: 700; }
                                             Text { text: "Both colours come from the cover that's playing."; color: Theme.muted; font-size: 12px; }
                                         }
-                                        Switch { checked <=> root.art-accent; toggled => { root.art-accent-changed(self.checked); } }
+                                        Toggle { checked <=> root.art-accent; y: (parent.height - self.height) / 2; toggled => { root.art-accent-changed(self.checked); } }
                                     }
                                 }
                             }
-                            Text { text: "The rest of Settings is still the web app's for now: this app follows what's set there."; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
+                            // the other sections: a card of switches each
+                            for r[i] in root.set-rows: VerticalLayout {
+                                spacing: 8px;
+                                if r.head != "": Text { text: r.head; color: Theme.text; font-size: 20px; font-weight: 800; }
+                                Card {
+                                    HorizontalLayout {
+                                        padding: 16px;
+                                        padding-top: 12px;
+                                        padding-bottom: 12px;
+                                        spacing: 14px;
+                                        VerticalLayout {
+                                            horizontal-stretch: 1;
+                                            alignment: center;
+                                            spacing: 2px;
+                                            Text { text: r.label; color: Theme.text; font-weight: 700; }
+                                            if r.note != "": Text { text: r.note; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
+                                        }
+                                        Toggle { checked: r.on; y: (parent.height - self.height) / 2; toggled => { root.set-toggle(i); } }
+                                    }
+                                }
+                            }
+                            Text { text: "Settings not here yet are the web app's: this app follows what's set there."; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
                         }
                     }
                     // Now Playing: the cover, and the lyrics as they're sung
@@ -1063,7 +1109,7 @@ export component AppWindow inherits Window {
                     HorizontalLayout {
                         Text { text: "Queue"; color: Theme.text; font-size: 18px; font-weight: 800; vertical-alignment: center; horizontal-stretch: 1; }
                         Text { text: "Autoplay"; color: Theme.muted; font-size: 12px; vertical-alignment: center; }
-                        Switch { checked <=> root.autoplay; toggled => { root.autoplay-changed(self.checked); } }
+                        Toggle { checked <=> root.autoplay; y: (parent.height - self.height) / 2; toggled => { root.autoplay-changed(self.checked); } }
                     }
                     if root.autoplay-note != "": Text { text: root.autoplay-note; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
                     if root.queue-rows.length == 0: Text { text: "Nothing queued. Play something, or right-click a track to add it."; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
