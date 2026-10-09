@@ -1631,6 +1631,173 @@ fn set_toggle(shared: &Shared, i: usize) {
     paint_settings(&shared.borrow());
 }
 
+/// The Library and your playlists, from every platform you're signed in to (at the start, and again
+/// after signing in or out)
+fn library_load(shared: &Shared) {
+    let (weak, rt) = { let a = shared.borrow(); (a.ui.clone(), a.rt.clone()) };
+    {
+        let yt_likes = shared.borrow().web.yt_likes.clone();
+        let own = xpl::playlists(&shared.borrow().xpl);
+        rt.spawn(async move {
+            let t0 = std::time::Instant::now();
+            let (sc, sp, lists) = tokio::join!(sources::soundcloud_likes(), sources::spotify_likes(500), sources::playlists());
+            let mut all: Vec<Track> = Vec::new();
+            all.extend(sc);
+            all.extend(sp);
+            all.extend(yt_likes);
+            // YouTube Music likes made here (the web app's are already in)
+            all.extend(marks::yt_likes());
+            let mut seen = std::collections::HashSet::new();
+            all.retain(|t| seen.insert(t.key.clone()));
+            all.extend(sources::local_files());
+            let secs = t0.elapsed().as_secs_f32();
+            let mut playlists = own;
+            playlists.extend(lists);
+            let _ = weak.upgrade_in_event_loop(move |ui| {
+                SHARED.with(|s| {
+                    let Some(shared) = s.borrow().clone() else { return };
+                    {
+                        let mut a = shared.borrow_mut();
+                        a.library = all;
+                        let prefs = a.web.prefs.clone();
+                        track::apply_fixes(&prefs, &mut a.library);
+                        a.playlists = playlists;
+                        paint_sides(&mut a);
+                        paint_plats(&a);
+                    }
+                    sync_all(&shared, true);
+                    if SYNC_EVERY.with(|x| x.borrow().is_none()) {
+                        let s2 = shared.clone();
+                        let every = slint::Timer::default();
+                        every.start(slint::TimerMode::Repeated, std::time::Duration::from_secs(600), move || sync_all(&s2, true));
+                        SYNC_EVERY.with(|x| *x.borrow_mut() = Some(every));
+                    }
+                    if shared.borrow().page == "library" {
+                        shared.borrow_mut().here = Some(Place::Page("library".into()));
+                        open_page(&shared, "library");
+                        ui.set_page_sub(format!("{} Loaded in {secs:.1} s.", ui.get_page_sub()).into());
+                    }
+                });
+            });
+        });
+    }
+}
+
+// ---------- Settings > Accounts ----------
+// (key, name): SoundCloud and Spotify for your library and search, Spotify's own sign-in for playing
+// it in full (Premium), your YouTube account for likes there, and Last.fm for scrobbling
+const ACCOUNTS: [(&str, &str); 5] = [("soundcloud", "SoundCloud"), ("spotify", "Spotify"), ("playback", "Spotify Playback"), ("youtube", "YouTube Account"), ("lastfm", "Last.fm")];
+
+thread_local! {
+    /// who's signed in where (as the platforms say), and the sign-ins under way
+    static ACCOUNT_NAMES: RefCell<HashMap<&'static str, String>> = RefCell::new(HashMap::new());
+    static ACCOUNT_BUSY: RefCell<std::collections::HashSet<&'static str>> = RefCell::new(std::collections::HashSet::new());
+}
+
+fn account_signed(key: &str) -> bool {
+    match key {
+        "soundcloud" => omnipulse_core::soundcloud::signed_in(),
+        "spotify" => omnipulse_core::spotify::spotify_signed_in(),
+        "playback" => omnipulse_core::spotify_engine::spe_signed_in(),
+        "youtube" => omnipulse_core::yt_account::status()["connected"].as_bool() == Some(true),
+        _ => omnipulse_core::lastfm::lastfm_status()["connected"].as_bool() == Some(true),
+    }
+}
+
+fn accounts_paint(shared: &Shared) {
+    let Some(ui) = shared.borrow().ui.upgrade() else { return };
+    let rows: Vec<Account> = ACCOUNTS.iter().map(|&(key, name)| {
+        let signed = account_signed(key);
+        let busy = ACCOUNT_BUSY.with(|b| b.borrow().contains(key));
+        let who = ACCOUNT_NAMES.with(|n| n.borrow().get(key).cloned()).filter(|s| !s.is_empty());
+        let status = if busy {
+            "Finish signing in in your browser.".to_string()
+        } else if signed {
+            match (key, who) {
+                ("playback", _) => "Signed in: Spotify plays in full here (with Premium).".to_string(),
+                (_, Some(w)) => format!("Signed in as {w}."),
+                _ => "Signed in.".to_string(),
+            }
+        } else {
+            match key {
+                "soundcloud" => "Your SoundCloud likes, playlists and search.".to_string(),
+                "spotify" => "Your Spotify likes, playlists and search.".to_string(),
+                "playback" => "Plays Spotify tracks in full (Premium). Without it, they play from YouTube Music.".to_string(),
+                "youtube" if omnipulse_core::yt_account::status()["configured"].as_bool() != Some(true) => "Needs YouTube keys first: set them up in the web app (Settings > Integrations).".to_string(),
+                "youtube" => "Likes here become likes on YouTube and YouTube Music.".to_string(),
+                _ if omnipulse_core::lastfm::lastfm_status()["configured"].as_bool() != Some(true) => "Needs Last.fm keys first: set them up in the web app (Settings > Integrations).".to_string(),
+                _ => "What you play goes to your Last.fm profile.".to_string(),
+            }
+        };
+        Account { name: name.into(), status: status.into(), signed, busy }
+    }).collect();
+    ui.set_accounts(ModelRc::from(Rc::new(VecModel::from(rows))));
+}
+
+/// Who's signed in, asked of the platforms (SoundCloud's and Spotify's names; the others keep theirs)
+fn accounts_refresh(shared: &Shared) {
+    let (rt, weak) = { let a = shared.borrow(); (a.rt.clone(), a.ui.clone()) };
+    ACCOUNT_NAMES.with(|n| {
+        let mut n = n.borrow_mut();
+        if let Some(name) = omnipulse_core::yt_account::status()["name"].as_str() { n.insert("youtube", name.to_string()); }
+        if let Some(name) = omnipulse_core::lastfm::lastfm_status()["name"].as_str() { n.insert("lastfm", name.to_string()); }
+    });
+    accounts_paint(shared);
+    rt.spawn(async move {
+        let sc = if omnipulse_core::soundcloud::signed_in() { omnipulse_core::soundcloud::api_get("/me".into()).await.ok().and_then(|v| v["username"].as_str().map(String::from)) } else { None };
+        let sp = if omnipulse_core::spotify::spotify_signed_in() { omnipulse_core::spotify::spotify_api("GET".into(), "/me".into(), None).await.ok().and_then(|v| v["display_name"].as_str().or(v["id"].as_str()).map(String::from)) } else { None };
+        let _ = weak.upgrade_in_event_loop(move |_| SHARED.with(|s| {
+            ACCOUNT_NAMES.with(|n| {
+                let mut n = n.borrow_mut();
+                n.insert("soundcloud", sc.unwrap_or_default());
+                n.insert("spotify", sp.unwrap_or_default());
+            });
+            if let Some(shared) = s.borrow().clone() { accounts_paint(&shared); }
+        }));
+    });
+}
+
+/// An account's button: signs in (in your browser) or out
+fn account_act(shared: &Shared, i: usize) {
+    let Some(&(key, name)) = ACCOUNTS.get(i) else { return };
+    if ACCOUNT_BUSY.with(|b| b.borrow().contains(key)) {
+        return;
+    }
+    let (rt, weak) = { let a = shared.borrow(); (a.rt.clone(), a.ui.clone()) };
+    let out = account_signed(key);
+    ACCOUNT_BUSY.with(|b| b.borrow_mut().insert(key));
+    accounts_paint(shared);
+    rt.spawn(async move {
+        let done: Result<(), String> = match (key, out) {
+            ("soundcloud", false) => omnipulse_core::soundcloud::login().await,
+            ("soundcloud", true) => omnipulse_core::soundcloud::logout(),
+            ("spotify", false) => omnipulse_core::spotify::spotify_login().await,
+            ("spotify", true) => omnipulse_core::spotify::spotify_logout(),
+            ("playback", false) => omnipulse_core::spotify_engine::spe_login().await,
+            ("playback", true) => omnipulse_core::spotify_engine::spe_logout().await,
+            ("youtube", false) => omnipulse_core::yt_account::connect().await.map(|_| ()),
+            ("youtube", true) => omnipulse_core::yt_account::disconnect().await,
+            (_, false) => omnipulse_core::lastfm::lastfm_connect().await.map(|_| ()),
+            (_, true) => omnipulse_core::lastfm::lastfm_disconnect(),
+        };
+        let _ = weak.upgrade_in_event_loop(move |ui| SHARED.with(|s| {
+            ACCOUNT_BUSY.with(|b| b.borrow_mut().remove(key));
+            let Some(shared) = s.borrow().clone() else { return };
+            ui.set_status(match &done {
+                Ok(()) if out => format!("Signed out of {name}."),
+                Ok(()) => format!("Signed in to {name}."),
+                Err(e) => format!("{name}: {e}"),
+            }.into());
+            accounts_refresh(&shared);
+            // your library and playlists, from what you're signed in to now
+            if done.is_ok() && matches!(key, "soundcloud" | "spotify") {
+                paint_plats(&shared.borrow());
+                library_load(&shared);
+            }
+        }));
+    });
+}
+
 // ---------- Settings > Sound (crate::sound) ----------
 /// Measures a track's loudness, then plays it at the gain for that (if it's still the one playing)
 fn loud_measure(shared: &Shared, t: &Track, kind: &'static str, id: String, token: u64) {
@@ -2363,6 +2530,9 @@ fn main() -> Result<(), slint::PlatformError> {
     ui.on_sort_pick(move |by| lib_sort_pick(&s, &by));
     let s = shared.clone();
     ui.on_backup_make(move || backup_make(&s));
+    accounts_refresh(&shared);
+    let s = shared.clone();
+    ui.on_account_act(move |i| account_act(&s, i as usize));
     ui.set_eq_gains(ModelRc::from(shared.borrow().eq_model.clone()));
     ui.set_eq_presets(ModelRc::from(Rc::new(VecModel::from(sound::EQ_PRESETS.iter().map(|(n, _)| slint::SharedString::from(*n)).collect::<Vec<_>>()))));
     sound_paint(&shared.borrow());
@@ -2425,51 +2595,7 @@ fn main() -> Result<(), slint::PlatformError> {
     outside_start(&shared);
 
     // the Library and your playlists, in the background
-    {
-        let weak = ui.as_weak();
-        let yt_likes = shared.borrow().web.yt_likes.clone();
-        let own = xpl::playlists(&shared.borrow().xpl);
-        rt.spawn(async move {
-            let t0 = std::time::Instant::now();
-            let (sc, sp, lists) = tokio::join!(sources::soundcloud_likes(), sources::spotify_likes(500), sources::playlists());
-            let mut all: Vec<Track> = Vec::new();
-            all.extend(sc);
-            all.extend(sp);
-            all.extend(yt_likes);
-            // YouTube Music likes made here (the web app's are already in)
-            all.extend(marks::yt_likes());
-            let mut seen = std::collections::HashSet::new();
-            all.retain(|t| seen.insert(t.key.clone()));
-            all.extend(sources::local_files());
-            let secs = t0.elapsed().as_secs_f32();
-            let mut playlists = own;
-            playlists.extend(lists);
-            let _ = weak.upgrade_in_event_loop(move |ui| {
-                SHARED.with(|s| {
-                    let Some(shared) = s.borrow().clone() else { return };
-                    {
-                        let mut a = shared.borrow_mut();
-                        a.library = all;
-                        let prefs = a.web.prefs.clone();
-                        track::apply_fixes(&prefs, &mut a.library);
-                        a.playlists = playlists;
-                        paint_sides(&mut a);
-                        paint_plats(&a);
-                    }
-                    sync_all(&shared, true);
-                    let s2 = shared.clone();
-                    let every = slint::Timer::default();
-                    every.start(slint::TimerMode::Repeated, std::time::Duration::from_secs(600), move || sync_all(&s2, true));
-                    SYNC_EVERY.with(|x| *x.borrow_mut() = Some(every));
-                    if shared.borrow().page == "library" {
-                        shared.borrow_mut().here = Some(Place::Page("library".into()));
-                        open_page(&shared, "library");
-                        ui.set_page_sub(format!("{} Loaded in {secs:.1} s.", ui.get_page_sub()).into());
-                    }
-                });
-            });
-        });
-    }
+    library_load(&shared);
 
     let s = shared.clone();
     ui.on_nav(move |p| go(&s, Place::Page(p.into())));
@@ -2879,6 +3005,7 @@ fn main() -> Result<(), slint::PlatformError> {
                     println!("selftest: status \"{}\"", ui.get_status());
                     println!("selftest: settings rows {}", ui.get_set_rows().iter().map(|r| format!("{}{}", r.label, if r.on { "+" } else { "-" })).collect::<Vec<_>>().join(", "));
                     println!("selftest: remote state {}", remote_state(&s.borrow()));
+                    println!("selftest: accounts {}", ui.get_accounts().iter().map(|r| format!("{}: {}{}", r.name, if r.signed { "in, " } else { "out, " }, r.status)).collect::<Vec<_>>().join(" | "));
                     println!("selftest: queue {} ({} autoplay, {} requested), {}", s.borrow().queue.items.len(), s.borrow().queue.items.iter().filter(|q| q.auto).count(), s.borrow().queue.items.iter().filter(|q| !q.by.is_empty()).count(), ui.get_autoplay_note());
                     println!("selftest: library {} tracks, playlists {}, playing \"{}\" {} / {}, lyrics {}", s.borrow().library.len(), s.borrow().playlists.len(), ui.get_now_title(), ui.get_pos_text(), ui.get_dur_text(), s.borrow().lyrics.len());
                     let _ = slint::quit_event_loop();

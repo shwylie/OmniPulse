@@ -23,6 +23,8 @@ export struct Tile { title: string, sub: string, art: image, plat: string }
 export struct Shelf { title: string, tiles: [Tile] }
 export struct Line { text: string }
 /// A switch in Settings: under its section's heading (head, on the first of a section)
+/// An account in Settings: its name, what's known (who's signed in, or what it needs), and its button
+export struct Account { name: string, status: string, signed: bool, busy: bool }
 export struct SetRow { head: string, label: string, note: string, on: bool, key: string }
 export struct Item { name: string, sub: string, art: image, plat: string }
 
@@ -564,6 +566,8 @@ export component AppWindow inherits Window {
     callback eq-on-changed(bool);
     callback eq-band(int, float);
     callback eq-preset(int);
+    in property <[Account]> accounts;
+    callback account-act(int);
     callback backup-make();
     callback backup-restore();
     callback plat-toggle(string);
@@ -1124,6 +1128,36 @@ export component AppWindow inherits Window {
                                         }
                                         Chip { label: "Left"; on: !root.tab-right; y: (parent.height - self.height) / 2; clicked => { root.tab-align-picked("left"); } }
                                         Chip { label: "Right"; on: root.tab-right; y: (parent.height - self.height) / 2; clicked => { root.tab-align-picked("right"); } }
+                                    }
+                                }
+                            }
+                            // Accounts: signing in and out
+                            Text { text: "Accounts"; color: Theme.text; font-size: 20px; font-weight: 800; }
+                            Card {
+                                VerticalLayout {
+                                    padding: 16px;
+                                    padding-top: 8px;
+                                    padding-bottom: 8px;
+                                    for acc[i] in root.accounts: VerticalLayout {
+                                        if i > 0: Rectangle { height: 1px; background: Theme.line; }
+                                        HorizontalLayout {
+                                            padding-top: 8px;
+                                            padding-bottom: 8px;
+                                            spacing: 12px;
+                                            VerticalLayout {
+                                                horizontal-stretch: 1;
+                                                alignment: center;
+                                                spacing: 2px;
+                                                Text { text: acc.name; color: Theme.text; font-weight: 700; }
+                                                Text { text: acc.status; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
+                                            }
+                                            Pill {
+                                                label: acc.busy ? "Waiting..." : acc.signed ? "Sign out" : "Sign in";
+                                                on: !acc.signed && !acc.busy;
+                                                y: (parent.height - self.height) / 2;
+                                                clicked => { if (!acc.busy) { root.account-act(i); } }
+                                            }
+                                        }
                                     }
                                 }
                             }
