@@ -1021,6 +1021,7 @@ function renderPlaylists(note) {
   const item = (p, into) => {
     const b = el("button", "plItem");
     b.dataset.id = p.id;
+    b.draggable = true;   // onto another one: the two combined (js/dnd.js)
     b.title = p.title || "";
     b.append(platformBadge({ source: p.source || "soundcloud" }), el("span", "plName", p.title || "Untitled playlist"));
     into.append(b);

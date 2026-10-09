@@ -2,13 +2,14 @@
 // sidebar, onto the queue panel (before a row, or at the end) or onto the queue button; and
 // reordering what's next in the queue.
 
-const drag = { track: null, from: -1, fromList: false, many: null };   // from: the track's place in the queue; fromList: dragged from the page's own list; many: several picked ones (js/select.js)
+const drag = { track: null, from: -1, fromList: false, many: null, playlist: null };   // playlist: one of the sidebar's, dragged onto another to combine them   // from: the track's place in the queue; fromList: dragged from the page's own list; many: several picked ones (js/select.js)
 
 function dragClear() {
   drag.track = null;
   drag.from = -1;
   drag.fromList = false;
   drag.many = null;
+  drag.playlist = null;
   document.body.classList.remove("trackDrag");
   document.querySelectorAll(".dragging, .over, .dropOver").forEach((x) => x.classList.remove("dragging", "over", "dropOver"));
 }
@@ -168,13 +169,24 @@ function dndInit() {
 
   // ---------- playlists in the sidebar ----------
   const side = $("plList");
+  // a playlist dragged onto another: its songs go in that one too (it stays as it was)
+  side.addEventListener("dragstart", (e) => {
+    const b = e.target.closest(".plItem");
+    const p = b && playlists.find((x) => String(x.id) === b.dataset.id);
+    if (!p) return;
+    drag.playlist = p;
+    e.dataTransfer.effectAllowed = "copy";
+    e.dataTransfer.setData("text/plain", p.title || "Playlist");
+    b.classList.add("dragging");
+  });
   const target = (e) => {
     const b = e.target.closest(".plItem");
     const p = b && playlists.find((x) => String(x.id) === b.dataset.id);
+    if (p && drag.playlist) return p !== drag.playlist && (isXpl(p) || p.source !== "local") ? { b, p } : null;
     return p && playlistTakes(p, drag.track) ? { b, p } : null;
   };
   side.addEventListener("dragover", (e) => {
-    const hit = drag.track && target(e);
+    const hit = (drag.track || drag.playlist) && target(e);
     side.querySelectorAll(".plItem.dropOver").forEach((x) => { if (!hit || x !== hit.b) x.classList.remove("dropOver"); });
     if (!hit) return;   // not a playlist that takes this track: the cursor says no
     e.preventDefault();
@@ -185,11 +197,27 @@ function dndInit() {
     if (!side.contains(e.relatedTarget)) side.querySelectorAll(".plItem.dropOver").forEach((x) => x.classList.remove("dropOver"));
   });
   side.addEventListener("drop", (e) => {
-    const hit = drag.track && target(e);
+    const hit = (drag.track || drag.playlist) && target(e);
     if (!hit) return;
     e.preventDefault();
+    if (drag.playlist) { combinePlaylists(drag.playlist, hit.p); dragClear(); return; }
     if (drag.many) selPasteInto(hit.p, drag.many);
     else addToPlaylist(hit.p, drag.track);
     dragClear();
   });
+}
+
+// One playlist's songs into another (dragged onto it in the sidebar): the same as pasting them in, so
+// songs it has already are left out, and versions of the same song are asked about (js/select.js)
+async function combinePlaylists(from, into) {
+  say('Adding "' + (from.title || "the playlist") + '" to "' + (into.title || "the playlist") + '"...');
+  let tracks;
+  try {
+    tracks = isXpl(from) ? xplTracks(xplFind(from.id) || { tracks: [] }).filter((t) => !t.missing) : await platformPlaylistTracks(from);
+  } catch (e) {
+    say("Could not read that playlist: " + e);
+    return;
+  }
+  if (!tracks.length) { say('"' + (from.title || "That playlist") + '" is empty.'); return; }
+  await selPasteInto(into, tracks);
 }
