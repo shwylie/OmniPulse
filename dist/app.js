@@ -1374,13 +1374,22 @@ function tabFit() {
   const was = n.getBoundingClientRect().width;
   n.style.transition = "none";
   n.style.width = "auto";
-  const want = Math.min(n.getBoundingClientRect().width, n.parentElement.getBoundingClientRect().width);
+  const bar = n.parentElement.getBoundingClientRect();
+  // never narrower than the panel above it: the sidebar (on the left), or the queue (on the right,
+  // while it's open), so their edges line up and a short title doesn't wrap
+  const right = document.documentElement.dataset.tab === "right";
+  const panel = right ? $("queue") : document.querySelector(".sidebar");
+  const pr = panel && !panel.hidden && panel.offsetParent ? panel.getBoundingClientRect() : null;
+  const floor = pr && pr.width ? (right ? bar.right - pr.left : pr.right - bar.left) : 0;
+  const want = Math.min(Math.max(n.getBoundingClientRect().width, floor), bar.width);
   n.style.width = was + "px";
   void n.offsetWidth;
   n.style.transition = "";
   n.style.width = Math.ceil(want) + "px";
 }
 addEventListener("resize", () => requestAnimationFrame(tabFit));
+// (and when the sidebar or the queue changes width: opened, closed, narrowed)
+if (window.ResizeObserver) { const ro = new ResizeObserver(() => requestAnimationFrame(tabFit)); [document.querySelector(".sidebar"), $("queue")].forEach((x) => x && ro.observe(x)); }
 // (and whenever what it shows changes: an album name, say, comes in after the track has started)
 if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => requestAnimationFrame(tabFit));
 new MutationObserver(() => requestAnimationFrame(tabFit)).observe($("nowToggle").querySelector(".nowText"), { childList: true, subtree: true, characterData: true });
