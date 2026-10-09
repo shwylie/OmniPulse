@@ -244,11 +244,11 @@ function ytAccPaint() {
   if (typeof ytPaint === "function") ytPaint();
   if ($("clearedYt")) clearedPaint();   // (js/streamsafe.js)
   $("ytMirror").checked = !!prefs.ytMirror;
-  if (!ytAcc.busy && ytAcc.connected && ytAcc.name) { nameNote($("ytAccNote"), "Connected as ", ytAcc.name, ". Likes here are likes on YouTube and YouTube Music too."); return; }
+  if (!ytAcc.busy && ytAcc.connected && ytAcc.name) { nameNote($("ytAccNote"), "Signed in as ", ytAcc.name, ". Your likes are on YouTube too, so they're on your phone and other devices."); return; }
   $("ytAccNote").textContent = ytAcc.busy ? "Finish signing in in your browser, then come back here..."
-    : ytAcc.connected ? "Signed in. Likes here are likes on YouTube and YouTube Music too."
-    : ytAcc.configured === false ? "Optional. Set up gets your own free Google keys first; then sign in."
-    : "Optional. Signed in, a like here is a like on YouTube and YouTube Music too. Without it, likes are kept on this PC.";
+    : ytAcc.connected ? "Signed in. Your likes are on YouTube too, so they're on your phone and other devices."
+    : ytAcc.configured === false ? "Optional: your likes, on YouTube too. Set up gets you free Google keys first (a few minutes, once)."
+    : "Optional: sign in and your likes are on YouTube too, on your phone and other devices. Without it, YouTube Music still plays; likes stay on this PC.";
 }
 
 function ytAccInit() {
@@ -376,7 +376,7 @@ function ytPaint() {
 
 async function ytStartSetup() {
   await invoke("yt_setup").catch((e) => say(String(e)));
-  say("Setting up YouTube Music (about 58 MB)...");
+  say("Installing prerequisites for YouTube Music...", { stay: true, force: true });
   ytCheck();
 }
 
@@ -387,13 +387,18 @@ async function ytCheck() {
   syncSpotifySettings();   // a free Spotify account plays through YouTube Music
   renderPlatChips();
   clearTimeout(ytSetupTimer);
-  if (setup.busy) { ytSetupTimer = setTimeout(ytCheck, 700); return; }   // follow the download
-  if (setup.step === "Done" && ytAvailable()) {
-    ytInfo.setup = {};
-    say("YouTube Music is ready.");
+  if (setup.busy) {
+    // (the status bar follows it: the first launch has this to do before YouTube Music plays)
+    say("Installing prerequisites for YouTube Music" + (setup.total ? ": " + Math.round((100 * (setup.done || 0)) / setup.total) + "%" : "") + "...", { stay: true, force: true });
+    ytSetupTimer = setTimeout(ytCheck, 700);
     return;
   }
-  if (setup.error) { say("YouTube Music couldn't be set up: " + setup.error); return; }
+  if (setup.step === "Done" && ytAvailable()) {
+    ytInfo.setup = {};
+    say("YouTube Music is ready.", { force: true });
+    return;
+  }
+  if (setup.error) { say("YouTube Music couldn't be set up: " + setup.error, { force: true }); return; }
   // the first time (or after Remove and switching on again): set up without being asked
   if (ytWanted() && !ytAvailable() && !ytAutoTried) {
     ytAutoTried = true;
