@@ -1202,19 +1202,27 @@ export component AppWindow inherits Window {
                             border-top-left-radius: Theme.radius;
                             border-top-right-radius: Theme.radius;
                             clip: true;
+                            // (mirrored on the right: the cover at the window's edge, the text lined up beside it)
                             info := HorizontalLayout {
-                                x: 14px;
+                                x: root.tab-right ? 24px : 14px;
                                 y: 10px;
                                 width: parent.width - 38px;
                                 height: 44px;
                                 spacing: 12px;
-                                Cover { art: root.now-art; initial: ""; width: 44px; height: 44px; border-radius: 6px; }
-                                if root.now-plat != "": PlatIcon { plat: root.now-plat; width: 20px; height: 20px; y: (parent.height - self.height) / 2; fill: Theme.muted; }
-                                VerticalLayout {
+                                if root.tab-right: VerticalLayout {
                                     alignment: center;
                                     spacing: 2px;
-                                    Text { text: root.now-title; color: Theme.text; font-weight: 700; font-size: 15px; overflow: elide; }
-                                    Text { text: root.now-artist; color: Theme.muted; font-size: 13px; overflow: elide; }
+                                    Text { text: root.now-title; color: Theme.text; font-weight: 700; font-size: 15px; overflow: elide; horizontal-alignment: root.tab-right ? right : left; }
+                                    Text { text: root.now-artist; color: Theme.muted; font-size: 13px; overflow: elide; horizontal-alignment: root.tab-right ? right : left; }
+                                }
+                                if !root.tab-right: Cover { art: root.now-art; initial: ""; width: 44px; height: 44px; border-radius: 6px; }
+                                if root.now-plat != "": PlatIcon { plat: root.now-plat; width: 20px; height: 20px; y: (parent.height - self.height) / 2; fill: Theme.muted; }
+                                if root.tab-right: Cover { art: root.now-art; initial: ""; width: 44px; height: 44px; border-radius: 6px; }
+                                if !root.tab-right: VerticalLayout {
+                                    alignment: center;
+                                    spacing: 2px;
+                                    Text { text: root.now-title; color: Theme.text; font-weight: 700; font-size: 15px; overflow: elide; horizontal-alignment: root.tab-right ? right : left; }
+                                    Text { text: root.now-artist; color: Theme.muted; font-size: 13px; overflow: elide; horizontal-alignment: root.tab-right ? right : left; }
                                 }
                             }
                             TouchArea { clicked => { root.nav(root.page == "now" ? "library" : "now"); } }
