@@ -149,6 +149,25 @@ fn phrase_offset(m: &Measured) -> usize {
     (0..PHRASE).fold(0, |best, o| if score[o] > score[best] + 1e-9 { o } else { best })
 }
 
+/// How much louder a drop is than the bars before it, and how near the song's loudest it gets (dB, 8 bars each)
+const DROP_RISE_DB: f64 = 3.0;
+const DROP_NEAR_DB: f64 = 3.0;
+
+/// A song's drop, if its intro builds to one: the first of its phrases' starts (every 4 bars) in its
+/// first 40% where its next 8 bars are 3 dB louder than its last 8, and within 3 dB of its loudest 8.
+/// None for one that's into it from the start (no such rise).
+fn drop_bar(m: &Measured, off: usize) -> Option<usize> {
+    let d = &m.rhythm.bar_db;
+    let n = d.len();
+    if n < 24 { return None; }
+    let mean = |a: usize, b: usize| (a..b).map(|i| d[i].max(-40.0) as f64).sum::<f64>() / (b - a) as f64;
+    let loudest = (0..=n - 8).map(|i| mean(i, i + 8)).fold(f64::MIN, f64::max);
+    (8..=(n * 2 / 5).min(n - 8)).filter(|&i| on_phrase(i, off, 4)).find(|&i| {
+        let (after, before) = (mean(i, i + 8), mean(i - 8, i));
+        after - before >= DROP_RISE_DB && loudest - after <= DROP_NEAR_DB
+    })
+}
+
 /// Whether bar k starts a phrase (or every `every` bars of one) of a song whose phrases start at `off`
 fn on_phrase(k: usize, off: usize, every: usize) -> bool { (k + PHRASE - off % PHRASE) % every == 0 }
 
@@ -215,7 +234,9 @@ pub fn plan_structure(a: &Measured, a_end_ms: u64, now_ms: u64, b: &Measured) ->
         };
         let (run, k) = [PHRASE, 4].iter().find_map(|&n| place(n).map(|k| (n, k)))?;
         let every = if run >= PHRASE { PHRASE } else { 4 };
-        let from_bar = (0..bd.len()).find(|&c| on_phrase(c, b_off, every) && c + run >= b_main).unwrap_or(0).min(bd.len() - 1);
+        // (an intro that builds to a drop: the switch-over on the drop, the build before the run-up cut)
+        let main = drop_bar(b, b_off).map_or(b_main, |d| d.max(b_main));
+        let from_bar = (0..bd.len()).find(|&c| on_phrase(c, b_off, every) && c + run >= main).unwrap_or(0).min(bd.len() - 1);
         let (bars, swap_bar) = (run as u32 + 1, run);
         // stretched to each one's tempo over the bars mixed, not its average (within a percent of it)
         let n = bars as usize * 4;
@@ -458,6 +479,14 @@ mod tests {
         assert_eq!(p.at_ms, (500.0 + 56.0 * bar).round() as u64);
         // the next one from its bar 16 (a phrase), its beat in (bar 24) on the swap, the rest of its intro cut
         assert_eq!(p.start_ms, (300.0 + 16.0 * bar).round() as u64);
+        // an intro with a beat that builds (quiet, then fuller, then a long build) to its drop at bar 32:
+        // the switch-over on the drop, its first 24 bars cut
+        let built = shaped(m(128.0, 300.0, 0, 0.5), &song(&[(8, -16.0, true), (8, -11.0, true), (16, -12.0, true), (48, -7.0, true)]));
+        assert_eq!(drop_bar(&built, 0), Some(32));
+        let p = plan_structure(&a, end, 10_000, &built).expect("a plan");
+        assert_eq!(p.start_ms, (300.0 + 24.0 * bar).round() as u64);
+        // into it from the start (a few quiet bars, no rise to speak of): no drop, its beat as before
+        assert_eq!(drop_bar(&shaped(m(128.0, 300.0, 0, 0.5), &song(&[(4, -12.0, false), (80, -10.0, true)])), 0), None);
         // a beat all through, end to end: the latest phrase that fits before the sound ends
         let flat = shaped(m(128.0, 500.0, 0, 0.5), &song(&[(88, -10.0, true)]));
         let p = plan_structure(&flat, end, 10_000, &shaped(m(128.0, 300.0, 0, 0.5), &song(&[(88, -10.0, true)]))).expect("a plan");
