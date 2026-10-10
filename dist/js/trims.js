@@ -93,7 +93,16 @@ async function ytPickSearch() {
   const box = $("ytPickList");
   box.replaceChildren(el("div", "note", "Searching..."));
   let ranked = [];
-  try { ranked = await ytCandidates(t, $("ytPickQ").value.trim()); } catch (e) { box.replaceChildren(el("div", "note warn", String(e))); return; }
+  const q = $("ytPickQ").value.trim();
+  // a YouTube or YouTube Music link (or a video id): that video, whatever a search would say
+  const id = ytLinkId(q);
+  if (id) {
+    try {
+      const found = (await invoke("yt_radio", { id })).map(ytTrack).find((c) => c.ytId === id);
+      ranked = found ? [{ c: found, score: 1 }] : [];
+    } catch (e) { box.replaceChildren(el("div", "note warn", String(e))); return; }
+    if (!ranked.length) { box.replaceChildren(el("div", "note warn", "That video couldn't be found on YouTube.")); return; }
+  } else try { ranked = await ytCandidates(t, q); } catch (e) { box.replaceChildren(el("div", "note warn", String(e))); return; }
   box.replaceChildren(...ranked.slice(0, 8).map(({ c }) => {
     const b = el("button", "ytPickRow");
     b.type = "button";
