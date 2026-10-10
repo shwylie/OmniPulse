@@ -1404,6 +1404,8 @@ fn start(shared: &Shared) {
                         push_out(&shared, true);
                     }
                     // a Go+ track (or MusicBrainz song) with no version anywhere: skipped, not its preview
+                    // listening along: nothing here plays it, so a song of yours stands in for it
+                    Err(_) if listening().is_some() && !STAND_IN.with(|x| x.borrow().is_some()) => stand_in(&shared, &t),
                     Err(e) if t.go_plus || matches!(t.src, track::Src::MusicBrainz(_)) => {
                         let what = if t.go_plus { "Go+ track" } else { "from MusicBrainz" };
                         ui.set_status(format!("Skipped \"{}\" ({what}): {e}.", t.title).into());
@@ -3504,7 +3506,10 @@ fn listen_follow(shared: &Shared, st: serde_json::Value) {
     };
     let next: Vec<Track> = st["next"].as_array().into_iter().flatten().filter_map(Track::from_snapshot).collect();
     let playing = st["playing"].as_bool() == Some(true);
-    let same = shared.borrow().queue.current().is_some_and(|c| c.key == target.key);
+    // (a stand-in playing for the host's track counts as it)
+    let standing = STAND_IN.with(|x| x.borrow().as_ref().is_some_and(|k| *k == target.key));
+    let same = standing || shared.borrow().queue.current().is_some_and(|c| c.key == target.key);
+    if !standing { STAND_IN.with(|x| x.borrow_mut().take()); }
     if !same {
         {
             let mut a = shared.borrow_mut();
@@ -3526,15 +3531,49 @@ fn listen_follow(shared: &Shared, st: serde_json::Value) {
     let engine = shared.borrow().engine.clone();
     if !shared.borrow().loaded { return; }
     if playing && engine.is_paused() { engine.play(); } else if !playing && !engine.is_paused() { engine.pause(); }
-    if playing {
+    // (a stand-in plays from its own start: only the host's own track is kept in step)
+    if playing && !standing {
         let (want, have) = (listen_host_pos(), engine.position_ms());
         if want.abs_diff(have) > 3000 { engine.seek(want); }
     }
 }
 
+thread_local! {
+    /// listening along: the host's track a song of yours is standing in for (its key)
+    static STAND_IN: RefCell<Option<String>> = const { RefCell::new(None) };
+}
+
+/// A song of yours about as long as what's left of the host's track (the closest that's at least as
+/// long, or else the longest), from your likes and files that play here, as the web app's pickStandIn
+fn stand_in(shared: &Shared, host: &Track) {
+    let left = host.ms.saturating_sub(listen_host_pos()).max(30_000);
+    let pick = {
+        let a = shared.borrow();
+        let pool: Vec<&Track> = a.library.iter().filter(|t| t.ms > 30_000 && !t.is_mix() && t.key != host.key && !listen_needs_version(t) && !matches!(t.src, track::Src::MusicBrainz(_))).collect();
+        let mut longer: Vec<&&Track> = pool.iter().filter(|t| t.ms >= left).collect();
+        longer.sort_by_key(|t| t.ms);
+        let k = (rand_u64() as usize) % longer.len().clamp(1, 3);
+        longer.get(k).map(|t| (**t).clone()).or_else(|| pool.iter().max_by_key(|t| t.ms).map(|t| (*t).clone()))
+    };
+    let Some(pick) = pick else {
+        if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_status(format!("\"{}\" isn't available on your end, and there's nothing of yours to play meanwhile.", host.title).into()); }
+        return;
+    };
+    STAND_IN.with(|x| *x.borrow_mut() = Some(host.key.clone()));
+    let note = format!("\"{}\" isn't available on your end, so \"{}\" plays in its place until the host moves on.", host.title, pick.title);
+    {
+        let mut a = shared.borrow_mut();
+        if let Some(q) = a.queue.items.get_mut(0) { q.t = pick; }
+        a.queue.qi = Some(0);
+    }
+    start(shared);
+    if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_status(note.into()); }
+}
+
 /// Leaving (or the room's gone): your own queue back, paused where it was
 fn listen_leave(shared: &Shared, quiet: bool) {
     let Some(l) = LISTEN.with(|l| l.borrow_mut().take()) else { return };
+    STAND_IN.with(|x| x.borrow_mut().take());
     drop(l.tx);
     shared.borrow().engine.pause();
     {
