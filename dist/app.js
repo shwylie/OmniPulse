@@ -1946,6 +1946,8 @@ audio.addEventListener("loadedmetadata", () => {
 
 $("seek").addEventListener("input", () => {
   const cur = curTrack();
+  // listening along: scrubbing here brings it back in step with the host
+  if (typeof together !== "undefined" && together.role === "listener") together.resync = true;
   const frac = Number($("seek").value) / 1000;
   if (onSpotifyEngine(cur)) { if (spState.dur) spotifySeek(rawAt(cur, frac, spState.dur) / spState.dur); return; }
   const d = curDurMs();

@@ -3426,6 +3426,9 @@ struct Listening {
     /// the host's last state, and when it came
     state: Option<serde_json::Value>,
     at: std::time::Instant,
+    /// the track lined up with the host's already (left alone after), and whether something moved since
+    synced: Option<String>,
+    resync: bool,
 }
 
 thread_local! {
@@ -3466,6 +3469,11 @@ fn listen_needs_version(t: &Track) -> bool {
         track::Src::Plugin(id, _) => plugrun::get(id).is_some(),
     };
     !ok && ytdlp
+}
+
+/// Listening along: something moved on your end (a pause, a scrub), so it's lined up again
+fn listen_moved() {
+    LISTEN.with(|l| { if let Some(l) = l.borrow_mut().as_mut() { l.resync = true; } });
 }
 
 /// Fade Between Tracks as it's set: listening along, the host's (from their state's "feel")
@@ -3518,7 +3526,7 @@ fn listen_join(shared: &Shared, link: &str) {
     });
     let saved = std::mem::take(&mut shared.borrow_mut().queue);
     shared.borrow().engine.pause();
-    LISTEN.with(|l| *l.borrow_mut() = Some(Listening { kind: kind.clone(), host: "the host".into(), tx, saved, state: None, at: std::time::Instant::now() }));
+    LISTEN.with(|l| *l.borrow_mut() = Some(Listening { kind: kind.clone(), host: "the host".into(), tx, saved, state: None, at: std::time::Instant::now(), synced: None, resync: false }));
     if let Some(ui) = weak.upgrade() { ui.set_status(if kind == "jam" { "Joining the Jam..." } else { "Joining..." }.into()); }
     jam_paint(shared);
 }
@@ -3627,7 +3635,22 @@ fn listen_follow(shared: &Shared, st: serde_json::Value) {
     if listening().is_none() {
         return;   // (one still on its way after leaving)
     }
-    LISTEN.with(|l| { if let Some(l) = l.borrow_mut().as_mut() { l.state = Some(st.clone()); l.at = std::time::Instant::now(); } });
+    // the host's end moved (as the web app's): a jump in their position beyond what the time since says,
+    // or paused or played; otherwise a track lined up once is left alone
+    LISTEN.with(|l| {
+        let mut l = l.borrow_mut();
+        let Some(l) = l.as_mut() else { return };
+        if let Some(prev) = &l.state {
+            if prev["track"]["id"] == st["track"]["id"] {
+                let (pp, np) = (prev["playing"].as_bool() == Some(true), st["playing"].as_bool() == Some(true));
+                let (ppos, npos) = (prev["pos"].as_f64().unwrap_or(0.0), st["pos"].as_f64().unwrap_or(0.0));
+                let expect = if pp { ppos + l.at.elapsed().as_millis() as f64 } else { ppos };
+                if pp != np || (npos - expect).abs() > 1500.0 { l.resync = true; }
+            }
+        }
+        l.state = Some(st.clone());
+        l.at = std::time::Instant::now();
+    });
     let Some(target) = Track::from_snapshot(&st["track"]) else {
         if shared.borrow().loaded && !shared.borrow().engine.is_paused() { shared.borrow().engine.pause(); }
         return;
@@ -3645,6 +3668,7 @@ fn listen_follow(shared: &Shared, st: serde_json::Value) {
             a.queue.qi = Some(0);
             a.resume_ms = Some(listen_host_pos());
         }
+        LISTEN.with(|l| { if let Some(l) = l.borrow_mut().as_mut() { l.synced = None; } });
         start(shared);
         if !playing { shared.borrow().engine.pause(); }
         return;
@@ -3660,10 +3684,13 @@ fn listen_follow(shared: &Shared, st: serde_json::Value) {
     if !shared.borrow().loaded { return; }
     if playing && engine.is_paused() { engine.play(); } else if !playing && !engine.is_paused() { engine.pause(); }
     // (a stand-in plays from its own start: only the host's own track is kept in step)
-    if playing && !standing {
+    let key = shared.borrow().queue.current().map(|t| t.key.clone()).unwrap_or_default();
+    let lined_up = LISTEN.with(|l| l.borrow().as_ref().is_some_and(|l| l.synced.as_deref() == Some(key.as_str()) && !l.resync));
+    if playing && !standing && !lined_up {
         let (want, have) = (listen_host_pos(), engine.position_ms());
         // (back in step, smoothly: in again from quiet after the jump)
         if want.abs_diff(have) > 1000 { engine.seek(want); engine.fade(Some(0.0), 1.0, 800); }
+        LISTEN.with(|l| { if let Some(l) = l.borrow_mut().as_mut() { l.synced = Some(key); l.resync = false; } });
     }
 }
 
@@ -4079,6 +4106,7 @@ fn toggle(shared: &Shared) {
     }
     let (engine, weak) = { let a = shared.borrow(); (a.engine.clone(), a.ui.clone()) };
     let Some(ui) = weak.upgrade() else { return };
+    listen_moved();   // (listening along: your pause or play brings it back in step with the host)
     // (casting: what the device had buffered while paused is old, so it starts afresh)
     if engine.is_paused() { engine.play(); ui.set_playing(true); if casting().is_some() { omnipulse_core::cast::reload(); } } else { engine.pause(); ui.set_playing(false); }
     save_session(&shared.borrow());
@@ -4689,6 +4717,7 @@ fn main() -> Result<(), slint::PlatformError> {
     let s = shared.clone();
     ui.on_seek(move |f| {
         let engine = s.borrow().engine.clone();
+        listen_moved();   // (listening along: scrubbing here brings it back in step with the host)
         // within the part that plays (a track's start and end times)
         let (from, to) = trim_now(&s);
         let d = to.unwrap_or(engine.duration_ms()).saturating_sub(from);

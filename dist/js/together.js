@@ -432,7 +432,22 @@ const freshCopy = (s) => {
   return t;
 };
 
+// In step once per track: after a track has been lined up with the host's, it's left alone (no
+// chasing small drifts) until something moves on either end: the host scrubbing (or skipping a
+// silence: their position jumps), the host pausing or playing again, or you pausing or scrubbing.
+const listenSynced = (t) => !!t && together.synced === t.id && !together.resync;
+function listenSyncDone(t) { together.synced = t ? t.id : null; together.resync = false; }
+
 function listenerFollow(s) {
+  // the host's end moved: a jump in their position (beyond what the time since says), or paused/played
+  const prev = together.state;
+  if (prev && prev.track && s.track && prev.track.id === s.track.id) {
+    if (!!prev.playing !== !!s.playing) together.resync = true;
+    else if (s.playing) {
+      const expect = prev.pos + (performance.now() - together.stateAt);
+      if (Math.abs(s.pos - expect) > 1500) together.resync = true;
+    } else if (Math.abs(s.pos - prev.pos) > 1500) together.resync = true;
+  }
   together.state = s;
   together.stateAt = performance.now();
   [s.track].concat(s.next || []).filter(Boolean).forEach((x) => { together.trims[x.id] = x.trim || null; });
@@ -455,6 +470,7 @@ function listenerFollow(s) {
       return;
     }
     pendingResume = { id: target.id, posMs: Math.max(0, hostPos()) };
+    together.synced = null;   // (a new track: lined up once it plays)
     const late = hostPos() > 2000;
     const started = togetherOrig.playCurrent();
     // joining partway (or this one loading slower than the host's): it fades in, where the host is
@@ -464,6 +480,7 @@ function listenerFollow(s) {
       // the host always wins: what loading took (Spotify's start especially) is caught up straight away
       const t = curTrack();
       if (t && t.id === target.id && together.role === "listener" && Math.abs(hostPos() - curPosMs()) > 1500) fadeJump(1500, () => seekToMs(hostPos()));
+      if (t && t.id === target.id) listenSyncDone(t);
     });
     renderQueue();
     return;
@@ -474,9 +491,10 @@ function listenerFollow(s) {
   if (together.localPause) return;   // paused here on purpose: it catches up when played again
   if (s.playing && !nowPlaying()) togetherOrig.toggle();
   else if (!s.playing && nowPlaying()) togetherOrig.toggle();
-  if (s.playing && !cur.standInFor) {
+  if (s.playing && !cur.standInFor && !listenSynced(cur)) {
     const want = hostPos(), have = curPosMs();
-    if (Math.abs(want - have) > LISTEN_DRIFT_MS) fadeJump(800, () => seekToMs(hostPos()));   // drifted: back in step, smoothly
+    if (Math.abs(want - have) > LISTEN_DRIFT_MS) fadeJump(800, () => seekToMs(hostPos()));   // back in step, smoothly
+    listenSyncDone(cur);
   }
 }
 
@@ -604,7 +622,7 @@ function togetherGuard() {
       const wasPlaying = nowPlaying();
       together.localPause = wasPlaying;
       const r = togetherOrig.toggle.apply(this, args);
-      if (!wasPlaying && together.state) setTimeout(() => seekToMs(hostPos()), 400);
+      if (!wasPlaying && together.state) { together.resync = true; setTimeout(() => { seekToMs(hostPos()); listenSyncDone(curTrack()); }, 400); }
       return r;
     }
     if (!askLeave()) return;
@@ -662,8 +680,9 @@ function togetherInit() {
   setInterval(() => {
     if (together.role !== "listener" || !together.state || !together.state.playing || together.localPause || !nowPlaying()) return;
     const t = curTrack();
-    if (!t || t.standInFor || (together.state.track && t.id !== together.state.track.id) || fadeState.pendingIn) return;
+    if (!t || t.standInFor || (together.state.track && t.id !== together.state.track.id) || fadeState.pendingIn || listenSynced(t)) return;
     if (Math.abs(hostPos() - curPosMs()) > LISTEN_DRIFT_MS) fadeJump(800, () => seekToMs(hostPos()));
+    listenSyncDone(t);
   }, 2000);
   $("listenNudge").value = String(listenNudge());
   $("listenNudge").addEventListener("change", () => {
