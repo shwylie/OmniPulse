@@ -31,6 +31,29 @@ fn spotify_attach() {
     });
 }
 
+/// Why an age-restricted YouTube song with no other upload doesn't play (main.rs skips it, saying so)
+pub const AGE_BLOCKED: &str = "YouTube only plays it to signed-in adults, and there's no other upload of it";
+
+/// YouTube's answer for an age-restricted video (yt-dlp can't sign in as an adult)
+fn age_blocked(e: &str) -> bool {
+    let e = e.to_lowercase();
+    e.contains("confirm your age") || e.contains("age-restrict") || e.contains("age restrict") || e.contains("inappropriate for some users")
+}
+
+/// The audio of another upload of the same song (up to three close ones tried), as the web app's
+/// ytPlayAnyUpload
+async fn other_upload(t: &Track, id: &str) -> Option<String> {
+    let found = core::youtube::search(&format!("{} {}", t.artist, t.title)).await.ok()?;
+    for c in found.iter().filter(|c| c.id != id && crate::versions::score(t, c) >= 0.8).take(3) {
+        match core::youtube::stream_url(&c.id, false).await {
+            Ok(url) => return Some(url),
+            Err(e) if age_blocked(&e) => continue,
+            Err(_) => return None,
+        }
+    }
+    None
+}
+
 pub async fn open_source(t: &Track, rt: tokio::runtime::Handle) -> Result<Box<dyn Source>, String> {
     match &t.src {
         // (played as its YouTube Music version: crate::versions, in main.rs)
@@ -65,7 +88,12 @@ pub async fn open_source(t: &Track, rt: tokio::runtime::Handle) -> Result<Box<dy
             Err(why)
         }
         Src::YouTube(id) => {
-            let url = core::youtube::stream_url(id, false).await?;
+            let url = match core::youtube::stream_url(id, false).await {
+                Ok(url) => url,
+                // age-restricted: another upload of the same song often isn't (the closest few)
+                Err(e) if age_blocked(&e) => other_upload(t, id).await.ok_or_else(|| AGE_BLOCKED.to_string())?,
+                Err(e) => return Err(e),
+            };
             tokio::task::spawn_blocking(move || omnipulse_audio::open_url(&url, "m4a").map(|d| Box::new(d) as Box<dyn Source>)).await.map_err(|e| e.to_string())?
         }
         Src::Spotify(uri) => {

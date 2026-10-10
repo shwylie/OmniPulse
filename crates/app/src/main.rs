@@ -1033,6 +1033,20 @@ fn start(shared: &Shared) {
                         let s2 = shared.clone();
                         slint::Timer::single_shot(std::time::Duration::from_millis(400), move || step(&s2, 1));
                     }
+                    // age-restricted on YouTube with no other upload: skipped, saying why
+                    Err(e) if e == player::AGE_BLOCKED => {
+                        let note = format!("Skipped \"{}\": {e}.", t.title);
+                        let s2 = shared.clone();
+                        slint::Timer::single_shot(std::time::Duration::from_millis(400), move || {
+                            step(&s2, 1);
+                            let n = note.clone();
+                            let s3 = s2.clone();
+                            // (after the next one has started)
+                            slint::Timer::single_shot(std::time::Duration::from_millis(1200), move || {
+                                if let Some(ui) = s3.borrow().ui.upgrade() { ui.set_status(n.into()); }
+                            });
+                        });
+                    }
                     Err(e) => ui.set_status(format!("Couldn't play \"{}\": {e}", t.title).into()),
                 }
             });
