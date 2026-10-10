@@ -878,8 +878,7 @@ details.sub.inner { margin-top: 10px; }
 .searchGo svg { color: inherit; }
 
 /* ===== v44: favourites can be switched off; "Favourites only" ===== */
-:root.noFav .acts button[data-act="fav"], :root.noFav #favBtn, :root.noFav #npFav,
-:root.noFav #navFavourites, :root.noFav #favOnlyChip { display: none !important; }
+:root.noFavPage #navFavourites { display: none !important; }
 #list.favOnly li.notFav { display: none; }
 
 /* ===== v44: Discover feed: shelves of tiles that scroll sideways ===== */

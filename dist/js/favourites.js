@@ -10,14 +10,16 @@ try { favs = JSON.parse(localStorage.getItem(FAV_KEY) || "[]"); } catch (e) { fa
 let favIds = new Set(favs.map((s) => s.id));
 
 const isFav = (t) => !!t && favIds.has(t.id);
-const favOn = () => prefs.favOn !== false;
+// Favourites are always on (the stars, the filter); Settings only shows or hides their own page in
+// the sidebar. (Before, a switch turned the whole feature off: switched off, it's the page that hides.)
+const favOn = () => true;
+const favPageOn = () => prefs.favPage !== false;
 
-// Switching favourites off hides every star, the page and the filter; your favourites are kept
 function applyFavOn() {
-  document.documentElement.classList.toggle("noFav", !favOn());
-  $("favOn").checked = favOn();
-  if (!favOn() && prefs.favOnly) { prefs.favOnly = false; savePrefs(); }
-  if (!favOn() && view === "favourites") openLikes();
+  if (prefs.favOn === false) { if (prefs.favPage === undefined) prefs.favPage = false; delete prefs.favOn; savePrefs(); }
+  document.documentElement.classList.toggle("noFavPage", !favPageOn());
+  $("favPageOn").checked = favPageOn();
+  if (!favPageOn() && view === "favourites") openLikes();
   paintFavOnly();
 }
 
@@ -92,7 +94,7 @@ function openFavourites() {
 }
 
 function favouritesInit() {
-  $("favOn").addEventListener("change", () => { prefs.favOn = $("favOn").checked; savePrefs(); applyFavOn(); });
+  $("favPageOn").addEventListener("change", () => { prefs.favPage = $("favPageOn").checked; savePrefs(); applyFavOn(); });
   $("favOnlyChip").addEventListener("click", () => {
     prefs.favOnly = !prefs.favOnly;
     savePrefs();
