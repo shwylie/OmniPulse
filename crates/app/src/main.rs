@@ -1517,6 +1517,13 @@ fn start(shared: &Shared) {
                 ui.set_track_loading(false);
                 match src {
                     Ok(src) => {
+                        // the YouTube video it plays from (itself, or its version), for SponsorBlock
+                        let video = match (&t.src, &version) {
+                            (_, Some(v)) => Some(v.yt.id.clone()),
+                            (track::Src::YouTube(id), None) => Some(id.clone()),
+                            _ => None,
+                        };
+                        sb_load(&shared, video);
                         let what = sound::loud_source(&t, version.as_ref().map(|v| v.yt.id.as_str()));
                         shared.borrow_mut().cur_loud = what.as_ref().map(|(k, id)| format!("{k}:{id}"));
                         FADE.with(|f| *f.borrow_mut() = (false, String::new()));
@@ -1610,6 +1617,56 @@ fn start(shared: &Shared) {
             });
         });
     });
+}
+
+// ---------- SponsorBlock (as the web app's js/sponsorblock.js) ----------
+// What plays from YouTube skips the non-music parts of music videos (a skit before the song, an
+// interview after it) that people have marked there; asked by a hash prefix (core::sponsorblock).
+thread_local! {
+    /// the video playing, its parts (once known), and the last part skipped (so a seek back isn't fought)
+    static SB: RefCell<(String, Option<Vec<(f64, f64)>>, String)> = const { RefCell::new((String::new(), None, String::new())) };
+}
+
+fn sb_load(shared: &Shared, video: Option<String>) {
+    let id = video.unwrap_or_default();
+    SB.with(|b| *b.borrow_mut() = (id.clone(), None, String::new()));
+    if id.is_empty() || !integrations::on(&shared.borrow().web.prefs, "sbOn") { return; }
+    let (rt, weak) = { let a = shared.borrow(); (a.rt.clone(), a.ui.clone()) };
+    rt.spawn(async move {
+        let segs = omnipulse_core::sponsorblock::music_offtopic(&id).await.unwrap_or_default();
+        let _ = weak.upgrade_in_event_loop(move |_| SB.with(|b| {
+            let mut b = b.borrow_mut();
+            if b.0 == id { b.1 = Some(segs); }
+        }));
+    });
+}
+
+/// Each tick while playing: a marked part skipped. True if it moved on to the next track.
+fn sb_tick(shared: &Shared, pos: u64, dur: u64) -> bool {
+    if listening().is_some() || !integrations::on(&shared.borrow().web.prefs, "sbOn") { return false; }   // (listening along: the host's app skips them)
+    let at = pos as f64 / 1000.0;
+    let Some((key, seg)) = SB.with(|b| {
+        let b = b.borrow();
+        let seg = b.1.as_ref()?.iter().copied().find(|&(a, e)| at >= a && at < e - 0.5)?;
+        let key = format!("{}:{}", b.0, seg.0);
+        // (you went back into it yourself)
+        if b.2 == key && at > seg.0 + 1.5 { return None; }
+        Some((key, seg))
+    }) else { return false };
+    SB.with(|b| b.borrow_mut().2 = key);
+    let secs = (seg.1 - at.max(seg.0)).round() as u64;
+    let ui = shared.borrow().ui.upgrade();
+    // a part that runs to the end: the song's over
+    if dur > 0 && seg.1 * 1000.0 >= dur as f64 - 1500.0 {
+        if let Some(ui) = ui { ui.set_status(format!("Skipped the last {secs} s (not music, marked on SponsorBlock).").into()); }
+        step(shared, 1);
+        return true;
+    }
+    let engine = shared.borrow().engine.clone();
+    engine.seek((seg.1 * 1000.0) as u64);
+    engine.fade(Some(0.0), 1.0, 450);
+    if let Some(ui) = ui { ui.set_status(format!("Skipped {secs} s that isn't music (marked on SponsorBlock).").into()); }
+    false
 }
 
 // ---------- preloading the next track (as the web app's js/preload.js) ----------
@@ -2034,6 +2091,9 @@ fn tick(shared: &Shared, events: &std::sync::mpsc::Receiver<Event>, n: u64) {
     if !engine.is_paused() && fade_and_silences(shared, pos, dur) {
         return;
     }
+    if !engine.is_paused() && sb_tick(shared, pos, dur) {
+        return;
+    }
     while let Ok(ev) = events.try_recv() {
         match ev {
             Event::Ended if shared.borrow().repeat == "one" => start(shared),
@@ -2313,9 +2373,10 @@ fn song_request(shared: &Shared, id: u64, q: String, user: String) {
 /// The servers the web app's settings have on: the widget, the Stream Deck's remote, chat requests
 // ---------- Settings: the switches beyond Look ----------
 // (section, label, note, key, on unless switched off)
-const SET_ROWS: [(&str, &str, &str, &str, bool); 18] = [
+const SET_ROWS: [(&str, &str, &str, &str, bool); 19] = [
     ("Library", "Sets & Podcasts in the Queue", "Lists and autoplay include anything over 15 minutes. Off: only when you pick one.", "queueSets", false),
     ("Library", "Autoplay", "Plays similar tracks when the queue runs out.", "autoplay", true),
+    ("Library", "Skip non-music parts", "What plays from YouTube skips the parts of music videos that aren't music (a skit before the song, an interview after it), as marked on SponsorBlock.", "sbOn", true),
     ("Library", "Favourites Page", "Your starred tracks on a page of their own, in the sidebar. The stars stay either way.", "favPage", true),
     ("Integrations", "SoundCloud", "Its likes, playlists and search.", "scOn", true),
     ("Integrations", "Spotify", "Its likes, playlists and search.", "spOn", true),
