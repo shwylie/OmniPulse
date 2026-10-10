@@ -98,6 +98,46 @@ async function popularArtists() {
   }));
 }
 
+// ---------- genres you've said you like (Pick genres, on Discover) ----------
+// Deezer's genres, by its own ids. Picked ones start Discover off before there's anything to go on:
+// stations for each genre's best-known artists, its chart as a spotlight, and its tile first.
+const TASTE_GENRES = [["Pop", 132], ["Hip-hop & Rap", 116], ["Rock", 152], ["Dance", 113], ["Electronic", 106], ["R&B", 165],
+  ["Alternative & Indie", 85], ["Soul & Funk", 169], ["Jazz", 129], ["Country", 84], ["Folk", 466], ["Metal", 464],
+  ["Latin", 197], ["Reggae", 144], ["Blues", 153], ["Classical", 98], ["K-pop & Asian", 16], ["African", 2],
+  ["Brazilian", 75], ["Indian", 81], ["Film & Game", 173]];
+const tasteGenres = () => (Array.isArray(prefs.tasteGenres) ? prefs.tasteGenres : []).filter((g) => TASTE_GENRES.some(([n]) => n === g));
+const tasteId = (g) => (TASTE_GENRES.find(([n]) => n === g) || [])[1];
+
+// The artists of the genres you picked, as stations: the ones most often in each genre's chart (Deezer's
+// own genre artist lists are the same overall chart for every genre), the genres taking turns
+async function tasteArtists() {
+  const lists = await eachFew(tasteGenres(), async (g) => {
+    const by = new Map();
+    ((await dzGet("/chart/" + tasteId(g) + "/tracks?limit=50")).data || []).forEach((t) => {
+      const x = t.artist;
+      if (!x || !x.name) return;
+      const k = artistKey(x.name);
+      if (!by.has(k)) by.set(k, { n: 0, a: { key: k, name: x.name, liked: { soundcloud: [], spotify: [], youtube: [] }, known: [], files: [], score: 0,
+        art: x.picture_big || x.picture_xl || "", popular: true, genre: g } });
+      by.get(k).n++;
+    });
+    return [...by.values()].sort((x, y) => y.n - x.n).slice(0, 8).map((x) => x.a);
+  }, 3);
+  const seen = new Set();
+  return interleave(lists.filter(Boolean)).filter((a) => a.key && !hiddenArtists.has(a.key) && !seen.has(a.key) && seen.add(a.key));
+}
+
+// Nothing to go on yet: no likes, no favourites, nothing played
+const coldStart = () => !hasLikes() && !loadStats().length;
+
+// Before there's anything to go on, Discover starts with the genres (and their artists and charts)
+const COLD_FIRST = ["genres", "taste", "popular", "spotlight"];
+function orderFeed(shelves) {
+  if (!coldStart()) return shelves;
+  const rank = (s) => { const i = COLD_FIRST.indexOf(s.key); return i < 0 ? COLD_FIRST.length : i; };
+  return shelves.map((s, i) => [s, i]).sort((a, b) => rank(a[0]) - rank(b[0]) || a[1] - b[1]).map(([s]) => s);
+}
+
 const scSeeded = (crew) => crew.some((a) => a.liked.soundcloud.length);
 const useCatalog = (crew, plats) => plats.includes("catalog") && !scSeeded(crew);
 
@@ -226,7 +266,7 @@ async function buildFeed(plats) {
 
   const stationTile = (a) => ({
     kind: "station", plats: crewPlats([a], plats), art: a.art || (a.liked.soundcloud[0] ? artUrl(a.liked.soundcloud[0], "t500x500") : ""), name: a.name, hue: hueOf(a.name),
-    sub: a.popular ? "Popular right now" : "Artist station",
+    sub: a.genre ? a.genre + " station" : a.popular ? "Popular right now" : "Artist station",
     mix: makeMix({ id: "mix:station:" + a.key, title: a.name + " station",
       desc: "Music like " + a.name + ".", build: () => buildStation(a, plats), fresh: () => onlyNew(() => freshFor([a], plats)) }),
   });
@@ -242,16 +282,24 @@ async function buildFeed(plats) {
   // Discover, with Top songs and the genres, before you've played anything)
   if (plats.includes("catalog") && !liked.length) {
     const yours = new Set(artists.map((a) => a.key));
-    const popular = (await popularArtists().catch(() => [])).filter((a) => !yours.has(a.key)).slice(0, 12);
-    if (popular.length) shelves.push({ title: artists.length ? "Popular artists" : "Popular artists to start with", tiles: popular.map(stationTile) });
+    const picked = tasteGenres().length ? (await tasteArtists().catch(() => [])).filter((a) => !yours.has(a.key)).slice(0, 16) : [];
+    if (picked.length) shelves.push({ key: "taste", title: "Artists from the genres you like", tiles: picked.map(stationTile) });
+    else {
+      const popular = (await popularArtists().catch(() => [])).filter((a) => !yours.has(a.key)).slice(0, 12);
+      if (popular.length) shelves.push({ key: "popular", title: artists.length ? "Popular artists" : "Popular artists to start with", tiles: popular.map(stationTile) });
+    }
   }
 
   // Trending by genre
   const genrePlats = plats.filter((p) => DISCOVER_PICKERS[p]);
   if (genrePlats.length) {
+    // (the genres you picked first)
+    const picked = tasteGenres();
+    const order = picked.filter((g) => !GENRES.includes(g)).concat(GENRES.filter((g) => picked.includes(g)), GENRES.filter((g) => !picked.includes(g)));
     shelves.push({
+      key: "genres",
       title: "Trending by genre",
-      tiles: GENRES.map((g) => ({
+      tiles: order.map((g) => ({
         kind: "genre", plats: genrePlats, name: g, hue: hueOf(g), sub: "Trending",
         mix: makeMix({ id: "mix:genre:" + g, title: g, desc: "Trending " + g + ", from " + genrePlats.map((p) => PLATFORMS[p].name).join(" and ") + ".",
           build: () => buildGenre(g, genrePlats), fresh: () => onlyNew(() => buildGenre(g, genrePlats)) }),
@@ -261,11 +309,11 @@ async function buildFeed(plats) {
   return { shelves, artists };
 }
 
-// The genre most of your plays are in (one Deezer has a chart for), pop to begin with
+// The genre most of your plays are in (one Deezer has a chart for); "" before there's one
 function spotlightGenre() {
   const n = new Map();
   loadStats().forEach((x) => { const g = String(x.genre || "").toLowerCase().trim(); if (DZ_GENRES[g]) n.set(g, (n.get(g) || 0) + 1); });
-  return [...n.entries()].sort((a, b) => b[1] - a[1]).map(([g]) => g)[0] || "pop";
+  return [...n.entries()].sort((a, b) => b[1] - a[1]).map(([g]) => g)[0] || "";
 }
 
 // Shelves of single tracks, which need a moment to fetch; added below the others when ready
@@ -278,13 +326,15 @@ async function trackShelves(plats) {
     if (rel) out.push(rel);
     const top = await dzChart().catch(() => []);
     if (top.length) out.push({ title: "Top songs on Deezer", tracks: top.filter(keep).slice(0, 30) });
-    // the genre you play most (pop until there's one), its chart
-    const g = spotlightGenre();
-    const lit = await dzChart(DZ_GENRES[g]).catch(() => []);
+    // the genre you play most, or (before you've played anything) the ones you picked, or pop: its chart
     const seen = new Set(top.map((t) => t.id));
-    const spot = lit.filter((t) => keep(t) && !seen.has(t.id)).slice(0, 20);
-    const name = GENRES.find((x) => x.toLowerCase() === g) || g.charAt(0).toUpperCase() + g.slice(1);
-    if (spot.length) out.push({ title: name + " spotlight", tracks: spot });
+    const played = spotlightGenre();
+    const picks = played ? [[GENRES.find((x) => x.toLowerCase() === played) || played.charAt(0).toUpperCase() + played.slice(1), DZ_GENRES[played]]]
+      : tasteGenres().length ? tasteGenres().slice(0, 3).map((g) => [g, tasteId(g)]) : [["Pop", DZ_GENRES.pop]];
+    for (const [name, id] of picks) {
+      const spot = (await dzChart(id).catch(() => [])).filter((t) => keep(t) && !seen.has(t.id) && seen.add(t.id)).slice(0, 20);
+      if (spot.length) out.push({ key: "spotlight", title: name + " spotlight", tracks: spot });
+    }
   }
   if (plats.includes("soundcloud")) {
     const f = await scDiscover("following").catch(() => null);
@@ -423,7 +473,35 @@ function shelfEl(shelf) {
 }
 
 function paintFeed(shelves) {
-  $("feed").replaceChildren(...shelves.map(shelfEl));
+  $("feed").replaceChildren(...orderFeed(shelves).map(shelfEl));
+}
+
+// ---------- Pick genres: what you like, to start Discover off ----------
+function tasteOpen() {
+  const box = $("tasteChips");
+  const on = new Set(tasteGenres());
+  box.replaceChildren(...TASTE_GENRES.map(([g]) => {
+    const b = el("button", "chip optChip" + (on.has(g) ? " on" : ""), g);
+    b.type = "button";
+    b.setAttribute("aria-pressed", on.has(g) ? "true" : "false");
+    b.addEventListener("click", () => { const now = !b.classList.contains("on"); b.classList.toggle("on", now); b.setAttribute("aria-pressed", now ? "true" : "false"); });
+    return b;
+  }));
+  $("tasteDlg").showModal();
+}
+
+function tasteSave(e) {
+  e.preventDefault();
+  prefs.tasteGenres = [...$("tasteChips").querySelectorAll(".chip.on")].map((b) => b.textContent);
+  savePrefs();
+  $("tasteDlg").close();
+  paintTasteBtn();
+  say(prefs.tasteGenres.length ? "Thanks. Discover starts from " + prefs.tasteGenres.join(", ") + " now." : "No genres picked.");
+  openFeed(true);
+}
+
+function paintTasteBtn() {
+  $("tasteBtn").textContent = tasteGenres().length ? "Your genres" : "Pick genres";
 }
 
 // ---------- opening and playing tiles ----------
@@ -542,6 +620,11 @@ function wireShelves(box) {
 
 function feedInit() {
   $("luckyBtn").addEventListener("click", feelingLucky);
+  $("tasteBtn").addEventListener("click", tasteOpen);
+  $("likesPromptGenres").addEventListener("click", tasteOpen);
+  $("tasteForm").addEventListener("submit", tasteSave);
+  $("tasteCancel").addEventListener("click", () => $("tasteDlg").close());
+  paintTasteBtn();
   $("likesPromptFind").addEventListener("click", () => { $("q").focus(); say("Search for songs you love, then like or star them."); });
   wireShelves($("feed"));
 }

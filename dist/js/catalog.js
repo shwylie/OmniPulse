@@ -114,7 +114,7 @@ async function catDiscover(src) {
   if (src === "following") return { list: [] };
   if (src.startsWith("genre:")) {
     const g = src.slice(6).toLowerCase();
-    const id = DZ_GENRES[g];
+    const id = DZ_GENRES[g] || (typeof tasteId === "function" && tasteId(src.slice(6)));
     const list = id ? await dzChart(id) : ((await dzGet("/search?limit=50&q=" + encodeURIComponent(g))).data || []).map((x) => dzTrack(x));
     return { list: recFilter(list) };
   }

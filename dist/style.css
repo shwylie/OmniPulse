@@ -1785,3 +1785,5 @@ body.streamSafe #navSets, body.streamSafe #navArtists, body.streamSafe #plSectio
 .likesPrompt > div { flex: 1; min-width: 0; }
 .likesPrompt .note { margin-top: 2px; }
 .likesPrompt button { flex: none; }
+.tasteChips { display: flex; flex-wrap: wrap; gap: 8px; margin: 14px 0 6px; }
+.tasteDlg .sheet { max-width: 560px; }

@@ -724,6 +724,7 @@ function afterRender() {
 // Shown whenever any of them is, so the language filter stays reachable when it hid everything.
 function paintHeroActions() {
   $("luckyBtn").hidden = view !== "discover";
+  $("tasteBtn").hidden = view !== "discover" || !activePlats("discover").includes("catalog");
   $("libSort").hidden = view !== "likes" || albumsOnly();
   $("favOnlyChip").hidden = !favOn() || ["favourites", "discover", "stats", "now", "artists"].includes(view) || (view === "search" && !query);
   paintSetsChip();
@@ -732,7 +733,7 @@ function paintHeroActions() {
   hl.classList.toggle("on", !!prefs.hideLikes);
   hl.setAttribute("aria-pressed", prefs.hideLikes ? "true" : "false");
   hl.title = prefs.hideLikes ? "Your likes are hidden from these results. Click to show them." : "Leave tracks you've liked out of the results";
-  $("heroActions").hidden = !["playAll", "followBtn", "plDelete", "plShare", "plCollab", "luckyBtn", "libSort", "langChip", "favOnlyChip", "setsLikedChip", "hideLikesChip", "artistsBatch"].some((id) => !$(id).hidden);
+  $("heroActions").hidden = !["playAll", "followBtn", "plDelete", "plShare", "plCollab", "luckyBtn", "tasteBtn", "libSort", "langChip", "favOnlyChip", "setsLikedChip", "hideLikesChip", "artistsBatch"].some((id) => !$(id).hidden);
 }
 
 // A track's genres, as tags: its own, and those of its copies on other platforms (SoundCloud's are
