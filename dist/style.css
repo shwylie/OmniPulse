@@ -1181,7 +1181,6 @@ select.wide { max-width: 260px; }
 /* reordering the sidebar's pages */
 #navList .nav.dragging { opacity: 0.45; outline: 1px dashed var(--accent); }
 /* Go+ tracks that play from YouTube Music */
-.goPlus { flex: none; margin-right: 6px; padding: 0 5px; border-radius: 4px; font-size: 10px; font-weight: 700; line-height: 15px; color: #ff6a3d; border: 1px solid color-mix(in srgb, #ff6a3d 55%, transparent); }
 #npAlbum { margin: 4px 0 0; color: var(--text); opacity: 0.85; font-weight: 600; }
 
 /* ===== v45: the queue: Now playing, Next up (yours), Autoplay ===== */
@@ -1787,3 +1786,12 @@ body.streamSafe #navSets, body.streamSafe #navArtists, body.streamSafe #plSectio
 .likesPrompt button { flex: none; }
 .tasteChips { display: flex; flex-wrap: wrap; gap: 8px; margin: 14px 0 6px; }
 .tasteDlg .sheet { max-width: 560px; }
+/* A track's platform logo stays out of the way: in a list or the queue it shows on the row you're on
+   (hovered, picked or focused); on the player bar and in Now Playing, when you point at its place.
+   (Its space is kept, so nothing moves, and pointing at the empty spot brings it back: its slot has no box of
+   its own, so it's the icon itself that's pointed at.) The OBS
+   widget and chat's request replies are drawn elsewhere and keep theirs. */
+#list li .plat.platBig, .qRow .plat, #nowPlat .plat, #npPlat .plat { opacity: 0; transition: opacity .15s; }
+#list li:hover .plat.platBig, #list li.picked .plat.platBig, #list li:focus-within .plat.platBig,
+.qRow:hover .plat, .qRow:focus-within .plat,
+#nowPlat .plat:hover, #npPlat .plat:hover, #nowPlat .plat:focus-visible, #npPlat .plat:focus-visible { opacity: 1; }

@@ -777,11 +777,6 @@ function trackRow(t, i, playing) {
   const whoEl = el("span", "artistLink");
   fillArtists(whoEl, t);
   artistLine.append(whoEl);
-  if (srcOf(t) === "soundcloud" && isPreview(t)) {
-    const tag = el("span", "goPlus", "Go+");
-    tag.title = "A Go+ track: the full song plays from YouTube Music";
-    artistLine.insertBefore(tag, whoEl);
-  }
   // search results: the genre, a click away from more of it
   if (view === "search") trackGenres(t).forEach((g) => {
     const b = el("button", "genreTag", g);
