@@ -108,6 +108,46 @@ const TASTE_GENRES = [["Pop", 132], ["Hip-hop & Rap", 116], ["Rock", 152], ["Dan
 const tasteGenres = () => (Array.isArray(prefs.tasteGenres) ? prefs.tasteGenres : []).filter((g) => TASTE_GENRES.some(([n]) => n === g));
 const tasteId = (g) => (TASTE_GENRES.find(([n]) => n === g) || [])[1];
 
+// Subgenres, for fine-tuning once you've picked genres (Pick genres, then Fine-tune). Deezer has no
+// charts for them, so each is made from Deezer's playlists of that name.
+const SUBGENRES = {
+  "Pop": ["Synth-pop", "Dance Pop", "Indie Pop", "Hyperpop", "80s Pop", "Teen Pop", "Electropop"],
+  "Hip-hop & Rap": ["Trap", "Boom Bap", "Drill", "Conscious Hip-hop", "Lo-fi Hip-hop", "Old School Hip-hop", "UK Rap", "Cloud Rap"],
+  "Rock": ["Classic Rock", "Indie Rock", "Punk", "Pop Punk", "Grunge", "Hard Rock", "Prog Rock", "Emo", "Post-rock"],
+  "Dance": ["House", "Deep House", "Tech House", "Nu-disco", "EDM", "Eurodance", "Big Room", "UK Garage"],
+  "Electronic": ["Dubstep", "Electro House", "Drum & Bass", "Techno", "Trance", "Future Bass", "Melodic Bass", "Riddim",
+    "Synthwave", "Hardstyle", "Glitch Hop", "Liquid DnB", "Chillstep", "Ambient", "Lo-fi", "IDM", "Breakbeat"],
+  "R&B": ["Neo-soul", "Contemporary R&B", "90s R&B", "Alternative R&B", "Slow Jams"],
+  "Alternative & Indie": ["Shoegaze", "Dream Pop", "Post-punk", "Indie Folk", "Bedroom Pop", "Math Rock", "Garage Rock"],
+  "Soul & Funk": ["Motown", "Funk", "Northern Soul", "Disco", "Neo-soul"],
+  "Jazz": ["Smooth Jazz", "Bebop", "Jazz Fusion", "Vocal Jazz", "Nu Jazz", "Swing", "Acid Jazz"],
+  "Country": ["Classic Country", "Country Pop", "Americana", "Bluegrass", "Outlaw Country"],
+  "Folk": ["Indie Folk", "Celtic", "Singer-songwriter", "Folk Rock"],
+  "Metal": ["Metalcore", "Death Metal", "Black Metal", "Thrash Metal", "Nu Metal", "Power Metal", "Djent", "Doom Metal"],
+  "Latin": ["Reggaeton", "Salsa", "Bachata", "Latin Trap", "Regional Mexican", "Cumbia", "Latin Pop"],
+  "Reggae": ["Dancehall", "Dub", "Roots Reggae", "Lovers Rock"],
+  "Blues": ["Delta Blues", "Chicago Blues", "Blues Rock", "Electric Blues"],
+  "Classical": ["Baroque", "Romantic", "Solo Piano", "Opera", "Contemporary Classical", "Minimalism"],
+  "K-pop & Asian": ["K-pop", "J-pop", "City Pop", "C-pop", "J-rock", "Anime Songs"],
+  "African": ["Afrobeats", "Amapiano", "Highlife", "Afro House"],
+  "Brazilian": ["Bossa Nova", "Samba", "MPB", "Funk Carioca", "Sertanejo"],
+  "Indian": ["Bollywood", "Punjabi", "Carnatic", "Indie Hindi"],
+  "Film & Game": ["Film Scores", "Video Game Music", "Epic Orchestral", "Anime Soundtracks"],
+};
+// The subgenres you picked, of the genres you still have picked
+const tasteSubgenres = () => {
+  const ok = new Set(tasteGenres().flatMap((g) => SUBGENRES[g] || []));
+  return (Array.isArray(prefs.tasteSubgenres) ? prefs.tasteSubgenres : []).filter((s) => ok.has(s));
+};
+
+// A subgenre's music: Deezer's two best-matching playlists of that name (real playlists of 15
+// songs or more), taking turns, shuffled a little
+async function dzSubgenre(name) {
+  const found = ((await dzGet("/search/playlist?limit=10&q=" + encodeURIComponent(name))).data || []).filter((p) => (p.nb_tracks || 0) >= 15).slice(0, 2);
+  const lists = await eachFew(found, async (p) => ((await dzGet("/playlist/" + p.id + "/tracks?limit=60")).data || []).map((x) => dzTrack(x)), 2);
+  return recFilter(dedupeTracks(interleave(lists.filter(Boolean).map(shuffledCopy))));
+}
+
 // The artists of the genres you picked, as stations: the ones most often in each genre's chart (Deezer's
 // own genre artist lists are the same overall chart for every genre), the genres taking turns
 async function tasteArtists() {
@@ -131,7 +171,7 @@ async function tasteArtists() {
 const coldStart = () => !hasLikes() && !loadStats().length;
 
 // Before there's anything to go on, Discover starts with the genres (and their artists and charts)
-const COLD_FIRST = ["genres", "taste", "popular", "spotlight"];
+const COLD_FIRST = ["subgenres", "genres", "taste", "popular", "spotlight"];
 function orderFeed(shelves) {
   if (!coldStart()) return shelves;
   const rank = (s) => { const i = COLD_FIRST.indexOf(s.key); return i < 0 ? COLD_FIRST.length : i; };
@@ -288,6 +328,20 @@ async function buildFeed(plats) {
       const popular = (await popularArtists().catch(() => [])).filter((a) => !yours.has(a.key)).slice(0, 12);
       if (popular.length) shelves.push({ key: "popular", title: artists.length ? "Popular artists" : "Popular artists to start with", tiles: popular.map(stationTile) });
     }
+  }
+
+  // Your subgenres: the ones you fine-tuned to, each its own mix
+  const subs = plats.includes("catalog") ? tasteSubgenres() : [];
+  if (subs.length) {
+    shelves.push({
+      key: "subgenres",
+      title: "Your subgenres",
+      tiles: subs.map((g) => ({
+        kind: "genre", plats: ["deezer"], name: g, hue: hueOf(g), sub: "Mix",
+        mix: makeMix({ id: "mix:sub:" + g, title: g, desc: g + ", from Deezer's playlists of it.",
+          build: () => dzSubgenre(g), fresh: () => onlyNew(() => dzSubgenre(g)) }),
+      })),
+    });
   }
 
   // Trending by genre
@@ -484,11 +538,13 @@ function tasteOpen() {
     const b = el("button", "chip optChip" + (on.has(g) ? " on" : ""), g);
     b.type = "button";
     b.setAttribute("aria-pressed", on.has(g) ? "true" : "false");
-    b.addEventListener("click", () => { const now = !b.classList.contains("on"); b.classList.toggle("on", now); b.setAttribute("aria-pressed", now ? "true" : "false"); });
+    b.addEventListener("click", () => chipToggle(b));
     return b;
   }));
   $("tasteDlg").showModal();
 }
+
+const chipToggle = (b) => { const now = !b.classList.contains("on"); b.classList.toggle("on", now); b.setAttribute("aria-pressed", now ? "true" : "false"); };
 
 function tasteSave(e) {
   e.preventDefault();
@@ -496,8 +552,43 @@ function tasteSave(e) {
   savePrefs();
   $("tasteDlg").close();
   paintTasteBtn();
-  say(prefs.tasteGenres.length ? "Thanks. Discover starts from " + prefs.tasteGenres.join(", ") + " now." : "No genres picked.");
+  // then the second step, for the subgenres of the ones picked
+  if (tasteGenres().some((g) => SUBGENRES[g])) { subOpen(); return; }
+  tasteDone();
+}
+
+function tasteDone() {
+  const subs = tasteSubgenres();
+  say(tasteGenres().length ? "Thanks. Discover starts from " + (subs.length ? subs : tasteGenres()).join(", ") + " now." : "No genres picked.");
   openFeed(true);
+}
+
+// Fine-tune: the subgenres of each genre you picked, under its name
+function subOpen() {
+  const on = new Set(Array.isArray(prefs.tasteSubgenres) ? prefs.tasteSubgenres : []);
+  $("subGroups").replaceChildren(...tasteGenres().filter((g) => SUBGENRES[g]).map((g) => {
+    const box = el("div", "subGroup");
+    const chips = el("div", "tasteChips");
+    chips.append(...SUBGENRES[g].map((s) => {
+      const b = el("button", "chip optChip" + (on.has(s) ? " on" : ""), s);
+      b.type = "button";
+      b.setAttribute("aria-pressed", on.has(s) ? "true" : "false");
+      // (one that's under two genres is one choice: both its chips follow)
+      b.addEventListener("click", () => { const now = !b.classList.contains("on"); $("subGroups").querySelectorAll(".chip").forEach((c) => { if (c.textContent === s && c.classList.contains("on") !== now) chipToggle(c); }); });
+      return b;
+    }));
+    box.append(el("h3", "", g), chips);
+    return box;
+  }));
+  $("subDlg").showModal();
+}
+
+function subSave(e) {
+  e.preventDefault();
+  prefs.tasteSubgenres = [...new Set([...$("subGroups").querySelectorAll(".chip.on")].map((b) => b.textContent))];
+  savePrefs();
+  $("subDlg").close();
+  tasteDone();
 }
 
 function paintTasteBtn() {
@@ -624,6 +715,9 @@ function feedInit() {
   $("likesPromptGenres").addEventListener("click", tasteOpen);
   $("tasteForm").addEventListener("submit", tasteSave);
   $("tasteCancel").addEventListener("click", () => $("tasteDlg").close());
+  $("subForm").addEventListener("submit", subSave);
+  $("subSkip").addEventListener("click", () => { $("subDlg").close(); tasteDone(); });
+  $("subBack").addEventListener("click", () => { $("subDlg").close(); tasteOpen(); });
   paintTasteBtn();
   $("likesPromptFind").addEventListener("click", () => { $("q").focus(); say("Search for songs you love, then like or star them."); });
   wireShelves($("feed"));

@@ -63,7 +63,7 @@ function renderPlatChips() {
     b.title += !ready ? ": not set up yet. Click to set it up." : on ? " is on. Click to hide it everywhere." : " is off. Click to show it again.";
     b.setAttribute("aria-label", platInfo(p.id).name);
     b.setAttribute("aria-pressed", on ? "true" : "false");
-    b.append(platIcon(p.id));
+    b.append(titleIcon(p.id));
     box.append(b);
   });
 }

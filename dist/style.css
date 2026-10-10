@@ -1795,3 +1795,9 @@ body.streamSafe #navSets, body.streamSafe #navArtists, body.streamSafe #plSectio
 #list li:hover .plat.platBig, #list li.picked .plat.platBig, #list li:focus-within .plat.platBig,
 .qRow:hover .plat, .qRow:focus-within .plat,
 #nowPlat .plat:hover, #npPlat .plat:hover, #nowPlat .plat:focus-visible, #npPlat .plat:focus-visible { opacity: 1; }
+.subGroups { max-height: 56vh; overflow-y: auto; margin: 10px 0 6px; padding-right: 4px; }
+.subGroup h3 { margin: 12px 0 0; font-size: 13px; color: var(--muted); font-weight: 600; }
+.subGroup .tasteChips { margin-top: 8px; }
+/* Discover's tiles: which platforms a tile draws on shows on the tile you're pointing at (or on) */
+#feed .tileBadges { opacity: 0; transition: opacity .15s; }
+#feed .tile:hover .tileBadges, #feed .tile:focus-within .tileBadges { opacity: 1; }

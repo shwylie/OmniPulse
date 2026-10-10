@@ -67,7 +67,7 @@ fn client() -> reqwest::Client {
 
 /// What the app may ask Deezer for: its catalogue, read only
 fn allowed(path: &str) -> bool {
-    ["/search", "/track/", "/album/", "/artist/", "/chart", "/genre", "/editorial", "/radio"].iter().any(|p| path.starts_with(p)) && !path.contains("..")
+    ["/search", "/track/", "/album/", "/artist/", "/chart", "/genre", "/editorial", "/radio", "/playlist/"].iter().any(|p| path.starts_with(p)) && !path.contains("..")
 }
 
 /// One Deezer request (`path` like "/artist/27/albums?limit=10"), as Deezer answers it
@@ -252,6 +252,7 @@ mod tests {
     fn only_the_catalogue() {
         assert!(super::allowed("/artist/27/albums"));
         assert!(super::allowed("/chart/0/tracks?limit=10"));
+        assert!(super::allowed("/playlist/908622995/tracks"));
         assert!(!super::allowed("/user/me/flow"));
         assert!(!super::allowed("/artist/../user/1"));
     }

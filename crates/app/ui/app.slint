@@ -71,6 +71,8 @@ global Icons {
     out property <string> plugin: "M20.5 11H19V7c0-1.1-.9-2-2-2h-4V3.5C13 2.12 11.88 1 10.5 1S8 2.12 8 3.5V5H4c-1.1 0-1.99.9-1.99 2v3.8H3.5c1.49 0 2.7 1.21 2.7 2.7s-1.21 2.7-2.7 2.7H2V20c0 1.1.9 2 2 2h3.8v-1.5c0-1.49 1.21-2.7 2.7-2.7 1.49 0 2.7 1.21 2.7 2.7V22H17c1.1 0 2-.9 2-2v-4h1.5c1.38 0 2.5-1.12 2.5-2.5S21.88 11 20.5 11z";
     out property <string> musicbrainz: "M12 2a10 10 0 1 0 0 20 10 10 0 1 0 0-20zm0 6.5a3.5 3.5 0 1 1 0 7 3.5 3.5 0 0 1 0-7zm0 2a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3z";
     out property <string> youtube: "M5 3h14a3 3 0 0 1 3 3v9a3 3 0 0 1-3 3H5a3 3 0 0 1-3-3V6a3 3 0 0 1 3-3zm0 2.2a.8.8 0 0 0-.8.8v9c0 .44.36.8.8.8h14a.8.8 0 0 0 .8-.8V6a.8.8 0 0 0-.8-.8zM8 20h8v1.8H8z";
+    // (the title bar's YouTube Music switch: its own mark; on a track, the screen above)
+    out property <string> youtube-mark: "M12 2a10 10 0 1 0 0 20a10 10 0 1 0 0-20zm0 2.2a7.8 7.8 0 1 1 0 15.6a7.8 7.8 0 1 1 0-15.6zM9.8 8.3v7.4l6-3.7z";
     out property <string> local: "M10 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z";
 }
 
@@ -274,7 +276,8 @@ component Toggle inherits Rectangle {
 
 component PlatIcon inherits Glyph {
     in property <string> plat;
-    d: plat == "spotify" ? Icons.spotify : plat == "youtube" ? Icons.youtube : plat == "local" ? Icons.local : plat == "musicbrainz" ? Icons.musicbrainz : plat == "plugin" ? Icons.plugin : Icons.soundcloud;
+    in property <bool> title-bar;   // (YouTube Music's own mark there)
+    d: plat == "spotify" ? Icons.spotify : plat == "youtube" ? (title-bar ? Icons.youtube-mark : Icons.youtube) : plat == "local" ? Icons.local : plat == "musicbrainz" ? Icons.musicbrainz : plat == "plugin" ? Icons.plugin : Icons.soundcloud;
     fill: plat == "spotify" ? #1ed760 : plat == "youtube" ? #ff0033 : plat == "local" ? #f2b544 : plat == "musicbrainz" ? #ba478f : plat == "plugin" ? #38bdf8 : #ff5500;
 }
 
@@ -763,6 +766,7 @@ export component AppWindow inherits Window {
                             background: !p.on ? transparent : p.id == "spotify" ? #1ed76029 : p.id == "youtube" ? #ff003329 : p.id == "local" ? #f2b54429 : #ff550029;
                             PlatIcon {
                                 plat: p.id;
+                                title-bar: true;
                                 width: 15px;
                                 height: 15px;
                                 x: 5.5px;
