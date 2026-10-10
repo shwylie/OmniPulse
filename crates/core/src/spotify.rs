@@ -1,4 +1,8 @@
-// Spotify Web API: sign-in (PKCE), tokens and API calls. Playback is in spotify_engine.
+// Spotify Web API: tokens and API calls. Playback is in spotify_engine.
+//
+// Which sign-in the calls use: the playback one (Spotify's own app, spotify_engine) by default, so
+// signing in once is all it takes. It only takes Premium accounts, so a free account signs in
+// through a developer app of your own instead (spotify_client_id in config.json, PKCE below).
 
 use crate::{bind_addr, data_dir, load_config, now_secs, Config};
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
@@ -135,6 +139,42 @@ async fn cool_down() -> Result<(), String> {
         tokio::time::sleep(std::time::Duration::from_secs(wait)).await;
     }
     Ok(())
+}
+
+// Where a request's token comes from
+#[derive(Clone, Copy, PartialEq)]
+enum Via {
+    Playback,
+    App,
+}
+
+#[cfg(feature = "desktop")]
+fn playback_signed_in() -> bool {
+    crate::spotify_engine::spe_signed_in()
+}
+#[cfg(not(feature = "desktop"))]
+fn playback_signed_in() -> bool {
+    false
+}
+
+#[cfg(feature = "desktop")]
+async fn playback_token() -> Result<String, String> {
+    crate::spotify_engine::spe_web_token().await
+}
+#[cfg(not(feature = "desktop"))]
+async fn playback_token() -> Result<String, String> {
+    Err("Not connected to Spotify".into())
+}
+
+// The playback sign-in first, then your developer app's
+fn first_via() -> Option<Via> {
+    if playback_signed_in() {
+        Some(Via::Playback)
+    } else if load_sp_tokens().is_some() {
+        Some(Via::App)
+    } else {
+        None
+    }
 }
 
 /// A token that's good for at least a minute (refreshed if not, by one request at a time); with
@@ -287,7 +327,7 @@ pub async fn spotify_login() -> Result<(), String> {
 }
 
 pub fn spotify_signed_in() -> bool {
-    load_sp_tokens().is_some()
+    first_via().is_some()
 }
 
 pub fn spotify_logout() -> Result<(), String> {
@@ -300,8 +340,19 @@ pub fn spotify_logout() -> Result<(), String> {
 
 // The Spotify player in the page asks for a token whenever it needs one
 pub async fn spotify_token() -> Result<String, String> {
+    if first_via() == Some(Via::Playback) {
+        return playback_token().await;
+    }
     let cfg = load_config()?;
     Ok(usable_token(&cfg, None).await?.access_token)
+}
+
+// A token from this sign-in (refused: the one Spotify just turned down, replaced)
+async fn token_via(via: Via, cfg: &Config, refused: Option<&str>) -> Result<String, String> {
+    match via {
+        Via::Playback => playback_token().await,
+        Via::App => Ok(usable_token(cfg, refused).await?.access_token),
+    }
 }
 
 pub async fn spotify_api(method: String, path: String, body: Option<Value>) -> Result<Value, String> {
@@ -318,7 +369,8 @@ pub async fn spotify_api(method: String, path: String, body: Option<Value>) -> R
         _ => return Err("That method is not allowed".to_string()),
     };
     let cfg = load_config()?;
-    let mut t = usable_token(&cfg, None).await?;
+    let mut via = first_via().ok_or("Not connected to Spotify")?;
+    let mut token = token_via(via, &cfg, None).await?;
 
     let url = format!("{}{path}", api_base());
     let client = reqwest::Client::new();
@@ -336,11 +388,17 @@ pub async fn spotify_api(method: String, path: String, body: Option<Value>) -> R
         let res = {
             let _slot = GATE.acquire().await.map_err(|e| e.to_string())?;
             pace().await;
-            send(t.access_token.clone()).await.map_err(|e| e.to_string())?
+            send(token.clone()).await.map_err(|e| e.to_string())?
         };
         tries += 1;
         match res.status().as_u16() {
-            401 if tries < 3 => t = usable_token(&cfg, Some(&t.access_token)).await?,
+            // the playback sign-in's token turned down (or without the permission): your developer
+            // app's, if you've signed in with one too
+            401 | 403 if via == Via::Playback && tries < 3 && load_sp_tokens().is_some() => {
+                via = Via::App;
+                token = token_via(via, &cfg, None).await?;
+            }
+            401 if via == Via::App && tries < 3 => token = token_via(via, &cfg, Some(&token)).await?,
             429 => {
                 let wait = retry_after(&res);
                 set_cool_until(now_secs() + wait);

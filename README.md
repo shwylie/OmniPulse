@@ -46,12 +46,17 @@ In the window: Space, Shift+Left/Right, / to search
 ## Playback
 Full tracks are streamed over HLS using hls.js. `npm install` fetches it and copies it to `dist/hls.min.js`.
 
-## Spotify (optional, Premium only)
-1. Create an app at https://developer.spotify.com/dashboard and tick Web API and Web Playback SDK.
+## Spotify (optional)
+Premium: Settings > Spotify > Sign in. That one sign-in (Spotify's own, the one playback uses) covers
+your library, likes, search and playback.
+
+A free account needs a developer app of your own (Spotify only lets Premium sign in the other way);
+Settings shows a Set up button once it sees a free account. By hand:
+1. Create an app at https://developer.spotify.com/dashboard and tick Web API.
 2. Add this redirect URI to the app: http://127.0.0.1:8081/callback
 3. Add your Client ID to %APPDATA%\OmniPulse\config.json:
    { "client_id": "...", "client_secret": "...", "spotify_client_id": "YOUR_SPOTIFY_CLIENT_ID" }
-4. Settings > Spotify > Connect. The Spotify tab appears only for a Premium account.
+4. Settings > Spotify > Sign in. Its songs play from YouTube Music.
 Spotify and SoundCloud tracks never share a queue or a list.
 
 ## Feature switches

@@ -391,27 +391,37 @@ pub async fn spe_playlist(uri: String) -> Result<Value, String> {
     Ok(Value::Array(tracks))
 }
 
-// ---------- Spotify's own mixes ----------
-// Daily Mixes and the rest of "Made For You" are hidden from developer apps' Web API tokens
-// (since November 2024). The playback engine signs in as Spotify's own app, so its token can
-// read them. Only GET requests, only to api.spotify.com.
-pub async fn spe_web_get(path: String) -> Result<Value, String> {
-    if !path.starts_with('/') || path.contains("://") {
-        return Err("bad path".into());
-    }
+// ---------- the Web API through the playback sign-in ----------
+// The playback engine signs in as Spotify's own app, so its token works for the Web API too: the
+// app uses it for everything (library, likes, search, playlists), and a developer app of your own
+// is only needed for a free account, which the playback sign-in turns down. librespot keeps the
+// token until it expires.
+const WEB_SCOPES: &str = "user-read-private,user-read-email,user-library-read,user-library-modify,playlist-read-private,playlist-read-collaborative,playlist-modify-private,playlist-modify-public,user-follow-read,user-follow-modify,user-read-playback-state,user-modify-playback-state";
+
+pub async fn spe_web_token() -> Result<String, String> {
     let session = {
         let guard = engine().await?;
         guard.as_ref().unwrap().session.clone()
     };
-    let token = match session.login5().auth_token().await {
-        Ok(t) => t.access_token,
+    match session.login5().auth_token().await {
+        Ok(t) => Ok(t.access_token),
         Err(_) => session
             .token_provider()
-            .get_token("playlist-read-private,user-read-private,user-library-read")
+            .get_token(WEB_SCOPES)
             .await
-            .map_err(|e| format!("Spotify playback token: {e}"))?
-            .access_token,
-    };
+            .map(|t| t.access_token)
+            .map_err(|e| format!("Spotify playback token: {e}")),
+    }
+}
+
+// Daily Mixes and the rest of "Made For You" are hidden from developer apps' Web API tokens
+// (since November 2024); the playback sign-in's token can read them. Only GET requests, only to
+// api.spotify.com.
+pub async fn spe_web_get(path: String) -> Result<Value, String> {
+    if !path.starts_with('/') || path.contains("://") {
+        return Err("bad path".into());
+    }
+    let token = spe_web_token().await?;
     let res = reqwest::Client::new()
         .get(format!("https://api.spotify.com/v1{path}"))
         .bearer_auth(token)

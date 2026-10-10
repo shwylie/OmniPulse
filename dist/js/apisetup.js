@@ -14,7 +14,7 @@ const KEY_SETUPS = {
         [["App name", "OmniPulse"], ["Redirect URI", st.spotify_redirect || "http://127.0.0.1:8081/callback"]]],
       ["On your app's page, open Settings and copy its Client ID. There's no secret to copy: OmniPulse signs in without one.", null],
     ],
-    note: "A new Spotify app is in development mode: your own account can sign in to it straight away.",
+    note: "Only needed for a free Spotify account (Premium signs in without it). A new Spotify app is in development mode: your own account can sign in to it straight away.",
     done: () => spotifyCheck(),
     signIn: "spConnect",
   },
@@ -163,7 +163,9 @@ async function keySetupStatus() {
     const has = !!st[plat];
     $(setup).hidden = has;
     $(keys).hidden = !has;
-    if (!has) $(signIn).hidden = true;
+    // (Spotify signs in without keys of your own; they're only offered once a free account needs them)
+    if (plat === "spotify") { $(setup).hidden = has || !prefs.spNeedsKeys; $(signIn).hidden = false; }
+    else if (!has) $(signIn).hidden = true;
     else if (plat !== "youtube" || ytWanted()) $(signIn).hidden = false;
     // Spotify's options (Your Keys) once it has keys, while it's switched on
     if (plat === "spotify") $("spotifyOptions").hidden = !(FEATURES.spotify && has && prefs.spOn !== false);

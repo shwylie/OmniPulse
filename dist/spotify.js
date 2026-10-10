@@ -66,13 +66,15 @@ function syncSpotifySettings() {
   else if (spotifyFree) {
     nameNote($("spStatus"), "Signed in as ", spotifyName || "you", " \u00b7 Free. " +
       (ytOn() ? "Spotify tracks play from YouTube Music." : "Switch on YouTube Music to play your Spotify library."));
-  }
+  } else $("spStatus").textContent = prefs.spNeedsKeys ? SP_FREE_NOTE : SP_DEFAULT_NOTE;
 }
 
 // Checks the account (Premium or not). If Spotify can't be asked right now (rate limited, offline),
 // you stay signed in as you were last time and it's asked again in a minute; only Spotify turning the
 // sign-in down (a revoked or expired refresh token) needs a new sign-in.
 let spotifyCheckTimer = null;
+const spNotPremium = (e) => /premium account required/i.test(String(e));
+const SP_FREE_NOTE = "That's a free Spotify account. Spotify only lets Premium accounts sign in straight away; for a free one, Set up your own free Spotify app keys (a couple of minutes), then Sign in.";
 const spRevoked = (e) => /invalid_grant|invalid_client|revoked|connect again|Not connected/i.test(String(e));
 
 async function spotifyCheck() {
@@ -90,7 +92,17 @@ async function spotifyCheck() {
       savePrefs();
     } catch (e) {
       const last = prefs.spAccount;
-      if (spRevoked(e)) {
+      if (spNotPremium(e)) {
+        // Premium has ended: the playback sign-in is over (it only takes Premium); your own
+        // developer app's sign-in carries on, if you have one
+        await invoke("spe_logout").catch(() => {});
+        if (await invoke("spotify_signed_in")) return spotifyCheck();
+        spotifyFree = false;
+        prefs.spNeedsKeys = true;
+        savePrefs();
+        if (typeof keySetupStatus === "function") await keySetupStatus();
+        note = SP_FREE_NOTE;
+      } else if (spRevoked(e)) {
         spotifyFree = false;
         note = "Spotify ended the sign-in. Sign in again.";
       } else if (!last) {
@@ -135,20 +147,36 @@ async function spotifyGrant() {
   if (spotifyPremium || spotifyFree) say("Thanks. Spotify can be used for following now.");
 }
 
+// One sign-in: Spotify's own (the playback engine's), which covers your library, likes, search and
+// playback. It only takes Premium accounts; a free account signs in through a developer app of your
+// own instead (Set up, js/apisetup.js), and plays from YouTube Music.
 async function spotifyConnect() {
   $("spStatus").textContent = "Finish signing in in your browser...";
+  let keys = false;
+  try { keys = !!(await invoke("config_status")).spotify; } catch (e) {}
   try {
-    await invoke("spotify_login");
+    await invoke("spe_login");
+    prefs.spNeedsKeys = false;
+    savePrefs();
   } catch (e) {
-    $("spStatus").textContent = String(e);
-    return;
+    if (!spNotPremium(e)) { $("spStatus").textContent = String(e); return; }
+    if (!keys) {
+      prefs.spNeedsKeys = true;
+      savePrefs();
+      if (typeof keySetupStatus === "function") await keySetupStatus();
+      $("spStatus").textContent = SP_FREE_NOTE;
+      return;
+    }
+    try {
+      await invoke("spotify_login");
+    } catch (e2) {
+      $("spStatus").textContent = String(e2);
+      return;
+    }
   }
   await spotifyCheck();
-  // with Premium, playback's own approval straight after, in the same go (it needs Spotify's own app
-  // id, so it's a second page in the browser)
-  if (spotifyPremium && !(await invoke("spe_signed_in").catch(() => true))) {
-    try { await speLogin(); say("Signed in to Spotify.", { force: true }); } catch (e) { say("Spotify playback: " + e, { force: true }); }
-  }
+  speSettingsPaint();
+  if (spotifyPremium || spotifyFree) say("Signed in to Spotify.", { force: true });
 }
 
 async function spotifyDisconnect() {
@@ -271,10 +299,10 @@ function speSetup() {
   return spe.ready;
 }
 
-// Spotify playback signs in separately from the Spotify account above (it needs Spotify's own
-// app id); it happens once, in the browser, the first time you play something
+// Spotify playback's sign-in, if it's missing (signed in through your own developer app before it was
+// the default): once, in the browser, the first time you play something
 async function speLogin() {
-  say("One more step: approve Spotify playback in your browser (only needed once)...", { stay: true, force: true });
+  say("Finish signing in to Spotify playback in your browser (only needed once)...", { stay: true, force: true });
   await invoke("spe_login");
   speSettingsPaint();
 }
@@ -392,7 +420,7 @@ function speSettingsPaint() {}
 
 function spotifyInit() {
   $("spConnect").addEventListener("click", () => {
-    if (spotifyPremium) spotifyDisconnect(); else spotifyConnect();
+    if (spotifyPremium || spotifyFree) spotifyDisconnect(); else spotifyConnect();
   });
   setInterval(spotifyTick, 500);
   spotifyCheck();

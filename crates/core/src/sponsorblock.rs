@@ -12,7 +12,8 @@ use std::time::{Duration, Instant};
 
 const API: &str = "https://sponsor.ajay.app/api/skipSegments";
 const KEEP_FOR: Duration = Duration::from_secs(86400);
-static CACHE: Mutex<Option<HashMap<String, (Instant, Vec<(f64, f64)>)>>> = Mutex::new(None);
+type Segments = Vec<(f64, f64)>;
+static CACHE: Mutex<Option<HashMap<String, (Instant, Segments)>>> = Mutex::new(None);
 
 fn prefix(video_id: &str) -> String {
     let h = Sha256::digest(video_id.as_bytes());
