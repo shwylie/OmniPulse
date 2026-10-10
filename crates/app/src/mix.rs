@@ -129,15 +129,14 @@ fn downbeats(m: &Measured) -> Vec<f64> {
     m.rhythm.beats.iter().skip(m.rhythm.downbeat).step_by(4).map(|b| m.from_ms as f64 + b).collect()
 }
 
-/// How a plan hands over: on the beat, staged, a band at a time (the one coming in's highs up over its
-/// first bar; its mids and bass in at the swap, where its main part starts, the one going out's mids
-/// echoed as they go; the one going out's highs leaving over the last quarter); over a soft part, a
-/// crossfade with the bass swapped halfway. `filtered`: through high-pass filters instead (Settings'
-/// Filter Sweep Transitions): the one going out thinning out, the next coming in thin, opening on the swap.
-pub fn handoff(p: &Plan, filtered: bool) -> omnipulse_audio::Handoff {
+/// How a plan hands over: on the beat, a wipe (one split sweeping down through the sound, the one going
+/// out below it, the one coming in above it, never both in one band; down to the bass by the swap,
+/// where the next one's main part starts). `bands` (Settings' EQ Band Handoff): a band at a time
+/// instead, as a DJ's EQ (quicker). Over a soft part: a crossfade with the bass swapped halfway.
+pub fn handoff(p: &Plan, bands: bool) -> omnipulse_audio::Handoff {
     if !p.beatmatched { return omnipulse_audio::Handoff::bass_swap(p.ms, p.ms / 2); }
     let beat = p.ms as f64 / (p.bars * 4) as f64;
-    if filtered { omnipulse_audio::Handoff::filtered(p.ms, beat, p.swap_ms) } else { omnipulse_audio::Handoff::staged(p.ms, beat, p.swap_ms) }
+    if bands { omnipulse_audio::Handoff::staged(p.ms, beat, p.swap_ms) } else { omnipulse_audio::Handoff::wipe(p.ms, beat, p.swap_ms) }
 }
 
 /// A measured track's beat as it is over n beats from `from` (ms from its start), from its tracked beats: a
@@ -177,11 +176,12 @@ pub fn plan_structure(a: &Measured, a_end_ms: u64, now_ms: u64, b: &Measured) ->
     if let Some(r) = matched {
         let fits = |k: usize, n: u32| at(k) >= soonest && k + n as usize <= a_end && at(k) + a_bar * n as f64 <= audible;
         // the latest start on its phrase (8 bars, else 4) that gives up no more than 4 of its bars with a beat; else any
-        let (bars, k) = [16u32, 8, 4].iter().find_map(|&n| {
+        let place = |n: u32| {
             let ideal = a_end.checked_sub(n as usize)?;
             let latest = |every: usize| (0..=ideal).rev().find(|&k| on_phrase(k, a_off, every) && fits(k, n));
-            [8, 4].iter().filter_map(|&e| latest(e)).find(|&k| k + 4 >= ideal).or_else(|| latest(1)).map(|k| (n, k))
-        })?;
+            [8, 4].iter().filter_map(|&e| latest(e)).find(|&k| k + 4 >= ideal).or_else(|| latest(1))
+        };
+        let (bars, k) = [16u32, 8, 4].iter().find_map(|&n| place(n).map(|k| (n, k)))?;
         // the next one from its own phrase's start (the two counts of eight together), the one that puts
         // its beat in nearest the mix's half (rather sooner than later)
         let every = if bars >= 8 { PHRASE } else { 4 };
@@ -193,6 +193,12 @@ pub fn plan_structure(a: &Measured, a_end_ms: u64, now_ms: u64, b: &Measured) ->
         // mix's middle half; else at the half (both on a phrase)
         let beat_in = b_main.saturating_sub(from_bar);
         let swap_bar = if (bars as usize / 4..=bars as usize * 3 / 4).contains(&beat_in) { beat_in } else { bars as usize / 2 };
+        // (nothing's left to hand over after the swap but a moment: a mix that would go on long after it
+        // is cut down to the swap and a bar, at least 8, and moved later, the one playing heard to near its beat's end)
+        let (bars, k) = match ((swap_bar as u32 + 4).div_ceil(4) * 4).max(8) {
+            short if short < bars => place(short).map(|k| (short, k)).unwrap_or((bars, k)),
+            _ => (bars, k),
+        };
         // stretched to each one's tempo over the bars mixed, not its average (within a percent of it)
         let n = bars as usize * 4;
         let rate = match (period_at(a, at(k), n), period_at(b, bd[from_bar], (n as f64 * r).round() as usize)) {
@@ -417,16 +423,17 @@ mod tests {
         let end = (500.0 + 88.0 * bar) as u64;
         let p = plan_structure(&a, end, 10_000, &b).expect("a plan");
         assert!(p.beatmatched);
-        assert_eq!(p.bars, 16);
-        // over its last 16 bars with a beat (from bar 48, a phrase), its beatless outro cut
+        // 12 bars: to the swap (8 in) and a bar, cut down from 16
+        assert_eq!(p.bars, 12);
+        // over its last bars with a beat (from bar 48, a phrase), its beatless outro cut
         assert_eq!(p.at_ms, (500.0 + 48.0 * bar).round() as u64);
         // the next one's beat (bar 24) in at the mix's half: from its bar 16, the rest of its intro cut
         assert_eq!(p.start_ms, (300.0 + 16.0 * bar).round() as u64);
         // a beat all through, end to end: the latest phrase that fits before the sound ends
         let flat = shaped(m(128.0, 500.0, 0, 0.5), &song(&[(88, -10.0, true)]));
         let p = plan_structure(&flat, end, 10_000, &shaped(m(128.0, 300.0, 0, 0.5), &song(&[(88, -10.0, true)]))).expect("a plan");
-        assert_eq!((p.bars, p.start_ms), (16, 300));
-        assert_eq!(p.at_ms, (500.0 + 68.0 * bar).round() as u64);
+        assert_eq!((p.bars, p.start_ms), (12, 300));
+        assert_eq!(p.at_ms, (500.0 + 72.0 * bar).round() as u64);
         assert!(p.at_ms + p.ms <= end);
     }
 
@@ -490,8 +497,8 @@ fn mix_demo() {
     use crate::track::{Src, Track};
     let (a_id, b_id) = (std::env::var("OMNIPULSE_MIX_A").unwrap(), std::env::var("OMNIPULSE_MIX_B").unwrap());
     let out_path = std::env::var("OMNIPULSE_MIX_OUT").unwrap_or_else(|_| "mix-demo.wav".into());
-    // (OMNIPULSE_MIX_FILTER=1: through the filter sweeps)
-    let filter = std::env::var("OMNIPULSE_MIX_FILTER").is_ok_and(|v| v == "1");
+    // (OMNIPULSE_MIX_BANDS=1: a band at a time, not a wipe)
+    let filter = std::env::var("OMNIPULSE_MIX_BANDS").is_ok_and(|v| v == "1");
     let rt = tokio::runtime::Runtime::new().unwrap();
     // each measured whole (as the app does for a mix), kept as it keeps them
     let whole = |id: &str| omnipulse_core::rhythm::known(&format!("full:{id}")).filter(|m| !m.rhythm.bar_beat.is_empty()).unwrap_or_else(|| {

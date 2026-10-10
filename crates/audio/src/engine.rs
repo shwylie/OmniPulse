@@ -506,8 +506,9 @@ struct Fading {
     handoff: Option<Handoff>,
     bands: [Bands; 2],
     echo: Echo,
-    /// each side's swept high-pass (going out, coming in), and the rate (to tune them)
-    sweeps: [Butter; 2],
+    /// each side's swept filter (going out, coming in: two Butterworths, a Linkwitz-Riley side), and
+    /// the rate (to tune them)
+    sweeps: [[Butter; 2]; 2],
     rate: u32,
 }
 
@@ -534,26 +535,38 @@ impl Ramp {
     }
 }
 
-/// A high-pass filter swept from one cutoff to another (exponentially: as the ear hears it), from
-/// `from` to `to` (ms from the mix's start, or frames in the engine); as it starts before, as it ends after
+/// A filter (high-pass or low-pass; 24 dB an octave, a Linkwitz-Riley's side) swept from one cutoff to
+/// another (exponentially: as the ear hears it), from `from` to `to`, then on to `after` over `glide`
+/// (ms from the mix's start, or frames in the engine); as it starts before, as it ends after
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Sweep {
     pub from: u64,
     pub to: u64,
     pub hz: (f32, f32),
+    pub after: f32,
+    pub glide: u64,
+    pub high: bool,
 }
 
 impl Sweep {
     fn hz_at(&self, f: u64) -> f32 {
+        if f > self.to {
+            let q = ((f - self.to) as f32 / self.glide.max(1) as f32).min(1.0);
+            return self.hz.1 * (self.after / self.hz.1).powf(q);
+        }
         let q = if f <= self.from { 0.0 } else { ((f - self.from) as f32 / (self.to - self.from).max(1) as f32).min(1.0) };
         self.hz.0 * (self.hz.1 / self.hz.0).powf(q)
     }
-    fn frames(&self, rate: u64) -> Self { Self { from: self.from * rate / 1000, to: self.to * rate / 1000, hz: self.hz } }
+    fn frames(&self, rate: u64) -> Self { Self { from: self.from * rate / 1000, to: self.to * rate / 1000, glide: self.glide * rate / 1000, ..*self } }
 }
+
+/// A wipe's split: from up here (the air) down to the bass (where the kicks are) by the swap
+const WIPE_TOP_HZ: f32 = 12_000.0;
+const WIPE_BASS_HZ: f32 = 160.0;
 
 /// How a mix hands over, a band at a time: its bass (below ~150 Hz), its mids (to ~2.5 kHz: the
 /// vocals, mostly) and its highs (the hats, the air), and the one going out echoed as it leaves
-/// (`echo`: sent from, for, its delay; all ms from the mix's start); each side through a high-pass
+/// (`echo`: sent from, for, its delay; all ms from the mix's start); each side through a filter
 /// swept as it goes (`out_sweep`) or comes in (`in_sweep`), if it is
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Handoff {
@@ -565,8 +578,6 @@ pub struct Handoff {
     pub in_sweep: Option<Sweep>,
 }
 
-/// A sweep's resonance (a little: the filter heard as it moves, as a DJ mixer's is)
-const SWEEP_Q: f32 = 1.0;
 
 impl Handoff {
     /// The bass alone swapped at `at` (over a quarter second), the rest crossfaded over all `ms`
@@ -595,21 +606,24 @@ impl Handoff {
         }
     }
 
-    /// Through filters, over `ms` (of beats `beat_ms` long), swapped at `swap` (a downbeat): the one
-    /// coming in is heard (up over its first bar) through a high-pass, thin, that opens down to all of it
-    /// by the swap (the drop: its bass and kick in at once there); the one going out is thinned the same
-    /// way, its high-pass rising from nothing all through, gone by the end (its whole sound fading from
-    /// the swap), its mids echoed at the swap
-    pub fn filtered(ms: u64, beat_ms: f64, swap: u64) -> Self {
+    /// A wipe, over `ms`, swapped at `swap` (a downbeat): one split sweeps down through the sound, the
+    /// one going out heard below it (a low-pass) and the one coming in above it (a high-pass), so no
+    /// part of the sound is ever both's: the one coming in's air and hats first, then its voice as the
+    /// other's goes, down to the bass by the swap. There the one coming in's bass and kick drop in
+    /// (its high-pass gliding open) and the one going out goes (its last of the bass, at once): the
+    /// kicks never together. The two sides add up to all of it, so it's as loud all through.
+    pub fn wipe(ms: u64, beat_ms: f64, swap: u64) -> Self {
         let beat = beat_ms.round() as u64;
-        let all_in = Ramp { in_at: 0, in_len: (4 * beat).min(swap.max(1)), out_at: swap, out_len: ms - swap };
+        let glide = 120;
+        let side = Ramp { in_at: 0, in_len: beat, out_at: swap, out_len: glide };
+        let _ = ms;
         Self {
-            low: all_in,
-            mid: all_in,
-            high: all_in,
-            echo: Some((swap.saturating_sub(2 * beat), 3 * beat, (beat_ms * 0.75).round() as u64)),
-            out_sweep: Some(Sweep { from: 0, to: ms, hz: (20.0, 4000.0) }),
-            in_sweep: Some(Sweep { from: 0, to: swap, hz: (2000.0, 20.0) }),
+            low: side,
+            mid: side,
+            high: side,
+            echo: None,
+            out_sweep: Some(Sweep { from: 0, to: swap, hz: (WIPE_TOP_HZ, WIPE_BASS_HZ), after: WIPE_BASS_HZ, glide: 0, high: false }),
+            in_sweep: Some(Sweep { from: 0, to: swap, hz: (WIPE_TOP_HZ, WIPE_BASS_HZ), after: 10.0, glide, high: true }),
         }
     }
 
@@ -721,7 +735,7 @@ impl Fading {
         Self {
             next, total: total.max(1), done: 0, out_buf: VecDeque::new(), in_buf: VecDeque::new(), out_ended: false, in_ended: false,
             handoff: handoff.map(|h| h.frames(rate as u64)), bands: [Bands::new(rate); 2], echo: Echo { line: Vec::new(), at: 0 },
-            sweeps: [Butter::new(rate, 20.0, true); 2], rate,
+            sweeps: [[Butter::new(rate, 20.0, true); 2]; 2], rate,
         }
     }
 }
@@ -759,10 +773,11 @@ impl Fading {
                     let (mut ol, mut or, mut il, mut ir) = (ol, or, il, ir);
                     for (side, w) in [h.out_sweep, h.in_sweep].into_iter().enumerate() {
                         let Some(w) = w else { continue };
-                        if f % 32 == 0 { self.sweeps[side].tune(self.rate, w.hz_at(f), true, SWEEP_Q); }
+                        if f % 32 == 0 { for st in &mut self.sweeps[side] { st.tune(self.rate, w.hz_at(f), w.high, std::f32::consts::FRAC_1_SQRT_2); } }
                         let (l, r) = if side == 0 { (&mut ol, &mut or) } else { (&mut il, &mut ir) };
-                        *l = self.sweeps[side].run(0, *l);
-                        *r = self.sweeps[side].run(1, *r);
+                        let [s0, s1] = &mut self.sweeps[side];
+                        *l = s1.run(0, s0.run(0, *l));
+                        *r = s1.run(1, s0.run(1, *r));
                     }
                     let (lo, li) = h.low.gains(f);
                     let (mo, mi) = h.mid.gains(f);
@@ -1182,33 +1197,37 @@ mod mix_tests {
     }
 
     #[test]
-    fn filtered_thin_in_thin_out() {
+    fn a_wipe_never_has_both_in_one_band() {
         let rate = 44_100u32;
-        // both a bass (55 / 82 Hz) and a high (5 / 7 kHz)
-        let two = |a: f32, b: f32| -> Box<dyn Source> { Box::new(crate::source::Sum(vec![Tone::new(rate, a, 0.3, 12.0), Tone::new(rate, b, 0.1, 12.0)])) };
-        let h = Handoff::filtered(8000, 500.0, 4000);
-        let out = render_mix(two(55.0, 5000.0), two(82.0, 7000.0), (0.0, 0.0), rate, 2.0, 8000, Some(h), 11.0).unwrap();
-        let rms = |at: f32| { let i = (at * rate as f32) as usize * 2; let x = &out[i..i + 8820]; (x.iter().map(|v| v * v).sum::<f32>() / x.len() as f32).sqrt() };
-        let low_of = |at: f32, hz: f32| {
+        // the one going out: 55 Hz, 600 Hz, 6 kHz; the one coming in: 82 Hz, 900 Hz, 9 kHz
+        let tri = |a: f32, b: f32, c: f32| -> Box<dyn Source> { Box::new(crate::source::Sum(vec![Tone::new(rate, a, 0.3, 12.0), Tone::new(rate, b, 0.2, 12.0), Tone::new(rate, c, 0.1, 12.0)])) };
+        // 8 s of mix from 2 s, beats half a second, the swap 4 s in (6 s)
+        let out = render_mix(tri(55.0, 600.0, 6000.0), tri(82.0, 900.0, 9000.0), (0.0, 0.0), rate, 2.0, 8000, Some(Handoff::wipe(8000, 500.0, 4000)), 11.0).unwrap();
+        let has = |hz: f32, at: f32| {
             let n = (rate as f32 * 0.3) as usize;
             let i = (at * rate as f32) as usize - n / 2;
             let (mut c, mut s) = (0.0f32, 0.0f32);
             for k in 0..n {
-                let w = (1.0 - (2.0 * std::f32::consts::PI * k as f32 / n as f32).cos()) * 0.5;
-                let x = out[(i + k) * 2] * w;
-                let a = 2.0 * std::f32::consts::PI * hz * k as f32 / rate as f32;
-                c += x * a.cos();
-                s += x * a.sin();
+                let x = out[(i + k) * 2] * (1.0 - (2.0 * std::f32::consts::PI * k as f32 / n as f32).cos()) * 0.5;
+                let w = 2.0 * std::f32::consts::PI * hz * k as f32 / rate as f32;
+                c += x * w.cos();
+                s += x * w.sin();
             }
             4.0 * (c * c + s * s).sqrt() / n as f32
         };
-        // early on: the one coming in thin (its high, not its bass), the one going out whole
-        assert!(low_of(3.0, 82.0) < 0.02 && low_of(3.0, 55.0) > 0.2, "early {} {}", low_of(3.0, 82.0), low_of(3.0, 55.0));
-        // just before the swap (6 s): the one going out's bass going (its high-pass rising)
-        assert!(low_of(5.7, 55.0) < 0.15, "thinning {}", low_of(5.7, 55.0));
-        // after the swap: the one coming in whole, the other gone, and never a hole in the sound
-        assert!(low_of(7.0, 82.0) > 0.25 && low_of(7.0, 55.0) < 0.02, "after {} {}", low_of(7.0, 82.0), low_of(7.0, 55.0));
-        for t in [2.5f32, 3.5, 4.5, 5.5, 6.5, 7.5, 8.5, 9.5] { assert!(rms(t) > 0.06, "a hole at {t}: {}", rms(t)); }
+        // a second in (the split near 4 kHz): the one coming in's air, the other's mids and bass; the
+        // one going out's 6 kHz going, the one coming in's mids and bass not yet
+        assert!(has(9000.0, 3.0) > 0.08 && has(600.0, 3.0) > 0.15 && has(55.0, 3.0) > 0.25, "early in {} {} {}", has(9000.0, 3.0), has(600.0, 3.0), has(55.0, 3.0));
+        assert!(has(900.0, 3.0) < 0.02 && has(82.0, 3.0) < 0.01, "early held {} {}", has(900.0, 3.0), has(82.0, 3.0));
+        // three seconds in (the split near 470 Hz): the one coming in's voice, the one going out's bass; not the other way
+        assert!(has(900.0, 5.0) > 0.15 && has(55.0, 5.0) > 0.25, "late in {} {}", has(900.0, 5.0), has(55.0, 5.0));
+        assert!(has(6000.0, 5.0) < 0.005 && has(82.0, 5.0) < 0.01, "late out {} {}", has(6000.0, 5.0), has(82.0, 5.0));
+        // past the swap: only the one that came in, all of it
+        assert!(has(82.0, 7.0) > 0.25 && has(55.0, 7.0) < 0.01 && has(600.0, 7.0) < 0.01, "after {} {} {}", has(82.0, 7.0), has(55.0, 7.0), has(600.0, 7.0));
+        // and as loud all through (within 3 dB)
+        let rms = |at: f32| { let i = (at * rate as f32) as usize * 2; let x = &out[i..i + 8820]; 20.0 * ((x.iter().map(|v| v * v).sum::<f32>() / x.len() as f32).sqrt()).log10() };
+        let before = rms(1.0);
+        for t in [2.5f32, 3.0, 3.5, 4.0, 4.5, 5.0, 5.5, 6.5, 7.5, 9.0] { assert!((rms(t) - before).abs() < 3.0, "level at {t}: {} against {before}", rms(t)); }
     }
 
     #[test]
