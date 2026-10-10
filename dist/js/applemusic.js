@@ -44,14 +44,14 @@ async function appleFind(s) {
 }
 
 // A few at a time, saying how far it's got
-async function appleEach(list, what, fn) {
+async function appleEach(list, what, fn, doing) {
   let done = 0, i = 0;
   const work = async () => {
     while (i < list.length) {
       const k = i++;
       await fn(list[k], k);
       done++;
-      if (done % 5 === 0 || done === list.length) say("Importing from Apple Music: " + what + " " + done + " of " + list.length + "...", { stay: true, force: true });
+      if (done % 5 === 0 || done === list.length) say((doing || "Importing from Apple Music") + ": " + what + " " + done + " of " + list.length + "...", { stay: true, force: true });
     }
   };
   await Promise.all([work(), work(), work()]);

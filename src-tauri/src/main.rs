@@ -305,6 +305,11 @@ async fn cat_search(query: String) -> Result<Vec<Value>, String> { omnipulse_cor
 #[tauri::command]
 async fn deezer_get(path: String) -> Result<Value, String> { omnipulse_core::catalog::deezer(&path).await }
 // An artist's bio from Wikipedia ({ title, text, url, image }, or null)
+// Playlist files (M3U, CSV) the app imports and exports
+#[tauri::command]
+fn playlist_file_read(path: String) -> Result<String, String> { omnipulse_core::playlist_file_read(&path) }
+#[tauri::command]
+fn playlist_file_write(path: String, text: String) -> Result<(), String> { omnipulse_core::playlist_file_write(&path, &text) }
 #[tauri::command]
 async fn artist_bio(name: String) -> Result<Value, String> { omnipulse_core::bio::artist(&name).await }
 // SponsorBlock's non-music parts of a YouTube video ([[start, end]] in seconds)
@@ -926,7 +931,7 @@ fn main() {
             local_folders, local_set_folders, local_scan, local_status, local_tracks, local_server,
             requests_start, requests_stop, request_result,
             spe_signed_in, spe_login, spe_logout, spe_attach, spe_play, spe_pause, spe_resume, spe_seek, spe_stop, spe_played, spe_playlist, spe_web_get, spe_set_normalisation, loudness_analyse,
-            resolve_yt_stream, plugin_inspect, plugin_install, plugin_list, plugin_folder, plugin_remove, plugin_http, yt_search, yt_radio, yt_status, yt_artists, yt_artist, yt_album, yt_playlist, yt_playlists, yt_prepare, sc_ytdlp, mb_search, cat_search, deezer_get, artist_bio, sb_segments, apple_connect, apple_library, apple_forget, update_check, update_install, yt_setup, yt_remove, remote_start, remote_stop, remote_result
+            resolve_yt_stream, plugin_inspect, plugin_install, plugin_list, plugin_folder, plugin_remove, plugin_http, yt_search, yt_radio, yt_status, yt_artists, yt_artist, yt_album, yt_playlist, yt_playlists, yt_prepare, sc_ytdlp, mb_search, cat_search, deezer_get, artist_bio, playlist_file_read, playlist_file_write, sb_segments, apple_connect, apple_library, apple_forget, update_check, update_install, yt_setup, yt_remove, remote_start, remote_stop, remote_result
         ])
         .run(tauri::generate_context!())
         .expect("error while running app");

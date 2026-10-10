@@ -235,6 +235,7 @@ function localTrack(e) {
     duration: e.duration,
     artwork_url: localUrl("cover", e.id),
     url: localUrl("file", e.id),
+    path: e.path,
   });
 }
 

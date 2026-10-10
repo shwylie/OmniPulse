@@ -4,7 +4,9 @@
 
 const XPL_KEY = "sc.xplaylists";
 const XPL_FIELDS = ["source", "id", "ytId", "ytArtistId", "spArtists", "uri", "kind", "title", "displayArtist", "duration", "artwork_url", "permalink_url",
-  "album", "spAlbum", "genre", "created_at", "playback_count", "sharing", "access", "policy", "license"];
+  "album", "spAlbum", "genre", "created_at", "playback_count", "sharing", "access", "policy", "license",
+  // (the catalogues: Deezer, iTunes and MusicBrainz songs)
+  "isrc", "dzId", "dzArtistId", "dzAlbumId", "dzRank", "itId", "mbId", "release_date"];
 
 let xpls = [];
 try { xpls = JSON.parse(localStorage.getItem(XPL_KEY) || "[]"); } catch (e) { xpls = []; }
@@ -179,6 +181,8 @@ function openPlaylistActions(p, x, y) {
   add("Open", "open");
   add("Share", "share");
   SHARE_PLATS.forEach(([plat, name]) => { if (sharePlatformId(p, plat)) add("Copy " + name + " link", "share:" + plat); });
+  add("Export as M3U...", "m3u");
+  add("Export as CSV...", "csv");
   add("Hide playlist", "hide");
   if (isXpl(p)) {
     const x = xplFind(p.id) || {};
@@ -212,6 +216,7 @@ function runPlaylistAction(a) {
   else if (a === "rename") openRenameDialog(p);
   else if (a === "delete") deleteXpl(p);
   else if (a === "hide") hidePlaylist(p, true);
+  else if (a === "m3u" || a === "csv") plExport(p, a === "m3u" ? "m3u8" : "csv");
 }
 
 // Playlists you hide are kept (and listed in Settings > Library), just not shown in the sidebar
@@ -254,6 +259,7 @@ async function deleteXpl(p) {
 }
 
 function xplInit() {
+  $("plImport").addEventListener("click", plImport);
   $("newPlForm").addEventListener("submit", newPlaylistSubmit);
   $("newPlCancel").addEventListener("click", () => $("newPlDialog").close());
   $("sideLists").addEventListener("contextmenu", (e) => {

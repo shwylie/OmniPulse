@@ -322,6 +322,30 @@ pub fn set_gpu(enabled: bool) -> Result<(), String> {
 // The web app keeps its favourites, stats, settings and playlists on this PC in the WebView's own
 // storage, which nothing else can read. It writes a copy here as it goes, and the native app reads it.
 const WEB_EXPORT: &str = "web-export.json";
+// ---------- playlist files (M3U and CSV, imported and exported from the app) ----------
+const PLAYLIST_FILE_MAX: u64 = 16 * 1024 * 1024;
+
+fn playlist_file_ok(path: &str) -> Result<(), String> {
+    let ext = std::path::Path::new(path).extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
+    if ["m3u", "m3u8", "csv", "txt"].contains(&ext.as_str()) { Ok(()) } else { Err("Only .m3u, .m3u8, .csv and .txt playlist files".into()) }
+}
+
+/// A playlist file's text (a BOM and Windows' own code page aside: it's read as UTF-8, else Latin-1)
+pub fn playlist_file_read(path: &str) -> Result<String, String> {
+    playlist_file_ok(path)?;
+    if fs::metadata(path).map_err(|e| e.to_string())?.len() > PLAYLIST_FILE_MAX {
+        return Err("That file is too big for a playlist".into());
+    }
+    let bytes = fs::read(path).map_err(|e| e.to_string())?;
+    let text = String::from_utf8(bytes.clone()).unwrap_or_else(|_| bytes.iter().map(|&b| b as char).collect());
+    Ok(text.trim_start_matches('\u{feff}').to_string())
+}
+
+pub fn playlist_file_write(path: &str, text: &str) -> Result<(), String> {
+    playlist_file_ok(path)?;
+    fs::write(path, text).map_err(|e| e.to_string())
+}
+
 const WEB_EXPORT_MAX: usize = 32 * 1024 * 1024;
 
 pub fn save_web_export(text: &str) -> Result<(), String> {
