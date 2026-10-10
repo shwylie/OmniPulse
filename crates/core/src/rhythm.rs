@@ -447,3 +447,22 @@ mod tests {
         assert_eq!(transposed("C major", -1), Some(("B major".into(), "1B".into())));
     }
 }
+
+/// OMNIPULSE_WAV=<16-bit stereo wav> cargo test -p omnipulse-core rhythm_of_a_wav -- --ignored --nocapture:
+/// the beat of each 12 s of it (a mix's beats in step show one clear tempo through it)
+#[cfg(test)]
+#[test]
+#[ignore]
+fn rhythm_of_a_wav() {
+    let b = std::fs::read(std::env::var("OMNIPULSE_WAV").unwrap()).unwrap();
+    let rate = u32::from_le_bytes([b[24], b[25], b[26], b[27]]);
+    let mono: Vec<f32> = b[44..].chunks(4).map(|f| (i16::from_le_bytes([f[0], f[1]]) as f32 + i16::from_le_bytes([f[2], f[3]]) as f32) / 65536.0).collect();
+    let win = rate as usize * 12;
+    for (i, part) in mono.chunks(win).enumerate() {
+        if part.len() < win / 2 { break; }
+        match analyse(part, rate) {
+            Some(r) => println!("{:>3}-{:>3} s: {:.2} BPM, confidence {:.2}", i * 12, i * 12 + 12, r.bpm, r.tempo_confidence),
+            None => println!("{:>3} s: no beat", i * 12),
+        }
+    }
+}

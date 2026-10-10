@@ -1,7 +1,7 @@
 ; OmniPulse's installer, for the native app (crates/app): one program, no WebView. It installs where
 ; the web app's installer does (this user's %LOCALAPPDATA%\OmniPulse) and takes over its uninstall
 ; entry, its omnipulse:// links and its Start menu shortcut, so it updates the web app in place (your
-; data in %APPDATA%\sc-client is untouched: the native app reads the web app's from it).
+; data in %APPDATA%\OmniPulse is untouched: the native app reads the web app's from it).
 ;
 ; Built by scripts/release-native.mjs:  makensis /DVERSION=0.3.1 /DOUT=<setup.exe> installer\omnipulse-native.nsi
 ; /P (passive, as updates run it): its progress only, nothing to click. It starts OmniPulse when it's done.
@@ -119,5 +119,5 @@ Section "Uninstall"
   Delete "$SMPROGRAMS\OmniPulse.lnk"
   DeleteRegKey HKCU "${UNINST}"
   DeleteRegKey HKCU "Software\Classes\omnipulse"
-  ; (your music, settings and sign-ins in %APPDATA%\sc-client stay: reinstalling finds them)
+  ; (your music, settings and sign-ins in %APPDATA%\OmniPulse stay: reinstalling finds them)
 SectionEnd

@@ -162,3 +162,43 @@ mod tests {
         assert!(mid < 1.02 && mid > 1.0);
     }
 }
+
+/// A mix rendered to a WAV file, to listen to: the measured song OMNIPULSE_MIX_A (a SoundCloud track id)
+/// into OMNIPULSE_MIX_B, planned as the app plans it, from 12 s before its moment to 20 s after it.
+/// OMNIPULSE_MIX_A=.. OMNIPULSE_MIX_B=.. OMNIPULSE_MIX_OUT=mix.wav cargo test -p omnipulse --bin OmniPulse-native mix_demo -- --ignored
+#[cfg(test)]
+#[test]
+#[ignore]
+fn mix_demo() {
+    use crate::track::{Src, Track};
+    let (a_id, b_id) = (std::env::var("OMNIPULSE_MIX_A").unwrap(), std::env::var("OMNIPULSE_MIX_B").unwrap());
+    let out_path = std::env::var("OMNIPULSE_MIX_OUT").unwrap_or_else(|_| "mix-demo.wav".into());
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    let (a, b) = (omnipulse_core::rhythm::known(&a_id).expect("A measured"), omnipulse_core::rhythm::known(&b_id).expect("B measured"));
+    let t = |id: &str| Track { src: Src::SoundCloud(id.parse().unwrap()), key: id.to_string(), ..Default::default() };
+    let mut sa = rt.block_on(crate::player::open_source(&t(&a_id), rt.handle().clone())).expect("A opens");
+    let sb = rt.block_on(crate::player::open_source(&t(&b_id), rt.handle().clone())).expect("B opens");
+    let dur = sa.duration_ms().unwrap_or(0);
+    let p = plan(&a, dur, 0, &b, 8).expect("a plan");
+    println!("{p:?}");
+    let lead = 12_000;
+    sa.seek(p.at_ms - lead).unwrap();
+    let mut sb = omnipulse_audio::Stretched::shifted(sb, omnipulse_audio::Tempo::new(p.rate), p.semitones).unwrap();
+    omnipulse_audio::Source::seek(&mut sb, p.start_ms).unwrap();
+    let rate = 44_100;
+    let out = omnipulse_audio::engine::render_mix(sa, Box::new(sb), rate, lead as f32 / 1000.0, p.ms, Some(p.swap_ms), lead as f32 / 1000.0 + 20.0 + p.ms as f32 / 1000.0).unwrap();
+    // a 16-bit stereo WAV
+    let mut w = Vec::new();
+    let data = (out.len() * 2) as u32;
+    for (tag, n) in [(b"RIFF", 36 + data)] { w.extend_from_slice(tag); w.extend_from_slice(&n.to_le_bytes()); }
+    w.extend_from_slice(b"WAVEfmt ");
+    for v in [16u32] { w.extend_from_slice(&v.to_le_bytes()); }
+    for v in [1u16, 2] { w.extend_from_slice(&v.to_le_bytes()); }
+    for v in [rate, rate * 4] { w.extend_from_slice(&v.to_le_bytes()); }
+    for v in [4u16, 16] { w.extend_from_slice(&v.to_le_bytes()); }
+    w.extend_from_slice(b"data");
+    w.extend_from_slice(&data.to_le_bytes());
+    for s in &out { w.extend_from_slice(&((s.clamp(-1.0, 1.0) * 32767.0) as i16).to_le_bytes()); }
+    std::fs::write(&out_path, w).unwrap();
+    println!("wrote {out_path}: the mix starts 12 s in");
+}
