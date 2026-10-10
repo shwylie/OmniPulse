@@ -52,7 +52,7 @@ function renderPlatChips() {
   const box = $("titlePlat");
   box.hidden = false;
   box.replaceChildren();
-  PLATFORM_LIST.filter((p) => !p.noChip).forEach((p) => {
+  PLATFORM_LIST.filter((p) => !p.noChip && !(p.plugin && !pluginChip(p.id.slice(5)))).forEach((p) => {
     const ready = p.available();
     const on = ready && platformOn(p);
     const b = el("button", on ? "on" : ready ? "" : "unset");

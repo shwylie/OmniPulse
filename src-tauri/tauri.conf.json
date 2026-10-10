@@ -22,9 +22,10 @@
     "icon": [
       "icons/icon.ico"
     ],
-    "resources": [
-      "icons/taskbar/*"
-    ],
+    "resources": {
+      "icons/taskbar/*": "icons/taskbar/",
+      "../plugins/internet-archive/*": "plugins/internet-archive/"
+    },
     "externalBin": [
       "binaries/omnipulse-offset"
     ]

@@ -24,6 +24,8 @@ const plugPlat = (id) => "plug:" + id;
 const isPluginTrack = (t) => srcOf(t).startsWith("plug:");
 const pluginIdOf = (t) => srcOf(t).slice(5);
 const pluginOn = (id) => prefs["plugOn_" + id] !== false;
+// its icon among the platforms' in the title bar (on unless switched off in its settings)
+const pluginChip = (id) => prefs["plugChip_" + id] !== false;
 const pluginSettings = (id) => Object.assign({}, (prefs.pluginSettings || {})[id] || {});
 
 // ---------- the sandbox ----------
@@ -261,7 +263,7 @@ function pluginPaint() {
     const left = el("div");
     left.append(el("div", "lbl", m.name + (m.version ? " " + m.version : "")));
     const state = !pluginOn(m.id) ? "Off." : run && run.error ? "Couldn't start: " + run.error.split("\n")[0] : run && run.ready ? "Running." : "Starting...";
-    left.append(el("div", "note", (m.description ? m.description + " " : "") + (m.author ? "By " + m.author + ". " : "") + state));
+    left.append(el("div", "note", (m.description ? m.description + " " : "") + (m.author ? "By " + m.author + ". " : "") + (pkg.bundled ? "Comes with OmniPulse. " : "") + state));
     const sw = el("label", "switch");
     const on = el("input");
     on.type = "checkbox";
@@ -272,11 +274,29 @@ function pluginPaint() {
     row.append(left, sw);
     const more = el("details", "sub");
     more.append(el("summary", "", m.name + " settings"));
+    // shown in the title bar with the platforms, or not
+    const chipRow = el("div", "row");
+    const chipText = el("div");
+    chipText.append(el("div", "lbl", "Title Bar Icon"), el("div", "note", "Its icon at the top of the window, with the platforms', to switch it on and off there."));
+    const chipSw = el("label", "switch");
+    const chipOn = el("input");
+    chipOn.type = "checkbox";
+    chipOn.checked = pluginChip(m.id);
+    chipOn.addEventListener("change", () => { prefs["plugChip_" + m.id] = chipOn.checked; savePrefs(); renderPlatChips(); });
+    chipSw.append(chipOn, el("span"));
+    chipRow.append(chipText, chipSw);
+    more.append(chipRow);
     (Array.isArray(m.settings) ? m.settings : []).forEach((f) => more.append(pluginField(m.id, f)));
     more.append(el("p", "note", "Can reach: " + (m.hosts.length ? m.hosts.join(", ") : "no sites") + ". Offers: " + ((run && run.methods.join(", ")) || (m.capabilities || []).join(", ") || "nothing yet") + "."));
+    // its files (manifest.json and main.js), to read what it does
+    const files = el("button", "soft", "Show its files");
+    files.title = "Open the folder with this plugin's manifest.json and main.js";
+    files.addEventListener("click", () => invoke("plugin_folder", { id: m.id }).catch((e) => say(String(e))));
     const rm = el("button", "soft", "Remove " + m.name);
     rm.addEventListener("click", () => pluginRemove(m));
-    more.append(rm);
+    const btns = el("div", "rowEnd");
+    btns.append(files, rm);
+    more.append(btns);
     box.append(row, more);
   });
 }
@@ -290,7 +310,8 @@ async function pluginSetOn(id, on) {
 }
 
 async function pluginRemove(m) {
-  if (!confirm("Remove the plugin " + m.name + "? Its settings go too.")) return;
+  const pkg = pluginPackages.find((p) => p.manifest.id === m.id);
+  if (!confirm("Remove the plugin " + m.name + "? Its settings go too." + (pkg && pkg.bundled ? " It came with OmniPulse, and stays removed after updates." : ""))) return;
   pluginStop(m.id);
   await invoke("plugin_remove", { id: m.id }).catch((e) => say(String(e)));
   const all = Object.assign({}, prefs.pluginSettings || {});

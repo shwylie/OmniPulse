@@ -54,6 +54,8 @@ pub struct Package {
     pub code: String,
     /// what was read (manifest and script): installing checks it's still the same
     pub digest: String,
+    /// came with OmniPulse (installed from its own folder, kept up to date with it)
+    pub bundled: bool,
 }
 
 fn digest_of(manifest_text: &str, code: &str) -> String {
@@ -209,7 +211,7 @@ pub async fn inspect(source: &str) -> Result<Package, String> {
     };
     let manifest: Manifest = serde_json::from_str(&manifest_text).map_err(|e| e.to_string())?;
     let digest = digest_of(&manifest_text, &code);
-    Ok(Package { manifest, code, digest })
+    Ok(Package { manifest, code, digest, bundled: false })
 }
 
 /// Installs what inspect() found and you agreed to: read again from the source, and only if it's
@@ -236,11 +238,60 @@ pub fn list() -> Vec<Package> {
             let m: Manifest = serde_json::from_str(&std::fs::read_to_string(e.path().join("manifest.json")).ok()?).ok()?;
             check_manifest(&m).ok()?;
             let code = std::fs::read_to_string(e.path().join("main.js")).ok()?;
-            Some(Package { manifest: m, code, digest: String::new() })
+            let bundled = e.path().join(BUNDLED_MARK).exists();
+            Some(Package { manifest: m, code, digest: String::new(), bundled })
         })
         .collect();
     out.sort_by_key(|p| p.manifest.name.to_lowercase());
     out
+}
+
+// ---------- the plugins that come with OmniPulse ----------
+// They ship as ordinary plugin folders (manifest.json and main.js, readable like any other) beside
+// the app, and are installed from there: the first time, and again when a newer version comes with
+// an update. One you remove stays removed (its id is kept in REMOVED_LIST).
+const BUNDLED_MARK: &str = ".bundled";
+const REMOVED_LIST: &str = "removed-bundled.txt";
+
+/// Installs (or brings up to date) each plugin folder in `src` (the app's own plugins folder)
+pub fn install_bundled(src: &Path) {
+    if let Ok(dest) = plugins_dir() {
+        install_bundled_into(src, &dest);
+    }
+}
+
+fn install_bundled_into(src: &Path, dest: &Path) {
+    let removed = std::fs::read_to_string(dest.join(REMOVED_LIST)).unwrap_or_default();
+    let Ok(rd) = std::fs::read_dir(src) else { return };
+    for e in rd.flatten() {
+        let Ok(manifest_text) = std::fs::read_to_string(e.path().join("manifest.json")) else { continue };
+        let Ok(m) = serde_json::from_str::<Manifest>(&manifest_text) else { continue };
+        if check_manifest(&m).is_err() || removed.lines().any(|l| l.trim() == m.id) {
+            continue;
+        }
+        let Ok(code) = std::fs::read_to_string(e.path().join(&m.main)) else { continue };
+        let dir = dest.join(&m.id);
+        let have: Option<Manifest> = std::fs::read_to_string(dir.join("manifest.json")).ok().and_then(|t| serde_json::from_str(&t).ok());
+        if have.as_ref().is_some_and(|h| h.version == m.version) && dir.join("main.js").exists() {
+            continue;
+        }
+        if std::fs::create_dir_all(&dir).is_err() {
+            continue;
+        }
+        // (as an installed plugin is kept: its script as main.js)
+        let _ = std::fs::write(dir.join("manifest.json"), serde_json::to_string_pretty(&m).unwrap_or(manifest_text));
+        let _ = std::fs::write(dir.join("main.js"), code);
+        let _ = std::fs::write(dir.join(BUNDLED_MARK), "Came with OmniPulse. Removing it keeps it removed.\n");
+    }
+}
+
+/// The folder an installed plugin's files are in
+pub fn folder_of(id: &str) -> Result<PathBuf, String> {
+    if !id.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-') || id.is_empty() {
+        return Err("Bad plugin id".into());
+    }
+    let dir = plugins_dir()?.join(id);
+    if dir.is_dir() { Ok(dir) } else { Err("That plugin isn't installed.".into()) }
 }
 
 pub fn remove(id: &str) -> Result<(), String> {
@@ -248,6 +299,16 @@ pub fn remove(id: &str) -> Result<(), String> {
         return Err("Bad plugin id".into());
     }
     let dir = plugins_dir()?.join(id);
+    // one that came with OmniPulse isn't put back by the next start
+    if dir.join(BUNDLED_MARK).exists() {
+        let list = plugins_dir()?.join(REMOVED_LIST);
+        let mut have = std::fs::read_to_string(&list).unwrap_or_default();
+        if !have.lines().any(|l| l.trim() == id) {
+            have.push_str(id);
+            have.push('\n');
+            let _ = std::fs::write(list, have);
+        }
+    }
     if dir.exists() {
         std::fs::remove_dir_all(dir).map_err(|e| e.to_string())?;
     }
@@ -346,6 +407,36 @@ mod tests {
         assert!(!host_allowed(&hosts, "https://api.soundcloud.com/me"));
         assert!(!host_allowed(&hosts, "file:///C:/Users"));
         assert!(host_allowed(&["127.0.0.1".to_string()], "http://127.0.0.1:9/x"));
+    }
+
+    #[test]
+    fn bundled_plugins_install_update_and_stay_removed() {
+        let tmp = std::env::temp_dir().join(format!("op-bundled-{}", std::process::id()));
+        let src = tmp.join("src");
+        let dest = tmp.join("dest");
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(&dest).unwrap();
+        let ia = concat!(env!("CARGO_MANIFEST_DIR"), "/../../plugins");
+        install_bundled_into(Path::new(ia), &dest);
+        assert!(dest.join("internet-archive/main.js").exists() && dest.join("internet-archive").join(BUNDLED_MARK).exists());
+        // a newer one replaces it; the same version is left alone
+        std::fs::create_dir_all(src.join("x")).unwrap();
+        let m = |v: &str| format!(r#"{{"id":"demo","name":"Demo","version":"{v}","main":"main.js","hosts":[]}}"#);
+        std::fs::write(src.join("x/manifest.json"), m("1.0.0")).unwrap();
+        std::fs::write(src.join("x/main.js"), "one").unwrap();
+        install_bundled_into(&src, &dest);
+        std::fs::write(src.join("x/main.js"), "two").unwrap();
+        install_bundled_into(&src, &dest);
+        assert_eq!(std::fs::read_to_string(dest.join("demo/main.js")).unwrap(), "one");
+        std::fs::write(src.join("x/manifest.json"), m("1.1.0")).unwrap();
+        install_bundled_into(&src, &dest);
+        assert_eq!(std::fs::read_to_string(dest.join("demo/main.js")).unwrap(), "two");
+        // removed: not put back
+        std::fs::remove_dir_all(dest.join("demo")).unwrap();
+        std::fs::write(dest.join(REMOVED_LIST), "demo\n").unwrap();
+        install_bundled_into(&src, &dest);
+        assert!(!dest.join("demo").exists());
+        let _ = std::fs::remove_dir_all(&tmp);
     }
 
     #[tokio::test]

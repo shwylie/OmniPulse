@@ -336,6 +336,12 @@ async fn plugin_inspect(source: String) -> Result<plugins::Package, String> { pl
 async fn plugin_install(source: String, digest: String) -> Result<plugins::Manifest, String> { plugins::install(&source, &digest).await }
 #[tauri::command]
 fn plugin_list() -> Vec<plugins::Package> { plugins::list() }
+/// Opens an installed plugin's folder in Explorer, to read its files
+#[tauri::command]
+fn plugin_folder(id: String) -> Result<(), String> {
+    let dir = plugins::folder_of(&id)?;
+    std::process::Command::new("explorer").arg(dir).spawn().map(|_| ()).map_err(|e| e.to_string())
+}
 #[tauri::command]
 fn plugin_remove(id: String) -> Result<(), String> { plugins::remove(&id) }
 #[tauri::command]
@@ -725,6 +731,11 @@ fn main() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
+            // the plugins that come with OmniPulse (beside the app, as plain folders): installed or
+            // brought up to date before the page lists them
+            if let Ok(dir) = app.path().resolve("plugins", tauri::path::BaseDirectory::Resource) {
+                plugins::install_bundled(&dir);
+            }
             let gpu = omnipulse_core::load_settings().gpu;
             #[allow(unused_mut)]
             let mut builder =
@@ -853,7 +864,7 @@ fn main() {
             local_folders, local_set_folders, local_scan, local_status, local_tracks, local_server,
             requests_start, requests_stop, request_result,
             spe_signed_in, spe_login, spe_logout, spe_attach, spe_play, spe_pause, spe_resume, spe_seek, spe_stop, spe_played, spe_playlist, spe_web_get, spe_set_normalisation, loudness_analyse,
-            resolve_yt_stream, plugin_inspect, plugin_install, plugin_list, plugin_remove, plugin_http, yt_search, yt_radio, yt_status, yt_artists, yt_artist, yt_album, yt_playlist, yt_playlists, yt_prepare, sc_ytdlp, mb_search, update_check, update_install, yt_setup, yt_remove, remote_start, remote_stop, remote_result
+            resolve_yt_stream, plugin_inspect, plugin_install, plugin_list, plugin_folder, plugin_remove, plugin_http, yt_search, yt_radio, yt_status, yt_artists, yt_artist, yt_album, yt_playlist, yt_playlists, yt_prepare, sc_ytdlp, mb_search, update_check, update_install, yt_setup, yt_remove, remote_start, remote_stop, remote_result
         ])
         .run(tauri::generate_context!())
         .expect("error while running app");
