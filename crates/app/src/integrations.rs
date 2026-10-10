@@ -31,7 +31,8 @@ fn big_art(t: &Track) -> String {
 // ---------- Discord activity ----------
 /// Shows what's playing on your Discord profile (or nothing, when paused), as the web app does,
 /// with its buttons: Listen along (SoundCloud, at about where you are) and Open
-pub fn presence(rt: &tokio::runtime::Handle, prefs: &Value, t: Option<&Track>, pos_ms: u64, playing: bool) {
+/// join: the Listen Along room's link (crate::together), for the Listen along and Ask to Jam buttons
+pub fn presence(rt: &tokio::runtime::Handle, prefs: &Value, t: Option<&Track>, pos_ms: u64, playing: bool, join: Option<String>) {
     if !set(prefs, "presence") {
         return;
     }
@@ -40,13 +41,20 @@ pub fn presence(rt: &tokio::runtime::Handle, prefs: &Value, t: Option<&Track>, p
         return;
     };
     let (show_time, show_art, show_link, show_listen) = (on(prefs, "presTime"), on(prefs, "presArt"), on(prefs, "presLink"), on(prefs, "presListen"));
+    let show_ask = set(prefs, "presAsk");
     rt.spawn(async move {
         let now = core::now_secs() as i64;
         let start = now - (pos_ms / 1000) as i64;
         let end = (t.ms > 0).then(|| start + (t.ms / 1000) as i64);
         let link = t.web_link();
         let mut buttons = Vec::new();
-        if !link.is_empty() {
+        if let Some(join) = join.filter(|j| !j.is_empty()) {
+            // through the relay: Listen along joins your queue, Ask to Jam asks you for a Jam (two at most)
+            if show_listen { buttons.push(core::discord::PresenceButton { label: "Listen along".into(), url: join.clone() }); }
+            if show_ask { buttons.push(core::discord::PresenceButton { label: "Ask to Jam".into(), url: join.replace("/join/", "/ask/") }); }
+            if show_link && !link.is_empty() { buttons.push(core::discord::PresenceButton { label: open_label(&t).into(), url: link.clone() }); }
+            buttons.truncate(2);
+        } else if !link.is_empty() {
             if matches!(t.src, Src::SoundCloud(_)) {
                 if show_listen {
                     let s = pos_ms / 1000;

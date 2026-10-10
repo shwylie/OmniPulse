@@ -28,7 +28,9 @@ struct Gate {
     paused_until: Option<Instant>,
 }
 static GATE: Mutex<Gate> = Mutex::new(Gate { next: None, paused_until: None });
-static CACHE: Mutex<Option<HashMap<String, (Instant, Vec<Value>)>>> = Mutex::new(None);
+/// searches asked lately: the words (lower case) -> when, and what came back
+type Cache = HashMap<String, (Instant, Vec<Value>)>;
+static CACHE: Mutex<Option<Cache>> = Mutex::new(None);
 
 /// Waits for this request's turn (at least GAP after the last one), or says why not
 async fn turn() -> Result<(), String> {

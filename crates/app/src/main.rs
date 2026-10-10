@@ -11,6 +11,7 @@ mod look;
 mod marks;
 mod mirror;
 mod titles;
+mod together;
 mod versions;
 mod player;
 mod queue;
@@ -1451,8 +1452,10 @@ fn push_out(shared: &Shared, presence: bool) {
         integrations::widget_update(prefs, t, by, pos, dur, playing, (&a.accent.0, &a.accent.1));
     }
     if presence {
-        integrations::presence(&a.rt, prefs, t, pos, playing);
+        let join = listen_url(shared, &a, playing);
+        integrations::presence(&a.rt, prefs, t, pos, playing, join);
     }
+    host_push(&a);
     desktop::taskbar::state(playing, false, false, false);
 }
 
@@ -1718,7 +1721,7 @@ fn set_toggle(shared: &Shared, key: &str) {
                 "widget" => omnipulse_core::widget::widget_stop(),
                 "req" => omnipulse_core::requests::requests_stop(),
                 "remoteOn" => omnipulse_core::remote::remote_stop(),
-                "presence" if !on => integrations::presence(&shared.borrow().rt, &shared.borrow().web.prefs, None, 0, false),
+                "presence" if !on => integrations::presence(&shared.borrow().rt, &shared.borrow().web.prefs, None, 0, false, None),
                 _ => {}
             }
             if matches!(key, "widget" | "req" | "remoteOn") && on { outside_start(shared); }
@@ -2104,6 +2107,7 @@ fn pl_create(shared: &Shared, tracks: Vec<Track>) {
 thread_local! {
     static SYNC_TIMER: RefCell<Option<slint::Timer>> = const { RefCell::new(None) };
     static SYNC_EVERY: RefCell<Option<slint::Timer>> = const { RefCell::new(None) };
+    static JAM_TIMER: RefCell<Option<slint::Timer>> = const { RefCell::new(None) };
     static SYNC_BUSY: std::cell::Cell<(bool, bool)> = const { std::cell::Cell::new((false, false)) };
     static SYNC_SAID: RefCell<std::collections::HashSet<String>> = RefCell::new(std::collections::HashSet::new());
 }
@@ -2418,6 +2422,250 @@ fn share_platform(shared: &Shared, p: sources::Playlist, plat: &str) {
                 Err(e) => format!("Couldn't get its link: {e}"),
             }.into());
         });
+    });
+}
+
+// ---------- Listen Along and Jams, hosting (crate::together) ----------
+thread_local! {
+    /// the room you're hosting, if any
+    static ROOM: RefCell<Option<together::Room>> = const { RefCell::new(None) };
+    static MEMBERS: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
+    /// a room being made (so it's only made once)
+    static MAKING: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    /// someone asking for a Jam: (their ask's id, their name, when)
+    /// someone asking: (id, name, since, join), join being "let me into your Jam" (else "start one")
+    static ASK: RefCell<Option<(String, String, std::time::Instant, bool)>> = const { RefCell::new(None) };
+}
+const JAM_ASK_SECS: f32 = 60.0;
+
+fn my_name(a: &App) -> String {
+    a.web.prefs["togetherName"].as_str().map(str::trim).filter(|s| !s.is_empty()).map(String::from)
+        .or_else(|| ACCOUNT_NAMES.with(|n| n.borrow().get("spotify").cloned()).filter(|s| !s.is_empty()))
+        .or_else(|| ACCOUNT_NAMES.with(|n| n.borrow().get("soundcloud").cloned()).filter(|s| !s.is_empty()))
+        .unwrap_or_else(|| "Someone".into())
+}
+
+fn relay_of(a: &App) -> String {
+    a.web.prefs["relayUrl"].as_str().map(str::trim).filter(|s| !s.is_empty()).unwrap_or(share::RELAY_URL).trim_end_matches('/').to_string()
+}
+
+fn room_kind() -> Option<String> {
+    ROOM.with(|r| r.borrow().as_ref().map(|r| r.kind.clone()))
+}
+
+/// The Listen Along room's link for the Discord buttons: made while you're playing with Listen along
+/// or Ask to Jam on (and not in a Jam), let go when not
+fn listen_url(shared: &Shared, a: &App, playing: bool) -> Option<String> {
+    let p = &a.web.prefs;
+    let want = integrations::set(p, "presence") && (integrations::on(p, "presListen") || integrations::set(p, "presAsk")) && playing;
+    match room_kind().as_deref() {
+        Some("jam") => None,
+        Some(_) if !want => { room_end(false); None }
+        Some(_) => ROOM.with(|r| r.borrow().as_ref().map(|r| r.join_url.clone())),
+        None if want && !MAKING.with(|m| m.get()) => {
+            MAKING.with(|m| m.set(true));
+            room_open(shared, "listen", None, |s| push_out(s, true));
+            None
+        }
+        None => None,
+    }
+}
+
+type RoomDone = Box<dyn FnOnce(&Shared)>;
+thread_local! {
+    /// what to do once the room being made is open: kept on the UI thread (it holds UI state, so it
+    /// can't go along into the network task), and picked up when the answer comes back there
+    static ROOM_DONE: RefCell<Option<RoomDone>> = const { RefCell::new(None) };
+}
+
+/// A room: made (or one made already), connected, and kept; then `done`
+fn room_open(shared: &Shared, kind: &'static str, made: Option<serde_json::Value>, done: impl FnOnce(&Shared) + 'static) {
+    let (rt, weak, relay, host) = { let a = shared.borrow(); (a.rt.clone(), a.ui.clone(), relay_of(&a), my_name(&a)) };
+    ROOM_DONE.with(|d| *d.borrow_mut() = Some(Box::new(done)));
+    let rt2 = rt.clone();
+    rt.spawn(async move {
+        let made = match made { Some(m) => Ok(m), None => together::create(&relay, kind, &host).await };
+        let _ = weak.upgrade_in_event_loop(move |ui| SHARED.with(|s| {
+            MAKING.with(|m| m.set(false));
+            let Some(shared) = s.borrow().clone() else { return };
+            match made {
+                Ok(made) => {
+                    room_end(false);
+                    let room = together::connect(&rt2, &relay, kind, &made, |m| {
+                        let _ = slint::invoke_from_event_loop(move || SHARED.with(|s| { if let Some(sh) = s.borrow().clone() { room_message(&sh, m); } }));
+                    });
+                    ROOM.with(|r| *r.borrow_mut() = Some(room));
+                    jam_paint(&shared);
+                    if let Some(done) = ROOM_DONE.with(|d| d.borrow_mut().take()) { done(&shared); }
+                }
+                Err(e) => {
+                    ROOM_DONE.with(|d| d.borrow_mut().take());
+                    ui.set_status(format!("Couldn't open a room on the relay: {e}").into());
+                }
+            }
+        }));
+    });
+}
+
+/// The room closed (the listeners told it's over, when `tell`)
+fn room_end(tell: bool) {
+    ROOM.with(|r| {
+        if let Some(room) = r.borrow_mut().take() {
+            if tell { let _ = room.tx.send(serde_json::json!({ "type": "end" }).to_string()); }
+        }
+    });
+    MEMBERS.with(|m| m.borrow_mut().clear());
+}
+
+/// What's playing now, and next, to the room (as the web app's hostSnapshot)
+fn host_push(a: &App) {
+    let Some(tx) = ROOM.with(|r| r.borrow().as_ref().map(|r| r.tx.clone())) else { return };
+    let cur = a.queue.current();
+    let from = a.queue.qi.map_or(0, |i| i + 1);
+    let next: Vec<serde_json::Value> = a.queue.items.iter().skip(from).take(20).map(|q| q.t.to_snapshot()).collect();
+    let state = serde_json::json!({
+        "v": 1, "host": my_name(a), "kind": room_kind().unwrap_or_default(),
+        "playing": a.loaded && !a.engine.is_paused(), "pos": a.engine.position_ms(),
+        "track": cur.map(|t| t.to_snapshot()), "next": next,
+    });
+    let _ = tx.send(serde_json::json!({ "type": "state", "state": state }).to_string());
+}
+
+/// What the room says
+fn room_message(shared: &Shared, m: serde_json::Value) {
+    match m["type"].as_str() {
+        Some("open") => host_push(&shared.borrow()),
+        Some("members") => {
+            MEMBERS.with(|x| *x.borrow_mut() = m["list"].as_array().into_iter().flatten().filter_map(|n| n.as_str().map(String::from)).collect());
+            jam_paint(shared);
+        }
+        // a Jam member's song: in the queue, as theirs (Play next: next, after the other requests)
+        Some("add") if room_kind().as_deref() == Some("jam") => {
+            let Some(t) = Track::from_snapshot(&m["track"]) else { return };
+            let who = m["by"].as_str().unwrap_or("Someone").to_string();
+            let by = format!("{who} (Jam)");
+            let title = t.title.clone();
+            let next = m["next"].as_bool().unwrap_or(false);
+            {
+                let mut a = shared.borrow_mut();
+                let at = a.queue.add_request(t, &by);
+                if next && at > 1 {
+                    let i = a.queue.qi.unwrap_or(0) + at;
+                    a.queue.move_next(i);
+                }
+                paint_queue(&mut a);
+                save_session(&a);
+            }
+            let note = if next { format!("{who} put \"{title}\" on next.") } else { format!("{who} added \"{title}\" to the Jam.") };
+            if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_status(note.into()); }
+            host_push(&shared.borrow());
+        }
+        // a Jam member skipping (on, or back): for everyone
+        Some("skip") if room_kind().as_deref() == Some("jam") => {
+            let back = m["d"].as_i64() == Some(-1);
+            step(shared, if back { -1 } else { 1 });
+            let who = m["by"].as_str().unwrap_or("Someone");
+            if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_status(format!("{who} {}", if back { "went back a song." } else { "skipped the song." }).into()); }
+        }
+        Some(kind @ ("ask" | "joinAsk")) => {
+            let (Some(id), name) = (m["id"].as_str(), m["name"].as_str().unwrap_or("Someone")) else { return };
+            let join = kind == "joinAsk";
+            // Listen Along & Jams switched off: turned away; one at a time (the next is "busy", not declined)
+            if !jams_on(&shared.borrow()) { ask_answer(id, join, false, false); return; }
+            if ASK.with(|a| a.borrow().is_some()) || (!join && room_kind().as_deref() == Some("jam")) { ask_answer(id, join, false, true); return; }
+            ASK.with(|a| *a.borrow_mut() = Some((id.to_string(), name.to_string(), std::time::Instant::now(), join)));
+            jam_paint(shared);
+        }
+        Some("askGone") if ASK.with(|a| a.borrow().as_ref().is_some_and(|x| m["id"].as_str() == Some(x.0.as_str()))) => {
+            ASK.with(|a| *a.borrow_mut() = None);
+            jam_paint(shared);
+        }
+        _ => {}
+    }
+}
+
+fn ask_reply(id: &str, ok: bool, url: &str) {
+    ROOM.with(|r| { if let Some(room) = r.borrow().as_ref() { let _ = room.tx.send(serde_json::json!({ "type": "askReply", "id": id, "ok": ok, "url": url }).to_string()); } });
+}
+
+/// Answering someone asking: for a Jam (askReply) or into yours (admit). `busy`: not now, rather than
+/// no (the relay only keeps a real no, so they can ask again)
+fn ask_answer(id: &str, join: bool, ok: bool, busy: bool) {
+    let kind = if join { "admit" } else { "askReply" };
+    ROOM.with(|r| { if let Some(room) = r.borrow().as_ref() { let _ = room.tx.send(serde_json::json!({ "type": kind, "id": id, "ok": ok, "busy": busy, "url": "" }).to_string()); } });
+}
+
+/// Settings > Listen Along & Jams (on unless switched off, as the web app's prefs.jamsOn)
+fn jams_on(a: &App) -> bool {
+    integrations::on(&a.web.prefs, "jamsOn")
+}
+
+/// The title bar: Start a Jam / Jam · n, or someone's ask (its ring emptying; declined when it runs out)
+fn jam_paint(shared: &Shared) {
+    let Some(ui) = shared.borrow().ui.upgrade() else { return };
+    let ask = ASK.with(|a| a.borrow().clone());
+    if let Some((id, name, at, join)) = ask {
+        let left = 1.0 - at.elapsed().as_secs_f32() / JAM_ASK_SECS;
+        if left <= 0.0 {
+            // ran out: not now, rather than no
+            ask_answer(&id, join, false, true);
+            ASK.with(|a| *a.borrow_mut() = None);
+            return jam_paint(shared);
+        }
+        ui.set_jam_ask(if join { format!("{name} wants to join your Jam") } else { format!("{name} wants you to Start a Jam") }.into());
+        ui.set_jam_ring(together::ring_path(left).into());
+    } else {
+        ui.set_jam_ask("".into());
+    }
+    let members = MEMBERS.with(|m| m.borrow().clone());
+    let jam = room_kind().as_deref() == Some("jam");
+    ui.set_jam_on(jam);
+    ui.set_jam_hidden(!jams_on(&shared.borrow()));
+    ui.set_jam_label(if jam { if members.is_empty() { "Jam".into() } else { format!("Jam \u{b7} {}", members.len()) } } else { "Start a Jam".into() }.into());
+    ui.set_jam_link(ROOM.with(|r| r.borrow().as_ref().filter(|r| r.kind == "jam").map(|r| r.join_url.clone())).unwrap_or_default().into());
+    ui.set_jam_members(if members.is_empty() { "Nobody has joined yet.".to_string() } else { format!("In the Jam: {}", members.join(", ")) }.into());
+}
+
+fn jam_start(shared: &Shared) {
+    room_open(shared, "jam", None, |s| {
+        let link = ROOM.with(|r| r.borrow().as_ref().map(|r| r.join_url.clone())).unwrap_or_default();
+        let note = match share::copy(&link) { Ok(()) => "Jam started. The invite link is copied: send it to the friends you want in.".to_string(), Err(_) => "Jam started.".to_string() };
+        if let Some(ui) = s.borrow().ui.upgrade() { ui.set_status(note.into()); ui.set_jam_open(true); }
+        push_out(s, true);
+    });
+}
+
+/// Accepting an ask: the Jam made, its invite sent on the room they asked in, then the move to it
+fn jam_accept(shared: &Shared) {
+    let Some((id, name, _, join)) = ASK.with(|a| a.borrow_mut().take()) else { return };
+    jam_paint(shared);
+    // into your Jam: let in (they connect again by themselves)
+    if join {
+        ask_answer(&id, true, true, false);
+        if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_status(format!("Let {name} into your Jam.").into()); }
+        return;
+    }
+    let (rt, weak, relay, host) = { let a = shared.borrow(); (a.rt.clone(), a.ui.clone(), relay_of(&a), my_name(&a)) };
+    rt.spawn(async move {
+        let made = together::create(&relay, "jam", &host).await;
+        let _ = weak.upgrade_in_event_loop(move |ui| SHARED.with(|s| {
+            let Some(shared) = s.borrow().clone() else { return };
+            match made {
+                Ok(made) => {
+                    ask_reply(&id, true, made["joinUrl"].as_str().unwrap_or(""));
+                    let sh = shared.clone();
+                    slint::Timer::single_shot(std::time::Duration::from_millis(400), move || {
+                        room_end(true);
+                        let name = name.clone();
+                        room_open(&sh, "jam", Some(made), move |s| {
+                            if let Some(ui) = s.borrow().ui.upgrade() { ui.set_status(format!("Jam started with {name}. Invite more friends from the Jam button.").into()); }
+                            push_out(s, true);
+                        });
+                    });
+                }
+                Err(e) => { ask_reply(&id, false, ""); ui.set_status(format!("Couldn't start a Jam: {e}").into()); }
+            }
+        }));
     });
 }
 
@@ -2827,6 +3075,47 @@ fn main() -> Result<(), slint::PlatformError> {
     ui.on_sort_pick(move |by| lib_sort_pick(&s, &by));
     let s = shared.clone();
     ui.on_backup_make(move || backup_make(&s));
+    // Jams
+    let s = shared.clone();
+    ui.on_jam_clicked(move || {
+        if room_kind().as_deref() == Some("jam") {
+            if let Some(ui) = s.borrow().ui.upgrade() { jam_paint(&s); ui.set_jam_open(true); }
+        } else {
+            jam_start(&s);
+        }
+    });
+    let s = shared.clone();
+    ui.on_jam_accept(move || jam_accept(&s));
+    let s = shared.clone();
+    ui.on_jam_decline(move || {
+        if let Some((id, _, _, join)) = ASK.with(|a| a.borrow_mut().take()) { ask_answer(&id, join, false, false); }
+        jam_paint(&s);
+    });
+    let s = shared.clone();
+    ui.on_jam_copy(move || {
+        let link = ROOM.with(|r| r.borrow().as_ref().map(|r| r.join_url.clone())).unwrap_or_default();
+        if let Some(ui) = s.borrow().ui.upgrade() { ui.set_status(match share::copy(&link) { Ok(()) => "Invite link copied.".to_string(), Err(e) => e }.into()); }
+    });
+    let s = shared.clone();
+    ui.on_jam_end(move || {
+        room_end(true);
+        if let Some(ui) = s.borrow().ui.upgrade() { ui.set_jam_open(false); ui.set_status("Ended. Listeners carry on with their own music.".into()); }
+        jam_paint(&s);
+        push_out(&s, true);
+    });
+    jam_paint(&shared);
+    {
+        // the ask's ring, and what's playing to the room every few seconds (drift is caught)
+        let s = shared.clone();
+        let t = slint::Timer::default();
+        let mut n = 0u32;
+        t.start(slint::TimerMode::Repeated, std::time::Duration::from_millis(250), move || {
+            n += 1;
+            if ASK.with(|a| a.borrow().is_some()) { jam_paint(&s); }
+            if n.is_multiple_of(32) { host_push(&s.borrow()); }
+        });
+        JAM_TIMER.with(|x| *x.borrow_mut() = Some(t));
+    }
     accounts_refresh(&shared);
     let s = shared.clone();
     ui.on_account_act(move |i| account_act(&s, i as usize));

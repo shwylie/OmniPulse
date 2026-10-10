@@ -5407,6 +5407,7 @@ name = "omnipulse"
 version = "0.1.0"
 dependencies = [
  "arboard",
+ "futures-util",
  "global-hotkey",
  "image",
  "omnipulse-audio",
@@ -5419,6 +5420,7 @@ dependencies = [
  "slint",
  "slint-build",
  "tokio",
+ "tokio-tungstenite",
  "tray-icon",
  "windows 0.62.2",
 ]
