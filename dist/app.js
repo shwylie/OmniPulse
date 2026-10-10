@@ -1058,6 +1058,11 @@ function openSearch(q) {
   if (!plats.length) { showNothing(); return; }
   searchMixes = [];
   tracksExpanded = false;
+  // (the last search's results go straight away; the new ones show once every platform has answered)
+  ++loadToken;
+  viewTracks = [];
+  nextHref = "";
+  render();
   paintSearchShelves(q);
   if (albumsOnly()) return;
   const genre = genreOf(q);
@@ -1068,7 +1073,8 @@ function openSearch(q) {
     if (tok !== loadToken || view !== "search" || query !== q) return;   // moved on meanwhile
     // a genre is searched as a genre on each platform; sets & podcasts get their own shelf under All
     // (every platform is asked first, and the results shown once they've all answered, best first)
-    const named = (f, id) => Object.assign(f, { name: platInfo(id).name });
+    // (a plugin's search is slower than the platforms': its results join once they're in)
+    const named = (f, id) => Object.assign(f, { name: platInfo(id).name, late: id.startsWith("plug:") });
     loadMerged(plats.map((id) => named(genre && id !== "local" ? genreFeed(id, genre) : searchFeed(id, q), id)), (list) => {
       searchSetsFound(list);
       return list.filter((t) => (listFilter === "mixes" ? isMix(t) : !isMix(t)) && !(prefs.hideLikes && isLikedTrack(t)));

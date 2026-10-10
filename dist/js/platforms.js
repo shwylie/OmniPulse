@@ -146,13 +146,15 @@ function mergedWaiting(m, waiting) {
   say("Searching " + list + "...");
 }
 
-// (first: the first page of a search, which says what it is waiting for; later pages load quietly)
+// (first: the first page of a search, which says what it is waiting for; later pages load quietly.
+// A late feed, a plugin's, isn't waited for on the first page: its tracks join below once it answers.)
 async function pullMerged(first) {
   const m = merged;
-  const waiting = new Set(first ? m.feeds.filter((f) => !f.done && f.name).map((f) => f.name) : []);
+  const waiting = new Set(first ? m.feeds.filter((f) => !f.done && f.name && !f.late).map((f) => f.name) : []);
   mergedWaiting(m, waiting);
+  if (first) m.feeds.filter((f) => f.late && !f.done).forEach((f) => pullLate(m, f));
   const pages = await Promise.all(m.feeds.map(async (f) => {
-    if (f.done) return [];
+    if (f.done || (first && f.late)) return [];
     try {
       const page = await f.next().finally(() => { if (f.name) { waiting.delete(f.name); mergedWaiting(m, waiting); } });
       if (page === null) { f.done = true; return []; }
@@ -168,17 +170,37 @@ async function pullMerged(first) {
   return mergeDupes(m.rank ? m.rank(fresh) : fresh, m.keys);
 }
 
+// A late feed's first page: added below what's shown once both are in (the same song from another
+// platform joins its row instead), in its own best-first order
+async function pullLate(m, f) {
+  let page;
+  try { page = await f.next(); } catch (e) { f.done = true; return; }
+  if (page === null) { f.done = true; return; }
+  await m.shown;
+  if (m !== merged || m.tok !== loadToken) return;
+  const fresh = m.filter(page).filter((t) => !m.seen.has(t.id) && m.seen.add(t.id));
+  const add = mergeDupes(m.rank ? m.rank(fresh) : fresh, m.keys);
+  if (!add.length) return;
+  const was = viewTracks.length;
+  viewTracks = viewTracks.concat(add);
+  if (!was) { render(); say(""); } else renderAppend(was);
+  if (!nextHref && m.feeds.some((x) => !x.done)) nextHref = "merged:";
+}
+
 // (rank: puts each batch in order, best first, as search does)
 async function loadMerged(feeds, filter, rank) {
   const tok = ++loadToken;
-  merged = { feeds, filter: filter || ((l) => l), rank: rank || null, tok, seen: new Set(), keys: new Map(), errors: [] };
+  let shown;
+  merged = { feeds, filter: filter || ((l) => l), rank: rank || null, tok, seen: new Set(), keys: new Map(), errors: [], shown: new Promise((r) => { shown = r; }) };
   if (!feeds.some((f) => f.name)) say("Loading...");
   const got = await pullMerged(true);
-  if (tok !== loadToken) return;
+  if (tok !== loadToken) { shown(); return; }
   viewTracks = got;
   nextHref = feeds.some((f) => !f.done) ? "merged:" : "";
   render();
-  say(viewTracks.length ? "" : merged.errors[0] || "Nothing found.", { force: true });
+  const late = feeds.some((f) => f.late && !f.done);
+  say(viewTracks.length ? "" : late ? "Still asking " + feeds.filter((f) => f.late && !f.done).map((f) => f.name).join(" and ") + "..." : merged.errors[0] || "Nothing found.", { force: true });
+  shown();
   setTimeout(nearBottomCheck, 50);
 }
 
