@@ -82,6 +82,13 @@ pub fn plan(a: &Measured, a_end_ms: u64, now_ms: u64, b: &Measured, bars: u32) -
     })
 }
 
+/// How well `b` mixes after `a`: 2 its tempo and key both go, 1 its tempo, 0 neither (or not measured)
+pub fn fit(a: &Measured, b: Option<&Measured>) -> u8 {
+    let Some(b) = b else { return 0 };
+    if match_rate(a.rhythm.bpm, b.rhythm.bpm).is_none() { return 0; }
+    if omnipulse_core::rhythm::keys_mix(&a.rhythm.camelot, &b.rhythm.camelot) { 2 } else { 1 }
+}
+
 /// The tempo while easing back after the mix: from `rate` to 1.0 over `ms`, `t` ms in (smoothly)
 pub fn ease(rate: f64, t: u64, ms: u64) -> f64 {
     if t >= ms { return 1.0; }

@@ -2262,6 +2262,7 @@ fn autoplay_fill(shared: &Shared, then_play: bool) -> bool {
         let taken: std::collections::HashSet<String> = a.queue.items.iter().map(|q| q.t.key.clone()).collect();
         (seed, a.rt.clone(), a.ui.clone(), local, last_plat, taken, a.web.prefs.clone(), a.web.last_played.clone())
     };
+    let mix_on = integrations::on(&prefs, "mixOn");
     rt.spawn(async move {
         let want = |p: &str, key: &str| pref_on(&prefs, key) && (p != "local" || !local.is_empty());
         let (sc, sp, yt) = tokio::join!(
@@ -2289,6 +2290,13 @@ fn autoplay_fill(shared: &Shared, then_play: bool) -> bool {
         let mut picks = queue::take_turns(lists.clone(), last_plat, &taken, ok(window));
         if picks.is_empty() && avoid {
             picks = queue::take_turns(lists, last_plat, &taken, ok(3 * 3_600_000));
+        }
+        // seamless mixing: of autoplay's picks (never what you queued), the ones measured to go with
+        // this one (its tempo, and its key) first, so the mix has the best chance
+        if mix_on {
+            if let Some(a) = omnipulse_core::rhythm::known(&seed.key) {
+                picks.sort_by_key(|t| std::cmp::Reverse(mix::fit(&a, omnipulse_core::rhythm::known(&t.key).as_ref())));
+            }
         }
         let _ = weak.upgrade_in_event_loop(move |_| {
             SHARED.with(|s| {
