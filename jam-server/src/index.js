@@ -18,7 +18,7 @@
 //        { type: "joinAsk", ... }, answers { type: "admit", id, ok, url }, the asker is told
 //        { type: "admitted", url } or { type: "declined" })
 //   A Jam's invite lets you straight in (unless the host turned you away before). A Jam member can
-//   send { type: "add", track, next } and { type: "skip", d }, passed to the host to do.
+//   send { type: "add", track, next }, { type: "skip", d } and { type: "move", id, to }, passed to the host to do.
 //
 // Shared playlists (a playlist on someone's PC, with each song's links on every platform it's on):
 //   POST /api/shares                { title, by, tracks }  ->  { code, key, url }
@@ -338,6 +338,11 @@ export class Room {
     const meta = await this.meta();
     if (m.type === "add" && meta && meta.kind === "jam" && m.track && typeof m.track === "object") {
       const msg = JSON.stringify({ type: "add", track: m.track, next: !!m.next, by: who.name || "A listener" });
+      this.ctx.getWebSockets("host").forEach((w) => { try { w.send(msg); } catch (e) {} });
+    }
+    // ...or moving one in the queue (its id, to its new place after what's playing)
+    if (m.type === "move" && meta && meta.kind === "jam" && typeof m.id === "string") {
+      const msg = JSON.stringify({ type: "move", id: m.id.slice(0, 200), to: Math.max(1, Math.min(200, Number(m.to) || 1)), by: who.name || "A listener" });
       this.ctx.getWebSockets("host").forEach((w) => { try { w.send(msg); } catch (e) {} });
     }
     // ...or skipping (back or on): the host's player does it, for everyone

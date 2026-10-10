@@ -99,6 +99,13 @@ function dndInit() {
     const li = e.target.closest("#qNext .qRow, #qAuto .qRow");
     const to = li ? Number(li.dataset.q) : -1;
     const intoAuto = !!(li && li.closest("#qAuto"));
+    // listening along, the queue is the host's: in a Jam a move (or a song dropped in) goes to them
+    if (together.role === "listener") {
+      if (drag.from > qi && to > qi && to !== drag.from) jamMoveAsk(drag.from, to);
+      else if (drag.from < 0) (drag.many || [drag.track]).forEach((t) => addToQueue(t));
+      dragClear();
+      return;
+    }
     if (drag.from > qi) {
       // reorder; dropped among your tracks it's yours, among autoplay's it's autoplay's
       const onEmptyNext = !li && e.target.closest("#qNext");

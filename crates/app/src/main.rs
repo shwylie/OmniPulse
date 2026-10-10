@@ -3262,6 +3262,32 @@ fn room_message(shared: &Shared, m: serde_json::Value) {
             if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_status(note.into()); }
             host_push(&shared.borrow());
         }
+        // a Jam member moving a song: the same place among what's coming up, for everyone
+        Some("move") if room_kind().as_deref() == Some("jam") => {
+            let (Some(id), rel) = (m["id"].as_str(), m["to"].as_u64().unwrap_or(1).max(1) as usize) else { return };
+            let moved = {
+                let mut a = shared.borrow_mut();
+                let qi = a.queue.qi.unwrap_or(0);
+                let from = a.queue.items.iter().enumerate().skip(qi + 1).find(|(_, q)| q.t.key == id).map(|(i, _)| i);
+                let to = (qi + rel).min(a.queue.items.len().saturating_sub(1));
+                match from {
+                    Some(f) if f != to => {
+                        let q = a.queue.items.remove(f);
+                        let title = q.t.title.clone();
+                        a.queue.items.insert(to, q);
+                        paint_queue(&mut a);
+                        save_session(&a);
+                        Some(title)
+                    }
+                    _ => None,
+                }
+            };
+            if let Some(title) = moved {
+                let who = m["by"].as_str().unwrap_or("Someone");
+                if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_status(format!("{who} moved \"{title}\" in the Jam.").into()); }
+                host_push(&shared.borrow());
+            }
+        }
         // a Jam member skipping (on, or back): for everyone
         Some("skip") if room_kind().as_deref() == Some("jam") => {
             let back = m["d"].as_i64() == Some(-1);

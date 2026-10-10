@@ -129,6 +129,18 @@ async function hostOpen(kind, made) {
 function hostMessage(m) {
   if (m.type === "members") { together.members = m.list || []; paintTogether(); }
   else if (m.type === "add" && together.kind === "jam" && m.track) jamAdded(m.track, m.by, m.next);
+  else if (m.type === "move" && together.kind === "jam" && m.id) {
+    // a member moving a song: the same place among what's coming up, for everyone
+    const from = queue.findIndex((x, k) => k > qi && x.id === m.id);
+    const to = Math.max(qi + 1, Math.min(queue.length - 1, qi + (Number(m.to) || 1)));
+    if (from > qi && from !== to) {
+      const [moved] = queue.splice(from, 1);
+      queue.splice(to, 0, moved);
+      renderQueue();
+      say((m.by || "Someone") + ' moved "' + (moved.title || "a song") + '" in the Jam.');
+      hostPush(true);
+    }
+  }
   else if (m.type === "skip" && together.kind === "jam") {
     togetherOrig.skipPress(m.d === -1 ? -1 : 1);
     say((m.by || "Someone") + (m.d === -1 ? " went back a song." : " skipped the song."));
@@ -594,6 +606,18 @@ function togetherGuard() {
   };
   ["startList", "step", "skipPress", "playNext", "playFromPage", "addToQueue", "onEnded", "toggle"].forEach((n) => { window[n] = guard(n); });
 }
+// A listener moving a song in the Jam's queue: asked of the host (who moves it for everyone); it moves
+// here at once too, until the host's next word
+function jamMoveAsk(from, to) {
+  if (together.kind !== "jam") { say(together.hostName + " picks the order while you listen along.", { force: true }); return; }
+  const t = queue[from];
+  if (!t) return;
+  try { together.ws.send(JSON.stringify({ type: "move", id: t.id, to: to - qi })); } catch (e) { say("Couldn't reach the Jam."); return; }
+  const [moved] = queue.splice(from, 1);
+  queue.splice(to, 0, moved);
+  renderQueue();
+}
+
 // the host's own adds (from a Jam member) go straight in
 const addToQueueHere = (t) => togetherOrig.addToQueue(t);
 
