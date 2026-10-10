@@ -1577,6 +1577,7 @@ function playFromPage(i) {
 async function playCurrent() {
   const t = curTrack();
   if (!t) return;
+  playFresh = false;   // (what's loaded is this one from now on)
   if (closestNote && closestNote.t !== t) { closestNote = null; say("", { force: true }); }
   if (!safeOk(t)) { safeSkip(t); return; }
   fadeTrackChange(fadeState.last, t);   // the old one fades out, this one in (js/fade.js)
@@ -1904,8 +1905,11 @@ function noVersionHide(t) {
   say("Hidden. Settings > Library > Hidden & Not Recommended shows it again.");
 }
 
+// (set when what's loaded in the player isn't the track shown: after leaving a Jam, say)
+let playFresh = false;
 function toggle() {
   const cur = curTrack();
+  if (playFresh && cur) { playFresh = false; playCurrent(); return; }
   if (onSpotifyEngine(cur)) { spotifyToggle(); return; }
   if (!audio.src) {
     if (cur) playCurrent();   // the queue from last time

@@ -385,7 +385,7 @@ async function togetherLink(link, asked) {
   if (myAsk) { askPendingSay(); return; }
   if (together.role === "listener" && together.code === code) { say(together.waiting ? "Your request to join " + info.host + "'s Jam is still waiting." : "You're in " + info.host + "'s Jam already."); return; }
   if (together.role) await togetherEnd(true);
-  together.saved = { queue: queue.slice(), qi, listName: queueListName, wasPlaying: nowPlaying() };
+  together.saved = { queue: queue.slice(), qi, listName: queueListName, wasPlaying: nowPlaying(), pos: curTrack() ? Math.round(curPosMs()) : 0 };
   if (nowPlaying()) toggle();
   Object.assign(together, { role: "listener", kind, code, relay, hostName: info.host, closing: false, trims: {}, members: [] });
   const k = u.searchParams.get("k") || "";
@@ -521,7 +521,13 @@ function listenerRestore() {
   qi = s.qi;
   queueListName = s.listName;
   renderQueue();
-  if (curTrack()) { fillNowPlaying(curTrack()); refreshLikeUI(); }
+  // the player still has the Jam's song: Play loads yours again, where it was when you joined
+  if (curTrack()) {
+    playFresh = true;
+    pendingResume = s.pos > 0 ? { id: curTrack().id, posMs: s.pos } : null;
+    fillNowPlaying(curTrack());
+    refreshLikeUI();
+  }
 }
 
 // ---------- what a listener can't play: a stand-in of the same length ----------
