@@ -21,6 +21,8 @@ const SEARCH_TRACKS_SHOWN = 8;
 const searchPlays = (t) => {
   if (t.playback_count) return Number(t.playback_count);
   if (typeof t.spPop === "number") return Math.pow(10, 2 + t.spPop * 0.07);
+  // (Deezer's rank runs to about 1,000,000 for the biggest songs)
+  if (typeof t.dzRank === "number") return Math.pow(10, 2 + (t.dzRank / 1e6) * 7);
   return 1e5;
 };
 function searchRanker(q) {

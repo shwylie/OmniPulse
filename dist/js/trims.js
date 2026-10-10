@@ -77,7 +77,7 @@ function trimStartFor(t, resumeAt) {
 // For tracks that play from YouTube Music (Go+, Spotify without Premium): which version, and a search
 // to choose another
 function ytPickPaint(t) {
-  const wanted = srcOf(t) === "spotify" ? !spotifyPremium : srcOf(t) === "soundcloud" && isPreview(t);
+  const wanted = viaYouTube(t) || (srcOf(t) === "spotify" ? !spotifyPremium : srcOf(t) === "soundcloud" && isPreview(t));
   $("ytPick").hidden = !wanted || !ytOn();
   if ($("ytPick").hidden) return;
   const m = ytMatchesLoad()[t.id];

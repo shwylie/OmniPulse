@@ -6,6 +6,8 @@ pub mod apple;
 #[cfg(feature = "desktop")]
 pub mod backup;
 pub mod bundled;
+pub mod bio;
+pub mod catalog;
 #[cfg(feature = "desktop")]
 pub mod discord;
 pub mod lastfm;
@@ -273,11 +275,14 @@ pub fn open_url(url: String) -> Result<(), String> {
         || url.starts_with("https://music.youtube.com/")
         || url.starts_with("https://www.youtube.com/")
         || url.starts_with("https://musicbrainz.org/")
+        || url.starts_with("https://www.deezer.com/")
+        || url.starts_with("https://music.apple.com/")
+        || url.starts_with("https://en.wikipedia.org/")
         // (where your own keys are made: the key setup's pages)
         || url.starts_with("https://developer.spotify.com/")
         || url.starts_with("https://console.cloud.google.com/"))
     {
-        return Err("Only SoundCloud, Spotify, YouTube, MusicBrainz and Last.fm links can be opened".to_string());
+        return Err("Only SoundCloud, Spotify, YouTube, MusicBrainz, Deezer, Apple Music, Wikipedia and Last.fm links can be opened".to_string());
     }
     open_browser(&url)
 }

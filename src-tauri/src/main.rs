@@ -293,6 +293,15 @@ fn apple_forget(app: AppHandle) {
 // MusicBrainz: songs to find with no account (played from YouTube Music)
 #[tauri::command]
 async fn mb_search(query: String) -> Result<Vec<Value>, String> { omnipulse_core::musicbrainz::search(&query).await }
+// The catalogue (Deezer's and iTunes's open music data): songs to find with no account, played from YouTube Music
+#[tauri::command]
+async fn cat_search(query: String) -> Result<Vec<Value>, String> { omnipulse_core::catalog::search(&query).await }
+// One Deezer catalogue request (artists, albums, charts, related artists), as Deezer answers it
+#[tauri::command]
+async fn deezer_get(path: String) -> Result<Value, String> { omnipulse_core::catalog::deezer(&path).await }
+// An artist's bio from Wikipedia ({ title, text, url, image }, or null)
+#[tauri::command]
+async fn artist_bio(name: String) -> Result<Value, String> { omnipulse_core::bio::artist(&name).await }
 // Downloads yt-dlp and Deno in the background; yt_status says how it's going
 // async, so it runs on Tauri's async runtime rather than the window's thread
 #[tauri::command]
@@ -909,7 +918,7 @@ fn main() {
             local_folders, local_set_folders, local_scan, local_status, local_tracks, local_server,
             requests_start, requests_stop, request_result,
             spe_signed_in, spe_login, spe_logout, spe_attach, spe_play, spe_pause, spe_resume, spe_seek, spe_stop, spe_played, spe_playlist, spe_web_get, spe_set_normalisation, loudness_analyse,
-            resolve_yt_stream, plugin_inspect, plugin_install, plugin_list, plugin_folder, plugin_remove, plugin_http, yt_search, yt_radio, yt_status, yt_artists, yt_artist, yt_album, yt_playlist, yt_playlists, yt_prepare, sc_ytdlp, mb_search, apple_connect, apple_library, apple_forget, update_check, update_install, yt_setup, yt_remove, remote_start, remote_stop, remote_result
+            resolve_yt_stream, plugin_inspect, plugin_install, plugin_list, plugin_folder, plugin_remove, plugin_http, yt_search, yt_radio, yt_status, yt_artists, yt_artist, yt_album, yt_playlist, yt_playlists, yt_prepare, sc_ytdlp, mb_search, cat_search, deezer_get, artist_bio, apple_connect, apple_library, apple_forget, update_check, update_install, yt_setup, yt_remove, remote_start, remote_stop, remote_result
         ])
         .run(tauri::generate_context!())
         .expect("error while running app");

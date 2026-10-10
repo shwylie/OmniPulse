@@ -198,6 +198,12 @@ async function trackShelves(plats) {
   const out = [];
   const pickers = plats.filter((p) => DISCOVER_PICKERS[p]);
   const keep = notLiked(likedSongs());
+  if (plats.includes("catalog")) {
+    const rel = await newReleasesShelf().catch(() => null);
+    if (rel) out.push(rel);
+    const top = await dzChart().catch(() => []);
+    if (top.length) out.push({ title: "Top songs on Deezer", tracks: top.filter(keep).slice(0, 30) });
+  }
   if (plats.includes("soundcloud")) {
     const f = await scDiscover("following").catch(() => null);
     const newest = f ? f.list.filter(keep).sort((a, b) => String(b.created_at || "").localeCompare(String(a.created_at || ""))) : [];
@@ -252,6 +258,7 @@ function tileEl(tile) {
     if (src) { const img = el("img"); img.alt = ""; img.loading = "lazy"; img.src = src; img.onerror = () => img.removeAttribute("src"); art.append(img); }
   }
   art.append(platBadges(tile.plats));
+  if (tile.isNew) art.append(el("span", "tileNew", "New"));
   const play = el("button", "tilePlay");
   play.setAttribute("aria-label", "Play");
   play.title = "Play";
@@ -407,7 +414,8 @@ async function openFeed(fresh) {
   shelves.unshift(...later);
   if (view !== "discover") return;
   paintFeed(shelves);
-  if (tok === loadToken) say(shelves.length ? "" : "Like some tracks on SoundCloud or Spotify, and Discover will fill up with music for you.");
+  const notice = (later.find((s) => s.notice) || {}).notice;
+  if (tok === loadToken) say(notice || (shelves.length ? "" : "Like some tracks on SoundCloud or Spotify, and Discover will fill up with music for you."), notice ? { force: true } : undefined);
 }
 
 // I'm Feeling Lucky: a random mix (one that draws on more than one platform, if there are any), made

@@ -265,6 +265,9 @@ const PLATFORMS = {
   local: { name: "Local files", icon: "M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z" },
   youtube: { name: "YouTube Music", icon: "M5 3h14a3 3 0 0 1 3 3v9a3 3 0 0 1-3 3H5a3 3 0 0 1-3-3V6a3 3 0 0 1 3-3zm0 2.2a.8.8 0 0 0-.8.8v9c0 .44.36.8.8.8h14a.8.8 0 0 0 .8-.8V6a.8.8 0 0 0-.8-.8zM8 20h8v1.8H8z", rule: "evenodd" },   // a screen, with nothing in it: not a play button
   musicbrainz: { name: "MusicBrainz", icon: "M12 2a10 10 0 1 0 0 20 10 10 0 1 0 0-20zm0 6.5a3.5 3.5 0 1 1 0 7 3.5 3.5 0 0 1 0-7zm0 2a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3z", rule: "evenodd" },   // a record
+  deezer: { name: "Deezer", icon: "M1 18h3.6v2H1zm4.6-3h3.6v5H5.6zm4.6-3h3.6v8h-3.6zm4.6-3h3.6v11h-3.6zm4.6-5h3.6v16h-3.6z" },   // its bars
+  catalog: { name: "Deezer and Apple Music", icon: "M1 18h3.6v2H1zm4.6-3h3.6v5H5.6zm4.6-3h3.6v8h-3.6zm4.6-3h3.6v11h-3.6zm4.6-5h3.6v16h-3.6z" },   // the catalogues together
+  itunes: { name: "Apple Music", icon: "M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z" },
   apple: { name: "Apple Music", icon: "M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z" },
   amazon: { name: "Amazon Music", icon: "M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z" },
 };
@@ -272,7 +275,7 @@ const srcOf = (t) => (t && t.source) || "soundcloud";
 // Likes are saved to SoundCloud, your Spotify library, or (YouTube Music) this PC; local files can only be favourited
 const canLike = (t) => !!t && (srcOf(t) === "soundcloud" || srcOf(t) === "youtube" || (srcOf(t) === "spotify" && !!t.uri));
 // "Open on SoundCloud", "Open in Spotify", "Open in YouTube Music"
-const openLabel = (t) => (srcOf(t) === "spotify" ? "Open in Spotify" : srcOf(t) === "youtube" ? "Open in YouTube Music" : srcOf(t) === "musicbrainz" ? "Open on MusicBrainz"
+const openLabel = (t) => (srcOf(t) === "spotify" ? "Open in Spotify" : srcOf(t) === "youtube" ? "Open in YouTube Music" : srcOf(t) === "musicbrainz" ? "Open on MusicBrainz" : srcOf(t) === "deezer" ? "Open on Deezer" : srcOf(t) === "itunes" ? "Open in Apple Music"
   : srcOf(t).startsWith("plug:") ? "Open on " + platInfo(srcOf(t)).name : "Open on SoundCloud");
 
 function platformBadge(t) {
@@ -297,11 +300,11 @@ function platformButton(t) {
 }
 
 // A track's artists: "A, B & C" (or "A x B", "A feat. B", "A ft. B", "A (feat. B)") is three, each a
-// link to their own page; one is the usual link. The line keeps its own commas, ampersands, x's and
+// link to their own page ("A vs. B" too); one is the usual link. The line keeps its own commas, ampersands, x's and
 // feat.s. An X that ends a name ("Lil Nas X & ...") isn't one: it's followed by another separator, or
 // nothing. "ft" inside a name ("Daft Punk", "Swift") isn't either: it has to start a word after
 // another name ("Ft Lauderdale" at the start is a name).
-const ARTIST_SEP = /(\s*,\s*|\s+&\s+|\s+[x×]\s+(?![&,]|$)|(?:\s+\(?|\s*\()(?:feat\.?|ft\.?|featuring)\s+)/i;
+const ARTIST_SEP = /(\s*,\s*|\s+&\s+|\s+vs\.?\s+|\s+[x×]\s+(?![&,]|$)|(?:\s+\(?|\s*\()(?:feat\.?|ft\.?|featuring)\s+)/i;
 // a bracketed feat.'s closing bracket isn't part of the name (a name's own brackets are)
 const artistPart = (part) => {
   const p = part.trim();
@@ -337,9 +340,26 @@ function artistSplit(t) {
 }
 const artistNames = (t) => artistSplit(t).filter((x, i) => i % 2 === 0 && x.trim()).map((x) => artistPart(x).name).filter(Boolean);
 
-function fillArtists(box, t) {
+// The uploader, when they aren't one of the credited artists (a remixer, a label, a fan's upload): their
+// page is otherwise hard to reach from the track
+function uploaderApart(t) {
+  const up = t && srcOf(t) === "soundcloud" && t.user && t.user.username;
+  if (!up) return "";
+  return sameArtist(artistName(t), up) || artistNames(t).some((n) => sameArtist(n, up)) ? "" : up;
+}
+
+// withUploader: and "uploaded by" whoever uploaded it, when that's someone else (Now Playing)
+function fillArtists(box, t, withUploader) {
   box.replaceChildren();
   if (!t) return;
+  const up = withUploader ? uploaderApart(t) : "";
+  if (up) {
+    const u = el("span", "artistPart uploaderPart", up);
+    u.dataset.uploader = "1";
+    u.title = "Open " + up + "'s page (they uploaded it)";
+    // (after the artists: added once they're in)
+    queueMicrotask(() => box.append(el("span", "uploaderBy", " · uploaded by "), u));
+  }
   const names = artistNames(t);
   if (names.length < 2) {
     const s = el("span", "artistPart", artistName(t));
@@ -367,6 +387,7 @@ function openArtistNamed(t, name) {
 
 // A click in an artist line: the artist clicked, or the track's artist
 function openArtistClicked(t, target) {
+  if (target && target.closest && target.closest("[data-uploader]")) { openArtistFor(t); return; }   // the uploader's own page
   const part = target && target.closest && target.closest(".artistPart[data-name]");
   if (part) openArtistNamed(t, part.dataset.name);
   else openArtistFor(t);
@@ -470,6 +491,7 @@ function renderHero() {
   $("refreshBtn").hidden = !["discover", "rediscover", "sets", "artists", "streamer"].includes(v);
   $("viewSub").textContent = sub.trim();
   if (v === "artist" && currentArtist && currentArtist.on) $("viewSub").replaceChildren(...artistSubline(currentArtist));
+  paintBio();
   if (v === "rediscover") {
     $("viewSub").replaceChildren(el("span", "subLead", "Fall in love all over again"),
       el("span", "", " with the likes you haven't heard in a while."));
@@ -500,7 +522,7 @@ const COVER_WEDGES = {
   4: ["polygon(0 0, 100% 0, 50% 50%)", "polygon(100% 0, 100% 100%, 50% 50%)", "polygon(0 100%, 100% 100%, 50% 50%)", "polygon(0 0, 0 100%, 50% 50%)"],
 };
 
-const isAlbumPage = (p) => !!p && (!!p.album || !!p.spAlbumId || !!p.ytAlbumId || isScAlbum(p));
+const isAlbumPage = (p) => !!p && (!!p.album || !!p.spAlbumId || !!p.ytAlbumId || !!p.dzAlbumId || isScAlbum(p));
 
 function heroCovers(v) {
   if (v === "playlist" && isAlbumPage(currentPlaylist)) {
@@ -1041,7 +1063,7 @@ function openPlaylist(p) {
   if (p.source === "mix") { openMix(p); return; }   // a Discover mix or station
   if (isXpl(p) && typeof collabPull === "function") collabPull(xplFind(p.id));   // (collaborative: everyone's changes)
   if (isXpl(p)) { ++loadToken; $("listView").scrollTop = 0; setLocalPool(xplTracks(xplFind(p.id) || { tracks: [] })); render(); say(viewTracks.length ? "" : "Nothing in here yet. Add tracks with the playlist button on any track, or drag them onto this playlist."); return; }
-  if (p.source === "spotify" || p.source === "local" || p.source === "youtube") { loadPlatformPlaylist(p); return; }
+  if (p.source === "spotify" || p.source === "local" || p.source === "youtube" || p.source === "deezer") { loadPlatformPlaylist(p); return; }
   openCachedList("list:sc:" + p.id,
     () => collectPages("/playlists/" + p.id + "/tracks?access=playable&limit=200&linked_partitioning=true", 10),
     "Nothing in here yet.");
@@ -1050,7 +1072,7 @@ function openPlaylist(p) {
 // ---------- discover ----------
 // Discover is a feed of shelves (js/feed.js); each platform's picker (js/discover.js) supplies
 // "More of what you like" and the genre mixes
-const DISCOVER_PICKERS = { soundcloud: (src) => scDiscover(src), spotify: (src) => spDiscover(src), youtube: (src) => ytDiscover(src) };
+const DISCOVER_PICKERS = { soundcloud: (src) => scDiscover(src), spotify: (src) => spDiscover(src), youtube: (src) => ytDiscover(src), catalog: (src) => catDiscover(src) };
 
 function openDiscover(src, fresh) {
   if (!activePlats("discover").length) { openLikes(); return; }
@@ -1417,7 +1439,7 @@ function fillNowPlaying(t) {
   requestAnimationFrame(tabFit);
   applyFix(t);
   $("nowTitle").textContent = t ? t.title || "Untitled" : "Nothing playing";
-  fillArtists($("nowArtist"), t);
+  fillArtists($("nowArtist"), t, true);
   $("nowAlbum").textContent = t ? albumShown(t) : "";
   $("plAddBtn").hidden = !t;
   $("nowToggle").draggable = !!t;
@@ -1428,7 +1450,7 @@ function fillNowPlaying(t) {
 
   $("npTitle").textContent = t ? t.title || "Untitled" : "Nothing playing";
   if (t && trimOf(t)) { $("npTitle").append(trimMark(t)); $("nowTitle").append(trimMark(t)); }
-  fillArtists($("npArtist"), t);
+  fillArtists($("npArtist"), t, true);
   $("npPlat").replaceChildren(...(t ? [platformButton(t)] : []));
   const bits = [];
   if (t && t.genre) bits.push(t.genre);
@@ -1724,10 +1746,10 @@ async function startStream(t) {
     throw new Error(ytOn() ? "this song couldn't be found on YouTube Music" : "without Spotify Premium, Spotify tracks play from YouTube Music, which is switched off");
   }
   // MusicBrainz knows the song, YouTube Music has it to play
-  if (srcOf(t) === "musicbrainz") {
+  if (viaYouTube(t)) {
     if (await playViaYouTube(t, mine, "", true)) return;
     if (mine !== streamToken) return;
-    throw new Error(ytOn() ? "this song couldn't be found on YouTube Music" : "MusicBrainz songs play from YouTube Music, which is switched off");
+    throw new Error(ytOn() ? "this song couldn't be found on YouTube Music (Track preferences can pick it)" : platInfo(srcOf(t)).name + " songs play from YouTube Music, which is switched off");
   }
   if (isPluginTrack(t)) {
     const url = await pluginPlayUrl(t);

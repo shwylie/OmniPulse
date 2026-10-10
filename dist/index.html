@@ -120,6 +120,7 @@
         <div id="heroCover" class="heroCover" hidden></div>
         <div class="titleRow"><h1 id="viewTitle">Likes</h1><button id="refreshBtn" class="ghost refreshBtn" title="New recommendations" aria-label="Refresh recommendations" hidden><svg viewBox="0 0 24 24"><path d="M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/></svg></button></div>
         <p id="viewSub"></p>
+        <div id="heroBio" class="heroBio" hidden></div>
         <div class="chips" id="listChips" hidden></div>
         <div class="heroActions" id="heroActions" hidden>
           <button id="playAll" class="bigPlay" aria-label="Play all"><svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg></button>
@@ -666,6 +667,16 @@
           <div class="note" id="appleNote"></div>
         </div>
         <button id="appleImport" class="soft">Import</button>
+      </div>
+
+      <div class="row" id="catSection">
+        <div>
+          <div class="lbl">Deezer and Apple Music catalogues</div>
+          <div class="note" id="catNote"></div>
+          <button class="linkBtn" data-url="https://www.deezer.com/" title="Deezer's catalogue">About Deezer</button>
+          <button class="linkBtn" data-url="https://music.apple.com/" title="Apple's catalogue">About Apple Music</button>
+        </div>
+        <label class="switch" title="Search Deezer's and Apple's catalogues too"><input type="checkbox" id="catOn"><span></span></label>
       </div>
 
       <div class="row" id="mbSection">
@@ -1289,6 +1300,7 @@
 <script src="js/cast.js"></script>
 <script src="js/youtube.js"></script>
 <script src="js/musicbrainz.js"></script>
+<script src="js/catalog.js"></script>
 <script src="js/applemusic.js"></script>
 <script src="js/update.js"></script>
 <script src="js/plugins.js"></script>

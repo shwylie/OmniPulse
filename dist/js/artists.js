@@ -45,7 +45,7 @@ function mergeDupes(list, keys) {
 
 // The order the copies of a song are kept in: what plays best first
 function bestFirst(byPlat) {
-  const order = ["local", spotifyPremium ? "spotify" : null, "soundcloud", "youtube", spotifyPremium ? null : "spotify"].filter(Boolean);
+  const order = ["local", spotifyPremium ? "spotify" : null, "soundcloud", "youtube", spotifyPremium ? null : "spotify", "deezer"].filter(Boolean);
   return order.map((p) => byPlat[p] || []);
 }
 
@@ -90,7 +90,7 @@ function artistFrom(seed) {
   a.id = "a:" + a.key;
   a.username = name;   // what older code shows as the title
   const links = linksLoad()[a.key];
-  if (links) ARTIST_PLATS.forEach((p) => { if (links[p] !== undefined) a.on[p] = links[p]; });
+  if (links) ARTIST_PLATS.concat("deezer").forEach((p) => { if (links[p] !== undefined) a.on[p] = links[p]; });
   // what we came with beats what was remembered
   if (seed && seed.sc) a.on.soundcloud = seed.sc;
   if (seed && seed.sp) a.on.spotify = Object.assign({}, a.on.spotify || {}, seed.sp);
@@ -118,6 +118,9 @@ function artistOfTrack(t) {
 // Looks the artist up wherever that hasn't been done (or a profile is only half known)
 async function resolveArtist(a) {
   const plats = ARTIST_PLATS.filter((p) => activePlats().includes(p));
+  // Deezer's catalogue too (its top tracks, albums and picture), when it's on
+  const dz = activePlats().includes("catalog") && a.on.deezer === undefined
+    ? dzArtistFor(a.name).then((x) => { a.on.deezer = x; }).catch(() => {}) : null;
   await Promise.all(plats.map(async (p) => {
     const have = a.on[p];
     if (have === null || (have && have.img !== undefined && have.followers !== undefined)) return;
@@ -129,6 +132,7 @@ async function resolveArtist(a) {
       if (have === undefined) delete a.on[p];   // try again next time
     }
   }));
+  await dz;
   const links = linksLoad();
   links[a.key] = Object.assign({ at: Date.now() }, a.on);
   linksSave();
@@ -166,6 +170,9 @@ async function artistAlbums(a) {
       ? invoke("yt_artist", { id: a.on.youtube.id }).then((p) => p.albums.map(ytAlbumTile)).catch(() => [])
       : [],
     activePlats().includes("local") ? localAlbumTiles("likes", "").filter((t) => sameArtist(t.artist, a.name)) : [],
+    a.on.deezer && activePlats().includes("catalog")
+      ? dzGet("/artist/" + a.on.deezer.id + "/albums?limit=50").then((d) => (d.data || []).map((x) => dzAlbumTile(x, a.name))).catch(() => [])
+      : [],
   ]);
   // the same album once, from whichever platform comes first
   const seen = new Set();
@@ -194,6 +201,7 @@ async function openArtist(seed) {
   albumsKey = "";   // the albums can come from every platform now
   if (curPage) albumsOnPage(curPage);
   artistFollowCheck(a);
+  artistBioLoad(a);
   if (onlyAlbums || tok !== loadToken) return;
   const merged = await artistAllTracks(a, true);
   if (tok !== loadToken || currentArtist !== a) return;
@@ -201,6 +209,32 @@ async function openArtist(seed) {
   render();
   say(viewTracks.length ? "" : "No tracks by " + a.name + " found.");
   setTimeout(nearBottomCheck, 50);
+}
+
+// ---------- the artist's bio (Wikipedia) ----------
+// The opening of their Wikipedia article under their name: three lines, the rest on a click
+async function artistBioLoad(a) {
+  if (a.bio === undefined) {
+    a.bio = null;
+    try { a.bio = await invoke("artist_bio", { name: a.name }); } catch (e) { a.bio = undefined; }
+  }
+  if (currentArtist === a) paintBio();
+}
+
+function paintBio() {
+  const box = $("heroBio");
+  const b = view === "artist" && currentArtist && currentArtist.bio;
+  box.hidden = !b || !b.text;
+  if (box.hidden) { box.replaceChildren(); return; }
+  const text = el("p", "bioText", b.text);
+  const more = el("button", "linkBtn", "Wikipedia");
+  more.type = "button";
+  more.title = "Read more on Wikipedia";
+  more.addEventListener("click", (e) => { e.stopPropagation(); invoke("open_url", { url: b.url }).catch((err) => say(String(err))); });
+  box.replaceChildren(text, more);
+  box.classList.remove("open");
+  box.onclick = () => box.classList.toggle("open");
+  box.title = "Click to read it all";
 }
 
 // ---------- versions of the same song, together (artist pages) ----------
@@ -264,6 +298,9 @@ async function artistAllTracks(a, resolved) {
     byPlat[p] = await artistTracksOn(p, a.on[p], a).catch(() => []);
   }));
   if (activePlats().includes("local")) byPlat.local = artistFiles(a);
+  if (a.on.deezer && activePlats().includes("catalog")) {
+    byPlat.deezer = await dzGet("/artist/" + a.on.deezer.id + "/top?limit=50").then((d) => (d.data || []).map((x) => dzTrack(x))).catch(() => []);
+  }
   return mergeDupes(interleave(bestFirst(byPlat)));
 }
 
@@ -284,12 +321,18 @@ function artistSubline(a) {
     if (artistFollow[p]) s.classList.add("following");
     parts.push(s);
   });
+  if (a.on.deezer && activePlats().includes("catalog")) {
+    const s = el("span", "artistOn");
+    s.title = "Deezer";
+    s.append(platIcon("deezer"), el("span", "", a.on.deezer.followers ? a.on.deezer.followers.toLocaleString() + " fans" : "Deezer"));
+    parts.push(s);
+  }
   const files = artistFiles(a).length;
   if (files) { const s = el("span", "artistOn"); s.append(platIcon("local"), el("span", "", files + " files")); parts.push(s); }
   return parts;
 }
 
-const artistImage = (a) => (a && a.on && ((a.on.soundcloud && a.on.soundcloud.img) || (a.on.spotify && a.on.spotify.img) || (a.on.youtube && a.on.youtube.img))) || "";
+const artistImage = (a) => (a && a.on && ((a.on.soundcloud && a.on.soundcloud.img) || (a.on.spotify && a.on.spotify.img) || (a.on.youtube && a.on.youtube.img) || (a.on.deezer && a.on.deezer.img))) || "";
 
 // ---------- following, on every platform the artist is on ----------
 const YT_FOLLOWS_KEY = "sc.ytFollows";

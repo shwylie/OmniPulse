@@ -483,6 +483,7 @@ function openTrackMenu(t, x, y, fromPlayer, queueIdx) {
   const names = artistNames(t);
   if (names.length > 1) names.forEach((n, k) => add("Go to " + n, "artist:" + k));
   else add("Go to artist", "artist");
+  if (uploaderApart(t)) add("Go to " + uploaderApart(t) + " (uploader)", "uploader");
   if (!fromPlayer && view === "playlist" && isOwnPlaylist(currentPlaylist)) add("Remove from this playlist", "unlist");
   sep();
   add("Don't recommend this track", "hide");
@@ -510,6 +511,7 @@ function runMenuAction(a) {
   if (!t) return;
   const i = viewTracks.indexOf(t);
   if (a.startsWith("artist:")) { openArtistNamed(t, artistNames(t)[Number(a.slice(7))]); return; }
+  if (a === "uploader") { openArtistFor(t); return; }
   if (a.startsWith("share:")) { shareTrackLink(t, a.slice(6)); return; }
   switch (a) {
     case "play":

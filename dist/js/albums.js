@@ -35,6 +35,20 @@ function spAlbumTile(a) {
   };
 }
 
+// A Deezer album (or single, or EP): from the catalogue, played from YouTube Music
+function dzAlbumTile(a, artist) {
+  return {
+    source: "deezer", id: "dza:" + a.id, dzAlbumId: a.id, title: a.title || "Untitled album",
+    artist: (a.artist && a.artist.name) || artist || "", count: a.nb_tracks || 0, art: a.cover_xl || a.cover_big || a.cover_medium || "",
+    kind: a.record_type ? a.record_type.charAt(0).toUpperCase() + a.record_type.slice(1) : "", released: a.release_date || "",
+  };
+}
+
+async function dzAlbumTracks(id) {
+  const al = await dzGet("/album/" + id);
+  return ((al.tracks && al.tracks.data) || []).map((x) => dzTrack(x, al));
+}
+
 function localAlbumTiles(page, q) {
   const map = new Map();
   localTracks.forEach((t) => {
@@ -175,6 +189,7 @@ function albumAsPlaylist(a) {
   if (a.source === "soundcloud") return Object.assign({}, a.raw);
   if (a.source === "spotify") return { source: "spotify", id: a.id, spAlbumId: a.spAlbumId, title: a.title, user: { username: a.artist } };
   if (a.source === "youtube") return { source: "youtube", id: a.id, ytAlbumId: a.ytAlbumId, title: a.title, user: { username: a.artist } };
+  if (a.source === "deezer") return { source: "deezer", id: a.id, dzAlbumId: a.dzAlbumId, title: a.title, user: { username: a.artist } };
   return { source: "local", id: "album:" + a.title, album: a.title, title: a.title, user: { username: a.artist } };
 }
 
@@ -182,6 +197,7 @@ async function albumTracks(a) {
   if (a.source === "local") return localTracks.filter((t) => (t.album || "").trim() === a.title);
   if (a.source === "spotify") return spotifyAlbumTracks(a.spAlbumId);
   if (a.source === "youtube") return (await invoke("yt_album", { id: a.ytAlbumId })).tracks.map(ytTrack);
+  if (a.source === "deezer") return dzAlbumTracks(a.dzAlbumId);
   return asList(await api("/playlists/" + a.raw.id + "/tracks?access=playable&limit=200&linked_partitioning=true"));
 }
 

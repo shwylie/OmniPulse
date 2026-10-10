@@ -18,6 +18,8 @@ const PLATFORM_LIST = [
   { id: "youtube", pref: "ytOn", pages: ["likes", "search", "discover", "rediscover"], available: () => ytAvailable() },
   // an open catalogue, no account: search only, played from YouTube Music (js/musicbrainz.js)
   { id: "musicbrainz", pref: "mbOn", pages: ["search"], available: () => ytOn(), noChip: true },
+  // Deezer's and Apple's catalogues, no account: search and Discover, played from YouTube Music (js/catalog.js)
+  { id: "catalog", pref: "catOn", pages: ["search", "discover"], available: () => ytOn(), noChip: true },
 ];
 
 const platformOn = (p) => prefs[p.pref] !== false;
@@ -128,6 +130,7 @@ function searchFeed(id, q) {
   if (id === "spotify") return arrayFeed(() => spotifySearchTracks(q));
   if (id === "youtube") return arrayFeed(() => ytSearch(q));
   if (id === "musicbrainz") return arrayFeed(() => mbSearch(q));
+  if (id === "catalog") return arrayFeed(() => catSearch(q));
   if (id.startsWith("plug:")) return arrayFeed(() => pluginSearch(id.slice(5), q));
   return arrayFeed(async () => localSearch(q));
 }
@@ -460,6 +463,7 @@ async function openCachedList(key, fetchAll, emptyMsg) {
 }
 
 async function loadPlatformPlaylist(p) {
+  if (p.source === "deezer") return openCachedList("list:" + p.id, () => dzAlbumTracks(p.dzAlbumId), "Nothing in here yet.");
   if (p.source === "youtube") {
     return openCachedList("list:" + p.id, async () => (p.ytPlaylistId
       ? (await invoke("yt_playlist", { id: p.ytPlaylistId })).map(ytTrack)
