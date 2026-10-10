@@ -566,6 +566,8 @@ export component AppWindow inherits Window {
     callback tile(int, int);
     callback lucky();
     callback search(string);
+    // typing in the search bar: the page you're on is filtered as you type (Enter searches everywhere)
+    callback search-edited(string);
     callback play-queue(int);
     callback row-action(int, string);
     callback queue-action(int, string);
@@ -886,6 +888,7 @@ export component AppWindow inherits Window {
                                 single-line: true;
                                 text <=> root.search-text;
                                 accepted => { root.search(self.text); }
+                                edited => { root.search-edited(self.text); }
                             }
                         }
                         Rectangle { horizontal-stretch: 1; }

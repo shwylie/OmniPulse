@@ -70,6 +70,8 @@ struct App {
     artists: Option<Vec<sources::Artist>>,
     /// Favourites only (the track list's pill)
     fav_only: bool,
+    /// what's typed in the search bar: the page's tracks with every word in their title, artist or album
+    page_query: String,
     /// shuffle (the player bar's): on, and the upcoming tracks' order before it, to undo it
     shuffle_on: bool,
     shuffle_backup: Option<Vec<String>>,
@@ -140,7 +142,10 @@ fn apply_filter(app: &mut App) {
     let prefs = app.web.prefs.clone();
     let favs: std::collections::HashSet<&str> = app.web.favourites.iter().map(|t| t.key.as_str()).collect();
     let fav_only = app.fav_only;
-    let shown = |t: &&Track| plat_on(&prefs, t.plat()) && (!fav_only || favs.contains(t.key.as_str())) && streamsafe::allowed(&prefs, t);
+    // (as the web app's js/pagefind.js: word by word, in the title, artist or album)
+    let want = sources::words(&app.page_query);
+    let found = |t: &Track| want.is_empty() || { let have = sources::words(&format!("{} {} {}", t.title, t.artist, t.album)); want.iter().all(|w| have.iter().any(|h| h.starts_with(w.as_str()))) };
+    let shown = |t: &&Track| plat_on(&prefs, t.plat()) && (!fav_only || favs.contains(t.key.as_str())) && streamsafe::allowed(&prefs, t) && found(t);
     let mut filtered: Vec<Track> = match (app.page.as_str(), chip) {
         ("library" | "rediscover" | "favourites" | "search" | "playlist", 1) => app.page_all.iter().filter(shown).filter(|t| !t.is_mix()).cloned().collect(),
         ("library" | "rediscover" | "favourites" | "search" | "playlist", 2) => app.page_all.iter().filter(shown).filter(|t| t.is_mix()).cloned().collect(),
@@ -208,6 +213,7 @@ fn show_tracks(shared: &Shared, page: &str, title: &str, sub: String, mut tracks
     app.page = page.to_string();
     app.page_all = tracks;
     app.chip = 0;
+    app.page_query.clear();   // (a page opened afresh shows all of it)
     ui.set_page(page.into());
     ui.set_page_kind("tracks".into());
     ui.set_page_title(title.into());
@@ -3414,7 +3420,7 @@ fn main() -> Result<(), slint::PlatformError> {
         rt: rt.handle().clone(), engine: engine.clone(), ui: ui.as_weak(), rows, qrows, lyric_lines,
         library: Vec::new(), playlists: Vec::new(), web: webstate::load(), page: "library".into(),
         page_all: Vec::new(), page_tracks: Vec::new(), chip: 0, shelves: Vec::new(), queue: queue::Queue::default(), panel_map: Vec::new(), side_map: Vec::new(),
-        here: None, history: Vec::new(), artists: None, fav_only: false, shuffle_on: false, shuffle_backup: None, repeat: "off".into(), closest: None,
+        here: None, history: Vec::new(), artists: None, fav_only: false, page_query: String::new(), shuffle_on: false, shuffle_backup: None, repeat: "off".into(), closest: None,
         autoplay: true, ap_busy: false, ap_then_play: false, ap_failed: None, resume_ms: None, loaded: false, accent: ("#8e9bff".into(), "#8e9bff".into()), started_secs: 0, token: 0,
         lyrics: Vec::new(), heard: (String::new(), 0.0, false), last_pos: 0, xpl: xpl::load(), naming: None,
         loud: HashMap::new(), eq_model: Rc::new(VecModel::from(vec![0.0f32; 10])), add_map: Vec::new(), queue_spaced: false, analysis: HashMap::new(), cur_loud: None,
@@ -3678,6 +3684,13 @@ fn main() -> Result<(), slint::PlatformError> {
     let s = shared.clone();
     ui.on_search(move |q| { if !q.trim().is_empty() { go(&s, Place::Search(q.trim().into())); } });
     let s = shared.clone();
+    ui.on_search_edited(move |q| {
+        let mut a = s.borrow_mut();
+        if a.page == "search" || a.page == "settings" { return; }   // (there, Enter searches)
+        a.page_query = q.trim().to_string();
+        apply_filter(&mut a);
+    });
+    let s = shared.clone();
     ui.on_fav_only_changed(move |on| {
         let mut a = s.borrow_mut();
         a.fav_only = on;
@@ -3919,7 +3932,7 @@ fn main() -> Result<(), slint::PlatformError> {
         let mut step_no = 0usize;
         // (OMNIPULSE_SELFTEST_JOIN=<invite link>: only joining someone's room, following it, skipping and leaving)
         let join = std::env::var("OMNIPULSE_SELFTEST_JOIN").ok();
-        let full: [(u64, &str); 31] = [(9, "play"), (13, "library"), (14, "scoff"), (15, "scon"), (16, "discover"), (24, "rediscover"), (27, "sets"), (31, "stats"), (35, "now"), (39, "search"), (42, "settings"), (44, "light"), (45, "collapse"), (46, "artists"), (54, "artist"), (60, "autoplay"), (70, "narrow"), (72, "goplus"), (80, "tabright"), (81, "pbar"), (82, "pfloat"), (83, "pminimal"), (84, "musical"), (88, "musical2"), (90, "safe"), (91, "sort"), (93, "xpl"), (95, "xpl2"), (97, "fade"), (101, "fade2"), (103, "end")];
+        let full: [(u64, &str); 33] = [(9, "play"), (13, "library"), (13, "pagefind"), (14, "pageall"), (14, "scoff"), (15, "scon"), (16, "discover"), (24, "rediscover"), (27, "sets"), (31, "stats"), (35, "now"), (39, "search"), (42, "settings"), (44, "light"), (45, "collapse"), (46, "artists"), (54, "artist"), (60, "autoplay"), (70, "narrow"), (72, "goplus"), (80, "tabright"), (81, "pbar"), (82, "pfloat"), (83, "pminimal"), (84, "musical"), (88, "musical2"), (90, "safe"), (91, "sort"), (93, "xpl"), (95, "xpl2"), (97, "fade"), (101, "fade2"), (103, "end")];
         let plan: Vec<(u64, &str)> = if join.is_some() { vec![(6, "join"), (14, "joined"), (16, "jamskip"), (19, "leave"), (21, "end")] } else { full.to_vec() };
         t.start(slint::TimerMode::Repeated, std::time::Duration::from_millis(250), move || {
             let Some(&(at, what)) = plan.get(step_no) else { return };
@@ -3935,6 +3948,9 @@ fn main() -> Result<(), slint::PlatformError> {
             step_no += 1;
             match what {
                 "play" => { if ui.get_rows().row_count() > 0 { ui.invoke_play_row(0); } }
+                // typing in the search bar filters the Library, as you type
+                "pagefind" => { let n = ui.get_rows().row_count(); ui.invoke_search_edited("crunkz".into()); println!("selftest: page filter: {n} rows, typing \"crunkz\": {}", ui.get_rows().row_count()); }
+                "pageall" => { ui.invoke_search_edited("".into()); println!("selftest: page filter cleared: {} rows", ui.get_rows().row_count()); }
                 "join" => { if let Some(link) = &join { listen_join(&s, link); } }
                 "joined" => println!("selftest: listening {:?}, playing \"{}\" at {}, queue {}, jam button \"{}\", status \"{}\"", listening(), ui.get_now_title(), ui.get_pos_text(), s.borrow().queue.items.len(), ui.get_jam_label(), ui.get_status()),
                 "jamskip" => ui.invoke_next(),
