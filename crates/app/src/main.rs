@@ -3203,7 +3203,13 @@ fn ask_reply(id: &str, ok: bool, url: &str) {
 /// no (the relay only keeps a real no, so they can ask again)
 fn ask_answer(id: &str, join: bool, ok: bool, busy: bool) {
     let kind = if join { "admit" } else { "askReply" };
-    ROOM.with(|r| { if let Some(room) = r.borrow().as_ref() { let _ = room.tx.send(serde_json::json!({ "type": kind, "id": id, "ok": ok, "busy": busy, "url": "" }).to_string()); } });
+    ROOM.with(|r| {
+        if let Some(room) = r.borrow().as_ref() {
+            // (let into your Jam: its invite goes with it, which their app opens)
+            let url = if join && ok { room.join_url.clone() } else { String::new() };
+            let _ = room.tx.send(serde_json::json!({ "type": kind, "id": id, "ok": ok, "busy": busy, "url": url }).to_string());
+        }
+    });
 }
 
 /// Settings > Listen Along & Jams (on unless switched off, as the web app's prefs.jamsOn)
@@ -3368,6 +3374,10 @@ fn listen_join(shared: &Shared, link: &str) {
         if let Some(ui) = weak.upgrade() { ui.set_status("Listen Along & Jams are switched off (Settings > Integrations).".into()); }
         return;
     }
+    // asking: the host answers (a Jam's invite, or let into theirs), then it's joined
+    if kind == "ask" {
+        return ask_send(shared, &relay, &code, &name, &cid);
+    }
     if listening().is_some() { listen_leave(shared, true); }
     room_end(true);
     let ws = relay.replacen("http", "ws", 1);
@@ -3381,6 +3391,73 @@ fn listen_join(shared: &Shared, link: &str) {
     LISTEN.with(|l| *l.borrow_mut() = Some(Listening { kind: kind.clone(), host: "the host".into(), tx, saved, state: None, at: std::time::Instant::now() }));
     if let Some(ui) = weak.upgrade() { ui.set_status(if kind == "jam" { "Joining the Jam..." } else { "Joining..." }.into()); }
     jam_paint(shared);
+}
+
+thread_local! {
+    /// asking someone (their name, and the connection while it waits for their answer)
+    static ASKING: RefCell<Option<(String, tokio::sync::mpsc::UnboundedSender<String>)>> = const { RefCell::new(None) };
+}
+
+/// Asks the host of a room (from their Discord status's Ask to Jam / Ask to join): their answer is a
+/// Jam's invite (or being let into theirs), which is joined; a no, or no answer, is said
+fn ask_send(shared: &Shared, relay: &str, code: &str, name: &str, cid: &str) {
+    if ASKING.with(|a| a.borrow().is_some()) {
+        if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_status("You've asked already: waiting for their answer.".into()); }
+        return;
+    }
+    let (rt, weak) = { let a = shared.borrow(); (a.rt.clone(), a.ui.clone()) };
+    let (relay, code, name, cid) = (relay.to_string(), code.to_string(), name.to_string(), cid.to_string());
+    let host_url = format!("{relay}/api/rooms/{code}");
+    rt.clone().spawn(async move {
+        let host = match reqwest::get(&host_url).await { Ok(r) => r.json::<serde_json::Value>().await.ok().and_then(|v| v["host"].as_str().map(String::from)), Err(_) => None };
+        let _ = weak.upgrade_in_event_loop(move |ui| SHARED.with(|s| {
+            let Some(shared) = s.borrow().clone() else { return };
+            let Some(host) = host else { ui.set_status("That session has ended.".into()); return; };
+            let url = format!("{}/ws/{code}?role=asker&name={}&cid={}", relay.replacen("http", "ws", 1), sources::urlencode(&name), sources::urlencode(&cid));
+            let relay2 = relay.clone();
+            let tx = together::listen(&shared.borrow().rt, url, move |m| {
+                let relay = relay2.clone();
+                let _ = slint::invoke_from_event_loop(move || SHARED.with(|s| { if let Some(sh) = s.borrow().clone() { ask_answer_here(&sh, m, &relay); } }));
+            });
+            ASKING.with(|a| *a.borrow_mut() = Some((host.clone(), tx)));
+            ui.set_status(format!("Asked {host}. Waiting for their answer...").into());
+        }));
+    });
+}
+
+/// An invite's web page (https://<relay>/jam/<code>?k=...) as the app link it opens
+fn app_link(url: &str, relay: &str) -> String {
+    if url.starts_with("omnipulse://") { return url.to_string(); }
+    let rest = url.split_once("://").map(|x| x.1).unwrap_or(url);
+    let (origin_host, path) = rest.split_once('/').unwrap_or((rest, ""));
+    let (path, query) = path.split_once('?').unwrap_or((path, ""));
+    let k = query.split('&').find_map(|p| p.strip_prefix("k=")).unwrap_or("");
+    let origin = if origin_host.is_empty() { relay.to_string() } else { format!("{}://{origin_host}", url.split("://").next().unwrap_or("https")) };
+    format!("omnipulse://{path}?k={k}&relay={}", sources::urlencode(&origin))
+}
+
+/// The host's answer to your ask
+fn ask_answer_here(shared: &Shared, m: serde_json::Value, relay: &str) {
+    let Some(host) = ASKING.with(|a| a.borrow().as_ref().map(|x| x.0.clone())) else { return };
+    let say = |t: String| if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_status(t.into()); };
+    match m["type"].as_str() {
+        Some("askReply") | Some("admitted") => {
+            ASKING.with(|a| a.borrow_mut().take());
+            let link = m["url"].as_str().unwrap_or("").to_string();
+            let ok = m["type"].as_str() == Some("admitted") || m["ok"].as_bool() == Some(true);
+            if ok && !link.is_empty() {
+                // the Jam's invite (its web page's address), as the app link that page would open
+                listen_join(shared, &app_link(&link, relay));
+            } else if m["busy"].as_bool() == Some(true) {
+                say(format!("{host} is busy with another request: ask again in a bit."));
+            } else {
+                say(format!("{host} didn't start a Jam this time."));
+            }
+        }
+        Some("declined") => { ASKING.with(|a| a.borrow_mut().take()); say(format!("{host} didn't let you in this time.")); }
+        Some("closed") if ASKING.with(|a| a.borrow_mut().take()).is_some() => say(format!("No answer from {host}.")),
+        _ => {}
+    }
 }
 
 fn listen_message(shared: &Shared, m: serde_json::Value) {
@@ -4687,5 +4764,14 @@ mod time_tests {
         assert!(super::parse_time("1:xx").is_err());
         assert_eq!(super::fmt_time(65_000), "1:05");
         assert_eq!(super::fmt_time(10_500), "0:10.5");
+    }
+}
+
+#[cfg(test)]
+mod link_tests {
+    #[test]
+    fn invite_pages_as_app_links() {
+        assert_eq!(super::app_link("https://relay.test/jam/abcd1234?k=Xy9", "https://d"), "omnipulse://jam/abcd1234?k=Xy9&relay=https%3A%2F%2Frelay.test");
+        assert_eq!(super::app_link("omnipulse://jam/abcd1234?k=1", "https://d"), "omnipulse://jam/abcd1234?k=1");
     }
 }

@@ -78,7 +78,8 @@ pub fn parse_link(link: &str, default_relay: &str) -> Option<(String, String, St
     let rest = link.trim().strip_prefix("omnipulse://")?;
     let (head, query) = rest.split_once('?').unwrap_or((rest, ""));
     let (kind, code) = head.split_once('/')?;
-    let kind = match kind { "jam" => "jam", "join" => "listen", _ => return None };
+    // (ask: asking the host, to start a Jam or to be let into theirs)
+    let kind = match kind { "jam" => "jam", "join" => "listen", "ask" => "ask", _ => return None };
     let code = code.trim_end_matches('/');
     if code.len() != 8 || !code.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit()) {
         return None;
@@ -141,6 +142,7 @@ mod tests {
         assert!(parse_link("omnipulse://jam/ABCD", "https://d").is_none());
         assert!(parse_link("omnipulse://jam/abcd1234?relay=http://evil.com", "https://d").is_none());
         assert!(parse_link("https://jam/abcd1234", "https://d").is_none());
+        assert_eq!(parse_link("omnipulse://ask/abcd1234", "https://d").unwrap().0, "ask");
     }
 
     #[test]
