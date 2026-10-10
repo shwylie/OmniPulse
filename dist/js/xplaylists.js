@@ -210,6 +210,8 @@ function openPlaylistActions(p, x, y) {
 function runPlaylistAction(a) {
   const p = ctxPlaylist;
   closeMenu();
+  if (a === "new") { openNewPlaylistDialog(null); return; }
+  if (a === "import") { plImport(); return; }
   if (!p) return;
   if (a === "open") openPlaylist(p);
   else if (a === "share") sharePlaylist(p);
@@ -263,7 +265,21 @@ async function deleteXpl(p) {
 }
 
 function xplInit() {
-  $("plImport").addEventListener("click", plImport);
+  // right-click New playlist: make one, or import one from a file
+  $("plNew").addEventListener("contextmenu", (e) => {
+    e.preventDefault();
+    ctxPlaylist = null;
+    const m = $("plMenu");
+    m.replaceChildren();
+    [["New playlist", "new"], ["Import from a file...", "import"]].forEach(([label, action]) => {
+      const b = el("button", "menuItem", label);
+      b.dataset.paction = action;
+      m.append(b);
+    });
+    m.hidden = false;
+    m.style.left = Math.max(8, Math.min(window.innerWidth - m.offsetWidth - 8, e.clientX)) + "px";
+    m.style.top = Math.max(8, Math.min(window.innerHeight - m.offsetHeight - 8, e.clientY)) + "px";
+  });
   $("newPlForm").addEventListener("submit", newPlaylistSubmit);
   $("newPlCancel").addEventListener("click", () => $("newPlDialog").close());
   $("sideLists").addEventListener("contextmenu", (e) => {

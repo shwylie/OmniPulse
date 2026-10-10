@@ -1,6 +1,6 @@
 // Playlists as files: any playlist exports as M3U (each track's link, or its file on this PC) or CSV
 // (title, artist, album, length, ISRC, platform, link), from its right-click menu; and an M3U or CSV
-// file imports as a playlist on this PC (the import button beside New playlist), Exportify's Spotify CSVs too.
+// file imports as a playlist on this PC (right-click New playlist).
 // An imported song is the file itself, or the link's own track, or else found by its title and
 // artist: on your platforms first (Spotify by its ISRC), then in the catalogues. Songs not found
 // anywhere are listed, to copy.
@@ -30,7 +30,7 @@ function csvRows(text) {
 }
 const csvCell = (v) => { const s = String(v == null ? "" : v); return /[",\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
 
-// The songs in a CSV: its header names the columns (ours, Exportify's, and most others')
+// The songs in a CSV: its header row names the columns
 function csvEntries(text) {
   const rows = csvRows(text);
   if (rows.length < 2) return [];
@@ -130,7 +130,7 @@ async function plImport() {
     const text = await invoke("playlist_file_read", { path });
     entries = /\.csv$/i.test(path) ? csvEntries(text) : m3uEntries(text);
   } catch (e) { say("Couldn't read that file: " + e, { force: true }); return; }
-  if (!entries.length) { say("No songs in that file (a CSV needs a header row with a title column).", { force: true }); return; }
+  if (!entries.length) { say("No songs found in that file.", { force: true }); return; }
   const name = entries.name || path.split(/[\\/]/).pop().replace(/\.[^.]+$/, "");
   const found = new Array(entries.length).fill(null);
   const missing = [];
