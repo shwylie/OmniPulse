@@ -409,7 +409,7 @@ function platBadges(plats) {
   plats.forEach((p) => {
     const b = el("span", "tileBadge");
     b.title = PLATFORMS[p].name;
-    b.append(platIcon(p));
+    b.append(titleIcon(p));   // (YouTube Music's own mark: on the art it can't pass for a play button)
     box.append(b);
   });
   return box;
