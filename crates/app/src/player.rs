@@ -57,7 +57,7 @@ async fn other_upload(t: &Track, id: &str) -> Option<String> {
 pub async fn open_source(t: &Track, rt: tokio::runtime::Handle) -> Result<Box<dyn Source>, String> {
     match &t.src {
         // (played as its YouTube Music version: crate::versions, in main.rs)
-        Src::MusicBrainz(_) => Err("it plays from YouTube Music".into()),
+        Src::Catalog(_) => Err("it plays from YouTube Music".into()),
         Src::Plugin(id, x) => {
             let p = crate::plugrun::get(id).ok_or("its plugin isn't running (Settings > Integrations)")?;
             let r = p.call("resolve", vec![serde_json::from_str(x).unwrap_or_default()]).await?;

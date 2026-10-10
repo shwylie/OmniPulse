@@ -10,8 +10,9 @@ pub enum Src {
     Spotify(String),
     YouTube(String),
     Local(String),
-    /// a song MusicBrainz knows (its recording id): played from YouTube Music, as the web app does
-    MusicBrainz(String),
+    /// a song a catalogue knows, by its key: MusicBrainz's ("mb:<recording id>"), Deezer's ("dz:<id>") or
+    /// Apple Music's ("it:<id>"). It plays from YouTube Music, as the web app's do (crate::versions)
+    Catalog(String),
     /// a plugin's track: (the plugin's id, the track as the plugin gave it, as JSON)
     Plugin(String, String),
 }
@@ -38,6 +39,8 @@ pub struct Track {
     /// how often it's been played, for search's order: SoundCloud's and YouTube Music's counts, and
     /// Spotify's 0-100 popularity read as plays (as the web app's searchPlays); 0 when unknown
     pub plays: u64,
+    /// when it came out or was uploaded (YYYY-MM-DD; "" when unknown), for New releases' order
+    pub date: String,
 }
 
 impl Default for Src {
@@ -51,12 +54,14 @@ pub const MIX_MS: u64 = 15 * 60 * 1000;
 
 impl Track {
     pub fn plat(&self) -> &'static str {
-        match self.src {
+        match &self.src {
             Src::SoundCloud(_) => "soundcloud",
             Src::Spotify(_) => "spotify",
             Src::YouTube(_) => "youtube",
             Src::Local(_) => "local",
-            Src::MusicBrainz(_) => "musicbrainz",
+            Src::Catalog(k) if k.starts_with("dz:") => "deezer",
+            Src::Catalog(k) if k.starts_with("it:") => "itunes",
+            Src::Catalog(_) => "musicbrainz",
             Src::Plugin(..) => "plugin",
         }
     }
@@ -70,7 +75,8 @@ impl Track {
             Src::Spotify(uri) => format!("https://open.spotify.com/track/{}", uri.rsplit(':').next().unwrap_or("")),
             // (a plain YouTube link: it opens for anyone)
             Src::YouTube(id) => format!("https://www.youtube.com/watch?v={id}"),
-            Src::MusicBrainz(id) => format!("https://musicbrainz.org/recording/{id}"),
+            Src::Catalog(k) if k.starts_with("dz:") => format!("https://www.deezer.com/track/{}", &k[3..]),
+            Src::Catalog(k) => format!("https://musicbrainz.org/recording/{}", k.trim_start_matches("mb:")),
             _ => String::new(),
         }
     }
@@ -142,6 +148,7 @@ impl Track {
             licence: t["license"].as_str().unwrap_or("").to_string(),
             label: t["label_name"].as_str().unwrap_or("").to_string(),
             plays: t["playback_count"].as_u64().unwrap_or(0),
+            date: t["created_at"].as_str().unwrap_or("").chars().take(10).collect::<String>().replace('/', "-"),
         }
         .tidied())
     }
@@ -169,13 +176,35 @@ impl Track {
     pub fn musicbrainz(t: &Value) -> Option<Track> {
         let id = t["mbId"].as_str()?;
         Some(Track {
-            src: Src::MusicBrainz(id.to_string()),
+            src: Src::Catalog(format!("mb:{id}")),
             key: format!("mb:{id}"),
             title: t["title"].as_str().unwrap_or("Untitled").to_string(),
             artist: t["user"]["username"].as_str().unwrap_or("").to_string(),
             album: t["album"].as_str().unwrap_or("").to_string(),
             ms: t["duration"].as_u64().unwrap_or(0),
             art: t["artwork_url"].as_str().unwrap_or("").to_string(),
+            ..Default::default()
+        }
+        .tidied())
+    }
+
+/// A song from Deezer's or Apple's catalogue (as crates/core/src/catalog.rs gives it: dz_track, it_track),
+    /// to play from YouTube Music
+    pub fn catalog(t: &Value) -> Option<Track> {
+        let id = t["id"].as_str().filter(|k| k.starts_with("dz:") || k.starts_with("it:"))?;
+        Some(Track {
+            src: Src::Catalog(id.to_string()),
+            key: id.to_string(),
+            title: t["title"].as_str().unwrap_or("Untitled").to_string(),
+            artist: t["user"]["username"].as_str().unwrap_or("").to_string(),
+            album: t["album"].as_str().unwrap_or("").to_string(),
+            ms: t["duration"].as_u64().unwrap_or(0),
+            art: t["artwork_url"].as_str().unwrap_or("").to_string(),
+            genre: t["genre"].as_str().unwrap_or("").to_string(),
+            link: t["permalink_url"].as_str().unwrap_or("").to_string(),
+            // (Deezer's rank, up to about a million, read as plays like the others)
+            plays: t["dzRank"].as_u64().map(|r| r * 100).unwrap_or(0),
+            date: t["release_date"].as_str().unwrap_or("").to_string(),
             ..Default::default()
         }
         .tidied())
@@ -235,8 +264,8 @@ impl Track {
         if let Src::Spotify(uri) = &self.src {
             s["uri"] = serde_json::json!(uri);
         }
-        if let Src::MusicBrainz(id) = &self.src {
-            s["mbId"] = serde_json::json!(id);
+        if let Src::Catalog(k) = &self.src {
+            if let Some(id) = k.strip_prefix("mb:") { s["mbId"] = serde_json::json!(id); }
         }
         // a plugin's: its own source name, and the track as it gave it (the web app's pTrack)
         if let Src::Plugin(p, x) = &self.src {
@@ -254,7 +283,8 @@ impl Track {
             "spotify" => Src::Spotify(s["uri"].as_str().map(String::from).unwrap_or_else(|| format!("spotify:track:{}", id.trim_start_matches("sp:")))),
             "youtube" => Src::YouTube(id.trim_start_matches("yt:").to_string()),
             p if p.starts_with("plug:") => Src::Plugin(p[5..].to_string(), s["pTrack"].to_string()),
-            "musicbrainz" => Src::MusicBrainz(s["mbId"].as_str().map(String::from).unwrap_or_else(|| id.trim_start_matches("mb:").to_string())),
+            "musicbrainz" => Src::Catalog(format!("mb:{}", s["mbId"].as_str().map(String::from).unwrap_or_else(|| id.trim_start_matches("mb:").to_string()))),
+            "deezer" | "itunes" => Src::Catalog(id.clone()),
             "local" => {
                 let path = omnipulse_core::local::local_path_for(&id)?;
                 Src::Local(path.to_string_lossy().into_owned())
@@ -275,6 +305,7 @@ impl Track {
             licence: s["license"].as_str().unwrap_or("").to_string(),
             label: s["label_name"].as_str().unwrap_or("").to_string(),
             plays: s["playback_count"].as_u64().unwrap_or(0),
+            date: String::new(),
         })
     }
 }

@@ -165,13 +165,20 @@ pub async fn search(q: &str) -> Vec<Track> {
         }
         core::musicbrainz::search(q).await.map(|l| l.iter().filter_map(Track::musicbrainz).collect()).unwrap_or_default()
     };
+    // Deezer's and Apple's catalogues (no account): their songs play from YouTube Music too
+    let cat = async {
+        if !CATALOG.load(std::sync::atomic::Ordering::Relaxed) || core::tools::ytdlp_path().is_none() {
+            return Vec::new();
+        }
+        core::catalog::search(q).await.map(|l| l.iter().filter_map(Track::catalog).collect()).unwrap_or_default()
+    };
     // each running plugin that can search and play (crate::plugrun)
     let plugs = futures_util::future::join_all(crate::plugrun::players().into_iter().map(|p| {
         let q = q.to_string();
         async move { p.call("search", vec![serde_json::json!(q)]).await.map(|v| v.as_array().cloned().unwrap_or_default().iter().take(200).filter_map(|x| Track::plugin(&p.id, x)).collect::<Vec<_>>()).unwrap_or_default() }
     }));
-    let (a, b, c, d, e) = tokio::join!(sc, sp, yt, mb, plugs);
-    let mut lists = vec![a, b, c, d];
+    let (a, b, c, d, f, e) = tokio::join!(sc, sp, yt, mb, cat, plugs);
+    let mut lists = vec![a, b, c, d, f];
     lists.extend(e);
     once_each(rank(q, interleave(lists)))
 }
@@ -352,6 +359,9 @@ pub async fn found_tracks(f: &Found) -> Vec<Track> {
         Found::List { plat, id, title, .. } => playlist_tracks(&Playlist { plat, id: id.clone(), title: title.clone(), tracks: None, own: false }).await,
     }
 }
+
+/// Whether the catalogues are searched too (Settings: the web app's prefs.catOn, on unless switched off)
+pub static CATALOG: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
 
 /// Whether MusicBrainz is searched too (Settings: the web app's prefs.mbOn, on unless switched off)
 pub static MUSICBRAINZ: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);

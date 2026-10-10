@@ -9,6 +9,7 @@ mod keysetup;
 mod offset;
 mod plugrun;
 mod desktop;
+mod discover;
 mod integrations;
 mod look;
 mod marks;
@@ -436,6 +437,8 @@ fn go_plus_set(prefs: &serde_json::Value) {
     sources::GO_PLUS.store(on, std::sync::atomic::Ordering::Relaxed);
     // (MusicBrainz in search: Settings > Integrations, as the web app's prefs.mbOn)
     sources::MUSICBRAINZ.store(integrations::on(prefs, "mbOn"), std::sync::atomic::Ordering::Relaxed);
+    // (and Deezer's and Apple's catalogues: prefs.catOn)
+    sources::CATALOG.store(integrations::on(prefs, "catOn"), std::sync::atomic::Ordering::Relaxed);
 }
 
 fn plat_toggle(shared: &Shared, plat: &str) {
@@ -682,26 +685,19 @@ fn open_artist(shared: &Shared, i: usize) {
 }
 
 // ---------- Discover: shelves ----------
-fn track_from_play(p: &webstate::Play) -> Option<Track> {
-    let src = match p.src.as_str() {
-        "spotify" => track::Src::Spotify(format!("spotify:track:{}", p.id.trim_start_matches("sp:"))),
-        "youtube" => track::Src::YouTube(p.id.trim_start_matches("yt:").to_string()),
-        "musicbrainz" => track::Src::MusicBrainz(p.id.trim_start_matches("mb:").to_string()),
-        "local" => track::Src::Local(omnipulse_core::local::local_path_for(&p.id)?.to_string_lossy().into_owned()),
-        _ => track::Src::SoundCloud(p.id.parse().ok()?),
-    };
-    Some(Track { src, key: p.id.clone(), title: p.title.clone(), artist: p.artist.clone(), album: String::new(), ms: p.ms, art: p.art.clone(), genre: p.genre.clone(), link: String::new(), go_plus: false, ..Default::default() })
+thread_local! {
+    /// Discover's shelves as built (crate::discover), for its tiles' clicks
+    static DISCOVER: RefCell<Vec<discover::Shelf>> = const { RefCell::new(Vec::new()) };
 }
 
-fn top_lately(web: &WebState, library: &[Track], days: u64, n: usize) -> Vec<Track> {
-    let cut = now_ms().saturating_sub(days * 86_400_000);
-    let mut counts: HashMap<String, (usize, &webstate::Play)> = HashMap::new();
-    for p in web.plays.iter().filter(|p| p.ts >= cut) {
-        counts.entry(p.id.clone()).or_insert((0, p)).0 += 1;
-    }
-    let mut v: Vec<_> = counts.into_values().collect();
-    v.sort_by_key(|x| std::cmp::Reverse(x.0));
-    v.into_iter().filter_map(|(_, p)| library.iter().find(|t| t.key == p.id).cloned().or_else(|| track_from_play(p))).take(n).collect()
+/// Whether the catalogues (Deezer's and Apple's) are used: on unless switched off, while YouTube Music
+/// can play their songs
+fn catalog_on(prefs: &serde_json::Value) -> bool {
+    prefs["catOn"].as_bool() != Some(false) && omnipulse_core::tools::ytdlp_path().is_some()
+}
+
+fn discover_flags(prefs: &serde_json::Value) -> (bool, bool, bool) {
+    (catalog_on(prefs), omnipulse_core::tools::ytdlp_path().is_some(), omnipulse_core::soundcloud::signed_in())
 }
 
 fn open_discover(shared: &Shared) {
@@ -714,60 +710,49 @@ fn open_discover(shared: &Shared) {
     ui.set_page("discover".into());
     ui.set_page_kind("discover".into());
     ui.set_page_title("Discover".into());
-    ui.set_page_sub("Mixes and stations made from what you like.".into());
+    ui.set_page_sub("Mixes and stations made from what you typically like to listen to.".into());
     ui.set_chips(ModelRc::default());
     ui.set_shelves(ModelRc::default());
-    let (library, top, forgotten, rt, weak, token) = {
+    ui.set_status("Finding music for you...".into());
+    let (input, rt, weak, token) = {
         let a = shared.borrow();
-        let top = top_lately(&a.web, &a.library, 30, 20);
-        let cut = now_ms().saturating_sub(MONTH_MS);
-        let mut f: Vec<Track> = a.library.iter().filter(|t| a.web.last_played.get(&t.key).copied().unwrap_or(0) < cut && !t.is_mix()).cloned().collect();
-        queue::shuffle_in_place(&mut f);
-        f.truncate(20);
-        (a.library.clone(), top, f, a.rt.clone(), a.ui.clone(), a.token)
+        let (catalog, _, soundcloud) = discover_flags(&a.web.prefs);
+        let plays = a.web.plays.iter().map(|p| (p.artist.clone(), p.art.clone(), p.genre.clone())).collect();
+        (discover::Input { library: a.library.clone(), favourites: a.web.favourites.clone(), plays, prefs: a.web.prefs.clone(), catalog, soundcloud }, a.rt.clone(), a.ui.clone(), a.token)
     };
     rt.spawn(async move {
-        // seeds for "Because you like ...": what you've played lately, or else your likes
-        let mut seeds: Vec<Track> = top.iter().take(6).cloned().collect();
-        if seeds.len() < 2 {
-            let mut l: Vec<Track> = library.iter().filter(|t| !t.is_mix()).cloned().collect();
-            queue::shuffle_in_place(&mut l);
-            seeds = l.into_iter().take(6).collect();
-        }
-        queue::shuffle_in_place(&mut seeds);
-        let s1 = seeds.first().cloned();
-        let s2 = seeds.iter().find(|t| s1.as_ref().is_none_or(|a| a.artist != t.artist)).cloned();
-        let rel = |s: Option<Track>| async move { match s { Some(t) => (format!("Because you like {}", t.artist), sources::related(&t).await), None => (String::new(), Vec::new()) } };
-        let (follow, r1, r2) = tokio::join!(sources::following_tracks(60), rel(s1), rel(s2));
-        let mut shelves: Vec<(String, Vec<Track>)> = Vec::new();
-        // new music first, and none of it already in your likes (on any platform)
-        let liked = track::Liked::of(&library);
-        let fresh = |l: Vec<Track>| -> Vec<Track> { l.into_iter().filter(|t| !t.is_mix() && !liked.has(t)).take(20).collect() };
-        let follow = fresh(follow);
-        let (r1, r2) = ((r1.0, fresh(r1.1)), (r2.0, fresh(r2.1)));
-        if !follow.is_empty() { shelves.push(("New from artists you follow".into(), follow)); }
-        if !r1.1.is_empty() { shelves.push((r1.0, r1.1)); }
-        if !r2.1.is_empty() { shelves.push((r2.0, r2.1)); }
-        if !top.is_empty() { shelves.push(("Your top tracks lately".into(), top)); }
-        if !forgotten.is_empty() { shelves.push(("Rediscover".into(), forgotten)); }
-        let arts: Vec<Vec<String>> = shelves.iter().map(|(_, l)| l.iter().map(|t| t.art.clone()).collect()).collect();
+        let shelves = discover::build(input).await;
+        let arts: Vec<Vec<String>> = shelves.iter().map(|sh| sh.items.iter().map(|i| i.tile().2).collect()).collect();
         let weak2 = weak.clone();
         let _ = weak.upgrade_in_event_loop(move |ui| {
             SHARED.with(|s| {
                 let Some(shared) = s.borrow().clone() else { return };
                 if shared.borrow().token != token { return; }
                 let mut shelves = shelves;
-                { let prefs = shared.borrow().web.prefs.clone(); shelves.iter_mut().for_each(|(_, l)| track::apply_fixes(&prefs, l)); }
-                let models: Vec<Rc<VecModel<Tile>>> = shelves.iter().map(|(_, l)| Rc::new(VecModel::from(l.iter().map(|t| Tile { title: t.title.clone().into(), sub: t.artist.clone().into(), art: slint::Image::default(), plat: t.plat().into() }).collect::<Vec<_>>()))).collect();
-                let rows: Vec<Shelf> = shelves.iter().zip(&models).map(|((title, _), m)| Shelf { title: title.clone().into(), tiles: ModelRc::from(m.clone()) }).collect();
+                {
+                    let prefs = shared.borrow().web.prefs.clone();
+                    for sh in shelves.iter_mut() {
+                        for it in sh.items.iter_mut() {
+                            if let discover::Item::Track(t) = it { track::apply_fixes(&prefs, std::slice::from_mut(t)); }
+                        }
+                    }
+                }
+                let models: Vec<Rc<VecModel<Tile>>> = shelves.iter().map(|sh| Rc::new(VecModel::from(sh.items.iter().map(|i| {
+                    let (title, sub, _, plat) = i.tile();
+                    Tile { title: title.into(), sub: sub.into(), art: slint::Image::default(), plat: plat.into() }
+                }).collect::<Vec<_>>()))).collect();
+                let rows: Vec<Shelf> = shelves.iter().zip(&models).map(|(sh, m)| Shelf { title: sh.title.clone().into(), tiles: ModelRc::from(m.clone()) }).collect();
+                ui.set_status(if rows.is_empty() { "Play or star a few songs, and Discover will fill up with music for you.".into() } else { "".into() });
                 ui.set_shelves(ModelRc::from(Rc::new(VecModel::from(rows))));
-                shared.borrow_mut().shelves = shelves.into_iter().map(|(_, l)| l).collect();
+                shared.borrow_mut().shelves = shelves.iter().map(|sh| sh.items.iter().filter_map(|i| if let discover::Item::Track(t) = i { Some(t.clone()) } else { None }).collect()).collect();
+                DISCOVER.with(|d| *d.borrow_mut() = shelves);
                 SHELF_MODELS.with(|m| *m.borrow_mut() = models);
             });
         });
         // the covers, as they come
         for (s, list) in arts.into_iter().enumerate() {
             for (k, url) in list.into_iter().enumerate() {
+                if url.is_empty() { continue; }
                 if let Some(px) = player::fetch_art(url, 200).await {
                     let _ = weak2.upgrade_in_event_loop(move |_| {
                         SHELF_MODELS.with(|m| {
@@ -780,6 +765,36 @@ fn open_discover(shared: &Shared) {
             }
         }
     });
+}
+
+/// A tile on Discover: a song plays (with the shelf's other songs after it); a mix or station opens as
+/// a page of its tracks
+fn discover_tile(shared: &Shared, sh: usize, k: usize) {
+    let Some(item) = DISCOVER.with(|d| d.borrow().get(sh).and_then(|s| s.items.get(k).cloned())) else { return };
+    match item {
+        discover::Item::Track(t) => {
+            let list: Vec<Track> = DISCOVER.with(|d| d.borrow()[sh].items.iter().filter_map(|i| if let discover::Item::Track(x) = i { Some(x.clone()) } else { None }).collect());
+            let i = list.iter().position(|x| x.key == t.key).unwrap_or(0);
+            play_list(shared, list, i);
+        }
+        discover::Item::Mix(m) => {
+            let (liked, flags) = { let a = shared.borrow(); (track::Liked::of(&a.library), discover_flags(&a.web.prefs)) };
+            if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_status(format!("Putting {} together...", m.title).into()); }
+            let title = if matches!(m.how, discover::How::Crew(_, true)) { format!("{} station", m.title) } else { m.title.clone() };
+            let (rt, weak) = { let a = shared.borrow(); (a.rt.clone(), a.ui.clone()) };
+            let token = { let mut a = shared.borrow_mut(); a.token += 1; a.token };
+            rt.spawn(async move {
+                let list = discover::mix_tracks(&m, flags, &liked).await;
+                let sub = if list.is_empty() { "Nothing came back for this one: try again in a moment.".to_string() } else { m.desc.clone() };
+                let _ = weak.upgrade_in_event_loop(move |ui| SHARED.with(|s| {
+                    let Some(shared) = s.borrow().clone() else { return };
+                    if shared.borrow().token != token { return; }
+                    ui.set_status("".into());
+                    show_tracks(&shared, "mix", &title, sub, list, false);
+                }));
+            });
+        }
+    }
 }
 
 // ---------- casting (as the web app's js/cast.js, through crates/core/src/cast.rs) ----------
@@ -884,7 +899,7 @@ thread_local! {
 fn tp_versions(shared: &Shared, t: &Track) {
     TP_VERSIONS.with(|v| v.borrow_mut().clear());
     if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_tp_versions(ModelRc::default()); ui.set_tp_version_on(-1); }
-    if !(t.go_plus || matches!(t.src, track::Src::MusicBrainz(_))) { return; }
+    if !(t.go_plus || matches!(t.src, track::Src::Catalog(_))) { return; }
     let (rt, weak, t) = { let a = shared.borrow(); (a.rt.clone(), a.ui.clone(), t.clone()) };
     rt.spawn(async move {
         let (artist, title) = versions::guess_names(&t);
@@ -1373,7 +1388,7 @@ fn start(shared: &Shared) {
     rt.spawn(async move {
         // a Go+ track: never the preview, but its version on YouTube Music (crate::versions); a
         // MusicBrainz song the same way (MusicBrainz knows it, YouTube Music has it to play)
-        let mb = matches!(t.src, track::Src::MusicBrainz(_)) || listen_needs_version(&t);
+        let mb = matches!(t.src, track::Src::Catalog(_)) || listen_needs_version(&t);
         let (src, version) = if t.go_plus || mb {
             match versions::find(&t).await {
                 Some(v) => (player::open_source(&Track::youtube(&v.yt), h.clone()).await, Some(v)),
@@ -1434,7 +1449,7 @@ fn start(shared: &Shared) {
                     // a Go+ track (or MusicBrainz song) with no version anywhere: skipped, not its preview
                     // listening along: nothing here plays it, so a song of yours stands in for it
                     Err(_) if listening().is_some() && !STAND_IN.with(|x| x.borrow().is_some()) => stand_in(&shared, &t),
-                    Err(e) if t.go_plus || matches!(t.src, track::Src::MusicBrainz(_)) => {
+                    Err(e) if t.go_plus || matches!(t.src, track::Src::Catalog(_)) => {
                         let what = if t.go_plus { "Go+ track" } else { "from MusicBrainz" };
                         ui.set_status(format!("Skipped \"{}\" ({what}): {e}.", t.title).into());
                         let s2 = shared.clone();
@@ -2140,13 +2155,14 @@ fn song_request(shared: &Shared, id: u64, q: String, user: String) {
 /// The servers the web app's settings have on: the widget, the Stream Deck's remote, chat requests
 // ---------- Settings: the switches beyond Look ----------
 // (section, label, note, key, on unless switched off)
-const SET_ROWS: [(&str, &str, &str, &str, bool); 17] = [
+const SET_ROWS: [(&str, &str, &str, &str, bool); 18] = [
     ("Library", "Sets & Podcasts in the Queue", "Lists and autoplay include anything over 15 minutes. Off: only when you pick one.", "queueSets", false),
     ("Library", "Autoplay", "Plays similar tracks when the queue runs out.", "autoplay", true),
     ("Library", "Favourites Page", "Your starred tracks on a page of their own, in the sidebar. The stars stay either way.", "favPage", true),
     ("Integrations", "SoundCloud", "Its likes, playlists and search.", "scOn", true),
     ("Integrations", "Spotify", "Its likes, playlists and search.", "spOn", true),
     ("Integrations", "YouTube Music", "Search, radio, and Go+ tracks in full.", "ytOn", true),
+    ("Integrations", "Deezer and Apple Music catalogues", "Open music catalogues, no account needed: search, Discover and artist pages find their songs, and they play from YouTube Music.", "catOn", true),
     ("Integrations", "MusicBrainz", "An open music catalogue: search finds its songs too, and they play from YouTube Music.", "mbOn", true),
     ("Integrations", "Listen Along & Jams", "Listen together with friends, from your Discord status or a Jam invite. Off: no Jam button, and invites and requests are turned away (song requests aren't affected).", "jamsOn", true),
     ("Integrations", "Last.fm Scrobbling", "What you play goes to your Last.fm profile.", "scrobble", true),
@@ -3465,7 +3481,7 @@ fn listen_needs_version(t: &Track) -> bool {
         track::Src::Spotify(_) => omnipulse_core::spotify::spotify_signed_in() && omnipulse_core::spotify_engine::spe_signed_in(),
         track::Src::YouTube(_) => ytdlp,
         track::Src::Local(p) => std::path::Path::new(p).exists(),
-        track::Src::MusicBrainz(_) => false,
+        track::Src::Catalog(_) => false,
         track::Src::Plugin(id, _) => plugrun::get(id).is_some(),
     };
     !ok && ytdlp
@@ -3705,7 +3721,7 @@ fn stand_in(shared: &Shared, host: &Track) {
     let left = host.ms.saturating_sub(listen_host_pos()).max(30_000);
     let pick = {
         let a = shared.borrow();
-        let pool: Vec<&Track> = a.library.iter().filter(|t| t.ms > 30_000 && !t.is_mix() && t.key != host.key && !listen_needs_version(t) && !matches!(t.src, track::Src::MusicBrainz(_))).collect();
+        let pool: Vec<&Track> = a.library.iter().filter(|t| t.ms > 30_000 && !t.is_mix() && t.key != host.key && !listen_needs_version(t) && !matches!(t.src, track::Src::Catalog(_))).collect();
         let mut longer: Vec<&&Track> = pool.iter().filter(|t| t.ms >= left).collect();
         longer.sort_by_key(|t| t.ms);
         let k = (rand_u64() as usize) % longer.len().clamp(1, 3);
@@ -4537,6 +4553,7 @@ fn main() -> Result<(), slint::PlatformError> {
     ui.on_tile(move |sh, k| {
         if s.borrow().page == "search" { return open_found(&s, sh as usize, k as usize); }
         if s.borrow().page == "streamer" { return open_stream_coll(&s, sh as usize, k as usize); }
+        if s.borrow().page == "discover" { return discover_tile(&s, sh as usize, k as usize); }
         let list = s.borrow().shelves.get(sh as usize).cloned().unwrap_or_default();
         play_list(&s, list, k as usize);
     });
@@ -4787,7 +4804,10 @@ fn main() -> Result<(), slint::PlatformError> {
         // (OMNIPULSE_SELFTEST_JOIN=<invite link>: only joining someone's room, following it, skipping and leaving)
         let join = std::env::var("OMNIPULSE_SELFTEST_JOIN").ok();
         let full: [(u64, &str); 46] = [(9, "play"), (13, "library"), (13, "pagefind"), (14, "pageall"), (14, "pick"), (14, "picknone"), (14, "scoff"), (15, "scon"), (15, "albums"), (18, "albumsn"), (18, "discover"), (24, "rediscover"), (27, "sets"), (31, "stats"), (35, "now"), (36, "tprefs"), (37, "tpclose"), (39, "search"), (41, "found"), (42, "settings"), (43, "plugset"), (44, "plugclose"), (44, "keys"), (45, "keysclose"), (45, "light"), (45, "collapse"), (46, "artists"), (54, "artist"), (60, "autoplay"), (70, "narrow"), (72, "goplus"), (80, "tabright"), (81, "pbar"), (82, "pfloat"), (83, "pminimal"), (84, "musical"), (88, "musical2"), (90, "safe"), (90, "streamer"), (91, "streamcoll"), (91, "sort"), (93, "xpl"), (95, "xpl2"), (97, "fade"), (101, "fade2"), (103, "end")];
-        let plan: Vec<(u64, &str)> = if join.is_some() { vec![(6, "join"), (14, "joined"), (16, "jamskip"), (19, "leave"), (21, "end")] } else { full.to_vec() };
+        // (OMNIPULSE_SELFTEST_PLAN=discover: only Discover, its shelves, and the first mix it has opened)
+        let only_discover = std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("discover");
+        let plan: Vec<(u64, &str)> = if join.is_some() { vec![(6, "join"), (14, "joined"), (16, "jamskip"), (19, "leave"), (21, "end")] }
+            else if only_discover { vec![(9, "play"), (11, "discover"), (30, "disc"), (45, "discmix"), (46, "end")] } else { full.to_vec() };
         t.start(slint::TimerMode::Repeated, std::time::Duration::from_millis(250), move || {
             let Some(&(at, what)) = plan.get(step_no) else { return };
             if started.elapsed().as_secs() < at { return; }
@@ -4944,6 +4964,13 @@ fn main() -> Result<(), slint::PlatformError> {
                 "narrow" => { ui.window().set_size(slint::LogicalSize::new(900.0, 700.0)); }
                 // the first artist you follow
                 "artist" => { println!("selftest: following {} artists", ui.get_artists().row_count()); if ui.get_artists().row_count() > 0 { ui.invoke_artist(0); } }
+                // Discover's shelves, then its first mix (or station) opened
+                "disc" => {
+                    println!("selftest: discover shelves {}", ui.get_shelves().iter().map(|sh| format!("{} {}", sh.title, sh.tiles.row_count())).collect::<Vec<_>>().join(", "));
+                    let at = DISCOVER.with(|d| d.borrow().iter().position(|sh| sh.key == "mixes").map(|i| (i, 0)));
+                    if let Some((i, k)) = at { ui.invoke_tile(i as i32, k as i32); }
+                }
+                "discmix" => println!("selftest: mix \"{}\" ({}): {} tracks, first {:?}", ui.get_page_title(), ui.get_page_sub(), s.borrow().page_tracks.len(), s.borrow().page_tracks.iter().take(4).map(|t| format!("{} - {} [{}]", t.artist, t.title, t.plat())).collect::<Vec<_>>()),
                 "end" => {
                     println!("selftest: status \"{}\"", ui.get_status());
                     println!("selftest: settings rows {}", ui.get_set_rows_integrations().iter().chain(ui.get_set_rows_library().iter()).chain(ui.get_set_rows_streaming().iter()).map(|r| format!("{}{}", r.label, if r.on { "+" } else { "-" })).collect::<Vec<_>>().join(", "));

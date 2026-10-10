@@ -73,6 +73,9 @@ global Icons {
     out property <string> youtube: "M5 3h14a3 3 0 0 1 3 3v9a3 3 0 0 1-3 3H5a3 3 0 0 1-3-3V6a3 3 0 0 1 3-3zm0 2.2a.8.8 0 0 0-.8.8v9c0 .44.36.8.8.8h14a.8.8 0 0 0 .8-.8V6a.8.8 0 0 0-.8-.8zM8 20h8v1.8H8z";
     // (the title bar's YouTube Music switch: its own mark; on a track, the screen above)
     out property <string> youtube-mark: "M12 2a10 10 0 1 0 0 20a10 10 0 1 0 0-20zm0 2.2a7.8 7.8 0 1 1 0 15.6a7.8 7.8 0 1 1 0-15.6zM9.8 8.3v7.4l6-3.7z";
+    // the catalogues: Deezer's bars, and a note for Apple Music's
+    out property <string> deezer: "M1 18h3.6v2H1zm4.6-3h3.6v5H5.6zm4.6-3h3.6v8h-3.6zm4.6-3h3.6v11h-3.6zm4.6-5h3.6v16h-3.6z";
+    out property <string> itunes: "M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z";
     out property <string> local: "M10 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z";
 }
 
@@ -277,8 +280,8 @@ component Toggle inherits Rectangle {
 component PlatIcon inherits Glyph {
     in property <string> plat;
     in property <bool> title-bar;   // (YouTube Music's own mark there)
-    d: plat == "spotify" ? Icons.spotify : plat == "youtube" ? (title-bar ? Icons.youtube-mark : Icons.youtube) : plat == "local" ? Icons.local : plat == "musicbrainz" ? Icons.musicbrainz : plat == "plugin" ? Icons.plugin : Icons.soundcloud;
-    fill: plat == "spotify" ? #1ed760 : plat == "youtube" ? #ff0033 : plat == "local" ? #f2b544 : plat == "musicbrainz" ? #ba478f : plat == "plugin" ? #38bdf8 : #ff5500;
+    d: plat == "spotify" ? Icons.spotify : plat == "youtube" ? (title-bar ? Icons.youtube-mark : Icons.youtube) : plat == "local" ? Icons.local : plat == "musicbrainz" ? Icons.musicbrainz : plat == "plugin" ? Icons.plugin : plat == "deezer" ? Icons.deezer : plat == "itunes" ? Icons.itunes : Icons.soundcloud;
+    fill: plat == "spotify" ? #1ed760 : plat == "youtube" ? #ff0033 : plat == "local" ? #f2b544 : plat == "musicbrainz" ? #ba478f : plat == "plugin" ? #38bdf8 : plat == "deezer" ? #a238ff : plat == "itunes" ? #fa2d48 : #ff5500;
 }
 
 component NavItem inherits Rectangle {

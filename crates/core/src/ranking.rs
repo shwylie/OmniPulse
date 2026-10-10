@@ -64,3 +64,27 @@ mod tests {
         assert_eq!(r[2].0, "Goodbye");
     }
 }
+
+/// One artist however their name is written (the web app's artistKey): "The Glitch Mob" and "Glitch
+/// Mob", "Above & Beyond" and "Above and Beyond", "Tiësto" and "Tiesto"
+pub fn artist_key(s: &str) -> String {
+    use unicode_normalization::UnicodeNormalization;
+    let plain: String = s.to_lowercase().nfkd().filter(|c| !('\u{300}'..='\u{36f}').contains(c)).collect();
+    let plain = plain.replace('&', " and ");
+    let t = plain.trim_start();
+    let t = match t.strip_prefix("the ") { Some(rest) if !rest.trim().is_empty() => rest, _ => t };
+    t.chars().filter(|c| c.is_alphanumeric()).collect()
+}
+
+#[cfg(test)]
+mod artist_key_tests {
+    #[test]
+    fn one_artist_however_written() {
+        use super::artist_key as k;
+        assert_eq!(k("The Glitch Mob"), k("Glitch Mob"));
+        assert_eq!(k("Above & Beyond"), k("Above and Beyond"));
+        assert_eq!(k("Tiësto"), k("Tiesto"));
+        assert_eq!(k("The The"), "the");
+        assert_eq!(k("The Weeknd"), "weeknd");
+    }
+}
