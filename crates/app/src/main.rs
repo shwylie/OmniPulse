@@ -1591,13 +1591,24 @@ fn start(shared: &Shared) {
                         let what = sound::loud_source(&t, version.as_ref().map(|v| v.yt.id.as_str()));
                         shared.borrow_mut().cur_loud = what.as_ref().map(|(k, id)| format!("{k}:{id}"));
                         FADE.with(|f| *f.borrow_mut() = (false, String::new()));
-                        match fade_now(&shared.borrow()) {
-                            Some(ms) => engine.fade(Some(0.0), 1.0, ms),
-                            // (fading set or not, a new track comes up over a short moment: never a hard cut)
-                            None => engine.fade(Some(0.0), 1.0, 450),
-                        }
                         let known = what.as_ref().and_then(|(s, id)| shared.borrow().loud.get(&format!("{s}:{id}")).copied());
-                        engine.load(src, sound::loud_db(&shared.borrow().web.prefs, &t, known));
+                        let db = sound::loud_db(&shared.borrow().web.prefs, &t, known);
+                        // the track before ending with Fade Between Tracks on: both heard at once, this one coming in
+                        let resumed = resume > 0 || trim_of(&shared.borrow().web.prefs, &t.key).0 > 0;
+                        match XFADE.with(|x| x.borrow_mut().take()) {
+                            Some((ms, at)) if !resumed && at.elapsed().as_secs() < 8 => {
+                                engine.fade(None, 1.0, 200);
+                                engine.crossfade(src, db, ms);
+                            }
+                            _ => {
+                                match fade_now(&shared.borrow()) {
+                                    Some(ms) => engine.fade(Some(0.0), 1.0, ms),
+                                    // (fading set or not, a new track comes up over a short moment: never a hard cut)
+                                    None => engine.fade(Some(0.0), 1.0, 450),
+                                }
+                                engine.load(src, db);
+                            }
+                        }
                         if let (Some((src_kind, id)), None) = (what, known) {
                             loud_measure(&shared, &t, src_kind, id, token);
                         }
@@ -1854,6 +1865,7 @@ fn fav_toggle(shared: &Shared) {
 /// Playing from a page: a list (Library, a playlist...) becomes the queue; one track from Search
 /// takes the current one's place and leaves the rest of the queue as it was
 fn play_list(shared: &Shared, list: Vec<Track>, i: usize) {
+    XFADE.with(|x| *x.borrow_mut() = None);
     // listening along: in a Jam, the song goes to the host to play next; otherwise playing it here
     // would mean leaving, so that's said instead (the Jam button leaves)
     if let Some(kind) = listening() {
@@ -2973,6 +2985,15 @@ thread_local! {
     static FADE: RefCell<(bool, String)> = const { RefCell::new((false, String::new())) };
 }
 
+/// How early a crossfade starts asking for the next track's sound (it's preloaded: about this long)
+const XFADE_LEAD_MS: u64 = 1000;
+
+thread_local! {
+    /// the next track's start comes in as a crossfade of this many ms (set as the one playing ends)
+    /// (and when: it's for the track that comes next, even past ones Stream-Safe Music skips, for a moment)
+    static XFADE: RefCell<Option<(u64, std::time::Instant)>> = const { RefCell::new(None) };
+}
+
 /// Each tick while playing: long silences jumped over, the fade out at the end. True if it moved on.
 fn fade_and_silences(shared: &Shared, pos: u64, dur: u64) -> bool {
     let (an, key, fade, skip, engine) = {
@@ -3010,6 +3031,16 @@ fn fade_and_silences(shared: &Shared, pos: u64, dur: u64) -> bool {
     let end = if audible > 0 && audible < dur { audible } else { dur };
     let left = end as i64 - pos as i64;
     let (out, moved) = FADE.with(|f| f.borrow().clone());
+    // Fade Between Tracks as a true crossfade: the next one comes in over this one's last moments (both
+    // heard at once), started a second early for its sound to be found (it's preloaded). Not listening
+    // along (the host's app leads), and not repeating this one.
+    let next_up = { let a = shared.borrow(); a.repeat != "one" && a.queue.qi.is_some_and(|i| i + 1 < a.queue.items.len()) };
+    if next_up && listening().is_none() && !out && left > 0 && left as u64 <= ms + XFADE_LEAD_MS && moved != key {
+        FADE.with(|f| *f.borrow_mut() = (true, key.clone()));
+        XFADE.with(|x| *x.borrow_mut() = Some((ms, std::time::Instant::now())));
+        step(shared, 1);
+        return true;
+    }
     if !out && left > 0 && left as u64 <= ms {
         engine.fade(None, 0.0, left as u64);
         FADE.with(|f| f.borrow_mut().0 = true);
@@ -4096,6 +4127,7 @@ fn fade_now(a: &App) -> Option<u64> {
 
 /// A skip by hand (the buttons, media keys, the remote): listening, it goes to the Jam's host
 fn skip_press(shared: &Shared, d: i32) {
+    XFADE.with(|x| *x.borrow_mut() = None);
     let Some(kind) = listening() else { return step(shared, d) };
     let note = if kind == "jam" {
         listen_send(serde_json::json!({ "type": "skip", "d": if d < 0 { -1 } else { 1 } }));
@@ -5573,6 +5605,12 @@ fn main() -> Result<(), slint::PlatformError> {
                         a.cur_loud = Some("selftest".into());
                     }
                     println!("selftest: fade from {key} at {pos} ms");
+                    // (a moment later: both heard at once, the next one coming in)
+                    let s2 = s.clone();
+                    slint::Timer::single_shot(std::time::Duration::from_millis(1400), move || {
+                        let a = s2.borrow();
+                        println!("selftest: crossfading {}, now {}, at {} ms", a.engine.crossfading(), a.queue.current().map(|t| t.key.clone()).unwrap_or_default(), a.engine.position_ms());
+                    });
                 }
                 "fade2" => {
                     let key = s.borrow().queue.current().map(|t| t.key.clone()).unwrap_or_default();

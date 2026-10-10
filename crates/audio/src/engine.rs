@@ -1,5 +1,7 @@
 // The player: a decode thread that reads the source, converts it to the output's rate and runs the
 // chain (js/audio.js's, see dsp.rs), and an output stream (cpal: WASAPI on Windows) that plays it.
+// A crossfade plays two sources at once: the next one comes in as the one before goes out (equal
+// power), each through its own chain, and then it's the one playing.
 // About a third of a second is kept ready between them. Volume, mute and pause act in the output
 // itself, so they're heard at once.
 
@@ -129,6 +131,8 @@ fn interleave(ch: &[Vec<f32>], out: &mut Vec<f32>) {
 // ---------- the live player ----------
 enum Cmd {
     Load(Box<dyn Source>, f32),
+    /// the next source, coming in over this many ms as the one playing goes out
+    Crossfade(Box<dyn Source>, f32, u64),
     Seek(u64),
     Stop,
     Eq(Vec<f32>),
@@ -144,6 +148,10 @@ struct Shared {
     loaded: AtomicBool,
     /// frames played since the track's base position
     played: AtomicU64,
+    /// frames of those that were the track before's (a crossfade starts behind what's queued)
+    skew: AtomicU64,
+    /// a crossfade under way
+    fading_in: AtomicBool,
     base_ms: AtomicU64,
     duration_ms: AtomicU64,
     rate: AtomicU32,
@@ -186,6 +194,8 @@ impl Engine {
             paused: AtomicBool::new(true),
             loaded: AtomicBool::new(false),
             played: AtomicU64::new(0),
+            skew: AtomicU64::new(0),
+            fading_in: AtomicBool::new(false),
             base_ms: AtomicU64::new(0),
             duration_ms: AtomicU64::new(0),
             rate: AtomicU32::new(48000),
@@ -271,6 +281,15 @@ impl Engine {
     pub fn load(&self, src: Box<dyn Source>, match_db: f32) {
         let _ = self.cmd.send(Cmd::Load(src, match_db));
     }
+    /// Plays a source from its start, coming in over `ms` as the one playing goes out (a true crossfade:
+    /// both are heard at once); from then on it's the one playing (its position, length and end)
+    pub fn crossfade(&self, src: Box<dyn Source>, match_db: f32, ms: u64) {
+        let _ = self.cmd.send(Cmd::Crossfade(src, match_db, ms));
+    }
+    /// A crossfade is under way
+    pub fn crossfading(&self) -> bool {
+        self.shared.fading_in.load(Ordering::SeqCst)
+    }
     pub fn play(&self) {
         self.shared.paused.store(false, Ordering::SeqCst);
     }
@@ -315,7 +334,7 @@ impl Engine {
     pub fn position_ms(&self) -> u64 {
         let s = &self.shared;
         let rate = s.rate.load(Ordering::Relaxed).max(1) as u64;
-        s.base_ms.load(Ordering::Relaxed) + s.played.load(Ordering::Relaxed) * 1000 / rate
+        s.base_ms.load(Ordering::Relaxed) + s.played.load(Ordering::Relaxed).saturating_sub(s.skew.load(Ordering::Relaxed)) * 1000 / rate
     }
     pub fn duration_ms(&self) -> u64 {
         self.shared.duration_ms.load(Ordering::Relaxed)
@@ -441,18 +460,84 @@ fn build_output(name: &str, shared: Arc<Shared>, ev: Sender<Event>) -> Result<(c
     Ok((stream, rate))
 }
 
+/// Two sources at once: the one going out, the one coming in, and how far the fade is (in frames)
+struct Fading {
+    next: Pipeline,
+    total: u64,
+    done: u64,
+    out_buf: VecDeque<f32>,
+    in_buf: VecDeque<f32>,
+    out_ended: bool,
+    in_ended: bool,
+}
+
+const XFADE_CHUNK: usize = 4096 * 2;
+
+impl Fading {
+    /// The next piece of both, mixed (equal power); true once the fade is over
+    fn mix(&mut self, out: &mut Pipeline, into: &mut Vec<f32>, scratch: &mut Vec<f32>) -> Result<bool, String> {
+        while !self.out_ended && self.out_buf.len() < XFADE_CHUNK {
+            scratch.clear();
+            if !out.fill(scratch)? { self.out_ended = true; }
+            self.out_buf.extend(scratch.iter().copied());
+        }
+        while !self.in_ended && self.in_buf.len() < XFADE_CHUNK {
+            scratch.clear();
+            if !self.next.fill(scratch)? { self.in_ended = true; }
+            self.in_buf.extend(scratch.iter().copied());
+        }
+        let frames = (self.in_buf.len() / 2).min(if self.out_ended { usize::MAX } else { self.out_buf.len() / 2 }).min(XFADE_CHUNK / 2);
+        for _ in 0..frames {
+            let p = (self.done as f32 / self.total.max(1) as f32).min(1.0);
+            let (go, gi) = ((p * std::f32::consts::FRAC_PI_2).cos(), (p * std::f32::consts::FRAC_PI_2).sin());
+            let (ol, or) = (self.out_buf.pop_front().unwrap_or(0.0), self.out_buf.pop_front().unwrap_or(0.0));
+            let (il, ir) = (self.in_buf.pop_front().unwrap_or(0.0), self.in_buf.pop_front().unwrap_or(0.0));
+            into.push(ol * go + il * gi);
+            into.push(or * go + ir * gi);
+            self.done += 1;
+            if self.done >= self.total { break; }
+        }
+        // (the one coming in ran out before the fade did: it's over)
+        Ok(self.done >= self.total || (self.in_ended && self.in_buf.is_empty()))
+    }
+}
+
 fn decode_loop(shared: Arc<Shared>, cmds: Receiver<Cmd>, ev: Sender<Event>) {
     let mut pipe: Option<Pipeline> = None;
+    let mut fading: Option<Fading> = None;
     let mut eq = vec![0.0f32; 10];
     let mut ended_sent = true;
     let mut scratch = Vec::with_capacity(8192);
+    let mut mixed: Vec<f32> = Vec::with_capacity(XFADE_CHUNK);
     loop {
         // commands first; wait for one when there's nothing to do
         let idle = pipe.is_none() || shared.source_done.load(Ordering::SeqCst);
         let got = if idle { cmds.recv_timeout(Duration::from_millis(50)).ok() } else { cmds.try_recv().ok() };
         if let Some(c) = got {
             match c {
-                Cmd::Load(src, db) => {
+                Cmd::Crossfade(src, db, ms) if pipe.is_some() && !shared.source_done.load(Ordering::SeqCst) => {
+                    let rate = shared.rate.load(Ordering::SeqCst);
+                    // (one fading in already: it's the one playing now)
+                    if let Some(f) = fading.take() { pipe = Some(f.next); }
+                    let mut next = Pipeline::new(src, rate);
+                    next.chain.eq.set(&eq);
+                    next.chain.set_match_db(db, true);
+                    // its position counts from here: what's queued still is the one going out's
+                    let queued = shared.queue.lock().unwrap().len() as u64 / 2;
+                    shared.played.store(0, Ordering::SeqCst);
+                    shared.skew.store(queued, Ordering::SeqCst);
+                    shared.base_ms.store(0, Ordering::SeqCst);
+                    shared.duration_ms.store(next.duration_ms().unwrap_or(0), Ordering::SeqCst);
+                    shared.source_done.store(false, Ordering::SeqCst);
+                    shared.fading_in.store(true, Ordering::SeqCst);
+                    fading = Some(Fading { next, total: (ms * rate as u64 / 1000).max(1), done: 0, out_buf: VecDeque::new(), in_buf: VecDeque::new(), out_ended: false, in_ended: false });
+                    ended_sent = false;
+                }
+                // (nothing playing to fade from: it just starts)
+                Cmd::Crossfade(src, db, _) | Cmd::Load(src, db) => {
+                    fading = None;
+                    shared.fading_in.store(false, Ordering::SeqCst);
+                    shared.skew.store(0, Ordering::SeqCst);
                     let rate = shared.rate.load(Ordering::SeqCst);
                     let mut p = Pipeline::new(src, rate);
                     p.chain.eq.set(&eq);
@@ -467,6 +552,9 @@ fn decode_loop(shared: Arc<Shared>, cmds: Receiver<Cmd>, ev: Sender<Event>) {
                     ended_sent = false;
                 }
                 Cmd::Seek(ms) => {
+                    // (mid-crossfade: the one coming in is the one playing)
+                    if let Some(f) = fading.take() { pipe = Some(f.next); shared.fading_in.store(false, Ordering::SeqCst); }
+                    shared.skew.store(0, Ordering::SeqCst);
                     if let Some(p) = pipe.as_mut() {
                         match p.seek(ms) {
                             Ok(at) => {
@@ -484,6 +572,9 @@ fn decode_loop(shared: Arc<Shared>, cmds: Receiver<Cmd>, ev: Sender<Event>) {
                 }
                 Cmd::Stop => {
                     pipe = None;
+                    fading = None;
+                    shared.fading_in.store(false, Ordering::SeqCst);
+                    shared.skew.store(0, Ordering::SeqCst);
                     shared.queue.lock().unwrap().clear();
                     shared.loaded.store(false, Ordering::SeqCst);
                     shared.source_done.store(true, Ordering::SeqCst);
@@ -494,14 +585,21 @@ fn decode_loop(shared: Arc<Shared>, cmds: Receiver<Cmd>, ev: Sender<Event>) {
                     if let Some(p) = pipe.as_mut() {
                         p.chain.eq.set(&eq);
                     }
+                    if let Some(f) = fading.as_mut() {
+                        f.next.chain.eq.set(&eq);
+                    }
                 }
                 Cmd::Match(db, at_once) => {
-                    if let Some(p) = pipe.as_mut() {
-                        p.chain.set_match_db(db, at_once);
+                    // (a measurement for the one playing: the one coming in, mid-crossfade)
+                    match fading.as_mut() {
+                        Some(f) => f.next.chain.set_match_db(db, at_once),
+                        None => if let Some(p) = pipe.as_mut() { p.chain.set_match_db(db, at_once); },
                     }
                 }
                 Cmd::Rate(rate) => {
                     // a device at another rate: rebuild the conversion and chain where playback was
+                    // (mid-crossfade: the one coming in, where it is)
+                    if let Some(f) = fading.take() { pipe = Some(f.next); shared.fading_in.store(false, Ordering::SeqCst); shared.skew.store(0, Ordering::SeqCst); }
                     if let Some(old) = pipe.take() {
                         let was = shared.base_ms.load(Ordering::SeqCst);
                         let mut p = Pipeline::new(old.src, rate);
@@ -531,6 +629,33 @@ fn decode_loop(shared: Arc<Shared>, cmds: Receiver<Cmd>, ev: Sender<Event>) {
             std::thread::sleep(Duration::from_millis(10));
             continue;
         }
+        // a crossfade: both, mixed, until the one coming in is the one playing
+        if let Some(f) = fading.as_mut() {
+            mixed.clear();
+            match f.mix(p, &mut mixed, &mut scratch) {
+                Ok(over) => {
+                    *shared.level.lock().unwrap() = f.next.level;
+                    shared.queue.lock().unwrap().extend(mixed.iter().copied());
+                    if over {
+                        let f = fading.take().unwrap();
+                        // what of it was read ahead goes on as it is
+                        shared.queue.lock().unwrap().extend(f.in_buf.iter().copied());
+                        if f.in_ended { shared.source_done.store(true, Ordering::SeqCst); }
+                        pipe = Some(f.next);
+                        shared.fading_in.store(false, Ordering::SeqCst);
+                    }
+                }
+                Err(e) => {
+                    // the one coming in failed: it's the one playing all the same, and it says so
+                    let f = fading.take().unwrap();
+                    pipe = Some(f.next);
+                    shared.fading_in.store(false, Ordering::SeqCst);
+                    shared.source_done.store(true, Ordering::SeqCst);
+                    let _ = ev.send(Event::Error(e));
+                }
+            }
+            continue;
+        }
         scratch.clear();
         match p.fill(&mut scratch) {
             Ok(more) => {
@@ -548,6 +673,29 @@ fn decode_loop(shared: Arc<Shared>, cmds: Receiver<Cmd>, ev: Sender<Event>) {
     }
 }
 
+/// Renders a crossfade without a device: `a` from `a_from_ms`, then `b` coming in over `ms` (for tests)
+pub fn render_crossfade(a: Box<dyn Source>, b: Box<dyn Source>, out_rate: u32, a_secs: f32, ms: u64, max_secs: f32) -> Result<Vec<f32>, String> {
+    let mut pa = Pipeline::new(a, out_rate);
+    let mut out = Vec::new();
+    let lead = (a_secs * out_rate as f32) as usize * 2;
+    while out.len() < lead {
+        if !pa.fill(&mut out)? { break; }
+    }
+    out.truncate(lead);
+    let mut f = Fading { next: Pipeline::new(b, out_rate), total: ms * out_rate as u64 / 1000, done: 0, out_buf: VecDeque::new(), in_buf: VecDeque::new(), out_ended: false, in_ended: false };
+    let mut scratch = Vec::new();
+    loop {
+        if f.mix(&mut pa, &mut out, &mut scratch)? { break; }
+    }
+    out.extend(f.in_buf.iter().copied());
+    let limit = (max_secs * out_rate as f32) as usize * 2;
+    while out.len() < limit {
+        if !f.next.fill(&mut out)? { break; }
+    }
+    out.truncate(limit);
+    Ok(out)
+}
+
 /// Renders a source through the chain without a device (for tests and the test player's --wav)
 pub fn render(src: Box<dyn Source>, out_rate: u32, eq: &[f32], match_db: f32, max_secs: f32) -> Result<Vec<f32>, String> {
     let mut p = Pipeline::new(src, out_rate);
@@ -562,4 +710,33 @@ pub fn render(src: Box<dyn Source>, out_rate: u32, eq: &[f32], match_db: f32, ma
     }
     out.truncate(limit);
     Ok(out)
+}
+
+#[cfg(test)]
+mod xfade_tests {
+    use super::*;
+    use crate::source::Tone;
+
+    fn rms(x: &[f32]) -> f32 {
+        (x.iter().map(|v| v * v).sum::<f32>() / x.len().max(1) as f32).sqrt()
+    }
+
+    #[test]
+    fn a_crossfade_keeps_the_level_and_hands_over() {
+        let rate = 44_100u32;
+        let a = Box::new(Tone::new(rate, 440.0, 0.3, 10.0));
+        let b = Box::new(Tone::new(rate, 660.0, 0.3, 10.0));
+        let out = render_crossfade(a, b, rate, 2.0, 2000, 6.0).unwrap();
+        assert_eq!(out.len(), 6 * rate as usize * 2);
+        let at = |s: f32| { let i = (s * rate as f32) as usize * 2; rms(&out[i..i + 8820]) };
+        let (before, mid, after) = (at(1.0), at(2.95), at(5.0));
+        let db = |x: f32| 20.0 * x.log10();
+        // equal power: as loud all the way through (two different tones add as power)
+        assert!((db(mid) - db(before)).abs() < 1.0, "{before} {mid}");
+        assert!((db(after) - db(before)).abs() < 1.0, "{before} {after}");
+        // and after it, only the one that came in: 660 Hz, so about 66 upward zero crossings in 0.1 s
+        let i = (5.0 * rate as f32) as usize * 2;
+        let crossings = out[i..i + 2 * 4410].chunks(2).map(|f| f[0]).collect::<Vec<_>>().windows(2).filter(|w| w[0] < 0.0 && w[1] >= 0.0).count();
+        assert!((60..=72).contains(&crossings), "{crossings}");
+    }
 }
