@@ -109,7 +109,7 @@ pub async fn lastfm_connect() -> Result<String, String> {
         urlencoding::encode(&cfg.lastfm_api_key),
         urlencoding::encode(&token)
     );
-    opener::open(&url).map_err(|e| e.to_string())?;
+    crate::open_browser(&url)?;
     for _ in 0..40 {
         tokio::time::sleep(Duration::from_secs(3)).await;
         let params = vec![("token".to_string(), token.clone())];

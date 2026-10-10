@@ -179,7 +179,7 @@ pub async fn wait_for_callback(bind: String, url: String) -> Result<(String, Str
 /// The same, on a listener that's already open (Google's sign-in picks a free port first)
 pub async fn wait_on(listener: TcpListener, url: String) -> Result<(String, String), String> {
     listener.set_nonblocking(true).map_err(|e| e.to_string())?;
-    opener::open(&url).map_err(|e| e.to_string())?;
+    crate::open_browser(&url)?;
 
     let result = tokio::task::spawn_blocking(move || -> Result<(String, String), String> {
         let deadline = Instant::now() + Duration::from_secs(180);

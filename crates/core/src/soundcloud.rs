@@ -77,7 +77,7 @@ pub async fn login() -> Result<(), String> {
     let listener = TcpListener::bind(bind_addr(&cfg.redirect_uri))
         .map_err(|e| format!("Could not listen for the sign-in callback (is the port busy?): {e}"))?;
     listener.set_nonblocking(true).map_err(|e| e.to_string())?;
-    opener::open(&url).map_err(|e| e.to_string())?;
+    crate::open_browser(&url)?;
 
     let (code, got_state) = tokio::task::spawn_blocking(
         move || -> Result<(String, String), String> {

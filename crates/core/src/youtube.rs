@@ -529,6 +529,7 @@ pub fn forget_streams() {
     }
 }
 
+#[cfg(feature = "desktop")]
 fn expiry(url: &str) -> u64 {
     reqwest::Url::parse(url)
         .ok()
@@ -537,6 +538,7 @@ fn expiry(url: &str) -> u64 {
 }
 
 /// A direct audio URL for a video, from yt-dlp (kept until shortly before it expires)
+#[cfg(feature = "desktop")]
 pub async fn stream_url(video_id: &str, fresh: bool) -> Result<String, String> {
     if !valid_id(video_id) {
         return Err("Bad YouTube video id".into());

@@ -3,28 +3,43 @@
 // Nothing here knows about a window; the apps pass in callbacks where the page used to be called.
 
 pub mod apple;
+#[cfg(feature = "desktop")]
 pub mod backup;
 pub mod bundled;
+#[cfg(feature = "desktop")]
 pub mod discord;
 pub mod lastfm;
+#[cfg(feature = "desktop")]
 pub mod local;
+#[cfg(feature = "desktop")]
 pub mod loudness;
 pub mod lyrics;
 pub mod musicbrainz;
+#[cfg(feature = "desktop")]
 pub mod plugins;
+#[cfg(feature = "desktop")]
 pub mod cast;
+#[cfg(feature = "desktop")]
 pub mod omni_input;
+#[cfg(feature = "desktop")]
 pub mod main_out;
+#[cfg(feature = "desktop")]
 mod capture_diag;
+#[cfg(feature = "desktop")]
 pub mod remote;
+#[cfg(feature = "desktop")]
 pub mod requests;
 pub mod soundcloud;
 pub mod spotify;
+#[cfg(feature = "desktop")]
 pub mod spotify_engine;
+#[cfg(feature = "desktop")]
 pub mod tools;
+#[cfg(feature = "desktop")]
 pub mod widget;
 pub mod youtube;
 pub mod yt_account;
+#[cfg(feature = "desktop")]
 pub mod yt_stream;
 
 use serde::{Deserialize, Serialize};
@@ -80,7 +95,34 @@ pub struct Tokens {
 
 /// %APPDATA%\OmniPulse. The first time, the old %APPDATA%\sc-client is moved there (if it can't be
 /// moved yet, say a file in it is in use, the old one is used until it can).
+/// Where the app keeps its things, if not %APPDATA%\OmniPulse (the Android app's own folder)
+static DATA_DIR: std::sync::Mutex<Option<PathBuf>> = std::sync::Mutex::new(None);
+pub fn set_data_dir(dir: PathBuf) {
+    let _ = fs::create_dir_all(&dir);
+    *DATA_DIR.lock().unwrap() = Some(dir);
+}
+
+/// Opens a sign-in page in the browser: the desktop's default browser, or (set by the Android app)
+/// its own way of showing one
+type Opener = Box<dyn Fn(&str) -> Result<(), String> + Send + Sync>;
+static OPENER: std::sync::Mutex<Option<Opener>> = std::sync::Mutex::new(None);
+pub fn set_opener(f: Opener) {
+    *OPENER.lock().unwrap() = Some(f);
+}
+pub fn open_browser(url: &str) -> Result<(), String> {
+    if let Some(f) = OPENER.lock().unwrap().as_ref() {
+        return f(url);
+    }
+    #[cfg(feature = "desktop")]
+    return opener::open(url).map_err(|e| e.to_string());
+    #[cfg(not(feature = "desktop"))]
+    Err("No way to open the browser here.".into())
+}
+
 pub fn data_dir() -> Result<PathBuf, String> {
+    if let Some(d) = DATA_DIR.lock().unwrap().clone() {
+        return Ok(d);
+    }
     let base = PathBuf::from(std::env::var("APPDATA").map_err(|_| "APPDATA is not set".to_string())?);
     let dir = base.join("OmniPulse");
     let old = base.join("sc-client");
@@ -218,7 +260,7 @@ pub fn open_setup_page(url: &str) -> Result<(), String> {
     if !OK.iter().any(|p| url.starts_with(p)) {
         return Err("Only Spotify's, Last.fm's and Google Cloud's developer pages open from here".into());
     }
-    opener::open(url).map_err(|e| e.to_string())
+    open_browser(url)
 }
 
 pub fn open_url(url: String) -> Result<(), String> {
@@ -236,7 +278,7 @@ pub fn open_url(url: String) -> Result<(), String> {
     {
         return Err("Only SoundCloud, Spotify, YouTube, MusicBrainz and Last.fm links can be opened".to_string());
     }
-    opener::open(&url).map_err(|e| e.to_string())
+    open_browser(&url)
 }
 
 // ---------- app settings (read at startup) ----------
