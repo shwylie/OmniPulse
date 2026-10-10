@@ -106,3 +106,15 @@ mod tests {
         });
     }
 }
+
+/// OMNIPULSE_VERIFY=<installer> cargo test -p omnipulse verify_a_file -- --ignored (its .sig beside it)
+#[cfg(test)]
+#[test]
+#[ignore]
+fn verify_a_file() {
+    let f = std::env::var("OMNIPULSE_VERIFY").expect("OMNIPULSE_VERIFY");
+    let data = std::fs::read(&f).unwrap();
+    let sig = std::fs::read_to_string(format!("{f}.sig")).unwrap();
+    verify(&data, &sig).expect("signed with OmniPulse's key");
+    assert!(verify(&data[1..], &sig).is_err(), "a changed file fails");
+}
