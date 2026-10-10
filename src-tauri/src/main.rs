@@ -139,6 +139,11 @@ async fn loudness_analyse(source: String, id: String) -> Result<Value, String> {
 // ---------- lyrics, Discord, Last.fm, yt-dlp ----------
 #[tauri::command]
 async fn lyrics_get(url: String) -> Result<Value, String> { lyrics::lyrics_get(url).await }
+// Lyrics from one provider (lrclib, netease, kugou, youtube): { synced, plain, source, note } or null
+#[tauri::command]
+async fn lyrics_from(provider: String, artist: String, title: String, secs: u64, video_id: String) -> Result<Value, String> {
+    lyrics::from(&provider, &artist, &title, secs, &video_id).await
+}
 #[tauri::command]
 async fn presence_set(
     details: String,
@@ -913,7 +918,7 @@ fn main() {
             cast_devices, cast_start, cast_pcm, cast_track, cast_reload, cast_volume, cast_stop,
             login, signed_in, logout, api_get, stream_url, get_settings, set_gpu, restart_app, open_url, set_like, set_follow, playlist_write,
             spotify_login, spotify_signed_in, spotify_logout, spotify_token, spotify_api,
-            lyrics_get, presence_set, presence_clear,
+            lyrics_get, lyrics_from, presence_set, presence_clear,
             lastfm_status, lastfm_connect, lastfm_disconnect, lastfm_call, lastfm_recent, spotify_wait,
             stream_resolve, presence_test, taskbar_state,
             widget_start, lan_ip, widget_stop, widget_update, widget_alert, alert_media_set, alert_media_clear, alert_media_bytes,

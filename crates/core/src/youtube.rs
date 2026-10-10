@@ -562,6 +562,27 @@ pub async fn stream_url(video_id: &str, fresh: bool) -> Result<String, String> {
     Ok(url)
 }
 
+// ---------- lyrics ----------
+/// A song's lyrics as YouTube Music shows them (plain text, with whom they're from), or None
+pub async fn lyrics(video_id: &str) -> Result<Option<(String, String)>, String> {
+    if !valid_id(video_id) {
+        return Err("Bad YouTube video id".into());
+    }
+    let next = call("next", json!({ "videoId": video_id })).await?;
+    let mut ids = Vec::new();
+    find_all(&next, "browseId", &mut ids);
+    let Some(id) = ids.iter().filter_map(|x| x.as_str()).find(|x| x.starts_with("MPLYt")) else { return Ok(None) };
+    let page = call("browse", json!({ "browseId": id })).await?;
+    let mut shelves = Vec::new();
+    find_all(&page, "musicDescriptionShelfRenderer", &mut shelves);
+    let Some(shelf) = shelves.first() else { return Ok(None) };
+    let words = text(&shelf["description"]);
+    if words.trim().is_empty() {
+        return Ok(None);
+    }
+    Ok(Some((words, text(&shelf["footer"]))))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -1735,3 +1735,9 @@ body.streamSafe #navSets, body.streamSafe #navArtists, body.streamSafe #plSectio
 .heroBio.open .bioText { -webkit-line-clamp: unset; display: block; }
 .heroBio .linkBtn { margin-top: 2px; }
 .uploaderBy { opacity: .7; }
+.lyProviders { display: flex; flex-direction: column; gap: 4px; margin-top: 8px; }
+.lyProvider { display: flex; align-items: center; gap: 8px; }
+.lyProvider .lyNum { width: 14px; color: var(--muted); font-size: 12px; text-align: right; }
+.lyProvider .lyName { min-width: 170px; }
+.lyProvider button { padding: 2px 8px; }
+.lyOthers { display: inline-flex; gap: 10px; flex-wrap: wrap; }
