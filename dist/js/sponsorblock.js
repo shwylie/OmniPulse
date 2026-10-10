@@ -16,7 +16,7 @@ function sbLoad(id) {
 
 function sbTick() {
   const t = curTrack();
-  if (!sbOn() || !t || !nowPlaying()) return;
+  if (!sbOn() || !t || !nowPlaying() || switching) return;
   // listening along: the host's app skips them (or doesn't), and this follows it
   if (typeof together !== "undefined" && together.role === "listener") return;
   const id = sbVideoOf(t);

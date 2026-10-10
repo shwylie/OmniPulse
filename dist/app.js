@@ -1630,15 +1630,40 @@ function playFromPage(i) {
 }
 
 // ---------- playback ----------
+// Changing track: what's playing carries on, as it is, until the new one can actually play (a slow
+// source, YouTube's say, can take a few seconds to find); then it fades out quickly and the new one
+// comes in. Meanwhile the seek bar shimmers, and nothing that watches the position (fades, skips,
+// trims, the end) takes the old track's for the new one's.
+let switching = null;   // { prev } while the new track is being found
+let playGen = 0;        // which playCurrent is the latest
+
+function loadingBar(on) {
+  document.querySelectorAll(".seekRow, .miniProg").forEach((n) => n.classList.toggle("loading", !!on));
+}
+
+// The handover: the old one fades out (quickly), and the new one starts once it's quiet
+async function swapIn() {
+  if (!switching) return;
+  const { prev } = switching;
+  switching = null;
+  const heard = nowPlaying();
+  fadeTrackChange(prev, curTrack());   // (js/fade.js)
+  nativeOutFlush();   // the last track's tail isn't heard over the new one
+  if (prev && onSpotifyEngine(prev) && !onSpotifyEngine(curTrack())) spotifyPause();
+  if (heard) await new Promise((r) => setTimeout(r, FADE_SKIP_MS));
+}
+
 async function playCurrent() {
   const t = curTrack();
   if (!t) return;
+  const gen = ++playGen;
   playFresh = false;   // (what's loaded is this one from now on)
   if (closestNote && closestNote.t !== t) { closestNote = null; say("", { force: true }); }
   if (!safeOk(t)) { safeSkip(t); return; }
-  fadeTrackChange(fadeState.last, t);   // the old one fades out, this one in (js/fade.js)
+  // (a switch already under way keeps its "before": that's what's still heard)
+  if (!switching) switching = { prev: fadeState.last };
   fadeState.last = t;
-  nativeOutFlush();   // the last track's tail isn't heard over the new one
+  loadingBar(true);
   fillNowPlaying(t);
   refreshLikeUI();
   trackStarted(t);
@@ -1650,21 +1675,25 @@ async function playCurrent() {
     if (onSpotifyEngine(t)) {
       // a stream still loading for the track before (SoundCloud, YouTube...) mustn't start under this one
       streamToken++;
+      await swapIn();
       if (hls) { hls.destroy(); hls = null; }
       audio.pause();
       await spotifyStart(t, startAt);
     } else {
-      spotifyPause();
       await startStream(t);
       if (startAt && curTrack() === t) audio.currentTime = startAt / 1000;
     }
   } catch (e) {
     if (e && e.name === "AbortError") return;   // skipped to another track
+    if (gen === playGen) await swapIn();   // (it can't play: the old one stops anyway)
     // only for signed-in adults on YouTube, with no other upload: skipped, saying why (js/youtube.js)
     if (ytAgeBlocked(e) && curTrack() === t) { ytAgeSkip(t); return; }
     // listening along: what can't play here comes from YouTube Music, or waits for the next one
     if (together.role === "listener" && curTrack() === t) { listenerFallback(t, String(e && e.message ? e.message : e).replace(/^Error: /, "")); return; }
     say("Could not play this track: " + e);
+  } finally {
+    // (whatever this ended in: playing, a stand-in, a skip; a newer track's switch is its own)
+    if (gen === playGen) { if (switching) await swapIn(); loadingBar(false); }
   }
 }
 
@@ -1676,8 +1705,9 @@ audio.addEventListener("playing", () => { if (onSpotifyEngine(curTrack())) audio
 
 const streamName = (name) => String(name).replace(/_url$/, "");
 
-// Loads one stream and resolves once it is actually playing
-function tryStream(url, isHls, auth) {
+// Loads one stream and resolves once it is actually playing (the track before stops only now)
+async function tryStream(url, isHls, auth) {
+  await swapIn();
   return new Promise((resolve, reject) => {
     let done = false;
     const finish = (err) => {
@@ -1996,6 +2026,7 @@ audio.addEventListener("error", () => {
 });
 // positions and lengths as shown: within the part of the track that plays (js/trims.js)
 audio.addEventListener("timeupdate", () => {
+  if (switching) return;   // (still the track before, while this one's found)
   const t = curTrack();
   $("cur").textContent = fmt(viewPos(t, audio.currentTime * 1000));
   const d = viewDur(t, curDurMs());

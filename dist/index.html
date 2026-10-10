@@ -218,7 +218,7 @@
       <button id="repeatBtn" class="ghost mode" aria-label="Repeat" data-mode="off"><svg viewBox="0 0 24 24"><path d="M7 7h10v3l4-4-4-4v3H5v6h2V7zm10 10H7v-3l-4 4 4 4v-3h12v-6h-2v4z"/></svg></button>
       <div class="seekRow">
         <span id="cur">0:00</span>
-        <input id="seek" type="range" min="0" max="1000" value="0" aria-label="Seek">
+        <span class="seekWrap"><input id="seek" type="range" min="0" max="1000" value="0" aria-label="Seek"><span class="seekLoad" aria-hidden="true"></span></span>
         <span id="dur">0:00</span>
       </div>
       <div class="volWrap">

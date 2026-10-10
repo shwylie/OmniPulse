@@ -142,6 +142,8 @@ li.playing .title { color: var(--accent); }
 .player .main:hover { background: var(--accent); color: var(--on-accent); filter: brightness(1.08); transform: scale(1.04); }
 .seekRow { display: flex; align-items: center; gap: 10px; width: 100%; color: var(--muted); font-size: 12px; }
 .seekRow input { flex: 1; }
+.seekWrap { flex: 1; position: relative; display: flex; align-items: center; min-width: 0; }
+.seekWrap input { flex: 1; min-width: 0; }
 .right { display: flex; align-items: center; justify-content: flex-end; gap: 4px; }
 #vol { width: 100px; }
 input[type="range"] { accent-color: var(--accent); }
@@ -1747,3 +1749,22 @@ body.streamSafe #navSets, body.streamSafe #navArtists, body.streamSafe #plSectio
 .collabPill { display: inline-flex; align-items: center; gap: 6px; }
 .collabPill svg { width: 16px; height: 16px; fill: currentColor; }
 .collabPill.on { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 50%, transparent); }
+/* the next track being found: a marquee, as Windows Vista's progress bars had it: a soft glow that
+   glides left to right along the bar, over and over (not its progress) */
+.seekLoad { position: absolute; left: 0; right: 0; top: 50%; height: 4px; margin-top: -2px; border-radius: 4px; pointer-events: none; opacity: 0; }
+.seekLoad::before, .miniTrack::before {
+  content: ""; position: absolute; top: 50%; height: 10px; margin-top: -5px; width: 22%; left: -22%;
+  border-radius: 50%; pointer-events: none;
+  background: radial-gradient(ellipse at center, color-mix(in srgb, var(--accent) 35%, #fff) 0%, var(--accent) 30%, color-mix(in srgb, var(--accent) 45%, transparent) 55%, transparent 72%);
+  filter: blur(0.6px);
+}
+.miniTrack { position: relative; }
+.miniTrack::before { opacity: 0; }
+.seekRow.loading .seekLoad, .miniProg.loading .miniTrack::before { opacity: 1; transition: opacity .2s; }
+.seekRow.loading .seekLoad::before, .miniProg.loading .miniTrack::before { animation: seekMarquee 1.6s cubic-bezier(.45, .05, .55, .95) infinite; }
+/* (the bar itself steps back while it glides: the old track's progress isn't the new one's) */
+.seekRow.loading input { opacity: .45; }
+.miniProg.loading .miniTrack { overflow: visible; }
+.miniProg.loading #miniBar, .miniProg.loading .miniKnob { opacity: .2; }
+@keyframes seekMarquee { from { left: -22%; } to { left: 100%; } }
+@media (prefers-reduced-motion: reduce) { .seekRow.loading .seekLoad::before, .miniProg.loading .miniTrack::before { animation-duration: 3.2s; } }

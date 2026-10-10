@@ -49,7 +49,7 @@ const fmtTenth = (ms) => {
 // ---------- while it plays ----------
 function trimTick() {
   const t = curTrack();
-  if (!t || !nowPlaying()) return;
+  if (!t || !nowPlaying() || switching) return;
   const pos = curPosMs();
   if (trimPreview && trimPreview.id === t.id) {
     if (pos >= trimPreview.until) { trimPreview = null; toggle(); say("Preview done."); }

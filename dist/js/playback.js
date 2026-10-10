@@ -90,6 +90,8 @@ function cycleRepeat() {
 
 // Called when a track finishes, from the audio element or the Spotify player
 function onEnded() {
+  // the track before ran out while the next one's being found: it starts when it's ready
+  if (typeof switching !== "undefined" && switching) return;
   if (closestNote) closestAccept();   // a closest version heard to the end: kept (app.js)
   if (repeatMode === "one") {
     if (onSpotifyEngine(curTrack())) playCurrent();

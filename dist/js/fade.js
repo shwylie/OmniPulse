@@ -77,7 +77,7 @@ function fadeJump(ms, jump) {
 // Near the end: down to silence over the fade's length (and back up if you seek away from the end)
 function fadeTick() {
   const t = curTrack();
-  if (!t || !norm.fade || !nowPlaying()) return;
+  if (!t || !norm.fade || !nowPlaying() || switching) return;
   // Never stuck silent: skipping quickly can miss the moment a track's sound starts, which leaves
   // its fade-in waiting (and the volume down) while it plays. Playing on for a moment counts as
   // started; and turned down while not fading out, it comes back up.

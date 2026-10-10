@@ -126,7 +126,7 @@ function silenceTick() {
   const now = performance.now();
   const dt = silence.lastTick ? now - silence.lastTick : 0;
   silence.lastTick = now;
-  if (!min || !t || !nowPlaying()) { silence.live = 0; return; }
+  if (!min || !t || !nowPlaying() || switching) { silence.live = 0; return; }
   // listening along: the host's app skips them (or doesn't), and this follows it, so the two stay in step
   if (typeof together !== "undefined" && together.role === "listener") { silence.live = 0; return; }
   const pos = curPosMs();
