@@ -11,6 +11,7 @@ mod plugrun;
 mod collab;
 mod desktop;
 mod instance;
+mod updater;
 mod discover;
 mod integrations;
 mod look;
@@ -4504,6 +4505,54 @@ fn rand_u64() -> u64 {
 // ---------- Back Up & Restore (Settings > App; crates/core/src/backup.rs, as the web app's) ----------
 // The backup's "web" part is the web app's saved data: here, the copy it last wrote for this app.
 // This app's own settings and state are files in the data folder, and go in with the rest.
+// ---------- updates (crate::updater) ----------
+thread_local! {
+    /// a newer release, once one's known
+    static UPDATE: RefCell<Option<updater::Release>> = const { RefCell::new(None) };
+}
+
+fn update_check(shared: &Shared, said: bool) {
+    let (rt, weak) = { let a = shared.borrow(); (a.rt.clone(), a.ui.clone()) };
+    if let Some(ui) = weak.upgrade() { ui.set_update_note("Checking...".into()); }
+    rt.spawn(async move {
+        let r = updater::check().await;
+        let _ = weak.upgrade_in_event_loop(move |ui| {
+            match r {
+                Ok(Some(rel)) => {
+                    ui.set_update_note(format!("OmniPulse {} is out (this is {}). {}", rel.version, updater::VERSION, rel.notes).into());
+                    ui.set_update_label("Update".into());
+                    ui.set_status(format!("OmniPulse {} is out: Settings > App & Look > Updates.", rel.version).into());
+                    UPDATE.with(|u| *u.borrow_mut() = Some(rel));
+                }
+                Ok(None) => {
+                    ui.set_update_note(format!("OmniPulse {}: up to date.", updater::VERSION).into());
+                    if said { ui.set_status("OmniPulse is up to date.".into()); }
+                }
+                Err(e) => ui.set_update_note(format!("Couldn't check for updates: {e}").into()),
+            }
+        });
+    });
+}
+
+fn update_act(shared: &Shared) {
+    let Some(rel) = UPDATE.with(|u| u.borrow().clone()) else { return update_check(shared, true) };
+    let (rt, weak) = { let a = shared.borrow(); (a.rt.clone(), a.ui.clone()) };
+    if let Some(ui) = weak.upgrade() { ui.set_update_note(format!("Downloading OmniPulse {}...", rel.version).into()); ui.set_update_label("...".into()); }
+    rt.spawn(async move {
+        let got = updater::download(&rel).await;
+        let _ = weak.upgrade_in_event_loop(move |ui| SHARED.with(|s| {
+            match got.and_then(|p| updater::install(&p)) {
+                Ok(()) => {
+                    // (the installer starts the new one when it's done)
+                    if let Some(sh) = s.borrow().clone() { save_session(&sh.borrow()); }
+                    let _ = slint::quit_event_loop();
+                }
+                Err(e) => { ui.set_update_note(format!("Couldn't update: {e}").into()); ui.set_update_label("Update".into()); }
+            }
+        }));
+    });
+}
+
 fn backup_web() -> String {
     let mut v = omnipulse_core::load_web_export().unwrap_or_else(|| serde_json::json!({}));
     if let Some(o) = v.as_object_mut() {
@@ -5025,6 +5074,13 @@ fn main() -> Result<(), slint::PlatformError> {
     ui.on_genre_search(move |g| go(&s, Place::Search(g.to_string())));
     let s = shared.clone();
     ui.on_pl_import(move || pl_import(&s));
+    let s = shared.clone();
+    ui.on_update_act(move || update_act(&s));
+    // a newer version: asked about a little after starting (not in the self-test)
+    if std::env::var_os("OMNIPULSE_SELFTEST").is_none() {
+        let s = shared.clone();
+        slint::Timer::single_shot(std::time::Duration::from_secs(20), move || update_check(&s, false));
+    }
     let s = shared.clone();
     ui.on_name_done(move |name| name_done(&s, &name));
     let s = shared.clone();

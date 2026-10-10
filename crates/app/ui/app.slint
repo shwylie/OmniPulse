@@ -771,6 +771,10 @@ export component AppWindow inherits Window {
     callback account-act(int);
     in-out property <bool> rounded: true;
     callback rounded-changed(bool);
+    // Updates: what's known (this version, or a newer one), and its button ("Check" or "Update")
+    in property <string> update-note: "Checks for a newer version a little after it starts.";
+    in property <string> update-label: "Check";
+    callback update-act();
     callback backup-make();
     callback backup-restore();
     callback plat-toggle(string);
@@ -1524,6 +1528,22 @@ export component AppWindow inherits Window {
                                             Text { text: "On the sidebar, the page and the queue. Off: square."; color: Theme.muted; font-size: 12px; }
                                         }
                                         Toggle { checked <=> root.rounded; y: (parent.height - self.height) / 2; toggled => { root.rounded-changed(self.checked); } }
+                                    }
+                                }
+                                Card {
+                                    HorizontalLayout {
+                                        padding: 16px;
+                                        padding-top: 12px;
+                                        padding-bottom: 12px;
+                                        spacing: 10px;
+                                        VerticalLayout {
+                                            horizontal-stretch: 1;
+                                            alignment: center;
+                                            spacing: 2px;
+                                            Text { text: "Updates"; color: Theme.text; font-weight: 700; }
+                                            Text { text: root.update-note; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
+                                        }
+                                        Pill { label: root.update-label; on: root.update-label == "Update"; y: (parent.height - self.height) / 2; clicked => { root.update-act(); } }
                                     }
                                 }
                                 Card {

@@ -5544,12 +5544,14 @@ dependencies = [
 
 [[package]]
 name = "omnipulse"
-version = "0.1.0"
+version = "0.3.0"
 dependencies = [
  "arboard",
+ "base64 0.22.1",
  "futures-util",
  "global-hotkey",
  "image",
+ "minisign-verify",
  "omnipulse-audio",
  "omnipulse-core",
  "regex",

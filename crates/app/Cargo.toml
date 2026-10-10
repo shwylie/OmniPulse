@@ -1,6 +1,6 @@
 [package]
 name = "omnipulse"
-version = "0.1.0"
+version = "0.3.0"
 edition = "2021"
 description = "OmniPulse, native: one window, one process (Slint), beside the web app until it does everything"
 
@@ -26,6 +26,9 @@ tray-icon = "0.25"
 rfd = "0.16"
 # copying share links (the version Tauri's clipboard plugin uses)
 arboard = "3.6"
+# the updater: releases are checked against OmniPulse's own key before installing (as Tauri's updater does)
+minisign-verify = "0.2"
+base64 = "0.22"
 # Listen Along and Jams: the relay's rooms (the version the workspace has already)
 tokio-tungstenite = { version = "0.28", features = ["native-tls"] }
 futures-util = "0.3"
