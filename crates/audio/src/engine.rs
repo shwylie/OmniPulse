@@ -575,16 +575,18 @@ impl Handoff {
         Self { low: Ramp::swap(at, 250), mid: all, high: all, echo: None, out_sweep: None, in_sweep: None }
     }
 
-    /// Staged over `ms` (of beats `beat_ms` long), swapped at `swap` (a downbeat): the one coming in's
-    /// highs come up over its first bar (its hats over the one playing); at the swap, its mids and bass
-    /// come in as the other's go (the mids over the beat leading to it, the bass at once on it: one voice
-    /// then the other, the kicks never together), the one going out's mids echoed as they go; its highs
-    /// leave over the last quarter
+    /// Staged over `ms` (of beats `beat_ms` long), swapped at `swap` (a downbeat): the highs cross over
+    /// (equal power: never two sets of hats at full) from 4 bars before the swap to 2 bars after it; at
+    /// the swap, the mids and bass come in as the other's go (the mids over the two beats leading to it,
+    /// the bass at once on it: one voice then the other, the kicks never together), the one going out's
+    /// mids echoed as they go
     pub fn staged(ms: u64, beat_ms: f64, swap: u64) -> Self {
-        let (q, beat) = (ms / 4, beat_ms.round() as u64);
+        let beat = beat_ms.round() as u64;
+        let highs_from = swap.saturating_sub(16 * beat);
+        let highs_to = (swap + 8 * beat).min(ms);
         Self {
-            high: Ramp { in_at: 0, in_len: (4 * beat).min(q), out_at: ms - q, out_len: q },
-            mid: Ramp::swap(swap.saturating_sub(beat), beat),
+            high: Ramp::swap(highs_from, highs_to - highs_from),
+            mid: Ramp::swap(swap.saturating_sub(2 * beat), 2 * beat),
             low: Ramp::swap(swap.saturating_sub(60), 120),
             // (a dotted eighth's echo: three quarters of a beat; sent for the two beats before the swap and the one after)
             echo: Some((swap.saturating_sub(2 * beat), 3 * beat, (beat_ms * 0.75).round() as u64)),
@@ -697,8 +699,8 @@ struct Echo {
     at: usize,
 }
 
-const ECHO_FEEDBACK: f32 = 0.45;
-const ECHO_WET: f32 = 0.55;
+const ECHO_FEEDBACK: f32 = 0.35;
+const ECHO_WET: f32 = 0.3;
 
 impl Echo {
     /// What it gives back now, for this frame of what's sent to it (`delay` frames long)
@@ -771,7 +773,8 @@ impl Fading {
                         let (a_l, a_m, a_h) = self.bands[0].split(ch, o);
                         let (b_l, b_m, b_h) = self.bands[1].split(ch, i);
                         side[ch] = a_l * lo + a_m * mo + a_h * ho + b_l * li + b_m * mi + b_h * hi;
-                        send[ch] = a_m * mo + a_h * ho;
+                        // (its voice echoed: its mids, not its hats)
+                        send[ch] = a_m * mo;
                     }
                     if let Some((from, len, delay)) = h.echo {
                         let sending = if f >= from && f < from + len { 1.0 } else { 0.0 };
@@ -1226,9 +1229,15 @@ mod mix_tests {
             }
             4.0 * (c * c + s * s).sqrt() / n as f32
         };
-        // a second in: the highs of both, the mids and bass only the one going out's
-        assert!(has(9000.0, 3.0) > 0.03 && has(6000.0, 3.0) > 0.05, "highs {} {}", has(9000.0, 3.0), has(6000.0, 3.0));
+        // early on (the highs cross over all through the mix: its beats are long): the one going out's highs mostly
+        assert!(has(6000.0, 2.5) > 0.08 && has(9000.0, 2.5) < 0.04, "highs early {} {}", has(6000.0, 2.5), has(9000.0, 2.5));
         assert!(has(900.0, 3.0) < 0.02 && has(82.0, 3.0) < 0.02, "held back {} {}", has(900.0, 3.0), has(82.0, 3.0));
+        // past it: the one coming in's highs only
+        assert!(has(9000.0, 9.8) > 0.08 && has(6000.0, 9.8) < 0.01, "highs late {} {}", has(9000.0, 9.8), has(6000.0, 9.8));
+        // and never louder or quieter through it than either alone (within 1.5 dB)
+        let rms = |at: f32| { let i = (at * rate as f32) as usize * 2; let x = &out[i..i + 8820]; 20.0 * ((x.iter().map(|v| v * v).sum::<f32>() / x.len() as f32).sqrt()).log10() };
+        let before = rms(1.0);
+        for t in [2.5f32, 3.5, 4.5, 5.5, 6.5, 7.5, 8.5, 9.5, 10.5] { assert!((rms(t) - before).abs() < 1.5, "level at {t}: {} against {before}", rms(t)); }
         // before the swap (6 s: 2 + 4): the one going out's mids and bass
         assert!(has(600.0, 5.0) > 0.15 && has(55.0, 5.0) > 0.2 && has(82.0, 5.0) < 0.03, "before {} {} {}", has(600.0, 5.0), has(55.0, 5.0), has(82.0, 5.0));
         // after it: the one coming in's (the other's mids gone, but for their echo)
