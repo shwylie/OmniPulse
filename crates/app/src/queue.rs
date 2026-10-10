@@ -251,7 +251,6 @@ pub fn space_recent(list: Vec<Track>, last_played: &HashMap<String, u64>, window
 
 // ---------- autoplay ----------
 pub const AUTOPLAY_BATCH: usize = 10;
-pub const AUTOPLAY_LEAD_MS: u64 = 30_000;
 
 /// Takes turns between the platforms' lists (each list's own order kept), starting with one other
 /// than `last_plat`. A platform isn't used twice in a row unless it's the only one with anything to

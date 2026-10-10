@@ -1475,6 +1475,8 @@ fn start(shared: &Shared) {
     let ui = weak.upgrade().unwrap();
     show_now(&ui, &t);
     ui.set_status(format!("Loading \"{}\"...", t.title).into());
+    // (the song before plays on until this one can: the seek bar shows its progress behind a marquee)
+    ui.set_track_loading(true);
     ui.set_lyrics_note("Looking for lyrics...".into());
     ui.set_lyric_on(-1);
     {
@@ -1512,6 +1514,7 @@ fn start(shared: &Shared) {
                 if shared.borrow().token != token {
                     return;
                 }
+                ui.set_track_loading(false);
                 match src {
                     Ok(src) => {
                         let what = sound::loud_source(&t, version.as_ref().map(|v| v.yt.id.as_str()));
@@ -1606,6 +1609,47 @@ fn start(shared: &Shared) {
                 a.lyrics = lyrics;
             });
         });
+    });
+}
+
+// ---------- preloading the next track (as the web app's js/preload.js) ----------
+// Once the one playing is 70% through, or has a minute left (whichever comes first), what the next one
+// needs before it can start is found: its YouTube Music version (a catalogue song, a Go+ track) and its
+// stream's address (yt-dlp; both kept, crate::versions and core::youtube), so it starts straight away.
+// Meanwhile the marquee glides over the seek bar (which stays usable).
+const PRELOAD_AT: f64 = 0.7;
+const PRELOAD_LEFT_MS: u64 = 60_000;
+
+fn preload_due(pos: u64, dur: u64) -> bool {
+    pos as f64 >= dur as f64 * PRELOAD_AT || dur.saturating_sub(pos) <= PRELOAD_LEFT_MS
+}
+
+thread_local! {
+    /// the track looked for last (so it's done once)
+    static PRELOADED: RefCell<String> = const { RefCell::new(String::new()) };
+}
+
+fn preload_next(shared: &Shared) {
+    let next = {
+        let a = shared.borrow();
+        if a.repeat == "one" { return; }
+        match a.queue.qi {
+            Some(i) if i + 1 < a.queue.items.len() => a.queue.items[i + 1].t.clone(),
+            Some(_) if a.repeat == "all" && a.queue.items.len() > 1 => a.queue.items[0].t.clone(),
+            _ => return,
+        }
+    };
+    if PRELOADED.with(|p| *p.borrow() == next.key) { return; }
+    PRELOADED.with(|p| *p.borrow_mut() = next.key.clone());
+    let yt_id = |t: &Track| if let track::Src::YouTube(id) = &t.src { Some(id.clone()) } else { None };
+    let via_yt = next.go_plus || matches!(next.src, track::Src::Catalog(_)) || listen_needs_version(&next);
+    if !via_yt && yt_id(&next).is_none() { return; }   // (the others start at once anyway)
+    let (rt, weak) = { let a = shared.borrow(); (a.rt.clone(), a.ui.clone()) };
+    if let Some(ui) = weak.upgrade() { ui.set_preloading(true); }
+    rt.spawn(async move {
+        let id = if via_yt { versions::find(&next).await.map(|v| v.yt.id) } else { yt_id(&next) };
+        if let Some(id) = id { let _ = omnipulse_core::youtube::stream_url(&id, false).await; }
+        let _ = weak.upgrade_in_event_loop(|ui| ui.set_preloading(false));
     });
 }
 
@@ -1977,10 +2021,15 @@ fn tick(shared: &Shared, events: &std::sync::mpsc::Receiver<Event>, n: u64) {
             slint::Timer::single_shot(std::time::Duration::ZERO, move || push_out(&s, false));
         }
         let last = a.queue.qi.is_some_and(|i| i + 1 >= a.queue.items.len());
-        last && dur > 0 && dur.saturating_sub(pos) <= queue::AUTOPLAY_LEAD_MS && !a.ap_busy
+        // (when the next track would be preloaded: 70% through, or a minute left, so autoplay's first pick
+        // is preloaded too)
+        last && dur > 0 && preload_due(pos, dur) && !a.ap_busy
     };
     if near_end {
         autoplay_fill(shared, false);
+    }
+    if !engine.is_paused() && dur > 0 && preload_due(pos, dur) {
+        preload_next(shared);
     }
     if !engine.is_paused() && fade_and_silences(shared, pos, dur) {
         return;
@@ -4947,7 +4996,7 @@ fn main() -> Result<(), slint::PlatformError> {
         // (OMNIPULSE_SELFTEST_PLAN=discover: only Discover, its shelves, and the first mix it has opened)
         let only_discover = std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("discover");
         let plan: Vec<(u64, &str)> = if join.is_some() { vec![(6, "join"), (14, "joined"), (16, "jamskip"), (19, "leave"), (21, "end")] }
-            else if only_discover { vec![(9, "play"), (11, "discover"), (30, "disc"), (45, "discmix"), (46, "taste"), (47, "taste2"), (48, "taste3"), (70, "tasted"), (71, "end")] } else { full.to_vec() };
+            else if only_discover { vec![(9, "play"), (11, "discover"), (30, "disc"), (45, "discmix"), (46, "taste"), (47, "taste2"), (48, "taste3"), (70, "tasted"), (71, "marquee"), (72, "marqueeoff"), (73, "end")] } else { full.to_vec() };
         t.start(slint::TimerMode::Repeated, std::time::Duration::from_millis(250), move || {
             let Some(&(at, what)) = plan.get(step_no) else { return };
             if started.elapsed().as_secs() < at { return; }
@@ -5125,6 +5174,9 @@ fn main() -> Result<(), slint::PlatformError> {
                     ui.invoke_taste_save();
                     println!("selftest: picked {} / {}, open {}, status \"{}\"", s.borrow().web.prefs["tasteGenres"], s.borrow().web.prefs["tasteSubgenres"], ui.get_taste_open(), ui.get_status());
                 }
+                // the seek bar's marquee, for its picture
+                "marquee" => ui.set_track_loading(true),
+                "marqueeoff" => ui.set_track_loading(false),
                 "tasted" => println!("selftest: discover after picking: {}", ui.get_shelves().iter().map(|sh| format!("{} {}", sh.title, sh.tiles.row_count())).collect::<Vec<_>>().join(", ")),
                 "discmix" => println!("selftest: mix \"{}\" ({}): {} tracks, first {:?}", ui.get_page_title(), ui.get_page_sub(), s.borrow().page_tracks.len(), s.borrow().page_tracks.iter().take(4).map(|t| format!("{} - {} [{}]", t.artist, t.title, t.plat())).collect::<Vec<_>>()),
                 "end" => {
