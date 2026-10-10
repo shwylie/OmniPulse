@@ -3965,9 +3965,13 @@ fn jam_paint(shared: &Shared) {
         ui.set_jam_on(true);
         ui.set_jam_hidden(false);
         ui.set_jam_label(if kind == "jam" { "Leave Jam" } else { "Leave Listen Along" }.into());
+        ui.set_queue_room(if kind == "jam" { "In a Jam: the host's queue".into() } else { "Listening along: the host's queue".into() });
+        ui.set_queue_room_host(false);
         return;
     }
     let jam = room_kind().as_deref() == Some("jam");
+    ui.set_queue_room(if jam { format!("Your Jam · {} listening", members.len()).into() } else { "".into() });
+    ui.set_queue_room_host(jam);
     ui.set_jam_on(jam);
     ui.set_jam_hidden(!jams_on(&shared.borrow()));
     ui.set_jam_label(if jam { if members.is_empty() { "Jam".into() } else { format!("Jam \u{b7} {}", members.len()) } } else { "Start a Jam".into() }.into());

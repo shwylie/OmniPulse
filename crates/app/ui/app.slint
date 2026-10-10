@@ -789,6 +789,9 @@ export component AppWindow inherits Window {
     // Jams: the title bar's button ("" hides it), someone asking for one, and the Jam's own dialog
     in property <string> jam-label;
     in property <bool> jam-on;
+    // the queue panel's bar while in a room: "Your Jam · 2 listening" (End Jam), or listening along (Leave)
+    in property <string> queue-room;
+    in property <bool> queue-room-host;
     in property <string> jam-ask;
     // Listen Along & Jams switched off: no Jam button
     in property <bool> jam-hidden;
@@ -1788,6 +1791,17 @@ export component AppWindow inherits Window {
                         Text { text: "Queue"; color: Theme.text; font-size: 18px; font-weight: 800; vertical-alignment: center; horizontal-stretch: 1; }
                         Text { text: "Autoplay"; color: Theme.muted; font-size: 12px; vertical-alignment: center; }
                         Toggle { checked <=> root.autoplay; y: (parent.height - self.height) / 2; toggled => { root.autoplay-changed(self.checked); } }
+                    }
+                    if root.queue-room != "": Rectangle {
+                        height: 40px;
+                        border-radius: 10px;
+                        background: Theme.accent.with-alpha(0.14);
+                        HorizontalLayout {
+                            padding-left: 12px;
+                            padding-right: 4px;
+                            Text { text: root.queue-room; color: Theme.text; font-size: 13px; font-weight: 600; vertical-alignment: center; horizontal-stretch: 1; overflow: elide; }
+                            Pill { label: root.queue-room-host ? "End Jam" : "Leave"; y: 1px; clicked => { if (root.queue-room-host) { root.jam-end(); } else { root.jam-clicked(); } } }
+                        }
                     }
                     if root.autoplay-note != "": Text { text: root.autoplay-note; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
                     if root.queue-rows.length == 0: Text { text: "Nothing queued. Play something, or right-click a track to add it."; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
