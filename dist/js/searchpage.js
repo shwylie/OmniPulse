@@ -78,6 +78,9 @@ async function searchArtists(q, plats, genre) {
     plats.includes("youtube") && !genre
       ? invoke("yt_artists", { query: q }).then((l) => l.map((a) => ({ plat: "youtube", name: a.name, info: { id: a.id, name: a.name, img: a.thumb, followers: a.subscribers } }))).catch(() => [])
       : [],
+    plats.includes("catalog") && !genre
+      ? dzGet("/search/artist?limit=10&q=" + encodeURIComponent(q)).then((d) => (d.data || []).map((a) => ({ plat: "deezer", name: a.name, info: { id: a.id, name: a.name, img: a.picture_big || a.picture_xl || "", followers: a.nb_fan || 0, url: a.link || "" } }))).catch(() => [])
+      : [],
     // a genre's best-known artists, from Last.fm (names only)
     genre && prefs.lfmOn !== false
       ? invoke("lastfm_call", { method: "tag.getTopArtists", params: [["tag", genre], ["limit", "20"]] })
@@ -86,17 +89,30 @@ async function searchArtists(q, plats, genre) {
   ]);
   // one tile per artist, whichever platforms they turned up on
   const by = new Map();
-  interleave(lists).forEach((x) => {
+  interleave(lists).forEach((x, order) => {
     const k = artistKey(x.name);
     if (!k) return;
-    if (!by.has(k)) by.set(k, { name: x.name, on: {}, img: "" });
+    if (!by.has(k)) by.set(k, { name: x.name, on: {}, img: "", followers: 0, order });
     const a = by.get(k);
-    if (x.plat && !a.on[x.plat]) a.on[x.plat] = x.info;
-    if (!a.img && x.info && x.info.img) a.img = x.info.img;
+    if (x.plat && !a.on[x.plat]) { a.on[x.plat] = x.info; a.followers += countOf(x.info && x.info.followers); }
+    // (a real picture beats a stand-in avatar)
+    const img = x.info && x.info.img;
+    if (img && (!a.img || (!realImage(a.img) && realImage(img)))) a.img = img;
   });
-  return [...by.values()].slice(0, 24).map((a) => {
+  // The one you meant first: the name itself, then one with all the words; then a real picture,
+  // then how many follow them (on every platform together), then how many platforms they're on
+  const want = reqWords(q).join(" ");
+  const wantSet = new Set(reqWords(q));
+  const rank = (a) => {
+    const have = reqWords(a.name);
+    const exact = genre ? 0 : have.join(" ") === want ? 2 : [...wantSet].every((w) => have.includes(w)) ? 1 : 0;
+    return [exact, realImage(a.img) ? 1 : 0, Math.log10(1 + a.followers) + Object.keys(a.on).length * 0.5];
+  };
+  const ranked = [...by.values()].map((a) => ({ a, r: rank(a) }))
+    .sort((x, y) => y.r[0] - x.r[0] || y.r[1] - x.r[1] || y.r[2] - x.r[2] || x.a.order - y.a.order).map((x) => x.a);
+  return ranked.slice(0, 24).map((a) => {
     const plats = Object.keys(a.on);
-    const seed = () => artistFrom({ name: a.name, sc: a.on.soundcloud, sp: a.on.spotify, yt: a.on.youtube });
+    const seed = () => { const s = artistFrom({ name: a.name, sc: a.on.soundcloud, sp: a.on.spotify, yt: a.on.youtube }); if (a.on.deezer && !s.on.deezer) s.on.deezer = a.on.deezer; return s; };
     return {
       kind: "artist", name: a.name, art: a.img, hue: hueOf(a.name), plats, sub: "Artist",
       open: () => openArtist(seed()),

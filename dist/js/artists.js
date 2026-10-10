@@ -332,7 +332,20 @@ function artistSubline(a) {
   return parts;
 }
 
-const artistImage = (a) => (a && a.on && ((a.on.soundcloud && a.on.soundcloud.img) || (a.on.spotify && a.on.spotify.img) || (a.on.youtube && a.on.youtube.img) || (a.on.deezer && a.on.deezer.img))) || "";
+// A picture that's really of them (SoundCloud's and Deezer's stand-in avatars aren't)
+const realImage = (u) => !!u && !/default_avatar|\/images\/artist\/\/|\/artist\/\/|placeholder/i.test(u);
+// How many follow them: a number, or YouTube's "1.37M subscribers"
+function countOf(v) {
+  if (typeof v === "number") return v;
+  const m = String(v || "").replace(/,/g, "").match(/([\d.]+)\s*([kmb])?/i);
+  if (!m) return 0;
+  return Number(m[1]) * ({ k: 1e3, m: 1e6, b: 1e9 }[(m[2] || "").toLowerCase()] || 1);
+}
+const artistImage = (a) => {
+  if (!a || !a.on) return "";
+  const imgs = ["spotify", "deezer", "youtube", "soundcloud"].map((p) => a.on[p] && a.on[p].img).filter(Boolean);
+  return imgs.find(realImage) || imgs[0] || "";
+};
 
 // ---------- following, on every platform the artist is on ----------
 const YT_FOLLOWS_KEY = "sc.ytFollows";
