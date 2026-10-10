@@ -1588,6 +1588,7 @@ fn start(shared: &Shared) {
                             _ => None,
                         };
                         sb_load(&shared, video);
+                        rhythm_begin(&shared, &t, 0);
                         let what = sound::loud_source(&t, version.as_ref().map(|v| v.yt.id.as_str()));
                         shared.borrow_mut().cur_loud = what.as_ref().map(|(k, id)| format!("{k}:{id}"));
                         FADE.with(|f| *f.borrow_mut() = (false, String::new()));
@@ -1693,6 +1694,86 @@ fn start(shared: &Shared) {
             });
         });
     });
+}
+
+// ---------- a song's tempo, beats and key (core::rhythm), for seamless mixing ----------
+// On a song's first play (with nothing known of it yet), its first 30% is listened to as it plays (the
+// engine's sound, before the volume: Spotify's too) and measured: its BPM, each beat's time, the
+// downbeat and its key, kept by its key in state/rhythm.json. A seek or a skip meanwhile leaves it for
+// another time; a crossfade's start is waited out (the song before is in it).
+const RHYTHM_PART: f64 = 0.3;
+const RHYTHM_MIN_MS: u64 = 15_000;
+
+struct RhythmEar {
+    key: String,
+    /// where it started listening (ms into the track), and how much it has to hear
+    from_ms: Option<u64>,
+    want_ms: u64,
+    samples: std::sync::Arc<std::sync::Mutex<Vec<f32>>>,
+    rate: u32,
+}
+
+thread_local! {
+    static RHYTHM_EAR: RefCell<Option<RhythmEar>> = const { RefCell::new(None) };
+}
+
+/// A track has started: listened to, if nothing's known of it yet
+fn rhythm_begin(shared: &Shared, t: &Track, dur_ms: u64) {
+    rhythm_stop(shared);
+    if t.key.is_empty() || omnipulse_core::rhythm::known(&t.key).is_some() || t.is_mix() { return; }
+    let want = ((dur_ms.max(t.ms) as f64 * RHYTHM_PART) as u64).max(RHYTHM_MIN_MS);
+    let rate = shared.borrow().engine.output_rate();
+    RHYTHM_EAR.with(|e| *e.borrow_mut() = Some(RhythmEar { key: t.key.clone(), from_ms: None, want_ms: want, samples: Default::default(), rate }));
+}
+
+fn rhythm_stop(shared: &Shared) {
+    shared.borrow().engine.set_tap("rhythm", None);
+    RHYTHM_EAR.with(|e| *e.borrow_mut() = None);
+}
+
+/// Each tick: listening starts once a crossfade's over, stops at a seek, and is measured once it's heard enough
+fn rhythm_tick(shared: &Shared, pos: u64) {
+    let engine = shared.borrow().engine.clone();
+    let cur = shared.borrow().queue.current().map(|t| t.key.clone()).unwrap_or_default();
+    let step = RHYTHM_EAR.with(|e| {
+        let mut e = e.borrow_mut();
+        let Some(l) = e.as_mut() else { return 0 };
+        if l.key != cur { return 3; }
+        match l.from_ms {
+            None => {
+                if engine.crossfading() || engine.is_paused() { return 0; }
+                l.from_ms = Some(pos);
+                let buf = l.samples.clone();
+                engine.set_tap("rhythm", Some(Box::new(move |st: &[f32]| {
+                    if let Ok(mut b) = buf.lock() { b.extend(st.chunks(2).map(|f| (f[0] + f.get(1).copied().unwrap_or(f[0])) * 0.5)); }
+                })));
+                0
+            }
+            Some(from) => {
+                let heard = l.samples.lock().map(|b| b.len()).unwrap_or(0) as u64 * 1000 / l.rate.max(1) as u64;
+                // (a seek: where it is isn't where listening says it is)
+                if pos.abs_diff(from + heard) > 2500 { return 3; }
+                if heard >= l.want_ms { 2 } else { 0 }
+            }
+        }
+    });
+    match step {
+        2 => {
+            engine.set_tap("rhythm", None);
+            let Some(l) = RHYTHM_EAR.with(|e| e.borrow_mut().take()) else { return };
+            let from = l.from_ms.unwrap_or(0);
+            let rt = shared.borrow().rt.clone();
+            rt.spawn_blocking(move || {
+                let mono = std::mem::take(&mut *l.samples.lock().unwrap());
+                let heard = mono.len() as u64 * 1000 / l.rate.max(1) as u64;
+                if let Some(r) = omnipulse_core::rhythm::analyse(&mono, l.rate) {
+                    omnipulse_core::rhythm::keep(&l.key, omnipulse_core::rhythm::Measured { from_ms: from, to_ms: from + heard, rhythm: r, v: omnipulse_core::rhythm::VERSION });
+                }
+            });
+        }
+        3 => rhythm_stop(shared),
+        _ => {}
+    }
 }
 
 // ---------- SponsorBlock (as the web app's js/sponsorblock.js) ----------
@@ -2173,6 +2254,7 @@ fn tick(shared: &Shared, events: &std::sync::mpsc::Receiver<Event>, n: u64) {
     if !engine.is_paused() && sb_tick(shared, pos, dur) {
         return;
     }
+    rhythm_tick(shared, pos);
     while let Ok(ev) = events.try_recv() {
         match ev {
             Event::Ended if shared.borrow().repeat == "one" => start(shared),
@@ -5480,6 +5562,7 @@ fn main() -> Result<(), slint::PlatformError> {
         // (OMNIPULSE_SELFTEST_PLAN=discover: only Discover, its shelves, and the first mix it has opened)
         let only_discover = std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("discover");
         let plan: Vec<(u64, &str)> = if join.is_some() { vec![(6, "join"), (14, "joined"), (16, "jamskip"), (19, "leave"), (21, "end")] }
+            else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("rhythm") { vec![(9, "play"), (100, "rhythm"), (101, "end")] }
             else if only_discover { vec![(9, "play"), (11, "discover"), (30, "disc"), (45, "discmix"), (12, "import"), (46, "taste"), (47, "taste2"), (48, "taste3"), (70, "tasted"), (71, "marquee"), (72, "marqueeoff"), (73, "end")] } else { full.to_vec() };
         t.start(slint::TimerMode::Repeated, std::time::Duration::from_millis(250), move || {
             let Some(&(at, what)) = plan.get(step_no) else { return };
@@ -5666,6 +5749,15 @@ fn main() -> Result<(), slint::PlatformError> {
                 }
                 // the seek bar's marquee, for its picture
                 "marquee" => ui.set_track_loading(true),
+                // what was measured of the track playing (its first 30%, as it played)
+                "rhythm" => {
+                    let key = s.borrow().queue.current().map(|t| format!("{} ({})", t.key, t.title)).unwrap_or_default();
+                    let k = s.borrow().queue.current().map(|t| t.key.clone()).unwrap_or_default();
+                    match omnipulse_core::rhythm::known(&k) {
+                        Some(m) => println!("selftest: rhythm of {key}: {} BPM (confidence {:.2}), {} ({}), first beat {:.0} ms after {} ms, {} beats, downbeat {}", m.rhythm.bpm, m.rhythm.tempo_confidence, m.rhythm.key, m.rhythm.camelot, m.rhythm.first_beat_ms, m.from_ms, m.rhythm.beats.len(), m.rhythm.downbeat),
+                        None => println!("selftest: rhythm of {key}: not measured (listening {})", RHYTHM_EAR.with(|e| e.borrow().as_ref().map(|l| format!("from {:?}, {} samples, wants {} ms", l.from_ms, l.samples.lock().map(|b| b.len()).unwrap_or(0), l.want_ms))).unwrap_or_default()),
+                    }
+                }
                 // OMNIPULSE_SELFTEST_IMPORT=<an M3U or CSV>: imported as a playlist on this PC (shown after)
                 "import" => if let Ok(f) = std::env::var("OMNIPULSE_SELFTEST_IMPORT") { pl_import_file(&s, f.into()); },
                 "marqueeoff" => ui.set_track_loading(false),

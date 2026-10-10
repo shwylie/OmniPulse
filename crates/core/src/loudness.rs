@@ -242,6 +242,50 @@ pub fn measure(source: Box<dyn MediaSource>, ext: Option<&str>, duration_ms: Opt
     meter.ok_or("there was no audio to measure")?.finish(duration_ms)
 }
 
+/// Decodes `source` to mono samples (its channels averaged), up to `max_secs` (blocking): for rhythm.rs
+pub fn decode_mono(source: Box<dyn MediaSource>, ext: Option<&str>, max_secs: f64) -> Result<(Vec<f32>, u32), String> {
+    let mut hint = Hint::new();
+    if let Some(e) = ext {
+        hint.with_extension(e);
+    }
+    let mss = MediaSourceStream::new(source, Default::default());
+    let probed = symphonia::default::get_probe()
+        .format(&hint, mss, &FormatOptions::default(), &MetadataOptions::default())
+        .map_err(|e| format!("unreadable audio: {e}"))?;
+    let mut format = probed.format;
+    let track = format.tracks().iter().find(|t| t.codec_params.codec != CODEC_TYPE_NULL).ok_or("no audio in it")?;
+    let track_id = track.id;
+    let mut decoder = symphonia::default::get_codecs().make(&track.codec_params, &DecoderOptions::default()).map_err(|e| format!("can't decode it: {e}"))?;
+    let (mut out, mut rate) = (Vec::new(), 0u32);
+    let mut buf: Option<SampleBuffer<f32>> = None;
+    loop {
+        let packet = match format.next_packet() {
+            Ok(p) => p,
+            Err(SymError::IoError(_)) | Err(SymError::ResetRequired) => break,
+            Err(e) => return Err(format!("reading the audio failed: {e}")),
+        };
+        if packet.track_id() != track_id { continue; }
+        let decoded = match decoder.decode(&packet) {
+            Ok(d) => d,
+            Err(SymError::DecodeError(_)) => continue,
+            Err(SymError::IoError(_)) => break,
+            Err(e) => return Err(format!("decoding failed: {e}")),
+        };
+        let spec = *decoded.spec();
+        if decoded.frames() == 0 { continue; }
+        rate = spec.rate;
+        let ch = spec.channels.count().max(1);
+        let need = decoded.capacity() as u64;
+        if buf.as_ref().is_none_or(|b| (b.capacity() as u64) < need * ch as u64) { buf = Some(SampleBuffer::new(need, spec)); }
+        let b = buf.as_mut().unwrap();
+        b.copy_interleaved_ref(decoded);
+        out.extend(b.samples().chunks(ch).map(|f| f.iter().sum::<f32>() / ch as f32));
+        if out.len() as f64 >= max_secs * rate as f64 { break; }
+    }
+    if out.is_empty() { return Err("there was no audio".into()); }
+    Ok((out, rate))
+}
+
 // ---------- the cache ----------
 
 static CACHE: Mutex<Option<HashMap<String, Analysis>>> = Mutex::new(None);
@@ -781,5 +825,28 @@ mod tests {
         assert_eq!(sniff(&b), Some("aac"));
         assert_eq!(sniff(&[0xFF, 0xFB, 0x90, 0x64]), Some("mp3"));
         assert_eq!(sniff(b"\0\0\0\x18ftypM4A \0\0\0\0"), Some("mp4"));
+    }
+}
+
+/// cargo test -p omnipulse-core rhythm_live -- --ignored --nocapture (needs yt-dlp and the internet)
+#[cfg(test)]
+mod rhythm_live {
+    #[test]
+    #[ignore]
+    fn rhythm_live() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        // (well-known tempos and keys, as published)
+        for (id, name) in [("_ovdm2yX4MA", "Avicii - Levels: 126 BPM, C# minor"), ("dQw4w9WgXcQ", "Rick Astley - Never Gonna Give You Up: 113 BPM, Ab major"), ("FGBhQbmPwH8", "Daft Punk - One More Time: 123 BPM, D major"), ("YQHsXMglC9A", "Adele - Hello: 79 BPM, F minor"), ("JGwWNGJdvx8", "Ed Sheeran - Shape of You: 96 BPM, C# minor"), ("OPf0YbXqDm0", "Mark Ronson - Uptown Funk: 115 BPM, D minor"), ("ZbZSe6N_BXs", "Pharrell - Happy: 160 BPM, F minor"), ("Zi_XLOBDo_Y", "Michael Jackson - Billie Jean: 117 BPM, F# minor")] {
+            let got = rt.block_on(async {
+                let url = crate::yt_stream::resolve_video(id).await?;
+                let f = super::fetch_audio(&url, None).await?;
+                Ok::<_, String>(f)
+            });
+            let f = match got { Ok(f) => f, Err(e) => { println!("{name}: couldn't fetch ({e})"); continue; } };
+            let (mono, rate) = super::decode_mono(Box::new(std::io::Cursor::new(f.bytes)), f.ext.as_deref(), 75.0).expect("decoded");
+            // the first 30% of a song, as the apps measure it (here: its first 75 s at most)
+            let r = crate::rhythm::analyse(&mono, rate).expect("analysed");
+            println!("{name}: measured {} BPM (confidence {:.2}), {} ({}, confidence {:.2}), first beat {:.0} ms, {} beats", r.bpm, r.tempo_confidence, r.key, r.camelot, r.key_confidence, r.first_beat_ms, r.beats.len());
+        }
     }
 }
