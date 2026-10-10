@@ -793,7 +793,7 @@ export component AppWindow inherits Window {
                 VerticalLayout {
                     padding: 10px;
                     spacing: 2px;
-                    NavItem { label: "Discover"; d: Icons.discover; compact: root.narrow; active: root.page == "discover"; clicked => { root.nav("discover"); } }
+                    NavItem { label: root.stream-safe ? "Streamer Mode" : "Discover"; d: Icons.discover; compact: root.narrow; active: root.page == "discover" || root.page == "streamer"; clicked => { root.nav("discover"); } }
                     NavItem { label: "Rediscover"; d: Icons.rediscover; compact: root.narrow; active: root.page == "rediscover"; clicked => { root.nav("rediscover"); } }
                     NavItem { label: "Library"; d: Icons.library; compact: root.narrow; active: root.page == "library"; clicked => { root.nav("library"); } }
                     if root.fav-page: NavItem { label: "Favourites"; d: Icons.star; spin: true; compact: root.narrow; active: root.page == "favourites"; clicked => { root.nav("favourites"); } }

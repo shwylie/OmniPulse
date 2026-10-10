@@ -332,6 +332,9 @@ fn open_page(shared: &Shared, page: &str) {
             let sub = if pool.is_empty() { "You've played all your likes recently.".to_string() } else { "Likes you haven't heard in a month or more, the longest-forgotten first.".to_string() };
             show_tracks(shared, "rediscover", "Rediscover", sub, pool, true);
         }
+        // (while Stream-Safe Music is on, the Streamer Mode page stands in for Discover)
+        "discover" if streamsafe::on(&shared.borrow().web.prefs) => open_streamer(shared),
+        "streamer" => open_streamer(shared),
         "discover" => open_discover(shared),
         "artists" => open_artists(shared),
         "stats" => open_stats(shared, 1),
@@ -701,6 +704,66 @@ fn open_discover(shared: &Shared) {
                 }
             }
         }
+    });
+}
+
+// ---------- the Streamer Mode page (as the web app's js/streamerpage.js) ----------
+// While Stream-Safe Music is on: collections of music that's safe on stream, each made when it's
+// opened (searched for on every platform that's on, then only what's safe kept, each song once):
+// every artist or label cleared for streaming, Creative Commons music by genre, and your safe likes.
+#[derive(Clone)]
+enum StreamColl { Cleared(Vec<String>), Genre(String), Likes }
+
+thread_local! {
+    static STREAM_COLLS: RefCell<Vec<Vec<(String, StreamColl)>>> = const { RefCell::new(Vec::new()) };
+}
+
+fn open_streamer(shared: &Shared) {
+    let ui = shared.borrow().ui.upgrade().unwrap();
+    {
+        let mut a = shared.borrow_mut();
+        a.page = "streamer".into();
+        a.token += 1;
+    }
+    ui.set_page("streamer".into());
+    ui.set_page_kind("discover".into());
+    ui.set_page_title("Streamer Mode".into());
+    ui.set_page_sub("Music that's safe on stream: artists and labels cleared for streaming, Creative Commons music, and your safe likes.".into());
+    ui.set_chips(ModelRc::default());
+    let prefs = shared.borrow().web.prefs.clone();
+    let shelves: Vec<(String, Vec<(String, StreamColl)>)> = vec![
+        ("Cleared for streaming".into(), streamsafe::cleared_on(&prefs).into_iter().map(|(n, names)| (n, StreamColl::Cleared(names))).collect()),
+        ("Creative Commons".into(), streamsafe::GENRES.iter().map(|g| (g.to_string(), StreamColl::Genre(g.to_string()))).collect()),
+        ("From your likes".into(), vec![("Your Safe Likes".into(), StreamColl::Likes)]),
+    ];
+    let shelves: Vec<_> = shelves.into_iter().filter(|(_, l)| !l.is_empty()).collect();
+    let sub = |c: &StreamColl| match c { StreamColl::Cleared(_) => "Cleared for streaming", StreamColl::Genre(_) => "Creative Commons", StreamColl::Likes => "From your likes" };
+    let models: Vec<Rc<VecModel<Tile>>> = shelves.iter().map(|(_, l)| Rc::new(VecModel::from(l.iter().map(|(n, c)| Tile { title: n.clone().into(), sub: sub(c).into(), art: slint::Image::default(), plat: "".into() }).collect::<Vec<_>>()))).collect();
+    let rows: Vec<Shelf> = shelves.iter().zip(&models).map(|((t, _), m)| Shelf { title: t.clone().into(), tiles: ModelRc::from(m.clone()) }).collect();
+    ui.set_shelves(ModelRc::from(Rc::new(VecModel::from(rows))));
+    SHELF_MODELS.with(|m| *m.borrow_mut() = models);
+    STREAM_COLLS.with(|s| *s.borrow_mut() = shelves.into_iter().map(|(_, l)| l).collect());
+}
+
+/// A collection opened: made from every platform that's on, only what's safe, each song once, mixed
+fn open_stream_coll(shared: &Shared, sh: usize, k: usize) {
+    let Some((name, c)) = STREAM_COLLS.with(|s| s.borrow().get(sh).and_then(|l| l.get(k).cloned())) else { return };
+    let (prefs, library) = { let a = shared.borrow(); (a.web.prefs.clone(), a.library.clone()) };
+    show_tracks(shared, "streamcoll", &name, "Finding music that's safe on stream...".into(), Vec::new(), false);
+    load_into(shared, "streamcoll", name.clone(), async move {
+        let mut found: Vec<Track> = match &c {
+            StreamColl::Likes => library,
+            StreamColl::Cleared(names) => futures_util::future::join_all(names.iter().map(|n| sources::search(n))).await.into_iter().flatten().collect(),
+            StreamColl::Genre(g) => {
+                let qs = [g.clone(), format!("{g} creative commons"), format!("{g} royalty free"), format!("{g} no copyright")];
+                futures_util::future::join_all(qs.iter().map(|q| sources::search(q))).await.into_iter().flatten().filter(streamsafe::open).collect()
+            }
+        };
+        let mut seen = std::collections::HashSet::new();
+        found.retain(|t| !t.is_mix() && streamsafe::ok(&prefs, t) && seen.insert(t.key.clone()));
+        queue::shuffle_in_place(&mut found);
+        let sub = if found.is_empty() { "Nothing safe on stream turned up here just now.".to_string() } else { format!("{}, all safe on stream.", plural(found.len(), "track", "tracks")) };
+        (found, sub)
     });
 }
 
@@ -3199,6 +3262,10 @@ fn safe_set(shared: &Shared, on: bool) {
             ui.set_status(if on { format!("Streamer Mode: only music that's safe on stream shows and plays{}", if private { ", and private info is hidden." } else { "." }) } else { "Stream-Safe Music off.".to_string() }.into());
         }
     }
+    // the Streamer Mode page takes Discover's place while it's on (and gives it back after)
+    let page = shared.borrow().page.clone();
+    if on && page == "discover" { open_streamer(shared); }
+    if !on && (page == "streamer" || page == "streamcoll") { open_page(shared, "discover"); }
     // what's playing now, if it isn't safe, goes
     if on && shared.borrow().loaded && !shared.borrow().queue.current().is_some_and(|t| streamsafe::ok(&shared.borrow().web.prefs, t)) {
         start(shared);
@@ -3795,6 +3862,7 @@ fn main() -> Result<(), slint::PlatformError> {
     let s = shared.clone();
     ui.on_tile(move |sh, k| {
         if s.borrow().page == "search" { return open_found(&s, sh as usize, k as usize); }
+        if s.borrow().page == "streamer" { return open_stream_coll(&s, sh as usize, k as usize); }
         let list = s.borrow().shelves.get(sh as usize).cloned().unwrap_or_default();
         play_list(&s, list, k as usize);
     });
@@ -3988,7 +4056,7 @@ fn main() -> Result<(), slint::PlatformError> {
         let mut step_no = 0usize;
         // (OMNIPULSE_SELFTEST_JOIN=<invite link>: only joining someone's room, following it, skipping and leaving)
         let join = std::env::var("OMNIPULSE_SELFTEST_JOIN").ok();
-        let full: [(u64, &str); 34] = [(9, "play"), (13, "library"), (13, "pagefind"), (14, "pageall"), (14, "scoff"), (15, "scon"), (16, "discover"), (24, "rediscover"), (27, "sets"), (31, "stats"), (35, "now"), (39, "search"), (41, "found"), (42, "settings"), (44, "light"), (45, "collapse"), (46, "artists"), (54, "artist"), (60, "autoplay"), (70, "narrow"), (72, "goplus"), (80, "tabright"), (81, "pbar"), (82, "pfloat"), (83, "pminimal"), (84, "musical"), (88, "musical2"), (90, "safe"), (91, "sort"), (93, "xpl"), (95, "xpl2"), (97, "fade"), (101, "fade2"), (103, "end")];
+        let full: [(u64, &str); 36] = [(9, "play"), (13, "library"), (13, "pagefind"), (14, "pageall"), (14, "scoff"), (15, "scon"), (16, "discover"), (24, "rediscover"), (27, "sets"), (31, "stats"), (35, "now"), (39, "search"), (41, "found"), (42, "settings"), (44, "light"), (45, "collapse"), (46, "artists"), (54, "artist"), (60, "autoplay"), (70, "narrow"), (72, "goplus"), (80, "tabright"), (81, "pbar"), (82, "pfloat"), (83, "pminimal"), (84, "musical"), (88, "musical2"), (90, "safe"), (90, "streamer"), (91, "streamcoll"), (91, "sort"), (93, "xpl"), (95, "xpl2"), (97, "fade"), (101, "fade2"), (103, "end")];
         let plan: Vec<(u64, &str)> = if join.is_some() { vec![(6, "join"), (14, "joined"), (16, "jamskip"), (19, "leave"), (21, "end")] } else { full.to_vec() };
         t.start(slint::TimerMode::Repeated, std::time::Duration::from_millis(250), move || {
             let Some(&(at, what)) = plan.get(step_no) else { return };
@@ -4008,6 +4076,9 @@ fn main() -> Result<(), slint::PlatformError> {
                 "pagefind" => { let n = ui.get_rows().row_count(); ui.invoke_search_edited("crunkz".into()); println!("selftest: page filter: {n} rows, typing \"crunkz\": {}", ui.get_rows().row_count()); }
                 // what the search found besides tracks
                 "found" => println!("selftest: search shelves {}", ui.get_shelves().iter().map(|sh| format!("{} {}", sh.title, sh.tiles.row_count())).collect::<Vec<_>>().join(", ")),
+                // with Stream-Safe Music on: the Streamer Mode page, and one of its collections
+                "streamer" => { ui.invoke_nav("discover".into()); println!("selftest: streamer page \"{}\", shelves {}", ui.get_page_title(), ui.get_shelves().iter().map(|sh| format!("{} {}", sh.title, sh.tiles.row_count())).collect::<Vec<_>>().join(", ")); }
+                "streamcoll" => ui.invoke_tile(0, 0),
                 "pageall" => { ui.invoke_search_edited("".into()); println!("selftest: page filter cleared: {} rows", ui.get_rows().row_count()); }
                 "join" => { if let Some(link) = &join { listen_join(&s, link); } }
                 "joined" => println!("selftest: listening {:?}, playing \"{}\" at {}, queue {}, jam button \"{}\", status \"{}\"", listening(), ui.get_now_title(), ui.get_pos_text(), s.borrow().queue.items.len(), ui.get_jam_label(), ui.get_status()),

@@ -75,6 +75,30 @@ pub fn ok(prefs: &Value, t: &Track) -> bool {
     })
 }
 
+/// The artists and labels cleared for streaming that are on: (name, the names to search for)
+pub fn cleared_on(prefs: &Value) -> Vec<(String, Vec<String>)> {
+    let p = &prefs["streamCleared"];
+    let set = |id: &str, dflt: bool| p["on"][id].as_bool().unwrap_or(dflt);
+    let shown = |id: &str| -> String { match id { "ncs" => "NCS", "streambeats" => "StreamBeats", "monstercat" => "Monstercat", "epidemic" => "Epidemic Sound", "lofigirl" => "Lofi Girl", "chillhop" => "Chillhop Music", x => x }.to_string() };
+    let mut out: Vec<(String, Vec<String>)> = CLEARED.iter().filter(|(id, _, _, d)| set(id, *d))
+        .map(|(id, artists, labels, _)| (shown(id), artists.iter().chain(labels.iter()).map(|s| s.to_string()).collect::<Vec<_>>()))
+        .collect();
+    for c in p["custom"].as_array().into_iter().flatten() {
+        let (id, name) = (c["id"].as_str().unwrap_or(""), c["name"].as_str().unwrap_or(""));
+        if !name.is_empty() && set(id, true) { out.push((name.to_string(), vec![name.to_string()])); }
+    }
+    out.iter_mut().for_each(|(_, n)| { n.sort(); n.dedup(); n.truncate(4); });
+    out
+}
+
+/// Creative Commons music by genre (the Streamer Mode page's, as the web app's STREAM_GENRES)
+pub const GENRES: [&str; 8] = ["Electronic", "Lo-fi", "Chill", "Hip-hop", "Ambient", "Rock", "Synthwave", "Acoustic"];
+
+/// Under an open licence (SoundCloud's Creative Commons ones, "no-rights-reserved")
+pub fn open(t: &Track) -> bool {
+    open_licence(t)
+}
+
 /// On: whether it may play. Off: everything may.
 pub fn allowed(prefs: &Value, t: &Track) -> bool {
     !on(prefs) || ok(prefs, t)
