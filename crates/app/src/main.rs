@@ -358,15 +358,16 @@ fn plat_on(prefs: &serde_json::Value, plat: &str) -> bool {
     integrations::on(prefs, plat_key(plat))
 }
 
-/// The platforms you have (signed in, or with files), for the title bar
+/// The title bar's platforms, as the web app's: each one, in its colours while it's set up (signed in,
+/// or yt-dlp here for YouTube Music) and on, grey until it's set up (clicking it opens Settings). Your
+/// files have no icon (nothing to sign in to): they switch on and off in Settings.
 fn paint_plats(a: &App) {
     let Some(ui) = a.ui.upgrade() else { return };
     let mut list: Vec<Plat> = Vec::new();
-    let mut add = |id: &str, name: &str| list.push(Plat { id: id.into(), on: plat_on(&a.web.prefs, id), name: name.into() });
-    if omnipulse_core::soundcloud::signed_in() { add("soundcloud", "SoundCloud"); }
-    if omnipulse_core::spotify::spotify_signed_in() { add("spotify", "Spotify"); }
-    add("youtube", "YouTube Music");
-    if a.library.iter().any(|t| t.plat() == "local") { add("local", "Your files"); }
+    let mut add = |id: &str, name: &str, ready: bool| list.push(Plat { id: id.into(), on: ready && plat_on(&a.web.prefs, id), name: name.into(), ready });
+    add("soundcloud", "SoundCloud", omnipulse_core::soundcloud::signed_in());
+    add("spotify", "Spotify", omnipulse_core::spotify::spotify_signed_in());
+    add("youtube", "YouTube Music", omnipulse_core::tools::ytdlp_path().is_some());
     ui.set_plats(ModelRc::from(Rc::new(VecModel::from(list))));
 }
 
@@ -401,6 +402,17 @@ fn go_plus_set(prefs: &serde_json::Value) {
 }
 
 fn plat_toggle(shared: &Shared, plat: &str) {
+    // not set up yet: Settings, to set it up
+    let ready = match plat {
+        "soundcloud" => omnipulse_core::soundcloud::signed_in(),
+        "spotify" => omnipulse_core::spotify::spotify_signed_in(),
+        "youtube" => omnipulse_core::tools::ytdlp_path().is_some(),
+        _ => true,
+    };
+    if !ready {
+        open_page(shared, "settings");
+        return;
+    }
     let key = plat_key(plat);
     let now = {
         let mut a = shared.borrow_mut();

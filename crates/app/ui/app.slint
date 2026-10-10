@@ -20,7 +20,8 @@ export global Theme {
 
 export struct Row { title: string, artist: string, album: string, dur: string, plat: string, playing: bool, head: string, auto: bool, art: image, liked: bool, sc-link: bool, sp-link: bool, yt-link: bool }
 export struct Side { title: string, plat: string, own: bool, share: bool, sc: bool, sp: bool }
-export struct Plat { id: string, on: bool, name: string }
+/// A platform in the title bar: on (in its colours), set up (ready; grey until it is), its name
+export struct Plat { id: string, on: bool, name: string, ready: bool }
 export struct Tile { title: string, sub: string, art: image, plat: string }
 export struct Shelf { title: string, tiles: [Tile] }
 export struct Line { text: string }
@@ -704,7 +705,7 @@ export component AppWindow inherits Window {
                                 x: 5.5px;
                                 y: 5.5px;
                                 fill: !p.on ? Theme.text : p.id == "spotify" ? #1ed760 : p.id == "youtube" ? #ff0033 : p.id == "local" ? #f2b544 : #ff5500;
-                                opacity: p.on ? 1 : (ta-p.has-hover ? 0.7 : 0.4);
+                                opacity: p.on ? 1 : !p.ready ? (ta-p.has-hover ? 0.5 : 0.25) : (ta-p.has-hover ? 0.7 : 0.4);
                             }
                             ta-p := TouchArea { clicked => { root.plat-toggle(p.id); } }
                         }
