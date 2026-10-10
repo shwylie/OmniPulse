@@ -28,12 +28,27 @@ const PLAYER_STYLES = {
 const playerStyle = () => (PLAYER_STYLES[prefs.playerStyle] ? prefs.playerStyle : "tab");
 
 let playerMinNow = 0;
-function playerMinWidth(w) {
+let playerMinWaiting = 0;   // a minimum held back while the window is maximized
+async function playerMinWidth(w) {
   if (w === playerMinNow) return;
-  playerMinNow = w;
   const api = window.__TAURI__ && window.__TAURI__.window;
   const Size = (window.__TAURI__ && window.__TAURI__.dpi && window.__TAURI__.dpi.LogicalSize) || (api && api.LogicalSize);
   if (!api || !Size) return;
+  // (maximized, Windows moves the window off where it is when its minimum changes: so it waits until
+  // the window is restored)
+  if (await win.isMaximized().catch(() => false)) {
+    if (!playerMinWaiting) win.onResized(async () => {
+      if (!playerMinWaiting || await win.isMaximized().catch(() => false)) return;
+      const ww = playerMinWaiting;
+      playerMinWaiting = 0;
+      playerMinNow = 0;
+      playerMinWidth(ww);
+    }).catch(() => {});
+    playerMinWaiting = w;
+    return;
+  }
+  playerMinWaiting = 0;
+  playerMinNow = w;
   win.setMinSize(new Size(w, 520)).catch(() => {});
   // narrower than that right now: as wide as it needs
   if (innerWidth < w) win.setSize(new Size(w, Math.max(520, innerHeight))).catch(() => {});
