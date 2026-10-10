@@ -360,7 +360,9 @@ fn open_page(shared: &Shared, page: &str) {
             pool.retain(|t| lp.get(&t.key).copied().unwrap_or(0) < cut);
             queue::shuffle_in_place(&mut pool);
             pool.sort_by_key(|t| lp.get(&t.key).copied().unwrap_or(0));   // never played first
-            let sub = if pool.is_empty() { "You've played all your likes recently.".to_string() } else { "Likes you haven't heard in a month or more, the longest-forgotten first.".to_string() };
+            let none = { let a = shared.borrow(); a.web.favourites.is_empty() && !a.library.iter().any(|t| t.plat() != "local") };
+            // (nothing liked yet: asked for some, as the web app's card)
+            let sub = if none { "Get better recommendations: add some music to your likes or favourites (the heart or the star on any song), and Discover and Rediscover will be built around it.".to_string() } else if pool.is_empty() { "You've played all your likes recently.".to_string() } else { "Likes you haven't heard in a month or more, the longest-forgotten first.".to_string() };
             show_tracks(shared, "rediscover", "Rediscover", sub, pool, true);
         }
         // (while Stream-Safe Music is on, the Streamer Mode page stands in for Discover)
