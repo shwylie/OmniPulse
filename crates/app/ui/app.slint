@@ -28,7 +28,10 @@ export struct Line { text: string }
 /// A switch in Settings: under its section's heading (head, on the first of a section)
 /// An account in Settings: its name, what's known (who's signed in, or what it needs), and its button
 export struct Account { name: string, status: string, signed: bool, busy: bool }
-export struct SetRow { head: string, label: string, note: string, on: bool, key: string, sub: bool }
+export struct SetRow { head: string, label: string, note: string, on: bool, key: string, sub: bool, more: bool }
+/// One of a plugin's settings: its kind ("toggle", "text", "password", "number", "select"), what it's
+/// set to (as text; "true"/"false" for a toggle), and a select's options
+export struct PlugField { key: string, label: string, note: string, kind: string, value: string, options: [string] }
 export struct Item { name: string, sub: string, art: image, plat: string }
 
 global Icons {
@@ -568,6 +571,13 @@ export component AppWindow inherits Window {
     // Settings, beyond Look: its switches, section by section
     // Settings' switches, by category, and which categories are closed
     in property <[SetRow]> set-rows-integrations;
+    // a Settings row's own settings (a plugin's): its key; the dialog with its fields
+    callback set-more(string);
+    in-out property <bool> pf-open;
+    in property <string> pf-head;
+    in property <[PlugField]> pf-fields;
+    callback pf-set(int, string);
+    callback pf-save();
     in property <[SetRow]> set-rows-library;
     in property <[SetRow]> set-rows-streaming;
     in property <bool> closed-look;
@@ -1428,6 +1438,7 @@ export component AppWindow inherits Window {
                                             Text { text: r.label; color: Theme.text; font-weight: 700; }
                                             if r.note != "": Text { text: r.note; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
                                         }
+                                        if r.more: Pill { label: "Settings"; y: (parent.height - self.height) / 2; clicked => { root.set-more(r.key); } }
                                         Toggle { checked: r.on; y: (parent.height - self.height) / 2; toggled => { root.set-toggle(r.key); } }
                                     }
                                 }
@@ -1889,6 +1900,62 @@ export component AppWindow inherits Window {
                 }
             }
         }
+        }
+    }
+    // a plugin's settings, as its manifest lists them
+    if root.pf-open: Rectangle {
+        x: 0;
+        y: 0;
+        width: root.width;
+        height: root.height;
+        background: #00000080;
+        TouchArea { clicked => { root.pf-open = false; } }
+        Rectangle {
+            width: 460px;
+            // (sized by its fields: a size taken from its own layout would size the window by it too)
+            height: 120px + root.pf-fields.length * 60px;
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            background: Theme.elevated;
+            border-radius: 12px;
+            border-width: 1px;
+            border-color: Theme.line;
+            TouchArea { }
+            pf-col := VerticalLayout {
+                alignment: start;
+                padding: 20px;
+                spacing: 12px;
+                Text { text: root.pf-head; color: Theme.text; font-size: 18px; font-weight: 800; }
+                for f[i] in root.pf-fields: HorizontalLayout {
+                    spacing: 12px;
+                    VerticalLayout {
+                        horizontal-stretch: 1;
+                        alignment: center;
+                        spacing: 2px;
+                        Text { text: f.label; color: Theme.text; font-weight: 700; }
+                        if f.note != "": Text { text: f.note; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
+                    }
+                    if f.kind == "toggle": Toggle { checked: f.value == "true"; y: (parent.height - self.height) / 2; toggled => { root.pf-set(i, self.checked ? "true" : "false"); } }
+                    // a choice: each click moves on to the next of its options
+                    if f.kind == "select": Pill { label: f.value; y: (parent.height - self.height) / 2; clicked => { root.pf-set(i, "\u{1}next"); } }
+                    if f.kind == "text" || f.kind == "password" || f.kind == "number": Rectangle {
+                        width: 180px;
+                        height: 34px;
+                        y: (parent.height - self.height) / 2;
+                        border-radius: 8px;
+                        background: Theme.panel;
+                        border-width: 1px;
+                        border-color: Theme.line;
+                        TextInput { x: 10px; width: parent.width - 20px; height: parent.height; vertical-alignment: center; color: Theme.text; font-size: 14px; single-line: true; input-type: f.kind == "password" ? InputType.password : f.kind == "number" ? InputType.decimal : InputType.text; text: f.value; edited => { root.pf-set(i, self.text); } }
+                    }
+                }
+                HorizontalLayout {
+                    alignment: end;
+                    spacing: 8px;
+                    Pill { label: "Cancel"; clicked => { root.pf-open = false; } }
+                    Pill { label: "Save"; on: true; clicked => { root.pf-save(); } }
+                }
+            }
         }
     }
     // Track preferences: the title and artist shown for it (everywhere), and the part of it that plays

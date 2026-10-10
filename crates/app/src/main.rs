@@ -2133,7 +2133,7 @@ fn paint_settings(a: &App) {
             .filter(|(_, _, _, key, _)| *key != "streamSafe" || streamer)
             .map(|(_, label, note, key, dflt)| {
                 let on = if *key == "autoplay" { a.autoplay } else { set_row_on(&a.web.prefs, key, *dflt) };
-                SetRow { head: Default::default(), label: (*label).into(), note: (*note).into(), on, key: (*key).into(), sub: *key == "streamSafe" }
+                SetRow { head: Default::default(), label: (*label).into(), note: (*note).into(), on, key: (*key).into(), sub: *key == "streamSafe", more: false }
             }).collect();
         // the plugins installed (the web app adds and removes them; each one switches on and off here)
         if sec == "Integrations" && !streamer {
@@ -2141,7 +2141,8 @@ fn paint_settings(a: &App) {
                 let m = &p.manifest;
                 let state = if !plugin_on(&a.web.prefs, &m.id) { "Off.".to_string() } else if plugrun::get(&m.id).is_some() { "Running.".to_string() } else { PLUG_ERR.with(|e| e.borrow().get(&m.id).cloned()).map(|e| format!("Couldn't start: {e}")).unwrap_or_else(|| "Starting...".into()) };
                 let note = format!("{}{}{}", if m.description.is_empty() { String::new() } else { format!("{} ", m.description) }, if p.bundled { "Comes with OmniPulse. " } else { "" }, state);
-                list.push(SetRow { head: Default::default(), label: format!("Plugin: {}", m.name).into(), note: note.into(), on: plugin_on(&a.web.prefs, &m.id), key: format!("plugOn_{}", m.id).into(), sub: false });
+                let more = m.settings.as_array().is_some_and(|l| !l.is_empty());
+                list.push(SetRow { head: Default::default(), label: format!("Plugin: {}", m.name).into(), note: note.into(), on: plugin_on(&a.web.prefs, &m.id), key: format!("plugOn_{}", m.id).into(), sub: false, more });
             }
         }
         ModelRc::from(Rc::new(VecModel::from(list)))
@@ -2180,6 +2181,78 @@ fn offset_apply(shared: &Shared) {
         Err(e) => e,
     };
     if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_status(note.into()); }
+}
+
+thread_local! {
+    /// the plugin whose settings are open, and what they're set to meanwhile
+    static PF_EDIT: RefCell<Option<(String, serde_json::Map<String, serde_json::Value>)>> = const { RefCell::new(None) };
+}
+
+/// A plugin's settings dialog: its manifest's fields, as they're set (prefs.pluginSettings, as the web app's)
+fn pf_open(shared: &Shared, id: &str) {
+    let Some(p) = omnipulse_core::plugins::list().into_iter().find(|p| p.manifest.id == id) else { return };
+    let now = plugrun::settings_of(&p.manifest, &shared.borrow().web.prefs);
+    let vals = now.as_object().cloned().unwrap_or_default();
+    PF_EDIT.with(|e| *e.borrow_mut() = Some((id.to_string(), vals)));
+    pf_paint(shared);
+    if let Some(ui) = shared.borrow().ui.upgrade() {
+        ui.set_pf_head(format!("{} settings", p.manifest.name).into());
+        ui.set_pf_open(true);
+    }
+}
+
+fn pf_fields(id: &str) -> Vec<serde_json::Value> {
+    omnipulse_core::plugins::list().into_iter().find(|p| p.manifest.id == id).and_then(|p| p.manifest.settings.as_array().cloned()).unwrap_or_default()
+}
+
+fn pf_paint(shared: &Shared) {
+    let Some((id, vals)) = PF_EDIT.with(|e| e.borrow().clone()) else { return };
+    let text = |v: &serde_json::Value| match v { serde_json::Value::String(s) => s.clone(), serde_json::Value::Null => String::new(), x => x.to_string() };
+    let rows: Vec<PlugField> = pf_fields(&id).iter().filter_map(|f| {
+        let key = f["key"].as_str()?.to_string();
+        let kind = f["type"].as_str().unwrap_or("text").to_string();
+        let options: Vec<slint::SharedString> = f["options"].as_array().into_iter().flatten().map(|o| text(o).into()).collect();
+        Some(PlugField { label: f["label"].as_str().unwrap_or(&key).into(), note: f["note"].as_str().unwrap_or("").into(), value: vals.get(&key).map(text).unwrap_or_default().into(), kind: kind.into(), options: ModelRc::from(Rc::new(VecModel::from(options))), key: key.into() })
+    }).collect();
+    if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_pf_fields(ModelRc::from(Rc::new(VecModel::from(rows)))); }
+}
+
+/// One setting changed in the dialog (a select's "next": on to its next option)
+fn pf_set(shared: &Shared, i: usize, v: &str) {
+    let Some((id, mut vals)) = PF_EDIT.with(|e| e.borrow().clone()) else { return };
+    let Some(f) = pf_fields(&id).get(i).cloned() else { return };
+    let Some(key) = f["key"].as_str().map(String::from) else { return };
+    let value = match f["type"].as_str().unwrap_or("text") {
+        "toggle" => serde_json::json!(v == "true"),
+        "number" => v.trim().parse::<f64>().map(|n| serde_json::json!(n)).unwrap_or(serde_json::Value::Null),
+        "select" => {
+            let opts: Vec<serde_json::Value> = f["options"].as_array().cloned().unwrap_or_default();
+            let at = opts.iter().position(|o| Some(o) == vals.get(&key)).map_or(0, |k| (k + 1) % opts.len().max(1));
+            opts.get(at).cloned().unwrap_or_default()
+        }
+        _ => serde_json::json!(v),
+    };
+    vals.insert(key, value);
+    let select = f["type"].as_str() == Some("select") || f["type"].as_str() == Some("toggle");
+    PF_EDIT.with(|e| *e.borrow_mut() = Some((id, vals)));
+    if select { pf_paint(shared); }   // (typed ones aren't drawn again while they're typed in)
+}
+
+/// Saved: the plugin starts again with them
+fn pf_save(shared: &Shared) {
+    let Some((id, vals)) = PF_EDIT.with(|e| e.borrow_mut().take()) else { return };
+    let all = {
+        let mut a = shared.borrow_mut();
+        let mut all = a.web.prefs["pluginSettings"].as_object().cloned().unwrap_or_default();
+        all.insert(id.clone(), serde_json::Value::Object(vals));
+        let all = serde_json::Value::Object(all);
+        if let Some(o) = a.web.prefs.as_object_mut() { o.insert("pluginSettings".into(), all.clone()); }
+        all
+    };
+    if std::env::var_os("OMNIPULSE_SELFTEST").is_none() { webstate::save_pref("pluginSettings", all); }
+    plugrun::stop(&id);
+    plugins_start(shared);
+    if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_pf_open(false); ui.set_status("Plugin settings saved.".into()); }
 }
 
 /// A plugin: on unless switched off (the web app's prefs.plugOn_<id>)
@@ -3984,6 +4057,12 @@ fn main() -> Result<(), slint::PlatformError> {
     ui.on_set_toggle(move |key| set_toggle(&s, &key));
     let s = shared.clone();
     ui.on_section_flip(move |t| section_flip(&s, &t));
+    let s = shared.clone();
+    ui.on_set_more(move |key| { if let Some(id) = key.strip_prefix("plugOn_") { pf_open(&s, id); } });
+    let s = shared.clone();
+    ui.on_pf_set(move |i, v| pf_set(&s, i as usize, &v));
+    let s = shared.clone();
+    ui.on_pf_save(move || pf_save(&s));
     paint_settings(&shared.borrow());
     let s = shared.clone();
     ui.on_like_toggle(move || like_toggle(&s));
@@ -4394,7 +4473,7 @@ fn main() -> Result<(), slint::PlatformError> {
         let mut step_no = 0usize;
         // (OMNIPULSE_SELFTEST_JOIN=<invite link>: only joining someone's room, following it, skipping and leaving)
         let join = std::env::var("OMNIPULSE_SELFTEST_JOIN").ok();
-        let full: [(u64, &str); 42] = [(9, "play"), (13, "library"), (13, "pagefind"), (14, "pageall"), (14, "pick"), (14, "picknone"), (14, "scoff"), (15, "scon"), (15, "albums"), (18, "albumsn"), (18, "discover"), (24, "rediscover"), (27, "sets"), (31, "stats"), (35, "now"), (36, "tprefs"), (37, "tpclose"), (39, "search"), (41, "found"), (42, "settings"), (44, "light"), (45, "collapse"), (46, "artists"), (54, "artist"), (60, "autoplay"), (70, "narrow"), (72, "goplus"), (80, "tabright"), (81, "pbar"), (82, "pfloat"), (83, "pminimal"), (84, "musical"), (88, "musical2"), (90, "safe"), (90, "streamer"), (91, "streamcoll"), (91, "sort"), (93, "xpl"), (95, "xpl2"), (97, "fade"), (101, "fade2"), (103, "end")];
+        let full: [(u64, &str); 44] = [(9, "play"), (13, "library"), (13, "pagefind"), (14, "pageall"), (14, "pick"), (14, "picknone"), (14, "scoff"), (15, "scon"), (15, "albums"), (18, "albumsn"), (18, "discover"), (24, "rediscover"), (27, "sets"), (31, "stats"), (35, "now"), (36, "tprefs"), (37, "tpclose"), (39, "search"), (41, "found"), (42, "settings"), (43, "plugset"), (44, "plugclose"), (44, "light"), (45, "collapse"), (46, "artists"), (54, "artist"), (60, "autoplay"), (70, "narrow"), (72, "goplus"), (80, "tabright"), (81, "pbar"), (82, "pfloat"), (83, "pminimal"), (84, "musical"), (88, "musical2"), (90, "safe"), (90, "streamer"), (91, "streamcoll"), (91, "sort"), (93, "xpl"), (95, "xpl2"), (97, "fade"), (101, "fade2"), (103, "end")];
         let plan: Vec<(u64, &str)> = if join.is_some() { vec![(6, "join"), (14, "joined"), (16, "jamskip"), (19, "leave"), (21, "end")] } else { full.to_vec() };
         t.start(slint::TimerMode::Repeated, std::time::Duration::from_millis(250), move || {
             let Some(&(at, what)) = plan.get(step_no) else { return };
@@ -4426,6 +4505,9 @@ fn main() -> Result<(), slint::PlatformError> {
                 // the Library's Albums chip
                 "albums" => { ui.invoke_nav("library".into()); ui.invoke_chip(3); }
                 "albumsn" => println!("selftest: library albums {}, kind {}, \"{}\"", ui.get_album_tiles().row_count(), ui.get_page_kind(), ui.get_page_sub()),
+                // a plugin's settings dialog (the Internet Archive's, if it's here), and a choice moved on
+                "plugset" => { pf_open(&s, "internet-archive"); let before = ui.get_pf_fields().iter().map(|f| format!("{}={}", f.key, f.value)).collect::<Vec<_>>().join(" "); ui.invoke_pf_set(2, "".into()); println!("selftest: plugin settings {} -> {}", before, ui.get_pf_fields().iter().map(|f| format!("{}={}", f.key, f.value)).collect::<Vec<_>>().join(" ")); }
+                "plugclose" => { PF_EDIT.with(|e| e.borrow_mut().take()); ui.set_pf_open(false); }
                 "pageall" => { ui.invoke_search_edited("".into()); println!("selftest: page filter cleared: {} rows", ui.get_rows().row_count()); }
                 "join" => { if let Some(link) = &join { listen_join(&s, link); } }
                 "joined" => println!("selftest: listening {:?}, playing \"{}\" at {}, queue {}, jam button \"{}\", status \"{}\"", listening(), ui.get_now_title(), ui.get_pos_text(), s.borrow().queue.items.len(), ui.get_jam_label(), ui.get_status()),
