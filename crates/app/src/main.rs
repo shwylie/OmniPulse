@@ -1888,6 +1888,55 @@ thread_local! {
     static MIXED_IN: RefCell<Option<(String, Option<versions::Version>)>> = const { RefCell::new(None) };
     /// whether the track playing is one a mix can go out of (it's not Spotify's own playback)
     static MIX_OUT_OK: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    /// the playing track listened to again near its end, for its beat there: (its key, where it started,
+    /// the sound so far, its rate; or the measurement made of it)
+    static MIX_EAR: RefCell<Option<(String, u64, std::sync::Arc<std::sync::Mutex<Vec<f32>>>, u32)>> = const { RefCell::new(None) };
+    static MIX_LOCAL: RefCell<Option<(String, omnipulse_core::rhythm::Measured)>> = const { RefCell::new(None) };
+}
+
+/// How long the playing track is listened to again before a mix, and how long before its moment
+const MIX_EAR_MS: u64 = 14_000;
+const MIX_EAR_AHEAD_MS: u64 = 28_000;
+
+/// Near a mix's moment: the playing track's beat measured again there (a song's tempo drifts; what was
+/// measured of its start may be off by its end), and lined up with the first measurement's bars
+fn mix_ear(shared: &Shared, key: &str, pos: u64, at_ms: u64) {
+    let engine = shared.borrow().engine.clone();
+    let listening_to = MIX_EAR.with(|e| e.borrow().as_ref().map(|x| x.0.clone()));
+    if MIX_LOCAL.with(|l| l.borrow().as_ref().is_some_and(|x| x.0 == key)) { return; }
+    match listening_to {
+        None if pos + MIX_EAR_AHEAD_MS >= at_ms && pos + MIX_EAR_MS + 6000 < at_ms => {
+            let buf = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+            let b2 = buf.clone();
+            engine.set_tap("mixear", Some(Box::new(move |st: &[f32]| {
+                if let Ok(mut b) = b2.lock() { b.extend(st.chunks(2).map(|f| (f[0] + f.get(1).copied().unwrap_or(f[0])) * 0.5)); }
+            })));
+            MIX_EAR.with(|e| *e.borrow_mut() = Some((key.to_string(), pos, buf, engine.output_rate())));
+        }
+        Some(k) if k != key => { engine.set_tap("mixear", None); MIX_EAR.with(|e| *e.borrow_mut() = None); }
+        Some(_) => {
+            let (from, n, rate) = MIX_EAR.with(|e| e.borrow().as_ref().map(|x| (x.1, x.2.lock().map(|b| b.len()).unwrap_or(0), x.3))).unwrap_or((0, 0, 1));
+            let heard = n as u64 * 1000 / rate.max(1) as u64;
+            // (a seek meanwhile: what was heard isn't one stretch)
+            if pos.abs_diff(from + heard) > 2500 { engine.set_tap("mixear", None); MIX_EAR.with(|e| *e.borrow_mut() = None); return; }
+            if heard < MIX_EAR_MS { return; }
+            engine.set_tap("mixear", None);
+            let Some((k, from, buf, rate)) = MIX_EAR.with(|e| e.borrow_mut().take()) else { return };
+            let (rt, weak) = { let a = shared.borrow(); (a.rt.clone(), a.ui.clone()) };
+            rt.spawn_blocking(move || {
+                let mono = std::mem::take(&mut *buf.lock().unwrap());
+                let first = omnipulse_core::rhythm::known(&k);
+                let local = omnipulse_core::rhythm::analyse(&mono, rate).map(|r| omnipulse_core::rhythm::Measured { from_ms: from, to_ms: from + heard, rhythm: r, v: omnipulse_core::rhythm::VERSION });
+                let lined = first.zip(local).and_then(|(f, l)| mix::relined(&f, &l));
+                let _ = weak.upgrade_in_event_loop(move |_| {
+                    // (none: the first measurement stands, marked as looked at)
+                    let m = lined.or_else(|| omnipulse_core::rhythm::known(&k));
+                    if let Some(m) = m { MIX_LOCAL.with(|l| *l.borrow_mut() = Some((k, m))); }
+                });
+            });
+        }
+        None => {}
+    }
 }
 
 const MIX_BARS: u32 = 8;
@@ -1923,10 +1972,18 @@ fn mix_tick(shared: &Shared, pos: u64, dur: u64) {
     let (Some(next), Some(cur)) = (next, cur) else { return };
     if !on || listening_now || !MIX_OUT_OK.with(|c| c.get()) || dur == 0 || next.is_mix() { return; }
     let (Some(a), Some(b)) = (omnipulse_core::rhythm::known(&cur.key), omnipulse_core::rhythm::known(&next.key)) else { return };
+    // (the playing one's beat as measured again near its end, once it has been)
+    let local = MIX_LOCAL.with(|l| l.borrow().as_ref().filter(|x| x.0 == cur.key).map(|x| x.1.clone()));
+    let a = local.clone().unwrap_or(a);
     // (where its sound ends: measured, if it's before the file's end)
     let audible = shared.borrow().cur_loud.as_ref().and_then(|k| shared.borrow().analysis.get(k).and_then(|x| x["audible_ms"].as_u64())).filter(|&x| x > 0 && x < dur).unwrap_or(dur);
     let Some(plan) = mix::plan(&a, audible, pos, &b, MIX_BARS) else { return };
-    // got ready about seven seconds ahead of its moment
+    // listened to again first, then got ready about seven seconds ahead of its moment
+    if local.is_none() {
+        mix_ear(shared, &cur.key, pos, plan.at_ms);
+        // (too late to listen again: as it was measured)
+        if pos + MIX_EAR_MS + 6000 < plan.at_ms || MIX_EAR.with(|e| e.borrow().is_some()) { return; }
+    }
     if pos + 7000 < plan.at_ms { return; }
     MIX.with(|m| *m.borrow_mut() = Some(MixPhase::Opening(next.key.clone())));
     let (rt, weak, prefs) = { let a = shared.borrow(); (a.rt.clone(), a.ui.clone(), a.web.prefs.clone()) };
@@ -5809,7 +5866,7 @@ fn main() -> Result<(), slint::PlatformError> {
         // (OMNIPULSE_SELFTEST_PLAN=discover: only Discover, its shelves, and the first mix it has opened)
         let only_discover = std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("discover");
         let plan: Vec<(u64, &str)> = if join.is_some() { vec![(6, "join"), (14, "joined"), (16, "jamskip"), (19, "leave"), (21, "end")] }
-            else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("mix") { vec![(9, "play"), (10, "mixprep"), (70, "mixseek"), (82, "mixcheck"), (88, "mixcheck"), (110, "mixcheck"), (112, "end")] }
+            else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("mix") { vec![(9, "play"), (10, "mixprep"), (70, "mixseek"), (82, "mixcheck"), (100, "mixcheck"), (106, "mixcheck"), (130, "mixcheck"), (132, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("rhythm") { vec![(9, "play"), (100, "rhythm"), (101, "end")] }
             else if only_discover { vec![(9, "play"), (11, "discover"), (30, "disc"), (45, "discmix"), (12, "import"), (46, "taste"), (47, "taste2"), (48, "taste3"), (70, "tasted"), (71, "marquee"), (72, "marqueeoff"), (73, "end")] } else { full.to_vec() };
         t.start(slint::TimerMode::Repeated, std::time::Duration::from_millis(250), move || {
@@ -6014,7 +6071,7 @@ fn main() -> Result<(), slint::PlatformError> {
                     match found {
                         Some((i, t, b, p)) => {
                             { let mut a2 = s.borrow_mut(); let item = a2.queue.items.remove(i); a2.queue.items.insert(qi + 1, item); }
-                            s.borrow().engine.seek(p.at_ms.saturating_sub(9000));
+                            s.borrow().engine.seek(p.at_ms.saturating_sub(30_000));
                             println!("selftest: mix: {} ({} BPM, {}) into {} ({} BPM, {}) at {} ms over {} ms, from {} ms in, at {:.4}x, {:+} semitones", cur.title, a.rhythm.bpm, a.rhythm.camelot, t.title, b.rhythm.bpm, b.rhythm.camelot, p.at_ms, p.ms, p.start_ms, p.rate, p.semitones);
                         }
                         None => println!("selftest: mix: none of the next 6 has a tempo close enough (or isn't measured): {:?}", { let q = &s.borrow().queue; q.items.iter().skip(qi + 1).take(6).map(|x| omnipulse_core::rhythm::known(&x.t.key).map(|m| m.rhythm.bpm)).collect::<Vec<_>>() }),
@@ -6023,7 +6080,8 @@ fn main() -> Result<(), slint::PlatformError> {
                 "mixcheck" => {
                     let a = s.borrow();
                     let phase = MIX.with(|m| match &*m.borrow() { None => "none".to_string(), Some(MixPhase::Opening(_)) => "opening".into(), Some(MixPhase::Waiting { .. }) => "waiting".into(), Some(MixPhase::Mixing { tempo, .. }) => format!("mixing at {:.4}x", tempo.get()) });
-                    println!("selftest: mix: {phase}, engine crossfading {} mixing {}, now \"{}\" at {} ms", a.engine.crossfading(), a.engine.mixing(), a.queue.current().map(|t| t.title.clone()).unwrap_or_default(), a.engine.position_ms());
+                    let ear = MIX_EAR.with(|e| e.borrow().as_ref().map(|x| format!("listening again from {} ms", x.1))).or_else(|| MIX_LOCAL.with(|l| l.borrow().as_ref().map(|x| format!("measured again: {} BPM, downbeat {}, from {} ms", x.1.rhythm.bpm, x.1.rhythm.downbeat, x.1.from_ms)))).unwrap_or_default();
+                    println!("selftest: mix: {phase}, engine crossfading {} mixing {}, now \"{}\" at {} ms; {ear}", a.engine.crossfading(), a.engine.mixing(), a.queue.current().map(|t| t.title.clone()).unwrap_or_default(), a.engine.position_ms());
                 }
                 // what was measured of the track playing (its first 30%, as it played)
                 "rhythm" => {

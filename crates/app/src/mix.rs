@@ -89,6 +89,27 @@ pub fn fit(a: &Measured, b: Option<&Measured>) -> u8 {
     if omnipulse_core::rhythm::keys_mix(&a.rhythm.camelot, &b.rhythm.camelot) { 2 } else { 1 }
 }
 
+/// A fresh measurement of a bit of the track (near its end), lined up with what was measured of its
+/// start: the same bars (its downbeats where the first measurement's grid has them), the tempo and beats
+/// as they are there. None if they don't agree (another tempo there: the first measurement stands).
+pub fn relined(first: &Measured, local: &Measured) -> Option<Measured> {
+    let (a, b) = (first.rhythm.bpm, local.rhythm.bpm);
+    if a <= 0.0 || (b / a - 1.0).abs() > 0.02 { return None; }
+    let down = first_downbeat(first)?;
+    let bar = 4.0 * first.rhythm.period_ms;
+    // the local beat nearest a downbeat of the first grid: that's a downbeat
+    let (idx, off) = local.rhythm.beats.iter().enumerate().map(|(i, t)| {
+        let at = local.from_ms as f64 + t;
+        let k = ((at - down) / bar).round();
+        (i, (at - (down + k * bar)).abs())
+    }).min_by(|x, y| x.1.total_cmp(&y.1))?;
+    // (more than half a beat from any of its downbeats: they don't line up)
+    if off > first.rhythm.period_ms / 2.0 { return None; }
+    let mut m = local.clone();
+    m.rhythm.downbeat = idx % 4;
+    Some(m)
+}
+
 /// The tempo while easing back after the mix: from `rate` to 1.0 over `ms`, `t` ms in (smoothly)
 pub fn ease(rate: f64, t: u64, ms: u64) -> f64 {
     if t >= ms { return 1.0; }
@@ -152,6 +173,27 @@ mod tests {
         // a key not clear enough: left as it is
         (b.rhythm.key, b.rhythm.camelot, b.rhythm.key_confidence) = ("B minor".into(), "10A".into(), 0.02);
         assert_eq!(key_shift(&a, &b), 0);
+    }
+
+    #[test]
+    fn a_fresh_look_near_the_end() {
+        // measured at the start: 128 BPM, downbeats from 500 ms
+        let first = m(128.0, 500.0, 0, 0.5);
+        // near the end, 127.5 BPM really, its beats from 180 s on (a beat late of the old grid's by 30 ms)
+        let mut local = m(127.5, 0.0, 0, 0.5);
+        local.from_ms = 180_000;
+        let bar = 4.0f64 * 60_000.0 / 128.0;
+        let k = ((180_000.0 - 500.0) / bar).ceil();
+        let down = 500.0 + k * bar;
+        let period = 60_000.0 / 127.5;
+        local.rhythm.beats = (0..32).map(|i| down - 180_000.0 + 30.0 - 2.0 * period + i as f64 * period).collect();
+        let r = relined(&first, &local).expect("lined up");
+        // its first downbeat is the beat on the old grid's downbeat (the third here)
+        assert_eq!(r.rhythm.downbeat, 2);
+        // another tempo there entirely: the first measurement stands
+        let mut other = local.clone();
+        other.rhythm.bpm = 140.0;
+        assert!(relined(&first, &other).is_none());
     }
 
     #[test]
