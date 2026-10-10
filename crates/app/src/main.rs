@@ -1604,9 +1604,11 @@ fn song_request(shared: &Shared, id: u64, q: String, user: String) {
     if !integrations::set(&prefs, "req") || plats.is_empty() { reply(req_fail(&prefs, &base, "closed", vec![])); return; }
     if q.is_empty() { reply(req_fail(&prefs, &base, "empty", vec![])); return; }
     let pending: Vec<String> = a.queue.pending_requests().map(|x| x.by.to_lowercase()).collect();
-    if pending.len() as u64 >= prefs["reqMax"].as_u64().unwrap_or(10) { reply(req_fail(&prefs, &base, "full", vec![])); return; }
+    // Limit Requests (on unless switched off): the most waiting, and the most per viewer
+    let limited = integrations::on(&prefs, "reqLimits");
+    if limited && pending.len() as u64 >= prefs["reqMax"].as_u64().unwrap_or(10) { reply(req_fail(&prefs, &base, "full", vec![])); return; }
     let mine = pending.iter().filter(|b| **b == who.to_lowercase()).count();
-    if !user.trim().is_empty() && mine as u64 >= prefs["reqPerUser"].as_u64().unwrap_or(2) {
+    if limited && !user.trim().is_empty() && mine as u64 >= prefs["reqPerUser"].as_u64().unwrap_or(2) {
         reply(req_fail(&prefs, &base, "perUser", vec![("count", mine.to_string())]));
         return;
     }
@@ -1627,11 +1629,16 @@ fn song_request(shared: &Shared, id: u64, q: String, user: String) {
                 let vars: Vec<(&str, String)> = base.iter().cloned().chain([("title", t.title.clone()), ("artist", t.artist.clone())]).collect();
                 let (pos, idle) = {
                     let mut a = shared.borrow_mut();
+                    // already coming up: it moves up, after the other requests (unless it's playing, or
+                    // someone's requested it already)
                     let from = a.queue.qi.unwrap_or(0);
-                    if a.queue.items.iter().skip(from).any(|x| x.t.key == t.key) {
+                    let at = a.queue.items.iter().enumerate().skip(from + 1).find(|(_, x)| x.t.key == t.key).map(|(i, x)| (i, x.by.is_empty()));
+                    let playing = a.queue.qi.and_then(|i| a.queue.items.get(i)).is_some_and(|x| x.t.key == t.key);
+                    if playing || at.is_some_and(|(_, free)| !free) {
                         reply(serde_json::json!({ "ok": false, "message": requests::msg(&prefs, "duplicate", &vars) }));
                         return;
                     }
+                    if let Some((i, _)) = at { a.queue.remove(i); }
                     let mut t = t.clone();
                     track::apply_fixes(&a.web.prefs, std::slice::from_mut(&mut t));
                     let pos = a.queue.add_request(t.clone(), &who);
@@ -1653,18 +1660,22 @@ fn song_request(shared: &Shared, id: u64, q: String, user: String) {
 /// The servers the web app's settings have on: the widget, the Stream Deck's remote, chat requests
 // ---------- Settings: the switches beyond Look ----------
 // (section, label, note, key, on unless switched off)
-const SET_ROWS: [(&str, &str, &str, &str, bool); 12] = [
+const SET_ROWS: [(&str, &str, &str, &str, bool); 16] = [
     ("Library", "Sets & Podcasts in the Queue", "Lists and autoplay include anything over 15 minutes. Off: only when you pick one.", "queueSets", false),
     ("Library", "Autoplay", "Plays similar tracks when the queue runs out.", "autoplay", true),
+    ("Library", "Favourites Page", "Your starred tracks on a page of their own, in the sidebar. The stars stay either way.", "favPage", true),
     ("Integrations", "SoundCloud", "Its likes, playlists and search.", "scOn", true),
     ("Integrations", "Spotify", "Its likes, playlists and search.", "spOn", true),
     ("Integrations", "YouTube Music", "Search, radio, and Go+ tracks in full.", "ytOn", true),
+    ("Integrations", "MusicBrainz", "An open music catalogue: search finds its songs too, and they play from YouTube Music.", "mbOn", true),
+    ("Integrations", "Listen Along & Jams", "Listen together with friends, from your Discord status or a Jam invite. Off: no Jam button, and invites and requests are turned away (song requests aren't affected).", "jamsOn", true),
     ("Integrations", "Last.fm Scrobbling", "What you play goes to your Last.fm profile.", "scrobble", true),
     ("Streaming", "Streamer Mode", "Hides account names, keys, addresses and plugin settings. The title bar's button does this too.", "streamerMode", false),
     ("Streaming", "Extended", "Also leaves out music that isn't safe on stream: only open licences, and artists and labels cleared for streaming.", "streamSafe", false),
     ("Streaming", "Discord Status", "Shows what you're playing on your Discord profile.", "presence", false),
     ("Streaming", "Stream Widget", "A now-playing card for OBS, with alerts.", "widget", false),
     ("Streaming", "Song Requests", "Chat asks for songs through your bot.", "req", false),
+    ("Streaming", "Limit Requests", "The most waiting, and the most per viewer. Off: chat can request as many songs as it likes.", "reqLimits", true),
     ("Streaming", "Stream Deck & Remote", "Control the app from a Stream Deck or another device.", "remoteOn", false),
 ];
 
@@ -1744,6 +1755,16 @@ fn set_toggle(shared: &Shared, key: &str) {
                 _ => {}
             }
             if matches!(key, "widget" | "req" | "remoteOn") && on { outside_start(shared); }
+            if key == "mbOn" { go_plus_set(&shared.borrow().web.prefs); }
+            // Listen Along & Jams off: out of any room, and the Jam button goes
+            if key == "jamsOn" {
+                if !on { ASK.with(|x| x.borrow_mut().take()); room_end(true); push_out(shared, true); }
+                jam_paint(shared);
+            }
+            if key == "favPage" {
+                if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_fav_page(on); }
+                if !on && shared.borrow().page == "favourites" { open_page(shared, "library"); }
+            }
             if key == "presence" && on { push_out(shared, true); }
             if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_status(format!("{label} {}.", if on { "on" } else { "off" }).into()); }
         }
@@ -3209,6 +3230,7 @@ fn main() -> Result<(), slint::PlatformError> {
         if std::env::var_os("OMNIPULSE_SELFTEST").is_none() { webstate::save_pref("streamerMode", serde_json::json!(on)); }
     });
     paint_plats(&shared.borrow());
+    ui.set_fav_page(integrations::on(&shared.borrow().web.prefs, "favPage"));
     if std::env::var_os("OMNIPULSE_SELFTEST").is_some() {
         // the self-test's own: the widget and requests on ports of their own, key "selftest" (not the
         // remote: starting it writes remote.json, which would point the Stream Deck at the test)

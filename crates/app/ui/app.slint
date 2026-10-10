@@ -636,6 +636,8 @@ export component AppWindow inherits Window {
     in property <string> jam-ask;
     // Listen Along & Jams switched off: no Jam button
     in property <bool> jam-hidden;
+    // Settings > Library > Favourites Page (the stars stay either way)
+    in property <bool> fav-page: true;
     in property <string> jam-ring;
     in-out property <bool> jam-open;
     in property <string> jam-link;
@@ -791,7 +793,7 @@ export component AppWindow inherits Window {
                     NavItem { label: "Discover"; d: Icons.discover; compact: root.narrow; active: root.page == "discover"; clicked => { root.nav("discover"); } }
                     NavItem { label: "Rediscover"; d: Icons.rediscover; compact: root.narrow; active: root.page == "rediscover"; clicked => { root.nav("rediscover"); } }
                     NavItem { label: "Library"; d: Icons.library; compact: root.narrow; active: root.page == "library"; clicked => { root.nav("library"); } }
-                    NavItem { label: "Favourites"; d: Icons.star; spin: true; compact: root.narrow; active: root.page == "favourites"; clicked => { root.nav("favourites"); } }
+                    if root.fav-page: NavItem { label: "Favourites"; d: Icons.star; spin: true; compact: root.narrow; active: root.page == "favourites"; clicked => { root.nav("favourites"); } }
                     NavItem { label: "Sets & Podcasts"; d: Icons.sets; compact: root.narrow; active: root.page == "sets"; clicked => { root.nav("sets"); } }
                     NavItem { label: "Artists"; d: Icons.person; compact: root.narrow; active: root.page == "artists" || root.page == "artist"; clicked => { root.nav("artists"); } }
                     NavItem { label: "Stats"; d: Icons.stats; compact: root.narrow; active: root.page == "stats"; clicked => { root.nav("stats"); } }

@@ -87,16 +87,26 @@ pub fn is_version(s: &str) -> bool {
     mark.is_match(&same.replace_all(s, " "))
 }
 
+/// Every word asked for is in its title or artist (more words are fine)
+fn has_all(t: &Track, q: &str) -> bool {
+    let have = words(&format!("{} {}", t.title, t.artist));
+    words(q).iter().all(|w| have.contains(w))
+}
+
 /// The best of a search for what was asked for, and how good (lower is better): the song itself that
-/// you like, the song itself, one you like, then anything. Unless a version was asked for, other
-/// versions only come after the song itself.
+/// you like, the song itself, one with every word asked for, one you like, then anything. Unless a
+/// version was asked for, other versions only come after the song itself; but one with every word in
+/// it beats one without them ("ghosts n stuff ginsu" is Ginsu's mashup, not the original).
 fn rank<'a>(found: &'a [Track], asked: &str, liked: &dyn Fn(&Track) -> bool) -> Option<(&'a Track, usize)> {
     let want_version = is_version(asked);
     let top: Vec<&Track> = found.iter().take(10).filter(|x| want_version || !is_version(&x.title)).collect();
     let same = |x: &&&Track| same_song(x, asked);
+    let all = |x: &&&Track| has_all(x, asked);
     let tiers = [
         top.iter().take(5).find(|x| same(x) && liked(x)).copied(),
         top.iter().find(same).copied(),
+        top.iter().find(all).copied(),
+        found.iter().take(10).find(|x| has_all(x, asked)),
         top.iter().take(5).find(|x| liked(x)).copied(),
         top.first().copied(),
         found.iter().take(5).find(|x| liked(x)),
