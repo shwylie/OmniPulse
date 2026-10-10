@@ -1561,8 +1561,18 @@ fn fav_toggle(shared: &Shared) {
 /// Playing from a page: a list (Library, a playlist...) becomes the queue; one track from Search
 /// takes the current one's place and leaves the rest of the queue as it was
 fn play_list(shared: &Shared, list: Vec<Track>, i: usize) {
-    if listening().is_some() {
-        listen_leave(shared, true);
+    // listening along: in a Jam, the song goes to the host to play next; otherwise playing it here
+    // would mean leaving, so that's said instead (the Jam button leaves)
+    if let Some(kind) = listening() {
+        let note = match list.get(i) {
+            Some(t) if kind == "jam" => {
+                listen_send(serde_json::json!({ "type": "add", "track": t.to_snapshot(), "next": true }));
+                format!("Sent \"{}\" to the Jam, to play next.", t.title)
+            }
+            _ => "You're listening along: leave first (the button at the top) to play your own music.".to_string(),
+        };
+        if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_status(note.into()); }
+        return;
     }
     let (list, i) = {
         let a = shared.borrow();

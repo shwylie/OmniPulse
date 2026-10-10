@@ -568,6 +568,18 @@ function togetherGuard() {
     }
     // the player moving itself on (a song that ended, or couldn't play): the host decides what's next
     if (n === "onEnded" || n === "step") return;
+    // playing a song (from a page or a list): in a Jam it goes to the host, to play next; listening
+    // along, you're asked first (leaving is what playing it here would take)
+    if (n === "playFromPage" || n === "startList") {
+      const t = n === "playFromPage" ? viewTracks[args[0]] : (args[0] || [])[args[2] ? 0 : args[1] || 0];
+      if (together.canAdd && t && !args[2]) {
+        if (send({ type: "add", track: snapOf(t), next: true })) say('Sent "' + (t.title || "the song") + '" to the Jam, to play next.');
+        return;
+      }
+      const self = this;
+      say((together.kind === "jam" ? "You're in " + together.hostName + "'s Jam" : "You're listening along with " + together.hostName) + ": playing this leaves it.", { force: true, actions: [["Leave and play", () => togetherEnd(true).then(() => togetherOrig[n].apply(self, args))]] });
+      return;
+    }
     if (n === "playCurrent") return togetherOrig[n].apply(this, args);
     if (n === "toggle") {
       // a pause here is yours; playing again catches up with the host
