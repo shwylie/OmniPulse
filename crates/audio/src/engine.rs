@@ -540,7 +540,7 @@ impl Ramp {
 /// between them (as the ear hears it); the first one's before them, the last one's after
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Sweep {
-    pub points: [(u64, f32); 4],
+    pub points: [(u64, f32); 5],
     pub high: bool,
 }
 
@@ -555,15 +555,17 @@ impl Sweep {
                 return ha * (hb / ha).powf(q);
             }
         }
-        pts[3].1
+        pts[4].1
     }
     fn frames(&self, rate: u64) -> Self { Self { points: self.points.map(|(t, hz)| (t * rate / 1000, hz)), high: self.high } }
 }
 
-/// A wipe's split: from up here (the air), down to where the voices start (by the beat before the
-/// swap), then on down to the bass (where the kicks are) by the swap
-const WIPE_TOP_HZ: f32 = 12_000.0;
-const WIPE_VOICE_HZ: f32 = 3_000.0;
+/// A wipe's split: from up here (the very top), easing down (to WIPE_HALF_HZ halfway) to above the
+/// voices' presence (by the beat before the swap: the one playing still bright, its voice clear),
+/// then on down to the bass (where the kicks are) by the swap
+const WIPE_TOP_HZ: f32 = 16_000.0;
+const WIPE_HALF_HZ: f32 = 10_000.0;
+const WIPE_VOICE_HZ: f32 = 5_000.0;
 const WIPE_BASS_HZ: f32 = 160.0;
 
 /// How a mix hands over, a band at a time: its bass (below ~150 Hz), its mids (to ~2.5 kHz: the
@@ -620,14 +622,14 @@ impl Handoff {
         let beat = (beat_ms.round() as u64).min(swap);
         let glide = 120;
         let side = Ramp { in_at: 0, in_len: beat, out_at: swap, out_len: glide };
-        let down = [(0, WIPE_TOP_HZ), (swap - beat, WIPE_VOICE_HZ), (swap, WIPE_BASS_HZ)];
+        let down = [(0, WIPE_TOP_HZ), ((swap - beat) / 2, WIPE_HALF_HZ), (swap - beat, WIPE_VOICE_HZ), (swap, WIPE_BASS_HZ)];
         Self {
             low: side,
             mid: side,
             high: side,
             echo: None,
-            out_sweep: Some(Sweep { points: [down[0], down[1], down[2], down[2]], high: false }),
-            in_sweep: Some(Sweep { points: [down[0], down[1], down[2], (swap + glide, 10.0)], high: true }),
+            out_sweep: Some(Sweep { points: [down[0], down[1], down[2], down[3], down[3]], high: false }),
+            in_sweep: Some(Sweep { points: [down[0], down[1], down[2], down[3], (swap + glide, 10.0)], high: true }),
         }
     }
 
@@ -1219,14 +1221,14 @@ mod mix_tests {
             }
             4.0 * (c * c + s * s).sqrt() / n as f32
         };
-        // a second in (the split near 8 kHz): the one going out whole but its very top; the one coming
+        // a second in (the split near 13 kHz): the one going out whole but its very top; the one coming
         // in's voice and bass not at all
         assert!(has(600.0, 3.0) > 0.18 && has(55.0, 3.0) > 0.25, "early out {} {}", has(600.0, 3.0), has(55.0, 3.0));
         assert!(has(900.0, 3.0) < 0.01 && has(82.0, 3.0) < 0.01, "early held {} {}", has(900.0, 3.0), has(82.0, 3.0));
-        // three seconds in, a beat before the swap (the split near 3.7 kHz): the one coming in's highs,
-        // the one going out's voice still all there, the one coming in's not yet
-        assert!(has(9000.0, 5.0) > 0.08 && has(600.0, 5.0) > 0.18, "voice kept {} {}", has(9000.0, 5.0), has(600.0, 5.0));
-        assert!(has(900.0, 5.0) < 0.01 && has(6000.0, 5.0) < 0.03, "voice held {} {}", has(900.0, 5.0), has(6000.0, 5.0));
+        // three seconds in, a beat before the swap (the split near 6.3 kHz): the one coming in's top,
+        // the one going out's voice all there and still bright (its 6 kHz half there), the one coming in's not yet
+        assert!(has(9000.0, 5.0) > 0.06 && has(600.0, 5.0) > 0.18 && has(6000.0, 5.0) > 0.04, "kept {} {} {}", has(9000.0, 5.0), has(600.0, 5.0), has(6000.0, 5.0));
+        assert!(has(900.0, 5.0) < 0.01, "voice held {}", has(900.0, 5.0));
         // past the swap: only the one that came in, all of it
         assert!(has(82.0, 7.0) > 0.25 && has(55.0, 7.0) < 0.01 && has(600.0, 7.0) < 0.01, "after {} {} {}", has(82.0, 7.0), has(55.0, 7.0), has(600.0, 7.0));
         // and as loud all through (within 3 dB)
