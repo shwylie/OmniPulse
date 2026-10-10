@@ -200,26 +200,50 @@ pub fn parse_lyrics(v: &Value) -> Vec<Line> {
     v["plainLyrics"].as_str().map(|p| p.lines().map(|l| Line { ms: 0, text: l.trim().to_string() }).collect()).unwrap_or_default()
 }
 
-pub async fn lyrics(t: &Track) -> Vec<Line> {
-    let enc = |s: &str| s.bytes().map(|b| if b.is_ascii_alphanumeric() { (b as char).to_string() } else { format!("%{b:02X}") }).collect::<String>();
-    let artist = t.artist.split(',').next().unwrap_or("").trim().to_string();
-    let title = t.title.split(" (").next().unwrap_or(&t.title).trim().to_string();
-    let dur = if t.ms > 0 { format!("&duration={}", t.ms / 1000) } else { String::new() };
-    let got = core::lyrics::lyrics_get(format!("https://lrclib.net/api/get?artist_name={}&track_name={}{dur}", enc(&artist), enc(&title))).await;
-    let v = match got {
-        Ok(v) => v,
-        Err(_) => core::lyrics::lyrics_get(format!("https://lrclib.net/api/search?q={}", enc(&format!("{artist} {title}"))))
-            .await
-            .ok()
-            .and_then(|l| l.as_array().and_then(|a| a.first().cloned()))
-            .unwrap_or(Value::Null),
+/// The lyrics places, as the web app's LYRICS_PROVIDERS, in your order (prefs.lyricsOrder: [{ id, on }])
+const PROVIDERS: [&str; 4] = ["lrclib", "netease", "kugou", "youtube"];
+
+pub fn lyrics_order(prefs: &Value) -> Vec<String> {
+    let mut out: Vec<(String, bool)> = prefs["lyricsOrder"].as_array().into_iter().flatten()
+        .filter_map(|x| Some((x["id"].as_str()?.to_string(), x["on"].as_bool() != Some(false))))
+        .filter(|(id, _)| PROVIDERS.contains(&id.as_str()))
+        .collect();
+    for p in PROVIDERS { if !out.iter().any(|(id, _)| id == p) { out.push((p.to_string(), true)); } }
+    out.into_iter().filter(|(_, on)| *on).map(|(id, _)| id).collect()
+}
+
+/// A track's lyrics (as the web app's findLyrics): the first timed ones, asking each place in your
+/// order (LRCLIB, NetEase Cloud Music, KuGou, YouTube Music), else the first plain ones
+pub async fn lyrics(t: &Track, prefs: &Value) -> Vec<Line> {
+    let (artist, title) = crate::versions::guess_names(t);
+    let artist = if artist.is_empty() { t.artist.split(',').next().unwrap_or("").trim().to_string() } else { artist };
+    let secs = t.ms / 1000;
+    // the YouTube video it plays from (itself, or its version there), for YouTube Music's lyrics
+    let video = match &t.src {
+        Src::YouTube(id) => id.clone(),
+        _ if t.go_plus || matches!(t.src, Src::Catalog(_)) => crate::versions::find(t).await.map(|v| v.yt.id).unwrap_or_default(),
+        _ => String::new(),
     };
-    parse_lyrics(&v)
+    let mut plain: Option<Value> = None;
+    for p in lyrics_order(prefs) {
+        let Ok(v) = core::lyrics::from(&p, &artist, &title, secs, &video).await else { continue };
+        if v.is_null() { continue; }
+        if v["synced"].is_string() { return parse_lyrics(&serde_json::json!({ "syncedLyrics": v["synced"] })); }
+        if plain.is_none() { plain = Some(serde_json::json!({ "plainLyrics": v["plain"] })); }
+    }
+    plain.map(|v| parse_lyrics(&v)).unwrap_or_default()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn lyrics_places_in_your_order() {
+        let p = serde_json::json!({ "lyricsOrder": [{ "id": "kugou", "on": true }, { "id": "lrclib", "on": false }, { "id": "nope" }] });
+        assert_eq!(lyrics_order(&p), ["kugou", "netease", "youtube"]);
+        assert_eq!(lyrics_order(&Value::Null), ["lrclib", "netease", "kugou", "youtube"]);
+    }
 
     #[test]
     fn synced_lyrics_are_read_in_order() {

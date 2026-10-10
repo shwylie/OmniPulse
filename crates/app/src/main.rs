@@ -1593,9 +1593,10 @@ fn start(shared: &Shared) {
             });
         });
     });
+    let prefs = shared.borrow().web.prefs.clone();
     rt.spawn(async move {
         let art = player::fetch_art(t2.art.replace("-t200x200", "-t500x500"), 500).await;
-        let lyrics = player::lyrics(&t2).await;
+        let lyrics = player::lyrics(&t2, &prefs).await;
         let _ = weak2.upgrade_in_event_loop(move |ui| {
             SHARED.with(|s| {
                 let Some(shared) = s.borrow().clone() else { return };
