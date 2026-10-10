@@ -17,6 +17,7 @@ pub mod local;
 pub mod loudness;
 pub mod lyrics;
 pub mod ranking;
+pub mod sponsorblock;
 pub mod musicbrainz;
 #[cfg(feature = "desktop")]
 pub mod plugins;
@@ -278,6 +279,7 @@ pub fn open_url(url: String) -> Result<(), String> {
         || url.starts_with("https://www.deezer.com/")
         || url.starts_with("https://music.apple.com/")
         || url.starts_with("https://en.wikipedia.org/")
+        || url.starts_with("https://sponsor.ajay.app/")
         // (where your own keys are made: the key setup's pages)
         || url.starts_with("https://developer.spotify.com/")
         || url.starts_with("https://console.cloud.google.com/"))

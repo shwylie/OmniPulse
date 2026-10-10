@@ -302,6 +302,9 @@ async fn deezer_get(path: String) -> Result<Value, String> { omnipulse_core::cat
 // An artist's bio from Wikipedia ({ title, text, url, image }, or null)
 #[tauri::command]
 async fn artist_bio(name: String) -> Result<Value, String> { omnipulse_core::bio::artist(&name).await }
+// SponsorBlock's non-music parts of a YouTube video ([[start, end]] in seconds)
+#[tauri::command]
+async fn sb_segments(video_id: String) -> Result<Vec<(f64, f64)>, String> { omnipulse_core::sponsorblock::music_offtopic(&video_id).await }
 // Downloads yt-dlp and Deno in the background; yt_status says how it's going
 // async, so it runs on Tauri's async runtime rather than the window's thread
 #[tauri::command]
@@ -918,7 +921,7 @@ fn main() {
             local_folders, local_set_folders, local_scan, local_status, local_tracks, local_server,
             requests_start, requests_stop, request_result,
             spe_signed_in, spe_login, spe_logout, spe_attach, spe_play, spe_pause, spe_resume, spe_seek, spe_stop, spe_played, spe_playlist, spe_web_get, spe_set_normalisation, loudness_analyse,
-            resolve_yt_stream, plugin_inspect, plugin_install, plugin_list, plugin_folder, plugin_remove, plugin_http, yt_search, yt_radio, yt_status, yt_artists, yt_artist, yt_album, yt_playlist, yt_playlists, yt_prepare, sc_ytdlp, mb_search, cat_search, deezer_get, artist_bio, apple_connect, apple_library, apple_forget, update_check, update_install, yt_setup, yt_remove, remote_start, remote_stop, remote_result
+            resolve_yt_stream, plugin_inspect, plugin_install, plugin_list, plugin_folder, plugin_remove, plugin_http, yt_search, yt_radio, yt_status, yt_artists, yt_artist, yt_album, yt_playlist, yt_playlists, yt_prepare, sc_ytdlp, mb_search, cat_search, deezer_get, artist_bio, sb_segments, apple_connect, apple_library, apple_forget, update_check, update_install, yt_setup, yt_remove, remote_start, remote_stop, remote_result
         ])
         .run(tauri::generate_context!())
         .expect("error while running app");
