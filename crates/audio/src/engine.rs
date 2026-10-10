@@ -154,8 +154,8 @@ struct Shared {
     fade_target: AtomicU32,
     fade_step: AtomicU32,
     fade_from: AtomicU32,
-    /// the sound before the volume (stereo, interleaved), for a second output (OmniPulse Offset)
-    tap: Mutex<Option<Tap>>,
+    /// the sound before the volume (stereo, interleaved), for other outputs (OmniPulse Offset, casting), by name
+    tap: Mutex<Vec<(String, Tap)>>,
     /// the main output held back by this many frames (a second output that has to be earlier)
     main_delay: AtomicU32,
 }
@@ -194,7 +194,7 @@ impl Engine {
             fade_step: AtomicU32::new(1.0f32.to_bits()),
             fade_from: AtomicU32::new(f32::NAN.to_bits()),
             source_done: AtomicBool::new(false),
-            tap: Mutex::new(None),
+            tap: Mutex::new(Vec::new()),
             main_delay: AtomicU32::new(0),
         });
         let (cmd, cmd_rx) = mpsc::channel();
@@ -324,9 +324,13 @@ impl Engine {
     pub fn level(&self) -> (f32, f32) {
         *self.shared.level.lock().unwrap()
     }
-    /// A second output's feed (None: none)
-    pub fn set_tap(&self, tap: Option<Tap>) {
-        *self.shared.tap.lock().unwrap() = tap;
+    /// Another output's feed, by name (None: that one stops)
+    pub fn set_tap(&self, name: &str, tap: Option<Tap>) {
+        let mut taps = self.shared.tap.lock().unwrap();
+        taps.retain(|(n, _)| n != name);
+        if let Some(t) = tap {
+            taps.push((name.to_string(), t));
+        }
     }
 
     /// Holds the main output back (for a second output that has to be heard earlier)
@@ -380,7 +384,7 @@ fn build_output(name: &str, shared: Arc<Shared>, ev: Sender<Event>) -> Result<(c
         let mut q = shared.queue.lock().unwrap();
         let mut frames = 0u64;
         let delay = shared.main_delay.load(Ordering::Relaxed) as usize;
-        let tapping = shared.tap.lock().unwrap().is_some();
+        let tapping = !shared.tap.lock().unwrap().is_empty();
         tapped.clear();
         for fr in out.chunks_mut(ch.max(1)) {
             let (l, r) = match (q.pop_front(), q.pop_front()) {
@@ -414,7 +418,7 @@ fn build_output(name: &str, shared: Arc<Shared>, ev: Sender<Event>) -> Result<(c
         drop(q);
         shared.played.fetch_add(frames, Ordering::Relaxed);
         if tapping {
-            if let Some(t) = shared.tap.lock().unwrap().as_mut() { t(&tapped); }
+            for (_, t) in shared.tap.lock().unwrap().iter_mut() { t(&tapped); }
         }
     };
     let err = move |e: cpal::StreamError| {

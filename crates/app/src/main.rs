@@ -707,6 +707,93 @@ fn open_discover(shared: &Shared) {
     });
 }
 
+// ---------- casting (as the web app's js/cast.js, through crates/core/src/cast.rs) ----------
+// The app stays the player: its sound (before the volume) goes to the device as a live stream, the
+// PC's own output is silent meanwhile, and the volume slider is the device's. Track changes give the
+// device the new title and cover; pausing and playing on either side is followed.
+thread_local! {
+    /// the device being cast to (its name)
+    static CASTING: RefCell<Option<String>> = const { RefCell::new(None) };
+    /// the cast devices last listed in the output menu (after Windows' devices)
+    static CAST_LIST: RefCell<Vec<omnipulse_core::cast::Device>> = const { RefCell::new(Vec::new()) };
+}
+
+pub fn casting() -> Option<String> {
+    CASTING.with(|c| c.borrow().clone())
+}
+
+fn cast_meta(a: &App) -> serde_json::Value {
+    match a.queue.current() {
+        Some(t) => serde_json::json!({ "title": t.title, "artist": t.artist, "album": t.album, "art": t.art.replace("-t200x200", "-t500x500"), "playing": !a.engine.is_paused() }),
+        None => serde_json::json!({ "title": "OmniPulse" }),
+    }
+}
+
+fn cast_start(shared: &Shared, d: omnipulse_core::cast::Device) {
+    let (rt, weak, meta) = { let a = shared.borrow(); (a.rt.clone(), a.ui.clone(), cast_meta(&a)) };
+    if let Some(ui) = weak.upgrade() { ui.set_status(format!("Connecting to {}...", d.name).into()); }
+    let events: std::sync::Arc<dyn Fn(serde_json::Value) + Send + Sync> = std::sync::Arc::new(|m| {
+        let _ = slint::invoke_from_event_loop(move || SHARED.with(|s| { if let Some(sh) = s.borrow().clone() { cast_event(&sh, m); } }));
+    });
+    rt.spawn_blocking(move || {
+        let got = omnipulse_core::cast::start(&d.id, meta, events);
+        let _ = weak.upgrade_in_event_loop(move |ui| SHARED.with(|s| {
+            let Some(shared) = s.borrow().clone() else { return };
+            match got {
+                Ok(dev) => {
+                    CASTING.with(|c| *c.borrow_mut() = Some(dev.name.clone()));
+                    let engine = shared.borrow().engine.clone();
+                    let rate = engine.output_rate();
+                    let mut bytes = Vec::new();
+                    engine.set_tap("cast", Some(Box::new(move |x: &[f32]| {
+                        offset::pcm(x, &mut bytes);
+                        if bytes.len() >= rate as usize / 50 * 4 { omnipulse_core::cast::push_pcm(&bytes, rate); bytes.clear(); }
+                    })));
+                    engine.set_muted(true);
+                    let offset_on = shared.borrow().web.prefs["out2On"].as_bool() == Some(true);
+                    offset_apply(&shared);
+                    ui.set_status(if offset_on { format!("Casting to {}. OmniPulse Offset is paused until you stop.", dev.name) } else { format!("Casting to {}. It plays there a moment after it does here.", dev.name) }.into());
+                }
+                Err(e) => ui.set_status(format!("Couldn't cast to {}: {e}", d.name).into()),
+            }
+        }));
+    });
+}
+
+/// Casting over (stopped here, or by the device): the PC's own output back, and OmniPulse Offset
+fn cast_end(shared: &Shared, note: Option<String>) {
+    let Some(name) = CASTING.with(|c| c.borrow_mut().take()) else { return };
+    let engine = shared.borrow().engine.clone();
+    engine.set_tap("cast", None);
+    engine.set_muted(false);
+    offset_apply(shared);
+    if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_status(note.unwrap_or_else(|| format!("Stopped casting to {name}.")).into()); }
+}
+
+fn cast_stop(shared: &Shared) {
+    omnipulse_core::cast::stop();
+    cast_end(shared, None);
+}
+
+/// What the device says
+fn cast_event(shared: &Shared, m: serde_json::Value) {
+    if casting().is_none() { return; }
+    match m["type"].as_str() {
+        Some("ended") => cast_end(shared, m["message"].as_str().map(|x| format!("Casting stopped: {x}"))),
+        Some("error") => { if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_status(m["message"].as_str().unwrap_or("").to_string().into()); } }
+        // paused or played with the device's own controls
+        Some("media") => {
+            let paused = shared.borrow().engine.is_paused();
+            match m["state"].as_str() {
+                Some("PAUSED") if !paused => toggle(shared),
+                Some("PLAYING") if paused => { omnipulse_core::cast::reload(); toggle(shared); }
+                _ => {}
+            }
+        }
+        _ => {}
+    }
+}
+
 // ---------- the Streamer Mode page (as the web app's js/streamerpage.js) ----------
 // While Stream-Safe Music is on: collections of music that's safe on stream, each made when it's
 // opened (searched for on every platform that's on, then only what's safe kept, each song once):
@@ -1135,6 +1222,7 @@ fn start(shared: &Shared) {
                         engine.play();
                         ui.set_playing(true);
                         ui.set_status("".into());
+                        if casting().is_some() { omnipulse_core::cast::track(cast_meta(&shared.borrow())); }
                         // which version a Go+ track is playing; the closest one's note stays while it plays
                         if let Some(v) = &version {
                             let what = if mb { "From MusicBrainz" } else { "Go+ track" };
@@ -3512,7 +3600,8 @@ fn toggle(shared: &Shared) {
     }
     let (engine, weak) = { let a = shared.borrow(); (a.engine.clone(), a.ui.clone()) };
     let Some(ui) = weak.upgrade() else { return };
-    if engine.is_paused() { engine.play(); ui.set_playing(true); } else { engine.pause(); ui.set_playing(false); }
+    // (casting: what the device had buffered while paused is old, so it starts afresh)
+    if engine.is_paused() { engine.play(); ui.set_playing(true); if casting().is_some() { omnipulse_core::cast::reload(); } } else { engine.pause(); ui.set_playing(false); }
     save_session(&shared.borrow());
     push_out(shared, true);
 }
@@ -3748,6 +3837,13 @@ fn main() -> Result<(), slint::PlatformError> {
             list.extend(omnipulse_audio::Engine::devices());
             let want = webstate::native_pref("nativeDevice").and_then(|v| v.as_str().map(String::from)).unwrap_or_default();
             ui.set_device_on(list.iter().position(|d| *d == want).map_or(0, |i| i as i32));
+            // cast devices on the network (found in the background: the menu has more next time it opens)
+            let _ = omnipulse_core::cast::discover_start();
+            let cast = omnipulse_core::cast::devices();
+            let on = casting();
+            if let Some(i) = on.as_ref().and_then(|n| cast.iter().position(|d| d.name == *n)) { ui.set_device_on((list.len() + i) as i32); }
+            list.extend(cast.iter().map(|d| format!("Cast to {}", d.name)));
+            CAST_LIST.with(|c| *c.borrow_mut() = cast);
             ui.set_devices(ModelRc::from(Rc::new(VecModel::from(list.into_iter().map(slint::SharedString::from).collect::<Vec<_>>()))));
         });
     }
@@ -3755,6 +3851,14 @@ fn main() -> Result<(), slint::PlatformError> {
     ui.on_device_pick(move |i| {
         let Some(ui) = s.borrow().ui.upgrade() else { return };
         let Some(name) = ui.get_devices().row_data(i as usize).map(|d| d.to_string()) else { return };
+        // a cast device (they come after Windows' devices)
+        if let Some(d) = name.strip_prefix("Cast to ").and_then(|n| CAST_LIST.with(|c| c.borrow().iter().find(|d| d.name == n).cloned())) {
+            if casting().as_deref() == Some(d.name.as_str()) { return; }
+            if casting().is_some() { omnipulse_core::cast::stop(); cast_end(&s, None); }
+            ui.set_device_on(i);
+            return cast_start(&s, d);
+        }
+        if casting().is_some() { cast_stop(&s); }
         let engine = s.borrow().engine.clone();
         let use_name = if i == 0 { String::new() } else { name.clone() };
         match engine.set_device(&use_name) {
@@ -3998,7 +4102,8 @@ fn main() -> Result<(), slint::PlatformError> {
             slint::Timer::single_shot(std::time::Duration::from_millis(300), move || push_out(&s2, true));
         }
     });
-    ui.on_volume_changed({ let engine = engine.clone(); move |v| engine.set_volume(v) });
+    // (casting: the slider is the device's volume)
+    ui.on_volume_changed({ let engine = engine.clone(); move |v| if casting().is_some() { omnipulse_core::cast::set_volume(v as f64) } else { engine.set_volume(v) } });
 
     // the window: dragged by the title bar, its own buttons
     ui.on_drag({

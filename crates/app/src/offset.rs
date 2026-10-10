@@ -15,8 +15,9 @@ const PIECE_MS: u64 = 20;
 
 /// Starts, changes or stops it as the settings say; what to tell you (the device it plays on, or why not)
 pub fn apply(engine: &Engine, prefs: &Value) -> Result<String, String> {
-    if prefs["out2On"].as_bool() != Some(true) {
-        engine.set_tap(None);
+    // (while casting it rests: the sound is on the device, so it would only echo; it's back after)
+    if prefs["out2On"].as_bool() != Some(true) || crate::casting().is_some() {
+        engine.set_tap("offset", None);
         engine.set_main_delay_ms(0);
         omni_input::stop();
         return Ok(String::new());
@@ -29,8 +30,15 @@ pub fn apply(engine: &Engine, prefs: &Value) -> Result<String, String> {
     let rate = engine.output_rate();
     let later = if offset > 0 { offset as usize * rate as usize / 1000 } else { 0 };
     let piece = (rate as u64 * PIECE_MS / 1000) as usize * 4;
-    engine.set_tap(Some(tap(vol, later, piece, move |b| omni_input::push_pcm(b, rate))));
+    engine.set_tap("offset", Some(tap(vol, later, piece, move |b| omni_input::push_pcm(b, rate))));
     Ok(device)
+}
+
+/// 16-bit stereo PCM of the feed, for another output (casting uses it too)
+pub fn pcm(s: &[f32], out: &mut Vec<u8>) {
+    for &x in s {
+        out.extend_from_slice(&((x.clamp(-1.0, 1.0) * 32767.0) as i16).to_le_bytes());
+    }
 }
 
 /// The feed: its volume, its own delay line (`later` frames, when it's the later one), then 16-bit
@@ -64,3 +72,4 @@ mod tests {
         assert_eq!(v, [0, 0, 0, 0, 16383, 16383]);
     }
 }
+
