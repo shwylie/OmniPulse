@@ -1530,7 +1530,7 @@ function openCurrentArtist(e) {
 $("nowArtist").addEventListener("click", openCurrentArtist);
 $("npArtist").addEventListener("click", openCurrentArtist);
 // the platform icon: the uploader's page
-["nowPlat", "npPlat"].forEach((id) => $(id).addEventListener("click", (e) => {
+["nowPlat", "npPlat", "npArtPlat"].forEach((id) => $(id).addEventListener("click", (e) => {
   if (!e.target.closest(".platBig")) return;
   e.stopPropagation();
   const t = curTrack();
