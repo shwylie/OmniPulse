@@ -11,7 +11,8 @@ const SEARCH_TRACKS_SHOWN = 8;
 // Best match first:
 //   1. a track with every word searched for (in its title or artist) beats one with fewer
 //      ("ginsu ghosts n stuff" puts Ginsu's "Ghosts n Stuff" above the original and its remixes)
-//   2. then one whose title is just what was searched ("hello": "Hello" before "Hello Hello")
+//   2. then one whose title (or artist) is just what was searched ("hello": "Hello" before "Hello
+//      Hello"; "deadmau5": deadmau5's songs, not only ones called "deadmau5")
 //   3. then the more played, across platforms ("hello": Adele's before one with a 25th of the plays)
 // and otherwise the platforms take turns, as they came.
 // Plays: SoundCloud's and YouTube Music's counts; Spotify gives a 0-100 popularity instead, read as
@@ -30,7 +31,7 @@ function searchRanker(q) {
     const have = new Set(reqWords((t.title || "") + " " + artistName(t)));
     return want.filter((w) => have.has(w)).length / want.length;
   };
-  const exact = (t) => (reqWords(t.title || "").join(" ") === asked ? 1 : 0);
+  const exact = (t) => (reqWords(t.title || "").join(" ") === asked || reqWords(artistName(t)).join(" ") === asked ? 1 : 0);
   return (list) => list.map((t, i) => ({ t, i, s: score(t), e: exact(t), p: Math.log10(1 + searchPlays(t)) }))
     .sort((a, b) => b.s - a.s || b.e - a.e || b.p - a.p || a.i - b.i).map((x) => x.t);
 }
