@@ -87,7 +87,8 @@ impl Track {
     /// Its title tidied as the web app does (crate::titles): promo tags out, "Artist - Song" split
     /// (SoundCloud), and featured artists out of the title and into the artists
     pub fn tidied(mut self) -> Self {
-        self.title = crate::titles::clean_title(&self.title);
+        self.title = crate::titles::clean_title(&lookalikes(&self.title));
+        self.artist = lookalikes(&self.artist);
         let mut t = self.split_artist();
         let (title, artist) = crate::titles::tidy_feat(&t.title, &t.artist);
         t.title = title;
@@ -215,6 +216,12 @@ impl Track {
             label: s["label_name"].as_str().unwrap_or("").to_string(),
         })
     }
+}
+
+/// Characters the app's font hasn't got, as ones it has that look the same: "Ginsu \u{2a2f} Ghosts" (a
+/// maths cross) shows as "Ginsu \u{d7} Ghosts". (The web view borrows another font for them; this can't.)
+pub fn lookalikes(s: &str) -> String {
+    s.chars().map(|c| match c { '\u{2a2f}' | '\u{2715}' | '\u{2716}' => '\u{d7}', _ => c }).collect()
 }
 
 pub fn fmt_ms(ms: u64) -> String {
