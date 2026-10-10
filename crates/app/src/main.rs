@@ -3095,6 +3095,127 @@ fn pl_create(shared: &Shared, tracks: Vec<Track>) {
     }
 }
 
+// ---------- playlists as files (as the web app's js/playlistfiles.js, core::playlistfile) ----------
+fn plat_name(plat: &str) -> &'static str {
+    match plat { "soundcloud" => "SoundCloud", "spotify" => "Spotify", "youtube" => "YouTube Music", "local" => "Your files", "deezer" => "Deezer", "itunes" => "Apple Music", "musicbrainz" => "MusicBrainz", _ => "Plugin" }
+}
+
+/// Any playlist as an M3U (each track's file or link) or a CSV (title, artist, album, length, platform, link)
+fn pl_export(shared: &Shared, p: sources::Playlist, kind: &str) {
+    let safe: String = p.title.chars().map(|c| if "<>:\"/\\|?*".contains(c) { ' ' } else { c }).collect();
+    let safe = if safe.trim().is_empty() { "Playlist".to_string() } else { safe.trim().to_string() };
+    let dlg = rfd::FileDialog::new().set_title(format!("Export {}", p.title)).set_file_name(format!("{safe}.{}", if kind == "csv" { "csv" } else { "m3u8" }));
+    let dlg = if kind == "csv" { dlg.add_filter("CSV", &["csv"]) } else { dlg.add_filter("M3U playlist", &["m3u8", "m3u"]) };
+    let Some(dest) = dlg.save_file() else { return };
+    let (rt, weak, prefs) = { let a = shared.borrow(); (a.rt.clone(), a.ui.clone(), a.web.prefs.clone()) };
+    if let Some(ui) = weak.upgrade() { ui.set_status("Exporting...".into()); }
+    let csv = kind == "csv";
+    rt.spawn(async move {
+        let mut list = sources::playlist_tracks(&p).await;
+        track::apply_fixes(&prefs, &mut list);
+        let rows: Vec<omnipulse_core::playlistfile::Row> = list.iter().map(|t| omnipulse_core::playlistfile::Row {
+            title: t.title.clone(), artist: t.artist.clone(), album: t.album.clone(), ms: t.ms, isrc: String::new(),
+            platform: plat_name(t.plat()).to_string(), link: t.web_link(),
+            path: if let track::Src::Local(path) = &t.src { path.clone() } else { String::new() },
+        }).collect();
+        let text = if csv { omnipulse_core::playlistfile::csv_text(&rows) } else { omnipulse_core::playlistfile::m3u_text(&p.title, &rows) };
+        let done = omnipulse_core::playlist_file_write(&dest.to_string_lossy(), &text);
+        let n = rows.len();
+        let _ = weak.upgrade_in_event_loop(move |ui| ui.set_status(match done {
+            Ok(()) => format!("Exported \"{}\": {}.", p.title, plural(n, "song", "songs")),
+            Err(e) => format!("Couldn't save it: {e}"),
+        }.into()));
+    });
+}
+
+/// A YouTube video's id in a link (youtube.com/watch?v=, music.youtube.com, youtu.be/)
+fn yt_link_id(link: &str) -> Option<String> {
+    let id = link.split_once("v=").map(|(_, r)| r).or_else(|| link.split_once("youtu.be/").map(|(_, r)| r))?;
+    let id: String = id.chars().take_while(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_').collect();
+    (id.len() == 11).then_some(id)
+}
+
+/// A song in a playlist file: the file itself, the link's own track, or else found by its title and
+/// artist (in the catalogues, then YouTube Music)
+async fn entry_track(e: &omnipulse_core::playlistfile::Entry, files: &[Track], catalog: bool) -> Option<Track> {
+    if !e.path.is_empty() {
+        let want = e.path.replace('/', "\\").to_lowercase();
+        if let Some(f) = files.iter().find(|t| matches!(&t.src, track::Src::Local(p) if p.replace('/', "\\").to_lowercase() == want)) { return Some(f.clone()); }
+    }
+    let link = e.link.as_str();
+    if !link.is_empty() {
+        if let Some(id) = yt_link_id(link) {
+            return Some(Track { src: track::Src::YouTube(id.clone()), key: format!("yt:{id}"), title: if e.title.is_empty() { "Untitled".into() } else { e.title.clone() }, artist: e.artist.clone(), ms: e.ms, ..Default::default() });
+        }
+        let sp = link.split("track/").nth(1).or_else(|| link.strip_prefix("spotify:track:")).map(|r| r.chars().take(22).collect::<String>());
+        if let Some(id) = sp.filter(|id| id.len() == 22 && link.contains("spotify")) {
+            if let Ok(v) = omnipulse_core::spotify::spotify_api("GET".into(), format!("/tracks/{id}?market=from_token"), None).await {
+                if let Some(t) = Track::spotify(&v) { return Some(t); }
+            }
+        }
+        if link.contains("soundcloud.com/") && omnipulse_core::soundcloud::signed_in() {
+            if let Ok(v) = omnipulse_core::soundcloud::api_get(format!("/resolve?url={}", sources::urlencode(link.split(['?', '#']).next().unwrap_or(link)))).await {
+                if let Some(t) = Track::soundcloud(&v) { return Some(t); }
+            }
+        }
+        if let Some(id) = link.split("deezer.com/").nth(1).and_then(|r| r.split("track/").nth(1)).map(|r| r.chars().take_while(|c| c.is_ascii_digit()).collect::<String>()).filter(|id| !id.is_empty()) {
+            if let Ok(v) = omnipulse_core::catalog::deezer(&format!("/track/{id}")).await {
+                if let Some(t) = omnipulse_core::catalog::dz_track(&v, None).and_then(|x| Track::catalog(&x)) { return Some(t); }
+            }
+        }
+    }
+    if e.title.is_empty() { return None; }
+    let want = track::song_key(&Track { title: e.title.clone(), artist: e.artist.clone(), ..Default::default() });
+    let q = format!("{} {}", e.artist, e.title);
+    if catalog {
+        if let Ok(found) = omnipulse_core::catalog::search(q.trim()).await {
+            if let Some(t) = found.iter().filter_map(Track::catalog).find(|t| track::song_key(t) == want) { return Some(t); }
+        }
+    }
+    let found = omnipulse_core::youtube::search(q.trim()).await.ok()?;
+    found.iter().map(Track::youtube).find(|t| track::song_key(t) == want)
+}
+
+fn pl_import(shared: &Shared) {
+    let Some(src) = rfd::FileDialog::new().set_title("Import a playlist").add_filter("Playlist", &["m3u", "m3u8", "csv", "txt"]).pick_file() else { return };
+    pl_import_file(shared, src);
+}
+
+fn pl_import_file(shared: &Shared, src: std::path::PathBuf) {
+    let path = src.to_string_lossy().into_owned();
+    let text = match omnipulse_core::playlist_file_read(&path) {
+        Ok(t) => t,
+        Err(e) => { if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_status(format!("Couldn't read that file: {e}").into()); } return; }
+    };
+    let (name, entries) = if path.to_lowercase().ends_with(".csv") { (String::new(), omnipulse_core::playlistfile::csv_entries(&text)) } else { omnipulse_core::playlistfile::m3u_entries(&text) };
+    let ui = shared.borrow().ui.upgrade();
+    if entries.is_empty() { if let Some(ui) = ui { ui.set_status("No songs found in that file.".into()); } return; }
+    let name = if name.is_empty() { src.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| "Imported".into()) } else { name };
+    let (rt, weak, files, catalog) = { let a = shared.borrow(); (a.rt.clone(), a.ui.clone(), a.library.iter().filter(|t| t.plat() == "local").cloned().collect::<Vec<_>>(), catalog_on(&a.web.prefs)) };
+    if let Some(ui) = ui { ui.set_status(format!("Importing \"{name}\": {}...", plural(entries.len(), "song", "songs")).into()); }
+    rt.spawn(async move {
+        let mut tracks = Vec::new();
+        let mut missing = Vec::new();
+        for e in &entries {
+            match entry_track(e, &files, catalog).await {
+                Some(t) => tracks.push(t),
+                None => missing.push(if e.artist.is_empty() { e.title.clone() } else { format!("{} - {}", e.artist, e.title) }),
+            }
+        }
+        let _ = weak.upgrade_in_event_loop(move |ui| SHARED.with(|s| {
+            let Some(shared) = s.borrow().clone() else { return };
+            if tracks.is_empty() { ui.set_status("None of its songs were found anywhere.".into()); return; }
+            let id = xpl::create(&mut shared.borrow_mut().xpl, &name, &tracks);
+            xpl_changed(&shared);
+            go(&shared, Place::Playlist(id));
+            let note = format!("Imported \"{name}\": {}{}", plural(tracks.len(), "song", "songs"), if missing.is_empty() { ".".to_string() } else { format!(", {} found anywhere (copied, to look for).", plural(missing.len(), "song wasn't", "songs weren't")) });
+            if !missing.is_empty() { let _ = arboard::Clipboard::new().and_then(|mut c| c.set_text(missing.join("\n"))); }
+            ui.set_status(note.into());
+            STATUS_HOLD.with(|h| *h.borrow_mut() = None);
+        }));
+    });
+}
+
 // ---------- keeping them on the platforms (crate::mirror) ----------
 thread_local! {
     static SYNC_TIMER: RefCell<Option<slint::Timer>> = const { RefCell::new(None) };
@@ -3313,6 +3434,9 @@ fn side_action(shared: &Shared, i: usize, act: &str) {
     }
     if let Some(plat) = act.strip_prefix("link:") {
         return share_platform(shared, p, plat);
+    }
+    if let Some(kind) = act.strip_prefix("export:") {
+        return pl_export(shared, p, kind);
     }
     if !xpl::is_own(&p.id) {
         return;
@@ -4549,6 +4673,8 @@ fn main() -> Result<(), slint::PlatformError> {
     let s = shared.clone();
     ui.on_pl_new(move || pl_create(&s, Vec::new()));
     let s = shared.clone();
+    ui.on_pl_import(move || pl_import(&s));
+    let s = shared.clone();
     ui.on_name_done(move |name| name_done(&s, &name));
     let s = shared.clone();
     ui.on_side_action(move |i, act| side_action(&s, i as usize, &act));
@@ -5089,7 +5215,7 @@ fn main() -> Result<(), slint::PlatformError> {
         // (OMNIPULSE_SELFTEST_PLAN=discover: only Discover, its shelves, and the first mix it has opened)
         let only_discover = std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("discover");
         let plan: Vec<(u64, &str)> = if join.is_some() { vec![(6, "join"), (14, "joined"), (16, "jamskip"), (19, "leave"), (21, "end")] }
-            else if only_discover { vec![(9, "play"), (11, "discover"), (30, "disc"), (45, "discmix"), (46, "taste"), (47, "taste2"), (48, "taste3"), (70, "tasted"), (71, "marquee"), (72, "marqueeoff"), (73, "end")] } else { full.to_vec() };
+            else if only_discover { vec![(9, "play"), (11, "discover"), (30, "disc"), (45, "discmix"), (12, "import"), (46, "taste"), (47, "taste2"), (48, "taste3"), (70, "tasted"), (71, "marquee"), (72, "marqueeoff"), (73, "end")] } else { full.to_vec() };
         t.start(slint::TimerMode::Repeated, std::time::Duration::from_millis(250), move || {
             let Some(&(at, what)) = plan.get(step_no) else { return };
             if started.elapsed().as_secs() < at { return; }
@@ -5269,8 +5395,13 @@ fn main() -> Result<(), slint::PlatformError> {
                 }
                 // the seek bar's marquee, for its picture
                 "marquee" => ui.set_track_loading(true),
+                // OMNIPULSE_SELFTEST_IMPORT=<an M3U or CSV>: imported as a playlist on this PC (shown after)
+                "import" => if let Ok(f) = std::env::var("OMNIPULSE_SELFTEST_IMPORT") { pl_import_file(&s, f.into()); },
                 "marqueeoff" => ui.set_track_loading(false),
-                "tasted" => println!("selftest: discover after picking: {}", ui.get_shelves().iter().map(|sh| format!("{} {}", sh.title, sh.tiles.row_count())).collect::<Vec<_>>().join(", ")),
+                "tasted" => {
+                    println!("selftest: imported {:?}, status \"{}\"", s.borrow().xpl.as_array().into_iter().flatten().filter(|x| x["title"].as_str() == Some("Import test")).map(|x| x["tracks"].as_array().map(|t| t.iter().map(|y| format!("{} [{}]", y["title"].as_str().unwrap_or(""), y["source"].as_str().unwrap_or(""))).collect::<Vec<_>>()).unwrap_or_default()).collect::<Vec<_>>(), ui.get_status());
+                    println!("selftest: discover after picking: {}", ui.get_shelves().iter().map(|sh| format!("{} {}", sh.title, sh.tiles.row_count())).collect::<Vec<_>>().join(", "));
+                }
                 "discmix" => println!("selftest: mix \"{}\" ({}): {} tracks, first {:?}", ui.get_page_title(), ui.get_page_sub(), s.borrow().page_tracks.len(), s.borrow().page_tracks.iter().take(4).map(|t| format!("{} - {} [{}]", t.artist, t.title, t.plat())).collect::<Vec<_>>()),
                 "end" => {
                     println!("selftest: status \"{}\"", ui.get_status());

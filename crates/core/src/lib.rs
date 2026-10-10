@@ -19,6 +19,7 @@ pub mod lyrics;
 pub mod ranking;
 pub mod sponsorblock;
 pub mod musicbrainz;
+pub mod playlistfile;
 #[cfg(feature = "desktop")]
 pub mod plugins;
 #[cfg(feature = "desktop")]

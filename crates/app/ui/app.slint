@@ -551,6 +551,8 @@ export component AppWindow inherits Window {
     in property <string> name-ok;
     callback name-done(string);
     callback pl-new();
+    // a playlist file (M3U or CSV) as a playlist on this PC: the New playlist button's right-click menu
+    callback pl-import();
     callback side-action(int, string);
     // the bar's playlist button: one of yours (by its place in own-lists), or -1 for a new one
     callback bar-pl(int);
@@ -933,7 +935,13 @@ export component AppWindow inherits Window {
                     if !root.narrow: HorizontalLayout {
                         padding-left: 12px;
                         Text { text: "Playlists"; color: Theme.muted; font-size: 12px; font-weight: 700; vertical-alignment: center; horizontal-stretch: 1; }
-                        IconButton { d: Icons.add; size: 26px; clicked => { root.pl-new(); } }
+                        ContextMenuArea {
+                            Menu {
+                                MenuItem { title: "New playlist"; activated => { root.pl-new(); } }
+                                MenuItem { title: "Import a playlist file..."; activated => { root.pl-import(); } }
+                            }
+                            IconButton { d: Icons.add; size: 26px; clicked => { root.pl-new(); } }
+                        }
                     }
                     if root.narrow: Rectangle { height: 1px; background: Theme.line; }
                     ListView {
@@ -952,13 +960,14 @@ export component AppWindow inherits Window {
                                 if !root.narrow: Text { text: s.title; color: root.side-on == i ? Theme.text : Theme.muted; font-size: 13px; vertical-alignment: center; overflow: elide; }
                             }
                             ContextMenuArea {
-                                enabled: s.share || s.own;
                                 Menu {
                                     if s.share: MenuItem { title: "Share"; activated => { root.side-action(i, "share"); } }
                                     if s.sc: MenuItem { title: "Copy SoundCloud Link"; activated => { root.side-action(i, "link:soundcloud"); } }
                                     if s.sp: MenuItem { title: "Copy Spotify Link"; activated => { root.side-action(i, "link:spotify"); } }
                                     if s.own: MenuItem { title: "Rename..."; activated => { root.side-action(i, "rename"); } }
                                     if s.own: MenuItem { title: "Delete"; activated => { root.side-action(i, "delete"); } }
+                                    MenuItem { title: "Export as M3U..."; activated => { root.side-action(i, "export:m3u"); } }
+                                    MenuItem { title: "Export as CSV..."; activated => { root.side-action(i, "export:csv"); } }
                                 }
                                 sta := TouchArea { clicked => { root.side(i); } }
                             }
