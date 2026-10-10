@@ -62,6 +62,16 @@ pub async fn open_source(t: &Track, rt: tokio::runtime::Handle) -> Result<Box<dy
             let p = path.clone();
             tokio::task::spawn_blocking(move || Decoded::open_file(std::path::Path::new(&p)).map(|d| Box::new(d) as Box<dyn Source>)).await.map_err(|e| e.to_string())?
         }
+        // not signed in to SoundCloud (a friend in a Jam, say): the track's own audio through yt-dlp
+        Src::SoundCloud(_) if !core::soundcloud::signed_in() && core::tools::ytdlp_path().is_some() && t.link.starts_with("https://soundcloud.com/") => {
+            let url = core::yt_stream::resolve_soundcloud(t.link.split(['?', '#']).next().unwrap_or("")).await?;
+            let hls = url.contains(".m3u8");
+            tokio::task::spawn_blocking(move || -> Result<Box<dyn Source>, String> {
+                if hls { Ok(Box::new(HlsSource::open(&url)?)) } else { Ok(Box::new(omnipulse_audio::open_url(&url, "mp3")?)) }
+            })
+            .await
+            .map_err(|e| e.to_string())?
+        }
         Src::SoundCloud(id) => {
             let v = core::soundcloud::stream_url(id.to_string()).await?;
             let mut why = String::from("SoundCloud sent no stream for it");
