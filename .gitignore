@@ -9,3 +9,12 @@ crates/core/keys.local.json
 
 # the Stream Deck plugin's own logs
 streamdeck/com.shwylie.scclient.sdPlugin/logs/
+
+# the Android app's build, and what scripts/android-rust.mjs makes (it runs with every Gradle build)
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+android/.kotlin/
+android/app/src/main/jniLibs/
+android/app/src/main/java/uniffi/
