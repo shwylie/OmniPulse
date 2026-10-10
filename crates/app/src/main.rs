@@ -1003,8 +1003,10 @@ fn start(shared: &Shared) {
                         if let (Some((src_kind, id)), None) = (what, known) {
                             loud_measure(&shared, &t, src_kind, id, token);
                         }
-                        if resume > 0 {
-                            engine.seek(resume);
+                        // where you left off, or its start time (Track preferences)
+                        let at = resume.max(trim_of(&shared.borrow().web.prefs, &t.key).0);
+                        if at > 0 {
+                            engine.seek(at);
                         }
                         engine.play();
                         ui.set_playing(true);
@@ -1393,11 +1395,24 @@ fn tick(shared: &Shared, events: &std::sync::mpsc::Receiver<Event>, n: u64) {
     if !shared.borrow().loaded {
         return; // a restored session, not started yet: the bar shows where it was
     }
-    let (pos, dur) = (engine.position_ms(), engine.duration_ms());
-    ui.set_pos_text(fmt_ms(pos).into());
-    ui.set_dur_text(fmt_ms(dur).into());
-    ui.set_dur_secs(dur as f32 / 1000.0);
-    ui.set_pos_frac(if dur > 0 { (pos as f32 / dur as f32).min(1.0) } else { 0.0 });
+    let (pos, raw_dur) = (engine.position_ms(), engine.duration_ms());
+    // a track's start and end times (Track preferences): it shows, and plays, as only that part
+    let (t_start, t_end) = trim_now(shared);
+    let dur = t_end.unwrap_or(raw_dur);
+    let (vpos, vdur) = (pos.saturating_sub(t_start), dur.saturating_sub(t_start));
+    ui.set_pos_text(fmt_ms(vpos).into());
+    ui.set_dur_text(fmt_ms(vdur).into());
+    ui.set_dur_secs(vdur as f32 / 1000.0);
+    ui.set_pos_frac(if vdur > 0 { (vpos as f32 / vdur as f32).min(1.0) } else { 0.0 });
+    // its end time: on to the next one (once)
+    if let Some(end) = t_end {
+        let here = format!("{}:{:?}", shared.borrow().queue.current().map(|t| t.key.clone()).unwrap_or_default(), shared.borrow().queue.qi);
+        if !engine.is_paused() && pos >= end && TRIM_ENDED.with(|e| *e.borrow() != here) {
+            TRIM_ENDED.with(|e| *e.borrow_mut() = here);
+            if shared.borrow().repeat == "one" { start(shared); } else { step(shared, 1); }
+            return;
+        }
+    }
     let near_end = {
         let mut a = shared.borrow_mut();
         if let Some(i) = a.lyrics.iter().rposition(|l| l.ms > 0 && l.ms <= pos + 200) {
@@ -1450,6 +1465,28 @@ fn tick(shared: &Shared, events: &std::sync::mpsc::Receiver<Event>, n: u64) {
             Event::Ended => step(shared, 1),
             Event::Error(e) => ui.set_status(e.into()),
         }
+    }
+}
+
+thread_local! {
+    /// the track (and its place in the queue) its end time has just ended, so it's done once
+    static TRIM_ENDED: RefCell<String> = const { RefCell::new(String::new()) };
+}
+
+/// A track's start and end times, as the web app keeps them (prefs.trackTrims[id] = { start, end }, ms)
+fn trim_of(prefs: &serde_json::Value, key: &str) -> (u64, Option<u64>) {
+    let x = &prefs["trackTrims"][key];
+    let start = x["start"].as_f64().unwrap_or(0.0).max(0.0) as u64;
+    let end = x["end"].as_f64().filter(|e| *e > 0.0).map(|e| e as u64);
+    (start, end.filter(|e| *e > start))
+}
+
+/// The playing track's (the host's while listening along: it plays as it is)
+fn trim_now(shared: &Shared) -> (u64, Option<u64>) {
+    let a = shared.borrow();
+    match a.queue.current() {
+        Some(t) => trim_of(&a.web.prefs, &t.key),
+        None => (0, None),
     }
 }
 
@@ -3815,9 +3852,11 @@ fn main() -> Result<(), slint::PlatformError> {
     let s = shared.clone();
     ui.on_seek(move |f| {
         let engine = s.borrow().engine.clone();
-        let d = engine.duration_ms();
+        // within the part that plays (a track's start and end times)
+        let (from, to) = trim_now(&s);
+        let d = to.unwrap_or(engine.duration_ms()).saturating_sub(from);
         if d > 0 {
-            engine.seek((f.clamp(0.0, 1.0) as f64 * d as f64) as u64);
+            engine.seek(from + (f.clamp(0.0, 1.0) as f64 * d as f64) as u64);
             let s2 = s.clone();
             slint::Timer::single_shot(std::time::Duration::from_millis(300), move || push_out(&s2, true));
         }
@@ -4050,4 +4089,16 @@ thread_local! {
     static ALERT_TIMER: RefCell<Option<slint::Timer>> = const { RefCell::new(None) };
     #[allow(clippy::type_complexity)]
     static STAT_MODELS: RefCell<Option<(Rc<VecModel<Item>>, Rc<VecModel<Item>>)>> = const { RefCell::new(None) };
+}
+
+#[cfg(test)]
+mod trim_tests {
+    #[test]
+    fn start_and_end_times() {
+        let p = serde_json::json!({ "trackTrims": { "1": { "start": 10000, "end": 50000 }, "2": { "start": 0, "end": 0 }, "3": { "start": 9000, "end": 5000 } } });
+        assert_eq!(super::trim_of(&p, "1"), (10000, Some(50000)));
+        assert_eq!(super::trim_of(&p, "2"), (0, None));
+        assert_eq!(super::trim_of(&p, "3"), (9000, None));   // an end before the start doesn't count
+        assert_eq!(super::trim_of(&p, "x"), (0, None));
+    }
 }
