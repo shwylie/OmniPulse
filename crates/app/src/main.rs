@@ -10,6 +10,7 @@ mod offset;
 mod plugrun;
 mod collab;
 mod desktop;
+mod instance;
 mod discover;
 mod integrations;
 mod look;
@@ -4232,6 +4233,15 @@ fn skip_press(shared: &Shared, d: i32) {
 }
 
 /// Opens an invite link (given to the app when it starts)
+/// An omnipulse:// link (the app started with it, or handed it by a second one): a collaborative
+/// playlist's invite joins it; a Jam's or a Listen Along's joins that
+fn open_link(shared: &Shared, link: &str) {
+    if let Some((code, relay, e)) = together::parse_playlist_link(link, &relay_of(&shared.borrow())) {
+        if !e.is_empty() { return collab_join(shared, code, relay, e); }
+    }
+    listen_join(shared, link)
+}
+
 fn listen_join(shared: &Shared, link: &str) {
     let (rt, weak, default_relay, name, cid) = {
         let a = shared.borrow();
@@ -4848,6 +4858,19 @@ fn toggle(shared: &Shared) {
 }
 
 fn main() -> Result<(), slint::PlatformError> {
+    // one OmniPulse at a time: a second one hands its link (or "show") to the first, and closes
+    let link_arg = std::env::args().find(|x| x.starts_with("omnipulse://"));
+    if std::env::var_os("OMNIPULSE_SELFTEST").is_none() {
+        let claimed = instance::claim(link_arg.clone(), |msg| {
+            let _ = slint::invoke_from_event_loop(move || SHARED.with(|s| {
+                if let Some(sh) = s.borrow().clone() {
+                    desktop_action(&sh, "show");
+                    if msg.starts_with("omnipulse://") { open_link(&sh, &msg); }
+                }
+            }));
+        });
+        if claimed.is_err() { return Ok(()); }
+    }
     let rt = tokio::runtime::Builder::new_multi_thread().worker_threads(2).enable_all().build().expect("runtime");
     // Slint's software renderer to start with: measured at 38 MB and ~3% of a core while playing,
     // against ~100 MB with the GPU one (most of it the graphics driver). SLINT_BACKEND picks another.
@@ -4882,6 +4905,10 @@ fn main() -> Result<(), slint::PlatformError> {
 
     SHARED.with(|s| *s.borrow_mut() = Some(shared.clone()));
     // the plugins that are on, each started on its own thread
+    // the plugins that come with OmniPulse (beside it, in plugins/): installed, or brought up to date
+    if let Some(dir) = std::env::current_exe().ok().and_then(|e| e.parent().map(|d| d.join("plugins"))).filter(|d| d.is_dir()) {
+        omnipulse_core::plugins::install_bundled(&dir);
+    }
     plugins_start(&shared);
     // OmniPulse Offset, if it's on (not in the self-test: it would play)
     if std::env::var_os("OMNIPULSE_SELFTEST").is_none() { offset_apply(&shared); }
@@ -5030,15 +5057,10 @@ fn main() -> Result<(), slint::PlatformError> {
     paint_plats(&shared.borrow());
     ui.set_fav_page(integrations::on(&shared.borrow().web.prefs, "favPage"));
     // an invite link the app was opened with (omnipulse://jam/... or join/...): joined once it's up
-    if let Some(link) = std::env::args().find(|x| x.starts_with("omnipulse://")) {
+    SHARED.with(|s| *s.borrow_mut() = Some(shared.clone()));
+    if let Some(link) = link_arg {
         let s = shared.clone();
-        slint::Timer::single_shot(std::time::Duration::from_millis(1500), move || {
-            // (a playlist's: with an edit key, an invite to a collaborative one)
-            if let Some((code, relay, e)) = together::parse_playlist_link(&link, &relay_of(&s.borrow())) {
-                if !e.is_empty() { return collab_join(&s, code, relay, e); }
-            }
-            listen_join(&s, &link)
-        });
+        slint::Timer::single_shot(std::time::Duration::from_millis(1500), move || open_link(&s, &link));
     }
     // everyone's changes to your collaborative playlists: a moment after starting, then every minute
     {
