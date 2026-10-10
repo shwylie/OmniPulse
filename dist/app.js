@@ -171,7 +171,8 @@ const ICON_CLOSE = "M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.4
 
 // The seek bar, and the thin bar that stands in for it when the window is narrow
 function paintProgress(frac) {
-  const f = Math.max(0, Math.min(1, frac || 0));
+  // (the next track being found: no progress at all, only the marquee)
+  const f = switching ? 0 : Math.max(0, Math.min(1, frac || 0));
   $("seek").value = String(Math.round(f * 1000));
   if (miniDrag === null) {
     $("miniBar").style.width = (f * 100).toFixed(2) + "%";
@@ -1639,6 +1640,7 @@ let playGen = 0;        // which playCurrent is the latest
 
 function loadingBar(on) {
   document.querySelectorAll(".seekRow, .miniProg").forEach((n) => n.classList.toggle("loading", !!on));
+  if (on) { paintProgress(0); $("cur").textContent = fmt(0); $("miniTime").textContent = ""; }
 }
 
 // The handover: the old one fades out (quickly), and the new one starts once it's quiet

@@ -295,7 +295,7 @@ function spotifyPos() {
 
 function paintSpotify() {
   const t = curTrack();
-  if (!onSpotifyEngine(t)) return;
+  if (!onSpotifyEngine(t) || (typeof switching !== "undefined" && switching)) return;   // (the next track being found)
   if (pendingResume && pendingResume.id === t.id) return;   // restored, not started: the restored position stays shown
   const pos = Math.min(spotifyPos(), spState.dur || Infinity);
   $("cur").textContent = fmt(viewPos(t, pos));

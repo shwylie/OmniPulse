@@ -1762,9 +1762,10 @@ body.streamSafe #navSets, body.streamSafe #navArtists, body.streamSafe #plSectio
 .miniTrack::before { opacity: 0; }
 .seekRow.loading .seekLoad, .miniProg.loading .miniTrack::before { opacity: 1; transition: opacity .2s; }
 .seekRow.loading .seekLoad::before, .miniProg.loading .miniTrack::before { animation: seekMarquee 1.6s cubic-bezier(.45, .05, .55, .95) infinite; }
-/* (the bar itself steps back while it glides: the old track's progress isn't the new one's) */
-.seekRow.loading input { opacity: .45; }
+/* (only the glow shows while it glides: no fill, no knob, just the empty bar under it) */
+.seekRow.loading input { visibility: hidden; }
+.seekRow.loading .seekLoad { background: color-mix(in srgb, var(--text) 16%, transparent); }
 .miniProg.loading .miniTrack { overflow: visible; }
-.miniProg.loading #miniBar, .miniProg.loading .miniKnob { opacity: .2; }
+.miniProg.loading #miniBar, .miniProg.loading .miniKnob, .miniProg.loading .miniTime { opacity: 0; }
 @keyframes seekMarquee { from { left: -22%; } to { left: 100%; } }
 @media (prefers-reduced-motion: reduce) { .seekRow.loading .seekLoad::before, .miniProg.loading .miniTrack::before { animation-duration: 3.2s; } }
