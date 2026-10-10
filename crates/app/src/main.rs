@@ -1599,6 +1599,7 @@ fn start(shared: &Shared) {
                         };
                         sb_load(&shared, video);
                         rhythm_begin(&shared, &t, 0);
+                        if integrations::on(&shared.borrow().web.prefs, "mixOn") && MIX_OUT_OK.with(|c| c.get()) { rhythm_ahead(&shared, t.clone()); }
                         let what = sound::loud_source(&t, version.as_ref().map(|v| v.yt.id.as_str()));
                         shared.borrow_mut().cur_loud = what.as_ref().map(|(k, id)| format!("{k}:{id}"));
                         FADE.with(|f| *f.borrow_mut() = (false, String::new()));
@@ -1734,27 +1735,50 @@ fn rhythm_line(key: &str) -> String {
     omnipulse_core::rhythm::known(key).map(|m| format!("{:.0} BPM · {} · {}", m.rhythm.bpm, m.rhythm.key, m.rhythm.camelot)).unwrap_or_default()
 }
 
-/// The next track's beat, measured ahead from its stream's start (for a mix into it), if it isn't known
-/// yet: its YouTube Music version's, its SoundCloud stream's, a plugin's or its file's (never Spotify's)
+/// What a track's measured whole is kept as (its every beat, and each bar's loudness: where its intro
+/// ends and its outro starts), for a mix out of it or into it
+fn rhythm_full_key(key: &str) -> String { format!("full:{key}") }
+
+fn rhythm_full(key: &str) -> Option<omnipulse_core::rhythm::Measured> { omnipulse_core::rhythm::known(&rhythm_full_key(key)) }
+
+/// (tracks being measured whole right now, so each is once)
+static RHYTHM_FULL_BUSY: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+
+/// A track measured whole (for a mix out of it or into it), if it isn't yet, from what the mix plays:
+/// its YouTube Music version's, its SoundCloud stream's, a plugin's or its file's (never Spotify's).
+/// What's measured of its start is kept too, if nothing is yet.
 fn rhythm_ahead(shared: &Shared, t: Track) {
-    if t.key.is_empty() || t.is_mix() || omnipulse_core::rhythm::known(&t.key).is_some() { return; }
+    if t.key.is_empty() || t.is_mix() || rhythm_full(&t.key).is_some() { return; }
+    {
+        let mut busy = RHYTHM_FULL_BUSY.lock().unwrap();
+        if busy.contains(&t.key) { return; }
+        busy.push(t.key.clone());
+    }
     let rt = shared.borrow().rt.clone();
     rt.spawn(async move {
-        let (kind, id) = match &t.src {
-            track::Src::YouTube(id) => ("youtube", id.clone()),
-            track::Src::Local(p) => ("local", p.clone()),
-            track::Src::SoundCloud(id) if !t.go_plus && omnipulse_core::soundcloud::signed_in() => ("soundcloud", id.to_string()),
-            _ if mix_via_youtube(&t) => match versions::find(&t).await { Some(v) => ("youtube", v.yt.id), None => return },
-            _ => return,
-        };
-        let secs = ((t.ms as f64 / 1000.0) * RHYTHM_PART).clamp(30.0, 120.0);
-        let Ok((mono, rate)) = omnipulse_core::loudness::mono_start(kind, &id, secs).await else { return };
-        let heard = mono.len() as u64 * 1000 / rate.max(1) as u64;
-        let r = tokio::task::spawn_blocking(move || omnipulse_core::rhythm::analyse(&mono, rate)).await.ok().flatten();
-        if let Some(r) = r {
-            omnipulse_core::rhythm::keep(&t.key, omnipulse_core::rhythm::Measured { from_ms: 0, to_ms: heard, rhythm: r, v: omnipulse_core::rhythm::VERSION });
-        }
+        let key = t.key.clone();
+        rhythm_measure_whole(t).await;
+        RHYTHM_FULL_BUSY.lock().unwrap().retain(|k| *k != key);
     });
+}
+
+async fn rhythm_measure_whole(t: Track) {
+    let (kind, id) = match &t.src {
+        track::Src::YouTube(id) => ("youtube", id.clone()),
+        track::Src::Local(p) => ("local", p.clone()),
+        track::Src::SoundCloud(id) if !t.go_plus && omnipulse_core::soundcloud::signed_in() => ("soundcloud", id.to_string()),
+        _ if mix_via_youtube(&t) => match versions::find(&t).await { Some(v) => ("youtube", v.yt.id), None => return },
+        _ => return,
+    };
+    // (all of it: up to 20 minutes)
+    let Ok((mono, rate)) = omnipulse_core::loudness::mono_start(kind, &id, 1200.0).await else { return };
+    let heard = mono.len() as u64 * 1000 / rate.max(1) as u64;
+    let r = tokio::task::spawn_blocking(move || omnipulse_core::rhythm::analyse(&mono, rate)).await.ok().flatten();
+    if let Some(r) = r {
+        let m = omnipulse_core::rhythm::Measured { from_ms: 0, to_ms: heard, rhythm: r, v: omnipulse_core::rhythm::VERSION };
+        if omnipulse_core::rhythm::known(&t.key).is_none() { omnipulse_core::rhythm::keep(&t.key, m.clone()); }
+        omnipulse_core::rhythm::keep(&rhythm_full_key(&t.key), m);
+    }
 }
 
 /// A track has started: listened to, if nothing's known of it yet
@@ -1971,14 +1995,22 @@ fn mix_tick(shared: &Shared, pos: u64, dur: u64) {
     };
     let (Some(next), Some(cur)) = (next, cur) else { return };
     if !on || listening_now || !MIX_OUT_OK.with(|c| c.get()) || dur == 0 || next.is_mix() { return; }
-    let (Some(a), Some(b)) = (omnipulse_core::rhythm::known(&cur.key), omnipulse_core::rhythm::known(&next.key)) else { return };
-    // (the playing one's beat as measured again near its end, once it has been)
-    let local = MIX_LOCAL.with(|l| l.borrow().as_ref().filter(|x| x.0 == cur.key).map(|x| x.1.clone()));
-    let a = local.clone().unwrap_or(a);
     // (where its sound ends: measured, if it's before the file's end)
     let audible = shared.borrow().cur_loud.as_ref().and_then(|k| shared.borrow().analysis.get(k).and_then(|x| x["audible_ms"].as_u64())).filter(|&x| x > 0 && x < dur).unwrap_or(dur);
-    let Some(plan) = mix::plan(&a, audible, pos, &b, MIX_BARS) else { return };
-    // listened to again first, then got ready about seven seconds ahead of its moment
+    // both measured whole: every beat tracked, so no listening again
+    let whole = rhythm_full(&cur.key).zip(rhythm_full(&next.key)).and_then(|(a, b)| mix::plan_structure(&a, audible, pos, &b));
+    let (plan, local) = match whole {
+        Some(p) => (p, Some(())),
+        None => {
+            let (Some(a), Some(b)) = (omnipulse_core::rhythm::known(&cur.key), omnipulse_core::rhythm::known(&next.key)) else { return };
+            // (the playing one's beat as measured again near its end, once it has been)
+            let local = MIX_LOCAL.with(|l| l.borrow().as_ref().filter(|x| x.0 == cur.key).map(|x| x.1.clone()));
+            let a = local.clone().unwrap_or(a);
+            let Some(plan) = mix::plan(&a, audible, pos, &b, MIX_BARS) else { return };
+            (plan, local.map(|_| ()))
+        }
+    };
+    // listened to again first (measured only in part), then got ready about seven seconds ahead of its moment
     if local.is_none() {
         mix_ear(shared, &cur.key, pos, plan.at_ms);
         // (too late to listen again: as it was measured)
@@ -3309,7 +3341,7 @@ fn fade_and_silences(shared: &Shared, pos: u64, dur: u64) -> bool {
         let a = shared.borrow();
         let Some(t) = a.queue.current() else { return false };
         let an = a.cur_loud.as_ref().and_then(|k| a.analysis.get(k)).cloned();
-        (an, t.key.clone(), fade_now(&a), sound::skip_silence_ms(&a.web.prefs), a.engine.clone())
+        (an, t.key.clone(), fade_out_ms(&a), sound::skip_silence_ms(&a.web.prefs), a.engine.clone())
     };
     let Some(an) = an else { return false };
     if dur == 0 {
@@ -4434,6 +4466,16 @@ fn fade_now(a: &App) -> Option<u64> {
         None => sound::fade_ms(&a.web.prefs),
     }
 }
+
+/// How a track goes out into the next one: as Fade Between Tracks is set; with seamless mixing on, the
+/// mix decides (a mix where it can, and where it can't, its own short crossfade, whatever fading's set)
+fn fade_out_ms(a: &App) -> Option<u64> {
+    if integrations::on(&a.web.prefs, "mixOn") && listening().is_none() { return Some(MIX_FALLBACK_MS); }
+    fade_now(a)
+}
+
+/// The crossfade seamless mixing falls back on (no beat to mix on, or the next one couldn't be got ready)
+const MIX_FALLBACK_MS: u64 = 6000;
 
 /// A skip by hand (the buttons, media keys, the remote): listening, it goes to the Jam's host
 fn skip_press(shared: &Shared, d: i32) {
@@ -6067,7 +6109,13 @@ fn main() -> Result<(), slint::PlatformError> {
                     let Some(a) = omnipulse_core::rhythm::known(&cur.key) else { println!("selftest: mix: the one playing isn't measured"); return };
                     let dur = s.borrow().engine.duration_ms();
                     let cands: Vec<(usize, Track)> = { let q = &s.borrow().queue; q.items.iter().enumerate().skip(qi + 1).take(6).map(|(i, x)| (i, x.t.clone())).collect() };
-                    let found = cands.into_iter().find_map(|(i, t)| omnipulse_core::rhythm::known(&t.key).and_then(|b| mix::plan(&a, dur, 0, &b, MIX_BARS).map(|p| (i, t, b, p))));
+                    // (measured whole: the plan from its structure, as the mix makes it; else from what's measured of their starts)
+                    let fa = rhythm_full(&cur.key);
+                    println!("selftest: mix: the one playing measured whole: {}", fa.is_some());
+                    let found = cands.into_iter().find_map(|(i, t)| match (&fa, rhythm_full(&t.key)) {
+                        (Some(fa), Some(fb)) => mix::plan_structure(fa, dur, 0, &fb).map(|p| (i, t, fb, p)),
+                        _ => omnipulse_core::rhythm::known(&t.key).and_then(|b| mix::plan(&a, dur, 0, &b, MIX_BARS).map(|p| (i, t, b, p))),
+                    });
                     match found {
                         Some((i, t, b, p)) => {
                             { let mut a2 = s.borrow_mut(); let item = a2.queue.items.remove(i); a2.queue.items.insert(qi + 1, item); }

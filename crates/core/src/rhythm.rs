@@ -37,6 +37,9 @@ pub struct Rhythm {
     pub key: String,
     pub camelot: String,
     pub key_confidence: f64,
+    /// each bar's loudness (dB, from the first downbeat on): where the intro ends and the outro begins
+    #[serde(default)]
+    pub bar_db: Vec<f32>,
 }
 
 const NOTES: [&str; 12] = ["C", "C#", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B"];
@@ -281,6 +284,18 @@ pub fn analyse(mono: &[f32], rate: u32) -> Option<Rhythm> {
     }
     let downbeat = (0..4).max_by(|&a, &b| phase[a].total_cmp(&phase[b])).unwrap_or(0);
     let (tonic, minor, kconf) = key(&x);
+    // each bar's loudness, from the first downbeat on (four tracked beats to a bar)
+    let mut bar_db = Vec::new();
+    let mut b = downbeat;
+    while b < beats.len() {
+        let start = beats[b];
+        let end = beats.get(b + 4).copied().unwrap_or(start + 4.0 * period_ms);
+        let (i, j) = (((start / 1000.0) * RATE as f64) as usize, (((end / 1000.0) * RATE as f64) as usize).min(x.len()));
+        if j <= i { break; }
+        let ms = x[i..j].iter().map(|v| (*v as f64) * (*v as f64)).sum::<f64>() / (j - i) as f64;
+        bar_db.push((10.0 * ms.max(1e-12).log10()) as f32);
+        b += 4;
+    }
     Some(Rhythm {
         bpm: (60_000.0 / period_ms * 100.0).round() / 100.0,
         first_beat_ms: first,
@@ -291,6 +306,7 @@ pub fn analyse(mono: &[f32], rate: u32) -> Option<Rhythm> {
         key: key_name(tonic, minor),
         camelot: camelot(tonic, minor),
         key_confidence: kconf,
+        bar_db,
     })
 }
 
