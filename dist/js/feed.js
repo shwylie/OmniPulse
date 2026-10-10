@@ -167,14 +167,17 @@ async function tasteArtists() {
   return interleave(lists.filter(Boolean)).filter((a) => a.key && !hiddenArtists.has(a.key) && !seen.has(a.key) && seen.add(a.key));
 }
 
-// Nothing to go on yet: no likes, no favourites, nothing played
-const coldStart = () => !hasLikes() && !loadStats().length;
+// Nothing to go on yet: no likes, no favourites, nothing played, no genres picked
+const coldStart = () => !hasLikes() && !loadStats().length && !tasteGenres().length;
 
-// Before there's anything to go on, Discover starts with the genres (and their artists and charts)
-const COLD_FIRST = ["subgenres", "genres", "taste", "popular", "spotlight"];
+// Discover's order: new releases, then the app's own mixes and stations, new for you and the genres;
+// Deezer's charts last. Before there's anything to go on: the genres first, with popular artists and
+// charts to start from.
+const FEED_ORDER = ["releases", "mixes", "spmixes", "stations", "taste", "foryou", "subgenres", "genres", "top", "popular", "spotlight"];
+const COLD_ORDER = ["genres", "popular", "spotlight", "top", "foryou"];
 function orderFeed(shelves) {
-  if (!coldStart()) return shelves;
-  const rank = (s) => { const i = COLD_FIRST.indexOf(s.key); return i < 0 ? COLD_FIRST.length : i; };
+  const order = coldStart() ? COLD_ORDER : FEED_ORDER;
+  const rank = (s) => { const i = order.indexOf(s.key); return i < 0 ? order.length : i; };
   return shelves.map((s, i) => [s, i]).sort((a, b) => rank(a[0]) - rank(b[0]) || a[1] - b[1]).map(([s]) => s);
 }
 
@@ -299,10 +302,10 @@ async function buildFeed(plats) {
     };
   });
   const madeForYou = fromSpotify.daily.map(spotifyTile).concat(yours);
-  if (madeForYou.length) shelves.push({ title: "Made for you", tiles: madeForYou });
+  if (madeForYou.length) shelves.push({ key: "mixes", title: "Made for you", tiles: madeForYou });
 
   // Spotify's other mixes: Discover Weekly, Release Radar, your top mixes...
-  if (fromSpotify.other.length) shelves.push({ title: "More mixes from Spotify", tiles: fromSpotify.other.map(spotifyTile) });
+  if (fromSpotify.other.length) shelves.push({ key: "spmixes", title: "More mixes from Spotify", tiles: fromSpotify.other.map(spotifyTile) });
 
   const stationTile = (a) => ({
     kind: "station", plats: crewPlats([a], plats), art: a.art || (a.liked.soundcloud[0] ? artUrl(a.liked.soundcloud[0], "t500x500") : ""), name: a.name, hue: hueOf(a.name),
@@ -314,6 +317,7 @@ async function buildFeed(plats) {
   const stationArtists = shuffledCopy(artists.slice(6, 30)).slice(0, 8);
   if (stationArtists.length) {
     shelves.push({
+      key: "stations",
       title: "Artist stations",
       tiles: stationArtists.map(stationTile),
     });
@@ -326,7 +330,7 @@ async function buildFeed(plats) {
     if (picked.length) shelves.push({ key: "taste", title: "Artists from the genres you like", tiles: picked.map(stationTile) });
     else {
       const popular = (await popularArtists().catch(() => [])).filter((a) => !yours.has(a.key)).slice(0, 12);
-      if (popular.length) shelves.push({ key: "popular", title: artists.length ? "Popular artists" : "Popular artists to start with", tiles: popular.map(stationTile) });
+      if (popular.length) shelves.push({ key: "popular", title: coldStart() ? "Popular artists to start with" : "Popular artists", tiles: popular.map(stationTile) });
     }
   }
 
@@ -363,41 +367,39 @@ async function buildFeed(plats) {
   return { shelves, artists };
 }
 
-// The genre most of your plays are in (one Deezer has a chart for); "" before there's one
-function spotlightGenre() {
-  const n = new Map();
-  loadStats().forEach((x) => { const g = String(x.genre || "").toLowerCase().trim(); if (DZ_GENRES[g]) n.set(g, (n.get(g) || 0) + 1); });
-  return [...n.entries()].sort((a, b) => b[1] - a[1]).map(([g]) => g)[0] || "";
-}
-
 // Shelves of single tracks, which need a moment to fetch; added below the others when ready
 async function trackShelves(plats) {
   const out = [];
   const pickers = plats.filter((p) => DISCOVER_PICKERS[p]);
   const keep = notLiked(likedSongs());
-  if (plats.includes("catalog")) {
-    const rel = await newReleasesShelf().catch(() => null);
-    if (rel) out.push(rel);
-    const top = await dzChart().catch(() => []);
-    if (top.length) out.push({ title: "Top songs on Deezer", tracks: top.filter(keep).slice(0, 30) });
-    // the genre you play most, or (before you've played anything) the ones you picked, or pop: its chart
-    const seen = new Set(top.map((t) => t.id));
-    const played = spotlightGenre();
-    const picks = played ? [[GENRES.find((x) => x.toLowerCase() === played) || played.charAt(0).toUpperCase() + played.slice(1), DZ_GENRES[played]]]
-      : tasteGenres().length ? tasteGenres().slice(0, 3).map((g) => [g, tasteId(g)]) : [["Pop", DZ_GENRES.pop]];
-    for (const [name, id] of picks) {
-      const spot = (await dzChart(id).catch(() => [])).filter((t) => keep(t) && !seen.has(t.id) && seen.add(t.id)).slice(0, 20);
-      if (spot.length) out.push({ key: "spotlight", title: name + " spotlight", tracks: spot });
-    }
-  }
+  // New releases: albums and singles from your artists (Deezer) and new tracks from those you follow
+  // (SoundCloud), one shelf, newest first
+  const rel = plats.includes("catalog") ? await newReleasesShelf().catch(() => null) : null;
+  let followed = [];
   if (plats.includes("soundcloud")) {
     const f = await scDiscover("following").catch(() => null);
-    const newest = f ? f.list.filter(keep).sort((a, b) => String(b.created_at || "").localeCompare(String(a.created_at || ""))) : [];
-    if (newest.length) out.push({ title: "New from artists you follow", tracks: newest.slice(0, 30) });
+    followed = f ? f.list.filter(keep).slice(0, 30) : [];
+  }
+  const dated = (rel ? rel.tiles.map((t) => [t.released || "", t]) : [])
+    .concat(followed.map((t, i) => [String(t.created_at || "").slice(0, 10), { kind: "track", track: t, index: i, list: followed, plats: [srcOf(t)], sub: artistName(t) }]));
+  if (dated.length) {
+    out.push({ key: "releases", title: "New releases", notice: rel && rel.notice,
+      tiles: dated.sort((a, b) => b[0].localeCompare(a[0])).map(([, t]) => t) });
+  }
+  if (plats.includes("catalog")) {
+    const top = await dzChart().catch(() => []);
+    if (top.length) out.push({ key: "top", title: "Top songs", tracks: top.filter(keep).slice(0, 30) });
+    // (only before there's anything to go on, and no genres picked: otherwise the genre tiles below are
+    // the same charts as mixes)
+    if (coldStart()) {
+      const seen = new Set(top.map((t) => t.id));
+      const spot = (await dzChart(DZ_GENRES.pop).catch(() => [])).filter((t) => keep(t) && !seen.has(t.id)).slice(0, 20);
+      if (spot.length) out.push({ key: "spotlight", title: "Pop spotlight", tracks: spot });
+    }
   }
   const likes = await Promise.allSettled(pickers.map((p) => DISCOVER_PICKERS[p]("foryou")));
   const more = dedupeTracks(interleave(likes.filter((r) => r.status === "fulfilled").map((r) => shuffledCopy(r.value.list)))).filter(keep).slice(0, 30);
-  if (more.length) out.push({ title: "New for you", tracks: more });
+  if (more.length) out.push({ key: "foryou", title: "New for you", tracks: more });
   return out;
 }
 
@@ -661,8 +663,7 @@ async function openFeed(fresh) {
   // These finish even if you open a tile meanwhile, so the feed is complete when you come back
   const later = await trackShelves(plats);
   if (!feedCache || feedCache.shelves !== shelves) return;   // refreshed since
-  // new music first: new from artists you follow, and new for you, above the mixes
-  shelves.unshift(...later);
+  shelves.unshift(...later);   // (where each goes: orderFeed)
   if (view !== "discover") return;
   paintFeed(shelves);
   const notice = (later.find((s) => s.notice) || {}).notice;

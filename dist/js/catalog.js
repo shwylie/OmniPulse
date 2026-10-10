@@ -157,7 +157,7 @@ async function newReleasesShelf() {
   const first = !seen.size;
   const fresh = list.filter((a) => !seen.has(a.id));
   const tiles = list.map((a) => ({
-    kind: "playlist", name: a.title, art: a.art, plats: ["deezer"], isNew: !first && !seen.has(a.id),
+    kind: "playlist", name: a.title, art: a.art, plats: ["deezer"], isNew: !first && !seen.has(a.id), released: a.released,
     sub: a.artist + " · " + (a.kind && a.kind !== "Album" ? a.kind + " · " : "") + releaseWhen(a.released),
     open: () => openPlaylist(albumAsPlaylist(a)),
     play: () => playAlbum(a),
