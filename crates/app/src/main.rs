@@ -11,6 +11,7 @@ mod plugrun;
 mod collab;
 mod desktop;
 mod instance;
+mod mix;
 mod updater;
 mod discover;
 mod integrations;
@@ -1562,17 +1563,22 @@ fn start(shared: &Shared) {
     let weak2 = weak.clone();
     let t2 = t.clone();
     STATUS_HOLD.with(|h| *h.borrow_mut() = None);
+    // a track a mix brought in: it's playing already (not loaded again)
+    let mixed = MIXED_IN.with(|m| m.borrow_mut().take()).filter(|(k, _)| *k == t.key);
+    if mixed.is_none() { MIX.with(|m| *m.borrow_mut() = None); }
     rt.spawn(async move {
         // a Go+ track: never the preview, but its version on YouTube Music (crate::versions); a
         // MusicBrainz song the same way (MusicBrainz knows it, YouTube Music has it to play)
         let mb = matches!(t.src, track::Src::Catalog(_)) || listen_needs_version(&t);
-        let (src, version) = if t.go_plus || mb {
+        let (src, version) = if let Some((_, v)) = mixed {
+            (Ok(None), v)
+        } else if t.go_plus || mb {
             match versions::find(&t).await {
-                Some(v) => (player::open_source(&Track::youtube(&v.yt), h.clone()).await, Some(v)),
+                Some(v) => (player::open_source(&Track::youtube(&v.yt), h.clone()).await.map(Some), Some(v)),
                 None => (Err("there's no version of it on YouTube Music".to_string()), None),
             }
         } else {
-            (player::open_source(&t, h.clone()).await, None)
+            (player::open_source(&t, h.clone()).await.map(Some), None)
         };
         let _ = weak.upgrade_in_event_loop(move |ui| {
             SHARED.with(|s| {
@@ -1583,6 +1589,8 @@ fn start(shared: &Shared) {
                 ui.set_track_loading(false);
                 match src {
                     Ok(src) => {
+                        // a mix goes out of it next time only if it isn't Spotify's own playback
+                        MIX_OUT_OK.with(|c| c.set(version.is_some() || !matches!(t.src, track::Src::Spotify(_))));
                         // the YouTube video it plays from (itself, or its version), for SponsorBlock
                         let video = match (&t.src, &version) {
                             (_, Some(v)) => Some(v.yt.id.clone()),
@@ -1598,12 +1606,14 @@ fn start(shared: &Shared) {
                         let db = sound::loud_db(&shared.borrow().web.prefs, &t, known);
                         // the track before ending with Fade Between Tracks on: both heard at once, this one coming in
                         let resumed = resume > 0 || trim_of(&shared.borrow().web.prefs, &t.key).0 > 0;
-                        match XFADE.with(|x| x.borrow_mut().take()) {
-                            Some((ms, at)) if !resumed && at.elapsed().as_secs() < 8 => {
+                        match (src, XFADE.with(|x| x.borrow_mut().take())) {
+                            // (mixed in: playing already)
+                            (None, _) => {}
+                            (Some(src), Some((ms, at))) if !resumed && at.elapsed().as_secs() < 8 => {
                                 engine.fade(None, 1.0, 200);
                                 engine.crossfade(src, db, ms);
                             }
-                            _ => {
+                            (Some(src), _) => {
                                 match fade_now(&shared.borrow()) {
                                     Some(ms) => engine.fade(Some(0.0), 1.0, ms),
                                     // (fading set or not, a new track comes up over a short moment: never a hard cut)
@@ -1724,6 +1734,29 @@ fn rhythm_line(key: &str) -> String {
     omnipulse_core::rhythm::known(key).map(|m| format!("{:.0} BPM · {} · {}", m.rhythm.bpm, m.rhythm.key, m.rhythm.camelot)).unwrap_or_default()
 }
 
+/// The next track's beat, measured ahead from its stream's start (for a mix into it), if it isn't known
+/// yet: its YouTube Music version's, its SoundCloud stream's, a plugin's or its file's (never Spotify's)
+fn rhythm_ahead(shared: &Shared, t: Track) {
+    if t.key.is_empty() || t.is_mix() || omnipulse_core::rhythm::known(&t.key).is_some() { return; }
+    let rt = shared.borrow().rt.clone();
+    rt.spawn(async move {
+        let (kind, id) = match &t.src {
+            track::Src::YouTube(id) => ("youtube", id.clone()),
+            track::Src::Local(p) => ("local", p.clone()),
+            track::Src::SoundCloud(id) if !t.go_plus && omnipulse_core::soundcloud::signed_in() => ("soundcloud", id.to_string()),
+            _ if mix_via_youtube(&t) => match versions::find(&t).await { Some(v) => ("youtube", v.yt.id), None => return },
+            _ => return,
+        };
+        let secs = ((t.ms as f64 / 1000.0) * RHYTHM_PART).clamp(30.0, 120.0);
+        let Ok((mono, rate)) = omnipulse_core::loudness::mono_start(kind, &id, secs).await else { return };
+        let heard = mono.len() as u64 * 1000 / rate.max(1) as u64;
+        let r = tokio::task::spawn_blocking(move || omnipulse_core::rhythm::analyse(&mono, rate)).await.ok().flatten();
+        if let Some(r) = r {
+            omnipulse_core::rhythm::keep(&t.key, omnipulse_core::rhythm::Measured { from_ms: 0, to_ms: heard, rhythm: r, v: omnipulse_core::rhythm::VERSION });
+        }
+    });
+}
+
 /// A track has started: listened to, if nothing's known of it yet
 fn rhythm_begin(shared: &Shared, t: &Track, dur_ms: u64) {
     rhythm_stop(shared);
@@ -1838,9 +1871,116 @@ fn sb_tick(shared: &Shared, pos: u64, dur: u64) -> bool {
     false
 }
 
-// ---------- seamless mixing ----------
+// ---------- seamless mixing (crate::mix) ----------
+enum MixPhase {
+    /// the next one (its key) being opened
+    Opening(String),
+    /// handed to the engine, waiting for its moment
+    Waiting { key: String, plan: mix::Plan, tempo: omnipulse_audio::Tempo, version: Option<versions::Version> },
+    /// coming in (and then easing back to its own tempo)
+    Mixing { plan: mix::Plan, tempo: omnipulse_audio::Tempo, eased_from: Option<std::time::Instant>, ease_ms: u64 },
+}
+
+thread_local! {
+    static MIX: RefCell<Option<MixPhase>> = const { RefCell::new(None) };
+    /// the track the queue moves on to at a mix's moment (start() doesn't load it: it's playing), with
+    /// the YouTube Music version it plays as
+    static MIXED_IN: RefCell<Option<(String, Option<versions::Version>)>> = const { RefCell::new(None) };
+    /// whether the track playing is one a mix can go out of (it's not Spotify's own playback)
+    static MIX_OUT_OK: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+const MIX_BARS: u32 = 8;
+
+/// A track the mix plays from YouTube Music: Go+, a catalogue's, a Spotify one (never Spotify's own
+/// playback in a mix), or one listening along can't play here
+fn mix_via_youtube(t: &Track) -> bool {
+    t.go_plus || matches!(t.src, track::Src::Catalog(_) | track::Src::Spotify(_)) || listen_needs_version(t)
+}
+
+/// Each tick: a mix planned and got ready as the one playing nears its moment; eased back after
+fn mix_tick(shared: &Shared, pos: u64, dur: u64) {
+    // coming in: once the crossfade's over, back to its own tempo over a few beats
+    let easing = MIX.with(|m| {
+        let mut m = m.borrow_mut();
+        if let Some(MixPhase::Mixing { plan, tempo, eased_from, ease_ms }) = m.as_mut() {
+            let engine = shared.borrow().engine.clone();
+            if engine.crossfading() { return true; }
+            let since = *eased_from.get_or_insert_with(std::time::Instant::now);
+            let t = since.elapsed().as_millis() as u64;
+            tempo.set(mix::ease(plan.rate, t, *ease_ms));
+            if t >= *ease_ms { *m = None; }
+            return true;
+        }
+        m.is_some()
+    });
+    if easing { return; }
+    let (on, listening_now, next, cur) = {
+        let a = shared.borrow();
+        let next = if a.repeat == "one" { None } else { a.queue.qi.and_then(|i| a.queue.items.get(i + 1)).map(|q| q.t.clone()) };
+        (integrations::on(&a.web.prefs, "mixOn"), listening().is_some(), next, a.queue.current().cloned())
+    };
+    let (Some(next), Some(cur)) = (next, cur) else { return };
+    if !on || listening_now || !MIX_OUT_OK.with(|c| c.get()) || dur == 0 || next.is_mix() { return; }
+    let (Some(a), Some(b)) = (omnipulse_core::rhythm::known(&cur.key), omnipulse_core::rhythm::known(&next.key)) else { return };
+    // (where its sound ends: measured, if it's before the file's end)
+    let audible = shared.borrow().cur_loud.as_ref().and_then(|k| shared.borrow().analysis.get(k).and_then(|x| x["audible_ms"].as_u64())).filter(|&x| x > 0 && x < dur).unwrap_or(dur);
+    let Some(plan) = mix::plan(&a, audible, pos, &b, MIX_BARS) else { return };
+    // got ready about seven seconds ahead of its moment
+    if pos + 7000 < plan.at_ms { return; }
+    MIX.with(|m| *m.borrow_mut() = Some(MixPhase::Opening(next.key.clone())));
+    let (rt, weak, prefs) = { let a = shared.borrow(); (a.rt.clone(), a.ui.clone(), a.web.prefs.clone()) };
+    let h = rt.clone();
+    rt.spawn(async move {
+        let (src, version) = if mix_via_youtube(&next) {
+            match versions::find(&next).await {
+                Some(v) => (player::open_source(&Track::youtube(&v.yt), h).await, Some(v)),
+                None => (Err("no version on YouTube Music".to_string()), None),
+            }
+        } else {
+            (player::open_source(&next, h).await, None)
+        };
+        let tempo = omnipulse_audio::Tempo::new(plan.rate);
+        let ready = tokio::task::spawn_blocking({
+            let tempo = tempo.clone();
+            let start = plan.start_ms;
+            move || -> Result<Box<dyn omnipulse_audio::Source>, String> {
+                let mut st = omnipulse_audio::Stretched::new(src?, tempo)?;
+                omnipulse_audio::Source::seek(&mut st, start)?;
+                Ok(Box::new(st))
+            }
+        }).await.map_err(|e| e.to_string()).and_then(|r| r);
+        let _ = weak.upgrade_in_event_loop(move |_| SHARED.with(|s| {
+            let Some(shared) = s.borrow().clone() else { return };
+            let still = MIX.with(|m| matches!(&*m.borrow(), Some(MixPhase::Opening(k)) if *k == next.key));
+            if !still { return; }
+            match ready {
+                Ok(src) => {
+                    let what = sound::loud_source(&next, version.as_ref().map(|v| v.yt.id.as_str()));
+                    let known = what.as_ref().and_then(|(s, id)| shared.borrow().loud.get(&format!("{s}:{id}")).copied());
+                    let db = sound::loud_db(&prefs, &next, known);
+                    shared.borrow().engine.mix_at(src, db, plan.at_ms, plan.ms, Some(plan.swap_ms));
+                    MIX.with(|m| *m.borrow_mut() = Some(MixPhase::Waiting { key: next.key.clone(), plan, tempo, version }));
+                }
+                // (it couldn't be got ready: the usual way, then)
+                Err(_) => MIX.with(|m| *m.borrow_mut() = None),
+            }
+        }));
+    });
+}
+
 /// A mix's moment came: the next track is coming in (the queue moves on, without loading it again)
-fn mix_started(_shared: &Shared) {}
+fn mix_started(shared: &Shared) {
+    let Some(MixPhase::Waiting { key, plan, tempo, version }) = MIX.with(|m| m.borrow_mut().take()) else { return };
+    let at = shared.borrow().queue.qi.map(|i| i + 1).filter(|&n| shared.borrow().queue.items.get(n).is_some_and(|q| q.t.key == key));
+    let Some(n) = at else { return };
+    // (each beat of the one coming in, at its own tempo, for easing back over sixteen of them)
+    let ease_ms = omnipulse_core::rhythm::known(&key).map(|m| (16.0 * m.rhythm.period_ms) as u64).unwrap_or(8000);
+    MIX.with(|m| *m.borrow_mut() = Some(MixPhase::Mixing { plan, tempo, eased_from: None, ease_ms }));
+    MIXED_IN.with(|m| *m.borrow_mut() = Some((key, version)));
+    shared.borrow_mut().queue.qi = Some(n);
+    start(shared);
+}
 
 // ---------- preloading the next track (as the web app's js/preload.js) ----------
 // Once the one playing is 70% through, or has a minute left (whichever comes first), what the next one
@@ -1871,6 +2011,7 @@ fn preload_next(shared: &Shared) {
     };
     if PRELOADED.with(|p| *p.borrow() == next.key) { return; }
     PRELOADED.with(|p| *p.borrow_mut() = next.key.clone());
+    if integrations::on(&shared.borrow().web.prefs, "mixOn") { rhythm_ahead(shared, next.clone()); }
     let yt_id = |t: &Track| if let track::Src::YouTube(id) = &t.src { Some(id.clone()) } else { None };
     let via_yt = next.go_plus || matches!(next.src, track::Src::Catalog(_)) || listen_needs_version(&next);
     if !via_yt && yt_id(&next).is_none() { return; }   // (the others start at once anyway)
@@ -2272,6 +2413,7 @@ fn tick(shared: &Shared, events: &std::sync::mpsc::Receiver<Event>, n: u64) {
         return;
     }
     rhythm_tick(shared, pos);
+    if !engine.is_paused() { mix_tick(shared, pos, dur); }
     while let Ok(ev) = events.try_recv() {
         match ev {
             Event::Mixed => mix_started(shared),
@@ -2552,9 +2694,10 @@ fn song_request(shared: &Shared, id: u64, q: String, user: String) {
 /// The servers the web app's settings have on: the widget, the Stream Deck's remote, chat requests
 // ---------- Settings: the switches beyond Look ----------
 // (section, label, note, key, on unless switched off)
-const SET_ROWS: [(&str, &str, &str, &str, bool); 19] = [
+const SET_ROWS: [(&str, &str, &str, &str, bool); 20] = [
     ("Library", "Sets & Podcasts in the Queue", "Lists and autoplay include anything over 15 minutes. Off: only when you pick one.", "queueSets", false),
     ("Library", "Autoplay", "Plays similar tracks when the queue runs out.", "autoplay", true),
+    ("Library", "Seamless Mix", "Songs with a beat blend into the next on it, as a DJ mixes: at its tempo, on a downbeat, the bass handed over at once. With songs that play from YouTube Music or your files (never Spotify's own playback), once their beat is known.", "mixOn", true),
     ("Library", "Skip non-music parts", "What plays from YouTube skips the parts of music videos that aren't music (a skit before the song, an interview after it), as marked on SponsorBlock.", "sbOn", true),
     ("Library", "Favourites Page", "Your starred tracks on a page of their own, in the sidebar. The stars stay either way.", "favPage", true),
     ("Integrations", "SoundCloud", "Its likes, playlists and search.", "scOn", true),
@@ -3134,6 +3277,7 @@ fn fade_and_silences(shared: &Shared, pos: u64, dur: u64) -> bool {
     // Fade Between Tracks as a true crossfade: the next one comes in over this one's last moments (both
     // heard at once), started a second early for its sound to be found (it's preloaded). Not listening
     // along (the host's app leads), and not repeating this one.
+    if MIX.with(|m| m.borrow().is_some()) || shared.borrow().engine.mixing() { return false; }
     let next_up = { let a = shared.borrow(); a.repeat != "one" && a.queue.qi.is_some_and(|i| i + 1 < a.queue.items.len()) };
     if next_up && listening().is_none() && !out && left > 0 && left as u64 <= ms + XFADE_LEAD_MS && moved != key {
         FADE.with(|f| *f.borrow_mut() = (true, key.clone()));
@@ -5656,6 +5800,7 @@ fn main() -> Result<(), slint::PlatformError> {
         // (OMNIPULSE_SELFTEST_PLAN=discover: only Discover, its shelves, and the first mix it has opened)
         let only_discover = std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("discover");
         let plan: Vec<(u64, &str)> = if join.is_some() { vec![(6, "join"), (14, "joined"), (16, "jamskip"), (19, "leave"), (21, "end")] }
+            else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("mix") { vec![(9, "play"), (10, "mixprep"), (70, "mixseek"), (82, "mixcheck"), (88, "mixcheck"), (110, "mixcheck"), (112, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("rhythm") { vec![(9, "play"), (100, "rhythm"), (101, "end")] }
             else if only_discover { vec![(9, "play"), (11, "discover"), (30, "disc"), (45, "discmix"), (12, "import"), (46, "taste"), (47, "taste2"), (48, "taste3"), (70, "tasted"), (71, "marquee"), (72, "marqueeoff"), (73, "end")] } else { full.to_vec() };
         t.start(slint::TimerMode::Repeated, std::time::Duration::from_millis(250), move || {
@@ -5843,6 +5988,34 @@ fn main() -> Result<(), slint::PlatformError> {
                 }
                 // the seek bar's marquee, for its picture
                 "marquee" => ui.set_track_loading(true),
+                // a mix: the next few measured ahead; then one at about this one's tempo moved up next, and
+                // the one playing put a few seconds before its moment; then how it went
+                "mixprep" => {
+                    let next: Vec<Track> = { let a = s.borrow(); let i = a.queue.qi.unwrap_or(0); a.queue.items.iter().skip(i + 1).take(6).map(|q| q.t.clone()).collect() };
+                    for t in next { rhythm_ahead(&s, t); }
+                    println!("selftest: mix: measuring the next 6 ahead");
+                }
+                "mixseek" => {
+                    let (cur, qi) = { let a = s.borrow(); (a.queue.current().cloned(), a.queue.qi.unwrap_or(0)) };
+                    let Some(cur) = cur else { return };
+                    let Some(a) = omnipulse_core::rhythm::known(&cur.key) else { println!("selftest: mix: the one playing isn't measured"); return };
+                    let dur = s.borrow().engine.duration_ms();
+                    let cands: Vec<(usize, Track)> = { let q = &s.borrow().queue; q.items.iter().enumerate().skip(qi + 1).take(6).map(|(i, x)| (i, x.t.clone())).collect() };
+                    let found = cands.into_iter().find_map(|(i, t)| omnipulse_core::rhythm::known(&t.key).and_then(|b| mix::plan(&a, dur, 0, &b, MIX_BARS).map(|p| (i, t, b, p))));
+                    match found {
+                        Some((i, t, b, p)) => {
+                            { let mut a2 = s.borrow_mut(); let item = a2.queue.items.remove(i); a2.queue.items.insert(qi + 1, item); }
+                            s.borrow().engine.seek(p.at_ms.saturating_sub(9000));
+                            println!("selftest: mix: {} ({} BPM, {}) into {} ({} BPM, {}) at {} ms over {} ms, from {} ms in, at {:.4}x", cur.title, a.rhythm.bpm, a.rhythm.camelot, t.title, b.rhythm.bpm, b.rhythm.camelot, p.at_ms, p.ms, p.start_ms, p.rate);
+                        }
+                        None => println!("selftest: mix: none of the next 6 has a tempo close enough (or isn't measured): {:?}", { let q = &s.borrow().queue; q.items.iter().skip(qi + 1).take(6).map(|x| omnipulse_core::rhythm::known(&x.t.key).map(|m| m.rhythm.bpm)).collect::<Vec<_>>() }),
+                    }
+                }
+                "mixcheck" => {
+                    let a = s.borrow();
+                    let phase = MIX.with(|m| match &*m.borrow() { None => "none".to_string(), Some(MixPhase::Opening(_)) => "opening".into(), Some(MixPhase::Waiting { .. }) => "waiting".into(), Some(MixPhase::Mixing { tempo, .. }) => format!("mixing at {:.4}x", tempo.get()) });
+                    println!("selftest: mix: {phase}, engine crossfading {} mixing {}, now \"{}\" at {} ms", a.engine.crossfading(), a.engine.mixing(), a.queue.current().map(|t| t.title.clone()).unwrap_or_default(), a.engine.position_ms());
+                }
                 // what was measured of the track playing (its first 30%, as it played)
                 "rhythm" => {
                     let key = s.borrow().queue.current().map(|t| format!("{} ({})", t.key, t.title)).unwrap_or_default();

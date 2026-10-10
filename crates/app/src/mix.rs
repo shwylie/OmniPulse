@@ -1,0 +1,123 @@
+// Seamless mixing (Fuser's idea, a DJ's way): when the track playing and the next one both have a beat
+// measured (core::rhythm), the next one comes in on a downbeat of the one playing, at its tempo (its
+// pitch kept: crate::stretch's keylock), their bass handed over at once halfway (a bass swap), over a
+// few bars that end before the one playing's sound does; then it eases back to its own tempo.
+// Only for tracks played from YouTube Music, a plugin or your files: never Spotify's own playback.
+
+use omnipulse_core::rhythm::Measured;
+
+/// How far from its own tempo a track is played to match (8%: a DJ deck's usual range)
+const MAX_STRETCH: f64 = 0.08;
+/// A beat that's not clear enough isn't mixed on
+const MIN_CONFIDENCE: f64 = 0.15;
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Plan {
+    /// where in the one playing it starts (a downbeat, ms)
+    pub at_ms: u64,
+    /// how long it takes (whole bars of the one playing)
+    pub ms: u64,
+    /// where in it the bass is handed over (a bar boundary)
+    pub swap_ms: u64,
+    /// where in the next one it starts from (its first downbeat)
+    pub start_ms: u64,
+    /// the next one's tempo meanwhile (1.0 its own), then eased back
+    pub rate: f64,
+    pub bars: u32,
+}
+
+/// A downbeat's time in a measured track (ms from its start): its first tracked downbeat
+fn first_downbeat(m: &Measured) -> Option<f64> {
+    m.rhythm.beats.get(m.rhythm.downbeat).map(|b| m.from_ms as f64 + b)
+}
+
+/// The tempo the next one plays at to match (and how many of its beats to one of the playing one's)
+fn match_rate(a_bpm: f64, b_bpm: f64) -> Option<(f64, f64)> {
+    if a_bpm <= 0.0 || b_bpm <= 0.0 { return None; }
+    // (the same tempo, or half or double time)
+    [1.0, 2.0, 0.5].iter().map(|m| (a_bpm / (b_bpm * m), *m)).filter(|(r, _)| (r - 1.0).abs() <= MAX_STRETCH).min_by(|x, y| (x.0 - 1.0).abs().total_cmp(&(y.0 - 1.0).abs()))
+}
+
+/// The plan for mixing `b` in after `a` (`a_end_ms`: where `a`'s sound ends; `now_ms`: where it is),
+/// over `bars` bars, or None (no clear beat, tempos too far apart, no room left)
+pub fn plan(a: &Measured, a_end_ms: u64, now_ms: u64, b: &Measured, bars: u32) -> Option<Plan> {
+    if a.rhythm.tempo_confidence < MIN_CONFIDENCE || b.rhythm.tempo_confidence < MIN_CONFIDENCE { return None; }
+    let (rate, _per) = match_rate(a.rhythm.bpm, b.rhythm.bpm)?;
+    let bar = 4.0 * a.rhythm.period_ms;
+    let first = first_downbeat(a)?;
+    let len = bar * bars as f64;
+    // the latest downbeat that leaves room before the sound ends, a phrase's start if it can be
+    // (every 8 bars, else every 4, else any bar), and far enough ahead to get the next one ready
+    let last_k = ((a_end_ms as f64 - 500.0 - len - first) / bar).floor();
+    if last_k < 0.0 { return None; }
+    let soonest = now_ms as f64 + 4000.0;
+    let pick = |every: i64| (0..=last_k as i64).rev().find(|k| k % every == 0 && first + *k as f64 * bar >= soonest);
+    let k = pick(8).or_else(|| pick(4)).or_else(|| pick(1))?;
+    let at = first + k as f64 * bar;
+    Some(Plan {
+        at_ms: at.round() as u64,
+        ms: len.round() as u64,
+        swap_ms: (bar * (bars / 2) as f64).round() as u64,
+        start_ms: first_downbeat(b)?.round() as u64,
+        rate,
+        bars,
+    })
+}
+
+/// The tempo while easing back after the mix: from `rate` to 1.0 over `ms`, `t` ms in (smoothly)
+pub fn ease(rate: f64, t: u64, ms: u64) -> f64 {
+    if t >= ms { return 1.0; }
+    let p = t as f64 / ms.max(1) as f64;
+    let s = p * p * (3.0 - 2.0 * p);
+    rate + (1.0 - rate) * s
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use omnipulse_core::rhythm::{Rhythm, VERSION};
+
+    fn m(bpm: f64, first_beat: f64, downbeat: usize, conf: f64) -> Measured {
+        let period = 60_000.0 / bpm;
+        let beats: Vec<f64> = (0..64).map(|i| first_beat + i as f64 * period).collect();
+        Measured { from_ms: 0, to_ms: 60_000, rhythm: Rhythm { bpm, first_beat_ms: first_beat, period_ms: period, beats, downbeat, tempo_confidence: conf, key: "A minor".into(), camelot: "8A".into(), key_confidence: 0.5 }, v: VERSION }
+    }
+
+    #[test]
+    fn on_a_phrase_before_the_end() {
+        // 128 BPM (a bar is 1875 ms), the first downbeat at 500 ms; the sound ends at 200 s
+        let a = m(128.0, 500.0, 0, 0.5);
+        let b = m(126.0, 300.0, 1, 0.5);
+        let p = plan(&a, 200_000, 60_000, &b, 8).expect("a plan");
+        let bar = 1875.0;
+        // on a downbeat of a phrase (every 8 bars), its 8 bars over before the end
+        let k = ((p.at_ms as f64 - 500.0) / bar).round() as i64;
+        assert_eq!(k % 8, 0);
+        assert!((p.at_ms as f64 - (500.0 + k as f64 * bar)).abs() < 1.0);
+        assert!(p.at_ms + p.ms <= 200_000 - 500, "{p:?}");
+        // the latest one that fits
+        assert!(p.at_ms as f64 + 8.0 * bar + p.ms as f64 > 199_500.0, "{p:?}");
+        // the next one starts from its first downbeat (its second beat here), at the playing one's tempo
+        assert_eq!(p.start_ms, (300.0f64 + 60_000.0 / 126.0).round() as u64);
+        assert!((p.rate - 128.0 / 126.0).abs() < 1e-9);
+        assert_eq!(p.swap_ms, (4.0 * bar) as u64);
+    }
+
+    #[test]
+    fn tempos_too_far_apart_or_no_beat() {
+        assert!(plan(&m(128.0, 0.0, 0, 0.5), 200_000, 0, &m(100.0, 0.0, 0, 0.5), 8).is_none());
+        assert!(plan(&m(128.0, 0.0, 0, 0.05), 200_000, 0, &m(128.0, 0.0, 0, 0.5), 8).is_none());
+        // half time is fine: 64 against 128
+        assert!(plan(&m(128.0, 0.0, 0, 0.5), 200_000, 0, &m(64.5, 0.0, 0, 0.5), 8).is_some());
+        // no room left
+        assert!(plan(&m(128.0, 0.0, 0, 0.5), 200_000, 190_000, &m(128.0, 0.0, 0, 0.5), 8).is_none());
+    }
+
+    #[test]
+    fn easing_back() {
+        assert!((ease(1.02, 0, 8000) - 1.02).abs() < 1e-9);
+        assert!((ease(1.02, 8000, 8000) - 1.0).abs() < 1e-9);
+        let mid = ease(1.02, 4000, 8000);
+        assert!(mid < 1.02 && mid > 1.0);
+    }
+}

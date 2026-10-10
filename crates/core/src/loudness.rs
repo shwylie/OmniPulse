@@ -286,6 +286,34 @@ pub fn decode_mono(source: Box<dyn MediaSource>, ext: Option<&str>, max_secs: f6
     Ok((out, rate))
 }
 
+/// The start of a track, as mono samples, up to `max_secs` (for measuring its beat before it plays):
+/// `kind` "youtube" (a video id), "soundcloud" (a track id), "local" (a file's path) or "url"
+pub async fn mono_start(kind: &str, id: &str, max_secs: f64) -> Result<(Vec<f32>, u32), String> {
+    let fetched = match kind {
+        "local" => {
+            let path = id.to_string();
+            let ext = std::path::Path::new(&path).extension().and_then(|e| e.to_str()).map(|e| e.to_lowercase());
+            return tokio::task::spawn_blocking(move || {
+                let f = std::fs::File::open(&path).map_err(|e| e.to_string())?;
+                decode_mono(Box::new(f), ext.as_deref(), max_secs)
+            }).await.map_err(|e| e.to_string())?;
+        }
+        "youtube" => fetch_audio(&crate::youtube::stream_url(id, false).await?, None).await?,
+        "soundcloud" => {
+            let info = soundcloud::stream_url(id.to_string()).await?;
+            let mut got = None;
+            for c in info["candidates"].as_array().cloned().unwrap_or_default() {
+                if c["name"].as_str() == Some("preview") { continue; }
+                let Ok(r) = soundcloud::stream_resolve(c["url"].as_str().unwrap_or("").to_string()).await else { continue };
+                if let Ok(f) = fetch_audio(r["url"].as_str().unwrap_or(""), r["auth"].as_str()).await { got = Some(f); break; }
+            }
+            got.ok_or("SoundCloud gave no stream for it")?
+        }
+        _ => fetch_audio(id, None).await?,
+    };
+    tokio::task::spawn_blocking(move || decode_mono(Box::new(Cursor::new(fetched.bytes)), fetched.ext, max_secs)).await.map_err(|e| e.to_string())?
+}
+
 // ---------- the cache ----------
 
 static CACHE: Mutex<Option<HashMap<String, Analysis>>> = Mutex::new(None);
