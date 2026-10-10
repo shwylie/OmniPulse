@@ -540,6 +540,8 @@ export component AppWindow inherits Window {
     in property <[string]> tp-versions;
     in property <int> tp-version-on: -1;
     callback tp-version(int);
+    // a YouTube or YouTube Music link pasted, for what it plays as
+    callback tp-link(string);
     callback tp-save();
     callback tp-reset();
     // "now": where the track is playing, for its start (0) or end (1)
@@ -2260,6 +2262,15 @@ export component AppWindow inherits Window {
                     background: k == root.tp-version-on ? Theme.accent.with-alpha(0.22) : vta.has-hover ? Theme.panel : transparent;
                     Text { x: 10px; width: parent.width - 20px; text: v; color: k == root.tp-version-on ? Theme.text : Theme.muted; font-size: 13px; overflow: elide; vertical-alignment: center; }
                     vta := TouchArea { clicked => { root.tp-version(k); } }
+                }
+                if root.tp-versions.length > 0: Rectangle {
+                    height: 34px;
+                    border-radius: 8px;
+                    background: Theme.panel;
+                    border-width: 1px;
+                    border-color: Theme.line;
+                    if tpl.text == "": Text { x: 10px; text: "Or paste a YouTube or YouTube Music link"; color: Theme.muted; font-size: 13px; vertical-alignment: center; height: parent.height; }
+                    tpl := TextInput { x: 10px; width: parent.width - 20px; height: parent.height; vertical-alignment: center; color: Theme.text; font-size: 13px; single-line: true; edited => { if (self.text != "") { root.tp-link(self.text); } } }
                 }
                 HorizontalLayout {
                     spacing: 8px;

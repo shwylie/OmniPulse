@@ -4866,6 +4866,25 @@ fn main() -> Result<(), slint::PlatformError> {
         if let Some(ui) = s.borrow().ui.upgrade() { ui.set_tp_version_on(k); ui.set_status(format!("\"{}\" plays \"{}\" from YouTube Music from now on.", t.title, c.title).into()); }
     });
     let s = shared.clone();
+    ui.on_tp_link(move |link| {
+        // (as the web app's: a pasted link's video, kept as what it plays)
+        let (Some(t), Some(id)) = (TP_TRACK.with(|x| x.borrow().clone()), yt_link_id(&link)) else { return };
+        if TP_VERSIONS.with(|v| v.borrow().first().is_some_and(|c| c.id == id)) { return; }
+        let (rt, weak) = { let a = s.borrow(); (a.rt.clone(), a.ui.clone()) };
+        rt.spawn(async move {
+            let found = omnipulse_core::youtube::radio(&id).await.ok().and_then(|l| l.into_iter().find(|c| c.id == id));
+            let _ = weak.upgrade_in_event_loop(move |ui| {
+                let Some(c) = found else { ui.set_status("That link's video couldn't be found on YouTube Music.".into()); return };
+                versions::keep(&t, &c);
+                TP_VERSIONS.with(|v| { let mut v = v.borrow_mut(); v.retain(|x| x.id != c.id); v.insert(0, c.clone()); });
+                let names: Vec<slint::SharedString> = TP_VERSIONS.with(|v| v.borrow().iter().map(|c| format!("{} · {} · {}", c.title, c.artists, fmt_ms(c.duration_ms)).into()).collect());
+                ui.set_tp_versions(ModelRc::from(Rc::new(VecModel::from(names))));
+                ui.set_tp_version_on(0);
+                ui.set_status(format!("\"{}\" plays \"{}\" from YouTube Music from now on.", t.title, c.title).into());
+            });
+        });
+    });
+    let s = shared.clone();
     ui.on_tp_now(move |which| {
         let pos = s.borrow().engine.position_ms();
         if let Some(ui) = s.borrow().ui.upgrade() { if which == 0 { ui.set_tp_start(fmt_time(pos).into()); } else { ui.set_tp_end(fmt_time(pos).into()); } }
