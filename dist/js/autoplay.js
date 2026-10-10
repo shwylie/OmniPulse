@@ -4,7 +4,6 @@
 // anything you or chat add goes before the autoplay picks.
 
 const AUTOPLAY_BATCH = 10;
-const AUTOPLAY_LEAD_MS = 30000;          // start looking this long before the last track ends
 const AUTOPLAY_RECENT_MIN_MS = 3 * 3600000;  // if Avoid Recent Plays leaves nothing to add, just the last three hours
 let autoplayRecentMs = 0;                    // 0: the time frame chosen in Settings (js/history.js)
 
@@ -159,6 +158,10 @@ function autoplayFill() {
       }
       queue.push(...picks);
       autoplayPaint();
+      // (said, so it's no surprise what comes on next)
+      if (curTrack() === seed && queue[qi + 1] && queue[qi + 1].autoplay) {
+        say("Autoplay added " + plural(picks.length, "similar song", "similar songs") + " to the queue. Up next: " + (queue[qi + 1].title || "a song") + " by " + artistName(queue[qi + 1]) + ".", { force: true });
+      }
     } catch (e) {
       autoplayFailedFor = seed.id;
       autoplayPaint("Autoplay couldn't load suggestions: " + (e && e.message ? e.message : e));
@@ -179,12 +182,15 @@ async function autoplayAdvance() {
   return false;
 }
 
-// Checked every couple of seconds: is the last track close to its end?
+// Checked every couple of seconds: is the last track far enough in? Autoplay picks when the next
+// track would be preloaded (js/preload.js: 70% through, or a minute left), so its first pick is
+// in the queue in time to be preloaded too, and starts without a silence
 function autoplayTick() {
   const t = curTrack();
   if (!t || !autoplayActive() || autoplayBusy || qi < queue.length - 1) return;
   const dur = trimmedEnd(t, curDurMs());
-  if (!dur || dur - curPosMs() <= AUTOPLAY_LEAD_MS) autoplayFill();
+  const pos = curPosMs();
+  if (!dur || pos >= dur * PRELOAD_AT || dur - pos <= PRELOAD_LEFT_MS) autoplayFill();
 }
 
 function setAutoplay(on) {

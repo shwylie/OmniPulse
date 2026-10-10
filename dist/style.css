@@ -1778,3 +1778,4 @@ body.streamSafe #navSets, body.streamSafe #navArtists, body.streamSafe #plSectio
 .miniProg.loading .miniKnob, .miniProg.loading .miniTime { opacity: 0; }
 @keyframes seekMarquee { from { left: -24%; } to { left: 100%; } }
 @media (prefers-reduced-motion: reduce) { .seekRow.loading .seekLoad::before, .miniProg.loading .miniLoad::before { animation-duration: 3.2s; } }
+.qNote.qAuto { color: var(--accent); }

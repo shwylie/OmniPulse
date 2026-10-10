@@ -1392,7 +1392,12 @@ function renderQueue() {
     }
   });
   if (next.length > QUEUE_SHOWN) nextBox.append(el("li", "qEmpty", "...and " + (next.length - QUEUE_SHOWN) + " more."));
-  auto.forEach((tr, k) => autoBox.append(queueRow(tr, split + k, true)));
+  auto.forEach((tr, k) => {
+    const li = queueRow(tr, split + k, true);
+    // the very next song came from Autoplay: said on it
+    if (split + k === qi + 1) li.querySelector(".meta").append(el("div", "qNote qAuto", "Up next, added by Autoplay"));
+    autoBox.append(li);
+  });
   autoBox.hidden = !auto.length || !autoplayOn();
   autoplayPaint();
   reqQueueBtn();
