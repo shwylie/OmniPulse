@@ -2005,7 +2005,7 @@ fn mix_tick(shared: &Shared, pos: u64, dur: u64) {
             // (the one going out slowed into the next one's tempo as far through as the mix is, and the next
             // one with it, from the other's tempo to its own: at its own by the end, nothing to ease back)
             if let Some(o) = out.clone() {
-                let x = began.elapsed().as_millis() as f64 / plan.ms.max(1) as f64;
+                let x = began.elapsed().as_millis() as f64 / plan.ramp_ms.max(1) as f64;
                 o.set(mix::out_ramp(plan.out_tempo, x));
                 tempo.set(mix::in_ramp(plan.out_tempo, x));
                 if engine.crossfading() { return true; }

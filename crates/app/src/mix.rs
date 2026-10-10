@@ -37,7 +37,12 @@ pub struct Plan {
     /// (or sped) into it. The next one goes with it: from the one playing's tempo (`rate`: 1/out_tempo)
     /// to its own by then (in_ramp), the two at one tempo all through.
     pub out_tempo: f64,
+    /// how long that takes (ms of the mix: to the switch-over), 0 with no ramp
+    pub ramp_ms: u64,
 }
+
+/// A tempo this near the next one's isn't eased into (it's played at the one playing's, then its own)
+const RAMP_MIN: f64 = 0.002;
 
 /// How far the one playing is slowed (or sped) into the next one's tempo over its outro, at most
 const MAX_RAMP: f64 = 0.25;
@@ -182,7 +187,7 @@ fn downbeats(m: &Measured) -> Vec<f64> {
 /// instead, as a DJ's EQ (quicker). Over a soft part: a crossfade with the bass swapped halfway.
 pub fn handoff(p: &Plan, bands: bool) -> omnipulse_audio::Handoff {
     if !p.beatmatched { return omnipulse_audio::Handoff::bass_swap(p.ms, p.ms / 2); }
-    let beat = p.ms as f64 / (p.bars * 4) as f64;
+    let beat = p.ms.saturating_sub(p.swap_ms) as f64 / 4.0;
     if bands { omnipulse_audio::Handoff::staged(p.ms, beat, p.swap_ms) } else { omnipulse_audio::Handoff::wipe(beat, p.swap_ms) }
 }
 
@@ -247,30 +252,48 @@ pub fn plan_structure(a: &Measured, a_end_ms: u64, now_ms: u64, b: &Measured) ->
             }
             _ => r,
         };
-        let len = a_bar * bars as f64;
+        // the two at one tempo all through: from the one playing's (the next one stretched to it) to the
+        // next one's own (the one playing slowed or sped to it) by the switch-over, eased; then a bar
+        // of the next one alone, at its own. (Its run-up takes as long as its bars do at the eased tempo.)
+        let target = 1.0 / rate;
+        let (swap_ms, len, out_tempo) = if (target - 1.0).abs() < RAMP_MIN {
+            (a_bar * swap_bar as f64, a_bar * bars as f64, 1.0)
+        } else {
+            let swap = a_bar * swap_bar as f64 * 2.0 / (1.0 + target);
+            (swap, swap + a_bar / target, target)
+        };
         return Some(Plan {
             at_ms: at(k).round() as u64,
             ms: len.round() as u64,
-            swap_ms: (a_bar * swap_bar as f64).round() as u64,
+            swap_ms: swap_ms.round() as u64,
             start_ms: bd[from_bar].round() as u64,
             rate,
             bars,
             semitones: key_shift(a, b),
             beatmatched: true,
-            out_tempo: 1.0,
+            out_tempo,
+            ramp_ms: if out_tempo == 1.0 { 0 } else { swap_ms.round() as u64 },
         });
     }
-    let soft = |at_ms: f64, ms: f64, start_ms: f64, bars: u32, out_tempo: f64| Some(Plan {
+    // (eased onto one tempo, `target` not 1.0: the next one from the one playing's tempo to its own over all of it)
+    let soft = |at_ms: f64, ms: f64, start_ms: f64, bars: u32, target: f64| Some(Plan {
         at_ms: at_ms.round() as u64,
         ms: ms.round() as u64,
         swap_ms: (ms / 2.0).round() as u64,
         start_ms: start_ms.round() as u64,
-        rate: 1.0,
+        rate: 1.0 / target,
         bars,
         semitones: 0,
         beatmatched: false,
-        out_tempo,
+        out_tempo: target,
+        ramp_ms: if target == 1.0 { 0 } else { ms.round() as u64 },
     });
+    // (how far the one playing is eased, if it can be; and how many of its bars go to one of the next one's:
+    // half or double time, 2 or 1/2)
+    let ramp = ramp_to(a.rhythm.bpm, b.rhythm.bpm);
+    let per = ramp.map_or(1.0, |t| t * a.rhythm.bpm / b.rhythm.bpm);
+    // (bars of the one playing, eased: the time they take)
+    let eased_ms = |n: f64| a_bar * n * 2.0 / (1.0 + ramp.unwrap_or(1.0));
     // the one playing's beatless outro (what of it is heard), the next one coming in over it: its own
     // beatless intro too, as much as fits, its beat as the blend ends
     let a_soft = (a_end..).take_while(|&k| at(k) + a_bar <= audible).count();
@@ -280,28 +303,36 @@ pub fn plan_structure(a: &Measured, a_end_ms: u64, now_ms: u64, b: &Measured) ->
         // (slowed, or sped, into the next one's tempo over it, if that's not too far: the two at one tempo
         // all through, each going as many beats, so the next one's from as many of its bars before its
         // beat as the outro's long, its beat on the switch-over; the mix as long as those bars take, eased)
-        if let Some(target) = ramp_to(a.rhythm.bpm, b.rhythm.bpm) {
-            let ms = a_bar * n as f64 * 2.0 / (1.0 + target);
-            let nb = ((n as f64 * a_bar / (b_bar * target)).round() as usize).min(b_main);
-            return Some(Plan { rate: 1.0 / target, ..soft(at(a_end), ms, b_at(b_main - nb), n as u32, target)? });
+        if let Some(target) = ramp {
+            let nb = ((n as f64 / per).round() as usize).min(b_main);
+            return soft(at(a_end), eased_ms(n as f64), b_at(b_main - nb), n as u32, target);
         }
         let nb = ((ms / b_bar).floor() as usize).min(b_main);
         return soft(at(a_end), ms, b_at(b_main - nb), n as u32, 1.0);
     }
     // the next one's beatless intro, under the one playing's last bars with a beat: its beat comes in
     // as the other's ends
+    // (eased onto one tempo, where it can be: as many of the one playing's last bars with a beat as the
+    // next one's intro bars, on a downbeat of each, the beats together all through)
     if b_main >= 2 {
         let nb = b_main.min(8);
-        let ms = b_bar * nb as f64;
-        let end = at(a_end).min(audible);
-        if let Some(k) = (0..=a_end).rev().find(|&k| at(k) + ms <= end && at(k) >= soonest) {
-            return soft(at(k), ms, b_at(b_main - nb), nb as u32, 1.0);
+        if let Some(target) = ramp {
+            let na = ((nb as f64 * per).round() as usize).max(1);
+            if let Some(k) = (0..=a_end.saturating_sub(na)).rev().find(|&k| at(k) >= soonest && at(k) + a_bar * na as f64 <= audible) {
+                return soft(at(k), eased_ms(na as f64), b_at(b_main - nb), na as u32, target);
+            }
+        } else {
+            let ms = b_bar * nb as f64;
+            let end = at(a_end).min(audible);
+            if let Some(k) = (0..=a_end).rev().find(|&k| at(k) + ms <= end && at(k) >= soonest) {
+                return soft(at(k), ms, b_at(b_main - nb), nb as u32, 1.0);
+            }
         }
     }
-    // neither has one: two bars where the one playing's beat ends, straight into the next one's
-    let ms = 2.0 * a_bar;
-    let k = (0..=a_end.saturating_sub(2)).rev().find(|&k| at(k) >= soonest && at(k) + ms <= audible)?;
-    soft(at(k), ms, b_at(b_main), 2, 1.0)
+    // neither has one: two bars where the one playing's beat ends, straight into the next one's (eased
+    // onto one tempo over them, where it can be)
+    let k = (0..=a_end.saturating_sub(2)).rev().find(|&k| at(k) >= soonest && at(k) + 2.0 * a_bar <= audible)?;
+    soft(at(k), eased_ms(2.0), b_at(b_main), 2, ramp.unwrap_or(1.0))
 }
 
 /// The plan for mixing `b` in after `a` (`a_end_ms`: where `a`'s sound ends; `now_ms`: where it is),
@@ -332,6 +363,7 @@ pub fn plan(a: &Measured, a_end_ms: u64, now_ms: u64, b: &Measured, bars: u32) -
         semitones: key_shift(a, b),
         beatmatched: true,
         out_tempo: 1.0,
+        ramp_ms: 0,
     })
 }
 
@@ -512,6 +544,23 @@ mod tests {
     }
 
     #[test]
+    fn matched_eased_onto_one_tempo_by_the_switch_over() {
+        // 128 into 122: on the beat, the two at one tempo from 128 to 122 by the switch-over
+        let a = shaped(m(128.0, 500.0, 0, 0.5), &song(&[(64, -10.0, true), (24, -11.0, false)]));
+        let b = shaped(m(122.0, 300.0, 0, 0.5), &song(&[(24, -12.0, false), (64, -9.0, true)]));
+        let bar: f64 = 4.0 * 60_000.0 / 128.0;
+        let p = plan_structure(&a, (500.0 + 88.0 * bar) as u64, 10_000, &b).expect("a plan");
+        let target = 122.0 / 128.0;
+        assert!(p.beatmatched && (p.out_tempo - target).abs() < 1e-6 && (p.rate - 1.0 / target).abs() < 1e-6, "{p:?}");
+        for x in [0.0, 0.3, 0.6, 1.0] { assert!((out_ramp(p.out_tempo, x) * 128.0 - in_ramp(p.out_tempo, x) * 122.0).abs() < 1e-6, "one tempo at {x}"); }
+        assert!((in_ramp(p.out_tempo, 1.0) - 1.0).abs() < 1e-9);
+        // its run-up (8 bars) as long as they take eased; the ramp ends on the switch-over; a bar after at 122
+        let swap = bar * 8.0 * 2.0 / (1.0 + target);
+        assert_eq!((p.swap_ms, p.ramp_ms), (swap.round() as u64, swap.round() as u64));
+        assert_eq!(p.ms, (swap + bar / target).round() as u64);
+    }
+
+    #[test]
     fn tempos_apart_over_the_soft_part() {
         let bar: f64 = 4.0 * 60_000.0 / 128.0;
         let fast_bar: f64 = 4.0 * 60_000.0 / 174.0;
@@ -607,7 +656,8 @@ fn mix_demo() {
     let rate = 44_100;
     let out = {
         let (target, a_tempo, b_tempo) = (p.out_tempo, omnipulse_audio::Tempo::new(1.0), b_tempo.clone());
-        let ramp = { let a_tempo = a_tempo.clone(); move |x: f64| { a_tempo.set(out_ramp(target, x)); b_tempo.set(in_ramp(target, x)); } };
+        let share = p.ms as f64 / p.ramp_ms.max(1) as f64;
+        let ramp = { let a_tempo = a_tempo.clone(); move |x: f64| { a_tempo.set(out_ramp(target, x * share)); b_tempo.set(in_ramp(target, x * share)); } };
         omnipulse_audio::engine::render_mix_ramped(sa, Box::new(sb), dbs, rate, lead as f32 / 1000.0, p.ms, Some(handoff(&p, filter)), (target != 1.0).then_some((&a_tempo, &ramp as &dyn Fn(f64))), lead as f32 / 1000.0 + 20.0 + p.ms as f32 / 1000.0).unwrap()
     };
     // how clearly one beat holds through the blend (the two lined up: one; off: two fighting), against the
@@ -628,18 +678,31 @@ fn mix_demo() {
     println!("the blend: lined up {:?}, half a beat off {:?}", held(&out), held(&off));
     // each of the next one's beats in the blend (where it lands, stretched) against the nearest of the one
     // playing's, as both were tracked whole: how far apart they are (ms), for this plan and the old one
+    // each of the next one's beats in the blend against the nearest of the one playing's (as both were
+    // tracked whole), as heard (ms of the mix): both followed through it a millisecond at a time, at their
+    // tempos as the plan moves them (eased onto one, or the next one at its rate)
     let apart = |p: &Plan| {
         let ab: Vec<f64> = a.rhythm.beats.iter().map(|x| a.from_ms as f64 + x).collect();
-        let d: Vec<f64> = b.rhythm.beats.iter().map(|x| b.from_ms as f64 + x).filter(|x| *x >= p.start_ms as f64 && *x < p.start_ms as f64 + p.ms as f64 * p.rate)
-            .map(|x| p.at_ms as f64 + (x - p.start_ms as f64) / p.rate)
-            .map(|x| ab.iter().map(|y| (x - y).abs()).fold(f64::MAX, f64::min)).collect();
+        let bb: Vec<f64> = b.rhythm.beats.iter().map(|x| b.from_ms as f64 + x).collect();
+        let tempos = |t: f64| if p.ramp_ms > 0 { let x = t / p.ramp_ms as f64; (out_ramp(p.out_tempo, x), in_ramp(p.out_tempo, x)) } else { (1.0, p.rate) };
+        let until = if p.beatmatched { p.swap_ms } else { p.ms } as f64;
+        let (mut pa, mut pb, mut t) = (p.at_ms as f64, p.start_ms as f64, 0.0);
+        let mut next = bb.iter().position(|x| *x >= pb).unwrap_or(bb.len());
+        let mut d = Vec::new();
+        while t < until && next < bb.len() {
+            let (fa, fb) = tempos(t);
+            pa += fa;
+            pb += fb;
+            t += 1.0;
+            if pb >= bb[next] {
+                d.push(ab.iter().map(|y| (pa - y).abs()).fold(f64::MAX, f64::min) / fa);
+                next += 1;
+            }
+        }
         let bar_of = |m: &omnipulse_core::rhythm::Measured, t: f64| m.rhythm.beats.iter().position(|x| m.from_ms as f64 + x >= t - 30.0).map(|i| (i as i64 - m.rhythm.downbeat as i64).rem_euclid(4));
-        (d.iter().sum::<f64>() / d.len().max(1) as f64, d.iter().copied().fold(0.0, f64::max), bar_of(&a, p.at_ms as f64), bar_of(&b, p.start_ms as f64))
+        (d.len(), d.iter().sum::<f64>() / d.len().max(1) as f64, d.iter().copied().fold(0.0, f64::max), bar_of(&a, p.at_ms as f64), bar_of(&b, p.start_ms as f64))
     };
-    println!("beats apart (mean ms, worst ms, beat of A's bar it goes out on, of B's it comes in on): this plan {:?}", apart(&p));
-    if let (Some(pa), Some(pb)) = (omnipulse_core::rhythm::known(&a_id), omnipulse_core::rhythm::known(&b_id)) {
-        if let Some(old) = plan(&pa, dur, 0, &pb, 8) { println!("the old plan (from 30%): {old:?}: {:?}", apart(&old)); }
-    }
+    println!("beats apart (how many, mean ms, worst ms, beat of A's bar it goes out on, of B's it comes in on): {:?}", apart(&p));
     // a 16-bit stereo WAV
     let mut w = Vec::new();
     let data = (out.len() * 2) as u32;
