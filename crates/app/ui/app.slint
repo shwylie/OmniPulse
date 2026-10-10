@@ -445,7 +445,7 @@ export component AppWindow inherits Window {
 
     // pages
     in property <string> page: "library";
-    in property <string> page-kind: "tracks";
+    in-out property <string> page-kind: "tracks";
     in property <string> page-title: "Library";
     in property <string> page-sub;
     in property <[string]> chips;
@@ -1006,6 +1006,37 @@ export component AppWindow inherits Window {
                                 Text { text: a.sub; color: Theme.muted; font-size: 12px; overflow: elide; horizontal-alignment: center; }
                             }
                             ata := TouchArea { clicked => { root.artist(i); } }
+                        }
+                    }
+                    // Search: its first tracks (Show all lists them all), then artists, albums and playlists
+                    if root.page-kind == "search": ScrollView {
+                        vertical-stretch: 1;
+                        VerticalLayout {
+                            spacing: 22px;
+                            if root.rows.length > 0: VerticalLayout {
+                                spacing: 6px;
+                                HorizontalLayout {
+                                    Text { text: "Tracks"; color: Theme.text; font-size: 20px; font-weight: 800; horizontal-stretch: 1; vertical-alignment: center; }
+                                    if root.rows.length > 8: Pill { label: "Show all"; clicked => { root.page-kind = "tracks"; } }
+                                }
+                                for r[i] in root.rows: VerticalLayout {
+                                    if i < 8: TrackRow { item: r; index: i; compact: root.narrow || root.queue-open; lists: root.own-lists; removable: false; play => { root.play-row(i); } act(a) => { root.row-action(i, a); } }
+                                }
+                            }
+                            for sh[s] in root.shelves: VerticalLayout {
+                                spacing: 10px;
+                                Text { text: sh.title; color: Theme.text; font-size: 20px; font-weight: 800; }
+                                Flickable {
+                                    height: 230px;
+                                    content-width: sh.tiles.length * 186px;
+                                    HorizontalLayout {
+                                        spacing: 16px;
+                                        alignment: start;
+                                        for t[k] in sh.tiles: TileView { tile: t; clicked => { root.tile(s, k); } }
+                                    }
+                                }
+                            }
+                            Rectangle { height: 76px; }
                         }
                     }
                     // Discover: shelves

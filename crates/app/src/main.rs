@@ -210,12 +210,15 @@ fn show_tracks(shared: &Shared, page: &str, title: &str, sub: String, mut tracks
     let mut app = shared.borrow_mut();
     track::apply_fixes(&app.web.prefs, &mut tracks);
     let Some(ui) = app.ui.upgrade() else { return };
+    if page == "search" && app.page != "search" { ui.set_shelves(ModelRc::default()); }
     app.page = page.to_string();
     app.page_all = tracks;
     app.chip = 0;
     app.page_query.clear();   // (a page opened afresh shows all of it)
+    // Search: its first tracks, then what else it found (shelves); Show all lists every track
+    let kind = if page == "search" { "search" } else { "tracks" };
     ui.set_page(page.into());
-    ui.set_page_kind("tracks".into());
+    ui.set_page_kind(kind.into());
     ui.set_page_title(title.into());
     ui.set_page_sub(sub.into());
     ui.set_chips(ModelRc::from(Rc::new(VecModel::from(if chips { FILTER_CHIPS.iter().map(|c| (*c).into()).collect() } else { Vec::new() }))));
@@ -465,10 +468,62 @@ fn open_search(shared: &Shared, q: String) {
         return;
     }
     show_tracks(shared, "search", &format!("Results for \"{q}\""), "Searching...".into(), Vec::new(), true);
+    search_shelves(shared, q.clone());
     load_into(shared, "search", format!("Results for \"{q}\""), async move {
         let t = sources::search(&q).await;
         let sub = if t.is_empty() { "Nothing found.".into() } else { plural(t.len(), "track", "tracks") + ", best match first." };
         (t, sub)
+    });
+}
+
+thread_local! {
+    /// what Search found besides tracks, shelf by shelf (its tiles open them)
+    static FOUND: RefCell<Vec<Vec<sources::Found>>> = const { RefCell::new(Vec::new()) };
+}
+
+/// Search's shelves: artists, albums and playlists from every platform, with their pictures as they come
+fn search_shelves(shared: &Shared, q: String) {
+    let (rt, weak) = { let a = shared.borrow(); (a.rt.clone(), a.ui.clone()) };
+    FOUND.with(|f| f.borrow_mut().clear());
+    rt.spawn(async move {
+        let (artists, albums, lists) = sources::search_found(&q).await;
+        let shelves: Vec<(&str, Vec<sources::Found>)> = [("Artists", artists), ("Albums", albums), ("Playlists", lists)].into_iter().filter(|(_, l)| !l.is_empty()).collect();
+        let arts: Vec<Vec<String>> = shelves.iter().map(|(_, l)| l.iter().map(|f| f.tile().2).collect()).collect();
+        let weak2 = weak.clone();
+        let q2 = q.clone();
+        let _ = weak.upgrade_in_event_loop(move |ui| SHARED.with(|s| {
+            let Some(shared) = s.borrow().clone() else { return };
+            if shared.borrow().page != "search" || !ui.get_page_title().contains(q2.as_str()) { return; }
+            let models: Vec<Rc<VecModel<Tile>>> = shelves.iter().map(|(_, l)| Rc::new(VecModel::from(l.iter().map(|f| { let (t, sub, _, plat) = f.tile(); Tile { title: t.into(), sub: sub.into(), art: slint::Image::default(), plat: plat.into() } }).collect::<Vec<_>>()))).collect();
+            let rows: Vec<Shelf> = shelves.iter().zip(&models).map(|((title, _), m)| Shelf { title: (*title).into(), tiles: ModelRc::from(m.clone()) }).collect();
+            ui.set_shelves(ModelRc::from(Rc::new(VecModel::from(rows))));
+            SHELF_MODELS.with(|m| *m.borrow_mut() = models);
+            FOUND.with(|f| *f.borrow_mut() = shelves.into_iter().map(|(_, l)| l).collect());
+        }));
+        for (s, list) in arts.into_iter().enumerate() {
+            for (k, url) in list.into_iter().enumerate() {
+                if url.is_empty() { continue; }
+                if let Some(px) = player::fetch_art(url, 200).await {
+                    let _ = weak2.upgrade_in_event_loop(move |_| SHELF_MODELS.with(|m| {
+                        if let Some(model) = m.borrow().get(s) {
+                            if let Some(mut t) = model.row_data(k) { t.art = slint::Image::from_rgba8(px); model.set_row_data(k, t); }
+                        }
+                    }));
+                }
+            }
+        }
+    });
+}
+
+/// A tile on Search's shelves: that artist's, album's or playlist's tracks, as a page
+fn open_found(shared: &Shared, sh: usize, k: usize) {
+    let Some(f) = FOUND.with(|x| x.borrow().get(sh).and_then(|l| l.get(k).cloned())) else { return };
+    let (title, by, _, _) = f.tile();
+    show_tracks(shared, "found", &title, "Loading...".into(), Vec::new(), true);
+    load_into(shared, "found", title.clone(), async move {
+        let list = sources::found_tracks(&f).await;
+        let sub = if list.is_empty() { "Nothing to play here.".to_string() } else { format!("{}{}.", if by == "Artist" { String::new() } else { format!("{by} \u{b7} ") }, plural(list.len(), "track", "tracks")) };
+        (list, sub)
     });
 }
 
@@ -3739,6 +3794,7 @@ fn main() -> Result<(), slint::PlatformError> {
     });
     let s = shared.clone();
     ui.on_tile(move |sh, k| {
+        if s.borrow().page == "search" { return open_found(&s, sh as usize, k as usize); }
         let list = s.borrow().shelves.get(sh as usize).cloned().unwrap_or_default();
         play_list(&s, list, k as usize);
     });
@@ -3932,7 +3988,7 @@ fn main() -> Result<(), slint::PlatformError> {
         let mut step_no = 0usize;
         // (OMNIPULSE_SELFTEST_JOIN=<invite link>: only joining someone's room, following it, skipping and leaving)
         let join = std::env::var("OMNIPULSE_SELFTEST_JOIN").ok();
-        let full: [(u64, &str); 33] = [(9, "play"), (13, "library"), (13, "pagefind"), (14, "pageall"), (14, "scoff"), (15, "scon"), (16, "discover"), (24, "rediscover"), (27, "sets"), (31, "stats"), (35, "now"), (39, "search"), (42, "settings"), (44, "light"), (45, "collapse"), (46, "artists"), (54, "artist"), (60, "autoplay"), (70, "narrow"), (72, "goplus"), (80, "tabright"), (81, "pbar"), (82, "pfloat"), (83, "pminimal"), (84, "musical"), (88, "musical2"), (90, "safe"), (91, "sort"), (93, "xpl"), (95, "xpl2"), (97, "fade"), (101, "fade2"), (103, "end")];
+        let full: [(u64, &str); 34] = [(9, "play"), (13, "library"), (13, "pagefind"), (14, "pageall"), (14, "scoff"), (15, "scon"), (16, "discover"), (24, "rediscover"), (27, "sets"), (31, "stats"), (35, "now"), (39, "search"), (41, "found"), (42, "settings"), (44, "light"), (45, "collapse"), (46, "artists"), (54, "artist"), (60, "autoplay"), (70, "narrow"), (72, "goplus"), (80, "tabright"), (81, "pbar"), (82, "pfloat"), (83, "pminimal"), (84, "musical"), (88, "musical2"), (90, "safe"), (91, "sort"), (93, "xpl"), (95, "xpl2"), (97, "fade"), (101, "fade2"), (103, "end")];
         let plan: Vec<(u64, &str)> = if join.is_some() { vec![(6, "join"), (14, "joined"), (16, "jamskip"), (19, "leave"), (21, "end")] } else { full.to_vec() };
         t.start(slint::TimerMode::Repeated, std::time::Duration::from_millis(250), move || {
             let Some(&(at, what)) = plan.get(step_no) else { return };
@@ -3950,6 +4006,8 @@ fn main() -> Result<(), slint::PlatformError> {
                 "play" => { if ui.get_rows().row_count() > 0 { ui.invoke_play_row(0); } }
                 // typing in the search bar filters the Library, as you type
                 "pagefind" => { let n = ui.get_rows().row_count(); ui.invoke_search_edited("crunkz".into()); println!("selftest: page filter: {n} rows, typing \"crunkz\": {}", ui.get_rows().row_count()); }
+                // what the search found besides tracks
+                "found" => println!("selftest: search shelves {}", ui.get_shelves().iter().map(|sh| format!("{} {}", sh.title, sh.tiles.row_count())).collect::<Vec<_>>().join(", ")),
                 "pageall" => { ui.invoke_search_edited("".into()); println!("selftest: page filter cleared: {} rows", ui.get_rows().row_count()); }
                 "join" => { if let Some(link) = &join { listen_join(&s, link); } }
                 "joined" => println!("selftest: listening {:?}, playing \"{}\" at {}, queue {}, jam button \"{}\", status \"{}\"", listening(), ui.get_now_title(), ui.get_pos_text(), s.borrow().queue.items.len(), ui.get_jam_label(), ui.get_status()),

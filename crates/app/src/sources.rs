@@ -173,7 +173,125 @@ pub async fn search(q: &str) -> Vec<Track> {
     let (a, b, c, d, e) = tokio::join!(sc, sp, yt, mb, plugs);
     let mut lists = vec![a, b, c, d];
     lists.extend(e);
-    rank(q, interleave(lists))
+    once_each(rank(q, interleave(lists)))
+}
+
+/// The same song found twice (the same title and first artist, about as long) shows once, where it
+/// first came (the web app merges them into one row too)
+pub fn once_each(list: Vec<Track>) -> Vec<Track> {
+    let key = |t: &Track| format!("{}|{}", words(&t.title).join(" "), words(t.artist.split([',', '&']).next().unwrap_or("")).join(" "));
+    let mut seen: Vec<(String, u64)> = Vec::new();
+    list.into_iter().filter(|t| {
+        let k = key(t);
+        if seen.iter().any(|(sk, ms)| *sk == k && (t.ms == 0 || *ms == 0 || t.ms.abs_diff(*ms) <= 3000)) { return false; }
+        seen.push((k, t.ms));
+        true
+    }).collect()
+}
+
+/// Something a search found besides tracks (Search's shelves, as the web app's): an artist (where they
+/// are on each platform), an album or a playlist
+#[derive(Clone, Debug)]
+pub enum Found {
+    Artist { name: String, img: String, sc: Option<u64>, sp: Option<String>, yt: Option<String> },
+    Album { plat: &'static str, id: String, title: String, by: String, img: String },
+    List { plat: &'static str, id: String, title: String, by: String, img: String },
+}
+
+impl Found {
+    /// (title, the line under it, its picture, the platform's icon)
+    pub fn tile(&self) -> (String, String, String, &'static str) {
+        match self {
+            Found::Artist { name, img, sc, sp, .. } => (name.clone(), "Artist".into(), img.clone(), if sp.is_some() { "spotify" } else if sc.is_some() { "soundcloud" } else { "youtube" }),
+            Found::Album { plat, title, by, img, .. } => (title.clone(), by.clone(), img.clone(), plat),
+            Found::List { plat, title, by, img, .. } => (title.clone(), by.clone(), img.clone(), plat),
+        }
+    }
+}
+
+/// Artists, albums and playlists for a search, from every platform (Spotify gives an app 10 at a time)
+pub async fn search_found(q: &str) -> (Vec<Found>, Vec<Found>, Vec<Found>) {
+    let enc = urlencode(q);
+    let sc_on = core::soundcloud::signed_in();
+    let sp_on = core::spotify::spotify_signed_in();
+    let sp = |kind: &'static str| {
+        let enc = enc.clone();
+        async move {
+            if !sp_on { return Value::Null; }
+            core::spotify::spotify_api("GET".into(), format!("/search?type={kind}&limit=10&market=from_token&q={enc}"), None).await.unwrap_or_default()
+        }
+    };
+    let sc = |path: String| async move { if sc_on { core::soundcloud::api_get(sc_path(path)).await.unwrap_or_default() } else { Value::Null } };
+    let (sp_art, sp_alb, sp_pl, sc_users, sc_pl, yt_art, yt_pl) = tokio::join!(
+        sp("artist"), sp("album"), sp("playlist"),
+        sc(format!("/users?q={enc}&limit=6")), sc(format!("/playlists?q={enc}&limit=8&linked_partitioning=true")),
+        async { core::youtube::search_artists(q).await.unwrap_or_default() }, async { core::youtube::search_playlists(q).await.unwrap_or_default() },
+    );
+    let img_of = |v: &Value| v["images"].as_array().and_then(|i| i.get(1).or(i.first())).and_then(|i| i["url"].as_str()).unwrap_or("").to_string();
+    // artists: the same name on several platforms is one
+    let mut artists: Vec<Found> = Vec::new();
+    let mut put = |name: &str, img: String, sc: Option<u64>, sp: Option<String>, yt: Option<String>| {
+        let k = name_key(name);
+        if k.is_empty() { return; }
+        match artists.iter_mut().find(|a| matches!(a, Found::Artist { name, .. } if name_key(name) == k)) {
+            Some(Found::Artist { img: i, sc: a, sp: b, yt: c, .. }) => {
+                if i.is_empty() { *i = img; }
+                if a.is_none() { *a = sc; }
+                if b.is_none() { *b = sp; }
+                if c.is_none() { *c = yt; }
+            }
+            _ => artists.push(Found::Artist { name: name.to_string(), img, sc, sp, yt }),
+        }
+    };
+    for a in sp_art["artists"]["items"].as_array().cloned().unwrap_or_default().iter().take(6) {
+        put(a["name"].as_str().unwrap_or(""), img_of(a), None, a["id"].as_str().map(String::from), None);
+    }
+    for u in items(&sc_users).iter().take(6) {
+        put(u["username"].as_str().unwrap_or(""), u["avatar_url"].as_str().unwrap_or("").replace("-large", "-t200x200"), u["id"].as_u64(), None, None);
+    }
+    for a in yt_art.iter().take(6) {
+        put(&a.name, a.thumb.clone(), None, None, Some(a.id.clone()));
+    }
+    let albums: Vec<Found> = sp_alb["albums"]["items"].as_array().cloned().unwrap_or_default().iter().filter_map(|a| Some(Found::Album {
+        plat: "spotify", id: a["id"].as_str()?.to_string(), title: a["name"].as_str().unwrap_or("").to_string(),
+        by: a["artists"].as_array().map(|x| x.iter().filter_map(|y| y["name"].as_str()).collect::<Vec<_>>().join(", ")).unwrap_or_default(), img: img_of(a),
+    })).collect();
+    let mut lists: Vec<Found> = Vec::new();
+    for p in items(&sc_pl).iter().take(8) {
+        if let Some(id) = p["id"].as_u64() {
+            lists.push(Found::List { plat: "soundcloud", id: id.to_string(), title: p["title"].as_str().unwrap_or("").to_string(), by: p["user"]["username"].as_str().unwrap_or("").to_string(), img: p["artwork_url"].as_str().unwrap_or("").replace("-large", "-t200x200") });
+        }
+    }
+    for p in sp_pl["playlists"]["items"].as_array().cloned().unwrap_or_default().iter().filter(|p| !p.is_null()).take(8) {
+        if let Some(id) = p["id"].as_str() {
+            lists.push(Found::List { plat: "spotify", id: id.to_string(), title: p["name"].as_str().unwrap_or("").to_string(), by: p["owner"]["display_name"].as_str().unwrap_or("").to_string(), img: img_of(p) });
+        }
+    }
+    for p in yt_pl.iter().take(8) {
+        lists.push(Found::List { plat: "youtube", id: p.id.clone(), title: p.title.clone(), by: p.author.clone(), img: p.thumb.clone() });
+    }
+    (artists, albums, lists)
+}
+
+/// What's in something a search found: an artist's songs, an album's or a playlist's tracks
+pub async fn found_tracks(f: &Found) -> Vec<Track> {
+    match f {
+        Found::Artist { name, sc, sp, yt, img } => {
+            let a = Artist { name: name.clone(), img: img.clone(), sc: *sc, sp: sp.clone() };
+            let yt = async {
+                match yt { Some(id) => core::youtube::artist(id).await.map(|p| p.songs.iter().map(Track::youtube).collect()).unwrap_or_default(), None => Vec::new() }
+            };
+            let (mine, yt) = tokio::join!(artist_tracks(&a), yt);
+            interleave(vec![mine, yt])
+        }
+        Found::Album { id, img, .. } => {
+            let Ok(v) = core::spotify::spotify_api("GET".into(), format!("/albums/{id}/tracks?limit=50&market=from_token"), None).await else { return Vec::new() };
+            // (an album's tracks come without the album: its cover is the album's)
+            v["items"].as_array().cloned().unwrap_or_default().iter().filter_map(Track::spotify).map(|mut t| { if t.art.is_empty() { t.art = img.clone(); } t }).collect()
+        }
+        Found::List { plat: "youtube", id, .. } => core::youtube::playlist(id).await.map(|l| l.iter().map(Track::youtube).collect()).unwrap_or_default(),
+        Found::List { plat, id, title, .. } => playlist_tracks(&Playlist { plat, id: id.clone(), title: title.clone(), tracks: None, own: false }).await,
+    }
 }
 
 /// Whether MusicBrainz is searched too (Settings: the web app's prefs.mbOn, on unless switched off)
@@ -503,6 +621,11 @@ mod rank_tests {
         // an artist's name: their most played, not a little-known song named after them
         let got = rank("deadmau5", vec![t("deadmau5", "Someone", 0), t("Strobe", "deadmau5", 50_000_000)]);
         assert_eq!(got[0].title, "Strobe");
+        // twice the same song shows once; a remix of it isn't the same
+        let mut a = t("My Pet Coelacanth", "deadmau5", 1); a.ms = 496_000;
+        let mut b = t("My Pet Coelacanth", "deadmau5", 1); b.ms = 497_000;
+        let mut c = t("My Pet Coelacanth (Remix)", "deadmau5", 1); c.ms = 300_000;
+        assert_eq!(once_each(vec![a, b, c]).len(), 2);
         assert_eq!(words("Café n Stuff 2"), ["cafe", "stuff", "2"]);
     }
 }
