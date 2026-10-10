@@ -972,7 +972,7 @@ fn start(shared: &Shared) {
     rt.spawn(async move {
         // a Go+ track: never the preview, but its version on YouTube Music (crate::versions); a
         // MusicBrainz song the same way (MusicBrainz knows it, YouTube Music has it to play)
-        let mb = matches!(t.src, track::Src::MusicBrainz(_));
+        let mb = matches!(t.src, track::Src::MusicBrainz(_)) || listen_needs_version(&t);
         let (src, version) = if t.go_plus || mb {
             match versions::find(&t).await {
                 Some(v) => (player::open_source(&Track::youtube(&v.yt), h.clone()).await, Some(v)),
@@ -1155,6 +1155,9 @@ fn fav_toggle(shared: &Shared) {
 /// Playing from a page: a list (Library, a playlist...) becomes the queue; one track from Search
 /// takes the current one's place and leaves the rest of the queue as it was
 fn play_list(shared: &Shared, list: Vec<Track>, i: usize) {
+    if listening().is_some() {
+        listen_leave(shared, true);
+    }
     let (list, i) = {
         let a = shared.borrow();
         if streamsafe::on(&a.web.prefs) {
@@ -1191,6 +1194,9 @@ fn play_list(shared: &Shared, list: Vec<Track>, i: usize) {
 }
 
 fn step(shared: &Shared, d: i32) {
+    if listening().is_some() {
+        return;   // listening along: the host moves on, and so does this
+    }
     let engine = shared.borrow().engine.clone();
     if d < 0 && engine.position_ms() > 3000 {
         engine.seek(0);
@@ -1527,8 +1533,8 @@ fn remote_action(shared: &Shared, id: u64, action: &str) {
         "play" => if !shared.borrow().loaded || shared.borrow().engine.is_paused() { toggle(shared) },
         "pause" => if shared.borrow().loaded && !shared.borrow().engine.is_paused() { toggle(shared) },
         "toggle" => toggle(shared),
-        "next" => step(shared, 1),
-        "previous" => step(shared, -1),
+        "next" => skip_press(shared, 1),
+        "previous" => skip_press(shared, -1),
         "shuffle" => {
             let mut a = shared.borrow_mut();
             let lp = shuffle_basis(&a);
@@ -2680,6 +2686,12 @@ fn jam_paint(shared: &Shared) {
         ui.set_jam_ask("".into());
     }
     let members = MEMBERS.with(|m| m.borrow().clone());
+    if let Some(kind) = listening() {
+        ui.set_jam_on(true);
+        ui.set_jam_hidden(false);
+        ui.set_jam_label(if kind == "jam" { "Leave Jam" } else { "Leave Listen Along" }.into());
+        return;
+    }
     let jam = room_kind().as_deref() == Some("jam");
     ui.set_jam_on(jam);
     ui.set_jam_hidden(!jams_on(&shared.borrow()));
@@ -2729,6 +2741,204 @@ fn jam_accept(shared: &Shared) {
             }
         }));
     });
+}
+
+// ---------- listening along: someone else's room (as the web app's listener side) ----------
+// Your own queue is set aside while listening and back when you leave. The host's track plays
+// through this app's accounts (or its YouTube Music version, when this app can't play it), at the
+// host's position; their pauses and skips are followed. In a Jam, skipping and adding songs go to
+// the host, who does them for everyone.
+struct Listening {
+    kind: String,
+    host: String,
+    tx: tokio::sync::mpsc::UnboundedSender<String>,
+    saved: queue::Queue,
+    /// the host's last state, and when it came
+    state: Option<serde_json::Value>,
+    at: std::time::Instant,
+}
+
+thread_local! {
+    static LISTEN: RefCell<Option<Listening>> = const { RefCell::new(None) };
+}
+
+/// "jam" or "listen" while listening along
+fn listening() -> Option<String> {
+    LISTEN.with(|l| l.borrow().as_ref().map(|l| l.kind.clone()))
+}
+
+fn listen_send(m: serde_json::Value) {
+    LISTEN.with(|l| { if let Some(l) = l.borrow().as_ref() { let _ = l.tx.send(m.to_string()); } });
+}
+
+/// Where the host is now: what they said, plus the time since (while they're playing)
+fn listen_host_pos() -> u64 {
+    LISTEN.with(|l| {
+        let l = l.borrow();
+        let Some(st) = l.as_ref().and_then(|l| l.state.as_ref().map(|s| (s, l.at))) else { return 0 };
+        let pos = st.0["pos"].as_f64().unwrap_or(0.0).max(0.0) as u64;
+        if st.0["playing"].as_bool() == Some(true) { pos + st.1.elapsed().as_millis() as u64 } else { pos }
+    })
+}
+
+/// Whether this app can play the host's track as it is (else its YouTube Music version)
+fn listen_needs_version(t: &Track) -> bool {
+    if listening().is_none() {
+        return false;
+    }
+    let ytdlp = omnipulse_core::tools::ytdlp_path().is_some();
+    let ok = match &t.src {
+        track::Src::SoundCloud(_) => omnipulse_core::soundcloud::signed_in() || ytdlp,
+        track::Src::Spotify(_) => omnipulse_core::spotify::spotify_signed_in() && omnipulse_core::spotify_engine::spe_signed_in(),
+        track::Src::YouTube(_) => ytdlp,
+        track::Src::Local(p) => std::path::Path::new(p).exists(),
+        track::Src::MusicBrainz(_) => false,
+    };
+    !ok && ytdlp
+}
+
+/// A skip by hand (the buttons, media keys, the remote): listening, it goes to the Jam's host
+fn skip_press(shared: &Shared, d: i32) {
+    let Some(kind) = listening() else { return step(shared, d) };
+    let note = if kind == "jam" {
+        listen_send(serde_json::json!({ "type": "skip", "d": if d < 0 { -1 } else { 1 } }));
+        if d < 0 { "Going back a song for the Jam..." } else { "Skipping for the Jam..." }.to_string()
+    } else {
+        format!("{} picks what plays while you listen along.", LISTEN.with(|l| l.borrow().as_ref().map(|l| l.host.clone())).unwrap_or_default())
+    };
+    if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_status(note.into()); }
+}
+
+/// Opens an invite link (given to the app when it starts)
+fn listen_join(shared: &Shared, link: &str) {
+    let (rt, weak, default_relay, name, cid) = {
+        let a = shared.borrow();
+        let cid = a.web.prefs["clientId"].as_str().map(String::from).unwrap_or_else(|| format!("{:016x}", rand_u64()));
+        (a.rt.clone(), a.ui.clone(), relay_of(&a), my_name(&a), cid)
+    };
+    let Some((kind, code, relay, k)) = together::parse_link(link, &default_relay) else {
+        if let Some(ui) = weak.upgrade() { ui.set_status("That link isn't an OmniPulse invite.".into()); }
+        return;
+    };
+    if !jams_on(&shared.borrow()) {
+        if let Some(ui) = weak.upgrade() { ui.set_status("Listen Along & Jams are switched off (Settings > Integrations).".into()); }
+        return;
+    }
+    if listening().is_some() { listen_leave(shared, true); }
+    room_end(true);
+    let ws = relay.replacen("http", "ws", 1);
+    let url = format!("{ws}/ws/{code}?role=listener&name={}&cid={}{}", sources::urlencode(&name), sources::urlencode(&cid),
+        if k.is_empty() { String::new() } else { format!("&k={}", sources::urlencode(&k)) });
+    let tx = together::listen(&rt, url, |m| {
+        let _ = slint::invoke_from_event_loop(move || SHARED.with(|s| { if let Some(sh) = s.borrow().clone() { listen_message(&sh, m); } }));
+    });
+    let saved = std::mem::take(&mut shared.borrow_mut().queue);
+    shared.borrow().engine.pause();
+    LISTEN.with(|l| *l.borrow_mut() = Some(Listening { kind: kind.clone(), host: "the host".into(), tx, saved, state: None, at: std::time::Instant::now() }));
+    if let Some(ui) = weak.upgrade() { ui.set_status(if kind == "jam" { "Joining the Jam..." } else { "Joining..." }.into()); }
+    jam_paint(shared);
+}
+
+fn listen_message(shared: &Shared, m: serde_json::Value) {
+    if listening().is_none() {
+        return;
+    }
+    match m["type"].as_str() {
+        Some("hello") => {
+            let host = m["host"].as_str().unwrap_or("the host").to_string();
+            let kind = listening().unwrap_or_default();
+            LISTEN.with(|l| { if let Some(l) = l.borrow_mut().as_mut() { l.host = host.clone(); } });
+            let note = if kind == "jam" { format!("Joined {host}'s Jam. You can add songs and skip them too. Your own queue is set aside until you leave.") } else { format!("Listening along with {host}. Your own queue is set aside until you leave.") };
+            if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_status(note.into()); }
+        }
+        Some("state") => listen_follow(shared, m["state"].clone()),
+        Some("ended") => {
+            let host = LISTEN.with(|l| l.borrow().as_ref().map(|l| l.host.clone())).unwrap_or_default();
+            listen_leave(shared, true);
+            if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_status(format!("{host} ended the session. Back to your own queue.").into()); }
+        }
+        Some("declined") => {
+            listen_leave(shared, true);
+            if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_status("The host didn't let you in this time.".into()); }
+        }
+        Some("closed") => {
+            listen_leave(shared, true);
+            let why = m["why"].as_str().unwrap_or("the connection closed");
+            if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_status(format!("Left the session: {why}. Back to your own queue.").into()); }
+        }
+        _ => {}
+    }
+}
+
+/// The host's state: the same track (started at their position), playing or paused as they are,
+/// and back in step if it drifts more than 3 seconds
+fn listen_follow(shared: &Shared, st: serde_json::Value) {
+    if listening().is_none() {
+        return;   // (one still on its way after leaving)
+    }
+    LISTEN.with(|l| { if let Some(l) = l.borrow_mut().as_mut() { l.state = Some(st.clone()); l.at = std::time::Instant::now(); } });
+    let Some(target) = Track::from_snapshot(&st["track"]) else {
+        if shared.borrow().loaded && !shared.borrow().engine.is_paused() { shared.borrow().engine.pause(); }
+        return;
+    };
+    let next: Vec<Track> = st["next"].as_array().into_iter().flatten().filter_map(Track::from_snapshot).collect();
+    let playing = st["playing"].as_bool() == Some(true);
+    let same = shared.borrow().queue.current().is_some_and(|c| c.key == target.key);
+    if !same {
+        {
+            let mut a = shared.borrow_mut();
+            a.queue.items = std::iter::once(target).chain(next).map(queue::QItem::mine).collect();
+            a.queue.qi = Some(0);
+            a.resume_ms = Some(listen_host_pos());
+        }
+        start(shared);
+        if !playing { shared.borrow().engine.pause(); }
+        return;
+    }
+    {
+        let mut a = shared.borrow_mut();
+        let cur = a.queue.items.first().cloned();
+        a.queue.items = cur.into_iter().chain(next.into_iter().map(queue::QItem::mine)).collect();
+        a.queue.qi = Some(0);
+        paint_queue(&mut a);
+    }
+    let engine = shared.borrow().engine.clone();
+    if !shared.borrow().loaded { return; }
+    if playing && engine.is_paused() { engine.play(); } else if !playing && !engine.is_paused() { engine.pause(); }
+    if playing {
+        let (want, have) = (listen_host_pos(), engine.position_ms());
+        if want.abs_diff(have) > 3000 { engine.seek(want); }
+    }
+}
+
+/// Leaving (or the room's gone): your own queue back, paused where it was
+fn listen_leave(shared: &Shared, quiet: bool) {
+    let Some(l) = LISTEN.with(|l| l.borrow_mut().take()) else { return };
+    drop(l.tx);
+    shared.borrow().engine.pause();
+    {
+        let mut a = shared.borrow_mut();
+        a.queue = l.saved;
+        a.loaded = false;
+        paint_queue(&mut a);
+    }
+    if let Some(ui) = shared.borrow().ui.upgrade() {
+        ui.set_playing(false);
+        match shared.borrow().queue.current() {
+            Some(t) => show_now(&ui, t),
+            // nothing of your own queued: the bar empties
+            None => { ui.set_now_title("".into()); ui.set_now_artist("".into()); ui.set_pos_text("".into()); ui.set_dur_text("".into()); }
+        }
+        if !quiet { ui.set_status("You left. Back to your own queue.".into()); }
+    }
+    jam_paint(shared);
+}
+
+fn rand_u64() -> u64 {
+    use std::hash::{BuildHasher, Hasher};
+    let mut h = std::collections::hash_map::RandomState::new().build_hasher();
+    h.write_u128(std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0));
+    h.finish()
 }
 
 // ---------- Back Up & Restore (Settings > App; crates/core/src/backup.rs, as the web app's) ----------
@@ -2969,8 +3179,8 @@ fn outside_start(shared: &Shared) {
 fn desktop_action(shared: &Shared, action: &str) {
     match action {
         "play" => toggle(shared),
-        "next" => step(shared, 1),
-        "prev" => step(shared, -1),
+        "next" => skip_press(shared, 1),
+        "prev" => skip_press(shared, -1),
         "shuffle" => {
             let mut a = shared.borrow_mut();
             let lp = shuffle_basis(&a);
@@ -3140,7 +3350,9 @@ fn main() -> Result<(), slint::PlatformError> {
     // Jams
     let s = shared.clone();
     ui.on_jam_clicked(move || {
-        if room_kind().as_deref() == Some("jam") {
+        if listening().is_some() {
+            listen_leave(&s, false);
+        } else if room_kind().as_deref() == Some("jam") {
             if let Some(ui) = s.borrow().ui.upgrade() { jam_paint(&s); ui.set_jam_open(true); }
         } else {
             jam_start(&s);
@@ -3253,6 +3465,11 @@ fn main() -> Result<(), slint::PlatformError> {
     });
     paint_plats(&shared.borrow());
     ui.set_fav_page(integrations::on(&shared.borrow().web.prefs, "favPage"));
+    // an invite link the app was opened with (omnipulse://jam/... or join/...): joined once it's up
+    if let Some(link) = std::env::args().find(|x| x.starts_with("omnipulse://")) {
+        let s = shared.clone();
+        slint::Timer::single_shot(std::time::Duration::from_millis(1500), move || listen_join(&s, &link));
+    }
     if std::env::var_os("OMNIPULSE_SELFTEST").is_some() {
         // the self-test's own: the widget and requests on ports of their own, key "selftest" (not the
         // remote: starting it writes remote.json, which would point the Stream Deck at the test)
@@ -3456,6 +3673,17 @@ fn main() -> Result<(), slint::PlatformError> {
             drop(a);
             return copy_track_link(&s, &t, plat);
         }
+        if let Some(kind) = listening() {
+            drop(a);
+            let note = if kind != "jam" {
+                "You're listening along: only a Jam takes songs from listeners.".to_string()
+            } else {
+                listen_send(serde_json::json!({ "type": "add", "track": t.to_snapshot(), "next": act == "next" }));
+                format!("Sent \"{}\" to the Jam{}", t.title, if act == "next" { ", to play next." } else { "." })
+            };
+            if let Some(ui) = s.borrow().ui.upgrade() { ui.set_status(note.into()); }
+            return;
+        }
         let empty = a.queue.current().is_none();
         let title = t.title.clone();
         if act == "next" { a.queue.play_next(t); } else { a.queue.add(t); }
@@ -3514,9 +3742,9 @@ fn main() -> Result<(), slint::PlatformError> {
         save_session(&a);
     });
     let s = shared.clone();
-    ui.on_next(move || step(&s, 1));
+    ui.on_next(move || skip_press(&s, 1));
     let s = shared.clone();
-    ui.on_prev(move || step(&s, -1));
+    ui.on_prev(move || skip_press(&s, -1));
     let s = shared.clone();
     ui.on_toggle(move || toggle(&s));
     let s = shared.clone();
@@ -3585,7 +3813,10 @@ fn main() -> Result<(), slint::PlatformError> {
         let s = shared.clone();
         let started = std::time::Instant::now();
         let mut step_no = 0usize;
-        let plan: [(u64, &str); 31] = [(9, "play"), (13, "library"), (14, "scoff"), (15, "scon"), (16, "discover"), (24, "rediscover"), (27, "sets"), (31, "stats"), (35, "now"), (39, "search"), (42, "settings"), (44, "light"), (45, "collapse"), (46, "artists"), (54, "artist"), (60, "autoplay"), (70, "narrow"), (72, "goplus"), (80, "tabright"), (81, "pbar"), (82, "pfloat"), (83, "pminimal"), (84, "musical"), (88, "musical2"), (90, "safe"), (91, "sort"), (93, "xpl"), (95, "xpl2"), (97, "fade"), (101, "fade2"), (103, "end")];
+        // (OMNIPULSE_SELFTEST_JOIN=<invite link>: only joining someone's room, following it, skipping and leaving)
+        let join = std::env::var("OMNIPULSE_SELFTEST_JOIN").ok();
+        let full: [(u64, &str); 31] = [(9, "play"), (13, "library"), (14, "scoff"), (15, "scon"), (16, "discover"), (24, "rediscover"), (27, "sets"), (31, "stats"), (35, "now"), (39, "search"), (42, "settings"), (44, "light"), (45, "collapse"), (46, "artists"), (54, "artist"), (60, "autoplay"), (70, "narrow"), (72, "goplus"), (80, "tabright"), (81, "pbar"), (82, "pfloat"), (83, "pminimal"), (84, "musical"), (88, "musical2"), (90, "safe"), (91, "sort"), (93, "xpl"), (95, "xpl2"), (97, "fade"), (101, "fade2"), (103, "end")];
+        let plan: Vec<(u64, &str)> = if join.is_some() { vec![(6, "join"), (14, "joined"), (16, "jamskip"), (19, "leave"), (21, "end")] } else { full.to_vec() };
         t.start(slint::TimerMode::Repeated, std::time::Duration::from_millis(250), move || {
             let Some(&(at, what)) = plan.get(step_no) else { return };
             if started.elapsed().as_secs() < at { return; }
@@ -3600,6 +3831,10 @@ fn main() -> Result<(), slint::PlatformError> {
             step_no += 1;
             match what {
                 "play" => { if ui.get_rows().row_count() > 0 { ui.invoke_play_row(0); } }
+                "join" => { if let Some(link) = &join { listen_join(&s, link); } }
+                "joined" => println!("selftest: listening {:?}, playing \"{}\" at {}, queue {}, jam button \"{}\", status \"{}\"", listening(), ui.get_now_title(), ui.get_pos_text(), s.borrow().queue.items.len(), ui.get_jam_label(), ui.get_status()),
+                "jamskip" => ui.invoke_next(),
+                "leave" => { ui.invoke_jam_clicked(); println!("selftest: left: listening {:?}, queue {}, status \"{}\"", listening(), s.borrow().queue.items.len(), ui.get_status()); }
                 // SoundCloud switched off (and Streamer Mode on), then back
                 "scoff" => { ui.invoke_plat_toggle("soundcloud".into()); ui.set_streamer(true); println!("selftest: soundcloud off, {} rows", ui.get_rows().row_count()); }
                 "scon" => { ui.invoke_plat_toggle("soundcloud".into()); ui.set_streamer(false); println!("selftest: soundcloud on, {} rows", ui.get_rows().row_count()); }

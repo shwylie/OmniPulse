@@ -450,6 +450,28 @@ pub fn autoplay_local(seed: &Track, local: &[Track]) -> Vec<Track> {
     same
 }
 
+/// "%2F" and "+" back to what they stand for (a link's query values)
+pub fn urldecode(s: &str) -> String {
+    let b = s.as_bytes();
+    let mut out = Vec::with_capacity(b.len());
+    let mut i = 0;
+    while i < b.len() {
+        match b[i] {
+            b'+' => out.push(b' '),
+            b'%' if i + 2 < b.len() => {
+                let hex = |c: u8| (c as char).to_digit(16);
+                match (hex(b[i + 1]), hex(b[i + 2])) {
+                    (Some(h), Some(l)) => { out.push((h * 16 + l) as u8); i += 2; }
+                    _ => out.push(b'%'),
+                }
+            }
+            c => out.push(c),
+        }
+        i += 1;
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
 pub fn urlencode(s: &str) -> String {
     s.bytes()
         .map(|b| match b {
