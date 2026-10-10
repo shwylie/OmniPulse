@@ -19,6 +19,22 @@ async function collabPost(c, path, body) {
 }
 
 // The owner: shared (if it isn't yet), made collaborative, and the invite copied
+// The playlist page's collaborate button, beside Share (playlists on this PC): invite, copy the
+// invite again (yours), or say you're in someone else's
+function paintCollabBtn(v) {
+  const b = $("plCollab");
+  const p = v === "playlist" && currentPlaylist && isXpl(currentPlaylist) ? currentPlaylist : null;
+  const x = p && xplFind(p.id);
+  b.hidden = !x;
+  if (!x) return;
+  const c = x.collab;
+  $("plCollabText").textContent = !c ? "Invite collaborators" : c.owner ? "Copy invite link" : "Collaborating";
+  b.classList.toggle("on", !!c);
+  b.title = !c ? "Make this playlist collaborative: friends you send the link to can add, remove and reorder its songs"
+    : c.owner ? "It's collaborative: copy the invite link again to bring someone else in"
+    : "You're collaborating on someone's playlist. Right-click it in the sidebar to leave.";
+}
+
 async function collabInvite(p) {
   const x = xplFind(p.id);
   if (!x) return;
@@ -111,6 +127,14 @@ async function collabLeave(p) {
 }
 
 function collabInit() {
+  $("plCollab").addEventListener("click", async () => {
+    const p = currentPlaylist;
+    const x = p && xplFind(p.id);
+    if (!x) return;
+    if (x.collab && !x.collab.owner) { say("You're collaborating on this playlist. Right-click it in the sidebar to leave."); return; }
+    await collabInvite(p);
+    paintCollabBtn(view);
+  });
   // everyone's changes, every minute (and as each collaborative playlist is opened: js/app.js)
   setInterval(() => xpls.filter(isCollab).forEach((x) => collabPull(x)), COLLAB_PULL_MS);
   setTimeout(() => xpls.filter(isCollab).forEach((x) => collabPull(x)), 5000);

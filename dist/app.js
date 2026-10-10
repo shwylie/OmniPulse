@@ -294,7 +294,7 @@ function platformButton(t) {
   const b = platformBadge(t);
   b.classList.add("platBig");
   const up = t ? artistOfTrack(t).name : "";
-  b.title = platInfo(srcOf(t)).name + (up ? ". Click to open " + up + "'s page" : "");
+  b.title = platInfo(srcOf(t)).name + (up ? ". Click to open " + up + "'s page" + (uploaderApart(t) ? " (they uploaded it)" : "") : "");
   b.setAttribute("role", "button");
   return b;
 }
@@ -348,35 +348,35 @@ function uploaderApart(t) {
   return sameArtist(artistName(t), up) || artistNames(t).some((n) => sameArtist(n, up)) ? "" : up;
 }
 
-// withUploader: and "uploaded by" whoever uploaded it, when that's someone else (Now Playing)
+// withUploader: and "uploaded by" whoever uploaded it, when that's someone else (the full-screen
+// Now Playing; elsewhere the platform icon opens their page)
 function fillArtists(box, t, withUploader) {
   box.replaceChildren();
   if (!t) return;
-  const up = withUploader ? uploaderApart(t) : "";
-  if (up) {
-    const u = el("span", "artistPart uploaderPart", up);
-    u.dataset.uploader = "1";
-    u.title = "Open " + up + "'s page (they uploaded it)";
-    // (after the artists: added once they're in)
-    queueMicrotask(() => box.append(el("span", "uploaderBy", " · uploaded by "), u));
-  }
   const names = artistNames(t);
   if (names.length < 2) {
     const s = el("span", "artistPart", artistName(t));
     s.title = uploaderNote(t);
     box.append(s);
-    return;
+  } else {
+    artistSplit(t).forEach((part, i) => {
+      if (i % 2) { box.append(part); return; }   // the comma, " & " or " feat. " between them
+      const { name: n, close } = artistPart(part);
+      if (!n) return;
+      const s = el("span", "artistPart", n);
+      s.dataset.name = n;
+      s.title = "Open " + n + "'s page";
+      box.append(s);
+      if (close) box.append(close);
+    });
   }
-  artistSplit(t).forEach((part, i) => {
-    if (i % 2) { box.append(part); return; }   // the comma, " & " or " feat. " between them
-    const { name: n, close } = artistPart(part);
-    if (!n) return;
-    const s = el("span", "artistPart", n);
-    s.dataset.name = n;
-    s.title = "Open " + n + "'s page";
-    box.append(s);
-    if (close) box.append(close);
-  });
+  const up = withUploader ? uploaderApart(t) : "";
+  if (up) {
+    const u = el("span", "artistPart uploaderPart", up);
+    u.dataset.uploader = "1";
+    u.title = "Open " + up + "'s page (they uploaded it)";
+    box.append(el("span", "uploaderBy", " · uploaded by "), u);
+  }
 }
 
 // The page for one of a track's artists (by name, with its Spotify id when there is one)
@@ -505,6 +505,7 @@ function renderHero() {
   if ($("followBtn").hidden) $("followMoreBtn").hidden = true; else paintFollow();   // "Also follow on ...", now Follow shows
   $("plDelete").hidden = !(v === "playlist" && isOwnPlaylist(currentPlaylist));
   $("plShare").hidden = !(v === "playlist" && currentPlaylist && currentPlaylist.source !== "local");
+  paintCollabBtn(v);
   const av = $("heroAvatar");
   const src = v === "artist" ? artistImage(currentArtist) : "";
   if (src) { av.src = src; av.hidden = false; } else { av.removeAttribute("src"); av.hidden = true; }
@@ -730,7 +731,7 @@ function paintHeroActions() {
   hl.classList.toggle("on", !!prefs.hideLikes);
   hl.setAttribute("aria-pressed", prefs.hideLikes ? "true" : "false");
   hl.title = prefs.hideLikes ? "Your likes are hidden from these results. Click to show them." : "Leave tracks you've liked out of the results";
-  $("heroActions").hidden = !["playAll", "followBtn", "plDelete", "plShare", "luckyBtn", "libSort", "langChip", "favOnlyChip", "setsLikedChip", "hideLikesChip", "artistsBatch"].some((id) => !$(id).hidden);
+  $("heroActions").hidden = !["playAll", "followBtn", "plDelete", "plShare", "plCollab", "luckyBtn", "libSort", "langChip", "favOnlyChip", "setsLikedChip", "hideLikesChip", "artistsBatch"].some((id) => !$(id).hidden);
 }
 
 // A track's genres, as tags: its own, and those of its copies on other platforms (SoundCloud's are
@@ -1466,7 +1467,7 @@ function fillNowPlaying(t) {
   requestAnimationFrame(tabFit);
   applyFix(t);
   $("nowTitle").textContent = t ? t.title || "Untitled" : "Nothing playing";
-  fillArtists($("nowArtist"), t, true);
+  fillArtists($("nowArtist"), t);
   $("nowAlbum").textContent = t ? albumShown(t) : "";
   $("plAddBtn").hidden = !t;
   $("nowToggle").draggable = !!t;

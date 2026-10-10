@@ -1744,3 +1744,6 @@ body.streamSafe #navSets, body.streamSafe #navArtists, body.streamSafe #plSectio
 /* a search result's genre: a small tag after the artist, a click away from searching it */
 .genreTag { flex: none; margin-left: 8px; padding: 0 7px; border-radius: 999px; font-size: 10.5px; line-height: 16px; color: var(--muted); background: color-mix(in srgb, var(--accent) 12%, transparent); border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent); cursor: pointer; }
 .genreTag:hover { color: var(--text, #fff); background: color-mix(in srgb, var(--accent) 24%, transparent); }
+.collabPill { display: inline-flex; align-items: center; gap: 6px; }
+.collabPill svg { width: 16px; height: 16px; fill: currentColor; }
+.collabPill.on { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 50%, transparent); }
