@@ -359,54 +359,16 @@ pub static MUSICBRAINZ: std::sync::atomic::AtomicBool = std::sync::atomic::Atomi
 /// The words of a search or a title, as the web app's reqWords: lower case, accents off, Korean and
 /// Japanese and Chinese kept, single letters dropped (but not single digits)
 pub fn words(s: &str) -> Vec<String> {
-    use unicode_normalization::UnicodeNormalization;
-    let plain: String = s.to_lowercase().nfkd().filter(|c| !('\u{300}'..='\u{36f}').contains(c)).collect();
-    let keep = |c: char| c.is_ascii_lowercase() || c.is_ascii_digit() || ('\u{c0}'..='\u{24f}').contains(&c) || ('\u{400}'..='\u{4ff}').contains(&c)
-        || ('\u{1100}'..='\u{11ff}').contains(&c) || ('\u{3040}'..='\u{9fff}').contains(&c) || ('\u{ac00}'..='\u{d7af}').contains(&c);
-    plain.split(|c: char| !keep(c)).filter(|w| w.chars().count() > 1 || w.chars().any(|c| c.is_ascii_digit())).map(String::from).collect()
+    core::ranking::words(s)
 }
 
-/// Best match first, as the web app's searchRanker: more of the words searched for (in the title or
-/// artist), then a title (or artist) that's just what was searched, then the more played; otherwise as they came
-/// (the platforms taking turns). Unknown plays count as middling.
+/// Best match first, as the web app's searchRanker (core::ranking)
 pub fn rank(q: &str, list: Vec<Track>) -> Vec<Track> {
-    let mut want = words(q);
-    let asked = want.join(" ");
-    want.sort();
-    want.dedup();
-    if want.is_empty() {
-        return list;
-    }
-    let mut scored: Vec<(f64, u8, f64, usize, Track)> = list
-        .into_iter()
-        .enumerate()
-        .map(|(i, t)| {
-            let have: std::collections::HashSet<String> = words(&format!("{} {}", t.title, t.artist)).into_iter().collect();
-            let s = want.iter().filter(|w| have.contains(*w)).count() as f64 / want.len() as f64;
-            let exact = u8::from(words(&t.title).join(" ") == asked || words(&t.artist).join(" ") == asked);
-            let plays = if t.plays > 0 { t.plays as f64 } else { 1e5 };
-            (s, exact, (1.0 + plays).log10(), i, t)
-        })
-        .collect();
-    scored.sort_by(|a, b| b.0.total_cmp(&a.0).then(b.1.cmp(&a.1)).then(b.2.total_cmp(&a.2)).then(a.3.cmp(&b.3)));
-    scored.into_iter().map(|x| x.4).collect()
+    core::ranking::rank_by(q, list, |t| (t.title.as_str(), t.artist.as_str(), t.plays))
 }
 
 pub fn interleave(lists: Vec<Vec<Track>>) -> Vec<Track> {
-    let mut its: Vec<_> = lists.into_iter().map(|l| l.into_iter()).collect();
-    let mut out = Vec::new();
-    loop {
-        let mut any = false;
-        for it in its.iter_mut() {
-            if let Some(t) = it.next() {
-                out.push(t);
-                any = true;
-            }
-        }
-        if !any {
-            return out;
-        }
-    }
+    core::ranking::interleave(lists)
 }
 
 // ---------- the artists you follow (the Artists page) ----------

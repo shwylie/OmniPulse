@@ -32,6 +32,7 @@ librespot-playback = { version = "0.8", default-features = false, features = ["n
 librespot-oauth = { version = "0.8", default-features = false, features = ["native-tls"], optional = true }
 librespot-metadata = { version = "0.8", default-features = false, optional = true }
 futures = "0.3"
+unicode-normalization = "0.1"
 symphonia = { version = "0.5", default-features = false, features = ["aac", "alac", "flac", "isomp4", "mp3", "ogg", "pcm", "vorbis", "wav", "aiff"], optional = true }
 ebur128 = { version = "0.1", optional = true }
 zip = { version = "2", default-features = false, features = ["deflate"], optional = true }

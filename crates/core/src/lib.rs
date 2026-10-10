@@ -14,6 +14,7 @@ pub mod local;
 #[cfg(feature = "desktop")]
 pub mod loudness;
 pub mod lyrics;
+pub mod ranking;
 pub mod musicbrainz;
 #[cfg(feature = "desktop")]
 pub mod plugins;
