@@ -117,9 +117,10 @@ function reqMsg(key, vars) {
   return tpl.replace(/\{(\w+)\}/g, (m, k) => (vars && vars[k] !== undefined ? String(vars[k]) : m));
 }
 
-// The words in a request or a title, for matching against your likes
+// The words in a request or a title, for matching against your likes (Korean too: its syllables
+// come apart into their letters, U+1100-11FF, so both sides are compared the same way)
 const reqWords = (s) => String(s).toLowerCase().normalize("NFKD").replace(/[\u0300-\u036f]/g, "")
-  .split(/[^a-z0-9\u00c0-\u024f\u0400-\u04ff\u3040-\u9fff]+/).filter((w) => w.length > 1 || /\d/.test(w));
+  .split(/[^a-z0-9\u00c0-\u024f\u0400-\u04ff\u1100-\u11ff\u3040-\u9fff\uac00-\ud7af]+/).filter((w) => w.length > 1 || /\d/.test(w));
 
 async function likedMatch(q, plats) {
   const want = reqWords(q);
