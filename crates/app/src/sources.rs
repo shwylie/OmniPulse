@@ -273,6 +273,62 @@ pub async fn search_found(q: &str) -> (Vec<Found>, Vec<Found>, Vec<Found>) {
     (artists, albums, lists)
 }
 
+/// Your saved albums: Spotify's saved albums and the albums you've liked on SoundCloud (as the web
+/// app's Albums chip), newest first, taking turns
+pub async fn saved_albums() -> Vec<Found> {
+    let sp = async {
+        if !core::spotify::spotify_signed_in() { return Vec::new(); }
+        let mut out = Vec::new();
+        for offset in [0, 50, 100, 150] {
+            let Ok(v) = core::spotify::spotify_api("GET".into(), format!("/me/albums?limit=50&offset={offset}&market=from_token"), None).await else { break };
+            let page = v["items"].as_array().cloned().unwrap_or_default();
+            out.extend(page.iter().filter_map(|x| {
+                let a = &x["album"];
+                Some(Found::Album {
+                    plat: "spotify", id: a["id"].as_str()?.to_string(), title: a["name"].as_str().unwrap_or("").to_string(),
+                    by: a["artists"].as_array().map(|x| x.iter().filter_map(|y| y["name"].as_str()).collect::<Vec<_>>().join(", ")).unwrap_or_default(),
+                    img: a["images"].as_array().and_then(|i| i.get(1).or(i.first())).and_then(|i| i["url"].as_str()).unwrap_or("").to_string(),
+                })
+            }));
+            if page.len() < 50 { break; }
+        }
+        out
+    };
+    let sc = async {
+        if !core::soundcloud::signed_in() { return Vec::new(); }
+        let Ok(v) = core::soundcloud::api_get(sc_path("/me/likes/playlists?limit=50&linked_partitioning=true".into())).await else { return Vec::new() };
+        items(&v).iter().filter_map(|x| {
+            let p = if x.get("playlist").is_some() { &x["playlist"] } else { x };
+            let kind = format!("{} {}", p["playlist_type"].as_str().unwrap_or(""), p["set_type"].as_str().unwrap_or("")).to_lowercase();
+            let album = ["album", "ep", "compilation"].iter().any(|k| kind.contains(k)) || p["is_album"].as_bool() == Some(true);
+            if !album { return None; }
+            Some(Found::Album {
+                plat: "soundcloud", id: p["id"].as_u64()?.to_string(), title: p["title"].as_str().unwrap_or("").to_string(),
+                by: p["user"]["username"].as_str().unwrap_or("").to_string(), img: p["artwork_url"].as_str().unwrap_or("").replace("-large", "-t200x200"),
+            })
+        }).collect()
+    };
+    let (sp, sc) = tokio::join!(sp, sc);
+    let mut out = Vec::new();
+    let (mut a, mut b) = (sp.into_iter(), sc.into_iter());
+    loop {
+        let (x, y) = (a.next(), b.next());
+        if x.is_none() && y.is_none() { return out; }
+        out.extend(x);
+        out.extend(y);
+    }
+}
+
+/// Albums among your music files: an album name shared by more than one of them
+pub fn local_albums(files: &[Track]) -> Vec<Found> {
+    let mut by: std::collections::BTreeMap<String, (Found, usize)> = Default::default();
+    for t in files.iter().filter(|t| t.plat() == "local" && !t.album.trim().is_empty()) {
+        let e = by.entry(t.album.trim().to_lowercase()).or_insert_with(|| (Found::Album { plat: "local", id: t.album.trim().to_string(), title: t.album.trim().to_string(), by: t.artist.clone(), img: t.art.clone() }, 0));
+        e.1 += 1;
+    }
+    by.into_values().filter(|(_, n)| *n > 1).map(|(f, _)| f).collect()
+}
+
 /// What's in something a search found: an artist's songs, an album's or a playlist's tracks
 pub async fn found_tracks(f: &Found) -> Vec<Track> {
     match f {
@@ -284,6 +340,9 @@ pub async fn found_tracks(f: &Found) -> Vec<Track> {
             let (mine, yt) = tokio::join!(artist_tracks(&a), yt);
             interleave(vec![mine, yt])
         }
+        Found::Album { plat: "soundcloud", id, title, .. } => playlist_tracks(&Playlist { plat: "soundcloud", id: id.clone(), title: title.clone(), tracks: None, own: false }).await,
+        // (your files' albums are picked out of the Library by the app: main.rs)
+        Found::Album { plat: "local", .. } => Vec::new(),
         Found::Album { id, img, .. } => {
             let Ok(v) = core::spotify::spotify_api("GET".into(), format!("/albums/{id}/tracks?limit=50&market=from_token"), None).await else { return Vec::new() };
             // (an album's tracks come without the album: its cover is the album's)

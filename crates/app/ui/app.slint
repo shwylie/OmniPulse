@@ -489,6 +489,9 @@ export component AppWindow inherits Window {
     callback bar-pl(int);
     in property <int> side-on: -1;
     in property <[Shelf]> shelves;
+    // the Library's Albums chip
+    in property <[Tile]> album-tiles;
+    callback album-tile(int);
     in-out property <string> search-text;
     in property <bool> can-back;
     // narrower than 980 px (as the web app: set from Rust as the window changes): the sidebar down to
@@ -1003,6 +1006,19 @@ export component AppWindow inherits Window {
                         for r[i] in root.rows: VerticalLayout {
                             TrackRow { item: r; index: i; compact: root.narrow || root.queue-open; lists: root.own-lists; removable: root.own-page; play => { root.play-row(i); } act(a) => { root.row-action(i, a); } pick(m) => { root.row-pick(i, m); } }
                             if i == root.rows.length - 1: Rectangle { height: 76px; }
+                        }
+                    }
+                    // the Library's Albums: a grid of covers
+                    if root.page-kind == "albumgrid": agrid := ScrollView {
+                        vertical-stretch: 1;
+                        property <int> cols: max(1, floor(self.visible-width / 186px));
+                        content-width: self.visible-width;
+                        content-height: ceil(root.album-tiles.length / self.cols) * 240px + 76px;
+                        for t[i] in root.album-tiles: TileView {
+                            x: mod(i, agrid.cols) * 186px;
+                            y: floor(i / agrid.cols) * 240px + 12px;
+                            tile: t;
+                            clicked => { root.album-tile(i); }
                         }
                     }
                     // Artists: everyone you follow, round, A to Z
