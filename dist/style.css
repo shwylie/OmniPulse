@@ -1750,22 +1750,27 @@ body.streamSafe #navSets, body.streamSafe #navArtists, body.streamSafe #plSectio
 .collabPill svg { width: 16px; height: 16px; fill: currentColor; }
 .collabPill.on { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 50%, transparent); }
 /* the next track being found: a marquee, as Windows Vista's progress bars had it: a soft glow that
-   glides left to right along the bar, over and over (not its progress) */
-.seekLoad { position: absolute; left: 0; right: 0; top: 50%; height: 4px; margin-top: -2px; border-radius: 4px; pointer-events: none; opacity: 0; clip-path: inset(-6px 0 -6px 0 round 4px); }
-.seekLoad::before, .miniTrack::before {
+   glides left to right along the bar, over and over (not its progress). The glow has a layer of its
+   own, a little taller than the bar, that fades out towards both ends, so it comes in and goes out
+   smoothly instead of being cut off where the bar ends. */
+.seekLoad, .miniLoad {
+  position: absolute; left: 0; right: 0; height: 14px; pointer-events: none; opacity: 0;
+  -webkit-mask-image: linear-gradient(90deg, transparent 0, #000 14%, #000 86%, transparent 100%);
+  mask-image: linear-gradient(90deg, transparent 0, #000 14%, #000 86%, transparent 100%);
+}
+.seekLoad { top: 50%; margin-top: -7px; }
+.miniLoad { top: 0.5px; }   /* (centred on the 3px track, which sits 6px down) */
+.seekLoad::before, .miniLoad::before {
   content: ""; position: absolute; top: 50%; height: 10px; margin-top: -5px; width: 22%; left: -22%;
-  border-radius: 50%; pointer-events: none;
+  border-radius: 50%;
   background: radial-gradient(ellipse at center, color-mix(in srgb, var(--accent) 35%, #fff) 0%, var(--accent) 30%, color-mix(in srgb, var(--accent) 45%, transparent) 55%, transparent 72%);
   filter: blur(0.6px);
 }
-.miniTrack { position: relative; }
-.miniTrack::before { opacity: 0; }
-.seekRow.loading .seekLoad, .miniProg.loading .miniTrack::before { opacity: 1; transition: opacity .2s; }
-.seekRow.loading .seekLoad::before, .miniProg.loading .miniTrack::before { animation: seekMarquee 1.6s cubic-bezier(.45, .05, .55, .95) infinite; }
+.seekRow.loading .seekLoad, .miniProg.loading .miniLoad { opacity: 1; transition: opacity .2s; }
+.seekRow.loading .seekLoad::before, .miniProg.loading .miniLoad::before { animation: seekMarquee 1.6s cubic-bezier(.45, .05, .55, .95) infinite; }
 /* (only the glow shows while it glides: no fill, no knob, just the empty bar under it) */
 .seekRow.loading input { visibility: hidden; }
-.seekRow.loading .seekLoad { background: color-mix(in srgb, var(--text) 16%, transparent); }
-.miniProg.loading .miniTrack { overflow: visible; clip-path: inset(-6px 0 -6px 0 round 3px); }
+.seekRow.loading .seekWrap { background: linear-gradient(color-mix(in srgb, var(--text) 16%, transparent), color-mix(in srgb, var(--text) 16%, transparent)) center / 100% 4px no-repeat; border-radius: 4px; }
 .miniProg.loading #miniBar, .miniProg.loading .miniKnob, .miniProg.loading .miniTime { opacity: 0; }
 @keyframes seekMarquee { from { left: -22%; } to { left: 100%; } }
-@media (prefers-reduced-motion: reduce) { .seekRow.loading .seekLoad::before, .miniProg.loading .miniTrack::before { animation-duration: 3.2s; } }
+@media (prefers-reduced-motion: reduce) { .seekRow.loading .seekLoad::before, .miniProg.loading .miniLoad::before { animation-duration: 3.2s; } }
