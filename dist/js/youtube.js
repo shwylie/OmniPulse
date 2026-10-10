@@ -309,12 +309,6 @@ function ytAgeSkip(t) {
   setTimeout(() => say(note, { force: true }), 1200);   // (after the next one has started)
 }
 
-// The next track's audio is looked up while this one plays, so it starts straight away
-function ytPrepareNext() {
-  const next = queue[qi + 1];
-  if (next && srcOf(next) === "youtube" && ytAvailable()) invoke("yt_prepare", { id: ytIdOf(next) }).catch(() => {});
-}
-
 // ---------- autoplay and Discover ----------
 async function apYouTube(seed) {
   const song = await ytFind(seed);

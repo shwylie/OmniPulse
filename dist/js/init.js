@@ -83,6 +83,7 @@ function extrasInit() {
   mbInit();
   catInit();
   sbInit();
+  preloadInit();
   appleInit();
   pluginsInit();
   updateInit();

@@ -1767,8 +1767,10 @@ body.streamSafe #navSets, body.streamSafe #navArtists, body.streamSafe #plSectio
   background: radial-gradient(ellipse at center, #fff 0%, color-mix(in srgb, var(--accent) 30%, #fff) 22%, color-mix(in srgb, var(--accent) 80%, #fff) 42%, color-mix(in srgb, var(--accent) 55%, transparent) 62%, transparent 76%);
   filter: brightness(1.25) drop-shadow(0 0 3px color-mix(in srgb, var(--accent) 70%, #fff));
 }
-.seekRow.loading .seekLoad, .miniProg.loading .miniLoad { opacity: 1; transition: opacity .2s; }
-.seekRow.loading .seekLoad::before, .miniProg.loading .miniLoad::before { animation: seekMarquee 1.6s cubic-bezier(.45, .05, .55, .95) infinite; }
+.seekRow.loading .seekLoad, .miniProg.loading .miniLoad, .seekRow.preloading .seekLoad, .miniProg.preloading .miniLoad { opacity: 1; transition: opacity .2s; }
+.seekRow.loading .seekLoad::before, .miniProg.loading .miniLoad::before,
+.seekRow.preloading .seekLoad::before, .miniProg.preloading .miniLoad::before { animation: seekMarquee 1.6s cubic-bezier(.45, .05, .55, .95) infinite; }
+/* (preloading the next track while this one plays: only the glow; the bar works as ever) */
 /* (behind it, the playing song's progress, a little dimmed; nothing to drag while it's loading) */
 .seekRow.loading input { opacity: .6; pointer-events: none; }
 .miniProg.loading { pointer-events: none; }

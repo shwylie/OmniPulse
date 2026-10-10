@@ -1816,7 +1816,8 @@ async function startStream(t) {
     throw new Error(ytOn() ? "this song couldn't be found on YouTube Music (Track preferences can pick it)" : platInfo(srcOf(t)).name + " songs play from YouTube Music, which is switched off");
   }
   if (isPluginTrack(t)) {
-    const url = await pluginPlayUrl(t);
+    const pre = preloadTake(t, "plugin");   // (found while the track before played: js/preload.js)
+    const url = pre ? pre.url : await pluginPlayUrl(t);
     if (mine !== streamToken) return;
     await tryStream(url, false, null);
     if (mine === streamToken) say("");
@@ -1834,7 +1835,8 @@ async function startStream(t) {
   // not signed in to SoundCloud (a friend in your Jam, say): the track's own audio through yt-dlp
   if (meId === null && /^https:\/\/(m\.)?soundcloud\.com\//.test(t.permalink_url || "") && ytAvailable()) {
     try {
-      const url = await invoke("sc_ytdlp", { url: String(t.permalink_url).split(/[?#]/)[0] });
+      const pre = preloadTake(t, "scdlp");
+      const url = pre ? pre.url : await invoke("sc_ytdlp", { url: String(t.permalink_url).split(/[?#]/)[0] });
       if (mine !== streamToken) return;
       await tryStream(url, /\.m3u8(\?|$)/i.test(url), null);
       if (mine !== streamToken) return;
@@ -1848,7 +1850,8 @@ async function startStream(t) {
       throw new Error("not signed in to SoundCloud, and yt-dlp couldn't get it either (" + String(e && e.message ? e.message : e).replace(/^Error: /, "") + ")");
     }
   }
-  const info = await invoke("stream_url", { id: String(t.id) });
+  const pre = preloadTake(t, "sc");
+  const info = pre ? pre.info : await invoke("stream_url", { id: String(t.id) });
   if (mine !== streamToken) return;
   const failures = [];
   for (const c of info.candidates || []) {
@@ -1856,7 +1859,9 @@ async function startStream(t) {
     if (c.name === "preview") { await playFullElsewhere(t, mine, "SoundCloud only had a preview"); return; }
     let resolved;
     try {
-      resolved = await invoke("stream_resolve", { url: c.url });
+      // (the first one's address may have been found already)
+      resolved = pre && pre.first && pre.first.name === c.name ? pre.first.resolved : await invoke("stream_resolve", { url: c.url });
+      if (pre) pre.first = null;
     } catch (e) {
       failures.push(streamName(c.name) + ": " + e);
       continue;

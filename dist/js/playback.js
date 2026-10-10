@@ -112,7 +112,6 @@ function trackStarted(t) {
   normEnsure();
   loudTrackStarted(t);
   castTrack();
-  ytPrepareNext();
   session = { id: t.id, secs: 0, last: null, counted: false, scrobbled: false, startedAt: Date.now() };
   presenceUpdate();
   if (prefs.artAccent) updateArtAccent(t);
