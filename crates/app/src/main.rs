@@ -733,6 +733,8 @@ fn open_discover(shared: &Shared) {
         let _ = weak.upgrade_in_event_loop(move |ui| {
             SHARED.with(|s| {
                 let Some(shared) = s.borrow().clone() else { return };
+                // (left meanwhile: its status doesn't stay)
+                if ui.get_status() == "Finding music for you..." { ui.set_status("".into()); }
                 if shared.borrow().token != token { return; }
                 let mut shelves = shelves;
                 {

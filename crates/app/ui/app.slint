@@ -363,7 +363,7 @@ component TrackRow inherits Rectangle {
             background: Theme.elevated;
             Image { source: root.item.art; width: parent.width; height: parent.height; image-fit: cover; }
         }
-        PlatIcon { plat: root.item.plat; width: 18px; height: 18px; y: (parent.height - self.height) / 2; fill: Theme.muted; }
+        PlatIcon { plat: root.item.plat; width: 18px; height: 18px; y: (parent.height - self.height) / 2; fill: Theme.muted; opacity: ta.has-hover || root.item.picked ? 1 : 0; animate opacity { duration: 150ms; } }
         VerticalLayout {
             alignment: center;
             spacing: 2px;
@@ -413,6 +413,30 @@ component Cover inherits Rectangle {
     Image { source: root.art; width: parent.width; height: parent.height; image-fit: cover; }
 }
 
+// A cover with where it plays from as a round badge on its corner (the player bar's and Now Playing's,
+// as the web app's): always there, with YouTube Music's own mark (on the art it can't pass for a play button)
+component BadgedCover inherits Rectangle {
+    in property <image> art;
+    in property <string> initial;
+    in property <string> plat;
+    in property <length> badge: 22px;
+    in property <length> corner: 6px;
+    Cover { art: root.art; initial: root.initial; width: parent.width; height: parent.height; border-radius: root.corner; }
+    if root.plat != "": Rectangle {
+        x: parent.width - self.width * 0.78;
+        y: parent.height - self.height * 0.78;
+        width: root.badge;
+        height: root.badge;
+        border-radius: self.width / 2;
+        background: Theme.panel;
+        border-width: 2px;
+        border-color: Theme.panel;
+        drop-shadow-blur: 4px;
+        drop-shadow-color: #00000060;
+        PlatIcon { plat: root.plat; title-bar: true; width: root.badge * 0.6; height: root.badge * 0.6; }
+    }
+}
+
 component TileView inherits Rectangle {
     in property <Tile> tile;
     callback clicked;
@@ -425,7 +449,7 @@ component TileView inherits Rectangle {
             Cover { art: root.tile.art; initial: root.tile.title; width: 100%; height: 100%; }
             if ta.has-hover: Rectangle { x: parent.width - 52px; y: parent.height - 52px; width: 42px; height: 42px; border-radius: 21px; background: Theme.accent;
                 Glyph { d: Icons.play; width: 22px; height: 22px; fill: Theme.on-accent; } }
-            PlatIcon { plat: root.tile.plat; x: 8px; y: 8px; width: 18px; height: 18px; }
+            if ta.has-hover: PlatIcon { plat: root.tile.plat; title-bar: true; x: 8px; y: 8px; width: 18px; height: 18px; }
         }
         Text { text: root.tile.title; color: Theme.text; font-weight: 700; font-size: 13px; overflow: elide; }
         Text { text: root.tile.sub; color: Theme.muted; font-size: 12px; overflow: elide; }
@@ -1659,7 +1683,7 @@ export component AppWindow inherits Window {
                         VerticalLayout {
                             width: 360px;
                             spacing: 10px;
-                            Cover { art: root.now-art-big; initial: root.now-title; height: 360px; border-radius: 14px; }
+                            BadgedCover { art: root.now-art-big; initial: root.now-title; plat: root.now-plat; badge: 52px; corner: 14px; height: 360px; }
                             Text { text: root.now-title; color: Theme.text; font-size: 26px; font-weight: 800; wrap: word-wrap; }
                             Text { text: root.now-artist; color: Theme.accent; font-size: 16px; font-weight: 600; }
                             Text { text: root.now-album; color: Theme.muted; font-size: 13px; }
@@ -1797,9 +1821,8 @@ export component AppWindow inherits Window {
                                     Text { text: root.now-title; color: Theme.text; font-weight: 700; font-size: 15px; overflow: elide; horizontal-alignment: root.tab-right ? right : left; }
                                     Text { text: root.now-artist; color: Theme.muted; font-size: 13px; overflow: elide; horizontal-alignment: root.tab-right ? right : left; }
                                 }
-                                if !root.tab-right: Cover { art: root.now-art; initial: ""; width: 44px; height: 44px; border-radius: 6px; }
-                                if root.now-plat != "": PlatIcon { plat: root.now-plat; width: 20px; height: 20px; y: (parent.height - self.height) / 2; fill: Theme.muted; }
-                                if root.tab-right: Cover { art: root.now-art; initial: ""; width: 44px; height: 44px; border-radius: 6px; }
+                                if !root.tab-right: BadgedCover { art: root.now-art; initial: ""; plat: root.now-plat; width: 44px; height: 44px; }
+                                if root.tab-right: BadgedCover { art: root.now-art; initial: ""; plat: root.now-plat; width: 44px; height: 44px; }
                                 if !root.tab-right: VerticalLayout {
                                     alignment: center;
                                     spacing: 2px;
@@ -1863,8 +1886,7 @@ export component AppWindow inherits Window {
                             width: min(300px, max(160px, (root.width - 640px) / 2));
                             HorizontalLayout {
                                 spacing: 10px;
-                                Cover { art: root.now-art; initial: ""; width: root.player-style == "minimal" ? 34px : 40px; height: self.width; y: (parent.height - self.height) / 2; border-radius: 6px; }
-                                if root.now-plat != "": PlatIcon { plat: root.now-plat; width: 18px; height: 18px; y: (parent.height - self.height) / 2; fill: Theme.muted; }
+                                BadgedCover { art: root.now-art; initial: ""; plat: root.now-plat; badge: root.player-style == "minimal" ? 18px : 20px; width: root.player-style == "minimal" ? 34px : 40px; height: self.width; y: (parent.height - self.height) / 2; }
                                 VerticalLayout {
                                     alignment: center;
                                     spacing: 1px;
