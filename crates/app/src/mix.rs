@@ -1,7 +1,10 @@
 // Seamless mixing (Fuser's idea, a DJ's way): when the track playing and the next one both have a beat
 // measured (core::rhythm), the next one comes in on a downbeat of the one playing, at its tempo (its
-// pitch kept: crate::stretch's keylock), their bass handed over at once halfway (a bass swap), over a
-// few bars that end before the one playing's sound does; then it eases back to its own tempo.
+// pitch kept: crate::stretch's keylock), handed over a band at a time (omnipulse_audio::Handoff), the
+// beat kept going all through: the mix is over the one playing's last bars with a beat (its beatless
+// outro cut), the next one's beat in by its half (its beatless intro cut); then it eases back to its own
+// tempo. Tempos (or keys) that don't go together: over the soft part instead (a beatless outro or
+// intro), each at its own tempo, the two beats never heard at once.
 // Only for tracks played from YouTube Music, a plugin or your files: never Spotify's own playback.
 
 use omnipulse_core::rhythm::Measured;
@@ -27,6 +30,8 @@ pub struct Plan {
     /// its key shifted by this many semitones (for the whole track), to one that goes with the
     /// playing one's (0: as it is)
     pub semitones: i32,
+    /// on the beat (false: over the soft part, each at its own tempo)
+    pub beatmatched: bool,
 }
 
 /// A key not clear enough isn't shifted for
@@ -55,10 +60,10 @@ fn match_rate(a_bpm: f64, b_bpm: f64) -> Option<(f64, f64)> {
     [1.0, 2.0, 0.5].iter().map(|m| (a_bpm / (b_bpm * m), *m)).filter(|(r, _)| (r - 1.0).abs() <= MAX_STRETCH).min_by(|x, y| (x.0 - 1.0).abs().total_cmp(&(y.0 - 1.0).abs()))
 }
 
-/// The plan for mixing `b` in after `a` (`a_end_ms`: where `a`'s sound ends; `now_ms`: where it is),
-/// over `bars` bars, or None (no clear beat, tempos too far apart, no room left)
 /// A bar's loudness "loud enough to be the song proper": within this of its loud bars' (its 80th percentile)
 const LOUD_WITHIN_DB: f32 = 5.0;
+/// A bar with a beat: at least this strong, against the song's usual (core::rhythm's bar_beat)
+const BEAT_LINE: f32 = 0.45;
 
 fn loud_line(bars: &[f32]) -> Option<f32> {
     if bars.len() < 8 { return None; }
@@ -67,9 +72,40 @@ fn loud_line(bars: &[f32]) -> Option<f32> {
     Some(v[(v.len() * 4) / 5] - LOUD_WITHIN_DB)
 }
 
+/// Which of a song's bars are the song proper: a beat, and loud enough (not fading out). None if it
+/// wasn't measured for that.
+fn proper(m: &Measured) -> Option<Vec<bool>> {
+    let r = &m.rhythm;
+    if r.bar_beat.len() != r.bar_db.len() { return None; }
+    let line = loud_line(&r.bar_db)?;
+    Some(r.bar_db.iter().zip(&r.bar_beat).map(|(d, b)| *d >= line && *b >= BEAT_LINE).collect())
+}
+
+/// Where a song's beat starts (its first of two bars in a row with one) and ends (after its last two)
+fn beat_span(p: &[bool]) -> Option<(usize, usize)> {
+    let first = (0..p.len().saturating_sub(1)).find(|&i| p[i] && p[i + 1])?;
+    let last = (1..p.len()).rev().find(|&i| p[i] && p[i - 1])?;
+    Some((first, last + 1))
+}
+
+/// Whether two keys go together (as they are, or shifted for), or either isn't clear enough to say
+fn keys_fit(a: &Measured, b: &Measured) -> bool {
+    use omnipulse_core::rhythm::{keys_mix, transposed};
+    if a.rhythm.key_confidence < MIN_KEY_CONFIDENCE || b.rhythm.key_confidence < MIN_KEY_CONFIDENCE || keys_mix(&a.rhythm.camelot, &b.rhythm.camelot) { return true; }
+    [1, -1, 2, -2].iter().any(|s| transposed(&b.rhythm.key, *s).is_some_and(|(_, c)| keys_mix(&a.rhythm.camelot, &c)))
+}
+
 /// Each bar's downbeat in a measured track (ms from its start), from its tracked beats
 fn downbeats(m: &Measured) -> Vec<f64> {
     m.rhythm.beats.iter().skip(m.rhythm.downbeat).step_by(4).map(|b| m.from_ms as f64 + b).collect()
+}
+
+/// How a plan hands over: on the beat, staged, a band at a time (the one coming in's highs first, the
+/// mids swapped halfway, the bass at three quarters, the one going out echoed as it leaves); over a soft
+/// part, a crossfade with the bass swapped halfway
+pub fn handoff(p: &Plan) -> omnipulse_audio::Handoff {
+    if !p.beatmatched { return omnipulse_audio::Handoff::bass_swap(p.ms, p.swap_ms); }
+    omnipulse_audio::Handoff::staged(p.ms, p.ms as f64 / (p.bars * 4) as f64)
 }
 
 /// A measured track's beat as it is over n beats from `from` (ms from its start), from its tracked beats: a
@@ -80,56 +116,98 @@ fn period_at(m: &Measured, from: f64, n: usize) -> Option<f64> {
     Some((b1 - b0) / n as f64)
 }
 
-/// The plan, from both songs measured whole (each beat tracked, and each bar's loudness): the one
-/// playing goes out where its outro starts (where its loud part ends), on a phrase, the rest of it cut;
-/// the next one comes in so its main part (where its intro ends) starts as the mix ends, its intro before
-/// that cut. 16 bars when both have room for it, else 8. Tempos too far apart to match: a quick blend
-/// (2 bars) on the outro's downbeat straight into the next one's main part, each at its own tempo.
+/// The plan, from both songs measured whole (each beat tracked; each bar's loudness and beat), for
+/// mixing `b` in after `a` (`a_end_ms`: where `a`'s sound ends; `now_ms`: where it is).
+///
+/// Tempos and keys that go together: the beat kept going. The mix is over the one playing's last bars
+/// with a beat (16, else 8, else 4; on a phrase, as near its beat's end as can be), its beatless outro
+/// cut; the next one comes in so its beat starts by the mix's half, its beatless intro before that cut.
+///
+/// Tempos (or keys) that don't: over the soft part, each at its own tempo, the beats never together:
+/// the one playing's beatless outro (up to 8 bars) as the next one comes in; else the next one's
+/// beatless intro under the one playing's last bars with a beat; else a quick blend (2 bars) where the
+/// one playing's beat ends, into the next one's.
+///
 /// None without what that needs (then plan, from a grid).
 pub fn plan_structure(a: &Measured, a_end_ms: u64, now_ms: u64, b: &Measured) -> Option<Plan> {
     if a.rhythm.tempo_confidence < MIN_CONFIDENCE || b.rhythm.tempo_confidence < MIN_CONFIDENCE { return None; }
-    let matched = match_rate(a.rhythm.bpm, b.rhythm.bpm).map(|(r, _)| r);
     let (ad, bd) = (downbeats(a), downbeats(b));
     if ad.is_empty() || bd.is_empty() { return None; }
-    let (al, bl) = (loud_line(&a.rhythm.bar_db)?, loud_line(&b.rhythm.bar_db)?);
-    // the one playing: its last loud bar; its outro is after it
-    let last_loud = a.rhythm.bar_db.iter().rposition(|d| *d >= al)?;
-    let outro = (last_loud + 1).min(ad.len() - 1);
-    // the next one: its first loud bar (its intro is before it)
-    let main = b.rhythm.bar_db.iter().position(|d| *d >= bl)?;
-    let bar = 4.0 * a.rhythm.period_ms;
-    let bars: u32 = match matched { None => 2, Some(_) if ad.len() - outro >= 16 && main >= 16 => 16, Some(_) => 8 };
-    let len = bar * bars as f64;
-    let soonest = now_ms as f64 + 4000.0;
-    let fits = |k: usize| ad[k] >= soonest && ad[k] + len <= a_end_ms as f64 - 300.0;
-    // a phrase's start (every 8 bars from its first downbeat, else every 4, else any), the nearest the outro
-    let pick = |every: usize| (0..ad.len()).filter(|k| k % every == 0 && fits(*k)).min_by_key(|k| (*k as i64 - outro as i64).abs());
-    let k = pick(8).or_else(|| pick(4)).or_else(|| pick(1))?;
-    // the next one from the bar whose main part lands as the mix ends (its phrase's, its intro cut before it)
-    let land = main / 4 * 4;
-    let from_bar = if matched.is_some() { land.saturating_sub(bars as usize) } else { main }.min(bd.len() - 1);
-    // stretched to each one's tempo over the bars mixed, not its average (within a percent of it)
-    let rate = matched.map(|r| {
+    let (_, a_end) = beat_span(&proper(a)?)?;
+    let (b_main, _) = beat_span(&proper(b)?)?;
+    let (soonest, audible) = (now_ms as f64 + 4000.0, a_end_ms as f64 - 300.0);
+    let (a_bar, b_bar) = (4.0 * a.rhythm.period_ms, 4.0 * b.rhythm.period_ms);
+    // (bar k's downbeat; past the last one tracked, a bar on from it for each)
+    let at = |k: usize| ad.get(k).copied().unwrap_or_else(|| ad[ad.len() - 1] + (k + 1 - ad.len()) as f64 * a_bar);
+    let b_at = |k: usize| bd[k.min(bd.len() - 1)];
+    let matched = match_rate(a.rhythm.bpm, b.rhythm.bpm).map(|(r, _)| r).filter(|_| keys_fit(a, b));
+    if let Some(r) = matched {
+        let fits = |k: usize, n: u32| at(k) >= soonest && k + n as usize <= a_end && at(k) + a_bar * n as f64 <= audible;
+        // the latest start on a phrase (8 bars, else 4) that gives up no more than 4 of its bars with a beat; else any
+        let (bars, k) = [16u32, 8, 4].iter().find_map(|&n| {
+            let ideal = a_end.checked_sub(n as usize)?;
+            let latest = |every: usize| (0..=ideal).rev().find(|&k| k % every == 0 && fits(k, n));
+            [8, 4].iter().filter_map(|&e| latest(e)).find(|&k| k + 4 >= ideal).or_else(|| latest(1)).map(|k| (n, k))
+        })?;
+        let from_bar = b_main.saturating_sub(bars as usize / 2).min(bd.len() - 1);
+        // stretched to each one's tempo over the bars mixed, not its average (within a percent of it)
         let n = bars as usize * 4;
-        match (period_at(a, ad[k], n), period_at(b, bd[from_bar], (n as f64 * r).round() as usize)) {
+        let rate = match (period_at(a, at(k), n), period_at(b, bd[from_bar], (n as f64 * r).round() as usize)) {
             (Some(pa), Some(pb)) => {
                 let local = r * (pb / b.rhythm.period_ms) / (pa / a.rhythm.period_ms);
                 if (local / r - 1.0).abs() <= 0.01 { local } else { r }
             }
             _ => r,
-        }
-    });
-    Some(Plan {
-        at_ms: ad[k].round() as u64,
-        ms: len.round() as u64,
-        swap_ms: (bar * (bars / 2) as f64).round() as u64,
-        start_ms: bd[from_bar].round() as u64,
-        rate: rate.unwrap_or(1.0),
+        };
+        let len = a_bar * bars as f64;
+        return Some(Plan {
+            at_ms: at(k).round() as u64,
+            ms: len.round() as u64,
+            swap_ms: (len / 2.0).round() as u64,
+            start_ms: bd[from_bar].round() as u64,
+            rate,
+            bars,
+            semitones: key_shift(a, b),
+            beatmatched: true,
+        });
+    }
+    let soft = |at_ms: f64, ms: f64, start_ms: f64, bars: u32| Some(Plan {
+        at_ms: at_ms.round() as u64,
+        ms: ms.round() as u64,
+        swap_ms: (ms / 2.0).round() as u64,
+        start_ms: start_ms.round() as u64,
+        rate: 1.0,
         bars,
-        semitones: if matched.is_some() { key_shift(a, b) } else { 0 },
-    })
+        semitones: 0,
+        beatmatched: false,
+    });
+    // the one playing's beatless outro (what of it is heard), the next one coming in over it: its own
+    // beatless intro too, as much as fits, its beat as the blend ends
+    let a_soft = (a_end..).take_while(|&k| at(k) + a_bar <= audible).count();
+    if a_soft >= 2 && at(a_end) >= soonest {
+        let n = a_soft.min(8);
+        let ms = a_bar * n as f64;
+        let nb = ((ms / b_bar).floor() as usize).min(b_main);
+        return soft(at(a_end), ms, b_at(b_main - nb), n as u32);
+    }
+    // the next one's beatless intro, under the one playing's last bars with a beat: its beat comes in
+    // as the other's ends
+    if b_main >= 2 {
+        let nb = b_main.min(8);
+        let ms = b_bar * nb as f64;
+        let end = at(a_end).min(audible);
+        if let Some(k) = (0..=a_end).rev().find(|&k| at(k) + ms <= end && at(k) >= soonest) {
+            return soft(at(k), ms, b_at(b_main - nb), nb as u32);
+        }
+    }
+    // neither has one: two bars where the one playing's beat ends, straight into the next one's
+    let ms = 2.0 * a_bar;
+    let k = (0..=a_end.saturating_sub(2)).rev().find(|&k| at(k) >= soonest && at(k) + ms <= audible)?;
+    soft(at(k), ms, b_at(b_main), 2)
 }
 
+/// The plan for mixing `b` in after `a` (`a_end_ms`: where `a`'s sound ends; `now_ms`: where it is),
+/// over `bars` bars, or None (no clear beat, tempos too far apart, no room left)
 /// The plan, from a grid (a song measured only in part: its first 30%, say): the latest phrase-aligned
 /// downbeat that leaves its bars before the sound ends, the next one from its first downbeat
 pub fn plan(a: &Measured, a_end_ms: u64, now_ms: u64, b: &Measured, bars: u32) -> Option<Plan> {
@@ -154,6 +232,7 @@ pub fn plan(a: &Measured, a_end_ms: u64, now_ms: u64, b: &Measured, bars: u32) -
         rate,
         bars,
         semitones: key_shift(a, b),
+        beatmatched: true,
     })
 }
 
@@ -201,7 +280,7 @@ mod tests {
     fn m(bpm: f64, first_beat: f64, downbeat: usize, conf: f64) -> Measured {
         let period = 60_000.0 / bpm;
         let beats: Vec<f64> = (0..64).map(|i| first_beat + i as f64 * period).collect();
-        Measured { from_ms: 0, to_ms: 60_000, rhythm: Rhythm { bpm, first_beat_ms: first_beat, period_ms: period, beats, downbeat, tempo_confidence: conf, key: "A minor".into(), camelot: "8A".into(), key_confidence: 0.5, bar_db: Vec::new() }, v: VERSION }
+        Measured { from_ms: 0, to_ms: 60_000, rhythm: Rhythm { bpm, first_beat_ms: first_beat, period_ms: period, beats, downbeat, tempo_confidence: conf, key: "A minor".into(), camelot: "8A".into(), key_confidence: 0.5, bar_db: Vec::new(), bar_beat: Vec::new() }, v: VERSION }
     }
 
     #[test]
@@ -271,44 +350,66 @@ mod tests {
         assert!(relined(&first, &other).is_none());
     }
 
-    fn shaped(mut x: Measured, bars: &[f32]) -> Measured {
+    /// A song of bars (each its loudness, and whether it has a beat), every beat tracked
+    fn shaped(mut x: Measured, bars: &[(f32, bool)]) -> Measured {
         let period = x.rhythm.period_ms;
         let n = bars.len() * 4 + x.rhythm.downbeat + 4;
         x.rhythm.beats = (0..n).map(|i| x.rhythm.first_beat_ms + i as f64 * period).collect();
-        x.rhythm.bar_db = bars.to_vec();
+        x.rhythm.bar_db = bars.iter().map(|b| b.0).collect();
+        x.rhythm.bar_beat = bars.iter().map(|b| if b.1 { 1.0 } else { 0.1 }).collect();
         x
     }
 
+    fn song(parts: &[(usize, f32, bool)]) -> Vec<(f32, bool)> {
+        parts.iter().flat_map(|&(n, db, beat)| std::iter::repeat((db, beat)).take(n)).collect()
+    }
+
     #[test]
-    fn out_on_the_outro_in_after_the_intro() {
-        // the one playing: 64 loud bars, then a quiet 24-bar outro; the next: a 24-bar intro, then loud
-        let mut a_bars = vec![-10.0f32; 64];
-        a_bars.extend(vec![-22.0f32; 24]);
-        let mut b_bars = vec![-24.0f32; 24];
-        b_bars.extend(vec![-9.0f32; 64]);
-        let a = shaped(m(128.0, 500.0, 0, 0.5), &a_bars);
-        let b = shaped(m(128.0, 300.0, 0, 0.5), &b_bars);
+    fn the_beat_kept_going_its_beatless_parts_cut() {
+        // the one playing: 64 bars with a beat, then a 24-bar outro without one (as loud: a pad, a voice);
+        // the next: a 24-bar intro without a beat, then 64 with one
+        let a = shaped(m(128.0, 500.0, 0, 0.5), &song(&[(64, -10.0, true), (24, -11.0, false)]));
+        let b = shaped(m(128.0, 300.0, 0, 0.5), &song(&[(24, -12.0, false), (64, -9.0, true)]));
         let bar: f64 = 4.0 * 60_000.0 / 128.0;
         let end = (500.0 + 88.0 * bar) as u64;
         let p = plan_structure(&a, end, 10_000, &b).expect("a plan");
-        // room for 16 bars on both sides
+        assert!(p.beatmatched);
         assert_eq!(p.bars, 16);
-        // it goes out where the outro starts (bar 64, a phrase), the outro's other 8 bars cut
-        assert_eq!(p.at_ms, (500.0 + 64.0 * bar).round() as u64);
-        // the next one comes in 16 bars before its main part (bar 24, rounded to its phrase), its first 8 cut
-        assert_eq!(p.start_ms, (300.0 + 8.0 * bar).round() as u64);
-        // no intro or outro to speak of: the latest phrase that fits, from its first downbeat
-        let flat = shaped(m(128.0, 500.0, 0, 0.5), &vec![-10.0f32; 88]);
-        let p = plan_structure(&flat, end, 10_000, &shaped(m(128.0, 300.0, 0, 0.5), &vec![-10.0f32; 88])).expect("a plan");
-        assert_eq!(p.bars, 8);
-        assert_eq!(p.start_ms, 300);
+        // over its last 16 bars with a beat (from bar 48, a phrase), its beatless outro cut
+        assert_eq!(p.at_ms, (500.0 + 48.0 * bar).round() as u64);
+        // the next one's beat (bar 24) in at the mix's half: from its bar 16, the rest of its intro cut
+        assert_eq!(p.start_ms, (300.0 + 16.0 * bar).round() as u64);
+        // a beat all through, end to end: the latest phrase that fits before the sound ends
+        let flat = shaped(m(128.0, 500.0, 0, 0.5), &song(&[(88, -10.0, true)]));
+        let p = plan_structure(&flat, end, 10_000, &shaped(m(128.0, 300.0, 0, 0.5), &song(&[(88, -10.0, true)]))).expect("a plan");
+        assert_eq!((p.bars, p.start_ms), (16, 300));
+        assert_eq!(p.at_ms, (500.0 + 68.0 * bar).round() as u64);
         assert!(p.at_ms + p.ms <= end);
-        // tempos too far apart: a quick blend on the outro straight into the main part, untouched
-        let fast = shaped(m(174.0, 300.0, 0, 0.5), &b_bars);
-        let p = plan_structure(&a, end, 10_000, &fast).expect("a cut");
-        assert_eq!((p.bars, p.rate, p.semitones), (2, 1.0, 0));
+    }
+
+    #[test]
+    fn tempos_apart_over_the_soft_part() {
+        let bar: f64 = 4.0 * 60_000.0 / 128.0;
+        let fast_bar: f64 = 4.0 * 60_000.0 / 174.0;
+        let a = shaped(m(128.0, 500.0, 0, 0.5), &song(&[(64, -10.0, true), (24, -11.0, false)]));
+        let end = (500.0 + 88.0 * bar) as u64;
+        // its beatless outro (8 bars of it) as the next one comes in, each at its own tempo: the next one's
+        // beatless intro under it, as much as fits (10 of its bars), its beat as the blend ends
+        let fast = shaped(m(174.0, 300.0, 0, 0.5), &song(&[(24, -12.0, false), (64, -9.0, true)]));
+        let p = plan_structure(&a, end, 10_000, &fast).expect("a plan");
+        assert!(!p.beatmatched);
+        assert_eq!((p.bars, p.rate, p.semitones), (8, 1.0, 0));
         assert_eq!(p.at_ms, (500.0 + 64.0 * bar).round() as u64);
-        assert_eq!(p.start_ms, (300.0f64 + 24.0 * 4.0 * 60_000.0 / 174.0).round() as u64);
+        assert_eq!(p.start_ms, (300.0 + 14.0 * fast_bar).round() as u64);
+        // no outro without a beat: the next one's beatless intro under the one playing's last bars, its
+        // beat coming in as the other's ends
+        let flat = shaped(m(128.0, 500.0, 0, 0.5), &song(&[(88, -10.0, true)]));
+        let p = plan_structure(&flat, end, 10_000, &fast).expect("a plan");
+        assert_eq!(p.start_ms, (300.0 + 16.0 * fast_bar).round() as u64);
+        assert!(p.at_ms + p.ms <= end - 300 && p.at_ms + p.ms + bar as u64 > end - 300);
+        // neither: two bars where the one playing's beat ends, into the next one's
+        let p = plan_structure(&flat, end, 10_000, &shaped(m(174.0, 300.0, 0, 0.5), &song(&[(88, -9.0, true)]))).expect("a plan");
+        assert_eq!((p.bars, p.start_ms), (2, 300));
     }
 
     #[test]
@@ -332,7 +433,7 @@ fn mix_demo() {
     let out_path = std::env::var("OMNIPULSE_MIX_OUT").unwrap_or_else(|_| "mix-demo.wav".into());
     let rt = tokio::runtime::Runtime::new().unwrap();
     // each measured whole (as the app does for a mix), kept as it keeps them
-    let whole = |id: &str| omnipulse_core::rhythm::known(&format!("full:{id}")).unwrap_or_else(|| {
+    let whole = |id: &str| omnipulse_core::rhythm::known(&format!("full:{id}")).filter(|m| !m.rhythm.bar_beat.is_empty()).unwrap_or_else(|| {
         let (mono, rate) = rt.block_on(omnipulse_core::loudness::mono_start("soundcloud", id, 1200.0)).expect("its sound");
         let heard = mono.len() as u64 * 1000 / rate as u64;
         let m = omnipulse_core::rhythm::Measured { from_ms: 0, to_ms: heard, rhythm: omnipulse_core::rhythm::analyse(&mono, rate).expect("a beat"), v: omnipulse_core::rhythm::VERSION };
@@ -341,7 +442,7 @@ fn mix_demo() {
     });
     let (a, b) = (whole(&a_id), whole(&b_id));
     for (n, m) in [("A", &a), ("B", &b)] {
-        println!("{n}: {:.2} BPM, {}, {} beats, bars {:?}", m.rhythm.bpm, m.rhythm.camelot, m.rhythm.beats.len(), m.rhythm.bar_db.iter().map(|d| d.round() as i32).collect::<Vec<_>>());
+        println!("{n}: {:.2} BPM, {}, {} beats, bars {:?}", m.rhythm.bpm, m.rhythm.camelot, m.rhythm.beats.len(), m.rhythm.bar_db.iter().zip(&m.rhythm.bar_beat).map(|(d, b)| format!("{}/{:.1}", d.round() as i32, b)).collect::<Vec<_>>());
     }
     let t = |id: &str| Track { src: Src::SoundCloud(id.parse().unwrap()), key: id.to_string(), ..Default::default() };
     let mut sa = rt.block_on(crate::player::open_source(&t(&a_id), rt.handle().clone())).expect("A opens");
@@ -354,7 +455,7 @@ fn mix_demo() {
     let mut sb = omnipulse_audio::Stretched::shifted(sb, omnipulse_audio::Tempo::new(p.rate), p.semitones).unwrap();
     omnipulse_audio::Source::seek(&mut sb, p.start_ms).unwrap();
     let rate = 44_100;
-    let out = omnipulse_audio::engine::render_mix(sa, Box::new(sb), rate, lead as f32 / 1000.0, p.ms, Some(p.swap_ms), lead as f32 / 1000.0 + 20.0 + p.ms as f32 / 1000.0).unwrap();
+    let out = omnipulse_audio::engine::render_mix(sa, Box::new(sb), rate, lead as f32 / 1000.0, p.ms, Some(handoff(&p)), lead as f32 / 1000.0 + 20.0 + p.ms as f32 / 1000.0).unwrap();
     // how clearly one beat holds through the blend (the two lined up: one; off: two fighting), against the
     // same blend with the one coming in half a beat late
     let held = |out: &[f32]| {
@@ -368,7 +469,7 @@ fn mix_demo() {
         let sb = rt.block_on(crate::player::open_source(&t(&b_id), rt.handle().clone())).unwrap();
         let mut sb = omnipulse_audio::Stretched::shifted(sb, omnipulse_audio::Tempo::new(p.rate), p.semitones).unwrap();
         omnipulse_audio::Source::seek(&mut sb, p.start_ms + (b.rhythm.period_ms / 2.0) as u64).unwrap();
-        omnipulse_audio::engine::render_mix(sa, Box::new(sb), rate, lead as f32 / 1000.0, p.ms, Some(p.swap_ms), lead as f32 / 1000.0 + p.ms as f32 / 1000.0 + 1.0).unwrap()
+        omnipulse_audio::engine::render_mix(sa, Box::new(sb), rate, lead as f32 / 1000.0, p.ms, Some(handoff(&p)), lead as f32 / 1000.0 + p.ms as f32 / 1000.0 + 1.0).unwrap()
     };
     println!("the blend: lined up {:?}, half a beat off {:?}", held(&out), held(&off));
     // each of the next one's beats in the blend (where it lands, stretched) against the nearest of the one

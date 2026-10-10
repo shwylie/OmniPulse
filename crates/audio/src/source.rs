@@ -193,3 +193,29 @@ impl Source for Tone {
         Ok(ms)
     }
 }
+
+/// Several sources heard together (tones, for tests: each gives as much at a time)
+pub struct Sum(pub Vec<Tone>);
+
+impl Source for Sum {
+    fn rate(&self) -> u32 {
+        self.0.first().map(|t| t.rate).unwrap_or(44_100)
+    }
+    fn duration_ms(&self) -> Option<u64> {
+        self.0.iter().filter_map(|t| t.duration_ms()).max()
+    }
+    fn read(&mut self, out: &mut Vec<f32>) -> Result<bool, String> {
+        let (from, mut more, mut part) = (out.len(), false, Vec::new());
+        for t in &mut self.0 {
+            part.clear();
+            more |= t.read(&mut part)?;
+            if out.len() < from + part.len() { out.resize(from + part.len(), 0.0); }
+            for (o, v) in out[from..].iter_mut().zip(&part) { *o += v; }
+        }
+        Ok(more)
+    }
+    fn seek(&mut self, ms: u64) -> Result<u64, String> {
+        for t in &mut self.0 { t.seek(ms)?; }
+        Ok(ms)
+    }
+}

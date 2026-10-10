@@ -2,8 +2,9 @@
 // chain (js/audio.js's, see dsp.rs), and an output stream (cpal: WASAPI on Windows) that plays it.
 // A crossfade plays two sources at once: the next one comes in as the one before goes out (equal
 // power), each through its own chain, and then it's the one playing. A mix is a crossfade that starts
-// at an exact point of the one playing (a downbeat), with the bass handed over at once at another
-// (a bass swap: the two kicks never thump together), for beat-matched transitions.
+// at an exact point of the one playing (a downbeat), handed over a band at a time (a Handoff: its highs,
+// its mids, its bass each at their own moment, as a DJ does on an EQ; the two kicks never thump
+// together), the one going out echoed as it leaves, for beat-matched transitions.
 // About a third of a second is kept ready between them. Volume, mute and pause act in the output
 // itself, so they're heard at once.
 
@@ -143,8 +144,8 @@ enum Cmd {
     /// the next source, coming in over this many ms as the one playing goes out
     Crossfade(Box<dyn Source>, f32, u64),
     /// a mix: the next source (at the place it starts from), coming in when the one playing reaches
-    /// `at_ms` (sample-exact), over `ms`, its bass handed over `swap_ms` in (None: as the rest)
-    MixAt { src: Box<dyn Source>, db: f32, at_ms: u64, ms: u64, swap_ms: Option<u64> },
+    /// `at_ms` (sample-exact), over `ms`, handed over as `handoff` says (None: a plain crossfade)
+    MixAt { src: Box<dyn Source>, db: f32, at_ms: u64, ms: u64, handoff: Option<Handoff> },
     Seek(u64),
     Stop,
     Eq(Vec<f32>),
@@ -312,9 +313,9 @@ impl Engine {
         self.shared.fading_in.load(Ordering::SeqCst)
     }
     /// A mix: `src` (already where it starts from: its first downbeat, say) comes in when the one
-    /// playing reaches `at_ms` (exactly), over `ms`, its bass handed over `swap_ms` in
-    pub fn mix_at(&self, src: Box<dyn Source>, match_db: f32, at_ms: u64, ms: u64, swap_ms: Option<u64>) {
-        let _ = self.cmd.send(Cmd::MixAt { src, db: match_db, at_ms, ms, swap_ms });
+    /// playing reaches `at_ms` (exactly), over `ms`, handed over as `handoff` says
+    pub fn mix_at(&self, src: Box<dyn Source>, match_db: f32, at_ms: u64, ms: u64, handoff: Option<Handoff>) {
+        let _ = self.cmd.send(Cmd::MixAt { src, db: match_db, at_ms, ms, handoff });
     }
     /// A mix is waiting for its moment, or under way
     pub fn mixing(&self) -> bool {
@@ -501,32 +502,167 @@ struct Fading {
     in_buf: VecDeque<f32>,
     out_ended: bool,
     in_ended: bool,
-    /// a bass swap: the frame it happens at, and how long it takes (frames); each side's bass apart
-    swap: Option<(u64, u64)>,
-    lows: [Lows; 2],
+    /// a mix's handover, in frames (None: a plain crossfade); each side's bands apart, and the echo
+    handoff: Option<Handoff>,
+    bands: [Bands; 2],
+    echo: Echo,
 }
 
-/// A signal's bass, kept apart (two one-pole low-passes, ~150 Hz): low = lp(x), the rest x - low
-#[derive(Clone, Copy, Default)]
-struct Lows {
-    a: f32,
-    z: [[f32; 2]; 2],
+/// One band's handover in a mix: the one coming in up from `in_at` over `in_len`, the one going out
+/// down from `out_at` over `out_len` (equal power; ms from the mix's start, or frames in the engine)
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Ramp {
+    pub in_at: u64,
+    pub in_len: u64,
+    pub out_at: u64,
+    pub out_len: u64,
 }
 
-impl Lows {
-    fn new(rate: u32) -> Self {
-        Self { a: 1.0 - (-2.0 * std::f32::consts::PI * 150.0 / rate as f32).exp(), z: [[0.0; 2]; 2] }
+impl Ramp {
+    /// both at once: a swap (over `len`) at `at`
+    pub fn swap(at: u64, len: u64) -> Self { Self { in_at: at, in_len: len, out_at: at, out_len: len } }
+    fn gains(&self, f: u64) -> (f32, f32) {
+        let q = |at: u64, len: u64| if f < at { 0.0 } else { ((f - at) as f32 / len.max(1) as f32).min(1.0) };
+        (((q(self.out_at, self.out_len)) * std::f32::consts::FRAC_PI_2).cos(), (q(self.in_at, self.in_len) * std::f32::consts::FRAC_PI_2).sin())
     }
-    fn low(&mut self, ch: usize, x: f32) -> f32 {
-        self.z[0][ch] += self.a * (x - self.z[0][ch]);
-        self.z[1][ch] += self.a * (self.z[0][ch] - self.z[1][ch]);
-        self.z[1][ch]
+    fn frames(&self, rate: u64) -> Self {
+        let f = |ms: u64| ms * rate / 1000;
+        Self { in_at: f(self.in_at), in_len: f(self.in_len), out_at: f(self.out_at), out_len: f(self.out_len) }
+    }
+}
+
+/// How a mix hands over, a band at a time: its bass (below ~150 Hz), its mids (to ~2.5 kHz: the
+/// vocals, mostly) and its highs (the hats, the air), and the one going out echoed as it leaves
+/// (`echo`: sent from, for, its delay; all ms from the mix's start)
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Handoff {
+    pub low: Ramp,
+    pub mid: Ramp,
+    pub high: Ramp,
+    pub echo: Option<(u64, u64, u64)>,
+}
+
+impl Handoff {
+    /// The bass alone swapped at `at` (over a quarter second), the rest crossfaded over all `ms`
+    pub fn bass_swap(ms: u64, at: u64) -> Self {
+        let all = Ramp::swap(0, ms);
+        Self { low: Ramp::swap(at, 250), mid: all, high: all, echo: None }
+    }
+
+    /// Staged over `ms` (of beats `beat_ms` long): the one coming in's highs come up over the first
+    /// quarter (its hats over the one playing); the mids swap at the half (over a beat: one voice, then
+    /// the other), the one going out's echoed as they go; the bass swaps at three quarters (at once);
+    /// the one going out's highs leave over the last quarter
+    pub fn staged(ms: u64, beat_ms: f64) -> Self {
+        let (q, h, beat) = (ms / 4, ms / 2, beat_ms.round() as u64);
+        Self {
+            high: Ramp { in_at: 0, in_len: q, out_at: ms - q, out_len: q },
+            mid: Ramp::swap(h.saturating_sub(beat / 2), beat),
+            low: Ramp::swap(ms - q, 250.min(beat)),
+            // (a dotted eighth's echo: three quarters of a beat; sent for the two beats before the mids swap and the one after)
+            echo: Some((h.saturating_sub(2 * beat), 3 * beat, (beat_ms * 0.75).round() as u64)),
+        }
+    }
+
+    fn frames(&self, rate: u64) -> Self {
+        let f = |ms: u64| ms * rate / 1000;
+        Self { low: self.low.frames(rate), mid: self.mid.frames(rate), high: self.high.frames(rate), echo: self.echo.map(|(a, b, c)| (f(a), f(b), f(c.max(1)))) }
+    }
+}
+
+/// A second-order Butterworth low- or high-pass (the Audio EQ Cookbook, Q = 1/sqrt 2), stereo
+#[derive(Clone, Copy)]
+struct Butter {
+    b: [f32; 3],
+    a: [f32; 2],
+    z: [[f32; 4]; 2],
+}
+
+impl Butter {
+    fn new(rate: u32, hz: f32, high: bool) -> Self {
+        let w0 = 2.0 * std::f32::consts::PI * hz / rate as f32;
+        let (s, c) = w0.sin_cos();
+        let alpha = s / 2.0 * std::f32::consts::SQRT_2;
+        let a0 = 1.0 + alpha;
+        let b = if high { [(1.0 + c) / 2.0, -(1.0 + c), (1.0 + c) / 2.0] } else { [(1.0 - c) / 2.0, 1.0 - c, (1.0 - c) / 2.0] };
+        Self { b: b.map(|x| x / a0), a: [-2.0 * c / a0, (1.0 - alpha) / a0], z: [[0.0; 4]; 2] }
+    }
+    fn run(&mut self, ch: usize, x: f32) -> f32 {
+        let [x1, x2, y1, y2] = self.z[ch];
+        let y = self.b[0] * x + self.b[1] * x1 + self.b[2] * x2 - self.a[0] * y1 - self.a[1] * y2;
+        self.z[ch] = [x, x1, y, y1];
+        y
+    }
+}
+
+/// A Linkwitz-Riley crossover (24 dB an octave: two Butterworths each way); its two sides add up to
+/// the signal, its phase turned (an all-pass)
+#[derive(Clone, Copy)]
+struct Crossover {
+    lo: [Butter; 2],
+    hi: [Butter; 2],
+}
+
+impl Crossover {
+    fn new(rate: u32, hz: f32) -> Self { Self { lo: [Butter::new(rate, hz, false); 2], hi: [Butter::new(rate, hz, true); 2] } }
+    fn split(&mut self, ch: usize, x: f32) -> (f32, f32) {
+        let l = self.lo[0].run(ch, x);
+        let l = self.lo[1].run(ch, l);
+        let h = self.hi[0].run(ch, x);
+        let h = self.hi[1].run(ch, h);
+        (l, h)
+    }
+}
+
+/// A signal in three bands: its bass (below 150 Hz), its mids (to 2.5 kHz) and its highs, steeply
+/// apart; together, the signal (the bass turned in phase as the other two are, so they still add up)
+#[derive(Clone, Copy)]
+struct Bands {
+    low: Crossover,
+    high: Crossover,
+    /// (the bass through the 2.5 kHz crossover too: the same phase as the rest)
+    low_phase: Crossover,
+}
+
+impl Bands {
+    fn new(rate: u32) -> Self { Self { low: Crossover::new(rate, 150.0), high: Crossover::new(rate, 2500.0), low_phase: Crossover::new(rate, 2500.0) } }
+    fn split(&mut self, ch: usize, x: f32) -> (f32, f32, f32) {
+        let (l, rest) = self.low.split(ch, x);
+        let (m, h) = self.high.split(ch, rest);
+        let (a, b) = self.low_phase.split(ch, l);
+        (a + b, m, h)
+    }
+}
+
+/// The echo on the one going out: a stereo delay line, fed back
+struct Echo {
+    line: Vec<f32>,
+    at: usize,
+}
+
+const ECHO_FEEDBACK: f32 = 0.45;
+const ECHO_WET: f32 = 0.55;
+
+impl Echo {
+    /// What it gives back now, for this frame of what's sent to it (`delay` frames long)
+    fn tick(&mut self, delay: u64, send: (f32, f32)) -> (f32, f32) {
+        let n = delay as usize * 2;
+        if self.line.len() != n { self.line = vec![0.0; n]; self.at = 0; }
+        let (wl, wr) = (self.line[self.at], self.line[self.at + 1]);
+        self.line[self.at] = send.0 + wl * ECHO_FEEDBACK;
+        self.line[self.at + 1] = send.1 + wr * ECHO_FEEDBACK;
+        self.at = (self.at + 2) % n;
+        (wl, wr)
     }
 }
 
 impl Fading {
-    fn new(next: Pipeline, total: u64, swap: Option<(u64, u64)>, rate: u32) -> Self {
-        Self { next, total: total.max(1), done: 0, out_buf: VecDeque::new(), in_buf: VecDeque::new(), out_ended: false, in_ended: false, swap, lows: [Lows::new(rate); 2] }
+    /// (`handoff` in ms: it's kept in frames)
+    fn new(next: Pipeline, total: u64, handoff: Option<Handoff>, rate: u32) -> Self {
+        Self {
+            next, total: total.max(1), done: 0, out_buf: VecDeque::new(), in_buf: VecDeque::new(), out_ended: false, in_ended: false,
+            handoff: handoff.map(|h| h.frames(rate as u64)), bands: [Bands::new(rate); 2], echo: Echo { line: Vec::new(), at: 0 },
+        }
     }
 }
 
@@ -551,19 +687,36 @@ impl Fading {
             let (go, gi) = ((p * std::f32::consts::FRAC_PI_2).cos(), (p * std::f32::consts::FRAC_PI_2).sin());
             let (ol, or) = (self.out_buf.pop_front().unwrap_or(0.0), self.out_buf.pop_front().unwrap_or(0.0));
             let (il, ir) = (self.in_buf.pop_front().unwrap_or(0.0), self.in_buf.pop_front().unwrap_or(0.0));
-            match self.swap {
+            match self.handoff {
                 None => {
                     into.push(ol * go + il * gi);
                     into.push(or * go + ir * gi);
                 }
-                // the bass handed over at its moment; the rest crossfades as ever
-                Some((at, len)) => {
-                    let q = if self.done < at { 0.0 } else { ((self.done - at) as f32 / len.max(1) as f32).min(1.0) };
-                    let (bo, bi) = ((q * std::f32::consts::FRAC_PI_2).cos(), (q * std::f32::consts::FRAC_PI_2).sin());
-                    let (lol, lor) = (self.lows[0].low(0, ol), self.lows[0].low(1, or));
-                    let (lil, lir) = (self.lows[1].low(0, il), self.lows[1].low(1, ir));
-                    into.push((ol - lol) * go + lol * bo + (il - lil) * gi + lil * bi);
-                    into.push((or - lor) * go + lor * bo + (ir - lir) * gi + lir * bi);
+                // a band at a time, each at its moment; the one going out's mids and highs echoed as it leaves
+                Some(h) => {
+                    let f = self.done;
+                    let (lo, li) = h.low.gains(f);
+                    let (mo, mi) = h.mid.gains(f);
+                    let (ho, hi) = h.high.gains(f);
+                    let mut side = [0.0f32; 2];
+                    let mut send = [0.0f32; 2];
+                    for (ch, (o, i)) in [(ol, il), (or, ir)].into_iter().enumerate() {
+                        let (a_l, a_m, a_h) = self.bands[0].split(ch, o);
+                        let (b_l, b_m, b_h) = self.bands[1].split(ch, i);
+                        side[ch] = a_l * lo + a_m * mo + a_h * ho + b_l * li + b_m * mi + b_h * hi;
+                        send[ch] = a_m * mo + a_h * ho;
+                    }
+                    if let Some((from, len, delay)) = h.echo {
+                        let sending = if f >= from && f < from + len { 1.0 } else { 0.0 };
+                        let (wl, wr) = self.echo.tick(delay, (send[0] * sending, send[1] * sending));
+                        // (its tail dies away over the mix's last eighth: nothing of it cut off at the end)
+                        let tail = self.total / 8;
+                        let wet = ECHO_WET * if f + tail >= self.total { (self.total - f) as f32 / tail.max(1) as f32 } else { 1.0 };
+                        side[0] += wl * wet;
+                        side[1] += wr * wet;
+                    }
+                    into.push(side[0]);
+                    into.push(side[1]);
                 }
             }
             self.done += 1;
@@ -574,16 +727,16 @@ impl Fading {
     }
 }
 
-/// What a mix waits for: the next source, its gain, the moment (ms of the one playing), its length and bass swap
+/// What a mix waits for: the next source, its gain, the moment (ms of the one playing), its length and handover
 struct Waiting {
     next: Pipeline,
     at_ms: u64,
     ms: u64,
-    swap_ms: Option<u64>,
+    handoff: Option<Handoff>,
 }
 
 /// Starts a crossfade (or a mix) into `next`: from here, it's the one the position, length and end are of
-fn begin_fade(shared: &Shared, next: Pipeline, total_frames: u64, swap: Option<(u64, u64)>) -> Fading {
+fn begin_fade(shared: &Shared, next: Pipeline, total_frames: u64, handoff: Option<Handoff>) -> Fading {
     let rate = shared.rate.load(Ordering::SeqCst);
     let queued = shared.queue.lock().unwrap().len() as u64 / 2;
     shared.played.store(0, Ordering::SeqCst);
@@ -595,7 +748,7 @@ fn begin_fade(shared: &Shared, next: Pipeline, total_frames: u64, swap: Option<(
     shared.duration_ms.store(next.duration_ms().unwrap_or(0), Ordering::SeqCst);
     shared.source_done.store(false, Ordering::SeqCst);
     shared.fading_in.store(true, Ordering::SeqCst);
-    Fading::new(next, total_frames, swap, rate)
+    Fading::new(next, total_frames, handoff, rate)
 }
 
 fn decode_loop(shared: Arc<Shared>, cmds: Receiver<Cmd>, ev: Sender<Event>) {
@@ -626,13 +779,13 @@ fn decode_loop(shared: Arc<Shared>, cmds: Receiver<Cmd>, ev: Sender<Event>) {
                     ended_sent = false;
                 }
                 // a mix: waits for its moment in the one playing
-                Cmd::MixAt { src, db, at_ms, ms, swap_ms } if pipe.is_some() && !shared.source_done.load(Ordering::SeqCst) => {
+                Cmd::MixAt { src, db, at_ms, ms, handoff } if pipe.is_some() && !shared.source_done.load(Ordering::SeqCst) => {
                     let rate = shared.rate.load(Ordering::SeqCst);
                     if let Some(f) = fading.take() { pipe = Some(f.next); shared.fading_in.store(false, Ordering::SeqCst); }
                     let mut next = Pipeline::new(src, rate);
                     next.chain.eq.set(&eq);
                     next.chain.set_match_db(db, true);
-                    waiting = Some(Waiting { next, at_ms, ms, swap_ms });
+                    waiting = Some(Waiting { next, at_ms, ms, handoff });
                     shared.mix_waiting.store(true, Ordering::SeqCst);
                 }
                 Cmd::MixAt { src, db, .. } => {
@@ -765,8 +918,7 @@ fn decode_loop(shared: Arc<Shared>, cmds: Receiver<Cmd>, ev: Sender<Event>) {
                 let w = waiting.take().unwrap();
                 shared.mix_waiting.store(false, Ordering::SeqCst);
                 let total = w.ms * rate_u / 1000;
-                let swap = w.swap_ms.map(|s| (s * rate_u / 1000, rate_u / 4));
-                let mut f = begin_fade(&shared, w.next, total, swap);
+                let mut f = begin_fade(&shared, w.next, total, w.handoff);
                 f.out_buf.extend(scratch[(until * 2) as usize..].iter().copied());
                 f.out_ended = !more;
                 fading = Some(f);
@@ -859,8 +1011,8 @@ pub fn render_crossfade(a: Box<dyn Source>, b: Box<dyn Source>, out_rate: u32, a
     render_mix(a, b, out_rate, a_secs, ms, None, max_secs)
 }
 
-/// A mix rendered without a device: as render_crossfade, with the bass handed over `swap` ms in (for tests)
-pub fn render_mix(a: Box<dyn Source>, b: Box<dyn Source>, out_rate: u32, a_secs: f32, ms: u64, swap: Option<u64>, max_secs: f32) -> Result<Vec<f32>, String> {
+/// A mix rendered without a device: as render_crossfade, handed over as `handoff` says (for tests)
+pub fn render_mix(a: Box<dyn Source>, b: Box<dyn Source>, out_rate: u32, a_secs: f32, ms: u64, handoff: Option<Handoff>, max_secs: f32) -> Result<Vec<f32>, String> {
     let mut pa = Pipeline::new(a, out_rate);
     let mut out = Vec::new();
     let lead = (a_secs * out_rate as f32) as usize * 2;
@@ -868,7 +1020,7 @@ pub fn render_mix(a: Box<dyn Source>, b: Box<dyn Source>, out_rate: u32, a_secs:
         if !pa.fill(&mut out)? { break; }
     }
     out.truncate(lead);
-    let mut f = Fading::new(Pipeline::new(b, out_rate), ms * out_rate as u64 / 1000, swap.map(|s| (s * out_rate as u64 / 1000, out_rate as u64 / 4)), out_rate);
+    let mut f = Fading::new(Pipeline::new(b, out_rate), ms * out_rate as u64 / 1000, handoff, out_rate);
     let mut scratch = Vec::new();
     loop {
         if f.mix(&mut pa, &mut out, &mut scratch)? { break; }
@@ -946,12 +1098,46 @@ mod mix_tests {
         // two basslines: 55 Hz going out, 82 Hz coming in; a 2 s mix from 2 s, the bass swapped 1.2 s in
         let a = Box::new(Tone::new(rate, 55.0, 0.4, 10.0));
         let b = Box::new(Tone::new(rate, 82.0, 0.4, 10.0));
-        let out = render_mix(a, b, rate, 2.0, 2000, Some(1200), 6.0).unwrap();
+        let out = render_mix(a, b, rate, 2.0, 2000, Some(Handoff::bass_swap(2000, 1200)), 6.0).unwrap();
         // before the swap: only the one going out's (its 55 Hz: ~11 in 0.2 s), the other's held back
         let before = ups(&out, rate, 2.9, 0.2);
         assert!((10..=12).contains(&before), "before {before}");
         // after it (and its quarter second): only the one coming in's (82 Hz: ~16 in 0.2 s)
         let after = ups(&out, rate, 3.6, 0.2);
         assert!((15..=18).contains(&after), "after {after}");
+    }
+
+    #[test]
+    fn staged_a_band_at_a_time() {
+        let rate = 44_100u32;
+        // the one going out: a bass at 55 Hz, a mid at 600, a high at 6 kHz; the one coming in: 82, 900, 9 kHz
+        let tri = |a: f32, b: f32, c: f32| -> Box<dyn Source> { Box::new(crate::source::Sum(vec![Tone::new(rate, a, 0.3, 12.0), Tone::new(rate, b, 0.2, 12.0), Tone::new(rate, c, 0.1, 12.0)])) };
+        // 8 s of mix from 2 s, beats half a second
+        let h = Handoff::staged(8000, 500.0);
+        let out = render_mix(tri(55.0, 600.0, 6000.0), tri(82.0, 900.0, 9000.0), rate, 2.0, 8000, Some(h), 11.0).unwrap();
+        // how much of a frequency there is around a time (its correlation with a sine and a cosine, over
+        // a Hann window of 0.3 s centred there: the tones near it kept out)
+        let has = |hz: f32, at: f32| {
+            let n = (rate as f32 * 0.3) as usize;
+            let i = (at * rate as f32) as usize - n / 2;
+            let (mut c, mut s) = (0.0f32, 0.0f32);
+            for k in 0..n {
+                let x = out[(i + k) * 2] * (1.0 - (2.0 * std::f32::consts::PI * k as f32 / n as f32).cos()) * 0.5;
+                let w = 2.0 * std::f32::consts::PI * hz * k as f32 / rate as f32;
+                c += x * w.cos();
+                s += x * w.sin();
+            }
+            4.0 * (c * c + s * s).sqrt() / n as f32
+        };
+        // a second in: the highs of both, the mids and bass only the one going out's
+        assert!(has(9000.0, 3.0) > 0.03 && has(6000.0, 3.0) > 0.05, "highs {} {}", has(9000.0, 3.0), has(6000.0, 3.0));
+        assert!(has(900.0, 3.0) < 0.02 && has(82.0, 3.0) < 0.02, "held back {} {}", has(900.0, 3.0), has(82.0, 3.0));
+        // past the half (mids swapped): the one coming in's mids, the other's gone (but for its echo, sent before)
+        assert!(has(900.0, 7.0) > 0.15, "mids in {}", has(900.0, 7.0));
+        // the bass not swapped yet; then swapped at three quarters (8 s: 2 + 6)
+        assert!(has(55.0, 7.0) > 0.2 && has(82.0, 7.0) < 0.03, "bass before {} {}", has(55.0, 7.0), has(82.0, 7.0));
+        assert!(has(82.0, 8.5) > 0.2 && has(55.0, 8.5) < 0.03, "bass after {} {}", has(82.0, 8.5), has(55.0, 8.5));
+        // after it: only the one that came in
+        assert!(has(6000.0, 10.5) < 0.01 && has(600.0, 10.5) < 0.01, "left {} {}", has(6000.0, 10.5), has(600.0, 10.5));
     }
 }

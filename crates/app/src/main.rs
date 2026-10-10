@@ -1739,7 +1739,10 @@ fn rhythm_line(key: &str) -> String {
 /// ends and its outro starts), for a mix out of it or into it
 fn rhythm_full_key(key: &str) -> String { format!("full:{key}") }
 
-fn rhythm_full(key: &str) -> Option<omnipulse_core::rhythm::Measured> { omnipulse_core::rhythm::known(&rhythm_full_key(key)) }
+/// (one measured before each bar's beat was: measured again)
+fn rhythm_full(key: &str) -> Option<omnipulse_core::rhythm::Measured> {
+    omnipulse_core::rhythm::known(&rhythm_full_key(key)).filter(|m| !m.rhythm.bar_beat.is_empty())
+}
 
 /// (tracks being measured whole right now, so each is once)
 static RHYTHM_FULL_BUSY: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
@@ -2049,7 +2052,7 @@ fn mix_tick(shared: &Shared, pos: u64, dur: u64) {
                     let what = sound::loud_source(&next, version.as_ref().map(|v| v.yt.id.as_str()));
                     let known = what.as_ref().and_then(|(s, id)| shared.borrow().loud.get(&format!("{s}:{id}")).copied());
                     let db = sound::loud_db(&prefs, &next, known);
-                    shared.borrow().engine.mix_at(src, db, plan.at_ms, plan.ms, Some(plan.swap_ms));
+                    shared.borrow().engine.mix_at(src, db, plan.at_ms, plan.ms, Some(mix::handoff(&plan)));
                     MIX.with(|m| *m.borrow_mut() = Some(MixPhase::Waiting { key: next.key.clone(), plan, tempo, version }));
                 }
                 // (it couldn't be got ready: the usual way, then)
