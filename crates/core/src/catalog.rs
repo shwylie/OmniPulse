@@ -165,6 +165,15 @@ async fn itunes(term: &str) -> Result<Vec<Value>, String> {
     Ok(v["results"].as_array().into_iter().flatten().filter_map(it_track).collect())
 }
 
+/// How many albums' genres a search looks up (Deezer's search results don't carry one)
+const GENRE_ALBUMS: usize = 12;
+
+/// An album's first genre on Deezer ("Electro", "Pop"), if it has one
+async fn album_genre(id: u64) -> Option<String> {
+    let v = deezer(&format!("/album/{id}")).await.ok()?;
+    v["genres"]["data"].as_array()?.first()?["name"].as_str().map(String::from).filter(|g| !g.is_empty())
+}
+
 /// The words of a title or artist, for telling two catalogues' copies of a song apart
 fn same_key(t: &Value) -> String {
     let words = |s: &str| crate::ranking::words(s).join(" ");
@@ -178,11 +187,33 @@ pub async fn search(query: &str) -> Result<Vec<Value>, String> {
         return Ok(Vec::new());
     }
     let path = format!("/search?limit=40&q={}", urlencoding::encode(&q));
-    let (dz, it) = futures::join!(deezer(&path), itunes(&q));
-    let mut out: Vec<Value> = dz.as_ref().ok().and_then(|v| v["data"].as_array()).into_iter().flatten().filter_map(|t| dz_track(t, None)).collect();
+    let it = itunes(&q);
+    // Deezer's songs, with their genres (its search doesn't say: their albums do), while iTunes is asked
+    let dz = async {
+        let v = deezer(&path).await?;
+        let mut list: Vec<Value> = v["data"].as_array().into_iter().flatten().filter_map(|t| dz_track(t, None)).collect();
+        let mut albums: Vec<u64> = Vec::new();
+        for t in list.iter().take(20) {
+            if let Some(id) = t["dzAlbumId"].as_u64() {
+                if !albums.contains(&id) && albums.len() < GENRE_ALBUMS {
+                    albums.push(id);
+                }
+            }
+        }
+        let genres = futures::future::join_all(albums.iter().map(|id| album_genre(*id))).await;
+        let by: HashMap<u64, String> = albums.into_iter().zip(genres).filter_map(|(id, g)| g.map(|g| (id, g))).collect();
+        for t in list.iter_mut() {
+            if let Some(g) = t["dzAlbumId"].as_u64().and_then(|id| by.get(&id)) {
+                t["genre"] = json!(g);
+            }
+        }
+        Ok::<_, String>(list)
+    };
+    let (dz, it) = futures::join!(dz, it);
     if let (Err(e), Err(_)) = (&dz, &it) {
         return Err(e.clone());
     }
+    let mut out: Vec<Value> = dz.unwrap_or_default();
     let mut seen: HashMap<String, usize> = out.iter().enumerate().map(|(i, t)| (same_key(t), i)).collect();
     for t in it.unwrap_or_default() {
         let k = same_key(&t);
@@ -238,7 +269,7 @@ mod tests {
     fn searching() {
         let rt = tokio::runtime::Runtime::new().unwrap();
         let list = rt.block_on(super::search("strobe deadmau5")).unwrap();
-        println!("{}", list.iter().map(|t| format!("{} {} - {}", t["source"], t["user"]["username"], t["title"])).collect::<Vec<_>>().join("\n"));
+        println!("{}", list.iter().map(|t| format!("{} {} - {} [{}]", t["source"], t["user"]["username"], t["title"], t["genre"])).collect::<Vec<_>>().join("\n"));
         assert!(list.iter().any(|t| t["title"].as_str().unwrap_or("").contains("Strobe")));
         assert!(list.iter().any(|t| t["source"] == "itunes") || list.len() >= 10);
     }

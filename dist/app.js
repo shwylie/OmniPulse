@@ -733,6 +733,23 @@ function paintHeroActions() {
   $("heroActions").hidden = !["playAll", "followBtn", "plDelete", "plShare", "luckyBtn", "libSort", "langChip", "favOnlyChip", "setsLikedChip", "hideLikesChip", "artistsBatch"].some((id) => !$(id).hidden);
 }
 
+// A track's genres, as tags: its own, and those of its copies on other platforms (SoundCloud's are
+// whatever the uploader typed, so "#trap" is Trap, and ones that are really a name or "Other" go)
+function trackGenres(t) {
+  const out = [];
+  const seen = new Set();
+  [t].concat(t.dupes || []).forEach((x) => {
+    String((x && x.genre) || "").split(/\s*[\/,|]\s*/).forEach((g) => {
+      g = g.replace(/^#+/, "").replace(/\s+/g, " ").trim();
+      const k = g.toLowerCase();
+      if (!g || g.length > 24 || seen.has(k) || /^(other|none|unknown|music|misc|n\/a|-)$/i.test(g) || sameArtist(g, artistName(t))) return;
+      seen.add(k);
+      out.push(g === g.toLowerCase() ? g.replace(/\b\w/g, (c) => c.toUpperCase()) : g);
+    });
+  });
+  return out.slice(0, 2);
+}
+
 function trackRow(t, i, playing) {
   applyFix(t);   // your own title and artist, whichever copy this is (js/titles.js)
   const li = el("li");
@@ -762,6 +779,15 @@ function trackRow(t, i, playing) {
     tag.title = "A Go+ track: the full song plays from YouTube Music";
     artistLine.insertBefore(tag, whoEl);
   }
+  // search results: the genre, a click away from more of it
+  if (view === "search") trackGenres(t).forEach((g) => {
+    const b = el("button", "genreTag", g);
+    b.type = "button";
+    b.dataset.act = "genre";
+    b.dataset.genre = g;
+    b.title = "Search " + g;
+    artistLine.append(b);
+  });
   meta.append(el("div", "title", t.title || "Untitled"), artistLine);
   // other versions of it (artist pages): opened beneath the row
   if (t._versions && t._versions.length) {
@@ -835,6 +861,7 @@ $("list").addEventListener("click", (e) => {
   const btn = e.target.closest("button[data-act]");
   if (btn) {
     if (btn.dataset.act === "versions") versionsToggle(i);
+    else if (btn.dataset.act === "genre") openSearch(btn.dataset.genre);
     else if (btn.dataset.act === "like") toggleLike(t);
     else if (btn.dataset.act === "fav") toggleFav(t);
     else if (btn.dataset.act === "next") playNext(t);
