@@ -139,7 +139,8 @@ pub async fn playlist_tracks(p: &Playlist) -> Vec<Track> {
     }
 }
 
-/// A search on every platform (every one answers before anything shows), best match first (rank)
+/// A search on every platform but the plugins (every one answers before anything shows), best match
+/// first (rank); the plugins' results join after (search_plugins), as the web app's late feeds
 pub async fn search(q: &str) -> Vec<Track> {
     let enc = urlencode(q);
     let sc = async {
@@ -172,15 +173,18 @@ pub async fn search(q: &str) -> Vec<Track> {
         }
         core::catalog::search(q).await.map(|l| l.iter().filter_map(Track::catalog).collect()).unwrap_or_default()
     };
-    // each running plugin that can search and play (crate::plugrun)
+    let (a, b, c, d, f) = tokio::join!(sc, sp, yt, mb, cat);
+    once_each(rank(q, interleave(vec![a, b, c, d, f])))
+}
+
+/// Each running plugin that can search and play (crate::plugrun): slower (the Internet Archive), so
+/// their results join the others once they're in
+pub async fn search_plugins(q: &str) -> Vec<Track> {
     let plugs = futures_util::future::join_all(crate::plugrun::players().into_iter().map(|p| {
         let q = q.to_string();
         async move { p.call("search", vec![serde_json::json!(q)]).await.map(|v| v.as_array().cloned().unwrap_or_default().iter().take(200).filter_map(|x| Track::plugin(&p.id, x)).collect::<Vec<_>>()).unwrap_or_default() }
-    }));
-    let (a, b, c, d, f, e) = tokio::join!(sc, sp, yt, mb, cat, plugs);
-    let mut lists = vec![a, b, c, d, f];
-    lists.extend(e);
-    once_each(rank(q, interleave(lists)))
+    })).await;
+    interleave(plugs)
 }
 
 /// The same song found twice (the same title and first artist, about as long) shows once, where it
@@ -200,7 +204,7 @@ pub fn once_each(list: Vec<Track>) -> Vec<Track> {
 /// are on each platform), an album or a playlist
 #[derive(Clone, Debug)]
 pub enum Found {
-    Artist { name: String, img: String, sc: Option<u64>, sp: Option<String>, yt: Option<String> },
+    Artist { name: String, img: String, sc: Option<u64>, sp: Option<String>, yt: Option<String>, followers: u64 },
     Album { plat: &'static str, id: String, title: String, by: String, img: String },
     List { plat: &'static str, id: String, title: String, by: String, img: String },
 }
@@ -209,7 +213,7 @@ impl Found {
     /// (title, the line under it, its picture, the platform's icon)
     pub fn tile(&self) -> (String, String, String, &'static str) {
         match self {
-            Found::Artist { name, img, sc, sp, .. } => (name.clone(), "Artist".into(), img.clone(), if sp.is_some() { "spotify" } else if sc.is_some() { "soundcloud" } else { "youtube" }),
+            Found::Artist { name, img, sc, sp, followers, .. } => (name.clone(), if *followers > 0 { format!("Artist · {} followers", short_count(*followers)) } else { "Artist".into() }, img.clone(), if sp.is_some() { "spotify" } else if sc.is_some() { "soundcloud" } else { "youtube" }),
             Found::Album { plat, title, by, img, .. } => (title.clone(), by.clone(), img.clone(), plat),
             Found::List { plat, title, by, img, .. } => (title.clone(), by.clone(), img.clone(), plat),
         }
@@ -229,36 +233,59 @@ pub async fn search_found(q: &str) -> (Vec<Found>, Vec<Found>, Vec<Found>) {
         }
     };
     let sc = |path: String| async move { if sc_on { core::soundcloud::api_get(sc_path(path)).await.unwrap_or_default() } else { Value::Null } };
-    let (sp_art, sp_alb, sp_pl, sc_users, sc_pl, yt_art, yt_pl) = tokio::join!(
+    let dz_on = CATALOG.load(std::sync::atomic::Ordering::Relaxed) && core::tools::ytdlp_path().is_some();
+    let dz_path = format!("/search/artist?limit=10&q={enc}");
+    let (sp_art, sp_alb, sp_pl, sc_users, sc_pl, yt_art, yt_pl, dz_art) = tokio::join!(
         sp("artist"), sp("album"), sp("playlist"),
-        sc(format!("/users?q={enc}&limit=6")), sc(format!("/playlists?q={enc}&limit=8&linked_partitioning=true")),
+        sc(format!("/users?q={enc}&limit=10")), sc(format!("/playlists?q={enc}&limit=8&linked_partitioning=true")),
         async { core::youtube::search_artists(q).await.unwrap_or_default() }, async { core::youtube::search_playlists(q).await.unwrap_or_default() },
+        async { if dz_on { core::catalog::deezer(&dz_path).await.unwrap_or_default() } else { Value::Null } },
     );
     let img_of = |v: &Value| v["images"].as_array().and_then(|i| i.get(1).or(i.first())).and_then(|i| i["url"].as_str()).unwrap_or("").to_string();
-    // artists: the same name on several platforms is one
-    let mut artists: Vec<Found> = Vec::new();
-    let mut put = |name: &str, img: String, sc: Option<u64>, sp: Option<String>, yt: Option<String>| {
-        let k = name_key(name);
+    // artists: one per artist however their name is written, whichever platforms they're on (as the
+    // web app's searchArtists): written as their most followed profile writes it, a real picture first
+    struct A { name: String, img: String, sc: Option<u64>, sp: Option<String>, yt: Option<String>, followers: u64, best: i64, order: usize }
+    let mut by: Vec<(String, A)> = Vec::new();
+    let mut put = |name: &str, img: String, followers: u64, sc: Option<u64>, sp: Option<String>, yt: Option<String>| {
+        let k = core::ranking::artist_key(name);
         if k.is_empty() { return; }
-        match artists.iter_mut().find(|a| matches!(a, Found::Artist { name, .. } if name_key(name) == k)) {
-            Some(Found::Artist { img: i, sc: a, sp: b, yt: c, .. }) => {
-                if i.is_empty() { *i = img; }
-                if a.is_none() { *a = sc; }
-                if b.is_none() { *b = sp; }
-                if c.is_none() { *c = yt; }
-            }
-            _ => artists.push(Found::Artist { name: name.to_string(), img, sc, sp, yt }),
-        }
+        let order = by.len();
+        let at = match by.iter().position(|(key, _)| *key == k) {
+            Some(i) => i,
+            None => { by.push((k, A { name: name.to_string(), img: String::new(), sc: None, sp: None, yt: None, followers: 0, best: -1, order })); by.len() - 1 }
+        };
+        let a = &mut by[at].1;
+        a.followers += followers;
+        if followers as i64 > a.best { a.best = followers as i64; a.name = name.to_string(); }
+        if !img.is_empty() && (a.img.is_empty() || (!real_image(&a.img) && real_image(&img))) { a.img = img; }
+        if a.sc.is_none() { a.sc = sc; }
+        if a.sp.is_none() { a.sp = sp; }
+        if a.yt.is_none() { a.yt = yt; }
     };
-    for a in sp_art["artists"]["items"].as_array().cloned().unwrap_or_default().iter().take(6) {
-        put(a["name"].as_str().unwrap_or(""), img_of(a), None, a["id"].as_str().map(String::from), None);
+    let sp_list = sp_art["artists"]["items"].as_array().cloned().unwrap_or_default();
+    let sc_list = items(&sc_users);
+    let dz_list = dz_art["data"].as_array().cloned().unwrap_or_default();
+    for i in 0..10 {
+        if let Some(a) = sp_list.get(i) { put(a["name"].as_str().unwrap_or(""), img_of(a), a["followers"]["total"].as_u64().unwrap_or(0), None, a["id"].as_str().map(String::from), None); }
+        if let Some(u) = sc_list.get(i) { put(u["username"].as_str().unwrap_or(""), u["avatar_url"].as_str().unwrap_or("").replace("-large", "-t200x200"), u["followers_count"].as_u64().unwrap_or(0), u["id"].as_u64(), None, None); }
+        if let Some(a) = yt_art.get(i) { put(&a.name, a.thumb.clone(), count_of(&a.subscribers), None, None, Some(a.id.clone())); }
+        if let Some(a) = dz_list.get(i) { put(a["name"].as_str().unwrap_or(""), a["picture_big"].as_str().unwrap_or("").to_string(), a["nb_fan"].as_u64().unwrap_or(0), None, None, None); }
     }
-    for u in items(&sc_users).iter().take(6) {
-        put(u["username"].as_str().unwrap_or(""), u["avatar_url"].as_str().unwrap_or("").replace("-large", "-t200x200"), u["id"].as_u64(), None, None);
-    }
-    for a in yt_art.iter().take(6) {
-        put(&a.name, a.thumb.clone(), None, None, Some(a.id.clone()));
-    }
+    // the one you meant first: the name itself, then one with all the words; then a real picture, then
+    // how many follow them everywhere together, then how many platforms they're on
+    let want = words(q);
+    let asked = want.join(" ");
+    let rank = |a: &A| {
+        let have = words(&a.name);
+        let exact = if have.join(" ") == asked { 2 } else if want.iter().all(|w| have.contains(w)) { 1 } else { 0 };
+        let plats = [a.sc.is_some(), a.sp.is_some(), a.yt.is_some()].iter().filter(|x| **x).count() as f64;
+        (exact, real_image(&a.img) as u8, (1.0 + a.followers as f64).log10() + plats * 0.5)
+    };
+    let mut ranked: Vec<A> = by.into_iter().map(|(_, a)| a).collect();
+    ranked.sort_by(|x, y| { let (a, b) = (rank(x), rank(y)); b.0.cmp(&a.0).then(b.1.cmp(&a.1)).then(b.2.total_cmp(&a.2)).then(x.order.cmp(&y.order)) });
+    // (only those on a platform this app plays from: a Deezer-only artist opens nothing here)
+    let artists: Vec<Found> = ranked.into_iter().filter(|a| a.sc.is_some() || a.sp.is_some() || a.yt.is_some()).take(10)
+        .map(|a| Found::Artist { name: a.name, img: a.img, sc: a.sc, sp: a.sp, yt: a.yt, followers: a.followers }).collect();
     let albums: Vec<Found> = sp_alb["albums"]["items"].as_array().cloned().unwrap_or_default().iter().filter_map(|a| Some(Found::Album {
         plat: "spotify", id: a["id"].as_str()?.to_string(), title: a["name"].as_str().unwrap_or("").to_string(),
         by: a["artists"].as_array().map(|x| x.iter().filter_map(|y| y["name"].as_str()).collect::<Vec<_>>().join(", ")).unwrap_or_default(), img: img_of(a),
@@ -339,7 +366,7 @@ pub fn local_albums(files: &[Track]) -> Vec<Found> {
 /// What's in something a search found: an artist's songs, an album's or a playlist's tracks
 pub async fn found_tracks(f: &Found) -> Vec<Track> {
     match f {
-        Found::Artist { name, sc, sp, yt, img } => {
+        Found::Artist { name, sc, sp, yt, img, .. } => {
             let a = Artist { name: name.clone(), img: img.clone(), sc: *sc, sp: sp.clone() };
             let yt = async {
                 match yt { Some(id) => core::youtube::artist(id).await.map(|p| p.songs.iter().map(Track::youtube).collect()).unwrap_or_default(), None => Vec::new() }
@@ -395,6 +422,29 @@ impl Artist {
     pub fn plats(&self) -> Vec<&'static str> {
         [self.sc.is_some().then_some("soundcloud"), self.sp.is_some().then_some("spotify")].into_iter().flatten().collect()
     }
+}
+
+/// A picture of them, not a platform's stand-in for one (SoundCloud's default avatar)
+fn real_image(url: &str) -> bool {
+    !url.is_empty() && !url.contains("default_avatar") && !url.contains("avatars-default")
+}
+
+/// 1234567 as "1.2M"
+pub fn short_count(n: u64) -> String {
+    let f = n as f64;
+    if f >= 1e9 { format!("{:.1}B", f / 1e9) } else if f >= 1e6 { format!("{:.1}M", f / 1e6) } else if f >= 1e3 { format!("{:.0}K", f / 1e3) } else { n.to_string() }
+}
+
+/// "1.2M subscribers" as a number
+fn count_of(s: &str) -> u64 {
+    let t = s.split_whitespace().next().unwrap_or("").replace(',', "");
+    let (num, mul) = match t.chars().last() {
+        Some('K') | Some('k') => (&t[..t.len() - 1], 1e3),
+        Some('M') | Some('m') => (&t[..t.len() - 1], 1e6),
+        Some('B') | Some('b') => (&t[..t.len() - 1], 1e9),
+        _ => (t.as_str(), 1.0),
+    };
+    num.parse::<f64>().map(|n| (n * mul) as u64).unwrap_or(0)
 }
 
 fn name_key(s: &str) -> String {

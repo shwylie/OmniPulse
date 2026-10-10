@@ -498,10 +498,34 @@ fn open_search(shared: &Shared, q: String) {
     }
     show_tracks(shared, "search", &format!("Results for \"{q}\""), "Searching...".into(), Vec::new(), true);
     search_shelves(shared, q.clone());
-    load_into(shared, "search", format!("Results for \"{q}\""), async move {
+    // the plugins asked at once too; their results (slower: the Internet Archive) join once they're in,
+    // ranked with the rest
+    let (rt, weak) = { let a = shared.borrow(); (a.rt.clone(), a.ui.clone()) };
+    let token = { let mut a = shared.borrow_mut(); a.token += 1; a.token };
+    SHARED.with(|s| *s.borrow_mut() = Some(shared.clone()));
+    rt.spawn(async move {
+        let q2 = q.clone();
+        let late = tokio::spawn(async move { sources::search_plugins(&q2).await });
         let t = sources::search(&q).await;
-        let sub = if t.is_empty() { "Nothing found.".into() } else { plural(t.len(), "track", "tracks") + ", best match first." };
-        (t, sub)
+        let title = format!("Results for \"{q}\"");
+        let sub = if t.is_empty() { "Nothing found.".to_string() } else { plural(t.len(), "track", "tracks") + ", best match first." };
+        let _ = weak.upgrade_in_event_loop(move |_| SHARED.with(|s| {
+            let Some(shared) = s.borrow().clone() else { return };
+            if shared.borrow().token != token { return; }
+            show_tracks(&shared, "search", &title, sub, t, true);
+        }));
+        let more = late.await.unwrap_or_default();
+        if more.is_empty() { return; }
+        let _ = weak.upgrade_in_event_loop(move |ui| SHARED.with(|s| {
+            let Some(shared) = s.borrow().clone() else { return };
+            let mut a = shared.borrow_mut();
+            if a.token != token || a.page != "search" { return; }
+            let mut all = std::mem::take(&mut a.page_all);
+            all.extend(more);
+            a.page_all = sources::once_each(sources::rank(&q, all));
+            ui.set_page_sub((plural(a.page_all.len(), "track", "tracks") + ", best match first.").into());
+            apply_filter(&mut a);
+        }));
     });
 }
 
