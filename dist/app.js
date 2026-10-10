@@ -471,7 +471,7 @@ function renderHero() {
     sub = "Starred tracks from every platform, kept on this PC.";
   } else if (v === "discover") {
     title = "Discover";
-    sub = "Mixes and stations made from what you like and play.";
+    sub = "Mixes and stations made from what you typically like to listen to.";
   } else if (v === "streamer") {
     title = "Streamer Mode";
     sub = "Only music that's safe on stream: openly licensed, or by artists and labels cleared for streaming. Autoplay adds from these collections too.";
