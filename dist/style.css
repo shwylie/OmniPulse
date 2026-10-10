@@ -1786,14 +1786,13 @@ body.streamSafe #navSets, body.streamSafe #navArtists, body.streamSafe #plSectio
 .likesPrompt button { flex: none; }
 .tasteChips { display: flex; flex-wrap: wrap; gap: 8px; margin: 14px 0 6px; }
 .tasteDlg .sheet { max-width: 560px; }
-/* A track's platform logo stays out of the way: in a list or the queue it shows on the row you're on
+/* A track's platform logo stays out of the way: in a list it shows on the row (the queue always shows it) you're on
    (hovered, picked or focused); on the player bar and in Now Playing, when you point at its place.
    (Its space is kept, so nothing moves, and pointing at the empty spot brings it back: its slot has no box of
    its own, so it's the icon itself that's pointed at.) The OBS
    widget and chat's request replies are drawn elsewhere and keep theirs. */
-#list li .plat.platBig, .qRow .plat, #nowPlat .plat, #npPlat .plat { opacity: 0; transition: opacity .15s; }
+#list li .plat.platBig, #nowPlat .plat, #npPlat .plat { opacity: 0; transition: opacity .15s; }
 #list li:hover .plat.platBig, #list li.picked .plat.platBig, #list li:focus-within .plat.platBig,
-.qRow:hover .plat, .qRow:focus-within .plat,
 #nowPlat .plat:hover, #npPlat .plat:hover, #nowPlat .plat:focus-visible, #npPlat .plat:focus-visible { opacity: 1; }
 .subGroups { max-height: 56vh; overflow-y: auto; margin: 10px 0 6px; padding-right: 4px; }
 .subGroup h3 { margin: 12px 0 0; font-size: 13px; color: var(--muted); font-weight: 600; }
