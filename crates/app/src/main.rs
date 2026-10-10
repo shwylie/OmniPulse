@@ -5,6 +5,7 @@
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod offset;
 mod plugrun;
 mod desktop;
 mod integrations;
@@ -1689,7 +1690,7 @@ fn song_request(shared: &Shared, id: u64, q: String, user: String) {
 /// The servers the web app's settings have on: the widget, the Stream Deck's remote, chat requests
 // ---------- Settings: the switches beyond Look ----------
 // (section, label, note, key, on unless switched off)
-const SET_ROWS: [(&str, &str, &str, &str, bool); 16] = [
+const SET_ROWS: [(&str, &str, &str, &str, bool); 17] = [
     ("Library", "Sets & Podcasts in the Queue", "Lists and autoplay include anything over 15 minutes. Off: only when you pick one.", "queueSets", false),
     ("Library", "Autoplay", "Plays similar tracks when the queue runs out.", "autoplay", true),
     ("Library", "Favourites Page", "Your starred tracks on a page of their own, in the sidebar. The stars stay either way.", "favPage", true),
@@ -1705,6 +1706,7 @@ const SET_ROWS: [(&str, &str, &str, &str, bool); 16] = [
     ("Streaming", "Stream Widget", "A now-playing card for OBS, with alerts.", "widget", false),
     ("Streaming", "Song Requests", "Chat asks for songs through your bot.", "req", false),
     ("Streaming", "Limit Requests", "The most waiting, and the most per viewer. Off: chat can request as many songs as it likes.", "reqLimits", true),
+    ("Streaming", "OmniPulse Offset", "Your music a second time, as its own app (\"OmniPulse Offset\"), to send to a stream mix only. Its offset and volume are the web app's (Settings > Streaming) for now.", "out2On", false),
     ("Streaming", "Stream Deck & Remote", "Control the app from a Stream Deck or another device.", "remoteOn", false),
 ];
 
@@ -1759,6 +1761,17 @@ fn section_flip(shared: &Shared, title: &str) {
 }
 
 /// A switch in Settings: kept with this app's settings, and done straight away
+/// OmniPulse Offset started, changed or stopped as its settings say (crate::offset)
+fn offset_apply(shared: &Shared) {
+    let (engine, prefs) = { let a = shared.borrow(); (a.engine.clone(), a.web.prefs.clone()) };
+    let note = match offset::apply(&engine, &prefs) {
+        Ok(d) if d.is_empty() => return,
+        Ok(d) => format!("OmniPulse Offset is playing on {d}."),
+        Err(e) => e,
+    };
+    if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_status(note.into()); }
+}
+
 /// A plugin: on unless switched off (the web app's prefs.plugOn_<id>)
 fn plugin_on(prefs: &serde_json::Value, id: &str) -> bool {
     prefs[format!("plugOn_{id}")].as_bool() != Some(false)
@@ -1830,6 +1843,7 @@ fn set_toggle(shared: &Shared, key: &str) {
             }
             if matches!(key, "widget" | "req" | "remoteOn") && on { outside_start(shared); }
             if key == "mbOn" { go_plus_set(&shared.borrow().web.prefs); }
+            if key == "out2On" { offset_apply(shared); }
             // Listen Along & Jams off: out of any room, and the Jam button goes
             if key == "jamsOn" {
                 if !on { ASK.with(|x| x.borrow_mut().take()); room_end(true); push_out(shared, true); }
@@ -3374,6 +3388,8 @@ fn main() -> Result<(), slint::PlatformError> {
     SHARED.with(|s| *s.borrow_mut() = Some(shared.clone()));
     // the plugins that are on, each started on its own thread
     plugins_start(&shared);
+    // OmniPulse Offset, if it's on (not in the self-test: it would play)
+    if std::env::var_os("OMNIPULSE_SELFTEST").is_none() { offset_apply(&shared); }
     ui.set_page_sub("Loading your Library...".into());
     restore_session(&shared);
     apply_look(&shared);

@@ -8,7 +8,7 @@ pub mod push;
 pub mod source;
 pub mod ts;
 
-pub use engine::{render, Engine, Event};
+pub use engine::{render, Engine, Event, Tap};
 pub use hls::HlsSource;
 pub use http::open_url;
 pub use push::{PushFeed, PushSource};

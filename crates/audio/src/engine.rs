@@ -154,7 +154,14 @@ struct Shared {
     fade_target: AtomicU32,
     fade_step: AtomicU32,
     fade_from: AtomicU32,
+    /// the sound before the volume (stereo, interleaved), for a second output (OmniPulse Offset)
+    tap: Mutex<Option<Tap>>,
+    /// the main output held back by this many frames (a second output that has to be earlier)
+    main_delay: AtomicU32,
 }
+
+/// Gets the sound as it plays (stereo, interleaved, before the volume), at the output's rate
+pub type Tap = Box<dyn FnMut(&[f32]) + Send>;
 
 pub struct Engine {
     shared: Arc<Shared>,
@@ -187,6 +194,8 @@ impl Engine {
             fade_step: AtomicU32::new(1.0f32.to_bits()),
             fade_from: AtomicU32::new(f32::NAN.to_bits()),
             source_done: AtomicBool::new(false),
+            tap: Mutex::new(None),
+            main_delay: AtomicU32::new(0),
         });
         let (cmd, cmd_rx) = mpsc::channel();
         let (ev_tx, ev_rx) = mpsc::channel();
@@ -315,6 +324,17 @@ impl Engine {
     pub fn level(&self) -> (f32, f32) {
         *self.shared.level.lock().unwrap()
     }
+    /// A second output's feed (None: none)
+    pub fn set_tap(&self, tap: Option<Tap>) {
+        *self.shared.tap.lock().unwrap() = tap;
+    }
+
+    /// Holds the main output back (for a second output that has to be heard earlier)
+    pub fn set_main_delay_ms(&self, ms: u32) {
+        let frames = (ms as u64 * self.shared.rate.load(Ordering::Relaxed) as u64 / 1000) as u32;
+        self.shared.main_delay.store(frames, Ordering::Relaxed);
+    }
+
     pub fn output_rate(&self) -> u32 {
         self.shared.rate.load(Ordering::Relaxed)
     }
@@ -344,6 +364,9 @@ fn build_output(name: &str, shared: Arc<Shared>, ev: Sender<Event>) -> Result<(c
     let (ch, rate) = (cfg.channels as usize, cfg.sample_rate.0);
     let mut vol = Smoothed::new(f32_load(&shared.volume), 0.02, rate as f32);
     let mut fade = 1.0f32;
+    // the main output's delay line (empty unless it's held back), and the tap's piece
+    let mut held: VecDeque<(f32, f32)> = VecDeque::new();
+    let mut tapped: Vec<f32> = Vec::new();
     let mut fill = move |out: &mut [f32]| {
         let target = if shared.muted.load(Ordering::Relaxed) { 0.0 } else { f32_load(&shared.volume) };
         vol.set(target);
@@ -356,6 +379,9 @@ fn build_output(name: &str, shared: Arc<Shared>, ev: Sender<Event>) -> Result<(c
         }
         let mut q = shared.queue.lock().unwrap();
         let mut frames = 0u64;
+        let delay = shared.main_delay.load(Ordering::Relaxed) as usize;
+        let tapping = shared.tap.lock().unwrap().is_some();
+        tapped.clear();
         for fr in out.chunks_mut(ch.max(1)) {
             let (l, r) = match (q.pop_front(), q.pop_front()) {
                 (Some(l), Some(r)) => {
@@ -365,7 +391,17 @@ fn build_output(name: &str, shared: Arc<Shared>, ev: Sender<Event>) -> Result<(c
                 _ => (0.0, 0.0),
             };
             if fade < fade_to { fade = (fade + fade_step).min(fade_to); } else if fade > fade_to { fade = (fade - fade_step).max(fade_to); }
-            let g = vol.step() * fade;
+            if tapping { tapped.push(l * fade); tapped.push(r * fade); }
+            // held back: what's heard now is what came `delay` frames ago
+            let (l, r) = if delay == 0 && held.is_empty() {
+                (l, r)
+            } else {
+                held.push_back((l, r));
+                while held.len() > delay + 1 { held.pop_front(); }
+                if held.len() <= delay { (0.0, 0.0) } else { held.pop_front().unwrap_or((0.0, 0.0)) }
+            };
+            let g = vol.step();
+            let (l, r) = (l * fade, r * fade);
             match fr.len() {
                 1 => fr[0] = (l + r) * 0.5 * g,
                 _ => {
@@ -377,6 +413,9 @@ fn build_output(name: &str, shared: Arc<Shared>, ev: Sender<Event>) -> Result<(c
         }
         drop(q);
         shared.played.fetch_add(frames, Ordering::Relaxed);
+        if tapping {
+            if let Some(t) = shared.tap.lock().unwrap().as_mut() { t(&tapped); }
+        }
     };
     let err = move |e: cpal::StreamError| {
         let _ = ev.send(Event::Error(format!("The output device stopped: {e}")));
