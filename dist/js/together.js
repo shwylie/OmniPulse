@@ -288,6 +288,8 @@ function hostSnapshot() {
     playing: nowPlaying(), pos: Math.round(curPosMs()),
     track: t ? snapOf(t) : null,
     next: queue.slice(qi + 1, qi + 21).map(snapOf),
+    // how the host's app plays: listeners use it too while they're in, so they stay in step
+    feel: { fadeOn: !!prefs.fadeOn, fadeMs: Number(prefs.fadeMs) || 3000, skipSilence: Number(prefs.skipSilence) || 0 },
   };
 }
 

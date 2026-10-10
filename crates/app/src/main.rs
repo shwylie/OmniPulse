@@ -1393,7 +1393,7 @@ fn start(shared: &Shared) {
                         let what = sound::loud_source(&t, version.as_ref().map(|v| v.yt.id.as_str()));
                         shared.borrow_mut().cur_loud = what.as_ref().map(|(k, id)| format!("{k}:{id}"));
                         FADE.with(|f| *f.borrow_mut() = (false, String::new()));
-                        match sound::fade_ms(&shared.borrow().web.prefs) {
+                        match fade_now(&shared.borrow()) {
                             Some(ms) => engine.fade(Some(0.0), 1.0, ms),
                             // (fading set or not, a new track comes up over a short moment: never a hard cut)
                             None => engine.fade(Some(0.0), 1.0, 450),
@@ -2656,7 +2656,7 @@ fn fade_and_silences(shared: &Shared, pos: u64, dur: u64) -> bool {
         let a = shared.borrow();
         let Some(t) = a.queue.current() else { return false };
         let an = a.cur_loud.as_ref().and_then(|k| a.analysis.get(k)).cloned();
-        (an, t.key.clone(), sound::fade_ms(&a.web.prefs), sound::skip_silence_ms(&a.web.prefs), a.engine.clone())
+        (an, t.key.clone(), fade_now(&a), sound::skip_silence_ms(&a.web.prefs), a.engine.clone())
     };
     let Some(an) = an else { return false };
     if dur == 0 {
@@ -3231,6 +3231,8 @@ fn host_push(a: &App) {
         "v": 1, "host": my_name(a), "kind": room_kind().unwrap_or_default(),
         "playing": a.loaded && !a.engine.is_paused(), "pos": a.engine.position_ms(),
         "track": cur.map(|t| t.to_snapshot()), "next": next,
+        // how this app plays: listeners use it too while they're in, so they stay in step
+        "feel": { "fadeOn": a.web.prefs["fadeOn"].as_bool() == Some(true), "fadeMs": a.web.prefs["fadeMs"].as_u64().unwrap_or(3000), "skipSilence": a.web.prefs["skipSilence"].as_u64().unwrap_or(8) },
     });
     let _ = tx.send(serde_json::json!({ "type": "state", "state": state }).to_string());
 }
@@ -3464,6 +3466,15 @@ fn listen_needs_version(t: &Track) -> bool {
         track::Src::Plugin(id, _) => plugrun::get(id).is_some(),
     };
     !ok && ytdlp
+}
+
+/// Fade Between Tracks as it's set: listening along, the host's (from their state's "feel")
+fn fade_now(a: &App) -> Option<u64> {
+    let host = LISTEN.with(|l| l.borrow().as_ref().and_then(|l| l.state.as_ref().map(|s| s["feel"].clone()))).filter(|f| f.is_object());
+    match host {
+        Some(f) => sound::fade_ms(&f),
+        None => sound::fade_ms(&a.web.prefs),
+    }
 }
 
 /// A skip by hand (the buttons, media keys, the remote): listening, it goes to the Jam's host

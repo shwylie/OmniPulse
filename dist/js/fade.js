@@ -17,7 +17,11 @@ const fadeState = { out: false, pendingIn: false, forceIn: 0, movedOn: null, wai
 // How long a track fades for: a stand-in's own, the setting's, or not at all
 function fadeMsFor(t) {
   if (t && t.standInFor) return FADE_STANDIN_MS;
-  return prefs.fadeOn ? Math.max(500, Math.min(10000, Number(prefs.fadeMs) || 3000)) : 0;
+  // listening along: the host's fade (Fade Between Tracks as they have it), so both fade alike
+  const host = typeof together !== "undefined" && together.role === "listener" && together.state && together.state.feel;
+  const on = host ? host.fadeOn : prefs.fadeOn;
+  const ms = host ? host.fadeMs : prefs.fadeMs;
+  return on ? Math.max(500, Math.min(10000, Number(ms) || 3000)) : 0;
 }
 
 // Where the track's sound ends: its measured end, if that's before the file's (or its own end time)
