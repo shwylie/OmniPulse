@@ -34,7 +34,8 @@ pub struct Plan {
     pub beatmatched: bool,
     /// the one playing's tempo by the time the next one's beat comes in (1.0: as it is), eased to over
     /// its beatless outro (out_ramp): a tempo too far from the next one's to match on the beat, slowed
-    /// (or sped) into it
+    /// (or sped) into it. The next one goes with it: from the one playing's tempo (`rate`: 1/out_tempo)
+    /// to its own by then (in_ramp), the two at one tempo all through.
     pub out_tempo: f64,
 }
 
@@ -49,10 +50,16 @@ fn ramp_to(a_bpm: f64, b_bpm: f64) -> Option<f64> {
 }
 
 /// The one playing's tempo `p` (0..1) of the way through a mix that slows it to `target`: eased there
-/// (slowly at first, slowly at the last) over its first three quarters, then held, for the next one's beat
+/// (slowly at first, slowly at the last), arriving as the mix ends (the switch-over: the next one's beat)
 pub fn out_ramp(target: f64, p: f64) -> f64 {
-    let q = (p / 0.75).clamp(0.0, 1.0);
+    let q = p.clamp(0.0, 1.0);
     1.0 + (target - 1.0) * q * q * (3.0 - 2.0 * q)
+}
+
+/// The next one's tempo then: the one playing's, from its own start (1/target of its own) to its own
+/// by the end, the two together all through
+pub fn in_ramp(target: f64, p: f64) -> f64 {
+    out_ramp(target, p) / target
 }
 
 /// A key not clear enough isn't shifted for
@@ -249,9 +256,16 @@ pub fn plan_structure(a: &Measured, a_end_ms: u64, now_ms: u64, b: &Measured) ->
     if a_soft >= 2 && at(a_end) >= soonest {
         let n = a_soft.min(8);
         let ms = a_bar * n as f64;
+        // (slowed, or sped, into the next one's tempo over it, if that's not too far: the two at one tempo
+        // all through, each going as many beats, so the next one's from as many of its bars before its
+        // beat as the outro's long, its beat on the switch-over; the mix as long as those bars take, eased)
+        if let Some(target) = ramp_to(a.rhythm.bpm, b.rhythm.bpm) {
+            let ms = a_bar * n as f64 * 2.0 / (1.0 + target);
+            let nb = ((n as f64 * a_bar / (b_bar * target)).round() as usize).min(b_main);
+            return Some(Plan { rate: 1.0 / target, ..soft(at(a_end), ms, b_at(b_main - nb), n as u32, target)? });
+        }
         let nb = ((ms / b_bar).floor() as usize).min(b_main);
-        // (slowed, or sped, into the next one's tempo over it, if that's not too far)
-        return soft(at(a_end), ms, b_at(b_main - nb), n as u32, ramp_to(a.rhythm.bpm, b.rhythm.bpm).unwrap_or(1.0));
+        return soft(at(a_end), ms, b_at(b_main - nb), n as u32, 1.0);
     }
     // the next one's beatless intro, under the one playing's last bars with a beat: its beat comes in
     // as the other's ends
@@ -485,9 +499,16 @@ mod tests {
         // 128 into 110: slowed into it over its outro, eased, held for the next one's beat
         let slower = shaped(m(110.0, 300.0, 0, 0.5), &song(&[(24, -12.0, false), (64, -9.0, true)]));
         let q = plan_structure(&a, end, 10_000, &slower).expect("a plan");
-        assert!(!q.beatmatched && (q.out_tempo - 110.0 / 128.0).abs() < 1e-9, "{}", q.out_tempo);
-        assert!((out_ramp(q.out_tempo, 0.0) - 1.0).abs() < 1e-9 && (out_ramp(q.out_tempo, 0.75) - q.out_tempo).abs() < 1e-9 && (out_ramp(q.out_tempo, 1.0) - q.out_tempo).abs() < 1e-9);
-        assert!(out_ramp(q.out_tempo, 0.1) > 0.98);
+        let target = 110.0 / 128.0;
+        assert!(!q.beatmatched && (q.out_tempo - target).abs() < 1e-9, "{}", q.out_tempo);
+        // the next one from the one playing's tempo (128: its 1.16x), both arriving at 110 on the switch-over
+        assert!((q.rate - 128.0 / 110.0).abs() < 1e-9 && (in_ramp(target, 0.0) - q.rate).abs() < 1e-9 && (in_ramp(target, 1.0) - 1.0).abs() < 1e-9);
+        assert!((out_ramp(target, 0.0) - 1.0).abs() < 1e-9 && (out_ramp(target, 1.0) - target).abs() < 1e-9 && out_ramp(target, 0.1) > 0.98);
+        for x in [0.2, 0.5, 0.8] { assert!((out_ramp(target, x) * 128.0 - in_ramp(target, x) * 110.0).abs() < 1e-9, "one tempo at {x}"); }
+        // its 8-bar outro, at the eased tempo (128 to 110: 16.1 s), and the next one from 8 bars before its beat
+        let bar_110: f64 = 4.0 * 60_000.0 / 110.0;
+        assert_eq!(q.ms, (bar * 8.0 * 2.0 / (1.0 + target)).round() as u64);
+        assert_eq!(q.start_ms, (300.0 + 16.0 * bar_110).round() as u64);
         assert_eq!(p.at_ms, (500.0 + 64.0 * bar).round() as u64);
         assert_eq!(p.start_ms, (300.0 + 14.0 * fast_bar).round() as u64);
         // no outro without a beat: the next one's beatless intro under the one playing's last bars, its
@@ -551,10 +572,15 @@ fn mix_demo() {
     println!("{p:?}");
     let lead = 12_000;
     sa.seek(p.at_ms - lead).unwrap();
-    let mut sb = omnipulse_audio::Stretched::shifted(sb, omnipulse_audio::Tempo::new(p.rate), p.semitones).unwrap();
+    let b_tempo = omnipulse_audio::Tempo::new(p.rate);
+    let mut sb = omnipulse_audio::Stretched::shifted(sb, b_tempo.clone(), p.semitones).unwrap();
     omnipulse_audio::Source::seek(&mut sb, p.start_ms).unwrap();
     let rate = 44_100;
-    let out = { let target = p.out_tempo; let ramp = move |x: f64| out_ramp(target, x); omnipulse_audio::engine::render_mix_ramped(sa, Box::new(sb), dbs, rate, lead as f32 / 1000.0, p.ms, Some(handoff(&p, filter)), (target != 1.0).then_some(&ramp as &dyn Fn(f64) -> f64), lead as f32 / 1000.0 + 20.0 + p.ms as f32 / 1000.0).unwrap() };
+    let out = {
+        let (target, a_tempo, b_tempo) = (p.out_tempo, omnipulse_audio::Tempo::new(1.0), b_tempo.clone());
+        let ramp = { let a_tempo = a_tempo.clone(); move |x: f64| { a_tempo.set(out_ramp(target, x)); b_tempo.set(in_ramp(target, x)); } };
+        omnipulse_audio::engine::render_mix_ramped(sa, Box::new(sb), dbs, rate, lead as f32 / 1000.0, p.ms, Some(handoff(&p, filter)), (target != 1.0).then_some((&a_tempo, &ramp as &dyn Fn(f64))), lead as f32 / 1000.0 + 20.0 + p.ms as f32 / 1000.0).unwrap()
+    };
     // how clearly one beat holds through the blend (the two lined up: one; off: two fighting), against the
     // same blend with the one coming in half a beat late
     let held = |out: &[f32]| {

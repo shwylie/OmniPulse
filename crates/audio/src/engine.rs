@@ -1213,10 +1213,10 @@ pub fn render_mix(a: Box<dyn Source>, b: Box<dyn Source>, dbs: (f32, f32), out_r
     render_mix_ramped(a, b, dbs, out_rate, a_secs, ms, handoff, None, max_secs)
 }
 
-/// The same, the one going out stretched from the mix's start, its tempo `ramp`'s of how far in the
-/// mix is (0..1), as the app moves it
+/// The same, the one going out stretched from the mix's start by `ramp`'s tempo handle, and its
+/// function told how far in the mix is (0..1) as it goes, to move the tempos (as the app does)
 #[allow(clippy::too_many_arguments)]
-pub fn render_mix_ramped(a: Box<dyn Source>, b: Box<dyn Source>, dbs: (f32, f32), out_rate: u32, a_secs: f32, ms: u64, handoff: Option<Handoff>, ramp: Option<&dyn Fn(f64) -> f64>, max_secs: f32) -> Result<Vec<f32>, String> {
+pub fn render_mix_ramped(a: Box<dyn Source>, b: Box<dyn Source>, dbs: (f32, f32), out_rate: u32, a_secs: f32, ms: u64, handoff: Option<Handoff>, ramp: Option<(&crate::stretch::Tempo, &dyn Fn(f64))>, max_secs: f32) -> Result<Vec<f32>, String> {
     let mut pa = Pipeline::new(a, out_rate);
     pa.chain.set_match_db(dbs.0, true);
     let mut out = Vec::new();
@@ -1228,11 +1228,10 @@ pub fn render_mix_ramped(a: Box<dyn Source>, b: Box<dyn Source>, dbs: (f32, f32)
     let mut pb = Pipeline::new(b, out_rate);
     pb.chain.set_match_db(dbs.1, true);
     let mut f = Fading::new(pb, ms * out_rate as u64 / 1000, handoff, out_rate);
-    let tempo = crate::stretch::Tempo::new(1.0);
-    if ramp.is_some() { pa.stretch(tempo.clone())?; }
+    if let Some((tempo, _)) = ramp { pa.stretch(tempo.clone())?; }
     let mut scratch = Vec::new();
     loop {
-        if let Some(r) = ramp { tempo.set(r(f.done as f64 / f.total as f64)); }
+        if let Some((_, r)) = ramp { r(f.done as f64 / f.total as f64); }
         if f.mix(&mut pa, &mut out, &mut scratch)? { break; }
     }
     out.extend(f.in_buf.iter().copied());

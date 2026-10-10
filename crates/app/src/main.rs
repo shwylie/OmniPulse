@@ -2002,8 +2002,17 @@ fn mix_tick(shared: &Shared, pos: u64, dur: u64) {
         let mut m = m.borrow_mut();
         if let Some(MixPhase::Mixing { plan, tempo, eased_from, ease_ms, out, began }) = m.as_mut() {
             let engine = shared.borrow().engine.clone();
-            // (the one going out slowed into the next one's tempo, as far through as the mix is)
-            if let Some(o) = out { o.set(mix::out_ramp(plan.out_tempo, began.elapsed().as_millis() as f64 / plan.ms.max(1) as f64)); }
+            // (the one going out slowed into the next one's tempo as far through as the mix is, and the next
+            // one with it, from the other's tempo to its own: at its own by the end, nothing to ease back)
+            if let Some(o) = out.clone() {
+                let x = began.elapsed().as_millis() as f64 / plan.ms.max(1) as f64;
+                o.set(mix::out_ramp(plan.out_tempo, x));
+                tempo.set(mix::in_ramp(plan.out_tempo, x));
+                if engine.crossfading() { return true; }
+                tempo.set(1.0);
+                *m = None;
+                return true;
+            }
             if engine.crossfading() { return true; }
             let since = *eased_from.get_or_insert_with(std::time::Instant::now);
             let t = since.elapsed().as_millis() as u64;
