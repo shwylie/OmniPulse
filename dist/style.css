@@ -1749,28 +1749,30 @@ body.streamSafe #navSets, body.streamSafe #navArtists, body.streamSafe #plSectio
 .collabPill { display: inline-flex; align-items: center; gap: 6px; }
 .collabPill svg { width: 16px; height: 16px; fill: currentColor; }
 .collabPill.on { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 50%, transparent); }
-/* the next track being found: a marquee, as Windows Vista's progress bars had it: a soft glow that
-   glides left to right along the bar, over and over (not its progress). The glow has a layer of its
-   own, a little taller than the bar, that fades out towards both ends, so it comes in and goes out
-   smoothly instead of being cut off where the bar ends. */
+/* the next track being found: a marquee, as Windows Vista's progress bars had it: a bright glow that
+   glides left to right along the bar, over and over. It isn't the new track's progress: behind it,
+   the bar still shows how far the song that's playing is (dimmed a little, and not draggable). The
+   glow has a layer of its own, a little taller than the bar, that fades out towards both ends, so
+   it comes in and goes out smoothly instead of being cut off where the bar ends. */
 .seekLoad, .miniLoad {
-  position: absolute; left: 0; right: 0; height: 14px; pointer-events: none; opacity: 0;
+  position: absolute; left: 0; right: 0; height: 16px; pointer-events: none; opacity: 0;
   -webkit-mask-image: linear-gradient(90deg, transparent 0, #000 14%, #000 86%, transparent 100%);
   mask-image: linear-gradient(90deg, transparent 0, #000 14%, #000 86%, transparent 100%);
 }
-.seekLoad { top: 50%; margin-top: -7px; }
-.miniLoad { top: 0.5px; }   /* (centred on the 3px track, which sits 6px down) */
+.seekLoad { top: 50%; margin-top: -8px; }
+.miniLoad { top: -0.5px; }   /* (centred on the 3px track, which sits 6px down) */
 .seekLoad::before, .miniLoad::before {
-  content: ""; position: absolute; top: 50%; height: 10px; margin-top: -5px; width: 22%; left: -22%;
+  content: ""; position: absolute; top: 50%; height: 12px; margin-top: -6px; width: 24%; left: -24%;
   border-radius: 50%;
-  background: radial-gradient(ellipse at center, color-mix(in srgb, var(--accent) 35%, #fff) 0%, var(--accent) 30%, color-mix(in srgb, var(--accent) 45%, transparent) 55%, transparent 72%);
-  filter: blur(0.6px);
+  background: radial-gradient(ellipse at center, #fff 0%, color-mix(in srgb, var(--accent) 30%, #fff) 22%, color-mix(in srgb, var(--accent) 80%, #fff) 42%, color-mix(in srgb, var(--accent) 55%, transparent) 62%, transparent 76%);
+  filter: brightness(1.25) drop-shadow(0 0 3px color-mix(in srgb, var(--accent) 70%, #fff));
 }
 .seekRow.loading .seekLoad, .miniProg.loading .miniLoad { opacity: 1; transition: opacity .2s; }
 .seekRow.loading .seekLoad::before, .miniProg.loading .miniLoad::before { animation: seekMarquee 1.6s cubic-bezier(.45, .05, .55, .95) infinite; }
-/* (only the glow shows while it glides: no fill, no knob, just the empty bar under it) */
-.seekRow.loading input { visibility: hidden; }
-.seekRow.loading .seekWrap { background: linear-gradient(color-mix(in srgb, var(--text) 16%, transparent), color-mix(in srgb, var(--text) 16%, transparent)) center / 100% 4px no-repeat; border-radius: 4px; }
-.miniProg.loading #miniBar, .miniProg.loading .miniKnob, .miniProg.loading .miniTime { opacity: 0; }
-@keyframes seekMarquee { from { left: -22%; } to { left: 100%; } }
+/* (behind it, the playing song's progress, a little dimmed; nothing to drag while it's loading) */
+.seekRow.loading input { opacity: .6; pointer-events: none; }
+.miniProg.loading { pointer-events: none; }
+.miniProg.loading #miniBar { opacity: .6; }
+.miniProg.loading .miniKnob, .miniProg.loading .miniTime { opacity: 0; }
+@keyframes seekMarquee { from { left: -24%; } to { left: 100%; } }
 @media (prefers-reduced-motion: reduce) { .seekRow.loading .seekLoad::before, .miniProg.loading .miniLoad::before { animation-duration: 3.2s; } }

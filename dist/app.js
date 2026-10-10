@@ -171,8 +171,7 @@ const ICON_CLOSE = "M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.4
 
 // The seek bar, and the thin bar that stands in for it when the window is narrow
 function paintProgress(frac) {
-  // (the next track being found: no progress at all, only the marquee)
-  const f = switching ? 0 : Math.max(0, Math.min(1, frac || 0));
+  const f = Math.max(0, Math.min(1, frac || 0));
   $("seek").value = String(Math.round(f * 1000));
   if (miniDrag === null) {
     $("miniBar").style.width = (f * 100).toFixed(2) + "%";
@@ -1640,7 +1639,6 @@ let playGen = 0;        // which playCurrent is the latest
 
 function loadingBar(on) {
   document.querySelectorAll(".seekRow, .miniProg").forEach((n) => n.classList.toggle("loading", !!on));
-  if (on) { paintProgress(0); $("cur").textContent = fmt(0); $("miniTime").textContent = ""; }
 }
 
 // The handover: the old one fades out (quickly), and the new one starts once it's quiet
@@ -2028,11 +2026,13 @@ audio.addEventListener("error", () => {
 });
 // positions and lengths as shown: within the part of the track that plays (js/trims.js)
 audio.addEventListener("timeupdate", () => {
-  if (switching) return;   // (still the track before, while this one's found)
-  const t = curTrack();
+  // (while the next track is found, this is still the one before: its progress shows, behind the marquee)
+  const t = switching ? switching.prev : curTrack();
+  if (!t) return;
   $("cur").textContent = fmt(viewPos(t, audio.currentTime * 1000));
   const d = viewDur(t, curDurMs());
   if (d) paintProgress(viewPos(t, audio.currentTime * 1000) / d);
+  if (switching && d) $("dur").textContent = fmt(d);   // (its own length too, until the next one starts)
 });
 audio.addEventListener("loadedmetadata", () => {
   if (isFinite(audio.duration) && audio.duration) $("dur").textContent = fmt(viewDur(curTrack(), audio.duration * 1000));   // streams of unknown length report Infinity
