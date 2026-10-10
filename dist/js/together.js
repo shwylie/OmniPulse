@@ -78,13 +78,18 @@ function paintTogether() {
   jamBtn.classList.toggle("live", live);
   jamBtn.classList.toggle("pendingAsk", !!(waitingHere || asking));
   if (hostingJam && $("jamDialog").open) { $("jamMembers").textContent = together.members.length ? together.members.join(", ") : "Nobody has joined yet."; jamWaitPaint(); }
-  $("togetherBar").hidden = !listening;
+  // the queue panel's bar: the room you're in, and Leave; or the Jam you're hosting, and End Jam
+  $("togetherBar").hidden = !listening && !hostingJam;
+  $("togetherLeave").textContent = listening ? "Leave" : "End Jam";
+  $("togetherLeave").title = listening ? "Leave and go back to your own music" : "End the Jam: everyone goes back to their own music";
   // the queue is the host's: nothing to clear, no autoplay of your own
   $("clearQueue").hidden = listening;
   document.querySelectorAll(".qAutoHead").forEach((x) => { x.hidden = listening; });
   if (listening) {
     $("togetherText").textContent = (together.kind === "jam" ? "In " + together.hostName + "'s Jam" : "Listening along with " + together.hostName) +
       (together.members.length > 1 ? " · " + together.members.length + " listening" : "");
+  } else if (hostingJam) {
+    $("togetherText").textContent = "Your Jam" + (together.members.length ? " · " + together.members.length + " listening" : ": nobody has joined yet");
   }
 }
 
