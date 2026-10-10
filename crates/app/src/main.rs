@@ -1923,9 +1923,10 @@ enum MixPhase {
     /// the next one (its key) being opened
     Opening(String),
     /// handed to the engine, waiting for its moment
-    Waiting { key: String, plan: mix::Plan, tempo: omnipulse_audio::Tempo, version: Option<versions::Version> },
-    /// coming in (and then easing back to its own tempo)
-    Mixing { plan: mix::Plan, tempo: omnipulse_audio::Tempo, eased_from: Option<std::time::Instant>, ease_ms: u64 },
+    /// (the one playing's tempo, when the mix slows it into the next one's)
+    Waiting { key: String, plan: mix::Plan, tempo: omnipulse_audio::Tempo, version: Option<versions::Version>, out: Option<omnipulse_audio::Tempo> },
+    /// coming in (and then easing back to its own tempo); the one going out slowed as it goes, if it is
+    Mixing { plan: mix::Plan, tempo: omnipulse_audio::Tempo, eased_from: Option<std::time::Instant>, ease_ms: u64, out: Option<omnipulse_audio::Tempo>, began: std::time::Instant },
 }
 
 thread_local! {
@@ -1999,8 +2000,10 @@ fn mix_tick(shared: &Shared, pos: u64, dur: u64) {
     // coming in: once the crossfade's over, back to its own tempo over a few beats
     let easing = MIX.with(|m| {
         let mut m = m.borrow_mut();
-        if let Some(MixPhase::Mixing { plan, tempo, eased_from, ease_ms }) = m.as_mut() {
+        if let Some(MixPhase::Mixing { plan, tempo, eased_from, ease_ms, out, began }) = m.as_mut() {
             let engine = shared.borrow().engine.clone();
+            // (the one going out slowed into the next one's tempo, as far through as the mix is)
+            if let Some(o) = out { o.set(mix::out_ramp(plan.out_tempo, began.elapsed().as_millis() as f64 / plan.ms.max(1) as f64)); }
             if engine.crossfading() { return true; }
             let since = *eased_from.get_or_insert_with(std::time::Instant::now);
             let t = since.elapsed().as_millis() as u64;
@@ -2072,8 +2075,11 @@ fn mix_tick(shared: &Shared, pos: u64, dur: u64) {
                     let what = sound::loud_source(&next, version.as_ref().map(|v| v.yt.id.as_str()));
                     let known = what.as_ref().and_then(|(s, id)| shared.borrow().loud.get(&format!("{s}:{id}")).copied());
                     let db = sound::loud_db(&prefs, &next, known);
+                    // (slowed into the next one's tempo: from here, the one playing goes through the stretch, as it was until the mix)
+                    let out = (plan.out_tempo != 1.0).then(|| omnipulse_audio::Tempo::new(1.0));
+                    if let Some(o) = &out { shared.borrow().engine.stretch_playing(o.clone()); }
                     shared.borrow().engine.mix_at(src, db, plan.at_ms, plan.ms, Some(mix::handoff(&plan, set_row_on(&prefs, "mixBands", false))));
-                    MIX.with(|m| *m.borrow_mut() = Some(MixPhase::Waiting { key: next.key.clone(), plan, tempo, version }));
+                    MIX.with(|m| *m.borrow_mut() = Some(MixPhase::Waiting { key: next.key.clone(), plan, tempo, version, out }));
                 }
                 // (it couldn't be got ready: the usual way, then)
                 Err(_) => MIX.with(|m| *m.borrow_mut() = None),
@@ -2084,12 +2090,12 @@ fn mix_tick(shared: &Shared, pos: u64, dur: u64) {
 
 /// A mix's moment came: the next track is coming in (the queue moves on, without loading it again)
 fn mix_started(shared: &Shared) {
-    let Some(MixPhase::Waiting { key, plan, tempo, version }) = MIX.with(|m| m.borrow_mut().take()) else { return };
+    let Some(MixPhase::Waiting { key, plan, tempo, version, out }) = MIX.with(|m| m.borrow_mut().take()) else { return };
     let at = shared.borrow().queue.qi.map(|i| i + 1).filter(|&n| shared.borrow().queue.items.get(n).is_some_and(|q| q.t.key == key));
     let Some(n) = at else { return };
     // (each beat of the one coming in, at its own tempo, for easing back over sixteen of them)
     let ease_ms = omnipulse_core::rhythm::known(&key).map(|m| (16.0 * m.rhythm.period_ms) as u64).unwrap_or(8000);
-    MIX.with(|m| *m.borrow_mut() = Some(MixPhase::Mixing { plan, tempo, eased_from: None, ease_ms }));
+    MIX.with(|m| *m.borrow_mut() = Some(MixPhase::Mixing { plan, tempo, eased_from: None, ease_ms, out, began: std::time::Instant::now() }));
     MIXED_IN.with(|m| *m.borrow_mut() = Some((key, version)));
     shared.borrow_mut().queue.qi = Some(n);
     start(shared);

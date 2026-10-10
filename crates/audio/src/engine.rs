@@ -36,12 +36,93 @@ pub struct Pipeline {
     raw: Vec<f32>,
     pub level: (f32, f32),
     done: bool,
+    /// (as it plays as it is) the last moment of it read, and where its reading is (from where it
+    /// started or was put: frames on from `base_ms`), for a stretch to take over from (Pipeline::stretch)
+    recent: VecDeque<f32>,
+    base_ms: u64,
+    read_frames: u64,
+    /// sound to give before reading on (a stretch's first, crossed over from it as it was)
+    carry: Vec<f32>,
+}
+
+/// How much of the track playing is kept as it plays, for a stretch taking over to start from (its
+/// deck warmed up on it, not heard), and how long it crosses over from it as it was (no click)
+const RECENT_S: f32 = 0.5;
+const TAKEOVER_MS: u64 = 30;
+
+/// A source with a moment of it already read put back in front (for a stretch taking over)
+struct Replay {
+    head: Vec<f32>,
+    inner: Box<dyn Source>,
+}
+
+impl Source for Replay {
+    fn rate(&self) -> u32 { self.inner.rate() }
+    fn duration_ms(&self) -> Option<u64> { self.inner.duration_ms() }
+    fn read(&mut self, out: &mut Vec<f32>) -> Result<bool, String> {
+        if !self.head.is_empty() {
+            out.append(&mut self.head);
+            return Ok(true);
+        }
+        self.inner.read(out)
+    }
+    fn seek(&mut self, ms: u64) -> Result<u64, String> {
+        self.head.clear();
+        self.inner.seek(ms)
+    }
 }
 
 impl Pipeline {
     pub fn new(src: Box<dyn Source>, out_rate: u32) -> Self {
         let resampler = (src.rate() != out_rate).then(|| Resampler::new(src.rate(), out_rate));
-        Self { src, resampler, chain: Chain::new(out_rate as f32), raw: Vec::new(), level: (-180.0, -180.0), done: false }
+        Self { src, resampler, chain: Chain::new(out_rate as f32), raw: Vec::new(), level: (-180.0, -180.0), done: false, recent: VecDeque::new(), base_ms: 0, read_frames: 0, carry: Vec::new() }
+    }
+
+    /// From here on, at a tempo (its pitch kept: crate::stretch), the track playing as it was until now:
+    /// its deck warmed up on the last moment of it (not heard), lined up to the frame on where it is,
+    /// and crossed over to from it as it was over 30 ms, so the change isn't heard. Once only.
+    pub fn stretch(&mut self, tempo: crate::stretch::Tempo) -> Result<(), String> {
+        if self.src.position_ms().is_some() || self.done { return Ok(()); }
+        let rate = self.src.rate();
+        // a moment more of it as it is, to cross over from
+        let want = (TAKEOVER_MS * rate as u64 / 1000) as usize * 2;
+        let mut ahead = std::mem::take(&mut self.carry);
+        while ahead.len() < want {
+            if !self.src.read(&mut ahead)? { break; }
+        }
+        let recent: Vec<f32> = self.recent.drain(..).collect();
+        let back = recent.len() / 2;
+        let now_ms = self.base_ms + self.read_frames * 1000 / rate.max(1) as u64;
+        let start_ms = now_ms.saturating_sub(back as u64 * 1000 / rate.max(1) as u64);
+        let mut head = recent;
+        head.extend_from_slice(&ahead);
+        let old = std::mem::replace(&mut self.src, Box::new(crate::source::Tone::new(rate, 0.0, 0.0, 0.0)));
+        let mut st = match crate::stretch::Stretched::starting(Box::new(Replay { head, inner: old }), tempo, start_ms) {
+            Ok(st) => st,
+            Err(e) => return Err(e),
+        };
+        // warmed up: what it gives before where it is (its own delay, then the moment kept) let go, to the frame
+        let mut out = Vec::new();
+        let mut block = Vec::new();
+        while out.len() < ahead.len().max(2) {
+            let p0 = st.source_frames();
+            block.clear();
+            if !st.read(&mut block)? { break; }
+            let (p1, n) = (st.source_frames(), block.len() / 2);
+            if n == 0 || p1 < back as f64 { continue; }
+            let step = (p1 - p0) / n as f64;
+            let skip = if step > 0.0 { (((back as f64 - p0) / step).ceil().max(0.0) as usize).min(n) } else { 0 };
+            out.extend_from_slice(&block[skip * 2..]);
+        }
+        // crossed over to it from it as it was (the same moment)
+        let m = (ahead.len() / 2).min(out.len() / 2);
+        for i in 0..m {
+            let w = i as f32 / m.max(1) as f32;
+            for c in 0..2 { out[i * 2 + c] = ahead[i * 2 + c] * (1.0 - w) + out[i * 2 + c] * w; }
+        }
+        self.carry = out;
+        self.src = Box::new(st);
+        Ok(())
     }
 
     /// The next piece, appended to `out`; false once there's no more
@@ -50,9 +131,16 @@ impl Pipeline {
             return Ok(false);
         }
         self.raw.clear();
-        let more = self.src.read(&mut self.raw)?;
+        let more = if self.carry.is_empty() { self.src.read(&mut self.raw)? } else { self.raw = std::mem::take(&mut self.carry); true };
         if !self.raw.is_empty() {
             self.level = level(&self.raw);
+        }
+        // (as it is: its last moment kept, and how far it's read, for a stretch to take over)
+        if self.src.position_ms().is_none() {
+            self.read_frames += self.raw.len() as u64 / 2;
+            self.recent.extend(self.raw.iter().copied());
+            let cap = (RECENT_S * self.src.rate() as f32) as usize * 2;
+            if self.recent.len() > cap { let over = self.recent.len() - cap; self.recent.drain(..over); }
         }
         let start = out.len();
         match self.resampler.as_mut() {
@@ -73,6 +161,9 @@ impl Pipeline {
         }
         self.chain.reset();
         self.done = false;
+        (self.base_ms, self.read_frames) = (at, 0);
+        self.recent.clear();
+        self.carry.clear();
         Ok(at)
     }
 
@@ -146,6 +237,8 @@ enum Cmd {
     /// a mix: the next source (at the place it starts from), coming in when the one playing reaches
     /// `at_ms` (sample-exact), over `ms`, handed over as `handoff` says (None: a plain crossfade)
     MixAt { src: Box<dyn Source>, db: f32, at_ms: u64, ms: u64, handoff: Option<Handoff> },
+    /// the track playing at a tempo from here on (its pitch kept), as the handle says
+    StretchPlaying(crate::stretch::Tempo),
     Seek(u64),
     Stop,
     Eq(Vec<f32>),
@@ -316,6 +409,11 @@ impl Engine {
     /// playing reaches `at_ms` (exactly), over `ms`, handed over as `handoff` says
     pub fn mix_at(&self, src: Box<dyn Source>, match_db: f32, at_ms: u64, ms: u64, handoff: Option<Handoff>) {
         let _ = self.cmd.send(Cmd::MixAt { src, db: match_db, at_ms, ms, handoff });
+    }
+    /// The track playing at `tempo` from here on, its pitch kept (a mix slowing it into the next one's
+    /// tempo): it goes on as it was (start the handle at 1.0), then follows the handle
+    pub fn stretch_playing(&self, tempo: crate::stretch::Tempo) {
+        let _ = self.cmd.send(Cmd::StretchPlaying(tempo));
     }
     /// A mix is waiting for its moment, or under way
     pub fn mixing(&self) -> bool {
@@ -953,6 +1051,13 @@ fn decode_loop(shared: Arc<Shared>, cmds: Receiver<Cmd>, ev: Sender<Event>) {
                         w.next.chain.eq.set(&eq);
                     }
                 }
+                Cmd::StretchPlaying(tempo) => {
+                    // (the one playing: going out of a mix, or not yet in one; not one coming in)
+                    if let Some(p) = pipe.as_mut() {
+                        // (it couldn't be: it just goes on as it is, the mix unslowed; not an error to stop it for)
+                        if let Err(e) = p.stretch(tempo) { eprintln!("stretch: {e}"); }
+                    }
+                }
                 Cmd::Match(db, at_once) => {
                     // (a measurement for the one playing: the one coming in, mid-crossfade)
                     match fading.as_mut() {
@@ -1105,6 +1210,13 @@ pub fn render_crossfade(a: Box<dyn Source>, b: Box<dyn Source>, out_rate: u32, a
 /// A mix rendered without a device: as render_crossfade, handed over as `handoff` says, each one
 /// at its own loudness match (`dbs`: the one going out's, the one coming in's), as the player has it
 pub fn render_mix(a: Box<dyn Source>, b: Box<dyn Source>, dbs: (f32, f32), out_rate: u32, a_secs: f32, ms: u64, handoff: Option<Handoff>, max_secs: f32) -> Result<Vec<f32>, String> {
+    render_mix_ramped(a, b, dbs, out_rate, a_secs, ms, handoff, None, max_secs)
+}
+
+/// The same, the one going out stretched from the mix's start, its tempo `ramp`'s of how far in the
+/// mix is (0..1), as the app moves it
+#[allow(clippy::too_many_arguments)]
+pub fn render_mix_ramped(a: Box<dyn Source>, b: Box<dyn Source>, dbs: (f32, f32), out_rate: u32, a_secs: f32, ms: u64, handoff: Option<Handoff>, ramp: Option<&dyn Fn(f64) -> f64>, max_secs: f32) -> Result<Vec<f32>, String> {
     let mut pa = Pipeline::new(a, out_rate);
     pa.chain.set_match_db(dbs.0, true);
     let mut out = Vec::new();
@@ -1116,8 +1228,11 @@ pub fn render_mix(a: Box<dyn Source>, b: Box<dyn Source>, dbs: (f32, f32), out_r
     let mut pb = Pipeline::new(b, out_rate);
     pb.chain.set_match_db(dbs.1, true);
     let mut f = Fading::new(pb, ms * out_rate as u64 / 1000, handoff, out_rate);
+    let tempo = crate::stretch::Tempo::new(1.0);
+    if ramp.is_some() { pa.stretch(tempo.clone())?; }
     let mut scratch = Vec::new();
     loop {
+        if let Some(r) = ramp { tempo.set(r(f.done as f64 / f.total as f64)); }
         if f.mix(&mut pa, &mut out, &mut scratch)? { break; }
     }
     out.extend(f.in_buf.iter().copied());
@@ -1171,6 +1286,39 @@ mod xfade_tests {
         let i = (5.0 * rate as f32) as usize * 2;
         let crossings = out[i..i + 2 * 4410].chunks(2).map(|f| f[0]).collect::<Vec<_>>().windows(2).filter(|w| w[0] < 0.0 && w[1] >= 0.0).count();
         assert!((60..=72).contains(&crossings), "{crossings}");
+    }
+}
+
+#[cfg(test)]
+mod takeover_tests {
+    use super::*;
+    use crate::source::Tone;
+
+    #[test]
+    fn a_stretch_takes_over_unheard_then_slows() {
+        let rate = 44_100u32;
+        let mut p = Pipeline::new(Box::new(Tone::new(rate, 440.0, 0.3, 8.0)), rate);
+        let mut out = Vec::new();
+        while out.len() < rate as usize * 2 * 2 { p.fill(&mut out).unwrap(); }
+        let at = out.len();
+        let tempo = crate::stretch::Tempo::new(1.0);
+        p.stretch(tempo.clone()).unwrap();
+        while out.len() < at + rate as usize * 2 { p.fill(&mut out).unwrap(); }
+        // no click where it took over: no step between samples bigger than a 440 Hz sine's own (with room)
+        let max_step = 0.3 * 2.0 * std::f32::consts::PI * 440.0 / rate as f32;
+        let worst = out[at - 2000..at + 4000].chunks(2).map(|f| f[0]).collect::<Vec<_>>().windows(2).map(|w| (w[1] - w[0]).abs()).fold(0.0f32, f32::max);
+        assert!(worst < max_step * 1.6, "a step of {worst} (a sine's: {max_step})");
+        // and as loud
+        let rms = |x: &[f32]| (x.iter().map(|v| v * v).sum::<f32>() / x.len() as f32).sqrt();
+        assert!((rms(&out[at + 2000..at + 20000]) / rms(&out[at - 20000..at - 2000]) - 1.0).abs() < 0.1);
+        // where it is: where it took over, give or take
+        assert!(p.src_position_ms().is_some_and(|ms| (2900..3100).contains(&ms)), "{:?}", p.src_position_ms());
+        // slowed to 0.8: the rest (5 s of it) takes 6.25 s
+        tempo.set(0.8);
+        let from = out.len();
+        while p.fill(&mut out).unwrap() {}
+        let secs = (out.len() - from) as f64 / 2.0 / rate as f64;
+        assert!((secs - 5.0 / 0.8).abs() < 0.3, "{secs} s");
     }
 }
 

@@ -64,6 +64,18 @@ impl Stretched {
         Self::shifted(inner, tempo, 0)
     }
 
+    /// One taking over from where `inner` is (`start_ms` into the track), not its start
+    pub fn starting(inner: Box<dyn Source>, tempo: Tempo, start_ms: u64) -> Result<Self, String> {
+        let mut s = Self::shifted(inner, tempo, 0)?;
+        s.start_ms = start_ms;
+        Ok(s)
+    }
+
+    /// Where its output is, in frames of what it's been given (to the frame: a takeover lines up on it)
+    pub fn source_frames(&self) -> f64 {
+        self.deck.ctl.source_position()
+    }
+
     /// The same, its key shifted by whole semitones (up or down)
     pub fn shifted(inner: Box<dyn Source>, tempo: Tempo, semitones: i32) -> Result<Self, String> {
         let rate = inner.rate();

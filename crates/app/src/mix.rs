@@ -32,6 +32,27 @@ pub struct Plan {
     pub semitones: i32,
     /// on the beat (false: over the soft part, each at its own tempo)
     pub beatmatched: bool,
+    /// the one playing's tempo by the time the next one's beat comes in (1.0: as it is), eased to over
+    /// its beatless outro (out_ramp): a tempo too far from the next one's to match on the beat, slowed
+    /// (or sped) into it
+    pub out_tempo: f64,
+}
+
+/// How far the one playing is slowed (or sped) into the next one's tempo over its outro, at most
+const MAX_RAMP: f64 = 0.25;
+
+/// The tempo the one playing goes to over its outro to arrive at the next one's (the same tempo, or
+/// half or double time: the nearest), if it's not too far
+fn ramp_to(a_bpm: f64, b_bpm: f64) -> Option<f64> {
+    if a_bpm <= 0.0 || b_bpm <= 0.0 { return None; }
+    [1.0, 2.0, 0.5].iter().map(|m| b_bpm * m / a_bpm).filter(|r| (r - 1.0).abs() <= MAX_RAMP).min_by(|x, y| (x - 1.0).abs().total_cmp(&(y - 1.0).abs()))
+}
+
+/// The one playing's tempo `p` (0..1) of the way through a mix that slows it to `target`: eased there
+/// (slowly at first, slowly at the last) over its first three quarters, then held, for the next one's beat
+pub fn out_ramp(target: f64, p: f64) -> f64 {
+    let q = (p / 0.75).clamp(0.0, 1.0);
+    1.0 + (target - 1.0) * q * q * (3.0 - 2.0 * q)
 }
 
 /// A key not clear enough isn't shifted for
@@ -208,9 +229,10 @@ pub fn plan_structure(a: &Measured, a_end_ms: u64, now_ms: u64, b: &Measured) ->
             bars,
             semitones: key_shift(a, b),
             beatmatched: true,
+            out_tempo: 1.0,
         });
     }
-    let soft = |at_ms: f64, ms: f64, start_ms: f64, bars: u32| Some(Plan {
+    let soft = |at_ms: f64, ms: f64, start_ms: f64, bars: u32, out_tempo: f64| Some(Plan {
         at_ms: at_ms.round() as u64,
         ms: ms.round() as u64,
         swap_ms: (ms / 2.0).round() as u64,
@@ -219,6 +241,7 @@ pub fn plan_structure(a: &Measured, a_end_ms: u64, now_ms: u64, b: &Measured) ->
         bars,
         semitones: 0,
         beatmatched: false,
+        out_tempo,
     });
     // the one playing's beatless outro (what of it is heard), the next one coming in over it: its own
     // beatless intro too, as much as fits, its beat as the blend ends
@@ -227,7 +250,8 @@ pub fn plan_structure(a: &Measured, a_end_ms: u64, now_ms: u64, b: &Measured) ->
         let n = a_soft.min(8);
         let ms = a_bar * n as f64;
         let nb = ((ms / b_bar).floor() as usize).min(b_main);
-        return soft(at(a_end), ms, b_at(b_main - nb), n as u32);
+        // (slowed, or sped, into the next one's tempo over it, if that's not too far)
+        return soft(at(a_end), ms, b_at(b_main - nb), n as u32, ramp_to(a.rhythm.bpm, b.rhythm.bpm).unwrap_or(1.0));
     }
     // the next one's beatless intro, under the one playing's last bars with a beat: its beat comes in
     // as the other's ends
@@ -236,13 +260,13 @@ pub fn plan_structure(a: &Measured, a_end_ms: u64, now_ms: u64, b: &Measured) ->
         let ms = b_bar * nb as f64;
         let end = at(a_end).min(audible);
         if let Some(k) = (0..=a_end).rev().find(|&k| at(k) + ms <= end && at(k) >= soonest) {
-            return soft(at(k), ms, b_at(b_main - nb), nb as u32);
+            return soft(at(k), ms, b_at(b_main - nb), nb as u32, 1.0);
         }
     }
     // neither has one: two bars where the one playing's beat ends, straight into the next one's
     let ms = 2.0 * a_bar;
     let k = (0..=a_end.saturating_sub(2)).rev().find(|&k| at(k) >= soonest && at(k) + ms <= audible)?;
-    soft(at(k), ms, b_at(b_main), 2)
+    soft(at(k), ms, b_at(b_main), 2, 1.0)
 }
 
 /// The plan for mixing `b` in after `a` (`a_end_ms`: where `a`'s sound ends; `now_ms`: where it is),
@@ -272,6 +296,7 @@ pub fn plan(a: &Measured, a_end_ms: u64, now_ms: u64, b: &Measured, bars: u32) -
         bars,
         semitones: key_shift(a, b),
         beatmatched: true,
+        out_tempo: 1.0,
     })
 }
 
@@ -455,6 +480,14 @@ mod tests {
         let p = plan_structure(&a, end, 10_000, &fast).expect("a plan");
         assert!(!p.beatmatched);
         assert_eq!((p.bars, p.rate, p.semitones), (8, 1.0, 0));
+        // (174 is double time of 87: 128 down to it is 32%, too far to slow into)
+        assert_eq!(p.out_tempo, 1.0);
+        // 128 into 110: slowed into it over its outro, eased, held for the next one's beat
+        let slower = shaped(m(110.0, 300.0, 0, 0.5), &song(&[(24, -12.0, false), (64, -9.0, true)]));
+        let q = plan_structure(&a, end, 10_000, &slower).expect("a plan");
+        assert!(!q.beatmatched && (q.out_tempo - 110.0 / 128.0).abs() < 1e-9, "{}", q.out_tempo);
+        assert!((out_ramp(q.out_tempo, 0.0) - 1.0).abs() < 1e-9 && (out_ramp(q.out_tempo, 0.75) - q.out_tempo).abs() < 1e-9 && (out_ramp(q.out_tempo, 1.0) - q.out_tempo).abs() < 1e-9);
+        assert!(out_ramp(q.out_tempo, 0.1) > 0.98);
         assert_eq!(p.at_ms, (500.0 + 64.0 * bar).round() as u64);
         assert_eq!(p.start_ms, (300.0 + 14.0 * fast_bar).round() as u64);
         // no outro without a beat: the next one's beatless intro under the one playing's last bars, its
@@ -521,7 +554,7 @@ fn mix_demo() {
     let mut sb = omnipulse_audio::Stretched::shifted(sb, omnipulse_audio::Tempo::new(p.rate), p.semitones).unwrap();
     omnipulse_audio::Source::seek(&mut sb, p.start_ms).unwrap();
     let rate = 44_100;
-    let out = omnipulse_audio::engine::render_mix(sa, Box::new(sb), dbs, rate, lead as f32 / 1000.0, p.ms, Some(handoff(&p, filter)), lead as f32 / 1000.0 + 20.0 + p.ms as f32 / 1000.0).unwrap();
+    let out = { let target = p.out_tempo; let ramp = move |x: f64| out_ramp(target, x); omnipulse_audio::engine::render_mix_ramped(sa, Box::new(sb), dbs, rate, lead as f32 / 1000.0, p.ms, Some(handoff(&p, filter)), (target != 1.0).then_some(&ramp as &dyn Fn(f64) -> f64), lead as f32 / 1000.0 + 20.0 + p.ms as f32 / 1000.0).unwrap() };
     // how clearly one beat holds through the blend (the two lined up: one; off: two fighting), against the
     // same blend with the one coming in half a beat late
     let held = |out: &[f32]| {
