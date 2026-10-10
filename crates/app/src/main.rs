@@ -2052,7 +2052,7 @@ fn mix_tick(shared: &Shared, pos: u64, dur: u64) {
                     let what = sound::loud_source(&next, version.as_ref().map(|v| v.yt.id.as_str()));
                     let known = what.as_ref().and_then(|(s, id)| shared.borrow().loud.get(&format!("{s}:{id}")).copied());
                     let db = sound::loud_db(&prefs, &next, known);
-                    shared.borrow().engine.mix_at(src, db, plan.at_ms, plan.ms, Some(mix::handoff(&plan)));
+                    shared.borrow().engine.mix_at(src, db, plan.at_ms, plan.ms, Some(mix::handoff(&plan, set_row_on(&prefs, "mixFilter", false))));
                     MIX.with(|m| *m.borrow_mut() = Some(MixPhase::Waiting { key: next.key.clone(), plan, tempo, version }));
                 }
                 // (it couldn't be got ready: the usual way, then)
@@ -2795,10 +2795,11 @@ fn song_request(shared: &Shared, id: u64, q: String, user: String) {
 /// The servers the web app's settings have on: the widget, the Stream Deck's remote, chat requests
 // ---------- Settings: the switches beyond Look ----------
 // (section, label, note, key, on unless switched off)
-const SET_ROWS: [(&str, &str, &str, &str, bool); 20] = [
+const SET_ROWS: [(&str, &str, &str, &str, bool); 21] = [
     ("Library", "Sets & Podcasts in the Queue", "Lists and autoplay include anything over 15 minutes. Off: only when you pick one.", "queueSets", false),
     ("Library", "Autoplay", "Plays similar tracks when the queue runs out.", "autoplay", true),
     ("Library", "Seamless Mix", "Songs with a beat blend into the next on it, as a DJ mixes: at its tempo, on a downbeat, the bass handed over at once. With songs that play from YouTube Music or your files (never Spotify's own playback), once their beat is known.", "mixOn", true),
+    ("Library", "Filter Sweep Transitions", "Seamless Mix hands over through filters instead: the song playing thins out as it goes, and the next comes in thin and opens up on the drop.", "mixFilter", false),
     ("Library", "Skip non-music parts", "What plays from YouTube skips the parts of music videos that aren't music (a skit before the song, an interview after it), as marked on SponsorBlock.", "sbOn", true),
     ("Library", "Favourites Page", "Your starred tracks on a page of their own, in the sidebar. The stars stay either way.", "favPage", true),
     ("Integrations", "SoundCloud", "Its likes, playlists and search.", "scOn", true),
