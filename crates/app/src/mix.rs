@@ -158,19 +158,20 @@ fn phrase_offset(m: &Measured) -> usize {
 const DROP_RISE_DB: f64 = 3.0;
 const DROP_NEAR_DB: f64 = 3.0;
 
-/// A song's drop, if its intro builds to one: the first of its phrases' starts (every 4 bars) in its
-/// first 40% where its next 8 bars are 3 dB louder than its last 8, and within 3 dB of its loudest 8.
-/// None for one that's into it from the start (no such rise).
+/// A song's drop, if its intro builds to one: of its phrases' starts (every 4 bars) in its first 40%
+/// where its next 8 bars are 3 dB louder than its last 8 and within 3 dB of its loudest 8, the one that
+/// rises most and comes nearest its loudest (a build has smaller steps up before it). None for one
+/// that's into it from the start (no such rise).
 fn drop_bar(m: &Measured, off: usize) -> Option<usize> {
     let d = &m.rhythm.bar_db;
     let n = d.len();
     if n < 24 { return None; }
     let mean = |a: usize, b: usize| (a..b).map(|i| d[i].max(-40.0) as f64).sum::<f64>() / (b - a) as f64;
     let loudest = (0..=n - 8).map(|i| mean(i, i + 8)).fold(f64::MIN, f64::max);
-    (8..=(n * 2 / 5).min(n - 8)).filter(|&i| on_phrase(i, off, 4)).find(|&i| {
+    (8..=(n * 2 / 5).min(n - 8)).filter(|&i| on_phrase(i, off, 4)).filter_map(|i| {
         let (after, before) = (mean(i, i + 8), mean(i - 8, i));
-        after - before >= DROP_RISE_DB && loudest - after <= DROP_NEAR_DB
-    })
+        (after - before >= DROP_RISE_DB && loudest - after <= DROP_NEAR_DB).then_some((i, (after - before) - (loudest - after)))
+    }).fold(None, |best: Option<(usize, f64)>, x| if best.is_none_or(|b| x.1 > b.1 + 1e-9) { Some(x) } else { best }).map(|(i, _)| i)
 }
 
 /// Whether bar k starts a phrase (or every `every` bars of one) of a song whose phrases start at `off`
@@ -515,6 +516,9 @@ mod tests {
         // the switch-over on the drop, its first 24 bars cut
         let built = shaped(m(128.0, 300.0, 0, 0.5), &song(&[(8, -16.0, true), (8, -11.0, true), (16, -12.0, true), (48, -7.0, true)]));
         assert_eq!(drop_bar(&built, 0), Some(32));
+        // a smaller step up first (8 bars 3 dB up, still 3 dB under its loudest): not the drop
+        let stepped = shaped(m(128.0, 300.0, 0, 0.5), &song(&[(8, -13.0, true), (8, -10.0, true), (16, -12.0, true), (48, -7.0, true)]));
+        assert_eq!(drop_bar(&stepped, 0), Some(32));
         let p = plan_structure(&a, end, 10_000, &built).expect("a plan");
         assert_eq!(p.start_ms, (300.0 + 24.0 * bar).round() as u64);
         // into it from the start (a few quiet bars, no rise to speak of): no drop, its beat as before
@@ -631,7 +635,7 @@ fn mix_demo() {
         m
     });
     let (a, b) = (whole(&a_id), whole(&b_id));
-    println!("phrases from bar {} of A, {} of B", phrase_offset(&a), phrase_offset(&b));
+    println!("phrases from bar {} of A, {} of B; B's drop {:?}", phrase_offset(&a), phrase_offset(&b), drop_bar(&b, phrase_offset(&b)));
     for (n, m) in [("A", &a), ("B", &b)] {
         println!("{n}: {:.2} BPM, {}, {} beats, bars {:?}", m.rhythm.bpm, m.rhythm.camelot, m.rhythm.beats.len(), m.rhythm.bar_db.iter().zip(&m.rhythm.bar_beat).map(|(d, b)| format!("{}/{:.1}", d.round() as i32, b)).collect::<Vec<_>>());
     }
@@ -717,4 +721,137 @@ fn mix_demo() {
     for s in &out { w.extend_from_slice(&((s.clamp(-1.0, 1.0) * 32767.0) as i16).to_le_bytes()); }
     std::fs::write(&out_path, w).unwrap();
     println!("wrote {out_path}: the mix starts 12 s in (A at {:.1} s of {:.1} s, B from {:.1} s)", p.at_ms as f64 / 1000.0, dur as f64 / 1000.0, p.start_ms as f64 / 1000.0);
+}
+
+/// Where a song's kicks and snares fall in its bars, as tracked (for a downbeat that feels off): each
+/// beat of the bar (and the half beat after it), its kick (lows) and snare (upper mids) at their
+/// strongest within 30 ms, averaged over bars \`OMNIPULSE_PROBE_BARS\` ("24..32")
+/// OMNIPULSE_PROBE_ID=1293532780 cargo test --release -p omnipulse --bin OmniPulse-native phase_probe -- --ignored --nocapture
+#[test]
+#[ignore]
+fn phase_probe() {
+    let id = std::env::var("OMNIPULSE_PROBE_ID").unwrap();
+    let (from, to) = std::env::var("OMNIPULSE_PROBE_BARS").ok().and_then(|r| { let (a, b) = r.split_once("..")?; Some((a.parse::<usize>().ok()?, b.parse::<usize>().ok()?)) }).unwrap_or((24, 32));
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    let m = omnipulse_core::rhythm::known(&format!("full:{id}")).expect("measured whole");
+    let (mono, rate) = rt.block_on(omnipulse_core::loudness::mono_start("soundcloud", &id, 1200.0)).unwrap();
+    // the lows (one-pole at 120 Hz, twice) and the snare band (2-pole high-pass at 1.5 kHz, low-passed at 6)
+    let lp = |x: &[f32], hz: f32| { let a = 1.0 - (-2.0 * std::f32::consts::PI * hz / rate as f32).exp(); let (mut z1, mut z2) = (0.0f32, 0.0f32); x.iter().map(|v| { z1 += a * (v - z1); z2 += a * (z1 - z2); z2 }).collect::<Vec<f32>>() };
+    let low = lp(&mono, 120.0);
+    let l15 = lp(&mono, 1500.0);
+    let l6 = lp(&mono, 6000.0);
+    let mid: Vec<f32> = l6.iter().zip(&l15).map(|(a, b)| a - b).collect();
+    let peak = |e: &[f32], ms: f64| { let c = (ms / 1000.0 * rate as f64) as i64; let w = (0.03 * rate as f64) as i64; (c - w..c + w).filter(|&i| i >= 0 && (i as usize) < e.len()).map(|i| e[i as usize].abs()).fold(0.0f32, f32::max) };
+    let mut table = [[0.0f32; 4]; 8];
+    let beats: Vec<f64> = m.rhythm.beats.iter().map(|b| m.from_ms as f64 + b).collect();
+    for bar in from..to {
+        for ph in 0..4 {
+            let i = m.rhythm.downbeat + bar * 4 + ph;
+            let (Some(&t), Some(&t2)) = (beats.get(i), beats.get(i + 1)) else { continue };
+            let half = (t + t2) / 2.0;
+            table[ph * 2][0] += peak(&low, t);
+            table[ph * 2][1] += peak(&mid, t);
+            table[ph * 2 + 1][0] += peak(&low, half);
+            table[ph * 2 + 1][1] += peak(&mid, half);
+        }
+    }
+    let n = (to - from) as f32;
+    println!("{id}: bars {from}..{to} (downbeat beat {}), kick / snare by where in the bar:", m.rhythm.downbeat);
+    for (i, r) in table.iter().enumerate() {
+        println!("  {}{}  kick {:.3}  snare {:.3}", i / 2 + 1, if i % 2 == 1 { " and" } else { "    " }, r[0] / n, r[1] / n);
+    }
+}
+
+/// Where in each beat a song's hits start, as tracked: its snare band's (and its lows') onsets over bars
+/// \`OMNIPULSE_PROBE_BARS\`, in 16 steps of a beat (0: on the beat, 8: the half beat): a grid that's off
+/// shows its hits a few steps in, all the same way
+#[test]
+#[ignore]
+fn onset_probe() {
+    let id = std::env::var("OMNIPULSE_PROBE_ID").unwrap();
+    let (from, to) = std::env::var("OMNIPULSE_PROBE_BARS").ok().and_then(|r| { let (a, b) = r.split_once("..")?; Some((a.parse::<usize>().ok()?, b.parse::<usize>().ok()?)) }).unwrap_or((24, 32));
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    let m = omnipulse_core::rhythm::known(&format!("full:{id}")).expect("measured whole");
+    let (mono, rate) = rt.block_on(omnipulse_core::loudness::mono_start("soundcloud", &id, 1200.0)).unwrap();
+    let lp = |x: &[f32], hz: f32| { let a = 1.0 - (-2.0 * std::f32::consts::PI * hz / rate as f32).exp(); let (mut z1, mut z2) = (0.0f32, 0.0f32); x.iter().map(|v| { z1 += a * (v - z1); z2 += a * (z1 - z2); z2 }).collect::<Vec<f32>>() };
+    let (l15, l6) = (lp(&mono, 1500.0), lp(&mono, 6000.0));
+    let bands = [("snare", l6.iter().zip(&l15).map(|(a, b)| a - b).collect::<Vec<f32>>()), ("lows", lp(&mono, 120.0))];
+    let beats: Vec<f64> = m.rhythm.beats.iter().map(|b| m.from_ms as f64 + b).collect();
+    for (name, x) in &bands {
+        // its envelope (5 ms), and where it rises (over 10 ms)
+        let hop = (rate as usize) / 1000;
+        let env: Vec<f32> = x.chunks(hop).map(|c| c.iter().map(|v| v * v).sum::<f32>().sqrt()).collect();
+        let rise = |ms: usize| if ms >= 10 && ms < env.len() { (env[ms] - env[ms - 10]).max(0.0) } else { 0.0 };
+        let mut bins = [0.0f32; 16];
+        for i in m.rhythm.downbeat + from * 4..(m.rhythm.downbeat + to * 4).min(beats.len() - 1) {
+            let (t0, t1) = (beats[i], beats[i + 1]);
+            for ms in t0 as usize..t1 as usize {
+                let k = (((ms as f64 - t0) / (t1 - t0)) * 16.0) as usize;
+                bins[k.min(15)] += rise(ms);
+            }
+        }
+        let top = bins.iter().copied().fold(0.0f32, f32::max).max(1e-9);
+        println!("{id} bars {from}..{to} {name:5}: {}", bins.iter().map(|b| format!("{:>3}", (b / top * 99.0).round() as i32)).collect::<Vec<_>>().join(" "));
+    }
+}
+
+/// How far apart the two are as heard in a mix's run-up: each rendered alone, as the mix plays it
+/// (stretched, eased), their hits' rises cross-correlated over ±300 ms: the lag that fits best is how
+/// far the next one is off (positive: late)
+/// OMNIPULSE_MIX_A=.. OMNIPULSE_MIX_B=.. cargo test --release -p omnipulse --bin OmniPulse-native align_probe -- --ignored --nocapture
+#[test]
+#[ignore]
+fn align_probe() {
+    use crate::track::{Src, Track};
+    let (a_id, b_id) = (std::env::var("OMNIPULSE_MIX_A").unwrap(), std::env::var("OMNIPULSE_MIX_B").unwrap());
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    let full = |id: &str| omnipulse_core::rhythm::known(&format!("full:{id}")).expect("measured whole");
+    let (a, b) = (full(&a_id), full(&b_id));
+    let t = |id: &str| Track { src: Src::SoundCloud(id.parse().unwrap()), key: id.to_string(), ..Default::default() };
+    let open = |id: &str| rt.block_on(crate::player::open_source(&t(id), rt.handle().clone())).unwrap();
+    let dur = open(&a_id).duration_ms().unwrap_or(0);
+    let p = plan_structure(&a, dur, 0, &b).expect("a plan");
+    println!("{p:?}");
+    let (rate, lead) = (44_100u32, 4000u64);
+    let silent = || -> Box<dyn omnipulse_audio::Source> { Box::new(omnipulse_audio::Tone::new(rate, 0.0, 0.0, 900.0)) };
+    let render = |with_a: bool| {
+        let mut sa = if with_a { open(&a_id) } else { silent() };
+        sa.seek(p.at_ms - lead).unwrap();
+        let b_tempo = omnipulse_audio::Tempo::new(p.rate);
+        let sb: Box<dyn omnipulse_audio::Source> = if with_a { silent() } else {
+            let mut s = omnipulse_audio::Stretched::shifted(open(&b_id), b_tempo.clone(), p.semitones).unwrap();
+            omnipulse_audio::Source::seek(&mut s, p.start_ms).unwrap();
+            Box::new(s)
+        };
+        let (target, a_tempo) = (p.out_tempo, omnipulse_audio::Tempo::new(1.0));
+        let share = p.ms as f64 / p.ramp_ms.max(1) as f64;
+        let ramp = { let a_tempo = a_tempo.clone(); move |x: f64| { a_tempo.set(out_ramp(target, x * share)); b_tempo.set(in_ramp(target, x * share)); } };
+        // (a plain crossfade: each one whole, at its gain; the gains don't move a hit)
+        omnipulse_audio::engine::render_mix_ramped(sa, sb, (0.0, 0.0), rate, lead as f32 / 1000.0, p.ms, None, (target != 1.0).then_some((&a_tempo, &ramp as &dyn Fn(f64))), lead as f32 / 1000.0 + p.ms as f32 / 1000.0).unwrap()
+    };
+    let (oa, ob) = (render(true), render(false));
+    // each one's rises (1 ms steps), over the run-up but its first second and last half
+    let rises = |x: &[f32]| {
+        let hop = rate as usize / 1000;
+        let env: Vec<f32> = x.chunks(hop * 2).map(|c| c.iter().map(|v| v * v).sum::<f32>().sqrt()).collect();
+        (0..env.len()).map(|i| if i >= 8 { (env[i] - env[i - 8]).max(0.0) } else { 0.0 }).collect::<Vec<f32>>()
+    };
+    let (ra, rb) = (rises(&oa), rises(&ob));
+    let (from, to) = (lead as usize + 1000, lead as usize + p.swap_ms as usize - 500);
+    let corr = |lag: i64| (from..to).map(|i| ra[i] as f64 * rb.get((i as i64 + lag) as usize).copied().unwrap_or(0.0) as f64).sum::<f64>();
+    let mut all: Vec<(i64, f64)> = (-300..=300).map(|l| (l, corr(l))).collect();
+    let zero = corr(0);
+    all.sort_by(|x, y| y.1.total_cmp(&x.1));
+    println!("the run-up ({} s): best fits at lags {:?} (ms: positive, the next one late); at 0: {:.0}% of the best", (to - from) / 1000, all.iter().take(5).map(|(l, c)| format!("{l} ({:.0}%)", c / all[0].1 * 100.0)).collect::<Vec<_>>(), zero / all[0].1 * 100.0);
+}
+
+/// A song measured whole again, with the analysis' debug lines (OMNIPULSE_RHYTHM_DEBUG)
+#[test]
+#[ignore]
+fn rhythm_debug_probe() {
+    let id = std::env::var("OMNIPULSE_PROBE_ID").unwrap();
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    let (mono, rate) = rt.block_on(omnipulse_core::loudness::mono_start("soundcloud", &id, 1200.0)).unwrap();
+    let r = omnipulse_core::rhythm::analyse(&mono, rate).unwrap();
+    println!("{id}: {} BPM, first beat {:.0} ms, downbeat {}", r.bpm, r.beats[0], r.downbeat);
 }

@@ -18,6 +18,8 @@ const RATE: u32 = 22_050;
 const HOP: usize = 110; // ~5 ms
 const WIN: usize = 512; // ~23 ms
 const FPS: f64 = RATE as f64 / HOP as f64;
+/// How much harder a song's bass hits between its tracked beats than on them for them to be its off-beats
+const OFFBEAT_BASS: f64 = 1.1;
 const CHROMA_WIN: usize = 8192;
 const CHROMA_HOP: usize = 2048;
 
@@ -267,6 +269,17 @@ pub fn analyse(mono: &[f32], rate: u32) -> Option<Rhythm> {
     let (period, conf) = tempo(&o);
     let frames = track(&o, period);
     if frames.len() < 4 { return None; }
+    // on the off-beats? (a song whose hats or bass, between its kicks, are its strongest hits: the
+    // tracker can follow those, its beats half a beat out.) Its kicks are where its bass hits hardest:
+    // if that's between the beats tracked, they're moved on half a beat, onto them.
+    let frames = {
+        let at = |e: &[f64], f: usize| { let (a, b) = (f.saturating_sub(2), (f + 2).min(e.len() - 1)); (a..=b).map(|k| e[k]).fold(0.0, f64::max) };
+        let halves: Vec<usize> = frames.windows(2).map(|w| (w[0] + w[1]) / 2).collect();
+        let on: f64 = frames.iter().map(|&f| at(&bass, f)).sum::<f64>() / frames.len() as f64;
+        let off: f64 = halves.iter().map(|&f| at(&bass, f)).sum::<f64>() / halves.len().max(1) as f64;
+        if off > on * OFFBEAT_BASS { halves } else { frames }
+    };
+    if frames.len() < 4 { return None; }
     let beats: Vec<f64> = frames.iter().map(|&f| place(&o, f)).collect();
     // a straight grid through them: least squares of beat time against its number
     let n = beats.len() as f64;
@@ -335,7 +348,8 @@ pub struct Measured {
     pub v: u32,
 }
 
-pub const VERSION: u32 = 1;
+/// (2: beats moved onto the kicks where they were tracked on the off-beats)
+pub const VERSION: u32 = 2;
 
 static STORE: std::sync::Mutex<Option<std::collections::HashMap<String, Measured>>> = std::sync::Mutex::new(None);
 
