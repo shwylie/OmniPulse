@@ -471,7 +471,7 @@ function renderHero() {
     sub = "Starred tracks from every platform, kept on this PC.";
   } else if (v === "discover") {
     title = "Discover";
-    sub = "Mixes and stations made from what you like.";
+    sub = "Mixes and stations made from what you like and play.";
   } else if (v === "streamer") {
     title = "Streamer Mode";
     sub = "Only music that's safe on stream: openly licensed, or by artists and labels cleared for streaming. Autoplay adds from these collections too.";
@@ -496,6 +496,7 @@ function renderHero() {
     $("viewSub").replaceChildren(el("span", "subLead", "Fall in love all over again"),
       el("span", "", " with the likes you haven't heard in a while."));
   }
+  paintLikesPrompt();   // no likes or favourites anywhere yet: asked for some (js/feed.js)
   const isArtist = v === "artist" && !!currentArtist;
   $("playAll").hidden = n === 0;
   $("shuffleAll").hidden = n === 0;
@@ -1551,6 +1552,7 @@ function setHeart(btn, on) {
 }
 
 function refreshLikeUI() {
+  paintLikesPrompt();
   taskbarSync();
   const t = curTrack();
   const lb = $("likeBtn");

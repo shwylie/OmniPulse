@@ -55,10 +55,12 @@ async function dzArtistFor(name) {
   const k = artistKey(name);
   if (!k) return null;
   const saved = dzArtistsLoad()[k];
-  if (saved && Date.now() - saved.at < (saved.id ? 30 : 7) * 86400000) return saved.id ? saved : null;
+  // (v2: picked the most followed of the same name; earlier picks took the first, sometimes a namesake)
+  if (saved && saved.v === 2 && Date.now() - saved.at < (saved.id ? 30 : 7) * 86400000) return saved.id ? saved : null;
   const found = ((await dzGet("/search/artist?limit=5&q=" + encodeURIComponent(name))).data || []);
-  const a = found.find((x) => sameArtist(x.name, name));
-  dzArtists[k] = a ? { id: a.id, name: a.name, img: a.picture_big || a.picture_xl || "", followers: a.nb_fan || 0, url: a.link || "https://www.deezer.com/artist/" + a.id, at: Date.now() } : { id: 0, at: Date.now() };
+  // (several of the same name: the best known, not a namesake with a handful of fans)
+  const a = found.filter((x) => sameArtist(x.name, name)).sort((x, y) => (y.nb_fan || 0) - (x.nb_fan || 0))[0];
+  dzArtists[k] = a ? { v: 2, id: a.id, name: a.name, img: a.picture_big || a.picture_xl || "", followers: a.nb_fan || 0, url: a.link || "https://www.deezer.com/artist/" + a.id, at: Date.now() } : { v: 2, id: 0, at: Date.now() };
   try { localStorage.setItem(DZ_ARTISTS_KEY, JSON.stringify(dzArtists)); } catch (e) {}
   return a ? dzArtists[k] : null;
 }
@@ -105,7 +107,7 @@ async function dzSimilarTracks(name) {
   if (!a) return [];
   const rel = ((await dzGet("/artist/" + a.id + "/related?limit=8")).data || []);
   const lists = await eachFew(shuffleInPlace(rel.slice()).slice(0, 5), async (r) => ((await dzGet("/artist/" + r.id + "/top?limit=6")).data || []).map((x) => dzTrack(x)));
-  return lists.filter(Boolean).flat();
+  return interleave(lists.filter(Boolean));   // (taking turns, not five by one artist in a row)
 }
 
 async function catDiscover(src) {

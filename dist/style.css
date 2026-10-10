@@ -1779,3 +1779,9 @@ body.streamSafe #navSets, body.streamSafe #navArtists, body.streamSafe #plSectio
 @keyframes seekMarquee { from { left: -24%; } to { left: 100%; } }
 @media (prefers-reduced-motion: reduce) { .seekRow.loading .seekLoad::before, .miniProg.loading .miniLoad::before { animation-duration: 3.2s; } }
 .qNote.qAuto { color: var(--accent); }
+.likesPrompt { display: flex; align-items: center; gap: 14px; margin: 4px 0 18px; padding: 14px 16px; border-radius: 12px; background: color-mix(in srgb, var(--accent) 10%, transparent); border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent); }
+.likesPrompt[hidden] { display: none; }
+.likesPrompt > svg { width: 24px; height: 24px; flex: none; fill: var(--accent); }
+.likesPrompt > div { flex: 1; min-width: 0; }
+.likesPrompt .note { margin-top: 2px; }
+.likesPrompt button { flex: none; }

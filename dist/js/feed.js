@@ -23,6 +23,13 @@ function likedSongs() {
   ytLikedTracks().forEach(add);
   return keys;
 }
+// Anything liked or starred, on any platform (your music files don't count: they say nothing about taste)
+const hasLikes = () => favs.length > 0 || [...likeState.values()].some(Boolean) || likedTracks.some(isLikedTrack) || (spLikedCache || []).length > 0 || ytLikedTracks().length > 0;
+// The "Get better recommendations" card on Discover and Rediscover, while there are none
+function paintLikesPrompt() {
+  const v = view === "now" ? back : view;
+  $("likesPrompt").hidden = !["discover", "rediscover"].includes(v) || hasLikes();
+}
 const notLiked = (keys) => (t) => !isLikedTrack(t) && !keys.has(songKey(t));
 
 // ---------- your top artists, from your likes on every platform and what you play ----------
@@ -57,9 +64,47 @@ function feedArtists(plats) {
     .sort((x, y) => y.score - x.score);
 }
 
+// Without SoundCloud likes to go on (no accounts at all, say): the artists you star and play on this
+// PC, most first (a star counts as three plays). One play is enough to start from.
+const HISTORY_MIN = 1;
+
+function historyArtists(plats) {
+  const by = new Map();
+  const add = (name, w, t, art) => {
+    const k = artistKey(name);
+    if (!k || hiddenArtists.has(k) || (t && isMix(t))) return;
+    if (!by.has(k)) by.set(k, { key: k, name, liked: { soundcloud: [], spotify: [], youtube: [] }, known: [], files: [], score: 0, art: "" });
+    const a = by.get(k);
+    a.score += w;
+    if (t) a.known.push(t);
+    if (!a.art) a.art = (t && artUrl(t, "t500x500")) || art || "";
+  };
+  favs.forEach((t) => add(guessNames(t).artist || firstArtist(t), 3, t));
+  if (plats.includes("youtube")) ytLikedTracks().forEach((t) => add(firstArtist(t), 2, t));
+  loadStats().forEach((x) => add(String(x.artist || "").split(",")[0].trim(), 1, null, x.art));
+  const local = plats.includes("local") ? localTracks : [];
+  return [...by.values()]
+    .filter((a) => a.score >= HISTORY_MIN)
+    .map((a) => Object.assign(a, { files: local.filter((t) => artistKey(artistName(t)) === a.key) }))
+    .sort((x, y) => y.score - x.score);
+}
+
+// Popular artists right now (Deezer's chart), as stations: Discover's start before you've played anything
+async function popularArtists() {
+  const d = await dzGet("/chart/0/artists?limit=20");
+  return (d.data || []).filter((x) => x && x.name && !hiddenArtists.has(artistKey(x.name))).map((x) => ({
+    key: artistKey(x.name), name: x.name, liked: { soundcloud: [], spotify: [], youtube: [] }, known: [], files: [], score: 0,
+    art: x.picture_big || x.picture_xl || "", popular: true,
+  }));
+}
+
+const scSeeded = (crew) => crew.some((a) => a.liked.soundcloud.length);
+const useCatalog = (crew, plats) => plats.includes("catalog") && !scSeeded(crew);
+
 // Which platforms a mix of these artists will draw on
 function crewPlats(crew, plats) {
-  const out = ["soundcloud"];
+  const out = scSeeded(crew) ? ["soundcloud"] : [];
+  if (useCatalog(crew, plats)) out.push("deezer");
   if (plats.includes("spotify")) out.push("spotify");
   if (plats.includes("youtube")) out.push("youtube");
   if (crew.some((a) => a.files.length)) out.push("local");
@@ -88,15 +133,23 @@ async function freshFor(crew, plats) {
   const yt = plats.includes("youtube")
     ? ytSearch(crew[0].name).then((found) => (found[0] ? ytRadio(found[0].ytId) : [])).catch(() => [])
     : Promise.resolve([]);
-  const [a, b, c] = await Promise.all([sc, sp, yt]);
+  // Deezer's related artists' best-known songs (played from YouTube Music), for mixes that aren't
+  // seeded by SoundCloud likes
+  const cat = useCatalog(crew, plats)
+    ? Promise.all(crew.slice(0, 3).map((a) => dzSimilarTracks(a.name).catch(() => []))).then((l) => l.flat())
+    : Promise.resolve([]);
+  const [a, b, c, d] = await Promise.all([sc, sp, yt, cat]);
   const fresh = notLiked(likedSongs());
-  return withoutRecent(interleave([shuffledCopy(a), shuffledCopy(b), shuffledCopy(c)]).filter((t) => freshPick(t) && fresh(t)));
+  const known = new Set(crew.map((x) => x.key));
+  // (the crew's own songs come in as the familiar ones, not as new)
+  const others = (t) => !(useCatalog(crew, plats) && known.has(artistKey(firstArtist(t))));
+  return withoutRecent(interleave([shuffledCopy(a), shuffledCopy(b), shuffledCopy(c), shuffledCopy(d)]).filter((t) => freshPick(t) && fresh(t) && others(t)));
 }
 
 // Your Mix: mostly new music in the vein of these artists, with some you like by them (on any
 // platform, and your files) woven in: two new ones for each one you know
 async function buildYourMix(crew, plats) {
-  const familiar = shuffledCopy(crew.flatMap((a) => a.liked.soundcloud.concat(a.liked.spotify, a.liked.youtube, a.files))).slice(0, 12);
+  const familiar = shuffledCopy(crew.flatMap((a) => a.liked.soundcloud.concat(a.liked.spotify, a.liked.youtube, a.known || [], a.files))).slice(0, 12);
   const fresh = await freshFor(crew, plats);
   const out = [];
   for (let i = 0, k = 0; i < fresh.length || k < familiar.length; ) {
@@ -109,7 +162,9 @@ async function buildYourMix(crew, plats) {
 
 // An artist station: that sound, mostly from other artists
 async function buildStation(a, plats) {
-  const own = shuffledCopy(a.liked.soundcloud.concat(a.liked.spotify, a.liked.youtube, a.files)).slice(0, 4);
+  let own = shuffledCopy(a.liked.soundcloud.concat(a.liked.spotify, a.liked.youtube, a.known || [], a.files)).slice(0, 4);
+  // (nothing of theirs you know yet: a few of their best-known songs to start)
+  if (!own.length && useCatalog([a], plats)) own = await dzArtistFor(a.name).then((d) => (d ? dzGet("/artist/" + d.id + "/top?limit=4") : { data: [] })).then((r) => (r.data || []).map((x) => dzTrack(x))).catch(() => []);
   return dedupeTracks(own.concat(await freshFor([a], plats))).slice(0, 60);
 }
 
@@ -143,7 +198,9 @@ function spotifyTile(p) {
 
 async function buildFeed(plats) {
   if (plats.includes("soundcloud") || plats.includes("spotify")) await loadLikesFor(plats).catch(() => null);
-  const artists = feedArtists(plats);
+  const liked = feedArtists(plats);
+  // (no SoundCloud likes: what you star and play here instead)
+  const artists = liked.length ? liked : historyArtists(plats);
   const fromSpotify = plats.includes("spotify") ? await spotifyMadeForYou().catch(() => ({ daily: [], other: [] })) : { daily: [], other: [] };
   const shelves = [];
 
@@ -155,9 +212,9 @@ async function buildFeed(plats) {
     const who = crew.map((x) => x.name).join(", ") + " and more";
     return {
       kind: "daily", band: MIX_BANDS[i % MIX_BANDS.length], number: n, plats: crewPlats(crew, plats),
-      art: artUrl(a.liked.soundcloud[0], "t500x500"), sub: who,
+      art: a.art || (a.liked.soundcloud[0] ? artUrl(a.liked.soundcloud[0], "t500x500") : ""), sub: who,
       mix: makeMix({ id: "mix:yours:" + a.key, title: "Your Mix " + n,
-        desc: who + ": tracks you like, mixed with new ones from " + crewPlats(crew, plats).map((p) => PLATFORMS[p].name).join(", ") + ".",
+        desc: who + ": " + (scSeeded(crew) ? "tracks you like" : "songs you play") + ", mixed with new ones from " + crewPlats(crew, plats).map((p) => PLATFORMS[p].name).join(", ") + ".",
         build: () => buildYourMix(crew, plats), fresh: () => onlyNew(() => freshFor(crew, plats)) }),
     };
   });
@@ -167,18 +224,26 @@ async function buildFeed(plats) {
   // Spotify's other mixes: Discover Weekly, Release Radar, your top mixes...
   if (fromSpotify.other.length) shelves.push({ title: "More mixes from Spotify", tiles: fromSpotify.other.map(spotifyTile) });
 
+  const stationTile = (a) => ({
+    kind: "station", plats: crewPlats([a], plats), art: a.art || (a.liked.soundcloud[0] ? artUrl(a.liked.soundcloud[0], "t500x500") : ""), name: a.name, hue: hueOf(a.name),
+    sub: a.popular ? "Popular right now" : "Artist station",
+    mix: makeMix({ id: "mix:station:" + a.key, title: a.name + " station",
+      desc: "Music like " + a.name + ".", build: () => buildStation(a, plats), fresh: () => onlyNew(() => freshFor([a], plats)) }),
+  });
   // Artist stations: the next artists you like, a little shuffled each time
   const stationArtists = shuffledCopy(artists.slice(6, 30)).slice(0, 8);
   if (stationArtists.length) {
     shelves.push({
       title: "Artist stations",
-      tiles: stationArtists.map((a) => ({
-        kind: "station", plats: crewPlats([a], plats), art: artUrl(a.liked.soundcloud[0], "t500x500"), name: a.name, hue: hueOf(a.name),
-        sub: "Artist station",
-        mix: makeMix({ id: "mix:station:" + a.key, title: a.name + " station",
-          desc: "Music like " + a.name + ".", build: () => buildStation(a, plats), fresh: () => onlyNew(() => freshFor([a], plats)) }),
-      })),
+      tiles: stationArtists.map(stationTile),
     });
+  }
+  // Popular artists: stations to start from, for everyone using the catalogues (and the whole of
+  // Discover, with Top songs and the genres, before you've played anything)
+  if (plats.includes("catalog") && !liked.length) {
+    const yours = new Set(artists.map((a) => a.key));
+    const popular = (await popularArtists().catch(() => [])).filter((a) => !yours.has(a.key)).slice(0, 12);
+    if (popular.length) shelves.push({ title: artists.length ? "Popular artists" : "Popular artists to start with", tiles: popular.map(stationTile) });
   }
 
   // Trending by genre
@@ -196,6 +261,13 @@ async function buildFeed(plats) {
   return { shelves, artists };
 }
 
+// The genre most of your plays are in (one Deezer has a chart for), pop to begin with
+function spotlightGenre() {
+  const n = new Map();
+  loadStats().forEach((x) => { const g = String(x.genre || "").toLowerCase().trim(); if (DZ_GENRES[g]) n.set(g, (n.get(g) || 0) + 1); });
+  return [...n.entries()].sort((a, b) => b[1] - a[1]).map(([g]) => g)[0] || "pop";
+}
+
 // Shelves of single tracks, which need a moment to fetch; added below the others when ready
 async function trackShelves(plats) {
   const out = [];
@@ -206,6 +278,13 @@ async function trackShelves(plats) {
     if (rel) out.push(rel);
     const top = await dzChart().catch(() => []);
     if (top.length) out.push({ title: "Top songs on Deezer", tracks: top.filter(keep).slice(0, 30) });
+    // the genre you play most (pop until there's one), its chart
+    const g = spotlightGenre();
+    const lit = await dzChart(DZ_GENRES[g]).catch(() => []);
+    const seen = new Set(top.map((t) => t.id));
+    const spot = lit.filter((t) => keep(t) && !seen.has(t.id)).slice(0, 20);
+    const name = GENRES.find((x) => x.toLowerCase() === g) || g.charAt(0).toUpperCase() + g.slice(1);
+    if (spot.length) out.push({ title: name + " spotlight", tracks: spot });
   }
   if (plats.includes("soundcloud")) {
     const f = await scDiscover("following").catch(() => null);
@@ -418,7 +497,7 @@ async function openFeed(fresh) {
   if (view !== "discover") return;
   paintFeed(shelves);
   const notice = (later.find((s) => s.notice) || {}).notice;
-  if (tok === loadToken) say(notice || (shelves.length ? "" : "Like some tracks on SoundCloud or Spotify, and Discover will fill up with music for you."), notice ? { force: true } : undefined);
+  if (tok === loadToken) say(notice || (shelves.length ? "" : "Play or star a few songs, and Discover will fill up with music for you."), notice ? { force: true } : undefined);
 }
 
 // I'm Feeling Lucky: a random mix (one that draws on more than one platform, if there are any), made
@@ -463,5 +542,6 @@ function wireShelves(box) {
 
 function feedInit() {
   $("luckyBtn").addEventListener("click", feelingLucky);
+  $("likesPromptFind").addEventListener("click", () => { $("q").focus(); say("Search for songs you love, then like or star them."); });
   wireShelves($("feed"));
 }

@@ -57,6 +57,7 @@ function toggleFav(t) {
     if (canLike(t) && !isLiked(t)) toggleLike(t);   // a favourite is a like too
   }
   favSave();
+  paintLikesPrompt();
   if (view === "favourites") {
     viewTracks = viewTracks.filter((x) => isFav(x));
     render();
