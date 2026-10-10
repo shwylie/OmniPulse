@@ -97,6 +97,7 @@ impl Track {
             auto: false,
             art: Default::default(),
             liked: false,
+            genres: slint::ModelRc::from(std::rc::Rc::new(slint::VecModel::from(genre_tags(self).into_iter().map(slint::SharedString::from).collect::<Vec<_>>()))),
             ..crate::share_flags(self)
         }
     }
@@ -314,6 +315,23 @@ impl Track {
 /// maths cross) shows as "Ginsu \u{d7} Ghosts". (The web view borrows another font for them; this can't.)
 pub fn lookalikes(s: &str) -> String {
     s.chars().map(|c| match c { '\u{2a2f}' | '\u{2715}' | '\u{2716}' => '\u{d7}', _ => c }).collect()
+}
+
+/// Its genres as tags (the web app's trackGenres): up to two, split at slashes and commas, tidied, and
+/// not "Other" or the artist's own name
+pub fn genre_tags(t: &Track) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for g in t.genre.split(['/', ',', '|']) {
+        let g = g.trim().trim_start_matches('#').split_whitespace().collect::<Vec<_>>().join(" ");
+        let k = g.to_lowercase();
+        if g.is_empty() || g.chars().count() > 24 || ["other", "none", "unknown", "music", "misc", "n/a", "-"].contains(&k.as_str()) { continue; }
+        if omnipulse_core::ranking::artist_key(&g) == omnipulse_core::ranking::artist_key(&t.artist) { continue; }
+        if out.iter().any(|x| x.to_lowercase() == k) { continue; }
+        let shown = if g == k { g.split(' ').map(|w| { let mut c = w.chars(); c.next().map(|f| f.to_uppercase().collect::<String>() + c.as_str()).unwrap_or_default() }).collect::<Vec<_>>().join(" ") } else { g };
+        out.push(shown);
+        if out.len() == 2 { break; }
+    }
+    out
 }
 
 pub fn fmt_ms(ms: u64) -> String {

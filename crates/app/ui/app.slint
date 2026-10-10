@@ -18,7 +18,7 @@ export global Theme {
     in-out property <length> panel-radius: 10px;
 }
 
-export struct Row { title: string, artist: string, album: string, dur: string, plat: string, playing: bool, head: string, auto: bool, art: image, liked: bool, sc-link: bool, sp-link: bool, yt-link: bool, picked: bool }
+export struct Row { title: string, artist: string, album: string, dur: string, plat: string, playing: bool, head: string, auto: bool, art: image, liked: bool, sc-link: bool, sp-link: bool, yt-link: bool, picked: bool, genres: [string] }
 export struct Side { title: string, plat: string, own: bool, share: bool, sc: bool, sp: bool, collab: bool, collab-owner: bool }
 /// A platform in the title bar: on (in its colours), set up (ready; grey until it is), its name
 export struct Plat { id: string, on: bool, name: string, ready: bool }
@@ -359,6 +359,9 @@ component TrackRow inherits Rectangle {
     /// your playlists on this PC (to add to), and whether this list is one of them
     in property <[string]> lists;
     in property <bool> removable;
+    // Search: each track's genres as tags, a click searching that genre
+    in property <bool> show-genres;
+    callback genre(string);
     callback play();
     callback act(string);
     // Ctrl+click picks it (or lets it go), Shift+click picks everything from the last one picked
@@ -390,7 +393,22 @@ component TrackRow inherits Rectangle {
             alignment: center;
             spacing: 2px;
             Text { text: root.item.title; color: root.item.playing ? Theme.accent : Theme.text; font-weight: 700; font-size: 14px; overflow: elide; }
-            Text { text: root.item.artist; color: Theme.muted; font-size: 13px; overflow: elide; }
+            HorizontalLayout {
+                spacing: 6px;
+                Text { text: root.item.artist; color: Theme.muted; font-size: 13px; overflow: elide; horizontal-stretch: 1; max-width: self.preferred-width; }
+                for g in root.item.genres: Rectangle {
+                    visible: root.show-genres;
+                    height: 18px;
+                    y: (parent.height - self.height) / 2;
+                    width: root.show-genres ? gt.preferred-width + 12px : 0px;
+                    border-radius: 9px;
+                    border-width: 1px;
+                    border-color: gta.has-hover ? Theme.accent : Theme.line;
+                    gt := Text { text: g; color: gta.has-hover ? Theme.text : Theme.muted; font-size: 11px; }
+                    gta := TouchArea { clicked => { root.genre(g); } }
+                }
+                Rectangle { horizontal-stretch: 0; }
+            }
         }
         if !root.compact: Text { text: root.item.album; width: 26%; color: Theme.muted; font-size: 13px; overflow: elide; vertical-alignment: center; }
         Rectangle {
@@ -698,6 +716,7 @@ export component AppWindow inherits Window {
     callback search-edited(string);
     callback play-queue(int);
     callback row-action(int, string);
+    callback genre-search(string);
     callback queue-action(int, string);
     callback shuffle();
     callback play-page();
@@ -1117,7 +1136,7 @@ export component AppWindow inherits Window {
                         init => { root.rows-in-view(self.first, self.count); }
                         // (the last one with room below it, so it scrolls clear of the track tab)
                         for r[i] in root.rows: VerticalLayout {
-                            TrackRow { item: r; index: i; compact: root.narrow || root.queue-open; lists: root.own-lists; removable: root.own-page; play => { root.play-row(i); } act(a) => { root.row-action(i, a); } pick(m) => { root.row-pick(i, m); } }
+                            TrackRow { item: r; index: i; compact: root.narrow || root.queue-open; lists: root.own-lists; removable: root.own-page; show-genres: root.page == "search"; genre(g) => { root.genre-search(g); } play => { root.play-row(i); } act(a) => { root.row-action(i, a); } pick(m) => { root.row-pick(i, m); } }
                             if i == root.rows.length - 1: Rectangle { height: 76px; }
                         }
                     }
@@ -1175,7 +1194,7 @@ export component AppWindow inherits Window {
                                     if root.rows.length > 8: Pill { label: "Show all"; clicked => { root.page-kind = "tracks"; } }
                                 }
                                 for r[i] in root.rows: VerticalLayout {
-                                    if i < 8: TrackRow { item: r; index: i; compact: root.narrow || root.queue-open; lists: root.own-lists; removable: false; play => { root.play-row(i); } act(a) => { root.row-action(i, a); } pick(m) => { root.row-pick(i, m); } }
+                                    if i < 8: TrackRow { item: r; index: i; compact: root.narrow || root.queue-open; lists: root.own-lists; removable: false; show-genres: true; genre(g) => { root.genre-search(g); } play => { root.play-row(i); } act(a) => { root.row-action(i, a); } pick(m) => { root.row-pick(i, m); } }
                                 }
                             }
                             for sh[s] in root.shelves: VerticalLayout {

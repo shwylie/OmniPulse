@@ -4862,6 +4862,8 @@ fn main() -> Result<(), slint::PlatformError> {
     let s = shared.clone();
     ui.on_pl_new(move || pl_create(&s, Vec::new()));
     let s = shared.clone();
+    ui.on_genre_search(move |g| go(&s, Place::Search(g.to_string())));
+    let s = shared.clone();
     ui.on_pl_import(move || pl_import(&s));
     let s = shared.clone();
     ui.on_name_done(move |name| name_done(&s, &name));
