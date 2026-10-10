@@ -27,7 +27,10 @@ const notLiked = (keys) => (t) => !isLikedTrack(t) && !keys.has(songKey(t));
 
 // ---------- your top artists, from your likes on every platform and what you play ----------
 // One entry per artist, whichever platforms you like them on, so a mix can draw on all of them.
-const artistKey = (s) => String(s || "").toLowerCase().replace(/[^a-z0-9À-ɏ]+/g, "");
+// (one artist however it's written: "The Glitch Mob" and "Glitch Mob", "Above & Beyond" and "Above and
+// Beyond", "Tiësto" and "Tiesto")
+const artistKey = (s) => String(s || "").toLowerCase().normalize("NFKD").replace(/[\u0300-\u036f]/g, "")
+  .replace(/&/g, " and ").replace(/^\s*the\s+(?=\S)/, "").replace(/[^a-z0-9À-ɏ]+/g, "");
 
 function feedArtists(plats) {
   const plays = new Map();

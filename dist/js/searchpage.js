@@ -92,9 +92,12 @@ async function searchArtists(q, plats, genre) {
   interleave(lists).forEach((x, order) => {
     const k = artistKey(x.name);
     if (!k) return;
-    if (!by.has(k)) by.set(k, { name: x.name, on: {}, img: "", followers: 0, order });
+    if (!by.has(k)) by.set(k, { name: x.name, on: {}, img: "", followers: 0, order, nameFrom: -1 });
     const a = by.get(k);
-    if (x.plat && !a.on[x.plat]) { a.on[x.plat] = x.info; a.followers += countOf(x.info && x.info.followers); }
+    const n = countOf(x.info && x.info.followers);
+    if (x.plat && !a.on[x.plat]) { a.on[x.plat] = x.info; a.followers += n; }
+    // (written the way their most followed profile writes it: "The Glitch Mob", not "Glitch Mob")
+    if (n > a.nameFrom) { a.nameFrom = n; a.name = x.name; }
     // (a real picture beats a stand-in avatar)
     const img = x.info && x.info.img;
     if (img && (!a.img || (!realImage(a.img) && realImage(img)))) a.img = img;
