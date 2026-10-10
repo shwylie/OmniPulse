@@ -8,6 +8,7 @@
 mod keysetup;
 mod offset;
 mod plugrun;
+mod collab;
 mod desktop;
 mod discover;
 mod integrations;
@@ -310,6 +311,12 @@ fn open_place(shared: &Shared, place: &Place) {
         Place::Playlist(id) => {
             let at = shared.borrow().playlists.iter().position(|p| &p.id == id);
             match at { Some(i) => open_playlist(shared, i), None => open_page(shared, "library") }
+            // (a collaborative one: everyone's changes, at most every 10 seconds as it's opened)
+            let due = COLLAB_PULLED.with(|m| m.borrow().get(id).is_none_or(|t: &std::time::Instant| t.elapsed().as_secs() >= 10));
+            if due && collab_of(&shared.borrow().xpl, id).is_some() {
+                COLLAB_PULLED.with(|m| m.borrow_mut().insert(id.clone(), std::time::Instant::now()));
+                collab_pull(shared, id);
+            }
         }
         Place::Search(q) => open_search(shared, q.clone()),
         Place::Artist(i) => open_artist(shared, *i),
@@ -418,7 +425,7 @@ fn paint_sides(a: &mut App) {
         .filter(|&i| plat_on(&prefs, a.playlists[i].plat) || a.playlists[i].plat == "local")
         .filter(|&i| !hidden.contains(&mirror::side_id(a.playlists[i].plat, &a.playlists[i].id)))
         .collect();
-    let sides: Vec<Side> = a.side_map.iter().map(|&i| Side { title: a.playlists[i].title.clone().into(), plat: a.playlists[i].plat.into(), own: xpl::is_own(&a.playlists[i].id), share: a.playlists[i].plat != "local" || xpl::is_own(&a.playlists[i].id), sc: share::platform_id(&a.playlists[i], &a.xpl, "soundcloud").is_some(), sp: share::platform_id(&a.playlists[i], &a.xpl, "spotify").is_some() }).collect();
+    let sides: Vec<Side> = a.side_map.iter().map(|&i| Side { title: a.playlists[i].title.clone().into(), plat: a.playlists[i].plat.into(), own: xpl::is_own(&a.playlists[i].id), share: a.playlists[i].plat != "local" || xpl::is_own(&a.playlists[i].id), sc: share::platform_id(&a.playlists[i], &a.xpl, "soundcloud").is_some(), sp: share::platform_id(&a.playlists[i], &a.xpl, "spotify").is_some(), collab: collab_of(&a.xpl, &a.playlists[i].id).is_some(), collab_owner: collab_of(&a.xpl, &a.playlists[i].id).is_some_and(|c| c["owner"].as_bool() == Some(true)) }).collect();
     ui.set_sides(ModelRc::from(Rc::new(VecModel::from(sides))));
     // Add to Playlist: yours here first, then the platforms' (one of those becomes a playlist here)
     let mut order: Vec<usize> = a.side_map.iter().copied().filter(|&i| xpl::is_own(&a.playlists[i].id)).collect();
@@ -3381,6 +3388,7 @@ fn pl_add_platform(shared: &Shared, p: sources::Playlist, t: Track) {
                 if let Some(list) = a.xpl.as_array_mut() { list.insert(0, copy); } else { a.xpl = serde_json::json!([copy]); }
                 xpl::add(&mut a.xpl, &id, std::slice::from_ref(&t));
             }
+            collab_send(&shared, &id, collab::add_op(&t));
             hidden_set(&shared, &mirror::side_id(p.plat, &p.id), true);
             xpl_changed(&shared);
             let where_ = if p.plat == "spotify" { "Spotify" } else { "SoundCloud" };
@@ -3388,6 +3396,155 @@ fn pl_add_platform(shared: &Shared, p: sources::Playlist, t: Track) {
             ui.set_status(if p.own { format!("\"{}\" now takes songs from any platform, and stays up to date on {where_}.", p.title) } else { format!("You can't edit this playlist on {where_}, so your changes are saved on this PC only.") }.into());
             let showing = matches!(&shared.borrow().here, Some(Place::Playlist(x)) if *x == p.id);
             if showing { go(&shared, Place::Playlist(id)); }
+        }));
+    });
+}
+
+// ---------- collaborative playlists (crate::collab, as the web app's js/collab.js) ----------
+thread_local! {
+    static COLLAB_PULLED: RefCell<HashMap<String, std::time::Instant>> = RefCell::new(HashMap::new());
+}
+
+fn collab_of(all: &serde_json::Value, id: &str) -> Option<serde_json::Value> {
+    all.as_array()?.iter().find(|x| x["id"].as_str() == Some(id)).filter(|x| collab::is_collab(x)).map(|x| x["collab"].clone())
+}
+
+fn xpl_set(shared: &Shared, id: &str, f: impl FnOnce(&mut serde_json::Value)) {
+    let mut a = shared.borrow_mut();
+    if let Some(x) = a.xpl.as_array_mut().and_then(|l| l.iter_mut().find(|x| x["id"].as_str() == Some(id))) { f(x); }
+}
+
+/// Invite collaborators: a platform playlist is copied to this PC first (its original stays as it is);
+/// the playlist is shared (if it isn't yet), made collaborative, and the invite link copied
+fn collab_invite(shared: &Shared, p: sources::Playlist) {
+    if let Some(c) = collab_of(&shared.borrow().xpl, &p.id) {
+        if c["owner"].as_bool() != Some(true) { return share_status(shared, "You're collaborating on this playlist. Right-click it to leave.".into()); }
+    }
+    let (relay, by, rt, weak) = {
+        let a = shared.borrow();
+        let relay = a.web.prefs["relayUrl"].as_str().map(str::trim).filter(|s| !s.is_empty()).unwrap_or(share::RELAY_URL).trim_end_matches('/').to_string();
+        (relay, my_name(&a), a.rt.clone(), a.ui.clone())
+    };
+    let was = shared.borrow().xpl.as_array().and_then(|l| l.iter().find(|x| x["id"].as_str() == Some(p.id.as_str())).map(|x| x["share"].clone())).unwrap_or_default();
+    share_status(shared, "Making it collaborative...".into());
+    rt.spawn(async move {
+        // (a platform playlist: its copy on this PC is what's shared)
+        let copy = if xpl::is_own(&p.id) { None } else { Some(mirror::adopt(&p).await) };
+        let pl = match &copy { Some(c) => xpl::playlists(&serde_json::json!([c.clone()])).into_iter().next().unwrap_or(p.clone()), None => p.clone() };
+        let tracks = sources::playlist_tracks(&pl).await;
+        let shared_at = share::share_playlist(&relay, &pl.title, &by, &tracks, &was).await;
+        let done = match shared_at { Ok((_, info)) => collab::invite(&info).await.map(|(link, c)| (link, c, info)), Err(e) => Err(e) };
+        let _ = weak.upgrade_in_event_loop(move |_| SHARED.with(|s| {
+            let Some(shared) = s.borrow().clone() else { return };
+            match done {
+                Ok((link, c, info)) => {
+                    if let Some(c) = copy.clone() {
+                        let mut a = shared.borrow_mut();
+                        if let Some(list) = a.xpl.as_array_mut() { list.insert(0, c); } else { a.xpl = serde_json::json!([c]); }
+                    }
+                    let id = pl.id.clone();
+                    // (an invite again keeps the playlist's revision)
+                    let had = collab_of(&shared.borrow().xpl, &id);
+                    xpl_set(&shared, &id, |x| { x["share"] = info; x["collab"] = had.unwrap_or(c); });
+                    if copy.is_some() { hidden_set(&shared, &mirror::side_id(p.plat, &p.id), true); }
+                    xpl_changed(&shared);
+                    share_status(&shared, match share::copy(&link) {
+                        Ok(()) => format!("Invite link copied: friends who open it can add songs to \"{}\" and take them out, from their own OmniPulse.", pl.title),
+                        Err(e) => e,
+                    });
+                }
+                Err(e) => share_status(&shared, format!("Couldn't make it collaborative: {e}")),
+            }
+        }));
+    });
+}
+
+/// Leaving (or, its owner, stopping it): the playlist stays here as yours
+fn collab_leave(shared: &Shared, id: &str) {
+    let Some(c) = collab_of(&shared.borrow().xpl, id) else { return };
+    let owner = c["owner"].as_bool() == Some(true);
+    let title = shared.borrow().playlists.iter().find(|p| p.id == id).map(|p| p.title.clone()).unwrap_or_default();
+    let ask = if owner { format!("Stop \"{title}\" being collaborative? Everyone keeps a copy, but changes no longer go between you.") } else { format!("Leave \"{title}\"? You keep it as yours, but your changes and theirs no longer go between you.") };
+    let sure = std::env::var_os("OMNIPULSE_SELFTEST").is_some()
+        || rfd::MessageDialog::new().set_title(if owner { "Stop collaborating" } else { "Leave collaboration" }).set_description(ask).set_buttons(rfd::MessageButtons::OkCancel).show() == rfd::MessageDialogResult::Ok;
+    if !sure { return; }
+    if owner { let c2 = c.clone(); shared.borrow().rt.spawn(async move { collab::stop(&c2).await; }); }
+    xpl_set(shared, id, |x| { if let Some(o) = x.as_object_mut() { o.remove("collab"); } });
+    xpl_changed(shared);
+    share_status(shared, if owner { format!("\"{title}\" isn't collaborative any more.") } else { format!("You left \"{title}\". It's kept as yours.") });
+}
+
+/// A change here, to everyone in it (only up to date if it was the only one since; else theirs fetched)
+fn collab_send(shared: &Shared, id: &str, op: serde_json::Value) {
+    let Some(c) = collab_of(&shared.borrow().xpl, id) else { return };
+    let (rt, weak, id) = { let a = shared.borrow(); (a.rt.clone(), a.ui.clone(), id.to_string()) };
+    rt.spawn(async move {
+        let r = collab::send(&c, op).await;
+        let _ = weak.upgrade_in_event_loop(move |ui| SHARED.with(|s| {
+            let Some(shared) = s.borrow().clone() else { return };
+            match r {
+                Ok(rev) if rev > 0 && rev == c["rev"].as_u64().unwrap_or(0) + 1 => { xpl_set(&shared, &id, |x| x["collab"]["rev"] = serde_json::json!(rev)); xpl::save(&shared.borrow().xpl); }
+                Ok(rev) if rev > 0 => collab_pull(&shared, &id),
+                Ok(_) => {}
+                Err(e) => ui.set_status(format!("Couldn't send that change to everyone in the playlist: {e}").into()),
+            }
+        }));
+    });
+}
+
+/// Everyone else's changes: the playlist as it is on the relay (your own files kept where they were)
+fn collab_pull(shared: &Shared, id: &str) {
+    let Some(c) = collab_of(&shared.borrow().xpl, id) else { return };
+    let (Some(relay), Some(code)) = (c["relay"].as_str().map(String::from), c["code"].as_str().map(String::from)) else { return };
+    let (rt, weak, id) = { let a = shared.borrow(); (a.rt.clone(), a.ui.clone(), id.to_string()) };
+    rt.spawn(async move {
+        let Ok(share) = collab::fetch(&relay, &code).await else { return };   // (offline: next time)
+        let _ = weak.upgrade_in_event_loop(move |ui| SHARED.with(|s| {
+            let Some(shared) = s.borrow().clone() else { return };
+            let Some(x) = shared.borrow().xpl.as_array().and_then(|l| l.iter().find(|x| x["id"].as_str() == Some(id.as_str())).cloned()) else { return };
+            match collab::merged(&x, &share) {
+                Err(()) => {
+                    xpl_set(&shared, &id, |x| { if let Some(o) = x.as_object_mut() { o.remove("collab"); } });
+                    xpl_shown(&shared);
+                    ui.set_status(format!("\"{}\" isn't collaborative any more: it's kept as yours.", x["title"].as_str().unwrap_or("")).into());
+                }
+                Ok(None) => {}
+                Ok(Some((tracks, title, rev))) => {
+                    xpl_set(&shared, &id, |x| { x["tracks"] = serde_json::json!(tracks); x["title"] = serde_json::json!(title); x["collab"]["rev"] = serde_json::json!(rev); });
+                    xpl_shown(&shared);
+                }
+            }
+        }));
+    });
+}
+
+fn collab_pull_all(shared: &Shared) {
+    let ids: Vec<String> = shared.borrow().xpl.as_array().into_iter().flatten().filter(|x| collab::is_collab(x)).filter_map(|x| x["id"].as_str().map(String::from)).collect();
+    for id in ids { collab_pull(shared, &id); }
+}
+
+/// Opening an invite (omnipulse://playlist/<code>?e=<edit key>): joined, as one of your playlists (or
+/// the one you joined already, opened)
+fn collab_join(shared: &Shared, code: String, relay: String, e: String) {
+    let had = shared.borrow().xpl.as_array().into_iter().flatten().find(|x| x["collab"]["code"].as_str() == Some(code.as_str())).and_then(|x| x["id"].as_str().map(String::from));
+    if let Some(id) = had { go(shared, Place::Playlist(id.clone())); return collab_pull(shared, &id); }
+    let (rt, weak) = { let a = shared.borrow(); (a.rt.clone(), a.ui.clone()) };
+    rt.spawn(async move {
+        let share = collab::fetch(&relay, &code).await.ok().filter(|s| s["tracks"].is_array());
+        let _ = weak.upgrade_in_event_loop(move |ui| SHARED.with(|s| {
+            let Some(shared) = s.borrow().clone() else { return };
+            let Some(share) = share else { ui.set_status("That playlist isn't shared any more.".into()); return };
+            let title = share["title"].as_str().unwrap_or("Playlist").to_string();
+            let by = share["by"].as_str().map(|b| format!(" from {b}")).unwrap_or_default();
+            let sure = std::env::var_os("OMNIPULSE_SELFTEST").is_some()
+                || rfd::MessageDialog::new().set_title("Join playlist").set_description(format!("Join \"{title}\"{by}? It's a collaborative playlist: you can add songs to it and take them out, and see everyone else's changes.")).set_buttons(rfd::MessageButtons::OkCancel).show() == rfd::MessageDialogResult::Ok;
+            if !sure { return; }
+            let tracks: Vec<Track> = share["tracks"].as_array().into_iter().flatten().filter_map(|t| Track::from_snapshot(&t["snap"])).filter(|t| t.plat() != "local").collect();
+            let id = xpl::create(&mut shared.borrow_mut().xpl, &title, &tracks);
+            xpl_set(&shared, &id, |x| x["collab"] = serde_json::json!({ "code": code, "relay": relay, "k": e, "owner": false, "rev": share["rev"].as_u64().unwrap_or(0) }));
+            xpl_changed(&shared);
+            go(&shared, Place::Playlist(id));
+            ui.set_status(format!("Joined \"{title}\". Your changes go to everyone in it, and theirs come to you.").into());
         }));
     });
 }
@@ -3429,6 +3586,7 @@ fn pl_add(shared: &Shared, k: usize, t: Track) {
     }
     let title = shared.borrow().playlists.iter().find(|p| p.id == id).map(|p| p.title.clone()).unwrap_or_default();
     let n = xpl::add(&mut shared.borrow_mut().xpl, &id, std::slice::from_ref(&t));
+    if n > 0 && t.plat() != "local" { collab_send(shared, &id, collab::add_op(&t)); }
     xpl_changed(shared);
     if let Some(ui) = shared.borrow().ui.upgrade() {
         ui.set_status(if n > 0 { format!("Added \"{}\" to {title}.", t.title) } else { format!("\"{}\" is already in {title}.", t.title) }.into());
@@ -3441,6 +3599,7 @@ fn pl_row_action(shared: &Shared, act: &str, t: Track) {
         "plremove" => {
             let id = match &shared.borrow().here { Some(Place::Playlist(id)) if xpl::is_own(id) => id.clone(), _ => return };
             xpl::remove(&mut shared.borrow_mut().xpl, &id, &t.key);
+            collab_send(shared, &id, collab::remove_op(&t.key));
             xpl_changed(shared);
         }
         _ => {
@@ -3461,6 +3620,12 @@ fn side_action(shared: &Shared, i: usize, act: &str) {
     }
     if let Some(kind) = act.strip_prefix("export:") {
         return pl_export(shared, p, kind);
+    }
+    if act == "collab" {
+        return collab_invite(shared, p);
+    }
+    if act == "collab-leave" {
+        return collab_leave(shared, &p.id);
     }
     if !xpl::is_own(&p.id) {
         return;
@@ -4732,7 +4897,22 @@ fn main() -> Result<(), slint::PlatformError> {
     // an invite link the app was opened with (omnipulse://jam/... or join/...): joined once it's up
     if let Some(link) = std::env::args().find(|x| x.starts_with("omnipulse://")) {
         let s = shared.clone();
-        slint::Timer::single_shot(std::time::Duration::from_millis(1500), move || listen_join(&s, &link));
+        slint::Timer::single_shot(std::time::Duration::from_millis(1500), move || {
+            // (a playlist's: with an edit key, an invite to a collaborative one)
+            if let Some((code, relay, e)) = together::parse_playlist_link(&link, &relay_of(&s.borrow())) {
+                if !e.is_empty() { return collab_join(&s, code, relay, e); }
+            }
+            listen_join(&s, &link)
+        });
+    }
+    // everyone's changes to your collaborative playlists: a moment after starting, then every minute
+    {
+        let s = shared.clone();
+        slint::Timer::single_shot(std::time::Duration::from_secs(5), move || collab_pull_all(&s));
+        let s = shared.clone();
+        let t = slint::Timer::default();
+        t.start(slint::TimerMode::Repeated, std::time::Duration::from_secs(collab::PULL_SECS), move || collab_pull_all(&s));
+        std::mem::forget(t);
     }
     if std::env::var_os("OMNIPULSE_SELFTEST").is_some() {
         // the self-test's own: the widget and requests on ports of their own, key "selftest" (not the

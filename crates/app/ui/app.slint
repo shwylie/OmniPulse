@@ -19,7 +19,7 @@ export global Theme {
 }
 
 export struct Row { title: string, artist: string, album: string, dur: string, plat: string, playing: bool, head: string, auto: bool, art: image, liked: bool, sc-link: bool, sp-link: bool, yt-link: bool, picked: bool }
-export struct Side { title: string, plat: string, own: bool, share: bool, sc: bool, sp: bool }
+export struct Side { title: string, plat: string, own: bool, share: bool, sc: bool, sp: bool, collab: bool, collab-owner: bool }
 /// A platform in the title bar: on (in its colours), set up (ready; grey until it is), its name
 export struct Plat { id: string, on: bool, name: string, ready: bool }
 export struct Tile { title: string, sub: string, art: image, plat: string }
@@ -966,6 +966,8 @@ export component AppWindow inherits Window {
                                     if s.share: MenuItem { title: "Share"; activated => { root.side-action(i, "share"); } }
                                     if s.sc: MenuItem { title: "Copy SoundCloud Link"; activated => { root.side-action(i, "link:soundcloud"); } }
                                     if s.sp: MenuItem { title: "Copy Spotify Link"; activated => { root.side-action(i, "link:spotify"); } }
+                                    if s.share && !(s.collab && !s.collab-owner): MenuItem { title: s.collab ? "Copy invite link" : "Invite collaborators"; activated => { root.side-action(i, "collab"); } }
+                                    if s.collab: MenuItem { title: s.collab-owner ? "Stop collaborating" : "Leave collaboration"; activated => { root.side-action(i, "collab-leave"); } }
                                     if s.own: MenuItem { title: "Rename..."; activated => { root.side-action(i, "rename"); } }
                                     if s.own: MenuItem { title: "Delete"; activated => { root.side-action(i, "delete"); } }
                                     MenuItem { title: "Export as M3U..."; activated => { root.side-action(i, "export:m3u"); } }

@@ -92,6 +92,20 @@ pub fn parse_link(link: &str, default_relay: &str) -> Option<(String, String, St
     ok.then(|| (kind.to_string(), code.to_string(), relay, param("k")))
 }
 
+/// A playlist's link (omnipulse://playlist/<code>?e=<edit key>&relay=...): (code, relay, edit key or "")
+pub fn parse_playlist_link(link: &str, default_relay: &str) -> Option<(String, String, String)> {
+    let rest = link.trim().strip_prefix("omnipulse://playlist/")?;
+    let (code, query) = rest.split_once('?').unwrap_or((rest, ""));
+    let code = code.trim_end_matches('/');
+    if code.len() != 8 || !code.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit()) { return None; }
+    let param = |k: &str| query.split('&').find_map(|p| p.strip_prefix(&format!("{k}="))).map(crate::sources::urldecode).unwrap_or_default();
+    let relay = param("relay");
+    let relay = if relay.is_empty() { default_relay.to_string() } else { relay.trim_end_matches('/').to_string() };
+    let ok = relay.starts_with("https://") || relay.starts_with("http://127.0.0.1") || relay.starts_with("http://localhost");
+    let e: String = param("e").chars().filter(|c| c.is_ascii_lowercase() || c.is_ascii_digit()).collect();
+    ok.then(|| (code.to_string(), relay, e))
+}
+
 /// Connects to a room as a listener: everything it says goes to `on`, then { type: "closed" } once
 /// the connection's gone (or couldn't be made); dropping the sender leaves
 pub fn listen(rt: &tokio::runtime::Handle, url: String, on: impl Fn(Value) + Send + Sync + 'static) -> mpsc::UnboundedSender<String> {
