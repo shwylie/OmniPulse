@@ -1717,6 +1717,11 @@ thread_local! {
     static RHYTHM_EAR: RefCell<Option<RhythmEar>> = const { RefCell::new(None) };
 }
 
+/// Its tempo and key as Now Playing shows them ("" before they're measured)
+fn rhythm_line(key: &str) -> String {
+    omnipulse_core::rhythm::known(key).map(|m| format!("{:.0} BPM · {} · {}", m.rhythm.bpm, m.rhythm.key, m.rhythm.camelot)).unwrap_or_default()
+}
+
 /// A track has started: listened to, if nothing's known of it yet
 fn rhythm_begin(shared: &Shared, t: &Track, dur_ms: u64) {
     rhythm_stop(shared);
@@ -1762,12 +1767,17 @@ fn rhythm_tick(shared: &Shared, pos: u64) {
             engine.set_tap("rhythm", None);
             let Some(l) = RHYTHM_EAR.with(|e| e.borrow_mut().take()) else { return };
             let from = l.from_ms.unwrap_or(0);
-            let rt = shared.borrow().rt.clone();
+            let (rt, weak) = { let a = shared.borrow(); (a.rt.clone(), a.ui.clone()) };
             rt.spawn_blocking(move || {
                 let mono = std::mem::take(&mut *l.samples.lock().unwrap());
                 let heard = mono.len() as u64 * 1000 / l.rate.max(1) as u64;
                 if let Some(r) = omnipulse_core::rhythm::analyse(&mono, l.rate) {
                     omnipulse_core::rhythm::keep(&l.key, omnipulse_core::rhythm::Measured { from_ms: from, to_ms: from + heard, rhythm: r, v: omnipulse_core::rhythm::VERSION });
+                    // (still playing: Now Playing says so)
+                    let key = l.key.clone();
+                    let _ = weak.upgrade_in_event_loop(move |ui| SHARED.with(|s| {
+                        if let Some(sh) = s.borrow().clone() { if sh.borrow().queue.current().is_some_and(|t| t.key == key) { ui.set_now_rhythm(rhythm_line(&key).into()); } }
+                    }));
                 }
             });
         }
@@ -1875,6 +1885,7 @@ fn show_now(ui: &AppWindow, t: &Track) {
     ui.set_now_album(t.album.clone().into());
     let apart = !t.uploader.is_empty() && omnipulse_core::ranking::artist_key(&t.uploader) != omnipulse_core::ranking::artist_key(t.artist.split([',', '&']).next().unwrap_or(""));
     ui.set_now_uploader(if apart { t.uploader.clone().into() } else { "".into() });
+    ui.set_now_rhythm(rhythm_line(&t.key).into());
     ui.set_now_plat(t.plat().into());
     ui.set_now_art(slint::Image::default());
     ui.set_now_art_big(slint::Image::default());

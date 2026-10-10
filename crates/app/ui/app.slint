@@ -610,6 +610,8 @@ export component AppWindow inherits Window {
     in property <string> now-album;
     // who uploaded it, where that's not its artist (Now Playing only)
     in property <string> now-uploader;
+    // its tempo and key, once measured ("132 BPM · F# major · 2B")
+    in property <string> now-rhythm;
     in property <[Line]> lyrics;
     in property <int> lyric-on: -1;
     in property <bool> st-empty;
@@ -1750,6 +1752,7 @@ export component AppWindow inherits Window {
                             Text { text: root.now-artist; color: Theme.accent; font-size: 16px; font-weight: 600; }
                             if root.now-uploader != "": Text { text: "uploaded by " + root.now-uploader; color: Theme.muted; font-size: 13px; }
                             Text { text: root.now-album; color: Theme.muted; font-size: 13px; }
+                            if root.now-rhythm != "": Text { text: root.now-rhythm; color: Theme.muted; font-size: 12px; }
                             Rectangle { vertical-stretch: 1; }
                         }
                         VerticalLayout {
