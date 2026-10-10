@@ -1395,7 +1395,8 @@ fn start(shared: &Shared) {
                         FADE.with(|f| *f.borrow_mut() = (false, String::new()));
                         match sound::fade_ms(&shared.borrow().web.prefs) {
                             Some(ms) => engine.fade(Some(0.0), 1.0, ms),
-                            None => engine.fade(Some(1.0), 1.0, 0),
+                            // (fading set or not, a new track comes up over a short moment: never a hard cut)
+                            None => engine.fade(Some(0.0), 1.0, 450),
                         }
                         let known = what.as_ref().and_then(|(s, id)| shared.borrow().loud.get(&format!("{s}:{id}")).copied());
                         engine.load(src, sound::loud_db(&shared.borrow().web.prefs, &t, known));
@@ -3622,7 +3623,8 @@ fn listen_follow(shared: &Shared, st: serde_json::Value) {
     // (a stand-in plays from its own start: only the host's own track is kept in step)
     if playing && !standing {
         let (want, have) = (listen_host_pos(), engine.position_ms());
-        if want.abs_diff(have) > 3000 { engine.seek(want); }
+        // (back in step, smoothly: in again from quiet after the jump)
+        if want.abs_diff(have) > 3000 { engine.seek(want); engine.fade(Some(0.0), 1.0, 800); }
     }
 }
 

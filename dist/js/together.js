@@ -445,7 +445,7 @@ function listenerFollow(s) {
       if (!s.playing) { if (nowPlaying()) togetherOrig.toggle(); return; }
       // the host always wins: what loading took (Spotify's start especially) is caught up straight away
       const t = curTrack();
-      if (t && t.id === target.id && together.role === "listener" && Math.abs(hostPos() - curPosMs()) > 1500) seekToMs(hostPos());
+      if (t && t.id === target.id && together.role === "listener" && Math.abs(hostPos() - curPosMs()) > 1500) fadeJump(1500, () => seekToMs(hostPos()));
     });
     renderQueue();
     return;
@@ -458,7 +458,7 @@ function listenerFollow(s) {
   else if (!s.playing && nowPlaying()) togetherOrig.toggle();
   if (s.playing && !cur.standInFor) {
     const want = hostPos(), have = curPosMs();
-    if (Math.abs(want - have) > 3000) seekToMs(want);   // drifted: back in step
+    if (Math.abs(want - have) > 3000) fadeJump(800, () => seekToMs(hostPos()));   // drifted: back in step, smoothly
   }
 }
 

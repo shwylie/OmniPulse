@@ -9,6 +9,9 @@
 
 const FADE_STANDIN_MS = 2000;
 const FADE_SKIP_MS = 300;
+// every track change, fading set or not: the old one goes down this fast and the new one comes up
+// over this long, so a change is never a hard cut
+const FADE_BASE_IN_MS = 450;
 const fadeState = { out: false, pendingIn: false, forceIn: 0, movedOn: null, waitPos: null, quietSince: 0 };
 
 // How long a track fades for: a stand-in's own, the setting's, or not at all
@@ -33,8 +36,8 @@ function fadeTo(value, ms) {
   else g.setValueAtTime(value, now);
 }
 
-// A new track is about to play: the one still heard fades out quickly if fading's on (or it's a
-// stand-in), and the new one fades in once its sound starts
+// A new track is about to play: the one still heard fades out quickly, and the new one fades in once
+// its sound starts (over the setting's length if fading's on, a short moment if not)
 function fadeTrackChange(prev, next) {
   fadeState.pendingIn = true;
   fadeState.waitPos = null;
@@ -42,19 +45,29 @@ function fadeTrackChange(prev, next) {
   fadeState.movedOn = null;
   // after a stand-in, the Jam's next track fades in too
   fadeState.forceIn = prev && prev.standInFor ? FADE_STANDIN_MS : 0;
-  if (prev && nowPlaying() && (fadeMsFor(prev) || fadeMsFor(next))) fadeTo(0, FADE_SKIP_MS);
+  if (prev && nowPlaying()) fadeTo(0, FADE_SKIP_MS);
 }
 
 // The new track's sound has started
 function fadeHeard() {
   if (!fadeState.pendingIn) return;
   fadeState.pendingIn = false;
-  const ms = Math.max(fadeMsFor(curTrack()), fadeState.forceIn);
+  const ms = Math.max(fadeMsFor(curTrack()), fadeState.forceIn, FADE_BASE_IN_MS);
   fadeState.forceIn = 0;
   if (!norm.fade) return;
   const g = norm.fade.gain, now = norm.ctx.currentTime;
   g.cancelScheduledValues(now);
   if (ms) { g.setValueAtTime(0.0001, now); g.linearRampToValueAtTime(1, now + ms / 1000); } else g.setValueAtTime(1, now);
+}
+
+// A jump in what's playing (catching up with a Jam's host): down quickly, the jump, then in again
+// over `ms` once the sound carries on (fadeHeard, or the watch in fadeTick)
+function fadeJump(ms, jump) {
+  fadeTo(0, 120);
+  fadeState.pendingIn = true;
+  fadeState.waitPos = null;
+  fadeState.forceIn = ms;
+  setTimeout(() => { jump(); fadeState.waitPos = null; }, 130);   // (the jump itself isn't the sound carrying on)
 }
 
 // Near the end: down to silence over the fade's length (and back up if you seek away from the end)
