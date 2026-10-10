@@ -601,9 +601,16 @@ fn open_found(shared: &Shared, sh: usize, k: usize) {
     let Some(f) = FOUND.with(|x| x.borrow().get(sh).and_then(|l| l.get(k).cloned())) else { return };
     let (title, by, _, _) = f.tile();
     show_tracks(shared, "found", &title, "Loading...".into(), Vec::new(), true);
+    let cat = catalog_on(&shared.borrow().web.prefs);
     load_into(shared, "found", title.clone(), async move {
-        let list = sources::found_tracks(&f).await;
-        let sub = if list.is_empty() { "Nothing to play here.".to_string() } else { format!("{}{}.", if by == "Artist" { String::new() } else { format!("{by} \u{b7} ") }, plural(list.len(), "track", "tracks")) };
+        let (list, bio) = match &f {
+            sources::Found::Artist { name, .. } => {
+                let (l, dz, bio) = tokio::join!(sources::found_tracks(&f), artist_top(name, cat), artist_bio(name));
+                (sources::once_each(sources::interleave(vec![l, dz])), bio)
+            }
+            _ => (sources::found_tracks(&f).await, String::new()),
+        };
+        let sub = if list.is_empty() { "Nothing to play here.".to_string() } else { format!("{bio}{}{}.", if by == "Artist" { String::new() } else { format!("{by} \u{b7} ") }, plural(list.len(), "track", "tracks")) };
         (list, sub)
     });
 }
@@ -677,11 +684,35 @@ fn open_artist(shared: &Shared, i: usize) {
     let name = |p: &str| match p { "spotify" => "Spotify", _ => "SoundCloud" };
     let on = a.plats().into_iter().map(name).collect::<Vec<_>>().join(" and ");
     show_tracks(shared, "artist", &a.name, "Loading...".into(), Vec::new(), true);
+    let cat = catalog_on(&shared.borrow().web.prefs);
     load_into(shared, "artist", a.name.clone(), async move {
-        let t = sources::artist_tracks(&a).await;
-        let sub = format!("You follow them on {on}. {}.", plural(t.len(), "track", "tracks"));
+        let (t, dz, bio) = tokio::join!(sources::artist_tracks(&a), artist_top(&a.name, cat), artist_bio(&a.name));
+        let t = sources::once_each(sources::interleave(vec![t, dz]));
+        let sub = format!("{bio}You follow them on {on}. {}.", plural(t.len(), "track", "tracks"));
         (t, sub)
     });
+}
+
+/// An artist's best known songs on Deezer (with the catalogues on)
+async fn artist_top(name: &str, on: bool) -> Vec<Track> {
+    if !on { return Vec::new(); }
+    let Some((id, _)) = discover::dz_artist(name).await else { return Vec::new() };
+    omnipulse_core::catalog::deezer(&format!("/artist/{id}/top?limit=20")).await.ok()
+        .map(|v| v["data"].as_array().into_iter().flatten().filter_map(|t| omnipulse_core::catalog::dz_track(t, None)).filter_map(|t| Track::catalog(&t)).collect())
+        .unwrap_or_default()
+}
+
+/// An artist's bio, as the web app's (Wikipedia's, core::bio): its first sentence or two, then a space
+async fn artist_bio(name: &str) -> String {
+    let Ok(v) = omnipulse_core::bio::artist(name).await else { return String::new() };
+    let text = v["text"].as_str().unwrap_or("").trim().to_string();
+    if text.is_empty() { return String::new(); }
+    let mut out = String::new();
+    for sentence in text.split_inclusive(". ") {
+        if !out.is_empty() && out.len() + sentence.len() > 260 { break; }
+        out.push_str(sentence);
+    }
+    format!("{} ", out.trim())
 }
 
 // ---------- Discover: shelves ----------

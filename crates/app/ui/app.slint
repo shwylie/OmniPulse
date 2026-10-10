@@ -1035,7 +1035,7 @@ export component AppWindow inherits Window {
                         }
                         Rectangle { horizontal-stretch: 1; }
                     }
-                    if root.page-kind != "now" && root.page-sub != "": Text { text: root.page-sub; color: Theme.muted; font-size: 14px; overflow: elide; }
+                    if root.page-kind != "now" && root.page-sub != "": Text { text: root.page-sub; color: Theme.muted; font-size: 14px; wrap: word-wrap; overflow: elide; max-height: 60px; }
                     if root.chips.length > 0: HorizontalLayout {
                         alignment: start;
                         spacing: 8px;
