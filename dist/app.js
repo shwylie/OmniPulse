@@ -294,8 +294,9 @@ function platformBadge(t) {
 
 // The bigger platform icon left of a track's title, artist and album: it lights up in the platform's
 // own colour on hover, and opens the uploader's page (who put it there), whatever the credits say
-function platformButton(t) {
+function platformButton(t, mark) {
   const b = platformBadge(t);
+  if (mark) b.replaceChildren(titleIcon(srcOf(t)));
   b.classList.add("platBig");
   const up = t ? artistOfTrack(t).name : "";
   b.title = platInfo(srcOf(t)).name + (up ? ". Click to open " + up + "'s page" + (uploaderApart(t) ? " (they uploaded it)" : "") : "");
@@ -1484,7 +1485,8 @@ function fillNowPlaying(t) {
   $("plAddBtn").hidden = !t;
   $("nowToggle").draggable = !!t;
   $("moreBtn").hidden = !t;
-  $("nowPlat").replaceChildren(...(t ? [platformButton(t)] : []));
+  // (on the art's corner: YouTube Music's own mark, as it can't pass for a play button there)
+  $("nowPlat").replaceChildren(...(t ? [platformButton(t, true)] : []));
   const small = t ? artUrl(t, "t120x120") : "";
   fadeImg($("nowArt"), small);
 
