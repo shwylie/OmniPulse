@@ -1779,6 +1779,8 @@ fn show_now(ui: &AppWindow, t: &Track) {
     ui.set_now_title(t.title.clone().into());
     ui.set_now_artist(t.artist.clone().into());
     ui.set_now_album(t.album.clone().into());
+    let apart = !t.uploader.is_empty() && omnipulse_core::ranking::artist_key(&t.uploader) != omnipulse_core::ranking::artist_key(t.artist.split([',', '&']).next().unwrap_or(""));
+    ui.set_now_uploader(if apart { t.uploader.clone().into() } else { "".into() });
     ui.set_now_plat(t.plat().into());
     ui.set_now_art(slint::Image::default());
     ui.set_now_art_big(slint::Image::default());

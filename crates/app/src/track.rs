@@ -41,6 +41,9 @@ pub struct Track {
     pub plays: u64,
     /// when it came out or was uploaded (YYYY-MM-DD; "" when unknown), for New releases' order
     pub date: String,
+    /// who put it there, where that's someone other than its artist (a SoundCloud upload titled
+    /// "Artist - Song"): shown in Now Playing as "uploaded by", as the web app does
+    pub uploader: String,
 }
 
 impl Default for Src {
@@ -150,6 +153,7 @@ impl Track {
             label: t["label_name"].as_str().unwrap_or("").to_string(),
             plays: t["playback_count"].as_u64().unwrap_or(0),
             date: t["created_at"].as_str().unwrap_or("").chars().take(10).collect::<String>().replace('/', "-"),
+            uploader: t["user"]["username"].as_str().unwrap_or("").to_string(),
         }
         .tidied())
     }
@@ -307,6 +311,7 @@ impl Track {
             label: s["label_name"].as_str().unwrap_or("").to_string(),
             plays: s["playback_count"].as_u64().unwrap_or(0),
             date: String::new(),
+            uploader: String::new(),
         })
     }
 }
