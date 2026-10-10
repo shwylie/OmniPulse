@@ -40,7 +40,7 @@ function xplTracks(p) {
 
 // What the sidebar shows (the "user" is you, so its track rows get remove buttons)
 function xplSidebarItems() {
-  return xpls.map((p) => ({ source: "xpl", id: p.id, title: p.title, user: { username: "This PC" }, count: p.tracks.length }));
+  return xpls.map((p) => ({ source: "xpl", id: p.id, title: p.title, user: { username: p.collab ? "Collaborative" : "This PC" }, count: p.tracks.length }));
 }
 
 function xplCreate(title, tracks, from) {
@@ -63,6 +63,7 @@ function xplAdd(id, list) {
   const fresh = list.filter((t) => t && !have.has(t.id) && have.add(t.id));
   p.tracks.push(...fresh.map(xplSnap));
   xplSave();
+  if (typeof collabAdded === "function") collabAdded(p, fresh);   // (collaborative: to everyone in it)
   return fresh.length;
 }
 
@@ -71,6 +72,7 @@ function xplRemove(id, trackId) {
   if (!p) return;
   p.tracks = p.tracks.filter((s) => s.id !== trackId);
   xplSave();
+  if (typeof collabRemoved === "function") collabRemoved(p, trackId);
 }
 
 function xplRename(id, title) {
@@ -179,6 +181,10 @@ function openPlaylistActions(p, x, y) {
   SHARE_PLATS.forEach(([plat, name]) => { if (sharePlatformId(p, plat)) add("Copy " + name + " link", "share:" + plat); });
   add("Hide playlist", "hide");
   if (isXpl(p)) {
+    const x = xplFind(p.id) || {};
+    if (!x.collab) add("Invite collaborators", "collab");
+    else if (x.collab.owner) { add("Copy invite link again", "collab"); add("Stop collaborating", "collableave"); }
+    else add("Leave collaboration", "collableave");
     add("Rename...", "rename");
     add("Delete", "delete");
   } else {
@@ -201,6 +207,8 @@ function runPlaylistAction(a) {
   else if (a === "share") sharePlaylist(p);
   else if (a.startsWith("share:")) sharePlatform(p, a.slice(6));
   else if (a === "switch") xplSwitch(p);
+  else if (a === "collab") collabInvite(p);
+  else if (a === "collableave") collabLeave(p);
   else if (a === "rename") openRenameDialog(p);
   else if (a === "delete") deleteXpl(p);
   else if (a === "hide") hidePlaylist(p, true);

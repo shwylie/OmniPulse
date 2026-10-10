@@ -29,7 +29,8 @@ function shareLinks(t) {
   return links;
 }
 
-async function sharePlaylist(p) {
+// (quiet: only shared, for an invite to collaborate: no link of its own copied)
+async function sharePlaylist(p, quiet) {
   const relay = relayUrl();
   say("Sharing...");
   let tracks;
@@ -56,6 +57,7 @@ async function sharePlaylist(p) {
       shareInfoSet(p, { code: made.code, key: made.key, relay });
       url = made.url;
     }
+    if (quiet) return;
     await navigator.clipboard.writeText(url);
     say("Link copied: anyone can see its songs on every platform, and open it in OmniPulse." + (was ? " (The same link as before, now up to date.)" : ""), { force: true });
   } catch (e) {

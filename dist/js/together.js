@@ -366,7 +366,9 @@ async function togetherLink(link, asked) {
     return;
   }
   if (u.host === "playlist") {
-    if (/^[a-z0-9]{8}$/.test(code) && relayOk(relay)) await shareOpen(code, relay); else say("That link isn't an OmniPulse playlist.");
+    // (with an edit key: an invite to a collaborative one, which joins it)
+    const e = (u.searchParams.get("e") || "").replace(/[^a-z0-9]/g, "");
+    if (/^[a-z0-9]{8}$/.test(code) && relayOk(relay)) await (e ? collabJoin(code, relay, e) : shareOpen(code, relay)); else say("That link isn't an OmniPulse playlist.");
     return;
   }
   if (!kind || !/^[a-z0-9]{8}$/.test(code) || !relayOk(relay)) { say("That link isn't an OmniPulse invite."); return; }

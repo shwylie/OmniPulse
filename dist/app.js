@@ -1039,6 +1039,7 @@ function openPlaylist(p) {
   currentPlaylist = p;
   showView("playlist");
   if (p.source === "mix") { openMix(p); return; }   // a Discover mix or station
+  if (isXpl(p) && typeof collabPull === "function") collabPull(xplFind(p.id));   // (collaborative: everyone's changes)
   if (isXpl(p)) { ++loadToken; $("listView").scrollTop = 0; setLocalPool(xplTracks(xplFind(p.id) || { tracks: [] })); render(); say(viewTracks.length ? "" : "Nothing in here yet. Add tracks with the playlist button on any track, or drag them onto this playlist."); return; }
   if (p.source === "spotify" || p.source === "local" || p.source === "youtube") { loadPlatformPlaylist(p); return; }
   openCachedList("list:sc:" + p.id,

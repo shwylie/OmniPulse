@@ -83,6 +83,7 @@ function extrasInit() {
   mbInit();
   pluginsInit();
   updateInit();
+  collabInit();
   castInit();
   nativeOutInit();
   togetherInit();

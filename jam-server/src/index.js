@@ -23,7 +23,11 @@
 // Shared playlists (a playlist on someone's PC, with each song's links on every platform it's on):
 //   POST /api/shares                { title, by, tracks }  ->  { code, key, url }
 //   PUT  /api/shares/<code>?key=<k> the same, updated
-//   GET  /api/shares/<code>         the playlist (for OmniPulse to add it)
+//   GET  /api/shares/<code>         the playlist (for OmniPulse to add it), with its rev (each change counts)
+//   POST /api/shares/<code>/collab?key=<k>[&stop=1]   collaborative: an edit key for its invite -> { editKey }
+//        (stop: no longer; a collaborative one is never let go for being idle)
+//   POST /api/shares/<code>/edit?k=<key or editKey>   { op: "add", track } | { op: "remove", id } (a
+//        track's snap.id), from its owner or a collaborator -> { rev }
 //   GET  /p/<code>                  its page: the songs, their links, and Open in OmniPulse
 //
 // Settings (wrangler.toml [vars], or the Cloudflare dashboard): DOWNLOAD_URL, where "Download OmniPulse"
@@ -84,7 +88,8 @@ const fmtLen = (ms) => { const s = Math.round((Number(ms) || 0) / 1000); return 
 const LINK_NAMES = { soundcloud: "SoundCloud", spotify: "Spotify", youtube: "YouTube Music" };
 const httpsLink = (u) => typeof u === "string" && /^https:\/\//.test(u);
 
-function sharePage(env, share, appLink) {
+// (invite: a collaborator's link, which joins it rather than copies it)
+function sharePage(env, share, appLink, invite) {
   const title = share ? share.title : "This playlist isn't shared any more";
   const download = env.DOWNLOAD_URL || "";
   const rows = share ? share.tracks.map((t, i) => {
@@ -92,7 +97,7 @@ function sharePage(env, share, appLink) {
     return '<li><span class="n">' + (i + 1) + '</span><span class="t"><b>' + esc(t.title) + '</b><br><span class="a">' + esc(t.artist) + '</span></span><span class="l">' + links + '</span><span class="d">' + fmtLen(t.ms) + "</span></li>";
   }).join("") : "";
   const sub = share ? (share.by ? "Shared by " + esc(share.by) + " · " : "") + share.tracks.length + (share.tracks.length === 1 ? " song" : " songs") : "Ask them to send a new link.";
-  const acts = share ? '<div class="acts"><a class="btn open" href="' + esc(appLink) + '">Open in OmniPulse</a>' + (download ? '<a class="btn get" href="' + esc(download) + '">Download OmniPulse</a>' : "") + "</div><ol>" + rows + "</ol>" : "";
+  const acts = share ? '<div class="acts"><a class="btn open" href="' + esc(appLink) + '">' + (invite ? "Join in OmniPulse" : "Open in OmniPulse") + '</a>' + (download ? '<a class="btn get" href="' + esc(download) + '">Download OmniPulse</a>' : "") + "</div><ol>" + rows + "</ol>" : "";
   return '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">' +
     "<title>" + esc(title) + " · OmniPulse</title>" +
     '<meta property="og:title" content="' + esc(title) + '"><meta property="og:description" content="A playlist from OmniPulse, with every song on SoundCloud, Spotify and YouTube Music">' +
@@ -146,6 +151,18 @@ export default {
       if (!put.ok) return put;
       return json({ code, key, url: url.origin + "/p/" + code });
     }
+    // collaborative playlists: the edit key, and the edits
+    if (parts[0] === "api" && parts[1] === "shares" && parts.length === 4 && req.method === "POST" && (parts[3] === "collab" || parts[3] === "edit")) {
+      const code = parts[2];
+      if (!/^[a-z0-9]{8}$/.test(code)) return json({ error: "not found" }, 404);
+      const stub = env.SHARES.get(env.SHARES.idFromName(code));
+      if (parts[3] === "collab") return stub.fetch("https://share/collab", { method: "POST", body: JSON.stringify({ key: url.searchParams.get("key") || "", stop: url.searchParams.get("stop") === "1" }) });
+      const r = await readJson(req);
+      if (r.error) return r.error;
+      const op = r.body || {};
+      const track = op.op === "add" ? shareClean({ tracks: [op.track || {}] }).tracks[0] : null;
+      return stub.fetch("https://share/edit", { method: "POST", body: JSON.stringify({ k: url.searchParams.get("k") || "", op: op.op, id: String(op.id || "").slice(0, 200), track }) });
+    }
     if ((parts[0] === "p" && parts.length === 2) || (parts[0] === "api" && parts[1] === "shares" && parts.length === 3)) {
       const code = parts[parts.length - 1];
       if (!/^[a-z0-9]{8}$/.test(code)) return json({ error: "not found" }, 404);
@@ -158,8 +175,10 @@ export default {
       const got = await stub.fetch("https://share/get");
       if (parts[0] === "api") return got;
       const share = got.ok ? await got.json().catch(() => null) : null;
-      const appLink = (env.APP_SCHEME || "omnipulse") + "://playlist/" + code + "?relay=" + encodeURIComponent(url.origin);
-      return new Response(sharePage(env, share, appLink), { headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" } });
+      // (a collaborator's invite carries its edit key on to the app)
+      const e = (url.searchParams.get("e") || "").replace(/[^a-z0-9]/g, "").slice(0, 40);
+      const appLink = (env.APP_SCHEME || "omnipulse") + "://playlist/" + code + "?relay=" + encodeURIComponent(url.origin) + (e ? "&e=" + e : "");
+      return new Response(sharePage(env, share, appLink, !!e), { headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" } });
     }
 
     // a new room
@@ -393,12 +412,50 @@ export class Share {
     if (url.pathname === "/put") {
       const m = await req.json();
       if (m.fresh ? !!meta : !meta || m.key !== meta.key) return json({ error: "not yours to change" }, 403);
-      await this.ctx.storage.put("meta", { key: meta ? meta.key : m.key, used: Date.now() });
-      await this.ctx.storage.put("share", m.share);
+      await this.ctx.storage.put("meta", { key: meta ? meta.key : m.key, editKey: meta ? meta.editKey : undefined, used: Date.now() });
+      const old = await this.ctx.storage.get("share");
+      await this.ctx.storage.put("share", Object.assign(m.share, { rev: ((old && old.rev) || 0) + 1, collab: !!(meta && meta.editKey) }));
       await this.ctx.storage.setAlarm(Date.now() + SHARE_IDLE_MS);
       return json({ ok: true });
     }
     if (!meta) return json({ error: "this playlist isn't shared any more" }, 404);
+    if (url.pathname === "/collab") {
+      const m = await req.json();
+      if (m.key !== meta.key) return json({ error: "not yours to change" }, 403);
+      // the owner stopping it: the edit key goes (collaborators keep their copies, no longer joined)
+      if (m.stop) {
+        delete meta.editKey;
+        const share = await this.ctx.storage.get("share");
+        if (share) { share.collab = false; share.rev = (share.rev || 0) + 1; await this.ctx.storage.put("share", share); }
+        await this.ctx.storage.put("meta", meta);
+        return json({ ok: true });
+      }
+      if (!meta.editKey) {
+        meta.editKey = randomCode(24);
+        const share = await this.ctx.storage.get("share");
+        if (share) { share.collab = true; await this.ctx.storage.put("share", share); }
+      }
+      meta.used = Date.now();
+      await this.ctx.storage.put("meta", meta);
+      return json({ editKey: meta.editKey });
+    }
+    if (url.pathname === "/edit") {
+      const m = await req.json();
+      if (!m.k || (m.k !== meta.key && m.k !== meta.editKey)) return json({ error: "not yours to change" }, 403);
+      const share = (await this.ctx.storage.get("share")) || { title: "Playlist", tracks: [] };
+      const idOf = (t) => (t && t.snap && t.snap.id != null ? String(t.snap.id) : "");
+      if (m.op === "add" && m.track) {
+        if (!share.tracks.some((t) => idOf(t) && idOf(t) === idOf(m.track)) && share.tracks.length < MAX_SHARE_TRACKS) share.tracks.push(m.track);
+      } else if (m.op === "remove" && m.id) {
+        share.tracks = share.tracks.filter((t) => idOf(t) !== m.id);
+      } else return json({ error: "unknown edit" }, 400);
+      share.rev = (share.rev || 0) + 1;
+      await this.ctx.storage.put("share", share);
+      meta.used = Date.now();
+      await this.ctx.storage.put("meta", meta);
+      await this.ctx.storage.setAlarm(Date.now() + SHARE_IDLE_MS);
+      return json({ rev: share.rev });
+    }
     meta.used = Date.now();
     await this.ctx.storage.put("meta", meta);
     await this.ctx.storage.setAlarm(Date.now() + SHARE_IDLE_MS);
@@ -407,6 +464,11 @@ export class Share {
 
   async alarm() {
     const meta = await this.ctx.storage.get("meta");
+    // a collaborative one stays for as long as it's collaborative (only stopping it lets it go)
+    if (meta && meta.editKey) {
+      await this.ctx.storage.setAlarm(Date.now() + SHARE_IDLE_MS);
+      return;
+    }
     if (meta && Date.now() - (meta.used || 0) < SHARE_IDLE_MS) {
       await this.ctx.storage.setAlarm((meta.used || Date.now()) + SHARE_IDLE_MS);
       return;
