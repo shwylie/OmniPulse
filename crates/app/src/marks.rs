@@ -30,6 +30,7 @@ pub async fn set_like(t: &Track, on: bool) -> Result<(), String> {
             let q = format!("/me/library?uris={}", crate::sources::urlencode(uri));
             omnipulse_core::spotify::spotify_api(if on { "PUT" } else { "DELETE" }.into(), q, None).await.map(|_| ())
         }
+        Src::MusicBrainz(_) => Err("a MusicBrainz song can't be liked: it's only played from YouTube Music".into()),
         Src::YouTube(_) => {
             let mut v = read("native-yt-likes.json");
             let mut list: Vec<Value> = v.as_array().cloned().unwrap_or_default();

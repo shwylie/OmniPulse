@@ -9,6 +9,7 @@ name = "OmniPulse-native"
 path = "src/main.rs"
 
 [dependencies]
+unicode-normalization = "0.1"
 omnipulse-core = { path = "../core" }
 omnipulse-audio = { path = "../audio" }
 slint = { version = "1.18", features = ["unstable-winit-030"] }

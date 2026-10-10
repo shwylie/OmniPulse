@@ -396,6 +396,8 @@ fn paint_sides(a: &mut App) {
 fn go_plus_set(prefs: &serde_json::Value) {
     let on = plat_on(prefs, "youtube") && omnipulse_core::tools::ytdlp_path().is_some();
     sources::GO_PLUS.store(on, std::sync::atomic::Ordering::Relaxed);
+    // (MusicBrainz in search: Settings > Integrations, as the web app's prefs.mbOn)
+    sources::MUSICBRAINZ.store(integrations::on(prefs, "mbOn"), std::sync::atomic::Ordering::Relaxed);
 }
 
 fn plat_toggle(shared: &Shared, plat: &str) {
@@ -445,7 +447,7 @@ fn open_search(shared: &Shared, q: String) {
     show_tracks(shared, "search", &format!("Results for \"{q}\""), "Searching...".into(), Vec::new(), true);
     load_into(shared, "search", format!("Results for \"{q}\""), async move {
         let t = sources::search(&q).await;
-        let sub = if t.is_empty() { "Nothing found.".into() } else { plural(t.len(), "track", "tracks") + " from SoundCloud, Spotify and YouTube Music." };
+        let sub = if t.is_empty() { "Nothing found.".into() } else { plural(t.len(), "track", "tracks") + ", best match first." };
         (t, sub)
     });
 }
@@ -531,6 +533,7 @@ fn track_from_play(p: &webstate::Play) -> Option<Track> {
     let src = match p.src.as_str() {
         "spotify" => track::Src::Spotify(format!("spotify:track:{}", p.id.trim_start_matches("sp:"))),
         "youtube" => track::Src::YouTube(p.id.trim_start_matches("yt:").to_string()),
+        "musicbrainz" => track::Src::MusicBrainz(p.id.trim_start_matches("mb:").to_string()),
         "local" => track::Src::Local(omnipulse_core::local::local_path_for(&p.id)?.to_string_lossy().into_owned()),
         _ => track::Src::SoundCloud(p.id.parse().ok()?),
     };
@@ -955,8 +958,10 @@ fn start(shared: &Shared) {
     let t2 = t.clone();
     STATUS_HOLD.with(|h| *h.borrow_mut() = None);
     rt.spawn(async move {
-        // a Go+ track: never the preview, but its version on YouTube Music (crate::versions)
-        let (src, version) = if t.go_plus {
+        // a Go+ track: never the preview, but its version on YouTube Music (crate::versions); a
+        // MusicBrainz song the same way (MusicBrainz knows it, YouTube Music has it to play)
+        let mb = matches!(t.src, track::Src::MusicBrainz(_));
+        let (src, version) = if t.go_plus || mb {
             match versions::find(&t).await {
                 Some(v) => (player::open_source(&Track::youtube(&v.yt), h.clone()).await, Some(v)),
                 None => (Err("there's no version of it on YouTube Music".to_string()), None),
@@ -992,10 +997,11 @@ fn start(shared: &Shared) {
                         ui.set_status("".into());
                         // which version a Go+ track is playing; the closest one's note stays while it plays
                         if let Some(v) = &version {
+                            let what = if mb { "From MusicBrainz" } else { "Go+ track" };
                             if v.exact {
-                                ui.set_status("Go+ track: playing the full song from YouTube Music.".into());
+                                if !mb { ui.set_status("Go+ track: playing the full song from YouTube Music.".into()); }
                             } else {
-                                let note = format!("Go+ track: no exact match, so it's playing the closest, \"{}\" by {}, from YouTube Music.", v.yt.title, v.yt.artists);
+                                let note = format!("{what}: no exact match, so it's playing the closest, \"{}\" by {}, from YouTube Music.", v.yt.title, v.yt.artists);
                                 ui.set_status(note.clone().into());
                                 STATUS_HOLD.with(|h| *h.borrow_mut() = Some(note));
                             }
@@ -1008,9 +1014,10 @@ fn start(shared: &Shared) {
                         }
                         push_out(&shared, true);
                     }
-                    // a Go+ track with no version anywhere: skipped, not its preview
-                    Err(e) if t.go_plus => {
-                        ui.set_status(format!("Skipped \"{}\" (Go+ track): {e}.", t.title).into());
+                    // a Go+ track (or MusicBrainz song) with no version anywhere: skipped, not its preview
+                    Err(e) if t.go_plus || matches!(t.src, track::Src::MusicBrainz(_)) => {
+                        let what = if t.go_plus { "Go+ track" } else { "from MusicBrainz" };
+                        ui.set_status(format!("Skipped \"{}\" ({what}): {e}.", t.title).into());
                         let s2 = shared.clone();
                         slint::Timer::single_shot(std::time::Duration::from_millis(400), move || step(&s2, 1));
                     }

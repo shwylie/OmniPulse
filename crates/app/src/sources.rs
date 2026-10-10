@@ -139,7 +139,7 @@ pub async fn playlist_tracks(p: &Playlist) -> Vec<Track> {
     }
 }
 
-/// A search on every platform, taking turns so each gets a look in
+/// A search on every platform (every one answers before anything shows), best match first (rank)
 pub async fn search(q: &str) -> Vec<Track> {
     let enc = urlencode(q);
     let sc = async {
@@ -158,8 +158,54 @@ pub async fn search(q: &str) -> Vec<Track> {
             .unwrap_or_default()
     };
     let yt = async { core::youtube::search(q).await.map(|l| l.iter().map(Track::youtube).collect()).unwrap_or_default() };
-    let (a, b, c): (Vec<Track>, Vec<Track>, Vec<Track>) = tokio::join!(sc, sp, yt);
-    interleave(vec![a, b, c])
+    // MusicBrainz: its songs play from YouTube Music, so only while that can play (yt-dlp here)
+    let mb = async {
+        if !MUSICBRAINZ.load(std::sync::atomic::Ordering::Relaxed) || core::tools::ytdlp_path().is_none() {
+            return Vec::new();
+        }
+        core::musicbrainz::search(q).await.map(|l| l.iter().filter_map(Track::musicbrainz).collect()).unwrap_or_default()
+    };
+    let (a, b, c, d): (Vec<Track>, Vec<Track>, Vec<Track>, Vec<Track>) = tokio::join!(sc, sp, yt, mb);
+    rank(q, interleave(vec![a, b, c, d]))
+}
+
+/// Whether MusicBrainz is searched too (Settings: the web app's prefs.mbOn, on unless switched off)
+pub static MUSICBRAINZ: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
+
+/// The words of a search or a title, as the web app's reqWords: lower case, accents off, Korean and
+/// Japanese and Chinese kept, single letters dropped (but not single digits)
+pub fn words(s: &str) -> Vec<String> {
+    use unicode_normalization::UnicodeNormalization;
+    let plain: String = s.to_lowercase().nfkd().filter(|c| !('\u{300}'..='\u{36f}').contains(c)).collect();
+    let keep = |c: char| c.is_ascii_lowercase() || c.is_ascii_digit() || ('\u{c0}'..='\u{24f}').contains(&c) || ('\u{400}'..='\u{4ff}').contains(&c)
+        || ('\u{1100}'..='\u{11ff}').contains(&c) || ('\u{3040}'..='\u{9fff}').contains(&c) || ('\u{ac00}'..='\u{d7af}').contains(&c);
+    plain.split(|c: char| !keep(c)).filter(|w| w.chars().count() > 1 || w.chars().any(|c| c.is_ascii_digit())).map(String::from).collect()
+}
+
+/// Best match first, as the web app's searchRanker: more of the words searched for (in the title or
+/// artist), then a title (or artist) that's just what was searched, then the more played; otherwise as they came
+/// (the platforms taking turns). Unknown plays count as middling.
+pub fn rank(q: &str, list: Vec<Track>) -> Vec<Track> {
+    let mut want = words(q);
+    let asked = want.join(" ");
+    want.sort();
+    want.dedup();
+    if want.is_empty() {
+        return list;
+    }
+    let mut scored: Vec<(f64, u8, f64, usize, Track)> = list
+        .into_iter()
+        .enumerate()
+        .map(|(i, t)| {
+            let have: std::collections::HashSet<String> = words(&format!("{} {}", t.title, t.artist)).into_iter().collect();
+            let s = want.iter().filter(|w| have.contains(*w)).count() as f64 / want.len() as f64;
+            let exact = u8::from(words(&t.title).join(" ") == asked || words(&t.artist).join(" ") == asked);
+            let plays = if t.plays > 0 { t.plays as f64 } else { 1e5 };
+            (s, exact, (1.0 + plays).log10(), i, t)
+        })
+        .collect();
+    scored.sort_by(|a, b| b.0.total_cmp(&a.0).then(b.1.cmp(&a.1)).then(b.2.total_cmp(&a.2)).then(a.3.cmp(&b.3)));
+    scored.into_iter().map(|x| x.4).collect()
 }
 
 pub fn interleave(lists: Vec<Vec<Track>>) -> Vec<Track> {
@@ -411,4 +457,23 @@ pub fn urlencode(s: &str) -> String {
             _ => format!("%{b:02X}"),
         })
         .collect()
+}
+
+#[cfg(test)]
+mod rank_tests {
+    use super::*;
+    fn t(title: &str, artist: &str, plays: u64) -> Track { Track { title: title.into(), artist: artist.into(), plays, ..Default::default() } }
+
+    #[test]
+    fn best_match_first_as_the_web_app() {
+        let got = rank("hello", vec![t("허각 - Hello", "huh gak", 3_840_000), t("Hello Hello", "Wajid", 3_400_000), t("Hello", "colby!", 291_000), t("Hello", "Adele", 95_000_000)]);
+        let names: Vec<&str> = got.iter().map(|x| x.artist.as_str()).collect();
+        assert_eq!(names, ["Adele", "colby!", "huh gak", "Wajid"]);
+        let got = rank("ginsu ghosts n stuff", vec![t("Ghosts 'n' Stuff", "deadmau5", 90_000_000), t("Ginsu × Ghosts 'n' Stuff × Goodbye", "Tritonal", 200_000)]);
+        assert_eq!(got[0].artist, "Tritonal");
+        // an artist's name: their most played, not a little-known song named after them
+        let got = rank("deadmau5", vec![t("deadmau5", "Someone", 0), t("Strobe", "deadmau5", 50_000_000)]);
+        assert_eq!(got[0].title, "Strobe");
+        assert_eq!(words("Café n Stuff 2"), ["cafe", "stuff", "2"]);
+    }
 }

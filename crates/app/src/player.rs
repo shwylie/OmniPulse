@@ -33,6 +33,8 @@ fn spotify_attach() {
 
 pub async fn open_source(t: &Track, rt: tokio::runtime::Handle) -> Result<Box<dyn Source>, String> {
     match &t.src {
+        // (played as its YouTube Music version: crate::versions, in main.rs)
+        Src::MusicBrainz(_) => Err("it plays from YouTube Music".into()),
         Src::Local(path) => {
             let p = path.clone();
             tokio::task::spawn_blocking(move || Decoded::open_file(std::path::Path::new(&p)).map(|d| Box::new(d) as Box<dyn Source>)).await.map_err(|e| e.to_string())?

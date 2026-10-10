@@ -10,6 +10,8 @@ pub enum Src {
     Spotify(String),
     YouTube(String),
     Local(String),
+    /// a song MusicBrainz knows (its recording id): played from YouTube Music, as the web app does
+    MusicBrainz(String),
 }
 
 #[derive(Clone, Debug, Default)]
@@ -31,6 +33,9 @@ pub struct Track {
     pub licence: String,
     /// its record label, where it's given (for Stream-Safe Music)
     pub label: String,
+    /// how often it's been played, for search's order: SoundCloud's and YouTube Music's counts, and
+    /// Spotify's 0-100 popularity read as plays (as the web app's searchPlays); 0 when unknown
+    pub plays: u64,
 }
 
 impl Default for Src {
@@ -49,6 +54,7 @@ impl Track {
             Src::Spotify(_) => "spotify",
             Src::YouTube(_) => "youtube",
             Src::Local(_) => "local",
+            Src::MusicBrainz(_) => "musicbrainz",
         }
     }
 
@@ -59,7 +65,9 @@ impl Track {
         }
         match &self.src {
             Src::Spotify(uri) => format!("https://open.spotify.com/track/{}", uri.rsplit(':').next().unwrap_or("")),
-            Src::YouTube(id) => format!("https://music.youtube.com/watch?v={id}"),
+            // (a plain YouTube link: it opens for anyone)
+            Src::YouTube(id) => format!("https://www.youtube.com/watch?v={id}"),
+            Src::MusicBrainz(id) => format!("https://musicbrainz.org/recording/{id}"),
             _ => String::new(),
         }
     }
@@ -130,6 +138,23 @@ impl Track {
             go_plus: t["access"].as_str() == Some("preview") || t["policy"].as_str() == Some("SNIP"),
             licence: t["license"].as_str().unwrap_or("").to_string(),
             label: t["label_name"].as_str().unwrap_or("").to_string(),
+            plays: t["playback_count"].as_u64().unwrap_or(0),
+        }
+        .tidied())
+    }
+
+    /// A song MusicBrainz knows (as crates/core/src/musicbrainz.rs gives it), to play from YouTube Music
+    pub fn musicbrainz(t: &Value) -> Option<Track> {
+        let id = t["mbId"].as_str()?;
+        Some(Track {
+            src: Src::MusicBrainz(id.to_string()),
+            key: format!("mb:{id}"),
+            title: t["title"].as_str().unwrap_or("Untitled").to_string(),
+            artist: t["user"]["username"].as_str().unwrap_or("").to_string(),
+            album: t["album"].as_str().unwrap_or("").to_string(),
+            ms: t["duration"].as_u64().unwrap_or(0),
+            art: t["artwork_url"].as_str().unwrap_or("").to_string(),
+            ..Default::default()
         }
         .tidied())
     }
@@ -149,6 +174,8 @@ impl Track {
             art: t["album"]["images"].as_array().and_then(|i| i.get(1).or(i.first())).and_then(|i| i["url"].as_str()).unwrap_or("").to_string(),
             genre: String::new(),
             link: String::new(),
+            // 0-100, read as plays on a log scale (50 about 300 thousand, 80 about 40 million)
+            plays: t["popularity"].as_f64().map(|p| 10f64.powf(2.0 + p * 0.07) as u64).unwrap_or(0),
             go_plus: false, ..Default::default()
         }.tidied())
     }
@@ -164,6 +191,7 @@ impl Track {
             art: t.thumb.clone(),
             genre: String::new(),
             link: String::new(),
+            plays: t.plays,
             go_plus: false, ..Default::default()
         }
         .tidied()
@@ -185,6 +213,9 @@ impl Track {
         if let Src::Spotify(uri) = &self.src {
             s["uri"] = serde_json::json!(uri);
         }
+        if let Src::MusicBrainz(id) = &self.src {
+            s["mbId"] = serde_json::json!(id);
+        }
         s
     }
 
@@ -195,6 +226,7 @@ impl Track {
         let src = match source {
             "spotify" => Src::Spotify(s["uri"].as_str().map(String::from).unwrap_or_else(|| format!("spotify:track:{}", id.trim_start_matches("sp:")))),
             "youtube" => Src::YouTube(id.trim_start_matches("yt:").to_string()),
+            "musicbrainz" => Src::MusicBrainz(s["mbId"].as_str().map(String::from).unwrap_or_else(|| id.trim_start_matches("mb:").to_string())),
             "local" => {
                 let path = omnipulse_core::local::local_path_for(&id)?;
                 Src::Local(path.to_string_lossy().into_owned())
@@ -214,6 +246,7 @@ impl Track {
             go_plus: s["access"].as_str() == Some("preview") || s["policy"].as_str() == Some("SNIP"),
             licence: s["license"].as_str().unwrap_or("").to_string(),
             label: s["label_name"].as_str().unwrap_or("").to_string(),
+            plays: s["playback_count"].as_u64().unwrap_or(0),
         })
     }
 }
