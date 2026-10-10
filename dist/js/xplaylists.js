@@ -112,19 +112,23 @@ async function platformPlaylistTracks(p) {
 }
 
 // "Switch to a playlist on this PC": copy it here, and hide the original from the sidebar
+// (returns the copy as the sidebar has it, or null if it couldn't be made)
 async function xplSwitch(p) {
   say('Copying "' + (p.title || "playlist") + '"...');
   try {
-    const tracks = await platformPlaylistTracks(p);
+    const tracks = typeof playlistAllTracks === "function" ? await playlistAllTracks(p) : await platformPlaylistTracks(p);
     const copy = xplCreate(p.title, tracks, String(p.id));
     prefs.hiddenPlaylists = [...new Set((prefs.hiddenPlaylists || []).concat(String(p.id)))];
     savePrefs();
     await refreshSidebar();
-    openPlaylist(playlists.find((x) => x.id === copy.id));
-    say('"' + copy.title + '" is now a playlist on this PC (' + copy.tracks.length + " tracks). The original is unchanged on " +
-      (p.source === "spotify" ? "Spotify" : p.source === "local" ? "your drive" : "SoundCloud") + ".");
+    const shown = playlists.find((x) => x.id === copy.id);
+    openPlaylist(shown);
+    say('"' + copy.title + '" is now a playlist on this PC (' + copy.tracks.length + " tracks)." + (p.source === "mix" ? "" : " The original is unchanged on " +
+      (p.source === "local" ? "your drive" : platInfo(p.source || "soundcloud").name) + "."));
+    return shown || null;
   } catch (e) {
     say("Could not copy the playlist: " + e);
+    return null;
   }
 }
 

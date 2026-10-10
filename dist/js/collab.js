@@ -19,12 +19,23 @@ async function collabPost(c, path, body) {
 }
 
 // The owner: shared (if it isn't yet), made collaborative, and the invite copied
-// The playlist page's collaborate button, beside Share (playlists on this PC): invite, copy the
-// invite again (yours), or say you're in someone else's
+// The playlist page's collaborate button, beside Share: invite, copy the invite again (yours), or
+// say you're in someone else's. On a SoundCloud, Spotify or YouTube playlist it first makes a copy
+// on this PC (collaborating needs one; the original stays as it is), then invites.
+const collabable = (p) => !!p && p.source !== "local" && !isAlbumPage(p);
 function paintCollabBtn(v) {
   const b = $("plCollab");
-  const p = v === "playlist" && currentPlaylist && isXpl(currentPlaylist) ? currentPlaylist : null;
-  const x = p && xplFind(p.id);
+  const p = v === "playlist" && collabable(currentPlaylist) ? currentPlaylist : null;
+  b.hidden = !p;
+  if (!p) return;
+  if (!isXpl(p)) {
+    $("plCollabText").textContent = "Invite collaborators";
+    b.classList.remove("on");
+    b.title = "Make a collaborative copy on this PC that friends can add to, remove from and reorder" +
+      (p.source === "mix" ? "" : " (the original on " + platInfo(p.source || "soundcloud").name + " stays as it is)");
+    return;
+  }
+  const x = xplFind(p.id);
   b.hidden = !x;
   if (!x) return;
   const c = x.collab;
@@ -128,8 +139,11 @@ async function collabLeave(p) {
 
 function collabInit() {
   $("plCollab").addEventListener("click", async () => {
-    const p = currentPlaylist;
-    const x = p && xplFind(p.id);
+    let p = currentPlaylist;
+    if (!collabable(p)) return;
+    // (a platform playlist: its copy on this PC is what's shared)
+    if (!isXpl(p)) { p = await xplSwitch(p); if (!p) return; }
+    const x = xplFind(p.id);
     if (!x) return;
     if (x.collab && !x.collab.owner) { say("You're collaborating on this playlist. Right-click it in the sidebar to leave."); return; }
     await collabInvite(p);
