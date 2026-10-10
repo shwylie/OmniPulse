@@ -228,7 +228,10 @@ pub fn open_url(url: String) -> Result<(), String> {
         || url.starts_with("https://www.last.fm/")
         || url.starts_with("https://music.youtube.com/")
         || url.starts_with("https://www.youtube.com/")
-        || url.starts_with("https://musicbrainz.org/"))
+        || url.starts_with("https://musicbrainz.org/")
+        // (where your own keys are made: the key setup's pages)
+        || url.starts_with("https://developer.spotify.com/")
+        || url.starts_with("https://console.cloud.google.com/"))
     {
         return Err("Only SoundCloud, Spotify, YouTube, MusicBrainz and Last.fm links can be opened".to_string());
     }

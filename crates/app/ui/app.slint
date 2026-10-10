@@ -31,6 +31,10 @@ export struct Account { name: string, status: string, signed: bool, busy: bool }
 export struct SetRow { head: string, label: string, note: string, on: bool, key: string, sub: bool, more: bool }
 /// One of a plugin's settings: its kind ("toggle", "text", "password", "number", "select"), what it's
 /// set to (as text; "true"/"false" for a toggle), and a select's options
+/// A step of the key setup: what to do, whether it has a page to open, and values to copy
+export struct KeyStep { text: string, has-url: bool, copies: [string] }
+/// A key to paste: its label, what's typed, and whether it looks right
+export struct KeyField { label: string, value: string, ok: bool }
 export struct PlugField { key: string, label: string, note: string, kind: string, value: string, options: [string] }
 export struct Item { name: string, sub: string, art: image, plat: string }
 
@@ -576,6 +580,16 @@ export component AppWindow inherits Window {
     // Settings, beyond Look: its switches, section by section
     // Settings' switches, by category, and which categories are closed
     in property <[SetRow]> set-rows-integrations;
+    // your own keys (Accounts): the key setup
+    in-out property <bool> ks-open;
+    in property <string> ks-head;
+    in property <string> ks-note;
+    in property <[KeyStep]> ks-steps;
+    in property <[KeyField]> ks-fields;
+    callback ks-open-url(int);
+    callback ks-copy(int, int);
+    callback ks-set(int, string);
+    callback ks-save();
     // a Settings row's own settings (a plugin's): its key; the dialog with its fields
     callback set-more(string);
     in-out property <bool> pf-open;
@@ -1905,6 +1919,68 @@ export component AppWindow inherits Window {
                 }
             }
         }
+        }
+    }
+    // your own keys for a platform: the steps (with pages to open and values to copy), then the keys
+    if root.ks-open: Rectangle {
+        x: 0;
+        y: 0;
+        width: root.width;
+        height: root.height;
+        background: #00000080;
+        TouchArea { clicked => { root.ks-open = false; } }
+        Rectangle {
+            width: 560px;
+            // (sized by what's in it: a size taken from its own layout would size the window by it too)
+            height: 150px + root.ks-steps.length * 74px + root.ks-fields.length * 58px;
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            background: Theme.elevated;
+            border-radius: 12px;
+            border-width: 1px;
+            border-color: Theme.line;
+            TouchArea { }
+            VerticalLayout {
+                alignment: start;
+                padding: 20px;
+                spacing: 10px;
+                Text { text: root.ks-head; color: Theme.text; font-size: 18px; font-weight: 800; }
+                for st[i] in root.ks-steps: HorizontalLayout {
+                    spacing: 10px;
+                    height: 64px;
+                    Text { text: (i + 1) + "."; color: Theme.accent; font-weight: 800; width: 18px; }
+                    VerticalLayout {
+                        horizontal-stretch: 1;
+                        spacing: 4px;
+                        Text { text: st.text; color: Theme.text; font-size: 13px; wrap: word-wrap; }
+                        HorizontalLayout {
+                            alignment: start;
+                            spacing: 6px;
+                            for c[k] in st.copies: Pill { label: "Copy " + c; clicked => { root.ks-copy(i, k); } }
+                        }
+                    }
+                    if st.has-url: Pill { label: "Open"; y: 0; clicked => { root.ks-open-url(i); } }
+                }
+                for f[i] in root.ks-fields: VerticalLayout {
+                    spacing: 4px;
+                    Text { text: f.label + (f.value == "" ? "" : f.ok ? "  \u{2713}" : "  (doesn't look right yet)"); color: f.ok ? Theme.accent : Theme.muted; font-size: 12px; }
+                    Rectangle {
+                        height: 34px;
+                        border-radius: 8px;
+                        background: Theme.panel;
+                        border-width: 1px;
+                        border-color: f.ok ? Theme.accent : Theme.line;
+                        TextInput { x: 10px; width: parent.width - 20px; height: parent.height; vertical-alignment: center; color: Theme.text; font-size: 13px; single-line: true; text: f.value; edited => { root.ks-set(i, self.text); } }
+                    }
+                }
+                Text { text: root.ks-note; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
+                HorizontalLayout {
+                    alignment: end;
+                    spacing: 8px;
+                    Pill { label: "Cancel"; clicked => { root.ks-open = false; } }
+                    Pill { label: "Save and sign in"; on: true; clicked => { root.ks-save(); } }
+                }
+            }
         }
     }
     // a plugin's settings, as its manifest lists them

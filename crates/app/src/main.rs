@@ -5,6 +5,7 @@
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod keysetup;
 mod offset;
 mod plugrun;
 mod desktop;
@@ -2506,9 +2507,9 @@ fn accounts_paint(shared: &Shared) {
                 "soundcloud" => "Your SoundCloud likes, playlists and search.".to_string(),
                 "spotify" => "Your Spotify likes, playlists and search.".to_string(),
                 "playback" => "Plays Spotify tracks in full (Premium). Without it, they play from YouTube Music.".to_string(),
-                "youtube" if omnipulse_core::yt_account::status()["configured"].as_bool() != Some(true) => "Needs YouTube keys first: set them up in the web app (Settings > Integrations).".to_string(),
+                "youtube" if omnipulse_core::yt_account::status()["configured"].as_bool() != Some(true) => "Optional: your likes on YouTube too. It needs your own free Google keys first: Sign in sets them up.".to_string(),
                 "youtube" => "Likes here become likes on YouTube and YouTube Music.".to_string(),
-                _ if omnipulse_core::lastfm::lastfm_status()["configured"].as_bool() != Some(true) => "Needs Last.fm keys first: set them up in the web app (Settings > Integrations).".to_string(),
+                _ if omnipulse_core::lastfm::lastfm_status()["configured"].as_bool() != Some(true) => "What you play on your Last.fm profile. It needs your own free Last.fm keys first: Sign in sets them up.".to_string(),
                 _ => "What you play goes to your Last.fm profile.".to_string(),
             }
         };
@@ -2546,8 +2547,13 @@ fn account_act(shared: &Shared, i: usize) {
     if ACCOUNT_BUSY.with(|b| b.borrow().contains(key)) {
         return;
     }
-    let (rt, weak) = { let a = shared.borrow(); (a.rt.clone(), a.ui.clone()) };
     let out = account_signed(key);
+    // signing in where your own keys are needed first: the key setup (then the sign-in)
+    let plat = match key { "spotify" => Some("spotify"), "youtube" => Some("youtube"), "lastfm" => Some("lastfm"), _ => None };
+    if let Some(plat) = plat.filter(|p| !out && !keysetup::has_keys(p)) {
+        return ks_open(shared, plat, i);
+    }
+    let (rt, weak) = { let a = shared.borrow(); (a.rt.clone(), a.ui.clone()) };
     ACCOUNT_BUSY.with(|b| b.borrow_mut().insert(key));
     accounts_paint(shared);
     rt.spawn(async move {
@@ -2579,6 +2585,52 @@ fn account_act(shared: &Shared, i: usize) {
             }
         }));
     });
+}
+
+// ---------- your own keys (crate::keysetup) ----------
+thread_local! {
+    /// the platform being set up, the account it signs in to after, and the keys typed so far
+    static KS: RefCell<Option<(String, usize, Vec<String>)>> = const { RefCell::new(None) };
+}
+
+fn ks_open(shared: &Shared, plat: &str, account: usize) {
+    let Some(s) = keysetup::setup(plat) else { return };
+    KS.with(|k| *k.borrow_mut() = Some((plat.to_string(), account, vec![String::new(); s.fields.len()])));
+    let Some(ui) = shared.borrow().ui.upgrade() else { return };
+    ui.set_ks_head(format!("Set up {}: your own keys", s.name).into());
+    ui.set_ks_note(format!("{} They're kept on this PC, in OmniPulse's own folder.", s.note).into());
+    let steps: Vec<KeyStep> = s.steps.iter().map(|st| KeyStep { text: st.text.into(), has_url: st.url.is_some(), copies: ModelRc::from(Rc::new(VecModel::from(st.copies.iter().map(|(l, _)| slint::SharedString::from(*l)).collect::<Vec<_>>()))) }).collect();
+    ui.set_ks_steps(ModelRc::from(Rc::new(VecModel::from(steps))));
+    ks_paint(shared);
+    ui.set_ks_open(true);
+}
+
+fn ks_paint(shared: &Shared) {
+    let Some((plat, _, vals)) = KS.with(|k| k.borrow().clone()) else { return };
+    let Some(s) = keysetup::setup(&plat) else { return };
+    let fields: Vec<KeyField> = s.fields.iter().zip(&vals).map(|((_, label, re), v)| KeyField { label: (*label).into(), value: v.clone().into(), ok: keysetup::looks_right(re, v) }).collect();
+    if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_ks_fields(ModelRc::from(Rc::new(VecModel::from(fields)))); }
+}
+
+fn ks_save(shared: &Shared) {
+    let Some((plat, account, vals)) = KS.with(|k| k.borrow().clone()) else { return };
+    let Some(s) = keysetup::setup(&plat) else { return };
+    let Some(ui) = shared.borrow().ui.upgrade() else { return };
+    if s.fields.iter().zip(&vals).any(|((_, _, re), v)| !keysetup::looks_right(re, v)) {
+        ui.set_ks_note("Not yet: each key has to look right (a tick beside it) before it's saved.".into());
+        return;
+    }
+    let mut fields = serde_json::Map::new();
+    for ((key, _, _), v) in s.fields.iter().zip(&vals) { fields.insert((*key).into(), serde_json::json!(v.trim())); }
+    match omnipulse_core::config_set(&fields) {
+        Ok(()) => {
+            KS.with(|k| k.borrow_mut().take());
+            ui.set_ks_open(false);
+            ui.set_status(format!("Your {} keys are saved. Signing in...", s.name).into());
+            account_act(shared, account);
+        }
+        Err(e) => ui.set_ks_note(format!("Couldn't save them: {e}").into()),
+    }
 }
 
 // ---------- Fade Between Tracks and Skip Silences (as the web app's js/fade.js and js/loudness.js) ----------
@@ -4199,6 +4251,38 @@ fn main() -> Result<(), slint::PlatformError> {
     ui.on_set_toggle(move |key| set_toggle(&s, &key));
     let s = shared.clone();
     ui.on_section_flip(move |t| section_flip(&s, &t));
+    // the key setup
+    let s = shared.clone();
+    ui.on_ks_open_url(move |i| {
+        let Some(plat) = KS.with(|k| k.borrow().as_ref().map(|x| x.0.clone())) else { return };
+        if let Some(url) = keysetup::setup(&plat).and_then(|st| st.steps.get(i as usize).and_then(|x| x.url)) {
+            if let Err(e) = omnipulse_core::open_url(url.to_string()) { if let Some(ui) = s.borrow().ui.upgrade() { ui.set_status(e.into()); } }
+        }
+    });
+    let s = shared.clone();
+    ui.on_ks_copy(move |i, k| {
+        let Some(plat) = KS.with(|x| x.borrow().as_ref().map(|x| x.0.clone())) else { return };
+        if let Some((label, value)) = keysetup::setup(&plat).and_then(|st| st.steps.get(i as usize).and_then(|x| x.copies.get(k as usize).cloned())) {
+            if let Some(ui) = s.borrow().ui.upgrade() { ui.set_status(match share::copy(&value) { Ok(()) => format!("{label} copied."), Err(e) => e }.into()); }
+        }
+    });
+    let s = shared.clone();
+    ui.on_ks_set(move |i, v| {
+        KS.with(|k| { if let Some(x) = k.borrow_mut().as_mut() { if let Some(f) = x.2.get_mut(i as usize) { *f = v.to_string(); } } });
+        // (the ticks: only the labels change while a key is typed)
+        let Some((plat, _, vals)) = KS.with(|k| k.borrow().clone()) else { return };
+        let Some(st) = keysetup::setup(&plat) else { return };
+        if let Some(ui) = s.borrow().ui.upgrade() {
+            let model = ui.get_ks_fields();
+            if let (Some(mut f), Some((_, _, re))) = (model.row_data(i as usize), st.fields.get(i as usize)) {
+                f.value = v.clone();
+                f.ok = keysetup::looks_right(re, &vals[i as usize]);
+                model.set_row_data(i as usize, f);
+            }
+        }
+    });
+    let s = shared.clone();
+    ui.on_ks_save(move || ks_save(&s));
     let s = shared.clone();
     ui.on_set_more(move |key| { if let Some(id) = key.strip_prefix("plugOn_") { pf_open(&s, id); } });
     let s = shared.clone();
@@ -4622,7 +4706,7 @@ fn main() -> Result<(), slint::PlatformError> {
         let mut step_no = 0usize;
         // (OMNIPULSE_SELFTEST_JOIN=<invite link>: only joining someone's room, following it, skipping and leaving)
         let join = std::env::var("OMNIPULSE_SELFTEST_JOIN").ok();
-        let full: [(u64, &str); 44] = [(9, "play"), (13, "library"), (13, "pagefind"), (14, "pageall"), (14, "pick"), (14, "picknone"), (14, "scoff"), (15, "scon"), (15, "albums"), (18, "albumsn"), (18, "discover"), (24, "rediscover"), (27, "sets"), (31, "stats"), (35, "now"), (36, "tprefs"), (37, "tpclose"), (39, "search"), (41, "found"), (42, "settings"), (43, "plugset"), (44, "plugclose"), (44, "light"), (45, "collapse"), (46, "artists"), (54, "artist"), (60, "autoplay"), (70, "narrow"), (72, "goplus"), (80, "tabright"), (81, "pbar"), (82, "pfloat"), (83, "pminimal"), (84, "musical"), (88, "musical2"), (90, "safe"), (90, "streamer"), (91, "streamcoll"), (91, "sort"), (93, "xpl"), (95, "xpl2"), (97, "fade"), (101, "fade2"), (103, "end")];
+        let full: [(u64, &str); 46] = [(9, "play"), (13, "library"), (13, "pagefind"), (14, "pageall"), (14, "pick"), (14, "picknone"), (14, "scoff"), (15, "scon"), (15, "albums"), (18, "albumsn"), (18, "discover"), (24, "rediscover"), (27, "sets"), (31, "stats"), (35, "now"), (36, "tprefs"), (37, "tpclose"), (39, "search"), (41, "found"), (42, "settings"), (43, "plugset"), (44, "plugclose"), (44, "keys"), (45, "keysclose"), (45, "light"), (45, "collapse"), (46, "artists"), (54, "artist"), (60, "autoplay"), (70, "narrow"), (72, "goplus"), (80, "tabright"), (81, "pbar"), (82, "pfloat"), (83, "pminimal"), (84, "musical"), (88, "musical2"), (90, "safe"), (90, "streamer"), (91, "streamcoll"), (91, "sort"), (93, "xpl"), (95, "xpl2"), (97, "fade"), (101, "fade2"), (103, "end")];
         let plan: Vec<(u64, &str)> = if join.is_some() { vec![(6, "join"), (14, "joined"), (16, "jamskip"), (19, "leave"), (21, "end")] } else { full.to_vec() };
         t.start(slint::TimerMode::Repeated, std::time::Duration::from_millis(250), move || {
             let Some(&(at, what)) = plan.get(step_no) else { return };
@@ -4657,6 +4741,9 @@ fn main() -> Result<(), slint::PlatformError> {
                 // a plugin's settings dialog (the Internet Archive's, if it's here), and a choice moved on
                 "plugset" => { pf_open(&s, "internet-archive"); let before = ui.get_pf_fields().iter().map(|f| format!("{}={}", f.key, f.value)).collect::<Vec<_>>().join(" "); ui.invoke_pf_set(2, "".into()); println!("selftest: plugin settings {} -> {}", before, ui.get_pf_fields().iter().map(|f| format!("{}={}", f.key, f.value)).collect::<Vec<_>>().join(" ")); }
                 "plugclose" => { PF_EDIT.with(|e| e.borrow_mut().take()); ui.set_pf_open(false); }
+                // the key setup (YouTube's), for its picture; nothing is saved
+                "keys" => { ks_open(&s, "youtube", 3); ui.invoke_ks_set(0, "123-abc.apps.googleusercontent.com".into()); println!("selftest: key setup \"{}\", steps {}, fields {}", ui.get_ks_head(), ui.get_ks_steps().row_count(), ui.get_ks_fields().iter().map(|f| format!("{}:{}", f.label, f.ok)).collect::<Vec<_>>().join(" ")); }
+                "keysclose" => { KS.with(|k| k.borrow_mut().take()); ui.set_ks_open(false); }
                 "pageall" => { ui.invoke_search_edited("".into()); println!("selftest: page filter cleared: {} rows", ui.get_rows().row_count()); }
                 "join" => { if let Some(link) = &join { listen_join(&s, link); } }
                 "joined" => println!("selftest: listening {:?}, playing \"{}\" at {}, queue {}, jam button \"{}\", status \"{}\"", listening(), ui.get_now_title(), ui.get_pos_text(), s.borrow().queue.items.len(), ui.get_jam_label(), ui.get_status()),
