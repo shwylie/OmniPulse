@@ -338,6 +338,19 @@ pub fn keep(key: &str, m: Measured) {
     if let (Some(p), Some(t)) = (store_file(), text) { let _ = std::fs::write(p, t); }
 }
 
+/// A key's tonic (0 is C) and whether it's minor, from its name ("A minor")
+pub fn key_parts(key: &str) -> Option<(usize, bool)> {
+    let (note, mode) = key.split_once(' ')?;
+    Some((NOTES.iter().position(|n| *n == note)?, mode == "minor"))
+}
+
+/// A key shifted by semitones: its name and Camelot code
+pub fn transposed(key: &str, semitones: i32) -> Option<(String, String)> {
+    let (t, minor) = key_parts(key)?;
+    let t = ((t as i32 + semitones).rem_euclid(12)) as usize;
+    Some((key_name(t, minor), camelot(t, minor)))
+}
+
 /// Whether two keys mix well (the Camelot wheel: the same, one step round, or the relative major/minor)
 pub fn keys_mix(a: &str, b: &str) -> bool {
     let parse = |c: &str| -> Option<(i32, char)> { let (n, l) = c.split_at(c.len().checked_sub(1)?); Some((n.parse().ok()?, l.chars().next()?)) };
@@ -430,5 +443,7 @@ mod tests {
         assert_eq!(camelot(4, true), "9A");
         assert!(keys_mix("8A", "9A") && keys_mix("8A", "8B") && keys_mix("12B", "1B"));
         assert!(!keys_mix("8A", "10A") && !keys_mix("8A", "9B"));
+        assert_eq!(transposed("A minor", 2), Some(("B minor".into(), "10A".into())));
+        assert_eq!(transposed("C major", -1), Some(("B major".into(), "1B".into())));
     }
 }

@@ -1944,8 +1944,9 @@ fn mix_tick(shared: &Shared, pos: u64, dur: u64) {
         let ready = tokio::task::spawn_blocking({
             let tempo = tempo.clone();
             let start = plan.start_ms;
+            let semitones = plan.semitones;
             move || -> Result<Box<dyn omnipulse_audio::Source>, String> {
-                let mut st = omnipulse_audio::Stretched::new(src?, tempo)?;
+                let mut st = omnipulse_audio::Stretched::shifted(src?, tempo, semitones)?;
                 omnipulse_audio::Source::seek(&mut st, start)?;
                 Ok(Box::new(st))
             }
@@ -6006,7 +6007,7 @@ fn main() -> Result<(), slint::PlatformError> {
                         Some((i, t, b, p)) => {
                             { let mut a2 = s.borrow_mut(); let item = a2.queue.items.remove(i); a2.queue.items.insert(qi + 1, item); }
                             s.borrow().engine.seek(p.at_ms.saturating_sub(9000));
-                            println!("selftest: mix: {} ({} BPM, {}) into {} ({} BPM, {}) at {} ms over {} ms, from {} ms in, at {:.4}x", cur.title, a.rhythm.bpm, a.rhythm.camelot, t.title, b.rhythm.bpm, b.rhythm.camelot, p.at_ms, p.ms, p.start_ms, p.rate);
+                            println!("selftest: mix: {} ({} BPM, {}) into {} ({} BPM, {}) at {} ms over {} ms, from {} ms in, at {:.4}x, {:+} semitones", cur.title, a.rhythm.bpm, a.rhythm.camelot, t.title, b.rhythm.bpm, b.rhythm.camelot, p.at_ms, p.ms, p.start_ms, p.rate, p.semitones);
                         }
                         None => println!("selftest: mix: none of the next 6 has a tempo close enough (or isn't measured): {:?}", { let q = &s.borrow().queue; q.items.iter().skip(qi + 1).take(6).map(|x| omnipulse_core::rhythm::known(&x.t.key).map(|m| m.rhythm.bpm)).collect::<Vec<_>>() }),
                     }

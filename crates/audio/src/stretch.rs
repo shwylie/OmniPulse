@@ -1,6 +1,9 @@
 // A source at another tempo, its pitch kept (timestretch's keylock deck: pure Rust), for seamless
 // mixing: the track coming in plays at the tempo of the one going out, then eases back to its own.
 // The tempo is a shared handle the app moves while it plays (1.0: its own; 1.02: 2% faster).
+// A key shift (whole semitones, for the whole track) is a pitch factor on top: the source says it's at
+// that much higher a rate (so the engine's resampler plays it that much higher, and faster), and the
+// deck's tempo makes up for the speed.
 
 use crate::source::Source;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -51,14 +54,22 @@ pub struct Stretched {
     block: Vec<f32>,
     /// the track's frames pushed in all, once it's done (0 until then)
     real_frames: u64,
+    /// a key shift, as a factor of pitch (1.0: none)
+    pitch: f64,
     last_at: f64,
 }
 
 impl Stretched {
     pub fn new(inner: Box<dyn Source>, tempo: Tempo) -> Result<Self, String> {
+        Self::shifted(inner, tempo, 0)
+    }
+
+    /// The same, its key shifted by whole semitones (up or down)
+    pub fn shifted(inner: Box<dyn Source>, tempo: Tempo, semitones: i32) -> Result<Self, String> {
         let rate = inner.rate();
-        let t = tempo.get();
-        Ok(Self { deck: deck(rate, t)?, inner, tempo, rate, start_ms: 0, pending: Vec::new(), inner_done: false, finished: false, applied: t, block: vec![0.0; BLOCK * 2], real_frames: 0, last_at: -1.0 })
+        let pitch = 2f64.powf(semitones as f64 / 12.0);
+        let t = tempo.get() / pitch;
+        Ok(Self { deck: deck(rate, t)?, inner, tempo, rate, start_ms: 0, pending: Vec::new(), inner_done: false, finished: false, applied: t, block: vec![0.0; BLOCK * 2], real_frames: 0, last_at: -1.0, pitch })
     }
 
     /// Feeds the deck enough of the track for the next block
@@ -89,13 +100,14 @@ impl Stretched {
 
 impl Source for Stretched {
     fn rate(&self) -> u32 {
-        self.rate
+        // (shifted: said to be at a higher or lower rate, so it's played that much higher or lower)
+        (self.rate as f64 * self.pitch).round() as u32
     }
     fn duration_ms(&self) -> Option<u64> {
         self.inner.duration_ms()
     }
     fn read(&mut self, out: &mut Vec<f32>) -> Result<bool, String> {
-        let t = self.tempo.get();
+        let t = self.tempo.get() / self.pitch;
         if (t - self.applied).abs() > 1e-6 {
             self.deck.ctl.set_tempo_rate(t);
             self.applied = t;
@@ -115,8 +127,8 @@ impl Source for Stretched {
     }
     fn seek(&mut self, ms: u64) -> Result<u64, String> {
         let at = self.inner.seek(ms)?;
-        self.deck = deck(self.rate, self.tempo.get())?;
-        self.applied = self.tempo.get();
+        self.deck = deck(self.rate, self.tempo.get() / self.pitch)?;
+        self.applied = self.tempo.get() / self.pitch;
         self.start_ms = at;
         self.pending.clear();
         self.inner_done = false;
@@ -151,6 +163,21 @@ mod tests {
         assert!((40..=48).contains(&n), "{n}");
         // and where it is in the track, in the track's own time
         assert!(s.position_ms().unwrap() >= 3800, "{:?}", s.position_ms());
+    }
+
+    #[test]
+    fn a_key_shift_keeps_the_tempo() {
+        let rate = 44_100;
+        // two semitones up, at its own tempo, through the engine's resampling (as it plays)
+        let s = Stretched::shifted(Box::new(Tone::new(rate, 440.0, 0.3, 4.0)), Tempo::new(1.0), 2).unwrap();
+        let out = crate::engine::render(Box::new(s), rate, &[0.0; 10], 0.0, 10.0).unwrap();
+        let secs = out.len() as f64 / 2.0 / rate as f64;
+        assert!((secs - 4.0).abs() < 0.15, "{secs} s");
+        // 440 Hz two semitones up is 493.9 Hz: about 49 upward crossings in 0.1 s
+        let mid = out.len() / 4;
+        let ch: Vec<f32> = out[mid..mid + 2 * 4410].chunks(2).map(|f| f[0]).collect();
+        let n = ch.windows(2).filter(|w| w[0] < 0.0 && w[1] >= 0.0).count();
+        assert!((47..=52).contains(&n), "{n}");
     }
 }
 

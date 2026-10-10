@@ -24,6 +24,23 @@ pub struct Plan {
     /// the next one's tempo meanwhile (1.0 its own), then eased back
     pub rate: f64,
     pub bars: u32,
+    /// its key shifted by this many semitones (for the whole track), to one that goes with the
+    /// playing one's (0: as it is)
+    pub semitones: i32,
+}
+
+/// A key not clear enough isn't shifted for
+const MIN_KEY_CONFIDENCE: f64 = 0.1;
+
+/// The smallest shift (up to two semitones) that puts `b`'s key next to `a`'s on the Camelot wheel;
+/// 0 when they go together already, or either key isn't clear
+pub fn key_shift(a: &Measured, b: &Measured) -> i32 {
+    use omnipulse_core::rhythm::{keys_mix, transposed};
+    if a.rhythm.key_confidence < MIN_KEY_CONFIDENCE || b.rhythm.key_confidence < MIN_KEY_CONFIDENCE || keys_mix(&a.rhythm.camelot, &b.rhythm.camelot) { return 0; }
+    for s in [1, -1, 2, -2] {
+        if transposed(&b.rhythm.key, s).is_some_and(|(_, c)| keys_mix(&a.rhythm.camelot, &c)) { return s; }
+    }
+    0
 }
 
 /// A downbeat's time in a measured track (ms from its start): its first tracked downbeat
@@ -61,6 +78,7 @@ pub fn plan(a: &Measured, a_end_ms: u64, now_ms: u64, b: &Measured, bars: u32) -
         start_ms: first_downbeat(b)?.round() as u64,
         rate,
         bars,
+        semitones: key_shift(a, b),
     })
 }
 
@@ -111,6 +129,22 @@ mod tests {
         assert!(plan(&m(128.0, 0.0, 0, 0.5), 200_000, 0, &m(64.5, 0.0, 0, 0.5), 8).is_some());
         // no room left
         assert!(plan(&m(128.0, 0.0, 0, 0.5), 200_000, 190_000, &m(128.0, 0.0, 0, 0.5), 8).is_none());
+    }
+
+    #[test]
+    fn keys_shifted_to_go_together() {
+        let mut a = m(128.0, 0.0, 0, 0.5);
+        let mut b = m(128.0, 0.0, 0, 0.5);
+        (a.rhythm.key, a.rhythm.camelot) = ("A minor".into(), "8A".into());
+        // B minor (10A) is two steps away: down two semitones is A minor
+        (b.rhythm.key, b.rhythm.camelot) = ("B minor".into(), "10A".into());
+        assert_eq!(key_shift(&a, &b), -2);
+        // E minor (9A) is next to it already
+        (b.rhythm.key, b.rhythm.camelot) = ("E minor".into(), "9A".into());
+        assert_eq!(key_shift(&a, &b), 0);
+        // a key not clear enough: left as it is
+        (b.rhythm.key, b.rhythm.camelot, b.rhythm.key_confidence) = ("B minor".into(), "10A".into(), 0.02);
+        assert_eq!(key_shift(&a, &b), 0);
     }
 
     #[test]
