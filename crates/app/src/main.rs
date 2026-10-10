@@ -714,6 +714,12 @@ fn open_discover(shared: &Shared) {
     ui.set_chips(ModelRc::default());
     ui.set_shelves(ModelRc::default());
     ui.set_status("Finding music for you...".into());
+    {
+        let a = shared.borrow();
+        let likes = !a.web.favourites.is_empty() || a.library.iter().any(|t| t.plat() != "local");
+        ui.set_likes_prompt(!likes);
+        ui.set_taste_label(if discover::taste_genres(&a.web.prefs).is_empty() { "Pick genres".into() } else { "Your genres".into() });
+    }
     let (input, rt, weak, token) = {
         let a = shared.borrow();
         let (catalog, _, soundcloud) = discover_flags(&a.web.prefs);
@@ -765,6 +771,107 @@ fn open_discover(shared: &Shared) {
             }
         }
     });
+}
+
+// ---------- Pick genres and Fine-tune (as the web app's tasteOpen / subOpen) ----------
+thread_local! {
+    /// the dialog's chips: (their group, their name, picked), and where each row's chips are in it
+    static TASTE: RefCell<(u8, Vec<(String, String, bool)>, Vec<Vec<usize>>)> = const { RefCell::new((1, Vec::new(), Vec::new())) };
+}
+
+fn pref_set(shared: &Shared, key: &str, v: serde_json::Value) {
+    if let Some(o) = shared.borrow_mut().web.prefs.as_object_mut() { o.insert(key.into(), v.clone()); }
+    if std::env::var_os("OMNIPULSE_SELFTEST").is_none() { webstate::save_pref(key, v); }
+}
+
+fn taste_paint(shared: &Shared) {
+    let Some(ui) = shared.borrow().ui.upgrade() else { return };
+    TASTE.with(|t| {
+        let mut t = t.borrow_mut();
+        let (step, chips, _) = &*t;
+        let step = *step;
+        let mut rows: Vec<TasteRow> = Vec::new();
+        let mut map: Vec<Vec<usize>> = Vec::new();
+        let mut group = String::new();
+        let mut line: Vec<usize> = Vec::new();
+        let flush = |line: &mut Vec<usize>, rows: &mut Vec<TasteRow>, map: &mut Vec<Vec<usize>>| {
+            if line.is_empty() { return; }
+            rows.push(TasteRow { head: "".into(), chips: ModelRc::from(Rc::new(VecModel::from(line.iter().map(|&i| TasteChip { label: chips[i].1.clone().into(), on: chips[i].2 }).collect::<Vec<_>>()))) });
+            map.push(std::mem::take(line));
+        };
+        for (i, (g, _, _)) in chips.iter().enumerate() {
+            if step == 2 && *g != group {
+                flush(&mut line, &mut rows, &mut map);
+                group = g.clone();
+                rows.push(TasteRow { head: g.clone().into(), chips: ModelRc::default() });
+                map.push(Vec::new());
+            }
+            line.push(i);
+            if line.len() == 4 { flush(&mut line, &mut rows, &mut map); }
+        }
+        flush(&mut line, &mut rows, &mut map);
+        t.2 = map;
+        ui.set_taste_step(step as i32);
+        ui.set_taste_rows(ModelRc::from(Rc::new(VecModel::from(rows))));
+    });
+}
+
+fn taste_open(shared: &Shared, step: u8) {
+    let prefs = shared.borrow().web.prefs.clone();
+    let chips: Vec<(String, String, bool)> = if step == 1 {
+        let on = discover::taste_genres(&prefs);
+        discover::TASTE_GENRES.iter().map(|(g, _)| (String::new(), g.to_string(), on.iter().any(|x| x == g))).collect()
+    } else {
+        let on: Vec<String> = prefs["tasteSubgenres"].as_array().into_iter().flatten().filter_map(|x| x.as_str().map(String::from)).collect();
+        discover::taste_genres(&prefs).iter().flat_map(|g| discover::subgenres(g).iter().map(|sg| (g.clone(), sg.to_string(), on.iter().any(|x| x == sg))).collect::<Vec<_>>()).collect()
+    };
+    TASTE.with(|t| *t.borrow_mut() = (step, chips, Vec::new()));
+    taste_paint(shared);
+    if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_taste_open(true); }
+}
+
+fn taste_toggle(shared: &Shared, row: usize, k: usize) {
+    TASTE.with(|t| {
+        let mut t = t.borrow_mut();
+        let Some(&i) = t.2.get(row).and_then(|r| r.get(k)) else { return };
+        let now = !t.1[i].2;
+        // (a subgenre under two genres is one choice: both its chips follow)
+        let name = t.1[i].1.clone();
+        for c in t.1.iter_mut().filter(|c| c.1 == name) { c.2 = now; }
+    });
+    taste_paint(shared);
+}
+
+fn taste_picked() -> Vec<String> {
+    TASTE.with(|t| {
+        let mut out: Vec<String> = Vec::new();
+        for c in t.borrow().1.iter().filter(|c| c.2) { if !out.contains(&c.1) { out.push(c.1.clone()); } }
+        out
+    })
+}
+
+fn taste_save(shared: &Shared) {
+    let step = TASTE.with(|t| t.borrow().0);
+    let picked = taste_picked();
+    if step == 1 {
+        pref_set(shared, "tasteGenres", serde_json::json!(picked));
+        // then the second step, for the subgenres of the ones picked
+        if picked.iter().any(|g| !discover::subgenres(g).is_empty()) { return taste_open(shared, 2); }
+    } else {
+        pref_set(shared, "tasteSubgenres", serde_json::json!(picked));
+    }
+    taste_done(shared);
+}
+
+fn taste_done(shared: &Shared) {
+    let prefs = shared.borrow().web.prefs.clone();
+    let (g, sg) = (discover::taste_genres(&prefs), discover::taste_subgenres(&prefs));
+    if let Some(ui) = shared.borrow().ui.upgrade() {
+        ui.set_taste_open(false);
+        ui.set_taste_label(if g.is_empty() { "Pick genres".into() } else { "Your genres".into() });
+        ui.set_status(if g.is_empty() { "No genres picked.".into() } else { format!("Thanks. Discover starts from {} now.", if sg.is_empty() { g.join(", ") } else { sg.join(", ") }).into() });
+    }
+    open_discover(shared);
 }
 
 /// A tile on Discover: a song plays (with the shelf's other songs after it); a mix or station opens as
@@ -4558,6 +4665,16 @@ fn main() -> Result<(), slint::PlatformError> {
         play_list(&s, list, k as usize);
     });
     let s = shared.clone();
+    ui.on_taste_pick(move || taste_open(&s, 1));
+    let s = shared.clone();
+    ui.on_taste_toggle(move |r, k| taste_toggle(&s, r as usize, k as usize));
+    let s = shared.clone();
+    ui.on_taste_save(move || taste_save(&s));
+    let s = shared.clone();
+    ui.on_taste_back(move || taste_open(&s, 1));
+    let s = shared.clone();
+    ui.on_taste_skip(move || taste_done(&s));
+    let s = shared.clone();
     ui.on_lucky(move || {
         // a station in the vein of something you like, made only of music you haven't liked anywhere
         let (seeds, rt, weak, liked) = {
@@ -4807,7 +4924,7 @@ fn main() -> Result<(), slint::PlatformError> {
         // (OMNIPULSE_SELFTEST_PLAN=discover: only Discover, its shelves, and the first mix it has opened)
         let only_discover = std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("discover");
         let plan: Vec<(u64, &str)> = if join.is_some() { vec![(6, "join"), (14, "joined"), (16, "jamskip"), (19, "leave"), (21, "end")] }
-            else if only_discover { vec![(9, "play"), (11, "discover"), (30, "disc"), (45, "discmix"), (46, "end")] } else { full.to_vec() };
+            else if only_discover { vec![(9, "play"), (11, "discover"), (30, "disc"), (45, "discmix"), (46, "taste"), (47, "taste2"), (48, "taste3"), (70, "tasted"), (71, "end")] } else { full.to_vec() };
         t.start(slint::TimerMode::Repeated, std::time::Duration::from_millis(250), move || {
             let Some(&(at, what)) = plan.get(step_no) else { return };
             if started.elapsed().as_secs() < at { return; }
@@ -4970,6 +5087,22 @@ fn main() -> Result<(), slint::PlatformError> {
                     let at = DISCOVER.with(|d| d.borrow().iter().position(|sh| sh.key == "mixes").map(|i| (i, 0)));
                     if let Some((i, k)) = at { ui.invoke_tile(i as i32, k as i32); }
                 }
+                "taste" => { ui.invoke_taste_pick(); println!("selftest: pick genres open {}, rows {}", ui.get_taste_open(), ui.get_taste_rows().row_count()); }
+                "taste2" => {
+                    // Rock and Electronic (rows of four: Pop, Hip-hop & Rap, Rock, Dance / Electronic, ...)
+                    ui.invoke_taste_toggle(0, 2);
+                    ui.invoke_taste_toggle(1, 0);
+                    ui.invoke_taste_save();
+                    println!("selftest: fine-tune step {}, groups {:?}", ui.get_taste_step(), ui.get_taste_rows().iter().filter(|r| r.head != "").map(|r| r.head.to_string()).collect::<Vec<_>>());
+                }
+                "taste3" => {
+                    // the first subgenre of each group (Classic Rock, Dubstep)
+                    let heads: Vec<usize> = ui.get_taste_rows().iter().enumerate().filter(|(_, r)| r.head != "").map(|(i, _)| i).collect();
+                    for h in heads { ui.invoke_taste_toggle(h as i32 + 1, 0); }
+                    ui.invoke_taste_save();
+                    println!("selftest: picked {} / {}, open {}, status \"{}\"", s.borrow().web.prefs["tasteGenres"], s.borrow().web.prefs["tasteSubgenres"], ui.get_taste_open(), ui.get_status());
+                }
+                "tasted" => println!("selftest: discover after picking: {}", ui.get_shelves().iter().map(|sh| format!("{} {}", sh.title, sh.tiles.row_count())).collect::<Vec<_>>().join(", ")),
                 "discmix" => println!("selftest: mix \"{}\" ({}): {} tracks, first {:?}", ui.get_page_title(), ui.get_page_sub(), s.borrow().page_tracks.len(), s.borrow().page_tracks.iter().take(4).map(|t| format!("{} - {} [{}]", t.artist, t.title, t.plat())).collect::<Vec<_>>()),
                 "end" => {
                     println!("selftest: status \"{}\"", ui.get_status());

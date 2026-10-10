@@ -23,6 +23,9 @@ export struct Side { title: string, plat: string, own: bool, share: bool, sc: bo
 /// A platform in the title bar: on (in its colours), set up (ready; grey until it is), its name
 export struct Plat { id: string, on: bool, name: string, ready: bool }
 export struct Tile { title: string, sub: string, art: image, plat: string }
+/// Pick genres (and Fine-tune): a row of up to four chips, under a group's name (on its first row)
+export struct TasteChip { label: string, on: bool }
+export struct TasteRow { head: string, chips: [TasteChip] }
 export struct Shelf { title: string, tiles: [Tile] }
 export struct Line { text: string }
 /// A switch in Settings: under its section's heading (head, on the first of a section)
@@ -599,6 +602,18 @@ export component AppWindow inherits Window {
     // a Settings row's own settings (a plugin's): its key; the dialog with its fields
     callback set-more(string);
     in-out property <bool> pf-open;
+    // Pick genres (step 1) and Fine-tune (step 2: the picked genres' subgenres), and Discover's card
+    // asking for likes while there are none
+    in-out property <bool> taste-open;
+    in property <int> taste-step: 1;
+    in property <[TasteRow]> taste-rows;
+    in property <bool> likes-prompt;
+    in property <string> taste-label: "Pick genres";
+    callback taste-pick();
+    callback taste-toggle(int, int);
+    callback taste-save();
+    callback taste-back();
+    callback taste-skip();
     in property <string> pf-head;
     in property <[PlugField]> pf-fields;
     callback pf-set(int, string);
@@ -1124,7 +1139,30 @@ export component AppWindow inherits Window {
                             spacing: 22px;
                             HorizontalLayout {
                                 alignment: start;
+                                spacing: 8px;
                                 Chip { label: "I'm Feeling Lucky"; on: true; clicked => { root.lucky(); } }
+                                Chip { label: root.taste-label; clicked => { root.taste-pick(); } }
+                            }
+                            // no likes or favourites yet: asked for some, for better recommendations
+                            if root.likes-prompt: Rectangle {
+                                height: 76px;
+                                border-radius: 12px;
+                                background: Theme.accent.with-alpha(0.10);
+                                border-width: 1px;
+                                border-color: Theme.accent.with-alpha(0.30);
+                                HorizontalLayout {
+                                    padding: 14px;
+                                    spacing: 12px;
+                                    VerticalLayout {
+                                        horizontal-stretch: 1;
+                                        alignment: center;
+                                        spacing: 2px;
+                                        Text { text: "Get better recommendations"; color: Theme.text; font-weight: 700; }
+                                        Text { text: "Add some music to your likes or favourites (the heart or the star on any song), and Discover and Rediscover will be built around it."; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
+                                    }
+                                    Pill { label: "Pick genres"; y: (parent.height - self.height) / 2; clicked => { root.taste-pick(); } }
+                                    Pill { label: "Find music"; y: (parent.height - self.height) / 2; clicked => { ti.focus(); } }
+                                }
                             }
                             for sh[s] in root.shelves: VerticalLayout {
                                 spacing: 10px;
@@ -1926,6 +1964,61 @@ export component AppWindow inherits Window {
                 }
             }
         }
+        }
+    }
+    // Pick genres, then Fine-tune
+    if root.taste-open: Rectangle {
+        x: 0;
+        y: 0;
+        width: root.width;
+        height: root.height;
+        background: #00000080;
+        TouchArea { clicked => { root.taste-open = false; } }
+        Rectangle {
+            width: 600px;
+            height: min(root.height - 40px, 190px + root.taste-rows.length * 40px);
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            background: Theme.elevated;
+            border-radius: 12px;
+            border-width: 1px;
+            border-color: Theme.line;
+            TouchArea { }
+            VerticalLayout {
+                padding: 20px;
+                spacing: 10px;
+                Text { text: root.taste-step == 1 ? "What do you like?" : "Fine-tune"; color: Theme.text; font-size: 18px; font-weight: 800; }
+                Text {
+                    text: root.taste-step == 1 ? "Pick a few genres, and Discover starts from them: stations for their artists, their charts and their mixes. What you like and play counts for more as you go. Change them here any time."
+                        : "Any of these you like most? Each one you pick gets a mix of its own on Discover. You can skip this.";
+                    color: Theme.muted; font-size: 12px; wrap: word-wrap;
+                }
+                Flickable {
+                    vertical-stretch: 1;
+                    content-height: root.taste-rows.length * 40px;
+                    VerticalLayout {
+                        alignment: start;
+                        for r[i] in root.taste-rows: VerticalLayout {
+                            spacing: 4px;
+                            if r.head != "": Text { height: 28px; vertical-alignment: bottom; text: r.head; color: Theme.muted; font-size: 12px; font-weight: 600; }
+                            if r.chips.length > 0: HorizontalLayout {
+                                height: 40px;
+                                spacing: 6px;
+                                alignment: start;
+                                for c[k] in r.chips: Pill { label: c.label; on: c.on; clicked => { root.taste-toggle(i, k); } }
+                            }
+                        }
+                    }
+                }
+                HorizontalLayout {
+                    spacing: 8px;
+                    if root.taste-step == 2: Pill { label: "Back"; clicked => { root.taste-back(); } }
+                    Rectangle { horizontal-stretch: 1; }
+                    if root.taste-step == 1: Pill { label: "Cancel"; clicked => { root.taste-open = false; } }
+                    if root.taste-step == 2: Pill { label: "Skip"; clicked => { root.taste-skip(); } }
+                    Pill { label: "Save"; on: true; clicked => { root.taste-save(); } }
+                }
+            }
         }
     }
     // your own keys for a platform: the steps (with pages to open and values to copy), then the keys
