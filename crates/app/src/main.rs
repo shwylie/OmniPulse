@@ -1099,6 +1099,14 @@ fn like_toggle(shared: &Shared) {
         ui.set_now_liked(on);
         ui.set_status(format!("{} \"{}\".", if on { "Liked" } else { "Took the like off" }, t.title).into());
     }
+    // a requested song: the widget cheers whoever asked for it, for a few seconds
+    let by = shared.borrow().queue.qi.and_then(|i| shared.borrow().queue.items.get(i).map(|q| q.by.clone())).unwrap_or_default();
+    if on && !by.is_empty() {
+        integrations::like_banter(by.trim_end_matches(" (Jam)"));
+        push_out(shared, true);
+        let s = shared.clone();
+        slint::Timer::single_shot(std::time::Duration::from_millis(8100), move || push_out(&s, true));
+    }
     rt.spawn(async move {
         let r = marks::set_like(&t, on).await;
         let _ = weak.upgrade_in_event_loop(move |ui| SHARED.with(|s| {

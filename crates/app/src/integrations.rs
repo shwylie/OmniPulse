@@ -228,6 +228,33 @@ pub fn alerts_cfg(prefs: &Value) -> Value {
     })
 }
 
+// Liking a song someone requested: the card says so for a few seconds, with a word for them (each
+// line once before any repeats), as the web app's widgetLiked
+const LIKE_LINES: [&str; 12] = [
+    "Good choice, {user}!", "{user} has taste.", "Certified banger, {user}.", "Nice one, {user}!",
+    "{user} gets it.", "This one's a keeper, {user}.", "Top-tier pick, {user}.", "{user} cooked with this one.",
+    "Straight into the likes, thanks {user}!", "Great call, {user}.", "{user} knows what's up.", "Taste confirmed, {user}.",
+];
+const LIKE_NOTE_MS: u128 = 8000;
+static LIKE_NOTE: std::sync::Mutex<Option<(String, std::time::Instant)>> = std::sync::Mutex::new(None);
+static LIKE_ORDER: std::sync::Mutex<Vec<usize>> = std::sync::Mutex::new(Vec::new());
+
+/// A requested song liked: the card's note for whoever asked for it (for LIKE_NOTE_MS)
+pub fn like_banter(by: &str) {
+    let mut order = LIKE_ORDER.lock().unwrap();
+    if order.is_empty() {
+        let mut all: Vec<usize> = (0..LIKE_LINES.len()).collect();
+        crate::queue::shuffle_in_place(&mut all);
+        *order = all;
+    }
+    let line = LIKE_LINES[order.pop().unwrap_or(0)].replace("{user}", by);
+    *LIKE_NOTE.lock().unwrap() = Some((format!("\u{2665} Liked \u{b7} {line}"), std::time::Instant::now()));
+}
+
+fn like_note() -> String {
+    LIKE_NOTE.lock().unwrap().as_ref().filter(|(_, at)| at.elapsed().as_millis() < LIKE_NOTE_MS).map(|(s, _)| s.clone()).unwrap_or_default()
+}
+
 /// What the widget shows: the track, where it's up to, its colours, and the look set in Settings
 /// by: who asked for it in chat ("" for none)
 pub fn widget_update(prefs: &Value, t: Option<&Track>, by: &str, pos_ms: u64, dur_ms: u64, playing: bool, accent: (&str, &str)) {
@@ -248,6 +275,7 @@ pub fn widget_update(prefs: &Value, t: Option<&Track>, by: &str, pos_ms: u64, du
             "playing": playing,
             "title": t.title, "artist": t.artist, "artwork": big_art(t), "url": t.web_link(), "platform": t.plat(),
             "requested_by": if on(prefs, "wRequester") { by } else { "" },
+            "like_note": if by.is_empty() { String::new() } else { like_note() },
             "duration_ms": if dur_ms > 0 { dur_ms } else { t.ms }, "position_ms": pos_ms,
             "updated_at": core::now_secs() * 1000 + (std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.subsec_millis() as u64).unwrap_or(0)),
             "anim": {
@@ -350,5 +378,19 @@ mod alert_tests {
         assert_eq!(f["cpics"], json!(["5", ""]));
         assert_eq!(c["collage"]["angle"], 30.0);
         assert_eq!(c["collage"]["dir"], "ltr");
+    }
+}
+
+#[cfg(test)]
+mod banter_tests {
+    #[test]
+    fn each_line_once_before_any_repeats() {
+        let mut seen = std::collections::HashSet::new();
+        for _ in 0..super::LIKE_LINES.len() {
+            super::like_banter("amy");
+            seen.insert(super::like_note());
+        }
+        assert_eq!(seen.len(), super::LIKE_LINES.len());
+        assert!(seen.iter().all(|s| s.contains("amy") && s.starts_with('\u{2665}')));
     }
 }
