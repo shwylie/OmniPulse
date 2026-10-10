@@ -1002,7 +1002,9 @@ function openSearch(q) {
   ready.then(() => {
     if (tok !== loadToken || view !== "search" || query !== q) return;   // moved on meanwhile
     // a genre is searched as a genre on each platform; sets & podcasts get their own shelf under All
-    loadMerged(plats.map((id) => (genre && id !== "local" ? genreFeed(id, genre) : searchFeed(id, q))), (list) => {
+    // (every platform is asked first, and the results shown once they've all answered, best first)
+    const named = (f, id) => Object.assign(f, { name: platInfo(id).name });
+    loadMerged(plats.map((id) => named(genre && id !== "local" ? genreFeed(id, genre) : searchFeed(id, q), id)), (list) => {
       searchSetsFound(list);
       return list.filter((t) => (listFilter === "mixes" ? isMix(t) : !isMix(t)) && !(prefs.hideLikes && isLikedTrack(t)));
     }, genre ? null : searchRanker(q));

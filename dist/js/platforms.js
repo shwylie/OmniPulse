@@ -134,12 +134,24 @@ function searchFeed(id, q) {
 
 let merged = null;   // { feeds, filter, tok, seen, errors } for the list on screen
 
-async function pullMerged() {
+// (feeds with a name are shown waiting for, in the status bar: "Searching SoundCloud and Spotify...")
+function mergedWaiting(m, waiting) {
+  if (m.tok !== loadToken) return;
+  const names = [...waiting];
+  if (!names.length) return;
+  const list = names.length > 1 ? names.slice(0, -1).join(", ") + " and " + names[names.length - 1] : names[0];
+  say("Searching " + list + "...");
+}
+
+// (first: the first page of a search, which says what it is waiting for; later pages load quietly)
+async function pullMerged(first) {
   const m = merged;
+  const waiting = new Set(first ? m.feeds.filter((f) => !f.done && f.name).map((f) => f.name) : []);
+  mergedWaiting(m, waiting);
   const pages = await Promise.all(m.feeds.map(async (f) => {
     if (f.done) return [];
     try {
-      const page = await f.next();
+      const page = await f.next().finally(() => { if (f.name) { waiting.delete(f.name); mergedWaiting(m, waiting); } });
       if (page === null) { f.done = true; return []; }
       return m.filter(page);
     } catch (e) {
@@ -157,13 +169,13 @@ async function pullMerged() {
 async function loadMerged(feeds, filter, rank) {
   const tok = ++loadToken;
   merged = { feeds, filter: filter || ((l) => l), rank: rank || null, tok, seen: new Set(), keys: new Map(), errors: [] };
-  say("Loading...");
-  const got = await pullMerged();
+  if (!feeds.some((f) => f.name)) say("Loading...");
+  const got = await pullMerged(true);
   if (tok !== loadToken) return;
   viewTracks = got;
   nextHref = feeds.some((f) => !f.done) ? "merged:" : "";
   render();
-  say(viewTracks.length ? "" : merged.errors[0] || "Nothing found.");
+  say(viewTracks.length ? "" : merged.errors[0] || "Nothing found.", { force: true });
   setTimeout(nearBottomCheck, 50);
 }
 
