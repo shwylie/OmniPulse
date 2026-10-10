@@ -1786,14 +1786,12 @@ body.streamSafe #navSets, body.streamSafe #navArtists, body.streamSafe #plSectio
 .likesPrompt button { flex: none; }
 .tasteChips { display: flex; flex-wrap: wrap; gap: 8px; margin: 14px 0 6px; }
 .tasteDlg .sheet { max-width: 560px; }
-/* A track's platform logo stays out of the way: in a list it shows on the row (the queue always shows it) you're on
-   (hovered, picked or focused); in Now Playing, when you point at its place (the player bar always shows it, on a corner of the art).
-   (Its space is kept, so nothing moves, and pointing at the empty spot brings it back: its slot has no box of
-   its own, so it's the icon itself that's pointed at.) The OBS
-   widget and chat's request replies are drawn elsewhere and keep theirs. */
-#list li .plat.platBig, #npPlat .plat { opacity: 0; transition: opacity .15s; }
-#list li:hover .plat.platBig, #list li.picked .plat.platBig, #list li:focus-within .plat.platBig,
-#npPlat .plat:hover, #npPlat .plat:focus-visible { opacity: 1; }
+/* A track's platform logo stays out of the way in lists: it shows on the row you're on (hovered, picked
+   or focused), and its space is kept, so nothing moves. The queue, the player bar and Now Playing always
+   show it (on the art's corner, for the last two). The OBS widget and chat's request replies are drawn
+   elsewhere and keep theirs. */
+#list li .plat.platBig { opacity: 0; transition: opacity .15s; }
+#list li:hover .plat.platBig, #list li.picked .plat.platBig, #list li:focus-within .plat.platBig { opacity: 1; }
 .subGroups { max-height: 56vh; overflow-y: auto; margin: 10px 0 6px; padding-right: 4px; }
 .subGroup h3 { margin: 12px 0 0; font-size: 13px; color: var(--muted); font-weight: 600; }
 .subGroup .tasteChips { margin-top: 8px; }
@@ -1809,3 +1807,12 @@ body.streamSafe #navSets, body.streamSafe #navArtists, body.streamSafe #plSectio
 }
 .nowArtBox #nowPlat .plat.platBig svg { width: 13px; height: 13px; }
 .nowArtBox #nowPlat .plat.platBig:hover { background: color-mix(in srgb, var(--plat-c, var(--text)) 22%, var(--panel)); }
+/* Now Playing: the same badge, bigger, on the big art's corner */
+.npArtBox { position: relative; flex: none; line-height: 0; }
+.npArtBox[hidden] { display: none; }
+.npArtBox #npArtPlat .plat.platBig {
+  position: absolute; right: -10px; bottom: -10px; width: 52px; height: 52px;
+  background: var(--panel); color: var(--plat-c, var(--text)); box-shadow: 0 0 0 3px var(--panel), 0 4px 14px rgb(0 0 0 / .4);
+}
+.npArtBox #npArtPlat .plat.platBig svg { width: 30px; height: 30px; }
+.npArtBox #npArtPlat .plat.platBig:hover { background: color-mix(in srgb, var(--plat-c, var(--text)) 22%, var(--panel)); }

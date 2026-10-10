@@ -1493,7 +1493,10 @@ function fillNowPlaying(t) {
   $("npTitle").textContent = t ? t.title || "Untitled" : "Nothing playing";
   if (t && trimOf(t)) { $("npTitle").append(trimMark(t)); $("nowTitle").append(trimMark(t)); }
   fillArtists($("npArtist"), t, true);
-  $("npPlat").replaceChildren(...(t ? [platformButton(t)] : []));
+  // (on the art's corner, bigger than the player bar's; beside the title when there's no art)
+  const npBig = t ? artUrl(t, "t500x500") : "";
+  $("npArtPlat").replaceChildren(...(t && npBig ? [platformButton(t, true)] : []));
+  $("npPlat").replaceChildren(...(t && !npBig ? [platformButton(t, true)] : []));
   const bits = [];
   if (t && t.genre) bits.push(t.genre);
   const year = t && t.created_at ? String(t.created_at).slice(0, 4) : "";
@@ -1505,7 +1508,7 @@ function fillNowPlaying(t) {
   $("npAlbum").hidden = !album;
   $("npDesc").textContent = t && t.description ? t.description.slice(0, 600) : "";
   const big = t ? artUrl(t, "t500x500") : "";
-  if (big) { fadeImg($("npArt"), big); $("npArt").hidden = false; } else { $("npArt").hidden = true; }
+  if (big) { fadeImg($("npArt"), big); $("npArtBox").hidden = false; } else { $("npArtBox").hidden = true; }
   $("npOpen").hidden = !(t && t.permalink_url);
   $("npOpen").textContent = t ? openLabel(t) : "";
   $("dur").textContent = fmt(t ? viewDur(t, t.duration || 0) : 0);
