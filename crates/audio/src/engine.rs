@@ -1,7 +1,9 @@
 // The player: a decode thread that reads the source, converts it to the output's rate and runs the
 // chain (js/audio.js's, see dsp.rs), and an output stream (cpal: WASAPI on Windows) that plays it.
 // A crossfade plays two sources at once: the next one comes in as the one before goes out (equal
-// power), each through its own chain, and then it's the one playing.
+// power), each through its own chain, and then it's the one playing. A mix is a crossfade that starts
+// at an exact point of the one playing (a downbeat), with the bass handed over at once at another
+// (a bass swap: the two kicks never thump together), for beat-matched transitions.
 // About a third of a second is kept ready between them. Volume, mute and pause act in the output
 // itself, so they're heard at once.
 
@@ -20,6 +22,8 @@ const AHEAD_S: f32 = 0.35;
 pub enum Event {
     /// the track played to its end
     Ended,
+    /// a mix's moment came: the next track is coming in (it's the one playing from here)
+    Mixed,
     Error(String),
 }
 
@@ -73,6 +77,11 @@ impl Pipeline {
 
     pub fn duration_ms(&self) -> Option<u64> {
         self.src.duration_ms()
+    }
+
+    /// Where its source says it is in its own time (a stretched one's), if it says
+    pub fn src_position_ms(&self) -> Option<u64> {
+        self.src.position_ms()
     }
 }
 
@@ -133,6 +142,9 @@ enum Cmd {
     Load(Box<dyn Source>, f32),
     /// the next source, coming in over this many ms as the one playing goes out
     Crossfade(Box<dyn Source>, f32, u64),
+    /// a mix: the next source (at the place it starts from), coming in when the one playing reaches
+    /// `at_ms` (sample-exact), over `ms`, its bass handed over `swap_ms` in (None: as the rest)
+    MixAt { src: Box<dyn Source>, db: f32, at_ms: u64, ms: u64, swap_ms: Option<u64> },
     Seek(u64),
     Stop,
     Eq(Vec<f32>),
@@ -152,6 +164,12 @@ struct Shared {
     skew: AtomicU64,
     /// a crossfade under way
     fading_in: AtomicBool,
+    /// a mix waiting for its moment
+    mix_waiting: AtomicBool,
+    /// frames given to the output since the base position (for where a stretched source is)
+    produced: AtomicU64,
+    /// a stretched source's place in its own time, less where the frames given say it is (ms)
+    stretch_off: std::sync::atomic::AtomicI64,
     base_ms: AtomicU64,
     duration_ms: AtomicU64,
     rate: AtomicU32,
@@ -196,6 +214,9 @@ impl Engine {
             played: AtomicU64::new(0),
             skew: AtomicU64::new(0),
             fading_in: AtomicBool::new(false),
+            mix_waiting: AtomicBool::new(false),
+            produced: AtomicU64::new(0),
+            stretch_off: std::sync::atomic::AtomicI64::new(0),
             base_ms: AtomicU64::new(0),
             duration_ms: AtomicU64::new(0),
             rate: AtomicU32::new(48000),
@@ -290,6 +311,15 @@ impl Engine {
     pub fn crossfading(&self) -> bool {
         self.shared.fading_in.load(Ordering::SeqCst)
     }
+    /// A mix: `src` (already where it starts from: its first downbeat, say) comes in when the one
+    /// playing reaches `at_ms` (exactly), over `ms`, its bass handed over `swap_ms` in
+    pub fn mix_at(&self, src: Box<dyn Source>, match_db: f32, at_ms: u64, ms: u64, swap_ms: Option<u64>) {
+        let _ = self.cmd.send(Cmd::MixAt { src, db: match_db, at_ms, ms, swap_ms });
+    }
+    /// A mix is waiting for its moment, or under way
+    pub fn mixing(&self) -> bool {
+        self.shared.mix_waiting.load(Ordering::SeqCst) || self.shared.fading_in.load(Ordering::SeqCst)
+    }
     pub fn play(&self) {
         self.shared.paused.store(false, Ordering::SeqCst);
     }
@@ -334,7 +364,9 @@ impl Engine {
     pub fn position_ms(&self) -> u64 {
         let s = &self.shared;
         let rate = s.rate.load(Ordering::Relaxed).max(1) as u64;
-        s.base_ms.load(Ordering::Relaxed) + s.played.load(Ordering::Relaxed).saturating_sub(s.skew.load(Ordering::Relaxed)) * 1000 / rate
+        let at = s.base_ms.load(Ordering::Relaxed) + s.played.load(Ordering::Relaxed).saturating_sub(s.skew.load(Ordering::Relaxed)) * 1000 / rate;
+        // (a stretched source: where it is in its own time)
+        (at as i64 + s.stretch_off.load(Ordering::Relaxed)).max(0) as u64
     }
     pub fn duration_ms(&self) -> u64 {
         self.shared.duration_ms.load(Ordering::Relaxed)
@@ -469,6 +501,33 @@ struct Fading {
     in_buf: VecDeque<f32>,
     out_ended: bool,
     in_ended: bool,
+    /// a bass swap: the frame it happens at, and how long it takes (frames); each side's bass apart
+    swap: Option<(u64, u64)>,
+    lows: [Lows; 2],
+}
+
+/// A signal's bass, kept apart (two one-pole low-passes, ~150 Hz): low = lp(x), the rest x - low
+#[derive(Clone, Copy, Default)]
+struct Lows {
+    a: f32,
+    z: [[f32; 2]; 2],
+}
+
+impl Lows {
+    fn new(rate: u32) -> Self {
+        Self { a: 1.0 - (-2.0 * std::f32::consts::PI * 150.0 / rate as f32).exp(), z: [[0.0; 2]; 2] }
+    }
+    fn low(&mut self, ch: usize, x: f32) -> f32 {
+        self.z[0][ch] += self.a * (x - self.z[0][ch]);
+        self.z[1][ch] += self.a * (self.z[0][ch] - self.z[1][ch]);
+        self.z[1][ch]
+    }
+}
+
+impl Fading {
+    fn new(next: Pipeline, total: u64, swap: Option<(u64, u64)>, rate: u32) -> Self {
+        Self { next, total: total.max(1), done: 0, out_buf: VecDeque::new(), in_buf: VecDeque::new(), out_ended: false, in_ended: false, swap, lows: [Lows::new(rate); 2] }
+    }
 }
 
 const XFADE_CHUNK: usize = 4096 * 2;
@@ -492,8 +551,21 @@ impl Fading {
             let (go, gi) = ((p * std::f32::consts::FRAC_PI_2).cos(), (p * std::f32::consts::FRAC_PI_2).sin());
             let (ol, or) = (self.out_buf.pop_front().unwrap_or(0.0), self.out_buf.pop_front().unwrap_or(0.0));
             let (il, ir) = (self.in_buf.pop_front().unwrap_or(0.0), self.in_buf.pop_front().unwrap_or(0.0));
-            into.push(ol * go + il * gi);
-            into.push(or * go + ir * gi);
+            match self.swap {
+                None => {
+                    into.push(ol * go + il * gi);
+                    into.push(or * go + ir * gi);
+                }
+                // the bass handed over at its moment; the rest crossfades as ever
+                Some((at, len)) => {
+                    let q = if self.done < at { 0.0 } else { ((self.done - at) as f32 / len.max(1) as f32).min(1.0) };
+                    let (bo, bi) = ((q * std::f32::consts::FRAC_PI_2).cos(), (q * std::f32::consts::FRAC_PI_2).sin());
+                    let (lol, lor) = (self.lows[0].low(0, ol), self.lows[0].low(1, or));
+                    let (lil, lir) = (self.lows[1].low(0, il), self.lows[1].low(1, ir));
+                    into.push((ol - lol) * go + lol * bo + (il - lil) * gi + lil * bi);
+                    into.push((or - lor) * go + lor * bo + (ir - lir) * gi + lir * bi);
+                }
+            }
             self.done += 1;
             if self.done >= self.total { break; }
         }
@@ -502,9 +574,34 @@ impl Fading {
     }
 }
 
+/// What a mix waits for: the next source, its gain, the moment (ms of the one playing), its length and bass swap
+struct Waiting {
+    next: Pipeline,
+    at_ms: u64,
+    ms: u64,
+    swap_ms: Option<u64>,
+}
+
+/// Starts a crossfade (or a mix) into `next`: from here, it's the one the position, length and end are of
+fn begin_fade(shared: &Shared, next: Pipeline, total_frames: u64, swap: Option<(u64, u64)>) -> Fading {
+    let rate = shared.rate.load(Ordering::SeqCst);
+    let queued = shared.queue.lock().unwrap().len() as u64 / 2;
+    shared.played.store(0, Ordering::SeqCst);
+    shared.skew.store(queued, Ordering::SeqCst);
+    shared.produced.store(0, Ordering::SeqCst);
+    shared.stretch_off.store(0, Ordering::SeqCst);
+    // (where it starts from: its own start, or where it was put)
+    shared.base_ms.store(next.src_position_ms().unwrap_or(0), Ordering::SeqCst);
+    shared.duration_ms.store(next.duration_ms().unwrap_or(0), Ordering::SeqCst);
+    shared.source_done.store(false, Ordering::SeqCst);
+    shared.fading_in.store(true, Ordering::SeqCst);
+    Fading::new(next, total_frames, swap, rate)
+}
+
 fn decode_loop(shared: Arc<Shared>, cmds: Receiver<Cmd>, ev: Sender<Event>) {
     let mut pipe: Option<Pipeline> = None;
     let mut fading: Option<Fading> = None;
+    let mut waiting: Option<Waiting> = None;
     let mut eq = vec![0.0f32; 10];
     let mut ended_sent = true;
     let mut scratch = Vec::with_capacity(8192);
@@ -523,21 +620,35 @@ fn decode_loop(shared: Arc<Shared>, cmds: Receiver<Cmd>, ev: Sender<Event>) {
                     next.chain.eq.set(&eq);
                     next.chain.set_match_db(db, true);
                     // its position counts from here: what's queued still is the one going out's
-                    let queued = shared.queue.lock().unwrap().len() as u64 / 2;
-                    shared.played.store(0, Ordering::SeqCst);
-                    shared.skew.store(queued, Ordering::SeqCst);
-                    shared.base_ms.store(0, Ordering::SeqCst);
-                    shared.duration_ms.store(next.duration_ms().unwrap_or(0), Ordering::SeqCst);
-                    shared.source_done.store(false, Ordering::SeqCst);
-                    shared.fading_in.store(true, Ordering::SeqCst);
-                    fading = Some(Fading { next, total: (ms * rate as u64 / 1000).max(1), done: 0, out_buf: VecDeque::new(), in_buf: VecDeque::new(), out_ended: false, in_ended: false });
+                    waiting = None;
+                    shared.mix_waiting.store(false, Ordering::SeqCst);
+                    fading = Some(begin_fade(&shared, next, ms * rate as u64 / 1000, None));
+                    ended_sent = false;
+                }
+                // a mix: waits for its moment in the one playing
+                Cmd::MixAt { src, db, at_ms, ms, swap_ms } if pipe.is_some() && !shared.source_done.load(Ordering::SeqCst) => {
+                    let rate = shared.rate.load(Ordering::SeqCst);
+                    if let Some(f) = fading.take() { pipe = Some(f.next); shared.fading_in.store(false, Ordering::SeqCst); }
+                    let mut next = Pipeline::new(src, rate);
+                    next.chain.eq.set(&eq);
+                    next.chain.set_match_db(db, true);
+                    waiting = Some(Waiting { next, at_ms, ms, swap_ms });
+                    shared.mix_waiting.store(true, Ordering::SeqCst);
+                }
+                Cmd::MixAt { src, db, .. } => {
+                    // (nothing playing to mix from: it just starts, as a load)
+                    let _ = cmds_self_load(&shared, &mut pipe, &mut fading, src, db, &eq);
                     ended_sent = false;
                 }
                 // (nothing playing to fade from: it just starts)
                 Cmd::Crossfade(src, db, _) | Cmd::Load(src, db) => {
                     fading = None;
+                    waiting = None;
+                    shared.mix_waiting.store(false, Ordering::SeqCst);
                     shared.fading_in.store(false, Ordering::SeqCst);
                     shared.skew.store(0, Ordering::SeqCst);
+                    shared.produced.store(0, Ordering::SeqCst);
+                    shared.stretch_off.store(0, Ordering::SeqCst);
                     let rate = shared.rate.load(Ordering::SeqCst);
                     let mut p = Pipeline::new(src, rate);
                     p.chain.eq.set(&eq);
@@ -552,9 +663,13 @@ fn decode_loop(shared: Arc<Shared>, cmds: Receiver<Cmd>, ev: Sender<Event>) {
                     ended_sent = false;
                 }
                 Cmd::Seek(ms) => {
-                    // (mid-crossfade: the one coming in is the one playing)
+                    // (mid-crossfade: the one coming in is the one playing; a mix waiting is off)
                     if let Some(f) = fading.take() { pipe = Some(f.next); shared.fading_in.store(false, Ordering::SeqCst); }
+                    waiting = None;
+                    shared.mix_waiting.store(false, Ordering::SeqCst);
                     shared.skew.store(0, Ordering::SeqCst);
+                    shared.produced.store(0, Ordering::SeqCst);
+                    shared.stretch_off.store(0, Ordering::SeqCst);
                     if let Some(p) = pipe.as_mut() {
                         match p.seek(ms) {
                             Ok(at) => {
@@ -573,6 +688,8 @@ fn decode_loop(shared: Arc<Shared>, cmds: Receiver<Cmd>, ev: Sender<Event>) {
                 Cmd::Stop => {
                     pipe = None;
                     fading = None;
+                    waiting = None;
+                    shared.mix_waiting.store(false, Ordering::SeqCst);
                     shared.fading_in.store(false, Ordering::SeqCst);
                     shared.skew.store(0, Ordering::SeqCst);
                     shared.queue.lock().unwrap().clear();
@@ -587,6 +704,9 @@ fn decode_loop(shared: Arc<Shared>, cmds: Receiver<Cmd>, ev: Sender<Event>) {
                     }
                     if let Some(f) = fading.as_mut() {
                         f.next.chain.eq.set(&eq);
+                    }
+                    if let Some(w) = waiting.as_mut() {
+                        w.next.chain.eq.set(&eq);
                     }
                 }
                 Cmd::Match(db, at_once) => {
@@ -629,6 +749,31 @@ fn decode_loop(shared: Arc<Shared>, cmds: Receiver<Cmd>, ev: Sender<Event>) {
             std::thread::sleep(Duration::from_millis(10));
             continue;
         }
+        // a mix waiting: when the one playing reaches its moment (within this piece: split exactly there)
+        if fading.is_none() && waiting.is_some() {
+            let rate_u = shared.rate.load(Ordering::Relaxed) as u64;
+            let now_ms = shared.base_ms.load(Ordering::Relaxed) as i64 + (shared.produced.load(Ordering::Relaxed) * 1000 / rate_u.max(1)) as i64 + shared.stretch_off.load(Ordering::Relaxed);
+            let at = waiting.as_ref().unwrap().at_ms as i64;
+            scratch.clear();
+            let more = match p.fill(&mut scratch) { Ok(m) => m, Err(e) => { let _ = ev.send(Event::Error(e)); false } };
+            let frames = scratch.len() as u64 / 2;
+            let until = ((at - now_ms).max(0) as u64 * rate_u / 1000).min(frames);
+            shared.queue.lock().unwrap().extend(scratch[..(until * 2) as usize].iter().copied());
+            shared.produced.fetch_add(until, Ordering::Relaxed);
+            if until < frames || !more {
+                // its moment: the rest of this piece is the first of the one going out, in the mix
+                let w = waiting.take().unwrap();
+                shared.mix_waiting.store(false, Ordering::SeqCst);
+                let total = w.ms * rate_u / 1000;
+                let swap = w.swap_ms.map(|s| (s * rate_u / 1000, rate_u / 4));
+                let mut f = begin_fade(&shared, w.next, total, swap);
+                f.out_buf.extend(scratch[(until * 2) as usize..].iter().copied());
+                f.out_ended = !more;
+                fading = Some(f);
+                let _ = ev.send(Event::Mixed);
+            }
+            continue;
+        }
         // a crossfade: both, mixed, until the one coming in is the one playing
         if let Some(f) = fading.as_mut() {
             mixed.clear();
@@ -636,10 +781,13 @@ fn decode_loop(shared: Arc<Shared>, cmds: Receiver<Cmd>, ev: Sender<Event>) {
                 Ok(over) => {
                     *shared.level.lock().unwrap() = f.next.level;
                     shared.queue.lock().unwrap().extend(mixed.iter().copied());
+                    shared.produced.fetch_add(mixed.len() as u64 / 2, Ordering::Relaxed);
+                    stretch_note(&shared, &f.next);
                     if over {
                         let f = fading.take().unwrap();
                         // what of it was read ahead goes on as it is
                         shared.queue.lock().unwrap().extend(f.in_buf.iter().copied());
+                        shared.produced.fetch_add(f.in_buf.len() as u64 / 2, Ordering::Relaxed);
                         if f.in_ended { shared.source_done.store(true, Ordering::SeqCst); }
                         pipe = Some(f.next);
                         shared.fading_in.store(false, Ordering::SeqCst);
@@ -661,6 +809,8 @@ fn decode_loop(shared: Arc<Shared>, cmds: Receiver<Cmd>, ev: Sender<Event>) {
             Ok(more) => {
                 *shared.level.lock().unwrap() = p.level;
                 shared.queue.lock().unwrap().extend(scratch.iter().copied());
+                shared.produced.fetch_add(scratch.len() as u64 / 2, Ordering::Relaxed);
+                stretch_note(&shared, p);
                 if !more {
                     shared.source_done.store(true, Ordering::SeqCst);
                 }
@@ -673,8 +823,44 @@ fn decode_loop(shared: Arc<Shared>, cmds: Receiver<Cmd>, ev: Sender<Event>) {
     }
 }
 
+/// A stretched source: where it is in its own time, against where the frames given say (ms)
+fn stretch_note(shared: &Shared, p: &Pipeline) {
+    if let Some(src_ms) = p.src_position_ms() {
+        let rate = shared.rate.load(Ordering::Relaxed).max(1) as u64;
+        let given = shared.base_ms.load(Ordering::Relaxed) + shared.produced.load(Ordering::Relaxed) * 1000 / rate;
+        shared.stretch_off.store(src_ms as i64 - given as i64, Ordering::Relaxed);
+    }
+}
+
+/// A load (as Cmd::Load), for a mix with nothing playing to mix from
+fn cmds_self_load(shared: &Shared, pipe: &mut Option<Pipeline>, fading: &mut Option<Fading>, src: Box<dyn Source>, db: f32, eq: &[f32]) -> bool {
+    *fading = None;
+    shared.fading_in.store(false, Ordering::SeqCst);
+    shared.mix_waiting.store(false, Ordering::SeqCst);
+    let rate = shared.rate.load(Ordering::SeqCst);
+    let mut p = Pipeline::new(src, rate);
+    p.chain.eq.set(eq);
+    p.chain.set_match_db(db, true);
+    shared.queue.lock().unwrap().clear();
+    shared.played.store(0, Ordering::SeqCst);
+    shared.skew.store(0, Ordering::SeqCst);
+    shared.produced.store(0, Ordering::SeqCst);
+    shared.stretch_off.store(0, Ordering::SeqCst);
+    shared.base_ms.store(p.src_position_ms().unwrap_or(0), Ordering::SeqCst);
+    shared.duration_ms.store(p.duration_ms().unwrap_or(0), Ordering::SeqCst);
+    shared.source_done.store(false, Ordering::SeqCst);
+    shared.loaded.store(true, Ordering::SeqCst);
+    *pipe = Some(p);
+    true
+}
+
 /// Renders a crossfade without a device: `a` from `a_from_ms`, then `b` coming in over `ms` (for tests)
 pub fn render_crossfade(a: Box<dyn Source>, b: Box<dyn Source>, out_rate: u32, a_secs: f32, ms: u64, max_secs: f32) -> Result<Vec<f32>, String> {
+    render_mix(a, b, out_rate, a_secs, ms, None, max_secs)
+}
+
+/// A mix rendered without a device: as render_crossfade, with the bass handed over `swap` ms in (for tests)
+pub fn render_mix(a: Box<dyn Source>, b: Box<dyn Source>, out_rate: u32, a_secs: f32, ms: u64, swap: Option<u64>, max_secs: f32) -> Result<Vec<f32>, String> {
     let mut pa = Pipeline::new(a, out_rate);
     let mut out = Vec::new();
     let lead = (a_secs * out_rate as f32) as usize * 2;
@@ -682,7 +868,7 @@ pub fn render_crossfade(a: Box<dyn Source>, b: Box<dyn Source>, out_rate: u32, a
         if !pa.fill(&mut out)? { break; }
     }
     out.truncate(lead);
-    let mut f = Fading { next: Pipeline::new(b, out_rate), total: ms * out_rate as u64 / 1000, done: 0, out_buf: VecDeque::new(), in_buf: VecDeque::new(), out_ended: false, in_ended: false };
+    let mut f = Fading::new(Pipeline::new(b, out_rate), ms * out_rate as u64 / 1000, swap.map(|s| (s * out_rate as u64 / 1000, out_rate as u64 / 4)), out_rate);
     let mut scratch = Vec::new();
     loop {
         if f.mix(&mut pa, &mut out, &mut scratch)? { break; }
@@ -738,5 +924,34 @@ mod xfade_tests {
         let i = (5.0 * rate as f32) as usize * 2;
         let crossings = out[i..i + 2 * 4410].chunks(2).map(|f| f[0]).collect::<Vec<_>>().windows(2).filter(|w| w[0] < 0.0 && w[1] >= 0.0).count();
         assert!((60..=72).contains(&crossings), "{crossings}");
+    }
+}
+
+#[cfg(test)]
+mod mix_tests {
+    use super::*;
+    use crate::source::Tone;
+
+    /// How many times a channel crosses zero upward in a stretch (a tone's frequency, near enough)
+    fn ups(out: &[f32], rate: u32, from_s: f32, secs: f32) -> usize {
+        let a = (from_s * rate as f32) as usize * 2;
+        let b = a + (secs * rate as f32) as usize * 2;
+        let ch: Vec<f32> = out[a..b].chunks(2).map(|f| f[0]).collect();
+        ch.windows(2).filter(|w| w[0] < 0.0 && w[1] >= 0.0).count()
+    }
+
+    #[test]
+    fn the_bass_is_handed_over_at_once() {
+        let rate = 44_100u32;
+        // two basslines: 55 Hz going out, 82 Hz coming in; a 2 s mix from 2 s, the bass swapped 1.2 s in
+        let a = Box::new(Tone::new(rate, 55.0, 0.4, 10.0));
+        let b = Box::new(Tone::new(rate, 82.0, 0.4, 10.0));
+        let out = render_mix(a, b, rate, 2.0, 2000, Some(1200), 6.0).unwrap();
+        // before the swap: only the one going out's (its 55 Hz: ~11 in 0.2 s), the other's held back
+        let before = ups(&out, rate, 2.9, 0.2);
+        assert!((10..=12).contains(&before), "before {before}");
+        // after it (and its quarter second): only the one coming in's (82 Hz: ~16 in 0.2 s)
+        let after = ups(&out, rate, 3.6, 0.2);
+        assert!((15..=18).contains(&after), "after {after}");
     }
 }

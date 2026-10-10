@@ -83,6 +83,7 @@ fn main() {
         match events.recv_timeout(Duration::from_millis(1000)) {
             Ok(Event::Ended) => { println!("ended at {} ms", engine.position_ms()); break; }
             Ok(Event::Error(e)) => { eprintln!("error: {e}"); break; }
+            Ok(Event::Mixed) => println!("mixed in at {} ms", engine.position_ms()),
             Err(_) => {
                 let (rms, peak) = engine.level();
                 println!("{:>6.1} s / {:.1} s   level {rms:.1} dB rms, {peak:.1} dB peak", engine.position_ms() as f32 / 1000.0, engine.duration_ms() as f32 / 1000.0);

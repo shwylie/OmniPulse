@@ -22,6 +22,11 @@ pub trait Source: Send {
     fn read(&mut self, out: &mut Vec<f32>) -> Result<bool, String>;
     /// Goes to a position; returns where it landed
     fn seek(&mut self, ms: u64) -> Result<u64, String>;
+    /// Where in the track the sound it last gave is, when that isn't simply how much it has given (a
+    /// stretched one's, crate::stretch)
+    fn position_ms(&self) -> Option<u64> {
+        None
+    }
 }
 
 pub struct Decoded {

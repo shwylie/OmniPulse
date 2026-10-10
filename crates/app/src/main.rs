@@ -1838,6 +1838,10 @@ fn sb_tick(shared: &Shared, pos: u64, dur: u64) -> bool {
     false
 }
 
+// ---------- seamless mixing ----------
+/// A mix's moment came: the next track is coming in (the queue moves on, without loading it again)
+fn mix_started(_shared: &Shared) {}
+
 // ---------- preloading the next track (as the web app's js/preload.js) ----------
 // Once the one playing is 70% through, or has a minute left (whichever comes first), what the next one
 // needs before it can start is found: its YouTube Music version (a catalogue song, a Go+ track) and its
@@ -2270,6 +2274,7 @@ fn tick(shared: &Shared, events: &std::sync::mpsc::Receiver<Event>, n: u64) {
     rhythm_tick(shared, pos);
     while let Ok(ev) = events.try_recv() {
         match ev {
+            Event::Mixed => mix_started(shared),
             Event::Ended if shared.borrow().repeat == "one" => start(shared),
             Event::Ended if shared.borrow().closest.is_some() => {
                 let (done, cur) = { let a = shared.borrow(); (a.closest.clone(), a.queue.current().cloned()) };

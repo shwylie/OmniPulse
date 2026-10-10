@@ -6,6 +6,7 @@ pub mod hls;
 pub mod http;
 pub mod push;
 pub mod source;
+pub mod stretch;
 pub mod ts;
 
 pub use engine::{render, Engine, Event, Tap};
@@ -13,6 +14,7 @@ pub use hls::HlsSource;
 pub use http::open_url;
 pub use push::{PushFeed, PushSource};
 pub use source::{Decoded, Source, Tone};
+pub use stretch::{Stretched, Tempo};
 
 #[cfg(test)]
 mod tests {

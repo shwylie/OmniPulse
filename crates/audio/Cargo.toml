@@ -8,6 +8,8 @@ description = "OmniPulse's playback engine: decoding, the sound chain (loudness 
 symphonia = { version = "0.5", default-features = false, features = ["aac", "alac", "flac", "isomp4", "mp3", "ogg", "pcm", "vorbis", "wav", "aiff"] }
 cpal = "0.15"
 rubato = "0.16"
+# tempo without pitch, for seamless mixing (pure Rust, MIT): a DJ deck's keylock
+timestretch = "0.15"
 reqwest = { version = "0.12", features = ["blocking"] }
 
 [dev-dependencies]
