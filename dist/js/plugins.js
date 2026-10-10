@@ -24,8 +24,8 @@ const plugPlat = (id) => "plug:" + id;
 const isPluginTrack = (t) => srcOf(t).startsWith("plug:");
 const pluginIdOf = (t) => srcOf(t).slice(5);
 const pluginOn = (id) => prefs["plugOn_" + id] !== false;
-// its icon among the platforms' in the title bar (on unless switched off in its settings)
-const pluginChip = (id) => prefs["plugChip_" + id] !== false;
+// its icon among the platforms' in the title bar (off until switched on in its settings)
+const pluginChip = (id) => prefs["plugChip_" + id] === true;
 const pluginSettings = (id) => Object.assign({}, (prefs.pluginSettings || {})[id] || {});
 
 // ---------- the sandbox ----------
