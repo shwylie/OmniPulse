@@ -136,7 +136,7 @@ fn downbeats(m: &Measured) -> Vec<f64> {
 pub fn handoff(p: &Plan, bands: bool) -> omnipulse_audio::Handoff {
     if !p.beatmatched { return omnipulse_audio::Handoff::bass_swap(p.ms, p.ms / 2); }
     let beat = p.ms as f64 / (p.bars * 4) as f64;
-    if bands { omnipulse_audio::Handoff::staged(p.ms, beat, p.swap_ms) } else { omnipulse_audio::Handoff::wipe(p.ms, beat, p.swap_ms) }
+    if bands { omnipulse_audio::Handoff::staged(p.ms, beat, p.swap_ms) } else { omnipulse_audio::Handoff::wipe(beat, p.swap_ms) }
 }
 
 /// A measured track's beat as it is over n beats from `from` (ms from its start), from its tracked beats: a
@@ -175,30 +175,20 @@ pub fn plan_structure(a: &Measured, a_end_ms: u64, now_ms: u64, b: &Measured) ->
     let matched = match_rate(a.rhythm.bpm, b.rhythm.bpm).map(|(r, _)| r).filter(|_| keys_fit(a, b));
     if let Some(r) = matched {
         let fits = |k: usize, n: u32| at(k) >= soonest && k + n as usize <= a_end && at(k) + a_bar * n as f64 <= audible;
-        // the latest start on its phrase (8 bars, else 4) that gives up no more than 4 of its bars with a beat; else any
-        let place = |n: u32| {
-            let ideal = a_end.checked_sub(n as usize)?;
-            let latest = |every: usize| (0..=ideal).rev().find(|&k| on_phrase(k, a_off, every) && fits(k, n));
-            [8, 4].iter().filter_map(|&e| latest(e)).find(|&k| k + 4 >= ideal).or_else(|| latest(1))
+        // the run-up to the swap: a phrase (8 bars), else half of one; the swap on a phrase's start of
+        // both. The one playing: the latest of its own phrases' starts that has its beat to the swap
+        // (giving up no more than a phrase of its bars with one, else any); the next one: from its own
+        // phrase's start, the soonest that has its main part (its beat) in by the swap, its intro before
+        // that cut. After the swap, a bar of the next one alone.
+        let place = |n: usize| {
+            let ideal = a_end.checked_sub(n)?;
+            let latest = |every: usize| (0..=ideal).rev().find(|&k| on_phrase(k, a_off, every) && fits(k, n as u32));
+            [PHRASE, 4].iter().filter_map(|&e| latest(e)).find(|&k| k + PHRASE >= ideal).or_else(|| latest(1))
         };
-        let (bars, k) = [16u32, 8, 4].iter().find_map(|&n| place(n).map(|k| (n, k)))?;
-        // the next one from its own phrase's start (the two counts of eight together), the one that puts
-        // its beat in nearest the mix's half (rather sooner than later)
-        let every = if bars >= 8 { PHRASE } else { 4 };
-        let target = b_main.saturating_sub(bars as usize / 2);
-        let from_bar = (0..bd.len()).filter(|&c| on_phrase(c, b_off, every))
-            .min_by_key(|&c| ((c as i64 - target as i64).abs(), std::cmp::Reverse(c)))
-            .unwrap_or(target).min(bd.len() - 1);
-        // the swap (its mids and bass in, the other's out) where its main part starts, if that's in the
-        // mix's middle half; else at the half (both on a phrase)
-        let beat_in = b_main.saturating_sub(from_bar);
-        let swap_bar = if (bars as usize / 4..=bars as usize * 3 / 4).contains(&beat_in) { beat_in } else { bars as usize / 2 };
-        // (nothing's left to hand over after the swap but a moment: a mix that would go on long after it
-        // is cut down to the swap and a bar, at least 8, and moved later, the one playing heard to near its beat's end)
-        let (bars, k) = match ((swap_bar as u32 + 4).div_ceil(4) * 4).max(8) {
-            short if short < bars => place(short).map(|k| (short, k)).unwrap_or((bars, k)),
-            _ => (bars, k),
-        };
+        let (run, k) = [PHRASE, 4].iter().find_map(|&n| place(n).map(|k| (n, k)))?;
+        let every = if run >= PHRASE { PHRASE } else { 4 };
+        let from_bar = (0..bd.len()).find(|&c| on_phrase(c, b_off, every) && c + run >= b_main).unwrap_or(0).min(bd.len() - 1);
+        let (bars, swap_bar) = (run as u32 + 1, run);
         // stretched to each one's tempo over the bars mixed, not its average (within a percent of it)
         let n = bars as usize * 4;
         let rate = match (period_at(a, at(k), n), period_at(b, bd[from_bar], (n as f64 * r).round() as usize)) {
@@ -423,16 +413,16 @@ mod tests {
         let end = (500.0 + 88.0 * bar) as u64;
         let p = plan_structure(&a, end, 10_000, &b).expect("a plan");
         assert!(p.beatmatched);
-        // 12 bars: to the swap (8 in) and a bar, cut down from 16
-        assert_eq!(p.bars, 12);
-        // over its last bars with a beat (from bar 48, a phrase), its beatless outro cut
-        assert_eq!(p.at_ms, (500.0 + 48.0 * bar).round() as u64);
-        // the next one's beat (bar 24) in at the mix's half: from its bar 16, the rest of its intro cut
+        // a phrase's run-up to the swap, then a bar of the next one alone
+        assert_eq!((p.bars, p.swap_ms), (9, (8.0 * bar).round() as u64));
+        // from bar 56 (a phrase), the swap where its beat ends (bar 64), its beatless outro cut
+        assert_eq!(p.at_ms, (500.0 + 56.0 * bar).round() as u64);
+        // the next one from its bar 16 (a phrase), its beat in (bar 24) on the swap, the rest of its intro cut
         assert_eq!(p.start_ms, (300.0 + 16.0 * bar).round() as u64);
         // a beat all through, end to end: the latest phrase that fits before the sound ends
         let flat = shaped(m(128.0, 500.0, 0, 0.5), &song(&[(88, -10.0, true)]));
         let p = plan_structure(&flat, end, 10_000, &shaped(m(128.0, 300.0, 0, 0.5), &song(&[(88, -10.0, true)]))).expect("a plan");
-        assert_eq!((p.bars, p.start_ms), (12, 300));
+        assert_eq!((p.bars, p.start_ms), (9, 300));
         assert_eq!(p.at_ms, (500.0 + 72.0 * bar).round() as u64);
         assert!(p.at_ms + p.ms <= end);
     }
@@ -446,9 +436,9 @@ mod tests {
         assert_eq!((phrase_offset(&a), phrase_offset(&b)), (1, 0));
         let bar: f64 = 4.0 * 60_000.0 / 128.0;
         let p = plan_structure(&a, (500.0 + 88.0 * bar) as u64, 10_000, &b).expect("a plan");
-        // out on its phrase (bar 49, 16 before its beat ends at 65), not a bar early; the next one from
-        // its bar 8 (on its phrase), its beat in (and the swap) at the half
-        assert_eq!(p.at_ms, (500.0 + 49.0 * bar).round() as u64);
+        // out on its phrase (bar 57: the swap on bar 65, where its beat ends), not a bar early; the next
+        // one from its bar 8 (on its phrase), its beat in on the swap
+        assert_eq!(p.at_ms, (500.0 + 57.0 * bar).round() as u64);
         assert_eq!(p.start_ms, (300.0 + 8.0 * bar).round() as u64);
         assert_eq!(p.swap_ms, (8.0 * bar).round() as u64);
     }
