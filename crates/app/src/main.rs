@@ -5,6 +5,7 @@
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod plugrun;
 mod desktop;
 mod integrations;
 mod look;
@@ -1715,13 +1716,22 @@ fn paint_settings(a: &App) {
     let Some(ui) = a.ui.upgrade() else { return };
     let streamer = integrations::set(&a.web.prefs, "streamerMode");
     let rows = |sec: &str| -> ModelRc<SetRow> {
-        let list: Vec<SetRow> = SET_ROWS.iter().filter(|(s, ..)| *s == sec)
+        let mut list: Vec<SetRow> = SET_ROWS.iter().filter(|(s, ..)| *s == sec)
             // Extended only shows with Streamer Mode on
             .filter(|(_, _, _, key, _)| *key != "streamSafe" || streamer)
             .map(|(_, label, note, key, dflt)| {
                 let on = if *key == "autoplay" { a.autoplay } else { set_row_on(&a.web.prefs, key, *dflt) };
                 SetRow { head: Default::default(), label: (*label).into(), note: (*note).into(), on, key: (*key).into(), sub: *key == "streamSafe" }
             }).collect();
+        // the plugins installed (the web app adds and removes them; each one switches on and off here)
+        if sec == "Integrations" && !streamer {
+            for p in omnipulse_core::plugins::list() {
+                let m = &p.manifest;
+                let state = if !plugin_on(&a.web.prefs, &m.id) { "Off.".to_string() } else if plugrun::get(&m.id).is_some() { "Running.".to_string() } else { PLUG_ERR.with(|e| e.borrow().get(&m.id).cloned()).map(|e| format!("Couldn't start: {e}")).unwrap_or_else(|| "Starting...".into()) };
+                let note = format!("{}{}{}", if m.description.is_empty() { String::new() } else { format!("{} ", m.description) }, if p.bundled { "Comes with OmniPulse. " } else { "" }, state);
+                list.push(SetRow { head: Default::default(), label: format!("Plugin: {}", m.name).into(), note: note.into(), on: plugin_on(&a.web.prefs, &m.id), key: format!("plugOn_{}", m.id).into(), sub: false });
+            }
+        }
         ModelRc::from(Rc::new(VecModel::from(list)))
     };
     ui.set_set_rows_integrations(rows("Integrations"));
@@ -1749,7 +1759,43 @@ fn section_flip(shared: &Shared, title: &str) {
 }
 
 /// A switch in Settings: kept with this app's settings, and done straight away
+/// A plugin: on unless switched off (the web app's prefs.plugOn_<id>)
+fn plugin_on(prefs: &serde_json::Value, id: &str) -> bool {
+    prefs[format!("plugOn_{id}")].as_bool() != Some(false)
+}
+
+thread_local! {
+    /// why a plugin didn't start, by its id
+    static PLUG_ERR: RefCell<HashMap<String, String>> = RefCell::new(HashMap::new());
+}
+
+/// The installed plugins that are on, started (each on its own thread: crate::plugrun); the rest stopped
+fn plugins_start(shared: &Shared) {
+    let (prefs, rt) = { let a = shared.borrow(); (a.web.prefs.clone(), a.rt.clone()) };
+    for p in omnipulse_core::plugins::list() {
+        let id = p.manifest.id.clone();
+        if !plugin_on(&prefs, &id) { plugrun::stop(&id); continue; }
+        if plugrun::get(&id).is_some() { continue; }
+        match plugrun::start(&p, &plugrun::settings_of(&p.manifest, &prefs), rt.clone()) {
+            Ok(_) => PLUG_ERR.with(|e| e.borrow_mut().remove(&id)),
+            Err(e) => PLUG_ERR.with(|x| x.borrow_mut().insert(id, e)),
+        };
+    }
+    paint_settings(&shared.borrow());
+}
+
 fn set_toggle(shared: &Shared, key: &str) {
+    if let Some(id) = key.strip_prefix("plugOn_") {
+        let on = {
+            let mut a = shared.borrow_mut();
+            let on = !plugin_on(&a.web.prefs, id);
+            if let Some(o) = a.web.prefs.as_object_mut() { o.insert(key.into(), serde_json::json!(on)); }
+            on
+        };
+        if std::env::var_os("OMNIPULSE_SELFTEST").is_none() { webstate::save_pref(key, serde_json::json!(on)); }
+        plugins_start(shared);
+        return;
+    }
     let Some(&(_, label, _, key, dflt)) = SET_ROWS.iter().find(|r| r.3 == key) else { return };
     match key {
         "autoplay" => {
@@ -2793,6 +2839,7 @@ fn listen_needs_version(t: &Track) -> bool {
         track::Src::YouTube(_) => ytdlp,
         track::Src::Local(p) => std::path::Path::new(p).exists(),
         track::Src::MusicBrainz(_) => false,
+        track::Src::Plugin(id, _) => plugrun::get(id).is_some(),
     };
     !ok && ytdlp
 }
@@ -3325,6 +3372,8 @@ fn main() -> Result<(), slint::PlatformError> {
     go_plus_set(&shared.borrow().web.prefs);
 
     SHARED.with(|s| *s.borrow_mut() = Some(shared.clone()));
+    // the plugins that are on, each started on its own thread
+    plugins_start(&shared);
     ui.set_page_sub("Loading your Library...".into());
     restore_session(&shared);
     apply_look(&shared);

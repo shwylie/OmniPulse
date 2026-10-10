@@ -12,6 +12,8 @@ pub enum Src {
     Local(String),
     /// a song MusicBrainz knows (its recording id): played from YouTube Music, as the web app does
     MusicBrainz(String),
+    /// a plugin's track: (the plugin's id, the track as the plugin gave it, as JSON)
+    Plugin(String, String),
 }
 
 #[derive(Clone, Debug, Default)]
@@ -55,6 +57,7 @@ impl Track {
             Src::YouTube(_) => "youtube",
             Src::Local(_) => "local",
             Src::MusicBrainz(_) => "musicbrainz",
+            Src::Plugin(..) => "plugin",
         }
     }
 
@@ -143,6 +146,25 @@ impl Track {
         .tidied())
     }
 
+    /// A plugin's track: { id, title, artist, album?, duration_ms?, artwork?, link?, license? }
+    pub fn plugin(plugin: &str, x: &Value) -> Option<Track> {
+        let id = x["id"].as_str().map(String::from).or_else(|| x["id"].as_i64().map(|n| n.to_string()))?;
+        let link = x["link"].as_str().filter(|l| l.starts_with("https://")).unwrap_or("").to_string();
+        Some(Track {
+            src: Src::Plugin(plugin.to_string(), x.to_string()),
+            key: format!("plug:{plugin}:{id}"),
+            title: x["title"].as_str().unwrap_or("Untitled").to_string(),
+            artist: x["artist"].as_str().unwrap_or("Unknown artist").to_string(),
+            album: x["album"].as_str().unwrap_or("").to_string(),
+            ms: x["duration_ms"].as_u64().unwrap_or(0),
+            art: x["artwork"].as_str().unwrap_or("").to_string(),
+            link,
+            licence: x["license"].as_str().unwrap_or("").to_string(),
+            ..Default::default()
+        }
+        .tidied())
+    }
+
     /// A song MusicBrainz knows (as crates/core/src/musicbrainz.rs gives it), to play from YouTube Music
     pub fn musicbrainz(t: &Value) -> Option<Track> {
         let id = t["mbId"].as_str()?;
@@ -216,6 +238,11 @@ impl Track {
         if let Src::MusicBrainz(id) = &self.src {
             s["mbId"] = serde_json::json!(id);
         }
+        // a plugin's: its own source name, and the track as it gave it (the web app's pTrack)
+        if let Src::Plugin(p, x) = &self.src {
+            s["source"] = serde_json::json!(format!("plug:{p}"));
+            s["pTrack"] = serde_json::from_str(x).unwrap_or_default();
+        }
         s
     }
 
@@ -226,6 +253,7 @@ impl Track {
         let src = match source {
             "spotify" => Src::Spotify(s["uri"].as_str().map(String::from).unwrap_or_else(|| format!("spotify:track:{}", id.trim_start_matches("sp:")))),
             "youtube" => Src::YouTube(id.trim_start_matches("yt:").to_string()),
+            p if p.starts_with("plug:") => Src::Plugin(p[5..].to_string(), s["pTrack"].to_string()),
             "musicbrainz" => Src::MusicBrainz(s["mbId"].as_str().map(String::from).unwrap_or_else(|| id.trim_start_matches("mb:").to_string())),
             "local" => {
                 let path = omnipulse_core::local::local_path_for(&id)?;

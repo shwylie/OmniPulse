@@ -165,8 +165,15 @@ pub async fn search(q: &str) -> Vec<Track> {
         }
         core::musicbrainz::search(q).await.map(|l| l.iter().filter_map(Track::musicbrainz).collect()).unwrap_or_default()
     };
-    let (a, b, c, d): (Vec<Track>, Vec<Track>, Vec<Track>, Vec<Track>) = tokio::join!(sc, sp, yt, mb);
-    rank(q, interleave(vec![a, b, c, d]))
+    // each running plugin that can search and play (crate::plugrun)
+    let plugs = futures_util::future::join_all(crate::plugrun::players().into_iter().map(|p| {
+        let q = q.to_string();
+        async move { p.call("search", vec![serde_json::json!(q)]).await.map(|v| v.as_array().cloned().unwrap_or_default().iter().take(200).filter_map(|x| Track::plugin(&p.id, x)).collect::<Vec<_>>()).unwrap_or_default() }
+    }));
+    let (a, b, c, d, e) = tokio::join!(sc, sp, yt, mb, plugs);
+    let mut lists = vec![a, b, c, d];
+    lists.extend(e);
+    rank(q, interleave(lists))
 }
 
 /// Whether MusicBrainz is searched too (Settings: the web app's prefs.mbOn, on unless switched off)

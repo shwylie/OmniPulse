@@ -61,6 +61,7 @@ global Icons {
     out property <string> gear: "M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58a.49.49 0 0 0 .12-.61l-1.92-3.32a.49.49 0 0 0-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54a.48.48 0 0 0-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96a.49.49 0 0 0-.59.22L2.74 8.87a.48.48 0 0 0 .12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58a.49.49 0 0 0-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32a.48.48 0 0 0-.12-.61l-2.01-1.58zM12 15.6A3.6 3.6 0 1 1 12 8.4a3.6 3.6 0 0 1 0 7.2z";
     out property <string> soundcloud: "M1 14.5c0-1.1.8-2 1.9-2.1.4-2.5 2.5-4.4 5.1-4.4.6 0 1.2.1 1.7.3C10.6 6.4 12.6 5 15 5c3.3 0 6 2.7 6 6 0 .2 0 .4-.1.6.7.5 1.1 1.3 1.1 2.2 0 1.5-1.2 2.7-2.7 2.7H3.6C2.2 16.5 1 15.6 1 14.5z";
     out property <string> spotify: "M12 2a10 10 0 100 20 10 10 0 000-20zm4.6 14.4c-.2.3-.6.4-.9.2-2.5-1.5-5.6-1.9-9.3-1-.3.1-.7-.1-.8-.5-.1-.3.1-.7.5-.8 4-.9 7.5-.5 10.3 1.2.3.2.4.6.2.9zm1.2-2.7c-.2.4-.7.5-1.1.3-2.9-1.8-7.2-2.3-10.6-1.2-.4.1-.9-.1-1-.5-.1-.4.1-.9.5-1 3.9-1.2 8.7-.6 12 1.4.4.2.5.7.2 1zm.1-2.8C14.5 8.8 8.9 8.6 5.6 9.6c-.5.2-1.1-.1-1.2-.6-.2-.5.1-1.1.6-1.2 3.8-1.1 10-.9 13.9 1.4.5.3.6.9.4 1.4-.3.4-.9.6-1.4.3z";
+    out property <string> plugin: "M20.5 11H19V7c0-1.1-.9-2-2-2h-4V3.5C13 2.12 11.88 1 10.5 1S8 2.12 8 3.5V5H4c-1.1 0-1.99.9-1.99 2v3.8H3.5c1.49 0 2.7 1.21 2.7 2.7s-1.21 2.7-2.7 2.7H2V20c0 1.1.9 2 2 2h3.8v-1.5c0-1.49 1.21-2.7 2.7-2.7 1.49 0 2.7 1.21 2.7 2.7V22H17c1.1 0 2-.9 2-2v-4h1.5c1.38 0 2.5-1.12 2.5-2.5S21.88 11 20.5 11z";
     out property <string> musicbrainz: "M12 2a10 10 0 1 0 0 20 10 10 0 1 0 0-20zm0 6.5a3.5 3.5 0 1 1 0 7 3.5 3.5 0 0 1 0-7zm0 2a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3z";
     out property <string> youtube: "M5 3h14a3 3 0 0 1 3 3v9a3 3 0 0 1-3 3H5a3 3 0 0 1-3-3V6a3 3 0 0 1 3-3zm0 2.2a.8.8 0 0 0-.8.8v9c0 .44.36.8.8.8h14a.8.8 0 0 0 .8-.8V6a.8.8 0 0 0-.8-.8zM8 20h8v1.8H8z";
     out property <string> local: "M10 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z";
@@ -266,8 +267,8 @@ component Toggle inherits Rectangle {
 
 component PlatIcon inherits Glyph {
     in property <string> plat;
-    d: plat == "spotify" ? Icons.spotify : plat == "youtube" ? Icons.youtube : plat == "local" ? Icons.local : plat == "musicbrainz" ? Icons.musicbrainz : Icons.soundcloud;
-    fill: plat == "spotify" ? #1ed760 : plat == "youtube" ? #ff0033 : plat == "local" ? #f2b544 : plat == "musicbrainz" ? #ba478f : #ff5500;
+    d: plat == "spotify" ? Icons.spotify : plat == "youtube" ? Icons.youtube : plat == "local" ? Icons.local : plat == "musicbrainz" ? Icons.musicbrainz : plat == "plugin" ? Icons.plugin : Icons.soundcloud;
+    fill: plat == "spotify" ? #1ed760 : plat == "youtube" ? #ff0033 : plat == "local" ? #f2b544 : plat == "musicbrainz" ? #ba478f : plat == "plugin" ? #38bdf8 : #ff5500;
 }
 
 component NavItem inherits Rectangle {

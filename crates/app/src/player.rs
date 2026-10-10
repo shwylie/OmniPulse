@@ -58,6 +58,20 @@ pub async fn open_source(t: &Track, rt: tokio::runtime::Handle) -> Result<Box<dy
     match &t.src {
         // (played as its YouTube Music version: crate::versions, in main.rs)
         Src::MusicBrainz(_) => Err("it plays from YouTube Music".into()),
+        Src::Plugin(id, x) => {
+            let p = crate::plugrun::get(id).ok_or("its plugin isn't running (Settings > Integrations)")?;
+            let r = p.call("resolve", vec![serde_json::from_str(x).unwrap_or_default()]).await?;
+            let url = r["url"].as_str().unwrap_or("").to_string();
+            if !(url.starts_with("https://") || url.starts_with("http://")) {
+                return Err(format!("{} didn't give a playable address", p.name));
+            }
+            if !core::plugins::host_allowed(&p.hosts, &url) {
+                return Err(format!("{} may only play from {}", p.name, p.hosts.join(", ")));
+            }
+            let ext = url.split(['?', '#']).next().unwrap_or("").rsplit('.').next().unwrap_or("mp3").to_lowercase();
+            let ext = if ["mp3", "flac", "m4a", "ogg", "wav", "aac", "opus"].contains(&ext.as_str()) { ext } else { "mp3".to_string() };
+            tokio::task::spawn_blocking(move || omnipulse_audio::open_url(&url, &ext).map(|d| Box::new(d) as Box<dyn Source>)).await.map_err(|e| e.to_string())?
+        }
         Src::Local(path) => {
             let p = path.clone();
             tokio::task::spawn_blocking(move || Decoded::open_file(std::path::Path::new(&p)).map(|d| Box::new(d) as Box<dyn Source>)).await.map_err(|e| e.to_string())?
