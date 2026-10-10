@@ -1784,6 +1784,26 @@ async fn rhythm_measure_whole(t: Track) {
     }
 }
 
+/// The next track's loudness measured ahead (seamless mixing on): a mix brings it in at its own match,
+/// not a guess that moves once it's measured. Of what the mix plays (its YouTube Music version, if it
+/// plays as that); kept as a measurement as it plays is.
+fn loud_ahead(shared: &Shared, t: Track) {
+    if sound::loud_step(&shared.borrow().web.prefs) == "off" || t.is_mix() { return; }
+    let (rt, weak) = { let a = shared.borrow(); (a.rt.clone(), a.ui.clone()) };
+    rt.spawn(async move {
+        let version = if mix_via_youtube(&t) { versions::find(&t).await } else { None };
+        let Some((kind, id)) = sound::loud_source(&t, version.as_ref().map(|v| v.yt.id.as_str())) else { return };
+        let Ok(a) = omnipulse_core::loudness::analyse(kind, &id).await else { return };
+        let Some(lufs) = a["lufs"].as_f64() else { return };
+        let _ = weak.upgrade_in_event_loop(move |_| SHARED.with(|s| {
+            let Some(shared) = s.borrow().clone() else { return };
+            let key = format!("{kind}:{id}");
+            shared.borrow_mut().loud.insert(key.clone(), lufs);
+            shared.borrow_mut().analysis.entry(key).or_insert(a);
+        }));
+    });
+}
+
 /// A track has started: listened to, if nothing's known of it yet
 fn rhythm_begin(shared: &Shared, t: &Track, dur_ms: u64) {
     rhythm_stop(shared);
@@ -2104,7 +2124,7 @@ fn preload_next(shared: &Shared) {
     };
     if PRELOADED.with(|p| *p.borrow() == next.key) { return; }
     PRELOADED.with(|p| *p.borrow_mut() = next.key.clone());
-    if integrations::on(&shared.borrow().web.prefs, "mixOn") { rhythm_ahead(shared, next.clone()); }
+    if integrations::on(&shared.borrow().web.prefs, "mixOn") { rhythm_ahead(shared, next.clone()); loud_ahead(shared, next.clone()); }
     let yt_id = |t: &Track| if let track::Src::YouTube(id) = &t.src { Some(id.clone()) } else { None };
     let via_yt = next.go_plus || matches!(next.src, track::Src::Catalog(_)) || listen_needs_version(&next);
     if !via_yt && yt_id(&next).is_none() { return; }   // (the others start at once anyway)
@@ -6104,7 +6124,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 // the one playing put a few seconds before its moment; then how it went
                 "mixprep" => {
                     let next: Vec<Track> = { let a = s.borrow(); let i = a.queue.qi.unwrap_or(0); a.queue.items.iter().skip(i + 1).take(6).map(|q| q.t.clone()).collect() };
-                    for t in next { rhythm_ahead(&s, t); }
+                    for t in next { rhythm_ahead(&s, t.clone()); loud_ahead(&s, t); }
                     println!("selftest: mix: measuring the next 6 ahead");
                 }
                 "mixseek" => {

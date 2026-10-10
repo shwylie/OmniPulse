@@ -1078,19 +1078,23 @@ fn cmds_self_load(shared: &Shared, pipe: &mut Option<Pipeline>, fading: &mut Opt
 
 /// Renders a crossfade without a device: `a` from `a_from_ms`, then `b` coming in over `ms` (for tests)
 pub fn render_crossfade(a: Box<dyn Source>, b: Box<dyn Source>, out_rate: u32, a_secs: f32, ms: u64, max_secs: f32) -> Result<Vec<f32>, String> {
-    render_mix(a, b, out_rate, a_secs, ms, None, max_secs)
+    render_mix(a, b, (0.0, 0.0), out_rate, a_secs, ms, None, max_secs)
 }
 
-/// A mix rendered without a device: as render_crossfade, handed over as `handoff` says (for tests)
-pub fn render_mix(a: Box<dyn Source>, b: Box<dyn Source>, out_rate: u32, a_secs: f32, ms: u64, handoff: Option<Handoff>, max_secs: f32) -> Result<Vec<f32>, String> {
+/// A mix rendered without a device: as render_crossfade, handed over as `handoff` says, each one
+/// at its own loudness match (`dbs`: the one going out's, the one coming in's), as the player has it
+pub fn render_mix(a: Box<dyn Source>, b: Box<dyn Source>, dbs: (f32, f32), out_rate: u32, a_secs: f32, ms: u64, handoff: Option<Handoff>, max_secs: f32) -> Result<Vec<f32>, String> {
     let mut pa = Pipeline::new(a, out_rate);
+    pa.chain.set_match_db(dbs.0, true);
     let mut out = Vec::new();
     let lead = (a_secs * out_rate as f32) as usize * 2;
     while out.len() < lead {
         if !pa.fill(&mut out)? { break; }
     }
     out.truncate(lead);
-    let mut f = Fading::new(Pipeline::new(b, out_rate), ms * out_rate as u64 / 1000, handoff, out_rate);
+    let mut pb = Pipeline::new(b, out_rate);
+    pb.chain.set_match_db(dbs.1, true);
+    let mut f = Fading::new(pb, ms * out_rate as u64 / 1000, handoff, out_rate);
     let mut scratch = Vec::new();
     loop {
         if f.mix(&mut pa, &mut out, &mut scratch)? { break; }
@@ -1168,7 +1172,7 @@ mod mix_tests {
         // two basslines: 55 Hz going out, 82 Hz coming in; a 2 s mix from 2 s, the bass swapped 1.2 s in
         let a = Box::new(Tone::new(rate, 55.0, 0.4, 10.0));
         let b = Box::new(Tone::new(rate, 82.0, 0.4, 10.0));
-        let out = render_mix(a, b, rate, 2.0, 2000, Some(Handoff::bass_swap(2000, 1200)), 6.0).unwrap();
+        let out = render_mix(a, b, (0.0, 0.0), rate, 2.0, 2000, Some(Handoff::bass_swap(2000, 1200)), 6.0).unwrap();
         // before the swap: only the one going out's (its 55 Hz: ~11 in 0.2 s), the other's held back
         let before = ups(&out, rate, 2.9, 0.2);
         assert!((10..=12).contains(&before), "before {before}");
@@ -1183,7 +1187,7 @@ mod mix_tests {
         // both a bass (55 / 82 Hz) and a high (5 / 7 kHz)
         let two = |a: f32, b: f32| -> Box<dyn Source> { Box::new(crate::source::Sum(vec![Tone::new(rate, a, 0.3, 12.0), Tone::new(rate, b, 0.1, 12.0)])) };
         let h = Handoff::filtered(8000, 500.0, 4000);
-        let out = render_mix(two(55.0, 5000.0), two(82.0, 7000.0), rate, 2.0, 8000, Some(h), 11.0).unwrap();
+        let out = render_mix(two(55.0, 5000.0), two(82.0, 7000.0), (0.0, 0.0), rate, 2.0, 8000, Some(h), 11.0).unwrap();
         let rms = |at: f32| { let i = (at * rate as f32) as usize * 2; let x = &out[i..i + 8820]; (x.iter().map(|v| v * v).sum::<f32>() / x.len() as f32).sqrt() };
         let low_of = |at: f32, hz: f32| {
             let n = (rate as f32 * 0.3) as usize;
@@ -1214,7 +1218,7 @@ mod mix_tests {
         let tri = |a: f32, b: f32, c: f32| -> Box<dyn Source> { Box::new(crate::source::Sum(vec![Tone::new(rate, a, 0.3, 12.0), Tone::new(rate, b, 0.2, 12.0), Tone::new(rate, c, 0.1, 12.0)])) };
         // 8 s of mix from 2 s, beats half a second, swapped 4 s in
         let h = Handoff::staged(8000, 500.0, 4000);
-        let out = render_mix(tri(55.0, 600.0, 6000.0), tri(82.0, 900.0, 9000.0), rate, 2.0, 8000, Some(h), 11.0).unwrap();
+        let out = render_mix(tri(55.0, 600.0, 6000.0), tri(82.0, 900.0, 9000.0), (0.0, 0.0), rate, 2.0, 8000, Some(h), 11.0).unwrap();
         // how much of a frequency there is around a time (its correlation with a sine and a cosine, over
         // a Hann window of 0.3 s centred there: the tones near it kept out)
         let has = |hz: f32, at: f32| {

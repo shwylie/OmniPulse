@@ -510,6 +510,13 @@ fn mix_demo() {
     let mut sa = rt.block_on(crate::player::open_source(&t(&a_id), rt.handle().clone())).expect("A opens");
     let sb = rt.block_on(crate::player::open_source(&t(&b_id), rt.handle().clone())).expect("B opens");
     let dur = sa.duration_ms().unwrap_or(0);
+    // each one at its own loudness match (Settings > Sound's Normal: -14 LUFS), as the app plays them
+    let db = |id: &str| {
+        let lufs = rt.block_on(omnipulse_core::loudness::analyse("soundcloud", id)).ok().and_then(|a| a["lufs"].as_f64());
+        crate::sound::loud_db(&serde_json::json!({}), &t(id), lufs)
+    };
+    let dbs = (db(&a_id), db(&b_id));
+    println!("loudness matched: A {:+.1} dB, B {:+.1} dB", dbs.0, dbs.1);
     let p = plan_structure(&a, dur, 0, &b).expect("a plan");
     println!("{p:?}");
     let lead = 12_000;
@@ -517,7 +524,7 @@ fn mix_demo() {
     let mut sb = omnipulse_audio::Stretched::shifted(sb, omnipulse_audio::Tempo::new(p.rate), p.semitones).unwrap();
     omnipulse_audio::Source::seek(&mut sb, p.start_ms).unwrap();
     let rate = 44_100;
-    let out = omnipulse_audio::engine::render_mix(sa, Box::new(sb), rate, lead as f32 / 1000.0, p.ms, Some(handoff(&p, filter)), lead as f32 / 1000.0 + 20.0 + p.ms as f32 / 1000.0).unwrap();
+    let out = omnipulse_audio::engine::render_mix(sa, Box::new(sb), dbs, rate, lead as f32 / 1000.0, p.ms, Some(handoff(&p, filter)), lead as f32 / 1000.0 + 20.0 + p.ms as f32 / 1000.0).unwrap();
     // how clearly one beat holds through the blend (the two lined up: one; off: two fighting), against the
     // same blend with the one coming in half a beat late
     let held = |out: &[f32]| {
@@ -531,7 +538,7 @@ fn mix_demo() {
         let sb = rt.block_on(crate::player::open_source(&t(&b_id), rt.handle().clone())).unwrap();
         let mut sb = omnipulse_audio::Stretched::shifted(sb, omnipulse_audio::Tempo::new(p.rate), p.semitones).unwrap();
         omnipulse_audio::Source::seek(&mut sb, p.start_ms + (b.rhythm.period_ms / 2.0) as u64).unwrap();
-        omnipulse_audio::engine::render_mix(sa, Box::new(sb), rate, lead as f32 / 1000.0, p.ms, Some(handoff(&p, filter)), lead as f32 / 1000.0 + p.ms as f32 / 1000.0 + 1.0).unwrap()
+        omnipulse_audio::engine::render_mix(sa, Box::new(sb), dbs, rate, lead as f32 / 1000.0, p.ms, Some(handoff(&p, filter)), lead as f32 / 1000.0 + p.ms as f32 / 1000.0 + 1.0).unwrap()
     };
     println!("the blend: lined up {:?}, half a beat off {:?}", held(&out), held(&off));
     // each of the next one's beats in the blend (where it lands, stretched) against the nearest of the one
