@@ -127,6 +127,8 @@ function silenceTick() {
   const dt = silence.lastTick ? now - silence.lastTick : 0;
   silence.lastTick = now;
   if (!min || !t || !nowPlaying()) { silence.live = 0; return; }
+  // listening along: the host's app skips them (or doesn't), and this follows it, so the two stay in step
+  if (typeof together !== "undefined" && together.role === "listener") { silence.live = 0; return; }
   const pos = curPosMs();
   const moving = silence.lastPos >= 0 && pos > silence.lastPos;
   silence.lastPos = pos;
@@ -143,6 +145,7 @@ function silenceTick() {
     } else {
       audio.currentTime = Math.max(0, run[1] - 150) / 1000;
       say("Skipped " + secs + " s of silence.");
+      if (typeof hostPush === "function") hostPush(true);   // (hosting: listeners jump with it)
     }
     return;
   }

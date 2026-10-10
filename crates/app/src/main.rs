@@ -2663,7 +2663,8 @@ fn fade_and_silences(shared: &Shared, pos: u64, dur: u64) -> bool {
         return false;
     }
     // a silence of the chosen length or more: over it, or on to the next track if it runs to the end
-    if skip > 0 {
+    // (listening along: the host's app skips them, or doesn't, and this follows it)
+    if skip > 0 && listening().is_none() {
         let measured = an["analysed_ms"].as_u64().unwrap_or(0);
         for s in an["silences"].as_array().into_iter().flatten() {
             let (from, to) = (s[0].as_u64().unwrap_or(0), s[1].as_u64().unwrap_or(0));
@@ -2675,6 +2676,7 @@ fn fade_and_silences(shared: &Shared, pos: u64, dur: u64) -> bool {
                 return true;
             }
             engine.seek(to);
+            host_push(&shared.borrow());   // (hosting: listeners jump with it)
             if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_status(format!("Skipped {} s of silence.", (to - from) / 1000).into()); }
             return false;
         }
