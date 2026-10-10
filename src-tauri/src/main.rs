@@ -245,6 +245,51 @@ async fn update_install(app: AppHandle, progress: Channel<Value>) -> Result<(), 
     app.restart();
 }
 
+// ---------- Apple Music, once (crates/core/src/apple.rs): a read-only import ----------
+/// You sign in to music.apple.com in a private window of its own (nothing kept after it closes; the
+/// app's own data isn't touched); once its sign-in cookie is there, it's taken (into memory only) and
+/// the window closes. Five minutes to sign in.
+#[tauri::command]
+async fn apple_connect(app: AppHandle) -> Result<(), String> {
+    use omnipulse_core::apple;
+    apple::dev_token().await?;   // (Apple's page as expected, before you're asked to sign in)
+    if let Some(w) = app.get_webview_window("apple") { let _ = w.close(); }
+    let url: tauri::Url = "https://music.apple.com/us/home".parse().map_err(|_| "bad address".to_string())?;
+    let w = WebviewWindowBuilder::new(&app, "apple", WebviewUrl::External(url))
+        .title("Sign in to Apple Music (once, to import your music)")
+        .inner_size(1000.0, 760.0)
+        .incognito(true)
+        .build()
+        .map_err(|e| e.to_string())?;
+    let site: tauri::Url = "https://music.apple.com".parse().map_err(|_| "bad address".to_string())?;
+    tokio::task::spawn_blocking(move || {
+        for _ in 0..300 {
+            std::thread::sleep(std::time::Duration::from_secs(1));
+            let Ok(cookies) = w.cookies_for_url(site.clone()) else { return Err("You closed the sign-in window.".to_string()) };
+            if let Some(c) = cookies.iter().find(|c| c.name() == "media-user-token" && !c.value().is_empty()) {
+                apple::set_user_token(c.value().to_string());
+                let _ = w.close();
+                return Ok(());
+            }
+        }
+        let _ = w.close();
+        Err("Signing in took too long.".to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Your loved songs and playlists, read from Apple Music (nothing there is changed)
+#[tauri::command]
+async fn apple_library() -> Result<Value, String> { omnipulse_core::apple::library().await }
+
+/// The import's done: your Apple Music sign-in is forgotten
+#[tauri::command]
+fn apple_forget(app: AppHandle) {
+    omnipulse_core::apple::forget();
+    if let Some(w) = app.get_webview_window("apple") { let _ = w.close(); }
+}
+
 // MusicBrainz: songs to find with no account (played from YouTube Music)
 #[tauri::command]
 async fn mb_search(query: String) -> Result<Vec<Value>, String> { omnipulse_core::musicbrainz::search(&query).await }
@@ -864,7 +909,7 @@ fn main() {
             local_folders, local_set_folders, local_scan, local_status, local_tracks, local_server,
             requests_start, requests_stop, request_result,
             spe_signed_in, spe_login, spe_logout, spe_attach, spe_play, spe_pause, spe_resume, spe_seek, spe_stop, spe_played, spe_playlist, spe_web_get, spe_set_normalisation, loudness_analyse,
-            resolve_yt_stream, plugin_inspect, plugin_install, plugin_list, plugin_folder, plugin_remove, plugin_http, yt_search, yt_radio, yt_status, yt_artists, yt_artist, yt_album, yt_playlist, yt_playlists, yt_prepare, sc_ytdlp, mb_search, update_check, update_install, yt_setup, yt_remove, remote_start, remote_stop, remote_result
+            resolve_yt_stream, plugin_inspect, plugin_install, plugin_list, plugin_folder, plugin_remove, plugin_http, yt_search, yt_radio, yt_status, yt_artists, yt_artist, yt_album, yt_playlist, yt_playlists, yt_prepare, sc_ytdlp, mb_search, apple_connect, apple_library, apple_forget, update_check, update_install, yt_setup, yt_remove, remote_start, remote_stop, remote_result
         ])
         .run(tauri::generate_context!())
         .expect("error while running app");

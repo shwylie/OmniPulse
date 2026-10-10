@@ -2,6 +2,7 @@
 // SoundCloud / Spotify / Last.fm / Discord / lyrics, local music, and the local servers.
 // Nothing here knows about a window; the apps pass in callbacks where the page used to be called.
 
+pub mod apple;
 pub mod backup;
 pub mod bundled;
 pub mod discord;
