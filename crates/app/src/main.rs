@@ -2606,7 +2606,15 @@ fn folders_set(shared: &Shared, folders: Vec<String>) {
 // ---------- Settings > Accounts ----------
 // (key, name): SoundCloud and Spotify for your library and search, Spotify's own sign-in for playing
 // it in full (Premium), your YouTube account for likes there, and Last.fm for scrobbling
-const ACCOUNTS: [(&str, &str); 5] = [("soundcloud", "SoundCloud"), ("spotify", "Spotify"), ("playback", "Spotify Playback"), ("youtube", "YouTube Account"), ("lastfm", "Last.fm")];
+// (Spotify is one sign-in, as the web app's: its own, the playback engine's, for Premium; a free account
+// signs in through your own developer app instead: crates/core/src/spotify.rs)
+const ACCOUNTS: [(&str, &str); 4] = [("soundcloud", "SoundCloud"), ("spotify", "Spotify"), ("youtube", "YouTube Account"), ("lastfm", "Last.fm")];
+
+/// Spotify only lets Premium accounts sign in its own way
+/// set once Spotify has turned its own sign-in down (a free account): the next sign-in is your app's
+static SP_FREE_SEEN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+const SP_FREE: &str = "That's a free Spotify account. Spotify only lets Premium accounts sign in straight away; for a free one, your own free Spotify app keys are set up first (a couple of minutes), then it signs in.";
 
 thread_local! {
     /// who's signed in where (as the platforms say), and the sign-ins under way
@@ -2618,7 +2626,6 @@ fn account_signed(key: &str) -> bool {
     match key {
         "soundcloud" => omnipulse_core::soundcloud::signed_in(),
         "spotify" => omnipulse_core::spotify::spotify_signed_in(),
-        "playback" => omnipulse_core::spotify_engine::spe_signed_in(),
         "youtube" => omnipulse_core::yt_account::status()["connected"].as_bool() == Some(true),
         _ => omnipulse_core::lastfm::lastfm_status()["connected"].as_bool() == Some(true),
     }
@@ -2634,15 +2641,15 @@ fn accounts_paint(shared: &Shared) {
             "Finish signing in in your browser.".to_string()
         } else if signed {
             match (key, who) {
-                ("playback", _) => "Signed in: Spotify plays in full here (with Premium).".to_string(),
+                ("spotify", Some(w)) if omnipulse_core::spotify_engine::spe_signed_in() => format!("Signed in as {w} · Premium: Spotify plays in full here."),
+                ("spotify", Some(w)) => format!("Signed in as {w} · Free: Spotify tracks play from YouTube Music."),
                 (_, Some(w)) => format!("Signed in as {w}."),
                 _ => "Signed in.".to_string(),
             }
         } else {
             match key {
                 "soundcloud" => "Your SoundCloud likes, playlists and search.".to_string(),
-                "spotify" => "Your Spotify likes, playlists and search.".to_string(),
-                "playback" => "Plays Spotify tracks in full (Premium). Without it, they play from YouTube Music.".to_string(),
+                "spotify" => "Your Spotify likes, playlists and search, and with Premium, Spotify playing in full here.".to_string(),
                 "youtube" if omnipulse_core::yt_account::status()["configured"].as_bool() != Some(true) => "Optional: your likes on YouTube too. It needs your own free Google keys first: Sign in sets them up.".to_string(),
                 "youtube" => "Likes here become likes on YouTube and YouTube Music.".to_string(),
                 _ if omnipulse_core::lastfm::lastfm_status()["configured"].as_bool() != Some(true) => "What you play on your Last.fm profile. It needs your own free Last.fm keys first: Sign in sets them up.".to_string(),
@@ -2685,7 +2692,7 @@ fn account_act(shared: &Shared, i: usize) {
     }
     let out = account_signed(key);
     // signing in where your own keys are needed first: the key setup (then the sign-in)
-    let plat = match key { "spotify" => Some("spotify"), "youtube" => Some("youtube"), "lastfm" => Some("lastfm"), _ => None };
+    let plat = match key { "youtube" => Some("youtube"), "lastfm" => Some("lastfm"), _ => None };
     if let Some(plat) = plat.filter(|p| !out && !keysetup::has_keys(p)) {
         return ks_open(shared, plat, i);
     }
@@ -2696,10 +2703,19 @@ fn account_act(shared: &Shared, i: usize) {
         let done: Result<(), String> = match (key, out) {
             ("soundcloud", false) => omnipulse_core::soundcloud::login().await,
             ("soundcloud", true) => omnipulse_core::soundcloud::logout(),
-            ("spotify", false) => omnipulse_core::spotify::spotify_login().await,
-            ("spotify", true) => omnipulse_core::spotify::spotify_logout(),
-            ("playback", false) => omnipulse_core::spotify_engine::spe_login().await,
-            ("playback", true) => omnipulse_core::spotify_engine::spe_logout().await,
+            // Premium: Spotify's own sign-in; a free account (which it turns down): your developer app's
+            ("spotify", false) if SP_FREE_SEEN.load(std::sync::atomic::Ordering::Relaxed) && keysetup::has_keys("spotify") => omnipulse_core::spotify::spotify_login().await,
+            ("spotify", false) => match omnipulse_core::spotify_engine::spe_login().await {
+                Err(e) if e.to_lowercase().contains("premium account required") => {
+                    SP_FREE_SEEN.store(true, std::sync::atomic::Ordering::Relaxed);
+                    if keysetup::has_keys("spotify") { omnipulse_core::spotify::spotify_login().await } else { Err(SP_FREE.to_string()) }
+                }
+                other => other,
+            },
+            ("spotify", true) => {
+                let _ = omnipulse_core::spotify_engine::spe_logout().await;
+                omnipulse_core::spotify::spotify_logout()
+            }
             ("youtube", false) => omnipulse_core::yt_account::connect().await.map(|_| ()),
             ("youtube", true) => omnipulse_core::yt_account::disconnect().await,
             (_, false) => omnipulse_core::lastfm::lastfm_connect().await.map(|_| ()),
@@ -2708,6 +2724,11 @@ fn account_act(shared: &Shared, i: usize) {
         let _ = weak.upgrade_in_event_loop(move |ui| SHARED.with(|s| {
             ACCOUNT_BUSY.with(|b| b.borrow_mut().remove(key));
             let Some(shared) = s.borrow().clone() else { return };
+            if matches!(&done, Err(e) if e == SP_FREE) {
+                ui.set_status(SP_FREE.into());
+                accounts_refresh(&shared);
+                return ks_open(&shared, "spotify", i);
+            }
             ui.set_status(match &done {
                 Ok(()) if out => format!("Signed out of {name}."),
                 Ok(()) => format!("Signed in to {name}."),
@@ -4961,7 +4982,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 "plugset" => { pf_open(&s, "internet-archive"); let before = ui.get_pf_fields().iter().map(|f| format!("{}={}", f.key, f.value)).collect::<Vec<_>>().join(" "); ui.invoke_pf_set(2, "".into()); println!("selftest: plugin settings {} -> {}", before, ui.get_pf_fields().iter().map(|f| format!("{}={}", f.key, f.value)).collect::<Vec<_>>().join(" ")); }
                 "plugclose" => { PF_EDIT.with(|e| e.borrow_mut().take()); ui.set_pf_open(false); }
                 // the key setup (YouTube's), for its picture; nothing is saved
-                "keys" => { ks_open(&s, "youtube", 3); ui.invoke_ks_set(0, "123-abc.apps.googleusercontent.com".into()); println!("selftest: key setup \"{}\", steps {}, fields {}", ui.get_ks_head(), ui.get_ks_steps().row_count(), ui.get_ks_fields().iter().map(|f| format!("{}:{}", f.label, f.ok)).collect::<Vec<_>>().join(" ")); }
+                "keys" => { ks_open(&s, "youtube", 2); ui.invoke_ks_set(0, "123-abc.apps.googleusercontent.com".into()); println!("selftest: key setup \"{}\", steps {}, fields {}", ui.get_ks_head(), ui.get_ks_steps().row_count(), ui.get_ks_fields().iter().map(|f| format!("{}:{}", f.label, f.ok)).collect::<Vec<_>>().join(" ")); }
                 "keysclose" => { KS.with(|k| k.borrow_mut().take()); ui.set_ks_open(false); }
                 "pageall" => { ui.invoke_search_edited("".into()); println!("selftest: page filter cleared: {} rows", ui.get_rows().row_count()); }
                 "join" => { if let Some(link) = &join { listen_join(&s, link); } }
