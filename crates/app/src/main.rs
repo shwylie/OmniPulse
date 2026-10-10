@@ -72,6 +72,9 @@ struct App {
     fav_only: bool,
     /// what's typed in the search bar: the page's tracks with every word in their title, artist or album
     page_query: String,
+    /// the tracks picked on the page (by key), and the last one picked (its row), for Shift+click
+    picked: std::collections::HashSet<String>,
+    pick_anchor: Option<usize>,
     /// shuffle (the player bar's): on, and the upcoming tracks' order before it, to undo it
     shuffle_on: bool,
     shuffle_backup: Option<Vec<String>>,
@@ -156,10 +159,24 @@ fn apply_filter(app: &mut App) {
     }
     let playing = app.queue.current().map(|t| t.key.clone()).unwrap_or_default();
     let liked: std::collections::HashSet<&str> = app.library.iter().map(|t| t.key.as_str()).collect();
-    app.rows.set_vec(filtered.iter().map(|t| Row { liked: liked.contains(t.key.as_str()), ..t.row(t.key == playing) }).collect::<Vec<_>>());
+    app.rows.set_vec(filtered.iter().map(|t| Row { liked: liked.contains(t.key.as_str()), picked: app.picked.contains(&t.key), ..t.row(t.key == playing) }).collect::<Vec<_>>());
     app.page_tracks = filtered;
     // its covers, once this is done with the app
     slint::Timer::single_shot(std::time::Duration::ZERO, || SHARED.with(|s| { if let Some(sh) = s.borrow().clone() { rows_art(&sh); } }));
+}
+
+/// The rows' picked marks (and how many, in the status bar)
+fn pick_paint(a: &mut App) {
+    for k in 0..a.rows.row_count() {
+        if let (Some(mut r), Some(t)) = (a.rows.row_data(k), a.page_tracks.get(k)) {
+            let on = a.picked.contains(&t.key);
+            if r.picked != on { r.picked = on; a.rows.set_row_data(k, r); }
+        }
+    }
+    if let Some(ui) = a.ui.upgrade() {
+        let n = a.page_tracks.iter().filter(|t| a.picked.contains(&t.key)).count();
+        ui.set_status(if n > 0 { format!("{} picked: right-click one for what to do with them (Escape lets them go).", plural(n, "track", "tracks")) } else { String::new() }.into());
+    }
 }
 
 // ---------- the Library's order (as the web app's sort chips, kept in the same setting) ----------
@@ -215,6 +232,8 @@ fn show_tracks(shared: &Shared, page: &str, title: &str, sub: String, mut tracks
     app.page_all = tracks;
     app.chip = 0;
     app.page_query.clear();   // (a page opened afresh shows all of it)
+    app.picked.clear();
+    app.pick_anchor = None;
     // Search: its first tracks, then what else it found (shelves); Show all lists every track
     let kind = if page == "search" { "search" } else { "tracks" };
     ui.set_page(page.into());
@@ -3718,7 +3737,7 @@ fn main() -> Result<(), slint::PlatformError> {
         rt: rt.handle().clone(), engine: engine.clone(), ui: ui.as_weak(), rows, qrows, lyric_lines,
         library: Vec::new(), playlists: Vec::new(), web: webstate::load(), page: "library".into(),
         page_all: Vec::new(), page_tracks: Vec::new(), chip: 0, shelves: Vec::new(), queue: queue::Queue::default(), panel_map: Vec::new(), side_map: Vec::new(),
-        here: None, history: Vec::new(), artists: None, fav_only: false, page_query: String::new(), shuffle_on: false, shuffle_backup: None, repeat: "off".into(), closest: None,
+        here: None, history: Vec::new(), artists: None, fav_only: false, page_query: String::new(), picked: Default::default(), pick_anchor: None, shuffle_on: false, shuffle_backup: None, repeat: "off".into(), closest: None,
         autoplay: true, ap_busy: false, ap_then_play: false, ap_failed: None, resume_ms: None, loaded: false, accent: ("#8e9bff".into(), "#8e9bff".into()), started_secs: 0, token: 0,
         lyrics: Vec::new(), heard: (String::new(), 0.0, false), last_pos: 0, xpl: xpl::load(), naming: None,
         loud: HashMap::new(), eq_model: Rc::new(VecModel::from(vec![0.0f32; 10])), add_map: Vec::new(), queue_spaced: false, analysis: HashMap::new(), cur_loud: None,
@@ -4107,6 +4126,29 @@ fn main() -> Result<(), slint::PlatformError> {
     ui.on_row_action(move |i, act| {
         let mut a = s.borrow_mut();
         let Some(t) = a.page_tracks.get(i as usize).cloned() else { return };
+        // a picked one: every one that's picked (in the page's order)
+        if a.picked.len() > 1 && a.picked.contains(&t.key) && !act.starts_with("link:") && listening().is_none() {
+            let all: Vec<Track> = a.page_tracks.iter().filter(|x| a.picked.contains(&x.key)).cloned().collect();
+            let n = all.len();
+            drop(a);
+            match act.as_str() {
+                "plnew" => pl_create(&s, all),
+                a if a.starts_with("pl") => { for x in all { pl_row_action(&s, a, x); } }
+                _ => {
+                    let empty = s.borrow().queue.current().is_none();
+                    {
+                        let mut a = s.borrow_mut();
+                        // (Play Next in reverse, so they play in the page's order)
+                        if act == "next" { for x in all.into_iter().rev() { a.queue.play_next(x); } } else { for x in all { a.queue.add(x); } }
+                        paint_queue(&mut a);
+                        save_session(&a);
+                    }
+                    if let Some(ui) = s.borrow().ui.upgrade() { ui.set_status(format!("{} {n} tracks.", if act == "next" { "Playing next:" } else { "Added to the queue:" }).into()); }
+                    if empty { start(&s); }
+                }
+            }
+            return;
+        }
         if act.starts_with("pl") {
             drop(a);
             return pl_row_action(&s, &act, t);
@@ -4136,6 +4178,37 @@ fn main() -> Result<(), slint::PlatformError> {
         }
         drop(a);
         if empty { start(&s); }
+    });
+    // picking tracks on the page
+    let s = shared.clone();
+    ui.on_row_pick(move |i, mode| {
+        let mut a = s.borrow_mut();
+        let i = i as usize;
+        let Some(key) = a.page_tracks.get(i).map(|t| t.key.clone()) else { return };
+        match (mode, a.pick_anchor) {
+            (2, Some(from)) => {
+                let (lo, hi) = (from.min(i), from.max(i));
+                let keys: Vec<String> = a.page_tracks[lo..=hi.min(a.page_tracks.len() - 1)].iter().map(|t| t.key.clone()).collect();
+                a.picked.extend(keys);
+            }
+            _ => { if !a.picked.remove(&key) { a.picked.insert(key); } a.pick_anchor = Some(i); }
+        }
+        pick_paint(&mut a);
+    });
+    let s = shared.clone();
+    ui.on_pick_all(move || {
+        let mut a = s.borrow_mut();
+        let keys: Vec<String> = a.page_tracks.iter().map(|t| t.key.clone()).collect();
+        a.picked.extend(keys);
+        pick_paint(&mut a);
+    });
+    let s = shared.clone();
+    ui.on_pick_none(move || {
+        let mut a = s.borrow_mut();
+        if a.picked.is_empty() { return; }
+        a.picked.clear();
+        a.pick_anchor = None;
+        pick_paint(&mut a);
     });
     let s = shared.clone();
     ui.on_queue_action(move |i, act| {
@@ -4260,7 +4333,7 @@ fn main() -> Result<(), slint::PlatformError> {
         let mut step_no = 0usize;
         // (OMNIPULSE_SELFTEST_JOIN=<invite link>: only joining someone's room, following it, skipping and leaving)
         let join = std::env::var("OMNIPULSE_SELFTEST_JOIN").ok();
-        let full: [(u64, &str); 38] = [(9, "play"), (13, "library"), (13, "pagefind"), (14, "pageall"), (14, "scoff"), (15, "scon"), (16, "discover"), (24, "rediscover"), (27, "sets"), (31, "stats"), (35, "now"), (36, "tprefs"), (37, "tpclose"), (39, "search"), (41, "found"), (42, "settings"), (44, "light"), (45, "collapse"), (46, "artists"), (54, "artist"), (60, "autoplay"), (70, "narrow"), (72, "goplus"), (80, "tabright"), (81, "pbar"), (82, "pfloat"), (83, "pminimal"), (84, "musical"), (88, "musical2"), (90, "safe"), (90, "streamer"), (91, "streamcoll"), (91, "sort"), (93, "xpl"), (95, "xpl2"), (97, "fade"), (101, "fade2"), (103, "end")];
+        let full: [(u64, &str); 40] = [(9, "play"), (13, "library"), (13, "pagefind"), (14, "pageall"), (14, "pick"), (14, "picknone"), (14, "scoff"), (15, "scon"), (16, "discover"), (24, "rediscover"), (27, "sets"), (31, "stats"), (35, "now"), (36, "tprefs"), (37, "tpclose"), (39, "search"), (41, "found"), (42, "settings"), (44, "light"), (45, "collapse"), (46, "artists"), (54, "artist"), (60, "autoplay"), (70, "narrow"), (72, "goplus"), (80, "tabright"), (81, "pbar"), (82, "pfloat"), (83, "pminimal"), (84, "musical"), (88, "musical2"), (90, "safe"), (90, "streamer"), (91, "streamcoll"), (91, "sort"), (93, "xpl"), (95, "xpl2"), (97, "fade"), (101, "fade2"), (103, "end")];
         let plan: Vec<(u64, &str)> = if join.is_some() { vec![(6, "join"), (14, "joined"), (16, "jamskip"), (19, "leave"), (21, "end")] } else { full.to_vec() };
         t.start(slint::TimerMode::Repeated, std::time::Duration::from_millis(250), move || {
             let Some(&(at, what)) = plan.get(step_no) else { return };
@@ -4286,6 +4359,9 @@ fn main() -> Result<(), slint::PlatformError> {
                 // Track preferences for what's playing, for its picture
                 "tprefs" => { if let Some(t) = s.borrow().queue.current().cloned() { tp_open(&s, &t); } println!("selftest: track preferences open {}, \"{}\" by {}", ui.get_tp_open(), ui.get_tp_title(), ui.get_tp_artist()); }
                 "tpclose" => ui.set_tp_open(false),
+                // picking: two rows, a range with Shift, then none
+                "pick" => { ui.invoke_row_pick(0, 1); ui.invoke_row_pick(4, 2); println!("selftest: picked {} (rows marked {}), status \"{}\"", s.borrow().picked.len(), ui.get_rows().iter().filter(|r| r.picked).count(), ui.get_status()); }
+                "picknone" => { ui.invoke_pick_none(); println!("selftest: picked after Escape {}", s.borrow().picked.len()); }
                 "pageall" => { ui.invoke_search_edited("".into()); println!("selftest: page filter cleared: {} rows", ui.get_rows().row_count()); }
                 "join" => { if let Some(link) = &join { listen_join(&s, link); } }
                 "joined" => println!("selftest: listening {:?}, playing \"{}\" at {}, queue {}, jam button \"{}\", status \"{}\"", listening(), ui.get_now_title(), ui.get_pos_text(), s.borrow().queue.items.len(), ui.get_jam_label(), ui.get_status()),

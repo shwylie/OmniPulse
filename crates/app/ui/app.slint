@@ -18,7 +18,7 @@ export global Theme {
     in-out property <length> panel-radius: 10px;
 }
 
-export struct Row { title: string, artist: string, album: string, dur: string, plat: string, playing: bool, head: string, auto: bool, art: image, liked: bool, sc-link: bool, sp-link: bool, yt-link: bool }
+export struct Row { title: string, artist: string, album: string, dur: string, plat: string, playing: bool, head: string, auto: bool, art: image, liked: bool, sc-link: bool, sp-link: bool, yt-link: bool, picked: bool }
 export struct Side { title: string, plat: string, own: bool, share: bool, sc: bool, sp: bool }
 /// A platform in the title bar: on (in its colours), set up (ready; grey until it is), its name
 export struct Plat { id: string, on: bool, name: string, ready: bool }
@@ -323,9 +323,12 @@ component TrackRow inherits Rectangle {
     in property <bool> removable;
     callback play();
     callback act(string);
+    // Ctrl+click picks it (or lets it go), Shift+click picks everything from the last one picked
+    callback pick(int);
+    property <bool> picking;
     height: 60px;
     border-radius: 6px;
-    background: ta.has-hover ? Theme.elevated : transparent;
+    background: root.item.picked ? Theme.accent.with-alpha(0.2) : ta.has-hover ? Theme.elevated : transparent;
     HorizontalLayout {
         padding-left: 8px;
         padding-right: 16px;
@@ -372,7 +375,15 @@ component TrackRow inherits Rectangle {
             if root.item.sp-link: MenuItem { title: "Copy Spotify Link"; activated => { root.act("link:spotify"); } }
             if root.item.yt-link: MenuItem { title: "Copy YouTube Music Link"; activated => { root.act("link:youtube"); } }
         }
-        ta := TouchArea { clicked => { root.play(); } }
+        ta := TouchArea {
+            pointer-event(e) => {
+                if (e.kind == PointerEventKind.down && e.button == PointerEventButton.left) {
+                    root.picking = e.modifiers.control || e.modifiers.shift;
+                    if (root.picking) { root.pick(e.modifiers.shift ? 2 : 1); }
+                }
+            }
+            clicked => { if (!root.picking) { root.play(); } }
+        }
     }
 }
 
@@ -640,6 +651,10 @@ export component AppWindow inherits Window {
     callback toggle();
     callback next();
     callback prev();
+    // picking tracks on a page: a row (1 one more or less, 2 everything from the last one), all (Ctrl+A), none (Escape)
+    callback row-pick(int, int);
+    callback pick-all();
+    callback pick-none();
     callback seek(float);
     callback volume-changed(float);
     callback drag();
@@ -898,7 +913,7 @@ export component AppWindow inherits Window {
                                 font-size: 14px;
                                 single-line: true;
                                 text <=> root.search-text;
-                                accepted => { root.search(self.text); }
+                                accepted => { root.search(self.text); keys.focus(); }
                                 edited => { root.search-edited(self.text); }
                             }
                         }
@@ -986,7 +1001,7 @@ export component AppWindow inherits Window {
                         init => { root.rows-in-view(self.first, self.count); }
                         // (the last one with room below it, so it scrolls clear of the track tab)
                         for r[i] in root.rows: VerticalLayout {
-                            TrackRow { item: r; index: i; compact: root.narrow || root.queue-open; lists: root.own-lists; removable: root.own-page; play => { root.play-row(i); } act(a) => { root.row-action(i, a); } }
+                            TrackRow { item: r; index: i; compact: root.narrow || root.queue-open; lists: root.own-lists; removable: root.own-page; play => { root.play-row(i); } act(a) => { root.row-action(i, a); } pick(m) => { root.row-pick(i, m); } }
                             if i == root.rows.length - 1: Rectangle { height: 76px; }
                         }
                     }
@@ -1031,7 +1046,7 @@ export component AppWindow inherits Window {
                                     if root.rows.length > 8: Pill { label: "Show all"; clicked => { root.page-kind = "tracks"; } }
                                 }
                                 for r[i] in root.rows: VerticalLayout {
-                                    if i < 8: TrackRow { item: r; index: i; compact: root.narrow || root.queue-open; lists: root.own-lists; removable: false; play => { root.play-row(i); } act(a) => { root.row-action(i, a); } }
+                                    if i < 8: TrackRow { item: r; index: i; compact: root.narrow || root.queue-open; lists: root.own-lists; removable: false; play => { root.play-row(i); } act(a) => { root.row-action(i, a); } pick(m) => { root.row-pick(i, m); } }
                                 }
                             }
                             for sh[s] in root.shelves: VerticalLayout {
@@ -2018,6 +2033,27 @@ export component AppWindow inherits Window {
                     Pill { label: "Close"; on: true; clicked => { root.jam-open = false; } }
                 }
             }
+        }
+    }
+    // the keyboard (as the web app's): Space plays or pauses, Shift+Right/Left skip, / goes to the search
+    // bar, Q opens or closes the queue, L likes; Ctrl+A picks every track on the page, Escape none
+    keys := FocusScope {
+        x: 0;
+        y: 0;
+        width: 0;
+        height: 0;
+        init => { self.focus(); }
+        key-pressed(e) => {
+            if (e.modifiers.control && (e.text == "a" || e.text == "A")) { root.pick-all(); return accept; }
+            if (e.text == Key.Escape) { root.pick-none(); return accept; }
+            if (e.modifiers.control || e.modifiers.alt || e.modifiers.meta) { return reject; }
+            if (e.text == " ") { root.toggle(); return accept; }
+            if (e.modifiers.shift && e.text == Key.RightArrow) { root.next(); return accept; }
+            if (e.modifiers.shift && e.text == Key.LeftArrow) { root.prev(); return accept; }
+            if (e.text == "/") { ti.focus(); return accept; }
+            if (e.text == "q") { root.queue-open = !root.queue-open; return accept; }
+            if (e.text == "l") { root.like-toggle(); return accept; }
+            reject
         }
     }
 }
