@@ -1787,16 +1787,25 @@ body.streamSafe #navSets, body.streamSafe #navArtists, body.streamSafe #plSectio
 .tasteChips { display: flex; flex-wrap: wrap; gap: 8px; margin: 14px 0 6px; }
 .tasteDlg .sheet { max-width: 560px; }
 /* A track's platform logo stays out of the way: in a list it shows on the row (the queue always shows it) you're on
-   (hovered, picked or focused); on the player bar and in Now Playing, when you point at its place.
+   (hovered, picked or focused); in Now Playing, when you point at its place (the player bar always shows it, on a corner of the art).
    (Its space is kept, so nothing moves, and pointing at the empty spot brings it back: its slot has no box of
    its own, so it's the icon itself that's pointed at.) The OBS
    widget and chat's request replies are drawn elsewhere and keep theirs. */
-#list li .plat.platBig, #nowPlat .plat, #npPlat .plat { opacity: 0; transition: opacity .15s; }
+#list li .plat.platBig, #npPlat .plat { opacity: 0; transition: opacity .15s; }
 #list li:hover .plat.platBig, #list li.picked .plat.platBig, #list li:focus-within .plat.platBig,
-#nowPlat .plat:hover, #npPlat .plat:hover, #nowPlat .plat:focus-visible, #npPlat .plat:focus-visible { opacity: 1; }
+#npPlat .plat:hover, #npPlat .plat:focus-visible { opacity: 1; }
 .subGroups { max-height: 56vh; overflow-y: auto; margin: 10px 0 6px; padding-right: 4px; }
 .subGroup h3 { margin: 12px 0 0; font-size: 13px; color: var(--muted); font-weight: 600; }
 .subGroup .tasteChips { margin-top: 8px; }
 /* Discover's tiles: which platforms a tile draws on shows on the tile you're pointing at (or on) */
 #feed .tileBadges { opacity: 0; transition: opacity .15s; }
 #feed .tile:hover .tileBadges, #feed .tile:focus-within .tileBadges { opacity: 1; }
+/* The player bar: the platform icon always shows, as a badge on the album art's corner (it still opens
+   the uploader's page) */
+.nowArtBox { position: relative; flex: none; display: block; line-height: 0; }
+.nowArtBox #nowPlat .plat.platBig {
+  position: absolute; right: -5px; bottom: -5px; width: 22px; height: 22px;
+  background: var(--panel); color: var(--plat-c, var(--text)); box-shadow: 0 0 0 2px var(--panel), 0 1px 4px rgb(0 0 0 / .35);
+}
+.nowArtBox #nowPlat .plat.platBig svg { width: 13px; height: 13px; }
+.nowArtBox #nowPlat .plat.platBig:hover { background: color-mix(in srgb, var(--plat-c, var(--text)) 22%, var(--panel)); }
