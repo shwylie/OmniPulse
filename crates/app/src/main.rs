@@ -3650,7 +3650,7 @@ fn listen_follow(shared: &Shared, st: serde_json::Value) {
     if playing && !standing {
         let (want, have) = (listen_host_pos(), engine.position_ms());
         // (back in step, smoothly: in again from quiet after the jump)
-        if want.abs_diff(have) > 3000 { engine.seek(want); engine.fade(Some(0.0), 1.0, 800); }
+        if want.abs_diff(have) > 1000 { engine.seek(want); engine.fade(Some(0.0), 1.0, 800); }
     }
 }
 

@@ -418,7 +418,11 @@ function listenerMessage(m) {
 }
 
 // Where the host is now: what they said, plus the time since
-const hostPos = () => together.state ? together.state.pos + (together.state.playing ? performance.now() - together.stateAt : 0) : 0;
+// (Listening Along: Timing moves it later, to line up with the host's stream when that's heard too)
+const listenNudge = () => Math.max(-3000, Math.min(8000, Number(prefs.listenNudge) || 0));
+const hostPos = () => together.state ? Math.max(0, together.state.pos + (together.state.playing ? performance.now() - together.stateAt : 0) - listenNudge()) : 0;
+// Kept in step: more than this apart, it catches up (smoothly: js/fade.js's fadeJump)
+const LISTEN_DRIFT_MS = 1000;
 
 const freshCopy = (s) => {
   const t = Object.assign({}, s, { user: Object.assign({}, s.user) });
@@ -470,7 +474,7 @@ function listenerFollow(s) {
   else if (!s.playing && nowPlaying()) togetherOrig.toggle();
   if (s.playing && !cur.standInFor) {
     const want = hostPos(), have = curPosMs();
-    if (Math.abs(want - have) > 3000) fadeJump(800, () => seekToMs(hostPos()));   // drifted: back in step, smoothly
+    if (Math.abs(want - have) > LISTEN_DRIFT_MS) fadeJump(800, () => seekToMs(hostPos()));   // drifted: back in step, smoothly
   }
 }
 
@@ -651,6 +655,22 @@ function togetherInit() {
   $("jamClose").addEventListener("click", () => $("jamDialog").close());
   // the host's state follows playback, the queue and every few seconds
   setInterval(() => hostPush(true), 8000);
+  // listening along: kept in step between the host's words too (where the host is is worked out
+  // from their last word and the time since)
+  setInterval(() => {
+    if (together.role !== "listener" || !together.state || !together.state.playing || together.localPause || !nowPlaying()) return;
+    const t = curTrack();
+    if (!t || t.standInFor || (together.state.track && t.id !== together.state.track.id) || fadeState.pendingIn) return;
+    if (Math.abs(hostPos() - curPosMs()) > LISTEN_DRIFT_MS) fadeJump(800, () => seekToMs(hostPos()));
+  }, 2000);
+  $("listenNudge").value = String(listenNudge());
+  $("listenNudge").addEventListener("change", () => {
+    prefs.listenNudge = Math.max(-3000, Math.min(8000, Math.round(Number($("listenNudge").value) || 0)));
+    $("listenNudge").value = String(prefs.listenNudge);
+    savePrefs();
+    // listening now: straight to the new timing
+    if (together.role === "listener" && together.state && nowPlaying()) fadeJump(800, () => seekToMs(hostPos()));
+  });
   window.__deepLink = async () => {
     const links = await invoke("deep_links_take").catch(() => []);
     for (const l of links) await togetherLink(l);
