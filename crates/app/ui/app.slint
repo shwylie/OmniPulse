@@ -455,6 +455,17 @@ export component AppWindow inherits Window {
     // your playlists on this PC, by name; the page is one of them
     in property <[string]> own-lists;
     in property <bool> own-page;
+    // Track preferences (the bar's menu): its title and artist as you want them, and its start and end
+    in-out property <bool> tp-open;
+    in-out property <string> tp-title;
+    in-out property <string> tp-artist;
+    in-out property <string> tp-start;
+    in-out property <string> tp-end;
+    in property <string> tp-note;
+    callback tp-save();
+    callback tp-reset();
+    // "now": where the track is playing, for its start (0) or end (1)
+    callback tp-now(int);
     // the naming dialog (a new playlist, or renaming one)
     in-out property <bool> name-open;
     in-out property <string> name-text;
@@ -1847,6 +1858,74 @@ export component AppWindow inherits Window {
                 }
             }
         }
+        }
+    }
+    // Track preferences: the title and artist shown for it (everywhere), and the part of it that plays
+    if root.tp-open: Rectangle {
+        x: 0;
+        y: 0;
+        width: root.width;
+        height: root.height;
+        background: #00000080;
+        TouchArea { clicked => { root.tp-open = false; } }
+        Rectangle {
+            width: 440px;
+            height: tp-col.preferred-height;
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            background: Theme.elevated;
+            border-radius: 12px;
+            border-width: 1px;
+            border-color: Theme.line;
+            TouchArea { }
+            tp-col := VerticalLayout {
+                padding: 20px;
+                spacing: 10px;
+                Text { text: "Track preferences"; color: Theme.text; font-size: 18px; font-weight: 800; }
+                for f[i] in [{ label: "Title", which: 0 }, { label: "Artist", which: 1 }]: VerticalLayout {
+                    spacing: 4px;
+                    Text { text: f.label; color: Theme.muted; font-size: 12px; }
+                    Rectangle {
+                        height: 34px;
+                        border-radius: 8px;
+                        background: Theme.panel;
+                        border-width: 1px;
+                        border-color: Theme.line;
+                        if f.which == 0: TextInput { x: 10px; width: parent.width - 20px; height: parent.height; vertical-alignment: center; color: Theme.text; font-size: 14px; single-line: true; text <=> root.tp-title; }
+                        if f.which == 1: TextInput { x: 10px; width: parent.width - 20px; height: parent.height; vertical-alignment: center; color: Theme.text; font-size: 14px; single-line: true; text <=> root.tp-artist; }
+                    }
+                }
+                Text { text: "Start and end (m:ss; empty for its own)"; color: Theme.muted; font-size: 12px; }
+                HorizontalLayout {
+                    spacing: 8px;
+                    Rectangle {
+                        height: 34px;
+                        border-radius: 8px;
+                        background: Theme.panel;
+                        border-width: 1px;
+                        border-color: Theme.line;
+                        TextInput { x: 10px; width: parent.width - 20px; height: parent.height; vertical-alignment: center; color: Theme.text; font-size: 14px; single-line: true; text <=> root.tp-start; }
+                    }
+                    Pill { label: "Now"; clicked => { root.tp-now(0); } }
+                    Rectangle {
+                        height: 34px;
+                        border-radius: 8px;
+                        background: Theme.panel;
+                        border-width: 1px;
+                        border-color: Theme.line;
+                        TextInput { x: 10px; width: parent.width - 20px; height: parent.height; vertical-alignment: center; color: Theme.text; font-size: 14px; single-line: true; text <=> root.tp-end; }
+                    }
+                    Pill { label: "Now"; clicked => { root.tp-now(1); } }
+                }
+                if root.tp-note != "": Text { text: root.tp-note; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
+                HorizontalLayout {
+                    spacing: 8px;
+                    Pill { label: "Reset"; clicked => { root.tp-reset(); } }
+                    Rectangle { horizontal-stretch: 1; }
+                    Pill { label: "Cancel"; clicked => { root.tp-open = false; } }
+                    Pill { label: "Save"; on: true; clicked => { root.tp-save(); } }
+                }
+            }
         }
     }
     // naming a playlist: a new one, or a new name for one of yours

@@ -794,6 +794,93 @@ fn cast_event(shared: &Shared, m: serde_json::Value) {
     }
 }
 
+// ---------- Track preferences (as the web app's, in js/trims.js and the title fixes) ----------
+// Its title and artist as you want them shown (prefs.trackFixes[id] = { title, artist }) and the part
+// of it that plays (prefs.trackTrims[id] = { start, end }, ms).
+thread_local! {
+    /// the track being edited
+    static TP_TRACK: RefCell<Option<Track>> = const { RefCell::new(None) };
+}
+
+/// m:ss (or m:ss.s, or seconds) to ms; empty is None, nonsense an error
+fn parse_time(s: &str) -> Result<Option<u64>, ()> {
+    let s = s.trim();
+    if s.is_empty() { return Ok(None); }
+    let mut ms = 0f64;
+    for p in s.split(':') {
+        let n: f64 = p.trim().parse().map_err(|_| ())?;
+        if n < 0.0 { return Err(()); }
+        ms = ms * 60.0 + n;
+    }
+    Ok(Some((ms * 1000.0).round() as u64))
+}
+
+fn fmt_time(ms: u64) -> String {
+    let s = ms as f64 / 1000.0;
+    let m = (s / 60.0).floor();
+    let rest = s - m * 60.0;
+    let r = format!("{rest:04.1}");
+    format!("{m}:{}", r.strip_suffix(".0").unwrap_or(&r))
+}
+
+fn tp_open(shared: &Shared, t: &Track) {
+    let (start, end) = trim_of(&shared.borrow().web.prefs, &t.key);
+    TP_TRACK.with(|x| *x.borrow_mut() = Some(t.clone()));
+    if let Some(ui) = shared.borrow().ui.upgrade() {
+        ui.set_tp_title(t.title.clone().into());
+        ui.set_tp_artist(t.artist.clone().into());
+        ui.set_tp_start(if start > 0 { fmt_time(start) } else { String::new() }.into());
+        ui.set_tp_end(end.map(fmt_time).unwrap_or_default().into());
+        ui.set_tp_note(format!("It's {} long.", fmt_ms(t.ms)).into());
+        ui.set_tp_open(true);
+    }
+}
+
+/// Saves (or, with `reset`, takes off) the track's preferences, and shows them where it's listed
+fn tp_save(shared: &Shared, reset: bool) {
+    let Some(t) = TP_TRACK.with(|x| x.borrow().clone()) else { return };
+    let Some(ui) = shared.borrow().ui.upgrade() else { return };
+    let (start, end) = if reset { (None, None) } else {
+        match (parse_time(&ui.get_tp_start()), parse_time(&ui.get_tp_end())) {
+            (Ok(a), Ok(b)) => (a, b),
+            _ => { ui.set_tp_note("Times are m:ss, like 1:05 (or empty).".into()); return; }
+        }
+    };
+    if let (Some(a), Some(b)) = (start, end) {
+        if b <= a { ui.set_tp_note("The end has to come after the start.".into()); return; }
+    }
+    let (title, artist) = (ui.get_tp_title().trim().to_string(), ui.get_tp_artist().trim().to_string());
+    let (fixes, trims) = {
+        let mut a = shared.borrow_mut();
+        let mut fixes = a.web.prefs["trackFixes"].as_object().cloned().unwrap_or_default();
+        let mut trims = a.web.prefs["trackTrims"].as_object().cloned().unwrap_or_default();
+        if reset || (title == t.title && artist == t.artist) { if reset { fixes.remove(&t.key); } } else {
+            fixes.insert(t.key.clone(), serde_json::json!({ "title": title, "artist": artist }));
+        }
+        if start.unwrap_or(0) == 0 && end.is_none() { trims.remove(&t.key); } else {
+            trims.insert(t.key.clone(), serde_json::json!({ "start": start.unwrap_or(0), "end": end.unwrap_or(0) }));
+        }
+        let (fixes, trims) = (serde_json::Value::Object(fixes), serde_json::Value::Object(trims));
+        if let Some(o) = a.web.prefs.as_object_mut() { o.insert("trackFixes".into(), fixes.clone()); o.insert("trackTrims".into(), trims.clone()); }
+        // where it's listed: the queue and the page (its title and artist, as you want them)
+        let prefs = a.web.prefs.clone();
+        let fix = |x: &mut Track| if x.key == t.key { if reset { x.title = t.title.clone(); x.artist = t.artist.clone(); } else if !title.is_empty() { x.title = title.clone(); x.artist = artist.clone(); } };
+        a.queue.items.iter_mut().for_each(|q| fix(&mut q.t));
+        a.page_all.iter_mut().for_each(fix);
+        track::apply_fixes(&prefs, &mut a.page_all);
+        paint_queue(&mut a);
+        apply_filter(&mut a);
+        (fixes, trims)
+    };
+    if std::env::var_os("OMNIPULSE_SELFTEST").is_none() {
+        webstate::save_pref("trackFixes", fixes);
+        webstate::save_pref("trackTrims", trims);
+    }
+    if let Some(cur) = shared.borrow().queue.current() { if cur.key == t.key { show_now(&ui, cur); } }
+    ui.set_tp_open(false);
+    ui.set_status(if reset { format!("\"{}\" is back as it was.", t.title) } else { "Track preferences saved.".to_string() }.into());
+}
+
 // ---------- the Streamer Mode page (as the web app's js/streamerpage.js) ----------
 // While Stream-Safe Music is on: collections of music that's safe on stream, each made when it's
 // opened (searched for on every platform that's on, then only what's safe kept, each song once):
@@ -3870,6 +3957,16 @@ fn main() -> Result<(), slint::PlatformError> {
             Err(e) => ui.set_status(format!("Couldn't play on {name}: {e}").into()),
         }
     });
+    // Track preferences
+    let s = shared.clone();
+    ui.on_tp_save(move || tp_save(&s, false));
+    let s = shared.clone();
+    ui.on_tp_reset(move || tp_save(&s, true));
+    let s = shared.clone();
+    ui.on_tp_now(move |which| {
+        let pos = s.borrow().engine.position_ms();
+        if let Some(ui) = s.borrow().ui.upgrade() { if which == 0 { ui.set_tp_start(fmt_time(pos).into()); } else { ui.set_tp_end(fmt_time(pos).into()); } }
+    });
     // the track's menu
     let s = shared.clone();
     ui.on_more_want(move || {
@@ -3880,6 +3977,7 @@ fn main() -> Result<(), slint::PlatformError> {
             if !t.web_link().is_empty() { items.push(format!("Open on {}", match t.plat() { "spotify" => "Spotify", "youtube" => "YouTube Music", _ => "SoundCloud" }).into()); }
             if !t.artist.is_empty() { items.push(format!("Search for {}", t.artist.split(", ").next().unwrap_or("")).into()); }
             items.push("Search for this song".into());
+            items.push("Track preferences...".into());
             for (plat, _) in share::links(t) { items.push(format!("Copy {} link", share::name(plat)).into()); }
         }
         ui.set_more_items(ModelRc::from(Rc::new(VecModel::from(items))));
@@ -3889,6 +3987,7 @@ fn main() -> Result<(), slint::PlatformError> {
         let Some(ui) = s.borrow().ui.upgrade() else { return };
         let Some(item) = ui.get_more_items().row_data(i as usize).map(|x| x.to_string()) else { return };
         let Some(t) = s.borrow().queue.current().cloned() else { return };
+        if item == "Track preferences..." { return tp_open(&s, &t); }
         if let Some(name) = item.strip_prefix("Copy ").and_then(|x| x.strip_suffix(" link")) {
             if let Some((plat, _)) = share::PLATS.iter().find(|(_, n)| *n == name) { copy_track_link(&s, &t, plat); }
         } else if item.starts_with("Open on") {
@@ -4161,7 +4260,7 @@ fn main() -> Result<(), slint::PlatformError> {
         let mut step_no = 0usize;
         // (OMNIPULSE_SELFTEST_JOIN=<invite link>: only joining someone's room, following it, skipping and leaving)
         let join = std::env::var("OMNIPULSE_SELFTEST_JOIN").ok();
-        let full: [(u64, &str); 36] = [(9, "play"), (13, "library"), (13, "pagefind"), (14, "pageall"), (14, "scoff"), (15, "scon"), (16, "discover"), (24, "rediscover"), (27, "sets"), (31, "stats"), (35, "now"), (39, "search"), (41, "found"), (42, "settings"), (44, "light"), (45, "collapse"), (46, "artists"), (54, "artist"), (60, "autoplay"), (70, "narrow"), (72, "goplus"), (80, "tabright"), (81, "pbar"), (82, "pfloat"), (83, "pminimal"), (84, "musical"), (88, "musical2"), (90, "safe"), (90, "streamer"), (91, "streamcoll"), (91, "sort"), (93, "xpl"), (95, "xpl2"), (97, "fade"), (101, "fade2"), (103, "end")];
+        let full: [(u64, &str); 38] = [(9, "play"), (13, "library"), (13, "pagefind"), (14, "pageall"), (14, "scoff"), (15, "scon"), (16, "discover"), (24, "rediscover"), (27, "sets"), (31, "stats"), (35, "now"), (36, "tprefs"), (37, "tpclose"), (39, "search"), (41, "found"), (42, "settings"), (44, "light"), (45, "collapse"), (46, "artists"), (54, "artist"), (60, "autoplay"), (70, "narrow"), (72, "goplus"), (80, "tabright"), (81, "pbar"), (82, "pfloat"), (83, "pminimal"), (84, "musical"), (88, "musical2"), (90, "safe"), (90, "streamer"), (91, "streamcoll"), (91, "sort"), (93, "xpl"), (95, "xpl2"), (97, "fade"), (101, "fade2"), (103, "end")];
         let plan: Vec<(u64, &str)> = if join.is_some() { vec![(6, "join"), (14, "joined"), (16, "jamskip"), (19, "leave"), (21, "end")] } else { full.to_vec() };
         t.start(slint::TimerMode::Repeated, std::time::Duration::from_millis(250), move || {
             let Some(&(at, what)) = plan.get(step_no) else { return };
@@ -4184,6 +4283,9 @@ fn main() -> Result<(), slint::PlatformError> {
                 // with Stream-Safe Music on: the Streamer Mode page, and one of its collections
                 "streamer" => { ui.invoke_nav("discover".into()); println!("selftest: streamer page \"{}\", shelves {}", ui.get_page_title(), ui.get_shelves().iter().map(|sh| format!("{} {}", sh.title, sh.tiles.row_count())).collect::<Vec<_>>().join(", ")); }
                 "streamcoll" => ui.invoke_tile(0, 0),
+                // Track preferences for what's playing, for its picture
+                "tprefs" => { if let Some(t) = s.borrow().queue.current().cloned() { tp_open(&s, &t); } println!("selftest: track preferences open {}, \"{}\" by {}", ui.get_tp_open(), ui.get_tp_title(), ui.get_tp_artist()); }
+                "tpclose" => ui.set_tp_open(false),
                 "pageall" => { ui.invoke_search_edited("".into()); println!("selftest: page filter cleared: {} rows", ui.get_rows().row_count()); }
                 "join" => { if let Some(link) = &join { listen_join(&s, link); } }
                 "joined" => println!("selftest: listening {:?}, playing \"{}\" at {}, queue {}, jam button \"{}\", status \"{}\"", listening(), ui.get_now_title(), ui.get_pos_text(), s.borrow().queue.items.len(), ui.get_jam_label(), ui.get_status()),
@@ -4350,5 +4452,18 @@ mod trim_tests {
         assert_eq!(super::trim_of(&p, "2"), (0, None));
         assert_eq!(super::trim_of(&p, "3"), (9000, None));   // an end before the start doesn't count
         assert_eq!(super::trim_of(&p, "x"), (0, None));
+    }
+}
+
+#[cfg(test)]
+mod time_tests {
+    #[test]
+    fn typed_times() {
+        assert_eq!(super::parse_time("1:05"), Ok(Some(65_000)));
+        assert_eq!(super::parse_time("0:10.5"), Ok(Some(10_500)));
+        assert_eq!(super::parse_time(" "), Ok(None));
+        assert!(super::parse_time("1:xx").is_err());
+        assert_eq!(super::fmt_time(65_000), "1:05");
+        assert_eq!(super::fmt_time(10_500), "0:10.5");
     }
 }
