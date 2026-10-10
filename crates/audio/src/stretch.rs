@@ -57,11 +57,19 @@ pub struct Stretched {
     /// a key shift, as a factor of pitch (1.0: none)
     pitch: f64,
     last_at: f64,
+    /// what it gives from its start (or a seek) is where it starts, to the frame: its deck's own delay
+    /// (a constant, in frames of what it gives, at any tempo) still to be let go
+    delay_left: usize,
 }
 
 impl Stretched {
     pub fn new(inner: Box<dyn Source>, tempo: Tempo) -> Result<Self, String> {
         Self::shifted(inner, tempo, 0)
+    }
+
+    fn delayed(mut self) -> Self {
+        self.delay_left = self.deck.proc.pipeline_latency_frames();
+        self
     }
 
     /// One taking over from where `inner` is (`start_ms` into the track), not its start
@@ -79,9 +87,11 @@ impl Stretched {
     /// The same, its key shifted by whole semitones (up or down)
     pub fn shifted(inner: Box<dyn Source>, tempo: Tempo, semitones: i32) -> Result<Self, String> {
         let rate = inner.rate();
-        let pitch = 2f64.powf(semitones as f64 / 12.0);
+        // (the rate it says, a round 100 Hz: one with much in common with the output's, so its
+        // resampling is light and quick, not half a second behind; under a cent off the semitones)
+        let pitch = if semitones == 0 { 1.0 } else { ((rate as f64 * 2f64.powf(semitones as f64 / 12.0)) / 100.0).round() * 100.0 / rate as f64 };
         let t = tempo.get() / pitch;
-        Ok(Self { deck: deck(rate, t)?, inner, tempo, rate, start_ms: 0, pending: Vec::new(), inner_done: false, finished: false, applied: t, block: vec![0.0; BLOCK * 2], real_frames: 0, last_at: -1.0, pitch })
+        Ok(Self { deck: deck(rate, t)?, inner, tempo, rate, start_ms: 0, pending: Vec::new(), inner_done: false, finished: false, applied: t, block: vec![0.0; BLOCK * 2], real_frames: 0, last_at: -1.0, pitch, delay_left: 0 }.delayed())
     }
 
     /// Feeds the deck enough of the track for the next block
@@ -134,7 +144,10 @@ impl Source for Stretched {
         }
         self.last_at = at;
         self.deck.proc.process(&mut self.block);
-        out.extend_from_slice(&self.block);
+        // (its delay, just started: let go)
+        let drop = self.delay_left.min(self.block.len() / 2);
+        self.delay_left -= drop;
+        out.extend_from_slice(&self.block[drop * 2..]);
         Ok(true)
     }
     fn seek(&mut self, ms: u64) -> Result<u64, String> {
@@ -147,6 +160,7 @@ impl Source for Stretched {
         self.finished = false;
         self.real_frames = 0;
         self.last_at = -1.0;
+        self.delay_left = self.deck.proc.pipeline_latency_frames();
         Ok(at)
     }
     fn position_ms(&self) -> Option<u64> {
@@ -175,6 +189,52 @@ mod tests {
         assert!((40..=48).contains(&n), "{n}");
         // and where it is in the track, in the track's own time
         assert!(s.position_ms().unwrap() >= 3800, "{:?}", s.position_ms());
+    }
+
+    /// Clicks every half second (one sample each), for where the sound comes out
+    struct Clicks { pos: u64, len: u64, rate: u32 }
+    impl Source for Clicks {
+        fn rate(&self) -> u32 { self.rate }
+        fn duration_ms(&self) -> Option<u64> { Some(self.len * 1000 / self.rate as u64) }
+        fn read(&mut self, out: &mut Vec<f32>) -> Result<bool, String> {
+            if self.pos >= self.len { return Ok(false); }
+            let n = 1024.min(self.len - self.pos);
+            for i in 0..n { let v = if (self.pos + i) % (self.rate as u64 / 2) == 0 { 1.0 } else { 0.0 }; out.extend_from_slice(&[v, v]); }
+            self.pos += n;
+            Ok(true)
+        }
+        fn seek(&mut self, ms: u64) -> Result<u64, String> { self.pos = ms * self.rate as u64 / 1000; Ok(ms) }
+    }
+
+    #[test]
+    fn on_time_as_heard() {
+        let rate = 44_100;
+        for (t, semis) in [(1.0, 0), (1.0, 1), (1.056, 1), (0.95, 2), (1.0, -1)] {
+            let mut s = Stretched::shifted(Box::new(Clicks { pos: 0, len: rate as u64 * 5, rate }), Tempo::new(t), semis).unwrap();
+            s.seek(1000).unwrap();
+            let out = crate::engine::render(Box::new(s), rate, &[0.0; 10], 0.0, 2.5).unwrap();
+            let ch: Vec<f32> = out.chunks(2).map(|f| f[0].abs()).collect();
+            let gap = (rate as f64 * 0.5 / t) as usize;
+            let peaks: Vec<String> = (0..4).map(|k| { let a = (k * gap).saturating_sub(gap / 2); let b = (k * gap + gap / 2).min(ch.len()); let i = (a..b).max_by(|x, y| ch[*x].total_cmp(&ch[*y])).unwrap(); format!("{:.1} ({:.2})", (i as f64 - k as f64 * gap as f64) * 1000.0 / rate as f64, ch[i]) }).collect();
+            // each click where it should be (but the chain's few ms, as every track has), not its deck's
+            // delay or its resampling's behind (once 95 ms a semitone up, half a second two)
+            for p in &peaks[1..] { let late: f64 = p.split(' ').next().unwrap().parse().unwrap(); assert!(late.abs() < 10.0, "tempo {t} {semis:+}: {peaks:?}"); }
+        }
+    }
+
+    #[test]
+    fn all_of_it_heard() {
+        let rate = 44_100;
+        for semis in [0, 1, 2] {
+            let mut s = Stretched::shifted(Box::new(Tone::new(rate, 440.0, 0.3, 4.0)), Tempo::new(1.0), semis).unwrap();
+            let mut n = 0usize; let mut blocks = 0;
+            let mut out = Vec::new();
+            while s.read(&mut out).unwrap() { blocks += 1; n = out.len(); if blocks > 1000 { break; } }
+            let r = crate::engine::render(Box::new(Stretched::shifted(Box::new(Tone::new(rate, 440.0, 0.3, 4.0)), Tempo::new(1.0), semis).unwrap()), rate, &[0.0; 10], 0.0, 10.0).unwrap();
+            let _ = (n, blocks);
+            // all of it heard, its end too (out of the resampling)
+            assert!((r.len() as f64 / 2.0 / rate as f64 - 4.0).abs() < 0.1, "{semis:+}: {:.2} s", r.len() as f64 / 2.0 / rate as f64);
+        }
     }
 
     #[test]

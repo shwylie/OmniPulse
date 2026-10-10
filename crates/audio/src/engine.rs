@@ -181,12 +181,16 @@ impl Pipeline {
 pub struct Resampler {
     inner: rubato::FftFixedIn<f32>,
     pending: [Vec<f32>; 2],
+    /// its own delay (frames of output: up to 80 ms between rates with little in common, as a key
+    /// shift's), still to be let go: what it gives is where its input was, to the frame
+    skip: usize,
 }
 
 impl Resampler {
     pub fn new(from: u32, to: u32) -> Self {
         let inner = rubato::FftFixedIn::<f32>::new(from as usize, to as usize, 1024, 2, 2).expect("resampler");
-        Self { inner, pending: [Vec::new(), Vec::new()] }
+        let skip = { use rubato::Resampler as _; inner.output_delay() };
+        Self { inner, pending: [Vec::new(), Vec::new()], skip }
     }
 
     fn push(&mut self, inter: &[f32], last: bool, out: &mut Vec<f32>) {
@@ -202,21 +206,43 @@ impl Resampler {
             }
             let chunk: [Vec<f32>; 2] = [self.pending[0].drain(..need).collect(), self.pending[1].drain(..need).collect()];
             if let Ok(res) = self.inner.process(&chunk, None) {
-                interleave(&res, out);
+                self.give(&res, out);
+            }
+        }
+        // (the end: as much again as its delay pushed through, so what's inside it comes out too)
+        if last && self.skip == 0 && !self.pending[0].is_empty() {
+            use rubato::Resampler as _;
+            let tail = self.inner.output_delay() * self.inner.input_frames_next() / self.inner.output_frames_next().max(1) + 1;
+            for ch in &mut self.pending { ch.extend(std::iter::repeat_n(0.0, tail)); }
+            loop {
+                let need = self.inner.input_frames_next();
+                if self.pending[0].len() < need { break; }
+                let chunk: [Vec<f32>; 2] = [self.pending[0].drain(..need).collect(), self.pending[1].drain(..need).collect()];
+                if let Ok(res) = self.inner.process(&chunk, None) { self.give(&res, out); }
             }
         }
         if last && !self.pending[0].is_empty() {
             let chunk = [std::mem::take(&mut self.pending[0]), std::mem::take(&mut self.pending[1])];
             if let Ok(res) = self.inner.process_partial(Some(&chunk), None) {
-                interleave(&res, out);
+                self.give(&res, out);
             }
         }
+    }
+
+    /// What it made, less what's left of its own delay
+    fn give(&mut self, res: &[Vec<f32>], out: &mut Vec<f32>) {
+        let n = res[0].len().min(res[1].len());
+        let drop = self.skip.min(n);
+        self.skip -= drop;
+        if drop == 0 { return interleave(res, out); }
+        interleave(&[res[0][drop..n].to_vec(), res[1][drop..n].to_vec()], out);
     }
 
     fn reset(&mut self) {
         use rubato::Resampler as _;
         self.inner.reset();
         self.pending = [Vec::new(), Vec::new()];
+        self.skip = self.inner.output_delay();
     }
 }
 

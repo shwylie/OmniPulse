@@ -855,3 +855,36 @@ fn rhythm_debug_probe() {
     let r = omnipulse_core::rhythm::analyse(&mono, rate).unwrap();
     println!("{id}: {} BPM, first beat {:.0} ms, downbeat {}", r.bpm, r.beats[0], r.downbeat);
 }
+
+/// Where a song's kicks land against its tracked beats, finely: its lows' (below 150 Hz) energy over
+/// 8 ms, where it rises most within each beat, as ms after the beat (median, and the spread), over
+/// bars \`OMNIPULSE_PROBE_BARS\`
+#[test]
+#[ignore]
+fn kick_probe() {
+    let id = std::env::var("OMNIPULSE_PROBE_ID").unwrap();
+    let (from, to) = std::env::var("OMNIPULSE_PROBE_BARS").ok().and_then(|r| { let (a, b) = r.split_once("..")?; Some((a.parse::<usize>().ok()?, b.parse::<usize>().ok()?)) }).unwrap_or((24, 32));
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    let m = omnipulse_core::rhythm::known(&format!("full:{id}")).expect("measured whole");
+    let (mono, rate) = rt.block_on(omnipulse_core::loudness::mono_start("soundcloud", &id, 1200.0)).unwrap();
+    let lp = |x: &[f32], hz: f32| { let a = 1.0 - (-2.0 * std::f32::consts::PI * hz / rate as f32).exp(); let (mut z1, mut z2) = (0.0f32, 0.0f32); x.iter().map(|v| { z1 += a * (v - z1); z2 += a * (z1 - z2); z2 }).collect::<Vec<f32>>() };
+    let low = lp(&mono, 150.0);
+    let hi: Vec<f32> = { let l = lp(&mono, 2000.0); mono.iter().zip(&l).map(|(a, b)| a - b).collect() };
+    let per_ms = rate as usize / 1000;
+    // energy over 8 ms, every ms
+    let env = |x: &[f32]| (0..x.len() / per_ms).map(|i| { let a = i * per_ms; let b = (a + 8 * per_ms).min(x.len()); (x[a..b].iter().map(|v| v * v).sum::<f32>() / (b - a) as f32).sqrt() }).collect::<Vec<f32>>();
+    let beats: Vec<f64> = m.rhythm.beats.iter().map(|b| m.from_ms as f64 + b).collect();
+    for (name, e) in [("kick (lows)", env(&low)), ("hats (highs)", env(&hi))] {
+        let mut at = Vec::new();
+        for i in m.rhythm.downbeat + from * 4..(m.rhythm.downbeat + to * 4).min(beats.len() - 1) {
+            // from a quarter beat before it to three quarters after: where it rises most (over 6 ms)
+            let (t, p) = (beats[i], beats[i + 1] - beats[i]);
+            let (a, b) = ((t - p / 4.0).max(6.0) as usize, ((t + p * 0.75) as usize).min(e.len() - 1));
+            let best = (a..b).max_by(|&x, &y| (e[x] - e[x - 6]).total_cmp(&(e[y] - e[y - 6]))).unwrap();
+            at.push(best as f64 - 3.0 - t);
+        }
+        at.sort_by(|x, y| x.total_cmp(y));
+        let q = |f: f64| at[((at.len() - 1) as f64 * f) as usize];
+        println!("{id} bars {from}..{to} {name}: rises {:.0} ms after the beat (median; quartiles {:.0} / {:.0}; beat {:.0} ms)", q(0.5), q(0.25), q(0.75), m.rhythm.period_ms);
+    }
+}
