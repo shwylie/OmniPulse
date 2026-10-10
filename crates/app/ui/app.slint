@@ -476,6 +476,11 @@ export component AppWindow inherits Window {
     in-out property <string> tp-start;
     in-out property <string> tp-end;
     in property <string> tp-note;
+    // "Plays from YouTube Music" (a Go+ track, a MusicBrainz song): the versions it could play, the
+    // one it plays marked
+    in property <[string]> tp-versions;
+    in property <int> tp-version-on: -1;
+    callback tp-version(int);
     callback tp-save();
     callback tp-reset();
     // "now": where the track is playing, for its start (0) or end (1)
@@ -2016,6 +2021,14 @@ export component AppWindow inherits Window {
                     Pill { label: "Now"; clicked => { root.tp-now(1); } }
                 }
                 if root.tp-note != "": Text { text: root.tp-note; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
+                if root.tp-versions.length > 0: Text { text: "Plays from YouTube Music"; color: Theme.muted; font-size: 12px; }
+                for v[k] in root.tp-versions: Rectangle {
+                    height: 30px;
+                    border-radius: 8px;
+                    background: k == root.tp-version-on ? Theme.accent.with-alpha(0.22) : vta.has-hover ? Theme.panel : transparent;
+                    Text { x: 10px; width: parent.width - 20px; text: v; color: k == root.tp-version-on ? Theme.text : Theme.muted; font-size: 13px; overflow: elide; vertical-alignment: center; }
+                    vta := TouchArea { clicked => { root.tp-version(k); } }
+                }
                 HorizontalLayout {
                     spacing: 8px;
                     Pill { label: "Reset"; clicked => { root.tp-reset(); } }

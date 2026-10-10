@@ -874,6 +874,31 @@ fn cast_event(shared: &Shared, m: serde_json::Value) {
 thread_local! {
     /// the track being edited
     static TP_TRACK: RefCell<Option<Track>> = const { RefCell::new(None) };
+    /// the YouTube Music versions it could play from (Track preferences' list)
+    static TP_VERSIONS: RefCell<Vec<omnipulse_core::youtube::YtTrack>> = const { RefCell::new(Vec::new()) };
+}
+
+/// For a track that plays from YouTube Music (a Go+ track, a MusicBrainz song): the closest few
+/// versions there, best first, with the one it plays marked
+fn tp_versions(shared: &Shared, t: &Track) {
+    TP_VERSIONS.with(|v| v.borrow_mut().clear());
+    if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_tp_versions(ModelRc::default()); ui.set_tp_version_on(-1); }
+    if !(t.go_plus || matches!(t.src, track::Src::MusicBrainz(_))) { return; }
+    let (rt, weak, t) = { let a = shared.borrow(); (a.rt.clone(), a.ui.clone(), t.clone()) };
+    rt.spawn(async move {
+        let (artist, title) = versions::guess_names(&t);
+        let mut found = omnipulse_core::youtube::search(&format!("{artist} {title}")).await.unwrap_or_default();
+        found.sort_by(|a, b| versions::score(&t, b).total_cmp(&versions::score(&t, a)));
+        found.truncate(6);
+        let on = versions::saved_id(&t.key);
+        let _ = weak.upgrade_in_event_loop(move |ui| {
+            if TP_TRACK.with(|x| x.borrow().as_ref().map(|x| x.key.clone())) != Some(t.key.clone()) { return; }
+            let names: Vec<slint::SharedString> = found.iter().map(|c| format!("{} \u{b7} {} \u{b7} {}", c.title, c.artists, fmt_ms(c.duration_ms)).into()).collect();
+            ui.set_tp_version_on(on.as_ref().and_then(|id| found.iter().position(|c| &c.id == id)).map_or(-1, |i| i as i32));
+            ui.set_tp_versions(ModelRc::from(Rc::new(VecModel::from(names))));
+            TP_VERSIONS.with(|v| *v.borrow_mut() = found);
+        });
+    });
 }
 
 /// m:ss (or m:ss.s, or seconds) to ms; empty is None, nonsense an error
@@ -908,6 +933,7 @@ fn tp_open(shared: &Shared, t: &Track) {
         ui.set_tp_note(format!("It's {} long.", fmt_ms(t.ms)).into());
         ui.set_tp_open(true);
     }
+    tp_versions(shared, t);
 }
 
 /// Saves (or, with `reset`, takes off) the track's preferences, and shows them where it's listed
@@ -4231,6 +4257,13 @@ fn main() -> Result<(), slint::PlatformError> {
     ui.on_tp_save(move || tp_save(&s, false));
     let s = shared.clone();
     ui.on_tp_reset(move || tp_save(&s, true));
+    let s = shared.clone();
+    ui.on_tp_version(move |k| {
+        let (Some(t), Some(c)) = (TP_TRACK.with(|x| x.borrow().clone()), TP_VERSIONS.with(|v| v.borrow().get(k as usize).cloned())) else { return };
+        // (kept: it plays that one from now on, as the web app's ytChooseMatch)
+        versions::keep(&t, &c);
+        if let Some(ui) = s.borrow().ui.upgrade() { ui.set_tp_version_on(k); ui.set_status(format!("\"{}\" plays \"{}\" from YouTube Music from now on.", t.title, c.title).into()); }
+    });
     let s = shared.clone();
     ui.on_tp_now(move |which| {
         let pos = s.borrow().engine.position_ms();
