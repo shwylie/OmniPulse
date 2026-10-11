@@ -172,8 +172,34 @@ pub async fn chart(genre: u64) -> Vec<Track> {
     dz_tracks(&dz(&format!("/chart/{genre}/tracks?limit=50")).await, None)
 }
 
-/// Deezer's artist of this name: the best known of those named so (not a namesake with a few fans)
+/// Deezer's artist of this name: of several so named, the one whose top songs include songs you have
+/// by that name (none of them: left unmatched rather than guessed); with nothing to go on, the best
+/// known (a common name's best known can be someone else entirely)
 static DZ_ARTISTS: std::sync::Mutex<Option<HashMap<String, Option<(u64, String)>>>> = std::sync::Mutex::new(None);
+
+/// The titles of the songs you have, by artist (artist_key -> title keys): what tells namesakes apart
+static YOUR_TITLES: std::sync::Mutex<Option<HashMap<String, std::collections::HashSet<String>>>> = std::sync::Mutex::new(None);
+
+/// A title as compared across platforms: no brackets, no " - Remastered"-style tail
+fn title_key(s: &str) -> String {
+    let mut out = String::new();
+    let mut depth = 0;
+    for c in s.chars() {
+        match c { '(' | '[' => depth += 1, ')' | ']' => depth = (depth - 1).max(0), _ if depth == 0 => out.push(c), _ => {} }
+    }
+    let cut = out.find(" - ").map(|i| out[..i].to_string()).unwrap_or(out);
+    core::ranking::artist_key(&cut)
+}
+
+fn your_titles_set(library: &[Track]) {
+    let mut m: HashMap<String, std::collections::HashSet<String>> = HashMap::new();
+    for t in library {
+        let a = core::ranking::artist_key(t.artist.split(',').next().unwrap_or(""));
+        let k = title_key(&t.title);
+        if !a.is_empty() && !k.is_empty() { m.entry(a).or_default().insert(k); }
+    }
+    *YOUR_TITLES.lock().unwrap() = Some(m);
+}
 
 pub async fn dz_artist(name: &str) -> Option<(u64, String)> {
     let k = core::ranking::artist_key(name);
@@ -181,11 +207,25 @@ pub async fn dz_artist(name: &str) -> Option<(u64, String)> {
     if let Some(hit) = DZ_ARTISTS.lock().unwrap().as_ref().and_then(|m| m.get(&k).cloned()) {
         return hit;
     }
-    let found = dz(&format!("/search/artist?limit=5&q={}", crate::sources::urlencode(name))).await;
-    let best = found["data"].as_array().into_iter().flatten()
+    let found = dz(&format!("/search/artist?limit=10&q={}", crate::sources::urlencode(name))).await;
+    let mut same: Vec<Value> = found["data"].as_array().into_iter().flatten()
         .filter(|x| x["name"].as_str().is_some_and(|n| core::ranking::artist_key(n) == k))
-        .max_by_key(|x| x["nb_fan"].as_u64().unwrap_or(0))
-        .and_then(|x| Some((x["id"].as_u64()?, x["picture_big"].as_str().unwrap_or("").to_string())));
+        .cloned().collect();
+    same.sort_by_key(|x| std::cmp::Reverse(x["nb_fan"].as_u64().unwrap_or(0)));
+    let pick = |x: &Value| Some((x["id"].as_u64()?, x["picture_big"].as_str().unwrap_or("").to_string()));
+    let yours = YOUR_TITLES.lock().unwrap().as_ref().and_then(|m| m.get(&k).cloned()).unwrap_or_default();
+    let best = if same.len() > 1 && !yours.is_empty() {
+        let mut top = (0usize, None);
+        for x in same.iter().take(6) {
+            let Some(id) = x["id"].as_u64() else { continue };
+            let hits = dz(&format!("/artist/{id}/top?limit=50")).await["data"].as_array().into_iter().flatten()
+                .filter(|t| yours.contains(&title_key(t["title_short"].as_str().or(t["title"].as_str()).unwrap_or("")))).count();
+            if hits > top.0 { top = (hits, pick(x)); }
+        }
+        top.1
+    } else {
+        same.first().and_then(pick)
+    };
     DZ_ARTISTS.lock().unwrap().get_or_insert_with(HashMap::new).insert(k, best.clone());
     best
 }
@@ -483,6 +523,7 @@ fn station(s: &Seed, flags_cat: bool, sc_seeded: bool) -> Item {
 
 /// Discover's shelves, in their order
 pub async fn build(input: Input) -> Vec<Shelf> {
+    your_titles_set(&input.library);
     let liked = Liked::of(&input.library);
     let cold = input.cold();
     let (artists, sc_seeded) = your_artists(&input);
@@ -571,6 +612,15 @@ pub async fn build(input: Input) -> Vec<Shelf> {
 
     order(&mut shelves, cold);
     shelves
+}
+
+#[cfg(test)]
+mod title_key_tests {
+    #[test]
+    fn titles_compare_without_their_brackets_and_tails() {
+        assert_eq!(super::title_key("Rain Falling Slowly (feat. X) - Remastered 2011"), super::title_key("Rain Falling Slowly [Live]"));
+        assert_ne!(super::title_key("Rain"), super::title_key("Rain Falling Slowly"));
+    }
 }
 
 #[cfg(test)]

@@ -51,16 +51,40 @@ function dzArtistsLoad() {
   return dzArtists;
 }
 
+// A title as compared across platforms: no brackets, no " - Remastered"-style tail, letters and digits
+const titleKey = (s) => artistKey(String(s || "").replace(/[(\[][^)\]]*[)\]]/g, " ").replace(/\s+-\s+.*$/, ""));
+
+// The titles of the songs you have by an artist (liked anywhere, or played): what tells namesakes apart
+function yourTitlesBy(name) {
+  const k = artistKey(name);
+  const out = new Set();
+  const add = (artist, title) => { if (artistKey(artist) === k && titleKey(title)) out.add(titleKey(title)); };
+  likedTracks.filter(isLikedTrack).forEach((t) => add(guessNames(t).artist || artistName(t), guessNames(t).title || t.title));
+  (spLikedCache || []).forEach((t) => add(firstArtist(t), t.title));
+  ytLikedTracks().forEach((t) => add(firstArtist(t), t.title));
+  loadStats().forEach((x) => add(String(x.artist || "").split(",")[0].trim(), x.title));
+  return out;
+}
+
 async function dzArtistFor(name) {
   const k = artistKey(name);
   if (!k) return null;
   const saved = dzArtistsLoad()[k];
-  // (v2: picked the most followed of the same name; earlier picks took the first, sometimes a namesake)
-  if (saved && saved.v === 2 && Date.now() - saved.at < (saved.id ? 30 : 7) * 86400000) return saved.id ? saved : null;
-  const found = ((await dzGet("/search/artist?limit=5&q=" + encodeURIComponent(name))).data || []);
-  // (several of the same name: the best known, not a namesake with a handful of fans)
-  const a = found.filter((x) => sameArtist(x.name, name)).sort((x, y) => (y.nb_fan || 0) - (x.nb_fan || 0))[0];
-  dzArtists[k] = a ? { v: 2, id: a.id, name: a.name, img: a.picture_big || a.picture_xl || "", followers: a.nb_fan || 0, url: a.link || "https://www.deezer.com/artist/" + a.id, at: Date.now() } : { v: 2, id: 0, at: Date.now() };
+  // (v3: several of the same name told apart by your songs; v2 took the most followed, which for a
+  // common name could be someone else entirely)
+  if (saved && saved.v === 3 && Date.now() - saved.at < (saved.id ? 30 : 7) * 86400000) return saved.id ? saved : null;
+  const found = ((await dzGet("/search/artist?limit=10&q=" + encodeURIComponent(name))).data || []);
+  const same = found.filter((x) => sameArtist(x.name, name)).sort((x, y) => (y.nb_fan || 0) - (x.nb_fan || 0));
+  let a = same[0];
+  // (several of the same name: the one whose top songs include ones you have by that name; none of
+  // them: the name is left unmatched rather than guessed, if you have songs to go on)
+  const yours = same.length > 1 ? yourTitlesBy(name) : new Set();
+  if (yours.size) {
+    const hits = await eachFew(same.slice(0, 6), async (x) => ((await dzGet("/artist/" + x.id + "/top?limit=50")).data || []).filter((t) => yours.has(titleKey(t.title_short || t.title))).length, 3);
+    const best = hits.reduce((b, n, i) => ((n || 0) > (hits[b] || 0) ? i : b), 0);
+    a = hits[best] ? same[best] : null;
+  }
+  dzArtists[k] = a ? { v: 3, id: a.id, name: a.name, img: a.picture_big || a.picture_xl || "", followers: a.nb_fan || 0, url: a.link || "https://www.deezer.com/artist/" + a.id, at: Date.now() } : { v: 3, id: 0, at: Date.now() };
   try { localStorage.setItem(DZ_ARTISTS_KEY, JSON.stringify(dzArtists)); } catch (e) {}
   return a ? dzArtists[k] : null;
 }
