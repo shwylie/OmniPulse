@@ -133,6 +133,9 @@ async fn spe_web_get(path: String) -> Result<Value, String> { spe::spe_web_get(p
 async fn spe_account() -> Result<Value, String> { spe::spe_account().await }
 #[tauri::command]
 fn spe_crashed_last_time() -> bool { spe::spe_crashed_last_time() }
+/// A step the page takes, in diag.log
+#[tauri::command]
+fn diag_note(msg: String) { omnipulse_core::diag::note(&format!("page: {}", msg.chars().take(300).collect::<String>())); }
 #[tauri::command]
 fn spe_set_normalisation(on: bool, target_lufs: f64) { spe::spe_set_normalisation(on, target_lufs) }
 
@@ -765,6 +768,7 @@ fn browser_args(gpu: bool) -> String {
 
 fn main() {
     omnipulse_core::crash_log_install();
+    omnipulse_core::diag::install();
     let play = Shortcut::new(None, Code::MediaPlayPause);
     let next = Shortcut::new(None, Code::MediaTrackNext);
     let prev = Shortcut::new(None, Code::MediaTrackPrevious);
@@ -935,9 +939,13 @@ fn main() {
             config_status, config_set, open_setup_page, backup_create, backup_restore, youtube_status, youtube_connect, youtube_disconnect, youtube_licences, like_youtube_track, unlike_youtube_track,
             local_folders, local_set_folders, local_scan, local_status, local_tracks, local_server,
             requests_start, requests_stop, request_result,
-            spe_signed_in, spe_login, spe_logout, spe_attach, spe_play, spe_pause, spe_resume, spe_seek, spe_stop, spe_played, spe_playlist, spe_web_get, spe_account, spe_crashed_last_time, spe_set_normalisation, loudness_analyse,
+            spe_signed_in, spe_login, spe_logout, spe_attach, spe_play, spe_pause, spe_resume, spe_seek, spe_stop, spe_played, spe_playlist, spe_web_get, spe_account, spe_crashed_last_time, diag_note, spe_set_normalisation, loudness_analyse,
             resolve_yt_stream, plugin_inspect, plugin_install, plugin_list, plugin_folder, plugin_remove, plugin_http, yt_search, yt_radio, yt_status, yt_artists, yt_artist, yt_album, yt_playlist, yt_playlists, yt_prepare, sc_ytdlp, mb_search, cat_search, deezer_get, artist_bio, playlist_file_read, playlist_file_write, sb_segments, apple_connect, apple_library, apple_forget, update_check, update_install, yt_setup, yt_remove, remote_start, remote_stop, remote_result
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running app");
+        .build(tauri::generate_context!())
+        .expect("error while building app")
+        .run(|_app, event| {
+            // (closed as an app does: so a log that stops without this means it didn't)
+            if let tauri::RunEvent::Exit = event { omnipulse_core::diag::note("closed normally"); }
+        });
 }

@@ -14,6 +14,7 @@ desktop = ["reqwest/default-tls", "dep:tiny_http", "dep:opener", "dep:librespot-
 mobile = ["reqwest/rustls-tls"]
 
 [dependencies]
+log = "0.4"
 reqwest = { version = "0.12", default-features = false, features = ["json", "blocking", "charset", "http2"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -46,7 +47,7 @@ omnipulse-pcmout = { path = "../pcmout", optional = true }
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "process", "time"] }
 
 [target.'cfg(windows)'.dependencies]
-windows = { version = "0.62", features = ["Win32_Foundation", "Win32_Security_Cryptography"] }
+windows = { version = "0.62", features = ["Win32_Foundation", "Win32_Security_Cryptography", "Win32_System_Console"] }
 
 [target.'cfg(windows)'.dev-dependencies]
 windows = { version = "0.62", features = ["Win32_Foundation", "Win32_System_Com", "Win32_System_Com_StructuredStorage", "Win32_System_Variant", "Win32_Media_Audio", "Win32_System_Threading", "Win32_System_ProcessStatus", "Win32_UI_Shell_PropertiesSystem", "Win32_Devices_FunctionDiscovery", "Win32_Media_Audio_Endpoints", "Win32_Media_KernelStreaming", "Win32_Media_Multimedia", "Win32_System_Diagnostics_ToolHelp"] }

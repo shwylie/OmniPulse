@@ -93,7 +93,9 @@ async function spotifyCheck() {
       // signed in for playback: the account from the playback sign-in's own login (Premium or not),
       // not the Web API, which everyone signed in this way shares (Spotify's limits are per app); its
       // display name from the Web API after, when Spotify allows
-      const pb = (await invoke("spe_signed_in").catch(() => false)) ? await invoke("spe_account").catch(() => null) : null;
+      spNote("checking the account");
+      const pb = (await invoke("spe_signed_in").catch(() => false)) ? await invoke("spe_account").catch((e) => { spNote("account through playback failed: " + e); return null; }) : null;
+      spNote("account: " + (pb ? pb.product || "(none given)" : "not through playback"));
       // (not Premium: the playback sign-in only serves Premium, and using it for more can take the
       // app down: signed out of it at once, as Spotify turning it down would)
       if (pb && pb.product && pb.product !== "premium") throw new Error("Premium account required");
@@ -179,15 +181,21 @@ async function spotifyGrant() {
 // One sign-in: Spotify's own (the playback engine's), which covers your library, likes, search and
 // playback. It only takes Premium accounts; a free account signs in through a developer app of your
 // own instead (Set up, js/apisetup.js), and plays from YouTube Music.
+// (a step of Spotify's sign-in, in diag.log: an app that closes leaves its last steps there)
+const spNote = (msg) => invoke("diag_note", { msg: "spotify: " + msg }).catch(() => {});
+
 async function spotifyConnect() {
+  spNote("sign-in started");
   $("spStatus").textContent = "Finish signing in in your browser...";
   let keys = false;
   try { keys = !!(await invoke("config_status")).spotify; } catch (e) {}
   try {
     await invoke("spe_login");
+    spNote("playback sign-in done");
     prefs.spNeedsKeys = false;
     savePrefs();
   } catch (e) {
+    spNote("playback sign-in refused: " + e);
     if (!spNotPremium(e)) { $("spStatus").textContent = String(e); return; }
     if (!keys) {
       prefs.spNeedsKeys = true;

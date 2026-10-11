@@ -5604,6 +5604,7 @@ dependencies = [
  "librespot-oauth",
  "librespot-playback",
  "lofty",
+ "log",
  "md5",
  "mdns-sd",
  "native-tls",

@@ -243,6 +243,7 @@ fn start_check() {
             marks.iter().for_each(|m| { let _ = std::fs::remove_file(m); });
             if let Ok(c) = cache_dir() { let _ = std::fs::remove_dir_all(c); }
             CRASHED.store(true, Ordering::SeqCst);
+            crate::diag::note("spotify playback: last run went down while using it: signed out of it");
         }
     });
 }
@@ -255,7 +256,10 @@ pub fn spe_crashed_last_time() -> bool {
 
 async fn connect(credentials: Credentials) -> Result<Engine, String> {
     let _busy = Busy::new();
-    connect_now(credentials).await
+    crate::diag::note("spotify playback: connecting");
+    let r = connect_now(credentials).await;
+    crate::diag::note(&match &r { Ok(_) => "spotify playback: connected".to_string(), Err(e) => format!("spotify playback: connect failed: {e}") });
+    r
 }
 
 async fn connect_now(credentials: Credentials) -> Result<Engine, String> {
@@ -264,6 +268,7 @@ async fn connect_now(credentials: Credentials) -> Result<Engine, String> {
         .connect(credentials, true)
         .await
         .map_err(|e| format!("Spotify playback sign-in failed: {e}"))?;
+    crate::diag::note("spotify playback: session up, making its player");
     let norm = *NORM.lock().unwrap();
     let player = make_player(&session, norm);
     Ok(Engine { session, player, norm })
@@ -303,10 +308,12 @@ pub async fn spe_login() -> Result<(), String> {
         .with_custom_message("Signed in to Spotify playback. You can close this tab and go back to OmniPulse.")
         .build()
         .map_err(|e| format!("Spotify sign-in: {e}"))?;
+    crate::diag::note("spotify playback sign-in: in the browser");
     let token = client
         .get_access_token_async()
         .await
-        .map_err(|e| format!("Spotify sign-in: {e}"))?;
+        .map_err(|e| { crate::diag::note(&format!("spotify playback sign-in: the browser's sign-in failed: {e}")); format!("Spotify sign-in: {e}") })?;
+    crate::diag::note("spotify playback sign-in: signed in in the browser");
     let engine = connect(Credentials::with_access_token(token.access_token)).await?;
     *ENGINE.lock().await = Some(engine);
     Ok(())
@@ -464,6 +471,7 @@ pub async fn spe_account() -> Result<Value, String> {
         if let Some(t) = session.get_user_attribute("type").filter(|t| !t.is_empty()) { product = t; break; }
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
     }
+    crate::diag::note(&format!("spotify playback: account read: {}", if product.is_empty() { "(none given)" } else { product.as_str() }));
     Ok(json!({ "id": session.username(), "product": product }))
 }
 
@@ -476,6 +484,7 @@ const WEB_SCOPES: &str = "user-read-private,user-read-email,user-library-read,us
 
 pub async fn spe_web_token() -> Result<String, String> {
     let _busy = Busy::new();
+    crate::diag::note("spotify playback: a Web API token");
     let session = {
         let guard = engine().await?;
         guard.as_ref().unwrap().session.clone()

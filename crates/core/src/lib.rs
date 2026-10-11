@@ -3,6 +3,7 @@
 // Nothing here knows about a window; the apps pass in callbacks where the page used to be called.
 
 pub mod apple;
+pub mod diag;
 #[cfg(feature = "desktop")]
 pub mod backup;
 pub mod bundled;
@@ -138,6 +139,7 @@ pub fn crash_log_install() {
         let place = info.location().map(|l| format!("{}:{}", l.file(), l.line())).unwrap_or_default();
         let trace = std::backtrace::Backtrace::force_capture();
         let entry = format!("---- {at} (unix secs), version {}, thread {thread}\n{what}\nat {place}\n{trace}\n", env!("CARGO_PKG_VERSION"));
+        diag::note(&format!("panic in {thread}: {what} at {place}"));
         if let Ok(dir) = data_dir() {
             let f = dir.join("crash.log");
             let old = std::fs::read_to_string(&f).unwrap_or_default();

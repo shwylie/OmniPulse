@@ -5342,6 +5342,7 @@ fn toggle(shared: &Shared) {
 
 fn main() -> Result<(), slint::PlatformError> {
     omnipulse_core::crash_log_install();
+    omnipulse_core::diag::install();
     // one OmniPulse at a time: a second one hands its link (or "show") to the first, and closes
     let link_arg = std::env::args().find(|x| x.starts_with("omnipulse://"));
     if std::env::var_os("OMNIPULSE_SELFTEST").is_none() {
