@@ -74,7 +74,7 @@ async function collabJoin(code, relay, e) {
   try { const r = await fetch(relay + "/api/shares/" + code); share = r.ok ? await r.json() : null; } catch (x) { share = null; }
   if (!share || !Array.isArray(share.tracks)) { say("That playlist isn't shared any more."); return; }
   if (!confirm('Join "' + share.title + '"' + (share.by ? " from " + share.by : "") + "? It's a collaborative playlist: you can add songs to it and take them out, and see everyone else's changes.")) return;
-  const p = xplCreate(share.title, share.tracks.map((t) => t.snap).filter((s) => s && s.id && s.source !== "local"));
+  const p = xplCreate(share.title, collabSnaps(share));
   p.collab = { code, relay, k: e, owner: false, rev: share.rev || 0 };
   xplSave(true);
   await refreshSidebar();
@@ -91,7 +91,14 @@ function collabSend(x, op) {
     .catch((e) => say('Couldn\'t send that change to "' + x.title + '": ' + (e && e.message ? e.message : e)));
 }
 function collabAdded(x, tracks) {
-  tracks.filter((t) => srcOf(t) !== "local").forEach((t) => collabSend(x, { op: "add", track: { title: matchTitle(t), artist: artistName(t), ms: t.full_duration || t.duration || 0, links: shareLinks(t), snap: xplSnap(t) } }));
+  tracks.filter((t) => srcOf(t) !== "local").forEach((t) => collabSend(x, { op: "add", track: { title: matchTitle(t), artist: artistName(t), ms: t.full_duration || t.duration || 0, links: shareLinks(t), snap: xplSnap(t), by: myName() } }));
+}
+
+// A collaborative playlist's songs as the relay has them, each with who added it (the playlist's
+// owner for its first songs, and for ones added before this was kept)
+function collabSnaps(share) {
+  return share.tracks.map((t) => t.snap && Object.assign({}, t.snap, { addedBy: t.by || share.by || "" }))
+    .filter((s) => s && s.id && s.source !== "local");
 }
 function collabRemoved(x, id) {
   collabSend(x, { op: "remove", id: String(id) });
@@ -113,7 +120,7 @@ async function collabPull(x) {
   }
   if ((share.rev || 0) === x.collab.rev) return;
   const mine = x.tracks.filter((s) => srcOf(s) === "local");
-  x.tracks = share.tracks.map((t) => t.snap).filter((s) => s && s.id && s.source !== "local").concat(mine);
+  x.tracks = collabSnaps(share).concat(mine);
   if (share.title) x.title = share.title;
   x.collab.rev = share.rev || 0;
   xplSave();

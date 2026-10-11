@@ -124,7 +124,8 @@ function shareClean(body) {
   const tracks = (Array.isArray(body.tracks) ? body.tracks : []).slice(0, MAX_SHARE_TRACKS).map((t) => {
     const links = {};
     Object.keys(LINK_NAMES).forEach((k) => { const u = t && t.links && t.links[k]; if (httpsLink(u)) links[k] = u.slice(0, 500); });
-    return { title: s(t && t.title, 300), artist: s(t && t.artist, 300), ms: Number(t && t.ms) || 0, links, snap: t && t.snap && typeof t.snap === "object" ? t.snap : null };
+    // (by: who added it, in a collaborative playlist)
+    return { title: s(t && t.title, 300), artist: s(t && t.artist, 300), ms: Number(t && t.ms) || 0, links, snap: t && t.snap && typeof t.snap === "object" ? t.snap : null, by: s(t && t.by, 60) };
   });
   return { title: s(body.title, 200) || "Playlist", by: s(body.by, 60), tracks };
 }

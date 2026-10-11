@@ -3,7 +3,7 @@
 // platform. Local files are kept by id and looked up again, since their addresses change per run.
 
 const XPL_KEY = "sc.xplaylists";
-const XPL_FIELDS = ["source", "id", "ytId", "ytArtistId", "spArtists", "uri", "kind", "title", "displayArtist", "duration", "artwork_url", "permalink_url",
+const XPL_FIELDS = ["addedBy", "source", "id", "ytId", "ytArtistId", "spArtists", "uri", "kind", "title", "displayArtist", "duration", "artwork_url", "permalink_url",
   "album", "spAlbum", "genre", "created_at", "playback_count", "sharing", "access", "policy", "license",
   // (the catalogues: Deezer, iTunes and MusicBrainz songs)
   "isrc", "dzId", "dzArtistId", "dzAlbumId", "dzRank", "itId", "mbId", "release_date"];
@@ -63,7 +63,8 @@ function xplAdd(id, list) {
   if (!p) return 0;
   const have = new Set(p.tracks.map((s) => s.id));
   const fresh = list.filter((t) => t && !have.has(t.id) && have.add(t.id));
-  p.tracks.push(...fresh.map(xplSnap));
+  // (collaborative: added by you, as everyone sees it)
+  p.tracks.push(...fresh.map((t) => Object.assign(xplSnap(t), p.collab && typeof myName === "function" ? { addedBy: myName() } : {})));
   xplSave();
   if (typeof collabAdded === "function") collabAdded(p, fresh);   // (collaborative: to everyone in it)
   return fresh.length;

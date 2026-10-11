@@ -796,6 +796,10 @@ function trackRow(t, i, playing) {
     artistLine.append(b);
   });
   meta.append(el("div", "title", t.title || "Untitled"), artistLine);
+  // a collaborative playlist: who added it, shown as you hover over it
+  if (t.addedBy && view === "playlist" && currentPlaylist && isXpl(currentPlaylist) && (xplFind(currentPlaylist.id) || {}).collab) {
+    artistLine.append(el("span", "addedBy", "Added by " + t.addedBy));
+  }
   // other versions of it (artist pages): opened beneath the row
   if (t._versions && t._versions.length) {
     const vb = el("button", "versionsBtn" + (versionsOpen.has(String(t.id)) ? " open" : ""), t._versions.length + (t._versions.length === 1 ? " more version" : " more versions"));
