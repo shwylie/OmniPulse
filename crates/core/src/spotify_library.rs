@@ -234,6 +234,23 @@ mod tests {
         assert!(total > 0);
     }
 
+    /// cargo test -p omnipulse-core like_unlike_live -- --ignored --nocapture (likes a song that isn't
+    /// liked, checks, unlikes it, checks: the library left as it was; stops if it's liked already)
+    #[test]
+    #[ignore]
+    fn like_unlike_live() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let uri = "spotify:track:4uLU6hMCjMI75M1A2tKUQC".to_string();
+        let has = |rt: &tokio::runtime::Runtime| rt.block_on(liked_all()).unwrap().iter().any(|l| l.uri == uri);
+        assert!(!has(&rt), "liked already: left alone");
+        rt.block_on(spe_set_liked(uri.clone(), true)).expect("like");
+        let liked = has(&rt);
+        rt.block_on(spe_set_liked(uri.clone(), false)).expect("unlike");
+        let after = has(&rt);
+        println!("liked: {liked}, after unliking: {after}");
+        assert!(liked && !after);
+    }
+
     /// cargo test -p omnipulse-core liked_tracks_live -- --ignored --nocapture (reads only: every
     /// liked song's id, and five of them in full)
     #[test]
