@@ -62,10 +62,11 @@ function syncSpotifySettings() {
   // its options (Your Keys) fold out under Spotify once it's set up and switched on (js/apisetup.js)
   if (typeof keySetupStatus === "function") keySetupStatus();
   $("spConnect").textContent = spotifyPremium || spotifyFree ? "Sign out" : "Sign in";
-  if (spotifyPremium) nameNote($("spStatus"), "Signed in as ", spotifyName || "you", " \u00b7 Premium.");
+  const own = spOwnKeys ? " Requests go through your own app keys." : "";
+  if (spotifyPremium) nameNote($("spStatus"), "Signed in as ", spotifyName || "you", " \u00b7 Premium." + own);
   else if (spotifyFree) {
     nameNote($("spStatus"), "Signed in as ", spotifyName || "you", " \u00b7 Free. " +
-      (ytOn() ? "Spotify tracks play from YouTube Music." : "Switch on YouTube Music to play your Spotify library."));
+      (ytOn() ? "Spotify tracks play from YouTube Music." : "Switch on YouTube Music to play your Spotify library.") + own);
   } else $("spStatus").textContent = prefs.spNeedsKeys ? SP_FREE_NOTE : SP_DEFAULT_NOTE;
 }
 
@@ -73,9 +74,26 @@ function syncSpotifySettings() {
 // you stay signed in as you were last time and it's asked again in a minute; only Spotify turning the
 // sign-in down (a revoked or expired refresh token) needs a new sign-in.
 let spotifyCheckTimer = null;
+// signed in with your own app keys too (their own allowance of requests)
+let spOwnKeys = false;
 let spCrashSaid = false;
 const spNotPremium = (e) => /premium account required/i.test(String(e));
 const SP_FREE_NOTE = "That's a free Spotify account. Spotify only lets Premium accounts sign in straight away; a free one signs in with the Spotify app of someone with Premium who adds you to it: Set up shows how.";
+// Your own keys, signed in already: what they're for (an allowance of requests of your own)
+const SP_OWN_KEYS_LEAD = "Optional. Spotify limits requests per app, and its own sign-in (the one you used) shares one allowance with everyone signed in that way, so when it's busy, OmniPulse has to wait. Keys of your own give you an allowance of your own: your requests go through them, with Spotify's sign-in kept as a backup. Spotify needs an app's owner to have Premium; with a free account, use the Client ID of someone with Premium who's added you to their app.";
+
+// Saved: signed in with them too (your own app's sign-in, beside Spotify's)
+async function spotifyOwnKeysSignIn() {
+  $("spStatus").textContent = "Finish signing in in your browser...";
+  try {
+    await invoke("spotify_login");
+    say("Signed in with your own Spotify keys: your requests go through them now.", { force: true });
+  } catch (e) {
+    say("Couldn't sign in with your keys: " + e, { force: true });
+  }
+  await spotifyCheck();
+}
+
 // Spotify turning down an app whose owner hasn't Premium (its rule since February 2026)
 const spOwnerNotPremium = (e) => /premium subscription required for the owner/i.test(String(e));
 const SP_OWNER_NOTE = "Spotify turned these app keys down: an app only works when its owner has Premium (Spotify's rule since February 2026), so a free account can't use one of its own. Use the Client ID of someone with Premium who's added you to their app: Your keys shows how.";
@@ -85,6 +103,7 @@ async function spotifyCheck() {
   clearTimeout(spotifyCheckTimer);
   let ok = false;
   let note = "";
+  spOwnKeys = !!(await invoke("config_status").catch(() => ({}))).spotify && !!(await invoke("spotify_app_signed_in").catch(() => false));
   // Spotify playback took the app down last time (it can, for some accounts): it's been signed out
   const crashed = await invoke("spe_crashed_last_time").catch(() => false);
   if (crashed && !spCrashSaid) {

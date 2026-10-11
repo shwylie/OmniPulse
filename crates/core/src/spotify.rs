@@ -85,31 +85,44 @@ fn retry_after(res: &reqwest::Response) -> u64 {
     res.headers().get("retry-after").and_then(|v| v.to_str().ok()).and_then(|s| s.trim().parse().ok()).unwrap_or(5).clamp(1, 86400)
 }
 
+// Each sign-in has its own allowance (Spotify counts per app: the playback sign-in's is Spotify's own,
+// shared with everyone signed in that way; your developer app's is yours), so each its own wait: one
+// limited, the other carries on.
 static COOL_LOADED: std::sync::Once = std::sync::Once::new();
+static COOL_PLAYBACK: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
-fn cool_file() -> Option<std::path::PathBuf> {
-    data_dir().ok().map(|d| d.join("spotify_wait.txt"))
+fn cool_slot(via: Via) -> &'static std::sync::atomic::AtomicU64 {
+    match via { Via::App => &COOL_UNTIL, Via::Playback => &COOL_PLAYBACK }
 }
 
-fn cool_until() -> u64 {
+fn cool_file(via: Via) -> Option<std::path::PathBuf> {
+    data_dir().ok().map(|d| d.join(match via { Via::App => "spotify_wait.txt", Via::Playback => "spotify_wait_playback.txt" }))
+}
+
+fn cool_until(via: Via) -> u64 {
     COOL_LOADED.call_once(|| {
-        let saved = cool_file().and_then(|p| std::fs::read_to_string(p).ok()).and_then(|s| s.trim().parse::<u64>().ok()).unwrap_or(0);
-        COOL_UNTIL.fetch_max(saved, std::sync::atomic::Ordering::SeqCst);
+        for v in [Via::App, Via::Playback] {
+            let saved = cool_file(v).and_then(|p| std::fs::read_to_string(p).ok()).and_then(|s| s.trim().parse::<u64>().ok()).unwrap_or(0);
+            cool_slot(v).fetch_max(saved, std::sync::atomic::Ordering::SeqCst);
+        }
     });
-    COOL_UNTIL.load(std::sync::atomic::Ordering::SeqCst)
+    cool_slot(via).load(std::sync::atomic::Ordering::SeqCst)
 }
 
-fn set_cool_until(until: u64) {
-    let _ = cool_until();
-    COOL_UNTIL.fetch_max(until, std::sync::atomic::Ordering::SeqCst);
-    if let Some(p) = cool_file() {
-        let _ = std::fs::write(p, COOL_UNTIL.load(std::sync::atomic::Ordering::SeqCst).to_string());
+fn set_cool_until(via: Via, until: u64) {
+    let _ = cool_until(via);
+    cool_slot(via).fetch_max(until, std::sync::atomic::Ordering::SeqCst);
+    if let Some(p) = cool_file(via) {
+        let _ = std::fs::write(p, cool_slot(via).load(std::sync::atomic::Ordering::SeqCst).to_string());
     }
 }
 
-/// Seconds left before Spotify takes requests again (0: now)
+/// Seconds left before Spotify takes requests again (0: now) through any sign-in you have
 pub fn spotify_wait() -> u64 {
-    cool_until().saturating_sub(now_secs())
+    let now = now_secs();
+    let vias: Vec<Via> = [Via::App, Via::Playback].into_iter().filter(|v| via_usable(*v)).collect();
+    if vias.is_empty() { return cool_until(Via::App).saturating_sub(now); }
+    vias.into_iter().map(|v| cool_until(v).saturating_sub(now)).min().unwrap_or(0)
 }
 
 // Requests at least this far apart, so a burst (following many artists, say) doesn't trip the limit
@@ -157,9 +170,9 @@ async fn pace() {
     *next = Some(tokio::time::Instant::now().max(now) + SPACING);
 }
 
-// Waits out a rate limit if it's short; errors if it isn't
-async fn cool_down() -> Result<(), String> {
-    let until = cool_until();
+// Waits out a sign-in's rate limit if it's short; errors if it isn't
+async fn cool_down(via: Via) -> Result<(), String> {
+    let until = cool_until(via);
     let now = now_secs();
     if until > now {
         let wait = until - now;
@@ -196,15 +209,39 @@ async fn playback_token() -> Result<String, String> {
     Err("Not connected to Spotify".into())
 }
 
-// The playback sign-in first, then your developer app's
+/// Signed in with your own developer app (its tokens kept), and not turned down this run
+pub fn spotify_app_signed_in() -> bool {
+    via_usable(Via::App)
+}
+
+/// Your developer app's keys turned down by Spotify this run (its owner hasn't Premium: Spotify's rule
+/// for developer apps since February 2026): left alone for the rest of it, the playback sign-in used
+static APP_TURNED_DOWN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+fn via_usable(via: Via) -> bool {
+    match via {
+        Via::App => load_sp_tokens().is_some() && !APP_TURNED_DOWN.load(std::sync::atomic::Ordering::Relaxed),
+        Via::Playback => playback_signed_in(),
+    }
+}
+
+// Your own developer app's first (its own allowance), signed in with it; else the playback sign-in's
 fn first_via() -> Option<Via> {
-    if playback_signed_in() {
+    if via_usable(Via::App) {
+        Some(Via::App)
+    } else if playback_signed_in() {
         Some(Via::Playback)
     } else if load_sp_tokens().is_some() {
         Some(Via::App)
     } else {
         None
     }
+}
+
+/// The other sign-in, if you have it and it can take requests now
+fn other_via(via: Via) -> Option<Via> {
+    let o = if via == Via::App { Via::Playback } else { Via::App };
+    (via_usable(o) && cool_until(o) <= now_secs()).then_some(o)
 }
 
 /// A token that's good for at least a minute (refreshed if not, by one request at a time); with
@@ -431,7 +468,13 @@ async fn spotify_api_now(method: String, path: String, body: Option<Value>) -> R
 
     let mut tries = 0;
     let res = loop {
-        cool_down().await?;
+        // this sign-in limited for long: the other, if it's free; else said
+        if let Err(e) = cool_down(via).await {
+            match other_via(via) {
+                Some(o) => { via = o; token = token_via(via, &cfg, None).await?; continue; }
+                None => return Err(e),
+            }
+        }
         let res = {
             let _slot = GATE.acquire().await.map_err(|e| e.to_string())?;
             pace().await;
@@ -441,14 +484,30 @@ async fn spotify_api_now(method: String, path: String, body: Option<Value>) -> R
         match res.status().as_u16() {
             // the playback sign-in's token turned down (or without the permission): your developer
             // app's, if you've signed in with one too
-            401 | 403 if via == Via::Playback && tries < 3 && load_sp_tokens().is_some() => {
+            401 | 403 if via == Via::Playback && tries < 3 && via_usable(Via::App) => {
                 via = Via::App;
                 token = token_via(via, &cfg, None).await?;
             }
             401 if via == Via::App && tries < 3 => token = token_via(via, &cfg, Some(&token)).await?,
+            // your app's keys turned down (its owner without Premium, say): the playback sign-in's,
+            // and (for that reason) not your app's again this run
+            403 if via == Via::App && tries < 3 && playback_signed_in() => {
+                let text = res.text().await.unwrap_or_default();
+                if text.to_lowercase().contains("premium subscription required for the owner") {
+                    APP_TURNED_DOWN.store(true, std::sync::atomic::Ordering::Relaxed);
+                }
+                via = Via::Playback;
+                token = token_via(via, &cfg, None).await?;
+            }
             429 => {
                 let wait = retry_after(&res);
-                set_cool_until(now_secs() + wait);
+                set_cool_until(via, now_secs() + wait);
+                // (the other sign-in has an allowance of its own: on with that)
+                if let Some(o) = other_via(via).filter(|_| tries < 3) {
+                    via = o;
+                    token = token_via(via, &cfg, None).await?;
+                    continue;
+                }
                 if wait > WAIT_AT_MOST || tries >= 3 {
                     return Err(format!("{RATE_LIMITED} right now: try again in {wait} s."));
                 }
@@ -512,6 +571,7 @@ mod tests {
         });
         *API_BASE.lock().unwrap() = Some(format!("http://127.0.0.1:{port}"));
         COOL_UNTIL.store(0, std::sync::atomic::Ordering::SeqCst);
+        COOL_PLAYBACK.store(0, std::sync::atomic::Ordering::SeqCst);
 
         // a short limit is waited out
         let t0 = std::time::Instant::now();

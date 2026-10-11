@@ -73,5 +73,6 @@ mod tests {
         let text = std::fs::read_to_string(dir.join("diag.log")).unwrap();
         assert!(text.contains("---- started") && text.contains("a step") && text.contains("a library's warning"), "{text}");
         assert!(text.contains("has overflowed its stack"), "{text}");
+        *crate::DATA_DIR.lock().unwrap() = None;
     }
 }

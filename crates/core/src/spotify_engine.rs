@@ -582,6 +582,7 @@ mod crash_mark_tests {
         assert!(super::spe_crashed_last_time());
         assert!(!dir.join("librespot").exists() && !dir.join("spotify_busy.txt").exists());
         assert!(!super::spe_signed_in());
+        *crate::DATA_DIR.lock().unwrap() = None;
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

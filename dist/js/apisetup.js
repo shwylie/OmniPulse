@@ -184,8 +184,9 @@ async function keySetupStatus() {
     const has = !!st[plat];
     $(setup).hidden = has;
     $(keys).hidden = !has;
-    // (Spotify signs in without keys of your own; they're only offered once a free account needs them)
-    if (plat === "spotify") { $(setup).hidden = has || !prefs.spNeedsKeys; $(signIn).hidden = false; }
+    // (Spotify signs in without keys of your own; once signed in, they're offered, for an allowance
+    // of requests of your own)
+    if (plat === "spotify") { $(setup).hidden = has || !(prefs.spNeedsKeys || (typeof spotifyPremium !== "undefined" && (spotifyPremium || spotifyFree))); $(signIn).hidden = false; }
     else if (!has) $(signIn).hidden = true;
     else if (plat !== "youtube" || ytWanted()) $(signIn).hidden = false;
     // Spotify's options (Your Keys) once it has keys, while it's switched on
@@ -195,8 +196,14 @@ async function keySetupStatus() {
 
 function keySetupInit() {
   // (Spotify, for a free account: someone with Premium's app, not one of its own)
-  [["spSetup", "spotify"], ["lfmSetup", "lastfm"], ["ytAccSetup", "youtube"], ["spKeys", "spotify"], ["lfmKeys", "lastfm"], ["ytKeys", "youtube"]]
-    .forEach(([id, plat]) => $(id).addEventListener("click", () => keySetupOpen(plat === "spotify" && prefs.spNeedsKeys ? "spotifyFree" : plat)));
+  [["lfmSetup", "lastfm"], ["ytAccSetup", "youtube"], ["lfmKeys", "lastfm"], ["ytKeys", "youtube"]]
+    .forEach(([id, plat]) => $(id).addEventListener("click", () => keySetupOpen(plat)));
+  // Spotify's: signed in already, why they're worth it, and signed in with them once saved
+  ["spSetup", "spKeys"].forEach((id) => $(id).addEventListener("click", () => {
+    if (prefs.spNeedsKeys) return keySetupOpen("spotifyFree", null, () => spotifyConnect());
+    const signedIn = typeof spotifyPremium !== "undefined" && (spotifyPremium || spotifyFree);
+    keySetupOpen("spotify", signedIn ? SP_OWN_KEYS_LEAD : null, signedIn ? spotifyOwnKeysSignIn : null);
+  }));
   $("ksForm").addEventListener("submit", keySetupSave);
   $("ksCancel").addEventListener("click", () => $("keySetup").close());
   $("keySetup").addEventListener("paste", (e) => {

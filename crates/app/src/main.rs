@@ -3292,7 +3292,10 @@ fn accounts_paint(shared: &Shared) {
                 _ => "What you play goes to your Last.fm profile.".to_string(),
             }
         };
-        Account { name: name.into(), status: status.into(), signed, busy }
+        // (Spotify, signed in: your own app keys, optional, for an allowance of requests of your own)
+        let keys = if key == "spotify" && signed && !busy { if keysetup::has_keys("spotify") { "Change keys" } else { "Own keys" } } else { "" };
+        let status = if key == "spotify" && signed && omnipulse_core::spotify::spotify_app_signed_in() { format!("{status} Requests go through your own app keys.") } else { status };
+        Account { name: name.into(), status: status.into(), signed, busy, keys: keys.into() }
     }).collect();
     ui.set_accounts(ModelRc::from(Rc::new(VecModel::from(rows))));
 }
@@ -3335,6 +3338,7 @@ fn account_act(shared: &Shared, i: usize) {
     // signing in where your own keys are needed first: the key setup (then the sign-in)
     let plat = match key { "youtube" => Some("youtube"), "lastfm" => Some("lastfm"), _ => None };
     if let Some(plat) = plat.filter(|p| !out && !keysetup::has_keys(p)) {
+        KS_SIGNED_IN.with(|k| k.set(false));
         return ks_open(shared, plat, i);
     }
     let (rt, weak) = { let a = shared.borrow(); (a.rt.clone(), a.ui.clone()) };
@@ -3368,6 +3372,7 @@ fn account_act(shared: &Shared, i: usize) {
             if matches!(&done, Err(e) if e == SP_FREE) {
                 ui.set_status(SP_FREE.into());
                 accounts_refresh(&shared);
+                KS_SIGNED_IN.with(|k| k.set(false));
                 return ks_open(&shared, "spotify-free", i);
             }
             ui.set_status(match &done {
@@ -3391,12 +3396,21 @@ thread_local! {
     static KS: RefCell<Option<(String, usize, Vec<String>)>> = const { RefCell::new(None) };
 }
 
+thread_local! {
+    /// the key setup opened for an account signed in already (its own keys, optional): saved, it
+    /// signs in with them beside it, rather than pressing the account's button (Sign out)
+    static KS_SIGNED_IN: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+const SP_OWN_KEYS: &str = "Optional. Spotify limits requests per app, and its own sign-in (the one you used) shares one allowance with everyone signed in that way, so when it's busy, OmniPulse has to wait. Keys of your own give you an allowance of your own: your requests go through them, with Spotify's sign-in kept as a backup. Spotify needs an app's owner to have Premium; with a free account, use the Client ID of someone with Premium who's added you.";
+
 fn ks_open(shared: &Shared, plat: &str, account: usize) {
     let Some(s) = keysetup::setup(plat) else { return };
     KS.with(|k| *k.borrow_mut() = Some((plat.to_string(), account, vec![String::new(); s.fields.len()])));
     let Some(ui) = shared.borrow().ui.upgrade() else { return };
     ui.set_ks_head(format!("Set up {}: your own keys", s.name).into());
-    ui.set_ks_note(format!("{} They're kept on this PC, in OmniPulse's own folder.", s.note).into());
+    let why = if KS_SIGNED_IN.with(|k| k.get()) && plat == "spotify" { format!("{SP_OWN_KEYS} ") } else { String::new() };
+    ui.set_ks_note(format!("{why}{} They're kept on this PC, in OmniPulse's own folder.", s.note).into());
     let steps: Vec<KeyStep> = s.steps.iter().map(|st| KeyStep { text: st.text.into(), has_url: st.url.is_some(), copies: ModelRc::from(Rc::new(VecModel::from(st.copies.iter().map(|(l, _)| slint::SharedString::from(*l)).collect::<Vec<_>>()))) }).collect();
     ui.set_ks_steps(ModelRc::from(Rc::new(VecModel::from(steps))));
     ks_paint(shared);
@@ -3425,6 +3439,18 @@ fn ks_save(shared: &Shared) {
             KS.with(|k| k.borrow_mut().take());
             ui.set_ks_open(false);
             ui.set_status(format!("Your {} keys are saved. Signing in...", s.name).into());
+            if KS_SIGNED_IN.with(|k| k.replace(false)) {
+                // signed in already: with your own app too, beside it
+                let (rt, weak) = { let a = shared.borrow(); (a.rt.clone(), a.ui.clone()) };
+                rt.spawn(async move {
+                    let r = omnipulse_core::spotify::spotify_login().await;
+                    let _ = weak.upgrade_in_event_loop(move |ui| SHARED.with(|s| {
+                        ui.set_status(match &r { Ok(()) => "Signed in with your own Spotify keys: your requests go through them now.".to_string(), Err(e) => format!("Couldn't sign in with your keys: {e}") }.into());
+                        if let Some(sh) = s.borrow().clone() { accounts_refresh(&sh); }
+                    }));
+                });
+                return;
+            }
             account_act(shared, account);
         }
         Err(e) => ui.set_ks_note(format!("Couldn't save them: {e}").into()),
@@ -5614,6 +5640,8 @@ fn main() -> Result<(), slint::PlatformError> {
     });
     let s = shared.clone();
     ui.on_lyrics_pick(move |i| lyrics_pick(&s, i as usize));
+    let s = shared.clone();
+    ui.on_account_keys(move |i| { KS_SIGNED_IN.with(|k| k.set(true)); ks_open(&s, "spotify", i as usize); });
     let s = shared.clone();
     ui.on_set_toggle(move |key| set_toggle(&s, &key));
     let s = shared.clone();
