@@ -15,7 +15,7 @@
 const XM_PLATS = ["soundcloud", "spotify"];
 const XM_MATCH_KEY = "sc.xplMatches";
 const XM_MISS_TTL = 7 * 86400000;   // "no match" is looked for again after a week
-const XM_PULL_MS = 10 * 60000;      // followed playlists are checked this often
+const XM_PULL_MS = 30 * 60000;      // followed playlists are checked this often (not more: Spotify's rate limits)
 
 let xmMatches = null;
 function xmMatchesLoad() {

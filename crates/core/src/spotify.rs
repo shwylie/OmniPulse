@@ -61,7 +61,7 @@ pub async fn sp_token_request(params: &[(&str, &str)]) -> Result<(String, Option
 // token happens one request at a time: Spotify may hand out a new refresh token each time, so racing
 // refreshes could leave a stale one saved.
 static REFRESHING: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
-static GATE: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(4); // requests in flight at once
+static GATE: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(2); // requests in flight at once
 static COOL_UNTIL: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0); // unix secs
 const WAIT_AT_MOST: u64 = 10; // seconds; longer than this and the request says so instead
 
@@ -113,7 +113,37 @@ pub fn spotify_wait() -> u64 {
 }
 
 // Requests at least this far apart, so a burst (following many artists, say) doesn't trip the limit
-const SPACING: std::time::Duration = std::time::Duration::from_millis(120);
+// (Spotify counts over a rolling 30 seconds; a developer app's allowance is modest: about 3 a second
+// at most keeps well inside it)
+const SPACING: std::time::Duration = std::time::Duration::from_millis(300);
+
+// ---------- asked once, not again and again ----------
+// What Spotify gave for a GET is kept a few minutes: the same list asked for from several pages (your
+// likes, a playlist, a search) comes from here, not Spotify again. The same GET asked for twice at once
+// is asked once (the second waits for the first). Any change (a like, a playlist edited) clears it all,
+// so what's shown after a change is never stale.
+const KEEP_FOR: std::time::Duration = std::time::Duration::from_secs(300);
+type Kept = std::collections::HashMap<String, (std::time::Instant, Value)>;
+static KEPT: std::sync::Mutex<Option<Kept>> = std::sync::Mutex::new(None);
+static ASKING: std::sync::Mutex<Option<std::collections::HashMap<String, std::sync::Arc<tokio::sync::Mutex<()>>>>> = std::sync::Mutex::new(None);
+
+fn kept(path: &str) -> Option<Value> {
+    let g = KEPT.lock().ok()?;
+    let (at, v) = g.as_ref()?.get(path)?;
+    (at.elapsed() < KEEP_FOR).then(|| v.clone())
+}
+
+fn keep(path: &str, v: &Value) {
+    if let Ok(mut g) = KEPT.lock() {
+        let m = g.get_or_insert_with(Default::default);
+        m.retain(|_, (at, _)| at.elapsed() < KEEP_FOR);
+        m.insert(path.to_string(), (std::time::Instant::now(), v.clone()));
+    }
+}
+
+fn forget_kept() {
+    if let Ok(mut g) = KEPT.lock() { *g = None; }
+}
 static NEXT_SEND: tokio::sync::Mutex<Option<tokio::time::Instant>> = tokio::sync::Mutex::const_new(None);
 
 async fn pace() {
@@ -356,6 +386,23 @@ async fn token_via(via: Via, cfg: &Config, refused: Option<&str>) -> Result<Stri
 }
 
 pub async fn spotify_api(method: String, path: String, body: Option<Value>) -> Result<Value, String> {
+    if method != "GET" {
+        let r = spotify_api_now(method, path, body).await;
+        forget_kept();
+        return r;
+    }
+    if let Some(v) = kept(&path) { return Ok(v); }
+    // (the same one already being asked: wait for it, then it's kept)
+    let lock = ASKING.lock().map_err(|e| e.to_string())?.get_or_insert_with(Default::default).entry(path.clone()).or_default().clone();
+    let _turn = lock.lock().await;
+    if let Some(v) = kept(&path) { return Ok(v); }
+    let r = spotify_api_now(method, path.clone(), body).await;
+    if let Ok(v) = &r { keep(&path, v); }
+    if let Ok(mut g) = ASKING.lock() { if let Some(m) = g.as_mut() { if std::sync::Arc::strong_count(&lock) <= 2 { m.remove(&path); } } }
+    r
+}
+
+async fn spotify_api_now(method: String, path: String, body: Option<Value>) -> Result<Value, String> {
     let allowed = ["/me", "/search", "/tracks", "/albums", "/artists", "/playlists"];
     if !path.starts_with('/') || !allowed.iter().any(|p| path.starts_with(p)) {
         return Err("That Spotify path is not allowed".to_string());
@@ -426,6 +473,17 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
 
+    #[test]
+    fn kept_and_forgotten() {
+        forget_kept();
+        assert!(kept("/me/tracks?limit=50&offset=0").is_none());
+        keep("/me/tracks?limit=50&offset=0", &serde_json::json!({ "items": [1] }));
+        assert_eq!(kept("/me/tracks?limit=50&offset=0"), Some(serde_json::json!({ "items": [1] })));
+        assert!(kept("/me/tracks?limit=50&offset=50").is_none());
+        forget_kept();
+        assert!(kept("/me/tracks?limit=50&offset=0").is_none());
+    }
+
     #[tokio::test]
     #[allow(clippy::await_holding_lock)] // only makes the tests take turns
     async fn waits_out_short_rate_limits_and_refuses_long_ones() {
@@ -461,12 +519,15 @@ mod tests {
         assert_eq!(v["id"], "me");
         assert!(t0.elapsed() >= std::time::Duration::from_millis(900));
         assert_eq!(hits.load(Ordering::SeqCst), 2);
+        // asked again: what it gave is kept (Spotify isn't asked)
+        assert_eq!(spotify_api("GET".into(), "/me".into(), None).await.unwrap()["id"], "me");
+        assert_eq!(hits.load(Ordering::SeqCst), 2);
         // a long one is reported as a rate limit (not a sign-out)...
-        let e = spotify_api("GET".into(), "/me".into(), None).await.unwrap_err();
+        let e = spotify_api("GET".into(), "/me?again=1".into(), None).await.unwrap_err();
         assert!(e.starts_with(RATE_LIMITED) && e.contains("60 s"), "{e}");
         assert_eq!(hits.load(Ordering::SeqCst), 3);
         // ...and nothing more is sent to Spotify while it lasts
-        let e = spotify_api("GET".into(), "/me".into(), None).await.unwrap_err();
+        let e = spotify_api("GET".into(), "/me?again=2".into(), None).await.unwrap_err();
         assert!(e.starts_with(RATE_LIMITED), "{e}");
         assert_eq!(hits.load(Ordering::SeqCst), 3);
         // the wait is known (for the app to say when), and kept for the next time the app opens
