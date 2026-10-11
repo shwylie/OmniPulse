@@ -1,6 +1,6 @@
 [package]
 name = "omnipulse-core"
-version = "0.2.17"
+version = "0.2.18"
 edition = "2021"
 description = "OmniPulse's backend: accounts, streaming services, local music and the local servers"
 
