@@ -127,6 +127,11 @@ async fn spe_stop() -> Result<(), String> { spe::spe_stop().await }
 fn spe_played(gen: u32, frames: u64) { spe::spe_played(gen, frames) }
 #[tauri::command]
 async fn spe_playlist(uri: String) -> Result<Value, String> { spe::spe_playlist(uri).await }
+// your likes through Spotify's own library service (not the Web API's shared allowance)
+#[tauri::command]
+async fn spe_liked(known: Vec<String>) -> Result<Value, String> { omnipulse_core::spotify_library::spe_liked(known).await }
+#[tauri::command]
+async fn spe_set_liked(uri: String, on: bool) -> Result<(), String> { omnipulse_core::spotify_library::spe_set_liked(uri, on).await }
 #[tauri::command]
 async fn spe_web_get(path: String) -> Result<Value, String> { spe::spe_web_get(path).await }
 #[tauri::command]
@@ -941,7 +946,7 @@ fn main() {
             config_status, config_set, open_setup_page, backup_create, backup_restore, youtube_status, youtube_connect, youtube_disconnect, youtube_licences, like_youtube_track, unlike_youtube_track,
             local_folders, local_set_folders, local_scan, local_status, local_tracks, local_server,
             requests_start, requests_stop, request_result,
-            spe_signed_in, spe_login, spe_logout, spe_attach, spe_play, spe_pause, spe_resume, spe_seek, spe_stop, spe_played, spe_playlist, spe_web_get, spe_account, spe_crashed_last_time, spotify_app_signed_in, diag_note, spe_set_normalisation, loudness_analyse,
+            spe_signed_in, spe_login, spe_logout, spe_attach, spe_play, spe_pause, spe_resume, spe_seek, spe_stop, spe_played, spe_playlist, spe_liked, spe_set_liked, spe_web_get, spe_account, spe_crashed_last_time, spotify_app_signed_in, diag_note, spe_set_normalisation, loudness_analyse,
             resolve_yt_stream, plugin_inspect, plugin_install, plugin_list, plugin_folder, plugin_remove, plugin_http, yt_search, yt_radio, yt_status, yt_artists, yt_artist, yt_album, yt_playlist, yt_playlists, yt_prepare, sc_ytdlp, mb_search, cat_search, deezer_get, artist_bio, playlist_file_read, playlist_file_write, sb_segments, apple_connect, apple_library, apple_forget, update_check, update_install, yt_setup, yt_remove, remote_start, remote_stop, remote_result
         ])
         .build(tauri::generate_context!())

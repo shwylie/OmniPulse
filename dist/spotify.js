@@ -544,6 +544,16 @@ async function spotifyMadeForYou() {
 // ---------- likes (your Spotify library) ----------
 // Spotify replaced its track-specific endpoints with /me/library in February 2026: it takes URIs.
 async function spotifySetLiked(t, on) {
+  // (through Spotify's own library service when signed in that way: no Web API allowance used)
+  if (await invoke("spe_signed_in").catch(() => false)) {
+    try {
+      await invoke("spe_set_liked", { uri: t.uri, on });
+      if (typeof spLikedNote === "function") spLikedNote(t, on);
+      return;
+    } catch (e) {
+      spNote("like: Spotify's library failed: " + e + ": the Web API instead");
+    }
+  }
   try {
     await spApi(on ? "PUT" : "DELETE", "/me/library?uris=" + encodeURIComponent(t.uri));
     if (typeof spLikedNote === "function") spLikedNote(t, on);

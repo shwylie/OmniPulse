@@ -120,12 +120,33 @@ async fn sp_likes_read(known: Option<&std::collections::HashSet<String>>) -> (Ve
     }
 }
 
+/// Your likes from Spotify's own library service, through the playback sign-in (a free account's too):
+/// every one, newest first, only the songs not kept yet read; the Web API's allowance (shared with
+/// everyone signed in that way, often used up) untouched. None: not signed in that way, or it failed.
+async fn sp_likes_library(kept: &[Track]) -> Option<Vec<Track>> {
+    if !core::spotify_engine::spe_signed_in() { return None; }
+    let known: Vec<String> = kept.iter().filter_map(|t| t.key.strip_prefix("sp:").map(String::from)).collect();
+    let v = match core::spotify_library::spe_liked(known).await {
+        Ok(v) => v,
+        Err(e) => { core::diag::note(&format!("likes: Spotify's library failed: {e}: the Web API instead")); return None; }
+    };
+    let mut have: std::collections::HashMap<String, Track> = kept.iter().map(|t| (t.key.clone(), t.clone())).collect();
+    for x in v["tracks"].as_array().cloned().unwrap_or_default() {
+        if let Some(t) = Track::spotify(&x) { have.insert(t.key.clone(), t); }
+    }
+    Some(v["ids"].as_array().cloned().unwrap_or_default().iter().filter_map(|id| id.as_str()).filter_map(|id| have.remove(&format!("sp:{id}"))).collect())
+}
+
 pub async fn spotify_likes(_max: usize) -> Vec<Track> {
     if !core::spotify::spotify_signed_in() {
         return Vec::new();
     }
     let (mut list, mut complete, mut full_at) = sp_likes_load();
     let now = core::now_secs();
+    if let Some(got) = sp_likes_library(&list).await {
+        sp_likes_save(&got, true, now);
+        return got;
+    }
     if !complete || now.saturating_sub(full_at) > SP_LIKES_FULL_EVERY {
         let (got, whole) = sp_likes_read(None).await;
         if whole {

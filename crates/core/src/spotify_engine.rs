@@ -416,7 +416,7 @@ fn uri_id(uri: &SpotifyUri) -> String {
     uri.to_uri().ok().and_then(|u| u.rsplit(':').next().map(str::to_string)).unwrap_or_default()
 }
 
-fn track_json(t: &librespot_metadata::Track) -> Value {
+pub(crate) fn track_json(t: &librespot_metadata::Track) -> Value {
     let cover = t.album.covers.iter().max_by_key(|c| c.width).and_then(|c| c.id.to_base16().ok())
         .map(|hex| format!("https://i.scdn.co/image/{hex}"));
     let mut artists: Vec<Value> = t.artists.iter().filter(|a| !a.name.is_empty()).map(|a| json!({ "name": a.name })).collect();
@@ -506,6 +506,13 @@ pub async fn spe_account() -> Result<Value, String> {
     let product = account_type(&session).await;
     crate::diag::note(&format!("spotify playback: account read: {}", if product.is_empty() { "(none given)" } else { product.as_str() }));
     Ok(json!({ "id": session.username(), "product": product }))
+}
+
+/// The playback sign-in's session (signed in again from its saved sign-in if it dropped), for
+/// Spotify's own services (your library: spotify_library.rs)
+pub async fn spe_session() -> Result<Session, String> {
+    let guard = engine().await?;
+    Ok(guard.as_ref().unwrap().session.clone())
 }
 
 // ---------- the Web API through the playback sign-in ----------

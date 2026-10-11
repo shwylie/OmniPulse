@@ -41,6 +41,8 @@ pub mod spotify;
 #[cfg(feature = "desktop")]
 pub mod spotify_engine;
 #[cfg(feature = "desktop")]
+pub mod spotify_library;
+#[cfg(feature = "desktop")]
 pub mod tools;
 #[cfg(feature = "desktop")]
 pub mod widget;

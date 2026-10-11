@@ -144,8 +144,33 @@ async function spLikedRead(known) {
   }
 }
 
+// Your likes from Spotify's own library service, through the playback sign-in (a free account's
+// too): every id, newest first, and the songs not kept yet; the Web API's allowance (shared with
+// everyone signed in that way, and often used up) isn't touched. null: not signed in that way.
+async function spLikedFromLibrary() {
+  if (!(await invoke("spe_signed_in").catch(() => false))) return null;
+  const r = await invoke("spe_liked", { known: [...spLikedIds] });
+  const have = new Map((spLikedCache || []).map((t) => [t.id, t]));
+  (r.tracks || []).filter((x) => x && x.id).forEach((x) => have.set(x.id, spTrack(x)));
+  return (r.ids || []).map((id) => have.get(id)).filter(Boolean);
+}
+
 function spLikedFetch() {
   spLikedFetching ??= (async () => {
+    // (Spotify's library service first; the Web API if that fails)
+    try {
+      const list = await spLikedFromLibrary();
+      if (list) {
+        spLikedCache = list;
+        spLikedComplete = true;
+        spLikedFullAt = spLikedAt = Date.now();
+        spLikedCache.forEach((t) => likeState.set(t.id, true));
+        spLikedKeep();
+        return spLikedCache;
+      }
+    } catch (e) {
+      if (typeof spNote === "function") spNote("likes: Spotify's library failed: " + e + ": the Web API instead");
+    }
     const full = !spLikedComplete || Date.now() - spLikedFullAt > SP_LIKES_FULL_EVERY;
     try {
       if (full) {

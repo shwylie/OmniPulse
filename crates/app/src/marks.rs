@@ -27,8 +27,14 @@ pub async fn set_like(t: &Track, on: bool) -> Result<(), String> {
     match &t.src {
         Src::SoundCloud(id) => omnipulse_core::soundcloud::set_like(id.to_string(), on).await,
         Src::Spotify(uri) => {
-            let q = format!("/me/library?uris={}", crate::sources::urlencode(uri));
-            omnipulse_core::spotify::spotify_api(if on { "PUT" } else { "DELETE" }.into(), q, None).await?;
+            // (through Spotify's own library service when signed in that way; else the Web API)
+            let done = omnipulse_core::spotify_engine::spe_signed_in()
+                && omnipulse_core::spotify_library::spe_set_liked(uri.clone(), on).await
+                    .map_err(|e| omnipulse_core::diag::note(&format!("like: Spotify's library failed: {e}: the Web API instead"))).is_ok();
+            if !done {
+                let q = format!("/me/library?uris={}", crate::sources::urlencode(uri));
+                omnipulse_core::spotify::spotify_api(if on { "PUT" } else { "DELETE" }.into(), q, None).await?;
+            }
             // (and in this PC's copy of your likes, at once)
             crate::sources::spotify_liked_note(t, on);
             Ok(())
