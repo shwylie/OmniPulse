@@ -179,8 +179,13 @@ const NONE_TTL_SECS: u64 = 86_400;
 /// The version of a Go+ track to play: one kept from before, the best close match, or the closest
 pub async fn find(t: &Track) -> Option<Version> {
     let saved = with_saved(|m| m.get(&t.key).cloned());
-    if let Some(v) = saved.as_ref().and_then(from_snap) {
-        return Some(Version { yt: v, exact: true });
+    // (one found by itself before who's featured counted ("fv"): looked for again, once; yours stay)
+    let featured = !omnipulse_core::ranking::featured(&match_title(t)).0.is_empty() || t.artist.contains(',');
+    let before = saved.as_ref().filter(|s| featured && s["chosen"].as_bool() != Some(true) && s["fv"].is_null()).and_then(from_snap);
+    if before.is_none() {
+        if let Some(v) = saved.as_ref().and_then(from_snap) {
+            return Some(Version { yt: v, exact: true });
+        }
     }
     // looked for lately and nothing close: the closest from then
     if let Some(s) = &saved {
@@ -190,7 +195,11 @@ pub async fn find(t: &Track) -> Option<Version> {
     }
     let (ga, gt) = guess_names(t);
     let first = format!("{} {}", if ga.is_empty() { &t.artist } else { &ga }, gt);
-    let mut ranked: Vec<(f32, YtTrack)> = omnipulse_core::youtube::search(first.trim()).await.ok()?.into_iter().take(10).map(|c| (score(t, &c), c)).collect();
+    let found = match omnipulse_core::youtube::search(first.trim()).await {
+        Ok(f) => f,
+        Err(_) => return before.map(|yt| Version { yt, exact: true }),
+    };
+    let mut ranked: Vec<(f32, YtTrack)> = found.into_iter().take(10).map(|c| (score(t, &c), c)).collect();
     if !ranked.iter().any(|(s, _)| *s >= 0.5) {
         if let Ok(more) = omnipulse_core::youtube::search(&format!("{} {}", t.artist, match_title(t))).await {
             ranked.extend(more.into_iter().take(10).map(|c| (score(t, &c), c)));
@@ -198,9 +207,11 @@ pub async fn find(t: &Track) -> Option<Version> {
     }
     ranked.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
     let pick = ranked.iter().find(|(s, c)| *s >= 0.5 && artist_hit(t, c)).map(|(_, c)| c.clone());
+    // (looked for again and nothing better: the one from before stays)
+    let pick = pick.or(before);
     match pick {
         Some(c) => {
-            with_saved(|m| m.insert(t.key.clone(), snap(&c)));
+            with_saved(|m| m.insert(t.key.clone(), { let mut s = snap(&c); s["fv"] = json!(1); s }));
             save_all();
             Some(Version { yt: c, exact: true })
         }

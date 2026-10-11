@@ -147,14 +147,19 @@ async function ytCandidates(t, query) {
 
 // any: for a track that can't play at all otherwise (Go+), the best of the close ones is taken, even if
 // it's another version or a different length, as long as the title and the artist match
+// A song with someone featured ("(with X)", or credited after the first artist)
+const ytHasFeatured = (t) => featuredOf(matchTitle(t)).names.length > 0 || String(artistName(t)).includes(",");
+
 async function ytMatch(t, any) {
   if (srcOf(t) === "youtube") return t;
   const saved = ytMatchesLoad()[t.id];
-  if (saved && saved.id) return ytTrack(saved);
+  // (one found by itself before who's featured counted (fv): looked for again, once; yours stay)
+  const recheck = !!(saved && saved.id && !saved.chosen && !saved.fv && ytHasFeatured(t));
+  if (saved && saved.id && !recheck) return ytTrack(saved);
   // (an old "none" without a date, or one more than a day old, is looked for again; so is a strict one when any will do)
   if (saved && saved.none && (saved.any || !any) && Date.now() - (saved.at || 0) < YT_NO_MATCH_TTL) { ytLastMiss = { id: t.id, closest: saved.closest || "", near: saved.near || null }; return null; }
   let ranked;
-  try { ranked = await ytCandidates(t); } catch (e) { return null; }   // couldn't search: try again next time
+  try { ranked = await ytCandidates(t); } catch (e) { return recheck ? ytTrack(saved) : null; }   // couldn't search: try again next time
   // nothing close: once more, by the song's own title
   if (any && !(ranked[0] && ranked[0].score >= 0.5)) {
     try { ranked = ranked.concat(await ytCandidates(t, artistName(t) + " " + matchTitle(t))).sort((a, b) => b.score - a.score); } catch (e) {}
@@ -165,7 +170,9 @@ async function ytMatch(t, any) {
   const closest = top ? '"' + top.c.title + '" by ' + artistName(top.c) : "";
   // (the closest one is kept too: a Go+ track with no match plays it rather than nothing)
   const near = top ? ytSnap(top.c) : null;
-  ytMatches[t.id] = ok ? ytSnap(ok) : { none: true, at: Date.now(), closest, near, any: !!any };
+  // (looked for again and nothing better: the one from before stays)
+  if (recheck && !ok) { saved.fv = 1; ytMatchesSave(); return ytTrack(saved); }
+  ytMatches[t.id] = ok ? Object.assign(ytSnap(ok), { fv: 1 }) : { none: true, at: Date.now(), closest, near, any: !!any };
   ytMatchesSave();
   if (!ok) ytLastMiss = { id: t.id, closest, near };
   return ok;
