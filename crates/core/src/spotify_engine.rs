@@ -201,7 +201,33 @@ impl Sink for PcmSink {
 }
 
 // ---------- session and player ----------
+// Connecting is marked on disk while it happens: if the app went down in the middle of it last time
+// (Spotify's library can fail hard for some accounts), the saved sign-in isn't tried again on its
+// own, every start: it's let go, and signing in again is asked for, instead of the app closing again.
+fn connecting_mark() -> Option<std::path::PathBuf> {
+    crate::data_dir().ok().map(|d| d.join("spotify_connecting.txt"))
+}
+
+/// Whether the last connect went down with the app (and so the saved sign-in was let go)
+pub fn spe_crashed_last_time() -> bool {
+    connecting_mark().is_some_and(|m| m.exists())
+}
+
 async fn connect(credentials: Credentials) -> Result<Engine, String> {
+    if let Some(m) = connecting_mark() {
+        if m.exists() {
+            let _ = std::fs::remove_file(&m);
+            if let Ok(dir) = cache_dir() { let _ = std::fs::remove_dir_all(dir); }
+            return Err("Spotify playback stopped the app last time it connected, so it's been signed out. Sign in to Spotify again (Settings > Integrations); if it happens again, the crash is in crash.log in the app's folder.".into());
+        }
+        let _ = std::fs::write(&m, "connecting");
+    }
+    let r = connect_now(credentials).await;
+    if let Some(m) = connecting_mark() { let _ = std::fs::remove_file(m); }
+    r
+}
+
+async fn connect_now(credentials: Credentials) -> Result<Engine, String> {
     let session = Session::new(SessionConfig::default(), Some(cache()?));
     session
         .connect(credentials, true)

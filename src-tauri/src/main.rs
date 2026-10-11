@@ -760,6 +760,7 @@ fn browser_args(gpu: bool) -> String {
 // ---------- app ----------
 
 fn main() {
+    omnipulse_core::crash_log_install();
     let play = Shortcut::new(None, Code::MediaPlayPause);
     let next = Shortcut::new(None, Code::MediaTrackNext);
     let prev = Shortcut::new(None, Code::MediaTrackPrevious);

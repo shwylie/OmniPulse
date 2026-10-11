@@ -6,7 +6,8 @@ members = ["src-tauri", "crates/core", "crates/audio", "crates/input", "crates/p
 opt-level = "s"
 lto = true
 codegen-units = 1
-panic = "abort"
+# (unwind: a panic in a background thread or task, as in a library's, ends that, not the whole app)
+panic = "unwind"
 strip = true
 
 # Dev builds: no debug info for dependencies, and line numbers only for our own crates (full debug

@@ -125,6 +125,29 @@ pub fn open_browser(url: &str) -> Result<(), String> {
     Err("No way to open the browser here.".into())
 }
 
+/// Anything that goes wrong inside the app (a panic: in it or a library it uses, on any thread) is
+/// written to crash.log in the data folder, with where and how it got there, and kept to the last
+/// 200 KB: so a crash can be looked into (it can't be seen otherwise: the app has no console).
+/// The panic still goes on as before after (that thread or task ends).
+pub fn crash_log_install() {
+    let before = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        let at = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+        let thread = std::thread::current().name().unwrap_or("unnamed").to_string();
+        let what = info.payload().downcast_ref::<&str>().map(|s| s.to_string()).or_else(|| info.payload().downcast_ref::<String>().cloned()).unwrap_or_else(|| "(no message)".into());
+        let place = info.location().map(|l| format!("{}:{}", l.file(), l.line())).unwrap_or_default();
+        let trace = std::backtrace::Backtrace::force_capture();
+        let entry = format!("---- {at} (unix secs), version {}, thread {thread}\n{what}\nat {place}\n{trace}\n", env!("CARGO_PKG_VERSION"));
+        if let Ok(dir) = data_dir() {
+            let f = dir.join("crash.log");
+            let old = std::fs::read_to_string(&f).unwrap_or_default();
+            let keep = if old.len() > 200_000 { old.get(old.len() - 150_000..).unwrap_or("").to_string() } else { old };
+            let _ = std::fs::write(&f, keep + &entry);
+        }
+        before(info);
+    }));
+}
+
 pub fn data_dir() -> Result<PathBuf, String> {
     if let Some(d) = DATA_DIR.lock().unwrap().clone() {
         return Ok(d);
@@ -415,5 +438,24 @@ mod config_tests {
         config_set(&clear).unwrap();
         assert_eq!(config_status()["lastfm"], false);
         let _ = fs::remove_dir_all(&tmp);
+    }
+}
+
+#[cfg(test)]
+mod crash_log_tests {
+    #[test]
+    fn a_panic_in_a_thread_is_written_down_and_the_rest_goes_on() {
+        let _turn = crate::TEST_ENV.lock().unwrap_or_else(|e| e.into_inner());
+        let tmp = std::env::temp_dir().join(format!("omnipulse-crash-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(&tmp).unwrap();
+        *crate::DATA_DIR.lock().unwrap() = Some(tmp.clone());
+        super::crash_log_install();
+        let r = std::thread::Builder::new().name("spotify-test".into()).spawn(|| { let v: Vec<u8> = Vec::new(); v[3] }).unwrap().join();
+        assert!(r.is_err(), "the thread ended");
+        let log = std::fs::read_to_string(tmp.join("crash.log")).unwrap();
+        assert!(log.contains("thread spotify-test") && log.contains("index out of bounds") && log.contains("lib.rs"), "{log}");
+        *crate::DATA_DIR.lock().unwrap() = None;
+        let _ = std::panic::take_hook();
     }
 }
