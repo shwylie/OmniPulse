@@ -496,7 +496,8 @@ function renderHero() {
   const n = viewTracks.length;
   $("viewTitle").textContent = title;
   // pages made from what the platforms send: fetched again with the refresh button
-  $("refreshBtn").hidden = !["discover", "rediscover", "sets", "artists", "streamer"].includes(v);
+  // (and a Discover mix: made again, for one made from a title new music for it)
+  $("refreshBtn").hidden = !(["discover", "rediscover", "sets", "artists", "streamer"].includes(v) || (v === "playlist" && currentPlaylist && currentPlaylist.source === "mix" && !!(currentPlaylist.refresh || currentPlaylist.fresh)));
   $("viewSub").textContent = sub.trim();
   if (v === "artist" && currentArtist && currentArtist.on) $("viewSub").replaceChildren(...artistSubline(currentArtist));
   paintBio();

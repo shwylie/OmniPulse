@@ -148,6 +148,21 @@ async function dzSubgenre(name) {
   return recFilter(dedupeTracks(interleave(lists.filter(Boolean).map(shuffledCopy))));
 }
 
+// Music for a title, from Deezer: three of its playlists of that name (picked from its ten best, so
+// different ones each time), taking turns; its songs found for the title only if it has fewer than two
+// such playlists (a song search for "Dubstep" finds songs called that, not the genre). None of
+// `avoid` (what was showing) if there's enough without, so a refresh is new music
+async function dzForTitle(title, avoid) {
+  const skip = new Set((avoid || []).map((t) => t.id));
+  const found = ((await dzGet("/search/playlist?limit=25&q=" + encodeURIComponent(title))).data || []).filter((x) => (x.nb_tracks || 0) >= 15);
+  const picks = shuffledCopy(found.slice(0, 10)).slice(0, 3);
+  const lists = await eachFew(picks, async (x) => ((await dzGet("/playlist/" + x.id + "/tracks?limit=80")).data || []).map((t) => dzTrack(t)), 2);
+  const songs = picks.length >= 2 ? [] : ((await dzGet("/search?limit=50&q=" + encodeURIComponent(title)).catch(() => ({}))).data || []).map((t) => dzTrack(t));
+  const all = dedupeTracks(interleave(lists.filter(Boolean).map(shuffledCopy).concat([shuffledCopy(songs)])));
+  const unseen = all.filter((t) => !skip.has(t.id));
+  return recFilter((unseen.length >= 15 ? unseen : all).slice(0, 80));
+}
+
 // The artists of the genres you picked, as stations: the ones most often in each genre's chart (Deezer's
 // own genre artist lists are the same overall chart for every genre), the genres taking turns
 async function tasteArtists() {
@@ -343,7 +358,8 @@ async function buildFeed(plats) {
       tiles: subs.map((g) => ({
         kind: "genre", plats: ["deezer"], name: g, hue: hueOf(g), sub: "Mix",
         mix: makeMix({ id: "mix:sub:" + g, title: g, desc: g + ", from Deezer's playlists of it.",
-          build: () => dzSubgenre(g), fresh: () => onlyNew(() => dzSubgenre(g)) }),
+          build: () => dzSubgenre(g), fresh: () => onlyNew(() => dzSubgenre(g)),
+          refresh: (avoid) => dzForTitle(g, avoid) }),
       })),
     });
   }
@@ -360,7 +376,13 @@ async function buildFeed(plats) {
       tiles: order.map((g) => ({
         kind: "genre", plats: genrePlats, name: g, hue: hueOf(g), sub: "Trending",
         mix: makeMix({ id: "mix:genre:" + g, title: g, desc: "Trending " + g + ", from " + genrePlats.map((p) => PLATFORMS[p].name).join(" and ") + ".",
-          build: () => buildGenre(g, genrePlats), fresh: () => onlyNew(() => buildGenre(g, genrePlats)) }),
+          build: () => buildGenre(g, genrePlats), fresh: () => onlyNew(() => buildGenre(g, genrePlats)),
+          // (refreshed: Deezer's part made again for the genre's name, the other platforms' new to you)
+          refresh: genrePlats.includes("catalog") ? async (avoid) => {
+            const others = genrePlats.filter((x) => x !== "catalog");
+            const [dz, rest] = await Promise.allSettled([dzForTitle(g, avoid), others.length ? onlyNew(() => buildGenre(g, others)) : Promise.resolve([])]);
+            return dedupeTracks(interleave([dz.value || [], rest.value || []]));
+          } : null }),
       })),
     });
   }
@@ -601,6 +623,17 @@ function paintTasteBtn() {
 async function mixTracks(mix) {
   if (!mix.tracks) mix.tracks = await mix.build();
   return mix.tracks;
+}
+
+// The refresh button on a mix's page: made again (for a mix made from a title, new music for it),
+// not what was showing
+async function refreshMix(p) {
+  const avoid = (p.tracks || []).slice();
+  const remake = p.refresh ? () => p.refresh(avoid) : p.fresh ? () => p.fresh() : () => p.build();
+  p.tracks = null;
+  const build = p.build;
+  p.build = remake;
+  try { await openMix(p); } finally { p.build = build; }
 }
 
 async function openMix(p) {

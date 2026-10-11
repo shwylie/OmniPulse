@@ -207,6 +207,7 @@ function discoverInit() {
     else if (view === "sets") openSets();
     else if (view === "artists") { followedCache = null; openArtistsPage(); }
     else if (view === "streamer") { streamColl.clear(); streamShelves = null; openStreamer(); }
+    else if (view === "playlist" && currentPlaylist && currentPlaylist.source === "mix") refreshMix(currentPlaylist);
   });
   $("recLangSel").value = prefs.recLang || "any";
   $("recLangSel").addEventListener("change", () => {
