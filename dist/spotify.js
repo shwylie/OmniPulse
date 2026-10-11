@@ -73,6 +73,7 @@ function syncSpotifySettings() {
 // you stay signed in as you were last time and it's asked again in a minute; only Spotify turning the
 // sign-in down (a revoked or expired refresh token) needs a new sign-in.
 let spotifyCheckTimer = null;
+let spCrashSaid = false;
 const spNotPremium = (e) => /premium account required/i.test(String(e));
 const SP_FREE_NOTE = "That's a free Spotify account. Spotify only lets Premium accounts sign in straight away; for a free one, Set up your own free Spotify app keys (a couple of minutes), then Sign in.";
 const spRevoked = (e) => /invalid_grant|invalid_client|revoked|connect again|Not connected/i.test(String(e));
@@ -81,12 +82,21 @@ async function spotifyCheck() {
   clearTimeout(spotifyCheckTimer);
   let ok = false;
   let note = "";
+  // Spotify playback took the app down last time (it can, for some accounts): it's been signed out
+  const crashed = await invoke("spe_crashed_last_time").catch(() => false);
+  if (crashed && !spCrashSaid) {
+    spCrashSaid = true;
+    say("Spotify playback closed the app last time, so it's been signed out of it. A free Spotify account needs your own free app keys: Settings > Integrations > Spotify.", { force: true });
+  }
   if (await invoke("spotify_signed_in")) {
     try {
       // signed in for playback: the account from the playback sign-in's own login (Premium or not),
       // not the Web API, which everyone signed in this way shares (Spotify's limits are per app); its
       // display name from the Web API after, when Spotify allows
       const pb = (await invoke("spe_signed_in").catch(() => false)) ? await invoke("spe_account").catch(() => null) : null;
+      // (not Premium: the playback sign-in only serves Premium, and using it for more can take the
+      // app down: signed out of it at once, as Spotify turning it down would)
+      if (pb && pb.product && pb.product !== "premium") throw new Error("Premium account required");
       if (pb && pb.product) {
         spApi("GET", "/me").then((me) => {
           if (!me || !me.id) return;

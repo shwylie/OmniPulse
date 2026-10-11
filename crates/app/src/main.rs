@@ -5559,6 +5559,10 @@ fn main() -> Result<(), slint::PlatformError> {
         slint::Timer::single_shot(std::time::Duration::from_secs(5), move || collab_pull_all(&s));
         // (and copies of deleted playlists that couldn't be deleted then)
         if std::env::var_os("OMNIPULSE_SELFTEST").is_none() { shared.borrow().rt.spawn(mirror::remove_left()); }
+        // Spotify playback took the app down last time (it can, for some accounts): signed out of it, and said
+        if omnipulse_core::spotify_engine::spe_crashed_last_time() {
+            if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_status("Spotify playback closed the app last time, so it's been signed out of it. A free Spotify account needs your own free app keys: Settings > Accounts.".into()); }
+        }
         // hosting when the app closed (an update) and opened again soon after: picked up again
         let s = shared.clone();
         slint::Timer::single_shot(std::time::Duration::from_secs(2), move || host_resume(&s));

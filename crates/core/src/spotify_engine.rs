@@ -201,30 +201,61 @@ impl Sink for PcmSink {
 }
 
 // ---------- session and player ----------
-// Connecting is marked on disk while it happens: if the app went down in the middle of it last time
-// (Spotify's library can fail hard for some accounts), the saved sign-in isn't tried again on its
-// own, every start: it's let go, and signing in again is asked for, instead of the app closing again.
-fn connecting_mark() -> Option<std::path::PathBuf> {
-    crate::data_dir().ok().map(|d| d.join("spotify_connecting.txt"))
+// Using the engine (connecting, its tokens, its account) is marked on disk while it happens: Spotify's
+// library can fail hard for some accounts (a free one), below where a crash is caught and written down,
+// taking the app with it. A mark still there when the app starts again means it did: the saved sign-in
+// is let go (and that's said), instead of the app closing again on every start.
+static BUSY: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+static STARTED: std::sync::Once = std::sync::Once::new();
+static CRASHED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+fn busy_mark() -> Option<std::path::PathBuf> {
+    crate::data_dir().ok().map(|d| d.join("spotify_busy.txt"))
 }
 
-/// Whether the last connect went down with the app (and so the saved sign-in was let go)
+/// Marked while it's held (the first in writes the mark, the last out takes it away)
+struct Busy;
+
+impl Busy {
+    fn new() -> Self {
+        start_check();
+        if BUSY.fetch_add(1, Ordering::SeqCst) == 0 {
+            if let Some(m) = busy_mark() { let _ = std::fs::write(m, "busy"); }
+        }
+        Busy
+    }
+}
+
+impl Drop for Busy {
+    fn drop(&mut self) {
+        if BUSY.fetch_sub(1, Ordering::SeqCst) == 1 {
+            if let Some(m) = busy_mark() { let _ = std::fs::remove_file(m); }
+        }
+    }
+}
+
+// (once a run, before the engine's first use: last time's mark found, the saved sign-in let go)
+fn start_check() {
+    STARTED.call_once(|| {
+        let Ok(dir) = crate::data_dir() else { return };
+        let marks = [dir.join("spotify_busy.txt"), dir.join("spotify_connecting.txt")];
+        if marks.iter().any(|m| m.exists()) {
+            marks.iter().for_each(|m| { let _ = std::fs::remove_file(m); });
+            if let Ok(c) = cache_dir() { let _ = std::fs::remove_dir_all(c); }
+            CRASHED.store(true, Ordering::SeqCst);
+        }
+    });
+}
+
+/// Whether Spotify playback took the app down last time (and so its sign-in was let go)
 pub fn spe_crashed_last_time() -> bool {
-    connecting_mark().is_some_and(|m| m.exists())
+    start_check();
+    CRASHED.load(Ordering::SeqCst)
 }
 
 async fn connect(credentials: Credentials) -> Result<Engine, String> {
-    if let Some(m) = connecting_mark() {
-        if m.exists() {
-            let _ = std::fs::remove_file(&m);
-            if let Ok(dir) = cache_dir() { let _ = std::fs::remove_dir_all(dir); }
-            return Err("Spotify playback stopped the app last time it connected, so it's been signed out. Sign in to Spotify again (Settings > Integrations); if it happens again, the crash is in crash.log in the app's folder.".into());
-        }
-        let _ = std::fs::write(&m, "connecting");
-    }
-    let r = connect_now(credentials).await;
-    if let Some(m) = connecting_mark() { let _ = std::fs::remove_file(m); }
-    r
+    let _busy = Busy::new();
+    connect_now(credentials).await
 }
 
 async fn connect_now(credentials: Credentials) -> Result<Engine, String> {
@@ -240,6 +271,7 @@ async fn connect_now(credentials: Credentials) -> Result<Engine, String> {
 
 // The running engine, reconnecting from saved credentials if needed
 async fn engine() -> Result<tokio::sync::MutexGuard<'static, Option<Engine>>, String> {
+    start_check();
     let mut guard = ENGINE.lock().await;
     let healthy = guard.as_ref().is_some_and(|e| !e.session.is_invalid() && !e.player.is_invalid());
     if !healthy {
@@ -260,6 +292,7 @@ fn track_uri(uri: &str) -> Result<SpotifyUri, String> {
 
 // ---------- commands ----------
 pub fn spe_signed_in() -> bool {
+    start_check();
     cache().ok().and_then(|c| c.credentials()).is_some()
 }
 
@@ -420,6 +453,7 @@ pub async fn spe_playlist(uri: String) -> Result<Value, String> {
 /// The playback sign-in's account, from its own login (not the Web API, so no rate limit can stand in
 /// the way of signing in): its username and its product ("premium", "free", ...)
 pub async fn spe_account() -> Result<Value, String> {
+    let _busy = Busy::new();
     let session = {
         let guard = engine().await?;
         guard.as_ref().unwrap().session.clone()
@@ -441,6 +475,7 @@ pub async fn spe_account() -> Result<Value, String> {
 const WEB_SCOPES: &str = "user-read-private,user-read-email,user-library-read,user-library-modify,playlist-read-private,playlist-read-collaborative,playlist-modify-private,playlist-modify-public,user-follow-read,user-follow-modify,user-read-playback-state,user-modify-playback-state";
 
 pub async fn spe_web_token() -> Result<String, String> {
+    let _busy = Busy::new();
     let session = {
         let guard = engine().await?;
         guard.as_ref().unwrap().session.clone()
@@ -488,5 +523,24 @@ mod account_live {
         let v = rt.block_on(super::spe_account()).expect("the account");
         println!("product {:?}, username set: {}", v["product"], v["id"].as_str().is_some_and(|s| !s.is_empty()));
         assert!(!v["product"].as_str().unwrap_or("").is_empty());
+    }
+}
+
+#[cfg(test)]
+mod crash_mark_tests {
+    #[test]
+    fn a_mark_left_by_a_crash_signs_playback_out_on_the_next_start() {
+        let _turn = crate::TEST_ENV.lock().unwrap_or_else(|e| e.into_inner());
+        let dir = std::env::temp_dir().join(format!("omnipulse-spemark-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        crate::set_data_dir(dir.clone());
+        // last run: went down while using the engine (the mark left), signed in (credentials kept)
+        std::fs::create_dir_all(dir.join("librespot")).unwrap();
+        std::fs::write(dir.join("librespot").join("credentials.json"), "{}").unwrap();
+        std::fs::write(dir.join("spotify_busy.txt"), "busy").unwrap();
+        assert!(super::spe_crashed_last_time());
+        assert!(!dir.join("librespot").exists() && !dir.join("spotify_busy.txt").exists());
+        assert!(!super::spe_signed_in());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
