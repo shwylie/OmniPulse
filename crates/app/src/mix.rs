@@ -911,3 +911,74 @@ fn beat_probe() {
         println!("bar {bar:>3} at {:>6.0} ms: {}   (all/lows dB, a beat each)", beats[m.rhythm.downbeat + bar * 4], row.join("  "));
     }
 }
+
+/// The demo's two songs as separate files, each whole (no filters, no crossfade), on the demo's
+/// timeline: as stretched, eased and key-shifted as the mix has them, at their loudness match, the
+/// one playing going on after the switch-over (at its eased tempo) and the next one at its own, for
+/// mixing by hand. OMNIPULSE_MIX_A / _B as mix_demo; OMNIPULSE_MIX_OUT the path before "-A.wav"
+#[test]
+#[ignore]
+fn mix_stems() {
+    use crate::track::{Src, Track};
+    use omnipulse_audio::engine::Pipeline;
+    let (a_id, b_id) = (std::env::var("OMNIPULSE_MIX_A").unwrap(), std::env::var("OMNIPULSE_MIX_B").unwrap());
+    let base = std::env::var("OMNIPULSE_MIX_OUT").unwrap_or_else(|_| "mix-stems".into());
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    let full = |id: &str| omnipulse_core::rhythm::known(&format!("full:{id}")).expect("measured whole");
+    let (a, b) = (full(&a_id), full(&b_id));
+    let t = |id: &str| Track { src: Src::SoundCloud(id.parse().unwrap()), key: id.to_string(), ..Default::default() };
+    let open = |id: &str| rt.block_on(crate::player::open_source(&t(id), rt.handle().clone())).unwrap();
+    let dur = open(&a_id).duration_ms().unwrap_or(0);
+    let p = plan_structure(&a, dur, 0, &b).expect("a plan");
+    println!("{p:?}");
+    let db = |id: &str| {
+        let lufs = rt.block_on(omnipulse_core::loudness::analyse("soundcloud", id)).ok().and_then(|a| a["lufs"].as_f64());
+        crate::sound::loud_db(&serde_json::json!({}), &t(id), lufs)
+    };
+    let (rate, lead) = (44_100u32, 12_000u64);
+    let total = (lead + p.ms + 20_000) as usize * rate as usize / 1000 * 2;
+    let lead_n = lead as usize * rate as usize / 1000 * 2;
+    // (where in the mix it is, 0..1 of the ramp: from the frames given after the lead)
+    let ramp_x = |given: usize| if p.ramp_ms == 0 { 1.0 } else { ((given.saturating_sub(lead_n) / 2) as f64 * 1000.0 / rate as f64 / p.ramp_ms as f64).min(1.0) };
+    // the one playing: as it is to the mix's moment, then through the stretch, eased
+    let mut pa = Pipeline::new(open(&a_id), rate);
+    pa.seek(p.at_ms - lead).unwrap();
+    pa.chain.set_match_db(db(&a_id), true);
+    let a_tempo = omnipulse_audio::Tempo::new(1.0);
+    let mut out_a = Vec::new();
+    while out_a.len() < lead_n { if !pa.fill(&mut out_a).unwrap() { break; } }
+    // (on from there through the stretch: nothing read past the moment let go)
+    pa.stretch(a_tempo.clone()).unwrap();
+    while out_a.len() < total {
+        if p.out_tempo != 1.0 { a_tempo.set(out_ramp(p.out_tempo, ramp_x(out_a.len()))); }
+        if !pa.fill(&mut out_a).unwrap() { break; }
+    }
+    out_a.resize(total, 0.0);
+    // the next one: silent through the lead, then from where the mix has it, eased to its own tempo
+    let b_tempo = omnipulse_audio::Tempo::new(p.rate);
+    let mut sb = omnipulse_audio::Stretched::shifted(open(&b_id), b_tempo.clone(), p.semitones).unwrap();
+    omnipulse_audio::Source::seek(&mut sb, p.start_ms).unwrap();
+    let mut pb = Pipeline::new(Box::new(sb), rate);
+    pb.chain.set_match_db(db(&b_id), true);
+    let mut out_b = vec![0.0f32; lead_n];
+    while out_b.len() < total {
+        b_tempo.set(if p.out_tempo != 1.0 { in_ramp(p.out_tempo, ramp_x(out_b.len())) } else if ramp_x(out_b.len()) < 1.0 || p.ramp_ms == 0 && out_b.len() < lead_n + p.ms as usize * rate as usize / 1000 * 2 { p.rate } else { 1.0 });
+        if !pb.fill(&mut out_b).unwrap() { break; }
+    }
+    out_b.resize(total, 0.0);
+    let wav = |path: &str, out: &[f32]| {
+        let mut w = Vec::new();
+        let data = (out.len() * 2) as u32;
+        w.extend_from_slice(b"RIFF"); w.extend_from_slice(&(36 + data).to_le_bytes());
+        w.extend_from_slice(b"WAVEfmt "); w.extend_from_slice(&16u32.to_le_bytes());
+        for v in [1u16, 2] { w.extend_from_slice(&v.to_le_bytes()); }
+        for v in [rate, rate * 4] { w.extend_from_slice(&v.to_le_bytes()); }
+        for v in [4u16, 16] { w.extend_from_slice(&v.to_le_bytes()); }
+        w.extend_from_slice(b"data"); w.extend_from_slice(&data.to_le_bytes());
+        for s in out { w.extend_from_slice(&((s.clamp(-1.0, 1.0) * 32767.0) as i16).to_le_bytes()); }
+        std::fs::write(path, w).unwrap();
+    };
+    wav(&format!("{base}-A.wav"), &out_a);
+    wav(&format!("{base}-B.wav"), &out_b);
+    println!("wrote {base}-A.wav and -B.wav: the mix from {:.1} s, the switch-over at {:.1} s", lead as f64 / 1000.0, (lead + p.swap_ms) as f64 / 1000.0);
+}

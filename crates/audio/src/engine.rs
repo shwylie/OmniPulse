@@ -1250,10 +1250,12 @@ pub fn render_mix_ramped(a: Box<dyn Source>, b: Box<dyn Source>, dbs: (f32, f32)
     while out.len() < lead {
         if !pa.fill(&mut out)? { break; }
     }
-    out.truncate(lead);
+    // (what was read past the moment is the one going out's first in the mix, as the player has it)
+    let past = out.split_off(lead.min(out.len()));
     let mut pb = Pipeline::new(b, out_rate);
     pb.chain.set_match_db(dbs.1, true);
     let mut f = Fading::new(pb, ms * out_rate as u64 / 1000, handoff, out_rate);
+    f.out_buf.extend(past);
     if let Some((tempo, _)) = ramp { pa.stretch(tempo.clone())?; }
     let mut scratch = Vec::new();
     loop {
