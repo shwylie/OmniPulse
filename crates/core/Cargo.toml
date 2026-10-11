@@ -9,7 +9,7 @@ description = "OmniPulse's backend: accounts, streaming services, local music an
 # is rustls, so nothing needs OpenSSL for Android.
 [features]
 default = ["desktop"]
-desktop = ["reqwest/default-tls", "dep:tiny_http", "dep:opener", "dep:librespot-core", "dep:librespot-playback", "dep:librespot-oauth", "dep:librespot-metadata",
+desktop = ["reqwest/default-tls", "dep:tiny_http", "dep:opener", "dep:librespot-core", "dep:librespot-playback", "dep:librespot-oauth", "dep:librespot-metadata", "dep:librespot-protocol", "dep:protobuf",
   "dep:symphonia", "dep:ebur128", "dep:zip", "dep:mdns-sd", "dep:native-tls", "dep:omnipulse-pcmout", "dep:lofty"]
 mobile = ["reqwest/rustls-tls"]
 
@@ -32,6 +32,9 @@ librespot-core = { version = "0.8", default-features = false, features = ["nativ
 librespot-playback = { version = "0.8", default-features = false, features = ["native-tls"], optional = true }
 librespot-oauth = { version = "0.8", default-features = false, features = ["native-tls"], optional = true }
 librespot-metadata = { version = "0.8", default-features = false, optional = true }
+# (your playlist list from Spotify's own service: its message read as it comes)
+librespot-protocol = { version = "0.8", optional = true }
+protobuf = { version = "3.7", optional = true }
 futures = "0.3"
 unicode-normalization = "0.1"
 # BPM, beats and key (rhythm.rs)

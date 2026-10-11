@@ -605,6 +605,22 @@ async function spotifySearchTracks(q) {
 
 // ---------- your Spotify playlists (sidebar) ----------
 async function spotifyPlaylists() {
+  // (from Spotify's own playlist service when signed in that way: the Web API's allowance untouched)
+  if (await invoke("spe_signed_in").catch(() => false)) {
+    try {
+      const list = await invoke("spe_playlists");
+      return list.map((x) => ({
+        source: "spotify",
+        id: "sp:" + x.id,
+        spId: x.id,
+        title: x.name || "Untitled playlist",
+        user: { username: x.owner === "spotify" ? "Spotify" : x.owner || "" },
+        own: !!x.own,
+      }));
+    } catch (e) {
+      spNote("playlists: Spotify's own service failed: " + e + ": the Web API instead");
+    }
+  }
   const out = [];
   let offset = 0;
   while (out.length < 200) {
@@ -627,6 +643,15 @@ async function spotifyPlaylists() {
 // Since February 2026 the Web API only lists the tracks of playlists you own; for anyone else's
 // (and Spotify's own) it returns no items. Those are read through the playback engine instead.
 async function spotifyPlaylistTracks(id, max) {
+  // (through Spotify's own playlist service first, when signed in that way: any playlist, and the
+  // Web API's allowance untouched)
+  if (await invoke("spe_signed_in").catch(() => false)) {
+    try {
+      return (await speCall("spe_playlist", { uri: "spotify:playlist:" + id })).slice(0, max || 1000).map(spTrack);
+    } catch (e) {
+      spNote("playlist: Spotify's own service failed: " + e + ": the Web API instead");
+    }
+  }
   const out = [];
   let offset = 0;
   let refused = null;

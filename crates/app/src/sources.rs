@@ -211,7 +211,22 @@ pub async fn playlists() -> Vec<Playlist> {
             }
         }
     }
-    if core::spotify::spotify_signed_in() {
+    // (Spotify's own playlist service first, when signed in that way: the Web API's allowance untouched)
+    let mut sp_done = false;
+    if core::spotify::spotify_signed_in() && core::spotify_engine::spe_signed_in() {
+        match core::spotify_library::spe_playlists().await {
+            Ok(v) => {
+                for p in v.as_array().cloned().unwrap_or_default() {
+                    if let (Some(id), Some(title)) = (p["id"].as_str(), p["name"].as_str()) {
+                        out.push(Playlist { plat: "spotify", id: id.to_string(), title: title.to_string(), tracks: None, own: p["own"].as_bool().unwrap_or(false) });
+                    }
+                }
+                sp_done = true;
+            }
+            Err(e) => core::diag::note(&format!("playlists: Spotify's own service failed: {e}: the Web API instead")),
+        }
+    }
+    if !sp_done && core::spotify::spotify_signed_in() {
         let me = core::spotify::spotify_api("GET".into(), "/me".into(), None).await.ok().and_then(|m| m["id"].as_str().map(String::from)).unwrap_or_default();
         if let Ok(v) = core::spotify::spotify_api("GET".into(), "/me/playlists?limit=50".into(), None).await {
             for p in v["items"].as_array().cloned().unwrap_or_default() {
@@ -230,6 +245,13 @@ pub async fn playlist_tracks(p: &Playlist) -> Vec<Track> {
     }
     match p.plat {
         "soundcloud" => sc_pages(format!("/playlists/{}/tracks?access=playable&limit=200&linked_partitioning=true", p.id), 2000).await,
+        "spotify" if core::spotify_engine::spe_signed_in() => match core::spotify_engine::spe_playlist(format!("spotify:playlist:{}", p.id)).await {
+            Ok(v) => v.as_array().cloned().unwrap_or_default().iter().filter_map(Track::spotify).collect(),
+            Err(e) => {
+                core::diag::note(&format!("playlist: Spotify's own service failed: {e}: the Web API instead"));
+                sp_pages(format!("/playlists/{}/items", p.id), 1000, |it| Track::spotify(if it.get("item").is_some() { &it["item"] } else { &it["track"] })).await
+            }
+        },
         "spotify" => sp_pages(format!("/playlists/{}/items", p.id), 1000, |it| Track::spotify(if it.get("item").is_some() { &it["item"] } else { &it["track"] })).await,
         _ => Vec::new(),
     }

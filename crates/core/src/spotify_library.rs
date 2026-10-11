@@ -180,6 +180,43 @@ pub async fn spe_liked(known: Vec<String>) -> Result<serde_json::Value, String> 
     Ok(serde_json::json!({ "ids": ids, "tracks": tracks }))
 }
 
+/// Your playlists (the ones in your library, in its order: folders left out), from Spotify's own
+/// playlist service: each one's id, name, owner's username, whether it's yours, its length
+pub async fn spe_playlists() -> Result<serde_json::Value, String> {
+    use futures::stream::{self, StreamExt};
+    use librespot_metadata::{Metadata, Playlist};
+    use protobuf::Message;
+    let session = spe_session().await?;
+    let me = session.username();
+    let raw = session.spclient().get_rootlist(0, Some(500)).await.map_err(|e| format!("Spotify's playlists: {e}"))?;
+    let list = librespot_protocol::playlist4_external::SelectedListContent::parse_from_bytes(&raw).map_err(|e| format!("Spotify's playlists: {e}"))?;
+    let uris: Vec<String> = list.contents.items.iter().map(|i| i.uri().to_string()).filter(|u| u.starts_with("spotify:playlist:")).collect();
+    let out: Vec<serde_json::Value> = stream::iter(uris)
+        .map(|uri| {
+            let session = session.clone();
+            let me = me.clone();
+            async move {
+                let id = librespot_core::SpotifyUri::from_uri(&uri).ok()?;
+                let p = Playlist::get(&session, &id).await.ok()?;
+                let owner = match &p.id { librespot_core::SpotifyUri::Playlist { user: Some(u), .. } => u.clone(), _ => String::new() };
+                Some(serde_json::json!({
+                    "id": uri.trim_start_matches("spotify:playlist:"),
+                    "name": p.attributes.name,
+                    "owner": owner,
+                    "own": !owner.is_empty() && owner == me,
+                    "collaborative": p.attributes.is_collaborative,
+                    "total": p.length,
+                }))
+            }
+        })
+        .buffered(10)
+        .filter_map(|p| async move { p })
+        .collect()
+        .await;
+    crate::diag::note(&format!("spotify library: {} playlists", out.len()));
+    Ok(serde_json::Value::Array(out))
+}
+
 /// Likes or unlikes one song (its spotify:track:... uri)
 pub async fn spe_set_liked(uri: String, on: bool) -> Result<(), String> {
     if !uri.starts_with("spotify:track:") { return Err("not a Spotify song".into()); }
@@ -249,6 +286,19 @@ mod tests {
         let after = has(&rt);
         println!("liked: {liked}, after unliking: {after}");
         assert!(liked && !after);
+    }
+
+    /// cargo test -p omnipulse-core playlists_live -- --ignored --nocapture (reads only)
+    #[test]
+    #[ignore]
+    fn playlists_live() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let t0 = std::time::Instant::now();
+        let v = rt.block_on(spe_playlists()).expect("the playlists");
+        let a = v.as_array().unwrap();
+        println!("{} playlists in {:?}; yours {}", a.len(), t0.elapsed(), a.iter().filter(|p| p["own"] == true).count());
+        for p in a.iter().take(5) { println!("  {} (owner set {}, own {}, {} songs)", p["name"], p["owner"].as_str().is_some_and(|s| !s.is_empty()), p["own"], p["total"]); }
+        assert!(!a.is_empty());
     }
 
     /// cargo test -p omnipulse-core liked_tracks_live -- --ignored --nocapture (reads only: every
