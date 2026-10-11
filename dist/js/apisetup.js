@@ -14,7 +14,21 @@ const KEY_SETUPS = {
         [["App name", "OmniPulse"], ["Redirect URI", st.spotify_redirect || "http://127.0.0.1:8081/callback"]]],
       ["On your app's page, open Settings and copy its Client ID. There's no secret to copy: OmniPulse signs in without one.", null],
     ],
-    note: "Only needed for a free Spotify account (Premium signs in without it). A new Spotify app is in development mode: your own account can sign in to it straight away.",
+    note: "With Premium, a Spotify app of your own can be shared: friends with a free account can sign in with it too. On its page in the Developer Dashboard, open User Management and add each one (their name, and their Spotify account's email; up to five), then send them its Client ID.",
+    done: () => spotifyCheck(),
+    signIn: "spConnect",
+  },
+  // A free account: Spotify only lets an app work for its owner with Premium (since February 2026), so
+  // one of its own can't be; it signs in with the app of someone with Premium who's added it
+  spotifyFree: {
+    name: "Spotify",
+    fields: [["spotify_client_id", "Client ID", /^[0-9a-f]{32}$/i]],
+    steps: () => [
+      ["Ask someone with Spotify Premium (a friend who uses OmniPulse, say) to add you to their Spotify app. On its page in the Spotify Developer Dashboard they open User Management and add your name and the email of your Spotify account. (No app yet? With Premium, they make one in OmniPulse: Settings > Integrations > Spotify > Your keys.)", "https://developer.spotify.com/dashboard"],
+      ["They send you its Client ID. It isn't a secret: OmniPulse signs in without one.", null],
+      ["Paste it here and save: OmniPulse signs you in with their app.", null],
+    ],
+    note: "Spotify only lets an app work when its owner has Premium (since February 2026), so a free account can't use keys of its own. An app can have up to five people added to it. Spotify songs play from YouTube Music.",
     done: () => spotifyCheck(),
     signIn: "spConnect",
   },
@@ -180,8 +194,9 @@ async function keySetupStatus() {
 }
 
 function keySetupInit() {
+  // (Spotify, for a free account: someone with Premium's app, not one of its own)
   [["spSetup", "spotify"], ["lfmSetup", "lastfm"], ["ytAccSetup", "youtube"], ["spKeys", "spotify"], ["lfmKeys", "lastfm"], ["ytKeys", "youtube"]]
-    .forEach(([id, plat]) => $(id).addEventListener("click", () => keySetupOpen(plat)));
+    .forEach(([id, plat]) => $(id).addEventListener("click", () => keySetupOpen(plat === "spotify" && prefs.spNeedsKeys ? "spotifyFree" : plat)));
   $("ksForm").addEventListener("submit", keySetupSave);
   $("ksCancel").addEventListener("click", () => $("keySetup").close());
   $("keySetup").addEventListener("paste", (e) => {

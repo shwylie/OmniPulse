@@ -75,7 +75,10 @@ function syncSpotifySettings() {
 let spotifyCheckTimer = null;
 let spCrashSaid = false;
 const spNotPremium = (e) => /premium account required/i.test(String(e));
-const SP_FREE_NOTE = "That's a free Spotify account. Spotify only lets Premium accounts sign in straight away; for a free one, Set up your own free Spotify app keys (a couple of minutes), then Sign in.";
+const SP_FREE_NOTE = "That's a free Spotify account. Spotify only lets Premium accounts sign in straight away; a free one signs in with the Spotify app of someone with Premium who adds you to it: Set up shows how.";
+// Spotify turning down an app whose owner hasn't Premium (its rule since February 2026)
+const spOwnerNotPremium = (e) => /premium subscription required for the owner/i.test(String(e));
+const SP_OWNER_NOTE = "Spotify turned these app keys down: an app only works when its owner has Premium (Spotify's rule since February 2026), so a free account can't use one of its own. Use the Client ID of someone with Premium who's added you to their app: Your keys shows how.";
 const spRevoked = (e) => /invalid_grant|invalid_client|revoked|connect again|Not connected/i.test(String(e));
 
 async function spotifyCheck() {
@@ -130,6 +133,12 @@ async function spotifyCheck() {
         savePrefs();
         if (typeof keySetupStatus === "function") await keySetupStatus();
         note = SP_FREE_NOTE;
+      } else if (spOwnerNotPremium(e)) {
+        spotifyFree = false;
+        prefs.spNeedsKeys = true;
+        savePrefs();
+        note = SP_OWNER_NOTE;
+        say(SP_OWNER_NOTE, { force: true, stay: true, actions: [["Show Me How", () => keySetupOpen("spotifyFree", null, () => spotifyConnect())]] });
       } else if (spRevoked(e)) {
         spotifyFree = false;
         note = "Spotify ended the sign-in. Sign in again.";
@@ -213,7 +222,7 @@ async function spotifyConnect() {
       $("spStatus").textContent = SP_FREE_NOTE;
       // the steps for your own keys, at once: saved, it signs in with them
       if (typeof keySetupOpen === "function") {
-        keySetupOpen("spotify", "That's a free Spotify account. Spotify only lets Premium accounts sign in through its own player, so a free account signs in with its own app keys instead: free from Spotify, about five minutes, once. Follow the steps below; when you save, OmniPulse signs you in with them. (Spotify songs then play from YouTube Music.)", () => spotifyConnect());
+        keySetupOpen("spotifyFree", "That's a free Spotify account. Spotify only lets Premium accounts sign in through its own player, and only lets an app's keys work when the app's owner has Premium, so a free account signs in with the app of someone with Premium who adds you to it. The steps are below; when you save, OmniPulse signs you in.", () => spotifyConnect());
       }
       return;
     }

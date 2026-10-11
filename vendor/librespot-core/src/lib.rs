@@ -1,3 +1,5 @@
+// (OmniPulse, vendored: a lint expectation of upstream's that this toolchain finds unfulfilled is quiet)
+#![allow(unfulfilled_lint_expectations)]
 #[macro_use]
 extern crate log;
 

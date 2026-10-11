@@ -3247,7 +3247,7 @@ const ACCOUNTS: [(&str, &str); 4] = [("soundcloud", "SoundCloud"), ("spotify", "
 /// set once Spotify has turned its own sign-in down (a free account): the next sign-in is your app's
 static SP_FREE_SEEN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
-const SP_FREE: &str = "That's a free Spotify account. Spotify only lets Premium accounts sign in straight away; for a free one, your own free Spotify app keys are set up first (a couple of minutes), then it signs in.";
+const SP_FREE: &str = "That's a free Spotify account. Spotify only lets Premium accounts sign in straight away; a free one signs in with the Spotify app of someone with Premium who adds you to it: the steps are open.";
 
 thread_local! {
     /// who's signed in where (as the platforms say), and the sign-ins under way
@@ -3365,7 +3365,7 @@ fn account_act(shared: &Shared, i: usize) {
             if matches!(&done, Err(e) if e == SP_FREE) {
                 ui.set_status(SP_FREE.into());
                 accounts_refresh(&shared);
-                return ks_open(&shared, "spotify", i);
+                return ks_open(&shared, "spotify-free", i);
             }
             ui.set_status(match &done {
                 Ok(()) if out => format!("Signed out of {name}."),

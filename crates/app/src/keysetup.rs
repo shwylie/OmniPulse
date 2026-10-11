@@ -34,7 +34,19 @@ pub fn setup(plat: &str) -> Option<Setup> {
                     copies: vec![("App name", "OmniPulse".into()), ("Redirect URI", st["spotify_redirect"].as_str().filter(|s| !s.is_empty()).unwrap_or("http://127.0.0.1:8081/callback").to_string())] },
                 Step { text: "On your app's page, open Settings and copy its Client ID. There's no secret to copy: OmniPulse signs in without one.", url: None, copies: vec![] },
             ],
-            note: "A new Spotify app is in development mode: your own account can sign in to it straight away.",
+            note: "With Premium, this app can be shared: friends with a free account can sign in with it too. On its page in the Developer Dashboard, open User Management and add each one (their name, and their Spotify account's email; up to five), then send them its Client ID.",
+        },
+        // a free account: Spotify only lets an app work for its owner with Premium (since February 2026),
+        // so one of its own can't be; it signs in with the app of someone with Premium who's added it
+        "spotify-free" => Setup {
+            name: "Spotify",
+            fields: vec![("spotify_client_id", "Client ID", r"^[0-9a-fA-F]{32}$")],
+            steps: vec![
+                Step { text: "Ask someone with Spotify Premium (a friend who uses OmniPulse, say) to add you to their Spotify app. On its page in the Spotify Developer Dashboard they open User Management and add your name and the email of your Spotify account. (No app yet? With Premium, they make one in OmniPulse: Settings > Accounts > Spotify's keys.)", url: Some("https://developer.spotify.com/dashboard"), copies: vec![] },
+                Step { text: "They send you its Client ID. It isn't a secret: OmniPulse signs in without one.", url: None, copies: vec![] },
+                Step { text: "Paste it here and save: OmniPulse signs you in with their app.", url: None, copies: vec![] },
+            ],
+            note: "Spotify only lets an app work when its owner has Premium (since February 2026), so a free account can't use keys of its own. An app can have up to five people added to it. Spotify songs play from YouTube Music.",
         },
         "lastfm" => Setup {
             name: "Last.fm",
