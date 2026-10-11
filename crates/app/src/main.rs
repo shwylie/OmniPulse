@@ -1712,7 +1712,7 @@ fn start(shared: &Shared) {
     let prefs = shared.borrow().web.prefs.clone();
     rt.spawn(async move {
         let art = player::fetch_art(t2.art.replace("-t200x200", "-t500x500"), 500).await;
-        let lyrics = player::lyrics(&t2, &prefs).await;
+        let (lyrics, from) = player::lyrics(&t2, &prefs).await;
         let _ = weak2.upgrade_in_event_loop(move |ui| {
             SHARED.with(|s| {
                 let Some(shared) = s.borrow().clone() else { return };
@@ -1727,12 +1727,49 @@ fn start(shared: &Shared) {
                     ui.set_now_art(img.clone());
                     ui.set_now_art_big(img);
                 }
-                ui.set_lyrics_note(if lyrics.is_empty() { "No lyrics found for this one.".into() } else if lyrics.iter().all(|l| l.ms == 0) { "These lyrics aren't timed.".into() } else { "".into() });
-                let a = &mut *shared.borrow_mut();
-                a.lyric_lines.set_vec(lyrics.iter().map(|l| Line { text: l.text.clone().into() }).collect::<Vec<_>>());
-                a.lyrics = lyrics;
+                let prefs = shared.borrow().web.prefs.clone();
+                show_lyrics(&shared, &ui, &prefs, lyrics, &from);
             });
         });
+    });
+}
+
+thread_local! {
+    /// the other places Now Playing offers lyrics from (their ids, as listed)
+    static LY_OTHERS: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
+}
+
+/// A song's lyrics shown, with where they're from and the other places to try ("Lyrics from KuGou.
+/// Other sources: LRCLIB, NetEase, ..."), as the web app's
+fn show_lyrics(shared: &Shared, ui: &AppWindow, prefs: &serde_json::Value, lyrics: Vec<player::Line>, from: &str) {
+    ui.set_lyrics_note(if lyrics.is_empty() { "No lyrics found for this one.".into() } else if lyrics.iter().all(|l| l.ms == 0) { "These lyrics aren't timed.".into() } else { "".into() });
+    ui.set_lyrics_from(if from.is_empty() { "".into() } else { format!("Lyrics from {}.", player::lyrics_name(from)).into() });
+    let others: Vec<String> = player::lyrics_order(prefs).into_iter().filter(|p| p != from).collect();
+    ui.set_lyrics_others(ModelRc::from(Rc::new(VecModel::from(others.iter().map(|p| slint::SharedString::from(player::lyrics_name(p))).collect::<Vec<_>>()))));
+    LY_OTHERS.with(|o| *o.borrow_mut() = others);
+    let a = &mut *shared.borrow_mut();
+    a.lyric_lines.set_vec(lyrics.iter().map(|l| Line { text: l.text.clone().into() }).collect::<Vec<_>>());
+    a.lyrics = lyrics;
+}
+
+/// One of the other places picked: the song's lyrics from there (kept as its choice), or a note that
+/// it has none
+fn lyrics_pick(shared: &Shared, i: usize) {
+    let Some(id) = LY_OTHERS.with(|o| o.borrow().get(i).cloned()) else { return };
+    let Some(t) = shared.borrow().queue.current().cloned() else { return };
+    let (rt, weak, token) = { let a = shared.borrow(); (a.rt.clone(), a.ui.clone(), a.token) };
+    if let Some(ui) = weak.upgrade() { ui.set_status(format!("Lyrics from {}...", player::lyrics_name(&id)).into()); }
+    rt.spawn(async move {
+        let lyrics = player::lyrics_from(&t, &id).await;
+        let _ = weak.upgrade_in_event_loop(move |ui| SHARED.with(|s| {
+            let Some(shared) = s.borrow().clone() else { return };
+            if shared.borrow().token != token { return; }
+            if lyrics.is_empty() { ui.set_status(format!("{} has no lyrics for this one.", player::lyrics_name(&id)).into()); return; }
+            ui.set_status("".into());
+            player::lyrics_pick_set(&t.key, &id);
+            let prefs = shared.borrow().web.prefs.clone();
+            show_lyrics(&shared, &ui, &prefs, lyrics, &id);
+        }));
     });
 }
 
@@ -5487,6 +5524,8 @@ fn main() -> Result<(), slint::PlatformError> {
         if page == "artists" { s.borrow_mut().artists = None; }
         open_page(&s, &page);
     });
+    let s = shared.clone();
+    ui.on_lyrics_pick(move |i| lyrics_pick(&s, i as usize));
     let s = shared.clone();
     ui.on_set_toggle(move |key| set_toggle(&s, &key));
     let s = shared.clone();

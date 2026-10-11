@@ -212,26 +212,78 @@ pub fn lyrics_order(prefs: &Value) -> Vec<String> {
     out.into_iter().filter(|(_, on)| *on).map(|(id, _)| id).collect()
 }
 
-/// A track's lyrics (as the web app's findLyrics): the first timed ones, asking each place in your
-/// order (LRCLIB, NetEase Cloud Music, KuGou, YouTube Music), else the first plain ones
-pub async fn lyrics(t: &Track, prefs: &Value) -> Vec<Line> {
+/// A lyrics place's name, as shown ("Lyrics from KuGou")
+pub fn lyrics_name(id: &str) -> &'static str {
+    match id { "lrclib" => "LRCLIB", "netease" => "NetEase", "kugou" => "KuGou", "youtube" => "YouTube Music", _ => "" }
+}
+
+// The place you picked for a song's lyrics (Now Playing's other sources), kept by its key in
+// state/native-lyrics-picks.json, as the web app keeps its own
+fn picks_file() -> Option<std::path::PathBuf> {
+    core::data_dir().ok().map(|d| d.join("state").join("native-lyrics-picks.json"))
+}
+
+fn lyrics_pick(key: &str) -> Option<String> {
+    let v: Value = picks_file().and_then(|p| std::fs::read_to_string(p).ok()).and_then(|t| serde_json::from_str(&t).ok())?;
+    v[key].as_str().map(String::from)
+}
+
+pub fn lyrics_pick_set(key: &str, id: &str) {
+    let Some(p) = picks_file() else { return };
+    let mut v: Value = std::fs::read_to_string(&p).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_else(|| serde_json::json!({}));
+    if !v.is_object() { v = serde_json::json!({}); }
+    v[key] = serde_json::json!(id);
+    if let Some(d) = p.parent() { let _ = std::fs::create_dir_all(d); }
+    let _ = std::fs::write(p, v.to_string());
+}
+
+// What the places are asked with: the artist, the title, its length, the YouTube video it plays from
+// (itself, or its version there: YouTube Music's lyrics)
+async fn lyrics_query(t: &Track) -> (String, String, u64, String) {
     let (artist, title) = crate::versions::guess_names(t);
     let artist = if artist.is_empty() { t.artist.split(',').next().unwrap_or("").trim().to_string() } else { artist };
-    let secs = t.ms / 1000;
-    // the YouTube video it plays from (itself, or its version there), for YouTube Music's lyrics
     let video = match &t.src {
         Src::YouTube(id) => id.clone(),
         _ if t.go_plus || matches!(t.src, Src::Catalog(_)) => crate::versions::find(t).await.map(|v| v.yt.id).unwrap_or_default(),
         _ => String::new(),
     };
-    let mut plain: Option<Value> = None;
-    for p in lyrics_order(prefs) {
+    (artist, title, t.ms / 1000, video)
+}
+
+/// A track's lyrics (as the web app's findLyrics): the first timed ones, asking each place in your
+/// order (LRCLIB, NetEase Cloud Music, KuGou, YouTube Music; the one you picked for the song first),
+/// else the first plain ones; and the place they're from ("" for none)
+pub async fn lyrics(t: &Track, prefs: &Value) -> (Vec<Line>, String) {
+    let (artist, title, secs, video) = lyrics_query(t).await;
+    let mut order = lyrics_order(prefs);
+    if let Some(p) = lyrics_pick(&t.key).filter(|p| PROVIDERS.contains(&p.as_str())) {
+        order.retain(|x| *x != p);
+        order.insert(0, p);
+    }
+    let mut plain: Option<(Value, String)> = None;
+    for p in order {
         let Ok(v) = core::lyrics::from(&p, &artist, &title, secs, &video).await else { continue };
         if v.is_null() { continue; }
-        if v["synced"].is_string() { return parse_lyrics(&serde_json::json!({ "syncedLyrics": v["synced"] })); }
-        if plain.is_none() { plain = Some(serde_json::json!({ "plainLyrics": v["plain"] })); }
+        // (timed ones only if they are: a place can answer with an empty or untimed "synced")
+        if let Some(l) = timed(&v) { return (l, p); }
+        if plain.is_none() && v["plain"].as_str().is_some_and(|x| !x.trim().is_empty()) { plain = Some((serde_json::json!({ "plainLyrics": v["plain"] }), p)); }
     }
-    plain.map(|v| parse_lyrics(&v)).unwrap_or_default()
+    plain.map(|(v, p)| (parse_lyrics(&v), p)).unwrap_or_default()
+}
+
+/// A track's lyrics from one place (Now Playing's other sources): timed if it has them, else plain
+pub async fn lyrics_from(t: &Track, provider: &str) -> Vec<Line> {
+    let (artist, title, secs, video) = lyrics_query(t).await;
+    let Ok(v) = core::lyrics::from(provider, &artist, &title, secs, &video).await else { return Vec::new() };
+    if let Some(l) = timed(&v) { return l; }
+    if v["plain"].as_str().is_some_and(|x| !x.trim().is_empty()) { return parse_lyrics(&serde_json::json!({ "plainLyrics": v["plain"] })); }
+    Vec::new()
+}
+
+/// A place's timed lyrics, if they are timed (not empty, not untimed text in the timed field)
+fn timed(v: &Value) -> Option<Vec<Line>> {
+    let l = parse_lyrics(&serde_json::json!({ "syncedLyrics": v["synced"].as_str()? }));
+    l.iter().any(|x| x.ms > 0).then_some(l)
 }
 
 #[cfg(test)]
@@ -253,5 +305,23 @@ mod tests {
         let p = parse_lyrics(&serde_json::json!({ "plainLyrics": "a\nb" }));
         assert_eq!(p.len(), 2);
         assert_eq!(p[0].ms, 0);
+    }
+}
+
+#[cfg(test)]
+mod lyrics_live {
+    /// cargo test -p omnipulse --bin OmniPulse-native lyrics_sources_live -- --ignored --nocapture (the internet)
+    #[test]
+    #[ignore]
+    fn lyrics_sources_live() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let t = crate::track::Track { src: crate::track::Src::YouTube("dQw4w9WgXcQ".into()), key: "yt:dQw4w9WgXcQ".into(), title: "Never Gonna Give You Up".into(), artist: "Rick Astley".into(), ms: 213_000, ..Default::default() };
+        let (first, from) = rt.block_on(super::lyrics(&t, &serde_json::Value::Null));
+        println!("in order: {} lines from {from}", first.len());
+        for p in ["lrclib", "netease", "kugou", "youtube"] {
+            let l = rt.block_on(super::lyrics_from(&t, p));
+            println!("{}: {} lines, timed {}", super::lyrics_name(p), l.len(), l.iter().any(|x| x.ms > 0));
+        }
+        assert!(!first.is_empty() && !from.is_empty());
     }
 }
