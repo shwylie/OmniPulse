@@ -9,7 +9,9 @@ let spotifyFree = false;   // signed in without Premium: your library and search
 // Spotify's own player only plays for Premium; without it a Spotify track plays from YouTube Music
 // (in the app's <audio> player like everything else)
 const onSpotifyEngine = (t) => !!t && srcOf(t) === "spotify" && spotifyPremium && !t.ytVia && !t.spGone;
-const spotifyUsable = () => FEATURES.spotify && (spotifyPremium || (spotifyFree && ytOn()));
+// (a free account: its library shows all the same; its songs play from YouTube Music, and say so
+// when that is off)
+const spotifyUsable = () => FEATURES.spotify && (spotifyPremium || spotifyFree);
 let spotifyName = "";
 let spotifyMeId = "";   // your Spotify user id (which playlists are yours to change)
 let spState = { pos: 0, ts: 0, playing: false, dur: 0 };
