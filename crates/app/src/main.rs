@@ -1596,7 +1596,9 @@ fn start(shared: &Shared) {
     rt.spawn(async move {
         // a Go+ track: never the preview, but its version on YouTube Music (crate::versions); a
         // MusicBrainz song the same way (MusicBrainz knows it, YouTube Music has it to play)
-        let mb = matches!(t.src, track::Src::Catalog(_)) || listen_needs_version(&t);
+        // (and a Spotify song with a free account signed in, or none for playback: from YouTube Music too)
+        let sp_free = matches!(t.src, track::Src::Spotify(_)) && !sp_plays_here();
+        let mb = matches!(t.src, track::Src::Catalog(_)) || listen_needs_version(&t) || sp_free;
         let (src, version) = if let Some((_, v)) = mixed {
             (Ok(None), v)
         } else if t.go_plus || mb {
@@ -3274,6 +3276,7 @@ fn accounts_paint(shared: &Shared) {
             "Finish signing in in your browser.".to_string()
         } else if signed {
             match (key, who) {
+                ("spotify", Some(w)) if omnipulse_core::spotify_engine::spe_signed_in() && omnipulse_core::spotify_engine::spe_premium() == Some(false) => format!("Signed in as {w} · Free: your likes and playlists are here; Spotify songs play from YouTube Music."),
                 ("spotify", Some(w)) if omnipulse_core::spotify_engine::spe_signed_in() => format!("Signed in as {w} · Premium: Spotify plays in full here."),
                 ("spotify", Some(w)) => format!("Signed in as {w} · Free: Spotify tracks play from YouTube Music."),
                 (_, Some(w)) => format!("Signed in as {w}."),
@@ -4603,6 +4606,12 @@ fn listen_host_pos() -> u64 {
     })
 }
 
+/// Whether Spotify songs play through Spotify here: signed in for playback with Premium (a free account,
+/// signed in for its library, plays them from YouTube Music)
+fn sp_plays_here() -> bool {
+    omnipulse_core::spotify_engine::spe_signed_in() && omnipulse_core::spotify_engine::spe_premium() != Some(false)
+}
+
 /// Whether this app can play the host's track as it is (else its YouTube Music version)
 fn listen_needs_version(t: &Track) -> bool {
     if listening().is_none() {
@@ -4611,7 +4620,7 @@ fn listen_needs_version(t: &Track) -> bool {
     let ytdlp = omnipulse_core::tools::ytdlp_path().is_some();
     let ok = match &t.src {
         track::Src::SoundCloud(_) => omnipulse_core::soundcloud::signed_in() || ytdlp,
-        track::Src::Spotify(_) => omnipulse_core::spotify::spotify_signed_in() && omnipulse_core::spotify_engine::spe_signed_in(),
+        track::Src::Spotify(_) => omnipulse_core::spotify::spotify_signed_in() && sp_plays_here(),
         track::Src::YouTube(_) => ytdlp,
         track::Src::Local(p) => std::path::Path::new(p).exists(),
         track::Src::Catalog(_) => false,

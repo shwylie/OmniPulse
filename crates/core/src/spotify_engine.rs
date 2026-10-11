@@ -269,6 +269,8 @@ async fn connect_now(credentials: Credentials) -> Result<Engine, String> {
         .await
         .map_err(|e| format!("Spotify playback sign-in failed: {e}"))?;
     crate::diag::note("spotify playback: session up, making its player");
+    // (its account type, kept: a free one is never played through)
+    let _ = account_type(&session).await;
     let norm = *NORM.lock().unwrap();
     let player = make_player(&session, norm);
     Ok(Engine { session, player, norm })
@@ -315,21 +317,17 @@ pub async fn spe_login() -> Result<(), String> {
         .map_err(|e| { crate::diag::note(&format!("spotify playback sign-in: the browser's sign-in failed: {e}")); format!("Spotify sign-in: {e}") })?;
     crate::diag::note("spotify playback sign-in: signed in in the browser");
     let engine = connect(Credentials::with_access_token(token.access_token)).await?;
-    // only Premium plays through this sign-in: a free account is signed out again, and turned down as
-    // Spotify would (the app then signs in with your own app keys, or says how to set them up)
+    // a free account stays signed in, for its library (likes, playlists) through Spotify's Web API;
+    // only playing through it is Premium's (spe_play turns it down: its songs play from YouTube Music)
     let product = account_type(&engine.session).await;
-    if !product.is_empty() && product != "premium" {
-        crate::diag::note(&format!("spotify playback sign-in: a {product} account: signed out of playback"));
-        engine.player.stop();
-        engine.session.shutdown();
-        if let Ok(dir) = cache_dir() { let _ = std::fs::remove_dir_all(dir); }
-        return Err(format!("Premium account required (this is a {product} Spotify account)"));
-    }
+    crate::diag::note(&format!("spotify sign-in: a {} account", if product.is_empty() { "(not said)" } else { product.as_str() }));
     *ENGINE.lock().await = Some(engine);
     Ok(())
 }
 
 pub async fn spe_logout() -> Result<(), String> {
+    if let Ok(mut p) = PRODUCT.lock() { p.clear(); }
+    if let Ok(d) = crate::data_dir() { let _ = std::fs::remove_file(d.join("spotify_account.txt")); }
     if let Some(e) = ENGINE.lock().await.take() {
         e.player.stop();
         e.session.shutdown();
@@ -349,6 +347,8 @@ pub fn spe_attach(audio: Arc<dyn PcmOut>, events: EventOut) {
 
 // Returns the generation number the page should accept audio for
 pub async fn spe_play(uri: String, position_ms: u32) -> Result<u32, String> {
+    // (a free account: never played through Spotify; the app plays its songs from YouTube Music)
+    if spe_premium() == Some(false) { return Err("Premium account required to play through Spotify (this one plays from YouTube Music)".into()); }
     let track = track_uri(&uri)?;
     *REQUESTED.lock().unwrap() = uri.clone();
     let mut guard = engine().await?;
@@ -468,13 +468,30 @@ pub async fn spe_playlist(uri: String) -> Result<Value, String> {
 }
 
 /// A session's account type ("premium", "free", ...): it comes just after its login, so it's waited
-/// for (a few seconds at most; "" if it never says)
+/// for (a few seconds at most; "" if it never says). Kept, for spe_premium.
 async fn account_type(session: &Session) -> String {
     for _ in 0..30 {
-        if let Some(t) = session.get_user_attribute("type").filter(|t| !t.is_empty()) { return t; }
+        if let Some(t) = session.get_user_attribute("type").filter(|t| !t.is_empty()) {
+            if let Ok(mut p) = PRODUCT.lock() { *p = t.clone(); }
+            // (kept on disk too: known from the start next time, before it connects)
+            if let Ok(d) = crate::data_dir() { let _ = std::fs::write(d.join("spotify_account.txt"), &t); }
+            return t;
+        }
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
     }
     String::new()
+}
+
+static PRODUCT: std::sync::Mutex<String> = std::sync::Mutex::new(String::new());
+
+/// Whether the account signed in can play through Spotify here (Premium), if it's known yet. A free
+/// one is signed in for its library only: its songs play from YouTube Music.
+pub fn spe_premium() -> Option<bool> {
+    let mut p = PRODUCT.lock().ok()?.clone();
+    if p.is_empty() {
+        p = crate::data_dir().ok().and_then(|d| std::fs::read_to_string(d.join("spotify_account.txt")).ok()).unwrap_or_default().trim().to_string();
+    }
+    (!p.is_empty()).then(|| p == "premium")
 }
 
 /// The playback sign-in's account, from its own login (not the Web API, so no rate limit can stand in

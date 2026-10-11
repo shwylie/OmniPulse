@@ -99,9 +99,8 @@ async function spotifyCheck() {
       spNote("checking the account");
       const pb = (await invoke("spe_signed_in").catch(() => false)) ? await invoke("spe_account").catch((e) => { spNote("account through playback failed: " + e); return null; }) : null;
       spNote("account: " + (pb ? pb.product || "(none given)" : "not through playback"));
-      // (not Premium: the playback sign-in only serves Premium, and using it for more can take the
-      // app down: signed out of it at once, as Spotify turning it down would)
-      if (pb && pb.product && pb.product !== "premium") throw new Error("Premium account required");
+      // (not Premium: signed in all the same, for its likes and playlists; its songs play from YouTube
+      // Music, never through Spotify, which only plays for Premium)
       if (pb && pb.product) {
         spApi("GET", "/me").then((me) => {
           if (!me || !me.id) return;
@@ -198,15 +197,6 @@ async function spotifyConnect() {
   $("spStatus").textContent = "Finish signing in in your browser...";
   let keys = false;
   try { keys = !!(await invoke("config_status")).spotify; } catch (e) {}
-  // a free account, known already, with its keys set up: straight to signing in with them (not the
-  // playback sign-in again, which only takes Premium)
-  if (prefs.spNeedsKeys && keys) {
-    try { await invoke("spotify_login"); } catch (e2) { $("spStatus").textContent = String(e2); return; }
-    await spotifyCheck();
-    speSettingsPaint();
-    if (spotifyPremium || spotifyFree) say("Signed in to Spotify.", { force: true });
-    return;
-  }
   try {
     await invoke("spe_login");
     spNote("playback sign-in done");
