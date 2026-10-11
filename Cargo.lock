@@ -5594,7 +5594,7 @@ dependencies = [
 
 [[package]]
 name = "omnipulse-core"
-version = "0.2.14"
+version = "0.2.15"
 dependencies = [
  "base64 0.22.1",
  "ebur128",
@@ -7165,7 +7165,7 @@ dependencies = [
 
 [[package]]
 name = "sc-client"
-version = "0.2.14"
+version = "0.2.15"
 dependencies = [
  "omnipulse-core",
  "serde",
