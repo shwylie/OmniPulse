@@ -277,7 +277,10 @@ const PLATFORMS = {
 };
 const srcOf = (t) => (t && t.source) || "soundcloud";
 // Likes are saved to SoundCloud, your Spotify library, or (YouTube Music) this PC; local files can only be favourited
-const canLike = (t) => !!t && (srcOf(t) === "soundcloud" || srcOf(t) === "youtube" || (srcOf(t) === "spotify" && !!t.uri));
+// (a catalogue's song, Deezer's, Apple Music's or MusicBrainz's, plays from YouTube Music: its like is
+// kept with YouTube Music's likes, here, and made on YouTube too with your account connected)
+const fromCatalog = (t) => ["deezer", "itunes", "musicbrainz"].includes(srcOf(t));
+const canLike = (t) => !!t && (srcOf(t) === "soundcloud" || srcOf(t) === "youtube" || fromCatalog(t) || (srcOf(t) === "spotify" && !!t.uri));
 // "Open on SoundCloud", "Open in Spotify", "Open in YouTube Music"
 const openLabel = (t) => (srcOf(t) === "spotify" ? "Open in Spotify" : srcOf(t) === "youtube" ? "Open in YouTube Music" : srcOf(t) === "musicbrainz" ? "Open on MusicBrainz" : srcOf(t) === "deezer" ? "Open on Deezer" : srcOf(t) === "itunes" ? "Open in Apple Music"
   : srcOf(t).startsWith("plug:") ? "Open on " + platInfo(srcOf(t)).name : "Open on SoundCloud");
@@ -1579,9 +1582,9 @@ function refreshLikeUI() {
 
 async function setLikedOn(t, on) {
   if (srcOf(t) === "spotify") await spotifySetLiked(t, on);
-  else if (srcOf(t) === "youtube") ytSetLiked(t, on);
+  else if (srcOf(t) === "youtube" || fromCatalog(t)) ytSetLiked(t, on);
   else await invoke("set_like", { id: String(t.id), like: on });
-  ytMirrorLike(t, on);   // and on YouTube, with your account connected and that asked for (js/youtube.js)
+  if (!fromCatalog(t)) ytMirrorLike(t, on);   // (a catalogue's: ytSetLiked made it on YouTube already)   // and on YouTube, with your account connected and that asked for (js/youtube.js)
 }
 
 // Liking likes this copy of the song; unliking unlikes it wherever it's liked (the same song on
