@@ -1224,7 +1224,18 @@ $("sideLists").addEventListener("click", (e) => {
   if (!b) return;
   const p = playlists.find((x) => String(x.id) === b.dataset.id);
   if (p) openPlaylist(p);
+  listsPanel(false);   // (a narrow window's panel: closed once one's picked)
 });
+
+// A narrow window: the playlists don't fit beside the pages, so the Playlists icon shows them as a
+// panel; picking one, pressing Escape or clicking anywhere else closes it
+function listsPanel(open) {
+  $("app").classList.toggle("listsOpen", open);
+  $("navLists").classList.toggle("on", open);
+}
+$("navLists").addEventListener("click", (e) => { e.stopPropagation(); listsPanel(!$("app").classList.contains("listsOpen")); });
+document.addEventListener("click", (e) => { if ($("app").classList.contains("listsOpen") && !e.target.closest("#sideLists")) listsPanel(false); });
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") listsPanel(false); });
 
 // Your SoundCloud playlists and the ones you liked (refreshSidebar shows them with the others)
 async function scPlaylists() {

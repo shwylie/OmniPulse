@@ -1821,3 +1821,15 @@ body.streamSafe #navSets, body.streamSafe #navArtists, body.streamSafe #plSectio
 body { user-select: none; -webkit-user-select: none; }
 input, textarea, select, [contenteditable="true"] { user-select: text; -webkit-user-select: text; }
 .ksCopy code { user-select: all; -webkit-user-select: all; }
+
+/* ===== a narrow window: the playlists as a panel beside the icons (they don't fit in the sidebar) ===== */
+#navLists { display: none; }
+@media (max-width: 980px) {
+  #navLists { display: flex; }
+  #navLists.on { color: var(--accent); }
+  .app.listsOpen .sideLists {
+    display: flex; position: fixed; z-index: 60; left: 84px; top: 48px; bottom: 96px; width: 260px;
+    margin: 0; padding: 10px 6px; background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+  }
+}
