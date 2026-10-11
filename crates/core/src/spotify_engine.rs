@@ -315,6 +315,16 @@ pub async fn spe_login() -> Result<(), String> {
         .map_err(|e| { crate::diag::note(&format!("spotify playback sign-in: the browser's sign-in failed: {e}")); format!("Spotify sign-in: {e}") })?;
     crate::diag::note("spotify playback sign-in: signed in in the browser");
     let engine = connect(Credentials::with_access_token(token.access_token)).await?;
+    // only Premium plays through this sign-in: a free account is signed out again, and turned down as
+    // Spotify would (the app then signs in with your own app keys, or says how to set them up)
+    let product = account_type(&engine.session).await;
+    if !product.is_empty() && product != "premium" {
+        crate::diag::note(&format!("spotify playback sign-in: a {product} account: signed out of playback"));
+        engine.player.stop();
+        engine.session.shutdown();
+        if let Ok(dir) = cache_dir() { let _ = std::fs::remove_dir_all(dir); }
+        return Err(format!("Premium account required (this is a {product} Spotify account)"));
+    }
     *ENGINE.lock().await = Some(engine);
     Ok(())
 }
@@ -457,6 +467,16 @@ pub async fn spe_playlist(uri: String) -> Result<Value, String> {
     Ok(Value::Array(tracks))
 }
 
+/// A session's account type ("premium", "free", ...): it comes just after its login, so it's waited
+/// for (a few seconds at most; "" if it never says)
+async fn account_type(session: &Session) -> String {
+    for _ in 0..30 {
+        if let Some(t) = session.get_user_attribute("type").filter(|t| !t.is_empty()) { return t; }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+    String::new()
+}
+
 /// The playback sign-in's account, from its own login (not the Web API, so no rate limit can stand in
 /// the way of signing in): its username and its product ("premium", "free", ...)
 pub async fn spe_account() -> Result<Value, String> {
@@ -465,12 +485,7 @@ pub async fn spe_account() -> Result<Value, String> {
         let guard = engine().await?;
         guard.as_ref().unwrap().session.clone()
     };
-    // (its account details come just after its login: waited for, a few seconds at most)
-    let mut product = String::new();
-    for _ in 0..30 {
-        if let Some(t) = session.get_user_attribute("type").filter(|t| !t.is_empty()) { product = t; break; }
-        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-    }
+    let product = account_type(&session).await;
     crate::diag::note(&format!("spotify playback: account read: {}", if product.is_empty() { "(none given)" } else { product.as_str() }));
     Ok(json!({ "id": session.username(), "product": product }))
 }

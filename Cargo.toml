@@ -17,3 +17,8 @@ debug = "line-tables-only"
 
 [profile.dev.package."*"]
 debug = false
+
+# librespot-core with one change: a free account isn't exit(1) (which closed the whole app); see
+# vendor/librespot-core/src/session.rs check_catalogue, and VENDORED.md
+[patch.crates-io]
+librespot-core = { path = "vendor/librespot-core" }
