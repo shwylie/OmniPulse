@@ -239,10 +239,14 @@ pub fn plan_structure(a: &Measured, a_end_ms: u64, now_ms: u64, b: &Measured) ->
             [PHRASE, 4].iter().filter_map(|&e| latest(e)).find(|&k| k + PHRASE >= ideal).or_else(|| latest(1))
         };
         let (run, k) = [PHRASE, 4].iter().find_map(|&n| place(n).map(|k| (n, k)))?;
-        let every = if run >= PHRASE { PHRASE } else { 4 };
+        // (the next one's bars in the run-up: as many as the one playing's, or half or twice as many in
+        // half or double time: one of its bars as long as two of the other's, or half of one)
+        let a_per_b = b.rhythm.period_ms / (r * a.rhythm.period_ms);
+        let run_b = ((run as f64 / a_per_b).round() as usize).max(1);
+        let every = if run_b >= PHRASE { PHRASE } else { run_b.clamp(1, 4) };
         // (an intro that builds to a drop: the switch-over on the drop, the build before the run-up cut)
         let main = drop_bar(b, b_off).map_or(b_main, |d| d.max(b_main));
-        let from_bar = (0..bd.len()).find(|&c| on_phrase(c, b_off, every) && c + run >= main).unwrap_or(0).min(bd.len() - 1);
+        let from_bar = (0..bd.len()).find(|&c| on_phrase(c, b_off, every) && c + run_b >= main).unwrap_or(0).min(bd.len() - 1);
         let (bars, swap_bar) = (run as u32 + 1, run);
         // stretched to each one's tempo over the bars mixed, not its average (within a percent of it)
         let n = bars as usize * 4;
@@ -552,6 +556,12 @@ mod tests {
         // 128 into 122: on the beat, the two at one tempo from 128 to 122 by the switch-over
         let a = shaped(m(128.0, 500.0, 0, 0.5), &song(&[(64, -10.0, true), (24, -11.0, false)]));
         let b = shaped(m(122.0, 300.0, 0, 0.5), &song(&[(24, -12.0, false), (64, -9.0, true)]));
+        // (half time: 128 into 64, its intro 8 of its own bars, its beat on the switch-over: from its bar 4,
+        // as its 4 bars are the other's 8)
+        let half = shaped(m(64.0, 300.0, 0, 0.5), &song(&[(8, -12.0, false), (40, -9.0, true)]));
+        let h = plan_structure(&a, (500.0 + 88.0 * 4.0 * 60_000.0 / 128.0) as u64, 10_000, &half).expect("a half-time plan");
+        assert!(h.beatmatched && (h.rate - 1.0).abs() < 1e-6, "{h:?}");
+        assert_eq!(h.start_ms, (300.0 + 4.0 * 4.0 * 60_000.0 / 64.0f64).round() as u64);
         let bar: f64 = 4.0 * 60_000.0 / 128.0;
         let p = plan_structure(&a, (500.0 + 88.0 * bar) as u64, 10_000, &b).expect("a plan");
         let target = 122.0 / 128.0;
@@ -1015,5 +1025,29 @@ fn kick_cues_probe() {
         // claps and snares: beats 2 and 4 of the bar (odd from the downbeat) against the half beats after them
         let snare = { let e = &envs[1].1; let odd: Vec<usize> = (0..r.beats.len() - 1).filter(|i| (*i + 4 - r.downbeat % 4) % 2 == 1).collect(); let on: f64 = odd.iter().map(|&i| rise(e, r.beats[i])).sum::<f64>(); let off: f64 = odd.iter().map(|&i| rise(e, halves[i])).sum::<f64>(); off / on.max(1e-12) };
         println!("{id} ({} BPM): between/on  {}  click {click:.2}  snare(2,4) {snare:.2}", r.bpm, envs.iter().map(|(n, e)| format!("{n} {:.2}", ratio(e))).collect::<Vec<_>>().join("  "));
+    }
+}
+
+/// SoundCloud tracks for a search, with their tempo measured whole (for picking demo pairs):
+/// OMNIPULSE_PROBE_Q="drum and bass" (and _N, how many)
+#[test]
+#[ignore]
+fn find_probe() {
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    let q = std::env::var("OMNIPULSE_PROBE_Q").unwrap();
+    let n: usize = std::env::var("OMNIPULSE_PROBE_N").ok().and_then(|v| v.parse().ok()).unwrap_or(8);
+    let r = rt.block_on(omnipulse_core::soundcloud::api_get(format!("/tracks?q={}&access=playable&limit=20&linked_partitioning=true", q.replace(' ', "%20")))).unwrap();
+    let list = r["collection"].as_array().cloned().unwrap_or_default();
+    for t in list.iter().filter(|t| t["duration"].as_u64().is_some_and(|d| (120_000..420_000).contains(&d))).take(n) {
+        let id = t["id"].as_u64().unwrap().to_string();
+        let got = rt.block_on(omnipulse_core::loudness::mono_start("soundcloud", &id, 1200.0));
+        let Ok((mono, rate)) = got else { println!("{id}: no stream  {}", t["title"].as_str().unwrap_or("")); continue };
+        match omnipulse_core::rhythm::analyse(&mono, rate) {
+            Some(r) => {
+                omnipulse_core::rhythm::keep(&format!("full:{id}"), omnipulse_core::rhythm::Measured { from_ms: 0, to_ms: mono.len() as u64 * 1000 / rate as u64, rhythm: r.clone(), v: omnipulse_core::rhythm::VERSION });
+                println!("{id}: {:.1} BPM ({:.2}), {}  | {} - {}", r.bpm, r.tempo_confidence, r.camelot, t["user"]["username"].as_str().unwrap_or(""), t["title"].as_str().unwrap_or(""));
+            }
+            None => println!("{id}: no beat  {}", t["title"].as_str().unwrap_or("")),
+        }
     }
 }
