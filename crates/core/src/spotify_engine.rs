@@ -417,6 +417,22 @@ pub async fn spe_playlist(uri: String) -> Result<Value, String> {
     Ok(Value::Array(tracks))
 }
 
+/// The playback sign-in's account, from its own login (not the Web API, so no rate limit can stand in
+/// the way of signing in): its username and its product ("premium", "free", ...)
+pub async fn spe_account() -> Result<Value, String> {
+    let session = {
+        let guard = engine().await?;
+        guard.as_ref().unwrap().session.clone()
+    };
+    // (its account details come just after its login: waited for, a few seconds at most)
+    let mut product = String::new();
+    for _ in 0..30 {
+        if let Some(t) = session.get_user_attribute("type").filter(|t| !t.is_empty()) { product = t; break; }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+    Ok(json!({ "id": session.username(), "product": product }))
+}
+
 // ---------- the Web API through the playback sign-in ----------
 // The playback engine signs in as Spotify's own app, so its token works for the Web API too: the
 // app uses it for everything (library, likes, search, playlists), and a developer app of your own
@@ -460,4 +476,17 @@ pub async fn spe_web_get(path: String) -> Result<Value, String> {
         return Err(format!("Spotify said {}: {}", status.as_u16(), body.chars().take(200).collect::<String>()));
     }
     serde_json::from_str(&body).map_err(|e| e.to_string())
+}
+
+#[cfg(test)]
+mod account_live {
+    /// cargo test -p omnipulse-core spe_account_live -- --ignored --nocapture (this PC's saved playback sign-in)
+    #[test]
+    #[ignore]
+    fn spe_account_live() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let v = rt.block_on(super::spe_account()).expect("the account");
+        println!("product {:?}, username set: {}", v["product"], v["id"].as_str().is_some_and(|s| !s.is_empty()));
+        assert!(!v["product"].as_str().unwrap_or("").is_empty());
+    }
 }

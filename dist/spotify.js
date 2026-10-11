@@ -83,7 +83,23 @@ async function spotifyCheck() {
   let note = "";
   if (await invoke("spotify_signed_in")) {
     try {
-      const me = await spApi("GET", "/me");
+      // signed in for playback: the account from the playback sign-in's own login (Premium or not),
+      // not the Web API, which everyone signed in this way shares (Spotify's limits are per app); its
+      // display name from the Web API after, when Spotify allows
+      const pb = (await invoke("spe_signed_in").catch(() => false)) ? await invoke("spe_account").catch(() => null) : null;
+      if (pb && pb.product) {
+        spApi("GET", "/me").then((me) => {
+          if (!me || !me.id) return;
+          spotifyName = me.display_name || me.id;
+          spotifyMeId = me.id;
+          prefs.spAccount = { product: pb.product, name: spotifyName };
+          savePrefs();
+          syncSpotifySettings();
+        }).catch(() => {});
+      }
+      const me = pb && pb.product
+        ? { product: pb.product, id: pb.id, display_name: (prefs.spAccount && prefs.spAccount.name) || "" }
+        : await spApi("GET", "/me");
       ok = me.product === "premium";
       spotifyName = me.display_name || me.id || "";
       spotifyMeId = me.id || "";
@@ -106,10 +122,13 @@ async function spotifyCheck() {
         spotifyFree = false;
         note = "Spotify ended the sign-in. Sign in again.";
       } else if (!last) {
-        // nothing known yet: hidden until the next try, which brings it back by itself
+        // nothing known yet: hidden until the next try, which brings it back by itself (as soon as
+        // Spotify said it can, when it asked for a pause)
         spotifyFree = false;
-        note = "Could not check your Spotify account (" + e + "): trying again in a minute.";
-        spotifyCheckTimer = setTimeout(spotifyCheck, 60000);
+        const wait = spWaitSecs(e);
+        note = wait ? "Signed in. Spotify asked OmniPulse to wait a moment before checking your account: back by itself in " + wait + " s."
+          : "Could not check your Spotify account (" + e + "): trying again in a minute.";
+        spotifyCheckTimer = setTimeout(spotifyCheck, wait ? (wait + 2) * 1000 : 60000);
       } else {
         // still signed in, as last time; ask again in a minute
         ok = last.product === "premium";
