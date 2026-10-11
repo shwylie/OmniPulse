@@ -943,6 +943,32 @@ fn taste_done(shared: &Shared) {
     open_discover(shared);
 }
 
+thread_local! {
+    /// the Discover mix whose page is open (for its refresh button)
+    static OPEN_MIX: RefCell<Option<discover::Mix>> = const { RefCell::new(None) };
+}
+
+/// A mix's page refreshed: made again (for a subgenre's or a genre's, new music for its title)
+fn mix_refresh(shared: &Shared) {
+    let Some(m) = OPEN_MIX.with(|o| o.borrow().clone()) else { return };
+    let (liked, flags) = { let a = shared.borrow(); (track::Liked::of(&a.library), discover_flags(&a.web.prefs)) };
+    let avoid: std::collections::HashSet<String> = shared.borrow().page_all.iter().map(|t| t.key.clone()).collect();
+    let title = shared.borrow().ui.upgrade().map(|ui| ui.get_page_title().to_string()).unwrap_or_else(|| m.title.clone());
+    if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_status(format!("New music for {}...", m.title).into()); }
+    let (rt, weak) = { let a = shared.borrow(); (a.rt.clone(), a.ui.clone()) };
+    let token = { let mut a = shared.borrow_mut(); a.token += 1; a.token };
+    rt.spawn(async move {
+        let list = discover::mix_again(&m, flags, &liked, &avoid).await;
+        let _ = weak.upgrade_in_event_loop(move |ui| SHARED.with(|s| {
+            let Some(shared) = s.borrow().clone() else { return };
+            if shared.borrow().token != token { return; }
+            if list.is_empty() { ui.set_status("Nothing new came back for this one: try again in a moment.".into()); return; }
+            ui.set_status("".into());
+            show_tracks(&shared, "mix", &title, m.desc.clone(), list, false);
+        }));
+    });
+}
+
 /// A tile on Discover: a song plays (with the shelf's other songs after it); a mix or station opens as
 /// a page of its tracks
 fn discover_tile(shared: &Shared, sh: usize, k: usize) {
@@ -959,6 +985,7 @@ fn discover_tile(shared: &Shared, sh: usize, k: usize) {
             let title = if matches!(m.how, discover::How::Crew(_, true)) { format!("{} station", m.title) } else { m.title.clone() };
             let (rt, weak) = { let a = shared.borrow(); (a.rt.clone(), a.ui.clone()) };
             let token = { let mut a = shared.borrow_mut(); a.token += 1; a.token };
+            OPEN_MIX.with(|o| *o.borrow_mut() = Some(m.clone()));
             rt.spawn(async move {
                 let list = discover::mix_tracks(&m, flags, &liked).await;
                 let sub = if list.is_empty() { "Nothing came back for this one: try again in a moment.".to_string() } else { m.desc.clone() };
@@ -5451,6 +5478,7 @@ fn main() -> Result<(), slint::PlatformError> {
     let s = shared.clone();
     ui.on_refresh(move || {
         let page = s.borrow().page.clone();
+        if page == "mix" { return mix_refresh(&s); }
         if page == "artists" { s.borrow_mut().artists = None; }
         open_page(&s, &page);
     });

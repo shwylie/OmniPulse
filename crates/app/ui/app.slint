@@ -1071,7 +1071,7 @@ export component AppWindow inherits Window {
                     if root.page-kind != "now": HorizontalLayout {
                         spacing: 14px;
                         Text { text: root.page-title; color: Theme.text; font-size: 44px; font-weight: 800; overflow: elide; horizontal-stretch: 0; }
-                        if root.page == "discover" || root.page == "rediscover" || root.page == "sets" || root.page == "artists": RoundButton {
+                        if root.page == "discover" || root.page == "rediscover" || root.page == "sets" || root.page == "artists" || root.page == "mix": RoundButton {
                             d: Icons.refresh;
                             y: (parent.height - self.height) / 2;
                             clicked => { root.refresh(); }
