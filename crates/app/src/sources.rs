@@ -73,11 +73,86 @@ async fn sp_pages(first: String, max: usize, pick: fn(&Value) -> Option<Track>) 
     out
 }
 
-pub async fn spotify_likes(max: usize) -> Vec<Track> {
+// ---------- your Spotify likes: all of them, kept on this PC ----------
+// As the web app keeps them: the whole library read once (paced), then only what's new asked for
+// (newest first, until a like that's known: usually one request), and all of it again once a day for
+// unlikes made in Spotify's own app; liking and unliking here change the copy at once. So whether a
+// song is liked is known without asking Spotify (a rate limit can't make a liked one look unliked).
+// Kept in state/native-spotify-likes.json, as tracks' snapshots.
+const SP_LIKES_FULL_EVERY: u64 = 86_400;
+
+fn sp_likes_file() -> Option<std::path::PathBuf> {
+    core::data_dir().ok().map(|d| d.join("state").join("native-spotify-likes.json"))
+}
+
+fn sp_likes_load() -> (Vec<Track>, bool, u64) {
+    let v: Value = sp_likes_file().and_then(|p| std::fs::read_to_string(p).ok()).and_then(|t| serde_json::from_str(&t).ok()).unwrap_or(Value::Null);
+    let list = v["tracks"].as_array().map(|a| a.iter().filter_map(Track::from_snapshot).collect()).unwrap_or_default();
+    (list, v["complete"].as_bool().unwrap_or(false), v["full_at"].as_u64().unwrap_or(0))
+}
+
+fn sp_likes_save(list: &[Track], complete: bool, full_at: u64) {
+    if let Some(p) = sp_likes_file() {
+        if let Some(d) = p.parent() { let _ = std::fs::create_dir_all(d); }
+        let v = serde_json::json!({ "tracks": list.iter().map(|t| t.to_snapshot()).collect::<Vec<_>>(), "complete": complete, "full_at": full_at });
+        let _ = std::fs::write(p, v.to_string());
+    }
+}
+
+/// Your likes a page at a time from the newest, until one in `known` (or the end); and whether it
+/// got there (false: cut short, by a rate limit say: what it read is still given)
+async fn sp_likes_read(known: Option<&std::collections::HashSet<String>>) -> (Vec<Track>, bool) {
+    let mut out = Vec::new();
+    let mut offset = 0;
+    loop {
+        let Ok(v) = core::spotify::spotify_api("GET".into(), format!("/me/tracks?limit=50&offset={offset}&market=from_token"), None).await else { return (out, false) };
+        let page: Vec<Track> = v["items"].as_array().cloned().unwrap_or_default().iter().filter_map(|it| Track::spotify(&it["track"])).collect();
+        let n = v["items"].as_array().map(|a| a.len()).unwrap_or(0);
+        if let Some(k) = known {
+            if let Some(i) = page.iter().position(|t| k.contains(&t.key)) {
+                out.extend(page.into_iter().take(i));
+                return (out, true);
+            }
+        }
+        out.extend(page);
+        if n < 50 { return (out, true); }
+        offset += 50;
+    }
+}
+
+pub async fn spotify_likes(_max: usize) -> Vec<Track> {
     if !core::spotify::spotify_signed_in() {
         return Vec::new();
     }
-    sp_pages("/me/tracks".into(), max, |it| Track::spotify(&it["track"])).await
+    let (mut list, mut complete, mut full_at) = sp_likes_load();
+    let now = core::now_secs();
+    if !complete || now.saturating_sub(full_at) > SP_LIKES_FULL_EVERY {
+        let (got, whole) = sp_likes_read(None).await;
+        if whole {
+            list = got;
+            complete = true;
+            full_at = now;
+        } else {
+            // (cut short: what came back on top of what was kept)
+            let keys: std::collections::HashSet<String> = got.iter().map(|t| t.key.clone()).collect();
+            list.retain(|t| !keys.contains(&t.key));
+            list.splice(0..0, got);
+        }
+    } else {
+        let known: std::collections::HashSet<String> = list.iter().map(|t| t.key.clone()).collect();
+        let (new, _) = sp_likes_read(Some(&known)).await;
+        list.splice(0..0, new);
+    }
+    sp_likes_save(&list, complete, full_at);
+    list
+}
+
+/// A like or unlike made here: in the copy at once
+pub fn spotify_liked_note(t: &Track, on: bool) {
+    let (mut list, complete, full_at) = sp_likes_load();
+    list.retain(|x| x.key != t.key);
+    if on { list.insert(0, t.clone()); }
+    sp_likes_save(&list, complete, full_at);
 }
 
 pub fn local_files() -> Vec<Track> {
@@ -708,5 +783,28 @@ mod rank_tests {
         let mut c = t("My Pet Coelacanth (Remix)", "deadmau5", 1); c.ms = 300_000;
         assert_eq!(once_each(vec![a, b, c]).len(), 2);
         assert_eq!(words("Café n Stuff 2"), ["cafe", "stuff", "2"]);
+    }
+}
+
+#[cfg(test)]
+mod spotify_likes_tests {
+    use super::*;
+
+    #[test]
+    fn the_copy_is_kept_and_changed_by_likes_here() {
+        let dir = std::env::temp_dir().join(format!("omnipulse-splikes-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        core::set_data_dir(dir.clone());
+        let sp = |n: u32| Track::spotify(&serde_json::json!({ "uri": format!("spotify:track:s{n}"), "id": format!("s{n}"), "name": format!("Song {n}"), "artists": [{ "name": "A" }], "album": { "name": "", "images": [] }, "duration_ms": 1000 })).unwrap();
+        sp_likes_save(&[sp(1), sp(2)], true, 123);
+        let (list, complete, full_at) = sp_likes_load();
+        assert_eq!((list.iter().map(|t| t.key.clone()).collect::<Vec<_>>(), complete, full_at), (vec!["sp:s1".to_string(), "sp:s2".into()], true, 123));
+        // liked here: newest first; unliked: gone; the rest as it was
+        spotify_liked_note(&sp(3), true);
+        spotify_liked_note(&sp(1), false);
+        let (list, complete, _) = sp_likes_load();
+        assert_eq!(list.iter().map(|t| t.key.clone()).collect::<Vec<_>>(), vec!["sp:s3".to_string(), "sp:s2".into()]);
+        assert!(complete);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

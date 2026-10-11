@@ -28,11 +28,15 @@ pub async fn set_like(t: &Track, on: bool) -> Result<(), String> {
         Src::SoundCloud(id) => omnipulse_core::soundcloud::set_like(id.to_string(), on).await,
         Src::Spotify(uri) => {
             let q = format!("/me/library?uris={}", crate::sources::urlencode(uri));
-            omnipulse_core::spotify::spotify_api(if on { "PUT" } else { "DELETE" }.into(), q, None).await.map(|_| ())
+            omnipulse_core::spotify::spotify_api(if on { "PUT" } else { "DELETE" }.into(), q, None).await?;
+            // (and in this PC's copy of your likes, at once)
+            crate::sources::spotify_liked_note(t, on);
+            Ok(())
         }
         Src::Plugin(..) => Err("a plugin's track can't be liked (favourite it instead)".into()),
-        Src::Catalog(_) => Err("a catalogue's song can't be liked: it's only played from YouTube Music".into()),
-        Src::YouTube(_) => {
+        // a catalogue's song (Deezer's, Apple Music's, MusicBrainz's) plays from YouTube Music: its like
+        // is kept with YouTube Music's, here (as the web app keeps them)
+        Src::YouTube(_) | Src::Catalog(_) => {
             let mut v = read("native-yt-likes.json");
             let mut list: Vec<Value> = v.as_array().cloned().unwrap_or_default();
             list.retain(|x| x["id"].as_str() != Some(t.key.as_str()));
