@@ -145,12 +145,51 @@ async fn write(plat: &str, id: &str, title: &str, ids: &[String]) -> Result<(), 
 }
 
 /// A hidden playlist made for one here, gone with it
-pub async fn remove(plat: &str, id: &str) {
-    let _ = if plat == "soundcloud" {
+/// A copy deleted on its platform: true once it's gone (already gone counts)
+pub async fn remove(plat: &str, id: &str) -> bool {
+    let r = if plat == "soundcloud" {
         core::soundcloud::playlist_write("DELETE".into(), format!("/playlists/{id}"), None).await
     } else {
         core::spotify::spotify_api("DELETE".into(), format!("/me/library?uris={}", sources::urlencode(&format!("spotify:playlist:{id}"))), None).await
     };
+    match r { Ok(_) => true, Err(e) => e.contains("404") || e.to_lowercase().contains("not found") }
+}
+
+// Copies of deleted playlists that couldn't be deleted at the time (state/native-gone-mirrors.json),
+// tried again on the next start
+fn gone_file() -> Option<std::path::PathBuf> {
+    core::data_dir().ok().map(|d| d.join("state").join("native-gone-mirrors.json"))
+}
+
+fn gone_list() -> Vec<(String, String)> {
+    let v: Value = gone_file().and_then(|p| std::fs::read_to_string(p).ok()).and_then(|t| serde_json::from_str(&t).ok()).unwrap_or(Value::Null);
+    v.as_array().into_iter().flatten().filter_map(|x| Some((x["plat"].as_str()?.to_string(), x["id"].as_str()?.to_string()))).collect()
+}
+
+fn gone_save(list: &[(String, String)]) {
+    if let Some(p) = gone_file() {
+        if let Some(d) = p.parent() { let _ = std::fs::create_dir_all(d); }
+        let v: Vec<Value> = list.iter().map(|(plat, id)| serde_json::json!({ "plat": plat, "id": id })).collect();
+        let _ = std::fs::write(p, Value::Array(v).to_string());
+    }
+}
+
+/// A deleted playlist's copy deleted on its platform; kept to try again if it couldn't be
+pub async fn remove_or_later(plat: &str, id: &str) {
+    if !remove(plat, id).await {
+        let mut l = gone_list();
+        if !l.iter().any(|(_, x)| x == id) { l.push((plat.to_string(), id.to_string())); }
+        gone_save(&l);
+    }
+}
+
+/// The ones left from before, tried again
+pub async fn remove_left() {
+    let mut left = Vec::new();
+    for (plat, id) in gone_list() {
+        if !remove(&plat, &id).await { left.push((plat, id)); }
+    }
+    gone_save(&left);
 }
 
 /// How the sidebar's hidden list knows a platform playlist

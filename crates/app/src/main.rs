@@ -4127,8 +4127,10 @@ fn side_action(shared: &Shared, i: usize, act: &str) {
     for plat in mirror::PLATS {
         if gone["made"][plat].as_bool() == Some(true) {
             if let Some(mid) = gone["mirrors"][plat].as_str().map(String::from) {
-                hidden_set(shared, &mirror::side_id(plat, &mid), false);
-                if std::env::var_os("OMNIPULSE_SELFTEST").is_none() { shared.borrow().rt.spawn(async move { mirror::remove(plat, &mid).await; }); }
+                // (left hidden: a platform can still list one for a while after it's deleted; one that
+                // couldn't be deleted is tried again on the next start)
+                hidden_set(shared, &mirror::side_id(plat, &mid), true);
+                if std::env::var_os("OMNIPULSE_SELFTEST").is_none() { shared.borrow().rt.spawn(async move { mirror::remove_or_later(plat, &mid).await; }); }
             }
         }
     }
@@ -4285,6 +4287,7 @@ fn room_open(shared: &Shared, kind: &'static str, made: Option<serde_json::Value
                         let _ = slint::invoke_from_event_loop(move || SHARED.with(|s| { if let Some(sh) = s.borrow().clone() { room_message(&sh, m); } }));
                     });
                     ROOM.with(|r| *r.borrow_mut() = Some(room));
+                    host_keep(kind, &relay, Some(&made));
                     jam_paint(&shared);
                     if let Some(done) = ROOM_DONE.with(|d| d.borrow_mut().take()) { done(&shared); }
                 }
@@ -4297,14 +4300,64 @@ fn room_open(shared: &Shared, kind: &'static str, made: Option<serde_json::Value
     });
 }
 
-/// The room closed (the listeners told it's over, when `tell`)
+/// The room closed (the listeners told it's over, when `tell`: ended, so not picked up again)
 fn room_end(tell: bool) {
     ROOM.with(|r| {
         if let Some(room) = r.borrow_mut().take() {
             if tell { let _ = room.tx.send(serde_json::json!({ "type": "end" }).to_string()); }
         }
     });
+    if tell { host_keep("", "", None); }
     MEMBERS.with(|m| m.borrow_mut().clear());
+}
+
+// ---------- hosting through a restart (as the web app's) ----------
+// What you're hosting is kept (state/native-hosting.json, and when last), so the app closing mid-session
+// (an update) and opening again within a minute and a half picks it up where it was: everyone was told
+// you'd be back (the relay waits that long)
+const HOST_RESUME_SECS: u64 = 90;
+
+fn hosting_file() -> Option<std::path::PathBuf> {
+    omnipulse_core::data_dir().ok().map(|d| d.join("state").join("native-hosting.json"))
+}
+
+/// Kept (made: the room; None: forgotten), or (made Some, kind "") just its time refreshed
+fn host_keep(kind: &str, relay: &str, made: Option<&serde_json::Value>) {
+    let Some(p) = hosting_file() else { return };
+    match made {
+        None => { let _ = std::fs::remove_file(p); }
+        Some(m) => {
+            if let Some(d) = p.parent() { let _ = std::fs::create_dir_all(d); }
+            let v = serde_json::json!({ "kind": kind, "relay": relay, "made": m, "at": omnipulse_core::now_secs() });
+            let _ = std::fs::write(p, v.to_string());
+        }
+    }
+}
+
+thread_local! {
+    static HOST_FRESH_AT: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
+/// Still hosting: its time kept fresh (as states are pushed: every 10 s at most)
+fn host_fresh() {
+    let now = omnipulse_core::now_secs();
+    if now.saturating_sub(HOST_FRESH_AT.with(|c| c.get())) < 10 { return; }
+    HOST_FRESH_AT.with(|c| c.set(now));
+    let Some(p) = hosting_file() else { return };
+    let Some(mut v) = std::fs::read_to_string(&p).ok().and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok()) else { return };
+    v["at"] = serde_json::json!(omnipulse_core::now_secs());
+    let _ = std::fs::write(p, v.to_string());
+}
+
+fn host_resume(shared: &Shared) {
+    let Some(v) = hosting_file().and_then(|p| std::fs::read_to_string(p).ok()).and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok()) else { return };
+    let fresh = omnipulse_core::now_secs().saturating_sub(v["at"].as_u64().unwrap_or(0)) <= HOST_RESUME_SECS;
+    let kind: &'static str = match v["kind"].as_str() { Some("jam") => "jam", Some("listen") => "listen", _ => "" };
+    if !fresh || kind.is_empty() || ROOM.with(|r| r.borrow().is_some()) || listening().is_some() { host_keep("", "", None); return; }
+    room_open(shared, kind, Some(v["made"].clone()), move |s| {
+        if let Some(ui) = s.borrow().ui.upgrade() { ui.set_status(format!("Back in your {}: everyone's still with you.", if kind == "jam" { "Jam" } else { "session" }).into()); }
+        push_out(s, true);
+    });
 }
 
 /// What's playing now, and next, to the room (as the web app's hostSnapshot)
@@ -4321,6 +4374,7 @@ fn host_push(a: &App) {
         "feel": { "fadeOn": a.web.prefs["fadeOn"].as_bool() == Some(true), "fadeMs": a.web.prefs["fadeMs"].as_u64().unwrap_or(3000), "skipSilence": a.web.prefs["skipSilence"].as_u64().unwrap_or(8) },
     });
     let _ = tx.send(serde_json::json!({ "type": "state", "state": state }).to_string());
+    host_fresh();
 }
 
 /// What the room says
@@ -4721,10 +4775,20 @@ fn listen_message(shared: &Shared, m: serde_json::Value) {
             if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_status(note.into()); }
         }
         Some("state") => listen_follow(shared, m["state"].clone()),
+        // the host's app closed (an update, say): waited for; back, or gone for good (the relay says)
+        Some("hostAway") => {
+            let host = LISTEN.with(|l| l.borrow().as_ref().map(|l| l.host.clone())).unwrap_or_default();
+            if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_status(format!("{host}'s app closed: waiting for them to come back...").into()); }
+        }
+        Some("hostBack") => {
+            let host = LISTEN.with(|l| l.borrow().as_ref().map(|l| l.host.clone())).unwrap_or_default();
+            if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_status(format!("{host} is back.").into()); }
+        }
         Some("ended") => {
             let host = LISTEN.with(|l| l.borrow().as_ref().map(|l| l.host.clone())).unwrap_or_default();
             listen_leave(shared, true);
-            if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_status(format!("{host} ended the session. Back to your own queue.").into()); }
+            let why = if m["why"].as_str() == Some("hostGone") { "didn't come back, so the session's over" } else { "ended the session" };
+            if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_status(format!("{host} {why}. Back to your own queue.").into()); }
         }
         Some("declined") => {
             listen_leave(shared, true);
@@ -5488,6 +5552,11 @@ fn main() -> Result<(), slint::PlatformError> {
     {
         let s = shared.clone();
         slint::Timer::single_shot(std::time::Duration::from_secs(5), move || collab_pull_all(&s));
+        // (and copies of deleted playlists that couldn't be deleted then)
+        if std::env::var_os("OMNIPULSE_SELFTEST").is_none() { shared.borrow().rt.spawn(mirror::remove_left()); }
+        // hosting when the app closed (an update) and opened again soon after: picked up again
+        let s = shared.clone();
+        slint::Timer::single_shot(std::time::Duration::from_secs(2), move || host_resume(&s));
         let s = shared.clone();
         let t = slint::Timer::default();
         t.start(slint::TimerMode::Repeated, std::time::Duration::from_secs(collab::PULL_SECS), move || collab_pull_all(&s));
