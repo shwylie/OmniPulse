@@ -34,6 +34,7 @@
 // points; APP_SCHEME, the app's link scheme ("omnipulse").
 
 const ROOM_IDLE_MS = 12 * 3600 * 1000;   // a room nobody has used for this long goes away
+const HOST_GRACE_MS = 90 * 1000;          // the host gone (their app closed: an update, say) this long: it's over for everyone
 const MAX_LISTENERS = 50;
 const MAX_MESSAGE = 64 * 1024;
 // asking to join: each app (by its id) has one request waiting at a time, a network at most two,
@@ -273,6 +274,12 @@ export class Room {
     if (role === "host") {
       if (url.searchParams.get("key") !== meta.hostKey) return json({ error: "not the host" }, 403);
       this.ctx.getWebSockets("host").forEach((w) => { try { w.close(4000, "the host connected again"); } catch (e) {} });
+      // (back after being away: everyone's told)
+      if (await this.ctx.storage.get("hostGone")) {
+        await this.ctx.storage.delete("hostGone");
+        const back = JSON.stringify({ type: "hostBack" });
+        this.listeners().forEach((w) => { try { w.send(back); } catch (e) {} });
+      }
     } else {
       if (meta.kind === "jam" && url.searchParams.get("k") !== meta.inviteKey) return json({ error: "this Jam needs an invite" }, 403);
       if (this.listeners().length >= MAX_LISTENERS) return json({ error: "this session is full" }, 429);
@@ -375,6 +382,17 @@ export class Room {
   async webSocketClose(ws) {
     try { ws.close(); } catch (e) {}
     const who = ws.deserializeAttachment() || {};
+    // the host gone, and not back on another connection: everyone's told, and if they're not back
+    // within a minute and a half, it's over (their app closed for an update comes back sooner)
+    if (who.role === "host" && !this.ctx.getWebSockets("host").some((w) => w !== ws)) {
+      const meta = await this.meta();
+      if (meta) {
+        await this.ctx.storage.put("hostGone", Date.now());
+        const away = JSON.stringify({ type: "hostAway" });
+        this.listeners().forEach((w) => { try { w.send(away); } catch (e) {} });
+        await this.ctx.storage.setAlarm(Date.now() + HOST_GRACE_MS);
+      }
+    }
     // someone who asked (or was waiting to be let in), gone before an answer: the host's prompt goes too
     if (who.role === "asker" || who.role === "pending") {
       const msg = JSON.stringify({ type: "askGone", id: who.id });
@@ -388,8 +406,19 @@ export class Room {
     this.sendMembers(ws);
   }
 
-  // nobody's used it in a while: it goes
+  // nobody's used it in a while: it goes (or its host has been gone too long)
   async alarm() {
+    const gone = await this.ctx.storage.get("hostGone");
+    if (gone && !this.ctx.getWebSockets("host").length) {
+      if (Date.now() - gone >= HOST_GRACE_MS) {
+        const msg = JSON.stringify({ type: "ended", why: "hostGone" });
+        this.ctx.getWebSockets().forEach((w) => { try { w.send(msg); w.close(1000, "ended"); } catch (e) {} });
+        await this.ctx.storage.deleteAll();
+        return;
+      }
+      await this.ctx.storage.setAlarm(gone + HOST_GRACE_MS);
+      return;
+    }
     const meta = await this.meta();
     if (meta && Date.now() - (meta.used || 0) < ROOM_IDLE_MS) {
       await this.ctx.storage.setAlarm((meta.used || Date.now()) + ROOM_IDLE_MS);

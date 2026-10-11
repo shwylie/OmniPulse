@@ -125,10 +125,38 @@ async function hostOpen(kind, made) {
   if (together.role) await togetherEnd(true);
   const r = made || await roomCreate(kind);
   Object.assign(together, { role: "host", kind, code: r.code, hostKey: r.hostKey, inviteKey: r.inviteKey || "", joinUrl: r.joinUrl, relay, members: [], closing: false });
+  hostKeep();
   roomConnect(wsBase(relay) + "/ws/" + r.code + "?role=host&key=" + encodeURIComponent(r.hostKey), hostMessage);
   together.ws.addEventListener("open", () => hostPush(true));
   paintTogether();
   return r;
+}
+
+// ---------- hosting through a restart ----------
+// What you're hosting is kept (and when last), so the app closing mid-session (an update) and opening
+// again soon after picks it up where it was: everyone was told you'd be back (the relay waits a minute
+// and a half for you)
+const HOSTING_KEY = "sc.hosting";
+const HOST_RESUME_MS = 90 * 1000;
+function hostKeep() {
+  if (together.role !== "host") return;
+  try { localStorage.setItem(HOSTING_KEY, JSON.stringify({ kind: together.kind, code: together.code, hostKey: together.hostKey, inviteKey: together.inviteKey, joinUrl: together.joinUrl, relay: together.relay, at: Date.now() })); } catch (e) {}
+}
+function hostForget() { try { localStorage.removeItem(HOSTING_KEY); } catch (e) {} }
+
+function hostResume() {
+  let h = null;
+  try { h = JSON.parse(localStorage.getItem(HOSTING_KEY) || "null"); } catch (e) {}
+  if (!h || !h.code || !h.hostKey || Date.now() - (h.at || 0) > HOST_RESUME_MS) { hostForget(); return; }
+  Object.assign(together, { role: "host", kind: h.kind, code: h.code, hostKey: h.hostKey, inviteKey: h.inviteKey || "", joinUrl: h.joinUrl, relay: h.relay, members: [], closing: false });
+  roomConnect(wsBase(h.relay) + "/ws/" + h.code + "?role=host&key=" + encodeURIComponent(h.hostKey), hostMessage, () => {
+    // (gone meanwhile: nothing to pick up)
+    hostForget();
+    Object.assign(together, { role: null, kind: null, code: "", hostKey: "" });
+    paintTogether();
+  });
+  together.ws.addEventListener("open", () => { hostPush(true); say("Back in your " + (h.kind === "jam" ? "Jam" : "session") + ": everyone's still with you.", { force: true }); });
+  paintTogether();
 }
 
 function hostMessage(m) {
@@ -346,6 +374,7 @@ function jamDialog() {
 async function togetherEnd(quiet) {
   const was = together.role;
   together.closing = true;
+  if (was === "host") hostForget();   // (ended: not picked up again on the next start)
   if (together.ws) {
     try { if (was === "host") together.ws.send(JSON.stringify({ type: "end" })); } catch (e) {}
     try { together.ws.close(); } catch (e) {}
@@ -423,7 +452,10 @@ function listenerMessage(m) {
   if (m.type === "hello") { together.hostName = m.host || together.hostName; together.canAdd = !!m.canAdd; together.waiting = false; paintTogether(); }
   else if (m.type === "members") { together.members = m.list || []; paintTogether(); }
   else if (m.type === "state" && m.state) listenerFollow(m.state);
-  else if (m.type === "ended") togetherEnd(true).then(() => say((together.hostName || "The host") + " ended the session. Back to your own queue."));
+  // the host's app closed (an update, say): they're waited for; back, or gone for good (the relay says)
+  else if (m.type === "hostAway") { together.hostAway = true; say((together.hostName || "The host") + "'s app closed: waiting for them to come back...", { force: true }); paintTogether(); }
+  else if (m.type === "hostBack") { together.hostAway = false; say((together.hostName || "The host") + " is back.", { force: true }); paintTogether(); }
+  else if (m.type === "ended") togetherEnd(true).then(() => say((together.hostName || "The host") + (m.why === "hostGone" ? " didn't come back, so the session's over." : " ended the session.") + " Back to your own queue."));
 }
 
 // Where the host is now: what they said, plus the time since
@@ -687,7 +719,10 @@ function togetherInit() {
   $("jamEnd").addEventListener("click", () => { $("jamDialog").close(); togetherEnd(false); });
   $("jamClose").addEventListener("click", () => $("jamDialog").close());
   // the host's state follows playback, the queue and every few seconds
-  setInterval(() => hostPush(true), 8000);
+  setInterval(() => { hostPush(true); hostKeep(); }, 8000);
+  // hosting when the app closed (an update) and opened again soon after: picked up again (once your
+  // queue is back, so what everyone hears goes on)
+  setTimeout(() => { if (togetherOn() && !together.role) hostResume(); }, 1500);
   // listening along: kept in step between the host's words too (where the host is is worked out
   // from their last word and the time since)
   setInterval(() => {
