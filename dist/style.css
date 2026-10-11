@@ -1837,3 +1837,6 @@ input, textarea, select, [contenteditable="true"] { user-select: text; -webkit-u
 /* ===== a collaborative playlist: who added a song, as you hover over it ===== */
 .addedBy { display: none; margin-left: 8px; font-size: 12px; color: var(--muted); }
 #list li:hover .addedBy, #list li.selected .addedBy { display: inline; }
+
+/* the key setup opened for a reason (a free Spotify account signing in): why, above the steps */
+.ksLead { margin: 0 0 10px; padding: 10px 12px; border-radius: 8px; background: var(--elevated); color: var(--text); font-size: 13px; line-height: 1.45; }

@@ -189,6 +189,15 @@ async function spotifyConnect() {
   $("spStatus").textContent = "Finish signing in in your browser...";
   let keys = false;
   try { keys = !!(await invoke("config_status")).spotify; } catch (e) {}
+  // a free account, known already, with its keys set up: straight to signing in with them (not the
+  // playback sign-in again, which only takes Premium)
+  if (prefs.spNeedsKeys && keys) {
+    try { await invoke("spotify_login"); } catch (e2) { $("spStatus").textContent = String(e2); return; }
+    await spotifyCheck();
+    speSettingsPaint();
+    if (spotifyPremium || spotifyFree) say("Signed in to Spotify.", { force: true });
+    return;
+  }
   try {
     await invoke("spe_login");
     spNote("playback sign-in done");
@@ -202,6 +211,10 @@ async function spotifyConnect() {
       savePrefs();
       if (typeof keySetupStatus === "function") await keySetupStatus();
       $("spStatus").textContent = SP_FREE_NOTE;
+      // the steps for your own keys, at once: saved, it signs in with them
+      if (typeof keySetupOpen === "function") {
+        keySetupOpen("spotify", "That's a free Spotify account. Spotify only lets Premium accounts sign in through its own player, so a free account signs in with its own app keys instead: free from Spotify, about five minutes, once. Follow the steps below; when you save, OmniPulse signs you in with them. (Spotify songs then play from YouTube Music.)", () => spotifyConnect());
+      }
       return;
     }
     try {

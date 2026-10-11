@@ -129,8 +129,13 @@ function keySetupTake(text) {
   return true;
 }
 
-async function keySetupOpen(plat) {
+// (lead: why it's opened, shown above the steps; then, saved, it signs in by itself)
+let keySetupThen = null;
+async function keySetupOpen(plat, lead, then) {
   keySetupFor = plat;
+  keySetupThen = then || null;
+  $("ksLead").hidden = !lead;
+  $("ksLead").textContent = lead || "";
   try { keySetupPaint.status = await invoke("config_status"); } catch (e) { keySetupPaint.status = {}; }
   keySetupPaint();
   if ($("settings").open) $("settings").close();
@@ -150,6 +155,8 @@ async function keySetupSave(e) {
   }
   $("keySetup").close();
   await keySetupStatus();
+  // opened for a sign-in (a free Spotify account): signed in now, with the keys
+  if (keySetupThen) { const then = keySetupThen; keySetupThen = null; say(s.name + " is set up: signing in...", { force: true }); then(); return; }
   s.done();
   const btn = $(s.signIn);
   say(s.name + " is set up.", btn ? { stay: true, actions: [["Sign In Now", () => { $("settings").showModal(); btn.click(); }]] } : undefined);
