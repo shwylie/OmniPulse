@@ -73,12 +73,28 @@ function matchWords(s) {
     .replace(/\b(feat|ft|featuring|prod|with)\b\.?/g, " ").replace(/[^a-z0-9]+/g, " ").trim().split(" ").filter(Boolean);
 }
 
+// Who a title says is featured: "(with JENNIE)", "[feat. A & B]", " ft. A, B" at the end; their names,
+// and the title without them (core's ranking::featured, the same)
+function featuredOf(title) {
+  title = String(title || "");
+  const br = title.match(/[(\[]\s*(?:feat\.?|ft\.?|featuring|with)\s+([^)\]]+)[)\]]/i);
+  const end = br ? null : title.match(/\s(?:feat\.?|ft\.?|featuring)\s+(.+)$/i);
+  const m = br || end;
+  if (!m) return { names: [], bare: title };
+  const names = m[1].split(/\s*(?:,|&|\band\b|\bx\b)\s*/i).map((x) => x.trim()).filter(Boolean);
+  return { names, bare: title.replace(m[0], " ").replace(/\s+/g, " ").trim() };
+}
+
 function ytMatchScore(t, c) {
   const names = guessNames(t);
   const artist = matchWords(names.artist || artistName(t));
-  const want = new Set(matchWords(matchTitle(t)));
+  // who's featured ("(with JENNIE)", or credited after the first artist): not part of the title, and a
+  // version that credits them is the one (one that doesn't is likely another)
+  const ft = featuredOf(matchTitle(t));
+  const feat = ft.names.concat(String(artistName(t)).split(",").slice(1).map((x) => x.trim()).filter(Boolean)).map(matchWords).filter((w) => w.length);
+  const want = new Set(matchWords(ft.bare));
   // the artist's name in an upload's title ("Artist - Song") isn't part of the song's title
-  const got = new Set(matchWords(uploadTitle(c.title)).filter((w) => !(artist.includes(w) && !want.has(w))));
+  const got = new Set(matchWords(featuredOf(uploadTitle(c.title)).bare).filter((w) => !(artist.includes(w) && !want.has(w)) && !feat.some((f) => f.includes(w) && !want.has(w))));
   if (!want.size || !got.size) return 0;
   let shared = 0;
   want.forEach((w) => { if (got.has(w)) shared++; });
@@ -89,6 +105,10 @@ function ytMatchScore(t, c) {
   const where = new Set(matchWords(artistName(c) + " " + c.title));
   if (artist.length && artist.some((w) => where.has(w))) score += 0.3;
   else score -= 0.6;
+  if (feat.length) {
+    const hits = feat.filter((f) => f.every((w) => where.has(w))).length;
+    score += hits === feat.length ? 0.3 : hits ? 0.1 : -0.3;
+  }
   // a remix isn't the original (and the other way round)
   VERSION_WORDS.forEach((v) => { if (want.has(v) !== got.has(v)) score -= 0.6; });
   // the length, when both are known

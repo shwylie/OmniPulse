@@ -132,8 +132,14 @@ pub fn artist_hit(t: &Track, c: &YtTrack) -> bool {
 pub fn score(t: &Track, c: &YtTrack) -> f32 {
     let (ga, _) = guess_names(t);
     let artist = match_words(if ga.is_empty() { &t.artist } else { &ga });
-    let want: HashSet<String> = match_words(&match_title(t)).into_iter().collect();
-    let got: HashSet<String> = match_words(&upload_title(&c.title)).into_iter().filter(|w| !(artist.contains(w) && !want.contains(w))).collect();
+    // who's featured ("(with JENNIE)", or credited after the first artist): not part of the title, and
+    // a version that credits them is the one (one that doesn't is likely another)
+    let (mut feat, bare) = omnipulse_core::ranking::featured(&match_title(t));
+    feat.extend(t.artist.split(',').skip(1).map(|a| a.trim().to_string()).filter(|a| !a.is_empty()));
+    let feat: Vec<Vec<String>> = feat.iter().map(|f| match_words(f)).filter(|w| !w.is_empty()).collect();
+    let want: HashSet<String> = match_words(&bare).into_iter().collect();
+    let got: HashSet<String> = match_words(&omnipulse_core::ranking::featured(&upload_title(&c.title)).1).into_iter()
+        .filter(|w| !(artist.contains(w) && !want.contains(w)) && !feat.iter().any(|f| f.contains(w) && !want.contains(w))).collect();
     if want.is_empty() || got.is_empty() {
         return 0.0;
     }
@@ -143,6 +149,11 @@ pub fn score(t: &Track, c: &YtTrack) -> f32 {
         return 0.0;
     }
     s += if artist_hit(t, c) { 0.3 } else { -0.6 };
+    if !feat.is_empty() {
+        let place: HashSet<String> = match_words(&format!("{} {}", c.artists, c.title)).into_iter().collect();
+        let hits = feat.iter().filter(|f| f.iter().all(|w| place.contains(w))).count();
+        s += if hits == feat.len() { 0.3 } else if hits > 0 { 0.1 } else { -0.3 };
+    }
     for v in VERSION_WORDS {
         if want.contains(v) != got.contains(v) {
             s -= 0.6;
@@ -221,6 +232,18 @@ mod tests {
     }
     fn yt(title: &str, artists: &str, ms: u64) -> YtTrack {
         YtTrack { id: "v".into(), title: title.into(), artists: artists.into(), duration_ms: ms, ..Default::default() }
+    }
+
+    #[test]
+    fn the_version_with_who_is_featured_comes_first() {
+        // Deezer's "Dracula (with JENNIE)": the solo "Dracula" is another song (a little shorter, too)
+        let t = sc("Dracula (with JENNIE)", "Tame Impala", 209_700);
+        let solo = score(&t, &yt("Dracula", "Tame Impala", 206_000));
+        let with = score(&t, &yt("Dracula", "Tame Impala, JENNIE", 210_000));
+        assert!(with > solo + 0.3, "with {with}, solo {solo}");
+        assert!(solo > 0.0);
+        // (a song named with "with" in it isn't someone featured)
+        assert!(score(&sc("Stay With Me", "Sam Smith", 172_000), &yt("Stay With Me", "Sam Smith", 172_000)) >= 1.0);
     }
 
     #[test]

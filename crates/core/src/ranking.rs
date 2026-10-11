@@ -36,6 +36,43 @@ pub fn rank_by<T>(q: &str, list: Vec<T>, of: impl Fn(&T) -> (&str, &str, u64)) -
     scored.into_iter().map(|x| x.4).collect()
 }
 
+/// Who a title says is featured: "(with JENNIE)", "[feat. A & B]", " ft. A, B" at the end. Their
+/// names, and the title without them.
+pub fn featured(title: &str) -> (Vec<String>, String) {
+    let lower = title.to_ascii_lowercase();   // (byte for byte the same places as the title)
+    let lead = ["feat. ", "feat ", "ft. ", "ft ", "featuring ", "with "];
+    // bracketed: "(with X)"
+    let mut i = 0;
+    let b = lower.as_bytes();
+    while i < b.len() {
+        if b[i] == b'(' || b[i] == b'[' {
+            let close = if b[i] == b'(' { ')' } else { ']' };
+            if let Some(end) = lower[i..].find(close).map(|e| i + e) {
+                let inner = lower[i + 1..end].trim_start();
+                if let Some(l) = lead.iter().find(|l| inner.starts_with(**l)) {
+                    let start = i + 1 + (lower[i + 1..end].len() - inner.len()) + l.len();
+                    let names = split_names(&title[start..end]);
+                    let rest = format!("{} {}", &title[..i], &title[end + 1..]).split_whitespace().collect::<Vec<_>>().join(" ");
+                    return (names, rest);
+                }
+                i = end;
+            }
+        }
+        i += 1;
+    }
+    // at the end, unbracketed: "Song ft. X" (not "with", which songs are named with)
+    for l in ["feat. ", "feat ", "ft. ", "ft ", "featuring "] {
+        if let Some(at) = lower.find(&format!(" {l}")) {
+            return (split_names(&title[at + 1 + l.len()..]), title[..at].trim().to_string());
+        }
+    }
+    (Vec::new(), title.to_string())
+}
+
+fn split_names(s: &str) -> Vec<String> {
+    s.split([',', '&']).flat_map(|p| p.split(" and ")).flat_map(|p| p.split(" x ")).map(|p| p.trim().to_string()).filter(|p| !p.is_empty()).collect()
+}
+
 /// The lists taking turns: the first of each, then the second of each, ...
 pub fn interleave<T>(lists: Vec<Vec<T>>) -> Vec<T> {
     let mut its: Vec<_> = lists.into_iter().map(|l| l.into_iter()).collect();
@@ -51,6 +88,18 @@ pub fn interleave<T>(lists: Vec<Vec<T>>) -> Vec<T> {
         if !any {
             return out;
         }
+    }
+}
+
+#[cfg(test)]
+mod featured_tests {
+    #[test]
+    fn featured_names_come_out_of_the_title() {
+        assert_eq!(super::featured("Dracula (with JENNIE)"), (vec!["JENNIE".to_string()], "Dracula".to_string()));
+        assert_eq!(super::featured("Song [feat. A & B] (Remix)"), (vec!["A".to_string(), "B".to_string()], "Song (Remix)".to_string()));
+        assert_eq!(super::featured("Song ft. A, B"), (vec!["A".to_string(), "B".to_string()], "Song".to_string()));
+        assert_eq!(super::featured("Stay With Me").0.len(), 0);
+        assert_eq!(super::featured("Song (Radio Edit)").0.len(), 0);
     }
 }
 
