@@ -160,10 +160,12 @@ function spLikedFetch() {
     } catch (e) {
       // (cut short, by a rate limit say: what came back is added, the rest kept as it was)
       const got = e.partial || [];
+      if (typeof spNote === "function") spNote("likes: reading them failed after " + got.length + ": " + e);
       if (got.length) spLikedCache = got.concat((spLikedCache || []).filter((t) => !got.some((x) => x.id === t.id)));
       if (!got.length && !spLikedCache) throw e;
     }
     spLikedAt = Date.now();
+    if (typeof spNote === "function") spNote("likes: " + spLikedCache.length + " kept");
     spLikedCache.forEach((t) => likeState.set(t.id, true));
     spLikedKeep();
     return spLikedCache;

@@ -218,6 +218,13 @@ pub fn spotify_app_signed_in() -> bool {
 /// for developer apps since February 2026): left alone for the rest of it, the playback sign-in used
 static APP_TURNED_DOWN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
+/// Your app's keys left alone for the rest of the run, and why noted
+fn app_turned_down(why: &str) {
+    if !APP_TURNED_DOWN.swap(true, std::sync::atomic::Ordering::Relaxed) {
+        crate::diag::note(&format!("spotify: your app's keys aren't used this run ({why}): Spotify's sign-in instead"));
+    }
+}
+
 fn via_usable(via: Via) -> bool {
     match via {
         Via::App => load_sp_tokens().is_some() && !APP_TURNED_DOWN.load(std::sync::atomic::Ordering::Relaxed),
@@ -454,7 +461,16 @@ async fn spotify_api_now(method: String, path: String, body: Option<Value>) -> R
     };
     let cfg = load_config()?;
     let mut via = first_via().ok_or("Not connected to Spotify")?;
-    let mut token = token_via(via, &cfg, None).await?;
+    // (your app's sign-in failing, its keys turned down say: the playback sign-in's, for the run)
+    let mut token = match token_via(via, &cfg, None).await {
+        Ok(t) => t,
+        Err(e) if via == Via::App && playback_signed_in() => {
+            app_turned_down(&format!("its sign-in failed: {e}"));
+            via = Via::Playback;
+            token_via(via, &cfg, None).await?
+        }
+        Err(e) => return Err(e),
+    };
 
     let url = format!("{}{path}", api_base());
     let client = reqwest::Client::new();
@@ -491,10 +507,11 @@ async fn spotify_api_now(method: String, path: String, body: Option<Value>) -> R
             401 if via == Via::App && tries < 3 => token = token_via(via, &cfg, Some(&token)).await?,
             // your app's keys turned down (its owner without Premium, say): the playback sign-in's,
             // and (for that reason) not your app's again this run
+            // (any 403 but a missing permission: the owner without Premium, or you not added to it)
             403 if via == Via::App && tries < 3 && playback_signed_in() => {
                 let text = res.text().await.unwrap_or_default();
-                if text.to_lowercase().contains("premium subscription required for the owner") {
-                    APP_TURNED_DOWN.store(true, std::sync::atomic::Ordering::Relaxed);
+                if !text.to_lowercase().contains("scope") {
+                    app_turned_down(&format!("Spotify said 403 for {path}: {}", text.chars().take(200).collect::<String>()));
                 }
                 via = Via::Playback;
                 token = token_via(via, &cfg, None).await?;
@@ -502,6 +519,7 @@ async fn spotify_api_now(method: String, path: String, body: Option<Value>) -> R
             429 => {
                 let wait = retry_after(&res);
                 set_cool_until(via, now_secs() + wait);
+                crate::diag::note(&format!("spotify: rate limited ({}) for {wait} s", if via == Via::App { "your app's keys" } else { "Spotify's sign-in" }));
                 // (the other sign-in has an allowance of its own: on with that)
                 if let Some(o) = other_via(via).filter(|_| tries < 3) {
                     via = o;
@@ -518,6 +536,7 @@ async fn spotify_api_now(method: String, path: String, body: Option<Value>) -> R
     let status = res.status();
     let text = res.text().await.map_err(|e| e.to_string())?;
     if !status.is_success() {
+        crate::diag::note(&format!("spotify: {method} {} turned down ({}): {status}", path.split('?').next().unwrap_or(""), if via == Via::App { "your app's keys" } else { "Spotify's sign-in" }));
         return Err(format!("Spotify error {status}: {text}"));
     }
     if text.trim().is_empty() {

@@ -206,7 +206,7 @@ impl Sink for PcmSink {
 // taking the app with it. A mark still there when the app starts again means it did: the saved sign-in
 // is let go (and that's said), instead of the app closing again on every start.
 static BUSY: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
-static STARTED: std::sync::Once = std::sync::Once::new();
+static STARTED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 static CRASHED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 fn busy_mark() -> Option<std::path::PathBuf> {
@@ -236,7 +236,8 @@ impl Drop for Busy {
 
 // (once a run, before the engine's first use: last time's mark found, the saved sign-in let go)
 fn start_check() {
-    STARTED.call_once(|| {
+    if STARTED.swap(true, Ordering::SeqCst) { return; }
+    {
         let Ok(dir) = crate::data_dir() else { return };
         let marks = [dir.join("spotify_busy.txt"), dir.join("spotify_connecting.txt")];
         if marks.iter().any(|m| m.exists()) {
@@ -245,7 +246,7 @@ fn start_check() {
             CRASHED.store(true, Ordering::SeqCst);
             crate::diag::note("spotify playback: last run went down while using it: signed out of it");
         }
-    });
+    }
 }
 
 /// Whether Spotify playback took the app down last time (and so its sign-in was let go)
@@ -575,6 +576,8 @@ mod crash_mark_tests {
         let dir = std::env::temp_dir().join(format!("omnipulse-spemark-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         crate::set_data_dir(dir.clone());
+        // (as at a start: another test may have made the check already)
+        super::STARTED.store(false, std::sync::atomic::Ordering::SeqCst);
         // last run: went down while using the engine (the mark left), signed in (credentials kept)
         std::fs::create_dir_all(dir.join("librespot")).unwrap();
         std::fs::write(dir.join("librespot").join("credentials.json"), "{}").unwrap();
