@@ -3306,6 +3306,11 @@ fn accounts_refresh(shared: &Shared) {
     rt.spawn(async move {
         let sc = if omnipulse_core::soundcloud::signed_in() { omnipulse_core::soundcloud::api_get("/me".into()).await.ok().and_then(|v| v["username"].as_str().map(String::from)) } else { None };
         let sp = if omnipulse_core::spotify::spotify_signed_in() { omnipulse_core::spotify::spotify_api("GET".into(), "/me".into(), None).await.ok().and_then(|v| v["display_name"].as_str().or(v["id"].as_str()).map(String::from)) } else { None };
+        // (Spotify limiting the Web API, which the playback sign-in shares with everyone: its own login's username)
+        let sp = match sp {
+            None if omnipulse_core::spotify_engine::spe_signed_in() => omnipulse_core::spotify_engine::spe_account().await.ok().and_then(|v| v["id"].as_str().filter(|x| !x.is_empty()).map(String::from)),
+            sp => sp,
+        };
         let _ = weak.upgrade_in_event_loop(move |_| SHARED.with(|s| {
             ACCOUNT_NAMES.with(|n| {
                 let mut n = n.borrow_mut();
