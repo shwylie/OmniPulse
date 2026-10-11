@@ -982,3 +982,38 @@ fn mix_stems() {
     wav(&format!("{base}-B.wav"), &out_b);
     println!("wrote {base}-A.wav and -B.wav: the mix from {:.1} s, the switch-over at {:.1} s", lead as f64 / 1000.0, (lead + p.swap_ms) as f64 / 1000.0);
 }
+
+/// Which cues tell a grid on the beats from one half a beat out, on songs whose grids are known right:
+/// each cue's hits on the beats against halfway between (above 1: more between)
+#[test]
+#[ignore]
+fn kick_cues_probe() {
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    let rate = 22_050usize;
+    for id in std::env::var("OMNIPULSE_PROBE_IDS").unwrap().split(',') {
+        let Ok((mono, r0)) = rt.block_on(omnipulse_core::loudness::mono_start("soundcloud", id, 1200.0)) else { println!("{id}: no stream"); continue };
+        let r = omnipulse_core::rhythm::analyse(&mono, r0).unwrap();
+        let x = omnipulse_core::rhythm::at_analysis_rate(&mono, r0);
+        let pole = |hz: f64| 1.0 - (-2.0 * std::f64::consts::PI * hz / rate as f64).exp();
+        let lp = |x: &[f32], hz: f64| { let a = pole(hz); let (mut z1, mut z2) = (0.0f64, 0.0f64); x.iter().map(|&v| { z1 += a * (v as f64 - z1); z2 += a * (z1 - z2); z2 }).collect::<Vec<f64>>() };
+        let (l40, l120, l1k, l4k, l6k) = (lp(&x, 40.0), lp(&x, 120.0), lp(&x, 1000.0), lp(&x, 4000.0), lp(&x, 6000.0));
+        let bands: Vec<(&str, Vec<f64>)> = vec![
+            ("lows", l120.iter().zip(&l40).map(|(a, b)| a - b).collect()),
+            ("mids 1-4k", l4k.iter().zip(&l1k).map(|(a, b)| a - b).collect()),
+            ("highs 6k+", x.iter().zip(&l6k).map(|(a, b)| *a as f64 - b).collect()),
+        ];
+        let per = rate / 1000;
+        let env = |b: &[f64]| (0..b.len() / per).map(|i| { let a = i * per; let e = (a + 5 * per).min(b.len()); (b[a..e].iter().map(|v| v * v).sum::<f64>() / (e - a).max(1) as f64).sqrt() }).collect::<Vec<f64>>();
+        let envs: Vec<(&str, Vec<f64>)> = bands.iter().map(|(n, b)| (*n, env(b))).collect();
+        // a cue's rise near a moment: the biggest rise over 10 ms within 20 ms of it
+        let rise = |e: &[f64], t: f64| { let c = t.round() as i64; (c - 20..=c + 20).filter(|&i| i >= 10 && (i as usize) < e.len()).map(|i| (e[i as usize] - e[i as usize - 10]).max(0.0)).fold(0.0, f64::max) };
+        let halves: Vec<f64> = r.beats.windows(2).map(|w| (w[0] + w[1]) / 2.0).collect();
+        let ratio = |e: &[f64]| { let on: f64 = r.beats.iter().map(|&t| rise(e, t)).sum::<f64>() / r.beats.len() as f64; let off: f64 = halves.iter().map(|&t| rise(e, t)).sum::<f64>() / halves.len() as f64; off / on.max(1e-12) };
+        // the kick's click: lows and highs rising together
+        let both = |t: f64| rise(&envs[0].1, t) * rise(&envs[2].1, t);
+        let click = { let on: f64 = r.beats.iter().map(|&t| both(t)).sum::<f64>(); let off: f64 = halves.iter().map(|&t| both(t)).sum::<f64>(); off / on.max(1e-18) * r.beats.len() as f64 / halves.len() as f64 };
+        // claps and snares: beats 2 and 4 of the bar (odd from the downbeat) against the half beats after them
+        let snare = { let e = &envs[1].1; let odd: Vec<usize> = (0..r.beats.len() - 1).filter(|i| (*i + 4 - r.downbeat % 4) % 2 == 1).collect(); let on: f64 = odd.iter().map(|&i| rise(e, r.beats[i])).sum::<f64>(); let off: f64 = odd.iter().map(|&i| rise(e, halves[i])).sum::<f64>(); off / on.max(1e-12) };
+        println!("{id} ({} BPM): between/on  {}  click {click:.2}  snare(2,4) {snare:.2}", r.bpm, envs.iter().map(|(n, e)| format!("{n} {:.2}", ratio(e))).collect::<Vec<_>>().join("  "));
+    }
+}

@@ -261,6 +261,9 @@ pub fn camelot(tonic: usize, minor: bool) -> String {
     if minor { format!("{}A", CAMELOT_MAJOR[(tonic + 3) % 12]) } else { format!("{}B", CAMELOT_MAJOR[tonic % 12]) }
 }
 
+/// Mono samples at the analysis rate (for kick_strength)
+pub fn at_analysis_rate(mono: &[f32], rate: u32) -> Vec<f32> { to_analysis_rate(mono, rate) }
+
 /// Tempo, beats and key of mono samples at `rate` (a few seconds at least; the more the better)
 pub fn analyse(mono: &[f32], rate: u32) -> Option<Rhythm> {
     let x = to_analysis_rate(mono, rate);
