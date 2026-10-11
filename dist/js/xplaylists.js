@@ -91,12 +91,16 @@ function xplDelete(id) {
   if (!p) return;
   xpls = xpls.filter((x) => x !== p);
   xplSave(true);
-  // the hidden copies made for it on the platforms go too (one of yours it was made from stays)
+  // the hidden copies made for it on the platforms go too (one of yours it was made from stays). They
+  // stay hidden here (a platform can still list one for a while after it's deleted), and one that
+  // couldn't be deleted just now is tried again on the next start
   Object.keys(p.made || {}).forEach((plat) => {
     const id = p.mirrors && p.mirrors[plat];
     if (!id) return;
-    xmRemove(plat, id);
-    prefs.hiddenPlaylists = (prefs.hiddenPlaylists || []).filter((x) => x !== xmSideId(plat, id));
+    const side = xmSideId(plat, id);
+    if (!(prefs.hiddenPlaylists || []).includes(side)) prefs.hiddenPlaylists = (prefs.hiddenPlaylists || []).concat(side);
+    prefs.goneMirrors = (prefs.goneMirrors || []).filter((g) => g.id !== id).concat({ plat, id });
+    xmRemove(plat, id).then((ok) => { if (ok) { prefs.goneMirrors = (prefs.goneMirrors || []).filter((g) => g.id !== id); savePrefs(); } });
   });
   savePrefs();
   if (p.from) {

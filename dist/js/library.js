@@ -103,6 +103,15 @@ async function deletePlaylist() {
     openLikes();
     say("Playlist deleted.");
   } catch (e) {
+    // already gone there (SoundCloud can list a deleted one for a while): left out here from now on
+    if (/\b404\b|not found/i.test(String(e))) {
+      prefs.hiddenPlaylists = (prefs.hiddenPlaylists || []).concat(String(p.id));
+      savePrefs();
+      await refreshSidebar();
+      openLikes();
+      say("That playlist was already gone from SoundCloud: it's left out here now.");
+      return;
+    }
     say("Could not delete the playlist: " + e);
   }
 }

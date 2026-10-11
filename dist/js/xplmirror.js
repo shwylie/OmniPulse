@@ -105,11 +105,21 @@ async function xmWrite(plat, id, title, ids) {
   for (let i = 100; i < ids.length; i += 100) await spApi("POST", "/playlists/" + id + "/items", { uris: ids.slice(i, i + 100) });
 }
 
+// A copy deleted on its platform: true once it's gone (already gone counts)
 function xmRemove(plat, id) {
   const done = plat === "soundcloud"
     ? invoke("playlist_write", { method: "DELETE", path: "/playlists/" + id, body: null })
     : spApi("DELETE", "/me/library?uris=" + encodeURIComponent("spotify:playlist:" + id));
-  return done.catch(() => {});
+  return done.then(() => true).catch((e) => /\b404\b|not found/i.test(String(e)));
+}
+
+// Copies of deleted playlists that couldn't be deleted at the time: tried again (on start)
+function xmRemoveLeft() {
+  (prefs.goneMirrors || []).slice().forEach((g) => xmRemove(g.plat, g.id).then((ok) => {
+    if (!ok) return;
+    prefs.goneMirrors = (prefs.goneMirrors || []).filter((x) => x.id !== g.id);
+    savePrefs();
+  }));
 }
 
 function xmPlatTracks(plat, id) {
@@ -236,4 +246,5 @@ function xmInit() {
   // once the platforms are signed in, and from then on now and then
   setTimeout(() => xmSyncAll(true), 15000);
   setInterval(() => xmSyncAll(true), XM_PULL_MS);
+  setTimeout(xmRemoveLeft, 5000);
 }
