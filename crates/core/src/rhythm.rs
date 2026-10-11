@@ -20,6 +20,8 @@ const WIN: usize = 512; // ~23 ms
 const FPS: f64 = RATE as f64 / HOP as f64;
 /// How much harder a song's bass hits between its tracked beats than on them for them to be its off-beats
 const OFFBEAT_BASS: f64 = 1.1;
+/// How much a song's section changes count, against its bass, for which beat of four is its first
+const DOWNBEAT_CHANGE_WEIGHT: f64 = 2.0;
 const CHROMA_WIN: usize = 8192;
 const CHROMA_HOP: usize = 2048;
 
@@ -293,13 +295,35 @@ pub fn analyse(mono: &[f32], rate: u32) -> Option<Rhythm> {
     let mut first = mt - period_ms * mi;
     while first - period_ms >= 0.0 { first -= period_ms; }
     while first < 0.0 { first += period_ms; }
-    // the downbeat: of each four, the one where the bass hits hardest
+    // the downbeat: of each four, the one where the bass hits hardest, and (more) where the song's
+    // sections change (a drop, a breakdown, a new verse: on a bar's first beat, near always): each beat's
+    // loudness, its next 4 against its last 4, summed by where in the four it is. A song that changes a
+    // lot leans on its changes; one that hardly does, on its bass.
     let mut phase = [0.0f64; 4];
     for (i, &f) in frames.iter().enumerate() {
         let (a, b) = (f.saturating_sub(2), (f + 2).min(bass.len() - 1));
         phase[i % 4] += (a..=b).map(|k| bass[k]).fold(0.0, f64::max);
     }
-    let downbeat = (0..4).max_by(|&a, &b| phase[a].total_cmp(&phase[b])).unwrap_or(0);
+    let loud: Vec<f64> = beats.windows(2).map(|w| {
+        let (i, j) = (((w[0] / 1000.0) * RATE as f64) as usize, (((w[1] / 1000.0) * RATE as f64) as usize).min(x.len()));
+        if j <= i { return -120.0; }
+        (10.0 * (x[i..j].iter().map(|v| (*v as f64) * (*v as f64)).sum::<f64>() / (j - i) as f64).max(1e-12).log10()).max(-60.0)
+    }).collect();
+    let mut change = [0.0f64; 4];
+    for i in 4..loud.len().saturating_sub(4) {
+        let (before, after) = (loud[i - 4..i].iter().sum::<f64>() / 4.0, loud[i..i + 4].iter().sum::<f64>() / 4.0);
+        // (only a real change counts: 3 dB and up, so the beat-to-beat wobble of a steady part doesn't)
+        let d = (after - before).abs();
+        if d >= 3.0 { change[i % 4] += d; }
+    }
+    let share = |v: &[f64; 4]| { let t: f64 = v.iter().sum(); if t > 0.0 { v.map(|x| x / t) } else { [0.25; 4] } };
+    let (bass_share, change_share) = (share(&phase), share(&change));
+    let score: Vec<f64> = (0..4).map(|k| bass_share[k] + DOWNBEAT_CHANGE_WEIGHT * change_share[k]).collect();
+    let downbeat = (0..4).max_by(|&a, &b| score[a].total_cmp(&score[b])).unwrap_or(0);
+    if std::env::var_os("OMNIPULSE_RHYTHM_DEBUG").is_some() {
+        let old = (0..4).max_by(|&a, &b| phase[a].total_cmp(&phase[b])).unwrap_or(0);
+        eprintln!("rhythm debug: downbeat by bass {old}, now {downbeat}; bass {:?} changes {:?}", bass_share.map(|v| (v * 100.0).round()), change_share.map(|v| (v * 100.0).round()));
+    }
     let (tonic, minor, kconf) = key(&x);
     // each bar's loudness, from the first downbeat on (four tracked beats to a bar), and how strong its
     // beat is: its onsets and its bass at its beats, against the song's usual (a median beat's: 1)
@@ -348,8 +372,9 @@ pub struct Measured {
     pub v: u32,
 }
 
-/// (2: beats moved onto the kicks where they were tracked on the off-beats)
-pub const VERSION: u32 = 2;
+/// (2: beats moved onto the kicks where they were tracked on the off-beats; 3: the downbeat from
+/// where the sections change too)
+pub const VERSION: u32 = 3;
 
 static STORE: std::sync::Mutex<Option<std::collections::HashMap<String, Measured>>> = std::sync::Mutex::new(None);
 

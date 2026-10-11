@@ -888,3 +888,26 @@ fn kick_probe() {
         println!("{id} bars {from}..{to} {name}: rises {:.0} ms after the beat (median; quartiles {:.0} / {:.0}; beat {:.0} ms)", q(0.5), q(0.25), q(0.75), m.rhythm.period_ms);
     }
 }
+
+/// A song's loudness and kick beat by beat over bars \`OMNIPULSE_PROBE_BARS\` (to find where its drop is)
+#[test]
+#[ignore]
+fn beat_probe() {
+    let id = std::env::var("OMNIPULSE_PROBE_ID").unwrap();
+    let (from, to) = std::env::var("OMNIPULSE_PROBE_BARS").ok().and_then(|r| { let (a, b) = r.split_once("..")?; Some((a.parse::<usize>().ok()?, b.parse::<usize>().ok()?)) }).unwrap_or((28, 36));
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    let m = omnipulse_core::rhythm::known(&format!("full:{id}")).expect("measured whole");
+    let (mono, rate) = rt.block_on(omnipulse_core::loudness::mono_start("soundcloud", &id, 1200.0)).unwrap();
+    let lp = |x: &[f32], hz: f32| { let a = 1.0 - (-2.0 * std::f32::consts::PI * hz / rate as f32).exp(); let (mut z1, mut z2) = (0.0f32, 0.0f32); x.iter().map(|v| { z1 += a * (v - z1); z2 += a * (z1 - z2); z2 }).collect::<Vec<f32>>() };
+    let low = lp(&mono, 120.0);
+    let beats: Vec<f64> = m.rhythm.beats.iter().map(|b| m.from_ms as f64 + b).collect();
+    let db = |x: &[f32], a: f64, b: f64| { let (i, j) = ((a / 1000.0 * rate as f64) as usize, ((b / 1000.0 * rate as f64) as usize).min(x.len())); 10.0 * ((x[i..j].iter().map(|v| v * v).sum::<f32>() / (j - i).max(1) as f32).max(1e-12)).log10() };
+    for bar in from..to {
+        let row: Vec<String> = (0..4).map(|ph| {
+            let i = m.rhythm.downbeat + bar * 4 + ph;
+            let (t, t2) = (beats[i], beats[(i + 1).min(beats.len() - 1)]);
+            format!("{:>4.0}/{:>4.0}", db(&mono, t, t2), db(&low, t, t2))
+        }).collect();
+        println!("bar {bar:>3} at {:>6.0} ms: {}   (all/lows dB, a beat each)", beats[m.rhythm.downbeat + bar * 4], row.join("  "));
+    }
+}
