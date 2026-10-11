@@ -44,6 +44,8 @@ pub struct Track {
     /// who put it there, where that's someone other than its artist (a SoundCloud upload titled
     /// "Artist - Song"): shown in Now Playing as "uploaded by", as the web app does
     pub uploader: String,
+    /// who added it, in a collaborative playlist (shown on its row as you hover over it)
+    pub added_by: String,
 }
 
 impl Default for Src {
@@ -100,6 +102,7 @@ impl Track {
             auto: false,
             art: Default::default(),
             liked: false,
+            added_by: self.added_by.clone().into(),
             genres: slint::ModelRc::from(std::rc::Rc::new(slint::VecModel::from(genre_tags(self).into_iter().map(slint::SharedString::from).collect::<Vec<_>>()))),
             ..crate::share_flags(self)
         }
@@ -154,6 +157,7 @@ impl Track {
             plays: t["playback_count"].as_u64().unwrap_or(0),
             date: t["created_at"].as_str().unwrap_or("").chars().take(10).collect::<String>().replace('/', "-"),
             uploader: t["user"]["username"].as_str().unwrap_or("").to_string(),
+            added_by: String::new(),
         }
         .tidied())
     }
@@ -266,6 +270,9 @@ impl Track {
         if !self.label.is_empty() {
             s["label_name"] = serde_json::json!(self.label);
         }
+        if !self.added_by.is_empty() {
+            s["addedBy"] = serde_json::json!(self.added_by);
+        }
         if let Src::Spotify(uri) = &self.src {
             s["uri"] = serde_json::json!(uri);
         }
@@ -312,6 +319,7 @@ impl Track {
             plays: s["playback_count"].as_u64().unwrap_or(0),
             date: String::new(),
             uploader: String::new(),
+            added_by: s["addedBy"].as_str().unwrap_or("").to_string(),
         })
     }
 }

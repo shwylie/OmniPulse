@@ -3831,7 +3831,8 @@ fn pl_add_platform(shared: &Shared, p: sources::Playlist, t: Track) {
                 if let Some(list) = a.xpl.as_array_mut() { list.insert(0, copy); } else { a.xpl = serde_json::json!([copy]); }
                 xpl::add(&mut a.xpl, &id, std::slice::from_ref(&t));
             }
-            collab_send(&shared, &id, collab::add_op(&t));
+            let by = my_name(&shared.borrow());
+            collab_send(&shared, &id, collab::add_op(&t, &by));
             hidden_set(&shared, &mirror::side_id(p.plat, &p.id), true);
             xpl_changed(&shared);
             let where_ = if p.plat == "spotify" { "Spotify" } else { "SoundCloud" };
@@ -3982,7 +3983,7 @@ fn collab_join(shared: &Shared, code: String, relay: String, e: String) {
             let sure = std::env::var_os("OMNIPULSE_SELFTEST").is_some()
                 || rfd::MessageDialog::new().set_title("Join playlist").set_description(format!("Join \"{title}\"{by}? It's a collaborative playlist: you can add songs to it and take them out, and see everyone else's changes.")).set_buttons(rfd::MessageButtons::OkCancel).show() == rfd::MessageDialogResult::Ok;
             if !sure { return; }
-            let tracks: Vec<Track> = share["tracks"].as_array().into_iter().flatten().filter_map(|t| Track::from_snapshot(&t["snap"])).filter(|t| t.plat() != "local").collect();
+            let tracks: Vec<Track> = share["tracks"].as_array().into_iter().flatten().map(collab::with_who(&share)).filter_map(|s| Track::from_snapshot(&s)).filter(|t| t.plat() != "local").collect();
             let id = xpl::create(&mut shared.borrow_mut().xpl, &title, &tracks);
             xpl_set(&shared, &id, |x| x["collab"] = serde_json::json!({ "code": code, "relay": relay, "k": e, "owner": false, "rev": share["rev"].as_u64().unwrap_or(0) }));
             xpl_changed(&shared);
@@ -4028,8 +4029,12 @@ fn pl_add(shared: &Shared, k: usize, t: Track) {
         return;
     }
     let title = shared.borrow().playlists.iter().find(|p| p.id == id).map(|p| p.title.clone()).unwrap_or_default();
+    // (a collaborative playlist: added by you, as everyone sees it)
+    let collab = shared.borrow().xpl.as_array().is_some_and(|l| l.iter().any(|x| x["id"].as_str() == Some(id.as_str()) && x["collab"].is_object()));
+    let by = my_name(&shared.borrow());
+    let t = if collab { Track { added_by: by.clone(), ..t } } else { t };
     let n = xpl::add(&mut shared.borrow_mut().xpl, &id, std::slice::from_ref(&t));
-    if n > 0 && t.plat() != "local" { collab_send(shared, &id, collab::add_op(&t)); }
+    if n > 0 && t.plat() != "local" { collab_send(shared, &id, collab::add_op(&t, &by)); }
     xpl_changed(shared);
     if let Some(ui) = shared.borrow().ui.upgrade() {
         ui.set_status(if n > 0 { format!("Added \"{}\" to {title}.", t.title) } else { format!("\"{}\" is already in {title}.", t.title) }.into());

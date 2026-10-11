@@ -47,9 +47,21 @@ pub async fn send(c: &Value, op: Value) -> Result<u64, String> {
     Ok(v["rev"].as_u64().unwrap_or(0))
 }
 
-pub fn add_op(t: &Track) -> Value {
+/// Adding a song, and who added it (`by`: your name, as everyone in it sees it)
+/// A song of a collaborative playlist as the relay has it: its snapshot, with who added it (the
+/// playlist's owner for its first songs, and ones added before that was kept)
+pub fn with_who(share: &Value) -> impl Fn(&Value) -> Value + '_ {
+    move |t: &Value| {
+        let mut s = t["snap"].clone();
+        let by = t["by"].as_str().filter(|b| !b.is_empty()).or(share["by"].as_str()).unwrap_or("");
+        if s.is_object() && !by.is_empty() { s["addedBy"] = json!(by); }
+        s
+    }
+}
+
+pub fn add_op(t: &Track, by: &str) -> Value {
     let links: serde_json::Map<String, Value> = crate::share::links(t).into_iter().map(|(k, v)| (k.to_string(), json!(v))).collect();
-    json!({ "op": "add", "track": { "title": t.title, "artist": t.artist, "ms": t.ms, "links": links, "snap": t.to_snapshot() } })
+    json!({ "op": "add", "track": { "title": t.title, "artist": t.artist, "ms": t.ms, "links": links, "snap": t.to_snapshot(), "by": by } })
 }
 
 pub fn remove_op(key: &str) -> Value {
@@ -74,7 +86,7 @@ pub fn merged(x: &Value, share: &Value) -> Result<Option<(Vec<Value>, String, u6
         return Ok(None);
     }
     let local = |s: &Value| s["source"].as_str() == Some("local");
-    let mut tracks: Vec<Value> = share["tracks"].as_array().into_iter().flatten().map(|t| t["snap"].clone()).filter(|s| !s["id"].is_null() && !local(s)).collect();
+    let mut tracks: Vec<Value> = share["tracks"].as_array().into_iter().flatten().map(with_who(&share)).filter(|s| !s["id"].is_null() && !local(s)).collect();
     tracks.extend(x["tracks"].as_array().into_iter().flatten().filter(|s| local(s)).cloned());
     let title = share["title"].as_str().filter(|t| !t.is_empty()).or(x["title"].as_str()).unwrap_or("Playlist").to_string();
     Ok(Some((tracks, title, rev)))
@@ -117,7 +129,7 @@ mod live {
             let edit = link.split("?e=").nth(1).unwrap();
             let friend = json!({ "code": c["code"], "relay": relay, "k": edit, "owner": false, "rev": 0 });
             let b = Track { src: Src::YouTube("9bZkp7q19f0".into()), key: "yt:9bZkp7q19f0".into(), title: "Gangnam Style".into(), artist: "PSY".into(), ms: 252_000, ..Default::default() };
-            let rev = send(&friend, add_op(&b)).await.expect("sent");
+            let rev = send(&friend, add_op(&b, "Friend")).await.expect("sent");
             assert!(rev >= 1);
             // the owner pulls it in
             let x = json!({ "title": "Ours", "collab": c, "tracks": [a.to_snapshot()] });
@@ -125,12 +137,23 @@ mod live {
             let (tracks, _, got) = merged(&x, &share).unwrap().expect("changed");
             assert_eq!(got, rev);
             assert_eq!(tracks.len(), 2);
+            // who added each: the friend theirs, the owner (who shared it) the first
+            assert_eq!((tracks[0]["addedBy"].as_str(), tracks[1]["addedBy"].as_str()), (Some("Tester"), Some("Friend")));
             // removing it, then stopping it: the friend's copy is told
             send(&friend, remove_op("yt:9bZkp7q19f0")).await.expect("removed");
             stop(&c).await;
             let after = fetch(relay, c["code"].as_str().unwrap()).await.expect("fetched");
             assert!(merged(&friend_x(&friend), &after).is_err());
         });
+    }
+
+    #[test]
+    fn who_added_each() {
+        let share = json!({ "by": "Owner", "tracks": [{ "snap": { "id": "1" }, "by": "" }, { "snap": { "id": "2" }, "by": "Friend" }] });
+        let got: Vec<Value> = share["tracks"].as_array().unwrap().iter().map(with_who(&share)).collect();
+        assert_eq!((got[0]["addedBy"].as_str(), got[1]["addedBy"].as_str()), (Some("Owner"), Some("Friend")));
+        assert_eq!(Track::from_snapshot(&got[1]).unwrap().added_by, "Friend");
+        assert_eq!(Track::from_snapshot(&got[1]).unwrap().to_snapshot()["addedBy"], "Friend");
     }
 
     fn friend_x(c: &Value) -> Value {

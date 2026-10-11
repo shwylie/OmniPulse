@@ -18,7 +18,7 @@ export global Theme {
     in-out property <length> panel-radius: 10px;
 }
 
-export struct Row { title: string, artist: string, album: string, dur: string, plat: string, playing: bool, head: string, auto: bool, art: image, liked: bool, sc-link: bool, sp-link: bool, yt-link: bool, picked: bool, genres: [string] }
+export struct Row { title: string, artist: string, album: string, dur: string, plat: string, playing: bool, head: string, auto: bool, art: image, liked: bool, sc-link: bool, sp-link: bool, yt-link: bool, picked: bool, genres: [string], added-by: string }
 export struct Side { title: string, plat: string, own: bool, share: bool, sc: bool, sp: bool, collab: bool, collab-owner: bool }
 /// A platform in the title bar: on (in its colours), set up (ready; grey until it is), its name
 export struct Plat { id: string, on: bool, name: string, ready: bool }
@@ -396,6 +396,8 @@ component TrackRow inherits Rectangle {
             HorizontalLayout {
                 spacing: 6px;
                 Text { text: root.item.artist; color: Theme.muted; font-size: 13px; overflow: elide; horizontal-stretch: 1; max-width: self.preferred-width; }
+                // (a collaborative playlist: who added it, as you hover over it)
+                if (ta.has-hover || root.item.picked) && root.item.added-by != "": Text { text: "Added by " + root.item.added-by; color: Theme.muted; font-size: 12px; overflow: elide; vertical-alignment: center; }
                 for g in root.item.genres: Rectangle {
                     visible: root.show-genres;
                     height: 18px;
