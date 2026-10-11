@@ -272,7 +272,7 @@ async function openRediscover(fresh) {
     if (!plats.length) { showNothing(); return; }
     // your likes from every active platform (local files count as liked)
     const parts = await Promise.all(plats.map(async (id) => {
-      if (id === "spotify") return spotifyLikedTracks(500).catch(() => []);
+      if (id === "spotify") return spLiked().then((l) => l || []).catch(() => []);
       if (id === "local") return localTracks;
       if (id === "youtube") return ytLikedTracks();
       await ensureLikes();

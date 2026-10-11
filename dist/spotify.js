@@ -476,6 +476,7 @@ async function spotifyMadeForYou() {
 async function spotifySetLiked(t, on) {
   try {
     await spApi(on ? "PUT" : "DELETE", "/me/library?uris=" + encodeURIComponent(t.uri));
+    if (typeof spLikedNote === "function") spLikedNote(t, on);
   } catch (e) {
     if (/40[13]|scope|permission/i.test(String(e))) {
       throw new Error("Spotify needs a fresh sign-in to change your likes. Settings > Integrations > Spotify: Sign out, then Sign in.");
@@ -488,6 +489,13 @@ async function spotifySetLiked(t, on) {
 const spLikeAsked = new Set();
 async function spotifyLikeCheck(list) {
   if (!spotifyPremium && !spotifyFree) return;
+  // (all your likes kept here: known without asking Spotify)
+  if (typeof spLikedComplete !== "undefined" && spLikedComplete) {
+    let any = false;
+    list.forEach((t) => { if (srcOf(t) === "spotify" && !likeState.has(t.id)) { likeState.set(t.id, spLikedIds.has(t.id)); any = true; } });
+    if (any) refreshLikeUI();
+    return;
+  }
   const todo = list.filter((t) => srcOf(t) === "spotify" && t.uri && !likeState.has(t.id) && !spLikeAsked.has(t.id));
   for (let i = 0; i < todo.length; i += 40) {
     const batch = todo.slice(i, i + 40);

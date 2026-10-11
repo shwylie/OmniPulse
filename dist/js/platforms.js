@@ -119,7 +119,7 @@ const markLiked = (list) => list.forEach((t) => likeState.set(t.id, true));
 
 function likesFeed(id) {
   if (id === "soundcloud") return scFeed(LIKES_PATH, markLiked);
-  if (id === "spotify") return arrayFeed(() => spotifyLikedTracks(500));
+  if (id === "spotify") return arrayFeed(async () => (await spLiked()) || []);
   if (id === "youtube") return arrayFeed(async () => ytLikedTracks());
   if (id.startsWith("plug:")) return arrayFeed(() => pluginLibraryOf(id.slice(5)));
   return arrayFeed(async () => localTracks.slice());

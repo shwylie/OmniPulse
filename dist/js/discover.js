@@ -107,28 +107,91 @@ async function scSimilar() {
 // Spotify switched off recommendations and related artists for new apps in November 2024, and
 // caps searches at 10 results. So Discover on Spotify is built from what's left: Last.fm finds
 // artists similar to the ones you like, and Spotify search supplies their tracks.
+// ---------- your Spotify likes: all of them, kept on this PC ----------
+// The whole library is read once (a page of 50 at a time, paced), and kept: after that only what's
+// new is asked for (newest first, until a like that's known: usually one request), and the whole of
+// it again once a day (for unlikes made in Spotify's own app). Liking and unliking here change the
+// copy at once. With all of it here, whether a song is liked is known without asking Spotify (so a
+// rate limit can't make a liked song look unliked).
 let spLikedCache = null;
 let spLikedAt = 0;
+let spLikedComplete = false;   // the whole library read, once at least
+let spLikedFullAt = 0;
+let spLikedIds = new Set();
+const SP_LIKES_FULL_EVERY = 24 * 3600000;
 
 let spLikedFetching = null;
 let spLikedCacheRead = null;
 
+function spLikedKeep() {
+  spLikedIds = new Set((spLikedCache || []).map((t) => t.id));
+  storeSet("likes:spotify", { at: spLikedAt, tracks: (spLikedCache || []).map(xplSnap), complete: spLikedComplete, fullAt: spLikedFullAt }).catch(() => {});
+}
+
+// Your likes, a page at a time from the newest; stops at a page with one already known (known: the
+// ids of the copy), or at the end. What it read before a failure is kept, the failure passed on.
+async function spLikedRead(known) {
+  const out = [];
+  let offset = 0;
+  for (;;) {
+    let data;
+    try { data = await spApi("GET", "/me/tracks?limit=50&offset=" + offset); } catch (e) { e.partial = out; throw e; }
+    const items = (data.items || []).map((x) => x.track).filter((x) => x && x.id).map(spTrack);
+    const upTo = known ? items.findIndex((t) => known.has(t.id)) : -1;
+    out.push(...(upTo >= 0 ? items.slice(0, upTo) : items));
+    if (upTo >= 0 || !data.next || !items.length) return { list: out, ended: upTo < 0 };
+    offset += 50;
+  }
+}
+
 function spLikedFetch() {
-  spLikedFetching ??= spotifyLikedTracks(500).then((list) => {
-    spLikedCache = list;
+  spLikedFetching ??= (async () => {
+    const full = !spLikedComplete || Date.now() - spLikedFullAt > SP_LIKES_FULL_EVERY;
+    try {
+      if (full) {
+        const r = await spLikedRead(null);
+        spLikedCache = r.list;
+        spLikedComplete = true;
+        spLikedFullAt = Date.now();
+      } else {
+        const r = await spLikedRead(spLikedIds);
+        spLikedCache = r.list.concat((spLikedCache || []).filter((t) => !r.list.some((x) => x.id === t.id)));
+      }
+    } catch (e) {
+      // (cut short, by a rate limit say: what came back is added, the rest kept as it was)
+      const got = e.partial || [];
+      if (got.length) spLikedCache = got.concat((spLikedCache || []).filter((t) => !got.some((x) => x.id === t.id)));
+      if (!got.length && !spLikedCache) throw e;
+    }
     spLikedAt = Date.now();
-    cacheTracks("likes:spotify", list);
-    return list;
-  }).finally(() => { spLikedFetching = null; });
+    spLikedCache.forEach((t) => likeState.set(t.id, true));
+    spLikedKeep();
+    return spLikedCache;
+  })().finally(() => { spLikedFetching = null; });
   return spLikedFetching;
+}
+
+// A like or unlike made here: in the copy at once
+function spLikedNote(t, on) {
+  if (!spLikedCache) return;
+  spLikedCache = spLikedCache.filter((x) => x.id !== t.id);
+  if (on) spLikedCache.unshift(t);
+  spLikedKeep();
 }
 
 // Your Spotify likes, from this PC's copy when there is one (refreshed in the background when
 // it's over ten minutes old); force waits for a fresh copy
 function spLikedFromCache() {
-  spLikedCacheRead ??= cachedTracks("likes:spotify").then((c) => {
-    if (c && !spLikedCache) { spLikedCache = c.tracks; spLikedAt = c.at; c.tracks.forEach((t) => likeState.set(t.id, true)); }
-  });
+  spLikedCacheRead ??= storeGet("likes:spotify").then((c) => {
+    if (c && Array.isArray(c.tracks) && !spLikedCache) {
+      spLikedCache = c.tracks.map(fromSnap);
+      spLikedAt = c.at || 0;
+      spLikedComplete = !!c.complete;
+      spLikedFullAt = c.fullAt || 0;
+      spLikedIds = new Set(spLikedCache.map((t) => t.id));
+      spLikedCache.forEach((t) => likeState.set(t.id, true));
+    }
+  }).catch(() => {});
   return spLikedCacheRead;
 }
 
