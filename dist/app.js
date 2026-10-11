@@ -1814,6 +1814,7 @@ async function startStream(t) {
     const note = t.spGone ? "This song was removed from Spotify: playing it from YouTube Music." : "Playing from YouTube Music (this Spotify account isn't Premium).";
     if (await playViaYouTube(t, mine, note)) return;
     if (mine !== streamToken) return;
+    if (await playClosestOnYouTube(t, mine)) return;
     if (t.spGone) {
       // listening along: a song of yours plays in its place (js/together.js)
       if (together.role === "listener") { playStandIn(t, Math.max(0, (t.duration || 0) - hostPos()) || hostLenMs(t)); return; }
@@ -1828,6 +1829,7 @@ async function startStream(t) {
   if (viaYouTube(t)) {
     if (await playViaYouTube(t, mine, "", true)) return;
     if (mine !== streamToken) return;
+    if (await playClosestOnYouTube(t, mine)) return;
     throw new Error(ytOn() ? "this song couldn't be found on YouTube Music (Track preferences can pick it)" : platInfo(srcOf(t)).name + " songs play from YouTube Music, which is switched off");
   }
   if (isPluginTrack(t)) {

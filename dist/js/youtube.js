@@ -186,6 +186,14 @@ async function playYouTubeVersion(t, m, mine, note) {
   return true;
 }
 
+// No match good enough to be sure of: the closest YouTube Music found plays rather than nothing, and
+// says which it is (Track preferences can pick another). False if there was none at all.
+async function playClosestOnYouTube(t, mine) {
+  const near = ytOn() ? ytClosest(t) : null;
+  if (!near || mine !== streamToken) return false;
+  return playYouTubeVersion(t, near, mine, "No sure match on YouTube Music: playing the closest, \"" + (near.title || "") + "\" by " + artistName(near) + " (Track preferences can pick another).");
+}
+
 // ---------- likes, kept on this PC ----------
 const YT_LIKES_KEY = "sc.ytLikes";
 let ytLikes = [];   // newest first
