@@ -1816,3 +1816,8 @@ body.streamSafe #navSets, body.streamSafe #navArtists, body.streamSafe #plSectio
 }
 .npArtBox #npArtPlat .plat.platBig svg { width: 30px; height: 30px; }
 .npArtBox #npArtPlat .plat.platBig:hover { background: color-mix(in srgb, var(--plat-c, var(--text)) 22%, var(--panel)); }
+
+/* ===== no text highlighting on pages (it's an app, not a document): only where you type ===== */
+body { user-select: none; -webkit-user-select: none; }
+input, textarea, select, [contenteditable="true"] { user-select: text; -webkit-user-select: text; }
+.ksCopy code { user-select: all; -webkit-user-select: all; }
