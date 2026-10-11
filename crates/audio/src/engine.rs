@@ -634,6 +634,8 @@ struct Fading {
     /// the rate (to tune them)
     sweeps: [[Butter; 2]; 2],
     rate: u32,
+    /// a tape stop under way: where it is in what's read of the one going out (frames, fractional)
+    brake_at: f64,
 }
 
 /// One band's handover in a mix: the one coming in up from `in_at` over `in_len`, the one going out
@@ -704,6 +706,9 @@ pub struct Handoff {
     pub echo: Option<(u64, u64, u64)>,
     pub out_sweep: Option<Sweep>,
     pub in_sweep: Option<Sweep>,
+    /// a tape stop: the one going out slowed to a halt (speed and pitch together, as a turntable's
+    /// motor cut: no keylock) from `.0` over `.1` (ms from the mix's start, or frames), silent after
+    pub brake: Option<(u64, u64)>,
 }
 
 
@@ -711,7 +716,7 @@ impl Handoff {
     /// The bass alone swapped at `at` (over a quarter second), the rest crossfaded over all `ms`
     pub fn bass_swap(ms: u64, at: u64) -> Self {
         let all = Ramp::swap(0, ms);
-        Self { low: Ramp::swap(at, 250), mid: all, high: all, echo: None, out_sweep: None, in_sweep: None }
+        Self { low: Ramp::swap(at, 250), mid: all, high: all, echo: None, out_sweep: None, in_sweep: None, brake: None }
     }
 
     /// Staged over `ms` (of beats `beat_ms` long), swapped at `swap` (a downbeat): the highs cross over
@@ -731,6 +736,7 @@ impl Handoff {
             echo: Some((swap.saturating_sub(2 * beat), 3 * beat, (beat_ms * 0.75).round() as u64)),
             out_sweep: None,
             in_sweep: None,
+            brake: None,
         }
     }
 
@@ -754,7 +760,16 @@ impl Handoff {
             echo: None,
             out_sweep: Some(Sweep { points: [down[0], down[1], down[2], down[3], down[3]], high: false }),
             in_sweep: Some(Sweep { points: [down[0], down[1], down[2], down[3], (swap + glide, 10.0)], high: true }),
+            brake: None,
         }
+    }
+
+    /// A tape stop over `ms`: the one going out slows to a halt (its speed falling evenly to nothing, its
+    /// pitch with it), its last moment faded; the one coming in starts as it stops (at once, but for a
+    /// few ms against a click). For tempos too far apart to blend on the beat: one stops, the other goes.
+    pub fn tape_stop(ms: u64) -> Self {
+        let side = Ramp { in_at: ms, in_len: 25, out_at: ms.saturating_sub(60), out_len: 60 };
+        Self { low: side, mid: side, high: side, echo: None, out_sweep: None, in_sweep: None, brake: Some((0, ms)) }
     }
 
     fn frames(&self, rate: u64) -> Self {
@@ -762,6 +777,7 @@ impl Handoff {
         Self {
             low: self.low.frames(rate), mid: self.mid.frames(rate), high: self.high.frames(rate), echo: self.echo.map(|(a, b, c)| (f(a), f(b), f(c.max(1)))),
             out_sweep: self.out_sweep.map(|w| w.frames(rate)), in_sweep: self.in_sweep.map(|w| w.frames(rate)),
+            brake: self.brake.map(|(a, b)| (f(a), f(b))),
         }
     }
 }
@@ -865,7 +881,7 @@ impl Fading {
         Self {
             next, total: total.max(1), done: 0, out_buf: VecDeque::new(), in_buf: VecDeque::new(), out_ended: false, in_ended: false,
             handoff: handoff.map(|h| h.frames(rate as u64)), bands: [Bands::new(rate); 2], echo: Echo { line: Vec::new(), at: 0 },
-            sweeps: [[Butter::new(rate, 20.0, true); 2]; 2], rate,
+            sweeps: [[Butter::new(rate, 20.0, true); 2]; 2], rate, brake_at: 0.0,
         }
     }
 }
@@ -889,7 +905,25 @@ impl Fading {
         for _ in 0..frames {
             let p = (self.done as f32 / self.total.max(1) as f32).min(1.0);
             let (go, gi) = ((p * std::f32::consts::FRAC_PI_2).cos(), (p * std::f32::consts::FRAC_PI_2).sin());
-            let (ol, or) = (self.out_buf.pop_front().unwrap_or(0.0), self.out_buf.pop_front().unwrap_or(0.0));
+            let braking = self.handoff.and_then(|h| h.brake).filter(|(from, _)| self.done >= *from);
+            let (ol, or) = match braking {
+                None => (self.out_buf.pop_front().unwrap_or(0.0), self.out_buf.pop_front().unwrap_or(0.0)),
+                // stopped: nothing more of it
+                Some((from, len)) if self.done >= from + len => (0.0, 0.0),
+                // slowing: read at a falling speed (between its frames, in a line), as a turntable spinning down
+                Some((from, len)) => {
+                    let speed = 1.0 - (self.done - from) as f64 / len.max(1) as f64;
+                    let i = self.brake_at.floor() as usize;
+                    let w = (self.brake_at - i as f64) as f32;
+                    let at = |k: usize, c: usize| self.out_buf.get(k * 2 + c).copied().unwrap_or(0.0);
+                    let v = (at(i, 0) + (at(i + 1, 0) - at(i, 0)) * w, at(i, 1) + (at(i + 1, 1) - at(i, 1)) * w);
+                    self.brake_at += speed;
+                    let gone = (self.brake_at.floor() as usize).min(self.out_buf.len() / 2);
+                    self.out_buf.drain(..gone * 2);
+                    self.brake_at -= gone as f64;
+                    v
+                }
+            };
             let (il, ir) = (self.in_buf.pop_front().unwrap_or(0.0), self.in_buf.pop_front().unwrap_or(0.0));
             match self.handoff {
                 None => {
@@ -1375,6 +1409,26 @@ mod mix_tests {
         // after it (and its quarter second): only the one coming in's (82 Hz: ~16 in 0.2 s)
         let after = ups(&out, rate, 3.6, 0.2);
         assert!((15..=18).contains(&after), "after {after}");
+    }
+
+    #[test]
+    fn a_tape_stop_slows_it_to_a_halt_then_the_next_one_goes() {
+        let rate = 44_100u32;
+        let a = Box::new(Tone::new(rate, 440.0, 0.3, 10.0));
+        let b = Box::new(Tone::new(rate, 660.0, 0.3, 10.0));
+        // from 2 s: a second's stop, then the next one
+        let out = render_mix(a, b, (0.0, 0.0), rate, 2.0, 1300, Some(Handoff::tape_stop(1000)), 5.0).unwrap();
+        // upward zero crossings in a tenth of a second (a tone's frequency, near enough)
+        let ups = |at: f32| { let i = (at * rate as f32) as usize * 2; out[i..i + 2 * 4410].chunks(2).map(|f| f[0]).collect::<Vec<_>>().windows(2).filter(|w| w[0] < 0.0 && w[1] >= 0.0).count() };
+        // before it: 440 Hz (44); a quarter in: three quarters the speed (33); three quarters in: a quarter (11)
+        assert!((42..=46).contains(&ups(1.8)), "before {}", ups(1.8));
+        assert!((30..=36).contains(&ups(2.2)), "slowing {}", ups(2.2));
+        assert!((8..=14).contains(&ups(2.7)), "nearly stopped {}", ups(2.7));
+        // after it: only the next one (660 Hz: 66)
+        assert!((63..=69).contains(&ups(3.5)), "after {}", ups(3.5));
+        // and no click as it stops: nothing louder than the tones themselves
+        let peak = out[(2.9 * rate as f32) as usize * 2..(3.1 * rate as f32) as usize * 2].iter().fold(0.0f32, |m, v| m.max(v.abs()));
+        assert!(peak <= 0.36, "{peak}");
     }
 
     #[test]

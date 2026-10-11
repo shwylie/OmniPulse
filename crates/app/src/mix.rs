@@ -39,6 +39,9 @@ pub struct Plan {
     pub out_tempo: f64,
     /// how long that takes (ms of the mix: to the switch-over), 0 with no ramp
     pub ramp_ms: u64,
+    /// a tape stop: the one playing slows to a halt on its last beat, the next one goes as it stops
+    /// (tempos too far apart to blend on the beat)
+    pub tape_stop: bool,
 }
 
 /// A tempo this near the next one's isn't eased into (it's played at the one playing's, then its own)
@@ -187,6 +190,7 @@ fn downbeats(m: &Measured) -> Vec<f64> {
 /// where the next one's main part starts). `bands` (Settings' EQ Band Handoff): a band at a time
 /// instead, as a DJ's EQ (quicker). Over a soft part: a crossfade with the bass swapped halfway.
 pub fn handoff(p: &Plan, bands: bool) -> omnipulse_audio::Handoff {
+    if p.tape_stop { return omnipulse_audio::Handoff::tape_stop(p.swap_ms); }
     if !p.beatmatched { return omnipulse_audio::Handoff::bass_swap(p.ms, p.ms / 2); }
     let beat = p.ms.saturating_sub(p.swap_ms) as f64 / 4.0;
     if bands { omnipulse_audio::Handoff::staged(p.ms, beat, p.swap_ms) } else { omnipulse_audio::Handoff::wipe(beat, p.swap_ms) }
@@ -278,6 +282,7 @@ pub fn plan_structure(a: &Measured, a_end_ms: u64, now_ms: u64, b: &Measured) ->
             beatmatched: true,
             out_tempo,
             ramp_ms: if out_tempo == 1.0 { 0 } else { swap_ms.round() as u64 },
+            tape_stop: false,
         });
     }
     // (eased onto one tempo, `target` not 1.0: the next one from the one playing's tempo to its own over all of it)
@@ -292,10 +297,35 @@ pub fn plan_structure(a: &Measured, a_end_ms: u64, now_ms: u64, b: &Measured) ->
         beatmatched: false,
         out_tempo: target,
         ramp_ms: if target == 1.0 { 0 } else { ms.round() as u64 },
+        tape_stop: false,
     });
     // (how far the one playing is eased, if it can be; and how many of its bars go to one of the next one's:
     // half or double time, 2 or 1/2)
     let ramp = ramp_to(a.rhythm.bpm, b.rhythm.bpm);
+    // too far apart even for that: a tape stop. The one playing brakes over its last beat with one (two
+    // beats long: slowing evenly, it goes one), coming to rest on the downbeat its beat ends at, its
+    // outro cut; the next one starts on its main part's downbeat as it stops, its intro cut.
+    if ramp.is_none() {
+        let beat = a.rhythm.period_ms;
+        let len = (2.0 * beat).clamp(600.0, 1600.0);
+        let from = at(a_end) - beat;
+        if from >= soonest && at(a_end) <= audible + 300.0 {
+            return Some(Plan {
+                at_ms: from.round() as u64,
+                ms: (len + 300.0).round() as u64,
+                swap_ms: len.round() as u64,
+                // (an intro that builds to a drop: in at the drop, the build cut too)
+                start_ms: b_at(drop_bar(b, b_off).map_or(b_main, |d| d.max(b_main))).round() as u64,
+                rate: 1.0,
+                bars: 1,
+                semitones: 0,
+                beatmatched: false,
+                out_tempo: 1.0,
+                ramp_ms: 0,
+                tape_stop: true,
+            });
+        }
+    }
     let per = ramp.map_or(1.0, |t| t * a.rhythm.bpm / b.rhythm.bpm);
     // (bars of the one playing, eased: the time they take)
     let eased_ms = |n: f64| a_bar * n * 2.0 / (1.0 + ramp.unwrap_or(1.0));
@@ -369,6 +399,7 @@ pub fn plan(a: &Measured, a_end_ms: u64, now_ms: u64, b: &Measured, bars: u32) -
         beatmatched: true,
         out_tempo: 1.0,
         ramp_ms: 0,
+        tape_stop: false,
     })
 }
 
@@ -577,22 +608,15 @@ mod tests {
     #[test]
     fn tempos_apart_over_the_soft_part() {
         let bar: f64 = 4.0 * 60_000.0 / 128.0;
+        let beat = bar / 4.0;
         let fast_bar: f64 = 4.0 * 60_000.0 / 174.0;
         let a = shaped(m(128.0, 500.0, 0, 0.5), &song(&[(64, -10.0, true), (24, -11.0, false)]));
         let end = (500.0 + 88.0 * bar) as u64;
-        // its beatless outro (8 bars of it) as the next one comes in, each at its own tempo: the next one's
-        // beatless intro under it, as much as fits (10 of its bars), its beat as the blend ends
-        let fast = shaped(m(174.0, 300.0, 0, 0.5), &song(&[(24, -12.0, false), (64, -9.0, true)]));
-        let p = plan_structure(&a, end, 10_000, &fast).expect("a plan");
-        assert!(!p.beatmatched);
-        assert_eq!((p.bars, p.rate, p.semitones), (8, 1.0, 0));
-        // (174 is double time of 87: 128 down to it is 32%, too far to slow into)
-        assert_eq!(p.out_tempo, 1.0);
-        // 128 into 110: slowed into it over its outro, eased, held for the next one's beat
+        // 128 into 110: within reach, so eased onto one tempo over its beatless outro
         let slower = shaped(m(110.0, 300.0, 0, 0.5), &song(&[(24, -12.0, false), (64, -9.0, true)]));
         let q = plan_structure(&a, end, 10_000, &slower).expect("a plan");
         let target = 110.0 / 128.0;
-        assert!(!q.beatmatched && (q.out_tempo - target).abs() < 1e-9, "{}", q.out_tempo);
+        assert!(!q.beatmatched && !q.tape_stop && (q.out_tempo - target).abs() < 1e-9, "{}", q.out_tempo);
         // the next one from the one playing's tempo (128: its 1.16x), both arriving at 110 on the switch-over
         assert!((q.rate - 128.0 / 110.0).abs() < 1e-9 && (in_ramp(target, 0.0) - q.rate).abs() < 1e-9 && (in_ramp(target, 1.0) - 1.0).abs() < 1e-9);
         assert!((out_ramp(target, 0.0) - 1.0).abs() < 1e-9 && (out_ramp(target, 1.0) - target).abs() < 1e-9 && out_ramp(target, 0.1) > 0.98);
@@ -601,17 +625,20 @@ mod tests {
         let bar_110: f64 = 4.0 * 60_000.0 / 110.0;
         assert_eq!(q.ms, (bar * 8.0 * 2.0 / (1.0 + target)).round() as u64);
         assert_eq!(q.start_ms, (300.0 + 16.0 * bar_110).round() as u64);
-        assert_eq!(p.at_ms, (500.0 + 64.0 * bar).round() as u64);
-        assert_eq!(p.start_ms, (300.0 + 14.0 * fast_bar).round() as u64);
-        // no outro without a beat: the next one's beatless intro under the one playing's last bars, its
-        // beat coming in as the other's ends
+        // 128 into 174 (32% from it, and from its half time): too far: a tape stop. It brakes over its
+        // last beat with one (two beats long), to rest on the downbeat its beat ends at (bar 64: its
+        // outro cut); the next one goes as it stops, from its main part (bar 24: its intro cut)
+        let fast = shaped(m(174.0, 300.0, 0, 0.5), &song(&[(24, -12.0, false), (64, -9.0, true)]));
+        let p = plan_structure(&a, end, 10_000, &fast).expect("a plan");
+        assert!(p.tape_stop && !p.beatmatched && (p.rate, p.semitones, p.out_tempo) == (1.0, 0, 1.0), "{p:?}");
+        assert_eq!(p.at_ms, (500.0 + 64.0 * bar - beat).round() as u64);
+        assert_eq!(p.swap_ms, (2.0 * beat).round() as u64);
+        assert_eq!(p.start_ms, (300.0 + 24.0 * fast_bar).round() as u64);
+        // a beat to its very end: the same, on its last downbeat; into one with no intro: from its start
         let flat = shaped(m(128.0, 500.0, 0, 0.5), &song(&[(88, -10.0, true)]));
-        let p = plan_structure(&flat, end, 10_000, &fast).expect("a plan");
-        assert_eq!(p.start_ms, (300.0 + 16.0 * fast_bar).round() as u64);
-        assert!(p.at_ms + p.ms <= end - 300 && p.at_ms + p.ms + bar as u64 > end - 300);
-        // neither: two bars where the one playing's beat ends, into the next one's
         let p = plan_structure(&flat, end, 10_000, &shaped(m(174.0, 300.0, 0, 0.5), &song(&[(88, -9.0, true)]))).expect("a plan");
-        assert_eq!((p.bars, p.start_ms), (2, 300));
+        assert!(p.tape_stop);
+        assert_eq!((p.at_ms, p.start_ms), ((500.0 + 88.0 * bar - beat).round() as u64, 300));
     }
 
     #[test]
