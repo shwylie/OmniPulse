@@ -2107,7 +2107,11 @@ $("mute").addEventListener("click", () => {
 
 $("toggle").addEventListener("click", toggle);
 // Skipping by hand (buttons, keys, the remote): listening along, it goes to the Jam instead (js/together.js)
-function skipPress(d) { step(d); }
+function skipPress(d) {
+  // (skipped before it counted as a play: noted against its artist, for Discover: js/taste.js)
+  if (d > 0 && typeof noteSkip === "function") noteSkip(curTrack(), curPosMs(), curDurMs());
+  step(d);
+}
 $("prev").addEventListener("click", () => skipPress(-1));
 $("next").addEventListener("click", () => skipPress(1));
 

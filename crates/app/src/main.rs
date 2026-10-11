@@ -4682,6 +4682,11 @@ const MIX_FALLBACK_MS: u64 = 6000;
 /// A skip by hand (the buttons, media keys, the remote): listening, it goes to the Jam's host
 fn skip_press(shared: &Shared, d: i32) {
     XFADE.with(|x| *x.borrow_mut() = None);
+    // (skipped before it counted as a play: noted against its artist, for Discover)
+    if d > 0 && listening().is_none() {
+        let a = shared.borrow();
+        if let Some(q) = a.queue.qi.and_then(|i| a.queue.items.get(i)) { discover::note_skip(&q.t, a.engine.position_ms(), a.engine.duration_ms()); }
+    }
     let Some(kind) = listening() else { return step(shared, d) };
     let note = if kind == "jam" {
         listen_send(serde_json::json!({ "type": "skip", "d": if d < 0 { -1 } else { 1 } }));

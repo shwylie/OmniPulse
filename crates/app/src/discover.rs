@@ -342,6 +342,101 @@ pub fn your_artists(input: &Input) -> (Vec<Seed>, bool) {
 
 /// New songs in the vein of these artists: SoundCloud's related tracks for what you like there,
 /// Deezer's related artists (for mixes not seeded by SoundCloud), and YouTube Music's radio
+// ---------- your taste: what Discover picks by ----------
+// As the web app's (js/taste.js): the platforms only put songs forward; which make a mix, and in what
+// order, is decided from what you like and listen to. An artist you like or play: up; one put forward
+// by more than one platform: up; a genre you listen to: up; one you keep skipping: down; a little
+// chance, so a mix made again differs; at most two by one artist near the top.
+struct Taste { artists: HashMap<String, f64>, genres: HashMap<String, f64>, top_genre: f64, skips: HashMap<String, f64> }
+
+static TASTE: std::sync::Mutex<Option<Taste>> = std::sync::Mutex::new(None);
+const SKIPS_KEEP: u64 = 90 * 86_400;
+
+fn skips_file() -> Option<std::path::PathBuf> {
+    core::data_dir().ok().map(|d| d.join("state").join("native-skips.json"))
+}
+
+fn skips_load() -> Vec<(String, u64)> {
+    let now = core::now_secs();
+    let v: Value = skips_file().and_then(|p| std::fs::read_to_string(p).ok()).and_then(|t| serde_json::from_str(&t).ok()).unwrap_or(Value::Null);
+    v.as_array().into_iter().flatten()
+        .filter_map(|x| Some((x["a"].as_str()?.to_string(), x["ts"].as_u64()?)))
+        .filter(|(_, ts)| now.saturating_sub(*ts) < SKIPS_KEEP)
+        .collect()
+}
+
+/// A song skipped past (Next, a media key) after a few seconds but before it counts as a play (30 s,
+/// or half of it): its artist noted, for Discover (kept 90 days)
+pub fn note_skip(t: &Track, pos_ms: u64, dur_ms: u64) {
+    let counted = if dur_ms > 0 { (dur_ms / 2).min(30_000) } else { 30_000 };
+    if t.is_mix() || pos_ms < 3000 || pos_ms >= counted { return; }
+    let a = core::ranking::artist_key(&first_artist(t));
+    if a.is_empty() { return; }
+    let mut list = skips_load();
+    list.push((a, core::now_secs()));
+    let start = list.len().saturating_sub(2000);
+    let v: Vec<Value> = list[start..].iter().map(|(a, ts)| serde_json::json!({ "a": a, "ts": ts })).collect();
+    if let Some(p) = skips_file() {
+        if let Some(d) = p.parent() { let _ = std::fs::create_dir_all(d); }
+        let _ = std::fs::write(p, Value::Array(v).to_string());
+    }
+}
+
+fn taste_set(input: &Input) {
+    let mut artists: HashMap<String, f64> = HashMap::new();
+    let mut genres: HashMap<String, f64> = HashMap::new();
+    let add = |m: &mut HashMap<String, f64>, k: String, w: f64| { if !k.is_empty() { *m.entry(k).or_default() += w; } };
+    for t in input.library.iter().chain(&input.favourites).filter(|t| !t.is_mix()) {
+        add(&mut artists, core::ranking::artist_key(&first_artist(t)), 2.0);
+        add(&mut genres, core::ranking::artist_key(&t.genre), 2.0);
+    }
+    for (artist, _, genre) in &input.plays {
+        add(&mut artists, core::ranking::artist_key(artist.split(',').next().unwrap_or("")), 1.0);
+        add(&mut genres, core::ranking::artist_key(genre), 1.0);
+    }
+    let mut skips: HashMap<String, f64> = HashMap::new();
+    for (a, _) in skips_load() { add(&mut skips, a, 1.0); }
+    let top_genre = genres.values().cloned().fold(1.0, f64::max);
+    *TASTE.lock().unwrap() = Some(Taste { artists, genres, top_genre, skips });
+}
+
+/// The platforms' lists (one each) made into one: best for you first, at most two by one artist until
+/// the rest have had their turn
+fn taste_pick(lists: Vec<Vec<Track>>) -> Vec<Track> {
+    let key = |t: &Track| core::ranking::artist_key(&first_artist(t));
+    let mut votes: HashMap<String, f64> = HashMap::new();
+    for l in &lists {
+        let seen: std::collections::HashSet<String> = l.iter().map(key).collect();
+        for a in seen { *votes.entry(a).or_default() += 1.0; }
+    }
+    let mut x = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos() as u64).unwrap_or(7) | 1;
+    let mut chance = move || { x ^= x << 13; x ^= x >> 7; x ^= x << 17; (x % 10_000) as f64 / 10_000.0 };
+    let guard = TASTE.lock().unwrap();
+    let mut scored: Vec<(f64, Track)> = lists.into_iter().flatten().map(|t| {
+        let a = key(&t);
+        let mut s = 1.0 + 0.6 * (votes.get(&a).copied().unwrap_or(1.0) - 1.0).max(0.0);
+        if let Some(p) = guard.as_ref() {
+            let w = p.artists.get(&a).copied().unwrap_or(0.0);
+            if w > 0.0 { s += 1.2 * (1.0 + w).log2(); }
+            let g = p.genres.get(&core::ranking::artist_key(&t.genre)).copied().unwrap_or(0.0);
+            if g > 0.0 { s += 0.8 * g / p.top_genre; }
+            s /= 1.0 + 0.5 * p.skips.get(&a).copied().unwrap_or(0.0);
+        }
+        (s * (0.85 + chance() * 0.3), t)
+    }).collect();
+    drop(guard);
+    scored.sort_by(|a, b| b.0.total_cmp(&a.0));
+    let mut per: HashMap<String, usize> = HashMap::new();
+    let (mut first, mut later) = (Vec::new(), Vec::new());
+    for (_, t) in scored {
+        let n = per.entry(key(&t)).or_default();
+        *n += 1;
+        if *n <= 2 { first.push(t) } else { later.push(t) }
+    }
+    first.extend(later);
+    first
+}
+
 pub async fn fresh_for(crew: &[Seed], sc_seeded: bool, input_flags: (bool, bool, bool), liked: &Liked) -> Vec<Track> {
     let (catalog, youtube, soundcloud) = input_flags;
     let sc = async {
@@ -368,16 +463,13 @@ pub async fn fresh_for(crew: &[Seed], sc_seeded: bool, input_flags: (bool, bool,
             None => Vec::new(),
         }
     };
-    let (mut a, mut b, mut c) = tokio::join!(sc, cat, yt);
-    crate::queue::shuffle_in_place(&mut a);
-    crate::queue::shuffle_in_place(&mut b);
-    crate::queue::shuffle_in_place(&mut c);
+    let (a, b, c) = tokio::join!(sc, cat, yt);
     let crew_keys: Vec<&str> = crew.iter().map(|s| s.key.as_str()).collect();
-    crate::sources::interleave(vec![a, b, c]).into_iter()
-        .filter(|t| !t.is_mix() && !liked.has(t))
+    let keep = |t: &Track| !t.is_mix() && !liked.has(t)
         // (the crew's own songs come in as the familiar ones, not as new)
-        .filter(|t| sc_seeded || !crew_keys.contains(&core::ranking::artist_key(&first_artist(t)).as_str()))
-        .collect()
+        && (sc_seeded || !crew_keys.contains(&core::ranking::artist_key(&first_artist(t)).as_str()));
+    // (the platforms put songs forward; which make it, and in what order, is yours)
+    taste_pick([a, b, c].into_iter().map(|l| l.into_iter().filter(|t| keep(t)).collect()).collect())
 }
 
 /// A mix's or a station's tracks: mostly new music, with what you know of theirs woven in (two new
@@ -524,6 +616,7 @@ fn station(s: &Seed, flags_cat: bool, sc_seeded: bool) -> Item {
 /// Discover's shelves, in their order
 pub async fn build(input: Input) -> Vec<Shelf> {
     your_titles_set(&input.library);
+    taste_set(&input);
     let liked = Liked::of(&input.library);
     let cold = input.cold();
     let (artists, sc_seeded) = your_artists(&input);
@@ -612,6 +705,31 @@ pub async fn build(input: Input) -> Vec<Shelf> {
 
     order(&mut shelves, cold);
     shelves
+}
+
+#[cfg(test)]
+mod taste_tests {
+    use super::*;
+    fn t(artist: &str, n: usize, genre: &str) -> Vec<Track> {
+        (0..n).map(|i| Track { title: format!("{artist}{i}"), artist: artist.into(), genre: genre.into(), key: format!("{artist}{i}"), ..Default::default() }).collect()
+    }
+    #[test]
+    fn your_artists_and_genres_first_skipped_last_two_each_at_most() {
+        let mut artists = HashMap::new();
+        artists.insert("fav".to_string(), 4.0);
+        let mut genres = HashMap::new();
+        genres.insert("dnb".to_string(), 3.0);
+        let mut skips = HashMap::new();
+        skips.insert("skipped".to_string(), 4.0);
+        *TASTE.lock().unwrap() = Some(Taste { artists, genres, top_genre: 3.0, skips });
+        let out = taste_pick(vec![[t("Random", 3, ""), t("Fav", 4, ""), t("Skipped", 2, "")].concat(), [t("Genre", 2, "dnb"), t("Random2", 2, "")].concat()]);
+        let names: Vec<&str> = out.iter().map(|x| x.artist.as_str()).collect();
+        assert_eq!(&names[..2], ["Fav", "Fav"]);
+        assert_eq!(&names[2..4], ["Genre", "Genre"]);
+        assert_eq!(names[..10].iter().filter(|a| **a == "Fav").count(), 2);
+        assert_eq!(names.iter().position(|a| *a == "Skipped").unwrap(), 8);
+        *TASTE.lock().unwrap() = None;
+    }
 }
 
 #[cfg(test)]

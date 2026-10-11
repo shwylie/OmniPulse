@@ -224,7 +224,11 @@ async function spSimilarTracks(name, n) {
 // New tracks in the vein of these artists, from every platform that's on
 async function freshFor(crew, plats) {
   const sc = scRelatedTo(crew.flatMap((a) => a.liked.soundcloud), 4);
-  const sp = plats.includes("spotify")
+  // (Spotify's search only with Premium, whose songs play through Spotify; a free account's would
+  // play from YouTube Music anyway, and the search shares an allowance that's often used up: Deezer's
+  // stand in)
+  const spSearch = plats.includes("spotify") && spotifyPremium;
+  const sp = spSearch
     ? Promise.all([spSimilarTracks(crew[0].name, 3), ...crew.map((a) => spArtistTracks(a.name))]).then((l) => l.flat())
     : Promise.resolve([]);
   // YouTube Music's radio from the first artist's best-known song
@@ -233,7 +237,7 @@ async function freshFor(crew, plats) {
     : Promise.resolve([]);
   // Deezer's related artists' best-known songs (played from YouTube Music), for mixes that aren't
   // seeded by SoundCloud likes
-  const cat = useCatalog(crew, plats)
+  const cat = useCatalog(crew, plats) || (plats.includes("catalog") && plats.includes("spotify") && !spSearch)
     ? Promise.all(crew.slice(0, 3).map((a) => dzSimilarTracks(a.name).catch(() => []))).then((l) => l.flat())
     : Promise.resolve([]);
   const [a, b, c, d] = await Promise.all([sc, sp, yt, cat]);
@@ -241,7 +245,9 @@ async function freshFor(crew, plats) {
   const known = new Set(crew.map((x) => x.key));
   // (the crew's own songs come in as the familiar ones, not as new)
   const others = (t) => !(useCatalog(crew, plats) && known.has(artistKey(firstArtist(t))));
-  return withoutRecent(interleave([shuffledCopy(a), shuffledCopy(b), shuffledCopy(c), shuffledCopy(d)]).filter((t) => freshPick(t) && fresh(t) && others(t)));
+  // (the platforms put songs forward; which make it, and in what order, is yours: js/taste.js)
+  const keep = (t) => freshPick(t) && fresh(t) && others(t);
+  return withoutRecent(tastePick([a, b, c, d].map((l) => (l || []).filter(keep))));
 }
 
 // Your Mix: mostly new music in the vein of these artists, with some you like by them (on any
