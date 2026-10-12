@@ -322,15 +322,15 @@ pub async fn subgenre_tracks(name: &str) -> Vec<Track> {
 /// A mix made again (its page's refresh): a subgenre's or a genre's for its title (new music for it),
 /// any other made afresh
 pub async fn mix_again(m: &Mix, flags: (bool, bool, bool), liked: &Liked, avoid: &std::collections::HashSet<String>) -> Vec<Track> {
-    match &m.how {
+    lang_keep(match &m.how {
         // (drawn again from what the playlists agree on: none of what was showing, if there's enough)
         How::Sub(name) | How::Genre(name) => {
             let all = subgenre_tracks(name).await;
             let fresh: Vec<Track> = all.iter().filter(|t| !avoid.contains(&t.key)).cloned().collect();
             if fresh.len() >= 20 { fresh } else { all }
         }
-        _ => mix_tracks(m, flags, liked).await,
-    }
+        _ => mix_tracks_any(m, flags, liked).await,
+    })
 }
 
 async fn album_tracks(id: u64) -> Vec<Track> {
@@ -532,8 +532,24 @@ pub async fn crew_tracks(crew: &[Seed], station: bool, sc_seeded: bool, flags: (
     out
 }
 
+/// Discover's language (the web app's recLang, English unless picked): its shelves and its mixes
+static LANG: std::sync::Mutex<String> = std::sync::Mutex::new(String::new());
+
+pub fn lang_of(prefs: &Value) -> String {
+    prefs["recLang"].as_str().unwrap_or("en").to_string()
+}
+
+fn lang_keep(list: Vec<Track>) -> Vec<Track> {
+    let want = LANG.lock().unwrap().clone();
+    crate::lang::filter(list, if want.is_empty() { "en" } else { &want })
+}
+
 /// What a tile opens or plays
 pub async fn mix_tracks(m: &Mix, flags: (bool, bool, bool), liked: &Liked) -> Vec<Track> {
+    lang_keep(mix_tracks_any(m, flags, liked).await)
+}
+
+async fn mix_tracks_any(m: &Mix, flags: (bool, bool, bool), liked: &Liked) -> Vec<Track> {
     match &m.how {
         How::Crew(crew, station) => {
             let sc_seeded = crew.iter().any(|a| !a.sc_likes.is_empty());
@@ -653,6 +669,20 @@ fn station(s: &Seed, flags_cat: bool, sc_seeded: bool) -> Item {
 pub async fn build(input: Input) -> Vec<Shelf> {
     your_titles_set(&input.library);
     taste_set(&input);
+    *LANG.lock().unwrap() = lang_of(&input.prefs);
+    let mut shelves = build_any(input).await;
+    // (the shelves of songs in Discover's language; one left empty goes)
+    for sh in shelves.iter_mut() {
+        if !sh.items.iter().any(|i| matches!(i, Item::Track(_))) { continue; }
+        let tracks: Vec<Track> = sh.items.iter().filter_map(|i| if let Item::Track(t) = i { Some(t.clone()) } else { None }).collect();
+        let kept: std::collections::HashSet<String> = lang_keep(tracks).into_iter().map(|t| t.key).collect();
+        sh.items.retain(|i| if let Item::Track(t) = i { kept.contains(&t.key) } else { true });
+    }
+    shelves.retain(|sh| !sh.items.is_empty());
+    shelves
+}
+
+async fn build_any(input: Input) -> Vec<Shelf> {
     let liked = Liked::of(&input.library);
     let cold = input.cold();
     let (artists, sc_seeded) = your_artists(&input);

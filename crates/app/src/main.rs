@@ -14,6 +14,7 @@ mod instance;
 mod mix;
 mod updater;
 mod discover;
+mod lang;
 mod integrations;
 mod look;
 mod marks;
@@ -788,6 +789,8 @@ fn open_discover(shared: &Shared) {
         let likes = !a.web.favourites.is_empty() || a.library.iter().any(|t| t.plat() != "local");
         ui.set_likes_prompt(!likes);
         ui.set_taste_label(if discover::taste_genres(&a.web.prefs).is_empty() { "Pick genres".into() } else { "Your genres".into() });
+        let lang = discover::lang_of(&a.web.prefs);
+        ui.set_lang_label(lang::CHOICES.iter().find(|(v, _)| *v == lang).map(|(_, n)| *n).unwrap_or("Any language").into());
     }
     let (input, rt, weak, token) = {
         let a = shared.borrow();
@@ -5902,6 +5905,20 @@ fn main() -> Result<(), slint::PlatformError> {
     });
     let s = shared.clone();
     ui.on_taste_pick(move || taste_open(&s, 1));
+    // Discover's language: the next one, and Discover made again in it
+    let s = shared.clone();
+    ui.on_lang_next(move || {
+        let next = {
+            let mut a = s.borrow_mut();
+            let now = discover::lang_of(&a.web.prefs);
+            let i = lang::CHOICES.iter().position(|(v, _)| *v == now).unwrap_or(0);
+            let next = lang::CHOICES[(i + 1) % lang::CHOICES.len()].0;
+            if let Some(o) = a.web.prefs.as_object_mut() { o.insert("recLang".into(), serde_json::json!(next)); }
+            next
+        };
+        if std::env::var_os("OMNIPULSE_SELFTEST").is_none() { webstate::save_pref("recLang", serde_json::json!(next)); }
+        open_discover(&s);
+    });
     let s = shared.clone();
     ui.on_taste_toggle(move |r, k| taste_toggle(&s, r as usize, k as usize));
     let s = shared.clone();
@@ -6163,7 +6180,7 @@ fn main() -> Result<(), slint::PlatformError> {
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("mix") { vec![(9, "play"), (10, "mixprep"), (70, "mixseek"), (82, "mixcheck"), (100, "mixcheck"), (106, "mixcheck"), (130, "mixcheck"), (132, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("rhythm") { vec![(9, "play"), (100, "rhythm"), (101, "end")] }
             // (OMNIPULSE_SELFTEST_PLAN=look: List Density at Compact, and Search with Hide likes)
-            else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("look") { vec![(9, "play"), (12, "library"), (13, "compact"), (14, "settings"), (15, "comfy"), (16, "search"), (19, "hidelikes"), (21, "hidelikesoff"), (22, "end")] }
+            else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("look") { vec![(9, "play"), (12, "library"), (13, "compact"), (14, "settings"), (15, "comfy"), (16, "search"), (19, "hidelikes"), (21, "hidelikesoff"), (22, "discover"), (30, "langnext"), (40, "end")] }
             else if only_discover { vec![(9, "play"), (11, "discover"), (30, "disc"), (45, "discmix"), (12, "import"), (46, "taste"), (47, "taste2"), (48, "taste3"), (70, "tasted"), (71, "marquee"), (72, "marqueeoff"), (73, "end")] } else { full.to_vec() };
         t.start(slint::TimerMode::Repeated, std::time::Duration::from_millis(250), move || {
             let Some(&(at, what)) = plan.get(step_no) else { return };
@@ -6227,6 +6244,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 }
                 "search" => { ui.set_search_text("deadmau5".into()); ui.invoke_search("deadmau5".into()); }
                 "compact" => ui.invoke_density_changed(true),
+                "langnext" => { ui.invoke_lang_next(); println!("selftest: Discover language now \"{}\"", ui.get_lang_label()); }
                 "comfy" => { ui.invoke_density_changed(false); ui.invoke_nav("library".into()); }
                 "hidelikes" => { let n = ui.get_rows().row_count(); ui.invoke_hide_likes_changed(true); println!("selftest: search {n} rows, with Hide likes {}", ui.get_rows().row_count()); }
                 "hidelikesoff" => { ui.invoke_hide_likes_changed(false); println!("selftest: Hide likes off: {} rows", ui.get_rows().row_count()); }

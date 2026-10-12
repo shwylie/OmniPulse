@@ -693,6 +693,9 @@ export component AppWindow inherits Window {
     in property <[TasteRow]> taste-rows;
     in property <bool> likes-prompt;
     in property <string> taste-label: "Pick genres";
+    // Discover's language: shown, and clicked through (Any, English, Spanish...)
+    in property <string> lang-label: "English";
+    callback lang-next();
     callback taste-pick();
     callback taste-toggle(int, int);
     callback taste-save();
@@ -1254,6 +1257,7 @@ export component AppWindow inherits Window {
                                 spacing: 8px;
                                 Chip { label: "I'm Feeling Lucky"; on: true; clicked => { root.lucky(); } }
                                 Chip { label: root.taste-label; clicked => { root.taste-pick(); } }
+                                Chip { label: root.lang-label; clicked => { root.lang-next(); } }
                             }
                             // no likes or favourites yet: asked for some, for better recommendations
                             if root.likes-prompt: Rectangle {
