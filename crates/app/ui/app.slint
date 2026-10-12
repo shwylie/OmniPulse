@@ -998,6 +998,9 @@ export component AppWindow inherits Window {
     callback queue-action(int, string);
     // the queue's Clear, and Clear requests (true)
     callback queue-clear(bool);
+    // the playing song right-clicked in the player bar: the "..." menu
+    callback now-menu();
+    in-out property <int> now-menu-asks;
     in property <int> queue-requests;
     callback shuffle();
     callback play-page();
@@ -2613,6 +2616,12 @@ export component AppWindow inherits Window {
                                 height: 48px;
                                 border-radius: 6px;
                                 background: qta.has-hover ? Theme.elevated : transparent;
+                                border-width: qrdz.has-drag ? 2px : 0px;
+                                border-color: Theme.accent;
+                                qrdz := DropArea {
+                                    can-drop(e) => { return Dnd.accepts("qrow:" + i, e.data) ? DragAction.move : DragAction.none; }
+                                    dropped(e) => { Dnd.dropped("qrow:" + i, e.data); return e.proposed-action; }
+                                }
                                 HorizontalLayout {
                                     padding-left: 6px;
                                     spacing: 10px;
@@ -2645,7 +2654,12 @@ export component AppWindow inherits Window {
                                         if q.yt-link: MenuItem { title: "Copy YouTube Music Link"; activated => { root.queue-action(i, "link:youtube"); } }
                                         MenuItem { title: "Track Preferences..."; activated => { root.queue-action(i, "prefs"); } }
                                     }
-                                    qta := TouchArea { clicked => { root.play-queue(i); } }
+                                    DragArea {
+                                        allow-move: true;
+                                        allow-copy: true;
+                                        data: Dnd.payload("q:" + i);
+                                        qta := TouchArea { clicked => { root.play-queue(i); } }
+                                    }
                                 }
                             }
                         }
@@ -2717,7 +2731,14 @@ export component AppWindow inherits Window {
                                     Text { text: root.now-artist; color: Theme.muted; font-size: 13px; overflow: elide; horizontal-alignment: root.tab-right ? right : left; }
                                 }
                             }
-                            TouchArea { clicked => { root.nav(root.page == "now" ? "library" : "now"); } }
+                            DragArea {
+                                allow-copy: true;
+                                data: Dnd.payload("now");
+                                TouchArea {
+                                    clicked => { root.nav(root.page == "now" ? "library" : "now"); }
+                                    pointer-event(e) => { if (e.kind == PointerEventKind.up && e.button == PointerEventButton.right) { root.now-menu(); } }
+                                }
+                            }
                         }
                     }
                     // the curve: the body's colour, with the gap's quarter circle cut from it
@@ -2803,7 +2824,14 @@ export component AppWindow inherits Window {
                                     Text { text: root.now-artist; color: Theme.muted; font-size: 12px; overflow: elide; }
                                 }
                             }
-                            TouchArea { clicked => { root.nav(root.page == "now" ? "library" : "now"); } }
+                            DragArea {
+                                allow-copy: true;
+                                data: Dnd.payload("now");
+                                TouchArea {
+                                    clicked => { root.nav(root.page == "now" ? "library" : "now"); }
+                                    pointer-event(e) => { if (e.kind == PointerEventKind.up && e.button == PointerEventButton.right) { root.now-menu(); } }
+                                }
+                            }
                         }
                         if !root.tab-style: Rectangle { horizontal-stretch: 1; }
                         IconButton { d: root.playing ? Icons.pause : Icons.play; filled: true; size: 40px; y: (parent.height - self.height) / 2; clicked => { root.toggle(); } }
@@ -2878,6 +2906,9 @@ export component AppWindow inherits Window {
                         Rectangle {
                             width: 36px;
                             IconButton { d: Icons.more; y: (parent.height - self.height) / 2; clicked => { root.more-want(); more-menu.show(); } }
+                            // (right-clicking the playing song shows it too)
+                            property <int> menu-asked: root.now-menu-asks;
+                            changed menu-asked => { root.more-want(); more-menu.show(); }
                             more-menu := PopupWindow {
                                 x: parent.width - 240px;
                                 y: -12px - root.more-items.length * 32px - 16px;

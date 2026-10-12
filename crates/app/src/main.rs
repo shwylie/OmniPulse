@@ -5477,10 +5477,17 @@ fn pl_add(shared: &Shared, k: usize, t: Track) {
 // ("side:<i>", "page") takes tracks, and another playlist's songs (combined, as pasting them in:
 // what's there already left out); a platform playlist takes one track (adopted, as adding to it from
 // the menu does); the queue takes tracks.
+#[derive(Clone)]
 enum Dragged { Tracks(Vec<Track>), List(usize) }
 
 fn dragged(a: &App, data: &slint::DataTransfer) -> Option<Dragged> {
     let text = data.plain_text().ok()?;
+    // the playing song (the player bar's), or a queue row
+    if text == "now" { return a.queue.current().cloned().map(|t| Dragged::Tracks(vec![t])); }
+    if let Some(i) = text.strip_prefix("q:").and_then(|x| x.parse::<usize>().ok()) {
+        let at = *a.panel_map.get(i)?;
+        return a.queue.items.get(at).map(|q| Dragged::Tracks(vec![q.t.clone()]));
+    }
     if let Some(i) = text.strip_prefix("t:").and_then(|x| x.parse::<usize>().ok()) {
         let t = a.page_tracks.get(i)?;
         let many: Vec<Track> = if a.picked.contains(&t.key) && a.picked.len() > 1 { a.page_tracks.iter().filter(|x| a.picked.contains(&x.key)).cloned().collect() } else { vec![t.clone()] };
@@ -5501,12 +5508,36 @@ fn drop_list(a: &App, target: &str) -> Option<usize> {
 
 fn drop_ok(a: &App, target: &str, what: &Dragged) -> bool {
     if target == "queue" { return matches!(what, Dragged::Tracks(_)); }
+    // (before a queue row: one of what's next, not before what's playing)
+    if let Some(j) = target.strip_prefix("qrow:").and_then(|x| x.parse::<usize>().ok()) {
+        let at = a.panel_map.get(j).copied();
+        return matches!(what, Dragged::Tracks(_)) && listening().is_none() && at.is_some_and(|at| a.queue.qi.is_none_or(|qi| at > qi));
+    }
     let Some(at) = drop_list(a, target) else { return false };
     let p = &a.playlists[at];
     match what {
         Dragged::Tracks(t) => xpl::is_own(&p.id) || (p.own && p.plat != "local" && t.len() == 1),
         Dragged::List(from) => *from != at && (xpl::is_own(&p.id) || (p.own && p.plat != "local")),
     }
+}
+
+/// A drop on a queue row: a queue row moved there, or tracks put in before it
+fn drop_queue_row(shared: &Shared, j: usize, from: Option<usize>, what: Dragged) {
+    let Dragged::Tracks(list) = what else { return };
+    let mut a = shared.borrow_mut();
+    let Some(&to) = a.panel_map.get(j) else { return };
+    match from.and_then(|i| a.panel_map.get(i).copied()) {
+        Some(at) if at != to => {
+            let item = a.queue.items.remove(at);
+            let to = if at < to { to - 1 } else { to };
+            a.queue.items.insert(to, item);
+            if let Some(qi) = a.queue.qi { if at < qi && to >= qi { a.queue.qi = Some(qi - 1); } else if at > qi && to <= qi { a.queue.qi = Some(qi + 1); } }
+        }
+        Some(_) => return,
+        None => { for (k, t) in list.into_iter().enumerate() { a.queue.items.insert(to + k, queue::QItem::mine(t)); } }
+    }
+    paint_queue(&mut a);
+    save_session(&a);
 }
 
 fn drop_do(shared: &Shared, target: &str, what: Dragged) {
@@ -6600,6 +6631,11 @@ fn rand_u64() -> u64 {
 // The backup's "web" part is the web app's saved data: here, the copy it last wrote for this app.
 // This app's own settings and state are files in the data folder, and go in with the rest.
 // ---------- updates (crate::updater) ----------
+thread_local! {
+    /// the player bar's "..." lines' actions, in order
+    static MORE_ACTS: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
+}
+
 /// What a status's button does
 #[derive(Clone)]
 enum StatusAct { Update, Dismiss, Prefs(Track), Skip, Leave, Copy(String) }
@@ -7670,33 +7706,53 @@ fn main() -> Result<(), slint::PlatformError> {
     });
     // the track's menu
     let s = shared.clone();
+    // the player bar's "..." (the web app's track menu for what's playing): each line, and what it does
     ui.on_more_want(move || {
         let a = s.borrow();
         let Some(ui) = a.ui.upgrade() else { return };
-        let mut items: Vec<slint::SharedString> = Vec::new();
-        if let Some(t) = a.queue.current() {
-            if !t.web_link().is_empty() { items.push(format!("Open on {}", match t.plat() { "spotify" => "Spotify", "youtube" => "YouTube Music", _ => "SoundCloud" }).into()); }
-            if !t.artist.is_empty() { items.push(format!("Search for {}", t.artist.split(", ").next().unwrap_or("")).into()); }
-            items.push("Search for this song".into());
-            items.push("Track preferences...".into());
-            for (plat, _) in share::links(t) { items.push(format!("Copy {} link", share::name(plat)).into()); }
+        let mut items: Vec<(String, String)> = Vec::new();
+        if let Some(t) = a.queue.current().cloned() {
+            let m = marks_of(&a);
+            let r = row_menu(&a, &m, &t, t.row(true));
+            items.push(("Play Next".into(), "next".into()));
+            items.push(("Add to Queue".into(), "add".into()));
+            if r.can_like { items.push((if r.liked { "Remove from Likes" } else { "Add to Likes" }.into(), "like".into())); }
+            items.push((if r.fav { "Remove from Favourites" } else { "Add to Favourites" }.into(), "fav".into()));
+            let names: Vec<String> = t.artist.split([',', '&']).map(|x| x.trim().to_string()).filter(|x| !x.is_empty()).collect();
+            if names.len() > 1 { for (k, n) in names.iter().enumerate() { items.push((format!("Go to {n}"), format!("artist:{k}"))); } } else { items.push(("Go to Artist".into(), "artist:0".into())); }
+            if !r.uploader.is_empty() { items.push((format!("Go to {} (Uploader)", r.uploader), "uploader".into())); }
+            items.push(("Search for This Song".into(), "search".into()));
+            items.push(("Don't Recommend This Track".into(), "hide:track".into()));
+            if !t.album.is_empty() { items.push(("Don't Recommend This Album".into(), "hide:album".into())); }
+            if let Some(n) = names.first() { items.push((format!("Don't Recommend {n}"), "hide:artist".into())); }
+            if !r.cleared.is_empty() { items.push((r.cleared.to_string(), "cleared".into())); }
+            if !r.open_label.is_empty() { items.push((r.open_label.to_string(), "open".into())); }
+            for (plat, _) in share::links(&t) { items.push((format!("Copy {} Link", share::name(plat)), format!("link:{plat}"))); }
+            items.push(("Track Preferences...".into(), "prefs".into()));
         }
-        ui.set_more_items(ModelRc::from(Rc::new(VecModel::from(items))));
+        MORE_ACTS.with(|m| *m.borrow_mut() = items.iter().map(|x| x.1.clone()).collect());
+        ui.set_more_items(ModelRc::from(Rc::new(VecModel::from(items.into_iter().map(|x| slint::SharedString::from(x.0)).collect::<Vec<_>>()))));
     });
     let s = shared.clone();
     ui.on_more_pick(move |i| {
-        let Some(ui) = s.borrow().ui.upgrade() else { return };
-        let Some(item) = ui.get_more_items().row_data(i as usize).map(|x| x.to_string()) else { return };
+        let Some(act) = MORE_ACTS.with(|m| m.borrow().get(i as usize).cloned()) else { return };
         let Some(t) = s.borrow().queue.current().cloned() else { return };
-        if item == "Track preferences..." { return tp_open(&s, &t); }
-        if let Some(name) = item.strip_prefix("Copy ").and_then(|x| x.strip_suffix(" link")) {
-            if let Some((plat, _)) = share::PLATS.iter().find(|(_, n)| *n == name) { copy_track_link(&s, &t, plat); }
-        } else if item.starts_with("Open on") {
-            if let Err(e) = omnipulse_core::open_url(t.web_link()) { ui.set_status(e.into()); }
-        } else {
-            let q = if item == "Search for this song" { format!("{} {}", t.artist.split(", ").next().unwrap_or(""), t.title) } else { t.artist.split(", ").next().unwrap_or("").to_string() };
-            ui.set_search_text(q.clone().into());
-            go(&s, Place::Search(q));
+        if let Some(plat) = act.strip_prefix("link:") { return copy_track_link(&s, &t, plat); }
+        if let Some(what) = act.strip_prefix("hide:") { return hide_track(&s, &t, what); }
+        match act.as_str() {
+            "next" | "add" => {
+                let mut a = s.borrow_mut();
+                if act == "next" { a.queue.play_next(t.clone()); } else { a.queue.add(t.clone()); }
+                paint_queue(&mut a);
+                save_session(&a);
+                if let Some(ui) = a.ui.upgrade() { ui.set_status(format!("{} \"{}\".", if act == "next" { "Playing next:" } else { "Added to the queue:" }, t.title).into()); }
+            }
+            "search" => {
+                let q = format!("{} {}", t.artist.split(", ").next().unwrap_or(""), t.title);
+                if let Some(ui) = s.borrow().ui.upgrade() { ui.set_search_text(q.clone().into()); }
+                go(&s, Place::Search(q));
+            }
+            other => { track_act(&s, &t, other); }
         }
     });
     let s = shared.clone();
@@ -7718,6 +7774,10 @@ fn main() -> Result<(), slint::PlatformError> {
                 return;
             }
             let what = { let a = s.borrow(); dragged(&a, &data).filter(|w| drop_ok(&a, &target, w)) };
+            if let (Some(w), Some(j)) = (what.clone(), target.strip_prefix("qrow:").and_then(|x| x.parse::<usize>().ok())) {
+                let from = data.plain_text().ok().and_then(|t| t.strip_prefix("q:").and_then(|x| x.parse::<usize>().ok()));
+                return drop_queue_row(&s, j, from, w);
+            }
             if let Some(w) = what { drop_do(&s, &target, w); }
         });
     }
@@ -7729,6 +7789,7 @@ fn main() -> Result<(), slint::PlatformError> {
     });
     let s = shared.clone();
     ui.on_crumb_go(move |i| crumb_go(&s, i.max(0) as usize));
+    ui.on_now_menu({ let w = ui.as_weak(); move || { if let Some(ui) = w.upgrade() { ui.set_now_menu_asks(ui.get_now_menu_asks() + 1); } } });
     ui.on_queue_clear({ let s = shared.clone(); move |req| {
         let mut a = s.borrow_mut();
         let note = if req { let n = a.queue.clear_requests(); format!("{} removed.", plural(n, "waiting request", "waiting requests")) } else { a.queue.clear(); "The queue is cleared.".to_string() };
