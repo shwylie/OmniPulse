@@ -999,6 +999,11 @@ export component AppWindow inherits Window {
     callback queue-action(int, string);
     // the queue's Clear, and Clear requests (true)
     callback queue-clear(bool);
+    // the open playlist's header: what it offers
+    in property <bool> pl-share;
+    in property <string> pl-collab;
+    in property <bool> pl-own;
+    callback page-pl(string);
     // the Artists page: an artist's menu, and following everyone from one platform on another
     callback artist-act(int, string);
     in property <[string]> artists-batch;
@@ -1516,6 +1521,10 @@ export component AppWindow inherits Window {
                             pa := TouchArea { enabled: root.rows.length > 0; clicked => { root.play-page(); } }
                         }
                         Pill { label: "Shuffle"; y: 7px; clicked => { root.shuffle(); } }
+                        // a playlist's own: Share, Invite collaborators (or its invite link), Delete playlist, as the web app's
+                        if root.page == "playlist" && root.pl-share: Pill { label: "Share"; y: 7px; clicked => { root.page-pl("share"); } }
+                        if root.page == "playlist" && root.pl-collab != "": Pill { label: root.pl-collab; y: 7px; clicked => { root.page-pl("collab"); } }
+                        if root.page == "playlist" && root.pl-own: Pill { label: "Delete playlist"; y: 7px; clicked => { root.page-pl("delete"); } }
                         Rectangle { horizontal-stretch: 1; }
                         // the Library's sort, clicked through: A to Z, Z to A, off
                         if root.page == "library": Rectangle {

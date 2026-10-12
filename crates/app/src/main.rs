@@ -522,6 +522,15 @@ fn open_playlist(shared: &Shared, i: usize) {
     let ui = shared.borrow().ui.upgrade().unwrap();
     show_tracks(shared, "playlist", &p.title, "Loading...".into(), Vec::new(), true);
     ui.set_side_on(shared.borrow().side_map.iter().position(|&k| k == i).map_or(-1, |k| k as i32));
+    // (its header: as its sidebar menu has it)
+    {
+        let a = shared.borrow();
+        let own = xpl::is_own(&p.id);
+        let collab = collab_of(&a.xpl, &p.id);
+        ui.set_pl_share(p.plat != "local" || own);
+        ui.set_pl_own(own);
+        ui.set_pl_collab(match &collab { Some(c) if c["owner"].as_bool() == Some(true) => "Copy invite link".into(), Some(_) => "".into(), None if p.plat != "local" || own => "Invite collaborators".into(), None => "".into() });
+    }
     let title = p.title.clone();
     let by = match p.plat { "spotify" => "On Spotify", "soundcloud" => "On SoundCloud", _ => "On this PC" };
     load_into(shared, "playlist", title, async move {
@@ -7869,6 +7878,10 @@ fn main() -> Result<(), slint::PlatformError> {
     });
     let s = shared.clone();
     ui.on_crumb_go(move |i| crumb_go(&s, i.max(0) as usize));
+    ui.on_page_pl({ let s = shared.clone(); move |act| {
+        let side = { let a = s.borrow(); match &a.here { Some(Place::Playlist(id)) => a.side_map.iter().position(|&k| a.playlists.get(k).is_some_and(|p| &p.id == id)), _ => None } };
+        if let Some(i) = side { side_action(&s, i, &act); }
+    } });
     ui.on_artist_act({ let s = shared.clone(); move |i, act| artist_act(&s, i.max(0) as usize, &act) });
     ui.on_artists_batch_go({ let s = shared.clone(); move |k| artists_batch(&s, k.max(0) as usize) });
     ui.on_now_menu({ let w = ui.as_weak(); move || { if let Some(ui) = w.upgrade() { ui.set_now_menu_asks(ui.get_now_menu_asks() + 1); } } });
