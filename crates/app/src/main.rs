@@ -7586,6 +7586,8 @@ fn main() -> Result<(), slint::PlatformError> {
             // only asked, nothing dropped on your playlists)
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("dnd") { vec![(9, "play"), (12, "library"), (13, "qopen"), (14, "dragq"), (16, "dragasks"), (17, "end")] }
             // (OMNIPULSE_SELFTEST_PLAN=panels: the settings panels, opened (nothing saved))
+            // (OMNIPULSE_SELFTEST_PLAN=spotify: a Spotify song played through Spotify (Seamless Mix off for it), and whether its sound comes)
+            else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("spotify") { vec![(8, "spplay"), (14, "spcheck"), (20, "spcheck"), (21, "end")] }
             // (OMNIPULSE_SELFTEST_PLAN=setsearch: Settings searched, a panel's path clicked back along, and closed)
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("setsearch") { vec![(9, "library"), (10, "settings"), (11, "ss_fade"), (12, "ss_mix tempo"), (13, "sshit"), (14, "p_alert:raid"), (15, "crumb2"), (16, "setclose"), (17, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("panels") { vec![(9, "settings"), (10, "cat_Integrations"), (11, "cat_Plugins"), (12, "p_requests"), (12, "p_widget"), (14, "p_alerts"), (16, "p_plugins"), (17, "plugread"), (20, "p_alertlist"), (21, "p_alert:raid"), (22, "pfclose"), (23, "end")] }
@@ -7669,6 +7671,12 @@ fn main() -> Result<(), slint::PlatformError> {
                 "compact" => ui.invoke_density_changed(true),
                 w if w.starts_with("cat_") => ui.set_set_cat(w[4..].into()),
                 w if w.starts_with("ss_") => { ui.set_search_text(w[3..].into()); ui.invoke_search_edited(w[3..].into()); println!("selftest: settings search \"{}\": {}", &w[3..], ui.get_set_hits().iter().take(6).map(|h| format!("{} ({})", h.label, h.path)).collect::<Vec<_>>().join("; ")); }
+                "spplay" => {
+                    if let Some(o) = s.borrow_mut().web.prefs.as_object_mut() { o.insert("mixOn".into(), serde_json::json!(false)); }
+                    let t = s.borrow().library.iter().find(|t| matches!(t.src, track::Src::Spotify(_))).cloned();
+                    match t { Some(t) => { println!("selftest: spotify: playing \"{}\"", t.title); play_list(&s, vec![t], 0); } None => println!("selftest: spotify: no Spotify song in the Library") }
+                }
+                "spcheck" => { let a = s.borrow(); println!("selftest: spotify: now \"{}\" at {} ms, loaded {}, paused {}, status \"{}\"", a.queue.current().map(|t| t.title.clone()).unwrap_or_default(), a.engine.position_ms(), a.loaded, a.engine.is_paused(), ui.get_status()); }
                 "sshit" => { ui.invoke_set_hit(0); println!("selftest: after a hit: cat \"{}\", query \"{}\"", ui.get_set_cat(), ui.get_set_query()); }
                 "crumb2" => { println!("selftest: path {:?}", ui.get_pf_crumbs().iter().collect::<Vec<_>>()); ui.invoke_crumb_go(2); println!("selftest: after its 3rd part: open {}, head \"{}\"", ui.get_pf_open(), ui.get_pf_head()); }
                 "setclose" => { ui.invoke_settings_close(); println!("selftest: settings closed: page \"{}\", panel {}, cat \"{}\"", ui.get_page(), ui.get_pf_open(), ui.get_set_cat()); }

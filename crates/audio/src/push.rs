@@ -66,6 +66,8 @@ pub struct PushSource {
     played_fn: PlayedFn,
     /// how long to wait for the producer before giving up on this read (it may be buffering)
     patience: Duration,
+    /// frames of the current generation taken so far (the producer is told the total, not each piece)
+    taken: (u32, u64),
 }
 
 impl PushSource {
@@ -74,7 +76,7 @@ impl PushSource {
     pub fn new(rate: u32, duration_ms: Option<u64>, seek: SeekFn, played: PlayedFn) -> (Self, PushFeed) {
         let inner = Arc::new(Inner { state: Mutex::new(State { queue: VecDeque::new(), gen: 0, ended: false, closed: false }), more: Condvar::new() });
         let feed = PushFeed(inner.clone());
-        (Self { inner, rate, duration_ms, seek_fn: seek, played_fn: played, patience: Duration::from_secs(10) }, feed)
+        (Self { inner, rate, duration_ms, seek_fn: seek, played_fn: played, patience: Duration::from_secs(10), taken: (0, 0) }, feed)
     }
 }
 
@@ -110,7 +112,9 @@ impl Source for PushSource {
         out.extend(s.queue.drain(..n));
         let gen = s.gen;
         drop(s);
-        (self.played_fn)(gen, (n / 2) as u64);
+        if self.taken.0 != gen { self.taken = (gen, 0); }
+        self.taken.1 += (n / 2) as u64;
+        (self.played_fn)(gen, self.taken.1);
         Ok(true)
     }
 
@@ -142,7 +146,8 @@ mod tests {
             44100,
             Some(1000),
             Box::new(move |_ms| { let mut g = g2.lock().unwrap(); *g += 1; Ok(*g) }),
-            Box::new(move |_gen, frames| { seen.fetch_add(frames, Ordering::SeqCst); }),
+            // (as spotify_engine::spe_played: the total so far of this generation)
+            Box::new(move |_gen, frames| { seen.store(frames, Ordering::SeqCst); }),
         );
         // a second of a tone, pushed from another thread in 100 ms pieces
         let producer = {
