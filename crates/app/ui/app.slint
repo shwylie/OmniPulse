@@ -540,7 +540,13 @@ component Card inherits Rectangle {
 }
 
 export component AppWindow inherits Window {
-    title: "OmniPulse";
+    title: root.app-name != "" ? root.app-name : "OmniPulse";
+    // Settings > App > Display Name: in the title bar and the taskbar (the web app's appName)
+    in-out property <string> app-name;
+    callback app-name-changed(string);
+    // Settings > App > Listening Along: Timing, in ms (the web app's listenNudge)
+    in-out property <string> listen-nudge: "0";
+    callback listen-nudge-changed(string);
     no-frame: true;
     background: Theme.bg;
     preferred-width: 1180px;
@@ -768,6 +774,9 @@ export component AppWindow inherits Window {
     in property <string> follow-more;
     callback follow-click();
     callback follow-more-click();
+    // Sets & Podcasts: only the ones in your likes (the web app's setsLiked)
+    in-out property <bool> sets-liked;
+    callback sets-liked-changed(bool);
     // Search: leave out what you've liked (the web app's Hide likes)
     in-out property <bool> hide-likes;
     callback hide-likes-changed(bool);
@@ -887,7 +896,7 @@ export component AppWindow inherits Window {
             HorizontalLayout {
                 padding-left: 14px;
                 spacing: 10px;
-                Text { text: "OmniPulse"; color: Theme.text; font-weight: 700; font-size: 13px; vertical-alignment: center; }
+                Text { text: root.app-name != "" ? root.app-name : "OmniPulse"; color: Theme.text; font-weight: 700; font-size: 13px; vertical-alignment: center; }
                 // Streamer Mode: grey when off; on, it pulses YouTube red, Twitch purple and Kick green
                 Rectangle {
                     width: 26px;
@@ -1210,6 +1219,7 @@ export component AppWindow inherits Window {
                                 }
                             }
                         }
+                        if root.page == "sets": Pill { label: "Liked only"; d: Icons.library; on: root.sets-liked; y: 7px; clicked => { root.sets-liked = !root.sets-liked; root.sets-liked-changed(root.sets-liked); } }
                         if root.page == "artist" && root.follow-more != "": Pill { label: root.follow-more; y: 7px; clicked => { root.follow-more-click(); } }
                         if root.page == "artist" && root.follow-label != "": Pill { label: root.follow-label; on: root.follow-on; y: 7px; clicked => { root.follow-click(); } }
                         Pill { label: "Favourites only"; d: Icons.star; on: root.fav-only; y: 7px; clicked => { root.fav-only = !root.fav-only; root.fav-only-changed(root.fav-only); } }
@@ -1623,6 +1633,58 @@ export component AppWindow inherits Window {
                                         }
                                         Chip { label: "Comfortable"; on: !root.compact-rows; y: (parent.height - self.height) / 2; clicked => { root.compact-rows = false; root.density-changed(false); } }
                                         Chip { label: "Compact"; on: root.compact-rows; y: (parent.height - self.height) / 2; clicked => { root.compact-rows = true; root.density-changed(true); } }
+                                    }
+                                }
+                                Card {
+                                    HorizontalLayout {
+                                        padding: 16px;
+                                        padding-top: 12px;
+                                        padding-bottom: 12px;
+                                        spacing: 12px;
+                                        VerticalLayout {
+                                            horizontal-stretch: 1;
+                                            alignment: center;
+                                            spacing: 2px;
+                                            Text { text: "Display Name"; color: Theme.text; font-weight: 700; }
+                                            Text { text: "Shown in the title bar and taskbar."; color: Theme.muted; font-size: 12px; }
+                                        }
+                                        Rectangle {
+                                            width: 220px;
+                                            height: 34px;
+                                            y: (parent.height - self.height) / 2;
+                                            border-radius: 8px;
+                                            background: Theme.panel;
+                                            border-width: 1px;
+                                            border-color: Theme.line;
+                                            if root.app-name == "": Text { x: 10px; text: "OmniPulse"; color: Theme.muted; font-size: 14px; vertical-alignment: center; height: parent.height; }
+                                            TextInput { x: 10px; width: parent.width - 20px; height: parent.height; vertical-alignment: center; color: Theme.text; font-size: 14px; single-line: true; text <=> root.app-name; edited => { root.app-name-changed(self.text); } }
+                                        }
+                                    }
+                                }
+                                Card {
+                                    HorizontalLayout {
+                                        padding: 16px;
+                                        padding-top: 12px;
+                                        padding-bottom: 12px;
+                                        spacing: 12px;
+                                        VerticalLayout {
+                                            horizontal-stretch: 1;
+                                            alignment: center;
+                                            spacing: 2px;
+                                            Text { text: "Listening Along: Timing"; color: Theme.text; font-weight: 700; }
+                                            Text { text: "Plays this much later than the host (or earlier, below 0), to line up with their stream when you're hearing it too (a Discord screen share runs behind, often by a second or two)."; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
+                                        }
+                                        Rectangle {
+                                            width: 90px;
+                                            height: 34px;
+                                            y: (parent.height - self.height) / 2;
+                                            border-radius: 8px;
+                                            background: Theme.panel;
+                                            border-width: 1px;
+                                            border-color: Theme.line;
+                                            TextInput { x: 10px; width: parent.width - 20px; height: parent.height; vertical-alignment: center; color: Theme.text; font-size: 14px; single-line: true; input-type: InputType.decimal; text <=> root.listen-nudge; edited => { root.listen-nudge-changed(self.text); } }
+                                        }
+                                        Text { text: "ms"; color: Theme.muted; font-size: 13px; vertical-alignment: center; }
                                     }
                                 }
                                 Card {

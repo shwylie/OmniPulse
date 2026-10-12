@@ -232,6 +232,10 @@ fn lib_sort_pick(shared: &Shared, by: &str) {
     apply_filter(&mut a);
 }
 
+/// A page's name in the web app's pageFilters (its views), and the chip it keeps (All, Tracks, Sets & Podcasts)
+fn filter_view(page: &str) -> &str { if page == "library" { "likes" } else { page } }
+const FILTER_KEYS: [&str; 3] = ["all", "tracks", "mixes"];
+
 fn show_tracks(shared: &Shared, page: &str, title: &str, sub: String, mut tracks: Vec<Track>, chips: bool) {
     let mut app = shared.borrow_mut();
     track::apply_fixes(&app.web.prefs, &mut tracks);
@@ -253,7 +257,10 @@ fn show_tracks(shared: &Shared, page: &str, title: &str, sub: String, mut tracks
     let mut names: Vec<slint::SharedString> = if chips { FILTER_CHIPS.iter().map(|c| (*c).into()).collect() } else { Vec::new() };
     if chips && page == "library" { names.push("Albums".into()); }
     ui.set_chips(ModelRc::from(Rc::new(VecModel::from(names))));
-    ui.set_chip_on(0);
+    // (the chip last picked on this page)
+    let kept = if chips { FILTER_KEYS.iter().position(|k| app.web.prefs["pageFilters"][filter_view(page)].as_str() == Some(k)).unwrap_or(0) } else { 0 };
+    app.chip = kept;
+    ui.set_chip_on(kept as i32);
     apply_filter(&mut app);
 }
 
@@ -351,7 +358,11 @@ fn open_page(shared: &Shared, page: &str) {
         "sets" => {
             // long ones from your likes, then from the artists you follow
             let mine: Vec<Track> = shared.borrow().library.iter().filter(|t| t.is_mix()).cloned().collect();
-            show_tracks(shared, "sets", "Sets & Podcasts", "Long sets, mixes and podcasts: anything over 15 minutes.".into(), mine.clone(), false);
+            let liked_only = shared.borrow().web.prefs["setsLiked"].as_bool() == Some(true);
+            if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_sets_liked(liked_only); }
+            let n = mine.len();
+            show_tracks(shared, "sets", "Sets & Podcasts", if liked_only { format!("Long sets, mixes and podcasts in your likes: anything over 15 minutes. {}.", plural(n, "of them", "of them")) } else { "Long sets, mixes and podcasts: anything over 15 minutes.".into() }, mine.clone(), false);
+            if liked_only { return; }
             load_into(shared, "sets", "Sets & Podcasts".into(), async move {
                 let more: Vec<Track> = sources::following_tracks(300).await.into_iter().filter(|t| t.is_mix() && !mine.iter().any(|m| m.key == t.key)).collect();
                 let n = mine.len() + more.len();
@@ -376,7 +387,7 @@ fn open_page(shared: &Shared, page: &str) {
         "streamer" => open_streamer(shared),
         "discover" => open_discover(shared),
         "artists" => open_artists(shared),
-        "stats" => open_stats(shared, 1),
+        "stats" => { let p = stats_period(&shared.borrow().web.prefs); open_stats(shared, p) }
         "settings" => {
             let mut a = shared.borrow_mut();
             a.page = "settings".into();
@@ -1372,7 +1383,36 @@ fn open_stream_coll(shared: &Shared, sh: usize, k: usize) {
 }
 
 // ---------- Stats ----------
+// (the web app's statsPeriod: week, month, year, all; this month and this year by the calendar, as its)
+const PERIOD_KEYS: [&str; 4] = ["week", "month", "year", "all"];
+
+/// How long ago this month (first = false) or this year began, by this PC's clock, in ms
+fn since_start_of(year: bool) -> u64 {
+    #[cfg(windows)]
+    {
+        let t = unsafe { windows::Win32::System::SystemInformation::GetLocalTime() };
+        let (y, m, d) = (t.wYear as u64, t.wMonth as u64, t.wDay as u64);
+        let leap = (y % 4 == 0 && y % 100 != 0) || y % 400 == 0;
+        let before: [u64; 12] = [0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334];
+        let days = if year { before[(m - 1) as usize] + d - 1 + u64::from(leap && m > 2) } else { d - 1 };
+        ((days * 86_400 + t.wHour as u64 * 3600 + t.wMinute as u64 * 60 + t.wSecond as u64) * 1000) + t.wMilliseconds as u64
+    }
+    #[cfg(not(windows))]
+    { if year { 365 * 86_400_000 } else { MONTH_MS } }
+}
+
+/// The period last picked (This Month unless one was)
+fn stats_period(prefs: &serde_json::Value) -> usize {
+    PERIOD_KEYS.iter().position(|k| prefs["statsPeriod"].as_str() == Some(k)).unwrap_or(1)
+}
+
 fn open_stats(shared: &Shared, period: usize) {
+    // (kept for next time, as the web app's)
+    if stats_period(&shared.borrow().web.prefs) != period {
+        let v = serde_json::json!(PERIOD_KEYS[period.min(3)]);
+        if let Some(o) = shared.borrow_mut().web.prefs.as_object_mut() { o.insert("statsPeriod".into(), v.clone()); }
+        if std::env::var_os("OMNIPULSE_SELFTEST").is_none() { webstate::save_pref("statsPeriod", v); }
+    }
     let ui = shared.borrow().ui.upgrade().unwrap();
     {
         let mut a = shared.borrow_mut();
@@ -1389,8 +1429,8 @@ fn open_stats(shared: &Shared, period: usize) {
     let now = now_ms();
     let since = match period {
         0 => now.saturating_sub(7 * 86_400_000),
-        1 => now.saturating_sub(MONTH_MS),
-        2 => now.saturating_sub(365 * 86_400_000),
+        1 => now.saturating_sub(since_start_of(false)),
+        2 => now.saturating_sub(since_start_of(true)),
         _ => 0,
     };
     let list: Vec<&webstate::Play> = a.web.plays.iter().filter(|p| p.ts >= since).collect();
@@ -4917,12 +4957,22 @@ fn listen_send(m: serde_json::Value) {
 }
 
 /// Where the host is now: what they said, plus the time since (while they're playing)
+/// Listening Along: Timing (the web app's listenNudge): this much behind the host (ahead, below 0), to
+/// line up with their stream when that's heard too; -3 s to 8 s
+static LISTEN_NUDGE: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(0);
+
+fn nudge_of(prefs: &serde_json::Value) -> i64 {
+    prefs["listenNudge"].as_f64().map(|n| n.round() as i64).unwrap_or(0).clamp(-3000, 8000)
+}
+
 fn listen_host_pos() -> u64 {
+    let nudge = LISTEN_NUDGE.load(std::sync::atomic::Ordering::Relaxed);
     LISTEN.with(|l| {
         let l = l.borrow();
         let Some(st) = l.as_ref().and_then(|l| l.state.as_ref().map(|s| (s, l.at))) else { return 0 };
         let pos = st.0["pos"].as_f64().unwrap_or(0.0).max(0.0) as u64;
-        if st.0["playing"].as_bool() == Some(true) { pos + st.1.elapsed().as_millis() as u64 } else { pos }
+        let pos = if st.0["playing"].as_bool() == Some(true) { pos + st.1.elapsed().as_millis() as u64 } else { pos };
+        (pos as i64 - nudge).max(0) as u64
     })
 }
 
@@ -5631,6 +5681,11 @@ fn apply_look(shared: &Shared) {
     t.set_motion(motion);
     ui.set_anim_on(motion);
     ui.set_close_to_tray(prefs["closeToTray"].as_bool() == Some(true));
+    LISTEN_NUDGE.store(nudge_of(prefs), std::sync::atomic::Ordering::Relaxed);
+    let nudge = nudge_of(prefs).to_string();
+    if ui.get_listen_nudge().trim() != nudge && !(ui.get_listen_nudge().trim().is_empty() && nudge == "0") { ui.set_listen_nudge(nudge.into()); }
+    let name = prefs["appName"].as_str().unwrap_or("").trim().to_string();
+    if ui.get_app_name().trim() != name { ui.set_app_name(name.into()); }
     t.set_bg(p.bg.slint());
     t.set_panel(p.panel.slint());
     t.set_elevated(p.elevated.slint());
@@ -5895,6 +5950,26 @@ fn main() -> Result<(), slint::PlatformError> {
         let key = match id.as_str() { "navFavourites" => "favPage", "navSets" => "setsOn", _ => "statsShown" };
         // (as switching it off in Settings)
         if set_row_on(&s.borrow().web.prefs, key, true) { set_toggle(&s, key); }
+    });
+    // (saved as it's typed; the box keeps what's typed, the title bar and taskbar follow it)
+    let s = shared.clone();
+    ui.on_app_name_changed(move |name| {
+        let v = serde_json::json!(name.trim());
+        if let Some(o) = s.borrow_mut().web.prefs.as_object_mut() { o.insert("appName".into(), v.clone()); }
+        if std::env::var_os("OMNIPULSE_SELFTEST").is_none() { webstate::save_pref("appName", v); }
+    });
+    let s = shared.clone();
+    ui.on_listen_nudge_changed(move |text| {
+        let n = text.trim().parse::<f64>().map(|n| n.round() as i64).unwrap_or(0).clamp(-3000, 8000);
+        LISTEN_NUDGE.store(n, std::sync::atomic::Ordering::Relaxed);
+        if let Some(o) = s.borrow_mut().web.prefs.as_object_mut() { o.insert("listenNudge".into(), serde_json::json!(n)); }
+        if std::env::var_os("OMNIPULSE_SELFTEST").is_none() { webstate::save_pref("listenNudge", serde_json::json!(n)); }
+    });
+    let s = shared.clone();
+    ui.on_sets_liked_changed(move |on| {
+        if let Some(o) = s.borrow_mut().web.prefs.as_object_mut() { o.insert("setsLiked".into(), serde_json::json!(on)); }
+        if std::env::var_os("OMNIPULSE_SELFTEST").is_none() { webstate::save_pref("setsLiked", serde_json::json!(on)); }
+        open_page(&s, "sets");
     });
     let s = shared.clone();
     ui.on_close_to_tray_changed(move |on| set_look_pref(&s, "closeToTray", serde_json::json!(on)));
@@ -6184,9 +6259,13 @@ fn main() -> Result<(), slint::PlatformError> {
         apply_filter(&mut a);
     });
     let s = shared.clone();
+    // (remembered, as the web app's favOnly)
+    { let on = shared.borrow().web.prefs["favOnly"].as_bool() == Some(true); shared.borrow_mut().fav_only = on; ui.set_fav_only(on); }
     ui.on_fav_only_changed(move |on| {
         let mut a = s.borrow_mut();
         a.fav_only = on;
+        if let Some(o) = a.web.prefs.as_object_mut() { o.insert("favOnly".into(), serde_json::json!(on)); }
+        if std::env::var_os("OMNIPULSE_SELFTEST").is_none() { webstate::save_pref("favOnly", serde_json::json!(on)); }
         apply_filter(&mut a);
     });
     let s = shared.clone();
@@ -6222,6 +6301,13 @@ fn main() -> Result<(), slint::PlatformError> {
         if ui.get_page_kind() == "albumgrid" { ui.set_page_kind("tracks".into()); }
         let mut a = s.borrow_mut();
         a.chip = i as usize;
+        // (kept for this page, as the web app keeps it)
+        if let Some(k) = FILTER_KEYS.get(i as usize) {
+            let mut all = if a.web.prefs["pageFilters"].is_object() { a.web.prefs["pageFilters"].clone() } else { serde_json::json!({}) };
+            all[filter_view(&page)] = serde_json::json!(k);
+            if let Some(o) = a.web.prefs.as_object_mut() { o.insert("pageFilters".into(), all.clone()); }
+            if std::env::var_os("OMNIPULSE_SELFTEST").is_none() { webstate::save_pref("pageFilters", all); }
+        }
         apply_filter(&mut a);
     });
     let s = shared.clone();
