@@ -8665,7 +8665,7 @@ fn main() -> Result<(), slint::PlatformError> {
             // (OMNIPULSE_SELFTEST_PLAN=spotify: a Spotify song played through Spotify (Seamless Mix off for it), and whether its sound comes)
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("spotify") { vec![(8, "spplay"), (14, "spcheck"), (20, "spcheck"), (21, "end")] }
             // (OMNIPULSE_SELFTEST_PLAN=tp: Track preferences for what plays, its bar dragged)
-            else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("tp") { vec![(9, "play"), (12, "tprefs"), (13, "tpdrag"), (14, "nowmenu"), (15, "end")] }
+            else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("tp") { vec![(9, "play"), (12, "tprefs"), (13, "tpdrag"), (14, "nowmenu"), (15, "now"), (18, "end")] }
             // (OMNIPULSE_SELFTEST_PLAN=la: the look-alikes dialog, with two made up (nothing added))
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("la") { vec![(8, "lashow"), (9, "lacycle"), (10, "end")] }
             // (OMNIPULSE_SELFTEST_PLAN=stats: the Stats page, its facts said)

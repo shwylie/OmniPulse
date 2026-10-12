@@ -2541,7 +2541,9 @@ export component AppWindow inherits Window {
                         VerticalLayout {
                             width: 360px;
                             spacing: 10px;
-                            BadgedCover { art: root.now-art-big; initial: root.now-title; plat: root.now-plat; badge: 52px; corner: 14px; height: 360px; }
+                            // (smaller on a short window: its title, artist and buttons stay in sight)
+                            property <length> side: min(360px, max(180px, root.height - 470px));
+                            BadgedCover { art: root.now-art-big; initial: root.now-title; plat: root.now-plat; badge: 52px; corner: 14px; height: parent.side; width: parent.side; }
                             Text { text: root.now-title; color: Theme.text; font-size: 26px; font-weight: 800; wrap: word-wrap; }
                             // (the artist: their page, a click away, as the web app's)
                             Text { text: root.now-artist; color: nat.has-hover ? Theme.text : Theme.accent; font-size: 16px; font-weight: 600; wrap: word-wrap; nat := TouchArea { mouse-cursor: MouseCursor.pointer; clicked => { root.now-act("artist:0"); } } }
