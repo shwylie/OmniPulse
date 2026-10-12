@@ -6684,6 +6684,9 @@ fn main() -> Result<(), slint::PlatformError> {
             let cast = if cast_on { omnipulse_core::cast::devices() } else { Vec::new() };
             let on = casting();
             if let Some(i) = on.as_ref().and_then(|n| cast.iter().position(|d| d.name == *n)) { ui.set_device_on((list.len() + i) as i32); }
+            // (where OmniPulse Offset plays, if it is: marked too)
+            let off = if omnipulse_core::omni_input::running() { omnipulse_core::omni_input::device() } else { String::new() };
+            ui.set_device_offset(if off.is_empty() { -1 } else { list.iter().position(|d| *d == off || d.starts_with(&off) || off.starts_with(d.as_str())).map_or(-1, |i| i as i32) });
             // (cast devices after Windows', under a heading of their own)
             ui.set_devices_cast_from(if cast.is_empty() { -1 } else { list.len() as i32 });
             list.extend(cast.iter().map(|d| format!("Cast to {}", d.name)));

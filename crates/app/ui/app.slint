@@ -360,6 +360,8 @@ component Progress inherits Rectangle {
 component MenuRow inherits Rectangle {
     in property <string> label;
     in property <bool> on;
+    /// (where the sound plays: OmniPulse Offset plays here, a ring and its name)
+    in property <bool> offset;
     callback clicked;
     height: 32px;
     border-radius: 6px;
@@ -369,7 +371,9 @@ component MenuRow inherits Rectangle {
         padding-right: 10px;
         spacing: 8px;
         Rectangle { width: 8px; Rectangle { width: 8px; height: 8px; y: (parent.height - self.height) / 2; border-radius: 4px; background: root.on ? Theme.accent : transparent; } }
-        Text { text: root.label; color: Theme.text; font-size: 13px; vertical-alignment: center; overflow: elide; }
+        if root.offset: Rectangle { width: 8px; Rectangle { width: 8px; height: 8px; y: (parent.height - self.height) / 2; border-radius: 4px; border-width: 2px; border-color: Theme.accent-2; } }
+        Text { text: root.label; color: Theme.text; font-size: 13px; vertical-alignment: center; overflow: elide; horizontal-stretch: 1; }
+        if root.offset: Text { text: "Offset"; color: Theme.accent-2; font-size: 11px; font-weight: 700; vertical-alignment: center; }
     }
     ta := TouchArea { clicked => { root.clicked(); } }
 }
@@ -1020,6 +1024,8 @@ export component AppWindow inherits Window {
     in property <bool> mix-on;
     // the output menu: where its cast devices start (-1: none)
     in property <int> devices-cast-from: -1;
+    // and where OmniPulse Offset plays (-1: it isn't)
+    in property <int> device-offset: -1;
     in property <bool> mixing;
     callback mix-toggle();
     // an edge or corner pressed: the window resized from it (0 top ... 7 bottom-right)
@@ -2528,7 +2534,7 @@ export component AppWindow inherits Window {
                                                 Rectangle { height: 1px; background: Theme.line; }
                                                 Text { text: "CHROMECAST"; color: Theme.muted; font-size: 10px; font-weight: 800; letter-spacing: 1px; x: 10px; height: 25px; vertical-alignment: center; }
                                             }
-                                            MenuRow { label: d; on: root.device-on == i; clicked => { root.device-pick(i); } }
+                                            MenuRow { label: d; on: root.device-on == i; offset: root.device-offset == i; clicked => { root.device-pick(i); } }
                                         }
                                     }
                                 }
