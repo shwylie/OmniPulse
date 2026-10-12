@@ -675,9 +675,13 @@ fn open_artists(shared: &Shared) {
     ui.set_artists(ModelRc::default());
     let (rt, weak) = { let a = shared.borrow(); (a.rt.clone(), a.ui.clone()) };
     SHARED.with(|s| *s.borrow_mut() = Some(shared.clone()));
+    let everywhere = shared.borrow().web.prefs["followEverywhere"].as_bool() != Some(false) && std::env::var_os("OMNIPULSE_SELFTEST").is_none();
     rt.spawn(async move {
-        let list = sources::followed_artists().await;
-        let _ = weak.upgrade_in_event_loop(move |_| {
+        let mut list = sources::followed_artists().await;
+        // (Follow Everywhere: new follows on one platform, on the other too)
+        let also = if everywhere { sources::follow_new_everywhere(&mut list).await } else { Vec::new() };
+        let _ = weak.upgrade_in_event_loop(move |ui| {
+            if !also.is_empty() { ui.set_status(format!("Followed {}{} on your other platform too.", also.iter().take(3).cloned().collect::<Vec<_>>().join(", "), if also.len() > 3 { " and others" } else { "" }).into()); }
             SHARED.with(|s| {
                 let Some(shared) = s.borrow().clone() else { return };
                 shared.borrow_mut().artists = Some(list.clone());
@@ -718,8 +722,110 @@ fn paint_artists(shared: &Shared, list: &[sources::Artist]) {
     });
 }
 
+// ---------- following, on an artist's page ----------
+thread_local! {
+    /// the artist whose page is open (in the Artists list), and whether Unfollow was pressed once
+    /// (pressed again, it unfollows); the platforms they've been unfollowed on, so Follow can undo it
+    static FOLLOW: RefCell<(Option<usize>, bool, Vec<(&'static str, String)>)> = const { RefCell::new((None, false, Vec::new())) };
+}
+
+
+fn follow_paint(shared: &Shared) {
+    let Some(ui) = shared.borrow().ui.upgrade() else { return };
+    let (at, asked, off) = FOLLOW.with(|f| f.borrow().clone());
+    let Some(a) = at.and_then(|i| shared.borrow().artists.as_ref().and_then(|l| l.get(i).cloned())) else { ui.set_follow_label("".into()); ui.set_follow_more("".into()); return };
+    let names = |l: Vec<&str>| l.into_iter().map(plat_name).collect::<Vec<_>>().join(" and ");
+    if a.plats().is_empty() {
+        ui.set_follow_label(if off.is_empty() { "".into() } else { "Follow".into() });
+        ui.set_follow_on(false);
+    } else {
+        ui.set_follow_label(if asked { format!("Unfollow on {}?", names(a.plats())) } else { "Unfollow".into() }.into());
+        ui.set_follow_on(true);
+    }
+    // (followed on one, signed in to the other: Also follow there)
+    let more = if a.sc.is_none() && !a.plats().is_empty() && omnipulse_core::soundcloud::signed_in() { "Also follow on SoundCloud" }
+        else if a.sp.is_none() && !a.plats().is_empty() && omnipulse_core::spotify::spotify_signed_in() { "Also follow on Spotify" } else { "" };
+    ui.set_follow_more(more.into());
+}
+
+/// The artist's entry in the Artists list changed
+fn artist_set(shared: &Shared, i: usize, f: impl FnOnce(&mut sources::Artist)) {
+    if let Some(a) = shared.borrow_mut().artists.as_mut().and_then(|l| l.get_mut(i)) { f(a); }
+    follow_paint(shared);
+}
+
+fn follow_click(shared: &Shared) {
+    let (at, asked, off) = FOLLOW.with(|f| f.borrow().clone());
+    let Some(i) = at else { return };
+    let Some(a) = shared.borrow().artists.as_ref().and_then(|l| l.get(i).cloned()) else { return };
+    let (rt, weak) = { let x = shared.borrow(); (x.rt.clone(), x.ui.clone()) };
+    if a.plats().is_empty() {
+        // followed again where they were unfollowed
+        rt.spawn(async move {
+            let mut back = Vec::new();
+            for (p, id) in &off { if sources::set_follow(p, id, true).await.is_ok() { back.push((*p, id.clone())); } }
+            let _ = weak.upgrade_in_event_loop(move |ui| SHARED.with(|s| {
+                let Some(sh) = s.borrow().clone() else { return };
+                FOLLOW.with(|f| f.borrow_mut().2.clear());
+                let name = a.name.clone();
+                artist_set(&sh, i, |x| for (p, id) in &back { if *p == "soundcloud" { x.sc = id.parse().ok(); } else { x.sp = Some(id.clone()); } });
+                ui.set_status(format!("Following {name} again.").into());
+            }));
+        });
+        return;
+    }
+    // Unfollow: asked once, done on the second press
+    if !asked {
+        FOLLOW.with(|f| f.borrow_mut().1 = true);
+        follow_paint(shared);
+        return;
+    }
+    let plats: Vec<(&'static str, String)> = [a.sc.map(|n| ("soundcloud", n.to_string())), a.sp.clone().map(|id| ("spotify", id))].into_iter().flatten().collect();
+    rt.spawn(async move {
+        let mut done = Vec::new();
+        let mut failed = Vec::new();
+        for (p, id) in &plats {
+            match sources::set_follow(p, id, false).await { Ok(()) => done.push((*p, id.clone())), Err(e) => failed.push(format!("{}: {e}", plat_name(p))) }
+        }
+        let _ = weak.upgrade_in_event_loop(move |ui| SHARED.with(|s| {
+            let Some(sh) = s.borrow().clone() else { return };
+            FOLLOW.with(|f| { let mut f = f.borrow_mut(); f.1 = false; f.2 = done.clone(); });
+            let name = a.name.clone();
+            artist_set(&sh, i, |x| for (p, _) in &done { if *p == "soundcloud" { x.sc = None; } else { x.sp = None; } });
+            ui.set_status(if failed.is_empty() { format!("Unfollowed {name}.") } else { format!("Couldn't unfollow everywhere. {}", failed.join(" ")) }.into());
+        }));
+    });
+}
+
+fn follow_more_click(shared: &Shared) {
+    let at = FOLLOW.with(|f| f.borrow().0);
+    let Some(i) = at else { return };
+    let Some(a) = shared.borrow().artists.as_ref().and_then(|l| l.get(i).cloned()) else { return };
+    let plat = if a.sc.is_none() { "soundcloud" } else { "spotify" };
+    let (rt, weak) = { let x = shared.borrow(); (x.rt.clone(), x.ui.clone()) };
+    if let Some(ui) = weak.upgrade() { ui.set_status(format!("Looking for {} on {}...", a.name, plat_name(plat)).into()); }
+    rt.spawn(async move {
+        let r = match sources::find_artist_on(plat, &a.name).await {
+            None => Err(format!("{} isn't on {} (by that name).", a.name, plat_name(plat))),
+            Some(id) => sources::set_follow(plat, &id, true).await.map(|_| id).map_err(|e| format!("Couldn't follow on {}: {e}", plat_name(plat))),
+        };
+        let _ = weak.upgrade_in_event_loop(move |ui| SHARED.with(|s| {
+            let Some(sh) = s.borrow().clone() else { return };
+            match r {
+                Ok(id) => {
+                    artist_set(&sh, i, |x| if plat == "soundcloud" { x.sc = id.parse().ok(); } else { x.sp = Some(id.clone()); });
+                    ui.set_status(format!("Following {} on {} too.", a.name, plat_name(plat)).into());
+                }
+                Err(e) => ui.set_status(e.into()),
+            }
+        }));
+    });
+}
+
 fn open_artist(shared: &Shared, i: usize) {
     let Some(a) = shared.borrow().artists.as_ref().and_then(|l| l.get(i).cloned()) else { return };
+    FOLLOW.with(|f| *f.borrow_mut() = (Some(i), false, Vec::new()));
+    follow_paint(shared);
     let name = |p: &str| match p { "spotify" => "Spotify", _ => "SoundCloud" };
     let on = a.plats().into_iter().map(name).collect::<Vec<_>>().join(" and ");
     show_tracks(shared, "artist", &a.name, "Loading...".into(), Vec::new(), true);
@@ -2903,13 +3009,15 @@ fn song_request(shared: &Shared, id: u64, q: String, user: String) {
 /// The servers the web app's settings have on: the widget, the Stream Deck's remote, chat requests
 // ---------- Settings: the switches beyond Look ----------
 // (section, label, note, key, on unless switched off)
-const SET_ROWS: [(&str, &str, &str, &str, bool); 21] = [
+const SET_ROWS: [(&str, &str, &str, &str, bool); 25] = [
     ("Library", "Sets & Podcasts in the Queue", "Lists and autoplay include anything over 15 minutes. Off: only when you pick one.", "queueSets", false),
     ("Library", "Autoplay", "Plays similar tracks when the queue runs out.", "autoplay", true),
     ("Library", "Seamless Mix", "Songs with a beat blend into the next on it, as a DJ mixes: at its tempo, on its phrase, the next one sweeping in from the top as the one playing gives way below it (never both in one part of the sound), down to the drop. With songs that play from YouTube Music or your files (never Spotify's own playback), once their beat is known.", "mixOn", true),
     ("Library", "EQ Band Handoff", "Seamless Mix hands over a band at a time (highs, then voice and bass), as a DJ's EQ does, instead of sweeping one song into the other: quicker and more sudden.", "mixBands", false),
     ("Library", "Skip non-music parts", "What plays from YouTube skips the parts of music videos that aren't music (a skit before the song, an interview after it), as marked on SponsorBlock.", "sbOn", true),
     ("Library", "Favourites Page", "Your starred tracks on a page of their own, in the sidebar. The stars stay either way.", "favPage", true),
+    ("Library", "Sets & Podcasts Page", "A page for anything over 15 minutes, in the sidebar. Right-click it there to hide it.", "setsOn", true),
+    ("Library", "Stats", "Your listening, in the sidebar. Right-click it there to hide it.", "statsShown", true),
     ("Integrations", "SoundCloud", "Its likes, playlists and search.", "scOn", true),
     ("Integrations", "Spotify", "Its likes, playlists and search.", "spOn", true),
     ("Integrations", "YouTube Music", "Search, radio, and Go+ tracks in full.", "ytOn", true),
@@ -2917,6 +3025,8 @@ const SET_ROWS: [(&str, &str, &str, &str, bool); 21] = [
     ("Integrations", "MusicBrainz", "An open music catalogue: search finds its songs too, and they play from YouTube Music.", "mbOn", true),
     ("Integrations", "Listen Along & Jams", "Listen together with friends, from your Discord status or a Jam invite. Off: no Jam button, and invites and requests are turned away (song requests aren't affected).", "jamsOn", true),
     ("Integrations", "Last.fm Scrobbling", "What you play goes to your Last.fm profile.", "scrobble", true),
+    ("Integrations", "Follow Everywhere", "Following an artist on one platform follows them on the others.", "followEverywhere", true),
+    ("Integrations", "Chromecast", "Speakers and TVs on your network, to play to: they show with Windows' devices, where the sound plays.", "castOn", false),
     ("Streaming", "Streamer Mode", "Hides account names, keys, addresses and plugin settings. The title bar's button does this too.", "streamerMode", false),
     ("Streaming", "Extended", "Also leaves out music that isn't safe on stream: only open licences, and artists and labels cleared for streaming.", "streamSafe", false),
     ("Streaming", "Discord Status", "Shows what you're playing on your Discord profile.", "presence", false),
@@ -3087,6 +3197,39 @@ fn plugins_start(shared: &Shared) {
     paint_settings(&shared.borrow());
 }
 
+// ---------- the sidebar's pages: your order, and the ones you've hidden ----------
+const NAV_IDS: [&str; 7] = ["navDiscover", "navRediscover", "navLikes", "navFavourites", "navSets", "navArtists", "navStats"];
+
+fn nav_ids(prefs: &serde_json::Value) -> Vec<String> {
+    let order: Vec<String> = prefs["navOrder"].as_array().into_iter().flatten().filter_map(|x| x.as_str().map(String::from)).collect();
+    let rank = |id: &str| order.iter().position(|o| o == id).unwrap_or(order.len() + NAV_IDS.iter().position(|n| *n == id).unwrap_or(0));
+    let mut ids: Vec<String> = NAV_IDS.iter().map(|s| s.to_string()).collect();
+    ids.sort_by_key(|id| rank(id));
+    let off = |key: &str| prefs[key].as_bool() == Some(false);
+    ids.retain(|id| !(id == "navFavourites" && off("favPage")) && !(id == "navSets" && off("setsOn")) && !(id == "navStats" && off("statsShown")));
+    ids
+}
+
+fn nav_paint(shared: &Shared) {
+    let ids = nav_ids(&shared.borrow().web.prefs);
+    if let Some(ui) = shared.borrow().ui.upgrade() {
+        ui.set_nav_ids(ModelRc::from(Rc::new(VecModel::from(ids.into_iter().map(slint::SharedString::from).collect::<Vec<_>>()))));
+    }
+}
+
+/// A page dragged onto another: it goes above it (all of them kept in the order, the hidden too)
+fn nav_move(shared: &Shared, from: &str, before: &str) {
+    if from == before { return; }
+    let mut order = { let a = shared.borrow(); let mut all = nav_ids(&serde_json::json!({ "navOrder": a.web.prefs["navOrder"].clone() })); for n in NAV_IDS { if !all.iter().any(|x| x == n) { all.push(n.to_string()); } } all };
+    order.retain(|x| x != from);
+    let at = order.iter().position(|x| x == before).unwrap_or(order.len());
+    order.insert(at, from.to_string());
+    let v = serde_json::json!(order);
+    if let Some(o) = shared.borrow_mut().web.prefs.as_object_mut() { o.insert("navOrder".into(), v.clone()); }
+    if std::env::var_os("OMNIPULSE_SELFTEST").is_none() { webstate::save_pref("navOrder", v); }
+    nav_paint(shared);
+}
+
 fn set_toggle(shared: &Shared, key: &str) {
     if let Some(id) = key.strip_prefix("plugOn_") {
         let on = {
@@ -3142,6 +3285,12 @@ fn set_toggle(shared: &Shared, key: &str) {
             if key == "favPage" {
                 if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_fav_page(on); }
                 if !on && shared.borrow().page == "favourites" { open_page(shared, "library"); }
+            }
+            // a page switched off: out of the sidebar (and off it, if it's open)
+            if matches!(key, "favPage" | "setsOn" | "statsShown") {
+                nav_paint(shared);
+                let page = match key { "setsOn" => "sets", "statsShown" => "stats", _ => "favourites" };
+                if !on && shared.borrow().page == page { open_page(shared, "library"); }
             }
             if key == "presence" && on { push_out(shared, true); }
             if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_status(format!("{label} {}.", if on { "on" } else { "off" }).into()); }
@@ -5408,6 +5557,18 @@ fn outside_start(shared: &Shared) {
 }
 
 /// A media key, the tray's menu or a taskbar button
+/// The window closed: hidden to the tray with Close to Tray on (the music carries on; Quit is in the
+/// tray's menu), else the app quits
+fn close_or_tray(shared: &Shared) {
+    save_session(&shared.borrow());
+    let tray = shared.borrow().web.prefs["closeToTray"].as_bool() == Some(true);
+    if tray {
+        if let Some(ui) = shared.borrow().ui.upgrade() { let _ = ui.window().hide(); }
+    } else {
+        let _ = slint::quit_event_loop();
+    }
+}
+
 fn desktop_action(shared: &Shared, action: &str) {
     match action {
         "play" => toggle(shared),
@@ -5465,6 +5626,11 @@ fn apply_look(shared: &Shared) {
     t.set_row_h(if compact { 40.0 } else { 60.0 });
     t.set_row_art(if compact { 32.0 } else { 44.0 });
     ui.set_compact_rows(compact);
+    // Settings > App: Animations, Close to Tray
+    let motion = prefs["animOn"].as_bool() != Some(false);
+    t.set_motion(motion);
+    ui.set_anim_on(motion);
+    ui.set_close_to_tray(prefs["closeToTray"].as_bool() == Some(true));
     t.set_bg(p.bg.slint());
     t.set_panel(p.panel.slint());
     t.set_elevated(p.elevated.slint());
@@ -5721,6 +5887,21 @@ fn main() -> Result<(), slint::PlatformError> {
     let s = shared.clone();
     ui.on_rounded_changed(move |on| set_look_pref(&s, "appRounded", serde_json::json!(on)));
     let s = shared.clone();
+    ui.on_follow_click(move || follow_click(&s));
+    let s = shared.clone();
+    ui.on_follow_more_click(move || follow_more_click(&s));
+    let s = shared.clone();
+    ui.on_nav_hide(move |id| {
+        let key = match id.as_str() { "navFavourites" => "favPage", "navSets" => "setsOn", _ => "statsShown" };
+        // (as switching it off in Settings)
+        if set_row_on(&s.borrow().web.prefs, key, true) { set_toggle(&s, key); }
+    });
+    let s = shared.clone();
+    ui.on_close_to_tray_changed(move |on| set_look_pref(&s, "closeToTray", serde_json::json!(on)));
+    let s = shared.clone();
+    ui.on_anim_changed(move |on| set_look_pref(&s, "animOn", serde_json::json!(on)));
+    nav_paint(&shared);
+    let s = shared.clone();
     ui.on_density_changed(move |c| set_look_pref(&s, "density", serde_json::json!(if c { "compact" } else { "comfortable" })));
     let s = shared.clone();
     ui.on_player_style_picked(move |style| set_look_pref(&s, "playerStyle", serde_json::json!(style.as_str())));
@@ -5855,9 +6036,11 @@ fn main() -> Result<(), slint::PlatformError> {
             list.extend(omnipulse_audio::Engine::devices());
             let want = webstate::native_pref("nativeDevice").and_then(|v| v.as_str().map(String::from)).unwrap_or_default();
             ui.set_device_on(list.iter().position(|d| *d == want).map_or(0, |i| i as i32));
-            // cast devices on the network (found in the background: the menu has more next time it opens)
-            let _ = omnipulse_core::cast::discover_start();
-            let cast = omnipulse_core::cast::devices();
+            // cast devices on the network (found in the background: the menu has more next time it opens),
+            // with Chromecast switched on (Settings > Integrations, the web app's castOn)
+            let cast_on = SHARED.with(|s| s.borrow().as_ref().is_some_and(|sh| sh.borrow().web.prefs["castOn"].as_bool() == Some(true)));
+            if cast_on { let _ = omnipulse_core::cast::discover_start(); }
+            let cast = if cast_on { omnipulse_core::cast::devices() } else { Vec::new() };
             let on = casting();
             if let Some(i) = on.as_ref().and_then(|n| cast.iter().position(|d| d.name == *n)) { ui.set_device_on((list.len() + i) as i32); }
             list.extend(cast.iter().map(|d| format!("Cast to {}", d.name)));
@@ -5962,9 +6145,17 @@ fn main() -> Result<(), slint::PlatformError> {
         let d = ui.global::<Dnd>();
         d.on_payload(|what| slint::DataTransfer::from(what));
         let s = shared.clone();
-        d.on_accepts(move |target, data| { let a = s.borrow(); dragged(&a, &data).is_some_and(|w| drop_ok(&a, &target, &w)) });
+        d.on_accepts(move |target, data| {
+            // (a page of the sidebar, onto another)
+            if let Some(over) = target.strip_prefix("nav:") { return data.plain_text().ok().and_then(|t| t.strip_prefix("n:").map(|f| f != over)).unwrap_or(false); }
+            let a = s.borrow(); dragged(&a, &data).is_some_and(|w| drop_ok(&a, &target, &w))
+        });
         let s = shared.clone();
         d.on_dropped(move |target, data| {
+            if let Some(over) = target.strip_prefix("nav:") {
+                if let Some(from) = data.plain_text().ok().and_then(|t| t.strip_prefix("n:").map(String::from)) { nav_move(&s, &from, over); }
+                return;
+            }
             let what = { let a = s.borrow(); dragged(&a, &data).filter(|w| drop_ok(&a, &target, w)) };
             if let Some(w) = what { drop_do(&s, &target, w); }
         });
@@ -6287,10 +6478,9 @@ fn main() -> Result<(), slint::PlatformError> {
         }
     });
     let s = shared.clone();
-    ui.on_close_window(move || {
-        save_session(&s.borrow());
-        let _ = slint::quit_event_loop();
-    });
+    ui.on_close_window(move || close_or_tray(&s));
+    let s = shared.clone();
+    ui.window().on_close_requested(move || { close_or_tray(&s); slint::CloseRequestResponse::KeepWindowShown });
 
     // the media keys and the tray (made here, on the window's thread, which has the message loop they need)
     let desk = desktop::Desktop::start();
@@ -6612,7 +6802,10 @@ fn main() -> Result<(), slint::PlatformError> {
         t
     });
 
-    ui.run()?;
+    // (run until quit, not until the window hides: with Close to Tray the app stays in the tray)
+    ui.show()?;
+    slint::run_event_loop_until_quit()?;
+    let _ = ui.hide();
     drop(rt);
     Ok(())
 }

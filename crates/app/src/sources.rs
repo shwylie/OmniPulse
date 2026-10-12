@@ -542,6 +542,69 @@ impl Artist {
     }
 }
 
+// ---------- following (the web app's js/artists.js) ----------
+/// An artist of this name on a platform (its id), the best known of those so named
+pub async fn find_artist_on(plat: &str, name: &str) -> Option<String> {
+    let k = name_key(name);
+    if k.is_empty() { return None; }
+    match plat {
+        "soundcloud" => {
+            let v = core::soundcloud::api_get(format!("/search/users?q={}&limit=10", urlencode(name))).await.ok()?;
+            items(&v).iter().filter(|u| name_key(u["username"].as_str().unwrap_or("")) == k)
+                .max_by_key(|u| u["followers_count"].as_u64().unwrap_or(0))
+                .and_then(|u| u["id"].as_u64()).map(|id| id.to_string())
+        }
+        "spotify" => {
+            let v = core::spotify::spotify_api("GET".into(), format!("/search?type=artist&limit=10&q={}", urlencode(name)), None).await.ok()?;
+            v["artists"]["items"].as_array()?.iter().find(|a| name_key(a["name"].as_str().unwrap_or("")) == k)
+                .and_then(|a| a["id"].as_str()).map(String::from)
+        }
+        _ => None,
+    }
+}
+
+/// Follows (or unfollows) an artist on a platform
+pub async fn set_follow(plat: &str, id: &str, on: bool) -> Result<(), String> {
+    match plat {
+        "soundcloud" => core::soundcloud::set_follow(id.to_string(), on).await,
+        // (since Spotify's February 2026 changes: /me/library, with the artist's uri)
+        "spotify" => core::spotify::spotify_api(if on { "PUT" } else { "DELETE" }.into(), format!("/me/library?uris={}", urlencode(&format!("spotify:artist:{id}"))), None).await.map(|_| ()),
+        _ => Err("not a platform you can follow on".into()),
+    }
+}
+
+/// Follow Everywhere: artists newly followed on one platform (since the last look at it) followed on
+/// the other too. A platform seen for the first time only has its follows noted (so a whole list never
+/// counts as new); more than ten new at once are left alone. Kept in state/native-follow-seen.json.
+/// What it followed, by name.
+pub async fn follow_new_everywhere(list: &mut [Artist]) -> Vec<String> {
+    let path = core::data_dir().ok().map(|d| d.join("state").join("native-follow-seen.json"));
+    let seen: Value = path.as_ref().and_then(|p| std::fs::read_to_string(p).ok()).and_then(|t| serde_json::from_str(&t).ok()).unwrap_or(Value::Null);
+    let plats: Vec<&str> = [core::soundcloud::signed_in().then_some("soundcloud"), core::spotify::spotify_signed_in().then_some("spotify")].into_iter().flatten().collect();
+    let on = |a: &Artist, p: &str| if p == "soundcloud" { a.sc.is_some() } else { a.sp.is_some() };
+    let was = |p: &str| seen[p].as_array().map(|l| l.iter().filter_map(|x| x.as_str().map(String::from)).collect::<std::collections::HashSet<String>>());
+    let fresh: Vec<usize> = (0..list.len()).filter(|&i| plats.iter().any(|p| was(p).is_some_and(|w| on(&list[i], p) && !w.contains(&name_key(&list[i].name))))).collect();
+    let mut done = Vec::new();
+    if fresh.len() <= 10 {
+        for i in fresh {
+            for p in &plats {
+                if on(&list[i], p) { continue; }
+                let Some(id) = find_artist_on(p, &list[i].name).await else { continue };
+                if set_follow(p, &id, true).await.is_ok() {
+                    if *p == "soundcloud" { list[i].sc = id.parse().ok(); } else { list[i].sp = Some(id); }
+                    done.push(list[i].name.clone());
+                }
+            }
+        }
+    }
+    let mut now = if seen.is_object() { seen } else { serde_json::json!({}) };
+    for p in &plats { now[*p] = serde_json::json!(list.iter().filter(|a| on(a, p)).map(|a| name_key(&a.name)).collect::<Vec<_>>()); }
+    if let Some(p) = path { if let Some(d) = p.parent() { let _ = std::fs::create_dir_all(d); } let _ = std::fs::write(p, now.to_string()); }
+    done.sort();
+    done.dedup();
+    done
+}
+
 /// A picture of them, not a platform's stand-in for one (SoundCloud's default avatar)
 fn real_image(url: &str) -> bool {
     !url.is_empty() && !url.contains("default_avatar") && !url.contains("avatars-default")

@@ -19,6 +19,8 @@ export global Theme {
     // a track row and its cover: smaller with List Density at Compact (Settings > Look)
     in-out property <length> row-h: 60px;
     in-out property <length> row-art: 44px;
+    // Settings > Look > Animations: off, everything moves at once
+    in-out property <bool> motion: true;
 }
 
 // Drag and drop (as the web app's js/dnd.js): a track of the page ("t:<row>") or a playlist of the
@@ -221,7 +223,7 @@ component Progress inherits Rectangle {
     Rectangle {
         y: (parent.height - self.height) / 2;
         height: root.live ? 6px : 3px;
-        animate height { duration: 120ms; }
+        animate height { duration: Theme.motion ? 120ms : 0ms; }
         border-radius: 3px;
         background: Theme.text.with-alpha(0.16);
         clip: true;
@@ -301,10 +303,10 @@ component Toggle inherits Rectangle {
     height: 24px;
     border-radius: 12px;
     background: root.checked ? Theme.accent : Theme.line;
-    animate background { duration: 150ms; }
+    animate background { duration: Theme.motion ? 150ms : 0ms; }
     Rectangle {
         x: root.checked ? parent.width - self.width - 3px : 3px;
-        animate x { duration: 150ms; easing: ease-out; }
+        animate x { duration: Theme.motion ? 150ms : 0ms; easing: ease-out; }
         y: 3px;
         width: 18px;
         height: 18px;
@@ -400,7 +402,7 @@ component TrackRow inherits Rectangle {
             background: Theme.elevated;
             Image { source: root.item.art; width: parent.width; height: parent.height; image-fit: cover; }
         }
-        PlatIcon { plat: root.item.plat; width: 18px; height: 18px; y: (parent.height - self.height) / 2; fill: Theme.muted; opacity: ta.has-hover || root.item.picked ? 1 : 0; animate opacity { duration: 150ms; } }
+        PlatIcon { plat: root.item.plat; width: 18px; height: 18px; y: (parent.height - self.height) / 2; fill: Theme.muted; opacity: ta.has-hover || root.item.picked ? 1 : 0; animate opacity { duration: Theme.motion ? 150ms : 0ms; } }
         VerticalLayout {
             alignment: center;
             spacing: 2px;
@@ -760,6 +762,12 @@ export component AppWindow inherits Window {
     callback artist(int);
     callback back();
     callback fav-only-changed(bool);
+    // an artist's page: Unfollow (or Follow again), and Also follow on the platform you don't yet
+    in property <string> follow-label;
+    in property <bool> follow-on;
+    in property <string> follow-more;
+    callback follow-click();
+    callback follow-more-click();
     // Search: leave out what you've liked (the web app's Hide likes)
     in-out property <bool> hide-likes;
     callback hide-likes-changed(bool);
@@ -804,6 +812,11 @@ export component AppWindow inherits Window {
     // Settings > Look > List Density: Compact (the web app's setting too)
     in-out property <bool> compact-rows;
     callback density-changed(bool);
+    // Settings > App: Close to Tray, Animations (the web app's settings too)
+    in-out property <bool> close-to-tray;
+    callback close-to-tray-changed(bool);
+    in-out property <bool> anim-on: true;
+    callback anim-changed(bool);
     // Updates: what's known (this version, or a newer one), and its button ("Check" or "Update")
     in property <string> update-note: "Checks for a newer version a little after it starts.";
     in property <string> update-label: "Check";
@@ -836,6 +849,21 @@ export component AppWindow inherits Window {
     in property <bool> jam-hidden;
     // Settings > Library > Favourites Page (the stars stay either way)
     in property <bool> fav-page: true;
+    // the sidebar's pages, in your order (the web app's navOrder: its button ids), the hidden ones out
+    in property <[string]> nav-ids: ["navDiscover", "navRediscover", "navLikes", "navFavourites", "navSets", "navArtists", "navStats"];
+    callback nav-hide(string);
+    pure function nav-page(id: string) -> string {
+        return id == "navDiscover" ? "discover" : id == "navRediscover" ? "rediscover" : id == "navLikes" ? "library" : id == "navFavourites" ? "favourites" : id == "navSets" ? "sets" : id == "navArtists" ? "artists" : "stats";
+    }
+    pure function nav-label(id: string) -> string {
+        return id == "navDiscover" ? (root.stream-safe ? "Streamer Mode" : "Discover") : id == "navRediscover" ? "Rediscover" : id == "navLikes" ? "Library" : id == "navFavourites" ? "Favourites" : id == "navSets" ? "Sets & Podcasts" : id == "navArtists" ? "Artists" : "Stats";
+    }
+    pure function nav-icon(id: string) -> string {
+        return id == "navDiscover" ? Icons.discover : id == "navRediscover" ? Icons.rediscover : id == "navLikes" ? Icons.library : id == "navFavourites" ? Icons.star : id == "navSets" ? Icons.sets : id == "navArtists" ? Icons.person : Icons.stats;
+    }
+    pure function nav-active(id: string) -> bool {
+        return root.page == root.nav-page(id) || (id == "navDiscover" && root.page == "streamer") || (id == "navArtists" && root.page == "artist");
+    }
     in property <string> jam-ring;
     in-out property <bool> jam-open;
     in property <string> jam-link;
@@ -974,7 +1002,7 @@ export component AppWindow inherits Window {
         Rectangle {
             vertical-stretch: 1;
             property <length> body-h: root.status != "" ? 99px : 68px;
-            animate body-h { duration: 220ms; easing: ease-out; }
+            animate body-h { duration: Theme.motion ? 220ms : 0ms; easing: ease-out; }
         HorizontalLayout {
             y: 0;
             height: parent.height - parent.body-h - 16px;
@@ -989,13 +1017,23 @@ export component AppWindow inherits Window {
                 VerticalLayout {
                     padding: 10px;
                     spacing: 2px;
-                    NavItem { label: root.stream-safe ? "Streamer Mode" : "Discover"; d: Icons.discover; compact: root.narrow; active: root.page == "discover" || root.page == "streamer"; clicked => { root.nav("discover"); } }
-                    NavItem { label: "Rediscover"; d: Icons.rediscover; compact: root.narrow; active: root.page == "rediscover"; clicked => { root.nav("rediscover"); } }
-                    NavItem { label: "Library"; d: Icons.library; compact: root.narrow; active: root.page == "library"; clicked => { root.nav("library"); } }
-                    if root.fav-page: NavItem { label: "Favourites"; d: Icons.star; spin: true; compact: root.narrow; active: root.page == "favourites"; clicked => { root.nav("favourites"); } }
-                    NavItem { label: "Sets & Podcasts"; d: Icons.sets; compact: root.narrow; active: root.page == "sets"; clicked => { root.nav("sets"); } }
-                    NavItem { label: "Artists"; d: Icons.person; compact: root.narrow; active: root.page == "artists" || root.page == "artist"; clicked => { root.nav("artists"); } }
-                    NavItem { label: "Stats"; d: Icons.stats; compact: root.narrow; active: root.page == "stats"; clicked => { root.nav("stats"); } }
+                    for id in root.nav-ids: ndz := DropArea {
+                        height: 38px;
+                        can-drop(e) => { return Dnd.accepts("nav:" + id, e.data) ? DragAction.move : DragAction.none; }
+                        dropped(e) => { Dnd.dropped("nav:" + id, e.data); return e.proposed-action; }
+                        // (where it goes: a line above it)
+                        if ndz.has-drag: Rectangle { y: 0; height: 2px; background: Theme.accent; }
+                        DragArea {
+                            allow-move: true;
+                            data: Dnd.payload("n:" + id);
+                            ContextMenuArea {
+                                Menu {
+                                    if id == "navFavourites" || id == "navSets" || id == "navStats": MenuItem { title: "Hide from the Sidebar"; activated => { root.nav-hide(id); } }
+                                }
+                                NavItem { label: root.nav-label(id); d: root.nav-icon(id); spin: id == "navFavourites"; compact: root.narrow; active: root.nav-active(id); clicked => { root.nav(root.nav-page(id)); } }
+                            }
+                        }
+                    }
                     Rectangle { height: 10px; }
                     if !root.narrow: HorizontalLayout {
                         padding-left: 12px;
@@ -1172,6 +1210,8 @@ export component AppWindow inherits Window {
                                 }
                             }
                         }
+                        if root.page == "artist" && root.follow-more != "": Pill { label: root.follow-more; y: 7px; clicked => { root.follow-more-click(); } }
+                        if root.page == "artist" && root.follow-label != "": Pill { label: root.follow-label; on: root.follow-on; y: 7px; clicked => { root.follow-click(); } }
                         Pill { label: "Favourites only"; d: Icons.star; on: root.fav-only; y: 7px; clicked => { root.fav-only = !root.fav-only; root.fav-only-changed(root.fav-only); } }
                     }
                     // the list's column heads
@@ -1594,6 +1634,36 @@ export component AppWindow inherits Window {
                                             horizontal-stretch: 1;
                                             alignment: center;
                                             spacing: 2px;
+                                            Text { text: "Close to Tray"; color: Theme.text; font-weight: 700; }
+                                            Text { text: "Closing hides the window; music keeps playing. Quit from the tray."; color: Theme.muted; font-size: 12px; }
+                                        }
+                                        Toggle { checked <=> root.close-to-tray; y: (parent.height - self.height) / 2; toggled => { root.close-to-tray-changed(self.checked); } }
+                                    }
+                                }
+                                Card {
+                                    HorizontalLayout {
+                                        padding: 16px;
+                                        padding-top: 12px;
+                                        padding-bottom: 12px;
+                                        VerticalLayout {
+                                            horizontal-stretch: 1;
+                                            alignment: center;
+                                            spacing: 2px;
+                                            Text { text: "Animations"; color: Theme.text; font-weight: 700; }
+                                            Text { text: "Fades and motion."; color: Theme.muted; font-size: 12px; }
+                                        }
+                                        Toggle { checked <=> root.anim-on; y: (parent.height - self.height) / 2; toggled => { root.anim-changed(self.checked); } }
+                                    }
+                                }
+                                Card {
+                                    HorizontalLayout {
+                                        padding: 16px;
+                                        padding-top: 12px;
+                                        padding-bottom: 12px;
+                                        VerticalLayout {
+                                            horizontal-stretch: 1;
+                                            alignment: center;
+                                            spacing: 2px;
                                             Text { text: "Rounded Corners"; color: Theme.text; font-weight: 700; }
                                             Text { text: "On the sidebar, the page and the queue. Off: square."; color: Theme.muted; font-size: 12px; }
                                         }
@@ -1877,7 +1947,7 @@ export component AppWindow inherits Window {
                                         font-size: i == root.lyric-on ? 21px : 19px;
                                         font-weight: 700;
                                         overflow: elide;
-                                        animate color, opacity, font-size { duration: 400ms; easing: ease-out; }
+                                        animate color, opacity, font-size { duration: Theme.motion ? 400ms : 0ms; easing: ease-out; }
                                     }
                                 }
                             }
@@ -1981,7 +2051,7 @@ export component AppWindow inherits Window {
                         // (on the right, while it's open), so their edges line up
                         property <length> floor: root.tab-right ? (root.queue-open ? 300px : 0) : (root.narrow ? 68px : 230px);
                         width: min(max(info.preferred-width + 38px, self.floor), root.width - 40px);
-                        animate width { duration: 320ms; easing: cubic-bezier(0.2, 0.8, 0.2, 1); }
+                        animate width { duration: Theme.motion ? 320ms : 0ms; easing: cubic-bezier(0.2, 0.8, 0.2, 1); }
                         height: parent.height;
                         // the gap around it
                         Rectangle {
