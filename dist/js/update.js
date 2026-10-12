@@ -40,7 +40,7 @@ async function updateInstall() {
 }
 
 // ---------- the native app (0.3.x): offered, never forced ----------
-// Its own releases repo (shwylie/omnipulse-native-releases). Once one's out, the status bar offers the
+// Its own releases repo (shwylie/omnipulse-native-releases), asked once at each launch. Once one's out, the status bar offers the
 // move: Switch to the Native App installs it in this one's place (same folder and data, signed with
 // the same key), Not Now puts it off until the next native version comes out. Settings > Updates
 // offers it too, whenever there is one.
@@ -81,6 +81,4 @@ function updateInit() {
   $("nativeBtn").addEventListener("click", nativeInstall);
   updatePaint();
   setTimeout(() => updateCheck(false).then(() => setTimeout(nativeCheck, 4000)), 8000);   // once the app's settled
-  // (a new native version while it's left running: asked about then)
-  setInterval(nativeCheck, 6 * 3600 * 1000);
 }
