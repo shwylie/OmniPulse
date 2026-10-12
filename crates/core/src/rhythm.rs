@@ -46,6 +46,10 @@ pub struct Rhythm {
     /// beatless intro or outro)
     #[serde(default)]
     pub bar_beat: Vec<f32>,
+    /// each bar's notes: how much of each pitch class (C to B, summing to 1) it has (Melody Play: a
+    /// melody looped against what's coming in)
+    #[serde(default)]
+    pub bar_chroma: Vec<[f32; 12]>,
 }
 
 const NOTES: [&str; 12] = ["C", "C#", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B"];
@@ -204,8 +208,10 @@ fn place(o: &[f64], f: usize) -> f64 {
     ((k as f64 + off) * HOP as f64 + WIN as f64 / 2.0) / RATE as f64 * 1000.0
 }
 
-/// The key: the chroma (pitch classes) against the major and minor profiles
-fn key(x: &[f32]) -> (usize, bool, f64) {
+/// The key: the chroma (pitch classes) against the major and minor profiles; and each frame's chroma
+/// (its middle, ms; its pitch classes, summing to 1)
+fn key(x: &[f32]) -> (usize, bool, f64, Vec<(f64, [f32; 12])>) {
+    let mut each = Vec::new();
     let mut planner = RealFftPlanner::<f32>::new();
     let fft = planner.plan_fft_forward(CHROMA_WIN);
     let w = hann(CHROMA_WIN);
@@ -235,6 +241,8 @@ fn key(x: &[f32]) -> (usize, bool, f64) {
         for (n, e) in note.iter().enumerate() { fr[(n + LOW as usize) % 12] += e.sqrt(); }
         let sum: f64 = fr.iter().sum();
         if sum > 0.0 { for i in 0..12 { chroma[i] += fr[i] / sum; } }
+        let mid = (f * CHROMA_HOP + CHROMA_WIN / 2) as f64 / RATE as f64 * 1000.0;
+        each.push((mid, if sum > 0.0 { fr.map(|v| (v / sum) as f32) } else { [0.0; 12] }));
     }
     let corr = |profile: &[f64; 12], tonic: usize| {
         let p: Vec<f64> = (0..12).map(|i| profile[(i + 12 - tonic) % 12]).collect();
@@ -250,7 +258,7 @@ fn key(x: &[f32]) -> (usize, bool, f64) {
     }
     all.sort_by(|a, b| b.0.total_cmp(&a.0));
     let (best, second) = (all[0], all[1]);
-    (best.1, best.2, ((best.0 - second.0) * 4.0).clamp(0.0, 1.0))
+    (best.1, best.2, ((best.0 - second.0) * 4.0).clamp(0.0, 1.0), each)
 }
 
 pub fn key_name(tonic: usize, minor: bool) -> String {
@@ -315,7 +323,7 @@ pub fn analyse(mono: &[f32], rate: u32) -> Option<Rhythm> {
         let old = (0..4).max_by(|&a, &b| phase[a].total_cmp(&phase[b])).unwrap_or(0);
         eprintln!("rhythm debug: downbeat by bass {old}, now {downbeat}; bass {:?} changes {:?}", bass_share.map(|v| (v * 100.0).round()), change_share.map(|v| (v * 100.0).round()));
     }
-    let (tonic, minor, kconf) = key(&x);
+    let (tonic, minor, kconf, frames_chroma) = key(&x);
     // each bar's loudness, from the first downbeat on (four tracked beats to a bar), and how strong its
     // beat is: its onsets and its bass at its beats, against the song's usual (a median beat's: 1)
     let peak = |e: &[f64], f: usize| { let (a, b) = (f.saturating_sub(2), (f + 2).min(e.len() - 1)); (a..=b).map(|k| e[k]).fold(0.0, f64::max) };
@@ -323,6 +331,7 @@ pub fn analyse(mono: &[f32], rate: u32) -> Option<Rhythm> {
     let (mo, mb) = (median(&o), median(&bass));
     let mut bar_db = Vec::new();
     let mut bar_beat = Vec::new();
+    let mut bar_chroma = Vec::new();
     let mut b = downbeat;
     while b < beats.len() {
         let fs = &frames[b..(b + 4).min(frames.len())];
@@ -334,6 +343,12 @@ pub fn analyse(mono: &[f32], rate: u32) -> Option<Rhythm> {
         let ms = x[i..j].iter().map(|v| (*v as f64) * (*v as f64)).sum::<f64>() / (j - i) as f64;
         bar_db.push((10.0 * ms.max(1e-12).log10()) as f32);
         bar_beat.push(strength as f32);
+        // (its notes: its frames', summed, as shares)
+        let mut c = [0.0f32; 12];
+        for (_, fr) in frames_chroma.iter().filter(|(t, _)| *t >= start && *t < end) { for k in 0..12 { c[k] += fr[k]; } }
+        let sum: f32 = c.iter().sum();
+        if sum > 0.0 { for v in &mut c { *v /= sum; } }
+        bar_chroma.push(c);
         b += 4;
     }
     Some(Rhythm {
@@ -348,6 +363,7 @@ pub fn analyse(mono: &[f32], rate: u32) -> Option<Rhythm> {
         key_confidence: kconf,
         bar_db,
         bar_beat,
+        bar_chroma,
     })
 }
 
@@ -366,7 +382,7 @@ pub struct Measured {
 /// (2-3: beats moved half a beat where the bass hit harder between them, wrongly: an off-beat bass
 /// louder than the kick isn't a beat tracked off it; 4: that undone, the downbeat from where the
 /// sections change too)
-pub const VERSION: u32 = 4;
+pub const VERSION: u32 = 5;
 
 static STORE: std::sync::Mutex<Option<std::collections::HashMap<String, Measured>>> = std::sync::Mutex::new(None);
 

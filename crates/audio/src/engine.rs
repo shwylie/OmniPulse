@@ -304,6 +304,32 @@ struct Shared {
     tap: Mutex<Vec<(String, Tap)>>,
     /// the main output held back by this many frames (a second output that has to be earlier)
     main_delay: AtomicU32,
+    /// how hard the engine works (an audit of Seamless Mix's cost): for playing as it is, through the
+    /// stretch (a mix's tempo, and after one), and mixing two at once: (ns of work, frames of sound made)
+    perf: Mutex<[(u64, u64); 3]>,
+}
+
+/// What the engine's work cost, by what it was doing (Engine::perf)
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Perf {
+    /// (ns of work, frames of sound made): playing a source as it is, through the stretch, mixing
+    pub plain: (u64, u64),
+    pub stretched: (u64, u64),
+    pub mixing: (u64, u64),
+}
+
+impl Perf {
+    /// The share of one core it took (0..1) for a (work, frames) pair at `rate`
+    pub fn load((ns, frames): (u64, u64), rate: u32) -> Option<f64> {
+        (frames > 0).then(|| ns as f64 / 1e9 / (frames as f64 / rate.max(1) as f64))
+    }
+}
+
+fn perf_add(shared: &Shared, what: usize, since: std::time::Instant, frames: u64) {
+    if let Ok(mut p) = shared.perf.lock() {
+        p[what].0 += since.elapsed().as_nanos() as u64;
+        p[what].1 += frames;
+    }
 }
 
 /// Gets the sound as it plays (stereo, interleaved, before the volume), at the output's rate
@@ -347,6 +373,7 @@ impl Engine {
             source_done: AtomicBool::new(false),
             tap: Mutex::new(Vec::new()),
             main_delay: AtomicU32::new(0),
+            perf: Mutex::new([(0, 0); 3]),
         });
         let (cmd, cmd_rx) = mpsc::channel();
         let (ev_tx, ev_rx) = mpsc::channel();
@@ -442,6 +469,15 @@ impl Engine {
         let _ = self.cmd.send(Cmd::StretchPlaying(tempo));
     }
     /// A mix is waiting for its moment, or under way
+    /// What the engine's work has cost so far (since it started), by what it was doing
+    pub fn perf(&self) -> Perf {
+        let p = self.shared.perf.lock().map(|p| *p).unwrap_or_default();
+        Perf { plain: p[0], stretched: p[1], mixing: p[2] }
+    }
+    /// The output's rate (frames a second)
+    pub fn rate(&self) -> u32 {
+        self.shared.rate.load(Ordering::Relaxed)
+    }
     pub fn mixing(&self) -> bool {
         self.shared.mix_waiting.load(Ordering::SeqCst) || self.shared.fading_in.load(Ordering::SeqCst)
     }
@@ -811,6 +847,13 @@ impl Handoff {
     pub fn tape_stop(ms: u64) -> Self {
         let side = Ramp { in_at: ms, in_len: 25, out_at: ms.saturating_sub(60), out_len: 60 };
         Self { low: side, mid: side, high: side, echo: None, out_sweep: None, in_sweep: None, brake: Some((0, ms)), spin: None, out_loop: None, in_loop: None }
+    }
+
+    /// A cut on the beat at `swap`: the one going out to the moment, the one coming in from it (a
+    /// few ms each way against a click)
+    pub fn cut(swap: u64) -> Self {
+        let side = Ramp { in_at: swap, in_len: 8, out_at: swap.saturating_sub(12), out_len: 12 };
+        Self { low: side, mid: side, high: side, echo: None, out_sweep: None, in_sweep: None, brake: None, spin: None, out_loop: None, in_loop: None }
     }
 
     /// Wordplay: the one going out's word (a beat from the mix's start) looped `reps` more times, then
@@ -1277,7 +1320,9 @@ fn decode_loop(shared: Arc<Shared>, cmds: Receiver<Cmd>, ev: Sender<Event>) {
             let now_ms = shared.base_ms.load(Ordering::Relaxed) as i64 + (shared.produced.load(Ordering::Relaxed) * 1000 / rate_u.max(1)) as i64 + shared.stretch_off.load(Ordering::Relaxed);
             let at = waiting.as_ref().unwrap().at_ms as i64;
             scratch.clear();
+            let t0 = std::time::Instant::now();
             let more = match p.fill(&mut scratch) { Ok(m) => m, Err(e) => { let _ = ev.send(Event::Error(e)); false } };
+            perf_add(&shared, if p.src_position_ms().is_some() { 1 } else { 0 }, t0, scratch.len() as u64 / 2);
             let frames = scratch.len() as u64 / 2;
             let until = ((at - now_ms).max(0) as u64 * rate_u / 1000).min(frames);
             shared.queue.lock().unwrap().extend(scratch[..(until * 2) as usize].iter().copied());
@@ -1298,7 +1343,10 @@ fn decode_loop(shared: Arc<Shared>, cmds: Receiver<Cmd>, ev: Sender<Event>) {
         // a crossfade: both, mixed, until the one coming in is the one playing
         if let Some(f) = fading.as_mut() {
             mixed.clear();
-            match f.mix(p, &mut mixed, &mut scratch) {
+            let t0 = std::time::Instant::now();
+            let r = f.mix(p, &mut mixed, &mut scratch);
+            perf_add(&shared, 2, t0, mixed.len() as u64 / 2);
+            match r {
                 Ok(over) => {
                     *shared.level.lock().unwrap() = f.next.level;
                     shared.queue.lock().unwrap().extend(mixed.iter().copied());
@@ -1332,7 +1380,10 @@ fn decode_loop(shared: Arc<Shared>, cmds: Receiver<Cmd>, ev: Sender<Event>) {
             continue;
         }
         scratch.clear();
-        match p.fill(&mut scratch) {
+        let t0 = std::time::Instant::now();
+        let r = p.fill(&mut scratch);
+        perf_add(&shared, if p.src_position_ms().is_some() { 1 } else { 0 }, t0, scratch.len() as u64 / 2);
+        match r {
             Ok(more) => {
                 *shared.level.lock().unwrap() = p.level;
                 shared.queue.lock().unwrap().extend(scratch.iter().copied());

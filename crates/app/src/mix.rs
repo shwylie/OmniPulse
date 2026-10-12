@@ -49,6 +49,8 @@ pub struct Plan {
     pub in_loop: Option<(u64, u64, u32)>,
     /// Wordplay: the word (or words) the one playing's loop sings and the next one comes in on
     pub word: Option<String>,
+    /// a transition of its own, if it is one: "wordplay", "drop swap", "melody play"
+    pub style: Option<&'static str>,
 }
 
 /// A tempo this near the next one's isn't eased into (it's played at the one playing's, then its own)
@@ -238,6 +240,7 @@ const TAPE_TAIL_MS: u64 = 300;
 pub fn handoff(p: &Plan, bands: bool) -> omnipulse_audio::Handoff {
     if p.tape_stop { return omnipulse_audio::Handoff::tape(p.swap_ms, p.ramp_ms); }
     if let (Some(_), Some((_, beat, reps))) = (&p.word, p.out_loop) { return omnipulse_audio::Handoff::word_cut(p.swap_ms, beat, reps); }
+    if p.style == Some("drop swap") { return omnipulse_audio::Handoff::cut(p.swap_ms); }
     let mut h = if !p.beatmatched {
         omnipulse_audio::Handoff::bass_swap(p.ms, p.ms / 2)
     } else {
@@ -372,6 +375,7 @@ pub fn plan_structure(a: &Measured, a_end_ms: u64, now_ms: u64, b: &Measured) ->
             out_loop,
             in_loop,
             word: None,
+        style: None,
         });
     }
     // (eased onto one tempo, `target` not 1.0: the next one from the one playing's tempo to its own over all of it)
@@ -390,6 +394,7 @@ pub fn plan_structure(a: &Measured, a_end_ms: u64, now_ms: u64, b: &Measured) ->
         out_loop: None,
         in_loop: None,
         word: None,
+        style: None,
     });
     // (how far the one playing is eased, if it can be; and how many of its bars go to one of the next one's:
     // half or double time, 2 or 1/2)
@@ -423,6 +428,7 @@ pub fn plan_structure(a: &Measured, a_end_ms: u64, now_ms: u64, b: &Measured) ->
         out_loop: None,
         in_loop: None,
         word: None,
+        style: None,
     })
 }
 
@@ -459,6 +465,7 @@ pub fn plan(a: &Measured, a_end_ms: u64, now_ms: u64, b: &Measured, bars: u32) -
         out_loop: None,
         in_loop: None,
         word: None,
+        style: None,
     })
 }
 
@@ -579,10 +586,140 @@ pub fn plan_wordplay(a: &Measured, a_lines: &[(u64, String)], a_end_ms: u64, now
                 out_loop: Some((0, beat.round() as u64, n as u32 - 1)),
                 in_loop: None,
                 word: Some(word),
+                style: Some("wordplay"),
             }));
         }
     }
     best.map(|b| b.3)
+}
+
+// ---------- Drop Swap: the next one's drop where the one playing's final drop would have been ----------
+/// A song's final drop: of its phrases' starts (every 4 bars) past its middle where its next 8 bars are
+/// 3 dB louder than its last 8 and within 3 dB of its loudest 8, the last run of them; of that run, the
+/// one rising most (the drop itself, not a bar of the build before it)
+fn last_drop(m: &Measured, off: usize) -> Option<usize> {
+    let d = &m.rhythm.bar_db;
+    let n = d.len();
+    if n < 24 { return None; }
+    let mean = |a: usize, b: usize| (a..b).map(|i| d[i].max(-40.0) as f64).sum::<f64>() / (b - a) as f64;
+    let loudest = (0..=n - 8).map(|i| mean(i, i + 8)).fold(f64::MIN, f64::max);
+    let rise = |i: usize| mean(i, i + 8) - mean(i - 8, i);
+    let ok: Vec<usize> = (n / 2..=n - 8).filter(|&i| on_phrase(i, off, 4) && rise(i) >= DROP_RISE_DB && loudest - mean(i, i + 8) <= DROP_NEAR_DB).collect();
+    // (the last rise, as a run of phrase starts that each count: the one of them rising most)
+    ok.last()?;
+    let mut from = ok.len() - 1;
+    while from > 0 && ok[from - 1] + 4 >= ok[from] { from -= 1; }
+    ok[from..].iter().copied().max_by(|&x, &y| rise(x).total_cmp(&rise(y)))
+}
+
+/// Drop Swap: the one playing's build to its final drop plays out, and on the drop's downbeat the next
+/// one's drop comes in instead (cut on the beat, at the one playing's tempo, then eased back to its own).
+/// Tempos that go together, a final drop late in the one playing (its last 45%), a drop the next one
+/// builds to; None without.
+pub fn plan_drop_swap(a: &Measured, a_end_ms: u64, now_ms: u64, b: &Measured) -> Option<Plan> {
+    if a.rhythm.tempo_confidence < MIN_CONFIDENCE || b.rhythm.tempo_confidence < MIN_CONFIDENCE { return None; }
+    let r = match_rate(a.rhythm.bpm, b.rhythm.bpm).map(|(r, _)| r)?;
+    let (ad, bd) = (downbeats(a), downbeats(b));
+    let a_drop = last_drop(a, phrase_offset(a))?;
+    let b_drop = drop_bar(b, phrase_offset(b))?;
+    if a_drop * 100 < a.rhythm.bar_db.len() * 55 || a_drop < 1 { return None; }
+    let (from, at) = (*ad.get(a_drop - 1)?, *ad.get(a_drop)?);
+    if from < (now_ms + 8000) as f64 || at > a_end_ms as f64 { return None; }
+    let bar = at - from;
+    let start = bd.get(b_drop)? - bar * r;
+    if start < 0.0 { return None; }
+    Some(Plan {
+        at_ms: from.round() as u64,
+        ms: (bar + 400.0).round() as u64,
+        swap_ms: bar.round() as u64,
+        start_ms: start.round() as u64,
+        rate: r,
+        bars: 1,
+        semitones: key_shift(a, b),
+        beatmatched: false,
+        out_tempo: 1.0,
+        ramp_ms: 0,
+        tape_stop: false,
+        out_loop: None,
+        in_loop: None,
+        word: None,
+        style: Some("drop swap"),
+    })
+}
+
+// ---------- Melody Play: the one playing's melody looped into the same melody coming in ----------
+/// A bar's notes as one profile (the bars from `k`, `n` of them), shifted up `s` semitones
+fn notes_of(m: &Measured, k: usize, n: usize, s: i32) -> Option<[f32; 12]> {
+    let bars = m.rhythm.bar_chroma.get(k..k + n)?;
+    let mut c = [0.0f32; 12];
+    for b in bars { for i in 0..12 { c[(i as i32 + s).rem_euclid(12) as usize] += b[i]; } }
+    let sum: f32 = c.iter().sum();
+    (sum > 0.0).then(|| c.map(|v| v / sum))
+}
+
+/// Notes that make a tune (a few pitch classes most of it), not a wash of all of them
+fn tuneful(c: &[f32; 12]) -> bool {
+    let mut v = *c;
+    v.sort_by(|a, b| b.total_cmp(a));
+    v[0] + v[1] + v[2] >= 0.5
+}
+
+fn alike(x: &[f32; 12], y: &[f32; 12]) -> f32 {
+    let (d, nx, ny) = (0..12).fold((0.0, 0.0, 0.0), |(d, a, b), i| (d + x[i] * y[i], a + x[i] * x[i], b + y[i] * y[i]));
+    if nx > 0.0 && ny > 0.0 { d / (nx * ny).sqrt() } else { 0.0 }
+}
+
+/// How alike two melodies' notes must be (cosine, 0..1) to play one into the other
+const MELODY_ALIKE: f32 = 0.92;
+
+/// Melody Play: a bar (or two) of the one playing's melody, late in it, looped for four bars as the next
+/// one comes in under it, on the beat; the swap where the next one's own melody starts with the same
+/// notes (the next one shifted in key to fit, as a mix on the beat does), so the tune carries on from one
+/// song into the other. None without such a pair (or their notes measured).
+pub fn plan_melody(a: &Measured, a_end_ms: u64, now_ms: u64, b: &Measured) -> Option<Plan> {
+    if a.rhythm.tempo_confidence < MIN_CONFIDENCE || b.rhythm.tempo_confidence < MIN_CONFIDENCE { return None; }
+    if a.rhythm.bar_chroma.is_empty() || b.rhythm.bar_chroma.is_empty() { return None; }
+    let r = match_rate(a.rhythm.bpm, b.rhythm.bpm).map(|(r, _)| r).filter(|_| keys_fit(a, b))?;
+    let (ad, bd) = (downbeats(a), downbeats(b));
+    let (_, a_end) = beat_span(&proper(a)?)?;
+    let (a_off, b_off) = (phrase_offset(a), phrase_offset(b));
+    let shift = key_shift(a, b);
+    let soonest = (now_ms + 8000) as f64;
+    let na = a.rhythm.bar_chroma.len().min(ad.len());
+    let nb = (b.rhythm.bar_chroma.len().min(bd.len())) / 2;
+    let mut best: Option<(f32, Plan)> = None;
+    for len in [2usize, 1] {
+        let reps = (4 / len) as u32 - 1;
+        for k in (na * 55 / 100..na.saturating_sub(len)).filter(|&k| on_phrase(k, a_off, 4)) {
+            // (its loop, then a bar of the next one alone, all before its beat ends)
+            if k + 5 > a_end || *ad.get(k)? < soonest || ad.get(k + 5).is_none_or(|t| *t > a_end_ms as f64) { continue; }
+            let Some(mine) = notes_of(a, k, len, 0).filter(tuneful) else { continue };
+            for j in (4..nb).filter(|&j| on_phrase(j, b_off, 4)) {
+                let Some(theirs) = notes_of(b, j, len, shift).filter(tuneful) else { continue };
+                let like = alike(&mine, &theirs);
+                if like < MELODY_ALIKE || best.as_ref().is_some_and(|(l, _)| *l >= like) { continue; }
+                let bar = ad[k + 1] - ad[k];
+                best = Some((like, Plan {
+                    at_ms: ad[k].round() as u64,
+                    ms: (5.0 * bar).round() as u64,
+                    swap_ms: (4.0 * bar).round() as u64,
+                    start_ms: bd[j - 4].round() as u64,
+                    rate: r,
+                    bars: 5,
+                    semitones: shift,
+                    beatmatched: true,
+                    out_tempo: 1.0,
+                    ramp_ms: 0,
+                    tape_stop: false,
+                    out_loop: Some((0, (len as f64 * bar).round() as u64, reps)),
+                    in_loop: None,
+                    word: None,
+                    style: Some("melody play"),
+                }));
+            }
+        }
+    }
+    best.map(|b| b.1)
 }
 
 #[cfg(test)]
@@ -593,7 +730,7 @@ mod tests {
     fn m(bpm: f64, first_beat: f64, downbeat: usize, conf: f64) -> Measured {
         let period = 60_000.0 / bpm;
         let beats: Vec<f64> = (0..64).map(|i| first_beat + i as f64 * period).collect();
-        Measured { from_ms: 0, to_ms: 60_000, rhythm: Rhythm { bpm, first_beat_ms: first_beat, period_ms: period, beats, downbeat, tempo_confidence: conf, key: "A minor".into(), camelot: "8A".into(), key_confidence: 0.5, bar_db: Vec::new(), bar_beat: Vec::new() }, v: VERSION }
+        Measured { from_ms: 0, to_ms: 60_000, rhythm: Rhythm { bpm, first_beat_ms: first_beat, period_ms: period, beats, downbeat, tempo_confidence: conf, key: "A minor".into(), camelot: "8A".into(), key_confidence: 0.5, bar_db: Vec::new(), bar_beat: Vec::new(), bar_chroma: Vec::new() }, v: VERSION }
     }
 
     #[test]
@@ -704,6 +841,53 @@ mod tests {
         // a handoff that loops it, then cuts
         let h = handoff(&p, false);
         assert_eq!(h.out_loop.map(|l| l.reps), Some(5));
+    }
+
+    #[test]
+    fn a_drop_swap_lands_the_next_drop_on_the_final_one() {
+        // the one playing: 40 loud, 16 of build, its final drop at bar 56 (24 loud), 8 of outro; the next:
+        // a 16-bar build to its drop at bar 16
+        let a = shaped(m(128.0, 500.0, 0, 0.5), &song(&[(40, -9.0, true), (16, -16.0, true), (24, -9.0, true), (8, -15.0, true)]));
+        let b = shaped(m(127.0, 300.0, 0, 0.5), &song(&[(16, -17.0, true), (72, -9.0, true)]));
+        let bar: f64 = 4.0 * 60_000.0 / 128.0;
+        let end = (500.0 + 88.0 * bar) as u64;
+        let p = plan_drop_swap(&a, end, 10_000, &b).expect("a drop swap");
+        assert_eq!(p.style, Some("drop swap"));
+        // from a bar before its final drop, the swap on that drop
+        assert_eq!(p.at_ms, (500.0 + 55.0 * bar).round() as u64);
+        assert_eq!(p.swap_ms, bar.round() as u64);
+        // the next one's drop on the swap (at the one playing's tempo)
+        let b_drop = 300.0 + 16.0 * 4.0 * 60_000.0 / 127.0;
+        assert!((p.start_ms as f64 + p.swap_ms as f64 * p.rate - b_drop).abs() < 2.0, "{p:?}");
+        // a cut on the beat
+        let h = handoff(&p, false);
+        assert_eq!((h.low.in_at, h.low.out_at + h.low.out_len), (p.swap_ms, p.swap_ms));
+        // tempos too far apart: none
+        assert!(plan_drop_swap(&a, end, 10_000, &shaped(m(100.0, 300.0, 0, 0.5), &song(&[(16, -17.0, true), (72, -9.0, true)]))).is_none());
+    }
+
+    #[test]
+    fn melody_play_loops_a_tune_into_the_same_one() {
+        // notes: a tune on A, C and E (most of the bar), and a wash (all twelve alike)
+        let mut tune = [0.02f32; 12];
+        (tune[9], tune[0], tune[4]) = (0.3, 0.25, 0.25);
+        let wash = [1.0 / 12.0; 12];
+        let mut a = shaped(m(128.0, 500.0, 0, 0.5), &song(&[(88, -10.0, true)]));
+        let mut b = shaped(m(128.0, 300.0, 0, 0.5), &song(&[(88, -10.0, true)]));
+        a.rhythm.bar_chroma = (0..88).map(|i| if (64..66).contains(&i) { tune } else { wash }).collect();
+        b.rhythm.bar_chroma = (0..88).map(|i| if (12..14).contains(&i) { tune } else { wash }).collect();
+        let bar: f64 = 4.0 * 60_000.0 / 128.0;
+        let end = (500.0 + 88.0 * bar) as u64;
+        let p = plan_melody(&a, end, 10_000, &b).expect("melody play");
+        assert_eq!(p.style, Some("melody play"));
+        // its two bars of tune looped (once more: four bars), the next one's tune on the swap
+        assert_eq!(p.at_ms, (500.0 + 64.0 * bar).round() as u64);
+        assert_eq!(p.out_loop, Some((0, (2.0 * bar).round() as u64, 1)));
+        assert_eq!(p.start_ms, (300.0 + 8.0 * bar).round() as u64);
+        assert_eq!(p.swap_ms, (4.0 * bar).round() as u64);
+        // nothing tuneful to match: none
+        b.rhythm.bar_chroma = vec![wash; 88];
+        assert!(plan_melody(&a, end, 10_000, &b).is_none());
     }
 
     #[test]

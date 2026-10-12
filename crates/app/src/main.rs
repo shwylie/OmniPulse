@@ -2177,6 +2177,8 @@ thread_local! {
     static MIX_WORDS: RefCell<HashMap<String, Vec<(u64, String)>>> = RefCell::new(HashMap::new());
     static MIX_WORDS_BUSY: RefCell<std::collections::HashSet<String>> = RefCell::new(std::collections::HashSet::new());
     static MIX: RefCell<Option<MixPhase>> = const { RefCell::new(None) };
+    /// the transition of its own used last (Wordplay, Drop Swap, Melody Play), so the next is another
+    static MIX_STYLE_LAST: std::cell::Cell<Option<&'static str>> = const { std::cell::Cell::new(None) };
     /// the track the queue moves on to at a mix's moment (start() doesn't load it: it's playing), with
     /// the YouTube Music version it plays as
     static MIXED_IN: RefCell<Option<(String, Option<versions::Version>)>> = const { RefCell::new(None) };
@@ -2241,6 +2243,61 @@ fn mix_via_youtube(t: &Track) -> bool {
     t.go_plus || matches!(t.src, track::Src::Catalog(_) | track::Src::Spotify(_)) || listen_needs_version(t)
 }
 
+// ---------- Seamless Mix's cost, audited (the engine's work and the planning; never measuring songs,
+// which is always on) ----------
+#[derive(Default)]
+struct MixAudit {
+    /// planning: ns, times
+    plan_ns: u64,
+    plans: u64,
+    /// the mix under way: the engine's work when it began, its kind, what it's from and to
+    began: Option<(omnipulse_audio::Perf, &'static str, String)>,
+    /// each mix: its kind, its share of a core while it ran, how long
+    mixes: Vec<serde_json::Value>,
+}
+
+thread_local! {
+    static MIX_AUDIT: RefCell<MixAudit> = RefCell::new(MixAudit::default());
+}
+
+fn mix_kind(p: &mix::Plan) -> &'static str {
+    if let Some(s) = p.style { s } else if p.tape_stop { "tape stop" } else if p.out_loop.is_some() || p.in_loop.is_some() { "looped" } else if p.beatmatched { "on the beat" } else { "blend" }
+}
+
+fn audit_began(shared: &Shared, plan: &mix::Plan, what: String) {
+    let perf = shared.borrow().engine.perf();
+    MIX_AUDIT.with(|a| a.borrow_mut().began = Some((perf, mix_kind(plan), what)));
+}
+
+/// A mix over: what it cost, noted (the log, state/native-mix-audit.json, Settings > Sound)
+fn audit_over(shared: &Shared) {
+    let (engine, ui) = { let a = shared.borrow(); (a.engine.clone(), a.ui.clone()) };
+    let now = engine.perf();
+    let rate = engine.rate();
+    MIX_AUDIT.with(|a| {
+        let mut a = a.borrow_mut();
+        let Some((was, kind, what)) = a.began.take() else { return };
+        let d = (now.mixing.0.saturating_sub(was.mixing.0), now.mixing.1.saturating_sub(was.mixing.1));
+        let Some(load) = omnipulse_audio::Perf::load(d, rate) else { return };
+        let secs = d.1 as f64 / rate.max(1) as f64;
+        omnipulse_core::diag::note(&format!("Seamless Mix audit: {kind} mix ({what}): {:.2}% of a core over {secs:.1} s", load * 100.0));
+        a.mixes.push(serde_json::json!({ "kind": kind, "what": what, "load": load, "secs": secs, "at": std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0) }));
+        let n = a.mixes.len();
+        if n > 50 { a.mixes.drain(..n - 50); }
+        let pct = |x: (u64, u64)| omnipulse_audio::Perf::load(x, rate).map(|l| l * 100.0);
+        let plan_ms = if a.plans > 0 { a.plan_ns as f64 / a.plans as f64 / 1e6 } else { 0.0 };
+        let file = serde_json::json!({
+            "note": "Seamless Mix's cost: the audio engine's work (share of one core) mixing, through the stretch (a mix's tempo, and after), and playing as it is; and the planning. Measuring songs isn't counted.",
+            "mixing": pct(now.mixing), "stretched": pct(now.stretched), "plain": pct(now.plain), "planMs": plan_ms, "plans": a.plans, "mixes": a.mixes,
+        });
+        if let Ok(d) = omnipulse_core::data_dir() { let _ = std::fs::write(d.join("state").join("native-mix-audit.json"), serde_json::to_string_pretty(&file).unwrap_or_default()); }
+        if let Some(ui) = ui.upgrade() {
+            let f = |x: Option<f64>| x.map_or("not yet".to_string(), |v| format!("{v:.1}% of a core"));
+            ui.set_mix_audit(format!("Mixing: {} ({} mixes, the last {:.1}%). Through the stretch (a mix's tempo, and after it): {}. Playing as it is: {}. Planning: {plan_ms:.2} ms a time. Measuring songs isn't counted. Kept in state\\native-mix-audit.json.", f(pct(now.mixing)), a.mixes.len(), load * 100.0, f(pct(now.stretched)), f(pct(now.plain))).into());
+        }
+    });
+}
+
 /// Each tick: a mix planned and got ready as the one playing nears its moment; eased back after
 fn mix_tick(shared: &Shared, pos: u64, dur: u64) {
     // coming in: once the crossfade's over, back to its own tempo over a few beats
@@ -2257,6 +2314,8 @@ fn mix_tick(shared: &Shared, pos: u64, dur: u64) {
                 if engine.crossfading() { return true; }
                 tempo.set(1.0);
                 *m = None;
+                let s2 = shared.clone();
+                slint::Timer::single_shot(std::time::Duration::ZERO, move || audit_over(&s2));
                 return true;
             }
             if engine.crossfading() { return true; }
@@ -2264,6 +2323,11 @@ fn mix_tick(shared: &Shared, pos: u64, dur: u64) {
             let t = since.elapsed().as_millis() as u64;
             tempo.set(mix::ease(plan.rate, t, *ease_ms));
             if t >= *ease_ms { *m = None; }
+            // (the crossfade itself over: what it cost)
+            if MIX_AUDIT.with(|a| a.borrow().began.is_some()) {
+                let s2 = shared.clone();
+                slint::Timer::single_shot(std::time::Duration::ZERO, move || audit_over(&s2));
+            }
             return true;
         }
         m.is_some()
@@ -2280,6 +2344,7 @@ fn mix_tick(shared: &Shared, pos: u64, dur: u64) {
     if !streamsafe::allowed(&shared.borrow().web.prefs, &next) { return; }
     // (where its sound ends: measured, if it's before the file's end)
     let audible = shared.borrow().cur_loud.as_ref().and_then(|k| shared.borrow().analysis.get(k).and_then(|x| x["audible_ms"].as_u64())).filter(|&x| x > 0 && x < dur).unwrap_or(dur);
+    let planning = std::time::Instant::now();
     // Wordplay (Settings > Sound): both songs' timed lyrics, for the recordings as measured
     let words_on = set_row_on(&shared.borrow().web.prefs, "mixWords", true);
     let wordplay = if words_on { rhythm_full(&cur.key).zip(rhythm_full(&next.key)) } else { None }.and_then(|(a, b)| {
@@ -2300,8 +2365,21 @@ fn mix_tick(shared: &Shared, pos: u64, dur: u64) {
         let (la, lb) = (lines(&cur, &a), lines(&next, &b));
         mix::plan_wordplay(&a, &la?, audible, pos, &b, &lb?)
     });
+    // Drop Swap and Melody Play (Settings > Sound); of the ones there are, not the one used last time
+    let (drop_on, melody_on) = { let p = &shared.borrow().web.prefs; (set_row_on(p, "mixDrop", true), set_row_on(p, "mixMelody", true)) };
+    let both = rhythm_full(&cur.key).zip(rhythm_full(&next.key));
+    let special = {
+        let mut all: Vec<mix::Plan> = wordplay.into_iter().collect();
+        if let Some((a, b)) = &both {
+            if drop_on { all.extend(mix::plan_drop_swap(a, audible, pos, b)); }
+            if melody_on { all.extend(mix::plan_melody(a, audible, pos, b)); }
+        }
+        let last = MIX_STYLE_LAST.with(|l| l.get());
+        let i = all.iter().position(|p| p.style != last).unwrap_or(0);
+        (!all.is_empty()).then(|| all.swap_remove(i))
+    };
     // both measured whole: every beat tracked, so no listening again
-    let whole = wordplay.or_else(|| rhythm_full(&cur.key).zip(rhythm_full(&next.key)).and_then(|(a, b)| mix::plan_structure(&a, audible, pos, &b)));
+    let whole = special.or_else(|| both.and_then(|(a, b)| mix::plan_structure(&a, audible, pos, &b)));
     let (plan, local) = match whole {
         Some(p) => (p, Some(())),
         None => {
@@ -2313,6 +2391,7 @@ fn mix_tick(shared: &Shared, pos: u64, dur: u64) {
             (plan, local.map(|_| ()))
         }
     };
+    MIX_AUDIT.with(|a| { let mut a = a.borrow_mut(); a.plan_ns += planning.elapsed().as_nanos() as u64; a.plans += 1; });
     // listened to again first (measured only in part), then got ready about seven seconds ahead of its moment
     if local.is_none() {
         mix_ear(shared, &cur.key, pos, plan.at_ms);
@@ -2372,7 +2451,16 @@ fn mix_started(shared: &Shared) {
     let Some(n) = at else { return };
     // (each beat of the one coming in, at its own tempo, for easing back over sixteen of them)
     let ease_ms = omnipulse_core::rhythm::known(&key).map(|m| (16.0 * m.rhythm.period_ms) as u64).unwrap_or(8000);
-    if let (Some(w), Some(ui)) = (plan.word.clone(), shared.borrow().ui.upgrade()) { ui.set_status(format!("Wordplay: \u{201c}{w}\u{201d}").into()); }
+    audit_began(shared, &plan, format!("{} into {}", shared.borrow().queue.current().map(|t| t.title.clone()).unwrap_or_default(), shared.borrow().queue.items.get(n).map(|q| q.t.title.clone()).unwrap_or_default()));
+    if plan.style.is_some() { MIX_STYLE_LAST.with(|l| l.set(plan.style)); }
+    if let Some(ui) = shared.borrow().ui.upgrade() {
+        match (plan.style, plan.word.clone()) {
+            (_, Some(w)) => ui.set_status(format!("Wordplay: \u{201c}{w}\u{201d}").into()),
+            (Some("drop swap"), _) => ui.set_status("Drop swap.".into()),
+            (Some("melody play"), _) => ui.set_status("Melody play.".into()),
+            _ => {}
+        }
+    }
     MIX.with(|m| *m.borrow_mut() = Some(MixPhase::Mixing { plan, tempo, eased_from: None, ease_ms, out, began: std::time::Instant::now() }));
     MIXED_IN.with(|m| *m.borrow_mut() = Some((key, version)));
     shared.borrow_mut().queue.qi = Some(n);
@@ -3113,13 +3201,15 @@ fn song_request(shared: &Shared, id: u64, q: String, user: String) {
 /// The servers the web app's settings have on: the widget, the Stream Deck's remote, chat requests
 // ---------- Settings: the switches beyond Look ----------
 // (section, label, note, key, on unless switched off)
-const SET_ROWS: [(&str, &str, &str, &str, bool); 30] = [
+const SET_ROWS: [(&str, &str, &str, &str, bool); 32] = [
     ("Library", "Sets & Podcasts in the Queue", "Lists and autoplay include anything over 15 minutes. Off: only when you pick one.", "queueSets", false),
     ("Library", "Autoplay", "Plays similar tracks when the queue runs out.", "autoplay", true),
     ("Library", "Hidden & Not Recommended", "Right-click a track to stop it, its album or its artist being recommended. Off: nothing is left out; the lists are kept.", "hideOn", true),
     ("Library", "Avoid Recent Plays", "Skips songs you've heard lately in what the app picks for you. What you choose yourself still plays.", "avoidRecent", true),
     ("Sound", "Seamless Mix", "Songs with a beat blend into the next on it, as a DJ mixes: at its tempo, on its phrase, the next one sweeping in from the top as the one playing gives way below it (never both in one part of the sound), down to the drop. With songs that play from YouTube Music or your files (never Spotify's own playback), once their beat is known.", "mixOn", true),
     ("Sound", "Wordplay", "Seamless Mix sometimes hands over on a word: the song playing sings one (\"heat\", \"one more time\"), it's looped on the beat, and the next song comes in singing the same one. Only with songs whose timed lyrics match what plays.", "mixWords", true),
+    ("Sound", "Drop Swap", "Seamless Mix sometimes lets the song playing build to its final drop, and the next song's drop lands there instead, on the beat.", "mixDrop", true),
+    ("Sound", "Melody Play", "Seamless Mix sometimes loops a bar of the song playing's melody while the next one comes in under it, when the next one's melody starts with the same notes: the tune carries on from one into the other.", "mixMelody", true),
     ("Sound", "EQ Band Handoff", "Seamless Mix hands over a band at a time (highs, then voice and bass), as a DJ's EQ does, instead of sweeping one song into the other: quicker and more sudden.", "mixBands", false),
     ("Library", "Skip non-music parts", "What plays from YouTube skips the parts of music videos that aren't music (a skit before the song, an interview after it), as marked on SponsorBlock.", "sbOn", true),
     ("Library", "Favourites Page", "Your starred tracks on a page of their own, in the sidebar. The stars stay either way.", "favPage", true),

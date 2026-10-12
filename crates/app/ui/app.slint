@@ -907,6 +907,8 @@ export component AppWindow inherits Window {
     callback pf-save();
     in property <[SetRow]> set-rows-library;
     in property <[SetRow]> set-rows-sound;
+    // Seamless Mix's cost, as measured (an audit: the engine's work only, not measuring songs)
+    in property <string> mix-audit;
     in property <[SetRow]> set-rows-plugins;
     in property <[SetRow]> set-rows-streaming;
     in property <bool> closed-look;
@@ -2197,6 +2199,16 @@ export component AppWindow inherits Window {
                                 }
                                 // (Seamless Mix and its band handoff)
                                 for r[i] in root.set-rows-sound: SetRowView { r: r; toggle(k) => { root.set-toggle(k); } more(k) => { root.set-more(k); } }
+                                if root.mix-audit != "": Card {
+                                    VerticalLayout {
+                                        padding: 16px;
+                                        padding-top: 12px;
+                                        padding-bottom: 12px;
+                                        spacing: 2px;
+                                        Text { text: "Seamless Mix: What It Costs"; color: Theme.text; font-weight: 700; }
+                                        Text { text: root.mix-audit; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
+                                    }
+                                }
                             }
                             if root.set-cat == "Streaming" && root.set-query == "": VerticalLayout {
                                 spacing: 14px;
