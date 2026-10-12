@@ -724,7 +724,17 @@ fn paint_artists(shared: &Shared, list: &[sources::Artist]) {
         sub: a.plats().into_iter().map(name).collect::<Vec<_>>().join(" \u{b7} ").into(),
         art: slint::Image::default(),
         plat: a.plats().first().copied().unwrap_or("soundcloud").into(),
+        on_sc: a.sc.is_some(),
+        on_sp: a.sp.is_some(),
     }).collect();
+    // (following everyone from one platform on the other too, as the web app's header menu)
+    let (sc_on, sp_on) = { let p = &shared.borrow().web.prefs; (plat_on(p, "soundcloud"), plat_on(p, "spotify")) };
+    let (to_sp, to_sc) = (list.iter().filter(|a| a.sc.is_some() && a.sp.is_none()).count(), list.iter().filter(|a| a.sp.is_some() && a.sc.is_none()).count());
+    let mut batch: Vec<slint::SharedString> = Vec::new();
+    if sc_on && sp_on && to_sp > 0 { batch.push(format!("Follow your SoundCloud artists on Spotify too ({to_sp})").into()); }
+    if sc_on && sp_on && to_sc > 0 { batch.push(format!("Follow your Spotify artists on SoundCloud too ({to_sc})").into()); }
+    ARTISTS_BATCH.with(|b| *b.borrow_mut() = [(sc_on && sp_on && to_sp > 0).then_some("spotify"), (sc_on && sp_on && to_sc > 0).then_some("soundcloud")].into_iter().flatten().collect());
+    ui.set_artists_batch(ModelRc::from(Rc::new(VecModel::from(batch))));
     ui.set_page_sub(if list.is_empty() { "Artists you follow on SoundCloud and Spotify show here.".into() } else { format!("{} you follow on SoundCloud and Spotify.", plural(list.len(), "artist", "artists")).into() });
     let model = Rc::new(VecModel::from(items));
     ui.set_artists(ModelRc::from(model.clone()));
@@ -819,6 +829,76 @@ fn follow_click(shared: &Shared) {
             artist_set(&sh, i, |x| for (p, _) in &done { if *p == "soundcloud" { x.sc = None; } else { x.sp = None; } });
             ui.set_status(if failed.is_empty() { format!("Unfollowed {name}.") } else { format!("Couldn't unfollow everywhere. {}", failed.join(" ")) }.into());
         }));
+    });
+}
+
+thread_local! {
+    /// the Artists page's batch lines: the platform each follows everyone on
+    static ARTISTS_BATCH: RefCell<Vec<&'static str>> = const { RefCell::new(Vec::new()) };
+}
+
+/// An artist's menu on the Artists page: Follow on SoundCloud / Spotify Too, Unfollow Everywhere
+fn artist_act(shared: &Shared, i: usize, act: &str) {
+    let Some(a) = shared.borrow().artists.as_ref().and_then(|l| l.get(i).cloned()) else { return };
+    let (rt, weak) = { let x = shared.borrow(); (x.rt.clone(), x.ui.clone()) };
+    if let Some(plat) = act.strip_prefix("follow:") {
+        let plat: &'static str = if plat == "spotify" { "spotify" } else { "soundcloud" };
+        if let Some(ui) = weak.upgrade() { ui.set_status(format!("Looking for {} on {}...", a.name, plat_name(plat)).into()); }
+        rt.spawn(async move {
+            let r = match sources::find_artist_on(plat, &a.name).await {
+                None => Err(format!("{} isn't on {} (by that name).", a.name, plat_name(plat))),
+                Some(id) => sources::set_follow(plat, &id, true).await.map(|_| id).map_err(|e| format!("Couldn't follow on {}: {e}", plat_name(plat))),
+            };
+            let _ = weak.upgrade_in_event_loop(move |ui| SHARED.with(|s| {
+                let Some(sh) = s.borrow().clone() else { return };
+                match r {
+                    Ok(id) => { artist_set(&sh, i, |x| if plat == "soundcloud" { x.sc = id.parse().ok(); } else { x.sp = Some(id.clone()); }); ui.set_status(format!("Following {} on {}.", a.name, plat_name(plat)).into()); }
+                    Err(e) => ui.set_status(e.into()),
+                }
+            }));
+        });
+        return;
+    }
+    // Unfollow Everywhere: asked first (as the web app's)
+    let on: Vec<&str> = a.plats().into_iter().map(plat_name).collect();
+    let sure = rfd::MessageDialog::new().set_title("Unfollow").set_description(format!("Unfollow {} on {}?", a.name, on.join(" and "))).set_buttons(rfd::MessageButtons::OkCancel).show() == rfd::MessageDialogResult::Ok;
+    if !sure { return; }
+    let plats: Vec<(&'static str, String)> = [a.sc.map(|n| ("soundcloud", n.to_string())), a.sp.clone().map(|id| ("spotify", id))].into_iter().flatten().collect();
+    rt.spawn(async move {
+        let mut done = Vec::new();
+        for (p, id) in &plats { if sources::set_follow(p, id, false).await.is_ok() { done.push(*p); } }
+        let _ = weak.upgrade_in_event_loop(move |ui| SHARED.with(|s| {
+            let Some(sh) = s.borrow().clone() else { return };
+            artist_set(&sh, i, |x| for p in &done { if *p == "soundcloud" { x.sc = None; } else { x.sp = None; } });
+            ui.set_status(format!("Unfollowed {}.", a.name).into());
+        }));
+    });
+}
+
+/// Following everyone you follow on one platform on the other too (the web app's batchFollow)
+fn artists_batch(shared: &Shared, k: usize) {
+    let Some(to) = ARTISTS_BATCH.with(|b| b.borrow().get(k).copied()) else { return };
+    let Some(list) = shared.borrow().artists.clone() else { return };
+    let todo: Vec<(usize, sources::Artist)> = list.into_iter().enumerate().filter(|(_, a)| if to == "spotify" { a.sc.is_some() && a.sp.is_none() } else { a.sp.is_some() && a.sc.is_none() }).collect();
+    let (rt, weak) = { let x = shared.borrow(); (x.rt.clone(), x.ui.clone()) };
+    let n = todo.len();
+    rt.spawn(async move {
+        let (mut done, mut missing) = (0usize, 0usize);
+        for (k, (i, a)) in todo.into_iter().enumerate() {
+            let w = weak.clone();
+            let _ = w.upgrade_in_event_loop(move |ui| ui.set_status(format!("Following on {}: {} of {n}...", plat_name(to), k + 1).into()));
+            match sources::find_artist_on(to, &a.name).await {
+                Some(id) if sources::set_follow(to, &id, true).await.is_ok() => {
+                    done += 1;
+                    let _ = weak.upgrade_in_event_loop(move |_| SHARED.with(|s| { if let Some(sh) = s.borrow().clone() { artist_set(&sh, i, |x| if to == "soundcloud" { x.sc = id.parse().ok(); } else { x.sp = Some(id.clone()); }); } }));
+                }
+                _ => missing += 1,
+            }
+        }
+        let _ = weak.upgrade_in_event_loop(move |ui| {
+            ui.set_status(format!("Following {} more on {}.{}", plural(done, "artist", "artists"), plat_name(to), if missing > 0 { format!(" {} couldn't be found there.", plural(missing, "artist", "artists")) } else { String::new() }).into());
+            SHARED.with(|s| { if let Some(sh) = s.borrow().clone() { if let Some(l) = sh.borrow().artists.clone() { paint_artists(&sh, &l); } } });
+        });
     });
 }
 
@@ -1747,8 +1827,8 @@ fn open_stats(shared: &Shared, period: usize) {
         ui.set_st_top_name(name.clone().into());
         ui.set_st_top_sub(format!("{} · {}% of everything you played", plural(*n, "play", "plays"), n * 100 / list.len()).into());
     }
-    let song_items: Vec<Item> = songs.iter().take(5).map(|(n, p)| Item { name: p.title.clone().into(), sub: format!("{} · {}", p.artist, plural(*n, "play", "plays")).into(), art: slint::Image::default(), plat: p.src.clone().into() }).collect();
-    let artist_items: Vec<Item> = artists.iter().take(6).map(|(name, (n, p))| Item { name: name.clone().into(), sub: plural(*n, "play", "plays").into(), art: slint::Image::default(), plat: p.src.clone().into() }).collect();
+    let song_items: Vec<Item> = songs.iter().take(5).map(|(n, p)| Item { name: p.title.clone().into(), sub: format!("{} · {}", p.artist, plural(*n, "play", "plays")).into(), art: slint::Image::default(), plat: p.src.clone().into(), ..Default::default() }).collect();
+    let artist_items: Vec<Item> = artists.iter().take(6).map(|(name, (n, p))| Item { name: name.clone().into(), sub: plural(*n, "play", "plays").into(), art: slint::Image::default(), plat: p.src.clone().into(), ..Default::default() }).collect();
     let song_model = Rc::new(VecModel::from(song_items));
     let artist_model = Rc::new(VecModel::from(artist_items));
     ui.set_st_songs(ModelRc::from(song_model.clone()));
@@ -1783,7 +1863,7 @@ fn open_stats(shared: &Shared, period: usize) {
     let mut plat_list: Vec<_> = plats.into_iter().collect();
     plat_list.sort_by_key(|x| std::cmp::Reverse(x.1));
     let pname = |p: &str| match p { "spotify" => "Spotify", "youtube" => "YouTube Music", "local" => "Your files", _ => "SoundCloud" };
-    ui.set_st_plats(ModelRc::from(Rc::new(VecModel::from(plat_list.iter().map(|(p, n)| Item { name: pname(p).into(), sub: format!("{}%", n * 100 / list.len()).into(), art: slint::Image::default(), plat: p.clone().into() }).collect::<Vec<_>>()))));
+    ui.set_st_plats(ModelRc::from(Rc::new(VecModel::from(plat_list.iter().map(|(p, n)| Item { name: pname(p).into(), sub: format!("{}%", n * 100 / list.len()).into(), art: slint::Image::default(), plat: p.clone().into(), ..Default::default() }).collect::<Vec<_>>()))));
     // the song on repeat (played most in one day, three times or more), then a few facts, different each
     // visit (the web app's statFacts)
     let day_of = |ts: u64| ((ts / 3_600_000) as i64 + local_offset_hours()).div_euclid(24);
@@ -7789,6 +7869,8 @@ fn main() -> Result<(), slint::PlatformError> {
     });
     let s = shared.clone();
     ui.on_crumb_go(move |i| crumb_go(&s, i.max(0) as usize));
+    ui.on_artist_act({ let s = shared.clone(); move |i, act| artist_act(&s, i.max(0) as usize, &act) });
+    ui.on_artists_batch_go({ let s = shared.clone(); move |k| artists_batch(&s, k.max(0) as usize) });
     ui.on_now_menu({ let w = ui.as_weak(); move || { if let Some(ui) = w.upgrade() { ui.set_now_menu_asks(ui.get_now_menu_asks() + 1); } } });
     ui.on_queue_clear({ let s = shared.clone(); move |req| {
         let mut a = s.borrow_mut();

@@ -67,7 +67,8 @@ export struct KeyStep { text: string, has-url: bool, copies: [string] }
 /// A key to paste: its label, what's typed, and whether it looks right
 export struct KeyField { label: string, value: string, ok: bool }
 export struct PlugField { key: string, label: string, note: string, kind: string, value: string, options: [string] }
-export struct Item { name: string, sub: string, art: image, plat: string }
+// (an artist you follow: whether on SoundCloud and on Spotify, for its menu)
+export struct Item { name: string, sub: string, art: image, plat: string, on-sc: bool, on-sp: bool }
 
 global Icons {
     out property <string> play: "M8 5v14l11-7z";
@@ -998,6 +999,10 @@ export component AppWindow inherits Window {
     callback queue-action(int, string);
     // the queue's Clear, and Clear requests (true)
     callback queue-clear(bool);
+    // the Artists page: an artist's menu, and following everyone from one platform on another
+    callback artist-act(int, string);
+    in property <[string]> artists-batch;
+    callback artists-batch-go(int);
     // the playing song right-clicked in the player bar: the "..." menu
     callback now-menu();
     in-out property <int> now-menu-asks;
@@ -1579,6 +1584,11 @@ export component AppWindow inherits Window {
                         }
                     }
                     // Artists: everyone you follow, round, A to Z
+                    if root.page-kind == "artists" && root.artists-batch.length > 0: HorizontalLayout {
+                        spacing: 8px;
+                        alignment: start;
+                        for b[k] in root.artists-batch: Pill { label: b; clicked => { root.artists-batch-go(k); } }
+                    }
                     if root.page-kind == "artists": grid := ScrollView {
                         vertical-stretch: 1;
                         property <int> cols: max(1, floor(self.visible-width / 186px));
@@ -1604,7 +1614,15 @@ export component AppWindow inherits Window {
                                 Text { text: a.name; color: Theme.text; font-weight: 700; font-size: 13px; overflow: elide; horizontal-alignment: center; }
                                 Text { text: a.sub; color: Theme.muted; font-size: 12px; overflow: elide; horizontal-alignment: center; }
                             }
-                            ata := TouchArea { clicked => { root.artist(i); } }
+                            ContextMenuArea {
+                                Menu {
+                                    MenuItem { title: "Open"; activated => { root.artist(i); } }
+                                    if !a.on-sc: MenuItem { title: "Follow on SoundCloud Too"; activated => { root.artist-act(i, "follow:soundcloud"); } }
+                                    if !a.on-sp: MenuItem { title: "Follow on Spotify Too"; activated => { root.artist-act(i, "follow:spotify"); } }
+                                    MenuItem { title: "Unfollow Everywhere"; activated => { root.artist-act(i, "unfollow"); } }
+                                }
+                                ata := TouchArea { clicked => { root.artist(i); } }
+                            }
                         }
                     }
                     // Search: its first tracks (Show all lists them all), then artists, albums and playlists
