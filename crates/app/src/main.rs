@@ -1411,7 +1411,94 @@ fn tp_open(shared: &Shared, t: &Track) {
         ui.set_tp_note(format!("It's {} long.", fmt_ms(t.ms)).into());
         ui.set_tp_open(true);
     }
+    tp_bar(shared);
     tp_versions(shared, t);
+}
+
+/// The track's length, for Track preferences' bar: as playing, else as listed
+fn tp_len(shared: &Shared) -> u64 {
+    let Some(t) = TP_TRACK.with(|x| x.borrow().clone()) else { return 0 };
+    let a = shared.borrow();
+    if a.queue.current().is_some_and(|c| c.key == t.key) && a.engine.duration_ms() > 0 { a.engine.duration_ms() } else { t.ms }
+}
+
+/// The bar painted from the start and end as written
+fn tp_bar(shared: &Shared) {
+    let Some(ui) = shared.borrow().ui.upgrade() else { return };
+    let len = tp_len(shared).max(1) as f32;
+    let start = parse_time(&ui.get_tp_start()).ok().flatten().unwrap_or(0) as f32;
+    let end = parse_time(&ui.get_tp_end()).ok().flatten().map_or(len, |e| e as f32);
+    ui.set_tp_from((start / len).clamp(0.0, 1.0));
+    ui.set_tp_to((end / len).clamp(0.0, 1.0));
+}
+
+/// The bar dragged: the start (0) or the end (1) where it's let go, a second apart at least; the end at
+/// the track's own end (within a quarter second) is none
+fn tp_drag(shared: &Shared, frac: f32, which: i32) {
+    // (a time typed: the bar again)
+    if which < 0 { return tp_bar(shared); }
+    let Some(ui) = shared.borrow().ui.upgrade() else { return };
+    let len = tp_len(shared);
+    if len == 0 { return; }
+    let at = (frac as f64 * len as f64) as u64;
+    let start = parse_time(&ui.get_tp_start()).ok().flatten().unwrap_or(0);
+    let end = parse_time(&ui.get_tp_end()).ok().flatten().unwrap_or(len);
+    if which == 0 {
+        let v = at.min(end.saturating_sub(1000));
+        ui.set_tp_start(if v == 0 { String::new() } else { fmt_time(v) }.into());
+    } else {
+        let v = at.max(start + 1000);
+        ui.set_tp_end(if v + 250 >= len { String::new() } else { fmt_time(v) }.into());
+    }
+    tp_bar(shared);
+}
+
+thread_local! {
+    /// a preview playing (Track preferences): the track, and where it stops
+    static TP_PREVIEW: RefCell<Option<(String, u64)>> = const { RefCell::new(None) };
+}
+
+/// How long a preview of a start or an end plays
+const PREVIEW_MS: u64 = 8000;
+
+/// A preview of the start (0) or the end (1) as written: the track played from there, for a few seconds
+fn tp_preview(shared: &Shared, which: i32) {
+    let Some(t) = TP_TRACK.with(|x| x.borrow().clone()) else { return };
+    let Some(ui) = shared.borrow().ui.upgrade() else { return };
+    let (Ok(start), Ok(end)) = (parse_time(&ui.get_tp_start()), parse_time(&ui.get_tp_end())) else { ui.set_tp_note("Times are m:ss, like 1:05 (or empty).".into()); return };
+    let playing = shared.borrow().queue.current().is_some_and(|c| c.key == t.key) && shared.borrow().loaded;
+    if !playing {
+        // (not playing yet: it's played now, then previewed once it's going)
+        { let mut a = shared.borrow_mut(); a.queue.play_next(t.clone()); }
+        step(shared, 1);
+        let s2 = shared.clone();
+        let tries = std::rc::Rc::new(std::cell::Cell::new(0));
+        let timer = slint::Timer::default();
+        timer.start(slint::TimerMode::Repeated, std::time::Duration::from_millis(300), move || {
+            tries.set(tries.get() + 1);
+            let ready = s2.borrow().loaded && s2.borrow().queue.current().is_some_and(|c| c.key == t.key) && s2.borrow().engine.duration_ms() > 0;
+            if ready || tries.get() > 50 {
+                TP_PREVIEW_WAIT.with(|w| w.borrow_mut().take());
+                if ready { tp_preview(&s2, which); }
+            }
+        });
+        TP_PREVIEW_WAIT.with(|w| *w.borrow_mut() = Some(timer));
+        ui.set_status("Getting it ready to preview...".into());
+        return;
+    }
+    let len = tp_len(shared);
+    let end = end.unwrap_or(len);
+    let from = if which == 0 { start.unwrap_or(0) } else { end.saturating_sub(PREVIEW_MS).max(start.unwrap_or(0)) };
+    let until = if which == 0 { (from + PREVIEW_MS).min(end) } else { end };
+    TP_PREVIEW.with(|p| *p.borrow_mut() = Some((t.key.clone(), until)));
+    let engine = shared.borrow().engine.clone();
+    engine.seek(from);
+    if engine.is_paused() { toggle(shared); }
+    ui.set_status(format!("Previewing {}...", if which == 0 { "the start" } else { "the end" }).into());
+}
+
+thread_local! {
+    static TP_PREVIEW_WAIT: RefCell<Option<slint::Timer>> = const { RefCell::new(None) };
 }
 
 /// Saves (or, with `reset`, takes off) the track's preferences, and shows them where it's listed
@@ -3364,6 +3451,11 @@ fn tick(shared: &Shared, events: &std::sync::mpsc::Receiver<Event>, n: u64) {
             if shared.borrow().repeat == "one" { start(shared); } else { step(shared, 1); }
             return;
         }
+    }
+    if let Some((k, until)) = TP_PREVIEW.with(|p| p.borrow().clone()) {
+        let here = shared.borrow().queue.current().is_some_and(|c| c.key == k);
+        if !here { TP_PREVIEW.with(|p| p.borrow_mut().take()); }
+        else if pos + 150 >= until && !engine.is_paused() { TP_PREVIEW.with(|p| p.borrow_mut().take()); toggle(shared); ui.set_status("Preview over.".into()); }
     }
     let near_end = {
         let mut a = shared.borrow_mut();
@@ -7794,10 +7886,35 @@ fn main() -> Result<(), slint::PlatformError> {
             });
         });
     });
+    ui.on_tp_drag({ let s = shared.clone(); move |f, w| tp_drag(&s, f, w) });
+    ui.on_tp_preview({ let s = shared.clone(); move |w| tp_preview(&s, w) });
+    ui.on_tp_whole({ let s = shared.clone(); move || { if let Some(ui) = s.borrow().ui.upgrade() { ui.set_tp_start("".into()); ui.set_tp_end("".into()); } tp_bar(&s); } });
+    ui.on_tp_search({ let s = shared.clone(); move |q| {
+        // (a search for other versions, as the web app's: the closest few for what's typed)
+        let q = q.trim().to_string();
+        if q.is_empty() || yt_link_id(&q).is_some() { return; }
+        let Some(t) = TP_TRACK.with(|x| x.borrow().clone()) else { return };
+        let (rt, weak) = { let a = s.borrow(); (a.rt.clone(), a.ui.clone()) };
+        if let Some(ui) = weak.upgrade() { ui.set_status("Searching...".into()); }
+        rt.spawn(async move {
+            let mut found = omnipulse_core::youtube::search(&q).await.unwrap_or_default();
+            found.truncate(8);
+            let _ = weak.upgrade_in_event_loop(move |ui| {
+                if found.is_empty() { ui.set_status("Nothing found on YouTube Music.".into()); return; }
+                ui.set_status("".into());
+                TP_VERSIONS.with(|v| *v.borrow_mut() = found.clone());
+                let names: Vec<slint::SharedString> = found.iter().map(|c| format!("{} · {} · {}", c.title, c.artists, fmt_ms(c.duration_ms)).into()).collect();
+                ui.set_tp_versions(ModelRc::from(Rc::new(VecModel::from(names))));
+                ui.set_tp_version_on(-1);
+                let _ = &t;
+            });
+        });
+    } });
     let s = shared.clone();
     ui.on_tp_now(move |which| {
         let pos = s.borrow().engine.position_ms();
         if let Some(ui) = s.borrow().ui.upgrade() { if which == 0 { ui.set_tp_start(fmt_time(pos).into()); } else { ui.set_tp_end(fmt_time(pos).into()); } }
+        tp_bar(&s);
     });
     // the track's menu
     let s = shared.clone();

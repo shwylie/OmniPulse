@@ -793,6 +793,14 @@ export component AppWindow inherits Window {
     callback tp-reset();
     // "now": where the track is playing, for its start (0) or end (1)
     callback tp-now(int);
+    // the track as a bar, its part that plays between the handles (0..1); dragged (where, which end);
+    // a preview of its start (0) or end (1); the whole track again; versions searched for
+    in property <float> tp-from: 0;
+    in property <float> tp-to: 1;
+    callback tp-drag(float, int);
+    callback tp-preview(int);
+    callback tp-whole();
+    callback tp-search(string);
     // the naming dialog (a new playlist, or renaming one)
     in-out property <bool> name-open;
     in-out property <string> name-text;
@@ -3155,7 +3163,7 @@ export component AppWindow inherits Window {
                         background: Theme.panel;
                         border-width: 1px;
                         border-color: Theme.line;
-                        TextInput { x: 10px; width: parent.width - 20px; height: parent.height; vertical-alignment: center; color: Theme.text; font-size: 14px; single-line: true; text <=> root.tp-start; }
+                        TextInput { x: 10px; width: parent.width - 20px; height: parent.height; vertical-alignment: center; color: Theme.text; font-size: 14px; single-line: true; text <=> root.tp-start; edited => { root.tp-drag(-1, -1); } }
                     }
                     Pill { label: "Now"; clicked => { root.tp-now(0); } }
                     Rectangle {
@@ -3164,9 +3172,34 @@ export component AppWindow inherits Window {
                         background: Theme.panel;
                         border-width: 1px;
                         border-color: Theme.line;
-                        TextInput { x: 10px; width: parent.width - 20px; height: parent.height; vertical-alignment: center; color: Theme.text; font-size: 14px; single-line: true; text <=> root.tp-end; }
+                        TextInput { x: 10px; width: parent.width - 20px; height: parent.height; vertical-alignment: center; color: Theme.text; font-size: 14px; single-line: true; text <=> root.tp-end; edited => { root.tp-drag(-1, -1); } }
                     }
                     Pill { label: "Now"; clicked => { root.tp-now(1); } }
+                }
+                // the track, with the part that plays: drag either end (or click where it should be)
+                Rectangle {
+                    height: 26px;
+                    property <int> which;
+                    Rectangle { y: 9px; height: 8px; border-radius: 4px; background: Theme.text.with-alpha(0.12); }
+                    Rectangle { x: parent.width * root.tp-from; width: parent.width * max(0, root.tp-to - root.tp-from); y: 9px; height: 8px; border-radius: 4px; background: Theme.accent; }
+                    for h in [root.tp-from, root.tp-to]: Rectangle { x: parent.width * h - 7px; y: 6px; width: 14px; height: 14px; border-radius: 7px; background: Theme.text; }
+                    tbt := TouchArea {
+                        mouse-cursor: MouseCursor.pointer;
+                        pointer-event(e) => {
+                            if (e.kind == PointerEventKind.down) {
+                                parent.which = abs(self.mouse-x / self.width - root.tp-from) <= abs(self.mouse-x / self.width - root.tp-to) ? 0 : 1;
+                                root.tp-drag(max(0, min(1, self.mouse-x / self.width)), parent.which);
+                            }
+                        }
+                        moved => { if (self.pressed) { root.tp-drag(max(0, min(1, self.mouse-x / self.width)), parent.which); } }
+                    }
+                }
+                HorizontalLayout {
+                    spacing: 8px;
+                    alignment: start;
+                    Pill { label: "Preview the Start"; clicked => { root.tp-preview(0); } }
+                    Pill { label: "Preview the End"; clicked => { root.tp-preview(1); } }
+                    Pill { label: "Whole Track"; clicked => { root.tp-whole(); } }
                 }
                 if root.tp-note != "": Text { text: root.tp-note; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
                 if root.tp-versions.length > 0: Text { text: "Plays from YouTube Music"; color: Theme.muted; font-size: 12px; }
@@ -3184,7 +3217,7 @@ export component AppWindow inherits Window {
                     border-width: 1px;
                     border-color: Theme.line;
                     if tpl.text == "": Text { x: 10px; text: "Or paste a YouTube or YouTube Music link"; color: Theme.muted; font-size: 13px; vertical-alignment: center; height: parent.height; }
-                    tpl := TextInput { x: 10px; width: parent.width - 20px; height: parent.height; vertical-alignment: center; color: Theme.text; font-size: 13px; single-line: true; edited => { if (self.text != "") { root.tp-link(self.text); } } }
+                    tpl := TextInput { x: 10px; width: parent.width - 20px; height: parent.height; vertical-alignment: center; color: Theme.text; font-size: 13px; single-line: true; edited => { if (self.text != "") { root.tp-link(self.text); } } accepted => { root.tp-search(self.text); } }
                 }
                 HorizontalLayout {
                     spacing: 8px;
