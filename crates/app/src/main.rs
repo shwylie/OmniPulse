@@ -598,7 +598,7 @@ fn search_shelves(shared: &Shared, q: String) {
         let _ = weak.upgrade_in_event_loop(move |ui| SHARED.with(|s| {
             let Some(shared) = s.borrow().clone() else { return };
             if shared.borrow().page != "search" || !ui.get_page_title().contains(q2.as_str()) { return; }
-            let models: Vec<Rc<VecModel<Tile>>> = shelves.iter().map(|(_, l)| Rc::new(VecModel::from(l.iter().map(|f| { let (t, sub, _, plat) = f.tile(); Tile { title: t.into(), sub: sub.into(), art: slint::Image::default(), plat: plat.into(), genre: false, c1: Default::default(), c2: Default::default() } }).collect::<Vec<_>>()))).collect();
+            let models: Vec<Rc<VecModel<Tile>>> = shelves.iter().map(|(_, l)| Rc::new(VecModel::from(l.iter().map(|f| { let (t, sub, _, plat) = f.tile(); Tile { title: t.into(), sub: sub.into(), art: slint::Image::default(), plat: plat.into(), genre: false, c1: Default::default(), c2: Default::default(), track: false, liked: false } }).collect::<Vec<_>>()))).collect();
             let rows: Vec<Shelf> = shelves.iter().zip(&models).map(|((title, _), m)| Shelf { title: (*title).into(), tiles: ModelRc::from(m.clone()) }).collect();
             ui.set_shelves(ModelRc::from(Rc::new(VecModel::from(rows))));
             SHELF_MODELS.with(|m| *m.borrow_mut() = models);
@@ -637,7 +637,7 @@ fn library_albums(shared: &Shared) {
         let weak2 = weak.clone();
         let _ = weak.upgrade_in_event_loop(move |ui| {
             if ui.get_page_kind() != "albumgrid" { return; }
-            let model = Rc::new(VecModel::from(list.iter().map(|f| { let (t, sub, _, plat) = f.tile(); Tile { title: t.into(), sub: sub.into(), art: slint::Image::default(), plat: plat.into(), genre: false, c1: Default::default(), c2: Default::default() } }).collect::<Vec<_>>()));
+            let model = Rc::new(VecModel::from(list.iter().map(|f| { let (t, sub, _, plat) = f.tile(); Tile { title: t.into(), sub: sub.into(), art: slint::Image::default(), plat: plat.into(), genre: false, c1: Default::default(), c2: Default::default(), track: false, liked: false } }).collect::<Vec<_>>()));
             ui.set_album_tiles(ModelRc::from(model.clone()));
             ui.set_page_sub(if n == 0 { "No saved albums yet: save some on Spotify, like some on SoundCloud, or add music files with their album names.".to_string() } else { format!("{}: saved on Spotify, liked on SoundCloud, and your files'.", plural(n, "album", "albums")) }.into());
             ALBUM_MODEL.with(|m| *m.borrow_mut() = Some(model));
@@ -1073,7 +1073,8 @@ fn open_discover(shared: &Shared) {
                     let genre = matches!(i, discover::Item::Mix(m) if matches!(m.how, discover::How::Sub(_) | discover::How::Genre(_)));
                     let hue = title.chars().fold(7u32, |h, c| (h * 31 + c as u32) % 360) as f32;
                     let (c1, c2) = if genre { (look::hsl(hue, 0.7, 45.0).slint(), look::hsl((hue + 40.0) % 360.0, 0.6, 16.0).slint()) } else { Default::default() };
-                    Tile { title: title.into(), sub: sub.into(), art: slint::Image::default(), plat: plat.into(), genre, c1, c2 }
+                    let (is_track, liked) = match i { discover::Item::Track(t) => (true, shared.borrow().library.iter().any(|x| x.key == t.key)), _ => (false, false) };
+                    Tile { title: title.into(), sub: sub.into(), art: slint::Image::default(), plat: plat.into(), genre, c1, c2, track: is_track, liked }
                 }).collect::<Vec<_>>()))).collect();
                 let rows: Vec<Shelf> = shelves.iter().zip(&models).map(|(sh, m)| Shelf { title: sh.title.clone().into(), tiles: ModelRc::from(m.clone()) }).collect();
                 ui.set_status(if rows.is_empty() { "Play or star a few songs, and Discover will fill up with music for you.".into() } else { "".into() });
@@ -1577,7 +1578,7 @@ fn open_streamer(shared: &Shared) {
     ];
     let shelves: Vec<_> = shelves.into_iter().filter(|(_, l)| !l.is_empty()).collect();
     let sub = |c: &StreamColl| match c { StreamColl::Cleared(_) => "Cleared for streaming", StreamColl::Genre(_) => "Creative Commons", StreamColl::Likes => "From your likes" };
-    let models: Vec<Rc<VecModel<Tile>>> = shelves.iter().map(|(_, l)| Rc::new(VecModel::from(l.iter().map(|(n, c)| Tile { title: n.clone().into(), sub: sub(c).into(), art: slint::Image::default(), plat: "".into(), genre: false, c1: Default::default(), c2: Default::default() }).collect::<Vec<_>>()))).collect();
+    let models: Vec<Rc<VecModel<Tile>>> = shelves.iter().map(|(_, l)| Rc::new(VecModel::from(l.iter().map(|(n, c)| Tile { title: n.clone().into(), sub: sub(c).into(), art: slint::Image::default(), plat: "".into(), genre: false, c1: Default::default(), c2: Default::default(), track: false, liked: false }).collect::<Vec<_>>()))).collect();
     let rows: Vec<Shelf> = shelves.iter().zip(&models).map(|((t, _), m)| Shelf { title: t.clone().into(), tiles: ModelRc::from(m.clone()) }).collect();
     ui.set_shelves(ModelRc::from(Rc::new(VecModel::from(rows))));
     SHELF_MODELS.with(|m| *m.borrow_mut() = models);
@@ -8098,6 +8099,22 @@ fn main() -> Result<(), slint::PlatformError> {
     });
     let s = shared.clone();
     ui.on_crumb_go(move |i| crumb_go(&s, i.max(0) as usize));
+    ui.on_tile_act({ let s = shared.clone(); move |sh, k, act| {
+        // (a Discover shelf's song; another page's shelves are songs only)
+        let t = if s.borrow().page == "discover" {
+            DISCOVER.with(|d| d.borrow().get(sh as usize).and_then(|x| x.items.get(k as usize).cloned())).and_then(|i| if let discover::Item::Track(t) = i { Some(t) } else { None })
+        } else { s.borrow().shelves.get(sh as usize).and_then(|l| l.get(k as usize).cloned()) };
+        let Some(t) = t else { return };
+        if let Some(what) = act.strip_prefix("hide:") { return hide_track(&s, &t, what); }
+        if act == "next" || act == "add" {
+            let empty = s.borrow().queue.current().is_none();
+            { let mut a = s.borrow_mut(); if act == "next" { a.queue.play_next(t.clone()); } else { a.queue.add(t.clone()); } paint_queue(&mut a); save_session(&a); }
+            if let Some(ui) = s.borrow().ui.upgrade() { ui.set_status(format!("{} \"{}\".", if act == "next" { "Playing next:" } else { "Added to the queue:" }, t.title).into()); }
+            if empty { start(&s); }
+            return;
+        }
+        track_act(&s, &t, &act);
+    } });
     ui.on_helpers_act({ let s = shared.clone(); move |a| helpers_act(&s, &a) });
     ui.on_now_act({ let s = shared.clone(); move |act| { let t = s.borrow().queue.current().cloned(); if let Some(t) = t { track_act(&s, &t, &act); } } });
     ui.on_title_rename({ let s = shared.clone(); move || name_ask(&s, Naming::AppName) });
