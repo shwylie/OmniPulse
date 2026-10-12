@@ -173,6 +173,7 @@ pub fn edit_fields(prefs: &Value, k: &str, vals: &Map<String, Value>) -> Vec<Val
     if vals.get("own").and_then(|v| v.as_bool()) == Some(true) {
         f.push(field("e.color", "Colour", "As #rrggbb: where its gradient starts.", "text"));
         f.push(field("e.color2", "Second Colour", "As #rrggbb: where it ends.", "text"));
+        f.push(button("alSwap".to_string(), "", "Swap the Two Colours", ""));
     }
     let has_sound = prefs["alertSounds"][k].is_object();
     let mut secs: Vec<(Value, String)> = vec![(json!(""), "As set for all".into())];
@@ -214,6 +215,7 @@ pub fn edit_fields(prefs: &Value, k: &str, vals: &Map<String, Value>) -> Vec<Val
             f.push(sel("adj", "Its Level", "Yours, on top of what was measured.", adj));
             f.push(field("e.sdelay", "Delay", "In ms: how long after the alert shows its sound starts.", "number"));
             f.push(field("e.music", "Musical Alert", "The app plays its sound itself, pausing the music for it and fading the music back in after.", "toggle"));
+            f.push(button(format!("alMeasure:{k}"), "", "Measure Again", "Works out its level again (your own adjustment stays)."));
             f.push(button(format!("alSnd:{k}"), "", "Change Sound", ""));
             f.push(button(format!("alSndClear:{k}"), "", "Remove Sound", ""));
         }

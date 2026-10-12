@@ -3891,6 +3891,29 @@ fn panel_press(shared: &Shared, key: &str) {
                 Err(e) => format!("Couldn't open its folder: {e}"),
             }
         }
+        // an alert's two colours, the other way round
+        "alSwap" => {
+            let vals = PF_EDIT.with(|e| e.borrow().as_ref().map(|x| x.1.clone())).unwrap_or_default();
+            let (a, b) = (vals.get("e.color").cloned().unwrap_or_default(), vals.get("e.color2").cloned().unwrap_or_default());
+            panel_put(shared, "e.color", b);
+            panel_put(shared, "e.color2", a);
+            return;
+        }
+        // an alert's sound measured again (its own adjustment kept)
+        k if k.starts_with("alMeasure:") => {
+            let kind = k["alMeasure:".len()..].to_string();
+            match omnipulse_core::loudness::alert_levels(&kind) {
+                Ok(mut m) => {
+                    let mut lv = shared.borrow().web.prefs["alertLevels"].as_object().cloned().unwrap_or_default();
+                    m["adj"] = lv.get(&kind).map(|x| x["adj"].clone()).filter(|a| !a.is_null()).unwrap_or(serde_json::json!(0));
+                    lv.insert(kind, m);
+                    pref_put(shared, "alertLevels", serde_json::Value::Object(lv));
+                    push_out(shared, true);
+                    "Measured again.".to_string()
+                }
+                Err(e) => format!("Couldn't measure it: {e}"),
+            }
+        }
         "widgetHide" => {
             let key = shared.borrow().queue.current().map(|t| t.key.clone()).unwrap_or_default();
             if let Ok(mut h) = integrations::WIDGET_HIDDEN.lock() { *h = key; }
