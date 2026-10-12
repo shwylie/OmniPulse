@@ -1420,6 +1420,7 @@ export component AppWindow inherits Window {
                               data: Dnd.payload("p:" + i);
                             ContextMenuArea {
                                 Menu {
+                                    MenuItem { title: "Open"; activated => { root.side(i); } }
                                     if s.share: MenuItem { title: "Share"; activated => { root.side-action(i, "share"); } }
                                     if s.sc: MenuItem { title: "Copy SoundCloud Link"; activated => { root.side-action(i, "link:soundcloud"); } }
                                     if s.sp: MenuItem { title: "Copy Spotify Link"; activated => { root.side-action(i, "link:spotify"); } }
@@ -1428,6 +1429,7 @@ export component AppWindow inherits Window {
                                     if s.own: MenuItem { title: "Rename..."; activated => { root.side-action(i, "rename"); } }
                                     if s.own: MenuItem { title: "Delete"; activated => { root.side-action(i, "delete"); } }
                                     MenuItem { title: "Hide playlist"; activated => { root.side-action(i, "hide"); } }
+                                    if !s.own && s.share: MenuItem { title: "Switch to a Playlist on This PC"; activated => { root.side-action(i, "switch"); } }
                                     MenuItem { title: "Export as M3U..."; activated => { root.side-action(i, "export:m3u"); } }
                                     MenuItem { title: "Export as CSV..."; activated => { root.side-action(i, "export:csv"); } }
                                 }

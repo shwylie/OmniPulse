@@ -5919,6 +5919,25 @@ fn side_action(shared: &Shared, i: usize, act: &str) {
     if act == "collab-leave" {
         return collab_leave(shared, &p.id);
     }
+    // a platform playlist made one on this PC (all its songs, from any platform, kept in step on the
+    // platforms), the original hidden from the sidebar, as the web app's Switch to a playlist on this PC
+    if act == "switch" {
+        let (rt, weak) = { let a = shared.borrow(); (a.rt.clone(), a.ui.clone()) };
+        if let Some(ui) = weak.upgrade() { ui.set_status(format!("Copying \"{}\"...", p.title).into()); }
+        rt.spawn(async move {
+            let copy = mirror::adopt(&p).await;
+            let _ = weak.upgrade_in_event_loop(move |ui| SHARED.with(|s| {
+                let Some(shared) = s.borrow().clone() else { return };
+                let id = copy["id"].as_str().unwrap_or("").to_string();
+                { let mut a = shared.borrow_mut(); if let Some(l) = a.xpl.as_array_mut() { l.insert(0, copy); } else { a.xpl = serde_json::json!([copy]); } }
+                hidden_set(&shared, &mirror::side_id(p.plat, &p.id), true);
+                xpl_changed(&shared);
+                go(&shared, Place::Playlist(id));
+                ui.set_status(format!("\"{}\" is a playlist on this PC now, kept on the platforms too.", p.title).into());
+            }));
+        });
+        return;
+    }
     // hidden from the sidebar (kept: shown again from Settings > Library > Hidden & Not Recommended)
     if act == "hide" {
         let mut ids: Vec<serde_json::Value> = shared.borrow().web.prefs["hiddenByYou"].as_array().cloned().unwrap_or_default();
