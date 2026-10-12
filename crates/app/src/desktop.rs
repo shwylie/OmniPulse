@@ -217,3 +217,244 @@ pub mod taskbar {
     pub fn attach(_hwnd: isize) {}
     pub fn state(_playing: bool, _shuffle: bool, _liked: bool, _can_like: bool) {}
 }
+
+// ---------- Windows' media controls (by the volume, in quick settings, on the lock screen) ----------
+/// What's playing, as Windows' media controls and the taskbar widget show it
+#[derive(Clone, Default, PartialEq)]
+pub struct Now {
+    pub title: String,
+    pub artist: String,
+    pub album: String,
+    pub art: String,
+    pub playing: bool,
+    pub has_track: bool,
+    pub pos_ms: u64,
+    pub dur_ms: u64,
+}
+
+/// A place in the track asked for from Windows' controls (ms), waiting for the app
+static SEEK: Mutex<Option<u64>> = Mutex::new(None);
+
+pub fn take_seek() -> Option<u64> {
+    SEEK.lock().ok()?.take()
+}
+
+#[cfg(windows)]
+pub mod media {
+    use super::Now;
+    use std::cell::RefCell;
+    use windows::core::HSTRING;
+    use windows::Foundation::{TimeSpan, TypedEventHandler, Uri};
+    use windows::Media::{
+        MediaPlaybackStatus, MediaPlaybackType, PlaybackPositionChangeRequestedEventArgs, SystemMediaTransportControls, SystemMediaTransportControlsButton,
+        SystemMediaTransportControlsButtonPressedEventArgs, SystemMediaTransportControlsTimelineProperties,
+    };
+    use windows::Storage::Streams::RandomAccessStreamReference;
+    use windows::Win32::Foundation::HWND;
+    use windows::Win32::System::WinRT::ISystemMediaTransportControlsInterop;
+
+    struct Smtc {
+        c: SystemMediaTransportControls,
+        shown: Option<Now>,
+    }
+
+    thread_local! {
+        static SMTC: RefCell<Option<Smtc>> = const { RefCell::new(None) };
+    }
+
+    fn ts(ms: u64) -> TimeSpan {
+        TimeSpan { Duration: ms as i64 * 10_000 }
+    }
+
+    fn make(hwnd: isize) -> windows::core::Result<SystemMediaTransportControls> {
+        let interop = windows::core::factory::<SystemMediaTransportControls, ISystemMediaTransportControlsInterop>()?;
+        let c: SystemMediaTransportControls = unsafe { interop.GetForWindow(HWND(hwnd as _))? };
+        c.SetIsPlayEnabled(true)?;
+        c.SetIsPauseEnabled(true)?;
+        c.SetIsNextEnabled(true)?;
+        c.SetIsPreviousEnabled(true)?;
+        c.ButtonPressed(&TypedEventHandler::<SystemMediaTransportControls, SystemMediaTransportControlsButtonPressedEventArgs>::new(|_, args| {
+            if let Some(a) = args.as_ref() {
+                let b = a.Button()?;
+                let act = if b == SystemMediaTransportControlsButton::Play || b == SystemMediaTransportControlsButton::Pause {
+                    "play"
+                } else if b == SystemMediaTransportControlsButton::Next {
+                    "next"
+                } else if b == SystemMediaTransportControlsButton::Previous {
+                    "prev"
+                } else {
+                    return Ok(());
+                };
+                if let Ok(mut c) = super::CLICKED.lock() {
+                    c.push(act);
+                }
+            }
+            Ok(())
+        }))?;
+        c.PlaybackPositionChangeRequested(&TypedEventHandler::<SystemMediaTransportControls, PlaybackPositionChangeRequestedEventArgs>::new(|_, args| {
+            if let Some(a) = args.as_ref() {
+                let ms = (a.RequestedPlaybackPosition()?.Duration / 10_000).max(0) as u64;
+                if let Ok(mut s) = super::SEEK.lock() {
+                    *s = Some(ms);
+                }
+            }
+            Ok(())
+        }))?;
+        Ok(c)
+    }
+
+    /// On or off (Settings > App > Windows Media Controls); `hwnd` the app's window
+    pub fn enable(hwnd: isize, on: bool) {
+        SMTC.with(|s| {
+            let mut s = s.borrow_mut();
+            if on && s.is_none() {
+                if let Ok(c) = make(hwnd) {
+                    let _ = c.SetIsEnabled(true);
+                    *s = Some(Smtc { c, shown: None });
+                }
+            }
+            if !on {
+                if let Some(m) = s.take() {
+                    let _ = m.c.DisplayUpdater().and_then(|d| d.ClearAll());
+                    let _ = m.c.SetIsEnabled(false);
+                }
+            }
+        });
+    }
+
+    /// Keeps them in step with the player (only what's changed is sent)
+    pub fn update(now: &Now) {
+        SMTC.with(|s| {
+            let mut s = s.borrow_mut();
+            let Some(m) = s.as_mut() else { return };
+            if m.shown.as_ref() == Some(now) {
+                return;
+            }
+            let was = m.shown.take().unwrap_or_default();
+            let first = !was.has_track;
+            if !now.has_track {
+                let _ = m.c.SetPlaybackStatus(MediaPlaybackStatus::Closed);
+                let _ = m.c.DisplayUpdater().and_then(|d| d.ClearAll());
+                m.shown = Some(now.clone());
+                return;
+            }
+            if first || was.title != now.title || was.artist != now.artist || was.art != now.art || was.album != now.album {
+                let _ = (|| -> windows::core::Result<()> {
+                    let d = m.c.DisplayUpdater()?;
+                    d.SetType(MediaPlaybackType::Music)?;
+                    let p = d.MusicProperties()?;
+                    p.SetTitle(&HSTRING::from(now.title.as_str()))?;
+                    p.SetArtist(&HSTRING::from(now.artist.as_str()))?;
+                    p.SetAlbumTitle(&HSTRING::from(now.album.as_str()))?;
+                    if now.art.starts_with("http") {
+                        d.SetThumbnail(&RandomAccessStreamReference::CreateFromUri(&Uri::CreateUri(&HSTRING::from(now.art.as_str()))?)?)?;
+                    } else {
+                        d.SetThumbnail(None)?;
+                    }
+                    d.Update()
+                })();
+            }
+            if first || was.playing != now.playing {
+                let _ = m.c.SetPlaybackStatus(if now.playing { MediaPlaybackStatus::Playing } else { MediaPlaybackStatus::Paused });
+            }
+            // where it is: each second, when it jumps (a seek), or with a new length
+            if first || now.pos_ms / 1000 != was.pos_ms / 1000 || now.dur_ms != was.dur_ms {
+                let _ = (|| -> windows::core::Result<()> {
+                    let t = SystemMediaTransportControlsTimelineProperties::new()?;
+                    t.SetStartTime(ts(0))?;
+                    t.SetMinSeekTime(ts(0))?;
+                    t.SetEndTime(ts(now.dur_ms))?;
+                    t.SetMaxSeekTime(ts(now.dur_ms))?;
+                    t.SetPosition(ts(now.pos_ms.min(now.dur_ms)))?;
+                    m.c.UpdateTimelineProperties(&t)
+                })();
+            }
+            m.shown = Some(now.clone());
+        });
+    }
+}
+
+#[cfg(not(windows))]
+pub mod media {
+    pub fn enable(_hwnd: isize, _on: bool) {}
+    pub fn update(_now: &super::Now) {}
+}
+
+// ---------- the taskbar widget's place: over the taskbar's empty room, left of the clock ----------
+#[cfg(windows)]
+pub mod dock {
+    use windows::core::{w, PCWSTR};
+    use windows::Win32::Foundation::{HWND, RECT};
+    use windows::Win32::Graphics::Dwm::{DwmSetWindowAttribute, DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUNDSMALL, DWM_WINDOW_CORNER_PREFERENCE};
+    use windows::Win32::Graphics::Gdi::{GetMonitorInfoW, MonitorFromWindow, MONITORINFO, MONITOR_DEFAULTTONEAREST};
+    use windows::Win32::UI::Shell::{SHQueryUserNotificationState, QUNS_BUSY, QUNS_PRESENTATION_MODE, QUNS_RUNNING_D3D_FULL_SCREEN};
+    use windows::Win32::UI::WindowsAndMessaging::{
+        FindWindowExW, FindWindowW, GetWindowLongPtrW, GetWindowRect, SetWindowLongPtrW, SetWindowPos, GWL_EXSTYLE, HWND_TOPMOST, SWP_NOACTIVATE, SWP_NOOWNERZORDER,
+        WS_EX_APPWINDOW, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
+    };
+
+    /// Where it goes, in pixels (x, y, width, height): the taskbar's height less a little, `width` wide,
+    /// just left of the clock and the tray. None: no room (the taskbar hidden, or down a side of the screen)
+    pub fn spot(width: i32, scale: f32) -> Option<(i32, i32, i32, i32)> {
+        unsafe {
+            let bar = FindWindowW(w!("Shell_TrayWnd"), PCWSTR::null()).ok()?;
+            let mut r = RECT::default();
+            GetWindowRect(bar, &mut r).ok()?;
+            let (bw, bh) = (r.right - r.left, r.bottom - r.top);
+            if bw < bh || bh < 20 {
+                return None;
+            }
+            // (auto-hidden: only a sliver of it on screen)
+            let mon = MonitorFromWindow(bar, MONITOR_DEFAULTTONEAREST);
+            let mut mi = MONITORINFO { cbSize: std::mem::size_of::<MONITORINFO>() as u32, ..Default::default() };
+            if GetMonitorInfoW(mon, &mut mi).as_bool() {
+                let m = mi.rcMonitor;
+                if r.top >= m.bottom - 4 || r.bottom <= m.top + 4 {
+                    return None;
+                }
+            }
+            let mut t = RECT::default();
+            let right = match FindWindowExW(Some(bar), None, w!("TrayNotifyWnd"), PCWSTR::null()) {
+                Ok(tray) if GetWindowRect(tray, &mut t).is_ok() && t.left > r.left + bw / 2 => t.left,
+                _ => r.right - (220.0 * scale) as i32,
+            };
+            let gap = (6.0 * scale) as i32;
+            Some((right - width - gap, r.top + gap, width, bh - 2 * gap))
+        }
+    }
+
+    /// Something full screen (a game, a video, a presentation): it keeps out of the way
+    pub fn busy() -> bool {
+        unsafe { SHQueryUserNotificationState().map(|s| s == QUNS_BUSY || s == QUNS_RUNNING_D3D_FULL_SCREEN || s == QUNS_PRESENTATION_MODE).unwrap_or(false) }
+    }
+
+    /// Made a widget: no taskbar button of its own, never takes the focus, small round corners
+    pub fn style(hwnd: isize) {
+        unsafe {
+            let h = HWND(hwnd as _);
+            let ex = GetWindowLongPtrW(h, GWL_EXSTYLE);
+            SetWindowLongPtrW(h, GWL_EXSTYLE, (ex | WS_EX_TOOLWINDOW.0 as isize | WS_EX_NOACTIVATE.0 as isize) & !(WS_EX_APPWINDOW.0 as isize));
+            let pref = DWMWCP_ROUNDSMALL;
+            let _ = DwmSetWindowAttribute(h, DWMWA_WINDOW_CORNER_PREFERENCE, &pref as *const DWM_WINDOW_CORNER_PREFERENCE as _, std::mem::size_of::<DWM_WINDOW_CORNER_PREFERENCE>() as u32);
+        }
+    }
+
+    /// Put (back) over the taskbar: it comes up over us whenever it's clicked
+    pub fn keep(hwnd: isize, (x, y, w, h): (i32, i32, i32, i32)) {
+        unsafe {
+            let _ = SetWindowPos(HWND(hwnd as _), Some(HWND_TOPMOST), x, y, w, h, SWP_NOACTIVATE | SWP_NOOWNERZORDER);
+        }
+    }
+}
+
+#[cfg(not(windows))]
+pub mod dock {
+    pub fn spot(_w: i32, _s: f32) -> Option<(i32, i32, i32, i32)> {
+        None
+    }
+    pub fn busy() -> bool {
+        false
+    }
+    pub fn style(_hwnd: isize) {}
+    pub fn keep(_hwnd: isize, _r: (i32, i32, i32, i32)) {}
+}

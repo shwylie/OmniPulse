@@ -2716,6 +2716,7 @@ fn tick(shared: &Shared, events: &std::sync::mpsc::Receiver<Event>, n: u64) {
     // a mix playing: the title bar's button and the progress bar show it
     let mixing = shared.borrow().engine.mixing();
     if ui.get_mixing() != mixing { ui.set_mixing(mixing); }
+    windows_now(shared, &ui);
     // the narrow layout below 980 px across, as the web app's
     let w = ui.window().size().to_logical(ui.window().scale_factor()).width;
     // (with the queue open too, the full sidebar needs more room: narrow up to 1100 px then)
@@ -6175,6 +6176,7 @@ fn desktop_action(shared: &Shared, action: &str) {
         "play" => toggle(shared),
         "next" => skip_press(shared, 1),
         "prev" => skip_press(shared, -1),
+        "like" => like_toggle(shared),
         "shuffle" => {
             let mut a = shared.borrow_mut();
             let lp = shuffle_basis(&a);
@@ -6196,6 +6198,112 @@ fn desktop_action(shared: &Shared, action: &str) {
         }
         _ => {}
     }
+}
+
+thread_local! {
+    /// the app's window, once it's up (Windows' media controls are tied to it)
+    static MAIN_HWND: std::cell::Cell<isize> = const { std::cell::Cell::new(0) };
+    /// Settings > App > Taskbar Widget: its window (made the first time it's switched on), its handle,
+    /// and whether it's showing
+    static TBW: RefCell<Option<(TaskbarWidget, isize, bool)>> = const { RefCell::new(None) };
+}
+
+/// What's playing, for Windows' media controls
+fn now_for_windows(a: &App) -> desktop::Now {
+    let t = a.queue.current();
+    desktop::Now {
+        title: t.map(|t| t.title.clone()).unwrap_or_default(),
+        artist: t.map(|t| t.artist.clone()).unwrap_or_default(),
+        album: t.map(|t| t.album.clone()).unwrap_or_default(),
+        art: t.map(|t| t.art.replace("-t200x200", "-t500x500")).unwrap_or_default(),
+        playing: a.loaded && !a.engine.is_paused(),
+        has_track: t.is_some(),
+        pos_ms: a.engine.position_ms(),
+        dur_ms: a.engine.duration_ms().max(t.map_or(0, |t| t.ms)),
+    }
+}
+
+/// Windows' media controls and the taskbar widget, kept in step (each tick)
+fn windows_now(shared: &Shared, ui: &AppWindow) {
+    let (now, smtc, widget) = {
+        let a = shared.borrow();
+        let prefs = &a.web.prefs;
+        (now_for_windows(&a), prefs["smtcOn"].as_bool() != Some(false), prefs["taskbarWidget"].as_bool() == Some(true) && (std::env::var_os("OMNIPULSE_SELFTEST").is_none() || std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("taskbar")))
+    };
+    if smtc { desktop::media::update(&now); }
+    // a place asked for from them
+    if let Some(ms) = desktop::take_seek() {
+        let engine = shared.borrow().engine.clone();
+        engine.seek(ms);
+        let s2 = shared.clone();
+        slint::Timer::single_shot(std::time::Duration::from_millis(300), move || push_out(&s2, true));
+    }
+    taskbar_widget(shared, ui, widget);
+}
+
+/// The taskbar widget: made, shown, kept in its place and in step with the player bar; hidden while
+/// something's full screen or the taskbar is (and with the switch off)
+fn taskbar_widget(shared: &Shared, ui: &AppWindow, on: bool) {
+    TBW.with(|w| {
+        let mut w = w.borrow_mut();
+        if !on {
+            if let Some((tw, _, shown)) = w.as_mut() { if *shown { let _ = tw.hide(); *shown = false; } }
+            return;
+        }
+        if w.is_none() {
+            let Ok(tw) = TaskbarWidget::new() else { return };
+            let s = shared.clone();
+            tw.on_act(move |a| {
+                let s = s.clone();
+                // (after the click's done with: what it does may repaint the widget)
+                slint::Timer::single_shot(std::time::Duration::ZERO, move || desktop_action(&s, &a));
+            });
+            *w = Some((tw, 0, false));
+        }
+        let Some((tw, hwnd, shown)) = w.as_mut() else { return };
+        // the app's colours
+        let (mt, wt) = (ui.global::<Theme>(), tw.global::<Theme>());
+        wt.set_panel(mt.get_panel()); wt.set_elevated(mt.get_elevated()); wt.set_text(mt.get_text()); wt.set_muted(mt.get_muted());
+        wt.set_accent(mt.get_accent()); wt.set_accent_2(mt.get_accent_2()); wt.set_on_accent(mt.get_on_accent()); wt.set_motion(mt.get_motion());
+        // what's playing, as the player bar has it
+        tw.set_has_track(shared.borrow().queue.current().is_some());
+        tw.set_song(ui.get_now_title()); tw.set_artist(ui.get_now_artist()); tw.set_plat(ui.get_now_plat());
+        if tw.get_art() != ui.get_now_art() { tw.set_art(ui.get_now_art()); }
+        tw.set_playing(ui.get_playing()); tw.set_liked(ui.get_now_liked()); tw.set_can_like(ui.get_can_like());
+        tw.set_frac(ui.get_pos_frac()); tw.set_mixing(ui.get_mixing());
+        // where: by the clock, over the taskbar (put back over it each time, as it comes up over us when clicked)
+        let scale = if *hwnd != 0 { tw.window().scale_factor() } else { ui.window().scale_factor() };
+        let spot = desktop::dock::spot((280.0 * scale) as i32, scale).filter(|_| !desktop::dock::busy());
+        match spot {
+            None => { if *shown { let _ = tw.hide(); *shown = false; } }
+            Some((x, y, wd, ht)) => {
+                if !*shown {
+                    tw.window().set_size(slint::PhysicalSize::new(wd as u32, ht as u32));
+                    tw.window().set_position(slint::PhysicalPosition::new(x, y));
+                    let _ = tw.show();
+                    *shown = true;
+                }
+                // (its handle: there once the window's been made, a moment after it's first shown)
+                if *hwnd == 0 {
+                    {
+                        use slint::winit_030::winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
+                        use slint::winit_030::WinitWindowAccessor;
+                        *hwnd = tw.window().with_winit_window(|win| match win.window_handle().map(|h| h.as_raw()) {
+                            Ok(RawWindowHandle::Win32(h)) => Some(h.hwnd.get()),
+                            _ => None,
+                        }).flatten().unwrap_or(0);
+                        if *hwnd != 0 {
+                            // (no taskbar button of its own: hidden and shown again with its new style)
+                            desktop::dock::style(*hwnd);
+                            let _ = tw.hide();
+                            let _ = tw.show();
+                        }
+                    }
+                }
+                if *hwnd != 0 { desktop::dock::keep(*hwnd, (x, y, wd, ht)); }
+            }
+        }
+    });
 }
 
 /// The window's handle, once it exists (for the taskbar buttons)
@@ -6235,6 +6343,8 @@ fn apply_look(shared: &Shared) {
     t.set_motion(motion);
     ui.set_anim_on(motion);
     ui.set_close_to_tray(prefs["closeToTray"].as_bool() == Some(true));
+    ui.set_smtc_on(prefs["smtcOn"].as_bool() != Some(false));
+    ui.set_taskbar_widget(prefs["taskbarWidget"].as_bool() == Some(true));
     LISTEN_NUDGE.store(nudge_of(prefs), std::sync::atomic::Ordering::Relaxed);
     let nudge = nudge_of(prefs).to_string();
     if ui.get_listen_nudge().trim() != nudge && !(ui.get_listen_nudge().trim().is_empty() && nudge == "0") { ui.set_listen_nudge(nudge.into()); }
@@ -6531,6 +6641,15 @@ fn main() -> Result<(), slint::PlatformError> {
     ui.on_mix_toggle(move || set_toggle(&s, "mixOn"));
     let s = shared.clone();
     ui.on_close_to_tray_changed(move |on| set_look_pref(&s, "closeToTray", serde_json::json!(on)));
+    let s = shared.clone();
+    ui.on_app_pref(move |key, on| {
+        set_look_pref(&s, &key, serde_json::json!(on));
+        if key == "smtcOn" {
+            let h = MAIN_HWND.with(|m| m.get());
+            if h != 0 { desktop::media::enable(h, on); }
+        }
+        if let Some(ui) = s.borrow().ui.upgrade() { windows_now(&s, &ui); }
+    });
     let s = shared.clone();
     ui.on_anim_changed(move |on| set_look_pref(&s, "animOn", serde_json::json!(on)));
     nav_paint(&shared);
@@ -7175,8 +7294,14 @@ fn main() -> Result<(), slint::PlatformError> {
     // the taskbar buttons, once the window is up
     let weak = ui.as_weak();
     slint::Timer::single_shot(std::time::Duration::from_millis(500), move || {
-        if let Some(h) = weak.upgrade().as_ref().and_then(window_hwnd) {
-            desktop::taskbar::attach(h);
+        if let Some(ui) = weak.upgrade() {
+            if let Some(h) = window_hwnd(&ui) {
+                desktop::taskbar::attach(h);
+                MAIN_HWND.with(|m| m.set(h));
+                // Settings > App > Windows Media Controls (on unless switched off)
+                let on = SHARED.with(|s| s.borrow().as_ref().map(|sh| sh.borrow().web.prefs["smtcOn"].as_bool() != Some(false))).unwrap_or(true);
+                desktop::media::enable(h, on);
+            }
         }
     });
 
@@ -7202,6 +7327,9 @@ fn main() -> Result<(), slint::PlatformError> {
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("dnd") { vec![(9, "play"), (12, "library"), (13, "qopen"), (14, "dragq"), (16, "dragasks"), (17, "end")] }
             // (OMNIPULSE_SELFTEST_PLAN=panels: the settings panels, opened (nothing saved))
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("panels") { vec![(9, "settings"), (10, "cat_Integrations"), (11, "cat_Plugins"), (12, "p_requests"), (12, "p_widget"), (14, "p_alerts"), (16, "p_plugins"), (17, "plugread"), (20, "p_alertlist"), (21, "p_alert:raid"), (22, "pfclose"), (23, "end")] }
+            // (OMNIPULSE_SELFTEST_PLAN=taskbar: the taskbar widget switched on (shown for a few seconds), a
+            // picture of it, then off)
+            else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("taskbar") { vec![(9, "play"), (10, "tbon"), (15, "tbshot"), (16, "tboff"), (18, "end")] }
             // (OMNIPULSE_SELFTEST_PLAN=look: List Density at Compact, and Search with Hide likes)
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("look") { vec![(9, "play"), (12, "library"), (13, "compact"), (14, "settings"), (15, "comfy"), (16, "search"), (19, "hidelikes"), (21, "hidelikesoff"), (22, "discover"), (30, "langnext"), (40, "end")] }
             else if only_discover { vec![(9, "play"), (11, "discover"), (30, "disc"), (45, "discmix"), (12, "import"), (46, "taste"), (47, "taste2"), (48, "taste3"), (70, "tasted"), (71, "marquee"), (72, "marqueeoff"), (73, "end")] } else { full.to_vec() };
@@ -7229,6 +7357,16 @@ fn main() -> Result<(), slint::PlatformError> {
                 // Track preferences for what's playing, for its picture
                 "tprefs" => { if let Some(t) = s.borrow().queue.current().cloned() { tp_open(&s, &t); } println!("selftest: track preferences open {}, \"{}\" by {}", ui.get_tp_open(), ui.get_tp_title(), ui.get_tp_artist()); }
                 "tpclose" => ui.set_tp_open(false),
+                "tbon" => ui.invoke_app_pref("taskbarWidget".into(), true),
+                "tbshot" => TBW.with(|w| {
+                    if let Some((tw, h, shown)) = w.borrow().as_ref() {
+                        println!("selftest: taskbar widget shown {shown}, hwnd {h}, size {:?}, at {:?}, \"{}\" playing {}", tw.window().size(), tw.window().position(), tw.get_song(), tw.get_playing());
+                        if let Ok(shot) = tw.window().take_snapshot() {
+                            let _ = image::RgbaImage::from_raw(shot.width(), shot.height(), shot.as_bytes().to_vec()).map(|i| i.save(format!("{dir}/taskbar-widget.png")));
+                        }
+                    } else { println!("selftest: no taskbar widget"); }
+                }),
+                "tboff" => { ui.invoke_app_pref("taskbarWidget".into(), false); println!("selftest: taskbar widget after off: shown {}", TBW.with(|w| w.borrow().as_ref().is_some_and(|x| x.2))); }
                 // picking: two rows, a range with Shift, then none
                 "pick" => { ui.invoke_row_pick(0, 1); ui.invoke_row_pick(4, 2); println!("selftest: picked {} (rows marked {}), status \"{}\"", s.borrow().picked.len(), ui.get_rows().iter().filter(|r| r.picked).count(), ui.get_status()); }
                 "picknone" => { ui.invoke_pick_none(); println!("selftest: picked after Escape {}", s.borrow().picked.len()); }

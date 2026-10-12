@@ -993,6 +993,10 @@ export component AppWindow inherits Window {
     // Settings > App: Close to Tray, Animations (the web app's settings too)
     in-out property <bool> close-to-tray;
     callback close-to-tray-changed(bool);
+    // Settings > App: Windows Media Controls, Taskbar Widget
+    in-out property <bool> smtc-on;
+    in-out property <bool> taskbar-widget;
+    callback app-pref(string, bool);
     in-out property <bool> anim-on: true;
     callback anim-changed(bool);
     // Updates: what's known (this version, or a newer one), and its button ("Check" or "Update")
@@ -1931,6 +1935,38 @@ export component AppWindow inherits Window {
                                             Text { text: "Closing hides the window; music keeps playing. Quit from the tray."; color: Theme.muted; font-size: 12px; }
                                         }
                                         Toggle { checked <=> root.close-to-tray; y: (parent.height - self.height) / 2; toggled => { root.close-to-tray-changed(self.checked); } }
+                                    }
+                                }
+                                Card {
+                                    HorizontalLayout {
+                                        padding: 16px;
+                                        padding-top: 12px;
+                                        padding-bottom: 12px;
+                                        spacing: 12px;
+                                        VerticalLayout {
+                                            horizontal-stretch: 1;
+                                            alignment: center;
+                                            spacing: 2px;
+                                            Text { text: "Windows Media Controls"; color: Theme.text; font-weight: 700; }
+                                            Text { text: "What's playing in Windows' media controls: by the volume and in quick settings, and on the lock screen, with its cover, Play / Pause, Next and Previous."; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
+                                        }
+                                        Toggle { checked <=> root.smtc-on; y: (parent.height - self.height) / 2; toggled => { root.app-pref("smtcOn", self.checked); } }
+                                    }
+                                }
+                                Card {
+                                    HorizontalLayout {
+                                        padding: 16px;
+                                        padding-top: 12px;
+                                        padding-bottom: 12px;
+                                        spacing: 12px;
+                                        VerticalLayout {
+                                            horizontal-stretch: 1;
+                                            alignment: center;
+                                            spacing: 2px;
+                                            Text { text: "Taskbar Widget"; color: Theme.text; font-weight: 700; }
+                                            Text { text: "What's playing, always on show in the taskbar by the clock, with its controls. Hidden while a game or video is full screen, or the taskbar is hidden."; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
+                                        }
+                                        Toggle { checked <=> root.taskbar-widget; y: (parent.height - self.height) / 2; toggled => { root.app-pref("taskbarWidget", self.checked); } }
                                     }
                                 }
                                 Card {
@@ -2954,4 +2990,73 @@ export component AppWindow inherits Window {
             reject
         }
     }
+}
+
+// Settings > App > Taskbar Widget: what's playing, always on show in the taskbar by the clock (a small
+// window of its own over the taskbar's empty room, never taking the focus). Its colours are the app's,
+// set on its own Theme.
+export component TaskbarWidget inherits Window {
+    in property <string> song;
+    in property <string> artist;
+    in property <image> art;
+    in property <string> plat;
+    in property <bool> playing;
+    in property <bool> liked;
+    in property <bool> can-like;
+    in property <float> frac;
+    in property <bool> mixing;
+    in property <bool> has-track;
+    callback act(string);
+    no-frame: true;
+    always-on-top: true;
+    title: "OmniPulse Taskbar Widget";
+    background: Theme.panel;
+    preferred-width: 280px;
+    preferred-height: 40px;
+    HorizontalLayout {
+        padding-left: 6px;
+        padding-right: 4px;
+        spacing: 8px;
+        alignment: stretch;
+        Rectangle {
+            width: 30px;
+            height: self.width;
+            y: (parent.height - self.height) / 2;
+            BadgedCover { art: root.art; plat: root.plat; badge: 14px; corner: 4px; initial: root.song == "" ? "" : "♪"; width: parent.width; height: parent.height; }
+        }
+        VerticalLayout {
+            horizontal-stretch: 1;
+            alignment: center;
+            spacing: 0px;
+            Marquee { text: root.has-track ? root.song : "OmniPulse"; font-size: 12px; }
+            Marquee { text: root.has-track ? (root.mixing ? "Mixing · " + root.artist : root.artist) : "Nothing playing"; font-size: 11px; font-weight: 400; ink: Theme.muted; }
+        }
+        if root.can-like: IconButton { d: root.liked ? Icons.library : Icons.heart-out; size: 26px; tint: root.liked ? Theme.accent : Theme.muted; y: (parent.height - self.height) / 2; clicked => { root.act("like"); } }
+        IconButton { d: Icons.prev; size: 26px; y: (parent.height - self.height) / 2; clicked => { root.act("prev"); } }
+        IconButton { d: root.playing ? Icons.pause : Icons.play; size: 30px; tint: Theme.text; y: (parent.height - self.height) / 2; clicked => { root.act("play"); } }
+        IconButton { d: Icons.next; size: 26px; y: (parent.height - self.height) / 2; clicked => { root.act("next"); } }
+    }
+    // where it is, along its foot (the mix sweeping through it, as the player bar's)
+    Rectangle {
+        y: parent.height - 2px;
+        height: 2px;
+        background: Theme.text.with-alpha(0.12);
+        clip: true;
+        Rectangle { x: 0; width: parent.width * max(0, min(1, root.frac)); height: 100%; background: Theme.accent; }
+        if root.mixing: Rectangle {
+            property <float> ph: mod(animation-tick() / 1ms, 1400) / 1400;
+            x: 0;
+            width: parent.width * max(0, min(1, root.frac));
+            height: 100%;
+            clip: true;
+            Rectangle {
+                x: -parent.width + parent.width * 2 * parent.ph;
+                width: parent.width * 2;
+                height: 100%;
+                background: @linear-gradient(90deg, Theme.accent 0%, Theme.accent-2 25%, Theme.accent 50%, Theme.accent-2 75%, Theme.accent 100%);
+            }
+        }
+    }
+    // the cover and the names: the app's window, shown
+    TouchArea { x: 0; width: root.width - (root.can-like ? 150px : 120px); height: parent.height - 2px; clicked => { root.act("show"); } }
 }
