@@ -2391,6 +2391,15 @@ fn start(shared: &Shared) {
     if safe_skip(shared) {
         return;
     }
+    // (the song change, for rating it: from what, to what, how, and why it wasn't mixed if it wasn't)
+    if let Some(t) = shared.borrow().queue.current().cloned() {
+        let how = CHANGE_HOW.with(|h| h.replace("picked"));
+        let prev = LAST_PLAYING.with(|l| l.borrow_mut().replace(t.clone()));
+        if prev.as_ref().is_some_and(|p| p.key != t.key || how == "ended") {
+            let why = MIX_WHY.with(|m| m.borrow().clone()).filter(|(a, b, _)| prev.as_ref().is_some_and(|p| p.key == *a) && *b == t.key).map(|x| x.2);
+            LAST_CHANGE.with(|c| *c.borrow_mut() = Some(SongChange { from: prev, to: t, how, why, at: std::time::Instant::now() }));
+        }
+    }
     // (anything started is what's shown: a mix being shown is over)
     if MIX_SHOW.with(|m| m.borrow_mut().take()).is_some() {
         if let Some(ui) = shared.borrow().ui.upgrade() { ui.global::<Theme>().set_pulsing(false); }
@@ -3058,12 +3067,17 @@ fn mix_tick(shared: &Shared, pos: u64, dur: u64) {
     };
     let (Some(next), Some(cur)) = (next, cur) else { return };
     // (OMNIPULSE_MIX_DEBUG: why it isn't mixing, each second)
-    let why = |w: &str| if std::env::var_os("OMNIPULSE_MIX_DEBUG").is_some() && pos % 1000 < 260 { eprintln!("mix debug at {pos}: {w}"); };
+    let pair = (cur.key.clone(), next.key.clone());
+    let why = |w: &str| {
+        // (kept: if this pair changes over unmixed, a rating of it says why)
+        MIX_WHY.with(|m| *m.borrow_mut() = Some((pair.0.clone(), pair.1.clone(), w.to_string())));
+        if std::env::var_os("OMNIPULSE_MIX_DEBUG").is_some() && pos % 1000 < 260 { eprintln!("mix debug at {pos}: {w}"); }
+    };
     // (a Jam going: its queue plays as it is, unmixed, till it ends)
     let listening_now = listening_now || room_kind().as_deref() == Some("jam");
     if !on || listening_now || !MIX_OUT_OK.with(|c| c.get()) || dur == 0 || next.is_mix() { why(&format!("on {on}, listening {listening_now}, out ok {}, dur {dur}, next is a set {}", MIX_OUT_OK.with(|c| c.get()), next.is_mix())); return; }
     // (Stream-Safe Music: never mixed into one it doesn't allow; the usual way skips it)
-    if !streamsafe::allowed(&shared.borrow().web.prefs, &next) { return; }
+    if !streamsafe::allowed(&shared.borrow().web.prefs, &next) { why("Stream-Safe Music doesn't allow the next one"); return; }
     // (where its sound ends: measured, if it's before the file's end)
     let audible = shared.borrow().cur_loud.as_ref().and_then(|k| shared.borrow().analysis.get(k).and_then(|x| x["audible_ms"].as_u64())).filter(|&x| x > 0 && x < dur).unwrap_or(dur);
     let planning = std::time::Instant::now();
@@ -3174,6 +3188,22 @@ fn mix_tick(shared: &Shared, pos: u64, dur: u64) {
 thread_local! {
     /// the last transition: what it was, and when it began
     static LAST_MIX: RefCell<Option<(serde_json::Value, std::time::Instant)>> = const { RefCell::new(None) };
+    /// the last song change of any kind (mixed or not), and the one playing before it
+    static LAST_CHANGE: RefCell<Option<SongChange>> = const { RefCell::new(None) };
+    static LAST_PLAYING: RefCell<Option<Track>> = const { RefCell::new(None) };
+    /// how the next change comes about: "mixed", "ended" (on to the next, unmixed), else "picked" (a
+    /// skip, a click, a queue change)
+    static CHANGE_HOW: std::cell::Cell<&'static str> = const { std::cell::Cell::new("picked") };
+    /// the mixer's last word on the pair coming up (the one playing, the next one): why it isn't mixing
+    static MIX_WHY: RefCell<Option<(String, String, String)>> = const { RefCell::new(None) };
+}
+
+struct SongChange {
+    from: Option<Track>,
+    to: Track,
+    how: &'static str,
+    why: Option<String>,
+    at: std::time::Instant,
 }
 
 /// One side of a transition, as it was measured (no sound: its numbers)
@@ -3213,7 +3243,34 @@ fn mix_record(a: &App, plan: &mix::Plan, from: Option<&Track>, to: Option<&Track
 
 /// The last transition rated: a line in state/mix-feedback.jsonl, or why it couldn't be
 fn mix_feedback(shared: &Shared, good: bool) -> Result<String, &'static str> {
-    let Some((rec, began)) = LAST_MIX.with(|l| l.borrow().clone()) else { return Err("No transition to rate yet.") };
+    // (what's rated: the last song change. Mixed, its transition; not, the change as it was, and why the
+    // mixer left it, so a rating never lands on an older transition)
+    let change = LAST_CHANGE.with(|c| c.borrow().as_ref().map(|c| (c.to.key.clone(), c.how, c.at)));
+    let mixed = LAST_MIX.with(|l| l.borrow().clone());
+    let (rec, began) = match (change, mixed) {
+        (Some((to, how, at)), mixed) if how != "mixed" || mixed.as_ref().is_none_or(|(r, _)| r["to"]["key"].as_str() != Some(to.as_str())) => {
+            let a = shared.borrow();
+            let rec = LAST_CHANGE.with(|c| c.borrow().as_ref().map(|c| {
+                let p = &a.web.prefs;
+                serde_json::json!({
+                    "id": std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0).saturating_sub(c.at.elapsed().as_millis() as u64),
+                    "kind": "unmixed",
+                    // ("ended": played to its end and on to the next unmixed; "picked": a skip or a click, by hand)
+                    "how": how,
+                    "whyNotMixed": c.why,
+                    "mixOn": integrations::on(p, "mixOn"),
+                    "plan": null,
+                    "from": c.from.as_ref().map(mix_side),
+                    "to": mix_side(&c.to),
+                    "settings": { "mixWords": set_row_on(p, "mixWords", true), "mixDrop": set_row_on(p, "mixDrop", true), "mixMelody": set_row_on(p, "mixMelody", true), "mixBands": set_row_on(p, "mixBands", false) },
+                    "version": env!("CARGO_PKG_VERSION"),
+                })
+            })).ok_or("No song change to rate yet.")?;
+            (rec, at)
+        }
+        (_, Some(m)) => m,
+        _ => return Err("No transition to rate yet."),
+    };
     let line = serde_json::json!({
         "verdict": if good { "good" } else { "bad" },
         // (what the two mean, as the one rating uses them: "bad" isn't "it sounded bad")
@@ -3230,6 +3287,7 @@ fn mix_feedback(shared: &Shared, good: bool) -> Result<String, &'static str> {
     let mut f = std::fs::OpenOptions::new().create(true).append(true).open(dir.join("mix-feedback.jsonl")).map_err(|_| "Couldn't write the feedback file.")?;
     writeln!(f, "{line}").map_err(|_| "Couldn't write the feedback file.")?;
     let what = format!("{} into {}", rec["from"]["title"].as_str().unwrap_or("?"), rec["to"]["title"].as_str().unwrap_or("?"));
+    let _ = &began;
     let n = std::fs::read_to_string(dir.join("mix-feedback.jsonl")).map(|s| s.lines().count()).unwrap_or(0);
     let note = format!("Transition rated {}: {what} ({}). {n} ratings so far.", if good { "good" } else { "bad" }, rec["kind"].as_str().unwrap_or(""));
     if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_status(note.clone().into()); }
@@ -3328,6 +3386,7 @@ fn mix_started(shared: &Shared) {
     }
     MIX.with(|m| *m.borrow_mut() = Some(MixPhase::Mixing { plan, tempo, eased_from: None, ease_ms, out, began: std::time::Instant::now(), pitch }));
     MIXED_IN.with(|m| *m.borrow_mut() = Some((key, version)));
+    CHANGE_HOW.with(|h| h.set("mixed"));
     // (the one going out, as it's shown now: kept shown until the mix is over)
     let keep = {
         let a = shared.borrow();
@@ -3897,7 +3956,7 @@ fn tick(shared: &Shared, events: &std::sync::mpsc::Receiver<Event>, n: u64) {
     while let Ok(ev) = events.try_recv() {
         match ev {
             Event::Mixed => mix_started(shared),
-            Event::Ended if shared.borrow().repeat == "one" => start(shared),
+            Event::Ended if shared.borrow().repeat == "one" => { CHANGE_HOW.with(|h| h.set("ended")); start(shared) }
             Event::Ended if shared.borrow().closest.is_some() => {
                 let (done, cur) = { let a = shared.borrow(); (a.closest.clone(), a.queue.current().cloned()) };
                 if let (Some((key, yt)), Some(t)) = (done, cur) {
@@ -3907,9 +3966,10 @@ fn tick(shared: &Shared, events: &std::sync::mpsc::Receiver<Event>, n: u64) {
                     }
                 }
                 shared.borrow_mut().closest = None;
+                CHANGE_HOW.with(|h| h.set("ended"));
                 step(shared, 1);
             }
-            Event::Ended => step(shared, 1),
+            Event::Ended => { CHANGE_HOW.with(|h| h.set("ended")); step(shared, 1) }
             Event::Error(e) => ui.set_status(e.into()),
         }
     }
@@ -9140,6 +9200,7 @@ fn main() -> Result<(), slint::PlatformError> {
         let only_discover = std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("discover");
         let plan: Vec<(u64, &str)> = if join.is_some() { vec![(6, "join"), (14, "joined"), (16, "jamskip"), (19, "leave"), (21, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("mix") { vec![(9, "play"), (10, "mixprep"), (70, "mixseek"), (82, "mixcheck"), (100, "mixcheck"), (106, "mixcheck"), (130, "mixcheck"), (132, "end")] }
+            else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("rchange") { vec![(9, "play"), (11, "rate"), (12, "skip"), (16, "rate"), (17, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("mixfb") { vec![(9, "play"), (10, "rate"), (11, "mixprep"), (70, "mixseek"), (80, "mixcheck"), (84, "mixcheck"), (88, "mixcheck"), (92, "mixcheck"), (96, "mixcheck"), (100, "mixcheck"), (104, "mixcheck"), (108, "mixcheck"), (112, "rate"), (114, "mixcheck"), (118, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("rhythm") { vec![(9, "play"), (100, "rhythm"), (101, "end")] }
             // (OMNIPULSE_SELFTEST_PLAN=dnd: a Library track dragged onto the queue; what the sidebar would take,
@@ -9493,6 +9554,7 @@ fn main() -> Result<(), slint::PlatformError> {
                         None => println!("selftest: mix: none of the next 6 has a tempo close enough (or isn't measured): {:?}", { let q = &s.borrow().queue; q.items.iter().skip(qi + 1).take(6).map(|x| omnipulse_core::rhythm::known(&x.t.key).map(|m| m.rhythm.bpm)).collect::<Vec<_>>() }),
                     }
                 }
+                "skip" => { skip_press(&s, 1); }
                 "rate" => { println!("selftest: rate: {:?}", mix_feedback(&s, false)); }
                 "mixcheck" => {
                     let a = s.borrow();
