@@ -2087,6 +2087,12 @@ export component AppWindow inherits Window {
                                 if f.note != "": Text { text: f.note; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
                             }
                             if f.kind == "toggle": Toggle { checked: f.value == "true"; y: (parent.height - self.height) / 2; toggled => { root.pf-set(i, self.checked ? "true" : "false"); } }
+                    // a list's row: its buttons, then its switch
+                    if f.kind == "row": HorizontalLayout {
+                        spacing: 6px;
+                        for o[k] in f.options: Pill { label: o; y: (parent.height - self.height) / 2; clicked => { root.pf-set(i, "btn:" + k); } }
+                    }
+                    if f.kind == "row": Toggle { checked: f.value == "true"; y: (parent.height - self.height) / 2; toggled => { root.pf-set(i, self.checked ? "true" : "false"); } }
                             // a choice: each click moves on to the next of its options
                             if f.kind == "select": Pill { label: f.value; y: (parent.height - self.height) / 2; clicked => { root.pf-set(i, "\u{1}next"); } }
                             if f.kind == "text" || f.kind == "password" || f.kind == "number": Rectangle {

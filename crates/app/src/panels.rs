@@ -10,7 +10,9 @@
 
 use serde_json::{json, Map, Value};
 
-pub fn title(name: &str) -> &'static str {
+pub fn title(name: &str) -> String {
+    if name == "alertlist" { return "Alerts and Their Order".into(); }
+    if let Some(k) = name.strip_prefix("alert:") { return format!("Alert: {}", crate::alerts::name(&Value::Null, k)); }
     match name {
         "requests" => "Song Requests",
         "widget" => "Stream Widget",
@@ -20,7 +22,7 @@ pub fn title(name: &str) -> &'static str {
         "hidden" => "Hidden & Not Recommended",
         "plugins" => "Plugins",
         _ => "Avoid Recent Plays",
-    }
+    }.to_string()
 }
 
 /// The panel a switch's Settings button opens (by the switch's pref)
@@ -44,6 +46,8 @@ fn keys(name: &str) -> Vec<(&'static str, Value)> {
 
 /// The values a panel starts with: what's set, else the default
 pub fn values(name: &str, prefs: &Value) -> Map<String, Value> {
+    if name == "alertlist" { return crate::alerts::list_values(prefs); }
+    if let Some(k) = name.strip_prefix("alert:") { return crate::alerts::edit_values(prefs, k); }
     let mut m = Map::new();
     for (k, d) in keys(name) {
         let v = if prefs[k].is_null() { d } else { prefs[k].clone() };
@@ -95,6 +99,8 @@ fn remote_bots(vals: &Map<String, Value>, what: &str, port: u64, path: &str, lan
 
 /// A panel's fields, for the values as they are in it (prefs: for the keys, Streamer Mode, the LAN address)
 pub fn fields(name: &str, vals: &Map<String, Value>, prefs: &Value, lan: &str) -> Vec<Value> {
+    if name == "alertlist" { return crate::alerts::list_fields(prefs); }
+    if let Some(k) = name.strip_prefix("alert:") { return crate::alerts::edit_fields(prefs, k, vals); }
     let streamer = prefs["streamerMode"].as_bool() == Some(true);
     let hide = |key: &str| if streamer { "\u{2022}".repeat(8) } else { key.to_string() };
     let n = |k: &str, d: u64| vals.get(k).and_then(|v| v.as_u64()).unwrap_or(d);
@@ -187,7 +193,7 @@ pub fn fields(name: &str, vals: &Map<String, Value>, prefs: &Value, lan: &str) -
             f.push(sel_owned("alertIcon", "Icon Size", "", pct(0.6, 2.0, 0.2)));
             f.push(sel("alertSecs", "Show For", "", &[(json!(3), "3 s"), (json!(5), "5 s"), (json!(8), "8 s"), (json!(12), "12 s")]));
             f.push(sel_owned("alertVol", "Sound Volume", "", pct(0.0, 1.0, 0.1)));
-            f.push(note("Which alerts there are, and their sounds and pictures, are set in the web app for now (Settings > Streaming > Alerts and Their Order)."));
+            f.push(button("alList", "Alerts and Their Order", "Open", "Which alerts show and which goes first, and each one's words, picture and sound."));
             f
         }
         "remote" => {

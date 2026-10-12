@@ -243,6 +243,45 @@ pub fn measure(source: Box<dyn MediaSource>, ext: Option<&str>, duration_ms: Opt
 }
 
 /// Decodes `source` to mono samples (its channels averaged), up to `max_secs` (blocking): for rhythm.rs
+/// An alert's sound, measured as the web app's alertMeasure (js/alertmedia.js) does when it's added: its
+/// peak, its loudest 400 ms, its length, its shape (160 points), and the gain that brings its loudest
+/// moment to -16 dB without its peak going over -1 dB (half-dB steps, -24 to +18)
+pub fn alert_levels(kind: &str) -> Result<serde_json::Value, String> {
+    let bytes = crate::widget::alert_media_bytes(kind, "sound")?;
+    let (x, rate) = decode_mono(Box::new(std::io::Cursor::new(bytes)), None, 600.0)?;
+    if x.is_empty() || rate == 0 { return Err("that sound is empty".into()); }
+    let n = x.len();
+    let mut peak = 0f32;
+    let mut env = vec![0f32; 160];
+    let per = n.div_ceil(env.len()).max(1);
+    for (i, v) in x.iter().enumerate() {
+        let a = v.abs();
+        if a > peak { peak = a; }
+        let b = (i / per).min(159);
+        if a > env[b] { env[b] = a; }
+    }
+    let (win, hop) = ((rate as f64 * 0.4).round() as usize, (rate as f64 * 0.1).round().max(1.0) as usize);
+    let mut loud = 0f64;
+    let mut start = 0;
+    while start + 1 < n {
+        let end = (start + win).min(n);
+        let sum: f64 = x[start..end].iter().map(|v| (*v as f64) * (*v as f64)).sum();
+        if end > start { loud = loud.max((sum / (end - start) as f64).sqrt()); }
+        if start + win >= n { break; }
+        start += hop;
+    }
+    let db = |v: f64| if v > 0.0 { 20.0 * v.log10() } else { -96.0 };
+    let (peak_db, loud_db) = (db(peak as f64), db(loud));
+    let auto = ((-16.0 - loud_db).min(-1.0 - peak_db).clamp(-24.0, 18.0) * 2.0).round() / 2.0;
+    Ok(serde_json::json!({
+        "auto": auto,
+        "peak": (peak_db * 10.0).round() / 10.0,
+        "loud": (loud_db * 10.0).round() / 10.0,
+        "ms": (n as f64 * 1000.0 / rate as f64).round() as u64,
+        "env": env.iter().map(|v| (*v as f64 * 1000.0).round() / 1000.0).collect::<Vec<_>>(),
+    }))
+}
+
 pub fn decode_mono(source: Box<dyn MediaSource>, ext: Option<&str>, max_secs: f64) -> Result<(Vec<f32>, u32), String> {
     let mut hint = Hint::new();
     if let Some(e) = ext {
@@ -876,5 +915,38 @@ mod rhythm_live {
             let r = crate::rhythm::analyse(&mono, rate).expect("analysed");
             println!("{name}: measured {} BPM (confidence {:.2}), {} ({}, confidence {:.2}), first beat {:.0} ms, {} beats", r.bpm, r.tempo_confidence, r.key, r.camelot, r.key_confidence, r.first_beat_ms, r.beats.len());
         }
+    }
+}
+
+#[cfg(test)]
+mod alert_level_tests {
+    #[test]
+    fn an_alert_sound_is_measured_as_the_web_app_measures_it() {
+        let _turn = crate::TEST_ENV.lock().unwrap_or_else(|e| e.into_inner());
+        let dir = std::env::temp_dir().join(format!("omnipulse-alertlv-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        crate::set_data_dir(dir.clone());
+        // a second of a 440 Hz tone at half scale (a peak of -6 dB), as a 16-bit wav
+        let rate = 44_100u32;
+        let samples: Vec<i16> = (0..rate).map(|i| ((i as f64 * 440.0 * std::f64::consts::TAU / rate as f64).sin() * 16_384.0) as i16).collect();
+        let mut wav = Vec::new();
+        let data_len = (samples.len() * 2) as u32;
+        wav.extend_from_slice(b"RIFF"); wav.extend_from_slice(&(36 + data_len).to_le_bytes()); wav.extend_from_slice(b"WAVEfmt ");
+        wav.extend_from_slice(&16u32.to_le_bytes()); wav.extend_from_slice(&1u16.to_le_bytes()); wav.extend_from_slice(&1u16.to_le_bytes());
+        wav.extend_from_slice(&rate.to_le_bytes()); wav.extend_from_slice(&(rate * 2).to_le_bytes()); wav.extend_from_slice(&2u16.to_le_bytes()); wav.extend_from_slice(&16u16.to_le_bytes());
+        wav.extend_from_slice(b"data"); wav.extend_from_slice(&data_len.to_le_bytes());
+        for s in samples { wav.extend_from_slice(&s.to_le_bytes()); }
+        let src = dir.join("tone.wav");
+        std::fs::write(&src, wav).unwrap();
+        crate::widget::alert_media_set("follow", "sound", &src.display().to_string()).unwrap();
+        let m = super::alert_levels("follow").unwrap();
+        // peak -6 dB; its loudest 400 ms (a sine's RMS) about -9 dB; brought to -16: about -7
+        assert!((m["peak"].as_f64().unwrap() + 6.0).abs() < 0.3, "{m}");
+        assert!((m["loud"].as_f64().unwrap() + 9.0).abs() < 0.3, "{m}");
+        assert!((m["auto"].as_f64().unwrap() + 7.0).abs() < 0.6, "{m}");
+        assert!((m["ms"].as_u64().unwrap() as i64 - 1000).abs() < 20);
+        *crate::DATA_DIR.lock().unwrap() = None;
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

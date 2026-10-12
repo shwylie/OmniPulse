@@ -17,6 +17,7 @@ mod discover;
 mod lang;
 mod panels;
 mod hide;
+mod alerts;
 mod integrations;
 mod look;
 mod marks;
@@ -3215,7 +3216,8 @@ fn panel_open(shared: &Shared, name: &str) {
     PF_EDIT.with(|e| *e.borrow_mut() = Some((format!("panel:{name}"), vals)));
     pf_paint(shared);
     if let Some(ui) = shared.borrow().ui.upgrade() {
-        ui.set_pf_head(panels::title(name).into());
+        let head = match name.strip_prefix("alert:") { Some(k) => format!("Alert: {}", alerts::name(&shared.borrow().web.prefs, k)), None => panels::title(name) };
+        ui.set_pf_head(head.into());
         ui.set_pf_open(true);
     }
 }
@@ -3227,7 +3229,9 @@ fn panel_paint(shared: &Shared, name: &str, vals: &serde_json::Map<String, serde
         let key = f["key"].as_str().unwrap_or("").to_string();
         let kind = f["type"].as_str().unwrap_or("text").to_string();
         let now = vals.get(&key).cloned().unwrap_or_default();
+        let options: Vec<slint::SharedString> = if kind == "row" { f["labels"].as_array().into_iter().flatten().filter_map(|x| x.as_str().map(slint::SharedString::from)).collect() } else { Vec::new() };
         let value = match kind.as_str() {
+            "row" => if now.as_bool() == Some(true) { "true".into() } else { "false".into() },
             "select" => {
                 let opts = f["options"].as_array().cloned().unwrap_or_default();
                 let at = opts.iter().position(|o| panels::same(o, &now)).unwrap_or(0);
@@ -3237,7 +3241,7 @@ fn panel_paint(shared: &Shared, name: &str, vals: &serde_json::Map<String, serde
             "info" | "button" => f["value"].as_str().unwrap_or("").to_string(),
             _ => text(&now),
         };
-        PlugField { label: f["label"].as_str().unwrap_or("").into(), note: f["note"].as_str().unwrap_or("").into(), value: value.into(), kind: kind.into(), options: ModelRc::default(), key: key.into() }
+        PlugField { label: f["label"].as_str().unwrap_or("").into(), note: f["note"].as_str().unwrap_or("").into(), value: value.into(), kind: kind.into(), options: ModelRc::from(Rc::new(VecModel::from(options))), key: key.into() }
     }).collect();
     PANEL_FIELDS.with(|p| *p.borrow_mut() = fields);
     if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_pf_fields(ModelRc::from(Rc::new(VecModel::from(rows)))); }
@@ -3256,11 +3260,29 @@ fn panel_set(shared: &Shared, name: &str, mut vals: serde_json::Map<String, serd
             if let Some(o) = opts.get(at) { vals.insert(key, o.clone()); }
             true
         }
-        "button" => { PF_EDIT.with(|e| *e.borrow_mut() = Some((format!("panel:{name}"), vals.clone()))); panel_press(shared, &key); return panel_paint(shared, name, &vals); }
+        "button" => { PF_EDIT.with(|e| *e.borrow_mut() = Some((format!("panel:{name}"), vals.clone()))); panel_press(shared, &key); return pf_paint(shared); }
+        // a row of a list (the alerts'): its switch, or one of its buttons
+        "row" => {
+            if let Some(n) = v.strip_prefix("btn:").and_then(|n| n.parse::<usize>().ok()) {
+                PF_EDIT.with(|e| *e.borrow_mut() = Some((format!("panel:{name}"), vals.clone())));
+                if let Some(act) = f["actions"][n].as_str() { panel_press(shared, act); }
+                return pf_paint(shared);
+            }
+            vals.insert(key, serde_json::json!(v == "true"));
+            true
+        }
         _ => { if let Some(x) = panels::typed(&key, v) { vals.insert(key, x); } false }
     };
     PF_EDIT.with(|e| *e.borrow_mut() = Some((format!("panel:{name}"), vals.clone())));
     if redraw { panel_paint(shared, name, &vals); }
+}
+
+/// The alerts' list, as it is (its switches), kept before going elsewhere from it
+fn alerts_list_keep(shared: &Shared) {
+    let Some((id, vals)) = PF_EDIT.with(|e| e.borrow().clone()) else { return };
+    if id != "panel:alertlist" { return; }
+    let changes = alerts::list_save(&shared.borrow().web.prefs, &vals);
+    for (k, v) in changes { pref_put(shared, k, v); }
 }
 
 /// One of the open panel's values, set from here (a file picked), and the panel drawn again
@@ -3293,6 +3315,99 @@ fn panel_press(shared: &Shared, key: &str) {
             if key == "reqNewKey" { omnipulse_core::requests::requests_stop(); } else { omnipulse_core::remote::remote_stop(); }
             outside_start(shared);
             "A new key: the addresses have it.".to_string()
+        }
+        // ---------- the alerts ----------
+        "alList" => {
+            // (the Alerts page saved first, then its list)
+            if let Some((_, vals)) = PF_EDIT.with(|e| e.borrow().clone()) { for k in panels::keys_of("alerts") { if let Some(v) = vals.get(k) { pref_put(shared, k, v.clone()); } } }
+            panel_open(shared, "alertlist");
+            return;
+        }
+        k if k.starts_with("alEdit:") => {
+            alerts_list_keep(shared);
+            panel_open(shared, &format!("alert:{}", &k[7..]));
+            return;
+        }
+        k if k.starts_with("alTest:") => {
+            alerts_list_keep(shared);
+            if !integrations::set(&shared.borrow().web.prefs, "widget") { "Switch on the widget first.".to_string() } else {
+                push_out(shared, true);
+                match omnipulse_core::widget::alert_push(&alerts::test_alert(&k[7..])) { Ok(_) => "Sent a test alert to the widget.".to_string(), Err(e) => e }
+            }
+        }
+        k if k.starts_with("alUp:") || k.starts_with("alDown:") => {
+            let (kind, by) = if let Some(x) = k.strip_prefix("alUp:") { (x, -1) } else { (&k[7..], 1) };
+            let order = alerts::moved(&shared.borrow().web.prefs, kind, by);
+            pref_put(shared, "alertOrder", order);
+            push_out(shared, true);
+            return;
+        }
+        "alNew" => {
+            alerts_list_keep(shared);
+            let (id, all) = alerts::added(&shared.borrow().web.prefs);
+            pref_put(shared, "alertCustom", all);
+            panel_open(shared, &format!("alert:{id}"));
+            return;
+        }
+        k if k.starts_with("alPic:") || k.starts_with("alSnd:") => {
+            let (kind, image) = if let Some(x) = k.strip_prefix("alPic:") { (x.to_string(), true) } else { (k[6..].to_string(), false) };
+            let (title, exts): (&str, &[&str]) = if image { ("Choose a picture or GIF for this alert", &["gif", "png", "webp", "jpg", "jpeg"]) } else { ("Choose a sound for this alert", &["mp3", "wav", "ogg", "m4a", "aac", "flac"]) };
+            let Some(path) = rfd::FileDialog::new().set_title(title).add_filter(if image { "Pictures" } else { "Sounds" }, exts).pick_file() else { return };
+            match omnipulse_core::widget::alert_media_set(&kind, if image { "image" } else { "sound" }, &path.display().to_string()) {
+                Ok(file) => {
+                    let key = if image { "alertImages" } else { "alertSounds" };
+                    let mut all = shared.borrow().web.prefs[key].as_object().cloned().unwrap_or_default();
+                    all.insert(kind.clone(), serde_json::json!({ "name": file, "at": now_ms() }));
+                    pref_put(shared, key, serde_json::Value::Object(all));
+                    // (a new sound measured, so it plays about as loud as the others)
+                    let note = if image { format!("{file} shows with this alert.") } else {
+                        match omnipulse_core::loudness::alert_levels(&kind) {
+                            Ok(m) => {
+                                let mut lv = shared.borrow().web.prefs["alertLevels"].as_object().cloned().unwrap_or_default();
+                                let mut m = m;
+                                m["adj"] = serde_json::json!(0);
+                                lv.insert(kind.clone(), m);
+                                pref_put(shared, "alertLevels", serde_json::Value::Object(lv));
+                                format!("{file} plays with this alert.")
+                            }
+                            Err(e) => format!("{file} plays with this alert, but couldn't be measured: {e}"),
+                        }
+                    };
+                    push_out(shared, true);
+                    note
+                }
+                Err(e) => e,
+            }
+        }
+        k if k.starts_with("alPicClear:") || k.starts_with("alSndClear:") => {
+            let image = k.starts_with("alPicClear:");
+            let kind = &k[11..];
+            omnipulse_core::widget::alert_media_clear(kind, if image { "image" } else { "sound" });
+            for key in if image { vec!["alertImages"] } else { vec!["alertSounds", "alertLevels"] } {
+                let mut all = shared.borrow().web.prefs[key].as_object().cloned().unwrap_or_default();
+                all.remove(kind);
+                pref_put(shared, key, serde_json::Value::Object(all));
+            }
+            push_out(shared, true);
+            if image { "Its icon shows again.".to_string() } else { "Its sound is gone.".to_string() }
+        }
+        k if k.starts_with("alDelete:") => {
+            let kind = k[9..].to_string();
+            let changes = alerts::deleted(&shared.borrow().web.prefs, &kind);
+            for (key, v) in changes { pref_put(shared, key, v); }
+            for slot in ["sound", "image"] { omnipulse_core::widget::alert_media_clear(&kind, slot); }
+            push_out(shared, true);
+            panel_open(shared, "alertlist");
+            return;
+        }
+        k if k.starts_with("alReset:") => {
+            let mut all = shared.borrow().web.prefs["alertEdit"].as_object().cloned().unwrap_or_default();
+            all.remove(&k[8..]);
+            pref_put(shared, "alertEdit", serde_json::Value::Object(all));
+            let vals = alerts::edit_values(&shared.borrow().web.prefs, &k[8..]);
+            PF_EDIT.with(|e| *e.borrow_mut() = Some((format!("panel:alert:{}", &k[8..]), vals)));
+            push_out(shared, true);
+            "Back to how it was.".to_string()
         }
         "plugFile" => {
             let Some(path) = rfd::FileDialog::new().set_title("A plugin's manifest").add_filter("Plugin manifest", &["json"]).pick_file() else { return };
@@ -3390,6 +3505,16 @@ fn hide_applied(shared: &Shared) {
 
 /// Saved: into the prefs, and what uses them started again with them
 fn panel_save(shared: &Shared, name: &str, vals: serde_json::Map<String, serde_json::Value>) {
+    // (the alerts: the ones switched off; an alert's page, its own settings, then back to the list)
+    if name == "alertlist" || name.starts_with("alert:") {
+        let changes = { let p = &shared.borrow().web.prefs; if let Some(k) = name.strip_prefix("alert:") { alerts::edit_save(p, k, &vals) } else { alerts::list_save(p, &vals) } };
+        for (k, v) in changes { pref_put(shared, k, v); }
+        push_out(shared, true);
+        if name.starts_with("alert:") { panel_open(shared, "alertlist"); return; }
+        PF_EDIT.with(|e| e.borrow_mut().take());
+        if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_pf_open(false); ui.set_status("Alerts saved.".into()); }
+        return;
+    }
     // (Plugins: adding and removing are done as they're pressed; nothing to keep)
     if name == "plugins" {
         PF_EDIT.with(|e| e.borrow_mut().take());
@@ -6902,7 +7027,7 @@ fn main() -> Result<(), slint::PlatformError> {
             // only asked, nothing dropped on your playlists)
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("dnd") { vec![(9, "play"), (12, "library"), (13, "qopen"), (14, "dragq"), (16, "dragasks"), (17, "end")] }
             // (OMNIPULSE_SELFTEST_PLAN=panels: the settings panels, opened (nothing saved))
-            else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("panels") { vec![(9, "settings"), (10, "p_requests"), (12, "p_widget"), (14, "p_alerts"), (16, "p_plugins"), (17, "plugread"), (20, "pfclose"), (21, "end")] }
+            else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("panels") { vec![(9, "settings"), (10, "p_requests"), (12, "p_widget"), (14, "p_alerts"), (16, "p_plugins"), (17, "plugread"), (20, "p_alertlist"), (21, "p_alert:raid"), (22, "pfclose"), (23, "end")] }
             // (OMNIPULSE_SELFTEST_PLAN=look: List Density at Compact, and Search with Hide likes)
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("look") { vec![(9, "play"), (12, "library"), (13, "compact"), (14, "settings"), (15, "comfy"), (16, "search"), (19, "hidelikes"), (21, "hidelikesoff"), (22, "discover"), (30, "langnext"), (40, "end")] }
             else if only_discover { vec![(9, "play"), (11, "discover"), (30, "disc"), (45, "discmix"), (12, "import"), (46, "taste"), (47, "taste2"), (48, "taste3"), (70, "tasted"), (71, "marquee"), (72, "marqueeoff"), (73, "end")] } else { full.to_vec() };
@@ -6914,7 +7039,7 @@ fn main() -> Result<(), slint::PlatformError> {
             if step_no > 0 {
                 let name = plan[step_no - 1].1;
                 if let Ok(shot) = ui.window().take_snapshot() {
-                    let _ = image::RgbaImage::from_raw(shot.width(), shot.height(), shot.as_bytes().to_vec()).map(|i| i.save(format!("{dir}/{name}.png")));
+                    let _ = image::RgbaImage::from_raw(shot.width(), shot.height(), shot.as_bytes().to_vec()).map(|i| i.save(format!("{dir}/{}.png", name.replace(':', "_"))));
                 }
             }
             step_no += 1;
