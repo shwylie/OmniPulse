@@ -37,7 +37,8 @@ export global Dnd {
 // (and for its menu, as the web app's: its artists one by one, its uploader if it's someone else, a
 // like and a star, where it opens, Stream-Safe Music's Allow / Stop allowing)
 export struct Row { title: string, artist: string, album: string, dur: string, plat: string, playing: bool, head: string, auto: bool, art: image, liked: bool, sc-link: bool, sp-link: bool, yt-link: bool, picked: bool, genres: [string], added-by: string, artists: [string], uploader: string, can-like: bool, fav: bool, fav-on: bool, open-label: string, cleared: string }
-export struct Side { title: string, plat: string, own: bool, share: bool, sc: bool, sp: bool, collab: bool, collab-owner: bool }
+// (merged: playlists combined into it, to unmerge)
+export struct Side { title: string, plat: string, own: bool, share: bool, sc: bool, sp: bool, collab: bool, collab-owner: bool, merged: bool }
 /// A platform in the title bar: on (in its colours), set up (ready; grey until it is), its name
 export struct Plat { id: string, on: bool, name: string, ready: bool }
 // (a genre's tile, as the web app's: a coloured cover, its name on it; c1 its middle, c2 its edge)
@@ -1100,6 +1101,7 @@ export component AppWindow inherits Window {
     in property <bool> pl-share;
     in property <string> pl-collab;
     in property <bool> pl-own;
+    in property <bool> pl-merged;
     callback page-pl(string);
     // the Artists page: an artist's menu, and following everyone from one platform on another
     callback artist-act(int, string);
@@ -1508,6 +1510,8 @@ export component AppWindow inherits Window {
                                     if s.sp: MenuItem { title: "Copy Spotify Link"; activated => { root.side-action(i, "link:spotify"); } }
                                     if s.share && !(s.collab && !s.collab-owner): MenuItem { title: s.collab ? "Copy invite link" : "Invite collaborators"; activated => { root.side-action(i, "collab"); } }
                                     if s.collab: MenuItem { title: s.collab-owner ? "Stop collaborating" : "Leave collaboration"; activated => { root.side-action(i, "collab-leave"); } }
+                                    if s.own: MenuItem { title: "Export to SoundCloud & Spotify"; activated => { root.side-action(i, "export"); } }
+                                    if s.merged: MenuItem { title: "Unmerge Playlists"; activated => { root.side-action(i, "unmerge"); } }
                                     if s.own: MenuItem { title: "Rename..."; activated => { root.side-action(i, "rename"); } }
                                     if s.own: MenuItem { title: "Delete"; activated => { root.side-action(i, "delete"); } }
                                     MenuItem { title: "Hide playlist"; activated => { root.side-action(i, "hide"); } }
@@ -1642,6 +1646,8 @@ export component AppWindow inherits Window {
                         // a playlist's own: Share, Invite collaborators (or its invite link), Delete playlist, as the web app's
                         if root.page == "playlist" && root.pl-share: Pill { label: "Share"; y: 7px; clicked => { root.page-pl("share"); } }
                         if root.page == "playlist" && root.pl-collab != "": Pill { label: root.pl-collab; y: 7px; clicked => { root.page-pl("collab"); } }
+                        if root.page == "playlist" && root.pl-own: Pill { label: "Export"; tip: "Its SoundCloud songs to a playlist on SoundCloud, its Spotify songs to one on Spotify (again: brought up to date)"; y: 7px; clicked => { root.page-pl("export"); } }
+                        if root.page == "playlist" && root.pl-merged: Pill { label: "Unmerge"; tip: "Take out what each playlist combined into this one brought"; y: 7px; clicked => { root.page-pl("unmerge"); } }
                         if root.page == "playlist" && root.pl-own: Pill { label: "Delete playlist"; y: 7px; clicked => { root.page-pl("delete"); } }
                         Rectangle { horizontal-stretch: 1; }
                         // the Library's sort, clicked through: A to Z, Z to A, off

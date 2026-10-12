@@ -126,7 +126,7 @@ async fn create(plat: &str, title: &str) -> Result<String, String> {
         let c = core::soundcloud::playlist_write("POST".into(), "/playlists".into(), Some(json!({ "playlist": { "title": title, "sharing": "private", "tracks": [] } }))).await?;
         return c["id"].as_u64().map(|n| n.to_string()).ok_or_else(|| "SoundCloud didn't say what it made".to_string());
     }
-    let c = core::spotify::spotify_api("POST".into(), "/me/playlists".into(), Some(json!({ "name": title, "public": false, "description": "Kept in step with OmniPulse." }))).await?;
+    let c = core::spotify::spotify_api("POST".into(), "/me/playlists".into(), Some(json!({ "name": title, "public": false, "description": "Exported from OmniPulse." }))).await?;
     c["id"].as_str().map(String::from).ok_or_else(|| "Spotify didn't say what it made".to_string())
 }
 
@@ -197,105 +197,6 @@ pub fn side_id(plat: &str, id: &str) -> String {
     if plat == "spotify" { format!("sp:{id}") } else { id.to_string() }
 }
 
-/// What a platform playlist holds, as track keys (None if it couldn't be read: nothing is taken out then)
-async fn plat_keys(plat: &'static str, id: &str) -> Option<Vec<Track>> {
-    let list = sources::playlist_tracks(&sources::Playlist { plat, id: id.to_string(), title: String::new(), tracks: None, own: false }).await;
-    (!list.is_empty()).then_some(list)
-}
-
-fn keys_of(p: &Value) -> Vec<String> {
-    p["tracks"].as_array().into_iter().flatten().map(|s| s["id"].as_str().map(String::from).unwrap_or_else(|| s["id"].to_string())).collect()
-}
-
-/// What changed over there, brought in here; true if anything did
-async fn pull(p: &mut Value) -> bool {
-    let plat = match p["follow"]["plat"].as_str() { Some("spotify") => "spotify", Some("soundcloud") => "soundcloud", _ => return false };
-    let Some(id) = p["follow"]["id"].as_str().map(String::from) else { return false };
-    let Some(now) = plat_keys(plat, &id).await else { return false };
-    let now_keys: Vec<String> = now.iter().map(|t| t.key.clone()).collect();
-    let Some(seen) = p["follow"]["seen"].as_array().map(|a| a.iter().filter_map(|x| x.as_str().map(String::from)).collect::<Vec<_>>()) else {
-        p["follow"]["seen"] = json!(now_keys);
-        return false;
-    };
-    p["follow"]["seen"] = json!(now_keys);
-    let gone: Vec<&String> = seen.iter().filter(|k| !now_keys.contains(k)).collect();
-    let fresh: Vec<&Track> = now.iter().filter(|t| !seen.contains(&t.key)).collect();
-    if gone.is_empty() && fresh.is_empty() {
-        return false;
-    }
-    if let Some(list) = p["tracks"].as_array_mut() {
-        list.retain(|s| !gone.iter().any(|g| s["id"].as_str().map(String::from).unwrap_or_else(|| s["id"].to_string()) == **g));
-    }
-    let mut have = keys_of(p);
-    for t in fresh {
-        if !have.contains(&t.key) {
-            have.push(t.key.clone());
-            if let Some(list) = p["tracks"].as_array_mut() { list.push(crate::xpl::snap(t)); }
-        }
-    }
-    true
-}
-
-#[derive(Default)]
-pub struct Outcome {
-    /// its songs changed (from the platform's side)
-    pub changed: bool,
-    /// hidden playlists made for it, to hide (as the sidebar knows them)
-    pub hide: Vec<String>,
-    pub errors: Vec<String>,
-}
-
-/// One playlist, kept in step (on: the platforms signed in and switched on)
-pub async fn sync_one(p: &mut Value, on: &[&'static str], with_pull: bool) -> Outcome {
-    let mut out = Outcome { changed: with_pull && p["follow"].is_object() && pull(p).await, ..Default::default() };
-    let sig = json!([p["title"], keys_of(p), on]).to_string();
-    if !out.changed && p["mirrorSig"].as_str() == Some(sig.as_str()) {
-        return out;
-    }
-    let title = p["title"].as_str().unwrap_or("Untitled playlist").to_string();
-    let tracks: Vec<Track> = p["tracks"].as_array().into_iter().flatten().filter_map(Track::from_snapshot).collect();
-    let mut failed = false;
-    for &plat in on {
-        let mut ids: Vec<String> = Vec::new();
-        for t in &tracks {
-            if let Some(id) = counterpart(t, plat).await {
-                if !ids.contains(&id) { ids.push(id); }
-            }
-        }
-        let mut id = p["mirrors"][plat].as_str().map(String::from);
-        if id.is_none() && ids.is_empty() {
-            continue;
-        }
-        if id.is_none() {
-            match create(plat, &title).await {
-                Ok(made) => {
-                    if !p["mirrors"].is_object() { p["mirrors"] = json!({}); }
-                    if !p["made"].is_object() { p["made"] = json!({}); }
-                    p["mirrors"][plat] = json!(made);
-                    p["made"][plat] = json!(true);
-                    out.hide.push(side_id(plat, &made));
-                    id = Some(made);
-                }
-                Err(e) => { failed = true; out.errors.push(fail_note(&title, plat, &e)); continue; }
-            }
-        }
-        let id = id.unwrap_or_default();
-        match write(plat, &id, &title, &ids).await {
-            Ok(()) => {
-                // (what was written there isn't a change from that side)
-                if p["follow"]["plat"].as_str() == Some(plat) && p["follow"]["id"].as_str() == Some(id.as_str()) {
-                    p["follow"]["seen"] = json!(ids.iter().map(|x| if plat == "spotify" { format!("sp:{}", x.rsplit(':').next().unwrap_or("")) } else { x.clone() }).collect::<Vec<_>>());
-                }
-            }
-            Err(e) => { failed = true; out.errors.push(fail_note(&title, plat, &e)); }
-        }
-    }
-    if !failed {
-        p["mirrorSig"] = json!(sig);
-    }
-    out
-}
-
 fn fail_note(title: &str, plat: &str, e: &str) -> String {
     let name = if plat == "spotify" { "Spotify" } else { "SoundCloud" };
     let why = if plat == "spotify" && (e.contains("403") || e.to_lowercase().contains("scope") || e.to_lowercase().contains("insufficient")) {
@@ -303,23 +204,66 @@ fn fail_note(title: &str, plat: &str, e: &str) -> String {
     } else {
         e.to_string()
     };
-    format!("Couldn't keep \"{title}\" up to date on {name}: {why}")
+    format!("Couldn't export \"{title}\" to {name}: {why}")
 }
 
-/// A platform playlist you changed here: its songs, for a playlist here that follows it (and writes
-/// back to it, if it's yours)
+/// A platform playlist made one on this PC (converted: changed here, combined, switched): its songs,
+/// copied. From then on it's this PC's, no longer kept in step with the platform (Export puts its
+/// songs back there, when you ask)
 pub async fn adopt(p: &sources::Playlist) -> Value {
     let tracks = sources::playlist_tracks(p).await;
     let mut all = json!([]);
-    let id = crate::xpl::create(&mut all, &p.title, &tracks);
+    let _ = crate::xpl::create(&mut all, &p.title, &tracks);
     let mut copy = all[0].take();
     copy["from"] = json!(side_id(p.plat, &p.id));
-    copy["follow"] = json!({ "plat": p.plat, "id": p.id, "seen": tracks.iter().map(|t| t.key.clone()).collect::<Vec<_>>() });
+    // (one of yours: Export writes back to it, rather than making another)
     if p.own {
-        copy["mirrors"] = json!({ p.plat: p.id });
+        copy["exports"] = json!({ p.plat: p.id });
     }
-    let _ = id;
     copy
+}
+
+/// What an export did: each platform's songs written (platform, how many), what to hide in the sidebar
+/// (the playlists it made there), and what went wrong
+#[derive(Default)]
+pub struct Exported {
+    pub done: Vec<(&'static str, usize)>,
+    pub hide: Vec<String>,
+    pub errors: Vec<String>,
+}
+
+/// Export (or export again): a playlist here put on the platforms, each with its own songs only (its
+/// SoundCloud ones on SoundCloud, its Spotify ones on Spotify), into the playlist made there the first
+/// time (or the one it came from, if it's yours); one's made if there isn't one. `on`: the platforms
+/// signed in and switched on
+pub async fn export(p: &mut Value, on: &[&'static str]) -> Exported {
+    let mut out = Exported::default();
+    let title = p["title"].as_str().unwrap_or("Untitled playlist").to_string();
+    let tracks: Vec<Track> = p["tracks"].as_array().into_iter().flatten().filter_map(Track::from_snapshot).collect();
+    for &plat in on {
+        let mut ids: Vec<String> = Vec::new();
+        for t in &tracks {
+            let id = match (&t.src, plat) { (Src::SoundCloud(id), "soundcloud") => Some(id.to_string()), (Src::Spotify(uri), "spotify") => Some(uri.clone()), _ => None };
+            if let Some(id) = id { if !ids.contains(&id) { ids.push(id); } }
+        }
+        // (an earlier export's playlist, or the copy kept in step before exports were how it's done)
+        let mut id = p["exports"][plat].as_str().or(p["mirrors"][plat].as_str()).map(String::from);
+        if ids.is_empty() && id.is_none() { continue; }
+        if id.is_none() {
+            match create(plat, &title).await {
+                Ok(made) => { out.hide.push(side_id(plat, &made)); id = Some(made); }
+                Err(e) => { out.errors.push(fail_note(&title, plat, &e)); continue; }
+            }
+        }
+        let id = id.unwrap_or_default();
+        if !p["exports"].is_object() { p["exports"] = json!({}); }
+        p["exports"][plat] = json!(id);
+        match write(plat, &id, &title, &ids).await {
+            Ok(()) => out.done.push((plat, ids.len())),
+            Err(e) => out.errors.push(fail_note(&title, plat, &e)),
+        }
+    }
+    out
 }
 
 #[cfg(test)]

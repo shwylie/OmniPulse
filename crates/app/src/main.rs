@@ -461,7 +461,7 @@ fn paint_sides(a: &mut App) {
         // (the ones you hid, with Hidden & Not Recommended on)
         .filter(|&i| !hide::on(&prefs) || !prefs["hiddenByYou"].as_array().is_some_and(|l| l.iter().any(|x| x.as_str() == Some(a.playlists[i].id.as_str()))))
         .collect();
-    let sides: Vec<Side> = a.side_map.iter().map(|&i| Side { title: a.playlists[i].title.clone().into(), plat: if xpl::is_own(&a.playlists[i].id) { "xpl".into() } else { a.playlists[i].plat.into() }, own: xpl::is_own(&a.playlists[i].id), share: a.playlists[i].plat != "local" || xpl::is_own(&a.playlists[i].id), sc: share::platform_id(&a.playlists[i], &a.xpl, "soundcloud").is_some(), sp: share::platform_id(&a.playlists[i], &a.xpl, "spotify").is_some(), collab: collab_of(&a.xpl, &a.playlists[i].id).is_some(), collab_owner: collab_of(&a.xpl, &a.playlists[i].id).is_some_and(|c| c["owner"].as_bool() == Some(true)) }).collect();
+    let sides: Vec<Side> = a.side_map.iter().map(|&i| Side { title: a.playlists[i].title.clone().into(), plat: if xpl::is_own(&a.playlists[i].id) { "xpl".into() } else { a.playlists[i].plat.into() }, own: xpl::is_own(&a.playlists[i].id), share: a.playlists[i].plat != "local" || xpl::is_own(&a.playlists[i].id), sc: share::platform_id(&a.playlists[i], &a.xpl, "soundcloud").is_some(), sp: share::platform_id(&a.playlists[i], &a.xpl, "spotify").is_some(), collab: collab_of(&a.xpl, &a.playlists[i].id).is_some(), collab_owner: collab_of(&a.xpl, &a.playlists[i].id).is_some_and(|c| c["owner"].as_bool() == Some(true)), merged: a.xpl.as_array().is_some_and(|l| l.iter().any(|x| x["id"].as_str() == Some(a.playlists[i].id.as_str()) && x["merged"].as_array().is_some_and(|m| !m.is_empty()))) }).collect();
     ui.set_sides(ModelRc::from(Rc::new(VecModel::from(sides))));
     // Add to Playlist: yours here first, then the platforms' (one of those becomes a playlist here)
     let mut order: Vec<usize> = a.side_map.iter().copied().filter(|&i| xpl::is_own(&a.playlists[i].id)).collect();
@@ -532,6 +532,7 @@ fn open_playlist(shared: &Shared, i: usize) {
         let collab = collab_of(&a.xpl, &p.id);
         ui.set_pl_share(p.plat != "local" || own);
         ui.set_pl_own(own);
+        ui.set_pl_merged(a.xpl.as_array().is_some_and(|l| l.iter().any(|x| x["id"].as_str() == Some(p.id.as_str()) && x["merged"].as_array().is_some_and(|m| !m.is_empty()))));
         ui.set_pl_collab(match &collab { Some(c) if c["owner"].as_bool() == Some(true) => "Copy invite link".into(), Some(_) => "".into(), None if p.plat != "local" || own => "Invite collaborators".into(), None => "".into() });
     }
     let title = p.title.clone();
@@ -4845,13 +4846,7 @@ fn library_load(shared: &Shared) {
                         paint_sides(&mut a);
                         paint_plats(&a);
                     }
-                    sync_all(&shared, true);
-                    if SYNC_EVERY.with(|x| x.borrow().is_none()) {
-                        let s2 = shared.clone();
-                        let every = slint::Timer::default();
-                        every.start(slint::TimerMode::Repeated, std::time::Duration::from_secs(600), move || sync_all(&s2, true));
-                        SYNC_EVERY.with(|x| *x.borrow_mut() = Some(every));
-                    }
+                    // (playlists on this PC stay here: nothing's kept in step by itself; Export puts them on the platforms)
                     if shared.borrow().page == "library" {
                         shared.borrow_mut().here = Some(Place::Page("library".into()));
                         open_page(&shared, "library");
@@ -5282,7 +5277,6 @@ fn loud_pick(shared: &Shared, step: &str) {
 /// The playlists changed: kept, and shown again (the sidebar, the menus, and the page if it's one)
 fn xpl_changed(shared: &Shared) {
     xpl_shown(shared);
-    sync_soon(shared, 2000);
 }
 
 /// Kept and shown again, without keeping the platforms in step (that's done already)
@@ -5450,13 +5444,6 @@ thread_local! {
     static SYNC_SAID: RefCell<std::collections::HashSet<String>> = RefCell::new(std::collections::HashSet::new());
 }
 
-fn sync_soon(shared: &Shared, ms: u64) {
-    let s = shared.clone();
-    let t = slint::Timer::default();
-    t.start(slint::TimerMode::SingleShot, std::time::Duration::from_millis(ms), move || sync_all(&s, false));
-    SYNC_TIMER.with(|x| *x.borrow_mut() = Some(t));
-}
-
 fn sync_plats(prefs: &serde_json::Value) -> Vec<&'static str> {
     let mut on = Vec::new();
     if plat_on(prefs, "soundcloud") && omnipulse_core::soundcloud::signed_in() { on.push("soundcloud"); }
@@ -5464,77 +5451,39 @@ fn sync_plats(prefs: &serde_json::Value) -> Vec<&'static str> {
     on
 }
 
-/// Every playlist here, on the platforms (pull: and what changed over there brought in)
-fn sync_all(shared: &Shared, pull: bool) {
-    // (never in the self-test: it would make playlists on your accounts)
-    if std::env::var_os("OMNIPULSE_SELFTEST").is_some() {
+/// Export (or export again): a playlist here put on SoundCloud and Spotify, each with its own songs
+/// (crate::mirror::export), when you ask
+fn pl_export_platforms(shared: &Shared, id: &str) {
+    let (p, on, rt, weak) = {
+        let a = shared.borrow();
+        let Some(p) = a.xpl.as_array().and_then(|l| l.iter().find(|x| x["id"].as_str() == Some(id)).cloned()) else { return };
+        (p, sync_plats(&a.web.prefs), a.rt.clone(), a.ui.clone())
+    };
+    let title = p["title"].as_str().unwrap_or("Playlist").to_string();
+    if on.is_empty() {
+        if let Some(ui) = weak.upgrade() { ui.set_status("Sign in to SoundCloud or Spotify to export it there.".into()); }
         return;
     }
-    let (busy, _) = SYNC_BUSY.with(|b| b.get());
-    if busy {
-        SYNC_BUSY.with(|b| b.set((true, true)));
-        return;
-    }
-    SYNC_BUSY.with(|b| b.set((true, false)));
-    let (all, on, rt, weak) = { let a = shared.borrow(); (a.xpl.clone(), sync_plats(&a.web.prefs), a.rt.clone(), a.ui.clone()) };
+    if let Some(ui) = weak.upgrade() { ui.set_status(format!("Exporting \"{title}\"...").into()); }
+    let id = id.to_string();
     rt.spawn(async move {
-        let mut done = Vec::new();
-        for p in all.as_array().cloned().unwrap_or_default() {
-            let before = json_sig(&p);
-            let mut p = p;
-            let out = mirror::sync_one(&mut p, &on, pull).await;
-            done.push((before, p, out));
-        }
-        let _ = weak.upgrade_in_event_loop(move |_| SHARED.with(|s| {
+        let mut p = p;
+        let out = mirror::export(&mut p, &on).await;
+        let _ = weak.upgrade_in_event_loop(move |ui| SHARED.with(|s| {
             let Some(shared) = s.borrow().clone() else { return };
-            sync_apply(&shared, done);
-            let (_, again) = SYNC_BUSY.with(|b| b.get());
-            SYNC_BUSY.with(|b| b.set((false, false)));
-            if again { sync_soon(&shared, 500); }
+            let exports = p["exports"].clone();
+            xpl_set(&shared, &id, |x| { x["exports"] = exports; });
+            xpl::save(&shared.borrow().xpl);
+            for h in &out.hide { hidden_set(&shared, h, true); }
+            paint_sides(&mut shared.borrow_mut());
+            let name = |p: &str| if p == "spotify" { "Spotify" } else { "SoundCloud" };
+            let done: Vec<String> = out.done.iter().map(|(p, n)| format!("{} to {}", plural(*n, &format!("{} song", name(p)), &format!("{} songs", name(p))), name(p))).collect();
+            let note = if !out.errors.is_empty() { out.errors.join(" ") }
+                else if done.is_empty() { format!("\"{title}\" has no SoundCloud or Spotify songs to export.") }
+                else { format!("Exported \"{title}\": {}.", done.join(", ")) };
+            ui.set_status(note.into());
         }));
     });
-}
-
-fn json_sig(p: &serde_json::Value) -> String {
-    serde_json::json!([p["title"], p["tracks"]]).to_string()
-}
-
-fn sync_apply(shared: &Shared, done: Vec<(String, serde_json::Value, mirror::Outcome)>) {
-    let mut changed = false;
-    let mut again = false;
-    let mut hide: Vec<String> = Vec::new();
-    let mut notes: Vec<String> = Vec::new();
-    {
-        let mut a = shared.borrow_mut();
-        let Some(list) = a.xpl.as_array_mut() else { return };
-        for (before, p, out) in done {
-            let Some(mine) = list.iter_mut().find(|x| x["id"] == p["id"]) else { continue };
-            if json_sig(mine) == before {
-                *mine = p;
-                changed |= out.changed;
-            } else {
-                // changed here meanwhile: what was learned is kept, and it's written again
-                for k in ["mirrors", "made"] { if p[k].is_object() { mine[k] = p[k].clone(); } }
-                if p["follow"].is_object() { mine["follow"]["seen"] = p["follow"]["seen"].clone(); }
-                again = true;
-            }
-            hide.extend(out.hide);
-            notes.extend(out.errors);
-        }
-    }
-    if !hide.is_empty() {
-        let mut a = shared.borrow_mut();
-        let mut h: Vec<serde_json::Value> = a.web.prefs["hiddenPlaylists"].as_array().cloned().unwrap_or_default();
-        for x in hide { if !h.iter().any(|y| y.as_str() == Some(x.as_str())) { h.push(serde_json::json!(x)); } }
-        if let Some(o) = a.web.prefs.as_object_mut() { o.insert("hiddenPlaylists".into(), serde_json::json!(h.clone())); }
-        webstate::save_pref("hiddenPlaylists", serde_json::json!(h));
-    }
-    xpl::save(&shared.borrow().xpl);
-    if changed { xpl_shown(shared); } else { paint_sides(&mut shared.borrow_mut()); }
-    if let Some(n) = notes.into_iter().find(|n| SYNC_SAID.with(|s| s.borrow_mut().insert(n.clone()))) {
-        if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_status(n.into()); }
-    }
-    if again { sync_soon(shared, 2000); }
 }
 
 fn hidden_set(shared: &Shared, id: &str, hide: bool) {
@@ -5908,6 +5857,7 @@ fn drop_do(shared: &Shared, target: &str, what: Dragged) {
                 let _ = weak.upgrade_in_event_loop(move |ui| SHARED.with(|s| {
                     let Some(shared) = s.borrow().clone() else { return };
                     if list.is_empty() { ui.set_status(format!("\"{}\" is empty.", src.title).into()); return; }
+                    MERGING.with(|m| *m.borrow_mut() = Some((id.clone(), src.title.clone(), src.id.clone())));
                     pl_add_many(&shared, &id, list);
                 }));
             });
@@ -5938,10 +5888,40 @@ fn pl_adopt_add(shared: &Shared, into: sources::Playlist, src: Option<sources::P
             hidden_set(&shared, &mirror::side_id(into.plat, &into.id), true);
             xpl_changed(&shared);
             let showing = matches!(&shared.borrow().here, Some(Place::Playlist(x)) if *x == into.id);
+            if let Some(p) = &src { MERGING.with(|m| *m.borrow_mut() = Some((id.clone(), p.title.clone(), p.id.clone()))); }
             pl_add_many(&shared, &id, list);
             if showing { go(&shared, Place::Playlist(id)); }
         }));
     });
+}
+
+thread_local! {
+    /// a playlist being combined into another: (into, from's title, from's id), for its record
+    static MERGING: RefCell<Option<(String, String, String)>> = const { RefCell::new(None) };
+}
+
+/// Unmerge Playlists: what each playlist combined into this one brought taken out again (what was in
+/// it before stays); one that's gone from the sidebar is made again, on this PC
+fn pl_unmerge(shared: &Shared, id: &str) {
+    let Some(p) = shared.borrow().xpl.as_array().and_then(|l| l.iter().find(|x| x["id"].as_str() == Some(id)).cloned()) else { return };
+    let merged = p["merged"].as_array().cloned().unwrap_or_default();
+    if merged.is_empty() { return; }
+    let mut remade = 0;
+    for m in &merged {
+        for k in m["keys"].as_array().into_iter().flatten().filter_map(|k| k.as_str()) { xpl::remove(&mut shared.borrow_mut().xpl, id, k); }
+        let from = m["from"].as_str().unwrap_or("");
+        let there = shared.borrow().playlists.iter().any(|x| x.id == from);
+        if !there {
+            let tracks: Vec<Track> = m["tracks"].as_array().into_iter().flatten().filter_map(Track::from_snapshot).collect();
+            if !tracks.is_empty() { xpl::create(&mut shared.borrow_mut().xpl, m["title"].as_str().unwrap_or("Playlist"), &tracks); remade += 1; }
+        }
+    }
+    xpl_set(shared, id, |x| { if let Some(o) = x.as_object_mut() { o.remove("merged"); } });
+    xpl_changed(shared);
+    if let Some(ui) = shared.borrow().ui.upgrade() {
+        let names: Vec<String> = merged.iter().filter_map(|m| m["title"].as_str().map(|t| format!("\u{201c}{t}\u{201d}"))).collect();
+        ui.set_status(format!("Unmerged {} from \u{201c}{}\u{201d}.{}", names.join(" and "), p["title"].as_str().unwrap_or(""), if remade > 0 { format!(" {} made again on this PC.", plural(remade, "playlist was", "playlists were")) } else { String::new() }).into());
+    }
 }
 
 thread_local! {
@@ -5970,7 +5950,7 @@ fn pl_add_many(shared: &Shared, id: &str, list: Vec<Track>) {
 fn la_done(shared: &Shared, ok: bool) {
     let Some((id, add, ask)) = LA.with(|l| l.borrow_mut().take()) else { return };
     if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_la_open(false); }
-    if !ok { return; }
+    if !ok { MERGING.with(|m| m.borrow_mut().take()); return; }
     let (add, replace) = lookalike::decide(add, &ask);
     pl_add_now(shared, &id, add, replace);
 }
@@ -5986,6 +5966,14 @@ fn pl_add_now(shared: &Shared, id: &str, list: Vec<Track>, replace: Vec<(String,
     let list: Vec<Track> = if collab { list.into_iter().map(|t| Track { added_by: by.clone(), ..t }).collect() } else { list };
     let had: std::collections::HashSet<String> = shared.borrow().playlists.iter().find(|p| p.id == id).and_then(|p| p.tracks.as_ref()).map(|t| t.iter().map(|x| x.key.clone()).collect()).unwrap_or_default();
     let n = xpl::add(&mut shared.borrow_mut().xpl, id, &list);
+    // (a playlist combined into this one: what it brought, kept, for Unmerge Playlists)
+    if let Some((into, title, from)) = MERGING.with(|m| m.borrow_mut().take()) {
+        if into == id {
+            let added: Vec<&Track> = list.iter().filter(|t| !had.contains(&t.key)).collect();
+            let rec = serde_json::json!({ "title": title, "from": from, "keys": added.iter().map(|t| t.key.clone()).collect::<Vec<_>>(), "tracks": added.iter().map(|t| xpl::snap(t)).collect::<Vec<_>>() });
+            xpl_set(shared, id, |x| { if !x["merged"].is_array() { x["merged"] = serde_json::json!([]); } x["merged"].as_array_mut().unwrap().push(rec); });
+        }
+    }
     for t in list.iter().filter(|t| t.plat() != "local" && !had.contains(&t.key)) { collab_send(shared, id, collab::add_op(t, &by)); }
     xpl_changed(shared);
     let left = list.len().saturating_sub(n);
@@ -6050,6 +6038,9 @@ fn side_action(shared: &Shared, i: usize, act: &str) {
         });
         return;
     }
+    // Export to SoundCloud & Spotify (and again); Unmerge Playlists
+    if act == "export" { return pl_export_platforms(shared, &p.id); }
+    if act == "unmerge" { return pl_unmerge(shared, &p.id); }
     // hidden from the sidebar (kept: shown again from Settings > Library > Hidden & Not Recommended)
     if act == "hide" {
         let mut ids: Vec<serde_json::Value> = shared.borrow().web.prefs["hiddenByYou"].as_array().cloned().unwrap_or_default();
