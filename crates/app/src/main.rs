@@ -449,6 +449,8 @@ fn paint_sides(a: &mut App) {
     a.side_map = (0..a.playlists.len())
         .filter(|&i| plat_on(&prefs, a.playlists[i].plat) || a.playlists[i].plat == "local")
         .filter(|&i| !hidden.contains(&mirror::side_id(a.playlists[i].plat, &a.playlists[i].id)))
+        // (the ones you hid, with Hidden & Not Recommended on)
+        .filter(|&i| !hide::on(&prefs) || !prefs["hiddenByYou"].as_array().is_some_and(|l| l.iter().any(|x| x.as_str() == Some(a.playlists[i].id.as_str()))))
         .collect();
     let sides: Vec<Side> = a.side_map.iter().map(|&i| Side { title: a.playlists[i].title.clone().into(), plat: if xpl::is_own(&a.playlists[i].id) { "xpl".into() } else { a.playlists[i].plat.into() }, own: xpl::is_own(&a.playlists[i].id), share: a.playlists[i].plat != "local" || xpl::is_own(&a.playlists[i].id), sc: share::platform_id(&a.playlists[i], &a.xpl, "soundcloud").is_some(), sp: share::platform_id(&a.playlists[i], &a.xpl, "spotify").is_some(), collab: collab_of(&a.xpl, &a.playlists[i].id).is_some(), collab_owner: collab_of(&a.xpl, &a.playlists[i].id).is_some_and(|c| c["owner"].as_bool() == Some(true)) }).collect();
     ui.set_sides(ModelRc::from(Rc::new(VecModel::from(sides))));
@@ -3880,7 +3882,8 @@ fn panel_press(shared: &Shared, key: &str) {
             let changes = hide::unhide(&shared.borrow().web.prefs, list, key);
             for (k, v) in changes { pref_put(shared, k, v); }
             hide_applied(shared);
-            if list == "v" { "It shows again.".to_string() } else { "It can be recommended again.".to_string() }
+            if list == "p" { let mut a = shared.borrow_mut(); paint_sides(&mut a); }
+            match list { "v" | "p" => "It shows again.".to_string(), "all" => "They can all be recommended again.".to_string(), _ => "It can be recommended again.".to_string() }
         }
         "out2Restart" => {
             omnipulse_core::omni_input::stop();
@@ -5305,6 +5308,19 @@ fn side_action(shared: &Shared, i: usize, act: &str) {
     }
     if act == "collab-leave" {
         return collab_leave(shared, &p.id);
+    }
+    // hidden from the sidebar (kept: shown again from Settings > Library > Hidden & Not Recommended)
+    if act == "hide" {
+        let mut ids: Vec<serde_json::Value> = shared.borrow().web.prefs["hiddenByYou"].as_array().cloned().unwrap_or_default();
+        if !ids.iter().any(|x| x.as_str() == Some(p.id.as_str())) { ids.push(serde_json::json!(p.id)); }
+        let mut names = shared.borrow().web.prefs["hiddenByYouNames"].as_object().cloned().unwrap_or_default();
+        names.insert(p.id.clone(), serde_json::json!(p.title));
+        if !hide::on(&shared.borrow().web.prefs) { pref_put(shared, "hideOn", serde_json::json!(true)); }
+        pref_put(shared, "hiddenByYou", serde_json::json!(ids));
+        pref_put(shared, "hiddenByYouNames", serde_json::Value::Object(names));
+        paint_sides(&mut shared.borrow_mut());
+        if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_status(format!("\u{201c}{}\u{201d} is hidden. Show it again from Settings \u{203a} Library \u{203a} Hidden & Not Recommended.", p.title).into()); }
+        return;
     }
     if !xpl::is_own(&p.id) {
         return;

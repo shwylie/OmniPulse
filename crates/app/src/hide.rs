@@ -104,6 +104,13 @@ pub fn unhide(prefs: &Value, list: &str, key: &str) -> Vec<(&'static str, Value)
         (name, Value::Object(m))
     };
     match list {
+        // a playlist you hid (the web app's hiddenByYou), shown in the sidebar again
+        "p" => {
+            let ids: Vec<Value> = prefs["hiddenByYou"].as_array().cloned().unwrap_or_default().into_iter().filter(|x| x.as_str() != Some(key)).collect();
+            vec![("hiddenByYou", json!(ids)), drop("hiddenByYouNames")]
+        }
+        // all of them recommended again
+        "all" => vec![("hiddenArtists", json!({})), ("hiddenAlbums", json!({})), ("hiddenRecs", json!([])), ("hiddenRecNames", json!({}))],
         "a" => vec![drop("hiddenArtists")],
         "l" => vec![drop("hiddenAlbums")],
         "v" => vec![drop("noVersion")],
@@ -129,15 +136,19 @@ pub fn fields(prefs: &Value) -> Vec<Value> {
     tracks.sort_by(|a, b| a.1.to_lowercase().cmp(&b.1.to_lowercase()));
     let unnamed = recs.len() - tracks.len();
     let nv = sorted("noVersion");
+    // (playlists you hid from the sidebar: their names as they were then)
+    let pl_names = prefs["hiddenByYouNames"].as_object().cloned().unwrap_or_default();
+    let pls: Vec<(String, String)> = prefs["hiddenByYou"].as_array().into_iter().flatten().filter_map(|x| x.as_str()).map(|id| (id.to_string(), pl_names.get(id).and_then(|n| n.as_str()).unwrap_or("A playlist that isn't loaded right now").to_string())).collect();
     let mut f = Vec::new();
     let plural = |n: usize, one: &str, many: &str| format!("{n} {}", if n == 1 { one } else { many });
     let mut parts = Vec::new();
     if !artists.is_empty() { parts.push(plural(artists.len(), "artist", "artists")); }
     if !albums.is_empty() { parts.push(plural(albums.len(), "album", "albums")); }
     if !recs.is_empty() { parts.push(plural(recs.len(), "track", "tracks")); }
+    let pl_part = if pls.is_empty() { String::new() } else { format!("{} hidden from the sidebar. ", if pls.len() == 1 { "1 playlist is".to_string() } else { format!("{} playlists are", pls.len()) }) };
     let summary = if !on(prefs) { "Off: nothing is hidden or left out. Your lists are kept.".to_string() }
-        else if parts.is_empty() && nv.is_empty() { "Nothing yet. Right-click a track to stop it (or its album, or its artist) being recommended.".to_string() }
-        else { format!("{}{}", if parts.is_empty() { String::new() } else { format!("{} {} recommended. ", parts.join(", "), if artists.len() + albums.len() + recs.len() == 1 { "isn't" } else { "aren't" }) }, if nv.is_empty() { String::new() } else { format!("{} hidden for having no full version.", plural(nv.len(), "track", "tracks")) }) };
+        else if parts.is_empty() && nv.is_empty() && pls.is_empty() { "Nothing yet. Right-click a track to stop it (or its album, or its artist) being recommended, or a playlist in the sidebar to hide it.".to_string() }
+        else { format!("{pl_part}{}{}", if parts.is_empty() { String::new() } else { format!("{} {} recommended. ", parts.join(", "), if artists.len() + albums.len() + recs.len() == 1 { "isn't" } else { "aren't" }) }, if nv.is_empty() { String::new() } else { format!("{} hidden for having no full version.", plural(nv.len(), "track", "tracks")) }) };
     f.push(json!({ "key": "", "label": summary, "note": "", "type": "note" }));
     let row = |list: &str, k: &str, name: &str, press: &str| json!({ "key": format!("un{list}:{k}"), "label": name, "note": "", "type": "button", "value": press });
     if !artists.is_empty() { f.push(json!({ "key": "", "label": format!("Artists Not Recommended ({})", artists.len()), "note": "", "type": "note" })); }
@@ -148,6 +159,9 @@ pub fn fields(prefs: &Value) -> Vec<Value> {
     for (k, n) in &tracks { f.push(row("t", k, n, "Recommend Again")); }
     if !nv.is_empty() { f.push(json!({ "key": "", "label": format!("Hidden: No Full Version ({})", nv.len()), "note": "", "type": "note" })); }
     for (k, n) in &nv { f.push(row("v", k, n, "Show Again")); }
+    if !pls.is_empty() { f.push(json!({ "key": "", "label": format!("Hidden Playlists ({})", pls.len()), "note": "", "type": "note" })); }
+    for (k, n) in &pls { f.push(row("p", k, n, "Show")); }
+    if artists.len() + albums.len() + recs.len() > 1 { f.push(json!({ "key": "unall:", "label": "", "note": "", "type": "button", "value": "Recommend Them All Again" })); }
     f
 }
 

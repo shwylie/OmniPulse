@@ -1332,6 +1332,7 @@ export component AppWindow inherits Window {
                                     if s.collab: MenuItem { title: s.collab-owner ? "Stop collaborating" : "Leave collaboration"; activated => { root.side-action(i, "collab-leave"); } }
                                     if s.own: MenuItem { title: "Rename..."; activated => { root.side-action(i, "rename"); } }
                                     if s.own: MenuItem { title: "Delete"; activated => { root.side-action(i, "delete"); } }
+                                    MenuItem { title: "Hide playlist"; activated => { root.side-action(i, "hide"); } }
                                     MenuItem { title: "Export as M3U..."; activated => { root.side-action(i, "export:m3u"); } }
                                     MenuItem { title: "Export as CSV..."; activated => { root.side-action(i, "export:csv"); } }
                                 }
