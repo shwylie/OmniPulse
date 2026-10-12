@@ -1,12 +1,13 @@
 // Updates (as the web app's, through Tauri's updater): a little after each launch OmniPulse asks the
-// public releases repo for its latest.json; a newer version is offered (Settings > App & Look >
+// native releases repo (shwylie/omnipulse-native-releases) for its latest.json; a newer version is offered (Settings > App & Look >
 // Updates, and the status line); Update downloads its installer, checks it against OmniPulse's own
 // key (the one Tauri's updater signs with: minisign), runs it and closes, and the installer starts the
 // new one.
 
 use serde_json::Value;
 
-pub const LATEST: &str = "https://github.com/shwylie/omnipulse-releases/releases/latest/download/latest.json";
+/// (the native app's own releases repo: the web app's, omnipulse-releases, stays the web app's)
+pub const LATEST: &str = "https://github.com/shwylie/omnipulse-native-releases/releases/latest/download/latest.json";
 /// OmniPulse's updater key (src-tauri/tauri.conf.json's plugins.updater.pubkey: a minisign public key, base64)
 const PUBKEY: &str = "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IENFQ0Y4MEMxMDNFNDhCRTYKUldUbWkrUUR3WURQem1TTE93NnBweCtpemIxdjRVWE5HMDVLQUc1QTZZV1E4TGoydG5OdWI2Z0QK";
 
@@ -34,7 +35,7 @@ fn release_of(v: &Value) -> Option<Release> {
     Some(Release {
         version: v["version"].as_str()?.to_string(),
         notes: v["notes"].as_str().unwrap_or("").to_string(),
-        url: w["url"].as_str().filter(|u| u.starts_with("https://github.com/shwylie/omnipulse-releases/"))?.to_string(),
+        url: w["url"].as_str().filter(|u| u.starts_with("https://github.com/shwylie/omnipulse-native-releases/"))?.to_string(),
         signature: w["signature"].as_str()?.to_string(),
     })
 }

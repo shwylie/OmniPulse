@@ -5,9 +5,9 @@
 // 3. Checks the SoundCloud key isn't in the build
 // 4. Builds the installer (installer/omnipulse-native.nsi, with the NSIS Tauri keeps), and signs it with
 //    the updater's key in %USERPROFILE%\.tauri (the same key: the web app's updater accepts it too)
-// 5. Only with --publish: uploads it and latest.json as a GitHub release on the public releases repo.
-//    NOTE: the web app (0.2.x) reads that same latest.json, so publishing moves everyone on the web app
-//    to the native one at their next update. Publish only once that's what's wanted.
+// 5. Only with --publish: uploads it and latest.json as a GitHub release on the native releases repo
+//    (shwylie/omnipulse-native-releases: the native app updates from it; the web app, 0.2.26 on, offers
+//    the move to it, and asks again at each new native version once it's been put off).
 //
 // Needs the GitHub CLI, signed in (gh auth login), to publish.
 
@@ -16,7 +16,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
-const REPO = "shwylie/omnipulse-releases";
+const REPO = "shwylie/omnipulse-native-releases";
 const KEY = join(homedir(), ".tauri", "omnipulse-updater.key");
 const MAKENSIS = join(process.env.LOCALAPPDATA || "", "tauri", "NSIS", "makensis.exe");
 const publish = process.argv.includes("--publish");
@@ -50,7 +50,7 @@ console.log("Built and signed " + exe);
 
 // 5. the release (only when asked)
 if (!publish) {
-  console.log("Not published (add --publish to). Publishing moves the web app's users to this one at their next update.");
+  console.log("Not published (add --publish to).");
   process.exit(0);
 }
 const tag = "v" + version;

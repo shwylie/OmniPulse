@@ -266,6 +266,45 @@ async fn update_install(app: AppHandle, progress: Channel<Value>) -> Result<(), 
     app.restart();
 }
 
+// ---------- the native app (0.3.x), offered: from its own releases repo ----------
+// The same key signs it, so the same updater installs it: its installer takes this one's place (the
+// same folder, links and data) and starts it. Only when asked: the web app's own updates stay its own.
+const NATIVE_LATEST: &str = "https://github.com/shwylie/omnipulse-native-releases/releases/latest/download/latest.json";
+
+fn native_updater(app: &AppHandle) -> Result<tauri_plugin_updater::Updater, String> {
+    use tauri_plugin_updater::UpdaterExt;
+    let url: tauri::Url = NATIVE_LATEST.parse().map_err(|_| "bad address".to_string())?;
+    app.updater_builder().endpoints(vec![url]).map_err(|e| e.to_string())?.build().map_err(|e| e.to_string())
+}
+
+/// The native app's latest version, if there is one (newer than this one, as every native one is)
+#[tauri::command]
+async fn native_check(app: AppHandle) -> Result<Option<Value>, String> {
+    let found = native_updater(&app)?.check().await.map_err(|e| e.to_string())?;
+    Ok(found.map(|u| serde_json::json!({ "version": u.version, "notes": u.body.unwrap_or_default() })))
+}
+
+/// Moves to the native app: downloads it (progress as { done, total }), and its installer takes over
+#[tauri::command]
+async fn native_install(app: AppHandle, progress: Channel<Value>) -> Result<(), String> {
+    let Some(update) = native_updater(&app)?.check().await.map_err(|e| e.to_string())? else {
+        return Err("The native app isn't out yet.".into());
+    };
+    let mut done: u64 = 0;
+    update
+        .download_and_install(
+            |chunk, total| {
+                done += chunk as u64;
+                let _ = progress.send(serde_json::json!({ "done": done, "total": total }));
+            },
+            || {},
+        )
+        .await
+        .map_err(|e| e.to_string())?;
+    // (its installer has closed this one and starts the native app by itself)
+    Ok(())
+}
+
 // ---------- Apple Music, once (crates/core/src/apple.rs): a read-only import ----------
 /// You sign in to music.apple.com in a private window of its own (nothing kept after it closes; the
 /// app's own data isn't touched); once its sign-in cookie is there, it's taken (into memory only) and
@@ -949,7 +988,7 @@ fn main() {
             local_folders, local_set_folders, local_scan, local_status, local_tracks, local_server,
             requests_start, requests_stop, request_result,
             spe_signed_in, spe_login, spe_logout, spe_attach, spe_play, spe_pause, spe_resume, spe_seek, spe_stop, spe_played, spe_playlist, spe_liked, spe_set_liked, spe_playlists, spe_web_get, spe_account, spe_crashed_last_time, spotify_app_signed_in, diag_note, spe_set_normalisation, loudness_analyse,
-            resolve_yt_stream, plugin_inspect, plugin_install, plugin_list, plugin_folder, plugin_remove, plugin_http, yt_search, yt_radio, yt_status, yt_artists, yt_artist, yt_album, yt_playlist, yt_playlists, yt_prepare, sc_ytdlp, mb_search, cat_search, deezer_get, artist_bio, playlist_file_read, playlist_file_write, sb_segments, apple_connect, apple_library, apple_forget, update_check, update_install, yt_setup, yt_remove, remote_start, remote_stop, remote_result
+            resolve_yt_stream, plugin_inspect, plugin_install, plugin_list, plugin_folder, plugin_remove, plugin_http, yt_search, yt_radio, yt_status, yt_artists, yt_artist, yt_album, yt_playlist, yt_playlists, yt_prepare, sc_ytdlp, mb_search, cat_search, deezer_get, artist_bio, playlist_file_read, playlist_file_write, sb_segments, apple_connect, apple_library, apple_forget, update_check, update_install, native_check, native_install, yt_setup, yt_remove, remote_start, remote_stop, remote_result
         ])
         .build(tauri::generate_context!())
         .expect("error while building app")
