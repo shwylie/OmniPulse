@@ -993,8 +993,7 @@ export component AppWindow inherits Window {
     // Settings > App: Close to Tray, Animations (the web app's settings too)
     in-out property <bool> close-to-tray;
     callback close-to-tray-changed(bool);
-    // Settings > App: Windows Media Controls, Taskbar Widget
-    in-out property <bool> smtc-on;
+    // Settings > App: Taskbar Widget
     in-out property <bool> taskbar-widget;
     callback app-pref(string, bool);
     in-out property <bool> anim-on: true;
@@ -1935,22 +1934,6 @@ export component AppWindow inherits Window {
                                             Text { text: "Closing hides the window; music keeps playing. Quit from the tray."; color: Theme.muted; font-size: 12px; }
                                         }
                                         Toggle { checked <=> root.close-to-tray; y: (parent.height - self.height) / 2; toggled => { root.close-to-tray-changed(self.checked); } }
-                                    }
-                                }
-                                Card {
-                                    HorizontalLayout {
-                                        padding: 16px;
-                                        padding-top: 12px;
-                                        padding-bottom: 12px;
-                                        spacing: 12px;
-                                        VerticalLayout {
-                                            horizontal-stretch: 1;
-                                            alignment: center;
-                                            spacing: 2px;
-                                            Text { text: "Windows Media Controls"; color: Theme.text; font-weight: 700; }
-                                            Text { text: "What's playing in Windows' media controls: by the volume and in quick settings, and on the lock screen, with its cover, Play / Pause, Next and Previous."; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
-                                        }
-                                        Toggle { checked <=> root.smtc-on; y: (parent.height - self.height) / 2; toggled => { root.app-pref("smtcOn", self.checked); } }
                                     }
                                 }
                                 Card {

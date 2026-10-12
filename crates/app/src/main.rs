@@ -6201,8 +6201,6 @@ fn desktop_action(shared: &Shared, action: &str) {
 }
 
 thread_local! {
-    /// the app's window, once it's up (Windows' media controls are tied to it)
-    static MAIN_HWND: std::cell::Cell<isize> = const { std::cell::Cell::new(0) };
     /// Settings > App > Taskbar Widget: its window (made the first time it's switched on), its handle,
     /// and whether it's showing
     static TBW: RefCell<Option<(TaskbarWidget, isize, bool)>> = const { RefCell::new(None) };
@@ -6225,12 +6223,12 @@ fn now_for_windows(a: &App) -> desktop::Now {
 
 /// Windows' media controls and the taskbar widget, kept in step (each tick)
 fn windows_now(shared: &Shared, ui: &AppWindow) {
-    let (now, smtc, widget) = {
+    let (now, widget) = {
         let a = shared.borrow();
         let prefs = &a.web.prefs;
-        (now_for_windows(&a), prefs["smtcOn"].as_bool() != Some(false), prefs["taskbarWidget"].as_bool() == Some(true) && (std::env::var_os("OMNIPULSE_SELFTEST").is_none() || std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("taskbar")))
+        (now_for_windows(&a), prefs["taskbarWidget"].as_bool() == Some(true) && (std::env::var_os("OMNIPULSE_SELFTEST").is_none() || std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("taskbar")))
     };
-    if smtc { desktop::media::update(&now); }
+    desktop::media::update(&now);
     // a place asked for from them
     if let Some(ms) = desktop::take_seek() {
         let engine = shared.borrow().engine.clone();
@@ -6343,7 +6341,6 @@ fn apply_look(shared: &Shared) {
     t.set_motion(motion);
     ui.set_anim_on(motion);
     ui.set_close_to_tray(prefs["closeToTray"].as_bool() == Some(true));
-    ui.set_smtc_on(prefs["smtcOn"].as_bool() != Some(false));
     ui.set_taskbar_widget(prefs["taskbarWidget"].as_bool() == Some(true));
     LISTEN_NUDGE.store(nudge_of(prefs), std::sync::atomic::Ordering::Relaxed);
     let nudge = nudge_of(prefs).to_string();
@@ -6644,10 +6641,6 @@ fn main() -> Result<(), slint::PlatformError> {
     let s = shared.clone();
     ui.on_app_pref(move |key, on| {
         set_look_pref(&s, &key, serde_json::json!(on));
-        if key == "smtcOn" {
-            let h = MAIN_HWND.with(|m| m.get());
-            if h != 0 { desktop::media::enable(h, on); }
-        }
         if let Some(ui) = s.borrow().ui.upgrade() { windows_now(&s, &ui); }
     });
     let s = shared.clone();
@@ -7297,10 +7290,8 @@ fn main() -> Result<(), slint::PlatformError> {
         if let Some(ui) = weak.upgrade() {
             if let Some(h) = window_hwnd(&ui) {
                 desktop::taskbar::attach(h);
-                MAIN_HWND.with(|m| m.set(h));
-                // Settings > App > Windows Media Controls (on unless switched off)
-                let on = SHARED.with(|s| s.borrow().as_ref().map(|sh| sh.borrow().web.prefs["smtcOn"].as_bool() != Some(false))).unwrap_or(true);
-                desktop::media::enable(h, on);
+                // Windows' media controls (always)
+                desktop::media::enable(h, true);
             }
         }
     });
