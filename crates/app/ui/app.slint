@@ -436,11 +436,14 @@ component Toggle inherits Rectangle {
     TouchArea { clicked => { root.checked = !root.checked; root.toggled(); } }
 }
 
-component PlatIcon inherits Glyph {
+component PlatIcon inherits Rectangle {
     in property <string> plat;
     in property <bool> title-bar;   // (YouTube Music's own mark there)
-    d: plat == "xpl" ? Icons.xpl : plat == "spotify" ? Icons.spotify : plat == "youtube" ? (title-bar ? Icons.youtube-mark : Icons.youtube) : plat == "local" ? Icons.local : plat == "musicbrainz" ? Icons.musicbrainz : plat == "plugin" ? Icons.plugin : plat == "deezer" ? Icons.deezer : plat == "itunes" ? Icons.itunes : Icons.soundcloud;
-    fill: plat == "xpl" ? @linear-gradient(135deg, #ff5f6d 0%, #ffc371 25%, #47e891 50%, #3fa9ff 75%, #b06bff 100%) : plat == "spotify" ? #1ed760 : plat == "youtube" ? #ff0033 : plat == "local" ? #f2b544 : plat == "musicbrainz" ? #ba478f : plat == "plugin" ? #38bdf8 : plat == "deezer" ? #a238ff : plat == "itunes" ? #fa2d48 : #ff5500;
+    in property <brush> fill: root.plat == "xpl" ? transparent : root.plat == "spotify" ? #1ed760 : root.plat == "youtube" ? #ff0033 : root.plat == "local" ? #f2b544 : root.plat == "musicbrainz" ? #ba478f : root.plat == "plugin" ? #38bdf8 : root.plat == "deezer" ? #a238ff : root.plat == "itunes" ? #fa2d48 : #ff5500;
+    if root.plat != "xpl": Glyph { d: root.plat == "xpl" ? Icons.xpl : root.plat == "spotify" ? Icons.spotify : root.plat == "youtube" ? (root.title-bar ? Icons.youtube-mark : Icons.youtube) : root.plat == "local" ? Icons.local : root.plat == "musicbrainz" ? Icons.musicbrainz : root.plat == "plugin" ? Icons.plugin : root.plat == "deezer" ? Icons.deezer : root.plat == "itunes" ? Icons.itunes : Icons.soundcloud; fill: root.fill; width: parent.width; height: parent.height; }
+    // (a playlist on this PC: the web app's rainbow, as a picture: a gradient on a shape is drawn against the
+    // window here, not the icon, and slides as the list does)
+    if root.plat == "xpl": Image { source: @image-url("xpl.svg"); width: parent.width; height: parent.height; }
 }
 
 component NavItem inherits Rectangle {
