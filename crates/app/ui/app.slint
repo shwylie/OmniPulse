@@ -1085,6 +1085,10 @@ export component AppWindow inherits Window {
     callback album-act(int, string);
     // YouTube Music's helpers: what's said, a Set Up (or Try Again) button, a Remove one
     in property <string> helpers-note;
+    // Apple Music's import: what's said, its button (Import, Import again, ...)
+    in property <string> apple-note;
+    in property <string> apple-label: "Import";
+    callback apple-import();
     in property <string> helpers-setup;
     in property <bool> helpers-remove;
     callback helpers-act(string);
@@ -2450,6 +2454,23 @@ export component AppWindow inherits Window {
                                         }
                                     }
                                 }
+                                // Apple Music: an import, once (read only)
+                                Card {
+                                    HorizontalLayout {
+                                        padding: 16px;
+                                        padding-top: 12px;
+                                        padding-bottom: 12px;
+                                        spacing: 10px;
+                                        VerticalLayout {
+                                            horizontal-stretch: 1;
+                                            alignment: center;
+                                            spacing: 2px;
+                                            Text { text: "Apple Music"; color: Theme.text; font-weight: 700; }
+                                            Text { text: root.apple-note; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
+                                        }
+                                        Pill { label: root.apple-label; y: (parent.height - self.height) / 2; clicked => { root.apple-import(); } }
+                                    }
+                                }
                                 // YouTube Music's helpers (yt-dlp and Deno): how they are, set up, or taken off
                                 for r[i] in root.set-rows-integrations: SetRowView { r: r; toggle(k) => { root.set-toggle(k); } more(k) => { root.set-more(k); } }
                             }
@@ -3646,4 +3667,13 @@ export component TaskbarWidget inherits Window {
     }
     // the cover and the names: the app's window, shown
     TouchArea { x: 0; width: root.width - (root.can-like ? 150px : 120px); height: parent.height - 2px; clicked => { root.act("show"); } }
+}
+
+// Apple Music's sign-in (Settings > Integrations > Apple Music > Import): Apple's own page, in a window of
+// its own, only until you're signed in (then your music's read once, and the sign-in forgotten)
+export component AppleSignIn inherits Window {
+    title: "Sign in to Apple Music (once, to import your music)";
+    preferred-width: 1000px;
+    preferred-height: 760px;
+    background: #ffffff;
 }

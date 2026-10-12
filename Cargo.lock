@@ -5575,6 +5575,7 @@ dependencies = [
  "tray-icon",
  "unicode-normalization",
  "windows 0.62.2",
+ "wry",
 ]
 
 [[package]]

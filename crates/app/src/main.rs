@@ -18,6 +18,7 @@ mod lang;
 mod panels;
 mod hide;
 mod lookalike;
+mod apple_import;
 mod alerts;
 mod integrations;
 mod look;
@@ -3940,7 +3941,7 @@ fn set_row_on(prefs: &serde_json::Value, key: &str, dflt: bool) -> bool {
 
 fn paint_settings(a: &App) {
     let Some(ui) = a.ui.upgrade() else { return };
-    SHARED.with(|s| { if let Some(sh) = s.borrow().clone() { let sh2 = sh.clone(); slint::Timer::single_shot(std::time::Duration::ZERO, move || helpers_paint(&sh2)); } });
+    SHARED.with(|s| { if let Some(sh) = s.borrow().clone() { let sh2 = sh.clone(); slint::Timer::single_shot(std::time::Duration::ZERO, move || { helpers_paint(&sh2); apple_paint(&sh2); }); } });
     let streamer = integrations::set(&a.web.prefs, "streamerMode");
     let rows = |sec: &str| -> ModelRc<SetRow> {
         let mut list: Vec<SetRow> = SET_ROWS.iter().filter(|(s, ..)| *s == sec)
@@ -7021,6 +7022,144 @@ fn helpers_act(shared: &Shared, act: &str) {
     helpers_paint(shared);
 }
 
+// ---------- Apple Music, once (crate::apple_import) ----------
+thread_local! {
+    /// the sign-in window, its web view of Apple's page, and the timer watching it (while signing in)
+    static APPLE: RefCell<Option<(AppleSignIn, Option<wry::WebView>, slint::Timer)>> = const { RefCell::new(None) };
+    static APPLE_BUSY: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+fn apple_paint(shared: &Shared) {
+    let Some(ui) = shared.borrow().ui.upgrade() else { return };
+    let when = shared.borrow().web.prefs["appleImported"].as_u64().unwrap_or(0);
+    let on = if when > 0 { let d = ((when / 3_600_000) as i64 + local_offset_hours()).div_euclid(24); let (y, m, dd) = civil_date(d); format!(" Last imported {dd}/{m}/{y}.") } else { String::new() };
+    ui.set_apple_note(format!("Once: your loved songs become likes on your other platforms, and your playlists become playlists on this PC. Nothing on Apple Music is changed, and your sign-in is forgotten after.{on}").into());
+    ui.set_apple_label(if APPLE_BUSY.with(|b| b.get()) { "Importing...".into() } else if when > 0 { "Import again".into() } else { "Import".into() });
+}
+
+/// Import: Apple's sign-in page in a window of its own; once its sign-in cookie is there, it's taken
+/// (into memory only) and the window closes (five minutes to sign in), then the import itself
+fn apple_start(shared: &Shared) {
+    if APPLE_BUSY.with(|b| b.get()) { return; }
+    APPLE_BUSY.with(|b| b.set(true));
+    apple_paint(shared);
+    let (rt, weak) = { let a = shared.borrow(); (a.rt.clone(), a.ui.clone()) };
+    rt.spawn(async move {
+        // (Apple's page as expected, before you're asked to sign in)
+        let ok = omnipulse_core::apple::dev_token().await;
+        let _ = weak.upgrade_in_event_loop(move |ui| SHARED.with(|s| {
+            let Some(sh) = s.borrow().clone() else { return };
+            if let Err(e) = ok { return apple_fail(&sh, &format!("Couldn't reach Apple Music: {e}")); }
+            if let Err(e) = apple_window(&sh) { return apple_fail(&sh, &e); }
+            ui.set_status("Sign in to Apple Music in the window that opened (only to read your music: nothing there is changed)...".into());
+            STATUS_HOLD.with(|h| *h.borrow_mut() = Some("Sign in to Apple Music in the window that opened (only to read your music: nothing there is changed)...".into()));
+        }));
+    });
+}
+
+fn apple_fail(shared: &Shared, why: &str) {
+    APPLE.with(|a| { if let Some((w, _, _)) = a.borrow_mut().take() { let _ = w.hide(); } });
+    omnipulse_core::apple::forget();
+    APPLE_BUSY.with(|b| b.set(false));
+    apple_paint(shared);
+    STATUS_HOLD.with(|h| h.borrow_mut().take());
+    if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_status(why.into()); }
+}
+
+fn apple_window(shared: &Shared) -> Result<(), String> {
+    let w = AppleSignIn::new().map_err(|e| e.to_string())?;
+    w.show().map_err(|e| e.to_string())?;
+    // each second: the window's size kept to, and the sign-in looked for (five minutes)
+    let timer = slint::Timer::default();
+    let s = shared.clone();
+    let tries = std::rc::Rc::new(std::cell::Cell::new(0u32));
+    timer.start(slint::TimerMode::Repeated, std::time::Duration::from_millis(500), move || {
+        tries.set(tries.get() + 1);
+        APPLE.with(|a| {
+            let mut a = a.borrow_mut();
+            let Some((w, v, _)) = a.as_mut() else { return };
+            if v.is_some() { return; }
+            use slint::winit_030::WinitWindowAccessor;
+            let size = w.window().size();
+            *v = w.window().with_winit_window(|win| wry::WebViewBuilder::new()
+                .with_url("https://music.apple.com/us/home")
+                .with_incognito(true)
+                .with_bounds(wry::Rect { position: wry::dpi::PhysicalPosition::new(0, 0).into(), size: wry::dpi::PhysicalSize::new(size.width, size.height).into() })
+                .build_as_child(win).ok()).flatten();
+        });
+        let got = APPLE.with(|a| {
+            let a = a.borrow();
+            let Some((w, v, _)) = a.as_ref() else { return Err("You closed the sign-in window.".to_string()) };
+            if !w.window().is_visible() { return Err("You closed the sign-in window.".to_string()); }
+            let sz = w.window().size();
+            // (Apple's page put in once the window's there, a moment after it's shown)
+            let Some(v) = v.as_ref() else { return Ok(None) };
+            let _ = v.set_bounds(wry::Rect { position: wry::dpi::PhysicalPosition::new(0, 0).into(), size: wry::dpi::PhysicalSize::new(sz.width, sz.height).into() });
+            Ok(v.cookies_for_url("https://music.apple.com").ok().and_then(|c| c.into_iter().find(|c| c.name() == "media-user-token" && !c.value().is_empty()).map(|c| c.value().to_string())))
+        });
+        match got {
+            Err(e) => { let s = s.clone(); slint::Timer::single_shot(std::time::Duration::ZERO, move || apple_fail(&s, &e)); }
+            Ok(Some(token)) => {
+                omnipulse_core::apple::set_user_token(token);
+                let s = s.clone();
+                slint::Timer::single_shot(std::time::Duration::ZERO, move || { APPLE.with(|a| { if let Some((w, _, _)) = a.borrow_mut().take() { let _ = w.hide(); } }); apple_read(&s); });
+            }
+            Ok(None) if tries.get() >= 600 => { let s = s.clone(); slint::Timer::single_shot(std::time::Duration::ZERO, move || apple_fail(&s, "Signing in to Apple Music took too long.")); }
+            Ok(None) => {}
+        }
+    });
+    APPLE.with(|a| *a.borrow_mut() = Some((w, None, timer)));
+    Ok(())
+}
+
+/// Signed in: your music read (and the sign-in forgotten straight away), each song looked for
+fn apple_read(shared: &Shared) {
+    let (rt, weak, wh) = {
+        let a = shared.borrow();
+        let p = &a.web.prefs;
+        let wh = apple_import::Where { spotify: plat_on(p, "spotify") && omnipulse_core::spotify::spotify_signed_in(), soundcloud: plat_on(p, "soundcloud") && omnipulse_core::soundcloud::signed_in(), youtube: plat_on(p, "youtube") };
+        (a.rt.clone(), a.ui.clone(), wh)
+    };
+    if let Some(ui) = weak.upgrade() { ui.set_status("Reading your Apple Music...".into()); }
+    rt.spawn(async move {
+        let lib = omnipulse_core::apple::library().await;
+        omnipulse_core::apple::forget();
+        let lib = match lib { Ok(l) => l, Err(e) => { let _ = weak.upgrade_in_event_loop(move |_| SHARED.with(|s| { if let Some(sh) = s.borrow().clone() { apple_fail(&sh, &format!("Couldn't import from Apple Music: {e}")); } })); return; } };
+        let w2 = weak.clone();
+        let found = apple_import::run(lib, wh, move |msg| { let _ = w2.upgrade_in_event_loop(move |ui| ui.set_status(msg.into())); }).await;
+        // the likes (where they're found), as a like from the menu does
+        let mut liked = 0usize;
+        let mut missing = found.missing;
+        let have: std::collections::HashSet<String> = SHARED_LIBRARY_KEYS.with(|k| k.borrow().clone());
+        let mut newly = Vec::new();
+        for t in &found.likes {
+            if have.contains(&t.key) { continue; }
+            match marks::set_like(t, true).await { Ok(()) => { liked += 1; newly.push(t.clone()); } Err(e) => missing.push(format!("{} - {} (couldn't like it: {e})", t.artist, t.title)) }
+        }
+        let _ = weak.upgrade_in_event_loop(move |ui| SHARED.with(|s| {
+            let Some(sh) = s.borrow().clone() else { return };
+            {
+                let mut a = sh.borrow_mut();
+                for t in newly.into_iter().rev() { if !a.library.iter().any(|x| x.key == t.key) { a.library.insert(0, t); } }
+                for (name, tracks) in &found.lists { xpl::create(&mut a.xpl, name, tracks); }
+            }
+            xpl_changed(&sh);
+            pref_put(&sh, "appleImported", serde_json::json!(now_ms()));
+            APPLE_BUSY.with(|b| b.set(false));
+            apple_paint(&sh);
+            STATUS_HOLD.with(|h| h.borrow_mut().take());
+            let made = found.lists.len();
+            let note = format!("Imported from Apple Music: {} liked, {} made{} Your Apple Music sign-in is forgotten.", plural(liked, "loved song", "loved songs"), plural(made, "playlist", "playlists"), if missing.is_empty() { ". Everything was found.".to_string() } else { format!(". {} found anywhere.", plural(missing.len(), "song wasn't", "songs weren't")) });
+            if missing.is_empty() { ui.set_status(note.into()); } else { say_with(&ui, &note, vec![("Copy the missing", StatusAct::Copy(missing.join("\n")))]); }
+        }));
+    });
+}
+
+thread_local! {
+    /// (the Library's keys, for the import to leave alone what's liked already)
+    static SHARED_LIBRARY_KEYS: RefCell<std::collections::HashSet<String>> = RefCell::new(std::collections::HashSet::new());
+}
+
 /// What a status's button does
 #[derive(Clone)]
 enum StatusAct { Update, Dismiss, Prefs(Track), Skip, Leave, Copy(String), Restart }
@@ -8245,6 +8384,11 @@ fn main() -> Result<(), slint::PlatformError> {
         track_act(&s, &t, &act);
     } });
     ui.on_helpers_act({ let s = shared.clone(); move |a| helpers_act(&s, &a) });
+    ui.on_apple_import({ let s = shared.clone(); move || {
+        let keys = s.borrow().library.iter().map(|t| t.key.clone()).collect();
+        SHARED_LIBRARY_KEYS.with(|k| *k.borrow_mut() = keys);
+        apple_start(&s);
+    } });
     ui.on_now_act({ let s = shared.clone(); move |act| { let t = s.borrow().queue.current().cloned(); if let Some(t) = t { track_act(&s, &t, &act); } } });
     ui.on_title_rename({ let s = shared.clone(); move || name_ask(&s, Naming::AppName) });
     ui.on_title_signin({ let s = shared.clone(); move || { let i = ACCOUNTS.iter().position(|a| a.0 == "soundcloud").unwrap_or(0); account_act(&s, i); } });
@@ -8692,6 +8836,8 @@ fn main() -> Result<(), slint::PlatformError> {
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("spotify") { vec![(8, "spplay"), (14, "spcheck"), (20, "spcheck"), (21, "end")] }
             // (OMNIPULSE_SELFTEST_PLAN=tips: the pointer rested on the player bar's "..." and the shuffle button: their tooltips)
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("tips") { vec![(9, "play"), (11, "hover:1095:711"), (13, "tipsay"), (13, "hover:571:711"), (15, "tipsay"), (16, "hover:600:300"), (17, "tipsay"), (18, "end")] }
+            // (OMNIPULSE_SELFTEST_PLAN=apple: Apple Music's sign-in window opened off-screen, Apple's page looked at, closed; nobody signs in)
+            else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("apple") { vec![(6, "appleopen"), (16, "applecheck"), (17, "end")] }
             // (OMNIPULSE_SELFTEST_PLAN=tp: Track preferences for what plays, its bar dragged)
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("tp") { vec![(9, "play"), (12, "tprefs"), (13, "tpdrag"), (14, "nowmenu"), (15, "now"), (18, "end")] }
             // (OMNIPULSE_SELFTEST_PLAN=la: the look-alikes dialog, with two made up (nothing added))
@@ -8809,6 +8955,11 @@ fn main() -> Result<(), slint::PlatformError> {
                     if v.len() == 2 { ui.window().dispatch_event(slint::platform::WindowEvent::PointerMoved { position: slint::LogicalPosition::new(v[0], v[1]) }); }
                 }
                 "tipsay" => { let t = ui.global::<Tips>(); println!("selftest: tooltip on {}: \"{}\"", t.get_on(), t.get_text()); }
+                "appleopen" => { let r = apple_window(&s); APPLE.with(|a| if let Some((w, _, _)) = a.borrow().as_ref() { w.window().set_position(slint::PhysicalPosition::new(-4000, 0)); }); println!("selftest: apple window: {:?}", r.err()); }
+                "applecheck" => {
+                    APPLE.with(|a| if let Some((_, Some(v), _)) = a.borrow().as_ref() { println!("selftest: apple page: {:?}, cookies {}", v.url().ok(), v.cookies_for_url("https://music.apple.com").map(|c| c.len()).unwrap_or(0)); } else { println!("selftest: apple page: none"); });
+                    APPLE.with(|a| { if let Some((w, _, _)) = a.borrow_mut().take() { let _ = w.hide(); } });
+                }
                 "statsfacts" => println!("selftest: stats: {} | streak {} {} | facts {:?}", ui.get_st_big(), ui.get_st_streak(), ui.get_st_streak_sub(), ui.get_st_fact_heads().iter().zip(ui.get_st_facts().iter()).map(|(h, f)| format!("{h}: {f}")).collect::<Vec<_>>()),
                 "sshit" => { ui.invoke_set_hit(0); println!("selftest: after a hit: cat \"{}\", query \"{}\"", ui.get_set_cat(), ui.get_set_query()); }
                 "crumb2" => { println!("selftest: path {:?}", ui.get_pf_crumbs().iter().collect::<Vec<_>>()); ui.invoke_crumb_go(2); println!("selftest: after its 3rd part: open {}, head \"{}\"", ui.get_pf_open(), ui.get_pf_head()); }
