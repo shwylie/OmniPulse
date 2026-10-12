@@ -1438,6 +1438,174 @@ fn civil_date(days: i64) -> (i64, u32, u32) {
     (yoe + era * 400 + if m <= 2 { 1 } else { 0 }, m, d)
 }
 
+thread_local! {
+    /// Stats' card looked at more closely ("" for them all), and its ranked list's rows: (what a click
+    /// does, its cover's address)
+    static STATS_DETAIL: RefCell<String> = const { RefCell::new(String::new()) };
+    static STATS_ROWS: RefCell<Vec<(StatsRow, String)>> = const { RefCell::new(Vec::new()) };
+    static STATS_BLOCKS: RefCell<Option<Rc<VecModel<StatBlock>>>> = const { RefCell::new(None) };
+}
+
+#[derive(Clone)]
+enum StatsRow { Artist(String), Song(usize) }
+
+/// A recorded play as a track to play: this app's own copy if it has one, else made from what was kept
+fn play_track(a: &App, p: &webstate::Play) -> Option<Track> {
+    if let Some(t) = a.library.iter().chain(a.queue.items.iter().map(|q| &q.t)).find(|t| t.key == p.id) { return Some(t.clone()); }
+    let id = p.id.clone();
+    let src = if p.src.is_empty() { "soundcloud" } else { p.src.as_str() };
+    let mut snap = serde_json::json!({ "id": id, "title": p.title, "duration": p.ms, "artwork_url": p.art, "genre": p.genre, "source": src, "user": { "username": p.artist }, "displayArtist": p.artist });
+    if src == "soundcloud" { snap["id"] = serde_json::json!(id.trim_start_matches("sc:")); }
+    Track::from_snapshot(&snap)
+}
+
+/// Stats' closer look at one card (the web app's renderStatsDetail): its heading, and its blocks
+fn stats_detail(a: &App, ui: &AppWindow, list: &[&webstate::Play], since: u64, period: usize, which: &str) -> Rc<VecModel<StatBlock>> {
+    let label = PERIOD_CHIPS[period].to_lowercase();
+    let ms: u64 = list.iter().map(|p| p.ms).sum();
+    let day_of = |ts: u64| ((ts / 3_600_000) as i64 + local_offset_hours()).div_euclid(24);
+    let first_artist = |p: &webstate::Play| p.artist.split(',').next().unwrap_or("").trim().to_string();
+    let block = |kind: &str, kicker: &str| StatBlock { kind: kind.into(), kicker: kicker.into(), big: "".into(), sub: "".into(), wide: true, bars: ModelRc::default(), rows: ModelRc::default(), cells: ModelRc::default() };
+    let bars = |v: Vec<(String, f64, String)>| { let top = v.iter().map(|x| x.1).fold(1e-9, f64::max); ModelRc::from(Rc::new(VecModel::from(v.into_iter().map(|(l, n, t)| StatBar { label: l.into(), v: (n / top) as f32, tip: t.into() }).collect::<Vec<_>>()))) };
+    let months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    let days_names = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+    let weekday = |d: i64| (d + 4).rem_euclid(7) as usize;   // (day 0, 1 January 1970, was a Thursday)
+    let mut out: Vec<StatBlock> = Vec::new();
+    let mut rows: Vec<(StatsRow, String)> = Vec::new();
+    let head: String;
+    match which {
+        "time" => {
+            head = format!("You listened for {} {label}", fmt_hours(ms));
+            let by_month = period >= 2;
+            let mut m: std::collections::BTreeMap<i64, (u64, usize)> = Default::default();
+            for p in list {
+                let d = day_of(p.ts);
+                let k = if by_month { let (y, mo, _) = civil_date(d); y * 12 + mo as i64 } else { d };
+                let e = m.entry(k).or_default();
+                e.0 += p.ms;
+                e.1 += 1;
+            }
+            let items: Vec<(String, f64, String)> = m.iter().rev().take(60).collect::<Vec<_>>().into_iter().rev().map(|(k, (ms, n))| {
+                let lab = if by_month { months[((k - 1).rem_euclid(12)) as usize].to_string() } else { let (_, mo, dd) = civil_date(*k); format!("{dd} {}", months[(mo - 1) as usize]) };
+                (lab, *ms as f64, format!("{}, {}", fmt_hours(*ms), plural(*n, "play", "plays")))
+            }).collect();
+            let mut b = block("bars", if by_month { "BY MONTH" } else { "BY DAY" });
+            b.bars = bars(items);
+            out.push(b);
+            let span = ((now_ms().saturating_sub(list[0].ts.max(since))) as f64 / 86_400_000.0).ceil().max(1.0);
+            let mut b = block("big", "ON AVERAGE");
+            b.big = fmt_hours((ms as f64 / span) as u64).into();
+            b.sub = format!("a day, {} in all", plural(list.len(), "play", "plays")).into();
+            out.push(b);
+            let mut per: HashMap<i64, (u64, u64)> = HashMap::new();
+            for p in list { let e = per.entry(day_of(p.ts)).or_default(); e.0 += p.ms; e.1 = p.ts; }
+            if let Some((d, (dms, _))) = per.into_iter().max_by_key(|x| x.1 .0) {
+                let (_, mo, dd) = civil_date(d);
+                let mut b = block("big", "YOUR BIGGEST DAY");
+                b.big = format!("{} {dd} {}", days_names[weekday(d)], ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"][(mo - 1) as usize]).into();
+                b.sub = fmt_hours(dms).into();
+                out.push(b);
+            }
+        }
+        "artists" | "songs" => {
+            let songs = which == "songs";
+            let mut tally: HashMap<String, (usize, u64, &webstate::Play)> = HashMap::new();
+            for p in list {
+                let k = if songs { format!("{}|{}", p.title, p.artist) } else { first_artist(p) };
+                let e = tally.entry(k).or_insert((0, 0, p));
+                e.0 += 1;
+                e.1 += p.ms;
+                e.2 = p;
+            }
+            let mut v: Vec<(String, (usize, u64, &webstate::Play))> = tally.into_iter().collect();
+            v.sort_by(|x, y| y.1 .0.cmp(&x.1 .0).then(y.1 .1.cmp(&x.1 .1)));
+            v.truncate(50);
+            let top = v.first().map_or(1, |x| x.1 .0).max(1);
+            head = format!("Your top {} {label}", if songs { "songs" } else { "artists" });
+            let mut b = block("rows", "");
+            let mut tracks: Vec<Track> = Vec::new();
+            b.rows = ModelRc::from(Rc::new(VecModel::from(v.iter().enumerate().map(|(i, (k, (n, ms, p)))| {
+                if songs {
+                    if let Some(t) = play_track(a, p) { tracks.push(t); rows.push((StatsRow::Song(tracks.len() - 1), p.art.clone())); } else { rows.push((StatsRow::Song(usize::MAX), p.art.clone())); }
+                } else { rows.push((StatsRow::Artist(k.clone()), p.art.clone())); }
+                StatRow { rank: (i + 1) as i32, name: if songs { p.title.clone().into() } else { k.clone().into() }, sub: if songs { format!("{} \u{b7} {} \u{b7} {}", p.artist, plural(*n, "play", "plays"), fmt_hours(*ms)).into() } else { format!("{} \u{b7} {}", plural(*n, "play", "plays"), fmt_hours(*ms)).into() }, share: *n as f32 / top as f32, art: slint::Image::default() }
+            }).collect::<Vec<_>>())));
+            STATS_TRACKS.with(|t| *t.borrow_mut() = tracks);
+            out.push(b);
+        }
+        "when" => {
+            let mut hours = [0f64; 24];
+            let mut days = [0f64; 7];
+            for p in list {
+                let h = ((p.ts / 3_600_000) as i64 + local_offset_hours()).rem_euclid(24) as usize;
+                let w = if p.ms > 0 { p.ms } else { 180_000 } as f64;
+                hours[h] += w;
+                days[weekday(day_of(p.ts))] += w;
+            }
+            head = format!("You're a {}", ui.get_st_kind());
+            let hname = |h: usize| match h { 0 => "12a".to_string(), 12 => "12p".to_string(), h if h < 12 => format!("{h}a"), h => format!("{}p", h - 12) };
+            let mut b = block("bars", "BY HOUR");
+            b.bars = bars((0..24).map(|h| (if h % 3 == 0 { hname(h) } else { String::new() }, hours[h], fmt_hours(hours[h] as u64))).collect());
+            out.push(b);
+            let mut b = block("bars", "BY DAY");
+            b.bars = bars((0..7).map(|d| (days_names[d][..3].to_string(), days[d], fmt_hours(days[d] as u64))).collect());
+            out.push(b);
+            let mut b = block("text", "");
+            b.sub = ui.get_st_kind_sub();
+            out.push(b);
+        }
+        "where" => {
+            head = "Where it came from".into();
+            let mut plats: HashMap<String, (usize, u64)> = HashMap::new();
+            for p in list { let e = plats.entry(if p.src.is_empty() { "soundcloud".into() } else { p.src.clone() }).or_default(); e.0 += 1; e.1 += p.ms; }
+            let mut v: Vec<_> = plats.into_iter().collect();
+            v.sort_by_key(|x| std::cmp::Reverse(x.1 .0));
+            let pname = |p: &str| match p { "spotify" => "Spotify", "youtube" => "YouTube Music", "local" => "Your files", "soundcloud" => "SoundCloud", other => other }.to_string();
+            for (pl, (n, pms)) in v {
+                let mut tops: HashMap<String, usize> = HashMap::new();
+                for p in list.iter().filter(|p| (if p.src.is_empty() { "soundcloud" } else { p.src.as_str() }) == pl) { *tops.entry(first_artist(p)).or_default() += 1; }
+                let mut tops: Vec<_> = tops.into_iter().collect();
+                tops.sort_by_key(|x| std::cmp::Reverse(x.1));
+                let mut b = block("big", &pname(&pl).to_uppercase());
+                b.big = format!("{}%", n * 100 / list.len()).into();
+                b.sub = format!("{} \u{b7} {}{}", plural(n, "play", "plays"), fmt_hours(pms), if tops.is_empty() { String::new() } else { format!(". Most played: {}", tops.iter().take(3).map(|x| x.0.clone()).collect::<Vec<_>>().join(", ")) }).into();
+                out.push(b);
+            }
+        }
+        _ => {
+            // a streak: the last twelve weeks, a square a day, and the best run
+            let all = &a.web.plays;
+            let mut per: HashMap<i64, usize> = HashMap::new();
+            for p in all { *per.entry(day_of(p.ts)).or_default() += 1; }
+            let today = day_of(now_ms());
+            let start = today - 83 - weekday(today) as i64;
+            let cells: Vec<i32> = (start..=today).map(|d| match per.get(&d).copied().unwrap_or(0) { 0 => 0, n if n > 20 => 3, n if n > 5 => 2, _ => 1 }).collect();
+            head = format!("{} in a row", ui.get_st_streak());
+            let mut b = block("cal", "THE LAST TWELVE WEEKS");
+            b.cells = ModelRc::from(Rc::new(VecModel::from(cells)));
+            out.push(b);
+            let mut sorted: Vec<i64> = per.keys().copied().collect();
+            sorted.sort();
+            let (mut best, mut run) = (0usize, 0usize);
+            for (i, d) in sorted.iter().enumerate() { run = if i > 0 && d - sorted[i - 1] == 1 { run + 1 } else { 1 }; best = best.max(run); }
+            let mut b = block("big", "YOUR BEST");
+            b.big = plural(best, "day", "days").into();
+            b.sub = "in a row".into();
+            out.push(b);
+        }
+    }
+    STATS_ROWS.with(|r| *r.borrow_mut() = rows);
+    ui.set_st_detail_head(head.into());
+    let model = Rc::new(VecModel::from(out));
+    ui.set_st_blocks(ModelRc::from(model.clone()));
+    model
+}
+
+thread_local! {
+    /// the closer look at your top songs: the songs, to play from one of them down
+    static STATS_TRACKS: RefCell<Vec<Track>> = const { RefCell::new(Vec::new()) };
+}
+
 /// Clear Listening History: asked once more (a second click within five seconds), then done
 fn stats_clear(shared: &Shared) {
     let Some(ui) = shared.borrow().ui.upgrade() else { return };
@@ -1488,6 +1656,8 @@ fn open_stats(shared: &Shared, period: usize) {
         _ => 0,
     };
     let list: Vec<&webstate::Play> = a.web.plays.iter().filter(|p| p.ts >= since).collect();
+    let which = STATS_DETAIL.with(|d| d.borrow().clone());
+    ui.set_st_detail(if list.is_empty() { "".into() } else { which.clone().into() });
     if list.is_empty() {
         ui.set_st_empty(true);
         ui.set_st_big("Nothing yet".into());
@@ -1497,6 +1667,29 @@ fn open_stats(shared: &Shared, period: usize) {
         return;
     }
     ui.set_st_empty(false);
+    if !which.is_empty() {
+        let blocks = stats_detail(&a, &ui, &list, since, period, &which);
+        let weak = a.ui.clone();
+        drop(a);
+        // (the ranked lists' covers, as they come)
+        let urls: Vec<String> = STATS_ROWS.with(|r| r.borrow().iter().map(|x| x.1.clone()).collect());
+        STATS_BLOCKS.with(|m| *m.borrow_mut() = Some(blocks));
+        shared.borrow().rt.spawn(async move {
+            for (k, u) in urls.into_iter().enumerate().take(50) {
+                if let Some(px) = player::fetch_art(u, 96).await {
+                    let _ = weak.upgrade_in_event_loop(move |_| STATS_BLOCKS.with(|m| {
+                        let Some(model) = m.borrow().clone() else { return };
+                        let Some(mut b) = model.row_data(0) else { return };
+                        let rows = b.rows.clone();
+                        if let Some(mut r) = rows.row_data(k) { r.art = slint::Image::from_rgba8(px); rows.set_row_data(k, r); }
+                        b.rows = rows;
+                        let _ = b;
+                    }));
+                }
+            }
+        });
+        return;
+    }
     let ms: u64 = list.iter().map(|p| p.ms).sum();
     let h = ms as f64 / 3_600_000.0;
     ui.set_st_big((if h >= 10.0 { format!("{:.0} hours", h) } else if h >= 1.0 { format!("{h:.1} hours") } else { format!("{} minutes", ms / 60_000) }).into());
@@ -7450,6 +7643,15 @@ fn main() -> Result<(), slint::PlatformError> {
     ui.on_shuffle_toggle(move || shuffle_toggle(&s));
     let s = shared.clone();
     ui.on_stats_clear({ let s = shared.clone(); move || stats_clear(&s) });
+    ui.on_stats_open({ let s = shared.clone(); move |w| { STATS_DETAIL.with(|d| *d.borrow_mut() = w.to_string()); let p = s.borrow().chip; open_stats(&s, p); } });
+    ui.on_stats_play_these({ let s = shared.clone(); move || { let l = STATS_TRACKS.with(|t| t.borrow().clone()); if !l.is_empty() { play_list(&s, l, 0); } } });
+    ui.on_stats_row({ let s = shared.clone(); move |k| {
+        match STATS_ROWS.with(|r| r.borrow().get(k.max(0) as usize).map(|x| x.0.clone())) {
+            Some(StatsRow::Artist(name)) => go(&s, Place::Search(name)),
+            Some(StatsRow::Song(i)) if i != usize::MAX => { let l = STATS_TRACKS.with(|t| t.borrow().clone()); if i < l.len() { play_list(&s, l, i); } }
+            _ => {}
+        }
+    } });
     ui.on_repeat_cycle(move || {
         let mut a = s.borrow_mut();
         a.repeat = match a.repeat.as_str() { "off" => "all", "all" => "one", _ => "off" }.into();
@@ -7810,7 +8012,7 @@ fn main() -> Result<(), slint::PlatformError> {
             // (OMNIPULSE_SELFTEST_PLAN=la: the look-alikes dialog, with two made up (nothing added))
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("la") { vec![(8, "lashow"), (9, "lacycle"), (10, "end")] }
             // (OMNIPULSE_SELFTEST_PLAN=stats: the Stats page, its facts said)
-            else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("stats") { vec![(6, "stats"), (8, "statsfacts"), (9, "end")] }
+            else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("stats") { vec![(6, "stats"), (8, "statsfacts"), (9, "sd_time"), (11, "sd_artists"), (13, "sd_songs"), (15, "sd_when"), (16, "sd_where"), (17, "sd_streak"), (18, "sd_"), (19, "end")] }
             // (OMNIPULSE_SELFTEST_PLAN=setsearch: Settings searched, a panel's path clicked back along, and closed)
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("setsearch") { vec![(9, "library"), (10, "settings"), (11, "ss_fade"), (12, "ss_mix tempo"), (13, "sshit"), (14, "p_alert:raid"), (15, "crumb2"), (16, "setclose"), (17, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("panels") { vec![(9, "settings"), (10, "cat_Integrations"), (11, "cat_Plugins"), (12, "p_requests"), (12, "p_widget"), (14, "p_alerts"), (16, "p_plugins"), (17, "plugread"), (20, "p_alertlist"), (21, "p_alert:raid"), (22, "pfclose"), (23, "end")] }
@@ -7914,6 +8116,7 @@ fn main() -> Result<(), slint::PlatformError> {
                     }
                 }
                 "lacycle" => { ui.invoke_la_cycle(1); println!("selftest: look-alikes: {:?}", ui.get_la_rows().iter().map(|r| r.choice.to_string()).collect::<Vec<_>>()); ui.invoke_la_done(false); }
+                w if w.starts_with("sd_") => { ui.invoke_stats_open(w[3..].into()); println!("selftest: stats detail \"{}\": \"{}\", {} blocks", &w[3..], ui.get_st_detail_head(), ui.get_st_blocks().row_count()); }
                 "statsfacts" => println!("selftest: stats: {} | streak {} {} | facts {:?}", ui.get_st_big(), ui.get_st_streak(), ui.get_st_streak_sub(), ui.get_st_fact_heads().iter().zip(ui.get_st_facts().iter()).map(|(h, f)| format!("{h}: {f}")).collect::<Vec<_>>()),
                 "sshit" => { ui.invoke_set_hit(0); println!("selftest: after a hit: cat \"{}\", query \"{}\"", ui.get_set_cat(), ui.get_set_query()); }
                 "crumb2" => { println!("selftest: path {:?}", ui.get_pf_crumbs().iter().collect::<Vec<_>>()); ui.invoke_crumb_go(2); println!("selftest: after its 3rd part: open {}, head \"{}\"", ui.get_pf_open(), ui.get_pf_head()); }

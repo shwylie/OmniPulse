@@ -53,6 +53,10 @@ export struct Account { name: string, status: string, signed: bool, busy: bool, 
 export struct SetHit { path: string, label: string, note: string, cat: string, panel: string, key: string, on: bool, toggle: bool }
 // A song being added that looks like one there already: the new one, the one there, what's chosen
 export struct LookAlike { new: string, old: string, choice: string }
+// Stats' closer look at one card: its blocks (a bar chart, a big number, a ranked list, a calendar)
+export struct StatBar { label: string, v: float, tip: string }
+export struct StatRow { rank: int, name: string, sub: string, share: float, art: image }
+export struct StatBlock { kind: string, kicker: string, big: string, sub: string, wide: bool, bars: [StatBar], rows: [StatRow], cells: [int] }
 export struct SetRow { head: string, label: string, note: string, on: bool, key: string, sub: bool, more: bool, button: string }
 /// One of a plugin's settings: its kind ("toggle", "text", "password", "number", "select"), what it's
 /// set to (as text; "true"/"false" for a toggle), and a select's options
@@ -810,6 +814,14 @@ export component AppWindow inherits Window {
     in property <[string]> st-facts;
     // (each fact's heading, as the web app's: "Day after day", "Marathon"...)
     in property <[string]> st-fact-heads;
+    // a card looked at more closely ("time", "artists", "songs", "when", "where", "streak"; "" for them all)
+    in property <string> st-detail;
+    in property <string> st-detail-head;
+    in property <[StatBlock]> st-blocks;
+    callback stats-open(string);
+    callback stats-row(int);
+    callback stats-play-these();
+    callback stats-song(int);
     // Clear Listening History: asked once more before it's done
     in-out property <bool> st-clear-asking;
     callback stats-clear();
@@ -1653,7 +1665,91 @@ export component AppWindow inherits Window {
                             alignment: start;
                             spacing: 14px;
                             padding-right: 14px;
-                            Card {
+                            // a closer look at one card
+                            if root.st-detail != "": VerticalLayout {
+                                alignment: start;
+                                spacing: 14px;
+                                HorizontalLayout {
+                                    alignment: start;
+                                    spacing: 10px;
+                                    Pill { label: "\u{2039} Your Listening"; clicked => { root.stats-open(""); } }
+                                    if root.st-detail == "songs": Pill { label: "Play These"; on: true; clicked => { root.stats-play-these(); } }
+                                }
+                                Text { text: root.st-detail-head; color: Theme.text; font-size: 28px; font-weight: 800; wrap: word-wrap; }
+                                for b in root.st-blocks: Card {
+                                    VerticalLayout {
+                                        alignment: start;
+                                        padding: 20px;
+                                        spacing: 8px;
+                                        if b.kicker != "": Text { text: b.kicker; color: Theme.muted; font-size: 12px; font-weight: 800; letter-spacing: 1.5px; }
+                                        if b.kind == "big": Text { text: b.big; color: Theme.text; font-size: 30px; font-weight: 800; wrap: word-wrap; }
+                                        if b.kind == "big" || b.kind == "text": Text { text: b.sub; color: Theme.muted; font-size: 13px; wrap: word-wrap; }
+                                        if b.kind == "bars": HorizontalLayout {
+                                            height: 150px;
+                                            spacing: 3px;
+                                            for x in b.bars: VerticalLayout {
+                                                spacing: 4px;
+                                                Rectangle {
+                                                    vertical-stretch: 1;
+                                                    VerticalLayout {
+                                                        alignment: end;
+                                                        Rectangle { height: max(3px, (150px - 22px) * x.v); border-radius: 2px; background: x.v >= 0.999 ? Theme.accent : #8e9bff66; }
+                                                    }
+                                                    TouchArea { }
+                                                }
+                                                Text { text: x.label; color: Theme.muted; font-size: 10px; horizontal-alignment: center; height: 14px; }
+                                            }
+                                        }
+                                        if b.kind == "rows": VerticalLayout {
+                                            spacing: 6px;
+                                            for r[k] in b.rows: Rectangle {
+                                                height: 52px;
+                                                border-radius: 8px;
+                                                background: rta.has-hover ? Theme.elevated : transparent;
+                                                HorizontalLayout {
+                                                    padding-left: 6px;
+                                                    padding-right: 6px;
+                                                    spacing: 12px;
+                                                    Text { text: r.rank; width: 28px; color: Theme.accent; font-size: 18px; font-weight: 800; vertical-alignment: center; }
+                                                    Cover { art: r.art; initial: r.name; width: 42px; height: 42px; y: (parent.height - self.height) / 2; }
+                                                    VerticalLayout {
+                                                        alignment: center;
+                                                        horizontal-stretch: 1;
+                                                        Marquee { text: r.name; font-size: 14px; }
+                                                        Text { text: r.sub; color: Theme.muted; font-size: 12px; }
+                                                    }
+                                                    Rectangle {
+                                                        width: 120px;
+                                                        height: 6px;
+                                                        y: (parent.height - self.height) / 2;
+                                                        border-radius: 3px;
+                                                        background: Theme.text.with-alpha(0.1);
+                                                        Rectangle { x: 0; width: parent.width * r.share; height: 100%; border-radius: 3px; background: Theme.accent; }
+                                                    }
+                                                }
+                                                rta := TouchArea { mouse-cursor: MouseCursor.pointer; clicked => { root.stats-row(k); } }
+                                            }
+                                        }
+                                        // (twelve weeks: a column a week, a square a day, Sunday at the top)
+                                        if b.kind == "cal": HorizontalLayout {
+                                            alignment: start;
+                                            spacing: 4px;
+                                            for w in (b.cells.length + 6) / 7: VerticalLayout {
+                                                spacing: 4px;
+                                                for d in 7: Rectangle {
+                                                    property <int> at: w * 7 + d;
+                                                    property <int> n: self.at < b.cells.length ? b.cells[self.at] : -1;
+                                                    width: 16px;
+                                                    height: 16px;
+                                                    border-radius: 3px;
+                                                    background: self.n < 0 ? transparent : self.n == 0 ? Theme.text.with-alpha(0.08) : self.n == 1 ? #8e9bff55 : self.n == 2 ? #8e9bffaa : Theme.accent;
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            if root.st-detail == "": Card {
                                 height: 150px;
                                 fill: @linear-gradient(135deg, Theme.accent 0%, Theme.accent-2 100%);
                                 border-width: 0px;
@@ -1664,8 +1760,9 @@ export component AppWindow inherits Window {
                                     Text { text: root.st-big; color: Theme.on-accent; font-size: 56px; font-weight: 800; }
                                     Text { text: root.st-sub; color: Theme.on-accent; font-size: 13px; }
                                 }
+                                TouchArea { mouse-cursor: MouseCursor.pointer; clicked => { root.stats-open("time"); } }
                             }
-                            if !root.st-empty: VerticalLayout {
+                            if !root.st-empty && root.st-detail == "": VerticalLayout {
                                 alignment: start;
                                 spacing: 14px;
                                 HorizontalLayout {
@@ -1685,6 +1782,7 @@ export component AppWindow inherits Window {
                                                 Text { text: root.st-top-sub; color: #ffffffcc; font-size: 13px; }
                                             }
                                         }
+                                        TouchArea { mouse-cursor: MouseCursor.pointer; clicked => { root.stats-open("artists"); } }
                                     }
                                     Card {
                                         height: 150px;
@@ -1707,6 +1805,7 @@ export component AppWindow inherits Window {
                                                 }
                                             }
                                         }
+                                        TouchArea { mouse-cursor: MouseCursor.pointer; clicked => { root.stats-open("when"); } }
                                     }
                                 }
                                 HorizontalLayout {
@@ -1716,7 +1815,7 @@ export component AppWindow inherits Window {
                                             alignment: start;
                                             padding: 20px;
                                             spacing: 10px;
-                                            Text { text: "YOUR TOP SONGS"; color: Theme.muted; font-size: 12px; font-weight: 800; letter-spacing: 1.5px; }
+                                            Text { text: "YOUR TOP SONGS  \u{203a}"; color: sth.has-hover ? Theme.text : Theme.muted; font-size: 12px; font-weight: 800; letter-spacing: 1.5px; sth := TouchArea { mouse-cursor: MouseCursor.pointer; clicked => { root.stats-open("songs"); } } }
                                             for it[i] in root.st-songs: HorizontalLayout {
                                                 spacing: 12px;
                                                 height: 48px;
@@ -1742,6 +1841,7 @@ export component AppWindow inherits Window {
                                                 Text { text: root.st-streak; color: Theme.text; font-size: 34px; font-weight: 800; }
                                                 Text { text: root.st-streak-sub; color: Theme.muted; font-size: 12px; }
                                             }
+                                            TouchArea { mouse-cursor: MouseCursor.pointer; clicked => { root.stats-open("streak"); } }
                                         }
                                         Card {
                                             VerticalLayout {
@@ -1757,6 +1857,7 @@ export component AppWindow inherits Window {
                                                     Text { text: p.sub; color: Theme.muted; font-size: 13px; }
                                                 }
                                             }
+                                            TouchArea { mouse-cursor: MouseCursor.pointer; clicked => { root.stats-open("where"); } }
                                         }
                                     }
                                 }
