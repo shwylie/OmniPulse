@@ -2025,9 +2025,96 @@ export component AppWindow inherits Window {
                         }
                     }
                 }
+                // a switch's or a plugin's settings: the page (and the queue's room) taken over, as a page of
+                // its own, back to where you were
+                if root.pf-open: Rectangle {
+                    background: Theme.panel;
+                    border-radius: Theme.panel-radius;
+                    clip: true;
+                    TouchArea { }
+                    Rectangle {
+                        y: 0;
+                        height: 340px;
+                        background: @linear-gradient(180deg, Theme.panel.mix(Theme.accent, 0.7) 0%, Theme.panel 100%);
+                    }
+                    pf-col := VerticalLayout {
+                        padding: 24px;
+                        padding-top: 14px;
+                        padding-bottom: 16px;
+                        spacing: 12px;
+                        HorizontalLayout {
+                            RoundButton { d: Icons.back; clicked => { root.pf-open = false; } }
+                            Rectangle { horizontal-stretch: 1; }
+                        }
+                        Text { text: root.pf-head; color: Theme.text; font-size: 44px; font-weight: 800; overflow: elide; }
+                        ScrollView {
+                          vertical-stretch: 1;
+                          VerticalLayout {
+                          spacing: 12px;
+                          padding-right: 10px;
+                          for f[i] in root.pf-fields: VerticalLayout {
+                           spacing: 6px;
+                           // instructions: just text
+                           if f.kind == "note": Text { text: f.label; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
+                           // an address: shown, and copied
+                           if f.kind == "info": VerticalLayout {
+                            spacing: 4px;
+                            Text { text: f.label; color: Theme.text; font-weight: 700; }
+                            if f.note != "": Text { text: f.note; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
+                            HorizontalLayout {
+                              spacing: 8px;
+                              Rectangle {
+                                horizontal-stretch: 1;
+                                height: 34px;
+                                border-radius: 8px;
+                                background: Theme.panel;
+                                border-width: 1px;
+                                border-color: Theme.line;
+                                Text { x: 10px; width: parent.width - 20px; text: f.value; color: Theme.text; font-size: 12px; overflow: elide; vertical-alignment: center; }
+                              }
+                              Pill { label: "Copy"; clicked => { root.pf-copy(i); } }
+                            }
+                           }
+                           if f.kind != "note" && f.kind != "info": HorizontalLayout {
+                            spacing: 12px;
+                            VerticalLayout {
+                                horizontal-stretch: 1;
+                                alignment: center;
+                                spacing: 2px;
+                                Text { text: f.label; color: Theme.text; font-weight: 700; }
+                                if f.note != "": Text { text: f.note; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
+                            }
+                            if f.kind == "toggle": Toggle { checked: f.value == "true"; y: (parent.height - self.height) / 2; toggled => { root.pf-set(i, self.checked ? "true" : "false"); } }
+                            // a choice: each click moves on to the next of its options
+                            if f.kind == "select": Pill { label: f.value; y: (parent.height - self.height) / 2; clicked => { root.pf-set(i, "\u{1}next"); } }
+                            if f.kind == "text" || f.kind == "password" || f.kind == "number": Rectangle {
+                                width: 180px;
+                                height: 34px;
+                                y: (parent.height - self.height) / 2;
+                                border-radius: 8px;
+                                background: Theme.panel;
+                                border-width: 1px;
+                                border-color: Theme.line;
+                                TextInput { x: 10px; width: parent.width - 20px; height: parent.height; vertical-alignment: center; color: Theme.text; font-size: 14px; single-line: true; input-type: f.kind == "password" ? InputType.password : f.kind == "number" ? InputType.decimal : InputType.text; text: f.value; edited => { root.pf-set(i, self.text); } }
+                            }
+                            // a button: done at once
+                            if f.kind == "button": Pill { label: f.value; y: (parent.height - self.height) / 2; clicked => { root.pf-set(i, "press"); } }
+                           }
+                          }
+                          }
+                        }
+                        HorizontalLayout {
+                            alignment: end;
+                            spacing: 8px;
+                            Pill { label: "Cancel"; clicked => { root.pf-open = false; } }
+                            Pill { label: "Save"; on: true; clicked => { root.pf-save(); } }
+                        }
+                    }
+                }
             }
             // ---------- the queue ----------
-            if root.queue-open: Rectangle {
+            // (not while Settings, or a settings page, has the room)
+            if root.queue-open && !root.pf-open && root.page != "settings": Rectangle {
                 width: 300px;
                 background: Theme.panel;
                 border-radius: Theme.panel-radius;
@@ -2433,95 +2520,6 @@ export component AppWindow inherits Window {
         }
     }
     // a plugin's settings, as its manifest lists them
-    if root.pf-open: Rectangle {
-        x: 0;
-        y: 0;
-        width: root.width;
-        height: root.height;
-        background: #00000080;
-        TouchArea { clicked => { root.pf-open = false; } }
-        Rectangle {
-            width: 520px;
-            // (sized by its fields, as tall as the window lets it: a size taken from its own layout would
-            // size the window by it too; past that, its fields scroll)
-            height: min(root.height - 60px, 120px + root.pf-fields.length * 66px);
-            x: (parent.width - self.width) / 2;
-            y: (parent.height - self.height) / 2;
-            background: Theme.elevated;
-            border-radius: 12px;
-            border-width: 1px;
-            border-color: Theme.line;
-            TouchArea { }
-            pf-col := VerticalLayout {
-                height: parent.height;
-                padding: 20px;
-                spacing: 12px;
-                Text { text: root.pf-head; color: Theme.text; font-size: 18px; font-weight: 800; }
-                ScrollView {
-                  vertical-stretch: 1;
-                  VerticalLayout {
-                  spacing: 12px;
-                  padding-right: 10px;
-                  for f[i] in root.pf-fields: VerticalLayout {
-                   spacing: 6px;
-                   // instructions: just text
-                   if f.kind == "note": Text { text: f.label; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
-                   // an address: shown, and copied
-                   if f.kind == "info": VerticalLayout {
-                    spacing: 4px;
-                    Text { text: f.label; color: Theme.text; font-weight: 700; }
-                    if f.note != "": Text { text: f.note; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
-                    HorizontalLayout {
-                      spacing: 8px;
-                      Rectangle {
-                        horizontal-stretch: 1;
-                        height: 34px;
-                        border-radius: 8px;
-                        background: Theme.panel;
-                        border-width: 1px;
-                        border-color: Theme.line;
-                        Text { x: 10px; width: parent.width - 20px; text: f.value; color: Theme.text; font-size: 12px; overflow: elide; vertical-alignment: center; }
-                      }
-                      Pill { label: "Copy"; clicked => { root.pf-copy(i); } }
-                    }
-                   }
-                   if f.kind != "note" && f.kind != "info": HorizontalLayout {
-                    spacing: 12px;
-                    VerticalLayout {
-                        horizontal-stretch: 1;
-                        alignment: center;
-                        spacing: 2px;
-                        Text { text: f.label; color: Theme.text; font-weight: 700; }
-                        if f.note != "": Text { text: f.note; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
-                    }
-                    if f.kind == "toggle": Toggle { checked: f.value == "true"; y: (parent.height - self.height) / 2; toggled => { root.pf-set(i, self.checked ? "true" : "false"); } }
-                    // a choice: each click moves on to the next of its options
-                    if f.kind == "select": Pill { label: f.value; y: (parent.height - self.height) / 2; clicked => { root.pf-set(i, "\u{1}next"); } }
-                    if f.kind == "text" || f.kind == "password" || f.kind == "number": Rectangle {
-                        width: 180px;
-                        height: 34px;
-                        y: (parent.height - self.height) / 2;
-                        border-radius: 8px;
-                        background: Theme.panel;
-                        border-width: 1px;
-                        border-color: Theme.line;
-                        TextInput { x: 10px; width: parent.width - 20px; height: parent.height; vertical-alignment: center; color: Theme.text; font-size: 14px; single-line: true; input-type: f.kind == "password" ? InputType.password : f.kind == "number" ? InputType.decimal : InputType.text; text: f.value; edited => { root.pf-set(i, self.text); } }
-                    }
-                    // a button: done at once
-                    if f.kind == "button": Pill { label: f.value; y: (parent.height - self.height) / 2; clicked => { root.pf-set(i, "press"); } }
-                   }
-                  }
-                  }
-                }
-                HorizontalLayout {
-                    alignment: end;
-                    spacing: 8px;
-                    Pill { label: "Cancel"; clicked => { root.pf-open = false; } }
-                    Pill { label: "Save"; on: true; clicked => { root.pf-save(); } }
-                }
-            }
-        }
-    }
     // Track preferences: the title and artist shown for it (everywhere), and the part of it that plays
     if root.tp-open: Rectangle {
         x: 0;
