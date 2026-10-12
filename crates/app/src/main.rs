@@ -2709,6 +2709,9 @@ fn autoplay_fill(shared: &Shared, then_play: bool) -> bool {
 // session, the track's end
 fn tick(shared: &Shared, events: &std::sync::mpsc::Receiver<Event>, n: u64) {
     let Some(ui) = shared.borrow().ui.upgrade() else { return };
+    // a mix playing: the title bar's button and the progress bar show it
+    let mixing = shared.borrow().engine.mixing();
+    if ui.get_mixing() != mixing { ui.set_mixing(mixing); }
     // the narrow layout below 980 px across, as the web app's
     let w = ui.window().size().to_logical(ui.window().scale_factor()).width;
     // (with the queue open too, the full sidebar needs more room: narrow up to 1100 px then)
@@ -3767,6 +3770,7 @@ fn set_toggle(shared: &Shared, key: &str) {
                 jam_paint(shared);
             }
             if key == "hideOn" { hide_applied(shared); }
+            if key == "mixOn" { if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_mix_on(on); } }
             if key == "favPage" {
                 if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_fav_page(on); }
                 if !on && shared.borrow().page == "favourites" { open_page(shared, "library"); }
@@ -6483,6 +6487,10 @@ fn main() -> Result<(), slint::PlatformError> {
         if std::env::var_os("OMNIPULSE_SELFTEST").is_none() { webstate::save_pref("setsLiked", serde_json::json!(on)); }
         open_page(&s, "sets");
     });
+    // Seamless Mix's button (the same as its switch)
+    ui.set_mix_on(shared.borrow().web.prefs["mixOn"].as_bool() != Some(false));
+    let s = shared.clone();
+    ui.on_mix_toggle(move || set_toggle(&s, "mixOn"));
     let s = shared.clone();
     ui.on_close_to_tray_changed(move |on| set_look_pref(&s, "closeToTray", serde_json::json!(on)));
     let s = shared.clone();

@@ -94,6 +94,8 @@ global Icons {
     out property <string> deezer: "M1 18h3.6v2H1zm4.6-3h3.6v5H5.6zm4.6-3h3.6v8h-3.6zm4.6-3h3.6v11h-3.6zm4.6-5h3.6v16h-3.6z";
     out property <string> itunes: "M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z";
     // a playlist on this PC (the web app's xpl icon, drawn in its rainbow)
+    // Seamless Mix (an equaliser's bars)
+    out property <string> mix: "M7 18h2V6H7v12zm4 4h2V2h-2v20zm-8-8h2v-4H3v4zm12 4h2V6h-2v12zm4-8v4h2v-4h-2z";
     out property <string> xpl: "M15 6H3v2h12V6zm0 4H3v2h12v-2zM3 16h8v-2H3v2zM17 6v8.18c-.31-.11-.65-.18-1-.18-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3V8h3V6h-5z";
     out property <string> local: "M10 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z";
 }
@@ -274,6 +276,8 @@ component Progress inherits Rectangle {
     /// or found ahead while this one plays: a marquee glides along the bar, as Windows Vista's did
     in property <bool> loading;
     in property <bool> preloading;
+    /// a mix playing (Seamless Mix): the played part sweeps from one accent to the other
+    in property <bool> mixing;
     callback released(float);
     height: 16px;
     property <float> drag: -1;
@@ -289,6 +293,19 @@ component Progress inherits Rectangle {
         background: Theme.text.with-alpha(0.16);
         clip: true;
         Rectangle { x: 0; width: parent.width * root.frac; height: 100%; background: Theme.accent; opacity: root.loading ? 0.6 : 1; }
+        if root.mixing: Rectangle {
+            property <float> ph: mod(animation-tick() / 1ms, 1400) / 1400;
+            x: 0;
+            width: parent.width * root.frac;
+            height: 100%;
+            clip: true;
+            Rectangle {
+                x: -parent.width + parent.width * 2 * parent.ph;
+                width: parent.width * 2;
+                height: 100%;
+                background: @linear-gradient(90deg, Theme.accent 0%, Theme.accent-2 25%, Theme.accent 50%, Theme.accent-2 75%, Theme.accent 100%);
+            }
+        }
     }
     if root.loading || root.preloading: Rectangle {
         // (a layer of its own, clipped to the bar's length; the glow fades in and out near its ends)
@@ -998,6 +1015,11 @@ export component AppWindow inherits Window {
     callback jam-end();
     callback maximize();
     callback close-window();
+    // Seamless Mix: on or off (the title bar's button, as its switch in Settings > Sound), and a mix
+    // playing now
+    in property <bool> mix-on;
+    in property <bool> mixing;
+    callback mix-toggle();
     // an edge or corner pressed: the window resized from it (0 top ... 7 bottom-right)
     callback resize(int);
 
@@ -1036,6 +1058,38 @@ export component AppWindow inherits Window {
                     // Stream-Safe Music on: a dot
                     if root.stream-safe: Rectangle { x: 18px; y: 2px; width: 7px; height: 7px; border-radius: 3.5px; background: #53fc18; }
                     sta-s := TouchArea { clicked => { root.streamer-step(); } }
+                }
+                // Seamless Mix: grey when off; on, its colour flows from one accent to the other with a
+                // glow, brighter and quicker while a mix is playing
+                Rectangle {
+                    width: 26px;
+                    height: 26px;
+                    y: 4px;
+                    border-radius: 7px;
+                    background: sta-m.has-hover ? Theme.elevated : transparent;
+                    property <float> phase: mod(animation-tick() / 1ms, root.mixing ? 1200 : 3000) / (root.mixing ? 1200 : 3000);
+                    property <float> swing: phase < 0.5 ? phase * 2 : 2 - phase * 2;
+                    // the glow
+                    if root.mix-on: Rectangle {
+                        x: 3px;
+                        y: 3px;
+                        width: 20px;
+                        height: 20px;
+                        border-radius: 10px;
+                        background: Theme.accent.mix(Theme.accent-2, 1 - parent.swing).with-alpha(root.mixing ? 0.30 + 0.25 * parent.swing : 0.16);
+                        drop-shadow-blur: root.mixing ? 10px : 6px;
+                        drop-shadow-color: Theme.accent.mix(Theme.accent-2, parent.swing).with-alpha(root.mixing ? 0.9 : 0.5);
+                    }
+                    Glyph {
+                        d: Icons.mix;
+                        width: 16px;
+                        height: 16px;
+                        x: 5px;
+                        y: 5px;
+                        fill: !root.mix-on ? Theme.muted : Theme.accent.mix(Theme.accent-2, 1 - parent.swing);
+                        opacity: root.mix-on ? 1 : 0.55;
+                    }
+                    sta-m := TouchArea { clicked => { root.mix-toggle(); } }
                 }
                 // the platforms: in their colours when on, plain when off
                 if root.plats.length > 1: Rectangle {
@@ -2388,7 +2442,7 @@ export component AppWindow inherits Window {
                     padding-bottom: 4px;
                     // the controls and the volume on the left, the buttons on the right
                     // Minimal: the progress a line along the top
-                    if root.player-style == "minimal": Progress { value: root.pos-frac; length-secs: root.dur-secs; loading: root.track-loading; preloading: root.preloading; released(v) => { root.seek(v); } }
+                    if root.player-style == "minimal": Progress { value: root.pos-frac; length-secs: root.dur-secs; loading: root.track-loading; preloading: root.preloading; mixing: root.mixing; released(v) => { root.seek(v); } }
                     HorizontalLayout {
                         height: 42px;
                         spacing: 4px;
@@ -2490,7 +2544,7 @@ export component AppWindow inherits Window {
                         IconButton { d: Icons.queue; tint: root.queue-open ? Theme.accent : Theme.muted; y: (parent.height - self.height) / 2; clicked => { root.queue-open = !root.queue-open; } }
                     }
                     // the progress: click or drag along it (along the top, in Minimal)
-                    if root.player-style != "minimal": Progress { value: root.pos-frac; length-secs: root.dur-secs; loading: root.track-loading; preloading: root.preloading; released(v) => { root.seek(v); } }
+                    if root.player-style != "minimal": Progress { value: root.pos-frac; length-secs: root.dur-secs; loading: root.track-loading; preloading: root.preloading; mixing: root.mixing; released(v) => { root.seek(v); } }
                 }
                     }
                 }
