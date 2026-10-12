@@ -3455,8 +3455,15 @@ fn autoplay_fill(shared: &Shared, then_play: bool) -> bool {
                     }
                     let mut picks = picks;
                     track::apply_fixes(&a.web.prefs, &mut picks);
+                    let n = picks.len();
                     a.queue.items.extend(picks.into_iter().map(queue::QItem::auto));
                     paint_queue(&mut a);
+                    // (said, as the web app says it: how many, and what's next)
+                    if n > 0 {
+                        if let (Some(next), Some(ui)) = (a.queue.qi.and_then(|i| a.queue.items.get(i + 1)).map(|q| q.t.clone()), a.ui.upgrade()) {
+                            ui.set_status(format!("Autoplay added {} to the queue. Up next: {} by {}.", plural(n, "similar song", "similar songs"), next.title, next.artist).into());
+                        }
+                    }
                     save_session(&a);
                     then_play && a.queue.qi.is_some_and(|i| i + 1 < a.queue.items.len())
                 };
@@ -3525,6 +3532,7 @@ fn tick(shared: &Shared, events: &std::sync::mpsc::Receiver<Event>, n: u64) {
         let here = format!("{}:{:?}", shared.borrow().queue.current().map(|t| t.key.clone()).unwrap_or_default(), shared.borrow().queue.qi);
         if !engine.is_paused() && pos >= end && TRIM_ENDED.with(|e| *e.borrow() != here) {
             TRIM_ENDED.with(|e| *e.borrow_mut() = here);
+            ui.set_status(format!("Ended at {}, the end time you set for this track.", fmt_time(end)).into());
             if shared.borrow().repeat == "one" { start(shared); } else { step(shared, 1); }
             return;
         }
@@ -5137,6 +5145,7 @@ fn fade_and_silences(shared: &Shared, pos: u64, dur: u64) -> bool {
                 continue;
             }
             if to + 1500 >= dur && measured + 1500 >= dur {
+                if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_status(format!("Moved on after {} s of silence.", (dur.saturating_sub(from)) / 1000).into()); }
                 step(shared, 1);
                 return true;
             }
