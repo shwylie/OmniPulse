@@ -134,6 +134,15 @@ pub fn load() -> WebState {
         *e = (*e).max(p.ts);
         s.plays.push(p);
     }
+    // (Clear Listening History: the web app's plays from before it left out too)
+    let cleared = s.prefs["statsClearedAt"].as_u64().unwrap_or(0);
+    s.plays.retain(|p| p.ts > cleared);
     s.plays.sort_by_key(|p| p.ts);
     s
+}
+
+/// Clear Listening History: this app's plays gone, and the web app's from before now left out
+pub fn clear_plays(now: u64) {
+    if let Some(f) = native_stats_file() { let _ = std::fs::write(f, "[]"); }
+    save_pref("statsClearedAt", serde_json::json!(now));
 }

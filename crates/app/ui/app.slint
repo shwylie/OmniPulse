@@ -806,6 +806,11 @@ export component AppWindow inherits Window {
     in property <string> st-streak-sub;
     in property <[Item]> st-plats;
     in property <[string]> st-facts;
+    // (each fact's heading, as the web app's: "Day after day", "Marathon"...)
+    in property <[string]> st-fact-heads;
+    // Clear Listening History: asked once more before it's done
+    in-out property <bool> st-clear-asking;
+    callback stats-clear();
     // now playing
     in property <image> now-art-big;
     in property <string> now-album;
@@ -1762,9 +1767,19 @@ export component AppWindow inherits Window {
                                         }
                                     }
                                 }
-                                for f in root.st-facts: Card {
+                                for f[i] in root.st-facts: Card {
                                     fill: #8e9bff1a;
-                                    VerticalLayout { padding: 18px; Text { text: f; color: Theme.text; font-size: 15px; wrap: word-wrap; } }
+                                    VerticalLayout {
+                                        padding: 18px;
+                                        spacing: 6px;
+                                        if i < root.st-fact-heads.length && root.st-fact-heads[i] != "": Text { text: root.st-fact-heads[i]; color: Theme.muted; font-size: 12px; font-weight: 800; letter-spacing: 1.5px; }
+                                        Text { text: f; color: Theme.text; font-size: 15px; wrap: word-wrap; }
+                                    }
+                                }
+                                // Clear Listening History (a second click within a few seconds does it: it can't be undone)
+                                HorizontalLayout {
+                                    alignment: start;
+                                    Pill { label: root.st-clear-asking ? "Clear it all? Click again" : "Clear Listening History"; on: root.st-clear-asking; clicked => { root.stats-clear(); } }
                                 }
                             }
                         }

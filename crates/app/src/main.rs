@@ -1416,6 +1416,47 @@ fn stats_period(prefs: &serde_json::Value) -> usize {
     PERIOD_KEYS.iter().position(|k| prefs["statsPeriod"].as_str() == Some(k)).unwrap_or(1)
 }
 
+/// A length of time as the web app's fmtHours: "2.5 hours", "45 minutes"
+fn fmt_hours(ms: u64) -> String {
+    let h = ms as f64 / 3_600_000.0;
+    if h >= 10.0 { format!("{h:.0} hours") } else if h >= 1.0 { format!("{h:.1} hours") } else { format!("{} minutes", ms / 60_000) }
+}
+
+/// A day number (days since 1970) as (year, month, day)
+fn civil_date(days: i64) -> (i64, u32, u32) {
+    let z = days + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = (doy - (153 * mp + 2) / 5 + 1) as u32;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 } as u32;
+    (yoe + era * 400 + if m <= 2 { 1 } else { 0 }, m, d)
+}
+
+/// Clear Listening History: asked once more (a second click within five seconds), then done
+fn stats_clear(shared: &Shared) {
+    let Some(ui) = shared.borrow().ui.upgrade() else { return };
+    if !ui.get_st_clear_asking() {
+        ui.set_st_clear_asking(true);
+        let weak = ui.as_weak();
+        slint::Timer::single_shot(std::time::Duration::from_secs(5), move || { if let Some(ui) = weak.upgrade() { ui.set_st_clear_asking(false); } });
+        return;
+    }
+    ui.set_st_clear_asking(false);
+    let now = now_ms();
+    if std::env::var_os("OMNIPULSE_SELFTEST").is_none() { webstate::clear_plays(now); }
+    {
+        let mut a = shared.borrow_mut();
+        a.web.plays.clear();
+        if let Some(o) = a.web.prefs.as_object_mut() { o.insert("statsClearedAt".into(), serde_json::json!(now)); }
+    }
+    ui.set_status("Listening history cleared.".into());
+    let period = shared.borrow().chip;
+    open_stats(shared, period);
+}
+
 fn open_stats(shared: &Shared, period: usize) {
     // (kept for next time, as the web app's)
     if stats_period(&shared.borrow().web.prefs) != period {
@@ -1503,25 +1544,73 @@ fn open_stats(shared: &Shared, period: usize) {
     if !days.contains(&d) { d -= 1; }
     let mut streak = 0;
     while days.contains(&d) { streak += 1; d -= 1; }
+    // (and the best run there's been, as the web app's)
+    let mut sorted: Vec<i64> = days.iter().copied().collect();
+    sorted.sort();
+    let (mut best, mut run) = (0usize, 0usize);
+    for (i, d) in sorted.iter().enumerate() { run = if i > 0 && d - sorted[i - 1] == 1 { run + 1 } else { 1 }; best = best.max(run); }
     ui.set_st_streak(plural(streak, "day", "days").into());
-    ui.set_st_streak_sub("in a row".into());
+    ui.set_st_streak_sub((if best > streak { format!("in a row, your best is {}", plural(best, "day", "days")) } else if streak > 1 { "in a row: your best yet".to_string() } else { "in a row".to_string() }).into());
     let mut plat_list: Vec<_> = plats.into_iter().collect();
     plat_list.sort_by_key(|x| std::cmp::Reverse(x.1));
     let pname = |p: &str| match p { "spotify" => "Spotify", "youtube" => "YouTube Music", "local" => "Your files", _ => "SoundCloud" };
     ui.set_st_plats(ModelRc::from(Rc::new(VecModel::from(plat_list.iter().map(|(p, n)| Item { name: pname(p).into(), sub: format!("{}%", n * 100 / list.len()).into(), art: slint::Image::default(), plat: p.clone().into() }).collect::<Vec<_>>()))));
-    // a few facts, different each visit
-    let mut facts: Vec<String> = Vec::new();
+    // the song on repeat (played most in one day, three times or more), then a few facts, different each
+    // visit (the web app's statFacts)
+    let day_of = |ts: u64| ((ts / 3_600_000) as i64 + local_offset_hours()).div_euclid(24);
+    let when = |ts: u64| { let d = day_of(ts); let (_, m, dd) = civil_date(d); format!("{} {} {}", ["Thursday", "Friday", "Saturday", "Sunday", "Monday", "Tuesday", "Wednesday"][d.rem_euclid(7) as usize], dd, ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"][(m - 1) as usize]) };
+    let mut facts: Vec<(String, String)> = Vec::new();
+    {
+        let mut per_day: HashMap<(i64, &str, &str), (usize, u64)> = HashMap::new();
+        for p in &list { let e = per_day.entry((day_of(p.ts), p.title.as_str(), p.artist.as_str())).or_insert((0, 0)); e.0 += 1; e.1 = e.1.max(p.ts); }
+        if let Some(((_, title, artist), (n, ts))) = per_day.into_iter().max_by_key(|x| x.1 .0).filter(|x| x.1 .0 > 2) {
+            facts.push(("On repeat".into(), format!("\u{201c}{title}\u{201d} by {artist}: {} in one day, {}.", plural(n, "time", "times"), when(ts))));
+        }
+    }
+    let mut extra: Vec<(String, String)> = Vec::new();
+    if let Some((_, p)) = songs.first() {
+        let ds: std::collections::HashSet<i64> = list.iter().filter(|x| x.title == p.title && x.artist == p.artist).map(|x| day_of(x.ts)).collect();
+        if ds.len() > 1 { extra.push(("Day after day".into(), format!("You played \u{201c}{}\u{201d} on {}.", p.title, plural(ds.len(), "different day", "different days")))); }
+    }
     let once = artists.iter().filter(|a| a.1 .0 == 1).count();
-    if once > 2 { facts.push(format!("Explorer: {} got just one play.", plural(once, "artist", "artists"))); }
+    if once > 2 { extra.push(("Explorer".into(), format!("{} got just one play. Plenty to dig into.", plural(once, "artist", "artists")))); }
+    if since > 0 {
+        let before: std::collections::HashSet<String> = a.web.plays.iter().filter(|p| p.ts < since).map(first_artist).collect();
+        let fresh = artists.iter().filter(|(k, _)| !before.contains(k)).count();
+        if fresh > 0 { extra.push(("New to you".into(), format!("{} new to you in this time.", if fresh == 1 { "1 artist was".to_string() } else { format!("{fresh} artists were") }))); }
+    }
     let short = list.iter().filter(|p| p.ms > 0 && p.ms < 180_000).count();
-    if list.len() > 10 { facts.push(format!("Short and sweet: {}% of your plays were under 3 minutes.", short * 100 / list.len())); }
+    if list.len() > 10 { extra.push(("Short and sweet".into(), format!("{}% of your plays were under 3 minutes.", short * 100 / list.len()))); }
+    let long = list.iter().filter(|p| p.ms > 15 * 60_000).count();
+    if long > 0 { extra.push(("In it for the long haul".into(), format!("{} over 15 minutes made the cut.", if long == 1 { "1 set or podcast".to_string() } else { format!("{long} sets and podcasts") }))); }
+    // (the longest session: plays less than 30 minutes apart)
+    {
+        let (mut best, mut cur): ((u64, u64, usize), Option<(u64, u64, u64, usize)>) = ((0, 0, 0), None);
+        for p in &list {
+            let c = match cur { Some(c) if p.ts.saturating_sub(c.1) <= 30 * 60_000 => c, _ => (p.ts, p.ts, 0, 0) };
+            let c = (c.0, p.ts, c.2 + p.ms, c.3 + 1);
+            if c.2 > best.0 { best = (c.2, c.0, c.3); }
+            cur = Some(c);
+        }
+        if best.2 > 3 { extra.push(("Marathon".into(), format!("Your longest session ran {}, {} in a row, on {}.", fmt_hours(best.0), plural(best.2, "track", "tracks"), when(best.1)))); }
+    }
+    {
+        let mut genres: HashMap<String, (usize, String)> = HashMap::new();
+        for p in list.iter().filter(|p| !p.genre.is_empty()) { let e = genres.entry(p.genre.to_lowercase()).or_insert((0, p.genre.clone())); e.0 += 1; }
+        if let Some((_, (n, g))) = genres.into_iter().max_by_key(|x| x.1 .0).filter(|x| x.1 .0 > 2) { extra.push(("Your sound".into(), format!("{g} came up the most, {}.", plural(n, "time", "times")))); }
+    }
+    if let Some((k, (n, _))) = artists.iter().find(|(k, (n, _))| *n >= 5 && a.web.plays.iter().filter(|p| first_artist(p) == **k).count() >= n * 2) {
+        extra.push(("Old favourite".into(), format!("{k} is still on your mind: {} now, and more before that.", plural(*n, "play", "plays"))));
+    }
     if let Some(first) = a.web.plays.first().filter(|p| now.saturating_sub(p.ts) >= 2 * 86_400_000) {
         let days_ago = (now.saturating_sub(first.ts)) / 86_400_000;
-        facts.push(format!("Since the start: your listening here goes back {}.", plural(days_ago as usize, "day", "days")));
+        extra.push(("Since the start".into(), format!("Your listening here goes back {}.", plural(days_ago as usize, "day", "days"))));
     }
-    queue::shuffle_in_place(&mut facts);
-    facts.truncate(2);
-    ui.set_st_facts(ModelRc::from(Rc::new(VecModel::from(facts.into_iter().map(Into::into).collect::<Vec<slint::SharedString>>()))));
+    queue::shuffle_in_place(&mut extra);
+    extra.truncate(3);
+    facts.extend(extra);
+    ui.set_st_fact_heads(ModelRc::from(Rc::new(VecModel::from(facts.iter().map(|f| slint::SharedString::from(f.0.to_uppercase())).collect::<Vec<_>>()))));
+    ui.set_st_facts(ModelRc::from(Rc::new(VecModel::from(facts.into_iter().map(|f| f.1.into()).collect::<Vec<slint::SharedString>>()))));
     // covers
     let urls: Vec<String> = songs.iter().take(5).map(|(_, p)| p.art.clone()).collect();
     let aurls: Vec<String> = artists.iter().take(6).map(|(_, (_, p))| p.art.clone()).collect();
@@ -7245,6 +7334,7 @@ fn main() -> Result<(), slint::PlatformError> {
     let s = shared.clone();
     ui.on_shuffle_toggle(move || shuffle_toggle(&s));
     let s = shared.clone();
+    ui.on_stats_clear({ let s = shared.clone(); move || stats_clear(&s) });
     ui.on_repeat_cycle(move || {
         let mut a = s.borrow_mut();
         a.repeat = match a.repeat.as_str() { "off" => "all", "all" => "one", _ => "off" }.into();
@@ -7602,6 +7692,8 @@ fn main() -> Result<(), slint::PlatformError> {
             // (OMNIPULSE_SELFTEST_PLAN=panels: the settings panels, opened (nothing saved))
             // (OMNIPULSE_SELFTEST_PLAN=spotify: a Spotify song played through Spotify (Seamless Mix off for it), and whether its sound comes)
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("spotify") { vec![(8, "spplay"), (14, "spcheck"), (20, "spcheck"), (21, "end")] }
+            // (OMNIPULSE_SELFTEST_PLAN=stats: the Stats page, its facts said)
+            else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("stats") { vec![(6, "stats"), (8, "statsfacts"), (9, "end")] }
             // (OMNIPULSE_SELFTEST_PLAN=setsearch: Settings searched, a panel's path clicked back along, and closed)
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("setsearch") { vec![(9, "library"), (10, "settings"), (11, "ss_fade"), (12, "ss_mix tempo"), (13, "sshit"), (14, "p_alert:raid"), (15, "crumb2"), (16, "setclose"), (17, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("panels") { vec![(9, "settings"), (10, "cat_Integrations"), (11, "cat_Plugins"), (12, "p_requests"), (12, "p_widget"), (14, "p_alerts"), (16, "p_plugins"), (17, "plugread"), (20, "p_alertlist"), (21, "p_alert:raid"), (22, "pfclose"), (23, "end")] }
@@ -7695,6 +7787,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 "mixplats" => { let a = s.borrow(); let mut n: std::collections::BTreeMap<&str, usize> = Default::default(); for t in &a.page_tracks { *n.entry(t.plat()).or_default() += 1; } println!("selftest: mix \"{}\": {} tracks by platform {:?}", ui.get_page_title(), a.page_tracks.len(), n); }
                 "tall" => ui.window().set_size(slint::LogicalSize::new(1180.0, 2600.0)),
                 "short" => ui.window().set_size(slint::LogicalSize::new(1180.0, 760.0)),
+                "statsfacts" => println!("selftest: stats: {} | streak {} {} | facts {:?}", ui.get_st_big(), ui.get_st_streak(), ui.get_st_streak_sub(), ui.get_st_fact_heads().iter().zip(ui.get_st_facts().iter()).map(|(h, f)| format!("{h}: {f}")).collect::<Vec<_>>()),
                 "sshit" => { ui.invoke_set_hit(0); println!("selftest: after a hit: cat \"{}\", query \"{}\"", ui.get_set_cat(), ui.get_set_query()); }
                 "crumb2" => { println!("selftest: path {:?}", ui.get_pf_crumbs().iter().collect::<Vec<_>>()); ui.invoke_crumb_go(2); println!("selftest: after its 3rd part: open {}, head \"{}\"", ui.get_pf_open(), ui.get_pf_head()); }
                 "setclose" => { ui.invoke_settings_close(); println!("selftest: settings closed: page \"{}\", panel {}, cat \"{}\"", ui.get_page(), ui.get_pf_open(), ui.get_set_cat()); }
