@@ -6690,6 +6690,10 @@ fn main() -> Result<(), slint::PlatformError> {
         });
         if claimed.is_err() { return Ok(()); }
     }
+    // (a self-test leaves your Spotify alone: no session of its own, but for the Spotify test)
+    if std::env::var_os("OMNIPULSE_SELFTEST").is_some() && std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() != Some("spotify") {
+        std::env::set_var("OMNIPULSE_NO_SPOTIFY", "1");
+    }
     let rt = tokio::runtime::Builder::new_multi_thread().worker_threads(2).enable_all().build().expect("runtime");
     // Slint's software renderer to start with: measured at 38 MB and ~3% of a core while playing,
     // against ~100 MB with the GPU one (most of it the graphics driver). SLINT_BACKEND picks another.

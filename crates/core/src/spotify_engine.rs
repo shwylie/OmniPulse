@@ -279,6 +279,9 @@ async fn connect_now(credentials: Credentials) -> Result<Engine, String> {
 
 // The running engine, reconnecting from saved credentials if needed
 async fn engine() -> Result<tokio::sync::MutexGuard<'static, Option<Engine>>, String> {
+    // (the native app's self-tests: never a Spotify session of their own, which would cut off yours,
+    // unless one's testing Spotify itself)
+    if std::env::var_os("OMNIPULSE_NO_SPOTIFY").is_some() { return Err("Spotify is off for this run".into()); }
     start_check();
     let mut guard = ENGINE.lock().await;
     let healthy = guard.as_ref().is_some_and(|e| !e.session.is_invalid() && !e.player.is_invalid());
