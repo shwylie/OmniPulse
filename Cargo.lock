@@ -5590,6 +5590,7 @@ dependencies = [
  "timestretch",
  "tiny_http",
  "tokio",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
