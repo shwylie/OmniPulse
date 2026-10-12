@@ -1692,10 +1692,30 @@ fn autoplay_note(a: &App) -> String {
     }
 }
 
+thread_local! {
+    /// with Stream-Safe Music on, autoplay is its own (the web app's apStream): your usual one, kept
+    /// meanwhile, to go back to
+    static AP_USUAL: std::cell::Cell<Option<bool>> = const { std::cell::Cell::new(None) };
+}
+
+/// Autoplay as Stream-Safe Music has it or not: on, the stream's (apStream, on unless switched off);
+/// off, your usual one back
+fn autoplay_for_safe(a: &mut App, safe: bool) {
+    if safe {
+        if AP_USUAL.with(|u| u.get()).is_none() { AP_USUAL.with(|u| u.set(Some(a.autoplay))); }
+        a.autoplay = a.web.prefs["apStream"].as_bool() != Some(false);
+    } else if let Some(usual) = AP_USUAL.with(|u| u.take()) {
+        a.autoplay = usual;
+    }
+    if !a.autoplay { a.queue.drop_autoplay(); }
+    if let Some(ui) = a.ui.upgrade() { ui.set_autoplay(a.autoplay); }
+}
+
 fn save_session(a: &App) {
     let pos = a.resume_ms.unwrap_or_else(|| a.engine.position_ms());
     let mut v = a.queue.to_session(pos);
-    v["autoplay"] = serde_json::json!(a.autoplay);
+    // (your usual autoplay: the stream's is kept as apStream)
+    v["autoplay"] = serde_json::json!(AP_USUAL.with(|u| u.get()).unwrap_or(a.autoplay));
     queue::save_session(&v);
 }
 
@@ -2418,10 +2438,14 @@ fn like_toggle(shared: &Shared) {
         let s = shared.clone();
         slint::Timer::single_shot(std::time::Duration::from_millis(8100), move || push_out(&s, true));
     }
+    let mirror = shared.borrow().web.prefs["ytMirror"].as_bool() == Some(true);
     rt.spawn(async move {
         let r = marks::set_like(&t, on).await;
+        // (and on YouTube: its own song, or the same song with Like Other Tracks There Too)
+        let yt = if r.is_ok() { marks::youtube_too(&t, on, mirror).await } else { None };
         let _ = weak.upgrade_in_event_loop(move |ui| SHARED.with(|s| {
             let Some(sh) = s.borrow().clone() else { return };
+            if let Some(note) = yt { ui.set_status(note.into()); }
             if let Err(e) = r {
                 let mut a = sh.borrow_mut();
                 if on { a.library.retain(|x| x.key != t.key); } else { a.library.insert(0, t.clone()); }
@@ -2830,6 +2854,8 @@ fn restore_session(shared: &Shared) {
     let mut a = shared.borrow_mut();
     a.queue = q;
     a.autoplay = autoplay;
+    let safe = streamsafe::on(&a.web.prefs);
+    autoplay_for_safe(&mut a, safe);
     a.resume_ms = Some(pos);
     paint_queue(&mut a);
     let Some(t) = a.queue.current().cloned() else { return };
@@ -3052,7 +3078,7 @@ fn song_request(shared: &Shared, id: u64, q: String, user: String) {
 /// The servers the web app's settings have on: the widget, the Stream Deck's remote, chat requests
 // ---------- Settings: the switches beyond Look ----------
 // (section, label, note, key, on unless switched off)
-const SET_ROWS: [(&str, &str, &str, &str, bool); 28] = [
+const SET_ROWS: [(&str, &str, &str, &str, bool); 29] = [
     ("Library", "Sets & Podcasts in the Queue", "Lists and autoplay include anything over 15 minutes. Off: only when you pick one.", "queueSets", false),
     ("Library", "Autoplay", "Plays similar tracks when the queue runs out.", "autoplay", true),
     ("Library", "Hidden & Not Recommended", "Right-click a track to stop it, its album or its artist being recommended. Off: nothing is left out; the lists are kept.", "hideOn", true),
@@ -3070,6 +3096,7 @@ const SET_ROWS: [(&str, &str, &str, &str, bool); 28] = [
     ("Integrations", "MusicBrainz", "An open music catalogue: search finds its songs too, and they play from YouTube Music.", "mbOn", true),
     ("Integrations", "Listen Along & Jams", "Listen together with friends, from your Discord status or a Jam invite. Off: no Jam button, and invites and requests are turned away (song requests aren't affected).", "jamsOn", true),
     ("Integrations", "Last.fm Scrobbling", "What you play goes to your Last.fm profile.", "scrobble", true),
+    ("Integrations", "Like Other Tracks There Too", "With your YouTube account connected: liking a SoundCloud or Spotify track likes the same song on YouTube.", "ytMirror", false),
     ("Integrations", "Follow Everywhere", "Following an artist on one platform follows them on the others.", "followEverywhere", true),
     ("Integrations", "Chromecast", "Speakers and TVs on your network, to play to: they show with Windows' devices, where the sound plays.", "castOn", false),
     ("Streaming", "Streamer Mode", "Hides account names, keys, addresses and plugin settings. The title bar's button does this too.", "streamerMode", false),
@@ -5631,6 +5658,8 @@ fn safe_set(shared: &Shared, on: bool) {
         if let Some(o) = a.web.prefs.as_object_mut() { o.insert("streamSafe".into(), serde_json::json!(on)); }
         if std::env::var_os("OMNIPULSE_SELFTEST").is_none() { webstate::save_pref("streamSafe", serde_json::json!(on)); }
         a.ap_failed = None;
+        autoplay_for_safe(&mut a, on);
+        paint_queue(&mut a);
         apply_filter(&mut a);
         paint_settings(&a);
         if let Some(ui) = a.ui.upgrade() {
@@ -6704,6 +6733,11 @@ fn main() -> Result<(), slint::PlatformError> {
     ui.on_autoplay_changed(move |on| {
         let mut a = s.borrow_mut();
         a.autoplay = on;
+        // (Stream-Safe Music on: the stream's own, the web app's apStream)
+        if streamsafe::on(&a.web.prefs) {
+            if let Some(o) = a.web.prefs.as_object_mut() { o.insert("apStream".into(), serde_json::json!(on)); }
+            if std::env::var_os("OMNIPULSE_SELFTEST").is_none() { webstate::save_pref("apStream", serde_json::json!(on)); }
+        }
         a.ap_failed = None;
         if !on { a.queue.drop_autoplay(); }
         paint_queue(&mut a);

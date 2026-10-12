@@ -55,6 +55,32 @@ pub async fn set_like(t: &Track, on: bool) -> Result<(), String> {
     }
 }
 
+/// With your YouTube account connected (the web app's ytRate): a YouTube Music song liked there too; and
+/// with Like Other Tracks There Too (ytMirror), a SoundCloud or Spotify song's same song on YouTube, its
+/// video kept (state/native-yt-mirror.json) so unliking takes the same one off. Why not, if it couldn't.
+pub async fn youtube_too(t: &Track, on: bool, mirror: bool) -> Option<String> {
+    if omnipulse_core::yt_account::status()["connected"].as_bool() != Some(true) { return None; }
+    let (artist, title) = crate::versions::guess_names(t);
+    let r = match &t.src {
+        Src::YouTube(id) => omnipulse_core::yt_account::rate(Some(id.clone()), &title, &artist, on).await.map(|_| ()),
+        Src::SoundCloud(_) | Src::Spotify(_) if mirror => {
+            let mut ids = read("native-yt-mirror.json");
+            let was = ids[&t.key].as_str().map(String::from);
+            match omnipulse_core::yt_account::rate(was, &title, if artist.is_empty() { &t.artist } else { &artist }, on).await {
+                Ok(id) => {
+                    if !ids.is_object() { ids = json!({}); }
+                    if on { ids[&t.key] = json!(id); } else if let Some(o) = ids.as_object_mut() { o.remove(&t.key); }
+                    write("native-yt-mirror.json", &ids);
+                    Ok(())
+                }
+                Err(e) => Err(e),
+            }
+        }
+        _ => return None,
+    };
+    r.err().map(|e| format!("{} here, but not on YouTube: {e}", if on { "Liked" } else { "Unliked" }))
+}
+
 /// YouTube Music likes made here (they go in the Library too)
 pub fn yt_likes() -> Vec<Track> {
     read("native-yt-likes.json").as_array().map(|a| a.iter().filter_map(Track::from_snapshot).collect()).unwrap_or_default()
