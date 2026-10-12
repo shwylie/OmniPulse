@@ -6221,6 +6221,9 @@ fn apply_look(shared: &Shared) {
     // Settings > App > Rounded Corners (the web app's setting too)
     let rounded = prefs["appRounded"].as_bool() != Some(false);
     t.set_panel_radius(if rounded { 10.0 } else { 0.0 });
+    // (and the player's, and the cards': square everywhere with it off)
+    t.set_radius(if rounded { 10.0 } else { 0.0 });
+    t.set_card_radius(if rounded { 18.0 } else { 0.0 });
     ui.set_rounded(rounded);
     // Settings > Look > List Density (the web app's: rows 4 px apart, covers 32 px, at Compact)
     let compact = prefs["density"].as_str() == Some("compact");
