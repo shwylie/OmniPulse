@@ -1711,11 +1711,17 @@ export component AppWindow inherits Window {
                 border-color: Theme.accent;
                 // the accent's glow at the top, fading into the panel (its top corners the page's: what's in
                 // the page isn't rounded off with it)
+                // (the software renderer draws a gradient square-cornered: its rounded top edge is a strip of
+                // its first colour, the gradient from just under the corners)
                 Rectangle {
                     y: 0;
-                    height: 340px;
-                    border-top-left-radius: Theme.panel-radius;
-                    border-top-right-radius: Theme.panel-radius;
+                    height: Theme.panel-radius * 2;
+                    border-radius: Theme.panel-radius;
+                    background: Theme.panel.mix(Theme.accent, 0.7);
+                }
+                Rectangle {
+                    y: Theme.panel-radius;
+                    height: 340px - Theme.panel-radius;
                     background: @linear-gradient(180deg, Theme.panel.mix(Theme.accent, 0.7) 0%, Theme.panel 100%);
                 }
                 pdz := DropArea {
@@ -1777,10 +1783,11 @@ export component AppWindow inherits Window {
                                 color: sct.has-hover ? Theme.text : Theme.muted;
                                 font-size: 44px;
                                 font-weight: 800;
+                                vertical-alignment: center;
                                 sct := TouchArea { mouse-cursor: MouseCursor.pointer; clicked => { root.set-cat = ""; } }
                             }
                             Text { text: "›"; color: Theme.muted; font-size: 40px; font-weight: 400; vertical-alignment: center; }
-                            Text { text: root.set-cat; color: Theme.text; font-size: 44px; font-weight: 800; overflow: elide; }
+                            Text { text: root.set-cat; color: Theme.text; font-size: 44px; font-weight: 800; overflow: elide; vertical-alignment: center; }
                         }
                         if root.page == "discover" || root.page == "rediscover" || root.page == "sets" || root.page == "artists" || root.page == "mix": RoundButton {
                             tip: "New recommendations";
@@ -2921,11 +2928,17 @@ export component AppWindow inherits Window {
                     border-radius: Theme.panel-radius;
                     clip: true;
                     TouchArea { }
+                    // (the software renderer draws a gradient square-cornered: its rounded top edge is a strip of
+                    // its first colour, the gradient from just under the corners)
                     Rectangle {
                         y: 0;
-                        height: 340px;
-                        border-top-left-radius: Theme.panel-radius;
-                        border-top-right-radius: Theme.panel-radius;
+                        height: Theme.panel-radius * 2;
+                        border-radius: Theme.panel-radius;
+                        background: Theme.panel.mix(Theme.accent, 0.7);
+                    }
+                    Rectangle {
+                        y: Theme.panel-radius;
+                        height: 340px - Theme.panel-radius;
                         background: @linear-gradient(180deg, Theme.panel.mix(Theme.accent, 0.7) 0%, Theme.panel 100%);
                     }
                     pf-col := VerticalLayout {
@@ -2948,9 +2961,11 @@ export component AppWindow inherits Window {
                                     color: pct.has-hover ? Theme.text : Theme.muted;
                                     font-size: root.pf-crumbs.length >= 3 ? 28px : 44px;
                                     font-weight: 800;
+                                    // (every part on one line with the last: all centred in the row)
+                                    vertical-alignment: center;
                                     pct := TouchArea { mouse-cursor: MouseCursor.pointer; clicked => { root.crumb-go(i); } }
                                 }
-                                Text { text: "\u{203a}"; color: Theme.muted; font-size: 40px; font-weight: 400; vertical-alignment: center; }
+                                Text { text: "\u{203a}"; color: Theme.muted; font-size: root.pf-crumbs.length >= 3 ? 26px : 40px; font-weight: 400; vertical-alignment: center; }
                             }
                             Marquee { text: root.pf-head; font-size: root.pf-crumbs.length >= 3 ? 28px : 44px; font-weight: 800; horizontal-stretch: 1; y: (parent.height - self.height) / 2; }
                         }
@@ -3174,8 +3189,9 @@ export component AppWindow inherits Window {
                             width: parent.width + 16px;
                             height: parent.height + 8px;
                             background: Theme.bg;
-                            border-top-left-radius: Theme.radius + 8px;
-                            border-top-right-radius: Theme.radius + 8px;
+                            // (square with Rounded Corners off, as everything else)
+                            border-top-left-radius: Theme.radius > 0 ? Theme.radius + 8px : 0;
+                            border-top-right-radius: Theme.radius > 0 ? Theme.radius + 8px : 0;
                         }
                         Rectangle {
                             background: Theme.panel.mix(Theme.accent, 0.86);
@@ -3222,7 +3238,7 @@ export component AppWindow inherits Window {
                         height: 8px;
                         clip: true;
                         background: Theme.panel.mix(Theme.accent, 0.86);
-                        Rectangle { x: root.tab-right ? -8px : 0px; y: -8px; width: 16px; height: 16px; border-radius: 8px; background: Theme.bg; }
+                        Rectangle { x: root.tab-right ? -8px : 0px; y: -8px; width: 16px; height: 16px; border-radius: Theme.radius > 0 ? 8px : 0; background: Theme.bg; }
                     }
                 }
                 // the body: the status, the controls and the progress

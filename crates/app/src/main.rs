@@ -3977,8 +3977,8 @@ fn paint_settings(a: &App) {
             .filter(|(_, _, _, key, _)| *key != "streamSafe" || streamer)
             // (the platforms' own switches are with their accounts)
             .filter(|(_, _, _, key, _)| !matches!(*key, "scOn" | "spOn" | "ytOn" | "scrobble"))
-            // (Alerts only shows with the widget on)
-            .filter(|(_, _, _, key, _)| *key != "alertsOn" || integrations::set(&a.web.prefs, "widget"))
+            // (Alerts: inside the Stream Widget's page, as its path says, not a row of its own here)
+            .filter(|(_, _, _, key, _)| *key != "alertsOn")
             .map(|(_, label, note, key, dflt)| {
                 let on = if *key == "autoplay" { a.autoplay } else { set_row_on(&a.web.prefs, key, *dflt) };
                 // (its settings: in a panel, with it on; Streamer Mode leaves the addresses and keys out)
@@ -4140,6 +4140,11 @@ fn settings_index(a: &App) -> Vec<SetFound> {
     }
     for (cat, label, note, key, _) in SET_ROWS {
         let cat = if matches!(key, "scOn" | "spOn" | "ytOn" | "scrobble") { "Integrations" } else { cat };
+        // (Alerts: found in the Stream Widget's page)
+        if key == "alertsOn" {
+            out.push(SetFound { path: format!("{} \u{203a} {}", path(cat), panels::title("widget")), label: label.into(), note: note.into(), cat: cat.into(), panel: "widget".into(), key: key.into(), toggle: true });
+            continue;
+        }
         out.push(SetFound { path: path(cat), label: label.into(), note: note.into(), cat: cat.into(), panel: String::new(), key: key.into(), toggle: true });
     }
     let ip = omnipulse_core::lan_ip().unwrap_or_else(|| "THIS-PC".into());
@@ -4316,7 +4321,17 @@ fn panel_press(shared: &Shared, key: &str) {
             outside_start(shared);
             "A new key: the addresses have it.".to_string()
         }
-        // ---------- the alerts ----------
+        // ---------- the alerts (from the Stream Widget's page) ----------
+        "alertsSwitch" => {
+            set_toggle(shared, "alertsOn");
+            return;
+        }
+        "alertsOpen" => {
+            // (the widget's page saved first, as alList does the alerts')
+            if let Some((_, vals)) = PF_EDIT.with(|e| e.borrow().clone()) { for k in panels::keys_of("widget") { if let Some(v) = vals.get(k) { pref_put(shared, k, v.clone()); } } }
+            panel_open(shared, "alerts");
+            return;
+        }
         "alList" => {
             // (the Alerts page saved first, then its list)
             if let Some((_, vals)) = PF_EDIT.with(|e| e.borrow().clone()) { for k in panels::keys_of("alerts") { if let Some(v) = vals.get(k) { pref_put(shared, k, v.clone()); } } }
@@ -8871,6 +8886,7 @@ fn main() -> Result<(), slint::PlatformError> {
             // (OMNIPULSE_SELFTEST_PLAN=apple: Apple Music's sign-in window opened off-screen, Apple's page looked at, closed; nobody signs in)
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("apple") { vec![(6, "appleopen"), (16, "applecheck"), (17, "end")] }
             // (OMNIPULSE_SELFTEST_PLAN=tp: Track preferences for what plays, its bar dragged)
+            else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("square") { vec![(9, "play"), (10, "unround"), (12, "nav:settings"), (13, "cat:Streaming"), (14, "panel:widget"), (16, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("qset") { vec![(9, "play"), (11, "queue"), (14, "nav:settings"), (15, "cat:App & Look"), (16, "scroll:420"), (18, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("nowslim") { vec![(9, "play"), (11, "queue"), (12, "now"), (15, "size:860:720"), (17, "size:1100:720"), (19, "size:1500:860"), (21, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("tp") { vec![(9, "play"), (12, "tprefs"), (13, "tpdrag"), (14, "nowmenu"), (15, "now"), (18, "end")] }
@@ -8986,6 +9002,8 @@ fn main() -> Result<(), slint::PlatformError> {
                 w if w.starts_with("sd_") => { ui.invoke_stats_open(w[3..].into()); println!("selftest: stats detail \"{}\": \"{}\", {} blocks", &w[3..], ui.get_st_detail_head(), ui.get_st_blocks().row_count()); }
                 "queue" => { ui.set_queue_open(true); }
                 w if w.starts_with("nav:") => { ui.invoke_nav(w[4..].into()); }
+                "unround" => { if let Some(sh) = SHARED.with(|x| x.borrow().clone()) { pref_put(&sh, "appRounded", serde_json::json!(false)); apply_look(&sh); } }
+                w if w.starts_with("panel:") => { if let Some(sh) = SHARED.with(|x| x.borrow().clone()) { panel_open(&sh, &w[6..]); } }
                 w if w.starts_with("cat:") => { ui.set_set_cat(w[4..].into()); }
                 w if w.starts_with("scroll:") => { ui.window().dispatch_event(slint::platform::WindowEvent::PointerScrolled { position: slint::LogicalPosition::new(560.0, 400.0), delta_x: 0.0, delta_y: -(w[7..].parse::<f32>().unwrap_or(0.0)) }); }
                 w if w.starts_with("size:") => {

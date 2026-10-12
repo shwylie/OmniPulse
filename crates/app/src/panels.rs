@@ -139,7 +139,8 @@ pub fn fields(name: &str, vals: &Map<String, Value>, prefs: &Value, lan: &str) -
         }
         "widget" => {
             let port = n("widgetPort", 7878);
-            vec![
+            let alerts_on = prefs["alertsOn"].as_bool() == Some(true);
+            let mut f = vec![
                 info("Address", &format!("http://127.0.0.1:{port}/"), &format!("http://127.0.0.1:{port}/"), "In OBS: a Browser source with this address."),
                 num("widgetPort", "Port", "1024 to 65535."),
                 sel("widgetDesign", "Design", "", &[(json!("card"), "Card (460 × 130)"), (json!("bar"), "Slim bar (560 × 64)"), (json!("square"), "Square (300 × 380)"), (json!("minimal"), "Minimal (460 × 110)"), (json!("pill"), "Pill (480 × 80)")]),
@@ -152,7 +153,11 @@ pub fn fields(name: &str, vals: &Map<String, Value>, prefs: &Value, lan: &str) -
                 tog("wRequester", "Show Who Requested It", ""),
                 sel("wColor", "Colour Change", "", &[(json!(0), "Instant"), (json!(0.5), "Fast"), (json!(1.2), "Normal"), (json!(2.5), "Slow")]),
                 button("widgetHide", "Hide This Track", "Hide", "Until the next track."),
-            ]
+                // Alerts: on the widget, so here (Settings > Streaming > Stream Widget > Alerts)
+                button("alertsSwitch", "Alerts", if alerts_on { "Switch Off" } else { "Switch On" }, "On the widget: follows, subs, bits, raids and more, from your bot."),
+            ];
+            if alerts_on { f.push(button("alertsOpen", "Alerts Settings", "Open", "Your bot, how they look and sound, and which ones show.")); }
+            f
         }
         "alerts" => {
             let bot = s("alertBot", "streamerbot");
