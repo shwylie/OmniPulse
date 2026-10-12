@@ -116,7 +116,8 @@ pub fn in_ramp(target: f64, p: f64) -> f64 {
 }
 
 /// A key not clear enough isn't shifted for
-const MIN_KEY_CONFIDENCE: f64 = 0.1;
+// (a quarter of songs measure below this: a guess, not a key; neither a clash nor a shift is decided on it)
+const MIN_KEY_CONFIDENCE: f64 = 0.25;
 
 /// The smallest shift (up to two semitones) that puts `b`'s key next to `a`'s on the Camelot wheel;
 /// 0 when they go together already, or either key isn't clear
@@ -293,8 +294,12 @@ pub fn plan_structure(a: &Measured, a_end_ms: u64, now_ms: u64, b: &Measured) ->
     let a_bar = 4.0 * a.rhythm.period_ms;
     // (bar k's downbeat; past the last one tracked, a bar on from it for each)
     let at = |k: usize| ad.get(k).copied().unwrap_or_else(|| ad[ad.len() - 1] + (k + 1 - ad.len()) as f64 * a_bar);
-    let matched = match_rate(a.rhythm.bpm, b.rhythm.bpm).map(|(r, _)| r).filter(|_| keys_fit(a, b));
+    // (one tempo, keys that clash: still on the beat, but a short blend: half a phrase, the bass swapped
+    // on its downbeat, so the two keys are over each other only briefly, not a tape stop)
+    let clash = !keys_fit(a, b);
+    let matched = match_rate(a.rhythm.bpm, b.rhythm.bpm).map(|(r, _)| r);
     if let Some(r) = matched {
+        let runs: &[usize] = if clash { &[4] } else { &[PHRASE, 4] };
         let fits = |k: usize, n: u32| at(k) >= soonest && k + n as usize <= a_end && at(k) + a_bar * n as f64 <= audible;
         // the run-up to the swap: a phrase (8 bars), else half of one; the swap on a phrase's start of
         // both. The one playing: the latest of its own phrases' starts that has its beat to the swap
@@ -306,7 +311,7 @@ pub fn plan_structure(a: &Measured, a_end_ms: u64, now_ms: u64, b: &Measured) ->
             let latest = |every: usize| (0..=ideal).rev().find(|&k| on_phrase(k, a_off, every) && fits(k, n as u32));
             [PHRASE, 4].iter().filter_map(|&e| latest(e)).find(|&k| k + PHRASE >= ideal).or_else(|| latest(1))
         };
-        let (run, k) = [PHRASE, 4].iter().find_map(|&n| place(n).map(|k| (n, k)))?;
+        let (run, k) = runs.iter().find_map(|&n| place(n).map(|k| (n, k)))?;
         // (the next one's bars in the run-up: as many as the one playing's, or half or twice as many in
         // half or double time: one of its bars as long as two of the other's, or half of one)
         let a_per_b = b.rhythm.period_ms / (r * a.rhythm.period_ms);
@@ -1454,4 +1459,22 @@ fn find_probe() {
             None => println!("{id}: no beat  {}", t["title"].as_str().unwrap_or("")),
         }
     }
+}
+
+/// What each planner makes of two measured songs (state/rhythm.json's whole measurements), as the app
+/// would at `OMNIPULSE_PROBE_POS` ms into the first: OMNIPULSE_PROBE_A, OMNIPULSE_PROBE_B (track keys)
+#[test]
+#[ignore]
+fn pair_probe() {
+    let k = |v: &str| omnipulse_core::rhythm::known(&format!("full:{}", std::env::var(v).unwrap())).expect("measured whole");
+    let (a, b) = (k("OMNIPULSE_PROBE_A"), k("OMNIPULSE_PROBE_B"));
+    let pos: u64 = std::env::var("OMNIPULSE_PROBE_POS").ok().and_then(|x| x.parse().ok()).unwrap_or(60_000);
+    let end = a.to_ms;
+    println!("a: {:.2} BPM (conf {:.2}), {} ({:.2}), {} bars, phrase off {}, drop {:?}, last drop {:?}, content end {}", a.rhythm.bpm, a.rhythm.tempo_confidence, a.rhythm.camelot, a.rhythm.key_confidence, a.rhythm.bar_db.len(), phrase_offset(&a), drop_bar(&a, phrase_offset(&a)), last_drop(&a, phrase_offset(&a)), content_end(&a, a.rhythm.bar_db.len()));
+    println!("b: {:.2} BPM (conf {:.2}), {} ({:.2}), {} bars, phrase off {}, drop {:?}, content start {}", b.rhythm.bpm, b.rhythm.tempo_confidence, b.rhythm.camelot, b.rhythm.key_confidence, b.rhythm.bar_db.len(), phrase_offset(&b), drop_bar(&b, phrase_offset(&b)), content_start(&b, b.rhythm.bar_db.len()));
+    println!("keys fit {}, key shift {}", keys_fit(&a, &b), key_shift(&a, &b));
+    println!("drop swap: {:#?}", plan_drop_swap(&a, end, pos, &b));
+    println!("melody: {:#?}", plan_melody(&a, end, pos, &b));
+    println!("structure: {:#?}", plan_structure(&a, end, pos, &b));
+    println!("grid: {:#?}", plan(&a, end, pos, &b, 16));
 }
