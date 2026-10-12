@@ -394,6 +394,8 @@ fn open_page(shared: &Shared, page: &str) {
         "stats" => { let p = stats_period(&shared.borrow().web.prefs); open_stats(shared, p) }
         "settings" => {
             let mut a = shared.borrow_mut();
+            // (from another page: its categories first, as Windows' Settings opens)
+            if a.page != "settings" { ui.set_set_cat("".into()); }
             a.page = "settings".into();
             ui.set_page("settings".into());
             ui.set_page_kind("settings".into());
@@ -448,7 +450,7 @@ fn paint_sides(a: &mut App) {
         .filter(|&i| plat_on(&prefs, a.playlists[i].plat) || a.playlists[i].plat == "local")
         .filter(|&i| !hidden.contains(&mirror::side_id(a.playlists[i].plat, &a.playlists[i].id)))
         .collect();
-    let sides: Vec<Side> = a.side_map.iter().map(|&i| Side { title: a.playlists[i].title.clone().into(), plat: a.playlists[i].plat.into(), own: xpl::is_own(&a.playlists[i].id), share: a.playlists[i].plat != "local" || xpl::is_own(&a.playlists[i].id), sc: share::platform_id(&a.playlists[i], &a.xpl, "soundcloud").is_some(), sp: share::platform_id(&a.playlists[i], &a.xpl, "spotify").is_some(), collab: collab_of(&a.xpl, &a.playlists[i].id).is_some(), collab_owner: collab_of(&a.xpl, &a.playlists[i].id).is_some_and(|c| c["owner"].as_bool() == Some(true)) }).collect();
+    let sides: Vec<Side> = a.side_map.iter().map(|&i| Side { title: a.playlists[i].title.clone().into(), plat: if xpl::is_own(&a.playlists[i].id) { "xpl".into() } else { a.playlists[i].plat.into() }, own: xpl::is_own(&a.playlists[i].id), share: a.playlists[i].plat != "local" || xpl::is_own(&a.playlists[i].id), sc: share::platform_id(&a.playlists[i], &a.xpl, "soundcloud").is_some(), sp: share::platform_id(&a.playlists[i], &a.xpl, "spotify").is_some(), collab: collab_of(&a.xpl, &a.playlists[i].id).is_some(), collab_owner: collab_of(&a.xpl, &a.playlists[i].id).is_some_and(|c| c["owner"].as_bool() == Some(true)) }).collect();
     ui.set_sides(ModelRc::from(Rc::new(VecModel::from(sides))));
     // Add to Playlist: yours here first, then the platforms' (one of those becomes a playlist here)
     let mut order: Vec<usize> = a.side_map.iter().copied().filter(|&i| xpl::is_own(&a.playlists[i].id)).collect();
@@ -3084,8 +3086,8 @@ const SET_ROWS: [(&str, &str, &str, &str, bool); 29] = [
     ("Library", "Autoplay", "Plays similar tracks when the queue runs out.", "autoplay", true),
     ("Library", "Hidden & Not Recommended", "Right-click a track to stop it, its album or its artist being recommended. Off: nothing is left out; the lists are kept.", "hideOn", true),
     ("Library", "Avoid Recent Plays", "Skips songs you've heard lately in what the app picks for you. What you choose yourself still plays.", "avoidRecent", true),
-    ("Library", "Seamless Mix", "Songs with a beat blend into the next on it, as a DJ mixes: at its tempo, on its phrase, the next one sweeping in from the top as the one playing gives way below it (never both in one part of the sound), down to the drop. With songs that play from YouTube Music or your files (never Spotify's own playback), once their beat is known.", "mixOn", true),
-    ("Library", "EQ Band Handoff", "Seamless Mix hands over a band at a time (highs, then voice and bass), as a DJ's EQ does, instead of sweeping one song into the other: quicker and more sudden.", "mixBands", false),
+    ("Sound", "Seamless Mix", "Songs with a beat blend into the next on it, as a DJ mixes: at its tempo, on its phrase, the next one sweeping in from the top as the one playing gives way below it (never both in one part of the sound), down to the drop. With songs that play from YouTube Music or your files (never Spotify's own playback), once their beat is known.", "mixOn", true),
+    ("Sound", "EQ Band Handoff", "Seamless Mix hands over a band at a time (highs, then voice and bass), as a DJ's EQ does, instead of sweeping one song into the other: quicker and more sudden.", "mixBands", false),
     ("Library", "Skip non-music parts", "What plays from YouTube skips the parts of music videos that aren't music (a skit before the song, an interview after it), as marked on SponsorBlock.", "sbOn", true),
     ("Library", "Favourites Page", "Your starred tracks on a page of their own, in the sidebar. The stars stay either way.", "favPage", true),
     ("Library", "Sets & Podcasts Page", "A page for anything over 15 minutes, in the sidebar. Right-click it there to hide it.", "setsOn", true),
@@ -3107,7 +3109,7 @@ const SET_ROWS: [(&str, &str, &str, &str, bool); 29] = [
     ("Streaming", "Alerts", "On the widget: follows, subs, bits, raids and more, from your bot.", "alertsOn", false),
     ("Streaming", "Song Requests", "Chat asks for songs through your bot.", "req", false),
     ("Streaming", "Limit Requests", "The most waiting, and the most per viewer. Off: chat can request as many songs as it likes.", "reqLimits", true),
-    ("Streaming", "OmniPulse Offset", "Your music a second time, as its own app (\"OmniPulse Offset\"), to send to a stream mix only. Its offset and volume are the web app's (Settings > Streaming) for now.", "out2On", false),
+    ("Streaming", "OmniPulse Offset", "Your music a second time, as its own app (\"OmniPulse Offset\"), to send to a stream mix only, with an offset and a volume of its own.", "out2On", false),
     ("Streaming", "Stream Deck & Remote", "Control the app from a Stream Deck or another device.", "remoteOn", false),
 ];
 
@@ -3146,6 +3148,7 @@ fn paint_settings(a: &App) {
     };
     ui.set_set_rows_integrations(rows("Integrations"));
     ui.set_set_rows_library(rows("Library"));
+    ui.set_set_rows_sound(rows("Sound"));
     ui.set_set_rows_streaming(rows("Streaming"));
     // the closed categories (the web app's setting too: by their titles)
     let closed = |t: &str| a.web.prefs["setClosed"][t].as_bool() == Some(true);
@@ -3216,7 +3219,16 @@ fn panel_open(shared: &Shared, name: &str) {
     PF_EDIT.with(|e| *e.borrow_mut() = Some((format!("panel:{name}"), vals)));
     pf_paint(shared);
     if let Some(ui) = shared.borrow().ui.upgrade() {
-        let head = match name.strip_prefix("alert:") { Some(k) => format!("Alert: {}", alerts::name(&shared.borrow().web.prefs, k)), None => panels::title(name) };
+        let head = match name.strip_prefix("alert:") { Some(k) => alerts::name(&shared.borrow().web.prefs, k), None => panels::title(name) };
+        let crumb = match name {
+            "requests" | "widget" | "remote" | "offset" => "Settings › Streaming",
+            "alerts" => "Settings › Streaming › Stream Widget",
+            "alertlist" => "Settings › Streaming › Alerts",
+            n if n.starts_with("alert:") => "Settings › Streaming › Alerts",
+            "plugins" => "Settings › Integrations",
+            _ => "Settings › Library",
+        };
+        ui.set_pf_crumb(crumb.into());
         ui.set_pf_head(head.into());
         ui.set_pf_open(true);
     }
@@ -3580,7 +3592,8 @@ fn pf_open(shared: &Shared, id: &str) {
     PF_EDIT.with(|e| *e.borrow_mut() = Some((id.to_string(), vals)));
     pf_paint(shared);
     if let Some(ui) = shared.borrow().ui.upgrade() {
-        ui.set_pf_head(format!("{} settings", p.manifest.name).into());
+        ui.set_pf_crumb("Settings › Integrations".into());
+        ui.set_pf_head(p.manifest.name.clone().into());
         ui.set_pf_open(true);
     }
 }
@@ -7062,7 +7075,7 @@ fn main() -> Result<(), slint::PlatformError> {
             // only asked, nothing dropped on your playlists)
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("dnd") { vec![(9, "play"), (12, "library"), (13, "qopen"), (14, "dragq"), (16, "dragasks"), (17, "end")] }
             // (OMNIPULSE_SELFTEST_PLAN=panels: the settings panels, opened (nothing saved))
-            else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("panels") { vec![(9, "settings"), (10, "p_requests"), (12, "p_widget"), (14, "p_alerts"), (16, "p_plugins"), (17, "plugread"), (20, "p_alertlist"), (21, "p_alert:raid"), (22, "pfclose"), (23, "end")] }
+            else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("panels") { vec![(9, "settings"), (10, "cat_Sound"), (11, "cat_Streaming"), (12, "p_requests"), (12, "p_widget"), (14, "p_alerts"), (16, "p_plugins"), (17, "plugread"), (20, "p_alertlist"), (21, "p_alert:raid"), (22, "pfclose"), (23, "end")] }
             // (OMNIPULSE_SELFTEST_PLAN=look: List Density at Compact, and Search with Hide likes)
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("look") { vec![(9, "play"), (12, "library"), (13, "compact"), (14, "settings"), (15, "comfy"), (16, "search"), (19, "hidelikes"), (21, "hidelikesoff"), (22, "discover"), (30, "langnext"), (40, "end")] }
             else if only_discover { vec![(9, "play"), (11, "discover"), (30, "disc"), (45, "discmix"), (12, "import"), (46, "taste"), (47, "taste2"), (48, "taste3"), (70, "tasted"), (71, "marquee"), (72, "marqueeoff"), (73, "end")] } else { full.to_vec() };
@@ -7128,6 +7141,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 }
                 "search" => { ui.set_search_text("deadmau5".into()); ui.invoke_search("deadmau5".into()); }
                 "compact" => ui.invoke_density_changed(true),
+                w if w.starts_with("cat_") => ui.set_set_cat(w[4..].into()),
                 w if w.starts_with("p_") => { panel_open(&s, &w[2..]); println!("selftest: panel {} has {} fields", &w[2..], ui.get_pf_fields().row_count()); }
                 "plugread" => { panel_put(&s, "plugSource", serde_json::json!(std::env::current_dir().unwrap_or_default().join("plugins").join("internet-archive").join("manifest.json").display().to_string())); panel_press(&s, "plugCheck"); }
                 "pfclose" => { PF_EDIT.with(|e| e.borrow_mut().take()); ui.set_pf_open(false); }

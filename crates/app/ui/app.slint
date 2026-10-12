@@ -93,6 +93,8 @@ global Icons {
     // the catalogues: Deezer's bars, and a note for Apple Music's
     out property <string> deezer: "M1 18h3.6v2H1zm4.6-3h3.6v5H5.6zm4.6-3h3.6v8h-3.6zm4.6-3h3.6v11h-3.6zm4.6-5h3.6v16h-3.6z";
     out property <string> itunes: "M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z";
+    // a playlist on this PC (the web app's xpl icon, drawn in its rainbow)
+    out property <string> xpl: "M15 6H3v2h12V6zm0 4H3v2h12v-2zM3 16h8v-2H3v2zM17 6v8.18c-.31-.11-.65-.18-1-.18-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3V8h3V6h-5z";
     out property <string> local: "M10 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z";
 }
 
@@ -202,6 +204,65 @@ component Range inherits Rectangle {
                 root.changed(root.drag);
             }
         }
+    }
+}
+
+// A slider of named steps (Theme, Tint Strength): a notch at each, the thumb only ever on one (dragged,
+// it moves from notch to notch), each name under its own notch
+component Steps inherits Rectangle {
+    in property <[string]> names;
+    in property <int> value;
+    callback changed(int);
+    property <int> n: root.names.length;
+    property <length> pad: 7px;
+    property <length> span: max(1px, root.width - 14px);
+    property <int> at: max(0, min(root.n - 1, round((ta.mouse-x - root.pad) / root.span * (root.n - 1))));
+    height: 44px;
+    min-width: 120px;
+    // the track, filled up to the step it's on
+    Rectangle {
+        x: root.pad;
+        y: 8px;
+        width: root.span;
+        height: 4px;
+        border-radius: 2px;
+        background: Theme.text.with-alpha(0.18);
+        Rectangle { x: 0; width: root.span * root.value / max(1, root.n - 1); height: 100%; border-radius: 2px; background: Theme.accent; }
+    }
+    // a notch at each step
+    for nm[i] in root.names: Rectangle {
+        x: root.pad + root.span * i / max(1, root.n - 1) - 1px;
+        y: 3px;
+        width: 2px;
+        height: 14px;
+        border-radius: 1px;
+        background: i <= root.value ? Theme.accent : Theme.text.with-alpha(0.32);
+    }
+    Rectangle {
+        x: root.span * root.value / max(1, root.n - 1);
+        y: 3px;
+        width: 14px;
+        height: 14px;
+        border-radius: 7px;
+        background: ta.has-hover || ta.pressed ? Theme.accent.brighter(0.15) : Theme.accent;
+        border-width: 2px;
+        border-color: Theme.panel;
+    }
+    // each name under its notch (the first and last kept inside)
+    for nm[i] in root.names: Text {
+        text: nm;
+        y: 24px;
+        x: i == 0 ? 0px : i == root.n - 1 ? root.width - self.width : root.pad + root.span * i / max(1, root.n - 1) - self.width / 2;
+        color: i == root.value ? Theme.text : Theme.muted;
+        font-size: 12px;
+        font-weight: i == root.value ? 700 : 400;
+    }
+    ta := TouchArea {
+        mouse-cursor: MouseCursor.pointer;
+        pointer-event(e) => {
+            if (e.button == PointerEventButton.left && e.kind == PointerEventKind.down && root.at != root.value) { root.changed(root.at); }
+        }
+        moved => { if (self.pressed && root.at != root.value) { root.changed(root.at); } }
     }
 }
 
@@ -319,8 +380,8 @@ component Toggle inherits Rectangle {
 component PlatIcon inherits Glyph {
     in property <string> plat;
     in property <bool> title-bar;   // (YouTube Music's own mark there)
-    d: plat == "spotify" ? Icons.spotify : plat == "youtube" ? (title-bar ? Icons.youtube-mark : Icons.youtube) : plat == "local" ? Icons.local : plat == "musicbrainz" ? Icons.musicbrainz : plat == "plugin" ? Icons.plugin : plat == "deezer" ? Icons.deezer : plat == "itunes" ? Icons.itunes : Icons.soundcloud;
-    fill: plat == "spotify" ? #1ed760 : plat == "youtube" ? #ff0033 : plat == "local" ? #f2b544 : plat == "musicbrainz" ? #ba478f : plat == "plugin" ? #38bdf8 : plat == "deezer" ? #a238ff : plat == "itunes" ? #fa2d48 : #ff5500;
+    d: plat == "xpl" ? Icons.xpl : plat == "spotify" ? Icons.spotify : plat == "youtube" ? (title-bar ? Icons.youtube-mark : Icons.youtube) : plat == "local" ? Icons.local : plat == "musicbrainz" ? Icons.musicbrainz : plat == "plugin" ? Icons.plugin : plat == "deezer" ? Icons.deezer : plat == "itunes" ? Icons.itunes : Icons.soundcloud;
+    fill: plat == "xpl" ? @linear-gradient(135deg, #ff5f6d 0%, #ffc371 25%, #47e891 50%, #3fa9ff 75%, #b06bff 100%) : plat == "spotify" ? #1ed760 : plat == "youtube" ? #ff0033 : plat == "local" ? #f2b544 : plat == "musicbrainz" ? #ba478f : plat == "plugin" ? #38bdf8 : plat == "deezer" ? #a238ff : plat == "itunes" ? #fa2d48 : #ff5500;
 }
 
 component NavItem inherits Rectangle {
@@ -521,18 +582,6 @@ component TileView inherits Rectangle {
 }
 
 /// A Settings category's title: a click opens or closes it
-component SectionHead inherits Rectangle {
-    in property <string> label;
-    in property <bool> closed;
-    callback clicked;
-    height: 34px;
-    HorizontalLayout {
-        Text { text: root.label; color: Theme.text; font-size: 20px; font-weight: 800; vertical-alignment: center; horizontal-stretch: 1; }
-        // the arrow: down while open, right while closed
-        Glyph { d: root.closed ? "M9 6l6 6-6 6-1.4-1.4L12.2 12 7.6 7.4z" : "M6 9l6 6 6-6-1.4-1.4L12 12.2 7.4 7.6z"; width: 20px; height: 20px; y: (parent.height - self.height) / 2; fill: ta.has-hover ? Theme.text : Theme.muted; }
-    }
-    ta := TouchArea { mouse-cursor: pointer; clicked => { root.clicked(); } }
-}
 
 component Card inherits Rectangle {
     in property <brush> fill: Theme.panel;
@@ -540,6 +589,60 @@ component Card inherits Rectangle {
     background: fill;
     border-width: 1px;
     border-color: Theme.line;
+}
+
+// A category on Settings' first page (as Windows' Settings lists them): its icon, its name, what's in it
+component CatCard inherits Card {
+    in property <string> name;
+    in property <string> note;
+    in property <string> d;
+    callback clicked;
+    fill: cta.has-hover ? Theme.elevated : Theme.panel;
+    height: 72px;
+    cta := TouchArea { mouse-cursor: MouseCursor.pointer; clicked => { root.clicked(); } }
+    HorizontalLayout {
+        padding-left: 20px;
+        padding-right: 20px;
+        spacing: 18px;
+        Glyph { d: root.d; width: 24px; height: 24px; y: (parent.height - self.height) / 2; fill: Theme.accent; }
+        VerticalLayout {
+            horizontal-stretch: 1;
+            alignment: center;
+            spacing: 2px;
+            Text { text: root.name; color: Theme.text; font-weight: 700; font-size: 15px; }
+            Text { text: root.note; color: Theme.muted; font-size: 12px; overflow: elide; }
+        }
+        Text { text: "›"; color: Theme.muted; font-size: 26px; vertical-alignment: center; }
+    }
+}
+
+// A switch in Settings: its name and what it does, its switch; one with settings of its own (a page) opens
+// them from its Settings button, or from anywhere on the row; one that's a button (Add a Plugin) is that
+component SetRowView inherits Card {
+    in property <SetRow> r;
+    callback toggle(string);
+    callback more(string);
+    fill: rta.has-hover && root.r.more ? Theme.elevated : Theme.panel;
+    // (under the rest, so the switch and the buttons are still theirs)
+    rta := TouchArea { enabled: root.r.more; mouse-cursor: root.r.more ? MouseCursor.pointer : MouseCursor.default; clicked => { root.more(root.r.key); } }
+    HorizontalLayout {
+        padding: 16px;
+        padding-top: 12px;
+        padding-bottom: 12px;
+        padding-left: root.r.sub ? 34px : 16px;
+        spacing: 14px;
+        if root.r.sub: Rectangle { width: 2px; background: Theme.accent.with-alpha(0.5); }
+        VerticalLayout {
+            horizontal-stretch: 1;
+            alignment: center;
+            spacing: 2px;
+            Text { text: root.r.label; color: Theme.text; font-weight: 700; }
+            if root.r.note != "": Text { text: root.r.note; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
+        }
+        if root.r.more: Pill { label: "Settings ›"; y: (parent.height - self.height) / 2; clicked => { root.more(root.r.key); } }
+        if root.r.button != "": Pill { label: root.r.button + " ›"; y: (parent.height - self.height) / 2; clicked => { root.more(root.r.key); } }
+        if root.r.button == "": Toggle { checked: root.r.on; y: (parent.height - self.height) / 2; toggled => { root.toggle(root.r.key); } }
+    }
 }
 
 export component AppWindow inherits Window {
@@ -710,6 +813,10 @@ export component AppWindow inherits Window {
     // a Settings row's own settings (a plugin's): its key; the dialog with its fields
     callback set-more(string);
     in-out property <bool> pf-open;
+    // Settings, as Windows' is: its categories first; one open shows on its own, its path as the title
+    in-out property <string> set-cat;
+    // a settings page's path, before its name ("Settings › Streaming")
+    in property <string> pf-crumb;
     // a settings panel's address: copied
     callback pf-copy(int);
     // Pick genres (step 1) and Fine-tune (step 2: the picked genres' subgenres), and Discover's card
@@ -732,6 +839,7 @@ export component AppWindow inherits Window {
     callback pf-set(int, string);
     callback pf-save();
     in property <[SetRow]> set-rows-library;
+    in property <[SetRow]> set-rows-sound;
     in property <[SetRow]> set-rows-streaming;
     in property <bool> closed-look;
     in property <bool> closed-integrations;
@@ -1131,7 +1239,7 @@ export component AppWindow inherits Window {
                     spacing: 6px;
                     HorizontalLayout {
                         spacing: 12px;
-                        RoundButton { d: Icons.back; enabled: root.can-back; clicked => { root.back(); } }
+                        RoundButton { d: Icons.back; enabled: root.can-back || (root.page == "settings" && root.set-cat != ""); clicked => { if (root.page == "settings" && root.set-cat != "") { root.set-cat = ""; } else { root.back(); } } }
                         Rectangle { horizontal-stretch: 1; }
                         // the search bar: a pill in the middle
                         Rectangle {
@@ -1171,7 +1279,19 @@ export component AppWindow inherits Window {
                     // the title, and (on pages made from what the platforms send) fetching them again
                     if root.page-kind != "now": HorizontalLayout {
                         spacing: 14px;
-                        Text { text: root.page-title; color: Theme.text; font-size: 44px; font-weight: 800; overflow: elide; horizontal-stretch: 0; }
+                        if !(root.page == "settings" && root.set-cat != ""): Text { text: root.page-title; color: Theme.text; font-size: 44px; font-weight: 800; overflow: elide; horizontal-stretch: 0; }
+                        if root.page == "settings" && root.set-cat != "": HorizontalLayout {
+                            spacing: 14px;
+                            Text {
+                                text: "Settings";
+                                color: sct.has-hover ? Theme.text : Theme.muted;
+                                font-size: 44px;
+                                font-weight: 800;
+                                sct := TouchArea { mouse-cursor: MouseCursor.pointer; clicked => { root.set-cat = ""; } }
+                            }
+                            Text { text: "›"; color: Theme.muted; font-size: 40px; font-weight: 400; vertical-alignment: center; }
+                            Text { text: root.set-cat; color: Theme.text; font-size: 44px; font-weight: 800; overflow: elide; }
+                        }
                         if root.page == "discover" || root.page == "rediscover" || root.page == "sets" || root.page == "artists" || root.page == "mix": RoundButton {
                             d: Icons.refresh;
                             y: (parent.height - self.height) / 2;
@@ -1527,8 +1647,17 @@ export component AppWindow inherits Window {
                             alignment: start;
                             spacing: 14px;
                             padding-right: 14px;
-                            SectionHead { label: "App & Look"; closed: root.closed-look; clicked => { root.section-flip("App & Look"); } }
-                            if !root.closed-look: VerticalLayout {
+                            if root.set-cat == "": VerticalLayout {
+                                spacing: 8px;
+                                for c in [
+                                    { name: "App & Look", note: "Theme, colours, player style, name, tray, animations, updates, backups", d: Icons.gear },
+                                    { name: "Integrations", note: "Accounts, platforms, plugins, following, Discord, Last.fm", d: Icons.plugin },
+                                    { name: "Library", note: "Pages, autoplay, recent plays, hidden and not recommended, music folders", d: Icons.library },
+                                    { name: "Sound", note: "Loudness, fades, silences, equalizer, seamless mixing", d: Icons.volume },
+                                    { name: "Streaming", note: "Streamer Mode, the widget and alerts, song requests, Stream Deck, OmniPulse Offset", d: Icons.broadcast },
+                                ]: CatCard { name: c.name; note: c.note; d: c.d; clicked => { root.set-cat = c.name; } }
+                            }
+                            if root.set-cat == "App & Look": VerticalLayout {
                                 spacing: 14px;
                                 Card {
                                     VerticalLayout {
@@ -1542,10 +1671,7 @@ export component AppWindow inherits Window {
                                             Text { text: root.theme-step-name; color: Theme.muted; font-weight: 600; }
                                         }
                                         // steps from light to dark: it stops at each, never in between
-                                        Range { minimum: 0; maximum: 4; value: root.theme-step; changed(v) => { root.theme-step = round(v); root.look-changed("themeStep", round(v)); } }
-                                        HorizontalLayout {
-                                            for n[i] in ["Bright", "Soft", "Dim", "Dark", "Black"]: Text { text: n; color: Theme.muted; font-size: 12px; horizontal-stretch: 1; horizontal-alignment: i == 0 ? left : i == 4 ? right : center; }
-                                        }
+                                        Steps { names: ["Bright", "Soft", "Dim", "Dark", "Black"]; value: round(root.theme-step); changed(k) => { root.theme-step = k; root.look-changed("themeStep", k); } }
                                         Rectangle { height: 8px; }
                                         HorizontalLayout {
                                             alignment: start;
@@ -1568,10 +1694,7 @@ export component AppWindow inherits Window {
                                             Text { text: "Tint Strength"; color: Theme.text; font-weight: 700; }
                                             Text { text: root.tint-strength-name; color: Theme.muted; font-weight: 600; }
                                         }
-                                        Range { minimum: 0; maximum: 3; value: root.tint-strength; changed(v) => { root.tint-strength = round(v); root.look-changed("tintStrength", round(v)); } }
-                                        HorizontalLayout {
-                                            for n[i] in ["Off", "Subtle", "Medium", "Strong"]: Text { text: n; color: Theme.muted; font-size: 12px; horizontal-stretch: 1; horizontal-alignment: i == 0 ? left : i == 3 ? right : center; }
-                                        }
+                                        Steps { names: ["Off", "Subtle", "Medium", "Strong"]; value: round(root.tint-strength); changed(k) => { root.tint-strength = k; root.look-changed("tintStrength", k); } }
                                         Rectangle { height: 8px; }
                                         Text { text: "Accent"; color: Theme.text; font-weight: 700; }
                                         HorizontalLayout {
@@ -1771,8 +1894,7 @@ export component AppWindow inherits Window {
                                     }
                                 }
                             }
-                            SectionHead { label: "Integrations"; closed: root.closed-integrations; clicked => { root.section-flip("Integrations"); } }
-                            if !root.closed-integrations: VerticalLayout {
+                            if root.set-cat == "Integrations": VerticalLayout {
                                 spacing: 14px;
                                 Card {
                                     VerticalLayout {
@@ -1807,30 +1929,9 @@ export component AppWindow inherits Window {
                                         }
                                     }
                                 }
-                                for r[i] in root.set-rows-integrations: Card {
-                                    HorizontalLayout {
-                                        padding: 16px;
-                                        padding-top: 12px;
-                                        padding-bottom: 12px;
-                                        padding-left: r.sub ? 34px : 16px;
-                                        spacing: 14px;
-                                        if r.sub: Rectangle { width: 2px; background: Theme.accent.with-alpha(0.5); }
-                                        VerticalLayout {
-                                            horizontal-stretch: 1;
-                                            alignment: center;
-                                            spacing: 2px;
-                                            Text { text: r.label; color: Theme.text; font-weight: 700; }
-                                            if r.note != "": Text { text: r.note; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
-                                        }
-                                        if r.more: Pill { label: "Settings"; y: (parent.height - self.height) / 2; clicked => { root.set-more(r.key); } }
-                                        // (a row that's a button: Add a Plugin)
-                                        if r.button != "": Pill { label: r.button; y: (parent.height - self.height) / 2; clicked => { root.set-more(r.key); } }
-                                        if r.button == "": Toggle { checked: r.on; y: (parent.height - self.height) / 2; toggled => { root.set-toggle(r.key); } }
-                                    }
-                                }
+                                for r[i] in root.set-rows-integrations: SetRowView { r: r; toggle(k) => { root.set-toggle(k); } more(k) => { root.set-more(k); } }
                             }
-                            SectionHead { label: "Library"; closed: root.closed-library; clicked => { root.section-flip("Library"); } }
-                            if !root.closed-library: VerticalLayout {
+                            if root.set-cat == "Library": VerticalLayout {
                                 spacing: 14px;
                                 Card {
                                     VerticalLayout {
@@ -1852,27 +1953,9 @@ export component AppWindow inherits Window {
                                         }
                                     }
                                 }
-                                for r[i] in root.set-rows-library: Card {
-                                    HorizontalLayout {
-                                        padding: 16px;
-                                        padding-top: 12px;
-                                        padding-bottom: 12px;
-                                        padding-left: r.sub ? 34px : 16px;
-                                        spacing: 14px;
-                                        if r.sub: Rectangle { width: 2px; background: Theme.accent.with-alpha(0.5); }
-                                        VerticalLayout {
-                                            horizontal-stretch: 1;
-                                            alignment: center;
-                                            spacing: 2px;
-                                            Text { text: r.label; color: Theme.text; font-weight: 700; }
-                                            if r.note != "": Text { text: r.note; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
-                                        }
-                                        Toggle { checked: r.on; y: (parent.height - self.height) / 2; toggled => { root.set-toggle(r.key); } }
-                                    }
-                                }
+                                for r[i] in root.set-rows-library: SetRowView { r: r; toggle(k) => { root.set-toggle(k); } more(k) => { root.set-more(k); } }
                             }
-                            SectionHead { label: "Sound"; closed: root.closed-sound; clicked => { root.section-flip("Sound"); } }
-                            if !root.closed-sound: VerticalLayout {
+                            if root.set-cat == "Sound": VerticalLayout {
                                 spacing: 14px;
                                 Card {
                                     VerticalLayout {
@@ -1947,30 +2030,14 @@ export component AppWindow inherits Window {
                                         }
                                     }
                                 }
+                                // (Seamless Mix and its band handoff)
+                                for r[i] in root.set-rows-sound: SetRowView { r: r; toggle(k) => { root.set-toggle(k); } more(k) => { root.set-more(k); } }
                             }
-                            SectionHead { label: "Streaming"; closed: root.closed-streaming; clicked => { root.section-flip("Streaming"); } }
-                            if !root.closed-streaming: VerticalLayout {
+                            if root.set-cat == "Streaming": VerticalLayout {
                                 spacing: 14px;
-                                for r[i] in root.set-rows-streaming: Card {
-                                    HorizontalLayout {
-                                        padding: 16px;
-                                        padding-top: 12px;
-                                        padding-bottom: 12px;
-                                        padding-left: r.sub ? 34px : 16px;
-                                        spacing: 14px;
-                                        if r.sub: Rectangle { width: 2px; background: Theme.accent.with-alpha(0.5); }
-                                        VerticalLayout {
-                                            horizontal-stretch: 1;
-                                            alignment: center;
-                                            spacing: 2px;
-                                            Text { text: r.label; color: Theme.text; font-weight: 700; }
-                                            if r.note != "": Text { text: r.note; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
-                                        }
-                                        Toggle { checked: r.on; y: (parent.height - self.height) / 2; toggled => { root.set-toggle(r.key); } }
-                                    }
-                                }
+                                for r[i] in root.set-rows-streaming: SetRowView { r: r; toggle(k) => { root.set-toggle(k); } more(k) => { root.set-more(k); } }
                             }
-                            Text { text: "Settings not here yet are the web app's: this app follows what's set there."; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
+                            Rectangle { height: 96px; }
                         }
                     }
                     // Now Playing: the cover, and the lyrics as they're sung
@@ -2048,7 +2115,20 @@ export component AppWindow inherits Window {
                             RoundButton { d: Icons.back; clicked => { root.pf-open = false; } }
                             Rectangle { horizontal-stretch: 1; }
                         }
-                        Text { text: root.pf-head; color: Theme.text; font-size: 44px; font-weight: 800; overflow: elide; }
+                        HorizontalLayout {
+                            spacing: 14px;
+                            if root.pf-crumb != "": Text {
+                                text: root.pf-crumb + "  ›";
+                                color: pct.has-hover ? Theme.text : Theme.muted;
+                                font-size: 44px;
+                                font-weight: 800;
+                                overflow: elide;
+                                horizontal-stretch: 1;
+                                max-width: self.preferred-width;
+                                pct := TouchArea { mouse-cursor: MouseCursor.pointer; clicked => { root.pf-open = false; } }
+                            }
+                            Text { text: root.pf-head; color: Theme.text; font-size: 44px; font-weight: 800; overflow: elide; horizontal-stretch: 0; }
+                        }
                         ScrollView {
                           vertical-stretch: 1;
                           VerticalLayout {
