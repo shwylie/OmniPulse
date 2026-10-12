@@ -155,20 +155,25 @@ function dndInit() {
   });
 
   // ---------- the playlist that's open: drop a track anywhere on its page ----------
+  // (or another playlist from the sidebar: combined into it, as dropping it on this one there does)
   const page = $("listView");
-  const pageTakes = () => !!drag.track && !drag.fromList && view === "playlist" && playlistTakes(currentPlaylist, drag.track);
+  const pageTakesList = () => !!drag.playlist && view === "playlist" && !!currentPlaylist && currentPlaylist.source !== "mix"
+    && String(drag.playlist.id) !== String(currentPlaylist.id) && (isXpl(currentPlaylist) || currentPlaylist.source !== "local");
+  const pageTakes = () => pageTakesList() || (!!drag.track && !drag.fromList && view === "playlist" && playlistTakes(currentPlaylist, drag.track));
   page.addEventListener("dragover", (e) => {
     if (!pageTakes()) return;
     e.preventDefault();
     e.dataTransfer.dropEffect = "copy";
     page.classList.add("dropOver");
-    page.dataset.drop = "Add to " + (currentPlaylist.title || "this playlist");
+    page.dataset.drop = drag.playlist ? 'Add "' + (drag.playlist.title || "that playlist") + '" to ' + (currentPlaylist.title || "this playlist") : "Add to " + (currentPlaylist.title || "this playlist");
   });
   page.addEventListener("dragleave", (e) => { if (!page.contains(e.relatedTarget)) page.classList.remove("dropOver"); });
   page.addEventListener("drop", (e) => {
     if (!pageTakes()) return;
     e.preventDefault();
     page.classList.remove("dropOver");
+    // (combined, as in the sidebar: the page is shown again with its new songs)
+    if (drag.playlist) { combinePlaylists(drag.playlist, currentPlaylist); dragClear(); return; }
     if (drag.many) selPasteInto(currentPlaylist, drag.many);
     else addToPlaylist(currentPlaylist, drag.track);
     dragClear();
