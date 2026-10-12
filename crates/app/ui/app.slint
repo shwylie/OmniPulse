@@ -998,6 +998,8 @@ export component AppWindow inherits Window {
     callback jam-end();
     callback maximize();
     callback close-window();
+    // an edge or corner pressed: the window resized from it (0 top ... 7 bottom-right)
+    callback resize(int);
 
     VerticalLayout {
         // ---------- title bar ----------
@@ -2791,6 +2793,18 @@ export component AppWindow inherits Window {
             }
         }
     }
+    // its edges and corners, dragged to resize it (it has no frame of its own to): not while maximized
+    // 0 top, 1 bottom, 2 left, 3 right, 4 top-left, 5 top-right, 6 bottom-left, 7 bottom-right
+    property <length> edge: 5px;
+    property <length> corner: 12px;
+    if !root.is-max: TouchArea { x: root.corner; y: 0; width: root.width - 2 * root.corner; height: root.edge; mouse-cursor: MouseCursor.ns-resize; pointer-event(e) => { if (e.kind == PointerEventKind.down && e.button == PointerEventButton.left) { root.resize(0); } } }
+    if !root.is-max: TouchArea { x: root.corner; y: root.height - root.edge; width: root.width - 2 * root.corner; height: root.edge; mouse-cursor: MouseCursor.ns-resize; pointer-event(e) => { if (e.kind == PointerEventKind.down && e.button == PointerEventButton.left) { root.resize(1); } } }
+    if !root.is-max: TouchArea { x: 0; y: root.corner; width: root.edge; height: root.height - 2 * root.corner; mouse-cursor: MouseCursor.ew-resize; pointer-event(e) => { if (e.kind == PointerEventKind.down && e.button == PointerEventButton.left) { root.resize(2); } } }
+    if !root.is-max: TouchArea { x: root.width - root.edge; y: root.corner; width: root.edge; height: root.height - 2 * root.corner; mouse-cursor: MouseCursor.ew-resize; pointer-event(e) => { if (e.kind == PointerEventKind.down && e.button == PointerEventButton.left) { root.resize(3); } } }
+    if !root.is-max: TouchArea { x: 0; y: 0; width: root.corner; height: root.corner; mouse-cursor: MouseCursor.nwse-resize; pointer-event(e) => { if (e.kind == PointerEventKind.down && e.button == PointerEventButton.left) { root.resize(4); } } }
+    if !root.is-max: TouchArea { x: root.width - root.corner; y: 0; width: root.corner; height: root.corner; mouse-cursor: MouseCursor.nesw-resize; pointer-event(e) => { if (e.kind == PointerEventKind.down && e.button == PointerEventButton.left) { root.resize(5); } } }
+    if !root.is-max: TouchArea { x: 0; y: root.height - root.corner; width: root.corner; height: root.corner; mouse-cursor: MouseCursor.nesw-resize; pointer-event(e) => { if (e.kind == PointerEventKind.down && e.button == PointerEventButton.left) { root.resize(6); } } }
+    if !root.is-max: TouchArea { x: root.width - root.corner; y: root.height - root.corner; width: root.corner; height: root.corner; mouse-cursor: MouseCursor.nwse-resize; pointer-event(e) => { if (e.kind == PointerEventKind.down && e.button == PointerEventButton.left) { root.resize(7); } } }
     // the keyboard (as the web app's): Space plays or pauses, Shift+Right/Left skip, / goes to the search
     // bar, Q opens or closes the queue, L likes; Ctrl+A picks every track on the page, Escape none
     keys := FocusScope {

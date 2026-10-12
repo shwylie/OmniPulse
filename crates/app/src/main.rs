@@ -3141,8 +3141,8 @@ fn paint_settings(a: &App) {
                 let more = m.settings.as_array().is_some_and(|l| !l.is_empty());
                 list.push(SetRow { head: Default::default(), label: m.name.clone().into(), note: note.into(), on: plugin_on(&a.web.prefs, &m.id), key: format!("plugOn_{}", m.id).into(), sub: false, more, button: Default::default() });
             }
-            // (the plugins: adding one, and taking out the ones you've added)
-            list.push(SetRow { head: Default::default(), label: "Add a Plugin".into(), note: "Music sources made by others. Each is walled off and only reaches the sites it lists.".into(), on: false, key: "plugAdd".into(), sub: false, more: false, button: "Add".into() });
+            // (the plugins: adding one, and taking out the ones you've added; it stays at the top)
+            list.insert(0, SetRow { head: Default::default(), label: "Add a Plugin".into(), note: "Music sources made by others. Each is walled off and only reaches the sites it lists.".into(), on: false, key: "plugAdd".into(), sub: false, more: false, button: "Add".into() });
         }
         ModelRc::from(Rc::new(VecModel::from(list)))
     };
@@ -7083,6 +7083,15 @@ fn main() -> Result<(), slint::PlatformError> {
             use slint::winit_030::WinitWindowAccessor;
             let ui = weak.upgrade().unwrap();
             ui.window().with_winit_window(|w| { let _ = w.drag_window(); });
+        }
+    });
+    // resized from an edge or corner (Windows does the dragging, as it does the title bar's)
+    ui.on_resize({
+        let weak = ui.as_weak();
+        move |d| {
+            use slint::winit_030::{winit::window::ResizeDirection as R, WinitWindowAccessor};
+            let dir = match d { 0 => R::North, 1 => R::South, 2 => R::West, 3 => R::East, 4 => R::NorthWest, 5 => R::NorthEast, 6 => R::SouthWest, _ => R::SouthEast };
+            if let Some(ui) = weak.upgrade() { ui.window().with_winit_window(|w| { let _ = w.drag_resize_window(dir); }); }
         }
     });
     ui.on_minimize({ let weak = ui.as_weak(); move || weak.upgrade().unwrap().window().set_minimized(true) });
