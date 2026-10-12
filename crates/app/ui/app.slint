@@ -1090,6 +1090,7 @@ export component AppWindow inherits Window {
     callback helpers-act(string);
     // Now Playing: where its song opens ("Open on SoundCloud"...), and its buttons' and artist's actions
     in property <string> now-open;
+    in property <string> now-desc;
     callback now-act(string);
     // the open playlist's header: what it offers
     in property <bool> pl-share;
@@ -2600,10 +2601,15 @@ export component AppWindow inherits Window {
                                 Pill { label: root.now-fav ? "In Favourites" : "Add to Favourites"; on: root.now-fav; clicked => { root.fav-toggle(); } }
                                 if root.now-open != "": Pill { label: root.now-open; clicked => { root.now-act("open"); } }
                             }
+
                             Rectangle { vertical-stretch: 1; }
                         }
                         VerticalLayout {
                             horizontal-stretch: 1;
+                            spacing: 6px;
+                            // (a SoundCloud song's description, as its uploader wrote it, above its lyrics)
+                            if root.now-desc != "": Text { text: root.now-desc; color: Theme.muted; font-size: 13px; wrap: word-wrap; }
+                            if root.now-desc != "": Rectangle { height: 8px; }
                             if root.lyrics-note != "": Text { text: root.lyrics-note; color: Theme.muted; }
                             // where they're from, and the other places, a click each
                             if root.lyrics-from != "" || root.lyrics-others.length > 0: HorizontalLayout {

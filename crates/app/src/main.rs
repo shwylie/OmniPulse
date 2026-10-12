@@ -3155,6 +3155,32 @@ fn show_now(ui: &AppWindow, t: &Track) {
     ui.set_now_open(if t.web_link().is_empty() { "".into() } else { match t.plat() { "spotify" => "Open in Spotify", "youtube" => "Open in YouTube Music", "musicbrainz" => "Open on MusicBrainz", "deezer" => "Open on Deezer", "local" => "", _ => "Open on SoundCloud" }.into() });
     ui.set_now_art(slint::Image::default());
     ui.set_now_art_big(slint::Image::default());
+    now_desc(ui, t);
+}
+
+thread_local! {
+    /// SoundCloud songs' descriptions, as they've been fetched (by track)
+    static DESCS: RefCell<HashMap<String, String>> = RefCell::new(HashMap::new());
+}
+
+/// Now Playing's description (the web app's npDesc): a SoundCloud song's, its first 600 characters
+fn now_desc(ui: &AppWindow, t: &Track) {
+    ui.set_now_desc("".into());
+    let track::Src::SoundCloud(id) = &t.src else { return };
+    if let Some(d) = DESCS.with(|m| m.borrow().get(&t.key).cloned()) { ui.set_now_desc(d.into()); return; }
+    let (id, key, weak) = (*id, t.key.clone(), ui.as_weak());
+    SHARED.with(|s| {
+        let Some(sh) = s.borrow().clone() else { return };
+        sh.borrow().rt.spawn(async move {
+            let v = omnipulse_core::soundcloud::api_get(format!("/tracks/{id}")).await.unwrap_or_default();
+            let d: String = v["description"].as_str().unwrap_or("").trim().chars().take(600).collect();
+            let _ = weak.upgrade_in_event_loop(move |ui| SHARED.with(|s| {
+                DESCS.with(|m| m.borrow_mut().insert(key.clone(), d.clone()));
+                let still = s.borrow().as_ref().is_some_and(|sh| sh.borrow().queue.current().is_some_and(|c| c.key == key));
+                if still { ui.set_now_desc(d.into()); }
+            }));
+        });
+    });
 }
 
 /// The bar's heart and star for this track
