@@ -129,6 +129,8 @@ struct App {
 
 enum Naming {
     Rename(String),
+    /// the title bar's name (Settings > App > Display Name), from right-clicking it
+    AppName,
 }
 
 type Shared = Rc<RefCell<App>>;
@@ -5515,6 +5517,7 @@ fn collab_join(shared: &Shared, code: String, relay: String, e: String) {
 fn name_ask(shared: &Shared, naming: Naming) {
     let (head, ok, text) = match &naming {
         Naming::Rename(id) => ("Rename playlist", "Save", shared.borrow().playlists.iter().find(|p| &p.id == id).map(|p| p.title.clone()).unwrap_or_default()),
+        Naming::AppName => ("The app's name", "Save", shared.borrow().web.prefs["appName"].as_str().filter(|n| !n.trim().is_empty()).unwrap_or("OmniPulse").to_string()),
     };
     shared.borrow_mut().naming = Some(naming);
     if let Some(ui) = shared.borrow().ui.upgrade() {
@@ -5537,6 +5540,7 @@ fn name_done(shared: &Shared, name: &str) {
             xpl::rename(&mut shared.borrow_mut().xpl, &id, &name);
             xpl_changed(shared);
         }
+        Naming::AppName => set_look_pref(shared, "appName", serde_json::json!(if name == "OmniPulse" { String::new() } else { name })),
     }
 }
 
@@ -7250,6 +7254,7 @@ fn apply_look(shared: &Shared) {
     let nudge = nudge_of(prefs).to_string();
     if ui.get_listen_nudge().trim() != nudge && !(ui.get_listen_nudge().trim().is_empty() && nudge == "0") { ui.set_listen_nudge(nudge.into()); }
     let name = prefs["appName"].as_str().unwrap_or("").trim().to_string();
+    ui.set_title_prompt(name.is_empty() && plat_on(prefs, "soundcloud") && !omnipulse_core::soundcloud::signed_in());
     if ui.get_app_name().trim() != name { ui.set_app_name(name.into()); }
     t.set_bg(p.bg.slint());
     t.set_panel(p.panel.slint());
@@ -7878,6 +7883,8 @@ fn main() -> Result<(), slint::PlatformError> {
     });
     let s = shared.clone();
     ui.on_crumb_go(move |i| crumb_go(&s, i.max(0) as usize));
+    ui.on_title_rename({ let s = shared.clone(); move || name_ask(&s, Naming::AppName) });
+    ui.on_title_signin({ let s = shared.clone(); move || { let i = ACCOUNTS.iter().position(|a| a.0 == "soundcloud").unwrap_or(0); account_act(&s, i); } });
     ui.on_page_pl({ let s = shared.clone(); move |act| {
         let side = { let a = s.borrow(); match &a.here { Some(Place::Playlist(id)) => a.side_map.iter().position(|&k| a.playlists.get(k).is_some_and(|p| &p.id == id)), _ => None } };
         if let Some(i) = side { side_action(&s, i, &act); }

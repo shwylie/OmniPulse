@@ -744,6 +744,9 @@ export component AppWindow inherits Window {
     // Settings > App > Display Name: in the title bar and the taskbar (the web app's appName)
     in-out property <string> app-name;
     callback app-name-changed(string);
+    in property <bool> title-prompt;
+    callback title-rename();
+    callback title-signin();
     // Settings > App > Listening Along: Timing, in ms (the web app's listenNudge)
     in-out property <string> listen-nudge: "0";
     callback listen-nudge-changed(string);
@@ -1170,7 +1173,21 @@ export component AppWindow inherits Window {
             HorizontalLayout {
                 padding-left: 14px;
                 spacing: 10px;
-                Text { text: root.app-name != "" ? root.app-name : "OmniPulse"; color: Theme.text; font-weight: 700; font-size: 13px; vertical-alignment: center; }
+                // (right-click: rename it; signed out of SoundCloud: an invitation to sign in, as the web app's)
+                Rectangle {
+                    width: tt.preferred-width;
+                    tt := Text { text: root.title-prompt ? "Sign in to SoundCloud" : (root.app-name != "" ? root.app-name : "OmniPulse"); color: root.title-prompt ? (tta.has-hover ? Theme.text : Theme.accent) : Theme.text; font-weight: 700; font-size: 13px; vertical-alignment: center; height: parent.height; }
+                    tta := TouchArea {
+                        mouse-cursor: root.title-prompt ? MouseCursor.pointer : MouseCursor.default;
+                        clicked => { if (root.title-prompt) { root.title-signin(); } }
+                        // (the name drags the window as the rest of the title bar does)
+                        pointer-event(e) => {
+                            if (e.kind == PointerEventKind.up && e.button == PointerEventButton.right) { root.title-rename(); }
+                            if (e.kind == PointerEventKind.down && e.button == PointerEventButton.left && !root.title-prompt) { root.drag(); }
+                        }
+                        double-clicked => { if (!root.title-prompt) { root.maximize(); } }
+                    }
+                }
                 // Streamer Mode: grey when off; on, it pulses YouTube red, Twitch purple and Kick green
                 Rectangle {
                     width: 26px;
