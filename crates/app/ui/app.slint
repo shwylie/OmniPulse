@@ -707,6 +707,8 @@ export component AppWindow inherits Window {
     // a Settings row's own settings (a plugin's): its key; the dialog with its fields
     callback set-more(string);
     in-out property <bool> pf-open;
+    // a settings panel's address: copied
+    callback pf-copy(int);
     // Pick genres (step 1) and Fine-tune (step 2: the picked genres' subgenres), and Discover's card
     // asking for likes while there are none
     in-out property <bool> taste-open;
@@ -2436,9 +2438,10 @@ export component AppWindow inherits Window {
         background: #00000080;
         TouchArea { clicked => { root.pf-open = false; } }
         Rectangle {
-            width: 460px;
-            // (sized by its fields: a size taken from its own layout would size the window by it too)
-            height: 120px + root.pf-fields.length * 60px;
+            width: 520px;
+            // (sized by its fields, as tall as the window lets it: a size taken from its own layout would
+            // size the window by it too; past that, its fields scroll)
+            height: min(root.height - 60px, 120px + root.pf-fields.length * 66px);
             x: (parent.width - self.width) / 2;
             y: (parent.height - self.height) / 2;
             background: Theme.elevated;
@@ -2447,11 +2450,39 @@ export component AppWindow inherits Window {
             border-color: Theme.line;
             TouchArea { }
             pf-col := VerticalLayout {
-                alignment: start;
+                height: parent.height;
                 padding: 20px;
                 spacing: 12px;
                 Text { text: root.pf-head; color: Theme.text; font-size: 18px; font-weight: 800; }
-                for f[i] in root.pf-fields: HorizontalLayout {
+                ScrollView {
+                  vertical-stretch: 1;
+                  VerticalLayout {
+                  spacing: 12px;
+                  padding-right: 10px;
+                  for f[i] in root.pf-fields: VerticalLayout {
+                   spacing: 6px;
+                   // instructions: just text
+                   if f.kind == "note": Text { text: f.label; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
+                   // an address: shown, and copied
+                   if f.kind == "info": VerticalLayout {
+                    spacing: 4px;
+                    Text { text: f.label; color: Theme.text; font-weight: 700; }
+                    if f.note != "": Text { text: f.note; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
+                    HorizontalLayout {
+                      spacing: 8px;
+                      Rectangle {
+                        horizontal-stretch: 1;
+                        height: 34px;
+                        border-radius: 8px;
+                        background: Theme.panel;
+                        border-width: 1px;
+                        border-color: Theme.line;
+                        Text { x: 10px; width: parent.width - 20px; text: f.value; color: Theme.text; font-size: 12px; overflow: elide; vertical-alignment: center; }
+                      }
+                      Pill { label: "Copy"; clicked => { root.pf-copy(i); } }
+                    }
+                   }
+                   if f.kind != "note" && f.kind != "info": HorizontalLayout {
                     spacing: 12px;
                     VerticalLayout {
                         horizontal-stretch: 1;
@@ -2473,6 +2504,11 @@ export component AppWindow inherits Window {
                         border-color: Theme.line;
                         TextInput { x: 10px; width: parent.width - 20px; height: parent.height; vertical-alignment: center; color: Theme.text; font-size: 14px; single-line: true; input-type: f.kind == "password" ? InputType.password : f.kind == "number" ? InputType.decimal : InputType.text; text: f.value; edited => { root.pf-set(i, self.text); } }
                     }
+                    // a button: done at once
+                    if f.kind == "button": Pill { label: f.value; y: (parent.height - self.height) / 2; clicked => { root.pf-set(i, "press"); } }
+                   }
+                  }
+                  }
                 }
                 HorizontalLayout {
                     alignment: end;

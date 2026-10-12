@@ -120,7 +120,9 @@ pub fn widget_start(prefs: &Value) -> Option<String> {
     if !set(prefs, "widget") {
         return None;
     }
-    core::widget::widget_start(prefs["widgetPort"].as_u64().map(|p| p as u16).unwrap_or(7878), false, "").ok()
+    // (bots on other devices: alerts from them too, with the alerts' key, as the web app's)
+    let remote = set(prefs, "botRemote") && set(prefs, "alertsOn");
+    core::widget::widget_start(prefs["widgetPort"].as_u64().map(|p| p as u16).unwrap_or(7878), remote, prefs["alertKey"].as_str().unwrap_or("")).ok()
 }
 
 /// The alerts' settings, for the widget (as alertsCfg in js/widget.js)

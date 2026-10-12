@@ -15,6 +15,7 @@ mod mix;
 mod updater;
 mod discover;
 mod lang;
+mod panels;
 mod integrations;
 mod look;
 mod marks;
@@ -3049,9 +3050,10 @@ fn song_request(shared: &Shared, id: u64, q: String, user: String) {
 /// The servers the web app's settings have on: the widget, the Stream Deck's remote, chat requests
 // ---------- Settings: the switches beyond Look ----------
 // (section, label, note, key, on unless switched off)
-const SET_ROWS: [(&str, &str, &str, &str, bool); 25] = [
+const SET_ROWS: [(&str, &str, &str, &str, bool); 27] = [
     ("Library", "Sets & Podcasts in the Queue", "Lists and autoplay include anything over 15 minutes. Off: only when you pick one.", "queueSets", false),
     ("Library", "Autoplay", "Plays similar tracks when the queue runs out.", "autoplay", true),
+    ("Library", "Avoid Recent Plays", "Skips songs you've heard lately in what the app picks for you. What you choose yourself still plays.", "avoidRecent", true),
     ("Library", "Seamless Mix", "Songs with a beat blend into the next on it, as a DJ mixes: at its tempo, on its phrase, the next one sweeping in from the top as the one playing gives way below it (never both in one part of the sound), down to the drop. With songs that play from YouTube Music or your files (never Spotify's own playback), once their beat is known.", "mixOn", true),
     ("Library", "EQ Band Handoff", "Seamless Mix hands over a band at a time (highs, then voice and bass), as a DJ's EQ does, instead of sweeping one song into the other: quicker and more sudden.", "mixBands", false),
     ("Library", "Skip non-music parts", "What plays from YouTube skips the parts of music videos that aren't music (a skit before the song, an interview after it), as marked on SponsorBlock.", "sbOn", true),
@@ -3071,6 +3073,7 @@ const SET_ROWS: [(&str, &str, &str, &str, bool); 25] = [
     ("Streaming", "Extended", "Also leaves out music that isn't safe on stream: only open licences, and artists and labels cleared for streaming.", "streamSafe", false),
     ("Streaming", "Discord Status", "Shows what you're playing on your Discord profile.", "presence", false),
     ("Streaming", "Stream Widget", "A now-playing card for OBS, with alerts.", "widget", false),
+    ("Streaming", "Alerts", "On the widget: follows, subs, bits, raids and more, from your bot.", "alertsOn", false),
     ("Streaming", "Song Requests", "Chat asks for songs through your bot.", "req", false),
     ("Streaming", "Limit Requests", "The most waiting, and the most per viewer. Off: chat can request as many songs as it likes.", "reqLimits", true),
     ("Streaming", "OmniPulse Offset", "Your music a second time, as its own app (\"OmniPulse Offset\"), to send to a stream mix only. Its offset and volume are the web app's (Settings > Streaming) for now.", "out2On", false),
@@ -3088,9 +3091,13 @@ fn paint_settings(a: &App) {
         let mut list: Vec<SetRow> = SET_ROWS.iter().filter(|(s, ..)| *s == sec)
             // Extended only shows with Streamer Mode on
             .filter(|(_, _, _, key, _)| *key != "streamSafe" || streamer)
+            // (Alerts only shows with the widget on)
+            .filter(|(_, _, _, key, _)| *key != "alertsOn" || integrations::set(&a.web.prefs, "widget"))
             .map(|(_, label, note, key, dflt)| {
                 let on = if *key == "autoplay" { a.autoplay } else { set_row_on(&a.web.prefs, key, *dflt) };
-                SetRow { head: Default::default(), label: (*label).into(), note: (*note).into(), on, key: (*key).into(), sub: *key == "streamSafe", more: false }
+                // (its settings: in a panel, with it on; Streamer Mode leaves the addresses and keys out)
+                let more = on && panels::of_switch(key).is_some() && !(streamer && matches!(*key, "req" | "remoteOn"));
+                SetRow { head: Default::default(), label: (*label).into(), note: (*note).into(), on, key: (*key).into(), sub: matches!(*key, "streamSafe" | "alertsOn"), more }
             }).collect();
         // the plugins installed (the web app adds and removes them; each one switches on and off here)
         if sec == "Integrations" && !streamer {
@@ -3145,6 +3152,135 @@ thread_local! {
     static PF_EDIT: RefCell<Option<(String, serde_json::Map<String, serde_json::Value>)>> = const { RefCell::new(None) };
 }
 
+// ---------- Settings panels (crate::panels): a switch's settings, in the plugins' dialog ----------
+thread_local! {
+    /// the open panel's fields, as drawn (for what a press, a choice or a copy is of)
+    static PANEL_FIELDS: RefCell<Vec<serde_json::Value>> = const { RefCell::new(Vec::new()) };
+}
+
+/// The keys the servers need, made once (as the web app makes them when they're switched on)
+fn panel_keys(shared: &Shared) {
+    let need: Vec<&str> = {
+        let p = &shared.borrow().web.prefs;
+        let mut v = Vec::new();
+        if integrations::set(p, "req") && p["reqKey"].as_str().unwrap_or("").is_empty() { v.push("reqKey"); }
+        if integrations::set(p, "remoteOn") && p["remoteKey"].as_str().unwrap_or("").is_empty() { v.push("remoteKey"); }
+        if integrations::set(p, "botRemote") && p["alertKey"].as_str().unwrap_or("").is_empty() { v.push("alertKey"); }
+        v
+    };
+    for k in need { pref_put(shared, k, serde_json::json!(panels::new_key())); }
+}
+
+fn pref_put(shared: &Shared, key: &str, v: serde_json::Value) {
+    if let Some(o) = shared.borrow_mut().web.prefs.as_object_mut() { o.insert(key.into(), v.clone()); }
+    if std::env::var_os("OMNIPULSE_SELFTEST").is_none() { webstate::save_pref(key, v); }
+}
+
+fn panel_open(shared: &Shared, name: &str) {
+    panel_keys(shared);
+    let vals = panels::values(name, &shared.borrow().web.prefs);
+    PF_EDIT.with(|e| *e.borrow_mut() = Some((format!("panel:{name}"), vals)));
+    pf_paint(shared);
+    if let Some(ui) = shared.borrow().ui.upgrade() {
+        ui.set_pf_head(panels::title(name).into());
+        ui.set_pf_open(true);
+    }
+}
+
+fn panel_paint(shared: &Shared, name: &str, vals: &serde_json::Map<String, serde_json::Value>) {
+    let fields = panels::fields(name, vals, &shared.borrow().web.prefs, &omnipulse_core::lan_ip().unwrap_or_else(|| "THIS-PC".into()));
+    let text = |v: &serde_json::Value| match v { serde_json::Value::String(s) => s.clone(), serde_json::Value::Null => String::new(), x => x.to_string() };
+    let rows: Vec<PlugField> = fields.iter().map(|f| {
+        let key = f["key"].as_str().unwrap_or("").to_string();
+        let kind = f["type"].as_str().unwrap_or("text").to_string();
+        let now = vals.get(&key).cloned().unwrap_or_default();
+        let value = match kind.as_str() {
+            "select" => {
+                let opts = f["options"].as_array().cloned().unwrap_or_default();
+                let at = opts.iter().position(|o| panels::same(o, &now)).unwrap_or(0);
+                f["labels"][at].as_str().unwrap_or("").to_string()
+            }
+            "toggle" => if now.as_bool() == Some(true) { "true".into() } else { "false".into() },
+            "info" | "button" => f["value"].as_str().unwrap_or("").to_string(),
+            _ => text(&now),
+        };
+        PlugField { label: f["label"].as_str().unwrap_or("").into(), note: f["note"].as_str().unwrap_or("").into(), value: value.into(), kind: kind.into(), options: ModelRc::default(), key: key.into() }
+    }).collect();
+    PANEL_FIELDS.with(|p| *p.borrow_mut() = fields);
+    if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_pf_fields(ModelRc::from(Rc::new(VecModel::from(rows)))); }
+}
+
+/// A field changed (a choice: on to its next; a button: pressed, at once)
+fn panel_set(shared: &Shared, name: &str, mut vals: serde_json::Map<String, serde_json::Value>, i: usize, v: &str) {
+    let Some(f) = PANEL_FIELDS.with(|p| p.borrow().get(i).cloned()) else { return };
+    let key = f["key"].as_str().unwrap_or("").to_string();
+    let redraw = match f["type"].as_str().unwrap_or("") {
+        "toggle" => { vals.insert(key, serde_json::json!(v == "true")); true }
+        "select" => {
+            let opts = f["options"].as_array().cloned().unwrap_or_default();
+            let now = vals.get(&key).cloned().unwrap_or_default();
+            let at = opts.iter().position(|o| panels::same(o, &now)).map_or(0, |k| (k + 1) % opts.len().max(1));
+            if let Some(o) = opts.get(at) { vals.insert(key, o.clone()); }
+            true
+        }
+        "button" => { PF_EDIT.with(|e| *e.borrow_mut() = Some((format!("panel:{name}"), vals.clone()))); panel_press(shared, &key); return panel_paint(shared, name, &vals); }
+        _ => { if let Some(x) = panels::typed(&key, v) { vals.insert(key, x); } false }
+    };
+    PF_EDIT.with(|e| *e.borrow_mut() = Some((format!("panel:{name}"), vals.clone())));
+    if redraw { panel_paint(shared, name, &vals); }
+}
+
+/// A panel's button: done at once
+fn panel_press(shared: &Shared, key: &str) {
+    let note = match key {
+        "reqClear" => {
+            let mut a = shared.borrow_mut();
+            let cur = a.queue.qi;
+            let before = a.queue.items.len();
+            let keep: Vec<bool> = a.queue.items.iter().enumerate().map(|(i, q)| q.by.is_empty() || Some(i) == cur).collect();
+            let mut k = 0;
+            a.queue.items.retain(|_| { let x = keep[k]; k += 1; x });
+            if let Some(c) = cur { a.queue.qi = Some(keep[..c].iter().filter(|x| **x).count()); }
+            let n = before - a.queue.items.len();
+            paint_queue(&mut a);
+            save_session(&a);
+            if n == 0 { "No requests waiting.".to_string() } else { format!("Cleared {}.", plural(n, "request", "requests")) }
+        }
+        "reqNewKey" | "remoteNewKey" => {
+            let pref = if key == "reqNewKey" { "reqKey" } else { "remoteKey" };
+            pref_put(shared, pref, serde_json::json!(panels::new_key()));
+            if key == "reqNewKey" { omnipulse_core::requests::requests_stop(); } else { omnipulse_core::remote::remote_stop(); }
+            outside_start(shared);
+            "A new key: the addresses have it.".to_string()
+        }
+        "out2Restart" => {
+            omnipulse_core::omni_input::stop();
+            offset_apply(shared);
+            "OmniPulse Offset started again.".to_string()
+        }
+        _ => return,
+    };
+    if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_status(note.into()); }
+}
+
+/// Saved: into the prefs, and what uses them started again with them
+fn panel_save(shared: &Shared, name: &str, vals: serde_json::Map<String, serde_json::Value>) {
+    for k in panels::keys_of(name) {
+        if let Some(v) = vals.get(k) { pref_put(shared, k, v.clone()); }
+    }
+    panel_keys(shared);
+    match name {
+        "requests" => { omnipulse_core::requests::requests_stop(); outside_start(shared); }
+        "widget" | "alerts" => { omnipulse_core::widget::widget_stop(); outside_start(shared); push_out(shared, true); }
+        "remote" => { omnipulse_core::remote::remote_stop(); outside_start(shared); }
+        "offset" => offset_apply(shared),
+        _ => {}
+    }
+    PF_EDIT.with(|e| e.borrow_mut().take());
+    if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_pf_open(false); ui.set_status(format!("{} settings saved.", panels::title(name)).into()); }
+    paint_settings(&shared.borrow());
+}
+
 /// A plugin's settings dialog: its manifest's fields, as they're set (prefs.pluginSettings, as the web app's)
 fn pf_open(shared: &Shared, id: &str) {
     let Some(p) = omnipulse_core::plugins::list().into_iter().find(|p| p.manifest.id == id) else { return };
@@ -3164,6 +3300,7 @@ fn pf_fields(id: &str) -> Vec<serde_json::Value> {
 
 fn pf_paint(shared: &Shared) {
     let Some((id, vals)) = PF_EDIT.with(|e| e.borrow().clone()) else { return };
+    if let Some(name) = id.strip_prefix("panel:") { return panel_paint(shared, name, &vals); }
     let text = |v: &serde_json::Value| match v { serde_json::Value::String(s) => s.clone(), serde_json::Value::Null => String::new(), x => x.to_string() };
     let rows: Vec<PlugField> = pf_fields(&id).iter().filter_map(|f| {
         let key = f["key"].as_str()?.to_string();
@@ -3177,6 +3314,7 @@ fn pf_paint(shared: &Shared) {
 /// One setting changed in the dialog (a select's "next": on to its next option)
 fn pf_set(shared: &Shared, i: usize, v: &str) {
     let Some((id, mut vals)) = PF_EDIT.with(|e| e.borrow().clone()) else { return };
+    if let Some(name) = id.strip_prefix("panel:") { return panel_set(shared, name, vals, i, v); }
     let Some(f) = pf_fields(&id).get(i).cloned() else { return };
     let Some(key) = f["key"].as_str().map(String::from) else { return };
     let value = match f["type"].as_str().unwrap_or("text") {
@@ -3198,6 +3336,7 @@ fn pf_set(shared: &Shared, i: usize, v: &str) {
 /// Saved: the plugin starts again with them
 fn pf_save(shared: &Shared) {
     let Some((id, vals)) = PF_EDIT.with(|e| e.borrow_mut().take()) else { return };
+    if let Some(name) = id.strip_prefix("panel:") { return panel_save(shared, name, vals); }
     let all = {
         let mut a = shared.borrow_mut();
         let mut all = a.web.prefs["pluginSettings"].as_object().cloned().unwrap_or_default();
@@ -3308,13 +3447,13 @@ fn set_toggle(shared: &Shared, key: &str) {
             if std::env::var_os("OMNIPULSE_SELFTEST").is_none() { webstate::save_pref(key, serde_json::json!(on)); }
             // the servers stop, and start again with what's set now
             match key {
-                "widget" => omnipulse_core::widget::widget_stop(),
+                "widget" | "alertsOn" => omnipulse_core::widget::widget_stop(),
                 "req" => omnipulse_core::requests::requests_stop(),
                 "remoteOn" => omnipulse_core::remote::remote_stop(),
                 "presence" if !on => integrations::presence(&shared.borrow().rt, &shared.borrow().web.prefs, None, 0, false, None),
                 _ => {}
             }
-            if matches!(key, "widget" | "req" | "remoteOn") && on { outside_start(shared); }
+            if matches!(key, "widget" | "req" | "remoteOn" | "alertsOn") && (on || key == "alertsOn") { panel_keys(shared); outside_start(shared); }
             if key == "mbOn" { go_plus_set(&shared.borrow().web.prefs); }
             if key == "out2On" { offset_apply(shared); }
             // Listen Along & Jams off: out of any room, and the Jam button goes
@@ -5600,7 +5739,7 @@ fn outside_start(shared: &Shared) {
                     }
                 }));
             }));
-            let _ = omnipulse_core::requests::requests_start(prefs["reqPort"].as_u64().unwrap_or(7879) as u16, key.to_string(), false);
+            let _ = omnipulse_core::requests::requests_start(prefs["reqPort"].as_u64().unwrap_or(7879) as u16, key.to_string(), integrations::set(&prefs, "botRemote"));
         }
     }
     push_out(shared, false);
@@ -6092,7 +6231,18 @@ fn main() -> Result<(), slint::PlatformError> {
     let s = shared.clone();
     ui.on_ks_save(move || ks_save(&s));
     let s = shared.clone();
-    ui.on_set_more(move |key| { if let Some(id) = key.strip_prefix("plugOn_") { pf_open(&s, id); } });
+    ui.on_set_more(move |key| {
+        if let Some(id) = key.strip_prefix("plugOn_") { return pf_open(&s, id); }
+        if let Some(name) = panels::of_switch(&key) { panel_open(&s, name); }
+    });
+    let s = shared.clone();
+    ui.on_pf_copy(move |i| {
+        let v = PANEL_FIELDS.with(|p| p.borrow().get(i as usize).and_then(|f| f["copy"].as_str().map(String::from)));
+        if let Some(v) = v {
+            let note = match share::copy(&v) { Ok(()) => "Copied.".to_string(), Err(e) => e };
+            if let Some(ui) = s.borrow().ui.upgrade() { ui.set_status(note.into()); }
+        }
+    });
     let s = shared.clone();
     ui.on_pf_set(move |i, v| pf_set(&s, i as usize, &v));
     let s = shared.clone();
@@ -6608,6 +6758,8 @@ fn main() -> Result<(), slint::PlatformError> {
             // (OMNIPULSE_SELFTEST_PLAN=dnd: a Library track dragged onto the queue; what the sidebar would take,
             // only asked, nothing dropped on your playlists)
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("dnd") { vec![(9, "play"), (12, "library"), (13, "qopen"), (14, "dragq"), (16, "dragasks"), (17, "end")] }
+            // (OMNIPULSE_SELFTEST_PLAN=panels: the settings panels, opened (nothing saved))
+            else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("panels") { vec![(9, "settings"), (10, "p_requests"), (12, "p_widget"), (14, "p_alerts"), (16, "pfclose"), (17, "end")] }
             // (OMNIPULSE_SELFTEST_PLAN=look: List Density at Compact, and Search with Hide likes)
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("look") { vec![(9, "play"), (12, "library"), (13, "compact"), (14, "settings"), (15, "comfy"), (16, "search"), (19, "hidelikes"), (21, "hidelikesoff"), (22, "discover"), (30, "langnext"), (40, "end")] }
             else if only_discover { vec![(9, "play"), (11, "discover"), (30, "disc"), (45, "discmix"), (12, "import"), (46, "taste"), (47, "taste2"), (48, "taste3"), (70, "tasted"), (71, "marquee"), (72, "marqueeoff"), (73, "end")] } else { full.to_vec() };
@@ -6673,6 +6825,8 @@ fn main() -> Result<(), slint::PlatformError> {
                 }
                 "search" => { ui.set_search_text("deadmau5".into()); ui.invoke_search("deadmau5".into()); }
                 "compact" => ui.invoke_density_changed(true),
+                w if w.starts_with("p_") => { panel_open(&s, &w[2..]); println!("selftest: panel {} has {} fields", &w[2..], ui.get_pf_fields().row_count()); }
+                "pfclose" => { PF_EDIT.with(|e| e.borrow_mut().take()); ui.set_pf_open(false); }
                 "qopen" => ui.set_queue_open(true),
                 "dragq" => {
                     use slint::platform::{PointerEventButton, WindowEvent};
