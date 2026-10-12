@@ -366,6 +366,17 @@ pub async fn set_follow(id: String, follow: bool) -> Result<(), String> {
 }
 
 // Create (POST /playlists), change (PUT /playlists/{id}) or delete (DELETE) your own playlists.
+/// A playlist write's tracks, { "id": n } each, as { "urn": "soundcloud:tracks:n" }
+fn as_urns(mut body: Value) -> Value {
+    if let Some(list) = body["playlist"]["tracks"].as_array_mut() {
+        for t in list.iter_mut() {
+            let id = t["id"].as_u64().map(|n| n.to_string()).or_else(|| t["id"].as_str().filter(|x| x.chars().all(|c| c.is_ascii_digit()) && !x.is_empty()).map(String::from));
+            if let Some(id) = id { *t = serde_json::json!({ "urn": format!("soundcloud:tracks:{id}") }); }
+        }
+    }
+    body
+}
+
 pub async fn playlist_write(method: String, path: String, body: Option<Value>) -> Result<Value, String> {
     let ok_path = path == "/playlists"
         || path
@@ -381,6 +392,9 @@ pub async fn playlist_write(method: String, path: String, body: Option<Value>) -
         "DELETE" => reqwest::Method::DELETE,
         _ => return Err("That method is not allowed".to_string()),
     };
+    // (a playlist's tracks as URNs: SoundCloud turns down an id past 2,147,483,647 given as a number
+    // ("Could not parse JSON request body"), and its newer tracks' ids are)
+    let body = body.map(as_urns);
     let cfg = load_config()?;
     let mut tokens = load_tokens().ok_or("Not signed in")?;
     let url = format!("https://api.soundcloud.com{path}");
@@ -440,5 +454,16 @@ mod hls_probe {
             println!("{name} playlist: {real}");
             println!("{name}: {} segments, tags {:?}, first segment {} bytes, starts {:02x?} = {kind}", lines.iter().filter(|l| l.starts_with("#EXTINF")).count(), tags, bytes.len(), head);
         }
+    }
+}
+
+
+#[cfg(test)]
+mod urn_tests {
+    #[test]
+    fn a_playlists_tracks_go_as_urns() {
+        let b = super::as_urns(serde_json::json!({ "playlist": { "title": "x", "tracks": [{ "id": 2348177720u64 }, { "id": "12" }, { "urn": "soundcloud:tracks:5" }] } }));
+        assert_eq!(b["playlist"]["tracks"], serde_json::json!([{ "urn": "soundcloud:tracks:2348177720" }, { "urn": "soundcloud:tracks:12" }, { "urn": "soundcloud:tracks:5" }]));
+        assert_eq!(super::as_urns(serde_json::json!({ "playlist": { "title": "y" } }))["playlist"]["title"], "y");
     }
 }
