@@ -776,10 +776,30 @@ thread_local! {
 }
 
 
+thread_local! {
+    /// an artist's page opened by name, not followed: where they were found (to follow them there)
+    static NAMED: RefCell<Option<sources::Artist>> = const { RefCell::new(None) };
+}
+
 fn follow_paint(shared: &Shared) {
     let Some(ui) = shared.borrow().ui.upgrade() else { return };
     let (at, asked, off) = FOLLOW.with(|f| f.borrow().clone());
-    let Some(a) = at.and_then(|i| shared.borrow().artists.as_ref().and_then(|l| l.get(i).cloned())) else { ui.set_follow_label("".into()); ui.set_follow_more("".into()); return };
+    ui.set_follow_sc("".into());
+    ui.set_follow_sp("".into());
+    let Some(a) = at.and_then(|i| shared.borrow().artists.as_ref().and_then(|l| l.get(i).cloned())) else {
+        // (by name: Follow, where they were found)
+        let found = NAMED.with(|n| n.borrow().clone()).filter(|n| !n.plats().is_empty());
+        ui.set_follow_label(if found.is_some() { "Follow".into() } else { "".into() });
+        ui.set_follow_on(false);
+        if let Some(n) = &found {
+            if n.sc.is_some() { ui.set_follow_sc("Follow on SoundCloud".into()); }
+            if n.sp.is_some() { ui.set_follow_sp("Follow on Spotify".into()); }
+        }
+        ui.set_follow_more("".into());
+        return;
+    };
+    ui.set_follow_sc(if a.sc.is_some() { "Unfollow on SoundCloud".into() } else if omnipulse_core::soundcloud::signed_in() { "Follow on SoundCloud".into() } else { "".into() });
+    ui.set_follow_sp(if a.sp.is_some() { "Unfollow on Spotify".into() } else if omnipulse_core::spotify::spotify_signed_in() { "Follow on Spotify".into() } else { "".into() });
     let names = |l: Vec<&str>| l.into_iter().map(plat_name).collect::<Vec<_>>().join(" and ");
     if a.plats().is_empty() {
         ui.set_follow_label(if off.is_empty() { "".into() } else { "Follow".into() });
@@ -800,9 +820,57 @@ fn artist_set(shared: &Shared, i: usize, f: impl FnOnce(&mut sources::Artist)) {
     follow_paint(shared);
 }
 
+/// Follow on an artist's page opened by name: on the platforms they were found on (only `only`, if given),
+/// then they're in your Artists
+fn follow_named(shared: &Shared, only: Option<&'static str>) {
+    let Some(n) = NAMED.with(|x| x.borrow().clone()) else { return };
+    let plats: Vec<(&'static str, String)> = [n.sc.map(|x| ("soundcloud", x.to_string())), n.sp.clone().map(|x| ("spotify", x))].into_iter().flatten().filter(|(p, _)| only.is_none_or(|o| o == *p)).collect();
+    let (rt, weak) = { let x = shared.borrow(); (x.rt.clone(), x.ui.clone()) };
+    rt.spawn(async move {
+        let mut done: Vec<(&'static str, String)> = Vec::new();
+        for (p, id) in &plats { if sources::set_follow(p, id, true).await.is_ok() { done.push((*p, id.clone())); } }
+        let _ = weak.upgrade_in_event_loop(move |ui| SHARED.with(|s| {
+            let Some(sh) = s.borrow().clone() else { return };
+            if done.is_empty() { ui.set_status(format!("Couldn't follow {}.", n.name).into()); return; }
+            let a = sources::Artist { name: n.name.clone(), img: n.img.clone(), sc: done.iter().find(|d| d.0 == "soundcloud").and_then(|d| d.1.parse().ok()), sp: done.iter().find(|d| d.0 == "spotify").map(|d| d.1.clone()) };
+            let i = { let mut x = sh.borrow_mut(); let l = x.artists.get_or_insert_with(Vec::new); l.push(a); l.len() - 1 };
+            NAMED.with(|x| x.borrow_mut().take());
+            FOLLOW.with(|f| *f.borrow_mut() = (Some(i), false, Vec::new()));
+            follow_paint(&sh);
+            ui.set_status(format!("Following {} on {}.", n.name, done.iter().map(|d| plat_name(d.0)).collect::<Vec<_>>().join(" and ")).into());
+        }));
+    });
+}
+
+/// The follow button's right-click: one platform, followed or unfollowed
+fn follow_plat(shared: &Shared, plat: &str) {
+    let plat: &'static str = if plat == "spotify" { "spotify" } else { "soundcloud" };
+    let at = FOLLOW.with(|f| f.borrow().0);
+    let Some(i) = at else { return follow_named(shared, Some(plat)) };
+    let Some(a) = shared.borrow().artists.as_ref().and_then(|l| l.get(i).cloned()) else { return };
+    let have = if plat == "soundcloud" { a.sc.map(|x| x.to_string()) } else { a.sp.clone() };
+    match have {
+        // (followed there: unfollowed there only)
+        Some(id) => {
+            let (rt, weak) = { let x = shared.borrow(); (x.rt.clone(), x.ui.clone()) };
+            rt.spawn(async move {
+                let r = sources::set_follow(plat, &id, false).await;
+                let _ = weak.upgrade_in_event_loop(move |ui| SHARED.with(|s| {
+                    let Some(sh) = s.borrow().clone() else { return };
+                    match r {
+                        Ok(()) => { artist_set(&sh, i, |x| if plat == "soundcloud" { x.sc = None; } else { x.sp = None; }); ui.set_status(format!("Unfollowed {} on {}.", a.name, plat_name(plat)).into()); }
+                        Err(e) => ui.set_status(format!("Couldn't unfollow on {}: {e}", plat_name(plat)).into()),
+                    }
+                }));
+            });
+        }
+        None => artist_act(shared, i, &format!("follow:{plat}")),
+    }
+}
+
 fn follow_click(shared: &Shared) {
     let (at, asked, off) = FOLLOW.with(|f| f.borrow().clone());
-    let Some(i) = at else { return };
+    let Some(i) = at else { return follow_named(shared, None) };
     let Some(a) = shared.borrow().artists.as_ref().and_then(|l| l.get(i).cloned()) else { return };
     let (rt, weak) = { let x = shared.borrow(); (x.rt.clone(), x.ui.clone()) };
     if a.plats().is_empty() {
@@ -961,6 +1029,7 @@ fn open_artist_named(shared: &Shared, name: &str) {
     let followed = shared.borrow().artists.as_ref().and_then(|l| l.iter().position(|a| omnipulse_core::ranking::artist_key(&a.name) == omnipulse_core::ranking::artist_key(name)));
     if let Some(i) = followed { return open_artist(shared, i); }
     FOLLOW.with(|f| *f.borrow_mut() = (None, false, Vec::new()));
+    NAMED.with(|n| n.borrow_mut().take());
     follow_paint(shared);
     let key = omnipulse_core::ranking::artist_key(name);
     let mine: Vec<Track> = shared.borrow().library.iter().filter(|t| t.artist.split([',', '&']).any(|a| omnipulse_core::ranking::artist_key(a.trim()) == key)).cloned().collect();
@@ -973,6 +1042,10 @@ fn open_artist_named(shared: &Shared, name: &str) {
             async { if sp_on { sources::find_artist_on("spotify", &name).await } else { None } },
         );
         let a = sources::Artist { name: name.clone(), img: String::new(), sc, sp };
+        {
+            let found = a.clone();
+            let _ = slint::invoke_from_event_loop(move || SHARED.with(|s| { NAMED.with(|n| *n.borrow_mut() = Some(found)); if let Some(sh) = s.borrow().clone() { follow_paint(&sh); } }));
+        }
         let on = a.plats().into_iter().map(|p| if p == "spotify" { "Spotify" } else { "SoundCloud" }).collect::<Vec<_>>().join(" and ");
         let (t, dz, bio) = tokio::join!(sources::artist_tracks(&a), artist_top(&name, cat), artist_bio(&name));
         let t = sources::once_each(sources::interleave(vec![mine.clone(), t, dz]));
@@ -8099,6 +8172,7 @@ fn main() -> Result<(), slint::PlatformError> {
     });
     let s = shared.clone();
     ui.on_crumb_go(move |i| crumb_go(&s, i.max(0) as usize));
+    ui.on_follow_plat({ let s = shared.clone(); move |p| follow_plat(&s, &p) });
     ui.on_album_act({ let s = shared.clone(); move |i, act| {
         let Some(f) = ALBUMS.with(|a| a.borrow().get(i.max(0) as usize).cloned()) else { return };
         let (title, by, _, _) = f.tile();

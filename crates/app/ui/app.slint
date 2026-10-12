@@ -1041,6 +1041,10 @@ export component AppWindow inherits Window {
     callback queue-clear(bool);
     // a song's tile on a shelf: its menu's choice
     callback tile-act(int, int, string);
+    // an artist's page: following on one platform ("Follow on SoundCloud", "Unfollow on Spotify"; "" none)
+    in property <string> follow-sc;
+    in property <string> follow-sp;
+    callback follow-plat(string);
     callback album-act(int, string);
     // YouTube Music's helpers: what's said, a Set Up (or Try Again) button, a Remove one
     in property <string> helpers-note;
@@ -1614,7 +1618,16 @@ export component AppWindow inherits Window {
                         }
                         if root.page == "sets": Pill { label: "Liked only"; d: Icons.library; on: root.sets-liked; y: 7px; clicked => { root.sets-liked = !root.sets-liked; root.sets-liked-changed(root.sets-liked); } }
                         if root.page == "artist" && root.follow-more != "": Pill { label: root.follow-more; y: 7px; clicked => { root.follow-more-click(); } }
-                        if root.page == "artist" && root.follow-label != "": Pill { label: root.follow-label; on: root.follow-on; y: 7px; clicked => { root.follow-click(); } }
+                        // (right-click: each platform on its own, as the web app's)
+                        if root.page == "artist" && root.follow-label != "": ContextMenuArea {
+                            width: fpill.preferred-width;
+                            enabled: root.follow-sc != "" || root.follow-sp != "";
+                            Menu {
+                                if root.follow-sc != "": MenuItem { title: root.follow-sc; activated => { root.follow-plat("soundcloud"); } }
+                                if root.follow-sp != "": MenuItem { title: root.follow-sp; activated => { root.follow-plat("spotify"); } }
+                            }
+                            fpill := Pill { label: root.follow-label; on: root.follow-on; y: 7px; clicked => { root.follow-click(); } }
+                        }
                         Pill { label: "Favourites only"; d: Icons.star; on: root.fav-only; y: 7px; clicked => { root.fav-only = !root.fav-only; root.fav-only-changed(root.fav-only); } }
                     }
                     // the list's column heads
