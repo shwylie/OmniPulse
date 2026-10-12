@@ -418,8 +418,9 @@ pub mod dock {
                 Ok(tray) if GetWindowRect(tray, &mut t).is_ok() && t.left > r.left + bw / 2 => t.left,
                 _ => r.right - (220.0 * scale) as i32,
             };
+            // (the taskbar's full height, as its own buttons)
             let gap = (6.0 * scale) as i32;
-            Some((right - width - gap, r.top + gap, width, bh - 2 * gap))
+            Some((right - width - gap, r.top, width, bh))
         }
     }
 
@@ -428,14 +429,34 @@ pub mod dock {
         unsafe { SHQueryUserNotificationState().map(|s| s == QUNS_BUSY || s == QUNS_RUNNING_D3D_FULL_SCREEN || s == QUNS_PRESENTATION_MODE).unwrap_or(false) }
     }
 
-    /// Made a widget: no taskbar button of its own, never takes the focus, small round corners
-    pub fn style(hwnd: isize) {
+    /// Windows' taskbar is dark (Settings > Personalisation > Colours: Windows mode)
+    pub fn taskbar_dark() -> bool {
+        use windows::Win32::System::Registry::{RegGetValueW, HKEY_CURRENT_USER, RRF_RT_REG_DWORD};
+        let mut v: u32 = 0;
+        let mut n = std::mem::size_of::<u32>() as u32;
+        let ok = unsafe { RegGetValueW(HKEY_CURRENT_USER, w!("Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize"), w!("SystemUsesLightTheme"), RRF_RT_REG_DWORD, None, Some(&mut v as *mut u32 as _), Some(&mut n)) };
+        ok.is_err() || v == 0
+    }
+
+    /// Made a widget: no taskbar button of its own, never takes the focus. `glass`: see-through (what it
+    /// draws on black added over the taskbar, as the taskbar's own icons are), else small round corners
+    pub fn style(hwnd: isize, glass: bool) {
+        use windows::Win32::Graphics::Dwm::{DwmEnableBlurBehindWindow, DWM_BB_BLURREGION, DWM_BB_ENABLE, DWM_BLURBEHIND};
+        use windows::Win32::Graphics::Gdi::{CreateRectRgn, DeleteObject};
         unsafe {
             let h = HWND(hwnd as _);
             let ex = GetWindowLongPtrW(h, GWL_EXSTYLE);
             SetWindowLongPtrW(h, GWL_EXSTYLE, (ex | WS_EX_TOOLWINDOW.0 as isize | WS_EX_NOACTIVATE.0 as isize) & !(WS_EX_APPWINDOW.0 as isize));
-            let pref = DWMWCP_ROUNDSMALL;
-            let _ = DwmSetWindowAttribute(h, DWMWA_WINDOW_CORNER_PREFERENCE, &pref as *const DWM_WINDOW_CORNER_PREFERENCE as _, std::mem::size_of::<DWM_WINDOW_CORNER_PREFERENCE>() as u32);
+            if glass {
+                // (its alpha honoured, nothing blurred: an empty blur region)
+                let rgn = CreateRectRgn(0, 0, -1, -1);
+                let bb = DWM_BLURBEHIND { dwFlags: DWM_BB_ENABLE | DWM_BB_BLURREGION, fEnable: true.into(), hRgnBlur: rgn, fTransitionOnMaximized: false.into() };
+                let _ = DwmEnableBlurBehindWindow(h, &bb);
+                let _ = DeleteObject(rgn.into());
+            } else {
+                let pref = DWMWCP_ROUNDSMALL;
+                let _ = DwmSetWindowAttribute(h, DWMWA_WINDOW_CORNER_PREFERENCE, &pref as *const DWM_WINDOW_CORNER_PREFERENCE as _, std::mem::size_of::<DWM_WINDOW_CORNER_PREFERENCE>() as u32);
+            }
         }
     }
 
@@ -455,6 +476,9 @@ pub mod dock {
     pub fn busy() -> bool {
         false
     }
-    pub fn style(_hwnd: isize) {}
+    pub fn style(_hwnd: isize, _glass: bool) {}
+    pub fn taskbar_dark() -> bool {
+        true
+    }
     pub fn keep(_hwnd: isize, _r: (i32, i32, i32, i32)) {}
 }

@@ -6419,7 +6419,15 @@ fn taskbar_widget(shared: &Shared, ui: &AppWindow, on: bool) {
         let Some((tw, hwnd, shown)) = w.as_mut() else { return };
         // the app's colours
         let (mt, wt) = (ui.global::<Theme>(), tw.global::<Theme>());
-        wt.set_panel(mt.get_panel()); wt.set_elevated(mt.get_elevated()); wt.set_text(mt.get_text()); wt.set_muted(mt.get_muted());
+        // (see-through over a dark taskbar: light text, as its own; over a light one, the app's panel)
+        let glass = desktop::dock::taskbar_dark();
+        tw.set_glass(glass);
+        if glass {
+            wt.set_panel(slint::Color::from_argb_u8(0, 0, 0, 0)); wt.set_elevated(slint::Color::from_rgb_u8(0x2c, 0x2c, 0x2c));
+            wt.set_text(slint::Color::from_rgb_u8(0xf3, 0xf3, 0xf3)); wt.set_muted(slint::Color::from_rgb_u8(0xb4, 0xb4, 0xb4));
+        } else {
+            wt.set_panel(mt.get_panel()); wt.set_elevated(mt.get_elevated()); wt.set_text(mt.get_text()); wt.set_muted(mt.get_muted());
+        }
         wt.set_accent(mt.get_accent()); wt.set_accent_2(mt.get_accent_2()); wt.set_on_accent(mt.get_on_accent()); wt.set_motion(mt.get_motion());
         // what's playing, as the player bar has it
         tw.set_has_track(shared.borrow().queue.current().is_some());
@@ -6450,7 +6458,7 @@ fn taskbar_widget(shared: &Shared, ui: &AppWindow, on: bool) {
                         }).flatten().unwrap_or(0);
                         if *hwnd != 0 {
                             // (no taskbar button of its own: hidden and shown again with its new style)
-                            desktop::dock::style(*hwnd);
+                            desktop::dock::style(*hwnd, tw.get_glass());
                             let _ = tw.hide();
                             let _ = tw.show();
                         }

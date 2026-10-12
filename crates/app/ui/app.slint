@@ -3028,11 +3028,13 @@ export component TaskbarWidget inherits Window {
     in property <float> frac;
     in property <bool> mixing;
     in property <bool> has-track;
+    /// see-through, over a dark taskbar: black is clear, the rest added to what's under it
+    in property <bool> glass;
     callback act(string);
     no-frame: true;
     always-on-top: true;
     title: "OmniPulse Taskbar Widget";
-    background: Theme.panel;
+    background: root.glass ? transparent : Theme.panel;
     preferred-width: 280px;
     preferred-height: 40px;
     HorizontalLayout {
