@@ -3484,7 +3484,7 @@ fn settings_close(shared: &Shared) {
 struct SetFound { path: String, label: String, note: String, cat: String, panel: String, key: String, toggle: bool }
 
 /// The settings drawn by hand (not from SET_ROWS): their category, name and description
-const SET_HAND: [(&str, &str, &str); 22] = [
+const SET_HAND: [(&str, &str, &str); 23] = [
     ("", "Updates", "Checks for a newer version a little after it starts, and installs it."),
     ("App & Look", "Theme", "Light to dark."),
     ("App & Look", "Tint", "A colour through the theme."),
@@ -3498,6 +3498,7 @@ const SET_HAND: [(&str, &str, &str); 22] = [
     ("App & Look", "Listening Along: Timing", "Plays this much later than the host (or earlier, below 0), to line up with their stream."),
     ("App & Look", "Close to Tray", "Closing hides the window; music keeps playing. Quit from the tray."),
     ("App & Look", "Taskbar Widget", "What's playing, always on show in the taskbar by the clock, with its controls."),
+    ("App & Look", "Hardware Acceleration", "Draws the app with your graphics card. Takes effect the next time OmniPulse starts."),
     ("App & Look", "Animations", "Fades and motion."),
     ("App & Look", "Rounded Corners", "On the sidebar, the page and the queue. Off: square."),
     ("App & Look", "Back Up & Restore", "Your settings, keys, favourites, playlists, stats and alerts, in one .zip."),
@@ -6760,6 +6761,7 @@ fn apply_look(shared: &Shared) {
     ui.set_anim_on(motion);
     ui.set_close_to_tray(prefs["closeToTray"].as_bool() == Some(true));
     ui.set_taskbar_widget(prefs["taskbarWidget"].as_bool() == Some(true));
+    ui.set_gpu_on(prefs["nativeGpu"].as_bool() == Some(true));
     LISTEN_NUDGE.store(nudge_of(prefs), std::sync::atomic::Ordering::Relaxed);
     let nudge = nudge_of(prefs).to_string();
     if ui.get_listen_nudge().trim() != nudge && !(ui.get_listen_nudge().trim().is_empty() && nudge == "0") { ui.set_listen_nudge(nudge.into()); }
@@ -6853,8 +6855,10 @@ fn main() -> Result<(), slint::PlatformError> {
     let rt = tokio::runtime::Builder::new_multi_thread().worker_threads(2).enable_all().build().expect("runtime");
     // Slint's software renderer to start with: measured at 38 MB and ~3% of a core while playing,
     // against ~100 MB with the GPU one (most of it the graphics driver). SLINT_BACKEND picks another.
+    // (Settings > App > Hardware Acceleration: the GPU one, from the next start)
     if std::env::var_os("SLINT_BACKEND").is_none() {
-        let _ = slint::BackendSelector::new().backend_name("winit".into()).renderer_name("software".into()).select();
+        let gpu = webstate::native_pref("nativeGpu").and_then(|v| v.as_bool()) == Some(true);
+        let _ = slint::BackendSelector::new().backend_name("winit".into()).renderer_name(if gpu { "femtovg" } else { "software" }.into()).select();
     }
     let ui = AppWindow::new()?;
     let engine = Arc::new(Engine::new("").map_err(slint::PlatformError::Other)?);
@@ -7063,6 +7067,7 @@ fn main() -> Result<(), slint::PlatformError> {
     let s = shared.clone();
     ui.on_app_pref(move |key, on| {
         set_look_pref(&s, &key, serde_json::json!(on));
+        if key == "nativeGpu" { if let Some(ui) = s.borrow().ui.upgrade() { ui.set_status("Hardware Acceleration changes the next time OmniPulse starts.".into()); } }
         if let Some(ui) = s.borrow().ui.upgrade() { windows_now(&s, &ui); }
     });
     let s = shared.clone();

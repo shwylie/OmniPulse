@@ -1022,8 +1022,9 @@ export component AppWindow inherits Window {
     // Settings > App: Close to Tray, Animations (the web app's settings too)
     in-out property <bool> close-to-tray;
     callback close-to-tray-changed(bool);
-    // Settings > App: Taskbar Widget
+    // Settings > App: Taskbar Widget, Hardware Acceleration
     in-out property <bool> taskbar-widget;
+    in-out property <bool> gpu-on;
     callback app-pref(string, bool);
     // a web page opened in your browser
     callback open-web(string);
@@ -2032,6 +2033,22 @@ export component AppWindow inherits Window {
                                             Text { text: "What's playing, always on show in the taskbar by the clock, with its controls. Hidden while a game or video is full screen, or the taskbar is hidden."; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
                                         }
                                         Toggle { checked <=> root.taskbar-widget; y: (parent.height - self.height) / 2; toggled => { root.app-pref("taskbarWidget", self.checked); } }
+                                    }
+                                }
+                                Card {
+                                    HorizontalLayout {
+                                        padding: 16px;
+                                        padding-top: 12px;
+                                        padding-bottom: 12px;
+                                        spacing: 12px;
+                                        VerticalLayout {
+                                            horizontal-stretch: 1;
+                                            alignment: center;
+                                            spacing: 2px;
+                                            Text { text: "Hardware Acceleration"; color: Theme.text; font-weight: 700; }
+                                            Text { text: "Draws the app with your graphics card: smoother on big screens, about 100 MB more memory. Turn off if you see glitches. Takes effect the next time OmniPulse starts."; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
+                                        }
+                                        Toggle { checked <=> root.gpu-on; y: (parent.height - self.height) / 2; toggled => { root.app-pref("nativeGpu", self.checked); } }
                                     }
                                 }
                                 Card {
