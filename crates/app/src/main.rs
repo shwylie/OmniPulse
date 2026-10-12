@@ -2555,6 +2555,8 @@ fn step(shared: &Shared, d: i32) {
         None if d > 0 && !autoplay_fill(shared, true) => {
             engine.stop();
             shared.borrow_mut().loaded = false;
+            // (stopped: the accent you picked again, not the last cover's)
+            apply_look(shared);
             if let Some(ui) = shared.borrow().ui.upgrade() {
                 ui.set_playing(false);
             }
@@ -5815,6 +5817,7 @@ fn listen_leave(shared: &Shared, quiet: bool) {
         a.loaded = false;
         paint_queue(&mut a);
     }
+    apply_look(shared);
     if let Some(ui) = shared.borrow().ui.upgrade() {
         ui.set_playing(false);
         match shared.borrow().queue.current() {
@@ -6022,6 +6025,8 @@ fn safe_skip(shared: &Shared) -> bool {
             let engine = shared.borrow().engine.clone();
             engine.stop();
             shared.borrow_mut().loaded = false;
+            // (stopped: the accent you picked again, not the last cover's)
+            apply_look(shared);
             if let Some(ui) = shared.borrow().ui.upgrade() {
                 ui.set_playing(false);
                 ui.set_status(format!("Stream-Safe Music: \"{title}\" isn't safe on stream, and nothing after it in the queue is.").into());
