@@ -747,7 +747,7 @@ pub async fn sp_search(q: &str) -> Vec<Track> {
 }
 
 /// Artists like this one, from Last.fm (Spotify no longer offers related artists)
-async fn similar_artists(artist: &str, n: usize) -> Vec<String> {
+pub(crate) async fn similar_artists(artist: &str, n: usize) -> Vec<String> {
     core::lastfm::lastfm_call("artist.getSimilar".into(), vec![("artist".into(), artist.into()), ("limit".into(), n.to_string())])
         .await
         .ok()

@@ -483,8 +483,21 @@ pub async fn fresh_for(crew: &[Seed], sc_seeded: bool, input_flags: (bool, bool,
         for t in seeds.into_iter().take(4) { out.extend(crate::sources::related(&t).await); }
         out
     };
+    let sp_on = spotify_fresh();
+    let sp = async {
+        if !sp_on { return Vec::new(); }
+        let Some(first) = crew.first() else { return Vec::new() };
+        let mut names = crate::sources::similar_artists(&first.name, 10).await;
+        crate::queue::shuffle_in_place(&mut names);
+        names.truncate(3);
+        names.extend(crew.iter().map(|a| a.name.clone()));
+        let mut out = Vec::new();
+        for n in names { out.extend(crate::sources::sp_search(&format!("artist:\"{}\"", n.replace('"', ""))).await); }
+        out
+    };
     let cat = async {
-        if !catalog || sc_seeded { return Vec::new(); }
+        // (Deezer's: for mixes not seeded by SoundCloud, or with Spotify on but not searched)
+        if !catalog || (sc_seeded && (sp_on || !SPOTIFY_ON.load(std::sync::atomic::Ordering::Relaxed))) { return Vec::new(); }
         let mut lists = Vec::new();
         for a in crew.iter().take(3) { lists.push(similar_tracks(&a.name).await); }
         crate::sources::interleave(lists)
@@ -499,13 +512,13 @@ pub async fn fresh_for(crew: &[Seed], sc_seeded: bool, input_flags: (bool, bool,
             None => Vec::new(),
         }
     };
-    let (a, b, c) = tokio::join!(sc, cat, yt);
+    let (a, b, c, d) = tokio::join!(sc, cat, yt, sp);
     let crew_keys: Vec<&str> = crew.iter().map(|s| s.key.as_str()).collect();
     let keep = |t: &Track| !t.is_mix() && !liked.has(t)
         // (the crew's own songs come in as the familiar ones, not as new)
         && (sc_seeded || !crew_keys.contains(&core::ranking::artist_key(&first_artist(t)).as_str()));
     // (the platforms put songs forward; which make it, and in what order, is yours)
-    taste_pick([a, b, c].into_iter().map(|l| l.into_iter().filter(|t| keep(t)).collect()).collect())
+    taste_pick([a, d, c, b].into_iter().map(|l| l.into_iter().filter(|t| keep(t)).collect()).collect())
 }
 
 /// A mix's or a station's tracks: mostly new music, with what you know of theirs woven in (two new
@@ -534,6 +547,16 @@ pub async fn crew_tracks(crew: &[Seed], station: bool, sc_seeded: bool, flags: (
 
 /// Discover's language (the web app's recLang, English unless picked): its shelves and its mixes
 static LANG: std::sync::Mutex<String> = std::sync::Mutex::new(String::new());
+
+/// Spotify on (Settings: its switch) for Discover's mixes, as they were when Discover was made
+static SPOTIFY_ON: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Spotify's part of a mix (the web app's spSimilarTracks and spArtistTracks): its songs by the first
+/// artist's like (from Last.fm) and by the crew, searched, with Premium only (a free account's play from
+/// YouTube Music anyway, and the search's allowance is shared: Deezer's stand in then)
+fn spotify_fresh() -> bool {
+    SPOTIFY_ON.load(std::sync::atomic::Ordering::Relaxed) && core::spotify::spotify_signed_in() && core::spotify_engine::spe_premium() == Some(true)
+}
 
 pub fn lang_of(prefs: &Value) -> String {
     prefs["recLang"].as_str().unwrap_or("en").to_string()
@@ -678,6 +701,7 @@ pub async fn build(input: Input) -> Vec<Shelf> {
     your_titles_set(&input.library);
     taste_set(&input);
     *LANG.lock().unwrap() = lang_of(&input.prefs);
+    SPOTIFY_ON.store(input.prefs["spOn"].as_bool() != Some(false), std::sync::atomic::Ordering::Relaxed);
     hide_set(&input.prefs);
     let mut shelves = build_any(input).await;
     // (the shelves of songs in Discover's language; one left empty goes)

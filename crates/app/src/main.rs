@@ -6695,7 +6695,7 @@ fn main() -> Result<(), slint::PlatformError> {
         if claimed.is_err() { return Ok(()); }
     }
     // (a self-test leaves your Spotify alone: no session of its own, but for the Spotify test)
-    if std::env::var_os("OMNIPULSE_SELFTEST").is_some() && std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() != Some("spotify") {
+    if std::env::var_os("OMNIPULSE_SELFTEST").is_some() && std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() != Some("spotify") && std::env::var_os("OMNIPULSE_SELFTEST_SPOTIFY").is_none() {
         std::env::set_var("OMNIPULSE_NO_SPOTIFY", "1");
     }
     let rt = tokio::runtime::Builder::new_multi_thread().worker_threads(2).enable_all().build().expect("runtime");
@@ -7604,7 +7604,7 @@ fn main() -> Result<(), slint::PlatformError> {
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("taskbar") { vec![(9, "play"), (10, "tbon"), (15, "tbshot"), (16, "tboff"), (18, "end")] }
             // (OMNIPULSE_SELFTEST_PLAN=look: List Density at Compact, and Search with Hide likes)
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("look") { vec![(9, "play"), (12, "library"), (13, "compact"), (14, "settings"), (15, "comfy"), (16, "search"), (19, "hidelikes"), (21, "hidelikesoff"), (22, "discover"), (30, "langnext"), (40, "end")] }
-            else if only_discover { vec![(9, "play"), (11, "discover"), (30, "disc"), (45, "discmix"), (12, "import"), (46, "taste"), (47, "taste2"), (48, "taste3"), (70, "tall"), (70, "tasted"), (71, "short"), (71, "marquee"), (72, "marqueeoff"), (73, "end")] } else { full.to_vec() };
+            else if only_discover { vec![(9, "play"), (11, "discover"), (30, "disc"), (45, "discmix"), (12, "import"), (46, "taste"), (47, "taste2"), (48, "taste3"), (70, "tall"), (70, "tasted"), (71, "short"), (71, "yourmix"), (90, "mixplats"), (91, "marquee"), (92, "marqueeoff"), (93, "end")] } else { full.to_vec() };
         t.start(slint::TimerMode::Repeated, std::time::Duration::from_millis(250), move || {
             let Some(&(at, what)) = plan.get(step_no) else { return };
             if started.elapsed().as_secs() < at { return; }
@@ -7685,6 +7685,8 @@ fn main() -> Result<(), slint::PlatformError> {
                     match t { Some(t) => { println!("selftest: spotify: playing \"{}\"", t.title); play_list(&s, vec![t], 0); } None => println!("selftest: spotify: no Spotify song in the Library") }
                 }
                 "spcheck" => { let a = s.borrow(); println!("selftest: spotify: now \"{}\" at {} ms, loaded {}, paused {}, status \"{}\"", a.queue.current().map(|t| t.title.clone()).unwrap_or_default(), a.engine.position_ms(), a.loaded, a.engine.is_paused(), ui.get_status()); }
+                "yourmix" => { let at = ui.get_shelves().iter().position(|sh| sh.title == "Made for you"); println!("selftest: opening Made for you {at:?}"); if let Some(i) = at { ui.invoke_tile(i as i32, 0); } }
+                "mixplats" => { let a = s.borrow(); let mut n: std::collections::BTreeMap<&str, usize> = Default::default(); for t in &a.page_tracks { *n.entry(t.plat()).or_default() += 1; } println!("selftest: mix \"{}\": {} tracks by platform {:?}", ui.get_page_title(), a.page_tracks.len(), n); }
                 "tall" => ui.window().set_size(slint::LogicalSize::new(1180.0, 2600.0)),
                 "short" => ui.window().set_size(slint::LogicalSize::new(1180.0, 760.0)),
                 "sshit" => { ui.invoke_set_hit(0); println!("selftest: after a hit: cat \"{}\", query \"{}\"", ui.get_set_cat(), ui.get_set_query()); }
