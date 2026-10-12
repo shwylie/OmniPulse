@@ -9,6 +9,10 @@ use symphonia::core::io::MediaSource;
 
 const PIECE: u64 = 256 * 1024;
 
+/// A fresh address for the same sound, for when the one in use is turned down partway (YouTube's
+/// addresses can stop being accepted while a song plays)
+pub type Refresh = Box<dyn FnMut() -> Result<String, String> + Send + Sync>;
+
 pub struct HttpStream {
     client: reqwest::blocking::Client,
     url: String,
@@ -19,20 +23,37 @@ pub struct HttpStream {
     buf_start: u64,
     /// a server without ranges: the one response, read in order
     whole: Option<reqwest::blocking::Response>,
+    refresh: Option<Refresh>,
+    /// fresh addresses fetched so far (a few at most: one that keeps failing isn't tried forever)
+    refreshed: u32,
 }
 
 impl HttpStream {
     pub fn open(url: &str) -> Result<Self, String> {
+        Self::open_with(url, None)
+    }
+
+    pub fn open_with(url: &str, mut refresh: Option<Refresh>) -> Result<Self, String> {
+        let mut url = url.to_string();
+        let mut refreshed = 0;
         let client = reqwest::blocking::Client::builder()
             .timeout(Duration::from_secs(30))
             .build()
             .map_err(|e| e.to_string())?;
         // the first piece tells us the length and whether ranges work
-        let res = client
-            .get(url)
+        let mut res = client
+            .get(&url)
             .header("Range", format!("bytes=0-{}", PIECE - 1))
             .send()
             .map_err(|e| format!("Couldn't reach the stream: {e}"))?;
+        // (turned down: a fresh address, once)
+        if matches!(res.status().as_u16(), 403 | 410) {
+            if let Some(f) = refresh.as_mut() {
+                url = f()?;
+                refreshed += 1;
+                res = client.get(&url).header("Range", format!("bytes=0-{}", PIECE - 1)).send().map_err(|e| format!("Couldn't reach the stream: {e}"))?;
+            }
+        }
         let status = res.status();
         if !status.is_success() {
             return Err(format!("The stream answered {status}."));
@@ -47,7 +68,7 @@ impl HttpStream {
         } else {
             res.content_length()
         };
-        let mut s = Self { client, url: url.to_string(), len, ranges, pos: 0, buf: Vec::new(), buf_start: 0, whole: None };
+        let mut s = Self { client, url, len, ranges, pos: 0, buf: Vec::new(), buf_start: 0, whole: None, refresh, refreshed };
         if ranges {
             s.buf = res.bytes().map_err(|e| e.to_string())?.to_vec();
         } else {
@@ -58,12 +79,20 @@ impl HttpStream {
 
     fn fetch(&mut self, at: u64) -> std::io::Result<()> {
         let end = at + PIECE - 1;
-        let res = self
+        let mut res = self
             .client
             .get(&self.url)
             .header("Range", format!("bytes={at}-{end}"))
             .send()
             .map_err(std::io::Error::other)?;
+        // turned down partway: a fresh address for the same sound, and on from where it was
+        if matches!(res.status().as_u16(), 403 | 410) && self.refreshed < 3 {
+            if let Some(f) = self.refresh.as_mut() {
+                self.refreshed += 1;
+                self.url = f().map_err(std::io::Error::other)?;
+                res = self.client.get(&self.url).header("Range", format!("bytes={at}-{end}")).send().map_err(std::io::Error::other)?;
+            }
+        }
         if !res.status().is_success() {
             return Err(std::io::Error::other(format!("the stream answered {}", res.status())));
         }
@@ -128,4 +157,9 @@ impl MediaSource for HttpStream {
 /// A web address's sound, ready to play; `ext` (like "mp3" or "m4a") helps find its format
 pub fn open_url(url: &str, ext: &str) -> Result<crate::Decoded, String> {
     crate::Decoded::open(Box::new(HttpStream::open(url)?), ext)
+}
+
+/// The same, with a way to a fresh address if this one's turned down partway
+pub fn open_url_refreshing(url: &str, ext: &str, refresh: Refresh) -> Result<crate::Decoded, String> {
+    crate::Decoded::open(Box::new(HttpStream::open_with(url, Some(refresh))?), ext)
 }

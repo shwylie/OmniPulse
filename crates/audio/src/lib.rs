@@ -11,7 +11,7 @@ pub mod ts;
 
 pub use engine::{render, Engine, Event, Handoff, Loop, Perf, Ramp, Sweep, Tap};
 pub use hls::HlsSource;
-pub use http::open_url;
+pub use http::{open_url, open_url_refreshing};
 pub use push::{PushFeed, PushSource};
 pub use source::{Decoded, Source, Tone};
 pub use stretch::{Stretched, Tempo};
@@ -120,6 +120,47 @@ mod tests {
         let mut piece = Vec::new();
         assert!(src.read(&mut piece).unwrap() && !piece.is_empty());
         assert!(ranged.load(std::sync::atomic::Ordering::SeqCst) - before <= 2);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn an_address_turned_down_partway_is_swapped_for_a_fresh_one() {
+        // the old address answers its first piece, then 403s (as YouTube's can); a fresh one plays on
+        let dir = std::env::temp_dir().join(format!("op-audio-403-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let wav = dir.join("t.wav");
+        let tone: Vec<f32> = (0..4 * 44100).flat_map(|i| {
+            let v = 0.25 * (2.0 * std::f32::consts::PI * 440.0 * i as f32 / 44100.0).sin();
+            [v, v]
+        }).collect();
+        write_wav(&wav, 44100, &tone);
+        let bytes = std::sync::Arc::new(std::fs::read(&wav).unwrap());
+        let server = tiny_http::Server::http("127.0.0.1:0").unwrap();
+        let port = server.server_addr().to_ip().unwrap().port();
+        {
+            let bytes = bytes.clone();
+            std::thread::spawn(move || {
+                for req in server.incoming_requests() {
+                    let old = req.url().starts_with("/old");
+                    let r = req.headers().iter().find(|h| h.field.equiv("Range")).map(|h| h.value.as_str().to_string()).unwrap_or_default();
+                    let total = bytes.len();
+                    let (a, b) = r.trim_start_matches("bytes=").split_once('-').unwrap();
+                    let a: usize = a.parse().unwrap();
+                    let b: usize = b.parse::<usize>().unwrap().min(total - 1);
+                    if old && a > 0 { let _ = req.respond(tiny_http::Response::empty(403)); continue; }
+                    let res = tiny_http::Response::from_data(bytes[a..=b].to_vec()).with_status_code(206)
+                        .with_header(tiny_http::Header::from_bytes("Content-Range", format!("bytes {a}-{b}/{total}")).unwrap());
+                    let _ = req.respond(res);
+                }
+            });
+        }
+        let asked = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let a2 = asked.clone();
+        let fresh = format!("http://127.0.0.1:{port}/new.wav");
+        let src = open_url_refreshing(&format!("http://127.0.0.1:{port}/old.wav"), "wav", Box::new(move || { a2.fetch_add(1, std::sync::atomic::Ordering::SeqCst); Ok(fresh.clone()) })).unwrap();
+        let out = render(Box::new(src), 48000, &[0.0; 10], 0.0, 10.0).unwrap();
+        assert!((out.len() as i64 / 2 - 4 * 48000).abs() < 1500, "{}", out.len() / 2);
+        assert_eq!(asked.load(std::sync::atomic::Ordering::SeqCst), 1);
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

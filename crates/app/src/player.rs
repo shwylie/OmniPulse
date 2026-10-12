@@ -42,11 +42,11 @@ fn age_blocked(e: &str) -> bool {
 
 /// The audio of another upload of the same song (up to three close ones tried), as the web app's
 /// ytPlayAnyUpload
-async fn other_upload(t: &Track, id: &str) -> Option<String> {
+async fn other_upload(t: &Track, id: &str) -> Option<(String, String)> {
     let found = core::youtube::search(&format!("{} {}", t.artist, t.title)).await.ok()?;
     for c in found.iter().filter(|c| c.id != id && crate::versions::score(t, c) >= 0.8).take(3) {
         match core::youtube::stream_url(&c.id, false).await {
-            Ok(url) => return Some(url),
+            Ok(url) => return Some((c.id.clone(), url)),
             Err(e) if age_blocked(&e) => continue,
             Err(_) => return None,
         }
@@ -112,13 +112,15 @@ pub async fn open_source(t: &Track, rt: tokio::runtime::Handle) -> Result<Box<dy
             Err(why)
         }
         Src::YouTube(id) => {
-            let url = match core::youtube::stream_url(id, false).await {
-                Ok(url) => url,
+            let (vid, url) = match core::youtube::stream_url(id, false).await {
+                Ok(url) => (id.clone(), url),
                 // age-restricted: another upload of the same song often isn't (the closest few)
                 Err(e) if age_blocked(&e) => other_upload(t, id).await.ok_or_else(|| AGE_BLOCKED.to_string())?,
                 Err(e) => return Err(e),
             };
-            tokio::task::spawn_blocking(move || omnipulse_audio::open_url(&url, "m4a").map(|d| Box::new(d) as Box<dyn Source>)).await.map_err(|e| e.to_string())?
+            // (an address YouTube stops taking partway, a cached one or one cut off: a fresh one, on from there)
+            let refresh: omnipulse_audio::http::Refresh = Box::new(move || rt.block_on(core::youtube::stream_url(&vid, true)));
+            tokio::task::spawn_blocking(move || omnipulse_audio::open_url_refreshing(&url, "m4a", refresh).map(|d| Box::new(d) as Box<dyn Source>)).await.map_err(|e| e.to_string())?
         }
         Src::Spotify(uri) => {
             spotify_attach();
