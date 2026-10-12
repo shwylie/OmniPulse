@@ -226,7 +226,7 @@
       "Name": "Bad transition",
       "UUID": "com.shwylie.scclient.mix-bad",
       "Icon": "imgs/actions/mix-bad",
-      "Tooltip": "Seamless Mix feedback: the last transition sounded bad (logged with how it was mixed)",
+      "Tooltip": "Seamless Mix feedback: there's a better way to mix the last transition (logged with how it was mixed)",
       "Controllers": [
         "Keypad"
       ],

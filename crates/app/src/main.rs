@@ -3216,6 +3216,8 @@ fn mix_feedback(shared: &Shared, good: bool) -> Result<String, &'static str> {
     let Some((rec, began)) = LAST_MIX.with(|l| l.borrow().clone()) else { return Err("No transition to rate yet.") };
     let line = serde_json::json!({
         "verdict": if good { "good" } else { "bad" },
+        // (what the two mean, as the one rating uses them: "bad" isn't "it sounded bad")
+        "meaning": if good { "good: keep mixing pairs like this this way" } else { "bad: there's a better way to mix this pair (not necessarily a bad transition)" },
         "at": std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0),
         // (rated late, it may be of a later one by ear: how long after this one it was)
         "secsAfter": began.elapsed().as_secs_f64().round(),
@@ -3802,6 +3804,15 @@ fn tick(shared: &Shared, events: &std::sync::mpsc::Receiver<Event>, n: u64) {
         return; // a restored session, not started yet: the bar shows where it was
     }
     let (pos, raw_dur) = (engine.position_ms(), engine.duration_ms());
+    // a gap heard mid-track (the sound ran out before the next of it came): noted, with what else was
+    // going on, so it can be tracked down
+    let gap = engine.take_gap_ms();
+    if gap >= 20 && pos > 2000 && pos + 2000 < raw_dur && !engine.is_paused() {
+        let measuring = RHYTHM_FULL_BUSY.lock().map(|b| b.len()).unwrap_or(0);
+        let mix = MIX.with(|m| match &*m.borrow() { None => "none", Some(MixPhase::Opening(_)) => "opening the next", Some(MixPhase::Waiting { .. }) => "waiting", Some(MixPhase::Mixing { .. }) => "mixing" });
+        let title = shared.borrow().queue.current().map(|t| t.title.clone()).unwrap_or_default();
+        omnipulse_core::diag::note(&format!("playback gap: {gap} ms at {} in \"{title}\" (measuring {measuring} whole, mix {mix}, preloading {})", fmt_ms(pos), ui.get_preloading()));
+    }
     // a track's start and end times (Track preferences): it shows, and plays, as only that part
     let (t_start, t_end) = trim_now(shared);
     let dur = t_end.unwrap_or(raw_dur);

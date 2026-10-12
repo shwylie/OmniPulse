@@ -2,7 +2,8 @@
 
 Keys for OmniPulse: Play, Pause, Play / Pause, Next, Previous, Like, Favourite, Shuffle, Repeat,
 Clear requests, Clear queue, Sets & podcasts (lets them in or keeps them out of the queue and autoplay), and
-Good transition / Bad transition (Seamless Mix feedback: the last transition rated, logged with how it was
+Good transition / Bad transition (Seamless Mix feedback: the last transition rated; Bad means there's a better
+way to mix that pair, not that it was a bad transition as such; logged with how it was
 mixed in `%APPDATA%\OmniPulse\state\mix-feedback.jsonl`; nothing is logged without a press).
 Play / Pause, Like, Favourite, Shuffle, Repeat and Sets & podcasts light up to show what the app is doing.
 

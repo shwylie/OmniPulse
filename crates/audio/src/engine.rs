@@ -295,6 +295,8 @@ struct Shared {
     rate: AtomicU32,
     level: Mutex<(f32, f32)>,
     source_done: AtomicBool,
+    /// frames the output wanted mid-track and had none for (a gap heard), since last asked
+    dry: AtomicU64,
     /// Fade Between Tracks: where the fade is going, how far it moves each frame, and where to start
     /// it from first (NaN: from where it is)
     fade_target: AtomicU32,
@@ -371,6 +373,7 @@ impl Engine {
             fade_step: AtomicU32::new(1.0f32.to_bits()),
             fade_from: AtomicU32::new(f32::NAN.to_bits()),
             source_done: AtomicBool::new(false),
+            dry: AtomicU64::new(0),
             tap: Mutex::new(Vec::new()),
             main_delay: AtomicU32::new(0),
             perf: Mutex::new([(0, 0); 3]),
@@ -532,6 +535,11 @@ impl Engine {
     pub fn duration_ms(&self) -> u64 {
         self.shared.duration_ms.load(Ordering::Relaxed)
     }
+    /// How much went unheard (ms of silence where the track should have been) since last asked
+    pub fn take_gap_ms(&self) -> u64 {
+        let rate = self.shared.rate.load(Ordering::Relaxed).max(1) as u64;
+        self.shared.dry.swap(0, Ordering::Relaxed) * 1000 / rate
+    }
     /// How loud the source is right now, before any gain: (rms, peak) in dBFS
     pub fn level(&self) -> (f32, f32) {
         *self.shared.level.lock().unwrap()
@@ -628,6 +636,11 @@ fn build_output(name: &str, shared: Arc<Shared>, ev: Sender<Event>) -> Result<(c
             }
         }
         drop(q);
+        // (a gap: wanted and none there, with a track still going)
+        let wanted = (out.len() / ch.max(1)) as u64;
+        if frames < wanted && shared.loaded.load(Ordering::Relaxed) && !shared.source_done.load(Ordering::Relaxed) {
+            shared.dry.fetch_add(wanted - frames, Ordering::Relaxed);
+        }
         shared.played.fetch_add(frames, Ordering::Relaxed);
         if tapping {
             for (_, t) in shared.tap.lock().unwrap().iter_mut() { t(&tapped); }
@@ -1157,6 +1170,9 @@ fn begin_fade(shared: &Shared, next: Pipeline, total_frames: u64, handoff: Optio
 }
 
 fn decode_loop(shared: Arc<Shared>, cmds: Receiver<Cmd>, ev: Sender<Event>) {
+    // (above the app's other work, and a game's: the sound is only 0.35 s ahead of what's heard)
+    #[cfg(windows)]
+    unsafe { windows_sys::Win32::System::Threading::SetThreadPriority(windows_sys::Win32::System::Threading::GetCurrentThread(), windows_sys::Win32::System::Threading::THREAD_PRIORITY_HIGHEST); }
     let mut pipe: Option<Pipeline> = None;
     let mut fading: Option<Fading> = None;
     let mut waiting: Option<Waiting> = None;

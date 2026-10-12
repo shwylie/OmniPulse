@@ -20,3 +20,7 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 [[bin]]
 name = "op-play"
 path = "src/bin/op-play.rs"
+
+# (the decode thread raised above the rest: a song being measured, or a game, doesn't starve the sound)
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_System_Threading"] }

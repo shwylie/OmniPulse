@@ -57,11 +57,14 @@ pub fn parse(base: &str, text: &str) -> Playlist {
     Playlist { segments, init, encrypted }
 }
 
-/// The segments from one of them on, read as one stream
+/// Segments fetched ahead of the one being read (SoundCloud's are about ten seconds each): a slow one,
+/// or the next song fetched alongside, never makes the sound wait
+const SEGS_AHEAD: usize = 8;
+
+/// The segments from one of them on, read as one stream (fetched in order by a fetcher of its own,
+/// a few ahead; it stops when this is let go, a seek making another)
 struct SegmentReader {
-    client: reqwest::blocking::Client,
-    segs: Vec<Segment>,
-    next: usize,
+    got: std::sync::Mutex<std::sync::mpsc::Receiver<Result<Vec<u8>, String>>>,
     kind: Kind,
     demux: Demux,
     buf: Vec<u8>,
@@ -69,24 +72,30 @@ struct SegmentReader {
 }
 
 impl SegmentReader {
-    fn fetch(&self, url: &str) -> std::io::Result<Vec<u8>> {
-        let res = self.client.get(url).send().map_err(std::io::Error::other)?;
-        if !res.status().is_success() {
-            return Err(std::io::Error::other(format!("a segment answered {}", res.status())));
-        }
-        Ok(res.bytes().map_err(std::io::Error::other)?.to_vec())
+    fn new(client: &reqwest::blocking::Client, segs: &[Segment], from: usize, kind: Kind, init: Vec<u8>) -> Self {
+        let (tx, got) = std::sync::mpsc::sync_channel(SEGS_AHEAD);
+        let (client, urls): (_, Vec<String>) = (client.clone(), segs.iter().skip(from).map(|s| s.url.clone()).collect());
+        let _ = std::thread::Builder::new().name("segments ahead".into()).spawn(move || {
+            for url in urls {
+                let r = client.get(&url).send().map_err(|e| e.to_string()).and_then(|res| {
+                    if !res.status().is_success() { return Err(format!("a segment answered {}", res.status())); }
+                    res.bytes().map(|b| b.to_vec()).map_err(|e| e.to_string())
+                });
+                let failed = r.is_err();
+                // (read no more: let go, or a seek)
+                if tx.send(r).is_err() || failed { return; }
+            }
+        });
+        Self { got: std::sync::Mutex::new(got), kind, demux: Demux::default(), buf: init, pos: 0 }
     }
 }
 
 impl Read for SegmentReader {
     fn read(&mut self, out: &mut [u8]) -> std::io::Result<usize> {
         while self.pos >= self.buf.len() {
-            if self.next >= self.segs.len() {
-                return Ok(0);
-            }
-            let url = self.segs[self.next].url.clone();
-            self.next += 1;
-            let data = self.fetch(&url)?;
+            // (all of them read: the fetcher's done, and gone)
+            let Ok(next) = self.got.get_mut().unwrap().recv() else { return Ok(0) };
+            let data = next.map_err(std::io::Error::other)?;
             self.buf.clear();
             self.pos = 0;
             match self.kind {
@@ -162,7 +171,7 @@ impl HlsSource {
     }
 
     fn reader_from(client: &reqwest::blocking::Client, list: &Playlist, kind: Kind, ext: &str, init: &[u8], from: usize) -> Result<Decoded, String> {
-        let r = SegmentReader { client: client.clone(), segs: list.segments.clone(), next: from, kind, demux: Demux::default(), buf: init.to_vec(), pos: 0 };
+        let r = SegmentReader::new(client, &list.segments, from, kind, init.to_vec());
         Decoded::open(Box::new(ReadOnlySource::new(r)), ext)
     }
 }

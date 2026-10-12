@@ -13,19 +13,59 @@ const PIECE: u64 = 256 * 1024;
 /// addresses can stop being accepted while a song plays)
 pub type Refresh = Box<dyn FnMut() -> Result<String, String> + Send + Sync>;
 
+/// Pieces fetched ahead of where it's read (about 8 MB: minutes of most streams), so the sound never
+/// waits on the network while there's any: a slow piece, or the next song being fetched alongside
+/// (to measure it), is ridden out
+const AHEAD: u64 = 32;
+
+/// What's fetched, by piece (PIECE bytes from piece * PIECE), shared with the fetcher that runs ahead
+struct Pieces {
+    have: std::collections::HashMap<u64, Vec<u8>>,
+    /// the one being fetched ahead right now
+    busy: Option<u64>,
+    /// the piece being read (the fetcher keeps AHEAD pieces past it)
+    want: u64,
+    url: String,
+    refreshed: u32,
+    /// the fetcher gave up (reading fetches what it needs itself, as it did before)
+    failed: bool,
+    stop: bool,
+}
+
+type Ahead = std::sync::Arc<(std::sync::Mutex<Pieces>, std::sync::Condvar)>;
+
 pub struct HttpStream {
     client: reqwest::blocking::Client,
-    url: String,
     len: Option<u64>,
     ranges: bool,
     pos: u64,
-    buf: Vec<u8>,
-    buf_start: u64,
     /// a server without ranges: the one response, read in order
     whole: Option<reqwest::blocking::Response>,
-    refresh: Option<Refresh>,
-    /// fresh addresses fetched so far (a few at most: one that keeps failing isn't tried forever)
-    refreshed: u32,
+    ahead: Ahead,
+    refresh: std::sync::Arc<std::sync::Mutex<Option<Refresh>>>,
+}
+
+/// One piece, fetched (a fresh address for it, if the one in use is turned down: a few times at most)
+fn fetch_piece(client: &reqwest::blocking::Client, ahead: &Ahead, refresh: &std::sync::Mutex<Option<Refresh>>, k: u64, len: Option<u64>) -> std::io::Result<Vec<u8>> {
+    let at = k * PIECE;
+    let end = (at + PIECE - 1).min(len.unwrap_or(u64::MAX).saturating_sub(1));
+    let url = ahead.0.lock().unwrap().url.clone();
+    let mut res = client.get(&url).header("Range", format!("bytes={at}-{end}")).send().map_err(std::io::Error::other)?;
+    // turned down partway: a fresh address for the same sound, and on from where it was
+    if matches!(res.status().as_u16(), 403 | 410) {
+        let can = ahead.0.lock().unwrap().refreshed < 3;
+        if can {
+            if let Some(f) = refresh.lock().unwrap().as_mut() {
+                let fresh = f().map_err(std::io::Error::other)?;
+                { let mut p = ahead.0.lock().unwrap(); p.url = fresh.clone(); p.refreshed += 1; }
+                res = client.get(&fresh).header("Range", format!("bytes={at}-{end}")).send().map_err(std::io::Error::other)?;
+            }
+        }
+    }
+    if !res.status().is_success() {
+        return Err(std::io::Error::other(format!("the stream answered {}", res.status())));
+    }
+    Ok(res.bytes().map_err(std::io::Error::other)?.to_vec())
 }
 
 impl HttpStream {
@@ -68,37 +108,75 @@ impl HttpStream {
         } else {
             res.content_length()
         };
-        let mut s = Self { client, url, len, ranges, pos: 0, buf: Vec::new(), buf_start: 0, whole: None, refresh, refreshed };
+        let ahead: Ahead = std::sync::Arc::new((std::sync::Mutex::new(Pieces { have: Default::default(), busy: None, want: 0, url, refreshed, failed: false, stop: false }), std::sync::Condvar::new()));
+        let refresh = std::sync::Arc::new(std::sync::Mutex::new(refresh));
+        let mut s = Self { client, len, ranges, pos: 0, whole: None, ahead, refresh };
         if ranges {
-            s.buf = res.bytes().map_err(|e| e.to_string())?.to_vec();
+            let first = res.bytes().map_err(|e| e.to_string())?.to_vec();
+            s.ahead.0.lock().unwrap().have.insert(0, first);
+            // the fetcher: the pieces after the one being read, in order, kept AHEAD in front
+            if let Some(len) = len {
+                let last = len.saturating_sub(1) / PIECE;
+                let (client, ahead, refresh) = (s.client.clone(), s.ahead.clone(), s.refresh.clone());
+                std::thread::Builder::new().name("stream ahead".into()).spawn(move || loop {
+                    let k = {
+                        let (m, cv) = &*ahead;
+                        let mut p = m.lock().unwrap();
+                        loop {
+                            if p.stop || p.failed { return; }
+                            let to = (p.want + AHEAD).min(last);
+                            if let Some(k) = (p.want..=to).find(|k| !p.have.contains_key(k)) { p.busy = Some(k); break k; }
+                            p = cv.wait_timeout(p, Duration::from_millis(500)).unwrap().0;
+                        }
+                    };
+                    let got = fetch_piece(&client, &ahead, &refresh, k, Some(len));
+                    let (m, cv) = &*ahead;
+                    let mut p = m.lock().unwrap();
+                    p.busy = None;
+                    match got {
+                        Ok(b) => {
+                            p.have.insert(k, b);
+                            // (only what's near: a piece or two behind, and what's ahead)
+                            let want = p.want;
+                            p.have.retain(|&i, _| i + 2 >= want && i <= want + AHEAD + 2);
+                        }
+                        Err(_) => p.failed = true,
+                    }
+                    cv.notify_all();
+                }).map_err(|e| e.to_string())?;
+            }
         } else {
             s.whole = Some(res);
         }
         Ok(s)
     }
 
-    fn fetch(&mut self, at: u64) -> std::io::Result<()> {
-        let end = at + PIECE - 1;
-        let mut res = self
-            .client
-            .get(&self.url)
-            .header("Range", format!("bytes={at}-{end}"))
-            .send()
-            .map_err(std::io::Error::other)?;
-        // turned down partway: a fresh address for the same sound, and on from where it was
-        if matches!(res.status().as_u16(), 403 | 410) && self.refreshed < 3 {
-            if let Some(f) = self.refresh.as_mut() {
-                self.refreshed += 1;
-                self.url = f().map_err(std::io::Error::other)?;
-                res = self.client.get(&self.url).header("Range", format!("bytes={at}-{end}")).send().map_err(std::io::Error::other)?;
+    /// The piece `k`: fetched ahead already, coming (waited for), or fetched now
+    fn piece(&self, k: u64) -> std::io::Result<Vec<u8>> {
+        {
+            let (m, cv) = &*self.ahead;
+            let mut p = m.lock().unwrap();
+            p.want = k;
+            cv.notify_all();
+            loop {
+                if let Some(b) = p.have.get(&k) { return Ok(b.clone()); }
+                if p.busy != Some(k) { break; }
+                let (q, t) = cv.wait_timeout(p, Duration::from_secs(30)).unwrap();
+                p = q;
+                if t.timed_out() { break; }
             }
         }
-        if !res.status().is_success() {
-            return Err(std::io::Error::other(format!("the stream answered {}", res.status())));
-        }
-        self.buf = res.bytes().map_err(std::io::Error::other)?.to_vec();
-        self.buf_start = at;
-        Ok(())
+        let b = fetch_piece(&self.client, &self.ahead, &self.refresh, k, self.len)?;
+        self.ahead.0.lock().unwrap().have.insert(k, b.clone());
+        Ok(b)
+    }
+}
+
+impl Drop for HttpStream {
+    fn drop(&mut self) {
+        let (m, cv) = &*self.ahead;
+        m.lock().unwrap().stop = true;
+        cv.notify_all();
     }
 }
 
@@ -112,16 +190,14 @@ impl Read for HttpStream {
         if self.len.is_some_and(|l| self.pos >= l) {
             return Ok(0);
         }
-        let in_buf = self.pos >= self.buf_start && self.pos < self.buf_start + self.buf.len() as u64;
-        if !in_buf {
-            self.fetch(self.pos)?;
-            if self.buf.is_empty() {
-                return Ok(0);
-            }
+        let k = self.pos / PIECE;
+        let b = self.piece(k)?;
+        let from = (self.pos - k * PIECE) as usize;
+        if from >= b.len() {
+            return Ok(0);
         }
-        let from = (self.pos - self.buf_start) as usize;
-        let n = out.len().min(self.buf.len() - from);
-        out[..n].copy_from_slice(&self.buf[from..from + n]);
+        let n = out.len().min(b.len() - from);
+        out[..n].copy_from_slice(&b[from..from + n]);
         self.pos += n as u64;
         Ok(n)
     }
