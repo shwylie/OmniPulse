@@ -3885,6 +3885,13 @@ fn panel_press(shared: &Shared, key: &str) {
             if list == "p" { let mut a = shared.borrow_mut(); paint_sides(&mut a); }
             match list { "v" | "p" => "It shows again.".to_string(), "all" => "They can all be recommended again.".to_string(), _ => "It can be recommended again.".to_string() }
         }
+        "widgetHide" => {
+            let key = shared.borrow().queue.current().map(|t| t.key.clone()).unwrap_or_default();
+            if let Ok(mut h) = integrations::WIDGET_HIDDEN.lock() { *h = key; }
+            let s2 = shared.clone();
+            slint::Timer::single_shot(std::time::Duration::ZERO, move || push_out(&s2, false));
+            "The widget's card is hidden until the next track.".to_string()
+        }
         "out2Restart" => {
             omnipulse_core::omni_input::stop();
             offset_apply(shared);

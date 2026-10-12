@@ -259,10 +259,15 @@ fn like_note() -> String {
 
 /// What the widget shows: the track, where it's up to, its colours, and the look set in Settings
 /// by: who asked for it in chat ("" for none)
+/// The widget's Hide This Track: the card hidden while this track (its key) plays
+pub static WIDGET_HIDDEN: std::sync::Mutex<String> = std::sync::Mutex::new(String::new());
+
 pub fn widget_update(prefs: &Value, t: Option<&Track>, by: &str, pos_ms: u64, dur_ms: u64, playing: bool, accent: (&str, &str)) {
     if !set(prefs, "widget") {
         return;
     }
+    // (hidden until the next track)
+    let t = t.filter(|t| WIDGET_HIDDEN.lock().map(|h| h.is_empty() || *h != t.key).unwrap_or(true));
     let look = json!({
         "accent": accent.0, "accent2": accent.1,
         "design": prefs["widgetDesign"].as_str().unwrap_or("card"),

@@ -149,6 +149,7 @@ pub fn fields(name: &str, vals: &Map<String, Value>, prefs: &Value, lan: &str) -
                 tog("wSpin", "Spin the Record", ""),
                 tog("wRequester", "Show Who Requested It", ""),
                 sel("wColor", "Colour Change", "", &[(json!(0), "Instant"), (json!(0.5), "Fast"), (json!(1.2), "Normal"), (json!(2.5), "Slow")]),
+                button("widgetHide", "Hide This Track", "Hide", "Until the next track."),
             ]
         }
         "alerts" => {
