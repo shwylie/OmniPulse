@@ -1078,6 +1078,8 @@ export component AppWindow inherits Window {
     in property <color> tint-preview;
     in property <[color]> accent-list;
     in property <int> accent-on: -1;
+    /// the second accent (the web app's accent2): one of accent-list, or -1 for one colour only
+    in property <int> accent2-on: -1;
     in-out property <bool> art-accent;
     // the track info tab at the bar's right end instead of its left (Settings > Look)
     in property <bool> tab-right;
@@ -1330,6 +1332,7 @@ export component AppWindow inherits Window {
     callback backup-restore();
     callback plat-toggle(string);
     callback accent-picked(int);
+    callback accent2-picked(int);
     callback art-accent-changed(bool);
     callback autoplay-changed(bool);
     callback toggle();
@@ -2373,10 +2376,12 @@ export component AppWindow inherits Window {
                                         }
                                         Steps { names: ["Off", "Subtle", "Medium", "Strong"]; value: round(root.tint-strength); changed(k) => { root.tint-strength = k; root.look-changed("tintStrength", k); } }
                                         Rectangle { height: 8px; }
+                                        // (both chosen here, unless the album art's colours are on: then greyed out, as the web app's)
                                         Text { text: "Accent"; color: Theme.text; font-weight: 700; }
                                         HorizontalLayout {
                                             alignment: start;
                                             spacing: 10px;
+                                            opacity: root.art-accent ? 0.4 : 1;
                                             for c[i] in root.accent-list: Rectangle {
                                                 width: 28px;
                                                 height: 28px;
@@ -2384,7 +2389,36 @@ export component AppWindow inherits Window {
                                                 background: c;
                                                 border-width: root.accent-on == i ? 3px : 0px;
                                                 border-color: Theme.text;
-                                                TouchArea { clicked => { root.accent-picked(i); } }
+                                                TouchArea { enabled: !root.art-accent; clicked => { root.accent-picked(i); } }
+                                            }
+                                        }
+                                        Rectangle { height: 8px; }
+                                        Text { text: "Second Accent"; color: Theme.text; font-weight: 700; }
+                                        Text { text: root.art-accent ? "Turn off Colours from Album Art to choose your own colours." : "Used alongside the first, in gradients and highlights. One Colour: the first one only."; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
+                                        HorizontalLayout {
+                                            alignment: start;
+                                            spacing: 10px;
+                                            opacity: root.art-accent ? 0.4 : 1;
+                                            for c[i] in root.accent-list: Rectangle {
+                                                width: 28px;
+                                                height: 28px;
+                                                border-radius: 14px;
+                                                background: c;
+                                                border-width: root.accent2-on == i ? 3px : 0px;
+                                                border-color: Theme.text;
+                                                TouchArea { enabled: !root.art-accent; clicked => { root.accent2-picked(i); } }
+                                            }
+                                            // one colour only
+                                            Rectangle {
+                                                width: 28px;
+                                                height: 28px;
+                                                border-radius: 14px;
+                                                background: transparent;
+                                                border-width: root.accent2-on == -1 ? 3px : 1px;
+                                                border-color: root.accent2-on == -1 ? Theme.text : Theme.muted;
+                                                Path { width: 16px; height: 16px; commands: "M 2 14 L 14 2"; stroke: Theme.muted; stroke-width: 2px; }
+                                                onea := TouchArea { enabled: !root.art-accent; clicked => { root.accent2-picked(-1); } }
+                                                TipSpot { tip: "One Colour"; hover: onea.has-hover; }
                                             }
                                         }
                                         Rectangle { height: 8px; }
@@ -2993,7 +3027,7 @@ export component AppWindow inherits Window {
             }
             // ---------- the queue ----------
             // (not while Settings, or a settings page, has the room)
-            if root.queue-open && !root.pf-open && root.page != "settings": Rectangle {
+            if root.queue-open: Rectangle {
                 width: 300px;
                 background: Theme.panel;
                 border-radius: Theme.panel-radius;
@@ -3045,7 +3079,8 @@ export component AppWindow inherits Window {
                                 HorizontalLayout {
                                     padding-left: 6px;
                                     spacing: 10px;
-                                    PlatIcon { plat: q.plat; width: 16px; height: 16px; y: (parent.height - self.height) / 2; opacity: q.auto ? 0.7 : 1; }
+                                    // (its cover with the platform's badge, as the web app's queue)
+                                    BadgedCover { art: q.art; initial: q.title; plat: q.plat; badge: 16px; corner: 4px; width: 38px; height: 38px; y: (parent.height - self.height) / 2; opacity: q.auto ? 0.75 : 1; }
                                     VerticalLayout {
                                         alignment: center;
                                         Text { text: q.title; color: q.playing ? Theme.accent : Theme.text; font-weight: 600; font-size: 13px; overflow: elide; }

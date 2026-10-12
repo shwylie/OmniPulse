@@ -299,35 +299,53 @@ pub fn widget_update(prefs: &Value, t: Option<&Track>, by: &str, pos_ms: u64, du
 
 /// Two colours from a cover (its upper-left and lower-right halves), bright enough to tint the
 /// widget: the same idea as the web app's accent colours
+/// The cover's two colours, as the web app's artPalette: the cover seen at 32 x 32, its vivid pixels
+/// sorted into twelve hues, the strongest hue, and a clearly different one (two hues away, at least
+/// 15% as strong) if there is one, else "" (apply_look then uses a darker shade of the first). Tuned
+/// to the theme in apply_look (look::tune_art)
 pub fn accents(px: &slint::SharedPixelBuffer<slint::Rgba8Pixel>) -> (String, String) {
     let (w, h) = (px.width() as usize, px.height() as usize);
     let data = px.as_slice();
-    let mut sums = [[0f32; 4]; 2];
-    let step = (w * h / 4000).max(1);
-    for (i, p) in data.iter().enumerate().step_by(step) {
-        let (x, y) = (i % w, i / w);
-        let half = usize::from(x * h + y * w > w * h);
-        let (r, g, b) = (p.r as f32, p.g as f32, p.b as f32);
-        let max = r.max(g).max(b);
-        let sat = if max > 0.0 { (max - r.min(g).min(b)) / max } else { 0.0 };
-        // vivid, not too dark, pixels count most
-        let weight = 0.15 + sat * (max / 255.0);
-        sums[half][0] += r * weight;
-        sums[half][1] += g * weight;
-        sums[half][2] += b * weight;
-        sums[half][3] += weight;
+    if w == 0 || h == 0 {
+        return ("#8e9bff".into(), String::new());
     }
-    let hex = |s: [f32; 4]| {
-        if s[3] <= 0.0 {
-            return "#8e9bff".to_string();
+    // [r, g, b, weight] for each twelfth of the hue circle
+    let mut buckets = [[0f32; 4]; 12];
+    for y in 0..32 {
+        for x in 0..32 {
+            let p = data[(y * h / 32) * w + x * w / 32];
+            let (r, g, b) = (p.r as f32 / 255.0, p.g as f32 / 255.0, p.b as f32 / 255.0);
+            let (max, min) = (r.max(g).max(b), r.min(g).min(b));
+            let l = (max + min) / 2.0;
+            let d = max - min;
+            if d == 0.0 {
+                continue;
+            }
+            let s = if l > 0.5 { d / (2.0 - max - min) } else { d / (max + min) };
+            let sixths = if max == r { (g - b) / d + if g < b { 6.0 } else { 0.0 } } else if max == g { (b - r) / d + 2.0 } else { (r - g) / d + 4.0 };
+            let hue = sixths / 6.0;
+            // vivid and mid-bright counts; greys, near-blacks and near-whites don't
+            let wt = s * (1.0 - (l - 0.5).abs() * 1.8).max(0.0);
+            if wt < 0.05 {
+                continue;
+            }
+            let k = ((hue * 12.0) as usize) % 12;
+            buckets[k][0] += p.r as f32 * wt;
+            buckets[k][1] += p.g as f32 * wt;
+            buckets[k][2] += p.b as f32 * wt;
+            buckets[k][3] += wt;
         }
-        let (r, g, b) = (s[0] / s[3], s[1] / s[3], s[2] / s[3]);
-        // lifted to a usable brightness, keeping the hue
-        let m = r.max(g).max(b).max(1.0);
-        let k = (200.0 / m).clamp(1.0, 3.0);
-        format!("#{:02x}{:02x}{:02x}", (r * k).min(255.0) as u8, (g * k).min(255.0) as u8, (b * k).min(255.0) as u8)
+    }
+    let mut order: Vec<usize> = (0..12).filter(|&k| buckets[k][3] > 0.0).collect();
+    order.sort_by(|a, b| buckets[*b][3].total_cmp(&buckets[*a][3]));
+    let Some(&first) = order.first() else { return ("#8e9bff".into(), String::new()) };
+    let apart = |a: usize, b: usize| (a as i32 - b as i32).abs().min(12 - (a as i32 - b as i32).abs());
+    let second = order.iter().copied().find(|&k| apart(k, first) >= 2 && buckets[k][3] >= buckets[first][3] * 0.15);
+    let hex = |k: usize| {
+        let s = buckets[k];
+        format!("#{:02x}{:02x}{:02x}", (s[0] / s[3]).round() as u8, (s[1] / s[3]).round() as u8, (s[2] / s[3]).round() as u8)
     };
-    (hex(sums[0]), hex(sums[1]))
+    (hex(first), second.map(hex).unwrap_or_default())
 }
 
 #[cfg(test)]
@@ -357,7 +375,17 @@ mod tests {
             *p = slint::Rgba8Pixel { r: 120, g: 10, b: 10, a: 255 };
         }
         let (a, b) = accents(&px);
-        assert!(a.starts_with("#c8") && a == b, "{a} {b}");
+        assert_eq!((a.as_str(), b.as_str()), ("#780a0a", ""));
+        // half red, half blue: the two, the bigger first
+        let mut px = slint::SharedPixelBuffer::<slint::Rgba8Pixel>::new(20, 20);
+        for (i, p) in px.make_mut_slice().iter_mut().enumerate() {
+            *p = if i % 20 < 12 { slint::Rgba8Pixel { r: 200, g: 30, b: 30, a: 255 } } else { slint::Rgba8Pixel { r: 30, g: 30, b: 200, a: 255 } };
+        }
+        assert_eq!(accents(&px), ("#c81e1e".to_string(), "#1e1ec8".to_string()));
+        // grey: nothing to take
+        let mut px = slint::SharedPixelBuffer::<slint::Rgba8Pixel>::new(8, 8);
+        for p in px.make_mut_slice() { *p = slint::Rgba8Pixel { r: 90, g: 90, b: 90, a: 255 }; }
+        assert_eq!(accents(&px).1, "");
     }
 }
 

@@ -2168,6 +2168,9 @@ fn thumb_url(t: &Track) -> String {
     t.art.replace("-t200x200", "-t120x120")
 }
 
+/// how many of the queue's rows get their covers
+const QUEUE_ART: usize = 60;
+
 fn rows_art(shared: &Shared) {
     let a = shared.borrow();
     let (first, count) = ROW_ART.with(|c| c.borrow().view);
@@ -2187,6 +2190,25 @@ fn rows_art(shared: &Shared) {
                         if r.art.size().width == 0 {
                             r.art = img.clone();
                             a.rows.set_row_data(k, r);
+                        }
+                    }
+                }
+                None if !c.loading.contains(&url) && !want.contains(&url) => want.push(url),
+                None => {}
+            }
+        }
+        // the queue's covers too (its first rows: the ones in sight, as the web app's queue)
+        for (k, (_, q, _)) in a.queue.panel().iter().enumerate().take(QUEUE_ART.min(a.qrows.row_count())) {
+            let url = thumb_url(&q.t);
+            if url.is_empty() {
+                continue;
+            }
+            match c.map.get(&url) {
+                Some(img) => {
+                    if let Some(mut r) = a.qrows.row_data(k) {
+                        if r.art.size().width == 0 && img.size().width > 0 {
+                            r.art = img.clone();
+                            a.qrows.set_row_data(k, r);
                         }
                     }
                 }
@@ -2299,10 +2321,13 @@ fn paint_queue(a: &mut App) {
             let mut r = row_menu(a, &marks, &q.t, q.t.row(Some(*i) == a.queue.qi));
             r.head = (*head).into();
             r.auto = q.auto;
+            // (its cover, if it's in already; the rest come in rows_art)
+            if let Some(img) = ROW_ART.with(|c| c.borrow().map.get(&thumb_url(&q.t)).cloned()) { r.art = img; }
             r
         })
         .collect();
     a.panel_map = map;
+    slint::Timer::single_shot(std::time::Duration::ZERO, || SHARED.with(|s| { if let Some(sh) = s.borrow().clone() { rows_art(&sh); } }));
     a.qrows.set_vec(rows);
     if let Some(ui) = a.ui.upgrade() {
         ui.set_queue_requests(if integrations::set(&a.web.prefs, "req") { a.queue.pending_requests().count() as i32 } else { 0 });
@@ -7695,8 +7720,11 @@ fn apply_look(shared: &Shared) {
     // the accent: the album art's while something plays (if asked for), or the one picked
     let art = integrations::set(prefs, "artAccent") && a.loaded;
     let (c1, c2) = if art {
-        let parse = |s: &str| look::Rgb::parse(s).map(|c| look::tune_art(c, p.light));
-        (parse(&a.accent.0), parse(&a.accent.1))
+        let first = look::Rgb::parse(&a.accent.0);
+        let c1 = first.map(|c| look::tune_art(c, p.light));
+        // (one colour on the cover: a shade of it, as the web app's)
+        let c2 = look::Rgb::parse(&a.accent.1).map(|c| look::tune_art(c, p.light)).or(first.map(|c| look::tune_art_shade(c, p.light)));
+        (c1, c2)
     } else {
         let mine = look::Rgb::parse(prefs["accent"].as_str().unwrap_or(ACCENTS[0]));
         (mine, prefs["accent2"].as_str().and_then(look::Rgb::parse).or(mine))
@@ -7716,6 +7744,8 @@ fn apply_look(shared: &Shared) {
     ui.set_accent_list(ModelRc::from(Rc::new(VecModel::from(ACCENTS.iter().filter_map(|c| look::Rgb::parse(c)).map(|c| c.slint()).collect::<Vec<_>>()))));
     let picked = prefs["accent"].as_str().unwrap_or(ACCENTS[0]).to_lowercase();
     ui.set_accent_on(ACCENTS.iter().position(|c| *c == picked).map_or(-1, |i| i as i32));
+    let picked2 = prefs["accent2"].as_str().unwrap_or("").to_lowercase();
+    ui.set_accent2_on(ACCENTS.iter().position(|c| *c == picked2).map_or(-1, |i| i as i32));
     ui.set_art_accent(integrations::set(prefs, "artAccent"));
     ui.set_tab_right(prefs["tabAlign"].as_str() == Some("right"));
     ui.set_player_style(prefs["playerStyle"].as_str().filter(|s| matches!(*s, "bar" | "float" | "minimal")).unwrap_or("tab").into());
@@ -7829,6 +7859,12 @@ fn main() -> Result<(), slint::PlatformError> {
         if let Some(c) = ACCENTS.get(i as usize) {
             set_look_pref(&s, "accent", serde_json::json!(c));
         }
+    });
+    let s = shared.clone();
+    // the second accent (null: one colour, as the web app's setAccent2)
+    ui.on_accent2_picked(move |i| {
+        let v = ACCENTS.get(i.max(0) as usize).filter(|_| i >= 0).map_or(serde_json::Value::Null, |c| serde_json::json!(c));
+        set_look_pref(&s, "accent2", v);
     });
     let s = shared.clone();
     ui.on_art_accent_changed(move |on| set_look_pref(&s, "artAccent", serde_json::json!(on)));
@@ -8835,6 +8871,7 @@ fn main() -> Result<(), slint::PlatformError> {
             // (OMNIPULSE_SELFTEST_PLAN=apple: Apple Music's sign-in window opened off-screen, Apple's page looked at, closed; nobody signs in)
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("apple") { vec![(6, "appleopen"), (16, "applecheck"), (17, "end")] }
             // (OMNIPULSE_SELFTEST_PLAN=tp: Track preferences for what plays, its bar dragged)
+            else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("qset") { vec![(9, "play"), (11, "queue"), (14, "nav:settings"), (15, "cat:App & Look"), (16, "scroll:420"), (18, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("nowslim") { vec![(9, "play"), (11, "queue"), (12, "now"), (15, "size:860:720"), (17, "size:1100:720"), (19, "size:1500:860"), (21, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("tp") { vec![(9, "play"), (12, "tprefs"), (13, "tpdrag"), (14, "nowmenu"), (15, "now"), (18, "end")] }
             // (OMNIPULSE_SELFTEST_PLAN=la: the look-alikes dialog, with two made up (nothing added))
@@ -8948,6 +8985,9 @@ fn main() -> Result<(), slint::PlatformError> {
                 "lacycle" => { ui.invoke_la_cycle(1); println!("selftest: look-alikes: {:?}", ui.get_la_rows().iter().map(|r| r.choice.to_string()).collect::<Vec<_>>()); ui.invoke_la_done(false); }
                 w if w.starts_with("sd_") => { ui.invoke_stats_open(w[3..].into()); println!("selftest: stats detail \"{}\": \"{}\", {} blocks", &w[3..], ui.get_st_detail_head(), ui.get_st_blocks().row_count()); }
                 "queue" => { ui.set_queue_open(true); }
+                w if w.starts_with("nav:") => { ui.invoke_nav(w[4..].into()); }
+                w if w.starts_with("cat:") => { ui.set_set_cat(w[4..].into()); }
+                w if w.starts_with("scroll:") => { ui.window().dispatch_event(slint::platform::WindowEvent::PointerScrolled { position: slint::LogicalPosition::new(560.0, 400.0), delta_x: 0.0, delta_y: -(w[7..].parse::<f32>().unwrap_or(0.0)) }); }
                 w if w.starts_with("size:") => {
                     let v: Vec<f32> = w[5..].split(':').filter_map(|x| x.parse().ok()).collect();
                     if v.len() == 2 { ui.window().set_size(slint::LogicalSize::new(v[0], v[1])); }

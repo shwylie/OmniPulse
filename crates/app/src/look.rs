@@ -128,6 +128,20 @@ pub fn from_prefs(prefs: &Value) -> (usize, f32, usize) {
 
 /// The album art's colours tuned for the theme (as the web app does): bright enough on dark themes,
 /// deep enough on light ones
+/// tune_art's colour a shade darker (lighter on a light theme): the second accent from a cover with
+/// only one colour, as the web app's
+pub fn tune_art_shade(c: Rgb, light: bool) -> Rgb {
+    let t = tune_art(c, light);
+    let (r, g, b) = (t.0 as f32 / 255.0, t.1 as f32 / 255.0, t.2 as f32 / 255.0);
+    let (max, min) = (r.max(g).max(b), r.min(g).min(b));
+    let l = (max + min) / 2.0;
+    let d = max - min;
+    let s = if d == 0.0 { 0.0 } else { d / (1.0 - (2.0 * l - 1.0).abs()) };
+    let h = if d == 0.0 { 0.0 } else if max == r { 60.0 * ((g - b) / d).rem_euclid(6.0) } else if max == g { 60.0 * ((b - r) / d + 2.0) } else { 60.0 * ((r - g) / d + 4.0) };
+    let l = if light { (l + 0.1).min(0.55) } else { (l - 0.13).max(0.45) };
+    hsl(h, s, l * 100.0)
+}
+
 pub fn tune_art(c: Rgb, light: bool) -> Rgb {
     let (r, g, b) = (c.0 as f32 / 255.0, c.1 as f32 / 255.0, c.2 as f32 / 255.0);
     let (max, min) = (r.max(g).max(b), r.min(g).min(b));
