@@ -928,6 +928,10 @@ export component AppWindow inherits Window {
     callback crumb-go(int);
     // Settings: closed (the X), and searched (its own search: settings, not music)
     callback settings-close();
+    // a status's buttons (the web app's say(..., { actions })): Update, Later, Choose a version, Skip...
+    in property <[string]> status-actions;
+    callback status-act(int);
+    callback status-dismiss();
     // Adding look-alikes to a playlist: asked about (each one's choice cycles; all at once; Add, or Cancel)
     in-out property <bool> la-open;
     in property <string> la-head;
@@ -992,6 +996,9 @@ export component AppWindow inherits Window {
     callback row-action(int, string);
     callback genre-search(string);
     callback queue-action(int, string);
+    // the queue's Clear, and Clear requests (true)
+    callback queue-clear(bool);
+    in property <int> queue-requests;
     callback shuffle();
     callback play-page();
     callback refresh();
@@ -2577,7 +2584,11 @@ export component AppWindow inherits Window {
                     padding: 16px;
                     spacing: 8px;
                     HorizontalLayout {
+                        spacing: 6px;
                         Text { text: "Queue"; color: Theme.text; font-size: 18px; font-weight: 800; vertical-alignment: center; horizontal-stretch: 1; }
+                        // (as the web app's: waiting chat requests out; everything but what's playing out)
+                        if root.queue-requests > 0: Pill { label: "Clear requests"; y: (parent.height - self.height) / 2; clicked => { root.queue-clear(true); } }
+                        if root.queue-room == "" || root.queue-room-host: Pill { label: "Clear"; y: (parent.height - self.height) / 2; clicked => { root.queue-clear(false); } }
                         Text { text: "Autoplay"; color: Theme.muted; font-size: 12px; vertical-alignment: center; }
                         Toggle { checked <=> root.autoplay; y: (parent.height - self.height) / 2; toggled => { root.autoplay-changed(self.checked); } }
                     }
@@ -2741,23 +2752,30 @@ export component AppWindow inherits Window {
                     property <string> now: root.status;
                     changed now => { if (self.now != "") { self.said = self.now; } }
                     init => { self.said = root.status; }
-                    height: root.status != "" ? 31px : 0px;
+                    property <length> full: root.status-actions.length > 0 ? 42px : 31px;
+                    height: root.status != "" ? self.full : 0px;
                     animate height { duration: Theme.motion ? 200ms : 0ms; easing: ease-in-out; }
                     clip: true;
                     VerticalLayout {
                         y: 0;
-                        height: 31px;
+                        height: sbox.full;
                         padding-left: 18px;
                         padding-right: 18px;
                         padding-top: 8px;
                         opacity: root.status != "" ? 1 : 0;
                         animate opacity { duration: Theme.motion ? 160ms : 0ms; }
                         HorizontalLayout {
-                            height: 22px;
+                            height: sbox.full - 9px;
                             spacing: 10px;
                             property <bool> bad: root.status-bad;
                             Rectangle { width: 8px; height: 8px; y: (parent.height - self.height) / 2; border-radius: 4px; background: parent.bad ? #ff8a80 : Theme.accent; }
-                            Text { text: sbox.said; color: parent.bad ? #ff8a80 : Theme.text; font-size: 13px; vertical-alignment: center; overflow: elide; }
+                            // (a click on it puts it away, as the web app's)
+                            Rectangle {
+                                horizontal-stretch: 1;
+                                Text { x: 0; width: parent.width; height: parent.height; text: sbox.said; color: root.status-bad ? #ff8a80 : Theme.text; font-size: 13px; vertical-alignment: center; overflow: elide; }
+                                TouchArea { mouse-cursor: MouseCursor.pointer; clicked => { root.status-dismiss(); } }
+                            }
+                            for a[i] in root.status-actions: Pill { label: a; y: (parent.height - self.height) / 2; on: i == 0; clicked => { root.status-act(i); } }
                         }
                         Rectangle { height: 1px; background: Theme.line; }
                     }
@@ -3124,7 +3142,7 @@ export component AppWindow inherits Window {
                 }
                 Flickable {
                     vertical-stretch: 1;
-                    viewport-height: lav.preferred-height;
+                    content-height: lav.preferred-height;
                     lav := VerticalLayout {
                         spacing: 10px;
                         for r[i] in root.la-rows: HorizontalLayout {

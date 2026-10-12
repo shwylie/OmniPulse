@@ -84,6 +84,23 @@ impl Queue {
         at - self.qi.unwrap_or(0)
     }
 
+    /// The queue's Clear: only what's playing kept
+    pub fn clear(&mut self) {
+        match self.qi.and_then(|i| (i < self.items.len()).then(|| self.items.remove(i))) {
+            Some(q) => { self.items = vec![q]; self.qi = Some(0); }
+            None => { self.items.clear(); self.qi = None; }
+        }
+    }
+
+    /// Clear requests: the chat requests still to play taken out
+    pub fn clear_requests(&mut self) -> usize {
+        let from = self.qi.map_or(0, |i| i + 1);
+        let before = self.items.len();
+        let mut k = 0;
+        self.items.retain(|q| { let keep = k < from || q.by.is_empty(); k += 1; keep });
+        before - self.items.len()
+    }
+
     /// Chat requests still to play
     pub fn pending_requests(&self) -> impl Iterator<Item = &QItem> {
         self.items.iter().skip(self.qi.map_or(0, |i| i + 1)).filter(|q| !q.by.is_empty())

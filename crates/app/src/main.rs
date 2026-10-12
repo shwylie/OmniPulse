@@ -2051,6 +2051,7 @@ fn paint_queue(a: &mut App) {
     a.panel_map = map;
     a.qrows.set_vec(rows);
     if let Some(ui) = a.ui.upgrade() {
+        ui.set_queue_requests(if integrations::set(&a.web.prefs, "req") { a.queue.pending_requests().count() as i32 } else { 0 });
         ui.set_autoplay(a.autoplay);
         ui.set_autoplay_note(autoplay_note(a).into());
     }
@@ -2225,8 +2226,7 @@ fn start(shared: &Shared) {
                                 if !mb { ui.set_status("Go+ track: playing the full song from YouTube Music.".into()); }
                             } else {
                                 let note = format!("{what}: no exact match, so it's playing the closest, \"{}\" by {}, from YouTube Music.", v.yt.title, v.yt.artists);
-                                ui.set_status(note.clone().into());
-                                STATUS_HOLD.with(|h| *h.borrow_mut() = Some(note));
+                                say_with(&ui, &note, vec![("Choose a version", StatusAct::Prefs(t.clone())), ("Skip", StatusAct::Skip)]);
                             }
                         }
                         {
@@ -3234,6 +3234,10 @@ fn tick(shared: &Shared, events: &std::sync::mpsc::Receiver<Event>, n: u64) {
     STATUS_SEEN.with(|seen| {
         let mut seen = seen.borrow_mut();
         let now = ui.get_status().to_string();
+        if now != seen.0 && STATUS_ACTS.with(|s| s.borrow().0 != now) && ui.get_status_actions().row_count() > 0 {
+            ui.set_status_actions(ModelRc::default());
+            STATUS_ACTS.with(|s| *s.borrow_mut() = (String::new(), Vec::new()));
+        }
         if now != seen.0 {
             *seen = (now, std::time::Instant::now());
             return;
@@ -5105,14 +5109,13 @@ fn pl_import_file(shared: &Shared, src: std::path::PathBuf) {
         }
         let _ = weak.upgrade_in_event_loop(move |ui| SHARED.with(|s| {
             let Some(shared) = s.borrow().clone() else { return };
-            if tracks.is_empty() { ui.set_status("None of its songs were found anywhere.".into()); return; }
+            if tracks.is_empty() { say_with(&ui, "None of its songs were found anywhere.", vec![("Copy the missing", StatusAct::Copy(missing.join("\n")))]); return; }
             let id = xpl::create(&mut shared.borrow_mut().xpl, &name, &tracks);
             xpl_changed(&shared);
             go(&shared, Place::Playlist(id));
             let note = format!("Imported \"{name}\": {}{}", plural(tracks.len(), "song", "songs"), if missing.is_empty() { ".".to_string() } else { format!(", {} found anywhere (copied, to look for).", plural(missing.len(), "song wasn't", "songs weren't")) });
-            if !missing.is_empty() { let _ = arboard::Clipboard::new().and_then(|mut c| c.set_text(missing.join("\n"))); }
-            ui.set_status(note.into());
-            STATUS_HOLD.with(|h| *h.borrow_mut() = None);
+            if missing.is_empty() { ui.set_status(note.into()); STATUS_HOLD.with(|h| *h.borrow_mut() = None); }
+            else { say_with(&ui, &note.replace(" (copied, to look for)", ""), vec![("Copy the missing", StatusAct::Copy(missing.join("\n")))]); }
         }));
     });
 }
@@ -6430,7 +6433,7 @@ fn listen_message(shared: &Shared, m: serde_json::Value) {
                 (true, false) => format!("Joined {host}'s Jam. You can add songs and skip them too. Your own queue is set aside until you leave."),
                 (false, false) => format!("Listening along with {host}. Your own queue is set aside until you leave."),
             };
-            if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_status(note.into()); }
+            if let Some(ui) = shared.borrow().ui.upgrade() { if back { ui.set_status(note.into()); } else { say_with(&ui, &note, vec![("Leave", StatusAct::Leave)]); } }
         }
         Some("state") => { listening_keep(true); listen_follow(shared, m["state"].clone()) }
         // the host's app closed (an update, say): waited for; back, or gone for good (the relay says)
@@ -6597,6 +6600,36 @@ fn rand_u64() -> u64 {
 // The backup's "web" part is the web app's saved data: here, the copy it last wrote for this app.
 // This app's own settings and state are files in the data folder, and go in with the rest.
 // ---------- updates (crate::updater) ----------
+/// What a status's button does
+#[derive(Clone)]
+enum StatusAct { Update, Dismiss, Prefs(Track), Skip, Leave, Copy(String) }
+
+thread_local! {
+    /// the status that has buttons (its text), and what each does
+    static STATUS_ACTS: RefCell<(String, Vec<StatusAct>)> = const { RefCell::new((String::new(), Vec::new())) };
+}
+
+/// A status with buttons: it stays until it's dismissed, replaced, or one of them is clicked
+fn say_with(ui: &AppWindow, text: &str, acts: Vec<(&str, StatusAct)>) {
+    ui.set_status(text.into());
+    STATUS_HOLD.with(|h| *h.borrow_mut() = Some(text.to_string()));
+    ui.set_status_actions(ModelRc::from(Rc::new(VecModel::from(acts.iter().map(|a| slint::SharedString::from(a.0)).collect::<Vec<_>>()))));
+    STATUS_ACTS.with(|s| *s.borrow_mut() = (text.to_string(), acts.into_iter().map(|a| a.1).collect()));
+}
+
+fn status_act(shared: &Shared, i: usize) {
+    let Some(act) = STATUS_ACTS.with(|s| s.borrow().1.get(i).cloned()) else { return };
+    if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_status("".into()); }
+    match act {
+        StatusAct::Update => update_act(shared),
+        StatusAct::Dismiss => {}
+        StatusAct::Prefs(t) => tp_open(shared, &t),
+        StatusAct::Skip => step(shared, 1),
+        StatusAct::Leave => listen_leave(shared, false),
+        StatusAct::Copy(text) => { let _ = arboard::Clipboard::new().and_then(|mut c| c.set_text(text)); if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_status("Copied.".into()); } }
+    }
+}
+
 thread_local! {
     /// a newer release, once one's known
     static UPDATE: RefCell<Option<updater::Release>> = const { RefCell::new(None) };
@@ -6612,7 +6645,7 @@ fn update_check(shared: &Shared, said: bool) {
                 Ok(Some(rel)) => {
                     ui.set_update_note(format!("OmniPulse {} is out (this is {}). {}", rel.version, updater::VERSION, rel.notes).into());
                     ui.set_update_label("Update".into());
-                    ui.set_status(format!("OmniPulse {} is out: Settings > App & Look > Updates.", rel.version).into());
+                    say_with(&ui, &format!("OmniPulse {} is out.", rel.version), vec![("Update", StatusAct::Update), ("Later", StatusAct::Dismiss)]);
                     UPDATE.with(|u| *u.borrow_mut() = Some(rel));
                 }
                 Ok(None) => {
@@ -7696,6 +7729,15 @@ fn main() -> Result<(), slint::PlatformError> {
     });
     let s = shared.clone();
     ui.on_crumb_go(move |i| crumb_go(&s, i.max(0) as usize));
+    ui.on_queue_clear({ let s = shared.clone(); move |req| {
+        let mut a = s.borrow_mut();
+        let note = if req { let n = a.queue.clear_requests(); format!("{} removed.", plural(n, "waiting request", "waiting requests")) } else { a.queue.clear(); "The queue is cleared.".to_string() };
+        paint_queue(&mut a);
+        save_session(&a);
+        if let Some(ui) = a.ui.upgrade() { ui.set_status(note.into()); }
+    } });
+    ui.on_status_act({ let s = shared.clone(); move |i| status_act(&s, i.max(0) as usize) });
+    ui.on_status_dismiss({ let w = ui.as_weak(); move || { if let Some(ui) = w.upgrade() { ui.set_status("".into()); STATUS_HOLD.with(|h| h.borrow_mut().take()); } } });
     ui.on_la_cycle({ let weak = ui.as_weak(); move |i| { LA.with(|l| { if let Some((_, _, c)) = l.borrow_mut().as_mut() { if let Some(x) = c.get_mut(i.max(0) as usize) { x.choice = x.choice.next(); } } }); if let Some(ui) = weak.upgrade() { la_paint(&ui); } } });
     ui.on_la_all({ let weak = ui.as_weak(); move |k| { LA.with(|l| { if let Some((_, _, c)) = l.borrow_mut().as_mut() { for x in c.iter_mut() { x.choice = match k { 0 => lookalike::Choice::Both, 1 => lookalike::Choice::Old, _ => lookalike::Choice::New }; } } }); if let Some(ui) = weak.upgrade() { la_paint(&ui); } } });
     ui.on_la_done({ let s = shared.clone(); move |ok| la_done(&s, ok) });
