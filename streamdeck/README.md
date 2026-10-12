@@ -1,7 +1,9 @@
 # OmniPulse for Stream Deck
 
 Keys for OmniPulse: Play, Pause, Play / Pause, Next, Previous, Like, Favourite, Shuffle, Repeat,
-Clear requests, Clear queue, and Sets & podcasts (lets them in or keeps them out of the queue and autoplay).
+Clear requests, Clear queue, Sets & podcasts (lets them in or keeps them out of the queue and autoplay), and
+Good transition / Bad transition (Seamless Mix feedback: the last transition rated, logged with how it was
+mixed in `%APPDATA%\OmniPulse\state\mix-feedback.jsonl`; nothing is logged without a press).
 Play / Pause, Like, Favourite, Shuffle, Repeat and Sets & podcasts light up to show what the app is doing.
 
 ## Install
@@ -34,5 +36,5 @@ A key shows a warning triangle when the app isn't running or control is switched
 Anything that can open a URL works too (Stream Deck's Website action in the background, Touch Portal,
 AutoHotkey): copy the URL from Settings and change `action=` to any of the actions above
 (`play`, `pause`, `toggle`, `next`, `previous`, `like`, `favourite`, `shuffle`, `repeat`,
-`clear-requests`, `clear-queue`, `sets`). `/state?key=...` answers with what's playing. It only listens on
+`clear-requests`, `clear-queue`, `sets`, `mix-good`, `mix-bad`). `/state?key=...` answers with what's playing. It only listens on
 this PC (127.0.0.1).
