@@ -16,6 +16,9 @@ export global Theme {
     out property <length> radius: 10px;
     // the sidebar, the page and the queue: square with Rounded Corners off (Settings > App)
     in-out property <length> panel-radius: 10px;
+    // a track row and its cover: smaller with List Density at Compact (Settings > Look)
+    in-out property <length> row-h: 60px;
+    in-out property <length> row-art: 44px;
 }
 
 export struct Row { title: string, artist: string, album: string, dur: string, plat: string, playing: bool, head: string, auto: bool, art: image, liked: bool, sc-link: bool, sp-link: bool, yt-link: bool, picked: bool, genres: [string], added-by: string }
@@ -367,7 +370,7 @@ component TrackRow inherits Rectangle {
     // Ctrl+click picks it (or lets it go), Shift+click picks everything from the last one picked
     callback pick(int);
     property <bool> picking;
-    height: 60px;
+    height: Theme.row-h;
     border-radius: 6px;
     background: root.item.picked ? Theme.accent.with-alpha(0.2) : ta.has-hover ? Theme.elevated : transparent;
     HorizontalLayout {
@@ -380,8 +383,8 @@ component TrackRow inherits Rectangle {
             if ta.has-hover || root.item.playing: Path { commands: Icons.play; x: (parent.width - 16px) / 2; y: (parent.height - 16px) / 2; width: 16px; height: 16px; fill: Theme.accent; }
         }
         Rectangle {
-            width: 44px;
-            height: 44px;
+            width: Theme.row-art;
+            height: Theme.row-art;
             y: (parent.height - self.height) / 2;
             border-radius: 4px;
             clip: true;
@@ -741,6 +744,9 @@ export component AppWindow inherits Window {
     callback artist(int);
     callback back();
     callback fav-only-changed(bool);
+    // Search: leave out what you've liked (the web app's Hide likes)
+    in-out property <bool> hide-likes;
+    callback hide-likes-changed(bool);
     callback shuffle-toggle();
     callback repeat-cycle();
     callback look-changed(string, float);
@@ -779,6 +785,9 @@ export component AppWindow inherits Window {
     callback account-keys(int);
     in-out property <bool> rounded: true;
     callback rounded-changed(bool);
+    // Settings > Look > List Density: Compact (the web app's setting too)
+    in-out property <bool> compact-rows;
+    callback density-changed(bool);
     // Updates: what's known (this version, or a newer one), and its button ("Check" or "Update")
     in property <string> update-note: "Checks for a newer version a little after it starts.";
     in property <string> update-label: "Check";
@@ -1092,6 +1101,9 @@ export component AppWindow inherits Window {
                         spacing: 8px;
                         padding-top: 8px;
                         for c[i] in root.chips: Chip { label: c; on: root.chip-on == i; clicked => { root.chip(i); } }
+                        // (Search: leave out what you've liked)
+                        if root.page == "search": Rectangle { width: 8px; }
+                        if root.page == "search": Chip { label: "Hide likes"; on: root.hide-likes; clicked => { root.hide-likes = !root.hide-likes; root.hide-likes-changed(root.hide-likes); } }
                     }
                     // play the page, shuffle it; Favourites only on the right
                     if root.page-kind == "tracks": HorizontalLayout {
@@ -1148,14 +1160,14 @@ export component AppWindow inherits Window {
                     // a list of tracks (Library, playlists, Search, Favourites, Sets, Rediscover)
                     if root.page-kind == "tracks": track-list := ListView {
                         vertical-stretch: 1;
-                        property <int> first: max(0, floor(-self.content-y / 60px));
-                        property <int> count: ceil(self.visible-height / 60px) + 1;
+                        property <int> first: max(0, floor(-self.content-y / Theme.row-h));
+                        property <int> count: ceil(self.visible-height / Theme.row-h) + 1;
                         changed first => { root.rows-in-view(self.first, self.count); }
                         changed count => { root.rows-in-view(self.first, self.count); }
                         init => { root.rows-in-view(self.first, self.count); }
                         // (the last one with room below it, so it scrolls clear of the track tab)
                         for r[i] in root.rows: VerticalLayout {
-                            TrackRow { item: r; index: i; compact: root.narrow || root.queue-open; lists: root.own-lists; removable: root.own-page; show-genres: root.page == "search"; genre(g) => { root.genre-search(g); } play => { root.play-row(i); } act(a) => { root.row-action(i, a); } pick(m) => { root.row-pick(i, m); } }
+                            TrackRow { item: r; index: i; compact: root.narrow || root.queue-open; lists: root.own-lists; removable: root.own-page; show-genres: root.page == "search" && Theme.row-h >= 60px; genre(g) => { root.genre-search(g); } play => { root.play-row(i); } act(a) => { root.row-action(i, a); } pick(m) => { root.row-pick(i, m); } }
                             if i == root.rows.length - 1: Rectangle { height: 76px; }
                         }
                     }
@@ -1521,6 +1533,23 @@ export component AppWindow inherits Window {
                                             Chip { label: "Left"; on: !root.tab-right; y: (parent.height - self.height) / 2; clicked => { root.tab-align-picked("left"); } }
                                             Chip { label: "Right"; on: root.tab-right; y: (parent.height - self.height) / 2; clicked => { root.tab-align-picked("right"); } }
                                         }
+                                    }
+                                }
+                                Card {
+                                    HorizontalLayout {
+                                        padding: 16px;
+                                        padding-top: 12px;
+                                        padding-bottom: 12px;
+                                        spacing: 8px;
+                                        VerticalLayout {
+                                            horizontal-stretch: 1;
+                                            alignment: center;
+                                            spacing: 2px;
+                                            Text { text: "List Density"; color: Theme.text; font-weight: 700; }
+                                            Text { text: "How tightly tracks are listed. Compact fits more on screen."; color: Theme.muted; font-size: 12px; }
+                                        }
+                                        Chip { label: "Comfortable"; on: !root.compact-rows; y: (parent.height - self.height) / 2; clicked => { root.compact-rows = false; root.density-changed(false); } }
+                                        Chip { label: "Compact"; on: root.compact-rows; y: (parent.height - self.height) / 2; clicked => { root.compact-rows = true; root.density-changed(true); } }
                                     }
                                 }
                                 Card {

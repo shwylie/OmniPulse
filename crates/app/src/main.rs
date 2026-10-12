@@ -154,7 +154,9 @@ fn apply_filter(app: &mut App) {
     // (as the web app's js/pagefind.js: word by word, in the title, artist or album)
     let want = sources::words(&app.page_query);
     let found = |t: &Track| want.is_empty() || { let have = sources::words(&format!("{} {} {}", t.title, t.artist, t.album)); want.iter().all(|w| have.iter().any(|h| h.starts_with(w.as_str()))) };
-    let shown = |t: &&Track| plat_on(&prefs, t.plat()) && (!fav_only || favs.contains(t.key.as_str())) && streamsafe::allowed(&prefs, t) && found(t);
+    // (Search, with Hide likes: what you've liked left out)
+    let mine: std::collections::HashSet<&str> = if app.page == "search" && prefs["hideLikes"].as_bool() == Some(true) { app.library.iter().map(|t| t.key.as_str()).collect() } else { Default::default() };
+    let shown = |t: &&Track| plat_on(&prefs, t.plat()) && (!fav_only || favs.contains(t.key.as_str())) && !mine.contains(t.key.as_str()) && streamsafe::allowed(&prefs, t) && found(t);
     let mut filtered: Vec<Track> = match (app.page.as_str(), chip) {
         ("library" | "rediscover" | "favourites" | "search" | "playlist", 1) => app.page_all.iter().filter(shown).filter(|t| !t.is_mix()).cloned().collect(),
         ("library" | "rediscover" | "favourites" | "search" | "playlist", 2) => app.page_all.iter().filter(shown).filter(|t| t.is_mix()).cloned().collect(),
@@ -5317,6 +5319,11 @@ fn apply_look(shared: &Shared) {
     let rounded = prefs["appRounded"].as_bool() != Some(false);
     t.set_panel_radius(if rounded { 10.0 } else { 0.0 });
     ui.set_rounded(rounded);
+    // Settings > Look > List Density (the web app's: rows 4 px apart, covers 32 px, at Compact)
+    let compact = prefs["density"].as_str() == Some("compact");
+    t.set_row_h(if compact { 40.0 } else { 60.0 });
+    t.set_row_art(if compact { 32.0 } else { 44.0 });
+    ui.set_compact_rows(compact);
     t.set_bg(p.bg.slint());
     t.set_panel(p.panel.slint());
     t.set_elevated(p.elevated.slint());
@@ -5573,6 +5580,8 @@ fn main() -> Result<(), slint::PlatformError> {
     let s = shared.clone();
     ui.on_rounded_changed(move |on| set_look_pref(&s, "appRounded", serde_json::json!(on)));
     let s = shared.clone();
+    ui.on_density_changed(move |c| set_look_pref(&s, "density", serde_json::json!(if c { "compact" } else { "comfortable" })));
+    let s = shared.clone();
     ui.on_player_style_picked(move |style| set_look_pref(&s, "playerStyle", serde_json::json!(style.as_str())));
     let s = shared.clone();
     ui.on_tab_align_picked(move |side| set_look_pref(&s, "tabAlign", serde_json::json!(side.as_str())));
@@ -5820,6 +5829,14 @@ fn main() -> Result<(), slint::PlatformError> {
         let mut a = s.borrow_mut();
         if a.page == "search" || a.page == "settings" { return; }   // (there, Enter searches)
         a.page_query = q.trim().to_string();
+        apply_filter(&mut a);
+    });
+    ui.set_hide_likes(shared.borrow().web.prefs["hideLikes"].as_bool() == Some(true));
+    let s = shared.clone();
+    ui.on_hide_likes_changed(move |on| {
+        let mut a = s.borrow_mut();
+        if let Some(o) = a.web.prefs.as_object_mut() { o.insert("hideLikes".into(), serde_json::json!(on)); }
+        if std::env::var_os("OMNIPULSE_SELFTEST").is_none() { webstate::save_pref("hideLikes", serde_json::json!(on)); }
         apply_filter(&mut a);
     });
     let s = shared.clone();
@@ -6145,6 +6162,8 @@ fn main() -> Result<(), slint::PlatformError> {
         let plan: Vec<(u64, &str)> = if join.is_some() { vec![(6, "join"), (14, "joined"), (16, "jamskip"), (19, "leave"), (21, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("mix") { vec![(9, "play"), (10, "mixprep"), (70, "mixseek"), (82, "mixcheck"), (100, "mixcheck"), (106, "mixcheck"), (130, "mixcheck"), (132, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("rhythm") { vec![(9, "play"), (100, "rhythm"), (101, "end")] }
+            // (OMNIPULSE_SELFTEST_PLAN=look: List Density at Compact, and Search with Hide likes)
+            else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("look") { vec![(9, "play"), (12, "library"), (13, "compact"), (14, "settings"), (15, "comfy"), (16, "search"), (19, "hidelikes"), (21, "hidelikesoff"), (22, "end")] }
             else if only_discover { vec![(9, "play"), (11, "discover"), (30, "disc"), (45, "discmix"), (12, "import"), (46, "taste"), (47, "taste2"), (48, "taste3"), (70, "tasted"), (71, "marquee"), (72, "marqueeoff"), (73, "end")] } else { full.to_vec() };
         t.start(slint::TimerMode::Repeated, std::time::Duration::from_millis(250), move || {
             let Some(&(at, what)) = plan.get(step_no) else { return };
@@ -6207,6 +6226,10 @@ fn main() -> Result<(), slint::PlatformError> {
                     ui.set_queue_open(true);
                 }
                 "search" => { ui.set_search_text("deadmau5".into()); ui.invoke_search("deadmau5".into()); }
+                "compact" => ui.invoke_density_changed(true),
+                "comfy" => { ui.invoke_density_changed(false); ui.invoke_nav("library".into()); }
+                "hidelikes" => { let n = ui.get_rows().row_count(); ui.invoke_hide_likes_changed(true); println!("selftest: search {n} rows, with Hide likes {}", ui.get_rows().row_count()); }
+                "hidelikesoff" => { ui.invoke_hide_likes_changed(false); println!("selftest: Hide likes off: {} rows", ui.get_rows().row_count()); }
                 // a Go+ track: it plays from YouTube Music, never its preview
                 "goplus" => {
                     open_page(&s, "library");
