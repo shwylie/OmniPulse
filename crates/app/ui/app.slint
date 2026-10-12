@@ -47,6 +47,9 @@ export struct Line { text: string }
 /// A switch in Settings: under its section's heading (head, on the first of a section)
 /// An account in Settings: its name, what's known (who's signed in, or what it needs), and its button
 export struct Account { name: string, status: string, signed: bool, busy: bool, keys: string, switch: string, on: bool }
+// Settings' search: a setting found (its path, what it is), where it lives (its category, a panel to
+// open), and its switch if it has one
+export struct SetHit { path: string, label: string, note: string, cat: string, panel: string, key: string, on: bool, toggle: bool }
 export struct SetRow { head: string, label: string, note: string, on: bool, key: string, sub: bool, more: bool, button: string }
 /// One of a plugin's settings: its kind ("toggle", "text", "password", "number", "select"), what it's
 /// set to (as text; "true"/"false" for a toggle), and a select's options
@@ -84,6 +87,7 @@ global Icons {
     out property <string> shuffle: "M10.59 9.17L5.41 4 4 5.41l5.17 5.17 1.42-1.41zM14.5 4l2.04 2.04L4 18.59 5.41 20 17.96 7.46 20 9.5V4h-5.5zm.33 9.41l-1.41 1.41 3.13 3.13L14.5 20H20v-5.5l-2.04 2.04-3.13-3.13z";
     out property <string> repeat: "M7 7h10v3l4-4-4-4v3H5v6h2V7zm10 10H7v-3l-4 4 4 4v-3h12v-6h-2v4z";
     out property <string> volume: "M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z";
+    out property <string> close: "M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z";
     out property <string> gear: "M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58a.49.49 0 0 0 .12-.61l-1.92-3.32a.49.49 0 0 0-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54a.48.48 0 0 0-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96a.49.49 0 0 0-.59.22L2.74 8.87a.48.48 0 0 0 .12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58a.49.49 0 0 0-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32a.48.48 0 0 0-.12-.61l-2.01-1.58zM12 15.6A3.6 3.6 0 1 1 12 8.4a3.6 3.6 0 0 1 0 7.2z";
     out property <string> soundcloud: "M1 14.5c0-1.1.8-2 1.9-2.1.4-2.5 2.5-4.4 5.1-4.4.6 0 1.2.1 1.7.3C10.6 6.4 12.6 5 15 5c3.3 0 6 2.7 6 6 0 .2 0 .4-.1.6.7.5 1.1 1.3 1.1 2.2 0 1.5-1.2 2.7-2.7 2.7H3.6C2.2 16.5 1 15.6 1 14.5z";
     out property <string> spotify: "M12 2a10 10 0 100 20 10 10 0 000-20zm4.6 14.4c-.2.3-.6.4-.9.2-2.5-1.5-5.6-1.9-9.3-1-.3.1-.7-.1-.8-.5-.1-.3.1-.7.5-.8 4-.9 7.5-.5 10.3 1.2.3.2.4.6.2.9zm1.2-2.7c-.2.4-.7.5-1.1.3-2.9-1.8-7.2-2.3-10.6-1.2-.4.1-.9-.1-1-.5-.1-.4.1-.9.5-1 3.9-1.2 8.7-.6 12 1.4.4.2.5.7.2 1zm.1-2.8C14.5 8.8 8.9 8.6 5.6 9.6c-.5.2-1.1-.1-1.2-.6-.2-.5.1-1.1.6-1.2 3.8-1.1 10-.9 13.9 1.4.5.3.6.9.4 1.4-.3.4-.9.6-1.4.3z";
@@ -872,6 +876,14 @@ export component AppWindow inherits Window {
     in-out property <string> set-cat;
     // a settings page's path, before its name ("Settings › Streaming")
     in property <string> pf-crumb;
+    // (the panel's path, each part a way back to it)
+    in property <[string]> pf-crumbs;
+    callback crumb-go(int);
+    // Settings: closed (the X), and searched (its own search: settings, not music)
+    callback settings-close();
+    in property <[SetHit]> set-hits;
+    in property <string> set-query;
+    callback set-hit(int);
     // a settings panel's address: copied
     callback pf-copy(int);
     // Pick genres (step 1) and Fine-tune (step 2: the picked genres' subgenres), and Discover's card
@@ -1359,7 +1371,7 @@ export component AppWindow inherits Window {
                             Glyph { d: Icons.search; x: 16px; width: 20px; height: 20px; fill: Theme.muted; }
                             if root.search-text == "": Text {
                                 x: 48px;
-                                text: "Search everywhere";
+                                text: root.page == "settings" ? "Search settings" : "Search everywhere";
                                 color: Theme.muted;
                                 font-size: 14px;
                                 vertical-alignment: center;
@@ -1373,19 +1385,19 @@ export component AppWindow inherits Window {
                                 font-size: 14px;
                                 single-line: true;
                                 text <=> root.search-text;
-                                accepted => { root.search(self.text); keys.focus(); }
+                                accepted => { if (root.page != "settings") { root.search(self.text); keys.focus(); } }
                                 edited => { root.search-edited(self.text); }
                             }
                         }
                         Rectangle { horizontal-stretch: 1; }
-                        RoundButton { d: Icons.gear; clicked => { root.nav("settings"); } }
+                        RoundButton { d: root.page == "settings" ? Icons.close : Icons.gear; clicked => { if (root.page == "settings") { root.settings-close(); } else { root.nav("settings"); } } }
                     }
                     Rectangle { height: 10px; }
                     // the title, and (on pages made from what the platforms send) fetching them again
                     if root.page-kind != "now": HorizontalLayout {
                         spacing: 14px;
-                        if !(root.page == "settings" && root.set-cat != ""): Text { text: root.page-title; color: Theme.text; font-size: 44px; font-weight: 800; overflow: elide; horizontal-stretch: 0; }
-                        if root.page == "settings" && root.set-cat != "": HorizontalLayout {
+                        if !(root.page == "settings" && root.set-cat != "" && root.set-query == ""): Text { text: root.page == "settings" && root.set-query != "" ? "Settings" : root.page-title; color: Theme.text; font-size: 44px; font-weight: 800; overflow: elide; horizontal-stretch: 0; }
+                        if root.page == "settings" && root.set-cat != "" && root.set-query == "": HorizontalLayout {
                             spacing: 14px;
                             Text {
                                 text: "Settings";
@@ -1752,10 +1764,50 @@ export component AppWindow inherits Window {
                             alignment: start;
                             spacing: 14px;
                             padding-right: 14px;
-                            if root.set-cat == "": VerticalLayout {
+                            if root.set-query != "": VerticalLayout {
                                 spacing: 8px;
+                                if root.set-hits.length == 0: Text { text: "No settings match \u{201c}" + root.set-query + "\u{201d}."; color: Theme.muted; font-size: 14px; }
+                                for h[i] in root.set-hits: Card {
+                                    HorizontalLayout {
+                                        padding: 16px;
+                                        padding-top: 12px;
+                                        padding-bottom: 12px;
+                                        spacing: 12px;
+                                        VerticalLayout {
+                                            horizontal-stretch: 1;
+                                            alignment: center;
+                                            spacing: 2px;
+                                            Text { text: h.path; color: Theme.muted; font-size: 11px; }
+                                            Text { text: h.label; color: Theme.text; font-weight: 700; }
+                                            if h.note != "": Text { text: h.note; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
+                                        }
+                                        if h.toggle: Toggle { checked: h.on; y: (parent.height - self.height) / 2; toggled => { root.set-toggle(h.key); } }
+                                        if !h.toggle: Text { text: "\u{203a}"; color: Theme.muted; font-size: 22px; vertical-alignment: center; }
+                                    }
+                                    TouchArea { width: h.toggle ? parent.width - 80px : parent.width; x: 0; mouse-cursor: MouseCursor.pointer; clicked => { root.set-hit(i); } }
+                                }
+                            }
+                            if root.set-cat == "" && root.set-query == "": VerticalLayout {
+                                spacing: 8px;
+                                // (Updates: pinned at the top)
+                                Card {
+                                    HorizontalLayout {
+                                        padding: 16px;
+                                        padding-top: 12px;
+                                        padding-bottom: 12px;
+                                        spacing: 10px;
+                                        VerticalLayout {
+                                            horizontal-stretch: 1;
+                                            alignment: center;
+                                            spacing: 2px;
+                                            Text { text: "Updates"; color: Theme.text; font-weight: 700; }
+                                            Text { text: root.update-note; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
+                                        }
+                                        Pill { label: root.update-label; on: root.update-label == "Update"; y: (parent.height - self.height) / 2; clicked => { root.update-act(); } }
+                                    }
+                                }
                                 for c in [
-                                    { name: "App & Look", note: "Theme, colours, player style, name, tray, animations, updates, backups", d: Icons.gear },
+                                    { name: "App & Look", note: "Theme, colours, player style, name, tray, taskbar widget, animations, backups", d: Icons.gear },
                                     { name: "Integrations", note: "Accounts, platforms, catalogues, following, Listen Along & Jams, Last.fm", d: Icons.person },
                                     { name: "Plugins", note: "Music sources made by others: switched on and off, their settings, adding and removing them", d: Icons.plugin },
                                     { name: "Library", note: "Pages, autoplay, recent plays, hidden and not recommended, music folders", d: Icons.library },
@@ -1763,7 +1815,7 @@ export component AppWindow inherits Window {
                                     { name: "Streaming", note: "Streamer Mode, the widget and alerts, song requests, Stream Deck, OmniPulse Offset", d: Icons.broadcast },
                                 ]: CatCard { name: c.name; note: c.note; d: c.d; clicked => { root.set-cat = c.name; } }
                             }
-                            if root.set-cat == "App & Look": VerticalLayout {
+                            if root.set-cat == "App & Look" && root.set-query == "": VerticalLayout {
                                 spacing: 14px;
                                 Card {
                                     VerticalLayout {
@@ -1992,22 +2044,6 @@ export component AppWindow inherits Window {
                                             horizontal-stretch: 1;
                                             alignment: center;
                                             spacing: 2px;
-                                            Text { text: "Updates"; color: Theme.text; font-weight: 700; }
-                                            Text { text: root.update-note; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
-                                        }
-                                        Pill { label: root.update-label; on: root.update-label == "Update"; y: (parent.height - self.height) / 2; clicked => { root.update-act(); } }
-                                    }
-                                }
-                                Card {
-                                    HorizontalLayout {
-                                        padding: 16px;
-                                        padding-top: 12px;
-                                        padding-bottom: 12px;
-                                        spacing: 10px;
-                                        VerticalLayout {
-                                            horizontal-stretch: 1;
-                                            alignment: center;
-                                            spacing: 2px;
                                             Text { text: "Back Up & Restore"; color: Theme.text; font-weight: 700; }
                                             Text { text: "Your settings, keys, favourites, playlists, stats and alerts, in one .zip. Sign-ins aren't in it."; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
                                         }
@@ -2016,7 +2052,7 @@ export component AppWindow inherits Window {
                                     }
                                 }
                             }
-                            if root.set-cat == "Integrations": VerticalLayout {
+                            if root.set-cat == "Integrations" && root.set-query == "": VerticalLayout {
                                 spacing: 14px;
                                 Card {
                                     VerticalLayout {
@@ -2056,11 +2092,11 @@ export component AppWindow inherits Window {
                                 }
                                 for r[i] in root.set-rows-integrations: SetRowView { r: r; toggle(k) => { root.set-toggle(k); } more(k) => { root.set-more(k); } }
                             }
-                            if root.set-cat == "Plugins": VerticalLayout {
+                            if root.set-cat == "Plugins" && root.set-query == "": VerticalLayout {
                                 spacing: 14px;
                                 for r[i] in root.set-rows-plugins: SetRowView { r: r; toggle(k) => { root.set-toggle(k); } more(k) => { root.set-more(k); } }
                             }
-                            if root.set-cat == "Library": VerticalLayout {
+                            if root.set-cat == "Library" && root.set-query == "": VerticalLayout {
                                 spacing: 14px;
                                 Card {
                                     VerticalLayout {
@@ -2084,7 +2120,7 @@ export component AppWindow inherits Window {
                                 }
                                 for r[i] in root.set-rows-library: SetRowView { r: r; toggle(k) => { root.set-toggle(k); } more(k) => { root.set-more(k); } }
                             }
-                            if root.set-cat == "Sound": VerticalLayout {
+                            if root.set-cat == "Sound" && root.set-query == "": VerticalLayout {
                                 spacing: 14px;
                                 Card {
                                     VerticalLayout {
@@ -2162,7 +2198,7 @@ export component AppWindow inherits Window {
                                 // (Seamless Mix and its band handoff)
                                 for r[i] in root.set-rows-sound: SetRowView { r: r; toggle(k) => { root.set-toggle(k); } more(k) => { root.set-more(k); } }
                             }
-                            if root.set-cat == "Streaming": VerticalLayout {
+                            if root.set-cat == "Streaming" && root.set-query == "": VerticalLayout {
                                 spacing: 14px;
                                 for r[i] in root.set-rows-streaming: SetRowView { r: r; toggle(k) => { root.set-toggle(k); } more(k) => { root.set-more(k); } }
                             }
@@ -2245,20 +2281,23 @@ export component AppWindow inherits Window {
                         HorizontalLayout {
                             RoundButton { d: Icons.back; clicked => { root.pf-open = false; } }
                             Rectangle { horizontal-stretch: 1; }
+                            RoundButton { d: Icons.close; clicked => { root.settings-close(); } }
                         }
                         HorizontalLayout {
                             spacing: 14px;
-                            if root.pf-crumb != "": Text {
-                                text: root.pf-crumb + "  ›";
-                                color: pct.has-hover ? Theme.text : Theme.muted;
-                                font-size: 44px;
-                                font-weight: 800;
-                                overflow: elide;
-                                horizontal-stretch: 1;
-                                max-width: self.preferred-width;
-                                pct := TouchArea { mouse-cursor: MouseCursor.pointer; clicked => { root.pf-open = false; } }
+                            for c[i] in root.pf-crumbs: HorizontalLayout {
+                                spacing: 14px;
+                                horizontal-stretch: 0;
+                                Text {
+                                    text: c;
+                                    color: pct.has-hover ? Theme.text : Theme.muted;
+                                    font-size: root.pf-crumbs.length >= 3 ? 28px : 44px;
+                                    font-weight: 800;
+                                    pct := TouchArea { mouse-cursor: MouseCursor.pointer; clicked => { root.crumb-go(i); } }
+                                }
+                                Text { text: "\u{203a}"; color: Theme.muted; font-size: 40px; font-weight: 400; vertical-alignment: center; }
                             }
-                            Text { text: root.pf-head; color: Theme.text; font-size: 44px; font-weight: 800; overflow: elide; horizontal-stretch: 0; }
+                            Marquee { text: root.pf-head; font-size: root.pf-crumbs.length >= 3 ? 28px : 44px; font-weight: 800; horizontal-stretch: 1; y: (parent.height - self.height) / 2; }
                         }
                         ScrollView {
                           vertical-stretch: 1;

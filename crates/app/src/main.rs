@@ -3248,6 +3248,131 @@ fn pref_put(shared: &Shared, key: &str, v: serde_json::Value) {
     if std::env::var_os("OMNIPULSE_SELFTEST").is_none() { webstate::save_pref(key, v); }
 }
 
+thread_local! {
+    /// where each part of the open panel's path goes back to ("root", "cat:<category>", "panel:<name>")
+    static PF_CRUMBS: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
+    /// Settings' search: what it found, in order
+    static SET_HITS: RefCell<Vec<SetFound>> = const { RefCell::new(Vec::new()) };
+}
+
+fn crumbs_set(ui: &AppWindow, path: Vec<(String, String)>) {
+    ui.set_pf_crumbs(ModelRc::from(Rc::new(VecModel::from(path.iter().map(|(l, _)| slint::SharedString::from(l.as_str())).collect::<Vec<_>>()))));
+    PF_CRUMBS.with(|c| *c.borrow_mut() = path.into_iter().map(|(_, t)| t).collect());
+}
+
+/// A part of the panel's path clicked: back to it
+fn crumb_go(shared: &Shared, i: usize) {
+    let Some(to) = PF_CRUMBS.with(|c| c.borrow().get(i).cloned()) else { return };
+    let Some(ui) = shared.borrow().ui.upgrade() else { return };
+    if let Some(n) = to.strip_prefix("panel:") { panel_open(shared, n); return; }
+    PF_EDIT.with(|e| e.borrow_mut().take());
+    ui.set_pf_open(false);
+    ui.set_set_cat(to.strip_prefix("cat:").unwrap_or("").into());
+}
+
+/// Settings closed (its X), from wherever in it: back to the page before it
+fn settings_close(shared: &Shared) {
+    PF_EDIT.with(|e| e.borrow_mut().take());
+    if let Some(ui) = shared.borrow().ui.upgrade() {
+        ui.set_pf_open(false);
+        ui.set_set_cat("".into());
+        ui.set_set_query("".into());
+        ui.set_search_text("".into());
+    }
+    if shared.borrow().history.is_empty() { open_page(shared, "discover"); } else { go_back(shared); }
+}
+
+/// A setting Settings' search can find
+#[derive(Clone)]
+struct SetFound { path: String, label: String, note: String, cat: String, panel: String, key: String, toggle: bool }
+
+/// The settings drawn by hand (not from SET_ROWS): their category, name and description
+const SET_HAND: [(&str, &str, &str); 22] = [
+    ("", "Updates", "Checks for a newer version a little after it starts, and installs it."),
+    ("App & Look", "Theme", "Light to dark."),
+    ("App & Look", "Tint", "A colour through the theme."),
+    ("App & Look", "Tint Strength", "How much of the tint."),
+    ("App & Look", "Accent", "The colour of buttons, the progress bar and what's playing."),
+    ("App & Look", "Colours from Album Art", "Both colours come from the cover that's playing."),
+    ("App & Look", "Player Style", "Tab, Classic Bar, Floating or Minimal."),
+    ("App & Look", "Track Info Tab", "Which end of the player bar the tab sits at."),
+    ("App & Look", "List Density", "How tightly tracks are listed. Compact fits more on screen."),
+    ("App & Look", "Display Name", "Shown in the title bar and taskbar."),
+    ("App & Look", "Listening Along: Timing", "Plays this much later than the host (or earlier, below 0), to line up with their stream."),
+    ("App & Look", "Close to Tray", "Closing hides the window; music keeps playing. Quit from the tray."),
+    ("App & Look", "Taskbar Widget", "What's playing, always on show in the taskbar by the clock, with its controls."),
+    ("App & Look", "Animations", "Fades and motion."),
+    ("App & Look", "Rounded Corners", "On the sidebar, the page and the queue. Off: square."),
+    ("App & Look", "Back Up & Restore", "Your settings, keys, favourites, playlists, stats and alerts, in one .zip."),
+    ("Integrations", "Accounts", "SoundCloud, Spotify, YouTube Music and Last.fm: signing in and out, and each one's switch."),
+    ("Library", "Music Folders", "Folders on this PC or a network drive. Their music shows in your Library."),
+    ("Sound", "Match Loudness", "Every track played at the same loudness."),
+    ("Sound", "Fade Between Tracks", "Each track fades out where its sound ends, and the next fades in."),
+    ("Sound", "Skip Silences", "Jumps over long silences, and moves on when the rest is silent."),
+    ("Sound", "Equalizer", "Ten bands."),
+];
+
+/// Every setting there is, for searching: the hand-drawn ones, the switches, each panel's fields, the plugins
+fn settings_index(a: &App) -> Vec<SetFound> {
+    let mut out = Vec::new();
+    let path = |cat: &str| if cat.is_empty() { "Settings".to_string() } else { format!("Settings \u{203a} {cat}") };
+    for (cat, label, note) in SET_HAND {
+        out.push(SetFound { path: path(cat), label: label.into(), note: note.into(), cat: cat.into(), panel: String::new(), key: String::new(), toggle: false });
+    }
+    for (cat, label, note, key, _) in SET_ROWS {
+        let cat = if matches!(key, "scOn" | "spOn" | "ytOn" | "scrobble") { "Integrations" } else { cat };
+        out.push(SetFound { path: path(cat), label: label.into(), note: note.into(), cat: cat.into(), panel: String::new(), key: key.into(), toggle: true });
+    }
+    let ip = omnipulse_core::lan_ip().unwrap_or_else(|| "THIS-PC".into());
+    for (name, cat) in [("requests", "Streaming"), ("widget", "Streaming"), ("alerts", "Streaming"), ("alertlist", "Streaming"), ("remote", "Streaming"), ("offset", "Streaming"), ("recent", "Library"), ("hidden", "Library"), ("plugins", "Plugins")] {
+        let title = panels::title(name);
+        out.push(SetFound { path: path(cat), label: title.clone(), note: String::new(), cat: cat.into(), panel: name.into(), key: String::new(), toggle: false });
+        let vals = panels::values(name, &a.web.prefs);
+        for f in panels::fields(name, &vals, &a.web.prefs, &ip) {
+            let label = f["label"].as_str().unwrap_or("").trim().to_string();
+            if label.is_empty() || matches!(f["type"].as_str(), Some("note" | "row")) { continue; }
+            out.push(SetFound { path: format!("{} \u{203a} {title}", path(cat)), label, note: f["note"].as_str().unwrap_or("").into(), cat: cat.into(), panel: name.into(), key: String::new(), toggle: false });
+        }
+    }
+    for pl in omnipulse_core::plugins::list() {
+        out.push(SetFound { path: path("Plugins"), label: pl.manifest.name.clone(), note: pl.manifest.description.clone(), cat: "Plugins".into(), panel: String::new(), key: format!("plugOn_{}", pl.manifest.id), toggle: true });
+    }
+    out
+}
+
+/// Settings' search, as it's typed: every word in a setting's name, description or path; its name's first
+fn settings_search(shared: &Shared, q: &str) {
+    let Some(ui) = shared.borrow().ui.upgrade() else { return };
+    let q = q.trim().to_lowercase();
+    ui.set_set_query(q.clone().into());
+    if q.is_empty() { SET_HITS.with(|h| h.borrow_mut().clear()); return; }
+    let words: Vec<&str> = q.split_whitespace().collect();
+    let a = shared.borrow();
+    let mut hits: Vec<(u8, SetFound)> = settings_index(&a).into_iter().filter_map(|f| {
+        let (l, all) = (f.label.to_lowercase(), format!("{} {} {}", f.label, f.note, f.path).to_lowercase());
+        if !words.iter().all(|w| all.contains(w)) { return None; }
+        Some((if l.starts_with(&q) { 0 } else if words.iter().all(|w| l.contains(w)) { 1 } else { 2 }, f))
+    }).collect();
+    hits.sort_by_key(|h| h.0);
+    let found: Vec<SetFound> = hits.into_iter().map(|h| h.1).take(60).collect();
+    let rows: Vec<SetHit> = found.iter().map(|f| {
+        let on = if f.key == "autoplay" { a.autoplay } else if let Some(id) = f.key.strip_prefix("plugOn_") { plugin_on(&a.web.prefs, id) } else { SET_ROWS.iter().find(|r| r.3 == f.key).map(|r| set_row_on(&a.web.prefs, r.3, r.4)).unwrap_or(false) };
+        SetHit { path: f.path.clone().into(), label: f.label.clone().into(), note: f.note.clone().into(), cat: f.cat.clone().into(), panel: f.panel.clone().into(), key: f.key.clone().into(), on, toggle: f.toggle }
+    }).collect();
+    ui.set_set_hits(ModelRc::from(Rc::new(VecModel::from(rows))));
+    SET_HITS.with(|h| *h.borrow_mut() = found);
+}
+
+/// A setting found, clicked: its category (and its panel), the search over
+fn set_hit(shared: &Shared, i: usize) {
+    let Some(f) = SET_HITS.with(|h| h.borrow().get(i).cloned()) else { return };
+    let Some(ui) = shared.borrow().ui.upgrade() else { return };
+    ui.set_set_query("".into());
+    ui.set_search_text("".into());
+    ui.set_set_cat(f.cat.clone().into());
+    if !f.panel.is_empty() { panel_open(shared, &f.panel); }
+}
+
 fn panel_open(shared: &Shared, name: &str) {
     panel_keys(shared);
     if name == "plugins" { panels::PLUG_PENDING.with(|p| p.borrow_mut().take()); }
@@ -3256,15 +3381,23 @@ fn panel_open(shared: &Shared, name: &str) {
     pf_paint(shared);
     if let Some(ui) = shared.borrow().ui.upgrade() {
         let head = match name.strip_prefix("alert:") { Some(k) => alerts::name(&shared.borrow().web.prefs, k), None => panels::title(name) };
-        let crumb = match name {
-            "requests" | "widget" | "remote" | "offset" => "Settings › Streaming",
-            "alerts" => "Settings › Streaming › Stream Widget",
-            "alertlist" => "Settings › Streaming › Alerts",
-            n if n.starts_with("alert:") => "Settings › Streaming › Alerts",
-            "plugins" => "Settings › Plugins",
-            _ => "Settings › Library",
+        let cat = match name {
+            "requests" | "widget" | "remote" | "offset" | "alerts" | "alertlist" => "Streaming",
+            n if n.starts_with("alert:") => "Streaming",
+            "plugins" => "Plugins",
+            _ => "Library",
         };
-        ui.set_pf_crumb(crumb.into());
+        let mut path = vec![("Settings".to_string(), "root".to_string()), (cat.to_string(), format!("cat:{cat}"))];
+        match name {
+            "alerts" => path.push((panels::title("widget"), "panel:widget".into())),
+            "alertlist" => path.push((panels::title("alerts"), "panel:alerts".into())),
+            n if n.starts_with("alert:") => {
+                path.push((panels::title("alerts"), "panel:alerts".into()));
+                path.push((panels::title("alertlist"), "panel:alertlist".into()));
+            }
+            _ => {}
+        }
+        crumbs_set(&ui, path);
         ui.set_pf_head(head.into());
         ui.set_pf_open(true);
     }
@@ -3628,7 +3761,7 @@ fn pf_open(shared: &Shared, id: &str) {
     PF_EDIT.with(|e| *e.borrow_mut() = Some((id.to_string(), vals)));
     pf_paint(shared);
     if let Some(ui) = shared.borrow().ui.upgrade() {
-        ui.set_pf_crumb("Settings › Plugins".into());
+        crumbs_set(&ui, vec![("Settings".into(), "root".into()), ("Plugins".into(), "cat:Plugins".into())]);
         ui.set_pf_head(p.manifest.name.clone().into());
         ui.set_pf_open(true);
     }
@@ -6953,11 +7086,18 @@ fn main() -> Result<(), slint::PlatformError> {
         if let Some(id) = id { go(&s, Place::Playlist(id)); }
     });
     let s = shared.clone();
+    ui.on_crumb_go(move |i| crumb_go(&s, i.max(0) as usize));
+    let s = shared.clone();
+    ui.on_settings_close(move || settings_close(&s));
+    let s = shared.clone();
+    ui.on_set_hit(move |i| set_hit(&s, i.max(0) as usize));
+    let s = shared.clone();
     ui.on_search(move |q| { if !q.trim().is_empty() { go(&s, Place::Search(q.trim().into())); } });
     let s = shared.clone();
     ui.on_search_edited(move |q| {
         let mut a = s.borrow_mut();
-        if a.page == "search" || a.page == "settings" { return; }   // (there, Enter searches)
+        if a.page == "settings" { drop(a); settings_search(&s, &q); return; }
+        if a.page == "search" { return; }   // (there, Enter searches)
         a.page_query = q.trim().to_string();
         apply_filter(&mut a);
     });
@@ -7342,6 +7482,8 @@ fn main() -> Result<(), slint::PlatformError> {
             // only asked, nothing dropped on your playlists)
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("dnd") { vec![(9, "play"), (12, "library"), (13, "qopen"), (14, "dragq"), (16, "dragasks"), (17, "end")] }
             // (OMNIPULSE_SELFTEST_PLAN=panels: the settings panels, opened (nothing saved))
+            // (OMNIPULSE_SELFTEST_PLAN=setsearch: Settings searched, a panel's path clicked back along, and closed)
+            else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("setsearch") { vec![(9, "library"), (10, "settings"), (11, "ss_fade"), (12, "ss_mix tempo"), (13, "sshit"), (14, "p_alert:raid"), (15, "crumb2"), (16, "setclose"), (17, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("panels") { vec![(9, "settings"), (10, "cat_Integrations"), (11, "cat_Plugins"), (12, "p_requests"), (12, "p_widget"), (14, "p_alerts"), (16, "p_plugins"), (17, "plugread"), (20, "p_alertlist"), (21, "p_alert:raid"), (22, "pfclose"), (23, "end")] }
             // (OMNIPULSE_SELFTEST_PLAN=taskbar: the taskbar widget switched on (shown for a few seconds), a
             // picture of it, then off)
@@ -7422,6 +7564,10 @@ fn main() -> Result<(), slint::PlatformError> {
                 "search" => { ui.set_search_text("deadmau5".into()); ui.invoke_search("deadmau5".into()); }
                 "compact" => ui.invoke_density_changed(true),
                 w if w.starts_with("cat_") => ui.set_set_cat(w[4..].into()),
+                w if w.starts_with("ss_") => { ui.set_search_text(w[3..].into()); ui.invoke_search_edited(w[3..].into()); println!("selftest: settings search \"{}\": {}", &w[3..], ui.get_set_hits().iter().take(6).map(|h| format!("{} ({})", h.label, h.path)).collect::<Vec<_>>().join("; ")); }
+                "sshit" => { ui.invoke_set_hit(0); println!("selftest: after a hit: cat \"{}\", query \"{}\"", ui.get_set_cat(), ui.get_set_query()); }
+                "crumb2" => { println!("selftest: path {:?}", ui.get_pf_crumbs().iter().collect::<Vec<_>>()); ui.invoke_crumb_go(2); println!("selftest: after its 3rd part: open {}, head \"{}\"", ui.get_pf_open(), ui.get_pf_head()); }
+                "setclose" => { ui.invoke_settings_close(); println!("selftest: settings closed: page \"{}\", panel {}, cat \"{}\"", ui.get_page(), ui.get_pf_open(), ui.get_set_cat()); }
                 w if w.starts_with("p_") => { panel_open(&s, &w[2..]); println!("selftest: panel {} has {} fields", &w[2..], ui.get_pf_fields().row_count()); }
                 "plugread" => { panel_put(&s, "plugSource", serde_json::json!(std::env::current_dir().unwrap_or_default().join("plugins").join("internet-archive").join("manifest.json").display().to_string())); panel_press(&s, "plugCheck"); }
                 "pfclose" => { PF_EDIT.with(|e| e.borrow_mut().take()); ui.set_pf_open(false); }
