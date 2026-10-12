@@ -140,7 +140,7 @@ const HOSTING_KEY = "sc.hosting";
 const HOST_RESUME_MS = 90 * 1000;
 function hostKeep() {
   if (together.role !== "host") return;
-  try { localStorage.setItem(HOSTING_KEY, JSON.stringify({ kind: together.kind, code: together.code, hostKey: together.hostKey, inviteKey: together.inviteKey, joinUrl: together.joinUrl, relay: together.relay, at: Date.now() })); } catch (e) {}
+  try { localStorage.setItem(HOSTING_KEY, JSON.stringify({ kind: together.kind, code: together.code, hostKey: together.hostKey, inviteKey: together.inviteKey, joinUrl: together.joinUrl, relay: together.relay, members: (together.members || []).length, at: Date.now() })); } catch (e) {}
 }
 function hostForget() { try { localStorage.removeItem(HOSTING_KEY); } catch (e) {} }
 
@@ -155,12 +155,20 @@ function hostResume() {
     Object.assign(together, { role: null, kind: null, code: "", hostKey: "" });
     paintTogether();
   });
-  together.ws.addEventListener("open", () => { hostPush(true); say("Back in your " + (h.kind === "jam" ? "Jam" : "session") + ": everyone's still with you.", { force: true }); });
+  // (said only of a Jam, or of listeners who were there: a Listen Along room with nobody in it opens
+  // again quietly)
+  together.ws.addEventListener("open", () => {
+    hostPush(true);
+    const n = Number(h.members) || 0;
+    const note = h.kind === "jam" ? (n ? "Back in your Jam: everyone's still with you." : "Your Jam is open again.")
+      : n ? "Back in your Listen Along: " + (n === 1 ? "1 friend is" : n + " friends are") + " still listening." : "";
+    if (note) say(note, { force: true });
+  });
   paintTogether();
 }
 
 function hostMessage(m) {
-  if (m.type === "members") { together.members = m.list || []; paintTogether(); }
+  if (m.type === "members") { together.members = m.list || []; hostKeep(); paintTogether(); }
   else if (m.type === "add" && together.kind === "jam" && m.track) jamAdded(m.track, m.by, m.next);
   else if (m.type === "move" && together.kind === "jam" && m.id) {
     // a member moving a song: the same place among what's coming up, for everyone

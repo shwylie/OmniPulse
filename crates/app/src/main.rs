@@ -5161,13 +5161,31 @@ fn host_fresh() {
     let _ = std::fs::write(p, v.to_string());
 }
 
+/// How many are in the room, kept with it (so coming back after a restart says they're still there
+/// only if anyone was)
+fn host_members(n: usize) {
+    let Some(p) = hosting_file() else { return };
+    let Some(mut v) = std::fs::read_to_string(&p).ok().and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok()) else { return };
+    v["members"] = serde_json::json!(n);
+    let _ = std::fs::write(p, v.to_string());
+}
+
 fn host_resume(shared: &Shared) {
     let Some(v) = hosting_file().and_then(|p| std::fs::read_to_string(p).ok()).and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok()) else { return };
     let fresh = omnipulse_core::now_secs().saturating_sub(v["at"].as_u64().unwrap_or(0)) <= HOST_RESUME_SECS;
     let kind: &'static str = match v["kind"].as_str() { Some("jam") => "jam", Some("listen") => "listen", _ => "" };
     if !fresh || kind.is_empty() || ROOM.with(|r| r.borrow().is_some()) || listening().is_some() { host_keep("", "", None); return; }
+    let members = v["members"].as_u64().unwrap_or(0);
     room_open(shared, kind, Some(v["made"].clone()), move |s| {
-        if let Some(ui) = s.borrow().ui.upgrade() { ui.set_status(format!("Back in your {}: everyone's still with you.", if kind == "jam" { "Jam" } else { "session" }).into()); }
+        // (said only of a Jam, or of listeners who were there: a Listen Along room with nobody in it
+        // opens again quietly)
+        let note = match (kind, members > 0) {
+            ("jam", true) => Some("Back in your Jam: everyone's still with you.".to_string()),
+            ("jam", false) => Some("Your Jam is open again.".to_string()),
+            (_, true) => Some(format!("Back in your Listen Along: {} still listening.", if members == 1 { "1 friend is".to_string() } else { format!("{members} friends are") })),
+            _ => None,
+        };
+        if let (Some(n), Some(ui)) = (note, s.borrow().ui.upgrade()) { ui.set_status(n.into()); }
         push_out(s, true);
     });
 }
@@ -5195,6 +5213,7 @@ fn room_message(shared: &Shared, m: serde_json::Value) {
         Some("open") => host_push(&shared.borrow()),
         Some("members") => {
             MEMBERS.with(|x| *x.borrow_mut() = m["list"].as_array().into_iter().flatten().filter_map(|n| n.as_str().map(String::from)).collect());
+            host_members(MEMBERS.with(|x| x.borrow().len()));
             jam_paint(shared);
         }
         // a Jam member's song: in the queue, as theirs (Play next: next, after the other requests)
@@ -5495,7 +5514,42 @@ fn open_link(shared: &Shared, link: &str) {
     listen_join(shared, link)
 }
 
+// Listening along when the app closed (an update, say) and opened again within 90 s: joined again, and
+// said so (state/native-listening.json: the invite and when it was last heard from)
+fn listening_file() -> Option<std::path::PathBuf> {
+    omnipulse_core::data_dir().ok().map(|d| d.join("state").join("native-listening.json"))
+}
+
+thread_local! {
+    static LISTEN_LINK: RefCell<String> = const { RefCell::new(String::new()) };
+    static LISTEN_FRESH_AT: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+    /// joining again after a restart: the hello says "back", not "joined"
+    static REJOINING: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+fn listening_keep(on: bool) {
+    let Some(p) = listening_file() else { return };
+    if !on { let _ = std::fs::remove_file(p); return; }
+    let now = omnipulse_core::now_secs();
+    if now.saturating_sub(LISTEN_FRESH_AT.with(|c| c.get())) < 10 { return; }
+    LISTEN_FRESH_AT.with(|c| c.set(now));
+    let link = LISTEN_LINK.with(|l| l.borrow().clone());
+    if link.is_empty() { return; }
+    if let Some(d) = p.parent() { let _ = std::fs::create_dir_all(d); }
+    let _ = std::fs::write(p, serde_json::json!({ "link": link, "at": now }).to_string());
+}
+
+fn listen_resume(shared: &Shared) {
+    let Some(v) = listening_file().and_then(|p| std::fs::read_to_string(p).ok()).and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok()) else { return };
+    let fresh = omnipulse_core::now_secs().saturating_sub(v["at"].as_u64().unwrap_or(0)) <= HOST_RESUME_SECS;
+    let link = v["link"].as_str().unwrap_or("").to_string();
+    if !fresh || link.is_empty() || listening().is_some() || ROOM.with(|r| r.borrow().is_some()) { listening_keep(false); return; }
+    REJOINING.with(|r| r.set(true));
+    listen_join(shared, &link);
+}
+
 fn listen_join(shared: &Shared, link: &str) {
+    LISTEN_LINK.with(|l| *l.borrow_mut() = link.to_string());
     let (rt, weak, default_relay, name, cid) = {
         let a = shared.borrow();
         let cid = a.web.prefs["clientId"].as_str().map(String::from).unwrap_or_else(|| format!("{:016x}", rand_u64()));
@@ -5604,10 +5658,18 @@ fn listen_message(shared: &Shared, m: serde_json::Value) {
             let host = m["host"].as_str().unwrap_or("the host").to_string();
             let kind = listening().unwrap_or_default();
             LISTEN.with(|l| { if let Some(l) = l.borrow_mut().as_mut() { l.host = host.clone(); } });
-            let note = if kind == "jam" { format!("Joined {host}'s Jam. You can add songs and skip them too. Your own queue is set aside until you leave.") } else { format!("Listening along with {host}. Your own queue is set aside until you leave.") };
+            let back = REJOINING.with(|r| r.replace(false));
+            LISTEN_FRESH_AT.with(|c| c.set(0));
+            listening_keep(true);
+            let note = match (kind == "jam", back) {
+                (true, true) => format!("Back in {host}'s Jam."),
+                (false, true) => format!("Back listening along with {host}."),
+                (true, false) => format!("Joined {host}'s Jam. You can add songs and skip them too. Your own queue is set aside until you leave."),
+                (false, false) => format!("Listening along with {host}. Your own queue is set aside until you leave."),
+            };
             if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_status(note.into()); }
         }
-        Some("state") => listen_follow(shared, m["state"].clone()),
+        Some("state") => { listening_keep(true); listen_follow(shared, m["state"].clone()) }
         // the host's app closed (an update, say): waited for; back, or gone for good (the relay says)
         Some("hostAway") => {
             let host = LISTEN.with(|l| l.borrow().as_ref().map(|l| l.host.clone())).unwrap_or_default();
@@ -5736,6 +5798,9 @@ fn stand_in(shared: &Shared, host: &Track) {
 /// Leaving (or the room's gone): your own queue back, paused where it was
 fn listen_leave(shared: &Shared, quiet: bool) {
     let Some(l) = LISTEN.with(|l| l.borrow_mut().take()) else { return };
+    // (left: not joined again next time)
+    listening_keep(false);
+    REJOINING.with(|r| r.set(false));
     STAND_IN.with(|x| x.borrow_mut().take());
     drop(l.tx);
     shared.borrow().engine.pause();
@@ -6460,7 +6525,7 @@ fn main() -> Result<(), slint::PlatformError> {
         }
         // hosting when the app closed (an update) and opened again soon after: picked up again
         let s = shared.clone();
-        slint::Timer::single_shot(std::time::Duration::from_secs(2), move || host_resume(&s));
+        slint::Timer::single_shot(std::time::Duration::from_secs(2), move || { host_resume(&s); listen_resume(&s); });
         let s = shared.clone();
         let t = slint::Timer::default();
         t.start(slint::TimerMode::Repeated, std::time::Duration::from_secs(collab::PULL_SECS), move || collab_pull_all(&s));
