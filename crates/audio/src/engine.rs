@@ -640,6 +640,8 @@ struct Fading {
     /// has fallen (frames: it reads less than it plays while it spins up; its position put right after)
     spin_at: f64,
     pub spin_lag: f64,
+    /// each side's loop as it's heard the first time (frames, interleaved), for playing it again
+    loops: [Vec<f32>; 2],
 }
 
 /// One band's handover in a mix: the one coming in up from `in_at` over `in_len`, the one going out
@@ -716,6 +718,32 @@ pub struct Handoff {
     /// a tape start: the one coming in silent until `.0`, then spun up from a halt to its speed over
     /// `.1` (speed and pitch together, as a turntable's motor switched on)
     pub spin: Option<(u64, u64)>,
+    /// a loop of the one going out, or of the one coming in (as a DJ's: a beat or a few bars of it
+    /// played again, on the beat, so nothing of it need be cut short to fit the mix)
+    pub out_loop: Option<Loop>,
+    pub in_loop: Option<Loop>,
+}
+
+/// A loop in a mix: `len` of a song from `from` (ms from the mix's start, or frames) played, then
+/// played again `reps` more times; then it goes on from where the loop ended
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Loop {
+    pub from: u64,
+    pub len: u64,
+    pub reps: u32,
+}
+
+impl Loop {
+    fn frames(&self, rate: u64) -> Self { Self { from: self.from * rate / 1000, len: (self.len * rate / 1000).max(1), reps: self.reps } }
+    /// where frame `f` of the mix is in it: (pass, where in the pass), or None outside it
+    fn at(&self, f: u64) -> Option<(u64, u64)> {
+        (f >= self.from && f < self.from + self.len * (1 + self.reps as u64)).then(|| ((f - self.from) / self.len, (f - self.from) % self.len))
+    }
+    /// (its seams smoothed: a millisecond and a half either side, no click where it starts over)
+    fn seam(&self, k: u64) -> f32 {
+        const W: f32 = 64.0;
+        ((k + 1) as f32 / W).min((self.len - k) as f32 / W).min(1.0)
+    }
 }
 
 
@@ -723,7 +751,7 @@ impl Handoff {
     /// The bass alone swapped at `at` (over a quarter second), the rest crossfaded over all `ms`
     pub fn bass_swap(ms: u64, at: u64) -> Self {
         let all = Ramp::swap(0, ms);
-        Self { low: Ramp::swap(at, 250), mid: all, high: all, echo: None, out_sweep: None, in_sweep: None, brake: None, spin: None }
+        Self { low: Ramp::swap(at, 250), mid: all, high: all, echo: None, out_sweep: None, in_sweep: None, brake: None, spin: None, out_loop: None, in_loop: None }
     }
 
     /// Staged over `ms` (of beats `beat_ms` long), swapped at `swap` (a downbeat): the highs cross over
@@ -745,6 +773,8 @@ impl Handoff {
             in_sweep: None,
             brake: None,
             spin: None,
+            out_loop: None,
+            in_loop: None,
         }
     }
 
@@ -770,6 +800,8 @@ impl Handoff {
             in_sweep: Some(Sweep { points: [down[0], down[1], down[2], down[3], (swap + glide, 10.0)], high: true }),
             brake: None,
             spin: None,
+            out_loop: None,
+            in_loop: None,
         }
     }
 
@@ -778,7 +810,14 @@ impl Handoff {
     /// few ms against a click). For tempos too far apart to blend on the beat: one stops, the other goes.
     pub fn tape_stop(ms: u64) -> Self {
         let side = Ramp { in_at: ms, in_len: 25, out_at: ms.saturating_sub(60), out_len: 60 };
-        Self { low: side, mid: side, high: side, echo: None, out_sweep: None, in_sweep: None, brake: Some((0, ms)), spin: None }
+        Self { low: side, mid: side, high: side, echo: None, out_sweep: None, in_sweep: None, brake: Some((0, ms)), spin: None, out_loop: None, in_loop: None }
+    }
+
+    /// Wordplay: the one going out's word (a beat from the mix's start) looped `reps` more times, then
+    /// cut on the beat at `swap` as the next one comes in singing the same word
+    pub fn word_cut(swap: u64, beat: u64, reps: u32) -> Self {
+        let side = Ramp { in_at: swap, in_len: 8, out_at: swap.saturating_sub(12), out_len: 12 };
+        Self { low: side, mid: side, high: side, echo: None, out_sweep: None, in_sweep: None, brake: None, spin: None, out_loop: Some(Loop { from: 0, len: beat, reps }), in_loop: None }
     }
 
     /// A tape stop over `stop`, with a tape start over `start` in its last part: the one going out slows to
@@ -788,7 +827,7 @@ impl Handoff {
         let start = start.clamp(1, stop.max(1));
         let from = stop - start;
         let side = Ramp { in_at: from, in_len: 10, out_at: stop.saturating_sub(60), out_len: 60 };
-        Self { low: side, mid: side, high: side, echo: None, out_sweep: None, in_sweep: None, brake: Some((0, stop)), spin: Some((from, start)) }
+        Self { low: side, mid: side, high: side, echo: None, out_sweep: None, in_sweep: None, brake: Some((0, stop)), spin: Some((from, start)), out_loop: None, in_loop: None }
     }
 
     fn frames(&self, rate: u64) -> Self {
@@ -798,6 +837,8 @@ impl Handoff {
             out_sweep: self.out_sweep.map(|w| w.frames(rate)), in_sweep: self.in_sweep.map(|w| w.frames(rate)),
             brake: self.brake.map(|(a, b)| (f(a), f(b))),
             spin: self.spin.map(|(a, b)| (f(a), f(b))),
+            out_loop: self.out_loop.map(|l| l.frames(rate)),
+            in_loop: self.in_loop.map(|l| l.frames(rate)),
         }
     }
 }
@@ -901,7 +942,7 @@ impl Fading {
         Self {
             next, total: total.max(1), done: 0, out_buf: VecDeque::new(), in_buf: VecDeque::new(), out_ended: false, in_ended: false,
             handoff: handoff.map(|h| h.frames(rate as u64)), bands: [Bands::new(rate); 2], echo: Echo { line: Vec::new(), at: 0 },
-            sweeps: [[Butter::new(rate, 20.0, true); 2]; 2], rate, brake_at: 0.0, spin_at: 0.0, spin_lag: 0.0,
+            sweeps: [[Butter::new(rate, 20.0, true); 2]; 2], rate, brake_at: 0.0, spin_at: 0.0, spin_lag: 0.0, loops: [Vec::new(), Vec::new()],
         }
     }
 }
@@ -926,7 +967,24 @@ impl Fading {
             let p = (self.done as f32 / self.total.max(1) as f32).min(1.0);
             let (go, gi) = ((p * std::f32::consts::FRAC_PI_2).cos(), (p * std::f32::consts::FRAC_PI_2).sin());
             let braking = self.handoff.and_then(|h| h.brake).filter(|(from, _)| self.done >= *from);
+            let out_loop = self.handoff.and_then(|h| h.out_loop).and_then(|l| l.at(self.done).map(|at| (l, at)));
             let (ol, or) = match braking {
+                // looped: played again (none of it read meanwhile), or heard the first time and kept
+                _ if out_loop.is_some_and(|(_, (pass, _))| pass > 0) => {
+                    let (l, (_, k)) = out_loop.unwrap();
+                    let g = l.seam(k);
+                    let i = k as usize * 2;
+                    (self.loops[0].get(i).copied().unwrap_or(0.0) * g, self.loops[0].get(i + 1).copied().unwrap_or(0.0) * g)
+                }
+                _ if out_loop.is_some() => {
+                    let (l, (_, k)) = out_loop.unwrap();
+                    if k == 0 { self.loops[0].clear(); }
+                    let v = (self.out_buf.pop_front().unwrap_or(0.0), self.out_buf.pop_front().unwrap_or(0.0));
+                    self.loops[0].push(v.0);
+                    self.loops[0].push(v.1);
+                    let g = if l.reps > 0 { l.seam(k).max(if k < 64 { 1.0 } else { 0.0 }) } else { 1.0 };
+                    (v.0 * g, v.1 * g)
+                }
                 None => (self.out_buf.pop_front().unwrap_or(0.0), self.out_buf.pop_front().unwrap_or(0.0)),
                 // stopped: nothing more of it
                 Some((from, len)) if self.done >= from + len => (0.0, 0.0),
@@ -945,7 +1003,23 @@ impl Fading {
                 }
             };
             let spinning = self.handoff.and_then(|h| h.spin).filter(|(from, len)| self.done < *from + *len);
+            let in_loop = self.handoff.and_then(|h| h.in_loop).and_then(|l| l.at(self.done).map(|at| (l, at)));
             let (il, ir) = match spinning {
+                _ if in_loop.is_some_and(|(_, (pass, _))| pass > 0) => {
+                    let (l, (_, k)) = in_loop.unwrap();
+                    let g = l.seam(k);
+                    let i = k as usize * 2;
+                    (self.loops[1].get(i).copied().unwrap_or(0.0) * g, self.loops[1].get(i + 1).copied().unwrap_or(0.0) * g)
+                }
+                _ if in_loop.is_some() => {
+                    let (l, (_, k)) = in_loop.unwrap();
+                    if k == 0 { self.loops[1].clear(); }
+                    let v = (self.in_buf.pop_front().unwrap_or(0.0), self.in_buf.pop_front().unwrap_or(0.0));
+                    self.loops[1].push(v.0);
+                    self.loops[1].push(v.1);
+                    let g = if l.reps > 0 { l.seam(k).max(if k < 64 { 1.0 } else { 0.0 }) } else { 1.0 };
+                    (v.0 * g, v.1 * g)
+                }
                 None => (self.in_buf.pop_front().unwrap_or(0.0), self.in_buf.pop_front().unwrap_or(0.0)),
                 // not yet: nothing of it (and none of it read)
                 Some((from, _)) if self.done < from => { self.spin_lag += 1.0; (0.0, 0.0) }
@@ -1493,6 +1567,31 @@ mod mix_tests {
         // under the stop's end, both heard: something there, never silent between them
         let quiet = (31..39).map(|t| t as f32 / 10.0).map(|t| { let i = (t * rate as f32) as usize * 2; out[i..i + 882].iter().fold(0.0f32, |m, v| m.max(v.abs())) }).fold(1.0f32, f32::min);
         assert!(quiet > 0.05, "a gap: {quiet}");
+    }
+
+    #[test]
+    fn a_word_looped_plays_the_same_beat_again_then_the_next_one_comes_in() {
+        let rate = 44_100u32;
+        let a = Box::new(Tone::new(rate, 440.0, 0.3, 10.0));
+        let b = Box::new(Tone::new(rate, 660.0, 0.3, 10.0));
+        // from 2 s: a 257 ms beat (not a whole number of the tone's cycles) heard, then 3 more times; the
+        // next one in on the beat after (2 + 4 x 0.257 s)
+        let beat = 257u64;
+        let out = render_mix(a, b, (0.0, 0.0), rate, 2.0, 4 * beat + 400, Some(Handoff::word_cut(4 * beat, beat, 3)), 4.0).unwrap();
+        // (in frames: the loop is a whole number of them)
+        let (from, len) = (2 * rate as usize, beat as usize * rate as usize / 1000);
+        let at = |f: usize| out[f * 2];
+        // the same moment of the beat, each time round (the tone going on would be at another point by then)
+        for pass in 1..4 {
+            for k in [2205usize, 4410, 8820] {
+                let (first, again) = (at(from + k), at(from + pass * len + k));
+                assert!((first - again).abs() < 0.02, "pass {pass} at {k}: {first} vs {again}");
+            }
+        }
+        // after it: the next one alone (660 Hz: 66 zero crossings in a tenth of a second)
+        let i = ((2.0 + 4.0 * beat as f32 / 1000.0 + 0.1) * rate as f32) as usize * 2;
+        let ups = out[i..i + 2 * 4410].chunks(2).map(|f| f[0]).collect::<Vec<_>>().windows(2).filter(|w| w[0] < 0.0 && w[1] >= 0.0).count();
+        assert!((63..=69).contains(&ups), "after {ups}");
     }
 
     #[test]

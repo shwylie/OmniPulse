@@ -9,7 +9,7 @@ pub mod source;
 pub mod stretch;
 pub mod ts;
 
-pub use engine::{render, Engine, Event, Handoff, Ramp, Sweep, Tap};
+pub use engine::{render, Engine, Event, Handoff, Loop, Ramp, Sweep, Tap};
 pub use hls::HlsSource;
 pub use http::open_url;
 pub use push::{PushFeed, PushSource};

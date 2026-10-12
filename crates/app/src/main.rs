@@ -2173,6 +2173,9 @@ enum MixPhase {
 }
 
 thread_local! {
+    /// Wordplay's timed lyrics, by track (empty: none that fit), and those being found
+    static MIX_WORDS: RefCell<HashMap<String, Vec<(u64, String)>>> = RefCell::new(HashMap::new());
+    static MIX_WORDS_BUSY: RefCell<std::collections::HashSet<String>> = RefCell::new(std::collections::HashSet::new());
     static MIX: RefCell<Option<MixPhase>> = const { RefCell::new(None) };
     /// the track the queue moves on to at a mix's moment (start() doesn't load it: it's playing), with
     /// the YouTube Music version it plays as
@@ -2277,8 +2280,28 @@ fn mix_tick(shared: &Shared, pos: u64, dur: u64) {
     if !streamsafe::allowed(&shared.borrow().web.prefs, &next) { return; }
     // (where its sound ends: measured, if it's before the file's end)
     let audible = shared.borrow().cur_loud.as_ref().and_then(|k| shared.borrow().analysis.get(k).and_then(|x| x["audible_ms"].as_u64())).filter(|&x| x > 0 && x < dur).unwrap_or(dur);
+    // Wordplay (Settings > Sound): both songs' timed lyrics, for the recordings as measured
+    let words_on = set_row_on(&shared.borrow().web.prefs, "mixWords", true);
+    let wordplay = if words_on { rhythm_full(&cur.key).zip(rhythm_full(&next.key)) } else { None }.and_then(|(a, b)| {
+        let lines = |t: &Track, m: &omnipulse_core::rhythm::Measured| -> Option<Vec<(u64, String)>> {
+            if let Some(l) = MIX_WORDS.with(|w| w.borrow().get(&t.key).cloned()) { return Some(l); }
+            if MIX_WORDS_BUSY.with(|b| !b.borrow_mut().insert(t.key.clone())) { return None; }
+            let (t, secs, rt) = (t.clone(), (m.to_ms.saturating_sub(m.from_ms)) / 1000, shared.borrow().rt.clone());
+            let weak = shared.borrow().ui.clone();
+            rt.spawn(async move {
+                let l = player::mix_lyrics(&t, secs).await;
+                let _ = weak.upgrade_in_event_loop(move |_| {
+                    MIX_WORDS.with(|w| w.borrow_mut().insert(t.key.clone(), l));
+                    MIX_WORDS_BUSY.with(|b| b.borrow_mut().remove(&t.key));
+                });
+            });
+            None
+        };
+        let (la, lb) = (lines(&cur, &a), lines(&next, &b));
+        mix::plan_wordplay(&a, &la?, audible, pos, &b, &lb?)
+    });
     // both measured whole: every beat tracked, so no listening again
-    let whole = rhythm_full(&cur.key).zip(rhythm_full(&next.key)).and_then(|(a, b)| mix::plan_structure(&a, audible, pos, &b));
+    let whole = wordplay.or_else(|| rhythm_full(&cur.key).zip(rhythm_full(&next.key)).and_then(|(a, b)| mix::plan_structure(&a, audible, pos, &b)));
     let (plan, local) = match whole {
         Some(p) => (p, Some(())),
         None => {
@@ -2349,6 +2372,7 @@ fn mix_started(shared: &Shared) {
     let Some(n) = at else { return };
     // (each beat of the one coming in, at its own tempo, for easing back over sixteen of them)
     let ease_ms = omnipulse_core::rhythm::known(&key).map(|m| (16.0 * m.rhythm.period_ms) as u64).unwrap_or(8000);
+    if let (Some(w), Some(ui)) = (plan.word.clone(), shared.borrow().ui.upgrade()) { ui.set_status(format!("Wordplay: \u{201c}{w}\u{201d}").into()); }
     MIX.with(|m| *m.borrow_mut() = Some(MixPhase::Mixing { plan, tempo, eased_from: None, ease_ms, out, began: std::time::Instant::now() }));
     MIXED_IN.with(|m| *m.borrow_mut() = Some((key, version)));
     shared.borrow_mut().queue.qi = Some(n);
@@ -3089,12 +3113,13 @@ fn song_request(shared: &Shared, id: u64, q: String, user: String) {
 /// The servers the web app's settings have on: the widget, the Stream Deck's remote, chat requests
 // ---------- Settings: the switches beyond Look ----------
 // (section, label, note, key, on unless switched off)
-const SET_ROWS: [(&str, &str, &str, &str, bool); 29] = [
+const SET_ROWS: [(&str, &str, &str, &str, bool); 30] = [
     ("Library", "Sets & Podcasts in the Queue", "Lists and autoplay include anything over 15 minutes. Off: only when you pick one.", "queueSets", false),
     ("Library", "Autoplay", "Plays similar tracks when the queue runs out.", "autoplay", true),
     ("Library", "Hidden & Not Recommended", "Right-click a track to stop it, its album or its artist being recommended. Off: nothing is left out; the lists are kept.", "hideOn", true),
     ("Library", "Avoid Recent Plays", "Skips songs you've heard lately in what the app picks for you. What you choose yourself still plays.", "avoidRecent", true),
     ("Sound", "Seamless Mix", "Songs with a beat blend into the next on it, as a DJ mixes: at its tempo, on its phrase, the next one sweeping in from the top as the one playing gives way below it (never both in one part of the sound), down to the drop. With songs that play from YouTube Music or your files (never Spotify's own playback), once their beat is known.", "mixOn", true),
+    ("Sound", "Wordplay", "Seamless Mix sometimes hands over on a word: the song playing sings one (\"heat\", \"one more time\"), it's looped on the beat, and the next song comes in singing the same one. Only with songs whose timed lyrics match what plays.", "mixWords", true),
     ("Sound", "EQ Band Handoff", "Seamless Mix hands over a band at a time (highs, then voice and bass), as a DJ's EQ does, instead of sweeping one song into the other: quicker and more sudden.", "mixBands", false),
     ("Library", "Skip non-music parts", "What plays from YouTube skips the parts of music videos that aren't music (a skit before the song, an interview after it), as marked on SponsorBlock.", "sbOn", true),
     ("Library", "Favourites Page", "Your starred tracks on a page of their own, in the sidebar. The stars stay either way.", "favPage", true),

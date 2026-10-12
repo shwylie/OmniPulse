@@ -280,6 +280,14 @@ pub async fn lyrics_from(t: &Track, provider: &str) -> Vec<Line> {
     Vec::new()
 }
 
+/// A track's timed lyrics for Wordplay (Seamless Mix): LRCLIB's, for a recording `secs` long (what
+/// plays, as measured: a remix or another version of another length has none, its timing not the same)
+pub async fn mix_lyrics(t: &Track, secs: u64) -> Vec<(u64, String)> {
+    let (artist, title, _, _) = lyrics_query(t).await;
+    let Ok(v) = core::lyrics::from("lrclib", &artist, &title, secs, "").await else { return Vec::new() };
+    timed(&v).map(|l| l.into_iter().filter(|x| x.ms > 0 && !x.text.trim().is_empty()).map(|x| (x.ms, x.text)).collect()).unwrap_or_default()
+}
+
 /// A place's timed lyrics, if they are timed (not empty, not untimed text in the timed field)
 fn timed(v: &Value) -> Option<Vec<Line>> {
     let l = parse_lyrics(&serde_json::json!({ "syncedLyrics": v["synced"].as_str()? }));

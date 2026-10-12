@@ -43,6 +43,12 @@ pub struct Plan {
     /// the next one spins up to its speed (songs too far apart, in tempo or key, to blend: never over
     /// each other). `swap_ms`: the stop's length; the spin-up's, what's left of `ms` but its last TAPE_TAIL_MS
     pub tape_stop: bool,
+    /// a loop of the one playing, or of the next one: (from, length: ms from the mix's start; played that
+    /// many more times), so neither has to be cut short to fit (its singing never under the mix)
+    pub out_loop: Option<(u64, u64, u32)>,
+    pub in_loop: Option<(u64, u64, u32)>,
+    /// Wordplay: the word (or words) the one playing's loop sings and the next one comes in on
+    pub word: Option<String>,
 }
 
 /// A tempo this near the next one's isn't eased into (it's played at the one playing's, then its own)
@@ -66,6 +72,25 @@ fn content_start(m: &Measured, n: usize) -> usize {
     // (a bar of it: a beat, and near its loud ones; a beatless intro, however loud, is still an intro)
     let content = |i: usize| bars[i] > line && beat.get(i).is_some_and(|b| *b >= BEAT_LINE);
     (0..bars.len().saturating_sub(1)).find(|&i| content(i) && content(i + 1)).unwrap_or(n.saturating_sub(1)).min(n.saturating_sub(1))
+}
+
+/// A stripped-back outro (a DJ's outro): its last bars, at least this much quieter than its loud part
+const OUTRO_BELOW_DB: f32 = 3.0;
+
+/// Where a song's main part ends, its outro after it: the last of the last two bars in a row with a beat
+/// and as loud as its loud part (within OUTRO_BELOW_DB); the last bar if there's none
+fn content_end(m: &Measured, n: usize) -> usize {
+    let (bars, beat) = (&m.rhythm.bar_db, &m.rhythm.bar_beat);
+    let Some(line) = loud_line(bars).map(|l| l + LOUD_WITHIN_DB - OUTRO_BELOW_DB) else { return n.saturating_sub(1) };
+    let content = |i: usize| bars[i] > line && beat.get(i).is_some_and(|b| *b >= BEAT_LINE);
+    (1..bars.len()).rev().find(|&i| content(i) && content(i - 1)).unwrap_or(n.saturating_sub(1)).min(n.saturating_sub(1))
+}
+
+/// A loop that fills `want` bars from `have` (have < want): as long as can be (4 bars, 2, or 1) and
+/// fitting exactly, and how many more times it's played
+fn loop_fill(have: usize, want: usize) -> Option<(usize, u32)> {
+    if have == 0 || have >= want { return None; }
+    [4usize, 2, 1].into_iter().find(|&l| l <= have && (want - have) % l == 0).map(|l| (l, ((want - have) / l) as u32))
 }
 
 /// The tempo the one playing goes to over its outro to arrive at the next one's (the same tempo, or
@@ -212,9 +237,17 @@ const TAPE_TAIL_MS: u64 = 300;
 
 pub fn handoff(p: &Plan, bands: bool) -> omnipulse_audio::Handoff {
     if p.tape_stop { return omnipulse_audio::Handoff::tape(p.swap_ms, p.ramp_ms); }
-    if !p.beatmatched { return omnipulse_audio::Handoff::bass_swap(p.ms, p.ms / 2); }
-    let beat = p.ms.saturating_sub(p.swap_ms) as f64 / 4.0;
-    if bands { omnipulse_audio::Handoff::staged(p.ms, beat, p.swap_ms) } else { omnipulse_audio::Handoff::wipe(beat, p.swap_ms) }
+    if let (Some(_), Some((_, beat, reps))) = (&p.word, p.out_loop) { return omnipulse_audio::Handoff::word_cut(p.swap_ms, beat, reps); }
+    let mut h = if !p.beatmatched {
+        omnipulse_audio::Handoff::bass_swap(p.ms, p.ms / 2)
+    } else {
+        let beat = p.ms.saturating_sub(p.swap_ms) as f64 / 4.0;
+        if bands { omnipulse_audio::Handoff::staged(p.ms, beat, p.swap_ms) } else { omnipulse_audio::Handoff::wipe(beat, p.swap_ms) }
+    };
+    let as_loop = |(from, len, reps): (u64, u64, u32)| omnipulse_audio::Loop { from, len, reps };
+    h.out_loop = p.out_loop.map(as_loop);
+    h.in_loop = p.in_loop.map(as_loop);
+    h
 }
 
 /// A measured track's beat as it is over n beats from `from` (ms from its start), from its tracked beats: a
@@ -299,8 +332,33 @@ pub fn plan_structure(a: &Measured, a_end_ms: u64, now_ms: u64, b: &Measured) ->
             let swap = a_bar * swap_bar as f64 * 2.0 / (1.0 + target);
             (swap, swap + a_bar / target, target)
         };
+        // loops, so nothing's cut short to fit (with the two at one tempo all through: no tempo eased)
+        let (mut at_bar, mut out_loop, mut in_loop) = (k, None, None);
+        if out_tempo == 1.0 {
+            // the next one's intro shorter than the run-up: its last bars before its content looped, its
+            // content coming in on the swap (never under the run-up)
+            if from_bar == 0 && first < run_b {
+                if let Some((l, reps)) = loop_fill(first, run_b) {
+                    let (s0, s1) = (bd[first - l], bd[first.min(bd.len() - 1)]);
+                    if s1 > s0 { in_loop = Some((((s0 - bd[0]) / rate).round() as u64, ((s1 - s0) / rate).round() as u64, reps)); }
+                }
+            }
+            // the one playing's outro shorter than the run-up: the mix from where its outro starts, its last
+            // bars looped (its loud part, its singing, never under the mix)
+            let a_last = content_end(a, ad.len());
+            let outro = a_end.saturating_sub(a_last + 1);
+            if k <= a_last {
+                if let Some((l, reps)) = loop_fill(outro, run) {
+                    let k2 = a_end - outro;
+                    if at(k2) >= soonest {
+                        at_bar = k2;
+                        out_loop = Some(((at(a_end - l) - at(k2)).round() as u64, (at(a_end) - at(a_end - l)).round() as u64, reps));
+                    }
+                }
+            }
+        }
         return Some(Plan {
-            at_ms: at(k).round() as u64,
+            at_ms: at(at_bar).round() as u64,
             ms: len.round() as u64,
             swap_ms: swap_ms.round() as u64,
             start_ms: bd[from_bar].round() as u64,
@@ -311,6 +369,9 @@ pub fn plan_structure(a: &Measured, a_end_ms: u64, now_ms: u64, b: &Measured) ->
             out_tempo,
             ramp_ms: if out_tempo == 1.0 { 0 } else { swap_ms.round() as u64 },
             tape_stop: false,
+            out_loop,
+            in_loop,
+            word: None,
         });
     }
     // (eased onto one tempo, `target` not 1.0: the next one from the one playing's tempo to its own over all of it)
@@ -326,6 +387,9 @@ pub fn plan_structure(a: &Measured, a_end_ms: u64, now_ms: u64, b: &Measured) ->
         out_tempo: target,
         ramp_ms: if target == 1.0 { 0 } else { ms.round() as u64 },
         tape_stop: false,
+        out_loop: None,
+        in_loop: None,
+        word: None,
     });
     // (how far the one playing is eased, if it can be; and how many of its bars go to one of the next one's:
     // half or double time, 2 or 1/2)
@@ -356,6 +420,9 @@ pub fn plan_structure(a: &Measured, a_end_ms: u64, now_ms: u64, b: &Measured) ->
         out_tempo: 1.0,
         ramp_ms: (spin.round() as u64),
         tape_stop: true,
+        out_loop: None,
+        in_loop: None,
+        word: None,
     })
 }
 
@@ -389,6 +456,9 @@ pub fn plan(a: &Measured, a_end_ms: u64, now_ms: u64, b: &Measured, bars: u32) -
         out_tempo: 1.0,
         ramp_ms: 0,
         tape_stop: false,
+        out_loop: None,
+        in_loop: None,
+        word: None,
     })
 }
 
@@ -426,6 +496,93 @@ pub fn ease(rate: f64, t: u64, ms: u64) -> f64 {
     let p = t as f64 / ms.max(1) as f64;
     let s = p * p * (3.0 - 2.0 * p);
     rate + (1.0 - rate) * s
+}
+
+// ---------- Wordplay: the one playing's word looped on the beat, the next one coming in singing it ----------
+/// Words too common to make wordplay of (a match on one of them alone is no match)
+const PLAIN_WORDS: [&str; 40] = [
+    "the", "and", "but", "you", "your", "i'm", "im", "for", "with", "this", "that", "are", "was", "she", "he's", "his", "her", "our", "they", "them", "its", "it's", "all", "not", "can", "now", "got", "get", "just", "like", "yeah", "ooh", "ohh", "hey", "nah", "woah", "whoa", "uh", "ah", "oh",
+];
+
+/// A line's words, plain (lower case; its letters, digits and apostrophes)
+fn words_of(line: &str) -> Vec<String> {
+    line.split_whitespace()
+        .map(|w| w.chars().filter(|c| c.is_alphanumeric() || *c == '\'').collect::<String>().to_lowercase().replace('’', "'"))
+        .filter(|w| !w.is_empty())
+        .collect()
+}
+
+/// How many of two lines' first words are the same (up to three); a single one counts only if it's a
+/// word of its own (not "the", "oh"), four letters or more
+fn opening_match(a: &[String], b: &[String]) -> usize {
+    let n = a.iter().zip(b).take(3).take_while(|(x, y)| x == y).count();
+    match n {
+        0 => 0,
+        1 if a[0].chars().count() < 4 || PLAIN_WORDS.contains(&a[0].as_str()) => 0,
+        n => n,
+    }
+}
+
+/// The nearest of a song's beats to `t` (ms from its start), if it's within a third of a beat: (its
+/// time, its place in the bar: 0 a downbeat)
+fn beat_near(m: &Measured, t: f64) -> Option<(f64, usize)> {
+    let (i, at) = m.rhythm.beats.iter().enumerate().map(|(i, b)| (i, m.from_ms as f64 + b)).min_by(|x, y| (x.1 - t).abs().total_cmp(&(y.1 - t).abs()))?;
+    ((at - t).abs() <= m.rhythm.period_ms / 3.0).then_some((at, (i + 4 - m.rhythm.downbeat % 4) % 4))
+}
+
+/// Wordplay, from both songs' timed lyrics (each line: ms from the song's start, its words): a line
+/// late in the one playing and one early in the next that start with the same word (or words). The
+/// one playing's word (its beat) is looped to the next bar's downbeat (four to seven times in all), and
+/// cut there as the next one comes in on the same word, at the one playing's tempo if they're near
+/// enough (then eased back to its own), else at its own. None without such a pair.
+pub fn plan_wordplay(a: &Measured, a_lines: &[(u64, String)], a_end_ms: u64, now_ms: u64, b: &Measured, b_lines: &[(u64, String)]) -> Option<Plan> {
+    if a.rhythm.tempo_confidence < MIN_CONFIDENCE || b.rhythm.tempo_confidence < MIN_CONFIDENCE { return None; }
+    let b_len = (b.to_ms.max(b.from_ms)) as f64;
+    let (soonest, a_end) = ((now_ms + 8000) as f64, a_end_ms as f64);
+    let rate = match_rate(a.rhythm.bpm, b.rhythm.bpm).map_or(1.0, |(r, _)| r);
+    let beat = a.rhythm.period_ms;
+    // (the best: the most words the same, then the latest in the one playing, then the soonest in the next)
+    let mut best: Option<(usize, f64, f64, Plan)> = None;
+    for (ta, la) in a_lines {
+        let ta = *ta as f64;
+        // late in it (past halfway), with time for its loop before its sound ends
+        if ta < soonest.max(a_end * 0.5) || ta + 8.0 * beat > a_end { continue; }
+        let wa = words_of(la);
+        let Some((a_at, a_place)) = beat_near(a, ta) else { continue };
+        // (to the downbeat after: four beats at least)
+        let n = (4..8).find(|n| (a_place + n) % 4 == 0).unwrap_or(4);
+        let swap = n as f64 * beat;
+        for (tb, lb) in b_lines {
+            let tb = *tb as f64;
+            if tb < 2000.0 || tb > b_len * 0.6 { continue; }
+            let same = opening_match(&wa, &words_of(lb));
+            if same == 0 { continue; }
+            let Some((b_at, _)) = beat_near(b, tb) else { continue };
+            // (the next one read from the mix's start: as far before its word as the loop is long)
+            let start = b_at - swap * rate;
+            if start < 0.0 { continue; }
+            let better = best.as_ref().is_none_or(|(s, x, y, _)| same > *s || (same == *s && (a_at > *x + 1.0 || ((a_at - *x).abs() <= 1.0 && b_at < *y))));
+            if !better { continue; }
+            let word = wa[..same].join(" ");
+            best = Some((same, a_at, b_at, Plan {
+                at_ms: a_at.round() as u64,
+                ms: (swap + 400.0).round() as u64,
+                swap_ms: swap.round() as u64,
+                start_ms: start.round() as u64,
+                rate,
+                bars: 1,
+                semitones: 0,
+                beatmatched: false,
+                out_tempo: 1.0,
+                ramp_ms: 0,
+                tape_stop: false,
+                out_loop: Some((0, beat.round() as u64, n as u32 - 1)),
+                in_loop: None,
+                word: Some(word),
+            }));
+        }
+    }
+    best.map(|b| b.3)
 }
 
 #[cfg(test)]
@@ -518,6 +675,56 @@ mod tests {
 
     fn song(parts: &[(usize, f32, bool)]) -> Vec<(f32, bool)> {
         parts.iter().flat_map(|&(n, db, beat)| std::iter::repeat((db, beat)).take(n)).collect()
+    }
+
+    #[test]
+    fn wordplay_loops_the_word_to_the_downbeat_and_comes_in_on_it() {
+        // 128 BPM, beats from 500 ms (a beat 468.75 ms); the one playing sings "Heat, up the night" on
+        // its 3rd beat of bar 60, the next one "heat up the floor" at bar 10's downbeat
+        let a = shaped(m(128.0, 500.0, 0, 0.5), &song(&[(88, -10.0, true)]));
+        let b = shaped(m(126.0, 300.0, 0, 0.5), &song(&[(88, -10.0, true)]));
+        let (beat_a, beat_b): (f64, f64) = (60_000.0 / 128.0, 60_000.0 / 126.0);
+        let ta = 500.0 + (60.0 * 4.0 + 2.0) * beat_a;
+        let tb = 300.0 + 40.0 * beat_b;
+        let end = (500.0 + 88.0 * 4.0 * beat_a) as u64;
+        let a_lines = vec![(30_000, "Oh, the night".to_string()), ((ta + 40.0) as u64, "Heat, up the night".to_string())];
+        let b_lines = vec![(tb as u64 - 30, "heat up the floor".to_string()), (60_000, "the night".to_string())];
+        let p = plan_wordplay(&a, &a_lines, end, 10_000, &b, &b_lines).expect("wordplay");
+        assert_eq!(p.word.as_deref(), Some("heat up the"));
+        // from the word's beat, looped to the next downbeat: 2 beats in that bar, then 4 more (6 in all)
+        assert_eq!(p.at_ms, ta.round() as u64);
+        assert_eq!(p.out_loop, Some((0, beat_a.round() as u64, 5)));
+        assert_eq!(p.swap_ms, (6.0 * beat_a).round() as u64);
+        // the next one at the one playing's tempo, its word on the swap
+        assert!((p.rate - 128.0 / 126.0).abs() < 1e-9);
+        assert!((p.start_ms as f64 + p.swap_ms as f64 * p.rate - tb).abs() < 2.0, "{p:?}");
+        // "oh" and "the" alone aren't wordplay; nothing early enough in the one playing either
+        assert!(plan_wordplay(&a, &[(ta as u64, "Oh my".into())], end, 10_000, &b, &[(tb as u64, "oh no".into())]).is_none());
+        assert!(plan_wordplay(&a, &[(20_000, "Heat".into())], end, 10_000, &b, &[(tb as u64, "Heat".into())]).is_none());
+        // a handoff that loops it, then cuts
+        let h = handoff(&p, false);
+        assert_eq!(h.out_loop.map(|l| l.reps), Some(5));
+    }
+
+    #[test]
+    fn a_short_intro_or_outro_looped_rather_than_mixed_over() {
+        // the next one: 4 bars of beat intro, then its loud part (its singing): looped to fill the 8-bar
+        // run-up, its content coming in on the swap
+        let a = shaped(m(128.0, 500.0, 0, 0.5), &song(&[(64, -10.0, true), (24, -18.0, true)]));
+        let b = shaped(m(128.0, 300.0, 0, 0.5), &song(&[(4, -20.0, true), (84, -9.0, true)]));
+        let bar: f64 = 4.0 * 60_000.0 / 128.0;
+        let end = (500.0 + 88.0 * bar) as u64;
+        let p = plan_structure(&a, end, 10_000, &b).expect("a plan");
+        assert!(p.beatmatched);
+        assert_eq!(p.in_loop, Some((0, (4.0 * bar).round() as u64, 1)), "{p:?}");
+        assert_eq!(p.out_loop, None, "an outro long enough: {p:?}");
+        // the one playing: its loud part right to 4 bars before its end (a 4-bar outro): the mix from its
+        // outro, its last 4 bars looped once more (never over its loud part)
+        let a2 = shaped(m(128.0, 500.0, 0, 0.5), &song(&[(84, -10.0, true), (4, -13.0, true)]));
+        let b2 = shaped(m(128.0, 300.0, 0, 0.5), &song(&[(24, -20.0, true), (64, -9.0, true)]));
+        let q = plan_structure(&a2, end, 10_000, &b2).expect("a plan");
+        assert_eq!(q.at_ms, (500.0 + 84.0 * bar).round() as u64, "{q:?}");
+        assert_eq!(q.out_loop, Some((0, (4.0 * bar).round() as u64, 1)), "{q:?}");
     }
 
     #[test]
