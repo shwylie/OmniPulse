@@ -3129,6 +3129,8 @@ fn paint_settings(a: &App) {
         let mut list: Vec<SetRow> = SET_ROWS.iter().filter(|(s, ..)| *s == sec)
             // Extended only shows with Streamer Mode on
             .filter(|(_, _, _, key, _)| *key != "streamSafe" || streamer)
+            // (the platforms' own switches are with their accounts)
+            .filter(|(_, _, _, key, _)| !matches!(*key, "scOn" | "spOn" | "ytOn" | "scrobble"))
             // (Alerts only shows with the widget on)
             .filter(|(_, _, _, key, _)| *key != "alertsOn" || integrations::set(&a.web.prefs, "widget"))
             .map(|(_, label, note, key, dflt)| {
@@ -3744,6 +3746,7 @@ fn set_toggle(shared: &Shared, key: &str) {
             if let Some(o) = shared.borrow_mut().web.prefs.as_object_mut() { o.insert("streamerMode".into(), serde_json::json!(on)); }
             if std::env::var_os("OMNIPULSE_SELFTEST").is_none() { webstate::save_pref("streamerMode", serde_json::json!(on)); }
             if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_streamer(on); ui.set_status(if on { "Streamer Mode on." } else { "Streamer Mode off." }.into()); }
+            accounts_paint(shared);
             if !on && streamsafe::on(&shared.borrow().web.prefs) { safe_set(shared, false); }
         }
         "scOn" | "spOn" | "ytOn" => plat_toggle(shared, match key { "spOn" => "spotify", "ytOn" => "youtube", _ => "soundcloud" }),
@@ -3772,6 +3775,11 @@ fn set_toggle(shared: &Shared, key: &str) {
                 jam_paint(shared);
             }
             if key == "hideOn" { hide_applied(shared); }
+            // Chromecast off while casting: the cast ends, and the sound comes back here
+            if key == "castOn" && !on && casting().is_some() {
+                omnipulse_core::cast::stop();
+                cast_end(shared, Some("Chromecast off: playing here again.".into()));
+            }
             if key == "mixOn" { if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_mix_on(on); } }
             if key == "favPage" {
                 if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_fav_page(on); }
@@ -3788,6 +3796,7 @@ fn set_toggle(shared: &Shared, key: &str) {
         }
     }
     paint_settings(&shared.borrow());
+    if matches!(key, "scOn" | "spOn" | "ytOn" | "scrobble") { accounts_paint(shared); }
 }
 
 /// The Library and your playlists, from every platform you're signed in to (at the start, and again
@@ -3890,7 +3899,9 @@ fn folders_set(shared: &Shared, folders: Vec<String>) {
 // it in full (Premium), your YouTube account for likes there, and Last.fm for scrobbling
 // (Spotify is one sign-in, as the web app's: its own, the playback engine's, for Premium; a free account
 // signs in through your own developer app instead: crates/core/src/spotify.rs)
-const ACCOUNTS: [(&str, &str); 4] = [("soundcloud", "SoundCloud"), ("spotify", "Spotify"), ("youtube", "YouTube Account"), ("lastfm", "Last.fm")];
+const ACCOUNTS: [(&str, &str); 4] = [("soundcloud", "SoundCloud"), ("spotify", "Spotify"), ("youtube", "YouTube Music"), ("lastfm", "Last.fm")];
+/// Each account's platform switch, with it in Accounts (not in the list below it)
+fn account_switch(key: &str) -> &'static str { match key { "soundcloud" => "scOn", "spotify" => "spOn", "youtube" => "ytOn", _ => "scrobble" } }
 
 /// Spotify only lets Premium accounts sign in its own way
 /// set once Spotify has turned its own sign-in down (a free account): the next sign-in is your app's
@@ -3915,10 +3926,13 @@ fn account_signed(key: &str) -> bool {
 
 fn accounts_paint(shared: &Shared) {
     let Some(ui) = shared.borrow().ui.upgrade() else { return };
+    let prefs = shared.borrow().web.prefs.clone();
+    // (Streamer Mode: who you're signed in as isn't shown)
+    let private = integrations::set(&prefs, "streamerMode");
     let rows: Vec<Account> = ACCOUNTS.iter().map(|&(key, name)| {
         let signed = account_signed(key);
         let busy = ACCOUNT_BUSY.with(|b| b.borrow().contains(key));
-        let who = ACCOUNT_NAMES.with(|n| n.borrow().get(key).cloned()).filter(|s| !s.is_empty());
+        let who = if private { None } else { ACCOUNT_NAMES.with(|n| n.borrow().get(key).cloned()).filter(|s| !s.is_empty()) };
         let status = if busy {
             "Finish signing in in your browser.".to_string()
         } else if signed {
@@ -3927,6 +3941,9 @@ fn accounts_paint(shared: &Shared) {
                 ("spotify", Some(w)) if omnipulse_core::spotify_engine::spe_signed_in() => format!("Signed in as {w} · Premium: Spotify plays in full here."),
                 ("spotify", Some(w)) => format!("Signed in as {w} · Free: Spotify tracks play from YouTube Music."),
                 (_, Some(w)) => format!("Signed in as {w}."),
+                ("spotify", None) if private && omnipulse_core::spotify_engine::spe_premium() == Some(false) => "Signed in (your name's hidden in Streamer Mode) · Free: Spotify songs play from YouTube Music.".to_string(),
+                ("spotify", None) if private => "Signed in (your name's hidden in Streamer Mode) · Premium: Spotify plays in full here.".to_string(),
+                _ if private => "Signed in (your name's hidden in Streamer Mode).".to_string(),
                 _ => "Signed in.".to_string(),
             }
         } else {
@@ -3942,7 +3959,9 @@ fn accounts_paint(shared: &Shared) {
         // (Spotify, signed in: your own app keys, optional, for an allowance of requests of your own)
         let keys = if key == "spotify" && signed && !busy { if keysetup::has_keys("spotify") { "Change keys" } else { "Own keys" } } else { "" };
         let status = if key == "spotify" && signed && omnipulse_core::spotify::spotify_app_signed_in() { format!("{status} Requests go through your own app keys.") } else { status };
-        Account { name: name.into(), status: status.into(), signed, busy, keys: keys.into() }
+        let sw = account_switch(key);
+        let on = SET_ROWS.iter().find(|r| r.3 == sw).map(|r| set_row_on(&prefs, sw, r.4)).unwrap_or(true);
+        Account { name: name.into(), status: status.into(), signed, busy, keys: keys.into(), switch: sw.into(), on }
     }).collect();
     ui.set_accounts(ModelRc::from(Rc::new(VecModel::from(rows))));
 }
@@ -5968,6 +5987,8 @@ fn streamer_step(shared: &Shared) {
         safe_set(shared, false);
         if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_status("Streamer Mode off.".into()); }
     }
+    // (who you're signed in as: hidden, or shown again)
+    accounts_paint(shared);
 }
 
 fn safe_set(shared: &Shared, on: bool) {
@@ -6654,6 +6675,8 @@ fn main() -> Result<(), slint::PlatformError> {
             let cast = if cast_on { omnipulse_core::cast::devices() } else { Vec::new() };
             let on = casting();
             if let Some(i) = on.as_ref().and_then(|n| cast.iter().position(|d| d.name == *n)) { ui.set_device_on((list.len() + i) as i32); }
+            // (cast devices after Windows', under a heading of their own)
+            ui.set_devices_cast_from(if cast.is_empty() { -1 } else { list.len() as i32 });
             list.extend(cast.iter().map(|d| format!("Cast to {}", d.name)));
             CAST_LIST.with(|c| *c.borrow_mut() = cast);
             ui.set_devices(ModelRc::from(Rc::new(VecModel::from(list.into_iter().map(slint::SharedString::from).collect::<Vec<_>>()))));
@@ -7163,7 +7186,7 @@ fn main() -> Result<(), slint::PlatformError> {
             // only asked, nothing dropped on your playlists)
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("dnd") { vec![(9, "play"), (12, "library"), (13, "qopen"), (14, "dragq"), (16, "dragasks"), (17, "end")] }
             // (OMNIPULSE_SELFTEST_PLAN=panels: the settings panels, opened (nothing saved))
-            else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("panels") { vec![(9, "settings"), (10, "cat_Plugins"), (11, "cat_Streaming"), (12, "p_requests"), (12, "p_widget"), (14, "p_alerts"), (16, "p_plugins"), (17, "plugread"), (20, "p_alertlist"), (21, "p_alert:raid"), (22, "pfclose"), (23, "end")] }
+            else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("panels") { vec![(9, "settings"), (10, "cat_Integrations"), (11, "cat_Plugins"), (12, "p_requests"), (12, "p_widget"), (14, "p_alerts"), (16, "p_plugins"), (17, "plugread"), (20, "p_alertlist"), (21, "p_alert:raid"), (22, "pfclose"), (23, "end")] }
             // (OMNIPULSE_SELFTEST_PLAN=look: List Density at Compact, and Search with Hide likes)
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("look") { vec![(9, "play"), (12, "library"), (13, "compact"), (14, "settings"), (15, "comfy"), (16, "search"), (19, "hidelikes"), (21, "hidelikesoff"), (22, "discover"), (30, "langnext"), (40, "end")] }
             else if only_discover { vec![(9, "play"), (11, "discover"), (30, "disc"), (45, "discmix"), (12, "import"), (46, "taste"), (47, "taste2"), (48, "taste3"), (70, "tasted"), (71, "marquee"), (72, "marqueeoff"), (73, "end")] } else { full.to_vec() };

@@ -44,7 +44,7 @@ export struct Shelf { title: string, tiles: [Tile] }
 export struct Line { text: string }
 /// A switch in Settings: under its section's heading (head, on the first of a section)
 /// An account in Settings: its name, what's known (who's signed in, or what it needs), and its button
-export struct Account { name: string, status: string, signed: bool, busy: bool, keys: string }
+export struct Account { name: string, status: string, signed: bool, busy: bool, keys: string, switch: string, on: bool }
 export struct SetRow { head: string, label: string, note: string, on: bool, key: string, sub: bool, more: bool, button: string }
 /// One of a plugin's settings: its kind ("toggle", "text", "password", "number", "select"), what it's
 /// set to (as text; "true"/"false" for a toggle), and a select's options
@@ -1018,6 +1018,8 @@ export component AppWindow inherits Window {
     // Seamless Mix: on or off (the title bar's button, as its switch in Settings > Sound), and a mix
     // playing now
     in property <bool> mix-on;
+    // the output menu: where its cast devices start (-1: none)
+    in property <int> devices-cast-from: -1;
     in property <bool> mixing;
     callback mix-toggle();
     // an edge or corner pressed: the window resized from it (0 top ... 7 bottom-right)
@@ -1983,6 +1985,9 @@ export component AppWindow inherits Window {
                                                     y: (parent.height - self.height) / 2;
                                                     clicked => { if (!acc.busy) { root.account-act(i); } }
                                                 }
+                                                // (its platform, switched on or off here too: SoundCloud, Spotify, YouTube Music,
+                                                // Last.fm's scrobbling)
+                                                if acc.switch != "": Toggle { checked: acc.on; y: (parent.height - self.height) / 2; toggled => { root.set-toggle(acc.switch); } }
                                             }
                                         }
                                     }
@@ -2506,7 +2511,7 @@ export component AppWindow inherits Window {
                             IconButton { d: Icons.output; y: (parent.height - self.height) / 2; clicked => { root.devices-want(); devices-menu.show(); } }
                             devices-menu := PopupWindow {
                                 x: parent.width - 280px;
-                                y: -12px - root.devices.length * 32px - 16px;
+                                y: -12px - root.devices.length * 32px - 16px - (root.devices-cast-from >= 0 ? 38px : 0px);
                                 width: 280px;
                                 Rectangle {
                                     background: Theme.elevated;
@@ -2515,7 +2520,16 @@ export component AppWindow inherits Window {
                                     border-color: Theme.line;
                                     VerticalLayout {
                                         padding: 6px;
-                                        for d[i] in root.devices: MenuRow { label: d; on: root.device-on == i; clicked => { root.device-pick(i); } }
+                                        for d[i] in root.devices: VerticalLayout {
+                                            // (the cast devices apart, under a heading of their own)
+                                            if i == root.devices-cast-from: VerticalLayout {
+                                                padding-top: 6px;
+                                                spacing: 6px;
+                                                Rectangle { height: 1px; background: Theme.line; }
+                                                Text { text: "CHROMECAST"; color: Theme.muted; font-size: 10px; font-weight: 800; letter-spacing: 1px; x: 10px; height: 25px; vertical-alignment: center; }
+                                            }
+                                            MenuRow { label: d; on: root.device-on == i; clicked => { root.device-pick(i); } }
+                                        }
                                     }
                                 }
                             }
