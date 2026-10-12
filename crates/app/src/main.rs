@@ -2347,7 +2347,9 @@ fn mix_tick(shared: &Shared, pos: u64, dur: u64) {
         (integrations::on(&a.web.prefs, "mixOn"), listening().is_some(), next, a.queue.current().cloned())
     };
     let (Some(next), Some(cur)) = (next, cur) else { return };
-    if !on || listening_now || !MIX_OUT_OK.with(|c| c.get()) || dur == 0 || next.is_mix() { return; }
+    // (OMNIPULSE_MIX_DEBUG: why it isn't mixing, each second)
+    let why = |w: &str| if std::env::var_os("OMNIPULSE_MIX_DEBUG").is_some() && pos % 1000 < 260 { eprintln!("mix debug at {pos}: {w}"); };
+    if !on || listening_now || !MIX_OUT_OK.with(|c| c.get()) || dur == 0 || next.is_mix() { why(&format!("on {on}, listening {listening_now}, out ok {}, dur {dur}, next is a set {}", MIX_OUT_OK.with(|c| c.get()), next.is_mix())); return; }
     // (Stream-Safe Music: never mixed into one it doesn't allow; the usual way skips it)
     if !streamsafe::allowed(&shared.borrow().web.prefs, &next) { return; }
     // (where its sound ends: measured, if it's before the file's end)
@@ -2391,11 +2393,11 @@ fn mix_tick(shared: &Shared, pos: u64, dur: u64) {
     let (plan, local) = match whole {
         Some(p) => (p, Some(())),
         None => {
-            let (Some(a), Some(b)) = (omnipulse_core::rhythm::known(&cur.key), omnipulse_core::rhythm::known(&next.key)) else { return };
+            let (Some(a), Some(b)) = (omnipulse_core::rhythm::known(&cur.key), omnipulse_core::rhythm::known(&next.key)) else { why("not both measured"); return };
             // (the playing one's beat as measured again near its end, once it has been)
             let local = MIX_LOCAL.with(|l| l.borrow().as_ref().filter(|x| x.0 == cur.key).map(|x| x.1.clone()));
             let a = local.clone().unwrap_or(a);
-            let Some(plan) = mix::plan(&a, audible, pos, &b, MIX_BARS) else { return };
+            let Some(plan) = mix::plan(&a, audible, pos, &b, MIX_BARS) else { why("no plan from the grid"); return };
             (plan, local.map(|_| ()))
         }
     };
@@ -2404,9 +2406,9 @@ fn mix_tick(shared: &Shared, pos: u64, dur: u64) {
     if local.is_none() {
         mix_ear(shared, &cur.key, pos, plan.at_ms);
         // (too late to listen again: as it was measured)
-        if pos + MIX_EAR_MS + 6000 < plan.at_ms || MIX_EAR.with(|e| e.borrow().is_some()) { return; }
+        if pos + MIX_EAR_MS + 6000 < plan.at_ms || MIX_EAR.with(|e| e.borrow().is_some()) { why(&format!("listening again first (plan at {})", plan.at_ms)); return; }
     }
-    if pos + 7000 < plan.at_ms { return; }
+    if pos + 7000 < plan.at_ms { why(&format!("waiting for {} ({})", plan.at_ms, mix_kind(&plan))); return; }
     MIX.with(|m| *m.borrow_mut() = Some(MixPhase::Opening(next.key.clone())));
     let (rt, weak, prefs) = { let a = shared.borrow(); (a.rt.clone(), a.ui.clone(), a.web.prefs.clone()) };
     let h = rt.clone();
@@ -2446,7 +2448,7 @@ fn mix_tick(shared: &Shared, pos: u64, dur: u64) {
                     MIX.with(|m| *m.borrow_mut() = Some(MixPhase::Waiting { key: next.key.clone(), plan, tempo, version, out }));
                 }
                 // (it couldn't be got ready: the usual way, then)
-                Err(_) => MIX.with(|m| *m.borrow_mut() = None),
+                Err(e) => { omnipulse_core::diag::note(&format!("Seamless Mix: couldn't get the next one ready: {e}")); MIX.with(|m| *m.borrow_mut() = None) }
             }
         }));
     });
@@ -2456,7 +2458,7 @@ fn mix_tick(shared: &Shared, pos: u64, dur: u64) {
 fn mix_started(shared: &Shared) {
     let Some(MixPhase::Waiting { key, plan, tempo, version, out }) = MIX.with(|m| m.borrow_mut().take()) else { return };
     let at = shared.borrow().queue.qi.map(|i| i + 1).filter(|&n| shared.borrow().queue.items.get(n).is_some_and(|q| q.t.key == key));
-    let Some(n) = at else { return };
+    let Some(n) = at else { omnipulse_core::diag::note("Seamless Mix: its moment came, but the next one wasn't next any more"); return };
     // (each beat of the one coming in, at its own tempo, for easing back over sixteen of them)
     let ease_ms = omnipulse_core::rhythm::known(&key).map(|m| (16.0 * m.rhythm.period_ms) as u64).unwrap_or(8000);
     audit_began(shared, &plan, format!("{} into {}", shared.borrow().queue.current().map(|t| t.title.clone()).unwrap_or_default(), shared.borrow().queue.items.get(n).map(|q| q.t.title.clone()).unwrap_or_default()));
@@ -2921,12 +2923,16 @@ fn tick(shared: &Shared, events: &std::sync::mpsc::Receiver<Event>, n: u64) {
     if !engine.is_paused() && dur > 0 && preload_due(pos, dur) {
         preload_next(shared);
     }
+    let dbg = std::env::var_os("OMNIPULSE_MIX_DEBUG").is_some() && pos % 1000 < 260;
     if !engine.is_paused() && fade_and_silences(shared, pos, dur) {
+        if dbg { eprintln!("mix debug at {pos}: fades and silences took the tick"); }
         return;
     }
     if !engine.is_paused() && sb_tick(shared, pos, dur) {
+        if dbg { eprintln!("mix debug at {pos}: SponsorBlock took the tick"); }
         return;
     }
+    if dbg { eprintln!("mix debug at {pos}: paused {}", engine.is_paused()); }
     rhythm_tick(shared, pos);
     if !engine.is_paused() { mix_tick(shared, pos, dur); }
     while let Ok(ev) = events.try_recv() {
@@ -7844,6 +7850,8 @@ fn main() -> Result<(), slint::PlatformError> {
                 // a mix: the next few measured ahead; then one at about this one's tempo moved up next, and
                 // the one playing put a few seconds before its moment; then how it went
                 "mixprep" => {
+                    // (Seamless Mix on for the test, whatever it is for you: not kept)
+                    if let Some(o) = s.borrow_mut().web.prefs.as_object_mut() { o.insert("mixOn".into(), serde_json::json!(true)); }
                     let next: Vec<Track> = { let a = s.borrow(); let i = a.queue.qi.unwrap_or(0); a.queue.items.iter().skip(i + 1).take(6).map(|q| q.t.clone()).collect() };
                     for t in next { rhythm_ahead(&s, t.clone()); loud_ahead(&s, t); }
                     println!("selftest: mix: measuring the next 6 ahead");
