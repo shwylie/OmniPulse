@@ -10,8 +10,16 @@ export global Theme {
     in-out property <color> line: #262a35;
     in-out property <color> text: #e9ebf2;
     in-out property <color> muted: #9097a8;
-    in-out property <color> accent: #8e9bff;
-    in-out property <color> accent-2: #b48eff;
+    // the accent shown: the one set (picked, or the cover's), and during a mix with album-art colours
+    // on, a slow fade to the next cover's and back, over and over, till the mix is over
+    in-out property <color> accent-own: #8e9bff;
+    in-out property <color> accent-2-own: #b48eff;
+    in-out property <color> accent-next: #8e9bff;
+    in-out property <color> accent-2-next: #b48eff;
+    in-out property <bool> pulsing;
+    property <float> pulse: pulsing ? (1 - cos(animation-tick() / 3.2s * 360deg)) / 2 : 0;
+    out property <color> accent: pulsing ? accent-own.mix(accent-next, 1 - pulse) : accent-own;
+    out property <color> accent-2: pulsing ? accent-2-own.mix(accent-2-next, 1 - pulse) : accent-2-own;
     in-out property <color> on-accent: #111318;
     // (Rounded Corners off: 0, square, everywhere they're used: the player, the cards)
     in-out property <length> radius: 10px;
@@ -36,7 +44,7 @@ export global Dnd {
 
 // (and for its menu, as the web app's: its artists one by one, its uploader if it's someone else, a
 // like and a star, where it opens, Stream-Safe Music's Allow / Stop allowing)
-export struct Row { title: string, artist: string, album: string, dur: string, plat: string, playing: bool, head: string, auto: bool, art: image, liked: bool, sc-link: bool, sp-link: bool, yt-link: bool, picked: bool, genres: [string], added-by: string, artists: [string], uploader: string, can-like: bool, fav: bool, fav-on: bool, open-label: string, cleared: string }
+export struct Row { title: string, artist: string, album: string, dur: string, plat: string, playing: bool, head: string, auto: bool, art: image, liked: bool, sc-link: bool, sp-link: bool, yt-link: bool, picked: bool, genres: [string], added-by: string, artists: [string], uploader: string, can-like: bool, fav: bool, fav-on: bool, open-label: string, cleared: string, coming: bool }
 // (merged: playlists combined into it, to unmerge)
 export struct Side { title: string, plat: string, own: bool, share: bool, sc: bool, sp: bool, collab: bool, collab-owner: bool, merged: bool }
 /// A platform in the title bar: on (in its colours), set up (ready; grey until it is), its name
@@ -1349,6 +1357,8 @@ export component AppWindow inherits Window {
     // Jams: the title bar's button ("" hides it), someone asking for one, and the Jam's own dialog
     in property <string> jam-label;
     in property <bool> jam-on;
+    /// Seamless Mix on: no Jams (Start a Jam greyed out, saying why)
+    in property <bool> jam-off;
     // the queue panel's bar while in a room: "Your Jam · 2 listening" (End Jam), or listening along (Leave)
     in property <string> queue-room;
     in property <bool> queue-room-host;
@@ -1552,9 +1562,11 @@ export component AppWindow inherits Window {
                     border-radius: 11px;
                     border-width: root.jam-on ? 0 : 1px;
                     border-color: Theme.line;
-                    background: root.jam-on ? Theme.accent : (jam-ta.has-hover ? Theme.elevated : transparent);
-                    jam-t := Text { text: root.jam-label; color: root.jam-on ? Theme.on-accent : (jam-ta.has-hover ? Theme.text : Theme.muted); font-size: 12px; font-weight: 600; }
+                    background: root.jam-on ? Theme.accent : (jam-ta.has-hover && !root.jam-off ? Theme.elevated : transparent);
+                    opacity: root.jam-off ? 0.45 : 1;
+                    jam-t := Text { text: root.jam-label; color: root.jam-on ? Theme.on-accent : (jam-ta.has-hover && !root.jam-off ? Theme.text : Theme.muted); font-size: 12px; font-weight: 600; }
                     jam-ta := TouchArea { clicked => { root.jam-clicked(); } }
+                    TipSpot { tip: root.jam-off ? "Turn off Seamless Mix to start a Jam" : ""; hover: jam-ta.has-hover; }
                 }
                 Rectangle { width: 6px; }
                 for b in [{ d: "M1 6h10", act: "min" }, { d: root.is-max ? "M3.5 3.5V1.5h7v7h-2M1.5 3.5h7v7h-7z" : "M1.5 1.5h9v9h-9z", act: "max" }, { d: "M1.5 1.5l9 9M10.5 1.5l-9 9", act: "close" }]: Rectangle {
@@ -1766,6 +1778,11 @@ export component AppWindow inherits Window {
                                 text <=> root.search-text;
                                 accepted => { if (root.page != "settings") { root.search(self.text); keys.focus(); } }
                                 edited => { root.search-edited(self.text); }
+                                // (Escape here too: the picked tracks let go, and the keys back to the window)
+                                key-pressed(e) => {
+                                    if (e.text == Key.Escape) { root.pick-none(); keys.focus(); return accept; }
+                                    return reject;
+                                }
                             }
                         }
                         Rectangle { horizontal-stretch: 1; }
@@ -1896,7 +1913,7 @@ export component AppWindow inherits Window {
                         init => { root.rows-in-view(self.first, self.count); }
                         // (the last one with room below it, so it scrolls clear of the track tab)
                         for r[i] in root.rows: VerticalLayout {
-                            TrackRow { item: r; index: i; compact: root.narrow || root.queue-open; lists: root.own-lists; removable: root.own-page; show-genres: root.page == "search" && Theme.row-h >= 60px; genre(g) => { root.genre-search(g); } play => { root.play-row(i); } act(a) => { root.row-action(i, a); } pick(m) => { root.row-pick(i, m); } }
+                            TrackRow { item: r; index: i; compact: root.narrow || root.queue-open; lists: root.own-lists; removable: root.own-page; show-genres: root.page == "search" && Theme.row-h >= 60px; genre(g) => { root.genre-search(g); } play => { root.play-row(i); keys.focus(); } act(a) => { root.row-action(i, a); } pick(m) => { root.row-pick(i, m); keys.focus(); } }
                             if i == root.rows.length - 1: Rectangle { height: 76px; }
                         }
                     }
@@ -1979,7 +1996,7 @@ export component AppWindow inherits Window {
                                     if root.rows.length > 8: Pill { label: "Show all"; clicked => { root.page-kind = "tracks"; } }
                                 }
                                 for r[i] in root.rows: VerticalLayout {
-                                    if i < 8: TrackRow { item: r; index: i; compact: root.narrow || root.queue-open; lists: root.own-lists; removable: false; show-genres: true; genre(g) => { root.genre-search(g); } play => { root.play-row(i); } act(a) => { root.row-action(i, a); } pick(m) => { root.row-pick(i, m); } }
+                                    if i < 8: TrackRow { item: r; index: i; compact: root.narrow || root.queue-open; lists: root.own-lists; removable: false; show-genres: true; genre(g) => { root.genre-search(g); } play => { root.play-row(i); keys.focus(); } act(a) => { root.row-action(i, a); } pick(m) => { root.row-pick(i, m); keys.focus(); } }
                                 }
                             }
                             for sh[s] in root.shelves: VerticalLayout {
@@ -3084,7 +3101,8 @@ export component AppWindow inherits Window {
                             Rectangle {
                                 height: 48px;
                                 border-radius: 6px;
-                                background: qta.has-hover ? Theme.elevated : transparent;
+                                // (mixing in right now: the one coming in, lit, until it's the one playing)
+                                background: q.coming ? Theme.accent.with-alpha(qta.has-hover ? 0.26 : 0.18) : qta.has-hover ? Theme.elevated : transparent;
                                 border-width: qrdz.has-drag ? 2px : 0px;
                                 border-color: Theme.accent;
                                 qrdz := DropArea {

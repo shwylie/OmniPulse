@@ -14,7 +14,7 @@ const MAX_STRETCH: f64 = 0.08;
 /// A beat that's not clear enough isn't mixed on
 const MIN_CONFIDENCE: f64 = 0.15;
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
 pub struct Plan {
     /// where in the one playing it starts (a downbeat, ms)
     pub at_ms: u64,

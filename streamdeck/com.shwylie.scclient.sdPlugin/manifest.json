@@ -1,9 +1,9 @@
 {
   "$schema": "https://schemas.elgato.com/streamdeck/plugins/manifest.json",
   "Name": "OmniPulse",
-  "Version": "1.0.0.0",
+  "Version": "1.1.0.0",
   "Author": "SHWYLiE",
-  "Description": "Playback controls for OmniPulse: play, pause, skip, like, favourite, shuffle, repeat, and clearing the queue or chat requests.",
+  "Description": "Playback controls for OmniPulse: play, pause, skip, like, favourite, shuffle, repeat, clearing the queue or chat requests, and rating Seamless Mix transitions.",
   "UUID": "com.shwylie.scclient",
   "Icon": "imgs/plugin",
   "Category": "OmniPulse",
@@ -203,6 +203,36 @@
       "States": [
         {
           "Image": "imgs/actions/clear-queue-key"
+        }
+      ],
+      "UserTitleEnabled": true
+    },
+    {
+      "Name": "Good transition",
+      "UUID": "com.shwylie.scclient.mix-good",
+      "Icon": "imgs/actions/mix-good",
+      "Tooltip": "Seamless Mix feedback: the last transition sounded good (logged with how it was mixed)",
+      "Controllers": [
+        "Keypad"
+      ],
+      "States": [
+        {
+          "Image": "imgs/actions/mix-good-key"
+        }
+      ],
+      "UserTitleEnabled": true
+    },
+    {
+      "Name": "Bad transition",
+      "UUID": "com.shwylie.scclient.mix-bad",
+      "Icon": "imgs/actions/mix-bad",
+      "Tooltip": "Seamless Mix feedback: the last transition sounded bad (logged with how it was mixed)",
+      "Controllers": [
+        "Keypad"
+      ],
+      "States": [
+        {
+          "Image": "imgs/actions/mix-bad-key"
         }
       ],
       "UserTitleEnabled": true

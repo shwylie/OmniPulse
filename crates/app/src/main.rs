@@ -2312,6 +2312,16 @@ fn track_act(shared: &Shared, t: &Track, act: &str) -> bool {
 }
 
 fn paint_queue(a: &mut App) {
+    // (a mix under way: the queue as it was, the one going out playing, the one coming in lit)
+    let real = a.queue.qi;
+    let shown = mix_show_qi().filter(|&p| p < a.queue.items.len());
+    if shown.is_some() { a.queue.qi = shown; }
+    let coming = shown.and(real);
+    paint_queue_rows(a, coming);
+    a.queue.qi = real;
+}
+
+fn paint_queue_rows(a: &mut App, coming: Option<usize>) {
     let panel = a.queue.panel();
     let marks = marks_of(a);
     let map: Vec<usize> = panel.iter().map(|p| p.0).collect();
@@ -2321,6 +2331,7 @@ fn paint_queue(a: &mut App) {
             let mut r = row_menu(a, &marks, &q.t, q.t.row(Some(*i) == a.queue.qi));
             r.head = (*head).into();
             r.auto = q.auto;
+            r.coming = Some(*i) == coming;
             // (its cover, if it's in already; the rest come in rows_art)
             if let Some(img) = ROW_ART.with(|c| c.borrow().map.get(&thumb_url(&q.t)).cloned()) { r.art = img; }
             r
@@ -2379,6 +2390,10 @@ fn save_session(a: &App) {
 fn start(shared: &Shared) {
     if safe_skip(shared) {
         return;
+    }
+    // (anything started is what's shown: a mix being shown is over)
+    if MIX_SHOW.with(|m| m.borrow_mut().take()).is_some() {
+        if let Some(ui) = shared.borrow().ui.upgrade() { ui.global::<Theme>().set_pulsing(false); }
     }
     let (t, token, engine, rt, weak, resume) = {
         let mut a = shared.borrow_mut();
@@ -2554,16 +2569,28 @@ fn start(shared: &Shared) {
                 if shared.borrow().token < token {
                     return;
                 }
-                if let Some(px) = art {
-                    shared.borrow_mut().accent = integrations::accents(&px);
-                    apply_look(&shared);
-                    push_out(&shared, false);
-                    let img = slint::Image::from_rgba8(px);
-                    ui.set_now_art(img.clone());
-                    ui.set_now_art_big(img);
-                }
-                let prefs = shared.borrow().web.prefs.clone();
-                show_lyrics(&shared, &ui, &prefs, lyrics, &from);
+                let art_px = art.clone();
+                let weak = ui.as_weak();
+                let show = move || {
+                    let Some(ui) = weak.upgrade() else { return };
+                    let Some(shared) = SHARED.with(|s| s.borrow().clone()) else { return };
+                    if shared.borrow().token != token { return; }
+                    if let Some(px) = art {
+                        shared.borrow_mut().accent = integrations::accents(&px);
+                        apply_look(&shared);
+                        push_out(&shared, false);
+                        let img = slint::Image::from_rgba8(px);
+                        ui.set_now_art(img.clone());
+                        ui.set_now_art_big(img);
+                    }
+                    let prefs = shared.borrow().web.prefs.clone();
+                    show_lyrics(&shared, &ui, &prefs, lyrics, &from);
+                };
+                // (a mix under way: the one going out's shown till it's over; with album-art colours on, its
+                // accent fading to the next cover's and back meanwhile)
+                let held = MIX_SHOW.with(|m| m.borrow().is_some());
+                if held { if let Some(px) = &art_px { mix_pulse(&shared, &ui, px); } }
+                if held { MIX_SHOW.with(|m| if let Some(x) = m.borrow_mut().as_mut() { x.pending = Some(Box::new(show)); }); } else { show(); }
             });
         });
     });
@@ -2823,9 +2850,10 @@ enum MixPhase {
     Opening(String),
     /// handed to the engine, waiting for its moment
     /// (the one playing's tempo, when the mix slows it into the next one's)
-    Waiting { key: String, plan: mix::Plan, tempo: omnipulse_audio::Tempo, version: Option<versions::Version>, out: Option<omnipulse_audio::Tempo> },
+    /// (its key shift, if it has one: held through the mix, then bent back to its own key)
+    Waiting { key: String, plan: mix::Plan, tempo: omnipulse_audio::Tempo, version: Option<versions::Version>, out: Option<omnipulse_audio::Tempo>, pitch: Option<omnipulse_audio::Tempo> },
     /// coming in (and then easing back to its own tempo); the one going out slowed as it goes, if it is
-    Mixing { plan: mix::Plan, tempo: omnipulse_audio::Tempo, eased_from: Option<std::time::Instant>, ease_ms: u64, out: Option<omnipulse_audio::Tempo>, began: std::time::Instant },
+    Mixing { plan: mix::Plan, tempo: omnipulse_audio::Tempo, eased_from: Option<std::time::Instant>, ease_ms: u64, out: Option<omnipulse_audio::Tempo>, began: std::time::Instant, pitch: Option<omnipulse_audio::Tempo> },
 }
 
 thread_local! {
@@ -2833,6 +2861,9 @@ thread_local! {
     static MIX_WORDS: RefCell<HashMap<String, Vec<(u64, String)>>> = RefCell::new(HashMap::new());
     static MIX_WORDS_BUSY: RefCell<std::collections::HashSet<String>> = RefCell::new(std::collections::HashSet::new());
     static MIX: RefCell<Option<MixPhase>> = const { RefCell::new(None) };
+    /// a mix's key shift bending back to the track's own key once the mix is over: (its pitch, where it
+    /// was, since when, over how long)
+    static PITCH_BACK: RefCell<Option<(omnipulse_audio::Tempo, f64, std::time::Instant, u64)>> = const { RefCell::new(None) };
     /// the transition of its own used last (Wordplay, Drop Swap, Melody Play), so the next is another
     static MIX_STYLE_LAST: std::cell::Cell<Option<&'static str>> = const { std::cell::Cell::new(None) };
     /// the track the queue moves on to at a mix's moment (start() doesn't load it: it's playing), with
@@ -2955,11 +2986,34 @@ fn audit_over(shared: &Shared) {
 }
 
 /// Each tick: a mix planned and got ready as the one playing nears its moment; eased back after
+/// A key shift's only for the mix (the two keys together while both play): bent back to the track's own
+/// key over a few beats once the one going out has gone, never left on for the rest of it
+fn pitch_back_start(pitch: &Option<omnipulse_audio::Tempo>, ms: u64) {
+    if let Some(p) = pitch {
+        if PITCH_BACK.with(|b| b.borrow().is_none()) && (p.get() - 1.0).abs() > 1e-6 {
+            PITCH_BACK.with(|b| *b.borrow_mut() = Some((p.clone(), p.get(), std::time::Instant::now(), ms.max(1))));
+        }
+    }
+}
+
+fn pitch_back_tick() {
+    PITCH_BACK.with(|b| {
+        let mut b = b.borrow_mut();
+        let Some((p, from, since, ms)) = b.as_ref() else { return };
+        let x = (since.elapsed().as_millis() as f64 / *ms as f64).min(1.0);
+        // (eased in and out: in semitones, evenly, so it's a bend, not a slide that rushes at either end)
+        let s = x * x * (3.0 - 2.0 * x);
+        p.set(from.powf(1.0 - s));
+        if x >= 1.0 { p.set(1.0); *b = None; }
+    });
+}
+
 fn mix_tick(shared: &Shared, pos: u64, dur: u64) {
+    pitch_back_tick();
     // coming in: once the crossfade's over, back to its own tempo over a few beats
     let easing = MIX.with(|m| {
         let mut m = m.borrow_mut();
-        if let Some(MixPhase::Mixing { plan, tempo, eased_from, ease_ms, out, began }) = m.as_mut() {
+        if let Some(MixPhase::Mixing { plan, tempo, eased_from, ease_ms, out, began, pitch }) = m.as_mut() {
             let engine = shared.borrow().engine.clone();
             // (the one going out slowed into the next one's tempo as far through as the mix is, and the next
             // one with it, from the other's tempo to its own: at its own by the end, nothing to ease back)
@@ -2969,12 +3023,20 @@ fn mix_tick(shared: &Shared, pos: u64, dur: u64) {
                 tempo.set(mix::in_ramp(plan.out_tempo, x));
                 if engine.crossfading() { return true; }
                 tempo.set(1.0);
+                pitch_back_start(pitch, *ease_ms);
                 *m = None;
+                let s3 = shared.clone();
+                slint::Timer::single_shot(std::time::Duration::from_millis(MIX_HEARD_MS), move || mix_show_end(&s3));
                 let s2 = shared.clone();
                 slint::Timer::single_shot(std::time::Duration::ZERO, move || audit_over(&s2));
                 return true;
             }
             if engine.crossfading() { return true; }
+            pitch_back_start(pitch, *ease_ms);
+            if eased_from.is_none() {
+                let s3 = shared.clone();
+                slint::Timer::single_shot(std::time::Duration::from_millis(MIX_HEARD_MS), move || mix_show_end(&s3));
+            }
             let since = *eased_from.get_or_insert_with(std::time::Instant::now);
             let t = since.elapsed().as_millis() as u64;
             tempo.set(mix::ease(plan.rate, t, *ease_ms));
@@ -2997,6 +3059,8 @@ fn mix_tick(shared: &Shared, pos: u64, dur: u64) {
     let (Some(next), Some(cur)) = (next, cur) else { return };
     // (OMNIPULSE_MIX_DEBUG: why it isn't mixing, each second)
     let why = |w: &str| if std::env::var_os("OMNIPULSE_MIX_DEBUG").is_some() && pos % 1000 < 260 { eprintln!("mix debug at {pos}: {w}"); };
+    // (a Jam going: its queue plays as it is, unmixed, till it ends)
+    let listening_now = listening_now || room_kind().as_deref() == Some("jam");
     if !on || listening_now || !MIX_OUT_OK.with(|c| c.get()) || dur == 0 || next.is_mix() { why(&format!("on {on}, listening {listening_now}, out ok {}, dur {dur}, next is a set {}", MIX_OUT_OK.with(|c| c.get()), next.is_mix())); return; }
     // (Stream-Safe Music: never mixed into one it doesn't allow; the usual way skips it)
     if !streamsafe::allowed(&shared.borrow().web.prefs, &next) { return; }
@@ -3074,10 +3138,11 @@ fn mix_tick(shared: &Shared, pos: u64, dur: u64) {
             let tempo = tempo.clone();
             let start = plan.start_ms;
             let semitones = plan.semitones;
-            move || -> Result<Box<dyn omnipulse_audio::Source>, String> {
+            move || -> Result<(Box<dyn omnipulse_audio::Source>, Option<omnipulse_audio::Tempo>), String> {
                 let mut st = omnipulse_audio::Stretched::shifted(src?, tempo, semitones)?;
                 omnipulse_audio::Source::seek(&mut st, start)?;
-                Ok(Box::new(st))
+                let pitch = (semitones != 0).then(|| st.pitch());
+                Ok((Box::new(st), pitch))
             }
         }).await.map_err(|e| e.to_string()).and_then(|r| r);
         let _ = weak.upgrade_in_event_loop(move |_| SHARED.with(|s| {
@@ -3085,7 +3150,7 @@ fn mix_tick(shared: &Shared, pos: u64, dur: u64) {
             let still = MIX.with(|m| matches!(&*m.borrow(), Some(MixPhase::Opening(k)) if *k == next.key));
             if !still { return; }
             match ready {
-                Ok(src) => {
+                Ok((src, pitch)) => {
                     let what = sound::loud_source(&next, version.as_ref().map(|v| v.yt.id.as_str()));
                     let known = what.as_ref().and_then(|(s, id)| shared.borrow().loud.get(&format!("{s}:{id}")).copied());
                     let db = sound::loud_db(&prefs, &next, known);
@@ -3093,7 +3158,7 @@ fn mix_tick(shared: &Shared, pos: u64, dur: u64) {
                     let out = (plan.out_tempo != 1.0).then(|| omnipulse_audio::Tempo::new(1.0));
                     if let Some(o) = &out { shared.borrow().engine.stretch_playing(o.clone()); }
                     shared.borrow().engine.mix_at(src, db, plan.at_ms, plan.ms, Some(mix::handoff(&plan, set_row_on(&prefs, "mixBands", false))));
-                    MIX.with(|m| *m.borrow_mut() = Some(MixPhase::Waiting { key: next.key.clone(), plan, tempo, version, out }));
+                    MIX.with(|m| *m.borrow_mut() = Some(MixPhase::Waiting { key: next.key.clone(), plan, tempo, version, out, pitch }));
                 }
                 // (it couldn't be got ready: the usual way, then)
                 Err(e) => { omnipulse_core::diag::note(&format!("Seamless Mix: couldn't get the next one ready: {e}")); MIX.with(|m| *m.borrow_mut() = None) }
@@ -3102,15 +3167,155 @@ fn mix_tick(shared: &Shared, pos: u64, dur: u64) {
     });
 }
 
+// ---------- Seamless Mix feedback (the Stream Deck's Good Transition / Bad Transition keys) ----------
+// Each press is a line in state/mix-feedback.jsonl: the verdict, how long after the transition began,
+// and how it was mixed (both songs as measured, the plan, the settings). No sound is kept, and nothing's
+// written without a press: no rating is never taken as a good one.
+thread_local! {
+    /// the last transition: what it was, and when it began
+    static LAST_MIX: RefCell<Option<(serde_json::Value, std::time::Instant)>> = const { RefCell::new(None) };
+}
+
+/// One side of a transition, as it was measured (no sound: its numbers)
+fn mix_side(t: &Track) -> serde_json::Value {
+    let m = rhythm_full(&t.key).or_else(|| omnipulse_core::rhythm::known(&t.key));
+    serde_json::json!({
+        "key": t.key, "title": t.title, "artist": t.artist, "platform": t.plat(), "ms": t.ms,
+        "viaYouTube": mix_via_youtube(t),
+        "measured": m.map(|m| serde_json::json!({
+            "whole": rhythm_full(&t.key).is_some(),
+            "fromMs": m.from_ms, "toMs": m.to_ms,
+            "bpm": m.rhythm.bpm, "tempoConfidence": m.rhythm.tempo_confidence,
+            "key": m.rhythm.key, "camelot": m.rhythm.camelot, "keyConfidence": m.rhythm.key_confidence,
+            "periodMs": m.rhythm.period_ms, "downbeat": m.rhythm.downbeat,
+            // (each bar's loudness, dB, rounded: where its intro, drops and outro are)
+            "barDb": m.rhythm.bar_db.iter().map(|x| (*x as f64 * 10.0).round() / 10.0).collect::<Vec<_>>(),
+        })),
+    })
+}
+
+fn mix_record(a: &App, plan: &mix::Plan, from: Option<&Track>, to: Option<&Track>) -> serde_json::Value {
+    let p = &a.web.prefs;
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0);
+    serde_json::json!({
+        "id": now,
+        "kind": mix_kind(plan),
+        "plan": plan,
+        "from": from.map(mix_side),
+        "to": to.map(mix_side),
+        "settings": {
+            "mixWords": set_row_on(p, "mixWords", true), "mixDrop": set_row_on(p, "mixDrop", true),
+            "mixMelody": set_row_on(p, "mixMelody", true), "mixBands": set_row_on(p, "mixBands", false),
+        },
+        "version": env!("CARGO_PKG_VERSION"),
+    })
+}
+
+/// The last transition rated: a line in state/mix-feedback.jsonl, or why it couldn't be
+fn mix_feedback(shared: &Shared, good: bool) -> Result<String, &'static str> {
+    let Some((rec, began)) = LAST_MIX.with(|l| l.borrow().clone()) else { return Err("No transition to rate yet.") };
+    let line = serde_json::json!({
+        "verdict": if good { "good" } else { "bad" },
+        "at": std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0),
+        // (rated late, it may be of a later one by ear: how long after this one it was)
+        "secsAfter": began.elapsed().as_secs_f64().round(),
+        "mix": rec,
+    });
+    // (a self-test writes to its own folder, never your ratings)
+    let dir = match std::env::var_os("OMNIPULSE_SELFTEST") { Some(d) => std::path::PathBuf::from(d), None => omnipulse_core::data_dir().map_err(|_| "Couldn't find the data folder.")?.join("state") };
+    let _ = std::fs::create_dir_all(&dir);
+    use std::io::Write as _;
+    let mut f = std::fs::OpenOptions::new().create(true).append(true).open(dir.join("mix-feedback.jsonl")).map_err(|_| "Couldn't write the feedback file.")?;
+    writeln!(f, "{line}").map_err(|_| "Couldn't write the feedback file.")?;
+    let what = format!("{} into {}", rec["from"]["title"].as_str().unwrap_or("?"), rec["to"]["title"].as_str().unwrap_or("?"));
+    let n = std::fs::read_to_string(dir.join("mix-feedback.jsonl")).map(|s| s.lines().count()).unwrap_or(0);
+    let note = format!("Transition rated {}: {what} ({}). {n} ratings so far.", if good { "good" } else { "bad" }, rec["kind"].as_str().unwrap_or(""));
+    if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_status(note.clone().into()); }
+    Ok(note)
+}
+
+// ---------- what's shown while a mix is under way ----------
+// The one going out is what's playing until the mix is over: the player bar, Now Playing (its cover,
+// lyrics, place in it) and the queue's Now Playing stay its; the one coming in is lit in the queue. Then
+// everything's the new one's at once (its cover and lyrics, kept back meanwhile).
+struct MixShow {
+    prev_qi: usize,
+    /// where the one going out was when the mix began, and when that was (its place since: counted on)
+    from_ms: u64,
+    began: std::time::Instant,
+    dur: u64,
+    /// its lyrics (timed), for following along
+    lyrics: Vec<player::Line>,
+    /// the new one's cover and lyrics, arrived meanwhile: shown once it's over
+    pending: Option<Box<dyn FnOnce()>>,
+}
+
+/// (the engine makes its sound this far ahead of what's heard: the mix is over, as heard, that much later)
+const MIX_HEARD_MS: u64 = 400;
+
+thread_local! {
+    static MIX_SHOW: RefCell<Option<MixShow>> = const { RefCell::new(None) };
+}
+
+/// The one going out's place and length, while a mix is under way (None: no mix being shown)
+fn mix_show_pos() -> Option<(u64, u64)> {
+    MIX_SHOW.with(|m| m.borrow().as_ref().map(|x| ((x.from_ms + x.began.elapsed().as_millis() as u64).min(x.dur), x.dur)))
+}
+
+/// The queue's row shown as playing while a mix is under way (the one going out)
+fn mix_show_qi() -> Option<usize> {
+    MIX_SHOW.with(|m| m.borrow().as_ref().map(|x| x.prev_qi))
+}
+
+/// The accent's slow fade to the next cover's colours and back, while a mix is under way (album-art
+/// colours on only: picked colours stay as they are)
+fn mix_pulse(shared: &Shared, ui: &AppWindow, px: &slint::SharedPixelBuffer<slint::Rgba8Pixel>) {
+    let prefs = shared.borrow().web.prefs.clone();
+    if !integrations::set(&prefs, "artAccent") { return; }
+    let (step, hue, strength) = look::from_prefs(&prefs);
+    let light = look::palette(step, hue, strength).light;
+    let (a1, a2) = integrations::accents(px);
+    let Some(first) = look::Rgb::parse(&a1) else { return };
+    let c1 = look::tune_art(first, light);
+    let c2 = look::Rgb::parse(&a2).map(|c| look::tune_art(c, light)).unwrap_or_else(|| look::tune_art_shade(first, light));
+    let t = ui.global::<Theme>();
+    t.set_accent_next(c1.slint());
+    t.set_accent_2_next(c2.slint());
+    t.set_pulsing(true);
+}
+
+/// The mix over: the new one shown as playing, everywhere
+fn mix_show_end(shared: &Shared) {
+    if let Some(ui) = shared.borrow().ui.upgrade() { ui.global::<Theme>().set_pulsing(false); }
+    let Some(x) = MIX_SHOW.with(|m| m.borrow_mut().take()) else { return };
+    let Some(ui) = shared.borrow().ui.upgrade() else { return };
+    let Some(t) = shared.borrow().queue.current().cloned() else { return };
+    let (art, big) = (ui.get_now_art(), ui.get_now_art_big());
+    show_now(&ui, &t);
+    // (its cover and lyrics, if they came meanwhile; else they're shown as they come)
+    match x.pending {
+        Some(f) => f(),
+        None => { ui.set_now_art(art); ui.set_now_art_big(big); ui.set_lyrics_note("Looking for lyrics...".into()); }
+    }
+    paint_queue(&mut shared.borrow_mut());
+    push_out(shared, false);
+}
+
 /// A mix's moment came: the next track is coming in (the queue moves on, without loading it again)
 fn mix_started(shared: &Shared) {
-    let Some(MixPhase::Waiting { key, plan, tempo, version, out }) = MIX.with(|m| m.borrow_mut().take()) else { return };
+    let Some(MixPhase::Waiting { key, plan, tempo, version, out, pitch }) = MIX.with(|m| m.borrow_mut().take()) else { return };
     let at = shared.borrow().queue.qi.map(|i| i + 1).filter(|&n| shared.borrow().queue.items.get(n).is_some_and(|q| q.t.key == key));
     let Some(n) = at else { omnipulse_core::diag::note("Seamless Mix: its moment came, but the next one wasn't next any more"); return };
     // (each beat of the one coming in, at its own tempo, for easing back over sixteen of them)
     let ease_ms = omnipulse_core::rhythm::known(&key).map(|m| (16.0 * m.rhythm.period_ms) as u64).unwrap_or(8000);
     audit_began(shared, &plan, format!("{} into {}", shared.borrow().queue.current().map(|t| t.title.clone()).unwrap_or_default(), shared.borrow().queue.items.get(n).map(|q| q.t.title.clone()).unwrap_or_default()));
     if plan.style.is_some() { MIX_STYLE_LAST.with(|l| l.set(plan.style)); }
+    // (what it was, for rating it from the Stream Deck)
+    let rec = {
+        let a = shared.borrow();
+        mix_record(&a, &plan, a.queue.current(), a.queue.items.get(n).map(|q| &q.t))
+    };
+    LAST_MIX.with(|l| *l.borrow_mut() = Some((rec, std::time::Instant::now())));
     if let Some(ui) = shared.borrow().ui.upgrade() {
         match (plan.style, plan.word.clone()) {
             (_, Some(w)) => ui.set_status(format!("Wordplay: \u{201c}{w}\u{201d}").into()),
@@ -3119,10 +3324,33 @@ fn mix_started(shared: &Shared) {
             _ => {}
         }
     }
-    MIX.with(|m| *m.borrow_mut() = Some(MixPhase::Mixing { plan, tempo, eased_from: None, ease_ms, out, began: std::time::Instant::now() }));
+    MIX.with(|m| *m.borrow_mut() = Some(MixPhase::Mixing { plan, tempo, eased_from: None, ease_ms, out, began: std::time::Instant::now(), pitch }));
     MIXED_IN.with(|m| *m.borrow_mut() = Some((key, version)));
+    // (the one going out, as it's shown now: kept shown until the mix is over)
+    let keep = {
+        let a = shared.borrow();
+        let ui = a.ui.upgrade();
+        match (a.queue.current().cloned(), a.queue.qi, ui) {
+            (Some(prev), Some(qi), Some(ui)) => Some((prev, qi, a.engine.position_ms(), a.engine.duration_ms(), a.lyrics.clone(), (ui.get_now_art(), ui.get_now_art_big()), a.lyric_lines.iter().collect::<Vec<_>>(), ui.get_lyric_on(), ui.get_lyrics_note(), ui.get_lyrics_from())),
+            _ => None,
+        }
+    };
     shared.borrow_mut().queue.qi = Some(n);
     start(shared);
+    if let Some((prev, prev_qi, from_ms, dur, lyrics, (art, big), lines, on, note, from)) = keep {
+        MIX_SHOW.with(|m| *m.borrow_mut() = Some(MixShow { prev_qi, from_ms, began: std::time::Instant::now(), dur, lyrics, pending: None }));
+        if let Some(ui) = shared.borrow().ui.upgrade() {
+            show_now(&ui, &prev);
+            ui.set_now_art(art);
+            ui.set_now_art_big(big);
+            ui.set_track_loading(false);
+            shared.borrow().lyric_lines.set_vec(lines);
+            ui.set_lyric_on(on);
+            ui.set_lyrics_note(note);
+            ui.set_lyrics_from(from);
+        }
+        paint_queue(&mut shared.borrow_mut());
+    }
 }
 
 // ---------- preloading the next track (as the web app's js/preload.js) ----------
@@ -3577,7 +3805,16 @@ fn tick(shared: &Shared, events: &std::sync::mpsc::Receiver<Event>, n: u64) {
     // a track's start and end times (Track preferences): it shows, and plays, as only that part
     let (t_start, t_end) = trim_now(shared);
     let dur = t_end.unwrap_or(raw_dur);
-    let (vpos, vdur) = (pos.saturating_sub(t_start), dur.saturating_sub(t_start));
+    // (a mix under way: the one going out's place, as it's the one shown; its lyrics followed)
+    let (vpos, vdur) = match mix_show_pos() {
+        Some((p, d)) => {
+            MIX_SHOW.with(|m| if let Some(x) = m.borrow().as_ref() {
+                if let Some(i) = x.lyrics.iter().rposition(|l| l.ms > 0 && l.ms <= p + 200) { if ui.get_lyric_on() != i as i32 { ui.set_lyric_on(i as i32); } }
+            });
+            (p, d)
+        }
+        None => (pos.saturating_sub(t_start), dur.saturating_sub(t_start)),
+    };
     ui.set_pos_text(fmt_ms(vpos).into());
     ui.set_dur_text(fmt_ms(vdur).into());
     ui.set_dur_secs(vdur as f32 / 1000.0);
@@ -3599,7 +3836,7 @@ fn tick(shared: &Shared, events: &std::sync::mpsc::Receiver<Event>, n: u64) {
     }
     let near_end = {
         let mut a = shared.borrow_mut();
-        if let Some(i) = a.lyrics.iter().rposition(|l| l.ms > 0 && l.ms <= pos + 200) {
+        if let Some(i) = a.lyrics.iter().rposition(|l| l.ms > 0 && l.ms <= pos + 200).filter(|_| mix_show_pos().is_none()) {
             if ui.get_lyric_on() != i as i32 {
                 ui.set_lyric_on(i as i32);
             }
@@ -3804,6 +4041,7 @@ fn remote_action(shared: &Shared, id: u64, action: &str) {
             a.ap_failed = None;
         }
         "state" => {}
+        "mix-good" | "mix-bad" => if let Err(e) = mix_feedback(shared, action == "mix-good") { note = Some(e) },
         _ => note = Some("That button isn't in the native app yet."),
     }
     let s = shared.clone();
@@ -4811,6 +5049,8 @@ fn set_toggle(shared: &Shared, key: &str) {
                 on
             };
             if std::env::var_os("OMNIPULSE_SELFTEST").is_none() { webstate::save_pref(key, serde_json::json!(on)); }
+            // (Seamless Mix: Start a Jam greyed out with it on, and back with it off)
+            if key == "mixOn" { jam_paint(shared); }
             // the servers stop, and start again with what's set now
             match key {
                 "widget" | "alertsOn" => omnipulse_core::widget::widget_stop(),
@@ -6479,6 +6719,8 @@ fn jams_on(a: &App) -> bool {
     integrations::on(&a.web.prefs, "jamsOn")
 }
 
+const JAM_OFF: &str = "Jams are off while Seamless Mix is on (Settings > Sound): a Jam plays the host's queue as it is, unmixed.";
+
 /// The title bar: Start a Jam / Jam · n, or someone's ask (its ring emptying; declined when it runs out)
 fn jam_paint(shared: &Shared) {
     let Some(ui) = shared.borrow().ui.upgrade() else { return };
@@ -6506,6 +6748,8 @@ fn jam_paint(shared: &Shared) {
         return;
     }
     let jam = room_kind().as_deref() == Some("jam");
+    // (Seamless Mix on: no Jam to start; one already going carries on)
+    ui.set_jam_off(!jam && integrations::on(&shared.borrow().web.prefs, "mixOn"));
     ui.set_queue_room(if jam { format!("Your Jam · {} listening", members.len()).into() } else { "".into() });
     ui.set_queue_room_host(jam);
     ui.set_jam_on(jam);
@@ -6526,6 +6770,13 @@ fn jam_start(shared: &Shared) {
 
 /// Accepting an ask: the Jam made, its invite sent on the room they asked in, then the move to it
 fn jam_accept(shared: &Shared) {
+    // (asked to start one, with Seamless Mix on: declined, saying why)
+    if ASK.with(|a| a.borrow().as_ref().is_some_and(|x| !x.3)) && integrations::on(&shared.borrow().web.prefs, "mixOn") {
+        if let Some((id, _, _, join)) = ASK.with(|a| a.borrow_mut().take()) { ask_answer(&id, join, false, false); }
+        jam_paint(shared);
+        if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_status(JAM_OFF.into()); }
+        return;
+    }
     let Some((id, name, _, join)) = ASK.with(|a| a.borrow_mut().take()) else { return };
     jam_paint(shared);
     // into your Jam: let in (they connect again by themselves)
@@ -6729,6 +6980,11 @@ fn listen_join(shared: &Shared, link: &str) {
         if let Some(ui) = weak.upgrade() { ui.set_status("That link isn't an OmniPulse invite.".into()); }
         return;
     };
+    // (Seamless Mix on: no joining a Jam; Listen Along's still fine, as mixing waits while listening)
+    if kind == "jam" && integrations::on(&shared.borrow().web.prefs, "mixOn") {
+        if let Some(ui) = weak.upgrade() { ui.set_status(JAM_OFF.into()); }
+        return;
+    }
     if !jams_on(&shared.borrow()) {
         if let Some(ui) = weak.upgrade() { ui.set_status("Listen Along & Jams are switched off (Settings > Integrations).".into()); }
         return;
@@ -7639,7 +7895,7 @@ fn taskbar_widget(shared: &Shared, ui: &AppWindow, on: bool) {
         } else {
             wt.set_panel(mt.get_panel()); wt.set_elevated(mt.get_elevated()); wt.set_text(mt.get_text()); wt.set_muted(mt.get_muted());
         }
-        wt.set_accent(mt.get_accent()); wt.set_accent_2(mt.get_accent_2()); wt.set_on_accent(mt.get_on_accent()); wt.set_motion(mt.get_motion());
+        wt.set_accent_own(mt.get_accent()); wt.set_accent_2_own(mt.get_accent_2()); wt.set_on_accent(mt.get_on_accent()); wt.set_motion(mt.get_motion());
         // what's playing, as the player bar has it
         tw.set_has_track(shared.borrow().queue.current().is_some());
         tw.set_song(ui.get_now_title()); tw.set_artist(ui.get_now_artist()); tw.set_plat(ui.get_now_plat());
@@ -7745,8 +8001,8 @@ fn apply_look(shared: &Shared) {
         (mine, prefs["accent2"].as_str().and_then(look::Rgb::parse).or(mine))
     };
     let c1 = c1.unwrap_or(look::Rgb(0x8e, 0x9b, 0xff));
-    t.set_accent(c1.slint());
-    t.set_accent_2(c2.unwrap_or(c1).slint());
+    t.set_accent_own(c1.slint());
+    t.set_accent_2_own(c2.unwrap_or(c1).slint());
     t.set_on_accent(look::on_accent(c1).slint());
     ui.set_light_theme(p.light);
     // and Settings > Look shows where things are
@@ -7895,6 +8151,8 @@ fn main() -> Result<(), slint::PlatformError> {
             listen_leave(&s, false);
         } else if room_kind().as_deref() == Some("jam") {
             if let Some(ui) = s.borrow().ui.upgrade() { jam_paint(&s); ui.set_jam_open(true); }
+        } else if integrations::on(&s.borrow().web.prefs, "mixOn") {
+            if let Some(ui) = s.borrow().ui.upgrade() { ui.set_status(JAM_OFF.into()); }
         } else {
             jam_start(&s);
         }
@@ -8871,6 +9129,7 @@ fn main() -> Result<(), slint::PlatformError> {
         let only_discover = std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("discover");
         let plan: Vec<(u64, &str)> = if join.is_some() { vec![(6, "join"), (14, "joined"), (16, "jamskip"), (19, "leave"), (21, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("mix") { vec![(9, "play"), (10, "mixprep"), (70, "mixseek"), (82, "mixcheck"), (100, "mixcheck"), (106, "mixcheck"), (130, "mixcheck"), (132, "end")] }
+            else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("mixfb") { vec![(9, "play"), (10, "rate"), (11, "mixprep"), (70, "mixseek"), (80, "mixcheck"), (84, "mixcheck"), (88, "mixcheck"), (92, "mixcheck"), (96, "mixcheck"), (100, "mixcheck"), (104, "mixcheck"), (108, "mixcheck"), (112, "rate"), (114, "mixcheck"), (118, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("rhythm") { vec![(9, "play"), (100, "rhythm"), (101, "end")] }
             // (OMNIPULSE_SELFTEST_PLAN=dnd: a Library track dragged onto the queue; what the sidebar would take,
             // only asked, nothing dropped on your playlists)
@@ -9196,7 +9455,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 // the one playing put a few seconds before its moment; then how it went
                 "mixprep" => {
                     // (Seamless Mix on for the test, whatever it is for you: not kept)
-                    if let Some(o) = s.borrow_mut().web.prefs.as_object_mut() { o.insert("mixOn".into(), serde_json::json!(true)); }
+                    if let Some(o) = s.borrow_mut().web.prefs.as_object_mut() { o.insert("mixOn".into(), serde_json::json!(true)); if std::env::var_os("OMNIPULSE_SELFTEST_ART").is_some() { o.insert("artAccent".into(), serde_json::json!(true)); } }
                     let next: Vec<Track> = { let a = s.borrow(); let i = a.queue.qi.unwrap_or(0); a.queue.items.iter().skip(i + 1).take(6).map(|q| q.t.clone()).collect() };
                     for t in next { rhythm_ahead(&s, t.clone()); loud_ahead(&s, t); }
                     println!("selftest: mix: measuring the next 6 ahead");
@@ -9223,11 +9482,15 @@ fn main() -> Result<(), slint::PlatformError> {
                         None => println!("selftest: mix: none of the next 6 has a tempo close enough (or isn't measured): {:?}", { let q = &s.borrow().queue; q.items.iter().skip(qi + 1).take(6).map(|x| omnipulse_core::rhythm::known(&x.t.key).map(|m| m.rhythm.bpm)).collect::<Vec<_>>() }),
                     }
                 }
+                "rate" => { println!("selftest: rate: {:?}", mix_feedback(&s, false)); }
                 "mixcheck" => {
                     let a = s.borrow();
                     let phase = MIX.with(|m| match &*m.borrow() { None => "none".to_string(), Some(MixPhase::Opening(_)) => "opening".into(), Some(MixPhase::Waiting { .. }) => "waiting".into(), Some(MixPhase::Mixing { tempo, .. }) => format!("mixing at {:.4}x", tempo.get()) });
                     let ear = MIX_EAR.with(|e| e.borrow().as_ref().map(|x| format!("listening again from {} ms", x.1))).or_else(|| MIX_LOCAL.with(|l| l.borrow().as_ref().map(|x| format!("measured again: {} BPM, downbeat {}, from {} ms", x.1.rhythm.bpm, x.1.rhythm.downbeat, x.1.from_ms)))).unwrap_or_default();
                     println!("selftest: mix: {phase}, engine crossfading {} mixing {}, now \"{}\" at {} ms; {ear}", a.engine.crossfading(), a.engine.mixing(), a.queue.current().map(|t| t.title.clone()).unwrap_or_default(), a.engine.position_ms());
+                    let lit: Vec<String> = a.qrows.iter().filter(|r| r.coming).map(|r| r.title.to_string()).collect();
+                    let playing: Vec<String> = a.qrows.iter().filter(|r| r.playing).map(|r| r.title.to_string()).collect();
+                    println!("selftest: mix shown: \"{}\" at {} / {}, queue playing {playing:?}, lit {lit:?}, accent pulsing {}", ui.get_now_title(), ui.get_pos_text(), ui.get_dur_text(), ui.global::<Theme>().get_pulsing());
                 }
                 // what was measured of the track playing (its first 30%, as it played)
                 "rhythm" => {

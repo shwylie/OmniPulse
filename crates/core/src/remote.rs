@@ -31,6 +31,8 @@ pub fn set_handler(f: Handler) {
 const ACTIONS: &[&str] = &[
     "play", "pause", "toggle", "next", "previous", "like", "favourite", "shuffle", "repeat",
     "clear-requests", "clear-queue", "sets", "state",
+    // Seamless Mix feedback: the last transition, rated (logged with how it was mixed)
+    "mix-good", "mix-bad",
 ];
 
 static GEN: AtomicU64 = AtomicU64::new(0);

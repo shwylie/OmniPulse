@@ -1,9 +1,10 @@
 // A source at another tempo, its pitch kept (timestretch's keylock deck: pure Rust), for seamless
 // mixing: the track coming in plays at the tempo of the one going out, then eases back to its own.
 // The tempo is a shared handle the app moves while it plays (1.0: its own; 1.02: 2% faster).
-// A key shift (whole semitones, for the whole track) is a pitch factor on top: the source says it's at
-// that much higher a rate (so the engine's resampler plays it that much higher, and faster), and the
-// deck's tempo makes up for the speed.
+// A key shift (whole semitones) is a pitch factor on top, one the app can move while it plays (a shared
+// handle, as the tempo): the deck's output resampled by it (higher and faster), and the deck's tempo
+// making up for the speed. So a mix's key shift can bend back to the track's own key once the mix is
+// over, rather than staying for all of it.
 
 use crate::source::Source;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -25,6 +26,53 @@ impl Tempo {
     }
     pub fn get(&self) -> f64 {
         f64::from_bits(self.0.load(Ordering::Relaxed))
+    }
+}
+
+/// The resampling for a key shift: its pitch able to move as it plays (the deck's output in, a block
+/// at a time)
+struct Bend {
+    r: rubato::SincFixedIn<f32>,
+    /// the deck's output not resampled yet (each channel)
+    held: [Vec<f32>; 2],
+    /// the pitch it's at
+    applied: f64,
+    /// its own small delay, still to be let go (so it's on time, as the deck's)
+    skip: usize,
+}
+
+impl Bend {
+    fn new(pitch: f64) -> Result<Self, String> {
+        use rubato::{Resampler as _, SincInterpolationParameters, SincInterpolationType, WindowFunction};
+        let params = SincInterpolationParameters { sinc_len: 64, f_cutoff: 0.95, interpolation: SincInterpolationType::Linear, oversampling_factor: 128, window: WindowFunction::BlackmanHarris2 };
+        // (out per in: fewer frames, higher; within a third either way of where it starts: two
+        // semitones and back is an eighth)
+        let r = rubato::SincFixedIn::<f32>::new(1.0 / pitch, 1.33, params, 512, 2).map_err(|e| format!("the key shift wouldn't start: {e}"))?;
+        let skip = r.output_delay();
+        Ok(Self { r, held: [Vec::new(), Vec::new()], applied: pitch, skip })
+    }
+
+    /// Frames of the deck's output (interleaved) in; out, those resampled at `pitch`
+    fn run(&mut self, pitch: f64, frames: &[f32], out: &mut Vec<f32>) {
+        use rubato::Resampler as _;
+        for f in frames.chunks_exact(2) { self.held[0].push(f[0]); self.held[1].push(f[1]); }
+        if (pitch - self.applied).abs() > 1e-7 && self.r.set_resample_ratio(1.0 / pitch, true).is_ok() { self.applied = pitch; }
+        while self.held[0].len() >= self.r.input_frames_next() {
+            let n = self.r.input_frames_next();
+            let Ok(res) = self.r.process(&[&self.held[0][..n], &self.held[1][..n]], None) else { break };
+            self.held[0].drain(..n);
+            self.held[1].drain(..n);
+            let drop = self.skip.min(res[0].len());
+            self.skip -= drop;
+            for i in drop..res[0].len() { out.push(res[0][i]); out.push(res[1][i]); }
+        }
+    }
+
+    fn reset(&mut self) {
+        use rubato::Resampler as _;
+        self.r.reset();
+        self.held = [Vec::new(), Vec::new()];
+        self.skip = self.r.output_delay();
     }
 }
 
@@ -54,8 +102,10 @@ pub struct Stretched {
     block: Vec<f32>,
     /// the track's frames pushed in all, once it's done (0 until then)
     real_frames: u64,
-    /// a key shift, as a factor of pitch (1.0: none)
-    pitch: f64,
+    /// a key shift, as a factor of pitch (1.0: none), the app's to move (see Stretched::pitch)
+    pitch: Tempo,
+    /// its resampling, for one shifted (none: never shifted, played as it is)
+    bend: Option<Bend>,
     last_at: f64,
     /// what it gives from its start (or a seek) is where it starts, to the frame: its deck's own delay
     /// (a constant, in frames of what it gives, at any tempo) still to be let go
@@ -87,11 +137,16 @@ impl Stretched {
     /// The same, its key shifted by whole semitones (up or down)
     pub fn shifted(inner: Box<dyn Source>, tempo: Tempo, semitones: i32) -> Result<Self, String> {
         let rate = inner.rate();
-        // (the rate it says, a round 100 Hz: one with much in common with the output's, so its
-        // resampling is light and quick, not half a second behind; under a cent off the semitones)
-        let pitch = if semitones == 0 { 1.0 } else { ((rate as f64 * 2f64.powf(semitones as f64 / 12.0)) / 100.0).round() * 100.0 / rate as f64 };
-        let t = tempo.get() / pitch;
-        Ok(Self { deck: deck(rate, t)?, inner, tempo, rate, start_ms: 0, pending: Vec::new(), inner_done: false, finished: false, applied: t, block: vec![0.0; BLOCK * 2], real_frames: 0, last_at: -1.0, pitch, delay_left: 0 }.delayed())
+        let p = if semitones == 0 { 1.0 } else { 2f64.powf(semitones as f64 / 12.0) };
+        let t = tempo.get() / p;
+        let bend = if semitones == 0 { None } else { Some(Bend::new(p)?) };
+        Ok(Self { deck: deck(rate, t)?, inner, tempo, rate, start_ms: 0, pending: Vec::new(), inner_done: false, finished: false, applied: t, block: vec![0.0; BLOCK * 2], real_frames: 0, last_at: -1.0, pitch: Tempo::new(p), bend, delay_left: 0 }.delayed())
+    }
+
+    /// Its key shift, to move as it plays (a factor of pitch: 1.0 its own key); only one made shifted
+    /// can move (one that isn't stays as it is)
+    pub fn pitch(&self) -> Tempo {
+        self.pitch.clone()
     }
 
     /// Feeds the deck enough of the track for the next block
@@ -122,14 +177,14 @@ impl Stretched {
 
 impl Source for Stretched {
     fn rate(&self) -> u32 {
-        // (shifted: said to be at a higher or lower rate, so it's played that much higher or lower)
-        (self.rate as f64 * self.pitch).round() as u32
+        self.rate
     }
     fn duration_ms(&self) -> Option<u64> {
         self.inner.duration_ms()
     }
     fn read(&mut self, out: &mut Vec<f32>) -> Result<bool, String> {
-        let t = self.tempo.get() / self.pitch;
+        let p = if self.bend.is_some() { self.pitch.get() } else { 1.0 };
+        let t = self.tempo.get() / p;
         if (t - self.applied).abs() > 1e-6 {
             self.deck.ctl.set_tempo_rate(t);
             self.applied = t;
@@ -147,13 +202,18 @@ impl Source for Stretched {
         // (its delay, just started: let go)
         let drop = self.delay_left.min(self.block.len() / 2);
         self.delay_left -= drop;
-        out.extend_from_slice(&self.block[drop * 2..]);
+        match self.bend.as_mut() {
+            Some(b) => b.run(p, &self.block[drop * 2..], out),
+            None => out.extend_from_slice(&self.block[drop * 2..]),
+        }
         Ok(true)
     }
     fn seek(&mut self, ms: u64) -> Result<u64, String> {
         let at = self.inner.seek(ms)?;
-        self.deck = deck(self.rate, self.tempo.get() / self.pitch)?;
-        self.applied = self.tempo.get() / self.pitch;
+        let p = if self.bend.is_some() { self.pitch.get() } else { 1.0 };
+        self.deck = deck(self.rate, self.tempo.get() / p)?;
+        self.applied = self.tempo.get() / p;
+        if let Some(b) = self.bend.as_mut() { b.reset(); }
         self.start_ms = at;
         self.pending.clear();
         self.inner_done = false;
@@ -250,6 +310,29 @@ mod tests {
         let ch: Vec<f32> = out[mid..mid + 2 * 4410].chunks(2).map(|f| f[0]).collect();
         let n = ch.windows(2).filter(|w| w[0] < 0.0 && w[1] >= 0.0).count();
         assert!((47..=52).contains(&n), "{n}");
+    }
+
+    #[test]
+    fn a_key_shift_bends_back_as_it_plays() {
+        let rate = 44_100;
+        // two semitones up, then back to its own key partway through (as after a mix)
+        let mut s = Stretched::shifted(Box::new(Tone::new(rate, 440.0, 0.3, 6.0)), Tempo::new(1.0), 2).unwrap();
+        let pitch = s.pitch();
+        let mut out = Vec::new();
+        while s.read(&mut out).unwrap() {
+            if out.len() > rate as usize * 2 * 2 { pitch.set(1.0); }
+            if out.len() > rate as usize * 2 * 20 { break; }
+        }
+        let crossings = |at: f64| {
+            let i = (at * rate as f64) as usize * 2;
+            let ch: Vec<f32> = out[i..i + 2 * 4410].chunks(2).map(|f| f[0]).collect();
+            ch.windows(2).filter(|w| w[0] < 0.0 && w[1] >= 0.0).count()
+        };
+        // 493.9 Hz before, 440 Hz after, and every second of it still there (6 s at its own tempo)
+        assert!((47..=52).contains(&crossings(1.0)), "before {}", crossings(1.0));
+        assert!((42..=46).contains(&crossings(4.0)), "after {}", crossings(4.0));
+        let secs = out.len() as f64 / 2.0 / rate as f64;
+        assert!((secs - 6.0).abs() < 0.2, "{secs} s");
     }
 }
 
