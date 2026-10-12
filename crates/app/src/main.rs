@@ -4119,6 +4119,144 @@ fn pl_add(shared: &Shared, k: usize, t: Track) {
     }
 }
 
+// ---------- drag and drop (the web app's js/dnd.js) ----------
+// What's dragged: a track of the page ("t:<row>"; one of several picked: all of them), or a playlist
+// of the sidebar ("p:<side>"). What takes it: a playlist of yours in the sidebar or the open one
+// ("side:<i>", "page") takes tracks, and another playlist's songs (combined, as pasting them in:
+// what's there already left out); a platform playlist takes one track (adopted, as adding to it from
+// the menu does); the queue takes tracks.
+enum Dragged { Tracks(Vec<Track>), List(usize) }
+
+fn dragged(a: &App, data: &slint::DataTransfer) -> Option<Dragged> {
+    let text = data.plain_text().ok()?;
+    if let Some(i) = text.strip_prefix("t:").and_then(|x| x.parse::<usize>().ok()) {
+        let t = a.page_tracks.get(i)?;
+        let many: Vec<Track> = if a.picked.contains(&t.key) && a.picked.len() > 1 { a.page_tracks.iter().filter(|x| a.picked.contains(&x.key)).cloned().collect() } else { vec![t.clone()] };
+        return Some(Dragged::Tracks(many));
+    }
+    let i = text.strip_prefix("p:")?.parse::<usize>().ok()?;
+    a.side_map.get(i).copied().map(Dragged::List)
+}
+
+/// The playlist a drop target is (its place in a.playlists)
+fn drop_list(a: &App, target: &str) -> Option<usize> {
+    if target == "page" {
+        return match &a.here { Some(Place::Playlist(id)) => a.playlists.iter().position(|p| &p.id == id), _ => None };
+    }
+    let i = target.strip_prefix("side:")?.parse::<usize>().ok()?;
+    a.side_map.get(i).copied()
+}
+
+fn drop_ok(a: &App, target: &str, what: &Dragged) -> bool {
+    if target == "queue" { return matches!(what, Dragged::Tracks(_)); }
+    let Some(at) = drop_list(a, target) else { return false };
+    let p = &a.playlists[at];
+    match what {
+        Dragged::Tracks(t) => xpl::is_own(&p.id) || (p.own && p.plat != "local" && t.len() == 1),
+        Dragged::List(from) => *from != at && (xpl::is_own(&p.id) || (p.own && p.plat != "local")),
+    }
+}
+
+fn drop_do(shared: &Shared, target: &str, what: Dragged) {
+    if target == "queue" {
+        if let Dragged::Tracks(list) = what {
+            let n = list.len();
+            // (in a Jam: sent to it, as Add to Queue does)
+            if let Some(kind) = listening() {
+                if kind == "jam" { for t in &list { listen_send(serde_json::json!({ "type": "add", "track": t.to_snapshot(), "next": false })); } }
+                if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_status(if kind == "jam" { format!("Sent {} to the Jam.", plural(n, "track", "tracks")) } else { "You're listening along: only a Jam takes songs from listeners.".to_string() }.into()); }
+                return;
+            }
+            let empty = {
+                let mut a = shared.borrow_mut();
+                let empty = a.queue.current().is_none();
+                for t in list { a.queue.add(t); }
+                paint_queue(&mut a);
+                save_session(&a);
+                empty
+            };
+            if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_status(if n == 1 { "Added to the queue.".to_string() } else { format!("Added {n} tracks to the queue.") }.into()); }
+            if empty { start(shared); }
+        }
+        return;
+    }
+    let Some(at) = drop_list(&shared.borrow(), target) else { return };
+    let into = shared.borrow().playlists[at].clone();
+    match what {
+        // (one track onto a platform playlist: as adding it from the menu; more, or a playlist: it's adopted
+        // first, a playlist here kept in step with the platform's, as the web app does)
+        Dragged::Tracks(list) if !xpl::is_own(&into.id) && list.len() == 1 => { if let Some(t) = list.into_iter().next() { pl_add_platform(shared, into, t); } }
+        Dragged::Tracks(list) if !xpl::is_own(&into.id) => pl_adopt_add(shared, into, None, list),
+        Dragged::Tracks(list) => pl_add_many(shared, &into.id, list),
+        Dragged::List(from) if !xpl::is_own(&into.id) => {
+            let src = shared.borrow().playlists.get(from).cloned();
+            if let Some(src) = src { pl_adopt_add(shared, into, Some(src), Vec::new()); }
+        }
+        Dragged::List(from) => {
+            let Some(src) = shared.borrow().playlists.get(from).cloned() else { return };
+            if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_status(format!("Adding \"{}\" to \"{}\"...", src.title, into.title).into()); }
+            let (rt, weak) = { let a = shared.borrow(); (a.rt.clone(), a.ui.clone()) };
+            let id = into.id.clone();
+            rt.spawn(async move {
+                let list = sources::playlist_tracks(&src).await;
+                let _ = weak.upgrade_in_event_loop(move |ui| SHARED.with(|s| {
+                    let Some(shared) = s.borrow().clone() else { return };
+                    if list.is_empty() { ui.set_status(format!("\"{}\" is empty.", src.title).into()); return; }
+                    pl_add_many(&shared, &id, list);
+                }));
+            });
+        }
+    }
+}
+
+/// A platform playlist of yours adopted (a playlist here, kept in step with the platform's), then
+/// tracks into it: these, or another playlist's
+fn pl_adopt_add(shared: &Shared, into: sources::Playlist, src: Option<sources::Playlist>, list: Vec<Track>) {
+    let (rt, weak) = { let a = shared.borrow(); (a.rt.clone(), a.ui.clone()) };
+    if let Some(ui) = weak.upgrade() { ui.set_status(format!("Adding to \"{}\"...", into.title).into()); }
+    rt.spawn(async move {
+        let list = match &src { Some(p) => sources::playlist_tracks(p).await, None => list };
+        if list.is_empty() {
+            let name = src.map(|p| p.title).unwrap_or_default();
+            let _ = weak.upgrade_in_event_loop(move |ui| ui.set_status(format!("\"{name}\" is empty.").into()));
+            return;
+        }
+        let copy = mirror::adopt(&into).await;
+        let _ = weak.upgrade_in_event_loop(move |_ui| SHARED.with(|s| {
+            let Some(shared) = s.borrow().clone() else { return };
+            let id = copy["id"].as_str().unwrap_or("").to_string();
+            {
+                let mut a = shared.borrow_mut();
+                if let Some(l) = a.xpl.as_array_mut() { l.insert(0, copy); } else { a.xpl = serde_json::json!([copy]); }
+            }
+            hidden_set(&shared, &mirror::side_id(into.plat, &into.id), true);
+            xpl_changed(&shared);
+            let showing = matches!(&shared.borrow().here, Some(Place::Playlist(x)) if *x == into.id);
+            pl_add_many(&shared, &id, list);
+            if showing { go(&shared, Place::Playlist(id)); }
+        }));
+    });
+}
+
+/// Tracks into a playlist of yours (what's there already left out), said; shown again if it's open
+fn pl_add_many(shared: &Shared, id: &str, list: Vec<Track>) {
+    let title = shared.borrow().playlists.iter().find(|p| p.id == id).map(|p| p.title.clone()).unwrap_or_default();
+    let collab = shared.borrow().xpl.as_array().is_some_and(|l| l.iter().any(|x| x["id"].as_str() == Some(id) && x["collab"].is_object()));
+    let by = my_name(&shared.borrow());
+    let list: Vec<Track> = if collab { list.into_iter().map(|t| Track { added_by: by.clone(), ..t }).collect() } else { list };
+    let had: std::collections::HashSet<String> = shared.borrow().playlists.iter().find(|p| p.id == id).and_then(|p| p.tracks.as_ref()).map(|t| t.iter().map(|x| x.key.clone()).collect()).unwrap_or_default();
+    let n = xpl::add(&mut shared.borrow_mut().xpl, id, &list);
+    for t in list.iter().filter(|t| t.plat() != "local" && !had.contains(&t.key)) { collab_send(shared, id, collab::add_op(t, &by)); }
+    xpl_changed(shared);
+    let left = list.len().saturating_sub(n);
+    if let Some(ui) = shared.borrow().ui.upgrade() {
+        let there = if left > 0 { format!(" ({} there already)", plural(left, "was", "were")) } else { String::new() };
+        ui.set_status(if n > 0 { format!("Added {} to {title}{there}.", plural(n, "track", "tracks")) } else { format!("Nothing new for {title}{there}.") }.into());
+    }
+    let showing = matches!(&shared.borrow().here, Some(Place::Playlist(x)) if x == id);
+    if showing && n > 0 { go(shared, Place::Playlist(id.to_string())); }
+}
+
 fn pl_row_action(shared: &Shared, act: &str, t: Track) {
     match act {
         "plnew" => pl_create(shared, vec![t]),
@@ -5819,6 +5957,18 @@ fn main() -> Result<(), slint::PlatformError> {
     });
     let s = shared.clone();
     ui.on_artist(move |i| go(&s, Place::Artist(i as usize)));
+    // drag and drop: carried as plain text, read and acted on here
+    {
+        let d = ui.global::<Dnd>();
+        d.on_payload(|what| slint::DataTransfer::from(what));
+        let s = shared.clone();
+        d.on_accepts(move |target, data| { let a = s.borrow(); dragged(&a, &data).is_some_and(|w| drop_ok(&a, &target, &w)) });
+        let s = shared.clone();
+        d.on_dropped(move |target, data| {
+            let what = { let a = s.borrow(); dragged(&a, &data).filter(|w| drop_ok(&a, &target, w)) };
+            if let Some(w) = what { drop_do(&s, &target, w); }
+        });
+    }
     let s = shared.clone();
     ui.on_side(move |i| {
         let at = s.borrow().side_map.get(i as usize).copied();
@@ -6179,6 +6329,9 @@ fn main() -> Result<(), slint::PlatformError> {
         let plan: Vec<(u64, &str)> = if join.is_some() { vec![(6, "join"), (14, "joined"), (16, "jamskip"), (19, "leave"), (21, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("mix") { vec![(9, "play"), (10, "mixprep"), (70, "mixseek"), (82, "mixcheck"), (100, "mixcheck"), (106, "mixcheck"), (130, "mixcheck"), (132, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("rhythm") { vec![(9, "play"), (100, "rhythm"), (101, "end")] }
+            // (OMNIPULSE_SELFTEST_PLAN=dnd: a Library track dragged onto the queue; what the sidebar would take,
+            // only asked, nothing dropped on your playlists)
+            else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("dnd") { vec![(9, "play"), (12, "library"), (13, "qopen"), (14, "dragq"), (16, "dragasks"), (17, "end")] }
             // (OMNIPULSE_SELFTEST_PLAN=look: List Density at Compact, and Search with Hide likes)
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("look") { vec![(9, "play"), (12, "library"), (13, "compact"), (14, "settings"), (15, "comfy"), (16, "search"), (19, "hidelikes"), (21, "hidelikesoff"), (22, "discover"), (30, "langnext"), (40, "end")] }
             else if only_discover { vec![(9, "play"), (11, "discover"), (30, "disc"), (45, "discmix"), (12, "import"), (46, "taste"), (47, "taste2"), (48, "taste3"), (70, "tasted"), (71, "marquee"), (72, "marqueeoff"), (73, "end")] } else { full.to_vec() };
@@ -6244,6 +6397,24 @@ fn main() -> Result<(), slint::PlatformError> {
                 }
                 "search" => { ui.set_search_text("deadmau5".into()); ui.invoke_search("deadmau5".into()); }
                 "compact" => ui.invoke_density_changed(true),
+                "qopen" => ui.set_queue_open(true),
+                "dragq" => {
+                    use slint::platform::{PointerEventButton, WindowEvent};
+                    let n = s.borrow().queue.items.len();
+                    let w = ui.window();
+                    let at = |x: f32, y: f32| slint::LogicalPosition::new(x, y);
+                    w.dispatch_event(WindowEvent::PointerPressed { position: at(560.0, 392.0), button: PointerEventButton::Left });
+                    for k in 1..=12 { w.dispatch_event(WindowEvent::PointerMoved { position: at(560.0 + k as f32 * 40.0, 392.0 + k as f32 * 2.0) }); }
+                    w.dispatch_event(WindowEvent::PointerReleased { position: at(1040.0, 416.0), button: PointerEventButton::Left });
+                    println!("selftest: drag onto the queue: {n} -> {} (\"{}\")", s.borrow().queue.items.len(), ui.get_status());
+                }
+                "dragasks" => {
+                    let d = ui.global::<Dnd>();
+                    let ask = |t: &str, what: &str| d.invoke_accepts(t.into(), slint::DataTransfer::from(slint::SharedString::from(what)));
+                    let sides = s.borrow().side_map.len();
+                    let own: Vec<bool> = (0..sides.min(6)).map(|i| ask(&format!("side:{i}"), "t:0")).collect();
+                    println!("selftest: drag asks: track on sides 0-5 {own:?}; playlist 0 on itself {}, on side 1 {}; queue {}, playlist on queue {}", ask("side:0", "p:0"), ask("side:1", "p:0"), ask("queue", "t:0"), ask("queue", "p:0"));
+                }
                 "langnext" => { ui.invoke_lang_next(); println!("selftest: Discover language now \"{}\"", ui.get_lang_label()); }
                 "comfy" => { ui.invoke_density_changed(false); ui.invoke_nav("library".into()); }
                 "hidelikes" => { let n = ui.get_rows().row_count(); ui.invoke_hide_likes_changed(true); println!("selftest: search {n} rows, with Hide likes {}", ui.get_rows().row_count()); }

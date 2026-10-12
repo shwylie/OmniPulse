@@ -21,6 +21,15 @@ export global Theme {
     in-out property <length> row-art: 44px;
 }
 
+// Drag and drop (as the web app's js/dnd.js): a track of the page ("t:<row>") or a playlist of the
+// sidebar ("p:<side>") dragged; dropped on a playlist in the sidebar ("side:<i>"), the queue ("queue")
+// or the open playlist's page ("page"). What's carried, what takes it and the drop are the app's.
+export global Dnd {
+    pure callback payload(string) -> data-transfer;
+    pure callback accepts(string, data-transfer) -> bool;
+    callback dropped(string, data-transfer);
+}
+
 export struct Row { title: string, artist: string, album: string, dur: string, plat: string, playing: bool, head: string, auto: bool, art: image, liked: bool, sc-link: bool, sp-link: bool, yt-link: bool, picked: bool, genres: [string], added-by: string }
 export struct Side { title: string, plat: string, own: bool, share: bool, sc: bool, sp: bool, collab: bool, collab-owner: bool }
 /// A platform in the title bar: on (in its colours), set up (ready; grey until it is), its name
@@ -422,7 +431,10 @@ component TrackRow inherits Rectangle {
         }
         Text { text: root.item.dur; width: 48px; color: Theme.muted; font-size: 13px; horizontal-alignment: right; vertical-alignment: center; }
     }
-    ContextMenuArea {
+    DragArea {
+      allow-copy: true;
+      data: Dnd.payload("t:" + root.index);
+      ContextMenuArea {
         Menu {
             MenuItem { title: "Play Next"; activated => { root.act("next"); } }
             MenuItem { title: "Add to Queue"; activated => { root.act("add"); } }
@@ -445,6 +457,7 @@ component TrackRow inherits Rectangle {
             }
             clicked => { if (!root.picking) { root.play(); } }
         }
+      }
     }
 }
 
@@ -1003,7 +1016,9 @@ export component AppWindow inherits Window {
                           Rectangle {
                             height: 32px;
                             border-radius: 6px;
-                            background: root.side-on == i ? Theme.elevated : (sta.has-hover ? #ffffff08 : transparent);
+                            background: sdz.has-drag ? Theme.accent.with-alpha(0.3) : root.side-on == i ? Theme.elevated : (sta.has-hover ? #ffffff08 : transparent);
+                            border-width: sdz.has-drag ? 1px : 0px;
+                            border-color: Theme.accent;
                             HorizontalLayout {
                                 padding-left: root.narrow ? 0px : 12px;
                                 spacing: 10px;
@@ -1011,6 +1026,12 @@ export component AppWindow inherits Window {
                                 PlatIcon { plat: s.plat; width: 14px; height: 14px; y: (parent.height - self.height) / 2; }
                                 if !root.narrow: Text { text: s.title; color: root.side-on == i ? Theme.text : Theme.muted; font-size: 13px; vertical-alignment: center; overflow: elide; }
                             }
+                            sdz := DropArea {
+                              can-drop(e) => { return Dnd.accepts("side:" + i, e.data) ? DragAction.copy : DragAction.none; }
+                              dropped(e) => { Dnd.dropped("side:" + i, e.data); return e.proposed-action; }
+                             DragArea {
+                              allow-copy: true;
+                              data: Dnd.payload("p:" + i);
                             ContextMenuArea {
                                 Menu {
                                     if s.share: MenuItem { title: "Share"; activated => { root.side-action(i, "share"); } }
@@ -1025,6 +1046,8 @@ export component AppWindow inherits Window {
                                 }
                                 sta := TouchArea { clicked => { root.side(i); } }
                             }
+                             }
+                            }
                           }
                           if i == root.sides.length - 1: Rectangle { height: 76px; }
                         }
@@ -1037,11 +1060,17 @@ export component AppWindow inherits Window {
                 background: Theme.panel;
                 border-radius: Theme.panel-radius;
                 clip: true;
+                border-width: pdz.has-drag ? 2px : 0px;
+                border-color: Theme.accent;
                 // the accent's glow at the top, fading into the panel
                 Rectangle {
                     y: 0;
                     height: 340px;
                     background: @linear-gradient(180deg, Theme.panel.mix(Theme.accent, 0.7) 0%, Theme.panel 100%);
+                }
+                pdz := DropArea {
+                    can-drop(e) => { return Dnd.accepts("page", e.data) ? DragAction.copy : DragAction.none; }
+                    dropped(e) => { Dnd.dropped("page", e.data); return e.proposed-action; }
                 }
                 VerticalLayout {
                     padding: 24px;
@@ -1865,6 +1894,12 @@ export component AppWindow inherits Window {
                 width: 300px;
                 background: Theme.panel;
                 border-radius: Theme.panel-radius;
+                border-width: qdz.has-drag ? 2px : 0px;
+                border-color: Theme.accent;
+                qdz := DropArea {
+                    can-drop(e) => { return Dnd.accepts("queue", e.data) ? DragAction.copy : DragAction.none; }
+                    dropped(e) => { Dnd.dropped("queue", e.data); return e.proposed-action; }
+                }
                 VerticalLayout {
                     padding: 16px;
                     spacing: 8px;
