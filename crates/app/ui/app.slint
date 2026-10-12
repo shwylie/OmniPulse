@@ -2299,7 +2299,6 @@ export component AppWindow inherits Window {
                             }
                             if root.set-cat == "Integrations" && root.set-query == "": VerticalLayout {
                                 spacing: 14px;
-                                // YouTube Music's helpers (yt-dlp and Deno): how they are, set up, or taken off
                                 Card {
                                     HorizontalLayout {
                                         padding: 16px;
@@ -2359,6 +2358,7 @@ export component AppWindow inherits Window {
                                         }
                                     }
                                 }
+                                // YouTube Music's helpers (yt-dlp and Deno): how they are, set up, or taken off
                                 for r[i] in root.set-rows-integrations: SetRowView { r: r; toggle(k) => { root.set-toggle(k); } more(k) => { root.set-more(k); } }
                             }
                             if root.set-cat == "Plugins" && root.set-query == "": VerticalLayout {
