@@ -38,7 +38,8 @@ export struct Row { title: string, artist: string, album: string, dur: string, p
 export struct Side { title: string, plat: string, own: bool, share: bool, sc: bool, sp: bool, collab: bool, collab-owner: bool }
 /// A platform in the title bar: on (in its colours), set up (ready; grey until it is), its name
 export struct Plat { id: string, on: bool, name: string, ready: bool }
-export struct Tile { title: string, sub: string, art: image, plat: string }
+// (a genre's tile, as the web app's: a coloured cover, its name on it; c1 its middle, c2 its edge)
+export struct Tile { title: string, sub: string, art: image, plat: string, genre: bool, c1: color, c2: color }
 /// Pick genres (and Fine-tune): a row of up to four chips, under a group's name (on its first row)
 export struct TasteChip { label: string, on: bool }
 export struct TasteRow { head: string, chips: [TasteChip] }
@@ -632,7 +633,13 @@ component TileView inherits Rectangle {
         spacing: 8px;
         Rectangle {
             height: 170px;
-            Cover { art: root.tile.art; initial: root.tile.title; width: 100%; height: 100%; }
+            if !root.tile.genre: Cover { art: root.tile.art; initial: root.tile.title; width: 100%; height: 100%; }
+            if root.tile.genre: Rectangle {
+                border-radius: 8px;
+                clip: true;
+                background: @radial-gradient(circle, root.tile.c1 0%, root.tile.c2 100%);
+                Text { x: 12px; y: parent.height - self.height - 14px; width: parent.width - 24px; text: root.tile.title; color: #ffffff; font-size: 22px; font-weight: 800; wrap: word-wrap; }
+            }
             if ta.has-hover: Rectangle { x: parent.width - 52px; y: parent.height - 52px; width: 42px; height: 42px; border-radius: 21px; background: Theme.accent;
                 Glyph { d: Icons.play; width: 22px; height: 22px; fill: Theme.on-accent; } }
             if ta.has-hover: PlatIcon { plat: root.tile.plat; title-bar: true; x: 8px; y: 8px; width: 18px; height: 18px; }
