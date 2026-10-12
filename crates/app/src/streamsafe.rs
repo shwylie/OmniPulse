@@ -99,6 +99,57 @@ pub fn open(t: &Track) -> bool {
     open_licence(t)
 }
 
+/// The cleared entry (on) a track comes under: (its id, its name)
+fn cleared_entry(prefs: &Value, t: &Track) -> Option<(String, String)> {
+    let p = &prefs["streamCleared"];
+    let set = |id: &str, dflt: bool| p["on"][id].as_bool().unwrap_or(dflt);
+    let names = names(t);
+    let label = artist_key(&t.label);
+    let hit = |artists: &[&str], labels: &[&str]| artists.iter().any(|a| names.contains(&artist_key(a))) || (!label.is_empty() && labels.iter().any(|l| artist_key(l) == label));
+    let shown = |id: &str| -> String { match id { "ncs" => "NCS", "streambeats" => "StreamBeats", "monstercat" => "Monstercat", "epidemic" => "Epidemic Sound", "lofigirl" => "Lofi Girl", "chillhop" => "Chillhop Music", x => x }.to_string() };
+    for (id, artists, labels, dflt) in CLEARED {
+        if set(id, dflt) && hit(artists, labels) { return Some((id.to_string(), shown(id))); }
+    }
+    p["custom"].as_array().into_iter().flatten().find_map(|c| {
+        let (id, name) = (c["id"].as_str().unwrap_or(""), c["name"].as_str().unwrap_or(""));
+        let yes = set(id, true) && if c["kind"].as_str() == Some("label") { hit(&[], &[name]) } else { hit(&[name], &[]) };
+        yes.then(|| (id.to_string(), name.to_string()))
+    })
+}
+
+/// A track's menu line for Stream-Safe Music (the web app's clearedMenuLabel): "Allow <artist> on
+/// stream" or "Stop allowing <name> on stream"; none for open licences
+pub fn menu_label(prefs: &Value, t: &Track) -> Option<(String, bool)> {
+    if open_licence(t) { return None; }
+    if let Some((_, name)) = cleared_entry(prefs, t) { return Some((format!("Stop allowing {name} on stream"), false)); }
+    let a = t.artist.split([',', '&']).next().unwrap_or("").trim();
+    (!a.is_empty()).then(|| (format!("Allow {a} on stream"), true))
+}
+
+/// That menu line chosen: the new streamCleared, and what to say
+pub fn menu_run(prefs: &Value, t: &Track) -> Option<(Value, String)> {
+    let mut p = prefs["streamCleared"].clone();
+    if !p.is_object() { p = serde_json::json!({ "custom": [], "on": {} }); }
+    if !p["custom"].is_array() { p["custom"] = serde_json::json!([]); }
+    if !p["on"].is_object() { p["on"] = serde_json::json!({}); }
+    if let Some((id, name)) = cleared_entry(prefs, t) {
+        p["on"][id.as_str()] = serde_json::json!(false);
+        return Some((p, format!("{name} isn't cleared for streaming any more.")));
+    }
+    let a = t.artist.split([',', '&']).next().unwrap_or("").trim().to_string();
+    if a.is_empty() { return None; }
+    let key = artist_key(&a);
+    let old = p["custom"].as_array().and_then(|l| l.iter().find(|c| c["kind"].as_str() == Some("artist") && artist_key(c["name"].as_str().unwrap_or("")) == key).and_then(|c| c["id"].as_str().map(String::from)));
+    match old {
+        Some(id) => p["on"][id.as_str()] = serde_json::json!(true),
+        None => {
+            let id = format!("c{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0));
+            p["custom"].as_array_mut().unwrap().push(serde_json::json!({ "id": id, "kind": "artist", "name": a }));
+        }
+    }
+    Some((p, format!("{a} is cleared for streaming: Stream-Safe Music plays them.")))
+}
+
 /// On: whether it may play. Off: everything may.
 pub fn allowed(prefs: &Value, t: &Track) -> bool {
     !on(prefs) || ok(prefs, t)

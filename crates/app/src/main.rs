@@ -172,7 +172,9 @@ fn apply_filter(app: &mut App) {
     }
     let playing = app.queue.current().map(|t| t.key.clone()).unwrap_or_default();
     let liked: std::collections::HashSet<&str> = app.library.iter().map(|t| t.key.as_str()).collect();
-    app.rows.set_vec(filtered.iter().map(|t| Row { liked: liked.contains(t.key.as_str()), picked: app.picked.contains(&t.key), ..t.row(t.key == playing) }).collect::<Vec<_>>());
+    let _ = &liked;
+    let marks = marks_of(app);
+    app.rows.set_vec(filtered.iter().map(|t| row_menu(app, &marks, t, Row { picked: app.picked.contains(&t.key), ..t.row(t.key == playing) })).collect::<Vec<_>>());
     app.page_tracks = filtered;
     // its covers, once this is done with the app
     slint::Timer::single_shot(std::time::Duration::ZERO, || SHARED.with(|s| { if let Some(sh) = s.borrow().clone() { rows_art(&sh); } }));
@@ -298,6 +300,8 @@ enum Place {
     Playlist(String),
     Search(String),
     Artist(usize),
+    /// any artist, by name (Go to Artist): found on the platforms that are on
+    ArtistNamed(String),
 }
 
 /// Opens a place, remembering the one you were on (so Back returns to it)
@@ -337,6 +341,7 @@ fn open_place(shared: &Shared, place: &Place) {
         }
         Place::Search(q) => open_search(shared, q.clone()),
         Place::Artist(i) => open_artist(shared, *i),
+        Place::ArtistNamed(n) => open_artist_named(shared, n),
     }
     let a = shared.borrow();
     if let Some(ui) = a.ui.upgrade() {
@@ -854,6 +859,34 @@ fn open_artist(shared: &Shared, i: usize) {
         let (t, dz, bio) = tokio::join!(sources::artist_tracks(&a), artist_top(&a.name, cat), artist_bio(&a.name));
         let t = sources::once_each(sources::interleave(vec![t, dz]));
         let sub = format!("{bio}You follow them on {on}. {}.", plural(t.len(), "track", "tracks"));
+        (t, sub)
+    });
+}
+
+/// An artist's page from their name (the web app's openArtistNamed): what you like by them first, then
+/// what they've put out on SoundCloud and Spotify (found by name) and their best known on Deezer
+fn open_artist_named(shared: &Shared, name: &str) {
+    // (one you follow: their own page)
+    let followed = shared.borrow().artists.as_ref().and_then(|l| l.iter().position(|a| omnipulse_core::ranking::artist_key(&a.name) == omnipulse_core::ranking::artist_key(name)));
+    if let Some(i) = followed { return open_artist(shared, i); }
+    FOLLOW.with(|f| *f.borrow_mut() = (None, false, Vec::new()));
+    follow_paint(shared);
+    let key = omnipulse_core::ranking::artist_key(name);
+    let mine: Vec<Track> = shared.borrow().library.iter().filter(|t| t.artist.split([',', '&']).any(|a| omnipulse_core::ranking::artist_key(a.trim()) == key)).cloned().collect();
+    show_tracks(shared, "artist", name, "Loading...".into(), mine.clone(), true);
+    let (cat, sc_on, sp_on) = { let p = &shared.borrow().web.prefs; (catalog_on(p), plat_on(p, "soundcloud"), plat_on(p, "spotify")) };
+    let name = name.to_string();
+    load_into(shared, "artist", name.clone(), async move {
+        let (sc, sp) = tokio::join!(
+            async { if sc_on { sources::find_artist_on("soundcloud", &name).await.and_then(|x| x.parse().ok()) } else { None } },
+            async { if sp_on { sources::find_artist_on("spotify", &name).await } else { None } },
+        );
+        let a = sources::Artist { name: name.clone(), img: String::new(), sc, sp };
+        let on = a.plats().into_iter().map(|p| if p == "spotify" { "Spotify" } else { "SoundCloud" }).collect::<Vec<_>>().join(" and ");
+        let (t, dz, bio) = tokio::join!(sources::artist_tracks(&a), artist_top(&name, cat), artist_bio(&name));
+        let t = sources::once_each(sources::interleave(vec![mine.clone(), t, dz]));
+        let liked = if mine.is_empty() { String::new() } else { format!("{} you like first. ", plural(mine.len(), "song", "songs")) };
+        let sub = format!("{bio}{liked}{}{}.", if on.is_empty() { String::new() } else { format!("From {on} and more. ") }, plural(t.len(), "track", "tracks"));
         (t, sub)
     });
 }
@@ -1952,13 +1985,64 @@ fn rows_art(shared: &Shared) {
 }
 
 // ---------- the queue panel ----------
+/// A row's menu, as the web app's track menu: its artists, its uploader, its like and star, where it
+/// opens, Stream-Safe Music's Allow / Stop allowing
+/// (what's liked and starred, once for a whole list of rows)
+struct Marks { liked: std::collections::HashSet<String>, favs: std::collections::HashSet<String> }
+
+fn marks_of(a: &App) -> Marks {
+    Marks { liked: a.library.iter().map(|t| t.key.clone()).collect(), favs: marks::favourites(&a.web.favourites).into_iter().map(|t| t.key).collect() }
+}
+
+fn row_menu(a: &App, m: &Marks, t: &Track, mut r: Row) -> Row {
+    let names: Vec<slint::SharedString> = t.artist.split([',', '&']).map(|x| x.trim()).filter(|x| !x.is_empty()).map(Into::into).collect();
+    r.artists = ModelRc::from(Rc::new(VecModel::from(names)));
+    let apart = !t.uploader.is_empty() && omnipulse_core::ranking::artist_key(&t.uploader) != omnipulse_core::ranking::artist_key(t.artist.split([',', '&']).next().unwrap_or(""));
+    r.uploader = if apart { t.uploader.clone().into() } else { "".into() };
+    r.can_like = !matches!(t.src, track::Src::Local(_));
+    r.liked = m.liked.contains(&t.key);
+    r.fav_on = true;
+    r.fav = m.favs.contains(&t.key);
+    r.open_label = if t.web_link().is_empty() { "".into() } else { match t.plat() { "spotify" => "Open in Spotify", "youtube" => "Open in YouTube Music", "musicbrainz" => "Open on MusicBrainz", "deezer" => "Open on Deezer", "itunes" => "Open in Apple Music", "local" => "", _ => "Open on SoundCloud" }.into() };
+    r.cleared = streamsafe::menu_label(&a.web.prefs, t).map(|x| x.0).unwrap_or_default().into();
+    r
+}
+
+/// A choice from a track's menu (the page's, or the queue's) that isn't about the queue or a playlist:
+/// true if it was one of them
+fn track_act(shared: &Shared, t: &Track, act: &str) -> bool {
+    match act {
+        "like" => like_track(shared, t.clone()),
+        "fav" => fav_track(shared, t.clone()),
+        "uploader" => go(shared, Place::ArtistNamed(t.uploader.clone())),
+        "open" => { let _ = omnipulse_core::open_url(t.web_link()); }
+        "prefs" => tp_open(shared, t),
+        "cleared" => {
+            let (prefs, note) = { let a = shared.borrow(); match streamsafe::menu_run(&a.web.prefs, t) { Some(x) => x, None => return true } };
+            pref_put(shared, "streamCleared", prefs);
+            let mut a = shared.borrow_mut();
+            apply_filter(&mut a);
+            paint_queue(&mut a);
+            if let Some(ui) = a.ui.upgrade() { ui.set_status(note.into()); }
+        }
+        a if a.starts_with("artist:") => {
+            let k: usize = a[7..].parse().unwrap_or(0);
+            let name = t.artist.split([',', '&']).map(|x| x.trim()).filter(|x| !x.is_empty()).nth(k).unwrap_or(&t.artist).to_string();
+            go(shared, Place::ArtistNamed(name));
+        }
+        _ => return false,
+    }
+    true
+}
+
 fn paint_queue(a: &mut App) {
     let panel = a.queue.panel();
+    let marks = marks_of(a);
     let map: Vec<usize> = panel.iter().map(|p| p.0).collect();
     let rows: Vec<Row> = panel
         .iter()
         .map(|(i, q, head)| {
-            let mut r = q.t.row(Some(*i) == a.queue.qi);
+            let mut r = row_menu(a, &marks, &q.t, q.t.row(Some(*i) == a.queue.qi));
             r.head = (*head).into();
             r.auto = q.auto;
             r
@@ -2833,19 +2917,26 @@ fn paint_marks(ui: &AppWindow, t: &Track) {
 
 /// The heart: likes or unlikes what's playing, where it's from (put right back if that fails)
 fn like_toggle(shared: &Shared) {
+    let Some(t) = shared.borrow().queue.current().cloned() else { return };
+    like_track(shared, t);
+}
+
+/// A track liked, or the like taken off, where it's from (put right back if that fails)
+fn like_track(shared: &Shared, t: Track) {
+    let playing = shared.borrow().queue.current().is_some_and(|c| c.key == t.key);
     let (t, on, rt, weak) = {
         let mut a = shared.borrow_mut();
-        let Some(t) = a.queue.current().cloned() else { return };
         let on = !a.library.iter().any(|x| x.key == t.key);
         if on { a.library.insert(0, t.clone()); } else { a.library.retain(|x| x.key != t.key); }
         (t, on, a.rt.clone(), a.ui.clone())
     };
     if let Some(ui) = weak.upgrade() {
-        ui.set_now_liked(on);
+        if playing { ui.set_now_liked(on); }
         ui.set_status(format!("{} \"{}\".", if on { "Liked" } else { "Took the like off" }, t.title).into());
     }
+    { let mut a = shared.borrow_mut(); apply_filter(&mut a); paint_queue(&mut a); }
     // a requested song: the widget cheers whoever asked for it, for a few seconds
-    let by = shared.borrow().queue.qi.and_then(|i| shared.borrow().queue.items.get(i).map(|q| q.by.clone())).unwrap_or_default();
+    let by = if playing { shared.borrow().queue.qi.and_then(|i| shared.borrow().queue.items.get(i).map(|q| q.by.clone())).unwrap_or_default() } else { String::new() };
     if on && !by.is_empty() {
         integrations::like_banter(by.trim_end_matches(" (Jam)"));
         push_out(shared, true);
@@ -2872,19 +2963,26 @@ fn like_toggle(shared: &Shared) {
 
 /// The star: a favourite (which also likes it), or not
 fn fav_toggle(shared: &Shared) {
+    let Some(t) = shared.borrow().queue.current().cloned() else { return };
+    fav_track(shared, t);
+}
+
+/// A track starred (a favourite, which likes it too), or not
+fn fav_track(shared: &Shared, t: Track) {
+    let playing = shared.borrow().queue.current().is_some_and(|c| c.key == t.key);
     let (t, on, liked) = {
         let a = shared.borrow();
-        let Some(t) = a.queue.current().cloned() else { return };
         let on = !marks::favourites(&a.web.favourites).iter().any(|x| x.key == t.key);
         let liked = a.library.iter().any(|x| x.key == t.key);
         (t, on, liked)
     };
     marks::set_favourite(&t, on);
+    { let mut a = shared.borrow_mut(); apply_filter(&mut a); paint_queue(&mut a); }
     if let Some(ui) = shared.borrow().ui.upgrade() {
-        ui.set_now_fav(on);
+        if playing { ui.set_now_fav(on); }
         ui.set_status(format!("{} \"{}\".", if on { "Starred" } else { "Took the star off" }, t.title).into());
     }
-    if on && !liked { like_toggle(shared); }
+    if on && !liked { like_track(shared, t); }
 }
 
 /// Playing from a page: a list (Library, a playlist...) becomes the queue; one track from Search
@@ -7795,6 +7893,16 @@ fn main() -> Result<(), slint::PlatformError> {
             drop(a);
             return pl_row_action(&s, &act, t);
         }
+        if act == "play" {
+            let list = a.page_tracks.clone();
+            drop(a);
+            return play_list(&s, list, i as usize);
+        }
+        if matches!(act.as_str(), "like" | "fav" | "uploader" | "open" | "prefs" | "cleared") || act.starts_with("artist:") {
+            drop(a);
+            track_act(&s, &t, &act);
+            return;
+        }
         if let Some(what) = act.strip_prefix("hide:") {
             drop(a);
             return hide_track(&s, &t, what);
@@ -7864,6 +7972,11 @@ fn main() -> Result<(), slint::PlatformError> {
             let Some(t) = a.queue.items.get(at).map(|q| q.t.clone()) else { return };
             drop(a);
             return copy_track_link(&s, &t, plat);
+        }
+        if let Some(t) = a.queue.items.get(at).map(|q| q.t.clone()) {
+            if act.starts_with("pl") { drop(a); return pl_row_action(&s, &act, t); }
+            if let Some(what) = act.strip_prefix("hide:") { drop(a); return hide_track(&s, &t, what); }
+            if matches!(act.as_str(), "like" | "fav" | "open" | "prefs" | "artist:0") { drop(a); track_act(&s, &t, &act); return; }
         }
         match act.as_str() {
             "next" => a.queue.move_next(at),

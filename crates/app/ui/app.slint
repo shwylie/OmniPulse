@@ -34,7 +34,9 @@ export global Dnd {
     callback dropped(string, data-transfer);
 }
 
-export struct Row { title: string, artist: string, album: string, dur: string, plat: string, playing: bool, head: string, auto: bool, art: image, liked: bool, sc-link: bool, sp-link: bool, yt-link: bool, picked: bool, genres: [string], added-by: string }
+// (and for its menu, as the web app's: its artists one by one, its uploader if it's someone else, a
+// like and a star, where it opens, Stream-Safe Music's Allow / Stop allowing)
+export struct Row { title: string, artist: string, album: string, dur: string, plat: string, playing: bool, head: string, auto: bool, art: image, liked: bool, sc-link: bool, sp-link: bool, yt-link: bool, picked: bool, genres: [string], added-by: string, artists: [string], uploader: string, can-like: bool, fav: bool, fav-on: bool, open-label: string, cleared: string }
 export struct Side { title: string, plat: string, own: bool, share: bool, sc: bool, sp: bool, collab: bool, collab-owner: bool }
 /// A platform in the title bar: on (in its colours), set up (ready; grey until it is), its name
 export struct Plat { id: string, on: bool, name: string, ready: bool }
@@ -568,6 +570,7 @@ component TrackRow inherits Rectangle {
       data: Dnd.payload("t:" + root.index);
       ContextMenuArea {
         Menu {
+            MenuItem { title: "Play"; activated => { root.act("play"); } }
             MenuItem { title: "Play Next"; activated => { root.act("next"); } }
             MenuItem { title: "Add to Queue"; activated => { root.act("add"); } }
             Menu {
@@ -575,13 +578,28 @@ component TrackRow inherits Rectangle {
                 for l[k] in root.lists: MenuItem { title: l; activated => { root.act("pl" + k); } }
                 MenuItem { title: "New Playlist..."; activated => { root.act("plnew"); } }
             }
+            MenuSeparator { }
+            if root.item.can-like: MenuItem { title: root.item.liked ? "Remove from Likes" : "Add to Likes"; activated => { root.act("like"); } }
+            if root.item.fav-on: MenuItem { title: root.item.fav ? "Remove from Favourites" : "Add to Favourites"; activated => { root.act("fav"); } }
+            if root.item.artists.length > 1: Menu {
+                title: "Go to Artist";
+                for n[k] in root.item.artists: MenuItem { title: n; activated => { root.act("artist:" + k); } }
+            }
+            if root.item.artists.length <= 1: MenuItem { title: "Go to Artist"; activated => { root.act("artist:0"); } }
+            if root.item.uploader != "": MenuItem { title: "Go to " + root.item.uploader + " (Uploader)"; activated => { root.act("uploader"); } }
             if root.removable: MenuItem { title: "Remove from This Playlist"; activated => { root.act("plremove"); } }
+            MenuSeparator { }
             MenuItem { title: "Don't Recommend This Track"; activated => { root.act("hide:track"); } }
             if root.item.album != "": MenuItem { title: "Don't Recommend This Album"; activated => { root.act("hide:album"); } }
             if root.item.artist != "": MenuItem { title: "Don't Recommend " + root.item.artist; activated => { root.act("hide:artist"); } }
+            if root.item.cleared != "": MenuItem { title: root.item.cleared; activated => { root.act("cleared"); } }
+            MenuSeparator { }
+            if root.item.open-label != "": MenuItem { title: root.item.open-label; activated => { root.act("open"); } }
             if root.item.sc-link: MenuItem { title: "Copy SoundCloud Link"; activated => { root.act("link:soundcloud"); } }
             if root.item.sp-link: MenuItem { title: "Copy Spotify Link"; activated => { root.act("link:spotify"); } }
             if root.item.yt-link: MenuItem { title: "Copy YouTube Music Link"; activated => { root.act("link:youtube"); } }
+            MenuSeparator { }
+            MenuItem { title: "Track Preferences..."; activated => { root.act("prefs"); } }
         }
         ta := TouchArea {
             pointer-event(e) => {
@@ -2596,12 +2614,25 @@ export component AppWindow inherits Window {
                                 }
                                 ContextMenuArea {
                                     Menu {
+                                        if !q.playing: MenuItem { title: "Play"; activated => { root.play-queue(i); } }
                                         if !q.playing: MenuItem { title: "Play Next"; activated => { root.queue-action(i, "next"); } }
                                         if !q.playing: MenuItem { title: "Remove from Queue"; activated => { root.queue-action(i, "remove"); } }
                                         MenuItem { title: "Shuffle Next Up"; activated => { root.queue-action(i, "shuffle"); } }
+                                        Menu {
+                                            title: "Add to Playlist";
+                                            for l[k] in root.own-lists: MenuItem { title: l; activated => { root.queue-action(i, "pl" + k); } }
+                                            MenuItem { title: "New Playlist..."; activated => { root.queue-action(i, "plnew"); } }
+                                        }
+                                        MenuSeparator { }
+                                        if q.can-like: MenuItem { title: q.liked ? "Remove from Likes" : "Add to Likes"; activated => { root.queue-action(i, "like"); } }
+                                        if q.fav-on: MenuItem { title: q.fav ? "Remove from Favourites" : "Add to Favourites"; activated => { root.queue-action(i, "fav"); } }
+                                        MenuItem { title: "Go to Artist"; activated => { root.queue-action(i, "artist:0"); } }
+                                        MenuItem { title: "Don't Recommend This Track"; activated => { root.queue-action(i, "hide:track"); } }
+                                        if q.open-label != "": MenuItem { title: q.open-label; activated => { root.queue-action(i, "open"); } }
                                         if q.sc-link: MenuItem { title: "Copy SoundCloud Link"; activated => { root.queue-action(i, "link:soundcloud"); } }
                                         if q.sp-link: MenuItem { title: "Copy Spotify Link"; activated => { root.queue-action(i, "link:spotify"); } }
                                         if q.yt-link: MenuItem { title: "Copy YouTube Music Link"; activated => { root.queue-action(i, "link:youtube"); } }
+                                        MenuItem { title: "Track Preferences..."; activated => { root.queue-action(i, "prefs"); } }
                                     }
                                     qta := TouchArea { clicked => { root.play-queue(i); } }
                                 }
