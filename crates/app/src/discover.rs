@@ -91,6 +91,8 @@ pub enum How {
     Genre(String),
     /// one of Deezer's albums
     Album(u64),
+    /// one of Spotify's own mixes (a Daily Mix, Discover Weekly, ...): its playlist's address
+    Spotify(String),
 }
 
 #[derive(Clone, Debug)]
@@ -148,7 +150,7 @@ impl Input {
     }
 }
 
-const FEED_ORDER: [&str; 11] = ["releases", "mixes", "stations", "taste", "foryou", "subgenres", "genres", "top", "popular", "spotlight", ""];
+const FEED_ORDER: [&str; 12] = ["releases", "mixes", "spmixes", "stations", "taste", "foryou", "subgenres", "genres", "top", "popular", "spotlight", ""];
 const COLD_ORDER: [&str; 5] = ["genres", "popular", "spotlight", "top", "foryou"];
 
 fn order(shelves: &mut [Shelf], cold: bool) {
@@ -589,6 +591,7 @@ async fn mix_tracks_any(m: &Mix, flags: (bool, bool, bool), liked: &Liked) -> Ve
         How::Genre(name) => subgenre_tracks(name).await,
         How::Sub(name) => subgenre_tracks(name).await,
         How::Album(id) => album_tracks(*id).await,
+        How::Spotify(uri) => core::spotify_engine::spe_playlist(uri.clone()).await.ok().and_then(|v| v.as_array().cloned()).unwrap_or_default().iter().filter_map(Track::spotify).take(200).collect(),
     }
 }
 
@@ -696,6 +699,38 @@ fn station(s: &Seed, flags_cat: bool, sc_seeded: bool) -> Item {
     })
 }
 
+/// Spotify's own mixes (the web app's spotifyMadeForYou): its "Made For You" category, else a search for
+/// your Daily Mixes; read with the playback sign-in's token (a developer app's can't see them). The
+/// Daily Mixes in order, then the rest (Discover Weekly, Release Radar, ...)
+async fn spotify_made_for_you() -> (Vec<Item>, Vec<Item>) {
+    if !SPOTIFY_ON.load(std::sync::atomic::Ordering::Relaxed) || !core::spotify_engine::spe_signed_in() { return (Vec::new(), Vec::new()); }
+    let spotify_owned = |v: &Value| -> Vec<Value> { v["playlists"]["items"].as_array().cloned().unwrap_or_default().into_iter().filter(|p| p["id"].is_string() && p["owner"]["id"] == "spotify").collect() };
+    let daily_re = regex::Regex::new(r"(?i)^daily mix \d+$").unwrap();
+    let mut found = core::spotify_engine::spe_web_get("/browse/categories/0JQ5DAt0tbjZptfcdMSKl3/playlists?limit=50".into()).await.map(|v| spotify_owned(&v)).unwrap_or_default();
+    if !found.iter().any(|p| daily_re.is_match(p["name"].as_str().unwrap_or(""))) {
+        if let Ok(v) = core::spotify_engine::spe_web_get("/search?type=playlist&limit=50&q=Daily%20Mix".into()).await {
+            let seen: std::collections::HashSet<String> = found.iter().filter_map(|p| p["id"].as_str().map(String::from)).collect();
+            found.extend(spotify_owned(&v).into_iter().filter(|p| daily_re.is_match(p["name"].as_str().unwrap_or("")) && !seen.contains(p["id"].as_str().unwrap_or(""))));
+        }
+    }
+    let tile = |p: &Value| {
+        let tidy = regex::Regex::new(r"<[^>]+>").unwrap();
+        let desc = tidy.replace_all(p["description"].as_str().unwrap_or(""), "").to_string();
+        Item::Mix(Mix {
+            title: p["name"].as_str().unwrap_or("").to_string(),
+            sub: if desc.is_empty() { "Made by Spotify".into() } else { desc.clone() },
+            art: p["images"][0]["url"].as_str().unwrap_or("").to_string(),
+            plat: "spotify",
+            desc: if desc.is_empty() { "Made for you by Spotify.".into() } else { desc },
+            how: How::Spotify(format!("spotify:playlist:{}", p["id"].as_str().unwrap_or(""))),
+        })
+    };
+    let num = |p: &Value| p["name"].as_str().and_then(|n| n.split_whitespace().last()).and_then(|x| x.parse::<u32>().ok()).unwrap_or(99);
+    let (mut daily, other): (Vec<Value>, Vec<Value>) = found.into_iter().partition(|p| daily_re.is_match(p["name"].as_str().unwrap_or("")));
+    daily.sort_by_key(num);
+    (daily.iter().map(tile).collect(), other.iter().map(tile).collect())
+}
+
 /// Discover's shelves, in their order
 pub async fn build(input: Input) -> Vec<Shelf> {
     your_titles_set(&input.library);
@@ -721,7 +756,8 @@ async fn build_any(input: Input) -> Vec<Shelf> {
     let (artists, sc_seeded) = your_artists(&input);
     let mut shelves: Vec<Shelf> = Vec::new();
 
-    // Made for you: Your Mix 01-06 (one of your top artists plus two more)
+    // Made for you: Spotify's Daily Mixes, then Your Mix 01-06 (one of your top artists plus two more)
+    let (sp_daily, sp_other) = spotify_made_for_you().await;
     let mains: Vec<Seed> = artists.iter().take(6).cloned().collect();
     let rest: Vec<Seed> = artists.iter().skip(6).cloned().collect();
     let mixes: Vec<Item> = mains.iter().enumerate().map(|(i, a)| {
@@ -737,7 +773,10 @@ async fn build_any(input: Input) -> Vec<Shelf> {
             how: How::Crew(crew, false),
         })
     }).collect();
+    let mixes: Vec<Item> = sp_daily.into_iter().chain(mixes).collect();
     if !mixes.is_empty() { shelves.push(Shelf { key: "mixes", title: "Made for you".into(), items: mixes }); }
+    // Spotify's other mixes: Discover Weekly, Release Radar, your top mixes...
+    if !sp_other.is_empty() { shelves.push(Shelf { key: "spmixes", title: "More mixes from Spotify".into(), items: sp_other }); }
 
     // Artist stations: the next artists you like, a little shuffled each time
     let mut next: Vec<Seed> = artists.iter().skip(6).take(24).cloned().collect();
