@@ -31,9 +31,27 @@ function detectLang(t) {
 
 
 function recFilter(list) {
-  list = withoutRecent(list.filter((t) => !isLikedTrack(t) && recOk(t)));
-  const kept = list.filter(langOk);
-  return kept;
+  return langFilter(withoutRecent(list.filter((t) => !isLikedTrack(t) && recOk(t))));
+}
+
+// The language picker over a list: a song's own title, and failing that its artist's (all their titles
+// in the list together: a short title like "Ella" says nothing, but ten of theirs do)
+function langFilter(list) {
+  const want = prefs.recLang || "any";
+  if (want === "any") return list;
+  const sure = (d) => d !== "unknown" && !d.endsWith("?");
+  const text = new Map();
+  list.forEach((t) => { const a = artistKey(firstArtist(t)); text.set(a, (text.get(a) || "") + " " + (t.title || "") + " " + (t.tag_list || "")); });
+  const theirs = new Map();
+  return list.filter((t) => {
+    const d = detectLang(t);
+    if (d === want) return true;
+    if (sure(d)) return false;
+    const a = artistKey(firstArtist(t));
+    if (!theirs.has(a)) theirs.set(a, detectLang({ title: text.get(a) || "" }));
+    const ad = theirs.get(a);
+    return !(sure(ad) && ad !== want);
+  });
 }
 
 // The Discover language picker; tracks it can't place are kept

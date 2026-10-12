@@ -85,10 +85,10 @@ pub struct Seed {
 pub enum How {
     /// a Your Mix (crew of up to three) or a station (one)
     Crew(Vec<Seed>, bool),
-    /// a genre's chart (Deezer's id)
-    Chart(u64),
-    /// a subgenre: Deezer's playlists of it
+    /// a subgenre: what Deezer's playlists of it agree on
     Sub(String),
+    /// a genre of Trending by genre: the same
+    Genre(String),
     /// one of Deezer's albums
     Album(u64),
 }
@@ -247,17 +247,76 @@ async fn artist_top(name: &str, n: usize) -> Vec<Track> {
     dz_tracks(&dz(&format!("/artist/{id}/top?limit={n}")).await, None)
 }
 
-/// A subgenre's music: Deezer's two best-matching playlists of it (of 15 songs or more), taking turns
-pub async fn subgenre_tracks(name: &str) -> Vec<Track> {
-    let found = dz(&format!("/search/playlist?limit=10&q={}", crate::sources::urlencode(name))).await;
-    let ids: Vec<u64> = found["data"].as_array().into_iter().flatten().filter(|p| p["nb_tracks"].as_u64().unwrap_or(0) >= 15).filter_map(|p| p["id"].as_u64()).take(2).collect();
-    let mut lists = Vec::new();
-    for id in ids {
-        let mut l = dz_tracks(&dz(&format!("/playlist/{id}/tracks?limit=60")).await, None);
-        crate::queue::shuffle_in_place(&mut l);
-        lists.push(l);
+// ---------- a genre's music: what Deezer's playlists of it agree on ----------
+// As the web app's (dzGenreMix): a playlist named after a genre can hold anything, but the genre's
+// artists turn up in playlist after playlist of it. Up to eight playlists named for it (plainly named
+// first: "House Essentials" before "Latin House"), the songs of artists in two or more of them (too
+// few: the closest-named playlists' own), the best known first, at most two by one artist till the
+// rest have had a turn. (Deezer's charts are a few broad genres: Techno, Dubstep and Drum & Bass were
+// all its "Electro" chart.)
+const GENRE_FILLER: [&str; 27] = ["essentials", "essential", "best", "of", "the", "hits", "top", "mix", "playlist", "classics", "songs", "music", "anthems", "bangers", "new", "latest", "greatest", "ultimate", "hot", "all", "time", "tracks", "selection", "selected", "official", "100", "50"];
+
+fn genre_words(s: &str) -> Vec<String> {
+    s.to_lowercase().replace('&', " and ").split(|c: char| !c.is_ascii_alphanumeric()).map(|w| if w == "n" { "and" } else { w })
+        .filter(|w| !w.is_empty() && *w != "and").map(String::from).collect()
+}
+
+/// Of Deezer's playlists (title, id), the ones named for this genre, plainly named first (eight at most)
+fn genre_playlists(name: &str, found: &[(String, u64)]) -> Vec<u64> {
+    let want = genre_words(name);
+    let year = |w: &str| w.len() == 4 && (w.starts_with("19") || w.starts_with("20")) && w.chars().all(|c| c.is_ascii_digit());
+    let mut named: Vec<(usize, u64)> = found.iter().filter_map(|(title, id)| {
+        let w = genre_words(title);
+        if !want.iter().all(|v| w.contains(v)) { return None; }
+        Some((w.iter().filter(|v| !want.contains(v) && !GENRE_FILLER.contains(&v.as_str()) && !year(v)).count(), *id))
+    }).collect();
+    named.sort_by_key(|(extra, _)| *extra);   // (stable: Deezer's order among the equally plain)
+    named.into_iter().take(8).map(|(_, id)| id).collect()
+}
+
+/// The songs the playlists agree on, with how many have their artist; best known and most agreed first
+fn genre_pick(lists: Vec<Vec<Track>>) -> Vec<Track> {
+    let key = |t: &Track| core::ranking::artist_key(&first_artist(t));
+    let mut votes: HashMap<String, usize> = HashMap::new();
+    for l in &lists {
+        let seen: std::collections::HashSet<String> = l.iter().map(key).collect();
+        for a in seen { *votes.entry(a).or_default() += 1; }
     }
-    crate::sources::once_each(crate::sources::interleave(lists))
+    let mut seen = std::collections::HashSet::new();
+    let mut pool: Vec<Track> = lists.iter().flatten().filter(|t| votes.get(&key(t)).copied().unwrap_or(0) >= 2).filter(|t| seen.insert(t.key.clone())).cloned().collect();
+    if pool.len() < 25 {
+        pool.extend(lists.iter().take(2).flatten().filter(|t| seen.insert(t.key.clone())).cloned());
+    }
+    let mut x = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos() as u64).unwrap_or(7) | 1;
+    let mut chance = move || { x ^= x << 13; x ^= x >> 7; x ^= x << 17; (x % 10_000) as f64 / 10_000.0 };
+    let mut scored: Vec<(f64, Track)> = pool.into_iter().map(|t| {
+        let v = votes.get(&key(&t)).copied().unwrap_or(1) as f64;
+        ((1.0 + 0.5 * v) * (10.0 + t.plays as f64 / 100.0).log10() * (0.8 + chance() * 0.4), t)
+    }).collect();
+    scored.sort_by(|a, b| b.0.total_cmp(&a.0));
+    let mut per: HashMap<String, usize> = HashMap::new();
+    let (mut first, mut later) = (Vec::new(), Vec::new());
+    for (_, t) in scored {
+        let n = per.entry(key(&t)).or_default();
+        *n += 1;
+        if *n <= 2 { first.push(t) } else { later.push(t) }
+    }
+    first.extend(later);
+    first.truncate(80);
+    first
+}
+
+/// A genre's (or subgenre's) music, as above
+pub async fn subgenre_tracks(name: &str) -> Vec<Track> {
+    let found = dz(&format!("/search/playlist?limit=25&q={}", crate::sources::urlencode(name))).await;
+    let found: Vec<(String, u64)> = found["data"].as_array().into_iter().flatten()
+        .filter(|p| p["nb_tracks"].as_u64().unwrap_or(0) >= 15)
+        .filter_map(|p| Some((p["title"].as_str()?.to_string(), p["id"].as_u64()?))).collect();
+    let mut lists = Vec::new();
+    for id in genre_playlists(name, &found) {
+        lists.push(dz_tracks(&dz(&format!("/playlist/{id}/tracks?limit=100")).await, None));
+    }
+    genre_pick(lists)
 }
 
 /// Music for a title, from Deezer (a mix's refresh): three of its playlists of that name, picked from
@@ -291,8 +350,12 @@ pub async fn title_tracks(name: &str, avoid: &std::collections::HashSet<String>)
 /// any other made afresh
 pub async fn mix_again(m: &Mix, flags: (bool, bool, bool), liked: &Liked, avoid: &std::collections::HashSet<String>) -> Vec<Track> {
     match &m.how {
-        How::Sub(name) => title_tracks(name, avoid).await,
-        How::Chart(_) => title_tracks(&m.title, avoid).await,
+        // (drawn again from what the playlists agree on: none of what was showing, if there's enough)
+        How::Sub(name) | How::Genre(name) => {
+            let all = subgenre_tracks(name).await;
+            let fresh: Vec<Track> = all.iter().filter(|t| !avoid.contains(&t.key)).cloned().collect();
+            if fresh.len() >= 20 { fresh } else { all }
+        }
         _ => mix_tracks(m, flags, liked).await,
     }
 }
@@ -503,7 +566,7 @@ pub async fn mix_tracks(m: &Mix, flags: (bool, bool, bool), liked: &Liked) -> Ve
             let sc_seeded = crew.iter().any(|a| !a.sc_likes.is_empty());
             crew_tracks(crew, *station, sc_seeded, flags, liked).await
         }
-        How::Chart(id) => { let mut l = chart(*id).await; crate::queue::shuffle_in_place(&mut l); l }
+        How::Genre(name) => subgenre_tracks(name).await,
         How::Sub(name) => subgenre_tracks(name).await,
         How::Album(id) => album_tracks(*id).await,
     }
@@ -687,15 +750,15 @@ pub async fn build(input: Input) -> Vec<Shelf> {
     // Your subgenres, then Trending by genre (the ones you picked first)
     if input.catalog && !subs.is_empty() {
         shelves.push(Shelf { key: "subgenres", title: "Your subgenres".into(), items: subs.iter().map(|g| Item::Mix(Mix {
-            title: g.clone(), sub: "Mix".into(), art: String::new(), plat: "deezer", desc: format!("{g}, from Deezer's playlists of it."), how: How::Sub(g.clone()),
+            title: g.clone(), sub: "Mix".into(), art: String::new(), plat: "deezer", desc: format!("{g}, from what Deezer's playlists of it agree on."), how: How::Sub(g.clone()),
         })).collect() });
     }
     if input.catalog {
         let mut genres: Vec<(String, u64)> = picked.iter().filter(|g| !GENRES.iter().any(|(n, _)| n == g)).filter_map(|g| Some((g.clone(), taste_id(g)?))).collect();
         genres.extend(GENRES.iter().filter(|(n, _)| picked.iter().any(|p| p == n)).map(|(n, id)| (n.to_string(), *id)));
         genres.extend(GENRES.iter().filter(|(n, _)| !picked.iter().any(|p| p == n)).map(|(n, id)| (n.to_string(), *id)));
-        shelves.push(Shelf { key: "genres", title: "Trending by genre".into(), items: genres.into_iter().map(|(g, id)| Item::Mix(Mix {
-            title: g.clone(), sub: "Trending".into(), art: String::new(), plat: "deezer", desc: format!("Trending {g}, from Deezer's chart."), how: How::Chart(id),
+        shelves.push(Shelf { key: "genres", title: "Trending by genre".into(), items: genres.into_iter().map(|(g, _)| Item::Mix(Mix {
+            title: g.clone(), sub: "Trending".into(), art: String::new(), plat: "deezer", desc: format!("Trending {g}, from what Deezer's playlists of it agree on."), how: How::Genre(g.clone()),
         })).collect() });
     }
     let top: Vec<Item> = top.into_iter().filter(|t| !liked.has(t)).take(30).map(Item::Track).collect();
@@ -705,6 +768,26 @@ pub async fn build(input: Input) -> Vec<Shelf> {
 
     order(&mut shelves, cold);
     shelves
+}
+
+#[cfg(test)]
+mod genre_tests {
+    use super::*;
+    #[test]
+    fn plainly_named_playlists_first_and_only_ones_named_for_it() {
+        let found: Vec<(String, u64)> = [("Latin House", 1), ("House Essentials", 2), ("Chill House 2026", 3), ("Party Hits", 4), ("House", 5)].iter().map(|(t, i)| (t.to_string(), *i)).collect();
+        assert_eq!(genre_playlists("House", &found), [2, 5, 1, 3]);
+        assert_eq!(genre_playlists("Drum & Bass", &[("Drum and Bass Workout".into(), 7), ("Drum n Bass".into(), 8), ("Bass".into(), 9)]), [8, 7]);
+    }
+    #[test]
+    fn songs_the_playlists_agree_on() {
+        let t = |a: &str, n: usize| Track { title: format!("{a}{n}"), artist: a.into(), key: format!("{a}{n}"), ..Default::default() };
+        let lists = vec![vec![t("A", 1), t("B", 1), t("Odd", 1)], vec![t("A", 2), t("B", 2)], vec![t("A", 3), t("C", 1)]];
+        let mut many: Vec<Vec<Track>> = lists.clone();
+        many.extend((0..10).map(|i| vec![t("A", 10 + i), t("B", 10 + i)]));
+        let out = genre_pick(many);
+        assert!(out.iter().all(|x| x.artist != "Odd" && x.artist != "C"));
+    }
 }
 
 #[cfg(test)]

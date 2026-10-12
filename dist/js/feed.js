@@ -142,11 +142,57 @@ const tasteSubgenres = () => {
 
 // A subgenre's music: Deezer's two best-matching playlists of that name (real playlists of 15
 // songs or more), taking turns, shuffled a little
-async function dzSubgenre(name) {
-  const found = ((await dzGet("/search/playlist?limit=10&q=" + encodeURIComponent(name))).data || []).filter((p) => (p.nb_tracks || 0) >= 15).slice(0, 2);
-  const lists = await eachFew(found, async (p) => ((await dzGet("/playlist/" + p.id + "/tracks?limit=60")).data || []).map((x) => dzTrack(x)), 2);
-  return recFilter(dedupeTracks(interleave(lists.filter(Boolean).map(shuffledCopy))));
+// A genre's music: what Deezer's playlists of it agree on. A playlist named after a genre can hold
+// anything ("House" finds a house party's pop), but the genre's artists turn up in playlist after
+// playlist of it, and the rest don't. So: up to eight playlists named for it (plainly named first:
+// "House Essentials" before "Latin House"), and the songs of artists in two or more of them; too few,
+// the closest-named playlists' own. The best known first, at most two by one artist till the rest
+// have had a turn. Kept for the visit (a refresh draws again from it, none of avoid if it can).
+const GENRE_FILLER = new Set(["essentials", "essential", "best", "of", "the", "hits", "top", "mix", "playlist", "classics", "songs", "music", "anthems", "bangers", "new", "latest", "greatest", "ultimate", "hot", "all", "time", "tracks", "selection", "selected", "official", "100", "50"]);
+const genreWords = (s) => String(s || "").toLowerCase().replace(/&/g, " and ").replace(/\bn\b/g, "and").replace(/[^a-z0-9]+/g, " ").trim().split(" ").filter((w) => w && w !== "and");
+const genrePools = new Map();
+
+async function dzGenrePool(name) {
+  if (genrePools.has(name)) return genrePools.get(name);
+  const job = (async () => {
+    const want = genreWords(name);
+    const found = ((await dzGet("/search/playlist?limit=25&q=" + encodeURIComponent(name))).data || [])
+      .filter((x) => (x.nb_tracks || 0) >= 15)
+      .map((x) => { const w = genreWords(x.title); return { x, has: want.every((v) => w.includes(v)), extra: w.filter((v) => !want.includes(v) && !GENRE_FILLER.has(v) && !/^(19|20)\d\d$/.test(v)).length }; })
+      .filter((c) => c.has)
+      .sort((a, b) => a.extra - b.extra)
+      .slice(0, 8);
+    const lists = await eachFew(found, async (c) => ((await dzGet("/playlist/" + c.x.id + "/tracks?limit=100")).data || []).map((t) => dzTrack(t)), 3);
+    const votes = new Map();
+    lists.forEach((l) => new Set((l || []).map((t) => artistKey(firstArtist(t)))).forEach((a) => votes.set(a, (votes.get(a) || 0) + 1)));
+    const all = dedupeTracks(lists.filter(Boolean).flat());
+    let pool = all.filter((t) => (votes.get(artistKey(firstArtist(t))) || 0) >= 2);
+    if (pool.length < 25) {
+      const seen = new Set(pool.map((t) => t.id));
+      pool = pool.concat(lists.slice(0, 2).filter(Boolean).flat().filter((t) => !seen.has(t.id) && seen.add(t.id)));
+    }
+    return pool.map((t) => [t, votes.get(artistKey(firstArtist(t))) || 1]);
+  })();
+  genrePools.set(name, job);
+  job.catch(() => genrePools.delete(name));
+  return job;
 }
+
+async function dzGenreMix(name, avoid) {
+  const skip = new Set((avoid || []).map((t) => t.id));
+  const pool = await dzGenrePool(name);
+  const fresh = pool.filter(([t]) => !skip.has(t.id));
+  const use = fresh.length >= 20 ? fresh : pool;
+  // (the more playlists agree and the better known, the sooner; a little chance, so each draw differs)
+  const scored = use.map(([t, v]) => [t, (1 + 0.5 * v) * Math.log10(10 + (t.dzRank || 0)) * (0.8 + Math.random() * 0.4)]).sort((a, b) => b[1] - a[1]);
+  const per = new Map();
+  const first = [];
+  const later = [];
+  scored.forEach(([t]) => { const a = artistKey(firstArtist(t)); const n = per.get(a) || 0; per.set(a, n + 1); (n < 2 ? first : later).push(t); });
+  return recFilter(first.concat(later)).slice(0, 80);
+}
+
+const dzSubgenre = (name) => dzGenreMix(name);
 
 // Music for a title, from Deezer: three of its playlists of that name (picked from its ten best, so
 // different ones each time), taking turns; its songs found for the title only if it has fewer than two
@@ -247,7 +293,7 @@ async function freshFor(crew, plats) {
   const others = (t) => !(useCatalog(crew, plats) && known.has(artistKey(firstArtist(t))));
   // (the platforms put songs forward; which make it, and in what order, is yours: js/taste.js)
   const keep = (t) => freshPick(t) && fresh(t) && others(t);
-  return withoutRecent(tastePick([a, b, c, d].map((l) => (l || []).filter(keep))));
+  return langFilter(withoutRecent(tastePick([a, b, c, d].map((l) => (l || []).filter(keep)))));
 }
 
 // Your Mix: mostly new music in the vein of these artists, with some you like by them (on any
@@ -365,7 +411,7 @@ async function buildFeed(plats) {
         kind: "genre", plats: ["deezer"], name: g, hue: hueOf(g), sub: "Mix",
         mix: makeMix({ id: "mix:sub:" + g, title: g, desc: g + ", from Deezer's playlists of it.",
           build: () => dzSubgenre(g), fresh: () => onlyNew(() => dzSubgenre(g)),
-          refresh: (avoid) => dzForTitle(g, avoid) }),
+          refresh: (avoid) => dzGenreMix(g, avoid) }),
       })),
     });
   }
@@ -386,7 +432,7 @@ async function buildFeed(plats) {
           // (refreshed: Deezer's part made again for the genre's name, the other platforms' new to you)
           refresh: genrePlats.includes("catalog") ? async (avoid) => {
             const others = genrePlats.filter((x) => x !== "catalog");
-            const [dz, rest] = await Promise.allSettled([dzForTitle(g, avoid), others.length ? onlyNew(() => buildGenre(g, others)) : Promise.resolve([])]);
+            const [dz, rest] = await Promise.allSettled([dzGenreMix(g, avoid), others.length ? onlyNew(() => buildGenre(g, others)) : Promise.resolve([])]);
             return dedupeTracks(interleave([dz.value || [], rest.value || []]));
           } : null }),
       })),

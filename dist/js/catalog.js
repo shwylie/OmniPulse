@@ -137,10 +137,9 @@ async function dzSimilarTracks(name) {
 async function catDiscover(src) {
   if (src === "following") return { list: [] };
   if (src.startsWith("genre:")) {
-    const g = src.slice(6).toLowerCase();
-    const id = DZ_GENRES[g] || (typeof tasteId === "function" && tasteId(src.slice(6)));
-    const list = id ? await dzChart(id) : ((await dzGet("/search?limit=50&q=" + encodeURIComponent(g))).data || []).map((x) => dzTrack(x));
-    return { list: recFilter(list) };
+    // (what Deezer's playlists of the genre agree on: its charts are a few broad genres, so Techno,
+    // Dubstep and Drum & Bass were all its "Electro" chart)
+    return { list: await dzGenreMix(src.slice(6)) };
   }
   const cur = curTrack();
   const seeds = src === "similar" && cur ? [guessNames(cur).artist || artistName(cur)] : shuffleInPlace(yourArtists(12)).slice(0, 2);
