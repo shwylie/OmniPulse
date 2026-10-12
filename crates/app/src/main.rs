@@ -4327,7 +4327,9 @@ fn accounts_paint(shared: &Shared) {
         let status = if key == "spotify" && signed && omnipulse_core::spotify::spotify_app_signed_in() { format!("{status} Requests go through your own app keys.") } else { status };
         let sw = account_switch(key);
         let on = SET_ROWS.iter().find(|r| r.3 == sw).map(|r| set_row_on(&prefs, sw, r.4)).unwrap_or(true);
-        Account { name: name.into(), status: status.into(), signed, busy, keys: keys.into(), switch: sw.into(), on }
+        // (each platform's plans, as the web app's Manage subscription links)
+        let manage = match key { "soundcloud" => "https://soundcloud.com/you/subscriptions", "spotify" => "https://www.spotify.com/account/subscription/manage/", "youtube" => "https://www.youtube.com/paid_memberships", _ => "https://www.last.fm/settings/subscription" };
+        Account { name: name.into(), status: status.into(), signed, busy, keys: keys.into(), switch: sw.into(), on, manage: if signed { manage.into() } else { "".into() } }
     }).collect();
     ui.set_accounts(ModelRc::from(Rc::new(VecModel::from(rows))));
 }
@@ -7317,6 +7319,7 @@ fn main() -> Result<(), slint::PlatformError> {
     });
     let s = shared.clone();
     ui.on_crumb_go(move |i| crumb_go(&s, i.max(0) as usize));
+    ui.on_open_web(|url| { let _ = omnipulse_core::open_url(url.to_string()); });
     let s = shared.clone();
     ui.on_settings_close(move || settings_close(&s));
     let s = shared.clone();

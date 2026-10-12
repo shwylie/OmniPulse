@@ -47,7 +47,7 @@ export struct Shelf { title: string, tiles: [Tile] }
 export struct Line { text: string }
 /// A switch in Settings: under its section's heading (head, on the first of a section)
 /// An account in Settings: its name, what's known (who's signed in, or what it needs), and its button
-export struct Account { name: string, status: string, signed: bool, busy: bool, keys: string, switch: string, on: bool }
+export struct Account { name: string, status: string, signed: bool, busy: bool, keys: string, switch: string, on: bool, manage: string }
 // Settings' search: a setting found (its path, what it is), where it lives (its category, a panel to
 // open), and its switch if it has one
 export struct SetHit { path: string, label: string, note: string, cat: string, panel: string, key: string, on: bool, toggle: bool }
@@ -1025,6 +1025,8 @@ export component AppWindow inherits Window {
     // Settings > App: Taskbar Widget
     in-out property <bool> taskbar-widget;
     callback app-pref(string, bool);
+    // a web page opened in your browser
+    callback open-web(string);
     in-out property <bool> anim-on: true;
     callback anim-changed(bool);
     // Updates: what's known (this version, or a newer one), and its button ("Check" or "Update")
@@ -2099,6 +2101,12 @@ export component AppWindow inherits Window {
                                                     spacing: 2px;
                                                     Text { text: acc.name; color: Theme.text; font-weight: 700; }
                                                     Text { text: acc.status; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
+                                                }
+                                                // (the platform's plans: Go+, Premium, Pro...)
+                                                if acc.manage != "": Pill {
+                                                    label: "Manage subscription";
+                                                    y: (parent.height - self.height) / 2;
+                                                    clicked => { root.open-web(acc.manage); }
                                                 }
                                                 if acc.keys != "": Pill {
                                                     label: acc.keys;
