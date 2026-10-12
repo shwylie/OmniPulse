@@ -608,8 +608,20 @@ component TrackRow inherits Rectangle {
     DragArea {
       allow-copy: true;
       data: Dnd.payload("t:" + root.index);
-      ContextMenuArea {
-        Menu {
+      Rectangle {
+        ta := TouchArea {
+            pointer-event(e) => {
+                if (e.kind == PointerEventKind.down && e.button == PointerEventButton.left) {
+                    root.picking = e.modifiers.control || e.modifiers.shift;
+                    if (root.picking) { root.pick(e.modifiers.shift ? 2 : 1); }
+                }
+            }
+            clicked => { if (!root.picking) { root.play(); } }
+        }
+          // (on top: it only takes right-clicks, the rest goes through to what's under it)
+          ContextMenuArea {
+              width: 100%; height: 100%;
+              Menu {
             MenuItem { title: "Play"; activated => { root.act("play"); } }
             MenuItem { title: "Play Next"; activated => { root.act("next"); } }
             MenuItem { title: "Add to Queue"; activated => { root.act("add"); } }
@@ -641,15 +653,7 @@ component TrackRow inherits Rectangle {
             MenuSeparator { }
             MenuItem { title: "Track Preferences..."; activated => { root.act("prefs"); } }
         }
-        ta := TouchArea {
-            pointer-event(e) => {
-                if (e.kind == PointerEventKind.down && e.button == PointerEventButton.left) {
-                    root.picking = e.modifiers.control || e.modifiers.shift;
-                    if (root.picking) { root.pick(e.modifiers.shift ? 2 : 1); }
-                }
-            }
-            clicked => { if (!root.picking) { root.play(); } }
-        }
+          }
       }
     }
 }
@@ -717,9 +721,13 @@ component TileView inherits Rectangle {
         Text { text: root.tile.title; color: Theme.text; font-weight: 700; font-size: 13px; overflow: elide; }
         Text { text: root.tile.sub; color: Theme.muted; font-size: 12px; overflow: elide; }
     }
-    ContextMenuArea {
-        enabled: root.tile.track || root.album;
-        Menu {
+    Rectangle {
+        ta := TouchArea { clicked => { root.clicked(); } }
+        // (on top: it only takes right-clicks, the rest goes through to what's under it)
+        ContextMenuArea {
+            width: 100%; height: 100%;
+            enabled: root.tile.track || root.album;
+            Menu {
             if root.album: MenuItem { title: "Open"; activated => { root.clicked(); } }
             if root.album: MenuItem { title: "Play"; activated => { root.act("album-play"); } }
             if root.album: MenuSeparator { }
@@ -738,7 +746,7 @@ component TileView inherits Rectangle {
             if !root.album: MenuItem { title: "Open on Its Platform"; activated => { root.act("open"); } }
             if !root.album: MenuItem { title: "Track Preferences..."; activated => { root.act("prefs"); } }
         }
-        ta := TouchArea { clicked => { root.clicked(); } }
+        }
     }
 }
 
@@ -1458,11 +1466,15 @@ export component AppWindow inherits Window {
                         DragArea {
                             allow-move: true;
                             data: Dnd.payload("n:" + id);
-                            ContextMenuArea {
-                                Menu {
+                            Rectangle {
+                                NavItem { label: root.nav-label(id); d: root.nav-icon(id); spin: id == "navFavourites"; compact: root.narrow; active: root.nav-active(id); clicked => { root.nav(root.nav-page(id)); } }
+                                // (on top: it only takes right-clicks, the rest goes through to what's under it)
+                                ContextMenuArea {
+                                    width: 100%; height: 100%;
+                                    Menu {
                                     if id == "navFavourites" || id == "navSets" || id == "navStats": MenuItem { title: "Hide from the Sidebar"; activated => { root.nav-hide(id); } }
                                 }
-                                NavItem { label: root.nav-label(id); d: root.nav-icon(id); spin: id == "navFavourites"; compact: root.narrow; active: root.nav-active(id); clicked => { root.nav(root.nav-page(id)); } }
+                                }
                             }
                         }
                     }
@@ -1470,12 +1482,16 @@ export component AppWindow inherits Window {
                     if !root.narrow: HorizontalLayout {
                         padding-left: 12px;
                         Text { text: "Playlists"; color: Theme.muted; font-size: 12px; font-weight: 700; vertical-alignment: center; horizontal-stretch: 1; }
-                        ContextMenuArea {
-                            Menu {
+                        Rectangle { width: 26px; height: 26px;
+                            IconButton { tip: "New playlist"; d: Icons.add; size: 26px; clicked => { root.pl-new(); } }
+                            // (on top: it only takes right-clicks, the rest goes through to what's under it)
+                            ContextMenuArea {
+                                width: 100%; height: 100%;
+                                Menu {
                                 MenuItem { title: "New playlist"; activated => { root.pl-new(); } }
                                 MenuItem { title: "Import a playlist file..."; activated => { root.pl-import(); } }
                             }
-                            IconButton { tip: "New playlist"; d: Icons.add; size: 26px; clicked => { root.pl-new(); } }
+                            }
                         }
                     }
                     if root.narrow: Rectangle { height: 1px; background: Theme.line; }
@@ -1502,8 +1518,12 @@ export component AppWindow inherits Window {
                              DragArea {
                               allow-copy: true;
                               data: Dnd.payload("p:" + i);
-                            ContextMenuArea {
-                                Menu {
+                            Rectangle {
+                                sta := TouchArea { clicked => { root.side(i); } }
+                                // (on top: it only takes right-clicks, the rest goes through to what's under it)
+                                ContextMenuArea {
+                                    width: 100%; height: 100%;
+                                    Menu {
                                     MenuItem { title: "Open"; activated => { root.side(i); } }
                                     if s.share: MenuItem { title: "Share"; activated => { root.side-action(i, "share"); } }
                                     if s.sc: MenuItem { title: "Copy SoundCloud Link"; activated => { root.side-action(i, "link:soundcloud"); } }
@@ -1519,7 +1539,7 @@ export component AppWindow inherits Window {
                                     MenuItem { title: "Export as M3U..."; activated => { root.side-action(i, "export:m3u"); } }
                                     MenuItem { title: "Export as CSV..."; activated => { root.side-action(i, "export:csv"); } }
                                 }
-                                sta := TouchArea { clicked => { root.side(i); } }
+                                }
                             }
                              }
                             }
@@ -1672,14 +1692,19 @@ export component AppWindow inherits Window {
                         if root.page == "sets": Pill { label: "Liked only"; d: Icons.library; on: root.sets-liked; y: 7px; clicked => { root.sets-liked = !root.sets-liked; root.sets-liked-changed(root.sets-liked); } }
                         if root.page == "artist" && root.follow-more != "": Pill { label: root.follow-more; y: 7px; clicked => { root.follow-more-click(); } }
                         // (right-click: each platform on its own, as the web app's)
-                        if root.page == "artist" && root.follow-label != "": ContextMenuArea {
+                        if root.page == "artist" && root.follow-label != "": Rectangle {
                             width: fpill.preferred-width;
-                            enabled: root.follow-sc != "" || root.follow-sp != "";
-                            Menu {
+
+                            fpill := Pill { label: root.follow-label; on: root.follow-on; y: 7px; clicked => { root.follow-click(); } }
+                            // (on top: it only takes right-clicks, the rest goes through to what's under it)
+                            ContextMenuArea {
+                                width: 100%; height: 100%;
+                                enabled: root.follow-sc != "" || root.follow-sp != "";
+                                Menu {
                                 if root.follow-sc != "": MenuItem { title: root.follow-sc; activated => { root.follow-plat("soundcloud"); } }
                                 if root.follow-sp != "": MenuItem { title: root.follow-sp; activated => { root.follow-plat("spotify"); } }
                             }
-                            fpill := Pill { label: root.follow-label; on: root.follow-on; y: 7px; clicked => { root.follow-click(); } }
+                            }
                         }
                         Pill { label: "Favourites only"; d: Icons.star; on: root.fav-only; y: 7px; clicked => { root.fav-only = !root.fav-only; root.fav-only-changed(root.fav-only); } }
                     }
@@ -1758,14 +1783,18 @@ export component AppWindow inherits Window {
                                 Text { text: a.name; color: Theme.text; font-weight: 700; font-size: 13px; overflow: elide; horizontal-alignment: center; }
                                 Text { text: a.sub; color: Theme.muted; font-size: 12px; overflow: elide; horizontal-alignment: center; }
                             }
-                            ContextMenuArea {
-                                Menu {
+                            Rectangle {
+                                ata := TouchArea { clicked => { root.artist(i); } }
+                                // (on top: it only takes right-clicks, the rest goes through to what's under it)
+                                ContextMenuArea {
+                                    width: 100%; height: 100%;
+                                    Menu {
                                     MenuItem { title: "Open"; activated => { root.artist(i); } }
                                     if !a.on-sc: MenuItem { title: "Follow on SoundCloud Too"; activated => { root.artist-act(i, "follow:soundcloud"); } }
                                     if !a.on-sp: MenuItem { title: "Follow on Spotify Too"; activated => { root.artist-act(i, "follow:spotify"); } }
                                     MenuItem { title: "Unfollow Everywhere"; activated => { root.artist-act(i, "unfollow"); } }
                                 }
-                                ata := TouchArea { clicked => { root.artist(i); } }
+                                }
                             }
                         }
                     }
@@ -2604,29 +2633,41 @@ export component AppWindow inherits Window {
                         }
                     }
                     // Now Playing: the cover, and the lyrics as they're sung
-                    if root.page-kind == "now": HorizontalLayout {
+                    if root.page-kind == "now": npl := HorizontalLayout {
                         vertical-stretch: 1;
-                        spacing: 30px;
+                        // (the page's room, from the window: the sidebar's and the queue's taken off. Short of
+                        // it, the middle gives way: a narrower column, its buttons one above another, and the
+                        // cover above the lyrics instead)
+                        property <length> room: root.width - (root.narrow ? 68px : 230px) - (root.queue-open ? 300px : 0px) - 60px;
+                        property <bool> slim: room < 780px;
+                        spacing: slim ? 18px : 30px;
                         padding-top: 10px;
                         VerticalLayout {
-                            width: 360px;
+                            width: npl.slim ? max(150px, min(220px, npl.room * 0.36)) : 360px;
                             spacing: 10px;
                             // (smaller on a short window: its title, artist and buttons stay in sight)
                             property <length> side: min(360px, max(180px, root.height - 470px));
-                            BadgedCover { art: root.now-art-big; initial: root.now-title; plat: root.now-plat; badge: 52px; corner: 14px; height: parent.side; width: parent.side; }
-                            Text { text: root.now-title; color: Theme.text; font-size: 26px; font-weight: 800; wrap: word-wrap; }
+                            if !npl.slim: BadgedCover { art: root.now-art-big; initial: root.now-title; plat: root.now-plat; badge: 52px; corner: 14px; height: parent.side; width: parent.side; }
+                            Text { text: root.now-title; color: Theme.text; font-size: npl.slim ? 20px : 26px; font-weight: 800; wrap: word-wrap; }
                             // (the artist: their page, a click away, as the web app's)
                             Text { text: root.now-artist; color: nat.has-hover ? Theme.text : Theme.accent; font-size: 16px; font-weight: 600; wrap: word-wrap; nat := TouchArea { mouse-cursor: MouseCursor.pointer; clicked => { root.now-act("artist:0"); } } }
                             if root.now-uploader != "": Text { text: "uploaded by " + root.now-uploader; color: Theme.muted; font-size: 13px; }
                             Text { text: root.now-album; color: Theme.muted; font-size: 13px; }
                             if root.now-rhythm != "": Text { text: root.now-rhythm; color: Theme.muted; font-size: 12px; }
                             // Like, Add to Favourites, Open on its platform
-                            if root.now-title != "": HorizontalLayout {
+                            if root.now-title != "" && !npl.slim: HorizontalLayout {
                                 spacing: 8px;
                                 alignment: start;
                                 if root.can-like: Pill { label: root.now-liked ? "Liked" : "Like"; on: root.now-liked; clicked => { root.like-toggle(); } }
                                 Pill { label: root.now-fav ? "In Favourites" : "Add to Favourites"; on: root.now-fav; clicked => { root.fav-toggle(); } }
                                 if root.now-open != "": Pill { label: root.now-open; clicked => { root.now-act("open"); } }
+                            }
+                            if root.now-title != "" && npl.slim: VerticalLayout {
+                                spacing: 8px;
+                                alignment: start;
+                                if root.can-like: HorizontalLayout { alignment: start; Pill { label: root.now-liked ? "Liked" : "Like"; on: root.now-liked; clicked => { root.like-toggle(); } } }
+                                HorizontalLayout { alignment: start; Pill { label: root.now-fav ? "In Favourites" : "Add to Favourites"; on: root.now-fav; clicked => { root.fav-toggle(); } } }
+                                if root.now-open != "": HorizontalLayout { alignment: start; Pill { label: root.now-open; clicked => { root.now-act("open"); } } }
                             }
 
                             Rectangle { vertical-stretch: 1; }
@@ -2634,6 +2675,13 @@ export component AppWindow inherits Window {
                         VerticalLayout {
                             horizontal-stretch: 1;
                             spacing: 6px;
+                            // (the cover, above the lyrics, when there's no room for it beside them)
+                            if npl.slim: HorizontalLayout {
+                                alignment: start;
+                                property <length> side: min(220px, max(120px, root.height - 560px));
+                                BadgedCover { art: root.now-art-big; initial: root.now-title; plat: root.now-plat; badge: 40px; corner: 12px; height: parent.side; width: parent.side; }
+                            }
+                            if npl.slim: Rectangle { height: 6px; }
                             // (a SoundCloud song's description, as its uploader wrote it, above its lyrics)
                             if root.now-desc != "": Text { text: root.now-desc; color: Theme.muted; font-size: 13px; wrap: word-wrap; }
                             if root.now-desc != "": Rectangle { height: 8px; }
@@ -2641,7 +2689,7 @@ export component AppWindow inherits Window {
                             // where they're from, and the other places, a click each
                             if root.lyrics-from != "" || root.lyrics-others.length > 0: HorizontalLayout {
                                 spacing: 10px;
-                                Text { text: root.lyrics-from == "" ? "Other sources:" : root.lyrics-from + " Other sources:"; color: Theme.muted; font-size: 12px; }
+                                Text { text: root.lyrics-from == "" ? "Other sources:" : root.lyrics-from + " Other sources:"; color: Theme.muted; font-size: 12px; overflow: elide; min-width: 0; horizontal-stretch: 0; }
                                 for name[i] in root.lyrics-others: lt := TouchArea {
                                     width: lx.preferred-width;
                                     mouse-cursor: pointer;
@@ -2845,8 +2893,17 @@ export component AppWindow inherits Window {
                                         Text { text: q.artist; color: Theme.muted; font-size: 12px; overflow: elide; }
                                     }
                                 }
-                                ContextMenuArea {
-                                    Menu {
+                                Rectangle {
+                                    DragArea {
+                                        allow-move: true;
+                                        allow-copy: true;
+                                        data: Dnd.payload("q:" + i);
+                                        qta := TouchArea { clicked => { root.play-queue(i); } }
+                                    }
+                                    // (on top: it only takes right-clicks, the rest goes through to what's under it)
+                                    ContextMenuArea {
+                                        width: 100%; height: 100%;
+                                        Menu {
                                         if !q.playing: MenuItem { title: "Play"; activated => { root.play-queue(i); } }
                                         if !q.playing: MenuItem { title: "Play Next"; activated => { root.queue-action(i, "next"); } }
                                         if !q.playing: MenuItem { title: "Remove from Queue"; activated => { root.queue-action(i, "remove"); } }
@@ -2867,11 +2924,6 @@ export component AppWindow inherits Window {
                                         if q.yt-link: MenuItem { title: "Copy YouTube Music Link"; activated => { root.queue-action(i, "link:youtube"); } }
                                         MenuItem { title: "Track Preferences..."; activated => { root.queue-action(i, "prefs"); } }
                                     }
-                                    DragArea {
-                                        allow-move: true;
-                                        allow-copy: true;
-                                        data: Dnd.payload("q:" + i);
-                                        qta := TouchArea { clicked => { root.play-queue(i); } }
                                     }
                                 }
                             }

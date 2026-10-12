@@ -8827,11 +8827,14 @@ fn main() -> Result<(), slint::PlatformError> {
             // (OMNIPULSE_SELFTEST_PLAN=panels: the settings panels, opened (nothing saved))
             // (OMNIPULSE_SELFTEST_PLAN=spotify: a Spotify song played through Spotify (Seamless Mix off for it), and whether its sound comes)
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("spotify") { vec![(8, "spplay"), (14, "spcheck"), (20, "spcheck"), (21, "end")] }
+            // (OMNIPULSE_SELFTEST_PLAN=rclick: a right-click on the sidebar's first playlist and on a Library row, and what shows)
+            else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("rclick") { vec![(12, "rclick:228:264"), (24, "esc"), (25, "end")] }
             // (OMNIPULSE_SELFTEST_PLAN=tips: the pointer rested on the player bar's "..." and the shuffle button: their tooltips)
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("tips") { vec![(9, "play"), (11, "hover:1095:711"), (13, "tipsay"), (13, "hover:571:711"), (15, "tipsay"), (16, "hover:600:300"), (17, "tipsay"), (18, "end")] }
             // (OMNIPULSE_SELFTEST_PLAN=apple: Apple Music's sign-in window opened off-screen, Apple's page looked at, closed; nobody signs in)
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("apple") { vec![(6, "appleopen"), (16, "applecheck"), (17, "end")] }
             // (OMNIPULSE_SELFTEST_PLAN=tp: Track preferences for what plays, its bar dragged)
+            else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("nowslim") { vec![(9, "play"), (11, "queue"), (12, "now"), (15, "size:860:720"), (17, "size:1100:720"), (19, "size:1500:860"), (21, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("tp") { vec![(9, "play"), (12, "tprefs"), (13, "tpdrag"), (14, "nowmenu"), (15, "now"), (18, "end")] }
             // (OMNIPULSE_SELFTEST_PLAN=la: the look-alikes dialog, with two made up (nothing added))
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("la") { vec![(8, "lashow"), (9, "lacycle"), (10, "end")] }
@@ -8943,10 +8946,24 @@ fn main() -> Result<(), slint::PlatformError> {
                 "nowmenu" => { ui.set_tp_open(false); ui.invoke_more_want(); println!("selftest: player menu: {:?}", ui.get_more_items().iter().map(|x| x.to_string()).collect::<Vec<_>>()); }
                 "lacycle" => { ui.invoke_la_cycle(1); println!("selftest: look-alikes: {:?}", ui.get_la_rows().iter().map(|r| r.choice.to_string()).collect::<Vec<_>>()); ui.invoke_la_done(false); }
                 w if w.starts_with("sd_") => { ui.invoke_stats_open(w[3..].into()); println!("selftest: stats detail \"{}\": \"{}\", {} blocks", &w[3..], ui.get_st_detail_head(), ui.get_st_blocks().row_count()); }
+                "queue" => { ui.set_queue_open(true); }
+                w if w.starts_with("size:") => {
+                    let v: Vec<f32> = w[5..].split(':').filter_map(|x| x.parse().ok()).collect();
+                    if v.len() == 2 { ui.window().set_size(slint::LogicalSize::new(v[0], v[1])); }
+                }
                 w if w.starts_with("hover:") => {
                     let v: Vec<f32> = w[6..].split(':').filter_map(|x| x.parse().ok()).collect();
                     if v.len() == 2 { ui.window().dispatch_event(slint::platform::WindowEvent::PointerMoved { position: slint::LogicalPosition::new(v[0], v[1]) }); }
                 }
+                w if w.starts_with("rclick:") => {
+                    use slint::platform::{PointerEventButton, WindowEvent};
+                    let v: Vec<f32> = w[7..].split(':').filter_map(|x| x.parse().ok()).collect();
+                    let at = slint::LogicalPosition::new(v[0], v[1]);
+                    ui.window().dispatch_event(WindowEvent::PointerMoved { position: at });
+                    ui.window().dispatch_event(WindowEvent::PointerPressed { position: at, button: PointerEventButton::Right });
+                    ui.window().dispatch_event(WindowEvent::PointerReleased { position: at, button: PointerEventButton::Right });
+                }
+                "esc" => { ui.window().dispatch_event(slint::platform::WindowEvent::KeyPressed { text: slint::platform::Key::Escape.into() }); ui.window().dispatch_event(slint::platform::WindowEvent::KeyReleased { text: slint::platform::Key::Escape.into() }); }
                 "tipsay" => { let t = ui.global::<Tips>(); println!("selftest: tooltip on {}: \"{}\"", t.get_on(), t.get_text()); }
                 "appleopen" => { let r = apple_window(&s); APPLE.with(|a| if let Some((w, _, _)) = a.borrow().as_ref() { w.window().set_position(slint::PhysicalPosition::new(-4000, 0)); }); println!("selftest: apple window: {:?}", r.err()); }
                 "applecheck" => {
