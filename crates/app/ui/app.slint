@@ -45,7 +45,7 @@ export struct Line { text: string }
 /// A switch in Settings: under its section's heading (head, on the first of a section)
 /// An account in Settings: its name, what's known (who's signed in, or what it needs), and its button
 export struct Account { name: string, status: string, signed: bool, busy: bool, keys: string }
-export struct SetRow { head: string, label: string, note: string, on: bool, key: string, sub: bool, more: bool }
+export struct SetRow { head: string, label: string, note: string, on: bool, key: string, sub: bool, more: bool, button: string }
 /// One of a plugin's settings: its kind ("toggle", "text", "password", "number", "select"), what it's
 /// set to (as text; "true"/"false" for a toggle), and a select's options
 /// A step of the key setup: what to do, whether it has a page to open, and values to copy
@@ -1823,7 +1823,9 @@ export component AppWindow inherits Window {
                                             if r.note != "": Text { text: r.note; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
                                         }
                                         if r.more: Pill { label: "Settings"; y: (parent.height - self.height) / 2; clicked => { root.set-more(r.key); } }
-                                        Toggle { checked: r.on; y: (parent.height - self.height) / 2; toggled => { root.set-toggle(r.key); } }
+                                        // (a row that's a button: Add a Plugin)
+                                        if r.button != "": Pill { label: r.button; y: (parent.height - self.height) / 2; clicked => { root.set-more(r.key); } }
+                                        if r.button == "": Toggle { checked: r.on; y: (parent.height - self.height) / 2; toggled => { root.set-toggle(r.key); } }
                                     }
                                 }
                             }

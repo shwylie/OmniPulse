@@ -18,13 +18,14 @@ pub fn title(name: &str) -> &'static str {
         "remote" => "Stream Deck & Remote",
         "offset" => "OmniPulse Offset",
         "hidden" => "Hidden & Not Recommended",
+        "plugins" => "Plugins",
         _ => "Avoid Recent Plays",
     }
 }
 
 /// The panel a switch's Settings button opens (by the switch's pref)
 pub fn of_switch(key: &str) -> Option<&'static str> {
-    Some(match key { "req" => "requests", "widget" => "widget", "alertsOn" => "alerts", "remoteOn" => "remote", "out2On" => "offset", "avoidRecent" => "recent", "hideOn" => "hidden", _ => return None })
+    Some(match key { "req" => "requests", "widget" => "widget", "alertsOn" => "alerts", "remoteOn" => "remote", "out2On" => "offset", "avoidRecent" => "recent", "hideOn" => "hidden", "plugAdd" => "plugins", _ => return None })
 }
 
 /// What a panel edits, and each one's default (the web app's)
@@ -36,6 +37,7 @@ fn keys(name: &str) -> Vec<(&'static str, Value)> {
         "remote" => vec![("remotePort", json!(7880))],
         "offset" => vec![("out2Offset", json!(0)), ("out2Volume", json!(1))],
         "hidden" => vec![],
+        "plugins" => vec![("plugSource", json!(""))],
         _ => vec![("recentWindow", json!("week"))],
     }
 }
@@ -199,6 +201,7 @@ pub fn fields(name: &str, vals: &Map<String, Value>, prefs: &Value, lan: &str) -
             ]
         }
         "hidden" => crate::hide::fields(prefs),
+        "plugins" => plugin_fields(prefs),
         "offset" => vec![
             num("out2Offset", "Offset", "In ms, -5000 to 5000: how much later (or, below 0, earlier) OmniPulse Offset plays than you hear."),
             sel_owned("out2Volume", "Volume", "", pct(0.0, 1.0, 0.1)),
@@ -208,6 +211,69 @@ pub fn fields(name: &str, vals: &Map<String, Value>, prefs: &Value, lan: &str) -
             sel("recentWindow", "Time Frame", "What counts as heard lately.", &[(json!("day"), "Past day"), (json!("week"), "Past week"), (json!("month"), "Past month")]),
         ],
     }
+}
+
+// ---------- Plugins: adding one (the web app's js/plugins.js), and the ones you've added ----------
+thread_local! {
+    /// the plugin read from what was given, waiting to be added (or why it couldn't be read)
+    pub static PLUG_PENDING: std::cell::RefCell<Option<Result<omnipulse_core::plugins::Package, String>>> = const { std::cell::RefCell::new(None) };
+}
+
+/// What a plugin will and won't be able to do (the web app's plugAccess)
+pub fn plug_access(m: &omnipulse_core::plugins::Manifest) -> (Vec<String>, Vec<String>, Vec<String>) {
+    let (mut can, mut cannot, mut warn) = (Vec::new(), Vec::new(), Vec::new());
+    let caps: std::collections::HashSet<&str> = m.capabilities.iter().map(|s| s.as_str()).collect();
+    let local: Vec<&String> = m.hosts.iter().filter(|h| *h == "127.0.0.1" || *h == "localhost").collect();
+    let mut bare: Vec<String> = Vec::new();
+    for h in m.hosts.iter().filter(|h| !local.contains(h)) {
+        let b = h.trim_start_matches("*.").to_string();
+        if !bare.contains(&b) { bare.push(b); }
+    }
+    let web: Vec<String> = bare.iter().map(|h| if m.hosts.iter().any(|x| *x == format!("*.{h}")) { format!("{h} (any part of it)") } else { h.clone() }).collect();
+    if caps.contains("search") || caps.is_empty() { can.push("Show its songs in your search results, so it sees what you search for".into()); }
+    if caps.contains("play") || caps.is_empty() { can.push("Play its songs, from its own sites, and know when you play one".into()); }
+    if caps.contains("library") { can.push("Add its saved songs to your Library".into()); }
+    if !web.is_empty() { can.push(format!("Connect to {}", web.join(", "))); }
+    if !local.is_empty() { warn.push(format!("It can connect to programs running on this PC ({}). Only allow this if you know what it talks to.", local.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(", "))); }
+    let sets = m.settings.as_array().cloned().unwrap_or_default();
+    if sets.iter().any(|x| x["type"] == "password") { can.push("Keep a password or key you give it, on this PC; it can send that to the sites above".into()); }
+    else if !sets.is_empty() { can.push("Keep its own settings, on this PC".into()); }
+    cannot.push(if m.hosts.is_empty() { "Connect to the internet".into() } else { "Connect to any other site".into() });
+    cannot.extend(["See your accounts or sign-ins (SoundCloud, Spotify, YouTube Music, Last.fm, Discord)", "Open, read or change your files", "See your playlists, Library, listening history or settings", "Change anything else in the app"].map(String::from));
+    (can, cannot, warn)
+}
+
+fn plugin_fields(_prefs: &Value) -> Vec<Value> {
+    let mut f = vec![
+        note("Music sources made by others. Each is walled off and only reaches the sites it lists."),
+        text("plugSource", "Add a Plugin", "Its manifest.json: a web address, or a file on this PC."),
+        button("plugFile", "", "Choose File...", ""),
+        button("plugCheck", "", "Read It", "Shows what it would be able to do, before anything's added."),
+    ];
+    PLUG_PENDING.with(|p| match &*p.borrow() {
+        Some(Ok(pkg)) => {
+            let m = &pkg.manifest;
+            let have = omnipulse_core::plugins::list().into_iter().find(|x| x.manifest.id == m.id);
+            let (can, cannot, warn) = plug_access(m);
+            let kb = (pkg.code.len() / 1024).max(1);
+            let about: Vec<String> = [(!m.version.is_empty()).then(|| format!("Version {}", m.version)), (!m.author.is_empty()).then(|| format!("by {}", m.author)), Some(format!("{kb} KB"))].into_iter().flatten().collect();
+            f.push(note(&format!("Add {}?\n{}{}", m.name, about.join(" \u{b7} "), if m.description.is_empty() { String::new() } else { format!("\n{}", m.description) })));
+            f.push(note(&format!("It will be able to:\n{}", can.iter().map(|c| format!("\u{2022} {c}")).collect::<Vec<_>>().join("\n"))));
+            f.push(note(&format!("It won't be able to:\n{}", cannot.iter().map(|c| format!("\u{2022} {c}")).collect::<Vec<_>>().join("\n"))));
+            for w in warn { f.push(note(&format!("\u{26a0} {w}"))); }
+            f.push(note(&format!("It runs walled off from the rest of OmniPulse, and you can turn it off or remove it any time here.{}", have.map(|h| format!(" Adding it replaces the {} version you have.", if h.manifest.version.is_empty() { "installed".to_string() } else { h.manifest.version.clone() })).unwrap_or_default())));
+            f.push(button("plugInstall", "", if omnipulse_core::plugins::list().iter().any(|x| x.manifest.id == m.id) { "Update Plugin" } else { "Add Plugin" }, ""));
+        }
+        Some(Err(e)) => f.push(note(&format!("\u{26a0} {e}"))),
+        None => {}
+    });
+    // the ones you've added (those that come with OmniPulse stay)
+    let added: Vec<omnipulse_core::plugins::Package> = omnipulse_core::plugins::list().into_iter().filter(|p| !p.bundled).collect();
+    if !added.is_empty() { f.push(note("Added by you:")); }
+    for p in added {
+        f.push(button(&format!("plugRemove:{}", p.manifest.id), &p.manifest.name, "Remove", &p.manifest.description));
+    }
+    f
 }
 
 /// A value as typed in, for its key: numbers within their range (else left as it was)

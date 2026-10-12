@@ -3127,7 +3127,7 @@ fn paint_settings(a: &App) {
                 let on = if *key == "autoplay" { a.autoplay } else { set_row_on(&a.web.prefs, key, *dflt) };
                 // (its settings: in a panel, with it on; Streamer Mode leaves the addresses and keys out)
                 let more = on && panels::of_switch(key).is_some() && !(streamer && matches!(*key, "req" | "remoteOn"));
-                SetRow { head: Default::default(), label: (*label).into(), note: (*note).into(), on, key: (*key).into(), sub: matches!(*key, "streamSafe" | "alertsOn"), more }
+                SetRow { head: Default::default(), label: (*label).into(), note: (*note).into(), on, key: (*key).into(), sub: matches!(*key, "streamSafe" | "alertsOn"), more, button: Default::default() }
             }).collect();
         // the plugins installed (the web app adds and removes them; each one switches on and off here)
         if sec == "Integrations" && !streamer {
@@ -3136,8 +3136,10 @@ fn paint_settings(a: &App) {
                 let state = if !plugin_on(&a.web.prefs, &m.id) { "Off.".to_string() } else if plugrun::get(&m.id).is_some() { "Running.".to_string() } else { PLUG_ERR.with(|e| e.borrow().get(&m.id).cloned()).map(|e| format!("Couldn't start: {e}")).unwrap_or_else(|| "Starting...".into()) };
                 let note = format!("{}{}{}", if m.description.is_empty() { String::new() } else { format!("{} ", m.description) }, if p.bundled { "Comes with OmniPulse. " } else { "" }, state);
                 let more = m.settings.as_array().is_some_and(|l| !l.is_empty());
-                list.push(SetRow { head: Default::default(), label: format!("Plugin: {}", m.name).into(), note: note.into(), on: plugin_on(&a.web.prefs, &m.id), key: format!("plugOn_{}", m.id).into(), sub: false, more });
+                list.push(SetRow { head: Default::default(), label: format!("Plugin: {}", m.name).into(), note: note.into(), on: plugin_on(&a.web.prefs, &m.id), key: format!("plugOn_{}", m.id).into(), sub: false, more, button: Default::default() });
             }
+            // (the plugins: adding one, and taking out the ones you've added)
+            list.push(SetRow { head: Default::default(), label: "Add a Plugin".into(), note: "Music sources made by others. Each is walled off and only reaches the sites it lists.".into(), on: false, key: "plugAdd".into(), sub: false, more: false, button: "Plugins".into() });
         }
         ModelRc::from(Rc::new(VecModel::from(list)))
     };
@@ -3208,6 +3210,7 @@ fn pref_put(shared: &Shared, key: &str, v: serde_json::Value) {
 
 fn panel_open(shared: &Shared, name: &str) {
     panel_keys(shared);
+    if name == "plugins" { panels::PLUG_PENDING.with(|p| p.borrow_mut().take()); }
     let vals = panels::values(name, &shared.borrow().web.prefs);
     PF_EDIT.with(|e| *e.borrow_mut() = Some((format!("panel:{name}"), vals)));
     pf_paint(shared);
@@ -3260,6 +3263,14 @@ fn panel_set(shared: &Shared, name: &str, mut vals: serde_json::Map<String, serd
     if redraw { panel_paint(shared, name, &vals); }
 }
 
+/// One of the open panel's values, set from here (a file picked), and the panel drawn again
+fn panel_put(shared: &Shared, key: &str, v: serde_json::Value) {
+    let Some((id, mut vals)) = PF_EDIT.with(|e| e.borrow().clone()) else { return };
+    vals.insert(key.to_string(), v);
+    PF_EDIT.with(|e| *e.borrow_mut() = Some((id, vals)));
+    pf_paint(shared);
+}
+
 /// A panel's button: done at once
 fn panel_press(shared: &Shared, key: &str) {
     let note = match key {
@@ -3282,6 +3293,61 @@ fn panel_press(shared: &Shared, key: &str) {
             if key == "reqNewKey" { omnipulse_core::requests::requests_stop(); } else { omnipulse_core::remote::remote_stop(); }
             outside_start(shared);
             "A new key: the addresses have it.".to_string()
+        }
+        "plugFile" => {
+            let Some(path) = rfd::FileDialog::new().set_title("A plugin's manifest").add_filter("Plugin manifest", &["json"]).pick_file() else { return };
+            panel_put(shared, "plugSource", serde_json::json!(path.display().to_string()));
+            return panel_press(shared, "plugCheck");
+        }
+        "plugCheck" => {
+            let src = PF_EDIT.with(|e| e.borrow().as_ref().and_then(|(_, v)| v.get("plugSource").and_then(|x| x.as_str()).map(String::from))).unwrap_or_default();
+            if src.trim().is_empty() { "Give it a plugin's address or file first.".to_string() } else {
+                let (rt, weak) = { let a = shared.borrow(); (a.rt.clone(), a.ui.clone()) };
+                rt.spawn(async move {
+                    let r = omnipulse_core::plugins::inspect(&src).await;
+                    let _ = weak.upgrade_in_event_loop(move |ui| SHARED.with(|s| {
+                        let Some(sh) = s.borrow().clone() else { return };
+                        ui.set_status(match &r { Ok(p) => format!("Read {}: what it would be able to do is below.", p.manifest.name), Err(_) => "Couldn't read it.".to_string() }.into());
+                        panels::PLUG_PENDING.with(|p| *p.borrow_mut() = Some(r));
+                        pf_paint(&sh);
+                    }));
+                });
+                "Reading it...".to_string()
+            }
+        }
+        "plugInstall" => {
+            let Some(Ok(pkg)) = panels::PLUG_PENDING.with(|p| p.borrow_mut().take()) else { return };
+            let src = PF_EDIT.with(|e| e.borrow().as_ref().and_then(|(_, v)| v.get("plugSource").and_then(|x| x.as_str()).map(String::from))).unwrap_or_default();
+            let (rt, weak) = { let a = shared.borrow(); (a.rt.clone(), a.ui.clone()) };
+            rt.spawn(async move {
+                let r = omnipulse_core::plugins::install(&src, &pkg.digest).await;
+                let _ = weak.upgrade_in_event_loop(move |ui| SHARED.with(|s| {
+                    let Some(sh) = s.borrow().clone() else { return };
+                    match r {
+                        Ok(m) => {
+                            plugrun::stop(&m.id);
+                            plugins_start(&sh);
+                            panel_put(&sh, "plugSource", serde_json::json!(""));
+                            ui.set_status(format!("Added {}.", m.name).into());
+                        }
+                        Err(e) => ui.set_status(format!("Couldn't add it: {e}").into()),
+                    }
+                    pf_paint(&sh);
+                    paint_settings(&sh.borrow());
+                }));
+            });
+            "Adding it...".to_string()
+        }
+        k if k.starts_with("plugRemove:") => {
+            let id = &k["plugRemove:".len()..];
+            let name = omnipulse_core::plugins::list().into_iter().find(|p| p.manifest.id == id).map(|p| p.manifest.name).unwrap_or_else(|| id.to_string());
+            let sure = std::env::var_os("OMNIPULSE_SELFTEST").is_some()
+                || rfd::MessageDialog::new().set_title("Remove plugin").set_description(format!("Remove {name}? Its songs leave your search and Library.")).set_buttons(rfd::MessageButtons::OkCancel).show() == rfd::MessageDialogResult::Ok;
+            if !sure { return; }
+            plugrun::stop(id);
+            let r = omnipulse_core::plugins::remove(id);
+            paint_settings(&shared.borrow());
+            match r { Ok(()) => format!("Removed {name}."), Err(e) => format!("Couldn't remove it: {e}") }
         }
         k if k.starts_with("un") && k.contains(':') => {
             let (list, key) = k[2..].split_once(':').unwrap_or(("", ""));
@@ -3324,6 +3390,12 @@ fn hide_applied(shared: &Shared) {
 
 /// Saved: into the prefs, and what uses them started again with them
 fn panel_save(shared: &Shared, name: &str, vals: serde_json::Map<String, serde_json::Value>) {
+    // (Plugins: adding and removing are done as they're pressed; nothing to keep)
+    if name == "plugins" {
+        PF_EDIT.with(|e| e.borrow_mut().take());
+        if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_pf_open(false); }
+        return;
+    }
     for k in panels::keys_of(name) {
         if let Some(v) = vals.get(k) { pref_put(shared, k, v.clone()); }
     }
@@ -6830,7 +6902,7 @@ fn main() -> Result<(), slint::PlatformError> {
             // only asked, nothing dropped on your playlists)
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("dnd") { vec![(9, "play"), (12, "library"), (13, "qopen"), (14, "dragq"), (16, "dragasks"), (17, "end")] }
             // (OMNIPULSE_SELFTEST_PLAN=panels: the settings panels, opened (nothing saved))
-            else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("panels") { vec![(9, "settings"), (10, "p_requests"), (12, "p_widget"), (14, "p_alerts"), (16, "pfclose"), (17, "end")] }
+            else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("panels") { vec![(9, "settings"), (10, "p_requests"), (12, "p_widget"), (14, "p_alerts"), (16, "p_plugins"), (17, "plugread"), (20, "pfclose"), (21, "end")] }
             // (OMNIPULSE_SELFTEST_PLAN=look: List Density at Compact, and Search with Hide likes)
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("look") { vec![(9, "play"), (12, "library"), (13, "compact"), (14, "settings"), (15, "comfy"), (16, "search"), (19, "hidelikes"), (21, "hidelikesoff"), (22, "discover"), (30, "langnext"), (40, "end")] }
             else if only_discover { vec![(9, "play"), (11, "discover"), (30, "disc"), (45, "discmix"), (12, "import"), (46, "taste"), (47, "taste2"), (48, "taste3"), (70, "tasted"), (71, "marquee"), (72, "marqueeoff"), (73, "end")] } else { full.to_vec() };
@@ -6897,6 +6969,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 "search" => { ui.set_search_text("deadmau5".into()); ui.invoke_search("deadmau5".into()); }
                 "compact" => ui.invoke_density_changed(true),
                 w if w.starts_with("p_") => { panel_open(&s, &w[2..]); println!("selftest: panel {} has {} fields", &w[2..], ui.get_pf_fields().row_count()); }
+                "plugread" => { panel_put(&s, "plugSource", serde_json::json!(std::env::current_dir().unwrap_or_default().join("plugins").join("internet-archive").join("manifest.json").display().to_string())); panel_press(&s, "plugCheck"); }
                 "pfclose" => { PF_EDIT.with(|e| e.borrow_mut().take()); ui.set_pf_open(false); }
                 "qopen" => ui.set_queue_open(true),
                 "dragq" => {
