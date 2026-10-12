@@ -655,6 +655,8 @@ component TileView inherits Rectangle {
     callback clicked;
     // a song's tile right-clicked: what's picked from its menu
     callback act(string);
+    // an album's tile (the Library's Albums): its own menu
+    in property <bool> album;
     // (pointed at: its play button and platform show)
     property <bool> hover: ta.has-hover;
     width: 170px;
@@ -678,21 +680,25 @@ component TileView inherits Rectangle {
         Text { text: root.tile.sub; color: Theme.muted; font-size: 12px; overflow: elide; }
     }
     ContextMenuArea {
-        enabled: root.tile.track;
+        enabled: root.tile.track || root.album;
         Menu {
-            MenuItem { title: "Play"; activated => { root.clicked(); } }
-            MenuItem { title: "Play Next"; activated => { root.act("next"); } }
-            MenuItem { title: "Add to Queue"; activated => { root.act("add"); } }
-            MenuSeparator { }
-            MenuItem { title: root.tile.liked ? "Remove from Likes" : "Add to Likes"; activated => { root.act("like"); } }
-            MenuItem { title: "Add to Favourites"; activated => { root.act("fav"); } }
-            MenuItem { title: "Go to Artist"; activated => { root.act("artist:0"); } }
-            MenuSeparator { }
-            MenuItem { title: "Don't Recommend This Track"; activated => { root.act("hide:track"); } }
-            MenuItem { title: "Don't Recommend This Artist"; activated => { root.act("hide:artist"); } }
-            MenuSeparator { }
-            MenuItem { title: "Open on Its Platform"; activated => { root.act("open"); } }
-            MenuItem { title: "Track Preferences..."; activated => { root.act("prefs"); } }
+            if root.album: MenuItem { title: "Open"; activated => { root.clicked(); } }
+            if root.album: MenuItem { title: "Play"; activated => { root.act("album-play"); } }
+            if root.album: MenuSeparator { }
+            if root.album: MenuItem { title: "Don't Recommend This Album"; activated => { root.act("album-hide"); } }
+            if !root.album: MenuItem { title: "Play"; activated => { root.clicked(); } }
+            if !root.album: MenuItem { title: "Play Next"; activated => { root.act("next"); } }
+            if !root.album: MenuItem { title: "Add to Queue"; activated => { root.act("add"); } }
+            if !root.album: MenuSeparator { }
+            if !root.album: MenuItem { title: root.tile.liked ? "Remove from Likes" : "Add to Likes"; activated => { root.act("like"); } }
+            if !root.album: MenuItem { title: "Add to Favourites"; activated => { root.act("fav"); } }
+            if !root.album: MenuItem { title: "Go to Artist"; activated => { root.act("artist:0"); } }
+            if !root.album: MenuSeparator { }
+            if !root.album: MenuItem { title: "Don't Recommend This Track"; activated => { root.act("hide:track"); } }
+            if !root.album: MenuItem { title: "Don't Recommend This Artist"; activated => { root.act("hide:artist"); } }
+            if !root.album: MenuSeparator { }
+            if !root.album: MenuItem { title: "Open on Its Platform"; activated => { root.act("open"); } }
+            if !root.album: MenuItem { title: "Track Preferences..."; activated => { root.act("prefs"); } }
         }
         ta := TouchArea { clicked => { root.clicked(); } }
     }
@@ -1035,6 +1041,7 @@ export component AppWindow inherits Window {
     callback queue-clear(bool);
     // a song's tile on a shelf: its menu's choice
     callback tile-act(int, int, string);
+    callback album-act(int, string);
     // YouTube Music's helpers: what's said, a Set Up (or Try Again) button, a Remove one
     in property <string> helpers-note;
     in property <string> helpers-setup;
@@ -1649,7 +1656,9 @@ export component AppWindow inherits Window {
                             x: mod(i, agrid.cols) * 186px;
                             y: floor(i / agrid.cols) * 240px + 12px;
                             tile: t;
+                            album: true;
                             clicked => { root.album-tile(i); }
+                            act(a) => { root.album-act(i, a); }
                         }
                     }
                     // Artists: everyone you follow, round, A to Z

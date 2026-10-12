@@ -8099,6 +8099,26 @@ fn main() -> Result<(), slint::PlatformError> {
     });
     let s = shared.clone();
     ui.on_crumb_go(move |i| crumb_go(&s, i.max(0) as usize));
+    ui.on_album_act({ let s = shared.clone(); move |i, act| {
+        let Some(f) = ALBUMS.with(|a| a.borrow().get(i.max(0) as usize).cloned()) else { return };
+        let (title, by, _, _) = f.tile();
+        if act == "album-hide" {
+            // (as the track menu's Don't Recommend This Album: by its title and artist)
+            let t = Track { album: title.clone(), artist: by.clone(), ..Default::default() };
+            return hide_track(&s, &t, "album");
+        }
+        // Play: its tracks, from the first
+        if let sources::Found::Album { plat: "local", id, .. } = &f {
+            let list: Vec<Track> = s.borrow().library.iter().filter(|t| t.plat() == "local" && t.album.trim() == id).cloned().collect();
+            if !list.is_empty() { play_list(&s, list, 0); }
+            return;
+        }
+        let (rt, weak) = { let a = s.borrow(); (a.rt.clone(), a.ui.clone()) };
+        rt.spawn(async move {
+            let list = sources::found_tracks(&f).await;
+            let _ = weak.upgrade_in_event_loop(move |_| SHARED.with(|x| { if let Some(sh) = x.borrow().clone() { if !list.is_empty() { play_list(&sh, list, 0); } } }));
+        });
+    } });
     ui.on_tile_act({ let s = shared.clone(); move |sh, k, act| {
         // (a Discover shelf's song; another page's shelves are songs only)
         let t = if s.borrow().page == "discover" {
