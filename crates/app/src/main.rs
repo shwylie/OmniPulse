@@ -6555,6 +6555,9 @@ fn close_or_tray(shared: &Shared) {
     }
 }
 
+/// The devices menu's last line, with Chromecast on: a fresh look for cast devices
+const CAST_SEARCH: &str = "Search for Cast devices";
+
 fn desktop_action(shared: &Shared, action: &str) {
     match action {
         "play" => toggle(shared),
@@ -7201,6 +7204,8 @@ fn main() -> Result<(), slint::PlatformError> {
             // (cast devices after Windows', under a heading of their own)
             ui.set_devices_cast_from(if cast.is_empty() { -1 } else { list.len() as i32 });
             list.extend(cast.iter().map(|d| format!("Cast to {}", d.name)));
+            // (and a fresh look for them, as the web app's Search for Cast devices)
+            if cast_on { list.push(CAST_SEARCH.to_string()); }
             CAST_LIST.with(|c| *c.borrow_mut() = cast);
             ui.set_devices(ModelRc::from(Rc::new(VecModel::from(list.into_iter().map(slint::SharedString::from).collect::<Vec<_>>()))));
         });
@@ -7209,6 +7214,18 @@ fn main() -> Result<(), slint::PlatformError> {
     ui.on_device_pick(move |i| {
         let Some(ui) = s.borrow().ui.upgrade() else { return };
         let Some(name) = ui.get_devices().row_data(i as usize).map(|d| d.to_string()) else { return };
+        if name == CAST_SEARCH {
+            let _ = omnipulse_core::cast::discover_start();
+            ui.set_status("Searching for Cast devices...".into());
+            let weak = ui.as_weak();
+            slint::Timer::single_shot(std::time::Duration::from_millis(2500), move || {
+                let Some(ui) = weak.upgrade() else { return };
+                ui.invoke_devices_want();
+                let n = omnipulse_core::cast::devices().len();
+                ui.set_status(if n == 0 { "No Cast devices found on your network.".into() } else { format!("Found {}. They're in the menu.", plural(n, "Cast device", "Cast devices")).into() });
+            });
+            return;
+        }
         // a cast device (they come after Windows' devices)
         if let Some(d) = name.strip_prefix("Cast to ").and_then(|n| CAST_LIST.with(|c| c.borrow().iter().find(|d| d.name == n).cloned())) {
             if casting().as_deref() == Some(d.name.as_str()) { return; }
