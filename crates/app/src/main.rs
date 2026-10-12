@@ -3359,6 +3359,13 @@ fn panel_press(shared: &Shared, key: &str) {
                     let mut all = shared.borrow().web.prefs[key].as_object().cloned().unwrap_or_default();
                     all.insert(kind.clone(), serde_json::json!({ "name": file, "at": now_ms() }));
                     pref_put(shared, key, serde_json::Value::Object(all));
+                    // (a new picture starts uncropped, as the web app's; on the page too)
+                    if image {
+                        let mut edits = shared.borrow().web.prefs["alertEdit"].as_object().cloned().unwrap_or_default();
+                        if let Some(o) = edits.get_mut(&kind).and_then(|x| x.as_object_mut()) { o.remove("crop"); }
+                        pref_put(shared, "alertEdit", serde_json::Value::Object(edits));
+                        for (key, v) in [("crop.fit", serde_json::json!("contain")), ("crop.z", serde_json::json!(1.0)), ("crop.x", serde_json::json!(50.0)), ("crop.y", serde_json::json!(50.0))] { panel_put(shared, key, v); }
+                    }
                     // (a new sound measured, so it plays about as loud as the others)
                     let note = if image { format!("{file} shows with this alert.") } else {
                         match omnipulse_core::loudness::alert_levels(&kind) {
@@ -3379,6 +3386,33 @@ fn panel_press(shared: &Shared, key: &str) {
                 Err(e) => e,
             }
         }
+        // a collage picture (cladd:<n>:<kind>, clrm:<n>:<kind>), kept as <kind>-<n+1> as the web app keeps it
+        k if k.starts_with("cladd:") || k.starts_with("clrm:") => {
+            let add = k.starts_with("cladd:");
+            let rest = k.split_once(':').map(|x| x.1).unwrap_or("");
+            let (n, kind) = rest.split_once(':').unwrap_or(("0", ""));
+            let Ok(n) = n.parse::<usize>() else { return };
+            let file_kind = format!("{kind}-{}", n + 1);
+            let mut all = shared.borrow().web.prefs["alertCollage"].as_object().cloned().unwrap_or_default();
+            let mut list: Vec<serde_json::Value> = all.get(kind).and_then(|x| x.as_array()).cloned().unwrap_or_default();
+            while list.len() <= n { list.push(serde_json::Value::Null); }
+            let note = if add {
+                let Some(path) = rfd::FileDialog::new().set_title("Choose a picture or GIF for this alert's collage").add_filter("Pictures", &["gif", "png", "webp", "jpg", "jpeg"]).pick_file() else { return };
+                match omnipulse_core::widget::alert_media_set(&file_kind, "collage", &path.display().to_string()) {
+                    Ok(file) => { list[n] = serde_json::json!({ "name": file, "at": now_ms() }); format!("{file} is in its collage.") }
+                    Err(e) => { if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_status(e.into()); } return; }
+                }
+            } else {
+                omnipulse_core::widget::alert_media_clear(&file_kind, "collage");
+                list[n] = serde_json::Value::Null;
+                "Taken out of its collage.".to_string()
+            };
+            while list.last().is_some_and(|x| x.is_null()) { list.pop(); }
+            if list.iter().any(|x| !x.is_null()) { all.insert(kind.to_string(), serde_json::json!(list)); } else { all.remove(kind); }
+            pref_put(shared, "alertCollage", serde_json::Value::Object(all));
+            push_out(shared, true);
+            note
+        }
         k if k.starts_with("alPicClear:") || k.starts_with("alSndClear:") => {
             let image = k.starts_with("alPicClear:");
             let kind = &k[11..];
@@ -3396,6 +3430,7 @@ fn panel_press(shared: &Shared, key: &str) {
             let changes = alerts::deleted(&shared.borrow().web.prefs, &kind);
             for (key, v) in changes { pref_put(shared, key, v); }
             for slot in ["sound", "image"] { omnipulse_core::widget::alert_media_clear(&kind, slot); }
+            for n in 1..=6 { omnipulse_core::widget::alert_media_clear(&format!("{kind}-{n}"), "collage"); }
             push_out(shared, true);
             panel_open(shared, "alertlist");
             return;

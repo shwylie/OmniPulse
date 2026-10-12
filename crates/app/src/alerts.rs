@@ -27,6 +27,8 @@ const ICONS: [(&str, &str); 17] = [
     ("raid", "People"), ("hypetrain", "Train"), ("poll", "Chart"), ("ban", "No Entry"), ("watchstreak", "Flame"),
     ("bell", "Bell"), ("trophy", "Trophy"), ("hammer", "Hammer"), ("rocket", "Rocket"), ("music", "Music"), ("sparkle", "Sparkles"),
 ];
+const PALETTES: [(&str, &str); 11] = [("alert", "Alert's Colours"), ("rainbow", "Rainbow"), ("neon", "Neon"), ("sunset", "Sunset"), ("ocean", "Ocean"), ("forest", "Forest"), ("candy", "Candy"), ("fire", "Fire"), ("streamer", "Streaming Sites"), ("mono", "Black & White"), ("custom", "Your Own")];
+const COLLAGE_MAX: usize = 6;
 const ANIMS: [(&str, &str); 5] = [("slide", "Slide"), ("pop", "Pop"), ("fade", "Fade"), ("bounce", "Bounce"), ("flip", "Flip")];
 
 fn builtin(k: &str) -> Option<&'static (&'static str, &'static str, &'static str, &'static str, &'static str)> { KINDS.iter().find(|x| x.0 == k) }
@@ -106,7 +108,7 @@ pub fn deleted(prefs: &Value, k: &str) -> Vec<(&'static str, Value)> {
     let list = |key: &str| json!(prefs[key].as_array().cloned().unwrap_or_default().into_iter().filter(|x| x != k).collect::<Vec<_>>());
     vec![
         ("alertCustom", json!(custom(prefs).into_iter().filter(|c| c["id"] != k).collect::<Vec<_>>())),
-        ("alertEdit", without("alertEdit")), ("alertSounds", without("alertSounds")), ("alertImages", without("alertImages")), ("alertLevels", without("alertLevels")),
+        ("alertEdit", without("alertEdit")), ("alertSounds", without("alertSounds")), ("alertImages", without("alertImages")), ("alertLevels", without("alertLevels")), ("alertCollage", without("alertCollage")),
         ("alertOrder", list("alertOrder")), ("alertOff", list("alertOff")),
     ]
 }
@@ -133,6 +135,18 @@ pub fn edit_values(prefs: &Value, k: &str) -> Map<String, Value> {
     if m["e.color2"] == "" { m.insert("e.color2".into(), json!("#b38cff")); }
     m.insert("e.music".into(), json!(e.get("music").and_then(|v| v.as_bool()).unwrap_or(false)));
     m.insert("adj".into(), json!(prefs["alertLevels"][k]["adj"].as_f64().unwrap_or(0.0)));
+    // its picture's crop (the web app's: where the middle is, 0 to 100; zoom 1 to 4; fit or fill)
+    let c = e.get("crop").cloned().unwrap_or(Value::Null);
+    m.insert("crop.fit".into(), json!(c["fit"].as_str().unwrap_or("contain")));
+    m.insert("crop.z".into(), json!(c["z"].as_f64().unwrap_or(1.0)));
+    m.insert("crop.x".into(), json!(c["x"].as_f64().unwrap_or(50.0)));
+    m.insert("crop.y".into(), json!(c["y"].as_f64().unwrap_or(50.0)));
+    // its collage: the icons chosen, the tiles' colours
+    let chosen: Vec<String> = e.get("cicons").and_then(|v| v.as_array()).into_iter().flatten().filter_map(|x| x.as_str().map(String::from)).collect();
+    for (id, _) in ICONS { m.insert(format!("ci:{id}"), json!(chosen.iter().any(|c| c == id))); }
+    m.insert("cpal".into(), json!(e.get("cpal").and_then(|v| v.as_str()).filter(|s| !s.is_empty()).unwrap_or("alert")));
+    let own: Vec<String> = e.get("cpalOwn").and_then(|v| v.as_array()).into_iter().flatten().filter_map(|x| x.as_str().map(String::from)).collect();
+    m.insert("cpalOwn".into(), json!(if own.is_empty() { "#ff4d6d, #ffb703, #4cc9f0".to_string() } else { own.join(", ") }));
     if builtin(k).is_none() { m.insert("e.name".into(), json!(name(prefs, k))); }
     m
 }
@@ -172,7 +186,12 @@ pub fn edit_fields(prefs: &Value, k: &str, vals: &Map<String, Value>) -> Vec<Val
         Some(file) => {
             f.push(note(&format!("Picture: {file}")));
             f.push(button(format!("alPic:{k}"), "", "Change Picture", ""));
-            f.push(button(format!("alPicClear:{k}"), "", "Use an Icon", "Its crop is set in the web app for now."));
+            f.push(button(format!("alPicClear:{k}"), "", "Use an Icon", ""));
+            let steps = |from: f64, to: f64, by: f64, show: &dyn Fn(f64) -> String| { let mut o = Vec::new(); let mut v = from; while v <= to + 1e-9 { o.push((json!((v * 100.0).round() / 100.0), show(v))); v += by; } o };
+            f.push(sel("crop.fit", "Crop", "", vec![(json!("contain"), "Fit in the Tile".into()), (json!("cover"), "Fill the Tile".into())]));
+            f.push(sel("crop.z", "Zoom", "", steps(1.0, 4.0, 0.25, &|v| format!("{v}×"))));
+            f.push(sel("crop.x", "Across", "Which part is in the middle: 0 is its left edge, 100 its right.", steps(0.0, 100.0, 10.0, &|v| format!("{v}"))));
+            f.push(sel("crop.y", "Down", "0 is its top, 100 its bottom.", steps(0.0, 100.0, 10.0, &|v| format!("{v}"))));
         }
         None => {
             let dflt = if b.is_some() { k } else { "bell" };
@@ -200,7 +219,19 @@ pub fn edit_fields(prefs: &Value, k: &str, vals: &Map<String, Value>) -> Vec<Val
         }
         None => f.push(button(format!("alSnd:{k}"), "Sound", "Add a Sound...", "Measured as it's added, so it plays about as loud as the others.")),
     }
-    f.push(note("Its collage's own pictures are set in the web app for now."));
+    // its collage (with the Collage transition): its icons, its own pictures, its tiles' colours
+    f.push(note(if prefs["alertTrans"].as_str() == Some("collage") { "Collage: its tiles show its own picture, then these (nothing chosen: its icon, with a couple that go with it)." } else { "Collage (with the Collage transition): its tiles show its own picture, then these." }));
+    for (id, label) in ICONS { f.push(field(&format!("ci:{id}"), &format!("Icon: {label}"), "", "toggle")); }
+    let pics = prefs["alertCollage"][k].as_array().cloned().unwrap_or_default();
+    for i in 0..COLLAGE_MAX {
+        match pics.get(i).and_then(|p| p["name"].as_str()) {
+            Some(file) => f.push(button(format!("clrm:{i}:{k}"), &format!("Picture {}: {file}", i + 1), "Take It Out", "")),
+            None => f.push(button(format!("cladd:{i}:{k}"), &format!("Picture {}", i + 1), "Add...", "")),
+        }
+    }
+    f.push(sel("cpal", "Tile Colours", "", PALETTES.iter().map(|(v, l)| (json!(v), l.to_string())).collect()));
+    if s("cpal") == "custom" { f.push(field("cpalOwn", "Your Colours", "Two to six, as #rrggbb, with commas between.", "text")); }
+    f.push(note("Each tile's own position and background are set in the web app for now."));
     if b.is_none() { f.push(button(format!("alDelete:{k}"), "", "Delete This Alert", "")); }
     else if !edits(prefs, k).is_empty() { f.push(button(format!("alReset:{k}"), "", "Back to How It Was", "")); }
     f
@@ -214,6 +245,22 @@ pub fn edit_save(prefs: &Value, k: &str, vals: &Map<String, Value>) -> Vec<(&'st
         let v = vals.get(&format!("e.{key}")).cloned().unwrap_or(json!(""));
         let empty = v.is_null() || v == "" || v == json!(false) || (key == "sdelay" && v.as_f64() == Some(0.0)) || (matches!(key, "color" | "color2") && !own);
         if empty || (key == "name" && builtin(k).is_none()) { e.remove(key); } else { e.insert(key.into(), v); }
+    }
+    // the crop: kept unless it's as it starts
+    let n = |key: &str, d: f64| vals.get(key).and_then(|v| v.as_f64()).unwrap_or(d);
+    let fit = vals.get("crop.fit").and_then(|v| v.as_str()).unwrap_or("contain").to_string();
+    let (cx, cy, cz) = (n("crop.x", 50.0), n("crop.y", 50.0), n("crop.z", 1.0));
+    if prefs["alertImages"][k].is_object() && (fit != "contain" || (cx - 50.0).abs() > 1e-9 || (cy - 50.0).abs() > 1e-9 || (cz - 1.0).abs() > 1e-9) {
+        e.insert("crop".into(), json!({ "x": cx.round(), "y": cy.round(), "z": (cz * 100.0).round() / 100.0, "fit": fit }));
+    } else { e.remove("crop"); }
+    let chosen: Vec<&str> = ICONS.iter().map(|i| i.0).filter(|id| vals.get(&format!("ci:{id}")).and_then(|v| v.as_bool()) == Some(true)).collect();
+    if chosen.is_empty() { e.remove("cicons"); } else { e.insert("cicons".into(), json!(chosen)); }
+    let pal = vals.get("cpal").and_then(|v| v.as_str()).unwrap_or("alert").to_string();
+    if pal == "alert" { e.remove("cpal"); } else { e.insert("cpal".into(), json!(pal)); }
+    if pal == "custom" {
+        let own: Vec<String> = vals.get("cpalOwn").and_then(|v| v.as_str()).unwrap_or("").split(',').map(|c| c.trim().to_string())
+            .filter(|c| c.len() == 7 && c.starts_with('#') && c[1..].chars().all(|h| h.is_ascii_hexdigit())).take(COLLAGE_MAX).collect();
+        if own.len() >= 2 { e.insert("cpalOwn".into(), json!(own)); }
     }
     let mut all = prefs["alertEdit"].as_object().cloned().unwrap_or_default();
     if e.is_empty() { all.remove(k); } else { all.insert(k.into(), Value::Object(e)); }
@@ -252,5 +299,14 @@ mod tests {
         assert_eq!(saved[0].1["follow"]["head"], "Thanks {user}!");
         assert!(saved[0].1["follow"].get("color").is_none());
         assert_eq!(test_alert("raid")["amount"], "42");
+        // its collage: icons chosen, a palette of your own (the bad colour left out)
+        let mut v = edit_values(&p, "raid");
+        v.insert("ci:rocket".into(), json!(true));
+        v.insert("cpal".into(), json!("custom"));
+        v.insert("cpalOwn".into(), json!("#112233, nope, #445566"));
+        let e = &edit_save(&p, "raid", &v)[0].1["raid"];
+        assert_eq!(e["cicons"], json!(["rocket"]));
+        assert_eq!(e["cpalOwn"], json!(["#112233", "#445566"]));
+        assert!(e.get("crop").is_none());
     }
 }
