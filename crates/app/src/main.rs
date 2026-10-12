@@ -2273,6 +2273,8 @@ fn mix_tick(shared: &Shared, pos: u64, dur: u64) {
     };
     let (Some(next), Some(cur)) = (next, cur) else { return };
     if !on || listening_now || !MIX_OUT_OK.with(|c| c.get()) || dur == 0 || next.is_mix() { return; }
+    // (Stream-Safe Music: never mixed into one it doesn't allow; the usual way skips it)
+    if !streamsafe::allowed(&shared.borrow().web.prefs, &next) { return; }
     // (where its sound ends: measured, if it's before the file's end)
     let audible = shared.borrow().cur_loud.as_ref().and_then(|k| shared.borrow().analysis.get(k).and_then(|x| x["audible_ms"].as_u64())).filter(|&x| x > 0 && x < dur).unwrap_or(dur);
     // both measured whole: every beat tracked, so no listening again
@@ -5997,6 +5999,13 @@ fn safe_set(shared: &Shared, on: bool) {
         if let Some(o) = a.web.prefs.as_object_mut() { o.insert("streamSafe".into(), serde_json::json!(on)); }
         if std::env::var_os("OMNIPULSE_SELFTEST").is_none() { webstate::save_pref("streamSafe", serde_json::json!(on)); }
         a.ap_failed = None;
+        // (on: what's queued that it doesn't allow goes, after what's playing)
+        if on {
+            let prefs = a.web.prefs.clone();
+            let cur = a.queue.qi.unwrap_or(0);
+            let mut i = 0;
+            a.queue.items.retain(|q| { let keep = i <= cur || streamsafe::allowed(&prefs, &q.t); i += 1; keep });
+        }
         autoplay_for_safe(&mut a, on);
         paint_queue(&mut a);
         apply_filter(&mut a);
