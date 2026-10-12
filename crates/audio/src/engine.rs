@@ -636,6 +636,10 @@ struct Fading {
     rate: u32,
     /// a tape stop under way: where it is in what's read of the one going out (frames, fractional)
     brake_at: f64,
+    /// a tape start under way: where it is in what's read of the one coming in, and how far behind it
+    /// has fallen (frames: it reads less than it plays while it spins up; its position put right after)
+    spin_at: f64,
+    pub spin_lag: f64,
 }
 
 /// One band's handover in a mix: the one coming in up from `in_at` over `in_len`, the one going out
@@ -709,6 +713,9 @@ pub struct Handoff {
     /// a tape stop: the one going out slowed to a halt (speed and pitch together, as a turntable's
     /// motor cut: no keylock) from `.0` over `.1` (ms from the mix's start, or frames), silent after
     pub brake: Option<(u64, u64)>,
+    /// a tape start: the one coming in silent until `.0`, then spun up from a halt to its speed over
+    /// `.1` (speed and pitch together, as a turntable's motor switched on)
+    pub spin: Option<(u64, u64)>,
 }
 
 
@@ -716,7 +723,7 @@ impl Handoff {
     /// The bass alone swapped at `at` (over a quarter second), the rest crossfaded over all `ms`
     pub fn bass_swap(ms: u64, at: u64) -> Self {
         let all = Ramp::swap(0, ms);
-        Self { low: Ramp::swap(at, 250), mid: all, high: all, echo: None, out_sweep: None, in_sweep: None, brake: None }
+        Self { low: Ramp::swap(at, 250), mid: all, high: all, echo: None, out_sweep: None, in_sweep: None, brake: None, spin: None }
     }
 
     /// Staged over `ms` (of beats `beat_ms` long), swapped at `swap` (a downbeat): the highs cross over
@@ -737,6 +744,7 @@ impl Handoff {
             out_sweep: None,
             in_sweep: None,
             brake: None,
+            spin: None,
         }
     }
 
@@ -761,6 +769,7 @@ impl Handoff {
             out_sweep: Some(Sweep { points: [down[0], down[1], down[2], down[3], down[3]], high: false }),
             in_sweep: Some(Sweep { points: [down[0], down[1], down[2], down[3], (swap + glide, 10.0)], high: true }),
             brake: None,
+            spin: None,
         }
     }
 
@@ -769,7 +778,15 @@ impl Handoff {
     /// few ms against a click). For tempos too far apart to blend on the beat: one stops, the other goes.
     pub fn tape_stop(ms: u64) -> Self {
         let side = Ramp { in_at: ms, in_len: 25, out_at: ms.saturating_sub(60), out_len: 60 };
-        Self { low: side, mid: side, high: side, echo: None, out_sweep: None, in_sweep: None, brake: Some((0, ms)) }
+        Self { low: side, mid: side, high: side, echo: None, out_sweep: None, in_sweep: None, brake: Some((0, ms)), spin: None }
+    }
+
+    /// A tape stop over `stop`, then a tape start over `start`: the one going out slows to a halt; as it
+    /// stops, the one coming in spins up from one to its speed. For songs too far apart (in tempo or in
+    /// key) to blend: neither ever heard over the other, and the next one eased in, not dropped in.
+    pub fn tape(stop: u64, start: u64) -> Self {
+        let side = Ramp { in_at: stop, in_len: 10, out_at: stop.saturating_sub(60), out_len: 60 };
+        Self { low: side, mid: side, high: side, echo: None, out_sweep: None, in_sweep: None, brake: Some((0, stop)), spin: Some((stop, start.max(1))) }
     }
 
     fn frames(&self, rate: u64) -> Self {
@@ -778,6 +795,7 @@ impl Handoff {
             low: self.low.frames(rate), mid: self.mid.frames(rate), high: self.high.frames(rate), echo: self.echo.map(|(a, b, c)| (f(a), f(b), f(c.max(1)))),
             out_sweep: self.out_sweep.map(|w| w.frames(rate)), in_sweep: self.in_sweep.map(|w| w.frames(rate)),
             brake: self.brake.map(|(a, b)| (f(a), f(b))),
+            spin: self.spin.map(|(a, b)| (f(a), f(b))),
         }
     }
 }
@@ -881,7 +899,7 @@ impl Fading {
         Self {
             next, total: total.max(1), done: 0, out_buf: VecDeque::new(), in_buf: VecDeque::new(), out_ended: false, in_ended: false,
             handoff: handoff.map(|h| h.frames(rate as u64)), bands: [Bands::new(rate); 2], echo: Echo { line: Vec::new(), at: 0 },
-            sweeps: [[Butter::new(rate, 20.0, true); 2]; 2], rate, brake_at: 0.0,
+            sweeps: [[Butter::new(rate, 20.0, true); 2]; 2], rate, brake_at: 0.0, spin_at: 0.0, spin_lag: 0.0,
         }
     }
 }
@@ -924,7 +942,26 @@ impl Fading {
                     v
                 }
             };
-            let (il, ir) = (self.in_buf.pop_front().unwrap_or(0.0), self.in_buf.pop_front().unwrap_or(0.0));
+            let spinning = self.handoff.and_then(|h| h.spin).filter(|(from, len)| self.done < *from + *len);
+            let (il, ir) = match spinning {
+                None => (self.in_buf.pop_front().unwrap_or(0.0), self.in_buf.pop_front().unwrap_or(0.0)),
+                // not yet: nothing of it (and none of it read)
+                Some((from, _)) if self.done < from => { self.spin_lag += 1.0; (0.0, 0.0) }
+                // spinning up: read at a rising speed (between its frames, in a line), as a turntable starting
+                Some((from, len)) => {
+                    let speed = (self.done - from) as f64 / len.max(1) as f64;
+                    let i = self.spin_at.floor() as usize;
+                    let w = (self.spin_at - i as f64) as f32;
+                    let at = |k: usize, c: usize| self.in_buf.get(k * 2 + c).copied().unwrap_or(0.0);
+                    let v = (at(i, 0) + (at(i + 1, 0) - at(i, 0)) * w, at(i, 1) + (at(i + 1, 1) - at(i, 1)) * w);
+                    self.spin_at += speed;
+                    self.spin_lag += 1.0 - speed;
+                    let gone = (self.spin_at.floor() as usize).min(self.in_buf.len() / 2);
+                    self.in_buf.drain(..gone * 2);
+                    self.spin_at -= gone as f64;
+                    v
+                }
+            };
             match self.handoff {
                 None => {
                     into.push(ol * go + il * gi);
@@ -1193,6 +1230,12 @@ fn decode_loop(shared: Arc<Shared>, cmds: Receiver<Cmd>, ev: Sender<Event>) {
                     stretch_note(&shared, &f.next);
                     if over {
                         let f = fading.take().unwrap();
+                        // (a tape start: it read less than it played; where it is, put right)
+                        if f.spin_lag >= 1.0 {
+                            let lag_ms = (f.spin_lag * 1000.0 / shared.rate.load(Ordering::SeqCst).max(1) as f64).round() as u64;
+                            let b = shared.base_ms.load(Ordering::SeqCst);
+                            shared.base_ms.store(b.saturating_sub(lag_ms), Ordering::SeqCst);
+                        }
                         // what of it was read ahead goes on as it is
                         shared.queue.lock().unwrap().extend(f.in_buf.iter().copied());
                         shared.produced.fetch_add(f.in_buf.len() as u64 / 2, Ordering::Relaxed);
@@ -1429,6 +1472,23 @@ mod mix_tests {
         // and no click as it stops: nothing louder than the tones themselves
         let peak = out[(2.9 * rate as f32) as usize * 2..(3.1 * rate as f32) as usize * 2].iter().fold(0.0f32, |m, v| m.max(v.abs()));
         assert!(peak <= 0.36, "{peak}");
+    }
+
+    #[test]
+    fn a_tape_start_spins_the_next_one_up_as_the_other_stops() {
+        let rate = 44_100u32;
+        let a = Box::new(Tone::new(rate, 440.0, 0.3, 10.0));
+        let b = Box::new(Tone::new(rate, 660.0, 0.3, 10.0));
+        // from 2 s: a second's stop, then a second's spin-up
+        let out = render_mix(a, b, (0.0, 0.0), rate, 2.0, 2300, Some(Handoff::tape(1000, 1000)), 6.0).unwrap();
+        let ups = |at: f32| { let i = (at * rate as f32) as usize * 2; out[i..i + 2 * 4410].chunks(2).map(|f| f[0]).collect::<Vec<_>>().windows(2).filter(|w| w[0] < 0.0 && w[1] >= 0.0).count() };
+        // the one going out slowing; the next one not yet heard
+        assert!((30..=36).contains(&ups(2.2)), "slowing {}", ups(2.2));
+        // the next one spinning up: a quarter of the way (a quarter of 660 Hz: 16), three quarters (49)
+        assert!((13..=20).contains(&ups(3.25)), "spinning up {}", ups(3.25));
+        assert!((45..=53).contains(&ups(3.75)), "nearly there {}", ups(3.75));
+        // up to speed after (660 Hz: 66)
+        assert!((63..=69).contains(&ups(4.6)), "after {}", ups(4.6));
     }
 
     #[test]

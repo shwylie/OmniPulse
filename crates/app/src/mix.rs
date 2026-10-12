@@ -39,8 +39,9 @@ pub struct Plan {
     pub out_tempo: f64,
     /// how long that takes (ms of the mix: to the switch-over), 0 with no ramp
     pub ramp_ms: u64,
-    /// a tape stop: the one playing slows to a halt on its last beat, the next one goes as it stops
-    /// (tempos too far apart to blend on the beat)
+    /// a tape stop, then a tape start: the one playing slows to a halt on its last beat, and as it stops
+    /// the next one spins up to its speed (songs too far apart, in tempo or key, to blend: never over
+    /// each other). `swap_ms`: the stop's length; the spin-up's, what's left of `ms` but its last TAPE_TAIL_MS
     pub tape_stop: bool,
 }
 
@@ -57,15 +58,14 @@ const MAX_RAMP: f64 = MAX_STRETCH;
 /// intro, or a build to the drop, is left out only while it's quieter)
 const CONTENT_BELOW_DB: f32 = 9.0;
 
-/// The latest bar the next one can start from: the start of the phrase its content (its first two bars
-/// near its loud ones) starts in; its end if it has none
-fn content_cap(m: &Measured, off: usize, n: usize) -> usize {
+/// Where the next one's content starts (its first two bars with a beat near its loud ones): its end if
+/// it has none
+fn content_start(m: &Measured, n: usize) -> usize {
     let (bars, beat) = (&m.rhythm.bar_db, &m.rhythm.bar_beat);
     let Some(line) = loud_line(bars).map(|l| l + LOUD_WITHIN_DB - CONTENT_BELOW_DB) else { return n.saturating_sub(1) };
     // (a bar of it: a beat, and near its loud ones; a beatless intro, however loud, is still an intro)
     let content = |i: usize| bars[i] > line && beat.get(i).is_some_and(|b| *b >= BEAT_LINE);
-    let first = (0..bars.len().saturating_sub(1)).find(|&i| content(i) && content(i + 1)).unwrap_or(n.saturating_sub(1));
-    (0..=first.min(n.saturating_sub(1))).rev().find(|&c| on_phrase(c, off, PHRASE)).unwrap_or(0)
+    (0..bars.len().saturating_sub(1)).find(|&i| content(i) && content(i + 1)).unwrap_or(n.saturating_sub(1)).min(n.saturating_sub(1))
 }
 
 /// The tempo the one playing goes to over its outro to arrive at the next one's (the same tempo, or
@@ -207,8 +207,11 @@ fn downbeats(m: &Measured) -> Vec<f64> {
 /// out below it, the one coming in above it, never both in one band; down to the bass by the swap,
 /// where the next one's main part starts). `bands` (Settings' EQ Band Handoff): a band at a time
 /// instead, as a DJ's EQ (quicker). Over a soft part: a crossfade with the bass swapped halfway.
+/// (after a tape start: the next one alone a moment, at its speed, before the mix is over)
+const TAPE_TAIL_MS: u64 = 300;
+
 pub fn handoff(p: &Plan, bands: bool) -> omnipulse_audio::Handoff {
-    if p.tape_stop { return omnipulse_audio::Handoff::tape_stop(p.swap_ms); }
+    if p.tape_stop { return omnipulse_audio::Handoff::tape(p.swap_ms, p.ms.saturating_sub(p.swap_ms + TAPE_TAIL_MS)); }
     if !p.beatmatched { return omnipulse_audio::Handoff::bass_swap(p.ms, p.ms / 2); }
     let beat = p.ms.saturating_sub(p.swap_ms) as f64 / 4.0;
     if bands { omnipulse_audio::Handoff::staged(p.ms, beat, p.swap_ms) } else { omnipulse_audio::Handoff::wipe(beat, p.swap_ms) }
@@ -243,12 +246,15 @@ pub fn plan_structure(a: &Measured, a_end_ms: u64, now_ms: u64, b: &Measured) ->
     let (b_main, _) = beat_span(&proper(b)?)?;
     let (a_off, b_off) = (phrase_offset(a), phrase_offset(b));
     // (the next one's start left out: its quiet intro, never its content: from its phrase at the latest)
-    let cap = content_cap(b, b_off, bd.len());
+    // (its content never part of the mix: on a blend, its run-up ends where its content starts at the
+    // latest; on a tape start, it spins up in its intro, a phrase before its content)
+    let first = content_start(b, bd.len());
+    let cap = (0..first).rev().find(|&c| on_phrase(c, b_off, PHRASE)).unwrap_or(0);
     let drop_at = drop_bar(b, b_off).map_or(b_main, |d| d.max(b_main));
     // (where the next one starts from: no later than that)
     let b_at = |k: usize| bd[k.min(cap).min(bd.len() - 1)];
     let (soonest, audible) = (now_ms as f64 + 4000.0, a_end_ms as f64 - 300.0);
-    let (a_bar, b_bar) = (4.0 * a.rhythm.period_ms, 4.0 * b.rhythm.period_ms);
+    let a_bar = 4.0 * a.rhythm.period_ms;
     // (bar k's downbeat; past the last one tracked, a bar on from it for each)
     let at = |k: usize| ad.get(k).copied().unwrap_or_else(|| ad[ad.len() - 1] + (k + 1 - ad.len()) as f64 * a_bar);
     let matched = match_rate(a.rhythm.bpm, b.rhythm.bpm).map(|(r, _)| r).filter(|_| keys_fit(a, b));
@@ -272,7 +278,7 @@ pub fn plan_structure(a: &Measured, a_end_ms: u64, now_ms: u64, b: &Measured) ->
         let every = if run_b >= PHRASE { PHRASE } else { run_b.clamp(1, 4) };
         // (an intro that builds to a drop: the switch-over on the drop, the build before the run-up cut)
         let main = drop_at;
-        let from_bar = (0..bd.len()).find(|&c| on_phrase(c, b_off, every) && c + run_b >= main).unwrap_or(0).min(bd.len() - 1).min(cap);
+        let from_bar = (0..bd.len()).find(|&c| on_phrase(c, b_off, every) && c + run_b >= main).unwrap_or(0).min(bd.len() - 1).min(first.saturating_sub(run_b));
         let (bars, swap_bar) = (run as u32 + 1, run);
         // stretched to each one's tempo over the bars mixed, not its average (within a percent of it)
         let n = bars as usize * 4;
@@ -324,72 +330,30 @@ pub fn plan_structure(a: &Measured, a_end_ms: u64, now_ms: u64, b: &Measured) ->
     // (how far the one playing is eased, if it can be; and how many of its bars go to one of the next one's:
     // half or double time, 2 or 1/2)
     let ramp = ramp_to(a.rhythm.bpm, b.rhythm.bpm);
-    // too far apart even for that: a tape stop. The one playing brakes over its last beat with one (two
-    // beats long: slowing evenly, it goes one), coming to rest on the downbeat its beat ends at, its
-    // outro cut; the next one starts on its main part's downbeat as it stops, its intro cut.
-    if ramp.is_none() {
-        let beat = a.rhythm.period_ms;
-        let len = (2.0 * beat).clamp(600.0, 1600.0);
-        let from = at(a_end) - beat;
-        if from >= soonest && at(a_end) <= audible + 300.0 {
-            return Some(Plan {
-                at_ms: from.round() as u64,
-                ms: (len + 300.0).round() as u64,
-                swap_ms: len.round() as u64,
-                // (an intro that builds to a drop: in at the drop, the build cut too)
-                start_ms: b_at(drop_at).round() as u64,
-                rate: 1.0,
-                bars: 1,
-                semitones: 0,
-                beatmatched: false,
-                out_tempo: 1.0,
-                ramp_ms: 0,
-                tape_stop: true,
-            });
-        }
-    }
-    let per = ramp.map_or(1.0, |t| t * a.rhythm.bpm / b.rhythm.bpm);
-    // (bars of the one playing, eased: the time they take)
-    let eased_ms = |n: f64| a_bar * n * 2.0 / (1.0 + ramp.unwrap_or(1.0));
-    // the one playing's beatless outro (what of it is heard), the next one coming in over it: its own
-    // beatless intro too, as much as fits, its beat as the blend ends
-    let a_soft = (a_end..).take_while(|&k| at(k) + a_bar <= audible).count();
-    if a_soft >= 2 && at(a_end) >= soonest {
-        let n = a_soft.min(8);
-        let ms = a_bar * n as f64;
-        // (slowed, or sped, into the next one's tempo over it, if that's not too far: the two at one tempo
-        // all through, each going as many beats, so the next one's from as many of its bars before its
-        // beat as the outro's long, its beat on the switch-over; the mix as long as those bars take, eased)
-        if let Some(target) = ramp {
-            let nb = ((n as f64 / per).round() as usize).min(b_main);
-            return soft(at(a_end), eased_ms(n as f64), b_at(b_main - nb), n as u32, target);
-        }
-        let nb = ((ms / b_bar).floor() as usize).min(b_main);
-        return soft(at(a_end), ms, b_at(b_main - nb), n as u32, 1.0);
-    }
-    // the next one's beatless intro, under the one playing's last bars with a beat: its beat comes in
-    // as the other's ends
-    // (eased onto one tempo, where it can be: as many of the one playing's last bars with a beat as the
-    // next one's intro bars, on a downbeat of each, the beats together all through)
-    if b_main >= 2 {
-        let nb = b_main.min(8);
-        if let Some(target) = ramp {
-            let na = ((nb as f64 * per).round() as usize).max(1);
-            if let Some(k) = (0..=a_end.saturating_sub(na)).rev().find(|&k| at(k) >= soonest && at(k) + a_bar * na as f64 <= audible) {
-                return soft(at(k), eased_ms(na as f64), b_at(b_main - nb), na as u32, target);
-            }
-        } else {
-            let ms = b_bar * nb as f64;
-            let end = at(a_end).min(audible);
-            if let Some(k) = (0..=a_end).rev().find(|&k| at(k) + ms <= end && at(k) >= soonest) {
-                return soft(at(k), ms, b_at(b_main - nb), nb as u32, 1.0);
-            }
-        }
-    }
-    // neither has one: two bars where the one playing's beat ends, straight into the next one's (eased
-    // onto one tempo over them, where it can be)
-    let k = (0..=a_end.saturating_sub(2)).rev().find(|&k| at(k) >= soonest && at(k) + 2.0 * a_bar <= audible)?;
-    soft(at(k), eased_ms(2.0), b_at(b_main), 2, ramp.unwrap_or(1.0))
+    // not blended on the beat (tempos too far apart, or keys that clash): never faded over each other. A
+    // tape stop, then a tape start: the one playing brakes over its last beat with one (two beats long:
+    // slowing evenly, it goes one), coming to rest on the downbeat its beat ends at (its outro cut); as it
+    // stops, the next one spins up from its start (its intro's quiet part cut, never its content), eased
+    // in rather than dropped in
+    let _ = (ramp, soft);
+    let beat = a.rhythm.period_ms;
+    let stop = (2.0 * beat).clamp(600.0, 1600.0);
+    let spin = (1.5 * b.rhythm.period_ms).clamp(400.0, 1000.0);
+    let from = at(a_end) - beat;
+    if from < soonest || at(a_end) > audible + 300.0 { return None; }
+    Some(Plan {
+        at_ms: from.round() as u64,
+        ms: (stop + spin).round() as u64 + TAPE_TAIL_MS,
+        swap_ms: stop.round() as u64,
+        start_ms: b_at(drop_at).round() as u64,
+        rate: 1.0,
+        bars: 1,
+        semitones: 0,
+        beatmatched: false,
+        out_tempo: 1.0,
+        ramp_ms: 0,
+        tape_stop: true,
+    })
 }
 
 /// The plan for mixing `b` in after `a` (`a_end_ms`: where `a`'s sound ends; `now_ms`: where it is),
@@ -570,15 +534,15 @@ mod tests {
         // the next one from its bar 16 (a phrase), its beat in (bar 24) on the swap, the rest of its intro cut
         assert_eq!(p.start_ms, (300.0 + 16.0 * bar).round() as u64);
         // an intro with a beat that builds (quiet, then fuller, then a long build) to its drop at bar 32: its
-        // quiet start cut, but not its fuller part (with a beat, near its loud ones: a verse, say, sung):
-        // from its phrase at bar 8, its drop after
+        // fuller part (with a beat, near its loud ones: a verse, say, sung) never part of the mix: its
+        // run-up from bar 0, that part in on the swap, after the one playing has gone
         let built = shaped(m(128.0, 300.0, 0, 0.5), &song(&[(8, -16.0, true), (8, -11.0, true), (16, -12.0, true), (48, -7.0, true)]));
         assert_eq!(drop_bar(&built, 0), Some(32));
         // a smaller step up first (8 bars 3 dB up, still 3 dB under its loudest): not the drop
         let stepped = shaped(m(128.0, 300.0, 0, 0.5), &song(&[(8, -13.0, true), (8, -10.0, true), (16, -12.0, true), (48, -7.0, true)]));
         assert_eq!(drop_bar(&stepped, 0), Some(32));
         let p = plan_structure(&a, end, 10_000, &built).expect("a plan");
-        assert_eq!(p.start_ms, (300.0 + 8.0 * bar).round() as u64);
+        assert_eq!(p.start_ms, 300);
         // into it from the start (a few quiet bars, no rise to speak of): no drop, its beat as before
         assert_eq!(drop_bar(&shaped(m(128.0, 300.0, 0, 0.5), &song(&[(4, -12.0, false), (80, -10.0, true)])), 0), None);
         // a beat all through, end to end: the latest phrase that fits before the sound ends
@@ -648,7 +612,8 @@ mod tests {
         assert!(p.tape_stop && !p.beatmatched && (p.rate, p.semitones, p.out_tempo) == (1.0, 0, 1.0), "{p:?}");
         assert_eq!(p.at_ms, (500.0 + 64.0 * bar - beat).round() as u64);
         assert_eq!(p.swap_ms, (2.0 * beat).round() as u64);
-        assert_eq!(p.start_ms, (300.0 + 24.0 * fast_bar).round() as u64);
+        // (it spins up in its intro: a phrase before its beat comes in, bar 16)
+        assert_eq!(p.start_ms, (300.0 + 16.0 * fast_bar).round() as u64);
         // a beat to its very end: the same, on its last downbeat; into one with no intro: from its start
         let flat = shaped(m(128.0, 500.0, 0, 0.5), &song(&[(88, -10.0, true)]));
         let p = plan_structure(&flat, end, 10_000, &shaped(m(174.0, 300.0, 0, 0.5), &song(&[(88, -9.0, true)]))).expect("a plan");
