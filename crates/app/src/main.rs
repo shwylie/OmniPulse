@@ -3133,22 +3133,23 @@ fn paint_settings(a: &App) {
                 SetRow { head: Default::default(), label: (*label).into(), note: (*note).into(), on, key: (*key).into(), sub: matches!(*key, "streamSafe" | "alertsOn"), more, button: Default::default() }
             }).collect();
         // the plugins installed (the web app adds and removes them; each one switches on and off here)
-        if sec == "Integrations" && !streamer {
+        if sec == "Plugins" && !streamer {
             for p in omnipulse_core::plugins::list() {
                 let m = &p.manifest;
                 let state = if !plugin_on(&a.web.prefs, &m.id) { "Off.".to_string() } else if plugrun::get(&m.id).is_some() { "Running.".to_string() } else { PLUG_ERR.with(|e| e.borrow().get(&m.id).cloned()).map(|e| format!("Couldn't start: {e}")).unwrap_or_else(|| "Starting...".into()) };
                 let note = format!("{}{}{}", if m.description.is_empty() { String::new() } else { format!("{} ", m.description) }, if p.bundled { "Comes with OmniPulse. " } else { "" }, state);
                 let more = m.settings.as_array().is_some_and(|l| !l.is_empty());
-                list.push(SetRow { head: Default::default(), label: format!("Plugin: {}", m.name).into(), note: note.into(), on: plugin_on(&a.web.prefs, &m.id), key: format!("plugOn_{}", m.id).into(), sub: false, more, button: Default::default() });
+                list.push(SetRow { head: Default::default(), label: m.name.clone().into(), note: note.into(), on: plugin_on(&a.web.prefs, &m.id), key: format!("plugOn_{}", m.id).into(), sub: false, more, button: Default::default() });
             }
             // (the plugins: adding one, and taking out the ones you've added)
-            list.push(SetRow { head: Default::default(), label: "Add a Plugin".into(), note: "Music sources made by others. Each is walled off and only reaches the sites it lists.".into(), on: false, key: "plugAdd".into(), sub: false, more: false, button: "Plugins".into() });
+            list.push(SetRow { head: Default::default(), label: "Add a Plugin".into(), note: "Music sources made by others. Each is walled off and only reaches the sites it lists.".into(), on: false, key: "plugAdd".into(), sub: false, more: false, button: "Add".into() });
         }
         ModelRc::from(Rc::new(VecModel::from(list)))
     };
     ui.set_set_rows_integrations(rows("Integrations"));
     ui.set_set_rows_library(rows("Library"));
     ui.set_set_rows_sound(rows("Sound"));
+    ui.set_set_rows_plugins(rows("Plugins"));
     ui.set_set_rows_streaming(rows("Streaming"));
     // the closed categories (the web app's setting too: by their titles)
     let closed = |t: &str| a.web.prefs["setClosed"][t].as_bool() == Some(true);
@@ -3225,7 +3226,7 @@ fn panel_open(shared: &Shared, name: &str) {
             "alerts" => "Settings › Streaming › Stream Widget",
             "alertlist" => "Settings › Streaming › Alerts",
             n if n.starts_with("alert:") => "Settings › Streaming › Alerts",
-            "plugins" => "Settings › Integrations",
+            "plugins" => "Settings › Plugins",
             _ => "Settings › Library",
         };
         ui.set_pf_crumb(crumb.into());
@@ -3592,7 +3593,7 @@ fn pf_open(shared: &Shared, id: &str) {
     PF_EDIT.with(|e| *e.borrow_mut() = Some((id.to_string(), vals)));
     pf_paint(shared);
     if let Some(ui) = shared.borrow().ui.upgrade() {
-        ui.set_pf_crumb("Settings › Integrations".into());
+        ui.set_pf_crumb("Settings › Plugins".into());
         ui.set_pf_head(p.manifest.name.clone().into());
         ui.set_pf_open(true);
     }
@@ -7140,7 +7141,7 @@ fn main() -> Result<(), slint::PlatformError> {
             // only asked, nothing dropped on your playlists)
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("dnd") { vec![(9, "play"), (12, "library"), (13, "qopen"), (14, "dragq"), (16, "dragasks"), (17, "end")] }
             // (OMNIPULSE_SELFTEST_PLAN=panels: the settings panels, opened (nothing saved))
-            else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("panels") { vec![(9, "settings"), (10, "cat_Sound"), (11, "cat_Streaming"), (12, "p_requests"), (12, "p_widget"), (14, "p_alerts"), (16, "p_plugins"), (17, "plugread"), (20, "p_alertlist"), (21, "p_alert:raid"), (22, "pfclose"), (23, "end")] }
+            else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("panels") { vec![(9, "settings"), (10, "cat_Plugins"), (11, "cat_Streaming"), (12, "p_requests"), (12, "p_widget"), (14, "p_alerts"), (16, "p_plugins"), (17, "plugread"), (20, "p_alertlist"), (21, "p_alert:raid"), (22, "pfclose"), (23, "end")] }
             // (OMNIPULSE_SELFTEST_PLAN=look: List Density at Compact, and Search with Hide likes)
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("look") { vec![(9, "play"), (12, "library"), (13, "compact"), (14, "settings"), (15, "comfy"), (16, "search"), (19, "hidelikes"), (21, "hidelikesoff"), (22, "discover"), (30, "langnext"), (40, "end")] }
             else if only_discover { vec![(9, "play"), (11, "discover"), (30, "disc"), (45, "discmix"), (12, "import"), (46, "taste"), (47, "taste2"), (48, "taste3"), (70, "tasted"), (71, "marquee"), (72, "marqueeoff"), (73, "end")] } else { full.to_vec() };

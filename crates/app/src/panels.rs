@@ -20,7 +20,7 @@ pub fn title(name: &str) -> String {
         "remote" => "Stream Deck & Remote",
         "offset" => "OmniPulse Offset",
         "hidden" => "Hidden & Not Recommended",
-        "plugins" => "Plugins",
+        "plugins" => "Add a Plugin",
         _ => "Avoid Recent Plays",
     }.to_string()
 }

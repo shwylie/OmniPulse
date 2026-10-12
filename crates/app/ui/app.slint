@@ -840,6 +840,7 @@ export component AppWindow inherits Window {
     callback pf-save();
     in property <[SetRow]> set-rows-library;
     in property <[SetRow]> set-rows-sound;
+    in property <[SetRow]> set-rows-plugins;
     in property <[SetRow]> set-rows-streaming;
     in property <bool> closed-look;
     in property <bool> closed-integrations;
@@ -1651,7 +1652,8 @@ export component AppWindow inherits Window {
                                 spacing: 8px;
                                 for c in [
                                     { name: "App & Look", note: "Theme, colours, player style, name, tray, animations, updates, backups", d: Icons.gear },
-                                    { name: "Integrations", note: "Accounts, platforms, plugins, following, Discord, Last.fm", d: Icons.plugin },
+                                    { name: "Integrations", note: "Accounts, platforms, catalogues, following, Listen Along & Jams, Last.fm", d: Icons.person },
+                                    { name: "Plugins", note: "Music sources made by others: switched on and off, their settings, adding and removing them", d: Icons.plugin },
                                     { name: "Library", note: "Pages, autoplay, recent plays, hidden and not recommended, music folders", d: Icons.library },
                                     { name: "Sound", note: "Loudness, fades, silences, equalizer, seamless mixing", d: Icons.volume },
                                     { name: "Streaming", note: "Streamer Mode, the widget and alerts, song requests, Stream Deck, OmniPulse Offset", d: Icons.broadcast },
@@ -1930,6 +1932,10 @@ export component AppWindow inherits Window {
                                     }
                                 }
                                 for r[i] in root.set-rows-integrations: SetRowView { r: r; toggle(k) => { root.set-toggle(k); } more(k) => { root.set-more(k); } }
+                            }
+                            if root.set-cat == "Plugins": VerticalLayout {
+                                spacing: 14px;
+                                for r[i] in root.set-rows-plugins: SetRowView { r: r; toggle(k) => { root.set-toggle(k); } more(k) => { root.set-more(k); } }
                             }
                             if root.set-cat == "Library": VerticalLayout {
                                 spacing: 14px;
