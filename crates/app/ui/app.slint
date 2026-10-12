@@ -51,6 +51,8 @@ export struct Account { name: string, status: string, signed: bool, busy: bool, 
 // Settings' search: a setting found (its path, what it is), where it lives (its category, a panel to
 // open), and its switch if it has one
 export struct SetHit { path: string, label: string, note: string, cat: string, panel: string, key: string, on: bool, toggle: bool }
+// A song being added that looks like one there already: the new one, the one there, what's chosen
+export struct LookAlike { new: string, old: string, choice: string }
 export struct SetRow { head: string, label: string, note: string, on: bool, key: string, sub: bool, more: bool, button: string }
 /// One of a plugin's settings: its kind ("toggle", "text", "password", "number", "select"), what it's
 /// set to (as text; "true"/"false" for a toggle), and a select's options
@@ -896,6 +898,13 @@ export component AppWindow inherits Window {
     callback crumb-go(int);
     // Settings: closed (the X), and searched (its own search: settings, not music)
     callback settings-close();
+    // Adding look-alikes to a playlist: asked about (each one's choice cycles; all at once; Add, or Cancel)
+    in-out property <bool> la-open;
+    in property <string> la-head;
+    in property <[LookAlike]> la-rows;
+    callback la-cycle(int);
+    callback la-all(int);
+    callback la-done(bool);
     in property <[SetHit]> set-hits;
     in property <string> set-query;
     callback set-hit(int);
@@ -2951,6 +2960,62 @@ export component AppWindow inherits Window {
         }
     }
     // naming a playlist: a new one, or a new name for one of yours
+    if root.la-open: Rectangle {
+        x: 0;
+        y: 0;
+        width: root.width;
+        height: root.height;
+        background: #00000080;
+        TouchArea { clicked => { root.la-done(false); } }
+        Rectangle {
+            width: min(640px, root.width - 60px);
+            height: min(root.height - 80px, 170px + root.la-rows.length * 64px);
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            background: Theme.elevated;
+            border-radius: 12px;
+            border-width: 1px;
+            border-color: Theme.line;
+            TouchArea { }
+            VerticalLayout {
+                padding: 20px;
+                spacing: 12px;
+                Text { text: root.la-head; color: Theme.text; font-size: 18px; font-weight: 800; }
+                Text { text: "Each looks like a song that's there already, under a slightly different name."; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
+                if root.la-rows.length > 1: HorizontalLayout {
+                    spacing: 8px;
+                    alignment: start;
+                    Text { text: "For all:"; color: Theme.muted; font-size: 12px; vertical-alignment: center; }
+                    Pill { label: "Keep Both"; clicked => { root.la-all(0); } }
+                    Pill { label: "Keep the Ones There"; clicked => { root.la-all(1); } }
+                    Pill { label: "Use the New Ones"; clicked => { root.la-all(2); } }
+                }
+                Flickable {
+                    vertical-stretch: 1;
+                    viewport-height: lav.preferred-height;
+                    lav := VerticalLayout {
+                        spacing: 10px;
+                        for r[i] in root.la-rows: HorizontalLayout {
+                            spacing: 12px;
+                            VerticalLayout {
+                                horizontal-stretch: 1;
+                                spacing: 2px;
+                                Marquee { text: "New: " + r.new; font-size: 13px; font-weight: 400; }
+                                Marquee { text: "There: " + r.old; font-size: 12px; font-weight: 400; ink: Theme.muted; }
+                            }
+                            Pill { label: r.choice; y: (parent.height - self.height) / 2; clicked => { root.la-cycle(i); } }
+                        }
+                    }
+                }
+                HorizontalLayout {
+                    alignment: end;
+                    spacing: 8px;
+                    Pill { label: "Cancel"; clicked => { root.la-done(false); } }
+                    Pill { label: "Add"; on: true; clicked => { root.la-done(true); } }
+                }
+            }
+        }
+    }
     if root.name-open: Rectangle {
         x: 0;
         y: 0;

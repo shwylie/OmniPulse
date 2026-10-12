@@ -17,6 +17,7 @@ mod discover;
 mod lang;
 mod panels;
 mod hide;
+mod lookalike;
 mod alerts;
 mod integrations;
 mod look;
@@ -5295,8 +5296,42 @@ fn pl_adopt_add(shared: &Shared, into: sources::Playlist, src: Option<sources::P
     });
 }
 
-/// Tracks into a playlist of yours (what's there already left out), said; shown again if it's open
+thread_local! {
+    /// Look-alikes being asked about: the playlist, what's added as it is, and each one to decide
+    static LA: RefCell<Option<(String, Vec<Track>, Vec<lookalike::Conflict>)>> = const { RefCell::new(None) };
+}
+
+fn la_paint(ui: &AppWindow) {
+    LA.with(|l| {
+        let Some((_, _, c)) = l.borrow().clone() else { return };
+        ui.set_la_head(if c.len() == 1 { "This might already be here".into() } else { format!("{} of these might already be here", c.len()).into() });
+        ui.set_la_rows(ModelRc::from(Rc::new(VecModel::from(c.iter().map(|x| LookAlike { new: lookalike::line(&x.new).into(), old: lookalike::line(&x.twin).into(), choice: x.choice.label().into() }).collect::<Vec<_>>()))));
+    });
+}
+
+/// Several songs added to a playlist here: exactly the same ones left out; look-alikes asked about first
 fn pl_add_many(shared: &Shared, id: &str, list: Vec<Track>) {
+    let have: Vec<Track> = shared.borrow().playlists.iter().find(|p| p.id == id).and_then(|p| p.tracks.clone()).unwrap_or_default();
+    let (add, ask) = lookalike::plan(&list, &have);
+    if ask.is_empty() || std::env::var_os("OMNIPULSE_SELFTEST").is_some() { return pl_add_now(shared, id, list, Vec::new()); }
+    LA.with(|l| *l.borrow_mut() = Some((id.to_string(), add, ask)));
+    if let Some(ui) = shared.borrow().ui.upgrade() { la_paint(&ui); ui.set_la_open(true); }
+}
+
+/// The look-alikes answered (Add), or not (Cancel: nothing added)
+fn la_done(shared: &Shared, ok: bool) {
+    let Some((id, add, ask)) = LA.with(|l| l.borrow_mut().take()) else { return };
+    if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_la_open(false); }
+    if !ok { return; }
+    let (add, replace) = lookalike::decide(add, &ask);
+    pl_add_now(shared, &id, add, replace);
+}
+
+/// Tracks into a playlist of yours (what's there already left out), said; shown again if it's open
+fn pl_add_now(shared: &Shared, id: &str, list: Vec<Track>, replace: Vec<(String, Track)>) {
+    // (a look-alike swapped for the new one: the one there out, the new one in)
+    for (old, _) in &replace { xpl::remove(&mut shared.borrow_mut().xpl, id, old); }
+    let list: Vec<Track> = list.into_iter().chain(replace.into_iter().map(|r| r.1)).collect();
     let title = shared.borrow().playlists.iter().find(|p| p.id == id).map(|p| p.title.clone()).unwrap_or_default();
     let collab = shared.borrow().xpl.as_array().is_some_and(|l| l.iter().any(|x| x["id"].as_str() == Some(id) && x["collab"].is_object()));
     let by = my_name(&shared.borrow());
@@ -7370,6 +7405,9 @@ fn main() -> Result<(), slint::PlatformError> {
     });
     let s = shared.clone();
     ui.on_crumb_go(move |i| crumb_go(&s, i.max(0) as usize));
+    ui.on_la_cycle({ let weak = ui.as_weak(); move |i| { LA.with(|l| { if let Some((_, _, c)) = l.borrow_mut().as_mut() { if let Some(x) = c.get_mut(i.max(0) as usize) { x.choice = x.choice.next(); } } }); if let Some(ui) = weak.upgrade() { la_paint(&ui); } } });
+    ui.on_la_all({ let weak = ui.as_weak(); move |k| { LA.with(|l| { if let Some((_, _, c)) = l.borrow_mut().as_mut() { for x in c.iter_mut() { x.choice = match k { 0 => lookalike::Choice::Both, 1 => lookalike::Choice::Old, _ => lookalike::Choice::New }; } } }); if let Some(ui) = weak.upgrade() { la_paint(&ui); } } });
+    ui.on_la_done({ let s = shared.clone(); move |ok| la_done(&s, ok) });
     ui.on_open_web(|url| { let _ = omnipulse_core::open_url(url.to_string()); });
     let s = shared.clone();
     ui.on_settings_close(move || settings_close(&s));
@@ -7769,6 +7807,8 @@ fn main() -> Result<(), slint::PlatformError> {
             // (OMNIPULSE_SELFTEST_PLAN=panels: the settings panels, opened (nothing saved))
             // (OMNIPULSE_SELFTEST_PLAN=spotify: a Spotify song played through Spotify (Seamless Mix off for it), and whether its sound comes)
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("spotify") { vec![(8, "spplay"), (14, "spcheck"), (20, "spcheck"), (21, "end")] }
+            // (OMNIPULSE_SELFTEST_PLAN=la: the look-alikes dialog, with two made up (nothing added))
+            else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("la") { vec![(8, "lashow"), (9, "lacycle"), (10, "end")] }
             // (OMNIPULSE_SELFTEST_PLAN=stats: the Stats page, its facts said)
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("stats") { vec![(6, "stats"), (8, "statsfacts"), (9, "end")] }
             // (OMNIPULSE_SELFTEST_PLAN=setsearch: Settings searched, a panel's path clicked back along, and closed)
@@ -7864,6 +7904,16 @@ fn main() -> Result<(), slint::PlatformError> {
                 "mixplats" => { let a = s.borrow(); let mut n: std::collections::BTreeMap<&str, usize> = Default::default(); for t in &a.page_tracks { *n.entry(t.plat()).or_default() += 1; } println!("selftest: mix \"{}\": {} tracks by platform {:?}", ui.get_page_title(), a.page_tracks.len(), n); }
                 "tall" => ui.window().set_size(slint::LogicalSize::new(1180.0, 2600.0)),
                 "short" => ui.window().set_size(slint::LogicalSize::new(1180.0, 760.0)),
+                "lashow" => {
+                    let lib: Vec<Track> = s.borrow().library.iter().take(4).cloned().collect();
+                    if lib.len() >= 4 {
+                        let c = vec![lookalike::Conflict { new: lib[0].clone(), twin: lib[1].clone(), choice: lookalike::Choice::Both }, lookalike::Conflict { new: lib[2].clone(), twin: lib[3].clone(), choice: lookalike::Choice::Both }];
+                        LA.with(|l| *l.borrow_mut() = Some(("none".into(), Vec::new(), c)));
+                        la_paint(&ui);
+                        ui.set_la_open(true);
+                    }
+                }
+                "lacycle" => { ui.invoke_la_cycle(1); println!("selftest: look-alikes: {:?}", ui.get_la_rows().iter().map(|r| r.choice.to_string()).collect::<Vec<_>>()); ui.invoke_la_done(false); }
                 "statsfacts" => println!("selftest: stats: {} | streak {} {} | facts {:?}", ui.get_st_big(), ui.get_st_streak(), ui.get_st_streak_sub(), ui.get_st_fact_heads().iter().zip(ui.get_st_facts().iter()).map(|(h, f)| format!("{h}: {f}")).collect::<Vec<_>>()),
                 "sshit" => { ui.invoke_set_hit(0); println!("selftest: after a hit: cat \"{}\", query \"{}\"", ui.get_set_cat(), ui.get_set_query()); }
                 "crumb2" => { println!("selftest: path {:?}", ui.get_pf_crumbs().iter().collect::<Vec<_>>()); ui.invoke_crumb_go(2); println!("selftest: after its 3rd part: open {}, head \"{}\"", ui.get_pf_open(), ui.get_pf_head()); }
