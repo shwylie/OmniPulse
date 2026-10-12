@@ -48,7 +48,25 @@ pub struct Plan {
 const RAMP_MIN: f64 = 0.002;
 
 /// How far the one playing is slowed (or sped) into the next one's tempo over its outro, at most
-const MAX_RAMP: f64 = 0.25;
+// (as far as two songs' beats are matched: further apart, easing one onto the other is heard as the
+// song going wrong, and their beats still don't meet, so it's a transition made for that instead)
+const MAX_RAMP: f64 = MAX_STRETCH;
+
+/// A bar with a beat as loud as this, against the song's loud ones (their 80th percentile), is the song
+/// (a verse, its singing), not an intro to it: the next one's start is never left out past its first two of them (an
+/// intro, or a build to the drop, is left out only while it's quieter)
+const CONTENT_BELOW_DB: f32 = 9.0;
+
+/// The latest bar the next one can start from: the start of the phrase its content (its first two bars
+/// near its loud ones) starts in; its end if it has none
+fn content_cap(m: &Measured, off: usize, n: usize) -> usize {
+    let (bars, beat) = (&m.rhythm.bar_db, &m.rhythm.bar_beat);
+    let Some(line) = loud_line(bars).map(|l| l + LOUD_WITHIN_DB - CONTENT_BELOW_DB) else { return n.saturating_sub(1) };
+    // (a bar of it: a beat, and near its loud ones; a beatless intro, however loud, is still an intro)
+    let content = |i: usize| bars[i] > line && beat.get(i).is_some_and(|b| *b >= BEAT_LINE);
+    let first = (0..bars.len().saturating_sub(1)).find(|&i| content(i) && content(i + 1)).unwrap_or(n.saturating_sub(1));
+    (0..=first.min(n.saturating_sub(1))).rev().find(|&c| on_phrase(c, off, PHRASE)).unwrap_or(0)
+}
 
 /// The tempo the one playing goes to over its outro to arrive at the next one's (the same tempo, or
 /// half or double time: the nearest), if it's not too far
@@ -224,11 +242,15 @@ pub fn plan_structure(a: &Measured, a_end_ms: u64, now_ms: u64, b: &Measured) ->
     let (_, a_end) = beat_span(&proper(a)?)?;
     let (b_main, _) = beat_span(&proper(b)?)?;
     let (a_off, b_off) = (phrase_offset(a), phrase_offset(b));
+    // (the next one's start left out: its quiet intro, never its content: from its phrase at the latest)
+    let cap = content_cap(b, b_off, bd.len());
+    let drop_at = drop_bar(b, b_off).map_or(b_main, |d| d.max(b_main));
+    // (where the next one starts from: no later than that)
+    let b_at = |k: usize| bd[k.min(cap).min(bd.len() - 1)];
     let (soonest, audible) = (now_ms as f64 + 4000.0, a_end_ms as f64 - 300.0);
     let (a_bar, b_bar) = (4.0 * a.rhythm.period_ms, 4.0 * b.rhythm.period_ms);
     // (bar k's downbeat; past the last one tracked, a bar on from it for each)
     let at = |k: usize| ad.get(k).copied().unwrap_or_else(|| ad[ad.len() - 1] + (k + 1 - ad.len()) as f64 * a_bar);
-    let b_at = |k: usize| bd[k.min(bd.len() - 1)];
     let matched = match_rate(a.rhythm.bpm, b.rhythm.bpm).map(|(r, _)| r).filter(|_| keys_fit(a, b));
     if let Some(r) = matched {
         let fits = |k: usize, n: u32| at(k) >= soonest && k + n as usize <= a_end && at(k) + a_bar * n as f64 <= audible;
@@ -249,8 +271,8 @@ pub fn plan_structure(a: &Measured, a_end_ms: u64, now_ms: u64, b: &Measured) ->
         let run_b = ((run as f64 / a_per_b).round() as usize).max(1);
         let every = if run_b >= PHRASE { PHRASE } else { run_b.clamp(1, 4) };
         // (an intro that builds to a drop: the switch-over on the drop, the build before the run-up cut)
-        let main = drop_bar(b, b_off).map_or(b_main, |d| d.max(b_main));
-        let from_bar = (0..bd.len()).find(|&c| on_phrase(c, b_off, every) && c + run_b >= main).unwrap_or(0).min(bd.len() - 1);
+        let main = drop_at;
+        let from_bar = (0..bd.len()).find(|&c| on_phrase(c, b_off, every) && c + run_b >= main).unwrap_or(0).min(bd.len() - 1).min(cap);
         let (bars, swap_bar) = (run as u32 + 1, run);
         // stretched to each one's tempo over the bars mixed, not its average (within a percent of it)
         let n = bars as usize * 4;
@@ -315,7 +337,7 @@ pub fn plan_structure(a: &Measured, a_end_ms: u64, now_ms: u64, b: &Measured) ->
                 ms: (len + 300.0).round() as u64,
                 swap_ms: len.round() as u64,
                 // (an intro that builds to a drop: in at the drop, the build cut too)
-                start_ms: b_at(drop_bar(b, b_off).map_or(b_main, |d| d.max(b_main))).round() as u64,
+                start_ms: b_at(drop_at).round() as u64,
                 rate: 1.0,
                 bars: 1,
                 semitones: 0,
@@ -547,15 +569,16 @@ mod tests {
         assert_eq!(p.at_ms, (500.0 + 56.0 * bar).round() as u64);
         // the next one from its bar 16 (a phrase), its beat in (bar 24) on the swap, the rest of its intro cut
         assert_eq!(p.start_ms, (300.0 + 16.0 * bar).round() as u64);
-        // an intro with a beat that builds (quiet, then fuller, then a long build) to its drop at bar 32:
-        // the switch-over on the drop, its first 24 bars cut
+        // an intro with a beat that builds (quiet, then fuller, then a long build) to its drop at bar 32: its
+        // quiet start cut, but not its fuller part (with a beat, near its loud ones: a verse, say, sung):
+        // from its phrase at bar 8, its drop after
         let built = shaped(m(128.0, 300.0, 0, 0.5), &song(&[(8, -16.0, true), (8, -11.0, true), (16, -12.0, true), (48, -7.0, true)]));
         assert_eq!(drop_bar(&built, 0), Some(32));
         // a smaller step up first (8 bars 3 dB up, still 3 dB under its loudest): not the drop
         let stepped = shaped(m(128.0, 300.0, 0, 0.5), &song(&[(8, -13.0, true), (8, -10.0, true), (16, -12.0, true), (48, -7.0, true)]));
         assert_eq!(drop_bar(&stepped, 0), Some(32));
         let p = plan_structure(&a, end, 10_000, &built).expect("a plan");
-        assert_eq!(p.start_ms, (300.0 + 24.0 * bar).round() as u64);
+        assert_eq!(p.start_ms, (300.0 + 8.0 * bar).round() as u64);
         // into it from the start (a few quiet bars, no rise to speak of): no drop, its beat as before
         assert_eq!(drop_bar(&shaped(m(128.0, 300.0, 0, 0.5), &song(&[(4, -12.0, false), (80, -10.0, true)])), 0), None);
         // a beat all through, end to end: the latest phrase that fits before the sound ends
@@ -612,19 +635,11 @@ mod tests {
         let fast_bar: f64 = 4.0 * 60_000.0 / 174.0;
         let a = shaped(m(128.0, 500.0, 0, 0.5), &song(&[(64, -10.0, true), (24, -11.0, false)]));
         let end = (500.0 + 88.0 * bar) as u64;
-        // 128 into 110: within reach, so eased onto one tempo over its beatless outro
+        // 128 into 110 (14% apart): past what's eased (as far as beats are matched, no further): a tape stop,
+        // not the two stretched to meet
         let slower = shaped(m(110.0, 300.0, 0, 0.5), &song(&[(24, -12.0, false), (64, -9.0, true)]));
         let q = plan_structure(&a, end, 10_000, &slower).expect("a plan");
-        let target = 110.0 / 128.0;
-        assert!(!q.beatmatched && !q.tape_stop && (q.out_tempo - target).abs() < 1e-9, "{}", q.out_tempo);
-        // the next one from the one playing's tempo (128: its 1.16x), both arriving at 110 on the switch-over
-        assert!((q.rate - 128.0 / 110.0).abs() < 1e-9 && (in_ramp(target, 0.0) - q.rate).abs() < 1e-9 && (in_ramp(target, 1.0) - 1.0).abs() < 1e-9);
-        assert!((out_ramp(target, 0.0) - 1.0).abs() < 1e-9 && (out_ramp(target, 1.0) - target).abs() < 1e-9 && out_ramp(target, 0.1) > 0.98);
-        for x in [0.2, 0.5, 0.8] { assert!((out_ramp(target, x) * 128.0 - in_ramp(target, x) * 110.0).abs() < 1e-9, "one tempo at {x}"); }
-        // its 8-bar outro, at the eased tempo (128 to 110: 16.1 s), and the next one from 8 bars before its beat
-        let bar_110: f64 = 4.0 * 60_000.0 / 110.0;
-        assert_eq!(q.ms, (bar * 8.0 * 2.0 / (1.0 + target)).round() as u64);
-        assert_eq!(q.start_ms, (300.0 + 16.0 * bar_110).round() as u64);
+        assert!(q.tape_stop && !q.beatmatched && q.out_tempo == 1.0, "{q:?}");
         // 128 into 174 (32% from it, and from its half time): too far: a tape stop. It brakes over its
         // last beat with one (two beats long), to rest on the downbeat its beat ends at (bar 64: its
         // outro cut); the next one goes as it stops, from its main part (bar 24: its intro cut)
