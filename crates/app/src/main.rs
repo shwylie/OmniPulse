@@ -16,6 +16,7 @@ mod updater;
 mod discover;
 mod lang;
 mod panels;
+mod hide;
 mod integrations;
 mod look;
 mod marks;
@@ -158,7 +159,7 @@ fn apply_filter(app: &mut App) {
     let found = |t: &Track| want.is_empty() || { let have = sources::words(&format!("{} {} {}", t.title, t.artist, t.album)); want.iter().all(|w| have.iter().any(|h| h.starts_with(w.as_str()))) };
     // (Search, with Hide likes: what you've liked left out)
     let mine: std::collections::HashSet<&str> = if app.page == "search" && prefs["hideLikes"].as_bool() == Some(true) { app.library.iter().map(|t| t.key.as_str()).collect() } else { Default::default() };
-    let shown = |t: &&Track| plat_on(&prefs, t.plat()) && (!fav_only || favs.contains(t.key.as_str())) && !mine.contains(t.key.as_str()) && streamsafe::allowed(&prefs, t) && found(t);
+    let shown = |t: &&Track| plat_on(&prefs, t.plat()) && (!fav_only || favs.contains(t.key.as_str())) && !mine.contains(t.key.as_str()) && !hide::no_version(&prefs, t) && streamsafe::allowed(&prefs, t) && found(t);
     let mut filtered: Vec<Track> = match (app.page.as_str(), chip) {
         ("library" | "rediscover" | "favourites" | "search" | "playlist", 1) => app.page_all.iter().filter(shown).filter(|t| !t.is_mix()).cloned().collect(),
         ("library" | "rediscover" | "favourites" | "search" | "playlist", 2) => app.page_all.iter().filter(shown).filter(|t| t.is_mix()).cloned().collect(),
@@ -376,6 +377,7 @@ fn open_page(shared: &Shared, page: &str) {
             let (mut pool, lp) = { let a = shared.borrow(); (a.library.clone(), a.web.last_played.clone()) };
             let cut = now_ms().saturating_sub(MONTH_MS);
             pool.retain(|t| lp.get(&t.key).copied().unwrap_or(0) < cut);
+            { let prefs = shared.borrow().web.prefs.clone(); pool.retain(|t| hide::rec_ok(&prefs, t)); }
             queue::shuffle_in_place(&mut pool);
             pool.sort_by_key(|t| lp.get(&t.key).copied().unwrap_or(0));   // never played first
             let none = { let a = shared.borrow(); a.web.favourites.is_empty() && !a.library.iter().any(|t| t.plat() != "local") };
@@ -2632,7 +2634,7 @@ fn autoplay_fill(shared: &Shared, then_play: bool) -> bool {
         let ok = |within: u64| {
             let lp = &last_played;
             let prefs = &prefs;
-            move |t: &Track| (sets || !t.is_mix()) && !(avoid && lp.get(&t.key).is_some_and(|&ts| now.saturating_sub(ts) < within)) && streamsafe::allowed(prefs, t)
+            move |t: &Track| (sets || !t.is_mix()) && !(avoid && lp.get(&t.key).is_some_and(|&ts| now.saturating_sub(ts) < within)) && streamsafe::allowed(prefs, t) && hide::rec_ok(prefs, t) && !hide::no_version(prefs, t)
         };
         let mut picks = queue::take_turns(lists.clone(), last_plat, &taken, ok(window));
         if picks.is_empty() && avoid {
@@ -3050,9 +3052,10 @@ fn song_request(shared: &Shared, id: u64, q: String, user: String) {
 /// The servers the web app's settings have on: the widget, the Stream Deck's remote, chat requests
 // ---------- Settings: the switches beyond Look ----------
 // (section, label, note, key, on unless switched off)
-const SET_ROWS: [(&str, &str, &str, &str, bool); 27] = [
+const SET_ROWS: [(&str, &str, &str, &str, bool); 28] = [
     ("Library", "Sets & Podcasts in the Queue", "Lists and autoplay include anything over 15 minutes. Off: only when you pick one.", "queueSets", false),
     ("Library", "Autoplay", "Plays similar tracks when the queue runs out.", "autoplay", true),
+    ("Library", "Hidden & Not Recommended", "Right-click a track to stop it, its album or its artist being recommended. Off: nothing is left out; the lists are kept.", "hideOn", true),
     ("Library", "Avoid Recent Plays", "Skips songs you've heard lately in what the app picks for you. What you choose yourself still plays.", "avoidRecent", true),
     ("Library", "Seamless Mix", "Songs with a beat blend into the next on it, as a DJ mixes: at its tempo, on its phrase, the next one sweeping in from the top as the one playing gives way below it (never both in one part of the sound), down to the drop. With songs that play from YouTube Music or your files (never Spotify's own playback), once their beat is known.", "mixOn", true),
     ("Library", "EQ Band Handoff", "Seamless Mix hands over a band at a time (highs, then voice and bass), as a DJ's EQ does, instead of sweeping one song into the other: quicker and more sudden.", "mixBands", false),
@@ -3253,6 +3256,13 @@ fn panel_press(shared: &Shared, key: &str) {
             outside_start(shared);
             "A new key: the addresses have it.".to_string()
         }
+        k if k.starts_with("un") && k.contains(':') => {
+            let (list, key) = k[2..].split_once(':').unwrap_or(("", ""));
+            let changes = hide::unhide(&shared.borrow().web.prefs, list, key);
+            for (k, v) in changes { pref_put(shared, k, v); }
+            hide_applied(shared);
+            if list == "v" { "It shows again.".to_string() } else { "It can be recommended again.".to_string() }
+        }
         "out2Restart" => {
             omnipulse_core::omni_input::stop();
             offset_apply(shared);
@@ -3261,6 +3271,28 @@ fn panel_press(shared: &Shared, key: &str) {
         _ => return,
     };
     if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_status(note.into()); }
+}
+
+/// Don't recommend this track (its album, its artist): saved, out of the page if it's a page of picks for
+/// you, and out of autoplay's picks still to come
+fn hide_track(shared: &Shared, t: &Track, what: &str) {
+    let Some((changes, said)) = hide::hide(&shared.borrow().web.prefs, t, what) else { return };
+    for (k, v) in changes { pref_put(shared, k, v); }
+    hide_applied(shared);
+    if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_status(said.into()); }
+}
+
+fn hide_applied(shared: &Shared) {
+    let prefs = shared.borrow().web.prefs.clone();
+    discover::hide_set(&prefs);
+    let mut a = shared.borrow_mut();
+    let picks = matches!(a.page.as_str(), "discover" | "rediscover" | "mix");
+    if picks { a.page_all.retain(|x| hide::rec_ok(&prefs, x)); }
+    apply_filter(&mut a);
+    let cur = a.queue.qi.unwrap_or(0);
+    let mut i = 0;
+    a.queue.items.retain(|q| { let keep = i <= cur || !q.auto || hide::rec_ok(&prefs, &q.t); i += 1; keep });
+    paint_queue(&mut a);
 }
 
 /// Saved: into the prefs, and what uses them started again with them
@@ -3461,6 +3493,7 @@ fn set_toggle(shared: &Shared, key: &str) {
                 if !on { ASK.with(|x| x.borrow_mut().take()); room_end(true); push_out(shared, true); }
                 jam_paint(shared);
             }
+            if key == "hideOn" { hide_applied(shared); }
             if key == "favPage" {
                 if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_fav_page(on); }
                 if !on && shared.borrow().page == "favourites" { open_page(shared, "library"); }
@@ -6568,6 +6601,10 @@ fn main() -> Result<(), slint::PlatformError> {
         if act.starts_with("pl") {
             drop(a);
             return pl_row_action(&s, &act, t);
+        }
+        if let Some(what) = act.strip_prefix("hide:") {
+            drop(a);
+            return hide_track(&s, &t, what);
         }
         if let Some(plat) = act.strip_prefix("link:") {
             drop(a);

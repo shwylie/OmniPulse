@@ -17,13 +17,14 @@ pub fn title(name: &str) -> &'static str {
         "alerts" => "Alerts",
         "remote" => "Stream Deck & Remote",
         "offset" => "OmniPulse Offset",
+        "hidden" => "Hidden & Not Recommended",
         _ => "Avoid Recent Plays",
     }
 }
 
 /// The panel a switch's Settings button opens (by the switch's pref)
 pub fn of_switch(key: &str) -> Option<&'static str> {
-    Some(match key { "req" => "requests", "widget" => "widget", "alertsOn" => "alerts", "remoteOn" => "remote", "out2On" => "offset", "avoidRecent" => "recent", _ => return None })
+    Some(match key { "req" => "requests", "widget" => "widget", "alertsOn" => "alerts", "remoteOn" => "remote", "out2On" => "offset", "avoidRecent" => "recent", "hideOn" => "hidden", _ => return None })
 }
 
 /// What a panel edits, and each one's default (the web app's)
@@ -34,6 +35,7 @@ fn keys(name: &str) -> Vec<(&'static str, Value)> {
         "alerts" => vec![("alertBot", json!("streamerbot")), ("sbHost", json!("127.0.0.1:8080")), ("sbOn", json!(true)), ("alertTrans", json!("seamless")), ("alertCSize", json!("medium")), ("alertCDir", json!("diag")), ("alertCAngle", json!(0)), ("alertAnim", json!("slide")), ("alertOwnCol", json!(false)), ("alertCol1", json!("#8e9bff")), ("alertCol2", json!("#b38cff")), ("alertDir", json!("115deg")), ("alertIcon", json!(1)), ("alertSecs", json!(5)), ("alertVol", json!(0.8)), ("botRemote", json!(false))],
         "remote" => vec![("remotePort", json!(7880))],
         "offset" => vec![("out2Offset", json!(0)), ("out2Volume", json!(1))],
+        "hidden" => vec![],
         _ => vec![("recentWindow", json!("week"))],
     }
 }
@@ -196,6 +198,7 @@ pub fn fields(name: &str, vals: &Map<String, Value>, prefs: &Value, lan: &str) -
                 button("remoteNewKey", "Secret Key", "New Key", "A new key: anything using the old address needs the new one."),
             ]
         }
+        "hidden" => crate::hide::fields(prefs),
         "offset" => vec![
             num("out2Offset", "Offset", "In ms, -5000 to 5000: how much later (or, below 0, earlier) OmniPulse Offset plays than you hear."),
             sel_owned("out2Volume", "Volume", "", pct(0.0, 1.0, 0.1)),

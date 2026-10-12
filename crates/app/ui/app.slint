@@ -446,6 +446,9 @@ component TrackRow inherits Rectangle {
                 MenuItem { title: "New Playlist..."; activated => { root.act("plnew"); } }
             }
             if root.removable: MenuItem { title: "Remove from This Playlist"; activated => { root.act("plremove"); } }
+            MenuItem { title: "Don't Recommend This Track"; activated => { root.act("hide:track"); } }
+            if root.item.album != "": MenuItem { title: "Don't Recommend This Album"; activated => { root.act("hide:album"); } }
+            if root.item.artist != "": MenuItem { title: "Don't Recommend " + root.item.artist; activated => { root.act("hide:artist"); } }
             if root.item.sc-link: MenuItem { title: "Copy SoundCloud Link"; activated => { root.act("link:soundcloud"); } }
             if root.item.sp-link: MenuItem { title: "Copy Spotify Link"; activated => { root.act("link:spotify"); } }
             if root.item.yt-link: MenuItem { title: "Copy YouTube Music Link"; activated => { root.act("link:youtube"); } }

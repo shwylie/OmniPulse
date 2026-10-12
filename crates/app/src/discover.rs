@@ -539,10 +539,18 @@ pub fn lang_of(prefs: &Value) -> String {
     prefs["recLang"].as_str().unwrap_or("en").to_string()
 }
 
+/// (the prefs Hidden & Not Recommended reads, as they were when Discover was made)
+static HIDE: std::sync::Mutex<Value> = std::sync::Mutex::new(Value::Null);
+
 fn lang_keep(list: Vec<Track>) -> Vec<Track> {
     let want = LANG.lock().unwrap().clone();
+    let hide = HIDE.lock().unwrap().clone();
+    let list: Vec<Track> = list.into_iter().filter(|t| crate::hide::rec_ok(&hide, t) && !crate::hide::no_version(&hide, t)).collect();
     crate::lang::filter(list, if want.is_empty() { "en" } else { &want })
 }
+
+/// Hidden & Not Recommended changed: what's made from now on leaves it out
+pub fn hide_set(prefs: &Value) { *HIDE.lock().unwrap() = prefs.clone(); }
 
 /// What a tile opens or plays
 pub async fn mix_tracks(m: &Mix, flags: (bool, bool, bool), liked: &Liked) -> Vec<Track> {
@@ -670,6 +678,7 @@ pub async fn build(input: Input) -> Vec<Shelf> {
     your_titles_set(&input.library);
     taste_set(&input);
     *LANG.lock().unwrap() = lang_of(&input.prefs);
+    hide_set(&input.prefs);
     let mut shelves = build_any(input).await;
     // (the shelves of songs in Discover's language; one left empty goes)
     for sh in shelves.iter_mut() {
