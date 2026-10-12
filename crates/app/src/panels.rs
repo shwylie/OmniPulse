@@ -274,6 +274,10 @@ fn plugin_fields(_prefs: &Value) -> Vec<Value> {
         Some(Err(e)) => f.push(note(&format!("\u{26a0} {e}"))),
         None => {}
     });
+    // each one's files (its manifest.json and main.js), to read what it does
+    let all = omnipulse_core::plugins::list();
+    if !all.is_empty() { f.push(note("Their files:")); }
+    for p in &all { f.push(button(&format!("plugFiles:{}", p.manifest.id), &p.manifest.name, "Show Its Files", "Opens the folder with its manifest.json and main.js.")); }
     // the ones you've added (those that come with OmniPulse stay)
     let added: Vec<omnipulse_core::plugins::Package> = omnipulse_core::plugins::list().into_iter().filter(|p| !p.bundled).collect();
     if !added.is_empty() { f.push(note("Added by you:")); }

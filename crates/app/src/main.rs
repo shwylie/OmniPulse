@@ -3885,6 +3885,12 @@ fn panel_press(shared: &Shared, key: &str) {
             if list == "p" { let mut a = shared.borrow_mut(); paint_sides(&mut a); }
             match list { "v" | "p" => "It shows again.".to_string(), "all" => "They can all be recommended again.".to_string(), _ => "It can be recommended again.".to_string() }
         }
+        k if k.starts_with("plugFiles:") => {
+            match omnipulse_core::plugins::folder_of(&k["plugFiles:".len()..]) {
+                Ok(dir) => { let _ = std::process::Command::new("explorer").arg(dir).spawn(); return; }
+                Err(e) => format!("Couldn't open its folder: {e}"),
+            }
+        }
         "widgetHide" => {
             let key = shared.borrow().queue.current().map(|t| t.key.clone()).unwrap_or_default();
             if let Ok(mut h) = integrations::WIDGET_HIDDEN.lock() { *h = key; }
