@@ -3170,18 +3170,20 @@ fn now_desc(ui: &AppWindow, t: &Track) {
     let track::Src::SoundCloud(id) = &t.src else { return };
     if let Some(d) = DESCS.with(|m| m.borrow().get(&t.key).cloned()) { ui.set_now_desc(d.into()); return; }
     let (id, key, weak) = (*id, t.key.clone(), ui.as_weak());
-    SHARED.with(|s| {
+    // (later, once whoever called this is done with the app: it can be in the middle of changing it)
+    slint::Timer::single_shot(std::time::Duration::ZERO, move || SHARED.with(|s| {
         let Some(sh) = s.borrow().clone() else { return };
-        sh.borrow().rt.spawn(async move {
+        let Ok(app) = sh.try_borrow() else { return };
+        app.rt.spawn(async move {
             let v = omnipulse_core::soundcloud::api_get(format!("/tracks/{id}")).await.unwrap_or_default();
             let d: String = v["description"].as_str().unwrap_or("").trim().chars().take(600).collect();
             let _ = weak.upgrade_in_event_loop(move |ui| SHARED.with(|s| {
                 DESCS.with(|m| m.borrow_mut().insert(key.clone(), d.clone()));
-                let still = s.borrow().as_ref().is_some_and(|sh| sh.borrow().queue.current().is_some_and(|c| c.key == key));
+                let still = s.borrow().as_ref().is_some_and(|sh| sh.try_borrow().is_ok_and(|a| a.queue.current().is_some_and(|c| c.key == key)));
                 if still { ui.set_now_desc(d.into()); }
             }));
         });
-    });
+    }));
 }
 
 /// The bar's heart and star for this track
