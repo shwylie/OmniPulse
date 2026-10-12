@@ -1002,6 +1002,9 @@ export component AppWindow inherits Window {
     callback queue-action(int, string);
     // the queue's Clear, and Clear requests (true)
     callback queue-clear(bool);
+    // Now Playing: where its song opens ("Open on SoundCloud"...), and its buttons' and artist's actions
+    in property <string> now-open;
+    callback now-act(string);
     // the open playlist's header: what it offers
     in property <bool> pl-share;
     in property <string> pl-collab;
@@ -2460,10 +2463,19 @@ export component AppWindow inherits Window {
                             spacing: 10px;
                             BadgedCover { art: root.now-art-big; initial: root.now-title; plat: root.now-plat; badge: 52px; corner: 14px; height: 360px; }
                             Text { text: root.now-title; color: Theme.text; font-size: 26px; font-weight: 800; wrap: word-wrap; }
-                            Text { text: root.now-artist; color: Theme.accent; font-size: 16px; font-weight: 600; }
+                            // (the artist: their page, a click away, as the web app's)
+                            Text { text: root.now-artist; color: nat.has-hover ? Theme.text : Theme.accent; font-size: 16px; font-weight: 600; wrap: word-wrap; nat := TouchArea { mouse-cursor: MouseCursor.pointer; clicked => { root.now-act("artist:0"); } } }
                             if root.now-uploader != "": Text { text: "uploaded by " + root.now-uploader; color: Theme.muted; font-size: 13px; }
                             Text { text: root.now-album; color: Theme.muted; font-size: 13px; }
                             if root.now-rhythm != "": Text { text: root.now-rhythm; color: Theme.muted; font-size: 12px; }
+                            // Like, Add to Favourites, Open on its platform
+                            if root.now-title != "": HorizontalLayout {
+                                spacing: 8px;
+                                alignment: start;
+                                if root.can-like: Pill { label: root.now-liked ? "Liked" : "Like"; on: root.now-liked; clicked => { root.like-toggle(); } }
+                                Pill { label: root.now-fav ? "In Favourites" : "Add to Favourites"; on: root.now-fav; clicked => { root.fav-toggle(); } }
+                                if root.now-open != "": Pill { label: root.now-open; clicked => { root.now-act("open"); } }
+                            }
                             Rectangle { vertical-stretch: 1; }
                         }
                         VerticalLayout {

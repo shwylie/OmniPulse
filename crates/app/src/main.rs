@@ -2991,6 +2991,7 @@ fn show_now(ui: &AppWindow, t: &Track) {
     ui.set_now_uploader(if apart { t.uploader.clone().into() } else { "".into() });
     ui.set_now_rhythm(rhythm_line(&t.key).into());
     ui.set_now_plat(t.plat().into());
+    ui.set_now_open(if t.web_link().is_empty() { "".into() } else { match t.plat() { "spotify" => "Open in Spotify", "youtube" => "Open in YouTube Music", "musicbrainz" => "Open on MusicBrainz", "deezer" => "Open on Deezer", "local" => "", _ => "Open on SoundCloud" }.into() });
     ui.set_now_art(slint::Image::default());
     ui.set_now_art_big(slint::Image::default());
 }
@@ -7883,6 +7884,7 @@ fn main() -> Result<(), slint::PlatformError> {
     });
     let s = shared.clone();
     ui.on_crumb_go(move |i| crumb_go(&s, i.max(0) as usize));
+    ui.on_now_act({ let s = shared.clone(); move |act| { let t = s.borrow().queue.current().cloned(); if let Some(t) = t { track_act(&s, &t, &act); } } });
     ui.on_title_rename({ let s = shared.clone(); move || name_ask(&s, Naming::AppName) });
     ui.on_title_signin({ let s = shared.clone(); move || { let i = ACCOUNTS.iter().position(|a| a.0 == "soundcloud").unwrap_or(0); account_act(&s, i); } });
     ui.on_page_pl({ let s = shared.clone(); move |act| {
