@@ -211,7 +211,7 @@ fn downbeats(m: &Measured) -> Vec<f64> {
 const TAPE_TAIL_MS: u64 = 300;
 
 pub fn handoff(p: &Plan, bands: bool) -> omnipulse_audio::Handoff {
-    if p.tape_stop { return omnipulse_audio::Handoff::tape(p.swap_ms, p.ms.saturating_sub(p.swap_ms + TAPE_TAIL_MS)); }
+    if p.tape_stop { return omnipulse_audio::Handoff::tape(p.swap_ms, p.ramp_ms); }
     if !p.beatmatched { return omnipulse_audio::Handoff::bass_swap(p.ms, p.ms / 2); }
     let beat = p.ms.saturating_sub(p.swap_ms) as f64 / 4.0;
     if bands { omnipulse_audio::Handoff::staged(p.ms, beat, p.swap_ms) } else { omnipulse_audio::Handoff::wipe(beat, p.swap_ms) }
@@ -338,20 +338,23 @@ pub fn plan_structure(a: &Measured, a_end_ms: u64, now_ms: u64, b: &Measured) ->
     let _ = (ramp, soft);
     let beat = a.rhythm.period_ms;
     let stop = (2.0 * beat).clamp(600.0, 1600.0);
-    let spin = (1.5 * b.rhythm.period_ms).clamp(400.0, 1000.0);
+    // (its spin-up under the stop's second half: at its speed as the other halts)
+    let spin = stop / 2.0;
     let from = at(a_end) - beat;
     if from < soonest || at(a_end) > audible + 300.0 { return None; }
     Some(Plan {
         at_ms: from.round() as u64,
-        ms: (stop + spin).round() as u64 + TAPE_TAIL_MS,
+        ms: stop.round() as u64 + TAPE_TAIL_MS,
         swap_ms: stop.round() as u64,
-        start_ms: b_at(drop_at).round() as u64,
+        // (from half its spin-up before its downbeat: spinning up reads half as much as it plays, so the
+        // downbeat comes as it's at its speed)
+        start_ms: (b_at(drop_at) - spin / 2.0).max(0.0).round() as u64,
         rate: 1.0,
         bars: 1,
         semitones: 0,
         beatmatched: false,
         out_tempo: 1.0,
-        ramp_ms: 0,
+        ramp_ms: (spin.round() as u64),
         tape_stop: true,
     })
 }
@@ -612,13 +615,16 @@ mod tests {
         assert!(p.tape_stop && !p.beatmatched && (p.rate, p.semitones, p.out_tempo) == (1.0, 0, 1.0), "{p:?}");
         assert_eq!(p.at_ms, (500.0 + 64.0 * bar - beat).round() as u64);
         assert_eq!(p.swap_ms, (2.0 * beat).round() as u64);
-        // (it spins up in its intro: a phrase before its beat comes in, bar 16)
-        assert_eq!(p.start_ms, (300.0 + 16.0 * fast_bar).round() as u64);
+        // (it spins up in its intro: a phrase before its beat comes in, bar 16, from half its spin-up (a quarter
+        // of the stop) before it, so that downbeat is at its speed)
+        let stop = (2.0 * beat).clamp(600.0, 1600.0);
+        assert_eq!(p.start_ms, (300.0 + 16.0 * fast_bar - stop / 4.0).round() as u64);
+        assert_eq!(p.ramp_ms, (stop / 2.0).round() as u64);
         // a beat to its very end: the same, on its last downbeat; into one with no intro: from its start
         let flat = shaped(m(128.0, 500.0, 0, 0.5), &song(&[(88, -10.0, true)]));
         let p = plan_structure(&flat, end, 10_000, &shaped(m(174.0, 300.0, 0, 0.5), &song(&[(88, -9.0, true)]))).expect("a plan");
         assert!(p.tape_stop);
-        assert_eq!((p.at_ms, p.start_ms), ((500.0 + 88.0 * bar - beat).round() as u64, 300));
+        assert_eq!((p.at_ms, p.start_ms), ((500.0 + 88.0 * bar - beat).round() as u64, (300.0 - stop / 4.0).round() as u64));
     }
 
     #[test]

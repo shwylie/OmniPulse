@@ -781,12 +781,14 @@ impl Handoff {
         Self { low: side, mid: side, high: side, echo: None, out_sweep: None, in_sweep: None, brake: Some((0, ms)), spin: None }
     }
 
-    /// A tape stop over `stop`, then a tape start over `start`: the one going out slows to a halt; as it
-    /// stops, the one coming in spins up from one to its speed. For songs too far apart (in tempo or in
-    /// key) to blend: neither ever heard over the other, and the next one eased in, not dropped in.
+    /// A tape stop over `stop`, with a tape start over `start` in its last part: the one going out slows to
+    /// a halt while, under its end, the one coming in spins up from one to its speed, arriving at it as
+    /// the other stops (no gap between them). For songs too far apart (in tempo or in key) to blend.
     pub fn tape(stop: u64, start: u64) -> Self {
-        let side = Ramp { in_at: stop, in_len: 10, out_at: stop.saturating_sub(60), out_len: 60 };
-        Self { low: side, mid: side, high: side, echo: None, out_sweep: None, in_sweep: None, brake: Some((0, stop)), spin: Some((stop, start.max(1))) }
+        let start = start.clamp(1, stop.max(1));
+        let from = stop - start;
+        let side = Ramp { in_at: from, in_len: 10, out_at: stop.saturating_sub(60), out_len: 60 };
+        Self { low: side, mid: side, high: side, echo: None, out_sweep: None, in_sweep: None, brake: Some((0, stop)), spin: Some((from, start)) }
     }
 
     fn frames(&self, rate: u64) -> Self {
@@ -1479,16 +1481,18 @@ mod mix_tests {
         let rate = 44_100u32;
         let a = Box::new(Tone::new(rate, 440.0, 0.3, 10.0));
         let b = Box::new(Tone::new(rate, 660.0, 0.3, 10.0));
-        // from 2 s: a second's stop, then a second's spin-up
-        let out = render_mix(a, b, (0.0, 0.0), rate, 2.0, 2300, Some(Handoff::tape(1000, 1000)), 6.0).unwrap();
+        // from 2 s: a two-second stop, the next one spinning up over its second second (no gap)
+        let out = render_mix(a, b, (0.0, 0.0), rate, 2.0, 2300, Some(Handoff::tape(2000, 1000)), 6.0).unwrap();
+        // (the next one alone, past the stop: its zero crossings in a tenth of a second)
         let ups = |at: f32| { let i = (at * rate as f32) as usize * 2; out[i..i + 2 * 4410].chunks(2).map(|f| f[0]).collect::<Vec<_>>().windows(2).filter(|w| w[0] < 0.0 && w[1] >= 0.0).count() };
-        // the one going out slowing; the next one not yet heard
-        assert!((30..=36).contains(&ups(2.2)), "slowing {}", ups(2.2));
-        // the next one spinning up: a quarter of the way (a quarter of 660 Hz: 16), three quarters (49)
-        assert!((13..=20).contains(&ups(3.25)), "spinning up {}", ups(3.25));
-        assert!((45..=53).contains(&ups(3.75)), "nearly there {}", ups(3.75));
-        // up to speed after (660 Hz: 66)
+        // the one going out slowing, alone, before the next one starts (a quarter in: 3/4 of 440 Hz)
+        assert!((30..=36).contains(&ups(2.45)), "slowing {}", ups(2.45));
+        // the next one at its speed as the other stops, and after (660 Hz: 66)
+        assert!((63..=69).contains(&ups(4.05)), "at speed {}", ups(4.05));
         assert!((63..=69).contains(&ups(4.6)), "after {}", ups(4.6));
+        // under the stop's end, both heard: something there, never silent between them
+        let quiet = (31..39).map(|t| t as f32 / 10.0).map(|t| { let i = (t * rate as f32) as usize * 2; out[i..i + 882].iter().fold(0.0f32, |m, v| m.max(v.abs())) }).fold(1.0f32, f32::min);
+        assert!(quiet > 0.05, "a gap: {quiet}");
     }
 
     #[test]
