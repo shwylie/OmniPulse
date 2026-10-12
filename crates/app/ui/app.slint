@@ -2990,7 +2990,17 @@ export component AppWindow inherits Window {
                             }
                         }
                         Rectangle { width: 1px; height: 24px; y: (parent.height - self.height) / 2; background: Theme.line; }
-                        IconButton { d: Icons.queue; tint: root.queue-open ? Theme.accent : Theme.muted; y: (parent.height - self.height) / 2; clicked => { root.queue-open = !root.queue-open; } }
+                        // (tracks dropped on it go in the queue, as the web app's)
+                        IconButton {
+                            d: Icons.queue;
+                            tint: root.queue-open || qbd.has-drag ? Theme.accent : Theme.muted;
+                            y: (parent.height - self.height) / 2;
+                            clicked => { root.queue-open = !root.queue-open; }
+                            qbd := DropArea {
+                                can-drop(e) => { return Dnd.accepts("queue", e.data) ? DragAction.copy : DragAction.none; }
+                                dropped(e) => { Dnd.dropped("queue", e.data); return e.proposed-action; }
+                            }
+                        }
                     }
                     // the progress: click or drag along it (along the top, in Minimal)
                     if root.player-style != "minimal": Progress { value: root.pos-frac; length-secs: root.dur-secs; loading: root.track-loading; preloading: root.preloading; mixing: root.mixing; released(v) => { root.seek(v); } }
