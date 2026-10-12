@@ -8446,6 +8446,8 @@ fn main() -> Result<(), slint::PlatformError> {
             // (OMNIPULSE_SELFTEST_PLAN=panels: the settings panels, opened (nothing saved))
             // (OMNIPULSE_SELFTEST_PLAN=spotify: a Spotify song played through Spotify (Seamless Mix off for it), and whether its sound comes)
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("spotify") { vec![(8, "spplay"), (14, "spcheck"), (20, "spcheck"), (21, "end")] }
+            // (OMNIPULSE_SELFTEST_PLAN=tp: Track preferences for what plays, its bar dragged)
+            else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("tp") { vec![(9, "play"), (12, "tprefs"), (13, "tpdrag"), (14, "nowmenu"), (15, "end")] }
             // (OMNIPULSE_SELFTEST_PLAN=la: the look-alikes dialog, with two made up (nothing added))
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("la") { vec![(8, "lashow"), (9, "lacycle"), (10, "end")] }
             // (OMNIPULSE_SELFTEST_PLAN=stats: the Stats page, its facts said)
@@ -8552,6 +8554,8 @@ fn main() -> Result<(), slint::PlatformError> {
                         ui.set_la_open(true);
                     }
                 }
+                "tpdrag" => { ui.invoke_tp_drag(0.2, 0); ui.invoke_tp_drag(0.8, 1); println!("selftest: trim bar {:.2}-{:.2}, start \"{}\" end \"{}\"", ui.get_tp_from(), ui.get_tp_to(), ui.get_tp_start(), ui.get_tp_end()); }
+                "nowmenu" => { ui.set_tp_open(false); ui.invoke_more_want(); println!("selftest: player menu: {:?}", ui.get_more_items().iter().map(|x| x.to_string()).collect::<Vec<_>>()); }
                 "lacycle" => { ui.invoke_la_cycle(1); println!("selftest: look-alikes: {:?}", ui.get_la_rows().iter().map(|r| r.choice.to_string()).collect::<Vec<_>>()); ui.invoke_la_done(false); }
                 w if w.starts_with("sd_") => { ui.invoke_stats_open(w[3..].into()); println!("selftest: stats detail \"{}\": \"{}\", {} blocks", &w[3..], ui.get_st_detail_head(), ui.get_st_blocks().row_count()); }
                 "statsfacts" => println!("selftest: stats: {} | streak {} {} | facts {:?}", ui.get_st_big(), ui.get_st_streak(), ui.get_st_streak_sub(), ui.get_st_fact_heads().iter().zip(ui.get_st_facts().iter()).map(|(h, f)| format!("{h}: {f}")).collect::<Vec<_>>()),
