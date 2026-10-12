@@ -8828,7 +8828,8 @@ fn main() -> Result<(), slint::PlatformError> {
             // (OMNIPULSE_SELFTEST_PLAN=spotify: a Spotify song played through Spotify (Seamless Mix off for it), and whether its sound comes)
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("spotify") { vec![(8, "spplay"), (14, "spcheck"), (20, "spcheck"), (21, "end")] }
             // (OMNIPULSE_SELFTEST_PLAN=rclick: a right-click on the sidebar's first playlist and on a Library row, and what shows)
-            else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("rclick") { vec![(12, "rclick:228:264"), (24, "esc"), (25, "end")] }
+            else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("rclick") { vec![(12, "rclick:214:269"), (14, "esc"), (15, "rclick:1000:630"), (17, "esc"), (18, "rclick:80:322"), (20, "esc"), (21, "end")] }
+            else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("rpick") { vec![(12, "rclick:500:384"), (13, "lclick:560:126"), (15, "lclick:560:30"), (16, "esc"), (17, "rclick:80:322"), (18, "lclick:127:344"), (20, "end")] }
             // (OMNIPULSE_SELFTEST_PLAN=tips: the pointer rested on the player bar's "..." and the shuffle button: their tooltips)
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("tips") { vec![(9, "play"), (11, "hover:1095:711"), (13, "tipsay"), (13, "hover:571:711"), (15, "tipsay"), (16, "hover:600:300"), (17, "tipsay"), (18, "end")] }
             // (OMNIPULSE_SELFTEST_PLAN=apple: Apple Music's sign-in window opened off-screen, Apple's page looked at, closed; nobody signs in)
@@ -8954,6 +8955,16 @@ fn main() -> Result<(), slint::PlatformError> {
                 w if w.starts_with("hover:") => {
                     let v: Vec<f32> = w[6..].split(':').filter_map(|x| x.parse().ok()).collect();
                     if v.len() == 2 { ui.window().dispatch_event(slint::platform::WindowEvent::PointerMoved { position: slint::LogicalPosition::new(v[0], v[1]) }); }
+                }
+                w if w.starts_with("lclick:") => {
+                    let v: Vec<f32> = w[7..].split(':').filter_map(|x| x.parse().ok()).collect();
+                    if v.len() == 2 {
+                        let at = slint::LogicalPosition::new(v[0], v[1]);
+                        ui.window().dispatch_event(slint::platform::WindowEvent::PointerMoved { position: at });
+                        ui.window().dispatch_event(slint::platform::WindowEvent::PointerPressed { position: at, button: slint::platform::PointerEventButton::Left });
+                        ui.window().dispatch_event(slint::platform::WindowEvent::PointerReleased { position: at, button: slint::platform::PointerEventButton::Left });
+                    }
+                    println!("selftest: page now {}", ui.get_page());
                 }
                 w if w.starts_with("rclick:") => {
                     use slint::platform::{PointerEventButton, WindowEvent};

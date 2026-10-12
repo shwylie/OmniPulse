@@ -121,6 +121,12 @@ global Icons {
 // Tooltips (as the web app's title="..."): one label for the whole window, put up by a control the
 // pointer has rested on for a moment, under it (over it near the window's foot); gone when the pointer
 // leaves, the control's clicked, or after a few seconds
+/// The window's size, for menus opened near its edges (they open up or to the left instead)
+export global Win {
+    in-out property <length> w: 1200px;
+    in-out property <length> h: 800px;
+}
+
 export global Tips {
     in-out property <string> text;
     in-out property <length> x;
@@ -166,13 +172,14 @@ component IconButton inherits Rectangle {
     in property <bool> filled: false;
     in property <color> tint: Theme.muted;
     callback clicked;
+    callback right-click(length, length);
     width: size;
     height: size;
     border-radius: size / 2;
     background: filled ? Theme.accent : (ta.has-hover ? Theme.elevated : transparent);
     Glyph { d: root.d; width: root.size * 0.55; height: root.size * 0.55; fill: filled ? Theme.on-accent : (ta.has-hover ? Theme.text : root.tint); }
     TipSpot { tip: root.tip; hover: ta.has-hover; }
-    ta := TouchArea { clicked => { Tips.on = false; root.clicked(); } }
+    ta := TouchArea { pointer-event(e) => { if (e.kind == PointerEventKind.down && e.button == PointerEventButton.right) { root.right-click(self.mouse-x, self.mouse-y); } } clicked => { Tips.on = false; root.clicked(); } }
 }
 
 component RoundButton inherits Rectangle {
@@ -196,6 +203,7 @@ component Pill inherits Rectangle {
     in property <string> d;
     in property <bool> on;
     callback clicked;
+    callback right-click(length, length);
     height: 38px;
     width: t.preferred-width + 36px + (root.d != "" ? 20px : 0px);
     border-radius: 19px;
@@ -209,7 +217,7 @@ component Pill inherits Rectangle {
         t := Text { text: root.label; color: Theme.text; font-size: 13px; font-weight: 600; vertical-alignment: center; }
     }
     TipSpot { tip: root.tip; hover: ta.has-hover; }
-    ta := TouchArea { clicked => { Tips.on = false; root.clicked(); } }
+    ta := TouchArea { pointer-event(e) => { if (e.kind == PointerEventKind.down && e.button == PointerEventButton.right) { root.right-click(self.mouse-x, self.mouse-y); } } clicked => { Tips.on = false; root.clicked(); } }
 }
 
 component Range inherits Rectangle {
@@ -449,20 +457,102 @@ component MenuRow inherits Rectangle {
     in property <bool> on;
     /// (where the sound plays: OmniPulse Offset plays here, a ring and its name)
     in property <bool> offset;
+    /// (opens a list: an arrow after it; the way back: one before it)
+    in property <bool> more;
+    in property <bool> back;
     callback clicked;
     height: 32px;
     border-radius: 6px;
-    background: ta.has-hover ? Theme.line : transparent;
+    background: ta.has-hover ? Theme.accent.with-alpha(0.22) : transparent;
     HorizontalLayout {
         padding-left: 10px;
         padding-right: 10px;
         spacing: 8px;
         Rectangle { width: 8px; Rectangle { width: 8px; height: 8px; y: (parent.height - self.height) / 2; border-radius: 4px; background: root.on ? Theme.accent : transparent; } }
         if root.offset: Rectangle { width: 8px; Rectangle { width: 8px; height: 8px; y: (parent.height - self.height) / 2; border-radius: 4px; border-width: 2px; border-color: Theme.accent-2; } }
+        if root.back: Text { text: "\u{2039}"; color: Theme.accent; font-size: 16px; vertical-alignment: center; }
         Text { text: root.label; color: Theme.text; font-size: 13px; vertical-alignment: center; overflow: elide; horizontal-stretch: 1; }
+        if root.more: Text { text: "\u{203a}"; color: Theme.accent; font-size: 16px; vertical-alignment: center; }
         if root.offset: Text { text: "Offset"; color: Theme.accent-2; font-size: 11px; font-weight: 700; vertical-alignment: center; }
     }
     ta := TouchArea { clicked => { root.clicked(); } }
+}
+
+/// One entry of our own right-click menu: a label (or a line), shown or not, and which of the two
+/// lists it opens instead (1, 2), if any
+export struct MenuEnt { label: string, show: bool, sep: bool, sub: int }
+
+/// Our own right-click menu, in the app's look (Slint's own only follows light or dark): placed over
+/// what it's for, opened by open() from that one's right-click. A list entry ("Add to Playlist >")
+/// shows that list in its place, with a way back. picked(entry, which in its list, or -1)
+component CtxMenu inherits Rectangle {
+    in property <[MenuEnt]> items;
+    in property <[string]> list1;
+    in property <[string]> list1-more;
+    in property <[string]> list2;
+    in property <[string]> list2-more;
+    in property <bool> enabled: true;
+    callback picked(int, int);
+    property <int> sub: 0;
+    property <int> from: -1;
+    property <length> px;
+    property <length> py;
+    public function open(x: length, y: length) {
+        if (!root.enabled) { return; }
+        root.sub = 0;
+        root.px = x;
+        root.py = y;
+        pop.show();
+    }
+    function pick(n: int, k: int) {
+        pop.close();
+        root.picked(n, k);
+    }
+    pop := PopupWindow {
+        // (kept in the window: up from the pointer near the bottom, left of it near the right)
+        x: root.absolute-position.x + root.px + 250px > Win.w - 8px ? root.px - 250px : root.px;
+        y: root.absolute-position.y + root.py + frame.preferred-height > Win.h - 8px ? max(root.py - frame.preferred-height, 8px - root.absolute-position.y) : root.py;
+        width: 250px;
+        close-policy: PopupClosePolicy.close-on-click-outside;
+        frame := Rectangle {
+            background: Theme.elevated;
+            border-radius: 10px;
+            border-width: 1px;
+            border-color: Theme.line;
+            drop-shadow-blur: 18px;
+            drop-shadow-color: #00000070;
+            VerticalLayout {
+                padding: 6px;
+                if root.sub == 0: VerticalLayout {
+                    for m[n] in root.items: VerticalLayout {
+                        if m.show && m.sep: Rectangle { height: 9px; Rectangle { height: 1px; background: Theme.line; } }
+                        if m.show && !m.sep: MenuRow {
+                            label: m.label;
+                            more: m.sub > 0;
+                            clicked => { if (m.sub > 0) { root.from = n; root.sub = m.sub; } else { root.pick(n, -1); } }
+                        }
+                    }
+                }
+                if root.sub > 0: VerticalLayout {
+                    MenuRow { label: "Back"; back: true; clicked => { root.sub = 0; } }
+                    Rectangle { height: 9px; Rectangle { height: 1px; background: Theme.line; } }
+                    Flickable {
+                        height: min(col.preferred-height, 360px);
+                        col := VerticalLayout {
+                            if root.sub == 1: VerticalLayout {
+                                for l[k] in root.list1: MenuRow { label: l; clicked => { root.pick(root.from, k); } }
+                                for l[k] in root.list1-more: MenuRow { label: l; clicked => { root.pick(root.from, root.list1.length + k); } }
+                            }
+                            if root.sub == 2: VerticalLayout {
+                                for l[k] in root.list2: MenuRow { label: l; clicked => { root.pick(root.from, k); } }
+                                for l[k] in root.list2-more: MenuRow { label: l; clicked => { root.pick(root.from, root.list2.length + k); } }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
 
 component Toggle inherits Rectangle {
@@ -504,6 +594,7 @@ component NavItem inherits Rectangle {
     /// its icon turns slowly while it's pointed at (Favourites' star)
     in property <bool> spin;
     callback clicked;
+    callback right-click(length, length);
     height: 38px;
     border-radius: 8px;
     background: active ? Theme.elevated : (ta.has-hover ? #ffffff08 : transparent);
@@ -522,7 +613,7 @@ component NavItem inherits Rectangle {
         }
         if !root.compact: Text { text: root.label; color: active ? Theme.text : Theme.muted; font-size: 14px; font-weight: active ? 700 : 500; vertical-alignment: center; overflow: elide; }
     }
-    ta := TouchArea { clicked => { root.clicked(); } }
+    ta := TouchArea { pointer-event(e) => { if (e.kind == PointerEventKind.down && e.button == PointerEventButton.right) { root.right-click(self.mouse-x, self.mouse-y); } } clicked => { root.clicked(); } }
 }
 
 component Chip inherits Rectangle {
@@ -611,6 +702,7 @@ component TrackRow inherits Rectangle {
       Rectangle {
         ta := TouchArea {
             pointer-event(e) => {
+                if (e.kind == PointerEventKind.down && e.button == PointerEventButton.right) { cm1.open(self.mouse-x, self.mouse-y); }
                 if (e.kind == PointerEventKind.down && e.button == PointerEventButton.left) {
                     root.picking = e.modifiers.control || e.modifiers.shift;
                     if (root.picking) { root.pick(e.modifiers.shift ? 2 : 1); }
@@ -619,40 +711,57 @@ component TrackRow inherits Rectangle {
             clicked => { if (!root.picking) { root.play(); } }
         }
           // (on top: it only takes right-clicks, the rest goes through to what's under it)
-          ContextMenuArea {
+          cm1 := CtxMenu {
               width: 100%; height: 100%;
-              Menu {
-            MenuItem { title: "Play"; activated => { root.act("play"); } }
-            MenuItem { title: "Play Next"; activated => { root.act("next"); } }
-            MenuItem { title: "Add to Queue"; activated => { root.act("add"); } }
-            Menu {
-                title: "Add to Playlist";
-                for l[k] in root.lists: MenuItem { title: l; activated => { root.act("pl" + k); } }
-                MenuItem { title: "New Playlist..."; activated => { root.act("plnew"); } }
-            }
-            MenuSeparator { }
-            if root.item.can-like: MenuItem { title: root.item.liked ? "Remove from Likes" : "Add to Likes"; activated => { root.act("like"); } }
-            if root.item.fav-on: MenuItem { title: root.item.fav ? "Remove from Favourites" : "Add to Favourites"; activated => { root.act("fav"); } }
-            if root.item.artists.length > 1: Menu {
-                title: "Go to Artist";
-                for n[k] in root.item.artists: MenuItem { title: n; activated => { root.act("artist:" + k); } }
-            }
-            if root.item.artists.length <= 1: MenuItem { title: "Go to Artist"; activated => { root.act("artist:0"); } }
-            if root.item.uploader != "": MenuItem { title: "Go to " + root.item.uploader + " (Uploader)"; activated => { root.act("uploader"); } }
-            if root.removable: MenuItem { title: "Remove from This Playlist"; activated => { root.act("plremove"); } }
-            MenuSeparator { }
-            MenuItem { title: "Don't Recommend This Track"; activated => { root.act("hide:track"); } }
-            if root.item.album != "": MenuItem { title: "Don't Recommend This Album"; activated => { root.act("hide:album"); } }
-            if root.item.artist != "": MenuItem { title: "Don't Recommend " + root.item.artist; activated => { root.act("hide:artist"); } }
-            if root.item.cleared != "": MenuItem { title: root.item.cleared; activated => { root.act("cleared"); } }
-            MenuSeparator { }
-            if root.item.open-label != "": MenuItem { title: root.item.open-label; activated => { root.act("open"); } }
-            if root.item.sc-link: MenuItem { title: "Copy SoundCloud Link"; activated => { root.act("link:soundcloud"); } }
-            if root.item.sp-link: MenuItem { title: "Copy Spotify Link"; activated => { root.act("link:spotify"); } }
-            if root.item.yt-link: MenuItem { title: "Copy YouTube Music Link"; activated => { root.act("link:youtube"); } }
-            MenuSeparator { }
-            MenuItem { title: "Track Preferences..."; activated => { root.act("prefs"); } }
-        }
+              items: [
+                  { label: "Play", show: true },
+                  { label: "Play Next", show: true },
+                  { label: "Add to Queue", show: true },
+                  { label: "Add to Playlist", show: true, sub: 1 },
+                  { sep: true, show: true },
+                  { label: root.item.liked ? "Remove from Likes" : "Add to Likes", show: root.item.can-like },
+                  { label: root.item.fav ? "Remove from Favourites" : "Add to Favourites", show: root.item.fav-on },
+                  { label: "Go to Artist", show: root.item.artists.length > 1, sub: 2 },
+                  { label: "Go to Artist", show: root.item.artists.length <= 1 },
+                  { label: "Go to " + root.item.uploader + " (Uploader)", show: root.item.uploader != "" },
+                  { label: "Remove from This Playlist", show: root.removable },
+                  { sep: true, show: true },
+                  { label: "Don't Recommend This Track", show: true },
+                  { label: "Don't Recommend This Album", show: root.item.album != "" },
+                  { label: "Don't Recommend " + root.item.artist, show: root.item.artist != "" },
+                  { label: root.item.cleared, show: root.item.cleared != "" },
+                  { sep: true, show: true },
+                  { label: root.item.open-label, show: root.item.open-label != "" },
+                  { label: "Copy SoundCloud Link", show: root.item.sc-link },
+                  { label: "Copy Spotify Link", show: root.item.sp-link },
+                  { label: "Copy YouTube Music Link", show: root.item.yt-link },
+                  { sep: true, show: true },
+                  { label: "Track Preferences...", show: true }
+              ];
+              list1: root.lists;
+              list1-more: ["New Playlist..."];
+              list2: root.item.artists;
+              picked(n, k) => {
+                  if (n == 0) { root.act("play"); }
+                  if (n == 1) { root.act("next"); }
+                  if (n == 2) { root.act("add"); }
+                  if (n == 3) { if (k < root.lists.length) { root.act("pl" + k); } else if (k == root.lists.length + 0) { root.act("plnew"); } }
+                  if (n == 5) { root.act("like"); }
+                  if (n == 6) { root.act("fav"); }
+                  if (n == 7) { if (k < root.item.artists.length) { root.act("artist:" + k); } }
+                  if (n == 8) { root.act("artist:0"); }
+                  if (n == 9) { root.act("uploader"); }
+                  if (n == 10) { root.act("plremove"); }
+                  if (n == 12) { root.act("hide:track"); }
+                  if (n == 13) { root.act("hide:album"); }
+                  if (n == 14) { root.act("hide:artist"); }
+                  if (n == 15) { root.act("cleared"); }
+                  if (n == 17) { root.act("open"); }
+                  if (n == 18) { root.act("link:soundcloud"); }
+                  if (n == 19) { root.act("link:spotify"); }
+                  if (n == 20) { root.act("link:youtube"); }
+                  if (n == 22) { root.act("prefs"); }
+              }
           }
       }
     }
@@ -722,30 +831,45 @@ component TileView inherits Rectangle {
         Text { text: root.tile.sub; color: Theme.muted; font-size: 12px; overflow: elide; }
     }
     Rectangle {
-        ta := TouchArea { clicked => { root.clicked(); } }
+        ta := TouchArea { pointer-event(e) => { if (e.kind == PointerEventKind.down && e.button == PointerEventButton.right) { cm2.open(self.mouse-x, self.mouse-y); } } clicked => { root.clicked(); } }
         // (on top: it only takes right-clicks, the rest goes through to what's under it)
-        ContextMenuArea {
+        cm2 := CtxMenu {
             width: 100%; height: 100%;
             enabled: root.tile.track || root.album;
-            Menu {
-            if root.album: MenuItem { title: "Open"; activated => { root.clicked(); } }
-            if root.album: MenuItem { title: "Play"; activated => { root.act("album-play"); } }
-            if root.album: MenuSeparator { }
-            if root.album: MenuItem { title: "Don't Recommend This Album"; activated => { root.act("album-hide"); } }
-            if !root.album: MenuItem { title: "Play"; activated => { root.clicked(); } }
-            if !root.album: MenuItem { title: "Play Next"; activated => { root.act("next"); } }
-            if !root.album: MenuItem { title: "Add to Queue"; activated => { root.act("add"); } }
-            if !root.album: MenuSeparator { }
-            if !root.album: MenuItem { title: root.tile.liked ? "Remove from Likes" : "Add to Likes"; activated => { root.act("like"); } }
-            if !root.album: MenuItem { title: "Add to Favourites"; activated => { root.act("fav"); } }
-            if !root.album: MenuItem { title: "Go to Artist"; activated => { root.act("artist:0"); } }
-            if !root.album: MenuSeparator { }
-            if !root.album: MenuItem { title: "Don't Recommend This Track"; activated => { root.act("hide:track"); } }
-            if !root.album: MenuItem { title: "Don't Recommend This Artist"; activated => { root.act("hide:artist"); } }
-            if !root.album: MenuSeparator { }
-            if !root.album: MenuItem { title: "Open on Its Platform"; activated => { root.act("open"); } }
-            if !root.album: MenuItem { title: "Track Preferences..."; activated => { root.act("prefs"); } }
-        }
+            items: [
+                { label: "Open", show: root.album },
+                { label: "Play", show: root.album },
+                { sep: true, show: root.album },
+                { label: "Don't Recommend This Album", show: root.album },
+                { label: "Play", show: !root.album },
+                { label: "Play Next", show: !root.album },
+                { label: "Add to Queue", show: !root.album },
+                { sep: true, show: !root.album },
+                { label: root.tile.liked ? "Remove from Likes" : "Add to Likes", show: !root.album },
+                { label: "Add to Favourites", show: !root.album },
+                { label: "Go to Artist", show: !root.album },
+                { sep: true, show: !root.album },
+                { label: "Don't Recommend This Track", show: !root.album },
+                { label: "Don't Recommend This Artist", show: !root.album },
+                { sep: true, show: !root.album },
+                { label: "Open on Its Platform", show: !root.album },
+                { label: "Track Preferences...", show: !root.album }
+            ];
+            picked(n, k) => {
+                if (n == 0) { root.clicked(); }
+                if (n == 1) { root.act("album-play"); }
+                if (n == 3) { root.act("album-hide"); }
+                if (n == 4) { root.clicked(); }
+                if (n == 5) { root.act("next"); }
+                if (n == 6) { root.act("add"); }
+                if (n == 8) { root.act("like"); }
+                if (n == 9) { root.act("fav"); }
+                if (n == 10) { root.act("artist:0"); }
+                if (n == 12) { root.act("hide:track"); }
+                if (n == 13) { root.act("hide:artist"); }
+                if (n == 15) { root.act("open"); }
+                if (n == 16) { root.act("prefs"); }
+            }
         }
     }
 }
@@ -815,6 +939,8 @@ component SetRowView inherits Card {
 }
 
 export component AppWindow inherits Window {
+    changed width => { Win.w = self.width; }
+    changed height => { Win.h = self.height; }
     title: root.app-name != "" ? root.app-name : "OmniPulse";
     // Settings > App > Display Name: in the title bar and the taskbar (the web app's appName)
     in-out property <string> app-name;
@@ -943,7 +1069,7 @@ export component AppWindow inherits Window {
     // Settings > Look (and the built-in controls, light or dark to match)
     in property <bool> light-theme;
     changed light-theme => { Palette.color-scheme = self.light-theme ? ColorScheme.light : ColorScheme.dark; }
-    init => { Palette.color-scheme = self.light-theme ? ColorScheme.light : ColorScheme.dark; }
+    init => { Palette.color-scheme = self.light-theme ? ColorScheme.light : ColorScheme.dark; Win.w = self.width; Win.h = self.height; }
     in-out property <float> theme-step: 3;
     in-out property <float> tint-hue: 225;
     in-out property <float> tint-strength: 1;
@@ -1467,13 +1593,16 @@ export component AppWindow inherits Window {
                             allow-move: true;
                             data: Dnd.payload("n:" + id);
                             Rectangle {
-                                NavItem { label: root.nav-label(id); d: root.nav-icon(id); spin: id == "navFavourites"; compact: root.narrow; active: root.nav-active(id); clicked => { root.nav(root.nav-page(id)); } }
+                                NavItem { right-click(x, y) => { cm3.open(x, y); } label: root.nav-label(id); d: root.nav-icon(id); spin: id == "navFavourites"; compact: root.narrow; active: root.nav-active(id); clicked => { root.nav(root.nav-page(id)); } }
                                 // (on top: it only takes right-clicks, the rest goes through to what's under it)
-                                ContextMenuArea {
+                                cm3 := CtxMenu {
                                     width: 100%; height: 100%;
-                                    Menu {
-                                    if id == "navFavourites" || id == "navSets" || id == "navStats": MenuItem { title: "Hide from the Sidebar"; activated => { root.nav-hide(id); } }
-                                }
+                                    items: [
+                                        { label: "Hide from the Sidebar", show: id == "navFavourites" || id == "navSets" || id == "navStats" }
+                                    ];
+                                    picked(n, k) => {
+                                        if (n == 0) { root.nav-hide(id); }
+                                    }
                                 }
                             }
                         }
@@ -1483,14 +1612,18 @@ export component AppWindow inherits Window {
                         padding-left: 12px;
                         Text { text: "Playlists"; color: Theme.muted; font-size: 12px; font-weight: 700; vertical-alignment: center; horizontal-stretch: 1; }
                         Rectangle { width: 26px; height: 26px;
-                            IconButton { tip: "New playlist"; d: Icons.add; size: 26px; clicked => { root.pl-new(); } }
+                            IconButton { right-click(x, y) => { cm4.open(x, y); } tip: "New playlist"; d: Icons.add; size: 26px; clicked => { root.pl-new(); } }
                             // (on top: it only takes right-clicks, the rest goes through to what's under it)
-                            ContextMenuArea {
+                            cm4 := CtxMenu {
                                 width: 100%; height: 100%;
-                                Menu {
-                                MenuItem { title: "New playlist"; activated => { root.pl-new(); } }
-                                MenuItem { title: "Import a playlist file..."; activated => { root.pl-import(); } }
-                            }
+                                items: [
+                                    { label: "New playlist", show: true },
+                                    { label: "Import a playlist file...", show: true }
+                                ];
+                                picked(n, k) => {
+                                    if (n == 0) { root.pl-new(); }
+                                    if (n == 1) { root.pl-import(); }
+                                }
                             }
                         }
                     }
@@ -1519,26 +1652,42 @@ export component AppWindow inherits Window {
                               allow-copy: true;
                               data: Dnd.payload("p:" + i);
                             Rectangle {
-                                sta := TouchArea { clicked => { root.side(i); } }
+                                sta := TouchArea { pointer-event(e) => { if (e.kind == PointerEventKind.down && e.button == PointerEventButton.right) { cm5.open(self.mouse-x, self.mouse-y); } } clicked => { root.side(i); } }
                                 // (on top: it only takes right-clicks, the rest goes through to what's under it)
-                                ContextMenuArea {
+                                cm5 := CtxMenu {
                                     width: 100%; height: 100%;
-                                    Menu {
-                                    MenuItem { title: "Open"; activated => { root.side(i); } }
-                                    if s.share: MenuItem { title: "Share"; activated => { root.side-action(i, "share"); } }
-                                    if s.sc: MenuItem { title: "Copy SoundCloud Link"; activated => { root.side-action(i, "link:soundcloud"); } }
-                                    if s.sp: MenuItem { title: "Copy Spotify Link"; activated => { root.side-action(i, "link:spotify"); } }
-                                    if s.share && !(s.collab && !s.collab-owner): MenuItem { title: s.collab ? "Copy invite link" : "Invite collaborators"; activated => { root.side-action(i, "collab"); } }
-                                    if s.collab: MenuItem { title: s.collab-owner ? "Stop collaborating" : "Leave collaboration"; activated => { root.side-action(i, "collab-leave"); } }
-                                    if s.own: MenuItem { title: "Export to SoundCloud & Spotify"; activated => { root.side-action(i, "export"); } }
-                                    if s.merged: MenuItem { title: "Unmerge Playlists"; activated => { root.side-action(i, "unmerge"); } }
-                                    if s.own: MenuItem { title: "Rename..."; activated => { root.side-action(i, "rename"); } }
-                                    if s.own: MenuItem { title: "Delete"; activated => { root.side-action(i, "delete"); } }
-                                    MenuItem { title: "Hide playlist"; activated => { root.side-action(i, "hide"); } }
-                                    if !s.own && s.share: MenuItem { title: "Switch to a Playlist on This PC"; activated => { root.side-action(i, "switch"); } }
-                                    MenuItem { title: "Export as M3U..."; activated => { root.side-action(i, "export:m3u"); } }
-                                    MenuItem { title: "Export as CSV..."; activated => { root.side-action(i, "export:csv"); } }
-                                }
+                                    items: [
+                                        { label: "Open", show: true },
+                                        { label: "Share", show: s.share },
+                                        { label: "Copy SoundCloud Link", show: s.sc },
+                                        { label: "Copy Spotify Link", show: s.sp },
+                                        { label: s.collab ? "Copy invite link" : "Invite collaborators", show: s.share && !(s.collab && !s.collab-owner) },
+                                        { label: s.collab-owner ? "Stop collaborating" : "Leave collaboration", show: s.collab },
+                                        { label: "Export to SoundCloud & Spotify", show: s.own },
+                                        { label: "Unmerge Playlists", show: s.merged },
+                                        { label: "Rename...", show: s.own },
+                                        { label: "Delete", show: s.own },
+                                        { label: "Hide playlist", show: true },
+                                        { label: "Switch to a Playlist on This PC", show: !s.own && s.share },
+                                        { label: "Export as M3U...", show: true },
+                                        { label: "Export as CSV...", show: true }
+                                    ];
+                                    picked(n, k) => {
+                                        if (n == 0) { root.side(i); }
+                                        if (n == 1) { root.side-action(i, "share"); }
+                                        if (n == 2) { root.side-action(i, "link:soundcloud"); }
+                                        if (n == 3) { root.side-action(i, "link:spotify"); }
+                                        if (n == 4) { root.side-action(i, "collab"); }
+                                        if (n == 5) { root.side-action(i, "collab-leave"); }
+                                        if (n == 6) { root.side-action(i, "export"); }
+                                        if (n == 7) { root.side-action(i, "unmerge"); }
+                                        if (n == 8) { root.side-action(i, "rename"); }
+                                        if (n == 9) { root.side-action(i, "delete"); }
+                                        if (n == 10) { root.side-action(i, "hide"); }
+                                        if (n == 11) { root.side-action(i, "switch"); }
+                                        if (n == 12) { root.side-action(i, "export:m3u"); }
+                                        if (n == 13) { root.side-action(i, "export:csv"); }
+                                    }
                                 }
                             }
                              }
@@ -1695,15 +1844,19 @@ export component AppWindow inherits Window {
                         if root.page == "artist" && root.follow-label != "": Rectangle {
                             width: fpill.preferred-width;
 
-                            fpill := Pill { label: root.follow-label; on: root.follow-on; y: 7px; clicked => { root.follow-click(); } }
+                            fpill := Pill { right-click(x, y) => { cm6.open(x, y); } label: root.follow-label; on: root.follow-on; y: 7px; clicked => { root.follow-click(); } }
                             // (on top: it only takes right-clicks, the rest goes through to what's under it)
-                            ContextMenuArea {
+                            cm6 := CtxMenu {
                                 width: 100%; height: 100%;
                                 enabled: root.follow-sc != "" || root.follow-sp != "";
-                                Menu {
-                                if root.follow-sc != "": MenuItem { title: root.follow-sc; activated => { root.follow-plat("soundcloud"); } }
-                                if root.follow-sp != "": MenuItem { title: root.follow-sp; activated => { root.follow-plat("spotify"); } }
-                            }
+                                items: [
+                                    { label: root.follow-sc, show: root.follow-sc != "" },
+                                    { label: root.follow-sp, show: root.follow-sp != "" }
+                                ];
+                                picked(n, k) => {
+                                    if (n == 0) { root.follow-plat("soundcloud"); }
+                                    if (n == 1) { root.follow-plat("spotify"); }
+                                }
                             }
                         }
                         Pill { label: "Favourites only"; d: Icons.star; on: root.fav-only; y: 7px; clicked => { root.fav-only = !root.fav-only; root.fav-only-changed(root.fav-only); } }
@@ -1784,16 +1937,22 @@ export component AppWindow inherits Window {
                                 Text { text: a.sub; color: Theme.muted; font-size: 12px; overflow: elide; horizontal-alignment: center; }
                             }
                             Rectangle {
-                                ata := TouchArea { clicked => { root.artist(i); } }
+                                ata := TouchArea { pointer-event(e) => { if (e.kind == PointerEventKind.down && e.button == PointerEventButton.right) { cm7.open(self.mouse-x, self.mouse-y); } } clicked => { root.artist(i); } }
                                 // (on top: it only takes right-clicks, the rest goes through to what's under it)
-                                ContextMenuArea {
+                                cm7 := CtxMenu {
                                     width: 100%; height: 100%;
-                                    Menu {
-                                    MenuItem { title: "Open"; activated => { root.artist(i); } }
-                                    if !a.on-sc: MenuItem { title: "Follow on SoundCloud Too"; activated => { root.artist-act(i, "follow:soundcloud"); } }
-                                    if !a.on-sp: MenuItem { title: "Follow on Spotify Too"; activated => { root.artist-act(i, "follow:spotify"); } }
-                                    MenuItem { title: "Unfollow Everywhere"; activated => { root.artist-act(i, "unfollow"); } }
-                                }
+                                    items: [
+                                        { label: "Open", show: true },
+                                        { label: "Follow on SoundCloud Too", show: !a.on-sc },
+                                        { label: "Follow on Spotify Too", show: !a.on-sp },
+                                        { label: "Unfollow Everywhere", show: true }
+                                    ];
+                                    picked(n, k) => {
+                                        if (n == 0) { root.artist(i); }
+                                        if (n == 1) { root.artist-act(i, "follow:soundcloud"); }
+                                        if (n == 2) { root.artist-act(i, "follow:spotify"); }
+                                        if (n == 3) { root.artist-act(i, "unfollow"); }
+                                    }
                                 }
                             }
                         }
@@ -2898,32 +3057,46 @@ export component AppWindow inherits Window {
                                         allow-move: true;
                                         allow-copy: true;
                                         data: Dnd.payload("q:" + i);
-                                        qta := TouchArea { clicked => { root.play-queue(i); } }
+                                        qta := TouchArea { pointer-event(e) => { if (e.kind == PointerEventKind.down && e.button == PointerEventButton.right) { cm8.open(self.mouse-x, self.mouse-y); } } clicked => { root.play-queue(i); } }
                                     }
                                     // (on top: it only takes right-clicks, the rest goes through to what's under it)
-                                    ContextMenuArea {
+                                    cm8 := CtxMenu {
                                         width: 100%; height: 100%;
-                                        Menu {
-                                        if !q.playing: MenuItem { title: "Play"; activated => { root.play-queue(i); } }
-                                        if !q.playing: MenuItem { title: "Play Next"; activated => { root.queue-action(i, "next"); } }
-                                        if !q.playing: MenuItem { title: "Remove from Queue"; activated => { root.queue-action(i, "remove"); } }
-                                        MenuItem { title: "Shuffle Next Up"; activated => { root.queue-action(i, "shuffle"); } }
-                                        Menu {
-                                            title: "Add to Playlist";
-                                            for l[k] in root.own-lists: MenuItem { title: l; activated => { root.queue-action(i, "pl" + k); } }
-                                            MenuItem { title: "New Playlist..."; activated => { root.queue-action(i, "plnew"); } }
+                                        items: [
+                                            { label: "Play", show: !q.playing },
+                                            { label: "Play Next", show: !q.playing },
+                                            { label: "Remove from Queue", show: !q.playing },
+                                            { label: "Shuffle Next Up", show: true },
+                                            { label: "Add to Playlist", show: true, sub: 1 },
+                                            { sep: true, show: true },
+                                            { label: q.liked ? "Remove from Likes" : "Add to Likes", show: q.can-like },
+                                            { label: q.fav ? "Remove from Favourites" : "Add to Favourites", show: q.fav-on },
+                                            { label: "Go to Artist", show: true },
+                                            { label: "Don't Recommend This Track", show: true },
+                                            { label: q.open-label, show: q.open-label != "" },
+                                            { label: "Copy SoundCloud Link", show: q.sc-link },
+                                            { label: "Copy Spotify Link", show: q.sp-link },
+                                            { label: "Copy YouTube Music Link", show: q.yt-link },
+                                            { label: "Track Preferences...", show: true }
+                                        ];
+                                        list1: root.own-lists;
+                                        list1-more: ["New Playlist..."];
+                                        picked(n, k) => {
+                                            if (n == 0) { root.play-queue(i); }
+                                            if (n == 1) { root.queue-action(i, "next"); }
+                                            if (n == 2) { root.queue-action(i, "remove"); }
+                                            if (n == 3) { root.queue-action(i, "shuffle"); }
+                                            if (n == 4) { if (k < root.own-lists.length) { root.queue-action(i, "pl" + k); } else if (k == root.own-lists.length + 0) { root.queue-action(i, "plnew"); } }
+                                            if (n == 6) { root.queue-action(i, "like"); }
+                                            if (n == 7) { root.queue-action(i, "fav"); }
+                                            if (n == 8) { root.queue-action(i, "artist:0"); }
+                                            if (n == 9) { root.queue-action(i, "hide:track"); }
+                                            if (n == 10) { root.queue-action(i, "open"); }
+                                            if (n == 11) { root.queue-action(i, "link:soundcloud"); }
+                                            if (n == 12) { root.queue-action(i, "link:spotify"); }
+                                            if (n == 13) { root.queue-action(i, "link:youtube"); }
+                                            if (n == 14) { root.queue-action(i, "prefs"); }
                                         }
-                                        MenuSeparator { }
-                                        if q.can-like: MenuItem { title: q.liked ? "Remove from Likes" : "Add to Likes"; activated => { root.queue-action(i, "like"); } }
-                                        if q.fav-on: MenuItem { title: q.fav ? "Remove from Favourites" : "Add to Favourites"; activated => { root.queue-action(i, "fav"); } }
-                                        MenuItem { title: "Go to Artist"; activated => { root.queue-action(i, "artist:0"); } }
-                                        MenuItem { title: "Don't Recommend This Track"; activated => { root.queue-action(i, "hide:track"); } }
-                                        if q.open-label != "": MenuItem { title: q.open-label; activated => { root.queue-action(i, "open"); } }
-                                        if q.sc-link: MenuItem { title: "Copy SoundCloud Link"; activated => { root.queue-action(i, "link:soundcloud"); } }
-                                        if q.sp-link: MenuItem { title: "Copy Spotify Link"; activated => { root.queue-action(i, "link:spotify"); } }
-                                        if q.yt-link: MenuItem { title: "Copy YouTube Music Link"; activated => { root.queue-action(i, "link:youtube"); } }
-                                        MenuItem { title: "Track Preferences..."; activated => { root.queue-action(i, "prefs"); } }
-                                    }
                                     }
                                 }
                             }
