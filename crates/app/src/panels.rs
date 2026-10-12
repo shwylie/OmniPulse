@@ -21,13 +21,14 @@ pub fn title(name: &str) -> String {
         "offset" => "OmniPulse Offset",
         "hidden" => "Hidden & Not Recommended",
         "plugins" => "Add a Plugin",
+        "safe" => "What Counts as Safe",
         _ => "Avoid Recent Plays",
     }.to_string()
 }
 
 /// The panel a switch's Settings button opens (by the switch's pref)
 pub fn of_switch(key: &str) -> Option<&'static str> {
-    Some(match key { "req" => "requests", "widget" => "widget", "alertsOn" => "alerts", "remoteOn" => "remote", "out2On" => "offset", "avoidRecent" => "recent", "hideOn" => "hidden", "plugAdd" => "plugins", _ => return None })
+    Some(match key { "streamSafe" => "safe", "req" => "requests", "widget" => "widget", "alertsOn" => "alerts", "remoteOn" => "remote", "out2On" => "offset", "avoidRecent" => "recent", "hideOn" => "hidden", "plugAdd" => "plugins", _ => return None })
 }
 
 /// What a panel edits, and each one's default (the web app's)
@@ -47,6 +48,7 @@ fn keys(name: &str) -> Vec<(&'static str, Value)> {
 /// The values a panel starts with: what's set, else the default
 pub fn values(name: &str, prefs: &Value) -> Map<String, Value> {
     if name == "alertlist" { return crate::alerts::list_values(prefs); }
+    if name == "safe" { return crate::streamsafe::panel_values(prefs); }
     if let Some(k) = name.strip_prefix("alert:") { return crate::alerts::edit_values(prefs, k); }
     let mut m = Map::new();
     for (k, d) in keys(name) {
@@ -208,6 +210,7 @@ pub fn fields(name: &str, vals: &Map<String, Value>, prefs: &Value, lan: &str) -
             ]
         }
         "hidden" => crate::hide::fields(prefs),
+        "safe" => crate::streamsafe::panel_fields(prefs),
         "plugins" => plugin_fields(prefs),
         "offset" => vec![
             num("out2Offset", "Offset", "In ms, -5000 to 5000: how much later (or, below 0, earlier) OmniPulse Offset plays than you hear."),

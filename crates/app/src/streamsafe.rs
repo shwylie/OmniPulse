@@ -150,6 +150,75 @@ pub fn menu_run(prefs: &Value, t: &Track) -> Option<(Value, String)> {
     Some((p, format!("{a} is cleared for streaming: Stream-Safe Music plays them.")))
 }
 
+// ---------- What Counts as Safe (Settings > Streaming > Extended): the list, each switched, yours added ----------
+fn shown_name(id: &str) -> String {
+    match id { "ncs" => "NCS (NoCopyrightSounds)", "streambeats" => "StreamBeats by Harris Heller", "monstercat" => "Monstercat (with a Gold licence)", "epidemic" => "Epidemic Sound (with a subscription)", "lofigirl" => "Lofi Girl", "chillhop" => "Chillhop Music", x => x }.to_string()
+}
+
+/// The panel's values: each entry's switch ("on:<id>"), and the add form (its name and kind)
+pub fn panel_values(prefs: &Value) -> serde_json::Map<String, Value> {
+    let p = &prefs["streamCleared"];
+    let mut m = serde_json::Map::new();
+    for (id, _, _, dflt) in CLEARED { m.insert(format!("on:{id}"), serde_json::json!(p["on"][id].as_bool().unwrap_or(dflt))); }
+    for c in p["custom"].as_array().into_iter().flatten() {
+        if let Some(id) = c["id"].as_str() { m.insert(format!("on:{id}"), serde_json::json!(p["on"][id].as_bool().unwrap_or(true))); }
+    }
+    m.insert("safeName".into(), serde_json::json!(""));
+    m.insert("safeKind".into(), serde_json::json!("artist"));
+    m
+}
+
+/// The panel's fields
+pub fn panel_fields(prefs: &Value) -> Vec<Value> {
+    let tog = |k: String, label: String, note: &str| serde_json::json!({ "key": k, "label": label, "note": note, "type": "toggle" });
+    let mut f = vec![serde_json::json!({ "key": "", "label": "With Extended on, only these play (and songs under an open licence, such as SoundCloud's Creative Commons ones). Switch off any you don't have a licence for.", "note": "", "type": "note" })];
+    for (id, artists, labels, _) in CLEARED {
+        let mut what: Vec<&str> = Vec::new();
+        for x in artists.iter().chain(labels.iter()) { if !what.contains(x) { what.push(x); } }
+        f.push(tog(format!("on:{id}"), shown_name(id), &what.join(", ")));
+    }
+    for c in prefs["streamCleared"]["custom"].as_array().into_iter().flatten() {
+        let (Some(id), Some(name)) = (c["id"].as_str(), c["name"].as_str()) else { continue };
+        f.push(tog(format!("on:{id}"), name.to_string(), if c["kind"].as_str() == Some("label") { "A label you added." } else { "An artist you added." }));
+    }
+    f.push(serde_json::json!({ "key": "", "label": "Add an artist or label you're cleared to play:", "note": "", "type": "note" }));
+    f.push(serde_json::json!({ "key": "safeKind", "label": "It's", "note": "", "type": "select", "options": ["artist", "label"], "labels": ["An artist", "A record label"] }));
+    f.push(serde_json::json!({ "key": "safeName", "label": "Its name", "note": "As it's written on their songs.", "type": "text" }));
+    f.push(serde_json::json!({ "key": "safeAdd", "label": "", "note": "", "type": "button", "value": "Add" }));
+    f
+}
+
+/// The switches saved: the new streamCleared
+pub fn panel_save(prefs: &Value, vals: &serde_json::Map<String, Value>) -> Value {
+    let mut p = prefs["streamCleared"].clone();
+    if !p.is_object() { p = serde_json::json!({ "custom": [], "on": {} }); }
+    if !p["on"].is_object() { p["on"] = serde_json::json!({}); }
+    if !p["custom"].is_array() { p["custom"] = serde_json::json!([]); }
+    for (k, v) in vals { if let Some(id) = k.strip_prefix("on:") { p["on"][id] = v.clone(); } }
+    p
+}
+
+/// One added (the web app's clearedAdd): the new streamCleared, or None if it's on the list already
+pub fn add(prefs: &Value, kind: &str, name: &str) -> Option<Value> {
+    let name = name.trim();
+    if name.is_empty() { return None; }
+    let key = artist_key(name);
+    let label = kind == "label";
+    let set = |id: &str, dflt: bool| prefs["streamCleared"]["on"][id].as_bool().unwrap_or(dflt);
+    if CLEARED.iter().any(|(id, a, l, d)| set(id, *d) && (if label { *l } else { *a }).iter().any(|x| artist_key(x) == key)) { return None; }
+    let mut p = panel_save(prefs, &serde_json::Map::new());
+    let old = p["custom"].as_array().and_then(|l| l.iter().find(|c| c["kind"].as_str() == Some(kind) && artist_key(c["name"].as_str().unwrap_or("")) == key).and_then(|c| c["id"].as_str().map(String::from)));
+    match old {
+        Some(id) if set(&id, true) => return None,
+        Some(id) => p["on"][id.as_str()] = serde_json::json!(true),
+        None => {
+            let id = format!("c{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0));
+            p["custom"].as_array_mut().unwrap().push(serde_json::json!({ "id": id, "kind": kind, "name": name }));
+        }
+    }
+    Some(p)
+}
+
 /// On: whether it may play. Off: everything may.
 pub fn allowed(prefs: &Value, t: &Track) -> bool {
     !on(prefs) || ok(prefs, t)

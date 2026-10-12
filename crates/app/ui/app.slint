@@ -1010,6 +1010,11 @@ export component AppWindow inherits Window {
     callback queue-action(int, string);
     // the queue's Clear, and Clear requests (true)
     callback queue-clear(bool);
+    // YouTube Music's helpers: what's said, a Set Up (or Try Again) button, a Remove one
+    in property <string> helpers-note;
+    in property <string> helpers-setup;
+    in property <bool> helpers-remove;
+    callback helpers-act(string);
     // Now Playing: where its song opens ("Open on SoundCloud"...), and its buttons' and artist's actions
     in property <string> now-open;
     callback now-act(string);
@@ -2294,6 +2299,24 @@ export component AppWindow inherits Window {
                             }
                             if root.set-cat == "Integrations" && root.set-query == "": VerticalLayout {
                                 spacing: 14px;
+                                // YouTube Music's helpers (yt-dlp and Deno): how they are, set up, or taken off
+                                Card {
+                                    HorizontalLayout {
+                                        padding: 16px;
+                                        padding-top: 12px;
+                                        padding-bottom: 12px;
+                                        spacing: 10px;
+                                        VerticalLayout {
+                                            horizontal-stretch: 1;
+                                            alignment: center;
+                                            spacing: 2px;
+                                            Text { text: "YouTube Music's Helpers"; color: Theme.text; font-weight: 700; }
+                                            Text { text: root.helpers-note; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
+                                        }
+                                        if root.helpers-setup != "": Pill { label: root.helpers-setup; on: true; y: (parent.height - self.height) / 2; clicked => { root.helpers-act("setup"); } }
+                                        if root.helpers-remove: Pill { label: "Remove"; y: (parent.height - self.height) / 2; clicked => { root.helpers-act("remove"); } }
+                                    }
+                                }
                                 Card {
                                     VerticalLayout {
                                         padding: 16px;

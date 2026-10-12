@@ -3403,6 +3403,9 @@ fn tick(shared: &Shared, events: &std::sync::mpsc::Receiver<Event>, n: u64) {
     let mixing = shared.borrow().engine.mixing();
     if ui.get_mixing() != mixing { ui.set_mixing(mixing); }
     windows_now(shared, &ui);
+    // (YouTube Music's helpers being set up: how far, each second, while Settings is open)
+    if n.is_multiple_of(4) && ui.get_page() == "settings" && omnipulse_core::tools::progress()["busy"].as_bool() == Some(true) { helpers_paint(shared); }
+    if n == 8 { helpers_start(shared); }
     // the narrow layout below 980 px across, as the web app's
     let w = ui.window().size().to_logical(ui.window().scale_factor()).width;
     // (with the queue open too, the full sidebar needs more room: narrow up to 1100 px then)
@@ -3829,6 +3832,7 @@ fn set_row_on(prefs: &serde_json::Value, key: &str, dflt: bool) -> bool {
 
 fn paint_settings(a: &App) {
     let Some(ui) = a.ui.upgrade() else { return };
+    SHARED.with(|s| { if let Some(sh) = s.borrow().clone() { let sh2 = sh.clone(); slint::Timer::single_shot(std::time::Duration::ZERO, move || helpers_paint(&sh2)); } });
     let streamer = integrations::set(&a.web.prefs, "streamerMode");
     let rows = |sec: &str| -> ModelRc<SetRow> {
         let mut list: Vec<SetRow> = SET_ROWS.iter().filter(|(s, ..)| *s == sec)
@@ -4002,7 +4006,7 @@ fn settings_index(a: &App) -> Vec<SetFound> {
         out.push(SetFound { path: path(cat), label: label.into(), note: note.into(), cat: cat.into(), panel: String::new(), key: key.into(), toggle: true });
     }
     let ip = omnipulse_core::lan_ip().unwrap_or_else(|| "THIS-PC".into());
-    for (name, cat) in [("requests", "Streaming"), ("widget", "Streaming"), ("alerts", "Streaming"), ("alertlist", "Streaming"), ("remote", "Streaming"), ("offset", "Streaming"), ("recent", "Library"), ("hidden", "Library"), ("plugins", "Plugins")] {
+    for (name, cat) in [("requests", "Streaming"), ("widget", "Streaming"), ("alerts", "Streaming"), ("alertlist", "Streaming"), ("remote", "Streaming"), ("offset", "Streaming"), ("safe", "Streaming"), ("recent", "Library"), ("hidden", "Library"), ("plugins", "Plugins")] {
         let title = panels::title(name);
         out.push(SetFound { path: path(cat), label: title.clone(), note: String::new(), cat: cat.into(), panel: name.into(), key: String::new(), toggle: false });
         let vals = panels::values(name, &a.web.prefs);
@@ -4060,7 +4064,7 @@ fn panel_open(shared: &Shared, name: &str) {
     if let Some(ui) = shared.borrow().ui.upgrade() {
         let head = match name.strip_prefix("alert:") { Some(k) => alerts::name(&shared.borrow().web.prefs, k), None => panels::title(name) };
         let cat = match name {
-            "requests" | "widget" | "remote" | "offset" | "alerts" | "alertlist" => "Streaming",
+            "requests" | "widget" | "remote" | "offset" | "alerts" | "alertlist" | "safe" => "Streaming",
             n if n.starts_with("alert:") => "Streaming",
             "plugins" => "Plugins",
             _ => "Library",
@@ -4395,6 +4399,18 @@ fn panel_press(shared: &Shared, key: &str) {
                 Err(e) => format!("Couldn't measure it: {e}"),
             }
         }
+        // What Counts as Safe: one added, at once (its switches kept as they are now)
+        "safeAdd" => {
+            let vals = PF_EDIT.with(|e| e.borrow().as_ref().map(|x| x.1.clone())).unwrap_or_default();
+            let (name, kind) = (vals.get("safeName").and_then(|v| v.as_str()).unwrap_or("").to_string(), vals.get("safeKind").and_then(|v| v.as_str()).unwrap_or("artist").to_string());
+            let mut prefs = shared.borrow().web.prefs.clone();
+            prefs["streamCleared"] = streamsafe::panel_save(&prefs, &vals);
+            match streamsafe::add(&prefs, &kind, &name) {
+                Some(v) => { pref_put(shared, "streamCleared", v); panel_open(shared, "safe"); format!("{} is cleared for streaming.", name.trim()) }
+                None if name.trim().is_empty() => "Write its name first.".to_string(),
+                None => format!("{} is already on the list.", name.trim()),
+            }
+        }
         "widgetHide" => {
             let key = shared.borrow().queue.current().map(|t| t.key.clone()).unwrap_or_default();
             if let Ok(mut h) = integrations::WIDGET_HIDDEN.lock() { *h = key; }
@@ -4444,6 +4460,15 @@ fn panel_save(shared: &Shared, name: &str, vals: serde_json::Map<String, serde_j
         if name.starts_with("alert:") { panel_open(shared, "alertlist"); return; }
         PF_EDIT.with(|e| e.borrow_mut().take());
         if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_pf_open(false); ui.set_status("Alerts saved.".into()); }
+        return;
+    }
+    // (What Counts as Safe: its switches, into the list)
+    if name == "safe" {
+        let v = streamsafe::panel_save(&shared.borrow().web.prefs, &vals);
+        pref_put(shared, "streamCleared", v);
+        PF_EDIT.with(|e| e.borrow_mut().take());
+        { let mut a = shared.borrow_mut(); apply_filter(&mut a); paint_queue(&mut a); }
+        if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_pf_open(false); ui.set_status("What counts as safe is saved.".into()); }
         return;
     }
     // (Plugins: adding and removing are done as they're pressed; nothing to keep)
@@ -6822,9 +6847,55 @@ thread_local! {
     static MORE_ACTS: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
 }
 
+/// YouTube Music's helpers (yt-dlp and Deno, about 58 MB): how they are, in Settings > Integrations
+fn helpers_paint(shared: &Shared) {
+    let Some(ui) = shared.borrow().ui.upgrade() else { return };
+    let on = plat_on(&shared.borrow().web.prefs, "youtube");
+    let pr = omnipulse_core::tools::progress();
+    let mb = |b: u64| format!("{:.0}", b as f64 / 1_048_576.0);
+    let used = omnipulse_core::tools::disk_use();
+    let have = omnipulse_core::tools::ytdlp_path().is_some();
+    let (note, setup) = if pr["busy"].as_bool() == Some(true) {
+        let (done, total) = (pr["done"].as_u64().unwrap_or(0), pr["total"].as_u64().unwrap_or(0));
+        (format!("Setting up: {}{}...", pr["step"].as_str().unwrap_or("").to_lowercase(), if total > 0 { format!(", {} of {} MB", mb(done), mb(total)) } else { String::new() }), "")
+    } else if let Some(e) = pr["error"].as_str() {
+        (format!("Couldn't set up: {e}"), "Try Again")
+    } else if have {
+        ("Ready: yt-dlp finds each song's audio and Deno runs YouTube's player code for it, from their official releases (checked against their checksums), kept up to date.".to_string(), "")
+    } else if !on {
+        ("YouTube Music is off.".to_string(), "")
+    } else if omnipulse_core::yt_stream::on_path_public("yt-dlp") {
+        ("Ready, with your own yt-dlp.".to_string(), "")
+    } else {
+        ("Two small tools YouTube Music plays with (yt-dlp and Deno, about 58 MB): set up by themselves.".to_string(), "Set Up")
+    };
+    ui.set_helpers_note(format!("{note}{}", if used > 0 && !pr["busy"].as_bool().unwrap_or(false) { format!(" They take {} MB.", mb(used)) } else { String::new() }).into());
+    ui.set_helpers_setup(setup.into());
+    ui.set_helpers_remove(used > 0 && pr["busy"].as_bool() != Some(true));
+}
+
+/// Set up yt-dlp and Deno if YouTube Music is on and they aren't there (as the web app does at start),
+/// and let our yt-dlp update itself once a day
+fn helpers_start(shared: &Shared) {
+    if std::env::var_os("OMNIPULSE_SELFTEST").is_some() { return; }
+    if plat_on(&shared.borrow().web.prefs, "youtube") && omnipulse_core::tools::ytdlp_path().is_none() && !omnipulse_core::yt_stream::on_path_public("yt-dlp") {
+        omnipulse_core::tools::start_install();
+    }
+    shared.borrow().rt.spawn(async { let _ = omnipulse_core::tools::update_ytdlp_daily().await; });
+}
+
+fn helpers_act(shared: &Shared, act: &str) {
+    if act == "setup" { omnipulse_core::tools::start_install(); }
+    else {
+        let note = match omnipulse_core::tools::uninstall() { Ok(b) => format!("yt-dlp and Deno are removed ({:.0} MB freed).", b as f64 / 1_048_576.0), Err(e) => format!("Couldn't remove them: {e}") };
+        if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_status(note.into()); }
+    }
+    helpers_paint(shared);
+}
+
 /// What a status's button does
 #[derive(Clone)]
-enum StatusAct { Update, Dismiss, Prefs(Track), Skip, Leave, Copy(String) }
+enum StatusAct { Update, Dismiss, Prefs(Track), Skip, Leave, Copy(String), Restart }
 
 thread_local! {
     /// the status that has buttons (its text), and what each does
@@ -6848,6 +6919,12 @@ fn status_act(shared: &Shared, i: usize) {
         StatusAct::Prefs(t) => tp_open(shared, &t),
         StatusAct::Skip => step(shared, 1),
         StatusAct::Leave => listen_leave(shared, false),
+        StatusAct::Restart => {
+            // (a fresh one started, this one closed: the session kept for it)
+            save_session(&shared.borrow());
+            if let Ok(exe) = std::env::current_exe() { let _ = std::process::Command::new(exe).env("OMNIPULSE_RESTARTING", "1").spawn(); }
+            let _ = slint::quit_event_loop();
+        }
         StatusAct::Copy(text) => { let _ = arboard::Clipboard::new().and_then(|mut c| c.set_text(text)); if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_status("Copied.".into()); } }
     }
 }
@@ -7419,6 +7496,7 @@ fn main() -> Result<(), slint::PlatformError> {
     omnipulse_core::diag::install();
     // one OmniPulse at a time: a second one hands its link (or "show") to the first, and closes
     let link_arg = std::env::args().find(|x| x.starts_with("omnipulse://"));
+    if std::env::var_os("OMNIPULSE_RESTARTING").is_some() { instance::wait_for_the_last(); }
     if std::env::var_os("OMNIPULSE_SELFTEST").is_none() {
         let claimed = instance::claim(link_arg.clone(), |msg| {
             let _ = slint::invoke_from_event_loop(move || SHARED.with(|s| {
@@ -7649,7 +7727,7 @@ fn main() -> Result<(), slint::PlatformError> {
     let s = shared.clone();
     ui.on_app_pref(move |key, on| {
         set_look_pref(&s, &key, serde_json::json!(on));
-        if key == "nativeGpu" { if let Some(ui) = s.borrow().ui.upgrade() { ui.set_status("Hardware Acceleration changes the next time OmniPulse starts.".into()); } }
+        if key == "nativeGpu" { if let Some(ui) = s.borrow().ui.upgrade() { say_with(&ui, "Hardware Acceleration changes the next time OmniPulse starts.", vec![("Restart Now", StatusAct::Restart), ("Later", StatusAct::Dismiss)]); } }
         if let Some(ui) = s.borrow().ui.upgrade() { windows_now(&s, &ui); }
     });
     let s = shared.clone();
@@ -8001,6 +8079,7 @@ fn main() -> Result<(), slint::PlatformError> {
     });
     let s = shared.clone();
     ui.on_crumb_go(move |i| crumb_go(&s, i.max(0) as usize));
+    ui.on_helpers_act({ let s = shared.clone(); move |a| helpers_act(&s, &a) });
     ui.on_now_act({ let s = shared.clone(); move |act| { let t = s.borrow().queue.current().cloned(); if let Some(t) = t { track_act(&s, &t, &act); } } });
     ui.on_title_rename({ let s = shared.clone(); move || name_ask(&s, Naming::AppName) });
     ui.on_title_signin({ let s = shared.clone(); move || { let i = ACCOUNTS.iter().position(|a| a.0 == "soundcloud").unwrap_or(0); account_act(&s, i); } });
@@ -8453,7 +8532,7 @@ fn main() -> Result<(), slint::PlatformError> {
             // (OMNIPULSE_SELFTEST_PLAN=stats: the Stats page, its facts said)
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("stats") { vec![(6, "stats"), (8, "statsfacts"), (9, "sd_time"), (11, "sd_artists"), (13, "sd_songs"), (15, "sd_when"), (16, "sd_where"), (17, "sd_streak"), (18, "sd_"), (19, "end")] }
             // (OMNIPULSE_SELFTEST_PLAN=setsearch: Settings searched, a panel's path clicked back along, and closed)
-            else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("setsearch") { vec![(9, "library"), (10, "settings"), (11, "ss_fade"), (12, "ss_mix tempo"), (13, "sshit"), (14, "p_alert:raid"), (15, "crumb2"), (16, "setclose"), (17, "end")] }
+            else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("setsearch") { vec![(9, "library"), (10, "settings"), (11, "ss_fade"), (12, "ss_mix tempo"), (13, "sshit"), (14, "p_alert:raid"), (15, "crumb2"), (16, "p_safe"), (17, "setclose"), (18, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("panels") { vec![(9, "settings"), (10, "cat_Integrations"), (11, "cat_Plugins"), (12, "p_requests"), (12, "p_widget"), (14, "p_alerts"), (16, "p_plugins"), (17, "plugread"), (20, "p_alertlist"), (21, "p_alert:raid"), (22, "pfclose"), (23, "end")] }
             // (OMNIPULSE_SELFTEST_PLAN=taskbar: the taskbar widget switched on (shown for a few seconds), a
             // picture of it, then off)

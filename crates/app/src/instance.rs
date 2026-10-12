@@ -44,6 +44,14 @@ pub fn claim(arg: Option<String>, on: impl Fn(String) + Send + 'static) -> Resul
     }
 }
 
+/// Restarting (Hardware Acceleration's Restart Now): waits, up to ten seconds, for the one before to close
+pub fn wait_for_the_last() {
+    for _ in 0..50 {
+        if TcpListener::bind(("127.0.0.1", PORT)).is_ok() { return; }
+        std::thread::sleep(Duration::from_millis(200));
+    }
+}
+
 #[cfg(test)]
 mod tests {
     #[test]

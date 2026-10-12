@@ -107,6 +107,9 @@ fn soundcloud_link(url: &str) -> bool {
 
 /// What's installed: yt-dlp's version (if it runs), the JavaScript runtimes, whether they're our
 /// built-in copies, and how setting them up is going
+/// A program on the PATH (the native app's YouTube Music's Helpers)
+pub fn on_path_public(name: &str) -> bool { on_path(name) }
+
 pub async fn status() -> serde_json::Value {
     let mut cmd = tokio::process::Command::new(crate::tools::ytdlp_program());
     cmd.arg("--version").stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null()).kill_on_drop(true);
