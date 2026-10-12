@@ -2052,6 +2052,9 @@ function step(d) {
   if (d < 0 && onSpotify && spotifyPos() > trimStart(cur) + 3000) { spotifySeek(spState.dur ? trimStart(cur) / spState.dur : 0); return; }
   if (d < 0 && !onSpotify && audio.currentTime * 1000 > trimStart(cur) + 3000) { audio.currentTime = trimStart(cur) / 1000; return; }
   if (d > 0 && qi === queue.length - 1 && autoplayActive()) { autoplayAdvance(); return; }
+  // (back from the first: it starts again, rather than going round to the last, past which there's
+  // nothing: the queue looked emptied)
+  if (d < 0 && qi === 0) { if (onSpotify) spotifySeek(spState.dur ? trimStart(cur) / spState.dur : 0); else audio.currentTime = trimStart(cur) / 1000; return; }
   qi = (qi + d + queue.length) % queue.length;
   playCurrent();
 }

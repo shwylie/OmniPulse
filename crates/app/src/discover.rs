@@ -319,33 +319,6 @@ pub async fn subgenre_tracks(name: &str) -> Vec<Track> {
     genre_pick(lists)
 }
 
-/// Music for a title, from Deezer (a mix's refresh): three of its playlists of that name, picked from
-/// its ten best (different ones each time), taking turns; its songs found for the title only if it has
-/// fewer than two (a song search for "Dubstep" finds songs called that, not the genre). None of
-/// `avoid` (what was showing) if there's enough without, so a refresh is new music. As the web app's.
-pub async fn title_tracks(name: &str, avoid: &std::collections::HashSet<String>) -> Vec<Track> {
-    let found = dz(&format!("/search/playlist?limit=25&q={}", crate::sources::urlencode(name))).await;
-    let mut ids: Vec<u64> = found["data"].as_array().into_iter().flatten().filter(|p| p["nb_tracks"].as_u64().unwrap_or(0) >= 15).filter_map(|p| p["id"].as_u64()).take(10).collect();
-    crate::queue::shuffle_in_place(&mut ids);
-    ids.truncate(3);
-    let mut lists = Vec::new();
-    for id in &ids {
-        let mut l = dz_tracks(&dz(&format!("/playlist/{id}/tracks?limit=80")).await, None);
-        crate::queue::shuffle_in_place(&mut l);
-        lists.push(l);
-    }
-    if ids.len() < 2 {
-        let mut l = dz_tracks(&dz(&format!("/search?limit=50&q={}", crate::sources::urlencode(name))).await, None);
-        crate::queue::shuffle_in_place(&mut l);
-        lists.push(l);
-    }
-    let all = crate::sources::once_each(crate::sources::interleave(lists));
-    let unseen: Vec<Track> = all.iter().filter(|t| !avoid.contains(&t.key)).cloned().collect();
-    let mut out = if unseen.len() >= 15 { unseen } else { all };
-    out.truncate(80);
-    out
-}
-
 /// A mix made again (its page's refresh): a subgenre's or a genre's for its title (new music for it),
 /// any other made afresh
 pub async fn mix_again(m: &Mix, flags: (bool, bool, bool), liked: &Liked, avoid: &std::collections::HashSet<String>) -> Vec<Track> {
@@ -849,17 +822,18 @@ mod tests {
 }
 
 #[cfg(test)]
-mod title_live {
-    /// cargo test -p omnipulse --bin OmniPulse-native title_tracks_live -- --ignored --nocapture (the internet)
+mod genre_live {
+    /// cargo test -p omnipulse --bin OmniPulse-native genre_live -- --ignored --nocapture (the internet)
     #[test]
     #[ignore]
-    fn title_tracks_live() {
+    fn genre_live() {
         let rt = tokio::runtime::Runtime::new().unwrap();
-        let first = rt.block_on(super::subgenre_tracks("Lo-fi"));
-        let seen: std::collections::HashSet<String> = first.iter().map(|t| t.key.clone()).collect();
-        let again = rt.block_on(super::title_tracks("Lo-fi", &seen));
-        let repeated = again.iter().filter(|t| seen.contains(&t.key)).count();
-        println!("Lo-fi: {} then {} ({} repeated): {:?}", first.len(), again.len(), repeated, again.iter().take(4).map(|t| format!("{} - {}", t.title, t.artist)).collect::<Vec<_>>());
-        assert!(again.len() >= 15 && repeated == 0);
+        for g in ["Drum & Bass", "Future Bass", "House"] {
+            let l = rt.block_on(super::subgenre_tracks(g));
+            let mut who: Vec<String> = Vec::new();
+            for t in &l { if !who.contains(&t.artist) { who.push(t.artist.clone()); } }
+            println!("{g}: {} songs; {}", l.len(), who.iter().take(14).cloned().collect::<Vec<_>>().join(", "));
+            assert!(l.len() >= 20);
+        }
     }
 }

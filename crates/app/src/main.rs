@@ -2379,6 +2379,8 @@ fn step(shared: &Shared, d: i32) {
             }
             push_out(shared, true);
         }
+        // back from the first: it starts again
+        None if d < 0 => engine.seek(0),
         None => {}
     }
 }
