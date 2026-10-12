@@ -1770,17 +1770,21 @@ fn start(shared: &Shared) {
     // a track a mix brought in: it's playing already (not loaded again)
     let mixed = MIXED_IN.with(|m| m.borrow_mut().take()).filter(|(k, _)| *k == t.key);
     if mixed.is_none() { MIX.with(|m| *m.borrow_mut() = None); }
+    let mix_on_now = integrations::on(&shared.borrow().web.prefs, "mixOn");
     rt.spawn(async move {
         // a Go+ track: never the preview, but its version on YouTube Music (crate::versions); a
         // MusicBrainz song the same way (MusicBrainz knows it, YouTube Music has it to play)
         // (and a Spotify song with a free account signed in, or none for playback: from YouTube Music too)
-        let sp_free = matches!(t.src, track::Src::Spotify(_)) && !sp_plays_here();
+        // (with Seamless Mix on, a Spotify song plays from YouTube Music too, its Spotify details kept,
+        // so it mixes in and out like any other; Spotify's own playback if there's no version of it)
+        let sp_free = matches!(t.src, track::Src::Spotify(_)) && (!sp_plays_here() || mix_on_now);
         let mb = matches!(t.src, track::Src::Catalog(_)) || listen_needs_version(&t) || sp_free;
         let (src, version) = if let Some((_, v)) = mixed {
             (Ok(None), v)
         } else if t.go_plus || mb {
             match versions::find(&t).await {
                 Some(v) => (player::open_source(&Track::youtube(&v.yt), h.clone()).await.map(Some), Some(v)),
+                None if matches!(t.src, track::Src::Spotify(_)) && sp_plays_here() => (player::open_source(&t, h.clone()).await.map(Some), None),
                 None => (Err("there's no version of it on YouTube Music".to_string()), None),
             }
         } else {
@@ -2498,7 +2502,9 @@ fn preload_next(shared: &Shared) {
     PRELOADED.with(|p| *p.borrow_mut() = next.key.clone());
     if integrations::on(&shared.borrow().web.prefs, "mixOn") { rhythm_ahead(shared, next.clone()); loud_ahead(shared, next.clone()); }
     let yt_id = |t: &Track| if let track::Src::YouTube(id) = &t.src { Some(id.clone()) } else { None };
-    let via_yt = next.go_plus || matches!(next.src, track::Src::Catalog(_)) || listen_needs_version(&next);
+    // (a Spotify song from YouTube Music: with a free account, or Seamless Mix on)
+    let sp_yt = matches!(next.src, track::Src::Spotify(_)) && (!sp_plays_here() || integrations::on(&shared.borrow().web.prefs, "mixOn"));
+    let via_yt = next.go_plus || matches!(next.src, track::Src::Catalog(_)) || listen_needs_version(&next) || sp_yt;
     if !via_yt && yt_id(&next).is_none() { return; }   // (the others start at once anyway)
     let (rt, weak) = { let a = shared.borrow(); (a.rt.clone(), a.ui.clone()) };
     if let Some(ui) = weak.upgrade() { ui.set_preloading(true); }
@@ -3206,7 +3212,7 @@ const SET_ROWS: [(&str, &str, &str, &str, bool); 32] = [
     ("Library", "Autoplay", "Plays similar tracks when the queue runs out.", "autoplay", true),
     ("Library", "Hidden & Not Recommended", "Right-click a track to stop it, its album or its artist being recommended. Off: nothing is left out; the lists are kept.", "hideOn", true),
     ("Library", "Avoid Recent Plays", "Skips songs you've heard lately in what the app picks for you. What you choose yourself still plays.", "avoidRecent", true),
-    ("Sound", "Seamless Mix", "Songs with a beat blend into the next on it, as a DJ mixes: at its tempo, on its phrase, the next one sweeping in from the top as the one playing gives way below it (never both in one part of the sound), down to the drop. With songs that play from YouTube Music or your files (never Spotify's own playback), once their beat is known.", "mixOn", true),
+    ("Sound", "Seamless Mix", "Songs with a beat blend into the next on it, as a DJ mixes: at its tempo, on its phrase, the next one sweeping in from the top as the one playing gives way below it (never both in one part of the sound), down to the drop. While it's on, Spotify songs play from their YouTube Music version (their Spotify details kept), so they mix too.", "mixOn", true),
     ("Sound", "Wordplay", "Seamless Mix sometimes hands over on a word: the song playing sings one (\"heat\", \"one more time\"), it's looped on the beat, and the next song comes in singing the same one. Only with songs whose timed lyrics match what plays.", "mixWords", true),
     ("Sound", "Drop Swap", "Seamless Mix sometimes lets the song playing build to its final drop, and the next song's drop lands there instead, on the beat.", "mixDrop", true),
     ("Sound", "Melody Play", "Seamless Mix sometimes loops a bar of the song playing's melody while the next one comes in under it, when the next one's melody starts with the same notes: the tune carries on from one into the other.", "mixMelody", true),
