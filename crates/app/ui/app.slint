@@ -995,6 +995,8 @@ export component AppWindow inherits Window {
     callback app-name-changed(string);
     in property <bool> title-prompt;
     callback title-rename();
+    /// the name being typed in the title bar
+    in-out property <bool> title-editing;
     callback title-signin();
     // Settings > App > Listening Along: Timing, in ms (the web app's listenNudge)
     in-out property <string> listen-nudge: "0";
@@ -1452,14 +1454,45 @@ export component AppWindow inherits Window {
         Rectangle {
             height: 34px;
             TouchArea {
-                pointer-event(e) => { if (e.kind == PointerEventKind.down && e.button == PointerEventButton.left) { root.drag(); } }
+                pointer-event(e) => { if (e.kind == PointerEventKind.down && e.button == PointerEventButton.left) { keys.focus(); root.drag(); } }
                 double-clicked => { root.maximize(); }
             }
             HorizontalLayout {
                 padding-left: 14px;
                 spacing: 10px;
                 // (right-click: rename it; signed out of SoundCloud: an invitation to sign in, as the web app's)
-                Rectangle {
+                // (renamed where it is, as the web app's: right-click, type, Enter keeps it, Escape doesn't,
+                // a click elsewhere keeps it too)
+                if root.title-editing: Rectangle {
+                    width: max(120px, tin.preferred-width + 16px);
+                    height: 24px;
+                    y: 5px;
+                    border-radius: 6px;
+                    background: Theme.panel;
+                    border-width: 1px;
+                    border-color: Theme.accent;
+                    tin := TextInput {
+                        x: 8px;
+                        width: parent.width - 16px;
+                        height: parent.height;
+                        vertical-alignment: center;
+                        single-line: true;
+                        color: Theme.text;
+                        font-size: 13px;
+                        font-weight: 700;
+                        text: root.app-name != "" ? root.app-name : "OmniPulse";
+                        init => { self.focus(); self.select-all(); }
+                        accepted => { root.title-editing = false; root.app-name-changed(self.text == "OmniPulse" ? "" : self.text); keys.focus(); }
+                        key-pressed(e) => {
+                            if (e.text == Key.Escape) { root.title-editing = false; keys.focus(); return accept; }
+                            return reject;
+                        }
+                        changed has-focus => {
+                            if (!self.has-focus && root.title-editing) { root.title-editing = false; root.app-name-changed(self.text == "OmniPulse" ? "" : self.text); }
+                        }
+                    }
+                }
+                if !root.title-editing: Rectangle {
                     width: tt.preferred-width;
                     tt := Text { text: root.title-prompt ? "Sign in to SoundCloud" : (root.app-name != "" ? root.app-name : "OmniPulse"); color: root.title-prompt ? (tta.has-hover ? Theme.text : Theme.accent) : Theme.text; font-weight: 700; font-size: 13px; vertical-alignment: center; height: parent.height; }
                     tta := TouchArea {
@@ -1467,26 +1500,24 @@ export component AppWindow inherits Window {
                         clicked => { if (root.title-prompt) { root.title-signin(); } }
                         // (the name drags the window as the rest of the title bar does)
                         pointer-event(e) => {
-                            if (e.kind == PointerEventKind.up && e.button == PointerEventButton.right) { root.title-rename(); }
+                            if (e.kind == PointerEventKind.up && e.button == PointerEventButton.right && !root.title-prompt) { root.title-editing = true; }
                             if (e.kind == PointerEventKind.down && e.button == PointerEventButton.left && !root.title-prompt) { root.drag(); }
                         }
                         double-clicked => { if (!root.title-prompt) { root.maximize(); } }
                     }
                 }
                 // Streamer Mode: grey when off; on, it pulses YouTube red, Twitch purple and Kick green
+                // (full height, as the window's own buttons are)
                 Rectangle {
-                    width: 26px;
-                    height: 26px;
-                    y: 4px;
-                    border-radius: 7px;
+                    width: 40px;
                     background: sta-s.has-hover ? Theme.elevated : transparent;
                     property <float> phase: mod(animation-tick() / 1ms, 3600) / 1200;
                     Glyph {
                         d: Icons.broadcast;
                         width: 16px;
                         height: 16px;
-                        x: 5px;
-                        y: 5px;
+                        x: (parent.width - self.width) / 2;
+                        y: (parent.height - self.height) / 2;
                         fill: !root.streamer && !root.stream-safe ? Theme.muted
                             : parent.phase < 1 ? #ff0033.mix(#9146ff, 1 - parent.phase)
                             : parent.phase < 2 ? #9146ff.mix(#53fc18, 2 - parent.phase)
@@ -1494,24 +1525,21 @@ export component AppWindow inherits Window {
                         opacity: root.streamer || root.stream-safe ? 1 : 0.55;
                     }
                     // Stream-Safe Music on: a dot
-                    if root.stream-safe: Rectangle { x: 18px; y: 2px; width: 7px; height: 7px; border-radius: 3.5px; background: #53fc18; }
+                    if root.stream-safe: Rectangle { x: parent.width / 2 + 5px; y: parent.height / 2 - 11px; width: 7px; height: 7px; border-radius: 3.5px; background: #53fc18; }
                     TipSpot { hover: sta-s.has-hover; tip: root.stream-safe ? "Streamer Mode, Extended: private info hidden, and only music that's safe on stream. Click to turn it off." : root.streamer ? "Streamer Mode: private info hidden. Click again for Extended (only music that's safe on stream)." : "Streamer Mode: off. Click to hide private info; again for Extended (only music that's safe on stream)."; }
                     sta-s := TouchArea { clicked => { Tips.on = false; root.streamer-step(); } }
                 }
                 // Seamless Mix: grey when off; on, its colour flows from one accent to the other with a
                 // glow, brighter and quicker while a mix is playing
                 Rectangle {
-                    width: 26px;
-                    height: 26px;
-                    y: 4px;
-                    border-radius: 7px;
+                    width: 40px;
                     background: sta-m.has-hover ? Theme.elevated : transparent;
                     property <float> phase: mod(animation-tick() / 1ms, root.mixing ? 1200 : 3000) / (root.mixing ? 1200 : 3000);
                     property <float> swing: phase < 0.5 ? phase * 2 : 2 - phase * 2;
                     // the glow
                     if root.mix-on: Rectangle {
-                        x: 3px;
-                        y: 3px;
+                        x: (parent.width - self.width) / 2;
+                        y: (parent.height - self.height) / 2;
                         width: 20px;
                         height: 20px;
                         border-radius: 10px;
@@ -1523,8 +1551,8 @@ export component AppWindow inherits Window {
                         d: Icons.mix;
                         width: 16px;
                         height: 16px;
-                        x: 5px;
-                        y: 5px;
+                        x: (parent.width - self.width) / 2;
+                        y: (parent.height - self.height) / 2;
                         fill: !root.mix-on ? Theme.muted : Theme.accent.mix(Theme.accent-2, 1 - parent.swing);
                         opacity: root.mix-on ? 1 : 0.55;
                     }
@@ -1533,25 +1561,18 @@ export component AppWindow inherits Window {
                 }
                 // the platforms: in their colours when on, plain when off
                 if root.plats.length > 1: Rectangle {
-                    y: 4px;
-                    height: 26px;
-                    width: root.plats.length * 28px + 4px;
-                    border-radius: 8px;
-                    background: Theme.elevated;
+                    width: root.plats.length * 40px;
                     HorizontalLayout {
-                        padding: 2px;
-                        spacing: 2px;
                         for p in root.plats: Rectangle {
-                            width: 26px;
-                            border-radius: 6px;
-                            background: !p.on ? transparent : p.id == "spotify" ? #1ed76029 : p.id == "youtube" ? #ff003329 : p.id == "local" ? #f2b54429 : #ff550029;
+                            width: 40px;
+                            background: !p.on ? (ta-p.has-hover ? Theme.elevated : transparent) : p.id == "spotify" ? #1ed76029 : p.id == "youtube" ? #ff003329 : p.id == "local" ? #f2b54429 : #ff550029;
                             PlatIcon {
                                 plat: p.id;
                                 title-bar: true;
                                 width: 15px;
                                 height: 15px;
-                                x: 5.5px;
-                                y: 5.5px;
+                                x: (parent.width - self.width) / 2;
+                                y: (parent.height - self.height) / 2;
                                 fill: !p.on ? Theme.text : p.id == "spotify" ? #1ed760 : p.id == "youtube" ? #ff0033 : p.id == "local" ? #f2b544 : #ff5500;
                                 opacity: p.on ? 1 : !p.ready ? (ta-p.has-hover ? 0.5 : 0.25) : (ta-p.has-hover ? 0.7 : 0.4);
                             }
@@ -1563,10 +1584,7 @@ export component AppWindow inherits Window {
                 Rectangle { horizontal-stretch: 1; }
                 // someone asking you to start a Jam: in the button's place, with a ring that empties
                 if root.jam-ask != "": Rectangle {
-                    y: 4px;
-                    height: 26px;
                     width: ask-row.preferred-width + 16px;
-                    border-radius: 13px;
                     background: @linear-gradient(100deg, Theme.accent 0%, Theme.accent-2 100%);
                     ask-row := HorizontalLayout {
                         x: 8px;
@@ -1598,12 +1616,7 @@ export component AppWindow inherits Window {
                     }
                 }
                 if root.jam-ask == "" && root.jam-label != "" && !root.jam-hidden: Rectangle {
-                    y: 6px;
-                    height: 22px;
-                    width: jam-t.preferred-width + 24px;
-                    border-radius: 11px;
-                    border-width: root.jam-on ? 0 : 1px;
-                    border-color: Theme.line;
+                    width: jam-t.preferred-width + 28px;
                     background: root.jam-on ? Theme.accent : (jam-ta.has-hover && !root.jam-off ? Theme.elevated : transparent);
                     opacity: root.jam-off ? 0.45 : 1;
                     jam-t := Text { text: root.jam-label; color: root.jam-on ? Theme.on-accent : (jam-ta.has-hover && !root.jam-off ? Theme.text : Theme.muted); font-size: 12px; font-weight: 600; }
@@ -1627,8 +1640,9 @@ export component AppWindow inherits Window {
             property <length> body-h: root.status != "" ? 99px : 68px;
             animate body-h { duration: Theme.motion ? 220ms : 0ms; easing: ease-out; }
         HorizontalLayout {
-            y: 0;
-            height: parent.height - parent.body-h - 16px;
+            // (a gap under the title bar as wide as the ones between the panels)
+            y: 8px;
+            height: parent.height - parent.body-h - 24px;
             padding-left: 8px;
             padding-right: 8px;
             spacing: 8px;
@@ -2343,6 +2357,8 @@ export component AppWindow inherits Window {
                         // (another page of Settings: from its top)
                         property <string> cat: root.set-cat;
                         changed cat => { self.content-y = 0; }
+                        // (under everything: a click on the page, not on a control, lets go of any typing)
+                        TouchArea { clicked => { keys.focus(); } }
                         VerticalLayout {
                             alignment: start;
                             spacing: 14px;
@@ -2557,7 +2573,7 @@ export component AppWindow inherits Window {
                                             border-width: 1px;
                                             border-color: Theme.line;
                                             if root.app-name == "": Text { x: 10px; text: "OmniPulse"; color: Theme.muted; font-size: 14px; vertical-alignment: center; height: parent.height; }
-                                            TextInput { x: 10px; width: parent.width - 20px; height: parent.height; vertical-alignment: center; color: Theme.text; font-size: 14px; single-line: true; text <=> root.app-name; edited => { root.app-name-changed(self.text); } }
+                                            TextInput { x: 10px; width: parent.width - 20px; height: parent.height; vertical-alignment: center; color: Theme.text; font-size: 14px; single-line: true; text <=> root.app-name; edited => { root.app-name-changed(self.text); } accepted => { keys.focus(); } key-pressed(e) => { if (e.text == Key.Escape) { keys.focus(); return accept; } return reject; } }
                                         }
                                     }
                                 }
