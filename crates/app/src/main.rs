@@ -2837,6 +2837,12 @@ fn sb_tick(shared: &Shared, pos: u64, dur: u64) -> bool {
         if b.2 == key && at > seg.0 + 1.5 { return None; }
         Some((key, seg))
     }) else { return false };
+    // (a mix under way: where the next one comes in is the mix's choice; a part it's come into is
+    // left as it is, then and after, never jumped out of with a seek and a fade in)
+    if MIX.with(|m| m.borrow().is_some()) || mix_show_pos().is_some() {
+        SB.with(|b| b.borrow_mut().2 = key);
+        return false;
+    }
     SB.with(|b| b.borrow_mut().2 = key);
     let secs = (seg.1 - at.max(seg.0)).round() as u64;
     let ui = shared.borrow().ui.upgrade();
@@ -5513,8 +5519,8 @@ fn fade_and_silences(shared: &Shared, pos: u64, dur: u64) -> bool {
         return false;
     }
     // a silence of the chosen length or more: over it, or on to the next track if it runs to the end
-    // (listening along: the host's app skips them, or doesn't, and this follows it)
-    if skip > 0 && listening().is_none() {
+    // (listening along: the host's app skips them, or doesn't, and this follows it; never mid-mix)
+    if skip > 0 && listening().is_none() && MIX.with(|m| m.borrow().is_none()) {
         let measured = an["analysed_ms"].as_u64().unwrap_or(0);
         for s in an["silences"].as_array().into_iter().flatten() {
             let (from, to) = (s[0].as_u64().unwrap_or(0), s[1].as_u64().unwrap_or(0));
