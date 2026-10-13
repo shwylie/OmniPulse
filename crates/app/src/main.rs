@@ -6144,8 +6144,10 @@ fn drop_ok(a: &App, target: &str, what: &Dragged) -> bool {
     let Some(at) = drop_list(a, target) else { return false };
     let p = &a.playlists[at];
     match what {
-        Dragged::Tracks(t) => xpl::is_own(&p.id) || (p.own && p.plat != "local" && t.len() == 1),
-        Dragged::List(from) => *from != at && (xpl::is_own(&p.id) || (p.own && p.plat != "local")),
+        // (onto one that isn't yours, a platform's: it's made a playlist on this PC first, theirs left as it
+        // is; Export puts it on the platforms after, if wanted)
+        Dragged::Tracks(_) => xpl::is_own(&p.id) || p.plat != "local",
+        Dragged::List(from) => *from != at && (xpl::is_own(&p.id) || p.plat != "local"),
     }
 }
 
@@ -6196,7 +6198,7 @@ fn drop_do(shared: &Shared, target: &str, what: Dragged) {
     match what {
         // (one track onto a platform playlist: as adding it from the menu; more, or a playlist: it's adopted
         // first, a playlist here kept in step with the platform's, as the web app does)
-        Dragged::Tracks(list) if !xpl::is_own(&into.id) && list.len() == 1 => { if let Some(t) = list.into_iter().next() { pl_add_platform(shared, into, t); } }
+        Dragged::Tracks(list) if !xpl::is_own(&into.id) && into.own && list.len() == 1 => { if let Some(t) = list.into_iter().next() { pl_add_platform(shared, into, t); } }
         Dragged::Tracks(list) if !xpl::is_own(&into.id) => pl_adopt_add(shared, into, None, list),
         Dragged::Tracks(list) => pl_add_many(shared, &into.id, list),
         Dragged::List(from) if !xpl::is_own(&into.id) => {
@@ -9239,6 +9241,7 @@ fn main() -> Result<(), slint::PlatformError> {
             // (OMNIPULSE_SELFTEST_PLAN=tp: Track preferences for what plays, its bar dragged)
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("setfit") { vec![(9, "play"), (10, "queue"), (11, "size:1150:530"), (12, "nav:settings"), (13, "cat:Sound"), (14, "scroll:4000"), (16, "cat:Integrations"), (17, "scroll:-4000"), (19, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("acc2") { vec![(9, "play"), (10, "accent2"), (12, "nav:library"), (14, "end")] }
+            else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("dragasks") { vec![(9, "play"), (12, "dragasks"), (13, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("square") { vec![(9, "play"), (10, "unround"), (12, "nav:settings"), (13, "cat:Streaming"), (14, "panel:widget"), (16, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("qset") { vec![(9, "play"), (11, "queue"), (14, "nav:settings"), (15, "cat:App & Look"), (16, "scroll:420"), (18, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("nowslim") { vec![(9, "play"), (11, "queue"), (12, "now"), (15, "size:860:720"), (17, "size:1100:720"), (19, "size:1500:860"), (21, "end")] }
