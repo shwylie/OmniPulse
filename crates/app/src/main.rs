@@ -1116,6 +1116,7 @@ fn open_discover(shared: &Shared) {
         ui.set_taste_label(if discover::taste_genres(&a.web.prefs).is_empty() { "Pick genres".into() } else { "Your genres".into() });
         let lang = discover::lang_of(&a.web.prefs);
         ui.set_lang_label(lang::CHOICES.iter().find(|(v, _)| *v == lang).map(|(_, n)| *n).unwrap_or("Any language").into());
+        ui.set_lang_at(lang::CHOICES.iter().position(|(v, _)| *v == lang).unwrap_or(0) as i32);
     }
     let (input, rt, weak, token) = {
         let a = shared.borrow();
@@ -8628,6 +8629,9 @@ fn main() -> Result<(), slint::PlatformError> {
             // (where OmniPulse Offset plays, if it is: marked too)
             let off = if omnipulse_core::omni_input::running() { omnipulse_core::omni_input::device() } else { String::new() };
             ui.set_device_offset(if off.is_empty() { -1 } else { list.iter().position(|d| *d == off || d.starts_with(&off) || off.starts_with(d.as_str())).map_or(-1, |i| i as i32) });
+            // (Settings > Sound's Output Device: Windows' own, as the web app lists them)
+            ui.set_outputs(ModelRc::from(Rc::new(VecModel::from(list.iter().map(|d| slint::SharedString::from(d.as_str())).collect::<Vec<_>>()))));
+            ui.set_output_at(if (ui.get_device_on() as usize) < list.len() { ui.get_device_on() } else { -1 });
             // (cast devices after Windows', under a heading of their own)
             ui.set_devices_cast_from(if cast.is_empty() { -1 } else { list.len() as i32 });
             list.extend(cast.iter().map(|d| format!("Cast to {}", d.name)));
@@ -8992,12 +8996,11 @@ fn main() -> Result<(), slint::PlatformError> {
     ui.on_taste_pick(move || taste_open(&s, 1));
     // Discover's language: the next one, and Discover made again in it
     let s = shared.clone();
-    ui.on_lang_next(move || {
+    ui.set_lang_options(ModelRc::from(Rc::new(VecModel::from(lang::CHOICES.iter().map(|(_, l)| slint::SharedString::from(*l)).collect::<Vec<_>>()))));
+    ui.on_lang_pick(move |k| {
         let next = {
             let mut a = s.borrow_mut();
-            let now = discover::lang_of(&a.web.prefs);
-            let i = lang::CHOICES.iter().position(|(v, _)| *v == now).unwrap_or(0);
-            let next = lang::CHOICES[(i + 1) % lang::CHOICES.len()].0;
+            let next = lang::CHOICES[(k.max(0) as usize).min(lang::CHOICES.len() - 1)].0;
             if let Some(o) = a.web.prefs.as_object_mut() { o.insert("recLang".into(), serde_json::json!(next)); }
             next
         };
@@ -9322,6 +9325,7 @@ fn main() -> Result<(), slint::PlatformError> {
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("loudsteps") { vec![(9, "play"), (16, "loud:normal"), (17, "loud:loud"), (18, "loud:normal"), (19, "loud:quiet"), (20, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("titleedit") { vec![(9, "play"), (10, "titleedit"), (12, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("panels2") { vec![(9, "play"), (10, "nav:settings"), (11, "cat:Streaming"), (12, "panel:widget"), (14, "scroll:600"), (16, "panel:alerts"), (18, "scroll:900"), (20, "panel:limits"), (22, "panel:offset"), (24, "end")] }
+            else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("sound2") { vec![(9, "play"), (10, "nav:settings"), (11, "cat:Sound"), (13, "scroll:300"), (15, "cat:App & Look"), (16, "scroll:200"), (18, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("square") { vec![(9, "play"), (10, "unround"), (12, "nav:settings"), (13, "cat:Streaming"), (14, "panel:widget"), (16, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("qset") { vec![(9, "play"), (11, "queue"), (14, "nav:settings"), (15, "cat:App & Look"), (16, "scroll:420"), (18, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("nowslim") { vec![(9, "play"), (11, "queue"), (12, "now"), (15, "size:860:720"), (17, "size:1100:720"), (19, "size:1500:860"), (21, "end")] }
@@ -9505,7 +9509,7 @@ fn main() -> Result<(), slint::PlatformError> {
                     let own: Vec<bool> = (0..sides.min(6)).map(|i| ask(&format!("side:{i}"), "t:0")).collect();
                     println!("selftest: drag asks: track on sides 0-5 {own:?}; playlist 0 on itself {}, on side 1 {}; queue {}, playlist on queue {}", ask("side:0", "p:0"), ask("side:1", "p:0"), ask("queue", "t:0"), ask("queue", "p:0"));
                 }
-                "langnext" => { ui.invoke_lang_next(); println!("selftest: Discover language now \"{}\"", ui.get_lang_label()); }
+                "langnext" => { ui.invoke_lang_pick(ui.get_lang_at() + 1); println!("selftest: Discover language now \"{}\"", ui.get_lang_label()); }
                 "comfy" => { ui.invoke_density_changed(false); ui.invoke_nav("library".into()); }
                 "hidelikes" => { let n = ui.get_rows().row_count(); ui.invoke_hide_likes_changed(true); println!("selftest: search {n} rows, with Hide likes {}", ui.get_rows().row_count()); }
                 "hidelikesoff" => { ui.invoke_hide_likes_changed(false); println!("selftest: Hide likes off: {} rows", ui.get_rows().row_count()); }

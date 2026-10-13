@@ -608,6 +608,8 @@ component Dropdown inherits Rectangle {
     in property <[string]> options;
     in property <int> current;
     in property <bool> enabled: true;
+    /// shown when none of them is chosen
+    in property <string> placeholder;
     callback picked(int);
     // (as wide as the web app's, never stretched across the row)
     width: 220px;
@@ -621,7 +623,7 @@ component Dropdown inherits Rectangle {
         padding-left: 12px;
         padding-right: 10px;
         spacing: 8px;
-        Text { text: root.current >= 0 && root.current < root.options.length ? root.options[root.current] : ""; color: Theme.text; font-size: 13px; vertical-alignment: center; overflow: elide; horizontal-stretch: 1; }
+        Text { text: root.current >= 0 && root.current < root.options.length ? root.options[root.current] : root.placeholder; color: root.current >= 0 ? Theme.text : Theme.muted; font-size: 13px; vertical-alignment: center; overflow: elide; horizontal-stretch: 1; }
         Path { commands: "M 2 4 L 6 8 L 10 4"; viewbox-width: 12; viewbox-height: 12; width: 10px; height: 10px; y: (parent.height - self.height) / 2; stroke: Theme.muted; stroke-width: 1.6px; fill: transparent; }
     }
     dta := TouchArea { enabled: root.enabled; mouse-cursor: MouseCursor.pointer; clicked => { pop.show(); } }
@@ -1227,6 +1229,9 @@ export component AppWindow inherits Window {
     in property <bool> now-fav;
     in property <bool> can-like;
     in property <[string]> devices;
+    /// Settings > Sound > Output Device: Windows' devices only (no cast ones), and the one in use
+    in property <[string]> outputs;
+    in property <int> output-at: -1;
     in property <int> device-on: -1;
     in property <[string]> more-items;
     // Settings, beyond Look: its switches, section by section
@@ -1279,7 +1284,10 @@ export component AppWindow inherits Window {
     in property <string> taste-label: "Pick genres";
     // Discover's language: shown, and clicked through (Any, English, Spanish...)
     in property <string> lang-label: "English";
-    callback lang-next();
+    /// the languages Discover recommends in, and which is chosen
+    in property <[string]> lang-options;
+    in property <int> lang-at;
+    callback lang-pick(int);
     callback taste-pick();
     callback taste-toggle(int, int);
     callback taste-save();
@@ -2134,7 +2142,7 @@ export component AppWindow inherits Window {
                                 spacing: 8px;
                                 Chip { label: "I'm Feeling Lucky"; on: true; clicked => { root.lucky(); } }
                                 Chip { label: root.taste-label; clicked => { root.taste-pick(); } }
-                                Chip { label: root.lang-label; clicked => { root.lang-next(); } }
+                                Dropdown { options: root.lang-options; current: root.lang-at; picked(k) => { root.lang-pick(k); } }
                             }
                             // no likes or favourites yet: asked for some, for better recommendations
                             if root.likes-prompt: Rectangle {
@@ -2580,7 +2588,7 @@ export component AppWindow inherits Window {
                                         HorizontalLayout {
                                             alignment: start;
                                             spacing: 8px;
-                                            for k[i] in ["tab", "bar", "float", "minimal"]: Chip { label: ["Tab", "Classic Bar", "Floating", "Minimal"][i]; on: root.player-style == k; clicked => { root.player-style-picked(k); } }
+                                            Dropdown { options: ["Tab", "Classic Bar", "Floating", "Minimal"]; current: root.player-style == "bar" ? 1 : root.player-style == "float" ? 2 : root.player-style == "minimal" ? 3 : 0; picked(k) => { root.player-style-picked(["tab", "bar", "float", "minimal"][k]); } }
                                         }
                                         if root.tab-style: Rectangle { height: 8px; }
                                         if root.tab-style: HorizontalLayout {
@@ -2883,11 +2891,11 @@ export component AppWindow inherits Window {
                                                 Text { text: "Match Loudness"; color: Theme.text; font-weight: 700; }
                                                 Text { text: root.loud-on == "off" ? "Tracks play as loud as they were made." : "Every track at the same loudness."; color: Theme.muted; font-size: 12px; }
                                             }
-                                            for k[i] in ["off", "quiet", "normal", "loud"]: Chip {
-                                                label: ["Off", "Quiet", "Normal", "Loud"][i];
-                                                on: root.loud-on == k;
+                                            Dropdown {
+                                                options: ["Off", "Quiet", "Normal", "Loud"];
+                                                current: root.loud-on == "off" ? 0 : root.loud-on == "quiet" ? 1 : root.loud-on == "loud" ? 3 : 2;
                                                 y: (parent.height - self.height) / 2;
-                                                clicked => { root.loud-pick(k); }
+                                                picked(k) => { root.loud-pick(["off", "quiet", "normal", "loud"][k]); }
                                             }
                                         }
                                         Rectangle { height: 1px; background: Theme.line; }
@@ -2904,7 +2912,7 @@ export component AppWindow inherits Window {
                                             alignment: start;
                                             spacing: 8px;
                                             Text { text: "Fade Length"; color: Theme.muted; font-size: 12px; vertical-alignment: center; }
-                                            for ms in [1000, 2000, 3000, 5000, 8000]: Chip { label: (ms / 1000) + " s"; on: root.fade-ms == ms; clicked => { root.fade-ms-pick(ms); } }
+                                            Dropdown { options: ["1 s", "2 s", "3 s", "5 s", "8 s"]; current: root.fade-ms <= 1000 ? 0 : root.fade-ms <= 2000 ? 1 : root.fade-ms <= 3000 ? 2 : root.fade-ms <= 5000 ? 3 : 4; picked(k) => { root.fade-ms-pick([1000, 2000, 3000, 5000, 8000][k]); } }
                                         }
                                         Rectangle { height: 1px; background: Theme.line; }
                                         HorizontalLayout {
@@ -2915,7 +2923,7 @@ export component AppWindow inherits Window {
                                                 Text { text: "Skip Silences"; color: Theme.text; font-weight: 700; }
                                                 Text { text: "Jumps over long silences, and moves on when the rest is silent."; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
                                             }
-                                            for s in [0, 5, 8, 15, 30]: Chip { label: s == 0 ? "Off" : s + " s"; on: root.skip-silence == s; y: (parent.height - self.height) / 2; clicked => { root.skip-pick(s); } }
+                                            Dropdown { options: ["Off", "After 5 s", "After 8 s", "After 15 s", "After 30 s"]; current: root.skip-silence == 0 ? 0 : root.skip-silence <= 5 ? 1 : root.skip-silence <= 8 ? 2 : root.skip-silence <= 15 ? 3 : 4; y: (parent.height - self.height) / 2; picked(k) => { root.skip-pick([0, 5, 8, 15, 30][k]); } }
                                         }
                                         Rectangle { height: 1px; background: Theme.line; }
                                         HorizontalLayout {
@@ -2930,7 +2938,8 @@ export component AppWindow inherits Window {
                                         if root.eq-on: HorizontalLayout {
                                             alignment: start;
                                             spacing: 8px;
-                                            for p[i] in root.eq-presets: Chip { label: p; clicked => { root.eq-preset(i); } }
+                                            Dropdown { options: root.eq-presets; current: -1; placeholder: "Presets..."; picked(k) => { root.eq-preset(k); } }
+                                            Pill { label: "Reset"; clicked => { root.eq-preset(0); } }
                                         }
                                         // (the bands from 0 to 24, as the slider doesn't go below zero: 12 is flat)
                                         if root.eq-on: VerticalLayout {
@@ -2942,6 +2951,23 @@ export component AppWindow inherits Window {
                                                 Text { text: (g > 0 ? "+" : "") + round(g) + " dB"; width: 52px; color: Theme.text; font-size: 12px; horizontal-alignment: right; vertical-alignment: center; }
                                             }
                                         }
+                                    }
+                                }
+                                // Output Device (as the web app's, as well as the player bar's menu)
+                                Card {
+                                    HorizontalLayout {
+                                        padding: 16px;
+                                        padding-top: 12px;
+                                        padding-bottom: 12px;
+                                        spacing: 12px;
+                                        VerticalLayout {
+                                            horizontal-stretch: 1;
+                                            alignment: center;
+                                            spacing: 2px;
+                                            Text { text: "Output Device"; color: Theme.text; font-weight: 700; }
+                                            Text { text: "Where the sound plays."; color: Theme.muted; font-size: 12px; }
+                                        }
+                                        Dropdown { width: 280px; options: root.outputs; current: root.output-at; y: (parent.height - self.height) / 2; init => { root.devices-want(); } picked(k) => { root.device-pick(k); root.devices-want(); } }
                                     }
                                 }
                                 // (Seamless Mix and its band handoff)
