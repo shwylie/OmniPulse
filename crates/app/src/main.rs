@@ -7993,12 +7993,14 @@ fn taskbar_widget(shared: &Shared, ui: &AppWindow, on: bool) {
         if tw.get_art() != ui.get_now_art() { tw.set_art(ui.get_now_art()); }
         tw.set_playing(ui.get_playing()); tw.set_liked(ui.get_now_liked()); tw.set_can_like(ui.get_can_like());
         tw.set_frac(ui.get_pos_frac()); tw.set_mixing(ui.get_mixing());
+        tw.set_show_progress(ui.get_widget_progress()); tw.set_big_art(ui.get_widget_big_art());
         // where: by the clock, over the taskbar (put back over it each time, as it comes up over us when clicked)
         let scale = if *hwnd != 0 { tw.window().scale_factor() } else { ui.window().scale_factor() };
-        let spot = desktop::dock::spot((280.0 * scale) as i32, scale).filter(|_| !desktop::dock::busy());
+        let spot = desktop::dock::spot((340.0 * scale) as i32, scale).filter(|_| !desktop::dock::busy());
         match spot {
             None => { if *shown { let _ = tw.hide(); *shown = false; } }
             Some((x, y, wd, ht)) => {
+                tw.set_bar_h(ht as f32 / scale.max(0.5));
                 if !*shown {
                     tw.window().set_size(slint::PhysicalSize::new(wd as u32, ht as u32));
                     tw.window().set_position(slint::PhysicalPosition::new(x, y));
@@ -8066,6 +8068,8 @@ fn apply_look(shared: &Shared) {
     ui.set_anim_on(motion);
     ui.set_close_to_tray(min_to_tray(prefs));
     ui.set_taskbar_widget(prefs["taskbarWidget"].as_bool() == Some(true));
+    ui.set_widget_progress(prefs["widgetProgress"].as_bool() != Some(false));
+    ui.set_widget_big_art(prefs["widgetBigArt"].as_bool() != Some(false));
     ui.set_gpu_on(prefs["nativeGpu"].as_bool() == Some(true));
     LISTEN_NUDGE.store(nudge_of(prefs), std::sync::atomic::Ordering::Relaxed);
     let nudge = nudge_of(prefs).to_string();
@@ -9255,7 +9259,7 @@ fn main() -> Result<(), slint::PlatformError> {
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("panels") { vec![(9, "settings"), (10, "cat_Integrations"), (11, "cat_Plugins"), (12, "p_requests"), (12, "p_widget"), (14, "p_alerts"), (16, "p_plugins"), (17, "plugread"), (20, "p_alertlist"), (21, "p_alert:raid"), (22, "pfclose"), (23, "end")] }
             // (OMNIPULSE_SELFTEST_PLAN=taskbar: the taskbar widget switched on (shown for a few seconds), a
             // picture of it, then off)
-            else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("taskbar") { vec![(9, "play"), (10, "tbon"), (15, "tbshot"), (16, "tboff"), (18, "end")] }
+            else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("taskbar") { vec![(9, "play"), (10, "tbon"), (15, "tbshot"), (16, "tbsmall"), (18, "tbshot2"), (19, "tboff"), (21, "end")] }
             // (OMNIPULSE_SELFTEST_PLAN=look: List Density at Compact, and Search with Hide likes)
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("look") { vec![(9, "play"), (12, "library"), (13, "compact"), (14, "settings"), (15, "comfy"), (16, "search"), (19, "hidelikes"), (21, "hidelikesoff"), (22, "discover"), (30, "langnext"), (40, "end")] }
             else if only_discover { vec![(9, "play"), (11, "discover"), (30, "disc"), (45, "discmix"), (12, "import"), (46, "taste"), (47, "taste2"), (48, "taste3"), (70, "tall"), (70, "tasted"), (71, "short"), (71, "yourmix"), (90, "mixplats"), (91, "marquee"), (92, "marqueeoff"), (93, "end")] } else { full.to_vec() };
@@ -9292,6 +9296,8 @@ fn main() -> Result<(), slint::PlatformError> {
                         }
                     } else { println!("selftest: no taskbar widget"); }
                 }),
+                "tbsmall" => { ui.invoke_app_pref("widgetBigArt".into(), false); ui.invoke_app_pref("widgetProgress".into(), false); }
+                "tbshot2" => TBW.with(|w| { if let Some((tw, _, _)) = w.borrow().as_ref() { if let Ok(shot) = tw.window().take_snapshot() { let _ = image::RgbaImage::from_raw(shot.width(), shot.height(), shot.as_bytes().to_vec()).map(|i| i.save(format!("{dir}/taskbar-widget-small.png"))); } } }),
                 "tboff" => { ui.invoke_app_pref("taskbarWidget".into(), false); println!("selftest: taskbar widget after off: shown {}", TBW.with(|w| w.borrow().as_ref().is_some_and(|x| x.2))); }
                 // picking: two rows, a range with Shift, then none
                 "pick" => { ui.invoke_row_pick(0, 1); ui.invoke_row_pick(4, 2); println!("selftest: picked {} (rows marked {}), status \"{}\"", s.borrow().picked.len(), ui.get_rows().iter().filter(|r| r.picked).count(), ui.get_status()); }

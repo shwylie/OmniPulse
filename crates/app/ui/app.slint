@@ -1366,6 +1366,8 @@ export component AppWindow inherits Window {
     callback close-to-tray-changed(bool);
     // Settings > App: Taskbar Widget, Hardware Acceleration
     in-out property <bool> taskbar-widget;
+    in-out property <bool> widget-progress: true;
+    in-out property <bool> widget-big-art: true;
     in-out property <bool> gpu-on;
     callback app-pref(string, bool);
     // a web page opened in your browser
@@ -2588,6 +2590,35 @@ export component AppWindow inherits Window {
                                             Text { text: "What's playing, always on show in the taskbar by the clock, with its controls. Hidden while a game or video is full screen, or the taskbar is hidden."; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
                                         }
                                         Toggle { checked <=> root.taskbar-widget; y: (parent.height - self.height) / 2; toggled => { root.app-pref("taskbarWidget", self.checked); } }
+                                    }
+                                }
+                                if root.taskbar-widget: Card {
+                                    VerticalLayout {
+                                        padding: 16px;
+                                        padding-top: 10px;
+                                        padding-bottom: 10px;
+                                        padding-left: 34px;
+                                        spacing: 10px;
+                                        HorizontalLayout {
+                                            spacing: 12px;
+                                            VerticalLayout {
+                                                horizontal-stretch: 1;
+                                                alignment: center;
+                                                Text { text: "Progress Bar"; color: Theme.text; font-weight: 700; }
+                                                Text { text: "Where the song is, along the widget's foot."; color: Theme.muted; font-size: 12px; wrap: word-wrap; min-height: self.preferred-height; }
+                                            }
+                                            Toggle { checked <=> root.widget-progress; y: (parent.height - self.height) / 2; toggled => { root.app-pref("widgetProgress", self.checked); } }
+                                        }
+                                        HorizontalLayout {
+                                            spacing: 12px;
+                                            VerticalLayout {
+                                                horizontal-stretch: 1;
+                                                alignment: center;
+                                                Text { text: "Full-Height Cover"; color: Theme.text; font-weight: 700; }
+                                                Text { text: "The cover as tall as the taskbar, at the widget's edge. Off: a smaller one."; color: Theme.muted; font-size: 12px; wrap: word-wrap; min-height: self.preferred-height; }
+                                            }
+                                            Toggle { checked <=> root.widget-big-art; y: (parent.height - self.height) / 2; toggled => { root.app-pref("widgetBigArt", self.checked); } }
+                                        }
                                     }
                                 }
                                 Card {
@@ -3920,38 +3951,44 @@ export component TaskbarWidget inherits Window {
     in property <bool> has-track;
     /// see-through, over a dark taskbar: black is clear, the rest added to what's under it
     in property <bool> glass;
+    /// Settings > App & Look: its progress along its foot, and its cover the taskbar's full height
+    in property <bool> show-progress: true;
+    in property <bool> big-art: true;
+    /// the taskbar's height, as it was measured where it's placed (the cover's size: never the layout's own)
+    in property <length> bar-h: 48px;
     callback act(string);
     no-frame: true;
     always-on-top: true;
     title: "OmniPulse Taskbar Widget";
     background: root.glass ? transparent : Theme.panel;
-    preferred-width: 280px;
-    preferred-height: 40px;
+    preferred-width: 340px;
+    preferred-height: 48px;
     HorizontalLayout {
-        padding-left: 6px;
+        padding-left: root.big-art ? 0px : 6px;
         padding-right: 4px;
-        spacing: 8px;
+        spacing: 10px;
         alignment: stretch;
+        // (its cover: the taskbar's full height, at its left edge, or a smaller one)
         Rectangle {
-            width: 30px;
+            width: root.big-art ? root.bar-h : min(36px, root.bar-h - 8px);
             height: self.width;
             y: (parent.height - self.height) / 2;
-            BadgedCover { art: root.art; plat: root.plat; badge: 14px; corner: 4px; initial: root.song == "" ? "" : "♪"; width: parent.width; height: parent.height; }
+            BadgedCover { art: root.art; plat: root.plat; badge: 15px; corner: root.big-art ? 0px : 4px; initial: root.song == "" ? "" : "♪"; width: parent.width; height: parent.height; }
         }
         VerticalLayout {
             horizontal-stretch: 1;
             alignment: center;
-            spacing: 0px;
-            Marquee { text: root.has-track ? root.song : "OmniPulse"; font-size: 12px; }
-            Marquee { text: root.has-track ? (root.mixing ? "Mixing · " + root.artist : root.artist) : "Nothing playing"; font-size: 11px; font-weight: 400; ink: Theme.muted; }
+            spacing: 1px;
+            Marquee { text: root.has-track ? root.song : "OmniPulse"; font-size: 14px; }
+            Marquee { text: root.has-track ? (root.mixing ? "Mixing · " + root.artist : root.artist) : "Nothing playing"; font-size: 12px; font-weight: 400; ink: Theme.muted; }
         }
-        if root.can-like: IconButton { d: root.liked ? Icons.library : Icons.heart-out; size: 26px; tint: root.liked ? Theme.accent : Theme.muted; y: (parent.height - self.height) / 2; clicked => { root.act("like"); } }
-        IconButton { d: Icons.prev; size: 26px; y: (parent.height - self.height) / 2; clicked => { root.act("prev"); } }
-        IconButton { d: root.playing ? Icons.pause : Icons.play; size: 30px; tint: Theme.text; y: (parent.height - self.height) / 2; clicked => { root.act("play"); } }
-        IconButton { d: Icons.next; size: 26px; y: (parent.height - self.height) / 2; clicked => { root.act("next"); } }
+        if root.can-like: IconButton { d: root.liked ? Icons.library : Icons.heart-out; size: 30px; tint: root.liked ? Theme.accent : Theme.muted; y: (parent.height - self.height) / 2; clicked => { root.act("like"); } }
+        IconButton { d: Icons.prev; size: 30px; y: (parent.height - self.height) / 2; clicked => { root.act("prev"); } }
+        IconButton { d: root.playing ? Icons.pause : Icons.play; size: 34px; tint: Theme.text; y: (parent.height - self.height) / 2; clicked => { root.act("play"); } }
+        IconButton { d: Icons.next; size: 30px; y: (parent.height - self.height) / 2; clicked => { root.act("next"); } }
     }
-    // where it is, along its foot (the mix sweeping through it, as the player bar's)
-    Rectangle {
+    // where it is, along its foot (the mix sweeping through it, as the player bar's), if wanted
+    if root.show-progress: Rectangle {
         y: parent.height - 2px;
         height: 2px;
         background: Theme.text.with-alpha(0.12);
@@ -3972,7 +4009,7 @@ export component TaskbarWidget inherits Window {
         }
     }
     // the cover and the names: the app's window, shown
-    TouchArea { x: 0; width: root.width - (root.can-like ? 150px : 120px); height: parent.height - 2px; clicked => { root.act("show"); } }
+    TouchArea { x: 0; width: root.width - (root.can-like ? 170px : 136px); height: parent.height - 2px; clicked => { root.act("show"); } }
 }
 
 // Apple Music's sign-in (Settings > Integrations > Apple Music > Import): Apple's own page, in a window of
