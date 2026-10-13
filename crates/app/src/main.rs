@@ -3323,11 +3323,13 @@ const MIX_HEARD_MS: u64 = 400;
 
 thread_local! {
     static MIX_SHOW: RefCell<Option<MixShow>> = const { RefCell::new(None) };
+    static SHOWN_DUR: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
 }
 
 /// The one going out's place and length, while a mix is under way (None: no mix being shown)
 fn mix_show_pos() -> Option<(u64, u64)> {
-    MIX_SHOW.with(|m| m.borrow().as_ref().map(|x| ((x.from_ms + x.began.elapsed().as_millis() as u64).min(x.dur), x.dur)))
+    // (from where the mix began in it, as heard: the engine is that far ahead of the speakers)
+    MIX_SHOW.with(|m| m.borrow().as_ref().map(|x| ((x.from_ms + (x.began.elapsed().as_millis() as u64).saturating_sub(MIX_HEARD_MS)).min(x.dur), x.dur)))
 }
 
 /// The queue's row shown as playing while a mix is under way (the one going out)
@@ -3372,6 +3374,8 @@ fn mix_show_end(shared: &Shared) {
 /// A mix's moment came: the next track is coming in (the queue moves on, without loading it again)
 fn mix_started(shared: &Shared) {
     let Some(MixPhase::Waiting { key, plan, tempo, version, out, pitch }) = MIX.with(|m| m.borrow_mut().take()) else { return };
+    // (where the mix begins in the one going out: its place, shown, from there)
+    let plan_at = plan.at_ms;
     let at = shared.borrow().queue.qi.map(|i| i + 1).filter(|&n| shared.borrow().queue.items.get(n).is_some_and(|q| q.t.key == key));
     let Some(n) = at else { omnipulse_core::diag::note("Seamless Mix: its moment came, but the next one wasn't next any more"); return };
     // (each beat of the one coming in, at its own tempo, for easing back over sixteen of them)
@@ -3400,7 +3404,7 @@ fn mix_started(shared: &Shared) {
         let a = shared.borrow();
         let ui = a.ui.upgrade();
         match (a.queue.current().cloned(), a.queue.qi, ui) {
-            (Some(prev), Some(qi), Some(ui)) => Some((prev, qi, a.engine.position_ms(), a.engine.duration_ms(), a.lyrics.clone(), (ui.get_now_art(), ui.get_now_art_big()), a.lyric_lines.iter().collect::<Vec<_>>(), ui.get_lyric_on(), ui.get_lyrics_note(), ui.get_lyrics_from())),
+            (Some(prev), Some(qi), Some(ui)) => Some((prev, qi, plan_at, SHOWN_DUR.with(|d| d.get()).max(1), a.lyrics.clone(), (ui.get_now_art(), ui.get_now_art_big()), a.lyric_lines.iter().collect::<Vec<_>>(), ui.get_lyric_on(), ui.get_lyrics_note(), ui.get_lyrics_from())),
             _ => None,
         }
     };
@@ -3893,6 +3897,9 @@ fn tick(shared: &Shared, events: &std::sync::mpsc::Receiver<Event>, n: u64) {
         }
         None => (pos.saturating_sub(t_start), dur.saturating_sub(t_start)),
     };
+    // (the length shown, kept: a mix that starts shows the one going out at it, not the engine's, which is
+    // the incoming one's by then)
+    if mix_show_pos().is_none() { SHOWN_DUR.with(|d| d.set(vdur)); }
     ui.set_pos_text(fmt_ms(vpos).into());
     ui.set_dur_text(fmt_ms(vdur).into());
     ui.set_dur_secs(vdur as f32 / 1000.0);
