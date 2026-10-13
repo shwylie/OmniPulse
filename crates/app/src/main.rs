@@ -5619,10 +5619,17 @@ fn loud_pick(shared: &Shared, step: &str) {
     // what's playing: at the new target straight away
     let (t, token) = { let a = shared.borrow(); (a.queue.current().cloned(), a.token) };
     let Some(t) = t else { return };
-    let ver = shared.borrow().closest.as_ref().filter(|(k, _)| *k == t.key).map(|(_, v)| v.id.clone());
-    let what = sound::loud_source(&t, ver.as_deref());
+    // (what's actually playing, as it was started: its YouTube Music version, if it plays from one)
+    let cur = shared.borrow().cur_loud.clone();
+    let what: Option<(&'static str, String)> = match cur.as_deref().and_then(|k| k.split_once(':')) {
+        Some(("youtube", id)) => Some(("youtube", id.to_string())),
+        Some(("soundcloud", id)) => Some(("soundcloud", id.to_string())),
+        Some(("local", id)) => Some(("local", id.to_string())),
+        _ => sound::loud_source(&t, None),
+    };
+    let ver = what.as_ref().is_some_and(|(k, _)| *k == "youtube") && !matches!(t.src, track::Src::YouTube(_));
     let known = what.as_ref().and_then(|(s, id)| shared.borrow().loud.get(&format!("{s}:{id}")).copied());
-    { let a = shared.borrow(); a.engine.set_match_db(sound::loud_db(&a.web.prefs, &t, known, ver.is_some()), false); }
+    { let a = shared.borrow(); let db = sound::loud_db(&a.web.prefs, &t, known, ver); if std::env::var_os("OMNIPULSE_SELFTEST").is_some() { println!("selftest: loudness {step}: {db:+.1} dB ({:?}, measured {known:?})", what); } a.engine.set_match_db(db, false); }
     // (and Spotify's own levelling, for its songs it plays: from the next one)
     let (on, target) = sound::spotify_norm(&shared.borrow().web.prefs);
     omnipulse_core::spotify_engine::spe_set_normalisation(on, target);
@@ -9246,6 +9253,7 @@ fn main() -> Result<(), slint::PlatformError> {
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("setfit") { vec![(9, "play"), (10, "queue"), (11, "size:1150:530"), (12, "nav:settings"), (13, "cat:Sound"), (14, "scroll:4000"), (16, "cat:Integrations"), (17, "scroll:-4000"), (19, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("acc2") { vec![(9, "play"), (10, "accent2"), (12, "nav:library"), (14, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("dragasks") { vec![(9, "play"), (12, "dragasks"), (13, "end")] }
+            else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("loudsteps") { vec![(9, "play"), (16, "loud:normal"), (17, "loud:loud"), (18, "loud:normal"), (19, "loud:quiet"), (20, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("square") { vec![(9, "play"), (10, "unround"), (12, "nav:settings"), (13, "cat:Streaming"), (14, "panel:widget"), (16, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("qset") { vec![(9, "play"), (11, "queue"), (14, "nav:settings"), (15, "cat:App & Look"), (16, "scroll:420"), (18, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("nowslim") { vec![(9, "play"), (11, "queue"), (12, "now"), (15, "size:860:720"), (17, "size:1100:720"), (19, "size:1500:860"), (21, "end")] }
@@ -9365,6 +9373,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 "queue" => { ui.set_queue_open(true); }
                 w if w.starts_with("nav:") => { ui.invoke_nav(w[4..].into()); }
                 "accent2" => { if let Some(sh) = SHARED.with(|x| x.borrow().clone()) { if let Some(o) = sh.borrow_mut().web.prefs.as_object_mut() { o.insert("artAccent".into(), serde_json::json!(false)); o.insert("accent".into(), serde_json::json!("#4cc9f0")); o.insert("accent2".into(), serde_json::json!("#fa586a")); } apply_look(&sh); } }
+                w if w.starts_with("loud:") => { if let Some(sh) = SHARED.with(|x| x.borrow().clone()) { loud_pick(&sh, &w[5..]); } }
                 "unround" => { if let Some(sh) = SHARED.with(|x| x.borrow().clone()) { pref_put(&sh, "appRounded", serde_json::json!(false)); apply_look(&sh); } }
                 w if w.starts_with("panel:") => { if let Some(sh) = SHARED.with(|x| x.borrow().clone()) { panel_open(&sh, &w[6..]); } }
                 w if w.starts_with("cat:") => { ui.set_set_cat(w[4..].into()); }
