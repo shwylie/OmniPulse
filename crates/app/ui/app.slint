@@ -17,6 +17,9 @@ export global Theme {
     in-out property <color> accent-next: #8e9bff;
     in-out property <color> accent-2-next: #b48eff;
     in-out property <bool> pulsing;
+    // the player's colours: each accent a little into the panel (the first on the left, the second on the right)
+    out property <color> bar-a: panel.mix(accent, 0.86);
+    out property <color> bar-b: panel.mix(accent-2, 0.86);
     property <float> pulse: pulsing ? (1 - cos(animation-tick() / 3.2s * 360deg)) / 2 : 0;
     out property <color> accent: pulsing ? accent-own.mix(accent-next, 1 - pulse) : accent-own;
     out property <color> accent-2: pulsing ? accent-2-own.mix(accent-2-next, 1 - pulse) : accent-2-own;
@@ -561,6 +564,42 @@ component CtxMenu inherits Rectangle {
             }
         }
     }
+}
+
+/// Rounded corners for a gradient (the software renderer draws gradients square-cornered): at each
+/// corner asked for, the colour outside it with a quarter circle of the gradient's colour there. Laid
+/// over the shape, the size of it.
+component Caps inherits Rectangle {
+    in property <length> r;
+    in property <color> outside: Theme.bg;
+    in property <color> tl;
+    in property <color> tr;
+    in property <color> bl;
+    in property <color> br;
+    in property <bool> top: true;
+    in property <bool> bottom: false;
+    in property <bool> left: true;
+    in property <bool> right: true;
+    if root.r > 0 && root.top && root.left: Rectangle { x: 0; y: 0; width: root.r; height: root.r; clip: true; background: root.outside;
+        Rectangle { x: 0; y: 0; width: root.r * 2; height: root.r * 2; border-radius: root.r; background: root.tl; } }
+    if root.r > 0 && root.top && root.right: Rectangle { x: parent.width - root.r; y: 0; width: root.r; height: root.r; clip: true; background: root.outside;
+        Rectangle { x: -root.r; y: 0; width: root.r * 2; height: root.r * 2; border-radius: root.r; background: root.tr; } }
+    if root.r > 0 && root.bottom && root.left: Rectangle { x: 0; y: parent.height - root.r; width: root.r; height: root.r; clip: true; background: root.outside;
+        Rectangle { x: 0; y: -root.r; width: root.r * 2; height: root.r * 2; border-radius: root.r; background: root.bl; } }
+    if root.r > 0 && root.bottom && root.right: Rectangle { x: parent.width - root.r; y: parent.height - root.r; width: root.r; height: root.r; clip: true; background: root.outside;
+        Rectangle { x: -root.r; y: -root.r; width: root.r * 2; height: root.r * 2; border-radius: root.r; background: root.br; } }
+}
+
+/// A page's top: both accents across it (the first on the left, the second on the right, as the web
+/// app's), fading down into the panel
+component AccentGlow inherits Rectangle {
+    y: 0;
+    height: 340px;
+    property <color> c1: Theme.panel.mix(Theme.accent, 0.66);
+    property <color> c2: Theme.panel.mix(Theme.accent-2, 0.66);
+    Rectangle { background: @linear-gradient(90deg, root.c1 0%, root.c2 100%); }
+    Rectangle { background: @linear-gradient(180deg, Theme.panel.with-alpha(0) 0%, Theme.panel 100%); }
+    Caps { r: Theme.panel-radius; tl: root.c1; tr: root.c2; }
 }
 
 component Toggle inherits Rectangle {
@@ -1728,17 +1767,7 @@ export component AppWindow inherits Window {
                 // the page isn't rounded off with it)
                 // (the software renderer draws a gradient square-cornered: its rounded top edge is a strip of
                 // its first colour, the gradient from just under the corners)
-                Rectangle {
-                    y: 0;
-                    height: Theme.panel-radius * 2;
-                    border-radius: Theme.panel-radius;
-                    background: Theme.panel.mix(Theme.accent, 0.7);
-                }
-                Rectangle {
-                    y: Theme.panel-radius;
-                    height: 340px - Theme.panel-radius;
-                    background: @linear-gradient(180deg, Theme.panel.mix(Theme.accent, 0.7) 0%, Theme.panel 100%);
-                }
+                AccentGlow { }
                 pdz := DropArea {
                     can-drop(e) => { return Dnd.accepts("page", e.data) ? DragAction.copy : DragAction.none; }
                     dropped(e) => { Dnd.dropped("page", e.data); return e.proposed-action; }
@@ -2925,17 +2954,7 @@ export component AppWindow inherits Window {
                     TouchArea { }
                     // (the software renderer draws a gradient square-cornered: its rounded top edge is a strip of
                     // its first colour, the gradient from just under the corners)
-                    Rectangle {
-                        y: 0;
-                        height: Theme.panel-radius * 2;
-                        border-radius: Theme.panel-radius;
-                        background: Theme.panel.mix(Theme.accent, 0.7);
-                    }
-                    Rectangle {
-                        y: Theme.panel-radius;
-                        height: 340px - Theme.panel-radius;
-                        background: @linear-gradient(180deg, Theme.panel.mix(Theme.accent, 0.7) 0%, Theme.panel 100%);
-                    }
+                    AccentGlow { }
                     pf-col := VerticalLayout {
                         padding: 24px;
                         padding-top: 14px;
@@ -3178,6 +3197,9 @@ export component AppWindow inherits Window {
                         width: min(max(info.preferred-width + 38px, self.floor), root.width - 40px);
                         animate width { duration: Theme.motion ? 320ms : 0ms; easing: cubic-bezier(0.2, 0.8, 0.2, 1); }
                         height: parent.height;
+                        // (where it is across the player: the gradient's colours there)
+                        property <float> x0: self.x / max(1px, parent.width);
+                        property <float> x1: (self.x + self.width) / max(1px, parent.width);
                         // the gap around it
                         Rectangle {
                             x: -8px;
@@ -3190,9 +3212,10 @@ export component AppWindow inherits Window {
                             border-top-right-radius: Theme.radius > 0 ? Theme.radius + 8px : 0;
                         }
                         Rectangle {
-                            background: Theme.panel.mix(Theme.accent, 0.86);
+                            background: @linear-gradient(90deg, Theme.bar-a.mix(Theme.bar-b, 1 - tab.x0) 0%, Theme.bar-a.mix(Theme.bar-b, 1 - tab.x1) 100%);
                             border-top-left-radius: Theme.radius;
                             border-top-right-radius: Theme.radius;
+                            Caps { r: Theme.radius; outside: Theme.bg; tl: Theme.bar-a.mix(Theme.bar-b, 1 - tab.x0); tr: Theme.bar-a.mix(Theme.bar-b, 1 - tab.x1); }
                             clip: true;
                             // (mirrored on the right: the cover at the window's edge, the text lined up beside it)
                             info := HorizontalLayout {
@@ -3233,7 +3256,7 @@ export component AppWindow inherits Window {
                         width: 8px;
                         height: 8px;
                         clip: true;
-                        background: Theme.panel.mix(Theme.accent, 0.86);
+                        background: Theme.bar-a.mix(Theme.bar-b, 1 - self.x / max(1px, parent.width));
                         Rectangle { x: root.tab-right ? -8px : 0px; y: -8px; width: 16px; height: 16px; border-radius: Theme.radius > 0 ? 8px : 0; background: Theme.bg; }
                     }
                 }
@@ -3242,11 +3265,16 @@ export component AppWindow inherits Window {
                     vertical-stretch: 1;
                     // Minimal: the panel's own colour; Floating: round ends and a shadow
                     property <length> r: root.player-style == "float" && Theme.radius > 0 ? 22px : Theme.radius;
-                    background: root.player-style == "minimal" ? Theme.panel : Theme.panel.mix(Theme.accent, 0.86);
+                    background: root.player-style == "minimal" ? Theme.panel : @linear-gradient(90deg, Theme.bar-a 0%, Theme.bar-b 100%);
                     border-top-left-radius: root.tab-style && !root.tab-right ? 0 : self.r;
                     border-top-right-radius: root.tab-style && root.tab-right ? 0 : self.r;
                     border-bottom-left-radius: self.r;
                     border-bottom-right-radius: self.r;
+                    // (rounded over its gradient; the tab's side square, where the tab joins it)
+                    // (its corners rounded over its gradient; the top one on the tab's side square: the tab joins it there)
+                    if root.player-style != "minimal": Caps { r: parent.r; bl: Theme.bar-a; br: Theme.bar-b; top: false; bottom: true; }
+                    if root.player-style != "minimal" && (!root.tab-style || root.tab-right): Caps { r: parent.r; tl: Theme.bar-a; right: false; }
+                    if root.player-style != "minimal" && (!root.tab-style || !root.tab-right): Caps { r: parent.r; tr: Theme.bar-b; left: false; }
                     drop-shadow-blur: root.player-style == "float" ? 24px : 0;
                     drop-shadow-offset-y: root.player-style == "float" ? 8px : 0;
                     drop-shadow-color: #00000060;
