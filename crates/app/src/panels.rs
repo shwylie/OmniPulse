@@ -15,6 +15,7 @@ pub fn title(name: &str) -> String {
     if let Some(k) = name.strip_prefix("alert:") { return format!("Alert: {}", crate::alerts::name(&Value::Null, k)); }
     match name {
         "requests" => "Song Requests",
+        "limits" => "Limit Requests",
         "widget" => "Stream Widget",
         "alerts" => "Alerts",
         "remote" => "Stream Deck & Remote",
@@ -28,12 +29,13 @@ pub fn title(name: &str) -> String {
 
 /// The panel a switch's Settings button opens (by the switch's pref)
 pub fn of_switch(key: &str) -> Option<&'static str> {
-    Some(match key { "streamSafe" => "safe", "req" => "requests", "widget" => "widget", "alertsOn" => "alerts", "remoteOn" => "remote", "out2On" => "offset", "avoidRecent" => "recent", "hideOn" => "hidden", "plugAdd" => "plugins", _ => return None })
+    Some(match key { "streamSafe" => "safe", "req" => "requests", "reqLimits" => "limits", "widget" => "widget", "alertsOn" => "alerts", "remoteOn" => "remote", "out2On" => "offset", "avoidRecent" => "recent", "hideOn" => "hidden", "plugAdd" => "plugins", _ => return None })
 }
 
 /// What a panel edits, and each one's default (the web app's)
 fn keys(name: &str) -> Vec<(&'static str, Value)> {
     match name {
+        "limits" => vec![("reqMax", json!(10)), ("reqPerUser", json!(2))],
         "requests" => vec![("reqBot", json!("streamerbot")), ("reqRadioEdit", json!(false)), ("reqMax", json!(10)), ("reqPerUser", json!(2)), ("reqPort", json!(7879)), ("botRemote", json!(false))],
         "widget" => vec![("widgetPort", json!(7878)), ("widgetDesign", json!("card")), ("widgetAlign", json!("left")), ("widgetRounded", json!(true)), ("widgetText", json!(1)), ("wFade", json!(true)), ("wScroll", json!(true)), ("wSpin", json!(true)), ("wRequester", json!(true)), ("wColor", json!(1.2))],
         "alerts" => vec![("alertBot", json!("streamerbot")), ("sbHost", json!("127.0.0.1:8080")), ("sbOn", json!(true)), ("alertTrans", json!("seamless")), ("alertCSize", json!("medium")), ("alertCDir", json!("diag")), ("alertCAngle", json!(0)), ("alertAnim", json!("slide")), ("alertOwnCol", json!(false)), ("alertCol1", json!("#8e9bff")), ("alertCol2", json!("#b38cff")), ("alertDir", json!("115deg")), ("alertIcon", json!(1)), ("alertSecs", json!(5)), ("alertVol", json!(0.8)), ("botRemote", json!(false))],
@@ -85,6 +87,23 @@ fn pct(from: f64, to: f64, step: f64) -> Vec<(Value, String)> {
     while v <= to + 1e-9 { let r = (v * 100.0).round() / 100.0; out.push((json!(r), format!("{}%", (r * 100.0).round()))); v += step; }
     out
 }
+/// − and + through the options (a size, a count), as the web app's steppers
+fn stepper(key: &str, label: &str, note: &str, opts: Vec<(Value, String)>) -> Value {
+    let mut v = sel_owned(key, label, note, opts);
+    v["type"] = json!("stepper");
+    v
+}
+fn counts(from: u64, to: u64) -> Vec<(Value, String)> { (from..=to).map(|n| (json!(n), n.to_string())).collect() }
+/// A slider from `min` to `max` by `step` (`unit`: "%" for 0 to 1 shown as a percentage, or what's shown
+/// after the number); `with_box`: a box to type it in too
+fn range(key: &str, label: &str, note: &str, min: f64, max: f64, step: f64, unit: &str, with_box: bool) -> Value {
+    json!({ "key": key, "label": label, "note": note, "type": if with_box { "rangenum" } else { "range" }, "min": min, "max": max, "step": step, "unit": unit })
+}
+/// A colour: its swatch, its code, and Windows' colour picker
+fn color(key: &str, label: &str, note: &str) -> Value { json!({ "key": key, "label": label, "note": note, "type": "color" }) }
+/// A switch with its own settings beside it (`press`: what Configure does)
+fn toggle_cfg(key: &str, label: &str, note: &str, press: &str) -> Value { json!({ "key": key, "label": label, "note": note, "type": "togglecfg", "press": press }) }
+
 fn sel_owned(key: &str, label: &str, note: &str, opts: Vec<(Value, String)>) -> Value {
     let o: Vec<(Value, &str)> = opts.iter().map(|(v, l)| (v.clone(), l.as_str())).collect();
     sel(key, label, note, &o)
@@ -128,8 +147,6 @@ pub fn fields(name: &str, vals: &Map<String, Value>, prefs: &Value, lan: &str) -
                 info("Wrong Song Address (!wrongsong)", &wrong(&hide(&key)), &wrong(&key), ""),
                 note(steps),
                 tog("reqRadioEdit", "Prefer Radio Edits", "Plays a long song's radio edit, if there is one."),
-                num("reqMax", "Most Waiting", "With Limit Requests on: how many requests can wait at once (1 to 50)."),
-                num("reqPerUser", "Most per Viewer", "With Limit Requests on: how many of one viewer's can wait (1 to 10)."),
                 button("reqClear", "Waiting Now", "Clear Requests", "Takes the requested songs out of the queue."),
                 num("reqPort", "Port", "1024 to 65535."),
                 button("reqNewKey", "Secret Key", "New Key", "A new key: your bot needs the new addresses after."),
@@ -140,23 +157,24 @@ pub fn fields(name: &str, vals: &Map<String, Value>, prefs: &Value, lan: &str) -
         "widget" => {
             let port = n("widgetPort", 7878);
             let alerts_on = prefs["alertsOn"].as_bool() == Some(true);
-            let mut f = vec![
+            let f = vec![
                 info("Address", &format!("http://127.0.0.1:{port}/"), &format!("http://127.0.0.1:{port}/"), "In OBS: a Browser source with this address."),
                 num("widgetPort", "Port", "1024 to 65535."),
                 sel("widgetDesign", "Design", "", &[(json!("card"), "Card (460 × 130)"), (json!("bar"), "Slim bar (560 × 64)"), (json!("square"), "Square (300 × 380)"), (json!("minimal"), "Minimal (460 × 110)"), (json!("pill"), "Pill (480 × 80)")]),
                 sel("widgetAlign", "Alignment", "", &[(json!("left"), "Left"), (json!("right"), "Right")]),
                 tog("widgetRounded", "Rounded Corners", ""),
-                sel_owned("widgetText", "Text Size", "", pct(0.7, 1.6, 0.1)),
+                stepper("widgetText", "Text Size", "", pct(0.7, 1.6, 0.1)),
                 tog("wFade", "Fade Between Tracks", ""),
                 tog("wScroll", "Scroll Long Text", ""),
                 tog("wSpin", "Spin the Record", ""),
                 tog("wRequester", "Show Who Requested It", ""),
                 sel("wColor", "Colour Change", "", &[(json!(0), "Instant"), (json!(0.5), "Fast"), (json!(1.2), "Normal"), (json!(2.5), "Slow")]),
                 button("widgetHide", "Hide This Track", "Hide", "Until the next track."),
-                // Alerts: on the widget, so here (Settings > Streaming > Stream Widget > Alerts)
-                button("alertsSwitch", "Alerts", if alerts_on { "Switch Off" } else { "Switch On" }, "On the widget: follows, subs, bits, raids and more, from your bot."),
+                // Alerts: on the widget, so here (Settings > Streaming > Stream Widget > Alerts): a switch, as
+                // every other, with Configure beside it
+                toggle_cfg("alertsOn", "Alerts", "On the widget: follows, subs, bits, raids and more, from your bot.", "alertsOpen"),
             ];
-            if alerts_on { f.push(button("alertsOpen", "Alerts Settings", "Open", "Your bot, how they look and sound, and which ones show.")); }
+            let _ = alerts_on;
             f
         }
         "alerts" => {
@@ -187,23 +205,30 @@ pub fn fields(name: &str, vals: &Map<String, Value>, prefs: &Value, lan: &str) -
             if s("alertTrans", "seamless") == "collage" {
                 f.push(sel("alertCSize", "Collage Tiles", "", &[(json!("small"), "Small"), (json!("medium"), "Medium"), (json!("large"), "Large")]));
                 f.push(sel("alertCDir", "Sweep", "", &[(json!("diag"), "Corner to Corner"), (json!("diag-up"), "Corner to Corner, Rising"), (json!("ltr"), "Left to Right"), (json!("rtl"), "Right to Left"), (json!("ttb"), "Top to Bottom"), (json!("btt"), "Bottom to Top"), (json!("centre"), "From the Middle"), (json!("random"), "Scattered")]));
-                f.push(num("alertCAngle", "Angle", "The tiles' tilt, in degrees."));
+                f.push(range("alertCAngle", "Angle", "The tiles' tilt, in degrees.", -90.0, 90.0, 5.0, "°", true));
             }
             if s("alertTrans", "seamless") == "overlay" {
                 f.push(sel("alertAnim", "Animation", "", &[(json!("slide"), "Slide"), (json!("pop"), "Pop"), (json!("fade"), "Fade"), (json!("bounce"), "Bounce"), (json!("flip"), "Flip")]));
             }
             f.push(tog("alertOwnCol", "Their Own Colours", "Off: the alerts take the album art's colours, as the widget does."));
             if vals["alertOwnCol"].as_bool() == Some(true) {
-                f.push(text("alertCol1", "Accent Colour", "As #rrggbb."));
-                f.push(text("alertCol2", "Second Colour", "As #rrggbb."));
+                f.push(color("alertCol1", "Accent Colour", ""));
+                f.push(color("alertCol2", "Second Colour", ""));
                 f.push(sel("alertDir", "Gradient", "", &[(json!("115deg"), "Diagonal"), (json!("90deg"), "Left to Right"), (json!("180deg"), "Top to Bottom"), (json!("65deg"), "Diagonal, Rising"), (json!("glow"), "Glow")]));
             }
-            f.push(sel_owned("alertIcon", "Icon Size", "", pct(0.6, 2.0, 0.2)));
+            f.push(stepper("alertIcon", "Icon Size", "", pct(0.6, 2.0, 0.2)));
             f.push(sel("alertSecs", "Show For", "", &[(json!(3), "3 s"), (json!(5), "5 s"), (json!(8), "8 s"), (json!(12), "12 s")]));
-            f.push(sel_owned("alertVol", "Sound Volume", "", pct(0.0, 1.0, 0.1)));
+            f.push(range("alertVol", "Sound Volume", "", 0.0, 1.0, 0.01, "%", false));
             f.push(button("alList", "Alerts and Their Order", "Open", "Which alerts show and which goes first, and each one's words, picture and sound."));
             f
         }
+        // Limit Requests' own page (as the web app's, under it)
+        "limits" => vec![
+            stepper("reqMax", "Most Waiting", "How many requests can wait at once.", counts(1, 50)),
+            stepper("reqPerUser", "Most per Viewer", "How many of one viewer's can wait at once.", counts(1, 10)),
+            button("reqClear", "Waiting Now", "Remove All", "Takes the requested songs out of the queue."),
+            button("reqLimitsReset", "", "Reset to Defaults", "10 waiting, 2 per viewer."),
+        ],
         "remote" => {
             let port = n("remotePort", 7880);
             let key = prefs["remoteKey"].as_str().unwrap_or("").to_string();
@@ -219,7 +244,7 @@ pub fn fields(name: &str, vals: &Map<String, Value>, prefs: &Value, lan: &str) -
         "plugins" => plugin_fields(prefs),
         "offset" => vec![
             num("out2Offset", "Offset", "In ms, -5000 to 5000: how much later (or, below 0, earlier) OmniPulse Offset plays than you hear."),
-            sel_owned("out2Volume", "Volume", "", pct(0.0, 1.0, 0.1)),
+            range("out2Volume", "Volume", "", 0.0, 1.0, 0.01, "%", false),
             button("out2Restart", "Not Being Heard?", "Restart OmniPulse Offset", "Starts OmniPulse Offset again, fresh, without stopping your music."),
         ],
         _ => vec![

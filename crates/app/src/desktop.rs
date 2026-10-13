@@ -72,6 +72,30 @@ impl Desktop {
     }
 }
 
+/// Windows' own colour picker (as a web page's colour input opens), starting at `now` (#rrggbb); the
+/// colour chosen, or None if it was cancelled
+#[cfg(windows)]
+pub fn pick_color(now: &str) -> Option<String> {
+    use windows::Win32::Foundation::COLORREF;
+    use windows::Win32::UI::Controls::Dialogs::{ChooseColorW, CHOOSECOLORW, CC_FULLOPEN, CC_RGBINIT};
+    let hex = u32::from_str_radix(now.trim_start_matches('#'), 16).unwrap_or(0x8e9bff);
+    // (Windows' colours are 0x00BBGGRR)
+    let bgr = ((hex & 0xff) << 16) | (hex & 0xff00) | ((hex >> 16) & 0xff);
+    static mut CUSTOM: [COLORREF; 16] = [COLORREF(0x00ffffff); 16];
+    let mut cc = CHOOSECOLORW {
+        lStructSize: std::mem::size_of::<CHOOSECOLORW>() as u32,
+        rgbResult: COLORREF(bgr),
+        lpCustColors: std::ptr::addr_of_mut!(CUSTOM) as *mut COLORREF,
+        Flags: CC_FULLOPEN | CC_RGBINIT,
+        ..Default::default()
+    };
+    if !unsafe { ChooseColorW(&mut cc) }.as_bool() { return None; }
+    let c = cc.rgbResult.0;
+    Some(format!("#{:02x}{:02x}{:02x}", c & 0xff, (c >> 8) & 0xff, (c >> 16) & 0xff))
+}
+#[cfg(not(windows))]
+pub fn pick_color(_now: &str) -> Option<String> { None }
+
 // ---------- the taskbar thumbnail's buttons ----------
 #[cfg(windows)]
 pub mod taskbar {

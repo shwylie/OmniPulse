@@ -79,7 +79,7 @@ export struct SetRow { head: string, label: string, note: string, on: bool, key:
 export struct KeyStep { text: string, has-url: bool, copies: [string] }
 /// A key to paste: its label, what's typed, and whether it looks right
 export struct KeyField { label: string, value: string, ok: bool }
-export struct PlugField { key: string, label: string, note: string, kind: string, value: string, options: [string] }
+export struct PlugField { key: string, label: string, note: string, kind: string, value: string, options: [string], at: int }
 // (an artist you follow: whether on SoundCloud and on Spotify, for its menu)
 export struct Item { name: string, sub: string, art: image, plat: string, on-sc: bool, on-sp: bool }
 
@@ -600,6 +600,67 @@ component AccentGlow inherits Rectangle {
     Rectangle { background: @linear-gradient(90deg, root.c1 0%, root.c2 100%); }
     Rectangle { background: @linear-gradient(180deg, Theme.panel.with-alpha(0) 0%, Theme.panel 100%); }
     Caps { r: Theme.panel-radius; tl: root.c1; tr: root.c2; }
+}
+
+/// A choice from a list, as the web app's dropdowns: what's chosen, and a ▾; a click shows the list, in a
+/// menu of the app's look (up from it near the window's foot; it scrolls when it's long)
+component Dropdown inherits Rectangle {
+    in property <[string]> options;
+    in property <int> current;
+    in property <bool> enabled: true;
+    callback picked(int);
+    // (as wide as the web app's, never stretched across the row)
+    width: 220px;
+    height: 34px;
+    border-radius: 8px;
+    background: dta.has-hover && root.enabled ? Theme.elevated : Theme.panel;
+    border-width: 1px;
+    border-color: dta.has-hover && root.enabled ? Theme.accent.with-alpha(0.6) : Theme.line;
+    opacity: root.enabled ? 1 : 0.45;
+    HorizontalLayout {
+        padding-left: 12px;
+        padding-right: 10px;
+        spacing: 8px;
+        Text { text: root.current >= 0 && root.current < root.options.length ? root.options[root.current] : ""; color: Theme.text; font-size: 13px; vertical-alignment: center; overflow: elide; horizontal-stretch: 1; }
+        Path { commands: "M 2 4 L 6 8 L 10 4"; viewbox-width: 12; viewbox-height: 12; width: 10px; height: 10px; y: (parent.height - self.height) / 2; stroke: Theme.muted; stroke-width: 1.6px; fill: transparent; }
+    }
+    dta := TouchArea { enabled: root.enabled; mouse-cursor: MouseCursor.pointer; clicked => { pop.show(); } }
+    pop := PopupWindow {
+        x: 0;
+        y: root.absolute-position.y + root.height + 4px + list.preferred-height > Win.h - 8px ? -list.preferred-height - 4px : root.height + 4px;
+        width: max(root.width, 200px);
+        close-policy: PopupClosePolicy.close-on-click-outside;
+        list := Rectangle {
+            background: Theme.elevated;
+            border-radius: 10px;
+            border-width: 1px;
+            border-color: Theme.line;
+            drop-shadow-blur: 18px;
+            drop-shadow-color: #00000070;
+            preferred-height: min(col.preferred-height, 330px);
+            Flickable {
+                content-height: col.preferred-height;
+                col := VerticalLayout {
+                    padding: 6px;
+                    for o[k] in root.options: MenuRow { label: o; on: k == root.current; clicked => { pop.close(); root.picked(k); } }
+                }
+            }
+        }
+    }
+}
+
+/// A value stepped down and up, as the web app's − / +
+component Stepper inherits HorizontalLayout {
+    in property <string> value;
+    in property <bool> can-down: true;
+    in property <bool> can-up: true;
+    callback down();
+    callback up();
+    spacing: 6px;
+    alignment: end;
+    Pill { label: "\u{2212}"; opacity: root.can-down ? 1 : 0.4; y: (parent.height - self.height) / 2; clicked => { if (root.can-down) { root.down(); } } }
+    Text { text: root.value; min-width: 52px; color: Theme.text; font-size: 13px; font-weight: 700; horizontal-alignment: center; vertical-alignment: center; }
+    Pill { label: "+"; opacity: root.can-up ? 1 : 0.4; y: (parent.height - self.height) / 2; clicked => { if (root.can-up) { root.up(); } } }
 }
 
 component Toggle inherits Rectangle {
@@ -3074,8 +3135,49 @@ export component AppWindow inherits Window {
                         for o[k] in f.options: Pill { label: o; y: (parent.height - self.height) / 2; clicked => { root.pf-set(i, "btn:" + k); } }
                     }
                     if f.kind == "row": Toggle { checked: f.value == "true"; y: (parent.height - self.height) / 2; toggled => { root.pf-set(i, self.checked ? "true" : "false"); } }
-                            // a choice: each click moves on to the next of its options
-                            if f.kind == "select": Pill { label: f.value; y: (parent.height - self.height) / 2; clicked => { root.pf-set(i, "\u{1}next"); } }
+                            // a choice: a dropdown (as the web app's)
+                            if f.kind == "select": Dropdown { options: f.options; current: f.at; y: (parent.height - self.height) / 2; picked(k) => { root.pf-set(i, "\u{2}" + k); } }
+                            // a size or a count: − and + (as the web app's)
+                            if f.kind == "stepper": Stepper { value: f.value; can-down: f.at > 0; can-up: f.at < f.options.length - 1; y: (parent.height - self.height) / 2; down => { root.pf-set(i, "\u{2}" + (f.at - 1)); } up => { root.pf-set(i, "\u{2}" + (f.at + 1)); } }
+                            // a level: a slider, its value beside it (and with "rangenum", a box to type it in too)
+                            if f.kind == "range" || f.kind == "rangenum": rrow := HorizontalLayout {
+                                spacing: 10px;
+                                width: 260px;
+                                y: (parent.height - self.height) / 2;
+                                // (where it is as it slides: the value shown beside it follows)
+                                property <float> live: f.value.to-float();
+                                Range { horizontal-stretch: 1; minimum: f.options[0].to-float(); maximum: f.options[1].to-float(); value: f.value.to-float(); changed(v) => { rrow.live = v; root.pf-set(i, "\u{4}" + v); } }
+                                if f.kind == "range": Text { text: f.options[3] == "%" ? round(rrow.live * 100) + "%" : round(rrow.live) + f.options[3]; min-width: 44px; color: Theme.text; font-size: 13px; horizontal-alignment: right; vertical-alignment: center; }
+                                if f.kind == "rangenum": Rectangle {
+                                    width: 64px;
+                                    height: 30px;
+                                    border-radius: 8px;
+                                    background: Theme.panel;
+                                    border-width: 1px;
+                                    border-color: Theme.line;
+                                    TextInput { x: 8px; width: parent.width - 16px; height: parent.height; vertical-alignment: center; color: Theme.text; font-size: 13px; single-line: true; input-type: InputType.decimal; text: round(rrow.live); accepted => { root.pf-set(i, "\u{5}" + self.text); keys.focus(); } }
+                                }
+                            }
+                            // a colour: its swatch, its code, and Windows' colour picker (as the web app's)
+                            if f.kind == "color": HorizontalLayout {
+                                spacing: 8px;
+                                y: (parent.height - self.height) / 2;
+                                Rectangle { width: 30px; height: 30px; border-radius: 6px; border-width: 1px; border-color: Theme.line; background: transparent;
+                                    Rectangle { x: 3px; y: 3px; width: parent.width - 6px; height: parent.height - 6px; border-radius: 4px; background: f.at >= 0 ? Colors.rgb(floor(f.at / 65536), mod(floor(f.at / 256), 256), mod(f.at, 256)) : transparent; } }
+                                Rectangle {
+                                    width: 96px;
+                                    height: 30px;
+                                    border-radius: 8px;
+                                    background: Theme.panel;
+                                    border-width: 1px;
+                                    border-color: Theme.line;
+                                    TextInput { x: 8px; width: parent.width - 16px; height: parent.height; vertical-alignment: center; color: Theme.text; font-size: 13px; single-line: true; text: f.value; accepted => { root.pf-set(i, self.text); keys.focus(); } }
+                                }
+                                Pill { label: "Choose..."; clicked => { root.pf-set(i, "\u{3}pick"); } }
+                            }
+                            // a switch with its own settings beside it (Alerts: Configure, with it on)
+                            if f.kind == "togglecfg" && f.value == "true": Pill { label: f.options.length > 0 ? f.options[0] : "Configure"; y: (parent.height - self.height) / 2; clicked => { root.pf-set(i, "btn:0"); } }
+                            if f.kind == "togglecfg": Toggle { checked: f.value == "true"; y: (parent.height - self.height) / 2; toggled => { root.pf-set(i, self.checked ? "true" : "false"); } }
                             if f.kind == "text" || f.kind == "password" || f.kind == "number": Rectangle {
                                 width: 180px;
                                 height: 34px;

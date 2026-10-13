@@ -4472,7 +4472,7 @@ fn settings_index(a: &App) -> Vec<SetFound> {
         out.push(SetFound { path: path(cat), label: label.into(), note: note.into(), cat: cat.into(), panel: String::new(), key: key.into(), toggle: true });
     }
     let ip = omnipulse_core::lan_ip().unwrap_or_else(|| "THIS-PC".into());
-    for (name, cat) in [("requests", "Streaming"), ("widget", "Streaming"), ("alerts", "Streaming"), ("alertlist", "Streaming"), ("remote", "Streaming"), ("offset", "Streaming"), ("safe", "Streaming"), ("recent", "Library"), ("hidden", "Library"), ("plugins", "Plugins")] {
+    for (name, cat) in [("requests", "Streaming"), ("limits", "Streaming"), ("widget", "Streaming"), ("alerts", "Streaming"), ("alertlist", "Streaming"), ("remote", "Streaming"), ("offset", "Streaming"), ("safe", "Streaming"), ("recent", "Library"), ("hidden", "Library"), ("plugins", "Plugins")] {
         let title = panels::title(name);
         out.push(SetFound { path: path(cat), label: title.clone(), note: String::new(), cat: cat.into(), panel: name.into(), key: String::new(), toggle: false });
         let vals = panels::values(name, &a.web.prefs);
@@ -4530,7 +4530,7 @@ fn panel_open(shared: &Shared, name: &str) {
     if let Some(ui) = shared.borrow().ui.upgrade() {
         let head = match name.strip_prefix("alert:") { Some(k) => alerts::name(&shared.borrow().web.prefs, k), None => panels::title(name) };
         let cat = match name {
-            "requests" | "widget" | "remote" | "offset" | "alerts" | "alertlist" | "safe" => "Streaming",
+            "requests" | "limits" | "widget" | "remote" | "offset" | "alerts" | "alertlist" | "safe" => "Streaming",
             n if n.starts_with("alert:") => "Streaming",
             "plugins" => "Plugins",
             _ => "Library",
@@ -4558,19 +4558,28 @@ fn panel_paint(shared: &Shared, name: &str, vals: &serde_json::Map<String, serde
         let key = f["key"].as_str().unwrap_or("").to_string();
         let kind = f["type"].as_str().unwrap_or("text").to_string();
         let now = vals.get(&key).cloned().unwrap_or_default();
-        let options: Vec<slint::SharedString> = if kind == "row" { f["labels"].as_array().into_iter().flatten().filter_map(|x| x.as_str().map(slint::SharedString::from)).collect() } else { Vec::new() };
+        let labels = || -> Vec<slint::SharedString> { f["labels"].as_array().into_iter().flatten().filter_map(|x| x.as_str().map(slint::SharedString::from)).collect() };
+        let options: Vec<slint::SharedString> = match kind.as_str() {
+            "row" | "select" | "stepper" => labels(),
+            "range" | "rangenum" => vec![f["min"].to_string().into(), f["max"].to_string().into(), f["step"].to_string().into(), f["unit"].as_str().unwrap_or("").into()],
+            "togglecfg" => vec!["Configure".into()],
+            _ => Vec::new(),
+        };
+        // (where it is among its options; a colour: its value as 0xRRGGBB, -1 if it isn't one)
+        let at: i32 = match kind.as_str() {
+            "select" | "stepper" => f["options"].as_array().and_then(|o| o.iter().position(|o| panels::same(o, &now))).unwrap_or(0) as i32,
+            "color" => now.as_str().and_then(|c| c.strip_prefix('#')).filter(|c| c.len() == 6).and_then(|c| i32::from_str_radix(c, 16).ok()).unwrap_or(-1),
+            _ => 0,
+        };
         let value = match kind.as_str() {
-            "row" => if now.as_bool() == Some(true) { "true".into() } else { "false".into() },
-            "select" => {
-                let opts = f["options"].as_array().cloned().unwrap_or_default();
-                let at = opts.iter().position(|o| panels::same(o, &now)).unwrap_or(0);
-                f["labels"][at].as_str().unwrap_or("").to_string()
-            }
+            "row" | "togglecfg" => if now.as_bool() == Some(true) { "true".into() } else { "false".into() },
+            "select" | "stepper" => f["labels"][at.max(0) as usize].as_str().unwrap_or("").to_string(),
+            "range" | "rangenum" => now.as_f64().unwrap_or(f["min"].as_f64().unwrap_or(0.0)).to_string(),
             "toggle" => if now.as_bool() == Some(true) { "true".into() } else { "false".into() },
             "info" | "button" => f["value"].as_str().unwrap_or("").to_string(),
             _ => text(&now),
         };
-        PlugField { label: f["label"].as_str().unwrap_or("").into(), note: f["note"].as_str().unwrap_or("").into(), value: value.into(), kind: kind.into(), options: ModelRc::from(Rc::new(VecModel::from(options))), key: key.into() }
+        PlugField { label: f["label"].as_str().unwrap_or("").into(), note: f["note"].as_str().unwrap_or("").into(), value: value.into(), kind: kind.into(), options: ModelRc::from(Rc::new(VecModel::from(options))), key: key.into(), at }
     }).collect();
     PANEL_FIELDS.with(|p| *p.borrow_mut() = fields);
     if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_pf_fields(ModelRc::from(Rc::new(VecModel::from(rows)))); }
@@ -4582,12 +4591,44 @@ fn panel_set(shared: &Shared, name: &str, mut vals: serde_json::Map<String, serd
     let key = f["key"].as_str().unwrap_or("").to_string();
     let redraw = match f["type"].as_str().unwrap_or("") {
         "toggle" => { vals.insert(key, serde_json::json!(v == "true")); true }
-        "select" => {
+        "select" | "stepper" => {
             let opts = f["options"].as_array().cloned().unwrap_or_default();
             let now = vals.get(&key).cloned().unwrap_or_default();
-            let at = opts.iter().position(|o| panels::same(o, &now)).map_or(0, |k| (k + 1) % opts.len().max(1));
+            // (picked from its list, or − / +: by its place; else on to the next)
+            let at = match v.strip_prefix('\u{2}').and_then(|k| k.parse::<i64>().ok()) {
+                Some(k) => k.clamp(0, opts.len() as i64 - 1).max(0) as usize,
+                None => opts.iter().position(|o| panels::same(o, &now)).map_or(0, |k| (k + 1) % opts.len().max(1)),
+            };
             if let Some(o) = opts.get(at) { vals.insert(key, o.clone()); }
             true
+        }
+        "range" | "rangenum" => {
+            let (min, max, step) = (f["min"].as_f64().unwrap_or(0.0), f["max"].as_f64().unwrap_or(1.0), f["step"].as_f64().unwrap_or(0.01).max(1e-6));
+            let typed = v.starts_with('\u{5}');
+            let Ok(x) = v.trim_start_matches(['\u{4}', '\u{5}']).trim().parse::<f64>() else { return };
+            let x = ((x.clamp(min, max) - min) / step).round() * step + min;
+            vals.insert(key, serde_json::json!((x * 1000.0).round() / 1000.0));
+            // (slid: not drawn again under the pointer; typed in: drawn again, the slider where it is)
+            typed
+        }
+        "color" => {
+            if v == "\u{3}pick" {
+                let now = vals.get(&key).and_then(|c| c.as_str()).unwrap_or("#8e9bff").to_string();
+                match desktop::pick_color(&now) { Some(c) => { vals.insert(key, serde_json::json!(c)); } None => return }
+            } else {
+                let c = v.trim().trim_start_matches('#');
+                if c.len() != 6 || u32::from_str_radix(c, 16).is_err() { return; }
+                vals.insert(key, serde_json::json!(format!("#{}", c.to_lowercase())));
+            }
+            true
+        }
+        // a switch with its own settings: switched at once (as the others in Settings are), Configure opens them
+        "togglecfg" => {
+            PF_EDIT.with(|e| *e.borrow_mut() = Some((format!("panel:{name}"), vals.clone())));
+            if v == "btn:0" { if let Some(p) = f["press"].as_str() { panel_press(shared, p); } return; }
+            let on = v == "true";
+            if set_row_on(&shared.borrow().web.prefs, &key, false) != on { set_toggle(shared, &key); }
+            return pf_paint(shared);
         }
         "button" => { PF_EDIT.with(|e| *e.borrow_mut() = Some((format!("panel:{name}"), vals.clone()))); panel_press(shared, &key); return pf_paint(shared); }
         // a row of a list (the alerts'): its switch, or one of its buttons
@@ -4646,6 +4687,14 @@ fn panel_press(shared: &Shared, key: &str) {
             "A new key: the addresses have it.".to_string()
         }
         // ---------- the alerts (from the Stream Widget's page) ----------
+        "reqLimitsReset" => {
+            if let Some((_, mut vals)) = PF_EDIT.with(|e| e.borrow().clone()) {
+                vals.insert("reqMax".into(), serde_json::json!(10));
+                vals.insert("reqPerUser".into(), serde_json::json!(2));
+                PF_EDIT.with(|e| *e.borrow_mut() = Some(("panel:limits".into(), vals)));
+            }
+            "Back to 10 waiting, 2 per viewer (Save keeps it).".to_string()
+        }
         "alertsSwitch" => {
             set_toggle(shared, "alertsOn");
             return;
@@ -4995,7 +5044,8 @@ fn pf_paint(shared: &Shared) {
         let key = f["key"].as_str()?.to_string();
         let kind = f["type"].as_str().unwrap_or("text").to_string();
         let options: Vec<slint::SharedString> = f["options"].as_array().into_iter().flatten().map(|o| text(o).into()).collect();
-        Some(PlugField { label: f["label"].as_str().unwrap_or(&key).into(), note: f["note"].as_str().unwrap_or("").into(), value: vals.get(&key).map(text).unwrap_or_default().into(), kind: kind.into(), options: ModelRc::from(Rc::new(VecModel::from(options))), key: key.into() })
+        let at = f["options"].as_array().and_then(|o| o.iter().position(|o| Some(o) == vals.get(&key))).unwrap_or(0) as i32;
+        Some(PlugField { label: f["label"].as_str().unwrap_or(&key).into(), note: f["note"].as_str().unwrap_or("").into(), value: vals.get(&key).map(text).unwrap_or_default().into(), kind: kind.into(), options: ModelRc::from(Rc::new(VecModel::from(options))), key: key.into(), at })
     }).collect();
     if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_pf_fields(ModelRc::from(Rc::new(VecModel::from(rows)))); }
 }
@@ -5011,7 +5061,10 @@ fn pf_set(shared: &Shared, i: usize, v: &str) {
         "number" => v.trim().parse::<f64>().map(|n| serde_json::json!(n)).unwrap_or(serde_json::Value::Null),
         "select" => {
             let opts: Vec<serde_json::Value> = f["options"].as_array().cloned().unwrap_or_default();
-            let at = opts.iter().position(|o| Some(o) == vals.get(&key)).map_or(0, |k| (k + 1) % opts.len().max(1));
+            let at = match v.strip_prefix('\u{2}').and_then(|k| k.parse::<usize>().ok()) {
+                Some(k) => k.min(opts.len().saturating_sub(1)),
+                None => opts.iter().position(|o| Some(o) == vals.get(&key)).map_or(0, |k| (k + 1) % opts.len().max(1)),
+            };
             opts.get(at).cloned().unwrap_or_default()
         }
         _ => serde_json::json!(v),
@@ -9268,6 +9321,7 @@ fn main() -> Result<(), slint::PlatformError> {
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("dragasks") { vec![(9, "play"), (12, "dragasks"), (13, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("loudsteps") { vec![(9, "play"), (16, "loud:normal"), (17, "loud:loud"), (18, "loud:normal"), (19, "loud:quiet"), (20, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("titleedit") { vec![(9, "play"), (10, "titleedit"), (12, "end")] }
+            else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("panels2") { vec![(9, "play"), (10, "nav:settings"), (11, "cat:Streaming"), (12, "panel:widget"), (14, "scroll:600"), (16, "panel:alerts"), (18, "scroll:900"), (20, "panel:limits"), (22, "panel:offset"), (24, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("square") { vec![(9, "play"), (10, "unround"), (12, "nav:settings"), (13, "cat:Streaming"), (14, "panel:widget"), (16, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("qset") { vec![(9, "play"), (11, "queue"), (14, "nav:settings"), (15, "cat:App & Look"), (16, "scroll:420"), (18, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("nowslim") { vec![(9, "play"), (11, "queue"), (12, "now"), (15, "size:860:720"), (17, "size:1100:720"), (19, "size:1500:860"), (21, "end")] }
