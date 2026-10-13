@@ -2972,16 +2972,6 @@ export component AppWindow inherits Window {
                                 }
                                 // (Seamless Mix and its band handoff)
                                 for r[i] in root.set-rows-sound: SetRowView { r: r; toggle(k) => { root.set-toggle(k); } more(k) => { root.set-more(k); } }
-                                if root.mix-audit != "": Card {
-                                    VerticalLayout {
-                                        padding: 16px;
-                                        padding-top: 12px;
-                                        padding-bottom: 12px;
-                                        spacing: 2px;
-                                        Text { text: "Seamless Mix: What It Costs"; color: Theme.text; font-weight: 700; }
-                                        Text { text: root.mix-audit; color: Theme.muted; font-size: 12px; wrap: word-wrap; min-height: self.preferred-height; }
-                                    }
-                                }
                             }
                             if root.set-cat == "Streaming" && root.set-query == "": VerticalLayout {
                                 spacing: 14px;
@@ -3122,6 +3112,8 @@ export component AppWindow inherits Window {
                           VerticalLayout {
                           spacing: 12px;
                           padding-right: 10px;
+                          // (room under the last one, clear of Cancel and Save)
+                          padding-bottom: 24px;
                           for f[i] in root.pf-fields: VerticalLayout {
                            spacing: 6px;
                            // instructions: just text

@@ -3089,7 +3089,19 @@ fn mix_tick(shared: &Shared, pos: u64, dur: u64) {
     let audible = shared.borrow().cur_loud.as_ref().and_then(|k| shared.borrow().analysis.get(k).and_then(|x| x["audible_ms"].as_u64())).filter(|&x| x > 0 && x < dur).unwrap_or(dur);
     let planning = std::time::Instant::now();
     // Wordplay (Settings > Sound): both songs' timed lyrics, for the recordings as measured
-    let words_on = set_row_on(&shared.borrow().web.prefs, "mixWords", true);
+    // Settings > Sound > Seamless Mix: its styles, its blend, and (testing) one style forced
+    let force = shared.borrow().web.prefs["mixForce"].as_str().unwrap_or("auto").to_string();
+    let allows = |style: &str| force == "auto" || force == style;
+    {
+        let p = &shared.borrow().web.prefs;
+        use std::sync::atomic::Ordering::Relaxed;
+        mix::RUN_BARS.store(p["mixBars"].as_u64().unwrap_or(0) as usize, Relaxed);
+        mix::KEYS_OK.store(set_row_on(p, "mixKeys", true), Relaxed);
+        mix::LOOPS_OK.store(set_row_on(p, "mixLoops", true), Relaxed);
+        mix::FORCE_TAPE.store(force == "tape", Relaxed);
+        mix::BEAT_ONLY.store(force == "beat", Relaxed);
+    }
+    let words_on = set_row_on(&shared.borrow().web.prefs, "mixWords", true) && allows("wordplay");
     let wordplay = if words_on { rhythm_full(&cur.key).zip(rhythm_full(&next.key)) } else { None }.and_then(|(a, b)| {
         let lines = |t: &Track, m: &omnipulse_core::rhythm::Measured| -> Option<Vec<(u64, String)>> {
             if let Some(l) = MIX_WORDS.with(|w| w.borrow().get(&t.key).cloned()) { return Some(l); }
@@ -3111,7 +3123,7 @@ fn mix_tick(shared: &Shared, pos: u64, dur: u64) {
     // Tape Stops (Settings > Sound): off, none planned
     mix::TAPE_OK.store(set_row_on(&shared.borrow().web.prefs, "mixTape", true), std::sync::atomic::Ordering::Relaxed);
     // Drop Swap and Melody Play (Settings > Sound); of the ones there are, not the one used last time
-    let (drop_on, melody_on) = { let p = &shared.borrow().web.prefs; (set_row_on(p, "mixDrop", true), set_row_on(p, "mixMelody", true)) };
+    let (drop_on, melody_on) = { let p = &shared.borrow().web.prefs; (set_row_on(p, "mixDrop", true) && allows("drop"), set_row_on(p, "mixMelody", true) && allows("melody")) };
     let both = rhythm_full(&cur.key).zip(rhythm_full(&next.key));
     let special = {
         let mut all: Vec<mix::Plan> = wordplay.into_iter().collect();
@@ -3124,6 +3136,9 @@ fn mix_tick(shared: &Shared, pos: u64, dur: u64) {
         (!all.is_empty()).then(|| all.swap_remove(i))
     };
     // both measured whole: every beat tracked, so no listening again
+    // (a style of its own forced, for testing: that one, or no mix at all, never another)
+    let special_forced = matches!(force.as_str(), "wordplay" | "drop" | "melody");
+    if special_forced && special.is_none() { why(&format!("{force} forced, and this pair can't be mixed that way")); return; }
     let whole = special.or_else(|| both.and_then(|(a, b)| mix::plan_structure(&a, audible, pos, &b)));
     let (plan, local) = match whole {
         Some(p) => (p, Some(())),
@@ -3132,6 +3147,7 @@ fn mix_tick(shared: &Shared, pos: u64, dur: u64) {
             // (the playing one's beat as measured again near its end, once it has been)
             let local = MIX_LOCAL.with(|l| l.borrow().as_ref().filter(|x| x.0 == cur.key).map(|x| x.1.clone()));
             let a = local.clone().unwrap_or(a);
+            if force == "tape" { why("a tape stop forced: both songs need measuring whole first"); return; }
             let Some(plan) = mix::plan(&a, audible, pos, &b, MIX_BARS) else { why("no plan from the grid"); return };
             (plan, local.map(|_| ()))
         }
@@ -4253,17 +4269,12 @@ fn song_request(shared: &Shared, id: u64, q: String, user: String) {
 /// The servers the web app's settings have on: the widget, the Stream Deck's remote, chat requests
 // ---------- Settings: the switches beyond Look ----------
 // (section, label, note, key, on unless switched off)
-const SET_ROWS: [(&str, &str, &str, &str, bool); 33] = [
+const SET_ROWS: [(&str, &str, &str, &str, bool); 28] = [
     ("Library", "Sets & Podcasts in the Queue", "Lists and autoplay include anything over 15 minutes. Off: only when you pick one.", "queueSets", false),
     ("Library", "Autoplay", "Plays similar tracks when the queue runs out.", "autoplay", true),
     ("Library", "Hidden & Not Recommended", "Right-click a track to stop it, its album or its artist being recommended. Off: nothing is left out; the lists are kept.", "hideOn", true),
     ("Library", "Avoid Recent Plays", "Skips songs you've heard lately in what the app picks for you. What you choose yourself still plays.", "avoidRecent", true),
-    ("Sound", "Seamless Mix", "Songs with a beat blend into the next on it, as a DJ mixes: at its tempo, on its phrase, the next one sweeping in from the top as the one playing gives way below it (never both in one part of the sound), down to the drop. While it's on, Spotify songs play from their YouTube Music version (their Spotify details kept), so they mix too.", "mixOn", true),
-    ("Sound", "Wordplay", "Seamless Mix sometimes hands over on a word: the song playing sings one (\"heat\", \"one more time\"), it's looped on the beat, and the next song comes in singing the same one. Only with songs whose timed lyrics match what plays.", "mixWords", true),
-    ("Sound", "Drop Swap", "Seamless Mix sometimes lets the song playing build to its final drop, and the next song's drop lands there instead, on the beat.", "mixDrop", true),
-    ("Sound", "Melody Play", "Seamless Mix sometimes loops a bar of the song playing's melody while the next one comes in under it, when the next one's melody starts with the same notes: the tune carries on from one into the other.", "mixMelody", true),
-    ("Sound", "Tape Stops", "Two songs too far apart in tempo or key to blend: the one playing slows to a halt and the next spins up. Off: they change over the usual way instead.", "mixTape", true),
-    ("Sound", "EQ Band Handoff", "Seamless Mix hands over a band at a time (highs, then voice and bass), as a DJ's EQ does, instead of sweeping one song into the other: quicker and more sudden.", "mixBands", false),
+    ("Sound", "Seamless Mix", "Songs with a beat blend into the next on it, as a DJ mixes: at its tempo, on its phrase, the next one sweeping in from the top as the one playing gives way below it, down to the drop. While it's on, Spotify songs play from their YouTube Music version (their Spotify details kept), so they mix too. What it uses on your PC: your internet connection and CPU to download and measure each next song ahead of time, and a little more CPU and memory while a mix plays or a song plays at a changed tempo.", "mixOn", true),
     ("Library", "Skip non-music parts", "What plays from YouTube skips the parts of music videos that aren't music (a skit before the song, an interview after it), as marked on SponsorBlock.", "sbOn", true),
     ("Library", "Favourites Page", "Your starred tracks on a page of their own, in the sidebar. The stars stay either way.", "favPage", true),
     ("Library", "Sets & Podcasts Page", "A page for anything over 15 minutes, in the sidebar. Right-click it there to hide it.", "setsOn", true),
@@ -4473,7 +4484,7 @@ fn settings_index(a: &App) -> Vec<SetFound> {
         out.push(SetFound { path: path(cat), label: label.into(), note: note.into(), cat: cat.into(), panel: String::new(), key: key.into(), toggle: true });
     }
     let ip = omnipulse_core::lan_ip().unwrap_or_else(|| "THIS-PC".into());
-    for (name, cat) in [("requests", "Streaming"), ("limits", "Streaming"), ("widget", "Streaming"), ("alerts", "Streaming"), ("alertlist", "Streaming"), ("remote", "Streaming"), ("offset", "Streaming"), ("safe", "Streaming"), ("recent", "Library"), ("hidden", "Library"), ("plugins", "Plugins")] {
+    for (name, cat) in [("requests", "Streaming"), ("limits", "Streaming"), ("mix", "Sound"), ("widget", "Streaming"), ("alerts", "Streaming"), ("alertlist", "Streaming"), ("remote", "Streaming"), ("offset", "Streaming"), ("safe", "Streaming"), ("recent", "Library"), ("hidden", "Library"), ("plugins", "Plugins")] {
         let title = panels::title(name);
         out.push(SetFound { path: path(cat), label: title.clone(), note: String::new(), cat: cat.into(), panel: name.into(), key: String::new(), toggle: false });
         let vals = panels::values(name, &a.web.prefs);
@@ -4534,6 +4545,7 @@ fn panel_open(shared: &Shared, name: &str) {
             "requests" | "limits" | "widget" | "remote" | "offset" | "alerts" | "alertlist" | "safe" => "Streaming",
             n if n.starts_with("alert:") => "Streaming",
             "plugins" => "Plugins",
+            "mix" => "Sound",
             _ => "Library",
         };
         let mut path = vec![("Settings".to_string(), "root".to_string()), (cat.to_string(), format!("cat:{cat}"))];
@@ -9326,6 +9338,7 @@ fn main() -> Result<(), slint::PlatformError> {
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("titleedit") { vec![(9, "play"), (10, "titleedit"), (12, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("panels2") { vec![(9, "play"), (10, "nav:settings"), (11, "cat:Streaming"), (12, "panel:widget"), (14, "scroll:600"), (16, "panel:alerts"), (18, "scroll:900"), (20, "panel:limits"), (22, "panel:offset"), (24, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("sound2") { vec![(9, "play"), (10, "nav:settings"), (11, "cat:Sound"), (13, "scroll:300"), (15, "cat:App & Look"), (16, "scroll:200"), (18, "end")] }
+            else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("mixpage") { vec![(9, "play"), (10, "nav:settings"), (11, "cat:Sound"), (13, "scroll:300"), (14, "panel:mix"), (16, "scroll:900"), (18, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("square") { vec![(9, "play"), (10, "unround"), (12, "nav:settings"), (13, "cat:Streaming"), (14, "panel:widget"), (16, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("qset") { vec![(9, "play"), (11, "queue"), (14, "nav:settings"), (15, "cat:App & Look"), (16, "scroll:420"), (18, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("nowslim") { vec![(9, "play"), (11, "queue"), (12, "now"), (15, "size:860:720"), (17, "size:1100:720"), (19, "size:1500:860"), (21, "end")] }

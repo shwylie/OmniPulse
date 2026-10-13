@@ -16,6 +16,7 @@ pub fn title(name: &str) -> String {
     match name {
         "requests" => "Song Requests",
         "limits" => "Limit Requests",
+        "mix" => "Seamless Mix",
         "widget" => "Stream Widget",
         "alerts" => "Alerts",
         "remote" => "Stream Deck & Remote",
@@ -29,13 +30,14 @@ pub fn title(name: &str) -> String {
 
 /// The panel a switch's Settings button opens (by the switch's pref)
 pub fn of_switch(key: &str) -> Option<&'static str> {
-    Some(match key { "streamSafe" => "safe", "req" => "requests", "reqLimits" => "limits", "widget" => "widget", "alertsOn" => "alerts", "remoteOn" => "remote", "out2On" => "offset", "avoidRecent" => "recent", "hideOn" => "hidden", "plugAdd" => "plugins", _ => return None })
+    Some(match key { "streamSafe" => "safe", "req" => "requests", "reqLimits" => "limits", "mixOn" => "mix", "widget" => "widget", "alertsOn" => "alerts", "remoteOn" => "remote", "out2On" => "offset", "avoidRecent" => "recent", "hideOn" => "hidden", "plugAdd" => "plugins", _ => return None })
 }
 
 /// What a panel edits, and each one's default (the web app's)
 fn keys(name: &str) -> Vec<(&'static str, Value)> {
     match name {
         "limits" => vec![("reqMax", json!(10)), ("reqPerUser", json!(2))],
+        "mix" => vec![("mixWords", json!(true)), ("mixDrop", json!(true)), ("mixMelody", json!(true)), ("mixTape", json!(true)), ("mixBars", json!(0)), ("mixBands", json!(false)), ("mixKeys", json!(true)), ("mixLoops", json!(true)), ("mixForce", json!("auto"))],
         "requests" => vec![("reqBot", json!("streamerbot")), ("reqRadioEdit", json!(false)), ("reqMax", json!(10)), ("reqPerUser", json!(2)), ("reqPort", json!(7879)), ("botRemote", json!(false))],
         "widget" => vec![("widgetPort", json!(7878)), ("widgetDesign", json!("card")), ("widgetAlign", json!("left")), ("widgetRounded", json!(true)), ("widgetText", json!(1)), ("wFade", json!(true)), ("wScroll", json!(true)), ("wSpin", json!(true)), ("wRequester", json!(true)), ("wColor", json!(1.2))],
         "alerts" => vec![("alertBot", json!("streamerbot")), ("sbHost", json!("127.0.0.1:8080")), ("sbOn", json!(true)), ("alertTrans", json!("seamless")), ("alertCSize", json!("medium")), ("alertCDir", json!("diag")), ("alertCAngle", json!(0)), ("alertAnim", json!("slide")), ("alertOwnCol", json!(false)), ("alertCol1", json!("#8e9bff")), ("alertCol2", json!("#b38cff")), ("alertDir", json!("115deg")), ("alertIcon", json!(1)), ("alertSecs", json!(5)), ("alertVol", json!(0.8)), ("botRemote", json!(false))],
@@ -222,6 +224,21 @@ pub fn fields(name: &str, vals: &Map<String, Value>, prefs: &Value, lan: &str) -
             f.push(button("alList", "Alerts and Their Order", "Open", "Which alerts show and which goes first, and each one's words, picture and sound."));
             f
         }
+        // Seamless Mix's own page: its styles, its blend, and one forced for testing
+        "mix" => vec![
+            note("Styles: each one, when two songs suit it, in place of the usual blend (never the same one twice in a row)."),
+            tog("mixWords", "Wordplay", "The song playing sings a word (\"heat\", \"one more time\"), it's looped on the beat, and the next song comes in singing the same one. Only with songs whose timed lyrics match what plays."),
+            tog("mixDrop", "Drop Swap", "The song playing builds to its final drop, and the next song's drop lands there instead, on the beat."),
+            tog("mixMelody", "Melody Play", "A bar of the song playing's melody loops while the next one comes in under it, when the next one's melody starts with the same notes."),
+            tog("mixTape", "Tape Stops", "Two songs too far apart in tempo or key to blend: the one playing slows to a halt and the next spins up. Off: they change over the usual way instead."),
+            note("The blend: on the beat, at one tempo, the next song sweeping in from the top as the one playing gives way below it."),
+            sel("mixBars", "Blend Length", "How long the two play together.", &[(json!(0), "Auto (as the songs suit)"), (json!(4), "4 bars"), (json!(8), "8 bars"), (json!(16), "16 bars")]),
+            tog("mixBands", "EQ Band Handoff", "A band at a time (highs, then voice and bass), as a DJ's EQ does, instead of one sweep: quicker and more sudden."),
+            tog("mixKeys", "Match Keys", "A song shifted a semitone or two during the blend, so the two keys go together (back to its own key after)."),
+            tog("mixLoops", "Loops", "A short intro or outro looped, so neither song is cut short to fit the blend."),
+            note("Testing"),
+            sel("mixForce", "Force a Style", "Every transition this style, to hear it. A pair that can't be mixed that way isn't mixed at all.", &[(json!("auto"), "Off (as the songs suit)"), (json!("beat"), "On the beat (no tape stops)"), (json!("wordplay"), "Wordplay"), (json!("drop"), "Drop Swap"), (json!("melody"), "Melody Play"), (json!("tape"), "Tape Stop")]),
+        ],
         // Limit Requests' own page (as the web app's, under it)
         "limits" => vec![
             stepper("reqMax", "Most Waiting", "How many requests can wait at once.", counts(1, 50)),

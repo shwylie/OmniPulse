@@ -15,6 +15,17 @@ const MAX_STRETCH: f64 = 0.08;
 /// tape-stopped into each other (they change over the usual way)
 pub static TAPE_OK: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
 
+/// Settings > Sound > Seamless Mix, the base blend's own: its length in bars (0: as the songs suit, a
+/// phrase or half of one), keys matched (a song shifted a semitone or two to go with the other) or not,
+/// loops (so neither has to be cut short) or not; and for testing, a tape stop every time, or a blend
+/// on the beat only (never a tape stop)
+pub static RUN_BARS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+pub static KEYS_OK: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
+pub static LOOPS_OK: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
+pub static FORCE_TAPE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+pub static BEAT_ONLY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+fn on(b: &std::sync::atomic::AtomicBool) -> bool { b.load(std::sync::atomic::Ordering::Relaxed) }
+
 /// A beat that's not clear enough isn't mixed on
 const MIN_CONFIDENCE: f64 = 0.15;
 
@@ -127,6 +138,7 @@ const MIN_KEY_CONFIDENCE: f64 = 0.25;
 /// 0 when they go together already, or either key isn't clear
 pub fn key_shift(a: &Measured, b: &Measured) -> i32 {
     use omnipulse_core::rhythm::{keys_mix, transposed};
+    if !on(&KEYS_OK) { return 0; }
     if a.rhythm.key_confidence < MIN_KEY_CONFIDENCE || b.rhythm.key_confidence < MIN_KEY_CONFIDENCE || keys_mix(&a.rhythm.camelot, &b.rhythm.camelot) { return 0; }
     for s in [1, -1, 2, -2] {
         if transposed(&b.rhythm.key, s).is_some_and(|(_, c)| keys_mix(&a.rhythm.camelot, &c)) { return s; }
@@ -302,8 +314,12 @@ pub fn plan_structure(a: &Measured, a_end_ms: u64, now_ms: u64, b: &Measured) ->
     // on its downbeat, so the two keys are over each other only briefly, not a tape stop)
     let clash = !keys_fit(a, b);
     let matched = match_rate(a.rhythm.bpm, b.rhythm.bpm).map(|(r, _)| r);
+    // (testing: a tape stop, whatever the pair)
+    let matched = matched.filter(|_| !on(&FORCE_TAPE));
     if let Some(r) = matched {
-        let runs: &[usize] = if clash { &[4] } else { &[PHRASE, 4] };
+        let n_set = RUN_BARS.load(std::sync::atomic::Ordering::Relaxed);
+        let set = [n_set];
+        let runs: &[usize] = if n_set > 0 { &set } else if clash { &[4] } else { &[PHRASE, 4] };
         let fits = |k: usize, n: u32| at(k) >= soonest && k + n as usize <= a_end && at(k) + a_bar * n as f64 <= audible;
         // the run-up to the swap: a phrase (8 bars), else half of one; the swap on a phrase's start of
         // both. The one playing: the latest of its own phrases' starts that has its beat to the swap
@@ -346,7 +362,7 @@ pub fn plan_structure(a: &Measured, a_end_ms: u64, now_ms: u64, b: &Measured) ->
         };
         // loops, so nothing's cut short to fit (with the two at one tempo all through: no tempo eased)
         let (mut at_bar, mut out_loop, mut in_loop) = (k, None, None);
-        if out_tempo == 1.0 {
+        if out_tempo == 1.0 && on(&LOOPS_OK) {
             // the next one's intro shorter than the run-up: its last bars before its content looped, its
             // content coming in on the swap (never under the run-up)
             if from_bar == 0 && first < run_b {
@@ -414,7 +430,7 @@ pub fn plan_structure(a: &Measured, a_end_ms: u64, now_ms: u64, b: &Measured) ->
     // stops, the next one spins up from its start (its intro's quiet part cut, never its content), eased
     // in rather than dropped in
     let _ = (ramp, soft);
-    if !TAPE_OK.load(std::sync::atomic::Ordering::Relaxed) { return None; }
+    if (!TAPE_OK.load(std::sync::atomic::Ordering::Relaxed) && !on(&FORCE_TAPE)) || on(&BEAT_ONLY) { return None; }
     let beat = a.rhythm.period_ms;
     let stop = (2.0 * beat).clamp(600.0, 1600.0);
     // (its spin-up under the stop's second half: at its speed as the other halts)
