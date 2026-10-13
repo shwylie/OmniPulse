@@ -11,6 +11,10 @@ use omnipulse_core::rhythm::Measured;
 
 /// How far from its own tempo a track is played to match (8%: a DJ deck's usual range)
 const MAX_STRETCH: f64 = 0.08;
+/// Tape stops allowed (Settings > Sound > Tape Stops): off, two songs too far apart to blend aren't
+/// tape-stopped into each other (they change over the usual way)
+pub static TAPE_OK: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
+
 /// A beat that's not clear enough isn't mixed on
 const MIN_CONFIDENCE: f64 = 0.15;
 
@@ -410,6 +414,7 @@ pub fn plan_structure(a: &Measured, a_end_ms: u64, now_ms: u64, b: &Measured) ->
     // stops, the next one spins up from its start (its intro's quiet part cut, never its content), eased
     // in rather than dropped in
     let _ = (ramp, soft);
+    if !TAPE_OK.load(std::sync::atomic::Ordering::Relaxed) { return None; }
     let beat = a.rhythm.period_ms;
     let stop = (2.0 * beat).clamp(600.0, 1600.0);
     // (its spin-up under the stop's second half: at its speed as the other halts)
@@ -1065,7 +1070,7 @@ fn mix_demo() {
     // each one at its own loudness match (Settings > Sound's Normal: -14 LUFS), as the app plays them
     let db = |id: &str| {
         let lufs = rt.block_on(omnipulse_core::loudness::analyse("soundcloud", id)).ok().and_then(|a| a["lufs"].as_f64());
-        crate::sound::loud_db(&serde_json::json!({}), &t(id), lufs)
+        crate::sound::loud_db(&serde_json::json!({}), &t(id), lufs, false)
     };
     let dbs = (db(&a_id), db(&b_id));
     println!("loudness matched: A {:+.1} dB, B {:+.1} dB", dbs.0, dbs.1);
@@ -1352,7 +1357,7 @@ fn mix_stems() {
     println!("{p:?}");
     let db = |id: &str| {
         let lufs = rt.block_on(omnipulse_core::loudness::analyse("soundcloud", id)).ok().and_then(|a| a["lufs"].as_f64());
-        crate::sound::loud_db(&serde_json::json!({}), &t(id), lufs)
+        crate::sound::loud_db(&serde_json::json!({}), &t(id), lufs, false)
     };
     let (rate, lead) = (44_100u32, 12_000u64);
     let total = (lead + p.ms + 20_000) as usize * rate as usize / 1000 * 2;

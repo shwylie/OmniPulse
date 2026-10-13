@@ -5,8 +5,8 @@
 use global_hotkey::hotkey::{Code, HotKey};
 use global_hotkey::{GlobalHotKeyEvent, GlobalHotKeyManager, HotKeyState};
 use std::sync::Mutex;
-use tray_icon::menu::{Menu, MenuEvent, MenuItem};
-use tray_icon::{MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent};
+use tray_icon::menu::{Menu, MenuEvent, MenuItem, PredefinedMenuItem};
+use tray_icon::{TrayIcon, TrayIconBuilder, TrayIconEvent};
 
 /// What the taskbar buttons clicked, waiting for the app
 static CLICKED: Mutex<Vec<&'static str>> = Mutex::new(Vec::new());
@@ -33,8 +33,10 @@ impl Desktop {
         let mut menu_ids = Vec::new();
         let tray = (|| {
             let menu = Menu::new();
-            let items = [("Show", "show"), ("Play / Pause", "play"), ("Next", "next"), ("Previous", "prev"), ("Quit", "quit")];
+            // (Open, its own line: clicking the icon, or away from the menu, never brings the window back)
+            let items = [("Open OmniPulse", "show"), ("", ""), ("Play / Pause", "play"), ("Next", "next"), ("Previous", "prev"), ("", ""), ("Quit OmniPulse", "quit")];
             for (label, action) in items {
+                if label.is_empty() { menu.append(&PredefinedMenuItem::separator()).ok()?; continue; }
                 let it = MenuItem::new(label, true, None);
                 menu_ids.push((it.id().clone(), action));
                 menu.append(&it).ok()?;
@@ -61,11 +63,8 @@ impl Desktop {
                 out.push(*a);
             }
         }
-        while let Ok(e) = TrayIconEvent::receiver().try_recv() {
-            if let TrayIconEvent::Click { button: MouseButton::Left, button_state: MouseButtonState::Up, .. } = e {
-                out.push("show");
-            }
-        }
+        // (the icon's own clicks: only its menu, which Windows opens; nothing else)
+        while TrayIconEvent::receiver().try_recv().is_ok() {}
         if let Ok(mut c) = CLICKED.lock() {
             out.append(&mut c);
         }

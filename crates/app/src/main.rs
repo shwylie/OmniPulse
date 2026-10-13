@@ -2491,7 +2491,7 @@ fn start(shared: &Shared) {
                         shared.borrow_mut().cur_loud = what.as_ref().map(|(k, id)| format!("{k}:{id}"));
                         FADE.with(|f| *f.borrow_mut() = (false, String::new()));
                         let known = what.as_ref().and_then(|(s, id)| shared.borrow().loud.get(&format!("{s}:{id}")).copied());
-                        let db = sound::loud_db(&shared.borrow().web.prefs, &t, known);
+                        let db = sound::loud_db(&shared.borrow().web.prefs, &t, known, version.is_some());
                         // the track before ending with Fade Between Tracks on: both heard at once, this one coming in
                         let resumed = resume > 0 || trim_of(&shared.borrow().web.prefs, &t.key).0 > 0;
                         match (src, XFADE.with(|x| x.borrow_mut().take())) {
@@ -3101,6 +3101,8 @@ fn mix_tick(shared: &Shared, pos: u64, dur: u64) {
         let (la, lb) = (lines(&cur, &a), lines(&next, &b));
         mix::plan_wordplay(&a, &la?, audible, pos, &b, &lb?)
     });
+    // Tape Stops (Settings > Sound): off, none planned
+    mix::TAPE_OK.store(set_row_on(&shared.borrow().web.prefs, "mixTape", true), std::sync::atomic::Ordering::Relaxed);
     // Drop Swap and Melody Play (Settings > Sound); of the ones there are, not the one used last time
     let (drop_on, melody_on) = { let p = &shared.borrow().web.prefs; (set_row_on(p, "mixDrop", true), set_row_on(p, "mixMelody", true)) };
     let both = rhythm_full(&cur.key).zip(rhythm_full(&next.key));
@@ -3167,7 +3169,7 @@ fn mix_tick(shared: &Shared, pos: u64, dur: u64) {
                 Ok((src, pitch)) => {
                     let what = sound::loud_source(&next, version.as_ref().map(|v| v.yt.id.as_str()));
                     let known = what.as_ref().and_then(|(s, id)| shared.borrow().loud.get(&format!("{s}:{id}")).copied());
-                    let db = sound::loud_db(&prefs, &next, known);
+                    let db = sound::loud_db(&prefs, &next, known, version.is_some());
                     // (slowed into the next one's tempo: from here, the one playing goes through the stretch, as it was until the mix)
                     let out = (plan.out_tempo != 1.0).then(|| omnipulse_audio::Tempo::new(1.0));
                     if let Some(o) = &out { shared.borrow().engine.stretch_playing(o.clone()); }
@@ -3235,7 +3237,7 @@ fn mix_record(a: &App, plan: &mix::Plan, from: Option<&Track>, to: Option<&Track
         "to": to.map(mix_side),
         "settings": {
             "mixWords": set_row_on(p, "mixWords", true), "mixDrop": set_row_on(p, "mixDrop", true),
-            "mixMelody": set_row_on(p, "mixMelody", true), "mixBands": set_row_on(p, "mixBands", false),
+            "mixMelody": set_row_on(p, "mixMelody", true), "mixBands": set_row_on(p, "mixBands", false), "mixTape": set_row_on(p, "mixTape", true),
         },
         "version": env!("CARGO_PKG_VERSION"),
     })
@@ -3262,7 +3264,7 @@ fn mix_feedback(shared: &Shared, good: bool) -> Result<String, &'static str> {
                     "plan": null,
                     "from": c.from.as_ref().map(mix_side),
                     "to": mix_side(&c.to),
-                    "settings": { "mixWords": set_row_on(p, "mixWords", true), "mixDrop": set_row_on(p, "mixDrop", true), "mixMelody": set_row_on(p, "mixMelody", true), "mixBands": set_row_on(p, "mixBands", false) },
+                    "settings": { "mixWords": set_row_on(p, "mixWords", true), "mixDrop": set_row_on(p, "mixDrop", true), "mixMelody": set_row_on(p, "mixMelody", true), "mixBands": set_row_on(p, "mixBands", false), "mixTape": set_row_on(p, "mixTape", true) },
                     "version": env!("CARGO_PKG_VERSION"),
                 })
             })).ok_or("No song change to rate yet.")?;
@@ -4237,7 +4239,7 @@ fn song_request(shared: &Shared, id: u64, q: String, user: String) {
 /// The servers the web app's settings have on: the widget, the Stream Deck's remote, chat requests
 // ---------- Settings: the switches beyond Look ----------
 // (section, label, note, key, on unless switched off)
-const SET_ROWS: [(&str, &str, &str, &str, bool); 32] = [
+const SET_ROWS: [(&str, &str, &str, &str, bool); 33] = [
     ("Library", "Sets & Podcasts in the Queue", "Lists and autoplay include anything over 15 minutes. Off: only when you pick one.", "queueSets", false),
     ("Library", "Autoplay", "Plays similar tracks when the queue runs out.", "autoplay", true),
     ("Library", "Hidden & Not Recommended", "Right-click a track to stop it, its album or its artist being recommended. Off: nothing is left out; the lists are kept.", "hideOn", true),
@@ -4246,6 +4248,7 @@ const SET_ROWS: [(&str, &str, &str, &str, bool); 32] = [
     ("Sound", "Wordplay", "Seamless Mix sometimes hands over on a word: the song playing sings one (\"heat\", \"one more time\"), it's looped on the beat, and the next song comes in singing the same one. Only with songs whose timed lyrics match what plays.", "mixWords", true),
     ("Sound", "Drop Swap", "Seamless Mix sometimes lets the song playing build to its final drop, and the next song's drop lands there instead, on the beat.", "mixDrop", true),
     ("Sound", "Melody Play", "Seamless Mix sometimes loops a bar of the song playing's melody while the next one comes in under it, when the next one's melody starts with the same notes: the tune carries on from one into the other.", "mixMelody", true),
+    ("Sound", "Tape Stops", "Two songs too far apart in tempo or key to blend: the one playing slows to a halt and the next spins up. Off: they change over the usual way instead.", "mixTape", true),
     ("Sound", "EQ Band Handoff", "Seamless Mix hands over a band at a time (highs, then voice and bass), as a DJ's EQ does, instead of sweeping one song into the other: quicker and more sudden.", "mixBands", false),
     ("Library", "Skip non-music parts", "What plays from YouTube skips the parts of music videos that aren't music (a skit before the song, an interview after it), as marked on SponsorBlock.", "sbOn", true),
     ("Library", "Favourites Page", "Your starred tracks on a page of their own, in the sidebar. The stars stay either way.", "favPage", true),
@@ -4414,7 +4417,7 @@ fn settings_close(shared: &Shared) {
 struct SetFound { path: String, label: String, note: String, cat: String, panel: String, key: String, toggle: bool }
 
 /// The settings drawn by hand (not from SET_ROWS): their category, name and description
-const SET_HAND: [(&str, &str, &str); 23] = [
+const SET_HAND: [(&str, &str, &str); 22] = [
     ("", "Updates", "Checks for a newer version a little after it starts, and installs it."),
     ("App & Look", "Theme", "Light to dark."),
     ("App & Look", "Tint", "A colour through the theme."),
@@ -4425,8 +4428,7 @@ const SET_HAND: [(&str, &str, &str); 23] = [
     ("App & Look", "Track Info Tab", "Which end of the player bar the tab sits at."),
     ("App & Look", "List Density", "How tightly tracks are listed. Compact fits more on screen."),
     ("App & Look", "Display Name", "Shown in the title bar and taskbar."),
-    ("App & Look", "Listening Along: Timing", "Plays this much later than the host (or earlier, below 0), to line up with their stream."),
-    ("App & Look", "Close to Tray", "Closing hides the window; music keeps playing. Quit from the tray."),
+    ("App & Look", "Minimize to Tray", "Minimizing hides the window to the tray; music keeps playing. Open it again, or quit, from the tray's menu."),
     ("App & Look", "Taskbar Widget", "What's playing, always on show in the taskbar by the clock, with its controls."),
     ("App & Look", "Hardware Acceleration", "Draws the app with your graphics card. Takes effect the next time OmniPulse starts."),
     ("App & Look", "Animations", "Fades and motion."),
@@ -5582,7 +5584,7 @@ fn loud_measure(shared: &Shared, t: &Track, kind: &'static str, id: String, toke
             shared.borrow_mut().analysis.insert(format!("{kind}:{id}"), a.clone());
             let a = shared.borrow();
             if a.token == token {
-                a.engine.set_match_db(sound::loud_db(&a.web.prefs, &t, Some(lufs)), false);
+                a.engine.set_match_db(sound::loud_db(&a.web.prefs, &t, Some(lufs), kind == "youtube"), false);
             }
         }));
     });
@@ -5620,7 +5622,10 @@ fn loud_pick(shared: &Shared, step: &str) {
     let ver = shared.borrow().closest.as_ref().filter(|(k, _)| *k == t.key).map(|(_, v)| v.id.clone());
     let what = sound::loud_source(&t, ver.as_deref());
     let known = what.as_ref().and_then(|(s, id)| shared.borrow().loud.get(&format!("{s}:{id}")).copied());
-    { let a = shared.borrow(); a.engine.set_match_db(sound::loud_db(&a.web.prefs, &t, known), false); }
+    { let a = shared.borrow(); a.engine.set_match_db(sound::loud_db(&a.web.prefs, &t, known, ver.is_some()), false); }
+    // (and Spotify's own levelling, for its songs it plays: from the next one)
+    let (on, target) = sound::spotify_norm(&shared.borrow().web.prefs);
+    omnipulse_core::spotify_engine::spe_set_normalisation(on, target);
     if let (Some((kind, id)), None) = (what, known) { loud_measure(shared, &t, kind, id, token); }
 }
 
@@ -6916,8 +6921,9 @@ fn listen_send(m: serde_json::Value) {
 /// line up with their stream when that's heard too; -3 s to 8 s
 static LISTEN_NUDGE: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(0);
 
-fn nudge_of(prefs: &serde_json::Value) -> i64 {
-    prefs["listenNudge"].as_f64().map(|n| n.round() as i64).unwrap_or(0).clamp(-3000, 8000)
+fn nudge_of(_prefs: &serde_json::Value) -> i64 {
+    // (no longer a setting: listeners play in step with the host, never put behind or ahead)
+    0
 }
 
 fn listen_host_pos() -> u64 {
@@ -7852,15 +7858,27 @@ fn outside_start(shared: &Shared) {
 }
 
 /// A media key, the tray's menu or a taskbar button
-/// The window closed: hidden to the tray with Close to Tray on (the music carries on; Quit is in the
-/// tray's menu), else the app quits
+/// The window closed (its X): OmniPulse quits, always
 fn close_or_tray(shared: &Shared) {
     save_session(&shared.borrow());
-    let tray = shared.borrow().web.prefs["closeToTray"].as_bool() == Some(true);
-    if tray {
-        if let Some(ui) = shared.borrow().ui.upgrade() { let _ = ui.window().hide(); }
+    let _ = slint::quit_event_loop();
+}
+
+/// Minimize to Tray (Settings > App), else minimized to the taskbar as usual. (It was Close to Tray:
+/// that one switched on is this one switched on.)
+fn min_to_tray(prefs: &serde_json::Value) -> bool {
+    prefs["minToTray"].as_bool().or(prefs["closeToTray"].as_bool()).unwrap_or(false)
+}
+
+/// The window minimized: to the tray (the music carries on; Open OmniPulse and Quit are in its menu),
+/// with Minimize to Tray on
+fn minimize(shared: &Shared) {
+    let Some(ui) = shared.borrow().ui.upgrade() else { return };
+    if min_to_tray(&shared.borrow().web.prefs) {
+        save_session(&shared.borrow());
+        let _ = ui.window().hide();
     } else {
-        let _ = slint::quit_event_loop();
+        ui.window().set_minimized(true);
     }
 }
 
@@ -8044,7 +8062,7 @@ fn apply_look(shared: &Shared) {
     let motion = prefs["animOn"].as_bool() != Some(false);
     t.set_motion(motion);
     ui.set_anim_on(motion);
-    ui.set_close_to_tray(prefs["closeToTray"].as_bool() == Some(true));
+    ui.set_close_to_tray(min_to_tray(prefs));
     ui.set_taskbar_widget(prefs["taskbarWidget"].as_bool() == Some(true));
     ui.set_gpu_on(prefs["nativeGpu"].as_bool() == Some(true));
     LISTEN_NUDGE.store(nudge_of(prefs), std::sync::atomic::Ordering::Relaxed);
@@ -8190,6 +8208,8 @@ fn main() -> Result<(), slint::PlatformError> {
     ui.set_page_sub("Loading your Library...".into());
     restore_session(&shared);
     apply_look(&shared);
+    // Match Loudness for the Spotify songs Spotify plays: its own levelling, at the same target
+    { let (on, target) = sound::spotify_norm(&shared.borrow().web.prefs); omnipulse_core::spotify_engine::spe_set_normalisation(on, target); }
     let s = shared.clone();
     ui.on_look_changed(move |key, v| {
         // the step settings keep to their steps
@@ -8363,7 +8383,7 @@ fn main() -> Result<(), slint::PlatformError> {
     let s = shared.clone();
     ui.on_mix_toggle(move || set_toggle(&s, "mixOn"));
     let s = shared.clone();
-    ui.on_close_to_tray_changed(move |on| set_look_pref(&s, "closeToTray", serde_json::json!(on)));
+    ui.on_close_to_tray_changed(move |on| set_look_pref(&s, "minToTray", serde_json::json!(on)));
     let s = shared.clone();
     ui.on_app_pref(move |key, on| {
         set_look_pref(&s, &key, serde_json::json!(on));
@@ -9145,7 +9165,7 @@ fn main() -> Result<(), slint::PlatformError> {
             if let Some(ui) = weak.upgrade() { ui.window().with_winit_window(|w| { let _ = w.drag_resize_window(dir); }); }
         }
     });
-    ui.on_minimize({ let weak = ui.as_weak(); move || weak.upgrade().unwrap().window().set_minimized(true) });
+    { let s = shared.clone(); ui.on_minimize(move || minimize(&s)); }
     ui.on_maximize({
         let weak = ui.as_weak();
         move || {
@@ -9217,6 +9237,7 @@ fn main() -> Result<(), slint::PlatformError> {
             // (OMNIPULSE_SELFTEST_PLAN=apple: Apple Music's sign-in window opened off-screen, Apple's page looked at, closed; nobody signs in)
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("apple") { vec![(6, "appleopen"), (16, "applecheck"), (17, "end")] }
             // (OMNIPULSE_SELFTEST_PLAN=tp: Track preferences for what plays, its bar dragged)
+            else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("setfit") { vec![(9, "play"), (10, "queue"), (11, "size:1150:530"), (12, "nav:settings"), (13, "cat:Sound"), (14, "scroll:4000"), (16, "cat:Integrations"), (17, "scroll:-4000"), (19, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("square") { vec![(9, "play"), (10, "unround"), (12, "nav:settings"), (13, "cat:Streaming"), (14, "panel:widget"), (16, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("qset") { vec![(9, "play"), (11, "queue"), (14, "nav:settings"), (15, "cat:App & Look"), (16, "scroll:420"), (18, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("nowslim") { vec![(9, "play"), (11, "queue"), (12, "now"), (15, "size:860:720"), (17, "size:1100:720"), (19, "size:1500:860"), (21, "end")] }

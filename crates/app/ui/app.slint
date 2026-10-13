@@ -938,7 +938,8 @@ component SetRowView inherits Card {
             alignment: center;
             spacing: 2px;
             Text { text: root.r.label; color: Theme.text; font-weight: 700; }
-            if root.r.note != "": Text { text: root.r.note; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
+            // (its height at the width it gets: wrapped onto more lines in a narrow window, all of it counted)
+            if root.r.note != "": Text { text: root.r.note; color: Theme.muted; font-size: 12px; wrap: word-wrap; min-height: self.preferred-height; }
         }
         if root.r.more: Pill { label: "Settings ›"; y: (parent.height - self.height) / 2; clicked => { root.more(root.r.key); } }
         if root.r.button != "": Pill { label: root.r.button + " ›"; y: (parent.height - self.height) / 2; clicked => { root.more(root.r.key); } }
@@ -1612,6 +1613,8 @@ export component AppWindow inherits Window {
                                 // (on top: it only takes right-clicks, the rest goes through to what's under it)
                                 cm3 := CtxMenu {
                                     width: 100%; height: 100%;
+                                    // (only the ones that can be hidden have a menu: none opens empty)
+                                    enabled: id == "navFavourites" || id == "navSets" || id == "navStats";
                                     items: [
                                         { label: "Hide from the Sidebar", show: id == "navFavourites" || id == "navSets" || id == "navStats" }
                                     ];
@@ -2306,6 +2309,9 @@ export component AppWindow inherits Window {
                     // Settings
                     if root.page-kind == "settings": ScrollView {
                         vertical-stretch: 1;
+                        // (another page of Settings: from its top)
+                        property <string> cat: root.set-cat;
+                        changed cat => { self.content-y = 0; }
                         VerticalLayout {
                             alignment: start;
                             spacing: 14px;
@@ -2529,38 +2535,12 @@ export component AppWindow inherits Window {
                                         padding: 16px;
                                         padding-top: 12px;
                                         padding-bottom: 12px;
-                                        spacing: 12px;
                                         VerticalLayout {
                                             horizontal-stretch: 1;
                                             alignment: center;
                                             spacing: 2px;
-                                            Text { text: "Listening Along: Timing"; color: Theme.text; font-weight: 700; }
-                                            Text { text: "Plays this much later than the host (or earlier, below 0), to line up with their stream when you're hearing it too (a Discord screen share runs behind, often by a second or two)."; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
-                                        }
-                                        Rectangle {
-                                            width: 90px;
-                                            height: 34px;
-                                            y: (parent.height - self.height) / 2;
-                                            border-radius: 8px;
-                                            background: Theme.panel;
-                                            border-width: 1px;
-                                            border-color: Theme.line;
-                                            TextInput { x: 10px; width: parent.width - 20px; height: parent.height; vertical-alignment: center; color: Theme.text; font-size: 14px; single-line: true; input-type: InputType.decimal; text <=> root.listen-nudge; edited => { root.listen-nudge-changed(self.text); } }
-                                        }
-                                        Text { text: "ms"; color: Theme.muted; font-size: 13px; vertical-alignment: center; }
-                                    }
-                                }
-                                Card {
-                                    HorizontalLayout {
-                                        padding: 16px;
-                                        padding-top: 12px;
-                                        padding-bottom: 12px;
-                                        VerticalLayout {
-                                            horizontal-stretch: 1;
-                                            alignment: center;
-                                            spacing: 2px;
-                                            Text { text: "Close to Tray"; color: Theme.text; font-weight: 700; }
-                                            Text { text: "Closing hides the window; music keeps playing. Quit from the tray."; color: Theme.muted; font-size: 12px; }
+                                            Text { text: "Minimize to Tray"; color: Theme.text; font-weight: 700; }
+                                            Text { text: "Minimizing hides the window to the tray; music keeps playing. Open it again, or quit, from the tray's menu. The X always quits."; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
                                         }
                                         Toggle { checked <=> root.close-to-tray; y: (parent.height - self.height) / 2; toggled => { root.close-to-tray-changed(self.checked); } }
                                     }
@@ -2671,6 +2651,8 @@ export component AppWindow inherits Window {
                                         padding-bottom: 8px;
                                         for acc[i] in root.accounts: VerticalLayout {
                                             if i > 0: Rectangle { height: 1px; background: Theme.line; }
+                                            // (its name and status the whole width, its buttons on a line of their own under
+                                            // them: never squeezed into a column beside them)
                                             HorizontalLayout {
                                                 padding-top: 8px;
                                                 padding-bottom: 8px;
@@ -2680,28 +2662,24 @@ export component AppWindow inherits Window {
                                                     alignment: center;
                                                     spacing: 2px;
                                                     Text { text: acc.name; color: Theme.text; font-weight: 700; }
-                                                    Text { text: acc.status; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
-                                                }
-                                                // (the platform's plans: Go+, Premium, Pro...)
-                                                if acc.manage != "": Pill {
-                                                    label: "Manage subscription";
-                                                    y: (parent.height - self.height) / 2;
-                                                    clicked => { root.open-web(acc.manage); }
-                                                }
-                                                if acc.keys != "": Pill {
-                                                    label: acc.keys;
-                                                    y: (parent.height - self.height) / 2;
-                                                    clicked => { root.account-keys(i); }
-                                                }
-                                                Pill {
-                                                    label: acc.busy ? "Waiting..." : acc.signed ? "Sign out" : "Sign in";
-                                                    on: !acc.signed && !acc.busy;
-                                                    y: (parent.height - self.height) / 2;
-                                                    clicked => { if (!acc.busy) { root.account-act(i); } }
+                                                    Text { text: acc.status; color: Theme.muted; font-size: 12px; wrap: word-wrap; min-height: self.preferred-height; }
+                                                    Rectangle { height: 6px; }
+                                                    HorizontalLayout {
+                                                        alignment: start;
+                                                        spacing: 8px;
+                                                        // (the platform's plans: Go+, Premium, Pro...)
+                                                        if acc.manage != "": Pill { label: "Manage subscription"; clicked => { root.open-web(acc.manage); } }
+                                                        if acc.keys != "": Pill { label: acc.keys; clicked => { root.account-keys(i); } }
+                                                        Pill {
+                                                            label: acc.busy ? "Waiting..." : acc.signed ? "Sign out" : "Sign in";
+                                                            on: !acc.signed && !acc.busy;
+                                                            clicked => { if (!acc.busy) { root.account-act(i); } }
+                                                        }
+                                                    }
                                                 }
                                                 // (its platform, switched on or off here too: SoundCloud, Spotify, YouTube Music,
                                                 // Last.fm's scrobbling)
-                                                if acc.switch != "": Toggle { checked: acc.on; y: (parent.height - self.height) / 2; toggled => { root.set-toggle(acc.switch); } }
+                                                if acc.switch != "": Toggle { checked: acc.on; y: 4px; toggled => { root.set-toggle(acc.switch); } }
                                             }
                                         }
                                     }
@@ -2838,7 +2816,7 @@ export component AppWindow inherits Window {
                                         padding-bottom: 12px;
                                         spacing: 2px;
                                         Text { text: "Seamless Mix: What It Costs"; color: Theme.text; font-weight: 700; }
-                                        Text { text: root.mix-audit; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
+                                        Text { text: root.mix-audit; color: Theme.muted; font-size: 12px; wrap: word-wrap; min-height: self.preferred-height; }
                                     }
                                 }
                             }
