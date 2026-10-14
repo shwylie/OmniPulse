@@ -1892,6 +1892,8 @@ fn stats_detail(a: &App, ui: &AppWindow, list: &[&webstate::Play], since: u64, p
 thread_local! {
     /// the closer look at your top songs: the songs, to play from one of them down
     static STATS_TRACKS: RefCell<Vec<Track>> = const { RefCell::new(Vec::new()) };
+    /// the overview's top songs, playable, and its top artists' names
+    static STATS_TOP: RefCell<(Vec<Track>, Vec<String>)> = const { RefCell::new((Vec::new(), Vec::new())) };
 }
 
 /// Clear Listening History: asked once more (a second click within five seconds), then done
@@ -2002,6 +2004,9 @@ fn open_stats(shared: &Shared, period: usize) {
         ui.set_st_top_name(name.clone().into());
         ui.set_st_top_sub(format!("{} · {}% of everything you played", plural(*n, "play", "plays"), n * 100 / list.len()).into());
     }
+    // (playable as they are: a click on one plays the top songs from it; an artist opens their page)
+    let top: Vec<Track> = songs.iter().take(5).filter_map(|(_, p)| play_track(&a, p)).collect();
+    STATS_TOP.with(|t| *t.borrow_mut() = (top, artists.iter().take(6).map(|(n, _)| n.clone()).collect()));
     let song_items: Vec<Item> = songs.iter().take(5).map(|(n, p)| Item { name: p.title.clone().into(), sub: format!("{} · {}", p.artist, plural(*n, "play", "plays")).into(), art: slint::Image::default(), plat: p.src.clone().into(), ..Default::default() }).collect();
     let artist_items: Vec<Item> = artists.iter().take(6).map(|(name, (n, p))| Item { name: name.clone().into(), sub: plural(*n, "play", "plays").into(), art: slint::Image::default(), plat: p.src.clone().into(), ..Default::default() }).collect();
     let song_model = Rc::new(VecModel::from(song_items));
@@ -8963,6 +8968,13 @@ fn main() -> Result<(), slint::PlatformError> {
     ui.on_stats_clear({ let s = shared.clone(); move || stats_clear(&s) });
     ui.on_stats_open({ let s = shared.clone(); move |w| { STATS_DETAIL.with(|d| *d.borrow_mut() = w.to_string()); let p = s.borrow().chip; open_stats(&s, p); } });
     ui.on_stats_play_these({ let s = shared.clone(); move || { let l = STATS_TRACKS.with(|t| t.borrow().clone()); if !l.is_empty() { play_list(&s, l, 0); } } });
+    ui.on_stats_song({ let s = shared.clone(); move |i| {
+        let l = STATS_TOP.with(|t| t.borrow().0.clone());
+        if (i as usize) < l.len() { play_list(&s, l, i as usize); }
+    } });
+    ui.on_stats_artist({ let s = shared.clone(); move |i| {
+        if let Some(n) = STATS_TOP.with(|t| t.borrow().1.get(i.max(0) as usize).cloned()) { go(&s, Place::ArtistNamed(n)); }
+    } });
     ui.on_stats_row({ let s = shared.clone(); move |k| {
         match STATS_ROWS.with(|r| r.borrow().get(k.max(0) as usize).map(|x| x.0.clone())) {
             Some(StatsRow::Artist(name)) => go(&s, Place::Search(name)),
@@ -9359,6 +9371,7 @@ fn main() -> Result<(), slint::PlatformError> {
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("panels2") { vec![(9, "play"), (10, "nav:settings"), (11, "cat:Streaming"), (12, "panel:widget"), (14, "scroll:600"), (16, "panel:alerts"), (18, "scroll:900"), (20, "panel:limits"), (22, "panel:offset"), (24, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("sound2") { vec![(9, "play"), (10, "nav:settings"), (11, "cat:Sound"), (13, "scroll:300"), (15, "cat:App & Look"), (16, "scroll:200"), (18, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("mixpage") { vec![(9, "play"), (10, "nav:settings"), (11, "cat:Sound"), (13, "scroll:300"), (14, "panel:mix"), (16, "scroll:900"), (18, "end")] }
+            else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("statclick") { vec![(9, "play"), (10, "nav:stats"), (13, "statsong"), (15, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("square") { vec![(9, "play"), (10, "unround"), (12, "nav:settings"), (13, "cat:Streaming"), (14, "panel:widget"), (16, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("qset") { vec![(9, "play"), (11, "queue"), (14, "nav:settings"), (15, "cat:App & Look"), (16, "scroll:420"), (18, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("nowslim") { vec![(9, "play"), (11, "queue"), (12, "now"), (15, "size:860:720"), (17, "size:1100:720"), (19, "size:1500:860"), (21, "end")] }
@@ -9480,6 +9493,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 "accent2" => { if let Some(sh) = SHARED.with(|x| x.borrow().clone()) { if let Some(o) = sh.borrow_mut().web.prefs.as_object_mut() { o.insert("artAccent".into(), serde_json::json!(false)); o.insert("accent".into(), serde_json::json!("#4cc9f0")); o.insert("accent2".into(), serde_json::json!("#fa586a")); } apply_look(&sh); } }
                 w if w.starts_with("loud:") => { if let Some(sh) = SHARED.with(|x| x.borrow().clone()) { loud_pick(&sh, &w[5..]); } }
                 "titleedit" => { ui.set_title_editing(true); }
+                "statsong" => { let before = s.borrow().queue.current().map(|t| t.title.clone()); ui.invoke_stats_song(0); println!("selftest: stats top song 0: {:?} -> {:?}, top {:?}", before, s.borrow().queue.current().map(|t| t.title.clone()), STATS_TOP.with(|t| t.borrow().0.iter().map(|x| x.title.clone()).collect::<Vec<_>>())); }
                 "unround" => { if let Some(sh) = SHARED.with(|x| x.borrow().clone()) { pref_put(&sh, "appRounded", serde_json::json!(false)); apply_look(&sh); } }
                 w if w.starts_with("panel:") => { if let Some(sh) = SHARED.with(|x| x.borrow().clone()) { panel_open(&sh, &w[6..]); } }
                 w if w.starts_with("cat:") => { ui.set_set_cat(w[4..].into()); }

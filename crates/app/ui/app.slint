@@ -1164,8 +1164,10 @@ export component AppWindow inherits Window {
     in property <[StatBlock]> st-blocks;
     callback stats-open(string);
     callback stats-row(int);
-    callback stats-play-these();
+    /// the overview's top songs (played) and top artists (their page)
     callback stats-song(int);
+    callback stats-artist(int);
+    callback stats-play-these();
     // Clear Listening History: asked once more before it's done
     in-out property <bool> st-clear-asking;
     callback stats-clear();
@@ -2338,7 +2340,13 @@ export component AppWindow inherits Window {
                                             padding: 20px;
                                             spacing: 10px;
                                             Text { text: "YOUR TOP SONGS  \u{203a}"; color: sth.has-hover ? Theme.text : Theme.muted; font-size: 12px; font-weight: 800; letter-spacing: 1.5px; sth := TouchArea { mouse-cursor: MouseCursor.pointer; clicked => { root.stats-open("songs"); } } }
-                                            for it[i] in root.st-songs: HorizontalLayout {
+                                            // (a click plays it, from the top songs, as the web app's)
+                                            for it[i] in root.st-songs: Rectangle {
+                                              height: 48px;
+                                              border-radius: 8px;
+                                              background: sota.has-hover ? Theme.elevated : transparent;
+                                              sota := TouchArea { mouse-cursor: MouseCursor.pointer; clicked => { root.stats-song(i); } }
+                                              HorizontalLayout {
                                                 spacing: 12px;
                                                 height: 48px;
                                                 Text { text: i + 1; width: 22px; color: Theme.accent; font-size: 22px; font-weight: 800; vertical-alignment: center; }
@@ -2348,6 +2356,7 @@ export component AppWindow inherits Window {
                                                     Text { text: it.name; color: Theme.text; font-weight: 700; overflow: elide; }
                                                     Text { text: it.sub; color: Theme.muted; font-size: 12px; overflow: elide; }
                                                 }
+                                              }
                                             }
                                         }
                                     }
@@ -2392,11 +2401,13 @@ export component AppWindow inherits Window {
                                         HorizontalLayout {
                                             spacing: 16px;
                                             alignment: start;
-                                            for a in root.st-artists: VerticalLayout {
+                                            // (a click opens their page)
+                                            for a[k] in root.st-artists: VerticalLayout {
                                                 alignment: start;
                                                 width: 96px;
                                                 spacing: 6px;
-                                                Cover { art: a.art; initial: a.name; width: 80px; height: 80px; border-radius: 40px; }
+                                                Cover { art: a.art; initial: a.name; width: 80px; height: 80px; border-radius: 40px;
+                                                    TouchArea { mouse-cursor: MouseCursor.pointer; clicked => { root.stats-artist(k); } } }
                                                 Text { text: a.name; color: Theme.text; font-weight: 700; font-size: 12px; overflow: elide; horizontal-alignment: center; }
                                                 Text { text: a.sub; color: Theme.muted; font-size: 11px; horizontal-alignment: center; }
                                             }
