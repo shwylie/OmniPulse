@@ -1899,6 +1899,9 @@ export component AppWindow inherits Window {
                                 edited => { root.search-edited(self.text); }
                                 // (Escape here too: the picked tracks let go, and the keys back to the window)
                                 key-pressed(e) => {
+                                    // (as the web app's: Escape empties it, and what was narrowed down comes back;
+                                    // empty already, the picked tracks are let go of)
+                                    if (e.text == Key.Escape && self.text != "") { root.search-text = ""; root.search-edited(""); return accept; }
                                     if (e.text == Key.Escape) { root.pick-none(); keys.focus(); return accept; }
                                     return reject;
                                 }
