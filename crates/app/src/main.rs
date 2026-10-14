@@ -27,6 +27,7 @@ mod mirror;
 mod titles;
 mod together;
 mod versions;
+mod vgroup;
 mod player;
 mod queue;
 mod requests;
@@ -173,11 +174,28 @@ fn apply_filter(app: &mut App) {
     if app.page == "library" {
         lib_sort(&prefs, &mut filtered);
     }
+    // (an artist's page: each song's versions under it, opened beneath it, as the web app's)
+    let mut ver_label: std::collections::HashMap<String, String> = Default::default();
+    let mut ver_rows: std::collections::HashSet<String> = Default::default();
+    if app.page == "artist" {
+        let open = VER_OPEN.with(|o| o.borrow().clone());
+        let mut out = Vec::new();
+        for (head, vs) in vgroup::group(filtered, "") {
+            if !vs.is_empty() {
+                let n = vs.len();
+                ver_label.insert(head.key.clone(), if open.contains(&head.key) { "Hide versions".into() } else { format!("{n} more version{}", if n == 1 { "" } else { "s" }) });
+            }
+            let shown = open.contains(&head.key);
+            out.push(head);
+            if shown { for v in vs { ver_rows.insert(v.key.clone()); out.push(v); } }
+        }
+        filtered = out;
+    }
     let playing = app.queue.current().map(|t| t.key.clone()).unwrap_or_default();
     let liked: std::collections::HashSet<&str> = app.library.iter().map(|t| t.key.as_str()).collect();
     let _ = &liked;
     let marks = marks_of(app);
-    app.rows.set_vec(filtered.iter().map(|t| row_menu(app, &marks, t, Row { picked: app.picked.contains(&t.key), ..t.row(t.key == playing) })).collect::<Vec<_>>());
+    app.rows.set_vec(filtered.iter().map(|t| Row { versions: ver_label.get(&t.key).cloned().unwrap_or_default().into(), version: ver_rows.contains(&t.key), ..row_menu(app, &marks, t, Row { picked: app.picked.contains(&t.key), ..t.row(t.key == playing) }) }).collect::<Vec<_>>());
     app.page_tracks = filtered;
     // its covers, once this is done with the app
     slint::Timer::single_shot(std::time::Duration::ZERO, || SHARED.with(|s| { if let Some(sh) = s.borrow().clone() { rows_art(&sh); } }));
@@ -3373,6 +3391,8 @@ struct MixShow {
 const MIX_HEARD_MS: u64 = 400;
 
 thread_local! {
+    /// the songs on an artist's page whose versions are open beneath them (by key)
+    static VER_OPEN: RefCell<std::collections::HashSet<String>> = RefCell::new(Default::default());
     /// a crossfade's end (Fade Between Tracks), for the accent's pulse meanwhile
     static XFADE_PULSE: std::cell::Cell<Option<std::time::Instant>> = const { std::cell::Cell::new(None) };
     /// the tracks Ctrl+C copied, for Ctrl+V
@@ -9240,6 +9260,18 @@ fn main() -> Result<(), slint::PlatformError> {
             drop(a);
             return pl_row_action(&s, &act, t);
         }
+        // (its versions opened beneath it, or closed; More versions: a search everywhere for the song)
+        if act == "versions" {
+            VER_OPEN.with(|o| { let mut o = o.borrow_mut(); if !o.remove(&t.key) { o.insert(t.key.clone()); } });
+            apply_filter(&mut a);
+            return;
+        }
+        if act == "moreversions" {
+            drop(a);
+            let (who, _) = versions::guess_names(&t);
+            let q = format!("{} {}", if who.is_empty() { t.artist.clone() } else { who }, vgroup::base_title(&t, ""));
+            return go(&s, Place::Search(q.trim().into()));
+        }
         if act == "play" {
             let list = a.page_tracks.clone();
             drop(a);
@@ -9464,6 +9496,7 @@ fn main() -> Result<(), slint::PlatformError> {
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("mix") { vec![(9, "play"), (10, "mixprep"), (70, "mixseek"), (82, "mixcheck"), (100, "mixcheck"), (106, "mixcheck"), (130, "mixcheck"), (132, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("rchange") { vec![(9, "play"), (11, "rate"), (12, "skip"), (16, "rate"), (17, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("mixfb") { vec![(9, "play"), (10, "rate"), (11, "mixprep"), (70, "mixseek"), (80, "mixcheck"), (84, "mixcheck"), (88, "mixcheck"), (92, "mixcheck"), (96, "mixcheck"), (100, "mixcheck"), (104, "mixcheck"), (108, "mixcheck"), (112, "rate"), (114, "mixcheck"), (118, "end")] }
+            else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("versions") { vec![(9, "play"), (10, "artistnamed"), (40, "vopen"), (41, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("rhythm") { vec![(9, "play"), (100, "rhythm"), (101, "end")] }
             // (OMNIPULSE_SELFTEST_PLAN=dnd: a Library track dragged onto the queue; what the sidebar would take,
             // only asked, nothing dropped on your playlists)
@@ -9779,6 +9812,14 @@ fn main() -> Result<(), slint::PlatformError> {
                 // the narrow layout, for its picture
                 "narrow" => { ui.window().set_size(slint::LogicalSize::new(900.0, 700.0)); }
                 // the first artist you follow
+                "artistnamed" => open_artist_named(&s, "deadmau5"),
+                // (the first song with versions: them opened beneath it)
+                "vopen" => {
+                    let rows = s.borrow().rows.clone();
+                    let at = (0..rows.row_count()).find(|&k| rows.row_data(k).is_some_and(|r| r.versions != ""));
+                    println!("selftest: versions: {} rows, the first with versions at {at:?}", rows.row_count());
+                    if let Some(k) = at { ui.invoke_row_action(k as i32, "versions".into()); }
+                }
                 "artist" => { println!("selftest: following {} artists", ui.get_artists().row_count()); if ui.get_artists().row_count() > 0 { ui.invoke_artist(0); } }
                 // Discover's shelves, then its first mix (or station) opened
                 "disc" => {

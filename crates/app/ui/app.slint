@@ -47,7 +47,7 @@ export global Dnd {
 
 // (and for its menu, as the web app's: its artists one by one, its uploader if it's someone else, a
 // like and a star, where it opens, Stream-Safe Music's Allow / Stop allowing)
-export struct Row { title: string, artist: string, album: string, dur: string, plat: string, playing: bool, head: string, auto: bool, art: image, liked: bool, sc-link: bool, sp-link: bool, yt-link: bool, picked: bool, genres: [string], added-by: string, artists: [string], uploader: string, can-like: bool, fav: bool, fav-on: bool, open-label: string, cleared: string, coming: bool }
+export struct Row { versions: string, version: bool, title: string, artist: string, album: string, dur: string, plat: string, playing: bool, head: string, auto: bool, art: image, liked: bool, sc-link: bool, sp-link: bool, yt-link: bool, picked: bool, genres: [string], added-by: string, artists: [string], uploader: string, can-like: bool, fav: bool, fav-on: bool, open-label: string, cleared: string, coming: bool }
 // (merged: playlists combined into it, to unmerge)
 export struct Side { title: string, plat: string, own: bool, share: bool, sc: bool, sp: bool, collab: bool, collab-owner: bool, merged: bool }
 /// A platform in the title bar: on (in its colours), set up (ready; grey until it is), its name
@@ -782,14 +782,14 @@ component TrackRow inherits Rectangle {
     property <bool> picking;
     height: Theme.row-h;
     border-radius: 6px;
-    background: root.item.picked ? Theme.accent.with-alpha(0.2) : ta.has-hover ? Theme.elevated : transparent;
+    background: root.item.picked ? Theme.accent.with-alpha(0.2) : ta.has-hover ? Theme.elevated : root.item.version ? Theme.elevated.with-alpha(0.45) : transparent;
     HorizontalLayout {
-        padding-left: 8px;
+        padding-left: root.item.version ? 28px : 8px;
         padding-right: 16px;
         spacing: 16px;
         Rectangle {
             width: 28px;
-            if !ta.has-hover && !root.item.playing: Text { text: index + 1; width: parent.width; height: parent.height; color: Theme.muted; horizontal-alignment: center; vertical-alignment: center; font-size: 13px; }
+            if !ta.has-hover && !root.item.playing: Text { text: root.item.version ? "" : index + 1; width: parent.width; height: parent.height; color: Theme.muted; horizontal-alignment: center; vertical-alignment: center; font-size: 13px; }
             if ta.has-hover || root.item.playing: Path { commands: Icons.play; x: (parent.width - 16px) / 2; y: (parent.height - 16px) / 2; width: 16px; height: 16px; fill: Theme.accent; }
         }
         Rectangle {
@@ -826,6 +826,8 @@ component TrackRow inherits Rectangle {
             }
         }
         if !root.compact: Text { text: root.item.album; width: 26%; color: Theme.muted; font-size: 13px; overflow: elide; vertical-alignment: center; }
+        // (room for its versions' button, laid over it below)
+        if root.item.versions != "": Rectangle { width: 130px; }
         Rectangle {
             width: 24px;
             if root.item.liked: Glyph { d: Icons.library; width: 18px; height: 18px; y: (parent.height - self.height) / 2; fill: Theme.accent; }
@@ -872,7 +874,9 @@ component TrackRow inherits Rectangle {
                   { label: "Copy Spotify Link", show: root.item.sp-link },
                   { label: "Copy YouTube Music Link", show: root.item.yt-link },
                   { sep: true, show: true },
-                  { label: "Track Preferences...", show: true }
+                  { label: "Track Preferences...", show: true },
+                  { sep: true, show: root.item.versions != "" || root.item.version },
+                  { label: "More Versions", show: root.item.versions != "" || root.item.version }
               ];
               list1: root.lists;
               list1-more: ["New Playlist..."];
@@ -897,9 +901,24 @@ component TrackRow inherits Rectangle {
                   if (n == 19) { root.act("link:spotify"); }
                   if (n == 20) { root.act("link:youtube"); }
                   if (n == 22) { root.act("prefs"); }
+                  if (n == 24) { root.act("moreversions"); }
               }
           }
       }
+    }
+    // an artist's page: its other versions (remixes, edits and the like), opened beneath it
+    if root.item.versions != "": Rectangle {
+        x: parent.width - 250px;
+        y: (parent.height - self.height) / 2;
+        width: 130px;
+        height: 26px;
+        border-radius: 13px;
+        border-width: 1px;
+        border-color: vta.has-hover ? Theme.accent : Theme.line;
+        background: vta.has-hover ? Theme.elevated : transparent;
+        Text { text: root.item.versions; color: vta.has-hover ? Theme.text : Theme.muted; font-size: 12px; font-weight: 600; }
+        vta := TouchArea { mouse-cursor: MouseCursor.pointer; clicked => { root.act("versions"); } }
+        TipSpot { tip: "Its other versions: remixes, edits and the like"; hover: vta.has-hover; }
     }
 }
 
