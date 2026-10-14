@@ -205,6 +205,16 @@ pub fn parse_lyrics(v: &Value) -> Vec<Line> {
 /// The lyrics places, as the web app's LYRICS_PROVIDERS, in your order (prefs.lyricsOrder: [{ id, on }])
 const PROVIDERS: [&str; 4] = ["lrclib", "netease", "kugou", "youtube"];
 
+/// Every lyrics place, in your order, and whether it's on
+pub fn lyrics_all(prefs: &Value) -> Vec<(String, bool)> {
+    let mut out: Vec<(String, bool)> = prefs["lyricsOrder"].as_array().into_iter().flatten()
+        .filter_map(|x| Some((x["id"].as_str()?.to_string(), x["on"].as_bool() != Some(false))))
+        .filter(|(id, _)| PROVIDERS.contains(&id.as_str()))
+        .collect();
+    for p in PROVIDERS { if !out.iter().any(|(id, _)| id == p) { out.push((p.to_string(), true)); } }
+    out
+}
+
 pub fn lyrics_order(prefs: &Value) -> Vec<String> {
     let mut out: Vec<(String, bool)> = prefs["lyricsOrder"].as_array().into_iter().flatten()
         .filter_map(|x| Some((x["id"].as_str()?.to_string(), x["on"].as_bool() != Some(false))))

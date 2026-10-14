@@ -17,6 +17,9 @@ pub fn title(name: &str) -> String {
         "requests" => "Song Requests",
         "limits" => "Limit Requests",
         "mix" => "Seamless Mix",
+        "discord" => "Discord Status",
+        "together" => "Listen Along & Jams",
+        "lyrics" => "Lyrics",
         "widget" => "Stream Widget",
         "alerts" => "Alerts",
         "remote" => "Stream Deck & Remote",
@@ -30,13 +33,15 @@ pub fn title(name: &str) -> String {
 
 /// The panel a switch's Settings button opens (by the switch's pref)
 pub fn of_switch(key: &str) -> Option<&'static str> {
-    Some(match key { "streamSafe" => "safe", "req" => "requests", "reqLimits" => "limits", "mixOn" => "mix", "widget" => "widget", "alertsOn" => "alerts", "remoteOn" => "remote", "out2On" => "offset", "avoidRecent" => "recent", "hideOn" => "hidden", "plugAdd" => "plugins", _ => return None })
+    Some(match key { "streamSafe" => "safe", "req" => "requests", "reqLimits" => "limits", "mixOn" => "mix", "presence" => "discord", "jamsOn" => "together", "lyricsSources" => "lyrics", "widget" => "widget", "alertsOn" => "alerts", "remoteOn" => "remote", "out2On" => "offset", "avoidRecent" => "recent", "hideOn" => "hidden", "plugAdd" => "plugins", _ => return None })
 }
 
 /// What a panel edits, and each one's default (the web app's)
 fn keys(name: &str) -> Vec<(&'static str, Value)> {
     match name {
         "limits" => vec![("reqMax", json!(10)), ("reqPerUser", json!(2))],
+        "discord" => vec![("presArt", json!(true)), ("presTime", json!(true)), ("presListen", json!(true)), ("presAsk", json!(false)), ("presLink", json!(true))],
+        "together" => vec![("togetherName", json!(""))],
         "mix" => vec![("mixWords", json!(true)), ("mixDrop", json!(true)), ("mixMelody", json!(true)), ("mixTape", json!(true)), ("mixBars", json!(0)), ("mixBands", json!(false)), ("mixKeys", json!(true)), ("mixLoops", json!(true)), ("mixForce", json!("auto"))],
         "requests" => vec![("reqBot", json!("streamerbot")), ("reqRadioEdit", json!(false)), ("reqMax", json!(10)), ("reqPerUser", json!(2)), ("reqPort", json!(7879)), ("botRemote", json!(false))],
         "widget" => vec![("widgetPort", json!(7878)), ("widgetDesign", json!("card")), ("widgetAlign", json!("left")), ("widgetRounded", json!(true)), ("widgetText", json!(1)), ("wFade", json!(true)), ("wScroll", json!(true)), ("wSpin", json!(true)), ("wRequester", json!(true)), ("wColor", json!(1.2))],
@@ -49,8 +54,49 @@ fn keys(name: &str) -> Vec<(&'static str, Value)> {
     }
 }
 
+/// Lyrics' sources: asked in this order, the first with timed lyrics used; each switchable, moved up or
+/// down (in the panel's values: "order", the ids, and "on:<id>" each)
+fn lyrics_fields(vals: &Map<String, Value>) -> Vec<Value> {
+    let order: Vec<String> = vals.get("order").and_then(|o| o.as_array()).into_iter().flatten().filter_map(|x| x.as_str().map(String::from)).collect();
+    let n = order.len();
+    let mut f = vec![note("Where lyrics come from, asked in this order: the first with timed lyrics is used. In Now Playing, a song's lyrics can switch to another of these.")];
+    for (i, id) in order.iter().enumerate() {
+        let (mut acts, mut labels) = (Vec::new(), Vec::new());
+        if i > 0 { acts.push(format!("lyUp:{id}")); labels.push("\u{2191}".to_string()); }
+        if i + 1 < n { acts.push(format!("lyDown:{id}")); labels.push("\u{2193}".to_string()); }
+        f.push(json!({ "key": format!("on:{id}"), "label": crate::player::lyrics_name(id), "note": "", "type": "row", "actions": acts, "labels": labels }));
+    }
+    f
+}
+
+/// Lyrics' sources as they're set (all of them, the ones switched off too)
+pub fn lyrics_values(prefs: &Value) -> Map<String, Value> {
+    let mut m = Map::new();
+    let all = crate::player::lyrics_all(prefs);
+    m.insert("order".into(), json!(all.iter().map(|(id, _)| id.clone()).collect::<Vec<_>>()));
+    for (id, on) in all { m.insert(format!("on:{id}"), json!(on)); }
+    m
+}
+
+/// Lyrics' sources saved: prefs.lyricsOrder, as the web app keeps it ([{ id, on }])
+pub fn lyrics_save(vals: &Map<String, Value>) -> Value {
+    let order: Vec<String> = vals.get("order").and_then(|o| o.as_array()).into_iter().flatten().filter_map(|x| x.as_str().map(String::from)).collect();
+    json!(order.iter().map(|id| json!({ "id": id, "on": vals.get(&format!("on:{id}")).and_then(|v| v.as_bool()) != Some(false) })).collect::<Vec<_>>())
+}
+
+/// Moved up (-1) or down (1) in the panel's values
+pub fn lyrics_move(vals: &mut Map<String, Value>, id: &str, by: i32) {
+    let mut order: Vec<String> = vals.get("order").and_then(|o| o.as_array()).into_iter().flatten().filter_map(|x| x.as_str().map(String::from)).collect();
+    if let Some(i) = order.iter().position(|x| x == id) {
+        let j = (i as i32 + by).clamp(0, order.len() as i32 - 1) as usize;
+        order.swap(i, j);
+    }
+    vals.insert("order".into(), json!(order));
+}
+
 /// The values a panel starts with: what's set, else the default
 pub fn values(name: &str, prefs: &Value) -> Map<String, Value> {
+    if name == "lyrics" { return lyrics_values(prefs); }
     if name == "alertlist" { return crate::alerts::list_values(prefs); }
     if name == "safe" { return crate::streamsafe::panel_values(prefs); }
     if let Some(k) = name.strip_prefix("alert:") { return crate::alerts::edit_values(prefs, k); }
@@ -224,6 +270,20 @@ pub fn fields(name: &str, vals: &Map<String, Value>, prefs: &Value, lan: &str) -
             f.push(button("alList", "Alerts and Their Order", "Open", "Which alerts show and which goes first, and each one's words, picture and sound."));
             f
         }
+        // Discord Status: what it shows (as the web app's)
+        "discord" => vec![
+            tog("presArt", "Cover Art", "The cover of what's playing."),
+            tog("presTime", "Time", "How far through the song you are."),
+            tog("presListen", "Listen Along Button", "Friends can listen along with you from it."),
+            tog("presAsk", "Ask to Jam Button", "Friends can ask you to start a Jam from it."),
+            tog("presLink", "Open Track Button", "A button that opens the song on its platform."),
+        ],
+        // Listen Along & Jams: the name the others see
+        "together" => vec![
+            text("togetherName", "Your Name", "What others see when you listen along or Jam. Empty: your account's name."),
+        ],
+        // Lyrics: where they come from, in order (as the web app's)
+        "lyrics" => lyrics_fields(vals),
         // Seamless Mix's own page: its styles, its blend, and one forced for testing
         "mix" => vec![
             note("Styles: each one, when two songs suit it, in place of the usual blend (never the same one twice in a row)."),

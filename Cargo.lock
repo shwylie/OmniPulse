@@ -5551,7 +5551,7 @@ dependencies = [
 
 [[package]]
 name = "omnipulse"
-version = "0.3.0"
+version = "0.3.3"
 dependencies = [
  "arboard",
  "base64 0.22.1",
@@ -5595,7 +5595,7 @@ dependencies = [
 
 [[package]]
 name = "omnipulse-core"
-version = "0.2.26"
+version = "0.3.3"
 dependencies = [
  "base64 0.22.1",
  "ebur128",

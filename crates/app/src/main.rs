@@ -4291,7 +4291,7 @@ const SET_ROWS: [(&str, &str, &str, &str, bool); 28] = [
     ("Integrations", "Chromecast", "Speakers and TVs on your network, to play to: they show with Windows' devices, where the sound plays.", "castOn", false),
     ("Streaming", "Streamer Mode", "Hides account names, keys, addresses and plugin settings. The title bar's button does this too.", "streamerMode", false),
     ("Streaming", "Extended", "Also leaves out music that isn't safe on stream: only open licences, and artists and labels cleared for streaming.", "streamSafe", false),
-    ("Streaming", "Discord Status", "Shows what you're playing on your Discord profile.", "presence", false),
+    ("Integrations", "Discord Status", "Shows what you're playing on your Discord profile.", "presence", false),
     ("Streaming", "Stream Widget", "A now-playing card for OBS, with alerts.", "widget", false),
     ("Streaming", "Alerts", "On the widget: follows, subs, bits, raids and more, from your bot.", "alertsOn", false),
     ("Streaming", "Song Requests", "Chat asks for songs through your bot.", "req", false),
@@ -4322,6 +4322,10 @@ fn paint_settings(a: &App) {
                 let more = on && panels::of_switch(key).is_some() && !(streamer && matches!(*key, "req" | "remoteOn"));
                 SetRow { head: Default::default(), label: (*label).into(), note: (*note).into(), on, key: (*key).into(), sub: matches!(*key, "streamSafe" | "alertsOn"), more, button: Default::default() }
             }).collect();
+        // Lyrics: where they come from, and in which order (its own page, as the web app's)
+        if sec == "Integrations" {
+            list.push(SetRow { head: Default::default(), label: "Lyrics".into(), note: "Where lyrics come from, and in which order.".into(), on: false, key: "lyricsSources".into(), sub: false, more: false, button: "Sources".into() });
+        }
         // the plugins installed (the web app adds and removes them; each one switches on and off here)
         if sec == "Plugins" && !streamer {
             for p in omnipulse_core::plugins::list() {
@@ -4484,7 +4488,7 @@ fn settings_index(a: &App) -> Vec<SetFound> {
         out.push(SetFound { path: path(cat), label: label.into(), note: note.into(), cat: cat.into(), panel: String::new(), key: key.into(), toggle: true });
     }
     let ip = omnipulse_core::lan_ip().unwrap_or_else(|| "THIS-PC".into());
-    for (name, cat) in [("requests", "Streaming"), ("limits", "Streaming"), ("mix", "Sound"), ("widget", "Streaming"), ("alerts", "Streaming"), ("alertlist", "Streaming"), ("remote", "Streaming"), ("offset", "Streaming"), ("safe", "Streaming"), ("recent", "Library"), ("hidden", "Library"), ("plugins", "Plugins")] {
+    for (name, cat) in [("requests", "Streaming"), ("limits", "Streaming"), ("mix", "Sound"), ("discord", "Integrations"), ("together", "Integrations"), ("lyrics", "Integrations"), ("widget", "Streaming"), ("alerts", "Streaming"), ("alertlist", "Streaming"), ("remote", "Streaming"), ("offset", "Streaming"), ("safe", "Streaming"), ("recent", "Library"), ("hidden", "Library"), ("plugins", "Plugins")] {
         let title = panels::title(name);
         out.push(SetFound { path: path(cat), label: title.clone(), note: String::new(), cat: cat.into(), panel: name.into(), key: String::new(), toggle: false });
         let vals = panels::values(name, &a.web.prefs);
@@ -4546,6 +4550,7 @@ fn panel_open(shared: &Shared, name: &str) {
             n if n.starts_with("alert:") => "Streaming",
             "plugins" => "Plugins",
             "mix" => "Sound",
+            "discord" | "together" | "lyrics" => "Integrations",
             _ => "Library",
         };
         let mut path = vec![("Settings".to_string(), "root".to_string()), (cat.to_string(), format!("cat:{cat}"))];
@@ -4700,6 +4705,14 @@ fn panel_press(shared: &Shared, key: &str) {
             "A new key: the addresses have it.".to_string()
         }
         // ---------- the alerts (from the Stream Widget's page) ----------
+        k if k.starts_with("lyUp:") || k.starts_with("lyDown:") => {
+            let (id, by) = match k.strip_prefix("lyUp:") { Some(id) => (id.to_string(), -1), None => (k[7..].to_string(), 1) };
+            if let Some((n, mut vals)) = PF_EDIT.with(|e| e.borrow().clone()) {
+                panels::lyrics_move(&mut vals, &id, by);
+                PF_EDIT.with(|e| *e.borrow_mut() = Some((n, vals)));
+            }
+            return;
+        }
         "reqLimitsReset" => {
             if let Some((_, mut vals)) = PF_EDIT.with(|e| e.borrow().clone()) {
                 vals.insert("reqMax".into(), serde_json::json!(10));
@@ -5007,6 +5020,13 @@ fn panel_save(shared: &Shared, name: &str, vals: serde_json::Map<String, serde_j
         PF_EDIT.with(|e| e.borrow_mut().take());
         { let mut a = shared.borrow_mut(); apply_filter(&mut a); paint_queue(&mut a); }
         if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_pf_open(false); ui.set_status("What counts as safe is saved.".into()); }
+        return;
+    }
+    // (Lyrics: their order, as the web app keeps it)
+    if name == "lyrics" {
+        pref_put(shared, "lyricsOrder", panels::lyrics_save(&vals));
+        PF_EDIT.with(|e| e.borrow_mut().take());
+        if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_pf_open(false); ui.set_status("Lyrics sources saved.".into()); }
         return;
     }
     // (Plugins: adding and removing are done as they're pressed; nothing to keep)
