@@ -736,7 +736,8 @@ function alertsPaint() {
   const bot = prefs.alertBot || (prefs.reqBot === "mixitup" ? "mixitup" : prefs.reqBot === "other" ? "generic" : "streamerbot");
   $("alertBot").value = bot;
   $("sbRow").hidden = bot !== "streamerbot";
-  $("alertWebRow").hidden = bot === "streamerbot";
+  // (Mix It Up: an address for each of its events, below, rather than one to change for each)
+  $("alertWebRow").hidden = bot === "streamerbot" || bot === "mixitup";
   const vars = bot === "mixitup" ? "type=follow&user=$username" : "type=follow&user=NAME&amount=&message=";
   const keyPart = prefs.botRemote && prefs.alertKey ? "key=" + prefs.alertKey + "&" : "";
   $("alertUrl").value = "http://127.0.0.1:" + port + "/alert?" + keyPart + vars;
@@ -755,12 +756,29 @@ function alertsPaint() {
     );
     help.append(ol);
   } else if (bot === "mixitup") {
-    ol.append(
-      li("In Mix It Up, open the event to alert on (a follow, a sub, bits...) and add a Web Request action."),
-      li("Paste the address above, with ", code("type="), " set to that event: ", code(TYPES), "."),
-      li("Put Mix It Up's special identifiers in: ", code("user=$username"), ", and the amount and message for that event (its list of special identifiers has the right names, such as the bits or months)."),
-    );
-    help.append(ol);
+    // one address for each event, ready to paste: its type and Mix It Up's own special identifiers in
+    help.append(el("p", "note", "In Mix It Up, open each event below, add a Web Request action, and paste its address. Nothing in it needs changing."));
+    const base = "http://127.0.0.1:" + port + "/alert?" + keyPart + "type=";
+    const rows = MIXITUP_EVENTS.map(([event, rest]) => [event, base + rest, ""]);
+    alertCustom().forEach((c) => rows.push([(c.name || c.id) + " (yours)", base + c.id + "&user=$username", "Any event or command you like."]));
+    rows.forEach(([event, url, note]) => {
+      const row = el("div", "row stack");
+      const head = el("div");
+      head.append(el("div", "lbl", event));
+      if (note) head.append(el("div", "note", note));
+      const box = el("div", "widgetRow");
+      const input = el("input", "sensitive");
+      input.type = "text"; input.readOnly = true; input.value = url; input.setAttribute("aria-label", event + " address");
+      const copy = el("button", "soft", "Copy");
+      copy.addEventListener("click", async () => {
+        try { await navigator.clipboard.writeText(url); copy.textContent = "Copied"; setTimeout(() => { copy.textContent = "Copy"; }, 1500); }
+        catch (e) { input.select(); }
+      });
+      box.append(input, copy);
+      row.append(head, box);
+      help.append(row);
+    });
+    help.append(el("p", "note", "Polls, bans and watch streaks have no Mix It Up event to send them from."));
   } else {
     ol.append(
       li("When something happens, have your bot open the address above."),
@@ -772,6 +790,18 @@ function alertsPaint() {
   markSensitive(help);
   if (typeof stateNotes === "function") stateNotes();
 }
+
+// Mix It Up's events, each with its alert's type and Mix It Up's documented special identifiers for it
+const MIXITUP_EVENTS = [
+  ["Channel Followed", "follow&user=$username"],
+  ["Channel Subscribed", "sub&user=$username&amount=$usersubdurationmonths"],
+  ["Channel Resubscribed", "sub&user=$username&amount=$usersubmonths&message=$message"],
+  ["Mass Subscriptions Gifted", "gift&user=$username&amount=$subsgiftedamount"],
+  ["Bits Cheered", "bits&user=$username&amount=$bitsamount&message=$messagenocheermotes"],
+  ["Donation Received", "donation&user=$username&amount=$donationamount&message=$donationmessage"],
+  ["Channel Raided", "raid&user=$username&amount=$raidviewercount"],
+  ["Hype Train Level Up", "hypetrain&amount=$hypetrainlevel"],
+];
 
 function alertsInit() {
   $("alertsOn").addEventListener("change", () => { prefs.alertsOn = $("alertsOn").checked; alertsSave(); alertsPaint(); });

@@ -166,6 +166,20 @@ fn remote_bots(vals: &Map<String, Value>, what: &str, port: u64, path: &str, lan
     out
 }
 
+/// Mix It Up's events, each with its alert's type and Mix It Up's special identifiers for it (as its
+/// documentation lists them: Twitch's Channel Followed, Subscribed, Resubscribed, Subscriptions Gifted, Bits
+/// Cheered, Channel Raided, Hype Train; and Donation Received)
+const MIXITUP_EVENTS: [(&str, &str); 8] = [
+    ("Channel Followed", "follow&user=$username"),
+    ("Channel Subscribed", "sub&user=$username&amount=$usersubdurationmonths"),
+    ("Channel Resubscribed", "sub&user=$username&amount=$usersubmonths&message=$message"),
+    ("Mass Subscriptions Gifted", "gift&user=$username&amount=$subsgiftedamount"),
+    ("Bits Cheered", "bits&user=$username&amount=$bitsamount&message=$messagenocheermotes"),
+    ("Donation Received", "donation&user=$username&amount=$donationamount&message=$donationmessage"),
+    ("Channel Raided", "raid&user=$username&amount=$raidviewercount"),
+    ("Hype Train Level Up", "hypetrain&amount=$hypetrainlevel"),
+];
+
 /// A panel's fields, for the values as they are in it (prefs: for the keys, Streamer Mode, the LAN address)
 pub fn fields(name: &str, vals: &Map<String, Value>, prefs: &Value, lan: &str) -> Vec<Value> {
     if name == "alertlist" { return crate::alerts::list_fields(prefs); }
@@ -238,8 +252,23 @@ pub fn fields(name: &str, vals: &Map<String, Value>, prefs: &Value, lan: &str) -
                 f.push(text("sbHost", "Streamer.bot", "Its WebSocket Server's address and port."));
                 f.push(tog("sbOn", "Connect to Streamer.bot", ""));
                 f.push(note("1. In Streamer.bot: Servers/Clients > WebSocket Server. Tick Auto Start, then Start Server.\n2. Put its address and port here (127.0.0.1:8080 unless you've changed it), and switch it on.\n3. That's all: follows, subs, bits, raids and the rest come through by themselves."));
+            } else if bot == "mixitup" {
+                // one address for each, ready to paste: its event, its type and Mix It Up's own special
+                // identifiers already in (its documented ones for each event)
+                f.push(note("In Mix It Up, open each event below, add a Web Request action, and paste its address (Copy). Nothing in it needs changing."));
+                let at = |k: &str, rest: &str| format!("http://127.0.0.1:{port}/alert?{}type={rest}", part(k));
+                for (event, rest) in MIXITUP_EVENTS {
+                    f.push(info(event, &at(&hide(&key), rest), &at(&key, rest), ""));
+                }
+                // (your own alerts: their trigger, the viewer's name)
+                for k in crate::alerts::order(prefs) {
+                    if crate::alerts::KINDS.iter().any(|x| x.0 == k) { continue; }
+                    let rest = format!("{k}&user=$username");
+                    f.push(info(&format!("{} (yours)", crate::alerts::name(prefs, &k)), &at(&hide(&key), &rest), &at(&key, &rest), "Any event or command you like."));
+                }
+                f.push(note("Polls, bans and watch streaks have no Mix It Up event to send them from."));
             } else {
-                f.push(info("Web Request", &url(&hide(&key)), &url(&key), if bot == "mixitup" { "In Mix It Up, its Web Request action, with this address." } else { "Your bot opens this address when something happens." }));
+                f.push(info("Web Request", &url(&hide(&key)), &url(&key), "Your bot opens this address when something happens."));
                 f.push(note(&if bot == "mixitup" {
                     format!("1. In Mix It Up, open the event to alert on (a follow, a sub, bits...) and add a Web Request action.\n2. Paste the address above, with type= set to that event: {types}.\n3. Put Mix It Up's special identifiers in: user=$username, and the amount and message for that event (its list of special identifiers has the right names, such as the bits or months).")
                 } else {
