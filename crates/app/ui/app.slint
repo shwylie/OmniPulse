@@ -54,7 +54,7 @@ export struct Side { title: string, plat: string, own: bool, share: bool, sc: bo
 export struct Plat { id: string, on: bool, name: string, ready: bool }
 // (a genre's tile, as the web app's: a coloured cover, its name on it; c1 its middle, c2 its edge)
 // (a song's tile: a track menu on right-click, as the web app's; liked, for its line)
-export struct Tile { title: string, sub: string, art: image, plat: string, genre: bool, c1: color, c2: color, track: bool, liked: bool }
+export struct Tile { title: string, sub: string, art: image, plat: string, genre: bool, c1: color, c2: color, track: bool, liked: bool, row: Row }
 /// Pick genres (and Fine-tune): a row of up to four chips, under a group's name (on its first row)
 export struct TasteChip { label: string, on: bool }
 export struct TasteRow { head: string, chips: [TasteChip] }
@@ -70,7 +70,7 @@ export struct SetHit { path: string, label: string, note: string, cat: string, p
 export struct LookAlike { new: string, old: string, choice: string }
 // Stats' closer look at one card: its blocks (a bar chart, a big number, a ranked list, a calendar)
 export struct StatBar { label: string, v: float, tip: string }
-export struct StatRow { rank: int, name: string, sub: string, share: float, art: image }
+export struct StatRow { rank: int, name: string, sub: string, share: float, art: image, row: Row, song: bool }
 export struct StatBlock { kind: string, kicker: string, big: string, sub: string, wide: bool, bars: [StatBar], rows: [StatRow], cells: [int] }
 export struct SetRow { head: string, label: string, note: string, on: bool, key: string, sub: bool, more: bool, button: string }
 /// One of a plugin's settings: its kind ("toggle", "text", "password", "number", "select"), what it's
@@ -81,7 +81,7 @@ export struct KeyStep { text: string, has-url: bool, copies: [string] }
 export struct KeyField { label: string, value: string, ok: bool }
 export struct PlugField { key: string, label: string, note: string, kind: string, value: string, options: [string], at: int }
 // (an artist you follow: whether on SoundCloud and on Spotify, for its menu)
-export struct Item { name: string, sub: string, art: image, plat: string, on-sc: bool, on-sp: bool }
+export struct Item { name: string, sub: string, art: image, plat: string, on-sc: bool, on-sp: bool, row: Row }
 
 global Icons {
     out property <string> play: "M8 5v14l11-7z";
@@ -665,6 +665,75 @@ component Stepper inherits HorizontalLayout {
     Pill { label: "+"; opacity: root.can-up ? 1 : 0.4; y: (parent.height - self.height) / 2; clicked => { if (root.can-up) { root.up(); } } }
 }
 
+/// A song's menu, the same wherever it's right-clicked (a page's row, a tile, Stats, the queue), as
+/// the web app's openTrackMenu: what it does comes back by name in act()
+component TrackMenu inherits CtxMenu {
+    in property <Row> item;
+    /// your playlists on this PC (to add to)
+    in property <[string]> lists;
+    /// in a playlist of yours: Remove from This Playlist
+    in property <bool> removable;
+    /// a queue row: Remove from Queue and Shuffle Next Up; the one playing has no Play or Play Next
+    in property <bool> queue-row;
+    callback act(string);
+    items: [
+        { label: "Play", show: !(root.queue-row && root.item.playing) },
+        { label: "Play Next", show: !(root.queue-row && root.item.playing) },
+        { label: "Add to Queue", show: !root.queue-row },
+        { label: "Remove from Queue", show: root.queue-row && !root.item.playing },
+        { label: "Shuffle Next Up", show: root.queue-row },
+        { label: "Add to Playlist", show: true, sub: 1 },
+        { sep: true, show: true },
+        { label: root.item.liked ? "Remove from Likes" : "Add to Likes", show: root.item.can-like },
+        { label: root.item.fav ? "Remove from Favourites" : "Add to Favourites", show: root.item.fav-on },
+        { label: "Go to Artist", show: root.item.artists.length > 1, sub: 2 },
+        { label: "Go to Artist", show: root.item.artists.length <= 1 },
+        { label: "Go to " + root.item.uploader + " (Uploader)", show: root.item.uploader != "" },
+        { label: "Remove from This Playlist", show: root.removable },
+        { sep: true, show: true },
+        { label: "Don't Recommend This Track", show: true },
+        { label: "Don't Recommend This Album", show: root.item.album != "" },
+        { label: "Don't Recommend " + root.item.artist, show: root.item.artist != "" },
+        { label: root.item.cleared, show: root.item.cleared != "" },
+        { sep: true, show: root.item.open-label != "" || root.item.sc-link || root.item.sp-link || root.item.yt-link },
+        { label: root.item.open-label, show: root.item.open-label != "" },
+        { label: "Copy SoundCloud Link", show: root.item.sc-link },
+        { label: "Copy Spotify Link", show: root.item.sp-link },
+        { label: "Copy YouTube Music Link", show: root.item.yt-link },
+        { sep: true, show: true },
+        { label: "Track Preferences...", show: true },
+        { sep: true, show: root.item.versions != "" || root.item.version },
+        { label: "More Versions", show: root.item.versions != "" || root.item.version }
+    ];
+    list1: root.lists;
+    list1-more: ["New Playlist..."];
+    list2: root.item.artists;
+    picked(n, k) => {
+        if (n == 0) { root.act("play"); }
+        if (n == 1) { root.act("next"); }
+        if (n == 2) { root.act("add"); }
+        if (n == 3) { root.act("remove"); }
+        if (n == 4) { root.act("shuffle"); }
+        if (n == 5) { if (k < root.lists.length) { root.act("pl" + k); } else if (k == root.lists.length + 0) { root.act("plnew"); } }
+        if (n == 7) { root.act("like"); }
+        if (n == 8) { root.act("fav"); }
+        if (n == 9) { if (k < root.item.artists.length) { root.act("artist:" + k); } }
+        if (n == 10) { root.act("artist:0"); }
+        if (n == 11) { root.act("uploader"); }
+        if (n == 12) { root.act("plremove"); }
+        if (n == 14) { root.act("hide:track"); }
+        if (n == 15) { root.act("hide:album"); }
+        if (n == 16) { root.act("hide:artist"); }
+        if (n == 17) { root.act("cleared"); }
+        if (n == 19) { root.act("open"); }
+        if (n == 20) { root.act("link:soundcloud"); }
+        if (n == 21) { root.act("link:spotify"); }
+        if (n == 22) { root.act("link:youtube"); }
+        if (n == 24) { root.act("prefs"); }
+        if (n == 26) { root.act("moreversions"); }
+    }
+}
+
 component Toggle inherits Rectangle {
     in-out property <bool> checked;
     callback toggled();
@@ -849,60 +918,12 @@ component TrackRow inherits Rectangle {
             clicked => { if (!root.picking) { root.play(); } }
         }
           // (on top: it only takes right-clicks, the rest goes through to what's under it)
-          cm1 := CtxMenu {
+          cm1 := TrackMenu {
               width: 100%; height: 100%;
-              items: [
-                  { label: "Play", show: true },
-                  { label: "Play Next", show: true },
-                  { label: "Add to Queue", show: true },
-                  { label: "Add to Playlist", show: true, sub: 1 },
-                  { sep: true, show: true },
-                  { label: root.item.liked ? "Remove from Likes" : "Add to Likes", show: root.item.can-like },
-                  { label: root.item.fav ? "Remove from Favourites" : "Add to Favourites", show: root.item.fav-on },
-                  { label: "Go to Artist", show: root.item.artists.length > 1, sub: 2 },
-                  { label: "Go to Artist", show: root.item.artists.length <= 1 },
-                  { label: "Go to " + root.item.uploader + " (Uploader)", show: root.item.uploader != "" },
-                  { label: "Remove from This Playlist", show: root.removable },
-                  { sep: true, show: true },
-                  { label: "Don't Recommend This Track", show: true },
-                  { label: "Don't Recommend This Album", show: root.item.album != "" },
-                  { label: "Don't Recommend " + root.item.artist, show: root.item.artist != "" },
-                  { label: root.item.cleared, show: root.item.cleared != "" },
-                  { sep: true, show: true },
-                  { label: root.item.open-label, show: root.item.open-label != "" },
-                  { label: "Copy SoundCloud Link", show: root.item.sc-link },
-                  { label: "Copy Spotify Link", show: root.item.sp-link },
-                  { label: "Copy YouTube Music Link", show: root.item.yt-link },
-                  { sep: true, show: true },
-                  { label: "Track Preferences...", show: true },
-                  { sep: true, show: root.item.versions != "" || root.item.version },
-                  { label: "More Versions", show: root.item.versions != "" || root.item.version }
-              ];
-              list1: root.lists;
-              list1-more: ["New Playlist..."];
-              list2: root.item.artists;
-              picked(n, k) => {
-                  if (n == 0) { root.act("play"); }
-                  if (n == 1) { root.act("next"); }
-                  if (n == 2) { root.act("add"); }
-                  if (n == 3) { if (k < root.lists.length) { root.act("pl" + k); } else if (k == root.lists.length + 0) { root.act("plnew"); } }
-                  if (n == 5) { root.act("like"); }
-                  if (n == 6) { root.act("fav"); }
-                  if (n == 7) { if (k < root.item.artists.length) { root.act("artist:" + k); } }
-                  if (n == 8) { root.act("artist:0"); }
-                  if (n == 9) { root.act("uploader"); }
-                  if (n == 10) { root.act("plremove"); }
-                  if (n == 12) { root.act("hide:track"); }
-                  if (n == 13) { root.act("hide:album"); }
-                  if (n == 14) { root.act("hide:artist"); }
-                  if (n == 15) { root.act("cleared"); }
-                  if (n == 17) { root.act("open"); }
-                  if (n == 18) { root.act("link:soundcloud"); }
-                  if (n == 19) { root.act("link:spotify"); }
-                  if (n == 20) { root.act("link:youtube"); }
-                  if (n == 22) { root.act("prefs"); }
-                  if (n == 24) { root.act("moreversions"); }
-              }
+              item: root.item;
+              lists: root.lists;
+              removable: root.removable;
+              act(a) => { root.act(a); }
           }
       }
     }
@@ -958,6 +979,8 @@ component BadgedCover inherits Rectangle {
 
 component TileView inherits Rectangle {
     in property <Tile> tile;
+    /// your playlists on this PC (a song's Add to Playlist)
+    in property <[string]> lists;
     callback clicked;
     // a song's tile right-clicked: what's picked from its menu
     callback act(string);
@@ -986,7 +1009,15 @@ component TileView inherits Rectangle {
         Text { text: root.tile.sub; color: Theme.muted; font-size: 12px; overflow: elide; }
     }
     Rectangle {
-        ta := TouchArea { pointer-event(e) => { if (e.kind == PointerEventKind.down && e.button == PointerEventButton.right) { cm2.open(self.mouse-x, self.mouse-y); } } clicked => { root.clicked(); } }
+        ta := TouchArea { pointer-event(e) => { if (e.kind == PointerEventKind.down && e.button == PointerEventButton.right) { if (root.album) { cm2.open(self.mouse-x, self.mouse-y); } else { cmt.open(self.mouse-x, self.mouse-y); } } } clicked => { root.clicked(); } }
+        // (a song's: the same menu as anywhere else, as the web app's)
+        cmt := TrackMenu {
+            width: 100%; height: 100%;
+            enabled: root.tile.track && !root.album;
+            item: root.tile.row;
+            lists: root.lists;
+            act(a) => { if (a == "play") { root.clicked(); } else { root.act(a); } }
+        }
         // (on top: it only takes right-clicks, the rest goes through to what's under it)
         cm2 := CtxMenu {
             width: 100%; height: 100%;
@@ -1036,6 +1067,7 @@ component TileView inherits Rectangle {
 /// wheel; Show all lays every tile out in rows
 component ShelfView inherits VerticalLayout {
     in property <Shelf> shelf;
+    in property <[string]> lists;
     callback tile-clicked(int);
     callback tile-act(int, string);
     property <bool> open;
@@ -1057,7 +1089,7 @@ component ShelfView inherits VerticalLayout {
         HorizontalLayout {
             spacing: 16px;
             alignment: start;
-            for t[k] in root.shelf.tiles: TileView { tile: t; clicked => { root.tile-clicked(k); } act(a) => { root.tile-act(k, a); } }
+            for t[k] in root.shelf.tiles: TileView { tile: t; lists: root.lists; clicked => { root.tile-clicked(k); } act(a) => { root.tile-act(k, a); } }
         }
     }
     // the bar
@@ -1094,7 +1126,7 @@ component ShelfView inherits VerticalLayout {
     // (placed by hand, not by a layout: how many fit a row comes from the shelf's width)
     if root.open: Rectangle {
         height: ceil(root.shelf.tiles.length / root.per) * 242px - 16px;
-        for t[k] in root.shelf.tiles: TileView { x: mod(k, root.per) * 186px; y: floor(k / root.per) * 242px; tile: t; clicked => { root.tile-clicked(k); } act(a) => { root.tile-act(k, a); } }
+        for t[k] in root.shelf.tiles: TileView { x: mod(k, root.per) * 186px; y: floor(k / root.per) * 242px; tile: t; lists: root.lists; clicked => { root.tile-clicked(k); } act(a) => { root.tile-act(k, a); } }
     }
 }
 
@@ -1278,6 +1310,8 @@ export component AppWindow inherits Window {
     callback stats-row(int);
     /// the overview's top songs (played) and top artists (their page)
     callback stats-song(int);
+    /// a song right-clicked in Stats: (0) a closer look's row, (1) the overview's top songs; its menu's choice
+    callback stats-act(int, int, string);
     callback stats-artist(int);
     callback stats-play-these();
     // Clear Listening History: asked once more before it's done
@@ -1489,6 +1523,11 @@ export component AppWindow inherits Window {
     // the playing song right-clicked in the player bar: the "..." menu
     callback now-menu();
     in-out property <int> now-menu-asks;
+    /// the "..." menu's Add to Playlist: the player bar's playlist list shown
+    in-out property <int> pl-menu-asks;
+    /// the open playlist's own links (the Share button's right-click)
+    in property <bool> pl-sc;
+    in property <bool> pl-sp;
     in property <int> queue-requests;
     callback shuffle();
     callback play-page();
@@ -2084,7 +2123,23 @@ export component AppWindow inherits Window {
                         }
                         Pill { label: "Shuffle"; y: 7px; clicked => { root.shuffle(); } }
                         // a playlist's own: Share, Invite collaborators (or its invite link), Delete playlist, as the web app's
-                        if root.page == "playlist" && root.pl-share: Pill { label: "Share"; y: 7px; clicked => { root.page-pl("share"); } }
+                        // (right-click: its SoundCloud or Spotify link on its own, as the web app's)
+                        if root.page == "playlist" && root.pl-share: Rectangle {
+                            width: shp.width;
+                            shp := Pill { tip: "Share: songs from every platform together. Right-click for its SoundCloud or Spotify link."; label: "Share"; y: 7px; right-click(x, y) => { shm.open(x, y + 7px); } clicked => { root.page-pl("share"); } }
+                            shm := CtxMenu {
+                                width: 100%; height: 100%;
+                                items: [
+                                    { label: "Copy SoundCloud Link", show: root.pl-sc },
+                                    { label: "Copy Spotify Link", show: root.pl-sp },
+                                    { label: "It isn't on SoundCloud or Spotify yet: add a song from there first.", show: !root.pl-sc && !root.pl-sp }
+                                ];
+                                picked(n, k) => {
+                                    if (n == 0) { root.page-pl("link:soundcloud"); }
+                                    if (n == 1) { root.page-pl("link:spotify"); }
+                                }
+                            }
+                        }
                         if root.page == "playlist" && root.pl-collab != "": Pill { label: root.pl-collab; y: 7px; clicked => { root.page-pl("collab"); } }
                         if root.page == "playlist" && root.pl-own: Pill { label: "Export"; tip: "Its SoundCloud songs to a playlist on SoundCloud, its Spotify songs to one on Spotify (again: brought up to date)"; y: 7px; clicked => { root.page-pl("export"); } }
                         if root.page == "playlist" && root.pl-merged: Pill { label: "Unmerge"; tip: "Take out what each playlist combined into this one brought"; y: 7px; clicked => { root.page-pl("unmerge"); } }
@@ -2277,7 +2332,7 @@ export component AppWindow inherits Window {
                                     if i < 8: TrackRow { item: r; index: i; compact: root.narrow || root.queue-open; lists: root.own-lists; removable: false; show-genres: true; genre(g) => { root.genre-search(g); } play => { root.play-row(i); keys.focus(); } act(a) => { root.row-action(i, a); } pick(m) => { root.row-pick(i, m); keys.focus(); } }
                                 }
                             }
-                            for sh[s] in root.shelves: ShelfView { shelf: sh; tile-clicked(k) => { root.tile(s, k); } tile-act(k, a) => { root.tile-act(s, k, a); } }
+                            for sh[s] in root.shelves: ShelfView { shelf: sh; lists: root.own-lists; tile-clicked(k) => { root.tile(s, k); } tile-act(k, a) => { root.tile-act(s, k, a); } }
                             Rectangle { height: 76px; }
                         }
                     }
@@ -2314,7 +2369,7 @@ export component AppWindow inherits Window {
                                     Pill { label: "Find music"; y: (parent.height - self.height) / 2; clicked => { ti.focus(); } }
                                 }
                             }
-                            for sh[s] in root.shelves: ShelfView { shelf: sh; tile-clicked(k) => { root.tile(s, k); } tile-act(k, a) => { root.tile-act(s, k, a); } }
+                            for sh[s] in root.shelves: ShelfView { shelf: sh; lists: root.own-lists; tile-clicked(k) => { root.tile(s, k); } tile-act(k, a) => { root.tile-act(s, k, a); } }
                         }
                     }
                     // Stats, Wrapped-style
@@ -2386,7 +2441,8 @@ export component AppWindow inherits Window {
                                                         Rectangle { x: 0; width: parent.width * r.share; height: 100%; border-radius: 3px; background: Theme.accent; }
                                                     }
                                                 }
-                                                rta := TouchArea { mouse-cursor: MouseCursor.pointer; clicked => { root.stats-row(k); } }
+                                                rta := TouchArea { mouse-cursor: MouseCursor.pointer; pointer-event(e) => { if (e.kind == PointerEventKind.down && e.button == PointerEventButton.right && r.song) { rcm.open(self.mouse-x, self.mouse-y); } } clicked => { root.stats-row(k); } }
+                                                rcm := TrackMenu { width: 100%; height: 100%; item: r.row; lists: root.own-lists; act(a) => { root.stats-act(0, k, a); } }
                                             }
                                         }
                                         // (twelve weeks: a column a week, a square a day, Sunday at the top)
@@ -2480,7 +2536,8 @@ export component AppWindow inherits Window {
                                               height: 48px;
                                               border-radius: 8px;
                                               background: sota.has-hover ? Theme.elevated : transparent;
-                                              sota := TouchArea { mouse-cursor: MouseCursor.pointer; clicked => { root.stats-song(i); } }
+                                              sota := TouchArea { mouse-cursor: MouseCursor.pointer; pointer-event(e) => { if (e.kind == PointerEventKind.down && e.button == PointerEventButton.right) { scm.open(self.mouse-x, self.mouse-y); } } clicked => { root.stats-song(i); } }
+                                              scm := TrackMenu { width: 100%; height: 100%; item: it.row; lists: root.own-lists; act(a) => { root.stats-act(1, i, a); } }
                                               HorizontalLayout {
                                                 spacing: 12px;
                                                 height: 48px;
@@ -3445,43 +3502,12 @@ export component AppWindow inherits Window {
                                         qta := TouchArea { pointer-event(e) => { if (e.kind == PointerEventKind.down && e.button == PointerEventButton.right) { cm8.open(self.mouse-x, self.mouse-y); } } clicked => { root.play-queue(i); } }
                                     }
                                     // (on top: it only takes right-clicks, the rest goes through to what's under it)
-                                    cm8 := CtxMenu {
+                                    cm8 := TrackMenu {
                                         width: 100%; height: 100%;
-                                        items: [
-                                            { label: "Play", show: !q.playing },
-                                            { label: "Play Next", show: !q.playing },
-                                            { label: "Remove from Queue", show: !q.playing },
-                                            { label: "Shuffle Next Up", show: true },
-                                            { label: "Add to Playlist", show: true, sub: 1 },
-                                            { sep: true, show: true },
-                                            { label: q.liked ? "Remove from Likes" : "Add to Likes", show: q.can-like },
-                                            { label: q.fav ? "Remove from Favourites" : "Add to Favourites", show: q.fav-on },
-                                            { label: "Go to Artist", show: true },
-                                            { label: "Don't Recommend This Track", show: true },
-                                            { label: q.open-label, show: q.open-label != "" },
-                                            { label: "Copy SoundCloud Link", show: q.sc-link },
-                                            { label: "Copy Spotify Link", show: q.sp-link },
-                                            { label: "Copy YouTube Music Link", show: q.yt-link },
-                                            { label: "Track Preferences...", show: true }
-                                        ];
-                                        list1: root.own-lists;
-                                        list1-more: ["New Playlist..."];
-                                        picked(n, k) => {
-                                            if (n == 0) { root.play-queue(i); }
-                                            if (n == 1) { root.queue-action(i, "next"); }
-                                            if (n == 2) { root.queue-action(i, "remove"); }
-                                            if (n == 3) { root.queue-action(i, "shuffle"); }
-                                            if (n == 4) { if (k < root.own-lists.length) { root.queue-action(i, "pl" + k); } else if (k == root.own-lists.length + 0) { root.queue-action(i, "plnew"); } }
-                                            if (n == 6) { root.queue-action(i, "like"); }
-                                            if (n == 7) { root.queue-action(i, "fav"); }
-                                            if (n == 8) { root.queue-action(i, "artist:0"); }
-                                            if (n == 9) { root.queue-action(i, "hide:track"); }
-                                            if (n == 10) { root.queue-action(i, "open"); }
-                                            if (n == 11) { root.queue-action(i, "link:soundcloud"); }
-                                            if (n == 12) { root.queue-action(i, "link:spotify"); }
-                                            if (n == 13) { root.queue-action(i, "link:youtube"); }
-                                            if (n == 14) { root.queue-action(i, "prefs"); }
-                                        }
+                                        item: q;
+                                        lists: root.own-lists;
+                                        queue-row: true;
+                                        act(a) => { if (a == "play") { root.play-queue(i); } else { root.queue-action(i, a); } }
                                     }
                                 }
                             }
@@ -3702,6 +3728,9 @@ export component AppWindow inherits Window {
                         if root.now-plat != "": Rectangle {
                             width: 36px;
                             IconButton { tip: "Add to playlist"; d: Icons.playlist-add; y: (parent.height - self.height) / 2; clicked => { pl-menu.show(); } }
+                            // (the "..." menu's Add to Playlist opens it too)
+                            property <int> pl-asked: root.pl-menu-asks;
+                            changed pl-asked => { pl-menu.show(); }
                             pl-menu := PopupWindow {
                                 x: parent.width - 240px;
                                 y: -12px - (root.own-lists.length + 2) * 32px - 16px;

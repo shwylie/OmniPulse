@@ -556,6 +556,8 @@ fn open_playlist(shared: &Shared, i: usize) {
         let own = xpl::is_own(&p.id);
         let collab = collab_of(&a.xpl, &p.id);
         ui.set_pl_share(p.plat != "local" || own);
+        ui.set_pl_sc(share::platform_id(&p, &a.xpl, "soundcloud").is_some());
+        ui.set_pl_sp(share::platform_id(&p, &a.xpl, "spotify").is_some());
         ui.set_pl_own(own);
         ui.set_pl_merged(a.xpl.as_array().is_some_and(|l| l.iter().any(|x| x["id"].as_str() == Some(p.id.as_str()) && x["merged"].as_array().is_some_and(|m| !m.is_empty()))));
         ui.set_pl_collab(match &collab { Some(c) if c["owner"].as_bool() == Some(true) => "Copy invite link".into(), Some(_) => "".into(), None if p.plat != "local" || own => "Invite collaborators".into(), None => "".into() });
@@ -625,7 +627,7 @@ fn search_shelves(shared: &Shared, q: String) {
         let _ = weak.upgrade_in_event_loop(move |ui| SHARED.with(|s| {
             let Some(shared) = s.borrow().clone() else { return };
             if shared.borrow().page != "search" || !ui.get_page_title().contains(q2.as_str()) { return; }
-            let models: Vec<Rc<VecModel<Tile>>> = shelves.iter().map(|(_, l)| Rc::new(VecModel::from(l.iter().map(|f| { let (t, sub, _, plat) = f.tile(); Tile { title: t.into(), sub: sub.into(), art: slint::Image::default(), plat: plat.into(), genre: false, c1: Default::default(), c2: Default::default(), track: false, liked: false } }).collect::<Vec<_>>()))).collect();
+            let models: Vec<Rc<VecModel<Tile>>> = shelves.iter().map(|(_, l)| Rc::new(VecModel::from(l.iter().map(|f| { let (t, sub, _, plat) = f.tile(); Tile { title: t.into(), sub: sub.into(), art: slint::Image::default(), plat: plat.into(), genre: false, c1: Default::default(), c2: Default::default(), track: false, liked: false, row: Default::default() } }).collect::<Vec<_>>()))).collect();
             let rows: Vec<Shelf> = shelves.iter().zip(&models).map(|((title, _), m)| Shelf { title: (*title).into(), tiles: ModelRc::from(m.clone()) }).collect();
             ui.set_shelves(ModelRc::from(Rc::new(VecModel::from(rows))));
             SHELF_MODELS.with(|m| *m.borrow_mut() = models);
@@ -664,7 +666,7 @@ fn library_albums(shared: &Shared) {
         let weak2 = weak.clone();
         let _ = weak.upgrade_in_event_loop(move |ui| {
             if ui.get_page_kind() != "albumgrid" { return; }
-            let model = Rc::new(VecModel::from(list.iter().map(|f| { let (t, sub, _, plat) = f.tile(); Tile { title: t.into(), sub: sub.into(), art: slint::Image::default(), plat: plat.into(), genre: false, c1: Default::default(), c2: Default::default(), track: false, liked: false } }).collect::<Vec<_>>()));
+            let model = Rc::new(VecModel::from(list.iter().map(|f| { let (t, sub, _, plat) = f.tile(); Tile { title: t.into(), sub: sub.into(), art: slint::Image::default(), plat: plat.into(), genre: false, c1: Default::default(), c2: Default::default(), track: false, liked: false, row: Default::default() } }).collect::<Vec<_>>()));
             ui.set_album_tiles(ModelRc::from(model.clone()));
             ui.set_page_sub(if n == 0 { "No saved albums yet: save some on Spotify, like some on SoundCloud, or add music files with their album names.".to_string() } else { format!("{}: saved on Spotify, liked on SoundCloud, and your files'.", plural(n, "album", "albums")) }.into());
             ALBUM_MODEL.with(|m| *m.borrow_mut() = Some(model));
@@ -764,6 +766,7 @@ fn paint_artists(shared: &Shared, list: &[sources::Artist]) {
         plat: a.plats().first().copied().unwrap_or("soundcloud").into(),
         on_sc: a.sc.is_some(),
         on_sp: a.sp.is_some(),
+        row: Default::default(),
     }).collect();
     // (following everyone from one platform on the other too, as the web app's header menu)
     let (sc_on, sp_on) = { let p = &shared.borrow().web.prefs; (plat_on(p, "soundcloud"), plat_on(p, "spotify")) };
@@ -1179,7 +1182,9 @@ fn open_discover(shared: &Shared) {
                     let hue = title.chars().fold(7u32, |h, c| (h * 31 + c as u32) % 360) as f32;
                     let (c1, c2) = if genre { (look::hsl(hue, 0.7, 45.0).slint(), look::hsl((hue + 40.0) % 360.0, 0.6, 16.0).slint()) } else { Default::default() };
                     let (is_track, liked) = match i { discover::Item::Track(t) => (true, shared.borrow().library.iter().any(|x| x.key == t.key)), _ => (false, false) };
-                    Tile { title: title.into(), sub: sub.into(), art: slint::Image::default(), plat: plat.into(), genre, c1, c2, track: is_track, liked }
+                    // (a song's: its menu, the same as anywhere else)
+                    let row = match i { discover::Item::Track(t) => { let a = shared.borrow(); let m = marks_of(&a); row_menu(&a, &m, t, t.row(false)) }, _ => Row::default() };
+                    Tile { title: title.into(), sub: sub.into(), art: slint::Image::default(), plat: plat.into(), genre, c1, c2, track: is_track, liked, row }
                 }).collect::<Vec<_>>()))).collect();
                 let rows: Vec<Shelf> = shelves.iter().zip(&models).map(|(sh, m)| Shelf { title: sh.title.clone().into(), tiles: ModelRc::from(m.clone()) }).collect();
                 ui.set_status(if rows.is_empty() { "Play or star a few songs, and Discover will fill up with music for you.".into() } else { "".into() });
@@ -1700,7 +1705,7 @@ fn open_streamer(shared: &Shared) {
     ];
     let shelves: Vec<_> = shelves.into_iter().filter(|(_, l)| !l.is_empty()).collect();
     let sub = |c: &StreamColl| match c { StreamColl::Cleared(_) => "Cleared for streaming", StreamColl::Genre(_) => "Creative Commons", StreamColl::Likes => "From your likes" };
-    let models: Vec<Rc<VecModel<Tile>>> = shelves.iter().map(|(_, l)| Rc::new(VecModel::from(l.iter().map(|(n, c)| Tile { title: n.clone().into(), sub: sub(c).into(), art: slint::Image::default(), plat: "".into(), genre: false, c1: Default::default(), c2: Default::default(), track: false, liked: false }).collect::<Vec<_>>()))).collect();
+    let models: Vec<Rc<VecModel<Tile>>> = shelves.iter().map(|(_, l)| Rc::new(VecModel::from(l.iter().map(|(n, c)| Tile { title: n.clone().into(), sub: sub(c).into(), art: slint::Image::default(), plat: "".into(), genre: false, c1: Default::default(), c2: Default::default(), track: false, liked: false, row: Default::default() }).collect::<Vec<_>>()))).collect();
     let rows: Vec<Shelf> = shelves.iter().zip(&models).map(|((t, _), m)| Shelf { title: t.clone().into(), tiles: ModelRc::from(m.clone()) }).collect();
     ui.set_shelves(ModelRc::from(Rc::new(VecModel::from(rows))));
     SHELF_MODELS.with(|m| *m.borrow_mut() = models);
@@ -1858,11 +1863,14 @@ fn stats_detail(a: &App, ui: &AppWindow, list: &[&webstate::Play], since: u64, p
             head = format!("Your top {} {label}", if songs { "songs" } else { "artists" });
             let mut b = block("rows", "");
             let mut tracks: Vec<Track> = Vec::new();
+            let marks = marks_of(a);
             b.rows = ModelRc::from(Rc::new(VecModel::from(v.iter().enumerate().map(|(i, (k, (n, ms, p)))| {
+                let mut row = Row::default();
                 if songs {
-                    if let Some(t) = play_track(a, p) { tracks.push(t); rows.push((StatsRow::Song(tracks.len() - 1), p.art.clone())); } else { rows.push((StatsRow::Song(usize::MAX), p.art.clone())); }
+                    if let Some(t) = play_track(a, p) { row = row_menu(a, &marks, &t, t.row(false)); tracks.push(t); rows.push((StatsRow::Song(tracks.len() - 1), p.art.clone())); } else { rows.push((StatsRow::Song(usize::MAX), p.art.clone())); }
                 } else { rows.push((StatsRow::Artist(k.clone()), p.art.clone())); }
-                StatRow { rank: (i + 1) as i32, name: if songs { p.title.clone().into() } else { k.clone().into() }, sub: if songs { format!("{} \u{b7} {} \u{b7} {}", p.artist, plural(*n, "play", "plays"), fmt_hours(*ms)).into() } else { format!("{} \u{b7} {}", plural(*n, "play", "plays"), fmt_hours(*ms)).into() }, share: *n as f32 / top as f32, art: slint::Image::default() }
+                let song = row.title != "";
+                StatRow { row, song, rank: (i + 1) as i32, name: if songs { p.title.clone().into() } else { k.clone().into() }, sub: if songs { format!("{} \u{b7} {} \u{b7} {}", p.artist, plural(*n, "play", "plays"), fmt_hours(*ms)).into() } else { format!("{} \u{b7} {}", plural(*n, "play", "plays"), fmt_hours(*ms)).into() }, share: *n as f32 / top as f32, art: slint::Image::default() }
             }).collect::<Vec<_>>())));
             STATS_TRACKS.with(|t| *t.borrow_mut() = tracks);
             out.push(b);
@@ -2051,9 +2059,11 @@ fn open_stats(shared: &Shared, period: usize) {
         ui.set_st_top_sub(format!("{} · {}% of everything you played", plural(*n, "play", "plays"), n * 100 / list.len()).into());
     }
     // (playable as they are: a click on one plays the top songs from it; an artist opens their page)
-    let top: Vec<Track> = songs.iter().take(5).filter_map(|(_, p)| play_track(&a, p)).collect();
+    let marks = marks_of(&a);
+    let playable: Vec<_> = songs.iter().take(5).filter_map(|(n, p)| play_track(&a, p).map(|t| (*n, p, t))).collect();
+    let song_items: Vec<Item> = playable.iter().map(|(n, p, t)| Item { name: p.title.clone().into(), sub: format!("{} · {}", p.artist, plural(*n, "play", "plays")).into(), art: slint::Image::default(), plat: p.src.clone().into(), row: row_menu(&a, &marks, t, t.row(false)), ..Default::default() }).collect();
+    let top: Vec<Track> = playable.into_iter().map(|x| x.2).collect();
     STATS_TOP.with(|t| *t.borrow_mut() = (top, artists.iter().take(6).map(|(n, _)| n.clone()).collect()));
-    let song_items: Vec<Item> = songs.iter().take(5).map(|(n, p)| Item { name: p.title.clone().into(), sub: format!("{} · {}", p.artist, plural(*n, "play", "plays")).into(), art: slint::Image::default(), plat: p.src.clone().into(), ..Default::default() }).collect();
     let artist_items: Vec<Item> = artists.iter().take(6).map(|(name, (n, p))| Item { name: name.clone().into(), sub: plural(*n, "play", "plays").into(), art: slint::Image::default(), plat: p.src.clone().into(), ..Default::default() }).collect();
     let song_model = Rc::new(VecModel::from(song_items));
     let artist_model = Rc::new(VecModel::from(artist_items));
@@ -2338,6 +2348,27 @@ fn row_menu(a: &App, m: &Marks, t: &Track, mut r: Row) -> Row {
 
 /// A choice from a track's menu (the page's, or the queue's) that isn't about the queue or a playlist:
 /// true if it was one of them
+/// A song's menu's choice, wherever it was right-clicked (a tile, Stats, the queue; a page's rows have
+/// their own, for what's picked): to the queue, a playlist, not recommended, a link, and the rest
+fn menu_act(shared: &Shared, t: Track, act: &str) {
+    if act == "next" || act == "add" {
+        let empty = shared.borrow().queue.current().is_none();
+        { let mut a = shared.borrow_mut(); if act == "next" { a.queue.play_next(t.clone()); } else { a.queue.add(t.clone()); } paint_queue(&mut a); save_session(&a); }
+        if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_status(format!("{} \"{}\".", if act == "next" { "Playing next:" } else { "Added to the queue:" }, t.title).into()); }
+        if empty { start(shared); }
+        return;
+    }
+    if act.starts_with("pl") { return pl_row_action(shared, act, t); }
+    if let Some(what) = act.strip_prefix("hide:") { return hide_track(shared, &t, what); }
+    if let Some(plat) = act.strip_prefix("link:") { return copy_track_link(shared, &t, plat); }
+    if act == "moreversions" {
+        let (who, _) = versions::guess_names(&t);
+        let q = format!("{} {}", if who.is_empty() { t.artist.clone() } else { who }, vgroup::base_title(&t, ""));
+        return go(shared, Place::Search(q.trim().into()));
+    }
+    track_act(shared, &t, act);
+}
+
 fn track_act(shared: &Shared, t: &Track, act: &str) -> bool {
     match act {
         "like" => like_track(shared, t.clone()),
@@ -8913,6 +8944,7 @@ fn main() -> Result<(), slint::PlatformError> {
             let r = row_menu(&a, &m, &t, t.row(true));
             items.push(("Play Next".into(), "next".into()));
             items.push(("Add to Queue".into(), "add".into()));
+            items.push(("Add to Playlist...".into(), "playlist".into()));
             if r.can_like { items.push((if r.liked { "Remove from Likes" } else { "Add to Likes" }.into(), "like".into())); }
             items.push((if r.fav { "Remove from Favourites" } else { "Add to Favourites" }.into(), "fav".into()));
             let names: Vec<String> = t.artist.split([',', '&']).map(|x| x.trim().to_string()).filter(|x| !x.is_empty()).collect();
@@ -8934,6 +8966,7 @@ fn main() -> Result<(), slint::PlatformError> {
     ui.on_more_pick(move |i| {
         let Some(act) = MORE_ACTS.with(|m| m.borrow().get(i as usize).cloned()) else { return };
         let Some(t) = s.borrow().queue.current().cloned() else { return };
+        if act == "playlist" { if let Some(ui) = s.borrow().ui.upgrade() { ui.set_pl_menu_asks(ui.get_pl_menu_asks() + 1); } return; }
         if let Some(plat) = act.strip_prefix("link:") { return copy_track_link(&s, &t, plat); }
         if let Some(what) = act.strip_prefix("hide:") { return hide_track(&s, &t, what); }
         match act.as_str() {
@@ -9013,15 +9046,7 @@ fn main() -> Result<(), slint::PlatformError> {
             DISCOVER.with(|d| d.borrow().get(sh as usize).and_then(|x| x.items.get(k as usize).cloned())).and_then(|i| if let discover::Item::Track(t) = i { Some(t) } else { None })
         } else { s.borrow().shelves.get(sh as usize).and_then(|l| l.get(k as usize).cloned()) };
         let Some(t) = t else { return };
-        if let Some(what) = act.strip_prefix("hide:") { return hide_track(&s, &t, what); }
-        if act == "next" || act == "add" {
-            let empty = s.borrow().queue.current().is_none();
-            { let mut a = s.borrow_mut(); if act == "next" { a.queue.play_next(t.clone()); } else { a.queue.add(t.clone()); } paint_queue(&mut a); save_session(&a); }
-            if let Some(ui) = s.borrow().ui.upgrade() { ui.set_status(format!("{} \"{}\".", if act == "next" { "Playing next:" } else { "Added to the queue:" }, t.title).into()); }
-            if empty { start(&s); }
-            return;
-        }
-        track_act(&s, &t, &act);
+        menu_act(&s, t, &act);
     } });
     ui.on_helpers_act({ let s = shared.clone(); move |a| helpers_act(&s, &a) });
     ui.on_apple_import({ let s = shared.clone(); move || {
@@ -9033,6 +9058,10 @@ fn main() -> Result<(), slint::PlatformError> {
         let a = s.borrow();
         let list: Vec<Track> = a.page_tracks.iter().filter(|t| a.picked.contains(&t.key)).cloned().collect();
         if list.is_empty() { return; }
+        // (as text too, for anywhere else: "Artist - Title  link", a line each, as the web app's)
+        let text = list.iter().map(|t| format!("{}{}{}", if t.artist.is_empty() { String::new() } else { format!("{} - ", t.artist) }, t.title, if t.web_link().is_empty() { String::new() } else { format!("  {}", t.web_link()) })).collect::<Vec<_>>().join("
+");
+        let _ = share::copy(&text);
         if let Some(ui) = a.ui.upgrade() { ui.set_status(format!("Copied {}. Ctrl+V pastes them into a playlist that's open, or the queue.", plural(list.len(), "track", "tracks")).into()); }
         PICK_CLIP.with(|c| *c.borrow_mut() = list);
     } });
@@ -9128,9 +9157,20 @@ fn main() -> Result<(), slint::PlatformError> {
     ui.on_stats_artist({ let s = shared.clone(); move |i| {
         if let Some(n) = STATS_TOP.with(|t| t.borrow().1.get(i.max(0) as usize).cloned()) { go(&s, Place::ArtistNamed(n)); }
     } });
+    ui.on_stats_act({ let s = shared.clone(); move |which, k, act| {
+        let t = if which == 1 { STATS_TOP.with(|t| t.borrow().0.get(k.max(0) as usize).cloned()) } else {
+            match STATS_ROWS.with(|r| r.borrow().get(k.max(0) as usize).map(|x| x.0.clone())) {
+                Some(StatsRow::Song(i)) => STATS_TRACKS.with(|t| t.borrow().get(i).cloned()),
+                _ => None,
+            }
+        };
+        let Some(t) = t else { return };
+        if act == "play" { return play_list(&s, vec![t], 0); }
+        menu_act(&s, t, &act);
+    } });
     ui.on_stats_row({ let s = shared.clone(); move |k| {
         match STATS_ROWS.with(|r| r.borrow().get(k.max(0) as usize).map(|x| x.0.clone())) {
-            Some(StatsRow::Artist(name)) => go(&s, Place::Search(name)),
+            Some(StatsRow::Artist(name)) => go(&s, Place::ArtistNamed(name)),
             Some(StatsRow::Song(i)) if i != usize::MAX => { let l = STATS_TRACKS.with(|t| t.borrow().clone()); if i < l.len() { play_list(&s, l, i); } }
             _ => {}
         }
@@ -9372,7 +9412,7 @@ fn main() -> Result<(), slint::PlatformError> {
         if let Some(t) = a.queue.items.get(at).map(|q| q.t.clone()) {
             if act.starts_with("pl") { drop(a); return pl_row_action(&s, &act, t); }
             if let Some(what) = act.strip_prefix("hide:") { drop(a); return hide_track(&s, &t, what); }
-            if matches!(act.as_str(), "like" | "fav" | "open" | "prefs" | "artist:0") { drop(a); track_act(&s, &t, &act); return; }
+            if !matches!(act.as_str(), "next" | "remove" | "shuffle") { drop(a); menu_act(&s, t, &act); return; }
         }
         match act.as_str() {
             "next" => a.queue.move_next(at),
