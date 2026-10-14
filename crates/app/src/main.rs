@@ -6270,7 +6270,7 @@ fn drop_queue_row(shared: &Shared, j: usize, from: Option<usize>, what: Dragged)
             if let Some(qi) = a.queue.qi { if at < qi && to >= qi { a.queue.qi = Some(qi - 1); } else if at > qi && to <= qi { a.queue.qi = Some(qi + 1); } }
         }
         Some(_) => return,
-        None => { for (k, t) in list.into_iter().enumerate() { a.queue.items.insert(to + k, queue::QItem::mine(t)); } }
+        None => { for (k, t) in list.into_iter().enumerate() { a.queue.items.insert(to + k, queue::QItem::queued(t)); } }
     }
     paint_queue(&mut a);
     save_session(&a);
