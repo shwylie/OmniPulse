@@ -320,6 +320,13 @@ fn go(shared: &Shared, place: Place) {
         }
         a.here = Some(place.clone());
     }
+    // (where you were, for next time: a page of the sidebar, or a playlist)
+    let keep = match &place {
+        Place::Page(p) if matches!(p.as_str(), "discover" | "rediscover" | "library" | "artists" | "stats" | "favourites" | "sets") => Some(serde_json::json!({ "page": p })),
+        Place::Playlist(id) => Some(serde_json::json!({ "playlist": id })),
+        _ => None,
+    };
+    if let Some(k) = keep { if std::env::var_os("OMNIPULSE_SELFTEST").is_none() { webstate::save_pref("lastPlace", k); } }
     open_place(shared, &place);
 }
 
@@ -3344,6 +3351,12 @@ struct MixShow {
 const MIX_HEARD_MS: u64 = 400;
 
 thread_local! {
+    /// the last place opened again at start (once)
+    static LAST_PLACE_DONE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    static SESSION_SAVED: std::cell::Cell<std::time::Instant> = std::cell::Cell::new(std::time::Instant::now());
+}
+
+thread_local! {
     static MIX_SHOW: RefCell<Option<MixShow>> = const { RefCell::new(None) };
     static SHOWN_DUR: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
 }
@@ -3897,6 +3910,12 @@ fn tick(shared: &Shared, events: &std::sync::mpsc::Receiver<Event>, n: u64) {
         return; // a restored session, not started yet: the bar shows where it was
     }
     let (pos, raw_dur) = (engine.position_ms(), engine.duration_ms());
+    // (where you are, kept every few seconds while playing, as the web app's: a crash or a forced
+    // close loses no more than that)
+    if !engine.is_paused() && SESSION_SAVED.with(|t| t.get().elapsed().as_secs() >= 5) {
+        SESSION_SAVED.with(|t| t.set(std::time::Instant::now()));
+        save_session(&shared.borrow());
+    }
     // a gap heard mid-track (the sound ran out before the next of it came): noted, with what else was
     // going on, so it can be tracked down
     let gap = engine.take_gap_ms();
@@ -5304,7 +5323,16 @@ fn library_load(shared: &Shared) {
                         paint_plats(&a);
                     }
                     // (playlists on this PC stay here: nothing's kept in step by itself; Export puts them on the platforms)
-                    if shared.borrow().page == "library" {
+                    // (where you left off last time, once: unless you've gone somewhere since it started)
+                    let last = LAST_PLACE_DONE.with(|d| !d.replace(true)).then(|| webstate::native_pref("lastPlace")).flatten();
+                    let untouched = shared.borrow().page == "library" && shared.borrow().history.is_empty();
+                    let back_to = last.filter(|_| untouched).and_then(|v| {
+                        if let Some(id) = v["playlist"].as_str() { return shared.borrow().playlists.iter().any(|p| p.id == id).then(|| Place::Playlist(id.to_string())); }
+                        v["page"].as_str().filter(|p| *p != "library").map(|p| Place::Page(p.to_string()))
+                    });
+                    if let Some(place) = back_to {
+                        go(&shared, place);
+                    } else if shared.borrow().page == "library" {
                         shared.borrow_mut().here = Some(Place::Page("library".into()));
                         open_page(&shared, "library");
                         ui.set_page_sub(format!("{} Loaded in {secs:.1} s.", ui.get_page_sub()).into());

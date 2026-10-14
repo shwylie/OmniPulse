@@ -191,11 +191,14 @@ impl Queue {
 
     // ---------- the session: saved as you listen, restored (paused) at start ----------
     pub fn to_session(&self, pos_ms: u64) -> Value {
+        // (1,000 kept: the ones around what's playing, a hundred behind it, so it's always among them;
+        // the first 1,000 of a big list left it out once you were past them, and nothing came back)
+        let from = self.qi.unwrap_or(0).saturating_sub(100);
         json!({
-            "qi": self.qi,
+            "qi": self.qi.map(|q| q - from),
             "posMs": pos_ms,
             "savedAt": omnipulse_core::now_secs() * 1000,
-            "queue": self.items.iter().take(1000).map(|q| {
+            "queue": self.items.iter().skip(from).take(1000).map(|q| {
                 let mut s = q.t.to_snapshot();
                 if q.auto { s["autoplay"] = json!(true); }
                 if !q.by.is_empty() { s["requestedBy"] = json!(q.by); }
@@ -206,8 +209,19 @@ impl Queue {
     }
 
     pub fn from_session(v: &Value) -> Option<(Queue, u64)> {
-        let items: Vec<QItem> = v["queue"].as_array()?.iter().filter_map(|s| Track::from_snapshot(s).map(|t| QItem { t, auto: s["autoplay"].as_bool().unwrap_or(false), by: s["requestedBy"].as_str().unwrap_or("").to_string(), queued: s["queuedByYou"].as_bool().unwrap_or(false) })).collect();
-        let qi = v["qi"].as_u64()? as usize;
+        let saved_qi = v["qi"].as_u64()? as usize;
+        // (one that can't be read back is left out, and what was playing kept in its place: those
+        // before it no longer shift it onto another song, or past the end)
+        let mut qi = saved_qi;
+        let mut items = Vec::new();
+        for (i, s) in v["queue"].as_array()?.iter().enumerate() {
+            match Track::from_snapshot(s) {
+                Some(t) => items.push(QItem { t, auto: s["autoplay"].as_bool().unwrap_or(false), by: s["requestedBy"].as_str().unwrap_or("").to_string(), queued: s["queuedByYou"].as_bool().unwrap_or(false) }),
+                None if i < saved_qi => qi -= 1,
+                None if i == saved_qi => return None,
+                None => {}
+            }
+        }
         if qi >= items.len() {
             return None;
         }
@@ -344,6 +358,17 @@ mod tests {
 
     fn t(key: &str, artist: &str, sc: bool) -> Track {
         Track { src: if sc { Src::SoundCloud(1) } else { Src::YouTube(key.into()) }, key: key.into(), title: key.into(), artist: artist.into(), album: String::new(), ms: 200_000, art: String::new(), genre: String::new(), link: String::new(), go_plus: false, ..Default::default() }
+    }
+
+    #[test]
+    fn a_long_queue_comes_back_where_it_was() {
+        // 1,500 tracks, playing the 1,201st: it's kept (it was cut off before, past the first 1,000)
+        let mut q = Queue::default();
+        q.items = (0..1500).map(|i| QItem::mine(t(&format!("{}", 1000 + i), "x", true))).collect();
+        q.qi = Some(1200);
+        let (back, _) = Queue::from_session(&q.to_session(5000)).expect("restored");
+        assert_eq!(back.current().map(|t| t.key.as_str()), Some("2200"));
+        assert_eq!(back.items.len(), 400);
     }
 
     #[test]
