@@ -9059,8 +9059,7 @@ fn main() -> Result<(), slint::PlatformError> {
         let list: Vec<Track> = a.page_tracks.iter().filter(|t| a.picked.contains(&t.key)).cloned().collect();
         if list.is_empty() { return; }
         // (as text too, for anywhere else: "Artist - Title  link", a line each, as the web app's)
-        let text = list.iter().map(|t| format!("{}{}{}", if t.artist.is_empty() { String::new() } else { format!("{} - ", t.artist) }, t.title, if t.web_link().is_empty() { String::new() } else { format!("  {}", t.web_link()) })).collect::<Vec<_>>().join("
-");
+        let text = list.iter().map(|t| format!("{}{}{}", if t.artist.is_empty() { String::new() } else { format!("{} - ", t.artist) }, t.title, if t.web_link().is_empty() { String::new() } else { format!("  {}", t.web_link()) })).collect::<Vec<_>>().join("\n");
         let _ = share::copy(&text);
         if let Some(ui) = a.ui.upgrade() { ui.set_status(format!("Copied {}. Ctrl+V pastes them into a playlist that's open, or the queue.", plural(list.len(), "track", "tracks")).into()); }
         PICK_CLIP.with(|c| *c.borrow_mut() = list);
