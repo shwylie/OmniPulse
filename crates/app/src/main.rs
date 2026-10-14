@@ -2517,6 +2517,7 @@ fn start(shared: &Shared) {
                             (Some(src), Some((ms, at))) if !resumed && at.elapsed().as_secs() < 8 => {
                                 engine.fade(None, 1.0, 200);
                                 engine.crossfade(src, db, ms);
+                                XFADE_PULSE.with(|x| x.set(Some(std::time::Instant::now() + std::time::Duration::from_millis(ms))));
                             }
                             (Some(src), _) => {
                                 match fade_now(&shared.borrow()) {
@@ -2602,8 +2603,25 @@ fn start(shared: &Shared) {
                     let Some(shared) = SHARED.with(|s| s.borrow().clone()) else { return };
                     if shared.borrow().token != token { return; }
                     if let Some(px) = art {
+                        // (a crossfade under way, album-art colours on: the accent pulses to the new cover's
+                        // and back while both are heard, then takes it, as a mix's does)
+                        let fading = XFADE_PULSE.with(|x| x.take()).and_then(|until| until.checked_duration_since(std::time::Instant::now()));
+                        let pulse = fading.filter(|_| integrations::set(&shared.borrow().web.prefs, "artAccent"));
                         shared.borrow_mut().accent = integrations::accents(&px);
-                        apply_look(&shared);
+                        match pulse {
+                            Some(left) => {
+                                mix_pulse(&shared, &ui, &px);
+                                let w = weak.clone();
+                                slint::Timer::single_shot(left, move || {
+                                    let Some(ui) = w.upgrade() else { return };
+                                    let Some(shared) = SHARED.with(|s| s.borrow().clone()) else { return };
+                                    if shared.borrow().token != token { return; }
+                                    ui.global::<Theme>().set_pulsing(false);
+                                    apply_look(&shared);
+                                });
+                            }
+                            None => apply_look(&shared),
+                        }
                         push_out(&shared, false);
                         let img = slint::Image::from_rgba8(px);
                         ui.set_now_art(img.clone());
@@ -3355,6 +3373,8 @@ struct MixShow {
 const MIX_HEARD_MS: u64 = 400;
 
 thread_local! {
+    /// a crossfade's end (Fade Between Tracks), for the accent's pulse meanwhile
+    static XFADE_PULSE: std::cell::Cell<Option<std::time::Instant>> = const { std::cell::Cell::new(None) };
     /// the tracks Ctrl+C copied, for Ctrl+V
     static PICK_CLIP: RefCell<Vec<Track>> = const { RefCell::new(Vec::new()) };
     /// the last place opened again at start (once)
