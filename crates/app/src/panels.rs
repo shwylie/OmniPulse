@@ -180,6 +180,22 @@ const MIXITUP_EVENTS: [(&str, &str); 8] = [
     ("Hype Train Level Up", "hypetrain&amount=$hypetrainlevel"),
 ];
 
+/// Any other bot's events (Generic): each alert's own address, its type in, and a word in capitals
+/// for each of the bot's variables to put in its place
+const GENERIC_EVENTS: [(&str, &str); 11] = [
+    ("Follows", "follow&user=NAME"),
+    ("Subscriptions", "sub&user=NAME&amount=MONTHS&message=MESSAGE"),
+    ("Gifted Subs", "gift&user=NAME&amount=COUNT"),
+    ("Bits", "bits&user=NAME&amount=BITS&message=MESSAGE"),
+    ("Kicks", "kicks&user=NAME&amount=KICKS&message=MESSAGE"),
+    ("Donations", "donation&user=NAME&amount=AMOUNT&message=MESSAGE"),
+    ("Raids & Hosts", "raid&user=NAME&amount=VIEWERS"),
+    ("Hype Trains", "hypetrain&amount=LEVEL"),
+    ("Polls", "poll&user=QUESTION&message=MESSAGE"),
+    ("Bans", "ban&user=NAME"),
+    ("Watch Streaks", "watchstreak&user=NAME&amount=STREAMS"),
+];
+
 /// A panel's fields, for the values as they are in it (prefs: for the keys, Streamer Mode, the LAN address)
 pub fn fields(name: &str, vals: &Map<String, Value>, prefs: &Value, lan: &str) -> Vec<Value> {
     if name == "alertlist" { return crate::alerts::list_fields(prefs); }
@@ -267,6 +283,19 @@ pub fn fields(name: &str, vals: &Map<String, Value>, prefs: &Value, lan: &str) -
                     f.push(info(&format!("{} (yours)", crate::alerts::name(prefs, &k)), &at(&hide(&key), &rest), &at(&key, &rest), "Any event or command you like."));
                 }
                 f.push(note("Polls, bans and watch streaks have no Mix It Up event to send them from."));
+            } else if bot == "generic" {
+                // (as Mix It Up's: one address for each, its type in; only the bot's own variables to put in)
+                f.push(note("Have your bot open each address below when that happens, with its own variables in place of the words in capitals (NAME: the viewer's name; MESSAGE, and the amounts, where it has them, or left empty)."));
+                let at = |k: &str, rest: &str| format!("http://127.0.0.1:{port}/alert?{}type={rest}", part(k));
+                for (event, rest) in GENERIC_EVENTS {
+                    f.push(info(event, &at(&hide(&key), rest), &at(&key, rest), ""));
+                }
+                for k in crate::alerts::order(prefs) {
+                    if crate::alerts::KINDS.iter().any(|x| x.0 == k) { continue; }
+                    let rest = format!("{k}&user=NAME");
+                    f.push(info(&format!("{} (yours)", crate::alerts::name(prefs, &k)), &at(&hide(&key), &rest), &at(&key, &rest), "Any event or command you like."));
+                }
+                f.extend(remote_bots(vals, "alerts", port, &format!("/alert?{}{vars}", part(&hide(&key))), lan));
             } else {
                 f.push(info("Web Request", &url(&hide(&key)), &url(&key), "Your bot opens this address when something happens."));
                 f.push(note(&if bot == "mixitup" {
@@ -476,5 +505,14 @@ mod tests {
         assert!(!addr["value"].as_str().unwrap().contains("abc") && addr["copy"].as_str().unwrap().contains("abc"));
         // the alerts' bot follows the requests' one until it's picked
         assert_eq!(values("alerts", &prefs)["alertBot"], "mixitup");
+    }
+
+    #[test]
+    fn any_other_bot_gets_an_address_for_each_alert() {
+        let prefs = json!({ "alertBot": "generic", "alertKey": "k" });
+        let f = fields("alerts", &values("alerts", &prefs), &prefs, "");
+        let addrs: Vec<&str> = f.iter().filter(|x| x["type"] == "info").filter_map(|x| x["copy"].as_str()).collect();
+        assert_eq!(addrs.len(), 11);
+        assert!(addrs.contains(&"http://127.0.0.1:7878/alert?type=raid&user=NAME&amount=VIEWERS"));
     }
 }

@@ -737,7 +737,7 @@ function alertsPaint() {
   $("alertBot").value = bot;
   $("sbRow").hidden = bot !== "streamerbot";
   // (Mix It Up: an address for each of its events, below, rather than one to change for each)
-  $("alertWebRow").hidden = bot === "streamerbot" || bot === "mixitup";
+  $("alertWebRow").hidden = bot === "streamerbot" || bot === "mixitup" || bot === "generic";
   const vars = bot === "mixitup" ? "type=follow&user=$username" : "type=follow&user=NAME&amount=&message=";
   const keyPart = prefs.botRemote && prefs.alertKey ? "key=" + prefs.alertKey + "&" : "";
   $("alertUrl").value = "http://127.0.0.1:" + port + "/alert?" + keyPart + vars;
@@ -755,12 +755,14 @@ function alertsPaint() {
       li("That's all: follows, subs, bits, raids and the rest come through by themselves."),
     );
     help.append(ol);
-  } else if (bot === "mixitup") {
-    // one address for each event, ready to paste: its type and Mix It Up's own special identifiers in
-    help.append(el("p", "note", "In Mix It Up, open each event below, add a Web Request action, and paste its address. Nothing in it needs changing."));
+  } else if (bot === "mixitup" || bot === "generic") {
+    // one address for each event, ready to paste: its type in, and Mix It Up's own special identifiers
+    // (any other bot: a word in capitals for each of its variables)
+    const mix = bot === "mixitup";
+    help.append(el("p", "note", mix ? "In Mix It Up, open each event below, add a Web Request action, and paste its address. Nothing in it needs changing." : "Have your bot open each address below when that happens, with its own variables in place of the words in capitals (NAME: the viewer's name; MESSAGE, and the amounts, where it has them, or left empty)."));
     const base = "http://127.0.0.1:" + port + "/alert?" + keyPart + "type=";
-    const rows = MIXITUP_EVENTS.map(([event, rest]) => [event, base + rest, ""]);
-    alertCustom().forEach((c) => rows.push([(c.name || c.id) + " (yours)", base + c.id + "&user=$username", "Any event or command you like."]));
+    const rows = (mix ? MIXITUP_EVENTS : GENERIC_EVENTS).map(([event, rest]) => [event, base + rest, ""]);
+    alertCustom().forEach((c) => rows.push([(c.name || c.id) + " (yours)", base + c.id + "&user=" + (mix ? "$username" : "NAME"), "Any event or command you like."]));
     rows.forEach(([event, url, note]) => {
       const row = el("div", "row stack");
       const head = el("div");
@@ -778,7 +780,8 @@ function alertsPaint() {
       row.append(head, box);
       help.append(row);
     });
-    help.append(el("p", "note", "Polls, bans and watch streaks have no Mix It Up event to send them from."));
+    if (mix) help.append(el("p", "note", "Polls, bans and watch streaks have no Mix It Up event to send them from."));
+    else help.append(botRemoteBlock("alerts", port, "/alert?" + keyPart + vars));
   } else {
     ol.append(
       li("When something happens, have your bot open the address above."),
@@ -801,6 +804,21 @@ const MIXITUP_EVENTS = [
   ["Donation Received", "donation&user=$username&amount=$donationamount&message=$donationmessage"],
   ["Channel Raided", "raid&user=$username&amount=$raidviewercount"],
   ["Hype Train Level Up", "hypetrain&amount=$hypetrainlevel"],
+];
+
+// Any other bot's events (Generic): each alert's address, with a word in capitals for each of its variables
+const GENERIC_EVENTS = [
+  ["Follows", "follow&user=NAME"],
+  ["Subscriptions", "sub&user=NAME&amount=MONTHS&message=MESSAGE"],
+  ["Gifted Subs", "gift&user=NAME&amount=COUNT"],
+  ["Bits", "bits&user=NAME&amount=BITS&message=MESSAGE"],
+  ["Kicks", "kicks&user=NAME&amount=KICKS&message=MESSAGE"],
+  ["Donations", "donation&user=NAME&amount=AMOUNT&message=MESSAGE"],
+  ["Raids & Hosts", "raid&user=NAME&amount=VIEWERS"],
+  ["Hype Trains", "hypetrain&amount=LEVEL"],
+  ["Polls", "poll&user=QUESTION&message=MESSAGE"],
+  ["Bans", "ban&user=NAME"],
+  ["Watch Streaks", "watchstreak&user=NAME&amount=STREAMS"],
 ];
 
 function alertsInit() {
