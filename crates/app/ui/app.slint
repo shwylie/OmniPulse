@@ -2221,6 +2221,33 @@ export component AppWindow inherits Window {
                         vertical-stretch: 1;
                         VerticalLayout {
                             spacing: 22px;
+                            // (its own big search box, as the web app's: the same search as the bar's)
+                            Rectangle {
+                                height: 56px;
+                                border-radius: 28px;
+                                background: Theme.bg.mix(Theme.panel, 0.55);
+                                border-width: 1px;
+                                border-color: bq.has-focus ? Theme.accent.with-alpha(0.7) : Theme.line;
+                                Glyph { d: Icons.search; x: 20px; width: 24px; height: 24px; fill: Theme.muted; }
+                                if root.search-text == "": Text { x: 58px; text: "Artists, tracks, remixes..."; color: Theme.muted; font-size: 18px; vertical-alignment: center; }
+                                bq := TextInput {
+                                    x: 58px;
+                                    width: parent.width - 78px;
+                                    height: parent.height;
+                                    vertical-alignment: center;
+                                    color: Theme.text;
+                                    font-size: 18px;
+                                    single-line: true;
+                                    text <=> root.search-text;
+                                    accepted => { root.search(self.text); keys.focus(); }
+                                    edited => { root.search-edited(self.text); }
+                                    key-pressed(e) => {
+                                        if (e.text == Key.Escape && self.text != "") { root.search-text = ""; root.search-edited(""); return accept; }
+                                        if (e.text == Key.Escape) { keys.focus(); return accept; }
+                                        return reject;
+                                    }
+                                }
+                            }
                             if root.rows.length > 0: VerticalLayout {
                                 spacing: 6px;
                                 HorizontalLayout {
