@@ -1705,6 +1705,9 @@ export component AppWindow inherits Window {
     in-out property <bool> jam-open;
     in property <string> jam-link;
     in property <string> jam-members;
+    /// asking to join your Jam, waiting: each let in or declined
+    in property <[string]> jam-waiting;
+    callback jam-admit(int, bool);
     callback jam-clicked();
     callback jam-accept();
     callback jam-decline();
@@ -4244,6 +4247,13 @@ export component AppWindow inherits Window {
                     border-width: 1px;
                     border-color: Theme.line;
                     Text { x: 10px; width: parent.width - 20px; text: root.jam-link; color: Theme.text; font-size: 12px; vertical-alignment: center; overflow: elide; }
+                }
+                if root.jam-waiting.length > 0: Text { text: "Waiting to Join"; color: Theme.text; font-size: 14px; font-weight: 700; }
+                for w[i] in root.jam-waiting: HorizontalLayout {
+                    spacing: 8px;
+                    Text { text: w; color: Theme.text; font-size: 13px; vertical-alignment: center; horizontal-stretch: 1; overflow: elide; }
+                    Pill { label: "Let In"; on: true; clicked => { root.jam-admit(i, true); } }
+                    Pill { label: "Decline"; clicked => { root.jam-admit(i, false); } }
                 }
                 Text { text: root.jam-members; color: Theme.text; font-size: 13px; wrap: word-wrap; }
                 HorizontalLayout {

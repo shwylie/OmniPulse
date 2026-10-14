@@ -6825,6 +6825,9 @@ thread_local! {
     /// someone asking for a Jam: (their ask's id, their name, when)
     /// someone asking: (id, name, since, join), join being "let me into your Jam" (else "start one")
     static ASK: RefCell<Option<(String, String, std::time::Instant, bool)>> = const { RefCell::new(None) };
+    /// asking to join your Jam: each one waiting (id, name, their app's id), let in or declined from the
+    /// Jam's window, as the web app's (no time limit)
+    static JOINS: RefCell<Vec<(String, String, String)>> = const { RefCell::new(Vec::new()) };
 }
 const JAM_ASK_SECS: f32 = 60.0;
 
@@ -6907,6 +6910,15 @@ fn room_end(tell: bool) {
     });
     if tell { host_keep("", "", None); }
     MEMBERS.with(|m| m.borrow_mut().clear());
+    JOINS.with(|j| j.borrow_mut().clear());
+}
+
+/// One waiting to join your Jam: let in (they connect again by themselves) or declined
+fn join_answer(shared: &Shared, i: usize, ok: bool) {
+    let Some((id, name, _)) = JOINS.with(|j| { let mut j = j.borrow_mut(); (i < j.len()).then(|| j.remove(i)) }) else { return };
+    ask_answer(&id, true, ok, false);
+    jam_paint(shared);
+    if ok { if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_status(format!("{name} is joining your Jam.").into()); } }
 }
 
 // ---------- hosting through a restart (as the web app's) ----------
@@ -7061,8 +7073,23 @@ fn room_message(shared: &Shared, m: serde_json::Value) {
             let join = kind == "joinAsk";
             // Listen Along & Jams switched off: turned away; one at a time (the next is "busy", not declined)
             if !jams_on(&shared.borrow()) { ask_answer(id, join, false, false); return; }
+            // (into your Jam: on the waiting list, the same person once, at their newest ask)
+            if join {
+                let cid = m["cid"].as_str().unwrap_or("").to_string();
+                JOINS.with(|j| {
+                    let mut j = j.borrow_mut();
+                    match j.iter_mut().find(|x| (!cid.is_empty() && x.2 == cid) || x.0 == id) { Some(x) => x.0 = id.to_string(), None => j.push((id.to_string(), name.to_string(), cid)) }
+                });
+                jam_paint(shared);
+                if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_status(format!("{name} wants to join your Jam: let them in from the Jam button.").into()); }
+                return;
+            }
             if ASK.with(|a| a.borrow().is_some()) || (!join && room_kind().as_deref() == Some("jam")) { ask_answer(id, join, false, true); return; }
             ASK.with(|a| *a.borrow_mut() = Some((id.to_string(), name.to_string(), std::time::Instant::now(), join)));
+            jam_paint(shared);
+        }
+        Some("askGone") if JOINS.with(|j| j.borrow().iter().any(|x| m["id"].as_str() == Some(x.0.as_str()))) => {
+            JOINS.with(|j| j.borrow_mut().retain(|x| m["id"].as_str() != Some(x.0.as_str())));
             jam_paint(shared);
         }
         Some("askGone") if ASK.with(|a| a.borrow().as_ref().is_some_and(|x| m["id"].as_str() == Some(x.0.as_str()))) => {
@@ -7130,7 +7157,10 @@ fn jam_paint(shared: &Shared) {
     ui.set_queue_room_host(jam);
     ui.set_jam_on(jam);
     ui.set_jam_hidden(!jams_on(&shared.borrow()));
-    ui.set_jam_label(if jam { if members.is_empty() { "Jam".into() } else { format!("Jam \u{b7} {}", members.len()) } } else { "Start a Jam".into() }.into());
+    let waiting = JOINS.with(|j| j.borrow().iter().map(|x| slint::SharedString::from(x.1.as_str())).collect::<Vec<_>>());
+    let wait = if waiting.is_empty() { String::new() } else { format!(" \u{b7} {} waiting", waiting.len()) };
+    ui.set_jam_label(if jam { if members.is_empty() { format!("Jam{wait}") } else { format!("Jam \u{b7} {}{wait}", members.len()) } } else { "Start a Jam".into() }.into());
+    ui.set_jam_waiting(ModelRc::from(Rc::new(VecModel::from(waiting))));
     ui.set_jam_link(ROOM.with(|r| r.borrow().as_ref().filter(|r| r.kind == "jam").map(|r| r.join_url.clone())).unwrap_or_default().into());
     ui.set_jam_members(if members.is_empty() { "Nobody has joined yet.".to_string() } else { format!("In the Jam: {}", members.join(", ")) }.into());
 }
@@ -9126,6 +9156,7 @@ fn main() -> Result<(), slint::PlatformError> {
             }
         }
     } });
+    ui.on_jam_admit({ let s = shared.clone(); move |i, ok| join_answer(&s, i.max(0) as usize, ok) });
     ui.on_now_act({ let s = shared.clone(); move |act| { let t = s.borrow().queue.current().cloned(); if let Some(t) = t { track_act(&s, &t, &act); } } });
     ui.on_title_rename({ let s = shared.clone(); move || name_ask(&s, Naming::AppName) });
     ui.on_title_signin({ let s = shared.clone(); move || { let i = ACCOUNTS.iter().position(|a| a.0 == "soundcloud").unwrap_or(0); account_act(&s, i); } });
