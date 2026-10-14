@@ -1257,6 +1257,9 @@ export component AppWindow inherits Window {
     in property <bool> now-fav;
     in property <bool> can-like;
     in property <[string]> devices;
+    /// Chromecast switched on (the output menu's switch, as Settings > Integrations')
+    in property <bool> cast-on;
+    callback cast-toggle();
     /// Settings > Sound > Output Device: Windows' devices only (no cast ones), and the one in use
     in property <[string]> outputs;
     in property <int> output-at: -1;
@@ -3624,8 +3627,10 @@ export component AppWindow inherits Window {
                             IconButton { tip: "Output device and casting"; d: Icons.output; y: (parent.height - self.height) / 2; clicked => { root.devices-want(); devices-menu.show(); } }
                             devices-menu := PopupWindow {
                                 x: parent.width - 280px;
-                                y: -12px - root.devices.length * 32px - 16px - (root.devices-cast-from >= 0 ? 38px : 0px);
+                                y: -12px - root.devices.length * 32px - 16px - (root.devices-cast-from >= 0 ? 38px : 0px) - 47px;
                                 width: 280px;
+                                // (open while Chromecast is switched; a device picked closes it)
+                                close-policy: PopupClosePolicy.close-on-click-outside;
                                 Rectangle {
                                     background: Theme.elevated;
                                     border-radius: 10px;
@@ -3641,7 +3646,16 @@ export component AppWindow inherits Window {
                                                 Rectangle { height: 1px; background: Theme.line; }
                                                 Text { text: "CHROMECAST"; color: Theme.muted; font-size: 10px; font-weight: 800; letter-spacing: 1px; x: 10px; height: 25px; vertical-alignment: center; }
                                             }
-                                            MenuRow { label: d; on: root.device-on == i; offset: root.device-offset == i; clicked => { root.device-pick(i); } }
+                                            MenuRow { label: d; on: root.device-on == i; offset: root.device-offset == i; clicked => { devices-menu.close(); root.device-pick(i); } }
+                                        }
+                                        // Chromecast, switched here too (as Settings > Integrations)
+                                        Rectangle { height: 9px; Rectangle { height: 1px; background: Theme.line; } }
+                                        HorizontalLayout {
+                                            height: 32px;
+                                            padding-left: 10px;
+                                            padding-right: 6px;
+                                            Text { text: "Chromecast"; color: Theme.text; font-size: 13px; vertical-alignment: center; horizontal-stretch: 1; }
+                                            Toggle { checked: root.cast-on; y: (parent.height - self.height) / 2; toggled => { root.cast-toggle(); } }
                                         }
                                     }
                                 }

@@ -8710,6 +8710,20 @@ fn main() -> Result<(), slint::PlatformError> {
             ui.set_devices(ModelRc::from(Rc::new(VecModel::from(list.into_iter().map(slint::SharedString::from).collect::<Vec<_>>()))));
         });
     }
+    {
+        let s = shared.clone();
+        ui.on_cast_toggle(move || {
+            set_toggle(&s, "castOn");
+            if let Some(ui) = s.borrow().ui.upgrade() {
+                ui.set_cast_on(s.borrow().web.prefs["castOn"].as_bool() == Some(true));
+                ui.invoke_devices_want();
+                // (the devices found a moment later: the list again then)
+                let w = ui.as_weak();
+                slint::Timer::single_shot(std::time::Duration::from_millis(2500), move || { if let Some(ui) = w.upgrade() { ui.invoke_devices_want(); } });
+            }
+        });
+        ui.set_cast_on(shared.borrow().web.prefs["castOn"].as_bool() == Some(true));
+    }
     let s = shared.clone();
     ui.on_device_pick(move |i| {
         let Some(ui) = s.borrow().ui.upgrade() else { return };
