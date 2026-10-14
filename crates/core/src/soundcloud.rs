@@ -56,6 +56,23 @@ pub async fn refresh(cfg: &Config, old: &Tokens) -> Result<Tokens, String> {
     Ok(merged)
 }
 
+/// A fresh key after a 401, one refresh at a time: SoundCloud's refresh token works once, so many
+/// requests turned down together (a library loading, with its key just expired) all refreshing with it
+/// left all but the first failing, and those parts (playlists, search results) empty. Waiting its
+/// turn, a request first takes a key someone else got meanwhile (this app or the other, sharing the
+/// data folder), and refreshes only if there isn't one
+pub async fn refreshed_after_401(cfg: &Config, stale: &Tokens) -> Result<Tokens, String> {
+    static ONE_AT_A_TIME: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+    let _turn = ONE_AT_A_TIME.lock().await;
+    let disk = load_tokens().ok_or("Not signed in")?;
+    if disk.access_token != stale.access_token { return Ok(disk); }
+    match refresh(cfg, &disk).await {
+        Ok(t) => Ok(t),
+        // (refused: another app may have just used it; its new key, if it saved one)
+        Err(e) => match load_tokens() { Some(t) if t.access_token != stale.access_token => Ok(t), _ => Err(e) },
+    }
+}
+
 pub async fn login() -> Result<(), String> {
     let cfg = load_config()?;
 
@@ -197,7 +214,7 @@ pub async fn authed_request(method: reqwest::Method, path: &str) -> Result<reqwe
         .await
         .map_err(|e| e.to_string())?;
     if res.status().as_u16() == 401 {
-        tokens = refresh(&cfg, &tokens).await?;
+        tokens = refreshed_after_401(&cfg, &tokens).await?;
         res = send(tokens.access_token.clone())
             .await
             .map_err(|e| e.to_string())?;
@@ -411,7 +428,7 @@ pub async fn playlist_write(method: String, path: String, body: Option<Value>) -
     };
     let mut res = send(tokens.access_token.clone()).await.map_err(|e| e.to_string())?;
     if res.status().as_u16() == 401 {
-        tokens = refresh(&cfg, &tokens).await?;
+        tokens = refreshed_after_401(&cfg, &tokens).await?;
         res = send(tokens.access_token.clone()).await.map_err(|e| e.to_string())?;
     }
     let status = res.status();
