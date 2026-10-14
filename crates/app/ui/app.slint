@@ -1012,6 +1012,73 @@ component TileView inherits Rectangle {
 
 /// A Settings category's title: a click opens or closes it
 
+/// A shelf of tiles, as the web app's: it moves sideways with its own Back and More buttons and the
+/// bar under it (where in the row you are, and how much of it shows; click or drag it), not the scroll
+/// wheel; Show all lays every tile out in rows
+component ShelfView inherits VerticalLayout {
+    in property <Shelf> shelf;
+    callback tile-clicked(int);
+    callback tile-act(int, string);
+    property <bool> open;
+    property <length> span: max(0px, row.content-width - row.width);
+    property <bool> over: root.span > 2px && !root.open;
+    property <int> per: max(1, floor((root.width + 16px) / 186px));
+    spacing: 10px;
+    HorizontalLayout {
+        spacing: 8px;
+        Text { text: root.shelf.title; color: Theme.text; font-size: 20px; font-weight: 800; horizontal-stretch: 1; vertical-alignment: center; }
+        RoundButton { visible: root.over; d: "M15.4 7.4L14 6l-6 6 6 6 1.4-1.4L10.8 12z"; tip: "Back"; enabled: row.content-x < -2px; width: 34px; height: 34px; clicked => { row.content-x = min(0px, row.content-x + row.width * 0.9); } }
+        RoundButton { visible: root.over; d: "M8.6 16.6L10 18l6-6-6-6-1.4 1.4 4.6 4.6z"; tip: "More"; enabled: -row.content-x < root.span - 2px; width: 34px; height: 34px; clicked => { row.content-x = max(-root.span, row.content-x - row.width * 0.9); } }
+        Pill { visible: root.span > 2px || root.open; label: root.open ? "Show less" : "Show all"; height: 34px; clicked => { root.open = !root.open; row.content-x = 0; } }
+    }
+    row := Flickable {
+        visible: !root.open;
+        height: root.open ? 0px : 230px;
+        content-width: root.shelf.tiles.length * 186px - 16px;
+        HorizontalLayout {
+            spacing: 16px;
+            alignment: start;
+            for t[k] in root.shelf.tiles: TileView { tile: t; clicked => { root.tile-clicked(k); } act(a) => { root.tile-act(k, a); } }
+        }
+    }
+    // the bar
+    Rectangle {
+        visible: root.over;
+        height: 6px;
+        border-radius: 3px;
+        background: Theme.text.with-alpha(bta.has-hover || bta.pressed ? 0.14 : 0.08);
+        property <float> shown: row.width / row.content-width;
+        Rectangle {
+            x: parent.width * (-row.content-x / row.content-width);
+            width: parent.width * parent.shown;
+            border-radius: 3px;
+            background: bta.has-hover || bta.pressed ? Theme.accent : Theme.muted.with-alpha(0.6);
+        }
+        bta := TouchArea {
+            mouse-cursor: MouseCursor.pointer;
+            property <length> from-x;
+            property <length> from-content;
+            pointer-event(e) => {
+                if (e.kind == PointerEventKind.down && e.button == PointerEventButton.left) {
+                    self.from-x = self.mouse-x;
+                    // (a press beside the thumb centres the view there; on it, it's dragged)
+                    if (self.mouse-x < parent.width * (-row.content-x / row.content-width) || self.mouse-x > parent.width * ((-row.content-x + row.width) / row.content-width)) {
+                        row.content-x = -max(0px, min(root.span, self.mouse-x / parent.width * row.content-width - row.width / 2));
+                    }
+                    self.from-content = row.content-x;
+                }
+            }
+            moved => { if (self.pressed) { row.content-x = -max(0px, min(root.span, -self.from-content + (self.mouse-x - self.from-x) * row.content-width / parent.width)); } }
+        }
+    }
+    // Show all: every tile, in rows
+    // (placed by hand, not by a layout: how many fit a row comes from the shelf's width)
+    if root.open: Rectangle {
+        height: ceil(root.shelf.tiles.length / root.per) * 242px - 16px;
+        for t[k] in root.shelf.tiles: TileView { x: mod(k, root.per) * 186px; y: floor(k / root.per) * 242px; tile: t; clicked => { root.tile-clicked(k); } act(a) => { root.tile-act(k, a); } }
+    }
+}
+
 component Card inherits Rectangle {
     in property <brush> fill: Theme.panel;
     border-radius: Theme.card-radius;
@@ -2164,19 +2231,7 @@ export component AppWindow inherits Window {
                                     if i < 8: TrackRow { item: r; index: i; compact: root.narrow || root.queue-open; lists: root.own-lists; removable: false; show-genres: true; genre(g) => { root.genre-search(g); } play => { root.play-row(i); keys.focus(); } act(a) => { root.row-action(i, a); } pick(m) => { root.row-pick(i, m); keys.focus(); } }
                                 }
                             }
-                            for sh[s] in root.shelves: VerticalLayout {
-                                spacing: 10px;
-                                Text { text: sh.title; color: Theme.text; font-size: 20px; font-weight: 800; }
-                                Flickable {
-                                    height: 230px;
-                                    content-width: sh.tiles.length * 186px;
-                                    HorizontalLayout {
-                                        spacing: 16px;
-                                        alignment: start;
-                                        for t[k] in sh.tiles: TileView { tile: t; clicked => { root.tile(s, k); } act(a) => { root.tile-act(s, k, a); } }
-                                    }
-                                }
-                            }
+                            for sh[s] in root.shelves: ShelfView { shelf: sh; tile-clicked(k) => { root.tile(s, k); } tile-act(k, a) => { root.tile-act(s, k, a); } }
                             Rectangle { height: 76px; }
                         }
                     }
@@ -2213,19 +2268,7 @@ export component AppWindow inherits Window {
                                     Pill { label: "Find music"; y: (parent.height - self.height) / 2; clicked => { ti.focus(); } }
                                 }
                             }
-                            for sh[s] in root.shelves: VerticalLayout {
-                                spacing: 10px;
-                                Text { text: sh.title; color: Theme.text; font-size: 20px; font-weight: 800; }
-                                Flickable {
-                                    height: 230px;
-                                    content-width: sh.tiles.length * 186px;
-                                    HorizontalLayout {
-                                        spacing: 16px;
-                                        alignment: start;
-                                        for t[k] in sh.tiles: TileView { tile: t; clicked => { root.tile(s, k); } act(a) => { root.tile-act(s, k, a); } }
-                                    }
-                                }
-                            }
+                            for sh[s] in root.shelves: ShelfView { shelf: sh; tile-clicked(k) => { root.tile(s, k); } tile-act(k, a) => { root.tile-act(s, k, a); } }
                         }
                     }
                     // Stats, Wrapped-style
