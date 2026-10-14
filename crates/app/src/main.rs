@@ -1506,12 +1506,29 @@ fn fmt_time(ms: u64) -> String {
     format!("{m}:{}", r.strip_suffix(".0").unwrap_or(&r))
 }
 
+/// A title that's really a file name ("thescript-forthefirsttime(8barzremix).mp3"): a guess at its
+/// title and artist (as the web app's guessFromFilename); anything else as it is
+fn guess_from_filename(t: &Track) -> (String, String) {
+    static EXT: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| regex::Regex::new(r"(?i)\.(mp3|wav|flac|m4a|aac|ogg|aiff?)$").unwrap());
+    static SPLIT: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| regex::Regex::new(r"^([^-]+?)\s*-\s*(.+)$").unwrap());
+    let looks = EXT.is_match(&t.title) || (!t.title.contains(char::is_whitespace) && t.title.contains(['-', '_']));
+    if !looks { return (t.title.clone(), t.artist.clone()); }
+    let s = EXT.replace(&t.title, "").replace('_', " ").trim().to_string();
+    match SPLIT.captures(&s) {
+        Some(m) => (m[2].trim().to_string(), m[1].trim().to_string()),
+        None => (s, t.artist.clone()),
+    }
+}
+
 fn tp_open(shared: &Shared, t: &Track) {
     let (start, end) = trim_of(&shared.borrow().web.prefs, &t.key);
     TP_TRACK.with(|x| *x.borrow_mut() = Some(t.clone()));
     if let Some(ui) = shared.borrow().ui.upgrade() {
-        ui.set_tp_title(t.title.clone().into());
-        ui.set_tp_artist(t.artist.clone().into());
+        // (a title that's really a file name, not fixed yet: a guess at it filled in, as the web app's)
+        let fixed = shared.borrow().web.prefs["trackFixes"].get(&t.key).is_some();
+        let (title, artist) = if fixed { (t.title.clone(), t.artist.clone()) } else { guess_from_filename(t) };
+        ui.set_tp_title(title.into());
+        ui.set_tp_artist(artist.into());
         ui.set_tp_start(if start > 0 { fmt_time(start) } else { String::new() }.into());
         ui.set_tp_end(end.map(fmt_time).unwrap_or_default().into());
         ui.set_tp_note(format!("It's {} long.", fmt_ms(t.ms)).into());
