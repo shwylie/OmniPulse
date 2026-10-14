@@ -4626,7 +4626,7 @@ fn settings_index(a: &App) -> Vec<SetFound> {
         out.push(SetFound { path: path(cat), label: label.into(), note: note.into(), cat: cat.into(), panel: String::new(), key: key.into(), toggle: true });
     }
     let ip = omnipulse_core::lan_ip().unwrap_or_else(|| "THIS-PC".into());
-    for (name, cat) in [("requests", "Streaming"), ("limits", "Streaming"), ("mix", "Sound"), ("discord", "Integrations"), ("together", "Integrations"), ("lyrics", "Integrations"), ("widget", "Streaming"), ("alerts", "Streaming"), ("alertlist", "Streaming"), ("remote", "Streaming"), ("offset", "Streaming"), ("safe", "Streaming"), ("recent", "Library"), ("hidden", "Library"), ("plugins", "Plugins")] {
+    for (name, cat) in [("requests", "Streaming"), ("replies", "Streaming"), ("limits", "Streaming"), ("mix", "Sound"), ("discord", "Integrations"), ("together", "Integrations"), ("lyrics", "Integrations"), ("widget", "Streaming"), ("alerts", "Streaming"), ("alertlist", "Streaming"), ("remote", "Streaming"), ("offset", "Streaming"), ("safe", "Streaming"), ("recent", "Library"), ("hidden", "Library"), ("plugins", "Plugins")] {
         let title = panels::title(name);
         out.push(SetFound { path: path(cat), label: title.clone(), note: String::new(), cat: cat.into(), panel: name.into(), key: String::new(), toggle: false });
         let vals = panels::values(name, &a.web.prefs);
@@ -4684,7 +4684,7 @@ fn panel_open(shared: &Shared, name: &str) {
     if let Some(ui) = shared.borrow().ui.upgrade() {
         let head = match name.strip_prefix("alert:") { Some(k) => alerts::name(&shared.borrow().web.prefs, k), None => panels::title(name) };
         let cat = match name {
-            "requests" | "limits" | "widget" | "remote" | "offset" | "alerts" | "alertlist" | "safe" => "Streaming",
+            "requests" | "replies" | "limits" | "widget" | "remote" | "offset" | "alerts" | "alertlist" | "safe" => "Streaming",
             n if n.starts_with("alert:") => "Streaming",
             "plugins" => "Plugins",
             "mix" => "Sound",
@@ -4695,6 +4695,7 @@ fn panel_open(shared: &Shared, name: &str) {
         match name {
             "alerts" => path.push((panels::title("widget"), "panel:widget".into())),
             "alertlist" => path.push((panels::title("alerts"), "panel:alerts".into())),
+            "replies" => path.push((panels::title("requests"), "panel:requests".into())),
             n if n.starts_with("alert:") => {
                 path.push((panels::title("alerts"), "panel:alerts".into()));
                 path.push((panels::title("alertlist"), "panel:alertlist".into()));
@@ -4862,6 +4863,19 @@ fn panel_press(shared: &Shared, key: &str) {
         "alertsSwitch" => {
             set_toggle(shared, "alertsOn");
             return;
+        }
+        // (Chat Replies: from Song Requests, its page saved first)
+        "repliesOpen" => {
+            if let Some((_, vals)) = PF_EDIT.with(|e| e.borrow().clone()) { for k in panels::keys_of("requests") { if let Some(v) = vals.get(k) { pref_put(shared, k, v.clone()); } } }
+            panel_open(shared, "replies");
+            return;
+        }
+        "repliesReset" => {
+            if let Some((n, mut vals)) = PF_EDIT.with(|e| e.borrow().clone()) {
+                for (k, _) in requests::MSG_KEYS { vals.insert(format!("msg:{k}"), serde_json::json!("")); }
+                PF_EDIT.with(|e| *e.borrow_mut() = Some((n, vals)));
+            }
+            "Every reply back to its default (Save keeps it).".to_string()
         }
         "alertsOpen" => {
             // (the widget's page saved first, as alList does the alerts')
@@ -5158,6 +5172,17 @@ fn panel_save(shared: &Shared, name: &str, vals: serde_json::Map<String, serde_j
         PF_EDIT.with(|e| e.borrow_mut().take());
         { let mut a = shared.borrow_mut(); apply_filter(&mut a); paint_queue(&mut a); }
         if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_pf_open(false); ui.set_status("What counts as safe is saved.".into()); }
+        return;
+    }
+    // (Chat Replies: the ones in your own words, as the web app keeps them in reqMsgs)
+    if name == "replies" {
+        let mut m = serde_json::Map::new();
+        for (k, _) in requests::MSG_KEYS {
+            if let Some(v) = vals.get(&format!("msg:{k}")).and_then(|v| v.as_str()).map(str::trim).filter(|v| !v.is_empty()) { m.insert(k.into(), serde_json::json!(v)); }
+        }
+        pref_put(shared, "reqMsgs", serde_json::Value::Object(m));
+        PF_EDIT.with(|e| e.borrow_mut().take());
+        if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_pf_open(false); ui.set_status("Chat replies saved.".into()); }
         return;
     }
     // (Lyrics: their order, as the web app keeps it)
@@ -9570,6 +9595,7 @@ fn main() -> Result<(), slint::PlatformError> {
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("mix") { vec![(9, "play"), (10, "mixprep"), (70, "mixseek"), (82, "mixcheck"), (100, "mixcheck"), (106, "mixcheck"), (130, "mixcheck"), (132, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("rchange") { vec![(9, "play"), (11, "rate"), (12, "skip"), (16, "rate"), (17, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("mixfb") { vec![(9, "play"), (10, "rate"), (11, "mixprep"), (70, "mixseek"), (80, "mixcheck"), (84, "mixcheck"), (88, "mixcheck"), (92, "mixcheck"), (96, "mixcheck"), (100, "mixcheck"), (104, "mixcheck"), (108, "mixcheck"), (112, "rate"), (114, "mixcheck"), (118, "end")] }
+            else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("replies") { vec![(9, "play"), (10, "openreplies"), (12, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("np") { vec![(9, "play"), (14, "now"), (18, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("versions") { vec![(9, "play"), (10, "artistnamed"), (40, "vopen"), (41, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("rhythm") { vec![(9, "play"), (100, "rhythm"), (101, "end")] }
@@ -9888,6 +9914,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 "narrow" => { ui.window().set_size(slint::LogicalSize::new(900.0, 700.0)); }
                 // the first artist you follow
                 "artistnamed" => open_artist_named(&s, "deadmau5"),
+                "openreplies" => { ui.invoke_nav("settings".into()); ui.set_set_cat("Streaming".into()); panel_open(&s, "replies"); }
                 // (the first song with versions: them opened beneath it)
                 "vopen" => {
                     let rows = s.borrow().rows.clone();

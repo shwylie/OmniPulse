@@ -15,6 +15,7 @@ pub fn title(name: &str) -> String {
     if let Some(k) = name.strip_prefix("alert:") { return format!("Alert: {}", crate::alerts::name(&Value::Null, k)); }
     match name {
         "requests" => "Song Requests",
+        "replies" => "Chat Replies",
         "limits" => "Limit Requests",
         "mix" => "Seamless Mix",
         "discord" => "Discord Status",
@@ -97,6 +98,10 @@ pub fn lyrics_move(vals: &mut Map<String, Value>, id: &str, by: i32) {
 /// The values a panel starts with: what's set, else the default
 pub fn values(name: &str, prefs: &Value) -> Map<String, Value> {
     if name == "lyrics" { return lyrics_values(prefs); }
+    // (Chat Replies: each one's own words, empty for the default)
+    if name == "replies" {
+        return crate::requests::MSG_KEYS.iter().map(|(k, _)| (format!("msg:{k}"), json!(prefs["reqMsgs"][*k].as_str().unwrap_or("")))).collect();
+    }
     if name == "alertlist" { return crate::alerts::list_values(prefs); }
     if name == "safe" { return crate::streamsafe::panel_values(prefs); }
     if let Some(k) = name.strip_prefix("alert:") { return crate::alerts::edit_values(prefs, k); }
@@ -226,6 +231,7 @@ pub fn fields(name: &str, vals: &Map<String, Value>, prefs: &Value, lan: &str) -
                 note(steps),
                 tog("reqRadioEdit", "Prefer Radio Edits", "Plays a long song's radio edit, if there is one."),
                 button("reqClear", "Waiting Now", "Clear Requests", "Takes the requested songs out of the queue."),
+                button("repliesOpen", "Chat Replies", "Configure", "What your bot posts back in chat, in your own words."),
                 num("reqPort", "Port", "1024 to 65535."),
                 button("reqNewKey", "Secret Key", "New Key", "A new key: your bot needs the new addresses after."),
             ];
@@ -342,6 +348,12 @@ pub fn fields(name: &str, vals: &Map<String, Value>, prefs: &Value, lan: &str) -
         ],
         // Lyrics: where they come from, in order (as the web app's)
         "lyrics" => lyrics_fields(vals),
+        "replies" => {
+            let mut f = vec![note("What your bot posts back for each. Empty: the default, shown under it.\nPlaceholders: {title} {artist} {user} {position} {platform} {query} {count} {by}")];
+            for (k, label) in crate::requests::MSG_KEYS { f.push(text(&format!("msg:{k}"), label, crate::requests::default_msg(k))); }
+            f.push(button("repliesReset", "", "Reset to Defaults", "Every reply back to its default (Save keeps it)."));
+            f
+        }
         // Seamless Mix's own page: its styles, its blend, and one forced for testing
         "mix" => vec![
             note("Styles: each one, when two songs suit it, in place of the usual blend (never the same one twice in a row)."),

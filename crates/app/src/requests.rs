@@ -126,7 +126,14 @@ pub fn radio_pick(list: &[Track], q: &str) -> Option<Track> {
 }
 
 // ---------- the replies, which you can change in the web app's Settings ----------
-fn default_msg(key: &str) -> &'static str {
+/// Each reply, in the order Settings lists them, with its name there (the web app's REQ_MSG_LABELS)
+pub const MSG_KEYS: [(&str, &str); 12] = [
+    ("added", "Added"), ("playing", "Added, playing now"), ("notFound", "Not found"), ("full", "Queue full"),
+    ("perUser", "Viewer limit"), ("duplicate", "Already queued"), ("closed", "Requests off"), ("notSafe", "Not safe on stream"),
+    ("empty", "Nothing asked for"), ("wrongSong", "!wrongsong: removed"), ("noRequest", "!wrongsong: none of theirs"), ("noRequests", "!wrongsong: none at all (a mod)"),
+];
+
+pub fn default_msg(key: &str) -> &'static str {
     match key {
         "added" => "Added \"{title}\" by {artist} (#{position} in the queue).",
         "playing" => "Added \"{title}\" by {artist}, playing now.",
