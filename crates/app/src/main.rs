@@ -2369,8 +2369,18 @@ fn menu_act(shared: &Shared, t: Track, act: &str) {
     track_act(shared, &t, act);
 }
 
+/// 1234567 as "1,234,567"
+fn thousands(n: u64) -> String {
+    let s = n.to_string();
+    let mut out = String::new();
+    for (i, c) in s.chars().enumerate() { if i > 0 && (s.len() - i) % 3 == 0 { out.push(','); } out.push(c); }
+    out
+}
+
 fn track_act(shared: &Shared, t: &Track, act: &str) -> bool {
     match act {
+        // (the player's platform badge: who put it there, or its artist)
+        "platform" => return track_act(shared, t, if t.uploader.is_empty() { "artist:0" } else { "uploader" }),
         "like" => like_track(shared, t.clone()),
         "fav" => fav_track(shared, t.clone()),
         "uploader" => go(shared, Place::ArtistNamed(t.uploader.clone())),
@@ -3607,6 +3617,14 @@ fn show_now(ui: &AppWindow, t: &Track) {
     ui.set_now_title(t.title.clone().into());
     ui.set_now_artist(t.artist.clone().into());
     ui.set_now_album(t.album.clone().into());
+    let names: Vec<slint::SharedString> = t.artist.split([',', '&']).map(|x| x.trim()).filter(|x| !x.is_empty()).map(Into::into).collect();
+    ui.set_now_artists(ModelRc::from(Rc::new(VecModel::from(names))));
+    // (genre, year and plays, as the web app's npMeta)
+    let mut bits: Vec<String> = Vec::new();
+    if !t.genre.is_empty() { bits.push(t.genre.clone()); }
+    if t.date.len() >= 4 && t.date[..4].chars().all(|c| c.is_ascii_digit()) { bits.push(t.date[..4].to_string()); }
+    if t.plays > 0 && t.plat() != "spotify" { bits.push(format!("{} plays", thousands(t.plays))); }
+    ui.set_now_meta(bits.join(", ").into());
     let apart = !t.uploader.is_empty() && omnipulse_core::ranking::artist_key(&t.uploader) != omnipulse_core::ranking::artist_key(t.artist.split([',', '&']).next().unwrap_or(""));
     ui.set_now_uploader(if apart { t.uploader.clone().into() } else { "".into() });
     ui.set_now_rhythm(rhythm_line(&t.key).into());
@@ -9552,6 +9570,7 @@ fn main() -> Result<(), slint::PlatformError> {
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("mix") { vec![(9, "play"), (10, "mixprep"), (70, "mixseek"), (82, "mixcheck"), (100, "mixcheck"), (106, "mixcheck"), (130, "mixcheck"), (132, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("rchange") { vec![(9, "play"), (11, "rate"), (12, "skip"), (16, "rate"), (17, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("mixfb") { vec![(9, "play"), (10, "rate"), (11, "mixprep"), (70, "mixseek"), (80, "mixcheck"), (84, "mixcheck"), (88, "mixcheck"), (92, "mixcheck"), (96, "mixcheck"), (100, "mixcheck"), (104, "mixcheck"), (108, "mixcheck"), (112, "rate"), (114, "mixcheck"), (118, "end")] }
+            else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("np") { vec![(9, "play"), (14, "now"), (18, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("versions") { vec![(9, "play"), (10, "artistnamed"), (40, "vopen"), (41, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("rhythm") { vec![(9, "play"), (100, "rhythm"), (101, "end")] }
             // (OMNIPULSE_SELFTEST_PLAN=dnd: a Library track dragged onto the queue; what the sidebar would take,
