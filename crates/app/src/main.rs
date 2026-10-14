@@ -3355,6 +3355,8 @@ struct MixShow {
 const MIX_HEARD_MS: u64 = 400;
 
 thread_local! {
+    /// the tracks Ctrl+C copied, for Ctrl+V
+    static PICK_CLIP: RefCell<Vec<Track>> = const { RefCell::new(Vec::new()) };
     /// the last place opened again at start (once)
     static LAST_PLACE_DONE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
     static SESSION_SAVED: std::cell::Cell<std::time::Instant> = std::cell::Cell::new(std::time::Instant::now());
@@ -3512,6 +3514,8 @@ fn preload_next(shared: &Shared) {
 /// The player bar's track, without playing it (a restored session shows it paused)
 fn show_now(ui: &AppWindow, t: &Track) {
     paint_marks(ui, t);
+    let trimmed = SHARED.with(|s| s.borrow().as_ref().and_then(|sh| sh.try_borrow().ok().map(|a| { let (st, en) = trim_of(&a.web.prefs, &t.key); st > 0 || en.is_some() }))).unwrap_or(false);
+    ui.set_now_trimmed(trimmed);
     ui.set_now_title(t.title.clone().into());
     ui.set_now_artist(t.artist.clone().into());
     ui.set_now_album(t.album.clone().into());
@@ -5636,6 +5640,11 @@ thread_local! {
     static XFADE: RefCell<Option<(u64, std::time::Instant)>> = const { RefCell::new(None) };
 }
 
+thread_local! {
+    /// when a song that isn't measured went quiet (Skip Silences, by its level)
+    static QUIET_SINCE: std::cell::Cell<Option<std::time::Instant>> = const { std::cell::Cell::new(None) };
+}
+
 /// Each tick while playing: long silences jumped over, the fade out at the end. True if it moved on.
 fn fade_and_silences(shared: &Shared, pos: u64, dur: u64) -> bool {
     let (an, key, fade, skip, engine) = {
@@ -5644,7 +5653,22 @@ fn fade_and_silences(shared: &Shared, pos: u64, dur: u64) -> bool {
         let an = a.cur_loud.as_ref().and_then(|k| a.analysis.get(k)).cloned();
         (an, t.key.clone(), fade_out_ms(&a), sound::skip_silence_ms(&a.web.prefs), a.engine.clone())
     };
-    let Some(an) = an else { return false };
+    let Some(an) = an else {
+        // (not measured, as Spotify's songs aren't: its level watched as it plays, and on to the next
+        // after that long in silence, as the web app's)
+        if skip == 0 || listening().is_some() || MIX.with(|m| m.borrow().is_some()) { QUIET_SINCE.with(|q| q.set(None)); return false; }
+        let quiet = engine.level().0 < -60.0 && pos > 3000;
+        if !quiet { QUIET_SINCE.with(|q| q.set(None)); return false; }
+        let since = QUIET_SINCE.with(|q| { if q.get().is_none() { q.set(Some(std::time::Instant::now())); } q.get().unwrap() });
+        if since.elapsed().as_millis() as u64 >= skip {
+            QUIET_SINCE.with(|q| q.set(None));
+            if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_status(format!("Moved on after {} s of silence.", skip / 1000).into()); }
+            step(shared, 1);
+            return true;
+        }
+        return false;
+    };
+    let _ = &key;
     if dur == 0 {
         return false;
     }
@@ -8947,6 +8971,32 @@ fn main() -> Result<(), slint::PlatformError> {
         let keys = s.borrow().library.iter().map(|t| t.key.clone()).collect();
         SHARED_LIBRARY_KEYS.with(|k| *k.borrow_mut() = keys);
         apple_start(&s);
+    } });
+    ui.on_picks_copy({ let s = shared.clone(); move || {
+        let a = s.borrow();
+        let list: Vec<Track> = a.page_tracks.iter().filter(|t| a.picked.contains(&t.key)).cloned().collect();
+        if list.is_empty() { return; }
+        if let Some(ui) = a.ui.upgrade() { ui.set_status(format!("Copied {}. Ctrl+V pastes them into a playlist that's open, or the queue.", plural(list.len(), "track", "tracks")).into()); }
+        PICK_CLIP.with(|c| *c.borrow_mut() = list);
+    } });
+    ui.on_picks_paste({ let s = shared.clone(); move || {
+        let list = PICK_CLIP.with(|c| c.borrow().clone());
+        if list.is_empty() { return; }
+        let here = s.borrow().here.clone();
+        match here {
+            // (into the playlist that's open: yours, or one on this PC; the same song twice asked about)
+            Some(Place::Playlist(id)) if xpl::is_own(&id) => pl_add_many(&s, &id, list),
+            Some(Place::Playlist(_)) => { if let Some(ui) = s.borrow().ui.upgrade() { ui.set_status("This playlist isn't yours to change. Paste into one of yours, or one on this PC.".into()); } }
+            // (anywhere else: the queue, after what you've queued)
+            _ => {
+                let n = list.len();
+                let mut a = s.borrow_mut();
+                for t in list { a.queue.add(t); }
+                paint_queue(&mut a);
+                save_session(&a);
+                if let Some(ui) = a.ui.upgrade() { ui.set_status(format!("Added {} to the queue.", plural(n, "track", "tracks")).into()); }
+            }
+        }
     } });
     ui.on_now_act({ let s = shared.clone(); move |act| { let t = s.borrow().queue.current().cloned(); if let Some(t) = t { track_act(&s, &t, &act); } } });
     ui.on_title_rename({ let s = shared.clone(); move || name_ask(&s, Naming::AppName) });

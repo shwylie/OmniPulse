@@ -1241,6 +1241,10 @@ export component AppWindow inherits Window {
         root.status.to-lowercase().starts-with("couldn") || root.status.to-lowercase().starts-with("can't") || root.status.to-lowercase().starts-with("error") || root.status.to-lowercase().starts-with("skipped")
     }
     in property <string> now-title: "Nothing playing";
+    /// it has start or end times of its own (Track Preferences): an asterisk after its title opens them
+    in property <bool> now-trimmed;
+    callback picks-copy();
+    callback picks-paste();
     in property <string> now-artist;
     in property <string> now-plat;
     // the next track being found (the seek bar's marquee), or found ahead while this one plays
@@ -3050,6 +3054,13 @@ export component AppWindow inherits Window {
                             property <length> side: min(360px, max(180px, root.height - 470px));
                             if !npl.slim: BadgedCover { art: root.now-art-big; initial: root.now-title; plat: root.now-plat; badge: 52px; corner: 14px; height: parent.side; width: parent.side; }
                             Text { text: root.now-title; color: Theme.text; font-size: npl.slim ? 20px : 26px; font-weight: 800; wrap: word-wrap; }
+                            // (start or end times of its own: the asterisk opens them, as the web app's)
+                            if root.now-trimmed: Text {
+                                text: "* Plays only part of it: start and end times set";
+                                color: tma.has-hover ? Theme.text : Theme.accent;
+                                font-size: 12px;
+                                tma := TouchArea { mouse-cursor: MouseCursor.pointer; clicked => { root.now-act("prefs"); } }
+                            }
                             // (the artist: their page, a click away, as the web app's)
                             Text { text: root.now-artist; color: nat.has-hover ? Theme.text : Theme.accent; font-size: 16px; font-weight: 600; wrap: word-wrap; nat := TouchArea { mouse-cursor: MouseCursor.pointer; clicked => { root.now-act("artist:0"); } } }
                             if root.now-uploader != "": Text { text: "uploaded by " + root.now-uploader; color: Theme.muted; font-size: 13px; }
@@ -4122,6 +4133,9 @@ export component AppWindow inherits Window {
         init => { self.focus(); }
         key-pressed(e) => {
             if (e.modifiers.control && (e.text == "a" || e.text == "A")) { root.pick-all(); return accept; }
+            // (as the web app's: the picked tracks copied, and pasted into the playlist that's open, or the queue)
+            if (e.modifiers.control && (e.text == "c" || e.text == "C")) { root.picks-copy(); return accept; }
+            if (e.modifiers.control && (e.text == "v" || e.text == "V")) { root.picks-paste(); return accept; }
             if (e.text == Key.Escape) { root.pick-none(); return accept; }
             if (e.modifiers.control || e.modifiers.alt || e.modifiers.meta) { return reject; }
             if (e.text == " ") { root.toggle(); return accept; }
@@ -4130,6 +4144,9 @@ export component AppWindow inherits Window {
             if (e.text == "/") { ti.focus(); return accept; }
             if (e.text == "q") { root.queue-open = !root.queue-open; return accept; }
             if (e.text == "l") { root.like-toggle(); return accept; }
+            // (Left and Right: five seconds back and on, as the web app's)
+            if (e.text == Key.RightArrow && root.dur-secs > 0) { root.seek(max(0, min(1, root.pos-frac + 5 / root.dur-secs))); return accept; }
+            if (e.text == Key.LeftArrow && root.dur-secs > 0) { root.seek(max(0, min(1, root.pos-frac - 5 / root.dur-secs))); return accept; }
             reject
         }
     }

@@ -222,7 +222,7 @@ pub fn fields(name: &str, vals: &Map<String, Value>, prefs: &Value, lan: &str) -
             let f = vec![
                 info("Address", &format!("http://127.0.0.1:{port}/"), &format!("http://127.0.0.1:{port}/"), "In OBS: a Browser source with this address."),
                 num("widgetPort", "Port", "1024 to 65535."),
-                sel("widgetDesign", "Design", "", &[(json!("card"), "Card (460 × 130)"), (json!("bar"), "Slim bar (560 × 64)"), (json!("square"), "Square (300 × 380)"), (json!("minimal"), "Minimal (460 × 110)"), (json!("pill"), "Pill (480 × 80)")]),
+                sel("widgetDesign", "Design", "", &[(json!("card"), "Card (460 × 130)"), (json!("bar"), "Slim bar (560 × 64)"), (json!("square"), "Square (300 × 380)"), (json!("minimal"), "Minimal (460 × 110)"), (json!("pill"), "Pill (480 × 80)"), (json!("vinyl"), "Vinyl (460 × 150)"), (json!("poster"), "Poster (480 × 270)"), (json!("ticker"), "Ticker (640 × 48)")]),
                 sel("widgetAlign", "Alignment", "", &[(json!("left"), "Left"), (json!("right"), "Right")]),
                 tog("widgetRounded", "Rounded Corners", ""),
                 stepper("widgetText", "Text Size", "", pct(0.7, 1.6, 0.1)),
