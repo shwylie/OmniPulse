@@ -695,6 +695,32 @@ component PlatIcon inherits Rectangle {
     if root.plat == "xpl": Image { source: @image-url("xpl.svg"); width: parent.width; height: parent.height; }
 }
 
+/// A pill with platforms' symbols in place of their names: the one it's from (if any) → the one it's
+/// for, then what it does ("Follow 12", "Also follow")
+component PlatPill inherits Rectangle {
+    in property <string> from;
+    in property <string> to;
+    in property <string> label;
+    in property <string> tip;
+    callback clicked;
+    height: 38px;
+    width: row.preferred-width + 32px;
+    border-radius: 19px;
+    border-width: 1px;
+    border-color: pta.has-hover ? Theme.accent : Theme.line;
+    background: pta.has-hover ? Theme.elevated : transparent;
+    row := HorizontalLayout {
+        x: 16px;
+        spacing: 7px;
+        if root.from != "": PlatIcon { plat: root.from; width: 15px; height: 15px; y: (parent.height - self.height) / 2; }
+        if root.from != "": Text { text: "\u{2192}"; color: Theme.muted; font-size: 13px; vertical-alignment: center; }
+        PlatIcon { plat: root.to; width: 15px; height: 15px; y: (parent.height - self.height) / 2; }
+        Text { text: root.label; color: Theme.text; font-size: 13px; font-weight: 600; vertical-alignment: center; }
+    }
+    pta := TouchArea { mouse-cursor: MouseCursor.pointer; clicked => { Tips.on = false; root.clicked(); } }
+    TipSpot { tip: root.tip; hover: pta.has-hover; }
+}
+
 component NavItem inherits Rectangle {
     in property <string> label;
     in property <string> d;
@@ -1363,6 +1389,9 @@ export component AppWindow inherits Window {
     // the Artists page: an artist's menu, and following everyone from one platform on another
     callback artist-act(int, string);
     in property <[string]> artists-batch;
+    /// each one's platform it follows them on, and what it does, said in full
+    in property <[string]> artists-batch-to;
+    in property <[string]> artists-batch-tip;
     callback artists-batch-go(int);
     // the playing song right-clicked in the player bar: the "..." menu
     callback now-menu();
@@ -1988,7 +2017,7 @@ export component AppWindow inherits Window {
                             }
                         }
                         if root.page == "sets": Pill { label: "Liked only"; d: Icons.library; on: root.sets-liked; y: 7px; clicked => { root.sets-liked = !root.sets-liked; root.sets-liked-changed(root.sets-liked); } }
-                        if root.page == "artist" && root.follow-more != "": Pill { label: root.follow-more; y: 7px; clicked => { root.follow-more-click(); } }
+                        if root.page == "artist" && root.follow-more != "": PlatPill { to: root.follow-more; label: "Also follow"; tip: root.follow-more == "spotify" ? "Also follow them on Spotify" : "Also follow them on SoundCloud"; y: 7px; clicked => { root.follow-more-click(); } }
                         // (right-click: each platform on its own, as the web app's)
                         if root.page == "artist" && root.follow-label != "": Rectangle {
                             width: fpill.preferred-width;
@@ -2058,7 +2087,7 @@ export component AppWindow inherits Window {
                     if root.page-kind == "artists" && root.artists-batch.length > 0: HorizontalLayout {
                         spacing: 8px;
                         alignment: start;
-                        for b[k] in root.artists-batch: Pill { label: b; clicked => { root.artists-batch-go(k); } }
+                        for b[k] in root.artists-batch: PlatPill { from: root.artists-batch-to[k] == "spotify" ? "soundcloud" : "spotify"; to: root.artists-batch-to[k]; label: b; tip: root.artists-batch-tip[k]; clicked => { root.artists-batch-go(k); } }
                     }
                     if root.page-kind == "artists": grid := ScrollView {
                         vertical-stretch: 1;
@@ -2083,7 +2112,14 @@ export component AppWindow inherits Window {
                                         Glyph { d: Icons.play; width: 22px; height: 22px; fill: Theme.on-accent; } }
                                 }
                                 Text { text: a.name; color: Theme.text; font-weight: 700; font-size: 13px; overflow: elide; horizontal-alignment: center; }
-                                Text { text: a.sub; color: Theme.muted; font-size: 12px; overflow: elide; horizontal-alignment: center; }
+                                // (where you follow them: their platforms' symbols, not their names)
+                                HorizontalLayout {
+                                    alignment: center;
+                                    spacing: 6px;
+                                    height: 16px;
+                                    if a.on-sc: PlatIcon { plat: "soundcloud"; width: 15px; height: 15px; }
+                                    if a.on-sp: PlatIcon { plat: "spotify"; width: 15px; height: 15px; }
+                                }
                             }
                             Rectangle {
                                 ata := TouchArea { pointer-event(e) => { if (e.kind == PointerEventKind.down && e.button == PointerEventButton.right) { cm7.open(self.mouse-x, self.mouse-y); } } clicked => { root.artist(i); } }

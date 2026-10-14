@@ -751,8 +751,11 @@ fn paint_artists(shared: &Shared, list: &[sources::Artist]) {
     let (sc_on, sp_on) = { let p = &shared.borrow().web.prefs; (plat_on(p, "soundcloud"), plat_on(p, "spotify")) };
     let (to_sp, to_sc) = (list.iter().filter(|a| a.sc.is_some() && a.sp.is_none()).count(), list.iter().filter(|a| a.sp.is_some() && a.sc.is_none()).count());
     let mut batch: Vec<slint::SharedString> = Vec::new();
-    if sc_on && sp_on && to_sp > 0 { batch.push(format!("Follow your SoundCloud artists on Spotify too ({to_sp})").into()); }
-    if sc_on && sp_on && to_sc > 0 { batch.push(format!("Follow your Spotify artists on SoundCloud too ({to_sc})").into()); }
+    let (mut batch_to, mut batch_tip): (Vec<slint::SharedString>, Vec<slint::SharedString>) = (Vec::new(), Vec::new());
+    if sc_on && sp_on && to_sp > 0 { batch.push(format!("Follow {to_sp}").into()); batch_to.push("spotify".into()); batch_tip.push(format!("Follow the {} you follow on SoundCloud on Spotify too", plural(to_sp, "artist", "artists")).into()); }
+    if sc_on && sp_on && to_sc > 0 { batch.push(format!("Follow {to_sc}").into()); batch_to.push("soundcloud".into()); batch_tip.push(format!("Follow the {} you follow on Spotify on SoundCloud too", plural(to_sc, "artist", "artists")).into()); }
+    ui.set_artists_batch_to(ModelRc::from(Rc::new(VecModel::from(batch_to))));
+    ui.set_artists_batch_tip(ModelRc::from(Rc::new(VecModel::from(batch_tip))));
     ARTISTS_BATCH.with(|b| *b.borrow_mut() = [(sc_on && sp_on && to_sp > 0).then_some("spotify"), (sc_on && sp_on && to_sc > 0).then_some("soundcloud")].into_iter().flatten().collect());
     ui.set_artists_batch(ModelRc::from(Rc::new(VecModel::from(batch))));
     ui.set_page_sub(if list.is_empty() { "Artists you follow on SoundCloud and Spotify show here.".into() } else { format!("{} you follow on SoundCloud and Spotify.", plural(list.len(), "artist", "artists")).into() });
@@ -818,8 +821,9 @@ fn follow_paint(shared: &Shared) {
         ui.set_follow_on(true);
     }
     // (followed on one, signed in to the other: Also follow there)
-    let more = if a.sc.is_none() && !a.plats().is_empty() && omnipulse_core::soundcloud::signed_in() { "Also follow on SoundCloud" }
-        else if a.sp.is_none() && !a.plats().is_empty() && omnipulse_core::spotify::spotify_signed_in() { "Also follow on Spotify" } else { "" };
+    // (the platform: shown as its symbol, "Also follow")
+    let more = if a.sc.is_none() && !a.plats().is_empty() && omnipulse_core::soundcloud::signed_in() { "soundcloud" }
+        else if a.sp.is_none() && !a.plats().is_empty() && omnipulse_core::spotify::spotify_signed_in() { "spotify" } else { "" };
     ui.set_follow_more(more.into());
 }
 
@@ -9401,6 +9405,7 @@ fn main() -> Result<(), slint::PlatformError> {
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("mixpage") { vec![(9, "play"), (10, "nav:settings"), (11, "cat:Sound"), (13, "scroll:300"), (14, "panel:mix"), (16, "scroll:900"), (18, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("statclick") { vec![(9, "play"), (10, "nav:stats"), (13, "statsong"), (15, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("setclear") { vec![(9, "play"), (10, "nav:settings"), (12, "setq:fade"), (13, "setq:"), (15, "end")] }
+            else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("artistsym") { vec![(9, "play"), (12, "nav:artists"), (18, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("square") { vec![(9, "play"), (10, "unround"), (12, "nav:settings"), (13, "cat:Streaming"), (14, "panel:widget"), (16, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("qset") { vec![(9, "play"), (11, "queue"), (14, "nav:settings"), (15, "cat:App & Look"), (16, "scroll:420"), (18, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("nowslim") { vec![(9, "play"), (11, "queue"), (12, "now"), (15, "size:860:720"), (17, "size:1100:720"), (19, "size:1500:860"), (21, "end")] }
