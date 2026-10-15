@@ -5591,7 +5591,9 @@ fn panel_paint(shared: &Shared, name: &str, vals: &serde_json::Map<String, serde
     let rows: Vec<PlugField> = fields.iter().map(|f| {
         let key = f["key"].as_str().unwrap_or("").to_string();
         let kind = f["type"].as_str().unwrap_or("text").to_string();
-        let now = vals.get(&key).cloned().unwrap_or_default();
+        // (a switch with its own settings, as Settings' switches: switched at once, so it's as the prefs have
+        // it, not the page's copy of its values)
+        let now = if kind == "togglecfg" { serde_json::json!(set_row_on(&shared.borrow().web.prefs, &key, false)) } else { vals.get(&key).cloned().unwrap_or_default() };
         let labels = || -> Vec<slint::SharedString> { f["labels"].as_array().into_iter().flatten().filter_map(|x| x.as_str().map(slint::SharedString::from)).collect() };
         let options: Vec<slint::SharedString> = match kind.as_str() {
             "row" | "select" | "stepper" => labels(),
@@ -10701,6 +10703,8 @@ fn main() -> Result<(), slint::PlatformError> {
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("square") { vec![(9, "play"), (10, "unround"), (12, "nav:settings"), (13, "cat:Streaming"), (14, "panel:widget"), (16, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("qset") { vec![(9, "play"), (11, "queue"), (14, "nav:settings"), (15, "cat:App & Look"), (16, "scroll:420"), (18, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("nowslim") { vec![(9, "play"), (11, "queue"), (12, "now"), (15, "size:860:720"), (17, "size:1100:720"), (19, "size:1500:860"), (21, "end")] }
+            else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("alerts") { vec![(9, "openwidget"), (11, "alerton"), (12, "alertshow"), (13, "alerton"), (14, "alertshow"), (15, "end")] }
+            else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("qorder") { vec![(9, "rediscover"), (14, "play"), (18, "qshow"), (19, "qadd"), (20, "qshow"), (22, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("beat1") { vec![(9, "play"), (10, "smartprep"), (12, "tprefs"), (13, "beatearlier"), (14, "tpsave"), (15, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("tp") { vec![(9, "play"), (12, "tprefs"), (13, "tpdrag"), (14, "nowmenu"), (15, "now"), (18, "end")] }
             // (OMNIPULSE_SELFTEST_PLAN=la: the look-alikes dialog, with two made up (nothing added))
@@ -11118,6 +11122,31 @@ fn main() -> Result<(), slint::PlatformError> {
                     });
                 }
                 // Track Preferences' Beat 1: a beat earlier, then saved
+                // Settings > Streaming > Stream Widget, and its Alerts switch pressed (as a click does)
+                "openwidget" => { ui.invoke_nav("settings".into()); ui.set_set_cat("Streaming".into()); panel_open(&s, "widget"); }
+                "alerton" => {
+                    let f = ui.get_pf_fields();
+                    if let Some(i) = (0..f.row_count()).find(|&i| f.row_data(i).is_some_and(|x| x.key == "alertsOn")) {
+                        let now = f.row_data(i).unwrap().value == "true";
+                        ui.invoke_pf_set(i as i32, if now { "false" } else { "true" }.into());
+                    }
+                }
+                "alertshow" => {
+                    let f = ui.get_pf_fields();
+                    let shown = (0..f.row_count()).find_map(|i| f.row_data(i).filter(|x| x.key == "alertsOn").map(|x| x.value.to_string()));
+                    println!("selftest: alerts: switch shows {shown:?}, setting {}", set_row_on(&s.borrow().web.prefs, "alertsOn", false));
+                }
+                // the queue as the panel shows it: each row's heading and title
+                "qshow" => {
+                    let a = s.borrow();
+                    let rows: Vec<String> = a.qrows.iter().take(8).map(|r| format!("[{}] {}", r.head, r.title)).collect();
+                    println!("selftest: queue (page {}, {} items, playing {:?}): {rows:?}", a.page, a.queue.items.len(), a.queue.qi);
+                }
+                // a song from Library added to the queue (as its menu's Add to Queue)
+                "qadd" => {
+                    let t = s.borrow().library.iter().rev().find(|t| !s.borrow().queue.items.iter().any(|q| q.t.key == t.key)).cloned();
+                    if let Some(t) = t { println!("selftest: adding \"{}\"", t.title); queue_add(&s, t, false); }
+                }
                 "beatearlier" => { ui.set_tp_beat(ui.get_tp_beat() - 1); ui.set_tp_phrase(ui.get_tp_phrase() - 1); println!("selftest: beat 1 shown {}, at {}, phrases {}", ui.get_tp_beat_shown(), ui.get_tp_beat(), ui.get_tp_phrase()); }
                 "tpsave" => {
                     ui.invoke_tp_save();

@@ -179,15 +179,16 @@ impl Queue {
         if start <= from + 1 {
             return;
         }
-        let by: HashMap<String, (String, bool)> = self.items[from..start].iter().map(|q| (q.t.key.clone(), (q.by.clone(), q.queued))).collect();
-        let mine: Vec<Track> = self.items[from..start].iter().map(|q| q.t.clone()).collect();
+        // (only the rest of the list: what you queued and chat requests stay where they are, ahead of it)
+        let at: Vec<usize> = (from..start).filter(|&i| !self.items[i].queued && self.items[i].by.is_empty()).collect();
+        if at.len() < 2 { return; }
+        let mine: Vec<Track> = at.iter().map(|&i| self.items[i].t.clone()).collect();
         let mut shuffled = fair_shuffle(mine, last_played);
         if let Some((window, now)) = recent {
             shuffled = space_recent(shuffled, last_played, window, now);
         }
-        for (k, t) in shuffled.into_iter().enumerate() {
-            let (who, queued) = by.get(&t.key).cloned().unwrap_or_default();
-            self.items[from + k] = QItem { t, auto: false, by: who, queued };
+        for (&i, t) in at.iter().zip(shuffled) {
+            self.items[i] = QItem::mine(t);
         }
     }
 
@@ -390,6 +391,20 @@ pub fn take_turns(mut lists: Vec<(&'static str, Vec<Track>)>, last_plat: &str, t
 mod tests {
     use super::*;
     use crate::track::Src;
+
+    #[test]
+    fn a_shuffle_leaves_what_you_queued_ahead_of_the_list() {
+        let t = |k: &str| Track { key: k.into(), title: k.into(), ..Default::default() };
+        let mut q = Queue::default();
+        q.set_list((0..20).map(|i| t(&format!("l{i}"))).collect(), 0);
+        q.add(t("mine1"));
+        q.add(t("mine2"));
+        q.shuffle_rest(&HashMap::new(), None);
+        let keys: Vec<&str> = q.items.iter().map(|x| x.t.key.as_str()).collect();
+        assert_eq!(&keys[..3], &["l0", "mine1", "mine2"]);
+        assert!(q.items[1].queued && q.items[2].queued && !q.items[3].queued);
+        assert_eq!(keys.len(), 22);
+    }
 
     #[test]
     fn queuing_a_song_takes_it_out_of_the_list() {
