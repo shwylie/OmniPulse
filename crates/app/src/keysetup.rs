@@ -78,6 +78,29 @@ pub fn looks_right(pattern: &str, value: &str) -> bool {
     Regex::new(pattern).is_ok_and(|r| r.is_match(value.trim()))
 }
 
+/// The keys found in what's pasted or in a file (as the web app's keysFrom): Google's credentials file
+/// (its client_id and client_secret), or any text with keys of the right look in it; each field's
+/// place, and its key
+pub fn keys_from(plat: &str, text: &str) -> Vec<(usize, String)> {
+    let Some(s) = setup(plat) else { return Vec::new() };
+    if plat == "youtube" {
+        if let Ok(j) = serde_json::from_str::<serde_json::Value>(text) {
+            let c = if j["installed"].is_object() { &j["installed"] } else if j["web"].is_object() { &j["web"] } else { &j };
+            if let Some(id) = c["client_id"].as_str() {
+                let mut out = vec![(0, id.to_string())];
+                if let Some(sec) = c["client_secret"].as_str() { out.push((1, sec.to_string())); }
+                return out;
+            }
+        }
+    }
+    let words: Vec<&str> = text.split(|c: char| c.is_whitespace() || "\"',:;={}[]".contains(c)).filter(|w| !w.is_empty()).collect();
+    let mut out: Vec<(usize, String)> = Vec::new();
+    for (i, (_, _, re)) in s.fields.iter().enumerate() {
+        if let Some(hit) = words.iter().find(|w| looks_right(re, w) && !out.iter().any(|(_, v)| v == *w)) { out.push((i, hit.to_string())); }
+    }
+    out
+}
+
 /// Whether a platform's keys are set already
 pub fn has_keys(plat: &str) -> bool {
     omnipulse_core::config_status()[plat].as_bool() == Some(true)
@@ -85,6 +108,14 @@ pub fn has_keys(plat: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn keys_come_out_of_googles_file() {
+        let file = r#"{"installed":{"client_id":"123-abc.apps.googleusercontent.com","client_secret":"GOCSPX-abcdefghijkl"}}"#;
+        assert_eq!(super::keys_from("youtube", file), vec![(0, "123-abc.apps.googleusercontent.com".to_string()), (1, "GOCSPX-abcdefghijkl".to_string())]);
+        assert_eq!(super::keys_from("youtube", "id: 123-abc.apps.googleusercontent.com secret GOCSPX-abcdefghijkl").len(), 2);
+        assert!(super::keys_from("youtube", "nothing here").is_empty());
+    }
+
     #[test]
     fn keys_are_checked() {
         let sp = super::setup("spotify").unwrap();

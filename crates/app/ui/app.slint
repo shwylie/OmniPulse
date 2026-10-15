@@ -1445,6 +1445,8 @@ export component AppWindow inherits Window {
     callback ks-copy(int, int);
     callback ks-set(int, string);
     callback ks-save();
+    /// a file with the keys in it, read for them
+    callback ks-file();
     // a Settings row's own settings (a plugin's): its key; the dialog with its fields
     callback set-more(string);
     in-out property <bool> pf-open;
@@ -3994,6 +3996,7 @@ export component AppWindow inherits Window {
                 HorizontalLayout {
                     alignment: end;
                     spacing: 8px;
+                    Pill { label: "From a File..."; tip: "A file with the keys in it, such as Google's credentials file: they're filled in for you"; clicked => { root.ks-file(); } }
                     Pill { label: "Cancel"; clicked => { root.ks-open = false; } }
                     Pill { label: "Save and sign in"; on: true; clicked => { root.ks-save(); } }
                 }

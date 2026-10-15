@@ -5716,6 +5716,16 @@ fn ks_open(shared: &Shared, plat: &str, account: usize) {
     ui.set_ks_open(true);
 }
 
+/// Keys found (pasted, or in a file): each into its box, and what was found said
+fn ks_take(shared: &Shared, found: Vec<(usize, String)>) {
+    let Some(plat) = KS.with(|k| k.borrow().as_ref().map(|x| x.0.clone())) else { return };
+    let Some(s) = keysetup::setup(&plat) else { return };
+    KS.with(|k| { if let Some(x) = k.borrow_mut().as_mut() { for (i, v) in &found { if let Some(f) = x.2.get_mut(*i) { *f = v.clone(); } } } });
+    ks_paint(shared);
+    let names: Vec<&str> = found.iter().filter_map(|(i, _)| s.fields.get(*i).map(|f| f.1)).collect();
+    if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_ks_note(format!("Found the {}.", names.join(" and ")).into()); }
+}
+
 fn ks_paint(shared: &Shared) {
     let Some((plat, _, vals)) = KS.with(|k| k.borrow().clone()) else { return };
     let Some(s) = keysetup::setup(&plat) else { return };
@@ -8827,6 +8837,13 @@ fn main() -> Result<(), slint::PlatformError> {
     });
     let s = shared.clone();
     ui.on_ks_set(move |i, v| {
+        // (a credentials file's text, or several keys, pasted in: each to its own box, as the web app's)
+        let plat = KS.with(|k| k.borrow().as_ref().map(|x| x.0.clone())).unwrap_or_default();
+        let found = keysetup::keys_from(&plat, &v);
+        if !found.is_empty() && !(found.len() == 1 && found[0] == (i as usize, v.trim().to_string())) {
+            ks_take(&s, found);
+            return;
+        }
         KS.with(|k| { if let Some(x) = k.borrow_mut().as_mut() { if let Some(f) = x.2.get_mut(i as usize) { *f = v.to_string(); } } });
         // (the ticks: only the labels change while a key is typed)
         let Some((plat, _, vals)) = KS.with(|k| k.borrow().clone()) else { return };
@@ -8842,6 +8859,20 @@ fn main() -> Result<(), slint::PlatformError> {
     });
     let s = shared.clone();
     ui.on_ks_save(move || ks_save(&s));
+    // (a file with the keys in it, such as Google's credentials file: read for them)
+    let s = shared.clone();
+    ui.on_ks_file(move || {
+        let Some(plat) = KS.with(|k| k.borrow().as_ref().map(|x| x.0.clone())) else { return };
+        let Some(path) = rfd::FileDialog::new().set_title("A file with your keys in it").pick_file() else { return };
+        let text = std::fs::metadata(&path).ok().filter(|m| m.len() < 65536).and_then(|_| std::fs::read_to_string(&path).ok()).unwrap_or_default();
+        let found = keysetup::keys_from(&plat, &text);
+        if found.is_empty() {
+            let name = keysetup::setup(&plat).map(|x| x.name).unwrap_or("it");
+            if let Some(ui) = s.borrow().ui.upgrade() { ui.set_ks_note(format!("That file has no keys for {name} in it.").into()); }
+            return;
+        }
+        ks_take(&s, found);
+    });
     let s = shared.clone();
     ui.on_set_more(move |key| {
         if let Some(id) = key.strip_prefix("plugOn_") { return pf_open(&s, id); }
