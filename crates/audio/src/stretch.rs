@@ -71,6 +71,9 @@ impl Bend {
     fn reset(&mut self) {
         use rubato::Resampler as _;
         self.r.reset();
+        // (rubato's reset puts the ratio back to the one it was made with, a mix's key shift: the pitch
+        // it's at kept, or a seek after the bend back would play it shifted, and fast, again)
+        let _ = self.r.set_resample_ratio(1.0 / self.applied, false);
         self.held = [Vec::new(), Vec::new()];
         self.skip = self.r.output_delay();
     }
@@ -249,6 +252,24 @@ mod tests {
         assert!((40..=48).contains(&n), "{n}");
         // and where it is in the track, in the track's own time
         assert!(s.position_ms().unwrap() >= 3800, "{:?}", s.position_ms());
+    }
+
+    #[test]
+    fn a_seek_after_the_key_bends_back_stays_in_its_own_key() {
+        let rate = 44_100;
+        let mut s = Stretched::shifted(Box::new(Tone::new(rate, 440.0, 0.3, 6.0)), Tempo::new(1.0), 3).unwrap();
+        // (bent back to its own key, then sought)
+        s.pitch().set(1.0);
+        let mut out = Vec::new();
+        while out.len() < rate as usize * 2 { s.read(&mut out).unwrap(); }
+        s.seek(1000).unwrap();
+        let mut out = Vec::new();
+        while out.len() < rate as usize * 2 * 2 { s.read(&mut out).unwrap(); }
+        // 440 Hz, not 523 (three semitones up): about 44 upward crossings in 0.1 s
+        let mid = out.len() / 2;
+        let ch: Vec<f32> = out[mid..mid + 2 * 4410].chunks(2).map(|f| f[0]).collect();
+        let n = ch.windows(2).filter(|w| w[0] < 0.0 && w[1] >= 0.0).count();
+        assert!((40..=48).contains(&n), "{n}");
     }
 
     /// Clicks every half second (one sample each), for where the sound comes out

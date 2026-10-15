@@ -3576,6 +3576,10 @@ fn mix_tick(shared: &Shared, pos: u64, dur: u64) {
         let mut m = m.borrow_mut();
         if let Some(MixPhase::Mixing { plan, tempo, eased_from, ease_ms, out, began, pitch }) = m.as_mut() {
             let engine = shared.borrow().engine.clone();
+            // (its key shift only matters while both are heard: back to its own key over the mix's last
+            // quarter, as the one going out fades, so it's at its own pitch by the end, never after)
+            if began.elapsed().as_millis() as u64 >= plan.ms * 3 / 4 { pitch_back_start(pitch, (plan.ms / 4).max(1)); }
+            let engine = engine;
             // (the one going out slowed into the next one's tempo as far through as the mix is, and the next
             // one with it, from the other's tempo to its own: at its own by the end, nothing to ease back)
             if let Some(o) = out.clone() {
