@@ -203,6 +203,9 @@ pub async fn find(plat: &str, q: &str, local: &[Track]) -> Vec<Track> {
             Some(id) => core::youtube::radio(&id).await.map(|l| l.iter().map(Track::youtube).filter(|t| matches!(&t.src, Src::YouTube(x) if *x == id)).take(1).collect()).unwrap_or_default(),
             None => core::youtube::search(q).await.map(|l| l.iter().map(Track::youtube).collect()).unwrap_or_default(),
         },
+        "musicbrainz" => core::musicbrainz::search(q).await.map(|l| l.iter().filter_map(Track::musicbrainz).collect()).unwrap_or_default(),
+        "catalog" => core::catalog::search(q).await.map(|l| l.iter().filter_map(Track::catalog).collect()).unwrap_or_default(),
+        "plugins" => crate::sources::search_plugins(q).await,
         "local" => {
             let want = words(q);
             local.iter().filter(|t| { let have = words(&format!("{} {} {}", t.title, t.artist, t.album)); want.iter().all(|w| have.contains(w)) }).take(10).cloned().collect()

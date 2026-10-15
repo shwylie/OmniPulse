@@ -2389,7 +2389,8 @@ export component AppWindow inherits Window {
                         vertical-stretch: 1;
                         VerticalLayout {
                             spacing: 22px;
-                            HorizontalLayout {
+                            // (Discover's own: not on the Streamer Mode page, as the web app's)
+                            if root.page != "streamer": HorizontalLayout {
                                 alignment: start;
                                 spacing: 8px;
                                 Chip { label: "I'm Feeling Lucky"; on: true; clicked => { root.lucky(); } }

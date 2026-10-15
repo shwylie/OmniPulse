@@ -487,6 +487,8 @@ fn paint_sides(a: &mut App) {
         .filter(|&i| !hidden.contains(&mirror::side_id(a.playlists[i].plat, &a.playlists[i].id)))
         // (the ones you hid, with Hidden & Not Recommended on)
         .filter(|&i| !hide::on(&prefs) || !prefs["hiddenByYou"].as_array().is_some_and(|l| l.iter().any(|x| x.as_str() == Some(a.playlists[i].id.as_str()))))
+        // (and the playlists, while Stream-Safe Music is on)
+        .filter(|_| !streamsafe::on(&prefs))
         .collect();
     let sides: Vec<Side> = a.side_map.iter().map(|&i| Side { title: a.playlists[i].title.clone().into(), plat: if xpl::is_own(&a.playlists[i].id) { "xpl".into() } else { a.playlists[i].plat.into() }, own: xpl::is_own(&a.playlists[i].id), share: a.playlists[i].plat != "local" || xpl::is_own(&a.playlists[i].id), sc: share::platform_id(&a.playlists[i], &a.xpl, "soundcloud").is_some(), sp: share::platform_id(&a.playlists[i], &a.xpl, "spotify").is_some(), collab: collab_of(&a.xpl, &a.playlists[i].id).is_some(), collab_owner: collab_of(&a.xpl, &a.playlists[i].id).is_some_and(|c| c["owner"].as_bool() == Some(true)), merged: a.xpl.as_array().is_some_and(|l| l.iter().any(|x| x["id"].as_str() == Some(a.playlists[i].id.as_str()) && x["merged"].as_array().is_some_and(|m| !m.is_empty()))) }).collect();
     ui.set_sides(ModelRc::from(Rc::new(VecModel::from(sides))));
@@ -583,12 +585,21 @@ fn open_search(shared: &Shared, q: String) {
     // the plugins asked at once too; their results (slower: the Internet Archive) join once they're in,
     // ranked with the rest
     let (rt, weak) = { let a = shared.borrow(); (a.rt.clone(), a.ui.clone()) };
+    let local: Vec<Track> = {
+        let a = shared.borrow();
+        if !plat_on(&a.web.prefs, "local") { Vec::new() } else {
+            let want = requests::words(&q);
+            a.library.iter().filter(|t| t.plat() == "local").filter(|t| { let have = requests::words(&format!("{} {} {}", t.title, t.artist, t.album)); !want.is_empty() && want.iter().all(|w| have.contains(w)) }).take(50).cloned().collect()
+        }
+    };
     let token = { let mut a = shared.borrow_mut(); a.token += 1; a.token };
     SHARED.with(|s| *s.borrow_mut() = Some(shared.clone()));
     rt.spawn(async move {
         let q2 = q.clone();
         let late = tokio::spawn(async move { sources::search_plugins(&q2).await });
-        let t = sources::search(&q).await;
+        let mut t = sources::search(&q).await;
+        // (your music files too, with that platform on, as the web app's: ranked with the rest)
+        if !local.is_empty() { t = sources::rank(&q, sources::interleave(vec![t, local])); }
         let title = format!("Results for \"{q}\"");
         let sub = if t.is_empty() { "Nothing found.".to_string() } else { plural(t.len(), "track", "tracks") + ", best match first." };
         let _ = weak.upgrade_in_event_loop(move |_| SHARED.with(|s| {
@@ -2434,7 +2445,15 @@ fn paint_queue(a: &mut App) {
 }
 
 fn paint_queue_rows(a: &mut App, coming: Option<usize>) {
-    let panel = a.queue.panel();
+    // (Stream-Safe Music on: what isn't safe isn't shown, as the web app's; its heading goes to the next)
+    let safe = streamsafe::on(&a.web.prefs).then(|| a.web.prefs.clone());
+    let mut carry = String::new();
+    let panel: Vec<(usize, &queue::QItem, String)> = a.queue.panel().into_iter().filter_map(|(i, q, head)| {
+        let hide = safe.as_ref().is_some_and(|p| Some(i) != a.queue.qi && !streamsafe::ok(p, &q.t));
+        if hide { if !head.is_empty() { carry = head; } return None; }
+        let head = if head.is_empty() && !carry.is_empty() { std::mem::take(&mut carry) } else { carry.clear(); head };
+        Some((i, q, head))
+    }).collect();
     let marks = marks_of(a);
     let map: Vec<usize> = panel.iter().map(|p| p.0).collect();
     let rows: Vec<Row> = panel
@@ -2445,7 +2464,7 @@ fn paint_queue_rows(a: &mut App, coming: Option<usize>) {
             r.auto = q.auto;
             // (as the web app's: "requested by" a chat request; one that isn't safe on stream greyed)
             r.added_by = q.by.clone().into();
-            r.dim = streamsafe::on(&a.web.prefs) && !streamsafe::ok(&a.web.prefs, &q.t);
+
             r.coming = Some(*i) == coming;
             // (its cover, if it's in already; the rest come in rows_art)
             if let Some(img) = ROW_ART.with(|c| c.borrow().map.get(&thumb_url(&q.t)).cloned()) { r.art = img; }
@@ -4509,7 +4528,12 @@ fn song_request(shared: &Shared, id: u64, q: String, user: String) {
     let local: Vec<Track> = a.library.iter().filter(|t| t.plat() == "local").cloned().collect();
     if integrations::on(&prefs, "localOn") && !local.is_empty() { plats.push("local"); }
     if integrations::on(&prefs, "ytOn") { plats.push("youtube"); }
-    let names = plats.iter().map(|p| match *p { "soundcloud" => "SoundCloud", "spotify" => "Spotify", "local" => "your files", _ => "YouTube Music" }).collect::<Vec<_>>().join(" or ");
+    // (and the ones without an account, as search has them: MusicBrainz, the catalogues, plugins)
+    let yt_ok = omnipulse_core::tools::ytdlp_path().is_some();
+    if yt_ok && sources::MUSICBRAINZ.load(std::sync::atomic::Ordering::Relaxed) { plats.push("musicbrainz"); }
+    if yt_ok && sources::CATALOG.load(std::sync::atomic::Ordering::Relaxed) { plats.push("catalog"); }
+    if !plugrun::players().is_empty() { plats.push("plugins"); }
+    let names = plats.iter().map(|p| match *p { "soundcloud" => "SoundCloud", "spotify" => "Spotify", "local" => "your files", "musicbrainz" => "MusicBrainz", "catalog" => "the catalogues", "plugins" => "your plugins", _ => "YouTube Music" }).collect::<Vec<_>>().join(" or ");
     let base = vec![("user", who.clone()), ("query", q.clone()), ("platform", names)];
     if !integrations::set(&prefs, "req") || plats.is_empty() { reply(req_fail(&prefs, &base, "closed", vec![])); return; }
     if q.is_empty() { reply(req_fail(&prefs, &base, "empty", vec![])); return; }
@@ -5487,6 +5511,9 @@ fn nav_ids(prefs: &serde_json::Value) -> Vec<String> {
     ids.sort_by_key(|id| rank(id));
     let off = |key: &str| prefs[key].as_bool() == Some(false);
     ids.retain(|id| !(id == "navFavourites" && off("favPage")) && !(id == "navSets" && off("setsOn")) && !(id == "navStats" && off("statsShown")));
+    // (Stream-Safe Music on: the Streamer Mode page stands in for Discover, Rediscover, the Library,
+    // Favourites, Sets & Podcasts and Artists, which are hidden meanwhile, as the web app's)
+    if streamsafe::on(prefs) { ids.retain(|id| id == "navDiscover" || id == "navStats"); }
     ids
 }
 
@@ -8238,10 +8265,13 @@ fn safe_set(shared: &Shared, on: bool) {
             ui.set_status(if on { format!("Streamer Mode: only music that's safe on stream shows and plays{}", if private { ", and private info is hidden." } else { "." }) } else { "Stream-Safe Music off.".to_string() }.into());
         }
     }
-    // the Streamer Mode page takes Discover's place while it's on (and gives it back after)
+    // the Streamer Mode page takes the place of the pages it stands in for while it's on (and on one of
+    // them, it opens); off, from it, back to the Library (as the web app's streamerPageSync)
     let page = shared.borrow().page.clone();
-    if on && page == "discover" { open_streamer(shared); }
-    if !on && (page == "streamer" || page == "streamcoll") { open_page(shared, "discover"); }
+    nav_paint(shared);
+    paint_sides(&mut shared.borrow_mut());
+    if on && matches!(page.as_str(), "discover" | "rediscover" | "library" | "favourites" | "sets" | "artists" | "playlist" | "artist") { open_streamer(shared); }
+    if !on && (page == "streamer" || page == "streamcoll") { go(shared, Place::Page("library".into())); }
     // what's playing now, if it isn't safe, goes
     if on && shared.borrow().loaded && !shared.borrow().queue.current().is_some_and(|t| streamsafe::ok(&shared.borrow().web.prefs, t)) {
         start(shared);
