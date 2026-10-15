@@ -47,7 +47,7 @@ export global Dnd {
 
 // (and for its menu, as the web app's: its artists one by one, its uploader if it's someone else, a
 // like and a star, where it opens, Stream-Safe Music's Allow / Stop allowing)
-export struct Row { versions: string, version: bool, title: string, artist: string, album: string, dur: string, plat: string, playing: bool, head: string, auto: bool, art: image, liked: bool, sc-link: bool, sp-link: bool, yt-link: bool, picked: bool, genres: [string], added-by: string, artists: [string], uploader: string, can-like: bool, fav: bool, fav-on: bool, open-label: string, cleared: string, coming: bool }
+export struct Row { dim: bool, versions: string, version: bool, title: string, artist: string, album: string, dur: string, plat: string, playing: bool, head: string, auto: bool, art: image, liked: bool, sc-link: bool, sp-link: bool, yt-link: bool, picked: bool, genres: [string], added-by: string, artists: [string], uploader: string, can-like: bool, fav: bool, fav-on: bool, open-label: string, cleared: string, coming: bool }
 // (merged: playlists combined into it, to unmerge)
 export struct Side { title: string, plat: string, own: bool, share: bool, sc: bool, sp: bool, collab: bool, collab-owner: bool, merged: bool }
 /// A platform in the title bar: on (in its colours), set up (ready; grey until it is), its name
@@ -3536,12 +3536,15 @@ export component AppWindow inherits Window {
                                     padding-left: 6px;
                                     spacing: 10px;
                                     // (its cover with the platform's badge, as the web app's queue)
-                                    BadgedCover { art: q.art; initial: q.title; plat: q.plat; badge: 16px; corner: 4px; width: 38px; height: 38px; y: (parent.height - self.height) / 2; opacity: q.auto ? 0.75 : 1; }
+                                    BadgedCover { art: q.art; initial: q.title; plat: q.plat; badge: 16px; corner: 4px; width: 38px; height: 38px; y: (parent.height - self.height) / 2; opacity: q.auto || q.dim ? 0.6 : 1; }
                                     VerticalLayout {
                                         alignment: center;
+                                        opacity: q.dim ? 0.5 : 1;
                                         Text { text: q.title; color: q.playing ? Theme.accent : Theme.text; font-weight: 600; font-size: 13px; overflow: elide; }
-                                        Text { text: q.artist; color: Theme.muted; font-size: 12px; overflow: elide; }
+                                        // (a chat request: who asked for it, as the web app's)
+                                        Text { text: q.artist + (q.added-by != "" ? "  \u{b7}  requested by " + q.added-by : ""); color: Theme.muted; font-size: 12px; overflow: elide; }
                                     }
+                                    Rectangle { width: 30px; }
                                 }
                                 Rectangle {
                                     DragArea {
@@ -3558,6 +3561,19 @@ export component AppWindow inherits Window {
                                         queue-row: true;
                                         act(a) => { if (a == "play") { root.play-queue(i); } else { root.queue-action(i, a); } }
                                     }
+                                }
+                                // (each one coming up: a cross takes it out, as the web app's)
+                                if !q.playing: Rectangle {
+                                    x: parent.width - 32px;
+                                    y: (parent.height - self.height) / 2;
+                                    width: 26px;
+                                    height: 26px;
+                                    border-radius: 13px;
+                                    opacity: qta.has-hover || xta.has-hover ? 1 : 0;
+                                    background: xta.has-hover ? Theme.elevated : transparent;
+                                    Glyph { d: Icons.close; width: 14px; height: 14px; fill: xta.has-hover ? Theme.text : Theme.muted; }
+                                    xta := TouchArea { mouse-cursor: MouseCursor.pointer; clicked => { root.queue-action(i, "remove"); } }
+                                    TipSpot { tip: "Remove from queue"; hover: xta.has-hover; }
                                 }
                             }
                         }

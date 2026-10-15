@@ -409,12 +409,14 @@ fn open_page(shared: &Shared, page: &str) {
             });
         }
         "rediscover" => {
-            let (mut pool, lp) = { let a = shared.borrow(); (a.library.clone(), a.web.last_played.clone()) };
+            let (mut pool, h) = { let a = shared.borrow(); (a.library.clone(), heard(&a)) };
             let cut = now_ms().saturating_sub(MONTH_MS);
-            pool.retain(|t| lp.get(&t.key).copied().unwrap_or(0) < cut);
-            { let prefs = shared.borrow().web.prefs.clone(); pool.retain(|t| hide::rec_ok(&prefs, t)); }
+            pool.retain(|t| h.last(t) < cut);
+            { let prefs = shared.borrow().web.prefs.clone(); pool.retain(|t| hide::rec_ok(&prefs, t) && plat_on(&prefs, t.plat())); }
             queue::shuffle_in_place(&mut pool);
-            pool.sort_by_key(|t| lp.get(&t.key).copied().unwrap_or(0));   // never played first
+            pool.sort_by_key(|t| h.last(t));   // never played first
+            // (an even split: one platform, then the next, as the web app's alternatePlatforms)
+            let pool = queue::alternate_platforms(pool);
             let none = { let a = shared.borrow(); a.web.favourites.is_empty() && !a.library.iter().any(|t| t.plat() != "local") };
             // (nothing liked yet: asked for some, as the web app's card)
             let sub = if none { "Get better recommendations: add some music to your likes or favourites (the heart or the star on any song), and Discover and Rediscover will be built around it.".to_string() } else if pool.is_empty() { "You've played all your likes recently.".to_string() } else { "Likes you haven't heard in a month or more, the longest-forgotten first.".to_string() };
@@ -2441,6 +2443,9 @@ fn paint_queue_rows(a: &mut App, coming: Option<usize>) {
             let mut r = row_menu(a, &marks, &q.t, q.t.row(Some(*i) == a.queue.qi));
             r.head = head.as_str().into();
             r.auto = q.auto;
+            // (as the web app's: "requested by" a chat request; one that isn't safe on stream greyed)
+            r.added_by = q.by.clone().into();
+            r.dim = streamsafe::on(&a.web.prefs) && !streamsafe::ok(&a.web.prefs, &q.t);
             r.coming = Some(*i) == coming;
             // (its cover, if it's in already; the rest come in rows_art)
             if let Some(img) = ROW_ART.with(|c| c.borrow().map.get(&thumb_url(&q.t)).cloned()) { r.art = img; }
@@ -4029,13 +4034,20 @@ fn autoplay_fill(shared: &Shared, then_play: bool) -> bool {
         let local: Vec<Track> = a.library.iter().filter(|t| t.plat() == "local").cloned().collect();
         let last_plat = a.queue.items.last().map(|q| q.t.plat()).unwrap_or("");
         let taken: std::collections::HashSet<String> = a.queue.items.iter().map(|q| q.t.key.clone()).collect();
-        (seed, a.rt.clone(), a.ui.clone(), local, last_plat, taken, a.web.prefs.clone(), a.web.last_played.clone())
+        (seed, a.rt.clone(), a.ui.clone(), local, last_plat, taken, a.web.prefs.clone(), heard(&a))
+    };
+    // (SoundCloud's similar tracks from a SoundCloud song played earlier too, picked at random, as the
+    // web app's)
+    let earlier: Option<Track> = {
+        let a = shared.borrow();
+        let before: Vec<&Track> = a.queue.items.iter().take(a.queue.qi.unwrap_or(0)).map(|q| &q.t).filter(|t| t.plat() == "soundcloud" && t.key != seed.key).collect();
+        (!before.is_empty()).then(|| before[(rand_u64() as usize) % before.len()].clone())
     };
     let mix_on = integrations::on(&prefs, "mixOn");
     rt.spawn(async move {
         let want = |p: &str, key: &str| pref_on(&prefs, key) && (p != "local" || !local.is_empty());
         let (sc, sp, yt) = tokio::join!(
-            async { if want("soundcloud", "scOn") { sources::autoplay_soundcloud(&seed).await } else { Vec::new() } },
+            async { if want("soundcloud", "scOn") { sources::autoplay_soundcloud(&seed, earlier.as_ref()).await } else { Vec::new() } },
             async { if want("spotify", "spOn") { sources::autoplay_spotify(&seed).await } else { Vec::new() } },
             async { if want("youtube", "ytOn") { sources::autoplay_youtube(&seed).await } else { Vec::new() } },
         );
@@ -4051,10 +4063,14 @@ fn autoplay_fill(shared: &Shared, then_play: bool) -> bool {
         };
         let avoid = pref_on(&prefs, "avoidRecent");
         let now = now_ms();
+        // (and only the language of recommendations, as the web app's langOk: what can't be placed stays)
+        let want_lang = discover::lang_of(&prefs);
+        let lang_ok = move |t: &Track| { if want_lang == "any" { return true; } let d = lang::detect(&t.title); d == "unknown" || d.ends_with('?') || d == want_lang };
         let ok = |within: u64| {
-            let lp = &last_played;
+            let h = &last_played;
             let prefs = &prefs;
-            move |t: &Track| (sets || !t.is_mix()) && !(avoid && lp.get(&t.key).is_some_and(|&ts| now.saturating_sub(ts) < within)) && streamsafe::allowed(prefs, t) && hide::rec_ok(prefs, t) && !hide::no_version(prefs, t)
+            let lang_ok = lang_ok.clone();
+            move |t: &Track| (sets || !t.is_mix()) && !(avoid && now.saturating_sub(h.last(t)) < within) && streamsafe::allowed(prefs, t) && hide::rec_ok(prefs, t) && !hide::no_version(prefs, t) && lang_ok(t)
         };
         let mut picks = queue::take_turns(lists.clone(), last_plat, &taken, ok(window));
         if picks.is_empty() && avoid {
@@ -5931,6 +5947,26 @@ thread_local! {
 thread_local! {
     /// when a song that isn't measured went quiet (Skip Silences, by its level)
     static QUIET_SINCE: std::cell::Cell<Option<std::time::Instant>> = const { std::cell::Cell::new(None) };
+    /// where the watch saw it last (it only counts while the position moves)
+    static LAST_WATCH_POS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
+/// What isn't measured: silent (below -55 dB, its peaks below -40, as the measurement's) for that long
+/// while it plays, and not in its last 3 s: on to the next one. True if it moved on.
+fn silence_watch(shared: &Shared, engine: &Engine, pos: u64, dur: u64, skip: u64) -> bool {
+    let moving = LAST_WATCH_POS.with(|p| { let was = p.get(); p.set(pos); pos > was });
+    if skip == 0 || listening().is_some() || MIX.with(|m| m.borrow().is_some()) { QUIET_SINCE.with(|q| q.set(None)); return false; }
+    if !moving { return false; }
+    let (rms, peak) = engine.level();
+    if !(rms < -55.0 && peak < -40.0) { QUIET_SINCE.with(|q| q.set(None)); return false; }
+    let since = QUIET_SINCE.with(|q| { if q.get().is_none() { q.set(Some(std::time::Instant::now())); } q.get().unwrap() });
+    if since.elapsed().as_millis() as u64 >= skip && (dur == 0 || dur.saturating_sub(pos) > 3000) {
+        QUIET_SINCE.with(|q| q.set(None));
+        if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_status(format!("Moved on after {} s of silence.", skip / 1000).into()); }
+        step(shared, 1);
+        return true;
+    }
+    false
 }
 
 /// Each tick while playing: long silences jumped over, the fade out at the end. True if it moved on.
@@ -5941,21 +5977,15 @@ fn fade_and_silences(shared: &Shared, pos: u64, dur: u64) -> bool {
         let an = a.cur_loud.as_ref().and_then(|k| a.analysis.get(k)).cloned();
         (an, t.key.clone(), fade_out_ms(&a), sound::skip_silence_ms(&a.web.prefs), a.engine.clone())
     };
-    let Some(an) = an else {
-        // (not measured, as Spotify's songs aren't: its level watched as it plays, and on to the next
-        // after that long in silence, as the web app's)
-        if skip == 0 || listening().is_some() || MIX.with(|m| m.borrow().is_some()) { QUIET_SINCE.with(|q| q.set(None)); return false; }
-        let quiet = engine.level().0 < -60.0 && pos > 3000;
-        if !quiet { QUIET_SINCE.with(|q| q.set(None)); return false; }
-        let since = QUIET_SINCE.with(|q| { if q.get().is_none() { q.set(Some(std::time::Instant::now())); } q.get().unwrap() });
-        if since.elapsed().as_millis() as u64 >= skip {
-            QUIET_SINCE.with(|q| q.set(None));
-            if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_status(format!("Moved on after {} s of silence.", skip / 1000).into()); }
-            step(shared, 1);
-            return true;
-        }
-        return false;
-    };
+    // (not measured, as Spotify's songs aren't, or past what was measured of a long set: its level
+    // watched as it plays, and on to the next after that long in silence, as the web app's)
+    let measured_to = an.as_ref().map(|a| a["analysed_ms"].as_u64().unwrap_or(0));
+    if measured_to.is_none_or(|m| m > 0 && pos >= m) {
+        if silence_watch(shared, &engine, pos, dur, skip) { return true; }
+    } else {
+        QUIET_SINCE.with(|q| q.set(None));
+    }
+    let Some(an) = an else { return false };
     let _ = &key;
     if dur == 0 {
         return false;

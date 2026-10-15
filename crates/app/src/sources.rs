@@ -759,17 +759,25 @@ fn first_artist(t: &Track) -> String {
     t.artist.split([',', '&']).next().unwrap_or("").trim().to_string()
 }
 
-pub async fn autoplay_soundcloud(seed: &Track) -> Vec<Track> {
+/// SoundCloud's similar tracks: from the song playing and a SoundCloud song played earlier (as the web
+/// app's apSoundCloud); a song from elsewhere found on SoundCloud first, by its artist and title
+pub async fn autoplay_soundcloud(seed: &Track, earlier: Option<&Track>) -> Vec<Track> {
     if !core::soundcloud::signed_in() {
         return Vec::new();
     }
-    let mut out = match &seed.src {
-        Src::SoundCloud(_) => related(seed).await,
-        _ => match sc_search(&format!("{} {}", first_artist(seed), seed.title), 5).await.into_iter().next() {
-            Some(found) => related(&found).await,
-            None => Vec::new(),
-        },
+    let first = match &seed.src {
+        Src::SoundCloud(_) => Some(seed.clone()),
+        _ => {
+            let (artist, title) = crate::versions::guess_names(seed);
+            let who = if matches!(seed.src, Src::Spotify(_)) || artist.is_empty() { first_artist(seed) } else { artist };
+            sc_search(&format!("{who} {title}"), 5).await.into_iter().next()
+        }
     };
+    let (a, b) = tokio::join!(
+        async { match &first { Some(t) => related(t).await, None => Vec::new() } },
+        async { match earlier { Some(t) => related(t).await, None => Vec::new() } },
+    );
+    let mut out: Vec<Track> = a.into_iter().chain(b).collect();
     crate::queue::shuffle_in_place(&mut out);
     out
 }

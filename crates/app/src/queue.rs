@@ -281,6 +281,22 @@ pub fn fair_shuffle(list: Vec<Track>, last_played: &HashMap<String, u64>) -> Vec
     never
 }
 
+/// Takes turns between platforms: A, B, A, B... each one's own order kept; once only one has tracks
+/// left the list stops there, so the same platform never plays twice in a row, unless it's the only
+/// one in the list (the web app's alternatePlatforms)
+pub fn alternate_platforms(list: Vec<Track>) -> Vec<Track> {
+    let mut by: Vec<(&'static str, std::collections::VecDeque<Track>)> = Vec::new();
+    for t in list {
+        let p = t.plat();
+        match by.iter_mut().find(|x| x.0 == p) { Some(x) => x.1.push_back(t), None => by.push((p, std::collections::VecDeque::from([t]))) }
+    }
+    if by.len() < 2 { return by.into_iter().flat_map(|x| x.1).collect(); }
+    let rounds = by.iter().map(|x| x.1.len()).min().unwrap_or(0);
+    let mut out = Vec::new();
+    for _ in 0..rounds { for x in by.iter_mut() { out.extend(x.1.pop_front()); } }
+    out
+}
+
 /// Shuffling your Library or a playlist (as the web app's spaceRecent): what you've heard within the
 /// time frame comes up by how much of the list it is: 10% of it, once every 10 songs; 50%, once every
 /// 2. The rest play in between, in the order given.
@@ -361,6 +377,13 @@ pub fn take_turns(mut lists: Vec<(&'static str, Vec<Track>)>, last_plat: &str, t
 mod tests {
     use super::*;
     use crate::track::Src;
+
+    #[test]
+    fn platforms_take_turns() {
+        let list = vec![t("a1", "x", true), t("a2", "x", true), t("a3", "x", true), t("b1", "y", false), t("b2", "y", false)];
+        let keys: Vec<String> = alternate_platforms(list).into_iter().map(|x| x.key).collect();
+        assert_eq!(keys, ["a1", "b1", "a2", "b2"]);
+    }
 
     fn t(key: &str, artist: &str, sc: bool) -> Track {
         Track { src: if sc { Src::SoundCloud(1) } else { Src::YouTube(key.into()) }, key: key.into(), title: key.into(), artist: artist.into(), album: String::new(), ms: 200_000, art: String::new(), genre: String::new(), link: String::new(), go_plus: false, ..Default::default() }

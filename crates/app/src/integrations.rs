@@ -86,10 +86,13 @@ fn lfm_wanted(prefs: &Value) -> bool {
     on(prefs, "lfmOn") && set(prefs, "scrobble") && core::lastfm::lastfm_status()["connected"].as_bool() == Some(true)
 }
 
+/// Its artist and title as Last.fm knows songs (as the web app's: "Artist - Title" uploads split, the
+/// bracketed parts left out, Spotify's first artist)
 fn lfm_params(t: &Track) -> Vec<(String, String)> {
+    let (artist, title) = crate::versions::guess_names(t);
     let mut p = vec![
-        ("artist".to_string(), if t.artist.is_empty() { "Unknown".into() } else { t.artist.split(", ").next().unwrap_or(&t.artist).to_string() }),
-        ("track".to_string(), t.title.clone()),
+        ("artist".to_string(), if artist.is_empty() { "Unknown".into() } else { artist }),
+        ("track".to_string(), if title.is_empty() { if t.title.is_empty() { "Unknown".into() } else { t.title.clone() } } else { title }),
     ];
     if t.ms > 0 {
         p.push(("duration".into(), (t.ms / 1000).to_string()));

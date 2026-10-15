@@ -7,9 +7,12 @@ use crate::track::{Src, Track};
 use omnipulse_core as core;
 use serde_json::Value;
 
-/// The words in a request or a title, for matching
+/// The words in a request or a title, for matching (accents aside, as the web app's: "beyonce" is
+/// "Beyoncé")
 pub fn words(s: &str) -> Vec<String> {
-    s.to_lowercase()
+    use unicode_normalization::UnicodeNormalization;
+    let bare: String = s.nfkd().filter(|c| !('\u{300}'..='\u{36f}').contains(c)).collect();
+    bare.to_lowercase()
         .split(|c: char| !(c.is_alphanumeric()))
         .filter(|w| w.chars().count() > 1 || w.chars().any(|c| c.is_ascii_digit()))
         .map(String::from)
@@ -296,6 +299,11 @@ pub async fn pick(q: &str, plats: &[&'static str], likes: &[Track], local: &[Tra
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn accents_dont_matter() {
+        assert_eq!(words("Beyoncé - Halo"), words("beyonce halo"));
+    }
 
     fn t(title: &str, artist: &str, ms: u64) -> Track {
         Track { src: Src::YouTube(title.into()), key: title.into(), title: title.into(), artist: artist.into(), album: String::new(), ms, art: String::new(), genre: String::new(), link: String::new(), go_plus: false, ..Default::default() }

@@ -250,14 +250,18 @@ pub fn fields(name: &str, vals: &Map<String, Value>, prefs: &Value, lan: &str) -
                 stepper("widgetText", "Text Size", "", pct(0.7, 1.6, 0.1)),
                 tog("wFade", "Fade Between Tracks", ""),
                 tog("wScroll", "Scroll Long Text", ""),
-                tog("wSpin", "Spin the Record", ""),
+                // (only the Vinyl design has a record to spin, as the web app's)
+            ];
+            let mut f = f;
+            if s("widgetDesign", "card") == "vinyl" { f.push(tog("wSpin", "Spin the Record", "")); }
+            f.extend([
                 tog("wRequester", "Show Who Requested It", ""),
                 sel("wColor", "Colour Change", "", &[(json!(0), "Instant"), (json!(0.5), "Fast"), (json!(1.2), "Normal"), (json!(2.5), "Slow")]),
                 button("widgetHide", "Hide This Track", "Hide", "Until the next track."),
                 // Alerts: on the widget, so here (Settings > Streaming > Stream Widget > Alerts): a switch, as
                 // every other, with Configure beside it
                 toggle_cfg("alertsOn", "Alerts", "On the widget: follows, subs, bits, raids and more, from your bot.", "alertsOpen"),
-            ];
+            ]);
             let _ = alerts_on;
             f
         }
