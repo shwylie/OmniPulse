@@ -1332,6 +1332,9 @@ export component AppWindow inherits Window {
     in-out property <string> tp-start;
     in-out property <string> tp-end;
     in property <string> tp-note;
+    /// where its beat 1 is, moved by hand (beats; + later), for Smart Transitions (shown while they're on)
+    in-out property <int> tp-beat;
+    in property <bool> tp-beat-shown;
     // "Plays from YouTube Music" (a Go+ track, a MusicBrainz song): the versions it could play, the
     // one it plays marked
     in property <[string]> tp-versions;
@@ -4226,6 +4229,19 @@ export component AppWindow inherits Window {
                     Pill { label: "Preview the End"; clicked => { root.tp-preview(1); } }
                     Pill { label: "Whole Track"; clicked => { root.tp-whole(); } }
                 }
+                // Smart Transitions: beat 1, moved by hand where the measuring got it wrong (as a DJ app's beat grid)
+                if root.tp-beat-shown: HorizontalLayout {
+                    spacing: 8px;
+                    alignment: start;
+                    Text { text: "Beat 1"; color: Theme.text; font-size: 13px; vertical-alignment: center; }
+                    Pill { label: "Earlier"; tip: "Beat 1 a beat earlier, for blending on the beat"; clicked => { root.tp-beat = max(-8, root.tp-beat - 1); } }
+                    Text {
+                        text: root.tp-beat == 0 ? "as measured" : (abs(root.tp-beat) + (abs(root.tp-beat) == 1 ? " beat " : " beats ") + (root.tp-beat < 0 ? "earlier" : "later"));
+                        color: root.tp-beat == 0 ? Theme.muted : Theme.text; font-size: 13px; vertical-alignment: center; min-width: 110px; horizontal-alignment: center;
+                    }
+                    Pill { label: "Later"; tip: "Beat 1 a beat later"; clicked => { root.tp-beat = min(8, root.tp-beat + 1); } }
+                }
+                if root.tp-beat-shown: Text { text: "If Smart Transitions blend this song a beat or two off, move its beat 1 to where you hear the bar start (where a new section starts on it)."; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
                 if root.tp-note != "": Text { text: root.tp-note; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
                 if root.tp-versions.length > 0: Text { text: "Plays from YouTube Music"; color: Theme.muted; font-size: 12px; }
                 for v[k] in root.tp-versions: Rectangle {

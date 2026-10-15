@@ -278,6 +278,32 @@ fn ramp_time(d: f64, total: f64, target: f64) -> f64 {
     (lo + hi) / 2.0
 }
 
+/// A song with its beat 1 moved `n` beats (+ later, as Track Preferences has it): its bars from there,
+/// each one's level from its beats' (else the nearest bar's as measured)
+pub fn shifted(m: &Measured, n: i32) -> Measured {
+    if n == 0 { return m.clone(); }
+    let r = &m.rhythm;
+    let mut d = r.downbeat as i64 + n as i64;
+    while d < 0 { d += 4; }
+    let d = d as usize;
+    let mut h = m.clone();
+    h.rhythm.downbeat = d;
+    let bars = r.beats.len().saturating_sub(d) / 4;
+    // (bar k now starts on beat d + 4k: the bar as measured nearest it)
+    let near = |k: usize| (((d + 4 * k) as i64 - r.downbeat as i64 + 2).max(0) / 4) as usize;
+    let at = |v: &[f32], k: usize| v.get(near(k)).or(v.last()).copied().unwrap_or(0.0);
+    h.rhythm.bar_db = (0..bars).map(|k| {
+        let from = d + 4 * k;
+        match r.beat_db.get(from..from + 4) {
+            Some(b) => (10.0 * (b.iter().map(|x| 10f64.powf(*x as f64 / 10.0)).sum::<f64>() / 4.0).log10()) as f32,
+            None => at(&r.bar_db, k),
+        }
+    }).collect();
+    h.rhythm.bar_beat = (0..bars).map(|k| at(&r.bar_beat, k)).collect();
+    h.rhythm.bar_chroma = (0..bars).filter_map(|k| r.bar_chroma.get(near(k)).or(r.bar_chroma.last()).cloned()).collect();
+    h
+}
+
 /// A song counted at half time: every other beat a beat (from its bars' first), two of its bars a bar
 /// (paired so its 16-beat lines start one), its tempo half
 pub fn halved(m: &Measured) -> Measured {
@@ -478,6 +504,19 @@ mod tests {
     }
 
     #[test]
+    fn beat_one_moved_by_hand_moves_the_bars() {
+        let mut m = song(120.0, &levels(4, 40, 4), 0.6, "8A");
+        m.rhythm.beat_db = m.rhythm.bar_db.iter().flat_map(|d| [*d; 4]).collect();
+        let e = shifted(&m, -1);
+        // (a beat earlier: from beat 3 of four; its bars' levels from its beats, the intro's end a beat sooner)
+        assert_eq!(e.rhythm.downbeat, 3);
+        assert_eq!(e.rhythm.beats[e.rhythm.downbeat], m.rhythm.beats[3]);
+        assert!((e.rhythm.bar_db[2] - m.rhythm.bar_db[2]).abs() < 0.01 && e.rhythm.bar_db[3] > m.rhythm.bar_db[3] + 3.0);
+        assert_eq!(shifted(&m, 2).rhythm.downbeat, 2);
+        assert_eq!(shifted(&m, 0).rhythm, m.rhythm);
+    }
+
+    #[test]
     fn a_big_slowdown_is_a_speedup_from_half_time() {
         // 174 into 128: counted as 87, both sped up (B in at 87, to its own; A from 87's bars on)
         let a = song(174.0, &levels(16, 96, 16), 0.6, "8A");
@@ -570,6 +609,8 @@ mod tests {
             let (a_id, b_id) = pair.split_once(',').expect("a pair: A,B");
             let (ta, tb) = (track(a_id.trim()), track(b_id.trim()));
             let ((ma, ana), (mb, anb)) = (measure(&ta), measure(&tb));
+            let shift_of = |id: &str| std::env::var("OMNIPULSE_SMART_SHIFTS").ok().and_then(|v| v.split(',').find_map(|x| x.split_once(':').filter(|(k, _)| k.trim() == id).and_then(|(_, n)| n.trim().parse::<i32>().ok()))).unwrap_or(0);
+            let (ma, mb) = (ma.map(|m| shifted(&m, shift_of(a_id.trim()))), mb.map(|m| shifted(&m, shift_of(b_id.trim()))));
             let open = |t: &Track| rt.block_on(crate::player::open_source(t, rt.handle().clone())).expect("it opens");
             let (mut sa, sb) = (open(&ta), open(&tb));
             let a_dur = sa.duration_ms().unwrap_or(0);

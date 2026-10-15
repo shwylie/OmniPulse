@@ -1909,6 +1909,8 @@ fn tp_open(shared: &Shared, t: &Track) {
         ui.set_tp_start(if start > 0 { fmt_time(start) } else { String::new() }.into());
         ui.set_tp_end(end.map(fmt_time).unwrap_or_default().into());
         ui.set_tp_note(format!("It's {} long.", fmt_ms(t.ms)).into());
+        ui.set_tp_beat(beat_shift(&shared.borrow().web.prefs, &t.key));
+        ui.set_tp_beat_shown(smart_on(&shared.borrow().web.prefs));
         ui.set_tp_open(true);
     }
     tp_bar(shared);
@@ -2015,6 +2017,19 @@ fn tp_save(shared: &Shared, reset: bool) {
         if b <= a { ui.set_tp_note("The end has to come after the start.".into()); return; }
     }
     let (title, artist) = (ui.get_tp_title().trim().to_string(), ui.get_tp_artist().trim().to_string());
+    // (its beat 1, moved by hand: kept apart, by track)
+    let beat = if reset { 0 } else { ui.get_tp_beat() };
+    let shifts = {
+        let mut a = shared.borrow_mut();
+        let mut m = a.web.prefs["beatShifts"].as_object().cloned().unwrap_or_default();
+        if beat == 0 { m.remove(&t.key); } else { m.insert(t.key.clone(), serde_json::json!(beat)); }
+        let v = serde_json::Value::Object(m);
+        if let Some(o) = a.web.prefs.as_object_mut() { o.insert("beatShifts".into(), v.clone()); }
+        // (a pair already decided with it: decided again)
+        SMART_PAIR.with(|p| *p.borrow_mut() = None);
+        v
+    };
+    if std::env::var_os("OMNIPULSE_SELFTEST").is_none() { webstate::save_pref("beatShifts", shifts); }
     let (fixes, trims) = {
         let mut a = shared.borrow_mut();
         let mut fixes = a.web.prefs["trackFixes"].as_object().cloned().unwrap_or_default();
@@ -4529,7 +4544,8 @@ fn smart_pair(a: &App, dur: u64) -> Option<(SmartSong, SmartSong)> {
     let stated = |t: &Track| smart::stated_bpm(&t.title).or_else(|| DESCS.with(|m| m.borrow().get(&t.key).and_then(|d| smart::stated_bpm(d))));
     // (measured whole, of what it plays from: never a Spotify song measured from its YouTube Music
     // version while Spotify's own playback plays it)
-    let measured = |t: &Track, same: bool| if same && !t.is_mix() { rhythm_full(&t.key) } else { None };
+    // (its beat 1 where you've moved it, if you have)
+    let measured = |t: &Track, same: bool| if same && !t.is_mix() { rhythm_full(&t.key).map(|m| smart::shifted(&m, beat_shift(&a.web.prefs, &t.key))) } else { None };
     let an = a.cur_loud.as_ref().and_then(|k| a.analysis.get(k));
     let audible = an.and_then(|x| x["audible_ms"].as_u64()).unwrap_or(0);
     let a_side = SmartSong { rhythm: measured(&cur, MIX_OUT_OK.with(|c| c.get())), dur_ms: dur, audible_ms: audible, first_ms: 0, stated: stated(&cur), t: cur };
@@ -4996,6 +5012,11 @@ fn trim_of(prefs: &serde_json::Value, key: &str) -> (u64, Option<u64>) {
     let start = x["start"].as_f64().unwrap_or(0.0).max(0.0) as u64;
     let end = x["end"].as_f64().filter(|e| *e > 0.0).map(|e| e as u64);
     (start, end.filter(|e| *e > start))
+}
+
+/// A track's beat 1 as moved by hand (Track Preferences: beats, + later; 0 as measured)
+fn beat_shift(prefs: &serde_json::Value, key: &str) -> i32 {
+    prefs["beatShifts"][key].as_i64().unwrap_or(0).clamp(-8, 8) as i32
 }
 
 /// The playing track's (the host's while listening along: it plays as it is)
@@ -10672,6 +10693,7 @@ fn main() -> Result<(), slint::PlatformError> {
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("square") { vec![(9, "play"), (10, "unround"), (12, "nav:settings"), (13, "cat:Streaming"), (14, "panel:widget"), (16, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("qset") { vec![(9, "play"), (11, "queue"), (14, "nav:settings"), (15, "cat:App & Look"), (16, "scroll:420"), (18, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("nowslim") { vec![(9, "play"), (11, "queue"), (12, "now"), (15, "size:860:720"), (17, "size:1100:720"), (19, "size:1500:860"), (21, "end")] }
+            else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("beat1") { vec![(9, "play"), (10, "smartprep"), (12, "tprefs"), (13, "beatearlier"), (14, "tpsave"), (15, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("tp") { vec![(9, "play"), (12, "tprefs"), (13, "tpdrag"), (14, "nowmenu"), (15, "now"), (18, "end")] }
             // (OMNIPULSE_SELFTEST_PLAN=la: the look-alikes dialog, with two made up (nothing added))
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("la") { vec![(8, "lashow"), (9, "lacycle"), (10, "end")] }
@@ -11086,6 +11108,13 @@ fn main() -> Result<(), slint::PlatformError> {
                             play_list(&s, list, 0);
                         }));
                     });
+                }
+                // Track Preferences' Beat 1: a beat earlier, then saved
+                "beatearlier" => { ui.set_tp_beat(ui.get_tp_beat() - 1); println!("selftest: beat 1 shown {}, at {}", ui.get_tp_beat_shown(), ui.get_tp_beat()); }
+                "tpsave" => {
+                    ui.invoke_tp_save();
+                    let key = s.borrow().queue.current().map(|t| t.key.clone()).unwrap_or_default();
+                    println!("selftest: beat 1 saved: {} (for {key}), prefs {}", beat_shift(&s.borrow().web.prefs, &key), s.borrow().web.prefs["beatShifts"]);
                 }
                 "smartpage" => {
                     panel_open(&s, "smart");
