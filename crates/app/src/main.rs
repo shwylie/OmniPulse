@@ -3995,6 +3995,11 @@ fn mix_started(shared: &Shared) {
     let Some(n) = at else { omnipulse_core::diag::note("Seamless Mix: its moment came, but the next one wasn't next any more"); return };
     // (each beat of the one coming in, at its own tempo, for easing back over sixteen of them)
     let ease_ms = omnipulse_core::rhythm::known(&key).map(|m| (16.0 * m.rhythm.period_ms) as u64).unwrap_or(8000);
+    // (Smart Transitions' blends: back to its own tempo slowly enough not to be heard)
+    let ease_ms = if smart_on(&shared.borrow().web.prefs) && plan.beatmatched {
+        let left = shared.borrow().queue.items.get(n).map(|q| q.t.ms).unwrap_or(0).saturating_sub(plan.start_ms);
+        smart::ease_ms(left)
+    } else { ease_ms };
     audit_began(shared, &plan, format!("{} into {}", shared.borrow().queue.current().map(|t| t.title.clone()).unwrap_or_default(), shared.borrow().queue.items.get(n).map(|q| q.t.title.clone()).unwrap_or_default()));
     if plan.style.is_some() { MIX_STYLE_LAST.with(|l| l.set(plan.style)); }
     // (what it was, for rating it from the Stream Deck)

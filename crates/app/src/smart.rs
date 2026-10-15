@@ -187,10 +187,15 @@ fn sure_groups(m: &Measured) -> Option<usize> {
     groups(m).filter(|g| g.1 >= GROUPS_SURE).map(|g| g.0)
 }
 
+/// A blend's bars past its swap: the one playing's beat carried while the next one's settles in
+pub const TAIL_BARS: usize = 4;
+
 /// Tier 1: a blend on the beat, as DJs do: every 16 beats of the two together (both songs' 4-bar groups
-/// lined up: it starts, swaps and ends on lines of both), 32 beats long (else 16), the next one at the
-/// playing one's tempo (at most 4% off, its key as it is), the bass swapped on the line where the next
-/// one's main part starts. Over the one playing's last bars before its outro. None: a fade instead.
+/// lined up: it starts, swaps and ends on lines of both). Out over the one playing's outro (from the line
+/// it starts on), in from the start of the next one's intro (what each is made for): its intro to its main
+/// part as the run-up, in whole lines (16 beats, or 32; a longer intro, from 32 beats before its main
+/// part), the swap where its main part starts, then TAIL_BARS of the one playing's beat going. The next
+/// one at the playing one's tempo (at most 4% off, its key as it is). None: a fade instead.
 pub fn blend(a: &Side, b: &Side, now_ms: u64) -> Option<crate::mix::Plan> {
     if blend_blocked(a, b).is_some() { return None; }
     let (ma, mb) = (a.rhythm?, b.rhythm?);
@@ -200,30 +205,37 @@ pub fn blend(a: &Side, b: &Side, now_ms: u64) -> Option<crate::mix::Plan> {
     let bars = |m: &Measured| m.rhythm.beats.len().saturating_sub(m.rhythm.downbeat) / 4;
     let (na, nb) = (bars(ma), bars(mb));
     let on = |k: usize, g: usize| k % 4 == g % 4;
-    // the next one: from a line of its own, so its main part comes in on the swap (32 beats in, else 16);
-    // its intro too short for either: from its first line, its main part in before the swap
-    let first_b = body_line(mb).and_then(|l| mb.rhythm.bar_db.iter().position(|d| *d >= l)).unwrap_or(0);
-    let (run, from) = [8usize, 4].iter().find_map(|&r| (first_b >= r && on(first_b - r, gb)).then(|| (r, first_b - r)))
-        .unwrap_or((8, gb % 4));
-    if from + run + 1 >= nb { return None; }
-    // the one playing: the latest of its lines whose run ends on a line by its main part's end (its outro
-    // left out), at least 5 s from now, its sound not over
+    // the next one: from its first line, its intro (to its main part) the run-up
+    let s0 = gb % 4;
+    let first_b = body_line(mb).and_then(|l| mb.rhythm.bar_db.iter().position(|d| *d >= l)).unwrap_or(s0);
+    let intro = first_b.saturating_sub(s0) / 4 * 4;
+    let run = intro.clamp(4, 8);
+    let from = if intro > 8 { s0 + intro - 8 } else { s0 };
+    if from + run + TAIL_BARS >= nb { return None; }
+    // the one playing: from the line its outro starts on (where its main part ends, snapped back to a
+    // line), a line earlier at a time if that runs past its sound's end; at least 5 s from now
     let line = body_line(ma)?;
-    let last_a = ma.rhythm.bar_db.iter().rposition(|d| *d >= line)? + 1;
+    let outro = ma.rhythm.bar_db.iter().rposition(|d| *d >= line)? + 1;
     let end = if a.audible_ms > 0 && a.audible_ms < a.dur_ms { a.audible_ms } else { a.dur_ms } as f64;
-    let k = (0..=last_a.min(na.saturating_sub(run + 2)).saturating_sub(run)).rev().find(|&k| {
-        on(k, ga) && bar_ms(ma, k).is_some_and(|t| t >= now_ms as f64 + 5000.0) && bar_ms(ma, k + run + 1).is_some_and(|t| t <= end)
+    let k = (0..=outro.min(na)).rev().find(|&k| {
+        on(k, ga) && k + run + TAIL_BARS <= na && bar_ms(ma, k).is_some_and(|t| t >= now_ms as f64 + 5000.0) && bar_ms(ma, k + run + TAIL_BARS).is_some_and(|t| t <= end)
     })?;
-    let (at, swap, over) = (bar_ms(ma, k)?, bar_ms(ma, k + run)?, bar_ms(ma, k + run + 1)?);
-    // its tempo as it is over those bars (a song's drifts), the next one's over its own
+    let (at, swap, over) = (bar_ms(ma, k)?, bar_ms(ma, k + run)?, bar_ms(ma, k + run + TAIL_BARS)?);
+    // its tempo as it is over the run-up (a song's drifts), the next one's over its own
     let (pa, pb) = ((swap - at) / (run * 4) as f64, (bar_ms(mb, from + run)? - bar_ms(mb, from)?) / (run * 4) as f64);
     let rate = pb / pa;
     if (rate - 1.0).abs() > MAX_RATE { return None; }
     Some(crate::mix::Plan {
         at_ms: at.round() as u64, ms: (over - at).round() as u64, swap_ms: (swap - at).round() as u64, start_ms: bar_ms(mb, from)?.round() as u64,
-        rate, bars: run as u32 + 1, semitones: 0, beatmatched: true, out_tempo: 1.0, ramp_ms: 0, tape_stop: false,
+        rate, bars: (run + TAIL_BARS) as u32, semitones: 0, beatmatched: true, out_tempo: 1.0, ramp_ms: 0, tape_stop: false,
         out_loop: None, in_loop: None, word: None, style: None,
     })
+}
+
+/// After a blend, the next one back to its own tempo this slowly (a minute: 1.5% over it is far below
+/// what's heard), or over a third of what's left of it, if that's less
+pub fn ease_ms(left_ms: u64) -> u64 {
+    60_000u64.min(left_ms / 3).max(4_000)
 }
 
 /// The handoff of a plan: a blend's, the highs and mids crossfaded over it, the bass swapped at once on
@@ -233,9 +245,10 @@ pub fn blend(a: &Side, b: &Side, now_ms: u64) -> Option<crate::mix::Plan> {
 pub fn handoff(p: &crate::mix::Plan, voices: bool) -> omnipulse_audio::Handoff {
     if p.style == Some(ROLL) { return omnipulse_audio::Handoff::roll(p.swap_ms / p.bars.max(1) as u64, p.bars); }
     if p.tape_stop { return crate::mix::handoff(p, false); }
-    let h = omnipulse_audio::Handoff::bass_swap(p.ms, p.swap_ms);
-    // (a blend's last bar is after its swap: a beat, a quarter of it)
-    if voices { h.with_voices(p.swap_ms, p.ms.saturating_sub(p.swap_ms) as f64 / 4.0) } else { h }
+    // (the one playing's beat carried: the next one rising under it, the bass swapped, then its top fading)
+    let h = omnipulse_audio::Handoff::carry(p.ms, p.swap_ms);
+    let beat = p.swap_ms as f64 / ((p.bars as usize).saturating_sub(TAIL_BARS).max(1) * 4) as f64;
+    if voices { h.with_voices(p.swap_ms, beat) } else { h }
 }
 
 /// A fade's handoff: the voices handed over halfway, on a fade long enough (4 s) for it to be heard
@@ -374,10 +387,11 @@ mod tests {
         let p = blend(&side(&a), &side(&b), 0).expect("a blend");
         let bar_a: f64 = 4.0 * 60_000.0 / 128.0;
         let bar_b: f64 = 4.0 * 60_000.0 / 126.0;
-        // (B in from bar 2, its main part on the swap 16 beats on; A out from bar 52, its run ending on 56)
+        // (B in from bar 2, its intro's start on its line, its main part on the swap 16 beats on; A out
+        // from bar 56, where its outro starts; then 4 bars of A's beat)
         assert_eq!(p.start_ms, (2.0 * bar_b).round() as u64);
-        assert_eq!(p.at_ms, (52.0 * bar_a).round() as u64);
-        assert_eq!((p.bars, p.swap_ms), (5, (4.0 * bar_a).round() as u64));
+        assert_eq!(p.at_ms, (56.0 * bar_a).round() as u64);
+        assert_eq!((p.bars, p.swap_ms, p.ms), (8, (4.0 * bar_a).round() as u64, (8.0 * bar_a).round() as u64));
         assert!((p.rate - 128.0 / 126.0).abs() < 1e-6);
     }
 

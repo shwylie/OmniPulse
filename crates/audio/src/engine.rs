@@ -883,6 +883,20 @@ impl Handoff {
         Self { low: all, mid: all, high: all, echo: None, out_sweep: None, in_sweep: None, brake: None, spin: None, out_loop: None, in_loop: None, roll: None, out_voice: Some(((ms / 2).saturating_sub(turn), turn)), in_voice: Some((ms / 2, turn)) }
     }
 
+    /// A DJ's blend, the one playing's beat carried through: the next one's highs (its hats, its air)
+    /// rise over the first half of the run-up and its mids over all of it, under the one playing at full;
+    /// on `swap` the bass changes over at once (the two never together); then the one playing's mids and
+    /// highs, its beat's top, fade out over what's left (`ms - swap`) as the next one's beat settles in
+    pub fn carry(ms: u64, swap: u64) -> Self {
+        let tail = ms.saturating_sub(swap).max(1);
+        Self {
+            low: Ramp::swap(swap, 250),
+            mid: Ramp { in_at: 0, in_len: swap.max(1), out_at: swap, out_len: tail },
+            high: Ramp { in_at: 0, in_len: (swap / 2).max(1), out_at: swap, out_len: tail },
+            echo: None, out_sweep: None, in_sweep: None, brake: None, spin: None, out_loop: None, in_loop: None, roll: None, out_voice: None, in_voice: None,
+        }
+    }
+
     /// The bass alone swapped at `at` (over a quarter second), the rest crossfaded over all `ms`
     pub fn bass_swap(ms: u64, at: u64) -> Self {
         let all = Ramp::swap(0, ms);
