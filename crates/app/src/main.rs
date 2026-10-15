@@ -9020,6 +9020,46 @@ fn window_hwnd(ui: &AppWindow) -> Option<isize> {
 // ---------- the look: the theme, its tint, the accent (or the album art's) ----------
 const ACCENTS: [&str; 6] = ["#8e9bff", "#1ed760", "#fa586a", "#ff9f43", "#4cc9f0", "#c77dff"];
 
+thread_local! {
+    /// a change of accent under way: from, to (the accent, the second, the text on it), and since when
+    static ACCENT_FADE: RefCell<Option<([slint::Color; 3], [slint::Color; 3], std::time::Instant)>> = const { RefCell::new(None) };
+    static ACCENT_TIMER: slint::Timer = slint::Timer::default();
+}
+
+/// The accents changed (picked, or a new cover's): faded from the ones shown over 0.9 s, as the web
+/// app's (its CSS transition); at once with Animations off
+fn accent_fade(ui: &AppWindow, c1: slint::Color, c2: slint::Color, on: slint::Color, motion: bool) {
+    let t = ui.global::<Theme>();
+    let to = [c1, c2, on];
+    let now = [t.get_accent_own(), t.get_accent_2_own(), t.get_on_accent()];
+    let target_now = ACCENT_FADE.with(|f| f.borrow().as_ref().map(|x| x.1));
+    if target_now == Some(to) || (target_now.is_none() && now == to) { return; }
+    if !motion {
+        ACCENT_FADE.with(|f| f.borrow_mut().take());
+        t.set_accent_own(c1); t.set_accent_2_own(c2); t.set_on_accent(on);
+        return;
+    }
+    ACCENT_FADE.with(|f| *f.borrow_mut() = Some((now, to, std::time::Instant::now())));
+    let weak = ui.as_weak();
+    ACCENT_TIMER.with(|timer| timer.start(slint::TimerMode::Repeated, std::time::Duration::from_millis(30), move || {
+        let Some(ui) = weak.upgrade() else { return };
+        let Some((from, to, at)) = ACCENT_FADE.with(|f| *f.borrow()) else { return ACCENT_TIMER.with(|t| t.stop()) };
+        let x = (at.elapsed().as_secs_f32() / 0.9).min(1.0);
+        // (ease, as CSS's)
+        let k = x * x * (3.0 - 2.0 * x);
+        let mix = |a: slint::Color, b: slint::Color| {
+            let l = |p: u8, q: u8| (p as f32 + (q as f32 - p as f32) * k).round() as u8;
+            slint::Color::from_argb_u8(l(a.alpha(), b.alpha()), l(a.red(), b.red()), l(a.green(), b.green()), l(a.blue(), b.blue()))
+        };
+        let t = ui.global::<Theme>();
+        t.set_accent_own(mix(from[0], to[0]));
+        t.set_accent_2_own(mix(from[1], to[1]));
+        // (the text on the accent: dark or light, switched halfway)
+        t.set_on_accent(if k < 0.5 { from[2] } else { to[2] });
+        if x >= 1.0 { ACCENT_FADE.with(|f| f.borrow_mut().take()); ACCENT_TIMER.with(|t| t.stop()); }
+    }));
+}
+
 fn apply_look(shared: &Shared) {
     let a = shared.borrow();
     let Some(ui) = a.ui.upgrade() else { return };
@@ -9056,6 +9096,8 @@ fn apply_look(shared: &Shared) {
     if ui.get_app_name().trim() != name { ui.set_app_name(name.into()); }
     t.set_bg(p.bg.slint());
     t.set_panel(p.panel.slint());
+    // (the accents' blends go into the theme without its tint)
+    t.set_plain_panel(look::palette(step, hue, 0).panel.slint());
     t.set_elevated(p.elevated.slint());
     t.set_line(p.line.slint());
     t.set_text(p.text.slint());
@@ -9073,9 +9115,7 @@ fn apply_look(shared: &Shared) {
         (mine, prefs["accent2"].as_str().and_then(look::Rgb::parse).or(mine))
     };
     let c1 = c1.unwrap_or(look::Rgb(0x8e, 0x9b, 0xff));
-    t.set_accent_own(c1.slint());
-    t.set_accent_2_own(c2.unwrap_or(c1).slint());
-    t.set_on_accent(look::on_accent(c1).slint());
+    accent_fade(&ui, c1.slint(), c2.unwrap_or(c1).slint(), look::on_accent(c1).slint(), motion);
     ui.set_light_theme(p.light);
     // and Settings > Look shows where things are
     ui.set_theme_step(step as f32);
@@ -10319,6 +10359,7 @@ fn main() -> Result<(), slint::PlatformError> {
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("mixfb") { vec![(9, "play"), (10, "rate"), (11, "mixprep"), (70, "mixseek"), (80, "mixcheck"), (84, "mixcheck"), (88, "mixcheck"), (92, "mixcheck"), (96, "mixcheck"), (100, "mixcheck"), (104, "mixcheck"), (108, "mixcheck"), (112, "rate"), (114, "mixcheck"), (118, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("replies") { vec![(9, "play"), (10, "openreplies"), (12, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("genre") { vec![(9, "play"), (10, "searchhouse"), (30, "searchartists"), (34, "discover"), (60, "findtiles"), (62, "end")] }
+            else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("accent") { vec![(9, "play"), (12, "accentfade"), (15, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("np") { vec![(9, "play"), (14, "now"), (18, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("versions") { vec![(9, "play"), (10, "artistnamed"), (30, "vopen"), (31, "listdown"), (32, "artistalbums"), (45, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("rhythm") { vec![(9, "play"), (100, "rhythm"), (101, "end")] }
@@ -10644,6 +10685,14 @@ fn main() -> Result<(), slint::PlatformError> {
                     ui.invoke_chip(2);
                 }
                 "listdown" => ui.set_list_y(330.0),
+                "accentfade" => {
+                    if let Some(o) = s.borrow_mut().web.prefs.as_object_mut() { o.insert("artAccent".into(), serde_json::json!(false)); o.insert("accent".into(), serde_json::json!("#ff0000")); }
+                    apply_look(&s);
+                    for ms in [0u64, 300, 600, 1200] {
+                        let w = ui.as_weak();
+                        slint::Timer::single_shot(std::time::Duration::from_millis(ms), move || { if let Some(ui) = w.upgrade() { println!("selftest: accent at {ms} ms: {:?}", ui.global::<Theme>().get_accent_own()); } });
+                    }
+                }
                 "findtiles" => { ui.set_search_text("mix".into()); ui.invoke_search_edited("mix".into()); println!("selftest: find on discover: \"{}\"", ui.get_page_find_note()); }
                 "searchhouse" => go(&s, Place::Search("house".into())),
                 "searchartists" => { ui.invoke_chip(2); println!("selftest: search artists: {} shelves", ui.get_shelves().row_count()); }

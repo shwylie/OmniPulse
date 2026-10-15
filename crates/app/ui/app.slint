@@ -18,8 +18,10 @@ export global Theme {
     in-out property <color> accent-2-next: #b48eff;
     in-out property <bool> pulsing;
     // the player's colours: each accent a little into the panel (the first on the left, the second on the right)
-    out property <color> bar-a: panel.mix(accent, 0.86);
-    out property <color> bar-b: panel.mix(accent-2, 0.86);
+    // (into the theme's own panel, without the tint: the tint doesn't touch the accents)
+    in-out property <color> plain-panel: #1a1d24;
+    out property <color> bar-a: plain-panel.mix(accent, 0.86);
+    out property <color> bar-b: plain-panel.mix(accent-2, 0.86);
     property <float> pulse: pulsing ? (1 - cos(animation-tick() / 3.2s * 360deg)) / 2 : 0;
     out property <color> accent: pulsing ? accent-own.mix(accent-next, 1 - pulse) : accent-own;
     out property <color> accent-2: pulsing ? accent-2-own.mix(accent-2-next, 1 - pulse) : accent-2-own;
@@ -597,8 +599,8 @@ component Caps inherits Rectangle {
 component AccentGlow inherits Rectangle {
     y: 0;
     height: 340px;
-    property <color> c1: Theme.panel.mix(Theme.accent, 0.66);
-    property <color> c2: Theme.panel.mix(Theme.accent-2, 0.66);
+    property <color> c1: Theme.plain-panel.mix(Theme.accent, 0.66);
+    property <color> c2: Theme.plain-panel.mix(Theme.accent-2, 0.66);
     Rectangle { background: @linear-gradient(90deg, root.c1 0%, root.c2 100%); }
     Rectangle { background: @linear-gradient(180deg, Theme.panel.with-alpha(0) 0%, Theme.panel 100%); }
     Caps { r: Theme.panel-radius; tl: root.c1; tr: root.c2; }
