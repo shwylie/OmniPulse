@@ -884,7 +884,8 @@ impl Handoff {
     }
 
     /// A DJ's blend, the one playing's beat carried through: the next one's highs (its hats, its air)
-    /// rise over the first half of the run-up and its mids over all of it, under the one playing at full;
+    /// rise over the first half of the run-up and its mids over all of it, under the one playing (its mids,
+    /// its melody, giving way from halfway, gone a beat past the swap);
     /// on `swap` the bass changes over in a beat (`beat_ms`, centred on it: the two barely together); then
     /// the one playing's mids and highs, its beat's top, fade out over what's left (`ms - swap`) as the
     /// next one's beat settles in
@@ -892,7 +893,9 @@ impl Handoff {
         let tail = ms.saturating_sub(swap).max(1);
         Self {
             low: Ramp::swap(swap.saturating_sub(beat_ms / 2), beat_ms.max(1)),
-            mid: Ramp { in_at: 0, in_len: swap.max(1), out_at: swap, out_len: tail },
+            // (the one playing's melody, its mids, away from halfway through the run-up, gone a beat past the
+            // swap: two melodies never long together; its beat's top carried after)
+            mid: Ramp { in_at: 0, in_len: swap.max(1), out_at: swap / 2, out_len: (swap - swap / 2 + beat_ms).max(1) },
             high: Ramp { in_at: 0, in_len: (swap / 2).max(1), out_at: swap, out_len: tail },
             echo: None, out_sweep: None, in_sweep: None, brake: None, spin: None, out_loop: None, in_loop: None, roll: None, out_voice: None, in_voice: None,
         }
