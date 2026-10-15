@@ -53,6 +53,10 @@ pub struct Rhythm {
     /// tempo, say, a syncopated song's), and aren't to be mixed on
     #[serde(default)]
     pub model_bpm: f64,
+    /// each beat's loudness (dB, from it to the next): where a half-time song's phrases start, which can
+    /// be half of one of its bars
+    #[serde(default)]
+    pub beat_db: Vec<f32>,
     /// each bar's loudness (dB, from the first downbeat on): where the intro ends and the outro begins
     #[serde(default)]
     pub bar_db: Vec<f32>,
@@ -564,6 +568,7 @@ fn analyse_now(mono: &[f32], rate: u32) -> Option<Rhythm> {
         key_confidence: kconf,
         downbeat_confidence,
         model_bpm,
+        beat_db: loud.iter().map(|v| (*v * 10.0).round() as f32 / 10.0).collect(),
         bar_db,
         bar_beat,
         bar_chroma,
@@ -585,7 +590,7 @@ pub struct Measured {
 /// (2-3: beats moved half a beat where the bass hit harder between them, wrongly: an off-beat bass
 /// louder than the kick isn't a beat tracked off it; 4: that undone, the downbeat from where the
 /// sections change too)
-pub const VERSION: u32 = 10;
+pub const VERSION: u32 = 11;
 
 static STORE: std::sync::Mutex<Option<std::collections::HashMap<String, Measured>>> = std::sync::Mutex::new(None);
 

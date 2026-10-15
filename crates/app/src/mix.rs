@@ -756,7 +756,7 @@ mod tests {
     fn m(bpm: f64, first_beat: f64, downbeat: usize, conf: f64) -> Measured {
         let period = 60_000.0 / bpm;
         let beats: Vec<f64> = (0..64).map(|i| first_beat + i as f64 * period).collect();
-        Measured { from_ms: 0, to_ms: 60_000, rhythm: Rhythm { bpm, first_beat_ms: first_beat, period_ms: period, beats, downbeat, tempo_confidence: conf, key: "A minor".into(), camelot: "8A".into(), key_confidence: 0.5, downbeat_confidence: 1.0, model_bpm: 0.0, bar_db: Vec::new(), bar_beat: Vec::new(), bar_chroma: Vec::new() }, v: VERSION }
+        Measured { from_ms: 0, to_ms: 60_000, rhythm: Rhythm { bpm, first_beat_ms: first_beat, period_ms: period, beats, downbeat, tempo_confidence: conf, key: "A minor".into(), camelot: "8A".into(), key_confidence: 0.5, downbeat_confidence: 1.0, model_bpm: 0.0, beat_db: Vec::new(), bar_db: Vec::new(), bar_beat: Vec::new(), bar_chroma: Vec::new() }, v: VERSION }
     }
 
     #[test]

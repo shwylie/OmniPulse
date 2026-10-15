@@ -412,7 +412,7 @@ mod tests {
     fn song(bpm: f64, bars: &[f32], conf: f64, camelot: &str) -> Measured {
         let period = 60_000.0 / bpm;
         let beats: Vec<f64> = (0..bars.len() * 4 + 4).map(|i| i as f64 * period).collect();
-        Measured { from_ms: 0, to_ms: (beats.len() as f64 * period) as u64, rhythm: Rhythm { bpm, first_beat_ms: 0.0, period_ms: period, beats, downbeat: 0, tempo_confidence: conf, key: String::new(), camelot: camelot.into(), key_confidence: 0.8, downbeat_confidence: 1.0, model_bpm: 0.0, bar_db: bars.to_vec(), bar_beat: vec![1.0; bars.len()], bar_chroma: Vec::new() }, v: omnipulse_core::rhythm::VERSION }
+        Measured { from_ms: 0, to_ms: (beats.len() as f64 * period) as u64, rhythm: Rhythm { bpm, first_beat_ms: 0.0, period_ms: period, beats, downbeat: 0, tempo_confidence: conf, key: String::new(), camelot: camelot.into(), key_confidence: 0.8, downbeat_confidence: 1.0, model_bpm: 0.0, beat_db: Vec::new(), bar_db: bars.to_vec(), bar_beat: vec![1.0; bars.len()], bar_chroma: Vec::new() }, v: omnipulse_core::rhythm::VERSION }
     }
 
     fn levels(intro: usize, body: usize, outro: usize) -> Vec<f32> {
