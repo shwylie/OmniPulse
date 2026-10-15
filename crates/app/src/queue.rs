@@ -35,6 +35,8 @@ impl QItem {
 pub struct Queue {
     pub items: Vec<QItem>,
     pub qi: Option<usize>,
+    /// the list it was started from (a playlist's, a page's name), for its heading in the queue
+    pub name: String,
 }
 
 impl Queue {
@@ -176,14 +178,17 @@ impl Queue {
         }
     }
 
-    /// Up next, for the queue panel: (index in the queue, the track, the heading above it if any)
-    pub fn panel(&self) -> Vec<(usize, &QItem, &'static str)> {
+    /// Up next, for the queue panel: (index in the queue, the track, the heading above it if any). As
+    /// the web app's: what you queued ("Next in Queue"), the rest of the list ("Next From <its name>"),
+    /// then autoplay's picks, each run with its own heading
+    pub fn panel(&self) -> Vec<(usize, &QItem, String)> {
         let Some(cur) = self.qi else { return Vec::new() };
         let mut out = Vec::new();
-        let mut last = "";
+        let mut last = String::new();
+        let from = format!("Next From {}", if self.name.is_empty() { "Your List" } else { &self.name });
         for (i, q) in self.items.iter().enumerate().skip(cur) {
-            let head = if i == cur { "Now Playing" } else if q.auto { "Autoplay" } else { "Next Up" };
-            out.push((i, q, if head != last { head } else { "" }));
+            let head = if i == cur { "Now Playing".to_string() } else if q.auto { "Autoplay".to_string() } else if q.queued || !q.by.is_empty() { "Next in Queue".to_string() } else { from.clone() };
+            out.push((i, q, if head != last { head.clone() } else { String::new() }));
             last = head;
         }
         out
@@ -198,6 +203,7 @@ impl Queue {
             "qi": self.qi.map(|q| q - from),
             "posMs": pos_ms,
             "savedAt": omnipulse_core::now_secs() * 1000,
+            "listName": self.name,
             "queue": self.items.iter().skip(from).take(1000).map(|q| {
                 let mut s = q.t.to_snapshot();
                 if q.auto { s["autoplay"] = json!(true); }
@@ -225,7 +231,7 @@ impl Queue {
         if qi >= items.len() {
             return None;
         }
-        Some((Queue { items, qi: Some(qi) }, v["posMs"].as_u64().unwrap_or(0)))
+        Some((Queue { items, qi: Some(qi), name: v["listName"].as_str().unwrap_or("").to_string() }, v["posMs"].as_u64().unwrap_or(0)))
     }
 }
 
@@ -386,8 +392,8 @@ mod tests {
         let keys: Vec<&str> = q.items.iter().map(|i| i.t.key.as_str()).collect();
         assert_eq!(keys, ["a", "next", "mine", "mine2", "b", "auto1"]);
         q.items.remove(3);
-        let heads: Vec<&str> = q.panel().into_iter().map(|p| p.2).collect();
-        assert_eq!(heads, ["Now Playing", "Next Up", "", "", "Autoplay"]);
+        let heads: Vec<String> = q.panel().into_iter().map(|p| p.2).collect();
+        assert_eq!(heads, ["Now Playing", "Next in Queue", "", "Next From Your List", "Autoplay"]);
         q.drop_autoplay();
         assert!(q.items.iter().all(|i| !i.auto));
         q.remove(1);

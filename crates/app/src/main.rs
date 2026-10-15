@@ -2422,7 +2422,7 @@ fn paint_queue_rows(a: &mut App, coming: Option<usize>) {
         .iter()
         .map(|(i, q, head)| {
             let mut r = row_menu(a, &marks, &q.t, q.t.row(Some(*i) == a.queue.qi));
-            r.head = (*head).into();
+            r.head = head.as_str().into();
             r.auto = q.auto;
             r.coming = Some(*i) == coming;
             // (its cover, if it's in already; the rest come in rows_art)
@@ -3782,6 +3782,8 @@ fn play_list(shared: &Shared, list: Vec<Track>, i: usize) {
             a.queue.replace_current(t);
         } else {
             a.queue.set_list(list, i);
+            // (its name, for the queue's heading: "Next From <it>")
+            a.queue.name = a.ui.upgrade().map(|u| u.get_page_title().to_string()).unwrap_or_default();
             a.queue_spaced = a.page == "library" || a.page == "playlist";
             // shuffle on: the rest after the one picked, shuffled (in order, it plays as it is)
             if a.shuffle_on {
@@ -9541,6 +9543,7 @@ fn main() -> Result<(), slint::PlatformError> {
         {
             let mut a = s.borrow_mut();
             a.queue.set_list(list, 0);
+            a.queue.name = a.ui.upgrade().map(|u| u.get_page_title().to_string()).unwrap_or_default();
             a.queue_spaced = spaced;
             a.ap_failed = None;
         }
