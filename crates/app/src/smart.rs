@@ -109,6 +109,9 @@ pub fn fade(a: &Side, b: &Side, max_ms: u64, fixed_ms: u64) -> Fade {
 const TRUST_CONFIDENCE: f64 = 0.3;
 /// How far from its own tempo the next one plays (DJs: mostly under 5%)
 pub const MAX_RATE: f64 = 0.04;
+/// How far apart two songs' tempos can be for a blend with the tempo ridden from one to the other (as a
+/// DJ ramps between genres: Goodbye's 92 into One's 125); past 4%, the blend's always 32 beats, room for it
+pub const MAX_RAMP_BLEND: f64 = 0.40;
 /// A stated tempo agrees with the measured one within this (or half or double of it)
 const STATED_WITHIN: f64 = 0.03;
 
@@ -155,7 +158,7 @@ pub fn blend_blocked(a: &Side, b: &Side) -> Option<&'static str> {
     if !grid_trusted(a) { return Some("the one playing's beat isn't sure"); }
     if !grid_trusted(b) { return Some("the next one's beat isn't sure"); }
     let (ma, mb) = (a.rhythm?, b.rhythm?);
-    if match_rate(ma.rhythm.bpm, mb.rhythm.bpm).is_none() { return Some("tempos more than 4% apart"); }
+    if match_rate(ma.rhythm.bpm, mb.rhythm.bpm).is_none() && (ma.rhythm.bpm / mb.rhythm.bpm - 1.0).abs() > MAX_RAMP_BLEND { return Some("tempos too far apart (more than 40%)"); }
     if !keys_go(ma, mb) { return Some("keys that don't go together"); }
     None
 }
@@ -200,11 +203,20 @@ pub const TAIL_BARS: usize = 4;
 /// part), the swap where its main part starts, then TAIL_BARS of the one playing's beat going. The next
 /// one at the playing one's tempo (at most 4% off, its key as it is). None: a fade instead.
 pub fn blend(a: &Side, b: &Side, now_ms: u64) -> Option<crate::mix::Plan> {
-    if blend_blocked(a, b).is_some() { return None; }
+    blend_as(a, b, now_ms, false)
+}
+
+/// The same, `forced` (for listening only: no pair refused, however far apart or unsure; the
+/// renderer's OMNIPULSE_SMART_FORCE)
+pub fn blend_as(a: &Side, b: &Side, now_ms: u64, forced: bool) -> Option<crate::mix::Plan> {
+    let why = |w: &str| if std::env::var_os("OMNIPULSE_MIX_DEBUG").is_some() { eprintln!("smart debug: no blend: {w}"); };
+    if !forced && blend_blocked(a, b).is_some() { return None; }
     let (ma, mb) = (a.rhythm?, b.rhythm?);
     // (same time only: a half- or double-time pair's bars don't line up one to one)
-    if (ma.rhythm.bpm / mb.rhythm.bpm - 1.0).abs() > MAX_RATE { return None; }
-    let (ga, gb) = (sure_groups(ma)?, sure_groups(mb)?);
+    let ramp = (ma.rhythm.bpm / mb.rhythm.bpm - 1.0).abs();
+    if ramp > MAX_RAMP_BLEND && !forced { return None; }
+    let grid = |m: &Measured| if forced { groups(m).map(|g| g.0) } else { sure_groups(m) };
+    let (Some(ga), Some(gb)) = (grid(ma), grid(mb)) else { why(&format!("16-beat lines not sure: {:?} {:?}", groups(ma), groups(mb))); return None };
     let bars = |m: &Measured| m.rhythm.beats.len().saturating_sub(m.rhythm.downbeat) / 4;
     let (na, nb) = (bars(ma), bars(mb));
     let on = |k: usize, g: usize| k % 4 == g % 4;
@@ -212,22 +224,23 @@ pub fn blend(a: &Side, b: &Side, now_ms: u64) -> Option<crate::mix::Plan> {
     let s0 = gb % 4;
     let first_b = body_line(mb).and_then(|l| mb.rhythm.bar_db.iter().position(|d| *d >= l)).unwrap_or(s0);
     let intro = first_b.saturating_sub(s0) / 4 * 4;
-    let run = intro.clamp(4, 8);
-    let from = if intro > 8 { s0 + intro - 8 } else { s0 };
+    // (a big change of tempo: 32 beats for it, whatever the intro)
+    let run = if ramp > MAX_RATE { 8 } else { intro.clamp(4, 8) };
+    let from = if intro > run { s0 + intro - run } else { s0 };
     if from + run + TAIL_BARS >= nb { return None; }
     // the one playing: from the line its outro starts on (where its main part ends, snapped back to a
     // line), a line earlier at a time if that runs past its sound's end; at least 5 s from now
     let line = body_line(ma)?;
     let outro = ma.rhythm.bar_db.iter().rposition(|d| *d >= line)? + 1;
     let end = if a.audible_ms > 0 && a.audible_ms < a.dur_ms { a.audible_ms } else { a.dur_ms } as f64;
-    let k = (0..=outro.min(na)).rev().find(|&k| {
+    let Some(k) = (0..=outro.min(na)).rev().find(|&k| {
         on(k, ga) && k + run + TAIL_BARS <= na && bar_ms(ma, k).is_some_and(|t| t >= now_ms as f64 + 5000.0) && bar_ms(ma, k + run + TAIL_BARS).is_some_and(|t| t <= end)
-    })?;
+    }) else { why(&format!("no line to start on before its outro (bar {outro} of {na})")); return None };
     let (at, swap, over) = (bar_ms(ma, k)?, bar_ms(ma, k + run)?, bar_ms(ma, k + run + TAIL_BARS)?);
     // its tempo as it is over the run-up (a song's drifts), the next one's over its own
     let (pa, pb) = ((swap - at) / (run * 4) as f64, (bar_ms(mb, from + run)? - bar_ms(mb, from)?) / (run * 4) as f64);
     let rate = pb / pa;
-    if (rate - 1.0).abs() > MAX_RATE { return None; }
+    if (rate - 1.0).abs() > MAX_RAMP_BLEND && !forced { return None; }
     // the tempo ridden over all of it, as a DJ does: the two together at the one playing's at first, at
     // the next one's own by the end (the one playing eased to it, the next one with it): nothing to ease
     // back after. Its bars take longer or less as it's eased: the times, as heard
@@ -397,7 +410,7 @@ mod tests {
     fn a_blend_only_when_its_safe() {
         let a = song(128.0, &levels(8, 48, 8), 0.6, "8A");
         let near = song(126.0, &levels(8, 48, 8), 0.6, "9A");
-        let far = song(118.0, &levels(8, 48, 8), 0.6, "8A");
+        let far = song(80.0, &levels(8, 48, 8), 0.6, "8A");
         let clash = song(128.0, &levels(8, 48, 8), 0.6, "2B");
         let blurry = song(128.0, &levels(8, 48, 8), 0.1, "8A");
         let side = |m| Side { dur_ms: 150_000, rhythm: Some(m), ..Default::default() };
@@ -525,7 +538,8 @@ mod tests {
             let db = |t: &Track, an: &serde_json::Value| crate::sound::loud_db(&serde_json::json!({}), t, an["lufs"].as_f64(), false);
             let dbs = (db(&ta, &ana), db(&tb, &anb));
             let blocked = blend_blocked(&a, &b);
-            let mut plan = blend(&a, &b, 0).or_else(|| std::env::var_os("OMNIPULSE_SMART_ROLL").and_then(|_| roll(&a, &b, 0)));
+            let forced = std::env::var_os("OMNIPULSE_SMART_FORCE").is_some();
+            let mut plan = blend_as(&a, &b, 0, forced).or_else(|| std::env::var_os("OMNIPULSE_SMART_ROLL").and_then(|_| roll(&a, &b, 0)));
             // (OMNIPULSE_SMART_NUDGE: the next one started this many of its beats later (or, below 0, earlier), to listen for which is right)
             let nudge = std::env::var("OMNIPULSE_SMART_NUDGE").ok().and_then(|v| v.parse::<f64>().ok()).unwrap_or(0.0);
             if let (Some(p), Some(m)) = (plan.as_mut(), mb.as_ref()) { p.start_ms = (p.start_ms as f64 + nudge * m.rhythm.period_ms).max(0.0).round() as u64; }
@@ -717,6 +731,17 @@ mod tests {
             // (its tempo from its beats' spacing, not rounded)
             let n = r.beats.len();
             eprintln!("{span} s: {:.2} BPM ({} beats, confidence {:.2})", 60_000.0 * (n - 1) as f64 / (r.beats[n - 1] - r.beats[0]), n, r.tempo_confidence);
+        }
+    }
+
+    /// A SoundCloud track's own details (its bpm, genre, description), as its API gives them
+    #[test]
+    #[ignore]
+    fn sc_details() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        for id in std::env::var("OMNIPULSE_PROBE_IDS").unwrap().split(',') {
+            let v = rt.block_on(omnipulse_core::soundcloud::api_get(format!("/tracks/{id}"))).unwrap_or_default();
+            eprintln!("{id}: {} | bpm {} | genre {} | tags {} | {}", v["title"], v["bpm"], v["genre"], v["tag_list"], v["description"].as_str().unwrap_or("").chars().take(300).collect::<String>().replace(['\n', '\r'], " "));
         }
     }
 

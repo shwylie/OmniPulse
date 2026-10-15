@@ -338,6 +338,24 @@ pub fn background_end() {
 /// onto the tracked beat within 70 ms of it), and the share of them that agree. None: no model, or too
 /// few downbeats to go by.
 #[cfg(feature = "desktop")]
+/// A steady grid through a model's beats (as DJ software grids electronic music: one tempo all through):
+/// each beat numbered by its place at `bpm`, a straight line through them (least squares), and a beat on
+/// it every period from the first. Its beats one at a time can be out by tens of ms; the line isn't.
+fn steady_grid(beats: &[f64], bpm: f64) -> Vec<f64> {
+    let p0 = 60_000.0 / bpm;
+    let t0 = beats[0];
+    let pts: Vec<(f64, f64)> = beats.iter().map(|t| (((t - t0) / p0).round(), *t)).collect();
+    let n = pts.len() as f64;
+    let (mx, my) = (pts.iter().map(|p| p.0).sum::<f64>() / n, pts.iter().map(|p| p.1).sum::<f64>() / n);
+    let (sxy, sxx) = pts.iter().fold((0.0, 0.0), |(a, b), p| (a + (p.0 - mx) * (p.1 - my), b + (p.0 - mx).powi(2)));
+    let period = if sxx > 0.0 { sxy / sxx } else { p0 };
+    let mut first = my - period * mx;
+    while first - period >= 0.0 { first -= period; }
+    while first < 0.0 { first += period; }
+    let last = beats[beats.len() - 1] + period / 2.0;
+    (0..).map(|k| first + k as f64 * period).take_while(|t| *t <= last).collect()
+}
+
 /// What Beat This! found: its beats and downbeats (ms), and its beats' tempo
 pub(crate) struct ModelBeats {
     beats: Vec<f64>,
@@ -425,7 +443,7 @@ fn analyse_now(mono: &[f32], rate: u32) -> Option<Rhythm> {
     let tracked_bpm = 60_000.0 / (period / FPS * 1000.0);
     let agrees = |m: f64| [1.0, 2.0, 0.5].iter().any(|k| ((tracked_bpm * k) / m - 1.0).abs() <= 0.03);
     let (frames, from_model) = match &model {
-        Some(m) if m.bpm > 0.0 && m.beats.len() >= 32 && !agrees(m.bpm) => (m.beats.iter().map(|t| (t / 1000.0 * FPS).round() as usize).filter(|&f| f < o.len()).collect::<Vec<_>>(), true),
+        Some(m) if m.bpm > 0.0 && m.beats.len() >= 32 && !agrees(m.bpm) => (steady_grid(&m.beats, m.bpm).iter().map(|t| (t / 1000.0 * FPS).round() as usize).filter(|&f| f < o.len()).collect::<Vec<_>>(), true),
         _ => (frames, false),
     };
     if std::env::var_os("OMNIPULSE_RHYTHM_DEBUG").is_some() && from_model { eprintln!("rhythm debug: tracked at {tracked_bpm:.2} BPM, Beat This! at {:.2}: its beats used", model.as_ref().map_or(0.0, |m| m.bpm)); }
@@ -567,7 +585,7 @@ pub struct Measured {
 /// (2-3: beats moved half a beat where the bass hit harder between them, wrongly: an off-beat bass
 /// louder than the kick isn't a beat tracked off it; 4: that undone, the downbeat from where the
 /// sections change too)
-pub const VERSION: u32 = 9;
+pub const VERSION: u32 = 10;
 
 static STORE: std::sync::Mutex<Option<std::collections::HashMap<String, Measured>>> = std::sync::Mutex::new(None);
 
