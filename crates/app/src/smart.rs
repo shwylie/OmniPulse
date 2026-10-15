@@ -503,6 +503,94 @@ mod tests {
         }
     }
 
+    /// How well a blend's beats line up as heard: each side rendered alone over the blend (the next one
+    /// stretched and started as the plan has it), their kicks (below 150 Hz, where they rise) compared a
+    /// bar at a time: the lag (ms) at which they match best, B against A (+: B late). A steady lag is an
+    /// offset; one that grows, a tempo off.
+    /// OMNIPULSE_SMART_PAIRS="A,B;..." cargo test --release -p omnipulse --bin OmniPulse-native blend_probe -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn blend_probe() {
+        use crate::track::{Src, Track};
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let rate = 44_100u32;
+        for pair in std::env::var("OMNIPULSE_SMART_PAIRS").unwrap().split(';') {
+            let (a_id, b_id) = pair.split_once(',').unwrap();
+            let t = |id: &str| Track { src: Src::SoundCloud(id.parse().unwrap()), key: id.to_string(), ..Default::default() };
+            let (ta, tb) = (t(a_id), t(b_id));
+            let full = |t: &Track| omnipulse_core::rhythm::known(&format!("full:{}", t.key)).expect("measured whole (run smart_render first)");
+            let (ma, mb) = (full(&ta), full(&tb));
+            let an = |id: &str| rt.block_on(omnipulse_core::loudness::analyse("soundcloud", id)).unwrap_or_default();
+            let (ana, anb) = (an(a_id), an(b_id));
+            let a = Side { dur_ms: ana["duration_ms"].as_u64().unwrap_or(0), audible_ms: ana["audible_ms"].as_u64().unwrap_or(0), rhythm: Some(&ma), ..Default::default() };
+            let b = Side { dur_ms: anb["duration_ms"].as_u64().unwrap_or(0), audible_ms: anb["audible_ms"].as_u64().unwrap_or(0), rhythm: Some(&mb), ..Default::default() };
+            let Some(p) = blend(&a, &b, 0) else { println!("{pair}: no blend ({:?})", blend_blocked(&a, &b)); continue };
+            let open = |t: &Track| rt.block_on(crate::player::open_source(t, rt.handle().clone())).expect("it opens");
+            let secs = p.ms as f32 / 1000.0;
+            let mut sa = open(&ta);
+            sa.seek(p.at_ms).unwrap();
+            let pa = omnipulse_audio::engine::render(sa, rate, &[0.0; 10], 0.0, secs).unwrap();
+            // (OMNIPULSE_PROBE_CONTROL: B is A itself, a bar on: its kicks should match at 0)
+            let control = std::env::var_os("OMNIPULSE_PROBE_CONTROL").is_some();
+            let (tb, start, r) = if control { (ta.clone(), bar_ms(&ma, (ma.rhythm.beats.iter().position(|x| ma.from_ms as f64 + x >= p.at_ms as f64).unwrap_or(0).saturating_sub(ma.rhythm.downbeat)) / 4 + 1).unwrap().round() as u64, 1.0) } else { (tb.clone(), p.start_ms, p.rate) };
+            let mut sb = omnipulse_audio::Stretched::shifted(open(&tb), omnipulse_audio::Tempo::new(r), 0).unwrap();
+            omnipulse_audio::Source::seek(&mut sb, start).unwrap();
+            let pb = omnipulse_audio::engine::render(Box::new(sb), rate, &[0.0; 10], 0.0, secs).unwrap();
+            // (each one's kicks, as heard: its lows' envelope (a millisecond at a time, smoothed over 8), each
+            // sharp rise (half the strong ones' at least, 150 ms apart), timed where it's halfway up)
+            let kicks = |x: &[f32]| -> Vec<f64> {
+                let k = 1.0 - (-2.0 * std::f32::consts::PI * 150.0 / rate as f32).exp();
+                let (mut z1, mut z2) = (0.0f32, 0.0f32);
+                let raw: Vec<f32> = x.chunks(2 * 44).map(|c| c.chunks(2).map(|f| { z1 += k * ((f[0] + f[1]) * 0.5 - z1); z2 += k * (z1 - z2); z2 * z2 }).sum::<f32>()).collect();
+                let n = raw.len();
+                let e: Vec<f32> = (0..n).map(|i| { let (a, b) = (i.saturating_sub(4), (i + 4).min(n)); raw[a..b].iter().sum::<f32>() / (b - a) as f32 }).collect();
+                let rise: Vec<f32> = (0..n).map(|i| if i >= 2 && i + 2 < n { e[i + 2] - e[i - 2] } else { 0.0 }).collect();
+                let mut rs = rise.clone();
+                rs.sort_by(|a, b| a.total_cmp(b));
+                let line = rs[rs.len() * 995 / 1000] * 0.4;
+                let mut out: Vec<f64> = Vec::new();
+                let mut i = 2;
+                while i + 30 < n {
+                    if rise[i] >= line && (i..i + 20).all(|j| rise[j] <= rise[i] || j == i) {
+                        let base = e[i.saturating_sub(15)..=i].iter().copied().fold(f32::MAX, f32::min);
+                        let top = e[i..i + 30].iter().copied().fold(0.0, f32::max);
+                        let at = (i.saturating_sub(15)..i + 30).find(|&j| e[j] >= base + (top - base) * 0.5).unwrap_or(i);
+                        out.push(at as f64 * 44.0 * 1000.0 / rate as f64);
+                        i += 150;
+                    } else { i += 1; }
+                }
+                out
+            };
+            // (over the whole blend at once: each one's onsets, its lows' and its highs' rises (above 4 kHz:
+            // the hats), a millisecond at a time, and the lag where they match best)
+            let onsets = |x: &[f32]| -> Vec<f32> {
+                let kl = 1.0 - (-2.0 * std::f32::consts::PI * 150.0 / rate as f32).exp();
+                let kh = 1.0 - (-2.0 * std::f32::consts::PI * 4000.0 / rate as f32).exp();
+                let (mut l1, mut l2, mut h1) = (0.0f32, 0.0f32, 0.0f32);
+                let (lo, hi): (Vec<f32>, Vec<f32>) = x.chunks(2 * 44).map(|c| c.chunks(2).fold((0.0, 0.0), |(a, b), f| {
+                    let m = (f[0] + f[1]) * 0.5;
+                    l1 += kl * (m - l1); l2 += kl * (l1 - l2); h1 += kh * (m - h1);
+                    (a + l2 * l2, b + (m - h1) * (m - h1))
+                })).unzip();
+                let rise = |e: &[f32]| -> Vec<f32> { let l: Vec<f32> = e.iter().map(|v| (v + 1e-9).ln()).collect(); (0..l.len()).map(|i| if i >= 4 { (l[i] - l[i - 4]).max(0.0) } else { 0.0 }).collect() };
+                let (a, b) = (rise(&lo), rise(&hi));
+                a.iter().zip(&b).map(|(x, y)| x + y).collect()
+            };
+            let (oa, ob) = (onsets(&pa), onsets(&pb));
+            let n = oa.len().min(ob.len());
+            let corr = |l: i64| (100..n - 100).map(|i| oa[i] * ob[(i as i64 + l) as usize]).sum::<f32>();
+            let curve: Vec<(i64, f32)> = (-80..=80).map(|l| (l, corr(l))).collect();
+            let best = curve.iter().max_by(|a, b| a.1.total_cmp(&b.1)).unwrap();
+            let zero = curve.iter().find(|c| c.0 == 0).unwrap().1;
+            println!("{pair}: whole blend, best lag {} ms (its match {:.0}, at 0 ms {:.0})", best.0, best.1, zero);
+            let (ka, kb) = (kicks(&pa), kicks(&pb));
+            let d: Vec<i64> = ka.iter().filter_map(|a| kb.iter().map(|b| b - a).min_by(|x, y| x.abs().total_cmp(&y.abs())).filter(|x| x.abs() < 120.0).map(|x| x.round() as i64)).collect();
+            let mut sorted = d.clone();
+            sorted.sort();
+            println!("{pair}: rate {:.4}, kicks A {} B {}, B against A (ms, +: B late), median {:?}: {d:?}", p.rate, ka.len(), kb.len(), sorted.get(sorted.len() / 2));
+        }
+    }
+
     /// The fallback fade the app uses (main.rs' SMART_FIXED_MS)
     const FIXED_MS: u64 = 6000;
 
