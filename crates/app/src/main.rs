@@ -200,7 +200,27 @@ fn apply_filter(app: &mut App) {
     let liked: std::collections::HashSet<&str> = app.library.iter().map(|t| t.key.as_str()).collect();
     let _ = &liked;
     let marks = marks_of(app);
-    app.rows.set_vec(filtered.iter().map(|t| Row { versions: ver_label.get(&t.key).cloned().unwrap_or_default().into(), version: ver_rows.contains(&t.key), ..row_menu(app, &marks, t, Row { picked: app.picked.contains(&t.key), ..t.row(t.key == playing) }) }).collect::<Vec<_>>());
+    let albums_here = app.chip == 0 && !app.fav_only && matches!(app.page.as_str(), "library" | "rediscover" | "artist");
+    let (alb_key, albs, alb_pics) = PAGE_ALBUMS.with(|p| p.borrow().clone());
+    let title_now = app.ui.upgrade().map(|u| u.get_page_title().to_string()).unwrap_or_default();
+    let albs = if albums_here && alb_key == page_key(&app.page, &title_now) { albs } else { Vec::new() };
+    let mut rows_out: Vec<Row> = filtered.iter().map(|t| Row { versions: ver_label.get(&t.key).cloned().unwrap_or_default().into(), version: ver_rows.contains(&t.key), ..row_menu(app, &marks, t, Row { picked: app.picked.contains(&t.key), ..t.row(t.key == playing) }) }).collect::<Vec<_>>();
+    // (one before every sixth track)
+    // (not among a song's versions opened beneath it: before the next song instead)
+    let mut at = 0;
+    for (k, f) in albs.iter().enumerate() {
+        at = at.max((k + 1) * 6);
+        while rows_out.get(at).is_some_and(|r| r.version) { at += 1; }
+        let Some(r) = rows_out.get_mut(at) else { break };
+        at += 1;
+        let (title, by, _, plat) = f.tile();
+        r.alb = title.into();
+        r.alb_by = by.into();
+        r.alb_plat = plat.into();
+        r.alb_i = k as i32;
+        if let Some(px) = alb_pics.get(&k) { r.alb_art = slint::Image::from_rgba8(px.clone()); }
+    }
+    app.rows.set_vec(rows_out);
     app.page_tracks = filtered;
     // its covers, once this is done with the app
     slint::Timer::single_shot(std::time::Duration::ZERO, || SHARED.with(|s| { if let Some(sh) = s.borrow().clone() { rows_art(&sh); } }));
@@ -287,7 +307,7 @@ fn show_tracks(shared: &Shared, page: &str, title: &str, sub: String, mut tracks
     ui.set_page_sub(sub.into());
     // (the Library has an Albums chip too: your saved albums, as a grid)
     let mut names: Vec<slint::SharedString> = if chips { FILTER_CHIPS.iter().map(|c| (*c).into()).collect() } else { Vec::new() };
-    if chips && page == "library" { names.push("Albums".into()); }
+    if chips && (page == "library" || page == "rediscover") { names.push("Albums".into()); }
     if chips && page == "artist" { names = vec!["All".into(), "Tracks".into(), "Albums".into()]; }
     if chips && page == "search" { names = ["All", "Tracks", "Artists", "Albums", "Playlists", "Sets & Podcasts"].iter().map(|c| (*c).into()).collect(); }
     ui.set_chips(ModelRc::from(Rc::new(VecModel::from(names))));
@@ -394,6 +414,7 @@ fn open_page(shared: &Shared, page: &str) {
             let lib = shared.borrow().library.clone();
             let sub = format!("Everything you've liked on each platform, plus your music files, in one list. {}.", plural(lib.len(), "track", "tracks"));
             show_tracks(shared, "library", "Library", sub, lib, true);
+            page_albums_load(shared, "library", "Library");
         }
         "favourites" => {
             let fav = marks::favourites(&shared.borrow().web.favourites);
@@ -429,6 +450,7 @@ fn open_page(shared: &Shared, page: &str) {
             // (nothing liked yet: asked for some, as the web app's card)
             let sub = if none { "Get better recommendations: add some music to your likes or favourites (the heart or the star on any song), and Discover and Rediscover will be built around it.".to_string() } else if pool.is_empty() { "You've played all your likes recently.".to_string() } else { "Likes you haven't heard in a month or more, the longest-forgotten first.".to_string() };
             show_tracks(shared, "rediscover", "Rediscover", sub, pool, true);
+            page_albums_load(shared, "rediscover", "Rediscover");
         }
         // (while Stream-Safe Music is on, the Streamer Mode page stands in for Discover)
         "discover" if streamsafe::on(&shared.borrow().web.prefs) => open_streamer(shared),
@@ -743,6 +765,68 @@ fn search_shelves(shared: &Shared, q: String) {
             search_paint(&shared);
         }));
     });
+}
+
+thread_local! {
+    /// a page's albums, among its tracks (one every six, as the web app's injectAlbums): which page
+    /// (its kind and title), the albums, and their covers as they come
+    static PAGE_ALBUMS: RefCell<(String, Vec<sources::Found>, HashMap<usize, slint::SharedPixelBuffer<slint::Rgba8Pixel>>)> = RefCell::new((String::new(), Vec::new(), HashMap::new()));
+}
+
+fn page_key(page: &str, title: &str) -> String { format!("{page}\u{1}{title}") }
+
+/// A page's albums found (the Library's saved ones, a few for Rediscover, an artist's): shown among its
+/// tracks, their covers fetched
+fn page_albums_set(shared: &Shared, key: String, list: Vec<sources::Found>) {
+    let arts: Vec<String> = list.iter().map(|f| f.tile().2).collect();
+    PAGE_ALBUMS.with(|p| *p.borrow_mut() = (key.clone(), list, HashMap::new()));
+    apply_filter(&mut shared.borrow_mut());
+    let (rt, weak) = { let a = shared.borrow(); (a.rt.clone(), a.ui.clone()) };
+    rt.spawn(async move {
+        for (k, url) in arts.into_iter().enumerate().take(40) {
+            if url.is_empty() { continue; }
+            if let Some(px) = player::fetch_art(url, 120).await {
+                let key = key.clone();
+                let _ = weak.upgrade_in_event_loop(move |_| SHARED.with(|s| {
+                    let Some(sh) = s.borrow().clone() else { return };
+                    let same = PAGE_ALBUMS.with(|p| { let mut p = p.borrow_mut(); if p.0 != key { return false; } p.2.insert(k, px.clone()); true });
+                    if !same { return; }
+                    let a = sh.borrow();
+                    for i in 0..a.rows.row_count() {
+                        if let Some(mut r) = a.rows.row_data(i) { if r.alb_i == k as i32 && r.alb != "" { r.alb_art = slint::Image::from_rgba8(px.clone()); a.rows.set_row_data(i, r); } }
+                    }
+                }));
+            }
+        }
+    });
+}
+
+/// The albums for the Library and Rediscover (Rediscover: six of them, mixed), once the page shows
+fn page_albums_load(shared: &Shared, page: &str, title: &str) {
+    let key = page_key(page, title);
+    if PAGE_ALBUMS.with(|p| p.borrow().0 == key) { return; }
+    PAGE_ALBUMS.with(|p| *p.borrow_mut() = (key.clone(), Vec::new(), HashMap::new()));
+    let (rt, weak, files) = { let a = shared.borrow(); (a.rt.clone(), a.ui.clone(), a.library.iter().filter(|t| t.plat() == "local").cloned().collect::<Vec<_>>()) };
+    let few = page == "rediscover";
+    rt.spawn(async move {
+        let mut list = sources::saved_albums().await;
+        list.extend(sources::local_albums(&files));
+        if few { for i in (1..list.len()).rev() { let j = (rand_u64() as usize) % (i + 1); list.swap(i, j); } list.truncate(6); }
+        let _ = weak.upgrade_in_event_loop(move |_| SHARED.with(|s| { if let Some(sh) = s.borrow().clone() { if PAGE_ALBUMS.with(|p| p.borrow().0 == key) { page_albums_set(&sh, key, list); } } }));
+    });
+}
+
+/// A page's albums as the Albums chip's grid (Rediscover's)
+fn page_albums_grid(shared: &Shared) {
+    let list = PAGE_ALBUMS.with(|p| p.borrow().1.clone());
+    let Some(ui) = shared.borrow().ui.upgrade() else { return };
+    ui.set_page_kind("albumgrid".into());
+    let pics = PAGE_ALBUMS.with(|p| p.borrow().2.clone());
+    let model = Rc::new(VecModel::from(list.iter().enumerate().map(|(k, f)| { let (t, sub, _, plat) = f.tile(); Tile { title: t.into(), sub: sub.into(), art: pics.get(&k).map(|px| slint::Image::from_rgba8(px.clone())).unwrap_or_default(), plat: plat.into(), ..Default::default() } }).collect::<Vec<_>>()));
+    ui.set_album_tiles(ModelRc::from(model.clone()));
+    if list.is_empty() { ui.set_status("No albums here.".into()); }
+    ALBUM_MODEL.with(|m| *m.borrow_mut() = Some(model));
+    ALBUMS.with(|a| *a.borrow_mut() = list);
 }
 
 thread_local! {
@@ -1228,6 +1312,16 @@ fn artist_extras(shared: &Shared, name: &str, sc: Option<u64>, sp: Option<String
             ui.set_artist_bio(bio["text"].as_str().unwrap_or("").trim().into());
             ui.set_artist_bio_url(bio["url"].as_str().unwrap_or("").into());
             ARTIST_NOW.with(|n| *n.borrow_mut() = Some((name.clone(), p.clone())));
+            {
+                let (rt, files) = { let a = shared.borrow(); (a.rt.clone(), a.library.iter().filter(|t| t.plat() == "local").cloned().collect::<Vec<_>>()) };
+                let (n2, p2, key) = (name.clone(), p.clone(), page_key("artist", &name));
+                PAGE_ALBUMS.with(|x| *x.borrow_mut() = (key.clone(), Vec::new(), HashMap::new()));
+                let weak = ui.as_weak();
+                rt.spawn(async move {
+                    let list = sources::artist_albums(&n2, &p2, &files).await;
+                    let _ = weak.upgrade_in_event_loop(move |_| SHARED.with(|s| { if let Some(sh) = s.borrow().clone() { if PAGE_ALBUMS.with(|x| x.borrow().0 == key) { page_albums_set(&sh, key, list); } } }));
+                });
+            }
             // (their YouTube Music songs join the page, each song once)
             if !yt_songs.is_empty() {
                 let mut a = shared.borrow_mut();
@@ -9750,6 +9844,9 @@ fn main() -> Result<(), slint::PlatformError> {
         if page == "library" && i == 3 {
             return library_albums(&s);
         }
+        if page == "rediscover" && i == 3 {
+            return page_albums_grid(&s);
+        }
         if page == "artist" && i == 2 {
             return artist_albums(&s);
         }
@@ -9880,6 +9977,20 @@ fn main() -> Result<(), slint::PlatformError> {
         if act.starts_with("pl") {
             drop(a);
             return pl_row_action(&s, &act, t);
+        }
+        // (the album shown above it: opened, or played)
+        if act == "album" || act == "albumplay" {
+            drop(a);
+            let k = s.borrow().rows.row_data(i as usize).map(|r| r.alb_i).unwrap_or(-1);
+            let Some(f) = PAGE_ALBUMS.with(|p| p.borrow().1.get(k.max(0) as usize).cloned()) else { return };
+            if act == "album" { ALBUMS.with(|x| *x.borrow_mut() = vec![f]); return album_open(&s, 0); }
+            let (rt, weak) = { let a = s.borrow(); (a.rt.clone(), a.ui.clone()) };
+            let local: Vec<Track> = match &f { sources::Found::Album { plat: "local", id, .. } => s.borrow().library.iter().filter(|t| t.plat() == "local" && t.album.trim() == id).cloned().collect(), _ => Vec::new() };
+            rt.spawn(async move {
+                let list = if local.is_empty() { sources::found_tracks(&f).await } else { local };
+                let _ = weak.upgrade_in_event_loop(move |_| SHARED.with(|s| { if let Some(sh) = s.borrow().clone() { if !list.is_empty() { play_list(&sh, list, 0); } } }));
+            });
+            return;
         }
         // (its versions opened beneath it, or closed; More versions: a search everywhere for the song)
         if act == "versions" {
@@ -10102,7 +10213,7 @@ fn main() -> Result<(), slint::PlatformError> {
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("replies") { vec![(9, "play"), (10, "openreplies"), (12, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("genre") { vec![(9, "play"), (10, "searchhouse"), (30, "searchartists"), (34, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("np") { vec![(9, "play"), (14, "now"), (18, "end")] }
-            else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("versions") { vec![(9, "play"), (10, "artistnamed"), (30, "vopen"), (31, "artistalbums"), (45, "end")] }
+            else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("versions") { vec![(9, "play"), (10, "artistnamed"), (30, "vopen"), (31, "listdown"), (32, "artistalbums"), (45, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("rhythm") { vec![(9, "play"), (100, "rhythm"), (101, "end")] }
             // (OMNIPULSE_SELFTEST_PLAN=dnd: a Library track dragged onto the queue; what the sidebar would take,
             // only asked, nothing dropped on your playlists)
@@ -10419,7 +10530,13 @@ fn main() -> Result<(), slint::PlatformError> {
                 "narrow" => { ui.window().set_size(slint::LogicalSize::new(900.0, 700.0)); }
                 // the first artist you follow
                 "artistnamed" => open_artist_named(&s, "deadmau5"),
-                "artistalbums" => { ui.invoke_chip(2); }
+                "artistalbums" => {
+                    let rows = s.borrow().rows.clone();
+                    let albs: Vec<String> = (0..rows.row_count()).filter_map(|k| rows.row_data(k)).filter(|r| r.alb != "").map(|r| format!("{} ({})", r.alb, r.alb_plat)).collect();
+                    println!("selftest: albums among the rows: {albs:?}");
+                    ui.invoke_chip(2);
+                }
+                "listdown" => ui.set_list_y(330.0),
                 "searchhouse" => go(&s, Place::Search("house".into())),
                 "searchartists" => { ui.invoke_chip(2); println!("selftest: search artists: {} shelves", ui.get_shelves().row_count()); }
                 "openreplies" => { ui.invoke_nav("settings".into()); ui.set_set_cat("Streaming".into()); panel_open(&s, "replies"); }

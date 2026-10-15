@@ -47,7 +47,7 @@ export global Dnd {
 
 // (and for its menu, as the web app's: its artists one by one, its uploader if it's someone else, a
 // like and a star, where it opens, Stream-Safe Music's Allow / Stop allowing)
-export struct Row { dim: bool, versions: string, version: bool, title: string, artist: string, album: string, dur: string, plat: string, playing: bool, head: string, auto: bool, art: image, liked: bool, sc-link: bool, sp-link: bool, yt-link: bool, picked: bool, genres: [string], added-by: string, artists: [string], uploader: string, can-like: bool, fav: bool, fav-on: bool, open-label: string, cleared: string, coming: bool }
+export struct Row { alb: string, alb-by: string, alb-plat: string, alb-art: image, alb-i: int, dim: bool, versions: string, version: bool, title: string, artist: string, album: string, dur: string, plat: string, playing: bool, head: string, auto: bool, art: image, liked: bool, sc-link: bool, sp-link: bool, yt-link: bool, picked: bool, genres: [string], added-by: string, artists: [string], uploader: string, can-like: bool, fav: bool, fav-on: bool, open-label: string, cleared: string, coming: bool }
 // (merged: playlists combined into it, to unmerge)
 export struct Side { title: string, plat: string, own: bool, share: bool, sc: bool, sp: bool, collab: bool, collab-owner: bool, merged: bool }
 /// A platform in the title bar: on (in its colours), set up (ready; grey until it is), its name
@@ -945,6 +945,49 @@ component TrackRow inherits Rectangle {
     }
 }
 
+/// An album among a list's tracks: its cover, "Album" with where it's from, its title and artist; a
+/// click opens it, the button plays it
+component AlbumStrip inherits Rectangle {
+    in property <string> title;
+    in property <string> by;
+    in property <string> plat;
+    in property <image> art;
+    callback open;
+    callback play;
+    height: 68px;
+    border-radius: 8px;
+    background: ata.has-hover ? Theme.elevated : Theme.elevated.with-alpha(0.35);
+    ata := TouchArea { mouse-cursor: MouseCursor.pointer; clicked => { root.open(); } }
+    HorizontalLayout {
+        padding-left: 8px;
+        padding-right: 16px;
+        spacing: 14px;
+        Rectangle {
+            width: 52px;
+            height: 52px;
+            y: (parent.height - self.height) / 2;
+            border-radius: 6px;
+            clip: true;
+            background: Theme.elevated;
+            Image { source: root.art; width: parent.width; height: parent.height; image-fit: cover; }
+        }
+        VerticalLayout {
+            alignment: center;
+            spacing: 2px;
+            horizontal-stretch: 1;
+            HorizontalLayout {
+                spacing: 5px;
+                alignment: start;
+                PlatIcon { plat: root.plat; width: 12px; height: 12px; y: (parent.height - self.height) / 2; }
+                Text { text: "ALBUM"; color: Theme.muted; font-size: 10px; font-weight: 800; letter-spacing: 1px; }
+            }
+            Text { text: root.title; color: Theme.text; font-weight: 700; font-size: 14px; overflow: elide; }
+            Text { text: root.by; color: Theme.muted; font-size: 12px; overflow: elide; }
+        }
+        IconButton { tip: "Play album"; d: Icons.play; filled: true; size: 34px; y: (parent.height - self.height) / 2; clicked => { root.play(); } }
+    }
+}
+
 component Cover inherits Rectangle {
     in property <image> art;
     in property <string> initial;
@@ -1410,6 +1453,8 @@ export component AppWindow inherits Window {
     /// an artist's page: where they are (each platform's symbol and its count), their picture, their
     /// Wikipedia bio (three lines, all of it on a click) and its address
     in property <[ArtistOn]> artist-on;
+    /// (the self-test: the track list scrolled this far)
+    in property <length> list-y;
     in property <image> page-art;
     in property <bool> page-art-on;
     in property <string> artist-bio;
@@ -2301,10 +2346,15 @@ export component AppWindow inherits Window {
                         property <int> first: max(0, floor(-self.content-y / Theme.row-h));
                         property <int> count: ceil(self.visible-height / Theme.row-h) + 1;
                         changed first => { root.rows-in-view(self.first, self.count); }
+                        // (the self-test scrolling the list)
+                        property <length> asked-y: root.list-y;
+                        changed asked-y => { self.content-y = -self.asked-y; }
                         changed count => { root.rows-in-view(self.first, self.count); }
                         init => { root.rows-in-view(self.first, self.count); }
                         // (the last one with room below it, so it scrolls clear of the track tab)
                         for r[i] in root.rows: VerticalLayout {
+                            // (an album among the tracks, as the web app's: one before every sixth)
+                            if r.alb != "": AlbumStrip { title: r.alb; by: r.alb-by; plat: r.alb-plat; art: r.alb-art; open => { root.row-action(i, "album"); } play => { root.row-action(i, "albumplay"); } }
                             TrackRow { item: r; index: i; compact: root.narrow || root.queue-open; lists: root.own-lists; removable: root.own-page; show-genres: root.page == "search" && Theme.row-h >= 60px; genre(g) => { root.genre-search(g); } play => { root.play-row(i); keys.focus(); } act(a) => { root.row-action(i, a); } pick(m) => { root.row-pick(i, m); keys.focus(); } }
                             if i == root.rows.length - 1: Rectangle { height: 76px; }
                         }
