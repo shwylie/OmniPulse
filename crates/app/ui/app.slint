@@ -1909,7 +1909,7 @@ export component AppWindow inherits Window {
                         fill: !root.mix-on ? Theme.muted : Theme.accent.mix(Theme.accent-2, 1 - parent.swing);
                         opacity: root.mix-on ? 1 : 0.55;
                     }
-                    TipSpot { hover: sta-m.has-hover; tip: root.mix-on ? "Seamless Mix (beta): on. Click to turn it off." : "Seamless Mix (beta): off. Click to mix songs into each other on the beat."; }
+                    TipSpot { hover: sta-m.has-hover; tip: root.mix-on ? "Seamless Mix (WIP): on. Click to turn it off." : "Seamless Mix (WIP): off. Click to mix songs into each other on the beat."; }
                     sta-m := TouchArea { clicked => { Tips.on = false; root.mix-toggle(); } }
                 }
                 // the platforms: in their colours when on, plain when off

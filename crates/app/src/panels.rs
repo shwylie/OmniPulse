@@ -17,7 +17,7 @@ pub fn title(name: &str) -> String {
         "requests" => "Song Requests",
         "replies" => "Chat Replies",
         "limits" => "Limit Requests",
-        "mix" => "Seamless Mix (Beta)",
+        "mix" => "Seamless Mix (WIP)",
         "discord" => "Discord Status",
         "together" => "Listen Along & Jams",
         "lyrics" => "Lyrics",
@@ -360,7 +360,7 @@ pub fn fields(name: &str, vals: &Map<String, Value>, prefs: &Value, lan: &str) -
         }
         // Seamless Mix's own page: its styles, its blend, and one forced for testing
         "mix" => vec![
-            note("Seamless Mix is in beta: it's still being tuned, so some transitions may not sound right yet. Rating them (Stream Deck: Mix Good / Mix Bad) helps."),
+            note("Seamless Mix is WIP: it's still being worked on, so some transitions may not sound right yet. Rating them (Stream Deck: Mix Good / Mix Bad) helps."),
             note("Styles: each one, when two songs suit it, in place of the usual blend (never the same one twice in a row)."),
             tog("mixWords", "Wordplay", "The song playing sings a word (\"heat\", \"one more time\"), it's looped on the beat, and the next song comes in singing the same one. Only with songs whose timed lyrics match what plays."),
             tog("mixDrop", "Drop Swap", "The song playing builds to its final drop, and the next song's drop lands there instead, on the beat."),

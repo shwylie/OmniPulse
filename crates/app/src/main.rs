@@ -5024,7 +5024,7 @@ const SET_ROWS: [(&str, &str, &str, &str, bool); 28] = [
     ("Library", "Autoplay", "Plays similar tracks when the queue runs out.", "autoplay", true),
     ("Library", "Hidden & Not Recommended", "Right-click a track to stop it, its album or its artist being recommended. Off: nothing is left out; the lists are kept.", "hideOn", true),
     ("Library", "Avoid Recent Plays", "Skips songs you've heard lately in what the app picks for you. What you choose yourself still plays.", "avoidRecent", true),
-    ("Sound", "Seamless Mix (Beta)", "Beta: still being tuned, so some transitions may not sound right yet. Songs with a beat blend into the next on it, as a DJ mixes: at its tempo, on its phrase, the next one sweeping in from the top as the one playing gives way below it, down to the drop. While it's on, Spotify songs play from their YouTube Music version (their Spotify details kept), so they mix too. What it uses on your PC: your internet connection and CPU to download and measure each next song ahead of time, and a little more CPU and memory while a mix plays or a song plays at a changed tempo.", "mixOn", true),
+    ("Sound", "Seamless Mix (WIP)", "WIP: still being worked on, so some transitions may not sound right yet. Songs with a beat blend into the next on it, as a DJ mixes: at its tempo, on its phrase, the next one sweeping in from the top as the one playing gives way below it, down to the drop. While it's on, Spotify songs play from their YouTube Music version (their Spotify details kept), so they mix too. What it uses on your PC: your internet connection and CPU to download and measure each next song ahead of time, and a little more CPU and memory while a mix plays or a song plays at a changed tempo.", "mixOn", true),
     ("Library", "Skip non-music parts", "What plays from YouTube skips the parts of music videos that aren't music (a skit before the song, an interview after it), as marked on SponsorBlock.", "sbOn", true),
     ("Library", "Favourites Page", "Your starred tracks on a page of their own, in the sidebar. The stars stay either way.", "favPage", true),
     ("Library", "Sets & Podcasts Page", "A page for anything over 15 minutes, in the sidebar. Right-click it there to hide it.", "setsOn", true),
@@ -6003,8 +6003,8 @@ fn set_toggle(shared: &Shared, key: &str) {
             // (Seamless Mix: Start a Jam greyed out with it on, and back with it off)
             if key == "mixOn" {
                 jam_paint(shared);
-                // (beta: said as it's switched on)
-                if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_status(if on { "Seamless Mix is on. It's in beta: some transitions may not sound right yet." } else { "Seamless Mix is off." }.into()); }
+                // (a work in progress: said as it's switched on)
+                if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_status(if on { "Seamless Mix is on. It's WIP: some transitions may not sound right yet." } else { "Seamless Mix is off." }.into()); }
             }
             // the servers stop, and start again with what's set now
             match key {
