@@ -278,6 +278,30 @@ pub fn camelot(tonic: usize, minor: bool) -> String {
 /// Mono samples at the analysis rate (for kick_strength)
 pub fn at_analysis_rate(mono: &[f32], rate: u32) -> Vec<f32> { to_analysis_rate(mono, rate) }
 
+/// Where a song's snares (or claps) fall, by beat of four (from its first tracked beat): each beat's
+/// upper mids (1.5 to 6 kHz: a snare's crack, not its hats) rising within 40 ms of it, summed, as shares
+fn snare_by_phase(x: &[f32], beats: &[f64]) -> [f64; 4] {
+    let lp = |hz: f32| 1.0 - (-2.0 * std::f32::consts::PI * hz / RATE as f32).exp();
+    let (a15, a6) = (lp(1500.0), lp(6000.0));
+    let (mut l15, mut l6) = (0.0f32, 0.0f32);
+    const FRAME: usize = RATE as usize / 1000;
+    let e: Vec<f32> = x.chunks(FRAME).map(|c| c.iter().map(|v| { l15 += a15 * (v - l15); l6 += a6 * (v - l6); let m = l6 - l15; m * m }).sum::<f32>() / c.len() as f32).collect();
+    let n = e.len();
+    let sm: Vec<f32> = (0..n).map(|i| { let (a, b) = (i.saturating_sub(3), (i + 3).min(n)); e[a..b].iter().sum::<f32>() / (b - a) as f32 }).collect();
+    let fms = FRAME as f64 * 1000.0 / RATE as f64;
+    let mut by = [0.0f64; 4];
+    for (k, b) in beats.iter().enumerate() {
+        let c = (b / fms) as usize;
+        let (lo, hi) = (c.saturating_sub(40).max(3), (c + 40).min(n.saturating_sub(3)));
+        if hi <= lo { continue; }
+        // (its sharpest rise near the beat, against the level before it: a crack, not a held sound)
+        let r = (lo..hi).map(|i| (sm[i + 3] - sm[i - 3]).max(0.0) / (sm[i - 3] + 1e-9)).fold(0.0f32, f32::max);
+        by[k % 4] += (r as f64).min(50.0);
+    }
+    let t: f64 = by.iter().sum::<f64>().max(1e-9);
+    by.map(|v| v / t)
+}
+
 /// Tempo, beats and key of mono samples at `rate` (a few seconds at least; the more the better)
 pub fn analyse(mono: &[f32], rate: u32) -> Option<Rhythm> {
     let x = to_analysis_rate(mono, rate);
@@ -338,6 +362,26 @@ pub fn analyse(mono: &[f32], rate: u32) -> Option<Rhythm> {
         eprintln!("rhythm debug: downbeat by bass {old}, now {downbeat}; bass {:?} changes {:?}", bass_share.map(|v| (v * 100.0).round()), change_share.map(|v| (v * 100.0).round()));
     }
     let (tonic, minor, kconf, frames_chroma) = key(&x);
+    if std::env::var_os("OMNIPULSE_RHYTHM_DEBUG").is_some() {
+        // (each beat's notes, and how much they change from the two before to the two after it, by beat of four)
+        let per: Vec<[f32; 12]> = beats.windows(2).map(|w| {
+            let mut c = [0.0f32; 12];
+            for (_, fr) in frames_chroma.iter().filter(|(t, _)| *t >= w[0] && *t < w[1]) { for k in 0..12 { c[k] += fr[k]; } }
+            c
+        }).collect();
+        let mut chord = [0.0f64; 4];
+        for i in 2..per.len().saturating_sub(2) {
+            let sum = |a: usize, b: usize| { let mut c = [0.0f32; 12]; for v in &per[a..b] { for k in 0..12 { c[k] += v[k]; } } c };
+            let (x0, x1) = (sum(i - 2, i), sum(i, i + 2));
+            let dot: f32 = (0..12).map(|k| x0[k] * x1[k]).sum();
+            let n = (x0.iter().map(|v| v * v).sum::<f32>() * x1.iter().map(|v| v * v).sum::<f32>()).sqrt().max(1e-9);
+            chord[i % 4] += (1.0 - dot / n) as f64;
+        }
+        let t: f64 = chord.iter().sum::<f64>().max(1e-9);
+        let snare = snare_by_phase(&x, &beats);
+        eprintln!("rhythm debug: snares by beat of four {:?}", snare.map(|v| (v * 100.0).round()));
+        eprintln!("rhythm debug: downbeat {downbeat} (sure {:.2}); by beat of four (0..4 from the first tracked): bass {:?}, section changes {:?}, chord changes {:?}", downbeat_confidence, bass_share.map(|v| (v * 100.0).round()), change_share.map(|v| (v * 100.0).round()), chord.map(|v| (v / t * 100.0).round()));
+    }
     // each bar's loudness, from the first downbeat on (four tracked beats to a bar), and how strong its
     // beat is: its onsets and its bass at its beats, against the song's usual (a median beat's: 1)
     let peak = |e: &[f64], f: usize| { let (a, b) = (f.saturating_sub(2), (f + 2).min(e.len() - 1)); (a..=b).map(|k| e[k]).fold(0.0, f64::max) };

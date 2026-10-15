@@ -632,6 +632,20 @@ mod tests {
         }
     }
 
+    /// Each song measured again (as the app measures it whole), its downbeat's clues shown
+    /// OMNIPULSE_RHYTHM_DEBUG=1 OMNIPULSE_PROBE_IDS=1,2 cargo test --release -p omnipulse --bin OmniPulse-native rhythm_probe -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn rhythm_probe() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        for id in std::env::var("OMNIPULSE_PROBE_IDS").unwrap().split(',') {
+            let (mono, rate) = rt.block_on(omnipulse_core::loudness::mono_start("soundcloud", id, 1200.0)).unwrap();
+            eprintln!("{id}:");
+            let r = omnipulse_core::rhythm::analyse(&mono, rate).unwrap();
+            eprintln!("  {} BPM, downbeat {}, first beats {:?}", r.bpm, r.downbeat, &r.beats[..4]);
+        }
+    }
+
     /// The fallback fade the app uses (main.rs' SMART_FIXED_MS)
     const FIXED_MS: u64 = 6000;
 
