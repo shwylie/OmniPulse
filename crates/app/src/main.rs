@@ -167,7 +167,7 @@ fn apply_filter(app: &mut App) {
     let mine: std::collections::HashSet<&str> = if app.page == "search" && prefs["hideLikes"].as_bool() == Some(true) { app.library.iter().map(|t| t.key.as_str()).collect() } else { Default::default() };
     let shown = |t: &&Track| plat_on(&prefs, t.plat()) && (!fav_only || favs.contains(t.key.as_str())) && !mine.contains(t.key.as_str()) && !hide::no_version(&prefs, t) && streamsafe::allowed(&prefs, t) && found(t);
     let mut filtered: Vec<Track> = match (app.page.as_str(), chip) {
-        ("library" | "rediscover" | "favourites" | "search" | "playlist", 1) => app.page_all.iter().filter(shown).filter(|t| !t.is_mix()).cloned().collect(),
+        ("library" | "rediscover" | "favourites" | "search" | "playlist" | "artist", 1) => app.page_all.iter().filter(shown).filter(|t| !t.is_mix()).cloned().collect(),
         ("library" | "rediscover" | "favourites" | "search" | "playlist", 2) => app.page_all.iter().filter(shown).filter(|t| t.is_mix()).cloned().collect(),
         _ => app.page_all.iter().filter(shown).cloned().collect(),
     };
@@ -283,9 +283,11 @@ fn show_tracks(shared: &Shared, page: &str, title: &str, sub: String, mut tracks
     // (the Library has an Albums chip too: your saved albums, as a grid)
     let mut names: Vec<slint::SharedString> = if chips { FILTER_CHIPS.iter().map(|c| (*c).into()).collect() } else { Vec::new() };
     if chips && page == "library" { names.push("Albums".into()); }
+    if chips && page == "artist" { names = vec!["All".into(), "Tracks".into(), "Albums".into()]; }
     ui.set_chips(ModelRc::from(Rc::new(VecModel::from(names))));
     // (the chip last picked on this page)
     let kept = if chips { FILTER_KEYS.iter().position(|k| app.web.prefs["pageFilters"][filter_view(page)].as_str() == Some(k)).unwrap_or(0) } else { 0 };
+    let kept = if page == "artist" && kept > 1 { 0 } else { kept };
     app.chip = kept;
     ui.set_chip_on(kept as i32);
     apply_filter(&mut app);
@@ -1061,10 +1063,12 @@ fn open_artist(shared: &Shared, i: usize) {
     let on = a.plats().into_iter().map(name).collect::<Vec<_>>().join(" and ");
     show_tracks(shared, "artist", &a.name, "Loading...".into(), Vec::new(), true);
     let cat = catalog_on(&shared.borrow().web.prefs);
+    let token = shared.borrow().token;
+    artist_extras(shared, &a.name, a.sc, a.sp.clone(), token);
     load_into(shared, "artist", a.name.clone(), async move {
-        let (t, dz, bio) = tokio::join!(sources::artist_tracks(&a), artist_top(&a.name, cat), artist_bio(&a.name));
+        let (t, dz) = tokio::join!(sources::artist_tracks(&a), artist_top(&a.name, cat));
         let t = sources::once_each(sources::interleave(vec![t, dz]));
-        let sub = format!("{bio}You follow them on {on}. {}.", plural(t.len(), "track", "tracks"));
+        let sub = format!("You follow them on {on}. {}.", plural(t.len(), "track", "tracks"));
         (t, sub)
     });
 }
@@ -1081,6 +1085,8 @@ fn open_artist_named(shared: &Shared, name: &str) {
     let key = omnipulse_core::ranking::artist_key(name);
     let mine: Vec<Track> = shared.borrow().library.iter().filter(|t| t.artist.split([',', '&']).any(|a| omnipulse_core::ranking::artist_key(a.trim()) == key)).cloned().collect();
     show_tracks(shared, "artist", name, "Loading...".into(), mine.clone(), true);
+    let token = shared.borrow().token;
+    artist_extras(shared, name, None, None, token);
     let (cat, sc_on, sp_on) = { let p = &shared.borrow().web.prefs; (catalog_on(p), plat_on(p, "soundcloud"), plat_on(p, "spotify")) };
     let name = name.to_string();
     load_into(shared, "artist", name.clone(), async move {
@@ -1094,11 +1100,89 @@ fn open_artist_named(shared: &Shared, name: &str) {
             let _ = slint::invoke_from_event_loop(move || SHARED.with(|s| { NAMED.with(|n| *n.borrow_mut() = Some(found)); if let Some(sh) = s.borrow().clone() { follow_paint(&sh); } }));
         }
         let on = a.plats().into_iter().map(|p| if p == "spotify" { "Spotify" } else { "SoundCloud" }).collect::<Vec<_>>().join(" and ");
-        let (t, dz, bio) = tokio::join!(sources::artist_tracks(&a), artist_top(&name, cat), artist_bio(&name));
+        let (t, dz) = tokio::join!(sources::artist_tracks(&a), artist_top(&name, cat));
         let t = sources::once_each(sources::interleave(vec![mine.clone(), t, dz]));
         let liked = if mine.is_empty() { String::new() } else { format!("{} you like first. ", plural(mine.len(), "song", "songs")) };
-        let sub = format!("{bio}{liked}{}{}.", if on.is_empty() { String::new() } else { format!("From {on} and more. ") }, plural(t.len(), "track", "tracks"));
+        let sub = format!("{liked}{}{}.", if on.is_empty() { String::new() } else { format!("From {on} and more. ") }, plural(t.len(), "track", "tracks"));
         (t, sub)
+    });
+}
+
+thread_local! {
+    /// the artist page open: their name and where they are (for its Albums chip)
+    static ARTIST_NOW: RefCell<Option<(String, sources::Profiles)>> = const { RefCell::new(None) };
+}
+
+/// An artist's page, beyond its tracks (as the web app's): where they are, with how many follow them
+/// there (each platform's symbol), their picture, their Wikipedia bio, and their songs on YouTube Music
+fn artist_extras(shared: &Shared, name: &str, sc: Option<u64>, sp: Option<String>, token: u64) {
+    let (rt, weak, prefs, files) = { let a = shared.borrow(); (a.rt.clone(), a.ui.clone(), a.web.prefs.clone(), a.library.iter().filter(|t| t.plat() == "local").cloned().collect::<Vec<_>>()) };
+    if let Some(ui) = weak.upgrade() { ui.set_artist_on(ModelRc::default()); ui.set_artist_bio("".into()); ui.set_artist_bio_url("".into()); ui.set_page_art(slint::Image::default()); ui.set_page_art_on(false); }
+    ARTIST_NOW.with(|n| *n.borrow_mut() = Some((name.to_string(), sources::Profiles::default())));
+    let k = omnipulse_core::ranking::artist_key(name);
+    let n_files = files.iter().filter(|t| t.artist.split([',', '&']).any(|a| omnipulse_core::ranking::artist_key(a.trim()) == k)).count();
+    let (yt_on, dz_on, sc_on, sp_on) = (plat_on(&prefs, "youtube") && omnipulse_core::tools::ytdlp_path().is_some(), catalog_on(&prefs), plat_on(&prefs, "soundcloud"), plat_on(&prefs, "spotify"));
+    let name = name.to_string();
+    rt.spawn(async move {
+        let (p, bio) = tokio::join!(sources::profiles(&name, if sc_on { sc } else { None }, if sp_on { sp } else { None }, yt_on, dz_on), omnipulse_core::bio::artist(&name));
+        let p = sources::Profiles { sc: if sc_on { p.sc } else { None }, sp: if sp_on { p.sp } else { None }, ..p };
+        if std::env::var_os("OMNIPULSE_SELFTEST").is_some() { println!("selftest: profiles {p:?}"); }
+        let yt_songs: Vec<Track> = match &p.yt { Some((id, _)) => omnipulse_core::youtube::artist(id).await.map(|pg| pg.songs.iter().map(Track::youtube).collect()).unwrap_or_default(), None => Vec::new() };
+        let art = if p.img.is_empty() { None } else { player::fetch_art(p.img.clone(), 200).await };
+        let bio = bio.unwrap_or_default();
+        let _ = weak.upgrade_in_event_loop(move |ui| SHARED.with(|s| {
+            let Some(shared) = s.borrow().clone() else { return };
+            if shared.borrow().token != token && shared.borrow().page != "artist" { return; }
+            if ui.get_page() != "artist" || ui.get_page_title() != name.as_str() { return; }
+            let count = |n: u64| { let s = n.to_string(); let mut o = String::new(); for (i, c) in s.chars().enumerate() { if i > 0 && (s.len() - i) % 3 == 0 { o.push(','); } o.push(c); } o };
+            let mut on: Vec<ArtistOn> = Vec::new();
+            if let Some((_, f)) = p.sc { on.push(ArtistOn { plat: "soundcloud".into(), text: format!("{} followers", count(f)).into() }); }
+            if let Some((_, f)) = &p.sp { on.push(ArtistOn { plat: "spotify".into(), text: if *f > 0 { format!("{} followers", count(*f)) } else { "Spotify".into() }.into() }); }
+            if let Some((_, subs)) = &p.yt { on.push(ArtistOn { plat: "youtube".into(), text: if subs.is_empty() { "YouTube Music".into() } else { subs.clone().into() } }); }
+            if let Some((_, f)) = p.dz { on.push(ArtistOn { plat: "deezer".into(), text: if f > 0 { format!("{} fans", count(f)) } else { "Deezer".into() }.into() }); }
+            if n_files > 0 { on.push(ArtistOn { plat: "local".into(), text: plural(n_files, "file", "files").into() }); }
+            ui.set_artist_on(ModelRc::from(Rc::new(VecModel::from(on))));
+            if let Some(px) = art { ui.set_page_art(slint::Image::from_rgba8(px)); ui.set_page_art_on(true); }
+            ui.set_artist_bio(bio["text"].as_str().unwrap_or("").trim().into());
+            ui.set_artist_bio_url(bio["url"].as_str().unwrap_or("").into());
+            ARTIST_NOW.with(|n| *n.borrow_mut() = Some((name.clone(), p.clone())));
+            // (their YouTube Music songs join the page, each song once)
+            if !yt_songs.is_empty() {
+                let mut a = shared.borrow_mut();
+                let mut all = std::mem::take(&mut a.page_all);
+                all.extend(yt_songs);
+                a.page_all = sources::once_each(all);
+                apply_filter(&mut a);
+            }
+        }));
+    });
+}
+
+/// The artist page's Albums chip: their albums and singles from every platform, as tiles
+fn artist_albums(shared: &Shared) {
+    let Some((name, p)) = ARTIST_NOW.with(|n| n.borrow().clone()) else { return };
+    let (rt, weak, files) = { let a = shared.borrow(); (a.rt.clone(), a.ui.clone(), a.library.iter().filter(|t| t.plat() == "local").cloned().collect::<Vec<_>>()) };
+    if let Some(ui) = weak.upgrade() { ui.set_page_kind("albumgrid".into()); ui.set_album_tiles(ModelRc::default()); }
+    rt.spawn(async move {
+        let list = sources::artist_albums(&name, &p, &files).await;
+        let arts: Vec<String> = list.iter().map(|f| f.tile().2).collect();
+        let weak2 = weak.clone();
+        let _ = weak.upgrade_in_event_loop(move |ui| {
+            if ui.get_page_kind() != "albumgrid" || ui.get_page() != "artist" { return; }
+            let model = Rc::new(VecModel::from(list.iter().map(|f| { let (t, sub, _, plat) = f.tile(); Tile { title: t.into(), sub: sub.into(), art: slint::Image::default(), plat: plat.into(), genre: false, c1: Default::default(), c2: Default::default(), track: false, liked: false, row: Default::default() } }).collect::<Vec<_>>()));
+            ui.set_album_tiles(ModelRc::from(model.clone()));
+            if list.is_empty() { ui.set_status(format!("No albums by {name} turned up.").into()); }
+            ALBUM_MODEL.with(|m| *m.borrow_mut() = Some(model));
+            ALBUMS.with(|a| *a.borrow_mut() = list);
+        });
+        for (k, url) in arts.into_iter().enumerate() {
+            if url.is_empty() { continue; }
+            if let Some(px) = player::fetch_art(url, 200).await {
+                let _ = weak2.upgrade_in_event_loop(move |_| ALBUM_MODEL.with(|m| {
+                    if let Some(model) = m.borrow().as_ref() { if let Some(mut t) = model.row_data(k) { t.art = slint::Image::from_rgba8(px); model.set_row_data(k, t); } }
+                }));
+            }
+        }
     });
 }
 
@@ -9577,6 +9661,9 @@ fn main() -> Result<(), slint::PlatformError> {
         if page == "library" && i == 3 {
             return library_albums(&s);
         }
+        if page == "artist" && i == 2 {
+            return artist_albums(&s);
+        }
         if ui.get_page_kind() == "albumgrid" { ui.set_page_kind("tracks".into()); }
         let mut a = s.borrow_mut();
         a.chip = i as usize;
@@ -9917,7 +10004,7 @@ fn main() -> Result<(), slint::PlatformError> {
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("mixfb") { vec![(9, "play"), (10, "rate"), (11, "mixprep"), (70, "mixseek"), (80, "mixcheck"), (84, "mixcheck"), (88, "mixcheck"), (92, "mixcheck"), (96, "mixcheck"), (100, "mixcheck"), (104, "mixcheck"), (108, "mixcheck"), (112, "rate"), (114, "mixcheck"), (118, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("replies") { vec![(9, "play"), (10, "openreplies"), (12, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("np") { vec![(9, "play"), (14, "now"), (18, "end")] }
-            else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("versions") { vec![(9, "play"), (10, "artistnamed"), (40, "vopen"), (41, "end")] }
+            else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("versions") { vec![(9, "play"), (10, "artistnamed"), (30, "vopen"), (31, "artistalbums"), (45, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("rhythm") { vec![(9, "play"), (100, "rhythm"), (101, "end")] }
             // (OMNIPULSE_SELFTEST_PLAN=dnd: a Library track dragged onto the queue; what the sidebar would take,
             // only asked, nothing dropped on your playlists)
@@ -10234,6 +10321,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 "narrow" => { ui.window().set_size(slint::LogicalSize::new(900.0, 700.0)); }
                 // the first artist you follow
                 "artistnamed" => open_artist_named(&s, "deadmau5"),
+                "artistalbums" => { ui.invoke_chip(2); }
                 "openreplies" => { ui.invoke_nav("settings".into()); ui.set_set_cat("Streaming".into()); panel_open(&s, "replies"); }
                 // (the first song with versions: them opened beneath it)
                 "vopen" => {

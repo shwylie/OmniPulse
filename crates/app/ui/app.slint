@@ -54,6 +54,8 @@ export struct Side { title: string, plat: string, own: bool, share: bool, sc: bo
 export struct Plat { id: string, on: bool, name: string, ready: bool }
 // (a genre's tile, as the web app's: a coloured cover, its name on it; c1 its middle, c2 its edge)
 // (a song's tile: a track menu on right-click, as the web app's; liked, for its line)
+/// An artist page's platform: its symbol, and how many follow them there ("12,345 followers")
+export struct ArtistOn { plat: string, text: string }
 export struct Tile { title: string, sub: string, art: image, plat: string, genre: bool, c1: color, c2: color, track: bool, liked: bool, row: Row }
 /// Pick genres (and Fine-tune): a row of up to four chips, under a group's name (on its first row)
 export struct TasteChip { label: string, on: bool }
@@ -1405,6 +1407,14 @@ export component AppWindow inherits Window {
     callback picks-copy();
     callback picks-paste();
     in property <string> now-artist;
+    /// an artist's page: where they are (each platform's symbol and its count), their picture, their
+    /// Wikipedia bio (three lines, all of it on a click) and its address
+    in property <[ArtistOn]> artist-on;
+    in property <image> page-art;
+    in property <bool> page-art-on;
+    in property <string> artist-bio;
+    in property <string> artist-bio-url;
+    property <bool> bio-open;
     /// its artists, each a link (several: side by side)
     in property <[string]> now-artists;
     /// genre, year and plays, as the web app's (Now Playing)
@@ -2123,6 +2133,16 @@ export component AppWindow inherits Window {
                     // the title, and (on pages made from what the platforms send) fetching them again
                     if root.page-kind != "now": HorizontalLayout {
                         spacing: 14px;
+                        // (an artist's picture, as the web app's)
+                        if root.page == "artist" && root.page-art-on: Rectangle {
+                            width: 64px;
+                            height: 64px;
+                            y: (parent.height - self.height) / 2;
+                            border-radius: 32px;
+                            clip: true;
+                            background: Theme.elevated;
+                            Image { source: root.page-art; width: parent.width; height: parent.height; image-fit: cover; }
+                        }
                         if !(root.page == "settings" && root.set-cat != "" && root.set-query == ""): Text { text: root.page == "settings" && root.set-query != "" ? "Settings" : root.page-title; color: Theme.text; font-size: 44px; font-weight: 800; overflow: elide; horizontal-stretch: 0; }
                         if root.page == "settings" && root.set-cat != "" && root.set-query == "": HorizontalLayout {
                             spacing: 14px;
@@ -2146,6 +2166,31 @@ export component AppWindow inherits Window {
                         Rectangle { horizontal-stretch: 1; }
                     }
                     if root.page-kind != "now" && root.page-sub != "": Text { text: root.page-sub; color: Theme.muted; font-size: 14px; wrap: word-wrap; overflow: elide; max-height: 60px; }
+                    // an artist's page: where they are, with how many follow them there
+                    if root.page == "artist" && root.artist-on.length > 0: HorizontalLayout {
+                        alignment: start;
+                        spacing: 16px;
+                        for o in root.artist-on: HorizontalLayout {
+                            spacing: 6px;
+                            PlatIcon { plat: o.plat; width: 15px; height: 15px; y: (parent.height - self.height) / 2; }
+                            Text { text: o.text; color: Theme.muted; font-size: 13px; vertical-alignment: center; }
+                        }
+                    }
+                    // their bio: three lines, all of it on a click; Wikipedia for more
+                    if root.page == "artist" && root.artist-bio != "": HorizontalLayout {
+                        spacing: 10px;
+                        Text {
+                            text: root.artist-bio;
+                            color: bta.has-hover ? Theme.text : Theme.muted;
+                            font-size: 13px;
+                            wrap: word-wrap;
+                            overflow: elide;
+                            horizontal-stretch: 1;
+                            max-height: root.bio-open ? 400px : 54px;
+                            bta := TouchArea { mouse-cursor: MouseCursor.pointer; clicked => { root.bio-open = !root.bio-open; } }
+                        }
+                        if root.artist-bio-url != "": Pill { label: "Wikipedia"; tip: "Read more on Wikipedia"; y: 0; clicked => { root.open-web(root.artist-bio-url); } }
+                    }
                     if root.chips.length > 0: HorizontalLayout {
                         alignment: start;
                         spacing: 8px;

@@ -471,6 +471,98 @@ pub async fn saved_albums() -> Vec<Found> {
     }
 }
 
+/// An artist on each platform, as the web app's resolveArtist and artistSubline: how many follow them
+/// there, their picture (stand-in avatars aside), and their YouTube Music and Deezer pages
+#[derive(Clone, Default, Debug)]
+pub struct Profiles {
+    pub sc: Option<(u64, u64)>,
+    pub sp: Option<(String, u64)>,
+    /// (its channel id, "1.37M subscribers")
+    pub yt: Option<(String, String)>,
+    /// (its id, fans)
+    pub dz: Option<(u64, u64)>,
+    pub img: String,
+}
+
+pub async fn profiles(name: &str, sc: Option<u64>, sp: Option<String>, yt_on: bool, dz_on: bool) -> Profiles {
+    let k = name_key(name);
+    let sc_f = async {
+        let id = match sc { Some(id) => Some(id), None => find_artist_on("soundcloud", name).await.and_then(|x| x.parse().ok()) }?;
+        let v = core::soundcloud::api_get(format!("/users/{id}")).await.ok()?;
+        Some((id, v["followers_count"].as_u64().unwrap_or(0), v["avatar_url"].as_str().unwrap_or("").replace("-large", "-t500x500")))
+    };
+    let sp_f = async {
+        if !core::spotify::spotify_signed_in() { return None; }
+        let id = match sp { Some(id) => Some(id), None => find_artist_on("spotify", name).await }?;
+        let v = core::spotify::spotify_api("GET".into(), format!("/artists/{id}"), None).await.ok()?;
+        let img = v["images"].as_array().and_then(|i| i.first()).and_then(|i| i["url"].as_str()).unwrap_or("").to_string();
+        Some((id, v["followers"]["total"].as_u64().unwrap_or(0), img))
+    };
+    let yt_f = async {
+        if !yt_on { return None; }
+        let list = core::youtube::search_artists(name).await.ok()?;
+        list.into_iter().find(|a| name_key(&a.name) == k).map(|a| (a.id, a.subscribers, a.thumb))
+    };
+    let dz_f = async {
+        if !dz_on { return None; }
+        let (id, pic) = crate::discover::dz_artist(name).await?;
+        let v = core::catalog::deezer(&format!("/artist/{id}")).await.ok()?;
+        Some((id, v["nb_fan"].as_u64().unwrap_or(0), pic))
+    };
+    let (sc, sp, yt, dz) = tokio::join!(sc_f, sp_f, yt_f, dz_f);
+    // (a picture that's really of them: Spotify's, Deezer's, YouTube's, then SoundCloud's)
+    let imgs = [sp.as_ref().map(|x| x.2.clone()), dz.as_ref().map(|x| x.2.clone()), yt.as_ref().map(|x| x.2.clone()), sc.as_ref().map(|x| x.2.clone())];
+    let imgs: Vec<String> = imgs.into_iter().flatten().filter(|u| !u.is_empty()).collect();
+    let img = imgs.iter().find(|u| real_image(u)).or(imgs.first()).cloned().unwrap_or_default();
+    Profiles { sc: sc.map(|x| (x.0, x.1)), sp: sp.map(|x| (x.0, x.1)), yt: yt.map(|x| (x.0, x.1)), dz: dz.map(|x| (x.0, x.1)), img }
+}
+
+/// An artist's albums and singles, from every platform they're on (each once, by its title), as the web
+/// app's artistAlbums
+pub async fn artist_albums(name: &str, p: &Profiles, files: &[Track]) -> Vec<Found> {
+    let sc = async {
+        let Some((id, _)) = p.sc else { return Vec::new() };
+        let Ok(v) = core::soundcloud::api_get(sc_path(format!("/users/{id}/albums?limit=50&linked_partitioning=true"))).await else { return Vec::new() };
+        items(&v).iter().filter_map(|x| Some(Found::Album { plat: "soundcloud", id: x["id"].as_u64()?.to_string(), title: x["title"].as_str().unwrap_or("").to_string(), by: x["user"]["username"].as_str().unwrap_or("").to_string(), img: x["artwork_url"].as_str().unwrap_or("").replace("-large", "-t200x200") })).collect::<Vec<_>>()
+    };
+    let sp = async {
+        let Some((id, _)) = &p.sp else { return Vec::new() };
+        let Ok(v) = core::spotify::spotify_api("GET".into(), format!("/artists/{id}/albums?include_groups=album,single&limit=20&market=from_token"), None).await else { return Vec::new() };
+        v["items"].as_array().cloned().unwrap_or_default().iter().filter_map(|a| Some(Found::Album {
+            plat: "spotify", id: a["id"].as_str()?.to_string(), title: a["name"].as_str().unwrap_or("").to_string(),
+            by: a["artists"].as_array().map(|x| x.iter().filter_map(|y| y["name"].as_str()).collect::<Vec<_>>().join(", ")).unwrap_or_default(),
+            img: a["images"].as_array().and_then(|i| i.get(1).or(i.first())).and_then(|i| i["url"].as_str()).unwrap_or("").to_string(),
+        })).collect::<Vec<_>>()
+    };
+    let yt = async {
+        let Some((id, _)) = &p.yt else { return Vec::new() };
+        core::youtube::artist(id).await.map(|pg| pg.albums.into_iter().map(|a| Found::Album { plat: "youtube", id: a.id, title: a.title, by: a.artists, img: a.thumb }).collect()).unwrap_or_default()
+    };
+    let dz = async {
+        let Some((id, _)) = p.dz else { return Vec::new() };
+        let Ok(v) = core::catalog::deezer(&format!("/artist/{id}/albums?limit=50")).await else { return Vec::new() };
+        v["data"].as_array().cloned().unwrap_or_default().iter().filter_map(|a| Some(Found::Album { plat: "deezer", id: a["id"].as_u64()?.to_string(), title: a["title"].as_str().unwrap_or("").to_string(), by: name.to_string(), img: a["cover_medium"].as_str().unwrap_or("").to_string() })).collect()
+    };
+    let (sc, sp, yt, dz) = tokio::join!(sc, sp, yt, dz);
+    let k = name_key(name);
+    let mine: Vec<Track> = files.iter().filter(|t| t.plat() == "local" && t.artist.split([',', '&']).any(|a| name_key(a.trim()) == k)).cloned().collect();
+    let local = local_albums(&mine);
+    // (the same album once, from whichever platform comes first)
+    let mut seen = std::collections::HashSet::new();
+    let lists = [sp, sc, yt, local, dz];
+    let mut out = Vec::new();
+    let longest = lists.iter().map(|l| l.len()).max().unwrap_or(0);
+    for i in 0..longest {
+        for l in &lists {
+            if let Some(f) = l.get(i) {
+                let key = name_key(&f.tile().0);
+                if !key.is_empty() && seen.insert(key) { out.push(f.clone()); }
+            }
+        }
+    }
+    out
+}
+
 /// Albums among your music files: an album name shared by more than one of them
 pub fn local_albums(files: &[Track]) -> Vec<Found> {
     let mut by: std::collections::BTreeMap<String, (Found, usize)> = Default::default();
@@ -495,6 +587,11 @@ pub async fn found_tracks(f: &Found) -> Vec<Track> {
         Found::Album { plat: "soundcloud", id, title, .. } => playlist_tracks(&Playlist { plat: "soundcloud", id: id.clone(), title: title.clone(), tracks: None, own: false }).await,
         // (your files' albums are picked out of the Library by the app: main.rs)
         Found::Album { plat: "local", .. } => Vec::new(),
+        Found::Album { plat: "youtube", id, .. } => core::youtube::album(id).await.map(|(_, l)| l.iter().map(Track::youtube).collect()).unwrap_or_default(),
+        Found::Album { plat: "deezer", id, .. } => {
+            let Ok(v) = core::catalog::deezer(&format!("/album/{id}")).await else { return Vec::new() };
+            v["tracks"]["data"].as_array().cloned().unwrap_or_default().iter().filter_map(|t| core::catalog::dz_track(t, Some(&v))).filter_map(|t| Track::catalog(&t)).collect()
+        }
         Found::Album { id, img, .. } => {
             let Ok(v) = core::spotify::spotify_api("GET".into(), format!("/albums/{id}/tracks?limit=50&market=from_token"), None).await else { return Vec::new() };
             // (an album's tracks come without the album: its cover is the album's)
@@ -549,7 +646,8 @@ pub async fn find_artist_on(plat: &str, name: &str) -> Option<String> {
     if k.is_empty() { return None; }
     match plat {
         "soundcloud" => {
-            let v = core::soundcloud::api_get(format!("/search/users?q={}&limit=10", urlencode(name))).await.ok()?;
+            // (as the web app's: /users?q=, the API's own search for people)
+            let v = core::soundcloud::api_get(sc_path(format!("/users?q={}&limit=10&linked_partitioning=true", urlencode(name)))).await.ok()?;
             items(&v).iter().filter(|u| name_key(u["username"].as_str().unwrap_or("")) == k)
                 .max_by_key(|u| u["followers_count"].as_u64().unwrap_or(0))
                 .and_then(|u| u["id"].as_u64()).map(|id| id.to_string())
