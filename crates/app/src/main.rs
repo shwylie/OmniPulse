@@ -3734,6 +3734,7 @@ fn mix_tick(shared: &Shared, pos: u64, dur: u64) {
     plan
     };
     MIX.with(|m| *m.borrow_mut() = Some(MixPhase::Opening(next.key.clone())));
+    let cur_key = cur.key.clone();
     let (rt, weak, prefs) = { let a = shared.borrow(); (a.rt.clone(), a.ui.clone(), a.web.prefs.clone()) };
     let h = rt.clone();
     rt.spawn(async move {
@@ -3769,7 +3770,7 @@ fn mix_tick(shared: &Shared, pos: u64, dur: u64) {
                     // (slowed into the next one's tempo: from here, the one playing goes through the stretch, as it was until the mix)
                     let out = (plan.out_tempo != 1.0).then(|| omnipulse_audio::Tempo::new(1.0));
                     if let Some(o) = &out { shared.borrow().engine.stretch_playing(o.clone()); }
-                    let handoff = if smart { smart::handoff(&plan, set_row_on(&prefs, "smartVoices", true)) } else { mix::handoff(&plan, set_row_on(&prefs, "mixBands", false)) };
+                    let handoff = if smart { smart::handoff(&plan, set_row_on(&prefs, "smartVoices", true) && smart_both_sing(&cur_key, &next.key, (plan.at_ms, plan.at_ms + plan.ms), (plan.start_ms, plan.start_ms + (plan.ms as f64 * plan.rate) as u64))) } else { mix::handoff(&plan, set_row_on(&prefs, "mixBands", false)) };
                     shared.borrow().engine.mix_at(src, db, plan.at_ms, plan.ms, Some(handoff));
                     MIX.with(|m| *m.borrow_mut() = Some(MixPhase::Waiting { key: next.key.clone(), plan, tempo, version, out, pitch }));
                 }
@@ -4476,6 +4477,11 @@ fn smart_blends_on(prefs: &serde_json::Value) -> bool {
     smart_on(prefs) && set_row_on(prefs, "smartBlend", true)
 }
 
+/// One of its page's switches (on unless switched off)
+fn smart_set_on(prefs: &serde_json::Value, key: &str) -> bool {
+    smart_on(prefs) && set_row_on(prefs, key, true)
+}
+
 /// Its longest fade (its page's Longest Fade, s): 10 unless set
 fn smart_max_ms(prefs: &serde_json::Value) -> u64 {
     prefs["smartMax"].as_u64().unwrap_or(10).clamp(3, 30) * 1000
@@ -4540,6 +4546,28 @@ fn smart_same_source(t: &Track) -> bool {
     !matches!(t.src, track::Src::Spotify(_)) || !sp_plays_here()
 }
 
+/// Both songs sing over their parts of a transition (ms in each), by their timed lyrics (fetched as a
+/// pair's decided: smart_lyrics); not known, or not timed: not (a centre cut where nobody sings only
+/// thins the music)
+fn smart_both_sing(a: &str, b: &str, a_at: (u64, u64), b_at: (u64, u64)) -> bool {
+    let l = |k: &str| MIX_WORDS.with(|w| w.borrow().get(k).cloned());
+    matches!((l(a), l(b)), (Some(la), Some(lb)) if smart::sings(&la, a_at.0, a_at.1) && smart::sings(&lb, b_at.0, b_at.1))
+}
+
+/// A song's timed lyrics fetched (once; kept with Wordplay's), for the voices' handoff
+fn smart_lyrics(shared: &Shared, t: &Track) {
+    if MIX_WORDS.with(|w| w.borrow().contains_key(&t.key)) || MIX_WORDS_BUSY.with(|b| !b.borrow_mut().insert(t.key.clone())) { return; }
+    let (t, rt, weak) = { let a = shared.borrow(); (t.clone(), a.rt.clone(), a.ui.clone()) };
+    let secs = t.ms / 1000;
+    rt.spawn(async move {
+        let l = player::mix_lyrics(&t, secs).await;
+        let _ = weak.upgrade_in_event_loop(move |_| {
+            MIX_WORDS.with(|w| w.borrow_mut().insert(t.key.clone(), l));
+            MIX_WORDS_BUSY.with(|b| b.borrow_mut().remove(&t.key));
+        });
+    });
+}
+
 /// Your ratings so far (state/mix-feedback.jsonl): each one's kind, and good or not
 fn smart_ratings() -> Vec<(String, bool)> {
     let Ok(d) = omnipulse_core::data_dir() else { return Vec::new() };
@@ -4591,6 +4619,8 @@ fn smart_decide(shared: &Shared, a: &SmartSong, b: &SmartSong, pos: u64, late: b
 fn smart_fade_tick(shared: &Shared, key: &str, pos: u64, dur: u64) -> Option<bool> {
     if !smart_on(&shared.borrow().web.prefs) || listening().is_some() || room_kind().as_deref() == Some("jam") { return None; }
     let (a, b) = smart_pair(&shared.borrow(), dur)?;
+    // (their lyrics, for whether both sing where they meet)
+    if smart_set_on(&shared.borrow().web.prefs, "smartVoices") { smart_lyrics(shared, &a.t); smart_lyrics(shared, &b.t); }
     if MIX.with(|m| m.borrow().is_some()) || shared.borrow().engine.mixing() { return Some(false); }
     let (out, moved) = FADE.with(|f| f.borrow().clone());
     if out || moved == key { return Some(false); }
@@ -4609,7 +4639,8 @@ fn smart_fade_tick(shared: &Shared, key: &str, pos: u64, dur: u64) -> Option<boo
     FADE.with(|fd| *fd.borrow_mut() = (true, key.to_string()));
     XFADE.with(|x| *x.borrow_mut() = Some((ms, std::time::Instant::now())));
     SMART_START.with(|x| *x.borrow_mut() = (f.in_from_ms > 0).then(|| (b.t.key.clone(), f.in_from_ms)));
-    SMART_XFADE.with(|x| x.set(true));
+    // (the voices handed over halfway only if both sing there)
+    SMART_XFADE.with(|x| x.set(smart_both_sing(&a.t.key, &b.t.key, (f.out_from_ms, f.out_to_ms), (f.in_from_ms, f.in_from_ms + f.len_ms()))));
     CHANGE_HOW.with(|h| h.set("ended"));
     step(shared, 1);
     Some(true)

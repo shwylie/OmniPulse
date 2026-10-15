@@ -866,12 +866,11 @@ impl Centre {
 }
 
 impl Handoff {
-    /// The same, its voices handed over too: the one going out's taken away over the `beat_ms * 2` before
-    /// `at`, the one coming in's brought up over the two after it
-    pub fn with_voices(mut self, at: u64, beat_ms: f64) -> Self {
-        let two = (beat_ms * 2.0).round() as u64;
-        self.out_voice = Some((at.saturating_sub(two), two));
-        self.in_voice = Some((at, two));
+    /// The same, its voices handed over too, gradually: the one going out's faded away over the `out_ms`
+    /// before `at`, the one coming in's faded up over the `in_ms` after it
+    pub fn with_voices(mut self, at: u64, out_ms: u64, in_ms: u64) -> Self {
+        self.out_voice = Some((at.saturating_sub(out_ms), out_ms.max(1)));
+        self.in_voice = Some((at, in_ms.max(1)));
         self
     }
 
@@ -879,18 +878,20 @@ impl Handoff {
     /// one going out's gone by then, the one coming in's up from then, so they're never sung together
     pub fn voiced_crossfade(ms: u64) -> Self {
         let all = Ramp::swap(0, ms);
-        let turn = (ms / 5).clamp(300, 1500);
-        Self { low: all, mid: all, high: all, echo: None, out_sweep: None, in_sweep: None, brake: None, spin: None, out_loop: None, in_loop: None, roll: None, out_voice: Some(((ms / 2).saturating_sub(turn), turn)), in_voice: Some((ms / 2, turn)) }
+        // (each faded over a good part of it: gone by halfway, up from there)
+        let (out_len, in_len) = (ms * 3 / 10, ms * 2 / 5);
+        Self { low: all, mid: all, high: all, echo: None, out_sweep: None, in_sweep: None, brake: None, spin: None, out_loop: None, in_loop: None, roll: None, out_voice: Some(((ms / 2).saturating_sub(out_len), out_len)), in_voice: Some((ms / 2, in_len)) }
     }
 
     /// A DJ's blend, the one playing's beat carried through: the next one's highs (its hats, its air)
     /// rise over the first half of the run-up and its mids over all of it, under the one playing at full;
-    /// on `swap` the bass changes over at once (the two never together); then the one playing's mids and
-    /// highs, its beat's top, fade out over what's left (`ms - swap`) as the next one's beat settles in
-    pub fn carry(ms: u64, swap: u64) -> Self {
+    /// on `swap` the bass changes over in a beat (`beat_ms`, centred on it: the two barely together); then
+    /// the one playing's mids and highs, its beat's top, fade out over what's left (`ms - swap`) as the
+    /// next one's beat settles in
+    pub fn carry(ms: u64, swap: u64, beat_ms: u64) -> Self {
         let tail = ms.saturating_sub(swap).max(1);
         Self {
-            low: Ramp::swap(swap, 250),
+            low: Ramp::swap(swap.saturating_sub(beat_ms / 2), beat_ms.max(1)),
             mid: Ramp { in_at: 0, in_len: swap.max(1), out_at: swap, out_len: tail },
             high: Ramp { in_at: 0, in_len: (swap / 2).max(1), out_at: swap, out_len: tail },
             echo: None, out_sweep: None, in_sweep: None, brake: None, spin: None, out_loop: None, in_loop: None, roll: None, out_voice: None, in_voice: None,

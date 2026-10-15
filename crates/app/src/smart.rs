@@ -245,14 +245,25 @@ pub fn ease_ms(left_ms: u64) -> u64 {
 pub fn handoff(p: &crate::mix::Plan, voices: bool) -> omnipulse_audio::Handoff {
     if p.style == Some(ROLL) { return omnipulse_audio::Handoff::roll(p.swap_ms / p.bars.max(1) as u64, p.bars); }
     if p.tape_stop { return crate::mix::handoff(p, false); }
-    // (the one playing's beat carried: the next one rising under it, the bass swapped, then its top fading)
-    let h = omnipulse_audio::Handoff::carry(p.ms, p.swap_ms);
+    // (the one playing's beat carried: the next one rising under it, the bass swapped, then its top fading;
+    // the voices, if both sing there, the one playing's faded over the run-up's second half, the next
+    // one's up over the bars after the swap)
     let beat = p.swap_ms as f64 / ((p.bars as usize).saturating_sub(TAIL_BARS).max(1) * 4) as f64;
-    if voices { h.with_voices(p.swap_ms, beat) } else { h }
+    let h = omnipulse_audio::Handoff::carry(p.ms, p.swap_ms, beat.round() as u64);
+    if voices { h.with_voices(p.swap_ms, p.swap_ms / 2, p.ms.saturating_sub(p.swap_ms)) } else { h }
 }
 
-/// A fade's handoff: the voices handed over halfway, on a fade long enough (4 s) for it to be heard
-/// as one song's voice giving way to the other's; None, a plain crossfade
+/// Whether a song sings between `from` and `to` (ms in it), by its timed lyrics: a line from its time to
+/// the next one's (8 s at most: a line isn't sung for longer, and a gap after it is an instrumental part)
+pub fn sings(lines: &[(u64, String)], from: u64, to: u64) -> bool {
+    lines.iter().enumerate().any(|(i, (t, _))| {
+        let end = lines.get(i + 1).map_or(t + 8000, |n| n.0.min(t + 8000));
+        *t < to && end > from
+    })
+}
+
+/// A fade's handoff: the voices handed over halfway (`voices`: both sing there), on a fade long enough
+/// (4 s) for it to be heard as one song's voice giving way to the other's; None, a plain crossfade
 pub fn fade_handoff(ms: u64, voices: bool) -> Option<omnipulse_audio::Handoff> {
     (voices && ms >= 4000).then(|| omnipulse_audio::Handoff::voiced_crossfade(ms))
 }
@@ -422,6 +433,15 @@ mod tests {
     }
 
     #[test]
+    fn sung_only_where_its_lines_are() {
+        let l = vec![(10_000, "a".to_string()), (14_000, "b".to_string()), (60_000, "c".to_string())];
+        assert!(sings(&l, 12_000, 13_000));
+        // (a gap after a line: past 8 s of it, not sung)
+        assert!(!sings(&l, 30_000, 50_000));
+        assert!(!sings(&[], 0, 100_000));
+    }
+
+    #[test]
     fn extras_need_ratings_that_back_them() {
         let r = |good: usize, bad: usize| -> Vec<(String, bool)> { std::iter::repeat_n(("tape stop".to_string(), true), good).chain(std::iter::repeat_n(("tape stop".to_string(), false), bad)).collect() };
         assert!(!backed(&r(3, 12), "tape stop"));
@@ -443,7 +463,7 @@ mod tests {
         let max_ms = std::env::var("OMNIPULSE_SMART_MAX").ok().and_then(|v| v.parse::<u64>().ok()).unwrap_or(10) * 1000;
         let rt = tokio::runtime::Runtime::new().unwrap();
         let track = |s: &str| match s.parse::<u64>() {
-            Ok(id) => Track { src: Src::SoundCloud(id), key: s.to_string(), ..Default::default() },
+            Ok(id) => rt.block_on(omnipulse_core::soundcloud::api_get(format!("/tracks/{id}"))).ok().and_then(|v| Track::soundcloud(&v)).map(|mut t| { t.key = s.to_string(); t }).unwrap_or(Track { src: Src::SoundCloud(id), key: s.to_string(), ..Default::default() }),
             Err(_) => Track { src: Src::Local(s.to_string()), key: format!("local:{s}"), ..Default::default() },
         };
         let what = |t: &Track| match &t.src { Src::SoundCloud(id) => ("soundcloud", id.to_string()), Src::Local(p) => ("local", p.clone()), _ => unreachable!() };
@@ -478,13 +498,20 @@ mod tests {
             let db = |t: &Track, an: &serde_json::Value| crate::sound::loud_db(&serde_json::json!({}), t, an["lufs"].as_f64(), false);
             let dbs = (db(&ta, &ana), db(&tb, &anb));
             let blocked = blend_blocked(&a, &b);
-            let plan = blend(&a, &b, 0).or_else(|| std::env::var_os("OMNIPULSE_SMART_ROLL").and_then(|_| roll(&a, &b, 0)));
+            let mut plan = blend(&a, &b, 0).or_else(|| std::env::var_os("OMNIPULSE_SMART_ROLL").and_then(|_| roll(&a, &b, 0)));
+            // (OMNIPULSE_SMART_NUDGE: the next one started this many of its beats later (or, below 0, earlier), to listen for which is right)
+            let nudge = std::env::var("OMNIPULSE_SMART_NUDGE").ok().and_then(|v| v.parse::<f64>().ok()).unwrap_or(0.0);
+            if let (Some(p), Some(m)) = (plan.as_mut(), mb.as_ref()) { p.start_ms = (p.start_ms as f64 + nudge * m.rhythm.period_ms).max(0.0).round() as u64; }
+            // (the voices handed over only where both sing, by their timed lyrics, as the app does)
+            let lyrics = |t: &Track, m: &Option<Measured>| rt.block_on(crate::player::mix_lyrics(t, m.as_ref().map_or(0, |m| m.to_ms / 1000)));
+            let (la, lb) = (lyrics(&ta, &ma), lyrics(&tb, &mb));
+            let both_sing = |a_from: u64, a_to: u64, b_from: u64, b_to: u64| sings(&la, a_from, a_to) && sings(&lb, b_from, b_to);
             let (out, info) = match &plan {
                 Some(p) if p.style == Some(ROLL) => {
                     sa.seek(p.at_ms.saturating_sub(lead)).unwrap();
                     let mut sb = sb;
                     sb.seek(p.start_ms).unwrap();
-                    let out = omnipulse_audio::engine::render_mix(sa, sb, dbs, rate, lead as f32 / 1000.0, p.ms, Some(handoff(p, voices)), (lead + p.ms) as f32 / 1000.0 + 15.0).unwrap();
+                    let out = omnipulse_audio::engine::render_mix(sa, sb, dbs, rate, lead as f32 / 1000.0, p.ms, Some(handoff(p, false)), (lead + p.ms) as f32 / 1000.0 + 15.0).unwrap();
                     (out, serde_json::json!({ "kind": "roll", "plan": p, "notOnTheBeat": blocked }))
                 }
                 Some(p) => {
@@ -495,21 +522,21 @@ mod tests {
                     let (target, a_tempo) = (p.out_tempo, omnipulse_audio::Tempo::new(1.0));
                     let share = p.ms as f64 / p.ramp_ms.max(1) as f64;
                     let ramp = { let a_tempo = a_tempo.clone(); move |x: f64| { a_tempo.set(crate::mix::out_ramp(target, x * share)); b_tempo.set(crate::mix::in_ramp(target, x * share)); } };
-                    let out = omnipulse_audio::engine::render_mix_ramped(sa, Box::new(sb), dbs, rate, lead as f32 / 1000.0, p.ms, Some(handoff(p, voices)), (target != 1.0).then_some((&a_tempo, &ramp as &dyn Fn(f64))), (lead + p.ms) as f32 / 1000.0 + 15.0).unwrap();
-                    (out, serde_json::json!({ "kind": "smart blend", "plan": p }))
+                    let out = omnipulse_audio::engine::render_mix_ramped(sa, Box::new(sb), dbs, rate, lead as f32 / 1000.0, p.ms, Some(handoff(p, voices && both_sing(p.at_ms, p.at_ms + p.ms, p.start_ms, p.start_ms + (p.ms as f64 * p.rate) as u64))), (target != 1.0).then_some((&a_tempo, &ramp as &dyn Fn(f64))), (lead + p.ms) as f32 / 1000.0 + 15.0).unwrap();
+                    (out, serde_json::json!({ "kind": "smart blend", "plan": p, "nudgeBeats": nudge, "voicesHanded": voices && both_sing(p.at_ms, p.at_ms + p.ms, p.start_ms, p.start_ms + (p.ms as f64 * p.rate) as u64), "lyricLines": [la.len(), lb.len()] }))
                 }
                 None => {
                     let f = fade(&a, &b, max_ms, FIXED_MS);
                     sa.seek(f.out_from_ms.saturating_sub(lead)).unwrap();
                     let mut sb = sb;
                     if f.in_from_ms > 0 { sb.seek(f.in_from_ms).unwrap(); }
-                    let out = omnipulse_audio::engine::render_mix(sa, sb, dbs, rate, lead as f32 / 1000.0, f.len_ms(), fade_handoff(f.len_ms(), voices), (lead + f.len_ms()) as f32 / 1000.0 + 15.0).unwrap();
+                    let out = omnipulse_audio::engine::render_mix(sa, sb, dbs, rate, lead as f32 / 1000.0, f.len_ms(), fade_handoff(f.len_ms(), voices && both_sing(f.out_from_ms, f.out_to_ms, f.in_from_ms, f.in_from_ms + f.len_ms())), (lead + f.len_ms()) as f32 / 1000.0 + 15.0).unwrap();
                     (out, serde_json::json!({ "kind": "smart fade", "outFromMs": f.out_from_ms, "outToMs": f.out_to_ms, "inFromMs": f.in_from_ms, "ms": f.len_ms(), "notOnTheBeat": blocked.unwrap_or("no phrase to blend on"),
                         "outroFromMs": ma.as_ref().and_then(outro_from), "introToMs": mb.as_ref().and_then(intro_to) }))
                 }
             };
             let side = |m: &Option<Measured>| m.as_ref().map(|m| serde_json::json!({ "bpm": m.rhythm.bpm, "confidence": m.rhythm.tempo_confidence, "camelot": m.rhythm.camelot, "keyConfidence": m.rhythm.key_confidence, "downbeatConfidence": m.rhythm.downbeat_confidence, "groups": groups(m) }));
-            let info = serde_json::json!({ "a": a_id, "b": b_id, "aMeasured": side(&ma), "bMeasured": side(&mb), "dbs": [dbs.0, dbs.1], "startsAt": "12 s in", "transition": info });
+            let info = serde_json::json!({ "a": a_id, "b": b_id, "titles": [format!("{} - {}", ta.artist, ta.title), format!("{} - {}", tb.artist, tb.title)], "aMeasured": side(&ma), "bMeasured": side(&mb), "dbs": [dbs.0, dbs.1], "startsAt": "12 s in", "transition": info });
             let base = dir.join(format!("{:02}", n + 1));
             write_wav(&base.with_extension("wav"), &out, rate);
             std::fs::write(base.with_extension("json"), serde_json::to_string_pretty(&info).unwrap()).unwrap();
