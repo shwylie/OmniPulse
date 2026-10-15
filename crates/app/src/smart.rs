@@ -125,6 +125,9 @@ pub fn grid_trusted(s: &Side) -> bool {
     let Some(m) = s.rhythm else { return false };
     let bpm = m.rhythm.bpm;
     if m.rhythm.tempo_confidence < TRUST_CONFIDENCE || !(60.0..=200.0).contains(&bpm) || m.rhythm.beats.len() < 32 { return false; }
+    // (its beats on the song's pulse: Beat This!'s tempo agrees, as it is or at half or double)
+    let model = m.rhythm.model_bpm;
+    if model > 0.0 && ![1.0, 2.0, 0.5].iter().any(|k| ((bpm * k) / model - 1.0).abs() <= STATED_WITHIN) { return false; }
     // (its bars sure too: a downbeat a beat out matches the tempo, but not the bars)
     if m.rhythm.downbeat_confidence < omnipulse_core::rhythm::DOWNBEAT_TRUSTED { return false; }
     match s.stated_bpm {
@@ -367,7 +370,7 @@ mod tests {
     fn song(bpm: f64, bars: &[f32], conf: f64, camelot: &str) -> Measured {
         let period = 60_000.0 / bpm;
         let beats: Vec<f64> = (0..bars.len() * 4 + 4).map(|i| i as f64 * period).collect();
-        Measured { from_ms: 0, to_ms: (beats.len() as f64 * period) as u64, rhythm: Rhythm { bpm, first_beat_ms: 0.0, period_ms: period, beats, downbeat: 0, tempo_confidence: conf, key: String::new(), camelot: camelot.into(), key_confidence: 0.8, downbeat_confidence: 1.0, bar_db: bars.to_vec(), bar_beat: vec![1.0; bars.len()], bar_chroma: Vec::new() }, v: omnipulse_core::rhythm::VERSION }
+        Measured { from_ms: 0, to_ms: (beats.len() as f64 * period) as u64, rhythm: Rhythm { bpm, first_beat_ms: 0.0, period_ms: period, beats, downbeat: 0, tempo_confidence: conf, key: String::new(), camelot: camelot.into(), key_confidence: 0.8, downbeat_confidence: 1.0, model_bpm: 0.0, bar_db: bars.to_vec(), bar_beat: vec![1.0; bars.len()], bar_chroma: Vec::new() }, v: omnipulse_core::rhythm::VERSION }
     }
 
     fn levels(intro: usize, body: usize, outro: usize) -> Vec<f32> {
@@ -697,6 +700,23 @@ mod tests {
             let _ = omnipulse_core::rhythm::analyse(&mono, rate);
             let (c1, t1) = (cpu(), t0.elapsed().as_secs_f64());
             eprintln!("{id}: {secs:.0} s of song: {t1:.2} s to measure, {:.2} s of CPU ({:.1} cores while it ran), {} cores here", c1 - c0, (c1 - c0) / t1, std::thread::available_parallelism().map(|n| n.get()).unwrap_or(0));
+        }
+    }
+
+    /// The tempo heard in a render, a stretch at a time: OMNIPULSE_WAV=file OMNIPULSE_SPANS="2-10,20-27"
+    #[test]
+    #[ignore]
+    fn wav_tempo() {
+        let b = std::fs::read(std::env::var("OMNIPULSE_WAV").unwrap()).unwrap();
+        let x: Vec<f32> = b[44..].chunks(4).map(|f| (i16::from_le_bytes([f[0], f[1]]) as f32 + i16::from_le_bytes([f[2], f[3]]) as f32) / 65536.0).collect();
+        for span in std::env::var("OMNIPULSE_SPANS").unwrap().split(',') {
+            let (a, b) = span.split_once('-').unwrap();
+            let (a, b) = (a.parse::<f64>().unwrap(), b.parse::<f64>().unwrap());
+            let part = &x[(a * 44_100.0) as usize..((b * 44_100.0) as usize).min(x.len())];
+            let r = omnipulse_core::rhythm::analyse(part, 44_100).unwrap();
+            // (its tempo from its beats' spacing, not rounded)
+            let n = r.beats.len();
+            eprintln!("{span} s: {:.2} BPM ({} beats, confidence {:.2})", 60_000.0 * (n - 1) as f64 / (r.beats[n - 1] - r.beats[0]), n, r.tempo_confidence);
         }
     }
 
