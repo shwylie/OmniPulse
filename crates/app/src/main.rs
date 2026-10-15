@@ -167,8 +167,13 @@ fn apply_filter(app: &mut App) {
     let mine: std::collections::HashSet<&str> = if app.page == "search" && prefs["hideLikes"].as_bool() == Some(true) { app.library.iter().map(|t| t.key.as_str()).collect() } else { Default::default() };
     let shown = |t: &&Track| plat_on(&prefs, t.plat()) && (!fav_only || favs.contains(t.key.as_str())) && !mine.contains(t.key.as_str()) && !hide::no_version(&prefs, t) && streamsafe::allowed(&prefs, t) && found(t);
     let mut filtered: Vec<Track> = match (app.page.as_str(), chip) {
-        ("library" | "rediscover" | "favourites" | "search" | "playlist" | "artist", 1) => app.page_all.iter().filter(shown).filter(|t| !t.is_mix()).cloned().collect(),
-        ("library" | "rediscover" | "favourites" | "search" | "playlist", 2) => app.page_all.iter().filter(shown).filter(|t| t.is_mix()).cloned().collect(),
+        // (Search, as the web app's: its tracks without the sets under All and Tracks, which have a
+        // shelf of their own; only them under Sets & Podcasts; none for the other categories)
+        ("search", 0 | 1) => app.page_all.iter().filter(shown).filter(|t| !t.is_mix()).cloned().collect(),
+        ("search", 5) => app.page_all.iter().filter(shown).filter(|t| t.is_mix()).cloned().collect(),
+        ("search", _) => Vec::new(),
+        ("library" | "rediscover" | "favourites" | "playlist" | "artist", 1) => app.page_all.iter().filter(shown).filter(|t| !t.is_mix()).cloned().collect(),
+        ("library" | "rediscover" | "favourites" | "playlist", 2) => app.page_all.iter().filter(shown).filter(|t| t.is_mix()).cloned().collect(),
         _ => app.page_all.iter().filter(shown).cloned().collect(),
     };
     if app.page == "library" {
@@ -284,10 +289,11 @@ fn show_tracks(shared: &Shared, page: &str, title: &str, sub: String, mut tracks
     let mut names: Vec<slint::SharedString> = if chips { FILTER_CHIPS.iter().map(|c| (*c).into()).collect() } else { Vec::new() };
     if chips && page == "library" { names.push("Albums".into()); }
     if chips && page == "artist" { names = vec!["All".into(), "Tracks".into(), "Albums".into()]; }
+    if chips && page == "search" { names = ["All", "Tracks", "Artists", "Albums", "Playlists", "Sets & Podcasts"].iter().map(|c| (*c).into()).collect(); }
     ui.set_chips(ModelRc::from(Rc::new(VecModel::from(names))));
     // (the chip last picked on this page)
     let kept = if chips { FILTER_KEYS.iter().position(|k| app.web.prefs["pageFilters"][filter_view(page)].as_str() == Some(k)).unwrap_or(0) } else { 0 };
-    let kept = if page == "artist" && kept > 1 { 0 } else { kept };
+    let kept = if (page == "artist" && kept > 1) || page == "search" { 0 } else { kept };
     app.chip = kept;
     ui.set_chip_on(kept as i32);
     apply_filter(&mut app);
@@ -599,7 +605,11 @@ fn open_search(shared: &Shared, q: String) {
     rt.spawn(async move {
         let q2 = q.clone();
         let late = tokio::spawn(async move { sources::search_plugins(&q2).await });
-        let mut t = sources::search(&q).await;
+        let mut t = match sources::genre_of(&q) {
+            // (a genre: its tracks found by genre, then the rest, as the web app's)
+            Some(g) => { let (a, b) = tokio::join!(sources::search_genre(&g), sources::search(&q)); sources::once_each(a.into_iter().chain(b).collect()) }
+            None => sources::search(&q).await,
+        };
         // (your music files too, with that platform on, as the web app's: ranked with the rest)
         if !local.is_empty() { t = sources::rank(&q, sources::interleave(vec![t, local])); }
         let title = format!("Results for \"{q}\"");
@@ -608,6 +618,7 @@ fn open_search(shared: &Shared, q: String) {
             let Some(shared) = s.borrow().clone() else { return };
             if shared.borrow().token != token { return; }
             show_tracks(&shared, "search", &title, sub, t, true);
+            search_paint(&shared);
         }));
         let more = late.await.unwrap_or_default();
         if more.is_empty() { return; }
@@ -629,37 +640,108 @@ thread_local! {
     static FOUND: RefCell<Vec<Vec<sources::Found>>> = const { RefCell::new(Vec::new()) };
 }
 
+thread_local! {
+    /// a search's other finds, for its categories: its genre (if it's one), artists, albums, playlists
+    static SEARCH: RefCell<(Option<String>, Vec<sources::Found>, Vec<sources::Found>, Vec<sources::Found>)> = const { RefCell::new((None, Vec::new(), Vec::new(), Vec::new())) };
+    /// what each shelf shown on the Search page is (for a tile's click)
+    static SEARCH_MAP: RefCell<Vec<SearchShelf>> = const { RefCell::new(Vec::new()) };
+    /// the pictures fetched for the Search page's tiles, by address
+    static SEARCH_ART: RefCell<HashMap<String, slint::SharedPixelBuffer<slint::Rgba8Pixel>>> = RefCell::new(HashMap::new());
+}
+
+#[derive(Clone)]
+enum SearchShelf { Genre(String), Found(Vec<sources::Found>), Sets(Vec<Track>) }
+
+/// The Search page's shelves, for the category chosen (as the web app's paintSearchShelves): under All,
+/// its genre's (if it's one), then Artists, Albums, Playlists and Sets & Podcasts, a row each; a
+/// category on its own opened up
+fn search_paint(shared: &Shared) {
+    let Some(ui) = shared.borrow().ui.upgrade() else { return };
+    if shared.borrow().page != "search" { return; }
+    let chip = shared.borrow().chip;
+    let (genre, artists, albums, lists) = SEARCH.with(|s| s.borrow().clone());
+    let sets: Vec<Track> = shared.borrow().page_all.iter().filter(|t| t.is_mix()).take(24).cloned().collect();
+    let cat = catalog_on(&shared.borrow().web.prefs);
+    let mut shelves: Vec<(String, SearchShelf, bool)> = Vec::new();
+    let all = chip == 0;
+    if all { if let Some(g) = &genre { if cat { shelves.push((sources::title_case(g), SearchShelf::Genre(g.clone()), false)); } } }
+    let artists_title = match &genre { Some(g) => format!("Top {} artists", sources::title_case(g)), None => "Artists".to_string() };
+    if (all || chip == 2) && !artists.is_empty() { shelves.push((artists_title, SearchShelf::Found(artists), chip == 2)); }
+    if (all || chip == 3) && !albums.is_empty() { shelves.push(("Albums".into(), SearchShelf::Found(albums), chip == 3)); }
+    if (all || chip == 4) && !lists.is_empty() { shelves.push(("Playlists".into(), SearchShelf::Found(lists), chip == 4)); }
+    if all && !sets.is_empty() { shelves.push(("Sets & Podcasts".into(), SearchShelf::Sets(sets), false)); }
+    let mut wanted: Vec<(usize, usize, String)> = Vec::new();
+    let models: Vec<Rc<VecModel<Tile>>> = shelves.iter().enumerate().map(|(s, (_, sh, _))| {
+        let tiles: Vec<Tile> = match sh {
+            SearchShelf::Genre(g) => vec![Tile { title: format!("Trending {}", sources::title_case(g)).into(), sub: "Trending now".into(), genre: true, c1: look::hsl(g.chars().fold(7u32, |h, c| (h * 31 + c as u32) % 360) as f32, 0.7, 45.0).slint(), c2: look::hsl(((g.chars().fold(7u32, |h, c| (h * 31 + c as u32) % 360) + 40) % 360) as f32, 0.6, 16.0).slint(), ..Default::default() }],
+            SearchShelf::Found(l) => l.iter().map(|f| { let (t, sub, _, plat) = f.tile(); Tile { title: t.into(), sub: sub.into(), plat: plat.into(), ..Default::default() } }).collect(),
+            SearchShelf::Sets(l) => { let a = shared.borrow(); let m = marks_of(&a); l.iter().map(|t| Tile { title: t.title.clone().into(), sub: t.artist.clone().into(), plat: t.plat().into(), track: true, row: row_menu(&a, &m, t, t.row(false)), ..Default::default() }).collect() }
+        };
+        let urls: Vec<String> = match sh { SearchShelf::Genre(_) => Vec::new(), SearchShelf::Found(l) => l.iter().map(|f| f.tile().2).collect(), SearchShelf::Sets(l) => l.iter().map(thumb_url).collect() };
+        let tiles: Vec<Tile> = tiles.into_iter().enumerate().map(|(k, mut t)| {
+            if let Some(url) = urls.get(k) { match SEARCH_ART.with(|c| c.borrow().get(url).cloned()) { Some(px) => t.art = slint::Image::from_rgba8(px), None if !url.is_empty() => wanted.push((s, k, url.clone())), None => {} } }
+            t
+        }).collect();
+        Rc::new(VecModel::from(tiles))
+    }).collect();
+    let rows: Vec<Shelf> = shelves.iter().zip(&models).map(|((title, _, open), m)| Shelf { title: title.clone().into(), tiles: ModelRc::from(m.clone()), open: *open }).collect();
+    ui.set_shelves(ModelRc::from(Rc::new(VecModel::from(rows))));
+    SHELF_MODELS.with(|m| *m.borrow_mut() = models);
+    SEARCH_MAP.with(|m| *m.borrow_mut() = shelves.into_iter().map(|(_, sh, _)| sh).collect());
+    // (their pictures, as they come; kept for the other categories)
+    let (rt, weak) = { let a = shared.borrow(); (a.rt.clone(), a.ui.clone()) };
+    let gen = SEARCH_GEN.with(|g| { g.set(g.get() + 1); g.get() });
+    rt.spawn(async move {
+        for (s, k, url) in wanted {
+            if let Some(px) = player::fetch_art(url.clone(), 200).await {
+                let _ = weak.upgrade_in_event_loop(move |_| {
+                    SEARCH_ART.with(|c| c.borrow_mut().insert(url, px.clone()));
+                    if SEARCH_GEN.with(|g| g.get()) != gen { return; }
+                    SHELF_MODELS.with(|m| { if let Some(model) = m.borrow().get(s) { if let Some(mut t) = model.row_data(k) { t.art = slint::Image::from_rgba8(px); model.set_row_data(k, t); } } });
+                });
+            }
+        }
+    });
+}
+
+thread_local! {
+    static SEARCH_GEN: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
+/// A tile on the Search page: an artist's page, an album or playlist, a set, or its genre's mix
+fn search_tile(shared: &Shared, sh: usize, k: usize) {
+    let Some(shelf) = SEARCH_MAP.with(|m| m.borrow().get(sh).cloned()) else { return };
+    match shelf {
+        SearchShelf::Genre(g) => open_mix(shared, discover::Mix { title: format!("Trending {}", sources::title_case(&g)), sub: "Trending".into(), art: String::new(), plat: "deezer", desc: format!("What's trending in {}, from what Deezer's playlists of it agree on.", sources::title_case(&g)), how: discover::How::Genre(sources::title_case(&g)) }),
+        // (an artist: their page, as the web app's)
+        SearchShelf::Found(l) => match l.get(k) {
+            Some(sources::Found::Artist { name, .. }) => go(shared, Place::ArtistNamed(name.clone())),
+            Some(f) => { FOUND.with(|x| *x.borrow_mut() = vec![vec![f.clone()]]); open_found(shared, 0, 0); }
+            None => {}
+        },
+        SearchShelf::Sets(l) => play_list(shared, l, k),
+    }
+}
+
 /// Search's shelves: artists, albums and playlists from every platform, with their pictures as they come
 fn search_shelves(shared: &Shared, q: String) {
     let (rt, weak) = { let a = shared.borrow(); (a.rt.clone(), a.ui.clone()) };
     FOUND.with(|f| f.borrow_mut().clear());
+    SEARCH.with(|s| *s.borrow_mut() = (sources::genre_of(&q), Vec::new(), Vec::new(), Vec::new()));
+    SEARCH_ART.with(|c| c.borrow_mut().clear());
+    search_paint(shared);
     rt.spawn(async move {
-        let (artists, albums, lists) = sources::search_found(&q).await;
-        let shelves: Vec<(&str, Vec<sources::Found>)> = [("Artists", artists), ("Albums", albums), ("Playlists", lists)].into_iter().filter(|(_, l)| !l.is_empty()).collect();
-        let arts: Vec<Vec<String>> = shelves.iter().map(|(_, l)| l.iter().map(|f| f.tile().2).collect()).collect();
-        let weak2 = weak.clone();
+        let genre = sources::genre_of(&q);
+        let ((artists, albums, lists), top) = tokio::join!(sources::search_found(&q), async { match &genre { Some(g) => sources::genre_artists(g).await, None => Vec::new() } });
+        // (a genre: its best-known artists, as the web app's "Top <genre> artists")
+        let artists = if genre.is_some() && !top.is_empty() { top } else { artists };
         let q2 = q.clone();
         let _ = weak.upgrade_in_event_loop(move |ui| SHARED.with(|s| {
             let Some(shared) = s.borrow().clone() else { return };
             if shared.borrow().page != "search" || !ui.get_page_title().contains(q2.as_str()) { return; }
-            let models: Vec<Rc<VecModel<Tile>>> = shelves.iter().map(|(_, l)| Rc::new(VecModel::from(l.iter().map(|f| { let (t, sub, _, plat) = f.tile(); Tile { title: t.into(), sub: sub.into(), art: slint::Image::default(), plat: plat.into(), genre: false, c1: Default::default(), c2: Default::default(), track: false, liked: false, row: Default::default() } }).collect::<Vec<_>>()))).collect();
-            let rows: Vec<Shelf> = shelves.iter().zip(&models).map(|((title, _), m)| Shelf { title: (*title).into(), tiles: ModelRc::from(m.clone()) }).collect();
-            ui.set_shelves(ModelRc::from(Rc::new(VecModel::from(rows))));
-            SHELF_MODELS.with(|m| *m.borrow_mut() = models);
-            FOUND.with(|f| *f.borrow_mut() = shelves.into_iter().map(|(_, l)| l).collect());
+            SEARCH.with(|s| *s.borrow_mut() = (genre, artists, albums, lists));
+            search_paint(&shared);
         }));
-        for (s, list) in arts.into_iter().enumerate() {
-            for (k, url) in list.into_iter().enumerate() {
-                if url.is_empty() { continue; }
-                if let Some(px) = player::fetch_art(url, 200).await {
-                    let _ = weak2.upgrade_in_event_loop(move |_| SHELF_MODELS.with(|m| {
-                        if let Some(model) = m.borrow().get(s) {
-                            if let Some(mut t) = model.row_data(k) { t.art = slint::Image::from_rgba8(px); model.set_row_data(k, t); }
-                        }
-                    }));
-                }
-            }
-        }
     });
 }
 
@@ -1128,7 +1210,7 @@ fn artist_extras(shared: &Shared, name: &str, sc: Option<u64>, sp: Option<String
         let p = sources::Profiles { sc: if sc_on { p.sc } else { None }, sp: if sp_on { p.sp } else { None }, ..p };
         if std::env::var_os("OMNIPULSE_SELFTEST").is_some() { println!("selftest: profiles {p:?}"); }
         let yt_songs: Vec<Track> = match &p.yt { Some((id, _)) => omnipulse_core::youtube::artist(id).await.map(|pg| pg.songs.iter().map(Track::youtube).collect()).unwrap_or_default(), None => Vec::new() };
-        let art = if p.img.is_empty() { None } else { player::fetch_art(p.img.clone(), 200).await };
+        let art = if p.img.is_empty() { None } else { player::fetch_round(p.img.clone(), 200).await };
         let bio = bio.unwrap_or_default();
         let _ = weak.upgrade_in_event_loop(move |ui| SHARED.with(|s| {
             let Some(shared) = s.borrow().clone() else { return };
@@ -1283,7 +1365,7 @@ fn open_discover(shared: &Shared) {
                     let row = match i { discover::Item::Track(t) => { let a = shared.borrow(); let m = marks_of(&a); row_menu(&a, &m, t, t.row(false)) }, _ => Row::default() };
                     Tile { title: title.into(), sub: sub.into(), art: slint::Image::default(), plat: plat.into(), genre, c1, c2, track: is_track, liked, row }
                 }).collect::<Vec<_>>()))).collect();
-                let rows: Vec<Shelf> = shelves.iter().zip(&models).map(|(sh, m)| Shelf { title: sh.title.clone().into(), tiles: ModelRc::from(m.clone()) }).collect();
+                let rows: Vec<Shelf> = shelves.iter().zip(&models).map(|(sh, m)| Shelf { title: sh.title.clone().into(), tiles: ModelRc::from(m.clone()), open: false }).collect();
                 ui.set_status(if rows.is_empty() { "Play or star a few songs, and Discover will fill up with music for you.".into() } else { "".into() });
                 ui.set_shelves(ModelRc::from(Rc::new(VecModel::from(rows))));
                 shared.borrow_mut().shelves = shelves.iter().map(|sh| sh.items.iter().filter_map(|i| if let discover::Item::Track(t) = i { Some(t.clone()) } else { None }).collect()).collect();
@@ -1446,7 +1528,14 @@ fn discover_tile(shared: &Shared, sh: usize, k: usize) {
             let i = list.iter().position(|x| x.key == t.key).unwrap_or(0);
             play_list(shared, list, i);
         }
-        discover::Item::Mix(m) => {
+        discover::Item::Mix(m) => open_mix(shared, m),
+    }
+}
+
+/// A mix (Discover's, or a genre's from Search): put together, then shown as a page
+fn open_mix(shared: &Shared, m: discover::Mix) {
+    {
+        {
             let (liked, flags) = { let a = shared.borrow(); (track::Liked::of(&a.library), discover_flags(&a.web.prefs)) };
             if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_status(format!("Putting {} together...", m.title).into()); }
             let title = if matches!(m.how, discover::How::Crew(_, true)) { format!("{} station", m.title) } else { m.title.clone() };
@@ -1839,7 +1928,7 @@ fn open_streamer(shared: &Shared) {
     let shelves: Vec<_> = shelves.into_iter().filter(|(_, l)| !l.is_empty()).collect();
     let sub = |c: &StreamColl| match c { StreamColl::Cleared(_) => "Cleared for streaming", StreamColl::Genre(_) => "Creative Commons", StreamColl::Likes => "From your likes" };
     let models: Vec<Rc<VecModel<Tile>>> = shelves.iter().map(|(_, l)| Rc::new(VecModel::from(l.iter().map(|(n, c)| Tile { title: n.clone().into(), sub: sub(c).into(), art: slint::Image::default(), plat: "".into(), genre: false, c1: Default::default(), c2: Default::default(), track: false, liked: false, row: Default::default() }).collect::<Vec<_>>()))).collect();
-    let rows: Vec<Shelf> = shelves.iter().zip(&models).map(|((t, _), m)| Shelf { title: t.clone().into(), tiles: ModelRc::from(m.clone()) }).collect();
+    let rows: Vec<Shelf> = shelves.iter().zip(&models).map(|((t, _), m)| Shelf { title: t.clone().into(), tiles: ModelRc::from(m.clone()), open: false }).collect();
     ui.set_shelves(ModelRc::from(Rc::new(VecModel::from(rows))));
     SHELF_MODELS.with(|m| *m.borrow_mut() = models);
     STREAM_COLLS.with(|s| *s.borrow_mut() = shelves.into_iter().map(|(_, l)| l).collect());
@@ -9664,6 +9753,14 @@ fn main() -> Result<(), slint::PlatformError> {
         if page == "artist" && i == 2 {
             return artist_albums(&s);
         }
+        // (Search: each category on its own; the tracks for Tracks and Sets & Podcasts)
+        if page == "search" {
+            s.borrow_mut().chip = i as usize;
+            ui.set_page_kind(if i == 1 || i == 5 { "tracks" } else { "search" }.into());
+            apply_filter(&mut s.borrow_mut());
+            search_paint(&s);
+            return;
+        }
         if ui.get_page_kind() == "albumgrid" { ui.set_page_kind("tracks".into()); }
         let mut a = s.borrow_mut();
         a.chip = i as usize;
@@ -9690,7 +9787,7 @@ fn main() -> Result<(), slint::PlatformError> {
     });
     let s = shared.clone();
     ui.on_tile(move |sh, k| {
-        if s.borrow().page == "search" { return open_found(&s, sh as usize, k as usize); }
+        if s.borrow().page == "search" { return search_tile(&s, sh as usize, k as usize); }
         if s.borrow().page == "streamer" { return open_stream_coll(&s, sh as usize, k as usize); }
         if s.borrow().page == "discover" { return discover_tile(&s, sh as usize, k as usize); }
         let list = s.borrow().shelves.get(sh as usize).cloned().unwrap_or_default();
@@ -10003,6 +10100,7 @@ fn main() -> Result<(), slint::PlatformError> {
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("rchange") { vec![(9, "play"), (11, "rate"), (12, "skip"), (16, "rate"), (17, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("mixfb") { vec![(9, "play"), (10, "rate"), (11, "mixprep"), (70, "mixseek"), (80, "mixcheck"), (84, "mixcheck"), (88, "mixcheck"), (92, "mixcheck"), (96, "mixcheck"), (100, "mixcheck"), (104, "mixcheck"), (108, "mixcheck"), (112, "rate"), (114, "mixcheck"), (118, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("replies") { vec![(9, "play"), (10, "openreplies"), (12, "end")] }
+            else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("genre") { vec![(9, "play"), (10, "searchhouse"), (30, "searchartists"), (34, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("np") { vec![(9, "play"), (14, "now"), (18, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("versions") { vec![(9, "play"), (10, "artistnamed"), (30, "vopen"), (31, "artistalbums"), (45, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("rhythm") { vec![(9, "play"), (100, "rhythm"), (101, "end")] }
@@ -10322,6 +10420,8 @@ fn main() -> Result<(), slint::PlatformError> {
                 // the first artist you follow
                 "artistnamed" => open_artist_named(&s, "deadmau5"),
                 "artistalbums" => { ui.invoke_chip(2); }
+                "searchhouse" => go(&s, Place::Search("house".into())),
+                "searchartists" => { ui.invoke_chip(2); println!("selftest: search artists: {} shelves", ui.get_shelves().row_count()); }
                 "openreplies" => { ui.invoke_nav("settings".into()); ui.set_set_cat("Streaming".into()); panel_open(&s, "replies"); }
                 // (the first song with versions: them opened beneath it)
                 "vopen" => {

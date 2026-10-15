@@ -471,6 +471,68 @@ pub async fn saved_albums() -> Vec<Found> {
     }
 }
 
+// ---------- a search for a genre (as the web app's js/searchpage.js) ----------
+const GENRE_WORDS: [&str; 69] = [
+    "electronic", "edm", "house", "deep house", "tech house", "progressive house", "future house", "techno", "trance",
+    "dubstep", "melodic dubstep", "riddim", "drum and bass", "drum & bass", "dnb", "liquid dnb", "jungle", "garage", "uk garage",
+    "future bass", "trap", "hip hop", "hip-hop", "hip-hop & rap", "rap", "grime", "drill", "pop", "indie", "indie pop", "rock",
+    "alternative", "metal", "punk", "emo", "jazz", "blues", "soul", "funk", "disco", "r&b", "rnb", "classical", "ambient",
+    "lofi", "lo-fi", "chillout", "chillstep", "downtempo", "synthwave", "hardstyle", "phonk", "country", "folk", "reggae",
+    "reggaeton", "latin", "afrobeats", "k-pop", "kpop", "j-pop", "gospel", "orchestral", "soundtrack", "breakbeat", "idm",
+    "chill", "lo fi", "dance",
+];
+
+/// The genre a search is for ("house", "melodic dubstep music"), if it's one
+pub fn genre_of(q: &str) -> Option<String> {
+    let k = q.trim().to_lowercase();
+    let k = k.strip_suffix(" music").unwrap_or(&k).split_whitespace().collect::<Vec<_>>().join(" ");
+    GENRE_WORDS.contains(&k.as_str()).then_some(k)
+}
+
+/// "melodic dubstep" as "Melodic Dubstep" ("DnB", "EDM", "R&B" as they're written)
+pub fn title_case(s: &str) -> String {
+    let t: String = s.split(' ').map(|w| { let mut c = w.chars(); match c.next() { Some(f) => f.to_uppercase().collect::<String>() + c.as_str(), None => String::new() } }).collect::<Vec<_>>().join(" ");
+    t.replace("Dnb", "DnB").replace("Edm", "EDM").replace("R&b", "R&B")
+}
+
+/// A genre's tracks, found by genre rather than by title: SoundCloud's genre tag, Spotify's genre:,
+/// YouTube Music's own search for it
+pub async fn search_genre(g: &str) -> Vec<Track> {
+    let enc = urlencode(g);
+    let sc = async {
+        if !core::soundcloud::signed_in() { return Vec::new(); }
+        core::soundcloud::api_get(sc_path(format!("/tracks?genres={enc}&access=playable&limit=30&linked_partitioning=true"))).await.map(|v| items(&v).iter().filter_map(Track::soundcloud).collect()).unwrap_or_default()
+    };
+    let sp = async {
+        if !core::spotify::spotify_signed_in() { return Vec::new(); }
+        let q = urlencode(&format!("genre:\"{g}\""));
+        core::spotify::spotify_api("GET".into(), format!("/search?type=track&limit=10&market=from_token&q={q}"), None).await
+            .map(|v| v["tracks"]["items"].as_array().cloned().unwrap_or_default().iter().filter_map(Track::spotify).collect()).unwrap_or_default()
+    };
+    let yt = async { core::youtube::search(&format!("{g} music")).await.map(|l| l.iter().map(Track::youtube).collect()).unwrap_or_default() };
+    let (a, b, c) = tokio::join!(sc, sp, yt);
+    once_each(interleave(vec![a, b, c]))
+}
+
+/// A genre's best-known artists: Spotify's for genre:, and Last.fm's for its tag (names only)
+pub async fn genre_artists(g: &str) -> Vec<Found> {
+    let sp = async {
+        if !core::spotify::spotify_signed_in() { return Vec::new(); }
+        let q = urlencode(&format!("genre:\"{g}\""));
+        core::spotify::spotify_api("GET".into(), format!("/search?type=artist&limit=10&q={q}"), None).await.map(|v| v["artists"]["items"].as_array().cloned().unwrap_or_default().iter().filter_map(|a| Some(Found::Artist {
+            name: a["name"].as_str()?.to_string(), img: a["images"].as_array().and_then(|i| i.first()).and_then(|i| i["url"].as_str()).unwrap_or("").to_string(),
+            sc: None, sp: a["id"].as_str().map(String::from), yt: None, followers: a["followers"]["total"].as_u64().unwrap_or(0),
+        })).collect()).unwrap_or_default()
+    };
+    let lfm = async {
+        core::lastfm::lastfm_call("tag.getTopArtists".into(), vec![("tag".into(), g.to_string()), ("limit".into(), "20".into())]).await
+            .map(|v| v["topartists"]["artist"].as_array().cloned().unwrap_or_default().iter().filter_map(|a| Some(Found::Artist { name: a["name"].as_str()?.to_string(), img: String::new(), sc: None, sp: None, yt: None, followers: 0 })).collect()).unwrap_or_default()
+    };
+    let (a, b): (Vec<Found>, Vec<Found>) = tokio::join!(sp, lfm);
+    let mut seen = std::collections::HashSet::new();
+    a.into_iter().chain(b).filter(|f| seen.insert(name_key(&f.tile().0))).take(24).collect()
+}
+
 /// An artist on each platform, as the web app's resolveArtist and artistSubline: how many follow them
 /// there, their picture (stand-in avatars aside), and their YouTube Music and Deezer pages
 #[derive(Clone, Default, Debug)]

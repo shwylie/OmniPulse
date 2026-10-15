@@ -60,7 +60,7 @@ export struct Tile { title: string, sub: string, art: image, plat: string, genre
 /// Pick genres (and Fine-tune): a row of up to four chips, under a group's name (on its first row)
 export struct TasteChip { label: string, on: bool }
 export struct TasteRow { head: string, chips: [TasteChip] }
-export struct Shelf { title: string, tiles: [Tile] }
+export struct Shelf { title: string, tiles: [Tile], open: bool }
 export struct Line { text: string }
 /// A switch in Settings: under its section's heading (head, on the first of a section)
 /// An account in Settings: its name, what's known (who's signed in, or what it needs), and its button
@@ -1111,7 +1111,7 @@ component ShelfView inherits VerticalLayout {
     in property <[string]> lists;
     callback tile-clicked(int);
     callback tile-act(int, string);
-    property <bool> open;
+    property <bool> open: root.shelf.open;
     property <length> span: max(0px, row.content-width - row.width);
     property <bool> over: root.span > 2px && !root.open;
     property <int> per: max(1, floor((root.width + 16px) / 186px));
