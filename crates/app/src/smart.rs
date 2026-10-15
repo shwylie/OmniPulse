@@ -225,11 +225,29 @@ pub fn blend(a: &Side, b: &Side, now_ms: u64) -> Option<crate::mix::Plan> {
     let (pa, pb) = ((swap - at) / (run * 4) as f64, (bar_ms(mb, from + run)? - bar_ms(mb, from)?) / (run * 4) as f64);
     let rate = pb / pa;
     if (rate - 1.0).abs() > MAX_RATE { return None; }
+    // the tempo ridden over all of it, as a DJ does: the two together at the one playing's at first, at
+    // the next one's own by the end (the one playing eased to it, the next one with it): nothing to ease
+    // back after. Its bars take longer or less as it's eased: the times, as heard
+    let target = 1.0 / rate;
+    let heard = |d: f64| ramp_time(d, over - at, target);
+    let (len, swap_at) = (heard(over - at), heard(swap - at));
     Some(crate::mix::Plan {
-        at_ms: at.round() as u64, ms: (over - at).round() as u64, swap_ms: (swap - at).round() as u64, start_ms: bar_ms(mb, from)?.round() as u64,
-        rate, bars: (run + TAIL_BARS) as u32, semitones: 0, beatmatched: true, out_tempo: 1.0, ramp_ms: 0, tape_stop: false,
+        at_ms: at.round() as u64, ms: len.round() as u64, swap_ms: swap_at.round() as u64, start_ms: bar_ms(mb, from)?.round() as u64,
+        rate, bars: (run + TAIL_BARS) as u32, semitones: 0, beatmatched: true, out_tempo: target, ramp_ms: len.round() as u64, tape_stop: false,
         out_loop: None, in_loop: None, word: None, style: None,
     })
+}
+
+/// When (ms, as heard) the one playing has played `d` ms of itself, its tempo eased (mix::out_ramp: a
+/// smoothstep from 1 to `target`) over the time it takes to play `total` of itself
+fn ramp_time(d: f64, total: f64, target: f64) -> f64 {
+    // (its place at time t of L: t + (target - 1) L (q^3 - q^4 / 2), q = t / L; all of it by L, so
+    // L = total / (1 + (target - 1) / 2); then t found by halves)
+    let l = total / (1.0 + (target - 1.0) / 2.0);
+    let place = |t: f64| { let q = (t / l).clamp(0.0, 1.0); t + (target - 1.0) * l * (q.powi(3) - q.powi(4) / 2.0) };
+    let (mut lo, mut hi) = (0.0, l * 1.2);
+    for _ in 0..60 { let m = (lo + hi) / 2.0; if place(m) < d { lo = m } else { hi = m } }
+    (lo + hi) / 2.0
 }
 
 /// After a blend, the next one back to its own tempo this slowly (a minute: 1.5% over it is far below
@@ -402,8 +420,14 @@ mod tests {
         // from bar 56, where its outro starts; then 4 bars of A's beat)
         assert_eq!(p.start_ms, (2.0 * bar_b).round() as u64);
         assert_eq!(p.at_ms, (56.0 * bar_a).round() as u64);
-        assert_eq!((p.bars, p.swap_ms, p.ms), (8, (4.0 * bar_a).round() as u64, (8.0 * bar_a).round() as u64));
         assert!((p.rate - 128.0 / 126.0).abs() < 1e-6);
+        // (the tempo ridden from A's to B's over all of it: A ends at B's, B at its own; its 8 bars take
+        // as long as they do at the average of the two)
+        assert!((p.out_tempo - 126.0 / 128.0).abs() < 1e-6 && p.ramp_ms == p.ms);
+        assert_eq!(p.bars, 8);
+        let avg = (1.0 + 126.0 / 128.0) / 2.0;
+        assert!((p.ms as f64 - 8.0 * bar_a / avg).abs() <= 1.0, "{} vs {}", p.ms, 8.0 * bar_a / avg);
+        assert!(p.swap_ms as f64 > 4.0 * bar_a && (p.swap_ms as f64) < 4.0 * bar_a / (126.0 / 128.0));
     }
 
     #[test]
