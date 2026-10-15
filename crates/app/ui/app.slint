@@ -56,11 +56,11 @@ export struct Plat { id: string, on: bool, name: string, ready: bool }
 // (a song's tile: a track menu on right-click, as the web app's; liked, for its line)
 /// An artist page's platform: its symbol, and how many follow them there ("12,345 followers")
 export struct ArtistOn { plat: string, text: string }
-export struct Tile { title: string, sub: string, art: image, plat: string, genre: bool, c1: color, c2: color, track: bool, liked: bool, row: Row }
+export struct Tile { miss: bool, title: string, sub: string, art: image, plat: string, genre: bool, c1: color, c2: color, track: bool, liked: bool, row: Row }
 /// Pick genres (and Fine-tune): a row of up to four chips, under a group's name (on its first row)
 export struct TasteChip { label: string, on: bool }
 export struct TasteRow { head: string, chips: [TasteChip] }
-export struct Shelf { title: string, tiles: [Tile], open: bool }
+export struct Shelf { title: string, tiles: [Tile], open: bool, gone: bool, shown: int }
 export struct Line { text: string }
 /// A switch in Settings: under its section's heading (head, on the first of a section)
 /// An account in Settings: its name, what's known (who's signed in, or what it needs), and its button
@@ -1072,8 +1072,9 @@ component TileView inherits Rectangle {
     in property <bool> album;
     // (pointed at: its play button and platform show)
     property <bool> hover: ta.has-hover;
-    width: 170px;
+    width: root.tile.miss ? 0px : 170px;
     height: 226px;
+    visible: !root.tile.miss;
     VerticalLayout {
         spacing: 8px;
         Rectangle {
@@ -1151,6 +1152,8 @@ component TileView inherits Rectangle {
 /// wheel; Show all lays every tile out in rows
 component ShelfView inherits VerticalLayout {
     in property <Shelf> shelf;
+    visible: !root.shelf.gone;
+    max-height: root.shelf.gone ? 0px : 100000px;
     in property <[string]> lists;
     callback tile-clicked(int);
     callback tile-act(int, string);
@@ -1169,11 +1172,14 @@ component ShelfView inherits VerticalLayout {
     row := Flickable {
         visible: !root.open;
         height: root.open ? 0px : 230px;
-        content-width: root.shelf.tiles.length * 186px - 16px;
+        content-width: (root.shelf.shown > 0 ? root.shelf.shown : root.shelf.tiles.length) * 186px - 16px;
         HorizontalLayout {
-            spacing: 16px;
             alignment: start;
-            for t[k] in root.shelf.tiles: TileView { tile: t; lists: root.lists; clicked => { root.tile-clicked(k); } act(a) => { root.tile-act(k, a); } }
+            // (each tile with its gap after it: one left out of what's typed leaves no gap)
+            for t[k] in root.shelf.tiles: Rectangle {
+                width: t.miss ? 0px : 186px;
+                TileView { x: 0; tile: t; lists: root.lists; clicked => { root.tile-clicked(k); } act(a) => { root.tile-act(k, a); } }
+            }
         }
     }
     // the bar
@@ -1453,6 +1459,8 @@ export component AppWindow inherits Window {
     /// an artist's page: where they are (each platform's symbol and its count), their picture, their
     /// Wikipedia bio (three lines, all of it on a click) and its address
     in property <[ArtistOn]> artist-on;
+    /// what's typed in the bar, narrowing the page: how much of it matches
+    in property <string> page-find-note;
     /// the follow button's right-click: YouTube Music's line
     in property <string> follow-yt;
     /// (the self-test: the track list scrolled this far)
@@ -2147,7 +2155,7 @@ export component AppWindow inherits Window {
                             Glyph { d: Icons.search; x: 16px; width: 20px; height: 20px; fill: Theme.muted; }
                             if root.search-text == "": Text {
                                 x: 48px;
-                                text: root.page == "settings" ? "Search settings" : "Search everywhere";
+                                text: root.page == "settings" ? "Search settings" : root.page == "search" ? "Search everywhere" : "Search this page, or Enter for everywhere";
                                 color: Theme.muted;
                                 font-size: 14px;
                                 vertical-alignment: center;
@@ -2238,6 +2246,7 @@ export component AppWindow inherits Window {
                         }
                         if root.artist-bio-url != "": Pill { label: "Wikipedia"; tip: "Read more on Wikipedia"; y: 0; clicked => { root.open-web(root.artist-bio-url); } }
                     }
+                    if root.page-find-note != "": Text { text: root.page-find-note; color: Theme.muted; font-size: 12px; }
                     if root.chips.length > 0: HorizontalLayout {
                         alignment: start;
                         spacing: 8px;
