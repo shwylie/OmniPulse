@@ -648,7 +648,7 @@ component Dropdown inherits Rectangle {
                 content-height: col.preferred-height;
                 col := VerticalLayout {
                     padding: 6px;
-                    for o[k] in root.options: MenuRow { label: o; on: k == root.current; clicked => { pop.close(); root.picked(k); } }
+                    for o[k] in root.options: MenuRow { label: o; on: k == root.current; clicked => { root.picked(k); pop.close(); } }
                 }
             }
         }
@@ -3969,7 +3969,7 @@ export component AppWindow inherits Window {
                                                 Rectangle { height: 1px; background: Theme.line; }
                                                 Text { text: "CHROMECAST"; color: Theme.muted; font-size: 10px; font-weight: 800; letter-spacing: 1px; x: 10px; height: 25px; vertical-alignment: center; }
                                             }
-                                            MenuRow { label: d; on: root.device-on == i; offset: root.device-offset == i; clicked => { devices-menu.close(); root.device-pick(i); } }
+                                            MenuRow { label: d; on: root.device-on == i; offset: root.device-offset == i; clicked => { root.device-pick(i); devices-menu.close(); } }
                                         }
                                         // Chromecast, switched here too (as Settings > Integrations)
                                         Rectangle { height: 9px; Rectangle { height: 1px; background: Theme.line; } }

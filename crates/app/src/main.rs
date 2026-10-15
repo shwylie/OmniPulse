@@ -10703,6 +10703,16 @@ fn main() -> Result<(), slint::PlatformError> {
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("square") { vec![(9, "play"), (10, "unround"), (12, "nav:settings"), (13, "cat:Streaming"), (14, "panel:widget"), (16, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("qset") { vec![(9, "play"), (11, "queue"), (14, "nav:settings"), (15, "cat:App & Look"), (16, "scroll:420"), (18, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("nowslim") { vec![(9, "play"), (11, "queue"), (12, "now"), (15, "size:860:720"), (17, "size:1100:720"), (19, "size:1500:860"), (21, "end")] }
+            else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("dropclick") {
+                // (OMNIPULSE_SELFTEST_CLICKS="panel;x,y;x,y": the panel opened, then clicks where a pointer would)
+                let spec = std::env::var("OMNIPULSE_SELFTEST_CLICKS").unwrap_or_else(|_| "requests;1028,196;1028,262".into());
+                let mut v: Vec<(u64, &'static str)> = vec![(9, Box::leak(format!("openpanel:{}", spec.split(';').next().unwrap_or("requests")).into_boxed_str()))];
+                for (k, c) in spec.split(';').skip(1).enumerate() { v.push((11 + 2 * k as u64, Box::leak(format!("click:{c}").into_boxed_str()))); }
+                v.push((11 + 2 * spec.split(';').count() as u64, "pfshow"));
+                v.push((13 + 2 * spec.split(';').count() as u64, "end"));
+                v
+            }
+            else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("selects") { vec![(9, "selects:requests"), (11, "selects:alerts"), (13, "selects:widget"), (15, "selects:replies"), (17, "selects:discord"), (19, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("alerts") { vec![(9, "openwidget"), (11, "alerton"), (12, "alertshow"), (13, "alerton"), (14, "alertshow"), (15, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("qorder") { vec![(9, "rediscover"), (14, "play"), (18, "qshow"), (19, "qadd"), (20, "qshow"), (22, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("beat1") { vec![(9, "play"), (10, "smartprep"), (12, "tprefs"), (13, "beatearlier"), (14, "tpsave"), (15, "end")] }
@@ -11122,6 +11132,40 @@ fn main() -> Result<(), slint::PlatformError> {
                     });
                 }
                 // Track Preferences' Beat 1: a beat earlier, then saved
+                w if w.starts_with("openpanel:") => { ui.invoke_nav("settings".into()); panel_open(&s, &w[10..]); }
+                // a click where a pointer would (pressed and let go), in the window's own coordinates
+                w if w.starts_with("click:") => {
+                    let xy: Vec<f32> = w[6..].split(',').filter_map(|x| x.trim().parse().ok()).collect();
+                    if xy.len() == 2 {
+                        use slint::platform::{PointerEventButton, WindowEvent};
+                        let position = slint::LogicalPosition::new(xy[0], xy[1]);
+                        let win = ui.window();
+                        win.dispatch_event(WindowEvent::PointerMoved { position });
+                        win.dispatch_event(WindowEvent::PointerPressed { position, button: PointerEventButton::Left });
+                        win.dispatch_event(WindowEvent::PointerReleased { position, button: PointerEventButton::Left });
+                        println!("selftest: clicked {xy:?}");
+                    }
+                }
+                "pfshow" => {
+                    let f = ui.get_pf_fields();
+                    let v: Vec<String> = (0..f.row_count()).filter_map(|i| f.row_data(i)).filter(|x| x.kind == "select").map(|x| format!("{}={}", x.key, x.at)).collect();
+                    println!("selftest: dropdowns now {v:?}");
+                }
+                // a page's every dropdown: its second option picked (as a click does), and whether it shows it
+                w if w.starts_with("selects:") => {
+                    let name = &w[8..];
+                    panel_open(&s, name);
+                    let n = ui.get_pf_fields().row_count();
+                    for i in 0..n {
+                        let Some(f) = ui.get_pf_fields().row_data(i) else { continue };
+                        if f.kind != "select" { continue; }
+                        let want = if f.at == 1 { 0 } else { 1 };
+                        ui.invoke_pf_set(i as i32, format!("\u{2}{want}").into());
+                        let after = ui.get_pf_fields().row_data(i);
+                        let ok = after.as_ref().is_some_and(|x| x.key == f.key && x.at == want);
+                        println!("selftest: selects: {name}.{} ({} options) {} -> {} {}", f.key, f.options.row_count(), f.at, after.map_or(-1, |x| x.at), if ok { "ok" } else { "STUCK" });
+                    }
+                }
                 // Settings > Streaming > Stream Widget, and its Alerts switch pressed (as a click does)
                 "openwidget" => { ui.invoke_nav("settings".into()); ui.set_set_cat("Streaming".into()); panel_open(&s, "widget"); }
                 "alerton" => {
