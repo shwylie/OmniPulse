@@ -3034,7 +3034,12 @@ fn start(shared: &Shared) {
                             (None, _) => {}
                             (Some(src), Some((ms, at))) if !resumed && at.elapsed().as_secs() < 8 => {
                                 engine.fade(None, 1.0, 200);
-                                engine.crossfade(src, db, ms);
+                                // (Smart Transitions': the voices handed over halfway, if it's long enough)
+                                let smart = SMART_XFADE.with(|x| x.replace(false));
+                                match smart::fade_handoff(ms, smart && set_row_on(&shared.borrow().web.prefs, "smartVoices", true)) {
+                                    Some(h) => engine.crossfade_with(src, db, ms, h),
+                                    None => engine.crossfade(src, db, ms),
+                                }
                                 XFADE_PULSE.with(|x| x.set(Some(std::time::Instant::now() + std::time::Duration::from_millis(ms))));
                             }
                             (Some(src), _) => {
@@ -3764,7 +3769,7 @@ fn mix_tick(shared: &Shared, pos: u64, dur: u64) {
                     // (slowed into the next one's tempo: from here, the one playing goes through the stretch, as it was until the mix)
                     let out = (plan.out_tempo != 1.0).then(|| omnipulse_audio::Tempo::new(1.0));
                     if let Some(o) = &out { shared.borrow().engine.stretch_playing(o.clone()); }
-                    let handoff = if smart { smart::handoff(&plan) } else { mix::handoff(&plan, set_row_on(&prefs, "mixBands", false)) };
+                    let handoff = if smart { smart::handoff(&plan, set_row_on(&prefs, "smartVoices", true)) } else { mix::handoff(&plan, set_row_on(&prefs, "mixBands", false)) };
                     shared.borrow().engine.mix_at(src, db, plan.at_ms, plan.ms, Some(handoff));
                     MIX.with(|m| *m.borrow_mut() = Some(MixPhase::Waiting { key: next.key.clone(), plan, tempo, version, out, pitch }));
                 }
@@ -4480,6 +4485,8 @@ thread_local! {
     static SMART_PAIR: RefCell<Option<(String, String, Option<mix::Plan>, String)>> = const { RefCell::new(None) };
     /// where the next one starts from (its first sound) as a fade brings it in: its key, ms
     static SMART_START: RefCell<Option<(String, u64)>> = const { RefCell::new(None) };
+    /// the crossfade coming is Smart Transitions' (its voices handed over halfway)
+    static SMART_XFADE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
 /// A song as Smart Transitions knows it (what's measured of it is of what it plays from)
@@ -4597,6 +4604,7 @@ fn smart_fade_tick(shared: &Shared, key: &str, pos: u64, dur: u64) -> Option<boo
     FADE.with(|fd| *fd.borrow_mut() = (true, key.to_string()));
     XFADE.with(|x| *x.borrow_mut() = Some((ms, std::time::Instant::now())));
     SMART_START.with(|x| *x.borrow_mut() = (f.in_from_ms > 0).then(|| (b.t.key.clone(), f.in_from_ms)));
+    SMART_XFADE.with(|x| x.set(true));
     CHANGE_HOW.with(|h| h.set("ended"));
     step(shared, 1);
     Some(true)

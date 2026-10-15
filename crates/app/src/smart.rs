@@ -178,11 +178,21 @@ pub fn blend(a: &Side, b: &Side, now_ms: u64) -> Option<crate::mix::Plan> {
 }
 
 /// The handoff of a plan: a blend's, the highs and mids crossfaded over it, the bass swapped at once on
-/// its bar line (the two basses never together); a roll's, or a tape stop's
-pub fn handoff(p: &crate::mix::Plan) -> omnipulse_audio::Handoff {
+/// its bar line (the two basses never together), and with `voices`, the voices handed over there too
+/// (the one going out's gone over the two beats before it, the next one's up over the two after: never
+/// sung together); a roll's, or a tape stop's
+pub fn handoff(p: &crate::mix::Plan, voices: bool) -> omnipulse_audio::Handoff {
     if p.style == Some(ROLL) { return omnipulse_audio::Handoff::roll(p.swap_ms / p.bars.max(1) as u64, p.bars); }
     if p.tape_stop { return crate::mix::handoff(p, false); }
-    omnipulse_audio::Handoff::bass_swap(p.ms, p.swap_ms)
+    let h = omnipulse_audio::Handoff::bass_swap(p.ms, p.swap_ms);
+    // (a blend's last bar is after its swap: a beat, a quarter of it)
+    if voices { h.with_voices(p.swap_ms, p.ms.saturating_sub(p.swap_ms) as f64 / 4.0) } else { h }
+}
+
+/// A fade's handoff: the voices handed over halfway, on a fade long enough (4 s) for it to be heard
+/// as one song's voice giving way to the other's; None, a plain crossfade
+pub fn fade_handoff(ms: u64, voices: bool) -> Option<omnipulse_audio::Handoff> {
+    (voices && ms >= 4000).then(|| omnipulse_audio::Handoff::voiced_crossfade(ms))
 }
 
 // ---------- Tier 2: extras, as your ratings say ----------
@@ -323,7 +333,7 @@ mod tests {
         // (its end: bar 44, the main part's end, on a phrase line from bar 4; 4 bars before it)
         assert_eq!((p.at_ms, p.swap_ms, p.style), (80_000, 8_000, Some(ROLL)));
         assert_eq!(p.start_ms, (2.0 * 4.0 * 60_000.0 / 140.0_f64).round() as u64);
-        let h = handoff(&p);
+        let h = handoff(&p, true);
         assert_eq!(h.roll, Some(omnipulse_audio::Roll { bar: 2_000, bars: 4 }));
         assert!(not_rejected(&[], ROLL));
     }
@@ -370,6 +380,8 @@ mod tests {
         };
         let rate = 44_100u32;
         let lead = 12_000u64;
+        // (OMNIPULSE_SMART_VOICES=0: the voices not handed over, to compare)
+        let voices = std::env::var("OMNIPULSE_SMART_VOICES").map_or(true, |v| v != "0");
         for (n, pair) in pairs.split(';').filter(|p| !p.trim().is_empty()).enumerate() {
             let (a_id, b_id) = pair.split_once(',').expect("a pair: A,B");
             let (ta, tb) = (track(a_id.trim()), track(b_id.trim()));
@@ -389,7 +401,7 @@ mod tests {
                     sa.seek(p.at_ms.saturating_sub(lead)).unwrap();
                     let mut sb = sb;
                     sb.seek(p.start_ms).unwrap();
-                    let out = omnipulse_audio::engine::render_mix(sa, sb, dbs, rate, lead as f32 / 1000.0, p.ms, Some(handoff(p)), (lead + p.ms) as f32 / 1000.0 + 15.0).unwrap();
+                    let out = omnipulse_audio::engine::render_mix(sa, sb, dbs, rate, lead as f32 / 1000.0, p.ms, Some(handoff(p, voices)), (lead + p.ms) as f32 / 1000.0 + 15.0).unwrap();
                     (out, serde_json::json!({ "kind": "roll", "plan": p, "notOnTheBeat": blocked }))
                 }
                 Some(p) => {
@@ -400,7 +412,7 @@ mod tests {
                     let (target, a_tempo) = (p.out_tempo, omnipulse_audio::Tempo::new(1.0));
                     let share = p.ms as f64 / p.ramp_ms.max(1) as f64;
                     let ramp = { let a_tempo = a_tempo.clone(); move |x: f64| { a_tempo.set(crate::mix::out_ramp(target, x * share)); b_tempo.set(crate::mix::in_ramp(target, x * share)); } };
-                    let out = omnipulse_audio::engine::render_mix_ramped(sa, Box::new(sb), dbs, rate, lead as f32 / 1000.0, p.ms, Some(handoff(p)), (target != 1.0).then_some((&a_tempo, &ramp as &dyn Fn(f64))), (lead + p.ms) as f32 / 1000.0 + 15.0).unwrap();
+                    let out = omnipulse_audio::engine::render_mix_ramped(sa, Box::new(sb), dbs, rate, lead as f32 / 1000.0, p.ms, Some(handoff(p, voices)), (target != 1.0).then_some((&a_tempo, &ramp as &dyn Fn(f64))), (lead + p.ms) as f32 / 1000.0 + 15.0).unwrap();
                     (out, serde_json::json!({ "kind": "smart blend", "plan": p }))
                 }
                 None => {
@@ -408,7 +420,7 @@ mod tests {
                     sa.seek(f.out_from_ms.saturating_sub(lead)).unwrap();
                     let mut sb = sb;
                     if f.in_from_ms > 0 { sb.seek(f.in_from_ms).unwrap(); }
-                    let out = omnipulse_audio::engine::render_mix(sa, sb, dbs, rate, lead as f32 / 1000.0, f.len_ms(), None, (lead + f.len_ms()) as f32 / 1000.0 + 15.0).unwrap();
+                    let out = omnipulse_audio::engine::render_mix(sa, sb, dbs, rate, lead as f32 / 1000.0, f.len_ms(), fade_handoff(f.len_ms(), voices), (lead + f.len_ms()) as f32 / 1000.0 + 15.0).unwrap();
                     (out, serde_json::json!({ "kind": "smart fade", "outFromMs": f.out_from_ms, "outToMs": f.out_to_ms, "inFromMs": f.in_from_ms, "ms": f.len_ms(), "notOnTheBeat": blocked.unwrap_or("no phrase to blend on"),
                         "outroFromMs": ma.as_ref().and_then(outro_from), "introToMs": mb.as_ref().and_then(intro_to) }))
                 }

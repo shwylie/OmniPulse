@@ -259,7 +259,7 @@ fn interleave(ch: &[Vec<f32>], out: &mut Vec<f32>) {
 enum Cmd {
     Load(Box<dyn Source>, f32),
     /// the next source, coming in over this many ms as the one playing goes out
-    Crossfade(Box<dyn Source>, f32, u64),
+    Crossfade(Box<dyn Source>, f32, u64, Option<Handoff>),
     /// a mix: the next source (at the place it starts from), coming in when the one playing reaches
     /// `at_ms` (sample-exact), over `ms`, handed over as `handoff` says (None: a plain crossfade)
     MixAt { src: Box<dyn Source>, db: f32, at_ms: u64, ms: u64, handoff: Option<Handoff> },
@@ -455,7 +455,11 @@ impl Engine {
     /// Plays a source from its start, coming in over `ms` as the one playing goes out (a true crossfade:
     /// both are heard at once); from then on it's the one playing (its position, length and end)
     pub fn crossfade(&self, src: Box<dyn Source>, match_db: f32, ms: u64) {
-        let _ = self.cmd.send(Cmd::Crossfade(src, match_db, ms));
+        let _ = self.cmd.send(Cmd::Crossfade(src, match_db, ms, None));
+    }
+    /// The same, handed over as `handoff` has it (ms from the crossfade's start)
+    pub fn crossfade_with(&self, src: Box<dyn Source>, match_db: f32, ms: u64, handoff: Handoff) {
+        let _ = self.cmd.send(Cmd::Crossfade(src, match_db, ms, Some(handoff)));
     }
     /// A crossfade is under way
     pub fn crossfading(&self) -> bool {
@@ -691,6 +695,8 @@ struct Fading {
     pub spin_lag: f64,
     /// each side's loop as it's heard the first time (frames, interleaved), for playing it again
     loops: [Vec<f32>; 2],
+    /// each side's centre cut (its voice handed over)
+    centres: [Centre; 2],
 }
 
 /// One band's handover in a mix: the one coming in up from `in_at` over `in_len`, the one going out
@@ -774,6 +780,11 @@ pub struct Handoff {
     /// a roll of the one going out (as Traktor's Beatmasher): its bar from the mix's start heard, then
     /// that bar's first half twice, its first quarter four times... a bar each, a build
     pub roll: Option<Roll>,
+    /// the voice handed over (a centre cut, as a DJ app's vocal/instrumental switch): the one going out's
+    /// taken away from `.0` over `.1`; the one coming in's held out until `.0`, then brought up over
+    /// `.1` (ms from the mix's start, or frames). The two voices never together.
+    pub out_voice: Option<(u64, u64)>,
+    pub in_voice: Option<(u64, u64)>,
 }
 
 /// A roll: `bar` (ms, or frames) from the mix's start played, then over each of the next `bars - 1`
@@ -819,11 +830,63 @@ impl Loop {
 }
 
 
+/// The centre's voice range (the vocals, mostly: what's in both channels alike, 200 Hz to 6 kHz) turned
+/// down, the rest as it is: the kick and bass (centred too, but below it), the hats and air (above it),
+/// and everything panned (the sides) kept. Both the centre and the sides go through the same three-way
+/// split, so at full it's the signal (its phase turned, as the band handover's is).
+#[derive(Clone, Copy)]
+struct Centre {
+    mid: [Crossover; 3],
+    side: [Crossover; 3],
+}
+
+const VOICE_LOW_HZ: f32 = 200.0;
+const VOICE_HIGH_HZ: f32 = 6000.0;
+
+impl Centre {
+    fn new(rate: u32) -> Self {
+        let three = [Crossover::new(rate, VOICE_LOW_HZ), Crossover::new(rate, VOICE_HIGH_HZ), Crossover::new(rate, VOICE_HIGH_HZ)];
+        Self { mid: three, side: three }
+    }
+    /// One band split three ways (its bass through the upper crossover too, for its phase)
+    fn three(c: &mut [Crossover; 3], x: f32) -> (f32, f32, f32) {
+        let (l, rest) = c[0].split(0, x);
+        let (m, h) = c[1].split(0, rest);
+        let (a, b) = c[2].split(0, l);
+        (a + b, m, h)
+    }
+    /// A frame with its centre's voice at `g` (1: as it is; 0: gone)
+    fn run(&mut self, l: f32, r: f32, g: f32) -> (f32, f32) {
+        let (m, s) = ((l + r) * 0.5, (l - r) * 0.5);
+        let (ml, mm, mh) = Self::three(&mut self.mid, m);
+        let (sl, sm, sh) = Self::three(&mut self.side, s);
+        let (m, s) = (ml + mm * g + mh, sl + sm + sh);
+        (m + s, m - s)
+    }
+}
+
 impl Handoff {
+    /// The same, its voices handed over too: the one going out's taken away over the `beat_ms * 2` before
+    /// `at`, the one coming in's brought up over the two after it
+    pub fn with_voices(mut self, at: u64, beat_ms: f64) -> Self {
+        let two = (beat_ms * 2.0).round() as u64;
+        self.out_voice = Some((at.saturating_sub(two), two));
+        self.in_voice = Some((at, two));
+        self
+    }
+
+    /// A plain crossfade over `ms` (equal power, all of it at once), the voices handed over halfway: the
+    /// one going out's gone by then, the one coming in's up from then, so they're never sung together
+    pub fn voiced_crossfade(ms: u64) -> Self {
+        let all = Ramp::swap(0, ms);
+        let turn = (ms / 5).clamp(300, 1500);
+        Self { low: all, mid: all, high: all, echo: None, out_sweep: None, in_sweep: None, brake: None, spin: None, out_loop: None, in_loop: None, roll: None, out_voice: Some(((ms / 2).saturating_sub(turn), turn)), in_voice: Some((ms / 2, turn)) }
+    }
+
     /// The bass alone swapped at `at` (over a quarter second), the rest crossfaded over all `ms`
     pub fn bass_swap(ms: u64, at: u64) -> Self {
         let all = Ramp::swap(0, ms);
-        Self { low: Ramp::swap(at, 250), mid: all, high: all, echo: None, out_sweep: None, in_sweep: None, brake: None, spin: None, out_loop: None, in_loop: None, roll: None }
+        Self { low: Ramp::swap(at, 250), mid: all, high: all, echo: None, out_sweep: None, in_sweep: None, brake: None, spin: None, out_loop: None, in_loop: None, roll: None, out_voice: None, in_voice: None }
     }
 
     /// Staged over `ms` (of beats `beat_ms` long), swapped at `swap` (a downbeat): the highs cross over
@@ -848,6 +911,8 @@ impl Handoff {
             out_loop: None,
             in_loop: None,
             roll: None,
+            out_voice: None,
+            in_voice: None,
         }
     }
 
@@ -876,6 +941,8 @@ impl Handoff {
             out_loop: None,
             in_loop: None,
             roll: None,
+            out_voice: None,
+            in_voice: None,
         }
     }
 
@@ -884,21 +951,21 @@ impl Handoff {
     /// few ms against a click). For tempos too far apart to blend on the beat: one stops, the other goes.
     pub fn tape_stop(ms: u64) -> Self {
         let side = Ramp { in_at: ms, in_len: 25, out_at: ms.saturating_sub(60), out_len: 60 };
-        Self { low: side, mid: side, high: side, echo: None, out_sweep: None, in_sweep: None, brake: Some((0, ms)), spin: None, out_loop: None, in_loop: None, roll: None }
+        Self { low: side, mid: side, high: side, echo: None, out_sweep: None, in_sweep: None, brake: Some((0, ms)), spin: None, out_loop: None, in_loop: None, roll: None, out_voice: None, in_voice: None }
     }
 
     /// A cut on the beat at `swap`: the one going out to the moment, the one coming in from it (a
     /// few ms each way against a click)
     pub fn cut(swap: u64) -> Self {
         let side = Ramp { in_at: swap, in_len: 8, out_at: swap.saturating_sub(12), out_len: 12 };
-        Self { low: side, mid: side, high: side, echo: None, out_sweep: None, in_sweep: None, brake: None, spin: None, out_loop: None, in_loop: None, roll: None }
+        Self { low: side, mid: side, high: side, echo: None, out_sweep: None, in_sweep: None, brake: None, spin: None, out_loop: None, in_loop: None, roll: None, out_voice: None, in_voice: None }
     }
 
     /// Wordplay: the one going out's word (a beat from the mix's start) looped `reps` more times, then
     /// cut on the beat at `swap` as the next one comes in singing the same word
     pub fn word_cut(swap: u64, beat: u64, reps: u32) -> Self {
         let side = Ramp { in_at: swap, in_len: 8, out_at: swap.saturating_sub(12), out_len: 12 };
-        Self { low: side, mid: side, high: side, echo: None, out_sweep: None, in_sweep: None, brake: None, spin: None, out_loop: Some(Loop { from: 0, len: beat, reps }), in_loop: None, roll: None }
+        Self { low: side, mid: side, high: side, echo: None, out_sweep: None, in_sweep: None, brake: None, spin: None, out_loop: Some(Loop { from: 0, len: beat, reps }), in_loop: None, roll: None, out_voice: None, in_voice: None }
     }
 
     /// A roll out (as Traktor's Beatmasher): the one going out's bar from the mix's start played, then
@@ -909,7 +976,7 @@ impl Handoff {
         let end = bar_ms * bars as u64;
         let side = Ramp { in_at: end, in_len: 8, out_at: end.saturating_sub(12), out_len: 12 };
         let rise = [(0, 20.0), (bar_ms, 20.0), (bar_ms * 2, 120.0), (end.saturating_sub(bar_ms / 2), 900.0), (end, 1400.0)];
-        Self { low: side, mid: side, high: side, echo: None, out_sweep: Some(Sweep { points: rise, high: true }), in_sweep: None, brake: None, spin: Some((end, 1)), out_loop: None, in_loop: None, roll: Some(Roll { bar: bar_ms, bars }) }
+        Self { low: side, mid: side, high: side, echo: None, out_sweep: Some(Sweep { points: rise, high: true }), in_sweep: None, brake: None, spin: Some((end, 1)), out_loop: None, in_loop: None, roll: Some(Roll { bar: bar_ms, bars }), out_voice: None, in_voice: None }
     }
 
     /// A tape stop over `stop`, with a tape start over `start` in its last part: the one going out slows to
@@ -919,7 +986,7 @@ impl Handoff {
         let start = start.clamp(1, stop.max(1));
         let from = stop - start;
         let side = Ramp { in_at: from, in_len: 10, out_at: stop.saturating_sub(60), out_len: 60 };
-        Self { low: side, mid: side, high: side, echo: None, out_sweep: None, in_sweep: None, brake: Some((0, stop)), spin: Some((from, start)), out_loop: None, in_loop: None, roll: None }
+        Self { low: side, mid: side, high: side, echo: None, out_sweep: None, in_sweep: None, brake: Some((0, stop)), spin: Some((from, start)), out_loop: None, in_loop: None, roll: None, out_voice: None, in_voice: None }
     }
 
     fn frames(&self, rate: u64) -> Self {
@@ -932,6 +999,8 @@ impl Handoff {
             out_loop: self.out_loop.map(|l| l.frames(rate)),
             in_loop: self.in_loop.map(|l| l.frames(rate)),
             roll: self.roll.map(|r| r.frames(rate)),
+            out_voice: self.out_voice.map(|(a, b)| (f(a), f(b).max(1))),
+            in_voice: self.in_voice.map(|(a, b)| (f(a), f(b).max(1))),
         }
     }
 }
@@ -1035,7 +1104,7 @@ impl Fading {
         Self {
             next, total: total.max(1), done: 0, out_buf: VecDeque::new(), in_buf: VecDeque::new(), out_ended: false, in_ended: false,
             handoff: handoff.map(|h| h.frames(rate as u64)), bands: [Bands::new(rate); 2], echo: Echo { line: Vec::new(), at: 0 },
-            sweeps: [[Butter::new(rate, 20.0, true); 2]; 2], rate, brake_at: 0.0, spin_at: 0.0, spin_lag: 0.0, loops: [Vec::new(), Vec::new()],
+            sweeps: [[Butter::new(rate, 20.0, true); 2]; 2], rate, brake_at: 0.0, spin_at: 0.0, spin_lag: 0.0, loops: [Vec::new(), Vec::new()], centres: [Centre::new(rate); 2],
         }
     }
 }
@@ -1159,6 +1228,10 @@ impl Fading {
                     let f = self.done;
                     // (the sweeps: their cutoffs moved every 32 frames, smooth enough to hear as one glide)
                     let (mut ol, mut or, mut il, mut ir) = (ol, or, il, ir);
+                    // (the voices: the one going out's down, the one coming in's held out, then up)
+                    let q = |at: u64, len: u64| if f < at { 0.0 } else { ((f - at) as f32 / len.max(1) as f32).min(1.0) };
+                    if let Some((at, len)) = h.out_voice { (ol, or) = self.centres[0].run(ol, or, 1.0 - q(at, len)); }
+                    if let Some((at, len)) = h.in_voice { (il, ir) = self.centres[1].run(il, ir, q(at, len)); }
                     for (side, w) in [h.out_sweep, h.in_sweep].into_iter().enumerate() {
                         let Some(w) = w else { continue };
                         if f % 32 == 0 { for st in &mut self.sweeps[side] { st.tune(self.rate, w.hz_at(f), w.high, std::f32::consts::FRAC_1_SQRT_2); } }
@@ -1241,7 +1314,7 @@ fn decode_loop(shared: Arc<Shared>, cmds: Receiver<Cmd>, ev: Sender<Event>) {
         let got = if idle { cmds.recv_timeout(Duration::from_millis(50)).ok() } else { cmds.try_recv().ok() };
         if let Some(c) = got {
             match c {
-                Cmd::Crossfade(src, db, ms) if pipe.is_some() && !shared.source_done.load(Ordering::SeqCst) => {
+                Cmd::Crossfade(src, db, ms, handoff) if pipe.is_some() && !shared.source_done.load(Ordering::SeqCst) => {
                     let rate = shared.rate.load(Ordering::SeqCst);
                     // (one fading in already: it's the one playing now)
                     if let Some(f) = fading.take() { pipe = Some(f.next); }
@@ -1251,7 +1324,7 @@ fn decode_loop(shared: Arc<Shared>, cmds: Receiver<Cmd>, ev: Sender<Event>) {
                     // its position counts from here: what's queued still is the one going out's
                     waiting = None;
                     shared.mix_waiting.store(false, Ordering::SeqCst);
-                    fading = Some(begin_fade(&shared, next, ms * rate as u64 / 1000, None));
+                    fading = Some(begin_fade(&shared, next, ms * rate as u64 / 1000, handoff));
                     ended_sent = false;
                 }
                 // a mix: waits for its moment in the one playing
@@ -1270,7 +1343,7 @@ fn decode_loop(shared: Arc<Shared>, cmds: Receiver<Cmd>, ev: Sender<Event>) {
                     ended_sent = false;
                 }
                 // (nothing playing to fade from: it just starts)
-                Cmd::Crossfade(src, db, _) | Cmd::Load(src, db) => {
+                Cmd::Crossfade(src, db, _, _) | Cmd::Load(src, db) => {
                     fading = None;
                     waiting = None;
                     shared.mix_waiting.store(false, Ordering::SeqCst);
@@ -1789,5 +1862,36 @@ mod mix_tests {
         assert!(has(82.0, 6.5) > 0.2 && has(55.0, 6.5) < 0.03, "bass after {} {}", has(82.0, 6.5), has(55.0, 6.5));
         // after it: only the one that came in
         assert!(has(6000.0, 10.5) < 0.01 && has(600.0, 10.5) < 0.01, "left {} {}", has(6000.0, 10.5), has(600.0, 10.5));
+    }
+}
+
+#[cfg(test)]
+mod centre_tests {
+    use super::Centre;
+
+    /// The level (RMS) of what comes out of `g`'s centre cut, for a centred tone at `hz` (or one panned
+    /// hard left), its first half second left out (the filters settling)
+    fn through(hz: f32, panned: bool, g: f32) -> f32 {
+        let rate = 44_100;
+        let mut c = Centre::new(rate);
+        let (mut sum, mut n) = (0.0f32, 0);
+        for i in 0..rate as usize * 2 {
+            let x = (2.0 * std::f32::consts::PI * hz * i as f32 / rate as f32).sin() * 0.5;
+            let (l, r) = c.run(x, if panned { 0.0 } else { x }, g);
+            if i > rate as usize / 2 { sum += l * l + r * r; n += 2; }
+        }
+        (sum / n as f32).sqrt()
+    }
+
+    #[test]
+    fn the_centres_voice_goes_its_bass_and_whats_panned_stay() {
+        let full = through(1000.0, false, 1.0);
+        assert!((full - 0.3536).abs() < 0.01, "as it is at full: {full}");
+        assert!(through(1000.0, false, 0.0) < full * 0.1, "a centred voice gone");
+        assert!(through(60.0, false, 0.0) > full * 0.9, "its bass kept");
+        // (panned hard: half of it is in both channels alike, so about 70% of it stays: the centre trick's
+        // way, as the old karaoke switches)
+        let panned = through(1000.0, true, 0.0) / through(1000.0, true, 1.0);
+        assert!((0.65..0.75).contains(&panned), "what's panned mostly kept: {panned}");
     }
 }
