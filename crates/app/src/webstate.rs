@@ -30,6 +30,8 @@ pub struct WebState {
     pub favourites: Vec<Track>,
     pub plays: Vec<Play>,
     pub last_played: HashMap<String, u64>,
+    /// the YouTube Music artists followed in the web app (sc.ytFollows)
+    pub yt_follows: Value,
     pub own_playlists: Vec<Playlist>,
     pub yt_likes: Vec<Track>,
     pub prefs: Value,
@@ -105,6 +107,7 @@ pub fn load() -> WebState {
         s.plays = serde_json::from_value(key(&v, "sc.stats")).unwrap_or_default();
         s.yt_likes = key(&v, "sc.ytLikes").as_array().map(|a| a.iter().filter_map(Track::from_snapshot).collect()).unwrap_or_default();
         s.prefs = key(&v, "sc.prefs");
+        s.yt_follows = key(&v, "sc.ytFollows");
         // the web app's YouTube Music versions of Go+ tracks (crate::versions)
         crate::versions::seed_from_web(&key(&v, "sc.ytMatch"));
         if let Some(a) = key(&v, "sc.lastPlayed").as_array() {

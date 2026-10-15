@@ -639,7 +639,7 @@ pub fn local_albums(files: &[Track]) -> Vec<Found> {
 pub async fn found_tracks(f: &Found) -> Vec<Track> {
     match f {
         Found::Artist { name, sc, sp, yt, img, .. } => {
-            let a = Artist { name: name.clone(), img: img.clone(), sc: *sc, sp: sp.clone() };
+            let a = Artist { name: name.clone(), img: img.clone(), sc: *sc, sp: sp.clone(), yt: yt.clone() };
             let yt = async {
                 match yt { Some(id) => core::youtube::artist(id).await.map(|p| p.songs.iter().map(Track::youtube).collect()).unwrap_or_default(), None => Vec::new() }
             };
@@ -690,14 +690,23 @@ pub fn interleave(lists: Vec<Vec<Track>>) -> Vec<Track> {
 pub struct Artist {
     pub name: String,
     pub img: String,
-    /// their SoundCloud user id and Spotify artist id, where you follow them
+    /// their SoundCloud user id, Spotify artist id and YouTube Music channel id, where you follow them
     pub sc: Option<u64>,
     pub sp: Option<String>,
+    pub yt: Option<String>,
 }
 
 impl Artist {
     pub fn plats(&self) -> Vec<&'static str> {
-        [self.sc.is_some().then_some("soundcloud"), self.sp.is_some().then_some("spotify")].into_iter().flatten().collect()
+        [self.sc.is_some().then_some("soundcloud"), self.sp.is_some().then_some("spotify"), self.yt.is_some().then_some("youtube")].into_iter().flatten().collect()
+    }
+    /// Their id on a platform, where you follow them
+    pub fn id_on(&self, plat: &str) -> Option<String> {
+        match plat { "soundcloud" => self.sc.map(|x| x.to_string()), "spotify" => self.sp.clone(), "youtube" => self.yt.clone(), _ => None }
+    }
+    /// Followed there (Some: by that id), or not any more (None)
+    pub fn set_on(&mut self, plat: &str, id: Option<String>) {
+        match plat { "soundcloud" => self.sc = id.and_then(|x| x.parse().ok()), "spotify" => self.sp = id, "youtube" => self.yt = id, _ => {} }
     }
 }
 
@@ -719,6 +728,7 @@ pub async fn find_artist_on(plat: &str, name: &str) -> Option<String> {
             v["artists"]["items"].as_array()?.iter().find(|a| name_key(a["name"].as_str().unwrap_or("")) == k)
                 .and_then(|a| a["id"].as_str()).map(String::from)
         }
+        "youtube" => core::youtube::search_artists(name).await.ok()?.into_iter().find(|a| name_key(&a.name) == k).map(|a| a.id),
         _ => None,
     }
 }
@@ -729,6 +739,8 @@ pub async fn set_follow(plat: &str, id: &str, on: bool) -> Result<(), String> {
         "soundcloud" => core::soundcloud::set_follow(id.to_string(), on).await,
         // (since Spotify's February 2026 changes: /me/library, with the artist's uri)
         "spotify" => core::spotify::spotify_api(if on { "PUT" } else { "DELETE" }.into(), format!("/me/library?uris={}", urlencode(&format!("spotify:artist:{id}"))), None).await.map(|_| ()),
+        // (YouTube Music: on this PC, by the app: main.rs keeps the list)
+        "youtube" => Ok(()),
         _ => Err("not a platform you can follow on".into()),
     }
 }
@@ -793,8 +805,15 @@ fn name_key(s: &str) -> String {
 }
 
 /// Everyone you follow on SoundCloud and Spotify, as one list (the same name is one artist), A to Z
-pub async fn followed_artists() -> Vec<Artist> {
+pub async fn followed_artists(yt_follows: Vec<(String, String, String)>) -> Vec<Artist> {
     let mut by: std::collections::BTreeMap<String, Artist> = Default::default();
+    for (id, name, img) in yt_follows {
+        let k = name_key(&name);
+        if k.is_empty() { continue; }
+        let a = by.entry(k).or_insert_with(|| Artist { name: name.clone(), ..Default::default() });
+        if a.img.is_empty() { a.img = img; }
+        a.yt = Some(id);
+    }
     let mut add = |name: &str, img: &str, sc: Option<u64>, sp: Option<String>| {
         let k = name_key(name);
         if k.is_empty() {
@@ -837,8 +856,14 @@ pub async fn followed_artists() -> Vec<Artist> {
     list
 }
 
-/// An artist's tracks: their SoundCloud uploads and their songs on Spotify, taking turns
+/// An artist's tracks: their SoundCloud uploads, their songs on Spotify and on YouTube Music, taking turns
 pub async fn artist_tracks(a: &Artist) -> Vec<Track> {
+    let yt = async { match &a.yt { Some(id) => core::youtube::artist(id).await.map(|p| p.songs.iter().map(Track::youtube).collect()).unwrap_or_default(), None => Vec::new() } };
+    let (mine, yt) = tokio::join!(artist_tracks_sc_sp(a), yt);
+    if yt.is_empty() { mine } else { once_each(interleave(vec![mine, yt])) }
+}
+
+async fn artist_tracks_sc_sp(a: &Artist) -> Vec<Track> {
     let sc = async {
         match a.sc {
             Some(id) => sc_pages(format!("/users/{id}/tracks?access=playable&limit=50&linked_partitioning=true"), 100).await,

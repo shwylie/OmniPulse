@@ -83,7 +83,7 @@ export struct KeyStep { text: string, has-url: bool, copies: [string] }
 export struct KeyField { label: string, value: string, ok: bool }
 export struct PlugField { key: string, label: string, note: string, kind: string, value: string, options: [string], at: int }
 // (an artist you follow: whether on SoundCloud and on Spotify, for its menu)
-export struct Item { name: string, sub: string, art: image, plat: string, on-sc: bool, on-sp: bool, row: Row }
+export struct Item { name: string, sub: string, art: image, plat: string, on-sc: bool, on-sp: bool, on-yt: bool, row: Row }
 
 global Icons {
     out property <string> play: "M8 5v14l11-7z";
@@ -1453,6 +1453,8 @@ export component AppWindow inherits Window {
     /// an artist's page: where they are (each platform's symbol and its count), their picture, their
     /// Wikipedia bio (three lines, all of it on a click) and its address
     in property <[ArtistOn]> artist-on;
+    /// the follow button's right-click: YouTube Music's line
+    in property <string> follow-yt;
     /// (the self-test: the track list scrolled this far)
     in property <length> list-y;
     in property <image> page-art;
@@ -2315,11 +2317,13 @@ export component AppWindow inherits Window {
                                 enabled: root.follow-sc != "" || root.follow-sp != "";
                                 items: [
                                     { label: root.follow-sc, show: root.follow-sc != "" },
-                                    { label: root.follow-sp, show: root.follow-sp != "" }
+                                    { label: root.follow-sp, show: root.follow-sp != "" },
+                                    { label: root.follow-yt, show: root.follow-yt != "" }
                                 ];
                                 picked(n, k) => {
                                     if (n == 0) { root.follow-plat("soundcloud"); }
                                     if (n == 1) { root.follow-plat("spotify"); }
+                                    if (n == 2) { root.follow-plat("youtube"); }
                                 }
                             }
                         }
@@ -2410,6 +2414,7 @@ export component AppWindow inherits Window {
                                     height: 16px;
                                     if a.on-sc: PlatIcon { plat: "soundcloud"; width: 15px; height: 15px; }
                                     if a.on-sp: PlatIcon { plat: "spotify"; width: 15px; height: 15px; }
+                                    if a.on-yt: PlatIcon { plat: "youtube"; width: 15px; height: 15px; }
                                 }
                             }
                             Rectangle {
@@ -2421,13 +2426,15 @@ export component AppWindow inherits Window {
                                         { label: "Open", show: true },
                                         { label: "Follow on SoundCloud Too", show: !a.on-sc },
                                         { label: "Follow on Spotify Too", show: !a.on-sp },
+                                        { label: "Follow on YouTube Music Too", show: !a.on-yt },
                                         { label: "Unfollow Everywhere", show: true }
                                     ];
                                     picked(n, k) => {
                                         if (n == 0) { root.artist(i); }
                                         if (n == 1) { root.artist-act(i, "follow:soundcloud"); }
                                         if (n == 2) { root.artist-act(i, "follow:spotify"); }
-                                        if (n == 3) { root.artist-act(i, "unfollow"); }
+                                        if (n == 3) { root.artist-act(i, "follow:youtube"); }
+                                        if (n == 4) { root.artist-act(i, "unfollow"); }
                                     }
                                 }
                             }

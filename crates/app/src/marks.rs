@@ -82,6 +82,21 @@ pub async fn youtube_too(t: &Track, on: bool, mirror: bool) -> Option<String> {
 }
 
 /// YouTube Music likes made here (they go in the Library too)
+/// The YouTube Music artists you follow (YouTube Music has no follows for an app: they're kept on this
+/// PC, as the web app's sc.ytFollows): theirs from the web app, with what's followed or unfollowed here
+/// on top, in state/native-yt-follows.json. (channel id, name, picture)
+pub fn yt_follows(web: &Value) -> Vec<(String, String, String)> {
+    let v = read("native-yt-follows.json");
+    let list = if v.is_array() { v } else { web.clone() };
+    list.as_array().into_iter().flatten().filter_map(|x| Some((x["id"].as_str()?.to_string(), x["name"].as_str().unwrap_or("").to_string(), x["img"].as_str().unwrap_or("").to_string()))).collect()
+}
+
+pub fn set_yt_follow(web: &Value, id: &str, name: &str, img: &str, on: bool) {
+    let mut list: Vec<Value> = yt_follows(web).into_iter().filter(|x| x.0 != id).map(|x| json!({ "id": x.0, "name": x.1, "img": x.2 })).collect();
+    if on { list.insert(0, json!({ "id": id, "name": name, "img": img })); }
+    write("native-yt-follows.json", &Value::Array(list));
+}
+
 pub fn yt_likes() -> Vec<Track> {
     read("native-yt-likes.json").as_array().map(|a| a.iter().filter_map(Track::from_snapshot).collect()).unwrap_or_default()
 }
