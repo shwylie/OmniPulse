@@ -110,8 +110,9 @@ const TRUST_CONFIDENCE: f64 = 0.3;
 /// How far from its own tempo the next one plays (DJs: mostly under 5%)
 pub const MAX_RATE: f64 = 0.04;
 /// How far apart two songs' tempos can be for a blend with the tempo ridden from one to the other (as a
-/// DJ ramps between genres: Goodbye's 92 into One's 125); past 4%, the blend's always 32 beats, room for it
-pub const MAX_RAMP_BLEND: f64 = 0.40;
+/// DJ ramps between genres: Goodbye's 92 into One's 125, 174 counted as 87 into 128); past 4%, the blend's
+/// always 32 beats, room for it
+pub const MAX_RAMP_BLEND: f64 = 0.50;
 /// A stated tempo agrees with the measured one within this (or half or double of it)
 const STATED_WITHIN: f64 = 0.03;
 
@@ -158,7 +159,8 @@ pub fn blend_blocked(a: &Side, b: &Side) -> Option<&'static str> {
     if !grid_trusted(a) { return Some("the one playing's beat isn't sure"); }
     if !grid_trusted(b) { return Some("the next one's beat isn't sure"); }
     let (ma, mb) = (a.rhythm?, b.rhythm?);
-    if match_rate(ma.rhythm.bpm, mb.rhythm.bpm).is_none() && (ma.rhythm.bpm / mb.rhythm.bpm - 1.0).abs() > MAX_RAMP_BLEND { return Some("tempos too far apart (more than 40%)"); }
+    let near = |x: f64| (x / mb.rhythm.bpm - 1.0).abs() <= MAX_RAMP_BLEND;
+    if match_rate(ma.rhythm.bpm, mb.rhythm.bpm).is_none() && !near(ma.rhythm.bpm) && !near(ma.rhythm.bpm / 2.0) { return Some("tempos too far apart (more than 50%)"); }
     if !keys_go(ma, mb) { return Some("keys that don't go together"); }
     None
 }
@@ -212,10 +214,18 @@ pub fn blend_as(a: &Side, b: &Side, now_ms: u64, forced: bool) -> Option<crate::
     let why = |w: &str| if std::env::var_os("OMNIPULSE_MIX_DEBUG").is_some() { eprintln!("smart debug: no blend: {w}"); };
     if !forced && blend_blocked(a, b).is_some() { return None; }
     let (ma, mb) = (a.rhythm?, b.rhythm?);
+    // (a big slowdown sounds wrong: the one playing counted at half time instead (174 as 87) and sped up)
+    let half;
+    let ma = if ma.rhythm.bpm > mb.rhythm.bpm * (1.0 + MAX_RATE) && (ma.rhythm.bpm / 2.0 / mb.rhythm.bpm - 1.0).abs() <= MAX_RAMP_BLEND && ma.rhythm.bpm / 2.0 < mb.rhythm.bpm {
+        half = halved(ma);
+        &half
+    } else { ma };
     // (same time only: a half- or double-time pair's bars don't line up one to one)
     let ramp = (ma.rhythm.bpm / mb.rhythm.bpm - 1.0).abs();
     if ramp > MAX_RAMP_BLEND && !forced { return None; }
-    let grid = |m: &Measured| if forced { groups(m).map(|g| g.0) } else { sure_groups(m) };
+    // (16-beat lines not sure: the likeliest; the user would rather a blend on it than a fade)
+    let _ = forced;
+    let grid = |m: &Measured| groups(m).map(|g| g.0);
     let (Some(ga), Some(gb)) = (grid(ma), grid(mb)) else { why(&format!("16-beat lines not sure: {:?} {:?}", groups(ma), groups(mb))); return None };
     let bars = |m: &Measured| m.rhythm.beats.len().saturating_sub(m.rhythm.downbeat) / 4;
     let (na, nb) = (bars(ma), bars(mb));
@@ -244,12 +254,14 @@ pub fn blend_as(a: &Side, b: &Side, now_ms: u64, forced: bool) -> Option<crate::
     // the tempo ridden over all of it, as a DJ does: the two together at the one playing's at first, at
     // the next one's own by the end (the one playing eased to it, the next one with it): nothing to ease
     // back after. Its bars take longer or less as it's eased: the times, as heard
+    // (ridden over the run-up: at the next one's own tempo by the swap, where the one playing stops being
+    // heard; its last bars, fading, at that tempo too)
     let target = 1.0 / rate;
-    let heard = |d: f64| ramp_time(d, over - at, target);
-    let (len, swap_at) = (heard(over - at), heard(swap - at));
+    let swap_at = ramp_time(swap - at, swap - at, target);
+    let len = swap_at + (over - swap) / target;
     Some(crate::mix::Plan {
         at_ms: at.round() as u64, ms: len.round() as u64, swap_ms: swap_at.round() as u64, start_ms: bar_ms(mb, from)?.round() as u64,
-        rate, bars: (run + TAIL_BARS) as u32, semitones: 0, beatmatched: true, out_tempo: target, ramp_ms: len.round() as u64, tape_stop: false,
+        rate, bars: (run + TAIL_BARS) as u32, semitones: 0, beatmatched: true, out_tempo: target, ramp_ms: swap_at.round() as u64, tape_stop: false,
         out_loop: None, in_loop: None, word: None, style: None,
     })
 }
@@ -264,6 +276,23 @@ fn ramp_time(d: f64, total: f64, target: f64) -> f64 {
     let (mut lo, mut hi) = (0.0, l * 1.2);
     for _ in 0..60 { let m = (lo + hi) / 2.0; if place(m) < d { lo = m } else { hi = m } }
     (lo + hi) / 2.0
+}
+
+/// A song counted at half time: every other beat a beat (from its bars' first), two of its bars a bar
+/// (paired so its 16-beat lines start one), its tempo half
+pub fn halved(m: &Measured) -> Measured {
+    let r = &m.rhythm;
+    let skip = groups(m).map_or(0, |g| g.0 % 2);
+    let mut h = m.clone();
+    h.rhythm.beats = r.beats.iter().skip(r.downbeat + 4 * skip).step_by(2).copied().collect();
+    h.rhythm.downbeat = 0;
+    h.rhythm.bpm = r.bpm / 2.0;
+    h.rhythm.period_ms = r.period_ms * 2.0;
+    h.rhythm.model_bpm = r.model_bpm / 2.0;
+    h.rhythm.bar_db = r.bar_db.iter().skip(skip).copied().collect::<Vec<_>>().chunks(2).map(|c| c.iter().sum::<f32>() / c.len() as f32).collect();
+    h.rhythm.bar_beat = r.bar_beat.iter().skip(skip).copied().collect::<Vec<_>>().chunks(2).map(|c| c.iter().sum::<f32>() / c.len() as f32).collect();
+    h.rhythm.bar_chroma = r.bar_chroma.iter().skip(skip).step_by(2).cloned().collect();
+    h
 }
 
 /// After a blend, the next one back to its own tempo this slowly (a minute: 1.5% over it is far below
@@ -410,7 +439,7 @@ mod tests {
     fn a_blend_only_when_its_safe() {
         let a = song(128.0, &levels(8, 48, 8), 0.6, "8A");
         let near = song(126.0, &levels(8, 48, 8), 0.6, "9A");
-        let far = song(80.0, &levels(8, 48, 8), 0.6, "8A");
+        let far = song(300.0, &levels(8, 48, 8), 0.6, "8A");
         let clash = song(128.0, &levels(8, 48, 8), 0.6, "2B");
         let blurry = song(128.0, &levels(8, 48, 8), 0.1, "8A");
         let side = |m| Side { dur_ms: 150_000, rhythm: Some(m), ..Default::default() };
@@ -439,11 +468,23 @@ mod tests {
         assert!((p.rate - 128.0 / 126.0).abs() < 1e-6);
         // (the tempo ridden from A's to B's over all of it: A ends at B's, B at its own; its 8 bars take
         // as long as they do at the average of the two)
-        assert!((p.out_tempo - 126.0 / 128.0).abs() < 1e-6 && p.ramp_ms == p.ms);
+        // (ridden over the run-up: at B's own by the swap; the bars after it at B's tempo)
+        let t = 126.0 / 128.0;
+        assert!((p.out_tempo - t).abs() < 1e-6 && p.ramp_ms == p.swap_ms);
         assert_eq!(p.bars, 8);
-        let avg = (1.0 + 126.0 / 128.0) / 2.0;
-        assert!((p.ms as f64 - 8.0 * bar_a / avg).abs() <= 1.0, "{} vs {}", p.ms, 8.0 * bar_a / avg);
-        assert!(p.swap_ms as f64 > 4.0 * bar_a && (p.swap_ms as f64) < 4.0 * bar_a / (126.0 / 128.0));
+        let run = 4.0 * bar_a / ((1.0 + t) / 2.0);
+        assert!((p.swap_ms as f64 - run).abs() <= 1.0, "{} vs {run}", p.swap_ms);
+        assert!((p.ms as f64 - (run + 4.0 * bar_a / t)).abs() <= 1.0);
+    }
+
+    #[test]
+    fn a_big_slowdown_is_a_speedup_from_half_time() {
+        // 174 into 128: counted as 87, both sped up (B in at 87, to its own; A from 87's bars on)
+        let a = song(174.0, &levels(16, 96, 16), 0.6, "8A");
+        let b = song(128.0, &levels(8, 48, 8), 0.6, "8A");
+        let side = |m| Side { dur_ms: 300_000, rhythm: Some(m), ..Default::default() };
+        let p = blend(&side(&a), &side(&b), 0).expect("a blend");
+        assert!((p.rate - 87.0 / 128.0).abs() < 0.01 && p.out_tempo > 1.4, "{} {}", p.rate, p.out_tempo);
     }
 
     #[test]
