@@ -22,6 +22,9 @@ const FPS: f64 = RATE as f64 / HOP as f64;
 const DOWNBEAT_CHANGE_WEIGHT: f64 = 2.0;
 /// The share of section changes on one beat that makes it the downbeat for sure
 pub const DOWNBEAT_SURE: f64 = 0.45;
+/// A downbeat sure enough to mix on (its confidence; with Beat This!'s, the share of its downbeats on it:
+/// a mashup's sections, each its own, can disagree)
+pub const DOWNBEAT_TRUSTED: f64 = 0.7;
 const CHROMA_WIN: usize = 8192;
 const CHROMA_HOP: usize = 2048;
 
@@ -278,6 +281,47 @@ pub fn camelot(tonic: usize, minor: bool) -> String {
 /// Mono samples at the analysis rate (for kick_strength)
 pub fn at_analysis_rate(mono: &[f32], rate: u32) -> Vec<f32> { to_analysis_rate(mono, rate) }
 
+/// Beat This!'s model, loaded once (its files written next to the app's data the first time)
+#[cfg(feature = "desktop")]
+fn beat_model() -> Option<&'static std::sync::Mutex<beat_this::BeatThis<<beat_this::RtenRuntime as beat_this::Runtime>::Model>>> {
+    static M: std::sync::OnceLock<Option<std::sync::Mutex<beat_this::BeatThis<<beat_this::RtenRuntime as beat_this::Runtime>::Model>>>> = std::sync::OnceLock::new();
+    M.get_or_init(|| {
+        let dir = crate::data_dir().ok()?.join("models");
+        std::fs::create_dir_all(&dir).ok()?;
+        let put = |name: &str, bytes: &[u8]| -> Option<std::path::PathBuf> {
+            let p = dir.join(name);
+            if std::fs::metadata(&p).map(|m| m.len() as usize) .ok() != Some(bytes.len()) { std::fs::write(&p, bytes).ok()?; }
+            Some(p)
+        };
+        let mel = put("mel_spectrogram.onnx", include_bytes!("../models/mel_spectrogram.onnx"))?;
+        let beats = put("beat_this_small.onnx", include_bytes!("../models/beat_this_small.onnx"))?;
+        beat_this::BeatThis::new(&beat_this::RtenRuntime, &mel, &beats).ok().map(std::sync::Mutex::new)
+    }).as_ref()
+}
+
+/// Which of four tracked beats (from the first) is each bar's first, by Beat This!'s downbeats (each one
+/// onto the tracked beat within 70 ms of it), and the share of them that agree. None: no model, or too
+/// few downbeats to go by.
+#[cfg(feature = "desktop")]
+fn model_downbeat(mono: &[f32], rate: u32, beats: &[f64]) -> Option<(usize, f64)> {
+    let a = beat_model()?.lock().ok()?.analyze_audio(mono, rate).ok()?;
+    let mut by = [0usize; 4];
+    for d in &a.downbeats {
+        let t = *d as f64 * 1000.0;
+        let i = beats.partition_point(|b| *b < t);
+        let near = [i.checked_sub(1), Some(i)].into_iter().flatten().filter(|&j| j < beats.len()).min_by(|&x, &y| (beats[x] - t).abs().total_cmp(&(beats[y] - t).abs()))?;
+        if (beats[near] - t).abs() <= 70.0 { by[near % 4] += 1; }
+    }
+    let n: usize = by.iter().sum();
+    if n < 8 { return None; }
+    let best = (0..4).max_by_key(|&k| by[k])?;
+    if std::env::var_os("OMNIPULSE_RHYTHM_DEBUG").is_some() { eprintln!("rhythm debug: Beat This! downbeats by beat of four {by:?} (of {})", a.downbeats.len()); }
+    Some((best, by[best] as f64 / n as f64))
+}
+
+#[cfg(not(feature = "desktop"))]
+fn model_downbeat(_: &[f32], _: u32, _: &[f64]) -> Option<(usize, f64)> { None }
+
 /// Where a song's snares (or claps) fall, by beat of four (from its first tracked beat): each beat's
 /// upper mids (1.5 to 6 kHz: a snare's crack, not its hats) rising within 40 ms of it, summed, as shares
 fn snare_by_phase(x: &[f32], beats: &[f64]) -> [f64; 4] {
@@ -357,6 +401,9 @@ pub fn analyse(mono: &[f32], rate: u32) -> Option<Rhythm> {
     let score: Vec<f64> = (0..4).map(|k| bass_share[k] + DOWNBEAT_CHANGE_WEIGHT * change_share[k]).collect();
     let downbeat = if decisive { order[0] } else { (0..4).max_by(|&a, &b| score[a].total_cmp(&score[b])).unwrap_or(0) };
     let downbeat_confidence = if decisive { change_share[order[0]] } else { change_share[downbeat].min(DOWNBEAT_SURE - 0.01) };
+    // (Beat This!, a model trained on annotated songs, where it can: its downbeats, onto these beats; the
+    // share of them on one beat of four, how sure. The clues above disagree on halftime tracks, mashups)
+    let (downbeat, downbeat_confidence) = model_downbeat(mono, rate, &beats).unwrap_or((downbeat, downbeat_confidence));
     if std::env::var_os("OMNIPULSE_RHYTHM_DEBUG").is_some() {
         let old = (0..4).max_by(|&a, &b| phase[a].total_cmp(&phase[b])).unwrap_or(0);
         eprintln!("rhythm debug: downbeat by bass {old}, now {downbeat}; bass {:?} changes {:?}", bass_share.map(|v| (v * 100.0).round()), change_share.map(|v| (v * 100.0).round()));
@@ -441,7 +488,7 @@ pub struct Measured {
 /// (2-3: beats moved half a beat where the bass hit harder between them, wrongly: an off-beat bass
 /// louder than the kick isn't a beat tracked off it; 4: that undone, the downbeat from where the
 /// sections change too)
-pub const VERSION: u32 = 6;
+pub const VERSION: u32 = 7;
 
 static STORE: std::sync::Mutex<Option<std::collections::HashMap<String, Measured>>> = std::sync::Mutex::new(None);
 

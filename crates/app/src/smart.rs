@@ -126,7 +126,7 @@ pub fn grid_trusted(s: &Side) -> bool {
     let bpm = m.rhythm.bpm;
     if m.rhythm.tempo_confidence < TRUST_CONFIDENCE || !(60.0..=200.0).contains(&bpm) || m.rhythm.beats.len() < 32 { return false; }
     // (its bars sure too: a downbeat a beat out matches the tempo, but not the bars)
-    if m.rhythm.downbeat_confidence < omnipulse_core::rhythm::DOWNBEAT_SURE { return false; }
+    if m.rhythm.downbeat_confidence < omnipulse_core::rhythm::DOWNBEAT_TRUSTED { return false; }
     match s.stated_bpm {
         Some(st) => [1.0, 2.0, 0.5].iter().any(|k| ((bpm * k) / st - 1.0).abs() <= STATED_WITHIN),
         None => true,
