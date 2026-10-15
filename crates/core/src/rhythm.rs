@@ -338,7 +338,15 @@ pub fn background_end() {
 /// onto the tracked beat within 70 ms of it), and the share of them that agree. None: no model, or too
 /// few downbeats to go by.
 #[cfg(feature = "desktop")]
-fn model_downbeat(mono: &[f32], rate: u32, beats: &[f64]) -> Option<(usize, f64, f64)> {
+/// What Beat This! found: its beats and downbeats (ms), and its beats' tempo
+pub(crate) struct ModelBeats {
+    beats: Vec<f64>,
+    downbeats: Vec<f64>,
+    bpm: f64,
+}
+
+#[cfg(feature = "desktop")]
+fn model_run(mono: &[f32], rate: u32) -> Option<ModelBeats> {
     let a = beat_model()?.lock().ok()?.analyze_audio(mono, rate).ok()?;
     // (its own beats' tempo: the gaps between them near their median, averaged: they're whole frames of
     // 20 ms, so one gap alone is up to 2% out)
@@ -347,9 +355,18 @@ fn model_downbeat(mono: &[f32], rate: u32, beats: &[f64]) -> Option<(usize, f64,
     let mid = gaps.get(gaps.len() / 2).copied().unwrap_or(0.0);
     let near: Vec<f64> = gaps.iter().copied().filter(|g| (g / mid - 1.0).abs() < 0.1).collect();
     let model_bpm = if near.is_empty() { 0.0 } else { 60.0 * near.len() as f64 / near.iter().sum::<f64>() };
+    Some(ModelBeats { beats: a.beats.iter().map(|b| *b as f64 * 1000.0).collect(), downbeats: a.downbeats.iter().map(|d| *d as f64 * 1000.0).collect(), bpm: model_bpm })
+}
+
+#[cfg(not(feature = "desktop"))]
+fn model_run(_: &[f32], _: u32) -> Option<ModelBeats> { None }
+
+/// Which of four beats (from the first) is each bar's first, by Beat This!'s downbeats (each one onto
+/// the beat within 70 ms of it), and the share of them that agree. None: too few to go by.
+fn model_downbeat(a: &ModelBeats, beats: &[f64]) -> Option<(usize, f64)> {
     let mut by = [0usize; 4];
     for d in &a.downbeats {
-        let t = *d as f64 * 1000.0;
+        let t = *d;
         let i = beats.partition_point(|b| *b < t);
         let near = [i.checked_sub(1), Some(i)].into_iter().flatten().filter(|&j| j < beats.len()).min_by(|&x, &y| (beats[x] - t).abs().total_cmp(&(beats[y] - t).abs()))?;
         if (beats[near] - t).abs() <= 70.0 { by[near % 4] += 1; }
@@ -357,12 +374,9 @@ fn model_downbeat(mono: &[f32], rate: u32, beats: &[f64]) -> Option<(usize, f64,
     let n: usize = by.iter().sum();
     if n < 8 { return None; }
     let best = (0..4).max_by_key(|&k| by[k])?;
-    if std::env::var_os("OMNIPULSE_RHYTHM_DEBUG").is_some() { eprintln!("rhythm debug: Beat This! downbeats by beat of four {by:?} (of {}), its beats at {model_bpm:.2} BPM", a.downbeats.len()); }
-    Some((best, by[best] as f64 / n as f64, model_bpm))
+    if std::env::var_os("OMNIPULSE_RHYTHM_DEBUG").is_some() { eprintln!("rhythm debug: Beat This! downbeats by beat of four {by:?} (of {}), its beats at {:.2} BPM", a.downbeats.len(), a.bpm); }
+    Some((best, by[best] as f64 / n as f64))
 }
-
-#[cfg(not(feature = "desktop"))]
-fn model_downbeat(_: &[f32], _: u32, _: &[f64]) -> Option<(usize, f64, f64)> { None }
 
 /// Where a song's snares (or claps) fall, by beat of four (from its first tracked beat): each beat's
 /// upper mids (1.5 to 6 kHz: a snare's crack, not its hats) rising within 40 ms of it, summed, as shares
@@ -404,7 +418,17 @@ fn analyse_now(mono: &[f32], rate: u32) -> Option<Rhythm> {
     let (o, bass) = onsets(&x);
     let (period, conf) = tempo(&o);
     let frames = track(&o, period);
-    if frames.len() < 4 { return None; }
+    // Beat This!'s beats, where it can; where ours are on another pulse than its (as they are, or at half
+    // or double: two thirds of the tempo, say, a syncopated song's), its beats instead, each placed on our
+    // onsets (its frames are 20 ms; ours 5)
+    let model = model_run(mono, rate);
+    let tracked_bpm = 60_000.0 / (period / FPS * 1000.0);
+    let agrees = |m: f64| [1.0, 2.0, 0.5].iter().any(|k| ((tracked_bpm * k) / m - 1.0).abs() <= 0.03);
+    let (frames, from_model) = match &model {
+        Some(m) if m.bpm > 0.0 && m.beats.len() >= 32 && !agrees(m.bpm) => (m.beats.iter().map(|t| (t / 1000.0 * FPS).round() as usize).filter(|&f| f < o.len()).collect::<Vec<_>>(), true),
+        _ => (frames, false),
+    };
+    if std::env::var_os("OMNIPULSE_RHYTHM_DEBUG").is_some() && from_model { eprintln!("rhythm debug: tracked at {tracked_bpm:.2} BPM, Beat This! at {:.2}: its beats used", model.as_ref().map_or(0.0, |m| m.bpm)); }
     if frames.len() < 4 { return None; }
     let beats: Vec<f64> = frames.iter().map(|&f| place(&o, f)).collect();
     // a straight grid through them: least squares of beat time against its number
@@ -454,7 +478,10 @@ fn analyse_now(mono: &[f32], rate: u32) -> Option<Rhythm> {
     let downbeat_confidence = if decisive { change_share[order[0]] } else { change_share[downbeat].min(DOWNBEAT_SURE - 0.01) };
     // (Beat This!, a model trained on annotated songs, where it can: its downbeats, onto these beats; the
     // share of them on one beat of four, how sure. The clues above disagree on halftime tracks, mashups)
-    let (downbeat, downbeat_confidence, model_bpm) = model_downbeat(mono, rate, &beats).unwrap_or((downbeat, downbeat_confidence, 0.0));
+    let model_bpm = model.as_ref().map_or(0.0, |m| m.bpm);
+    let (downbeat, downbeat_confidence) = model.as_ref().and_then(|m| model_downbeat(m, &beats)).unwrap_or((downbeat, downbeat_confidence));
+    // (its beats the model's: as sure of them as of a clear beat of ours)
+    let conf = if from_model { conf.max(0.5) } else { conf };
     if std::env::var_os("OMNIPULSE_RHYTHM_DEBUG").is_some() {
         let old = (0..4).max_by(|&a, &b| phase[a].total_cmp(&phase[b])).unwrap_or(0);
         eprintln!("rhythm debug: downbeat by bass {old}, now {downbeat}; bass {:?} changes {:?}", bass_share.map(|v| (v * 100.0).round()), change_share.map(|v| (v * 100.0).round()));
@@ -540,7 +567,7 @@ pub struct Measured {
 /// (2-3: beats moved half a beat where the bass hit harder between them, wrongly: an off-beat bass
 /// louder than the kick isn't a beat tracked off it; 4: that undone, the downbeat from where the
 /// sections change too)
-pub const VERSION: u32 = 8;
+pub const VERSION: u32 = 9;
 
 static STORE: std::sync::Mutex<Option<std::collections::HashMap<String, Measured>>> = std::sync::Mutex::new(None);
 
