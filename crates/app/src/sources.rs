@@ -210,6 +210,16 @@ pub async fn playlists() -> Vec<Playlist> {
                 }
             }
         }
+        // (and the ones you've liked there, as the web app's scPlaylists: someone else's, so not yours to change)
+        if let Ok(v) = core::soundcloud::api_get("/me/likes/playlists?limit=50".into()).await {
+            for x in items(&v) {
+                let p = if x.get("playlist").is_some() { &x["playlist"] } else { &x };
+                if let (Some(id), Some(title)) = (p["id"].as_u64(), p["title"].as_str()) {
+                    if out.iter().any(|o: &Playlist| o.plat == "soundcloud" && o.id == id.to_string()) { continue; }
+                    out.push(Playlist { plat: "soundcloud", id: id.to_string(), title: title.to_string(), tracks: None, own: false });
+                }
+            }
+        }
     }
     // (Spotify's own playlist service first, when signed in that way: the Web API's allowance untouched)
     let mut sp_done = false;

@@ -10384,6 +10384,7 @@ fn main() -> Result<(), slint::PlatformError> {
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("replies") { vec![(9, "play"), (10, "openreplies"), (12, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("genre") { vec![(9, "play"), (10, "searchhouse"), (30, "searchartists"), (34, "discover"), (60, "findtiles"), (62, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("accent") { vec![(9, "play"), (12, "accentfade"), (15, "askshow"), (17, "end")] }
+            else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("scpl") { vec![(9, "play"), (14, "scplaylists"), (20, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("np") { vec![(9, "play"), (14, "now"), (18, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("versions") { vec![(9, "play"), (10, "artistnamed"), (30, "vopen"), (31, "listdown"), (32, "artistalbums"), (45, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("rhythm") { vec![(9, "play"), (100, "rhythm"), (101, "end")] }
@@ -10709,6 +10710,24 @@ fn main() -> Result<(), slint::PlatformError> {
                     ui.invoke_chip(2);
                 }
                 "listdown" => ui.set_list_y(330.0),
+                "scplaylists" => {
+                    {
+                        let a = s.borrow();
+                        let hidden: Vec<String> = a.web.prefs["hiddenPlaylists"].as_array().into_iter().flatten().filter_map(|x| x.as_str().map(String::from)).collect();
+                        let by: Vec<String> = a.web.prefs["hiddenByYou"].as_array().into_iter().flatten().filter_map(|x| x.as_str().map(String::from)).collect();
+                        for pl in a.playlists.iter().filter(|p| p.plat == "soundcloud") { println!("selftest: sc playlist {:?} {} hidden {} byyou {} shown {}", pl.title, pl.id, hidden.contains(&pl.id), by.contains(&pl.id), a.side_map.iter().any(|&i| a.playlists[i].id == pl.id)); }
+                        println!("selftest: scOn {:?}", a.web.prefs["scOn"]);
+                    }
+                    let rt = s.borrow().rt.clone();
+                    rt.spawn(async move {
+                        for path in ["/me/playlists?limit=200&linked_partitioning=true&show_tracks=false", "/me/playlists?limit=50&show_tracks=false", "/me/likes/playlists?limit=50"] {
+                            match omnipulse_core::soundcloud::api_get(path.into()).await {
+                                Ok(v) => { let n = if v.is_array() { v.as_array().map(|a| a.len()).unwrap_or(0) } else { v["collection"].as_array().map(|a| a.len()).unwrap_or(0) }; println!("selftest: sc {path}: ok, {n} items, keys {:?}", v.as_object().map(|o| o.keys().cloned().collect::<Vec<_>>())); }
+                                Err(e) => println!("selftest: sc {path}: error {e}"),
+                            }
+                        }
+                    });
+                }
                 "askshow" => { ui.set_ask_title("Delete playlist".into()); ui.set_ask_text("Delete \"Balls\" from this PC?".into()); ui.set_ask_ok("Delete".into()); ui.set_ask_open(true); }
                 "accentfade" => {
                     if let Some(o) = s.borrow_mut().web.prefs.as_object_mut() { o.insert("artAccent".into(), serde_json::json!(false)); o.insert("accent".into(), serde_json::json!("#ff0000")); }
