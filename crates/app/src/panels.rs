@@ -17,7 +17,7 @@ pub fn title(name: &str) -> String {
         "requests" => "Song Requests",
         "replies" => "Chat Replies",
         "limits" => "Limit Requests",
-        "mix" => "Seamless Mix",
+        "mix" => "Seamless Mix (Beta)",
         "discord" => "Discord Status",
         "together" => "Listen Along & Jams",
         "lyrics" => "Lyrics",
@@ -360,6 +360,7 @@ pub fn fields(name: &str, vals: &Map<String, Value>, prefs: &Value, lan: &str) -
         }
         // Seamless Mix's own page: its styles, its blend, and one forced for testing
         "mix" => vec![
+            note("Seamless Mix is in beta: it's still being tuned, so some transitions may not sound right yet. Rating them (Stream Deck: Mix Good / Mix Bad) helps."),
             note("Styles: each one, when two songs suit it, in place of the usual blend (never the same one twice in a row)."),
             tog("mixWords", "Wordplay", "The song playing sings a word (\"heat\", \"one more time\"), it's looped on the beat, and the next song comes in singing the same one. Only with songs whose timed lyrics match what plays."),
             tog("mixDrop", "Drop Swap", "The song playing builds to its final drop, and the next song's drop lands there instead, on the beat."),
@@ -368,7 +369,7 @@ pub fn fields(name: &str, vals: &Map<String, Value>, prefs: &Value, lan: &str) -
             note("The blend: on the beat, at one tempo, the next song sweeping in from the top as the one playing gives way below it."),
             sel("mixBars", "Blend Length", "How long the two play together.", &[(json!(0), "Auto (as the songs suit)"), (json!(4), "4 bars"), (json!(8), "8 bars"), (json!(16), "16 bars")]),
             tog("mixBands", "EQ Band Handoff", "A band at a time (highs, then voice and bass), as a DJ's EQ does, instead of one sweep: quicker and more sudden."),
-            tog("mixKeys", "Match Keys", "A song shifted a semitone or two during the blend, so the two keys go together (back to its own key after)."),
+            tog("mixKeys", "Match Keys", "A song shifted a semitone or two during the blend, so the two keys go together (back to its own key by the end of it)."),
             tog("mixLoops", "Loops", "A short intro or outro looped, so neither song is cut short to fit the blend."),
             note("Testing"),
             sel("mixForce", "Force a Style", "Every transition this style, to hear it. A pair that can't be mixed that way isn't mixed at all.", &[(json!("auto"), "Off (as the songs suit)"), (json!("beat"), "On the beat (no tape stops)"), (json!("wordplay"), "Wordplay"), (json!("drop"), "Drop Swap"), (json!("melody"), "Melody Play"), (json!("tape"), "Tape Stop")]),
