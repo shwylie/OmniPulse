@@ -1178,17 +1178,18 @@ fn artist_act(shared: &Shared, i: usize, act: &str) {
     }
     // Unfollow Everywhere: asked first (as the web app's)
     let on: Vec<&str> = a.plats().into_iter().map(plat_name).collect();
-    let sure = rfd::MessageDialog::new().set_title("Unfollow").set_description(format!("Unfollow {} on {}?", a.name, on.join(" and "))).set_buttons(rfd::MessageButtons::OkCancel).show() == rfd::MessageDialogResult::Ok;
-    if !sure { return; }
-    let plats: Vec<(&'static str, String)> = [a.sc.map(|n| ("soundcloud", n.to_string())), a.sp.clone().map(|id| ("spotify", id)), a.yt.clone().map(|id| ("youtube", id))].into_iter().flatten().collect();
-    rt.spawn(async move {
-        let mut done = Vec::new();
-        for (p, id) in &plats { if sources::set_follow(p, id, false).await.is_ok() { done.push(*p); } }
-        let _ = weak.upgrade_in_event_loop(move |ui| SHARED.with(|s| {
-            let Some(sh) = s.borrow().clone() else { return };
-            artist_set(&sh, i, |x| for p in &done { x.set_on(p, None); });
-            ui.set_status(format!("Unfollowed {}.", a.name).into());
-        }));
+    let text = format!("Unfollow {} on {}?", a.name, on.join(" and "));
+    ask(shared, "Unfollow", &text, "Unfollow", move |_| {
+        let plats: Vec<(&'static str, String)> = [a.sc.map(|n| ("soundcloud", n.to_string())), a.sp.clone().map(|id| ("spotify", id)), a.yt.clone().map(|id| ("youtube", id))].into_iter().flatten().collect();
+        rt.spawn(async move {
+            let mut done = Vec::new();
+            for (p, id) in &plats { if sources::set_follow(p, id, false).await.is_ok() { done.push(*p); } }
+            let _ = weak.upgrade_in_event_loop(move |ui| SHARED.with(|s| {
+                let Some(sh) = s.borrow().clone() else { return };
+                artist_set(&sh, i, |x| for p in &done { x.set_on(p, None); });
+                ui.set_status(format!("Unfollowed {}.", a.name).into());
+            }));
+        });
     });
 }
 
@@ -5664,13 +5665,14 @@ fn panel_press(shared: &Shared, key: &str) {
         k if k.starts_with("plugRemove:") => {
             let id = &k["plugRemove:".len()..];
             let name = omnipulse_core::plugins::list().into_iter().find(|p| p.manifest.id == id).map(|p| p.manifest.name).unwrap_or_else(|| id.to_string());
-            let sure = std::env::var_os("OMNIPULSE_SELFTEST").is_some()
-                || rfd::MessageDialog::new().set_title("Remove plugin").set_description(format!("Remove {name}? Its songs leave your search and Library.")).set_buttons(rfd::MessageButtons::OkCancel).show() == rfd::MessageDialogResult::Ok;
-            if !sure { return; }
-            plugrun::stop(id);
-            let r = omnipulse_core::plugins::remove(id);
-            paint_settings(&shared.borrow());
-            match r { Ok(()) => format!("Removed {name}."), Err(e) => format!("Couldn't remove it: {e}") }
+            let id = id.to_string();
+            let text = format!("Remove {name}? Its songs leave your search and Library.");
+            return ask(shared, "Remove plugin", &text, "Remove", move |sh| {
+                plugrun::stop(&id);
+                let r = omnipulse_core::plugins::remove(&id);
+                paint_settings(&sh.borrow());
+                if let Some(ui) = sh.borrow().ui.upgrade() { ui.set_status(match r { Ok(()) => format!("Removed {name}."), Err(e) => format!("Couldn't remove it: {e}") }.into()); }
+            });
         }
         k if k.starts_with("un") && k.contains(':') => {
             let (list, key) = k[2..].split_once(':').unwrap_or(("", ""));
@@ -6896,14 +6898,14 @@ fn collab_leave(shared: &Shared, id: &str) {
     let Some(c) = collab_of(&shared.borrow().xpl, id) else { return };
     let owner = c["owner"].as_bool() == Some(true);
     let title = shared.borrow().playlists.iter().find(|p| p.id == id).map(|p| p.title.clone()).unwrap_or_default();
-    let ask = if owner { format!("Stop \"{title}\" being collaborative? Everyone keeps a copy, but changes no longer go between you.") } else { format!("Leave \"{title}\"? You keep it as yours, but your changes and theirs no longer go between you.") };
-    let sure = std::env::var_os("OMNIPULSE_SELFTEST").is_some()
-        || rfd::MessageDialog::new().set_title(if owner { "Stop collaborating" } else { "Leave collaboration" }).set_description(ask).set_buttons(rfd::MessageButtons::OkCancel).show() == rfd::MessageDialogResult::Ok;
-    if !sure { return; }
-    if owner { let c2 = c.clone(); shared.borrow().rt.spawn(async move { collab::stop(&c2).await; }); }
-    xpl_set(shared, id, |x| { if let Some(o) = x.as_object_mut() { o.remove("collab"); } });
-    xpl_changed(shared);
-    share_status(shared, if owner { format!("\"{title}\" isn't collaborative any more.") } else { format!("You left \"{title}\". It's kept as yours.") });
+    let ask_text = if owner { format!("Stop \"{title}\" being collaborative? Everyone keeps a copy, but changes no longer go between you.") } else { format!("Leave \"{title}\"? You keep it as yours, but your changes and theirs no longer go between you.") };
+    let id = id.to_string();
+    ask(shared, if owner { "Stop collaborating" } else { "Leave collaboration" }, &ask_text, if owner { "Stop" } else { "Leave" }, move |shared| {
+        if owner { let c2 = c.clone(); shared.borrow().rt.spawn(async move { collab::stop(&c2).await; }); }
+        xpl_set(shared, &id, |x| { if let Some(o) = x.as_object_mut() { o.remove("collab"); } });
+        xpl_changed(shared);
+        share_status(shared, if owner { format!("\"{title}\" isn't collaborative any more.") } else { format!("You left \"{title}\". It's kept as yours.") });
+    });
 }
 
 /// A change here, to everyone in it (only up to date if it was the only one since; else theirs fetched)
@@ -6968,15 +6970,15 @@ fn collab_join(shared: &Shared, code: String, relay: String, e: String) {
             let Some(share) = share else { ui.set_status("That playlist isn't shared any more.".into()); return };
             let title = share["title"].as_str().unwrap_or("Playlist").to_string();
             let by = share["by"].as_str().map(|b| format!(" from {b}")).unwrap_or_default();
-            let sure = std::env::var_os("OMNIPULSE_SELFTEST").is_some()
-                || rfd::MessageDialog::new().set_title("Join playlist").set_description(format!("Join \"{title}\"{by}? It's a collaborative playlist: you can add songs to it and take them out, and see everyone else's changes.")).set_buttons(rfd::MessageButtons::OkCancel).show() == rfd::MessageDialogResult::Ok;
-            if !sure { return; }
-            let tracks: Vec<Track> = share["tracks"].as_array().into_iter().flatten().map(collab::with_who(&share)).filter_map(|s| Track::from_snapshot(&s)).filter(|t| t.plat() != "local").collect();
-            let id = xpl::create(&mut shared.borrow_mut().xpl, &title, &tracks);
-            xpl_set(&shared, &id, |x| x["collab"] = serde_json::json!({ "code": code, "relay": relay, "k": e, "owner": false, "rev": share["rev"].as_u64().unwrap_or(0) }));
-            xpl_changed(&shared);
-            go(&shared, Place::Playlist(id));
-            ui.set_status(format!("Joined \"{title}\". Your changes go to everyone in it, and theirs come to you.").into());
+            let text = format!("Join \"{title}\"{by}? It's a collaborative playlist: you can add songs to it and take them out, and see everyone else's changes.");
+            ask(&shared, "Join playlist", &text, "Join", move |shared| {
+                let tracks: Vec<Track> = share["tracks"].as_array().into_iter().flatten().map(collab::with_who(&share)).filter_map(|s| Track::from_snapshot(&s)).filter(|t| t.plat() != "local").collect();
+                let id = xpl::create(&mut shared.borrow_mut().xpl, &title, &tracks);
+                xpl_set(shared, &id, |x| x["collab"] = serde_json::json!({ "code": code, "relay": relay, "k": e, "owner": false, "rev": share["rev"].as_u64().unwrap_or(0) }));
+                xpl_changed(shared);
+                go(shared, Place::Playlist(id));
+                if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_status(format!("Joined \"{title}\". Your changes go to everyone in it, and theirs come to you.").into()); }
+            });
         }));
     });
 }
@@ -7355,11 +7357,12 @@ fn side_action(shared: &Shared, i: usize, act: &str) {
     if act == "rename" {
         return name_ask(shared, Naming::Rename(p.id));
     }
-    let sure = std::env::var_os("OMNIPULSE_SELFTEST").is_some()
-        || rfd::MessageDialog::new().set_title("Delete playlist").set_description(format!("Delete \"{}\" from this PC?", p.title)).set_buttons(rfd::MessageButtons::OkCancel).show() == rfd::MessageDialogResult::Ok;
-    if !sure {
-        return;
-    }
+    let text = format!("Delete \"{}\" from this PC?", p.title);
+    ask(shared, "Delete playlist", &text, "Delete", move |shared| pl_delete(shared, p));
+}
+
+/// A playlist on this PC deleted (asked first), and its copies on the platforms
+fn pl_delete(shared: &Shared, p: sources::Playlist) {
     let gone = shared.borrow().xpl.as_array().and_then(|l| l.iter().find(|x| x["id"].as_str() == Some(p.id.as_str())).cloned()).unwrap_or_default();
     for plat in mirror::PLATS {
         if gone["made"][plat].as_bool() == Some(true) {
@@ -7379,6 +7382,30 @@ fn side_action(shared: &Shared, i: usize, act: &str) {
         go(shared, Place::Page("library".into()));
     }
     if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_status("Playlist deleted.".into()); }
+}
+
+// ---------- asked first: in the app's own look (not Windows' message box) ----------
+thread_local! {
+    /// what an OK does, while it's asked
+    static ASKED: RefCell<Option<Box<dyn FnOnce(&Shared)>>> = const { RefCell::new(None) };
+}
+
+/// Asks (a title, what it'll do, the OK button's word); OK does `then`, Cancel nothing. The self-test
+/// says yes at once.
+fn ask(shared: &Shared, title: &str, text: &str, ok: &str, then: impl FnOnce(&Shared) + 'static) {
+    if std::env::var_os("OMNIPULSE_SELFTEST").is_some() { return then(shared); }
+    let Some(ui) = shared.borrow().ui.upgrade() else { return };
+    ASKED.with(|a| *a.borrow_mut() = Some(Box::new(then)));
+    ui.set_ask_title(title.into());
+    ui.set_ask_text(text.into());
+    ui.set_ask_ok(ok.into());
+    ui.set_ask_open(true);
+}
+
+fn ask_answer_ui(shared: &Shared, ok: bool) {
+    if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_ask_open(false); }
+    let then = ASKED.with(|a| a.borrow_mut().take());
+    if ok { if let Some(f) = then { f(shared); } }
 }
 
 // ---------- sharing a playlist (crate::share) ----------
@@ -8615,14 +8642,10 @@ fn backup_make(shared: &Shared) {
 
 fn backup_restore(shared: &Shared) {
     let Some(src) = rfd::FileDialog::new().set_title("Restore an OmniPulse backup").add_filter("OmniPulse backup", &["zip"]).pick_file() else { return };
-    let sure = rfd::MessageDialog::new()
-        .set_title("Restore this backup?")
-        .set_description("Your settings, favourites, playlists, stats and alerts are replaced with the backup's, and OmniPulse starts again.")
-        .set_buttons(rfd::MessageButtons::OkCancel)
-        .show();
-    if sure != rfd::MessageDialogResult::Ok {
-        return;
-    }
+    ask(shared, "Restore this backup?", "Your settings, favourites, playlists, stats and alerts are replaced with the backup's, and OmniPulse starts again.", "Restore", move |shared| backup_restore_from(shared, src));
+}
+
+fn backup_restore_from(shared: &Shared, src: std::path::PathBuf) {
     let status = |m: String| if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_status(m.into()); };
     let web = match omnipulse_core::backup::restore(&src.to_string_lossy()) {
         Ok(w) => w,
@@ -9868,6 +9891,7 @@ fn main() -> Result<(), slint::PlatformError> {
         }
     } });
     ui.on_jam_admit({ let s = shared.clone(); move |i, ok| join_answer(&s, i.max(0) as usize, ok) });
+    ui.on_ask_answer({ let s = shared.clone(); move |ok| ask_answer_ui(&s, ok) });
     ui.on_now_act({ let s = shared.clone(); move |act| { let t = s.borrow().queue.current().cloned(); if let Some(t) = t { track_act(&s, &t, &act); } } });
     ui.on_title_rename({ let s = shared.clone(); move || name_ask(&s, Naming::AppName) });
     ui.on_title_signin({ let s = shared.clone(); move || { let i = ACCOUNTS.iter().position(|a| a.0 == "soundcloud").unwrap_or(0); account_act(&s, i); } });
@@ -10359,7 +10383,7 @@ fn main() -> Result<(), slint::PlatformError> {
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("mixfb") { vec![(9, "play"), (10, "rate"), (11, "mixprep"), (70, "mixseek"), (80, "mixcheck"), (84, "mixcheck"), (88, "mixcheck"), (92, "mixcheck"), (96, "mixcheck"), (100, "mixcheck"), (104, "mixcheck"), (108, "mixcheck"), (112, "rate"), (114, "mixcheck"), (118, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("replies") { vec![(9, "play"), (10, "openreplies"), (12, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("genre") { vec![(9, "play"), (10, "searchhouse"), (30, "searchartists"), (34, "discover"), (60, "findtiles"), (62, "end")] }
-            else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("accent") { vec![(9, "play"), (12, "accentfade"), (15, "end")] }
+            else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("accent") { vec![(9, "play"), (12, "accentfade"), (15, "askshow"), (17, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("np") { vec![(9, "play"), (14, "now"), (18, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("versions") { vec![(9, "play"), (10, "artistnamed"), (30, "vopen"), (31, "listdown"), (32, "artistalbums"), (45, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("rhythm") { vec![(9, "play"), (100, "rhythm"), (101, "end")] }
@@ -10685,6 +10709,7 @@ fn main() -> Result<(), slint::PlatformError> {
                     ui.invoke_chip(2);
                 }
                 "listdown" => ui.set_list_y(330.0),
+                "askshow" => { ui.set_ask_title("Delete playlist".into()); ui.set_ask_text("Delete \"Balls\" from this PC?".into()); ui.set_ask_ok("Delete".into()); ui.set_ask_open(true); }
                 "accentfade" => {
                     if let Some(o) = s.borrow_mut().web.prefs.as_object_mut() { o.insert("artAccent".into(), serde_json::json!(false)); o.insert("accent".into(), serde_json::json!("#ff0000")); }
                     apply_look(&s);

@@ -67,7 +67,19 @@ impl Queue {
         }
     }
 
+    /// The same song further on in the list that's playing (or among autoplay's picks): taken out, as
+    /// it's queued now (what you queued, and chat requests, stay where they are)
+    fn take_from_list(&mut self, key: &str) {
+        let from = self.qi.map_or(0, |i| i + 1);
+        let mut i = from;
+        while i < self.items.len() {
+            let q = &self.items[i];
+            if q.t.key == key && !q.queued && q.by.is_empty() { self.items.remove(i); } else { i += 1; }
+        }
+    }
+
     pub fn play_next(&mut self, t: Track) {
+        self.take_from_list(&t.key);
         let at = self.qi.map_or(0, |i| i + 1).min(self.items.len());
         self.items.insert(at, QItem::queued(t));
         if self.qi.is_none() {
@@ -84,6 +96,7 @@ impl Queue {
     }
 
     pub fn add(&mut self, t: Track) {
+        self.take_from_list(&t.key);
         let at = self.queued_end();
         self.items.insert(at, QItem::queued(t));
         if self.qi.is_none() {
@@ -377,6 +390,18 @@ pub fn take_turns(mut lists: Vec<(&'static str, Vec<Track>)>, last_plat: &str, t
 mod tests {
     use super::*;
     use crate::track::Src;
+
+    #[test]
+    fn queuing_a_song_takes_it_out_of_the_list() {
+        let mut q = Queue::default();
+        q.set_list(vec![t("a", "x", true), t("b", "x", true), t("c", "x", true), t("d", "x", true)], 0);
+        q.add(t("c", "x", true));
+        let keys: Vec<&str> = q.items.iter().map(|i| i.t.key.as_str()).collect();
+        assert_eq!(keys, ["a", "c", "b", "d"]);
+        q.play_next(t("d", "x", true));
+        let keys: Vec<&str> = q.items.iter().map(|i| i.t.key.as_str()).collect();
+        assert_eq!(keys, ["a", "d", "c", "b"]);
+    }
 
     #[test]
     fn platforms_take_turns() {

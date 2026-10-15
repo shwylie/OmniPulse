@@ -1774,6 +1774,12 @@ export component AppWindow inherits Window {
     in-out property <bool> jam-open;
     in property <string> jam-link;
     in property <string> jam-members;
+    /// asked first, in the app's look: its title, what it'll do, the OK button's word
+    in-out property <bool> ask-open;
+    in property <string> ask-title;
+    in property <string> ask-text;
+    in property <string> ask-ok;
+    callback ask-answer(bool);
     /// asking to join your Jam, waiting: each let in or declined
     in property <[string]> jam-waiting;
     callback jam-admit(int, bool);
@@ -1916,10 +1922,12 @@ export component AppWindow inherits Window {
                             PlatIcon {
                                 plat: p.id;
                                 title-bar: true;
-                                width: 15px;
-                                height: 15px;
+                                // (SoundCloud's cloud is a wide, flat shape: drawn larger and lifted a little, so
+                                // it sits level with the round marks beside it)
+                                width: p.id == "soundcloud" ? 19px : 15px;
+                                height: self.width;
                                 x: (parent.width - self.width) / 2;
-                                y: (parent.height - self.height) / 2;
+                                y: (parent.height - self.height) / 2 - (p.id == "soundcloud" ? 1.5px : 0px);
                                 fill: !p.on ? Theme.text : p.id == "spotify" ? #1ed760 : p.id == "youtube" ? #ff0033 : p.id == "local" ? #f2b544 : #ff5500;
                                 opacity: p.on ? 1 : !p.ready ? (ta-p.has-hover ? 0.5 : 0.25) : (ta-p.has-hover ? 0.7 : 0.4);
                             }
@@ -4351,6 +4359,47 @@ export component AppWindow inherits Window {
         }
     }
     // your Jam: its invite, who's in, and End
+    // ---------- asked first (Delete, Unfollow, Restore...) ----------
+    if root.ask-open: Rectangle {
+        x: 0;
+        y: 0;
+        width: root.width;
+        height: root.height;
+        background: #00000080;
+        TouchArea { clicked => { root.ask-answer(false); } }
+        Rectangle {
+            width: 400px;
+            height: ask-col.preferred-height;
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            background: Theme.elevated;
+            border-radius: 12px;
+            border-width: 1px;
+            border-color: Theme.line;
+            TouchArea { }
+            ask-col := VerticalLayout {
+                padding: 20px;
+                spacing: 12px;
+                Text { text: root.ask-title; color: Theme.text; font-size: 18px; font-weight: 800; wrap: word-wrap; }
+                Text { text: root.ask-text; color: Theme.muted; font-size: 13px; wrap: word-wrap; }
+                HorizontalLayout {
+                    alignment: end;
+                    spacing: 8px;
+                    Pill { label: "Cancel"; clicked => { root.ask-answer(false); } }
+                    Pill { label: root.ask-ok; on: true; clicked => { root.ask-answer(true); } }
+                }
+            }
+            FocusScope {
+                width: 0; height: 0;
+                init => { self.focus(); }
+                key-pressed(e) => {
+                    if (e.text == Key.Escape) { root.ask-answer(false); return accept; }
+                    if (e.text == Key.Return) { root.ask-answer(true); return accept; }
+                    return reject;
+                }
+            }
+        }
+    }
     if root.jam-open: Rectangle {
         x: 0;
         y: 0;
