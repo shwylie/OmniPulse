@@ -226,6 +226,9 @@ pub fn blend_as(a: &Side, b: &Side, now_ms: u64, forced: bool) -> Option<crate::
     // (16-beat lines not sure: the likeliest; the user would rather a blend on it than a fade)
     let _ = forced;
     let grid = |m: &Measured| groups(m).map(|g| g.0);
+    // (listening only: a song's 16-beat line set by hand, OMNIPULSE_SMART_LINES="bpm:line", by its tempo)
+    let set = |m: &Measured, g: Option<usize>| std::env::var("OMNIPULSE_SMART_LINES").ok().and_then(|v| v.split(',').find_map(|x| x.split_once(':').filter(|(b, _)| (b.trim().parse::<f64>().unwrap_or(0.0) - m.rhythm.bpm).abs() < 0.05).and_then(|(_, l)| l.trim().parse::<usize>().ok()))).or(g);
+    let grid = |m: &Measured| set(m, grid(m));
     let (Some(ga), Some(gb)) = (grid(ma), grid(mb)) else { why(&format!("16-beat lines not sure: {:?} {:?}", groups(ma), groups(mb))); return None };
     let bars = |m: &Measured| m.rhythm.beats.len().saturating_sub(m.rhythm.downbeat) / 4;
     let (na, nb) = (bars(ma), bars(mb));
