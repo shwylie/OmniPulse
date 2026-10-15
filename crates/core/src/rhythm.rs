@@ -57,6 +57,9 @@ pub struct Rhythm {
     /// be half of one of its bars
     #[serde(default)]
     pub beat_db: Vec<f32>,
+    /// where its phrases start, moved by hand (bars; + later): set as it's used, never kept with it
+    #[serde(default, skip_serializing)]
+    pub phrase_shift: i32,
     /// each bar's loudness (dB, from the first downbeat on): where the intro ends and the outro begins
     #[serde(default)]
     pub bar_db: Vec<f32>,
@@ -568,6 +571,7 @@ fn analyse_now(mono: &[f32], rate: u32) -> Option<Rhythm> {
         key_confidence: kconf,
         downbeat_confidence,
         model_bpm,
+        phrase_shift: 0,
         beat_db: loud.iter().map(|v| (*v * 10.0).round() as f32 / 10.0).collect(),
         bar_db,
         bar_beat,

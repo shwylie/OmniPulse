@@ -182,9 +182,11 @@ pub fn groups(m: &Measured) -> Option<(usize, f64)> {
         if kept.iter().all(|k| k.abs_diff(i) > 3) { kept.push(i); by[i % 4] += j; }
     }
     let total: f64 = by.iter().sum();
-    if total <= 0.0 { return Some((0, 0.0)); }
+    // (moved by hand, Track Preferences' Phrases Start: sure, then)
+    let shift = m.rhythm.phrase_shift.rem_euclid(4) as usize;
+    if total <= 0.0 { return Some((shift, if shift > 0 { 1.0 } else { 0.0 })); }
     let best = (0..4).max_by(|&a, &b| by[a].total_cmp(&by[b]))?;
-    Some((best, by[best] / total))
+    Some(((best + shift) % 4, if shift > 0 { 1.0 } else { by[best] / total }))
 }
 
 /// 16-beat groups sure enough to mix on: most of its changes (45%) on one of the four bars
@@ -441,7 +443,7 @@ mod tests {
     fn song(bpm: f64, bars: &[f32], conf: f64, camelot: &str) -> Measured {
         let period = 60_000.0 / bpm;
         let beats: Vec<f64> = (0..bars.len() * 4 + 4).map(|i| i as f64 * period).collect();
-        Measured { from_ms: 0, to_ms: (beats.len() as f64 * period) as u64, rhythm: Rhythm { bpm, first_beat_ms: 0.0, period_ms: period, beats, downbeat: 0, tempo_confidence: conf, key: String::new(), camelot: camelot.into(), key_confidence: 0.8, downbeat_confidence: 1.0, model_bpm: 0.0, beat_db: Vec::new(), bar_db: bars.to_vec(), bar_beat: vec![1.0; bars.len()], bar_chroma: Vec::new() }, v: omnipulse_core::rhythm::VERSION }
+        Measured { from_ms: 0, to_ms: (beats.len() as f64 * period) as u64, rhythm: Rhythm { bpm, first_beat_ms: 0.0, period_ms: period, beats, downbeat: 0, tempo_confidence: conf, key: String::new(), camelot: camelot.into(), key_confidence: 0.8, downbeat_confidence: 1.0, model_bpm: 0.0, beat_db: Vec::new(), phrase_shift: 0, bar_db: bars.to_vec(), bar_beat: vec![1.0; bars.len()], bar_chroma: Vec::new() }, v: omnipulse_core::rhythm::VERSION }
     }
 
     fn levels(intro: usize, body: usize, outro: usize) -> Vec<f32> {
@@ -517,6 +519,14 @@ mod tests {
         assert!((e.rhythm.bar_db[2] - m.rhythm.bar_db[2]).abs() < 0.01 && e.rhythm.bar_db[3] > m.rhythm.bar_db[3] + 3.0);
         assert_eq!(shifted(&m, 2).rhythm.downbeat, 2);
         assert_eq!(shifted(&m, 0).rhythm, m.rhythm);
+    }
+
+    #[test]
+    fn phrases_moved_by_hand_move_the_lines() {
+        let mut m = song(120.0, &levels(8, 48, 8), 0.6, "8A");
+        assert_eq!(groups(&m).unwrap().0, 0);
+        m.rhythm.phrase_shift = -1;
+        assert_eq!(groups(&m).unwrap(), (3, 1.0));
     }
 
     #[test]
@@ -614,6 +624,10 @@ mod tests {
             let ((ma, ana), (mb, anb)) = (measure(&ta), measure(&tb));
             let shift_of = |id: &str| std::env::var("OMNIPULSE_SMART_SHIFTS").ok().and_then(|v| v.split(',').find_map(|x| x.split_once(':').filter(|(k, _)| k.trim() == id).and_then(|(_, n)| n.trim().parse::<i32>().ok()))).unwrap_or(0);
             let (ma, mb) = (ma.map(|m| shifted(&m, shift_of(a_id.trim()))), mb.map(|m| shifted(&m, shift_of(b_id.trim()))));
+            // (OMNIPULSE_SMART_PHRASES="id:bars": where its phrases start, moved, as Track Preferences does)
+            let phrase_of = |id: &str| std::env::var("OMNIPULSE_SMART_PHRASES").ok().and_then(|v| v.split(',').find_map(|x| x.split_once(':').filter(|(k, _)| k.trim() == id).and_then(|(_, n)| n.trim().parse::<i32>().ok()))).unwrap_or(0);
+            let with_phrase = |m: Option<Measured>, id: &str| m.map(|mut m| { m.rhythm.phrase_shift = phrase_of(id); m });
+            let (ma, mb) = (with_phrase(ma, a_id.trim()), with_phrase(mb, b_id.trim()));
             let open = |t: &Track| rt.block_on(crate::player::open_source(t, rt.handle().clone())).expect("it opens");
             let (mut sa, sb) = (open(&ta), open(&tb));
             let a_dur = sa.duration_ms().unwrap_or(0);
