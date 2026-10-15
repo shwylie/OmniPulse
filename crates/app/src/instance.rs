@@ -56,6 +56,8 @@ pub fn wait_for_the_last() {
 mod tests {
     #[test]
     fn a_second_one_hands_over() {
+        // (an OmniPulse open on this PC holds the port: nothing to test against then)
+        if std::net::TcpListener::bind(("127.0.0.1", super::PORT)).is_err() { return; }
         let (tx, rx) = std::sync::mpsc::channel();
         assert!(super::claim(None, move |m| { let _ = tx.send(m); }).is_ok());
         assert!(super::claim(Some("omnipulse://playlist/abcd1234?e=k".into()), |_| {}).is_err());
