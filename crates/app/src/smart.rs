@@ -646,6 +646,36 @@ mod tests {
         }
     }
 
+    /// What measuring a song costs: wall time, and the CPU time all its threads took (Windows)
+    /// OMNIPULSE_PROBE_IDS=1 cargo test --release -p omnipulse --bin OmniPulse-native rhythm_cost -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn rhythm_cost() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let cpu = || -> f64 {
+            #[cfg(windows)]
+            unsafe {
+                #[repr(C)] #[derive(Default, Clone, Copy)] struct Ft { lo: u32, hi: u32 }
+                #[link(name = "kernel32")] extern "system" { fn GetCurrentProcess() -> isize; fn GetProcessTimes(h: isize, c: *mut Ft, e: *mut Ft, k: *mut Ft, u: *mut Ft) -> i32; }
+                let (mut c, mut e, mut k, mut u) = (Ft::default(), Ft::default(), Ft::default(), Ft::default());
+                GetProcessTimes(GetCurrentProcess(), &mut c, &mut e, &mut k, &mut u);
+                let t = |f: Ft| ((f.hi as u64) << 32 | f.lo as u64) as f64 / 1e7;
+                return t(k) + t(u);
+            }
+            #[allow(unreachable_code)] 0.0
+        };
+        for id in std::env::var("OMNIPULSE_PROBE_IDS").unwrap().split(',') {
+            let (mono, rate) = rt.block_on(omnipulse_core::loudness::mono_start("soundcloud", id, 1200.0)).unwrap();
+            let secs = mono.len() as f64 / rate as f64;
+            // (once to load the model, then measured)
+            let _ = omnipulse_core::rhythm::analyse(&mono[..(rate as usize * 10).min(mono.len())], rate);
+            let (c0, t0) = (cpu(), std::time::Instant::now());
+            let _ = omnipulse_core::rhythm::analyse(&mono, rate);
+            let (c1, t1) = (cpu(), t0.elapsed().as_secs_f64());
+            eprintln!("{id}: {secs:.0} s of song: {t1:.2} s to measure, {:.2} s of CPU ({:.1} cores while it ran), {} cores here", c1 - c0, (c1 - c0) / t1, std::thread::available_parallelism().map(|n| n.get()).unwrap_or(0));
+        }
+    }
+
     /// The fallback fade the app uses (main.rs' SMART_FIXED_MS)
     const FIXED_MS: u64 = 6000;
 

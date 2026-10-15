@@ -286,6 +286,13 @@ pub fn at_analysis_rate(mono: &[f32], rate: u32) -> Vec<f32> { to_analysis_rate(
 fn beat_model() -> Option<&'static std::sync::Mutex<beat_this::BeatThis<<beat_this::RtenRuntime as beat_this::Runtime>::Model>>> {
     static M: std::sync::OnceLock<Option<std::sync::Mutex<beat_this::BeatThis<<beat_this::RtenRuntime as beat_this::Runtime>::Model>>>> = std::sync::OnceLock::new();
     M.get_or_init(|| {
+        // (one thread for it, at background priority: it's seconds of work a song, done ahead, and never
+        // to be had at a game's expense; set before its pool's first use, which reads it)
+        if std::env::var_os("RTEN_NUM_THREADS").is_none() {
+            // SAFETY: set once, before the model's thread pool is made; nothing else reads it
+            unsafe { std::env::set_var("RTEN_NUM_THREADS", "1") };
+        }
+        rten::thread_pool().run(background_begin);
         let dir = crate::data_dir().ok()?.join("models");
         std::fs::create_dir_all(&dir).ok()?;
         let put = |name: &str, bytes: &[u8]| -> Option<std::path::PathBuf> {
@@ -297,6 +304,29 @@ fn beat_model() -> Option<&'static std::sync::Mutex<beat_this::BeatThis<<beat_th
         let beats = put("beat_this_small.onnx", include_bytes!("../models/beat_this_small.onnx"))?;
         beat_this::BeatThis::new(&beat_this::RtenRuntime, &mel, &beats).ok().map(std::sync::Mutex::new)
     }).as_ref()
+}
+
+/// The thread calling this in the background from now on (Windows: its CPU and disk priority lowered, so
+/// anything in the foreground, a game, comes first)
+pub fn background_begin() {
+    #[cfg(windows)]
+    {
+        #[link(name = "kernel32")]
+        extern "system" { fn GetCurrentThread() -> isize; fn SetThreadPriority(h: isize, p: i32) -> i32; }
+        // SAFETY: the pseudo-handle of the calling thread, a documented priority mode
+        unsafe { SetThreadPriority(GetCurrentThread(), 0x0001_0000); }
+    }
+}
+
+/// Back out of the background (THREAD_MODE_BACKGROUND_END)
+pub fn background_end() {
+    #[cfg(windows)]
+    {
+        #[link(name = "kernel32")]
+        extern "system" { fn GetCurrentThread() -> isize; fn SetThreadPriority(h: isize, p: i32) -> i32; }
+        // SAFETY: as above
+        unsafe { SetThreadPriority(GetCurrentThread(), 0x0002_0000); }
+    }
 }
 
 /// Which of four tracked beats (from the first) is each bar's first, by Beat This!'s downbeats (each one
@@ -348,6 +378,15 @@ fn snare_by_phase(x: &[f32], beats: &[f64]) -> [f64; 4] {
 
 /// Tempo, beats and key of mono samples at `rate` (a few seconds at least; the more the better)
 pub fn analyse(mono: &[f32], rate: u32) -> Option<Rhythm> {
+    // (measuring is never in a hurry: in the background while it runs)
+    struct Bg;
+    impl Drop for Bg { fn drop(&mut self) { background_end(); } }
+    background_begin();
+    let _bg = Bg;
+    analyse_now(mono, rate)
+}
+
+fn analyse_now(mono: &[f32], rate: u32) -> Option<Rhythm> {
     let x = to_analysis_rate(mono, rate);
     if x.len() < RATE as usize * 6 { return None; }
     let (o, bass) = onsets(&x);

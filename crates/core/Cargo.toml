@@ -10,7 +10,7 @@ description = "OmniPulse's backend: accounts, streaming services, local music an
 [features]
 default = ["desktop"]
 desktop = ["reqwest/default-tls", "dep:tiny_http", "dep:opener", "dep:librespot-core", "dep:librespot-playback", "dep:librespot-oauth", "dep:librespot-metadata", "dep:librespot-protocol", "dep:protobuf",
-  "dep:symphonia", "dep:ebur128", "dep:zip", "dep:mdns-sd", "dep:native-tls", "dep:omnipulse-pcmout", "dep:lofty", "dep:beat-this"]
+  "dep:symphonia", "dep:ebur128", "dep:zip", "dep:mdns-sd", "dep:native-tls", "dep:omnipulse-pcmout", "dep:lofty", "dep:beat-this", "dep:rten"]
 mobile = ["reqwest/rustls-tls"]
 
 [dependencies]
@@ -41,6 +41,8 @@ unicode-normalization = "0.1"
 realfft = "3.5"
 # each bar's first beat (rhythm.rs): Beat This! (ISMIR 2024), its small model (models/), in pure Rust
 beat-this = { version = "1.1", default-features = false, optional = true }
+# (its thread pool: one thread, in the background, so a game never loses frames to it)
+rten = { version = "0.24", optional = true }
 symphonia = { version = "0.5", default-features = false, features = ["aac", "alac", "flac", "isomp4", "mp3", "ogg", "pcm", "vorbis", "wav", "aiff"], optional = true }
 ebur128 = { version = "0.1", optional = true }
 zip = { version = "2", default-features = false, features = ["deflate"], optional = true }
