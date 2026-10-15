@@ -7090,7 +7090,12 @@ fn drop_queue_row(shared: &Shared, j: usize, from: Option<usize>, what: Dragged)
     let Some(&to) = a.panel_map.get(j) else { return };
     match from.and_then(|i| a.panel_map.get(i).copied()) {
         Some(at) if at != to => {
-            let item = a.queue.items.remove(at);
+            // (it joins the part it's dropped in, as the web app's: Autoplay's picks, what you queued, or
+            // the rest of the list; a chat request stays one)
+            let (into_auto, into_mine) = a.queue.items.get(to).map(|x| (x.auto, x.queued || !x.by.is_empty())).unwrap_or((false, false));
+            let mut item = a.queue.items.remove(at);
+            item.auto = into_auto;
+            if !into_auto && item.by.is_empty() { item.queued = into_mine; }
             let to = if at < to { to - 1 } else { to };
             a.queue.items.insert(to, item);
             if let Some(qi) = a.queue.qi { if at < qi && to >= qi { a.queue.qi = Some(qi - 1); } else if at > qi && to <= qi { a.queue.qi = Some(qi + 1); } }
@@ -7954,7 +7959,8 @@ fn skip_press(shared: &Shared, d: i32) {
     // (skipped before it counted as a play: noted against its artist, for Discover)
     if d > 0 && listening().is_none() {
         let a = shared.borrow();
-        if let Some(q) = a.queue.qi.and_then(|i| a.queue.items.get(i)) { discover::note_skip(&q.t, a.engine.position_ms(), a.engine.duration_ms()); }
+        // (a song you like isn't held against its artist, as the web app's)
+        if let Some(q) = a.queue.qi.and_then(|i| a.queue.items.get(i)).filter(|q| !a.library.iter().any(|x| x.key == q.t.key)) { discover::note_skip(&q.t, a.engine.position_ms(), a.engine.duration_ms()); }
     }
     let Some(kind) = listening() else {
         // (as the web app's: Next on the last track, with autoplay not adding any, goes round to the first)
