@@ -1793,6 +1793,8 @@ export component AppWindow inherits Window {
     // Seamless Mix: on or off (the title bar's button, as its switch in Settings > Sound), and a mix
     // playing now
     in property <bool> mix-on;
+    /// Seamless Mix there at all (parked: its button gone)
+    in property <bool> mix-available;
     // the output menu: where its cast devices start (-1: none)
     in property <int> devices-cast-from: -1;
     // and where OmniPulse Offset plays (-1: it isn't)
@@ -1883,8 +1885,8 @@ export component AppWindow inherits Window {
                     sta-s := TouchArea { clicked => { Tips.on = false; root.streamer-step(); } }
                 }
                 // Seamless Mix: grey when off; on, its colour flows from one accent to the other with a
-                // glow, brighter and quicker while a mix is playing
-                Rectangle {
+                // glow, brighter and quicker while a mix is playing (none while it's parked)
+                if root.mix-available: Rectangle {
                     width: 40px;
                     background: sta-m.has-hover ? Theme.elevated : transparent;
                     property <float> phase: mod(animation-tick() / 1ms, root.mixing ? 1200 : 3000) / (root.mixing ? 1200 : 3000);

@@ -2975,7 +2975,7 @@ fn start(shared: &Shared) {
     // a track a mix brought in: it's playing already (not loaded again)
     let mixed = MIXED_IN.with(|m| m.borrow_mut().take()).filter(|(k, _)| *k == t.key);
     if mixed.is_none() { MIX.with(|m| *m.borrow_mut() = None); }
-    let mix_on_now = integrations::on(&shared.borrow().web.prefs, "mixOn");
+    let mix_on_now = mix_on(&shared.borrow().web.prefs);
     rt.spawn(async move {
         // a Go+ track: never the preview, but its version on YouTube Music (crate::versions); a
         // MusicBrainz song the same way (MusicBrainz knows it, YouTube Music has it to play)
@@ -3014,7 +3014,7 @@ fn start(shared: &Shared) {
                         };
                         sb_load(&shared, video);
                         rhythm_begin(&shared, &t, 0);
-                        if integrations::on(&shared.borrow().web.prefs, "mixOn") && MIX_OUT_OK.with(|c| c.get()) { rhythm_ahead(&shared, t.clone()); }
+                        if mix_on(&shared.borrow().web.prefs) && MIX_OUT_OK.with(|c| c.get()) { rhythm_ahead(&shared, t.clone()); }
                         let what = sound::loud_source(&t, version.as_ref().map(|v| v.yt.id.as_str()));
                         shared.borrow_mut().cur_loud = what.as_ref().map(|(k, id)| format!("{k}:{id}"));
                         FADE.with(|f| *f.borrow_mut() = (false, String::new()));
@@ -3619,7 +3619,7 @@ fn mix_tick(shared: &Shared, pos: u64, dur: u64) {
     let (on, listening_now, next, cur) = {
         let a = shared.borrow();
         let next = if a.repeat == "one" { None } else { a.queue.qi.and_then(|i| a.queue.items.get(i + 1)).map(|q| q.t.clone()) };
-        (integrations::on(&a.web.prefs, "mixOn"), listening().is_some(), next, a.queue.current().cloned())
+        (mix_on(&a.web.prefs), listening().is_some(), next, a.queue.current().cloned())
     };
     let (Some(next), Some(cur)) = (next, cur) else { return };
     // (OMNIPULSE_MIX_DEBUG: why it isn't mixing, each second)
@@ -3832,7 +3832,7 @@ fn mix_feedback(shared: &Shared, good: bool) -> Result<String, &'static str> {
                     // ("ended": played to its end and on to the next unmixed; "picked": a skip or a click, by hand)
                     "how": how,
                     "whyNotMixed": c.why,
-                    "mixOn": integrations::on(p, "mixOn"),
+                    "mixOn": mix_on(p),
                     "plan": null,
                     "from": c.from.as_ref().map(mix_side),
                     "to": mix_side(&c.to),
@@ -4038,10 +4038,10 @@ fn preload_next(shared: &Shared) {
     };
     if PRELOADED.with(|p| *p.borrow() == next.key) { return; }
     PRELOADED.with(|p| *p.borrow_mut() = next.key.clone());
-    if integrations::on(&shared.borrow().web.prefs, "mixOn") { rhythm_ahead(shared, next.clone()); loud_ahead(shared, next.clone()); }
+    if mix_on(&shared.borrow().web.prefs) { rhythm_ahead(shared, next.clone()); loud_ahead(shared, next.clone()); }
     let yt_id = |t: &Track| if let track::Src::YouTube(id) = &t.src { Some(id.clone()) } else { None };
     // (a Spotify song from YouTube Music: with a free account, or Seamless Mix on)
-    let sp_yt = matches!(next.src, track::Src::Spotify(_)) && (!sp_plays_here() || integrations::on(&shared.borrow().web.prefs, "mixOn"));
+    let sp_yt = matches!(next.src, track::Src::Spotify(_)) && (!sp_plays_here() || mix_on(&shared.borrow().web.prefs));
     let via_yt = next.go_plus || matches!(next.src, track::Src::Catalog(_)) || listen_needs_version(&next) || sp_yt;
     if !via_yt && yt_id(&next).is_none() { return; }   // (the others start at once anyway)
     let (rt, weak) = { let a = shared.borrow(); (a.rt.clone(), a.ui.clone()) };
@@ -4412,6 +4412,16 @@ fn lfm_heard_sync(shared: &Shared) {
     });
 }
 
+/// Seamless Mix, parked (2026-10-15): the version that blended on the beat (tag seamless-mix-v1) is
+/// kept, but off and out of sight, while automatic transitions are worked out again from what DJ
+/// software does (docs/dj-transitions.md). Songs change over as Fade Between Tracks has it meanwhile.
+const SEAMLESS_MIX: bool = false;
+
+/// Seamless Mix on: switched on in Settings, and the feature not parked
+fn mix_on(prefs: &serde_json::Value) -> bool {
+    SEAMLESS_MIX && integrations::on(prefs, "mixOn")
+}
+
 /// What shuffling goes by: when you last heard each track (long-unheard first), or, with repeat on,
 /// nothing (plainly random: it all comes round again anyway)
 fn shuffle_basis(a: &App) -> HashMap<String, u64> {
@@ -4459,7 +4469,7 @@ fn autoplay_fill(shared: &Shared, then_play: bool) -> bool {
         let before: Vec<&Track> = a.queue.items.iter().take(a.queue.qi.unwrap_or(0)).map(|q| &q.t).filter(|t| t.plat() == "soundcloud" && t.key != seed.key).collect();
         (!before.is_empty()).then(|| before[(rand_u64() as usize) % before.len()].clone())
     };
-    let mix_on = integrations::on(&prefs, "mixOn");
+    let mix_on = mix_on(&prefs);
     // (Stream-Safe Music on: the Streamer page's collections are what it picks from)
     let stream = streamsafe::on(&prefs).then(|| {
         let have: Vec<Track> = STREAM_BUILT.with(|b| b.borrow().values().flatten().cloned().collect());
@@ -5062,6 +5072,7 @@ fn paint_settings(a: &App) {
         let mut list: Vec<SetRow> = SET_ROWS.iter().filter(|(s, ..)| *s == sec)
             // Extended only shows with Streamer Mode on
             .filter(|(_, _, _, key, _)| *key != "streamSafe" || streamer)
+            .filter(|(_, _, _, key, _)| *key != "mixOn" || SEAMLESS_MIX)
             // (the platforms' own switches are with their accounts)
             .filter(|(_, _, _, key, _)| !matches!(*key, "scOn" | "spOn" | "ytOn" | "scrobble"))
             // (Alerts: inside the Stream Widget's page, as its path says, not a row of its own here)
@@ -5228,7 +5239,7 @@ fn settings_index(a: &App) -> Vec<SetFound> {
     for (cat, label, note) in SET_HAND {
         out.push(SetFound { path: path(cat), label: label.into(), note: note.into(), cat: cat.into(), panel: String::new(), key: String::new(), toggle: false });
     }
-    for (cat, label, note, key, _) in SET_ROWS {
+    for (cat, label, note, key, _) in SET_ROWS.iter().copied().filter(|r| r.3 != "mixOn" || SEAMLESS_MIX) {
         let cat = if matches!(key, "scOn" | "spOn" | "ytOn" | "scrobble") { "Integrations" } else { cat };
         // (Alerts: found in the Stream Widget's page)
         if key == "alertsOn" {
@@ -7826,7 +7837,7 @@ fn jam_paint(shared: &Shared) {
     }
     let jam = room_kind().as_deref() == Some("jam");
     // (Seamless Mix on: no Jam to start; one already going carries on)
-    ui.set_jam_off(!jam && integrations::on(&shared.borrow().web.prefs, "mixOn"));
+    ui.set_jam_off(!jam && mix_on(&shared.borrow().web.prefs));
     ui.set_queue_room(if jam { format!("Your Jam · {} listening", members.len()).into() } else { "".into() });
     ui.set_queue_room_host(jam);
     ui.set_jam_on(jam);
@@ -7851,7 +7862,7 @@ fn jam_start(shared: &Shared) {
 /// Accepting an ask: the Jam made, its invite sent on the room they asked in, then the move to it
 fn jam_accept(shared: &Shared) {
     // (asked to start one, with Seamless Mix on: declined, saying why)
-    if ASK.with(|a| a.borrow().as_ref().is_some_and(|x| !x.3)) && integrations::on(&shared.borrow().web.prefs, "mixOn") {
+    if ASK.with(|a| a.borrow().as_ref().is_some_and(|x| !x.3)) && mix_on(&shared.borrow().web.prefs) {
         if let Some((id, _, _, join)) = ASK.with(|a| a.borrow_mut().take()) { ask_answer(&id, join, false, false); }
         jam_paint(shared);
         if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_status(JAM_OFF.into()); }
@@ -7981,7 +7992,7 @@ fn fade_now(a: &App) -> Option<u64> {
 /// How a track goes out into the next one: as Fade Between Tracks is set; with seamless mixing on, the
 /// mix decides (a mix where it can, and where it can't, its own short crossfade, whatever fading's set)
 fn fade_out_ms(a: &App) -> Option<u64> {
-    if integrations::on(&a.web.prefs, "mixOn") && listening().is_none() { return Some(MIX_FALLBACK_MS); }
+    if mix_on(&a.web.prefs) && listening().is_none() { return Some(MIX_FALLBACK_MS); }
     fade_now(a)
 }
 
@@ -8068,7 +8079,7 @@ fn listen_join(shared: &Shared, link: &str) {
         return;
     };
     // (Seamless Mix on: no joining a Jam; Listen Along's still fine, as mixing waits while listening)
-    if kind == "jam" && integrations::on(&shared.borrow().web.prefs, "mixOn") {
+    if kind == "jam" && mix_on(&shared.borrow().web.prefs) {
         if let Some(ui) = weak.upgrade() { ui.set_status(JAM_OFF.into()); }
         return;
     }
@@ -9296,7 +9307,7 @@ fn main() -> Result<(), slint::PlatformError> {
             listen_leave(&s, false);
         } else if room_kind().as_deref() == Some("jam") {
             if let Some(ui) = s.borrow().ui.upgrade() { jam_paint(&s); ui.set_jam_open(true); }
-        } else if integrations::on(&s.borrow().web.prefs, "mixOn") {
+        } else if mix_on(&s.borrow().web.prefs) {
             if let Some(ui) = s.borrow().ui.upgrade() { ui.set_status(JAM_OFF.into()); }
         } else {
             jam_start(&s);
@@ -9433,7 +9444,8 @@ fn main() -> Result<(), slint::PlatformError> {
         open_page(&s, "sets");
     });
     // Seamless Mix's button (the same as its switch)
-    ui.set_mix_on(shared.borrow().web.prefs["mixOn"].as_bool() != Some(false));
+    ui.set_mix_on(mix_on(&shared.borrow().web.prefs));
+    ui.set_mix_available(SEAMLESS_MIX);
     let s = shared.clone();
     ui.on_mix_toggle(move || set_toggle(&s, "mixOn"));
     let s = shared.clone();
