@@ -157,24 +157,73 @@ pub fn blend_blocked(a: &Side, b: &Side) -> Option<&'static str> {
     None
 }
 
-/// Tier 1: a blend on the beat (Seamless Mix v1's planner, kept to what DJs do: no key shifting, no
-/// loops, no tape stops, on the beat only, the bass swapped on a bar line), or None (a fade instead)
+/// Where a song's 16-beat groups (4 bars) start: the bar (0..4, counted from its first downbeat) its
+/// section changes land on (a change: its next 4 bars' level against its last 4, the biggest within 3
+/// bars of it counted once), and how sure that is (the share of them that land there). None: too short.
+pub fn groups(m: &Measured) -> Option<(usize, f64)> {
+    let d = &m.rhythm.bar_db;
+    let n = d.len();
+    if n < 16 { return None; }
+    let mean = |a: usize, b: usize| d[a..b].iter().map(|x| x.max(-40.0) as f64).sum::<f64>() / (b - a) as f64;
+    // (near its start or end, as many bars either side as there are, two at least)
+    let mut jumps: Vec<(f64, usize)> = (2..=n - 2).map(|i| { let w = i.min(n - i).min(4); ((mean(i, i + w) - mean(i - w, i)).abs(), i) }).filter(|j| j.0 >= 1.5).collect();
+    jumps.sort_by(|a, b| b.0.total_cmp(&a.0));
+    let mut by = [0.0f64; 4];
+    let mut kept: Vec<usize> = Vec::new();
+    for (j, i) in jumps {
+        if kept.iter().all(|k| k.abs_diff(i) > 3) { kept.push(i); by[i % 4] += j; }
+    }
+    let total: f64 = by.iter().sum();
+    if total <= 0.0 { return Some((0, 0.0)); }
+    let best = (0..4).max_by(|&a, &b| by[a].total_cmp(&by[b]))?;
+    Some((best, by[best] / total))
+}
+
+/// 16-beat groups sure enough to mix on: most of its changes (45%) on one of the four bars
+const GROUPS_SURE: f64 = 0.45;
+
+/// The group grid of a song, if it's sure
+fn sure_groups(m: &Measured) -> Option<usize> {
+    groups(m).filter(|g| g.1 >= GROUPS_SURE).map(|g| g.0)
+}
+
+/// Tier 1: a blend on the beat, as DJs do: every 16 beats of the two together (both songs' 4-bar groups
+/// lined up: it starts, swaps and ends on lines of both), 32 beats long (else 16), the next one at the
+/// playing one's tempo (at most 4% off, its key as it is), the bass swapped on the line where the next
+/// one's main part starts. Over the one playing's last bars before its outro. None: a fade instead.
 pub fn blend(a: &Side, b: &Side, now_ms: u64) -> Option<crate::mix::Plan> {
     if blend_blocked(a, b).is_some() { return None; }
     let (ma, mb) = (a.rhythm?, b.rhythm?);
-    {
-        use std::sync::atomic::Ordering::Relaxed;
-        crate::mix::KEYS_OK.store(false, Relaxed);
-        crate::mix::LOOPS_OK.store(false, Relaxed);
-        crate::mix::TAPE_OK.store(false, Relaxed);
-        crate::mix::FORCE_TAPE.store(false, Relaxed);
-        crate::mix::BEAT_ONLY.store(true, Relaxed);
-        crate::mix::RUN_BARS.store(0, Relaxed);
-    }
-    let end = if a.audible_ms > 0 && a.audible_ms < a.dur_ms { a.audible_ms } else { a.dur_ms };
-    let p = crate::mix::plan_structure(ma, end, now_ms, mb)?;
-    // (only a blend on the beat, at most 4% off, its key as it is)
-    (p.beatmatched && !p.tape_stop && p.semitones == 0 && p.style.is_none() && p.out_loop.is_none() && p.in_loop.is_none() && (p.rate - 1.0).abs() <= MAX_RATE + 1e-9).then_some(p)
+    // (same time only: a half- or double-time pair's bars don't line up one to one)
+    if (ma.rhythm.bpm / mb.rhythm.bpm - 1.0).abs() > MAX_RATE { return None; }
+    let (ga, gb) = (sure_groups(ma)?, sure_groups(mb)?);
+    let bars = |m: &Measured| m.rhythm.beats.len().saturating_sub(m.rhythm.downbeat) / 4;
+    let (na, nb) = (bars(ma), bars(mb));
+    let on = |k: usize, g: usize| k % 4 == g % 4;
+    // the next one: from a line of its own, so its main part comes in on the swap (32 beats in, else 16);
+    // its intro too short for either: from its first line, its main part in before the swap
+    let first_b = body_line(mb).and_then(|l| mb.rhythm.bar_db.iter().position(|d| *d >= l)).unwrap_or(0);
+    let (run, from) = [8usize, 4].iter().find_map(|&r| (first_b >= r && on(first_b - r, gb)).then(|| (r, first_b - r)))
+        .unwrap_or((8, gb % 4));
+    if from + run + 1 >= nb { return None; }
+    // the one playing: the latest of its lines whose run ends on a line by its main part's end (its outro
+    // left out), at least 5 s from now, its sound not over
+    let line = body_line(ma)?;
+    let last_a = ma.rhythm.bar_db.iter().rposition(|d| *d >= line)? + 1;
+    let end = if a.audible_ms > 0 && a.audible_ms < a.dur_ms { a.audible_ms } else { a.dur_ms } as f64;
+    let k = (0..=last_a.min(na.saturating_sub(run + 2)).saturating_sub(run)).rev().find(|&k| {
+        on(k, ga) && bar_ms(ma, k).is_some_and(|t| t >= now_ms as f64 + 5000.0) && bar_ms(ma, k + run + 1).is_some_and(|t| t <= end)
+    })?;
+    let (at, swap, over) = (bar_ms(ma, k)?, bar_ms(ma, k + run)?, bar_ms(ma, k + run + 1)?);
+    // its tempo as it is over those bars (a song's drifts), the next one's over its own
+    let (pa, pb) = ((swap - at) / (run * 4) as f64, (bar_ms(mb, from + run)? - bar_ms(mb, from)?) / (run * 4) as f64);
+    let rate = pb / pa;
+    if (rate - 1.0).abs() > MAX_RATE { return None; }
+    Some(crate::mix::Plan {
+        at_ms: at.round() as u64, ms: (over - at).round() as u64, swap_ms: (swap - at).round() as u64, start_ms: bar_ms(mb, from)?.round() as u64,
+        rate, bars: run as u32 + 1, semitones: 0, beatmatched: true, out_tempo: 1.0, ramp_ms: 0, tape_stop: false,
+        out_loop: None, in_loop: None, word: None, style: None,
+    })
 }
 
 /// The handoff of a plan: a blend's, the highs and mids crossfaded over it, the bass swapped at once on
@@ -213,18 +262,21 @@ pub fn roll(a: &Side, b: &Side, now_ms: u64) -> Option<crate::mix::Plan> {
     let (ma, mb) = (a.rhythm?, b.rhythm?);
     let bars = |m: &Measured| (m.rhythm.beats.len().saturating_sub(m.rhythm.downbeat)) / 4;
     let (na, nb) = (bars(ma), bars(mb));
+    let (ga, gb) = (sure_groups(ma)?, sure_groups(mb)?);
     let line = body_line(ma)?;
     let first_body = ma.rhythm.bar_db.iter().position(|d| *d >= line)?;
     let last_body = ma.rhythm.bar_db.iter().rposition(|d| *d >= line)?;
     let end = if a.audible_ms > 0 && a.audible_ms < a.dur_ms { a.audible_ms } else { a.dur_ms } as f64;
-    // (its end on a phrase line, counted from where its main part starts: the latest by its main part's end)
-    let end_bar = (first_body + ROLL_BARS as usize..=(last_body + 1).min(na.saturating_sub(1))).rev().find(|&e| {
-        (e - first_body) % 8 == 0 && bar_ms(ma, e - ROLL_BARS as usize).is_some_and(|t| t >= now_ms as f64 + 5000.0) && bar_ms(ma, e).is_some_and(|t| t <= end)
+    // (its end on one of its 16-beat lines: the latest by its main part's end)
+    let end_bar = (first_body.max(ROLL_BARS as usize)..=(last_body + 1).min(na.saturating_sub(1))).rev().find(|&e| {
+        e % 4 == ga % 4 && bar_ms(ma, e - ROLL_BARS as usize).is_some_and(|t| t >= now_ms as f64 + 5000.0) && bar_ms(ma, e).is_some_and(|t| t <= end)
     })?;
     let (at, to) = (bar_ms(ma, end_bar - ROLL_BARS as usize)?, bar_ms(ma, end_bar)?);
     // the next one: on its main part's first downbeat, its intro (if short) left out
     let line_b = body_line(mb)?;
+    // (on one of its 16-beat lines: its main part's start, else the line before it)
     let main_b = mb.rhythm.bar_db.iter().position(|d| *d >= line_b).filter(|&k| k <= ROLL_SKIP_MAX).unwrap_or(0).min(nb.saturating_sub(1));
+    let main_b = (0..=main_b).rev().find(|&k| k % 4 == gb % 4).unwrap_or(gb % 4);
     let start = bar_ms(mb, main_b)?;
     let len = (to - at).round() as u64;
     Some(crate::mix::Plan {
@@ -310,6 +362,23 @@ mod tests {
         assert!(blend_blocked(&side(&a), &side(&blurry)).is_some());
         // half time counts as the same tempo (a 64 BPM grid on a 128 song)
         assert!(match_rate(128.0, 64.0).is_some());
+    }
+
+    #[test]
+    fn a_blend_lines_up_every_16_beats_of_both() {
+        // A: its sections change on bars 8 and 56 (lines on 0, 4, 8...); B's on 6 and 54 (lines on 2, 6...)
+        let a = song(128.0, &levels(8, 48, 8), 0.6, "8A");
+        let b = song(126.0, &levels(6, 48, 8), 0.6, "8A");
+        assert_eq!((groups(&a).unwrap().0, groups(&b).unwrap().0), (0, 2));
+        let side = |m| Side { dur_ms: 150_000, rhythm: Some(m), ..Default::default() };
+        let p = blend(&side(&a), &side(&b), 0).expect("a blend");
+        let bar_a: f64 = 4.0 * 60_000.0 / 128.0;
+        let bar_b: f64 = 4.0 * 60_000.0 / 126.0;
+        // (B in from bar 2, its main part on the swap 16 beats on; A out from bar 52, its run ending on 56)
+        assert_eq!(p.start_ms, (2.0 * bar_b).round() as u64);
+        assert_eq!(p.at_ms, (52.0 * bar_a).round() as u64);
+        assert_eq!((p.bars, p.swap_ms), (5, (4.0 * bar_a).round() as u64));
+        assert!((p.rate - 128.0 / 126.0).abs() < 1e-6);
     }
 
     #[test]
@@ -425,7 +494,7 @@ mod tests {
                         "outroFromMs": ma.as_ref().and_then(outro_from), "introToMs": mb.as_ref().and_then(intro_to) }))
                 }
             };
-            let side = |m: &Option<Measured>| m.as_ref().map(|m| serde_json::json!({ "bpm": m.rhythm.bpm, "confidence": m.rhythm.tempo_confidence, "camelot": m.rhythm.camelot, "keyConfidence": m.rhythm.key_confidence }));
+            let side = |m: &Option<Measured>| m.as_ref().map(|m| serde_json::json!({ "bpm": m.rhythm.bpm, "confidence": m.rhythm.tempo_confidence, "camelot": m.rhythm.camelot, "keyConfidence": m.rhythm.key_confidence, "downbeatConfidence": m.rhythm.downbeat_confidence, "groups": groups(m) }));
             let info = serde_json::json!({ "a": a_id, "b": b_id, "aMeasured": side(&ma), "bMeasured": side(&mb), "dbs": [dbs.0, dbs.1], "startsAt": "12 s in", "transition": info });
             let base = dir.join(format!("{:02}", n + 1));
             write_wav(&base.with_extension("wav"), &out, rate);
