@@ -771,6 +771,29 @@ pub struct Handoff {
     /// played again, on the beat, so nothing of it need be cut short to fit the mix)
     pub out_loop: Option<Loop>,
     pub in_loop: Option<Loop>,
+    /// a roll of the one going out (as Traktor's Beatmasher): its bar from the mix's start heard, then
+    /// that bar's first half twice, its first quarter four times... a bar each, a build
+    pub roll: Option<Roll>,
+}
+
+/// A roll: `bar` (ms, or frames) from the mix's start played, then over each of the next `bars - 1`
+/// bars, the first 1/2, 1/4, 1/8... of it again and again (a bar's worth each time)
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Roll {
+    pub bar: u64,
+    pub bars: u32,
+}
+
+impl Roll {
+    fn frames(&self, rate: u64) -> Self { Self { bar: (self.bar * rate / 1000).max(8), bars: self.bars } }
+    /// where frame `f` of the mix is: None, heard as it is (the first bar, being kept); else where in the
+    /// kept bar it's playing from, and that piece's length (for its seams)
+    fn at(&self, f: u64) -> Option<(u64, u64)> {
+        let k = f / self.bar;
+        if k == 0 || k >= self.bars as u64 { return None; }
+        let len = (self.bar >> k.min(6)).max(1);
+        Some(((f % self.bar) % len, len))
+    }
 }
 
 /// A loop in a mix: `len` of a song from `from` (ms from the mix's start, or frames) played, then
@@ -800,7 +823,7 @@ impl Handoff {
     /// The bass alone swapped at `at` (over a quarter second), the rest crossfaded over all `ms`
     pub fn bass_swap(ms: u64, at: u64) -> Self {
         let all = Ramp::swap(0, ms);
-        Self { low: Ramp::swap(at, 250), mid: all, high: all, echo: None, out_sweep: None, in_sweep: None, brake: None, spin: None, out_loop: None, in_loop: None }
+        Self { low: Ramp::swap(at, 250), mid: all, high: all, echo: None, out_sweep: None, in_sweep: None, brake: None, spin: None, out_loop: None, in_loop: None, roll: None }
     }
 
     /// Staged over `ms` (of beats `beat_ms` long), swapped at `swap` (a downbeat): the highs cross over
@@ -824,6 +847,7 @@ impl Handoff {
             spin: None,
             out_loop: None,
             in_loop: None,
+            roll: None,
         }
     }
 
@@ -851,6 +875,7 @@ impl Handoff {
             spin: None,
             out_loop: None,
             in_loop: None,
+            roll: None,
         }
     }
 
@@ -859,21 +884,32 @@ impl Handoff {
     /// few ms against a click). For tempos too far apart to blend on the beat: one stops, the other goes.
     pub fn tape_stop(ms: u64) -> Self {
         let side = Ramp { in_at: ms, in_len: 25, out_at: ms.saturating_sub(60), out_len: 60 };
-        Self { low: side, mid: side, high: side, echo: None, out_sweep: None, in_sweep: None, brake: Some((0, ms)), spin: None, out_loop: None, in_loop: None }
+        Self { low: side, mid: side, high: side, echo: None, out_sweep: None, in_sweep: None, brake: Some((0, ms)), spin: None, out_loop: None, in_loop: None, roll: None }
     }
 
     /// A cut on the beat at `swap`: the one going out to the moment, the one coming in from it (a
     /// few ms each way against a click)
     pub fn cut(swap: u64) -> Self {
         let side = Ramp { in_at: swap, in_len: 8, out_at: swap.saturating_sub(12), out_len: 12 };
-        Self { low: side, mid: side, high: side, echo: None, out_sweep: None, in_sweep: None, brake: None, spin: None, out_loop: None, in_loop: None }
+        Self { low: side, mid: side, high: side, echo: None, out_sweep: None, in_sweep: None, brake: None, spin: None, out_loop: None, in_loop: None, roll: None }
     }
 
     /// Wordplay: the one going out's word (a beat from the mix's start) looped `reps` more times, then
     /// cut on the beat at `swap` as the next one comes in singing the same word
     pub fn word_cut(swap: u64, beat: u64, reps: u32) -> Self {
         let side = Ramp { in_at: swap, in_len: 8, out_at: swap.saturating_sub(12), out_len: 12 };
-        Self { low: side, mid: side, high: side, echo: None, out_sweep: None, in_sweep: None, brake: None, spin: None, out_loop: Some(Loop { from: 0, len: beat, reps }), in_loop: None }
+        Self { low: side, mid: side, high: side, echo: None, out_sweep: None, in_sweep: None, brake: None, spin: None, out_loop: Some(Loop { from: 0, len: beat, reps }), in_loop: None, roll: None }
+    }
+
+    /// A roll out (as Traktor's Beatmasher): the one going out's bar from the mix's start played, then
+    /// rolled over `bars - 1` more bars (its first half twice, its first quarter four times...), a
+    /// high-pass rising through it, the build; on the roll's end the one coming in lands at once on its
+    /// downbeat (none of it read before), the one going out cut. Each at its own tempo.
+    pub fn roll(bar_ms: u64, bars: u32) -> Self {
+        let end = bar_ms * bars as u64;
+        let side = Ramp { in_at: end, in_len: 8, out_at: end.saturating_sub(12), out_len: 12 };
+        let rise = [(0, 20.0), (bar_ms, 20.0), (bar_ms * 2, 120.0), (end.saturating_sub(bar_ms / 2), 900.0), (end, 1400.0)];
+        Self { low: side, mid: side, high: side, echo: None, out_sweep: Some(Sweep { points: rise, high: true }), in_sweep: None, brake: None, spin: Some((end, 1)), out_loop: None, in_loop: None, roll: Some(Roll { bar: bar_ms, bars }) }
     }
 
     /// A tape stop over `stop`, with a tape start over `start` in its last part: the one going out slows to
@@ -883,7 +919,7 @@ impl Handoff {
         let start = start.clamp(1, stop.max(1));
         let from = stop - start;
         let side = Ramp { in_at: from, in_len: 10, out_at: stop.saturating_sub(60), out_len: 60 };
-        Self { low: side, mid: side, high: side, echo: None, out_sweep: None, in_sweep: None, brake: Some((0, stop)), spin: Some((from, start)), out_loop: None, in_loop: None }
+        Self { low: side, mid: side, high: side, echo: None, out_sweep: None, in_sweep: None, brake: Some((0, stop)), spin: Some((from, start)), out_loop: None, in_loop: None, roll: None }
     }
 
     fn frames(&self, rate: u64) -> Self {
@@ -895,6 +931,7 @@ impl Handoff {
             spin: self.spin.map(|(a, b)| (f(a), f(b))),
             out_loop: self.out_loop.map(|l| l.frames(rate)),
             in_loop: self.in_loop.map(|l| l.frames(rate)),
+            roll: self.roll.map(|r| r.frames(rate)),
         }
     }
 }
@@ -1024,7 +1061,25 @@ impl Fading {
             let (go, gi) = ((p * std::f32::consts::FRAC_PI_2).cos(), (p * std::f32::consts::FRAC_PI_2).sin());
             let braking = self.handoff.and_then(|h| h.brake).filter(|(from, _)| self.done >= *from);
             let out_loop = self.handoff.and_then(|h| h.out_loop).and_then(|l| l.at(self.done).map(|at| (l, at)));
+            let roll = self.handoff.and_then(|h| h.roll);
+            let rolled = roll.and_then(|r| r.at(self.done));
             let (ol, or) = match braking {
+                _ if rolled.is_some() => {
+                    let (k, len) = rolled.unwrap();
+                    let g = Loop { from: 0, len, reps: 1 }.seam(k);
+                    let i = k as usize * 2;
+                    (self.loops[0].get(i).copied().unwrap_or(0.0) * g, self.loops[0].get(i + 1).copied().unwrap_or(0.0) * g)
+                }
+                // (its first bar: heard, and kept)
+                _ if roll.is_some_and(|r| self.done < r.bar) => {
+                    if self.done == 0 { self.loops[0].clear(); }
+                    let v = (self.out_buf.pop_front().unwrap_or(0.0), self.out_buf.pop_front().unwrap_or(0.0));
+                    self.loops[0].push(v.0);
+                    self.loops[0].push(v.1);
+                    v
+                }
+                // (rolled to its end: nothing more of it)
+                _ if roll.is_some() => (0.0, 0.0),
                 // looped: played again (none of it read meanwhile), or heard the first time and kept
                 _ if out_loop.is_some_and(|(_, (pass, _))| pass > 0) => {
                     let (l, (_, k)) = out_loop.unwrap();

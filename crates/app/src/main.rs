@@ -3764,7 +3764,7 @@ fn mix_tick(shared: &Shared, pos: u64, dur: u64) {
                     // (slowed into the next one's tempo: from here, the one playing goes through the stretch, as it was until the mix)
                     let out = (plan.out_tempo != 1.0).then(|| omnipulse_audio::Tempo::new(1.0));
                     if let Some(o) = &out { shared.borrow().engine.stretch_playing(o.clone()); }
-                    let handoff = if smart && !plan.tape_stop { smart::handoff(&plan) } else { mix::handoff(&plan, set_row_on(&prefs, "mixBands", false)) };
+                    let handoff = if smart { smart::handoff(&plan) } else { mix::handoff(&plan, set_row_on(&prefs, "mixBands", false)) };
                     shared.borrow().engine.mix_at(src, db, plan.at_ms, plan.ms, Some(handoff));
                     MIX.with(|m| *m.borrow_mut() = Some(MixPhase::Waiting { key: next.key.clone(), plan, tempo, version, out, pitch }));
                 }
@@ -3828,7 +3828,7 @@ fn mix_record(a: &App, plan: &mix::Plan, from: Option<&Track>, to: Option<&Track
     let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0);
     serde_json::json!({
         "id": now,
-        "kind": if smart_on(p) { if plan.tape_stop { "tape stop" } else { "smart blend" } } else { mix_kind(plan) },
+        "kind": if smart_on(p) { if plan.tape_stop { "tape stop" } else if plan.style == Some(smart::ROLL) { smart::ROLL } else { "smart blend" } } else { mix_kind(plan) },
         "smart": smart_on(p),
         "plan": plan,
         "from": from.map(mix_side),
@@ -4003,6 +4003,7 @@ fn mix_started(shared: &Shared) {
             (_, Some(w)) => ui.set_status(format!("Wordplay: \u{201c}{w}\u{201d}").into()),
             (Some("drop swap"), _) => ui.set_status("Drop swap.".into()),
             (Some("melody play"), _) => ui.set_status("Melody play.".into()),
+            (Some("roll"), _) => ui.set_status("Roll.".into()),
             _ => {}
         }
     }
@@ -4554,9 +4555,12 @@ fn smart_decide(shared: &Shared, a: &SmartSong, b: &SmartSong, pos: u64, late: b
                 None => Some((None, "no phrase to blend on".into())),
             },
             Some(why) => {
-                // Tier 2: a tape stop, only switched on and with your ratings behind it
-                let tape = (set_row_on(&prefs, "smartTape", false) && smart::backed(&smart_ratings(), "tape stop")).then(|| smart::tape(&sa, &sb, pos)).flatten();
-                Some((tape, why.into()))
+                // Tier 2: a roll (switched on, and not turned down by your ratings), else a tape stop (switched
+                // on, and with your ratings behind it)
+                let ratings = smart_ratings();
+                let roll = (set_row_on(&prefs, "smartRoll", false) && smart::not_rejected(&ratings, smart::ROLL)).then(|| smart::roll(&sa, &sb, pos)).flatten();
+                let extra = roll.or_else(|| (set_row_on(&prefs, "smartTape", false) && smart::backed(&ratings, "tape stop")).then(|| smart::tape(&sa, &sb, pos)).flatten());
+                Some((extra, why.into()))
             }
         }
     } else if late {

@@ -177,13 +177,57 @@ pub fn blend(a: &Side, b: &Side, now_ms: u64) -> Option<crate::mix::Plan> {
     (p.beatmatched && !p.tape_stop && p.semitones == 0 && p.style.is_none() && p.out_loop.is_none() && p.in_loop.is_none() && (p.rate - 1.0).abs() <= MAX_RATE + 1e-9).then_some(p)
 }
 
-/// The handoff of a Tier 1 blend: the highs and mids crossfaded over it, the bass swapped at once on its
-/// bar line (the two basses never together)
+/// The handoff of a plan: a blend's, the highs and mids crossfaded over it, the bass swapped at once on
+/// its bar line (the two basses never together); a roll's, or a tape stop's
 pub fn handoff(p: &crate::mix::Plan) -> omnipulse_audio::Handoff {
+    if p.style == Some(ROLL) { return omnipulse_audio::Handoff::roll(p.swap_ms / p.bars.max(1) as u64, p.bars); }
+    if p.tape_stop { return crate::mix::handoff(p, false); }
     omnipulse_audio::Handoff::bass_swap(p.ms, p.swap_ms)
 }
 
 // ---------- Tier 2: extras, as your ratings say ----------
+/// A roll's style (and its ratings' kind)
+pub const ROLL: &str = "roll";
+/// How many bars a roll takes: its bar as it is, then halves, quarters, eighths
+const ROLL_BARS: u32 = 4;
+/// The most of the next one's intro left out, so it lands on its main part (bars); longer, it lands on its
+/// first downbeat
+const ROLL_SKIP_MAX: usize = 16;
+
+/// A roll out (Traktor's Beatmasher, as a transition): for two songs too far apart to blend, each with
+/// its bars sure. The one playing's last bar before a phrase line (at the end of its main part, not into
+/// its outro) is rolled over 4 bars, a build; the next one lands on the downbeat its main part starts
+/// on (its intro, up to 16 bars, left out), at its own tempo.
+pub fn roll(a: &Side, b: &Side, now_ms: u64) -> Option<crate::mix::Plan> {
+    if !grid_trusted(a) || !grid_trusted(b) { return None; }
+    let (ma, mb) = (a.rhythm?, b.rhythm?);
+    let bars = |m: &Measured| (m.rhythm.beats.len().saturating_sub(m.rhythm.downbeat)) / 4;
+    let (na, nb) = (bars(ma), bars(mb));
+    let line = body_line(ma)?;
+    let first_body = ma.rhythm.bar_db.iter().position(|d| *d >= line)?;
+    let last_body = ma.rhythm.bar_db.iter().rposition(|d| *d >= line)?;
+    let end = if a.audible_ms > 0 && a.audible_ms < a.dur_ms { a.audible_ms } else { a.dur_ms } as f64;
+    // (its end on a phrase line, counted from where its main part starts: the latest by its main part's end)
+    let end_bar = (first_body + ROLL_BARS as usize..=(last_body + 1).min(na.saturating_sub(1))).rev().find(|&e| {
+        (e - first_body) % 8 == 0 && bar_ms(ma, e - ROLL_BARS as usize).is_some_and(|t| t >= now_ms as f64 + 5000.0) && bar_ms(ma, e).is_some_and(|t| t <= end)
+    })?;
+    let (at, to) = (bar_ms(ma, end_bar - ROLL_BARS as usize)?, bar_ms(ma, end_bar)?);
+    // the next one: on its main part's first downbeat, its intro (if short) left out
+    let line_b = body_line(mb)?;
+    let main_b = mb.rhythm.bar_db.iter().position(|d| *d >= line_b).filter(|&k| k <= ROLL_SKIP_MAX).unwrap_or(0).min(nb.saturating_sub(1));
+    let start = bar_ms(mb, main_b)?;
+    let len = (to - at).round() as u64;
+    Some(crate::mix::Plan {
+        at_ms: at.round() as u64, ms: len + 40, swap_ms: len, start_ms: start.round() as u64, rate: 1.0, bars: ROLL_BARS, semitones: 0,
+        beatmatched: false, out_tempo: 1.0, ramp_ms: 0, tape_stop: false, out_loop: None, in_loop: None, word: None, style: Some(ROLL),
+    })
+}
+
+/// An extra not turned down by your ratings: under 5 rated, or most (60%) of them good
+pub fn not_rejected(ratings: &[(String, bool)], kind: &str) -> bool {
+    let of: Vec<bool> = ratings.iter().filter(|(k, _)| k == kind).map(|(_, g)| *g).collect();
+    of.len() < 5 || of.iter().filter(|g| **g).count() * 5 >= of.len() * 3
+}
 /// A tape stop (v1's), for two songs too far apart to blend: only when its ratings back it, and never a
 /// key shifted
 pub fn tape(a: &Side, b: &Side, now_ms: u64) -> Option<crate::mix::Plan> {
@@ -271,6 +315,20 @@ mod tests {
     }
 
     #[test]
+    fn a_roll_ends_on_a_phrase_line_and_lands_on_the_next_ones_main_part() {
+        // 120 BPM (2 s a bar): A's main part bars 4..44, its outro after; B's main part from bar 2
+        let a = song(120.0, &levels(4, 40, 4), 0.6, "8A");
+        let b = song(140.0, &levels(2, 40, 2), 0.6, "3B");
+        let p = roll(&Side { dur_ms: 100_000, rhythm: Some(&a), ..Default::default() }, &Side { dur_ms: 90_000, rhythm: Some(&b), ..Default::default() }, 0).expect("a roll");
+        // (its end: bar 44, the main part's end, on a phrase line from bar 4; 4 bars before it)
+        assert_eq!((p.at_ms, p.swap_ms, p.style), (80_000, 8_000, Some(ROLL)));
+        assert_eq!(p.start_ms, (2.0 * 4.0 * 60_000.0 / 140.0_f64).round() as u64);
+        let h = handoff(&p);
+        assert_eq!(h.roll, Some(omnipulse_audio::Roll { bar: 2_000, bars: 4 }));
+        assert!(not_rejected(&[], ROLL));
+    }
+
+    #[test]
     fn extras_need_ratings_that_back_them() {
         let r = |good: usize, bad: usize| -> Vec<(String, bool)> { std::iter::repeat_n(("tape stop".to_string(), true), good).chain(std::iter::repeat_n(("tape stop".to_string(), false), bad)).collect() };
         assert!(!backed(&r(3, 12), "tape stop"));
@@ -325,8 +383,15 @@ mod tests {
             let db = |t: &Track, an: &serde_json::Value| crate::sound::loud_db(&serde_json::json!({}), t, an["lufs"].as_f64(), false);
             let dbs = (db(&ta, &ana), db(&tb, &anb));
             let blocked = blend_blocked(&a, &b);
-            let plan = blend(&a, &b, 0);
+            let plan = blend(&a, &b, 0).or_else(|| std::env::var_os("OMNIPULSE_SMART_ROLL").and_then(|_| roll(&a, &b, 0)));
             let (out, info) = match &plan {
+                Some(p) if p.style == Some(ROLL) => {
+                    sa.seek(p.at_ms.saturating_sub(lead)).unwrap();
+                    let mut sb = sb;
+                    sb.seek(p.start_ms).unwrap();
+                    let out = omnipulse_audio::engine::render_mix(sa, sb, dbs, rate, lead as f32 / 1000.0, p.ms, Some(handoff(p)), (lead + p.ms) as f32 / 1000.0 + 15.0).unwrap();
+                    (out, serde_json::json!({ "kind": "roll", "plan": p, "notOnTheBeat": blocked }))
+                }
                 Some(p) => {
                     sa.seek(p.at_ms.saturating_sub(lead)).unwrap();
                     let b_tempo = omnipulse_audio::Tempo::new(p.rate);
