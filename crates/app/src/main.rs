@@ -12,6 +12,7 @@ mod collab;
 mod desktop;
 mod instance;
 mod mix;
+mod smart;
 mod updater;
 mod discover;
 mod lang;
@@ -2976,6 +2977,8 @@ fn start(shared: &Shared) {
     let mixed = MIXED_IN.with(|m| m.borrow_mut().take()).filter(|(k, _)| *k == t.key);
     if mixed.is_none() { MIX.with(|m| *m.borrow_mut() = None); }
     let mix_on_now = mix_on(&shared.borrow().web.prefs);
+    // (Smart Transitions' fade: it comes in from its first sound, its silence before that left out)
+    let smart_from = SMART_START.with(|x| x.borrow_mut().take()).filter(|(k, _)| *k == t.key && resume == 0 && trim_of(&shared.borrow().web.prefs, &t.key).0 == 0).map(|x| x.1);
     rt.spawn(async move {
         // a Go+ track: never the preview, but its version on YouTube Music (crate::versions); a
         // MusicBrainz song the same way (MusicBrainz knows it, YouTube Music has it to play)
@@ -2994,6 +2997,10 @@ fn start(shared: &Shared) {
             }
         } else {
             (player::open_source(&t, h.clone()).await.map(Some), None)
+        };
+        let src = match (src, smart_from) {
+            (Ok(Some(mut s)), Some(ms)) => tokio::task::spawn_blocking(move || { let _ = s.seek(ms); s }).await.map(Some).map_err(|e| e.to_string()),
+            (src, _) => src,
         };
         let _ = weak.upgrade_in_event_loop(move |ui| {
             SHARED.with(|s| {
@@ -3014,7 +3021,7 @@ fn start(shared: &Shared) {
                         };
                         sb_load(&shared, video);
                         rhythm_begin(&shared, &t, 0);
-                        if mix_on(&shared.borrow().web.prefs) && MIX_OUT_OK.with(|c| c.get()) { rhythm_ahead(&shared, t.clone()); }
+                        if (mix_on(&shared.borrow().web.prefs) || smart_on(&shared.borrow().web.prefs)) && MIX_OUT_OK.with(|c| c.get()) { rhythm_ahead(&shared, t.clone()); }
                         let what = sound::loud_source(&t, version.as_ref().map(|v| v.yt.id.as_str()));
                         shared.borrow_mut().cur_loud = what.as_ref().map(|(k, id)| format!("{k}:{id}"));
                         FADE.with(|f| *f.borrow_mut() = (false, String::new()));
@@ -3269,7 +3276,7 @@ async fn rhythm_measure_whole(t: Track) {
 /// not a guess that moves once it's measured. Of what the mix plays (its YouTube Music version, if it
 /// plays as that); kept as a measurement as it plays is.
 fn loud_ahead(shared: &Shared, t: Track) {
-    if sound::loud_step(&shared.borrow().web.prefs) == "off" || t.is_mix() { return; }
+    if (sound::loud_step(&shared.borrow().web.prefs) == "off" && !smart_on(&shared.borrow().web.prefs)) || t.is_mix() { return; }
     let (rt, weak) = { let a = shared.borrow(); (a.rt.clone(), a.ui.clone()) };
     rt.spawn(async move {
         let version = if mix_via_youtube(&t) { versions::find(&t).await } else { None };
@@ -3631,9 +3638,19 @@ fn mix_tick(shared: &Shared, pos: u64, dur: u64) {
     };
     // (a Jam going: its queue plays as it is, unmixed, till it ends)
     let listening_now = listening_now || room_kind().as_deref() == Some("jam");
-    if !on || listening_now || !MIX_OUT_OK.with(|c| c.get()) || dur == 0 || next.is_mix() { why(&format!("on {on}, listening {listening_now}, out ok {}, dur {dur}, next is a set {}", MIX_OUT_OK.with(|c| c.get()), next.is_mix())); return; }
+    // (Smart Transitions' blends on the beat: the same way in, its own plan)
+    let smart = !on && smart_blends_on(&shared.borrow().web.prefs);
+    if !(on || smart) || listening_now || !MIX_OUT_OK.with(|c| c.get()) || dur == 0 || next.is_mix() { why(&format!("on {on}, listening {listening_now}, out ok {}, dur {dur}, next is a set {}", MIX_OUT_OK.with(|c| c.get()), next.is_mix())); return; }
     // (Stream-Safe Music: never mixed into one it doesn't allow; the usual way skips it)
     if !streamsafe::allowed(&shared.borrow().web.prefs, &next) { why("Stream-Safe Music doesn't allow the next one"); return; }
+    let plan = if smart {
+        let Some((a, b)) = smart_pair(&shared.borrow(), dur) else { return };
+        let Some(plan) = smart_decide(shared, &a, &b, pos, false) else { return };
+        // (sought past its moment: a fade instead)
+        if pos > plan.at_ms { SMART_PAIR.with(|s| { if let Some(x) = s.borrow_mut().as_mut() { x.2 = None; x.3 = "sought past the blend".into(); } }); return; }
+        if pos + 7000 < plan.at_ms { return; }
+        plan
+    } else {
     // (where its sound ends: measured, if it's before the file's end)
     let audible = shared.borrow().cur_loud.as_ref().and_then(|k| shared.borrow().analysis.get(k).and_then(|x| x["audible_ms"].as_u64())).filter(|&x| x > 0 && x < dur).unwrap_or(dur);
     let planning = std::time::Instant::now();
@@ -3709,6 +3726,8 @@ fn mix_tick(shared: &Shared, pos: u64, dur: u64) {
         if pos + MIX_EAR_MS + 6000 < plan.at_ms || MIX_EAR.with(|e| e.borrow().is_some()) { why(&format!("listening again first (plan at {})", plan.at_ms)); return; }
     }
     if pos + 7000 < plan.at_ms { why(&format!("waiting for {} ({})", plan.at_ms, mix_kind(&plan))); return; }
+    plan
+    };
     MIX.with(|m| *m.borrow_mut() = Some(MixPhase::Opening(next.key.clone())));
     let (rt, weak, prefs) = { let a = shared.borrow(); (a.rt.clone(), a.ui.clone(), a.web.prefs.clone()) };
     let h = rt.clone();
@@ -3745,11 +3764,17 @@ fn mix_tick(shared: &Shared, pos: u64, dur: u64) {
                     // (slowed into the next one's tempo: from here, the one playing goes through the stretch, as it was until the mix)
                     let out = (plan.out_tempo != 1.0).then(|| omnipulse_audio::Tempo::new(1.0));
                     if let Some(o) = &out { shared.borrow().engine.stretch_playing(o.clone()); }
-                    shared.borrow().engine.mix_at(src, db, plan.at_ms, plan.ms, Some(mix::handoff(&plan, set_row_on(&prefs, "mixBands", false))));
+                    let handoff = if smart && !plan.tape_stop { smart::handoff(&plan) } else { mix::handoff(&plan, set_row_on(&prefs, "mixBands", false)) };
+                    shared.borrow().engine.mix_at(src, db, plan.at_ms, plan.ms, Some(handoff));
                     MIX.with(|m| *m.borrow_mut() = Some(MixPhase::Waiting { key: next.key.clone(), plan, tempo, version, out, pitch }));
                 }
                 // (it couldn't be got ready: the usual way, then)
-                Err(e) => { omnipulse_core::diag::note(&format!("Seamless Mix: couldn't get the next one ready: {e}")); MIX.with(|m| *m.borrow_mut() = None) }
+                Err(e) => {
+                    omnipulse_core::diag::note(&format!("Seamless Mix: couldn't get the next one ready: {e}"));
+                    MIX.with(|m| *m.borrow_mut() = None);
+                    // (Smart Transitions: a fade instead)
+                    if smart { SMART_PAIR.with(|s| { if let Some(x) = s.borrow_mut().as_mut() { x.2 = None; x.3 = format!("couldn't be got ready: {e}"); } }); }
+                }
             }
         }));
     });
@@ -3803,7 +3828,8 @@ fn mix_record(a: &App, plan: &mix::Plan, from: Option<&Track>, to: Option<&Track
     let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0);
     serde_json::json!({
         "id": now,
-        "kind": mix_kind(plan),
+        "kind": if smart_on(p) { if plan.tape_stop { "tape stop" } else { "smart blend" } } else { mix_kind(plan) },
+        "smart": smart_on(p),
         "plan": plan,
         "from": from.map(mix_side),
         "to": to.map(mix_side),
@@ -3828,7 +3854,8 @@ fn mix_feedback(shared: &Shared, good: bool) -> Result<String, &'static str> {
                 let p = &a.web.prefs;
                 serde_json::json!({
                     "id": std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0).saturating_sub(c.at.elapsed().as_millis() as u64),
-                    "kind": "unmixed",
+                    "kind": if c.why.as_deref().is_some_and(|w| w.starts_with("smart fade")) { "smart fade" } else { "unmixed" },
+                    "smart": smart_on(p),
                     // ("ended": played to its end and on to the next unmixed; "picked": a skip or a click, by hand)
                     "how": how,
                     "whyNotMixed": c.why,
@@ -4039,6 +4066,11 @@ fn preload_next(shared: &Shared) {
     if PRELOADED.with(|p| *p.borrow() == next.key) { return; }
     PRELOADED.with(|p| *p.borrow_mut() = next.key.clone());
     if mix_on(&shared.borrow().web.prefs) { rhythm_ahead(shared, next.clone()); loud_ahead(shared, next.clone()); }
+    // (Smart Transitions: its intro and first sound, measured ahead)
+    else if smart_on(&shared.borrow().web.prefs) {
+        if smart_same_source(&next) { rhythm_ahead(shared, next.clone()); }
+        loud_ahead(shared, next.clone());
+    }
     let yt_id = |t: &Track| if let track::Src::YouTube(id) = &t.src { Some(id.clone()) } else { None };
     // (a Spotify song from YouTube Music: with a free account, or Seamless Mix on)
     let sp_yt = matches!(next.src, track::Src::Spotify(_)) && (!sp_plays_here() || mix_on(&shared.borrow().web.prefs));
@@ -4420,6 +4452,150 @@ const SEAMLESS_MIX: bool = false;
 /// Seamless Mix on: switched on in Settings, and the feature not parked
 fn mix_on(prefs: &serde_json::Value) -> bool {
     SEAMLESS_MIX && integrations::on(prefs, "mixOn")
+}
+
+// ---------- Smart Transitions (crate::smart; docs/dj-transitions.md) ----------
+/// Smart Transitions on (Settings > Sound, WIP: off unless switched on; never with Seamless Mix)
+fn smart_on(prefs: &serde_json::Value) -> bool {
+    !mix_on(prefs) && set_row_on(prefs, "smartOn", false)
+}
+
+/// Its blends on the beat too (its page's Beatmatched Blends), not only fades
+fn smart_blends_on(prefs: &serde_json::Value) -> bool {
+    smart_on(prefs) && set_row_on(prefs, "smartBlend", true)
+}
+
+/// Its longest fade (its page's Longest Fade, s): 10 unless set
+fn smart_max_ms(prefs: &serde_json::Value) -> u64 {
+    prefs["smartMax"].as_u64().unwrap_or(10).clamp(3, 30) * 1000
+}
+
+/// With neither song's outro or intro measured: a fixed fade this long (Mixxx's; at most the longest)
+const SMART_FIXED_MS: u64 = 6000;
+
+thread_local! {
+    /// the pair coming up (the one playing, the next one) and what's decided for it, once: a blend on
+    /// the beat (its plan), or a fade (None), and why
+    static SMART_PAIR: RefCell<Option<(String, String, Option<mix::Plan>, String)>> = const { RefCell::new(None) };
+    /// where the next one starts from (its first sound) as a fade brings it in: its key, ms
+    static SMART_START: RefCell<Option<(String, u64)>> = const { RefCell::new(None) };
+}
+
+/// A song as Smart Transitions knows it (what's measured of it is of what it plays from)
+struct SmartSong {
+    t: Track,
+    rhythm: Option<omnipulse_core::rhythm::Measured>,
+    dur_ms: u64,
+    audible_ms: u64,
+    first_ms: u64,
+    stated: Option<f64>,
+}
+
+impl SmartSong {
+    fn side(&self) -> smart::Side<'_> {
+        smart::Side { dur_ms: self.dur_ms, audible_ms: self.audible_ms, first_ms: self.first_ms, rhythm: self.rhythm.as_ref(), stated_bpm: self.stated }
+    }
+}
+
+/// Where a song's sound starts: after the silence it starts with, if its loudness analysis has one
+fn first_sound(an: &serde_json::Value) -> u64 {
+    an["silences"].as_array().and_then(|s| s.first()).filter(|s| s[0].as_u64() == Some(0)).and_then(|s| s[1].as_u64()).unwrap_or(0)
+}
+
+/// The one playing and the next one, as Smart Transitions knows them (None: nothing next)
+fn smart_pair(a: &App, dur: u64) -> Option<(SmartSong, SmartSong)> {
+    if a.repeat == "one" { return None; }
+    let i = a.queue.qi?;
+    let (cur, next) = (a.queue.items.get(i)?.t.clone(), a.queue.items.get(i + 1)?.t.clone());
+    let stated = |t: &Track| smart::stated_bpm(&t.title).or_else(|| DESCS.with(|m| m.borrow().get(&t.key).and_then(|d| smart::stated_bpm(d))));
+    // (measured whole, of what it plays from: never a Spotify song measured from its YouTube Music
+    // version while Spotify's own playback plays it)
+    let measured = |t: &Track, same: bool| if same && !t.is_mix() { rhythm_full(&t.key) } else { None };
+    let an = a.cur_loud.as_ref().and_then(|k| a.analysis.get(k));
+    let audible = an.and_then(|x| x["audible_ms"].as_u64()).unwrap_or(0);
+    let a_side = SmartSong { rhythm: measured(&cur, MIX_OUT_OK.with(|c| c.get())), dur_ms: dur, audible_ms: audible, first_ms: 0, stated: stated(&cur), t: cur };
+    let v = if mix_via_youtube(&next) { versions::saved_id(&next.key) } else { None };
+    let nan = sound::loud_source(&next, v.as_deref()).and_then(|(k, id)| a.analysis.get(&format!("{k}:{id}")));
+    let b_dur = nan.and_then(|x| x["duration_ms"].as_u64()).filter(|&d| d > 0).unwrap_or(next.ms);
+    let b_side = SmartSong { rhythm: measured(&next, smart_same_source(&next)), dur_ms: b_dur, audible_ms: nan.and_then(|x| x["audible_ms"].as_u64()).unwrap_or(0), first_ms: nan.map(first_sound).unwrap_or(0), stated: stated(&next), t: next };
+    Some((a_side, b_side))
+}
+
+/// It plays from what was measured of it (a Spotify song plays from its YouTube Music version only
+/// when Spotify can't play it here)
+fn smart_same_source(t: &Track) -> bool {
+    !matches!(t.src, track::Src::Spotify(_)) || !sp_plays_here()
+}
+
+/// Your ratings so far (state/mix-feedback.jsonl): each one's kind, and good or not
+fn smart_ratings() -> Vec<(String, bool)> {
+    let Ok(d) = omnipulse_core::data_dir() else { return Vec::new() };
+    let Ok(text) = std::fs::read_to_string(d.join("state").join("mix-feedback.jsonl")) else { return Vec::new() };
+    text.lines().filter_map(|l| serde_json::from_str::<serde_json::Value>(l).ok()).filter_map(|v| Some((v["mix"]["kind"].as_str()?.to_string(), v["verdict"].as_str()? == "good"))).collect()
+}
+
+/// What's decided for the pair coming up, once: a blend on the beat (Some) or a fade (None). A blend's
+/// decided as soon as both are measured whole; `late` (a fade's moment come): a fade, if it's not
+/// decided by then. Not decided yet: None, and nothing kept.
+fn smart_decide(shared: &Shared, a: &SmartSong, b: &SmartSong, pos: u64, late: bool) -> Option<mix::Plan> {
+    if let Some((x, y, p, _)) = SMART_PAIR.with(|s| s.borrow().clone()) {
+        if x == a.t.key && y == b.t.key { return p; }
+    }
+    let prefs = shared.borrow().web.prefs.clone();
+    let (sa, sb) = (a.side(), b.side());
+    let decided: Option<(Option<mix::Plan>, String)> = if !smart_blends_on(&prefs) {
+        Some((None, "blends switched off".into()))
+    } else if !streamsafe::allowed(&prefs, &b.t) || b.t.is_mix() {
+        Some((None, "not one to blend into".into()))
+    } else if a.rhythm.is_some() && b.rhythm.is_some() {
+        match smart::blend_blocked(&sa, &sb) {
+            None => match smart::blend(&sa, &sb, pos) {
+                Some(p) => Some((Some(p), "on the beat".into())),
+                None => Some((None, "no phrase to blend on".into())),
+            },
+            Some(why) => {
+                // Tier 2: a tape stop, only switched on and with your ratings behind it
+                let tape = (set_row_on(&prefs, "smartTape", false) && smart::backed(&smart_ratings(), "tape stop")).then(|| smart::tape(&sa, &sb, pos)).flatten();
+                Some((tape, why.into()))
+            }
+        }
+    } else if late {
+        Some((None, "not both measured in time".into()))
+    } else {
+        None
+    };
+    let (p, why) = decided?;
+    SMART_PAIR.with(|s| *s.borrow_mut() = Some((a.t.key.clone(), b.t.key.clone(), p.clone(), why)));
+    p
+}
+
+/// Tier 0 each tick (Smart Transitions on, something next): the next one in over the one playing's outro
+/// and its own intro, the silences at either end left out; unless a blend on the beat is planned for the
+/// pair (crate::mix_tick's). None: not Smart Transitions' to do (Fade Between Tracks as set).
+fn smart_fade_tick(shared: &Shared, key: &str, pos: u64, dur: u64) -> Option<bool> {
+    if !smart_on(&shared.borrow().web.prefs) || listening().is_some() || room_kind().as_deref() == Some("jam") { return None; }
+    let (a, b) = smart_pair(&shared.borrow(), dur)?;
+    if MIX.with(|m| m.borrow().is_some()) || shared.borrow().engine.mixing() { return Some(false); }
+    let (out, moved) = FADE.with(|f| f.borrow().clone());
+    if out || moved == key { return Some(false); }
+    let f = smart::fade(&a.side(), &b.side(), smart_max_ms(&shared.borrow().web.prefs), SMART_FIXED_MS);
+    let left = f.out_to_ms as i64 - pos as i64;
+    if std::env::var_os("OMNIPULSE_MIX_DEBUG").is_some() && pos % 1000 < 260 { eprintln!("smart debug at {pos}: {f:?}, left {left}, audible {} of {}, outro {:?}, intro {:?}", a.audible_ms, a.dur_ms, a.rhythm.as_ref().and_then(smart::outro_from), b.rhythm.as_ref().and_then(smart::intro_to)); }
+    if left > (f.len_ms() + XFADE_LEAD_MS) as i64 {
+        smart_decide(shared, &a, &b, pos, false);
+        return Some(false);
+    }
+    if smart_decide(shared, &a, &b, pos, true).is_some() { return Some(false); }
+    // (what's left of it, if the moment's gone by: a blend that couldn't be got ready, a seek)
+    let ms = f.len_ms().min((left.max(0) as u64).max(smart::MIN_FADE_MS));
+    let why = SMART_PAIR.with(|s| s.borrow().as_ref().map(|x| x.3.clone())).unwrap_or_default();
+    MIX_WHY.with(|m| *m.borrow_mut() = Some((a.t.key.clone(), b.t.key.clone(), format!("smart fade: {ms} ms from {} to {}, the next one from {} ms (not on the beat: {why})", f.out_from_ms, f.out_to_ms, f.in_from_ms))));
+    FADE.with(|fd| *fd.borrow_mut() = (true, key.to_string()));
+    XFADE.with(|x| *x.borrow_mut() = Some((ms, std::time::Instant::now())));
+    SMART_START.with(|x| *x.borrow_mut() = (f.in_from_ms > 0).then(|| (b.t.key.clone(), f.in_from_ms)));
+    CHANGE_HOW.with(|h| h.set("ended"));
+    step(shared, 1);
+    Some(true)
 }
 
 /// What shuffling goes by: when you last heard each track (long-unheard first), or, with repeat on,
@@ -5029,12 +5205,13 @@ fn song_request(shared: &Shared, id: u64, q: String, user: String) {
 /// The servers the web app's settings have on: the widget, the Stream Deck's remote, chat requests
 // ---------- Settings: the switches beyond Look ----------
 // (section, label, note, key, on unless switched off)
-const SET_ROWS: [(&str, &str, &str, &str, bool); 28] = [
+const SET_ROWS: [(&str, &str, &str, &str, bool); 29] = [
     ("Library", "Sets & Podcasts in the Queue", "Lists and autoplay include anything over 15 minutes. Off: only when you pick one.", "queueSets", false),
     ("Library", "Autoplay", "Plays similar tracks when the queue runs out.", "autoplay", true),
     ("Library", "Hidden & Not Recommended", "Right-click a track to stop it, its album or its artist being recommended. Off: nothing is left out; the lists are kept.", "hideOn", true),
     ("Library", "Avoid Recent Plays", "Skips songs you've heard lately in what the app picks for you. What you choose yourself still plays.", "avoidRecent", true),
     ("Sound", "Seamless Mix (WIP)", "WIP: still being worked on, so some transitions may not sound right yet. Songs with a beat blend into the next on it, as a DJ mixes: at its tempo, on its phrase, the next one sweeping in from the top as the one playing gives way below it, down to the drop. While it's on, Spotify songs play from their YouTube Music version (their Spotify details kept), so they mix too. What it uses on your PC: your internet connection and CPU to download and measure each next song ahead of time, and a little more CPU and memory while a mix plays or a song plays at a changed tempo.", "mixOn", true),
+    ("Sound", "Smart Transitions (WIP)", "WIP: still being built. Songs change over the way DJ software does it: the silence at either end left out, and a crossfade over the song playing's outro and the next one's intro, as long as the shorter of the two. Two songs with a clear beat, within 4% of each other's tempo and in keys that go together, blend on the beat instead: on a phrase, the bass swapped on a bar line, never a key shifted. It measures each next song ahead of time (your internet connection and some CPU). Off: songs change over as Fade Between Tracks is set.", "smartOn", false),
     ("Library", "Skip non-music parts", "What plays from YouTube skips the parts of music videos that aren't music (a skit before the song, an interview after it), as marked on SponsorBlock.", "sbOn", true),
     ("Library", "Favourites Page", "Your starred tracks on a page of their own, in the sidebar. The stars stay either way.", "favPage", true),
     ("Library", "Sets & Podcasts Page", "A page for anything over 15 minutes, in the sidebar. Right-click it there to hide it.", "setsOn", true),
@@ -5249,7 +5426,7 @@ fn settings_index(a: &App) -> Vec<SetFound> {
         out.push(SetFound { path: path(cat), label: label.into(), note: note.into(), cat: cat.into(), panel: String::new(), key: key.into(), toggle: true });
     }
     let ip = omnipulse_core::lan_ip().unwrap_or_else(|| "THIS-PC".into());
-    for (name, cat) in [("requests", "Streaming"), ("replies", "Streaming"), ("limits", "Streaming"), ("mix", "Sound"), ("discord", "Integrations"), ("together", "Integrations"), ("lyrics", "Integrations"), ("widget", "Streaming"), ("alerts", "Streaming"), ("alertlist", "Streaming"), ("remote", "Streaming"), ("offset", "Streaming"), ("safe", "Streaming"), ("recent", "Library"), ("hidden", "Library"), ("plugins", "Plugins")] {
+    for (name, cat) in [("requests", "Streaming"), ("replies", "Streaming"), ("limits", "Streaming"), ("mix", "Sound"), ("smart", "Sound"), ("discord", "Integrations"), ("together", "Integrations"), ("lyrics", "Integrations"), ("widget", "Streaming"), ("alerts", "Streaming"), ("alertlist", "Streaming"), ("remote", "Streaming"), ("offset", "Streaming"), ("safe", "Streaming"), ("recent", "Library"), ("hidden", "Library"), ("plugins", "Plugins")] {
         let title = panels::title(name);
         out.push(SetFound { path: path(cat), label: title.clone(), note: String::new(), cat: cat.into(), panel: name.into(), key: String::new(), toggle: false });
         let vals = panels::values(name, &a.web.prefs);
@@ -5310,7 +5487,7 @@ fn panel_open(shared: &Shared, name: &str) {
             "requests" | "replies" | "limits" | "widget" | "remote" | "offset" | "alerts" | "alertlist" | "safe" => "Streaming",
             n if n.starts_with("alert:") => "Streaming",
             "plugins" => "Plugins",
-            "mix" => "Sound",
+            "mix" | "smart" => "Sound",
             "discord" | "together" | "lyrics" => "Integrations",
             _ => "Library",
         };
@@ -6017,6 +6194,11 @@ fn set_toggle(shared: &Shared, key: &str) {
                 // (a work in progress: said as it's switched on)
                 if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_status(if on { "Seamless Mix is on. It's WIP: some transitions may not sound right yet." } else { "Seamless Mix is off." }.into()); }
             }
+            if key == "smartOn" {
+                SMART_PAIR.with(|p| *p.borrow_mut() = None);
+                if on { PRELOADED.with(|p| p.borrow_mut().clear()); preload_next(shared); }
+                if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_status(if on { "Smart Transitions are on. They're WIP: some may not sound right yet." } else { "Smart Transitions are off." }.into()); }
+            }
             // the servers stop, and start again with what's set now
             match key {
                 "widget" | "alertsOn" => omnipulse_core::widget::widget_stop(),
@@ -6453,6 +6635,8 @@ fn fade_and_silences(shared: &Shared, pos: u64, dur: u64) -> bool {
     } else {
         QUIET_SINCE.with(|q| q.set(None));
     }
+    // Smart Transitions: the next one in over this one's outro, the silences left out (crate::smart)
+    let smart_tier0 = match smart_fade_tick(shared, &key, pos, dur) { Some(true) => return true, Some(false) => true, None => false };
     let Some(an) = an else { return false };
     let _ = &key;
     if dur == 0 {
@@ -6478,6 +6662,8 @@ fn fade_and_silences(shared: &Shared, pos: u64, dur: u64) -> bool {
             return false;
         }
     }
+    // (Smart Transitions: theirs, above)
+    if smart_tier0 { return false; }
     let Some(ms) = fade else { return false };
     // where the sound ends: its measured end, if that's before the file's
     let audible = an["audible_ms"].as_u64().unwrap_or(0);
@@ -6516,7 +6702,7 @@ fn fade_and_silences(shared: &Shared, pos: u64, dur: u64) -> bool {
 fn loud_measure(shared: &Shared, t: &Track, kind: &'static str, id: String, token: u64) {
     {
         let p = &shared.borrow().web.prefs;
-        if sound::loud_step(p) == "off" && sound::fade_ms(p).is_none() && sound::skip_silence_ms(p) == 0 {
+        if sound::loud_step(p) == "off" && sound::fade_ms(p).is_none() && sound::skip_silence_ms(p) == 0 && !smart_on(p) {
             return;
         }
     }
@@ -10403,6 +10589,8 @@ fn main() -> Result<(), slint::PlatformError> {
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("mixfb") { vec![(9, "play"), (10, "rate"), (11, "mixprep"), (70, "mixseek"), (80, "mixcheck"), (84, "mixcheck"), (88, "mixcheck"), (92, "mixcheck"), (96, "mixcheck"), (100, "mixcheck"), (104, "mixcheck"), (108, "mixcheck"), (112, "rate"), (114, "mixcheck"), (118, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("replies") { vec![(9, "play"), (10, "openreplies"), (12, "soundcat"), (13, "openmix"), (15, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("genre") { vec![(9, "play"), (10, "searchhouse"), (30, "searchartists"), (34, "discover"), (60, "findtiles"), (62, "end")] }
+            else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("smartblend") { vec![(8, "smartpair"), (30, "smartseek"), (32, "smartcheck"), (36, "smartcheck"), (40, "smartcheck"), (44, "smartcheck"), (48, "smartcheck"), (52, "smartcheck"), (56, "smartcheck"), (64, "smartcheck"), (66, "end")] }
+            else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("smart") { vec![(9, "play"), (10, "smartprep"), (12, "smartpage"), (70, "smartseek"), (72, "smartcheck"), (76, "smartcheck"), (80, "smartcheck"), (84, "smartcheck"), (88, "smartcheck"), (92, "smartcheck"), (100, "smartcheck"), (102, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("accent") { vec![(9, "play"), (12, "accentfade"), (15, "askshow"), (17, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("scpl") { vec![(9, "play"), (14, "scplaylists"), (20, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("np") { vec![(9, "play"), (14, "now"), (18, "end")] }
@@ -10827,6 +11015,54 @@ fn main() -> Result<(), slint::PlatformError> {
                 }
                 "skip" => { skip_press(&s, 1); }
                 "rate" => { println!("selftest: rate: {:?}", mix_feedback(&s, false)); }
+                // Smart Transitions: on for the test (not kept), the next ones measured ahead
+                "smartprep" => {
+                    if let Some(o) = s.borrow_mut().web.prefs.as_object_mut() { o.insert("smartOn".into(), serde_json::json!(true)); }
+                    let next: Vec<Track> = { let a = s.borrow(); let i = a.queue.qi.unwrap_or(0); a.queue.items.iter().skip(i + 1).take(2).map(|q| q.t.clone()).collect() };
+                    let cur = s.borrow().queue.current().cloned();
+                    for t in cur.into_iter().chain(next) { rhythm_ahead(&s, t.clone()); loud_ahead(&s, t); }
+                    println!("selftest: smart: on, measuring the one playing and the next ahead");
+                }
+                // (a pair that blends on the beat: OMNIPULSE_SELFTEST_PAIR="A,B", SoundCloud ids)
+                "smartpair" => {
+                    if let Some(o) = s.borrow_mut().web.prefs.as_object_mut() { o.insert("smartOn".into(), serde_json::json!(true)); }
+                    let ids: Vec<String> = std::env::var("OMNIPULSE_SELFTEST_PAIR").unwrap_or_else(|_| "1233870340,315594546".into()).split(',').map(|x| x.trim().to_string()).collect();
+                    let (rt, weak) = { let a = s.borrow(); (a.rt.clone(), a.ui.clone()) };
+                    rt.spawn(async move {
+                        let mut list = Vec::new();
+                        for id in ids { if let Some(t) = omnipulse_core::soundcloud::api_get(format!("/tracks/{id}")).await.ok().and_then(|v| Track::soundcloud(&v)) { list.push(t); } }
+                        let _ = weak.upgrade_in_event_loop(move |_| SHARED.with(|s| {
+                            let Some(s) = s.borrow().clone() else { return };
+                            println!("selftest: smart: playing {:?}", list.iter().map(|t| t.title.clone()).collect::<Vec<_>>());
+                            for t in &list { rhythm_ahead(&s, t.clone()); loud_ahead(&s, t.clone()); }
+                            play_list(&s, list, 0);
+                        }));
+                    });
+                }
+                "smartpage" => {
+                    panel_open(&s, "smart");
+                    let vals = panels::values("smart", &s.borrow().web.prefs);
+                    let f: Vec<String> = panels::fields("smart", &vals, &s.borrow().web.prefs, "").iter().map(|f| format!("{} ({})", f["label"].as_str().unwrap_or("").chars().take(40).collect::<String>(), f["type"].as_str().unwrap_or(""))).collect();
+                    println!("selftest: smart page \"{}\": {f:?}; its row in Settings: {}", panels::title("smart"), SET_ROWS.iter().any(|r| r.3 == "smartOn"));
+                }
+                // (to just before the transition as planned)
+                "smartseek" => {
+                    let dur = s.borrow().engine.duration_ms();
+                    let Some((a, b)) = smart_pair(&s.borrow(), dur) else { println!("selftest: smart: nothing next"); return };
+                    let f = smart::fade(&a.side(), &b.side(), smart_max_ms(&s.borrow().web.prefs), SMART_FIXED_MS);
+                    let pos = s.borrow().engine.position_ms();
+                    let blend = smart_decide(&s, &a, &b, pos, false);
+                    let why = SMART_PAIR.with(|x| x.borrow().as_ref().map(|x| x.3.clone()));
+                    println!("selftest: smart: \"{}\" ({:?} BPM, whole {}) into \"{}\" ({:?} BPM, whole {}); fade {f:?}; blend {:?}; decided {why:?}", a.t.title, a.rhythm.as_ref().map(|m| m.rhythm.bpm), a.rhythm.is_some(), b.t.title, b.rhythm.as_ref().map(|m| m.rhythm.bpm), b.rhythm.is_some(), blend.as_ref().map(|p| (p.at_ms, p.ms, p.rate)));
+                    let to = blend.map(|p| p.at_ms).unwrap_or(f.out_from_ms).saturating_sub(9000);
+                    s.borrow().engine.seek(to);
+                    println!("selftest: smart: sought to {to} ms of {dur}");
+                }
+                "smartcheck" => {
+                    let a = s.borrow();
+                    let phase = MIX.with(|m| match &*m.borrow() { None => "none".to_string(), Some(MixPhase::Opening(_)) => "opening".into(), Some(MixPhase::Waiting { .. }) => "waiting".into(), Some(MixPhase::Mixing { tempo, .. }) => format!("mixing at {:.4}x", tempo.get()) });
+                    println!("selftest: smart: mix {phase}, crossfading {} mixing {}, now \"{}\" at {} ms, why {:?}", a.engine.crossfading(), a.engine.mixing(), a.queue.current().map(|t| t.title.clone()).unwrap_or_default(), a.engine.position_ms(), MIX_WHY.with(|m| m.borrow().as_ref().map(|x| x.2.clone())));
+                }
                 "mixcheck" => {
                     let a = s.borrow();
                     let phase = MIX.with(|m| match &*m.borrow() { None => "none".to_string(), Some(MixPhase::Opening(_)) => "opening".into(), Some(MixPhase::Waiting { .. }) => "waiting".into(), Some(MixPhase::Mixing { tempo, .. }) => format!("mixing at {:.4}x", tempo.get()) });

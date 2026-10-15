@@ -18,6 +18,7 @@ pub fn title(name: &str) -> String {
         "replies" => "Chat Replies",
         "limits" => "Limit Requests",
         "mix" => "Seamless Mix (WIP)",
+        "smart" => "Smart Transitions (WIP)",
         "discord" => "Discord Status",
         "together" => "Listen Along & Jams",
         "lyrics" => "Lyrics",
@@ -34,7 +35,7 @@ pub fn title(name: &str) -> String {
 
 /// The panel a switch's Settings button opens (by the switch's pref)
 pub fn of_switch(key: &str) -> Option<&'static str> {
-    Some(match key { "streamSafe" => "safe", "req" => "requests", "reqLimits" => "limits", "mixOn" => "mix", "presence" => "discord", "jamsOn" => "together", "lyricsSources" => "lyrics", "widget" => "widget", "alertsOn" => "alerts", "remoteOn" => "remote", "out2On" => "offset", "avoidRecent" => "recent", "hideOn" => "hidden", "plugAdd" => "plugins", _ => return None })
+    Some(match key { "streamSafe" => "safe", "req" => "requests", "reqLimits" => "limits", "mixOn" => "mix", "smartOn" => "smart", "presence" => "discord", "jamsOn" => "together", "lyricsSources" => "lyrics", "widget" => "widget", "alertsOn" => "alerts", "remoteOn" => "remote", "out2On" => "offset", "avoidRecent" => "recent", "hideOn" => "hidden", "plugAdd" => "plugins", _ => return None })
 }
 
 /// What a panel edits, and each one's default (the web app's)
@@ -43,6 +44,7 @@ fn keys(name: &str) -> Vec<(&'static str, Value)> {
         "limits" => vec![("reqMax", json!(10)), ("reqPerUser", json!(2))],
         "discord" => vec![("presArt", json!(true)), ("presTime", json!(true)), ("presListen", json!(true)), ("presAsk", json!(false)), ("presLink", json!(true))],
         "together" => vec![("togetherName", json!(""))],
+        "smart" => vec![("smartBlend", json!(true)), ("smartMax", json!(10)), ("smartTape", json!(false))],
         "mix" => vec![("mixWords", json!(true)), ("mixDrop", json!(true)), ("mixMelody", json!(true)), ("mixTape", json!(true)), ("mixBars", json!(0)), ("mixBands", json!(false)), ("mixKeys", json!(true)), ("mixLoops", json!(true)), ("mixForce", json!("auto"))],
         "requests" => vec![("reqBot", json!("streamerbot")), ("reqRadioEdit", json!(false)), ("reqMax", json!(10)), ("reqPerUser", json!(2)), ("reqPort", json!(7879)), ("botRemote", json!(false))],
         "widget" => vec![("widgetPort", json!(7878)), ("widgetDesign", json!("card")), ("widgetAlign", json!("left")), ("widgetRounded", json!(true)), ("widgetText", json!(1)), ("wFade", json!(true)), ("wScroll", json!(true)), ("wSpin", json!(true)), ("wRequester", json!(true)), ("wColor", json!(1.2))],
@@ -373,6 +375,13 @@ pub fn fields(name: &str, vals: &Map<String, Value>, prefs: &Value, lan: &str) -
             tog("mixLoops", "Loops", "A short intro or outro looped, so neither song is cut short to fit the blend."),
             note("Testing"),
             sel("mixForce", "Force a Style", "Every transition this style, to hear it. A pair that can't be mixed that way isn't mixed at all.", &[(json!("auto"), "Off (as the songs suit)"), (json!("beat"), "On the beat (no tape stops)"), (json!("wordplay"), "Wordplay"), (json!("drop"), "Drop Swap"), (json!("melody"), "Melody Play"), (json!("tape"), "Tape Stop")]),
+        ],
+        // Smart Transitions' own page
+        "smart" => vec![
+            note("Smart Transitions are WIP: still being built, so some may not sound right yet. Rating them (Stream Deck: Mix Good / Mix Bad) helps."),
+            sel("smartMax", "Longest Fade", "The most the two songs play over each other. Each pair gets as long as the shorter of the song playing's outro and the next one's intro, up to this.", &[(json!(6), "6 s"), (json!(8), "8 s"), (json!(10), "10 s"), (json!(12), "12 s"), (json!(16), "16 s"), (json!(20), "20 s")]),
+            tog("smartBlend", "Beatmatched Blends", "Two songs with a clear beat, within 4% of each other's tempo and in keys that go together, blend on the beat: the next one at the playing one's tempo (its pitch kept), on a phrase, the bass swapped on a bar line. Off: always a fade."),
+            tog("smartTape", "Tape Stops", "Songs too far apart to blend: the one playing slows to a halt and the next spins up. Only once your ratings back them (at least 5 rated, most of them good)."),
         ],
         // Limit Requests' own page (as the web app's, under it)
         "limits" => vec![
