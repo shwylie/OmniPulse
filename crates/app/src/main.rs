@@ -2348,16 +2348,33 @@ fn row_menu(a: &App, m: &Marks, t: &Track, mut r: Row) -> Row {
 
 /// A choice from a track's menu (the page's, or the queue's) that isn't about the queue or a playlist:
 /// true if it was one of them
+/// Play Next or Add to Queue, from anywhere (as the web app's playNext / addToQueue): with Stream-Safe
+/// Music on, only what's safe; listening along in a Jam, to the host; otherwise into the queue
+fn queue_add(shared: &Shared, t: Track, next: bool) {
+    if streamsafe::on(&shared.borrow().web.prefs) && !streamsafe::ok(&shared.borrow().web.prefs, &t) {
+        if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_status("Stream-Safe Music is on, and that track isn't safe on stream.".into()); }
+        return;
+    }
+    if let Some(kind) = listening() {
+        let note = if kind != "jam" {
+            "You're listening along: only a Jam takes songs from listeners.".to_string()
+        } else {
+            listen_send(serde_json::json!({ "type": "add", "track": t.to_snapshot(), "next": next }));
+            format!("Sent \"{}\" to the Jam{}", t.title, if next { ", to play next." } else { "." })
+        };
+        if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_status(note.into()); }
+        return;
+    }
+    let empty = shared.borrow().queue.current().is_none();
+    { let mut a = shared.borrow_mut(); if next { a.queue.play_next(t.clone()); } else { a.queue.add(t.clone()); } paint_queue(&mut a); save_session(&a); }
+    if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_status(format!("{} \"{}\".", if next { "Playing next:" } else { "Added to the queue:" }, t.title).into()); }
+    if empty { start(shared); }
+}
+
 /// A song's menu's choice, wherever it was right-clicked (a tile, Stats, the queue; a page's rows have
 /// their own, for what's picked): to the queue, a playlist, not recommended, a link, and the rest
 fn menu_act(shared: &Shared, t: Track, act: &str) {
-    if act == "next" || act == "add" {
-        let empty = shared.borrow().queue.current().is_none();
-        { let mut a = shared.borrow_mut(); if act == "next" { a.queue.play_next(t.clone()); } else { a.queue.add(t.clone()); } paint_queue(&mut a); save_session(&a); }
-        if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_status(format!("{} \"{}\".", if act == "next" { "Playing next:" } else { "Added to the queue:" }, t.title).into()); }
-        if empty { start(shared); }
-        return;
-    }
+    if act == "next" || act == "add" { return queue_add(shared, t, act == "next"); }
     if act.starts_with("pl") { return pl_row_action(shared, act, t); }
     if let Some(what) = act.strip_prefix("hide:") { return hide_track(shared, &t, what); }
     if let Some(plat) = act.strip_prefix("link:") { return copy_track_link(shared, &t, plat); }
@@ -2505,6 +2522,7 @@ fn start(shared: &Shared) {
         a.cur_loud = None;
         FADE.with(|f| *f.borrow_mut() = (false, String::new()));
         a.heard = (t.key.clone(), 0.0, false);
+        SCROBBLED.with(|x| x.set(false));
         a.last_pos = 0;
         a.lyrics.clear();
         a.loaded = true;
@@ -3451,6 +3469,11 @@ const MIX_HEARD_MS: u64 = 400;
 thread_local! {
     /// the songs on an artist's page whose versions are open beneath them (by key)
     static VER_OPEN: RefCell<std::collections::HashSet<String>> = RefCell::new(Default::default());
+    /// a Last.fm scrobble sent for what's playing
+    static SCROBBLED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    /// paused a moment (0.6 s): your own accent back, not the cover's (as the web app's)
+    static ART_PAUSED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    static PAUSED_SINCE: std::cell::Cell<Option<std::time::Instant>> = const { std::cell::Cell::new(None) };
     /// a crossfade's end (Fade Between Tracks), for the accent's pulse meanwhile
     static XFADE_PULSE: std::cell::Cell<Option<std::time::Instant>> = const { std::cell::Cell::new(None) };
     /// the tracks Ctrl+C copied, for Ctrl+V
@@ -3775,9 +3798,37 @@ fn play_list(shared: &Shared, list: Vec<Track>, i: usize) {
             (list, i)
         }
     };
+    // Sets & Podcasts in the Queue off: the long ones left out of a list (not the one picked, and not on
+    // Sets & Podcasts itself); Avoid Recent Plays: what you heard lately left out of what plays from a
+    // list (not the one picked, not from a search, not your Library or a playlist, whose recent plays are
+    // spaced out instead), unless that leaves too little (as the web app's startList)
+    let (list, i) = {
+        let a = shared.borrow();
+        let (mut list, mut i) = (list, i);
+        let picked = list.get(i).map(|t| t.key.clone());
+        if !a.web.prefs["queueSets"].as_bool().unwrap_or(false) && a.page != "sets" {
+            let kept: Vec<Track> = list.iter().filter(|t| !t.is_mix() || Some(&t.key) == picked.as_ref()).cloned().collect();
+            if !kept.is_empty() { list = kept; }
+        }
+        let spaced = a.page == "library" || a.page == "playlist";
+        if a.repeat == "off" && !spaced && pref_on(&a.web.prefs, "avoidRecent") && a.page != "search" && list.len() > 1 {
+            let h = heard(&a);
+            let win = recent_window(&a.web.prefs);
+            let rest: Vec<&Track> = list.iter().filter(|t| Some(&t.key) != picked.as_ref()).collect();
+            let fresh: Vec<&Track> = rest.iter().copied().filter(|t| !h.within(t, win)).collect();
+            if fresh.len() < rest.len() && fresh.len() >= 3.min(rest.len().div_ceil(3)) {
+                let keep: std::collections::HashSet<&str> = fresh.iter().map(|t| t.key.as_str()).collect();
+                list = list.iter().filter(|t| Some(&t.key) == picked.as_ref() || keep.contains(t.key.as_str())).cloned().collect();
+            }
+        }
+        if let Some(k) = picked { i = list.iter().position(|t| t.key == k).unwrap_or(0); }
+        (list, i)
+    };
     {
         let mut a = shared.borrow_mut();
-        if a.page == "search" {
+        // (from a search or an artist's page: it only takes the place of what's playing, and the queue
+        // you had carries on after it)
+        if (a.page == "search" || a.page == "artist") && a.queue.current().is_some() {
             let Some(t) = list.get(i).cloned() else { return };
             a.queue.replace_current(t);
         } else {
@@ -3802,8 +3853,10 @@ fn step(shared: &Shared, d: i32) {
         return;   // listening along: the host moves on, and so does this
     }
     let engine = shared.borrow().engine.clone();
-    if d < 0 && engine.position_ms() > 3000 {
-        engine.seek(0);
+    // (back to where the track's set to start: its own start time, as the web app's)
+    let from = trim_now(shared).0;
+    if d < 0 && engine.position_ms() > from + 3000 {
+        engine.seek(from);
         return;
     }
     let next = {
@@ -3832,7 +3885,7 @@ fn step(shared: &Shared, d: i32) {
             push_out(shared, true);
         }
         // back from the first: it starts again
-        None if d < 0 => engine.seek(0),
+        None if d < 0 => engine.seek(from),
         None => {}
     }
 }
@@ -3873,10 +3926,79 @@ fn recent_window(prefs: &serde_json::Value) -> u64 {
     }
 }
 
+/// When you last heard each song: by its key, and by its name ("artist|title", so one heard on Spotify
+/// counts when it turns up on SoundCloud), what you scrobbled to Last.fm included (as the web app's
+/// lastHeard: its history and heardSongs)
+#[derive(Clone, Default)]
+struct Heard { by_key: HashMap<String, u64>, by_song: HashMap<String, u64> }
+
+impl Heard {
+    fn last(&self, t: &Track) -> u64 {
+        let k = track::song_key(t);
+        let by_song = if k.is_empty() { 0 } else { self.by_song.get(&k).copied().unwrap_or(0) };
+        self.by_key.get(&t.key).copied().unwrap_or(0).max(by_song)
+    }
+    fn within(&self, t: &Track, ms: u64) -> bool { now_ms().saturating_sub(self.last(t)) < ms }
+    /// For what's given, by key (what shuffling and spacing go by)
+    fn map_for<'a>(&self, list: impl Iterator<Item = &'a Track>) -> HashMap<String, u64> {
+        list.filter_map(|t| { let l = self.last(t); (l > 0).then(|| (t.key.clone(), l)) }).collect()
+    }
+}
+
+thread_local! {
+    /// the songs heard, by name: from your plays (made once), what plays here, and Last.fm's scrobbles
+    static HEARD_SONGS: RefCell<Option<HashMap<String, u64>>> = const { RefCell::new(None) };
+    /// when Last.fm's scrobbles were last asked for (every 30 minutes, while signed in there)
+    static LFM_HEARD_AT: std::cell::Cell<Option<std::time::Instant>> = const { std::cell::Cell::new(None) };
+}
+
+fn heard_song(key: String, ts: u64) {
+    if key.is_empty() { return; }
+    HEARD_SONGS.with(|h| { if let Some(m) = h.borrow_mut().as_mut() { let e = m.entry(key).or_insert(0); *e = (*e).max(ts); } });
+}
+
+fn heard(a: &App) -> Heard {
+    HEARD_SONGS.with(|h| {
+        if h.borrow().is_none() {
+            let mut m = HashMap::new();
+            for p in &a.web.plays {
+                let k = track::song_key(&Track { title: p.title.clone(), artist: p.artist.clone(), ..Default::default() });
+                if !k.is_empty() { let e = m.entry(k).or_insert(0); *e = (*e).max(p.ts); }
+            }
+            *h.borrow_mut() = Some(m);
+        }
+        Heard { by_key: a.web.last_played.clone(), by_song: h.borrow().clone().unwrap_or_default() }
+    })
+}
+
+/// Last.fm (signed in there): what you scrobbled within the time frame, on any device, counts as heard
+/// too; asked every 30 minutes (the web app's lfmHeardSync)
+fn lfm_heard_sync(shared: &Shared) {
+    if LFM_HEARD_AT.with(|t| t.get()).is_some_and(|t| t.elapsed().as_secs() < 1800) { return; }
+    if omnipulse_core::lastfm::lastfm_status()["connected"].as_bool() != Some(true) { return; }
+    LFM_HEARD_AT.with(|t| t.set(Some(std::time::Instant::now())));
+    let (rt, weak, prefs) = { let a = shared.borrow(); let _ = heard(&a); (a.rt.clone(), a.ui.clone(), a.web.prefs.clone()) };
+    let from = (now_ms().saturating_sub(recent_window(&prefs)) / 1000) as i64;
+    let pages = if prefs["recentWindow"].as_str() == Some("month") { 10 } else { 5 };
+    rt.spawn(async move {
+        let Ok(list) = omnipulse_core::lastfm::lastfm_recent(from, pages).await else {
+            // (try again in five minutes)
+            let _ = weak.upgrade_in_event_loop(|_| LFM_HEARD_AT.with(|t| t.set(std::time::Instant::now().checked_sub(std::time::Duration::from_secs(1500)))));
+            return;
+        };
+        let got: Vec<(String, u64)> = list.as_array().into_iter().flatten().map(|x| (track::song_key(&Track { title: x["title"].as_str().unwrap_or("").into(), artist: x["artist"].as_str().unwrap_or("").into(), ..Default::default() }), x["ts"].as_u64().unwrap_or(0))).collect();
+        let _ = weak.upgrade_in_event_loop(move |_| { for (k, ts) in got { heard_song(k, ts); } });
+    });
+}
+
 /// What shuffling goes by: when you last heard each track (long-unheard first), or, with repeat on,
 /// nothing (plainly random: it all comes round again anyway)
 fn shuffle_basis(a: &App) -> HashMap<String, u64> {
-    if a.repeat == "off" { a.web.last_played.clone() } else { HashMap::new() }
+    if a.repeat != "off" { return HashMap::new(); }
+    let h = heard(a);
+    let mut m = h.map_for(a.queue.items.iter().map(|q| &q.t).chain(a.page_tracks.iter()));
+    for (k, v) in &h.by_key { m.entry(k.clone()).or_insert(*v); }
+    m
 }
 
 fn spacing(a: &App) -> Option<(u64, u64)> {
@@ -3987,6 +4109,14 @@ fn autoplay_fill(shared: &Shared, then_play: bool) -> bool {
 // session, the track's end
 fn tick(shared: &Shared, events: &std::sync::mpsc::Receiver<Event>, n: u64) {
     let Some(ui) = shared.borrow().ui.upgrade() else { return };
+    // (album-art colours: your own accent while paused, the cover's again on play)
+    {
+        let paused = { let a = shared.borrow(); a.loaded && a.engine.is_paused() };
+        let since = PAUSED_SINCE.with(|p| { if !paused { p.set(None); } else if p.get().is_none() { p.set(Some(std::time::Instant::now())); } p.get() });
+        let want = since.is_some_and(|s| s.elapsed().as_millis() >= 600);
+        if want != ART_PAUSED.with(|p| p.get()) { ART_PAUSED.with(|p| p.set(want)); apply_look(shared); }
+    }
+    if n % 40 == 8 { lfm_heard_sync(shared); }
     // a mix playing: the title bar's button and the progress bar show it
     let mixing = shared.borrow().engine.mixing();
     if ui.get_mixing() != mixing { ui.set_mixing(mixing); }
@@ -4094,8 +4224,14 @@ fn tick(shared: &Shared, events: &std::sync::mpsc::Receiver<Event>, n: u64) {
             if let Some(t) = a.queue.current().cloned() {
                 webstate::count_play(&t);
                 a.web.last_played.insert(t.key.clone(), now_ms());
-                integrations::lastfm_scrobble(&a.rt, &a.web.prefs, &t, a.started_secs);
+                heard_song(track::song_key(&t), now_ms());
             }
+        }
+        // a scrobble, by Last.fm's rule (as the web app's): a track over 30 s, once half of it (or four
+        // minutes) has been heard
+        if a.heard.2 && !SCROBBLED.with(|x| x.get()) && dur > 30_000 && a.heard.1 >= (dur as f32 / 2000.0).min(240.0) {
+            SCROBBLED.with(|x| x.set(true));
+            if let Some(t) = a.queue.current().cloned() { integrations::lastfm_scrobble(&a.rt, &a.web.prefs, &t, a.started_secs); }
         }
         if n.is_multiple_of(20) && !engine.is_paused() {
             save_session(&a);
@@ -4134,7 +4270,15 @@ fn tick(shared: &Shared, events: &std::sync::mpsc::Receiver<Event>, n: u64) {
                 if let (Some((key, yt)), Some(t)) = (done, cur) {
                     if t.key == key {
                         versions::keep(&t, &yt);
-                        ui.set_status(format!("\"{}\" plays that version from now on.", t.title).into());
+                        // (its artist shown as that version's, as the web app's)
+                        let theirs = yt.artists.clone();
+                        if !theirs.is_empty() && theirs.to_lowercase() != t.artist.to_lowercase() {
+                            let mut fixes = shared.borrow().web.prefs["trackFixes"].as_object().cloned().unwrap_or_default();
+                            let title = fixes.get(&t.key).and_then(|f| f["title"].as_str().map(String::from)).unwrap_or(t.title.clone());
+                            fixes.insert(t.key.clone(), serde_json::json!({ "title": title, "artist": theirs }));
+                            pref_put(shared, "trackFixes", serde_json::Value::Object(fixes));
+                        }
+                        ui.set_status(format!("\"{}\" plays that version from now on{}.", t.title, if theirs.is_empty() { String::new() } else { format!(", by {theirs}") }).into());
                     }
                 }
                 shared.borrow_mut().closest = None;
@@ -4255,17 +4399,18 @@ fn remote_action(shared: &Shared, id: u64, action: &str) {
         "toggle" => toggle(shared),
         "next" => skip_press(shared, 1),
         "previous" => skip_press(shared, -1),
-        "shuffle" => {
-            let mut a = shared.borrow_mut();
-            let lp = shuffle_basis(&a);
-            let sp = spacing(&a);
-            a.queue.shuffle_rest(&lp, sp);
-            paint_queue(&mut a);
-        }
+        // (Shuffle on or off, as the player bar's; like, favourite and repeat as theirs)
+        "shuffle" => shuffle_toggle(shared),
+        "like" => { let t = shared.borrow().queue.current().cloned(); if let Some(t) = t { like_track(shared, t); } }
+        "favourite" => { let t = shared.borrow().queue.current().cloned(); if let Some(t) = t { fav_track(shared, t); } }
+        "repeat" => { if let Some(ui) = shared.borrow().ui.upgrade() { ui.invoke_repeat_cycle(); } }
+        // (only what's playing stays, as the web app's)
         "clear-queue" => {
             let mut a = shared.borrow_mut();
-            let keep = a.queue.qi.map_or(0, |i| i + 1);
-            a.queue.items.truncate(keep);
+            match a.queue.qi {
+                Some(i) => { let cur = a.queue.items.remove(i); a.queue.items = vec![cur]; a.queue.qi = Some(0); }
+                None => a.queue.items.clear(),
+            }
             paint_queue(&mut a);
             save_session(&a);
         }
@@ -4278,10 +4423,10 @@ fn remote_action(shared: &Shared, id: u64, action: &str) {
             save_session(&a);
         }
         "sets" => {
-            let mut a = shared.borrow_mut();
-            let now = !a.web.prefs["queueSets"].as_bool().unwrap_or(false);
-            if let Some(o) = a.web.prefs.as_object_mut() { o.insert("queueSets".into(), serde_json::json!(now)); }
-            a.ap_failed = None;
+            let now = !shared.borrow().web.prefs["queueSets"].as_bool().unwrap_or(false);
+            pref_put(shared, "queueSets", serde_json::json!(now));
+            shared.borrow_mut().ap_failed = None;
+            if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_status(if now { "Sets & Podcasts are back in the queue and autoplay." } else { "Sets & Podcasts are out of the queue and autoplay." }.into()); }
         }
         "state" => {}
         "mix-good" | "mix-bad" => if let Err(e) = mix_feedback(shared, action == "mix-good") { note = Some(e) },
@@ -7334,7 +7479,12 @@ fn skip_press(shared: &Shared, d: i32) {
         let a = shared.borrow();
         if let Some(q) = a.queue.qi.and_then(|i| a.queue.items.get(i)) { discover::note_skip(&q.t, a.engine.position_ms(), a.engine.duration_ms()); }
     }
-    let Some(kind) = listening() else { return step(shared, d) };
+    let Some(kind) = listening() else {
+        // (as the web app's: Next on the last track, with autoplay not adding any, goes round to the first)
+        let round = { let a = shared.borrow(); d > 0 && a.queue.items.len() > 1 && a.queue.qi.is_some_and(|i| i + 1 >= a.queue.items.len()) && (!a.autoplay || a.repeat != "off") };
+        if round { shared.borrow_mut().queue.qi = Some(0); return start(shared); }
+        return step(shared, d);
+    };
     let note = if kind == "jam" {
         listen_send(serde_json::json!({ "type": "skip", "d": if d < 0 { -1 } else { 1 } }));
         if d < 0 { "Going back a song for the Jam..." } else { "Skipping for the Jam..." }.to_string()
@@ -8424,7 +8574,7 @@ fn apply_look(shared: &Shared) {
     t.set_text(p.text.slint());
     t.set_muted(p.muted.slint());
     // the accent: the album art's while something plays (if asked for), or the one picked
-    let art = integrations::set(prefs, "artAccent") && a.loaded;
+    let art = integrations::set(prefs, "artAccent") && a.loaded && !ART_PAUSED.with(|p| p.get());
     let (c1, c2) = if art {
         let first = look::Rgb::parse(&a.accent.0);
         let c1 = first.map(|c| look::tune_art(c, p.light));
@@ -9398,7 +9548,7 @@ fn main() -> Result<(), slint::PlatformError> {
         let Some(t) = a.page_tracks.get(i as usize).cloned() else { return };
         // a picked one: every one that's picked (in the page's order)
         if a.picked.len() > 1 && a.picked.contains(&t.key) && !act.starts_with("link:") && listening().is_none() {
-            let all: Vec<Track> = a.page_tracks.iter().filter(|x| a.picked.contains(&x.key)).cloned().collect();
+            let all: Vec<Track> = a.page_tracks.iter().filter(|x| a.picked.contains(&x.key) && streamsafe::allowed(&a.web.prefs, x)).cloned().collect();
             let n = all.len();
             drop(a);
             match act.as_str() {
@@ -9453,27 +9603,8 @@ fn main() -> Result<(), slint::PlatformError> {
             drop(a);
             return copy_track_link(&s, &t, plat);
         }
-        if let Some(kind) = listening() {
-            drop(a);
-            let note = if kind != "jam" {
-                "You're listening along: only a Jam takes songs from listeners.".to_string()
-            } else {
-                listen_send(serde_json::json!({ "type": "add", "track": t.to_snapshot(), "next": act == "next" }));
-                format!("Sent \"{}\" to the Jam{}", t.title, if act == "next" { ", to play next." } else { "." })
-            };
-            if let Some(ui) = s.borrow().ui.upgrade() { ui.set_status(note.into()); }
-            return;
-        }
-        let empty = a.queue.current().is_none();
-        let title = t.title.clone();
-        if act == "next" { a.queue.play_next(t); } else { a.queue.add(t); }
-        paint_queue(&mut a);
-        save_session(&a);
-        if let Some(ui) = a.ui.upgrade() {
-            ui.set_status(format!("{} \"{title}\".", if act == "next" { "Playing next:" } else { "Added to the queue:" }).into());
-        }
         drop(a);
-        if empty { start(&s); }
+        queue_add(&s, t, act == "next");
     });
     // picking tracks on the page
     let s = shared.clone();
