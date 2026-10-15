@@ -1696,6 +1696,42 @@ enum StreamColl { Cleared(Vec<String>), Genre(String), Likes }
 
 thread_local! {
     static STREAM_COLLS: RefCell<Vec<Vec<(String, StreamColl)>>> = const { RefCell::new(Vec::new()) };
+    /// each collection's tracks once made (by its name), as the web app's streamColl: opened again at
+    /// once, and what autoplay picks from while Stream-Safe Music is on
+    static STREAM_BUILT: RefCell<HashMap<String, Vec<Track>>> = RefCell::new(HashMap::new());
+}
+
+/// A collection made: from every platform that's on, only what's safe, each song once, mixed
+async fn stream_build(c: &StreamColl, prefs: &serde_json::Value, library: Vec<Track>) -> Vec<Track> {
+    let mut found: Vec<Track> = match c {
+        StreamColl::Likes => library,
+        // (an artist or label cleared: its names, four at most, searched everywhere)
+        StreamColl::Cleared(names) => futures_util::future::join_all(names.iter().take(4).map(|n| sources::search(n))).await.into_iter().flatten().collect(),
+        StreamColl::Genre(g) => {
+            let qs = [g.clone(), format!("{g} creative commons"), format!("{g} royalty free"), format!("{g} no copyright")];
+            futures_util::future::join_all(qs.iter().map(|q| sources::search(q))).await.into_iter().flatten().filter(streamsafe::open).collect()
+        }
+    };
+    let mut seen = std::collections::HashSet::new();
+    found.retain(|t| !t.is_mix() && streamsafe::ok(prefs, t) && seen.insert(t.key.clone()));
+    queue::shuffle_in_place(&mut found);
+    found
+}
+
+/// Autoplay with Stream-Safe Music on: from the collections only (those made, and a couple more if
+/// there's little to pick from), as the web app's streamAutoplayPool
+async fn stream_autoplay_pool(prefs: serde_json::Value, library: Vec<Track>, have: Vec<Track>, todo: Vec<(String, StreamColl)>) -> (Vec<Track>, Vec<(String, Vec<Track>)>) {
+    let mut have = have;
+    let mut made = Vec::new();
+    if have.len() < 30 {
+        for (name, c) in todo.into_iter().take(2) {
+            let got = stream_build(&c, &prefs, library.clone()).await;
+            have.extend(got.iter().cloned());
+            made.push((name, got));
+        }
+    }
+    queue::shuffle_in_place(&mut have);
+    (have, made)
 }
 
 fn open_streamer(shared: &Shared) {
@@ -1729,20 +1765,19 @@ fn open_streamer(shared: &Shared) {
 fn open_stream_coll(shared: &Shared, sh: usize, k: usize) {
     let Some((name, c)) = STREAM_COLLS.with(|s| s.borrow().get(sh).and_then(|l| l.get(k).cloned())) else { return };
     let (prefs, library) = { let a = shared.borrow(); (a.web.prefs.clone(), a.library.clone()) };
+    let sub_of = |found: &[Track]| if found.is_empty() { "Nothing safe on stream turned up here just now.".to_string() } else { format!("{}, all safe on stream.", plural(found.len(), "track", "tracks")) };
+    // (made already: at once)
+    if let Some(found) = STREAM_BUILT.with(|b| b.borrow().get(&name).cloned()) {
+        let sub = sub_of(&found);
+        return show_tracks(shared, "streamcoll", &name, sub, found, false);
+    }
     show_tracks(shared, "streamcoll", &name, "Finding music that's safe on stream...".into(), Vec::new(), false);
+    let key = name.clone();
     load_into(shared, "streamcoll", name.clone(), async move {
-        let mut found: Vec<Track> = match &c {
-            StreamColl::Likes => library,
-            StreamColl::Cleared(names) => futures_util::future::join_all(names.iter().map(|n| sources::search(n))).await.into_iter().flatten().collect(),
-            StreamColl::Genre(g) => {
-                let qs = [g.clone(), format!("{g} creative commons"), format!("{g} royalty free"), format!("{g} no copyright")];
-                futures_util::future::join_all(qs.iter().map(|q| sources::search(q))).await.into_iter().flatten().filter(streamsafe::open).collect()
-            }
-        };
-        let mut seen = std::collections::HashSet::new();
-        found.retain(|t| !t.is_mix() && streamsafe::ok(&prefs, t) && seen.insert(t.key.clone()));
-        queue::shuffle_in_place(&mut found);
-        let sub = if found.is_empty() { "Nothing safe on stream turned up here just now.".to_string() } else { format!("{}, all safe on stream.", plural(found.len(), "track", "tracks")) };
+        let found = stream_build(&c, &prefs, library).await;
+        let keep = found.clone();
+        let _ = slint::invoke_from_event_loop(move || STREAM_BUILT.with(|b| { b.borrow_mut().insert(key, keep); }));
+        let sub = sub_of(&found);
         (found, sub)
     });
 }
@@ -4063,7 +4098,34 @@ fn autoplay_fill(shared: &Shared, then_play: bool) -> bool {
         (!before.is_empty()).then(|| before[(rand_u64() as usize) % before.len()].clone())
     };
     let mix_on = integrations::on(&prefs, "mixOn");
+    // (Stream-Safe Music on: the Streamer page's collections are what it picks from)
+    let stream = streamsafe::on(&prefs).then(|| {
+        let have: Vec<Track> = STREAM_BUILT.with(|b| b.borrow().values().flatten().cloned().collect());
+        let built: std::collections::HashSet<String> = STREAM_BUILT.with(|b| b.borrow().keys().cloned().collect());
+        let mut todo: Vec<(String, StreamColl)> = {
+            let p = &prefs;
+            let mut all: Vec<(String, StreamColl)> = streamsafe::cleared_on(p).into_iter().map(|(n, names)| (n, StreamColl::Cleared(names))).collect();
+            all.extend(streamsafe::GENRES.iter().map(|g| (g.to_string(), StreamColl::Genre(g.to_string()))));
+            all.push(("Your Safe Likes".into(), StreamColl::Likes));
+            all.into_iter().filter(|(n, _)| !built.contains(n)).collect()
+        };
+        for i in (1..todo.len()).rev() { let j = (rand_u64() as usize) % (i + 1); todo.swap(i, j); }
+        (have, todo, shared.borrow().library.clone())
+    });
     rt.spawn(async move {
+        if let Some((have, todo, library)) = stream {
+            let (pool, made) = stream_autoplay_pool(prefs.clone(), library, have, todo).await;
+            let _ = weak.upgrade_in_event_loop(move |_| STREAM_BUILT.with(|b| { for (n, l) in made { b.borrow_mut().insert(n, l); } }));
+            let lists = vec![("stream", pool)];
+            let avoid = pref_on(&prefs, "avoidRecent");
+            let window = recent_window(&prefs);
+            let now = now_ms();
+            let h = &last_played;
+            let mut picks = queue::take_turns(lists.clone(), "", &taken, |t: &Track| !(avoid && now.saturating_sub(h.last(t)) < window));
+            if picks.is_empty() && avoid { picks = queue::take_turns(lists, "", &taken, |t: &Track| now.saturating_sub(h.last(t)) >= 3 * 3_600_000); }
+            let _ = weak.upgrade_in_event_loop(move |_| SHARED.with(|s| { if let Some(sh) = s.borrow().clone() { autoplay_done(&sh, &seed, picks); } }));
+            return;
+        }
         let want = |p: &str, key: &str| pref_on(&prefs, key) && (p != "local" || !local.is_empty());
         let (sc, sp, yt) = tokio::join!(
             async { if want("soundcloud", "scOn") { sources::autoplay_soundcloud(&seed, earlier.as_ref()).await } else { Vec::new() } },
@@ -4102,42 +4164,43 @@ fn autoplay_fill(shared: &Shared, then_play: bool) -> bool {
                 picks.sort_by_key(|t| std::cmp::Reverse(mix::fit(&a, omnipulse_core::rhythm::known(&t.key).as_ref())));
             }
         }
-        let _ = weak.upgrade_in_event_loop(move |_| {
-            SHARED.with(|s| {
-                let Some(shared) = s.borrow().clone() else { return };
-                let go = {
-                    let mut a = shared.borrow_mut();
-                    a.ap_busy = false;
-                    let then_play = std::mem::take(&mut a.ap_then_play);
-                    // you started something else meanwhile, or switched autoplay off
-                    if a.queue.current().map(|t| &t.key) != Some(&seed.key) || !a.autoplay {
-                        paint_queue(&mut a);
-                        return;
-                    }
-                    if picks.is_empty() {
-                        a.ap_failed = Some(seed.key.clone());
-                    }
-                    let mut picks = picks;
-                    track::apply_fixes(&a.web.prefs, &mut picks);
-                    let n = picks.len();
-                    a.queue.items.extend(picks.into_iter().map(queue::QItem::auto));
-                    paint_queue(&mut a);
-                    // (said, as the web app says it: how many, and what's next)
-                    if n > 0 {
-                        if let (Some(next), Some(ui)) = (a.queue.qi.and_then(|i| a.queue.items.get(i + 1)).map(|q| q.t.clone()), a.ui.upgrade()) {
-                            ui.set_status(format!("Autoplay added {} to the queue. Up next: {} by {}.", plural(n, "similar song", "similar songs"), next.title, next.artist).into());
-                        }
-                    }
-                    save_session(&a);
-                    then_play && a.queue.qi.is_some_and(|i| i + 1 < a.queue.items.len())
-                };
-                if go {
-                    step(&shared, 1);
-                }
-            });
-        });
+        let _ = weak.upgrade_in_event_loop(move |_| SHARED.with(|s| { if let Some(sh) = s.borrow().clone() { autoplay_done(&sh, &seed, picks); } }));
     });
     true
+}
+
+/// Autoplay's picks in: after the queue (unless you started something else meanwhile, or switched it
+/// off), said, and on to them if that was asked
+fn autoplay_done(shared: &Shared, seed: &Track, picks: Vec<Track>) {
+    let go = {
+        let mut a = shared.borrow_mut();
+        a.ap_busy = false;
+        let then_play = std::mem::take(&mut a.ap_then_play);
+        // you started something else meanwhile, or switched autoplay off
+        if a.queue.current().map(|t| &t.key) != Some(&seed.key) || !a.autoplay {
+            paint_queue(&mut a);
+            return;
+        }
+        if picks.is_empty() {
+            a.ap_failed = Some(seed.key.clone());
+        }
+        let mut picks = picks;
+        track::apply_fixes(&a.web.prefs, &mut picks);
+        let n = picks.len();
+        a.queue.items.extend(picks.into_iter().map(queue::QItem::auto));
+        paint_queue(&mut a);
+        // (said, as the web app says it: how many, and what's next)
+        if n > 0 {
+            if let (Some(next), Some(ui)) = (a.queue.qi.and_then(|i| a.queue.items.get(i + 1)).map(|q| q.t.clone()), a.ui.upgrade()) {
+                ui.set_status(format!("Autoplay added {} to the queue. Up next: {} by {}.", plural(n, "similar song", "similar songs"), next.title, next.artist).into());
+            }
+        }
+        save_session(&a);
+        then_play && a.queue.qi.is_some_and(|i| i + 1 < a.queue.items.len())
+    };
+    if go {
+        step(shared, 1);
+    }
 }
 
 // four times a second: the position, the lyric being sung, counting the play, autoplay, the
@@ -8268,6 +8331,7 @@ fn safe_set(shared: &Shared, on: bool) {
     // the Streamer Mode page takes the place of the pages it stands in for while it's on (and on one of
     // them, it opens); off, from it, back to the Library (as the web app's streamerPageSync)
     let page = shared.borrow().page.clone();
+    STREAM_BUILT.with(|b| b.borrow_mut().clear());
     nav_paint(shared);
     paint_sides(&mut shared.borrow_mut());
     if on && matches!(page.as_str(), "discover" | "rediscover" | "library" | "favourites" | "sets" | "artists" | "playlist" | "artist") { open_streamer(shared); }
