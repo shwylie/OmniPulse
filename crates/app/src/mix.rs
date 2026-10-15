@@ -756,7 +756,7 @@ mod tests {
     fn m(bpm: f64, first_beat: f64, downbeat: usize, conf: f64) -> Measured {
         let period = 60_000.0 / bpm;
         let beats: Vec<f64> = (0..64).map(|i| first_beat + i as f64 * period).collect();
-        Measured { from_ms: 0, to_ms: 60_000, rhythm: Rhythm { bpm, first_beat_ms: first_beat, period_ms: period, beats, downbeat, tempo_confidence: conf, key: "A minor".into(), camelot: "8A".into(), key_confidence: 0.5, bar_db: Vec::new(), bar_beat: Vec::new(), bar_chroma: Vec::new() }, v: VERSION }
+        Measured { from_ms: 0, to_ms: 60_000, rhythm: Rhythm { bpm, first_beat_ms: first_beat, period_ms: period, beats, downbeat, tempo_confidence: conf, key: "A minor".into(), camelot: "8A".into(), key_confidence: 0.5, downbeat_confidence: 1.0, bar_db: Vec::new(), bar_beat: Vec::new(), bar_chroma: Vec::new() }, v: VERSION }
     }
 
     #[test]
@@ -1498,4 +1498,33 @@ fn pair_probe() {
     println!("melody: {:#?}", plan_melody(&a, end, pos, &b));
     println!("structure: {:#?}", plan_structure(&a, end, pos, &b));
     println!("grid: {:#?}", plan(&a, end, pos, &b, 16));
+}
+
+/// Where a song's sections change, against its bars as tracked: its biggest jumps in loudness (each
+/// beat's next 8 against its last 8), with the beat of the bar each falls on (1: the downbeat as
+/// tracked). Section changes land on bar 1 near always: a downbeat that's off shows them all on 3.
+/// OMNIPULSE_PROBE_IDS=1,2 cargo test --release -p omnipulse --bin OmniPulse-native downbeat_probe -- --ignored --nocapture
+#[test]
+#[ignore]
+fn downbeat_probe() {
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    for id in std::env::var("OMNIPULSE_PROBE_IDS").unwrap().split(',') {
+        let m = omnipulse_core::rhythm::known(&format!("full:{id}")).expect("measured whole");
+        let (mono, rate) = rt.block_on(omnipulse_core::loudness::mono_start("soundcloud", id, 1200.0)).unwrap();
+        let beats: Vec<f64> = m.rhythm.beats.iter().map(|b| m.from_ms as f64 + b).collect();
+        let loud: Vec<f64> = beats.windows(2).map(|w| {
+            let (i, j) = ((w[0] / 1000.0 * rate as f64) as usize, ((w[1] / 1000.0 * rate as f64) as usize).min(mono.len()));
+            if j <= i { return -60.0; }
+            (10.0 * (mono[i..j].iter().map(|v| (*v as f64).powi(2)).sum::<f64>() / (j - i) as f64).max(1e-12).log10()).max(-60.0)
+        }).collect();
+        let mut jumps: Vec<(f64, usize)> = (8..loud.len().saturating_sub(8)).map(|i| ((loud[i..i + 8].iter().sum::<f64>() - loud[i - 8..i].iter().sum::<f64>()).abs() / 8.0, i)).collect();
+        // (each change once: the biggest within a bar of it)
+        jumps.sort_by(|a, b| b.0.total_cmp(&a.0));
+        let mut kept: Vec<(f64, usize)> = Vec::new();
+        for j in jumps { if j.0 >= 2.0 && kept.iter().all(|k| k.1.abs_diff(j.1) > 3) { kept.push(j); } }
+        let mut by = [0.0f64; 4];
+        for (d, i) in &kept { by[(i + 4 - m.rhythm.downbeat % 4) % 4] += d; }
+        println!("{id}: {:.2} BPM, downbeat beat {}: changes by beat of the bar (1..4) {:?}", m.rhythm.bpm, m.rhythm.downbeat, by.map(|x| x.round()));
+        for (d, i) in kept.iter().take(10) { println!("   {:6.1} s  {:+.1} dB  beat {}", beats[*i] / 1000.0, d, (i + 4 - m.rhythm.downbeat % 4) % 4 + 1); }
+    }
 }

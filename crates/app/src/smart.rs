@@ -125,6 +125,8 @@ pub fn grid_trusted(s: &Side) -> bool {
     let Some(m) = s.rhythm else { return false };
     let bpm = m.rhythm.bpm;
     if m.rhythm.tempo_confidence < TRUST_CONFIDENCE || !(60.0..=200.0).contains(&bpm) || m.rhythm.beats.len() < 32 { return false; }
+    // (its bars sure too: a downbeat a beat out matches the tempo, but not the bars)
+    if m.rhythm.downbeat_confidence < omnipulse_core::rhythm::DOWNBEAT_SURE { return false; }
     match s.stated_bpm {
         Some(st) => [1.0, 2.0, 0.5].iter().any(|k| ((bpm * k) / st - 1.0).abs() <= STATED_WITHIN),
         None => true,
@@ -217,7 +219,7 @@ mod tests {
     fn song(bpm: f64, bars: &[f32], conf: f64, camelot: &str) -> Measured {
         let period = 60_000.0 / bpm;
         let beats: Vec<f64> = (0..bars.len() * 4 + 4).map(|i| i as f64 * period).collect();
-        Measured { from_ms: 0, to_ms: (beats.len() as f64 * period) as u64, rhythm: Rhythm { bpm, first_beat_ms: 0.0, period_ms: period, beats, downbeat: 0, tempo_confidence: conf, key: String::new(), camelot: camelot.into(), key_confidence: 0.8, bar_db: bars.to_vec(), bar_beat: vec![1.0; bars.len()], bar_chroma: Vec::new() }, v: omnipulse_core::rhythm::VERSION }
+        Measured { from_ms: 0, to_ms: (beats.len() as f64 * period) as u64, rhythm: Rhythm { bpm, first_beat_ms: 0.0, period_ms: period, beats, downbeat: 0, tempo_confidence: conf, key: String::new(), camelot: camelot.into(), key_confidence: 0.8, downbeat_confidence: 1.0, bar_db: bars.to_vec(), bar_beat: vec![1.0; bars.len()], bar_chroma: Vec::new() }, v: omnipulse_core::rhythm::VERSION }
     }
 
     fn levels(intro: usize, body: usize, outro: usize) -> Vec<f32> {

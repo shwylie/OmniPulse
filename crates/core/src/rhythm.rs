@@ -20,6 +20,8 @@ const WIN: usize = 512; // ~23 ms
 const FPS: f64 = RATE as f64 / HOP as f64;
 /// How much a song's section changes count, against its bass, for which beat of four is its first
 const DOWNBEAT_CHANGE_WEIGHT: f64 = 2.0;
+/// The share of section changes on one beat that makes it the downbeat for sure
+pub const DOWNBEAT_SURE: f64 = 0.45;
 const CHROMA_WIN: usize = 8192;
 const CHROMA_HOP: usize = 2048;
 
@@ -39,6 +41,10 @@ pub struct Rhythm {
     pub key: String,
     pub camelot: String,
     pub key_confidence: f64,
+    /// how sure the downbeat is (0..1): the share of the song's section changes that land on it (a
+    /// drop, a breakdown, a new verse: on a bar's first beat, near always). Low: a guess from its bass
+    #[serde(default)]
+    pub downbeat_confidence: f64,
     /// each bar's loudness (dB, from the first downbeat on): where the intro ends and the outro begins
     #[serde(default)]
     pub bar_db: Vec<f32>,
@@ -308,17 +314,25 @@ pub fn analyse(mono: &[f32], rate: u32) -> Option<Rhythm> {
         if j <= i { return -120.0; }
         (10.0 * (x[i..j].iter().map(|v| (*v as f64) * (*v as f64)).sum::<f64>() / (j - i) as f64).max(1e-12).log10()).max(-60.0)
     }).collect();
+    // (each change once, where it's biggest: its next 8 beats against its last 8, the biggest within a
+    // bar of it kept; 2 dB and up, so the beat-to-beat wobble of a steady part doesn't count)
+    let mut jumps: Vec<(f64, usize)> = (8..loud.len().saturating_sub(8)).map(|i| ((loud[i..i + 8].iter().sum::<f64>() - loud[i - 8..i].iter().sum::<f64>()).abs() / 8.0, i)).filter(|j| j.0 >= 2.0).collect();
+    jumps.sort_by(|a, b| b.0.total_cmp(&a.0));
     let mut change = [0.0f64; 4];
-    for i in 4..loud.len().saturating_sub(4) {
-        let (before, after) = (loud[i - 4..i].iter().sum::<f64>() / 4.0, loud[i..i + 4].iter().sum::<f64>() / 4.0);
-        // (only a real change counts: 3 dB and up, so the beat-to-beat wobble of a steady part doesn't)
-        let d = (after - before).abs();
-        if d >= 3.0 { change[i % 4] += d; }
+    let mut kept: Vec<usize> = Vec::new();
+    for (d, i) in jumps {
+        if kept.iter().all(|k| k.abs_diff(i) > 3) { kept.push(i); change[i % 4] += d; }
     }
     let share = |v: &[f64; 4]| { let t: f64 = v.iter().sum(); if t > 0.0 { v.map(|x| x / t) } else { [0.25; 4] } };
     let (bass_share, change_share) = (share(&phase), share(&change));
+    // (the changes decisive: most of them on one beat, well ahead of the next: that's the downbeat,
+    // whatever the bass says (a kick on 1 and 3 can't tell them apart); else both, and not sure)
+    let mut order: Vec<usize> = (0..4).collect();
+    order.sort_by(|&a, &b| change_share[b].total_cmp(&change_share[a]));
+    let decisive = change_share[order[0]] >= DOWNBEAT_SURE && change_share[order[0]] >= 1.4 * change_share[order[1]];
     let score: Vec<f64> = (0..4).map(|k| bass_share[k] + DOWNBEAT_CHANGE_WEIGHT * change_share[k]).collect();
-    let downbeat = (0..4).max_by(|&a, &b| score[a].total_cmp(&score[b])).unwrap_or(0);
+    let downbeat = if decisive { order[0] } else { (0..4).max_by(|&a, &b| score[a].total_cmp(&score[b])).unwrap_or(0) };
+    let downbeat_confidence = if decisive { change_share[order[0]] } else { change_share[downbeat].min(DOWNBEAT_SURE - 0.01) };
     if std::env::var_os("OMNIPULSE_RHYTHM_DEBUG").is_some() {
         let old = (0..4).max_by(|&a, &b| phase[a].total_cmp(&phase[b])).unwrap_or(0);
         eprintln!("rhythm debug: downbeat by bass {old}, now {downbeat}; bass {:?} changes {:?}", bass_share.map(|v| (v * 100.0).round()), change_share.map(|v| (v * 100.0).round()));
@@ -361,6 +375,7 @@ pub fn analyse(mono: &[f32], rate: u32) -> Option<Rhythm> {
         key: key_name(tonic, minor),
         camelot: camelot(tonic, minor),
         key_confidence: kconf,
+        downbeat_confidence,
         bar_db,
         bar_beat,
         bar_chroma,
@@ -382,7 +397,7 @@ pub struct Measured {
 /// (2-3: beats moved half a beat where the bass hit harder between them, wrongly: an off-beat bass
 /// louder than the kick isn't a beat tracked off it; 4: that undone, the downbeat from where the
 /// sections change too)
-pub const VERSION: u32 = 5;
+pub const VERSION: u32 = 6;
 
 static STORE: std::sync::Mutex<Option<std::collections::HashMap<String, Measured>>> = std::sync::Mutex::new(None);
 
