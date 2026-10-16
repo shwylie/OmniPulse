@@ -9474,7 +9474,6 @@ fn taskbar_widget(shared: &Shared, ui: &AppWindow, on: bool) {
     });
 }
 
-/// The window's handle, once it exists (for the taskbar buttons)
 /// The window moved (HTCAPTION) or resized (an edge's hit-test code) by Windows, as from its own title bar
 /// or frame. Not winit's drag_window: it marks a drag begun and clears that only when Windows' move ends,
 /// so a press whose move never began (the button up before it, as when another window took the focus
@@ -9502,6 +9501,7 @@ fn os_drag(ui: &AppWindow, ht: usize) {
     }
 }
 
+/// The window's handle, once it exists (for the taskbar buttons)
 fn window_hwnd(ui: &AppWindow) -> Option<isize> {
     use slint::winit_030::winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
     use slint::winit_030::WinitWindowAccessor;
