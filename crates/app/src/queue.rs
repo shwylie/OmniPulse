@@ -190,6 +190,8 @@ impl Queue {
         if let Some((window, now)) = recent {
             shuffled = space_recent(shuffled, last_played, window, now);
         }
+        // (the platforms taking turns, as far as they can)
+        let shuffled = spread_platforms(shuffled);
         for (&i, t) in at.iter().zip(shuffled) {
             self.items[i] = QItem::mine(t);
         }
@@ -314,6 +316,34 @@ pub fn alternate_platforms(list: Vec<Track>) -> Vec<Track> {
     out
 }
 
+/// Every track kept, the platforms taking turns as far as they can (SoundCloud, Spotify, YouTube,
+/// SoundCloud...), each spread evenly through the list by its share of it (one with half the tracks,
+/// every other one): each next from the platform furthest behind its share that isn't the one just
+/// played (each one's own order kept); once only one has any left, the rest of it
+pub fn spread_platforms(list: Vec<Track>) -> Vec<Track> {
+    let mut by: Vec<(&'static str, std::collections::VecDeque<Track>, f64, f64)> = Vec::new();
+    for t in list {
+        let p = t.plat();
+        match by.iter_mut().find(|x| x.0 == p) { Some(x) => x.1.push_back(t), None => by.push((p, std::collections::VecDeque::from([t]), 0.0, 0.0)) }
+    }
+    let n: usize = by.iter().map(|x| x.1.len()).sum();
+    for x in by.iter_mut() { x.2 = x.1.len() as f64 / n.max(1) as f64; }
+    let mut out = Vec::with_capacity(n);
+    let mut last = "";
+    while out.len() < n {
+        let step = (out.len() + 1) as f64;
+        let others = by.iter().any(|x| x.0 != last && !x.1.is_empty());
+        // (how far behind its share it is; ties: the first in the list's own order)
+        let pick = (0..by.len()).filter(|&i| !by[i].1.is_empty() && (by[i].0 != last || !others))
+            .max_by(|&a, &b| (by[a].2 * step - by[a].3).total_cmp(&(by[b].2 * step - by[b].3)).then(b.cmp(&a)));
+        let Some(i) = pick else { break };
+        out.push(by[i].1.pop_front().unwrap());
+        by[i].3 += 1.0;
+        last = by[i].0;
+    }
+    out
+}
+
 /// Shuffling your Library or a playlist (as the web app's spaceRecent): what you've heard within the
 /// time frame comes up by how much of the list it is: 10% of it, once every 10 songs; 50%, once every
 /// 2. The rest play in between, in the order given.
@@ -394,6 +424,21 @@ pub fn take_turns(mut lists: Vec<(&'static str, Vec<Track>)>, last_plat: &str, t
 mod tests {
     use super::*;
     use crate::track::Src;
+
+    #[test]
+    fn platforms_spread_every_track_kept() {
+        let t = |k: &str, p: &str| { let src = match p { "sp" => Src::Spotify(format!("spotify:track:{k}")), "yt" => Src::YouTube(k.into()), _ => Src::SoundCloud(k.len() as u64) }; Track { key: k.into(), src, ..Default::default() } };
+        let list = vec![t("s1", "sc"), t("s2", "sc"), t("s3", "sc"), t("s4", "sc"), t("p1", "sp"), t("p2", "sp"), t("y1", "yt"), t("y2", "yt")];
+        let out: Vec<String> = spread_platforms(list).into_iter().map(|x| x.key).collect();
+        assert_eq!(out.len(), 8);
+        assert_eq!(out[..3], ["s1", "p1", "y1"]);
+        // (never the same twice running while another's left)
+        let plat = |k: &str| k.chars().next().unwrap();
+        assert!(out.windows(2).all(|w| plat(&w[0]) != plat(&w[1])), "{out:?}");
+        // (each one's own order kept)
+        let scs: Vec<&String> = out.iter().filter(|k| k.starts_with('s')).collect();
+        assert_eq!(scs, ["s1", "s2", "s3", "s4"]);
+    }
 
     #[test]
     fn a_request_goes_ahead_of_the_list() {
