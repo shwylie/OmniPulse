@@ -4563,6 +4563,11 @@ fn smart_max_ms(prefs: &serde_json::Value) -> u64 {
 const SMART_FIXED_MS: u64 = 6000;
 
 thread_local! {
+    /// the song the next one was measured ahead for (once each)
+    static NEXT_AHEAD: RefCell<String> = const { RefCell::new(String::new()) };
+}
+
+thread_local! {
     /// the pair coming up (the one playing, the next one) and what's decided for it, once: a blend on
     /// the beat (its plan), or a fade (None), and why
     static SMART_PAIR: RefCell<Option<(String, String, Option<mix::Plan>, String)>> = const { RefCell::new(None) };
@@ -4933,6 +4938,8 @@ fn tick(shared: &Shared, events: &std::sync::mpsc::Receiver<Event>, n: u64) {
             ui.set_status("".into());
         }
     });
+    // (a widget's settings page open: its pop-out preview kept to what's on the page, as it plays)
+    widget_preview(shared);
     let engine = shared.borrow().engine.clone();
     if !shared.borrow().loaded {
         return; // a restored session, not started yet: the bar shows where it was
@@ -4988,9 +4995,23 @@ fn tick(shared: &Shared, events: &std::sync::mpsc::Receiver<Event>, n: u64) {
         if !here { TP_PREVIEW.with(|p| p.borrow_mut().take()); }
         else if pos + 150 >= until && !engine.is_paused() { TP_PREVIEW.with(|p| p.borrow_mut().take()); toggle(shared); ui.set_status("Preview over.".into()); }
     }
+    // (a song still loading: the engine's place is the one before's; its lyrics wait for its own)
+    let loading = ui.get_track_loading();
+    // Smart Transitions: the next song measured as soon as the transition into this one is over (not
+    // later on in this one), so it's ready for the next transition
+    if !loading && pos > 3000 && !engine.mixing() && !engine.crossfading() && smart_on(&shared.borrow().web.prefs) {
+        let (cur, next) = { let a = shared.borrow(); (a.queue.current().map(|t| t.key.clone()), a.queue.qi.and_then(|i| a.queue.items.get(i + 1)).map(|q| q.t.clone())) };
+        if let (Some(cur), Some(next)) = (cur, next) {
+            if NEXT_AHEAD.with(|n| n.replace(cur.clone())) != cur {
+                if smart_same_source(&next) { rhythm_ahead(shared, next.clone()); }
+                loud_ahead(shared, next);
+            }
+        }
+    }
     let near_end = {
         let mut a = shared.borrow_mut();
-        if let Some(i) = a.lyrics.iter().rposition(|l| l.ms > 0 && l.ms <= pos + 200).filter(|_| mix_show_pos().is_none()) {
+        if loading { if ui.get_lyric_on() != -1 { ui.set_lyric_on(-1); } }
+        else if let Some(i) = a.lyrics.iter().rposition(|l| l.ms > 0 && l.ms <= pos + 200).filter(|_| mix_show_pos().is_none()) {
             if ui.get_lyric_on() != i as i32 {
                 ui.set_lyric_on(i as i32);
             }
@@ -5148,6 +5169,8 @@ fn restore_session(shared: &Shared) {
 fn push_out(shared: &Shared, presence: bool) {
     let a = shared.borrow();
     let (pos, dur, playing) = (a.engine.position_ms(), a.engine.duration_ms(), a.loaded && !a.engine.is_paused());
+    // (a song still loading: the engine's place and length are the one before's: its own start, not those)
+    let (pos, dur) = if a.ui.upgrade().is_some_and(|u| u.get_track_loading()) { (0, 0) } else { (pos, dur) };
     let t = a.queue.current();
     let prefs = &a.web.prefs;
     if integrations::set(prefs, "widget") || integrations::set(prefs, "req") || integrations::set(prefs, "lyricsWidget") {
@@ -5809,6 +5832,12 @@ fn panel_press(shared: &Shared, key: &str) {
             }
             "Back to 10 waiting, 2 per viewer (Save keeps it).".to_string()
         }
+        // the widget being set up, in a window of its own
+        "previewOpen" => {
+            let name = PF_EDIT.with(|e| e.borrow().as_ref().and_then(|x| x.0.strip_prefix("panel:").map(String::from))).unwrap_or_default();
+            widget_preview_open(shared, &name);
+            return;
+        }
         "alertsSwitch" => {
             set_toggle(shared, "alertsOn");
             return;
@@ -6104,6 +6133,62 @@ fn hide_applied(shared: &Shared) {
 }
 
 /// Saved: into the prefs, and what uses them started again with them
+/// The settings page open, if it's one of a widget's (the Stream Widget, its alerts, the Lyrics Widget): the
+/// widget's state with what's on the page so far, for its pop-out preview; none open, the preview over
+fn widget_preview(shared: &Shared) {
+    let Some((id, vals)) = PF_EDIT.with(|e| e.borrow().clone()) else {
+        if omnipulse_core::widget::preview_on() { omnipulse_core::widget::preview_set(None); }
+        return;
+    };
+    let Some(name) = id.strip_prefix("panel:") else { return };
+    if !matches!(name, "widget" | "lyricsw" | "alerts" | "alertlist") && !name.starts_with("alert:") { return; }
+    let a = shared.borrow();
+    let mut prefs = a.web.prefs.clone();
+    let changes: Vec<(String, serde_json::Value)> = if let Some(k) = name.strip_prefix("alert:") {
+        alerts::edit_save(&a.web.prefs, k, &vals).into_iter().map(|(k, v)| (k.to_string(), v)).collect()
+    } else if name == "alertlist" {
+        alerts::list_save(&a.web.prefs, &vals).into_iter().map(|(k, v)| (k.to_string(), v)).collect()
+    } else {
+        vals.into_iter().collect()
+    };
+    if let Some(o) = prefs.as_object_mut() {
+        for (k, v) in changes { o.insert(k, v); }
+        // (shown whether they're switched on yet or not)
+        for k in ["widget", "lyricsWidget", "alertsOn"] { o.insert(k.into(), serde_json::json!(true)); }
+    }
+    let loading = a.ui.upgrade().is_some_and(|u| u.get_track_loading());
+    let (pos, dur) = if loading { (0, 0) } else { (a.engine.position_ms(), a.engine.duration_ms()) };
+    let by = a.queue.qi.and_then(|i| a.queue.items.get(i)).map(|q| q.by.as_str()).unwrap_or("");
+    let mut state = integrations::widget_state(&prefs, a.queue.current(), by, pos, dur, a.loaded && !a.engine.is_paused(), (&a.accent.0, &a.accent.1), &a.lyrics);
+    // (an alert's page: that one shown over and over; the alerts' pages: the first of them)
+    let kind = name.strip_prefix("alert:").map(String::from).or_else(|| matches!(name, "alerts" | "alertlist").then(|| alerts::order(&prefs).into_iter().next()).flatten());
+    if let (Some(o), Some(k)) = (state.as_object_mut(), kind) {
+        let test = alerts::KINDS.iter().find(|x| x.0 == k).and_then(|x| serde_json::from_str::<serde_json::Value>(x.2).ok()).unwrap_or_else(|| serde_json::json!({ "user": "Someone" }));
+        let mut al = test.as_object().cloned().unwrap_or_default();
+        al.insert("type".into(), serde_json::json!(k));
+        o.insert("preview_alert".into(), serde_json::Value::Object(al));
+    }
+    omnipulse_core::widget::preview_set(Some(state));
+}
+
+/// The pop-out preview: the widget being set up, in a window of its own (Edge's app window, no browser
+/// around it; else the default browser), as it'll look, changing as the page does
+fn widget_preview_open(shared: &Shared, name: &str) {
+    let prefs = shared.borrow().web.prefs.clone();
+    let port = prefs["widgetPort"].as_u64().unwrap_or(7878);
+    // (its server, if neither widget's on yet: for the preview)
+    let mut on = prefs.clone();
+    if let Some(o) = on.as_object_mut() { o.insert("widget".into(), serde_json::json!(true)); }
+    if !omnipulse_core::widget::preview_on() || integrations::widget_start(&prefs).is_none() { let _ = integrations::widget_start(&on); }
+    widget_preview(shared);
+    let (path, w, h) = if name == "lyricsw" { ("lyrics", 1100, 420) } else { ("", 720, 360) };
+    let url = format!("http://127.0.0.1:{port}/{path}?preview=1");
+    let profile = omnipulse_core::data_dir().map(|d| d.join("widget-preview")).unwrap_or_default();
+    let edge = std::process::Command::new("cmd").args(["/C", "start", "", "msedge", &format!("--app={url}"), &format!("--window-size={w},{h}"), &format!("--user-data-dir={}", profile.display())]).spawn();
+    if edge.is_err() { let _ = std::process::Command::new("cmd").args(["/C", "start", "", &url]).spawn(); }
+    if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_status("The preview's open: it changes as you change the settings, before you save them.".into()); }
+}
+
 fn panel_save(shared: &Shared, name: &str, vals: serde_json::Map<String, serde_json::Value>) {
     // (the alerts: the ones switched off; an alert's page, its own settings, then back to the list)
     if name == "alertlist" || name.starts_with("alert:") {
@@ -10774,6 +10859,7 @@ fn main() -> Result<(), slint::PlatformError> {
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("qset") { vec![(9, "play"), (11, "queue"), (14, "nav:settings"), (15, "cat:App & Look"), (16, "scroll:420"), (18, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("nowslim") { vec![(9, "play"), (11, "queue"), (12, "now"), (15, "size:860:720"), (17, "size:1100:720"), (19, "size:1500:860"), (21, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("smartmem") { vec![(9, "smartprep"), (10, "play"), (12, "mem"), (37, "mem"), (38, "nearend"), (62, "mem"), (87, "mem"), (88, "nearend"), (112, "mem"), (137, "mem"), (138, "nearend"), (162, "mem"), (187, "mem"), (188, "nearend"), (212, "mem"), (237, "mem"), (238, "nearend"), (262, "mem"), (287, "mem"), (288, "nearend"), (312, "mem"), (337, "mem"), (338, "nearend"), (362, "mem"), (387, "mem"), (388, "nearend"), (412, "mem"), (413, "end")] }
+            else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("lyrprev") { vec![(8, "playtitle"), (9, "widgeton"), (10, "openpanel:lyricsw"), (12, "lyrdraft"), (150, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("lyricsw") { vec![(8, "playtitle"), (9, "widgeton"), (20, "lyrshow"), (40, "lyrshow"), (90, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("gamealert") { vec![(8, "play"), (9, "widgeton"), (14, "gametest"), (21, "gametest"), (28, "gametest"), (35, "gametest"), (42, "gametest"), (49, "gametest"), (56, "gametest"), (63, "gametest"), (70, "gametest"), (77, "gametest"), (84, "gametest"), (91, "gametest"), (98, "gametest"), (105, "gametest"), (112, "gametest"), (119, "gametest"), (121, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("scplay") { vec![(9, "play"), (18, "spcheck3"), (22, "spcheck3"), (23, "end")] }
@@ -11227,6 +11313,15 @@ fn main() -> Result<(), slint::PlatformError> {
                     let list: Vec<Track> = s.borrow().library.iter().filter(|t| t.title.to_lowercase().contains(&want)).take(1).cloned().collect();
                     println!("selftest: playing {:?}", list.iter().map(|t| t.title.clone()).collect::<Vec<_>>());
                     play_list(&s, list, 0);
+                }
+                // the Lyrics Widget's page with some changes on it, not saved (for its preview)
+                "lyrdraft" => {
+                    PF_EDIT.with(|e| if let Some((_, v)) = e.borrow_mut().as_mut() {
+                        for (k, x) in [("lyricsOutline", serde_json::json!(true)), ("lyricsOutlineSize", serde_json::json!(5)), ("lyricsTextGrad", serde_json::json!(true)), ("lyricsColor2", serde_json::json!("#ffd166")),
+                            ("lyricsOwnHi", serde_json::json!(true)), ("lyricsHi", serde_json::json!("#ff4dd2")), ("lyricsHiGrad", serde_json::json!(true)), ("lyricsHi2", serde_json::json!("#4cc9f0")),
+                            ("lyricsBox", serde_json::json!(true)), ("lyricsBoxGrad", serde_json::json!(true)), ("lyricsBoxOpacity", serde_json::json!(0.8)), ("lyricsFont", serde_json::json!("bangers")), ("lyricsTransform", serde_json::json!("uppercase"))] { v.insert(k.into(), x); }
+                    });
+                    println!("selftest: lyrics draft set, saved outline {}", s.borrow().web.prefs["lyricsOutline"]);
                 }
                 "lyrshow" => { let a = s.borrow(); println!("selftest: lyrics {} lines (timed {}), at {} ms", a.lyrics.len(), a.lyrics.iter().filter(|l| l.ms > 0).count(), a.engine.position_ms()); }
                 // Alerts > Game Changes > Test (OMNIPULSE_SELFTEST_ALERT: another kind)

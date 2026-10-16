@@ -278,6 +278,12 @@ pub fn widget_update(prefs: &Value, t: Option<&Track>, by: &str, pos_ms: u64, du
     if !set(prefs, "widget") && !set(prefs, "lyricsWidget") {
         return;
     }
+    core::widget::widget_update(widget_state(prefs, t, by, pos_ms, dur_ms, playing, accent, lyrics));
+}
+
+/// What the widgets are sent: the track, where it's up to, its look, the alerts' settings, the lyrics
+#[allow(clippy::too_many_arguments)]
+pub fn widget_state(prefs: &Value, t: Option<&Track>, by: &str, pos_ms: u64, dur_ms: u64, playing: bool, accent: (&str, &str), lyrics: &[crate::player::Line]) -> Value {
     // (hidden until the next track)
     let t = t.filter(|t| WIDGET_HIDDEN.lock().map(|h| h.is_empty() || *h != t.key).unwrap_or(true));
     let look = json!({
@@ -308,7 +314,8 @@ pub fn widget_update(prefs: &Value, t: Option<&Track>, by: &str, pos_ms: u64, du
     }
     // the lyrics widget's: the playing song's lines (ms, words) and its look (Settings > Streaming > Lyrics Widget)
     if set(prefs, "lyricsWidget") {
-        if let (Some(o), Some(t)) = (state.as_object_mut(), t) {
+        let none = Track::default();
+        if let (Some(o), Some(t)) = (state.as_object_mut(), t.or(Some(&none))) {
             let s = |k: &str, d: &str| prefs[k].as_str().unwrap_or(d).to_string();
             o.insert("lyrics".into(), json!({
                 "key": t.key, "lines_n": lyrics.len(),
@@ -317,13 +324,21 @@ pub fn widget_update(prefs: &Value, t: Option<&Track>, by: &str, pos_ms: u64, du
                 "size": prefs["lyricsSize"].as_u64().unwrap_or(48), "font": s("lyricsFont", "sans"),
                 "align": s("lyricsAlign", "center"), "place": s("lyricsPlace", ""), "style": s("lyricsStyle", "karaoke"),
                 "color": s("lyricsColor", "#ffffff"), "hi": if set(prefs, "lyricsOwnHi") { s("lyricsHi", "#8e9bff") } else { accent.0.to_string() },
-                "dim": prefs["lyricsDim"].as_f64().unwrap_or(0.45), "box": set(prefs, "lyricsBox"), "upper": set(prefs, "lyricsUpper"),
+                "dim": prefs["lyricsDim"].as_f64().unwrap_or(0.45), "box": set(prefs, "lyricsBox"),
+                // (Capitals, before Text Transform replaced it: uppercase)
+                "transform": prefs["lyricsTransform"].as_str().map(String::from).unwrap_or_else(|| if set(prefs, "lyricsUpper") { "uppercase".into() } else { "none".into() }),
                 "shadow": on(prefs, "lyricsShadow"), "title": on(prefs, "lyricsTitle"), "offset": prefs["lyricsOffset"].as_i64().unwrap_or(0),
-                "hidePaused": on(prefs, "lyricsHidePaused"),
+                "hidePaused": on(prefs, "lyricsHidePaused"), "hideNone": on(prefs, "lyricsHideNone"),
+                "textGrad": set(prefs, "lyricsTextGrad"), "color2": s("lyricsColor2", "#9ad1ff"),
+                "hiGrad": set(prefs, "lyricsHiGrad"), "hi2": s("lyricsHi2", "#ff8ad8"), "gradDir": s("lyricsGradDir", "90deg"),
+                "outline": set(prefs, "lyricsOutline"), "outlineSize": prefs["lyricsOutlineSize"].as_u64().unwrap_or(4), "outlineColor": s("lyricsOutlineColor", "#000000"),
+                "outlineOpacity": prefs["lyricsOutlineOpacity"].as_f64().unwrap_or(1.0),
+                "boxColor": s("lyricsBoxColor", "#0a0a0e"), "boxGrad": set(prefs, "lyricsBoxGrad"), "boxColor2": s("lyricsBoxColor2", "#2a1450"),
+                "boxDir": s("lyricsBoxDir", "135deg"), "boxOpacity": prefs["lyricsBoxOpacity"].as_f64().unwrap_or(0.62),
             }));
         }
     }
-    core::widget::widget_update(state);
+    state
 }
 
 /// Two colours from a cover (its upper-left and lower-right halves), bright enough to tint the

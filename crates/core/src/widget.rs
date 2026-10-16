@@ -251,7 +251,12 @@ pub fn widget_serve(listener: TcpListener, gen: u64) {
                 }
                 match path {
                     "/now.json" => {
+                        let preview = query.split('&').any(|q| q == "preview=1");
                         let mut v = WIDGET_STATE.lock().ok().and_then(|g| g.clone()).unwrap_or_else(|| json!({ "playing": false }));
+                        // (the preview: the settings being edited over it)
+                        if preview {
+                            if let (Some(o), Some(Value::Object(p))) = (v.as_object_mut(), PREVIEW.lock().ok().and_then(|g| g.clone())) { o.extend(p); }
+                        }
                         if let Some(o) = v.as_object_mut() {
                             o.insert("v".to_string(), Value::String(widget_version()));
                             o.insert("alerts".to_string(), Value::Array(ALERTS.lock().unwrap().iter().cloned().collect()));
@@ -309,6 +314,18 @@ pub fn widget_serve(listener: TcpListener, gen: u64) {
             Err(_) => std::thread::sleep(Duration::from_millis(200)),
         }
     }
+}
+
+/// The settings page's preview (the app's pop-out): what's on the page so far, unsaved, over the widget's
+/// state, for a page asking with ?preview=1. None: no page open, the state as it is
+static PREVIEW: std::sync::Mutex<Option<Value>> = std::sync::Mutex::new(None);
+
+pub fn preview_set(v: Option<Value>) {
+    if let Ok(mut p) = PREVIEW.lock() { *p = v; }
+}
+
+pub fn preview_on() -> bool {
+    PREVIEW.lock().map(|p| p.is_some()).unwrap_or(false)
 }
 
 /// remote: bots on other devices may send alerts too (they need key); otherwise only this PC is heard

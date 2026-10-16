@@ -45,7 +45,7 @@ fn keys(name: &str) -> Vec<(&'static str, Value)> {
         "limits" => vec![("reqMax", json!(10)), ("reqPerUser", json!(2))],
         "discord" => vec![("presArt", json!(true)), ("presTime", json!(true)), ("presListen", json!(true)), ("presAsk", json!(false)), ("presLink", json!(true))],
         "together" => vec![("togetherName", json!(""))],
-        "lyricsw" => vec![("lyricsLines", json!(3)), ("lyricsBefore", json!(false)), ("lyricsSize", json!(48)), ("lyricsFont", json!("sans")), ("lyricsAlign", json!("center")), ("lyricsPlace", json!("")), ("lyricsStyle", json!("karaoke")), ("lyricsColor", json!("#ffffff")), ("lyricsOwnHi", json!(false)), ("lyricsHi", json!("#8e9bff")), ("lyricsDim", json!(0.45)), ("lyricsBox", json!(false)), ("lyricsUpper", json!(false)), ("lyricsShadow", json!(true)), ("lyricsTitle", json!(true)), ("lyricsOffset", json!(0)), ("lyricsHidePaused", json!(true))],
+        "lyricsw" => vec![("lyricsLines", json!(3)), ("lyricsBefore", json!(false)), ("lyricsSize", json!(48)), ("lyricsFont", json!("sans")), ("lyricsAlign", json!("center")), ("lyricsPlace", json!("")), ("lyricsStyle", json!("karaoke")), ("lyricsColor", json!("#ffffff")), ("lyricsTextGrad", json!(false)), ("lyricsColor2", json!("#9ad1ff")), ("lyricsOwnHi", json!(false)), ("lyricsHi", json!("#8e9bff")), ("lyricsHiGrad", json!(false)), ("lyricsHi2", json!("#ff8ad8")), ("lyricsGradDir", json!("90deg")), ("lyricsDim", json!(0.45)), ("lyricsTransform", json!("none")), ("lyricsShadow", json!(true)), ("lyricsOutline", json!(false)), ("lyricsOutlineSize", json!(4)), ("lyricsOutlineColor", json!("#000000")), ("lyricsOutlineOpacity", json!(1.0)), ("lyricsBox", json!(false)), ("lyricsBoxColor", json!("#0a0a0e")), ("lyricsBoxGrad", json!(false)), ("lyricsBoxColor2", json!("#2a1450")), ("lyricsBoxDir", json!("135deg")), ("lyricsBoxOpacity", json!(0.62)), ("lyricsTitle", json!(true)), ("lyricsHideNone", json!(true)), ("lyricsOffset", json!(0)), ("lyricsHidePaused", json!(true))],
         "smart" => vec![("smartBlend", json!(true)), ("smartMax", json!(10)), ("smartTape", json!(false)), ("smartRoll", json!(false)), ("smartVoices", json!(true))],
         "mix" => vec![("mixWords", json!(true)), ("mixDrop", json!(true)), ("mixMelody", json!(true)), ("mixTape", json!(true)), ("mixBars", json!(0)), ("mixBands", json!(false)), ("mixKeys", json!(true)), ("mixLoops", json!(true)), ("mixForce", json!("auto"))],
         "requests" => vec![("reqBot", json!("streamerbot")), ("reqRadioEdit", json!(false)), ("reqMax", json!(10)), ("reqPerUser", json!(2)), ("reqPort", json!(7879)), ("botRemote", json!(false))],
@@ -58,6 +58,19 @@ fn keys(name: &str) -> Vec<(&'static str, Value)> {
         _ => vec![("recentWindow", json!("week"))],
     }
 }
+
+/// The lyrics widget's fonts: the system's (on every Windows PC), then some from Google Fonts (web)
+const FONTS: [(&str, &str); 43] = [
+    ("sans", "Clean (system)"), ("segoe", "Segoe UI"), ("arial", "Arial"), ("verdana", "Verdana"), ("tahoma", "Tahoma"), ("trebuchet", "Trebuchet MS"),
+    ("calibri", "Calibri"), ("bahnschrift", "Bahnschrift"), ("franklin", "Franklin Gothic"), ("bold", "Impact"), ("black", "Arial Black"),
+    ("serif", "Georgia"), ("times", "Times New Roman"), ("palatino", "Palatino"), ("cambria", "Cambria"), ("gabriola", "Gabriola"),
+    ("mono", "Consolas"), ("courier", "Courier New"), ("comic", "Comic Sans MS"), ("script", "Segoe Script"), ("print", "Segoe Print"),
+    ("montserrat", "Montserrat (web)"), ("poppins", "Poppins (web)"), ("inter", "Inter (web)"), ("roboto", "Roboto (web)"), ("nunito", "Nunito (web)"),
+    ("rubik", "Rubik (web)"), ("fredoka", "Fredoka (web)"), ("oswald", "Oswald (web)"), ("bebas", "Bebas Neue (web)"), ("anton", "Anton (web)"),
+    ("russo", "Russo One (web)"), ("righteous", "Righteous (web)"), ("orbitron", "Orbitron (web)"), ("bangers", "Bangers (web)"), ("luckiest", "Luckiest Guy (web)"),
+    ("marker", "Permanent Marker (web)"), ("caveat", "Caveat (web)"), ("pacifico", "Pacifico (web)"), ("lobster", "Lobster (web)"), ("dancing", "Dancing Script (web)"),
+    ("playfair", "Playfair Display (web)"), ("pixel", "Press Start 2P (web)"),
+];
 
 /// Lyrics' sources: asked in this order, the first with timed lyrics used; each switchable, moved up or
 /// down (in the panel's values: "order", the ids, and "on:<id>" each)
@@ -207,6 +220,15 @@ const GENERIC_EVENTS: [(&str, &str); 11] = [
 
 /// A panel's fields, for the values as they are in it (prefs: for the keys, Streamer Mode, the LAN address)
 pub fn fields(name: &str, vals: &Map<String, Value>, prefs: &Value, lan: &str) -> Vec<Value> {
+    let mut f = fields_of(name, vals, prefs, lan);
+    // (the Stream Widget's and its alerts' pages: a pop-out preview first, as the Lyrics Widget's has)
+    if matches!(name, "widget" | "alerts" | "alertlist") || name.starts_with("alert:") {
+        f.insert(0, button("previewOpen", "Preview", "Pop Out Preview", "A window showing it as it'll look, changing as you change these (before you save them)."));
+    }
+    f
+}
+
+fn fields_of(name: &str, vals: &Map<String, Value>, prefs: &Value, lan: &str) -> Vec<Value> {
     if name == "alertlist" { return crate::alerts::list_fields(prefs); }
     if let Some(k) = name.strip_prefix("alert:") { return crate::alerts::edit_fields(prefs, k, vals); }
     let streamer = prefs["streamerMode"].as_bool() == Some(true);
@@ -383,24 +405,47 @@ pub fn fields(name: &str, vals: &Map<String, Value>, prefs: &Value, lan: &str) -
             // (the Stream Widget's port: its setting, not this page's)
             let port = prefs["widgetPort"].as_u64().unwrap_or(7878);
             let url = format!("http://127.0.0.1:{port}/lyrics");
+            let dirs = [(json!("90deg"), "Left to right"), (json!("180deg"), "Top to bottom"), (json!("135deg"), "Diagonal"), (json!("270deg"), "Right to left"), (json!("0deg"), "Bottom to top")];
             vec![
                 info("Address", &url, &url, "In OBS: a Browser source with this address (about 1280 × 400 suits 3 lines). Uses the Stream Widget's port."),
+                button("previewOpen", "Preview", "Pop Out Preview", "A window showing it as it'll look, changing as you change these (before you save them)."),
+                note("What's shown"),
                 sel("lyricsStyle", "Style", "", &[(json!("karaoke"), "Karaoke (the line fills in as it's sung)"), (json!("highlight"), "Highlight (the line lit at once)"), (json!("plain"), "Plain (only brighter)")]),
                 stepper("lyricsLines", "Lines Shown", "The one being sung and the next ones.", counts(1, 9)),
                 tog("lyricsBefore", "Show the Line Before", "The line just sung, above the one being sung."),
+                tog("lyricsTitle", "Track Info", "The song and artist above the lines. Off: only the lyrics."),
+                tog("lyricsHideNone", "Hide When There Are No Lyrics", "Nothing at all for a song without timed lyrics (not even its track info)."),
+                tog("lyricsHidePaused", "Hide While Paused", ""),
+                note("The lines fade in a moment before their first words are sung, out after the last, and out over a long instrumental part."),
+                note("Text"),
+                sel_owned("lyricsFont", "Font", "Those marked (web) come from Google Fonts.", FONTS.iter().map(|(k, n)| (json!(k), n.to_string())).collect()),
                 stepper("lyricsSize", "Text Size", "In pixels.", (16..=120).step_by(4).map(|x| (json!(x), format!("{x}px"))).collect()),
-                sel("lyricsFont", "Font", "", &[(json!("sans"), "Clean"), (json!("rounded"), "Rounded"), (json!("bold"), "Bold (Impact)"), (json!("serif"), "Serif"), (json!("mono"), "Typewriter")]),
+                sel("lyricsTransform", "Text Transform", "", &[(json!("none"), "None"), (json!("uppercase"), "Uppercase"), (json!("lowercase"), "Lowercase"), (json!("capitalize"), "Start Case")]),
                 sel("lyricsAlign", "Alignment", "", &[(json!("center"), "Centre"), (json!("left"), "Left"), (json!("right"), "Right")]),
                 sel("lyricsPlace", "Position", "Where the lines sit in the source.", &[(json!(""), "Middle"), (json!("top"), "Top"), (json!("bottom"), "Bottom")]),
                 color("lyricsColor", "Text Colour", ""),
+                tog("lyricsTextGrad", "Text Gradient", "From the text colour to a second one."),
+                color("lyricsColor2", "Text Gradient's Second Colour", ""),
                 tog("lyricsOwnHi", "Own Highlight Colour", "Off: the app's accent (from the album art, if that's on)."),
                 color("lyricsHi", "Highlight Colour", "The words being sung."),
+                tog("lyricsHiGrad", "Highlight Gradient", "From the highlight colour to a second one."),
+                color("lyricsHi2", "Highlight Gradient's Second Colour", ""),
+                sel("lyricsGradDir", "Gradient Direction", "For the text's and the highlight's.", &dirs),
                 range("lyricsDim", "Other Lines", "How bright the lines not being sung are.", 0.0, 1.0, 0.05, "%", false),
                 tog("lyricsShadow", "Shadow", "Keeps it readable over the game."),
-                tog("lyricsBox", "Background Box", "A dark box behind the lines."),
-                tog("lyricsUpper", "Capitals", "Every line in capitals."),
-                tog("lyricsTitle", "Song Title", "The song and artist above the lines."),
-                tog("lyricsHidePaused", "Hide While Paused", ""),
+                note("Outline"),
+                tog("lyricsOutline", "Outline", "A line round each letter, as OBS's text outline."),
+                stepper("lyricsOutlineSize", "Outline Size", "", (1..=20).map(|x| (json!(x), format!("{x}px"))).collect()),
+                color("lyricsOutlineColor", "Outline Colour", ""),
+                range("lyricsOutlineOpacity", "Outline Opacity", "", 0.0, 1.0, 0.05, "%", false),
+                note("Background Box"),
+                tog("lyricsBox", "Background Box", "A box behind the lines."),
+                color("lyricsBoxColor", "Box Colour", ""),
+                tog("lyricsBoxGrad", "Box Gradient", "From the box colour to a second one."),
+                color("lyricsBoxColor2", "Box Gradient's Second Colour", ""),
+                sel("lyricsBoxDir", "Box Gradient Direction", "", &dirs),
+                range("lyricsBoxOpacity", "Box Opacity", "", 0.0, 1.0, 0.05, "%", false),
+                note("Timing"),
                 num("lyricsOffset", "Timing", "In ms, -5000 to 5000: later (above 0) or earlier, to match your stream's delay or a song whose lyrics run early."),
             ]
         }

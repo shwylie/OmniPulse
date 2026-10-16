@@ -9,62 +9,138 @@
   the line being sung lit (a karaoke fill sweeping across it, or the whole line at once), the next ones
   after it. Its look is set in the app (Settings > Streaming > Lyrics Widget) and comes with /now.json,
   which the page asks for twice a second; between those, where the song is up to is counted on.
+  The lines fade in a moment before the first words are sung (not when the lyrics arrive), out after the
+  last, and out and back over a long instrumental gap; a new song's fade in after the old one's fade out.
+  With ?preview=1 (the app's pop-out preview): the settings as they're being edited, a checked
+  background to see it against, and sample lines when nothing's playing.
 -->
 <style>
-  :root { --size: 48px; --text: #ffffff; --hi: #8e9bff; --dim: 0.45; --gap: 0.35em; --font: system-ui, "Segoe UI", sans-serif; }
+  :root {
+    --size: 48px; --dim: 0.45; --gap: 0.35em; --font: system-ui, "Segoe UI", sans-serif;
+    --t1: #ffffff; --t2: #ffffff; --tdir: 90deg; --h1: #8e9bff; --h2: #8e9bff; --hdir: 90deg;
+    --ow: 0px; --oc: rgba(0, 0, 0, 1);
+    --b1: rgba(10, 10, 14, 0.62); --b2: rgba(10, 10, 14, 0.62); --bdir: 135deg;
+  }
   html, body { margin: 0; height: 100%; background: transparent; overflow: hidden; }
-  body { display: flex; flex-direction: column; justify-content: center; font-family: var(--font); color: var(--text); font-size: var(--size); }
+  body.preview { background: #2a2a2e repeating-conic-gradient(#3a3a40 0 25%, #2a2a2e 0 50%) 0 0 / 32px 32px; }
+  body { display: flex; flex-direction: column; justify-content: center; font-family: var(--font); font-size: var(--size); }
   body.top { justify-content: flex-start; }
   body.bottom { justify-content: flex-end; }
-  #wrap { padding: 0.5em 0.8em; box-sizing: border-box; transition: opacity 0.5s; }
-  body.box #wrap { background: rgba(10, 10, 14, 0.62); border-radius: 0.5em; margin: 0 0.5em; }
-  body.hidden #wrap { opacity: 0; }
-  #title { font-size: 0.42em; font-weight: 700; opacity: 0.8; margin-bottom: 0.5em; letter-spacing: 0.04em; }
-  #title:empty { display: none; }
-  .line { font-weight: 800; line-height: 1.18; margin: var(--gap) 0; opacity: var(--dim); transition: opacity 0.35s, transform 0.35s; transform-origin: left center; }
+  #wrap { padding: 0.5em 0.8em; box-sizing: border-box; transition: opacity 0.8s ease; }
+  body.box #wrap { background: linear-gradient(var(--bdir), var(--b1), var(--b2)); border-radius: 0.5em; margin: 0 0.5em; }
+  #wrap.gone { opacity: 0; }
+  #title { font-size: 0.42em; font-weight: 700; margin-bottom: 0.5em; letter-spacing: 0.04em; color: var(--t1); }
+  body.notitle #title { display: none; }
+  #lines { transition: opacity 0.9s ease; }
+  #lines.gone { opacity: 0; }
+  .line { font-weight: 800; line-height: 1.22; margin: var(--gap) 0; opacity: var(--dim); transition: opacity 0.35s, transform 0.35s; transform-origin: left center; }
   body.center .line, body.center #title { text-align: center; transform-origin: center; }
   body.right .line, body.right #title { text-align: right; transform-origin: right center; }
-  body.upper .line { text-transform: uppercase; }
-  body.shadow .line, body.shadow #title { text-shadow: 0 0.06em 0.12em rgba(0, 0, 0, 0.75), 0 0 0.04em rgba(0, 0, 0, 0.9); }
   .line.now { opacity: 1; transform: scale(1.04); }
   .line.past { opacity: calc(var(--dim) * 0.7); }
-  /* the karaoke fill: the line in the highlight colour up to where it's sung, the rest in the text colour */
-  body.karaoke .line.now span {
-    background: linear-gradient(90deg, var(--hi) 0 var(--p, 0%), var(--text) var(--p, 0%) 100%);
+  /* every line's words: the text colour (or its gradient), filled through the letters; the outline a copy of
+     them behind, drawn round (as OBS's text outline: outside the letters, the fill untouched) */
+  .line span, #title b {
+    position: relative; display: inline-block; font-weight: inherit;
+    background: linear-gradient(var(--tdir), var(--t1), var(--t2));
     -webkit-background-clip: text; background-clip: text; color: transparent;
   }
-  body.karaoke.shadow .line.now span { text-shadow: none; filter: drop-shadow(0 0.06em 0.1em rgba(0, 0, 0, 0.75)); }
-  body.highlight .line.now { color: var(--hi); }
-  #none { font-size: 0.5em; opacity: 0.7; }
+  .line span::before, #title b::before {
+    content: attr(data-t); position: absolute; left: 0; top: 0; z-index: -1; width: 100%;
+    color: transparent; -webkit-text-stroke: calc(var(--ow) * 2) var(--oc); background: none;
+  }
+  .line, #title { isolation: isolate; }
+  /* the line being sung: the highlight (or its gradient) up to where it's sung (karaoke), or all of it */
+  body.karaoke .line.now span {
+    background: linear-gradient(var(--hdir), var(--h1), var(--h2)) 0 0 / var(--p, 0%) 100% no-repeat, linear-gradient(var(--tdir), var(--t1), var(--t2));
+    -webkit-background-clip: text; background-clip: text;
+  }
+  body.highlight .line.now span { background: linear-gradient(var(--hdir), var(--h1), var(--h2)); -webkit-background-clip: text; background-clip: text; }
+  body.shadow .line, body.shadow #title { filter: drop-shadow(0 0.05em 0.08em rgba(0, 0, 0, 0.7)); }
+  #none { font-size: 0.5em; opacity: 0.7; color: var(--t1); }
 </style>
 </head>
 <body class="center karaoke shadow">
-<div id="wrap">
+<div id="wrap" class="gone">
   <div id="title"></div>
-  <div id="lines"></div>
+  <div id="lines" class="gone"></div>
   <div id="none" hidden></div>
 </div>
 <script>
 (() => {
   const $ = (id) => document.getElementById(id);
-  let s = null, key = "", lines = [], shownAt = -2, built = "";
+  const preview = /[?&]preview=1/.test(location.search);
+  let s = null, key = "", lines = [], shownAt = -2, built = "", swapping = false, pending = null, loadedFont = "";
+  // (the preview with nothing playing: a few lines of its own, sung round and round)
+  const SAMPLE = [[0, ""], [2500, "This is how your lyrics will look"], [6000, "The line being sung lights up"], [9500, "And the next ones wait below it"], [13000, "Change a setting to see it here"], [16500, "Then save it when it looks right"]];
+  const sampleStart = Date.now();
+
+  const LEAD_MS = 2500;      // the lines come in this long before their first words
+  const LINGER_MS = 4000;    // and stay this long after a line's sung, before a long gap or the end
+  const GAP_MS = 12000;      // a gap between lines this long: faded out and back in over it
 
   function position() {
     if (!s) return 0;
+    if (!s.title && preview) return (Date.now() - sampleStart) % 20000;
     const p = s.position_ms + (s.playing ? Date.now() - s.updated_at : 0);
     return p + (Number((s.lyrics && s.lyrics.offset) || 0));
+  }
+
+  // a colour with its opacity (#rrggbb, 0..1) as rgba()
+  function rgba(hex, a) {
+    const n = parseInt(String(hex || "#000000").replace("#", "").slice(0, 6), 16) || 0;
+    return "rgba(" + ((n >> 16) & 255) + "," + ((n >> 8) & 255) + "," + (n & 255) + "," + Math.max(0, Math.min(1, a === undefined ? 1 : Number(a))) + ")";
+  }
+
+  // a font: the system's, or one from Google Fonts (loaded once, when it's chosen)
+  const SYSTEM = {
+    sans: 'system-ui, "Segoe UI", sans-serif', segoe: '"Segoe UI", sans-serif', arial: 'Arial, sans-serif', verdana: 'Verdana, sans-serif', tahoma: 'Tahoma, sans-serif',
+    trebuchet: '"Trebuchet MS", sans-serif', calibri: 'Calibri, sans-serif', bahnschrift: 'Bahnschrift, sans-serif', franklin: '"Franklin Gothic Medium", sans-serif',
+    serif: 'Georgia, "Times New Roman", serif', times: '"Times New Roman", serif', palatino: '"Palatino Linotype", serif', cambria: 'Cambria, serif',
+    mono: 'Consolas, "Courier New", monospace', courier: '"Courier New", monospace', bold: 'Impact, "Arial Black", sans-serif', black: '"Arial Black", sans-serif',
+    comic: '"Comic Sans MS", cursive', script: '"Segoe Script", cursive', print: '"Segoe Print", cursive', gabriola: 'Gabriola, serif',
+  };
+  const GOOGLE = {
+    montserrat: "Montserrat", poppins: "Poppins", inter: "Inter", roboto: "Roboto", nunito: "Nunito", oswald: "Oswald", bebas: "Bebas Neue", anton: "Anton",
+    bangers: "Bangers", marker: "Permanent Marker", pacifico: "Pacifico", lobster: "Lobster", righteous: "Righteous", orbitron: "Orbitron", pixel: "Press Start 2P",
+    caveat: "Caveat", dancing: "Dancing Script", playfair: "Playfair Display", rubik: "Rubik", fredoka: "Fredoka", luckiest: "Luckiest Guy", russo: "Russo One",
+  };
+  function fontOf(f) {
+    if (GOOGLE[f]) {
+      if (loadedFont !== f) {
+        loadedFont = f;
+        const l = document.createElement("link");
+        l.rel = "stylesheet";
+        l.href = "https://fonts.googleapis.com/css2?family=" + encodeURIComponent(GOOGLE[f]) + ":wght@400;700;800;900&display=swap";
+        document.head.appendChild(l);
+      }
+      return '"' + GOOGLE[f] + '", system-ui, sans-serif';
+    }
+    return SYSTEM[f] || SYSTEM.sans;
   }
 
   // the look, as set in the app
   function look(l) {
     const b = document.body, st = document.documentElement.style;
     st.setProperty("--size", (Number(l.size) || 48) + "px");
-    st.setProperty("--text", l.color || "#ffffff");
-    st.setProperty("--hi", l.hi || s.accent || "#8e9bff");
+    const dir = l.gradDir || "90deg";
+    st.setProperty("--t1", l.color || "#ffffff");
+    st.setProperty("--t2", l.textGrad ? l.color2 || l.color || "#ffffff" : l.color || "#ffffff");
+    st.setProperty("--tdir", dir);
+    const hi = l.hi || s.accent || "#8e9bff";
+    st.setProperty("--h1", hi);
+    st.setProperty("--h2", l.hiGrad ? l.hi2 || hi : hi);
+    st.setProperty("--hdir", dir);
     st.setProperty("--dim", String(Math.max(0, Math.min(1, l.dim === undefined ? 0.45 : Number(l.dim)))));
-    const fonts = { sans: 'system-ui, "Segoe UI", sans-serif', serif: 'Georgia, "Times New Roman", serif', mono: 'Consolas, "Courier New", monospace', rounded: '"Nunito", "Segoe UI Rounded", "Arial Rounded MT Bold", system-ui, sans-serif', bold: 'Impact, "Arial Black", sans-serif' };
-    st.setProperty("--font", fonts[l.font] || fonts.sans);
-    b.className = [l.align || "center", l.style || "karaoke", l.place || "", l.box ? "box" : "", l.upper ? "upper" : "", l.shadow === false ? "" : "shadow"].filter(Boolean).join(" ");
+    st.setProperty("--ow", (l.outline ? Math.max(0, Math.min(30, Number(l.outlineSize) || 4)) : 0) + "px");
+    st.setProperty("--oc", rgba(l.outlineColor || "#000000", l.outlineOpacity === undefined ? 1 : l.outlineOpacity));
+    const bo = l.boxOpacity === undefined ? 0.62 : l.boxOpacity;
+    st.setProperty("--b1", rgba(l.boxColor || "#0a0a0e", bo));
+    st.setProperty("--b2", rgba(l.boxGrad ? l.boxColor2 || l.boxColor || "#0a0a0e" : l.boxColor || "#0a0a0e", bo));
+    st.setProperty("--bdir", l.boxDir || "135deg");
+    st.setProperty("--font", fontOf(l.font));
+    document.getElementById("lines").style.textTransform = l.transform || "none";
+    b.className = [l.align || "center", l.style || "karaoke", l.place || "", l.box ? "box" : "", l.shadow === false ? "" : "shadow", l.title === false ? "notitle" : "", preview ? "preview" : ""].filter(Boolean).join(" ");
   }
 
   // the lines around the one being sung: the one before (if asked for), it, and the next ones
@@ -74,61 +150,89 @@
     const before = l.before ? 1 : 0;
     const from = Math.max(0, at - before);
     const want = lines.slice(from, from + show);
-    const sig = from + ":" + want.length;
+    const sig = from + ":" + want.length + ":" + at;
     if (sig === built) return;
     built = sig;
-    const box = $("lines");
-    box.replaceChildren(...want.map((ln, i) => {
+    $("lines").replaceChildren(...want.map((ln, i) => {
       const d = document.createElement("div");
       const k = from + i;
       d.className = "line" + (k === at ? " now" : k < at ? " past" : "");
       const sp = document.createElement("span");
       sp.textContent = ln[1] || "♪";
+      sp.dataset.t = sp.textContent;
       d.appendChild(sp);
       return d;
     }));
   }
 
+  // whether the lines are to be seen now: from a moment before the first words (or the next words, after a
+  // long gap) to a while after the last sung
+  function seen(p) {
+    if (!lines.length) return false;
+    const next = lines.findIndex((x) => x[0] > p);
+    const last = next === -1 ? lines.length - 1 : next - 1;
+    const upcoming = next === -1 ? Infinity : lines[next][0];
+    if (last < 0) return upcoming - p <= LEAD_MS;
+    const sung = lines[last][0];
+    const lineEnd = next === -1 ? sung + 6000 : Math.min(upcoming, sung + 6000);
+    // (in a long gap: out a while after the last line ends, back in a moment before the next)
+    if (upcoming - lineEnd > GAP_MS) return p < lineEnd + LINGER_MS || upcoming - p <= LEAD_MS;
+    return next !== -1 || p < lineEnd + LINGER_MS;
+  }
+
   function frame() {
     requestAnimationFrame(frame);
-    if (!s || !s.lyrics || !lines.length) return;
+    if (!s || !lines.length || swapping) return;
     const p = position();
-    // the line being sung: the last one started
+    $("lines").classList.toggle("gone", !seen(p));
+    // the line being sung: the last one started (before the first: the first, waiting)
     let at = -1;
     for (let i = 0; i < lines.length; i++) { if (lines[i][0] <= p) at = i; else break; }
     if (at !== shownAt) { shownAt = at; built = ""; }
     build(Math.max(0, at));
-    // how far through it is: from its start to the next one's (a long gap: the line's sung in 6 s at most)
     const now = document.querySelector(".line.now span");
     if (now && at >= 0) {
       const start = lines[at][0], next = at + 1 < lines.length ? lines[at + 1][0] : start + 4000;
       const span = Math.min(next - start, 6000);
       const pct = Math.max(0, Math.min(100, ((p - start) / Math.max(1, span)) * 100));
       now.style.setProperty("--p", pct.toFixed(1) + "%");
-    }
+    } else if (now) now.style.setProperty("--p", "0%");
+  }
+
+  // a new song's lyrics: the old ones faded out first, then the new ones (seen as their time comes)
+  function swapTo(next) {
+    swapping = true;
+    $("lines").classList.add("gone");
+    setTimeout(() => {
+      lines = next;
+      shownAt = -2; built = "";
+      $("lines").replaceChildren();
+      swapping = false;
+    }, $("lines").childElementCount ? 900 : 0);
   }
 
   async function poll() {
     try {
-      const r = await fetch("/now.json", { cache: "no-store" });
+      const r = await fetch("/now.json" + (preview ? "?preview=1" : ""), { cache: "no-store" });
       s = await r.json();
       const l = s.lyrics || {};
       look(l);
-      document.body.classList.toggle("hidden", !s.playing && l.hidePaused !== false);
-      $("title").textContent = l.title ? [s.title, s.artist].filter(Boolean).join(" — ") : "";
-      const k = (l.key || "") + ":" + (l.lines_n || 0);
-      if (k !== key) {
-        key = k;
-        lines = (l.text || []).filter((x) => Array.isArray(x));
-        shownAt = -2; built = "";
-        const timed = lines.some((x) => x[0] > 0);
-        $("none").hidden = timed && lines.length > 0;
-        $("none").textContent = s.title ? (lines.length ? "No timed lyrics for this song" : "No lyrics for this song") : "";
-        if (!timed) lines = [];
-        $("lines").replaceChildren();
-      }
-    } catch (e) {}
-    setTimeout(poll, 500);
+      const sample = preview && !s.title;
+      const k = sample ? "sample" : (l.key || "") + ":" + (l.lines_n || 0);
+      const text = sample ? SAMPLE : (l.text || []).filter((x) => Array.isArray(x));
+      const timed = text.filter((x) => x[0] > 0);
+      if (k !== key) { key = k; swapTo(timed); }
+      // nothing to sing along to: a note, or (Hide When There Are No Lyrics) nothing at all
+      const none = !timed.length;
+      const hideAll = (none && l.hideNone !== false) || (!sample && !s.playing && l.hidePaused !== false) || (!sample && !s.title);
+      $("wrap").classList.toggle("gone", hideAll);
+      const info = sample ? "Sample Song — OmniPulse" : [s.title, s.artist].filter(Boolean).join(" — ");
+      const tb = $("title").firstElementChild || $("title").appendChild(document.createElement("b"));
+      if (tb.textContent !== info) { tb.textContent = info; tb.dataset.t = info; }
+      $("none").hidden = !none;
+      $("none").textContent = none ? (text.length ? "No timed lyrics for this song" : "No lyrics for this song") : "";
+    } catch (e) { if (preview) console.error("lyrics widget:", e); }
+    setTimeout(poll, preview ? 250 : 500);
   }
   poll();
   requestAnimationFrame(frame);
