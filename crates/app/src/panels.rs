@@ -36,7 +36,7 @@ pub fn title(name: &str) -> String {
 
 /// The panel a switch's Settings button opens (by the switch's pref)
 pub fn of_switch(key: &str) -> Option<&'static str> {
-    Some(match key { "streamSafe" => "safe", "req" => "requests", "reqLimits" => "limits", "mixOn" => "mix", "smartOn" => "smart", "presence" => "discord", "jamsOn" => "together", "lyricsSources" => "lyrics", "widget" => "widget", "lyricsWidget" => "lyricsw", "alertsOn" => "alerts", "remoteOn" => "remote", "out2On" => "offset", "avoidRecent" => "recent", "hideOn" => "hidden", "plugAdd" => "plugins", _ => return None })
+    Some(match key { "streamSafe" => "safe", "req" => "requests", "mixOn" => "mix", "smartOn" => "smart", "presence" => "discord", "jamsOn" => "together", "lyricsSources" => "lyrics", "widget" => "widget", "lyricsWidget" => "lyricsw", "alertsOn" => "alerts", "remoteOn" => "remote", "out2On" => "offset", "avoidRecent" => "recent", "hideOn" => "hidden", "plugAdd" => "plugins", _ => return None })
 }
 
 /// What a panel edits, and each one's default (the web app's)
@@ -48,7 +48,7 @@ fn keys(name: &str) -> Vec<(&'static str, Value)> {
         "lyricsw" => vec![("lyricsLines", json!(3)), ("lyricsBefore", json!(false)), ("lyricsScroll", json!("smooth")), ("lyricsScrollMs", json!(600)), ("lyricsScrollPlace", json!("top")), ("lyricsFadeEdges", json!(false)), ("lyricsSize", json!(48)), ("lyricsFont", json!("sans")), ("lyricsAlign", json!("center")), ("lyricsPlace", json!("")), ("lyricsStyle", json!("karaoke")), ("lyricsColor", json!("#ffffff")), ("lyricsTextGrad", json!(false)), ("lyricsColor2", json!("#9ad1ff")), ("lyricsOwnHi", json!(false)), ("lyricsHi", json!("#8e9bff")), ("lyricsHiGrad", json!(false)), ("lyricsHi2", json!("#ff8ad8")), ("lyricsGradDir", json!("90deg")), ("lyricsDim", json!(0.45)), ("lyricsTransform", json!("none")), ("lyricsShadow", json!(true)), ("lyricsOutline", json!(false)), ("lyricsOutlineSize", json!(4)), ("lyricsOutlineColor", json!("#000000")), ("lyricsOutlineOpacity", json!(1.0)), ("lyricsBox", json!(false)), ("lyricsBoxColor", json!("#0a0a0e")), ("lyricsBoxGrad", json!(false)), ("lyricsBoxColor2", json!("#2a1450")), ("lyricsBoxDir", json!("135deg")), ("lyricsBoxOpacity", json!(0.62)), ("lyricsTitle", json!(true)), ("lyricsHideNone", json!(true)), ("lyricsOffset", json!(0)), ("lyricsHidePaused", json!(true))],
         "smart" => vec![("smartBlend", json!(true)), ("smartMax", json!(10)), ("smartTape", json!(false)), ("smartRoll", json!(false)), ("smartVoices", json!(true))],
         "mix" => vec![("mixWords", json!(true)), ("mixDrop", json!(true)), ("mixMelody", json!(true)), ("mixTape", json!(true)), ("mixBars", json!(0)), ("mixBands", json!(false)), ("mixKeys", json!(true)), ("mixLoops", json!(true)), ("mixForce", json!("auto"))],
-        "requests" => vec![("reqBot", json!("streamerbot")), ("reqRadioEdit", json!(false)), ("reqMax", json!(10)), ("reqPerUser", json!(2)), ("reqPort", json!(7879)), ("botRemote", json!(false))],
+        "requests" => vec![("reqBot", json!("streamerbot")), ("reqRadioEdit", json!(false)), ("reqLimits", json!(true)), ("reqMax", json!(10)), ("reqPerUser", json!(2)), ("reqPort", json!(7879)), ("botRemote", json!(false))],
         "widget" => vec![("widgetPort", json!(7878)), ("widgetDesign", json!("card")), ("widgetAlign", json!("left")), ("widgetRounded", json!(true)), ("widgetText", json!(1)), ("wFade", json!(true)), ("wScroll", json!(true)), ("wSpin", json!(true)), ("wRequester", json!(true)), ("wColor", json!(1.2))],
         "alerts" => vec![("alertBot", json!("streamerbot")), ("sbHost", json!("127.0.0.1:8080")), ("sbOn", json!(true)), ("alertTrans", json!("seamless")), ("alertCSize", json!("medium")), ("alertCDir", json!("diag")), ("alertCAngle", json!(0)), ("alertAnim", json!("slide")), ("alertOwnCol", json!(false)), ("alertCol1", json!("#8e9bff")), ("alertCol2", json!("#b38cff")), ("alertDir", json!("115deg")), ("alertIcon", json!(1)), ("alertSecs", json!(5)), ("alertVol", json!(0.8)), ("botRemote", json!(false))],
         "remote" => vec![("remotePort", json!(7880))],
@@ -256,6 +256,11 @@ fn fields_of(name: &str, vals: &Map<String, Value>, prefs: &Value, lan: &str) ->
                 info("Wrong Song Address (!wrongsong)", &wrong(&hide(&key)), &wrong(&key), ""),
                 note(steps),
                 tog("reqRadioEdit", "Prefer Radio Edits", "Plays a long song's radio edit, if there is one."),
+                note("Limits"),
+                tog("reqLimits", "Limit Requests", "The most waiting, and the most per viewer. Off: chat can request as many songs as it likes."),
+                stepper("reqMax", "Most Waiting", "How many requests can wait at once.", counts(1, 50)),
+                stepper("reqPerUser", "Most per Viewer", "How many of one viewer's can wait at once.", counts(1, 10)),
+                button("reqLimitsReset", "", "Reset to Defaults", "On, 10 waiting, 2 per viewer."),
                 button("reqClear", "Waiting Now", "Clear Requests", "Takes the requested songs out of the queue."),
                 button("repliesOpen", "Chat Replies", "Configure", "What your bot posts back in chat, in your own words."),
                 num("reqPort", "Port", "1024 to 65535."),

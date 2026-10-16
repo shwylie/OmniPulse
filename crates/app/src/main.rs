@@ -5379,7 +5379,7 @@ fn song_request(shared: &Shared, id: u64, q: String, user: String) {
 /// The servers the web app's settings have on: the widget, the Stream Deck's remote, chat requests
 // ---------- Settings: the switches beyond Look ----------
 // (section, label, note, key, on unless switched off)
-const SET_ROWS: [(&str, &str, &str, &str, bool); 30] = [
+const SET_ROWS: [(&str, &str, &str, &str, bool); 29] = [
     ("Library", "Sets & Podcasts in the Queue", "Lists and autoplay include anything over 15 minutes. Off: only when you pick one.", "queueSets", false),
     ("Library", "Autoplay", "Plays similar tracks when the queue runs out.", "autoplay", true),
     ("Library", "Hidden & Not Recommended", "Right-click a track to stop it, its album or its artist being recommended. Off: nothing is left out; the lists are kept.", "hideOn", true),
@@ -5407,7 +5407,6 @@ const SET_ROWS: [(&str, &str, &str, &str, bool); 30] = [
     ("Streaming", "Lyrics Widget", "The playing song's lyrics for OBS, for karaoke: the line being sung lit up as it's sung, the next ones under it. Settings for its look.", "lyricsWidget", false),
     ("Streaming", "Alerts", "On the widget: follows, subs, bits, raids and more, from your bot.", "alertsOn", false),
     ("Streaming", "Song Requests", "Chat asks for songs through your bot.", "req", false),
-    ("Streaming", "Limit Requests", "The most waiting, and the most per viewer. Off: chat can request as many songs as it likes.", "reqLimits", true),
     ("Streaming", "OmniPulse Offset", "Your music a second time, as its own app (\"OmniPulse Offset\"), to send to a stream mix only, with an offset and a volume of its own.", "out2On", false),
     ("Streaming", "Stream Deck & Remote", "Control the app from a Stream Deck or another device.", "remoteOn", false),
 ];
@@ -5601,7 +5600,7 @@ fn settings_index(a: &App) -> Vec<SetFound> {
         out.push(SetFound { path: path(cat), label: label.into(), note: note.into(), cat: cat.into(), panel: String::new(), key: key.into(), toggle: true });
     }
     let ip = omnipulse_core::lan_ip().unwrap_or_else(|| "THIS-PC".into());
-    for (name, cat) in [("requests", "Streaming"), ("replies", "Streaming"), ("limits", "Streaming"), ("mix", "Sound"), ("smart", "Sound"), ("lyricsw", "Streaming"), ("discord", "Integrations"), ("together", "Integrations"), ("lyrics", "Integrations"), ("widget", "Streaming"), ("alerts", "Streaming"), ("alertlist", "Streaming"), ("remote", "Streaming"), ("offset", "Streaming"), ("safe", "Streaming"), ("recent", "Library"), ("hidden", "Library"), ("plugins", "Plugins")] {
+    for (name, cat) in [("requests", "Streaming"), ("replies", "Streaming"), ("mix", "Sound"), ("smart", "Sound"), ("lyricsw", "Streaming"), ("discord", "Integrations"), ("together", "Integrations"), ("lyrics", "Integrations"), ("widget", "Streaming"), ("alerts", "Streaming"), ("alertlist", "Streaming"), ("remote", "Streaming"), ("offset", "Streaming"), ("safe", "Streaming"), ("recent", "Library"), ("hidden", "Library"), ("plugins", "Plugins")] {
         let title = panels::title(name);
         out.push(SetFound { path: path(cat), label: title.clone(), note: String::new(), cat: cat.into(), panel: name.into(), key: String::new(), toggle: false });
         let vals = panels::values(name, &a.web.prefs);
@@ -5659,7 +5658,7 @@ fn panel_open(shared: &Shared, name: &str) {
     if let Some(ui) = shared.borrow().ui.upgrade() {
         let head = match name.strip_prefix("alert:") { Some(k) => alerts::name(&shared.borrow().web.prefs, k), None => panels::title(name) };
         let cat = match name {
-            "requests" | "replies" | "limits" | "widget" | "remote" | "offset" | "alerts" | "alertlist" | "safe" | "lyricsw" => "Streaming",
+            "requests" | "replies" | "widget" | "remote" | "offset" | "alerts" | "alertlist" | "safe" | "lyricsw" => "Streaming",
             n if n.starts_with("alert:") => "Streaming",
             "plugins" => "Plugins",
             "mix" | "smart" => "Sound",
@@ -5830,12 +5829,13 @@ fn panel_press(shared: &Shared, key: &str) {
             return;
         }
         "reqLimitsReset" => {
-            if let Some((_, mut vals)) = PF_EDIT.with(|e| e.borrow().clone()) {
+            if let Some((n, mut vals)) = PF_EDIT.with(|e| e.borrow().clone()) {
+                vals.insert("reqLimits".into(), serde_json::json!(true));
                 vals.insert("reqMax".into(), serde_json::json!(10));
                 vals.insert("reqPerUser".into(), serde_json::json!(2));
-                PF_EDIT.with(|e| *e.borrow_mut() = Some(("panel:limits".into(), vals)));
+                PF_EDIT.with(|e| *e.borrow_mut() = Some((n, vals)));
             }
-            "Back to 10 waiting, 2 per viewer (Save keeps it).".to_string()
+            "Back to on, 10 waiting, 2 per viewer (Save keeps it).".to_string()
         }
         // the widget being set up, in a window of its own
         "previewOpen" => {
