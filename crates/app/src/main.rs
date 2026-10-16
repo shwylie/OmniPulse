@@ -2847,6 +2847,7 @@ fn track_act(shared: &Shared, t: &Track, act: &str) -> bool {
 }
 
 fn paint_queue(a: &mut App) {
+    rhythm_wanted_set(a);
     // (a mix under way: the queue as it was, the one going out playing, the one coming in lit)
     let real = a.queue.qi;
     let shown = mix_show_qi().filter(|&p| p < a.queue.items.len());
@@ -2934,6 +2935,10 @@ fn save_session(a: &App) {
 
 // ---------- playing ----------
 fn start(shared: &Shared) {
+    if std::env::var_os("OMNIPULSE_STEP_DEBUG").is_some() {
+        let a = shared.borrow();
+        println!("start debug: \"{}\" (qi {:?} of {}), engine at {} of {} ms, xfade {:?}", a.queue.current().map(|t| t.title.clone()).unwrap_or_default(), a.queue.qi, a.queue.items.len(), a.engine.position_ms(), a.engine.duration_ms(), XFADE.with(|x| x.borrow().map(|v| v.0)));
+    }
     if safe_skip(shared) {
         return;
     }
@@ -3269,6 +3274,15 @@ fn rhythm_full(key: &str) -> Option<omnipulse_core::rhythm::Measured> {
 
 /// (tracks being measured whole right now, so each is once)
 static RHYTHM_FULL_BUSY: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+/// (the songs worth measuring now: the one playing and the next few; kept as the queue moves)
+static RHYTHM_WANTED: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+
+/// The songs worth measuring now, as the queue stands (the one playing and the next two)
+fn rhythm_wanted_set(a: &App) {
+    let from = a.queue.qi.unwrap_or(0);
+    let keys: Vec<String> = a.queue.items.iter().skip(from).take(3).map(|q| q.t.key.clone()).collect();
+    if let Ok(mut w) = RHYTHM_WANTED.lock() { *w = keys; }
+}
 
 /// A track measured whole (for a mix out of it or into it), if it isn't yet, from what the mix plays:
 /// its YouTube Music version's, its SoundCloud stream's, a plugin's or its file's (never Spotify's).
@@ -3280,10 +3294,18 @@ fn rhythm_ahead(shared: &Shared, t: Track) {
         if busy.contains(&t.key) { return; }
         busy.push(t.key.clone());
     }
+    // (what's worth measuring, as the queue stands now; this one too, if it's asked for outside it)
+    rhythm_wanted_set(&shared.borrow());
+    if let Ok(mut w) = RHYTHM_WANTED.lock() { if !w.contains(&t.key) { w.push(t.key.clone()); } }
     let rt = shared.borrow().rt.clone();
     rt.spawn(async move {
         let key = t.key.clone();
-        rhythm_measure_whole(t).await;
+        // (one song measured at a time, and only one that's still playing or next by its turn: memory and
+        // CPU kept to one song's worth, however fast songs change)
+        static ONE: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(1);
+        if let Ok(_turn) = ONE.acquire().await {
+            if RHYTHM_WANTED.lock().map(|w| w.iter().any(|k| *k == key)).unwrap_or(true) { rhythm_measure_whole(t).await; }
+        }
         RHYTHM_FULL_BUSY.lock().unwrap().retain(|k| *k != key);
     });
 }
@@ -3675,6 +3697,8 @@ fn mix_tick(shared: &Shared, pos: u64, dur: u64) {
         m.is_some()
     });
     if easing { return; }
+    // (a song still loading: the engine's place is the one before's)
+    if shared.borrow().ui.upgrade().is_some_and(|u| u.get_track_loading()) { return; }
     let (on, listening_now, next, cur) = {
         let a = shared.borrow();
         let next = if a.repeat == "one" { None } else { a.queue.qi.and_then(|i| a.queue.items.get(i + 1)).map(|q| q.t.clone()) };
@@ -4362,6 +4386,11 @@ fn play_list(shared: &Shared, list: Vec<Track>, i: usize) {
 }
 
 fn step(shared: &Shared, d: i32) {
+    if std::env::var_os("OMNIPULSE_STEP_DEBUG").is_some() {
+        let a = shared.borrow();
+        let status = a.ui.upgrade().map(|u| u.get_status().to_string()).unwrap_or_default();
+        println!("step debug: {d:+} from \"{}\" at {} of {} ms; status \"{status}\"; why {:?}", a.queue.current().map(|t| t.title.clone()).unwrap_or_default(), a.engine.position_ms(), a.engine.duration_ms(), MIX_WHY.with(|m| m.borrow().as_ref().map(|x| x.2.clone())));
+    }
     if listening().is_some() {
         return;   // listening along: the host moves on, and so does this
     }
@@ -4668,6 +4697,12 @@ fn smart_decide(shared: &Shared, a: &SmartSong, b: &SmartSong, pos: u64, late: b
 /// pair (crate::mix_tick's). None: not Smart Transitions' to do (Fade Between Tracks as set).
 fn smart_fade_tick(shared: &Shared, key: &str, pos: u64, dur: u64) -> Option<bool> {
     if !smart_on(&shared.borrow().web.prefs) || listening().is_some() || room_kind().as_deref() == Some("jam") { return None; }
+    // (a song just starting, its length not known yet: nothing to time a transition by. Without this, its end
+    // read as 0 and it moved straight on, and the next, and the next, each measured as it went)
+    if dur == 0 || pos < 1500 { return Some(false); }
+    // (the next one still loading: what the engine says is the one before's place and length, not its own;
+    // read as its, it was nearly over, so on it went, and on, through the queue)
+    if shared.borrow().ui.upgrade().is_some_and(|u| u.get_track_loading()) { return Some(false); }
     let (a, b) = smart_pair(&shared.borrow(), dur)?;
     // (their lyrics, for whether both sing where they meet)
     if smart_set_on(&shared.borrow().web.prefs, "smartVoices") { smart_lyrics(shared, &a.t); smart_lyrics(shared, &b.t); }
@@ -10734,6 +10769,7 @@ fn main() -> Result<(), slint::PlatformError> {
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("square") { vec![(9, "play"), (10, "unround"), (12, "nav:settings"), (13, "cat:Streaming"), (14, "panel:widget"), (16, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("qset") { vec![(9, "play"), (11, "queue"), (14, "nav:settings"), (15, "cat:App & Look"), (16, "scroll:420"), (18, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("nowslim") { vec![(9, "play"), (11, "queue"), (12, "now"), (15, "size:860:720"), (17, "size:1100:720"), (19, "size:1500:860"), (21, "end")] }
+            else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("smartmem") { vec![(9, "smartprep"), (10, "play"), (12, "mem"), (37, "mem"), (38, "nearend"), (62, "mem"), (87, "mem"), (88, "nearend"), (112, "mem"), (137, "mem"), (138, "nearend"), (162, "mem"), (187, "mem"), (188, "nearend"), (212, "mem"), (237, "mem"), (238, "nearend"), (262, "mem"), (287, "mem"), (288, "nearend"), (312, "mem"), (337, "mem"), (338, "nearend"), (362, "mem"), (387, "mem"), (388, "nearend"), (412, "mem"), (413, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("scplay") { vec![(9, "play"), (18, "spcheck3"), (22, "spcheck3"), (23, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("goplus") { vec![(9, "goplus"), (10, "gpfind"), (20, "spcheck3"), (40, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("spsmart") { vec![(9, "smartprep"), (10, "spplay3"), (24, "spcheck3"), (30, "spcheck3"), (31, "end")] }
@@ -11166,6 +11202,20 @@ fn main() -> Result<(), slint::PlatformError> {
                     });
                 }
                 // Track Preferences' Beat 1: a beat earlier, then saved
+                // the app's memory and CPU (Windows: working set, private bytes, CPU seconds so far)
+                "mem" => {
+                    #[repr(C)] #[derive(Default)] struct Pmc { cb: u32, faults: u32, peak_ws: usize, ws: usize, qpp: usize, qp: usize, qnpp: usize, qnp: usize, pagefile: usize, peak_pagefile: usize, private: usize }
+                    #[repr(C)] #[derive(Default, Clone, Copy)] struct Ft { lo: u32, hi: u32 }
+                    #[link(name = "kernel32")] extern "system" { fn GetCurrentProcess() -> isize; fn K32GetProcessMemoryInfo(h: isize, p: *mut Pmc, cb: u32) -> i32; fn GetProcessTimes(h: isize, c: *mut Ft, e: *mut Ft, k: *mut Ft, u: *mut Ft) -> i32; }
+                    let mut p = Pmc { cb: std::mem::size_of::<Pmc>() as u32, ..Default::default() };
+                    let (mut c, mut e, mut k, mut u) = (Ft::default(), Ft::default(), Ft::default(), Ft::default());
+                    unsafe { K32GetProcessMemoryInfo(GetCurrentProcess(), &mut p, p.cb); GetProcessTimes(GetCurrentProcess(), &mut c, &mut e, &mut k, &mut u); }
+                    let t = |f: Ft| ((f.hi as u64) << 32 | f.lo as u64) as f64 / 1e7;
+                    let a = s.borrow();
+                    println!("selftest: mem: {:.0} MB working set, {:.0} MB private, {:.1} s CPU; now \"{}\" at {} ms, mixing {}, analysis {} songs, rhythm {} busy", p.ws as f64 / 1e6, p.private as f64 / 1e6, t(k) + t(u), a.queue.current().map(|t| t.title.clone()).unwrap_or_default(), a.engine.position_ms(), a.engine.mixing(), a.analysis.len(), RHYTHM_FULL_BUSY.lock().map(|b| b.len()).unwrap_or(0));
+                }
+                // to 25 s before the end of what's playing (a transition soon)
+                "nearend" => { let a = s.borrow(); let d = a.engine.duration_ms(); if d > 30_000 { a.engine.seek(d - 25_000); } }
                 // the Library's Go+ tracks (20 of them): whether each has a YouTube Music version to play from
                 "gpfind" => {
                     let list: Vec<Track> = s.borrow().library.iter().filter(|t| t.go_plus).take(20).cloned().collect();

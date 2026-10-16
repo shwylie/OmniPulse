@@ -103,19 +103,35 @@ fn has_all(t: &Track, q: &str) -> bool {
 fn rank<'a>(found: &'a [Track], asked: &str, liked: &dyn Fn(&Track) -> bool) -> Option<(&'a Track, usize)> {
     let want_version = is_version(asked);
     let top: Vec<&Track> = found.iter().take(10).filter(|x| want_version || !is_version(&x.title)).collect();
-    let same = |x: &&&Track| same_song(x, asked);
-    let all = |x: &&&Track| has_all(x, asked);
+    let same = |x: &&Track| same_song(x, asked);
+    let all = |x: &&Track| has_all(x, asked);
+    // (of those that fit a tier, the most played: the song as most people know it, not an odd re-upload the
+    // search happened to list first; on a tie, the search's order)
+    fn most<'b>(it: impl Iterator<Item = &'b Track>) -> Option<&'b Track> {
+        it.fold(None, |best: Option<&Track>, x| match best { Some(b) if b.plays >= x.plays => Some(b), _ => Some(x) })
+    }
+    // (every word asked for, and no more of a version than was asked for: "cinema skrillex remix" is the
+    // remix, not its flip, its VIP or somebody's re-remix of it)
+    let plain = |x: &&Track| has_all(x, asked) && !extra_version(&x.title, asked);
     let tiers = [
-        top.iter().take(5).find(|x| same(x) && liked(x)).copied(),
-        top.iter().find(same).copied(),
-        top.iter().find(all).copied(),
-        found.iter().take(10).find(|x| has_all(x, asked)),
-        top.iter().take(5).find(|x| liked(x)).copied(),
+        most(top.iter().take(5).copied().filter(|x| same(x) && liked(x))),
+        most(top.iter().copied().filter(same)),
+        most(top.iter().copied().filter(plain)),
+        most(top.iter().copied().filter(all)),
+        most(found.iter().take(10).filter(|x| has_all(x, asked))),
+        most(top.iter().take(5).copied().filter(|x| liked(x))),
         top.first().copied(),
-        found.iter().take(5).find(|x| liked(x)),
+        most(found.iter().take(5).filter(|x| liked(x))),
         found.first(),
     ];
     tiers.iter().position(Option::is_some).map(|i| (tiers[i].unwrap(), i))
+}
+
+/// A title that's a version of a version nobody asked for: a flip, a VIP, a re-remix, a bootleg...
+fn extra_version(title: &str, asked: &str) -> bool {
+    const MORE: [&str; 14] = ["flip", "vip", "v.i.p", "re-remix", "reremix", "bootleg", "reboot", "mashup", "rework", "sped up", "slowed", "nightcore", "cover", "edit"];
+    let (t, a) = (title.to_lowercase(), asked.to_lowercase());
+    MORE.iter().any(|w| t.contains(w) && !a.contains(w))
 }
 
 pub fn radio_pick(list: &[Track], q: &str) -> Option<Track> {
@@ -332,6 +348,37 @@ mod tests {
         assert_eq!(radio_pick(&list, "deadmau5 strobe").unwrap().title, "Strobe (Radio Edit)");
         let prefs = serde_json::json!({ "reqMsgs": { "added": "  " } });
         assert_eq!(msg(&prefs, "added", &[("title", "Strobe".into()), ("artist", "deadmau5".into()), ("position", "2".into())]), "Added \"Strobe\" by deadmau5 (#2 in the queue).");
+    }
+
+    /// A request as chat would make it, against the real searches: OMNIPULSE_REQ="cinema skrillex remix"
+    #[test]
+    #[ignore]
+    fn request_probe() {
+        let q = std::env::var("OMNIPULSE_REQ").unwrap();
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        for p in ["soundcloud", "spotify"] {
+            for t in rt.block_on(find(p, &q, &[])).iter().take(10) { println!("  {p}: {} - {} ({} plays, {} ms) same {} all {} version {}", t.artist, t.title, t.plays, t.ms, same_song(t, &q), has_all(t, &q), is_version(&t.title)); }
+        }
+        for plats in [vec!["soundcloud"], vec!["spotify"], vec!["youtube"], vec!["soundcloud", "spotify", "youtube"]] {
+            let r = rt.block_on(pick(&q, &plats, &[], &[], false, &|_| true));
+            println!("{plats:?}: {:?}", r.map(|t| format!("{} - {} ({} plays, {})", t.artist, t.title, t.plays, t.plat())));
+        }
+    }
+
+    #[test]
+    fn of_the_same_song_the_most_played_is_picked() {
+        let t = |k: &str, title: &str, artist: &str, plays: u64| Track { key: k.into(), title: title.into(), artist: artist.into(), plays, ..Default::default() };
+        let found = vec![
+            t("odd", "Cinema (Skrillex Remix)", "some uploader", 900),
+            t("vip", "Cinema (Skrillex Remix) - Final Version V.I.P", "Benny Benassi", 120_000),
+            t("real", "Cinema (Skrillex Remix)", "Benny Benassi", 40_000_000),
+            t("other", "Cinema", "Benny Benassi", 90_000_000),
+        ];
+        let (got, _) = rank(&found, "cinema skrillex remix", &|_| false).unwrap();
+        assert_eq!(got.key, "real");
+        // (only versions of it: the one that's no more than was asked for, before the most played VIP)
+        let only = vec![t("vip", "Cinema (Skrillex Remix) - Final Version V.I.P", "Benny Benassi", 120_000), t("rr", "Cinema (Skrillex Remix) [Some Re-Remix]", "X", 60_000), t("plain", "Cinema (Skrillex Remix)", "uploader", 5_000)];
+        assert_eq!(rank(&only, "cinema skrillex remix", &|_| false).unwrap().0.key, "plain");
     }
 
     #[test]

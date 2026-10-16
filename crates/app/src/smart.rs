@@ -844,6 +844,33 @@ mod tests {
         }
     }
 
+    /// Memory as songs are measured one after another (Windows: the process's working set and private
+    /// bytes after each): OMNIPULSE_PROBE_IDS=1,2,3...
+    #[test]
+    #[ignore]
+    fn rhythm_memory() {
+        #[cfg(windows)]
+        fn mem() -> (f64, f64) {
+            #[repr(C)] #[derive(Default)] struct Pmc { cb: u32, faults: u32, peak_ws: usize, ws: usize, qpp: usize, qp: usize, qnpp: usize, qnp: usize, pagefile: usize, peak_pagefile: usize, private: usize }
+            #[link(name = "kernel32")] extern "system" { fn GetCurrentProcess() -> isize; fn K32GetProcessMemoryInfo(h: isize, p: *mut Pmc, cb: u32) -> i32; }
+            let mut p = Pmc { cb: std::mem::size_of::<Pmc>() as u32, ..Default::default() };
+            unsafe { K32GetProcessMemoryInfo(GetCurrentProcess(), &mut p, p.cb); }
+            (p.ws as f64 / 1e6, p.private as f64 / 1e6)
+        }
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let ids: Vec<String> = std::env::var("OMNIPULSE_PROBE_IDS").unwrap().split(',').map(String::from).collect();
+        eprintln!("start: {:?} MB (working set, private)", mem());
+        for round in 0..2 {
+            for id in &ids {
+                let (mono, rate) = rt.block_on(omnipulse_core::loudness::mono_start("soundcloud", id, 1200.0)).unwrap();
+                let secs = mono.len() / rate as usize;
+                let _ = omnipulse_core::rhythm::analyse(&mono, rate);
+                drop(mono);
+                eprintln!("round {round}, {id} ({secs} s): {:?} MB", mem());
+            }
+        }
+    }
+
     /// The fallback fade the app uses (main.rs' SMART_FIXED_MS)
     const FIXED_MS: u64 = 6000;
 
