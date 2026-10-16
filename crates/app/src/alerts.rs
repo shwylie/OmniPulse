@@ -9,7 +9,7 @@
 use serde_json::{json, Map, Value};
 
 /// [id, name in Settings, test values, heading, main line]
-pub const KINDS: [(&str, &str, &str, &str, &str); 11] = [
+pub const KINDS: [(&str, &str, &str, &str, &str); 12] = [
     ("follow", "Follows", r#"{"user":"A new friend"}"#, "New Follower", "{user}"),
     ("sub", "Subscriptions", r#"{"user":"A loyal viewer","amount":"6","message":"Six months already!"}"#, "New Subscriber", "{user}"),
     ("gift", "Gifted Subs", r#"{"user":"A generous viewer","amount":"5"}"#, "Gifted Subs", "{user} gifted {amount} subs"),
@@ -21,6 +21,8 @@ pub const KINDS: [(&str, &str, &str, &str, &str); 11] = [
     ("poll", "Polls", r#"{"user":"Which track next?","message":"Vote now!"}"#, "Poll", "{user}"),
     ("ban", "Bans", r#"{"user":"A troll"}"#, "Banned", "{user}"),
     ("watchstreak", "Watch Streaks", r#"{"user":"A regular","amount":"10"}"#, "Watch Streak", "{user} · {amount} streams"),
+    // (a song request you like while it plays: a thank-you to whoever asked for it)
+    ("liked", "Liked Requests", r#"{"user":"A viewer","message":"Great call, A viewer."}"#, "Request Liked", "{user}"),
 ];
 const ICONS: [(&str, &str); 17] = [
     ("follow", "Heart"), ("sub", "Star"), ("gift", "Gift"), ("bits", "Gem"), ("kicks", "Lightning"), ("donation", "Money"),

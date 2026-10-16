@@ -476,6 +476,7 @@
     hammer: "M2 19.63L13.43 8.2l-.71-.71 1.42-1.41-2.13-2.12 3.53-3.54 2.13 2.12 1.41-1.41 2.83 2.83-1.41 1.41 1.41 1.42-2.12 2.12-1.42-1.41-.7.7L5.24 21.63z",
     rocket: "M12 2.5s4.5 2.04 4.5 10.5c0 2.49-1.04 5.57-1.6 7H9.1c-.56-1.43-1.6-4.51-1.6-7C7.5 4.54 12 2.5 12 2.5zm2 8.5c0-1.1-.9-2-2-2s-2 .9-2 2 .9 2 2 2 2-.9 2-2zm-6.31 9.52c-.48-1.23-1.52-4.17-1.67-6.87l-1.13.75c-.56.38-.89 1-.89 1.67V22l3.69-1.48zM20 22v-5.93c0-.67-.33-1.29-.89-1.66l-1.13-.75c-.15 2.69-1.2 5.64-1.67 6.87L20 22z",
     music: "M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z",
+    liked: "M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z",
     sparkle: "M19 9l1.25-2.75L23 5l-2.75-1.25L19 1l-1.25 2.75L15 5l2.75 1.25L19 9zm-7.5.5L9 4 6.5 9.5 1 12l5.5 2.5L9 20l2.5-5.5L17 12l-5.5-2.5zM19 15l-1.25 2.75L15 19l2.75 1.25L19 23l1.25-2.75L23 19l-2.75-1.25L19 15z",
   });
   const ANIMS = {
@@ -507,6 +508,7 @@
       case "poll": return ["Poll", a.user || "A new poll", a.message];
       case "ban": return ["Banned", u, a.message];
       case "watchstreak": return ["Watch Streak", n ? u + " · " + n + plural(n, " stream", " streams") : u, a.message];
+      case "liked": return ["Request Liked", u, a.message];
       default: return [kindCfg(a.type).name || "Alert", a.user || "", a.message];
     }
   }
@@ -720,7 +722,7 @@
   const COLLAGE_WITH = {
     follow: ["sparkle", "follow"], sub: ["sparkle", "trophy"], gift: ["sparkle", "follow"], bits: ["sparkle", "kicks"],
     kicks: ["sparkle", "bits"], donation: ["follow", "sparkle"], raid: ["rocket", "sparkle"], hypetrain: ["rocket", "sparkle"],
-    poll: ["bell", "sparkle"], ban: ["hammer", "hammer"], watchstreak: ["trophy", "sparkle"],
+    poll: ["bell", "sparkle"], ban: ["hammer", "hammer"], watchstreak: ["trophy", "sparkle"], liked: ["follow", "sparkle"],
   };
   // Each one's own look in the collage (Settings > the alert > Collage > Edit): moved and zoomed
   // (and for a picture, filling its tile or fitting in it), and a background colour of its own

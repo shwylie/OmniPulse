@@ -244,8 +244,9 @@ const LIKE_NOTE_MS: u128 = 8000;
 static LIKE_NOTE: std::sync::Mutex<Option<(String, std::time::Instant)>> = std::sync::Mutex::new(None);
 static LIKE_ORDER: std::sync::Mutex<Vec<usize>> = std::sync::Mutex::new(Vec::new());
 
-/// A requested song liked: the card's note for whoever asked for it (for LIKE_NOTE_MS)
-pub fn like_banter(by: &str) {
+/// A requested song liked: an alert for whoever asked for it (Liked Requests), or with alerts off (or
+/// that one switched off), the card's note for them (for LIKE_NOTE_MS)
+pub fn like_banter(prefs: &Value, by: &str) {
     let mut order = LIKE_ORDER.lock().unwrap();
     if order.is_empty() {
         let mut all: Vec<usize> = (0..LIKE_LINES.len()).collect();
@@ -253,6 +254,14 @@ pub fn like_banter(by: &str) {
         *order = all;
     }
     let line = LIKE_LINES[order.pop().unwrap_or(0)].replace("{user}", by);
+    let alert_off = prefs["alertOff"].as_array().is_some_and(|l| l.iter().any(|x| x == "liked"));
+    if set(prefs, "widget") && set(prefs, "alertsOn") && !alert_off {
+        let mut f = serde_json::Map::new();
+        f.insert("type".into(), json!("liked"));
+        f.insert("user".into(), json!(by));
+        f.insert("message".into(), json!(line));
+        if core::widget::alert_push(&f).is_ok() { return; }
+    }
     *LIKE_NOTE.lock().unwrap() = Some((format!("\u{2665} Liked \u{b7} {line}"), std::time::Instant::now()));
 }
 
@@ -425,7 +434,7 @@ mod banter_tests {
     fn each_line_once_before_any_repeats() {
         let mut seen = std::collections::HashSet::new();
         for _ in 0..super::LIKE_LINES.len() {
-            super::like_banter("amy");
+            super::like_banter(&serde_json::json!({}), "amy");
             seen.insert(super::like_note());
         }
         assert_eq!(seen.len(), super::LIKE_LINES.len());

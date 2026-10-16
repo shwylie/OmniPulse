@@ -4204,7 +4204,8 @@ fn like_track(shared: &Shared, t: Track) {
     // a requested song: the widget cheers whoever asked for it, for a few seconds
     let by = if playing { shared.borrow().queue.qi.and_then(|i| shared.borrow().queue.items.get(i).map(|q| q.by.clone())).unwrap_or_default() } else { String::new() };
     if on && !by.is_empty() {
-        integrations::like_banter(by.trim_end_matches(" (Jam)"));
+        let prefs = shared.borrow().web.prefs.clone();
+        integrations::like_banter(&prefs, by.trim_end_matches(" (Jam)"));
         push_out(shared, true);
         let s = shared.clone();
         slint::Timer::single_shot(std::time::Duration::from_millis(8100), move || push_out(&s, true));
@@ -10706,6 +10707,7 @@ fn main() -> Result<(), slint::PlatformError> {
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("square") { vec![(9, "play"), (10, "unround"), (12, "nav:settings"), (13, "cat:Streaming"), (14, "panel:widget"), (16, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("qset") { vec![(9, "play"), (11, "queue"), (14, "nav:settings"), (15, "cat:App & Look"), (16, "scroll:420"), (18, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("nowslim") { vec![(9, "play"), (11, "queue"), (12, "now"), (15, "size:860:720"), (17, "size:1100:720"), (19, "size:1500:860"), (21, "end")] }
+            else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("goplus") { vec![(9, "goplus"), (10, "gpfind"), (20, "spcheck3"), (40, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("spsmart") { vec![(9, "smartprep"), (10, "spplay3"), (24, "spcheck3"), (30, "spcheck3"), (31, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("dropclick") {
                 // (OMNIPULSE_SELFTEST_CLICKS="panel;x,y;x,y": the panel opened, then clicks where a pointer would)
@@ -11136,6 +11138,16 @@ fn main() -> Result<(), slint::PlatformError> {
                     });
                 }
                 // Track Preferences' Beat 1: a beat earlier, then saved
+                // the Library's Go+ tracks (20 of them): whether each has a YouTube Music version to play from
+                "gpfind" => {
+                    let list: Vec<Track> = s.borrow().library.iter().filter(|t| t.go_plus).take(20).cloned().collect();
+                    let rt = s.borrow().rt.clone();
+                    rt.spawn(async move {
+                        let mut miss = Vec::new();
+                        for t in &list { if versions::find(t).await.is_none() { miss.push(format!("{} - {}", t.artist, t.title)); } }
+                        println!("selftest: go+: {} of {} have no YouTube Music version: {miss:?}", miss.len(), list.len());
+                    });
+                }
                 // a Spotify song from the Library played, two after it (with Smart Transitions on: from YouTube Music)
                 "spplay3" => {
                     let list: Vec<Track> = s.borrow().library.iter().filter(|t| matches!(t.src, track::Src::Spotify(_))).take(3).cloned().collect();

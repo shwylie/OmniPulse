@@ -274,7 +274,7 @@ pub fn fields(name: &str, vals: &Map<String, Value>, prefs: &Value, lan: &str) -
             let vars = if bot == "mixitup" { "type=follow&user=$username" } else { "type=follow&user=NAME&amount=&message=" };
             let part = |k: &str| if vals["botRemote"].as_bool() == Some(true) && !k.is_empty() { format!("key={k}&") } else { String::new() };
             let url = |k: &str| format!("http://127.0.0.1:{port}/alert?{}{vars}", part(k));
-            let types = "follow, sub, gift, bits, kicks, donation, raid, hypetrain, poll, ban, watchstreak";
+            let types = "follow, sub, gift, bits, kicks, donation, raid, hypetrain, poll, ban, watchstreak, liked";
             let mut f = vec![sel("alertBot", "Your Bot", "", &[(json!("streamerbot"), "Streamer.bot"), (json!("mixitup"), "Mix It Up"), (json!("generic"), "Generic")])];
             if bot == "streamerbot" {
                 f.push(text("sbHost", "Streamer.bot", "Its WebSocket Server's address and port."));

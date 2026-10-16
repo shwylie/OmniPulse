@@ -22,7 +22,7 @@ pub const WIDGET_HTML: &str = include_str!("../widget/widget.html");
 
 /// The kinds of alert, as /alert?type= names them
 /// (custom ones, set up in the app, come on top: see custom_kinds)
-pub const ALERT_KINDS: [&str; 11] = ["follow", "sub", "gift", "bits", "kicks", "donation", "raid", "hypetrain", "poll", "ban", "watchstreak"];
+pub const ALERT_KINDS: [&str; 12] = ["follow", "sub", "gift", "bits", "kicks", "donation", "raid", "hypetrain", "poll", "ban", "watchstreak", "liked"];
 /// The last few alerts, for the page to pick up (it shows the ones newer than it has seen)
 static ALERTS: Mutex<VecDeque<Value>> = Mutex::new(VecDeque::new());
 static ALERT_ID: AtomicU64 = AtomicU64::new(0);
@@ -98,6 +98,7 @@ pub fn alert_push(fields: &serde_json::Map<String, Value>) -> Result<Value, Stri
         "host" | "hosts" | "raids" => "raid".to_string(),
         "banned" => "ban".to_string(),
         "watch_streak" | "streak" => "watchstreak".to_string(),
+        "like" | "likedrequest" | "liked_request" => "liked".to_string(),
         other => other.to_string(),
     };
     let custom = custom_kinds();
