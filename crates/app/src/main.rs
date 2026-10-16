@@ -10770,6 +10770,7 @@ fn main() -> Result<(), slint::PlatformError> {
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("qset") { vec![(9, "play"), (11, "queue"), (14, "nav:settings"), (15, "cat:App & Look"), (16, "scroll:420"), (18, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("nowslim") { vec![(9, "play"), (11, "queue"), (12, "now"), (15, "size:860:720"), (17, "size:1100:720"), (19, "size:1500:860"), (21, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("smartmem") { vec![(9, "smartprep"), (10, "play"), (12, "mem"), (37, "mem"), (38, "nearend"), (62, "mem"), (87, "mem"), (88, "nearend"), (112, "mem"), (137, "mem"), (138, "nearend"), (162, "mem"), (187, "mem"), (188, "nearend"), (212, "mem"), (237, "mem"), (238, "nearend"), (262, "mem"), (287, "mem"), (288, "nearend"), (312, "mem"), (337, "mem"), (338, "nearend"), (362, "mem"), (387, "mem"), (388, "nearend"), (412, "mem"), (413, "end")] }
+            else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("gamealert") { vec![(8, "play"), (9, "widgeton"), (14, "gametest"), (21, "gametest"), (28, "gametest"), (35, "gametest"), (42, "gametest"), (49, "gametest"), (56, "gametest"), (63, "gametest"), (70, "gametest"), (77, "gametest"), (84, "gametest"), (91, "gametest"), (98, "gametest"), (105, "gametest"), (112, "gametest"), (119, "gametest"), (121, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("scplay") { vec![(9, "play"), (18, "spcheck3"), (22, "spcheck3"), (23, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("goplus") { vec![(9, "goplus"), (10, "gpfind"), (20, "spcheck3"), (40, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("spsmart") { vec![(9, "smartprep"), (10, "spplay3"), (24, "spcheck3"), (30, "spcheck3"), (31, "end")] }
@@ -11202,6 +11203,20 @@ fn main() -> Result<(), slint::PlatformError> {
                     });
                 }
                 // Track Preferences' Beat 1: a beat earlier, then saved
+                // the widget and its alerts on (for the test), its server started
+                "widgeton" => {
+                    if let Some(o) = s.borrow_mut().web.prefs.as_object_mut() {
+                        o.insert("widget".into(), serde_json::json!(true)); o.insert("alertsOn".into(), serde_json::json!(true));
+                        // (OMNIPULSE_SELFTEST_TRANS: the alerts' transition, for the test)
+                        if let Ok(t) = std::env::var("OMNIPULSE_SELFTEST_TRANS") { o.insert("alertTrans".into(), serde_json::json!(t)); }
+                    }
+                    let r = integrations::widget_start(&s.borrow().web.prefs);
+                    outside_start(&s);
+                    push_out(&s, true);
+                    println!("selftest: widget on: {r:?}");
+                }
+                // Alerts > Game Changes > Test (OMNIPULSE_SELFTEST_ALERT: another kind)
+                "gametest" => { let k = std::env::var("OMNIPULSE_SELFTEST_ALERT").unwrap_or_else(|_| "game".into()); panel_press(&s, &format!("alTest:{k}")); println!("selftest: tested {k}"); }
                 // the app's memory and CPU (Windows: working set, private bytes, CPU seconds so far)
                 "mem" => {
                     #[repr(C)] #[derive(Default)] struct Pmc { cb: u32, faults: u32, peak_ws: usize, ws: usize, qpp: usize, qp: usize, qnpp: usize, qnp: usize, pagefile: usize, peak_pagefile: usize, private: usize }
