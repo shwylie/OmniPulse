@@ -65,6 +65,17 @@ fn body_line(m: &Measured) -> Option<f32> {
     Some(v[v.len() * 3 / 4] - BODY_WITHIN_DB)
 }
 
+/// Where a transition starts in the one playing (ms): in its last quarter; a blend that won't fit there,
+/// earlier, as late as it fits
+pub fn earliest_ms(end_ms: u64) -> u64 {
+    end_ms * 3 / 4
+}
+
+/// And never before halfway, however long the blend (one that won't fit after it: a fade instead)
+pub fn never_before_ms(end_ms: u64) -> u64 {
+    end_ms / 2
+}
+
 /// Its outro: from where its last stretch of the song proper ends (ms), if it has one before its sound
 /// ends
 pub fn outro_from(m: &Measured) -> Option<u64> {
@@ -101,6 +112,8 @@ pub fn fade(a: &Side, b: &Side, max_ms: u64, fixed_ms: u64) -> Fade {
     // (never more than a third of what's left of the one coming in, nor what there is of the one going out)
     let room_b = b.dur_ms.saturating_sub(b.first_ms) / 3;
     let len = len.clamp(MIN_FADE_MS, max_ms.max(MIN_FADE_MS)).min(end).min(if room_b > 0 { room_b } else { u64::MAX });
+    // (in its last quarter: a fade always fits there)
+    let len = len.min(end - earliest_ms(end)).max(MIN_FADE_MS.min(end));
     Fade { out_from_ms: end.saturating_sub(len), out_to_ms: end, in_from_ms: b.first_ms }
 }
 
@@ -249,9 +262,11 @@ pub fn blend_as(a: &Side, b: &Side, now_ms: u64, forced: bool) -> Option<crate::
     let line = body_line(ma)?;
     let outro = ma.rhythm.bar_db.iter().rposition(|d| *d >= line)? + 1;
     let end = if a.audible_ms > 0 && a.audible_ms < a.dur_ms { a.audible_ms } else { a.dur_ms } as f64;
-    let Some(k) = (0..=outro.min(na)).rev().find(|&k| {
-        on(k, ga) && k + run + TAIL_BARS <= na && bar_ms(ma, k).is_some_and(|t| t >= now_ms as f64 + 5000.0) && bar_ms(ma, k + run + TAIL_BARS).is_some_and(|t| t <= end)
-    }) else { why(&format!("no line to start on before its outro (bar {outro} of {na})")); return None };
+    // (in its last quarter; else, as late as it fits, but never before halfway)
+    let fits = |floor: u64| (0..=outro.min(na)).rev().find(|&k| {
+        on(k, ga) && k + run + TAIL_BARS <= na && bar_ms(ma, k).is_some_and(|t| t >= now_ms as f64 + 5000.0 && t >= floor as f64) && bar_ms(ma, k + run + TAIL_BARS).is_some_and(|t| t <= end)
+    });
+    let Some(k) = fits(earliest_ms(end as u64)).or_else(|| fits(never_before_ms(end as u64))) else { why(&format!("no line to start on before its outro (bar {outro} of {na})")); return None };
     let (at, swap, over) = (bar_ms(ma, k)?, bar_ms(ma, k + run)?, bar_ms(ma, k + run + TAIL_BARS)?);
     // its tempo as it is over the run-up (a song's drifts), the next one's over its own
     let (pa, pb) = ((swap - at) / (run * 4) as f64, (bar_ms(mb, from + run)? - bar_ms(mb, from)?) / (run * 4) as f64);
@@ -387,9 +402,10 @@ pub fn roll(a: &Side, b: &Side, now_ms: u64) -> Option<crate::mix::Plan> {
     let last_body = ma.rhythm.bar_db.iter().rposition(|d| *d >= line)?;
     let end = if a.audible_ms > 0 && a.audible_ms < a.dur_ms { a.audible_ms } else { a.dur_ms } as f64;
     // (its end on one of its 16-beat lines: the latest by its main part's end)
-    let end_bar = (first_body.max(ROLL_BARS as usize)..=(last_body + 1).min(na.saturating_sub(1))).rev().find(|&e| {
-        e % 4 == ga % 4 && bar_ms(ma, e - ROLL_BARS as usize).is_some_and(|t| t >= now_ms as f64 + 5000.0) && bar_ms(ma, e).is_some_and(|t| t <= end)
-    })?;
+    let fits = |floor: u64| (first_body.max(ROLL_BARS as usize)..=(last_body + 1).min(na.saturating_sub(1))).rev().find(|&e| {
+        e % 4 == ga % 4 && bar_ms(ma, e - ROLL_BARS as usize).is_some_and(|t| t >= now_ms as f64 + 5000.0 && t >= floor as f64) && bar_ms(ma, e).is_some_and(|t| t <= end)
+    });
+    let end_bar = fits(earliest_ms(end as u64)).or_else(|| fits(never_before_ms(end as u64)))?;
     let (at, to) = (bar_ms(ma, end_bar - ROLL_BARS as usize)?, bar_ms(ma, end_bar)?);
     // the next one: on its main part's first downbeat, its intro (if short) left out
     let line_b = body_line(mb)?;
@@ -425,7 +441,7 @@ pub fn tape(a: &Side, b: &Side, now_ms: u64) -> Option<crate::mix::Plan> {
     let end = if a.audible_ms > 0 && a.audible_ms < a.dur_ms { a.audible_ms } else { a.dur_ms };
     let p = crate::mix::plan_structure(ma, end, now_ms, mb);
     crate::mix::FORCE_TAPE.store(false, std::sync::atomic::Ordering::Relaxed);
-    p.filter(|p| p.tape_stop && p.semitones == 0)
+    p.filter(|p| p.tape_stop && p.semitones == 0 && p.at_ms >= never_before_ms(end))
 }
 
 /// An extra's ratings (state/mix-feedback.jsonl, "kind" as the app wrote it): enough of them (5), and
@@ -537,9 +553,27 @@ mod tests {
         // 174 into 128: counted as 87, both sped up (B in at 87, to its own; A from 87's bars on)
         let a = song(174.0, &levels(16, 96, 16), 0.6, "8A");
         let b = song(128.0, &levels(8, 48, 8), 0.6, "8A");
-        let side = |m| Side { dur_ms: 300_000, rhythm: Some(m), ..Default::default() };
-        let p = blend(&side(&a), &side(&b), 0).expect("a blend");
+        // (each as long as its beats)
+        let side = |m: &'static Measured| Side { dur_ms: m.to_ms, rhythm: Some(m), ..Default::default() };
+        let (a, b): (&'static Measured, &'static Measured) = (Box::leak(Box::new(a)), Box::leak(Box::new(b)));
+        let p = blend(&side(a), &side(b), 0).expect("a blend");
         assert!((p.rate - 87.0 / 128.0).abs() < 0.01 && p.out_tempo > 1.4, "{} {}", p.rate, p.out_tempo);
+    }
+
+    #[test]
+    fn a_transition_starts_in_the_last_quarter_or_as_late_as_it_fits_never_before_halfway() {
+        // 120 BPM (2 s a bar), 48 bars of 96 s, its main part to bar 44: a blend in its last quarter (72 s on)
+        let a = song(120.0, &levels(4, 40, 4), 0.6, "8A");
+        let b = song(120.0, &levels(8, 40, 4), 0.6, "8A");
+        let side = |m, d| Side { dur_ms: d, rhythm: Some(m), ..Default::default() };
+        let p = blend(&side(&a, 96_000), &side(&b, b.to_ms), 0).expect("a blend");
+        assert!(p.at_ms >= earliest_ms(96_000), "{p:?}");
+        // a short song (14 bars, 28 s): no room after 21 s, so earlier, but from 14 s at the soonest
+        let short = song(120.0, &levels(1, 12, 1), 0.6, "8A");
+        if let Some(p) = blend(&side(&short, 28_000), &side(&b, b.to_ms), 0) { assert!(p.at_ms >= never_before_ms(28_000), "{p:?}"); }
+        // a fade never from before halfway
+        let f = fade(&side(&short, 28_000), &side(&b, b.to_ms), 60_000, 6000);
+        assert!(f.out_from_ms >= 14_000, "{f:?}");
     }
 
     #[test]

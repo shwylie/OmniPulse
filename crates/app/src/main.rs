@@ -3795,6 +3795,8 @@ fn mix_tick(shared: &Shared, pos: u64, dur: u64) {
         }
     };
     MIX_AUDIT.with(|a| { let mut a = a.borrow_mut(); a.plan_ns += planning.elapsed().as_nanos() as u64; a.plans += 1; });
+    // (never before halfway through the one playing)
+    if plan.at_ms < smart::never_before_ms(audible) { why(&format!("the mix would start at {} ms, before halfway", plan.at_ms)); return; }
     // listened to again first (measured only in part), then got ready about seven seconds ahead of its moment
     if local.is_none() {
         mix_ear(shared, &cur.key, pos, plan.at_ms);
@@ -4688,6 +4690,9 @@ fn smart_decide(shared: &Shared, a: &SmartSong, b: &SmartSong, pos: u64, late: b
         None
     };
     let (mut p, mut why) = decided?;
+    // (never before halfway through the one playing: a fade instead, which keeps to it)
+    let end = if a.audible_ms > 0 && a.audible_ms < a.dur_ms { a.audible_ms } else { a.dur_ms };
+    if p.as_ref().is_some_and(|x| x.at_ms < smart::never_before_ms(end)) { p = None; why = "it would start before halfway".into(); }
     // (a blend that starts the next one past its first sung words: a fade instead, from its start: its
     // lyrics, where they're known, are never cut into)
     if let Some(plan) = p.as_ref().filter(|x| !x.tape_stop && x.style.is_none()) {
@@ -9470,6 +9475,33 @@ fn taskbar_widget(shared: &Shared, ui: &AppWindow, on: bool) {
 }
 
 /// The window's handle, once it exists (for the taskbar buttons)
+/// The window moved (HTCAPTION) or resized (an edge's hit-test code) by Windows, as from its own title bar
+/// or frame. Not winit's drag_window: it marks a drag begun and clears that only when Windows' move ends,
+/// so a press whose move never began (the button up before it, as when another window took the focus
+/// mid-click: the lyrics widget's pop-out preview opening) left it marked, and every move and resize after
+/// was ignored
+fn os_drag(ui: &AppWindow, ht: usize) {
+    #[cfg(windows)]
+    {
+        use windows::Win32::Foundation::{HWND, LPARAM, POINT, WPARAM};
+        use windows::Win32::UI::Input::KeyboardAndMouse::ReleaseCapture;
+        use windows::Win32::UI::WindowsAndMessaging::{GetCursorPos, PostMessageW, WM_NCLBUTTONDOWN};
+        let Some(h) = window_hwnd(ui) else { return };
+        unsafe {
+            let mut p = POINT::default();
+            if GetCursorPos(&mut p).is_err() { return; }
+            let _ = ReleaseCapture();
+            let lp = ((p.y as i16 as u16 as u32) << 16) | (p.x as i16 as u16 as u32);
+            let _ = PostMessageW(Some(HWND(h as *mut _)), WM_NCLBUTTONDOWN, WPARAM(ht), LPARAM(lp as isize));
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        use slint::winit_030::WinitWindowAccessor;
+        if ht == 2 { ui.window().with_winit_window(|w| { let _ = w.drag_window(); }); }
+    }
+}
+
 fn window_hwnd(ui: &AppWindow) -> Option<isize> {
     use slint::winit_030::winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
     use slint::winit_030::WinitWindowAccessor;
@@ -10750,18 +10782,16 @@ fn main() -> Result<(), slint::PlatformError> {
     ui.on_drag({
         let weak = ui.as_weak();
         move || {
-            use slint::winit_030::WinitWindowAccessor;
-            let ui = weak.upgrade().unwrap();
-            ui.window().with_winit_window(|w| { let _ = w.drag_window(); });
+            if let Some(ui) = weak.upgrade() { os_drag(&ui, 2); }   // (HTCAPTION)
         }
     });
     // resized from an edge or corner (Windows does the dragging, as it does the title bar's)
     ui.on_resize({
         let weak = ui.as_weak();
         move |d| {
-            use slint::winit_030::{winit::window::ResizeDirection as R, WinitWindowAccessor};
-            let dir = match d { 0 => R::North, 1 => R::South, 2 => R::West, 3 => R::East, 4 => R::NorthWest, 5 => R::NorthEast, 6 => R::SouthWest, _ => R::SouthEast };
-            if let Some(ui) = weak.upgrade() { ui.window().with_winit_window(|w| { let _ = w.drag_resize_window(dir); }); }
+            // (HTTOP, HTBOTTOM, HTLEFT, HTRIGHT, HTTOPLEFT, HTTOPRIGHT, HTBOTTOMLEFT, HTBOTTOMRIGHT)
+            let ht = match d { 0 => 12, 1 => 15, 2 => 10, 3 => 11, 4 => 13, 5 => 14, 6 => 16, _ => 17 };
+            if let Some(ui) = weak.upgrade() { os_drag(&ui, ht); }
         }
     });
     { let s = shared.clone(); ui.on_minimize(move || minimize(&s)); }
