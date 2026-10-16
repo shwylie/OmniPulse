@@ -4554,11 +4554,6 @@ fn smart_blends_on(prefs: &serde_json::Value) -> bool {
     smart_on(prefs) && set_row_on(prefs, "smartBlend", true)
 }
 
-/// One of its page's switches (on unless switched off)
-fn smart_set_on(prefs: &serde_json::Value, key: &str) -> bool {
-    smart_on(prefs) && set_row_on(prefs, key, true)
-}
-
 /// Its longest fade (its page's Longest Fade, s): 10 unless set
 fn smart_max_ms(prefs: &serde_json::Value) -> u64 {
     prefs["smartMax"].as_u64().unwrap_or(10).clamp(3, 30) * 1000
