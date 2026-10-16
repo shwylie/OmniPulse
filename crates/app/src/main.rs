@@ -9492,6 +9492,17 @@ fn os_drag(ui: &AppWindow, ht: usize) {
             let _ = ReleaseCapture();
             let lp = ((p.y as i16 as u16 as u32) << 16) | (p.x as i16 as u16 as u32);
             let _ = PostMessageW(Some(HWND(h as *mut _)), WM_NCLBUTTONDOWN, WPARAM(ht), LPARAM(lp as isize));
+            // (Windows' move or resize takes the button's release for itself: the press let go of here, or
+            // the title bar or edge stays held, its cursor kept and every click after going to it)
+            let scale = ui.window().scale_factor().max(0.1);
+            let at = ui.window().position();
+            let pos = slint::LogicalPosition::new((p.x - at.x) as f32 / scale, (p.y - at.y) as f32 / scale);
+            let weak = ui.as_weak();
+            slint::Timer::single_shot(std::time::Duration::ZERO, move || {
+                if let Some(ui) = weak.upgrade() {
+                    ui.window().dispatch_event(slint::platform::WindowEvent::PointerReleased { position: pos, button: slint::platform::PointerEventButton::Left });
+                }
+            });
         }
     }
     #[cfg(not(windows))]
