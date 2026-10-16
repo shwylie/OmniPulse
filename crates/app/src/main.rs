@@ -3009,14 +3009,24 @@ fn start(shared: &Shared) {
         let mb = matches!(t.src, track::Src::Catalog(_)) || listen_needs_version(&t) || sp_free;
         let (src, version) = if let Some((_, v)) = mixed {
             (Ok(None), v)
-        } else if t.go_plus || mb {
+        } else if t.go_plus {
+            full_elsewhere(&t, h.clone()).await
+        } else if mb {
             match versions::find(&t).await {
                 Some(v) => (player::open_source(&Track::youtube(&v.yt), h.clone()).await.map(Some), Some(v)),
                 None if matches!(t.src, track::Src::Spotify(_)) && sp_plays_here() => (player::open_source(&t, h.clone()).await.map(Some), None),
                 None => (Err("there's no version of it on YouTube Music".to_string()), None),
             }
         } else {
-            (player::open_source(&t, h.clone()).await.map(Some), None)
+            let r = player::open_source(&t, h.clone()).await.map(Some);
+            // (SoundCloud with only a preview for it, whatever it's called: no stream it can play, or a "full"
+            // one that's 30 seconds of a longer song: the full song from elsewhere, as the web app's)
+            let preview = matches!(t.src, track::Src::SoundCloud(_)) && match &r {
+                Err(_) => true,
+                Ok(Some(s)) => t.ms > 60_000 && s.duration_ms().is_some_and(|d| d > 0 && d < 35_000),
+                Ok(None) => false,
+            };
+            if preview { full_elsewhere(&t, h.clone()).await } else { (r, None) }
         };
         let src = match (src, smart_from) {
             (Ok(Some(mut s)), Some(ms)) => tokio::task::spawn_blocking(move || { let _ = s.seek(ms); s }).await.map(Some).map_err(|e| e.to_string()),
@@ -3519,6 +3529,23 @@ const MIX_BARS: u32 = 8;
 
 /// A track the mix plays from YouTube Music: Go+, a catalogue's, a Spotify one (never Spotify's own
 /// playback in a mix), or one listening along can't play here
+/// A SoundCloud song it only has a preview of (Go+): the full song from YouTube Music (yt-dlp), else from
+/// Spotify (playing here, Premium), as the web app's playFullElsewhere
+async fn full_elsewhere(t: &Track, h: tokio::runtime::Handle) -> (Result<Option<Box<dyn omnipulse_audio::Source>>, String>, Option<versions::Version>) {
+    if let Some(v) = versions::find(t).await {
+        return (player::open_source(&Track::youtube(&v.yt), h).await.map(Some), Some(v));
+    }
+    if sp_plays_here() {
+        if let Some(id) = mirror::counterpart(t, "spotify").await {
+            let uri = if id.contains(':') { id } else { format!("spotify:track:{id}") };
+            let sp = Track { src: track::Src::Spotify(uri.clone()), key: format!("sp:{}", uri.rsplit(':').next().unwrap_or("")), ..t.clone() };
+            omnipulse_core::diag::note(&format!("Go+: \"{}\" plays from Spotify (no YouTube Music version)", t.title));
+            return (player::open_source(&sp, h).await.map(Some), None);
+        }
+    }
+    (Err("SoundCloud only has a preview of it, and there's no full version on YouTube Music or Spotify".to_string()), None)
+}
+
 fn mix_via_youtube(t: &Track) -> bool {
     t.go_plus || matches!(t.src, track::Src::Catalog(_) | track::Src::Spotify(_)) || listen_needs_version(t)
 }
@@ -10707,6 +10734,7 @@ fn main() -> Result<(), slint::PlatformError> {
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("square") { vec![(9, "play"), (10, "unround"), (12, "nav:settings"), (13, "cat:Streaming"), (14, "panel:widget"), (16, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("qset") { vec![(9, "play"), (11, "queue"), (14, "nav:settings"), (15, "cat:App & Look"), (16, "scroll:420"), (18, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("nowslim") { vec![(9, "play"), (11, "queue"), (12, "now"), (15, "size:860:720"), (17, "size:1100:720"), (19, "size:1500:860"), (21, "end")] }
+            else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("scplay") { vec![(9, "play"), (18, "spcheck3"), (22, "spcheck3"), (23, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("goplus") { vec![(9, "goplus"), (10, "gpfind"), (20, "spcheck3"), (40, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("spsmart") { vec![(9, "smartprep"), (10, "spplay3"), (24, "spcheck3"), (30, "spcheck3"), (31, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("dropclick") {
