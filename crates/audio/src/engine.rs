@@ -17,7 +17,24 @@ use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-const AHEAD_S: f32 = 0.35;
+/// How far ahead of what's heard the sound's made (s): enough to ride out the PC being busy (a build, a
+/// game loading) without a gap. The volume is applied as it's heard, so it's never this late; the EQ and a
+/// track's loudness match are made with the sound, so a change to them is heard up to this late
+const AHEAD_S: f32 = 1.2;
+
+/// The calling thread in Windows' "Pro Audio" class (MMCSS: scheduled ahead of ordinary work, a game's and
+/// a build's included), as audio software's own threads are
+#[cfg(windows)]
+pub fn pro_audio_thread() {
+    #[link(name = "avrt")]
+    extern "system" { fn AvSetMmThreadCharacteristicsW(task: *const u16, index: *mut u32) -> isize; }
+    let name: Vec<u16> = "Pro Audio\0".encode_utf16().collect();
+    let mut idx = 0u32;
+    // SAFETY: a nul-ended UTF-16 task name and a place for its index; the handle's kept for the thread's life
+    unsafe { AvSetMmThreadCharacteristicsW(name.as_ptr(), &mut idx); }
+}
+#[cfg(not(windows))]
+pub fn pro_audio_thread() {}
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Event {
@@ -654,10 +671,13 @@ fn build_output(name: &str, shared: Arc<Shared>, ev: Sender<Event>) -> Result<(c
         let _ = ev.send(Event::Error(format!("The output device stopped: {e}")));
     };
     let stream = match fmt {
-        cpal::SampleFormat::F32 => dev.build_output_stream(&cfg, move |d: &mut [f32], _| fill(d), err, None),
+        // (the device's own thread, the first time it asks: in the Pro Audio class too)
+        cpal::SampleFormat::F32 => { let mut boosted = false; dev.build_output_stream(&cfg, move |d: &mut [f32], _| { if !boosted { boosted = true; pro_audio_thread(); } fill(d) }, err, None) }
         cpal::SampleFormat::I16 => {
             let mut tmp = Vec::new();
+            let mut boosted = false;
             dev.build_output_stream(&cfg, move |d: &mut [i16], _| {
+                if !boosted { boosted = true; pro_audio_thread(); }
                 tmp.resize(d.len(), 0.0);
                 fill(&mut tmp);
                 d.iter_mut().zip(&tmp).for_each(|(o, s)| *o = (s.clamp(-1.0, 1.0) * 32767.0) as i16);
@@ -867,10 +887,10 @@ impl Centre {
 
 impl Handoff {
     /// The same, its voices handed over too, gradually: the one going out's faded away over the `out_ms`
-    /// before `at`, the one coming in's faded up over the `in_ms` after it
-    pub fn with_voices(mut self, at: u64, out_ms: u64, in_ms: u64) -> Self {
+    /// before `at`. The one coming in's is never held back (`_in_ms`): its first words are never lost
+    pub fn with_voices(mut self, at: u64, out_ms: u64, _in_ms: u64) -> Self {
         self.out_voice = Some((at.saturating_sub(out_ms), out_ms.max(1)));
-        self.in_voice = Some((at, in_ms.max(1)));
+        self.in_voice = None;
         self
     }
 
@@ -878,9 +898,10 @@ impl Handoff {
     /// one going out's gone by then, the one coming in's up from then, so they're never sung together
     pub fn voiced_crossfade(ms: u64) -> Self {
         let all = Ramp::swap(0, ms);
-        // (each faded over a good part of it: gone by halfway, up from there)
-        let (out_len, in_len) = (ms * 3 / 10, ms * 2 / 5);
-        Self { low: all, mid: all, high: all, echo: None, out_sweep: None, in_sweep: None, brake: None, spin: None, out_loop: None, in_loop: None, roll: None, out_voice: Some(((ms / 2).saturating_sub(out_len), out_len)), in_voice: Some((ms / 2, in_len)) }
+        // (the one going out's voice faded over its first part, gone by a third of the way; the one coming in's
+        // as it is, from its first word)
+        let out_len = ms * 3 / 10;
+        Self { low: all, mid: all, high: all, echo: None, out_sweep: None, in_sweep: None, brake: None, spin: None, out_loop: None, in_loop: None, roll: None, out_voice: Some((ms / 30, out_len)), in_voice: None }
     }
 
     /// A DJ's blend, the one playing's beat carried through: the next one's highs (its hats, its air)
@@ -1316,9 +1337,10 @@ fn begin_fade(shared: &Shared, next: Pipeline, total_frames: u64, handoff: Optio
 }
 
 fn decode_loop(shared: Arc<Shared>, cmds: Receiver<Cmd>, ev: Sender<Event>) {
-    // (above the app's other work, and a game's: the sound is only 0.35 s ahead of what's heard)
+    // (above the app's other work, and a game's: the sound is only AHEAD_S ahead of what's heard)
     #[cfg(windows)]
     unsafe { windows_sys::Win32::System::Threading::SetThreadPriority(windows_sys::Win32::System::Threading::GetCurrentThread(), windows_sys::Win32::System::Threading::THREAD_PRIORITY_HIGHEST); }
+    pro_audio_thread();
     let mut pipe: Option<Pipeline> = None;
     let mut fading: Option<Fading> = None;
     let mut waiting: Option<Waiting> = None;

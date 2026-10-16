@@ -161,7 +161,7 @@ pub fn blend_blocked(a: &Side, b: &Side) -> Option<&'static str> {
     let (ma, mb) = (a.rhythm?, b.rhythm?);
     let near = |x: f64| (x / mb.rhythm.bpm - 1.0).abs() <= MAX_RAMP_BLEND;
     if match_rate(ma.rhythm.bpm, mb.rhythm.bpm).is_none() && !near(ma.rhythm.bpm) && !near(ma.rhythm.bpm / 2.0) { return Some("tempos too far apart (more than 50%)"); }
-    if !keys_go(ma, mb) { return Some("keys that don't go together"); }
+    // (keys that don't go together: still a blend, a short one: the clash only briefly, as a DJ does)
     None
 }
 
@@ -239,8 +239,9 @@ pub fn blend_as(a: &Side, b: &Side, now_ms: u64, forced: bool) -> Option<crate::
     let s0 = gb % 4;
     let first_b = body_line(mb).and_then(|l| mb.rhythm.bar_db.iter().position(|d| *d >= l)).unwrap_or(s0);
     let intro = first_b.saturating_sub(s0) / 4 * 4;
-    // (a big change of tempo: 32 beats for it, whatever the intro)
-    let run = if ramp > MAX_RATE { 8 } else { intro.clamp(4, 8) };
+    // (a big change of tempo: 32 beats for it, whatever the intro; keys that clash: 16, the clash brief)
+    let clash = !keys_go(ma, mb);
+    let run = if clash { 4 } else if ramp > MAX_RATE { 8 } else { intro.clamp(4, 8) };
     let from = if intro > run { s0 + intro - run } else { s0 };
     if from + run + TAIL_BARS >= nb { return None; }
     // the one playing: from the line its outro starts on (where its main part ends, snapped back to a
@@ -476,7 +477,9 @@ mod tests {
         let side = |m| Side { dur_ms: 150_000, rhythm: Some(m), ..Default::default() };
         assert_eq!(blend_blocked(&side(&a), &side(&near)), None);
         assert!(blend_blocked(&side(&a), &side(&far)).is_some());
-        assert!(blend_blocked(&side(&a), &side(&clash)).is_some());
+        // (keys that clash: a short blend, 16 beats and the bars after, not none)
+        assert!(blend_blocked(&side(&a), &side(&clash)).is_none());
+        assert_eq!(blend(&side(&a), &side(&clash), 0).map(|p| p.bars), Some(4 + TAIL_BARS as u32));
         assert!(blend_blocked(&side(&a), &side(&blurry)).is_some());
         // half time counts as the same tempo (a 64 BPM grid on a 128 song)
         assert!(match_rate(128.0, 64.0).is_some());
@@ -869,6 +872,39 @@ mod tests {
                 eprintln!("round {round}, {id} ({secs} s): {:?} MB", mem());
             }
         }
+    }
+
+    /// Why pairs of the songs measured so far would blend or not (state/rhythm.json): each measured song
+    /// into the next one measured, counted by reason
+    #[test]
+    #[ignore]
+    fn blend_census() {
+        let d = omnipulse_core::data_dir().unwrap().join("state").join("rhythm.json");
+        let v: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(d).unwrap()).unwrap();
+        let songs: Vec<(String, Measured)> = v.as_object().unwrap().iter().filter(|(k, _)| k.starts_with("full:"))
+            .filter_map(|(k, x)| serde_json::from_value::<Measured>(x.clone()).ok().filter(|m| m.v == omnipulse_core::rhythm::VERSION).map(|m| (k.clone(), m))).collect();
+        println!("{} songs measured whole at this version", songs.len());
+        let mut why: std::collections::BTreeMap<String, usize> = Default::default();
+        let mut n = 0;
+        for (i, (_, a)) in songs.iter().enumerate() {
+            for (_, b) in songs.iter().skip(i + 1).take(25) {
+                let sa = Side { dur_ms: a.to_ms, rhythm: Some(a), ..Default::default() };
+                let sb = Side { dur_ms: b.to_ms, rhythm: Some(b), ..Default::default() };
+                let r = match blend_blocked(&sa, &sb) { Some(w) => w.to_string(), None => if blend(&sa, &sb, 0).is_some() { "blends".into() } else { "no line to start on".into() } };
+                *why.entry(r).or_default() += 1;
+                n += 1;
+            }
+        }
+        for (k, c) in &why { println!("  {k}: {c} ({:.0}%)", *c as f64 * 100.0 / n as f64); }
+        // and each song's own checks, alone
+        let mut own: std::collections::BTreeMap<&str, usize> = Default::default();
+        for (_, m) in &songs {
+            let r = &m.rhythm;
+            let s = Side { dur_ms: m.to_ms, rhythm: Some(m), ..Default::default() };
+            let k = if r.tempo_confidence < TRUST_CONFIDENCE { "tempo unclear" } else if r.model_bpm > 0.0 && ![1.0, 2.0, 0.5].iter().any(|x| ((r.bpm * x) / r.model_bpm - 1.0).abs() <= STATED_WITHIN) { "model tempo disagrees" } else if r.downbeat_confidence < omnipulse_core::rhythm::DOWNBEAT_TRUSTED { "beat 1 unsure" } else if !grid_trusted(&s) { "other" } else { "trusted" };
+            *own.entry(k).or_default() += 1;
+        }
+        println!("each song alone: {own:?}");
     }
 
     /// The fallback fade the app uses (main.rs' SMART_FIXED_MS)

@@ -4687,7 +4687,13 @@ fn smart_decide(shared: &Shared, a: &SmartSong, b: &SmartSong, pos: u64, late: b
     } else {
         None
     };
-    let (p, why) = decided?;
+    let (mut p, mut why) = decided?;
+    // (a blend that starts the next one past its first sung words: a fade instead, from its start: its
+    // lyrics, where they're known, are never cut into)
+    if let Some(plan) = p.as_ref().filter(|x| !x.tape_stop && x.style.is_none()) {
+        let first_sung = MIX_WORDS.with(|w| w.borrow().get(&b.t.key).and_then(|l| l.first().map(|x| x.0)));
+        if first_sung.is_some_and(|f| f < plan.start_ms) { p = None; why = "it would start past the next one's first words".into(); }
+    }
     SMART_PAIR.with(|s| *s.borrow_mut() = Some((a.t.key.clone(), b.t.key.clone(), p.clone(), why)));
     p
 }
@@ -4705,7 +4711,9 @@ fn smart_fade_tick(shared: &Shared, key: &str, pos: u64, dur: u64) -> Option<boo
     if shared.borrow().ui.upgrade().is_some_and(|u| u.get_track_loading()) { return Some(false); }
     let (a, b) = smart_pair(&shared.borrow(), dur)?;
     // (their lyrics, for whether both sing where they meet)
-    if smart_set_on(&shared.borrow().web.prefs, "smartVoices") { smart_lyrics(shared, &a.t); smart_lyrics(shared, &b.t); }
+    // (and for never starting the next one past its first words)
+    smart_lyrics(shared, &a.t);
+    smart_lyrics(shared, &b.t);
     if MIX.with(|m| m.borrow().is_some()) || shared.borrow().engine.mixing() { return Some(false); }
     let (out, moved) = FADE.with(|f| f.borrow().clone());
     if out || moved == key { return Some(false); }

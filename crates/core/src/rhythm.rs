@@ -538,8 +538,8 @@ fn analyse_now(mono: &[f32], rate: u32) -> Option<Rhythm> {
     let downbeat_confidence = if decisive { change_share[order[0]] } else { change_share[downbeat].min(DOWNBEAT_SURE - 0.01) };
     // (Beat This!, a model trained on annotated songs, where it can: its downbeats, onto these beats; the
     // share of them on one beat of four, how sure. The clues above disagree on halftime tracks, mashups)
-    // (its stretches not enough to tell which beat is the first: all of it, then)
-    if model.as_ref().is_some_and(|m| m.sampled && model_downbeat(m, &beats).is_none()) { model = model_run(mono, rate); }
+    // (its stretches not enough to be sure which beat is the first: all of it, then)
+    if model.as_ref().is_some_and(|m| m.sampled && model_downbeat(m, &beats).is_none_or(|d| d.1 < DOWNBEAT_TRUSTED)) { model = model_run(mono, rate); }
     let model_bpm = model.as_ref().map_or(0.0, |m| m.bpm);
     let (downbeat, downbeat_confidence) = model.as_ref().and_then(|m| model_downbeat(m, &beats)).unwrap_or((downbeat, downbeat_confidence));
     // (its beats the model's: as sure of them as of a clear beat of ours)
@@ -631,7 +631,7 @@ pub struct Measured {
 /// (2-3: beats moved half a beat where the bass hit harder between them, wrongly: an off-beat bass
 /// louder than the kick isn't a beat tracked off it; 4: that undone, the downbeat from where the
 /// sections change too)
-pub const VERSION: u32 = 11;
+pub const VERSION: u32 = 12;
 
 static STORE: std::sync::Mutex<Option<std::collections::HashMap<String, Measured>>> = std::sync::Mutex::new(None);
 
