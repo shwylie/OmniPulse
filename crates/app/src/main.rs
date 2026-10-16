@@ -2994,7 +2994,9 @@ fn start(shared: &Shared) {
     // a track a mix brought in: it's playing already (not loaded again)
     let mixed = MIXED_IN.with(|m| m.borrow_mut().take()).filter(|(k, _)| *k == t.key);
     if mixed.is_none() { MIX.with(|m| *m.borrow_mut() = None); }
-    let mix_on_now = mix_on(&shared.borrow().web.prefs);
+    // (Seamless Mix or Smart Transitions on: Spotify songs from their YouTube Music version, so they can be
+    // mixed: Spotify's own player plays one song at a time, never two crossfading)
+    let mix_on_now = mix_on(&shared.borrow().web.prefs) || smart_on(&shared.borrow().web.prefs);
     // (Smart Transitions' fade: it comes in from its first sound, its silence before that left out)
     let smart_from = SMART_START.with(|x| x.borrow_mut().take()).filter(|(k, _)| *k == t.key && resume == 0 && trim_of(&shared.borrow().web.prefs, &t.key).0 == 0).map(|x| x.1);
     rt.spawn(async move {
@@ -4103,7 +4105,7 @@ fn preload_next(shared: &Shared) {
     }
     let yt_id = |t: &Track| if let track::Src::YouTube(id) = &t.src { Some(id.clone()) } else { None };
     // (a Spotify song from YouTube Music: with a free account, or Seamless Mix on)
-    let sp_yt = matches!(next.src, track::Src::Spotify(_)) && (!sp_plays_here() || mix_on(&shared.borrow().web.prefs));
+    let sp_yt = matches!(next.src, track::Src::Spotify(_)) && (!sp_plays_here() || mix_on(&shared.borrow().web.prefs) || smart_on(&shared.borrow().web.prefs));
     let via_yt = next.go_plus || matches!(next.src, track::Src::Catalog(_)) || listen_needs_version(&next) || sp_yt;
     if !via_yt && yt_id(&next).is_none() { return; }   // (the others start at once anyway)
     let (rt, weak) = { let a = shared.borrow(); (a.rt.clone(), a.ui.clone()) };
@@ -4562,7 +4564,8 @@ fn smart_pair(a: &App, dur: u64) -> Option<(SmartSong, SmartSong)> {
 /// It plays from what was measured of it (a Spotify song plays from its YouTube Music version only
 /// when Spotify can't play it here)
 fn smart_same_source(t: &Track) -> bool {
-    !matches!(t.src, track::Src::Spotify(_)) || !sp_plays_here()
+    // (with Smart Transitions on, it plays from its YouTube Music version when there is one: start())
+    !matches!(t.src, track::Src::Spotify(_)) || !sp_plays_here() || SHARED.with(|s| s.borrow().as_ref().and_then(|sh| sh.try_borrow().ok().map(|a| smart_on(&a.web.prefs))).unwrap_or(false))
 }
 
 /// Both songs sing over their parts of a transition (ms in each), by their timed lyrics (fetched as a
@@ -10703,6 +10706,7 @@ fn main() -> Result<(), slint::PlatformError> {
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("square") { vec![(9, "play"), (10, "unround"), (12, "nav:settings"), (13, "cat:Streaming"), (14, "panel:widget"), (16, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("qset") { vec![(9, "play"), (11, "queue"), (14, "nav:settings"), (15, "cat:App & Look"), (16, "scroll:420"), (18, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("nowslim") { vec![(9, "play"), (11, "queue"), (12, "now"), (15, "size:860:720"), (17, "size:1100:720"), (19, "size:1500:860"), (21, "end")] }
+            else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("spsmart") { vec![(9, "smartprep"), (10, "spplay3"), (24, "spcheck3"), (30, "spcheck3"), (31, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("dropclick") {
                 // (OMNIPULSE_SELFTEST_CLICKS="panel;x,y;x,y": the panel opened, then clicks where a pointer would)
                 let spec = std::env::var("OMNIPULSE_SELFTEST_CLICKS").unwrap_or_else(|_| "requests;1028,196;1028,262".into());
@@ -11132,6 +11136,16 @@ fn main() -> Result<(), slint::PlatformError> {
                     });
                 }
                 // Track Preferences' Beat 1: a beat earlier, then saved
+                // a Spotify song from the Library played, two after it (with Smart Transitions on: from YouTube Music)
+                "spplay3" => {
+                    let list: Vec<Track> = s.borrow().library.iter().filter(|t| matches!(t.src, track::Src::Spotify(_))).take(3).cloned().collect();
+                    println!("selftest: spotify: playing {:?}", list.iter().map(|t| t.title.clone()).collect::<Vec<_>>());
+                    play_list(&s, list, 0);
+                }
+                "spcheck3" => {
+                    let a = s.borrow();
+                    println!("selftest: spotify: now \"{}\" at {} ms, paused {}, from its YouTube Music version {}", a.queue.current().map(|t| t.title.clone()).unwrap_or_default(), a.engine.position_ms(), a.engine.is_paused(), MIX_OUT_OK.with(|c| c.get()));
+                }
                 w if w.starts_with("openpanel:") => { ui.invoke_nav("settings".into()); panel_open(&s, &w[10..]); }
                 // a click where a pointer would (pressed and let go), in the window's own coordinates
                 w if w.starts_with("click:") => {

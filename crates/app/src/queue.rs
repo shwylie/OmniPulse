@@ -91,7 +91,7 @@ impl Queue {
     /// else you've queued, ahead of the rest of the list that's playing (and of autoplay's picks)
     pub fn queued_end(&self) -> usize {
         let mut i = self.qi.map_or(0, |q| q + 1).min(self.items.len());
-        while i < self.items.len() && self.items[i].queued { i += 1; }
+        while i < self.items.len() && (self.items[i].queued || !self.items[i].by.is_empty()) { i += 1; }
         i
     }
 
@@ -104,9 +104,12 @@ impl Queue {
         }
     }
 
-    /// A chat request: queued like Add to Queue, with who asked; its place in the queue (0: playing)
+    /// A chat request: queued like Add to Queue (after what you've queued and the other requests, ahead of
+    /// the rest of the list; coming up further on in it: moved up), with who asked; its place in the queue
+    /// (0: playing)
     pub fn add_request(&mut self, t: Track, by: &str) -> usize {
-        let at = self.autoplay_start();
+        self.take_from_list(&t.key);
+        let at = self.queued_end();
         self.items.insert(at, QItem { t, auto: false, by: by.to_string(), queued: false });
         if self.qi.is_none() {
             self.qi = Some(0);
@@ -391,6 +394,22 @@ pub fn take_turns(mut lists: Vec<(&'static str, Vec<Track>)>, last_plat: &str, t
 mod tests {
     use super::*;
     use crate::track::Src;
+
+    #[test]
+    fn a_request_goes_ahead_of_the_list() {
+        let t = |k: &str| Track { key: k.into(), title: k.into(), ..Default::default() };
+        let mut q = Queue::default();
+        q.set_list((0..10).map(|i| t(&format!("l{i}"))).collect(), 0);
+        q.add(t("mine"));
+        assert_eq!(q.add_request(t("req1"), "viewer"), 2);
+        assert_eq!(q.add_request(t("l7"), "other"), 3);
+        let keys: Vec<&str> = q.items.iter().map(|x| x.t.key.as_str()).collect();
+        assert_eq!(&keys[..5], &["l0", "mine", "req1", "l7", "l1"]);
+        assert_eq!(keys.iter().filter(|k| **k == "l7").count(), 1);
+        // (and what you queue after goes after the requests)
+        q.add(t("mine2"));
+        assert_eq!(q.items[4].t.key, "mine2");
+    }
 
     #[test]
     fn a_shuffle_leaves_what_you_queued_ahead_of_the_list() {
