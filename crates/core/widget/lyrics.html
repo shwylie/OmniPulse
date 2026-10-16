@@ -31,8 +31,11 @@
   #wrap.gone { opacity: 0; }
   #title { font-size: 0.42em; font-weight: 700; margin-bottom: 0.5em; letter-spacing: 0.04em; color: var(--t1); }
   body.notitle #title { display: none; }
-  #lines { transition: opacity 0.9s ease; }
-  #lines.gone { opacity: 0; }
+  /* the lines shown: a window onto all of the song's, slid up as each line's sung (Auto Scroll), the edges
+     faded if asked for */
+  #view { overflow: hidden; transition: opacity 0.9s ease; }
+  #view.gone { opacity: 0; }
+  #lines { position: relative; display: flow-root; will-change: transform; }
   .line { font-weight: 800; line-height: 1.22; margin: var(--gap) 0; opacity: var(--dim); transition: opacity 0.35s, transform 0.35s; transform-origin: left center; }
   body.center .line, body.center #title { text-align: center; transform-origin: center; }
   body.right .line, body.right #title { text-align: right; transform-origin: right center; }
@@ -63,14 +66,14 @@
 <body class="center karaoke shadow">
 <div id="wrap" class="gone">
   <div id="title"></div>
-  <div id="lines" class="gone"></div>
+  <div id="view" class="gone"><div id="lines"></div></div>
   <div id="none" hidden></div>
 </div>
 <script>
 (() => {
   const $ = (id) => document.getElementById(id);
   const preview = /[?&]preview=1/.test(location.search);
-  let s = null, key = "", lines = [], shownAt = -2, built = "", swapping = false, pending = null, loadedFont = "";
+  let s = null, key = "", lines = [], shownAt = -2, built = "", swapping = false, pending = null, loadedFont = "", laid = "";
   // (the preview with nothing playing: a few lines of its own, sung round and round)
   const SAMPLE = [[0, ""], [2500, "This is how your lyrics will look"], [6000, "The line being sung lights up"], [9500, "And the next ones wait below it"], [13000, "Change a setting to see it here"], [16500, "Then save it when it looks right"]];
   const sampleStart = Date.now();
@@ -143,26 +146,55 @@
     b.className = [l.align || "center", l.style || "karaoke", l.place || "", l.box ? "box" : "", l.shadow === false ? "" : "shadow", l.title === false ? "notitle" : "", preview ? "preview" : ""].filter(Boolean).join(" ");
   }
 
-  // the lines around the one being sung: the one before (if asked for), it, and the next ones
+  // all of the song's lines (made once a song), the one being sung lit, and the window onto them moved to
+  // it: the one before (if asked for) at the top, or the one being sung in the middle; slid there (Auto
+  // Scroll's Smooth) or at once (Jump)
   function build(at) {
     const l = s.lyrics || {};
+    const box = $("lines");
+    if (built !== key) {
+      built = key; shownAt = -2;
+      box.replaceChildren(...lines.map((ln) => {
+        const d = document.createElement("div");
+        d.className = "line";
+        const sp = document.createElement("span");
+        sp.textContent = ln[1] || "♪";
+        sp.dataset.t = sp.textContent;
+        d.appendChild(sp);
+        return d;
+      }));
+    }
+    const els = box.children;
+    if (!els.length) return;
+    if (at !== shownAt) {
+      shownAt = at;
+      for (let k = 0; k < els.length; k++) els[k].className = "line" + (k === at ? " now" : k < at ? " past" : "");
+    }
     const show = Math.max(1, Math.min(9, Number(l.lines) || 3));
-    const before = l.before ? 1 : 0;
-    const from = Math.max(0, at - before);
-    const want = lines.slice(from, from + show);
-    const sig = from + ":" + want.length + ":" + at;
-    if (sig === built) return;
-    built = sig;
-    $("lines").replaceChildren(...want.map((ln, i) => {
-      const d = document.createElement("div");
-      const k = from + i;
-      d.className = "line" + (k === at ? " now" : k < at ? " past" : "");
-      const sp = document.createElement("span");
-      sp.textContent = ln[1] || "♪";
-      sp.dataset.t = sp.textContent;
-      d.appendChild(sp);
-      return d;
-    }));
+    const middle = l.scrollPlace === "middle";
+    let from = middle ? at - Math.floor((show - 1) / 2) : at - (l.before ? 1 : 0);
+    from = Math.max(0, Math.min(from, Math.max(0, els.length - show)));
+    const to = Math.min(els.length, from + show);
+    // (where a line starts, its margin above it included; past the last: the end of it)
+    const gap = parseFloat(getComputedStyle(els[0]).marginTop) || 0;
+    const top = (k) => k < els.length ? els[k].offsetTop - gap : els[els.length - 1].offsetTop + els[els.length - 1].offsetHeight + gap;
+    const half = (k) => k >= 0 && k < els.length ? (els[k].offsetHeight + gap) / 2 : 0;
+    // (faded edges: half of the line above and below seen too, dissolving)
+    const fade = !!l.fadeEdges;
+    const up = fade ? half(from - 1) : 0, down = fade ? half(to) : 0;
+    const y = top(from) - up, h = top(to) - top(from) + up + down;
+    const ms = l.scroll === "jump" ? 0 : Math.max(0, Math.min(3000, Number(l.scrollMs) || 600));
+    const sig = [y, h, ms, up, down].map((x) => Math.round(x)).join(":");
+    if (sig === laid) return;
+    laid = sig;
+    const ease = ms ? "cubic-bezier(0.22, 0.61, 0.36, 1)" : "";
+    box.style.transition = ms ? "transform " + ms + "ms " + ease : "none";
+    $("view").style.transition = "opacity 0.9s ease" + (ms ? ", height " + ms + "ms " + ease : "");
+    box.style.transform = "translateY(" + (-y).toFixed(1) + "px)";
+    $("view").style.height = h.toFixed(1) + "px";
+    const mask = fade ? "linear-gradient(to bottom, transparent 0, #000 " + up.toFixed(0) + "px, #000 calc(100% - " + down.toFixed(0) + "px), transparent 100%)" : "none";
+    $("view").style.webkitMaskImage = mask;
+    $("view").style.maskImage = mask;
   }
 
   // whether the lines are to be seen now: from a moment before the first words (or the next words, after a
@@ -184,11 +216,10 @@
     requestAnimationFrame(frame);
     if (!s || !lines.length || swapping) return;
     const p = position();
-    $("lines").classList.toggle("gone", !seen(p));
+    $("view").classList.toggle("gone", !seen(p));
     // the line being sung: the last one started (before the first: the first, waiting)
     let at = -1;
     for (let i = 0; i < lines.length; i++) { if (lines[i][0] <= p) at = i; else break; }
-    if (at !== shownAt) { shownAt = at; built = ""; }
     build(Math.max(0, at));
     const now = document.querySelector(".line.now span");
     if (now && at >= 0) {
@@ -202,10 +233,10 @@
   // a new song's lyrics: the old ones faded out first, then the new ones (seen as their time comes)
   function swapTo(next) {
     swapping = true;
-    $("lines").classList.add("gone");
+    $("view").classList.add("gone");
     setTimeout(() => {
       lines = next;
-      shownAt = -2; built = "";
+      shownAt = -2; built = ""; laid = "";
       $("lines").replaceChildren();
       swapping = false;
     }, $("lines").childElementCount ? 900 : 0);

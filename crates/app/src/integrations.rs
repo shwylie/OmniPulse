@@ -321,6 +321,8 @@ pub fn widget_state(prefs: &Value, t: Option<&Track>, by: &str, pos_ms: u64, dur
                 "key": t.key, "lines_n": lyrics.len(),
                 "text": lyrics.iter().map(|l| json!([l.ms, l.text])).collect::<Vec<_>>(),
                 "lines": prefs["lyricsLines"].as_u64().unwrap_or(3), "before": set(prefs, "lyricsBefore"),
+                "scroll": s("lyricsScroll", "smooth"), "scrollMs": prefs["lyricsScrollMs"].as_u64().unwrap_or(600),
+                "scrollPlace": s("lyricsScrollPlace", "top"), "fadeEdges": set(prefs, "lyricsFadeEdges"),
                 "size": prefs["lyricsSize"].as_u64().unwrap_or(48), "font": s("lyricsFont", "sans"),
                 "align": s("lyricsAlign", "center"), "place": s("lyricsPlace", ""), "style": s("lyricsStyle", "karaoke"),
                 "color": s("lyricsColor", "#ffffff"), "hi": if set(prefs, "lyricsOwnHi") { s("lyricsHi", "#8e9bff") } else { accent.0.to_string() },
