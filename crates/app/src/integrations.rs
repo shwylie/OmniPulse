@@ -120,7 +120,7 @@ pub fn lastfm_scrobble(rt: &tokio::runtime::Handle, prefs: &Value, t: &Track, st
 
 // ---------- the OBS widget ----------
 pub fn widget_start(prefs: &Value) -> Option<String> {
-    if !set(prefs, "widget") {
+    if !set(prefs, "widget") && !set(prefs, "lyricsWidget") {
         return None;
     }
     // (bots on other devices: alerts from them too, with the alerts' key, as the web app's)
@@ -274,8 +274,8 @@ fn like_note() -> String {
 /// The widget's Hide This Track: the card hidden while this track (its key) plays
 pub static WIDGET_HIDDEN: std::sync::Mutex<String> = std::sync::Mutex::new(String::new());
 
-pub fn widget_update(prefs: &Value, t: Option<&Track>, by: &str, pos_ms: u64, dur_ms: u64, playing: bool, accent: (&str, &str)) {
-    if !set(prefs, "widget") {
+pub fn widget_update(prefs: &Value, t: Option<&Track>, by: &str, pos_ms: u64, dur_ms: u64, playing: bool, accent: (&str, &str), lyrics: &[crate::player::Line]) {
+    if !set(prefs, "widget") && !set(prefs, "lyricsWidget") {
         return;
     }
     // (hidden until the next track)
@@ -305,6 +305,23 @@ pub fn widget_update(prefs: &Value, t: Option<&Track>, by: &str, pos_ms: u64, du
     };
     if let (Some(o), Some(l)) = (state.as_object_mut(), look.as_object()) {
         o.extend(l.clone());
+    }
+    // the lyrics widget's: the playing song's lines (ms, words) and its look (Settings > Streaming > Lyrics Widget)
+    if set(prefs, "lyricsWidget") {
+        if let (Some(o), Some(t)) = (state.as_object_mut(), t) {
+            let s = |k: &str, d: &str| prefs[k].as_str().unwrap_or(d).to_string();
+            o.insert("lyrics".into(), json!({
+                "key": t.key, "lines_n": lyrics.len(),
+                "text": lyrics.iter().map(|l| json!([l.ms, l.text])).collect::<Vec<_>>(),
+                "lines": prefs["lyricsLines"].as_u64().unwrap_or(3), "before": set(prefs, "lyricsBefore"),
+                "size": prefs["lyricsSize"].as_u64().unwrap_or(48), "font": s("lyricsFont", "sans"),
+                "align": s("lyricsAlign", "center"), "place": s("lyricsPlace", ""), "style": s("lyricsStyle", "karaoke"),
+                "color": s("lyricsColor", "#ffffff"), "hi": if set(prefs, "lyricsOwnHi") { s("lyricsHi", "#8e9bff") } else { accent.0.to_string() },
+                "dim": prefs["lyricsDim"].as_f64().unwrap_or(0.45), "box": set(prefs, "lyricsBox"), "upper": set(prefs, "lyricsUpper"),
+                "shadow": on(prefs, "lyricsShadow"), "title": on(prefs, "lyricsTitle"), "offset": prefs["lyricsOffset"].as_i64().unwrap_or(0),
+                "hidePaused": on(prefs, "lyricsHidePaused"),
+            }));
+        }
     }
     core::widget::widget_update(state);
 }

@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Lyrics</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!--
+  OmniPulse's lyrics widget, for OBS (a Browser source at /lyrics): the playing song's timed lyrics,
+  the line being sung lit (a karaoke fill sweeping across it, or the whole line at once), the next ones
+  after it. Its look is set in the app (Settings > Streaming > Lyrics Widget) and comes with /now.json,
+  which the page asks for twice a second; between those, where the song is up to is counted on.
+-->
+<style>
+  :root { --size: 48px; --text: #ffffff; --hi: #8e9bff; --dim: 0.45; --gap: 0.35em; --font: system-ui, "Segoe UI", sans-serif; }
+  html, body { margin: 0; height: 100%; background: transparent; overflow: hidden; }
+  body { display: flex; flex-direction: column; justify-content: center; font-family: var(--font); color: var(--text); font-size: var(--size); }
+  body.top { justify-content: flex-start; }
+  body.bottom { justify-content: flex-end; }
+  #wrap { padding: 0.5em 0.8em; box-sizing: border-box; transition: opacity 0.5s; }
+  body.box #wrap { background: rgba(10, 10, 14, 0.62); border-radius: 0.5em; margin: 0 0.5em; }
+  body.hidden #wrap { opacity: 0; }
+  #title { font-size: 0.42em; font-weight: 700; opacity: 0.8; margin-bottom: 0.5em; letter-spacing: 0.04em; }
+  #title:empty { display: none; }
+  .line { font-weight: 800; line-height: 1.18; margin: var(--gap) 0; opacity: var(--dim); transition: opacity 0.35s, transform 0.35s; transform-origin: left center; }
+  body.center .line, body.center #title { text-align: center; transform-origin: center; }
+  body.right .line, body.right #title { text-align: right; transform-origin: right center; }
+  body.upper .line { text-transform: uppercase; }
+  body.shadow .line, body.shadow #title { text-shadow: 0 0.06em 0.12em rgba(0, 0, 0, 0.75), 0 0 0.04em rgba(0, 0, 0, 0.9); }
+  .line.now { opacity: 1; transform: scale(1.04); }
+  .line.past { opacity: calc(var(--dim) * 0.7); }
+  /* the karaoke fill: the line in the highlight colour up to where it's sung, the rest in the text colour */
+  body.karaoke .line.now span {
+    background: linear-gradient(90deg, var(--hi) 0 var(--p, 0%), var(--text) var(--p, 0%) 100%);
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+  }
+  body.karaoke.shadow .line.now span { text-shadow: none; filter: drop-shadow(0 0.06em 0.1em rgba(0, 0, 0, 0.75)); }
+  body.highlight .line.now { color: var(--hi); }
+  #none { font-size: 0.5em; opacity: 0.7; }
+</style>
+</head>
+<body class="center karaoke shadow">
+<div id="wrap">
+  <div id="title"></div>
+  <div id="lines"></div>
+  <div id="none" hidden></div>
+</div>
+<script>
+(() => {
+  const $ = (id) => document.getElementById(id);
+  let s = null, key = "", lines = [], shownAt = -2, built = "";
+
+  function position() {
+    if (!s) return 0;
+    const p = s.position_ms + (s.playing ? Date.now() - s.updated_at : 0);
+    return p + (Number((s.lyrics && s.lyrics.offset) || 0));
+  }
+
+  // the look, as set in the app
+  function look(l) {
+    const b = document.body, st = document.documentElement.style;
+    st.setProperty("--size", (Number(l.size) || 48) + "px");
+    st.setProperty("--text", l.color || "#ffffff");
+    st.setProperty("--hi", l.hi || s.accent || "#8e9bff");
+    st.setProperty("--dim", String(Math.max(0, Math.min(1, l.dim === undefined ? 0.45 : Number(l.dim)))));
+    const fonts = { sans: 'system-ui, "Segoe UI", sans-serif', serif: 'Georgia, "Times New Roman", serif', mono: 'Consolas, "Courier New", monospace', rounded: '"Nunito", "Segoe UI Rounded", "Arial Rounded MT Bold", system-ui, sans-serif', bold: 'Impact, "Arial Black", sans-serif' };
+    st.setProperty("--font", fonts[l.font] || fonts.sans);
+    b.className = [l.align || "center", l.style || "karaoke", l.place || "", l.box ? "box" : "", l.upper ? "upper" : "", l.shadow === false ? "" : "shadow"].filter(Boolean).join(" ");
+  }
+
+  // the lines around the one being sung: the one before (if asked for), it, and the next ones
+  function build(at) {
+    const l = s.lyrics || {};
+    const show = Math.max(1, Math.min(9, Number(l.lines) || 3));
+    const before = l.before ? 1 : 0;
+    const from = Math.max(0, at - before);
+    const want = lines.slice(from, from + show);
+    const sig = from + ":" + want.length;
+    if (sig === built) return;
+    built = sig;
+    const box = $("lines");
+    box.replaceChildren(...want.map((ln, i) => {
+      const d = document.createElement("div");
+      const k = from + i;
+      d.className = "line" + (k === at ? " now" : k < at ? " past" : "");
+      const sp = document.createElement("span");
+      sp.textContent = ln[1] || "♪";
+      d.appendChild(sp);
+      return d;
+    }));
+  }
+
+  function frame() {
+    requestAnimationFrame(frame);
+    if (!s || !s.lyrics || !lines.length) return;
+    const p = position();
+    // the line being sung: the last one started
+    let at = -1;
+    for (let i = 0; i < lines.length; i++) { if (lines[i][0] <= p) at = i; else break; }
+    if (at !== shownAt) { shownAt = at; built = ""; }
+    build(Math.max(0, at));
+    // how far through it is: from its start to the next one's (a long gap: the line's sung in 6 s at most)
+    const now = document.querySelector(".line.now span");
+    if (now && at >= 0) {
+      const start = lines[at][0], next = at + 1 < lines.length ? lines[at + 1][0] : start + 4000;
+      const span = Math.min(next - start, 6000);
+      const pct = Math.max(0, Math.min(100, ((p - start) / Math.max(1, span)) * 100));
+      now.style.setProperty("--p", pct.toFixed(1) + "%");
+    }
+  }
+
+  async function poll() {
+    try {
+      const r = await fetch("/now.json", { cache: "no-store" });
+      s = await r.json();
+      const l = s.lyrics || {};
+      look(l);
+      document.body.classList.toggle("hidden", !s.playing && l.hidePaused !== false);
+      $("title").textContent = l.title ? [s.title, s.artist].filter(Boolean).join(" — ") : "";
+      const k = (l.key || "") + ":" + (l.lines_n || 0);
+      if (k !== key) {
+        key = k;
+        lines = (l.text || []).filter((x) => Array.isArray(x));
+        shownAt = -2; built = "";
+        const timed = lines.some((x) => x[0] > 0);
+        $("none").hidden = timed && lines.length > 0;
+        $("none").textContent = s.title ? (lines.length ? "No timed lyrics for this song" : "No lyrics for this song") : "";
+        if (!timed) lines = [];
+        $("lines").replaceChildren();
+      }
+    } catch (e) {}
+    setTimeout(poll, 500);
+  }
+  poll();
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>

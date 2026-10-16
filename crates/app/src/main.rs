@@ -5147,9 +5147,9 @@ fn push_out(shared: &Shared, presence: bool) {
     let (pos, dur, playing) = (a.engine.position_ms(), a.engine.duration_ms(), a.loaded && !a.engine.is_paused());
     let t = a.queue.current();
     let prefs = &a.web.prefs;
-    if integrations::set(prefs, "widget") || integrations::set(prefs, "req") {
+    if integrations::set(prefs, "widget") || integrations::set(prefs, "req") || integrations::set(prefs, "lyricsWidget") {
         let by = a.queue.qi.and_then(|i| a.queue.items.get(i)).map(|q| q.by.as_str()).unwrap_or("");
-        integrations::widget_update(prefs, t, by, pos, dur, playing, (&a.accent.0, &a.accent.1));
+        integrations::widget_update(prefs, t, by, pos, dur, playing, (&a.accent.0, &a.accent.1), &a.lyrics);
     }
     if presence {
         let join = listen_url(shared, &a, playing);
@@ -5348,7 +5348,7 @@ fn song_request(shared: &Shared, id: u64, q: String, user: String) {
 /// The servers the web app's settings have on: the widget, the Stream Deck's remote, chat requests
 // ---------- Settings: the switches beyond Look ----------
 // (section, label, note, key, on unless switched off)
-const SET_ROWS: [(&str, &str, &str, &str, bool); 29] = [
+const SET_ROWS: [(&str, &str, &str, &str, bool); 30] = [
     ("Library", "Sets & Podcasts in the Queue", "Lists and autoplay include anything over 15 minutes. Off: only when you pick one.", "queueSets", false),
     ("Library", "Autoplay", "Plays similar tracks when the queue runs out.", "autoplay", true),
     ("Library", "Hidden & Not Recommended", "Right-click a track to stop it, its album or its artist being recommended. Off: nothing is left out; the lists are kept.", "hideOn", true),
@@ -5373,6 +5373,7 @@ const SET_ROWS: [(&str, &str, &str, &str, bool); 29] = [
     ("Streaming", "Extended", "Also leaves out music that isn't safe on stream: only open licences, and artists and labels cleared for streaming.", "streamSafe", false),
     ("Integrations", "Discord Status", "Shows what you're playing on your Discord profile.", "presence", false),
     ("Streaming", "Stream Widget", "A now-playing card for OBS, with alerts.", "widget", false),
+    ("Streaming", "Lyrics Widget", "The playing song's lyrics for OBS, for karaoke: the line being sung lit up as it's sung, the next ones under it. Settings for its look.", "lyricsWidget", false),
     ("Streaming", "Alerts", "On the widget: follows, subs, bits, raids and more, from your bot.", "alertsOn", false),
     ("Streaming", "Song Requests", "Chat asks for songs through your bot.", "req", false),
     ("Streaming", "Limit Requests", "The most waiting, and the most per viewer. Off: chat can request as many songs as it likes.", "reqLimits", true),
@@ -5569,7 +5570,7 @@ fn settings_index(a: &App) -> Vec<SetFound> {
         out.push(SetFound { path: path(cat), label: label.into(), note: note.into(), cat: cat.into(), panel: String::new(), key: key.into(), toggle: true });
     }
     let ip = omnipulse_core::lan_ip().unwrap_or_else(|| "THIS-PC".into());
-    for (name, cat) in [("requests", "Streaming"), ("replies", "Streaming"), ("limits", "Streaming"), ("mix", "Sound"), ("smart", "Sound"), ("discord", "Integrations"), ("together", "Integrations"), ("lyrics", "Integrations"), ("widget", "Streaming"), ("alerts", "Streaming"), ("alertlist", "Streaming"), ("remote", "Streaming"), ("offset", "Streaming"), ("safe", "Streaming"), ("recent", "Library"), ("hidden", "Library"), ("plugins", "Plugins")] {
+    for (name, cat) in [("requests", "Streaming"), ("replies", "Streaming"), ("limits", "Streaming"), ("mix", "Sound"), ("smart", "Sound"), ("lyricsw", "Streaming"), ("discord", "Integrations"), ("together", "Integrations"), ("lyrics", "Integrations"), ("widget", "Streaming"), ("alerts", "Streaming"), ("alertlist", "Streaming"), ("remote", "Streaming"), ("offset", "Streaming"), ("safe", "Streaming"), ("recent", "Library"), ("hidden", "Library"), ("plugins", "Plugins")] {
         let title = panels::title(name);
         out.push(SetFound { path: path(cat), label: title.clone(), note: String::new(), cat: cat.into(), panel: name.into(), key: String::new(), toggle: false });
         let vals = panels::values(name, &a.web.prefs);
@@ -5627,7 +5628,7 @@ fn panel_open(shared: &Shared, name: &str) {
     if let Some(ui) = shared.borrow().ui.upgrade() {
         let head = match name.strip_prefix("alert:") { Some(k) => alerts::name(&shared.borrow().web.prefs, k), None => panels::title(name) };
         let cat = match name {
-            "requests" | "replies" | "limits" | "widget" | "remote" | "offset" | "alerts" | "alertlist" | "safe" => "Streaming",
+            "requests" | "replies" | "limits" | "widget" | "remote" | "offset" | "alerts" | "alertlist" | "safe" | "lyricsw" => "Streaming",
             n if n.starts_with("alert:") => "Streaming",
             "plugins" => "Plugins",
             "mix" | "smart" => "Sound",
@@ -6346,13 +6347,13 @@ fn set_toggle(shared: &Shared, key: &str) {
             }
             // the servers stop, and start again with what's set now
             match key {
-                "widget" | "alertsOn" => omnipulse_core::widget::widget_stop(),
+                "widget" | "alertsOn" | "lyricsWidget" => omnipulse_core::widget::widget_stop(),
                 "req" => omnipulse_core::requests::requests_stop(),
                 "remoteOn" => omnipulse_core::remote::remote_stop(),
                 "presence" if !on => integrations::presence(&shared.borrow().rt, &shared.borrow().web.prefs, None, 0, false, None),
                 _ => {}
             }
-            if matches!(key, "widget" | "req" | "remoteOn" | "alertsOn") && (on || key == "alertsOn") { panel_keys(shared); outside_start(shared); }
+            if matches!(key, "widget" | "req" | "remoteOn" | "alertsOn" | "lyricsWidget") && (on || key == "alertsOn" || key == "lyricsWidget") { panel_keys(shared); outside_start(shared); }
             if key == "mbOn" { go_plus_set(&shared.borrow().web.prefs); }
             if key == "out2On" { offset_apply(shared); }
             // Listen Along & Jams off: out of any room, and the Jam button goes
@@ -10770,6 +10771,7 @@ fn main() -> Result<(), slint::PlatformError> {
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("qset") { vec![(9, "play"), (11, "queue"), (14, "nav:settings"), (15, "cat:App & Look"), (16, "scroll:420"), (18, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("nowslim") { vec![(9, "play"), (11, "queue"), (12, "now"), (15, "size:860:720"), (17, "size:1100:720"), (19, "size:1500:860"), (21, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("smartmem") { vec![(9, "smartprep"), (10, "play"), (12, "mem"), (37, "mem"), (38, "nearend"), (62, "mem"), (87, "mem"), (88, "nearend"), (112, "mem"), (137, "mem"), (138, "nearend"), (162, "mem"), (187, "mem"), (188, "nearend"), (212, "mem"), (237, "mem"), (238, "nearend"), (262, "mem"), (287, "mem"), (288, "nearend"), (312, "mem"), (337, "mem"), (338, "nearend"), (362, "mem"), (387, "mem"), (388, "nearend"), (412, "mem"), (413, "end")] }
+            else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("lyricsw") { vec![(8, "playtitle"), (9, "widgeton"), (20, "lyrshow"), (40, "lyrshow"), (90, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("gamealert") { vec![(8, "play"), (9, "widgeton"), (14, "gametest"), (21, "gametest"), (28, "gametest"), (35, "gametest"), (42, "gametest"), (49, "gametest"), (56, "gametest"), (63, "gametest"), (70, "gametest"), (77, "gametest"), (84, "gametest"), (91, "gametest"), (98, "gametest"), (105, "gametest"), (112, "gametest"), (119, "gametest"), (121, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("scplay") { vec![(9, "play"), (18, "spcheck3"), (22, "spcheck3"), (23, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("goplus") { vec![(9, "goplus"), (10, "gpfind"), (20, "spcheck3"), (40, "end")] }
@@ -11209,12 +11211,21 @@ fn main() -> Result<(), slint::PlatformError> {
                         o.insert("widget".into(), serde_json::json!(true)); o.insert("alertsOn".into(), serde_json::json!(true));
                         // (OMNIPULSE_SELFTEST_TRANS: the alerts' transition, for the test)
                         if let Ok(t) = std::env::var("OMNIPULSE_SELFTEST_TRANS") { o.insert("alertTrans".into(), serde_json::json!(t)); }
+                        if std::env::var_os("OMNIPULSE_SELFTEST_LYRICS").is_some() { o.insert("lyricsWidget".into(), serde_json::json!(true)); }
                     }
                     let r = integrations::widget_start(&s.borrow().web.prefs);
                     outside_start(&s);
                     push_out(&s, true);
                     println!("selftest: widget on: {r:?}");
                 }
+                // a Library song by its title (OMNIPULSE_SELFTEST_TITLE), played
+                "playtitle" => {
+                    let want = std::env::var("OMNIPULSE_SELFTEST_TITLE").unwrap_or_default().to_lowercase();
+                    let list: Vec<Track> = s.borrow().library.iter().filter(|t| t.title.to_lowercase().contains(&want)).take(1).cloned().collect();
+                    println!("selftest: playing {:?}", list.iter().map(|t| t.title.clone()).collect::<Vec<_>>());
+                    play_list(&s, list, 0);
+                }
+                "lyrshow" => { let a = s.borrow(); println!("selftest: lyrics {} lines (timed {}), at {} ms", a.lyrics.len(), a.lyrics.iter().filter(|l| l.ms > 0).count(), a.engine.position_ms()); }
                 // Alerts > Game Changes > Test (OMNIPULSE_SELFTEST_ALERT: another kind)
                 "gametest" => { let k = std::env::var("OMNIPULSE_SELFTEST_ALERT").unwrap_or_else(|_| "game".into()); panel_press(&s, &format!("alTest:{k}")); println!("selftest: tested {k}"); }
                 // the app's memory and CPU (Windows: working set, private bytes, CPU seconds so far)

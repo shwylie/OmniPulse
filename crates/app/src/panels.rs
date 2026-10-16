@@ -23,6 +23,7 @@ pub fn title(name: &str) -> String {
         "together" => "Listen Along & Jams",
         "lyrics" => "Lyrics",
         "widget" => "Stream Widget",
+        "lyricsw" => "Lyrics Widget",
         "alerts" => "Alerts",
         "remote" => "Stream Deck & Remote",
         "offset" => "OmniPulse Offset",
@@ -35,7 +36,7 @@ pub fn title(name: &str) -> String {
 
 /// The panel a switch's Settings button opens (by the switch's pref)
 pub fn of_switch(key: &str) -> Option<&'static str> {
-    Some(match key { "streamSafe" => "safe", "req" => "requests", "reqLimits" => "limits", "mixOn" => "mix", "smartOn" => "smart", "presence" => "discord", "jamsOn" => "together", "lyricsSources" => "lyrics", "widget" => "widget", "alertsOn" => "alerts", "remoteOn" => "remote", "out2On" => "offset", "avoidRecent" => "recent", "hideOn" => "hidden", "plugAdd" => "plugins", _ => return None })
+    Some(match key { "streamSafe" => "safe", "req" => "requests", "reqLimits" => "limits", "mixOn" => "mix", "smartOn" => "smart", "presence" => "discord", "jamsOn" => "together", "lyricsSources" => "lyrics", "widget" => "widget", "lyricsWidget" => "lyricsw", "alertsOn" => "alerts", "remoteOn" => "remote", "out2On" => "offset", "avoidRecent" => "recent", "hideOn" => "hidden", "plugAdd" => "plugins", _ => return None })
 }
 
 /// What a panel edits, and each one's default (the web app's)
@@ -44,6 +45,7 @@ fn keys(name: &str) -> Vec<(&'static str, Value)> {
         "limits" => vec![("reqMax", json!(10)), ("reqPerUser", json!(2))],
         "discord" => vec![("presArt", json!(true)), ("presTime", json!(true)), ("presListen", json!(true)), ("presAsk", json!(false)), ("presLink", json!(true))],
         "together" => vec![("togetherName", json!(""))],
+        "lyricsw" => vec![("lyricsLines", json!(3)), ("lyricsBefore", json!(false)), ("lyricsSize", json!(48)), ("lyricsFont", json!("sans")), ("lyricsAlign", json!("center")), ("lyricsPlace", json!("")), ("lyricsStyle", json!("karaoke")), ("lyricsColor", json!("#ffffff")), ("lyricsOwnHi", json!(false)), ("lyricsHi", json!("#8e9bff")), ("lyricsDim", json!(0.45)), ("lyricsBox", json!(false)), ("lyricsUpper", json!(false)), ("lyricsShadow", json!(true)), ("lyricsTitle", json!(true)), ("lyricsOffset", json!(0)), ("lyricsHidePaused", json!(true))],
         "smart" => vec![("smartBlend", json!(true)), ("smartMax", json!(10)), ("smartTape", json!(false)), ("smartRoll", json!(false)), ("smartVoices", json!(true))],
         "mix" => vec![("mixWords", json!(true)), ("mixDrop", json!(true)), ("mixMelody", json!(true)), ("mixTape", json!(true)), ("mixBars", json!(0)), ("mixBands", json!(false)), ("mixKeys", json!(true)), ("mixLoops", json!(true)), ("mixForce", json!("auto"))],
         "requests" => vec![("reqBot", json!("streamerbot")), ("reqRadioEdit", json!(false)), ("reqMax", json!(10)), ("reqPerUser", json!(2)), ("reqPort", json!(7879)), ("botRemote", json!(false))],
@@ -376,6 +378,32 @@ pub fn fields(name: &str, vals: &Map<String, Value>, prefs: &Value, lan: &str) -
             note("Testing"),
             sel("mixForce", "Force a Style", "Every transition this style, to hear it. A pair that can't be mixed that way isn't mixed at all.", &[(json!("auto"), "Off (as the songs suit)"), (json!("beat"), "On the beat (no tape stops)"), (json!("wordplay"), "Wordplay"), (json!("drop"), "Drop Swap"), (json!("melody"), "Melody Play"), (json!("tape"), "Tape Stop")]),
         ],
+        // the lyrics widget's look (an OBS Browser source at /lyrics on the widget's port)
+        "lyricsw" => {
+            // (the Stream Widget's port: its setting, not this page's)
+            let port = prefs["widgetPort"].as_u64().unwrap_or(7878);
+            let url = format!("http://127.0.0.1:{port}/lyrics");
+            vec![
+                info("Address", &url, &url, "In OBS: a Browser source with this address (about 1280 × 400 suits 3 lines). Uses the Stream Widget's port."),
+                sel("lyricsStyle", "Style", "", &[(json!("karaoke"), "Karaoke (the line fills in as it's sung)"), (json!("highlight"), "Highlight (the line lit at once)"), (json!("plain"), "Plain (only brighter)")]),
+                stepper("lyricsLines", "Lines Shown", "The one being sung and the next ones.", counts(1, 9)),
+                tog("lyricsBefore", "Show the Line Before", "The line just sung, above the one being sung."),
+                stepper("lyricsSize", "Text Size", "In pixels.", (16..=120).step_by(4).map(|x| (json!(x), format!("{x}px"))).collect()),
+                sel("lyricsFont", "Font", "", &[(json!("sans"), "Clean"), (json!("rounded"), "Rounded"), (json!("bold"), "Bold (Impact)"), (json!("serif"), "Serif"), (json!("mono"), "Typewriter")]),
+                sel("lyricsAlign", "Alignment", "", &[(json!("center"), "Centre"), (json!("left"), "Left"), (json!("right"), "Right")]),
+                sel("lyricsPlace", "Position", "Where the lines sit in the source.", &[(json!(""), "Middle"), (json!("top"), "Top"), (json!("bottom"), "Bottom")]),
+                color("lyricsColor", "Text Colour", ""),
+                tog("lyricsOwnHi", "Own Highlight Colour", "Off: the app's accent (from the album art, if that's on)."),
+                color("lyricsHi", "Highlight Colour", "The words being sung."),
+                range("lyricsDim", "Other Lines", "How bright the lines not being sung are.", 0.0, 1.0, 0.05, "%", false),
+                tog("lyricsShadow", "Shadow", "Keeps it readable over the game."),
+                tog("lyricsBox", "Background Box", "A dark box behind the lines."),
+                tog("lyricsUpper", "Capitals", "Every line in capitals."),
+                tog("lyricsTitle", "Song Title", "The song and artist above the lines."),
+                tog("lyricsHidePaused", "Hide While Paused", ""),
+                num("lyricsOffset", "Timing", "In ms, -5000 to 5000: later (above 0) or earlier, to match your stream's delay or a song whose lyrics run early."),
+            ]
+        }
         // Smart Transitions' own page
         "smart" => vec![
             note("Smart Transitions are WIP: still being built, so some may not sound right yet. Rating them (Stream Deck: Mix Good / Mix Bad) helps."),

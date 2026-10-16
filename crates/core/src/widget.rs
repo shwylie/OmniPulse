@@ -19,6 +19,8 @@ use std::{
 pub static WIDGET_STATE: Mutex<Option<Value>> = Mutex::new(None);
 pub static WIDGET_GEN: AtomicU64 = AtomicU64::new(0);
 pub const WIDGET_HTML: &str = include_str!("../widget/widget.html");
+/// The lyrics widget (/lyrics): the playing song's timed lyrics, for karaoke
+pub const LYRICS_HTML: &str = include_str!("../widget/lyrics.html");
 
 /// The kinds of alert, as /alert?type= names them
 /// (custom ones, set up in the app, come on top: see custom_kinds)
@@ -255,6 +257,9 @@ pub fn widget_serve(listener: TcpListener, gen: u64) {
                             o.insert("alerts".to_string(), Value::Array(ALERTS.lock().unwrap().iter().cloned().collect()));
                         }
                         reply(&mut stream, "200 OK", "application/json", v.to_string().as_bytes());
+                    }
+                    "/lyrics" | "/lyrics.html" => {
+                        reply(&mut stream, "200 OK", "text/html; charset=utf-8", LYRICS_HTML.as_bytes());
                     }
                     "/" | "/index.html" => {
                         reply(&mut stream, "200 OK", "text/html; charset=utf-8", WIDGET_HTML.replace("__WIDGET_VERSION__", &widget_version()).as_bytes());
