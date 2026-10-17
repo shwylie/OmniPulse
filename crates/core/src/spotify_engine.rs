@@ -413,62 +413,9 @@ pub fn spe_played(gen: u32, frames: u64) {
 // Since February 2026 the Web API only lists the tracks of playlists you own. librespot reads
 // any playlist the way Spotify's own app does; this returns its tracks shaped like the Web API's
 // track objects, so the page treats them the same way.
-const PLAYLIST_MAX: usize = 1000;
-
-fn uri_id(uri: &SpotifyUri) -> String {
-    uri.to_uri().ok().and_then(|u| u.rsplit(':').next().map(str::to_string)).unwrap_or_default()
-}
-
-pub(crate) fn track_json(t: &librespot_metadata::Track) -> Value {
-    let cover = t.album.covers.iter().max_by_key(|c| c.width).and_then(|c| c.id.to_base16().ok())
-        .map(|hex| format!("https://i.scdn.co/image/{hex}"));
-    let mut artists: Vec<Value> = t.artists.iter().filter(|a| !a.name.is_empty()).map(|a| json!({ "name": a.name })).collect();
-    if artists.is_empty() {
-        artists = t.artists_with_role.iter().map(|a| json!({ "name": a.name })).collect();
-    }
-    let id = uri_id(&t.id);
-    json!({
-        "id": id,
-        "uri": format!("spotify:track:{id}"),
-        "name": t.name,
-        "artists": artists,
-        "duration_ms": t.duration,
-        "external_urls": { "spotify": format!("https://open.spotify.com/track/{id}") },
-        "album": {
-            "id": uri_id(&t.album.id),
-            "name": t.album.name,
-            "images": cover.map(|u| vec![json!({ "url": u })]).unwrap_or_default(),
-            "album_type": "album",
-            "artists": t.album.artists.iter().map(|a| json!({ "name": a.name })).collect::<Vec<_>>(),
-        },
-    })
-}
 
 pub async fn spe_playlist(uri: String) -> Result<Value, String> {
-    use futures::stream::{self, StreamExt};
-    use librespot_metadata::{Metadata, Playlist, Track};
-    let session = {
-        let guard = engine().await?;
-        guard.as_ref().unwrap().session.clone()
-    };
-    let id = SpotifyUri::from_uri(&uri).map_err(|e| format!("bad playlist address: {e}"))?;
-    let playlist = Playlist::get(&session, &id).await.map_err(|e| format!("Spotify wouldn't open this playlist: {e}"))?;
-    let ids: Vec<SpotifyUri> = playlist.tracks()
-        .filter(|u| matches!(u, SpotifyUri::Track { .. }))   // podcast episodes are left out
-        .take(PLAYLIST_MAX)
-        .cloned()
-        .collect();
-    // ten at a time, kept in the playlist's order; tracks that can't be read are skipped
-    let tracks: Vec<Value> = stream::iter(ids)
-        .map(|tid| {
-            let session = session.clone();
-            async move { Track::get(&session, &tid).await.ok().map(|t| track_json(&t)) }
-        })
-        .buffered(10)
-        .filter_map(|t| async move { t })
-        .collect()
-        .await;
-    Ok(Value::Array(tracks))
+    crate::spotify_library::playlist_tracks(&uri).await
 }
 
 /// A session's account type ("premium", "free", ...): it comes just after its login, so it's waited

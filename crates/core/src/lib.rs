@@ -43,8 +43,10 @@ pub mod soundcloud;
 pub mod spotify;
 #[cfg(feature = "desktop")]
 pub mod spotify_engine;
-#[cfg(feature = "desktop")]
+#[cfg(feature = "spotify")]
 pub mod spotify_library;
+#[cfg(all(feature = "spotify", not(feature = "desktop")))]
+pub mod spotify_session;
 #[cfg(feature = "desktop")]
 pub mod tools;
 #[cfg(feature = "desktop")]
