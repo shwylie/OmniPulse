@@ -98,6 +98,9 @@ pub fn intro_to(m: &Measured) -> Option<u64> {
 /// measured, `fixed_ms` (Mixxx's fixed fade); silences left out
 pub fn fade(a: &Side, b: &Side, max_ms: u64, fixed_ms: u64) -> Fade {
     let end = if a.audible_ms > 0 && a.audible_ms < a.dur_ms { a.audible_ms } else { a.dur_ms };
+    if std::env::var_os("OMNIPULSE_SMART_OLDLEN").is_none() {
+        if let (Some(ma), Some(mb)) = (a.rhythm, b.rhythm) { return fade_fitted(a, b, ma, mb, end, max_ms); }
+    }
     // (measured, a song with no soft end or start has one of 0: it ends cold, or starts at once)
     let outro = a.rhythm.map(|m| outro_from(m).map_or(0, |x| end.saturating_sub(x)));
     let intro = b.rhythm.map(|m| intro_to(m).map_or(0, |x| x.saturating_sub(b.first_ms)));
@@ -118,6 +121,45 @@ pub fn fade(a: &Side, b: &Side, max_ms: u64, fixed_ms: u64) -> Fade {
     // (in its last quarter: a fade always fits there)
     let len = len.min(end - earliest_ms(end)).max(MIN_FADE_MS.min(end));
     Fade { out_from_ms: end.saturating_sub(len), out_to_ms: end, in_from_ms: b.first_ms }
+}
+
+/// A soft part this long or more is one to fit a fade to (an outro, an intro); shorter, the song ends cold
+/// or starts loud
+const FIT_SOFT_MS: u64 = 3000;
+/// The one playing's outro cut short for a next one that starts loud: over this
+const LOUD_IN_MS: u64 = 3000;
+
+/// A fade fitted to the two songs' structure, as a DJ fits one (2026-10-17; before: over the longer of
+/// the outro and the intro, the next one always from its start):
+/// - an outro and an intro: over the shorter of the two, the next one started so its main part lands
+///   as the one playing's sound ends (its intro's start left out if it's the longer);
+/// - a cold end into an intro: a short overlap at the end, the intro heard whole after;
+/// - an outro into a loud start: the next one in where the one playing's main part ends, over 3 s,
+///   not after its outro has run out;
+/// - a cold end into a loud start: a short overlap, the two loud parts barely together.
+/// Never longer than Longest Fade (`max_ms`), and in the one playing's last quarter.
+fn fade_fitted(a: &Side, b: &Side, ma: &Measured, mb: &Measured, end: u64, max_ms: u64) -> Fade {
+    let main_end = outro_from(ma).unwrap_or(end).min(end);
+    let main_in = intro_to(mb).unwrap_or(b.first_ms).max(b.first_ms);
+    let (outro, intro) = (end.saturating_sub(main_end), main_in.saturating_sub(b.first_ms));
+    let cap = max_ms.max(MIN_FADE_MS);
+    let floor = earliest_ms(end);
+    let f = match (outro >= FIT_SOFT_MS, intro >= FIT_SOFT_MS) {
+        (true, true) => {
+            let len = outro.min(intro).min(cap);
+            Fade { out_from_ms: end - len, out_to_ms: end, in_from_ms: main_in - len }
+        }
+        (false, true) => Fade { out_from_ms: end.saturating_sub(HARD_MS), out_to_ms: end, in_from_ms: b.first_ms },
+        (true, false) => {
+            let from = main_end.max(floor);
+            Fade { out_from_ms: from, out_to_ms: (from + LOUD_IN_MS.min(cap)).min(end), in_from_ms: b.first_ms }
+        }
+        (false, false) => Fade { out_from_ms: end.saturating_sub(HARD_MS), out_to_ms: end, in_from_ms: b.first_ms },
+    };
+    // (in its last quarter; and never shorter than a fade's shortest)
+    let from = f.out_from_ms.max(floor).min(f.out_to_ms.saturating_sub(MIN_FADE_MS.min(f.out_to_ms)));
+    let _ = a;
+    Fade { out_from_ms: from, ..f }
 }
 
 // ---------- Tier 1: when a blend on the beat is safe ----------
@@ -528,16 +570,29 @@ mod tests {
     }
 
     #[test]
-    fn a_fade_is_over_the_longer_soft_part_and_leaves_out_silences() {
-        // 120 BPM: 2 s a bar. A: 4 bars of outro (8 s) before its sound ends; B: 2 bars of intro (4 s)
+    fn a_fade_fits_the_two_songs_structure() {
+        // 120 BPM: 2 s a bar. A: 4 bars of outro (8 s) before its sound ends (96 s); B: 2 bars of intro (4 s)
         let a = song(120.0, &levels(4, 40, 4), 0.6, "8A");
         let b = song(120.0, &levels(2, 40, 2), 0.6, "8A");
-        let f = fade(&Side { dur_ms: 100_000, audible_ms: 96_000, rhythm: Some(&a), ..Default::default() }, &Side { dur_ms: 92_000, first_ms: 0, rhythm: Some(&b), ..Default::default() }, 12_000, 6_000);
-        assert_eq!(f, Fade { out_from_ms: 88_000, out_to_ms: 96_000, in_from_ms: 0 });
+        let a_side = Side { dur_ms: 100_000, audible_ms: 96_000, rhythm: Some(&a), ..Default::default() };
+        // an outro and an intro: over the shorter (4 s), B's main part (at 4 s) as A's sound ends
+        let f = fade(&a_side, &Side { dur_ms: 92_000, first_ms: 0, rhythm: Some(&b), ..Default::default() }, 12_000, 6_000);
+        assert_eq!(f, Fade { out_from_ms: 92_000, out_to_ms: 96_000, in_from_ms: 0 });
+        // a longer intro (6 bars, 12 s): its start left out, so its main part still lands at A's end
+        let long_in = song(120.0, &levels(6, 40, 2), 0.6, "8A");
+        let f = fade(&a_side, &Side { dur_ms: 100_000, rhythm: Some(&long_in), ..Default::default() }, 12_000, 6_000);
+        assert_eq!(f, Fade { out_from_ms: 88_000, out_to_ms: 96_000, in_from_ms: 4_000 });
+        // an outro into a loud start: B in where A's main part ends (88 s), over 3 s, A's outro cut short
+        let loud = song(120.0, &levels(0, 44, 2), 0.6, "8A");
+        let f = fade(&a_side, &Side { dur_ms: 92_000, rhythm: Some(&loud), ..Default::default() }, 12_000, 6_000);
+        assert_eq!(f, Fade { out_from_ms: 88_000, out_to_ms: 91_000, in_from_ms: 0 });
         // a cold end into a loud start: a short overlap
         let (cold, hard) = (song(120.0, &levels(4, 44, 0), 0.6, "8A"), song(120.0, &levels(0, 44, 2), 0.6, "8A"));
         let f = fade(&Side { dur_ms: 96_000, rhythm: Some(&cold), ..Default::default() }, &Side { dur_ms: 92_000, rhythm: Some(&hard), ..Default::default() }, 12_000, 6_000);
         assert_eq!(f.len_ms(), 2_000);
+        // a cold end into an intro: a short overlap at the end, the intro whole
+        let f = fade(&Side { dur_ms: 96_000, rhythm: Some(&cold), ..Default::default() }, &Side { dur_ms: 100_000, rhythm: Some(&long_in), ..Default::default() }, 12_000, 6_000);
+        assert_eq!((f.len_ms(), f.in_from_ms), (2_000, 0));
         // nothing measured: the longest allowed, ending where the sound does, the next one past its silence
         let f = fade(&Side { dur_ms: 200_000, audible_ms: 190_000, ..Default::default() }, &Side { dur_ms: 180_000, first_ms: 1_200, ..Default::default() }, 12_000, 6_000);
         assert_eq!(f, Fade { out_from_ms: 184_000, out_to_ms: 190_000, in_from_ms: 1_200 });
