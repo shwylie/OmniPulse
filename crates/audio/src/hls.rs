@@ -57,6 +57,20 @@ pub fn parse(base: &str, text: &str) -> Playlist {
     Playlist { segments, init, encrypted }
 }
 
+/// How a playlist and its segments are fetched: the whole of what's at an address (the desktop's own
+/// connection; on the phone, Media3's data sources, so what's downloaded plays offline)
+pub type Fetch = std::sync::Arc<dyn Fn(&str) -> Result<Vec<u8>, String> + Send + Sync>;
+
+/// The desktop's: its own connection
+fn own_fetch() -> Result<Fetch, String> {
+    let client = reqwest::blocking::Client::builder().timeout(Duration::from_secs(30)).build().map_err(|e| e.to_string())?;
+    Ok(std::sync::Arc::new(move |u: &str| {
+        let r = client.get(u).send().map_err(|e| format!("Couldn't reach the stream: {e}"))?;
+        if !r.status().is_success() { return Err(format!("The stream answered {}.", r.status())); }
+        r.bytes().map(|b| b.to_vec()).map_err(|e| e.to_string())
+    }))
+}
+
 /// Segments fetched ahead of the one being read (SoundCloud's are about ten seconds each): a slow one,
 /// or the next song fetched alongside, never makes the sound wait
 const SEGS_AHEAD: usize = 8;
@@ -72,15 +86,12 @@ struct SegmentReader {
 }
 
 impl SegmentReader {
-    fn new(client: &reqwest::blocking::Client, segs: &[Segment], from: usize, kind: Kind, init: Vec<u8>) -> Self {
+    fn new(fetch: &Fetch, segs: &[Segment], from: usize, kind: Kind, init: Vec<u8>) -> Self {
         let (tx, got) = std::sync::mpsc::sync_channel(SEGS_AHEAD);
-        let (client, urls): (_, Vec<String>) = (client.clone(), segs.iter().skip(from).map(|s| s.url.clone()).collect());
+        let (fetch, urls): (_, Vec<String>) = (fetch.clone(), segs.iter().skip(from).map(|s| s.url.clone()).collect());
         let _ = std::thread::Builder::new().name("segments ahead".into()).spawn(move || {
             for url in urls {
-                let r = client.get(&url).send().map_err(|e| e.to_string()).and_then(|res| {
-                    if !res.status().is_success() { return Err(format!("a segment answered {}", res.status())); }
-                    res.bytes().map(|b| b.to_vec()).map_err(|e| e.to_string())
-                });
+                let r = fetch(&url);
                 let failed = r.is_err();
                 // (read no more: let go, or a seek)
                 if tx.send(r).is_err() || failed { return; }
@@ -111,7 +122,7 @@ impl Read for SegmentReader {
 }
 
 pub struct HlsSource {
-    client: reqwest::blocking::Client,
+    fetch: Fetch,
     list: Playlist,
     kind: Kind,
     ext: &'static str,
@@ -123,14 +134,12 @@ pub struct HlsSource {
 
 impl HlsSource {
     pub fn open(url: &str) -> Result<Self, String> {
-        let client = reqwest::blocking::Client::builder().timeout(Duration::from_secs(30)).build().map_err(|e| e.to_string())?;
-        let get = |u: &str| -> Result<String, String> {
-            let r = client.get(u).send().map_err(|e| format!("Couldn't reach the stream: {e}"))?;
-            if !r.status().is_success() {
-                return Err(format!("The stream answered {}.", r.status()));
-            }
-            r.text().map_err(|e| e.to_string())
-        };
+        Self::open_with(url, own_fetch()?)
+    }
+
+    /// The same, its playlist and segments fetched by `fetch`
+    pub fn open_with(url: &str, fetch: Fetch) -> Result<Self, String> {
+        let get = |u: &str| -> Result<String, String> { fetch(u).map(|b| String::from_utf8_lossy(&b).into_owned()) };
         let mut base = url.to_string();
         let mut text = get(url)?;
         // a master playlist: its first variant
@@ -148,9 +157,9 @@ impl HlsSource {
         }
         let total_ms = list.segments.iter().map(|s| s.ms).sum();
         // what the segments are, from the first one
-        let first = client.get(&list.segments[0].url).send().and_then(|r| r.bytes()).map_err(|e| e.to_string())?;
+        let first = fetch(&list.segments[0].url)?;
         let init_bytes = match &list.init {
-            Some(u) => client.get(u).send().and_then(|r| r.bytes()).map_err(|e| e.to_string())?.to_vec(),
+            Some(u) => fetch(u)?,
             None => Vec::new(),
         };
         let looks_mp4 = |b: &[u8]| b.len() > 8 && matches!(&b[4..8], b"ftyp" | b"styp" | b"moof" | b"sidx");
@@ -165,13 +174,13 @@ impl HlsSource {
             let e = list.segments[0].url.split('?').next().unwrap_or("").rsplit('.').next().unwrap_or("");
             (Kind::Raw, match e { "mp3" => "mp3", "aac" => "aac", "ogg" | "opus" => "ogg", _ => "" })
         };
-        let inner = Self::reader_from(&client, &list, kind, ext, &init_bytes, 0)?;
+        let inner = Self::reader_from(&fetch, &list, kind, ext, &init_bytes, 0)?;
         let rate = inner.rate();
-        Ok(Self { client, list, kind, ext, init_bytes, inner, rate, total_ms })
+        Ok(Self { fetch, list, kind, ext, init_bytes, inner, rate, total_ms })
     }
 
-    fn reader_from(client: &reqwest::blocking::Client, list: &Playlist, kind: Kind, ext: &str, init: &[u8], from: usize) -> Result<Decoded, String> {
-        let r = SegmentReader::new(client, &list.segments, from, kind, init.to_vec());
+    fn reader_from(fetch: &Fetch, list: &Playlist, kind: Kind, ext: &str, init: &[u8], from: usize) -> Result<Decoded, String> {
+        let r = SegmentReader::new(fetch, &list.segments, from, kind, init.to_vec());
         Decoded::open(Box::new(ReadOnlySource::new(r)), ext)
     }
 }
@@ -193,7 +202,7 @@ impl Source for HlsSource {
             at += self.list.segments[k].ms;
             k += 1;
         }
-        self.inner = Self::reader_from(&self.client, &self.list, self.kind, self.ext, &self.init_bytes, k)?;
+        self.inner = Self::reader_from(&self.fetch, &self.list, self.kind, self.ext, &self.init_bytes, k)?;
         let mut skip = ((ms - at) * self.rate as u64 / 1000) as usize * 2;
         let mut scratch = Vec::new();
         while skip > 0 {

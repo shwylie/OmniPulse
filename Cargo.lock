@@ -5718,9 +5718,14 @@ name = "omnipulse-mobile"
 version = "0.1.0"
 dependencies = [
  "futures",
+ "jni 0.21.1",
+ "ndk-context",
+ "omnipulse-audio",
  "omnipulse-core",
+ "omnipulse-mix",
  "serde",
  "serde_json",
+ "symphonia",
  "thiserror 2.0.21",
  "tokio",
  "uniffi",
