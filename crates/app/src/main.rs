@@ -157,6 +157,7 @@ fn now_ms() -> u64 {
 
 // ---------- pages ----------
 fn apply_filter(app: &mut App) {
+    let t0 = std::time::Instant::now();
     let chip = app.chip;
     let prefs = app.web.prefs.clone();
     let favs: std::collections::HashSet<&str> = app.web.favourites.iter().map(|t| t.key.as_str()).collect();
@@ -180,6 +181,7 @@ fn apply_filter(app: &mut App) {
     if app.page == "library" {
         lib_sort(&prefs, &mut filtered);
     }
+    page_timing(&format!("  {} filtered ({} of {})", app.page, filtered.len(), app.page_all.len()), t0);
     // (an artist's page: each song's versions under it, opened beneath it, as the web app's)
     let mut ver_label: std::collections::HashMap<String, String> = Default::default();
     let mut ver_rows: std::collections::HashSet<String> = Default::default();
@@ -205,7 +207,9 @@ fn apply_filter(app: &mut App) {
     let (alb_key, albs, alb_pics) = PAGE_ALBUMS.with(|p| p.borrow().clone());
     let title_now = app.ui.upgrade().map(|u| u.get_page_title().to_string()).unwrap_or_default();
     let albs = if albums_here && alb_key == page_key(&app.page, &title_now) { albs } else { Vec::new() };
+    let t_rows = std::time::Instant::now();
     let mut rows_out: Vec<Row> = filtered.iter().map(|t| Row { versions: ver_label.get(&t.key).cloned().unwrap_or_default().into(), version: ver_rows.contains(&t.key), ..row_menu(app, &marks, t, Row { picked: app.picked.contains(&t.key), ..t.row(t.key == playing) }) }).collect::<Vec<_>>();
+    page_timing("  rows made", t_rows);
     // (one before every sixth track)
     // (not among a song's versions opened beneath it: before the next song instead)
     let mut at = 0;
@@ -221,7 +225,9 @@ fn apply_filter(app: &mut App) {
         r.alb_i = k as i32;
         if let Some(px) = alb_pics.get(&k) { r.alb_art = slint::Image::from_rgba8(px.clone()); }
     }
+    let t_set = std::time::Instant::now();
     app.rows.set_vec(rows_out);
+    page_timing("  rows given to the list", t_set);
     app.page_tracks = filtered;
     // its covers, once this is done with the app
     slint::Timer::single_shot(std::time::Duration::ZERO, || SHARED.with(|s| { if let Some(sh) = s.borrow().clone() { rows_art(&sh); } }));
@@ -408,7 +414,27 @@ fn open_place(shared: &Shared, place: &Place) {
     }
 }
 
+/// OMNIPULSE_PAGE_TIMING: how long a page takes to open, and its parts (printed)
+fn page_timing(what: &str, since: std::time::Instant) {
+    if std::env::var_os("OMNIPULSE_PAGE_TIMING").is_some() { println!("page timing: {what}: {:.1} ms", since.elapsed().as_secs_f64() * 1000.0); }
+}
+
+thread_local! {
+    /// (OMNIPULSE_PAGE_TIMING: when the page open now was opened, and whether its covers are all in yet)
+    static PAGE_T0: std::cell::Cell<Option<std::time::Instant>> = const { std::cell::Cell::new(None) };
+}
+
 fn open_page(shared: &Shared, page: &str) {
+    let t0 = std::time::Instant::now();
+    PAGE_T0.with(|p| p.set(Some(t0)));
+    open_page_now(shared, page);
+    page_timing(&format!("{page} opened"), t0);
+    // (and drawn: the next frame, once the event loop's had it)
+    let page = page.to_string();
+    slint::Timer::single_shot(std::time::Duration::ZERO, move || page_timing(&format!("{page} to the next turn of the event loop"), t0));
+}
+
+fn open_page_now(shared: &Shared, page: &str) {
     let ui = shared.borrow().ui.upgrade().unwrap();
     ui.set_side_on(-1);
     match page {
@@ -2639,7 +2665,7 @@ fn windows_offset() -> i64 {
 // Only the rows in view (and a few either side) get theirs, a few at a time, kept in a small cache,
 // so a list of thousands stays light. The list says which rows are in view (rows-in-view).
 const ART_KEEP: usize = 600;
-const ART_AT_ONCE: usize = 8;
+const ART_AT_ONCE: usize = 16;
 
 #[derive(Default)]
 struct ArtCache {
@@ -2742,6 +2768,10 @@ fn rows_art(shared: &Shared) {
                         rows_art(&sh);
                     }
                 });
+                // (the covers in sight all in: how long since the page opened)
+                if ROW_ART.with(|c| c.borrow().loading.is_empty()) {
+                    if let Some(t0) = PAGE_T0.with(|p| p.take()) { page_timing("covers in sight all in", t0); }
+                }
             });
         });
     }
@@ -10981,6 +11011,8 @@ fn main() -> Result<(), slint::PlatformError> {
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("apple") { vec![(6, "appleopen"), (16, "applecheck"), (17, "end")] }
             // (OMNIPULSE_SELFTEST_PLAN=tp: Track preferences for what plays, its bar dragged)
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("setfit") { vec![(9, "play"), (10, "queue"), (11, "size:1150:530"), (12, "nav:settings"), (13, "cat:Sound"), (14, "scroll:4000"), (16, "cat:Integrations"), (17, "scroll:-4000"), (19, "end")] }
+            // (OMNIPULSE_SELFTEST_PLAN=pagespeed: the Library, Discover and Rediscover opened twice each, timed with OMNIPULSE_PAGE_TIMING)
+            else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("pagespeed") { vec![(8, "nav:library"), (11, "nav:discover"), (40, "nav:rediscover"), (43, "nav:library"), (46, "nav:discover"), (49, "nav:rediscover"), (52, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("acc2") { vec![(9, "play"), (10, "accent2"), (12, "nav:library"), (14, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("dragasks") { vec![(9, "play"), (12, "dragasks"), (13, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("loudsteps") { vec![(9, "play"), (16, "loud:normal"), (17, "loud:loud"), (18, "loud:normal"), (19, "loud:quiet"), (20, "end")] }

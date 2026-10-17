@@ -144,13 +144,81 @@ pub async fn open_source(t: &Track, rt: tokio::runtime::Handle) -> Result<Box<dy
 }
 
 /// A cover, decoded off the UI thread, at most `size` pixels across
+// ---------- covers: one connection pool for all of them, and kept on disk (as a browser's cache) ----------
+/// The covers' folder (data folder\cache\art) holds at most this; past it, the longest unused go
+const ART_DISK_MAX: u64 = 300 * 1024 * 1024;
+/// a cover bigger than this isn't kept
+const ART_FILE_MAX: usize = 2 * 1024 * 1024;
+
+/// One client for every cover: its connections kept open and reused (HTTP/2 where the host has it),
+/// not a new secure connection for each picture
+fn art_client() -> &'static reqwest::Client {
+    static C: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
+    C.get_or_init(|| reqwest::Client::builder().pool_max_idle_per_host(16).timeout(std::time::Duration::from_secs(20)).build().unwrap_or_default())
+}
+
+fn art_dir() -> Option<std::path::PathBuf> {
+    core::data_dir().ok().map(|d| d.join("cache").join("art"))
+}
+
+fn art_file(url: &str) -> Option<std::path::PathBuf> {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    url.hash(&mut h);
+    art_dir().map(|d| d.join(format!("{:016x}", h.finish())))
+}
+
+/// The covers' folder kept to its size: the longest unused first (once a run, in the background)
+fn art_trim() {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| {
+        std::thread::spawn(|| {
+            let Some(dir) = art_dir() else { return };
+            let Ok(rd) = std::fs::read_dir(&dir) else { return };
+            let mut files: Vec<(std::time::SystemTime, u64, std::path::PathBuf)> = rd.flatten().filter_map(|e| {
+                let m = e.metadata().ok()?;
+                Some((m.accessed().or_else(|_| m.modified()).ok()?, m.len(), e.path()))
+            }).collect();
+            let mut total: u64 = files.iter().map(|f| f.1).sum();
+            if total <= ART_DISK_MAX { return; }
+            files.sort_by_key(|f| f.0);
+            for (_, len, p) in files {
+                if total <= ART_DISK_MAX * 2 / 3 { break; }
+                if std::fs::remove_file(&p).is_ok() { total = total.saturating_sub(len); }
+            }
+        });
+    });
+}
+
+/// A cover's bytes: from the disk if it's been fetched before, else fetched (and kept)
+async fn art_bytes(url: &str) -> Option<Vec<u8>> {
+    art_trim();
+    let file = art_file(url);
+    if let Some(f) = &file {
+        if let Ok(b) = tokio::fs::read(f).await {
+            if !b.is_empty() { return Some(b); }
+        }
+    }
+    let bytes = art_client().get(url).send().await.ok()?.error_for_status().ok()?.bytes().await.ok()?.to_vec();
+    if let Some(f) = file {
+        if bytes.len() <= ART_FILE_MAX {
+            if let Some(d) = f.parent() { let _ = tokio::fs::create_dir_all(d).await; }
+            let _ = tokio::fs::write(&f, &bytes).await;
+        }
+    }
+    Some(bytes)
+}
+
 pub async fn fetch_art(url: String, size: u32) -> Option<SharedPixelBuffer<Rgba8Pixel>> {
     if url.is_empty() {
         return None;
     }
-    let bytes = reqwest::get(&url).await.ok()?.bytes().await.ok()?;
-    let img = image::load_from_memory(&bytes).ok()?.thumbnail(size, size).to_rgba8();
-    Some(SharedPixelBuffer::clone_from_slice(img.as_raw(), img.width(), img.height()))
+    let bytes = art_bytes(&url).await?;
+    // (decoded off the async threads: they're for waiting on the network)
+    tokio::task::spawn_blocking(move || {
+        let img = image::load_from_memory(&bytes).ok()?.thumbnail(size, size).to_rgba8();
+        Some(SharedPixelBuffer::clone_from_slice(img.as_raw(), img.width(), img.height()))
+    }).await.ok().flatten()
 }
 
 /// A picture as a circle (an artist's): cropped square from its middle, the corners clear, the edge
@@ -159,8 +227,12 @@ pub async fn fetch_round(url: String, size: u32) -> Option<SharedPixelBuffer<Rgb
     if url.is_empty() {
         return None;
     }
-    let bytes = reqwest::get(&url).await.ok()?.bytes().await.ok()?;
-    let img = image::load_from_memory(&bytes).ok()?;
+    let bytes = art_bytes(&url).await?;
+    tokio::task::spawn_blocking(move || round_of(&bytes, size)).await.ok().flatten()
+}
+
+fn round_of(bytes: &[u8], size: u32) -> Option<SharedPixelBuffer<Rgba8Pixel>> {
+    let img = image::load_from_memory(bytes).ok()?;
     let side = img.width().min(img.height());
     let sq = img.crop_imm((img.width() - side) / 2, (img.height() - side) / 2, side, side).thumbnail(size, size).to_rgba8();
     let n = sq.width();
