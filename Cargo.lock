@@ -5631,6 +5631,7 @@ dependencies = [
  "minisign-verify",
  "omnipulse-audio",
  "omnipulse-core",
+ "omnipulse-mix",
  "regex",
  "reqwest 0.12.28",
  "rfd",
@@ -5699,6 +5700,17 @@ dependencies = [
  "windows 0.62.2",
  "windows-core 0.62.2",
  "zip 2.4.2",
+]
+
+[[package]]
+name = "omnipulse-mix"
+version = "0.1.0"
+dependencies = [
+ "omnipulse-audio",
+ "omnipulse-core",
+ "regex",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

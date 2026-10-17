@@ -1,0 +1,14 @@
+[package]
+name = "omnipulse-mix"
+version = "0.1.0"
+edition = "2021"
+description = "Seamless Mix's planning, shared by OmniPulse on the desktop and on Android"
+
+[dependencies]
+omnipulse-core = { path = "../core", default-features = false }
+omnipulse-audio = { path = "../audio", default-features = false }
+serde = { version = "1", features = ["derive"] }
+regex = "1"
+
+[dev-dependencies]
+serde_json = "1"

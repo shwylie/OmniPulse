@@ -4,13 +4,19 @@ version = "0.1.0"
 edition = "2021"
 description = "OmniPulse's playback engine: decoding, the sound chain (loudness match, EQ, limiter, volume) and output"
 
+# (desktop: Windows' own TLS, as reqwest has it by default; mobile: rustls, as the core's mobile build)
+[features]
+default = ["desktop"]
+desktop = ["reqwest/default-tls"]
+mobile = ["reqwest/rustls-tls"]
+
 [dependencies]
 symphonia = { version = "0.5", default-features = false, features = ["aac", "alac", "flac", "isomp4", "mp3", "ogg", "pcm", "vorbis", "wav", "aiff"] }
 cpal = "0.15"
 rubato = "0.16"
 # tempo without pitch, for seamless mixing (pure Rust, MIT): a DJ deck's keylock
 timestretch = "0.15"
-reqwest = { version = "0.12", features = ["blocking"] }
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "charset", "http2"] }
 
 [dev-dependencies]
 tiny_http = "0.12"
