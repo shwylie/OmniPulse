@@ -66,6 +66,8 @@ pub struct Plan {
     pub word: Option<String>,
     /// a transition of its own, if it is one: "wordplay", "drop swap", "melody play"
     pub style: Option<&'static str>,
+    /// of `bars`, the one playing's after the swap (Smart Transitions', its outro going); 0: the usual 4
+    pub tail_bars: u32,
 }
 
 /// A tempo this near the next one's isn't eased into (it's played at the one playing's, then its own)
@@ -385,7 +387,7 @@ pub fn plan_structure(a: &Measured, a_end_ms: u64, now_ms: u64, b: &Measured) ->
                 }
             }
         }
-        return Some(Plan {
+        return Some(Plan { tail_bars: 0,
             at_ms: at(at_bar).round() as u64,
             ms: len.round() as u64,
             swap_ms: swap_ms.round() as u64,
@@ -404,7 +406,7 @@ pub fn plan_structure(a: &Measured, a_end_ms: u64, now_ms: u64, b: &Measured) ->
         });
     }
     // (eased onto one tempo, `target` not 1.0: the next one from the one playing's tempo to its own over all of it)
-    let soft = |at_ms: f64, ms: f64, start_ms: f64, bars: u32, target: f64| Some(Plan {
+    let soft = |at_ms: f64, ms: f64, start_ms: f64, bars: u32, target: f64| Some(Plan { tail_bars: 0,
         at_ms: at_ms.round() as u64,
         ms: ms.round() as u64,
         swap_ms: (ms / 2.0).round() as u64,
@@ -437,7 +439,7 @@ pub fn plan_structure(a: &Measured, a_end_ms: u64, now_ms: u64, b: &Measured) ->
     let spin = stop / 2.0;
     let from = at(a_end) - beat;
     if from < soonest || at(a_end) > audible + 300.0 { return None; }
-    Some(Plan {
+    Some(Plan { tail_bars: 0,
         at_ms: from.round() as u64,
         ms: stop.round() as u64 + TAPE_TAIL_MS,
         swap_ms: stop.round() as u64,
@@ -476,7 +478,7 @@ pub fn plan(a: &Measured, a_end_ms: u64, now_ms: u64, b: &Measured, bars: u32) -
     let pick = |every: i64| (0..=last_k as i64).rev().find(|k| k % every == 0 && first + *k as f64 * bar >= soonest);
     let k = pick(8).or_else(|| pick(4)).or_else(|| pick(1))?;
     let at = first + k as f64 * bar;
-    Some(Plan {
+    Some(Plan { tail_bars: 0,
         at_ms: at.round() as u64,
         ms: len.round() as u64,
         swap_ms: (bar * (bars / 2) as f64).round() as u64,
@@ -597,7 +599,7 @@ pub fn plan_wordplay(a: &Measured, a_lines: &[(u64, String)], a_end_ms: u64, now
             let better = best.as_ref().is_none_or(|(s, x, y, _)| same > *s || (same == *s && (a_at > *x + 1.0 || ((a_at - *x).abs() <= 1.0 && b_at < *y))));
             if !better { continue; }
             let word = wa[..same].join(" ");
-            best = Some((same, a_at, b_at, Plan {
+            best = Some((same, a_at, b_at, Plan { tail_bars: 0,
                 at_ms: a_at.round() as u64,
                 ms: (swap + 400.0).round() as u64,
                 swap_ms: swap.round() as u64,
@@ -654,7 +656,7 @@ pub fn plan_drop_swap(a: &Measured, a_end_ms: u64, now_ms: u64, b: &Measured) ->
     let bar = at - from;
     let start = bd.get(b_drop)? - bar * r;
     if start < 0.0 { return None; }
-    Some(Plan {
+    Some(Plan { tail_bars: 0,
         at_ms: from.round() as u64,
         ms: (bar + 400.0).round() as u64,
         swap_ms: bar.round() as u64,
@@ -725,7 +727,7 @@ pub fn plan_melody(a: &Measured, a_end_ms: u64, now_ms: u64, b: &Measured) -> Op
                 let like = alike(&mine, &theirs);
                 if like < MELODY_ALIKE || best.as_ref().is_some_and(|(l, _)| *l >= like) { continue; }
                 let bar = ad[k + 1] - ad[k];
-                best = Some((like, Plan {
+                best = Some((like, Plan { tail_bars: 0,
                     at_ms: ad[k].round() as u64,
                     ms: (5.0 * bar).round() as u64,
                     swap_ms: (4.0 * bar).round() as u64,

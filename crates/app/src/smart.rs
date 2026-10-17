@@ -284,20 +284,29 @@ pub fn blend_as(a: &Side, b: &Side, now_ms: u64, forced: bool) -> Option<crate::
     // (only by keys known from outside: our own readings are a fifth out too often to shift a song by)
     let semitones = if a.key_known && b.key_known { key_ride(ma, mb) } else { 0 };
     let clash = !keys_go(ma, mb) && semitones == 0;
-    let run = if clash { 4 } else if ramp > MAX_RATE { 8 } else { intro.clamp(4, 8) };
-    let from = if intro > run { s0 + intro - run } else { s0 };
-    if from + run + TAIL_BARS >= nb { return None; }
-    // the one playing: from the line its outro starts on (where its main part ends, snapped back to a
-    // line), a line earlier at a time if that runs past its sound's end; at least 5 s from now
+    // the one playing: its main part's end (its outro from there), and its sound's
     let line = body_line(ma)?;
     let outro = ma.rhythm.bar_db.iter().rposition(|d| *d >= line)? + 1;
     let end = if a.audible_ms > 0 && a.audible_ms < a.dur_ms { a.audible_ms } else { a.dur_ms } as f64;
+    let sound_bars = (0..=na).rev().find(|&k| bar_ms(ma, k).is_some_and(|t| t <= end)).unwrap_or(na);
+    let a_out = sound_bars.saturating_sub(outro);
+    // how long they're together, and the one playing's tail after: by the two songs' structure
+    let (run, tail) = if std::env::var_os("OMNIPULSE_SMART_OLDLEN").is_some() {
+        // (as before 2026-10-17, for comparing: 8 bars for any change of tempo, 4 of tail)
+        (if clash { 4 } else if ramp > MAX_RATE { 8 } else { intro.clamp(4, 8) }, TAIL_BARS)
+    } else {
+        blend_lengths(intro, a_out, ramp, clash, ma.rhythm.period_ms)
+    };
+    let from = if intro > run { s0 + intro - run } else { s0 };
+    if from + run + tail >= nb { return None; }
+    // the one playing: from the line its outro starts on (where its main part ends, snapped back to a
+    // line), a line earlier at a time if that runs past its sound's end; at least 5 s from now
     // (in its last quarter; else, as late as it fits, but never before halfway)
     let fits = |floor: u64| (0..=outro.min(na)).rev().find(|&k| {
-        on(k, ga) && k + run + TAIL_BARS <= na && bar_ms(ma, k).is_some_and(|t| t >= now_ms as f64 + 5000.0 && t >= floor as f64) && bar_ms(ma, k + run + TAIL_BARS).is_some_and(|t| t <= end)
+        on(k, ga) && k + run + tail <= na && bar_ms(ma, k).is_some_and(|t| t >= now_ms as f64 + 5000.0 && t >= floor as f64) && bar_ms(ma, k + run + tail).is_some_and(|t| t <= end)
     });
     let Some(k) = fits(earliest_ms(end as u64)).or_else(|| fits(never_before_ms(end as u64))) else { why(&format!("no line to start on before its outro (bar {outro} of {na})")); return None };
-    let (at, swap, over) = (bar_ms(ma, k)?, bar_ms(ma, k + run)?, bar_ms(ma, k + run + TAIL_BARS)?);
+    let (at, swap, over) = (bar_ms(ma, k)?, bar_ms(ma, k + run)?, bar_ms(ma, k + run + tail)?);
     // its tempo as it is over the run-up (a song's drifts), the next one's over its own
     let (pa, pb) = ((swap - at) / (run * 4) as f64, (bar_ms(mb, from + run)? - bar_ms(mb, from)?) / (run * 4) as f64);
     let rate = pb / pa;
@@ -312,9 +321,29 @@ pub fn blend_as(a: &Side, b: &Side, now_ms: u64, forced: bool) -> Option<crate::
     let len = swap_at + (over - swap) / target;
     Some(crate::mix::Plan {
         at_ms: at.round() as u64, ms: len.round() as u64, swap_ms: swap_at.round() as u64, start_ms: bar_ms(mb, from)?.round() as u64,
-        rate, bars: (run + TAIL_BARS) as u32, semitones, beatmatched: true, out_tempo: target, ramp_ms: swap_at.round() as u64, tape_stop: false,
-        out_loop: None, in_loop: None, word: None, style: None,
+        rate, bars: (run + tail) as u32, semitones, beatmatched: true, out_tempo: target, ramp_ms: swap_at.round() as u64, tape_stop: false,
+        out_loop: None, in_loop: None, word: None, style: None, tail_bars: tail as u32,
     })
+}
+
+/// The longest the two are together (seconds); past it, a phrase less
+const TOGETHER_MAX_S: f64 = 24.0;
+/// How steep a change of tempo can be ridden: this much a bar
+const RIDE_PER_BAR: f64 = 0.05;
+
+/// How long a blend's run-up is (bars, the two together) and the one playing's tail after the swap, by
+/// the two songs' structure, as a DJ fits them: the next one's intro (whole phrases of 4 bars), so its
+/// main part lands on the swap; no longer than the one playing has to give under it (its outro, and a
+/// phrase of its main part); long enough to ride their tempos at most 5% a bar; at most 24 s together.
+/// The tail: what's left of its outro, 1 to 4 bars. (Before 2026-10-17: 8 bars for any change of tempo,
+/// whatever the songs, and 4 of tail: 23 to 33 s, as Us into Spotless, a 1-bar intro, took 24 s.)
+pub fn blend_lengths(intro: usize, a_out: usize, ramp: f64, clash: bool, period_ms: f64) -> (usize, usize) {
+    let phrases = |b: usize| b.div_ceil(4) * 4;
+    let mut run = if clash { 4 } else { intro.clamp(4, 16) };
+    run = run.min((phrases(a_out) + 4).max(4));
+    if ramp > MAX_RATE { run = run.max(phrases((ramp / RIDE_PER_BAR).ceil() as usize)).min(16); }
+    while run > 4 && run as f64 * 4.0 * period_ms > TOGETHER_MAX_S * 1000.0 { run -= 4; }
+    (run, a_out.clamp(1, TAIL_BARS))
 }
 
 /// When (ms, as heard) the one playing has played `d` ms of itself, its tempo eased (mix::out_ramp: a
@@ -388,7 +417,8 @@ pub fn handoff(p: &crate::mix::Plan, voices: bool) -> omnipulse_audio::Handoff {
     // (the one playing's beat carried: the next one rising under it, the bass swapped, then its top fading;
     // the voices, if both sing there, the one playing's faded over the run-up's second half, the next
     // one's up over the bars after the swap)
-    let beat = p.swap_ms as f64 / ((p.bars as usize).saturating_sub(TAIL_BARS).max(1) * 4) as f64;
+    let tail = if p.tail_bars > 0 { p.tail_bars as usize } else { TAIL_BARS };
+    let beat = p.swap_ms as f64 / ((p.bars as usize).saturating_sub(tail).max(1) * 4) as f64;
     let h = omnipulse_audio::Handoff::carry(p.ms, p.swap_ms, beat.round() as u64);
     if voices { h.with_voices(p.swap_ms, p.swap_ms / 2, p.ms.saturating_sub(p.swap_ms)) } else { h }
 }
@@ -446,7 +476,7 @@ pub fn roll(a: &Side, b: &Side, now_ms: u64) -> Option<crate::mix::Plan> {
     let len = (to - at).round() as u64;
     Some(crate::mix::Plan {
         at_ms: at.round() as u64, ms: len + 40, swap_ms: len, start_ms: start.round() as u64, rate: 1.0, bars: ROLL_BARS, semitones: 0,
-        beatmatched: false, out_tempo: 1.0, ramp_ms: 0, tape_stop: false, out_loop: None, in_loop: None, word: None, style: Some(ROLL),
+        beatmatched: false, out_tempo: 1.0, ramp_ms: 0, tape_stop: false, out_loop: None, in_loop: None, word: None, style: Some(ROLL), tail_bars: 0,
     })
 }
 
@@ -594,6 +624,24 @@ mod tests {
     }
 
     #[test]
+    fn a_blend_is_as_long_as_the_songs_make_it() {
+        let bar128 = 60_000.0 / 128.0;
+        // a long intro under a long outro: the intro, in phrases (16 bars at most)
+        assert_eq!(blend_lengths(12, 16, 0.0, false, bar128), (12, 4));
+        // a long intro, but only a short outro to carry it: the outro and a phrase of its main part
+        assert_eq!(blend_lengths(16, 2, 0.0, false, bar128), (8, 2));
+        // Us into Spotless (a 1-bar intro, a 3-bar outro, 16% apart): 4 bars ridden, 3 of tail, not 8 and 4
+        assert_eq!(blend_lengths(0, 3, 0.16, false, 60_000.0 / 110.0), (4, 3));
+        // a big ride needs room: 36% at 5% a bar, 8 bars
+        assert_eq!(blend_lengths(4, 8, 0.36, false, bar128).0, 8);
+        // a slow song: at most 24 s together (16 bars at 87 BPM is 44 s: 8 bars)
+        assert_eq!(blend_lengths(16, 16, 0.0, false, 60_000.0 / 87.0).0, 8);
+        // a cold end: a bar of tail; keys that clash: 4 bars together
+        assert_eq!(blend_lengths(8, 0, 0.0, false, bar128).1, 1);
+        assert_eq!(blend_lengths(16, 16, 0.0, true, bar128).0, 4);
+    }
+
+    #[test]
     fn a_small_slowdown_stays_a_slowdown() {
         // Shooting Stars' 128 into Rocket Girl's 105: slowed 18%, not counted as 64 and sped up 64%
         let a: &'static Measured = Box::leak(Box::new(song(128.0, &levels(16, 96, 16), 0.6, "8A")));
@@ -696,11 +744,15 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let max_ms = std::env::var("OMNIPULSE_SMART_MAX").ok().and_then(|v| v.parse::<u64>().ok()).unwrap_or(10) * 1000;
         let rt = tokio::runtime::Runtime::new().unwrap();
-        let track = |s: &str| match s.parse::<u64>() {
+        let kept: serde_json::Map<String, serde_json::Value> = omnipulse_core::data_dir().ok().and_then(|d| std::fs::read_to_string(d.join("state").join("yt-versions.json")).ok()).and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default();
+        let track = |s: &str| if let Some(id) = s.strip_prefix("yt:") {
+            let v = kept.values().find(|v| v["id"].as_str() == Some(id)).cloned().unwrap_or_default();
+            Track { src: Src::YouTube(id.to_string()), key: s.to_string(), title: v["title"].as_str().unwrap_or(id).to_string(), artist: v["artists"].as_str().unwrap_or("").to_string(), ms: v["duration_ms"].as_u64().unwrap_or(0), ..Default::default() }
+        } else { match s.parse::<u64>() {
             Ok(id) => rt.block_on(omnipulse_core::soundcloud::api_get(format!("/tracks/{id}"))).ok().and_then(|v| Track::soundcloud(&v)).map(|mut t| { t.key = s.to_string(); t }).unwrap_or(Track { src: Src::SoundCloud(id), key: s.to_string(), ..Default::default() }),
             Err(_) => Track { src: Src::Local(s.to_string()), key: format!("local:{s}"), ..Default::default() },
-        };
-        let what = |t: &Track| match &t.src { Src::SoundCloud(id) => ("soundcloud", id.to_string()), Src::Local(p) => ("local", p.clone()), _ => unreachable!() };
+        } };
+        let what = |t: &Track| match &t.src { Src::SoundCloud(id) => ("soundcloud", id.to_string()), Src::Local(p) => ("local", p.clone()), Src::YouTube(id) => ("youtube", id.clone()), _ => unreachable!() };
         // (each measured whole, kept as the app keeps them; its loudness analysed: its silences, its end)
         let measure = |t: &Track| {
             let (kind, id) = what(t);
