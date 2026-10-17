@@ -302,7 +302,7 @@ pub fn camelot(tonic: usize, minor: bool) -> String {
 pub fn at_analysis_rate(mono: &[f32], rate: u32) -> Vec<f32> { to_analysis_rate(mono, rate) }
 
 /// Beat This!'s model, loaded once (its files written next to the app's data the first time)
-#[cfg(feature = "desktop")]
+#[cfg(feature = "model")]
 fn beat_model() -> Option<&'static std::sync::Mutex<beat_this::BeatThis<<beat_this::RtenRuntime as beat_this::Runtime>::Model>>> {
     static M: std::sync::OnceLock<Option<std::sync::Mutex<beat_this::BeatThis<<beat_this::RtenRuntime as beat_this::Runtime>::Model>>>> = std::sync::OnceLock::new();
     M.get_or_init(|| {
@@ -399,7 +399,7 @@ fn model_sampled(mono: &[f32], rate: u32) -> Option<ModelBeats> {
     Some(all)
 }
 
-#[cfg(feature = "desktop")]
+#[cfg(feature = "model")]
 fn model_run(mono: &[f32], rate: u32) -> Option<ModelBeats> {
     let a = beat_model()?.lock().ok()?.analyze_audio(mono, rate).ok()?;
     // (its own beats' tempo: the gaps between them near their median, averaged: they're whole frames of
@@ -412,7 +412,7 @@ fn model_run(mono: &[f32], rate: u32) -> Option<ModelBeats> {
     Some(ModelBeats { beats: a.beats.iter().map(|b| *b as f64 * 1000.0).collect(), downbeats: a.downbeats.iter().map(|d| *d as f64 * 1000.0).collect(), bpm: model_bpm, sampled: false })
 }
 
-#[cfg(not(feature = "desktop"))]
+#[cfg(not(feature = "model"))]
 fn model_run(_: &[f32], _: u32) -> Option<ModelBeats> { None }
 
 /// Which of four beats (from the first) is each bar's first, by Beat This!'s downbeats (each one onto
