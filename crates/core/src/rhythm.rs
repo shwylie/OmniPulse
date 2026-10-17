@@ -336,6 +336,13 @@ pub fn background_begin() {
         // SAFETY: the pseudo-handle of the calling thread, a documented priority mode
         unsafe { SetThreadPriority(GetCurrentThread(), 0x0001_0000); }
     }
+    // (Android: the lowest priority, so the phone's scheduler keeps it off the big cores where it can)
+    #[cfg(target_os = "android")]
+    {
+        extern "C" { fn gettid() -> i32; fn setpriority(which: i32, who: u32, prio: i32) -> i32; }
+        // SAFETY: the calling thread's id; PRIO_PROCESS (0) with a tid sets that thread's nice value
+        unsafe { setpriority(0, gettid() as u32, 19); }
+    }
 }
 
 /// Back out of the background (THREAD_MODE_BACKGROUND_END)
@@ -378,15 +385,26 @@ pub(crate) struct ModelBeats {
 
 /// The model on two 30-second stretches of a song (at three tenths and seven tenths of it; a short song,
 /// all of it): its beats and downbeats there, in the song's time, and its tempo from them
+/// Each run of the model followed by a rest as long as it took (a phone's: half the heat, spread out;
+/// measuring's done well ahead of the mix it's for)
+pub static PACE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+fn paced<T>(f: impl FnOnce() -> T) -> T {
+    let t = std::time::Instant::now();
+    let r = f();
+    if PACE.load(std::sync::atomic::Ordering::Relaxed) { std::thread::sleep(t.elapsed()); }
+    r
+}
+
 fn model_sampled(mono: &[f32], rate: u32) -> Option<ModelBeats> {
     let len = mono.len() as f64 / rate.max(1) as f64;
-    if len <= 100.0 { return model_run(mono, rate); }
+    if len <= 100.0 { return paced(|| model_run(mono, rate)); }
     let mut all = ModelBeats { beats: Vec::new(), downbeats: Vec::new(), bpm: 0.0, sampled: true };
     let mut bpms = Vec::new();
     for frac in [0.3, 0.7] {
         let from = ((frac * len - 15.0).max(0.0) * rate as f64) as usize;
         let to = (from + 30 * rate as usize).min(mono.len());
-        let Some(m) = model_run(&mono[from..to], rate) else { continue };
+        let Some(m) = paced(|| model_run(&mono[from..to], rate)) else { continue };
         let off = from as f64 * 1000.0 / rate as f64;
         // (a stretch's first and last beat or so left out: the model's least sure at its edges)
         all.beats.extend(m.beats.iter().filter(|b| **b > 1500.0 && **b < 28_500.0).map(|b| b + off));

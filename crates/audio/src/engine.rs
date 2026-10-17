@@ -1397,7 +1397,20 @@ fn decode_loop(shared: Arc<Shared>, cmds: Receiver<Cmd>, ev: Sender<Event>) {
         // (nothing at all to do, not even an end to tell of: it waits on its commands, waking each second;
         // a track's end still to tell of, or one playing: as before)
         let rest = pipe.is_none() && ended_sent;
-        let got = held_cmd.take().or_else(|| if idle { cmds.recv_timeout(Duration::from_millis(if rest { 1000 } else { 50 })).ok() } else { cmds.try_recv().ok() });
+        // (the engine gone, its sender with it: this thread's done; waiting on it again would return at once, a spin)
+        let got = match held_cmd.take() {
+            Some(c) => Some(c),
+            None if idle => match cmds.recv_timeout(Duration::from_millis(if rest { 1000 } else { 50 })) {
+                Ok(c) => Some(c),
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => None,
+                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => return,
+            },
+            None => match cmds.try_recv() {
+                Ok(c) => Some(c),
+                Err(std::sync::mpsc::TryRecvError::Empty) => None,
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => return,
+            },
+        };
         if let Some(c) = got {
             match c {
                 Cmd::Crossfade(src, db, ms, handoff) if pipe.is_some() && !shared.source_done.load(Ordering::SeqCst) => {
@@ -1545,7 +1558,11 @@ fn decode_loop(shared: Arc<Shared>, cmds: Receiver<Cmd>, ev: Sender<Event>) {
             // (full: paused, it waits on its commands (a seek, a load) rather than checking every 10 ms;
             // playing, a short sleep, as the device takes what's queued)
             if shared.paused.load(Ordering::Relaxed) {
-                if let Ok(c) = cmds.recv_timeout(Duration::from_millis(250)) { held_cmd = Some(c); }
+                match cmds.recv_timeout(Duration::from_millis(250)) {
+                    Ok(c) => held_cmd = Some(c),
+                    Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => return,
+                    Err(_) => {}
+                }
             } else {
                 std::thread::sleep(Duration::from_millis(10));
             }
