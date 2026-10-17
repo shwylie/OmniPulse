@@ -4609,12 +4609,78 @@ struct SmartSong {
     audible_ms: u64,
     first_ms: u64,
     stated: Option<f64>,
+    /// its key from outside (SongBPM), in place of our own reading
+    key_known: bool,
 }
 
 impl SmartSong {
     fn side(&self) -> smart::Side<'_> {
-        smart::Side { dur_ms: self.dur_ms, audible_ms: self.audible_ms, first_ms: self.first_ms, rhythm: self.rhythm.as_ref(), stated_bpm: self.stated }
+        smart::Side { dur_ms: self.dur_ms, audible_ms: self.audible_ms, first_ms: self.first_ms, rhythm: self.rhythm.as_ref(), stated_bpm: self.stated, key_known: self.key_known }
     }
+    /// Its key from outside put in place of our own reading, if it's been found
+    fn with_key(mut self) -> Self {
+        if let (Some(m), Some(Some((tonic, minor)))) = (self.rhythm.as_mut(), ext_key(&self.t)) {
+            m.rhythm.key = omnipulse_core::rhythm::key_name(tonic, minor);
+            m.rhythm.camelot = omnipulse_core::rhythm::camelot(tonic, minor);
+            m.rhythm.key_confidence = 1.0;
+            self.key_known = true;
+        }
+        self
+    }
+}
+
+// ---------- songs' keys from outside (core::songbpm), kept in state/song-keys.json ----------
+thread_local! {
+    /// each song's key (tonic, minor), or none found (and when it was looked for, s)
+    static EXT_KEYS: RefCell<Option<HashMap<String, serde_json::Value>>> = const { RefCell::new(None) };
+    static EXT_KEYS_BUSY: RefCell<std::collections::HashSet<String>> = RefCell::new(std::collections::HashSet::new());
+}
+/// None found: looked for again after this long
+const EXT_KEY_RETRY_SECS: u64 = 7 * 86_400;
+
+fn ext_keys_file() -> Option<std::path::PathBuf> {
+    omnipulse_core::data_dir().ok().map(|d| d.join("state").join("song-keys.json"))
+}
+
+fn with_ext_keys<R>(f: impl FnOnce(&mut HashMap<String, serde_json::Value>) -> R) -> R {
+    EXT_KEYS.with(|k| {
+        let mut k = k.borrow_mut();
+        let m = k.get_or_insert_with(|| ext_keys_file().and_then(|p| std::fs::read_to_string(p).ok()).and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default());
+        f(m)
+    })
+}
+
+/// A song's key from outside: Some(Some(key)) found, Some(None) not found (or not this version), None
+/// not looked for yet (it's looked for now, in the background)
+fn ext_key(t: &Track) -> Option<Option<(usize, bool)>> {
+    let saved = with_ext_keys(|m| m.get(&t.key).cloned());
+    if let Some(v) = &saved {
+        if let (Some(tonic), Some(minor)) = (v["tonic"].as_u64(), v["minor"].as_bool()) { return Some(Some((tonic as usize, minor))); }
+        if omnipulse_core::now_secs().saturating_sub(v["at"].as_u64().unwrap_or(0)) < EXT_KEY_RETRY_SECS { return Some(None); }
+    }
+    if EXT_KEYS_BUSY.with(|b| !b.borrow_mut().insert(t.key.clone())) { return None; }
+    let Some(rt) = SHARED.with(|s| s.borrow().as_ref().map(|sh| sh.borrow().rt.clone())) else { return None };
+    let weak = SHARED.with(|s| s.borrow().as_ref().map(|sh| sh.borrow().ui.clone()));
+    let t = t.clone();
+    // (the first artist; the title as it is, its version kept, without who's featured or upload tags)
+    let artist = t.artist.split(',').next().unwrap_or("").trim().to_string();
+    let title = omnipulse_core::ranking::featured(&versions::match_title(&t)).1;
+    rt.spawn(async move {
+        let found = omnipulse_core::songbpm::lookup(&artist, &title, t.ms).await;
+        let v = match &found {
+            Ok(Some(k)) => Some(serde_json::json!({ "tonic": k.tonic, "minor": k.minor, "bpm": k.bpm, "ms": k.ms, "url": k.url })),
+            Ok(None) => Some(serde_json::json!({ "none": true, "at": omnipulse_core::now_secs() })),
+            Err(_) => None,
+        };
+        let Some(weak) = weak else { return };
+        let _ = weak.upgrade_in_event_loop(move |_| {
+            EXT_KEYS_BUSY.with(|b| b.borrow_mut().remove(&t.key));
+            let Some(v) = v else { return };
+            let text = with_ext_keys(|m| { m.insert(t.key.clone(), v); serde_json::to_string(m).ok() });
+            if let (Some(p), Some(text)) = (ext_keys_file(), text) { let _ = std::fs::write(p, text); }
+        });
+    });
+    None
 }
 
 /// Where a song's sound starts: after the silence it starts with, if its loudness analysis has one
@@ -4634,11 +4700,11 @@ fn smart_pair(a: &App, dur: u64) -> Option<(SmartSong, SmartSong)> {
     let measured = |t: &Track, same: bool| if same && !t.is_mix() { rhythm_full(&t.key).map(|m| { let mut m = smart::shifted(&m, beat_shift(&a.web.prefs, &t.key)); m.rhythm.phrase_shift = phrase_shift(&a.web.prefs, &t.key); m }) } else { None };
     let an = a.cur_loud.as_ref().and_then(|k| a.analysis.get(k));
     let audible = an.and_then(|x| x["audible_ms"].as_u64()).unwrap_or(0);
-    let a_side = SmartSong { rhythm: measured(&cur, MIX_OUT_OK.with(|c| c.get())), dur_ms: dur, audible_ms: audible, first_ms: 0, stated: stated(&cur), t: cur };
+    let a_side = SmartSong { rhythm: measured(&cur, MIX_OUT_OK.with(|c| c.get())), dur_ms: dur, audible_ms: audible, first_ms: 0, stated: stated(&cur), t: cur, key_known: false }.with_key();
     let v = if mix_via_youtube(&next) { versions::saved_id(&next.key) } else { None };
     let nan = sound::loud_source(&next, v.as_deref()).and_then(|(k, id)| a.analysis.get(&format!("{k}:{id}")));
     let b_dur = nan.and_then(|x| x["duration_ms"].as_u64()).filter(|&d| d > 0).unwrap_or(next.ms);
-    let b_side = SmartSong { rhythm: measured(&next, smart_same_source(&next)), dur_ms: b_dur, audible_ms: nan.and_then(|x| x["audible_ms"].as_u64()).unwrap_or(0), first_ms: nan.map(first_sound).unwrap_or(0), stated: stated(&next), t: next };
+    let b_side = SmartSong { rhythm: measured(&next, smart_same_source(&next)), dur_ms: b_dur, audible_ms: nan.and_then(|x| x["audible_ms"].as_u64()).unwrap_or(0), first_ms: nan.map(first_sound).unwrap_or(0), stated: stated(&next), t: next, key_known: false }.with_key();
     Some((a_side, b_side))
 }
 
@@ -4692,6 +4758,9 @@ fn smart_decide(shared: &Shared, a: &SmartSong, b: &SmartSong, pos: u64, late: b
         Some((None, "blends switched off".into()))
     } else if !streamsafe::allowed(&prefs, &b.t) || b.t.is_mix() {
         Some((None, "not one to blend into".into()))
+    } else if a.rhythm.is_some() && b.rhythm.is_some() && !late && set_row_on(&prefs, "smartKeys", true) && (EXT_KEYS_BUSY.with(|k| k.borrow().contains(&a.t.key) || k.borrow().contains(&b.t.key))) {
+        // (their keys still being looked for: decided once they're in, for a key ride by them)
+        None
     } else if a.rhythm.is_some() && b.rhythm.is_some() {
         match smart::blend_blocked(&sa, &sb) {
             None => match smart::blend(&sa, &sb, pos) {

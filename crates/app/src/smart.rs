@@ -27,6 +27,9 @@ pub struct Side<'a> {
     pub rhythm: Option<&'a Measured>,
     /// a tempo its title or description states ("100bpm"), if any
     pub stated_bpm: Option<f64>,
+    /// its key's from outside (SongBPM: Spotify's analysis), not only our own reading: one to shift a
+    /// song's pitch by
+    pub key_known: bool,
 }
 
 /// Tier 0: the one playing fades from `out_from_ms` to `out_to_ms` (where its sound ends); the next one
@@ -278,7 +281,8 @@ pub fn blend_as(a: &Side, b: &Side, now_ms: u64, forced: bool) -> Option<crate::
     let intro = first_b.saturating_sub(s0) / 4 * 4;
     // (a big change of tempo: 32 beats for it, whatever the intro; keys that clash: ridden into one key,
     // else 16 beats, the clash brief)
-    let semitones = key_ride(ma, mb);
+    // (only by keys known from outside: our own readings are a fifth out too often to shift a song by)
+    let semitones = if a.key_known && b.key_known { key_ride(ma, mb) } else { 0 };
     let clash = !keys_go(ma, mb) && semitones == 0;
     let run = if clash { 4 } else if ramp > MAX_RATE { 8 } else { intro.clamp(4, 8) };
     let from = if intro > run { s0 + intro - run } else { s0 };
@@ -607,9 +611,12 @@ mod tests {
         let mut b = song(124.0, &levels(8, 48, 8), 0.6, "4A");
         b.rhythm.key = "F minor".into();
         assert_eq!(key_ride(&a, &b), -1);
-        let side = |m| Side { dur_ms: 240_000, rhythm: Some(m), ..Default::default() };
+        let side = |m| Side { dur_ms: 240_000, rhythm: Some(m), key_known: true, ..Default::default() };
         let p = blend(&side(&a), &side(&b), 0).expect("a blend");
         assert_eq!(p.semitones, -1);
+        // (by our own readings only: never shifted)
+        let ours = |m| Side { dur_ms: 240_000, rhythm: Some(m), ..Default::default() };
+        assert_eq!(blend(&ours(&a), &ours(&b), 0).expect("a blend").semitones, 0);
         // (keys that go together: none)
         let mut c = b.clone();
         c.rhythm.camelot = "9A".into();
@@ -722,12 +729,18 @@ mod tests {
             let phrase_of = |id: &str| std::env::var("OMNIPULSE_SMART_PHRASES").ok().and_then(|v| v.split(',').find_map(|x| x.split_once(':').filter(|(k, _)| k.trim() == id).and_then(|(_, n)| n.trim().parse::<i32>().ok()))).unwrap_or(0);
             let with_phrase = |m: Option<Measured>, id: &str| m.map(|mut m| { m.rhythm.phrase_shift = phrase_of(id); m });
             let (ma, mb) = (with_phrase(ma, a_id.trim()), with_phrase(mb, b_id.trim()));
+            // (their keys from outside, as the app has them: SongBPM's, in place of our readings)
+            let ext = |t: &Track| rt.block_on(omnipulse_core::songbpm::lookup(t.artist.split(',').next().unwrap_or(""), &omnipulse_core::ranking::featured(&crate::versions::match_title(t)).1, t.ms)).ok().flatten();
+            let with_key = |m: Option<Measured>, k: &Option<omnipulse_core::songbpm::SongKey>| m.map(|mut m| { if let Some(k) = k { m.rhythm.key = omnipulse_core::rhythm::key_name(k.tonic, k.minor); m.rhythm.camelot = omnipulse_core::rhythm::camelot(k.tonic, k.minor); m.rhythm.key_confidence = 1.0; } m });
+            let (ka, kb) = (ext(&ta), ext(&tb));
+            println!("keys from outside: {:?} / {:?}", ka.as_ref().map(|k| &k.url), kb.as_ref().map(|k| &k.url));
+            let (ma, mb) = (with_key(ma, &ka), with_key(mb, &kb));
             let open = |t: &Track| rt.block_on(crate::player::open_source(t, rt.handle().clone())).expect("it opens");
             let (mut sa, sb) = (open(&ta), open(&tb));
             let a_dur = sa.duration_ms().unwrap_or(0);
             let first = |an: &serde_json::Value| an["silences"].as_array().and_then(|s| s.first()).filter(|s| s[0].as_u64() == Some(0)).and_then(|s| s[1].as_u64()).unwrap_or(0);
-            let a = Side { dur_ms: a_dur, audible_ms: ana["audible_ms"].as_u64().unwrap_or(0), first_ms: 0, rhythm: ma.as_ref(), stated_bpm: None };
-            let b = Side { dur_ms: anb["duration_ms"].as_u64().unwrap_or(0), audible_ms: anb["audible_ms"].as_u64().unwrap_or(0), first_ms: first(&anb), rhythm: mb.as_ref(), stated_bpm: None };
+            let a = Side { dur_ms: a_dur, audible_ms: ana["audible_ms"].as_u64().unwrap_or(0), first_ms: 0, rhythm: ma.as_ref(), stated_bpm: None, key_known: ka.is_some() };
+            let b = Side { dur_ms: anb["duration_ms"].as_u64().unwrap_or(0), audible_ms: anb["audible_ms"].as_u64().unwrap_or(0), first_ms: first(&anb), rhythm: mb.as_ref(), stated_bpm: None, key_known: kb.is_some() };
             let db = |t: &Track, an: &serde_json::Value| crate::sound::loud_db(&serde_json::json!({}), t, an["lufs"].as_f64(), false);
             let dbs = (db(&ta, &ana), db(&tb, &anb));
             let blocked = blend_blocked(&a, &b);

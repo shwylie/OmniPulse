@@ -19,6 +19,7 @@ pub mod loudness;
 pub mod lyrics;
 pub mod ranking;
 pub mod rhythm;
+pub mod songbpm;
 pub mod sponsorblock;
 pub mod musicbrainz;
 pub mod playlistfile;

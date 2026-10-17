@@ -1698,6 +1698,32 @@ mod xfade_tests {
     use super::*;
     use crate::source::Tone;
 
+    /// upward zero crossings a second (the left channel), over [from, from + secs)
+    fn hz(out: &[f32], rate: u32, from: f32, secs: f32) -> f32 {
+        let (a, b) = ((from * rate as f32) as usize, ((from + secs) * rate as f32) as usize);
+        let l: Vec<f32> = out[a * 2..b * 2].iter().step_by(2).copied().collect();
+        l.windows(2).filter(|w| w[0] <= 0.0 && w[1] > 0.0).count() as f32 / secs
+    }
+
+    #[test]
+    fn a_key_ride_moves_both_the_right_way() {
+        // B a semitone down at first (440 as 415), back to 440 by the end; A from 440 up to 466
+        let rate = 44_100u32;
+        for (a_amp, b_amp) in [(0.0f32, 0.3f32), (0.3, 0.0)] {
+            let a = Box::new(Tone::new(rate, 440.0, a_amp, 20.0));
+            let bt = crate::stretch::Tempo::new(1.0);
+            let b = crate::stretch::Stretched::shifted(Box::new(Tone::new(rate, 440.0, b_amp, 20.0)), bt, -1).unwrap();
+            let bp = b.pitch();
+            let (at, ap) = (crate::stretch::Tempo::new(1.0), crate::stretch::Tempo::new(1.0));
+            let ride = { let ap = ap.clone(); move |x: f64| { let e = x * x * (3.0 - 2.0 * x); bp.set(2f64.powf(-(1.0 - e) / 12.0)); ap.set(2f64.powf(e / 12.0)); } };
+            let out = render_mix_keyed(a, Box::new(b), (0.0, 0.0), rate, 1.0, 8000, None, Some((&at, &ride as &dyn Fn(f64))), Some(&ap), 10.0).unwrap();
+            let (start, end) = (hz(&out, rate, 1.3, 0.5), hz(&out, rate, 8.3, 0.5));
+            println!("A {a_amp} B {b_amp}: {start} Hz at the start, {end} Hz at the end");
+            if b_amp > 0.0 { assert!((start - 415.3).abs() < 6.0 && (end - 440.0).abs() < 6.0, "B: {start} {end}"); }
+            else { assert!((start - 440.0).abs() < 6.0 && (end - 466.2).abs() < 8.0, "A: {start} {end}"); }
+        }
+    }
+
     fn rms(x: &[f32]) -> f32 {
         (x.iter().map(|v| v * v).sum::<f32>() / x.len().max(1) as f32).sqrt()
     }
