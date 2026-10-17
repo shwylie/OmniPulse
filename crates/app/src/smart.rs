@@ -123,9 +123,31 @@ const TRUST_CONFIDENCE: f64 = 0.3;
 /// How far from its own tempo the next one plays (DJs: mostly under 5%)
 pub const MAX_RATE: f64 = 0.04;
 /// How far apart two songs' tempos can be for a blend with the tempo ridden from one to the other (as a
-/// DJ ramps between genres: Goodbye's 92 into One's 125, 174 counted as 87 into 128); past 4%, the blend's
-/// always 32 beats, room for it
-pub const MAX_RAMP_BLEND: f64 = 0.50;
+/// DJ ramps between genres: 87 into 120, 105 into 128), the faster over the slower; past 4%, the blend's
+/// always 32 beats, room for it. (Your ratings, 2026-10-17: every ride of 46% or more was bad, the good
+/// ones 22% or less; 50% before.)
+pub const MAX_RAMP_BLEND: f64 = 0.40;
+/// A slowdown up to this stays one (Goodbye's 36% sounded wrong); past it, the one playing is counted at half time and sped up instead
+/// (Shooting Stars' 128 into Rocket Girl's 105 was counted as 64 and sped up 64%: rated bad)
+const MAX_SLOWDOWN: f64 = 0.25;
+/// The ride between two tempos: the faster over the slower, less one (a slowdown and a speed-up alike)
+fn ride(a_bpm: f64, b_bpm: f64) -> f64 {
+    if a_bpm <= 0.0 || b_bpm <= 0.0 { return f64::INFINITY; }
+    (a_bpm / b_bpm).max(b_bpm / a_bpm) - 1.0
+}
+
+/// Match Keys (Seamless Mix's page): a blend of keys that clash ridden into one key; off, never shifted
+pub static KEYS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
+
+/// The key shift (semitones, up to two either way) that puts the next one's key beside the playing
+/// one's on the Camelot wheel: where the next one starts, both then ridden to the next one's own key
+/// over the run-up, as the tempo is. 0: they go together already, either key isn't clear, or Match
+/// Keys is off
+pub fn key_ride(a: &Measured, b: &Measured) -> i32 {
+    use omnipulse_core::rhythm::{keys_mix, transposed};
+    if !KEYS.load(std::sync::atomic::Ordering::Relaxed) || keys_go(a, b) { return 0; }
+    [1, -1, 2, -2].into_iter().find(|&s| transposed(&b.rhythm.key, s).is_some_and(|(_, c)| keys_mix(&a.rhythm.camelot, &c))).unwrap_or(0)
+}
 /// A stated tempo agrees with the measured one within this (or half or double of it)
 const STATED_WITHIN: f64 = 0.03;
 
@@ -172,7 +194,7 @@ pub fn blend_blocked(a: &Side, b: &Side) -> Option<&'static str> {
     if !grid_trusted(a) { return Some("the one playing's beat isn't sure"); }
     if !grid_trusted(b) { return Some("the next one's beat isn't sure"); }
     let (ma, mb) = (a.rhythm?, b.rhythm?);
-    let near = |x: f64| (x / mb.rhythm.bpm - 1.0).abs() <= MAX_RAMP_BLEND;
+    let near = |x: f64| ride(x, mb.rhythm.bpm) <= MAX_RAMP_BLEND;
     if match_rate(ma.rhythm.bpm, mb.rhythm.bpm).is_none() && !near(ma.rhythm.bpm) && !near(ma.rhythm.bpm / 2.0) { return Some("tempos too far apart (more than 50%)"); }
     // (keys that don't go together: still a blend, a short one: the clash only briefly, as a DJ does)
     None
@@ -231,13 +253,15 @@ pub fn blend_as(a: &Side, b: &Side, now_ms: u64, forced: bool) -> Option<crate::
     let (ma, mb) = (a.rhythm?, b.rhythm?);
     // (a big slowdown sounds wrong: the one playing counted at half time instead (174 as 87) and sped up)
     let half;
-    let ma = if ma.rhythm.bpm > mb.rhythm.bpm * (1.0 + MAX_RATE) && (ma.rhythm.bpm / 2.0 / mb.rhythm.bpm - 1.0).abs() <= MAX_RAMP_BLEND && ma.rhythm.bpm / 2.0 < mb.rhythm.bpm {
+    let ma = if ma.rhythm.bpm > mb.rhythm.bpm * (1.0 + MAX_SLOWDOWN) && ride(ma.rhythm.bpm / 2.0, mb.rhythm.bpm) <= MAX_RAMP_BLEND && ma.rhythm.bpm / 2.0 < mb.rhythm.bpm {
         half = halved(ma);
         &half
     } else { ma };
     // (same time only: a half- or double-time pair's bars don't line up one to one)
-    let ramp = (ma.rhythm.bpm / mb.rhythm.bpm - 1.0).abs();
+    let ramp = ride(ma.rhythm.bpm, mb.rhythm.bpm);
     if ramp > MAX_RAMP_BLEND && !forced { return None; }
+    // (a big slowdown that couldn't be a speed-up from half time: a fade, not a slowdown that sounds wrong)
+    if ma.rhythm.bpm > mb.rhythm.bpm * (1.0 + MAX_SLOWDOWN) && !forced { return None; }
     // (16-beat lines not sure: the likeliest; the user would rather a blend on it than a fade)
     let _ = forced;
     let grid = |m: &Measured| groups(m).map(|g| g.0);
@@ -252,8 +276,10 @@ pub fn blend_as(a: &Side, b: &Side, now_ms: u64, forced: bool) -> Option<crate::
     let s0 = gb % 4;
     let first_b = body_line(mb).and_then(|l| mb.rhythm.bar_db.iter().position(|d| *d >= l)).unwrap_or(s0);
     let intro = first_b.saturating_sub(s0) / 4 * 4;
-    // (a big change of tempo: 32 beats for it, whatever the intro; keys that clash: 16, the clash brief)
-    let clash = !keys_go(ma, mb);
+    // (a big change of tempo: 32 beats for it, whatever the intro; keys that clash: ridden into one key,
+    // else 16 beats, the clash brief)
+    let semitones = key_ride(ma, mb);
+    let clash = !keys_go(ma, mb) && semitones == 0;
     let run = if clash { 4 } else if ramp > MAX_RATE { 8 } else { intro.clamp(4, 8) };
     let from = if intro > run { s0 + intro - run } else { s0 };
     if from + run + TAIL_BARS >= nb { return None; }
@@ -271,7 +297,7 @@ pub fn blend_as(a: &Side, b: &Side, now_ms: u64, forced: bool) -> Option<crate::
     // its tempo as it is over the run-up (a song's drifts), the next one's over its own
     let (pa, pb) = ((swap - at) / (run * 4) as f64, (bar_ms(mb, from + run)? - bar_ms(mb, from)?) / (run * 4) as f64);
     let rate = pb / pa;
-    if (rate - 1.0).abs() > MAX_RAMP_BLEND && !forced { return None; }
+    if ride(1.0, rate) > MAX_RAMP_BLEND && !forced { return None; }
     // the tempo ridden over all of it, as a DJ does: the two together at the one playing's at first, at
     // the next one's own by the end (the one playing eased to it, the next one with it): nothing to ease
     // back after. Its bars take longer or less as it's eased: the times, as heard
@@ -282,7 +308,7 @@ pub fn blend_as(a: &Side, b: &Side, now_ms: u64, forced: bool) -> Option<crate::
     let len = swap_at + (over - swap) / target;
     Some(crate::mix::Plan {
         at_ms: at.round() as u64, ms: len.round() as u64, swap_ms: swap_at.round() as u64, start_ms: bar_ms(mb, from)?.round() as u64,
-        rate, bars: (run + TAIL_BARS) as u32, semitones: 0, beatmatched: true, out_tempo: target, ramp_ms: swap_at.round() as u64, tape_stop: false,
+        rate, bars: (run + TAIL_BARS) as u32, semitones, beatmatched: true, out_tempo: target, ramp_ms: swap_at.round() as u64, tape_stop: false,
         out_loop: None, in_loop: None, word: None, style: None,
     })
 }
@@ -550,14 +576,45 @@ mod tests {
 
     #[test]
     fn a_big_slowdown_is_a_speedup_from_half_time() {
-        // 174 into 128: counted as 87, both sped up (B in at 87, to its own; A from 87's bars on)
+        // 174 into 120: counted as 87, both sped up (B in at 87, to its own; A from 87's bars on)
         let a = song(174.0, &levels(16, 96, 16), 0.6, "8A");
-        let b = song(128.0, &levels(8, 48, 8), 0.6, "8A");
+        let b = song(120.0, &levels(8, 48, 8), 0.6, "8A");
         // (each as long as its beats)
         let side = |m: &'static Measured| Side { dur_ms: m.to_ms, rhythm: Some(m), ..Default::default() };
         let (a, b): (&'static Measured, &'static Measured) = (Box::leak(Box::new(a)), Box::leak(Box::new(b)));
         let p = blend(&side(a), &side(b), 0).expect("a blend");
-        assert!((p.rate - 87.0 / 128.0).abs() < 0.01 && p.out_tempo > 1.4, "{} {}", p.rate, p.out_tempo);
+        assert!((p.rate - 87.0 / 120.0).abs() < 0.01 && p.out_tempo > 1.35, "{} {}", p.rate, p.out_tempo);
+        // 174 into 128 (87 sped up 47%): too far, never ridden that far
+        let c: &'static Measured = Box::leak(Box::new(song(128.0, &levels(8, 48, 8), 0.6, "8A")));
+        assert!(blend(&side(a), &side(c), 0).is_none());
+    }
+
+    #[test]
+    fn a_small_slowdown_stays_a_slowdown() {
+        // Shooting Stars' 128 into Rocket Girl's 105: slowed 18%, not counted as 64 and sped up 64%
+        let a: &'static Measured = Box::leak(Box::new(song(128.0, &levels(16, 96, 16), 0.6, "8A")));
+        let b: &'static Measured = Box::leak(Box::new(song(105.0, &levels(8, 48, 8), 0.6, "8A")));
+        let side = |m: &'static Measured| Side { dur_ms: m.to_ms, rhythm: Some(m), ..Default::default() };
+        let p = blend(&side(a), &side(b), 0).expect("a blend");
+        assert!(p.out_tempo < 1.0 && (p.out_tempo - 105.0 / 128.0).abs() < 0.01, "{p:?}");
+    }
+
+    #[test]
+    fn keys_that_clash_are_ridden_into_one() {
+        // A minor (8A) into F minor (4A): the next one in a semitone down (E minor, 9A, beside 8A)
+        let mut a = song(124.0, &levels(16, 96, 16), 0.6, "8A");
+        a.rhythm.key = "A minor".into();
+        let mut b = song(124.0, &levels(8, 48, 8), 0.6, "4A");
+        b.rhythm.key = "F minor".into();
+        assert_eq!(key_ride(&a, &b), -1);
+        let side = |m| Side { dur_ms: 240_000, rhythm: Some(m), ..Default::default() };
+        let p = blend(&side(&a), &side(&b), 0).expect("a blend");
+        assert_eq!(p.semitones, -1);
+        // (keys that go together: none)
+        let mut c = b.clone();
+        c.rhythm.camelot = "9A".into();
+        c.rhythm.key = "E minor".into();
+        assert_eq!(key_ride(&a, &c), 0);
     }
 
     #[test]
@@ -694,12 +751,18 @@ mod tests {
                 Some(p) => {
                     sa.seek(p.at_ms.saturating_sub(lead)).unwrap();
                     let b_tempo = omnipulse_audio::Tempo::new(p.rate);
-                    let mut sb = omnipulse_audio::Stretched::shifted(sb, b_tempo.clone(), 0).unwrap();
+                    let mut sb = omnipulse_audio::Stretched::shifted(sb, b_tempo.clone(), p.semitones).unwrap();
+                    let b_pitch = sb.pitch();
                     omnipulse_audio::Source::seek(&mut sb, p.start_ms).unwrap();
-                    let (target, a_tempo) = (p.out_tempo, omnipulse_audio::Tempo::new(1.0));
+                    let (target, a_tempo, a_pitch) = (p.out_tempo, omnipulse_audio::Tempo::new(1.0), omnipulse_audio::Tempo::new(1.0));
                     let share = p.ms as f64 / p.ramp_ms.max(1) as f64;
-                    let ramp = { let a_tempo = a_tempo.clone(); move |x: f64| { a_tempo.set(crate::mix::out_ramp(target, x * share)); b_tempo.set(crate::mix::in_ramp(target, x * share)); } };
-                    let out = omnipulse_audio::engine::render_mix_ramped(sa, Box::new(sb), dbs, rate, lead as f32 / 1000.0, p.ms, Some(handoff(p, voices && both_sing(p.at_ms, p.at_ms + p.ms, p.start_ms, p.start_ms + (p.ms as f64 * p.rate) as u64))), (target != 1.0).then_some((&a_tempo, &ramp as &dyn Fn(f64))), (lead + p.ms) as f32 / 1000.0 + 15.0).unwrap();
+                    // (and a key ride, as the app's: both together, the next one in its own key by the swap)
+                    let (s, swap_share) = (p.semitones as f64, p.ms as f64 / p.swap_ms.max(1) as f64);
+                    let ramp = { let (a_tempo, a_pitch) = (a_tempo.clone(), a_pitch.clone()); move |x: f64| {
+                        a_tempo.set(crate::mix::out_ramp(target, x * share)); b_tempo.set(crate::mix::in_ramp(target, x * share));
+                        if s != 0.0 { let q = (x * swap_share).min(1.0); let e = q * q * (3.0 - 2.0 * q); b_pitch.set(2f64.powf(s * (1.0 - e) / 12.0)); a_pitch.set(2f64.powf(-s * e / 12.0)); }
+                    } };
+                    let out = omnipulse_audio::engine::render_mix_keyed(sa, Box::new(sb), dbs, rate, lead as f32 / 1000.0, p.ms, Some(handoff(p, voices && both_sing(p.at_ms, p.at_ms + p.ms, p.start_ms, p.start_ms + (p.ms as f64 * p.rate) as u64))), (target != 1.0 || s != 0.0).then_some((&a_tempo, &ramp as &dyn Fn(f64))), (s != 0.0).then_some(&a_pitch), (lead + p.ms) as f32 / 1000.0 + 15.0).unwrap();
                     (out, serde_json::json!({ "kind": "smart blend", "plan": p, "nudgeBeats": nudge, "voicesHanded": voices && both_sing(p.at_ms, p.at_ms + p.ms, p.start_ms, p.start_ms + (p.ms as f64 * p.rate) as u64), "lyricLines": [la.len(), lb.len()] }))
                 }
                 None => {

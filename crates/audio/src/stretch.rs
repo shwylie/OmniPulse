@@ -132,6 +132,14 @@ impl Stretched {
         Ok(s)
     }
 
+    /// The same, its key able to move as it plays from the one it's at (`pitch`, a factor: 1.0 its own),
+    /// for a mix that rides the one going out into the next one's key
+    pub fn bendable(mut self, pitch: Tempo) -> Result<Self, String> {
+        self.bend = Some(Bend::new(pitch.get())?);
+        self.pitch = pitch;
+        Ok(self)
+    }
+
     /// Where its output is, in frames of what it's been given (to the frame: a takeover lines up on it)
     pub fn source_frames(&self) -> f64 {
         self.deck.ctl.source_position()

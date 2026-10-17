@@ -3490,6 +3490,9 @@ thread_local! {
     /// a mix's key shift bending back to the track's own key once the mix is over: (its pitch, where it
     /// was, since when, over how long)
     static PITCH_BACK: RefCell<Option<(omnipulse_audio::Tempo, f64, std::time::Instant, u64)>> = const { RefCell::new(None) };
+    /// A Seamless Mix blend riding both songs into one key: the one going out's key handle, and the shift
+    /// the next one starts at (semitones); both ridden to the next one's own key by the swap
+    static KEY_RIDE: RefCell<Option<(omnipulse_audio::Tempo, i32)>> = const { RefCell::new(None) };
     /// the transition of its own used last (Wordplay, Drop Swap, Melody Play), so the next is another
     static MIX_STYLE_LAST: std::cell::Cell<Option<&'static str>> = const { std::cell::Cell::new(None) };
     /// the track the queue moves on to at a mix's moment (start() doesn't load it: it's playing), with
@@ -3660,7 +3663,15 @@ fn mix_tick(shared: &Shared, pos: u64, dur: u64) {
             let engine = shared.borrow().engine.clone();
             // (its key shift only matters while both are heard: back to its own key over the mix's last
             // quarter, as the one going out fades, so it's at its own pitch by the end, never after)
-            if began.elapsed().as_millis() as u64 >= plan.ms * 3 / 4 { pitch_back_start(pitch, (plan.ms / 4).max(1)); }
+            // (a key ride: the next one from the playing one's key to its own, the one playing from its own to
+            // the next one's, together, eased as the tempo is, the two a semitone or two apart all the way:
+            // in key with each other throughout, the next one in its own key by the swap)
+            if let Some((ap, s)) = KEY_RIDE.with(|k| k.borrow().clone()) {
+                let x = (began.elapsed().as_millis() as f64 / plan.swap_ms.max(1) as f64).min(1.0);
+                let e = x * x * (3.0 - 2.0 * x);
+                if let Some(bp) = pitch { bp.set(2f64.powf(s as f64 * (1.0 - e) / 12.0)); }
+                ap.set(2f64.powf(-(s as f64) * e / 12.0));
+            } else if began.elapsed().as_millis() as u64 >= plan.ms * 3 / 4 { pitch_back_start(pitch, (plan.ms / 4).max(1)); }
             let engine = engine;
             // (the one going out slowed into the next one's tempo as far through as the mix is, and the next
             // one with it, from the other's tempo to its own: at its own by the end, nothing to ease back)
@@ -3671,6 +3682,7 @@ fn mix_tick(shared: &Shared, pos: u64, dur: u64) {
                 if engine.crossfading() { return true; }
                 tempo.set(1.0);
                 pitch_back_start(pitch, *ease_ms);
+                KEY_RIDE.with(|k| *k.borrow_mut() = None);
                 *m = None;
                 let s3 = shared.clone();
                 slint::Timer::single_shot(std::time::Duration::from_millis(MIX_HEARD_MS), move || mix_show_end(&s3));
@@ -3842,8 +3854,17 @@ fn mix_tick(shared: &Shared, pos: u64, dur: u64) {
                     let known = what.as_ref().and_then(|(s, id)| shared.borrow().loud.get(&format!("{s}:{id}")).copied());
                     let db = sound::loud_db(&prefs, &next, known, version.is_some());
                     // (slowed into the next one's tempo: from here, the one playing goes through the stretch, as it was until the mix)
-                    let out = (plan.out_tempo != 1.0).then(|| omnipulse_audio::Tempo::new(1.0));
-                    if let Some(o) = &out { shared.borrow().engine.stretch_playing(o.clone()); }
+                    // (and a key ride: the one playing's key able to move too)
+                    let ride = smart && plan.semitones != 0 && pitch.is_some();
+                    let out = (plan.out_tempo != 1.0 || ride).then(|| omnipulse_audio::Tempo::new(1.0));
+                    KEY_RIDE.with(|k| *k.borrow_mut() = None);
+                    if let Some(o) = &out {
+                        if ride {
+                            let ap = omnipulse_audio::Tempo::new(1.0);
+                            shared.borrow().engine.stretch_playing_bent(o.clone(), ap.clone());
+                            KEY_RIDE.with(|k| *k.borrow_mut() = Some((ap, plan.semitones)));
+                        } else { shared.borrow().engine.stretch_playing(o.clone()); }
+                    }
                     let handoff = if smart { smart::handoff(&plan, set_row_on(&prefs, "smartVoices", true) && smart_both_sing(&cur_key, &next.key, (plan.at_ms, plan.at_ms + plan.ms), (plan.start_ms, plan.start_ms + (plan.ms as f64 * plan.rate) as u64))) } else { mix::handoff(&plan, set_row_on(&prefs, "mixBands", false)) };
                     shared.borrow().engine.mix_at(src, db, plan.at_ms, plan.ms, Some(handoff));
                     MIX.with(|m| *m.borrow_mut() = Some(MixPhase::Waiting { key: next.key.clone(), plan, tempo, version, out, pitch }));
@@ -4666,6 +4687,7 @@ fn smart_decide(shared: &Shared, a: &SmartSong, b: &SmartSong, pos: u64, late: b
     }
     let prefs = shared.borrow().web.prefs.clone();
     let (sa, sb) = (a.side(), b.side());
+    smart::KEYS.store(set_row_on(&prefs, "smartKeys", true), std::sync::atomic::Ordering::Relaxed);
     let decided: Option<(Option<mix::Plan>, String)> = if !smart_blends_on(&prefs) {
         Some((None, "blends switched off".into()))
     } else if !streamsafe::allowed(&prefs, &b.t) || b.t.is_mix() {
@@ -5386,7 +5408,7 @@ const SET_ROWS: [(&str, &str, &str, &str, bool); 29] = [
     ("Library", "Hidden & Not Recommended", "Right-click a track to stop it, its album or its artist being recommended. Off: nothing is left out; the lists are kept.", "hideOn", true),
     ("Library", "Avoid Recent Plays", "Skips songs you've heard lately in what the app picks for you. What you choose yourself still plays.", "avoidRecent", true),
     ("Sound", "Seamless Mix (WIP)", "WIP: still being worked on, so some transitions may not sound right yet. Songs with a beat blend into the next on it, as a DJ mixes: at its tempo, on its phrase, the next one sweeping in from the top as the one playing gives way below it, down to the drop. While it's on, Spotify songs play from their YouTube Music version (their Spotify details kept), so they mix too. What it uses on your PC: your internet connection and CPU to download and measure each next song ahead of time, and a little more CPU and memory while a mix plays or a song plays at a changed tempo.", "mixOn", true),
-    ("Sound", "Smart Transitions (WIP)", "WIP: still being built. Songs change over the way DJ software does it: the silence at either end left out, and a crossfade over the song playing's outro and the next one's intro, as long as the shorter of the two. Two songs with a clear beat, within 4% of each other's tempo and in keys that go together, blend on the beat instead: on a phrase, the bass swapped on a bar line, never a key shifted. It measures each next song ahead of time (your internet connection and some CPU). Off: songs change over as Fade Between Tracks is set.", "smartOn", false),
+    ("Sound", "Seamless Mix (WIP)", "WIP: still being built. Songs change over the way DJ software does it: the silence at either end left out, and a crossfade over the song playing's outro and the next one's intro. Two songs with a clear beat blend on the beat instead, on a phrase in the song's last quarter: the tempo ridden from one to the other (up to 40% apart), keys that clash ridden into one, the bass swapped on a bar line. It measures each next song ahead of time (your internet connection and some CPU). Off: songs change over as Fade Between Tracks is set.", "smartOn", false),
     ("Library", "Skip non-music parts", "What plays from YouTube skips the parts of music videos that aren't music (a skit before the song, an interview after it), as marked on SponsorBlock.", "sbOn", true),
     ("Library", "Favourites Page", "Your starred tracks on a page of their own, in the sidebar. The stars stay either way.", "favPage", true),
     ("Library", "Sets & Podcasts Page", "A page for anything over 15 minutes, in the sidebar. Right-click it there to hide it.", "setsOn", true),
@@ -6437,7 +6459,7 @@ fn set_toggle(shared: &Shared, key: &str) {
             if key == "smartOn" {
                 SMART_PAIR.with(|p| *p.borrow_mut() = None);
                 if on { PRELOADED.with(|p| p.borrow_mut().clear()); preload_next(shared); }
-                if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_status(if on { "Smart Transitions are on. They're WIP: some may not sound right yet." } else { "Smart Transitions are off." }.into()); }
+                if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_status(if on { "Seamless Mix is on. It's WIP: some transitions may not sound right yet." } else { "Seamless Mix is off." }.into()); }
             }
             // the servers stop, and start again with what's set now
             match key {
@@ -6461,7 +6483,7 @@ fn set_toggle(shared: &Shared, key: &str) {
                 omnipulse_core::cast::stop();
                 cast_end(shared, Some("Chromecast off: playing here again.".into()));
             }
-            if key == "mixOn" { if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_mix_on(on); } }
+            if key == "smartOn" { if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_mix_on(on); } }
             if key == "favPage" {
                 if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_fav_page(on); }
                 if !on && shared.borrow().page == "favourites" { open_page(shared, "library"); }
@@ -9908,10 +9930,11 @@ fn main() -> Result<(), slint::PlatformError> {
         open_page(&s, "sets");
     });
     // Seamless Mix's button (the same as its switch)
-    ui.set_mix_on(mix_on(&shared.borrow().web.prefs));
-    ui.set_mix_available(SEAMLESS_MIX);
+    // (the title bar's Seamless Mix: Smart Transitions, which replaced the first Seamless Mix)
+    ui.set_mix_on(smart_on(&shared.borrow().web.prefs));
+    ui.set_mix_available(true);
     let s = shared.clone();
-    ui.on_mix_toggle(move || set_toggle(&s, "mixOn"));
+    ui.on_mix_toggle(move || set_toggle(&s, "smartOn"));
     let s = shared.clone();
     ui.on_close_to_tray_changed(move |on| set_look_pref(&s, "minToTray", serde_json::json!(on)));
     let s = shared.clone();

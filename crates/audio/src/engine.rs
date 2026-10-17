@@ -99,6 +99,12 @@ impl Pipeline {
     /// its deck warmed up on the last moment of it (not heard), lined up to the frame on where it is,
     /// and crossed over to from it as it was over 30 ms, so the change isn't heard. Once only.
     pub fn stretch(&mut self, tempo: crate::stretch::Tempo) -> Result<(), String> {
+        self.stretch_bent(tempo, None)
+    }
+
+    /// The same, its key able to move too (`pitch`'s handle, from 1.0: its own key), for a mix riding
+    /// it into the next one's key
+    pub fn stretch_bent(&mut self, tempo: crate::stretch::Tempo, pitch: Option<crate::stretch::Tempo>) -> Result<(), String> {
         if self.src.position_ms().is_some() || self.done { return Ok(()); }
         let rate = self.src.rate();
         // a moment more of it as it is, to cross over from
@@ -118,6 +124,7 @@ impl Pipeline {
             Ok(st) => st,
             Err(e) => return Err(e),
         };
+        if let Some(p) = pitch { st = st.bendable(p)?; }
         // warmed up: what it gives before where it is (its own delay, then the moment kept) let go, to the frame
         let mut out = Vec::new();
         let mut block = Vec::new();
@@ -281,7 +288,7 @@ enum Cmd {
     /// `at_ms` (sample-exact), over `ms`, handed over as `handoff` says (None: a plain crossfade)
     MixAt { src: Box<dyn Source>, db: f32, at_ms: u64, ms: u64, handoff: Option<Handoff> },
     /// the track playing at a tempo from here on (its pitch kept), as the handle says
-    StretchPlaying(crate::stretch::Tempo),
+    StretchPlaying(crate::stretch::Tempo, Option<crate::stretch::Tempo>),
     Seek(u64),
     Stop,
     Eq(Vec<f32>),
@@ -490,7 +497,12 @@ impl Engine {
     /// The track playing at `tempo` from here on, its pitch kept (a mix slowing it into the next one's
     /// tempo): it goes on as it was (start the handle at 1.0), then follows the handle
     pub fn stretch_playing(&self, tempo: crate::stretch::Tempo) {
-        let _ = self.cmd.send(Cmd::StretchPlaying(tempo));
+        let _ = self.cmd.send(Cmd::StretchPlaying(tempo, None));
+    }
+    /// The same, its key able to move too (`pitch`'s handle, from 1.0), for a mix riding it into the next
+    /// one's key
+    pub fn stretch_playing_bent(&self, tempo: crate::stretch::Tempo, pitch: crate::stretch::Tempo) {
+        let _ = self.cmd.send(Cmd::StretchPlaying(tempo, Some(pitch)));
     }
     /// A mix is waiting for its moment, or under way
     /// What the engine's work has cost so far (since it started), by what it was doing
@@ -1451,11 +1463,11 @@ fn decode_loop(shared: Arc<Shared>, cmds: Receiver<Cmd>, ev: Sender<Event>) {
                         w.next.chain.eq.set(&eq);
                     }
                 }
-                Cmd::StretchPlaying(tempo) => {
+                Cmd::StretchPlaying(tempo, pitch) => {
                     // (the one playing: going out of a mix, or not yet in one; not one coming in)
                     if let Some(p) = pipe.as_mut() {
                         // (it couldn't be: it just goes on as it is, the mix unslowed; not an error to stop it for)
-                        if let Err(e) = p.stretch(tempo) { eprintln!("stretch: {e}"); }
+                        if let Err(e) = p.stretch_bent(tempo, pitch) { eprintln!("stretch: {e}"); }
                     }
                 }
                 Cmd::Match(db, at_once) => {
@@ -1631,6 +1643,12 @@ pub fn render_mix(a: Box<dyn Source>, b: Box<dyn Source>, dbs: (f32, f32), out_r
 /// function told how far in the mix is (0..1) as it goes, to move the tempos (as the app does)
 #[allow(clippy::too_many_arguments)]
 pub fn render_mix_ramped(a: Box<dyn Source>, b: Box<dyn Source>, dbs: (f32, f32), out_rate: u32, a_secs: f32, ms: u64, handoff: Option<Handoff>, ramp: Option<(&crate::stretch::Tempo, &dyn Fn(f64))>, max_secs: f32) -> Result<Vec<f32>, String> {
+    render_mix_keyed(a, b, dbs, out_rate, a_secs, ms, handoff, ramp, None, max_secs)
+}
+
+/// The same, the one going out's key able to move too (`a_pitch`'s handle, moved by `ramp`'s function)
+#[allow(clippy::too_many_arguments)]
+pub fn render_mix_keyed(a: Box<dyn Source>, b: Box<dyn Source>, dbs: (f32, f32), out_rate: u32, a_secs: f32, ms: u64, handoff: Option<Handoff>, ramp: Option<(&crate::stretch::Tempo, &dyn Fn(f64))>, a_pitch: Option<&crate::stretch::Tempo>, max_secs: f32) -> Result<Vec<f32>, String> {
     let mut pa = Pipeline::new(a, out_rate);
     pa.chain.set_match_db(dbs.0, true);
     let mut out = Vec::new();
@@ -1644,7 +1662,7 @@ pub fn render_mix_ramped(a: Box<dyn Source>, b: Box<dyn Source>, dbs: (f32, f32)
     pb.chain.set_match_db(dbs.1, true);
     let mut f = Fading::new(pb, ms * out_rate as u64 / 1000, handoff, out_rate);
     f.out_buf.extend(past);
-    if let Some((tempo, _)) = ramp { pa.stretch(tempo.clone())?; }
+    if let Some((tempo, _)) = ramp { pa.stretch_bent(tempo.clone(), a_pitch.cloned())?; }
     let mut scratch = Vec::new();
     loop {
         if let Some((_, r)) = ramp { r(f.done as f64 / f.total as f64); }
