@@ -349,10 +349,6 @@ pub fn background_end() {
     }
 }
 
-/// Which of four tracked beats (from the first) is each bar's first, by Beat This!'s downbeats (each one
-/// onto the tracked beat within 70 ms of it), and the share of them that agree. None: no model, or too
-/// few downbeats to go by.
-#[cfg(feature = "desktop")]
 /// A steady grid through a model's beats (as DJ software grids electronic music: one tempo all through):
 /// each beat numbered by its place at `bpm`, a straight line through them (least squares), and a beat on
 /// it every period from the first. Its beats one at a time can be out by tens of ms; the line isn't.
