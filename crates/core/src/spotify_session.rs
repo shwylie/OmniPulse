@@ -1,18 +1,16 @@
 // Spotify on the phone: librespot's session for your library (likes, playlists, songs), as the
 // desktop's playback sign-in gives it, without playing through it (the phone plays Spotify's songs
 // from their YouTube Music versions). Signed in once in the browser, as the desktop is (Spotify's own
-// app's client id, PKCE, the reply caught on 127.0.0.1:5588); the reusable credentials are kept in
+// app's client id, PKCE; its page shown in the app, which catches the redirect to 127.0.0.1:5588); the
+// reusable credentials are kept in
 // <data dir>/librespot, and the session's made again from them.
 
 use librespot_core::{authentication::Credentials, cache::Cache, config::SessionConfig, session::Session};
 use rand::Rng;
 use sha2::{Digest, Sha256};
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 const REDIRECT: &str = "http://127.0.0.1:5588/login";
 const SCOPES: &str = "streaming user-read-private user-read-email user-read-playback-state user-modify-playback-state user-library-read playlist-read-private";
-/// How long the browser's sign-in is waited for
-const SIGN_IN_WAIT_S: u64 = 300;
 
 static SESSION: tokio::sync::Mutex<Option<Session>> = tokio::sync::Mutex::const_new(None);
 
@@ -47,8 +45,12 @@ fn base64url(b: &[u8]) -> String {
     base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(b)
 }
 
-/// Signs in in the browser: Spotify's page opened (through the app's opener), its reply caught here
-pub async fn login() -> Result<String, String> {
+/// A sign-in under way: its PKCE verifier and state
+static PENDING: std::sync::Mutex<Option<(String, String)>> = std::sync::Mutex::new(None);
+
+/// Starts a sign-in: the page to open (the app shows it itself, and catches where it's sent back to,
+/// REDIRECT: nothing listens there; a phone freezes an app in the background, a listener with it)
+pub fn begin() -> String {
     const CHARS: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~";
     let (verifier, state): (String, String) = {
         let mut r = rand::thread_rng();
@@ -56,29 +58,24 @@ pub async fn login() -> Result<String, String> {
     };
     let challenge = base64url(&Sha256::digest(verifier.as_bytes()));
     let client_id = SessionConfig::default().client_id;
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:5588").await.map_err(|e| format!("Spotify sign-in couldn't listen for its reply: {e}"))?;
-    let url = format!(
+    *PENDING.lock().unwrap() = Some((verifier, state.clone()));
+    format!(
         "https://accounts.spotify.com/authorize?client_id={client_id}&response_type=code&redirect_uri={}&code_challenge_method=S256&code_challenge={challenge}&scope={}&state={state}",
         urlenc(REDIRECT), urlenc(SCOPES)
-    );
-    crate::open_browser(&url)?;
-    // the browser comes back to 127.0.0.1:5588/login?code=...&state=...
-    let code = tokio::time::timeout(std::time::Duration::from_secs(SIGN_IN_WAIT_S), async {
-        loop {
-            let (mut sock, _) = listener.accept().await.map_err(|e| e.to_string())?;
-            let mut buf = vec![0u8; 8192];
-            let n = sock.read(&mut buf).await.unwrap_or(0);
-            let req = String::from_utf8_lossy(&buf[..n]).to_string();
-            let path = req.lines().next().unwrap_or("").split_whitespace().nth(1).unwrap_or("").to_string();
-            if !path.starts_with("/login") { let _ = sock.write_all(b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n").await; continue; }
-            let q = |k: &str| path.split(['?', '&']).find_map(|p| p.strip_prefix(&format!("{k}="))).map(String::from);
-            let page = "<html><body style=\"font-family:sans-serif;padding:2em\"><h2>Signed in to Spotify</h2><p>You can go back to OmniPulse.</p></body></html>";
-            let _ = sock.write_all(format!("HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{page}", page.len()).as_bytes()).await;
-            if q("state").as_deref() != Some(state.as_str()) { return Err("Spotify's sign-in came back for another request".to_string()); }
-            if let Some(e) = q("error") { return Err(format!("Spotify's sign-in said: {e}")); }
-            return q("code").ok_or_else(|| "Spotify's sign-in gave no code".to_string());
-        }
-    }).await.map_err(|_| "Spotify's sign-in wasn't finished in time".to_string())??;
+    )
+}
+
+/// Where the sign-in's page sends you back to, once you're signed in (REDIRECT's address)
+pub const RETURN_TO: &str = REDIRECT;
+
+/// Finishes it, from the address the page sent you back to: your name
+pub async fn finish(back: &str) -> Result<String, String> {
+    let (verifier, state) = PENDING.lock().unwrap().take().ok_or("No Spotify sign-in was under way")?;
+    let q = |k: &str| back.split(['?', '&', '#']).find_map(|p| p.strip_prefix(&format!("{k}="))).map(String::from);
+    if q("state").as_deref() != Some(state.as_str()) { return Err("Spotify's sign-in came back for another request".into()); }
+    if let Some(e) = q("error") { return Err(format!("Spotify's sign-in said: {e}")); }
+    let code = q("code").ok_or("Spotify's sign-in gave no code")?;
+    let client_id = SessionConfig::default().client_id;
     // the code for a token, then a session with it (its reusable credentials kept)
     let res = reqwest::Client::new()
         .post("https://accounts.spotify.com/api/token")
