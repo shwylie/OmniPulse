@@ -16,6 +16,7 @@ pub mod lastfm;
 pub mod local;
 #[cfg(feature = "desktop")]
 pub mod loudness;
+pub mod meter;
 pub mod lyrics;
 pub mod ranking;
 pub mod keys;

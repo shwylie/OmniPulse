@@ -11,7 +11,7 @@ description = "OmniPulse's backend: accounts, streaming services, local music an
 default = ["desktop"]
 desktop = ["reqwest/default-tls", "dep:tiny_http", "dep:opener", "dep:librespot-core", "dep:librespot-playback", "dep:librespot-oauth", "dep:librespot-metadata", "dep:librespot-protocol", "dep:protobuf",
   "dep:symphonia", "dep:ebur128", "dep:zip", "dep:mdns-sd", "dep:native-tls", "dep:omnipulse-pcmout", "dep:lofty", "dep:beat-this", "dep:rten"]
-mobile = ["reqwest/rustls-tls"]
+mobile = ["reqwest/rustls-tls", "dep:ebur128"]
 
 [dependencies]
 log = "0.4"
