@@ -21,6 +21,15 @@ use std::time::Duration;
 /// game loading) without a gap. The volume is applied as it's heard, so it's never this late; the EQ and a
 /// track's loudness match are made with the sound, so a change to them is heard up to this late
 const AHEAD_S: f32 = 1.2;
+/// Nothing to play this long: the output stream stopped till there is (the device left idle)
+const OUTPUT_REST_AFTER: Duration = Duration::from_secs(3);
+
+impl Shared {
+    /// The output stream started again at once, if it's been stopped (something to play)
+    fn wake_output(&self) {
+        if let Some(t) = self.output_thread.lock().unwrap().as_ref() { t.unpark(); }
+    }
+}
 
 /// The calling thread in Windows' "Pro Audio" class (MMCSS: scheduled ahead of ordinary work, a game's and
 /// a build's included), as audio software's own threads are
@@ -301,6 +310,8 @@ struct Shared {
     volume: AtomicU32,
     muted: AtomicBool,
     paused: AtomicBool,
+    /// the thread holding the output stream: woken to start the stream again at once
+    output_thread: Mutex<Option<std::thread::Thread>>,
     loaded: AtomicBool,
     /// frames played since the track's base position
     played: AtomicU64,
@@ -382,6 +393,7 @@ impl Engine {
             volume: AtomicU32::new(1.0f32.to_bits()),
             muted: AtomicBool::new(false),
             paused: AtomicBool::new(true),
+            output_thread: Mutex::new(None),
             loaded: AtomicBool::new(false),
             played: AtomicU64::new(0),
             skew: AtomicU64::new(0),
@@ -441,6 +453,7 @@ impl Engine {
         let alive = Arc::new(AtomicBool::new(true));
         let (tx, rx) = mpsc::channel::<Result<u32, String>>();
         let shared = self.shared.clone();
+        let shared2 = self.shared.clone();
         let ev = self.ev_tx.clone();
         let flag = alive.clone();
         let dev_name = name.to_string();
@@ -452,8 +465,22 @@ impl Engine {
                 match made {
                     Ok((stream, rate)) => {
                         let _ = tx.send(Ok(rate));
+                        *shared2.output_thread.lock().unwrap() = Some(std::thread::current());
+                        // (nothing to play for a few seconds (paused, nothing loaded, the track over): the
+                        // stream stopped, so the device stops asking for silence every 10 ms and the CPU
+                        // can rest; started again the moment there's something, as play or a load wakes this)
+                        let (mut running, mut quiet_since) = (true, None::<std::time::Instant>);
                         while flag.load(Ordering::SeqCst) {
-                            std::thread::park_timeout(Duration::from_millis(200));
+                            std::thread::park_timeout(Duration::from_millis(if running { 200 } else { 1000 }));
+                            let quiet = shared2.paused.load(Ordering::SeqCst) || !shared2.loaded.load(Ordering::SeqCst)
+                                || (shared2.source_done.load(Ordering::SeqCst) && shared2.queue.lock().unwrap().is_empty());
+                            if quiet {
+                                let since = *quiet_since.get_or_insert_with(std::time::Instant::now);
+                                if running && since.elapsed() >= OUTPUT_REST_AFTER && std::env::var_os("OMNIPULSE_OUTPUT_ALWAYS").is_none() && stream.pause().is_ok() { running = false; }
+                            } else {
+                                quiet_since = None;
+                                if !running && stream.play().is_ok() { running = true; }
+                            }
                         }
                         drop(stream);
                     }
@@ -519,6 +546,7 @@ impl Engine {
     }
     pub fn play(&self) {
         self.shared.paused.store(false, Ordering::SeqCst);
+        self.shared.wake_output();
     }
     pub fn pause(&self) {
         self.shared.paused.store(true, Ordering::SeqCst);
@@ -1360,10 +1388,15 @@ fn decode_loop(shared: Arc<Shared>, cmds: Receiver<Cmd>, ev: Sender<Event>) {
     let mut ended_sent = true;
     let mut scratch = Vec::with_capacity(8192);
     let mut mixed: Vec<f32> = Vec::with_capacity(XFADE_CHUNK);
+    // (a command taken while it waited, paused, its buffer full: done first next time round)
+    let mut held_cmd: Option<Cmd> = None;
     loop {
         // commands first; wait for one when there's nothing to do
         let idle = pipe.is_none() || shared.source_done.load(Ordering::SeqCst);
-        let got = if idle { cmds.recv_timeout(Duration::from_millis(50)).ok() } else { cmds.try_recv().ok() };
+        // (nothing at all to do, not even an end to tell of: it waits on its commands, waking each second;
+        // a track's end still to tell of, or one playing: as before)
+        let rest = pipe.is_none() && ended_sent;
+        let got = held_cmd.take().or_else(|| if idle { cmds.recv_timeout(Duration::from_millis(if rest { 1000 } else { 50 })).ok() } else { cmds.try_recv().ok() });
         if let Some(c) = got {
             match c {
                 Cmd::Crossfade(src, db, ms, handoff) if pipe.is_some() && !shared.source_done.load(Ordering::SeqCst) => {
@@ -1396,6 +1429,7 @@ fn decode_loop(shared: Arc<Shared>, cmds: Receiver<Cmd>, ev: Sender<Event>) {
                 }
                 // (nothing playing to fade from: it just starts)
                 Cmd::Crossfade(src, db, _, _) | Cmd::Load(src, db) => {
+                    shared.wake_output();
                     fading = None;
                     waiting = None;
                     shared.mix_waiting.store(false, Ordering::SeqCst);
@@ -1507,7 +1541,13 @@ fn decode_loop(shared: Arc<Shared>, cmds: Receiver<Cmd>, ev: Sender<Event>) {
         let rate = shared.rate.load(Ordering::Relaxed) as f32;
         let ahead = (rate * AHEAD_S) as usize * 2;
         if shared.queue.lock().unwrap().len() >= ahead {
-            std::thread::sleep(Duration::from_millis(10));
+            // (full: paused, it waits on its commands (a seek, a load) rather than checking every 10 ms;
+            // playing, a short sleep, as the device takes what's queued)
+            if shared.paused.load(Ordering::Relaxed) {
+                if let Ok(c) = cmds.recv_timeout(Duration::from_millis(250)) { held_cmd = Some(c); }
+            } else {
+                std::thread::sleep(Duration::from_millis(10));
+            }
             continue;
         }
         // a mix waiting: when the one playing reaches its moment (within this piece: split exactly there)

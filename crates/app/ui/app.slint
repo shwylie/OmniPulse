@@ -1871,7 +1871,8 @@ export component AppWindow inherits Window {
                 Rectangle {
                     width: 40px;
                     background: sta-s.has-hover ? Theme.elevated : transparent;
-                    property <float> phase: mod(animation-tick() / 1ms, 3600) / 1200;
+                    // (pulsing only while there's music, as Seamless Mix's: still, YouTube red)
+                    property <float> phase: (root.streamer || root.stream-safe) && root.playing && Theme.motion ? mod(animation-tick() / 1ms, 3600) / 1200 : 0.0;
                     Glyph {
                         d: Icons.broadcast;
                         width: 16px;
@@ -1894,7 +1895,9 @@ export component AppWindow inherits Window {
                 if root.mix-available: Rectangle {
                     width: 40px;
                     background: sta-m.has-hover ? Theme.elevated : transparent;
-                    property <float> phase: mod(animation-tick() / 1ms, root.mixing ? 1200 : 3000) / (root.mixing ? 1200 : 3000);
+                    // (moving only while there's music: the clock read only then, or the window's drawn again every frame,
+                    // nothing playing or not: a third of a core, idle)
+                    property <float> phase: root.mix-on && root.playing && Theme.motion ? mod(animation-tick() / 1ms, root.mixing ? 1200 : 3000) / (root.mixing ? 1200 : 3000) : 0.5;
                     property <float> swing: phase < 0.5 ? phase * 2 : 2 - phase * 2;
                     // the glow
                     if root.mix-on: Rectangle {
