@@ -731,16 +731,17 @@ mod tests {
             let (ma, mb) = (with_phrase(ma, a_id.trim()), with_phrase(mb, b_id.trim()));
             // (their keys from outside, as the app has them: SongBPM's, in place of our readings)
             let ext = |t: &Track| rt.block_on(omnipulse_core::songbpm::lookup(t.artist.split(',').next().unwrap_or(""), &omnipulse_core::ranking::featured(&crate::versions::match_title(t)).1, t.ms)).ok().flatten();
-            let with_key = |m: Option<Measured>, k: &Option<omnipulse_core::songbpm::SongKey>| m.map(|mut m| { if let Some(k) = k { m.rhythm.key = omnipulse_core::rhythm::key_name(k.tonic, k.minor); m.rhythm.camelot = omnipulse_core::rhythm::camelot(k.tonic, k.minor); m.rhythm.key_confidence = 1.0; } m });
+            // (known only where ours and SongBPM's agree, as the app has it)
+            let agrees = |m: &Option<Measured>, k: &Option<omnipulse_core::songbpm::SongKey>| matches!((m, k), (Some(m), Some(k)) if m.rhythm.key == omnipulse_core::rhythm::key_name(k.tonic, k.minor));
             let (ka, kb) = (ext(&ta), ext(&tb));
-            println!("keys from outside: {:?} / {:?}", ka.as_ref().map(|k| &k.url), kb.as_ref().map(|k| &k.url));
-            let (ma, mb) = (with_key(ma, &ka), with_key(mb, &kb));
+            let (ka_ok, kb_ok) = (agrees(&ma, &ka), agrees(&mb, &kb));
+            println!("keys: ours {:?} / {:?}, SongBPM's {:?} / {:?}: known {ka_ok} / {kb_ok}", ma.as_ref().map(|m| &m.rhythm.key), mb.as_ref().map(|m| &m.rhythm.key), ka.as_ref().map(|k| omnipulse_core::rhythm::key_name(k.tonic, k.minor)), kb.as_ref().map(|k| omnipulse_core::rhythm::key_name(k.tonic, k.minor)));
             let open = |t: &Track| rt.block_on(crate::player::open_source(t, rt.handle().clone())).expect("it opens");
             let (mut sa, sb) = (open(&ta), open(&tb));
             let a_dur = sa.duration_ms().unwrap_or(0);
             let first = |an: &serde_json::Value| an["silences"].as_array().and_then(|s| s.first()).filter(|s| s[0].as_u64() == Some(0)).and_then(|s| s[1].as_u64()).unwrap_or(0);
-            let a = Side { dur_ms: a_dur, audible_ms: ana["audible_ms"].as_u64().unwrap_or(0), first_ms: 0, rhythm: ma.as_ref(), stated_bpm: None, key_known: ka.is_some() };
-            let b = Side { dur_ms: anb["duration_ms"].as_u64().unwrap_or(0), audible_ms: anb["audible_ms"].as_u64().unwrap_or(0), first_ms: first(&anb), rhythm: mb.as_ref(), stated_bpm: None, key_known: kb.is_some() };
+            let a = Side { dur_ms: a_dur, audible_ms: ana["audible_ms"].as_u64().unwrap_or(0), first_ms: 0, rhythm: ma.as_ref(), stated_bpm: None, key_known: ka_ok };
+            let b = Side { dur_ms: anb["duration_ms"].as_u64().unwrap_or(0), audible_ms: anb["audible_ms"].as_u64().unwrap_or(0), first_ms: first(&anb), rhythm: mb.as_ref(), stated_bpm: None, key_known: kb_ok };
             let db = |t: &Track, an: &serde_json::Value| crate::sound::loud_db(&serde_json::json!({}), t, an["lufs"].as_f64(), false);
             let dbs = (db(&ta, &ana), db(&tb, &anb));
             let blocked = blend_blocked(&a, &b);

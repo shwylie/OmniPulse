@@ -4617,13 +4617,15 @@ impl SmartSong {
     fn side(&self) -> smart::Side<'_> {
         smart::Side { dur_ms: self.dur_ms, audible_ms: self.audible_ms, first_ms: self.first_ms, rhythm: self.rhythm.as_ref(), stated_bpm: self.stated, key_known: self.key_known }
     }
-    /// Its key from outside put in place of our own reading, if it's been found
+    /// Its key known, if our reading and SongBPM's agree. Neither is right often enough alone to shift a
+    /// song's pitch by (ours and Spotify's analysis each put a song a fifth or its relative key out), but
+    /// they go wrong differently: when they agree, it's that key
     fn with_key(mut self) -> Self {
         if let (Some(m), Some(Some((tonic, minor)))) = (self.rhythm.as_mut(), ext_key(&self.t)) {
-            m.rhythm.key = omnipulse_core::rhythm::key_name(tonic, minor);
-            m.rhythm.camelot = omnipulse_core::rhythm::camelot(tonic, minor);
-            m.rhythm.key_confidence = 1.0;
-            self.key_known = true;
+            if m.rhythm.key == omnipulse_core::rhythm::key_name(tonic, minor) {
+                m.rhythm.key_confidence = 1.0;
+                self.key_known = true;
+            }
         }
         self
     }

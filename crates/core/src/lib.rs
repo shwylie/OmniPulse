@@ -18,6 +18,7 @@ pub mod local;
 pub mod loudness;
 pub mod lyrics;
 pub mod ranking;
+pub mod keys;
 pub mod rhythm;
 pub mod songbpm;
 pub mod sponsorblock;

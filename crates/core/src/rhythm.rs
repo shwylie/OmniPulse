@@ -282,6 +282,14 @@ fn key(x: &[f32]) -> (usize, bool, f64, Vec<(f64, [f32; 12])>) {
     (best.1, best.2, ((best.0 - second.0) * 4.0).clamp(0.0, 1.0), each)
 }
 
+/// The first reading of a key (each note's loudest bin, Krumhansl's profiles), of mono at any rate:
+/// tonic, minor, confidence (for comparing with core::keys)
+pub fn key_first_reading(mono: &[f32], rate: u32) -> (usize, bool, f64) {
+    let x = to_analysis_rate(mono, rate);
+    let (t, m, c, _) = key(&x);
+    (t, m, c)
+}
+
 pub fn key_name(tonic: usize, minor: bool) -> String {
     format!("{} {}", NOTES[tonic % 12], if minor { "minor" } else { "major" })
 }
@@ -549,6 +557,8 @@ fn analyse_now(mono: &[f32], rate: u32) -> Option<Rhythm> {
         eprintln!("rhythm debug: downbeat by bass {old}, now {downbeat}; bass {:?} changes {:?}", bass_share.map(|v| (v * 100.0).round()), change_share.map(|v| (v * 100.0).round()));
     }
     let (tonic, minor, kconf, frames_chroma) = key(&x);
+    // (the key itself read as core::keys does, KeyFinder's way; the frames' notes as they were, for the bars')
+    let (tonic, minor, kconf) = crate::keys::estimate(&x, &crate::keys::KeyOpts::default()).map_or((tonic, minor, kconf), |k| (k.tonic, k.minor, k.confidence));
     if std::env::var_os("OMNIPULSE_RHYTHM_DEBUG").is_some() {
         // (each beat's notes, and how much they change from the two before to the two after it, by beat of four)
         let per: Vec<[f32; 12]> = beats.windows(2).map(|w| {
@@ -631,7 +641,7 @@ pub struct Measured {
 /// (2-3: beats moved half a beat where the bass hit harder between them, wrongly: an off-beat bass
 /// louder than the kick isn't a beat tracked off it; 4: that undone, the downbeat from where the
 /// sections change too)
-pub const VERSION: u32 = 12;
+pub const VERSION: u32 = 13;
 
 static STORE: std::sync::Mutex<Option<std::collections::HashMap<String, Measured>>> = std::sync::Mutex::new(None);
 
