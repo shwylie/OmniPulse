@@ -20,3 +20,4 @@ android/app/src/main/jniLibs/
 android/app/src/main/java/uniffi/
 mix-demos/
 smart-renders/
+/android/dist/
