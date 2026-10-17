@@ -3017,7 +3017,8 @@ fn start(shared: &Shared) {
         } else if t.go_plus {
             full_elsewhere(&t, h.clone()).await
         } else if mb {
-            match versions::find(&t).await {
+            // (a Spotify song with only the closest there is: Spotify's own, if it plays here)
+            match versions::find(&t).await.filter(|v| v.exact || !(matches!(t.src, track::Src::Spotify(_)) && sp_plays_here())) {
                 Some(v) => (player::open_source(&Track::youtube(&v.yt), h.clone()).await.map(Some), Some(v)),
                 None if matches!(t.src, track::Src::Spotify(_)) && sp_plays_here() => (player::open_source(&t, h.clone()).await.map(Some), None),
                 None => (Err("there's no version of it on YouTube Music".to_string()), None),

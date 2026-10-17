@@ -53,7 +53,7 @@ pub fn seed_from_web(web: &Value) {
 }
 
 fn snap(c: &YtTrack) -> Value {
-    json!({ "id": c.id, "title": c.title, "artists": c.artists, "album": c.album, "duration_ms": c.duration_ms, "thumb": c.thumb })
+    json!({ "id": c.id, "title": c.title, "artists": c.artists, "album": c.album, "duration_ms": c.duration_ms, "thumb": c.thumb, "explicit": c.explicit })
 }
 
 fn from_snap(v: &Value) -> Option<YtTrack> {
@@ -64,6 +64,7 @@ fn from_snap(v: &Value) -> Option<YtTrack> {
         album: v["album"].as_str().unwrap_or("").to_string(),
         duration_ms: v["duration_ms"].as_u64().unwrap_or(0),
         thumb: v["thumb"].as_str().unwrap_or("").to_string(),
+        explicit: v["explicit"].as_bool().unwrap_or(false),
         ..Default::default()
     })
 }
@@ -74,6 +75,9 @@ fn rx(cell: &'static OnceLock<Regex>, src: &str) -> &'static Regex {
 }
 
 const VERSION_WORDS: [&str; 15] = ["remix", "edit", "mix", "vip", "flip", "bootleg", "live", "acoustic", "instrumental", "remaster", "cover", "sped", "slowed", "nightcore", "karaoke"];
+/// Versions that are never the song asked for, however close the rest: not a match at all (in its title,
+/// or its album's: "The Atlas Underground (Instrumentals)")
+const NEVER_WORDS: [&str; 10] = ["instrumental", "instrumentals", "karaoke", "cover", "live", "acoustic", "sped", "slowed", "nightcore", "reverb"];
 
 /// "Artist - Song" (or Spotify's own), its artist and title, without bracketed tags
 pub fn guess_names(t: &Track) -> (String, String) {
@@ -130,6 +134,7 @@ pub fn artist_hit(t: &Track, c: &YtTrack) -> bool {
 }
 
 pub fn score(t: &Track, c: &YtTrack) -> f32 {
+    static MUSIC_VIDEO: OnceLock<Regex> = OnceLock::new();
     let (ga, _) = guess_names(t);
     let artist = match_words(if ga.is_empty() { &t.artist } else { &ga });
     // who's featured ("(with JENNIE)", or credited after the first artist): not part of the title, and
@@ -143,12 +148,21 @@ pub fn score(t: &Track, c: &YtTrack) -> f32 {
     if want.is_empty() || got.is_empty() {
         return 0.0;
     }
+    let album: HashSet<String> = match_words(&c.album).into_iter().collect();
+    if NEVER_WORDS.iter().any(|v| !want.contains(*v) && (got.contains(*v) || album.contains(*v))) {
+        return 0.0;
+    }
     let shared = want.iter().filter(|w| got.contains(*w)).count() as f32;
     let mut s = shared / want.len().max(got.len()) as f32;
     if s < 0.75 {
         return 0.0;
     }
     s += if artist_hit(t, c) { 0.3 } else { -0.6 };
+    // (theirs, from their own channel, over someone else's upload that names them; their audio over
+    // their video, which may have more to it than the song)
+    let by: HashSet<String> = match_words(&c.artists).into_iter().collect();
+    if !artist.is_empty() && artist.iter().all(|w| by.contains(w)) { s += 0.1; }
+    if rx(&MUSIC_VIDEO, r"(?i)[(\[][^)\]]*\bvideo\b[^)\]]*[)\]]").is_match(&c.title) { s -= 0.05; }
     if !feat.is_empty() {
         let place: HashSet<String> = match_words(&format!("{} {}", c.artists, c.title)).into_iter().collect();
         let hits = feat.iter().filter(|f| f.iter().all(|w| place.contains(w))).count();
@@ -181,14 +195,15 @@ pub async fn find(t: &Track) -> Option<Version> {
     let saved = with_saved(|m| m.get(&t.key).cloned());
     // (one found by itself before who's featured counted ("fv"): looked for again, once; yours stay)
     let featured = !omnipulse_core::ranking::featured(&match_title(t)).0.is_empty() || t.artist.contains(',');
-    let before = saved.as_ref().filter(|s| featured && s["chosen"].as_bool() != Some(true) && s["fv"].is_null()).and_then(from_snap);
+    // (and once more since never-the-song versions (instrumentals...) and explicit ones counted ("xv"))
+    let before = saved.as_ref().filter(|s| s["chosen"].as_bool() != Some(true) && ((featured && s["fv"].is_null()) || s["xv"].is_null())).and_then(from_snap);
     if before.is_none() {
         if let Some(v) = saved.as_ref().and_then(from_snap) {
             return Some(Version { yt: v, exact: true });
         }
     }
     // looked for lately and nothing close: the closest from then
-    if let Some(s) = &saved {
+    if let Some(s) = saved.as_ref().filter(|s| !s["xv"].is_null()) {
         if s["none"].as_bool() == Some(true) && omnipulse_core::now_secs().saturating_sub(s["at"].as_u64().unwrap_or(0) / 1000) < NONE_TTL_SECS {
             return from_snap(&s["near"]).map(|yt| Version { yt, exact: false });
         }
@@ -200,24 +215,35 @@ pub async fn find(t: &Track) -> Option<Version> {
         Err(_) => return before.map(|yt| Version { yt, exact: true }),
     };
     let mut ranked: Vec<(f32, YtTrack)> = found.into_iter().take(10).map(|c| (score(t, &c), c)).collect();
-    if !ranked.iter().any(|(s, _)| *s >= 0.5) {
+    let good = |r: &[(f32, YtTrack)]| r.iter().any(|(s, c)| *s >= 0.5 && artist_hit(t, c));
+    if !good(&ranked) {
         if let Ok(more) = omnipulse_core::youtube::search(&format!("{} {}", t.artist, match_title(t))).await {
             ranked.extend(more.into_iter().take(10).map(|c| (score(t, &c), c)));
         }
     }
+    // (not among its songs: among its videos, as some are only uploaded that way)
+    if !good(&ranked) {
+        if let Ok(more) = omnipulse_core::youtube::search_videos(first.trim()).await {
+            ranked.extend(more.into_iter().take(10).map(|c| (score(t, &c) - 0.05, c)));
+        }
+    }
     ranked.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
-    let pick = ranked.iter().find(|(s, c)| *s >= 0.5 && artist_hit(t, c)).map(|(_, c)| c.clone());
-    // (looked for again and nothing better: the one from before stays)
-    let pick = pick.or(before);
+    let fits: Vec<&(f32, YtTrack)> = ranked.iter().filter(|(s, c)| *s >= 0.5 && artist_hit(t, c)).collect();
+    // (of the ones about as good as the best, the explicit one: the song as written, as its lyrics show it)
+    let best = fits.first().map(|x| x.0).unwrap_or(0.0);
+    let pick = fits.iter().find(|(s, c)| c.explicit && *s >= best - 0.15).or(fits.first()).map(|(_, c)| c.clone());
+    // (looked for again and nothing better: the one from before stays, unless it's one never to play)
+    let pick = pick.or(before.filter(|b| score(t, b) > 0.0));
     match pick {
         Some(c) => {
-            with_saved(|m| m.insert(t.key.clone(), { let mut s = snap(&c); s["fv"] = json!(1); s }));
+            with_saved(|m| m.insert(t.key.clone(), { let mut s = snap(&c); s["fv"] = json!(1); s["xv"] = json!(1); s }));
             save_all();
             Some(Version { yt: c, exact: true })
         }
         None => {
-            let near = ranked.first().map(|(_, c)| c.clone());
-            with_saved(|m| m.insert(t.key.clone(), json!({ "none": true, "at": omnipulse_core::now_secs() * 1000, "any": true, "near": near.as_ref().map(snap) })));
+            // (the closest only if it's by the artist and its title's close: never another song)
+            let near = ranked.iter().find(|(s, c)| *s > 0.0 && artist_hit(t, c)).map(|(_, c)| c.clone());
+            with_saved(|m| m.insert(t.key.clone(), json!({ "none": true, "at": omnipulse_core::now_secs() * 1000, "any": true, "xv": 1, "near": near.as_ref().map(snap) })));
             save_all();
             near.map(|yt| Version { yt, exact: false })
         }
@@ -258,6 +284,20 @@ mod tests {
     }
 
     #[test]
+    fn an_instrumental_or_a_cover_is_never_the_song() {
+        let t = Track { src: Src::Spotify("x".into()), key: "sp:x".into(), title: "We Don't Need You".into(), artist: "Tom Morello, VIC MENSA".into(), ms: 183_881, ..Default::default() };
+        assert_eq!(score(&t, &yt("We Don't Need You (Instrumental)", "Tom Morello", 184_000)), 0.0);
+        let mut c = yt("We Don't Need You", "Tom Morello", 184_000);
+        c.album = "The Atlas Underground (Instrumentals)".into();
+        assert_eq!(score(&t, &c), 0.0);
+        assert_eq!(score(&t, &yt("We Don't Need You (Live)", "Tom Morello", 184_000)), 0.0);
+        // the song itself, its audio a little over its video
+        let audio = score(&t, &yt("Tom Morello - We Don't Need You (ft. Vic Mensa) [Official Audio]", "Tom Morello", 185_000));
+        let video = score(&t, &yt("Tom Morello - We Don't Need You (ft. Vic Mensa) [Official Music Video]", "Tom Morello", 188_000));
+        assert!(audio >= 1.0 && audio > video, "audio {audio}, video {video}");
+    }
+
+    #[test]
     fn scores_as_the_web_app_does() {
         let t = sc("Mara Lune - Track 14", "uploader", 200_000);
         // the same song by the artist, about as long: a match
@@ -269,5 +309,21 @@ mod tests {
         // upload tags don't count
         assert!(score(&t, &yt("Track 14 (Official Audio)", "Mara Lune", 200_000)) >= 0.8);
         assert!(score(&t, &yt("Something Else", "Mara Lune", 200_000)) == 0.0);
+    }
+
+    /// (live: what YouTube Music gives for a Spotify song, and each one's score)
+    #[test]
+    #[ignore]
+    fn live_scores() {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        for (title, artist, ms) in [("I Will Not Break", "Disturbed", 292_058u64), ("We Don't Need You", "Tom Morello, VIC MENSA", 183_881), ("You Can Get It", "Arkells, K.Flay", 176_445)] {
+            let t = Track { src: Src::Spotify("x".into()), key: "sp:x".into(), title: title.into(), artist: artist.into(), ms, ..Default::default() };
+            let (ga, gt) = guess_names(&t);
+            let q = format!("{ga} {gt}");
+            let found = rt.block_on(omnipulse_core::youtube::search(&q)).unwrap();
+            let mut found = found; found.extend(rt.block_on(omnipulse_core::youtube::search_videos(&q)).unwrap().into_iter().map(|mut c| { c.title = format!("[video] {}", c.title); c }));
+            println!("== {q}");
+            for c in found.iter() { println!("{:.2} hit {} explicit {} | {} | {} | {} | {}", score(&t, c), artist_hit(&t, c), c.explicit, c.title, c.artists, c.album, c.duration_ms); }
+        }
     }
 }

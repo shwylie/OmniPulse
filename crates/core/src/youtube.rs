@@ -33,6 +33,8 @@ pub struct YtTrack {
     pub thumb: String,
     /// how many times it's been played ("2.4B plays" in search results), 0 when not shown
     pub plays: u64,
+    /// marked explicit (YouTube Music's "E" badge): the uncensored version
+    pub explicit: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -232,6 +234,7 @@ pub fn parse_list_item(it: &Value) -> Option<YtTrack> {
     if let Some(c) = col(1) {
         byline(&mut t, &runs(c));
     }
+    t.explicit = it["badges"].to_string().contains("MUSIC_EXPLICIT_BADGE") || it["flexColumns"].to_string().contains("MUSIC_EXPLICIT_BADGE");
     // the play count: a column of its own, or a part of the byline
     t.plays = cols
         .iter()
@@ -264,11 +267,22 @@ fn valid_id(id: &str) -> bool {
 
 /// Songs matching a search
 pub async fn search(query: &str) -> Result<Vec<YtTrack>, String> {
+    search_as(query, SONGS).await
+}
+
+/// The same among its videos (a song only uploaded as its video, not in the songs)
+pub async fn search_videos(query: &str) -> Result<Vec<YtTrack>, String> {
+    search_as(query, VIDEOS).await
+}
+
+const VIDEOS: &str = "EgWKAQIQAWoMEA4QChADEAQQCRAF";
+
+async fn search_as(query: &str, params: &str) -> Result<Vec<YtTrack>, String> {
     let q = query.trim();
     if q.is_empty() {
         return Ok(Vec::new());
     }
-    let v = call("search", json!({ "query": q, "params": SONGS })).await?;
+    let v = call("search", json!({ "query": q, "params": params })).await?;
     let mut items = Vec::new();
     find_all(&v, "musicResponsiveListItemRenderer", &mut items);
     let mut out: Vec<YtTrack> = items.into_iter().filter_map(parse_list_item).collect();
