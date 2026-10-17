@@ -947,17 +947,18 @@ impl Handoff {
     /// A DJ's blend, the one playing's beat carried through: the next one's highs (its hats, its air)
     /// rise over the first half of the run-up and its mids over all of it, under the one playing (its mids,
     /// its melody, giving way from halfway, gone a beat past the swap);
-    /// on `swap` the bass changes over in a beat (`beat_ms`, centred on it: the two barely together); then
-    /// the one playing's mids and highs, its beat's top, fade out over what's left (`ms - swap`) as the
-    /// next one's beat settles in
+    /// on `swap` the bass changes over in a beat (`beat_ms`, centred on it: the two barely together); the
+    /// one playing's highs, its hats and the top of its beat, giving way over the run-up's second half as
+    /// the next one's come up, gone a beat past the swap too: never two sets of hats at full, and none of
+    /// its percussion left ticking once the next one has taken over (heard after the swap, it jarred)
     pub fn carry(ms: u64, swap: u64, beat_ms: u64) -> Self {
-        let tail = ms.saturating_sub(swap).max(1);
+        let _ = ms;
         Self {
             low: Ramp::swap(swap.saturating_sub(beat_ms / 2), beat_ms.max(1)),
             // (the one playing's melody, its mids, away from halfway through the run-up, gone a beat past the
             // swap: two melodies never long together; its beat's top carried after)
             mid: Ramp { in_at: 0, in_len: swap.max(1), out_at: swap / 2, out_len: (swap - swap / 2 + beat_ms).max(1) },
-            high: Ramp { in_at: 0, in_len: (swap / 2).max(1), out_at: swap, out_len: tail },
+            high: Ramp { in_at: 0, in_len: (swap / 2).max(1), out_at: swap / 2, out_len: (swap - swap / 2 + beat_ms).max(1) },
             echo: None, out_sweep: None, in_sweep: None, brake: None, spin: None, out_loop: None, in_loop: None, roll: None, out_voice: None, in_voice: None,
         }
     }
@@ -1737,6 +1738,20 @@ pub fn render(src: Box<dyn Source>, out_rate: u32, eq: &[f32], match_db: f32, ma
 mod xfade_tests {
     use super::*;
     use crate::source::Tone;
+
+    #[test]
+    fn a_blends_hats_are_handed_over_by_the_swap() {
+        // 16 s together, the swap at 12 s, beats of 470 ms: the one playing's highs full early on, half gone
+        // by three quarters of the run-up, none left a beat past the swap (its percussion never ticking on
+        // after the next one has taken over)
+        let h = Handoff::carry(16_000, 12_000, 470);
+        let out_gain = |t: u64| h.high.gains(t).0;
+        assert!(out_gain(2_000) > 0.99, "{}", out_gain(2_000));
+        assert!(out_gain(12_000 + 470) < 0.01, "{}", out_gain(12_470));
+        assert!(out_gain(14_000) < 0.01);
+        // the next one's up over the first half
+        assert!(h.high.gains(6_000).1 > 0.99);
+    }
 
     /// upward zero crossings a second (the left channel), over [from, from + secs)
     fn hz(out: &[f32], rate: u32, from: f32, secs: f32) -> f32 {
