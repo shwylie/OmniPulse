@@ -1289,6 +1289,8 @@ export component AppWindow inherits Window {
     changed width => { Win.w = self.width; }
     changed height => { Win.h = self.height; }
     title: root.app-name != "" ? root.app-name : "OmniPulse";
+    // (the window's own icon: Task Manager's Apps list and Alt+Tab take it from the window, not the exe)
+    icon: @image-url("../../../src-tauri/icons/128x128.png");
     // Settings > App > Display Name: in the title bar and the taskbar (the web app's appName)
     in-out property <string> app-name;
     callback app-name-changed(string);
@@ -4643,6 +4645,7 @@ export component TaskbarWidget inherits Window {
 // its own, only until you're signed in (then your music's read once, and the sign-in forgotten)
 export component AppleSignIn inherits Window {
     title: "Sign in to Apple Music (once, to import your music)";
+    icon: @image-url("../../../src-tauri/icons/128x128.png");
     preferred-width: 1000px;
     preferred-height: 760px;
     background: #ffffff;
