@@ -364,7 +364,7 @@ pub async fn lyrics_from(t: &Track, provider: &str) -> Vec<Line> {
     Vec::new()
 }
 
-/// A track's timed lyrics for Wordplay (Seamless Mix): LRCLIB's, for a recording `secs` long (what
+/// A track's timed lyrics for Seamless Mix's voices' handoff: LRCLIB's, for a recording `secs` long (what
 /// plays, as measured: a remix or another version of another length has none, its timing not the same)
 pub async fn mix_lyrics(t: &Track, secs: u64) -> Vec<(u64, String)> {
     let (artist, title, _, _) = lyrics_query(t).await;

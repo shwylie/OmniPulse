@@ -1,32 +1,7 @@
-// Seamless Mix in the desktop app: its planning is omnipulse_mix::smart (crates/mix, shared with the
-// Android app); here, Tape Stops (which borrows the old Seamless Mix planner, crate::mix) and the tests
-// that need the app (renders, probes of real songs).
+// Seamless Mix in the desktop app: its planning is omnipulse_mix (crates/mix, shared with the Android
+// app); here, the tests that need the app (renders, probes of real songs).
 
 pub use omnipulse_mix::smart::*;
-
-/// A transition's handover: the shared one, or a tape stop's (the old planner's)
-pub fn handoff(p: &crate::mix::Plan, voices: bool) -> omnipulse_audio::Handoff {
-    if p.tape_stop { crate::mix::handoff(p, false) } else { omnipulse_mix::smart::handoff(p, voices) }
-}
-
-/// A tape stop (v1's), for two songs too far apart to blend: only when its ratings back it, and never a
-/// key shifted
-pub fn tape(a: &Side, b: &Side, now_ms: u64) -> Option<crate::mix::Plan> {
-    let (ma, mb) = (a.rhythm?, b.rhythm?);
-    {
-        use std::sync::atomic::Ordering::Relaxed;
-        crate::mix::KEYS_OK.store(false, Relaxed);
-        crate::mix::LOOPS_OK.store(false, Relaxed);
-        crate::mix::TAPE_OK.store(true, Relaxed);
-        crate::mix::FORCE_TAPE.store(true, Relaxed);
-        crate::mix::BEAT_ONLY.store(false, Relaxed);
-        crate::mix::RUN_BARS.store(0, Relaxed);
-    }
-    let end = if a.audible_ms > 0 && a.audible_ms < a.dur_ms { a.audible_ms } else { a.dur_ms };
-    let p = crate::mix::plan_structure(ma, end, now_ms, mb);
-    crate::mix::FORCE_TAPE.store(false, std::sync::atomic::Ordering::Relaxed);
-    p.filter(|p| p.tape_stop && p.semitones == 0 && p.at_ms >= never_before_ms(end))
-}
 
 #[cfg(test)]
 mod tests {
@@ -147,7 +122,7 @@ mod tests {
                     // (and a key ride, as the app's: both together, the next one in its own key by the swap)
                     let (s, swap_share) = (p.semitones as f64, p.ms as f64 / p.swap_ms.max(1) as f64);
                     let ramp = { let (a_tempo, a_pitch) = (a_tempo.clone(), a_pitch.clone()); move |x: f64| {
-                        a_tempo.set(crate::mix::out_ramp(target, x * share)); b_tempo.set(crate::mix::in_ramp(target, x * share));
+                        a_tempo.set(omnipulse_mix::plan::out_ramp(target, x * share)); b_tempo.set(omnipulse_mix::plan::in_ramp(target, x * share));
                         if s != 0.0 { let q = (x * swap_share).min(1.0); let e = q * q * (3.0 - 2.0 * q); b_pitch.set(2f64.powf(s * (1.0 - e) / 12.0)); a_pitch.set(2f64.powf(-s * e / 12.0)); }
                     } };
                     let out = omnipulse_audio::engine::render_mix_keyed(sa, Box::new(sb), dbs, rate, lead as f32 / 1000.0, p.ms, Some(handoff(p, voices && both_sing(p.at_ms, p.at_ms + p.ms, p.start_ms, p.start_ms + (p.ms as f64 * p.rate) as u64))), (target != 1.0 || s != 0.0).then_some((&a_tempo, &ramp as &dyn Fn(f64))), (s != 0.0).then_some(&a_pitch), (lead + p.ms) as f32 / 1000.0 + 15.0).unwrap();

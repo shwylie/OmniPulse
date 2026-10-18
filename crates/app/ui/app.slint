@@ -1752,8 +1752,6 @@ export component AppWindow inherits Window {
     // Jams: the title bar's button ("" hides it), someone asking for one, and the Jam's own dialog
     in property <string> jam-label;
     in property <bool> jam-on;
-    /// Seamless Mix on: no Jams (Start a Jam greyed out, saying why)
-    in property <bool> jam-off;
     // the queue panel's bar while in a room: "Your Jam · 2 listening" (End Jam), or listening along (Leave)
     in property <string> queue-room;
     in property <bool> queue-room-host;
@@ -2005,11 +2003,9 @@ export component AppWindow inherits Window {
                         y: (parent.height - self.height) / 2;
                         height: 28px;
                         border-radius: 8px;
-                        background: root.jam-on ? Theme.accent : (jam-ta.has-hover && !root.jam-off ? Theme.elevated : transparent);
-                        opacity: root.jam-off ? 0.45 : 1;
-                        jam-t := Text { text: root.jam-label; color: root.jam-on ? Theme.on-accent : (jam-ta.has-hover && !root.jam-off ? Theme.text : Theme.muted); font-size: 12px; font-weight: 600; }
+                        background: root.jam-on ? Theme.accent : (jam-ta.has-hover ? Theme.elevated : transparent);
+                        jam-t := Text { text: root.jam-label; color: root.jam-on ? Theme.on-accent : (jam-ta.has-hover ? Theme.text : Theme.muted); font-size: 12px; font-weight: 600; }
                         jam-ta := TouchArea { clicked => { root.jam-clicked(); } }
-                        TipSpot { tip: root.jam-off ? "Turn off Seamless Mix to start a Jam" : ""; hover: jam-ta.has-hover; }
                     }
                 }
                 Rectangle { width: 6px; }
@@ -4281,7 +4277,7 @@ export component AppWindow inherits Window {
                     }
                     Pill { label: "Later"; tip: "Its phrases start a bar later"; clicked => { root.tp-phrase = min(3, root.tp-phrase + 1); } }
                 }
-                if root.tp-beat-shown: Text { text: "If Smart Transitions blend this song off: a beat or two out, move Beat 1 to where you hear the bar start; on the beat but a bar out, move where its phrases start (a quiet or filtered bar can start one)."; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
+                if root.tp-beat-shown: Text { text: "If Seamless Mix blends this song off: a beat or two out, move Beat 1 to where you hear the bar start; on the beat but a bar out, move where its phrases start (a quiet or filtered bar can start one)."; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
                 if root.tp-note != "": Text { text: root.tp-note; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
                 if root.tp-versions.length > 0: Text { text: "Plays from YouTube Music"; color: Theme.muted; font-size: 12px; }
                 for v[k] in root.tp-versions: Rectangle {

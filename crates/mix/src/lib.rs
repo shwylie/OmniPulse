@@ -4,3 +4,4 @@
 
 pub mod plan;
 pub mod smart;
+pub mod tape;

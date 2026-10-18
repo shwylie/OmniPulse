@@ -17,7 +17,6 @@ pub fn title(name: &str) -> String {
         "requests" => "Song Requests",
         "replies" => "Chat Replies",
         "limits" => "Limit Requests",
-        "mix" => "Seamless Mix (WIP)",
         "smart" => "Seamless Mix (WIP)",
         "discord" => "Discord Status",
         "together" => "Listen Along & Jams",
@@ -36,7 +35,7 @@ pub fn title(name: &str) -> String {
 
 /// The panel a switch's Settings button opens (by the switch's pref)
 pub fn of_switch(key: &str) -> Option<&'static str> {
-    Some(match key { "streamSafe" => "safe", "req" => "requests", "mixOn" => "mix", "smartOn" => "smart", "presence" => "discord", "jamsOn" => "together", "lyricsSources" => "lyrics", "widget" => "widget", "lyricsWidget" => "lyricsw", "alertsOn" => "alerts", "remoteOn" => "remote", "out2On" => "offset", "avoidRecent" => "recent", "hideOn" => "hidden", "plugAdd" => "plugins", _ => return None })
+    Some(match key { "streamSafe" => "safe", "req" => "requests", "smartOn" => "smart", "presence" => "discord", "jamsOn" => "together", "lyricsSources" => "lyrics", "widget" => "widget", "lyricsWidget" => "lyricsw", "alertsOn" => "alerts", "remoteOn" => "remote", "out2On" => "offset", "avoidRecent" => "recent", "hideOn" => "hidden", "plugAdd" => "plugins", _ => return None })
 }
 
 /// What a panel edits, and each one's default (the web app's)
@@ -47,7 +46,6 @@ fn keys(name: &str) -> Vec<(&'static str, Value)> {
         "together" => vec![("togetherName", json!(""))],
         "lyricsw" => vec![("lyricsLines", json!(3)), ("lyricsBefore", json!(false)), ("lyricsScroll", json!("smooth")), ("lyricsScrollMs", json!(600)), ("lyricsScrollPlace", json!("top")), ("lyricsFadeEdges", json!(false)), ("lyricsSize", json!(48)), ("lyricsFont", json!("sans")), ("lyricsAlign", json!("center")), ("lyricsPlace", json!("")), ("lyricsStyle", json!("karaoke")), ("lyricsColor", json!("#ffffff")), ("lyricsTextGrad", json!(false)), ("lyricsColor2", json!("#9ad1ff")), ("lyricsOwnHi", json!(false)), ("lyricsHi", json!("#8e9bff")), ("lyricsHiGrad", json!(false)), ("lyricsHi2", json!("#ff8ad8")), ("lyricsGradDir", json!("90deg")), ("lyricsDim", json!(0.45)), ("lyricsTransform", json!("none")), ("lyricsShadow", json!(true)), ("lyricsOutline", json!(false)), ("lyricsOutlineSize", json!(4)), ("lyricsOutlineColor", json!("#000000")), ("lyricsOutlineOpacity", json!(1.0)), ("lyricsBox", json!(false)), ("lyricsBoxColor", json!("#0a0a0e")), ("lyricsBoxGrad", json!(false)), ("lyricsBoxColor2", json!("#2a1450")), ("lyricsBoxDir", json!("135deg")), ("lyricsBoxOpacity", json!(0.62)), ("lyricsTitle", json!(true)), ("lyricsHideNone", json!(true)), ("lyricsOffset", json!(0)), ("lyricsHidePaused", json!(true))],
         "smart" => vec![("smartBlend", json!(true)), ("smartKeys", json!(true)), ("smartMax", json!(10)), ("smartTape", json!(false)), ("smartRoll", json!(false)), ("smartVoices", json!(true))],
-        "mix" => vec![("mixWords", json!(true)), ("mixDrop", json!(true)), ("mixMelody", json!(true)), ("mixTape", json!(true)), ("mixBars", json!(0)), ("mixBands", json!(false)), ("mixKeys", json!(true)), ("mixLoops", json!(true)), ("mixForce", json!("auto"))],
         "requests" => vec![("reqBot", json!("streamerbot")), ("reqRadioEdit", json!(false)), ("reqLimits", json!(true)), ("reqMax", json!(10)), ("reqPerUser", json!(2)), ("reqPort", json!(7879)), ("botRemote", json!(false))],
         "widget" => vec![("widgetPort", json!(7878)), ("widgetDesign", json!("card")), ("widgetAlign", json!("left")), ("widgetRounded", json!(true)), ("widgetText", json!(1)), ("wFade", json!(true)), ("wScroll", json!(true)), ("wSpin", json!(true)), ("wRequester", json!(true)), ("wColor", json!(1.2))],
         "alerts" => vec![("alertBot", json!("streamerbot")), ("sbHost", json!("127.0.0.1:8080")), ("sbOn", json!(true)), ("alertTrans", json!("seamless")), ("alertCSize", json!("medium")), ("alertCDir", json!("diag")), ("alertCAngle", json!(0)), ("alertAnim", json!("slide")), ("alertOwnCol", json!(false)), ("alertCol1", json!("#8e9bff")), ("alertCol2", json!("#b38cff")), ("alertDir", json!("115deg")), ("alertIcon", json!(1)), ("alertSecs", json!(5)), ("alertVol", json!(0.8)), ("botRemote", json!(false))],
@@ -389,22 +387,6 @@ fn fields_of(name: &str, vals: &Map<String, Value>, prefs: &Value, lan: &str) ->
             f.push(button("repliesReset", "", "Reset to Defaults", "Every reply back to its default (Save keeps it)."));
             f
         }
-        // Seamless Mix's own page: its styles, its blend, and one forced for testing
-        "mix" => vec![
-            note("Seamless Mix is WIP: it's still being worked on, so some transitions may not sound right yet. Rating them (Stream Deck: Mix Good / Mix Bad) helps."),
-            note("Styles: each one, when two songs suit it, in place of the usual blend (never the same one twice in a row)."),
-            tog("mixWords", "Wordplay", "The song playing sings a word (\"heat\", \"one more time\"), it's looped on the beat, and the next song comes in singing the same one. Only with songs whose timed lyrics match what plays."),
-            tog("mixDrop", "Drop Swap", "The song playing builds to its final drop, and the next song's drop lands there instead, on the beat."),
-            tog("mixMelody", "Melody Play", "A bar of the song playing's melody loops while the next one comes in under it, when the next one's melody starts with the same notes."),
-            tog("mixTape", "Tape Stops", "Two songs too far apart in tempo or key to blend: the one playing slows to a halt and the next spins up. Off: they change over the usual way instead."),
-            note("The blend: on the beat, at one tempo, the next song sweeping in from the top as the one playing gives way below it."),
-            sel("mixBars", "Blend Length", "How long the two play together.", &[(json!(0), "Auto (as the songs suit)"), (json!(4), "4 bars"), (json!(8), "8 bars"), (json!(16), "16 bars")]),
-            tog("mixBands", "EQ Band Handoff", "A band at a time (highs, then voice and bass), as a DJ's EQ does, instead of one sweep: quicker and more sudden."),
-            tog("mixKeys", "Match Keys", "A song shifted a semitone or two during the blend, so the two keys go together (back to its own key by the end of it)."),
-            tog("mixLoops", "Loops", "A short intro or outro looped, so neither song is cut short to fit the blend."),
-            note("Testing"),
-            sel("mixForce", "Force a Style", "Every transition this style, to hear it. A pair that can't be mixed that way isn't mixed at all.", &[(json!("auto"), "Off (as the songs suit)"), (json!("beat"), "On the beat (no tape stops)"), (json!("wordplay"), "Wordplay"), (json!("drop"), "Drop Swap"), (json!("melody"), "Melody Play"), (json!("tape"), "Tape Stop")]),
-        ],
         // the lyrics widget's look (an OBS Browser source at /lyrics on the widget's port)
         "lyricsw" => {
             // (the Stream Widget's port: its setting, not this page's)

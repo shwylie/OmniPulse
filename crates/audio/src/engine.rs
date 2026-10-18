@@ -4,7 +4,7 @@
 // power), each through its own chain, and then it's the one playing. A mix is a crossfade that starts
 // at an exact point of the one playing (a downbeat), handed over a band at a time (a Handoff: its highs,
 // its mids, its bass each at their own moment, as a DJ does on an EQ; the two kicks never thump
-// together), the one going out echoed as it leaves, for beat-matched transitions.
+// together), for beat-matched transitions.
 // About a third of a second is kept ready between them. Volume, mute and pause act in the output
 // itself, so they're heard at once.
 
@@ -739,10 +739,9 @@ struct Fading {
     in_buf: VecDeque<f32>,
     out_ended: bool,
     in_ended: bool,
-    /// a mix's handover, in frames (None: a plain crossfade); each side's bands apart, and the echo
+    /// a mix's handover, in frames (None: a plain crossfade); each side's bands apart
     handoff: Option<Handoff>,
     bands: [Bands; 2],
-    echo: Echo,
     /// each side's swept filter (going out, coming in: two Butterworths, a Linkwitz-Riley side), and
     /// the rate (to tune them)
     sweeps: [[Butter; 2]; 2],
@@ -807,36 +806,22 @@ impl Sweep {
     fn frames(&self, rate: u64) -> Self { Self { points: self.points.map(|(t, hz)| (t * rate / 1000, hz)), high: self.high } }
 }
 
-/// A wipe's split: from up here (the very top), easing down (to WIPE_HALF_HZ halfway) to above the
-/// voices' presence (by the beat before the swap: the one playing still bright, its voice clear),
-/// then on down to the bass (where the kicks are) by the swap
-const WIPE_TOP_HZ: f32 = 16_000.0;
-const WIPE_HALF_HZ: f32 = 10_000.0;
-const WIPE_VOICE_HZ: f32 = 5_000.0;
-const WIPE_BASS_HZ: f32 = 160.0;
 
 /// How a mix hands over, a band at a time: its bass (below ~150 Hz), its mids (to ~2.5 kHz: the
-/// vocals, mostly) and its highs (the hats, the air), and the one going out echoed as it leaves
-/// (`echo`: sent from, for, its delay; all ms from the mix's start); each side through a filter
-/// swept as it goes (`out_sweep`) or comes in (`in_sweep`), if it is
+/// vocals, mostly) and its highs (the hats, the air); the one going out through a filter swept as it
+/// goes (`out_sweep`), if it is
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Handoff {
     pub low: Ramp,
     pub mid: Ramp,
     pub high: Ramp,
-    pub echo: Option<(u64, u64, u64)>,
     pub out_sweep: Option<Sweep>,
-    pub in_sweep: Option<Sweep>,
     /// a tape stop: the one going out slowed to a halt (speed and pitch together, as a turntable's
     /// motor cut: no keylock) from `.0` over `.1` (ms from the mix's start, or frames), silent after
     pub brake: Option<(u64, u64)>,
     /// a tape start: the one coming in silent until `.0`, then spun up from a halt to its speed over
     /// `.1` (speed and pitch together, as a turntable's motor switched on)
     pub spin: Option<(u64, u64)>,
-    /// a loop of the one going out, or of the one coming in (as a DJ's: a beat or a few bars of it
-    /// played again, on the beat, so nothing of it need be cut short to fit the mix)
-    pub out_loop: Option<Loop>,
-    pub in_loop: Option<Loop>,
     /// a roll of the one going out (as Traktor's Beatmasher): its bar from the mix's start heard, then
     /// that bar's first half twice, its first quarter four times... a bar each, a build
     pub roll: Option<Roll>,
@@ -855,6 +840,13 @@ pub struct Roll {
     pub bars: u32,
 }
 
+/// A repeated piece's seams smoothed (`len` frames long, at frame `k` of it): a millisecond and a half
+/// either side, no click where it starts over
+fn seam(len: u64, k: u64) -> f32 {
+    const W: f32 = 64.0;
+    ((k + 1) as f32 / W).min((len - k) as f32 / W).min(1.0)
+}
+
 impl Roll {
     fn frames(&self, rate: u64) -> Self { Self { bar: (self.bar * rate / 1000).max(8), bars: self.bars } }
     /// where frame `f` of the mix is: None, heard as it is (the first bar, being kept); else where in the
@@ -864,28 +856,6 @@ impl Roll {
         if k == 0 || k >= self.bars as u64 { return None; }
         let len = (self.bar >> k.min(6)).max(1);
         Some(((f % self.bar) % len, len))
-    }
-}
-
-/// A loop in a mix: `len` of a song from `from` (ms from the mix's start, or frames) played, then
-/// played again `reps` more times; then it goes on from where the loop ended
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Loop {
-    pub from: u64,
-    pub len: u64,
-    pub reps: u32,
-}
-
-impl Loop {
-    fn frames(&self, rate: u64) -> Self { Self { from: self.from * rate / 1000, len: (self.len * rate / 1000).max(1), reps: self.reps } }
-    /// where frame `f` of the mix is in it: (pass, where in the pass), or None outside it
-    fn at(&self, f: u64) -> Option<(u64, u64)> {
-        (f >= self.from && f < self.from + self.len * (1 + self.reps as u64)).then(|| ((f - self.from) / self.len, (f - self.from) % self.len))
-    }
-    /// (its seams smoothed: a millisecond and a half either side, no click where it starts over)
-    fn seam(&self, k: u64) -> f32 {
-        const W: f32 = 64.0;
-        ((k + 1) as f32 / W).min((self.len - k) as f32 / W).min(1.0)
     }
 }
 
@@ -941,7 +911,7 @@ impl Handoff {
         // (the one going out's voice faded over its first part, gone by a third of the way; the one coming in's
         // as it is, from its first word)
         let out_len = ms * 3 / 10;
-        Self { low: all, mid: all, high: all, echo: None, out_sweep: None, in_sweep: None, brake: None, spin: None, out_loop: None, in_loop: None, roll: None, out_voice: Some((ms / 30, out_len)), in_voice: None }
+        Self { low: all, mid: all, high: all, out_sweep: None, brake: None, spin: None, roll: None, out_voice: Some((ms / 30, out_len)), in_voice: None }
     }
 
     /// A DJ's blend, the one playing's beat carried through: the next one's highs (its hats, its air)
@@ -959,93 +929,8 @@ impl Handoff {
             // swap: two melodies never long together; its beat's top carried after)
             mid: Ramp { in_at: 0, in_len: swap.max(1), out_at: swap / 2, out_len: (swap - swap / 2 + beat_ms).max(1) },
             high: Ramp { in_at: 0, in_len: (swap / 2).max(1), out_at: swap / 2, out_len: (swap - swap / 2 + beat_ms).max(1) },
-            echo: None, out_sweep: None, in_sweep: None, brake: None, spin: None, out_loop: None, in_loop: None, roll: None, out_voice: None, in_voice: None,
+            out_sweep: None, brake: None, spin: None, roll: None, out_voice: None, in_voice: None,
         }
-    }
-
-    /// The bass alone swapped at `at` (over a quarter second), the rest crossfaded over all `ms`
-    pub fn bass_swap(ms: u64, at: u64) -> Self {
-        let all = Ramp::swap(0, ms);
-        Self { low: Ramp::swap(at, 250), mid: all, high: all, echo: None, out_sweep: None, in_sweep: None, brake: None, spin: None, out_loop: None, in_loop: None, roll: None, out_voice: None, in_voice: None }
-    }
-
-    /// Staged over `ms` (of beats `beat_ms` long), swapped at `swap` (a downbeat): the highs cross over
-    /// (equal power: never two sets of hats at full) from 4 bars before the swap to 2 bars after it; at
-    /// the swap, the mids and bass come in as the other's go (the mids over the two beats leading to it,
-    /// the bass at once on it: one voice then the other, the kicks never together), the one going out's
-    /// mids echoed as they go
-    pub fn staged(ms: u64, beat_ms: f64, swap: u64) -> Self {
-        let beat = beat_ms.round() as u64;
-        let highs_from = swap.saturating_sub(16 * beat);
-        let highs_to = (swap + 8 * beat).min(ms);
-        Self {
-            high: Ramp::swap(highs_from, highs_to - highs_from),
-            mid: Ramp::swap(swap.saturating_sub(2 * beat), 2 * beat),
-            low: Ramp::swap(swap.saturating_sub(60), 120),
-            // (a dotted eighth's echo: three quarters of a beat; sent for the two beats before the swap and the one after)
-            echo: Some((swap.saturating_sub(2 * beat), 3 * beat, (beat_ms * 0.75).round() as u64)),
-            out_sweep: None,
-            in_sweep: None,
-            brake: None,
-            spin: None,
-            out_loop: None,
-            in_loop: None,
-            roll: None,
-            out_voice: None,
-            in_voice: None,
-        }
-    }
-
-    /// A wipe, swapped at `swap` (a downbeat; of beats `beat_ms` long): one split sweeps down through
-    /// the sound, the one going out heard below it (a low-pass) and the one coming in above it (a
-    /// high-pass), so no part of the sound is ever both's. Up to the swap's last beat it only goes as far
-    /// as where the voices start (the one coming in's air and hats, over the other); the voices are the
-    /// one going out's until then. Over that last beat it goes down to the bass, and on the swap the one
-    /// coming in's voice, bass and kick are all in (its high-pass gliding open) and the one going out is
-    /// gone: the voices and the kicks never together. The two sides add up to all of it, so it's as loud
-    /// all through.
-    pub fn wipe(beat_ms: f64, swap: u64) -> Self {
-        let beat = (beat_ms.round() as u64).min(swap);
-        let glide = 120;
-        let side = Ramp { in_at: 0, in_len: beat, out_at: swap, out_len: glide };
-        let down = [(0, WIPE_TOP_HZ), ((swap - beat) / 2, WIPE_HALF_HZ), (swap - beat, WIPE_VOICE_HZ), (swap, WIPE_BASS_HZ)];
-        Self {
-            low: side,
-            mid: side,
-            high: side,
-            echo: None,
-            out_sweep: Some(Sweep { points: [down[0], down[1], down[2], down[3], down[3]], high: false }),
-            in_sweep: Some(Sweep { points: [down[0], down[1], down[2], down[3], (swap + glide, 10.0)], high: true }),
-            brake: None,
-            spin: None,
-            out_loop: None,
-            in_loop: None,
-            roll: None,
-            out_voice: None,
-            in_voice: None,
-        }
-    }
-
-    /// A tape stop over `ms`: the one going out slows to a halt (its speed falling evenly to nothing, its
-    /// pitch with it), its last moment faded; the one coming in starts as it stops (at once, but for a
-    /// few ms against a click). For tempos too far apart to blend on the beat: one stops, the other goes.
-    pub fn tape_stop(ms: u64) -> Self {
-        let side = Ramp { in_at: ms, in_len: 25, out_at: ms.saturating_sub(60), out_len: 60 };
-        Self { low: side, mid: side, high: side, echo: None, out_sweep: None, in_sweep: None, brake: Some((0, ms)), spin: None, out_loop: None, in_loop: None, roll: None, out_voice: None, in_voice: None }
-    }
-
-    /// A cut on the beat at `swap`: the one going out to the moment, the one coming in from it (a
-    /// few ms each way against a click)
-    pub fn cut(swap: u64) -> Self {
-        let side = Ramp { in_at: swap, in_len: 8, out_at: swap.saturating_sub(12), out_len: 12 };
-        Self { low: side, mid: side, high: side, echo: None, out_sweep: None, in_sweep: None, brake: None, spin: None, out_loop: None, in_loop: None, roll: None, out_voice: None, in_voice: None }
-    }
-
-    /// Wordplay: the one going out's word (a beat from the mix's start) looped `reps` more times, then
-    /// cut on the beat at `swap` as the next one comes in singing the same word
-    pub fn word_cut(swap: u64, beat: u64, reps: u32) -> Self {
-        let side = Ramp { in_at: swap, in_len: 8, out_at: swap.saturating_sub(12), out_len: 12 };
-        Self { low: side, mid: side, high: side, echo: None, out_sweep: None, in_sweep: None, brake: None, spin: None, out_loop: Some(Loop { from: 0, len: beat, reps }), in_loop: None, roll: None, out_voice: None, in_voice: None }
     }
 
     /// A roll out (as Traktor's Beatmasher): the one going out's bar from the mix's start played, then
@@ -1056,7 +941,7 @@ impl Handoff {
         let end = bar_ms * bars as u64;
         let side = Ramp { in_at: end, in_len: 8, out_at: end.saturating_sub(12), out_len: 12 };
         let rise = [(0, 20.0), (bar_ms, 20.0), (bar_ms * 2, 120.0), (end.saturating_sub(bar_ms / 2), 900.0), (end, 1400.0)];
-        Self { low: side, mid: side, high: side, echo: None, out_sweep: Some(Sweep { points: rise, high: true }), in_sweep: None, brake: None, spin: Some((end, 1)), out_loop: None, in_loop: None, roll: Some(Roll { bar: bar_ms, bars }), out_voice: None, in_voice: None }
+        Self { low: side, mid: side, high: side, out_sweep: Some(Sweep { points: rise, high: true }), brake: None, spin: Some((end, 1)), roll: Some(Roll { bar: bar_ms, bars }), out_voice: None, in_voice: None }
     }
 
     /// A tape stop over `stop`, with a tape start over `start` in its last part: the one going out slows to
@@ -1066,18 +951,16 @@ impl Handoff {
         let start = start.clamp(1, stop.max(1));
         let from = stop - start;
         let side = Ramp { in_at: from, in_len: 10, out_at: stop.saturating_sub(60), out_len: 60 };
-        Self { low: side, mid: side, high: side, echo: None, out_sweep: None, in_sweep: None, brake: Some((0, stop)), spin: Some((from, start)), out_loop: None, in_loop: None, roll: None, out_voice: None, in_voice: None }
+        Self { low: side, mid: side, high: side, out_sweep: None, brake: Some((0, stop)), spin: Some((from, start)), roll: None, out_voice: None, in_voice: None }
     }
 
     fn frames(&self, rate: u64) -> Self {
         let f = |ms: u64| ms * rate / 1000;
         Self {
-            low: self.low.frames(rate), mid: self.mid.frames(rate), high: self.high.frames(rate), echo: self.echo.map(|(a, b, c)| (f(a), f(b), f(c.max(1)))),
-            out_sweep: self.out_sweep.map(|w| w.frames(rate)), in_sweep: self.in_sweep.map(|w| w.frames(rate)),
+            low: self.low.frames(rate), mid: self.mid.frames(rate), high: self.high.frames(rate),
+            out_sweep: self.out_sweep.map(|w| w.frames(rate)),
             brake: self.brake.map(|(a, b)| (f(a), f(b))),
             spin: self.spin.map(|(a, b)| (f(a), f(b))),
-            out_loop: self.out_loop.map(|l| l.frames(rate)),
-            in_loop: self.in_loop.map(|l| l.frames(rate)),
             roll: self.roll.map(|r| r.frames(rate)),
             out_voice: self.out_voice.map(|(a, b)| (f(a), f(b).max(1))),
             in_voice: self.in_voice.map(|(a, b)| (f(a), f(b).max(1))),
@@ -1156,34 +1039,12 @@ impl Bands {
     }
 }
 
-/// The echo on the one going out: a stereo delay line, fed back
-struct Echo {
-    line: Vec<f32>,
-    at: usize,
-}
-
-const ECHO_FEEDBACK: f32 = 0.35;
-const ECHO_WET: f32 = 0.3;
-
-impl Echo {
-    /// What it gives back now, for this frame of what's sent to it (`delay` frames long)
-    fn tick(&mut self, delay: u64, send: (f32, f32)) -> (f32, f32) {
-        let n = delay as usize * 2;
-        if self.line.len() != n { self.line = vec![0.0; n]; self.at = 0; }
-        let (wl, wr) = (self.line[self.at], self.line[self.at + 1]);
-        self.line[self.at] = send.0 + wl * ECHO_FEEDBACK;
-        self.line[self.at + 1] = send.1 + wr * ECHO_FEEDBACK;
-        self.at = (self.at + 2) % n;
-        (wl, wr)
-    }
-}
-
 impl Fading {
     /// (`handoff` in ms: it's kept in frames)
     fn new(next: Pipeline, total: u64, handoff: Option<Handoff>, rate: u32) -> Self {
         Self {
             next, total: total.max(1), done: 0, out_buf: VecDeque::new(), in_buf: VecDeque::new(), out_ended: false, in_ended: false,
-            handoff: handoff.map(|h| h.frames(rate as u64)), bands: [Bands::new(rate); 2], echo: Echo { line: Vec::new(), at: 0 },
+            handoff: handoff.map(|h| h.frames(rate as u64)), bands: [Bands::new(rate); 2],
             sweeps: [[Butter::new(rate, 20.0, true); 2]; 2], rate, brake_at: 0.0, spin_at: 0.0, spin_lag: 0.0, loops: [Vec::new(), Vec::new()], centres: [Centre::new(rate); 2],
         }
     }
@@ -1209,13 +1070,12 @@ impl Fading {
             let p = (self.done as f32 / self.total.max(1) as f32).min(1.0);
             let (go, gi) = ((p * std::f32::consts::FRAC_PI_2).cos(), (p * std::f32::consts::FRAC_PI_2).sin());
             let braking = self.handoff.and_then(|h| h.brake).filter(|(from, _)| self.done >= *from);
-            let out_loop = self.handoff.and_then(|h| h.out_loop).and_then(|l| l.at(self.done).map(|at| (l, at)));
             let roll = self.handoff.and_then(|h| h.roll);
             let rolled = roll.and_then(|r| r.at(self.done));
             let (ol, or) = match braking {
                 _ if rolled.is_some() => {
                     let (k, len) = rolled.unwrap();
-                    let g = Loop { from: 0, len, reps: 1 }.seam(k);
+                    let g = seam(len, k);
                     let i = k as usize * 2;
                     (self.loops[0].get(i).copied().unwrap_or(0.0) * g, self.loops[0].get(i + 1).copied().unwrap_or(0.0) * g)
                 }
@@ -1229,22 +1089,6 @@ impl Fading {
                 }
                 // (rolled to its end: nothing more of it)
                 _ if roll.is_some() => (0.0, 0.0),
-                // looped: played again (none of it read meanwhile), or heard the first time and kept
-                _ if out_loop.is_some_and(|(_, (pass, _))| pass > 0) => {
-                    let (l, (_, k)) = out_loop.unwrap();
-                    let g = l.seam(k);
-                    let i = k as usize * 2;
-                    (self.loops[0].get(i).copied().unwrap_or(0.0) * g, self.loops[0].get(i + 1).copied().unwrap_or(0.0) * g)
-                }
-                _ if out_loop.is_some() => {
-                    let (l, (_, k)) = out_loop.unwrap();
-                    if k == 0 { self.loops[0].clear(); }
-                    let v = (self.out_buf.pop_front().unwrap_or(0.0), self.out_buf.pop_front().unwrap_or(0.0));
-                    self.loops[0].push(v.0);
-                    self.loops[0].push(v.1);
-                    let g = if l.reps > 0 { l.seam(k).max(if k < 64 { 1.0 } else { 0.0 }) } else { 1.0 };
-                    (v.0 * g, v.1 * g)
-                }
                 None => (self.out_buf.pop_front().unwrap_or(0.0), self.out_buf.pop_front().unwrap_or(0.0)),
                 // stopped: nothing more of it
                 Some((from, len)) if self.done >= from + len => (0.0, 0.0),
@@ -1263,23 +1107,7 @@ impl Fading {
                 }
             };
             let spinning = self.handoff.and_then(|h| h.spin).filter(|(from, len)| self.done < *from + *len);
-            let in_loop = self.handoff.and_then(|h| h.in_loop).and_then(|l| l.at(self.done).map(|at| (l, at)));
             let (il, ir) = match spinning {
-                _ if in_loop.is_some_and(|(_, (pass, _))| pass > 0) => {
-                    let (l, (_, k)) = in_loop.unwrap();
-                    let g = l.seam(k);
-                    let i = k as usize * 2;
-                    (self.loops[1].get(i).copied().unwrap_or(0.0) * g, self.loops[1].get(i + 1).copied().unwrap_or(0.0) * g)
-                }
-                _ if in_loop.is_some() => {
-                    let (l, (_, k)) = in_loop.unwrap();
-                    if k == 0 { self.loops[1].clear(); }
-                    let v = (self.in_buf.pop_front().unwrap_or(0.0), self.in_buf.pop_front().unwrap_or(0.0));
-                    self.loops[1].push(v.0);
-                    self.loops[1].push(v.1);
-                    let g = if l.reps > 0 { l.seam(k).max(if k < 64 { 1.0 } else { 0.0 }) } else { 1.0 };
-                    (v.0 * g, v.1 * g)
-                }
                 None => (self.in_buf.pop_front().unwrap_or(0.0), self.in_buf.pop_front().unwrap_or(0.0)),
                 // not yet: nothing of it (and none of it read)
                 Some((from, _)) if self.done < from => { self.spin_lag += 1.0; (0.0, 0.0) }
@@ -1303,7 +1131,7 @@ impl Fading {
                     into.push(ol * go + il * gi);
                     into.push(or * go + ir * gi);
                 }
-                // a band at a time, each at its moment; the one going out's mids and highs echoed as it leaves
+                // a band at a time, each at its moment
                 Some(h) => {
                     let f = self.done;
                     // (the sweeps: their cutoffs moved every 32 frames, smooth enough to hear as one glide)
@@ -1312,34 +1140,20 @@ impl Fading {
                     let q = |at: u64, len: u64| if f < at { 0.0 } else { ((f - at) as f32 / len.max(1) as f32).min(1.0) };
                     if let Some((at, len)) = h.out_voice { (ol, or) = self.centres[0].run(ol, or, 1.0 - q(at, len)); }
                     if let Some((at, len)) = h.in_voice { (il, ir) = self.centres[1].run(il, ir, q(at, len)); }
-                    for (side, w) in [h.out_sweep, h.in_sweep].into_iter().enumerate() {
-                        let Some(w) = w else { continue };
-                        if f % 32 == 0 { for st in &mut self.sweeps[side] { st.tune(self.rate, w.hz_at(f), w.high, std::f32::consts::FRAC_1_SQRT_2); } }
-                        let (l, r) = if side == 0 { (&mut ol, &mut or) } else { (&mut il, &mut ir) };
-                        let [s0, s1] = &mut self.sweeps[side];
-                        *l = s1.run(0, s0.run(0, *l));
-                        *r = s1.run(1, s0.run(1, *r));
+                    if let Some(w) = h.out_sweep {
+                        if f % 32 == 0 { for st in &mut self.sweeps[0] { st.tune(self.rate, w.hz_at(f), w.high, std::f32::consts::FRAC_1_SQRT_2); } }
+                        let [s0, s1] = &mut self.sweeps[0];
+                        ol = s1.run(0, s0.run(0, ol));
+                        or = s1.run(1, s0.run(1, or));
                     }
                     let (lo, li) = h.low.gains(f);
                     let (mo, mi) = h.mid.gains(f);
                     let (ho, hi) = h.high.gains(f);
                     let mut side = [0.0f32; 2];
-                    let mut send = [0.0f32; 2];
                     for (ch, (o, i)) in [(ol, il), (or, ir)].into_iter().enumerate() {
                         let (a_l, a_m, a_h) = self.bands[0].split(ch, o);
                         let (b_l, b_m, b_h) = self.bands[1].split(ch, i);
                         side[ch] = a_l * lo + a_m * mo + a_h * ho + b_l * li + b_m * mi + b_h * hi;
-                        // (its voice echoed: its mids, not its hats)
-                        send[ch] = a_m * mo;
-                    }
-                    if let Some((from, len, delay)) = h.echo {
-                        let sending = if f >= from && f < from + len { 1.0 } else { 0.0 };
-                        let (wl, wr) = self.echo.tick(delay, (send[0] * sending, send[1] * sending));
-                        // (its tail dies away over the mix's last eighth: nothing of it cut off at the end)
-                        let tail = self.total / 8;
-                        let wet = ECHO_WET * if f + tail >= self.total { (self.total - f) as f32 / tail.max(1) as f32 } else { 1.0 };
-                        side[0] += wl * wet;
-                        side[1] += wr * wet;
                     }
                     into.push(side[0]);
                     into.push(side[1]);
@@ -1858,49 +1672,6 @@ mod mix_tests {
     use super::*;
     use crate::source::Tone;
 
-    /// How many times a channel crosses zero upward in a stretch (a tone's frequency, near enough)
-    fn ups(out: &[f32], rate: u32, from_s: f32, secs: f32) -> usize {
-        let a = (from_s * rate as f32) as usize * 2;
-        let b = a + (secs * rate as f32) as usize * 2;
-        let ch: Vec<f32> = out[a..b].chunks(2).map(|f| f[0]).collect();
-        ch.windows(2).filter(|w| w[0] < 0.0 && w[1] >= 0.0).count()
-    }
-
-    #[test]
-    fn the_bass_is_handed_over_at_once() {
-        let rate = 44_100u32;
-        // two basslines: 55 Hz going out, 82 Hz coming in; a 2 s mix from 2 s, the bass swapped 1.2 s in
-        let a = Box::new(Tone::new(rate, 55.0, 0.4, 10.0));
-        let b = Box::new(Tone::new(rate, 82.0, 0.4, 10.0));
-        let out = render_mix(a, b, (0.0, 0.0), rate, 2.0, 2000, Some(Handoff::bass_swap(2000, 1200)), 6.0).unwrap();
-        // before the swap: only the one going out's (its 55 Hz: ~11 in 0.2 s), the other's held back
-        let before = ups(&out, rate, 2.9, 0.2);
-        assert!((10..=12).contains(&before), "before {before}");
-        // after it (and its quarter second): only the one coming in's (82 Hz: ~16 in 0.2 s)
-        let after = ups(&out, rate, 3.6, 0.2);
-        assert!((15..=18).contains(&after), "after {after}");
-    }
-
-    #[test]
-    fn a_tape_stop_slows_it_to_a_halt_then_the_next_one_goes() {
-        let rate = 44_100u32;
-        let a = Box::new(Tone::new(rate, 440.0, 0.3, 10.0));
-        let b = Box::new(Tone::new(rate, 660.0, 0.3, 10.0));
-        // from 2 s: a second's stop, then the next one
-        let out = render_mix(a, b, (0.0, 0.0), rate, 2.0, 1300, Some(Handoff::tape_stop(1000)), 5.0).unwrap();
-        // upward zero crossings in a tenth of a second (a tone's frequency, near enough)
-        let ups = |at: f32| { let i = (at * rate as f32) as usize * 2; out[i..i + 2 * 4410].chunks(2).map(|f| f[0]).collect::<Vec<_>>().windows(2).filter(|w| w[0] < 0.0 && w[1] >= 0.0).count() };
-        // before it: 440 Hz (44); a quarter in: three quarters the speed (33); three quarters in: a quarter (11)
-        assert!((42..=46).contains(&ups(1.8)), "before {}", ups(1.8));
-        assert!((30..=36).contains(&ups(2.2)), "slowing {}", ups(2.2));
-        assert!((8..=14).contains(&ups(2.7)), "nearly stopped {}", ups(2.7));
-        // after it: only the next one (660 Hz: 66)
-        assert!((63..=69).contains(&ups(3.5)), "after {}", ups(3.5));
-        // and no click as it stops: nothing louder than the tones themselves
-        let peak = out[(2.9 * rate as f32) as usize * 2..(3.1 * rate as f32) as usize * 2].iter().fold(0.0f32, |m, v| m.max(v.abs()));
-        assert!(peak <= 0.36, "{peak}");
-    }
-
     #[test]
     fn a_tape_start_spins_the_next_one_up_as_the_other_stops() {
         let rate = 44_100u32;
@@ -1919,111 +1690,6 @@ mod mix_tests {
         let quiet = (31..39).map(|t| t as f32 / 10.0).map(|t| { let i = (t * rate as f32) as usize * 2; out[i..i + 882].iter().fold(0.0f32, |m, v| m.max(v.abs())) }).fold(1.0f32, f32::min);
         assert!(quiet > 0.05, "a gap: {quiet}");
     }
-
-    #[test]
-    fn a_word_looped_plays_the_same_beat_again_then_the_next_one_comes_in() {
-        let rate = 44_100u32;
-        let a = Box::new(Tone::new(rate, 440.0, 0.3, 10.0));
-        let b = Box::new(Tone::new(rate, 660.0, 0.3, 10.0));
-        // from 2 s: a 257 ms beat (not a whole number of the tone's cycles) heard, then 3 more times; the
-        // next one in on the beat after (2 + 4 x 0.257 s)
-        let beat = 257u64;
-        let out = render_mix(a, b, (0.0, 0.0), rate, 2.0, 4 * beat + 400, Some(Handoff::word_cut(4 * beat, beat, 3)), 4.0).unwrap();
-        // (in frames: the loop is a whole number of them)
-        let (from, len) = (2 * rate as usize, beat as usize * rate as usize / 1000);
-        let at = |f: usize| out[f * 2];
-        // the same moment of the beat, each time round (the tone going on would be at another point by then)
-        for pass in 1..4 {
-            for k in [2205usize, 4410, 8820] {
-                let (first, again) = (at(from + k), at(from + pass * len + k));
-                assert!((first - again).abs() < 0.02, "pass {pass} at {k}: {first} vs {again}");
-            }
-        }
-        // after it: the next one alone (660 Hz: 66 zero crossings in a tenth of a second)
-        let i = ((2.0 + 4.0 * beat as f32 / 1000.0 + 0.1) * rate as f32) as usize * 2;
-        let ups = out[i..i + 2 * 4410].chunks(2).map(|f| f[0]).collect::<Vec<_>>().windows(2).filter(|w| w[0] < 0.0 && w[1] >= 0.0).count();
-        assert!((63..=69).contains(&ups), "after {ups}");
-    }
-
-    #[test]
-    fn a_wipe_never_has_both_in_one_band() {
-        let rate = 44_100u32;
-        // the one going out: 55 Hz, 600 Hz, 6 kHz; the one coming in: 82 Hz, 900 Hz, 9 kHz
-        let tri = |a: f32, b: f32, c: f32| -> Box<dyn Source> { Box::new(crate::source::Sum(vec![Tone::new(rate, a, 0.3, 12.0), Tone::new(rate, b, 0.2, 12.0), Tone::new(rate, c, 0.1, 12.0)])) };
-        // 8 s of mix from 2 s, beats half a second, the swap 4 s in (6 s)
-        let out = render_mix(tri(55.0, 600.0, 6000.0), tri(82.0, 900.0, 9000.0), (0.0, 0.0), rate, 2.0, 8000, Some(Handoff::wipe(500.0, 4000)), 11.0).unwrap();
-        let has = |hz: f32, at: f32| {
-            let n = (rate as f32 * 0.3) as usize;
-            let i = (at * rate as f32) as usize - n / 2;
-            let (mut c, mut s) = (0.0f32, 0.0f32);
-            for k in 0..n {
-                let x = out[(i + k) * 2] * (1.0 - (2.0 * std::f32::consts::PI * k as f32 / n as f32).cos()) * 0.5;
-                let w = 2.0 * std::f32::consts::PI * hz * k as f32 / rate as f32;
-                c += x * w.cos();
-                s += x * w.sin();
-            }
-            4.0 * (c * c + s * s).sqrt() / n as f32
-        };
-        // a second in (the split near 13 kHz): the one going out whole but its very top; the one coming
-        // in's voice and bass not at all
-        assert!(has(600.0, 3.0) > 0.18 && has(55.0, 3.0) > 0.25, "early out {} {}", has(600.0, 3.0), has(55.0, 3.0));
-        assert!(has(900.0, 3.0) < 0.01 && has(82.0, 3.0) < 0.01, "early held {} {}", has(900.0, 3.0), has(82.0, 3.0));
-        // three seconds in, a beat before the swap (the split near 6.3 kHz): the one coming in's top,
-        // the one going out's voice all there and still bright (its 6 kHz half there), the one coming in's not yet
-        assert!(has(9000.0, 5.0) > 0.06 && has(600.0, 5.0) > 0.18 && has(6000.0, 5.0) > 0.04, "kept {} {} {}", has(9000.0, 5.0), has(600.0, 5.0), has(6000.0, 5.0));
-        assert!(has(900.0, 5.0) < 0.01, "voice held {}", has(900.0, 5.0));
-        // past the swap: only the one that came in, all of it
-        assert!(has(82.0, 7.0) > 0.25 && has(55.0, 7.0) < 0.01 && has(600.0, 7.0) < 0.01, "after {} {} {}", has(82.0, 7.0), has(55.0, 7.0), has(600.0, 7.0));
-        // and as loud all through (within 3 dB)
-        let rms = |at: f32| { let i = (at * rate as f32) as usize * 2; let x = &out[i..i + 8820]; 20.0 * ((x.iter().map(|v| v * v).sum::<f32>() / x.len() as f32).sqrt()).log10() };
-        let before = rms(1.0);
-        for t in [2.5f32, 3.0, 3.5, 4.0, 4.5, 5.0, 5.5, 6.5, 7.5, 9.0] { assert!((rms(t) - before).abs() < 3.0, "level at {t}: {} against {before}", rms(t)); }
-    }
-
-    #[test]
-    fn staged_a_band_at_a_time() {
-        let rate = 44_100u32;
-        // the one going out: a bass at 55 Hz, a mid at 600, a high at 6 kHz; the one coming in: 82, 900, 9 kHz
-        let tri = |a: f32, b: f32, c: f32| -> Box<dyn Source> { Box::new(crate::source::Sum(vec![Tone::new(rate, a, 0.3, 12.0), Tone::new(rate, b, 0.2, 12.0), Tone::new(rate, c, 0.1, 12.0)])) };
-        // 8 s of mix from 2 s, beats half a second, swapped 4 s in
-        let h = Handoff::staged(8000, 500.0, 4000);
-        let out = render_mix(tri(55.0, 600.0, 6000.0), tri(82.0, 900.0, 9000.0), (0.0, 0.0), rate, 2.0, 8000, Some(h), 11.0).unwrap();
-        // how much of a frequency there is around a time (its correlation with a sine and a cosine, over
-        // a Hann window of 0.3 s centred there: the tones near it kept out)
-        let has = |hz: f32, at: f32| {
-            let n = (rate as f32 * 0.3) as usize;
-            let i = (at * rate as f32) as usize - n / 2;
-            let (mut c, mut s) = (0.0f32, 0.0f32);
-            for k in 0..n {
-                let x = out[(i + k) * 2] * (1.0 - (2.0 * std::f32::consts::PI * k as f32 / n as f32).cos()) * 0.5;
-                let w = 2.0 * std::f32::consts::PI * hz * k as f32 / rate as f32;
-                c += x * w.cos();
-                s += x * w.sin();
-            }
-            4.0 * (c * c + s * s).sqrt() / n as f32
-        };
-        // early on (the highs cross over all through the mix: its beats are long): the one going out's highs mostly
-        assert!(has(6000.0, 2.5) > 0.08 && has(9000.0, 2.5) < 0.04, "highs early {} {}", has(6000.0, 2.5), has(9000.0, 2.5));
-        assert!(has(900.0, 3.0) < 0.02 && has(82.0, 3.0) < 0.02, "held back {} {}", has(900.0, 3.0), has(82.0, 3.0));
-        // past it: the one coming in's highs only
-        assert!(has(9000.0, 9.8) > 0.08 && has(6000.0, 9.8) < 0.01, "highs late {} {}", has(9000.0, 9.8), has(6000.0, 9.8));
-        // and never louder or quieter through it than either alone (within 1.5 dB)
-        let rms = |at: f32| { let i = (at * rate as f32) as usize * 2; let x = &out[i..i + 8820]; 20.0 * ((x.iter().map(|v| v * v).sum::<f32>() / x.len() as f32).sqrt()).log10() };
-        let before = rms(1.0);
-        for t in [2.5f32, 3.5, 4.5, 5.5, 6.5, 7.5, 8.5, 9.5, 10.5] { assert!((rms(t) - before).abs() < 1.5, "level at {t}: {} against {before}", rms(t)); }
-        // before the swap (6 s: 2 + 4): the one going out's mids and bass
-        assert!(has(600.0, 5.0) > 0.15 && has(55.0, 5.0) > 0.2 && has(82.0, 5.0) < 0.03, "before {} {} {}", has(600.0, 5.0), has(55.0, 5.0), has(82.0, 5.0));
-        // after it: the one coming in's (the other's mids gone, but for their echo)
-        assert!(has(900.0, 7.0) > 0.15, "mids in {}", has(900.0, 7.0));
-        assert!(has(82.0, 6.5) > 0.2 && has(55.0, 6.5) < 0.03, "bass after {} {}", has(82.0, 6.5), has(55.0, 6.5));
-        // after it: only the one that came in
-        assert!(has(6000.0, 10.5) < 0.01 && has(600.0, 10.5) < 0.01, "left {} {}", has(6000.0, 10.5), has(600.0, 10.5));
-    }
-}
-
-#[cfg(test)]
-mod centre_tests {
-    use super::Centre;
 
     /// The level (RMS) of what comes out of `g`'s centre cut, for a centred tone at `hz` (or one panned
     /// hard left), its first half second left out (the filters settling)

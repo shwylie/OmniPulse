@@ -1,5 +1,5 @@
 // A transition's plan (what the engine plays: where, how long, at what tempo and key), and the curves its
-// tempo is ridden on; shared by the desktop app (its old Seamless Mix planner too) and the Android app
+// tempo is ridden on; shared by the desktop app and the Android app
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize)]
 pub struct Plan {
@@ -30,13 +30,7 @@ pub struct Plan {
     /// the next one spins up to its speed (songs too far apart, in tempo or key, to blend: never over
     /// each other). `swap_ms`: the stop's length; the spin-up's, what's left of `ms` but its last TAPE_TAIL_MS
     pub tape_stop: bool,
-    /// a loop of the one playing, or of the next one: (from, length: ms from the mix's start; played that
-    /// many more times), so neither has to be cut short to fit (its singing never under the mix)
-    pub out_loop: Option<(u64, u64, u32)>,
-    pub in_loop: Option<(u64, u64, u32)>,
-    /// Wordplay: the word (or words) the one playing's loop sings and the next one comes in on
-    pub word: Option<String>,
-    /// a transition of its own, if it is one: "wordplay", "drop swap", "melody play"
+    /// a transition of its own, if it is one: a roll (smart::ROLL)
     pub style: Option<&'static str>,
     /// of `bars`, the one playing's after the swap (Smart Transitions', its outro going); 0: the usual 4
     pub tail_bars: u32,

@@ -365,7 +365,7 @@ pub fn blend_as(a: &Side, b: &Side, now_ms: u64, forced: bool) -> Option<crate::
     Some(crate::plan::Plan {
         at_ms: at.round() as u64, ms: len.round() as u64, swap_ms: swap_at.round() as u64, start_ms: bar_ms(mb, from)?.round() as u64,
         rate, bars: (run + tail) as u32, semitones, beatmatched: true, out_tempo: target, ramp_ms: swap_at.round() as u64, tape_stop: false,
-        out_loop: None, in_loop: None, word: None, style: None, tail_bars: tail as u32,
+        style: None, tail_bars: tail as u32,
     })
 }
 
@@ -455,6 +455,7 @@ pub fn ease_ms(left_ms: u64) -> u64 {
 /// (the one going out's gone over the two beats before it, the next one's up over the two after: never
 /// sung together); a roll's, or a tape stop's
 pub fn handoff(p: &crate::plan::Plan, voices: bool) -> omnipulse_audio::Handoff {
+    if p.tape_stop { return omnipulse_audio::Handoff::tape(p.swap_ms, p.ramp_ms); }
     if p.style == Some(ROLL) { return omnipulse_audio::Handoff::roll(p.swap_ms / p.bars.max(1) as u64, p.bars); }
     // (the one playing's beat carried: the next one rising under it, the bass swapped, then its top fading;
     // the voices, if both sing there, the one playing's faded over the run-up's second half, the next
@@ -518,7 +519,7 @@ pub fn roll(a: &Side, b: &Side, now_ms: u64) -> Option<crate::plan::Plan> {
     let len = (to - at).round() as u64;
     Some(crate::plan::Plan {
         at_ms: at.round() as u64, ms: len + 40, swap_ms: len, start_ms: start.round() as u64, rate: 1.0, bars: ROLL_BARS, semitones: 0,
-        beatmatched: false, out_tempo: 1.0, ramp_ms: 0, tape_stop: false, out_loop: None, in_loop: None, word: None, style: Some(ROLL), tail_bars: 0,
+        beatmatched: false, out_tempo: 1.0, ramp_ms: 0, tape_stop: false, style: Some(ROLL), tail_bars: 0,
     })
 }
 
