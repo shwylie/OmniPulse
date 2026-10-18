@@ -3759,7 +3759,7 @@ fn mix_tick(shared: &Shared, pos: u64, dur: u64) {
     let listening_now = listening_now || room_kind().as_deref() == Some("jam");
     // (Smart Transitions' blends on the beat: the same way in, its own plan)
     let smart = !on && smart_blends_on(&shared.borrow().web.prefs);
-    if !(on || smart) || listening_now || !MIX_OUT_OK.with(|c| c.get()) || dur == 0 || next.is_mix() { why(&format!("on {on}, listening {listening_now}, out ok {}, dur {dur}, next is a set {}", MIX_OUT_OK.with(|c| c.get()), next.is_mix())); return; }
+    if !(on || smart) || listening_now || !MIX_OUT_OK.with(|c| c.get()) || dur == 0 || next.is_mix() || cur.is_mix() { why(&format!("on {on}, listening {listening_now}, out ok {}, dur {dur}, a set or podcast (next {}, playing {}): they play, unmixed", MIX_OUT_OK.with(|c| c.get()), next.is_mix(), cur.is_mix())); return; }
     // (Stream-Safe Music: never mixed into one it doesn't allow; the usual way skips it)
     if !streamsafe::allowed(&shared.borrow().web.prefs, &next) { why("Stream-Safe Music doesn't allow the next one"); return; }
     let plan = if smart {

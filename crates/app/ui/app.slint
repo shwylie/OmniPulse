@@ -1942,12 +1942,12 @@ export component AppWindow inherits Window {
                             PlatIcon {
                                 plat: p.id;
                                 title-bar: true;
-                                // (SoundCloud's cloud is a wide, flat shape: drawn larger and lifted a little, so
-                                // it sits level with the round marks beside it)
+                                // (SoundCloud's cloud is a wide, flat shape: drawn larger, and lowered by as much as
+                                // it sits above its box's middle (its outline spans 5 to 16.5 of 24), so it's centred)
                                 width: p.id == "soundcloud" ? 19px : 15px;
                                 height: self.width;
                                 x: (parent.width - self.width) / 2;
-                                y: (parent.height - self.height) / 2 - (p.id == "soundcloud" ? 1.5px : 0px);
+                                y: (parent.height - self.height) / 2 + (p.id == "soundcloud" ? self.height * 1.25 / 24 : 0px);
                                 fill: !p.on ? Theme.text : p.id == "spotify" ? #1ed760 : p.id == "youtube" ? #ff0033 : p.id == "local" ? #f2b544 : #ff5500;
                                 opacity: p.on ? 1 : !p.ready ? (ta-p.has-hover ? 0.5 : 0.25) : (ta-p.has-hover ? 0.7 : 0.4);
                             }

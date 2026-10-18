@@ -398,18 +398,48 @@ fn paced<T>(f: impl FnOnce() -> T) -> T {
 
 fn model_sampled(mono: &[f32], rate: u32) -> Option<ModelBeats> {
     let len = mono.len() as f64 / rate.max(1) as f64;
-    if len <= 100.0 { return paced(|| model_run(mono, rate)); }
+    if len <= 100.0 { return model_windowed(mono, rate); }
     let mut all = ModelBeats { beats: Vec::new(), downbeats: Vec::new(), bpm: 0.0, sampled: true };
     let mut bpms = Vec::new();
-    for frac in [0.3, 0.7] {
-        let from = ((frac * len - 15.0).max(0.0) * rate as f64) as usize;
-        let to = (from + 30 * rate as usize).min(mono.len());
+    for frac in [0.25, 0.4, 0.6, 0.75] {
+        let from = ((frac * len - 7.5).max(0.0) * rate as f64) as usize;
+        let to = (from + 15 * rate as usize).min(mono.len());
         let Some(m) = paced(|| model_run(&mono[from..to], rate)) else { continue };
         let off = from as f64 * 1000.0 / rate as f64;
         // (a stretch's first and last beat or so left out: the model's least sure at its edges)
-        all.beats.extend(m.beats.iter().filter(|b| **b > 1500.0 && **b < 28_500.0).map(|b| b + off));
-        all.downbeats.extend(m.downbeats.iter().filter(|b| **b > 1500.0 && **b < 28_500.0).map(|b| b + off));
+        all.beats.extend(m.beats.iter().filter(|b| **b > 1500.0 && **b < 13_500.0).map(|b| b + off));
+        all.downbeats.extend(m.downbeats.iter().filter(|b| **b > 1500.0 && **b < 13_500.0).map(|b| b + off));
         if m.bpm > 0.0 { bpms.push(m.bpm); }
+    }
+    if bpms.is_empty() { return None; }
+    bpms.sort_by(|a, b| a.total_cmp(b));
+    all.bpm = bpms[bpms.len() / 2];
+    Some(all)
+}
+
+/// The model over all of it, 15 s at a time (its own stretches are 30 s, and its memory goes with
+/// their square: 400 MB at 30 s, a quarter of it at 15), each window's first and last 1.5 s left to
+/// its neighbours, which overlap it by as much
+fn model_windowed(mono: &[f32], rate: u32) -> Option<ModelBeats> {
+    let (win, edge) = (15 * rate as usize, (1.5 * rate as f64) as usize);
+    if mono.len() <= win { return paced(|| model_run(mono, rate)); }
+    let mut all = ModelBeats { beats: Vec::new(), downbeats: Vec::new(), bpm: 0.0, sampled: false };
+    let mut bpms = Vec::new();
+    let mut from = 0usize;
+    loop {
+        let to = (from + win).min(mono.len());
+        let last = to == mono.len();
+        if let Some(m) = paced(|| model_run(&mono[from..to], rate)) {
+            let off = from as f64 * 1000.0 / rate as f64;
+            // (the part this window answers for: its middle; the first window from its start, the last to its end)
+            let lo = if from == 0 { f64::MIN } else { 1500.0 };
+            let hi = if last { f64::MAX } else { (to - from - edge) as f64 * 1000.0 / rate as f64 };
+            all.beats.extend(m.beats.iter().filter(|b| **b >= lo && **b < hi).map(|b| b + off));
+            all.downbeats.extend(m.downbeats.iter().filter(|b| **b >= lo && **b < hi).map(|b| b + off));
+            if m.bpm > 0.0 { bpms.push(m.bpm); }
+        }
+        if last { break; }
+        from = to - 2 * edge;
     }
     if bpms.is_empty() { return None; }
     bpms.sort_by(|a, b| a.total_cmp(b));
@@ -505,7 +535,7 @@ fn analyse_now(mono: &[f32], rate: u32) -> Option<Rhythm> {
     if std::env::var_os("OMNIPULSE_RHYTHM_DEBUG").is_some() { eprintln!("rhythm debug: the model took {:.2} s", t_model.elapsed().as_secs_f64()); }
     let tracked_bpm = 60_000.0 / (period / FPS * 1000.0);
     let agrees = |m: f64| [1.0, 2.0, 0.5].iter().any(|k| ((tracked_bpm * k) / m - 1.0).abs() <= 0.03);
-    if model.as_ref().is_some_and(|m| m.bpm > 0.0 && !agrees(m.bpm) && m.sampled) { model = model_run(mono, rate); }
+    if model.as_ref().is_some_and(|m| m.bpm > 0.0 && !agrees(m.bpm) && m.sampled) { model = model_windowed(mono, rate); }
     let (frames, from_model) = match &model {
         Some(m) if m.bpm > 0.0 && m.beats.len() >= 32 && !agrees(m.bpm) => (steady_grid(&m.beats, m.bpm).iter().map(|t| (t / 1000.0 * FPS).round() as usize).filter(|&f| f < o.len()).collect::<Vec<_>>(), true),
         _ => (frames, false),
@@ -561,7 +591,7 @@ fn analyse_now(mono: &[f32], rate: u32) -> Option<Rhythm> {
     // (Beat This!, a model trained on annotated songs, where it can: its downbeats, onto these beats; the
     // share of them on one beat of four, how sure. The clues above disagree on halftime tracks, mashups)
     // (its stretches not enough to be sure which beat is the first: all of it, then)
-    if model.as_ref().is_some_and(|m| m.sampled && model_downbeat(m, &beats).is_none_or(|d| d.1 < DOWNBEAT_TRUSTED)) { model = model_run(mono, rate); }
+    if model.as_ref().is_some_and(|m| m.sampled && model_downbeat(m, &beats).is_none_or(|d| d.1 < DOWNBEAT_TRUSTED)) { model = model_windowed(mono, rate); }
     let model_bpm = model.as_ref().map_or(0.0, |m| m.bpm);
     let (downbeat, downbeat_confidence) = model.as_ref().and_then(|m| model_downbeat(m, &beats)).unwrap_or((downbeat, downbeat_confidence));
     // (its beats the model's: as sure of them as of a clear beat of ours)
