@@ -1961,6 +1961,10 @@ export component AppWindow inherits Window {
                 // someone asking you to start a Jam: in the button's place, with a ring that empties
                 if root.jam-ask != "": Rectangle {
                     width: ask-row.preferred-width + 16px;
+                    Rectangle {
+                    y: (parent.height - self.height) / 2;
+                    height: 28px;
+                    border-radius: 8px;
                     background: @linear-gradient(100deg, Theme.accent 0%, Theme.accent-2 100%);
                     ask-row := HorizontalLayout {
                         x: 8px;
@@ -1974,7 +1978,7 @@ export component AppWindow inherits Window {
                         Rectangle {
                             width: yes-t.preferred-width + 18px;
                             height: 20px;
-                            y: 3px;
+                            y: (parent.height - self.height) / 2;
                             border-radius: 10px;
                             background: Theme.on-accent;
                             yes-t := Text { text: "Accept"; color: Theme.accent; font-size: 12px; font-weight: 700; }
@@ -1983,21 +1987,28 @@ export component AppWindow inherits Window {
                         Rectangle {
                             width: no-t.preferred-width + 18px;
                             height: 20px;
-                            y: 3px;
+                            y: (parent.height - self.height) / 2;
                             border-radius: 10px;
                             background: Theme.on-accent.with-alpha(0.18);
                             no-t := Text { text: "Decline"; color: Theme.on-accent; font-size: 12px; font-weight: 700; }
                             TouchArea { clicked => { root.jam-decline(); } }
                         }
                     }
+                    }
                 }
+                // (rounded, as the platforms' pill beside it)
                 if root.jam-ask == "" && root.jam-label != "" && !root.jam-hidden: Rectangle {
                     width: jam-t.preferred-width + 28px;
-                    background: root.jam-on ? Theme.accent : (jam-ta.has-hover && !root.jam-off ? Theme.elevated : transparent);
-                    opacity: root.jam-off ? 0.45 : 1;
-                    jam-t := Text { text: root.jam-label; color: root.jam-on ? Theme.on-accent : (jam-ta.has-hover && !root.jam-off ? Theme.text : Theme.muted); font-size: 12px; font-weight: 600; }
-                    jam-ta := TouchArea { clicked => { root.jam-clicked(); } }
-                    TipSpot { tip: root.jam-off ? "Turn off Seamless Mix to start a Jam" : ""; hover: jam-ta.has-hover; }
+                    Rectangle {
+                        y: (parent.height - self.height) / 2;
+                        height: 28px;
+                        border-radius: 8px;
+                        background: root.jam-on ? Theme.accent : (jam-ta.has-hover && !root.jam-off ? Theme.elevated : transparent);
+                        opacity: root.jam-off ? 0.45 : 1;
+                        jam-t := Text { text: root.jam-label; color: root.jam-on ? Theme.on-accent : (jam-ta.has-hover && !root.jam-off ? Theme.text : Theme.muted); font-size: 12px; font-weight: 600; }
+                        jam-ta := TouchArea { clicked => { root.jam-clicked(); } }
+                        TipSpot { tip: root.jam-off ? "Turn off Seamless Mix to start a Jam" : ""; hover: jam-ta.has-hover; }
+                    }
                 }
                 Rectangle { width: 6px; }
                 for b in [{ d: "M1 6h10", act: "min" }, { d: root.is-max ? "M3.5 3.5V1.5h7v7h-2M1.5 3.5h7v7h-7z" : "M1.5 1.5h9v9h-9z", act: "max" }, { d: "M1.5 1.5l9 9M10.5 1.5l-9 9", act: "close" }]: Rectangle {
