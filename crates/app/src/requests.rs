@@ -1,6 +1,7 @@
 // Song requests from chat (as in js/requests.js): a bot calls the requests server in core, which asks
 // the app; the app finds the song and queues it, and the reply is posted in chat. Punctuation is
-// ignored, "song by artist" is understood, your likes come first, links go to their own platform,
+// ignored, "song by artist" is understood, the song as most people know it is picked (your own copy
+// of it if you like it; SoundCloud only when nothing else has it), links go to their own platform,
 // and with Prefer Radio Edits a long version gives way to a radio edit of the same song.
 
 use crate::track::{Src, Track};
@@ -52,10 +53,11 @@ fn by_artist(list: Vec<Track>, artist: &Option<String>) -> Vec<Track> {
     let want = words(artist);
     list.into_iter()
         .filter(|t| {
-            // the artist, or the "Artist - " an uploader often puts in front of the title
+            // the artist, or the "Artist - " an uploader often puts in front of the title; or the one its
+            // version is credited to ("Rapture (Avicii New Generation Mix)" is by Avicii, asked for so)
             let lead = t.title.split_once(" - ").map(|x| x.0).unwrap_or("");
             let have = words(&format!("{} {lead}", t.artist));
-            want.iter().all(|w| have.contains(w))
+            want.iter().all(|w| have.contains(w)) || names_version(t, &format!("{} {}", artist, words(&t.title).join(" ")))
         })
         .collect()
 }
@@ -86,8 +88,30 @@ pub fn is_version(s: &str) -> bool {
     static SAME: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
     static MARK: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
     let same = SAME.get_or_init(|| regex::Regex::new(r"(?i)\b(radio (edit|mix|version)|single (edit|version)|short (edit|version)|clean (edit|version)|album (version|edit)|original (mix|version)|remaster(ed)?( \d{4})?|\d{4} remaster(ed)?)\b").expect("same"));
-    let mark = MARK.get_or_init(|| regex::Regex::new(r"(?i)\b(remix|rmx|bootleg|boot|flip|vip|mash ?up|cover|live|acoustic|instrumental|sped ?up|slowed|nightcore|karaoke|rework|refix|re-?edit|dub|edit|mix|version|vs)\b").expect("mark"));
+    let mark = MARK.get_or_init(|| regex::Regex::new(r"(?i)\b(remix|rmx|bootleg|boot|flip|vip|mash ?up|cover|live|acoustic|instrumental|sped ?up|slowed|nightcore|karaoke|rework|refix|re-?edit|dub|edit|mix|version|vs|bass ?boost(ed)?|8d|reverb(ed)?|tribute|in the style of|piano|orchestral|lullaby|8 ?bit)\b").expect("mark"));
     mark.is_match(&same.replace_all(s, " "))
+}
+
+/// A version that's named in what was asked for: a word asked for that's only in its version's credit
+/// ("rapture avicii" is Nadia Ali's "Rapture (Avicii New Generation Mix)": Avicii is its remixer)
+fn names_version(t: &Track, asked: &str) -> bool {
+    // (the title's parts: its name, then each bracket or " - " part after it)
+    let title = &t.title;
+    let mut cuts: Vec<usize> = [" (", " [", " - "].iter().flat_map(|m| title.match_indices(m).map(|(i, _)| i)).collect();
+    cuts.sort_unstable();
+    let Some(&first) = cuts.first() else { return false };
+    let base = words(&title[..first]);
+    let named = |w: &String| !base.contains(w);
+    let want = words(asked);
+    if !has_all(t, asked) || extra_version(title, asked) { return false; }
+    // the part that names what was asked for; and nothing else in it another version (a piano cover of the
+    // remix, its VIP, a tribute to it)
+    let ends: Vec<usize> = cuts.iter().skip(1).copied().chain([title.len()]).collect();
+    cuts.iter().zip(ends).any(|(&a, b)| {
+        let part = words(&title[a..b]);
+        let rest = format!("{}{}", &title[..a], &title[b..]);
+        part.iter().any(|w| want.contains(w) && named(w)) && !is_version(&rest)
+    })
 }
 
 /// Every word asked for is in its title or artist (more words are fine)
@@ -102,8 +126,8 @@ fn has_all(t: &Track, q: &str) -> bool {
 /// it beats one without them ("ghosts n stuff ginsu" is Ginsu's mashup, not the original).
 fn rank<'a>(found: &'a [Track], asked: &str, liked: &dyn Fn(&Track) -> bool) -> Option<(&'a Track, usize)> {
     let want_version = is_version(asked);
-    let top: Vec<&Track> = found.iter().take(10).filter(|x| want_version || !is_version(&x.title)).collect();
-    let same = |x: &&Track| same_song(x, asked);
+    let top: Vec<&Track> = found.iter().take(10).filter(|x| want_version || !is_version(&x.title) || names_version(x, asked)).collect();
+    let same = |x: &&Track| same_song(x, asked) || names_version(x, asked);
     let all = |x: &&Track| has_all(x, asked);
     // (of those that fit a tier, the most played: the song as most people know it, not an odd re-upload the
     // search happened to list first; on a tie, the search's order)
@@ -230,9 +254,22 @@ pub async fn find(plat: &str, q: &str, local: &[Track]) -> Vec<Track> {
     }
 }
 
-/// The track for a request: a liked one with every word asked for, or the first match on the first
-/// platform that has one (a liked one among its top five preferred), then a radio edit if wanted.
-/// Err is the reply's key (notFound / empty).
+/// Whether a track is by `artist` (the first name of it, as "Rick Astley" of "Rick Astley, X"): its artist,
+/// or the "Artist - " an uploader puts in front of its title
+fn same_artist(t: &Track, artist: &str) -> bool {
+    let main = artist.split([',', '&', '/']).next().unwrap_or(artist);
+    let want = words(&main.replace(" feat.", ",").replace(" ft.", ","));
+    let lead = t.title.split_once(" - ").map(|x| x.0).unwrap_or("");
+    let have = words(&format!("{} {lead}", t.artist));
+    !want.is_empty() && want.iter().all(|w| have.contains(w))
+}
+
+/// The track for a request. The song as most people know it: every platform but SoundCloud searched
+/// (at once), and of the best matches the most played; SoundCloud only if none of them has the song
+/// itself (its uploads are where the odd versions are: bass-boosted, tributes, live mashups). One of
+/// your likes is played instead only if it's that song by the same artist (your copy of it, not
+/// somebody's cover that you happen to like). Then a radio edit if wanted.
+/// Err is the reply's key (notFound / empty / notSafe).
 pub async fn pick(q: &str, plats: &[&'static str], likes: &[Track], local: &[Track], prefer_radio: bool, safe: &(dyn Fn(&Track) -> bool + Sync)) -> Result<Track, &'static str> {
     let is_link = q.starts_with("http://") || q.starts_with("https://");
     let order: Vec<&str> = if q.contains("soundcloud.com/") {
@@ -248,57 +285,48 @@ pub async fn pick(q: &str, plats: &[&'static str], likes: &[Track], local: &[Tra
     if qs.is_empty() {
         return Err("empty");
     }
-    let liked = |t: &Track| likes.iter().any(|l| l.key == t.key);
-    let mut asked = qs[0].0.clone();
-    let mut found: Vec<Track> = Vec::new();
-    let mut chosen: Option<Track> = None;
-    if !is_link {
-        'likes: for (qq, _) in &qs {
-            let want = words(qq);
-            if want.is_empty() {
-                continue;
-            }
-            // the same song, not just one with those words in it ("Beauty and a Strobe" isn't "Strobe")
-            for t in likes.iter().filter(|t| order.contains(&t.plat()) && !t.is_mix() && safe(t)) {
-                if same_song(t, qq) {
-                    chosen = Some(t.clone());
-                    asked = qq.clone();
-                    break 'likes;
-                }
-            }
-        }
-    }
-    if chosen.is_none() {
-        // the song itself (yours if you like it) on the first platform that has it; if none has it,
-        // the best that was found anywhere (with Stream-Safe Music on, only what's safe; none of it at
-        // all is its own reply)
-        let mut unsafe_only = false;
-        let mut best: Option<(usize, Vec<Track>, String, usize)> = None;   // (tier, found, asked, at)
-        'search: for (qq, artist) in &qs {
-            for p in &order {
-                let mut got = by_artist(find(p, qq, local).await.into_iter().filter(|t| !t.is_mix()).collect(), artist);
+    // (the platforms in two rounds: all but SoundCloud first, SoundCloud only if they don't have it)
+    let first: Vec<&str> = if is_link { order.clone() } else { order.iter().copied().filter(|p| *p != "soundcloud").collect() };
+    let fallback: Vec<&str> = if is_link { Vec::new() } else { order.iter().copied().filter(|p| *p == "soundcloud").collect() };
+    let mut unsafe_only = false;
+    // (tier, plays, found, asked, at): the best so far
+    let mut best: Option<(usize, u64, Vec<Track>, String, usize)> = None;
+    let better = |tier: usize, plays: u64, b: &Option<(usize, u64, Vec<Track>, String, usize)>| b.as_ref().is_none_or(|b| tier < b.0 || (tier == b.0 && plays > b.1));
+    for round in [&first, &fallback] {
+        if round.is_empty() || best.as_ref().is_some_and(|b| b.0 <= 1) { continue; }
+        for (qq, artist) in &qs {
+            let lists = futures_util::future::join_all(round.iter().map(|p| find(p, qq, local))).await;
+            for list in lists {
+                let mut got = by_artist(list.into_iter().filter(|t| !t.is_mix()).collect(), artist);
                 let all = got.len();
                 got.retain(|t| safe(t));
                 unsafe_only |= all > 0 && got.is_empty();
-                let r = if is_link { got.first().map(|_| (0usize, 0usize)) } else { rank(&got, qq, &liked).map(|(t, tier)| (tier, got.iter().position(|x| std::ptr::eq(x, t)).unwrap_or(0))) };
+                let r = if is_link { got.first().map(|_| (0usize, 0usize)) } else { rank(&got, qq, &|_| false).map(|(t, tier)| (tier, got.iter().position(|x| std::ptr::eq(x, t)).unwrap_or(0))) };
                 if let Some((tier, at)) = r {
-                    if best.as_ref().is_none_or(|b| tier < b.0) {
-                        best = Some((tier, got, qq.clone(), at));
-                    }
-                }
-                if best.as_ref().is_some_and(|b| b.0 <= 1) {
-                    break 'search;
+                    let plays = got[at].plays;
+                    if better(tier, plays, &best) { best = Some((tier, plays, got, qq.clone(), at)); }
                 }
             }
+            if best.as_ref().is_some_and(|b| b.0 <= 1) { break; }
         }
-        let Some((_, got, best_asked, at)) = best else {
-            return Err(if unsafe_only { "notSafe" } else { "notFound" });
-        };
-        found = got;
-        asked = best_asked;
-        chosen = Some(found[at].clone());
     }
-    let mut t = chosen.unwrap();
+    // your copy of it, if you like it: the same song by the same artist
+    let liked_copy = |song: &str, artist: Option<&str>| likes.iter().filter(|t| order.contains(&t.plat()) && !t.is_mix() && safe(t))
+        .find(|t| same_song(t, song) && artist.is_none_or(|a| same_artist(t, a))).cloned();
+    let (mut t, found, asked) = match best {
+        Some((tier, _, got, asked, at)) if !is_link => {
+            let top = got[at].clone();
+            // (only for the song itself: a like is never swapped in for a near miss)
+            let mine = (tier <= 1).then(|| liked_copy(&asked, Some(&top.artist))).flatten();
+            (mine.unwrap_or(top), got, asked)
+        }
+        Some((_, _, got, asked, at)) => (got[at].clone(), got, asked),
+        // nothing found anywhere: one of your likes with that title, if there is one
+        None => match (!is_link).then(|| qs.iter().find_map(|(qq, artist)| liked_copy(qq, artist.as_deref()).map(|t| (t, qq.clone())))).flatten() {
+            Some((t, qq)) => (t, Vec::new(), qq),
+            None => return Err(if unsafe_only { "notSafe" } else { "notFound" }),
+        },
+    };
     if prefer_radio && !is_link && t.ms >= LONG_MS && !is_radio(&t.title) {
         if let Some(r) = radio_pick(&found, &asked) {
             t = r;
@@ -359,7 +387,7 @@ mod tests {
         for p in ["soundcloud", "spotify"] {
             for t in rt.block_on(find(p, &q, &[])).iter().take(10) { println!("  {p}: {} - {} ({} plays, {} ms) same {} all {} version {}", t.artist, t.title, t.plays, t.ms, same_song(t, &q), has_all(t, &q), is_version(&t.title)); }
         }
-        for plats in [vec!["soundcloud"], vec!["spotify"], vec!["youtube"], vec!["soundcloud", "spotify", "youtube"]] {
+        for plats in [vec!["soundcloud", "spotify", "youtube", "catalog"]] {
             let r = rt.block_on(pick(&q, &plats, &[], &[], false, &|_| true));
             println!("{plats:?}: {:?}", r.map(|t| format!("{} - {} ({} plays, {})", t.artist, t.title, t.plays, t.plat())));
         }
@@ -379,6 +407,17 @@ mod tests {
         // (only versions of it: the one that's no more than was asked for, before the most played VIP)
         let only = vec![t("vip", "Cinema (Skrillex Remix) - Final Version V.I.P", "Benny Benassi", 120_000), t("rr", "Cinema (Skrillex Remix) [Some Re-Remix]", "X", 60_000), t("plain", "Cinema (Skrillex Remix)", "uploader", 5_000)];
         assert_eq!(rank(&only, "cinema skrillex remix", &|_| false).unwrap().0.key, "plain");
+    }
+
+    #[test]
+    fn a_liked_cover_isnt_the_song_and_altered_uploads_are_versions() {
+        let cover = t("Never Gonna Give You Up", "RadioClub", 200_000);
+        assert!(same_artist(&t("Never Gonna Give You Up", "Rick Astley", 213_000), "Rick Astley"));
+        assert!(!same_artist(&cover, "Rick Astley"));
+        assert!(same_artist(&t("Rick Astley - Never Gonna Give You Up", "some uploader", 213_000), "Rick Astley, X"));
+        assert!(names_version(&t("Rapture - Avicii New Generation Mix", "Nadia Ali", 221_000), "avicii rapture"));
+        assert!(!names_version(&t("Rapture (Avicii Remix) - Piano Version", "Pianostalgia FM", 208_000), "avicii rapture"));
+        assert!(is_version("Chelsea Dagger (Bass Boosted)") && is_version("Dancing Queen (8D Audio)") && is_version("Rapture - ABBA Tribute"));
     }
 
     #[test]
