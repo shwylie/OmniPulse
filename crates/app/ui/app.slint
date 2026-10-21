@@ -1822,6 +1822,8 @@ export component AppWindow inherits Window {
     in property <int> device-offset: -1;
     in property <bool> mixing;
     callback mix-toggle();
+    // a right-click on the title bar's Seamless Mix button, or a platform's: its settings ("smart", or the platform)
+    callback title-settings(string);
     // an edge or corner pressed: the window resized from it (0 top ... 7 bottom-right)
     callback resize(int);
 
@@ -1936,8 +1938,11 @@ export component AppWindow inherits Window {
                         fill: !root.mix-on ? Theme.muted : Theme.accent.mix(Theme.accent-2, 1 - parent.swing);
                         opacity: root.mix-on ? 1 : 0.55;
                     }
-                    TipSpot { hover: sta-m.has-hover; tip: root.mix-on ? "Seamless Mix (WIP): on. Click to turn it off." : "Seamless Mix (WIP): off. Click to mix songs into each other, on the beat where they can be."; }
-                    sta-m := TouchArea { clicked => { Tips.on = false; root.mix-toggle(); } }
+                    TipSpot { hover: sta-m.has-hover; tip: root.mix-on ? "Seamless Mix (WIP): on. Click to turn it off, right-click for its settings." : "Seamless Mix (WIP): off. Click to mix songs into each other, on the beat where they can be. Right-click for its settings."; }
+                    sta-m := TouchArea {
+                        clicked => { Tips.on = false; root.mix-toggle(); }
+                        pointer-event(e) => { if (e.kind == PointerEventKind.down && e.button == PointerEventButton.right) { Tips.on = false; root.title-settings("smart"); } }
+                    }
                 }
                 // the platforms: in their colours when on, plain when off
                 // (as the web app's: a rounded pill of rounded tiles, each tinted in its colour when on)
@@ -1967,8 +1972,11 @@ export component AppWindow inherits Window {
                                 fill: !p.on ? Theme.text : p.id == "spotify" ? #1ed760 : p.id == "youtube" ? #ff0033 : p.id == "local" ? #f2b544 : #ff5500;
                                 opacity: p.on ? 1 : !p.ready ? (ta-p.has-hover ? 0.5 : 0.25) : (ta-p.has-hover ? 0.7 : 0.4);
                             }
-                            TipSpot { hover: ta-p.has-hover; tip: p.name + (!p.ready ? ": not set up yet. Click to set it up." : p.on ? " is on. Click to hide it everywhere." : " is off. Click to show it again."); }
-                            ta-p := TouchArea { clicked => { Tips.on = false; root.plat-toggle(p.id); } }
+                            TipSpot { hover: ta-p.has-hover; tip: p.name + (!p.ready ? ": not set up yet. Click to set it up." : p.on ? " is on. Click to hide it everywhere, right-click for its settings." : " is off. Click to show it again, right-click for its settings."); }
+                            ta-p := TouchArea {
+                                clicked => { Tips.on = false; root.plat-toggle(p.id); }
+                                pointer-event(e) => { if (e.kind == PointerEventKind.down && e.button == PointerEventButton.right) { Tips.on = false; root.title-settings(p.id); } }
+                            }
                         }
                       }
                     }

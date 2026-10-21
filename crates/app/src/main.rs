@@ -9879,6 +9879,22 @@ fn main() -> Result<(), slint::PlatformError> {
     ui.set_mix_available(true);
     let s = shared.clone();
     ui.on_mix_toggle(move || set_toggle(&s, "smartOn"));
+    // (right-clicked in the title bar: Seamless Mix's own page; a platform's settings, where they are)
+    let s = shared.clone();
+    ui.on_title_settings(move |what| {
+        let Some(ui) = s.borrow().ui.upgrade() else { return };
+        go(&s, Place::Page("settings".into()));
+        // (whatever page of Settings was open, let go first)
+        PF_EDIT.with(|e| e.borrow_mut().take());
+        ui.set_pf_open(false);
+        ui.set_set_query("".into());
+        match what.as_str() {
+            "smart" => panel_open(&s, "smart"),
+            "local" => ui.set_set_cat("Library".into()),
+            p if p.starts_with("plugin") => ui.set_set_cat("Plugins".into()),
+            _ => ui.set_set_cat("Integrations".into()),
+        }
+    });
     let s = shared.clone();
     ui.on_close_to_tray_changed(move |on| set_look_pref(&s, "minToTray", serde_json::json!(on)));
     let s = shared.clone();
@@ -10853,6 +10869,8 @@ fn main() -> Result<(), slint::PlatformError> {
             // (OMNIPULSE_SELFTEST_PLAN=apple: Apple Music's sign-in window opened off-screen, Apple's page looked at, closed; nobody signs in)
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("apple") { vec![(6, "appleopen"), (16, "applecheck"), (17, "end")] }
             // (OMNIPULSE_SELFTEST_PLAN=tp: Track preferences for what plays, its bar dragged)
+            // (OMNIPULSE_SELFTEST_PLAN=titleset: the title bar's icons right-clicked: Seamless Mix's settings, then SoundCloud's)
+            else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("titleset") { vec![(9, "titleset:smart"), (11, "titleset:soundcloud"), (13, "end")] }
             // (OMNIPULSE_SELFTEST_PLAN=tallpanels: the Stream Widget's and the alerts' pages in a window tall enough for all of them)
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("tallpanels") { vec![(9, "size:1180:2600"), (10, "settings"), (11, "cat_Streaming"), (12, "p_widget"), (14, "p_alerts"), (16, "p_alertlist"), (18, "end")] }
             // (OMNIPULSE_SELFTEST_PLAN=side: the sidebar collapsed by hand, and Settings left for Discover)
@@ -10982,6 +11000,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 "search" => { ui.set_search_text("deadmau5".into()); ui.invoke_search("deadmau5".into()); }
                 "compact" => ui.invoke_density_changed(true),
                 "sidefold" => ui.set_side_collapsed(true),
+                w if w.starts_with("titleset:") => ui.invoke_title_settings(w[9..].into()),
                 "sideopen" => ui.set_side_collapsed(false),
                 "back" => { ui.invoke_back(); println!("selftest: back: page {}", s.borrow().page); }
                 w if w.starts_with("cat_") => ui.set_set_cat(w[4..].into()),
