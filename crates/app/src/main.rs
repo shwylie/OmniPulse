@@ -5381,7 +5381,7 @@ const SET_ROWS: [(&str, &str, &str, &str, bool); 28] = [
     ("Streaming", "Lyrics Widget", "The playing song's lyrics for OBS, for karaoke: the line being sung lit up as it's sung, the next ones under it. Settings for its look.", "lyricsWidget", false),
     ("Streaming", "Alerts", "On the widget: follows, subs, bits, raids and more, from your bot.", "alertsOn", false),
     ("Streaming", "Song Requests", "Chat asks for songs through your bot.", "req", false),
-    ("Streaming", "OmniPulse Offset", "Your music a second time, as its own app (\"OmniPulse Offset\"), to send to a stream mix only, with an offset and a volume of its own.", "out2On", false),
+    ("Streaming", "OmniPulse Offset", "Your music a second time, as its own app (\"OmniPulse Offset\"), to send to a stream mix only, with an offset and a volume of its own. Use this to sync up with mic delay.", "out2On", false),
     ("Streaming", "Stream Deck & Remote", "Control the app from a Stream Deck or another device.", "remoteOn", false),
 ];
 
