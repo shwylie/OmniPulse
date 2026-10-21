@@ -2521,6 +2521,7 @@ export component AppWindow inherits Window {
                         vertical-stretch: 1;
                         VerticalLayout {
                             spacing: 22px;
+                            alignment: start;
                             // (its own big search box, as the web app's: the same search as the bar's)
                             Rectangle {
                                 height: 56px;
@@ -3552,6 +3553,9 @@ export component AppWindow inherits Window {
                           padding-right: 10px;
                           // (room under the last one, clear of Cancel and Save)
                           padding-bottom: 24px;
+                          // (from the top, however tall the window: the room to spare under the last, never
+                          // shared out between them)
+                          alignment: start;
                           for f[i] in root.pf-fields: VerticalLayout {
                            spacing: 6px;
                            // instructions: just text

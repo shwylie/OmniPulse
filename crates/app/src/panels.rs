@@ -301,6 +301,9 @@ fn fields_of(name: &str, vals: &Map<String, Value>, prefs: &Value, lan: &str) ->
             let f = vec![
                 info("Address", &format!("http://127.0.0.1:{port}/"), &format!("http://127.0.0.1:{port}/"), "In OBS: a Browser source with this address."),
                 num("widgetPort", "Port", "1024 to 65535."),
+                // Alerts: on the widget, so here (Settings > Streaming > Stream Widget > Alerts): a switch, as
+                // every other, with Configure beside it; first, under where the widget's found
+                toggle_cfg("alertsOn", "Alerts", "On the widget: follows, subs, bits, raids and more, from your bot.", "alertsOpen"),
                 sel("widgetDesign", "Design", "", &[(json!("card"), "Card (460 × 130)"), (json!("bar"), "Slim bar (560 × 64)"), (json!("square"), "Square (300 × 380)"), (json!("minimal"), "Minimal (460 × 110)"), (json!("pill"), "Pill (480 × 80)"), (json!("vinyl"), "Vinyl (460 × 150)"), (json!("poster"), "Poster (480 × 270)"), (json!("ticker"), "Ticker (640 × 48)")]),
                 sel("widgetAlign", "Alignment", "", &[(json!("left"), "Left"), (json!("right"), "Right")]),
                 tog("widgetRounded", "Rounded Corners", ""),
@@ -315,9 +318,6 @@ fn fields_of(name: &str, vals: &Map<String, Value>, prefs: &Value, lan: &str) ->
                 tog("wRequester", "Show Who Requested It", ""),
                 sel("wColor", "Colour Change", "", &[(json!(0), "Instant"), (json!(0.5), "Fast"), (json!(1.2), "Normal"), (json!(2.5), "Slow")]),
                 button("widgetHide", "Hide This Track", "Hide", "Until the next track."),
-                // Alerts: on the widget, so here (Settings > Streaming > Stream Widget > Alerts): a switch, as
-                // every other, with Configure beside it
-                toggle_cfg("alertsOn", "Alerts", "On the widget: follows, subs, bits, raids and more, from your bot.", "alertsOpen"),
             ]);
             let _ = alerts_on;
             f
@@ -330,6 +330,8 @@ fn fields_of(name: &str, vals: &Map<String, Value>, prefs: &Value, lan: &str) ->
             let part = |k: &str| if vals["botRemote"].as_bool() == Some(true) && !k.is_empty() { format!("key={k}&") } else { String::new() };
             let url = |k: &str| format!("http://127.0.0.1:{port}/alert?{}{vars}", part(k));
             let types = "follow, sub, gift, bits, kicks, donation, raid, hypetrain, poll, ban, watchstreak, liked, game";
+            // (the alerts and how they look first; how your bot sends them after, in `setup`)
+            let mut look: Vec<Value> = vec![button("alList", "Alerts and Their Order", "Open", "Which alerts show and which goes first, and each one's words, picture and sound.")];
             let mut f = vec![sel("alertBot", "Your Bot", "", &[(json!("streamerbot"), "Streamer.bot"), (json!("mixitup"), "Mix It Up"), (json!("generic"), "Generic")])];
             if bot == "streamerbot" {
                 f.push(text("sbHost", "Streamer.bot", "Its WebSocket Server's address and port."));
@@ -372,6 +374,8 @@ fn fields_of(name: &str, vals: &Map<String, Value>, prefs: &Value, lan: &str) ->
                 }));
                 if bot != "mixitup" { f.extend(remote_bots(vals, "alerts", port, &format!("/alert?{}{vars}", part(&hide(&key))), lan)); }
             }
+            let setup = f;
+            let mut f = std::mem::take(&mut look);
             f.extend([
                 sel("alertTrans", "Transition", "", &[(json!("seamless"), "Seamless"), (json!("crossfade"), "Crossfade"), (json!("push"), "Slide Across"), (json!("flip"), "Flip"), (json!("wipe"), "Wipe"), (json!("collage"), "Collage"), (json!("overlay"), "Over the Top")]),
             ]);
@@ -392,7 +396,7 @@ fn fields_of(name: &str, vals: &Map<String, Value>, prefs: &Value, lan: &str) ->
             f.push(stepper("alertIcon", "Icon Size", "", pct(0.6, 2.0, 0.2)));
             f.push(sel("alertSecs", "Show For", "", &[(json!(3), "3 s"), (json!(5), "5 s"), (json!(8), "8 s"), (json!(12), "12 s")]));
             f.push(range("alertVol", "Sound Volume", "", 0.0, 1.0, 0.01, "%", false));
-            f.push(button("alList", "Alerts and Their Order", "Open", "Which alerts show and which goes first, and each one's words, picture and sound."));
+            f.extend(setup);
             f
         }
         // Discord Status: what it shows (as the web app's)
