@@ -6448,12 +6448,11 @@ fn library_load(shared: &Shared) {
         rt.spawn(async move {
             let t0 = std::time::Instant::now();
             let (sc, sp, lists) = tokio::join!(sources::soundcloud_likes(), sources::spotify_likes(500), sources::playlists());
-            let mut all: Vec<Track> = Vec::new();
-            all.extend(sc);
-            all.extend(sp);
-            all.extend(yt_likes);
-            // YouTube Music likes made here (the web app's are already in)
-            all.extend(marks::yt_likes());
+            // (each platform's likes newest first, taking turns: the Library mixes them track by track, not
+            // one platform's then the next's; YouTube Music's, the web app's and those made here, as one)
+            let mut yt = yt_likes;
+            yt.extend(marks::yt_likes());
+            let mut all: Vec<Track> = sources::interleave(vec![sc, sp, yt]);
             let mut seen = std::collections::HashSet::new();
             all.retain(|t| seen.insert(t.key.clone()));
             all.extend(sources::local_files());
