@@ -4244,7 +4244,7 @@ fn fav_track(shared: &Shared, t: Track) {
 /// Playing from a page: a list (Library, a playlist...) becomes the queue; one track from Search
 /// takes the current one's place and leaves the rest of the queue as it was
 fn play_list(shared: &Shared, list: Vec<Track>, i: usize) {
-    XFADE.with(|x| *x.borrow_mut() = None);
+    no_pulse(shared);
     // listening along: in a Jam, the song goes to the host to play next; otherwise playing it here
     // would mean leaving, so that's said instead (the Jam button leaves)
     if let Some(kind) = listening() {
@@ -4893,7 +4893,9 @@ fn tick(shared: &Shared, events: &std::sync::mpsc::Receiver<Event>, n: u64) {
     let Some(ui) = shared.borrow().ui.upgrade() else { return };
     // (album-art colours: your own accent while paused, the cover's again on play)
     {
-        let paused = { let a = shared.borrow(); a.loaded && a.engine.is_paused() };
+        // (paused by you: not a song being loaded after a skip, which held the engine still long enough to
+        // flash your accent in and the cover's back, as if a transition were under way)
+        let paused = { let a = shared.borrow(); a.loaded && a.engine.is_paused() && !ui.get_track_loading() };
         let since = PAUSED_SINCE.with(|p| { if !paused { p.set(None); } else if p.get().is_none() { p.set(Some(std::time::Instant::now())); } p.get() });
         let want = since.is_some_and(|s| s.elapsed().as_millis() >= 600);
         if want != ART_PAUSED.with(|p| p.get()) { ART_PAUSED.with(|p| p.set(want)); apply_look(shared); }
@@ -8392,8 +8394,16 @@ fn fade_out_ms(a: &App) -> Option<u64> {
 
 
 /// A skip by hand (the buttons, media keys, the remote): listening, it goes to the Jam's host
-fn skip_press(shared: &Shared, d: i32) {
+/// A change of song by hand (a skip, a pick): no crossfade's colour pulse carried over to it (it ran
+/// on the next cover shown, so a skip during or just after a crossfade flashed it as a transition)
+fn no_pulse(shared: &Shared) {
     XFADE.with(|x| *x.borrow_mut() = None);
+    XFADE_PULSE.with(|x| x.set(None));
+    if let Some(ui) = shared.borrow().ui.upgrade() { ui.global::<Theme>().set_pulsing(false); }
+}
+
+fn skip_press(shared: &Shared, d: i32) {
+    no_pulse(shared);
     // (skipped before it counted as a play: noted against its artist, for Discover)
     if d > 0 && listening().is_none() {
         let a = shared.borrow();
