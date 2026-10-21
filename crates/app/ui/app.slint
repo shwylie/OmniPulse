@@ -853,6 +853,12 @@ component TrackRow inherits Rectangle {
     // Ctrl+click picks it (or lets it go), Shift+click picks everything from the last one picked
     callback pick(int);
     property <bool> picking;
+    // (the pointer over its artist's name: that's a link to the artist, not the row's play)
+    property <length> px: ta.absolute-position.x + ta.mouse-x;
+    property <length> py: ta.absolute-position.y + ta.mouse-y;
+    property <bool> over-artist: ta.has-hover && root.item.artist != ""
+        && root.px >= art-t.absolute-position.x && root.px <= art-t.absolute-position.x + art-t.width
+        && root.py >= art-t.absolute-position.y && root.py <= art-t.absolute-position.y + art-t.height;
     height: Theme.row-h;
     border-radius: 6px;
     background: root.item.picked ? Theme.accent.with-alpha(0.2) : ta.has-hover ? Theme.elevated : root.item.version ? Theme.elevated.with-alpha(0.45) : transparent;
@@ -881,7 +887,7 @@ component TrackRow inherits Rectangle {
             Text { text: root.item.title; color: root.item.playing ? Theme.accent : Theme.text; font-weight: 700; font-size: 14px; overflow: elide; }
             HorizontalLayout {
                 spacing: 6px;
-                Text { text: root.item.artist; color: Theme.muted; font-size: 13px; overflow: elide; horizontal-stretch: 1; max-width: self.preferred-width; }
+                art-t := Text { text: root.item.artist; color: root.over-artist ? Theme.text : Theme.muted; font-size: 13px; overflow: elide; horizontal-stretch: 1; max-width: self.preferred-width; }
                 // (a collaborative playlist: who added it, as you hover over it)
                 if (ta.has-hover || root.item.picked) && root.item.added-by != "": Text { text: "Added by " + root.item.added-by; color: Theme.muted; font-size: 12px; overflow: elide; vertical-alignment: center; }
                 for g in root.item.genres: Rectangle {
@@ -912,6 +918,7 @@ component TrackRow inherits Rectangle {
       data: Dnd.payload("t:" + root.index);
       Rectangle {
         ta := TouchArea {
+            mouse-cursor: root.over-artist ? MouseCursor.pointer : MouseCursor.default;
             pointer-event(e) => {
                 if (e.kind == PointerEventKind.down && e.button == PointerEventButton.right) { cm1.open(self.mouse-x, self.mouse-y); }
                 if (e.kind == PointerEventKind.down && e.button == PointerEventButton.left) {
@@ -919,7 +926,12 @@ component TrackRow inherits Rectangle {
                     if (root.picking) { root.pick(e.modifiers.shift ? 2 : 1); }
                 }
             }
-            clicked => { if (!root.picking) { root.play(); } }
+            // (on its artist's name: that artist, the one of them under the pointer, as a share of the name's width)
+            clicked => {
+                if (root.picking) { return; }
+                if (root.over-artist) { root.act("artistat:" + Math.round((root.px - art-t.absolute-position.x) / max(1px, art-t.width) * 1000)); return; }
+                root.play();
+            }
         }
           // (on top: it only takes right-clicks, the rest goes through to what's under it)
           cm1 := TrackMenu {

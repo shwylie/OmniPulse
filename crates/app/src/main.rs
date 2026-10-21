@@ -2866,6 +2866,14 @@ fn track_act(shared: &Shared, t: &Track, act: &str) -> bool {
             paint_queue(&mut a);
             if let Some(ui) = a.ui.upgrade() { ui.set_status(note.into()); }
         }
+        // (a click on the artist's name, at a share of its width (in thousandths): the one of its names there)
+        a if a.starts_with("artistat:") => {
+            let at = a[9..].parse::<f64>().unwrap_or(0.0) / 1000.0;
+            let chars: Vec<char> = t.artist.chars().collect();
+            let i = ((at * chars.len() as f64) as usize).min(chars.len().saturating_sub(1));
+            let k = chars[..i].iter().filter(|c| matches!(c, ',' | '&')).count();
+            return track_act(shared, t, &format!("artist:{k}"));
+        }
         a if a.starts_with("artist:") => {
             let k: usize = a[7..].parse().unwrap_or(0);
             let name = t.artist.split([',', '&']).map(|x| x.trim()).filter(|x| !x.is_empty()).nth(k).unwrap_or(&t.artist).to_string();
@@ -10601,7 +10609,7 @@ fn main() -> Result<(), slint::PlatformError> {
             drop(a);
             return play_list(&s, list, i as usize);
         }
-        if matches!(act.as_str(), "like" | "fav" | "uploader" | "open" | "prefs" | "cleared") || act.starts_with("artist:") {
+        if matches!(act.as_str(), "like" | "fav" | "uploader" | "open" | "prefs" | "cleared") || act.starts_with("artist:") || act.starts_with("artistat:") {
             drop(a);
             track_act(&s, &t, &act);
             return;
