@@ -2367,7 +2367,7 @@ fn stats_detail(a: &App, ui: &AppWindow, list: &[&webstate::Play], since: u64, p
             for p in list { let e = plats.entry(if p.src.is_empty() { "soundcloud".into() } else { p.src.clone() }).or_default(); e.0 += 1; e.1 += p.ms; }
             let mut v: Vec<_> = plats.into_iter().collect();
             v.sort_by_key(|x| std::cmp::Reverse(x.1 .0));
-            let pname = |p: &str| match p { "spotify" => "Spotify", "youtube" => "YouTube Music", "local" => "Your files", "soundcloud" => "SoundCloud", other => other }.to_string();
+            let pname = |p: &str| plat_name(p).to_string();
             for (pl, (n, pms)) in v {
                 let mut tops: HashMap<String, usize> = HashMap::new();
                 for p in list.iter().filter(|p| (if p.src.is_empty() { "soundcloud" } else { p.src.as_str() }) == pl) { *tops.entry(first_artist(p)).or_default() += 1; }
@@ -2563,7 +2563,8 @@ fn open_stats(shared: &Shared, period: usize) {
     ui.set_st_streak_sub((if best > streak { format!("in a row, your best is {}", plural(best, "day", "days")) } else if streak > 1 { "in a row: your best yet".to_string() } else { "in a row".to_string() }).into());
     let mut plat_list: Vec<_> = plats.into_iter().collect();
     plat_list.sort_by_key(|x| std::cmp::Reverse(x.1));
-    let pname = |p: &str| match p { "spotify" => "Spotify", "youtube" => "YouTube Music", "local" => "Your files", _ => "SoundCloud" };
+    // (each by its own name: Deezer's, Apple Music's, MusicBrainz's and plugins' plays aren't SoundCloud's)
+    let pname = |p: &str| plat_name(p);
     ui.set_st_plats(ModelRc::from(Rc::new(VecModel::from(plat_list.iter().map(|(p, n)| Item { name: pname(p).into(), sub: format!("{}%", n * 100 / list.len()).into(), art: slint::Image::default(), plat: p.clone().into(), ..Default::default() }).collect::<Vec<_>>()))));
     // the song on repeat (played most in one day, three times or more), then a few facts, different each
     // visit (the web app's statFacts)
