@@ -9560,6 +9560,7 @@ fn apply_look(shared: &Shared) {
     let name = prefs["appName"].as_str().unwrap_or("").trim().to_string();
     ui.set_title_prompt(name.is_empty() && plat_on(prefs, "soundcloud") && !omnipulse_core::soundcloud::signed_in());
     if ui.get_app_name().trim() != name { ui.set_app_name(name.into()); }
+    ui.set_side_collapsed(prefs["sideCollapsed"].as_bool() == Some(true));
     t.set_bg(p.bg.slint());
     t.set_panel(p.panel.slint());
     // (the accents' blends go into the theme without its tint)
@@ -9839,6 +9840,12 @@ fn main() -> Result<(), slint::PlatformError> {
     ui.on_follow_click(move || follow_click(&s));
     let s = shared.clone();
     ui.on_follow_more_click(move || follow_more_click(&s));
+    let s = shared.clone();
+    ui.on_side_collapse(move |on| {
+        let v = serde_json::json!(on);
+        if let Some(o) = s.borrow_mut().web.prefs.as_object_mut() { o.insert("sideCollapsed".into(), v.clone()); }
+        if std::env::var_os("OMNIPULSE_SELFTEST").is_none() { webstate::save_pref("sideCollapsed", v); }
+    });
     let s = shared.clone();
     ui.on_nav_hide(move |id| {
         let key = match id.as_str() { "navFavourites" => "favPage", "navSets" => "setsOn", _ => "statsShown" };
@@ -10845,6 +10852,8 @@ fn main() -> Result<(), slint::PlatformError> {
             // (OMNIPULSE_SELFTEST_PLAN=apple: Apple Music's sign-in window opened off-screen, Apple's page looked at, closed; nobody signs in)
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("apple") { vec![(6, "appleopen"), (16, "applecheck"), (17, "end")] }
             // (OMNIPULSE_SELFTEST_PLAN=tp: Track preferences for what plays, its bar dragged)
+            // (OMNIPULSE_SELFTEST_PLAN=side: the sidebar collapsed by hand, and Settings left for Discover)
+            else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("side") { vec![(9, "library"), (11, "sidefold"), (13, "sideopen"), (14, "settings"), (16, "discover"), (18, "back"), (20, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("setfit") { vec![(9, "play"), (10, "queue"), (11, "size:1150:530"), (12, "nav:settings"), (13, "cat:Sound"), (14, "scroll:4000"), (16, "cat:Integrations"), (17, "scroll:-4000"), (19, "end")] }
             // (OMNIPULSE_SELFTEST_PLAN=pagespeed: the Library, Discover and Rediscover opened twice each, timed with OMNIPULSE_PAGE_TIMING)
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("pagespeed") { vec![(8, "nav:library"), (11, "nav:discover"), (40, "nav:rediscover"), (43, "nav:library"), (46, "nav:discover"), (49, "nav:rediscover"), (52, "end")] }
@@ -10969,6 +10978,9 @@ fn main() -> Result<(), slint::PlatformError> {
                 }
                 "search" => { ui.set_search_text("deadmau5".into()); ui.invoke_search("deadmau5".into()); }
                 "compact" => ui.invoke_density_changed(true),
+                "sidefold" => ui.set_side_collapsed(true),
+                "sideopen" => ui.set_side_collapsed(false),
+                "back" => { ui.invoke_back(); println!("selftest: back: page {}", s.borrow().page); }
                 w if w.starts_with("cat_") => ui.set_set_cat(w[4..].into()),
                 w if w.starts_with("ss_") => { ui.set_search_text(w[3..].into()); ui.invoke_search_edited(w[3..].into()); println!("selftest: settings search \"{}\": {}", &w[3..], ui.get_set_hits().iter().take(6).map(|h| format!("{} ({})", h.label, h.path)).collect::<Vec<_>>().join("; ")); }
                 "spplay" => {
@@ -11498,6 +11510,10 @@ fn main() -> Result<(), slint::PlatformError> {
 
     // (run until quit, not until the window hides: with Close to Tray the app stays in the tray)
     ui.show()?;
+    // (a self-test's window off the screen: its pictures are taken all the same, and it's never in your way)
+    if std::env::var_os("OMNIPULSE_SELFTEST").is_some() && std::env::var_os("OMNIPULSE_SELFTEST_ONSCREEN").is_none() {
+        ui.window().set_position(slint::PhysicalPosition::new(-4000, 0));
+    }
     slint::run_event_loop_until_quit()?;
     let _ = ui.hide();
     drop(rt);

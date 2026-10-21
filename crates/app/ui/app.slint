@@ -1392,6 +1392,10 @@ export component AppWindow inherits Window {
     // narrower than 980 px (as the web app: set from Rust as the window changes): the sidebar down to
     // its icons, no volume slider
     in property <bool> narrow;
+    // the sidebar collapsed to its icons by hand (its button, as Twitch's), kept; or by a narrow window
+    in-out property <bool> side-collapsed;
+    callback side-collapse(bool);
+    property <bool> slim-side: root.narrow || root.side-collapsed;
     in property <[Item]> artists;
     in-out property <bool> fav-only;
     in property <bool> shuffle-on;
@@ -2045,12 +2049,23 @@ export component AppWindow inherits Window {
             spacing: 8px;
             // ---------- sidebar ----------
             Rectangle {
-                width: root.narrow ? 68px : 230px;
+                width: root.slim-side ? 68px : 230px;
                 background: Theme.panel;
                 border-radius: Theme.panel-radius;
                 VerticalLayout {
                     padding: 10px;
                     spacing: 2px;
+                    // (collapse to its icons, or expand again; a narrow window keeps it collapsed)
+                    if !root.narrow: HorizontalLayout {
+                        alignment: root.side-collapsed ? center : end;
+                        height: 26px;
+                        IconButton {
+                            size: 26px;
+                            tip: root.side-collapsed ? "Expand the sidebar" : "Collapse the sidebar";
+                            d: root.side-collapsed ? "M8.6 16.6 13.2 12 8.6 7.4 10 6l6 6-6 6z" : "M15.4 16.6 10.8 12l4.6-4.6L14 6l-6 6 6 6z";
+                            clicked => { root.side-collapsed = !root.side-collapsed; root.side-collapse(root.side-collapsed); }
+                        }
+                    }
                     for id in root.nav-ids: ndz := DropArea {
                         height: 38px;
                         can-drop(e) => { return Dnd.accepts("nav:" + id, e.data) ? DragAction.move : DragAction.none; }
@@ -2061,7 +2076,7 @@ export component AppWindow inherits Window {
                             allow-move: true;
                             data: Dnd.payload("n:" + id);
                             Rectangle {
-                                NavItem { right-click(x, y) => { cm3.open(x, y); } label: root.nav-label(id); d: root.nav-icon(id); spin: id == "navFavourites"; compact: root.narrow; active: root.nav-active(id); clicked => { root.nav(root.nav-page(id)); } }
+                                NavItem { right-click(x, y) => { cm3.open(x, y); } label: root.nav-label(id); d: root.nav-icon(id); spin: id == "navFavourites"; compact: root.slim-side; active: root.nav-active(id); clicked => { root.nav(root.nav-page(id)); } }
                                 // (on top: it only takes right-clicks, the rest goes through to what's under it)
                                 cm3 := CtxMenu {
                                     width: 100%; height: 100%;
@@ -2078,7 +2093,7 @@ export component AppWindow inherits Window {
                         }
                     }
                     Rectangle { height: 10px; }
-                    if !root.narrow: HorizontalLayout {
+                    if !root.slim-side: HorizontalLayout {
                         padding-left: 12px;
                         Text { text: "Playlists"; color: Theme.muted; font-size: 12px; font-weight: 700; vertical-alignment: center; horizontal-stretch: 1; }
                         Rectangle { width: 26px; height: 26px;
@@ -2097,7 +2112,7 @@ export component AppWindow inherits Window {
                             }
                         }
                     }
-                    if root.narrow: Rectangle { height: 1px; background: Theme.line; }
+                    if root.slim-side: Rectangle { height: 1px; background: Theme.line; }
                     ListView {
                         vertical-stretch: 1;
                         // (the last one with room below it, clear of the track tab)
@@ -2109,11 +2124,11 @@ export component AppWindow inherits Window {
                             border-width: sdz.has-drag ? 1px : 0px;
                             border-color: Theme.accent;
                             HorizontalLayout {
-                                padding-left: root.narrow ? 0px : 12px;
+                                padding-left: root.slim-side ? 0px : 12px;
                                 spacing: 10px;
-                                alignment: root.narrow ? center : start;
+                                alignment: root.slim-side ? center : start;
                                 PlatIcon { plat: s.plat; width: 14px; height: 14px; y: (parent.height - self.height) / 2; }
-                                if !root.narrow: Text { text: s.title; color: root.side-on == i ? Theme.text : Theme.muted; font-size: 13px; vertical-alignment: center; overflow: elide; }
+                                if !root.slim-side: Text { text: s.title; color: root.side-on == i ? Theme.text : Theme.muted; font-size: 13px; vertical-alignment: center; overflow: elide; }
                             }
                             sdz := DropArea {
                               can-drop(e) => { return Dnd.accepts("side:" + i, e.data) ? DragAction.copy : DragAction.none; }
@@ -3401,7 +3416,7 @@ export component AppWindow inherits Window {
                         // (the page's room, from the window: the sidebar's and the queue's taken off. Short of
                         // it, the middle gives way: a narrower column, its buttons one above another, and the
                         // cover above the lyrics instead)
-                        property <length> room: root.width - (root.narrow ? 68px : 230px) - (root.queue-open ? 300px : 0px) - 60px;
+                        property <length> room: root.width - (root.slim-side ? 68px : 230px) - (root.queue-open ? 300px : 0px) - 60px;
                         property <bool> slim: room < 780px;
                         spacing: slim ? 18px : 30px;
                         padding-top: 10px;
@@ -3768,7 +3783,7 @@ export component AppWindow inherits Window {
                         x: root.tab-right ? parent.width - self.width : 0;
                         // never narrower than the panel above it: the sidebar (on the left), or the queue
                         // (on the right, while it's open), so their edges line up
-                        property <length> floor: root.tab-right ? (root.queue-open ? 300px : 0) : (root.narrow ? 68px : 230px);
+                        property <length> floor: root.tab-right ? (root.queue-open ? 300px : 0) : (root.slim-side ? 68px : 230px);
                         width: min(max(info.preferred-width + 38px, self.floor), root.width - 40px);
                         animate width { duration: Theme.motion ? 320ms : 0ms; easing: cubic-bezier(0.2, 0.8, 0.2, 1); }
                         height: parent.height;
