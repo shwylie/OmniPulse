@@ -363,6 +363,20 @@ enum Place {
 
 /// Opens a place, remembering the one you were on (so Back returns to it)
 fn go(shared: &Shared, place: Place) {
+    // (another page picked from Settings: Settings closed, as its own Close does, and left out of Back's
+    // history: Back goes to where you were before it)
+    let settings = Place::Page("settings".into());
+    let leaving_settings = place != settings && shared.borrow().here.as_ref() == Some(&settings);
+    if leaving_settings {
+        PF_EDIT.with(|e| e.borrow_mut().take());
+        if let Some(ui) = shared.borrow().ui.upgrade() {
+            ui.set_pf_open(false);
+            ui.set_set_cat("".into());
+            ui.set_set_query("".into());
+            ui.set_search_text("".into());
+        }
+        shared.borrow_mut().here = None;
+    }
     {
         let mut a = shared.borrow_mut();
         if let Some(here) = a.here.take() {
