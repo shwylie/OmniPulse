@@ -140,6 +140,29 @@ pub fn same(a: &Value, b: &Value) -> bool {
     match (a.as_f64(), b.as_f64()) { (Some(x), Some(y)) => (x - y).abs() < 1e-9, _ => a == b }
 }
 
+/// Streamer.bot's reply, posted on the platform the command came from (its %commandSource%): a Twitch
+/// Send Message sub-action answers on Twitch whatever chat asked
+const SB_REPLY_CODE: &str = r#"using System;
+
+public class CPHInline
+{
+    public bool Execute()
+    {
+        // what OmniPulse answered (Fetch URL's variable), and the chat the command came from
+        if (!CPH.TryGetArg("reply", out string reply) || string.IsNullOrWhiteSpace(reply)) return true;
+        CPH.TryGetArg("commandSource", out string source);
+        switch ((source ?? "").ToLowerInvariant())
+        {
+            case "youtube": CPH.SendYouTubeMessage(reply); break;
+            case "kick": CPH.SendKickMessage(reply); break;
+            case "trovo": CPH.SendTrovoMessage(reply); break;
+            default: CPH.SendMessage(reply); break;
+        }
+        return true;
+    }
+}
+"#;
+
 fn tog(key: &str, label: &str, note: &str) -> Value { json!({ "key": key, "label": label, "note": note, "type": "toggle" }) }
 fn num(key: &str, label: &str, note: &str) -> Value { json!({ "key": key, "label": label, "note": note, "type": "number" }) }
 fn text(key: &str, label: &str, note: &str) -> Value { json!({ "key": key, "label": label, "note": note, "type": "text" }) }
@@ -245,7 +268,7 @@ fn fields_of(name: &str, vals: &Map<String, Value>, prefs: &Value, lan: &str) ->
             let steps = match bot.as_str() {
                 "mixitup" => "1. Create a Chat Command such as !sr.\n2. Add a Web Request action, paste the request address, and set the response to plain text.\n3. Add a Chat action that sends $webrequestresult.\n4. For !song: the same again with the now playing address.\n5. For !wrongsong: the same again with the wrong song address ($userroles tells it who's a moderator). A viewer takes back their last request; a moderator, or you, takes back the last one anyone made.\nIf $webrequestresult doesn't post anything in your version, check Mix It Up's list of special identifiers for the web request result.",
                 "other" => "Any bot that can call a web address and post the reply in chat will work:\n1. Call /request with key (required, from here), q (what was asked for: search words or a SoundCloud or Spotify link) and user (who asked; used for the per-viewer limit and \"requested by\").\n2. Text in q and user must be URL-encoded (spaces as %20). Most bots have an encoded version of the message variable.\n3. The reply is one line of plain text, ready to post in chat. Add &format=json to get JSON instead: ok, message, title, artist, url and position.\n4. Call /now for the current song (no key needed). It also supports &format=json.\n5. Call /wrongsong with key, user and mod (true for a moderator, or a list of their roles with Moderator or Streamer in it) to take back that viewer's last request; a moderator's takes back the last one anyone made.",
-                _ => "1. Create an Action called Song request, with a Command trigger such as !sr.\n2. Add the sub-action Core > Network > Fetch URL, paste the request address, and set its variable name to reply.\n3. Add the sub-action Twitch > Chat > Send Message to Channel with the message %reply%.\n4. For !song: the same again with the now playing address.\n5. For !wrongsong: the same again with the wrong song address. A viewer takes back their last request; a moderator takes back the last one anyone made.\nIf your version names things slightly differently, look for the sub-action that fetches a URL and saves the reply in a variable.",
+                _ => "1. Create an Action called Song request, with a Command trigger such as !sr.\n2. Add the sub-action Core > Network > Fetch URL, paste the request address, and set its variable name to reply.\n3. Add the sub-action Core > C# > Execute C# Code, paste the Reply Code below into it, and Compile. It posts %reply% back on the platform the command came from (Twitch, YouTube, Kick or Trovo). A Twitch Send Message sub-action would answer on Twitch, whatever chat asked.\n4. For !song: the same again with the now playing address.\n5. For !wrongsong: the same again with the wrong song address. A viewer takes back their last request; a moderator takes back the last one anyone made.\nIf your version names things slightly differently, look for the sub-action that fetches a URL and saves the reply in a variable.",
             };
             let mut f = vec![
                 sel("reqBot", "Chat Bot", "", &[(json!("streamerbot"), "Streamer.bot"), (json!("mixitup"), "Mix It Up"), (json!("other"), "Generic")]),
@@ -253,6 +276,11 @@ fn fields_of(name: &str, vals: &Map<String, Value>, prefs: &Value, lan: &str) ->
                 info("Now Playing Address (!song)", &format!("{base}/now"), &format!("{base}/now"), ""),
                 info("Wrong Song Address (!wrongsong)", &wrong(&hide(&key)), &wrong(&key), ""),
                 note(steps),
+            ];
+            if bot == "streamerbot" {
+                f.push(info("Reply Code (for Execute C# Code)", "Copy it, then paste it into the sub-action", SB_REPLY_CODE, ""));
+            }
+            f.extend([
                 tog("reqRadioEdit", "Prefer Radio Edits", "Plays a long song's radio edit, if there is one."),
                 note("Limits"),
                 tog("reqLimits", "Limit Requests", "The most waiting, and the most per viewer. Off: chat can request as many songs as it likes."),
@@ -263,7 +291,7 @@ fn fields_of(name: &str, vals: &Map<String, Value>, prefs: &Value, lan: &str) ->
                 button("repliesOpen", "Chat Replies", "Configure", "What your bot posts back in chat, in your own words."),
                 num("reqPort", "Port", "1024 to 65535."),
                 button("reqNewKey", "Secret Key", "New Key", "A new key: your bot needs the new addresses after."),
-            ];
+            ]);
             f.extend(remote_bots(vals, "requests", port, &format!("/request?key={}&user=USERNAME&q=SONG", hide(&key)), lan));
             f
         }
