@@ -4928,6 +4928,8 @@ fn tick(shared: &Shared, events: &std::sync::mpsc::Receiver<Event>, n: u64) {
         if want != ART_PAUSED.with(|p| p.get()) { ART_PAUSED.with(|p| p.set(want)); apply_look(shared); }
     }
     if n % 40 == 8 { lfm_heard_sync(shared); }
+    // (the beat model let go once it's sat unused a minute: loaded again when a song's next measured)
+    if n % 120 == 60 { omnipulse_core::rhythm::release_model(std::time::Duration::from_secs(60)); }
     // a page loading: its platforms, ticked as each answers
     {
         let page = shared.borrow().page.clone();
@@ -6487,6 +6489,8 @@ fn set_toggle(shared: &Shared, key: &str) {
                 cast_end(shared, Some("Chromecast off: playing here again.".into()));
             }
             if key == "smartOn" { if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_mix_on(on); } }
+            // (Seamless Mix off: its beat model let go now, not kept for nothing)
+            if key == "smartOn" && !on { omnipulse_core::rhythm::release_model(std::time::Duration::ZERO); }
             if key == "favPage" {
                 if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_fav_page(on); }
                 if !on && shared.borrow().page == "favourites" { open_page(shared, "library"); }

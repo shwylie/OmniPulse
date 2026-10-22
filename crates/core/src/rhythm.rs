@@ -301,29 +301,52 @@ pub fn camelot(tonic: usize, minor: bool) -> String {
 /// Mono samples at the analysis rate (for kick_strength)
 pub fn at_analysis_rate(mono: &[f32], rate: u32) -> Vec<f32> { to_analysis_rate(mono, rate) }
 
-/// Beat This!'s model, loaded once (its files written next to the app's data the first time)
 #[cfg(feature = "model")]
-fn beat_model() -> Option<&'static std::sync::Mutex<beat_this::BeatThis<<beat_this::RtenRuntime as beat_this::Runtime>::Model>>> {
-    static M: std::sync::OnceLock<Option<std::sync::Mutex<beat_this::BeatThis<<beat_this::RtenRuntime as beat_this::Runtime>::Model>>>> = std::sync::OnceLock::new();
-    M.get_or_init(|| {
-        // (one thread for it, at background priority: it's seconds of work a song, done ahead, and never
-        // to be had at a game's expense; set before its pool's first use, which reads it)
+type BeatModel = beat_this::BeatThis<<beat_this::RtenRuntime as beat_this::Runtime>::Model>;
+
+/// Beat This!'s model while it's in use: loaded when a song's measured, let go once it's been idle a
+/// while or Seamless Mix is switched off (release_model): none of its memory kept for nothing
+#[cfg(feature = "model")]
+static MODEL: std::sync::Mutex<Option<(BeatModel, std::time::Instant)>> = std::sync::Mutex::new(None);
+
+/// The model, loaded if it isn't (its files written next to the app's data the first time), for `f`
+#[cfg(feature = "model")]
+fn with_model<R>(f: impl FnOnce(&mut BeatModel) -> R) -> Option<R> {
+    // (one thread for it, at background priority: it's seconds of work a song, done ahead, and never to
+    // be had at a game's expense; set before its pool's first use, which reads it, and only once)
+    static POOL: std::sync::Once = std::sync::Once::new();
+    POOL.call_once(|| {
         if std::env::var_os("RTEN_NUM_THREADS").is_none() {
             // SAFETY: set once, before the model's thread pool is made; nothing else reads it
             unsafe { std::env::set_var("RTEN_NUM_THREADS", "1") };
         }
         rten::thread_pool().run(background_begin);
+    });
+    let mut g = MODEL.lock().ok()?;
+    if g.is_none() {
         let dir = crate::data_dir().ok()?.join("models");
         std::fs::create_dir_all(&dir).ok()?;
         let put = |name: &str, bytes: &[u8]| -> Option<std::path::PathBuf> {
             let p = dir.join(name);
-            if std::fs::metadata(&p).map(|m| m.len() as usize) .ok() != Some(bytes.len()) { std::fs::write(&p, bytes).ok()?; }
+            if std::fs::metadata(&p).map(|m| m.len() as usize).ok() != Some(bytes.len()) { std::fs::write(&p, bytes).ok()?; }
             Some(p)
         };
         let mel = put("mel_spectrogram.onnx", include_bytes!("../models/mel_spectrogram.onnx"))?;
         let beats = put("beat_this_small.onnx", include_bytes!("../models/beat_this_small.onnx"))?;
-        beat_this::BeatThis::new(&beat_this::RtenRuntime, &mel, &beats).ok().map(std::sync::Mutex::new)
-    }).as_ref()
+        *g = Some((beat_this::BeatThis::new(&beat_this::RtenRuntime, &mel, &beats).ok()?, std::time::Instant::now()));
+    }
+    let (m, used) = g.as_mut()?;
+    *used = std::time::Instant::now();
+    Some(f(m))
+}
+
+/// The model let go if it hasn't been used for `idle` (Duration::ZERO: now): loaded again when it's next needed
+pub fn release_model(idle: std::time::Duration) {
+    #[cfg(feature = "model")]
+    if let Ok(mut g) = MODEL.try_lock() {
+        if g.as_ref().is_some_and(|(_, used)| used.elapsed() >= idle) { *g = None; }
+    }
+    let _ = idle;
 }
 
 /// The thread calling this in the background from now on (Windows: its CPU and disk priority lowered, so
@@ -449,7 +472,7 @@ fn model_windowed(mono: &[f32], rate: u32) -> Option<ModelBeats> {
 
 #[cfg(feature = "model")]
 fn model_run(mono: &[f32], rate: u32) -> Option<ModelBeats> {
-    let a = beat_model()?.lock().ok()?.analyze_audio(mono, rate).ok()?;
+    let a = with_model(|m| m.analyze_audio(mono, rate))?.ok()?;
     // (its own beats' tempo: the gaps between them near their median, averaged: they're whole frames of
     // 20 ms, so one gap alone is up to 2% out)
     let mut gaps: Vec<f64> = a.beats.windows(2).map(|w| (w[1] - w[0]) as f64).filter(|g| *g > 0.2 && *g < 1.5).collect();
