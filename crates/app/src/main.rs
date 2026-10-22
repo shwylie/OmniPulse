@@ -11,6 +11,21 @@ mod plugrun;
 mod collab;
 mod desktop;
 mod instance;
+// (a measuring build: every allocation counted, so the heap in use can be told from the rest)
+#[cfg(feature = "memcount")]
+mod memcount {
+    use std::alloc::{GlobalAlloc, Layout, System};
+    use std::sync::atomic::{AtomicIsize, Ordering};
+    pub static LIVE: AtomicIsize = AtomicIsize::new(0);
+    pub struct Counting;
+    unsafe impl GlobalAlloc for Counting {
+        unsafe fn alloc(&self, l: Layout) -> *mut u8 { LIVE.fetch_add(l.size() as isize, Ordering::Relaxed); unsafe { System.alloc(l) } }
+        unsafe fn dealloc(&self, p: *mut u8, l: Layout) { LIVE.fetch_sub(l.size() as isize, Ordering::Relaxed); unsafe { System.dealloc(p, l) } }
+        unsafe fn realloc(&self, p: *mut u8, l: Layout, n: usize) -> *mut u8 { LIVE.fetch_add(n as isize - l.size() as isize, Ordering::Relaxed); unsafe { System.realloc(p, l, n) } }
+    }
+    #[global_allocator]
+    static A: Counting = Counting;
+}
 mod aimusic;
 mod loading;
 mod viz;
@@ -776,9 +791,9 @@ fn search_paint(shared: &Shared) {
     let gen = SEARCH_GEN.with(|g| { g.set(g.get() + 1); g.get() });
     rt.spawn(async move {
         for (s, k, url) in wanted {
-            if let Some(px) = player::fetch_art(url.clone(), 200).await {
+            if let Some(px) = player::fetch_art(url.clone(), art_px(170.0)).await {
                 let _ = weak.upgrade_in_event_loop(move |_| {
-                    SEARCH_ART.with(|c| c.borrow_mut().insert(url, px.clone()));
+                    SEARCH_ART.with(|c| { let mut c = c.borrow_mut(); if c.len() >= 240 { c.clear(); } c.insert(url, px.clone()); });
                     if SEARCH_GEN.with(|g| g.get()) != gen { return; }
                     SHELF_MODELS.with(|m| { if let Some(model) = m.borrow().get(s) { if let Some(mut t) = model.row_data(k) { t.art = slint::Image::from_rgba8(px); model.set_row_data(k, t); } } });
                 });
@@ -916,7 +931,7 @@ fn library_albums(shared: &Shared) {
         });
         for (k, url) in arts.into_iter().enumerate() {
             if url.is_empty() { continue; }
-            if let Some(px) = player::fetch_art(url, 200).await {
+            if let Some(px) = player::fetch_art(url, art_px(170.0)).await {
                 let _ = weak2.upgrade_in_event_loop(move |_| ALBUM_MODEL.with(|m| {
                     if let Some(model) = m.borrow().as_ref() { if let Some(mut t) = model.row_data(k) { t.art = slint::Image::from_rgba8(px); model.set_row_data(k, t); } }
                 }));
@@ -1439,7 +1454,7 @@ fn artist_albums(shared: &Shared) {
         });
         for (k, url) in arts.into_iter().enumerate() {
             if url.is_empty() { continue; }
-            if let Some(px) = player::fetch_art(url, 200).await {
+            if let Some(px) = player::fetch_art(url, art_px(170.0)).await {
                 let _ = weak2.upgrade_in_event_loop(move |_| ALBUM_MODEL.with(|m| {
                     if let Some(model) = m.borrow().as_ref() { if let Some(mut t) = model.row_data(k) { t.art = slint::Image::from_rgba8(px); model.set_row_data(k, t); } }
                 }));
@@ -1630,7 +1645,7 @@ fn open_discover_fresh(shared: &Shared) {
         for (s, list) in arts.into_iter().enumerate() {
             for (k, url) in list.into_iter().enumerate() {
                 if url.is_empty() { continue; }
-                if let Some(px) = player::fetch_art(url, 200).await {
+                if let Some(px) = player::fetch_art(url, art_px(170.0)).await {
                     let _ = weak2.upgrade_in_event_loop(move |_| {
                         SHELF_MODELS.with(|m| {
                             if let Some(model) = m.borrow().get(s) {
@@ -2706,7 +2721,16 @@ fn windows_offset() -> i64 {
 // ---------- covers in the track list ----------
 // Only the rows in view (and a few either side) get theirs, a few at a time, kept in a small cache,
 // so a list of thousands stays light. The list says which rows are in view (rows-in-view).
-const ART_KEEP: usize = 600;
+const ART_KEEP: usize = 300;
+
+/// The screen's scale (100 is 100%), for covers decoded at the size they're shown
+static UI_SCALE: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(100);
+
+/// A cover's size in pixels, for one shown at `logical` px on this screen (at least that, at most twice it)
+fn art_px(logical: f32) -> u32 {
+    let scale = (UI_SCALE.load(std::sync::atomic::Ordering::Relaxed) as f32 / 100.0).clamp(1.0, 2.0);
+    (logical * scale).ceil() as u32
+}
 const ART_AT_ONCE: usize = 16;
 
 #[derive(Default)]
@@ -2789,7 +2813,7 @@ fn rows_art(shared: &Shared) {
         }
         let weak = weak.clone();
         rt.spawn(async move {
-            let px = player::fetch_art(url.clone(), 80).await;
+            let px = player::fetch_art(url.clone(), art_px(44.0)).await;
             let _ = weak.upgrade_in_event_loop(move |_| {
                 ROW_ART.with(|c| {
                     let mut c = c.borrow_mut();
@@ -4762,6 +4786,8 @@ fn smart_fade_tick(shared: &Shared, key: &str, pos: u64, dur: u64) -> Option<boo
     // (what's left of it, if the moment's gone by: a blend that couldn't be got ready, a seek)
     let ms = f.len_ms().min((left.max(0) as u64).max(smart::MIN_FADE_MS));
     let why = SMART_PAIR.with(|s| s.borrow().as_ref().map(|x| x.3.clone())).unwrap_or_default();
+    // (in the log too, why it's a fade and not a blend: what to look at when they're all fades)
+    omnipulse_core::diag::note(&format!("Seamless Mix: a fade, not a blend ({} into {}): {}", a.t.title, b.t.title, if why.is_empty() { "neither measured yet" } else { why.as_str() }));
     MIX_WHY.with(|m| *m.borrow_mut() = Some((a.t.key.clone(), b.t.key.clone(), format!("smart fade: {ms} ms from {} to {}, the next one from {} ms (not on the beat: {why})", f.out_from_ms, f.out_to_ms, f.in_from_ms))));
     FADE.with(|fd| *fd.borrow_mut() = (true, key.to_string()));
     XFADE.with(|x| *x.borrow_mut() = Some((ms, std::time::Instant::now())));
@@ -4936,6 +4962,12 @@ fn tick(shared: &Shared, events: &std::sync::mpsc::Receiver<Event>, n: u64) {
     if n % 120 == 60 { omnipulse_core::rhythm::release_model(std::time::Duration::from_secs(60)); }
     // Now Playing's visualiser: running only while it's shown, playing, with a style picked
     viz_update(shared, &ui);
+    #[cfg(feature = "memcount")]
+    if n % 20 == 0 && std::env::var_os("OMNIPULSE_SELFTEST").is_some() {
+        let a = shared.borrow();
+        println!("memcount: heap {:.1} MB; page {}, library {}, page tracks {}", memcount::LIVE.load(std::sync::atomic::Ordering::Relaxed) as f64 / 1048576.0, a.page, a.library.len(), a.page_tracks.len());
+    }
+    UI_SCALE.store((ui.window().scale_factor() * 100.0).round() as u32, std::sync::atomic::Ordering::Relaxed);
     // a page loading: its platforms, ticked as each answers
     {
         let page = shared.borrow().page.clone();
@@ -8487,9 +8519,10 @@ fn fade_out_ms(a: &App) -> Option<u64> {
 /// The visualiser on or off, as Now Playing is: on only while it's shown, playing, a style picked (the
 /// engine's tap and its timer stopped otherwise: nothing of it running for nothing)
 fn viz_update(shared: &Shared, ui: &AppWindow) {
-    let (style, on_now, on_bar) = {
+    let (style, on_now, on_bar, on_widget) = {
         let p = &shared.borrow().web.prefs;
-        (p["nowViz"].as_str().unwrap_or("off").to_string(), p["vizNow"].as_bool() != Some(false), p["vizBar"].as_bool() == Some(true))
+        (p["nowViz"].as_str().unwrap_or("off").to_string(), p["vizNow"].as_bool() != Some(false), p["vizBar"].as_bool() == Some(true),
+         p["taskbarWidget"].as_bool() == Some(true) && p["widgetViz"].as_bool() == Some(true))
     };
     if ui.get_viz_style() != style.as_str() { ui.set_viz_style(style.clone().into()); }
     if ui.get_viz_now() != on_now { ui.set_viz_now(on_now); }
@@ -8498,7 +8531,9 @@ fn viz_update(shared: &Shared, ui: &AppWindow) {
     let want = {
         let a = shared.borrow();
         let shown = ui.get_viz_full() || (on_now && a.page == "now") || on_bar;
-        style != "off" && shown && a.loaded && !a.engine.is_paused() && ui.window().is_visible() && !ui.window().is_minimized()
+        // (the taskbar widget's is in sight with the window minimized or in the tray)
+        let in_sight = shown && ui.window().is_visible() && !ui.window().is_minimized();
+        style != "off" && (in_sight || on_widget) && a.loaded && !a.engine.is_paused()
     };
     let running = VIZ.with(|v| v.borrow().is_some());
     if want == running { return; }
@@ -8519,7 +8554,9 @@ fn viz_update(shared: &Shared, ui: &AppWindow) {
             for (i, v) in b.into_iter().enumerate() { m.set_row_data(i, v); }
             for (i, v) in viz::peaks(&b).into_iter().enumerate() { tops.set_row_data(i, v); }
             for (i, v) in viz::curve(&b).into_iter().enumerate() { wave.set_row_data(i, v); }
-            if let Some(ui) = w.upgrade() { ui.set_viz_level(viz::level(&b)); }
+            let l = viz::level(&b);
+            if let Some(ui) = w.upgrade() { ui.set_viz_level(l); }
+            TBW.with(|t| if let Ok(t) = t.try_borrow() { if let Some((tw, _, _)) = t.as_ref() { tw.set_viz_level(l); } });
         });
         VIZ.with(|v| *v.borrow_mut() = Some((t, model)));
     } else {
@@ -9615,6 +9652,10 @@ fn taskbar_widget(shared: &Shared, ui: &AppWindow, on: bool) {
         tw.set_playing(ui.get_playing()); tw.set_liked(ui.get_now_liked()); tw.set_can_like(ui.get_can_like());
         tw.set_frac(ui.get_pos_frac()); tw.set_mixing(ui.get_mixing());
         tw.set_show_progress(ui.get_widget_progress()); tw.set_big_art(ui.get_widget_big_art());
+        // (its visualiser: the app's bands, as they're updated)
+        let viz = if ui.get_widget_viz() { ui.get_viz_style() } else { "off".into() };
+        if tw.get_viz() != viz { tw.set_viz(viz); }
+        if tw.get_viz_bands() != ui.get_viz_bands() { tw.set_viz_bands(ui.get_viz_bands()); tw.set_viz_peaks(ui.get_viz_peaks()); tw.set_viz_curve(ui.get_viz_curve()); }
         // where: by the clock, over the taskbar (put back over it each time, as it comes up over us when clicked)
         let scale = if *hwnd != 0 { tw.window().scale_factor() } else { ui.window().scale_factor() };
         let spot = desktop::dock::spot((340.0 * scale) as i32, scale).filter(|_| !desktop::dock::busy());
@@ -9768,6 +9809,7 @@ fn apply_look(shared: &Shared) {
     ui.set_close_to_tray(min_to_tray(prefs));
     ui.set_taskbar_widget(prefs["taskbarWidget"].as_bool() == Some(true));
     ui.set_widget_progress(prefs["widgetProgress"].as_bool() != Some(false));
+    ui.set_widget_viz(prefs["widgetViz"].as_bool() == Some(true));
     ui.set_widget_big_art(prefs["widgetBigArt"].as_bool() != Some(false));
     ui.set_gpu_on(prefs["nativeGpu"].as_bool() == Some(true));
     LISTEN_NUDGE.store(nudge_of(prefs), std::sync::atomic::Ordering::Relaxed);
@@ -10129,7 +10171,7 @@ fn main() -> Result<(), slint::PlatformError> {
     let s = shared.clone();
     ui.on_viz_cycle(move || {
         let now = s.borrow().web.prefs["nowViz"].as_str().unwrap_or("off").to_string();
-        let next = match now.as_str() { "off" => "bars", "bars" => "mirror", "mirror" => "peaks", "peaks" => "blocks", "blocks" => "wave", "wave" => "centre", "centre" => "glow", _ => "off" };
+        let next = match now.as_str() { "off" => "bars", "bars" => "mirror", "mirror" => "peaks", "peaks" => "blocks", "blocks" => "wave", "wave" => "centre", "centre" => "glow", "glow" => "ring", _ => "off" };
         if let Some(o) = s.borrow_mut().web.prefs.as_object_mut() { o.insert("nowViz".into(), serde_json::json!(next)); }
         if std::env::var_os("OMNIPULSE_SELFTEST").is_none() { webstate::save_pref("nowViz", serde_json::json!(next)); }
         if let Some(ui) = s.borrow().ui.upgrade() { viz_update(&s, &ui); }
@@ -11045,6 +11087,17 @@ fn main() -> Result<(), slint::PlatformError> {
             if let Some(ui) = weak.upgrade() { os_drag(&ui, ht); }
         }
     });
+    // (maximized or not, however it got that way: its button, a snap, Win+Up or Down, the title bar dragged
+    // off the top. Each changes its size, so it's looked at then; the edges only there to resize it when it isn't)
+    ui.on_window_resized({
+        let weak = ui.as_weak();
+        move || {
+            if let Some(ui) = weak.upgrade() {
+                let m = ui.window().is_maximized();
+                if ui.get_is_max() != m { ui.set_is_max(m); }
+            }
+        }
+    });
     { let s = shared.clone(); ui.on_minimize(move || minimize(&s)); }
     ui.on_maximize({
         let weak = ui.as_weak();
@@ -11129,7 +11182,14 @@ fn main() -> Result<(), slint::PlatformError> {
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("viz") { vec![(8, "vizprep"), (9, "library"), (11, "play"), (13, "now"), (17, "viz:blocks"), (19, "viz:wave"), (21, "viz:centre"), (23, "vizfull"), (25, "end")] }
             // (OMNIPULSE_SELFTEST_PLAN=alertwave: the first alert with a sound, its waveform and trims, in a tall window)
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("alertwave") { vec![(9, "size:1180:1700"), (10, "settings"), (11, "alertsnd"), (13, "end")] }
+            // (OMNIPULSE_SELFTEST_PLAN=normal: as it's used: a song playing (the sound at nothing), Now Playing,
+            // Discover, the Library again; memory measured from outside)
+            else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("normal") { vec![(8, "mute"), (9, "library"), (11, "play"), (14, "now"), (30, "discover"), (55, "library"), (95, "end")] }
+            // (OMNIPULSE_SELFTEST_PLAN=idle: the Library, then Discover, sitting there, for memory measured from outside)
+            else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("idle") { vec![(9, "library"), (40, "discover"), (75, "end")] }
             // (OMNIPULSE_SELFTEST_PLAN=applook: App & Look, nothing played)
+            else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("sayacts") { vec![(6, "sayacts"), (8, "end")] }
+            else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("ring") { vec![(8, "vizprep"), (9, "library"), (11, "play"), (13, "now"), (15, "viz:ring"), (19, "sayacts"), (22, "vizfull"), (25, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("applook") { vec![(9, "settings"), (10, "cat_App & Look"), (12, "end")] }
             // (OMNIPULSE_SELFTEST_PLAN=plugbar: a plugin's icon put in the title bar, then right-clicked for its settings)
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("plugbar") { vec![(9, "plugbar"), (11, "titleset:plugin:internet-archive"), (13, "end")] }
@@ -11272,6 +11332,8 @@ fn main() -> Result<(), slint::PlatformError> {
                     if let Some(o) = s.borrow_mut().web.prefs.as_object_mut() { o.insert("nowViz".into(), serde_json::json!("peaks")); o.insert("vizBar".into(), serde_json::json!(true)); }
                 }
                 "vizfull" => ui.set_viz_full(true),
+                "mute" => { ui.set_volume(0.0); ui.invoke_volume_changed(0.0); }
+                "sayacts" => say_with(&ui, "Hardware Acceleration changes the next time OmniPulse starts.", vec![("Restart Now", StatusAct::Dismiss), ("Later", StatusAct::Dismiss)]),
                 w if w.starts_with("viz:") => { if let Some(o) = s.borrow_mut().web.prefs.as_object_mut() { o.insert("nowViz".into(), serde_json::json!(&w[4..])); } }
                 "vizlook" => { ui.set_viz_full(false); ui.invoke_nav("settings".into()); }
                 "vizglow" => {
@@ -11835,8 +11897,10 @@ fn main() -> Result<(), slint::PlatformError> {
     }
     slint::run_event_loop_until_quit()?;
     let _ = ui.hide();
-    drop(rt);
-    Ok(())
+    // the window closed: OmniPulse ends, the music with it. (Not waiting on the background work: a plugin's
+    // connection or a long fetch kept the process, and the music, going after the window had gone)
+    rt.shutdown_timeout(std::time::Duration::from_millis(800));
+    std::process::exit(0)
 }
 
 thread_local! {

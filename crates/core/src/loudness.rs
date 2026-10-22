@@ -136,6 +136,16 @@ pub fn alert_levels(kind: &str) -> Result<serde_json::Value, String> {
 }
 
 pub fn decode_mono(source: Box<dyn MediaSource>, ext: Option<&str>, max_secs: f64) -> Result<(Vec<f32>, u32), String> {
+    decode_mono_at(source, ext, max_secs, false)
+}
+
+/// The same, at half the rate (44.1 or 48 kHz and up: each two samples averaged), for measuring a song's
+/// beat and key, which look no higher than 11 kHz: half the memory of a whole song held at once
+pub fn decode_mono_half(source: Box<dyn MediaSource>, ext: Option<&str>, max_secs: f64) -> Result<(Vec<f32>, u32), String> {
+    decode_mono_at(source, ext, max_secs, true)
+}
+
+fn decode_mono_at(source: Box<dyn MediaSource>, ext: Option<&str>, max_secs: f64, half: bool) -> Result<(Vec<f32>, u32), String> {
     let mut hint = Hint::new();
     if let Some(e) = ext {
         hint.with_extension(e);
@@ -147,9 +157,15 @@ pub fn decode_mono(source: Box<dyn MediaSource>, ext: Option<&str>, max_secs: f6
     let mut format = probed.format;
     let track = format.tracks().iter().find(|t| t.codec_params.codec != CODEC_TYPE_NULL).ok_or("no audio in it")?;
     let track_id = track.id;
+    // (halved: from 44.1 kHz up; a quieter rate is kept as it is)
+    let src_rate = track.codec_params.sample_rate.unwrap_or(0);
+    let step = if half && src_rate >= 44_100 { 2usize } else { 1 };
+    // (its length known: room for all of it at once, never a doubling as it grows, at twice the size)
+    let want = track.codec_params.n_frames.map(|n| (n as f64).min(max_secs * src_rate.max(1) as f64) as usize / step).unwrap_or(0);
     let mut decoder = symphonia::default::get_codecs().make(&track.codec_params, &DecoderOptions::default()).map_err(|e| format!("can't decode it: {e}"))?;
-    let (mut out, mut rate) = (Vec::new(), 0u32);
+    let (mut out, mut rate) = (Vec::with_capacity(want + 4096), 0u32);
     let mut buf: Option<SampleBuffer<f32>> = None;
+    let mut odd: Option<f32> = None;
     loop {
         let packet = match format.next_packet() {
             Ok(p) => p,
@@ -171,11 +187,17 @@ pub fn decode_mono(source: Box<dyn MediaSource>, ext: Option<&str>, max_secs: f6
         if buf.as_ref().is_none_or(|b| (b.capacity() as u64) < need * ch as u64) { buf = Some(SampleBuffer::new(need, spec)); }
         let b = buf.as_mut().unwrap();
         b.copy_interleaved_ref(decoded);
-        out.extend(b.samples().chunks(ch).map(|f| f.iter().sum::<f32>() / ch as f32));
-        if out.len() as f64 >= max_secs * rate as f64 { break; }
+        let mono = b.samples().chunks(ch).map(|f| f.iter().sum::<f32>() / ch as f32);
+        if step == 1 {
+            out.extend(mono);
+        } else {
+            for v in mono { match odd.take() { Some(a) => out.push((a + v) * 0.5), None => odd = Some(v) } }
+        }
+        if out.len() as f64 * step as f64 >= max_secs * rate as f64 { break; }
     }
     if out.is_empty() { return Err("there was no audio".into()); }
-    Ok((out, rate))
+    out.shrink_to_fit();
+    Ok((out, rate / step as u32))
 }
 
 /// The start of a track, as mono samples, up to `max_secs` (for measuring its beat before it plays):
@@ -187,7 +209,7 @@ pub async fn mono_start(kind: &str, id: &str, max_secs: f64) -> Result<(Vec<f32>
             let ext = std::path::Path::new(&path).extension().and_then(|e| e.to_str()).map(|e| e.to_lowercase());
             return tokio::task::spawn_blocking(move || {
                 let f = std::fs::File::open(&path).map_err(|e| e.to_string())?;
-                decode_mono(Box::new(f), ext.as_deref(), max_secs)
+                decode_mono_half(Box::new(f), ext.as_deref(), max_secs)
             }).await.map_err(|e| e.to_string())?;
         }
         "youtube" => fetch_audio(&crate::youtube::stream_url(id, false).await?, None).await?,
@@ -203,7 +225,7 @@ pub async fn mono_start(kind: &str, id: &str, max_secs: f64) -> Result<(Vec<f32>
         }
         _ => fetch_audio(id, None).await?,
     };
-    tokio::task::spawn_blocking(move || decode_mono(Box::new(Cursor::new(fetched.bytes)), fetched.ext, max_secs)).await.map_err(|e| e.to_string())?
+    tokio::task::spawn_blocking(move || decode_mono_half(Box::new(Cursor::new(fetched.bytes)), fetched.ext, max_secs)).await.map_err(|e| e.to_string())?
 }
 
 // ---------- the cache ----------

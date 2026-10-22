@@ -45,3 +45,7 @@ windows = { version = "0.62", features = ["Win32_Foundation", "Win32_System_Com"
 [build-dependencies]
 slint-build = "1.18"
 embed-resource = "3.0.12"
+
+[features]
+# (a build for measuring only: the heap in use counted, printed by the self-test)
+memcount = []

@@ -210,7 +210,7 @@ async fn art_bytes(url: &str) -> Option<Vec<u8>> {
 }
 
 pub async fn fetch_art(url: String, size: u32) -> Option<SharedPixelBuffer<Rgba8Pixel>> {
-    if url.is_empty() {
+    if url.is_empty() || std::env::var_os("OMNIPULSE_MEM_NO_ART").is_some() {
         return None;
     }
     let bytes = art_bytes(&url).await?;

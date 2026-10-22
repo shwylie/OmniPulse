@@ -861,6 +861,34 @@ component VizView inherits Rectangle {
     }
 }
 
+/// Ring (as Proximity's round its logo, the cover ours): the bands standing out from the cover's edges all the
+/// way round, each its own frequency: the bass at the middle of its foot, out along it, up its sides, the highs
+/// meeting in the middle of its top; the left half and the right mirrored. Laid over the cover, drawn outside it
+component VizRing inherits Rectangle {
+    in property <[float]> bands;
+    in property <length> depth: 24px;
+    in property <length> gap: 3px;
+    in property <float> strength: 1;
+    property <duration> glide: Theme.motion ? 90ms : 0ms;
+    // (a quarter of the bands along half the foot, half up a side, a quarter along half the top)
+    property <float> q: root.bands.length / 4;
+    property <length> step: root.width / max(1, 2 * self.q);
+    property <length> vstep: root.height / max(1, 2 * self.q);
+    property <length> th: max(2px, min(self.step, self.vstep) * 0.55);
+    for v[k] in root.bands: Rectangle {
+        property <int> side: k < root.q ? 0 : k < 3 * root.q ? 1 : 2;
+        property <length> len: max(2px, root.depth * v);
+        animate len { duration: root.glide; easing: ease-out; }
+        property <length> lx: self.side == 0 ? root.width / 2 - (k + 0.5) * root.step - root.th / 2 : self.side == 1 ? -root.gap - self.len : (k - 3 * root.q + 0.5) * root.step - root.th / 2;
+        property <length> ly: self.side == 0 ? root.height + root.gap : self.side == 1 ? root.height - (k - root.q + 0.5) * root.vstep - root.th / 2 : -root.gap - self.len;
+        property <length> w: self.side == 1 ? self.len : root.th;
+        property <length> h: self.side == 1 ? root.th : self.len;
+        property <color> c: Theme.accent.mix(Theme.accent-2, 1 - k / max(1, root.bands.length - 1)).with-alpha(root.strength);
+        Rectangle { x: parent.lx; y: parent.ly; width: parent.w; height: parent.h; border-radius: root.th / 2; background: parent.c; }
+        Rectangle { x: root.width - parent.lx - parent.w; y: parent.ly; width: parent.w; height: parent.h; border-radius: root.th / 2; background: parent.c; }
+    }
+}
+
 /// A page loading: an equaliser's bars moving, and each platform asked, ticked as it answers (so the
 /// slowest is the one still spinning)
 component LoadingView inherits Rectangle {
@@ -1229,6 +1257,30 @@ component BadgedCover inherits Rectangle {
     }
 }
 
+/// The tab's cover, with the visualiser round it (In the Player on): Glow's rings, or the Ring
+component TabCover inherits Rectangle {
+    in property <image> art;
+    in property <string> plat;
+    in property <string> viz;
+    in property <[float]> bands;
+    in property <float> level;
+    callback badge-clicked();
+    width: 44px;
+    height: 44px;
+    for r in [4, 3, 2, 1]: Rectangle {
+        visible: root.viz == "glow";
+        property <length> out: r * (1px + 1.6px * root.level);
+        x: -self.out;
+        y: -self.out;
+        width: parent.width + 2 * self.out;
+        height: parent.height + 2 * self.out;
+        border-radius: 8px + self.out;
+        background: Theme.accent.mix(Theme.accent-2, 1 - root.level).with-alpha((0.08 + 0.2 * root.level) * (5 - r) / 4);
+    }
+    if root.viz == "ring": VizRing { width: parent.width; height: parent.height; bands: root.bands; depth: 7px; gap: 2px; }
+    BadgedCover { art: root.art; initial: ""; plat: root.plat; width: parent.width; height: parent.height; badge-link: true; badge-clicked => { root.badge-clicked(); } }
+}
+
 component TileView inherits Rectangle {
     in property <Tile> tile;
     /// your playlists on this PC (a song's Add to Playlist)
@@ -1452,8 +1504,8 @@ component SetRowView inherits Card {
 }
 
 export component AppWindow inherits Window {
-    changed width => { Win.w = self.width; }
-    changed height => { Win.h = self.height; }
+    changed width => { Win.w = self.width; root.window-resized(); }
+    changed height => { Win.h = self.height; root.window-resized(); }
     title: root.app-name != "" ? root.app-name : "OmniPulse";
     // (the window's own icon: Task Manager's Apps list and Alt+Tab take it from the window, not the exe)
     icon: @image-url("../../../src-tauri/icons/128x128.png");
@@ -1592,6 +1644,8 @@ export component AppWindow inherits Window {
     in property <image> tint-strip;
     // Now Playing's visualiser: its style (off, bars, mirror, glow), and its 32 bands, 0 to 1
     in property <string> viz-style: "off";
+    // (the style where there's no cover to go round, as in the player's gaps: Ring as Centre)
+    property <string> viz-flat: root.viz-style == "ring" ? "centre" : root.viz-style;
     in property <[float]> viz-bands;
     // (and how loud it is now, 0 to 1: the Glow's)
     in property <float> viz-level;
@@ -1780,6 +1834,8 @@ export component AppWindow inherits Window {
     in-out property <bool> autoplay: true;
     in property <string> autoplay-note;
     in property <bool> is-max;
+    // (its size changed: maximized or restored, perhaps, by a snap or a shortcut)
+    callback window-resized();
 
     callback nav(string);
     callback side(int);
@@ -1916,6 +1972,7 @@ export component AppWindow inherits Window {
     in-out property <bool> taskbar-widget;
     in-out property <bool> widget-progress: true;
     in-out property <bool> widget-big-art: true;
+    in-out property <bool> widget-viz;
     in-out property <bool> gpu-on;
     callback app-pref(string, bool);
     // a web page opened in your browser
@@ -3266,13 +3323,13 @@ export component AppWindow inherits Window {
                                                 alignment: center;
                                                 spacing: 2px;
                                                 Text { text: "Visualiser"; color: Theme.text; font-weight: 700; }
-                                                Text { text: "The music as it plays: Bars, Mirror (from the middle), Peaks (bars with their tops held), Blocks (an LED meter), Wave (a smooth line), Centre (the bass in the middle), or a Glow. It only runs while it's on screen and something's playing."; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
+                                                Text { text: "The music as it plays: Bars, Mirror (from the middle), Peaks (bars with their tops held), Blocks (an LED meter), Wave (a smooth line), Centre (the bass in the middle), a Glow, or a Ring (each frequency standing out round the cover). It only runs while it's on screen and something's playing."; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
                                             }
                                             Dropdown {
-                                                options: ["Off", "Bars", "Mirror", "Peaks", "Blocks", "Wave", "Centre", "Glow"];
-                                                current: root.viz-style == "bars" ? 1 : root.viz-style == "mirror" ? 2 : root.viz-style == "peaks" ? 3 : root.viz-style == "blocks" ? 4 : root.viz-style == "wave" ? 5 : root.viz-style == "centre" ? 6 : root.viz-style == "glow" ? 7 : 0;
+                                                options: ["Off", "Bars", "Mirror", "Peaks", "Blocks", "Wave", "Centre", "Glow", "Ring"];
+                                                current: root.viz-style == "bars" ? 1 : root.viz-style == "mirror" ? 2 : root.viz-style == "peaks" ? 3 : root.viz-style == "blocks" ? 4 : root.viz-style == "wave" ? 5 : root.viz-style == "centre" ? 6 : root.viz-style == "glow" ? 7 : root.viz-style == "ring" ? 8 : 0;
                                                 y: (parent.height - self.height) / 2;
-                                                picked(k) => { root.viz-pick(k == 1 ? "bars" : k == 2 ? "mirror" : k == 3 ? "peaks" : k == 4 ? "blocks" : k == 5 ? "wave" : k == 6 ? "centre" : k == 7 ? "glow" : "off"); }
+                                                picked(k) => { root.viz-pick(k == 1 ? "bars" : k == 2 ? "mirror" : k == 3 ? "peaks" : k == 4 ? "blocks" : k == 5 ? "wave" : k == 6 ? "centre" : k == 7 ? "glow" : k == 8 ? "ring" : "off"); }
                                             }
                                         }
                                         HorizontalLayout {
@@ -3384,6 +3441,16 @@ export component AppWindow inherits Window {
                                                 Text { text: "The cover as tall as the taskbar, at the widget's edge. Off: a smaller one."; color: Theme.muted; font-size: 12px; wrap: word-wrap; min-height: self.preferred-height; }
                                             }
                                             Toggle { checked <=> root.widget-big-art; y: (parent.height - self.height) / 2; toggled => { root.app-pref("widgetBigArt", self.checked); } }
+                                        }
+                                        HorizontalLayout {
+                                            spacing: 12px;
+                                            VerticalLayout {
+                                                horizontal-stretch: 1;
+                                                alignment: center;
+                                                Text { text: "Visualiser"; color: Theme.text; font-weight: 700; }
+                                                Text { text: "The visualiser's style (above) in the widget, in a little space of its own beside the song's name. Ring is shown as Centre there."; color: Theme.muted; font-size: 12px; wrap: word-wrap; min-height: self.preferred-height; }
+                                            }
+                                            Toggle { checked <=> root.widget-viz; y: (parent.height - self.height) / 2; toggled => { root.app-pref("widgetViz", self.checked); } }
                                         }
                                     }
                                 }
@@ -3680,9 +3747,11 @@ export component AppWindow inherits Window {
                             if root.now-title != "": HorizontalLayout {
                                 alignment: start;
                                 spacing: 6px;
-                                Pill { label: "Visualiser: " + (root.viz-style == "bars" ? "Bars" : root.viz-style == "mirror" ? "Mirror" : root.viz-style == "peaks" ? "Peaks" : root.viz-style == "blocks" ? "Blocks" : root.viz-style == "wave" ? "Wave" : root.viz-style == "centre" ? "Centre" : root.viz-style == "glow" ? "Glow" : "Off"); on: root.viz-style != "off"; clicked => { root.viz-cycle(); } }
+                                Pill { label: "Visualiser: " + (root.viz-style == "bars" ? "Bars" : root.viz-style == "mirror" ? "Mirror" : root.viz-style == "peaks" ? "Peaks" : root.viz-style == "blocks" ? "Blocks" : root.viz-style == "wave" ? "Wave" : root.viz-style == "centre" ? "Centre" : root.viz-style == "glow" ? "Glow" : root.viz-style == "ring" ? "Ring" : "Off"); on: root.viz-style != "off"; clicked => { root.viz-cycle(); } }
                                 Pill { label: "Full Screen"; clicked => { root.viz-full = true; root.viz-place("full", true); } }
                             }
+                            // (Ring: room for its bars above and below the cover, clear of what's round it)
+                            if root.viz-now && root.viz-style == "ring" && !npl.slim: Rectangle { height: 26px; }
                             if !npl.slim: Rectangle {
                                 height: parent.side;
                                 width: parent.side;
@@ -3700,13 +3769,15 @@ export component AppWindow inherits Window {
                                     border-radius: 14px + self.out;
                                     background: Theme.accent.mix(Theme.accent-2, 1 - parent.bass).with-alpha((0.05 + 0.13 * parent.bass) * (7 - r) / 6);
                                 }
+                                if root.viz-now && root.viz-style == "ring": VizRing { width: parent.width; height: parent.height; bands: root.viz-bands; depth: 30px; gap: 4px; }
                                 BadgedCover { art: root.now-art-big; initial: root.now-title; plat: root.now-plat; badge: 52px; corner: 14px; height: parent.height; width: parent.width; }
                             }
+                            if root.viz-now && root.viz-style == "ring" && !npl.slim: Rectangle { height: 26px; }
                             // (the sound's bands under the cover, low to high: Bars, Mirror or Peaks)
-                            if root.viz-now && root.viz-style != "off" && root.viz-style != "glow": VizView {
+                            if root.viz-now && root.viz-style != "off" && root.viz-style != "glow" && (root.viz-style != "ring" || npl.slim): VizView {
                                 height: 46px;
                                 width: npl.slim ? parent.width : parent.side;
-                                style: root.viz-style;
+                                style: root.viz-flat;
                                 bands: root.viz-bands;
                                 peaks: root.viz-peaks;
                                 curve: root.viz-curve;
@@ -4136,6 +4207,8 @@ export component AppWindow inherits Window {
                             border-top-right-radius: Theme.radius;
                             Caps { r: Theme.radius; outside: Theme.bg; tl: Theme.bar-a.mix(Theme.bar-b, 1 - tab.x0); tr: Theme.bar-a.mix(Theme.bar-b, 1 - tab.x1); }
                             clip: true;
+                            // (Glow, In the Player: the tab lit as loud as the bass, as the player's gaps are)
+                            if root.viz-bar && root.viz-style == "glow": Rectangle { background: Theme.accent.mix(Theme.accent-2, 1 - root.viz-level).with-alpha(0.05 + 0.22 * root.viz-level); }
                             DragArea {
                                 allow-copy: true;
                                 data: Dnd.payload("now");
@@ -4157,8 +4230,8 @@ export component AppWindow inherits Window {
                                     Marquee { text: root.now-title + (root.now-trimmed ? " *" : ""); font-size: 15px; right: root.tab-right; max-width: 420px; }
                                     ArtistLinks { names: root.now-artists; text: root.now-artist; size: 13px; right: root.tab-right; pick(k) => { root.now-act("artist:" + k); } }
                                 }
-                                if !root.tab-right: BadgedCover { art: root.now-art; initial: ""; plat: root.now-plat; width: 44px; height: 44px; badge-link: true; badge-clicked => { root.now-act("platform"); } }
-                                if root.tab-right: BadgedCover { art: root.now-art; initial: ""; plat: root.now-plat; width: 44px; height: 44px; badge-link: true; badge-clicked => { root.now-act("platform"); } }
+                                if !root.tab-right: TabCover { art: root.now-art; plat: root.now-plat; viz: root.viz-bar ? root.viz-style : "off"; bands: root.viz-bands; level: root.viz-level; badge-clicked => { root.now-act("platform"); } }
+                                if root.tab-right: TabCover { art: root.now-art; plat: root.now-plat; viz: root.viz-bar ? root.viz-style : "off"; bands: root.viz-bands; level: root.viz-level; badge-clicked => { root.now-act("platform"); } }
                                 if !root.tab-right: VerticalLayout {
                                     alignment: center;
                                     spacing: 2px;
@@ -4205,7 +4278,7 @@ export component AppWindow inherits Window {
                     property <string> now: root.status;
                     changed now => { if (self.now != "") { self.said = self.now; } }
                     init => { self.said = root.status; }
-                    property <length> full: root.status-actions.length > 0 ? 42px : 31px;
+                    property <length> full: root.status-actions.length > 0 ? 52px : 31px;
                     height: root.status != "" ? self.full : 0px;
                     animate height { duration: Theme.motion ? 200ms : 0ms; easing: ease-in-out; }
                     clip: true;
@@ -4274,7 +4347,7 @@ export component AppWindow inherits Window {
                                 y: 7px;
                                 height: parent.height - 14px;
                                 if root.viz-style == "glow": Rectangle { border-radius: self.height / 2; background: Theme.accent.mix(Theme.accent-2, 1 - root.viz-level).with-alpha(0.08 + 0.3 * root.viz-level); }
-                                if root.viz-style != "glow": VizView { style: root.viz-style; bands: root.viz-bands; peaks: root.viz-peaks; curve: root.viz-curve; strength: 0.55; }
+                                if root.viz-style != "glow": VizView { style: root.viz-flat; bands: root.viz-bands; peaks: root.viz-peaks; curve: root.viz-curve; strength: 0.55; }
                             }
                         }
                         IconButton { tip: root.playing ? "Pause" : "Play"; d: root.playing ? Icons.pause : Icons.play; filled: true; size: 40px; y: (parent.height - self.height) / 2; clicked => { root.toggle(); } }
@@ -4314,7 +4387,7 @@ export component AppWindow inherits Window {
                                 y: 7px;
                                 height: parent.height - 14px;
                                 if root.viz-style == "glow": Rectangle { border-radius: self.height / 2; background: Theme.accent.mix(Theme.accent-2, 1 - root.viz-level).with-alpha(0.08 + 0.3 * root.viz-level); }
-                                if root.viz-style != "glow": VizView { style: root.viz-style; bands: root.viz-bands; peaks: root.viz-peaks; curve: root.viz-curve; strength: 0.55; }
+                                if root.viz-style != "glow": VizView { style: root.viz-flat; bands: root.viz-bands; peaks: root.viz-peaks; curve: root.viz-curve; strength: 0.55; }
                             }
                         }
                         // like and favourite, as the web app's (on the track that's playing)
@@ -4963,17 +5036,18 @@ export component AppWindow inherits Window {
                 border-radius: 18px + self.out;
                 background: Theme.accent.mix(Theme.accent-2, 1 - root.viz-level).with-alpha((0.05 + 0.13 * root.viz-level) * (7 - r) / 6);
             }
+            if root.viz-style == "ring": VizRing { width: parent.width; height: parent.height; bands: root.viz-bands; depth: parent.width * 0.2; gap: 6px; }
             Rectangle { border-radius: 18px; clip: true; Image { source: root.now-art-big; width: parent.width; height: parent.height; image-fit: cover; } }
         }
         VerticalLayout {
-            y: parent.height * 0.12 + parent.side + 28px;
+            y: parent.height * 0.12 + parent.side + 28px + (root.viz-style == "ring" ? parent.side * 0.2 : 0px);
             width: parent.width;
             height: 80px;
             spacing: 4px;
             Text { text: root.now-title; color: Theme.text; font-size: 30px; font-weight: 800; horizontal-alignment: center; overflow: elide; }
             Text { text: root.now-artist; color: Theme.accent; font-size: 18px; font-weight: 600; horizontal-alignment: center; overflow: elide; }
         }
-        if root.viz-style != "glow" && root.viz-style != "off": VizView {
+        if root.viz-style != "glow" && root.viz-style != "ring" && root.viz-style != "off": VizView {
             x: parent.width * 0.06;
             width: parent.width * 0.88;
             height: parent.height * 0.24;
@@ -5019,6 +5093,12 @@ export component TaskbarWidget inherits Window {
     in property <bool> big-art: true;
     /// the taskbar's height, as it was measured where it's placed (the cover's size: never the layout's own)
     in property <length> bar-h: 48px;
+    /// Settings > App & Look > Taskbar Widget > Visualiser: the app's style, in a little space of its own
+    in property <string> viz: "off";
+    in property <[float]> viz-bands;
+    in property <[float]> viz-peaks;
+    in property <[float]> viz-curve;
+    in property <float> viz-level;
     callback act(string);
     no-frame: true;
     always-on-top: true;
@@ -5044,6 +5124,11 @@ export component TaskbarWidget inherits Window {
             spacing: 1px;
             Marquee { text: root.has-track ? root.song : "OmniPulse"; font-size: 14px; }
             Marquee { text: root.has-track ? (root.mixing ? "Mixing · " + root.artist : root.artist) : "Nothing playing"; font-size: 12px; font-weight: 400; ink: Theme.muted; }
+        }
+        if root.viz != "off" && root.has-track: Rectangle {
+            width: 56px;
+            if root.viz == "glow": Rectangle { y: (parent.height - self.height) / 2; height: 18px; border-radius: 9px; background: Theme.accent.mix(Theme.accent-2, 1 - root.viz-level).with-alpha(0.12 + 0.5 * root.viz-level); }
+            if root.viz != "glow": VizView { y: 10px; height: parent.height - 20px; style: root.viz == "ring" ? "centre" : root.viz; bands: root.viz-bands; peaks: root.viz-peaks; curve: root.viz-curve; strength: 0.9; }
         }
         if root.can-like: IconButton { d: root.liked ? Icons.library : Icons.heart-out; size: 30px; tint: root.liked ? Theme.accent : Theme.muted; y: (parent.height - self.height) / 2; clicked => { root.act("like"); } }
         IconButton { d: Icons.prev; size: 30px; y: (parent.height - self.height) / 2; clicked => { root.act("prev"); } }
