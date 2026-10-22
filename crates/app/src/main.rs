@@ -331,6 +331,7 @@ fn show_tracks(shared: &Shared, page: &str, title: &str, sub: String, mut tracks
     ui.set_page_kind(kind.into());
     ui.set_page_title(title.into());
     ui.set_page_sub(sub.into());
+    album_head_paint(&app, &ui);
     // (the Library has an Albums chip too: your saved albums, as a grid)
     let mut names: Vec<slint::SharedString> = if chips { FILTER_CHIPS.iter().map(|c| (*c).into()).collect() } else { Vec::new() };
     if chips && (page == "library" || page == "rediscover") { names.push("Albums".into()); }
@@ -940,9 +941,88 @@ fn library_albums(shared: &Shared) {
     });
 }
 
+/// The album a page is (its header's): its title, who by, where from and its cover's address
+#[derive(Clone)]
+struct AlbumHead { title: String, by: String, plat: &'static str, img: String }
+
+thread_local! {
+    static PAGE_ALBUM: RefCell<Option<AlbumHead>> = const { RefCell::new(None) };
+    /// (its cover as fetched, and for which address)
+    static ALBUM_HEAD_ART: RefCell<String> = const { RefCell::new(String::new()) };
+}
+
+/// An album being opened as a page (or something else: None): its header
+fn album_head_for(f: Option<&sources::Found>) {
+    let h = match f {
+        Some(sources::Found::Album { plat, title, by, img, .. }) => Some(AlbumHead { title: title.clone(), by: by.clone(), plat, img: img.clone() }),
+        _ => None,
+    };
+    PAGE_ALBUM.with(|p| *p.borrow_mut() = h);
+}
+
+/// An album's page, its header: shown (with its cover, what's on it, liked or not) while the page is that
+/// album's, else hidden
+fn album_head_paint(a: &App, ui: &AppWindow) {
+    let page = ui.get_page();
+    let title = ui.get_page_title();
+    let head = PAGE_ALBUM.with(|p| p.borrow().clone()).filter(|h| (page == "album" || page == "found") && h.title == title.as_str());
+    let Some(h) = head else {
+        if ui.get_album_head() { ui.set_album_head(false); }
+        return;
+    };
+    ui.set_album_head(true);
+    ui.set_album_head_by(h.by.clone().into());
+    ui.set_album_head_plat(h.plat.into());
+    let list = &a.page_all;
+    let info = if list.is_empty() {
+        ui.get_page_sub().to_string()
+    } else {
+        let year = list.iter().find_map(|t| t.date.get(..4).filter(|y| y.chars().all(|c| c.is_ascii_digit()))).map(|y| format!("{y} \u{b7} ")).unwrap_or_default();
+        let mins = (list.iter().map(|t| t.ms).sum::<u64>() as f64 / 60_000.0).round() as u64;
+        format!("{year}{}{}", plural(list.len(), "song", "songs"), if mins > 0 { format!(" \u{b7} {} min", mins) } else { String::new() })
+    };
+    ui.set_album_head_info(info.into());
+    let likeable: Vec<&Track> = list.iter().filter(|t| !matches!(t.src, track::Src::Local(_))).collect();
+    ui.set_album_head_can_like(!likeable.is_empty());
+    ui.set_album_head_liked(!likeable.is_empty() && likeable.iter().all(|t| a.library.iter().any(|x| x.key == t.key)));
+    // its cover: the album's own, else its first song's
+    let url = if h.img.is_empty() { list.first().map(|t| t.art.clone()).unwrap_or_default() } else { h.img.clone() };
+    if ALBUM_HEAD_ART.with(|x| *x.borrow() == url) { return; }
+    ALBUM_HEAD_ART.with(|x| *x.borrow_mut() = url.clone());
+    ui.set_album_head_art(slint::Image::default());
+    if url.is_empty() { return; }
+    let weak = a.ui.clone();
+    a.rt.spawn(async move {
+        let Some(px) = player::fetch_art(url.clone(), art_px(168.0)).await else { return };
+        let _ = weak.upgrade_in_event_loop(move |ui| {
+            if ALBUM_HEAD_ART.with(|x| *x.borrow() == url) { ui.set_album_head_art(slint::Image::from_rgba8(px)); }
+        });
+    });
+}
+
+/// Like Album: every song on it liked (or, all of them liked already, the likes taken off)
+fn album_like(shared: &Shared) {
+    let (todo, on, title) = {
+        let a = shared.borrow();
+        let likeable: Vec<Track> = a.page_all.iter().filter(|t| !matches!(t.src, track::Src::Local(_))).cloned().collect();
+        let liked = |t: &Track| a.library.iter().any(|x| x.key == t.key);
+        let all = !likeable.is_empty() && likeable.iter().all(liked);
+        // (liking: only those not liked yet; unliking: all of them)
+        let todo: Vec<Track> = likeable.iter().filter(|t| liked(t) == all).cloned().collect();
+        let title = a.ui.upgrade().map(|u| u.get_page_title().to_string()).unwrap_or_default();
+        (todo, !all, title)
+    };
+    let n = todo.len();
+    for t in todo { like_track(shared, t); }
+    if let Some(ui) = shared.borrow().ui.upgrade() {
+        ui.set_status(format!("{} {} on \"{title}\".", if on { "Liked" } else { "Took the like off" }, plural(n, "song", "songs")).into());
+    }
+}
+
 /// An album on the Albums grid: its tracks, as a page
 fn album_open(shared: &Shared, i: usize) {
     let Some(f) = ALBUMS.with(|a| a.borrow().get(i).cloned()) else { return };
+    album_head_for(Some(&f));
     if let sources::Found::Album { plat: "local", id, by, .. } = &f {
         let list: Vec<Track> = shared.borrow().library.iter().filter(|t| t.plat() == "local" && t.album.trim() == id).cloned().collect();
         let sub = format!("{by} \u{b7} {}.", plural(list.len(), "track", "tracks"));
@@ -960,6 +1040,7 @@ fn album_open(shared: &Shared, i: usize) {
 /// A tile on Search's shelves: that artist's, album's or playlist's tracks, as a page
 fn open_found(shared: &Shared, sh: usize, k: usize) {
     let Some(f) = FOUND.with(|x| x.borrow().get(sh).and_then(|l| l.get(k).cloned())) else { return };
+    album_head_for(Some(&f));
     let (title, by, _, _) = f.tile();
     show_tracks(shared, "found", &title, "Loading...".into(), Vec::new(), true);
     let cat = catalog_on(&shared.borrow().web.prefs);
@@ -4243,6 +4324,7 @@ fn like_track(shared: &Shared, t: Track) {
     if let Some(ui) = weak.upgrade() {
         if playing { ui.set_now_liked(on); }
         ui.set_status(format!("{} \"{}\".", if on { "Liked" } else { "Took the like off" }, t.title).into());
+        album_head_paint(&shared.borrow(), &ui);
     }
     { let mut a = shared.borrow_mut(); apply_filter(&mut a); paint_queue(&mut a); }
     // a requested song: the widget cheers whoever asked for it, for a few seconds
@@ -10821,6 +10903,13 @@ fn main() -> Result<(), slint::PlatformError> {
         ROW_ART.with(|c| c.borrow_mut().view = (first.max(0) as usize, count.max(0) as usize));
         rows_art(&s);
     });
+    // an album's page: Play, and Like Album
+    let s = shared.clone();
+    ui.on_album_head_act(move |a| match a.as_str() {
+        "play" => { if let Some(ui) = s.borrow().ui.upgrade() { if ui.get_rows().row_count() > 0 { ui.invoke_play_row(0); } } }
+        "like" => album_like(&s),
+        _ => {}
+    });
     let s = shared.clone();
     ui.on_play_row(move |i| {
         let list = s.borrow().page_tracks.clone();
@@ -11197,6 +11286,7 @@ fn main() -> Result<(), slint::PlatformError> {
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("idle") { vec![(9, "library"), (40, "discover"), (75, "end")] }
             // (OMNIPULSE_SELFTEST_PLAN=applook: App & Look, nothing played)
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("sayacts") { vec![(6, "sayacts"), (8, "end")] }
+            else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("albumpage") { vec![(8, "search"), (28, "openalbum"), (38, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("ring") { vec![(8, "vizprep"), (9, "library"), (11, "play"), (13, "now"), (15, "viz:ring"), (19, "sayacts"), (22, "vizfull"), (25, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("applook") { vec![(9, "settings"), (10, "cat_App & Look"), (12, "end")] }
             // (OMNIPULSE_SELFTEST_PLAN=plugbar: a plugin's icon put in the title bar, then right-clicked for its settings)
@@ -11332,6 +11422,11 @@ fn main() -> Result<(), slint::PlatformError> {
                     ui.set_queue_open(true);
                 }
                 "search" => { ui.set_search_text("deadmau5".into()); ui.invoke_search("deadmau5".into()); }
+                "openalbum" => {
+                    let first = SEARCH.with(|x| x.borrow().2.first().cloned());
+                    println!("selftest: search albums {}", SEARCH.with(|x| x.borrow().2.len()));
+                    if let Some(f) = first { FOUND.with(|x| *x.borrow_mut() = vec![vec![f]]); open_found(&s, 0, 0); }
+                }
                 "compact" => ui.invoke_density_changed(true),
                 "sidefold" => ui.set_side_collapsed(true),
                 "vizprep" => {

@@ -1082,10 +1082,8 @@ component TrackRow inherits Rectangle {
         if !root.compact: Text { text: root.item.album; width: 26%; color: Theme.muted; font-size: 13px; overflow: elide; vertical-alignment: center; }
         // (room for its versions' button, laid over it below)
         if root.item.versions != "": Rectangle { width: 130px; }
-        Rectangle {
-            width: 24px;
-            if root.item.liked: Glyph { d: Icons.library; width: 18px; height: 18px; y: (parent.height - self.height) / 2; fill: Theme.accent; }
-        }
+        // (room for its heart, laid over it below: a button of its own, over the row's)
+        Rectangle { width: 24px; }
         Text { text: root.item.dur; width: 48px; color: Theme.muted; font-size: 13px; horizontal-alignment: right; vertical-alignment: center; }
     }
     DragArea {
@@ -1117,6 +1115,21 @@ component TrackRow inherits Rectangle {
               act(a) => { root.act(a); }
           }
       }
+    }
+    // its heart: liked or not, a click either way (the space for it: the row's right padding, its length and
+    // the spacing between, in from the right)
+    if root.item.liked || (root.item.can-like && (ta.has-hover || hta.has-hover)): Rectangle {
+        x: parent.width - 16px - 48px - 16px - 24px;
+        width: 24px;
+        Glyph { d: root.item.liked ? Icons.library : Icons.heart-out; width: 18px; height: 18px; y: (parent.height - self.height) / 2; fill: root.item.liked || hta.has-hover ? Theme.accent : Theme.muted; }
+        TipSpot { tip: root.item.liked ? "Remove from Likes" : "Add to Likes"; hover: hta.has-hover; }
+    }
+    hta := TouchArea {
+        x: parent.width - 16px - 48px - 16px - 24px;
+        width: 24px;
+        enabled: root.item.can-like;
+        mouse-cursor: root.item.can-like ? MouseCursor.pointer : MouseCursor.default;
+        clicked => { Tips.on = false; root.act("like"); }
     }
     // an artist's page: its other versions (remixes, edits and the like), opened beneath it
     if root.item.versions != "": Rectangle {
@@ -1710,6 +1723,16 @@ export component AppWindow inherits Window {
     in property <length> list-y;
     in property <image> page-art;
     in property <bool> page-art-on;
+    // an album's page (from Search, the Albums grid or an artist's): its cover large, who by, what's on it, and
+    // Like Album (every song on it liked, or the likes taken off; its Play and Shuffle are the page's own, below)
+    in property <bool> album-head;
+    in property <image> album-head-art;
+    in property <string> album-head-by;
+    in property <string> album-head-plat;
+    in property <string> album-head-info;
+    in property <bool> album-head-liked;
+    in property <bool> album-head-can-like;
+    callback album-head-act(string);
     in property <string> artist-bio;
     in property <string> artist-bio-url;
     property <bool> bio-open;
@@ -2501,7 +2524,44 @@ export component AppWindow inherits Window {
                     }
                     Rectangle { height: 10px; }
                     // the title, and (on pages made from what the platforms send) fetching them again
-                    if root.page-kind != "now": HorizontalLayout {
+                    if root.album-head && root.page-kind != "now": HorizontalLayout {
+                        spacing: 22px;
+                        Rectangle {
+                            width: 168px;
+                            height: 168px;
+                            border-radius: 10px;
+                            clip: true;
+                            background: Theme.elevated;
+                            Image { source: root.album-head-art; width: parent.width; height: parent.height; image-fit: cover; }
+                        }
+                        VerticalLayout {
+                            horizontal-stretch: 1;
+                            alignment: end;
+                            spacing: 6px;
+                            HorizontalLayout {
+                                alignment: start;
+                                spacing: 6px;
+                                PlatIcon { plat: root.album-head-plat; width: 14px; height: 14px; y: (parent.height - self.height) / 2; }
+                                Text { text: "ALBUM"; color: Theme.muted; font-size: 12px; font-weight: 700; letter-spacing: 1.5px; vertical-alignment: center; }
+                            }
+                            Text { text: root.page-title; color: Theme.text; font-size: 40px; font-weight: 800; wrap: word-wrap; overflow: elide; max-height: 104px; }
+                            Text { text: root.album-head-by; color: Theme.accent; font-size: 16px; font-weight: 700; overflow: elide; }
+                            Text { text: root.album-head-info; color: Theme.muted; font-size: 13px; overflow: elide; }
+                            Rectangle { height: 4px; }
+                            HorizontalLayout {
+                                alignment: start;
+                                spacing: 10px;
+                                if root.album-head-can-like: Pill {
+                                    label: root.album-head-liked ? "Liked" : "Like Album";
+                                    d: root.album-head-liked ? Icons.library : Icons.heart-out;
+                                    on: root.album-head-liked;
+                                    tip: root.album-head-liked ? "Take the like off every song on it" : "Like every song on it";
+                                    clicked => { root.album-head-act("like"); }
+                                }
+                            }
+                        }
+                    }
+                    if root.page-kind != "now" && !root.album-head: HorizontalLayout {
                         spacing: 14px;
                         // (an artist's picture, as the web app's)
                         if root.page == "artist" && root.page-art-on: Rectangle {
@@ -2535,7 +2595,7 @@ export component AppWindow inherits Window {
                         }
                         Rectangle { horizontal-stretch: 1; }
                     }
-                    if root.page-kind != "now" && root.page-sub != "": Text { text: root.page-sub; color: Theme.muted; font-size: 14px; wrap: word-wrap; overflow: elide; max-height: 60px; }
+                    if root.page-kind != "now" && !root.album-head && root.page-sub != "": Text { text: root.page-sub; color: Theme.muted; font-size: 14px; wrap: word-wrap; overflow: elide; max-height: 60px; }
                     // an artist's page: where they are, with how many follow them there
                     if root.page == "artist" && root.artist-on.length > 0: HorizontalLayout {
                         alignment: start;
@@ -4218,6 +4278,7 @@ export component AppWindow inherits Window {
                                 width: parent.width - 38px;
                                 height: 44px;
                                 spacing: 12px;
+                                if root.tab-right && root.can-like: IconButton { tip: root.now-liked ? "Remove from Likes" : "Add to Likes"; d: root.now-liked ? Icons.library : Icons.heart-out; tint: root.now-liked ? Theme.accent : Theme.muted; size: 32px; y: (parent.height - self.height) / 2; clicked => { root.like-toggle(); } }
                                 if root.tab-right: VerticalLayout {
                                     alignment: center;
                                     spacing: 2px;
@@ -4232,6 +4293,7 @@ export component AppWindow inherits Window {
                                     Marquee { text: root.now-title + (root.now-trimmed ? " *" : ""); font-size: 15px; right: root.tab-right; max-width: 420px; }
                                     ArtistLinks { names: root.now-artists; text: root.now-artist; size: 13px; right: root.tab-right; pick(k) => { root.now-act("artist:" + k); } }
                                 }
+                                if !root.tab-right && root.can-like: IconButton { tip: root.now-liked ? "Remove from Likes" : "Add to Likes"; d: root.now-liked ? Icons.library : Icons.heart-out; tint: root.now-liked ? Theme.accent : Theme.muted; size: 32px; y: (parent.height - self.height) / 2; clicked => { root.like-toggle(); } }
                             }
                         }
                     }
