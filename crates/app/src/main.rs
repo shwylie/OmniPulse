@@ -543,10 +543,17 @@ fn plat_on(prefs: &serde_json::Value, plat: &str) -> bool {
 fn paint_plats(a: &App) {
     let Some(ui) = a.ui.upgrade() else { return };
     let mut list: Vec<Plat> = Vec::new();
-    let mut add = |id: &str, name: &str, ready: bool| list.push(Plat { id: id.into(), on: ready && plat_on(&a.web.prefs, id), name: name.into(), ready });
+    let mut add = |id: &str, name: &str, ready: bool| list.push(Plat { id: id.into(), on: ready && plat_on(&a.web.prefs, id), name: name.into(), ready, d: Default::default() });
     add("soundcloud", "SoundCloud", omnipulse_core::soundcloud::signed_in());
     add("spotify", "Spotify", omnipulse_core::spotify::spotify_signed_in());
     add("youtube", "YouTube Music", omnipulse_core::tools::ytdlp_path().is_some());
+    // (and the plugins asked to be here, each its own icon: on and off as it's switched in Settings > Plugins)
+    for p in omnipulse_core::plugins::list() {
+        let m = &p.manifest;
+        if plugrun::settings_of(m, &a.web.prefs)[PLUG_TITLE_BAR].as_bool() != Some(true) { continue; }
+        let d = if m.icon.trim().is_empty() { "M12 2a10 10 0 1 0 0 20 10 10 0 1 0 0-20z".to_string() } else { m.icon.clone() };
+        list.push(Plat { id: format!("plugin:{}", m.id).into(), on: plugin_on(&a.web.prefs, &m.id), name: m.name.clone().into(), ready: true, d: d.into() });
+    }
     ui.set_plats(ModelRc::from(Rc::new(VecModel::from(list))));
 }
 
@@ -586,7 +593,16 @@ fn go_plus_set(prefs: &serde_json::Value) {
     sources::CATALOG.store(integrations::on(prefs, "catOn"), std::sync::atomic::Ordering::Relaxed);
 }
 
+/// A plugin's own setting, kept with its others: its icon in the title bar's platforms
+const PLUG_TITLE_BAR: &str = "_titleBar";
+
 fn plat_toggle(shared: &Shared, plat: &str) {
+    // (a plugin's: switched on or off, as in Settings > Plugins)
+    if let Some(id) = plat.strip_prefix("plugin:") {
+        set_toggle(shared, &format!("plugOn_{id}"));
+        paint_plats(&shared.borrow());
+        return;
+    }
     // not set up yet: Settings, to set it up
     let ready = match plat {
         "soundcloud" => omnipulse_core::soundcloud::signed_in(),
@@ -6279,7 +6295,12 @@ fn pf_open(shared: &Shared, id: &str) {
 }
 
 fn pf_fields(id: &str) -> Vec<serde_json::Value> {
-    omnipulse_core::plugins::list().into_iter().find(|p| p.manifest.id == id).and_then(|p| p.manifest.settings.as_array().cloned()).unwrap_or_default()
+    let Some(p) = omnipulse_core::plugins::list().into_iter().find(|p| p.manifest.id == id) else { return Vec::new() };
+    // (every plugin's: whether its icon is in the title bar; then its manifest's own)
+    let mut f = vec![serde_json::json!({ "key": PLUG_TITLE_BAR, "label": "Show in the Title Bar", "type": "toggle", "default": false,
+        "note": "Its icon beside SoundCloud, Spotify and YouTube Music: click it to switch the plugin on and off, right-click for these settings." })];
+    f.extend(p.manifest.settings.as_array().cloned().unwrap_or_default());
+    f
 }
 
 fn pf_paint(shared: &Shared) {
@@ -6336,6 +6357,7 @@ fn pf_save(shared: &Shared) {
     if std::env::var_os("OMNIPULSE_SELFTEST").is_none() { webstate::save_pref("pluginSettings", all); }
     plugrun::stop(&id);
     plugins_start(shared);
+    paint_plats(&shared.borrow());
     if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_pf_open(false); ui.set_status("Plugin settings saved.".into()); }
 }
 
@@ -9930,6 +9952,7 @@ fn main() -> Result<(), slint::PlatformError> {
         match what.as_str() {
             "smart" => panel_open(&s, "smart"),
             "local" => ui.set_set_cat("Library".into()),
+            p if p.starts_with("plugin:") => { ui.set_set_cat("Plugins".into()); pf_open(&s, &p[7..]); }
             p if p.starts_with("plugin") => ui.set_set_cat("Plugins".into()),
             _ => ui.set_set_cat("Integrations".into()),
         }
@@ -10908,6 +10931,8 @@ fn main() -> Result<(), slint::PlatformError> {
             // (OMNIPULSE_SELFTEST_PLAN=apple: Apple Music's sign-in window opened off-screen, Apple's page looked at, closed; nobody signs in)
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("apple") { vec![(6, "appleopen"), (16, "applecheck"), (17, "end")] }
             // (OMNIPULSE_SELFTEST_PLAN=tp: Track preferences for what plays, its bar dragged)
+            // (OMNIPULSE_SELFTEST_PLAN=plugbar: a plugin's icon put in the title bar, then right-clicked for its settings)
+            else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("plugbar") { vec![(9, "plugbar"), (11, "titleset:plugin:internet-archive"), (13, "end")] }
             // (OMNIPULSE_SELFTEST_PLAN=loadview: the pages as they load, their platforms ticked off)
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("loadview") { vec![(1, "library"), (2, "rediscover"), (4, "discover"), (5, "stats"), (7, "end")] }
             // (OMNIPULSE_SELFTEST_PLAN=titleset: the title bar's icons right-clicked: Seamless Mix's settings, then SoundCloud's)
@@ -11041,6 +11066,11 @@ fn main() -> Result<(), slint::PlatformError> {
                 "search" => { ui.set_search_text("deadmau5".into()); ui.invoke_search("deadmau5".into()); }
                 "compact" => ui.invoke_density_changed(true),
                 "sidefold" => ui.set_side_collapsed(true),
+                "plugbar" => {
+                    if let Some(o) = s.borrow_mut().web.prefs.as_object_mut() { o.insert("pluginSettings".into(), serde_json::json!({ "internet-archive": { "_titleBar": true } })); }
+                    paint_plats(&s.borrow());
+                    println!("selftest: plugbar: {:?}", ui.get_plats().iter().map(|p| (p.id.to_string(), p.on)).collect::<Vec<_>>());
+                }
                 w if w.starts_with("titleset:") => ui.invoke_title_settings(w[9..].into()),
                 "sideopen" => ui.set_side_collapsed(false),
                 "back" => { ui.invoke_back(); println!("selftest: back: page {}", s.borrow().page); }

@@ -53,7 +53,7 @@ export struct Row { alb: string, alb-by: string, alb-plat: string, alb-art: imag
 // (merged: playlists combined into it, to unmerge)
 export struct Side { title: string, plat: string, own: bool, share: bool, sc: bool, sp: bool, collab: bool, collab-owner: bool, merged: bool }
 /// A platform in the title bar: on (in its colours), set up (ready; grey until it is), its name
-export struct Plat { id: string, on: bool, name: string, ready: bool }
+export struct Plat { id: string, on: bool, name: string, ready: bool, d: string }
 // (a genre's tile, as the web app's: a coloured cover, its name on it; c1 its middle, c2 its edge)
 // (a song's tile: a track menu on right-click, as the web app's; liked, for its line)
 /// An artist page's platform: its symbol, and how many follow them there ("12,345 followers")
@@ -2031,8 +2031,18 @@ export component AppWindow inherits Window {
                         for p in root.plats: Rectangle {
                             width: 28px;
                             border-radius: 6px;
-                            background: !p.on ? (ta-p.has-hover ? Theme.line : transparent) : p.id == "spotify" ? #1ed76029 : p.id == "youtube" ? #ff003329 : p.id == "local" ? #f2b54429 : #ff550029;
-                            PlatIcon {
+                            background: !p.on ? (ta-p.has-hover ? Theme.line : transparent) : p.d != "" ? Theme.accent.with-alpha(0.16) : p.id == "spotify" ? #1ed76029 : p.id == "youtube" ? #ff003329 : p.id == "local" ? #f2b54429 : #ff550029;
+                            // (a plugin shown here: its own icon, from its manifest, in the accent)
+                            if p.d != "": Glyph {
+                                d: p.d;
+                                width: 15px;
+                                height: 15px;
+                                x: (parent.width - self.width) / 2;
+                                y: (parent.height - self.height) / 2;
+                                fill: p.on ? Theme.accent : Theme.text;
+                                opacity: p.on ? 1 : (ta-p.has-hover ? 0.7 : 0.4);
+                            }
+                            if p.d == "": PlatIcon {
                                 plat: p.id;
                                 title-bar: true;
                                 // (SoundCloud's cloud is a wide, flat shape: drawn larger, and lowered by as much as
