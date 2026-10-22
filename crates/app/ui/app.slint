@@ -1082,7 +1082,9 @@ component TrackRow inherits Rectangle {
         if !root.compact: Text { text: root.item.album; width: 26%; color: Theme.muted; font-size: 13px; overflow: elide; vertical-alignment: center; }
         // (room for its versions' button, laid over it below)
         if root.item.versions != "": Rectangle { width: 130px; }
-        // (room for its heart, laid over it below: a button of its own, over the row's)
+        // (room for its star (with Favourites on) and its heart, laid over them below: buttons of their own,
+        // over the row's)
+        if root.item.fav-on: Rectangle { width: 24px; }
         Rectangle { width: 24px; }
         Text { text: root.item.dur; width: 48px; color: Theme.muted; font-size: 13px; horizontal-alignment: right; vertical-alignment: center; }
     }
@@ -1116,13 +1118,27 @@ component TrackRow inherits Rectangle {
           }
       }
     }
-    // its heart: liked or not, a click either way (the space for it: the row's right padding, its length and
-    // the spacing between, in from the right)
-    if root.item.liked || (root.item.can-like && (ta.has-hover || hta.has-hover)): Rectangle {
+    // its heart: filled when liked, an outline when not, a click either way (the space for it: the row's right
+    // padding, its length and the spacing between, in from the right)
+    if root.item.liked || root.item.can-like: Rectangle {
         x: parent.width - 16px - 48px - 16px - 24px;
         width: 24px;
         Glyph { d: root.item.liked ? Icons.library : Icons.heart-out; width: 18px; height: 18px; y: (parent.height - self.height) / 2; fill: root.item.liked || hta.has-hover ? Theme.accent : Theme.muted; }
         TipSpot { tip: root.item.liked ? "Remove from Likes" : "Add to Likes"; hover: hta.has-hover; }
+    }
+    // its star (with Favourites on), the same, beside it
+    if root.item.fav-on: Rectangle {
+        x: parent.width - 16px - 48px - 16px - 24px - 16px - 24px;
+        width: 24px;
+        Glyph { d: root.item.fav ? Icons.star : Icons.star-out; width: 18px; height: 18px; y: (parent.height - self.height) / 2; fill: root.item.fav || fta.has-hover ? Theme.accent : Theme.muted; }
+        TipSpot { tip: root.item.fav ? "Remove from Favourites" : "Add to Favourites"; hover: fta.has-hover; }
+    }
+    fta := TouchArea {
+        x: parent.width - 16px - 48px - 16px - 24px - 16px - 24px;
+        width: 24px;
+        enabled: root.item.fav-on;
+        mouse-cursor: root.item.fav-on ? MouseCursor.pointer : MouseCursor.default;
+        clicked => { Tips.on = false; root.act("fav"); }
     }
     hta := TouchArea {
         x: parent.width - 16px - 48px - 16px - 24px;
@@ -1133,7 +1149,7 @@ component TrackRow inherits Rectangle {
     }
     // an artist's page: its other versions (remixes, edits and the like), opened beneath it
     if root.item.versions != "": Rectangle {
-        x: parent.width - 250px;
+        x: parent.width - 250px - (root.item.fav-on ? 40px : 0px);
         y: (parent.height - self.height) / 2;
         width: 130px;
         height: 26px;
