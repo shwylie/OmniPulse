@@ -112,6 +112,44 @@ pub fn curve(b: &[f32; BANDS]) -> [f32; CURVE] {
     out
 }
 
+/// The Ring's outline: one solid wave round the cover, as path commands in a 1000-unit square with the
+/// cover in its middle half (250 to 750). Each way round from the cover's foot (the bass) to its top (the
+/// highs), mirrored, standing out from the cover as far as the band there is loud; a smooth curve through it
+pub fn ring_path(b: &[f32; BANDS]) -> String {
+    const N: usize = 120;
+    const HALF: f32 = 250.0;
+    // (always a little of it showing; at its loudest a fifth of the cover's width out)
+    const BASE: f32 = 7.5 + 4.0;
+    const DEPTH: f32 = 100.0;
+    let pts: Vec<(f32, f32)> = (0..N)
+        .map(|i| {
+            // (from straight down, round the left side, to straight up and back down the right)
+            let th = std::f32::consts::TAU * i as f32 / N as f32;
+            let (dx, dy) = (-th.sin(), th.cos());
+            let away = if th <= std::f32::consts::PI { th } else { std::f32::consts::TAU - th };
+            let x = away / std::f32::consts::PI * (BANDS - 1) as f32;
+            let k = (x.floor() as usize).min(BANDS - 1);
+            let t = x - k as f32;
+            let v = b[k] + (b[(k + 1).min(BANDS - 1)] - b[k]) * t;
+            // (where the ray from the middle meets the cover's edge, then out from there)
+            let edge = HALF / dx.abs().max(dy.abs()).max(1e-3);
+            // (eased up a little, so quieter bands still move it)
+            let r = edge + BASE + DEPTH * v.clamp(0.0, 1.0).powf(0.8);
+            (500.0 + dx * r, 500.0 + dy * r)
+        })
+        .collect();
+    let p = |i: usize| pts[i % N];
+    let mut d = format!("M {:.1} {:.1}", pts[0].0, pts[0].1);
+    for i in 0..N {
+        let (p0, p1, p2, p3) = (p(i + N - 1), p(i), p(i + 1), p(i + 2));
+        let c1 = (p1.0 + (p2.0 - p0.0) / 6.0, p1.1 + (p2.1 - p0.1) / 6.0);
+        let c2 = (p2.0 - (p3.0 - p1.0) / 6.0, p2.1 - (p3.1 - p1.1) / 6.0);
+        d.push_str(&format!(" C {:.1} {:.1} {:.1} {:.1} {:.1} {:.1}", c1.0, c1.1, c2.0, c2.1, p2.0, p2.1));
+    }
+    d.push_str(" Z");
+    d
+}
+
 #[cfg(test)]
 mod tests {
     #[test]

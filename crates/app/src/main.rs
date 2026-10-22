@@ -8555,7 +8555,10 @@ fn viz_update(shared: &Shared, ui: &AppWindow) {
             for (i, v) in viz::peaks(&b).into_iter().enumerate() { tops.set_row_data(i, v); }
             for (i, v) in viz::curve(&b).into_iter().enumerate() { wave.set_row_data(i, v); }
             let l = viz::level(&b);
-            if let Some(ui) = w.upgrade() { ui.set_viz_level(l); }
+            if let Some(ui) = w.upgrade() {
+                ui.set_viz_level(l);
+                if ui.get_viz_style() == "ring" { ui.set_viz_ring(viz::ring_path(&b).into()); }
+            }
             TBW.with(|t| if let Ok(t) = t.try_borrow() { if let Some((tw, _, _)) = t.as_ref() { tw.set_viz_level(l); } });
         });
         VIZ.with(|v| *v.borrow_mut() = Some((t, model)));
