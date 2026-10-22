@@ -266,7 +266,8 @@ pub fn widget_serve(listener: TcpListener, gen: u64) {
                     "/lyrics" | "/lyrics.html" => {
                         reply(&mut stream, "200 OK", "text/html; charset=utf-8", LYRICS_HTML.as_bytes());
                     }
-                    "/" | "/index.html" => {
+                    // (the widget; its second, in a design of its own; and the alerts alone: one page, each as its address says)
+                    "/" | "/index.html" | "/2" | "/alerts" => {
                         reply(&mut stream, "200 OK", "text/html; charset=utf-8", WIDGET_HTML.replace("__WIDGET_VERSION__", &widget_version()).as_bytes());
                     }
                     // an alert: GET with ?type=&user=&amount=&message=, or POST with those as JSON

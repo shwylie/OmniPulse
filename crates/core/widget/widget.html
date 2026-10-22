@@ -1001,12 +1001,18 @@
   // the app's pop-out preview (?preview=1): the settings as they're being edited, a sample track if nothing's
   // playing, and the alert being edited shown every few seconds
   const PREVIEW = /[?&]preview=1/.test(location.search);
+  // which one this is: the widget (/), the second (/2: its own look), or the alerts alone (/alerts)
+  const SECOND = location.pathname.startsWith("/2"), ONLY_ALERTS = location.pathname.startsWith("/alerts");
   if (PREVIEW) document.body.classList.add("preview");
   let previewAlertAt = 0;
   async function poll() {
     try {
       const r = await fetch("/now.json" + (PREVIEW ? "?preview=1" : ""), { cache: "no-store" });
       s = await r.json();
+      if (SECOND && s.second) Object.assign(s, s.second);
+      // the alerts alone: no song shown, as when nothing's playing; the alerts split off: none over the song
+      if (ONLY_ALERTS) { delete s.title; s.playing = false; }
+      else if (s.alert_split && !PREVIEW) { s.alerts = []; delete s.preview_alert; if (s.alerts_cfg) s.alerts_cfg = Object.assign({}, s.alerts_cfg, { on: false }); }
       if (PREVIEW && !s.title) Object.assign(s, { title: "Sample Song", artist: "OmniPulse", playing: true, position_ms: 42000, duration_ms: 180000, updated_at: Date.now(), platform: "soundcloud" });
       if (PREVIEW && s.preview_alert && Date.now() - previewAlertAt > 8000 && !showing) {
         previewAlertAt = Date.now();

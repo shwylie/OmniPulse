@@ -298,6 +298,15 @@ pub fn widget_state(prefs: &Value, t: Option<&Track>, by: &str, pos_ms: u64, dur
         "align": if prefs["widgetAlign"].as_str() == Some("right") { "right" } else { "left" },
         "text_scale": prefs["widgetText"].as_f64().unwrap_or(1.0),
         "alerts_cfg": alerts_cfg(prefs),
+        // alerts in a Browser source of their own (/alerts), not over Now Playing
+        "alert_split": set(prefs, "alertSplit"),
+        // the second widget's own look (/2)
+        "second": {
+            "design": prefs["widget2Design"].as_str().unwrap_or("pill"),
+            "rounded": prefs["widget2Rounded"].as_bool() != Some(false),
+            "align": if prefs["widget2Align"].as_str() == Some("right") { "right" } else { "left" },
+            "text_scale": prefs["widget2Text"].as_f64().unwrap_or(1.0),
+        },
     });
     let mut state = match t {
         None => json!({ "playing": false }),

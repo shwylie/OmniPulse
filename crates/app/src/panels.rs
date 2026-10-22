@@ -47,7 +47,7 @@ fn keys(name: &str) -> Vec<(&'static str, Value)> {
         "lyricsw" => vec![("lyricsLines", json!(3)), ("lyricsBefore", json!(false)), ("lyricsScroll", json!("smooth")), ("lyricsScrollMs", json!(600)), ("lyricsScrollPlace", json!("top")), ("lyricsFadeEdges", json!(false)), ("lyricsSize", json!(48)), ("lyricsFont", json!("sans")), ("lyricsAlign", json!("center")), ("lyricsPlace", json!("")), ("lyricsStyle", json!("karaoke")), ("lyricsColor", json!("#ffffff")), ("lyricsTextGrad", json!(false)), ("lyricsColor2", json!("#9ad1ff")), ("lyricsOwnHi", json!(false)), ("lyricsHi", json!("#8e9bff")), ("lyricsHiGrad", json!(false)), ("lyricsHi2", json!("#ff8ad8")), ("lyricsGradDir", json!("90deg")), ("lyricsDim", json!(0.45)), ("lyricsTransform", json!("none")), ("lyricsShadow", json!(true)), ("lyricsOutline", json!(false)), ("lyricsOutlineSize", json!(4)), ("lyricsOutlineColor", json!("#000000")), ("lyricsOutlineOpacity", json!(1.0)), ("lyricsBox", json!(false)), ("lyricsBoxColor", json!("#0a0a0e")), ("lyricsBoxGrad", json!(false)), ("lyricsBoxColor2", json!("#2a1450")), ("lyricsBoxDir", json!("135deg")), ("lyricsBoxOpacity", json!(0.62)), ("lyricsTitle", json!(true)), ("lyricsHideNone", json!(true)), ("lyricsOffset", json!(0)), ("lyricsHidePaused", json!(true))],
         "smart" => vec![("smartBlend", json!(true)), ("smartKeys", json!(true)), ("smartMax", json!(10)), ("smartTape", json!(false)), ("smartRoll", json!(false)), ("smartVoices", json!(true))],
         "requests" => vec![("reqBot", json!("streamerbot")), ("reqRadioEdit", json!(false)), ("reqLimits", json!(true)), ("reqMax", json!(10)), ("reqPerUser", json!(2)), ("reqPort", json!(7879)), ("botRemote", json!(false))],
-        "widget" => vec![("widgetPort", json!(7878)), ("widgetDesign", json!("card")), ("widgetAlign", json!("left")), ("widgetRounded", json!(true)), ("widgetText", json!(1)), ("wFade", json!(true)), ("wScroll", json!(true)), ("wSpin", json!(true)), ("wRequester", json!(true)), ("wColor", json!(1.2))],
+        "widget" => vec![("widgetPort", json!(7878)), ("widgetDesign", json!("card")), ("widgetAlign", json!("left")), ("widgetRounded", json!(true)), ("widgetText", json!(1)), ("wFade", json!(true)), ("wScroll", json!(true)), ("wSpin", json!(true)), ("wRequester", json!(true)), ("wColor", json!(1.2)), ("alertSplit", json!(false)), ("widget2Design", json!("pill")), ("widget2Align", json!("left")), ("widget2Rounded", json!(true)), ("widget2Text", json!(1))],
         "alerts" => vec![("alertBot", json!("streamerbot")), ("sbHost", json!("127.0.0.1:8080")), ("sbOn", json!(true)), ("alertTrans", json!("seamless")), ("alertCSize", json!("medium")), ("alertCDir", json!("diag")), ("alertCAngle", json!(0)), ("alertAnim", json!("slide")), ("alertOwnCol", json!(false)), ("alertCol1", json!("#8e9bff")), ("alertCol2", json!("#b38cff")), ("alertDir", json!("115deg")), ("alertIcon", json!(1)), ("alertSecs", json!(5)), ("alertVol", json!(0.8)), ("botRemote", json!(false))],
         "remote" => vec![("remotePort", json!(7880))],
         "offset" => vec![("out2Offset", json!(0)), ("out2Volume", json!(1))],
@@ -304,6 +304,13 @@ fn fields_of(name: &str, vals: &Map<String, Value>, prefs: &Value, lan: &str) ->
                 // Alerts: on the widget, so here (Settings > Streaming > Stream Widget > Alerts): a switch, as
                 // every other, with Configure beside it; first, under where the widget's found
                 toggle_cfg("alertsOn", "Alerts", "On the widget: follows, subs, bits, raids and more, from your bot.", "alertsOpen"),
+                tog("alertSplit", "Alerts on Their Own", "In a Browser source of their own (its address below), not over Now Playing: each where you want it in OBS."),
+            ];
+            let mut f = f;
+            if vals["alertSplit"].as_bool() == Some(true) {
+                f.push(info("Alerts Address", &format!("http://127.0.0.1:{port}/alerts"), &format!("http://127.0.0.1:{port}/alerts"), "In OBS: a Browser source with this address, for the alerts alone."));
+            }
+            f.extend([
                 sel("widgetDesign", "Design", "", &[(json!("card"), "Card (460 × 130)"), (json!("bar"), "Slim bar (560 × 64)"), (json!("square"), "Square (300 × 380)"), (json!("minimal"), "Minimal (460 × 110)"), (json!("pill"), "Pill (480 × 80)"), (json!("vinyl"), "Vinyl (460 × 150)"), (json!("poster"), "Poster (480 × 270)"), (json!("ticker"), "Ticker (640 × 48)")]),
                 sel("widgetAlign", "Alignment", "", &[(json!("left"), "Left"), (json!("right"), "Right")]),
                 tog("widgetRounded", "Rounded Corners", ""),
@@ -311,13 +318,19 @@ fn fields_of(name: &str, vals: &Map<String, Value>, prefs: &Value, lan: &str) ->
                 tog("wFade", "Fade Between Tracks", ""),
                 tog("wScroll", "Scroll Long Text", ""),
                 // (only the Vinyl design has a record to spin, as the web app's)
-            ];
-            let mut f = f;
+            ]);
             if s("widgetDesign", "card") == "vinyl" { f.push(tog("wSpin", "Spin the Record", "")); }
             f.extend([
                 tog("wRequester", "Show Who Requested It", ""),
                 sel("wColor", "Colour Change", "", &[(json!(0), "Instant"), (json!(0.5), "Fast"), (json!(1.2), "Normal"), (json!(2.5), "Slow")]),
                 button("widgetHide", "Hide This Track", "Hide", "Until the next track."),
+                // a second Now Playing, for another scene: the same song, a design of its own
+                note("Second Widget"),
+                info("Second Widget Address", &format!("http://127.0.0.1:{port}/2"), &format!("http://127.0.0.1:{port}/2"), "Another Now Playing, for another scene in OBS, in a design of its own (the rest as above)."),
+                sel("widget2Design", "Its Design", "", &[(json!("card"), "Card (460 × 130)"), (json!("bar"), "Slim bar (560 × 64)"), (json!("square"), "Square (300 × 380)"), (json!("minimal"), "Minimal (460 × 110)"), (json!("pill"), "Pill (480 × 80)"), (json!("vinyl"), "Vinyl (460 × 150)"), (json!("poster"), "Poster (480 × 270)"), (json!("ticker"), "Ticker (640 × 48)")]),
+                sel("widget2Align", "Its Alignment", "", &[(json!("left"), "Left"), (json!("right"), "Right")]),
+                tog("widget2Rounded", "Its Rounded Corners", ""),
+                stepper("widget2Text", "Its Text Size", "", pct(0.7, 1.6, 0.1)),
             ]);
             let _ = alerts_on;
             f
