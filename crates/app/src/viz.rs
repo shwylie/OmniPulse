@@ -112,15 +112,16 @@ pub fn curve(b: &[f32; BANDS]) -> [f32; CURVE] {
     out
 }
 
-/// The Ring's outline: one solid wave round the cover, as path commands in a 1000-unit square with the
-/// cover in its middle half (250 to 750). Each way round from the cover's foot (the bass) to its top (the
-/// highs), mirrored, standing out from the cover as far as the band there is loud; a smooth curve through it
+/// The Ring's outline: one solid wave in a circle round the cover, as path commands in a 1000-unit square
+/// (the box it's drawn in), the cover in its middle (RING_COVER of it). Each way round from the foot (the bass)
+/// to the top (the highs), mirrored, out from a circle just clear of the cover's corners as far as the band
+/// there is loud; a smooth curve through it
 pub fn ring_path(b: &[f32; BANDS]) -> String {
     const N: usize = 120;
-    const HALF: f32 = 250.0;
-    // (always a little of it showing; at its loudest a fifth of the cover's width out)
-    const BASE: f32 = 7.5 + 4.0;
-    const DEPTH: f32 = 100.0;
+    // (the circle through the cover's corners, and a little out from them)
+    const BASE: f32 = RING_COVER * 500.0 * std::f32::consts::SQRT_2 + 10.0;
+    // (at its loudest, to the box's edge)
+    const DEPTH: f32 = 492.0 - BASE;
     let pts: Vec<(f32, f32)> = (0..N)
         .map(|i| {
             // (from straight down, round the left side, to straight up and back down the right)
@@ -131,10 +132,8 @@ pub fn ring_path(b: &[f32; BANDS]) -> String {
             let k = (x.floor() as usize).min(BANDS - 1);
             let t = x - k as f32;
             let v = b[k] + (b[(k + 1).min(BANDS - 1)] - b[k]) * t;
-            // (where the ray from the middle meets the cover's edge, then out from there)
-            let edge = HALF / dx.abs().max(dy.abs()).max(1e-3);
             // (eased up a little, so quieter bands still move it)
-            let r = edge + BASE + DEPTH * v.clamp(0.0, 1.0).powf(0.8);
+            let r = BASE + DEPTH * v.clamp(0.0, 1.0).powf(0.8);
             (500.0 + dx * r, 500.0 + dy * r)
         })
         .collect();
@@ -149,6 +148,9 @@ pub fn ring_path(b: &[f32; BANDS]) -> String {
     d.push_str(" Z");
     d
 }
+
+/// The Ring's cover: this much of the box's width, in its middle (the circle round it the rest)
+pub const RING_COVER: f32 = 0.56;
 
 #[cfg(test)]
 mod tests {

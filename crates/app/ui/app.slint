@@ -865,14 +865,12 @@ component VizView inherits Rectangle {
 /// way round, each its own frequency: the bass at the middle of its foot, out along it, up its sides, the highs
 /// meeting in the middle of its top; the left half and the right mirrored. Laid over the cover, drawn outside it
 component VizRing inherits Rectangle {
-    // (its outline, from the app: viz::ring_path's, the cover being the middle half of its square)
+    // (its outline, from the app: viz::ring_path's, over the whole box, the cover in its middle)
     in property <string> path;
     in property <float> strength: 1;
     Path {
-        x: -root.width / 2;
-        y: -root.height / 2;
-        width: root.width * 2;
-        height: root.height * 2;
+        width: root.width;
+        height: root.height;
         viewbox-width: 1000;
         viewbox-height: 1000;
         commands: root.path;
@@ -1256,13 +1254,13 @@ component TabCover inherits Rectangle {
     in property <image> art;
     in property <string> plat;
     in property <string> viz;
-    in property <string> ring;
     in property <float> level;
     callback badge-clicked();
     width: 44px;
     height: 44px;
     for r in [4, 3, 2, 1]: Rectangle {
-        visible: root.viz == "glow";
+        // (Ring too: the tab's cover too small for its circle)
+        visible: root.viz == "glow" || root.viz == "ring";
         property <length> out: r * (1px + 1.6px * root.level);
         x: -self.out;
         y: -self.out;
@@ -1271,7 +1269,6 @@ component TabCover inherits Rectangle {
         border-radius: 8px + self.out;
         background: Theme.accent.mix(Theme.accent-2, 1 - root.level).with-alpha((0.08 + 0.2 * root.level) * (5 - r) / 4);
     }
-    if root.viz == "ring": VizRing { width: parent.width; height: parent.height; path: root.ring; }
     BadgedCover { art: root.art; initial: ""; plat: root.plat; width: parent.width; height: parent.height; badge-link: true; badge-clicked => { root.badge-clicked(); } }
 }
 
@@ -3747,7 +3744,6 @@ export component AppWindow inherits Window {
                                 Pill { label: "Full Screen"; clicked => { root.viz-full = true; root.viz-place("full", true); } }
                             }
                             // (Ring: room for its bars above and below the cover, clear of what's round it)
-                            if root.viz-now && root.viz-style == "ring" && !npl.slim: Rectangle { height: parent.side * 0.2; }
                             if !npl.slim: Rectangle {
                                 height: parent.side;
                                 width: parent.side;
@@ -3765,10 +3761,11 @@ export component AppWindow inherits Window {
                                     border-radius: 14px + self.out;
                                     background: Theme.accent.mix(Theme.accent-2, 1 - parent.bass).with-alpha((0.05 + 0.13 * parent.bass) * (7 - r) / 6);
                                 }
-                                if root.viz-now && root.viz-style == "ring": VizRing { width: parent.width; height: parent.height; path: root.viz-ring; }
-                                BadgedCover { art: root.now-art-big; initial: root.now-title; plat: root.now-plat; badge: 52px; corner: 14px; height: parent.height; width: parent.width; }
+                                property <bool> ring: root.viz-now && root.viz-style == "ring";
+                                if self.ring: VizRing { width: parent.width; height: parent.height; path: root.viz-ring; }
+                                // (0.56: viz::RING_COVER)
+                                BadgedCover { art: root.now-art-big; initial: root.now-title; plat: root.now-plat; badge: parent.ring ? 36px : 52px; corner: parent.ring ? 10px : 14px; width: parent.ring ? parent.width * 0.56 : parent.width; height: self.width; x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2; }
                             }
-                            if root.viz-now && root.viz-style == "ring" && !npl.slim: Rectangle { height: parent.side * 0.2; }
                             // (the sound's bands under the cover, low to high: Bars, Mirror or Peaks)
                             if root.viz-now && root.viz-style != "off" && root.viz-style != "glow" && (root.viz-style != "ring" || npl.slim): VizView {
                                 height: 46px;
@@ -4226,8 +4223,8 @@ export component AppWindow inherits Window {
                                     Marquee { text: root.now-title + (root.now-trimmed ? " *" : ""); font-size: 15px; right: root.tab-right; max-width: 420px; }
                                     ArtistLinks { names: root.now-artists; text: root.now-artist; size: 13px; right: root.tab-right; pick(k) => { root.now-act("artist:" + k); } }
                                 }
-                                if !root.tab-right: TabCover { art: root.now-art; plat: root.now-plat; viz: root.viz-bar ? root.viz-style : "off"; ring: root.viz-ring; level: root.viz-level; badge-clicked => { root.now-act("platform"); } }
-                                if root.tab-right: TabCover { art: root.now-art; plat: root.now-plat; viz: root.viz-bar ? root.viz-style : "off"; ring: root.viz-ring; level: root.viz-level; badge-clicked => { root.now-act("platform"); } }
+                                if !root.tab-right: TabCover { art: root.now-art; plat: root.now-plat; viz: root.viz-bar ? root.viz-style : "off"; level: root.viz-level; badge-clicked => { root.now-act("platform"); } }
+                                if root.tab-right: TabCover { art: root.now-art; plat: root.now-plat; viz: root.viz-bar ? root.viz-style : "off"; level: root.viz-level; badge-clicked => { root.now-act("platform"); } }
                                 if !root.tab-right: VerticalLayout {
                                     alignment: center;
                                     spacing: 2px;
@@ -5033,10 +5030,19 @@ export component AppWindow inherits Window {
                 background: Theme.accent.mix(Theme.accent-2, 1 - root.viz-level).with-alpha((0.05 + 0.13 * root.viz-level) * (7 - r) / 6);
             }
             if root.viz-style == "ring": VizRing { width: parent.width; height: parent.height; path: root.viz-ring; }
-            Rectangle { border-radius: 18px; clip: true; Image { source: root.now-art-big; width: parent.width; height: parent.height; image-fit: cover; } }
+            // (Ring: the cover in the middle of the box, the circle round it; 0.56: viz::RING_COVER)
+            Rectangle {
+                width: root.viz-style == "ring" ? parent.width * 0.56 : parent.width;
+                height: self.width;
+                x: (parent.width - self.width) / 2;
+                y: (parent.height - self.height) / 2;
+                border-radius: root.viz-style == "ring" ? 12px : 18px;
+                clip: true;
+                Image { source: root.now-art-big; width: parent.width; height: parent.height; image-fit: cover; }
+            }
         }
         VerticalLayout {
-            y: parent.height * 0.12 + parent.side + 28px + (root.viz-style == "ring" ? parent.side * 0.2 : 0px);
+            y: parent.height * 0.12 + parent.side + 28px;
             width: parent.width;
             height: 80px;
             spacing: 4px;
