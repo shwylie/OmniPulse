@@ -5645,7 +5645,7 @@ dependencies = [
 
 [[package]]
 name = "omnipulse"
-version = "0.3.14"
+version = "0.3.15"
 dependencies = [
  "arboard",
  "base64 0.22.1",
@@ -5657,6 +5657,7 @@ dependencies = [
  "omnipulse-audio",
  "omnipulse-core",
  "omnipulse-mix",
+ "realfft",
  "regex",
  "reqwest 0.12.28",
  "rfd",
@@ -5690,7 +5691,7 @@ dependencies = [
 
 [[package]]
 name = "omnipulse-core"
-version = "0.3.14"
+version = "0.3.15"
 dependencies = [
  "base64 0.22.1",
  "beat-this",
