@@ -5719,7 +5719,7 @@ fn panel_paint(shared: &Shared, name: &str, vals: &serde_json::Map<String, serde
         let now = if kind == "togglecfg" { serde_json::json!(set_row_on(&shared.borrow().web.prefs, &key, false)) } else { vals.get(&key).cloned().unwrap_or_default() };
         let labels = || -> Vec<slint::SharedString> { f["labels"].as_array().into_iter().flatten().filter_map(|x| x.as_str().map(slint::SharedString::from)).collect() };
         let options: Vec<slint::SharedString> = match kind.as_str() {
-            "row" | "select" | "stepper" => labels(),
+            "row" | "select" | "stepper" | "wave" => labels(),
             "range" | "rangenum" => vec![f["min"].to_string().into(), f["max"].to_string().into(), f["step"].to_string().into(), f["unit"].as_str().unwrap_or("").into()],
             "togglecfg" => vec!["Configure".into()],
             _ => Vec::new(),
@@ -6215,7 +6215,7 @@ fn widget_preview_open(shared: &Shared, name: &str) {
     let (path, w, h) = if name == "lyricsw" { ("lyrics", 1100, 420) } else { ("", 720, 360) };
     let url = format!("http://127.0.0.1:{port}/{path}?preview=1");
     let profile = omnipulse_core::data_dir().map(|d| d.join("widget-preview")).unwrap_or_default();
-    let edge = std::process::Command::new("cmd").args(["/C", "start", "", "msedge", &format!("--app={url}"), &format!("--window-size={w},{h}"), &format!("--user-data-dir={}", profile.display())]).spawn();
+    let edge = std::process::Command::new("cmd").args(["/C", "start", "", "msedge", &format!("--app={url}"), "--autoplay-policy=no-user-gesture-required", &format!("--window-size={w},{h}"), &format!("--user-data-dir={}", profile.display())]).spawn();
     if edge.is_err() { let _ = std::process::Command::new("cmd").args(["/C", "start", "", &url]).spawn(); }
     if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_status("The preview's open: it changes as you change the settings, before you save them.".into()); }
 }
@@ -9255,7 +9255,11 @@ fn alert_shown(shared: &Shared, kind: &str) {
     };
     if e["music"].as_bool() != Some(true) { return; }
     let Some(path) = alert_sound_file(kind) else { return };
-    let Ok(src) = omnipulse_audio::Decoded::open_file(&path) else { return };
+    let Ok(mut src) = omnipulse_audio::Decoded::open_file(&path) else { return };
+    // (trimmed: from Trim Start, over Trim End before its end)
+    let ms = |v: &serde_json::Value| v.as_f64().or_else(|| v.as_str().and_then(|s| s.trim().parse::<f64>().ok())).map(|x| x.max(0.0).round() as u64).unwrap_or(0);
+    let (tstart, tend) = (ms(&e["tstart"]), ms(&e["tend"]));
+    if tstart > 0 { let _ = omnipulse_audio::Source::seek(&mut src, tstart); }
     let device = webstate::native_pref("nativeDevice").and_then(|v| v.as_str().map(String::from)).unwrap_or_default();
     let Ok(player) = omnipulse_audio::Engine::new(&device) else { return };
     let player = Arc::new(player);
@@ -9274,7 +9278,9 @@ fn alert_shown(shared: &Shared, kind: &str) {
     t.start(slint::TimerMode::Repeated, std::time::Duration::from_millis(100), move || {
         let _keep = &player;
         if fading.is_none() {
-            let ended = events.as_ref().is_some_and(|rx| rx.try_iter().any(|ev| matches!(ev, omnipulse_audio::Event::Ended | omnipulse_audio::Event::Error(_))));
+            let cut = tend > 0 && player.duration_ms() > 0 && player.position_ms() + tstart + tend >= player.duration_ms();
+            if cut { player.pause(); }
+            let ended = cut || events.as_ref().is_some_and(|rx| rx.try_iter().any(|ev| matches!(ev, omnipulse_audio::Event::Ended | omnipulse_audio::Event::Error(_))));
             if !ended { return; }
             if !was_playing || !s.borrow().engine.is_paused() { ALERT_TIMER.with(|x| *x.borrow_mut() = None); return; }
             let e = s.borrow().engine.clone();
@@ -10931,6 +10937,8 @@ fn main() -> Result<(), slint::PlatformError> {
             // (OMNIPULSE_SELFTEST_PLAN=apple: Apple Music's sign-in window opened off-screen, Apple's page looked at, closed; nobody signs in)
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("apple") { vec![(6, "appleopen"), (16, "applecheck"), (17, "end")] }
             // (OMNIPULSE_SELFTEST_PLAN=tp: Track preferences for what plays, its bar dragged)
+            // (OMNIPULSE_SELFTEST_PLAN=alertwave: the first alert with a sound, its waveform and trims, in a tall window)
+            else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("alertwave") { vec![(9, "size:1180:1700"), (10, "settings"), (11, "alertsnd"), (13, "end")] }
             // (OMNIPULSE_SELFTEST_PLAN=plugbar: a plugin's icon put in the title bar, then right-clicked for its settings)
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("plugbar") { vec![(9, "plugbar"), (11, "titleset:plugin:internet-archive"), (13, "end")] }
             // (OMNIPULSE_SELFTEST_PLAN=loadview: the pages as they load, their platforms ticked off)
@@ -11147,6 +11155,20 @@ fn main() -> Result<(), slint::PlatformError> {
                 "sshit" => { ui.invoke_set_hit(0); println!("selftest: after a hit: cat \"{}\", query \"{}\"", ui.get_set_cat(), ui.get_set_query()); }
                 "crumb2" => { println!("selftest: path {:?}", ui.get_pf_crumbs().iter().collect::<Vec<_>>()); ui.invoke_crumb_go(2); println!("selftest: after its 3rd part: open {}, head \"{}\"", ui.get_pf_open(), ui.get_pf_head()); }
                 "setclose" => { ui.invoke_settings_close(); println!("selftest: settings closed: page \"{}\", panel {}, cat \"{}\"", ui.get_page(), ui.get_pf_open(), ui.get_set_cat()); }
+                "alertsnd" => {
+                    // (none yet: a made-up one for Follows, its outline a swell with silence at its start; not kept)
+                    if s.borrow().web.prefs["alertSounds"].as_object().is_none_or(|m| m.is_empty()) {
+                        let env: Vec<f64> = (0..160).map(|i| if i < 22 { 0.01 } else { ((i as f64 * 0.37).sin().abs() * 0.6 + 0.2) * (1.0 - (i as f64 - 22.0) / 160.0) }).collect();
+                        if let Some(o) = s.borrow_mut().web.prefs.as_object_mut() {
+                            o.insert("alertSounds".into(), serde_json::json!({ "follow": { "name": "ding.mp3", "at": 1 } }));
+                            o.insert("alertLevels".into(), serde_json::json!({ "follow": { "ms": 2400, "auto": -2.5, "env": env } }));
+                            o.insert("alertEdit".into(), serde_json::json!({ "follow": { "tstart": 330, "tend": 200 } }));
+                        }
+                    }
+                    let k = s.borrow().web.prefs["alertSounds"].as_object().and_then(|m| m.keys().next().cloned());
+                    println!("selftest: alertsnd: {k:?}, levels {}", k.as_ref().map(|k| s.borrow().web.prefs["alertLevels"][k]["env"].as_array().map_or(0, |e| e.len())).unwrap_or(0));
+                    if let Some(k) = k { panel_open(&s, &format!("alert:{k}")); }
+                }
                 w if w.starts_with("p_") => { panel_open(&s, &w[2..]); println!("selftest: panel {} has {} fields", &w[2..], ui.get_pf_fields().row_count()); }
                 "plugread" => { panel_put(&s, "plugSource", serde_json::json!(std::env::current_dir().unwrap_or_default().join("plugins").join("internet-archive").join("manifest.json").display().to_string())); panel_press(&s, "plugCheck"); }
                 "pfclose" => { PF_EDIT.with(|e| e.borrow_mut().take()); ui.set_pf_open(false); }

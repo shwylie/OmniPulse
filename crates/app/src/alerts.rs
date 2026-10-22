@@ -128,7 +128,19 @@ pub fn test_alert(k: &str) -> Map<String, Value> {
 }
 
 // ---------- an alert's own page ----------
-const EDIT_KEYS: [&str; 10] = ["name", "head", "main", "color", "color2", "secs", "anim", "icon", "sdelay", "music"];
+const EDIT_KEYS: [&str; 12] = ["name", "head", "main", "color", "color2", "secs", "anim", "icon", "sdelay", "music", "tstart", "tend"];
+
+/// A number field's value (typed in: a number, or text of one); 0 if it isn't one
+fn ms_of(v: Option<&Value>) -> u64 {
+    v.and_then(|v| v.as_f64().or_else(|| v.as_str().and_then(|s| s.trim().parse::<f64>().ok()))).map(|x| x.max(0.0).round() as u64).unwrap_or(0)
+}
+
+/// Its sound's waveform: its measured outline's 160 steps, each 0 to 1 of the loudest
+fn wave_heights(env: &[Value]) -> Vec<String> {
+    let v: Vec<f64> = env.iter().filter_map(|x| x.as_f64()).collect();
+    let top = v.iter().cloned().fold(0.0, f64::max).max(1e-6);
+    v.iter().map(|a| format!("{:.3}", (a / top).max(0.02))).collect()
+}
 
 pub fn edit_values(prefs: &Value, k: &str) -> Map<String, Value> {
     let e = edits(prefs, k);
@@ -213,6 +225,16 @@ pub fn edit_fields(prefs: &Value, k: &str, vals: &Map<String, Value>) -> Vec<Val
             let secs = lv["ms"].as_u64().map(|ms| format!(", {:.1} s", ms as f64 / 1000.0)).unwrap_or_default();
             let auto = lv["auto"].as_f64().map(|a| format!(" Measured: {}{a} dB to match the others.", if a > 0.0 { "+" } else { "" })).unwrap_or_default();
             f.push(note(&format!("Sound: {file}{secs}.{auto}")));
+            // (its waveform, to see it was measured right, with what's trimmed off shaded; and the trims)
+            let ms = lv["ms"].as_u64().unwrap_or(0).max(1);
+            let (ts, te) = (ms_of(vals.get("e.tstart")), ms_of(vals.get("e.tend")));
+            if let Some(env) = lv["env"].as_array().filter(|e| !e.is_empty()) {
+                let frac = |x: u64| format!("{:.4}", (x as f64 / ms as f64).clamp(0.0, 1.0));
+                let wave: Vec<String> = [frac(ts), frac(te)].into_iter().chain(wave_heights(env)).collect();
+                f.push(json!({ "key": "", "type": "wave", "label": "Its Waveform", "note": "As measured. Shaded: what Trim Start and Trim End leave out.", "labels": wave }));
+            }
+            f.push(field("e.tstart", "Trim Start", "In ms: this much of its start left out (silence before it, say).", "number"));
+            f.push(field("e.tend", "Trim End", "In ms: this much of its end left out.", "number"));
             let mut adj = Vec::new();
             let mut v = -12.0;
             while v <= 12.0 { adj.push((json!(v), format!("{}{v} dB", if v > 0.0 { "+" } else { "" }))); v += 1.0; }
@@ -249,7 +271,7 @@ pub fn edit_save(prefs: &Value, k: &str, vals: &Map<String, Value>) -> Vec<(&'st
     let own = vals.get("own").and_then(|v| v.as_bool()) == Some(true);
     for key in EDIT_KEYS {
         let v = vals.get(&format!("e.{key}")).cloned().unwrap_or(json!(""));
-        let empty = v.is_null() || v == "" || v == json!(false) || (key == "sdelay" && v.as_f64() == Some(0.0)) || (matches!(key, "color" | "color2") && !own);
+        let empty = v.is_null() || v == "" || v == json!(false) || (matches!(key, "sdelay" | "tstart" | "tend") && v.as_f64() == Some(0.0)) || (matches!(key, "color" | "color2") && !own);
         if empty || (key == "name" && builtin(k).is_none()) { e.remove(key); } else { e.insert(key.into(), v); }
     }
     // the crop: kept unless it's as it starts

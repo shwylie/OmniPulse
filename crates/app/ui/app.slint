@@ -3651,6 +3651,34 @@ export component AppWindow inherits Window {
                            spacing: 6px;
                            // instructions: just text
                            if f.kind == "note": Text { text: f.label; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
+                           // a sound's waveform: where its trims are (shares of it), then its outline's 160 heights
+                           if f.kind == "wave": VerticalLayout {
+                            spacing: 4px;
+                            Text { text: f.label; color: Theme.text; font-weight: 700; }
+                            if f.note != "": Text { text: f.note; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
+                            Rectangle {
+                              height: 72px;
+                              border-radius: 8px;
+                              background: Theme.panel;
+                              border-width: 1px;
+                              border-color: Theme.line;
+                              clip: true;
+                              // (a bar for each of its 160 steps, spread across it: options' 3rd on are their heights, 0 to 1)
+                              for v[k] in f.options: Rectangle {
+                                  visible: k >= 2;
+                                  property <length> step: (parent.width - 16px) / max(1, f.options.length - 2);
+                                  x: 8px + (k - 2) * self.step;
+                                  width: max(1px, self.step * 0.72);
+                                  height: max(1px, (parent.height - 14px) * (k >= 2 ? v.to-float() : 0));
+                                  y: (parent.height - self.height) / 2;
+                                  border-radius: 1px;
+                                  background: Theme.accent;
+                              }
+                              // (trimmed off: shaded)
+                              Rectangle { x: 8px; y: 0; height: parent.height; width: (parent.width - 16px) * (f.options.length > 1 ? f.options[0].to-float() : 0); background: Theme.bg.with-alpha(0.72); }
+                              Rectangle { property <float> e: f.options.length > 1 ? f.options[1].to-float() : 0; x: 8px + (parent.width - 16px) * (1 - self.e); y: 0; height: parent.height; width: (parent.width - 16px) * self.e; background: Theme.bg.with-alpha(0.72); }
+                            }
+                           }
                            // an address: shown, and copied
                            if f.kind == "info": VerticalLayout {
                             spacing: 4px;
@@ -3670,7 +3698,7 @@ export component AppWindow inherits Window {
                               Pill { label: "Copy"; clicked => { root.pf-copy(i); } }
                             }
                            }
-                           if f.kind != "note" && f.kind != "info": HorizontalLayout {
+                           if f.kind != "note" && f.kind != "info" && f.kind != "wave": HorizontalLayout {
                             spacing: 12px;
                             VerticalLayout {
                                 horizontal-stretch: 1;

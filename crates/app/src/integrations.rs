@@ -190,6 +190,11 @@ pub fn alerts_cfg(prefs: &Value) -> Value {
             c.insert("secs".into(), json!(s));
         }
         if let Some(d) = e["sdelay"].as_u64() { c.insert("sdelay".into(), json!(d)); }
+        // (its sound trimmed: this much of its start and its end left out)
+        let ms = |v: &Value| v.as_f64().or_else(|| v.as_str().and_then(|s| s.trim().parse::<f64>().ok())).map(|x| x.max(0.0).round() as u64).unwrap_or(0);
+        let (tstart, tend) = (ms(&e["tstart"]), ms(&e["tend"]));
+        if tstart > 0 { c.insert("tstart".into(), json!(tstart)); }
+        if tend > 0 { c.insert("tend".into(), json!(tend)); }
         if let Some(at) = prefs["alertImages"][k]["at"].as_u64() {
             c.insert("image".into(), json!(at.to_string()));
         }
@@ -200,7 +205,7 @@ pub fn alerts_cfg(prefs: &Value) -> Value {
         let lv = &prefs["alertLevels"][k];
         if lv.is_object() && prefs["alertSounds"][k].is_object() {
             c.insert("gain".into(), json!(lv["auto"].as_f64().unwrap_or(0.0) + lv["adj"].as_f64().unwrap_or(0.0)));
-            c.insert("sndMs".into(), lv["ms"].clone());
+            c.insert("sndMs".into(), json!(lv["ms"].as_u64().unwrap_or(0).saturating_sub(tstart + tend)));
         }
         if let Some((_, name)) = custom.iter().find(|x| &x.0 == k) {
             c.insert("name".into(), json!(e["name"].as_str().filter(|v| !v.is_empty()).unwrap_or(name)));

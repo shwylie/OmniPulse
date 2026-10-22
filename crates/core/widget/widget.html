@@ -621,6 +621,10 @@
     } catch (e) {
       snd.volume = Math.min(1, gain);
     }
+    // (trimmed: from Trim Start, stopped Trim End before its end)
+    const from = Math.max(0, Number(k.tstart) || 0) / 1000, cut = Math.max(0, Number(k.tend) || 0) / 1000;
+    if (from > 0) snd.addEventListener("loadedmetadata", () => { try { snd.currentTime = from; } catch (e) {} }, { once: true });
+    if (cut > 0) snd.addEventListener("timeupdate", () => { if (snd.duration && snd.currentTime >= snd.duration - cut) snd.pause(); });
     setTimeout(() => snd.play().catch(() => {}), Math.max(0, Number(k.sdelay) || 0));
   }
 
