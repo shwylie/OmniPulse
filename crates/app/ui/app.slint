@@ -774,6 +774,36 @@ component PlatIcon inherits Rectangle {
     if root.plat == "xpl": Image { source: @image-url("xpl.svg"); width: parent.width; height: parent.height; }
 }
 
+/// The visualiser's bars, wherever they're shown (Now Playing, the player, full screen): Bars from the foot,
+/// Mirror from the middle, Peaks as Bars with each one's recent top held a moment
+component VizView inherits Rectangle {
+    in property <string> style;
+    in property <[float]> bands;
+    in property <[float]> peaks;
+    in property <float> strength: 1;
+    property <bool> mirror: root.style == "mirror";
+    for v[k] in root.bands: Rectangle {
+        property <length> step: root.width / max(1, root.bands.length);
+        x: k * self.step + self.step * 0.15;
+        width: self.step * 0.7;
+        height: max(2px, root.height * v);
+        y: root.mirror ? (root.height - self.height) / 2 : root.height - self.height;
+        border-radius: min(self.width, self.height) / 2;
+        background: Theme.accent.mix(Theme.accent-2, 1 - k / max(1, root.bands.length - 1)).with-alpha(root.strength);
+    }
+    if root.style == "peaks": Rectangle {
+        for p[k] in root.peaks: Rectangle {
+            property <length> step: root.width / max(1, root.peaks.length);
+            x: k * self.step + self.step * 0.15;
+            width: self.step * 0.7;
+            height: 3px;
+            y: max(0px, root.height - root.height * p - 6px);
+            border-radius: 1.5px;
+            background: Theme.text.with-alpha(0.8 * root.strength);
+        }
+    }
+}
+
 /// A page loading: an equaliser's bars moving, and each platform asked, ticked as it answers (so the
 /// slowest is the one still spinning)
 component LoadingView inherits Rectangle {
@@ -1506,6 +1536,13 @@ export component AppWindow inherits Window {
     in property <[float]> viz-bands;
     // (and how loud it is now, 0 to 1: the Glow's)
     in property <float> viz-level;
+    in property <[float]> viz-peaks;
+    // where it's shown: Now Playing, the player (behind its controls), full screen (the whole window)
+    in-out property <bool> viz-now: true;
+    in-out property <bool> viz-bar;
+    in-out property <bool> viz-full;
+    callback viz-pick(string);
+    callback viz-place(string, bool);
     callback viz-cycle();
     in property <string> now-album;
     // who uploaded it, where that's not its artist (Now Playing only)
@@ -1720,6 +1757,9 @@ export component AppWindow inherits Window {
     // Now Playing: where its song opens ("Open on SoundCloud"...), and its buttons' and artist's actions
     in property <string> now-open;
     in property <string> now-desc;
+    // Now Playing's right side: the lyrics or the song's description, one at a time (its switch: kept)
+    in-out property <string> now-pane: "lyrics";
+    callback now-pane-picked(string);
     callback now-act(string);
     // the open playlist's header: what it offers
     in property <bool> pl-share;
@@ -3149,6 +3189,55 @@ export component AppWindow inherits Window {
                                         Chip { label: "Compact"; on: root.compact-rows; y: (parent.height - self.height) / 2; clicked => { root.compact-rows = true; root.density-changed(true); } }
                                     }
                                 }
+                                // the visualiser: its style, and where it's shown
+                                Card {
+                                    VerticalLayout {
+                                        padding: 16px;
+                                        padding-top: 12px;
+                                        padding-bottom: 12px;
+                                        spacing: 10px;
+                                        HorizontalLayout {
+                                            spacing: 12px;
+                                            VerticalLayout {
+                                                horizontal-stretch: 1;
+                                                alignment: center;
+                                                spacing: 2px;
+                                                Text { text: "Visualiser"; color: Theme.text; font-weight: 700; }
+                                                Text { text: "The music as it plays: Bars, Mirror (from the middle), Peaks (bars with their tops held), or a Glow. It only runs while it's on screen and something's playing."; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
+                                            }
+                                            Dropdown {
+                                                options: ["Off", "Bars", "Mirror", "Peaks", "Glow"];
+                                                current: root.viz-style == "bars" ? 1 : root.viz-style == "mirror" ? 2 : root.viz-style == "peaks" ? 3 : root.viz-style == "glow" ? 4 : 0;
+                                                y: (parent.height - self.height) / 2;
+                                                picked(k) => { root.viz-pick(k == 1 ? "bars" : k == 2 ? "mirror" : k == 3 ? "peaks" : k == 4 ? "glow" : "off"); }
+                                            }
+                                        }
+                                        HorizontalLayout {
+                                            VerticalLayout {
+                                                horizontal-stretch: 1;
+                                                Text { text: "On Now Playing"; color: Theme.text; font-weight: 700; }
+                                                Text { text: "Under the cover (Glow: around it)."; color: Theme.muted; font-size: 12px; }
+                                            }
+                                            Toggle { checked <=> root.viz-now; y: (parent.height - self.height) / 2; toggled => { root.viz-place("now", self.checked); } }
+                                        }
+                                        HorizontalLayout {
+                                            VerticalLayout {
+                                                horizontal-stretch: 1;
+                                                Text { text: "In the Player"; color: Theme.text; font-weight: 700; }
+                                                Text { text: "Faintly, behind the playback controls, on every page."; color: Theme.muted; font-size: 12px; }
+                                            }
+                                            Toggle { checked <=> root.viz-bar; y: (parent.height - self.height) / 2; toggled => { root.viz-place("bar", self.checked); } }
+                                        }
+                                        HorizontalLayout {
+                                            VerticalLayout {
+                                                horizontal-stretch: 1;
+                                                Text { text: "Full Screen"; color: Theme.text; font-weight: 700; }
+                                                Text { text: "The whole window: the cover, what's playing and the visualiser. Escape closes it."; color: Theme.muted; font-size: 12px; }
+                                            }
+                                            Pill { label: "Open"; y: (parent.height - self.height) / 2; clicked => { root.viz-full = true; root.viz-place("full", true); } }
+                                        }
+                                    }
+                                }
                                 Card {
                                     HorizontalLayout {
                                         padding: 16px;
@@ -3524,6 +3613,13 @@ export component AppWindow inherits Window {
                             spacing: 10px;
                             // (smaller on a short window: its title, artist and buttons stay in sight)
                             property <length> side: min(360px, max(180px, root.height - 470px));
+                            // the visualiser's own controls: first, so a short window never pushes them out of sight
+                            if root.now-title != "": HorizontalLayout {
+                                alignment: start;
+                                spacing: 6px;
+                                Pill { label: "Visualiser: " + (root.viz-style == "bars" ? "Bars" : root.viz-style == "mirror" ? "Mirror" : root.viz-style == "peaks" ? "Peaks" : root.viz-style == "glow" ? "Glow" : "Off"); on: root.viz-style != "off"; clicked => { root.viz-cycle(); } }
+                                Pill { label: "Full Screen"; clicked => { root.viz-full = true; root.viz-place("full", true); } }
+                            }
                             if !npl.slim: Rectangle {
                                 height: parent.side;
                                 width: parent.side;
@@ -3532,7 +3628,7 @@ export component AppWindow inherits Window {
                                 // (rings round it, each a little further out and fainter, as far out as it's loud: drawn
                                 // the same by either renderer, the software one having no drop shadows)
                                 for r in [6, 5, 4, 3, 2, 1]: Rectangle {
-                                    visible: root.viz-style == "glow";
+                                    visible: root.viz-now && root.viz-style == "glow";
                                     property <length> out: r * (3px + 7px * parent.bass);
                                     x: -self.out;
                                     y: -self.out;
@@ -3543,19 +3639,13 @@ export component AppWindow inherits Window {
                                 }
                                 BadgedCover { art: root.now-art-big; initial: root.now-title; plat: root.now-plat; badge: 52px; corner: 14px; height: parent.height; width: parent.width; }
                             }
-                            // (Bars and Mirror: the sound's bands under the cover, low to high)
-                            if !npl.slim && (root.viz-style == "bars" || root.viz-style == "mirror"): Rectangle {
+                            // (the sound's bands under the cover, low to high: Bars, Mirror or Peaks)
+                            if root.viz-now && root.viz-style != "off" && root.viz-style != "glow": VizView {
                                 height: 46px;
-                                width: parent.side;
-                                for v[k] in root.viz-bands: Rectangle {
-                                    property <length> step: parent.width / max(1, root.viz-bands.length);
-                                    x: k * self.step;
-                                    width: self.step * 0.7;
-                                    height: max(2px, parent.height * v);
-                                    y: root.viz-style == "mirror" ? (parent.height - self.height) / 2 : parent.height - self.height;
-                                    border-radius: min(self.width, self.height) / 2;
-                                    background: Theme.accent.mix(Theme.accent-2, 1 - k / max(1, root.viz-bands.length - 1));
-                                }
+                                width: npl.slim ? parent.width : parent.side;
+                                style: root.viz-style;
+                                bands: root.viz-bands;
+                                peaks: root.viz-peaks;
                             }
                             Text { text: root.now-title; color: Theme.text; font-size: npl.slim ? 20px : 26px; font-weight: 800; wrap: word-wrap; }
                             // (start or end times of its own: the asterisk opens them, as the web app's)
@@ -3579,11 +3669,6 @@ export component AppWindow inherits Window {
                                 Pill { label: root.now-fav ? "In Favourites" : "Add to Favourites"; on: root.now-fav; clicked => { root.fav-toggle(); } }
                                 if root.now-open != "": Pill { label: root.now-open; clicked => { root.now-act("open"); } }
                             }
-                            // (the visualiser's style, a click on to the next: off, bars, mirror, glow)
-                            if root.now-title != "" && !npl.slim: HorizontalLayout {
-                                alignment: start;
-                                Pill { label: "Visualiser: " + (root.viz-style == "bars" ? "Bars" : root.viz-style == "mirror" ? "Mirror" : root.viz-style == "glow" ? "Glow" : "Off"); on: root.viz-style != "off"; clicked => { root.viz-cycle(); } }
-                            }
                             if root.now-title != "" && npl.slim: VerticalLayout {
                                 spacing: 8px;
                                 alignment: start;
@@ -3594,7 +3679,7 @@ export component AppWindow inherits Window {
 
                             Rectangle { vertical-stretch: 1; }
                         }
-                        VerticalLayout {
+                        npr := VerticalLayout {
                             horizontal-stretch: 1;
                             spacing: 6px;
                             // (the cover, above the lyrics, when there's no room for it beside them)
@@ -3604,12 +3689,18 @@ export component AppWindow inherits Window {
                                 BadgedCover { art: root.now-art-big; initial: root.now-title; plat: root.now-plat; badge: 40px; corner: 12px; height: parent.side; width: parent.side; }
                             }
                             if npl.slim: Rectangle { height: 6px; }
-                            // (a SoundCloud song's description, as its uploader wrote it, above its lyrics)
-                            if root.now-desc != "": Text { text: root.now-desc; color: Theme.muted; font-size: 13px; wrap: word-wrap; }
-                            if root.now-desc != "": Rectangle { height: 8px; }
-                            if root.lyrics-note != "": Text { text: root.lyrics-note; color: Theme.muted; }
+                            // the lyrics or the description (a SoundCloud song's, as its uploader wrote it): never both,
+                            // a switch between them when there's a description
+                            property <bool> show-desc: root.now-desc != "" && root.now-pane == "desc";
+                            if root.now-desc != "": HorizontalLayout {
+                                alignment: start;
+                                spacing: 6px;
+                                Chip { label: "Lyrics"; on: !npr.show-desc; clicked => { root.now-pane = "lyrics"; root.now-pane-picked("lyrics"); } }
+                                Chip { label: "Description"; on: npr.show-desc; clicked => { root.now-pane = "desc"; root.now-pane-picked("desc"); } }
+                            }
+                            if !npr.show-desc && root.lyrics-note != "": Text { text: root.lyrics-note; color: Theme.muted; }
                             // where they're from, and the other places, a click each
-                            if root.lyrics-from != "" || root.lyrics-others.length > 0: HorizontalLayout {
+                            if !npr.show-desc && (root.lyrics-from != "" || root.lyrics-others.length > 0): HorizontalLayout {
                                 spacing: 10px;
                                 Text { text: root.lyrics-from == "" ? "Other sources:" : root.lyrics-from + " Other sources:"; color: Theme.muted; font-size: 12px; overflow: elide; min-width: 0; horizontal-stretch: 0; }
                                 for name[i] in root.lyrics-others: lt := TouchArea {
@@ -3620,8 +3711,14 @@ export component AppWindow inherits Window {
                                 }
                                 Rectangle { horizontal-stretch: 1; }
                             }
-                            lv := ListView {
-                                vertical-stretch: 1;
+                            // (the two in one place: the one not chosen hidden, so the lyrics keep their place as they're sung)
+                            Rectangle {
+                              vertical-stretch: 1;
+                              if npr.show-desc: ScrollView {
+                                Text { width: parent.width - 12px; text: root.now-desc; color: Theme.text; font-size: 14px; wrap: word-wrap; }
+                              }
+                              lv := ListView {
+                                visible: !npr.show-desc;
                                 for l[i] in root.lyrics: Rectangle {
                                     height: 40px;
                                     Text {
@@ -3635,6 +3732,7 @@ export component AppWindow inherits Window {
                                         animate color, opacity, font-size { duration: Theme.motion ? 400ms : 0ms; easing: ease-out; }
                                     }
                                 }
+                              }
                             }
                             property <int> on: root.lyric-on;
                             changed on => {
@@ -4035,6 +4133,13 @@ export component AppWindow inherits Window {
                     drop-shadow-blur: root.player-style == "float" ? 24px : 0;
                     drop-shadow-offset-y: root.player-style == "float" ? 8px : 0;
                     drop-shadow-color: #00000060;
+                    // (the visualiser, faint, behind the controls: In the Player; Glow as the bar lit by it)
+                    if root.viz-bar && root.viz-style != "off": Rectangle {
+                        clip: true;
+                        border-radius: parent.r;
+                        if root.viz-style == "glow": Rectangle { background: Theme.accent.mix(Theme.accent-2, 1 - root.viz-level).with-alpha(0.22 * root.viz-level); }
+                        if root.viz-style != "glow": VizView { style: root.viz-style; bands: root.viz-bands; peaks: root.viz-peaks; strength: 0.22; }
+                    }
                     VerticalLayout {
                 // (it opens and closes from the controls' top edge, smoothly, never jumping: what it says is
                 // kept while it closes)
@@ -4752,6 +4857,65 @@ export component AppWindow inherits Window {
             reject
         }
     }
+    // the visualiser, full screen: the cover in the middle (its glow round it), what's playing, the bars across
+    // the foot; Escape or the close button ends it
+    if root.viz-full: Rectangle {
+        x: 0;
+        y: 0;
+        width: root.width;
+        height: root.height;
+        background: Theme.bg;
+        Image { source: root.now-art-big; width: parent.width; height: parent.height; image-fit: cover; opacity: 0.18; }
+        Rectangle { background: @linear-gradient(180deg, Theme.bg.with-alpha(0.55) 0%, Theme.bg.with-alpha(0.92) 100%); }
+        TouchArea { double-clicked => { root.viz-full = false; root.viz-place("full", false); } }
+        property <length> side: min(root.width * 0.34, root.height * 0.42);
+        Rectangle {
+            x: (parent.width - parent.side) / 2;
+            y: parent.height * 0.12;
+            width: parent.side;
+            height: parent.side;
+            for r in [6, 5, 4, 3, 2, 1]: Rectangle {
+                visible: root.viz-style == "glow";
+                property <length> out: r * (5px + 12px * root.viz-level);
+                x: -self.out;
+                y: -self.out;
+                width: parent.width + 2 * self.out;
+                height: parent.height + 2 * self.out;
+                border-radius: 18px + self.out;
+                background: Theme.accent.mix(Theme.accent-2, 1 - root.viz-level).with-alpha((0.05 + 0.13 * root.viz-level) * (7 - r) / 6);
+            }
+            Rectangle { border-radius: 18px; clip: true; Image { source: root.now-art-big; width: parent.width; height: parent.height; image-fit: cover; } }
+        }
+        VerticalLayout {
+            y: parent.height * 0.12 + parent.side + 28px;
+            width: parent.width;
+            height: 80px;
+            spacing: 4px;
+            Text { text: root.now-title; color: Theme.text; font-size: 30px; font-weight: 800; horizontal-alignment: center; overflow: elide; }
+            Text { text: root.now-artist; color: Theme.accent; font-size: 18px; font-weight: 600; horizontal-alignment: center; overflow: elide; }
+        }
+        if root.viz-style != "glow" && root.viz-style != "off": VizView {
+            x: parent.width * 0.06;
+            width: parent.width * 0.88;
+            height: parent.height * 0.24;
+            y: parent.height - self.height - 36px;
+            style: root.viz-style;
+            bands: root.viz-bands;
+            peaks: root.viz-peaks;
+            strength: 0.9;
+        }
+        if root.viz-style == "off": Text { y: parent.height - 80px; width: parent.width; horizontal-alignment: center; text: "Pick a visualiser style in Settings > App & Look."; color: Theme.muted; }
+        RoundButton { x: parent.width - self.width - 20px; y: 20px; tip: "Close the visualiser"; d: Icons.close; clicked => { root.viz-full = false; root.viz-place("full", false); } }
+        FocusScope {
+            width: 0; height: 0;
+            init => { self.focus(); }
+            key-pressed(e) => {
+                if (e.text == Key.Escape) { root.viz-full = false; root.viz-place("full", false); return accept; }
+                return reject;
+            }
+        }
+    }
+
 }
 
 // Settings > App > Taskbar Widget: what's playing, always on show in the taskbar by the clock (a small

@@ -5605,7 +5605,7 @@ fn settings_close(shared: &Shared) {
 struct SetFound { path: String, label: String, note: String, cat: String, panel: String, key: String, toggle: bool }
 
 /// The settings drawn by hand (not from SET_ROWS): their category, name and description
-const SET_HAND: [(&str, &str, &str); 22] = [
+const SET_HAND: [(&str, &str, &str); 23] = [
     ("", "Updates", "Checks for a newer version a little after it starts, and installs it."),
     ("App & Look", "Theme", "Light to dark."),
     ("App & Look", "Tint", "A colour through the theme."),
@@ -5615,6 +5615,7 @@ const SET_HAND: [(&str, &str, &str); 22] = [
     ("App & Look", "Player Style", "Tab, Classic Bar, Floating or Minimal."),
     ("App & Look", "Track Info Tab", "Which end of the player bar the tab sits at."),
     ("App & Look", "List Density", "How tightly tracks are listed. Compact fits more on screen."),
+    ("App & Look", "Visualiser", "The music as it plays: Bars, Mirror, Peaks or a Glow, on Now Playing, in the player, or full screen."),
     ("App & Look", "Display Name", "Shown in the title bar and taskbar."),
     ("App & Look", "Minimize to Tray", "Minimizing hides the window to the tray; music keeps playing. Open it again, or quit, from the tray's menu."),
     ("App & Look", "Taskbar Widget", "What's playing, always on show in the taskbar by the clock, with its controls."),
@@ -8486,11 +8487,18 @@ fn fade_out_ms(a: &App) -> Option<u64> {
 /// The visualiser on or off, as Now Playing is: on only while it's shown, playing, a style picked (the
 /// engine's tap and its timer stopped otherwise: nothing of it running for nothing)
 fn viz_update(shared: &Shared, ui: &AppWindow) {
-    let style = shared.borrow().web.prefs["nowViz"].as_str().unwrap_or("off").to_string();
+    let (style, on_now, on_bar) = {
+        let p = &shared.borrow().web.prefs;
+        (p["nowViz"].as_str().unwrap_or("off").to_string(), p["vizNow"].as_bool() != Some(false), p["vizBar"].as_bool() == Some(true))
+    };
     if ui.get_viz_style() != style.as_str() { ui.set_viz_style(style.clone().into()); }
+    if ui.get_viz_now() != on_now { ui.set_viz_now(on_now); }
+    if ui.get_viz_bar() != on_bar { ui.set_viz_bar(on_bar); }
+    // (shown somewhere: full screen, Now Playing open, or the player's; and playing, in sight)
     let want = {
         let a = shared.borrow();
-        style != "off" && a.page == "now" && a.loaded && !a.engine.is_paused() && ui.window().is_visible() && !ui.window().is_minimized()
+        let shown = ui.get_viz_full() || (on_now && a.page == "now") || on_bar;
+        style != "off" && shown && a.loaded && !a.engine.is_paused() && ui.window().is_visible() && !ui.window().is_minimized()
     };
     let running = VIZ.with(|v| v.borrow().is_some());
     if want == running { return; }
@@ -8498,13 +8506,16 @@ fn viz_update(shared: &Shared, ui: &AppWindow) {
     if want {
         engine.set_tap("viz", Some(viz::tap(engine.output_rate())));
         let model = Rc::new(VecModel::from(vec![0.0f32; viz::BANDS]));
+        let tops = Rc::new(VecModel::from(vec![0.0f32; viz::BANDS]));
         ui.set_viz_bands(ModelRc::from(model.clone()));
+        ui.set_viz_peaks(ModelRc::from(tops.clone()));
         let t = slint::Timer::default();
         let m = model.clone();
         let w = ui.as_weak();
         t.start(slint::TimerMode::Repeated, std::time::Duration::from_millis(33), move || {
             let b = viz::bands();
             for (i, v) in b.into_iter().enumerate() { m.set_row_data(i, v); }
+            for (i, v) in viz::peaks(&b).into_iter().enumerate() { tops.set_row_data(i, v); }
             if let Some(ui) = w.upgrade() { ui.set_viz_level(viz::level(&b)); }
         });
         VIZ.with(|v| *v.borrow_mut() = Some((t, model)));
@@ -8513,6 +8524,7 @@ fn viz_update(shared: &Shared, ui: &AppWindow) {
         viz::stop();
         VIZ.with(|v| *v.borrow_mut() = None);
         ui.set_viz_bands(ModelRc::default());
+        ui.set_viz_peaks(ModelRc::default());
         ui.set_viz_level(0.0);
     }
 }
@@ -10078,11 +10090,36 @@ fn main() -> Result<(), slint::PlatformError> {
     ui.set_mix_available(true);
     let s = shared.clone();
     ui.on_mix_toggle(move || set_toggle(&s, "smartOn"));
+    // (Now Playing: the lyrics or the description, as last picked)
+    ui.set_now_pane(if shared.borrow().web.prefs["nowPane"].as_str() == Some("desc") { "desc".into() } else { "lyrics".into() });
+    let s = shared.clone();
+    ui.on_now_pane_picked(move |p| {
+        let v = serde_json::json!(p.as_str());
+        if let Some(o) = s.borrow_mut().web.prefs.as_object_mut() { o.insert("nowPane".into(), v.clone()); }
+        if std::env::var_os("OMNIPULSE_SELFTEST").is_none() { webstate::save_pref("nowPane", v); }
+    });
+    // (the visualiser's style picked in App & Look, and where it's shown; full screen isn't kept)
+    let s = shared.clone();
+    ui.on_viz_pick(move |style| {
+        let v = serde_json::json!(style.as_str());
+        if let Some(o) = s.borrow_mut().web.prefs.as_object_mut() { o.insert("nowViz".into(), v.clone()); }
+        if std::env::var_os("OMNIPULSE_SELFTEST").is_none() { webstate::save_pref("nowViz", v); }
+        if let Some(ui) = s.borrow().ui.upgrade() { viz_update(&s, &ui); }
+    });
+    let s = shared.clone();
+    ui.on_viz_place(move |place, on| {
+        let key = match place.as_str() { "now" => Some("vizNow"), "bar" => Some("vizBar"), _ => None };
+        if let Some(k) = key {
+            if let Some(o) = s.borrow_mut().web.prefs.as_object_mut() { o.insert(k.into(), serde_json::json!(on)); }
+            if std::env::var_os("OMNIPULSE_SELFTEST").is_none() { webstate::save_pref(k, serde_json::json!(on)); }
+        }
+        if let Some(ui) = s.borrow().ui.upgrade() { viz_update(&s, &ui); }
+    });
     // (Now Playing's visualiser: on to the next style, kept)
     let s = shared.clone();
     ui.on_viz_cycle(move || {
         let now = s.borrow().web.prefs["nowViz"].as_str().unwrap_or("off").to_string();
-        let next = match now.as_str() { "off" => "bars", "bars" => "mirror", "mirror" => "glow", _ => "off" };
+        let next = match now.as_str() { "off" => "bars", "bars" => "mirror", "mirror" => "peaks", "peaks" => "glow", _ => "off" };
         if let Some(o) = s.borrow_mut().web.prefs.as_object_mut() { o.insert("nowViz".into(), serde_json::json!(next)); }
         if std::env::var_os("OMNIPULSE_SELFTEST").is_none() { webstate::save_pref("nowViz", serde_json::json!(next)); }
         if let Some(ui) = s.borrow().ui.upgrade() { viz_update(&s, &ui); }
@@ -11079,7 +11116,7 @@ fn main() -> Result<(), slint::PlatformError> {
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("apple") { vec![(6, "appleopen"), (16, "applecheck"), (17, "end")] }
             // (OMNIPULSE_SELFTEST_PLAN=tp: Track preferences for what plays, its bar dragged)
             // (OMNIPULSE_SELFTEST_PLAN=viz: Now Playing's visualiser, Bars then Glow, the sound at nothing)
-            else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("viz") { vec![(8, "vizprep"), (9, "library"), (11, "play"), (13, "now"), (19, "vizglow"), (22, "end")] }
+            else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("viz") { vec![(8, "vizprep"), (9, "library"), (11, "play"), (13, "now"), (18, "vizfull"), (20, "vizglow"), (22, "vizlook"), (23, "size:1180:2600"), (24, "cat_App & Look"), (26, "end")] }
             // (OMNIPULSE_SELFTEST_PLAN=alertwave: the first alert with a sound, its waveform and trims, in a tall window)
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("alertwave") { vec![(9, "size:1180:1700"), (10, "settings"), (11, "alertsnd"), (13, "end")] }
             // (OMNIPULSE_SELFTEST_PLAN=plugbar: a plugin's icon put in the title bar, then right-clicked for its settings)
@@ -11220,8 +11257,10 @@ fn main() -> Result<(), slint::PlatformError> {
                 "vizprep" => {
                     ui.set_volume(0.0);
                     ui.invoke_volume_changed(0.0);
-                    if let Some(o) = s.borrow_mut().web.prefs.as_object_mut() { o.insert("nowViz".into(), serde_json::json!("bars")); }
+                    if let Some(o) = s.borrow_mut().web.prefs.as_object_mut() { o.insert("nowViz".into(), serde_json::json!("peaks")); o.insert("vizBar".into(), serde_json::json!(true)); }
                 }
+                "vizfull" => ui.set_viz_full(true),
+                "vizlook" => { ui.set_viz_full(false); ui.invoke_nav("settings".into()); }
                 "vizglow" => {
                     println!("selftest: viz bands {:?}", ui.get_viz_bands().iter().map(|v| (v * 100.0).round() / 100.0).collect::<Vec<_>>());
                     if let Some(o) = s.borrow_mut().web.prefs.as_object_mut() { o.insert("nowViz".into(), serde_json::json!("glow")); }

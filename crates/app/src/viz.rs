@@ -11,8 +11,21 @@ pub const BANDS: usize = 32;
 struct Ring { buf: Vec<f32>, at: usize, rate: u32 }
 
 static SOUND: Mutex<Option<Ring>> = Mutex::new(None);
-/// each band as it's shown (falling slowly from its peaks)
+/// each band as it's shown (falling slowly from its peaks), and each one's top (held, then falling)
 static SHOWN: Mutex<[f32; BANDS]> = Mutex::new([0.0; BANDS]);
+static PEAKS: Mutex<[(f32, u32); BANDS]> = Mutex::new([(0.0, 0); BANDS]);
+
+/// Each band's recent top (for Peaks): held for half a second, then falling
+pub fn peaks(b: &[f32; BANDS]) -> [f32; BANDS] {
+    let mut p = PEAKS.lock().unwrap();
+    let mut out = [0.0; BANDS];
+    for (k, v) in b.iter().enumerate() {
+        let (top, held) = &mut p[k];
+        if *v >= *top { *top = *v; *held = 15; } else if *held > 0 { *held -= 1; } else { *top = (*top - 0.015).max(*v); }
+        out[k] = *top;
+    }
+    out
+}
 
 /// What the engine's tap feeds (its frames, stereo, at `rate`)
 pub fn tap(rate: u32) -> omnipulse_audio::Tap {
@@ -39,6 +52,7 @@ pub fn level(b: &[f32; BANDS]) -> f32 {
 pub fn stop() {
     *SOUND.lock().unwrap() = None;
     *SHOWN.lock().unwrap() = [0.0; BANDS];
+    *PEAKS.lock().unwrap() = [(0.0, 0); BANDS];
 }
 
 /// The bands now: from the sound just sent to the speakers (the tap is fed as it's played), each 0 to 1
