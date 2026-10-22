@@ -1,5 +1,5 @@
 // Finds a direct audio stream URL for a search, using yt-dlp from the system PATH:
-//   yt-dlp "ytsearch1:<query>" -g -f "ba[ext=m4a]/ba"
+//   yt-dlp "ytsearch1:<query>" --print "%(available_at|0)s %(url)s" -f "ba[ext=m4a]/ba"
 // (the best M4A audio of the top YouTube result, or the best audio of any kind).
 //
 // The query is passed as one argument with no shell in between, so it can't run commands, and it
@@ -45,7 +45,8 @@ async fn run(program: impl AsRef<OsStr>, target: String, label: &str, format: &s
     let query = label;
     let mut cmd = tokio::process::Command::new(program.as_ref());
     cmd.arg(target)
-        .args(["-g", "-f", format, "--no-playlist", "--no-warnings"])
+        // (its address, and when YouTube lets it be used: an address used before then is refused, 403)
+        .args(["--print", "%(available_at|0)s %(url)s", "-f", format, "--no-playlist", "--no-warnings"])
         .args(js_runtime_args())
         .args(crate::tools::cache_args())
         .envs(crate::tools::cache_env())
@@ -76,13 +77,25 @@ async fn run(program: impl AsRef<OsStr>, target: String, label: &str, format: &s
         let code = out.status.code().map(|c| c.to_string()).unwrap_or_else(|| "a signal".into());
         return Err(format!("yt-dlp couldn't resolve \"{query}\" (exit {code}): {why}"));
     }
-    // -g prints one URL per line; with an audio-only format there's one, but take the first to be safe
-    String::from_utf8_lossy(&out.stdout)
+    // a line per format: when it can be used, then its address; with an audio-only format there's one,
+    // but the first is taken to be safe
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let (at, url) = stdout
         .lines()
-        .map(str::trim)
-        .find(|l| l.starts_with("http://") || l.starts_with("https://"))
-        .map(str::to_string)
-        .ok_or_else(|| format!("yt-dlp found nothing to play for \"{query}\"."))
+        .filter_map(|l| {
+            let l = l.trim();
+            // ("<when> <address>"; or the address alone, from an older yt-dlp)
+            let (a, u) = l.split_once(' ').filter(|(a, _)| !a.starts_with("http")).unwrap_or(("0", l));
+            let u = u.trim();
+            (u.starts_with("http://") || u.starts_with("https://")).then(|| (a.parse::<u64>().unwrap_or(0), u.to_string()))
+        })
+        .next()
+        .ok_or_else(|| format!("yt-dlp found nothing to play for \"{query}\"."))?;
+    // YouTube hands out its streams a few seconds before they work (yt-dlp waits for them too): waited
+    // for here, so whatever opens it next isn't refused (never more than 15 s)
+    let wait = at.saturating_sub(crate::now_secs()).min(15);
+    if wait > 0 { tokio::time::sleep(Duration::from_secs(wait) + Duration::from_millis(300)).await; }
+    Ok(url)
 }
 
 /// The audio of one YouTube video (the best M4A, or the best audio of any kind)
@@ -163,7 +176,17 @@ mod tests {
         let p = fake("args", "echo https://x/?args=%*");
         let url = resolve_with(&p, "Daft Punk - Get Lucky").await.unwrap();
         assert!(url.contains("ytsearch1:Daft Punk - Get Lucky"), "{url}");
-        assert!(url.contains("-g -f") && url.contains("ba[ext=m4a]/ba"), "{url}");
+        assert!(url.contains("--print") && url.contains("ba[ext=m4a]/ba"), "{url}");
+    }
+
+    #[tokio::test]
+    async fn it_waits_till_youtube_lets_the_stream_be_used() {
+        // (YouTube's streams are refused, 403, till their available_at: waited for, so it's never opened too soon)
+        let at = crate::now_secs() + 2;
+        let p = fake("later", &format!("echo {at} https://rr1.googlevideo.com/videoplayback?id=abc"));
+        let t = std::time::Instant::now();
+        assert_eq!(resolve_with(&p, "x").await.unwrap(), "https://rr1.googlevideo.com/videoplayback?id=abc");
+        assert!(crate::now_secs() >= at && t.elapsed() >= std::time::Duration::from_millis(1000), "{:?}", t.elapsed());
     }
 
     #[tokio::test]
