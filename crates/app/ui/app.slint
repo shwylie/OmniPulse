@@ -2789,7 +2789,7 @@ export component AppWindow inherits Window {
                         vertical-stretch: 1;
                         property <int> cols: max(1, floor(self.visible-width / 186px));
                         content-width: self.visible-width;
-                        content-height: ceil(root.artists.length / self.cols) * 240px;
+                        content-height: ceil(root.artists.length / self.cols) * 240px + 76px;
                         for a[i] in root.artists: Rectangle {
                             x: mod(i, grid.cols) * 186px;
                             y: floor(i / grid.cols) * 240px;
@@ -2923,6 +2923,8 @@ export component AppWindow inherits Window {
                                 }
                             }
                             for sh[s] in root.shelves: ShelfView { shelf: sh; lists: root.own-lists; tile-clicked(k) => { root.tile(s, k); } tile-act(k, a) => { root.tile-act(s, k, a); } }
+                            // (clear of the player's tab, laid over the page's foot: the last of it scrolls up past it)
+                            Rectangle { height: 76px; }
                         }
                     }
                     // Stats, Wrapped-style
@@ -3174,6 +3176,8 @@ export component AppWindow inherits Window {
                                     Pill { label: root.st-clear-asking ? "Clear it all? Click again" : "Clear Listening History"; on: root.st-clear-asking; clicked => { root.stats-clear(); } }
                                 }
                             }
+                            // (clear of the player's tab, laid over the page's foot: the last of it scrolls up past it)
+                            Rectangle { height: 76px; }
                         }
                     }
                     // Settings
@@ -3796,6 +3800,8 @@ export component AppWindow inherits Window {
                                 for r[i] in root.set-rows-streaming: SetRowView { r: r; toggle(k) => { root.set-toggle(k); } more(k) => { root.set-more(k); } }
                             }
                             Rectangle { height: 96px; }
+                            // (clear of the player's tab, laid over the page's foot: the last of it scrolls up past it)
+                            Rectangle { height: 76px; }
                         }
                     }
                     // Now Playing: the cover, and the lyrics as they're sung
@@ -3808,11 +3814,17 @@ export component AppWindow inherits Window {
                         property <bool> slim: room < 780px;
                         spacing: slim ? 18px : 30px;
                         padding-top: 10px;
-                        VerticalLayout {
+                        // (clear of the player's tab, laid over the page's foot)
+                        padding-bottom: root.tab-style ? 64px : 0px;
+                        // (a scroll of its own: on a short window, what doesn't fit scrolls up, never under the player's tab)
+                        npls := ScrollView {
                             width: npl.slim ? max(150px, min(220px, npl.room * 0.36)) : 360px;
+                            horizontal-scrollbar-policy: always-off;
+                        VerticalLayout {
+                            width: npls.visible-width;
                             spacing: 10px;
                             // (smaller on a short window: its title, artist and buttons stay in sight)
-                            property <length> side: min(360px, max(180px, root.height - 470px));
+                            property <length> side: min(360px, max(180px, root.height - 470px - (root.tab-style ? 64px : 0px)));
                             // the visualiser's own controls: first, so a short window never pushes them out of sight
                             if root.now-title != "": HorizontalLayout {
                                 alignment: start;
@@ -3820,7 +3832,6 @@ export component AppWindow inherits Window {
                                 Pill { label: "Visualiser: " + (root.viz-style == "bars" ? "Bars" : root.viz-style == "mirror" ? "Mirror" : root.viz-style == "peaks" ? "Peaks" : root.viz-style == "blocks" ? "Blocks" : root.viz-style == "wave" ? "Wave" : root.viz-style == "centre" ? "Centre" : root.viz-style == "glow" ? "Glow" : root.viz-style == "ring" ? "Ring" : "Off"); on: root.viz-style != "off"; clicked => { root.viz-cycle(); } }
                                 Pill { label: "Full Screen"; clicked => { root.viz-full = true; root.viz-place("full", true); } }
                             }
-                            // (Ring: room for its bars above and below the cover, clear of what's round it)
                             if !npl.slim: Rectangle {
                                 height: parent.side;
                                 width: parent.side;
@@ -3883,6 +3894,7 @@ export component AppWindow inherits Window {
                             }
 
                             Rectangle { vertical-stretch: 1; }
+                        }
                         }
                         npr := VerticalLayout {
                             horizontal-stretch: 1;
@@ -4126,6 +4138,8 @@ export component AppWindow inherits Window {
                             Pill { label: "Cancel"; clicked => { root.pf-open = false; } }
                             Pill { label: "Save"; on: true; clicked => { root.pf-save(); } }
                         }
+                        // (clear of the player's tab, laid over the page's foot)
+                        if root.tab-style: Rectangle { height: 64px; }
                     }
                 }
             }
@@ -4225,6 +4239,7 @@ export component AppWindow inherits Window {
                                     TipSpot { tip: "Remove from queue"; hover: xta.has-hover; }
                                 }
                             }
+                            if i == root.queue-rows.length - 1: Rectangle { height: 76px; }
                         }
                     }
                 }
