@@ -599,12 +599,16 @@ component Caps inherits Rectangle {
 /// A page's top: both accents across it (the first on the left, the second on the right, as the web
 /// app's), fading down into the panel
 component AccentGlow inherits Rectangle {
+    // Settings' (all but App & Look, which stays as the pages are, to preview them): the same accents, but
+    // softer, the other way round, over a deeper panel, so it's plainly not one of the music's pages
+    in property <bool> settings;
+    in property <color> base: Theme.panel;
     y: 0;
-    height: 340px;
-    property <color> c1: Theme.plain-panel.mix(Theme.accent, 0.66);
-    property <color> c2: Theme.plain-panel.mix(Theme.accent-2, 0.66);
+    height: root.settings ? 220px : 340px;
+    property <color> c1: root.settings ? Theme.plain-panel.mix(Theme.accent-2, 0.82) : Theme.plain-panel.mix(Theme.accent, 0.66);
+    property <color> c2: root.settings ? Theme.plain-panel.mix(Theme.accent, 0.82) : Theme.plain-panel.mix(Theme.accent-2, 0.66);
     Rectangle { background: @linear-gradient(90deg, root.c1 0%, root.c2 100%); }
-    Rectangle { background: @linear-gradient(180deg, Theme.panel.with-alpha(0) 0%, Theme.panel 100%); }
+    Rectangle { background: @linear-gradient(180deg, root.base.with-alpha(0) 0%, root.base 100%); }
     Caps { r: Theme.panel-radius; tl: root.c1; tr: root.c2; }
 }
 
@@ -1605,6 +1609,9 @@ export component AppWindow inherits Window {
     // a Settings row's own settings (a plugin's): its key; the dialog with its fields
     callback set-more(string);
     in-out property <bool> pf-open;
+    // Settings in a look of its own (App & Look aside: it previews the pages' look as it's changed)
+    property <bool> settings-look: (root.page == "settings" || root.pf-open) && root.set-cat != "App & Look";
+    property <color> settings-panel: Theme.panel.mix(Theme.bg, 0.45);
     // Settings, as Windows' is: its categories first; one open shows on its own, its path as the title
     in-out property <string> set-cat;
     // a settings page's path, before its name ("Settings › Streaming")
@@ -2259,7 +2266,7 @@ export component AppWindow inherits Window {
             // ---------- the page ----------
             Rectangle {
                 horizontal-stretch: 1;
-                background: Theme.panel;
+                background: root.settings-look ? root.settings-panel : Theme.panel;
                 border-radius: Theme.panel-radius;
                 clip: true;
                 border-width: pdz.has-drag ? 2px : 0px;
@@ -2268,7 +2275,7 @@ export component AppWindow inherits Window {
                 // the page isn't rounded off with it)
                 // (the software renderer draws a gradient square-cornered: its rounded top edge is a strip of
                 // its first colour, the gradient from just under the corners)
-                AccentGlow { }
+                AccentGlow { settings: root.settings-look; base: root.settings-look ? root.settings-panel : Theme.panel; }
                 pdz := DropArea {
                     can-drop(e) => { return Dnd.accepts("page", e.data) ? DragAction.copy : DragAction.none; }
                     dropped(e) => { Dnd.dropped("page", e.data); return e.proposed-action; }
@@ -3585,13 +3592,13 @@ export component AppWindow inherits Window {
                 // a switch's or a plugin's settings: the page (and the queue's room) taken over, as a page of
                 // its own, back to where you were
                 if root.pf-open: Rectangle {
-                    background: Theme.panel;
+                    background: root.settings-look ? root.settings-panel : Theme.panel;
                     border-radius: Theme.panel-radius;
                     clip: true;
                     TouchArea { }
                     // (the software renderer draws a gradient square-cornered: its rounded top edge is a strip of
                     // its first colour, the gradient from just under the corners)
-                    AccentGlow { }
+                    AccentGlow { settings: root.settings-look; base: root.settings-look ? root.settings-panel : Theme.panel; }
                     pf-col := VerticalLayout {
                         padding: 24px;
                         padding-top: 14px;
