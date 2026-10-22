@@ -547,6 +547,8 @@ pub fn plug_access(m: &omnipulse_core::plugins::Manifest) -> (Vec<String>, Vec<S
     if caps.contains("search") || caps.is_empty() { can.push("Show its songs in your search results, so it sees what you search for".into()); }
     if caps.contains("play") || caps.is_empty() { can.push("Play its songs, from its own sites, and know when you play one".into()); }
     if caps.contains("library") { can.push("Add its saved songs to your Library".into()); }
+    if caps.contains("sockets") { can.push("Keep live connections open to its sites (a chat, its events)".into()); }
+    if caps.contains("app") { warn.push("It can use the app: add songs to your queue as requests, show alerts, read what's playing, open its sign-in pages in your browser and keep its own settings. Only allow this for a plugin you trust.".into()); }
     if !web.is_empty() { can.push(format!("Connect to {}", web.join(", "))); }
     if !local.is_empty() { warn.push(format!("It can connect to programs running on this PC ({}). Only allow this if you know what it talks to.", local.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(", "))); }
     let sets = m.settings.as_array().cloned().unwrap_or_default();

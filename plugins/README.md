@@ -27,6 +27,25 @@ request. It can't see your accounts, your files, your settings or the rest of th
 
 You see the sites before installing. Audio plays through the app's local server, from those sites only.
 
+## More than music: live connections and the app
+
+A plugin can also run on its own (a chatbot does), with two capabilities more, each shown to you before
+it's added:
+
+- `"sockets"`: live connections (WebSockets) to its sites: `OmniPulse.socket("wss://...")` gives
+  `{ send(text), close(), onopen, onmessage(text), onclose(why) }`. Only `wss://` to the sites in its
+  manifest, or `ws://` to this PC (`127.0.0.1` in its hosts: OBS's WebSocket server, say).
+- `"app"`: the app itself, each call a promise of its answer: `OmniPulse.app.request(user, query, platform)`
+  (a song request, with Song Requests' limits and replies), `.wrongSong(user, isMod)`, `.nowPlaying()`,
+  `.alert({ type, user, amount, message })`, `.openUrl("https://...")` (a sign-in page), `.say(text)`
+  (the app's status line), `.saveSettings({ ... })` (its own settings kept: a sign-in's tokens).
+
+Every plugin also has `setTimeout`, `setInterval` and their clears, and can register `start()`, called
+once it's running. A settings field of type `"button"` (with `"press"`: its label, and `"call"`: the
+method it calls with the page's values) runs one of its methods, a sign-in say; what it returns is shown.
+
+`chatbot/` here is OmniPulse's own chatbot, made this way.
+
 ## manifest.json
 
 ```json

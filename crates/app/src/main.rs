@@ -5306,8 +5306,12 @@ fn req_fail(prefs: &serde_json::Value, base: &[(&str, String)], key: &str, extra
 
 /// !wrongsong (as the web app's): takes back the viewer's last request; a moderator's takes back the
 /// last one anyone made. One that's playing already is skipped.
-fn wrong_song(shared: &Shared, id: u64, user: &str, is_mod: bool) {
-    let reply = move |v: serde_json::Value| omnipulse_core::requests::request_result(id, v);
+/// Where a request's answer goes: the requests server (to the bot that asked), or a plugin (a chatbot)
+type ReqReply = std::sync::Arc<dyn Fn(serde_json::Value) + Send + Sync>;
+
+fn to_server(id: u64) -> ReqReply { std::sync::Arc::new(move |v| omnipulse_core::requests::request_result(id, v)) }
+
+fn wrong_song(shared: &Shared, reply: ReqReply, user: &str, is_mod: bool) {
     let prefs = shared.borrow().web.prefs.clone();
     let who = if user.trim().is_empty() { "chat".to_string() } else { user.trim().to_string() };
     let base = vec![("user", who.clone())];
@@ -5335,8 +5339,7 @@ fn wrong_song(shared: &Shared, id: u64, user: &str, is_mod: bool) {
 }
 
 /// A song request from chat (through core's requests server); the reply goes back to the bot
-fn song_request(shared: &Shared, id: u64, q: String, user: String) {
-    let reply = move |v: serde_json::Value| omnipulse_core::requests::request_result(id, v);
+fn song_request(shared: &Shared, reply: ReqReply, q: String, user: String) {
     let a = shared.borrow();
     let prefs = a.web.prefs.clone();
     let q: String = q.trim().chars().take(200).collect();
@@ -6319,7 +6322,7 @@ fn pf_paint(shared: &Shared) {
         let kind = f["type"].as_str().unwrap_or("text").to_string();
         let options: Vec<slint::SharedString> = f["options"].as_array().into_iter().flatten().map(|o| text(o).into()).collect();
         let at = f["options"].as_array().and_then(|o| o.iter().position(|o| Some(o) == vals.get(&key))).unwrap_or(0) as i32;
-        Some(PlugField { label: f["label"].as_str().unwrap_or(&key).into(), note: f["note"].as_str().unwrap_or("").into(), value: vals.get(&key).map(text).unwrap_or_default().into(), kind: kind.into(), options: ModelRc::from(Rc::new(VecModel::from(options))), key: key.into(), at })
+        Some(PlugField { label: f["label"].as_str().unwrap_or(&key).into(), note: f["note"].as_str().unwrap_or("").into(), value: if kind == "button" { f["press"].as_str().unwrap_or("Go").into() } else { vals.get(&key).map(text).unwrap_or_default().into() }, kind: kind.into(), options: ModelRc::from(Rc::new(VecModel::from(options))), key: key.into(), at })
     }).collect();
     if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_pf_fields(ModelRc::from(Rc::new(VecModel::from(rows)))); }
 }
@@ -6330,6 +6333,21 @@ fn pf_set(shared: &Shared, i: usize, v: &str) {
     if let Some(name) = id.strip_prefix("panel:") { return panel_set(shared, name, vals, i, v); }
     let Some(f) = pf_fields(&id).get(i).cloned() else { return };
     let Some(key) = f["key"].as_str().map(String::from) else { return };
+    // (a button of its own: the method it names called, with the page's values as they are, unsaved; its
+    // answer said)
+    if f["type"].as_str() == Some("button") {
+        let (Some(p), Some(method)) = (plugrun::get(&id), f["call"].as_str().map(String::from)) else {
+            if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_status("Switch the plugin on (and save) first.".into()); }
+            return;
+        };
+        let (rt, weak) = { let a = shared.borrow(); (a.rt.clone(), a.ui.clone()) };
+        let now = serde_json::Value::Object(vals.clone());
+        rt.spawn(async move {
+            let r = p.call(&method, vec![now]).await;
+            let _ = weak.upgrade_in_event_loop(move |ui| ui.set_status(match r { Ok(v) => v.as_str().map(String::from).unwrap_or_else(|| "Done.".into()), Err(e) => e }.into()));
+        });
+        return;
+    }
     let value = match f["type"].as_str().unwrap_or("text") {
         "toggle" => serde_json::json!(v == "true"),
         "number" => v.trim().parse::<f64>().map(|n| serde_json::json!(n)).unwrap_or(serde_json::Value::Null),
@@ -9340,8 +9358,68 @@ fn alert_shown(shared: &Shared, kind: &str) {
     ALERT_TIMER.with(|x| *x.borrow_mut() = Some(t));
 }
 
+/// A plugin's OmniPulse.app call (its manifest asked for "app"): the app's work done on its own thread,
+/// the answer sent back. A chatbot's requests go through the same limits and replies as the bot server's.
+fn plugin_app(shared: &Shared, plugin: &str, ask: serde_json::Value, answer: Box<dyn FnOnce(serde_json::Value) + Send>) {
+    let args = ask["args"].as_array().cloned().unwrap_or_default();
+    let arg = |i: usize| args.get(i).and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let once = std::sync::Arc::new(std::sync::Mutex::new(Some(answer)));
+    let send = { let o = once.clone(); move |v: serde_json::Value| { if let Some(f) = o.lock().unwrap().take() { f(v); } } };
+    match ask["op"].as_str().unwrap_or("") {
+        // (a song request from chat: the platform it came from is noted with who asked)
+        "request" => {
+            let reply: ReqReply = std::sync::Arc::new(send);
+            if !integrations::set(&shared.borrow().web.prefs, "req") { return reply(serde_json::json!({ "ok": false, "message": requests::msg(&shared.borrow().web.prefs, "closed", &[]) })); }
+            song_request(shared, reply, arg(1), arg(0));
+        }
+        "wrongSong" => {
+            let is_mod = args.get(1).and_then(|v| v.as_bool()) == Some(true);
+            wrong_song(shared, std::sync::Arc::new(send), &arg(0), is_mod);
+        }
+        "nowPlaying" => send(omnipulse_core::requests::now_answer()),
+        // (an alert, as a bot's /alert: its type, who, how many, their message)
+        "alert" => {
+            let fields = args.first().and_then(|v| v.as_object()).cloned().unwrap_or_default();
+            send(match omnipulse_core::widget::alert_push(&fields) { Ok(a) => serde_json::json!({ "ok": true, "alert": a }), Err(e) => serde_json::json!({ "error": e }) });
+        }
+        // (a sign-in page: https only, in the browser)
+        "openUrl" => {
+            let url = arg(0);
+            if !url.starts_with("https://") { return send(serde_json::json!({ "error": "only https addresses" })); }
+            let _ = omnipulse_core::open_url(url);
+            send(serde_json::json!({ "ok": true }));
+        }
+        "say" => {
+            let name = omnipulse_core::plugins::list().into_iter().find(|p| p.manifest.id == plugin).map(|p| p.manifest.name).unwrap_or_default();
+            if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_status(format!("{name}: {}", arg(0).chars().take(300).collect::<String>()).into()); }
+            send(serde_json::json!({ "ok": true }));
+        }
+        // (its own settings, kept: a sign-in's tokens; merged into what's kept, never running it again)
+        "saveSettings" => {
+            let values = args.first().and_then(|v| v.as_object()).cloned().unwrap_or_default();
+            let all = {
+                let mut a = shared.borrow_mut();
+                let mut all = a.web.prefs["pluginSettings"].as_object().cloned().unwrap_or_default();
+                let mut mine = all.get(plugin).and_then(|v| v.as_object()).cloned().unwrap_or_default();
+                for (k, v) in values { mine.insert(k, v); }
+                all.insert(plugin.to_string(), serde_json::Value::Object(mine));
+                let all = serde_json::Value::Object(all);
+                if let Some(o) = a.web.prefs.as_object_mut() { o.insert("pluginSettings".into(), all.clone()); }
+                all
+            };
+            if std::env::var_os("OMNIPULSE_SELFTEST").is_none() { webstate::save_pref("pluginSettings", all); }
+            send(serde_json::json!({ "ok": true }));
+        }
+        other => send(serde_json::json!({ "error": format!("the app has no {other}") })),
+    }
+}
+
 fn outside_start(shared: &Shared) {
     let prefs = shared.borrow().web.prefs.clone();
+    plugrun::set_app_handler(std::sync::Arc::new(|plugin: &str, ask: serde_json::Value, answer: Box<dyn FnOnce(serde_json::Value) + Send>| {
+        let plugin = plugin.to_string();
+        let _ = slint::invoke_from_event_loop(move || SHARED.with(|s| { if let Some(sh) = s.borrow().clone() { plugin_app(&sh, &plugin, ask, answer); } }));
+    }));
     omnipulse_core::widget::set_shown_handler(std::sync::Arc::new(|kind: &str| {
         let kind = kind.to_string();
         let _ = slint::invoke_from_event_loop(move || SHARED.with(|s| { if let Some(sh) = s.borrow().clone() { alert_shown(&sh, &kind); } }));
@@ -9363,9 +9441,9 @@ fn outside_start(shared: &Shared) {
                     let Some(sh) = s.borrow().clone() else { return };
                     let user = ask["user"].as_str().unwrap_or("").to_string();
                     if ask["action"].as_str() == Some("wrongsong") {
-                        wrong_song(&sh, id, &user, ask["mod"].as_bool() == Some(true));
+                        wrong_song(&sh, to_server(id), &user, ask["mod"].as_bool() == Some(true));
                     } else {
-                        song_request(&sh, id, ask["q"].as_str().unwrap_or("").to_string(), user);
+                        song_request(&sh, to_server(id), ask["q"].as_str().unwrap_or("").to_string(), user);
                     }
                 }));
             }));

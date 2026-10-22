@@ -89,27 +89,7 @@ pub fn handle_req(mut stream: TcpStream) {
     let as_json = req_param(&url, "format").as_deref() == Some("json");
 
     let (status, answer) = match route.as_str() {
-        "/now" => {
-            let s = WIDGET_STATE.lock().ok().and_then(|g| g.clone()).unwrap_or(Value::Null);
-            let title = s["title"].as_str().unwrap_or("").to_string();
-            if title.is_empty() {
-                ("200 OK", serde_json::json!({ "ok": true, "playing": false, "message": "Nothing is playing right now." }))
-            } else {
-                let artist = s["artist"].as_str().unwrap_or("").to_string();
-                let paused = !s["playing"].as_bool().unwrap_or(false);
-                let mut msg = format!("Now playing: {title}");
-                if !artist.is_empty() {
-                    msg.push_str(&format!(" by {artist}"));
-                }
-                if paused {
-                    msg.push_str(" (paused)");
-                }
-                ("200 OK", serde_json::json!({
-                    "ok": true, "playing": !paused, "title": title, "artist": artist,
-                    "url": s["url"].as_str().unwrap_or(""), "message": msg
-                }))
-            }
-        }
+        "/now" => ("200 OK", now_answer()),
         "/request" => {
             let expected = REQ_KEY.lock().map(|k| k.clone()).unwrap_or_default();
             let key = req_param(&url, "key").unwrap_or_default();
@@ -192,6 +172,21 @@ pub fn requests_stop() {
 }
 
 // The page's answer to a request
+/// What's playing, as !song answers it (the widget's state: what the app last sent it)
+pub fn now_answer() -> Value {
+    let s = WIDGET_STATE.lock().ok().and_then(|g| g.clone()).unwrap_or(Value::Null);
+    let title = s["title"].as_str().unwrap_or("").to_string();
+    if title.is_empty() {
+        return serde_json::json!({ "ok": true, "playing": false, "message": "Nothing is playing right now." });
+    }
+    let artist = s["artist"].as_str().unwrap_or("").to_string();
+    let paused = !s["playing"].as_bool().unwrap_or(false);
+    let mut msg = format!("Now playing: {title}");
+    if !artist.is_empty() { msg.push_str(&format!(" by {artist}")); }
+    if paused { msg.push_str(" (paused)"); }
+    serde_json::json!({ "ok": true, "playing": !paused, "title": title, "artist": artist, "url": s["url"].as_str().unwrap_or(""), "message": msg })
+}
+
 pub fn request_result(id: u64, result: Value) {
     if let Ok(m) = req_wait().lock() {
         if let Some(tx) = m.get(&id) {

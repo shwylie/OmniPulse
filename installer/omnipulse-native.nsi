@@ -74,6 +74,8 @@ Section "OmniPulse"
   ; the plugins that come with OmniPulse (installed from here when it starts)
   SetOutPath "$INSTDIR\plugins\internet-archive"
   File /r "..\plugins\internet-archive\*.*"
+  SetOutPath "$INSTDIR\plugins\chatbot"
+  File /r "..\plugins\chatbot\*.*"
   SetOutPath "$INSTDIR"
   ; the web app's files this one doesn't need (it has its icons built in, and no separate input program)
   Delete "$INSTDIR\omnipulse-input.exe"
