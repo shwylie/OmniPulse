@@ -88,6 +88,8 @@ export struct PlugField { key: string, label: string, note: string, kind: string
 export struct Item { name: string, sub: string, art: image, plat: string, on-sc: bool, on-sp: bool, on-yt: bool, row: Row }
 /// A page being loaded: each platform it asks, and whether it's answered yet
 export struct LoadStep { plat: string, name: string, done: bool }
+/// A slice of the Ring visualiser: its outline, and where it is from the foot (0, the bass) to the top (1)
+export struct RingPiece { d: string, f: float }
 
 global Icons {
     out property <string> play: "M8 5v14l11-7z";
@@ -865,19 +867,18 @@ component VizView inherits Rectangle {
 /// way round, each its own frequency: the bass at the middle of its foot, out along it, up its sides, the highs
 /// meeting in the middle of its top; the left half and the right mirrored. Laid over the cover, drawn outside it
 component VizRing inherits Rectangle {
-    // (its outline, from the app: viz::ring_path's, over the whole box, the cover in its middle)
-    in property <string> path;
+    // (its slices, from the app: viz::ring_pieces', over the whole box, the cover in its middle; each its own
+    // step of the gradient, as the bars are, the bass's colour at the foot and the highs' at the top)
+    in property <[RingPiece]> pieces;
     in property <float> strength: 1;
-    Path {
+    for p in root.pieces: Path {
         width: root.width;
         height: root.height;
         viewbox-width: 1000;
         viewbox-height: 1000;
-        commands: root.path;
-        // (one colour: the software renderer fills a path's gradient as one anyway)
-        fill: Theme.accent.with-alpha(0.85 * root.strength);
-        stroke: Theme.accent.mix(Theme.text, 0.6).with-alpha(0.5 * root.strength);
-        stroke-width: 1px;
+        commands: p.d;
+        // (solid: see-through, where each runs into the next it showed twice, a spoke)
+        fill: Theme.accent.mix(Theme.accent-2, 1 - p.f).with-alpha(root.strength);
     }
 }
 
@@ -1638,7 +1639,7 @@ export component AppWindow inherits Window {
     // (the style where there's no cover to go round, as in the player's gaps: Ring as Centre)
     property <string> viz-flat: root.viz-style == "ring" ? "centre" : root.viz-style;
     // (the Ring's outline, each frame, while it's the style)
-    in property <string> viz-ring;
+    in property <[RingPiece]> viz-ring;
     in property <[float]> viz-bands;
     // (and how loud it is now, 0 to 1: the Glow's)
     in property <float> viz-level;
@@ -3762,7 +3763,7 @@ export component AppWindow inherits Window {
                                     background: Theme.accent.mix(Theme.accent-2, 1 - parent.bass).with-alpha((0.05 + 0.13 * parent.bass) * (7 - r) / 6);
                                 }
                                 property <bool> ring: root.viz-now && root.viz-style == "ring";
-                                if self.ring: VizRing { width: parent.width; height: parent.height; path: root.viz-ring; }
+                                if self.ring: VizRing { width: parent.width; height: parent.height; pieces: root.viz-ring; }
                                 // (0.56: viz::RING_COVER)
                                 BadgedCover { art: root.now-art-big; initial: root.now-title; plat: root.now-plat; badge: parent.ring ? 36px : 52px; corner: parent.ring ? 10px : 14px; width: parent.ring ? parent.width * 0.56 : parent.width; height: self.width; x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2; }
                             }
@@ -5029,7 +5030,7 @@ export component AppWindow inherits Window {
                 border-radius: 18px + self.out;
                 background: Theme.accent.mix(Theme.accent-2, 1 - root.viz-level).with-alpha((0.05 + 0.13 * root.viz-level) * (7 - r) / 6);
             }
-            if root.viz-style == "ring": VizRing { width: parent.width; height: parent.height; path: root.viz-ring; }
+            if root.viz-style == "ring": VizRing { width: parent.width; height: parent.height; pieces: root.viz-ring; }
             // (Ring: the cover in the middle of the box, the circle round it; 0.56: viz::RING_COVER)
             Rectangle {
                 width: root.viz-style == "ring" ? parent.width * 0.56 : parent.width;

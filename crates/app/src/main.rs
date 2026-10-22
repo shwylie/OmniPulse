@@ -8546,6 +8546,8 @@ fn viz_update(shared: &Shared, ui: &AppWindow) {
         ui.set_viz_bands(ModelRc::from(model.clone()));
         ui.set_viz_peaks(ModelRc::from(tops.clone()));
         ui.set_viz_curve(ModelRc::from(wave.clone()));
+        let ring = Rc::new(VecModel::from(vec![RingPiece::default(); viz::RING_PIECES]));
+        ui.set_viz_ring(ModelRc::from(ring.clone()));
         let t = slint::Timer::default();
         let m = model.clone();
         let w = ui.as_weak();
@@ -8557,7 +8559,9 @@ fn viz_update(shared: &Shared, ui: &AppWindow) {
             let l = viz::level(&b);
             if let Some(ui) = w.upgrade() {
                 ui.set_viz_level(l);
-                if ui.get_viz_style() == "ring" { ui.set_viz_ring(viz::ring_path(&b).into()); }
+                if ui.get_viz_style() == "ring" {
+                    for (i, (d, f)) in viz::ring_pieces(&b).into_iter().enumerate() { ring.set_row_data(i, RingPiece { d: d.into(), f }); }
+                }
             }
             TBW.with(|t| if let Ok(t) = t.try_borrow() { if let Some((tw, _, _)) = t.as_ref() { tw.set_viz_level(l); } });
         });
@@ -8569,6 +8573,7 @@ fn viz_update(shared: &Shared, ui: &AppWindow) {
         ui.set_viz_bands(ModelRc::default());
         ui.set_viz_peaks(ModelRc::default());
         ui.set_viz_curve(ModelRc::default());
+        ui.set_viz_ring(ModelRc::default());
         ui.set_viz_level(0.0);
     }
 }

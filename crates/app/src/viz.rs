@@ -116,7 +116,7 @@ pub fn curve(b: &[f32; BANDS]) -> [f32; CURVE] {
 /// (the box it's drawn in), the cover in its middle (RING_COVER of it). Each way round from the foot (the bass)
 /// to the top (the highs), mirrored, out from a circle just clear of the cover's corners as far as the band
 /// there is loud; a smooth curve through it
-pub fn ring_path(b: &[f32; BANDS]) -> String {
+pub fn ring_pieces(b: &[f32; BANDS]) -> Vec<(String, f32)> {
     const N: usize = 120;
     // (the circle through the cover's corners, and a little out from them)
     const BASE: f32 = RING_COVER * 500.0 * std::f32::consts::SQRT_2 + 10.0;
@@ -138,16 +138,30 @@ pub fn ring_path(b: &[f32; BANDS]) -> String {
         })
         .collect();
     let p = |i: usize| pts[i % N];
-    let mut d = format!("M {:.1} {:.1}", pts[0].0, pts[0].1);
-    for i in 0..N {
-        let (p0, p1, p2, p3) = (p(i + N - 1), p(i), p(i + 1), p(i + 2));
-        let c1 = (p1.0 + (p2.0 - p0.0) / 6.0, p1.1 + (p2.1 - p0.1) / 6.0);
-        let c2 = (p2.0 - (p3.0 - p1.0) / 6.0, p2.1 - (p3.1 - p1.1) / 6.0);
-        d.push_str(&format!(" C {:.1} {:.1} {:.1} {:.1} {:.1} {:.1}", c1.0, c1.1, c2.0, c2.1, p2.0, p2.1));
-    }
-    d.push_str(" Z");
-    d
+    // (in slices from the middle, each filled with its own step of the accent's gradient, the bass's colour at
+    // the foot, the highs' at the top: the software renderer fills a path with one colour. Each runs a step
+    // into the next, so no seam shows between them)
+    let per = N / RING_PIECES;
+    (0..RING_PIECES)
+        .map(|w| {
+            let (from, to) = (w * per, (w + 1) * per + 1);
+            let mut d = format!("M 500 500 L {:.1} {:.1}", p(from).0, p(from).1);
+            for i in from..to {
+                let (p0, p1, p2, p3) = (p(i + N - 1), p(i), p(i + 1), p(i + 2));
+                let c1 = (p1.0 + (p2.0 - p0.0) / 6.0, p1.1 + (p2.1 - p0.1) / 6.0);
+                let c2 = (p2.0 - (p3.0 - p1.0) / 6.0, p2.1 - (p3.1 - p1.1) / 6.0);
+                d.push_str(&format!(" C {:.1} {:.1} {:.1} {:.1} {:.1} {:.1}", c1.0, c1.1, c2.0, c2.1, p2.0, p2.1));
+            }
+            d.push_str(" Z");
+            // (how far round from the foot its middle is: 0 the bass, 1 the highs)
+            let mid = (w as f32 + 0.5) / RING_PIECES as f32;
+            (d, 1.0 - (2.0 * mid - 1.0).abs())
+        })
+        .collect()
 }
+
+/// The Ring's slices, each a step of the gradient
+pub const RING_PIECES: usize = 60;
 
 /// The Ring's cover: this much of the box's width, in its middle (the circle round it the rest)
 pub const RING_COVER: f32 = 0.56;
