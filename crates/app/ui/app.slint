@@ -86,6 +86,8 @@ export struct KeyField { label: string, value: string, ok: bool }
 export struct PlugField { key: string, label: string, note: string, kind: string, value: string, options: [string], at: int }
 // (an artist you follow: whether on SoundCloud and on Spotify, for its menu)
 export struct Item { name: string, sub: string, art: image, plat: string, on-sc: bool, on-sp: bool, on-yt: bool, row: Row }
+/// A page being loaded: each platform it asks, and whether it's answered yet
+export struct LoadStep { plat: string, name: string, done: bool }
 
 global Icons {
     out property <string> play: "M8 5v14l11-7z";
@@ -766,6 +768,66 @@ component PlatIcon inherits Rectangle {
     // (a playlist on this PC: the web app's rainbow, as a picture: a gradient on a shape is drawn against the
     // window here, not the icon, and slides as the list does)
     if root.plat == "xpl": Image { source: @image-url("xpl.svg"); width: parent.width; height: parent.height; }
+}
+
+/// A page loading: an equaliser's bars moving, and each platform asked, ticked as it answers (so the
+/// slowest is the one still spinning)
+component LoadingView inherits Rectangle {
+    in property <[LoadStep]> steps;
+    height: 96px;
+    VerticalLayout {
+        alignment: center;
+        spacing: 12px;
+        HorizontalLayout {
+            alignment: center;
+            spacing: 10px;
+            HorizontalLayout {
+                alignment: center;
+                spacing: 4px;
+                width: 34px;
+                for k in [0, 1, 2, 3, 4]: Rectangle {
+                    width: 4px;
+                    property <float> wave: Theme.motion ? (1 + Math.sin((animation-tick() / 1ms * 0.4 + k * 70) * 1deg)) / 2 : 0.5;
+                    height: 6px + 18px * self.wave;
+                    y: (24px - self.height) / 2;
+                    border-radius: 2px;
+                    background: Theme.accent.mix(Theme.accent-2, 1 - k / 4);
+                }
+            }
+            Text { text: "Loading..."; color: Theme.muted; font-size: 14px; vertical-alignment: center; }
+        }
+        HorizontalLayout {
+            alignment: center;
+            spacing: 8px;
+            for st in root.steps: Rectangle {
+                height: 30px;
+                border-radius: 15px;
+                background: st.done ? Theme.accent.with-alpha(0.14) : Theme.elevated;
+                border-width: 1px;
+                border-color: st.done ? Theme.accent.with-alpha(0.45) : Theme.line;
+                HorizontalLayout {
+                    padding-left: 12px;
+                    padding-right: 12px;
+                    spacing: 8px;
+                    PlatIcon { plat: st.plat; width: 14px; height: 14px; y: (parent.height - self.height) / 2; }
+                    Text { text: st.name; color: st.done ? Theme.text : Theme.muted; font-size: 12px; vertical-alignment: center; }
+                    // (a tick once it's answered; a dot going round till then)
+                    Rectangle {
+                        min-width: 14px;
+                        max-width: 14px;
+                        if st.done: Path { commands: "M 2 7.5 L 5.5 11 L 12 3.5"; viewbox-width: 14; viewbox-height: 14; width: 14px; height: 14px; y: (parent.height - self.height) / 2; stroke: Theme.accent; stroke-width: 2px; fill: transparent; }
+                        if !st.done: Rectangle {
+                            property <angle> at: Theme.motion ? (animation-tick() / 1ms * 0.36) * 1deg : 0deg;
+                            width: 4px; height: 4px; border-radius: 2px;
+                            background: Theme.muted;
+                            x: 5px + 5px * Math.cos(self.at);
+                            y: (parent.height - 4px) / 2 + 5px * Math.sin(self.at);
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
 
 /// A pill with platforms' symbols in place of their names: the one it's from (if any) → the one it's
@@ -1502,6 +1564,9 @@ export component AppWindow inherits Window {
     in property <string> now-plat;
     // the next track being found (the seek bar's marquee), or found ahead while this one plays
     in property <bool> track-loading;
+    // a page loading (Discover, the Library, Rediscover): its platforms, ticked as each answers; and which page
+    in property <[LoadStep]> load-steps;
+    in property <string> load-page;
     in property <bool> preloading;
     in property <image> now-art;
     in property <bool> playing;
@@ -2428,6 +2493,7 @@ export component AppWindow inherits Window {
                         Rectangle { height: 6px; }
                     }
                     if root.page-kind != "tracks": Rectangle { height: 4px; }
+                    if root.load-steps.length > 0 && root.load-page == root.page: LoadingView { steps: root.load-steps; }
                     // a list of tracks (Library, playlists, Search, Favourites, Sets, Rediscover)
                     if root.page-kind == "tracks": track-list := ListView {
                         vertical-stretch: 1;

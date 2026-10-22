@@ -11,6 +11,7 @@ mod plugrun;
 mod collab;
 mod desktop;
 mod instance;
+mod loading;
 mod smart;
 use omnipulse_mix::plan::Plan;
 mod updater;
@@ -1559,6 +1560,13 @@ fn open_discover_fresh(shared: &Shared) {
         let plays = a.web.plays.iter().map(|p| (p.artist.clone(), p.art.clone(), p.genre.clone())).collect();
         (discover::Input { library: a.library.clone(), favourites: a.web.favourites.clone(), plays, prefs: a.web.prefs.clone(), catalog, soundcloud }, a.rt.clone(), a.ui.clone(), a.token)
     };
+    {
+        let mut steps: Vec<(&'static str, &'static str)> = Vec::new();
+        if omnipulse_core::spotify::spotify_signed_in() { steps.push(("spotify", "Spotify")); }
+        if input.soundcloud { steps.push(("soundcloud", "SoundCloud")); }
+        if input.catalog { steps.push(("deezer", "Deezer")); }
+        loading::begin(&["discover"], &steps);
+    }
     rt.spawn(async move {
         let shelves = discover::build(input).await;
         let arts: Vec<Vec<String>> = shelves.iter().map(|sh| sh.items.iter().map(|i| i.tile().2).collect()).collect();
@@ -1592,6 +1600,7 @@ fn open_discover_fresh(shared: &Shared) {
                 let rows: Vec<Shelf> = shelves.iter().zip(&models).map(|(sh, m)| Shelf { title: sh.title.clone().into(), tiles: ModelRc::from(m.clone()), open: false, gone: false, shown: 0 }).collect();
                 ui.set_status(if rows.is_empty() { "Play or star a few songs, and Discover will fill up with music for you.".into() } else { "".into() });
                 ui.set_shelves(ModelRc::from(Rc::new(VecModel::from(rows))));
+                loading::end(&["discover"]);
                 shared.borrow_mut().shelves = shelves.iter().map(|sh| sh.items.iter().filter_map(|i| if let discover::Item::Track(t) = i { Some(t.clone()) } else { None }).collect()).collect();
                 let key = feed_key(&shared.borrow().web.prefs);
                 FEED_CACHE.with(|c| *c.borrow_mut() = Some((key, shelves.clone(), models.clone())));
@@ -3941,6 +3950,8 @@ thread_local! {
     static SCROBBLED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
     /// paused a moment (0.6 s): your own accent back, not the cover's (as the web app's)
     static ART_PAUSED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    /// what the loading view shows: its change count and page
+    static LOAD_SHOWN: RefCell<(u64, String)> = const { RefCell::new((u64::MAX, String::new())) };
     static PAUSED_SINCE: std::cell::Cell<Option<std::time::Instant>> = const { std::cell::Cell::new(None) };
     /// a crossfade's end (Fade Between Tracks), for the accent's pulse meanwhile
     static XFADE_PULSE: std::cell::Cell<Option<std::time::Instant>> = const { std::cell::Cell::new(None) };
@@ -4901,6 +4912,15 @@ fn tick(shared: &Shared, events: &std::sync::mpsc::Receiver<Event>, n: u64) {
         if want != ART_PAUSED.with(|p| p.get()) { ART_PAUSED.with(|p| p.set(want)); apply_look(shared); }
     }
     if n % 40 == 8 { lfm_heard_sync(shared); }
+    // a page loading: its platforms, ticked as each answers
+    {
+        let page = shared.borrow().page.clone();
+        let (n, steps) = loading::shown(&page);
+        if LOAD_SHOWN.with(|x| x.replace((n, page.clone()))) != (n, page.clone()) {
+            ui.set_load_page(if steps.is_empty() { "".into() } else { page.into() });
+            ui.set_load_steps(ModelRc::from(Rc::new(VecModel::from(steps.into_iter().map(|(p, name, done)| LoadStep { plat: p.into(), name: name.into(), done }).collect::<Vec<_>>()))));
+        }
+    }
     // a mix playing: the title bar's button and the progress bar show it
     let mixing = shared.borrow().engine.mixing();
     if ui.get_mixing() != mixing { ui.set_mixing(mixing); }
@@ -6470,9 +6490,17 @@ fn library_load(shared: &Shared) {
     {
         let yt_likes = shared.borrow().web.yt_likes.clone();
         let own = xpl::playlists(&shared.borrow().xpl);
+        {
+            let mut steps: Vec<(&'static str, &'static str)> = Vec::new();
+            if omnipulse_core::soundcloud::signed_in() { steps.push(("soundcloud", "SoundCloud")); }
+            if omnipulse_core::spotify::spotify_signed_in() { steps.push(("spotify", "Spotify")); }
+            loading::begin(&["library", "rediscover"], &steps);
+        }
         rt.spawn(async move {
             let t0 = std::time::Instant::now();
-            let (sc, sp, lists) = tokio::join!(sources::soundcloud_likes(), sources::spotify_likes(500), sources::playlists());
+            let sc = async { let x = sources::soundcloud_likes().await; loading::done("soundcloud"); x };
+            let sp = async { let x = sources::spotify_likes(500).await; loading::done("spotify"); x };
+            let (sc, sp, lists) = tokio::join!(sc, sp, sources::playlists());
             // (each platform's likes newest first, taking turns: the Library mixes them track by track, not
             // one platform's then the next's; YouTube Music's, the web app's and those made here, as one)
             let mut yt = yt_likes;
@@ -6490,6 +6518,7 @@ fn library_load(shared: &Shared) {
                     {
                         let mut a = shared.borrow_mut();
                         a.library = all;
+                        loading::end(&["library", "rediscover"]);
                         let prefs = a.web.prefs.clone();
                         track::apply_fixes(&prefs, &mut a.library);
                         a.playlists = playlists;
@@ -10879,6 +10908,8 @@ fn main() -> Result<(), slint::PlatformError> {
             // (OMNIPULSE_SELFTEST_PLAN=apple: Apple Music's sign-in window opened off-screen, Apple's page looked at, closed; nobody signs in)
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("apple") { vec![(6, "appleopen"), (16, "applecheck"), (17, "end")] }
             // (OMNIPULSE_SELFTEST_PLAN=tp: Track preferences for what plays, its bar dragged)
+            // (OMNIPULSE_SELFTEST_PLAN=loadview: the pages as they load, their platforms ticked off)
+            else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("loadview") { vec![(1, "library"), (2, "rediscover"), (4, "discover"), (5, "stats"), (7, "end")] }
             // (OMNIPULSE_SELFTEST_PLAN=titleset: the title bar's icons right-clicked: Seamless Mix's settings, then SoundCloud's)
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("titleset") { vec![(9, "titleset:smart"), (11, "titleset:soundcloud"), (13, "end")] }
             // (OMNIPULSE_SELFTEST_PLAN=tallpanels: the Stream Widget's and the alerts' pages in a window tall enough for all of them)

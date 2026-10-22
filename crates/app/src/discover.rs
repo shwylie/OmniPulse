@@ -758,6 +758,7 @@ async fn build_any(input: Input) -> Vec<Shelf> {
 
     // Made for you: Spotify's Daily Mixes, then Your Mix 01-06 (one of your top artists plus two more)
     let (sp_daily, sp_other) = spotify_made_for_you().await;
+    crate::loading::done("spotify");
     let mains: Vec<Seed> = artists.iter().take(6).cloned().collect();
     let rest: Vec<Seed> = artists.iter().skip(6).cloned().collect();
     let mixes: Vec<Item> = mains.iter().enumerate().map(|(i, a)| {
@@ -806,7 +807,9 @@ async fn build_any(input: Input) -> Vec<Shelf> {
     };
     let top = async { if input.catalog { chart(0).await } else { Vec::new() } };
     let spotlight = async { if input.catalog && cold { chart(132).await } else { Vec::new() } };
-    let (releases, followed, for_you, (taste, popular), top, spotlight) = tokio::join!(releases, followed, for_you, side, top, spotlight);
+    let followed = async { let x = followed.await; crate::loading::done("soundcloud"); x };
+    let deezer = async { let x = tokio::join!(releases, for_you, side, top, spotlight); crate::loading::done("deezer"); x };
+    let ((releases, for_you, (taste, popular), top, spotlight), followed) = tokio::join!(deezer, followed);
 
     // New releases: Deezer's albums and singles, and new tracks from who you follow, newest first
     let mut dated: Vec<(String, Item)> = releases.into_iter().map(|(d, m)| (d, Item::Mix(m))).collect();
