@@ -5615,7 +5615,7 @@ const SET_HAND: [(&str, &str, &str); 23] = [
     ("App & Look", "Player Style", "Tab, Classic Bar, Floating or Minimal."),
     ("App & Look", "Track Info Tab", "Which end of the player bar the tab sits at."),
     ("App & Look", "List Density", "How tightly tracks are listed. Compact fits more on screen."),
-    ("App & Look", "Visualiser", "The music as it plays: Bars, Mirror, Peaks or a Glow, on Now Playing, in the player, or full screen."),
+    ("App & Look", "Visualiser", "The music as it plays: Bars, Mirror, Peaks, Blocks, Wave, Centre or a Glow, on Now Playing, in the player, or full screen."),
     ("App & Look", "Display Name", "Shown in the title bar and taskbar."),
     ("App & Look", "Minimize to Tray", "Minimizing hides the window to the tray; music keeps playing. Open it again, or quit, from the tray's menu."),
     ("App & Look", "Taskbar Widget", "What's playing, always on show in the taskbar by the clock, with its controls."),
@@ -8507,8 +8507,10 @@ fn viz_update(shared: &Shared, ui: &AppWindow) {
         engine.set_tap("viz", Some(viz::tap(engine.output_rate())));
         let model = Rc::new(VecModel::from(vec![0.0f32; viz::BANDS]));
         let tops = Rc::new(VecModel::from(vec![0.0f32; viz::BANDS]));
+        let wave = Rc::new(VecModel::from(vec![0.0f32; viz::CURVE]));
         ui.set_viz_bands(ModelRc::from(model.clone()));
         ui.set_viz_peaks(ModelRc::from(tops.clone()));
+        ui.set_viz_curve(ModelRc::from(wave.clone()));
         let t = slint::Timer::default();
         let m = model.clone();
         let w = ui.as_weak();
@@ -8516,6 +8518,7 @@ fn viz_update(shared: &Shared, ui: &AppWindow) {
             let b = viz::bands();
             for (i, v) in b.into_iter().enumerate() { m.set_row_data(i, v); }
             for (i, v) in viz::peaks(&b).into_iter().enumerate() { tops.set_row_data(i, v); }
+            for (i, v) in viz::curve(&b).into_iter().enumerate() { wave.set_row_data(i, v); }
             if let Some(ui) = w.upgrade() { ui.set_viz_level(viz::level(&b)); }
         });
         VIZ.with(|v| *v.borrow_mut() = Some((t, model)));
@@ -8525,6 +8528,7 @@ fn viz_update(shared: &Shared, ui: &AppWindow) {
         VIZ.with(|v| *v.borrow_mut() = None);
         ui.set_viz_bands(ModelRc::default());
         ui.set_viz_peaks(ModelRc::default());
+        ui.set_viz_curve(ModelRc::default());
         ui.set_viz_level(0.0);
     }
 }
@@ -10119,7 +10123,7 @@ fn main() -> Result<(), slint::PlatformError> {
     let s = shared.clone();
     ui.on_viz_cycle(move || {
         let now = s.borrow().web.prefs["nowViz"].as_str().unwrap_or("off").to_string();
-        let next = match now.as_str() { "off" => "bars", "bars" => "mirror", "mirror" => "peaks", "peaks" => "glow", _ => "off" };
+        let next = match now.as_str() { "off" => "bars", "bars" => "mirror", "mirror" => "peaks", "peaks" => "blocks", "blocks" => "wave", "wave" => "centre", "centre" => "glow", _ => "off" };
         if let Some(o) = s.borrow_mut().web.prefs.as_object_mut() { o.insert("nowViz".into(), serde_json::json!(next)); }
         if std::env::var_os("OMNIPULSE_SELFTEST").is_none() { webstate::save_pref("nowViz", serde_json::json!(next)); }
         if let Some(ui) = s.borrow().ui.upgrade() { viz_update(&s, &ui); }
@@ -11116,7 +11120,7 @@ fn main() -> Result<(), slint::PlatformError> {
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("apple") { vec![(6, "appleopen"), (16, "applecheck"), (17, "end")] }
             // (OMNIPULSE_SELFTEST_PLAN=tp: Track preferences for what plays, its bar dragged)
             // (OMNIPULSE_SELFTEST_PLAN=viz: Now Playing's visualiser, Bars then Glow, the sound at nothing)
-            else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("viz") { vec![(8, "vizprep"), (9, "library"), (11, "play"), (13, "now"), (18, "vizfull"), (20, "vizglow"), (22, "vizlook"), (23, "size:1180:2600"), (24, "cat_App & Look"), (26, "end")] }
+            else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("viz") { vec![(8, "vizprep"), (9, "library"), (11, "play"), (13, "now"), (17, "viz:blocks"), (19, "viz:wave"), (21, "viz:centre"), (23, "vizfull"), (25, "end")] }
             // (OMNIPULSE_SELFTEST_PLAN=alertwave: the first alert with a sound, its waveform and trims, in a tall window)
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("alertwave") { vec![(9, "size:1180:1700"), (10, "settings"), (11, "alertsnd"), (13, "end")] }
             // (OMNIPULSE_SELFTEST_PLAN=plugbar: a plugin's icon put in the title bar, then right-clicked for its settings)
@@ -11260,6 +11264,7 @@ fn main() -> Result<(), slint::PlatformError> {
                     if let Some(o) = s.borrow_mut().web.prefs.as_object_mut() { o.insert("nowViz".into(), serde_json::json!("peaks")); o.insert("vizBar".into(), serde_json::json!(true)); }
                 }
                 "vizfull" => ui.set_viz_full(true),
+                w if w.starts_with("viz:") => { if let Some(o) = s.borrow_mut().web.prefs.as_object_mut() { o.insert("nowViz".into(), serde_json::json!(&w[4..])); } }
                 "vizlook" => { ui.set_viz_full(false); ui.invoke_nav("settings".into()); }
                 "vizglow" => {
                     println!("selftest: viz bands {:?}", ui.get_viz_bands().iter().map(|v| (v * 100.0).round() / 100.0).collect::<Vec<_>>());

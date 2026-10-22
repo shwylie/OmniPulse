@@ -774,22 +774,30 @@ component PlatIcon inherits Rectangle {
     if root.plat == "xpl": Image { source: @image-url("xpl.svg"); width: parent.width; height: parent.height; }
 }
 
-/// The visualiser's bars, wherever they're shown (Now Playing, the player, full screen): Bars from the foot,
-/// Mirror from the middle, Peaks as Bars with each one's recent top held a moment
+/// The visualiser, wherever it's shown (Now Playing, the player, full screen): Bars from the foot, Mirror
+/// from the middle, Peaks (Bars, each one's recent top held), Blocks (an LED meter's segments), Wave (a
+/// smooth line through them), Centre (the low end in the middle, mirrored out). Each bar glides to where it's
+/// sent (30 times a second), so it never steps.
 component VizView inherits Rectangle {
     in property <string> style;
     in property <[float]> bands;
     in property <[float]> peaks;
+    in property <[float]> curve;
     in property <float> strength: 1;
     property <bool> mirror: root.style == "mirror";
-    for v[k] in root.bands: Rectangle {
-        property <length> step: root.width / max(1, root.bands.length);
-        x: k * self.step + self.step * 0.15;
-        width: self.step * 0.7;
-        height: max(2px, root.height * v);
-        y: root.mirror ? (root.height - self.height) / 2 : root.height - self.height;
-        border-radius: min(self.width, self.height) / 2;
-        background: Theme.accent.mix(Theme.accent-2, 1 - k / max(1, root.bands.length - 1)).with-alpha(root.strength);
+    property <duration> glide: Theme.motion ? 90ms : 0ms;
+    // Bars, Mirror, Peaks: a bar a band
+    if root.style == "bars" || root.style == "mirror" || root.style == "peaks": Rectangle {
+        for v[k] in root.bands: Rectangle {
+            property <length> step: root.width / max(1, root.bands.length);
+            x: k * self.step + self.step * 0.15;
+            width: self.step * 0.7;
+            height: max(2px, root.height * v);
+            animate height { duration: root.glide; easing: ease-out; }
+            y: root.mirror ? (root.height - self.height) / 2 : root.height - self.height;
+            border-radius: min(self.width, self.height) / 2;
+            background: Theme.accent.mix(Theme.accent-2, 1 - k / max(1, root.bands.length - 1)).with-alpha(root.strength);
+        }
     }
     if root.style == "peaks": Rectangle {
         for p[k] in root.peaks: Rectangle {
@@ -798,8 +806,57 @@ component VizView inherits Rectangle {
             width: self.step * 0.7;
             height: 3px;
             y: max(0px, root.height - root.height * p - 6px);
+            animate y { duration: root.glide; easing: ease-out; }
             border-radius: 1.5px;
             background: Theme.text.with-alpha(0.8 * root.strength);
+        }
+    }
+    // Blocks: each band's segments lit up to its level (12 to a column)
+    if root.style == "blocks": Rectangle {
+        for v[k] in root.bands: Rectangle {
+            property <length> step: root.width / max(1, root.bands.length);
+            property <length> seg: root.height / 12;
+            x: k * self.step + self.step * 0.12;
+            width: self.step * 0.76;
+            for n in 12: Rectangle {
+                y: root.height - (n + 1) * parent.seg;
+                height: parent.seg * 0.7;
+                border-radius: 1.5px;
+                property <bool> lit: (n + 0.5) / 12 <= v;
+                background: Theme.accent.mix(Theme.accent-2, 1 - n / 11).with-alpha(self.lit ? root.strength : 0.08 * root.strength);
+                animate background { duration: Theme.motion ? 120ms : 0ms; }
+            }
+        }
+    }
+    // Wave: a smooth line through the bands, a dot each step, its glow under it
+    if root.style == "wave": Rectangle {
+        for v[k] in root.curve: Rectangle {
+            property <length> step: root.width / max(1, root.curve.length);
+            x: k * self.step;
+            width: max(2px, self.step * 1.05);
+            y: root.height * (1 - v) * 0.86 + root.height * 0.07 - self.width / 2;
+            animate y { duration: root.glide; easing: ease-out; }
+            height: self.width;
+            border-radius: self.width / 2;
+            background: Theme.accent.mix(Theme.accent-2, 1 - k / max(1, root.curve.length - 1)).with-alpha(root.strength);
+            // (the fill under the line, faint)
+            Rectangle {
+                y: parent.height / 2;
+                height: max(0px, root.height - parent.y - parent.height / 2);
+                width: parent.width;
+                background: @linear-gradient(180deg, Theme.accent.mix(Theme.accent-2, 1 - k / max(1, root.curve.length - 1)).with-alpha(0.28 * root.strength) 0%, transparent 100%);
+            }
+        }
+    }
+    // Centre: the low end in the middle, the highs out to both edges
+    if root.style == "centre": Rectangle {
+        for v[k] in root.bands: Rectangle {
+            property <length> step: root.width / max(1, root.bands.length * 2);
+            property <length> h: max(2px, root.height * v);
+            animate h { duration: root.glide; easing: ease-out; }
+            property <color> c: Theme.accent.mix(Theme.accent-2, 1 - k / max(1, root.bands.length - 1)).with-alpha(root.strength);
+            Rectangle { x: root.width / 2 + k * parent.step + parent.step * 0.15; width: parent.step * 0.7; height: parent.h; y: (root.height - self.height) / 2; border-radius: min(self.width, self.height) / 2; background: parent.c; }
+            Rectangle { x: root.width / 2 - (k + 1) * parent.step + parent.step * 0.15; width: parent.step * 0.7; height: parent.h; y: (root.height - self.height) / 2; border-radius: min(self.width, self.height) / 2; background: parent.c; }
         }
     }
 }
@@ -1537,6 +1594,7 @@ export component AppWindow inherits Window {
     // (and how loud it is now, 0 to 1: the Glow's)
     in property <float> viz-level;
     in property <[float]> viz-peaks;
+    in property <[float]> viz-curve;
     // where it's shown: Now Playing, the player (behind its controls), full screen (the whole window)
     in-out property <bool> viz-now: true;
     in-out property <bool> viz-bar;
@@ -3203,13 +3261,13 @@ export component AppWindow inherits Window {
                                                 alignment: center;
                                                 spacing: 2px;
                                                 Text { text: "Visualiser"; color: Theme.text; font-weight: 700; }
-                                                Text { text: "The music as it plays: Bars, Mirror (from the middle), Peaks (bars with their tops held), or a Glow. It only runs while it's on screen and something's playing."; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
+                                                Text { text: "The music as it plays: Bars, Mirror (from the middle), Peaks (bars with their tops held), Blocks (an LED meter), Wave (a smooth line), Centre (the bass in the middle), or a Glow. It only runs while it's on screen and something's playing."; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
                                             }
                                             Dropdown {
-                                                options: ["Off", "Bars", "Mirror", "Peaks", "Glow"];
-                                                current: root.viz-style == "bars" ? 1 : root.viz-style == "mirror" ? 2 : root.viz-style == "peaks" ? 3 : root.viz-style == "glow" ? 4 : 0;
+                                                options: ["Off", "Bars", "Mirror", "Peaks", "Blocks", "Wave", "Centre", "Glow"];
+                                                current: root.viz-style == "bars" ? 1 : root.viz-style == "mirror" ? 2 : root.viz-style == "peaks" ? 3 : root.viz-style == "blocks" ? 4 : root.viz-style == "wave" ? 5 : root.viz-style == "centre" ? 6 : root.viz-style == "glow" ? 7 : 0;
                                                 y: (parent.height - self.height) / 2;
-                                                picked(k) => { root.viz-pick(k == 1 ? "bars" : k == 2 ? "mirror" : k == 3 ? "peaks" : k == 4 ? "glow" : "off"); }
+                                                picked(k) => { root.viz-pick(k == 1 ? "bars" : k == 2 ? "mirror" : k == 3 ? "peaks" : k == 4 ? "blocks" : k == 5 ? "wave" : k == 6 ? "centre" : k == 7 ? "glow" : "off"); }
                                             }
                                         }
                                         HorizontalLayout {
@@ -3224,7 +3282,7 @@ export component AppWindow inherits Window {
                                             VerticalLayout {
                                                 horizontal-stretch: 1;
                                                 Text { text: "In the Player"; color: Theme.text; font-weight: 700; }
-                                                Text { text: "Faintly, behind the playback controls, on every page."; color: Theme.muted; font-size: 12px; }
+                                                Text { text: "In the player's empty space, either side of the controls, on every page."; color: Theme.muted; font-size: 12px; }
                                             }
                                             Toggle { checked <=> root.viz-bar; y: (parent.height - self.height) / 2; toggled => { root.viz-place("bar", self.checked); } }
                                         }
@@ -3617,7 +3675,7 @@ export component AppWindow inherits Window {
                             if root.now-title != "": HorizontalLayout {
                                 alignment: start;
                                 spacing: 6px;
-                                Pill { label: "Visualiser: " + (root.viz-style == "bars" ? "Bars" : root.viz-style == "mirror" ? "Mirror" : root.viz-style == "peaks" ? "Peaks" : root.viz-style == "glow" ? "Glow" : "Off"); on: root.viz-style != "off"; clicked => { root.viz-cycle(); } }
+                                Pill { label: "Visualiser: " + (root.viz-style == "bars" ? "Bars" : root.viz-style == "mirror" ? "Mirror" : root.viz-style == "peaks" ? "Peaks" : root.viz-style == "blocks" ? "Blocks" : root.viz-style == "wave" ? "Wave" : root.viz-style == "centre" ? "Centre" : root.viz-style == "glow" ? "Glow" : "Off"); on: root.viz-style != "off"; clicked => { root.viz-cycle(); } }
                                 Pill { label: "Full Screen"; clicked => { root.viz-full = true; root.viz-place("full", true); } }
                             }
                             if !npl.slim: Rectangle {
@@ -3646,6 +3704,7 @@ export component AppWindow inherits Window {
                                 style: root.viz-style;
                                 bands: root.viz-bands;
                                 peaks: root.viz-peaks;
+                                curve: root.viz-curve;
                             }
                             Text { text: root.now-title; color: Theme.text; font-size: npl.slim ? 20px : 26px; font-weight: 800; wrap: word-wrap; }
                             // (start or end times of its own: the asterisk opens them, as the web app's)
@@ -4133,13 +4192,6 @@ export component AppWindow inherits Window {
                     drop-shadow-blur: root.player-style == "float" ? 24px : 0;
                     drop-shadow-offset-y: root.player-style == "float" ? 8px : 0;
                     drop-shadow-color: #00000060;
-                    // (the visualiser, faint, behind the controls: In the Player; Glow as the bar lit by it)
-                    if root.viz-bar && root.viz-style != "off": Rectangle {
-                        clip: true;
-                        border-radius: parent.r;
-                        if root.viz-style == "glow": Rectangle { background: Theme.accent.mix(Theme.accent-2, 1 - root.viz-level).with-alpha(0.22 * root.viz-level); }
-                        if root.viz-style != "glow": VizView { style: root.viz-style; bands: root.viz-bands; peaks: root.viz-peaks; strength: 0.22; }
-                    }
                     VerticalLayout {
                 // (it opens and closes from the controls' top edge, smoothly, never jumping: what it says is
                 // kept while it closes)
@@ -4208,7 +4260,18 @@ export component AppWindow inherits Window {
                                 }
                             }
                         }
-                        if !root.tab-style: Rectangle { horizontal-stretch: 1; }
+                        if !root.tab-style: Rectangle {
+                            horizontal-stretch: 1;
+                            // (In the Player: the visualiser in this gap only, clear of the controls either side)
+                            if root.viz-bar && root.viz-style != "off" && self.width > 60px: Rectangle {
+                                x: 14px;
+                                width: parent.width - 28px;
+                                y: 7px;
+                                height: parent.height - 14px;
+                                if root.viz-style == "glow": Rectangle { border-radius: self.height / 2; background: Theme.accent.mix(Theme.accent-2, 1 - root.viz-level).with-alpha(0.08 + 0.3 * root.viz-level); }
+                                if root.viz-style != "glow": VizView { style: root.viz-style; bands: root.viz-bands; peaks: root.viz-peaks; curve: root.viz-curve; strength: 0.55; }
+                            }
+                        }
                         IconButton { tip: root.playing ? "Pause" : "Play"; d: root.playing ? Icons.pause : Icons.play; filled: true; size: 40px; y: (parent.height - self.height) / 2; clicked => { root.toggle(); } }
                         Rectangle { width: 6px; }
                         IconButton { tip: "Previous"; d: Icons.prev; y: (parent.height - self.height) / 2; clicked => { root.prev(); } }
@@ -4237,7 +4300,18 @@ export component AppWindow inherits Window {
                             }
                         }
                         Range { width: root.narrow ? 64px : 84px; y: (parent.height - self.height) / 2; minimum: 0; maximum: 100; value: root.volume; changed(v) => { root.volume = v; root.volume-changed(v / 100); } }
-                        Rectangle { horizontal-stretch: 1; }
+                        Rectangle {
+                            horizontal-stretch: 1;
+                            // (In the Player: the visualiser in this gap only, clear of the controls either side)
+                            if root.viz-bar && root.viz-style != "off" && self.width > 60px: Rectangle {
+                                x: 14px;
+                                width: parent.width - 28px;
+                                y: 7px;
+                                height: parent.height - 14px;
+                                if root.viz-style == "glow": Rectangle { border-radius: self.height / 2; background: Theme.accent.mix(Theme.accent-2, 1 - root.viz-level).with-alpha(0.08 + 0.3 * root.viz-level); }
+                                if root.viz-style != "glow": VizView { style: root.viz-style; bands: root.viz-bands; peaks: root.viz-peaks; curve: root.viz-curve; strength: 0.55; }
+                            }
+                        }
                         // like and favourite, as the web app's (on the track that's playing)
                         if root.can-like: IconButton { tip: root.now-liked ? "Remove from Likes" : "Add to Likes"; d: root.now-liked ? Icons.library : Icons.heart-out; tint: root.now-liked ? Theme.accent : Theme.muted; y: (parent.height - self.height) / 2; clicked => { root.like-toggle(); } }
                         if root.can-like: IconButton { tip: root.now-fav ? "Remove from Favourites" : "Add to Favourites"; d: root.now-fav ? Icons.star : Icons.star-out; tint: root.now-fav ? Theme.accent : Theme.muted; y: (parent.height - self.height) / 2; clicked => { root.fav-toggle(); } }
@@ -4902,6 +4976,7 @@ export component AppWindow inherits Window {
             style: root.viz-style;
             bands: root.viz-bands;
             peaks: root.viz-peaks;
+            curve: root.viz-curve;
             strength: 0.9;
         }
         if root.viz-style == "off": Text { y: parent.height - 80px; width: parent.width; horizontal-alignment: center; text: "Pick a visualiser style in Settings > App & Look."; color: Theme.muted; }

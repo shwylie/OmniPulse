@@ -5,7 +5,10 @@ use std::sync::Mutex;
 
 /// The last of the sound, in mono, as it was sent out (a ring, written from `at`)
 const RING: usize = 1 << 15;
-const FFT: usize = 2048;
+/// (4096: a longer stretch of the sound each time, so the low end steadier)
+const FFT: usize = 4096;
+/// the Wave's points: the bands, eased into a curve between them
+pub const CURVE: usize = 96;
 pub const BANDS: usize = 32;
 
 struct Ring { buf: Vec<f32>, at: usize, rate: u32 }
@@ -83,9 +86,30 @@ pub fn bands() -> [f32; BANDS] {
         let db = 20.0 * (peak / (FFT as f32 / 4.0)).max(1e-6).log10() + 6.0 * (b as f32 / BANDS as f32);
         *o = ((db + 60.0) / 60.0).clamp(0.0, 1.0);
     }
+    // smoothed: each band a little of its neighbours (no one bar flickering alone), then eased towards
+    // where it is now, rising faster than it falls (a meter's ballistics, not a jump each frame)
+    let spread: Vec<f32> = (0..BANDS).map(|k| {
+        let (l, r) = (out[k.saturating_sub(1)], out[(k + 1).min(BANDS - 1)]);
+        0.25 * l + 0.5 * out[k] + 0.25 * r
+    }).collect();
     let mut shown = SHOWN.lock().unwrap();
-    for (s, v) in shown.iter_mut().zip(out) { *s = if v > *s { v } else { (*s - 0.04).max(v) }; }
+    for (s, v) in shown.iter_mut().zip(spread) { *s += (v - *s) * if v > *s { 0.38 } else { 0.14 }; }
     *shown
+}
+
+/// The Wave's curve: the bands as CURVE points, eased between them (a smooth line, not steps)
+pub fn curve(b: &[f32; BANDS]) -> [f32; CURVE] {
+    let mut out = [0.0; CURVE];
+    for (i, o) in out.iter_mut().enumerate() {
+        let x = i as f32 * (BANDS - 1) as f32 / (CURVE - 1) as f32;
+        let k = x.floor() as usize;
+        let t = x - k as f32;
+        let (a, c) = (b[k], b[(k + 1).min(BANDS - 1)]);
+        // (eased, not straight: a curve through them)
+        let e = t * t * (3.0 - 2.0 * t);
+        *o = a + (c - a) * e;
+    }
+    out
 }
 
 #[cfg(test)]
