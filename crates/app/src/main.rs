@@ -11,6 +11,7 @@ mod plugrun;
 mod collab;
 mod desktop;
 mod instance;
+mod aimusic;
 mod loading;
 mod viz;
 mod smart;
@@ -5373,9 +5374,19 @@ fn song_request(shared: &Shared, reply: ReqReply, q: String, user: String) {
     let prefer_radio = integrations::set(&prefs, "reqRadioEdit");
     let (rt, weak) = (a.rt.clone(), a.ui.clone());
     drop(a);
+    // Keep Out AI Music: its list ready first; what's turned away for being AI noted, for its own reply
+    let no_ai = integrations::set(&prefs, "reqNoAi");
+    let ai_seen = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
     rt.spawn(async move {
-        let safe = { let p = prefs.clone(); move |t: &Track| streamsafe::allowed(&p, t) };
+        if no_ai { aimusic::refresh().await; }
+        let safe = { let (p, seen) = (prefs.clone(), ai_seen.clone()); move |t: &Track| {
+            if !streamsafe::allowed(&p, t) { return false; }
+            if no_ai && aimusic::is_ai(t) { seen.store(true, std::sync::atomic::Ordering::Relaxed); return false; }
+            true
+        } };
         let picked = requests::pick(&q, &plats, &likes, &local, prefer_radio, &safe).await;
+        // (nothing but AI music found: said so, not "not safe")
+        let picked = match picked { Err("notSafe") if ai_seen.load(std::sync::atomic::Ordering::Relaxed) => Err("noAi"), p => p };
         let _ = weak.upgrade_in_event_loop(move |_| {
             SHARED.with(|s| {
                 let Some(shared) = s.borrow().clone() else { return };

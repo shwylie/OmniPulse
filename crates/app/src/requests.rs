@@ -170,10 +170,10 @@ pub fn radio_pick(list: &[Track], q: &str) -> Option<Track> {
 
 // ---------- the replies, which you can change in the web app's Settings ----------
 /// Each reply, in the order Settings lists them, with its name there (the web app's REQ_MSG_LABELS)
-pub const MSG_KEYS: [(&str, &str); 12] = [
+pub const MSG_KEYS: [(&str, &str); 13] = [
     ("added", "Added"), ("playing", "Added, playing now"), ("notFound", "Not found"), ("full", "Queue full"),
     ("perUser", "Viewer limit"), ("duplicate", "Already queued"), ("closed", "Requests off"), ("notSafe", "Not safe on stream"),
-    ("empty", "Nothing asked for"), ("wrongSong", "!wrongsong: removed"), ("noRequest", "!wrongsong: none of theirs"), ("noRequests", "!wrongsong: none at all (a mod)"),
+    ("empty", "Nothing asked for"), ("wrongSong", "!wrongsong: removed"), ("noRequest", "!wrongsong: none of theirs"), ("noRequests", "!wrongsong: none at all (a mod)"), ("noAi", "AI music kept out"),
 ];
 
 pub fn default_msg(key: &str) -> &'static str {
@@ -189,6 +189,7 @@ pub fn default_msg(key: &str) -> &'static str {
         "noRequest" => "{user}, you don't have a request waiting.",
         "noRequests" => "There's no request waiting.",
         "notSafe" => "Only music that's safe on stream plays right now, and nothing for \"{query}\" is.",
+        "noAi" => "{user}, AI-made music isn't played here, and that's all there was for \"{query}\".",
         _ => "Tell me what to play, for example: artist - song",
     }
 }
