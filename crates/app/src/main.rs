@@ -9806,6 +9806,12 @@ fn apply_look(shared: &Shared) {
     ui.set_tint_strength(strength as f32);
     ui.set_theme_step_name(look::STEPS[step].0.into());
     ui.set_tint_strength_name(look::STRENGTHS[strength].into());
+    // (the tint's hues: a picture a pixel a degree)
+    if ui.get_tint_strip().size().width == 0 {
+        let mut px = slint::SharedPixelBuffer::<slint::Rgb8Pixel>::new(360, 1);
+        for (h, p) in px.make_mut_slice().iter_mut().enumerate() { let c = look::hsl(h as f32, 0.7, 58.0); *p = slint::Rgb8Pixel { r: c.0, g: c.1, b: c.2 }; }
+        ui.set_tint_strip(slint::Image::from_rgb8(px));
+    }
     ui.set_tint_preview(if strength > 0 { look::hsl(hue, 0.7, if p.light { 55.0 } else { 60.0 }).slint() } else { slint::Color::from_argb_u8(0, 0, 0, 0) });
     ui.set_accent_list(ModelRc::from(Rc::new(VecModel::from(ACCENTS.iter().filter_map(|c| look::Rgb::parse(c)).map(|c| c.slint()).collect::<Vec<_>>()))));
     let picked = prefs["accent"].as_str().unwrap_or(ACCENTS[0]).to_lowercase();
@@ -11123,6 +11129,8 @@ fn main() -> Result<(), slint::PlatformError> {
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("viz") { vec![(8, "vizprep"), (9, "library"), (11, "play"), (13, "now"), (17, "viz:blocks"), (19, "viz:wave"), (21, "viz:centre"), (23, "vizfull"), (25, "end")] }
             // (OMNIPULSE_SELFTEST_PLAN=alertwave: the first alert with a sound, its waveform and trims, in a tall window)
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("alertwave") { vec![(9, "size:1180:1700"), (10, "settings"), (11, "alertsnd"), (13, "end")] }
+            // (OMNIPULSE_SELFTEST_PLAN=applook: App & Look, nothing played)
+            else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("applook") { vec![(9, "settings"), (10, "cat_App & Look"), (12, "end")] }
             // (OMNIPULSE_SELFTEST_PLAN=plugbar: a plugin's icon put in the title bar, then right-clicked for its settings)
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("plugbar") { vec![(9, "plugbar"), (11, "titleset:plugin:internet-archive"), (13, "end")] }
             // (OMNIPULSE_SELFTEST_PLAN=loadview: the pages as they load, their platforms ticked off)

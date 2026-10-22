@@ -1588,6 +1588,8 @@ export component AppWindow inherits Window {
     callback stats-clear();
     // now playing
     in property <image> now-art-big;
+    // App & Look's tint: its hues, left to right
+    in property <image> tint-strip;
     // Now Playing's visualiser: its style (off, bars, mirror, glow), and its 32 bands, 0 to 1
     in property <string> viz-style: "off";
     in property <[float]> viz-bands;
@@ -3133,11 +3135,14 @@ export component AppWindow inherits Window {
                                             Rectangle { width: 12px; height: 12px; y: 3px; border-radius: 6px; background: root.tint-preview; border-width: 1px; border-color: Theme.line; }
                                         }
                                         Text { text: "A colour through the whole theme. Accent and album art colours still show on top."; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
+                                        // (the hues as a picture made by the app, one pixel a degree: drawn exactly by either
+                                        // renderer; the software one's many-stop gradient left a seam)
                                         Rectangle {
                                             height: 8px;
                                             border-radius: 4px;
+                                            clip: true;
                                             opacity: root.tint-strength > 0.5 ? 1 : 0.35;
-                                            background: @linear-gradient(90deg, #e04848 0%, #e0e048 17%, #48d848 33%, #48d8d8 50%, #6a72ec 67%, #d84ad6 83%, #e04848 100%);
+                                            Image { source: root.tint-strip; width: parent.width; height: parent.height; image-fit: fill; }
                                         }
                                         Range { minimum: 0; maximum: 359; value: root.tint-hue; enabled: root.tint-strength > 0.5; changed(v) => { root.tint-hue = v; root.look-changed("tintHue", round(v)); } }
                                         Rectangle { height: 8px; }
