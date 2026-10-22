@@ -33,6 +33,7 @@ base64 = "0.22"
 # Listen Along and Jams: the relay's rooms (the version the workspace has already)
 tokio-tungstenite = { version = "0.28", features = ["native-tls"] }
 futures-util = "0.3"
+realfft = "3.5"
 rquickjs = "0.9"
 
 # Apple Music's sign-in, once, for its import (the web view Tauri uses: Windows' own WebView2)

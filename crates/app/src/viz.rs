@@ -1,0 +1,91 @@
+// Now Playing's visualiser: the sound as it's played (an engine tap, only while Now Playing shows one),
+// as 32 bands from 40 Hz to 16 kHz, each 0 to 1, risen to at once and fallen from slowly, as a meter's.
+
+use std::sync::Mutex;
+
+/// The last of the sound, in mono, as it was sent out (a ring, written from `at`)
+const RING: usize = 1 << 15;
+const FFT: usize = 2048;
+pub const BANDS: usize = 32;
+
+struct Ring { buf: Vec<f32>, at: usize, rate: u32 }
+
+static SOUND: Mutex<Option<Ring>> = Mutex::new(None);
+/// each band as it's shown (falling slowly from its peaks)
+static SHOWN: Mutex<[f32; BANDS]> = Mutex::new([0.0; BANDS]);
+
+/// What the engine's tap feeds (its frames, stereo, at `rate`)
+pub fn tap(rate: u32) -> omnipulse_audio::Tap {
+    *SOUND.lock().unwrap() = Some(Ring { buf: vec![0.0; RING], at: 0, rate: rate.max(1) });
+    Box::new(move |frames: &[f32]| {
+        let Ok(mut g) = SOUND.lock() else { return };
+        let Some(r) = g.as_mut() else { return };
+        for f in frames.chunks_exact(2) {
+            r.buf[r.at] = (f[0] + f[1]) * 0.5;
+            r.at = (r.at + 1) % RING;
+        }
+    })
+}
+
+/// No more of it: its sound let go, its bands down
+/// How loud it is now, 0 to 1, for the Glow: its low end counted most, the rest too (so a quiet intro
+/// still moves it)
+pub fn level(b: &[f32; BANDS]) -> f32 {
+    let low = b[..8].iter().sum::<f32>() / 8.0;
+    let all = b.iter().sum::<f32>() / BANDS as f32;
+    (0.65 * low + 0.6 * all).min(1.0)
+}
+
+pub fn stop() {
+    *SOUND.lock().unwrap() = None;
+    *SHOWN.lock().unwrap() = [0.0; BANDS];
+}
+
+/// The bands now: from the sound just sent to the speakers (the tap is fed as it's played), each 0 to 1
+pub fn bands() -> [f32; BANDS] {
+    let (window, rate) = {
+        let g = SOUND.lock().unwrap();
+        let Some(r) = g.as_ref() else { return [0.0; BANDS] };
+        let end = r.at;
+        let w: Vec<f32> = (0..FFT).map(|i| r.buf[(end + RING - FFT + i) % RING]).collect();
+        (w, r.rate)
+    };
+    use realfft::RealFftPlanner;
+    thread_local! { static PLAN: std::cell::RefCell<RealFftPlanner<f32>> = std::cell::RefCell::new(RealFftPlanner::new()); }
+    let fft = PLAN.with(|p| p.borrow_mut().plan_fft_forward(FFT));
+    // (a Hann window: no edge of the stretch heard as a click across every band)
+    let mut input: Vec<f32> = window.iter().enumerate().map(|(i, v)| v * (0.5 - 0.5 * (std::f32::consts::TAU * i as f32 / FFT as f32).cos())).collect();
+    let mut spec = fft.make_output_vec();
+    if fft.process(&mut input, &mut spec).is_err() { return [0.0; BANDS]; }
+    let hz_per = rate as f32 / FFT as f32;
+    let mut out = [0.0f32; BANDS];
+    let (lo, hi) = (40.0f32, 16_000.0f32);
+    for (b, o) in out.iter_mut().enumerate() {
+        let f0 = lo * (hi / lo).powf(b as f32 / BANDS as f32);
+        let f1 = lo * (hi / lo).powf((b + 1) as f32 / BANDS as f32);
+        let (k0, k1) = ((f0 / hz_per) as usize, ((f1 / hz_per) as usize).max((f0 / hz_per) as usize + 1));
+        let peak = spec[k0.min(spec.len() - 1)..k1.min(spec.len())].iter().map(|c| c.norm()).fold(0.0f32, f32::max);
+        // (as dB, -60 to 0 of a full-scale tone's, read as 0 to 1; the highs lifted a little, as they're quieter)
+        let db = 20.0 * (peak / (FFT as f32 / 4.0)).max(1e-6).log10() + 6.0 * (b as f32 / BANDS as f32);
+        *o = ((db + 60.0) / 60.0).clamp(0.0, 1.0);
+    }
+    let mut shown = SHOWN.lock().unwrap();
+    for (s, v) in shown.iter_mut().zip(out) { *s = if v > *s { v } else { (*s - 0.04).max(v) }; }
+    *shown
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn a_tone_lights_its_own_band() {
+        for hz in [60.0f32, 1000.0, 8000.0] {
+            let mut t = super::tap(48_000);
+            let frames: Vec<f32> = (0..48_000).flat_map(|i| { let v = 0.3 * (std::f32::consts::TAU * hz * i as f32 / 48_000.0).sin(); [v, v] }).collect();
+            t(&frames);
+            *super::SHOWN.lock().unwrap() = [0.0; super::BANDS];
+            let b = super::bands();
+            let top = b.iter().enumerate().max_by(|x, y| x.1.total_cmp(y.1)).unwrap();
+            println!("{hz} Hz: loudest band {} at {:.2}; bands {:?}", top.0, top.1, b.iter().map(|v| (v * 10.0).round() / 10.0).collect::<Vec<_>>());
+        }
+    }
+}

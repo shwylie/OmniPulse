@@ -12,6 +12,7 @@ mod collab;
 mod desktop;
 mod instance;
 mod loading;
+mod viz;
 mod smart;
 use omnipulse_mix::plan::Plan;
 mod updater;
@@ -3966,6 +3967,8 @@ thread_local! {
     static SCROBBLED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
     /// paused a moment (0.6 s): your own accent back, not the cover's (as the web app's)
     static ART_PAUSED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    /// the visualiser's: its 30-a-second timer while it runs, and the bands it shows
+    static VIZ: RefCell<Option<(slint::Timer, Rc<VecModel<f32>>)>> = const { RefCell::new(None) };
     /// what the loading view shows: its change count and page
     static LOAD_SHOWN: RefCell<(u64, String)> = const { RefCell::new((u64::MAX, String::new())) };
     static PAUSED_SINCE: std::cell::Cell<Option<std::time::Instant>> = const { std::cell::Cell::new(None) };
@@ -4930,6 +4933,8 @@ fn tick(shared: &Shared, events: &std::sync::mpsc::Receiver<Event>, n: u64) {
     if n % 40 == 8 { lfm_heard_sync(shared); }
     // (the beat model let go once it's sat unused a minute: loaded again when a song's next measured)
     if n % 120 == 60 { omnipulse_core::rhythm::release_model(std::time::Duration::from_secs(60)); }
+    // Now Playing's visualiser: running only while it's shown, playing, with a style picked
+    viz_update(shared, &ui);
     // a page loading: its platforms, ticked as each answers
     {
         let page = shared.borrow().page.clone();
@@ -8449,6 +8454,40 @@ fn fade_out_ms(a: &App) -> Option<u64> {
 
 
 /// A skip by hand (the buttons, media keys, the remote): listening, it goes to the Jam's host
+/// The visualiser on or off, as Now Playing is: on only while it's shown, playing, a style picked (the
+/// engine's tap and its timer stopped otherwise: nothing of it running for nothing)
+fn viz_update(shared: &Shared, ui: &AppWindow) {
+    let style = shared.borrow().web.prefs["nowViz"].as_str().unwrap_or("off").to_string();
+    if ui.get_viz_style() != style.as_str() { ui.set_viz_style(style.clone().into()); }
+    let want = {
+        let a = shared.borrow();
+        style != "off" && a.page == "now" && a.loaded && !a.engine.is_paused() && ui.window().is_visible() && !ui.window().is_minimized()
+    };
+    let running = VIZ.with(|v| v.borrow().is_some());
+    if want == running { return; }
+    let engine = shared.borrow().engine.clone();
+    if want {
+        engine.set_tap("viz", Some(viz::tap(engine.output_rate())));
+        let model = Rc::new(VecModel::from(vec![0.0f32; viz::BANDS]));
+        ui.set_viz_bands(ModelRc::from(model.clone()));
+        let t = slint::Timer::default();
+        let m = model.clone();
+        let w = ui.as_weak();
+        t.start(slint::TimerMode::Repeated, std::time::Duration::from_millis(33), move || {
+            let b = viz::bands();
+            for (i, v) in b.into_iter().enumerate() { m.set_row_data(i, v); }
+            if let Some(ui) = w.upgrade() { ui.set_viz_level(viz::level(&b)); }
+        });
+        VIZ.with(|v| *v.borrow_mut() = Some((t, model)));
+    } else {
+        engine.set_tap("viz", None);
+        viz::stop();
+        VIZ.with(|v| *v.borrow_mut() = None);
+        ui.set_viz_bands(ModelRc::default());
+        ui.set_viz_level(0.0);
+    }
+}
+
 /// A change of song by hand (a skip, a pick): no crossfade's colour pulse carried over to it (it ran
 /// on the next cover shown, so a skip during or just after a crossfade flashed it as a transition)
 fn no_pulse(shared: &Shared) {
@@ -9950,6 +9989,15 @@ fn main() -> Result<(), slint::PlatformError> {
     ui.set_mix_available(true);
     let s = shared.clone();
     ui.on_mix_toggle(move || set_toggle(&s, "smartOn"));
+    // (Now Playing's visualiser: on to the next style, kept)
+    let s = shared.clone();
+    ui.on_viz_cycle(move || {
+        let now = s.borrow().web.prefs["nowViz"].as_str().unwrap_or("off").to_string();
+        let next = match now.as_str() { "off" => "bars", "bars" => "mirror", "mirror" => "glow", _ => "off" };
+        if let Some(o) = s.borrow_mut().web.prefs.as_object_mut() { o.insert("nowViz".into(), serde_json::json!(next)); }
+        if std::env::var_os("OMNIPULSE_SELFTEST").is_none() { webstate::save_pref("nowViz", serde_json::json!(next)); }
+        if let Some(ui) = s.borrow().ui.upgrade() { viz_update(&s, &ui); }
+    });
     // (right-clicked in the title bar: Seamless Mix's own page; a platform's settings, where they are)
     let s = shared.clone();
     ui.on_title_settings(move |what| {
@@ -10941,6 +10989,8 @@ fn main() -> Result<(), slint::PlatformError> {
             // (OMNIPULSE_SELFTEST_PLAN=apple: Apple Music's sign-in window opened off-screen, Apple's page looked at, closed; nobody signs in)
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("apple") { vec![(6, "appleopen"), (16, "applecheck"), (17, "end")] }
             // (OMNIPULSE_SELFTEST_PLAN=tp: Track preferences for what plays, its bar dragged)
+            // (OMNIPULSE_SELFTEST_PLAN=viz: Now Playing's visualiser, Bars then Glow, the sound at nothing)
+            else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("viz") { vec![(8, "vizprep"), (9, "library"), (11, "play"), (13, "now"), (19, "vizglow"), (22, "end")] }
             // (OMNIPULSE_SELFTEST_PLAN=alertwave: the first alert with a sound, its waveform and trims, in a tall window)
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("alertwave") { vec![(9, "size:1180:1700"), (10, "settings"), (11, "alertsnd"), (13, "end")] }
             // (OMNIPULSE_SELFTEST_PLAN=plugbar: a plugin's icon put in the title bar, then right-clicked for its settings)
@@ -11078,6 +11128,15 @@ fn main() -> Result<(), slint::PlatformError> {
                 "search" => { ui.set_search_text("deadmau5".into()); ui.invoke_search("deadmau5".into()); }
                 "compact" => ui.invoke_density_changed(true),
                 "sidefold" => ui.set_side_collapsed(true),
+                "vizprep" => {
+                    ui.set_volume(0.0);
+                    ui.invoke_volume_changed(0.0);
+                    if let Some(o) = s.borrow_mut().web.prefs.as_object_mut() { o.insert("nowViz".into(), serde_json::json!("bars")); }
+                }
+                "vizglow" => {
+                    println!("selftest: viz bands {:?}", ui.get_viz_bands().iter().map(|v| (v * 100.0).round() / 100.0).collect::<Vec<_>>());
+                    if let Some(o) = s.borrow_mut().web.prefs.as_object_mut() { o.insert("nowViz".into(), serde_json::json!("glow")); }
+                }
                 "plugbar" => {
                     if let Some(o) = s.borrow_mut().web.prefs.as_object_mut() { o.insert("pluginSettings".into(), serde_json::json!({ "internet-archive": { "_titleBar": true } })); }
                     paint_plats(&s.borrow());
