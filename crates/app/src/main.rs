@@ -11074,7 +11074,7 @@ fn main() -> Result<(), slint::PlatformError> {
             // (OMNIPULSE_SELFTEST_PLAN=plugbar: a plugin's icon put in the title bar, then right-clicked for its settings)
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("plugbar") { vec![(9, "plugbar"), (11, "titleset:plugin:internet-archive"), (13, "end")] }
             // (OMNIPULSE_SELFTEST_PLAN=loadview: the pages as they load, their platforms ticked off)
-            else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("loadview") { vec![(1, "library"), (2, "rediscover"), (4, "discover"), (5, "stats"), (7, "end")] }
+            else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("loadview") { vec![(1, "library"), (2, "rediscover"), (4, "discover"), (5, "loadshot1"), (6, "loadshot2"), (7, "stats"), (8, "end")] }
             // (OMNIPULSE_SELFTEST_PLAN=titleset: the title bar's icons right-clicked: Seamless Mix's settings, then SoundCloud's)
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("titleset") { vec![(9, "titleset:smart"), (11, "titleset:soundcloud"), (13, "end")] }
             // (OMNIPULSE_SELFTEST_PLAN=tallpanels: the Stream Widget's and the alerts' pages in a window tall enough for all of them)

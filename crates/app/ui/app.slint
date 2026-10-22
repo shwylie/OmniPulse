@@ -785,11 +785,12 @@ component LoadingView inherits Rectangle {
         HorizontalLayout {
             alignment: center;
             spacing: 10px;
-            HorizontalLayout {
-                alignment: center;
-                spacing: 4px;
-                width: 34px;
+            // (a fixed box: the bars move inside it, nothing around them moves with them)
+            Rectangle {
+                width: 36px;
+                height: 24px;
                 for k in [0, 1, 2, 3, 4]: Rectangle {
+                    x: k * 8px;
                     width: 4px;
                     property <float> wave: Theme.motion ? (1 + Math.sin((animation-tick() / 1ms * 0.4 + k * 70) * 1deg)) / 2 : 0.5;
                     height: 6px + 18px * self.wave;
