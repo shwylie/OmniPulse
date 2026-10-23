@@ -674,7 +674,12 @@ mod tests {
                     let answer = if line.contains("/channels/") { json!({ "id": 5, "user_id": 7, "chatroom": { "id": 9 } }) }
                         else if line.contains("/realtime/connection") { json!({ "data": { "connections": [{ "credentials": { "url": format!("ws://127.0.0.1:{sp}/ws") }, "provider": "centrifugo" }] } }) }
                         else if line.contains("/realtime/auth/connection") { json!({ "data": { "token": "guest" } }) }
-                        else if line.contains("/v1/chat") { posted.lock().unwrap().push(serde_json::from_str(&body).unwrap_or(Value::Null)); json!({ "data": {} }) }
+                        else if line.contains("/v1/chat") {
+                            let mut b: Value = serde_json::from_str(&body).unwrap_or(Value::Null);
+                            b["as"] = json!(text.lines().find_map(|l| l.strip_prefix("Authorization: Bearer ").or_else(|| l.strip_prefix("authorization: Bearer "))).unwrap_or("").trim());
+                            posted.lock().unwrap().push(b);
+                            json!({ "data": {} })
+                        }
                         else { json!({}) };
                     let b = answer.to_string();
                     let _ = tcp.write_all(format!("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{b}", b.len()).as_bytes()).await;
@@ -705,6 +710,7 @@ mod tests {
                                 chat("k1", "Viewer", "subscriber", "!sr take on me"),
                                 chat("k2", "Viewer", "subscriber", "!hello"),
                                 chat("k3", "MeBot", "broadcaster", "Hi Viewer on kick"),
+                                chat("k4", "TheBot", "", "!hello"),
                                 push("SubscriptionEvent", json!({ "chatroom_id": 9, "username": "NewSub", "months": 1 })),
                             ];
                             for l in lines { let _ = w.send(Message::Text(l.into())).await; }
@@ -735,7 +741,7 @@ mod tests {
             { "name": "Sub", "on": true, "trigger": t("event", json!({ "event": "sub" })), "steps": [st("say", json!({ "text": "Thanks %user%", "reply": false }))] },
             { "name": "Echo", "on": true, "trigger": t("message", json!({ "text": "hi viewer" })), "steps": [st("say", json!({ "text": "looped", "reply": false }))] },
         ]);
-        let p = start(&pkg, &json!({ "kickOn": true, "kickChannel": "me", "kickToken": "kt", "kickUserId": "7", "kickLogin": "MeBot", "actions": actions }), rt.handle().clone()).unwrap();
+        let p = start(&pkg, &json!({ "kickOn": true, "kickChannel": "me", "kickToken": "kt", "kickUserId": "7", "kickLogin": "MeBot", "kickBotToken": "bt", "kickBotLogin": "TheBot", "actions": actions }), rt.handle().clone()).unwrap();
         let said = |text: &str| posted.lock().unwrap().iter().any(|b| b["content"] == text);
         let until = Instant::now() + Duration::from_secs(10);
         let done = || said("Added Take On Me.") && said("Hi Viewer on kick") && said("Thanks NewSub") && asked.lock().unwrap().iter().any(|a| a["op"] == "alert" && a["args"][0]["user"] == "NewSub");
@@ -745,6 +751,9 @@ mod tests {
         // (the request as a Kick one, its answer a reply to its message, to the channel)
         assert!(a.iter().any(|x| x["op"] == "request" && x["args"] == json!(["Viewer", "take on me", "kick"])), "{a:#?}");
         assert!(b.iter().any(|x| x["content"] == "Added Take On Me." && x["reply_to_message_id"] == "k1" && x["broadcaster_user_id"] == 7), "{b:#?}");
+        // (posted as the bot account, to your channel; the bot's own !hello not answered)
+        assert!(b.iter().all(|x| x["as"] == "bt"), "{b:#?}");
+        assert_eq!(b.iter().filter(|x| x["content"] == "Hi Viewer on kick").count(), 1, "{b:#?}");
         // (Twitch's action not on Kick; our own echo not taken as chat; the keep-alive answered; the chatroom subscribed)
         assert!(!said("never") && !said("looped"), "{b:#?}");
         assert!(h.iter().any(|x| x == &json!({})), "{h:#?}");

@@ -1,7 +1,7 @@
 {
   "id": "chatbot",
   "name": "OmniPulse Chatbot",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "author": "OmniPulse",
   "description": "OmniPulse's own chatbot: song requests, alerts, your own actions (a trigger, then its steps) and OBS controls, straight from your chat, no other bot needed. Twitch and Kick; YouTube is on its way.",
   "main": "main.js",
@@ -116,12 +116,28 @@
       "note": "The sign-in link copied instead: open it in a private window on this PC."
     },
     {
+      "key": "kickBotSignIn",
+      "label": "Kick Bot Account (optional)",
+      "type": "button",
+      "press": "Sign In the Kick Bot",
+      "call": "signInKickBot",
+      "note": "A second Kick account that posts the replies, through the same Kick app. Without one, they come from your channel."
+    },
+    {
+      "key": "kickBotSignInCopy",
+      "label": "Kick Bot, Another Browser",
+      "type": "button",
+      "press": "Copy Sign-In Link",
+      "call": "signInKickBotCopy",
+      "note": "Paste it into a private window on this PC and sign in as the bot there: your own account stays signed in in your browser."
+    },
+    {
       "key": "kickSignOut",
       "label": "Kick Sign Out",
       "type": "button",
       "press": "Sign Out of Kick",
       "call": "signOutKick",
-      "note": ""
+      "note": "Forgets both Kick sign-ins on this PC."
     },
     {
       "key": "actionsOpen",

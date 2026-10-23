@@ -756,6 +756,8 @@ function setPoints() {
 // ---------- Kick: signed in with its OAuth (your own app's Client ID and secret, PKCE), chat read from
 // Kick's own realtime socket (as kick.com's page reads it: a guest's), sent through its API ----------
 const KICK_SCOPES = "user:read channel:read channel:write chat:write moderation:ban moderation:chat_message:manage";
+// (a bot account: only what posting needs, as Mix It Up's)
+const KICK_BOT_SCOPES = "user:read chat:write";
 const KICK_REDIRECT_PORT = 8476;
 const KICK_REDIRECT = "http://localhost:" + KICK_REDIRECT_PORT + "/kick";
 let kick = null, kickRoom = 0, kickChannelId = 0, kickRefresh = null, kickN = 10, kickRetry = 2000;
@@ -769,24 +771,27 @@ function randomText(n) {
   return out;
 }
 
-function signInKick(values, copy) {
+// (who: "bot" for a second Kick account that posts the replies; else your channel)
+function signInKick(values, copy, who) {
   let said = null;
   const first = new Promise((ok) => { said = ok; });
-  kickSignInFlow(values, said, copy).then((msg) => { if (msg) { said(msg); OmniPulse.app.say(msg); } }, (e) => { said("Couldn't sign in to Kick: " + e.message); OmniPulse.app.say("Couldn't sign in to Kick: " + e.message); });
+  kickSignInFlow(values, said, copy, who).then((msg) => { if (msg) { said(msg); OmniPulse.app.say(msg); } }, (e) => { said("Couldn't sign in to Kick: " + e.message); OmniPulse.app.say("Couldn't sign in to Kick: " + e.message); });
   return first;
 }
 
-async function kickSignInFlow(values, said, copy) {
+async function kickSignInFlow(values, said, copy, who) {
+  const bot = who === "bot";
   const v = Object.assign({}, S(), values || {});
   const id = String(v.kickClientId || "").trim(), secret = String(v.kickClientSecret || "").trim();
   if (!id || !secret) return "Put your Kick app's Client ID and Client Secret in first (their note says where), then sign in.";
   const verifier = randomText(64), state = randomText(24);
-  const q = { client_id: id, response_type: "code", redirect_uri: KICK_REDIRECT, scope: KICK_SCOPES, state, code_challenge: b64url(sha256(utf8(verifier))), code_challenge_method: "S256" };
+  const q = { client_id: id, response_type: "code", redirect_uri: KICK_REDIRECT, scope: bot ? KICK_BOT_SCOPES : KICK_SCOPES, state, code_challenge: b64url(sha256(utf8(verifier))), code_challenge_method: "S256" };
   const waiting = OmniPulse.app.awaitRedirect(KICK_REDIRECT_PORT, "/kick");
   await signInPage("https://id.kick.com/oauth/authorize?" + Object.entries(q).map(([k, x]) => k + "=" + encodeURIComponent(x)).join("&"), copy);
+  const as = bot ? "as the bot account" : "as your channel";
   said(copy
-    ? "The sign-in link is copied: paste it into a private window (or another browser) on this PC and sign in to Kick there, within five minutes. This says when it's done."
-    : "Sign in on Kick's page that's opened. This says when it's done.");
+    ? "The sign-in link is copied: paste it into a private window (or another browser) on this PC and sign in to Kick " + as + " there, within five minutes. This says when it's done."
+    : "Sign in on Kick's page that's opened (" + as + "). This says when it's done.");
   const back = await waiting;
   const got = {};
   String(back.query || "").split("&").forEach((kv) => { const i = kv.indexOf("="); if (i > 0) got[kv.slice(0, i)] = decodeURIComponent(kv.slice(i + 1).replace(/\+/g, " ")); });
@@ -794,29 +799,36 @@ async function kickSignInFlow(values, said, copy) {
   if (got.state !== state || !got.code) return "Kick's sign-in didn't come back as it should: try again.";
   const t = await form("https://id.kick.com/oauth/token", { grant_type: "authorization_code", client_id: id, client_secret: secret, redirect_uri: KICK_REDIRECT, code: got.code, code_verifier: verifier });
   if (!t.ok || !t.j.access_token) return "Kick didn't take the sign-in: " + (t.j.error_description || t.j.message || t.status) + ". Check its Client Secret, and that its Redirect URL is " + KICK_REDIRECT + ".";
-  const keep = { kickClientId: id, kickClientSecret: secret, kickToken: t.j.access_token, kickRefreshToken: t.j.refresh_token || "" };
+  const p = bot ? "kickBot" : "kick";
+  const keep = { kickClientId: id, kickClientSecret: secret, [p + "Token"]: t.j.access_token, [p + "RefreshToken"]: t.j.refresh_token || "" };
   Object.assign(OmniPulse.settings, keep);
-  const me = await kickApi("GET", "users");
+  const me = await kickApi("GET", "users", null, false, who);
   const u = me.data && me.data[0];
   if (!u) return "Signed in, but Kick didn't say who as: try again.";
-  keep.kickUserId = String(u.user_id);
-  keep.kickLogin = String(u.name || "");
-  if (!String(v.kickChannel || "").trim()) keep.kickChannel = String(u.name || "").toLowerCase();
+  if (bot) {
+    keep.kickBotLogin = String(u.name || "");
+    if (keep.kickBotLogin && keep.kickBotLogin.toLowerCase() === String(S().kickLogin || "").toLowerCase()) return "That's your channel's own account: sign in the bot with its own Kick account (a private window keeps you signed in as you).";
+  } else {
+    keep.kickUserId = String(u.user_id);
+    keep.kickLogin = String(u.name || "");
+    if (!String(v.kickChannel || "").trim()) keep.kickChannel = String(u.name || "").toLowerCase();
+  }
   await OmniPulse.app.saveSettings(keep);
   Object.assign(OmniPulse.settings, keep);
   restart();
-  return "Signed in to Kick as " + (u.name || "you") + ".";
+  return "Signed in to Kick as " + (u.name || "you") + (bot ? " (the bot)." : ".");
 }
 
-// Kick's API, as you (a token that's run out, renewed once)
-async function kickApi(method, path, body, again) {
-  if (!S().kickToken) throw new Error("sign in to Kick first (in the chatbot's settings)");
+// Kick's API, as your channel (or who: "bot", the bot account); a token that's run out, renewed once
+async function kickApi(method, path, body, again, who) {
+  const token = who === "bot" ? S().kickBotToken : S().kickToken;
+  if (!token) throw new Error("sign in to Kick first (in the chatbot's settings)");
   const r = await OmniPulse.fetch("https://api.kick.com/public/v1/" + path, {
     method,
-    headers: { Authorization: "Bearer " + S().kickToken, "Content-Type": "application/json", Accept: "application/json" },
+    headers: { Authorization: "Bearer " + token, "Content-Type": "application/json", Accept: "application/json" },
     body: body ? JSON.stringify(body) : undefined,
   });
-  if (r.status === 401 && !again && (await kickRenew())) return kickApi(method, path, body, true);
+  if (r.status === 401 && !again && (await kickRenew(who))) return kickApi(method, path, body, true, who);
   if (!r.ok) {
     let why = "";
     try { why = (await r.json()).message || ""; } catch (e) {}
@@ -826,20 +838,23 @@ async function kickApi(method, path, body, again) {
   try { return await r.json(); } catch (e) { return {}; }
 }
 
-async function kickRenew() {
+async function kickRenew(who) {
   const s = S();
-  if (!s.kickRefreshToken || !s.kickClientId || !s.kickClientSecret) return false;
-  const t = await form("https://id.kick.com/oauth/token", { grant_type: "refresh_token", client_id: s.kickClientId, client_secret: s.kickClientSecret, refresh_token: s.kickRefreshToken });
+  const p = who === "bot" ? "kickBot" : "kick";
+  if (!s[p + "RefreshToken"] || !s.kickClientId || !s.kickClientSecret) return false;
+  const t = await form("https://id.kick.com/oauth/token", { grant_type: "refresh_token", client_id: s.kickClientId, client_secret: s.kickClientSecret, refresh_token: s[p + "RefreshToken"] });
   if (!t.ok || !t.j.access_token) return false;
-  const keep = { kickToken: t.j.access_token, kickRefreshToken: t.j.refresh_token || s.kickRefreshToken };
+  const keep = { [p + "Token"]: t.j.access_token, [p + "RefreshToken"]: t.j.refresh_token || s[p + "RefreshToken"] };
   await OmniPulse.app.saveSettings(keep);
   Object.assign(OmniPulse.settings, keep);
   return true;
 }
 
-// A message in your Kick chat (to the one it answers), as you; kept a moment, so its echo isn't taken as chat
+// A message in your Kick chat (to the one it answers): from the bot account if there is one, else you; kept
+// a moment, so its echo isn't taken as chat
 function kickSay(to, text) {
-  if (!kick || !S().kickToken) return;
+  const who = S().kickBotToken ? "bot" : "channel";
+  if (!kick || !(who === "bot" ? S().kickBotToken : S().kickToken)) return;
   const channel = Number(S().kickUserId || 0);
   String(text).split("\n").filter(Boolean).forEach((line) => {
     const content = line.slice(0, 500);
@@ -847,7 +862,7 @@ function kickSay(to, text) {
     while (kickSent.length > 30) kickSent.shift();
     const body = { content, type: "user", broadcaster_user_id: channel };
     if (to) body.reply_to_message_id = to;
-    kickApi("POST", "chat", body).catch((e) => OmniPulse.log("kick chat: " + e.message));
+    kickApi("POST", "chat", body, false, who).catch((e) => OmniPulse.log("kick chat: " + e.message));
   });
 }
 
@@ -914,7 +929,8 @@ function onKick(event, d) {
   if (ev === "ChatMessageEvent") {
     const sender = d.sender || {};
     const content = String(d.content || "");
-    // (our own message coming back: not chat)
+    // (the bot account's messages never start anything; our own message coming back: not chat)
+    if (S().kickBotLogin && String(sender.username || "").toLowerCase() === String(S().kickBotLogin).toLowerCase()) return;
     if (S().kickLogin && String(sender.username || "").toLowerCase() === String(S().kickLogin).toLowerCase()) {
       const k = kickSent.findIndex((x) => x.content === content && Date.now() - x.at < 30000);
       if (k >= 0) { kickSent.splice(k, 1); return; }
@@ -1088,8 +1104,10 @@ OmniPulse.register({
   signInBotCopy(values) { return signIn("bot", TWITCH_SCOPES_BOT, values, true); },
   signInKick(values) { return signInKick(values); },
   signInKickCopy(values) { return signInKick(values, true); },
+  signInKickBot(values) { return signInKick(values, false, "bot"); },
+  signInKickBotCopy(values) { return signInKick(values, true, "bot"); },
   async signOutKick() {
-    const none = { kickToken: "", kickRefreshToken: "", kickUserId: "", kickLogin: "" };
+    const none = { kickToken: "", kickRefreshToken: "", kickUserId: "", kickLogin: "", kickBotToken: "", kickBotRefreshToken: "", kickBotLogin: "" };
     await OmniPulse.app.saveSettings(none);
     Object.assign(OmniPulse.settings, none);
     restart();
