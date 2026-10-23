@@ -572,7 +572,8 @@
     if (a.video) { video = document.createElement("video"); video.src = a.video; video.autoplay = true; video.playsInline = true; el.appendChild(video); }
     if (a.text) { const p = document.createElement("p"); p.textContent = a.text; el.appendChild(p); }
     box.appendChild(el);
-    requestAnimationFrame(() => el.classList.add("on"));
+    void el.offsetWidth;   // (laid out first, so it fades in)
+    el.classList.add("on");
     const gone = () => { el.classList.remove("on"); setTimeout(() => el.remove(), 500); };
     const t = setTimeout(gone, Math.max(1, Number(a.seconds) || 6) * 1000);
     if (video) video.onended = () => { clearTimeout(t); gone(); };
