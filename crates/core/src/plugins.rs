@@ -349,6 +349,12 @@ pub fn client_for(hosts: Vec<String>) -> reqwest::Client {
 /// Makes a request for a plugin: { status, headers, body (text) }
 pub async fn http(id: &str, url: &str, method: &str, headers: Vec<(String, String)>, body: Option<String>) -> Result<Value, String> {
     let hosts = hosts_of(id).ok_or("That plugin isn't installed.")?;
+    http_for(hosts, url, method, headers, body).await
+}
+
+/// The same, to a running plugin's own sites (its manifest as it was started: a newer one, come with an
+/// update, reaches its new sites before it's installed again)
+pub async fn http_for(hosts: Vec<String>, url: &str, method: &str, headers: Vec<(String, String)>, body: Option<String>) -> Result<Value, String> {
     if !host_allowed(&hosts, url) {
         return Err(format!("This plugin may only reach {}; it asked for {url}.", hosts.join(", ")));
     }
@@ -356,6 +362,7 @@ pub async fn http(id: &str, url: &str, method: &str, headers: Vec<(String, Strin
         "GET" => reqwest::Method::GET,
         "POST" => reqwest::Method::POST,
         "PUT" => reqwest::Method::PUT,
+        "PATCH" => reqwest::Method::PATCH,
         "DELETE" => reqwest::Method::DELETE,
         "HEAD" => reqwest::Method::HEAD,
         _ => return Err("That request method isn't allowed.".into()),

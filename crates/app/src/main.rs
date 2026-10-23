@@ -10004,6 +10004,47 @@ fn alert_shown(shared: &Shared, kind: &str) {
     ALERT_TIMER.with(|x| *x.borrow_mut() = Some(t));
 }
 
+/// A sign-in's way back to this PC: one visit to http://localhost:<port><path> within five minutes, a page
+/// saying it's done, and its query
+fn await_redirect(port: u16, path: &str) -> Result<String, String> {
+    use std::io::{Read, Write};
+    let listener = std::net::TcpListener::bind(("127.0.0.1", port)).map_err(|e| format!("couldn't listen on port {port} for the sign-in: {e}"))?;
+    listener.set_nonblocking(true).map_err(|e| e.to_string())?;
+    let until = std::time::Instant::now() + std::time::Duration::from_secs(300);
+    while std::time::Instant::now() < until {
+        match listener.accept() {
+            Ok((mut tcp, _)) => {
+                let _ = tcp.set_nonblocking(false);
+                let _ = tcp.set_read_timeout(Some(std::time::Duration::from_secs(5)));
+                let mut buf = [0u8; 8192];
+                let n = tcp.read(&mut buf).unwrap_or(0);
+                let req = String::from_utf8_lossy(&buf[..n]).to_string();
+                let target = req.lines().next().and_then(|l| l.split(' ').nth(1)).unwrap_or("").to_string();
+                let (at, query) = target.split_once('?').unwrap_or((target.as_str(), ""));
+                if at != path {
+                    let _ = tcp.write_all(b"HTTP/1.1 404 Not Found
+Content-Length: 0
+Connection: close
+
+");
+                    continue;
+                }
+                let page = "<!doctype html><meta charset=utf-8><title>OmniPulse</title><body style='font-family:sans-serif;background:#111;color:#eee;display:grid;place-items:center;height:90vh'><p>Done: you can close this tab and go back to OmniPulse.</p>";
+                let _ = tcp.write_all(format!("HTTP/1.1 200 OK
+Content-Type: text/html; charset=utf-8
+Content-Length: {}
+Connection: close
+
+{page}", page.len()).as_bytes());
+                return Ok(query.to_string());
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => std::thread::sleep(std::time::Duration::from_millis(100)),
+            Err(e) => return Err(e.to_string()),
+        }
+    }
+    Err("the sign-in wasn't finished in five minutes".into())
+}
+
 thread_local! {
     /// the sounds playing (a chatbot's Play a Sound): each kept going until it's over
     static SOUNDS: RefCell<Vec<(Rc<std::cell::Cell<bool>>, slint::Timer)>> = const { RefCell::new(Vec::new()) };
@@ -10072,6 +10113,14 @@ fn plugin_app(shared: &Shared, plugin: &str, ask: serde_json::Value, answer: Box
                 }.await;
                 send(match got { Ok(text) => serde_json::json!({ "ok": true, "text": text }), Err(e) => serde_json::json!({ "error": e }) });
             });
+        }
+        // (a sign-in coming back to this PC: the chatbot's Kick sign-in, its address http://localhost:<port><path>;
+        // one visit, within five minutes, its query handed back)
+        "awaitRedirect" => {
+            if plugin != "chatbot" { return send(serde_json::json!({ "error": "only OmniPulse's chatbot can" })); }
+            let port = args.first().and_then(|v| v.as_u64()).unwrap_or(0) as u16;
+            let path = arg(1);
+            std::thread::spawn(move || send(match await_redirect(port, &path) { Ok(q) => serde_json::json!({ "ok": true, "query": q }), Err(e) => serde_json::json!({ "error": e }) }));
         }
         // (a sound file of yours, over the music: a chatbot's Play a Sound)
         "sound" => {
@@ -11853,6 +11902,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 let (sb, miu): (&'static str, &'static str) = (Box::leak(format!("restore:{dir}/streamerbot-backup.zip").into_boxed_str()), Box::leak(format!("restore:{dir}/mixitup.miubackup").into_boxed_str()));
                 vec![(9, "settings"), (10, "cat_Streaming"), (11, "flows"), (12, sb), (13, "flowpick:3"), (15, miu), (16, "flowpick:30"), (18, "end")]
             }
+            else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("botset") { vec![(9, "settings"), (10, "titleset:plugin:chatbot"), (12, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("ring") { vec![(8, "vizprep"), (9, "library"), (11, "play"), (13, "now"), (15, "viz:ring"), (19, "sayacts"), (22, "vizfull"), (25, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("applook") { vec![(9, "settings"), (10, "cat_App & Look"), (12, "end")] }
             // (OMNIPULSE_SELFTEST_PLAN=plugbar: a plugin's icon put in the title bar, then right-clicked for its settings)

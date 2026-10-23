@@ -216,15 +216,15 @@ fn run(id: String, code: String, settings: String, caps: Caps, rt: tokio::runtim
         let g = ctx.globals();
         let e = |e: rquickjs::Error| e.to_string();
         // fetch: made by the app, answered as a message
-        let (pid, rt2, tx2, nx) = (id.clone(), rt.clone(), tx.clone(), next.clone());
+        let (hosts_f, rt2, tx2, nx) = (caps.hosts.clone(), rt.clone(), tx.clone(), next.clone());
         g.set("__host_fetch", Function::new(ctx.clone(), move |req: String| -> u32 {
             let n = nx();
-            let (pid, tx) = (pid.clone(), tx2.clone());
+            let (hosts, tx) = (hosts_f.clone(), tx2.clone());
             rt2.spawn(async move {
                 let r: Value = serde_json::from_str(&req).unwrap_or_default();
                 let headers: Vec<(String, String)> = r["headers"].as_array().into_iter().flatten().take(50)
                     .filter_map(|h| Some((h[0].as_str()?.to_string(), h[1].as_str()?.to_string()))).collect();
-                let got = core::plugins::http(&pid, r["url"].as_str().unwrap_or(""), r["method"].as_str().unwrap_or("GET"), headers, r["body"].as_str().map(String::from)).await;
+                let got = core::plugins::http_for(hosts, r["url"].as_str().unwrap_or(""), r["method"].as_str().unwrap_or("GET"), headers, r["body"].as_str().map(String::from)).await;
                 let out = match got { Ok(v) => v.to_string(), Err(e) => json!({ "error": e }).to_string() };
                 let _ = tx.send(Msg::Fetched(n, out));
             });
@@ -605,6 +605,150 @@ mod tests {
         assert_eq!(req(&a, "SetInputSettings").map(|x| x["d"]["requestData"].clone()), Some(json!({ "inputName": "Banner", "inputSettings": { "text": "Live from Starting Soon" } })), "{a:#?}");
         assert_eq!(req(&a, "SetCurrentProgramScene").map(|x| x["d"]["requestData"]["sceneName"].clone()), Some(json!("Main")), "{a:#?}");
         assert!(!a.iter().any(|x| x["d"]["requestData"]["sceneName"] == "Never"), "{a:#?}");
+        drop(p);
+        stop("chatbot");
+    }
+
+    /// The chatbot reading a real Kick channel's chat (OMNIPULSE_KICK_LIVE=<channel>; nothing's sent, no
+    /// sign-in): messages taken in as chat, an action run for each
+    #[test]
+    #[ignore]
+    fn the_chatbot_reads_real_kick() {
+        let Ok(channel) = std::env::var("OMNIPULSE_KICK_LIVE") else { return };
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let asked: Arc<Mutex<Vec<Value>>> = Arc::new(Mutex::new(Vec::new()));
+        let a2 = asked.clone();
+        set_app_handler(Arc::new(move |_p: &str, ask: Value, answer: Box<dyn FnOnce(Value) + Send>| { a2.lock().unwrap().push(ask.clone()); answer(json!({ "ok": true })); }));
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../plugins/chatbot");
+        let m: core::plugins::Manifest = serde_json::from_str(&std::fs::read_to_string(root.join("manifest.json")).unwrap()).unwrap();
+        let pkg = core::plugins::Package { manifest: m, code: std::fs::read_to_string(root.join("main.js")).unwrap(), digest: String::new(), bundled: true };
+        let t = crate::flows::defaults(crate::flows::TRIGGERS, "message");
+        let mut t = t; t["match"] = json!("regex"); t["text"] = json!("."); t["from"] = json!("kick");
+        let mut st = crate::flows::defaults(crate::flows::STEPS, "status"); st["text"] = json!("%user%: %message%");
+        let p = start(&pkg, &json!({ "kickOn": true, "kickChannel": channel, "actions": [{ "name": "Seen", "on": true, "trigger": t, "steps": [st] }] }), rt.handle().clone()).unwrap();
+        let until = Instant::now() + Duration::from_secs(30);
+        let said = || asked.lock().unwrap().iter().filter(|a| a["op"] == "say").map(|a| a["args"][0].as_str().unwrap_or("").to_string()).collect::<Vec<_>>();
+        while said().len() < 5 && Instant::now() < until { std::thread::sleep(Duration::from_millis(200)); }
+        let s = said();
+        println!("{} messages: {:#?}", s.len(), s.iter().take(5).collect::<Vec<_>>());
+        assert!(s.len() >= 5, "{s:#?}");
+        drop(p);
+        stop("chatbot");
+    }
+
+    /// The chatbot on Kick, against a stand-in Kick on this PC: its channel looked up, its realtime socket
+    /// (Centrifugo's protocol: a guest's token, the chatroom subscribed, its keep-alive answered), a request
+    /// from its chat answered through its API (as a reply), an action for Kick alone, our own message's
+    /// echo left alone, a sub an alert and an action
+    #[test]
+    fn the_chatbot_works_kick() {
+        use futures_util::{SinkExt, StreamExt};
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        use tokio_tungstenite::tungstenite::Message;
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let web = rt.block_on(tokio::net::TcpListener::bind("127.0.0.1:0")).unwrap();
+        let sock = rt.block_on(tokio::net::TcpListener::bind("127.0.0.1:0")).unwrap();
+        let (wp, sp) = (web.local_addr().unwrap().port(), sock.local_addr().unwrap().port());
+        // (its web side: the channel, the socket's address and a token, and its chat API, what's posted kept)
+        let posted: Arc<Mutex<Vec<Value>>> = Arc::new(Mutex::new(Vec::new()));
+        let p2 = posted.clone();
+        rt.spawn(async move {
+            while let Ok((mut tcp, _)) = web.accept().await {
+                let posted = p2.clone();
+                tokio::spawn(async move {
+                    let mut buf = Vec::new();
+                    let mut chunk = [0u8; 4096];
+                    loop {
+                        let n = tcp.read(&mut chunk).await.unwrap_or(0);
+                        if n == 0 { break; }
+                        buf.extend_from_slice(&chunk[..n]);
+                        let text = String::from_utf8_lossy(&buf).to_string();
+                        if let Some(at) = text.find("\r\n\r\n") {
+                            let len = text.lines().find_map(|l| l.to_lowercase().strip_prefix("content-length:").map(|v| v.trim().parse::<usize>().unwrap_or(0))).unwrap_or(0);
+                            if buf.len() >= at + 4 + len { break; }
+                        }
+                    }
+                    let text = String::from_utf8_lossy(&buf).to_string();
+                    let line = text.lines().next().unwrap_or("").to_string();
+                    let body = text.split_once("\r\n\r\n").map(|x| x.1.to_string()).unwrap_or_default();
+                    let answer = if line.contains("/channels/") { json!({ "id": 5, "user_id": 7, "chatroom": { "id": 9 } }) }
+                        else if line.contains("/realtime/connection") { json!({ "data": { "connections": [{ "credentials": { "url": format!("ws://127.0.0.1:{sp}/ws") }, "provider": "centrifugo" }] } }) }
+                        else if line.contains("/realtime/auth/connection") { json!({ "data": { "token": "guest" } }) }
+                        else if line.contains("/v1/chat") { posted.lock().unwrap().push(serde_json::from_str(&body).unwrap_or(Value::Null)); json!({ "data": {} }) }
+                        else { json!({}) };
+                    let b = answer.to_string();
+                    let _ = tcp.write_all(format!("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{b}", b.len()).as_bytes()).await;
+                });
+            }
+        });
+        // (its socket: connect and subscribes answered, its keep-alive sent, then chat and a sub)
+        let heard: Arc<Mutex<Vec<Value>>> = Arc::new(Mutex::new(Vec::new()));
+        let h2 = heard.clone();
+        rt.spawn(async move {
+            let (tcp, _) = sock.accept().await.unwrap();
+            let ws = tokio_tungstenite::accept_async(tcp).await.unwrap();
+            let (mut w, mut r) = ws.split();
+            let push = |ev: &str, data: Value| json!({ "push": { "channel": "chatrooms.9.v2", "pub": { "data": { "event": format!("App\\Events\\{ev}"), "data": data.to_string() } } } }).to_string();
+            let chat = |id: &str, who: &str, badge: &str, text: &str| push("ChatMessageEvent", json!({ "id": id, "chatroom_id": 9, "content": text, "type": "message", "sender": { "id": 42, "username": who, "slug": who.to_lowercase(), "identity": { "badges": [{ "type": badge }] } } }));
+            let mut subscribed = 0;
+            while let Some(Ok(Message::Text(t))) = r.next().await {
+                for line in t.split('\n').filter(|l| !l.is_empty()) {
+                    let m: Value = serde_json::from_str(line).unwrap_or(Value::Null);
+                    h2.lock().unwrap().push(m.clone());
+                    if m["connect"].is_object() { let _ = w.send(Message::Text(r#"{"id":1,"connect":{"client":"c","ttl":2700,"ping":25}}"#.into())).await; }
+                    if m["subscribe"].is_object() {
+                        let _ = w.send(Message::Text(format!(r#"{{"id":{},"subscribe":{{}}}}"#, m["id"]).into())).await;
+                        subscribed += 1;
+                        if subscribed == 2 {
+                            let _ = w.send(Message::Text("{}".into())).await;
+                            let lines = [
+                                chat("k1", "Viewer", "subscriber", "!sr take on me"),
+                                chat("k2", "Viewer", "subscriber", "!hello"),
+                                chat("k3", "MeBot", "broadcaster", "Hi Viewer on kick"),
+                                push("SubscriptionEvent", json!({ "chatroom_id": 9, "username": "NewSub", "months": 1 })),
+                            ];
+                            for l in lines { let _ = w.send(Message::Text(l.into())).await; }
+                        }
+                    }
+                }
+            }
+        });
+        let asked: Arc<Mutex<Vec<Value>>> = Arc::new(Mutex::new(Vec::new()));
+        let a2 = asked.clone();
+        set_app_handler(Arc::new(move |_p: &str, ask: Value, answer: Box<dyn FnOnce(Value) + Send>| {
+            a2.lock().unwrap().push(ask.clone());
+            answer(match ask["op"].as_str() { Some("request") => json!({ "ok": true, "message": "Added Take On Me." }), _ => json!({ "ok": true }) });
+        }));
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../plugins/chatbot");
+        let code = std::fs::read_to_string(root.join("main.js")).unwrap()
+            .replace("https://kick.com/api/v2/channels/", &format!("http://127.0.0.1:{wp}/channels/"))
+            .replace("https://web.kick.com/api/v1/realtime/", &format!("http://127.0.0.1:{wp}/realtime/"))
+            .replace("https://api.kick.com/public/v1/", &format!("http://127.0.0.1:{wp}/v1/"));
+        let mut m: core::plugins::Manifest = serde_json::from_str(&std::fs::read_to_string(root.join("manifest.json")).unwrap()).unwrap();
+        m.hosts.push("127.0.0.1".into());
+        let pkg = core::plugins::Package { manifest: m, code, digest: String::new(), bundled: true };
+        let t = |id: &str, set: Value| { let mut d = crate::flows::defaults(crate::flows::TRIGGERS, id); for (k, v) in set.as_object().unwrap() { d[k] = v.clone(); } d };
+        let st = |id: &str, set: Value| { let mut d = crate::flows::defaults(crate::flows::STEPS, id); for (k, v) in set.as_object().unwrap() { d[k] = v.clone(); } d };
+        let actions = json!([
+            { "name": "Hello", "on": true, "trigger": t("command", json!({ "command": "!hello", "cooldown": 0, "usercooldown": 0, "from": "kick" })), "steps": [st("say", json!({ "text": "Hi %user% on %platform%" }))] },
+            { "name": "Twitch Only", "on": true, "trigger": t("command", json!({ "command": "!hello", "cooldown": 0, "usercooldown": 0, "from": "twitch" })), "steps": [st("say", json!({ "text": "never" }))] },
+            { "name": "Sub", "on": true, "trigger": t("event", json!({ "event": "sub" })), "steps": [st("say", json!({ "text": "Thanks %user%", "reply": false }))] },
+            { "name": "Echo", "on": true, "trigger": t("message", json!({ "text": "hi viewer" })), "steps": [st("say", json!({ "text": "looped", "reply": false }))] },
+        ]);
+        let p = start(&pkg, &json!({ "kickOn": true, "kickChannel": "me", "kickToken": "kt", "kickUserId": "7", "kickLogin": "MeBot", "actions": actions }), rt.handle().clone()).unwrap();
+        let said = |text: &str| posted.lock().unwrap().iter().any(|b| b["content"] == text);
+        let until = Instant::now() + Duration::from_secs(10);
+        let done = || said("Added Take On Me.") && said("Hi Viewer on kick") && said("Thanks NewSub") && asked.lock().unwrap().iter().any(|a| a["op"] == "alert" && a["args"][0]["user"] == "NewSub");
+        while !done() && Instant::now() < until { std::thread::sleep(Duration::from_millis(50)); }
+        let (b, a, h) = (posted.lock().unwrap().clone(), asked.lock().unwrap().clone(), heard.lock().unwrap().clone());
+        assert!(done(), "posted {b:#?}, asked {a:#?}, heard {h:#?}");
+        // (the request as a Kick one, its answer a reply to its message, to the channel)
+        assert!(a.iter().any(|x| x["op"] == "request" && x["args"] == json!(["Viewer", "take on me", "kick"])), "{a:#?}");
+        assert!(b.iter().any(|x| x["content"] == "Added Take On Me." && x["reply_to_message_id"] == "k1" && x["broadcaster_user_id"] == 7), "{b:#?}");
+        // (Twitch's action not on Kick; our own echo not taken as chat; the keep-alive answered; the chatroom subscribed)
+        assert!(!said("never") && !said("looped"), "{b:#?}");
+        assert!(h.iter().any(|x| x == &json!({})), "{h:#?}");
+        assert!(h.iter().any(|x| x["subscribe"]["channel"] == "chatrooms.9.v2") && h.iter().any(|x| x["connect"]["token"] == "guest"), "{h:#?}");
         drop(p);
         stop("chatbot");
     }

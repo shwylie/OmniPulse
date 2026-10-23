@@ -32,6 +32,7 @@ const fn pick(key: &'static str, label: &'static str, options: &'static [(&'stat
     Field { key, label, kind: "select", options, default, note }
 }
 
+const FROM: &[(&str, &str)] = &[("any", "Any Platform"), ("twitch", "Twitch"), ("kick", "Kick")];
 const WHO: &[(&str, &str)] = &[("everyone", "Everyone"), ("subscribers", "Subscribers"), ("vips", "VIPs"), ("mods", "Moderators"), ("you", "Only You")];
 const EVENTS: &[(&str, &str)] = &[
     ("follow", "A Follow"), ("sub", "A New Sub"), ("resub", "A Resub"), ("gift", "Gifted Subs"), ("bits", "Bits"),
@@ -69,22 +70,26 @@ pub const TRIGGERS: &[Kind] = &[
         pick("who", "Who Can Use It", WHO, "everyone", ""),
         f("cooldown", "Cooldown", "number", "5", "Seconds before anyone can use it again."),
         f("usercooldown", "Cooldown per Viewer", "number", "15", "Seconds before the same viewer can again."),
+        pick("from", "On", FROM, "any", ""),
     ] },
     Kind { id: "message", label: "A Chat Message", note: "Gives its steps %user% and %message% (all they wrote).", fields: &[
         pick("match", "When It", MATCH, "contains", ""),
         f("text", "Words", "text", "hello", "Not case-sensitive."),
         pick("who", "From", WHO, "everyone", ""),
+        pick("from", "On", FROM, "any", ""),
     ] },
     Kind { id: "filter", label: "A Rule Broken", note: "A chat filter: its steps say what's done (delete it, time them out, warn them). Gives them %user% and %message%.", fields: &[
         pick("rule", "When a Message Has", RULES, "links", ""),
         f("words", "Banned Words", "text", "", "For banned words: with commas between (whole words, not case-sensitive)."),
         f("most", "Most", "number", "300", "Too long: the most letters; too many emotes: the most emotes."),
         pick("exempt", "Except From", EXEMPT, "subscribers", "Them and anyone above them (you always are)."),
+        pick("from", "On", FROM, "any", ""),
     ] },
     Kind { id: "event", label: "A Channel Event", note: "Gives its steps %user%, %amount% (bits, months, viewers, subs gifted) and %message%.", fields: &[
         pick("event", "Event", EVENTS, "follow", ""),
         f("min", "At Least", "number", "0", "The least it takes, in bits, raiders or subs gifted (0: any)."),
         f("reward", "Reward", "text", "", "For a Channel Points reward: its name (empty: any)."),
+        pick("from", "On", FROM, "any", "Kick has follows, subs, gifted subs, hosts and going live or offline."),
     ] },
     Kind { id: "timer", label: "Every Few Minutes", note: "No one's asked: %user% is empty.", fields: &[
         f("minutes", "Every", "number", "15", "Minutes."),

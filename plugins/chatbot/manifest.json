@@ -1,16 +1,21 @@
 {
   "id": "chatbot",
   "name": "OmniPulse Chatbot",
-  "version": "0.1.6",
+  "version": "0.2.0",
   "author": "OmniPulse",
-  "description": "OmniPulse's own chatbot: song requests, alerts, your own actions (a trigger, then its steps) and OBS controls, straight from your chat, no other bot needed. Twitch for now; Kick and YouTube are on their way.",
+  "description": "OmniPulse's own chatbot: song requests, alerts, your own actions (a trigger, then its steps) and OBS controls, straight from your chat, no other bot needed. Twitch and Kick; YouTube is on its way.",
   "main": "main.js",
   "hosts": [
     "id.twitch.tv",
     "api.twitch.tv",
     "irc-ws.chat.twitch.tv",
     "eventsub.wss.twitch.tv",
-    "127.0.0.1"
+    "127.0.0.1",
+    "kick.com",
+    "web.kick.com",
+    "api.kick.com",
+    "id.kick.com",
+    "*.platform.kick.com"
   ],
   "capabilities": [
     "sockets",
@@ -49,6 +54,50 @@
       "press": "Sign Out of Twitch",
       "call": "signOut",
       "note": "Forgets both sign-ins on this PC."
+    },
+    {
+      "key": "kickOn",
+      "label": "Kick",
+      "type": "toggle",
+      "default": false,
+      "note": "Your Kick chat too: song requests, your actions and alerts from it."
+    },
+    {
+      "key": "kickChannel",
+      "label": "Kick Channel",
+      "type": "text",
+      "default": "",
+      "note": "Its name, as in kick.com/name (filled in when you sign in)."
+    },
+    {
+      "key": "kickClientId",
+      "label": "Kick Client ID",
+      "type": "text",
+      "default": "",
+      "note": "Your own Kick app: kick.com, Settings > Developer, Create App, its Redirect URL http://localhost:8476/kick, all its scopes ticked. Then copy its Client ID here."
+    },
+    {
+      "key": "kickClientSecret",
+      "label": "Kick Client Secret",
+      "type": "password",
+      "default": "",
+      "note": "From the same app."
+    },
+    {
+      "key": "kickSignIn",
+      "label": "Kick Sign-In",
+      "type": "button",
+      "press": "Sign In with Kick",
+      "call": "signInKick",
+      "note": "Your Kick account: the chatbot answers as it."
+    },
+    {
+      "key": "kickSignOut",
+      "label": "Kick Sign Out",
+      "type": "button",
+      "press": "Sign Out of Kick",
+      "call": "signOutKick",
+      "note": ""
     },
     {
       "key": "actionsOpen",
