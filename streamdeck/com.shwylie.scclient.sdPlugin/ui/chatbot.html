@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>OmniPulse chatbot action</title>
+<!-- A Chatbot Action key's settings (bin/plugin.js reads them): which of the chatbot's actions it runs. The
+     list is OmniPulse's own (asked for through the plugin), so it's never typed wrong. -->
+<style>
+  body { margin: 0; padding: 10px 14px; font: 13px "Segoe UI", system-ui, sans-serif; color: #d8d8d8; background: #2d2d2d; }
+  label { display: block; margin: 8px 0 4px; }
+  select { width: 100%; padding: 4px 6px; font: inherit; color: #d8d8d8; background: #3d3d3d; border: 1px solid #555; border-radius: 3px; }
+  .note { color: #969696; font-size: 12px; margin: 8px 0; }
+</style>
+</head>
+<body>
+  <label for="action">Action</label>
+  <select id="action"></select>
+  <div class="note" id="note">Asking OmniPulse for your actions...</div>
+<script>
+  let socket = null, context = "", action = "", settings = {}, names = [];
+  const pick = document.getElementById("action"), note = document.getElementById("note");
+  function paint() {
+    const want = settings.action || "";
+    const all = names.slice();
+    // (one that's gone from OmniPulse: still shown, so it isn't lost from the key without a word)
+    if (want && !all.includes(want)) all.unshift(want);
+    pick.innerHTML = "";
+    const none = document.createElement("option");
+    none.value = ""; none.textContent = all.length ? "Pick one..." : "(none yet)";
+    pick.appendChild(none);
+    for (const n of all) { const o = document.createElement("option"); o.value = n; o.textContent = n + (names.includes(n) ? "" : " (not in OmniPulse now)"); pick.appendChild(o); }
+    pick.value = want;
+  }
+  pick.addEventListener("change", () => {
+    settings = Object.assign({}, settings, { action: pick.value });
+    if (socket && socket.readyState === 1) socket.send(JSON.stringify({ event: "setSettings", context, payload: settings }));
+  });
+  window.connectElgatoStreamDeckSocket = (port, uuid, registerEvent, info, actionInfo) => {
+    context = uuid;
+    try { const a = JSON.parse(actionInfo); action = a.action; settings = (a.payload || {}).settings || {}; } catch (e) { settings = {}; }
+    paint();
+    socket = new WebSocket("ws://127.0.0.1:" + port);
+    socket.onopen = () => {
+      socket.send(JSON.stringify({ event: registerEvent, uuid }));
+      socket.send(JSON.stringify({ event: "sendToPlugin", action, context, payload: { ask: "actions" } }));
+    };
+    socket.onmessage = (m) => {
+      try {
+        const msg = JSON.parse(m.data);
+        if (msg.event === "didReceiveSettings") { settings = (msg.payload || {}).settings || {}; paint(); }
+        if (msg.event === "sendToPropertyInspector" && msg.payload) {
+          names = msg.payload.actions || [];
+          note.textContent = msg.payload.error ? msg.payload.error : names.length ? "Pressed: it runs, as the Actions page's Run Now does." : "No actions yet: make some in OmniPulse (Settings > Streaming > the chatbot > Actions).";
+          paint();
+        }
+      } catch (e) { /* not for this page */ }
+    };
+  };
+  paint();
+</script>
+</body>
+</html>

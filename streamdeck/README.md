@@ -1,7 +1,8 @@
 # OmniPulse for Stream Deck
 
 Keys for OmniPulse: Play, Pause, Play / Pause, Next, Previous, Like, Favourite, Shuffle, Repeat,
-Clear requests, Clear queue, Sets & podcasts (lets them in or keeps them out of the queue and autoplay), and
+Clear requests, Clear queue, Sets & podcasts (lets them in or keeps them out of the queue and autoplay),
+Chatbot Action (runs one of the chatbot's actions, picked from OmniPulse's own list in its settings), and
 Good transition / Bad transition (Seamless Mix feedback: the last transition rated; Bad means there's a better
 way to mix that pair, not that it was a bad transition as such; logged with how it was
 mixed in `%APPDATA%\OmniPulse\state\mix-feedback.jsonl`; nothing is logged without a press).

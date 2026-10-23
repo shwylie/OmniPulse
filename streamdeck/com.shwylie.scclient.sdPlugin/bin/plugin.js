@@ -3,6 +3,7 @@
 // to %APPDATA%\OmniPulse\remote.json while remote control is on, so there's nothing to set up here.
 // Toggle keys (play/pause, like, favourite, shuffle, repeat, sets & podcasts) show the app's state.
 // The Play / Pause keys show the cover of what's playing (each key's settings: ui/art.html).
+// A Chatbot Action key runs one of the chatbot's actions (its settings: ui/chatbot.html), its name on it.
 
 import streamDeck from "@elgato/streamdeck";
 import { readFile } from "node:fs/promises";
@@ -120,10 +121,17 @@ function paint(state) {
   }
 }
 
+// A Chatbot Action key's name on it (unless you've given it a title of your own)
+function chatbotTitle(action) {
+  if (nameOf(action) !== "chatbot" || !action.isKey()) return;
+  action.setTitle((settings.get(action.id) || {}).action || "").catch(() => {});
+}
+
 streamDeck.actions.onWillAppear((ev) => {
   visible.set(ev.action.id, ev.action);
   settings.set(ev.action.id, ev.payload.settings || {});
   shown.delete(ev.action.id);
+  chatbotTitle(ev.action);
   if (last) paint(last);
 });
 streamDeck.actions.onWillDisappear((ev) => {
@@ -132,12 +140,29 @@ streamDeck.actions.onWillDisappear((ev) => {
 });
 streamDeck.settings.onDidReceiveSettings((ev) => {
   settings.set(ev.action.id, ev.payload.settings || {});
+  chatbotTitle(ev.action);
   if (last) paint(last);
+});
+
+// a Chatbot Action key's settings page asking for the chatbot's actions: OmniPulse's own list
+streamDeck.ui.onSendToPlugin(async (ev) => {
+  if (!ev.payload || ev.payload.ask !== "actions") return;
+  let answer;
+  try { answer = { actions: (await call(null)).chatbotActions || [] }; } catch (e) { answer = { actions: [], error: e.message }; }
+  if (streamDeck.ui.current) await streamDeck.ui.current.sendToPropertyInspector(answer).catch(() => {});
 });
 
 streamDeck.actions.onKeyDown(async (ev) => {
   const name = nameOf(ev.action);
   try {
+    // (a Chatbot Action key: the action its settings name)
+    if (name === "chatbot") {
+      const which = (settings.get(ev.action.id) || {}).action;
+      if (!which) throw new Error("no action picked in its settings");
+      paint(await call("chatbot:" + which));
+      await ev.action.showOk();
+      return;
+    }
     paint(await call(name));
     if (!STATES[name]) await ev.action.showOk();   // toggles show their new state instead
   } catch (e) {

@@ -1,9 +1,9 @@
 {
   "$schema": "https://schemas.elgato.com/streamdeck/plugins/manifest.json",
   "Name": "OmniPulse",
-  "Version": "1.1.0.0",
+  "Version": "1.2.0.0",
   "Author": "SHWYLiE",
-  "Description": "Playback controls for OmniPulse: play, pause, skip, like, favourite, shuffle, repeat, clearing the queue or chat requests, and rating Seamless Mix transitions.",
+  "Description": "Playback controls for OmniPulse: play, pause, skip, like, favourite, shuffle, repeat, clearing the queue or chat requests, rating Seamless Mix transitions, and running your chatbot's actions.",
   "UUID": "com.shwylie.scclient",
   "Icon": "imgs/plugin",
   "Category": "OmniPulse",
@@ -253,6 +253,24 @@
           "Image": "imgs/actions/sets-on"
         }
       ],
+      "UserTitleEnabled": true
+    },
+    {
+      "Name": "Chatbot Action",
+      "UUID": "com.shwylie.scclient.chatbot",
+      "Icon": "imgs/actions/chatbot",
+      "Tooltip": "Runs one of your OmniPulse chatbot's actions, as Run Now does",
+      "Controllers": [
+        "Keypad"
+      ],
+      "States": [
+        {
+          "Image": "imgs/actions/chatbot-key",
+          "TitleAlignment": "bottom",
+          "FontSize": 11
+        }
+      ],
+      "PropertyInspectorPath": "ui/chatbot.html",
       "UserTitleEnabled": true
     }
   ]

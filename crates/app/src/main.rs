@@ -5768,6 +5768,8 @@ fn remote_state(a: &App) -> serde_json::Value {
         "favourite": t.is_some_and(|t| marks::favourites(&a.web.favourites).iter().any(|x| x.key == t.key)),
         "setsAllowed": a.web.prefs["queueSets"].as_bool().unwrap_or(false),
         "requests": a.queue.pending_requests().count(),
+        // (the chatbot's actions, by name: a Chatbot Action key's settings list them)
+        "chatbotActions": a.web.prefs["pluginSettings"][BOT]["actions"].as_array().map(|l| l.iter().filter_map(|x| x["name"].as_str().map(String::from)).collect::<Vec<_>>()).unwrap_or_default(),
     })
 }
 
@@ -5811,6 +5813,17 @@ fn remote_action(shared: &Shared, id: u64, action: &str) {
         }
         "state" => {}
         "mix-good" | "mix-bad" => if let Err(e) = mix_feedback(shared, action == "mix-good") { note = Some(e) },
+        // (a Chatbot Action key: that action run, as the Actions page's Run Now runs it)
+        a if a.starts_with("chatbot:") => match plugrun::get(BOT) {
+            Some(p) => {
+                let (name, rt, weak) = (a[8..].to_string(), shared.borrow().rt.clone(), shared.borrow().ui.clone());
+                rt.spawn(async move {
+                    let r = p.call("runAction", vec![serde_json::json!(name)]).await;
+                    let _ = weak.upgrade_in_event_loop(move |ui| ui.set_status(match r { Ok(v) => v.as_str().map(String::from).unwrap_or_else(|| "Done.".into()), Err(e) => e }.into()));
+                });
+            }
+            None => note = Some("The chatbot isn't on: switch it on in OmniPulse (Settings > Plugins)."),
+        },
         _ => note = Some("That button isn't in the native app yet."),
     }
     let s = shared.clone();
