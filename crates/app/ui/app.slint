@@ -1635,6 +1635,38 @@ component ShelfView inherits VerticalLayout {
     }
 }
 
+/// The setting a search found (its name), lit where it shows; and where it is in the window once it's drawn
+/// (n: told again each time), so its page scrolls to it
+export global Hi {
+    in-out property <string> label;
+    in-out property <length> y;
+    in-out property <int> n;
+}
+
+/// (the setting a search found: a soft glow round it, fading out after; where it is, told once it's drawn)
+component HiGlow inherits Rectangle {
+    in property <bool> lit;
+    in property <length> r: 12px;
+    property <bool> told;
+    property <float> o: root.lit ? 1 : 0;
+    animate o { duration: Theme.motion ? 700ms : 0ms; }
+    border-radius: root.r;
+    border-width: 2px;
+    border-color: Theme.accent.with-alpha(0.8 * root.o);
+    background: Theme.accent.with-alpha(0.13 * root.o);
+    Timer { interval: 150ms; running: root.lit && !root.told; triggered => { root.told = true; Hi.y = root.absolute-position.y; Hi.n += 1; } }
+    changed lit => { if (!self.lit) { self.told = false; } }
+}
+
+/// A hand-made setting's name: lit when a search found it
+component HiTitle inherits Rectangle {
+    in property <string> text;
+    height: ht.preferred-height;
+    min-width: ht.preferred-width;
+    HiGlow { x: -12px; y: -7px; width: parent.width + 24px; height: parent.height + 14px; lit: Hi.label != "" && Hi.label == root.text; r: 10px; }
+    ht := Text { width: parent.width; text: root.text; color: Hi.label == root.text ? Theme.accent : Theme.text; font-weight: 700; animate color { duration: 300ms; } }
+}
+
 component Card inherits Rectangle {
     in property <brush> fill: Theme.panel;
     border-radius: Theme.card-radius;
@@ -1696,6 +1728,7 @@ component SetRowView inherits Card {
         if root.r.button != "": Pill { label: root.r.button + " ›"; y: (parent.height - self.height) / 2; clicked => { root.more(root.r.key); } }
         if root.r.button == "": Toggle { checked: root.r.on; y: (parent.height - self.height) / 2; toggled => { root.toggle(root.r.key); } }
     }
+    HiGlow { lit: Hi.label != "" && Hi.label == root.r.label; r: Theme.card-radius; }
 }
 
 // ---------- the chatbot's own page (Settings > Streaming > OmniPulse Chatbot) ----------
@@ -3961,6 +3994,9 @@ export component AppWindow inherits Window {
                     }
                     // Settings
                     if root.page-kind == "settings": ScrollView {
+                        // (a setting found by a search: scrolled to, a little under the top)
+                        property <int> hin: Hi.n;
+                        changed hin => { self.content-y = max(min(0px, self.content-y - (Hi.y - self.absolute-position.y - 120px)), self.visible-height - self.content-height); }
                         vertical-stretch: 1;
                         // (another page of Settings: from its top)
                         property <string> cat: root.set-cat;
@@ -4007,7 +4043,7 @@ export component AppWindow inherits Window {
                                             horizontal-stretch: 1;
                                             alignment: center;
                                             spacing: 2px;
-                                            Text { text: "Updates"; color: Theme.text; font-weight: 700; }
+                                            HiTitle { text: "Updates"; }
                                             Text { text: root.update-note; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
                                         }
                                         Pill { label: root.update-label; on: root.update-label == "Update"; y: (parent.height - self.height) / 2; clicked => { root.update-act(); } }
@@ -4032,7 +4068,7 @@ export component AppWindow inherits Window {
                                         HorizontalLayout {
                                             alignment: start;
                                             spacing: 8px;
-                                            Text { text: "Theme"; color: Theme.text; font-weight: 700; }
+                                            HiTitle { text: "Theme"; }
                                             Text { text: root.theme-step-name; color: Theme.muted; font-weight: 600; }
                                         }
                                         // steps from light to dark: it stops at each, never in between
@@ -4041,7 +4077,7 @@ export component AppWindow inherits Window {
                                         HorizontalLayout {
                                             alignment: start;
                                             spacing: 8px;
-                                            Text { text: "Tint"; color: Theme.text; font-weight: 700; }
+                                            HiTitle { text: "Tint"; }
                                             Rectangle { width: 12px; height: 12px; y: 3px; border-radius: 6px; background: root.tint-preview; border-width: 1px; border-color: Theme.line; }
                                         }
                                         Text { text: "A colour through the whole theme. Accent and album art colours still show on top."; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
@@ -4059,13 +4095,13 @@ export component AppWindow inherits Window {
                                         HorizontalLayout {
                                             alignment: start;
                                             spacing: 8px;
-                                            Text { text: "Tint Strength"; color: Theme.text; font-weight: 700; }
+                                            HiTitle { text: "Tint Strength"; }
                                             Text { text: root.tint-strength-name; color: Theme.muted; font-weight: 600; }
                                         }
                                         Steps { names: ["Off", "Subtle", "Medium", "Strong"]; value: round(root.tint-strength); changed(k) => { root.tint-strength = k; root.look-changed("tintStrength", k); } }
                                         Rectangle { height: 8px; }
                                         // (both chosen here, unless the album art's colours are on: then greyed out, as the web app's)
-                                        Text { text: "Accent"; color: Theme.text; font-weight: 700; }
+                                        HiTitle { text: "Accent"; }
                                         HorizontalLayout {
                                             alignment: start;
                                             spacing: 10px;
@@ -4113,13 +4149,13 @@ export component AppWindow inherits Window {
                                         HorizontalLayout {
                                             VerticalLayout {
                                                 horizontal-stretch: 1;
-                                                Text { text: "Colours from Album Art"; color: Theme.text; font-weight: 700; }
+                                                HiTitle { text: "Colours from Album Art"; }
                                                 Text { text: "Both colours come from the cover that's playing."; color: Theme.muted; font-size: 12px; }
                                             }
                                             Toggle { checked <=> root.art-accent; y: (parent.height - self.height) / 2; toggled => { root.art-accent-changed(self.checked); } }
                                         }
                                         Rectangle { height: 8px; }
-                                        Text { text: "Player Style"; color: Theme.text; font-weight: 700; }
+                                        HiTitle { text: "Player Style"; }
                                         Text {
                                             text: root.player-style == "bar" ? "Everything on one full-width bar: what's playing on the left, the controls in the middle. Needs the window at least 1000 px wide."
                                                 : root.player-style == "float" ? "One bar too, floating above the bottom of the window with rounded ends. Needs the window at least 1040 px wide."
@@ -4133,7 +4169,7 @@ export component AppWindow inherits Window {
                                             Dropdown { options: ["Tab", "Classic Bar", "Floating", "Minimal"]; current: root.player-style == "bar" ? 1 : root.player-style == "float" ? 2 : root.player-style == "minimal" ? 3 : 0; picked(k) => { root.player-style-picked(["tab", "bar", "float", "minimal"][k]); } }
                                         }
                                         Rectangle { height: 8px; }
-                                        Text { text: "Title Bar Colour"; color: Theme.text; font-weight: 700; }
+                                        HiTitle { text: "Title Bar Colour"; }
                                         Text {
                                             text: root.player-style == "minimal" ? "The Minimal player style keeps the title bar in the panel colour."
                                                 : root.title-colour == "plain" ? "The panel's colour, the same whatever's playing."
@@ -4150,7 +4186,7 @@ export component AppWindow inherits Window {
                                             spacing: 8px;
                                             VerticalLayout {
                                                 horizontal-stretch: 1;
-                                                Text { text: "Track Info Tab"; color: Theme.text; font-weight: 700; }
+                                                HiTitle { text: "Track Info Tab"; }
                                                 Text { text: "Which end of the player bar the tab sits at."; color: Theme.muted; font-size: 12px; }
                                             }
                                             Chip { label: "Left"; on: !root.tab-right; y: (parent.height - self.height) / 2; clicked => { root.tab-align-picked("left"); } }
@@ -4168,7 +4204,7 @@ export component AppWindow inherits Window {
                                             horizontal-stretch: 1;
                                             alignment: center;
                                             spacing: 2px;
-                                            Text { text: "List Density"; color: Theme.text; font-weight: 700; }
+                                            HiTitle { text: "List Density"; }
                                             Text { text: "How tightly tracks are listed. Compact fits more on screen."; color: Theme.muted; font-size: 12px; }
                                         }
                                         Chip { label: "Comfortable"; on: !root.compact-rows; y: (parent.height - self.height) / 2; clicked => { root.compact-rows = false; root.density-changed(false); } }
@@ -4188,7 +4224,7 @@ export component AppWindow inherits Window {
                                                 horizontal-stretch: 1;
                                                 alignment: center;
                                                 spacing: 2px;
-                                                Text { text: "Visualiser"; color: Theme.text; font-weight: 700; }
+                                                HiTitle { text: "Visualiser"; }
                                                 Text { text: "The music as it plays: Bars, Mirror (from the middle), Peaks (bars with their tops held), Blocks (an LED meter), Wave (a smooth line), Centre (the bass in the middle), a Glow, or a Ring (each frequency standing out round the cover). It only runs while it's on screen and something's playing."; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
                                             }
                                             Dropdown {
@@ -4234,7 +4270,7 @@ export component AppWindow inherits Window {
                                             horizontal-stretch: 1;
                                             alignment: center;
                                             spacing: 2px;
-                                            Text { text: "Display Name"; color: Theme.text; font-weight: 700; }
+                                            HiTitle { text: "Display Name"; }
                                             Text { text: "Shown in the title bar and taskbar."; color: Theme.muted; font-size: 12px; }
                                         }
                                         Rectangle {
@@ -4259,7 +4295,7 @@ export component AppWindow inherits Window {
                                             horizontal-stretch: 1;
                                             alignment: center;
                                             spacing: 2px;
-                                            Text { text: "Minimize to Tray"; color: Theme.text; font-weight: 700; }
+                                            HiTitle { text: "Minimize to Tray"; }
                                             Text { text: "Minimizing hides the window to the tray; music keeps playing. Open it again, or quit, from the tray's menu. The X always quits."; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
                                         }
                                         Toggle { checked <=> root.close-to-tray; y: (parent.height - self.height) / 2; toggled => { root.close-to-tray-changed(self.checked); } }
@@ -4275,7 +4311,7 @@ export component AppWindow inherits Window {
                                             horizontal-stretch: 1;
                                             alignment: center;
                                             spacing: 2px;
-                                            Text { text: "Taskbar Widget"; color: Theme.text; font-weight: 700; }
+                                            HiTitle { text: "Taskbar Widget"; }
                                             Text { text: "What's playing, always on show in the taskbar by the clock, with its controls. Hidden while a game or video is full screen, or the taskbar is hidden."; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
                                         }
                                         Toggle { checked <=> root.taskbar-widget; y: (parent.height - self.height) / 2; toggled => { root.app-pref("taskbarWidget", self.checked); } }
@@ -4313,7 +4349,7 @@ export component AppWindow inherits Window {
                                             VerticalLayout {
                                                 horizontal-stretch: 1;
                                                 alignment: center;
-                                                Text { text: "Visualiser"; color: Theme.text; font-weight: 700; }
+                                                HiTitle { text: "Visualiser"; }
                                                 Text { text: "The visualiser's style (above) in the widget, in a little space of its own beside the song's name. Ring is shown as Centre there."; color: Theme.muted; font-size: 12px; wrap: word-wrap; min-height: self.preferred-height; }
                                             }
                                             Toggle { checked <=> root.widget-viz; y: (parent.height - self.height) / 2; toggled => { root.app-pref("widgetViz", self.checked); } }
@@ -4330,7 +4366,7 @@ export component AppWindow inherits Window {
                                             horizontal-stretch: 1;
                                             alignment: center;
                                             spacing: 2px;
-                                            Text { text: "Hardware Acceleration"; color: Theme.text; font-weight: 700; }
+                                            HiTitle { text: "Hardware Acceleration"; }
                                             Text { text: "Draws the app with your graphics card: smoother on big screens, about 100 MB more memory. Turn off if you see glitches. Takes effect the next time OmniPulse starts."; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
                                         }
                                         Toggle { checked <=> root.gpu-on; y: (parent.height - self.height) / 2; toggled => { root.app-pref("nativeGpu", self.checked); } }
@@ -4345,7 +4381,7 @@ export component AppWindow inherits Window {
                                             horizontal-stretch: 1;
                                             alignment: center;
                                             spacing: 2px;
-                                            Text { text: "Animations"; color: Theme.text; font-weight: 700; }
+                                            HiTitle { text: "Animations"; }
                                             Text { text: "Fades and motion."; color: Theme.muted; font-size: 12px; }
                                         }
                                         Toggle { checked <=> root.anim-on; y: (parent.height - self.height) / 2; toggled => { root.anim-changed(self.checked); } }
@@ -4360,7 +4396,7 @@ export component AppWindow inherits Window {
                                             horizontal-stretch: 1;
                                             alignment: center;
                                             spacing: 2px;
-                                            Text { text: "Rounded Corners"; color: Theme.text; font-weight: 700; }
+                                            HiTitle { text: "Rounded Corners"; }
                                             Text { text: "On the sidebar, the page and the queue. Off: square."; color: Theme.muted; font-size: 12px; }
                                         }
                                         Toggle { checked <=> root.rounded; y: (parent.height - self.height) / 2; toggled => { root.rounded-changed(self.checked); } }
@@ -4376,7 +4412,7 @@ export component AppWindow inherits Window {
                                             horizontal-stretch: 1;
                                             alignment: center;
                                             spacing: 2px;
-                                            Text { text: "Back Up & Restore"; color: Theme.text; font-weight: 700; }
+                                            HiTitle { text: "Back Up & Restore"; }
                                             Text { text: "Your settings, keys, favourites, playlists, stats and alerts, in one .zip. Sign-ins aren't in it."; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
                                         }
                                         Pill { label: "Back up"; y: (parent.height - self.height) / 2; clicked => { root.backup-make(); } }
@@ -4457,7 +4493,7 @@ export component AppWindow inherits Window {
                                     VerticalLayout {
                                         padding: 16px;
                                         spacing: 10px;
-                                        Text { text: "Music Folders"; color: Theme.text; font-weight: 700; }
+                                        HiTitle { text: "Music Folders"; }
                                         Text { text: root.folders-note; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
                                         for f[i] in root.folders: HorizontalLayout {
                                             spacing: 10px;
@@ -4486,7 +4522,7 @@ export component AppWindow inherits Window {
                                             VerticalLayout {
                                                 horizontal-stretch: 1;
                                                 alignment: center;
-                                                Text { text: "Match Loudness"; color: Theme.text; font-weight: 700; }
+                                                HiTitle { text: "Match Loudness"; }
                                                 Text { text: root.loud-on == "off" ? "Tracks play as loud as they were made." : "Every track at the same loudness."; color: Theme.muted; font-size: 12px; }
                                             }
                                             Dropdown {
@@ -4501,7 +4537,7 @@ export component AppWindow inherits Window {
                                             VerticalLayout {
                                                 horizontal-stretch: 1;
                                                 alignment: center;
-                                                Text { text: "Fade Between Tracks"; color: Theme.text; font-weight: 700; }
+                                                HiTitle { text: "Fade Between Tracks"; }
                                                 Text { text: "Each track fades out where its sound ends, and the next fades in."; color: Theme.muted; font-size: 12px; }
                                             }
                                             Toggle { checked <=> root.fade-on; y: (parent.height - self.height) / 2; toggled => { root.fade-on-changed(self.checked); } }
@@ -4518,7 +4554,7 @@ export component AppWindow inherits Window {
                                             VerticalLayout {
                                                 horizontal-stretch: 1;
                                                 alignment: center;
-                                                Text { text: "Skip Silences"; color: Theme.text; font-weight: 700; }
+                                                HiTitle { text: "Skip Silences"; }
                                                 Text { text: "Jumps over long silences, and moves on when the rest is silent."; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
                                             }
                                             Dropdown { options: ["Off", "After 5 s", "After 8 s", "After 15 s", "After 30 s"]; current: root.skip-silence == 0 ? 0 : root.skip-silence <= 5 ? 1 : root.skip-silence <= 8 ? 2 : root.skip-silence <= 15 ? 3 : 4; y: (parent.height - self.height) / 2; picked(k) => { root.skip-pick([0, 5, 8, 15, 30][k]); } }
@@ -4528,7 +4564,7 @@ export component AppWindow inherits Window {
                                             VerticalLayout {
                                                 horizontal-stretch: 1;
                                                 alignment: center;
-                                                Text { text: "Equalizer"; color: Theme.text; font-weight: 700; }
+                                                HiTitle { text: "Equalizer"; }
                                                 Text { text: "Ten bands."; color: Theme.muted; font-size: 12px; }
                                             }
                                             Toggle { checked <=> root.eq-on; y: (parent.height - self.height) / 2; toggled => { root.eq-on-changed(self.checked); } }
@@ -4795,6 +4831,8 @@ export component AppWindow inherits Window {
                             try-it(t) => { root.bot-try(t); }
                         }
                         if !root.bot-page: ScrollView {
+                          property <int> hin: Hi.n;
+                          changed hin => { self.content-y = max(min(0px, self.content-y - (Hi.y - self.absolute-position.y - 120px)), self.visible-height - self.content-height); }
                           vertical-stretch: 1;
                           VerticalLayout {
                           spacing: 12px;
@@ -4808,6 +4846,7 @@ export component AppWindow inherits Window {
                            height: fcol.preferred-height;
                            // (changed, not saved yet: a ring round it, breathing)
                            if f.changed: Pulse { x: -10px; y: -6px; width: parent.width + 20px; height: parent.height + 12px; r: 10px; }
+                           HiGlow { x: -10px; y: -6px; width: parent.width + 20px; height: parent.height + 12px; r: 10px; lit: Hi.label != "" && Hi.label == f.label; }
                            fcol := VerticalLayout {
                            spacing: 6px;
                            // instructions: just text

@@ -6446,7 +6446,7 @@ fn settings_close(shared: &Shared) {
 struct SetFound { path: String, label: String, note: String, cat: String, panel: String, key: String, toggle: bool }
 
 /// The settings drawn by hand (not from SET_ROWS): their category, name and description
-const SET_HAND: [(&str, &str, &str); 23] = [
+const SET_HAND: [(&str, &str, &str); 24] = [
     ("", "Updates", "Checks for a newer version a little after it starts, and installs it."),
     ("App & Look", "Theme", "Light to dark."),
     ("App & Look", "Tint", "A colour through the theme."),
@@ -6454,6 +6454,7 @@ const SET_HAND: [(&str, &str, &str); 23] = [
     ("App & Look", "Accent", "The colour of buttons, the progress bar and what's playing."),
     ("App & Look", "Colours from Album Art", "Both colours come from the cover that's playing."),
     ("App & Look", "Player Style", "Tab, Classic Bar, Floating or Minimal."),
+    ("App & Look", "Title Bar Colour", "The title bar like the player bar, subtle, or plain."),
     ("App & Look", "Track Info Tab", "Which end of the player bar the tab sits at."),
     ("App & Look", "List Density", "How tightly tracks are listed. Compact fits more on screen."),
     ("App & Look", "Visualiser", "The music as it plays: Bars, Mirror, Peaks, Blocks, Wave, Centre or a Glow, on Now Playing, in the player, or full screen."),
@@ -6536,6 +6537,13 @@ fn set_hit(shared: &Shared, i: usize) {
     ui.set_search_text("".into());
     ui.set_set_cat(f.cat.clone().into());
     if !f.panel.is_empty() { panel_open(shared, &f.panel); }
+    // (what was found: lit where it shows (its page scrolls to it), for a few seconds)
+    let label = f.label.clone();
+    ui.global::<Hi>().set_label(label.clone().into());
+    let weak = ui.as_weak();
+    slint::Timer::single_shot(std::time::Duration::from_millis(4500), move || {
+        if let Some(ui) = weak.upgrade() { if ui.global::<Hi>().get_label() == label.as_str() { ui.global::<Hi>().set_label("".into()); } }
+    });
 }
 
 fn panel_open(shared: &Shared, name: &str) {
@@ -12619,6 +12627,9 @@ fn main() -> Result<(), slint::PlatformError> {
                 }
                 w if w.starts_with("panel:") => { if let Some(sh) = SHARED.with(|x| x.borrow().clone()) { panel_open(&sh, &w[6..]); } }
                 w if w.starts_with("cat:") => { ui.set_set_cat(w[4..].into()); }
+                // (Settings' search typed, and its n-th result picked)
+                w if w.starts_with("setsearch:") => { if let Some(sh) = SHARED.with(|x| x.borrow().clone()) { settings_search(&sh, &w[10..]); } }
+                w if w.starts_with("sethit:") => { if let Some(sh) = SHARED.with(|x| x.borrow().clone()) { set_hit(&sh, w[7..].parse().unwrap_or(0)); } }
                 w if w.starts_with("scroll:") => { ui.window().dispatch_event(slint::platform::WindowEvent::PointerScrolled { position: slint::LogicalPosition::new(560.0, 400.0), delta_x: 0.0, delta_y: -(w[7..].parse::<f32>().unwrap_or(0.0)) }); }
                 w if w.starts_with("size:") => {
                     let v: Vec<f32> = w[5..].split(':').filter_map(|x| x.parse().ok()).collect();
