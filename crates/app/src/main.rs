@@ -6235,6 +6235,7 @@ fn bot_paint(shared: &Shared) {
     ui.set_bot_steps(model(botpage::steps(&cur).into_iter().map(|(id, title, note, done, optional)| BotStep { id: id.into(), title: title.into(), note: note.into(), state: botpage::step_state(&cur, id, done, &now).into(), optional }).collect()));
     let log: Vec<BotLine> = st["recent"].as_array().into_iter().flatten().take(8).map(|l| BotLine { who: l["who"].as_str().unwrap_or("").into(), heard: l["heard"].as_str().unwrap_or("").into(), did: l["did"].as_str().unwrap_or("").into(), platform: l["platform"].as_str().unwrap_or("twitch").into() }).collect();
     ui.set_bot_log(model(log));
+    ui.set_bot_examples(model(botpage::examples(&cur).into_iter().map(slint::SharedString::from).collect()));
     ui.set_bot_tried(model(BOT_TRIED.with(|t| t.borrow().iter().map(|(w, x)| BotLine { who: w.as_str().into(), heard: Default::default(), did: x.as_str().into(), platform: "twitch".into() }).collect())));
     // (a sheet's and the step's lines: drawn again only when they've changed, so what's being typed stays put)
     let sheet = BOT_SHEET.with(|b| b.borrow().clone());

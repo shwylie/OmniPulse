@@ -184,6 +184,24 @@ pub fn card(cur: &Map<String, Value>, st: &Value, running: bool) -> (String, Str
     (name, sub, stats)
 }
 
+/// Some to try in its test chat, from what it answers: a request, then the actions' own commands, then points
+pub fn examples(cur: &Map<String, Value>) -> Vec<String> {
+    let mut out = Vec::new();
+    if on(cur, "requests", true) {
+        let sr = s(cur, "srCommands").split(',').map(|x| x.trim()).find(|x| !x.is_empty()).unwrap_or("!sr").to_string();
+        out.push(format!("{sr} take on me"));
+    }
+    let actions = match cur.get("actions") { Some(Value::String(t)) => serde_json::from_str::<Value>(t).unwrap_or(Value::Null), Some(v) => v.clone(), None => Value::Null };
+    for a in actions.as_array().into_iter().flatten() {
+        if out.len() >= 3 { break; }
+        if a["on"] == false || a["trigger"]["type"] != "command" { continue; }
+        if let Some(c) = a["trigger"]["command"].as_str().map(str::trim).filter(|c| c.starts_with('!') && !out.iter().any(|x| x == c)) { out.push(c.to_string()); }
+    }
+    if out.len() < 3 && on(cur, "pointsOn", false) { out.push("!points".into()); }
+    if out.len() < 3 && on(cur, "requests", true) { out.push("!song".into()); }
+    out
+}
+
 /// A page key as the settings have it (a feature's switch: its setting's own name)
 pub fn key_of(k: &str) -> &str {
     match k { "feat:requests" => "requests", "feat:alerts" => "alerts", "feat:points" => "pointsOn", x => x }
@@ -234,6 +252,12 @@ mod tests {
         let edit = m(json!({ "login": "", "requests": false, "token": "" }));
         let cur = current(&saved, &edit, &orig);
         assert_eq!((cur["login"].as_str(), cur["requests"].as_bool(), cur["token"].as_str()), (Some("Me"), Some(false), Some("new")));
+    }
+
+    #[test]
+    fn examples_come_from_what_it_answers() {
+        let cur = m(json!({ "requests": true, "srCommands": "!request, !sr", "actions": [{ "on": true, "trigger": { "type": "command", "command": "!hello" } }, { "on": false, "trigger": { "type": "command", "command": "!off" } }] }));
+        assert_eq!(examples(&cur), vec!["!request take on me", "!hello", "!song"]);
     }
 
     #[test]
