@@ -130,6 +130,7 @@ global Icons {
     out property <string> lastfm: "M10.584 17.21l-.88-2.392s-1.43 1.594-3.573 1.594c-1.897 0-3.244-1.649-3.244-4.288 0-3.382 1.704-4.591 3.381-4.591 2.42 0 3.189 1.567 3.849 3.574l.88 2.749c.88 2.666 2.529 4.81 7.285 4.81 3.409 0 5.718-1.044 5.718-3.793 0-2.227-1.265-3.381-3.63-3.931l-1.758-.385c-1.21-.275-1.567-.77-1.567-1.595 0-.934.742-1.484 1.952-1.484 1.32 0 2.034.495 2.144 1.677l2.749-.33c-.22-2.474-1.924-3.492-4.729-3.492-2.474 0-4.893.935-4.893 3.932 0 1.87.907 3.051 3.189 3.601l1.869.44c1.402.33 1.869.907 1.869 1.704 0 1.017-.99 1.43-2.86 1.43-2.776 0-3.93-1.457-4.59-3.464l-.907-2.75c-1.155-3.573-2.997-4.893-6.653-4.893C2.144 5.333 0 7.89 0 12.233c0 4.18 2.144 6.434 5.993 6.434 3.106 0 4.591-1.457 4.591-1.457z";
     out property <string> download: "M5 20h14v-2H5v2zM19 9h-4V3H9v6H5l7 7 7-7z";
     out property <string> folder-add: "M20 6h-8l-2-2H4c-1.11 0-1.99.89-1.99 2L2 18c0 1.11.89 2 2 2h16c1.11 0 2-.89 2-2V8c0-1.11-.89-2-2-2zm-1 8h-3v3h-2v-3h-3v-2h3V9h2v3h3v2z";
+    out property <string> shield: "M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4zm0 10.99h7c-.53 4.12-3.28 7.79-7 8.94V12H5V6.3l7-3.11v8.8z";
     out property <string> robot: "M20 9V7c0-1.1-.9-2-2-2h-3c0-1.66-1.34-3-3-3S9 3.34 9 5H6c-1.1 0-2 .9-2 2v2c-1.66 0-3 1.34-3 3s1.34 3 3 3v4c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2v-4c1.66 0 3-1.34 3-3s-1.34-3-3-3zM7.5 11.5c0-.83.67-1.5 1.5-1.5s1.5.67 1.5 1.5S9.83 13 9 13s-1.5-.67-1.5-1.5zM16 17H8v-2h8v2zm-1-4c-.83 0-1.5-.67-1.5-1.5S14.17 10 15 10s1.5.67 1.5 1.5S15.83 13 15 13z";
     out property <string> send: "M2.01 21L23 12 2.01 3 2 10l15 2-15 2z";
     out property <string> bell: "M12 22c1.1 0 2-.9 2-2h-4c0 1.1.89 2 2 2zm6-6v-5c0-3.07-1.64-5.64-4.5-6.32V4c0-.83-.67-1.5-1.5-1.5s-1.5.67-1.5 1.5v.68C7.63 5.36 6 7.92 6 11v5l-2 2v1h16v-1l-2-2z";
@@ -1894,6 +1895,87 @@ component ChangeSketch inherits Rectangle {
     if root.skip > 0: Text { x: parent.width - self.width - 10px; y: 5px; text: "Silences over " + root.skip + " s skipped"; color: Theme.muted; font-size: 10px; }
 }
 
+/// Something that goes on stream (the Stream Widget, the Lyrics Widget): a tile with its light, its address (copied
+/// with a click), its settings, its switch
+component StreamTile inherits Rectangle {
+    in property <SetRow> r;
+    in property <string> addr;
+    in property <string> d;
+    callback toggle(string);
+    callback more(string);
+    callback copy(string);
+    height: 124px;
+    border-radius: 14px;
+    background: Theme.panel;
+    border-width: 1px;
+    border-color: root.r.on ? Theme.accent.with-alpha(0.6) : Theme.line;
+    HiGlow { lit: Hi.label != "" && Hi.label == root.r.label; r: 14px; }
+    VerticalLayout {
+        padding: 12px;
+        spacing: 5px;
+        HorizontalLayout {
+            spacing: 8px;
+            Glyph { d: root.d; width: 16px; height: 16px; y: (parent.height - self.height) / 2; fill: root.r.on ? Theme.accent : Theme.muted; }
+            Text { text: root.r.label; color: Theme.text; font-weight: 700; font-size: 13px; overflow: elide; horizontal-stretch: 1; }
+        }
+        Text { text: root.r.note; color: Theme.muted; font-size: 12px; overflow: elide; }
+        if root.r.on && root.addr != "": Text { text: root.addr; color: Theme.accent.mix(Theme.text, 0.55); font-size: 11px; font-family: "Consolas"; overflow: elide; }
+        Rectangle { vertical-stretch: 1; }
+        HorizontalLayout {
+            spacing: 2px;
+            Toggle { checked: root.r.on; y: (parent.height - self.height) / 2; toggled => { root.toggle(root.r.key); } }
+            Rectangle { horizontal-stretch: 1; }
+            if root.r.on && root.addr != "": IconButton { d: Icons.copy; size: 30px; tip: "Copy its address, for a Browser source in OBS"; clicked => { root.copy(root.addr); } }
+            if root.r.more: IconButton { d: Icons.gear; size: 30px; tip: root.r.label + ": its settings"; clicked => { root.more(root.r.key); } }
+        }
+    }
+}
+
+/// A plugin, as a tile: its mark, a light (on, running), what it does, its settings, its switch; or (Add a Plugin)
+/// a dashed tile to add one
+component PluginTile inherits Rectangle {
+    in property <SetRow> r;
+    callback toggle(string);
+    callback more(string);
+    property <bool> add: root.r.key == "plugAdd";
+    height: 146px;
+    border-radius: 14px;
+    background: pta.has-hover && root.add ? Theme.elevated : Theme.panel;
+    border-width: root.add ? 2px : 1px;
+    border-color: root.add ? Theme.accent.with-alpha(0.45) : root.r.on ? Theme.accent.with-alpha(0.6) : Theme.line;
+    HiGlow { lit: Hi.label != "" && Hi.label == root.r.label; r: 14px; }
+    pta := TouchArea { enabled: root.add; mouse-cursor: root.add ? MouseCursor.pointer : MouseCursor.default; clicked => { root.more(root.r.key); } }
+    VerticalLayout {
+        padding: 14px;
+        spacing: 5px;
+        HorizontalLayout {
+            spacing: 8px;
+            Rectangle {
+                width: 30px; height: 30px; border-radius: 9px;
+                background: root.add ? Theme.accent.with-alpha(0.15) : root.r.on ? Theme.accent.with-alpha(0.15) : Theme.elevated;
+                Glyph { d: root.add ? Icons.add : Icons.plugin; width: 18px; height: 18px; x: 6px; y: 6px; fill: root.add || root.r.on ? Theme.accent : Theme.muted; }
+            }
+            Text { text: root.r.label; color: Theme.text; font-weight: 700; font-size: 13px; overflow: elide; horizontal-stretch: 1; vertical-alignment: center; }
+            if !root.add: Rectangle { width: 7px; height: 7px; y: (parent.height - self.height) / 2; border-radius: 4px; background: root.r.on ? #4ad295 : #4a5060; }
+        }
+        Rectangle {
+            vertical-stretch: 1;
+            preferred-height: 0px;
+            min-height: 0px;
+            clip: true;
+            pnt := Text { width: parent.width; height: parent.height; text: root.r.note; color: Theme.muted; font-size: 12px; wrap: word-wrap; overflow: elide; vertical-alignment: top; }
+            pna := TouchArea { enabled: !root.add; }
+            TipSpot { tip: root.r.note; hover: pna.has-hover && !root.add; }
+        }
+        if !root.add: HorizontalLayout {
+            spacing: 2px;
+            Toggle { checked: root.r.on; y: (parent.height - self.height) / 2; toggled => { root.toggle(root.r.key); } }
+            Rectangle { horizontal-stretch: 1; }
+            if root.r.more: IconButton { d: Icons.gear; size: 30px; tip: root.r.label + ": its settings"; clicked => { root.more(root.r.key); } }
+        }
+    }
+}
+
 /// (a line between a group's rows)
 component GroupLine inherits Rectangle { height: 1px; background: Theme.line; }
 
@@ -2970,6 +3052,9 @@ export component AppWindow inherits Window {
     callback play-page();
     callback refresh();
     callback set-toggle(string);
+    // (Streaming's tiles: the widget's port, for their addresses; an address copied)
+    in property <int> widget-port: 7878;
+    callback copy-text(string);
     callback like-toggle();
     callback fav-toggle();
     callback devices-want();
@@ -4630,8 +4715,15 @@ export component AppWindow inherits Window {
                                 }
                             }
                             if root.set-cat == "Plugins" && root.set-query == "": VerticalLayout {
-                                spacing: 14px;
-                                for r[i] in root.set-rows-plugins: SetRowView { r: r; toggle(k) => { root.set-toggle(k); } more(k) => { root.set-more(k); } }
+                                spacing: 10px;
+                                Text { text: "Music sources and more, made by others (and some that come with OmniPulse). Each is walled off, and only reaches the sites it lists."; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
+                                // (two to a row)
+                                for k in ceil(root.set-rows-plugins.length / 2): HorizontalLayout {
+                                    spacing: 10px;
+                                    PluginTile { horizontal-stretch: 1; preferred-width: 0px; min-width: 0px; r: root.set-rows-plugins[k * 2]; toggle(x) => { root.set-toggle(x); } more(x) => { root.set-more(x); } }
+                                    if k * 2 + 1 < root.set-rows-plugins.length: PluginTile { horizontal-stretch: 1; preferred-width: 0px; min-width: 0px; r: root.set-rows-plugins[k * 2 + 1]; toggle(x) => { root.set-toggle(x); } more(x) => { root.set-more(x); } }
+                                    if k * 2 + 1 >= root.set-rows-plugins.length: Rectangle { horizontal-stretch: 1; preferred-width: 0px; min-width: 0px; }
+                                }
                             }
                             if root.set-cat == "Library" && root.set-query == "": VerticalLayout {
                                 spacing: 10px;
@@ -4824,9 +4916,86 @@ export component AppWindow inherits Window {
                                     }
                                 }
                             }
-                            if root.set-cat == "Streaming" && root.set-query == "": VerticalLayout {
-                                spacing: 14px;
-                                for r[i] in root.set-rows-streaming: SetRowView { r: r; toggle(k) => { root.set-toggle(k); } more(k) => { root.set-more(k); } }
+                            if root.set-cat == "Streaming" && root.set-query == "": stv := VerticalLayout {
+                                spacing: 10px;
+                                property <string> base: "http://127.0.0.1:" + root.widget-port;
+                                // ---- Streamer Mode: a banner of its own, red-edged while it's on ----
+                                VerticalLayout {
+                                for r in root.set-rows-streaming: VerticalLayout {
+                                    if r.key == "streamerMode": Rectangle {
+                                        height: smr.preferred-height;
+                                        border-radius: Theme.card-radius;
+                                        background: r.on ? #ff5c6c.with-alpha(0.08) : Theme.panel;
+                                        border-width: 1px;
+                                        border-color: r.on ? #ff5c6c.with-alpha(0.7) : Theme.line;
+                                        HiGlow { lit: Hi.label != "" && Hi.label == r.label; r: Theme.card-radius; }
+                                        smr := HorizontalLayout {
+                                            padding: 16px;
+                                            spacing: 12px;
+                                            Rectangle {
+                                                width: 38px; height: 38px; y: (parent.height - self.height) / 2; border-radius: 12px;
+                                                background: r.on ? #ff5c6c.with-alpha(0.18) : Theme.elevated;
+                                                Glyph { d: Icons.shield; width: 22px; height: 22px; x: 8px; y: 8px; fill: r.on ? #ff5c6c : Theme.muted; }
+                                            }
+                                            VerticalLayout {
+                                                horizontal-stretch: 1;
+                                                alignment: center;
+                                                spacing: 2px;
+                                                Text { text: r.on ? "Streamer Mode is on" : r.label; color: Theme.text; font-weight: 700; }
+                                                Text { text: r.note; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
+                                            }
+                                            Toggle { checked: r.on; y: (parent.height - self.height) / 2; toggled => { root.set-toggle(r.key); } }
+                                        }
+                                    }
+                                    if r.key == "streamSafe": VerticalLayout { padding-top: 10px; SetRowView { r: r; toggle(k) => { root.set-toggle(k); } more(k) => { root.set-more(k); } } }
+                                }
+                                }
+                                // ---- on stream: tiles ----
+                                SectionHead { text: "On Stream"; }
+                                HorizontalLayout {
+                                    spacing: 0px;
+                                    for r in root.set-rows-streaming: HorizontalLayout {
+                                        horizontal-stretch: (r.key == "widget" || r.key == "lyricsWidget") ? 1 : 0;
+                                        preferred-width: 0px;
+                                        min-width: 0px;
+                                        padding-right: r.key == "widget" ? 8px : 0px;
+                                        if r.key == "widget": StreamTile { horizontal-stretch: 1; r: r; d: Icons.broadcast; addr: stv.base + "/"; toggle(k) => { root.set-toggle(k); } more(k) => { root.set-more(k); } copy(a) => { root.copy-text(a); } }
+                                        if r.key == "lyricsWidget": StreamTile { horizontal-stretch: 1; r: r; d: Icons.lyrics; addr: stv.base + "/lyrics"; toggle(k) => { root.set-toggle(k); } more(k) => { root.set-more(k); } copy(a) => { root.copy-text(a); } }
+                                    }
+                                }
+                                // (OBS's docks, and the multichat: their addresses, copied with a click)
+                                Card {
+                                    HorizontalLayout {
+                                        padding: 14px;
+                                        padding-top: 10px;
+                                        padding-bottom: 10px;
+                                        spacing: 6px;
+                                        VerticalLayout {
+                                            horizontal-stretch: 1;
+                                            alignment: center;
+                                            spacing: 2px;
+                                            HiTitle { text: "OBS Docks and Multichat"; }
+                                            Text { text: "With the Stream Widget on: the chat dock, the activity feed, and chat on stream. Copy one's address for OBS."; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
+                                        }
+                                        IconButton { d: Icons.copy; size: 34px; tip: "Copy the chat dock's address (Docks > Custom Browser Docks)"; y: (parent.height - self.height) / 2; clicked => { root.copy-text(stv.base + "/dock/chat"); } }
+                                        IconButton { d: Icons.bell; size: 34px; tip: "Copy the activity feed dock's address"; y: (parent.height - self.height) / 2; clicked => { root.copy-text(stv.base + "/dock/activity"); } }
+                                        IconButton { d: Icons.lyrics; size: 34px; tip: "Copy the multichat's address (a Browser source, on stream)"; y: (parent.height - self.height) / 2; clicked => { root.copy-text(stv.base + "/chat"); } }
+                                    }
+                                }
+                                // ---- your chat ----
+                                SectionHead { text: "Your Chat"; }
+                                VerticalLayout {
+                                    for r in root.set-rows-streaming: VerticalLayout {
+                                        if r.key == "req" || (r.key != "streamerMode" && r.key != "streamSafe" && r.key != "widget" && r.key != "lyricsWidget" && r.key != "out2On" && r.key != "remoteOn"): VerticalLayout { padding-bottom: 10px; SetRowView { r: r; toggle(k) => { root.set-toggle(k); } more(k) => { root.set-more(k); } } }
+                                    }
+                                }
+                                // ---- your setup ----
+                                SectionHead { text: "Your Setup"; }
+                                VerticalLayout {
+                                    for r in root.set-rows-streaming: VerticalLayout {
+                                        if r.key == "out2On" || r.key == "remoteOn": VerticalLayout { padding-bottom: 10px; SetRowView { r: r; toggle(k) => { root.set-toggle(k); } more(k) => { root.set-more(k); } } }
+                                    }
+                                }
                             }
                             Rectangle { height: 96px; }
                             // (clear of the player's tab, laid over the page's foot: the last of it scrolls up past it)

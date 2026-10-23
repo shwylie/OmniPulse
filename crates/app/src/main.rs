@@ -6070,6 +6070,7 @@ fn paint_settings(a: &App) {
     ui.set_set_rows_library(rows("Library"));
     ui.set_set_rows_sound(rows("Sound"));
     ui.set_set_rows_plugins(rows("Plugins"));
+    ui.set_widget_port(a.web.prefs["widgetPort"].as_i64().filter(|p| (1024..65536).contains(p)).unwrap_or(7878) as i32);
     ui.set_set_rows_streaming(rows("Streaming"));
     // the closed categories (the web app's setting too: by their titles)
     let closed = |t: &str| a.web.prefs["setClosed"][t].as_bool() == Some(true);
@@ -11566,6 +11567,8 @@ fn main() -> Result<(), slint::PlatformError> {
     ui.on_bot_act(move |a| bot_act(&s, &a));
     let s = shared.clone();
     ui.on_bot_try(move |t| bot_try(&s, &t));
+    let s = shared.clone();
+    ui.on_copy_text(move |t| { if share::copy(&t).is_ok() { if let Some(ui) = s.borrow().ui.upgrade() { ui.set_status("Copied.".into()); } } });
     paint_settings(&shared.borrow());
     let s = shared.clone();
     ui.on_like_toggle(move || like_toggle(&s));
