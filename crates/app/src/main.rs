@@ -6056,7 +6056,8 @@ fn paint_settings(a: &App) {
                 let state = plugin_state(&a.web.prefs, m);
                 let home = if m.section.is_empty() { String::new() } else { format!("Its settings are in Settings > {}; off here, it's gone from there too. ", m.section) };
                 let note = format!("{}{}{home}{}", if m.description.is_empty() { String::new() } else { format!("{} ", m.description) }, if p.bundled { "Comes with OmniPulse. " } else { "" }, state);
-                let more = m.section.is_empty() && m.settings.as_array().is_some_and(|l| !l.is_empty());
+                // (its settings, from here too: a plugin with a page elsewhere (the chatbot's, in Streaming) goes there, once it's on)
+                let more = if m.section.is_empty() { m.settings.as_array().is_some_and(|l| !l.is_empty()) } else { plugin_on(&a.web.prefs, &m.id) };
                 list.push(SetRow { head: Default::default(), label: plugin_label(m).into(), note: note.into(), on: plugin_on(&a.web.prefs, &m.id), key: format!("plugOn_{}", m.id).into(), sub: false, more, button: Default::default() });
             }
             // (the plugins: adding one, and taking out the ones you've added; it stays at the top)
@@ -10738,6 +10739,7 @@ fn apply_look(shared: &Shared) {
     ui.set_art_accent(integrations::set(prefs, "artAccent"));
     ui.set_tab_right(prefs["tabAlign"].as_str() == Some("right"));
     ui.set_player_style(prefs["playerStyle"].as_str().filter(|s| matches!(*s, "bar" | "float" | "minimal")).unwrap_or("tab").into());
+    ui.set_title_colour(prefs["titleColour"].as_str().filter(|s| matches!(*s, "subtle" | "plain")).unwrap_or("match").into());
 }
 
 /// A Look setting changed here: kept (over the web app's), and shown at once
@@ -11085,6 +11087,8 @@ fn main() -> Result<(), slint::PlatformError> {
     let s = shared.clone();
     ui.on_player_style_picked(move |style| set_look_pref(&s, "playerStyle", serde_json::json!(style.as_str())));
     let s = shared.clone();
+    ui.on_title_colour_picked(move |c| set_look_pref(&s, "titleColour", serde_json::json!(c.as_str())));
+    let s = shared.clone();
     ui.on_tab_align_picked(move |side| set_look_pref(&s, "tabAlign", serde_json::json!(side.as_str())));
     let s = shared.clone();
     ui.on_plat_toggle(move |p| plat_toggle(&s, &p));
@@ -11222,7 +11226,13 @@ fn main() -> Result<(), slint::PlatformError> {
     flows_wire(&ui, &shared);
     let s = shared.clone();
     ui.on_set_more(move |key| {
-        if let Some(id) = key.strip_prefix("plugOn_").or_else(|| key.strip_prefix("plugRun_")) { return pf_open(&s, id); }
+        if let Some(id) = key.strip_prefix("plugOn_").or_else(|| key.strip_prefix("plugRun_")) {
+            // (its page where it lives: Settings > Streaming for the chatbot, so Back goes there)
+            if let Some(sec) = omnipulse_core::plugins::list().into_iter().find(|p| p.manifest.id == id).map(|p| p.manifest.section).filter(|x| !x.is_empty()) {
+                if let Some(ui) = s.borrow().ui.upgrade() { ui.set_set_cat(sec.into()); }
+            }
+            return pf_open(&s, id);
+        }
         if let Some(name) = panels::of_switch(&key) { panel_open(&s, name); }
     });
     let s = shared.clone();
@@ -12088,6 +12098,10 @@ fn main() -> Result<(), slint::PlatformError> {
                 let dir = std::env::var("OMNIPULSE_SELFTEST_BOTS").unwrap_or_default();
                 let (sb, miu): (&'static str, &'static str) = (Box::leak(format!("restore:{dir}/streamerbot-backup.zip").into_boxed_str()), Box::leak(format!("restore:{dir}/mixitup.miubackup").into_boxed_str()));
                 vec![(9, "settings"), (10, "cat_Streaming"), (11, "flows"), (12, sb), (13, "flowpick:3"), (15, miu), (16, "flowpick:30"), (18, "end")]
+            }
+            // (OMNIPULSE_SELFTEST_PLAN=steps: the steps OMNIPULSE_SELFTEST_STEPS gives, "secs=step;secs=step", any of the steps below)
+            else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("steps") {
+                std::env::var("OMNIPULSE_SELFTEST_STEPS").unwrap_or_default().split(';').filter_map(|x| x.split_once('=')).filter_map(|(t, w)| Some((t.trim().parse::<u64>().ok()?, &*Box::leak(w.trim().to_string().into_boxed_str())))).collect()
             }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("botset") { vec![(9, "settings"), (10, "titleset:plugin:chatbot"), (12, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("ring") { vec![(8, "vizprep"), (9, "library"), (11, "play"), (13, "now"), (15, "viz:ring"), (19, "sayacts"), (22, "vizfull"), (25, "end")] }

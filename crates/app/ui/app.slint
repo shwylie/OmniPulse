@@ -205,7 +205,7 @@ component IconButton inherits Rectangle {
     background: filled ? Theme.accent : (ta.has-hover ? Theme.elevated : transparent);
     Glyph { d: root.d; width: root.size * 0.55; height: root.size * 0.55; fill: filled ? Theme.on-accent : (ta.has-hover ? Theme.text : root.tint); }
     TipSpot { tip: root.tip; hover: ta.has-hover; }
-    ta := TouchArea { pointer-event(e) => { if (e.kind == PointerEventKind.down && e.button == PointerEventButton.right) { root.right-click(self.mouse-x, self.mouse-y); } } clicked => { Tips.on = false; root.clicked(); } }
+    ta := TouchArea { pointer-event(e) => { if (e.kind == PointerEventKind.down && e.button == PointerEventButton.right) { root.right-click(self.absolute-position.x + self.mouse-x, self.absolute-position.y + self.mouse-y); } } clicked => { Tips.on = false; root.clicked(); } }
 }
 
 component RoundButton inherits Rectangle {
@@ -243,7 +243,7 @@ component Pill inherits Rectangle {
         t := Text { text: root.label; color: Theme.text; font-size: 13px; font-weight: 600; vertical-alignment: center; }
     }
     TipSpot { tip: root.tip; hover: ta.has-hover; }
-    ta := TouchArea { pointer-event(e) => { if (e.kind == PointerEventKind.down && e.button == PointerEventButton.right) { root.right-click(self.mouse-x, self.mouse-y); } } clicked => { Tips.on = false; root.clicked(); } }
+    ta := TouchArea { pointer-event(e) => { if (e.kind == PointerEventKind.down && e.button == PointerEventButton.right) { root.right-click(self.absolute-position.x + self.mouse-x, self.absolute-position.y + self.mouse-y); } } clicked => { Tips.on = false; root.clicked(); } }
 }
 
 component Range inherits Rectangle {
@@ -523,11 +523,12 @@ component CtxMenu inherits Rectangle {
     property <int> from: -1;
     property <length> px;
     property <length> py;
+    /// (x, y: where it was right-clicked, in the window: the menu opens there, wherever this sits)
     public function open(x: length, y: length) {
         if (!root.enabled) { return; }
         root.sub = 0;
-        root.px = x;
-        root.py = y;
+        root.px = x - root.absolute-position.x;
+        root.py = y - root.absolute-position.y;
         pop.show();
     }
     function pick(n: int, k: int) {
@@ -1086,7 +1087,7 @@ component NavItem inherits Rectangle {
         }
         if !root.compact: Text { text: root.label; color: active ? Theme.text : Theme.muted; font-size: 14px; font-weight: active ? 700 : 500; vertical-alignment: center; overflow: elide; }
     }
-    ta := TouchArea { pointer-event(e) => { if (e.kind == PointerEventKind.down && e.button == PointerEventButton.right) { root.right-click(self.mouse-x, self.mouse-y); } } clicked => { root.clicked(); } }
+    ta := TouchArea { pointer-event(e) => { if (e.kind == PointerEventKind.down && e.button == PointerEventButton.right) { root.right-click(self.absolute-position.x + self.mouse-x, self.absolute-position.y + self.mouse-y); } } clicked => { root.clicked(); } }
 }
 
 component Chip inherits Rectangle {
@@ -1184,7 +1185,7 @@ component TrackRow inherits Rectangle {
         ta := TouchArea {
             mouse-cursor: root.over-artist ? MouseCursor.pointer : MouseCursor.default;
             pointer-event(e) => {
-                if (e.kind == PointerEventKind.down && e.button == PointerEventButton.right) { cm1.open(self.mouse-x, self.mouse-y); }
+                if (e.kind == PointerEventKind.down && e.button == PointerEventButton.right) { cm1.open(self.absolute-position.x + self.mouse-x, self.absolute-position.y + self.mouse-y); }
                 if (e.kind == PointerEventKind.down && e.button == PointerEventButton.left) {
                     root.picking = e.modifiers.control || e.modifiers.shift;
                     if (root.picking) { root.pick(e.modifiers.shift ? 2 : 1); }
@@ -1488,7 +1489,7 @@ component TileView inherits Rectangle {
         Text { text: root.tile.sub; color: Theme.muted; font-size: 12px; overflow: elide; }
     }
     Rectangle {
-        ta := TouchArea { pointer-event(e) => { if (e.kind == PointerEventKind.down && e.button == PointerEventButton.right) { if (root.album) { cm2.open(self.mouse-x, self.mouse-y); } else { cmt.open(self.mouse-x, self.mouse-y); } } } clicked => { root.clicked(); } }
+        ta := TouchArea { pointer-event(e) => { if (e.kind == PointerEventKind.down && e.button == PointerEventButton.right) { if (root.album) { cm2.open(self.absolute-position.x + self.mouse-x, self.absolute-position.y + self.mouse-y); } else { cmt.open(self.absolute-position.x + self.mouse-x, self.absolute-position.y + self.mouse-y); } } } clicked => { root.clicked(); } }
         // (a song's: the same menu as anywhere else, as the web app's)
         cmt := TrackMenu {
             width: 100%; height: 100%;
@@ -1702,6 +1703,10 @@ export component AppWindow inherits Window {
     // window's narrowest follows it (the others put everything on one row)
     in property <string> player-style: "tab";
     callback player-style-picked(string);
+    // Settings > App & Look > Title Bar Colour: "match" (the player bar's colours, changing with the cover), "subtle"
+    // (the same, faint) or "plain" (the panel's colour, never changing)
+    in property <string> title-colour: "match";
+    callback title-colour-picked(string);
     property <bool> tab-style: root.player-style == "tab";
     min-width: root.player-style == "float" ? 1040px : root.tab-style ? 820px : 1000px;
     min-height: 520px;
@@ -2292,13 +2297,16 @@ export component AppWindow inherits Window {
             }
             // (a panel as the player bar is: in from the window's edges by the gap between the panels, rounded,
             // in its gradient; drags the window where nothing else is under the pointer)
-            Rectangle {
+            tbar := Rectangle {
                 x: 8px;
                 y: 8px;
                 width: parent.width - 16px;
                 height: 36px;
                 property <length> r: root.player-style == "float" && Theme.radius > 0 ? 18px : Theme.radius;
-                background: root.player-style == "minimal" ? Theme.panel : @linear-gradient(90deg, Theme.bar-a 0%, Theme.bar-b 100%);
+                property <bool> plain: root.player-style == "minimal" || root.title-colour == "plain";
+                property <color> ca: root.title-colour == "subtle" ? Theme.panel.mix(Theme.bar-a, 0.6) : Theme.bar-a;
+                property <color> cb: root.title-colour == "subtle" ? Theme.panel.mix(Theme.bar-b, 0.6) : Theme.bar-b;
+                background: self.plain ? Theme.panel : @linear-gradient(90deg, self.ca 0%, self.cb 100%);
                 border-radius: self.r;
                 clip: true;
                 HorizontalLayout {
@@ -2507,7 +2515,7 @@ export component AppWindow inherits Window {
                     }
                 }
                 // (its corners rounded over its gradient, and over the close button's red)
-                if root.player-style != "minimal": Caps { r: parent.r; tl: Theme.bar-a; bl: Theme.bar-a; tr: Theme.bar-b; br: Theme.bar-b; bottom: true; }
+                if !tbar.plain: Caps { r: tbar.r; tl: tbar.ca; bl: tbar.ca; tr: tbar.cb; br: tbar.cb; bottom: true; }
             }
         }
 
@@ -2613,7 +2621,7 @@ export component AppWindow inherits Window {
                               allow-copy: true;
                               data: Dnd.payload("p:" + i);
                             Rectangle {
-                                sta := TouchArea { pointer-event(e) => { if (e.kind == PointerEventKind.down && e.button == PointerEventButton.right) { cm5.open(self.mouse-x, self.mouse-y); } } clicked => { root.side(i); } }
+                                sta := TouchArea { pointer-event(e) => { if (e.kind == PointerEventKind.down && e.button == PointerEventButton.right) { cm5.open(self.absolute-position.x + self.mouse-x, self.absolute-position.y + self.mouse-y); } } clicked => { root.side(i); } }
                                 // (on top: it only takes right-clicks, the rest goes through to what's under it)
                                 cm5 := CtxMenu {
                                     width: 100%; height: 100%;
@@ -2855,7 +2863,7 @@ export component AppWindow inherits Window {
                         // (right-click: its SoundCloud or Spotify link on its own, as the web app's)
                         if root.page == "playlist" && root.pl-share: Rectangle {
                             width: shp.width;
-                            shp := Pill { tip: "Share: songs from every platform together. Right-click for its SoundCloud or Spotify link."; label: "Share"; y: 7px; right-click(x, y) => { shm.open(x, y + 7px); } clicked => { root.page-pl("share"); } }
+                            shp := Pill { tip: "Share: songs from every platform together. Right-click for its SoundCloud or Spotify link."; label: "Share"; y: 7px; right-click(x, y) => { shm.open(x, y); } clicked => { root.page-pl("share"); } }
                             shm := CtxMenu {
                                 width: 100%; height: 100%;
                                 items: [
@@ -3008,7 +3016,7 @@ export component AppWindow inherits Window {
                                 }
                             }
                             Rectangle {
-                                ata := TouchArea { pointer-event(e) => { if (e.kind == PointerEventKind.down && e.button == PointerEventButton.right) { cm7.open(self.mouse-x, self.mouse-y); } } clicked => { root.artist(i); } }
+                                ata := TouchArea { pointer-event(e) => { if (e.kind == PointerEventKind.down && e.button == PointerEventButton.right) { cm7.open(self.absolute-position.x + self.mouse-x, self.absolute-position.y + self.mouse-y); } } clicked => { root.artist(i); } }
                                 // (on top: it only takes right-clicks, the rest goes through to what's under it)
                                 cm7 := CtxMenu {
                                     width: 100%; height: 100%;
@@ -3185,7 +3193,7 @@ export component AppWindow inherits Window {
                                                         Rectangle { x: 0; width: parent.width * r.share; height: 100%; border-radius: 3px; background: Theme.accent; }
                                                     }
                                                 }
-                                                rta := TouchArea { mouse-cursor: MouseCursor.pointer; pointer-event(e) => { if (e.kind == PointerEventKind.down && e.button == PointerEventButton.right && r.song) { rcm.open(self.mouse-x, self.mouse-y); } } clicked => { root.stats-row(k); } }
+                                                rta := TouchArea { mouse-cursor: MouseCursor.pointer; pointer-event(e) => { if (e.kind == PointerEventKind.down && e.button == PointerEventButton.right && r.song) { rcm.open(self.absolute-position.x + self.mouse-x, self.absolute-position.y + self.mouse-y); } } clicked => { root.stats-row(k); } }
                                                 rcm := TrackMenu { width: 100%; height: 100%; item: r.row; lists: root.own-lists; act(a) => { root.stats-act(0, k, a); } }
                                             }
                                         }
@@ -3280,7 +3288,7 @@ export component AppWindow inherits Window {
                                               height: 48px;
                                               border-radius: 8px;
                                               background: sota.has-hover ? Theme.elevated : transparent;
-                                              sota := TouchArea { mouse-cursor: MouseCursor.pointer; pointer-event(e) => { if (e.kind == PointerEventKind.down && e.button == PointerEventButton.right) { scm.open(self.mouse-x, self.mouse-y); } } clicked => { root.stats-song(i); } }
+                                              sota := TouchArea { mouse-cursor: MouseCursor.pointer; pointer-event(e) => { if (e.kind == PointerEventKind.down && e.button == PointerEventButton.right) { scm.open(self.absolute-position.x + self.mouse-x, self.absolute-position.y + self.mouse-y); } } clicked => { root.stats-song(i); } }
                                               scm := TrackMenu { width: 100%; height: 100%; item: it.row; lists: root.own-lists; act(a) => { root.stats-act(1, i, a); } }
                                               HorizontalLayout {
                                                 spacing: 12px;
@@ -3541,6 +3549,19 @@ export component AppWindow inherits Window {
                                             alignment: start;
                                             spacing: 8px;
                                             Dropdown { options: ["Tab", "Classic Bar", "Floating", "Minimal"]; current: root.player-style == "bar" ? 1 : root.player-style == "float" ? 2 : root.player-style == "minimal" ? 3 : 0; picked(k) => { root.player-style-picked(["tab", "bar", "float", "minimal"][k]); } }
+                                        }
+                                        Rectangle { height: 8px; }
+                                        Text { text: "Title Bar Colour"; color: Theme.text; font-weight: 700; }
+                                        Text {
+                                            text: root.player-style == "minimal" ? "The Minimal player style keeps the title bar in the panel colour."
+                                                : root.title-colour == "plain" ? "The panel's colour, the same whatever's playing."
+                                                : root.title-colour == "subtle" ? "The player bar's colours, faintly, changing with the cover."
+                                                : "The player bar's colours, changing with the cover.";
+                                            color: Theme.muted; font-size: 12px; wrap: word-wrap;
+                                        }
+                                        HorizontalLayout {
+                                            alignment: start;
+                                            Dropdown { enabled: root.player-style != "minimal"; options: ["Like the Player Bar", "Subtle", "Plain"]; current: root.title-colour == "subtle" ? 1 : root.title-colour == "plain" ? 2 : 0; picked(k) => { root.title-colour-picked(["match", "subtle", "plain"][k]); } }
                                         }
                                         if root.tab-style: Rectangle { height: 8px; }
                                         if root.tab-style: HorizontalLayout {
@@ -4547,7 +4568,7 @@ export component AppWindow inherits Window {
                                         allow-move: true;
                                         allow-copy: true;
                                         data: Dnd.payload("q:" + i);
-                                        qta := TouchArea { pointer-event(e) => { if (e.kind == PointerEventKind.down && e.button == PointerEventButton.right) { cm8.open(self.mouse-x, self.mouse-y); } } clicked => { root.play-queue(i); } }
+                                        qta := TouchArea { pointer-event(e) => { if (e.kind == PointerEventKind.down && e.button == PointerEventButton.right) { cm8.open(self.absolute-position.x + self.mouse-x, self.absolute-position.y + self.mouse-y); } } clicked => { root.play-queue(i); } }
                                     }
                                     // (on top: it only takes right-clicks, the rest goes through to what's under it)
                                     cm8 := TrackMenu {
