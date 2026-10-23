@@ -4,6 +4,7 @@
 
 pub mod apple;
 pub mod diag;
+pub mod docks;
 #[cfg(feature = "desktop")]
 pub mod backup;
 pub mod bundled;

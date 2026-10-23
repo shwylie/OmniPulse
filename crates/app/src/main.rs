@@ -10222,6 +10222,15 @@ fn plugin_app(shared: &Shared, plugin: &str, ask: serde_json::Value, answer: Box
             }
             send(match omnipulse_core::widget::overlay_push(&fields) { Ok(_) => serde_json::json!({ "ok": true }), Err(e) => serde_json::json!({ "error": e }) });
         }
+        // (OBS's docks: the chat as the chatbot hears it, messages taken down, what happened for the activity feed)
+        "dockChat" | "dockGone" | "dockActivity" => {
+            if plugin != "chatbot" { return send(serde_json::json!({ "error": "only OmniPulse's chatbot can" })); }
+            let v = args.first().cloned().unwrap_or(serde_json::Value::Null);
+            if !v.is_object() { return send(serde_json::json!({ "error": "give it an object" })); }
+            let s = |k: &str| v[k].as_str().unwrap_or("").to_string();
+            match ask["op"].as_str().unwrap_or("") { "dockChat" => omnipulse_core::docks::chat_push(v.clone()), "dockGone" => omnipulse_core::docks::chat_gone(&s("platform"), &s("id"), &s("login")), _ => omnipulse_core::docks::activity_push(v.clone()) }
+            send(serde_json::json!({ "ok": true }));
+        }
         // (a text file of yours, written: a chatbot's Write to a File, for an OBS Text source)
         "writeFile" => {
             if plugin != "chatbot" { return send(serde_json::json!({ "error": "only OmniPulse's chatbot can" })); }
@@ -10297,6 +10306,24 @@ fn outside_start(shared: &Shared) {
     omnipulse_core::widget::set_shown_handler(std::sync::Arc::new(|kind: &str| {
         let kind = kind.to_string();
         let _ = slint::invoke_from_event_loop(move || SHARED.with(|s| { if let Some(sh) = s.borrow().clone() { alert_shown(&sh, &kind); } }));
+    }));
+    // (a dock's button: given to the chatbot, its answer or why not said back in the chat dock)
+    omnipulse_core::docks::set_dock_handler(std::sync::Arc::new(|cmd: serde_json::Value| {
+        let _ = slint::invoke_from_event_loop(move || SHARED.with(|s| {
+            let Some(sh) = s.borrow().clone() else { return };
+            match plugrun::get(BOT) {
+                Some(p) => {
+                    let rt = sh.borrow().rt.clone();
+                    rt.spawn(async move {
+                        match p.call("dock", vec![cmd]).await {
+                            Ok(v) => if let Some(m) = v.as_str().filter(|m| !m.is_empty()) { omnipulse_core::docks::notice(m) },
+                            Err(e) => omnipulse_core::docks::notice(&format!("Couldn't: {e}")),
+                        }
+                    });
+                }
+                None => omnipulse_core::docks::notice("The chatbot isn't on: switch it on in OmniPulse (Settings > Streaming)."),
+            }
+        }));
     }));
     integrations::widget_start(&prefs);
     if integrations::set(&prefs, "remoteOn") {

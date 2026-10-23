@@ -146,6 +146,7 @@ function reply(to, text, platform) {
   const s = botChat || chat;
   if (!s) return;
   const lines = String(text).split("\n").filter(Boolean);
+  if (!botChat) lines.forEach((line) => OmniPulse.app.dockChat({ platform: "twitch", id: "", user: S().login, login: String(S().login || "").toLowerCase(), text: line.slice(0, 480), self: true, badges: ["broadcaster"] }).catch(() => {}));
   lines.forEach((line) => s.send((to && p !== "all" ? "@reply-parent-msg-id=" + to + " " : "") + "PRIVMSG #" + S().login + " :" + line.slice(0, 480)));
 }
 
@@ -168,8 +169,11 @@ async function onChat(m) {
     onEvent("watch.streak", { user_name: m.tags["display-name"] || m.nick, user_id: m.tags["user-id"] || "", streak: m.tags["msg-param-value"] || "", message: { text: m.text || "" } });
     return;
   }
+  if (m.command === "CLEARMSG") { dockGone("twitch", m.tags["target-msg-id"] || "", ""); return; }
+  if (m.command === "CLEARCHAT") { dockGone("twitch", "", m.text || ""); return; }
   if (m.command !== "PRIVMSG") return;
   const platform = m.platform || "twitch";
+  if (platform === "twitch") dockTwitch(m);
   // (the bot's own messages never start anything)
   if (S().botLogin && m.nick === S().botLogin.toLowerCase()) return;
   chatLines++;
@@ -343,7 +347,8 @@ function onPlatform(t, platform) {
 
 // An event (ours: follow, sub...), to the actions waiting for it
 function fire(ev, ctx) {
-  credit(ev, ctx.user);
+  if (!ctx.replay) { credit(ev, ctx.user); feed(ev, ctx); }
+  ctx.fromEvent = ev;
   for (const x of live) {
     const t = x.trigger;
     if (t.type !== "event" || t.event !== ev || !onPlatform(t, ctx.platform)) continue;
@@ -660,7 +665,7 @@ async function step(st, ctx, depth) {
     }
     case "skip": await OmniPulse.app.control("next"); break;
     case "playpause": await OmniPulse.app.control("play"); break;
-    case "alert": await OmniPulse.app.alert({ type: st.alert || "follow", user: f("user"), amount: f("amount"), message: f("message") }); break;
+    case "alert": await OmniPulse.app.alert({ type: st.alert || "follow", user: f("user"), amount: f("amount"), message: f("message"), feed: ctx.fromEvent ? false : undefined }); break;
     case "timeout": {
       if (!ctx.userId) break;
       await helix("POST", "moderation/bans?broadcaster_id=" + S().userId + "&moderator_id=" + S().userId, { data: { user_id: ctx.userId, duration: Math.max(1, num(f("seconds"))), reason: f("reason") } });
@@ -1353,9 +1358,18 @@ const spoken = new Set();
 // What Kick sends: its chat as ours (a Twitch line's shape, its platform Kick), its events as ours
 function onKick(event, d) {
   const ev = event.replace(/^App\\Events\\/, "");
+  if (ev === "MessageDeletedEvent") { dockGone("kick", String((d.message && d.message.id) || d.id || ""), ""); return; }
+  if (ev === "UserBannedEvent") { const u = d.user || {}; dockGone("kick", "", String(u.slug || u.username || "")); return; }
+  if (ev === "ChatroomClearEvent") { dockGone("kick", "", ""); return; }
   if (ev === "ChatMessageEvent") {
     const sender = d.sender || {};
     const content = String(d.content || "");
+    {
+      const slug = String(sender.slug || sender.username || "").toLowerCase();
+      const own = [S().kickLogin, S().kickBotLogin].some((x) => x && String(x).toLowerCase() === String(sender.username || "").toLowerCase());
+      const kinds = ((sender.identity && sender.identity.badges) || []).map((b) => String(b.type || "").toLowerCase());
+      OmniPulse.app.dockChat({ platform: "kick", id: String(d.id || ""), user: sender.username || slug, login: slug, userId: String(sender.id || ""), color: (sender.identity && sender.identity.color) || "", badges: kinds, text: content, self: own }).catch(() => {});
+    }
     // (the bot account's messages never start anything; our own message coming back: not chat)
     if (S().kickBotLogin && String(sender.username || "").toLowerCase() === String(S().kickBotLogin).toLowerCase()) return;
     if (S().kickLogin && String(sender.username || "").toLowerCase() === String(S().kickLogin).toLowerCase()) {
@@ -1371,7 +1385,7 @@ function onKick(event, d) {
     });
     return;
   }
-  const alert = (a) => { if (S().alerts !== false) OmniPulse.app.alert(Object.assign({ platform: "kick" }, a)).catch((e) => OmniPulse.log("alert: " + e.message)); };
+  const alert = (a) => { if (S().alerts !== false) sendAlert(Object.assign({ platform: "kick" }, a)); };
   const go = (ours, ctx) => { const c = Object.assign({ platform: "kick", rawInput: "", message: "", amount: "" }, ctx); Object.assign(c, words(c.rawInput)); fire(ours, c); };
   switch (ev) {
     case "SubscriptionEvent": {
@@ -1495,11 +1509,11 @@ function connectEvents(token, url) {
       old.close();
     } else if (kind === "notification") {
       const type = m.payload.subscription.type, e = m.payload.event || {};
-      onEvent(type, e);
       if (S().alerts !== false) {
         const a = asAlert(type, e);
-        if (a) OmniPulse.app.alert(a).catch((err) => OmniPulse.log("alert: " + err.message));
+        if (a) sendAlert(a);
       }
+      onEvent(type, e);
     }
   };
   s.onclose = (why) => { if (!stopped && events === s) { OmniPulse.log("events closed: " + why); setTimeout(() => { events = connectEvents(token); }, retry); } };
@@ -1528,13 +1542,88 @@ async function start() {
   retry = 1000;
 }
 
+// ---------- OBS's docks: the chat (its moderation buttons) and the activity feed ----------
+let lastAlert = null;
+
+// An alert the chatbot made for an event: shown, and kept for the event's place in the feed (not fed twice)
+function sendAlert(a) {
+  lastAlert = { a, at: Date.now() };
+  OmniPulse.app.alert(Object.assign({ feed: false }, a)).catch((e) => OmniPulse.log("alert: " + e.message));
+}
+
+function feed(ev, ctx) {
+  let alert = null;
+  if (lastAlert && Date.now() - lastAlert.at < 3000 && String(lastAlert.a.user || "").toLowerCase() === String(ctx.user || "").toLowerCase()) { alert = lastAlert.a; lastAlert = null; }
+  const keep = { type: ev, platform: ctx.platform || "twitch", user: ctx.user || "", userId: ctx.userId || "", amount: String(ctx.amount == null ? "" : ctx.amount), message: ctx.message || "", rawInput: ctx.rawInput || "", reward: ctx.reward || "", currency: ctx.currency || "", winner: ctx.winner || "", chatbot: true };
+  if (alert) keep.alert = Object.assign({ feed: false }, alert);
+  OmniPulse.app.dockActivity(keep).catch(() => {});
+}
+
+function dockGone(platform, id, login) { OmniPulse.app.dockGone({ platform, id, login }).catch(() => {}); }
+
+function dockTwitch(m) {
+  const login = String(m.nick || "").toLowerCase();
+  let text = String(m.text || "");
+  const me = /^\u0001ACTION (.*)\u0001?$/.exec(text);
+  if (me) text = me[1].replace(/\u0001$/, "");
+  OmniPulse.app.dockChat({
+    platform: "twitch", id: m.tags.id || "", user: m.tags["display-name"] || login, login, userId: m.tags["user-id"] || "", color: m.tags.color || "",
+    badges: String(m.tags.badges || "").split(",").map((b) => b.split("/")[0]).filter(Boolean), text, emotes: m.tags.emotes || "", first: m.tags["first-msg"] === "1", me: !!me,
+    self: [S().login, S().botLogin].some((x) => x && String(x).toLowerCase() === login),
+  }).catch(() => {});
+}
+
+// A dock's button: a message taken down, a viewer timed out, banned or let back, something said, an event's actions run again
+async function dockDo(cmd) {
+  const kick = cmd.platform === "kick";
+  const who = cmd.user || cmd.login || "them";
+  const twitchMod = "broadcaster_id=" + S().userId + "&moderator_id=" + S().userId;
+  switch (cmd.do) {
+    case "say": {
+      const text = String(cmd.text || "").trim().slice(0, 500);
+      if (text) reply(null, text, cmd.platform === "kick" || cmd.platform === "twitch" ? cmd.platform : "all");
+      return "";
+    }
+    case "delete":
+      if (!cmd.id) throw new Error("that message has no id to delete it by");
+      if (kick) await kickApi("DELETE", "chat/" + encodeURIComponent(cmd.id));
+      else await helix("DELETE", "moderation/chat?" + twitchMod + "&message_id=" + encodeURIComponent(cmd.id));
+      return "Deleted " + who + "'s message.";
+    case "timeout":
+    case "ban":
+    case "unban": {
+      const secs = Math.max(1, Math.min(1209600, Math.round(num(cmd.seconds)) || 600));
+      if (kick) {
+        if (!cmd.userId) throw new Error("Kick didn't say who that is");
+        const body = { broadcaster_user_id: Number(S().kickUserId), user_id: Number(cmd.userId) };
+        if (cmd.do === "unban") await kickApi("DELETE", "moderation/bans", body);
+        else await kickApi("POST", "moderation/bans", Object.assign(body, cmd.do === "timeout" ? { duration: Math.max(1, Math.round(secs / 60)) } : {}));
+      } else {
+        const id = cmd.userId || (await twitchUserId(cmd.login || cmd.user));
+        if (cmd.do === "unban") await helix("DELETE", "moderation/bans?" + twitchMod + "&user_id=" + id);
+        else await helix("POST", "moderation/bans?" + twitchMod, { data: Object.assign({ user_id: id }, cmd.do === "timeout" ? { duration: secs } : {}) });
+      }
+      const long = secs % 3600 === 0 ? secs / 3600 + (secs === 3600 ? " hour" : " hours") : secs % 60 === 0 ? secs / 60 + (secs === 60 ? " minute" : " minutes") : secs + " seconds";
+      return cmd.do === "timeout" ? "Timed out " + who + " for " + long + "." : cmd.do === "ban" ? "Banned " + who + "." : "Let " + who + " back in.";
+    }
+    case "rerun": {
+      const e = cmd.event || {};
+      const ctx = { user: e.user || "", userId: e.userId || "", amount: e.amount || "", message: e.message || "", rawInput: e.rawInput || "", reward: e.reward || "", currency: e.currency || "", winner: e.winner || "", platform: e.platform || "twitch", replay: true };
+      Object.assign(ctx, words(ctx.rawInput));
+      fire(String(e.type || ""), ctx);
+      return "Ran " + (e.type || "its") + "'s actions again" + (ctx.user ? " for " + ctx.user : "") + ".";
+    }
+  }
+  throw new Error("a dock can't " + cmd.do);
+}
+
 // ---------- donations: Streamlabs' and StreamElements' own sockets ----------
 let tipSockets = [];
 
 // A donation, from whichever: its alert (if alerts are on) and A Donation's actions
 function onTip(user, amount, currency, message, from) {
   const value = String(Math.round(num(amount) * 100) / 100);
-  if (S().alerts !== false) OmniPulse.app.alert({ type: "donation", user, amount: (currency ? currency + " " : "") + value, message }).catch((e) => OmniPulse.log("alert: " + e.message));
+  if (S().alerts !== false) sendAlert({ type: "donation", user, amount: (currency ? currency + " " : "") + value, message });
   const ctx = { user, userId: "", amount: value, currency: currency || "", message: message || "", rawInput: message || "", platform: "all", service: from };
   Object.assign(ctx, words(ctx.rawInput));
   fire("donation", ctx);
@@ -1599,6 +1688,7 @@ function restart() { start().catch((e) => OmniPulse.log("start: " + e.message));
 
 OmniPulse.register({
   start() { restart(); return true; },
+  dock(cmd) { return dockDo(cmd || {}); },
   signInChannel(values) { return signIn("channel", TWITCH_SCOPES_CHANNEL, values); },
   signInBot(values) { return signIn("bot", TWITCH_SCOPES_BOT, values); },
   signInChannelCopy(values) { return signIn("channel", TWITCH_SCOPES_CHANNEL, values, true); },

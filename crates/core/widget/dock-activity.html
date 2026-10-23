@@ -1,0 +1,276 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OmniPulse Activity</title>
+<style>
+  /* OmniPulse's activity feed, for OBS (Docks > Custom Browser Docks): what happened on stream, each kind
+     shown or hidden, each alert replayed, the chatbot's events' actions run again */
+  :root {
+    --bg: #1b1d24; --panel: #23262f; --line: #2e323d; --text: #e6e8ee; --dim: #8b91a1; --accent: #7aa2ff; --danger: #ff5c6c; --fs: 13px;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); font: var(--fs) / 1.4 "Segoe UI", system-ui, sans-serif; }
+  body { display: flex; flex-direction: column; overflow: hidden; }
+  button, select, input { font: inherit; color: inherit; }
+  button { cursor: pointer; }
+  header { display: flex; align-items: center; gap: 6px; padding: 6px 8px; background: var(--panel); border-bottom: 1px solid var(--line); flex: none; }
+  header h1 { margin: 0 auto 0 2px; font-size: 13px; font-weight: 600; letter-spacing: 0.02em; }
+  .icon { border: 0; background: transparent; color: var(--dim); padding: 2px 5px; border-radius: 6px; font-size: 14px; line-height: 1; }
+  .icon:hover, .icon[aria-pressed="true"] { color: var(--text); background: var(--line); }
+  .count { font-size: 11px; color: var(--dim); }
+
+  #settings { display: none; flex: none; max-height: 60%; overflow-y: auto; padding: 8px 10px 10px; background: var(--panel); border-bottom: 1px solid var(--line); font-size: 12px; }
+  #settings.open { display: block; }
+  #settings h2 { margin: 8px 0 4px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--dim); }
+  #settings h2:first-child { margin-top: 0; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 2px 10px; }
+  .grid label, .row label { display: flex; align-items: center; gap: 6px; padding: 1px 0; }
+  .row { display: flex; flex-wrap: wrap; gap: 4px 14px; align-items: center; }
+  .links { display: flex; gap: 8px; margin: 4px 0 2px; }
+  .link { border: 0; background: none; padding: 0; color: var(--accent); font-size: 11px; }
+  .chip { border: 1px solid var(--line); background: transparent; border-radius: 999px; padding: 1px 10px; font-size: 11px; color: var(--dim); }
+  .chip:hover { color: var(--text); }
+  .chip.danger:hover, .chip.sure { color: #fff; background: var(--danger); border-color: var(--danger); }
+  select { background: var(--bg); border: 1px solid var(--line); border-radius: 6px; }
+
+  #feed { flex: 1; overflow-y: auto; padding: 4px 0 8px; overscroll-behavior: contain; }
+  .item { display: grid; grid-template-columns: 26px 1fr auto; gap: 0 8px; align-items: start; padding: 6px 8px 6px 6px; border-left: 3px solid var(--c, var(--line)); margin: 0 0 1px; }
+  .item:hover { background: #ffffff08; }
+  body.compact .item { padding-top: 2px; padding-bottom: 2px; }
+  body.compact .item .msg { display: none; }
+  .glyph { width: 26px; height: 26px; border-radius: 7px; display: grid; place-items: center; background: color-mix(in srgb, var(--c, #888) 22%, transparent); font-size: 14px; }
+  body.compact .glyph { width: 20px; height: 20px; font-size: 11px; border-radius: 5px; }
+  .what { min-width: 0; }
+  .what b { font-weight: 700; }
+  .msg { color: var(--dim); font-size: 0.92em; margin-top: 1px; overflow-wrap: anywhere; }
+  .meta { color: var(--dim); font-size: 0.8em; margin-top: 1px; }
+  body.compact .meta { display: inline; margin-left: 6px; }
+  .acts { display: flex; gap: 3px; opacity: 0.45; }
+  .item:hover .acts, .acts:focus-within { opacity: 1; }
+  .acts button { border: 1px solid var(--line); background: var(--panel); border-radius: 4px; padding: 0 6px; font-size: 10.5px; line-height: 18px; color: var(--dim); white-space: nowrap; }
+  .acts button:hover { color: var(--text); border-color: var(--dim); }
+  .acts button.done { color: #111; background: var(--accent); border-color: var(--accent); }
+  .pf { display: inline-block; font-size: 0.7em; font-weight: 700; border-radius: 3px; padding: 0 3px; margin-right: 4px; vertical-align: 1px; color: #111; }
+  .pf.twitch { background: #a970ff; } .pf.kick { background: #53fc18; } .pf.other { background: #8b91a1; }
+  #empty { color: var(--dim); text-align: center; padding: 24px 16px; font-size: 12px; }
+  #toast { position: absolute; left: 50%; bottom: 10px; transform: translateX(-50%); background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 4px 10px; font-size: 12px; opacity: 0; transition: opacity 0.2s; pointer-events: none; }
+  #toast.on { opacity: 1; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Activity</h1>
+  <span class="count" id="count"></span>
+  <button class="icon" id="pause" title="Pause the feed" aria-label="Pause" aria-pressed="false">&#10074;&#10074;</button>
+  <button class="icon" id="gear" title="Which events, and how they look" aria-label="Settings">&#9881;</button>
+</header>
+<div id="settings">
+  <h2>Show</h2>
+  <div class="links"><button class="link" id="allOn" type="button">All</button><button class="link" id="allOff" type="button">None</button><button class="link" id="money" type="button">Only follows, subs and money</button></div>
+  <div id="kinds"></div>
+  <h2>Look</h2>
+  <div class="row">
+    <label><input type="checkbox" id="oNewest" checked> Newest at the top</label>
+    <label><input type="checkbox" id="oCompact"> Compact</label>
+    <label><input type="checkbox" id="oPlatform" checked> Platform</label>
+    <label><input type="checkbox" id="oMsg" checked> Their message</label>
+    <label>Text <select id="oSize"><option value="12">Small</option><option value="13" selected>Normal</option><option value="15">Large</option></select></label>
+    <label>Platforms <select id="oFrom"><option value="all">All</option><option value="twitch">Twitch</option><option value="kick">Kick</option></select></label>
+  </div>
+  <h2>The Feed</h2>
+  <div class="row"><button class="chip danger" id="clear" type="button">Clear the Feed</button><span class="count">Kept by OmniPulse: the last 250, after a restart too.</span></div>
+</div>
+<div id="feed"><div id="empty">Follows, subs, bits, raids, rewards and the rest show here, from OmniPulse's chatbot and from any bot sending OmniPulse alerts.</div></div>
+<div id="toast"></div>
+<script>
+  "use strict";
+  const $ = (id) => document.getElementById(id);
+  // Every kind of event: its name in the settings, glyph, colour, group, and its line
+  const amt = (e) => String((e.alert && e.alert.amount) || e.amount || "").trim();
+  const n = (e) => parseFloat(String(e.amount || "").replace(/[^\d.]/g, "")) || 0;
+  const KINDS = [
+    ["follow", "Follows", "♥", "#ff6b8a", "Community", (e) => [e.user, " followed"]],
+    ["sub", "New Subs", "★", "#a970ff", "Subs", (e) => { const t = (e.alert && e.alert.amount) || (e.chatbot ? "" : e.amount); return [e.user, " subscribed", t ? " (" + t + ")" : ""]; }],
+    ["resub", "Resubs", "★", "#a970ff", "Subs", (e) => [e.user, " resubscribed", amt(e) ? " · " + amt(e) + (/\D/.test(amt(e)) ? "" : " months") : ""]],
+    ["gift", "Gifted Subs", "\u{1F381}", "#c084fc", "Subs", (e) => [e.user || "Anonymous", " gifted " + (amt(e) || 1) + (n(e) === 1 ? " sub" : " subs")]],
+    ["watchstreak", "Watch Streaks", "\u{1F525}", "#ffb547", "Community", (e) => [e.user, " is on a " + amt(e) + "-stream watch streak"]],
+    ["bits", "Bits", "◆", "#5ad1ff", "Money", (e) => [e.user || "Anonymous", " cheered " + amt(e) + " bits"]],
+    ["kicks", "Kicks", "◆", "#53fc18", "Money", (e) => [e.user, " sent " + amt(e) + " Kicks"]],
+    ["donation", "Donations", "$", "#4ad295", "Money", (e) => [e.user || "Someone", " donated " + ((e.currency ? e.currency + " " : "") + (e.chatbot ? e.amount : amt(e)))]],
+    ["charity", "Charity", "❤", "#4ad295", "Money", (e) => [e.user, " gave " + amt(e) + " to charity"]],
+    ["raid", "Raids", "⚑", "#ff8f4a", "Community", (e) => [e.user, " raided with " + amt(e) + (n(e) === 1 ? " viewer" : " viewers")]],
+    ["shoutoutin", "Shoutouts to You", "\u{1F4E3}", "#ff8f4a", "Community", (e) => [e.user, " shouted you out"]],
+    ["reward", "Channel Point Rewards", "◎", "#5ad1ff", "Community", (e) => [e.user, " redeemed " + (e.reward || "a reward")]],
+    ["firstmsg", "First-Time Chatters", "\u{1F44B}", "#7aa2ff", "Chat", (e) => [e.user, " chatted for the first time"]],
+    ["firstwords", "First Words This Stream", "\u{1F4AC}", "#7aa2ff", "Chat", (e) => [e.user, " said hello"]],
+    ["vip", "New VIPs", "♦", "#e05ce0", "Community", (e) => [e.user, " is now a VIP"]],
+    ["mod", "New Moderators", "⚔", "#3ccd6c", "Community", (e) => [e.user, " is now a moderator"]],
+    ["hypetrain", "Hype Trains", "\u{1F682}", "#ff6bd6", "Stream", (e) => ["", "Hype train" + (amt(e) ? ": " + (/\D/.test(amt(e)) ? amt(e) : "level " + amt(e)) : " started")]],
+    ["hypetrainend", "Hype Trains Ending", "\u{1F682}", "#ff6bd6", "Stream", (e) => ["", "Hype train ended at level " + (amt(e) || 1)]],
+    ["poll", "Polls", "☰", "#8b91a1", "Stream", (e) => ["", "Poll: " + (e.message || "started")]],
+    ["pollend", "Polls Ending", "☰", "#8b91a1", "Stream", (e) => ["", "Poll ended" + (e.winner ? ": " + e.winner + " won" : "")]],
+    ["prediction", "Predictions", "⚖", "#8b91a1", "Stream", (e) => ["", "Prediction: " + (e.message || "started")]],
+    ["predictionend", "Predictions Ending", "⚖", "#8b91a1", "Stream", (e) => ["", "Prediction ended" + (e.winner ? ": " + e.winner : "")]],
+    ["adbreak", "Ad Breaks", "▶", "#8b91a1", "Stream", (e) => ["", "Ad break" + (amt(e) ? " (" + amt(e) + " s)" : "")]],
+    ["online", "Going Live", "●", "#ff4f4f", "Stream", () => ["", "You went live"]],
+    ["offline", "Going Offline", "○", "#8b91a1", "Stream", () => ["", "You went offline"]],
+    ["ban", "Bans", "⛔", "#ff5c6c", "Stream", (e) => [e.user, " was banned"]],
+    ["liked", "Liked Requests", "♫", "#ff6b8a", "Music", (e) => [e.user, " liked a requested song"]],
+    ["game", "Game Changes", "\u{1F3AE}", "#8b91a1", "Stream", (e) => ["", "Now playing " + (e.message || e.amount || "a new game")]],
+  ];
+  const OFF_FIRST = ["firstwords"];
+  const GROUPS = ["Community", "Subs", "Money", "Chat", "Stream", "Music", "Other"];
+  const kindOf = (t) => KINDS.find((k) => k[0] === t) || [t, t + " (alert)", "✦", "#8b91a1", "Other", (e) => [e.user, " " + t + (amt(e) ? " " + amt(e) : "")]];
+
+  const store = {
+    get(k, d) { try { const v = localStorage.getItem("omnipulse.feed." + k); return v == null ? d : JSON.parse(v); } catch (e) { return d; } },
+    set(k, v) { try { localStorage.setItem("omnipulse.feed." + k, JSON.stringify(v)); } catch (e) {} },
+  };
+  const opt = { hidden: store.get("hidden", OFF_FIRST), newest: store.get("newest", true), compact: store.get("compact", false), platform: store.get("platform", true), msg: store.get("msg", true), size: store.get("size", "13"), from: store.get("from", "all") };
+  const items = [];
+  const seenKinds = new Set(KINDS.map((k) => k[0]));
+  let last = 0, paused = false, waiting = [];
+
+  function setOpt(k, v) { opt[k] = v; store.set(k, v); render(); }
+  const shown = (e) => !opt.hidden.includes(e.type) && (opt.from === "all" || (e.platform || "twitch") === opt.from);
+
+  function drawKinds() {
+    const box = $("kinds");
+    box.textContent = "";
+    for (const g of GROUPS) {
+      const list = [...seenKinds].map(kindOf).filter((k) => k[4] === g);
+      if (!list.length) continue;
+      const h = document.createElement("div"); h.className = "meta"; h.textContent = g; h.style.marginTop = "4px"; box.append(h);
+      const grid = document.createElement("div"); grid.className = "grid";
+      for (const k of list) {
+        const l = document.createElement("label");
+        const c = document.createElement("input"); c.type = "checkbox"; c.checked = !opt.hidden.includes(k[0]);
+        c.onchange = () => setOpt("hidden", c.checked ? opt.hidden.filter((x) => x !== k[0]) : opt.hidden.concat([k[0]]));
+        const dot = document.createElement("span"); dot.textContent = k[2]; dot.style.color = k[3];
+        l.append(c, dot, document.createTextNode(" " + k[1]));
+        grid.append(l);
+      }
+      box.append(grid);
+    }
+  }
+
+  function ago(ts) {
+    const s = Math.max(0, Math.round((Date.now() - ts) / 1000));
+    if (s < 45) return "just now";
+    if (s < 3600) return Math.round(s / 60) + " min ago";
+    const d = new Date(ts), today = new Date().toDateString() === d.toDateString();
+    return (today ? "" : d.toLocaleDateString([], { day: "numeric", month: "short" }) + " ") + String(d.getHours()).padStart(2, "0") + ":" + String(d.getMinutes()).padStart(2, "0");
+  }
+
+  function toast(text) { const t = $("toast"); t.textContent = text; t.classList.add("on"); clearTimeout(toast.t); toast.t = setTimeout(() => t.classList.remove("on"), 2200); }
+
+  async function act(cmd, b, label) {
+    try {
+      const r = await fetch("/dock/do", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(cmd) });
+      const j = await r.json();
+      if (!j.ok) { toast("Couldn't: " + (j.error || "no answer")); return; }
+      if (b) { b.classList.add("done"); b.textContent = label; setTimeout(() => { b.classList.remove("done"); b.textContent = b.dataset.label; }, 1500); }
+    } catch (e) { toast("OmniPulse isn't answering"); }
+  }
+
+  function row(e) {
+    const k = kindOf(e.type);
+    const r = document.createElement("div");
+    r.className = "item"; r.style.setProperty("--c", k[3]);
+    const g = document.createElement("div"); g.className = "glyph"; g.textContent = k[2]; g.style.color = k[3]; g.title = k[1];
+    const what = document.createElement("div"); what.className = "what";
+    const [who, rest, more] = k[5](e);
+    const line = document.createElement("div");
+    if (opt.platform && e.platform !== "all") { const p = document.createElement("span"); const pf = e.platform === "kick" ? "kick" : e.platform === "twitch" || (!e.platform && e.chatbot) ? "twitch" : "other"; p.className = "pf " + pf; p.textContent = pf === "kick" ? "K" : pf === "twitch" ? "T" : (e.platform || "?").slice(0, 2).toUpperCase(); line.append(p); }
+    if (who) { const b = document.createElement("b"); b.textContent = who; line.append(b); }
+    line.append(document.createTextNode((rest || "") + (more || "")));
+    what.append(line);
+    const said = e.type === "reward" ? e.message || e.rawInput : e.message;
+    if (opt.msg && said && !["poll", "prediction", "game"].includes(e.type)) { const m = document.createElement("div"); m.className = "msg"; m.textContent = "“" + said + "”"; what.append(m); }
+    const meta = document.createElement("div"); meta.className = "meta"; meta.textContent = ago(e.ts); meta.dataset.ts = e.ts; what.append(meta);
+    const acts = document.createElement("div"); acts.className = "acts";
+    if (e.alert) { const b = document.createElement("button"); b.type = "button"; b.textContent = b.dataset.label = "Replay"; b.title = "Show its alert again"; b.onclick = () => act({ do: "replay", n: e.n }, b, "Replayed"); acts.append(b); }
+    if (e.chatbot) { const b = document.createElement("button"); b.type = "button"; b.textContent = b.dataset.label = "Run Again"; b.title = "Run the chatbot's actions for it again (its thanks in chat, its sounds...)"; b.onclick = () => act({ do: "rerun", n: e.n }, b, "Ran"); acts.append(b); }
+    r.append(g, what, acts);
+    return r;
+  }
+
+  function render() {
+    document.documentElement.style.setProperty("--fs", opt.size + "px");
+    document.body.classList.toggle("compact", opt.compact);
+    $("oNewest").checked = opt.newest; $("oCompact").checked = opt.compact; $("oPlatform").checked = opt.platform; $("oMsg").checked = opt.msg; $("oSize").value = opt.size; $("oFrom").value = opt.from;
+    const feed = $("feed");
+    const list = items.filter(shown);
+    feed.querySelectorAll(".item").forEach((x) => x.remove());
+    $("empty").hidden = list.length > 0;
+    const ordered = opt.newest ? list.slice().reverse() : list;
+    for (const e of ordered) feed.append(row(e));
+    if (!opt.newest) feed.scrollTop = feed.scrollHeight;
+    $("count").textContent = list.length ? list.length + (list.length === items.length ? "" : " of " + items.length) : "";
+    drawKinds();
+  }
+
+  // (a new one: put in its place without drawing the rest again)
+  function add(e) {
+    items.push(e);
+    while (items.length > 250) items.shift();
+    if (!seenKinds.has(e.type)) { seenKinds.add(e.type); drawKinds(); }
+    if (!shown(e)) { $("count").textContent = items.filter(shown).length + " of " + items.length; return; }
+    const feed = $("feed"), r = row(e);
+    $("empty").hidden = true;
+    if (opt.newest) feed.insertBefore(r, $("empty").nextSibling);
+    else { const stay = feed.scrollHeight - feed.scrollTop - feed.clientHeight < 40; feed.append(r); if (stay) feed.scrollTop = feed.scrollHeight; }
+    r.animate([{ background: "color-mix(in srgb, " + kindOf(e.type)[3] + " 25%, transparent)" }, { background: "transparent" }], { duration: 1600 });
+    const c = items.filter(shown).length;
+    $("count").textContent = c + (c === items.length ? "" : " of " + items.length);
+  }
+
+  $("gear").onclick = () => $("settings").classList.toggle("open");
+  $("pause").onclick = () => {
+    paused = !paused;
+    $("pause").setAttribute("aria-pressed", String(paused));
+    $("pause").innerHTML = paused ? "&#9654;" : "&#10074;&#10074;";
+    $("pause").title = paused ? "Carry on (" + waiting.length + " waiting)" : "Pause the feed";
+    if (!paused) { waiting.forEach(add); waiting = []; }
+  };
+  $("allOn").onclick = () => setOpt("hidden", []);
+  $("allOff").onclick = () => setOpt("hidden", [...seenKinds]);
+  $("money").onclick = () => setOpt("hidden", [...seenKinds].filter((t) => !["follow", "sub", "resub", "gift", "bits", "kicks", "donation", "charity"].includes(t)));
+  $("oNewest").onchange = (e) => setOpt("newest", e.target.checked);
+  $("oCompact").onchange = (e) => setOpt("compact", e.target.checked);
+  $("oPlatform").onchange = (e) => setOpt("platform", e.target.checked);
+  $("oMsg").onchange = (e) => setOpt("msg", e.target.checked);
+  $("oSize").onchange = (e) => setOpt("size", e.target.value);
+  $("oFrom").onchange = (e) => setOpt("from", e.target.value);
+  $("clear").onclick = () => {
+    const b = $("clear");
+    if (!b.classList.contains("sure")) { b.classList.add("sure"); b.textContent = "Clear it? Click again"; setTimeout(() => { b.classList.remove("sure"); b.textContent = "Clear the Feed"; }, 3000); return; }
+    b.classList.remove("sure"); b.textContent = "Clear the Feed";
+    act({ do: "clearfeed" }).then(() => { items.length = 0; render(); });
+  };
+  setInterval(() => document.querySelectorAll(".meta[data-ts]").forEach((m) => { m.textContent = ago(Number(m.dataset.ts)); }), 30000);
+
+  let first = true, failing = false;
+  async function poll() {
+    try {
+      const r = await fetch("/dock/activity.json?after=" + last, { cache: "no-store" });
+      const j = await r.json();
+      if (j.last < last) { last = 0; items.length = 0; first = true; }
+      const got = (j.items || []).filter((e) => e.n > last);
+      got.forEach((e) => { last = Math.max(last, e.n); });
+      if (first) { first = false; got.forEach((e) => { items.push(e); seenKinds.add(e.type); }); render(); }
+      else if (paused) waiting.push(...got);
+      else got.forEach(add);
+      if (failing) { failing = false; toast("OmniPulse is back"); }
+    } catch (e) {
+      if (!failing) { failing = true; toast("Can't reach OmniPulse: is it open, with the Stream Widget on?"); }
+    }
+    setTimeout(poll, failing ? 3000 : 1000);
+  }
+  render();
+  poll();
+</script>
+</body>
+</html>

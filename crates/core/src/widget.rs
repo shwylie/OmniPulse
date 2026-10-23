@@ -163,6 +163,10 @@ pub fn alert_push(fields: &serde_json::Map<String, Value>) -> Result<Value, Stri
         "image": Some(get("image")).filter(|u| (u.starts_with("https://") || u.starts_with("http://")) && u.len() <= 500).unwrap_or_default(),
         "platform": get("platform").chars().filter(|c| c.is_ascii_alphanumeric()).take(16).collect::<String>().to_lowercase(),
     });
+    // (the activity feed's too, to replay: unless it's a test, a replay, or the chatbot's, which it keeps itself)
+    if a["test"] != true && fields.get("feed").and_then(|v| v.as_bool()) != Some(false) {
+        crate::docks::activity_push(json!({ "type": a["type"], "platform": a["platform"], "user": a["user"], "amount": a["amount"], "message": a["message"], "alert": a }));
+    }
     let mut q = ALERTS.lock().unwrap();
     q.push_back(a.clone());
     while q.len() > ALERTS_KEPT {
@@ -266,8 +270,16 @@ fn reply(stream: &mut std::net::TcpStream, status: &str, ctype: &str, body: &[u8
     let _ = stream.write_all(body);
 }
 
+/// A reply for this PC's own pages only (the docks): no other site may read it
+fn reply_own(stream: &mut std::net::TcpStream, status: &str, ctype: &str, body: &[u8]) {
+    let head = format!("HTTP/1.1 {status}\r\nContent-Type: {ctype}\r\nContent-Length: {}\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n", body.len());
+    let _ = stream.write_all(head.as_bytes());
+    let _ = stream.write_all(body);
+}
+
 pub fn widget_serve(listener: TcpListener, gen: u64) {
     let _ = listener.set_nonblocking(true);
+    let port = listener.local_addr().map(|a| a.port()).unwrap_or(0);
     loop {
         if WIDGET_GEN.load(Ordering::SeqCst) != gen {
             break; // switched off or restarted
@@ -315,6 +327,22 @@ pub fn widget_serve(listener: TcpListener, gen: u64) {
                             Some((b, f)) => reply(&mut stream, "200 OK", media_type(&f), &b),
                             None => reply(&mut stream, "404 Not Found", "text/plain", b"Not found."),
                         }
+                    }
+                    // (OBS's docks: the chat, with its moderation; the activity feed, its alerts replayed)
+                    "/dock/chat" => reply_own(&mut stream, "200 OK", "text/html; charset=utf-8", crate::docks::CHAT_HTML.as_bytes()),
+                    "/dock/activity" => reply_own(&mut stream, "200 OK", "text/html; charset=utf-8", crate::docks::ACTIVITY_HTML.as_bytes()),
+                    "/dock/chat.json" | "/dock/activity.json" => {
+                        let after = query_map(query).get("after").and_then(|v| v.as_str().and_then(|a| a.parse().ok())).unwrap_or(0);
+                        let v = if path == "/dock/chat.json" { crate::docks::chat_json(after) } else { crate::docks::activity_json(after) };
+                        reply_own(&mut stream, "200 OK", "application/json", v.to_string().as_bytes());
+                    }
+                    "/dock/do" => {
+                        let body = req.split_once("\r\n\r\n").map(|x| x.1).unwrap_or("");
+                        let answer = if method != "POST" || !crate::docks::trusted(&req, port) { Err("only OmniPulse's own docks can".to_string()) } else {
+                            serde_json::from_str::<Value>(body).map_err(|_| "that isn't JSON".to_string()).and_then(crate::docks::dock_do)
+                        };
+                        let (status, v) = match answer { Ok(m) => ("200 OK", json!({ "ok": true, "message": m })), Err(e) => ("400 Bad Request", json!({ "ok": false, "error": e })) };
+                        reply_own(&mut stream, status, "application/json", v.to_string().as_bytes());
                     }
                     "/lyrics" | "/lyrics.html" => {
                         reply(&mut stream, "200 OK", "text/html; charset=utf-8", LYRICS_HTML.as_bytes());

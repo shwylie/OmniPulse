@@ -672,6 +672,7 @@ mod tests {
                     let text = String::from_utf8_lossy(&buf).to_string();
                     let line = text.lines().next().unwrap_or("").to_string();
                     let body = text.split_once("\r\n\r\n").map(|x| x.1.to_string()).unwrap_or_default();
+                    if line.contains("/v1/moderation") || line.starts_with("DELETE /v1/chat") { helixed.lock().unwrap().push(format!("{} {}", line.split(' ').take(2).collect::<Vec<_>>().join(" "), body)); }
                     let answer = if line.contains("/helix/") {
                         helixed.lock().unwrap().push(format!("{} {}", line.split(' ').take(2).collect::<Vec<_>>().join(" "), body));
                         if line.contains("/helix/users") { json!({ "data": [{ "id": "99", "display_name": "Baddie" }] }) } else { json!({ "data": [] }) }
@@ -789,6 +790,38 @@ mod tests {
         assert!(asked.lock().unwrap().iter().any(|a| a["op"] == "speak" && a["args"][1] == "Zira" && a["args"][2] == 3), "{:#?}", asked.lock().unwrap());
         assert!(asked.lock().unwrap().iter().any(|a| a["op"] == "overlay" && a["args"][0]["image"] == "C:/pics/a.png" && a["args"][0]["place"] == "bottom" && a["args"][0]["seconds"] == 4));
         assert!(said("Web Tool now please"), "{:#?}", posted.lock().unwrap());
+        // (OBS's docks: Kick's chat to the chat dock, its sub to the activity feed with its alert; the
+        // dock's buttons as Kick's and Twitch's APIs have them)
+        {
+            let a = asked.lock().unwrap().clone();
+            assert!(a.iter().any(|x| x["op"] == "dockChat" && x["args"][0]["platform"] == "kick" && x["args"][0]["text"] == "!hello" && x["args"][0]["id"] == "k2" && x["args"][0]["userId"] == "42"), "{a:#?}");
+            assert!(a.iter().any(|x| x["op"] == "dockActivity" && x["args"][0]["type"] == "sub" && x["args"][0]["user"] == "NewSub" && x["args"][0]["alert"]["type"] == "sub" && x["args"][0]["chatbot"] == true), "{a:#?}");
+            assert!(a.iter().any(|x| x["op"] == "alert" && x["args"][0]["user"] == "NewSub" && x["args"][0]["feed"] == false), "{a:#?}");
+        }
+        for cmd in [
+            json!({ "do": "delete", "platform": "kick", "id": "k2", "user": "Viewer", "userId": "42" }),
+            json!({ "do": "timeout", "platform": "kick", "id": "k2", "user": "Viewer", "userId": "42", "seconds": 600 }),
+            json!({ "do": "ban", "platform": "twitch", "id": "t1", "user": "Baddie", "userId": "77" }),
+            json!({ "do": "unban", "platform": "twitch", "user": "Baddie", "login": "baddie" }),
+        ] {
+            let r = rt.block_on(p.call("dock", vec![cmd.clone()]));
+            assert!(r.is_ok(), "{cmd} {r:?}");
+        }
+        let said_dock = rt.block_on(p.call("dock", vec![json!({ "do": "say", "text": "from the dock", "platform": "kick" })]));
+        assert_eq!(said_dock, Ok(json!("")));
+        let ran = rt.block_on(p.call("dock", vec![json!({ "do": "rerun", "event": { "type": "sub", "user": "NewSub", "platform": "kick", "chatbot": true } })])).unwrap();
+        assert_eq!(ran, json!("Ran sub's actions again for NewSub."));
+        let until = Instant::now() + Duration::from_secs(5);
+        while (!said("from the dock") || posted.lock().unwrap().iter().filter(|b| b["content"] == "Thanks NewSub").count() < 2) && Instant::now() < until { std::thread::sleep(Duration::from_millis(50)); }
+        let x = helixed.lock().unwrap().clone();
+        let has = |want: &str| x.iter().any(|l| l.contains(want));
+        assert!(has("DELETE /v1/chat/k2"), "{x:#?}");
+        assert!(has("POST /v1/moderation/bans") && has("\"duration\":10") && has("\"user_id\":42"), "{x:#?}");
+        assert!(has("POST /helix/moderation/bans?broadcaster_id=1&moderator_id=1") && has("\"user_id\":\"77\"") && has("DELETE /helix/moderation/bans?broadcaster_id=1&moderator_id=1&user_id=99"), "{x:#?}");
+        assert!(said("from the dock"), "{:#?}", posted.lock().unwrap());
+        // (run again: its thanks said again, and not put in the feed twice)
+        assert_eq!(posted.lock().unwrap().iter().filter(|b| b["content"] == "Thanks NewSub").count(), 2);
+        assert_eq!(asked.lock().unwrap().iter().filter(|x| x["op"] == "dockActivity" && x["args"][0]["user"] == "NewSub").count(), 1);
         drop(p);
         stop("chatbot");
     }
