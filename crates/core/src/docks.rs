@@ -13,6 +13,8 @@ use std::{
 
 pub const CHAT_HTML: &str = include_str!("../widget/dock-chat.html");
 pub const ACTIVITY_HTML: &str = include_str!("../widget/dock-activity.html");
+/// The multichat, on stream: the same chat, see-through, for a Browser source
+pub const MULTICHAT_HTML: &str = include_str!("../widget/multichat.html");
 
 const CHAT_KEPT: usize = 300;
 const ACTIVITY_KEPT: usize = 250;

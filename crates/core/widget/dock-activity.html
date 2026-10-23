@@ -49,9 +49,15 @@
   body.compact .meta { display: inline; margin-left: 6px; }
   .acts { display: flex; gap: 3px; opacity: 0.45; }
   .item:hover .acts, .acts:focus-within { opacity: 1; }
-  .acts button { border: 1px solid var(--line); background: var(--panel); border-radius: 4px; padding: 0 6px; font-size: 10.5px; line-height: 18px; color: var(--dim); white-space: nowrap; }
-  .acts button:hover { color: var(--text); border-color: var(--dim); }
-  .acts button.done { color: #111; background: var(--accent); border-color: var(--accent); }
+  /* icon buttons, and their tips (drawn here: shown above, kept inside the dock) */
+  .ib { position: relative; display: inline-flex; align-items: center; gap: 2px; border: 1px solid var(--line); background: var(--panel); border-radius: 6px; padding: 2px 4px; color: var(--dim); line-height: 1; cursor: pointer; }
+  .ib svg { width: 14px; height: 14px; fill: currentColor; }
+  .ib .w { font-size: 9.5px; font-weight: 700; }
+  .ib:hover { color: var(--text); border-color: var(--dim); }
+  .ib[data-tip]:hover::after { content: attr(data-tip); position: absolute; right: 0; bottom: calc(100% + 6px); white-space: nowrap; background: #000c; color: #fff; font-size: 11px; font-weight: 400; padding: 4px 8px; border-radius: 6px; pointer-events: none; z-index: 20; }
+  .acts .ib.done { color: #111; background: var(--accent); border-color: var(--accent); }
+  .icon { position: relative; }
+  .icon[data-tip]:hover::after { content: attr(data-tip); position: absolute; right: 0; top: calc(100% + 6px); white-space: nowrap; background: #000c; color: #fff; font-size: 11px; padding: 4px 8px; border-radius: 6px; pointer-events: none; z-index: 20; }
   .pf { display: inline-block; font-size: 0.7em; font-weight: 700; border-radius: 3px; padding: 0 3px; margin-right: 4px; vertical-align: 1px; color: #111; }
   .pf.twitch { background: #a970ff; } .pf.kick { background: #53fc18; } .pf.other { background: #8b91a1; }
   #empty { color: var(--dim); text-align: center; padding: 24px 16px; font-size: 12px; }
@@ -63,8 +69,8 @@
 <header>
   <h1>Activity</h1>
   <span class="count" id="count"></span>
-  <button class="icon" id="pause" title="Pause the feed" aria-label="Pause" aria-pressed="false">&#10074;&#10074;</button>
-  <button class="icon" id="gear" title="Which events, and how they look" aria-label="Settings">&#9881;</button>
+  <button class="icon" id="pause" data-tip="Pause the feed" aria-label="Pause" aria-pressed="false">&#10074;&#10074;</button>
+  <button class="icon" id="gear" data-tip="Which events show, and how they look" aria-label="Settings">&#9881;</button>
 </header>
 <div id="settings">
   <h2>Show</h2>
@@ -164,6 +170,34 @@
     return (today ? "" : d.toLocaleDateString([], { day: "numeric", month: "short" }) + " ") + String(d.getHours()).padStart(2, "0") + ":" + String(d.getMinutes()).padStart(2, "0");
   }
 
+  // ---------- icons, and a tip on hover saying what each does ----------
+  const ICON = {
+    trash: "M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z",
+    timer: "M15 1H9v2h6V1zm-4 13h2V8h-2v6zm8.03-6.61l1.42-1.42c-.43-.51-.9-.99-1.41-1.41l-1.42 1.42A8.96 8.96 0 0 0 12 4c-4.97 0-9 4.03-9 9s4.02 9 9 9 9-4.03 9-9c0-2.12-.74-4.07-1.97-5.61zM12 20c-3.87 0-7-3.13-7-7s3.13-7 7-7 7 3.13 7 7-3.13 7-7 7z",
+    ban: "M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.42 0-8-3.58-8-8 0-1.85.63-3.55 1.69-4.9L16.9 18.31A7.902 7.902 0 0 1 12 20zm6.31-3.1L7.1 5.69A7.902 7.902 0 0 1 12 4c4.42 0 8 3.58 8 8 0 1.85-.63 3.55-1.69 4.9z",
+    undo: "M12.5 8c-2.65 0-5.05.99-6.9 2.6L2 7v9h9l-3.62-3.62c1.39-1.16 3.16-1.88 5.12-1.88 3.54 0 6.55 2.31 7.6 5.5l2.37-.78C21.08 11.03 17.15 8 12.5 8z",
+    send: "M2.01 21L23 12 2.01 3 2 10l15 2-15 2z",
+    replay: "M12 5V1L7 6l5 5V7c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6H4c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8-8z",
+    bolt: "M7 2v11h3v9l7-12h-4l4-8z",
+    check: "M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z",
+    eraser: "M15.14 3c-.51 0-1.02.2-1.41.59L2.59 14.73c-.78.78-.78 2.05 0 2.83L5.03 20h7.66l8.72-8.72c.79-.78.79-2.05 0-2.83l-4.85-4.86c-.39-.39-.9-.59-1.42-.59zM6.24 18l-2.24-2.24 6.07-6.07 4.24 4.24L10.24 18H6.24z",
+  };
+  function svg(name) {
+    const NS = "http://www.w3.org/2000/svg";
+    const s = document.createElementNS(NS, "svg"); s.setAttribute("viewBox", "0 0 24 24"); s.setAttribute("aria-hidden", "true");
+    const p = document.createElementNS(NS, "path"); p.setAttribute("d", ICON[name]); s.append(p);
+    return s;
+  }
+  // (an icon button: its icon, a word beside it if it needs one, and its tip)
+  function iconButton(name, tip, word, cls, go) {
+    const b = document.createElement("button");
+    b.type = "button"; b.className = "ib" + (cls ? " " + cls : ""); b.dataset.tip = tip; b.setAttribute("aria-label", tip);
+    b.append(svg(name));
+    if (word) { const w = document.createElement("span"); w.className = "w"; w.textContent = word; b.append(w); }
+    b.onclick = (e) => { e.stopPropagation(); go(b); };
+    return b;
+  }
+
   function toast(text) { const t = $("toast"); t.textContent = text; t.classList.add("on"); clearTimeout(toast.t); toast.t = setTimeout(() => t.classList.remove("on"), 2200); }
 
   async function act(cmd, b, label) {
@@ -171,7 +205,7 @@
       const r = await fetch("/dock/do", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(cmd) });
       const j = await r.json();
       if (!j.ok) { toast("Couldn't: " + (j.error || "no answer")); return; }
-      if (b) { b.classList.add("done"); b.textContent = label; setTimeout(() => { b.classList.remove("done"); b.textContent = b.dataset.label; }, 1500); }
+      if (b) { const was = b.dataset.tip; b.classList.add("done"); b.dataset.tip = label; setTimeout(() => { b.classList.remove("done"); b.dataset.tip = was; }, 1500); }
     } catch (e) { toast("OmniPulse isn't answering"); }
   }
 
@@ -191,8 +225,8 @@
     if (opt.msg && said && !["poll", "prediction", "game"].includes(e.type)) { const m = document.createElement("div"); m.className = "msg"; m.textContent = "“" + said + "”"; what.append(m); }
     const meta = document.createElement("div"); meta.className = "meta"; meta.textContent = ago(e.ts); meta.dataset.ts = e.ts; what.append(meta);
     const acts = document.createElement("div"); acts.className = "acts";
-    if (e.alert) { const b = document.createElement("button"); b.type = "button"; b.textContent = b.dataset.label = "Replay"; b.title = "Show its alert again"; b.onclick = () => act({ do: "replay", n: e.n }, b, "Replayed"); acts.append(b); }
-    if (e.chatbot) { const b = document.createElement("button"); b.type = "button"; b.textContent = b.dataset.label = "Run Again"; b.title = "Run the chatbot's actions for it again (its thanks in chat, its sounds...)"; b.onclick = () => act({ do: "rerun", n: e.n }, b, "Ran"); acts.append(b); }
+    if (e.alert) acts.append(iconButton("replay", "Show its alert again", "", "", (b) => act({ do: "replay", n: e.n }, b, "Replayed")));
+    if (e.chatbot) acts.append(iconButton("bolt", "Run the chatbot's actions for it again (its thanks in chat, its sounds...)", "", "", (b) => act({ do: "rerun", n: e.n }, b, "Ran them again")));
     r.append(g, what, acts);
     return r;
   }
@@ -232,7 +266,7 @@
     paused = !paused;
     $("pause").setAttribute("aria-pressed", String(paused));
     $("pause").innerHTML = paused ? "&#9654;" : "&#10074;&#10074;";
-    $("pause").title = paused ? "Carry on (" + waiting.length + " waiting)" : "Pause the feed";
+    $("pause").dataset.tip = paused ? "Carry on (" + waiting.length + " waiting)" : "Pause the feed";
     if (!paused) { waiting.forEach(add); waiting = []; }
   };
   $("allOn").onclick = () => setOpt("hidden", []);

@@ -330,6 +330,7 @@ pub fn widget_serve(listener: TcpListener, gen: u64) {
                     }
                     // (OBS's docks: the chat, with its moderation; the activity feed, its alerts replayed)
                     "/dock/chat" => reply_own(&mut stream, "200 OK", "text/html; charset=utf-8", crate::docks::CHAT_HTML.as_bytes()),
+                    "/chat" => reply_own(&mut stream, "200 OK", "text/html; charset=utf-8", crate::docks::MULTICHAT_HTML.as_bytes()),
                     "/dock/activity" => reply_own(&mut stream, "200 OK", "text/html; charset=utf-8", crate::docks::ACTIVITY_HTML.as_bytes()),
                     "/dock/chat.json" | "/dock/activity.json" => {
                         let after = query_map(query).get("after").and_then(|v| v.as_str().and_then(|a| a.parse().ok())).unwrap_or(0);

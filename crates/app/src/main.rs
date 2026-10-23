@@ -37,6 +37,7 @@ mod lang;
 mod panels;
 mod flows;
 mod botimport;
+mod botpage;
 mod hide;
 mod lookalike;
 mod apple_import;
@@ -6106,6 +6107,279 @@ fn offset_apply(shared: &Shared) {
 thread_local! {
     /// the plugin whose settings are open, and what they're set to meanwhile
     static PF_EDIT: RefCell<Option<(String, serde_json::Map<String, serde_json::Value>)>> = const { RefCell::new(None) };
+    /// what they were when the page opened (what's changed since: not saved yet)
+    static PF_ORIG: RefCell<serde_json::Map<String, serde_json::Value>> = RefCell::new(serde_json::Map::new());
+    /// where the page was being left for, while it asks whether to save
+    static LEAVE_TO: RefCell<String> = const { RefCell::new(String::new()) };
+    /// the chatbot's page: what the chatbot last said is going on, the sheet open, the setup step asked for,
+    /// what's been tried in its chat, and the sheet's and step's lines as last drawn (not drawn again unchanged)
+    static BOT_STATUS: RefCell<serde_json::Value> = const { RefCell::new(serde_json::Value::Null) };
+    static BOT_SHEET: RefCell<String> = const { RefCell::new(String::new()) };
+    static BOT_FOCUS: RefCell<String> = const { RefCell::new(String::new()) };
+    static BOT_TRIED: RefCell<Vec<(String, String)>> = const { RefCell::new(Vec::new()) };
+    static BOT_DRAWN: RefCell<(String, String)> = const { RefCell::new((String::new(), String::new())) };
+}
+
+/// A field typed in: its pulse, once it's changed (only its own row, so what's being typed stays put)
+fn pf_paint_changed(shared: &Shared) {
+    let Some(ui) = shared.borrow().ui.upgrade() else { return };
+    let Some((_, vals)) = PF_EDIT.with(|e| e.borrow().clone()) else { return };
+    let model = ui.get_pf_fields();
+    for i in 0..model.row_count() {
+        let Some(mut row) = model.row_data(i) else { continue };
+        let changed = row.kind != "togglecfg" && pf_changed(row.key.as_str());
+        if row.changed == changed { continue; }
+        row.changed = changed;
+        if matches!(row.kind.as_str(), "text" | "password" | "number") {
+            row.value = vals.get(row.key.as_str()).map(|v| match v { serde_json::Value::String(s) => s.clone(), serde_json::Value::Null => String::new(), x => x.to_string() }).unwrap_or_default().into();
+        }
+        model.set_row_data(i, row);
+    }
+}
+
+/// How many of the page's settings are changed and not saved yet
+fn pf_changes() -> usize {
+    let Some((_, vals)) = PF_EDIT.with(|e| e.borrow().clone()) else { return 0 };
+    PF_ORIG.with(|o| {
+        let o = o.borrow();
+        let mut keys: Vec<&String> = vals.keys().chain(o.keys()).collect();
+        keys.sort();
+        keys.dedup();
+        keys.into_iter().filter(|k| vals.get(*k) != o.get(*k)).count()
+    })
+}
+
+fn pf_changed(key: &str) -> bool {
+    let now = PF_EDIT.with(|e| e.borrow().as_ref().and_then(|(_, v)| v.get(key).cloned()));
+    now != PF_ORIG.with(|o| o.borrow().get(key).cloned())
+}
+
+/// The page's Save, pulsing while there's something to save
+fn pf_mark(shared: &Shared) {
+    let n = pf_changes();
+    if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_pf_dirty(n > 0); ui.set_pf_changes(n as i32); }
+}
+
+/// Leaving the page (Back, its X, a crumb): asked first when something's unsaved
+fn pf_leave(shared: &Shared, to: &str) {
+    if PF_EDIT.with(|e| e.borrow().is_some()) && pf_changes() > 0 {
+        LEAVE_TO.with(|l| *l.borrow_mut() = to.to_string());
+        if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_leave_ask(true); }
+        return;
+    }
+    leave_do(shared, to);
+}
+
+fn leave_do(shared: &Shared, to: &str) {
+    if let Some(i) = to.strip_prefix("crumb:").and_then(|i| i.parse::<usize>().ok()) { return crumb_go(shared, i); }
+    if to == "close" { return settings_close(shared); }
+    PF_EDIT.with(|e| e.borrow_mut().take());
+    if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_pf_open(false); }
+}
+
+/// The question's answer: saved and left, left as it was, or stayed; or (the page's own Put Back) as it was, staying
+fn leave_choice(shared: &Shared, c: &str) {
+    if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_leave_ask(false); }
+    let to = LEAVE_TO.with(|l| std::mem::take(&mut *l.borrow_mut()));
+    match c {
+        "save" => { pf_save(shared); if !to.is_empty() { leave_do(shared, &to); } }
+        "discard" => leave_do(shared, if to.is_empty() { "back" } else { &to }),
+        "cancel" => leave_do(shared, "back"),
+        "discard-stay" => {
+            let orig = PF_ORIG.with(|o| o.borrow().clone());
+            PF_EDIT.with(|e| if let Some((_, v)) = e.borrow_mut().as_mut() { *v = orig; });
+            BOT_DRAWN.with(|d| *d.borrow_mut() = Default::default());
+            pf_paint(shared);
+            pf_mark(shared);
+        }
+        _ => {}
+    }
+}
+
+// ---------- the chatbot's own page ----------
+
+fn bot_manifest() -> Option<omnipulse_core::plugins::Manifest> {
+    omnipulse_core::plugins::list().into_iter().find(|p| p.manifest.id == botpage::BOT).map(|p| p.manifest)
+}
+
+/// The chatbot's settings as the page shows them: as saved, the page's changes over them
+fn bot_current(shared: &Shared) -> serde_json::Map<String, serde_json::Value> {
+    let saved = bot_manifest().map(|m| plugrun::settings_of(&m, &shared.borrow().web.prefs)).and_then(|v| v.as_object().cloned()).unwrap_or_default();
+    let edit = PF_EDIT.with(|e| e.borrow().as_ref().filter(|(id, _)| id == botpage::BOT).map(|(_, v)| v.clone())).unwrap_or_default();
+    PF_ORIG.with(|o| botpage::current(&saved, &edit, &o.borrow()))
+}
+
+fn bot_fields(list: Vec<botpage::Field>) -> (Vec<BotField>, String) {
+    let sig = list.iter().map(|x| format!("{}|{}|{}|{}", x.key, x.kind, x.value, x.label)).collect::<Vec<_>>().join("\n");
+    let rows = list.into_iter().map(|x| BotField { changed: !x.key.is_empty() && !x.key.contains(':') && pf_changed(&x.key), key: x.key.into(), kind: x.kind.into(), label: x.label.into(), note: x.note.into(), value: x.value.into(), extra: x.extra.into(), n: x.n }).collect();
+    (rows, sig)
+}
+
+fn bot_paint(shared: &Shared) {
+    let Some(ui) = shared.borrow().ui.upgrade() else { return };
+    let cur = bot_current(shared);
+    let st = BOT_STATUS.with(|b| b.borrow().clone());
+    let running = plugrun::get(botpage::BOT).is_some() && st["running"].as_bool() != Some(false);
+    fn model<T: Clone + 'static>(v: Vec<T>) -> ModelRc<T> { ModelRc::from(Rc::new(VecModel::from(v))) }
+    let setup = !matches!(cur.get("setupDone"), Some(serde_json::Value::Bool(true)));
+    ui.set_bot_setup(setup);
+    let (name, sub, stats) = botpage::card(&cur, &st, running);
+    ui.set_bot_name(name.into());
+    ui.set_bot_sub(sub.into());
+    ui.set_bot_stats(stats.into());
+    ui.set_bot_running(running);
+    ui.set_bot_tiles(model(botpage::tiles(&cur, &st, running).into_iter().map(|(id, name, state, l1, l2)| BotTile { id: id.into(), name: name.into(), state: state.into(), line1: l1.into(), line2: l2.into() }).collect()));
+    ui.set_bot_feats(model(botpage::feats(&cur, &st).into_iter().map(|(id, name, note, on, open)| BotFeat { id: id.into(), name: name.into(), note: note.into(), on, open, changed: pf_changed(botpage::key_of(&format!("feat:{id}"))) && id != "actions" && id != "games" }).collect()));
+    let focus = BOT_FOCUS.with(|f| f.borrow().clone());
+    let now = botpage::step_now(&cur, &focus);
+    ui.set_bot_steps(model(botpage::steps(&cur).into_iter().map(|(id, title, note, done, optional)| BotStep { id: id.into(), title: title.into(), note: note.into(), state: botpage::step_state(&cur, id, done, &now).into(), optional }).collect()));
+    let log: Vec<BotLine> = st["recent"].as_array().into_iter().flatten().take(8).map(|l| BotLine { who: l["who"].as_str().unwrap_or("").into(), heard: l["heard"].as_str().unwrap_or("").into(), did: l["did"].as_str().unwrap_or("").into(), platform: l["platform"].as_str().unwrap_or("twitch").into() }).collect();
+    ui.set_bot_log(model(log));
+    ui.set_bot_tried(model(BOT_TRIED.with(|t| t.borrow().iter().map(|(w, x)| BotLine { who: w.as_str().into(), heard: Default::default(), did: x.as_str().into(), platform: "twitch".into() }).collect())));
+    // (a sheet's and the step's lines: drawn again only when they've changed, so what's being typed stays put)
+    let sheet = BOT_SHEET.with(|b| b.borrow().clone());
+    let (title, lines) = botpage::sheet(&sheet, &cur);
+    let (rows, sig) = bot_fields(lines);
+    let (srows, ssig) = bot_fields(if setup { botpage::step_fields(&now, &cur) } else { Vec::new() });
+    let (was, swas) = BOT_DRAWN.with(|d| d.borrow().clone());
+    if sig != was || sheet != ui.get_bot_sheet().as_str() { ui.set_bot_sheet_fields(model(rows)); }
+    if ssig != swas { ui.set_bot_step_fields(model(srows)); }
+    BOT_DRAWN.with(|d| *d.borrow_mut() = (sig, ssig));
+    ui.set_bot_sheet(sheet.into());
+    ui.set_bot_sheet_title(title.into());
+}
+
+/// What the chatbot says is going on: asked now, then every couple of seconds while its page is open
+fn bot_poll(shared: &Shared) {
+    let open = shared.borrow().ui.upgrade().map(|ui| ui.get_pf_open() && ui.get_bot_page()).unwrap_or(false);
+    if !open { return; }
+    let (rt, weak) = { let a = shared.borrow(); (a.rt.clone(), a.ui.clone()) };
+    if let Some(p) = plugrun::get(botpage::BOT) {
+        rt.spawn(async move {
+            let st = p.call("status", vec![]).await.unwrap_or(serde_json::Value::Null);
+            let _ = weak.upgrade_in_event_loop(move |_| {
+                BOT_STATUS.with(|b| *b.borrow_mut() = st);
+                SHARED.with(|s| if let Some(sh) = s.borrow().clone() { bot_paint(&sh); });
+            });
+        });
+    } else {
+        BOT_STATUS.with(|b| *b.borrow_mut() = serde_json::Value::Null);
+        bot_paint(shared);
+    }
+    let s = shared.clone();
+    slint::Timer::single_shot(std::time::Duration::from_secs(2), move || bot_poll(&s));
+}
+
+/// The chatbot's settings kept at once, without its page's Save (its setup's progress: nothing to restart for)
+fn bot_keep(shared: &Shared, key: &str, value: serde_json::Value) {
+    let all = {
+        let mut a = shared.borrow_mut();
+        let mut all = a.web.prefs["pluginSettings"].as_object().cloned().unwrap_or_default();
+        let mut mine = all.get(botpage::BOT).and_then(|v| v.as_object()).cloned().unwrap_or_default();
+        mine.insert(key.into(), value.clone());
+        all.insert(botpage::BOT.into(), serde_json::Value::Object(mine));
+        let all = serde_json::Value::Object(all);
+        if let Some(o) = a.web.prefs.as_object_mut() { o.insert("pluginSettings".into(), all.clone()); }
+        all
+    };
+    if std::env::var_os("OMNIPULSE_SELFTEST").is_none() { webstate::save_pref("pluginSettings", all); }
+    PF_EDIT.with(|e| if let Some((_, v)) = e.borrow_mut().as_mut() { v.insert(key.into(), value.clone()); });
+    PF_ORIG.with(|o| { o.borrow_mut().insert(key.into(), value); });
+}
+
+fn bot_set(shared: &Shared, key: &str, v: &str) {
+    let key = botpage::key_of(key).to_string();
+    let manifest = bot_manifest().map(|m| m.settings).unwrap_or_default();
+    let value = botpage::value_of(&manifest, &key, v);
+    let toggle = value.is_boolean();
+    PF_EDIT.with(|e| if let Some((_, vals)) = e.borrow_mut().as_mut() { vals.insert(key, value); });
+    pf_mark(shared);
+    // (a switch: seen at once, pulsing; typing: left as it's typed)
+    if toggle { bot_paint(shared); }
+}
+
+fn bot_act(shared: &Shared, act: &str) {
+    let say = |t: &str| if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_status(t.into()); };
+    if let Some(id) = act.strip_prefix("sheet:") {
+        BOT_SHEET.with(|b| *b.borrow_mut() = id.to_string());
+        return bot_paint(shared);
+    }
+    if let Some(url) = act.strip_prefix("url:") { let _ = omnipulse_core::open_url(url.to_string()); return; }
+    if let Some(text) = act.strip_prefix("copy:") { if share::copy(text).is_ok() { say("Copied."); } return; }
+    if let Some(id) = act.strip_prefix("step:") { BOT_FOCUS.with(|f| *f.borrow_mut() = id.to_string()); BOT_DRAWN.with(|d| *d.borrow_mut() = Default::default()); return bot_paint(shared); }
+    match act {
+        "run" => { set_toggle(shared, &format!("plugRun_{}", botpage::BOT)); return bot_poll_soon(shared); }
+        "actions" => return flows_open(shared),
+        "setup:done" => { bot_keep(shared, "setupDone", serde_json::json!(true)); BOT_FOCUS.with(|f| f.borrow_mut().clear()); return bot_paint(shared); }
+        "setup:again" => { bot_keep(shared, "setupDone", serde_json::json!(false)); bot_keep(shared, "setupSkip", serde_json::json!([])); BOT_FOCUS.with(|f| f.borrow_mut().clear()); BOT_DRAWN.with(|d| *d.borrow_mut() = Default::default()); return bot_paint(shared); }
+        _ => {}
+    }
+    if let Some(id) = act.strip_prefix("skip:").or_else(|| act.strip_prefix("next:")) {
+        // (Next: what's been set on the step saved first; a step not done: skipped for now)
+        if act.starts_with("next:") && pf_changes() > 0 { pf_save(shared); }
+        let cur = bot_current(shared);
+        let done = botpage::steps(&cur).into_iter().find(|x| x.0 == id).map(|x| x.3).unwrap_or(false);
+        if id == "features" && act.starts_with("next:") { bot_keep(shared, "setupDone", serde_json::json!(true)); }
+        else if !done {
+            let mut skip: Vec<serde_json::Value> = cur.get("setupSkip").and_then(|v| v.as_array()).cloned().unwrap_or_default();
+            if !skip.iter().any(|x| x == id) { skip.push(serde_json::json!(id)); }
+            bot_keep(shared, "setupSkip", serde_json::json!(skip));
+        }
+        BOT_FOCUS.with(|f| f.borrow_mut().clear());
+        BOT_DRAWN.with(|d| *d.borrow_mut() = Default::default());
+        return bot_paint(shared);
+    }
+    // an account's icon: its sign-in (here, or its link copied) or its sign-out, with the page's values as they are
+    let Some(method) = botpage::method(act) else { return };
+    if act.contains(":kick:") && !act.starts_with("out:") { PF_EDIT.with(|e| if let Some((_, v)) = e.borrow_mut().as_mut() { v.insert("kickOn".into(), serde_json::json!(true)); }); pf_mark(shared); }
+    let Some(p) = plugrun::get(botpage::BOT) else {
+        // (not running: started, then asked again)
+        if !plugin_runs(&shared.borrow().web.prefs, botpage::BOT) { set_toggle(shared, &format!("plugRun_{}", botpage::BOT)); }
+        plugins_start(shared);
+        let (s2, a2) = (shared.clone(), act.to_string());
+        say("Starting the chatbot...");
+        slint::Timer::single_shot(std::time::Duration::from_millis(900), move || if plugrun::get(botpage::BOT).is_some() { bot_act(&s2, &a2); });
+        return;
+    };
+    let vals = serde_json::Value::Object(bot_current(shared));
+    let (rt, weak) = { let a = shared.borrow(); (a.rt.clone(), a.ui.clone()) };
+    let method = method.to_string();
+    rt.spawn(async move {
+        let r = p.call(&method, vec![vals]).await;
+        let _ = weak.upgrade_in_event_loop(move |ui| ui.set_status(match r { Ok(v) => v.as_str().map(String::from).unwrap_or_else(|| "Done.".into()), Err(e) => e }.into()));
+    });
+    bot_poll_soon(shared);
+}
+
+fn bot_poll_soon(shared: &Shared) {
+    let s = shared.clone();
+    slint::Timer::single_shot(std::time::Duration::from_millis(700), move || { BOT_DRAWN.with(|d| *d.borrow_mut() = Default::default()); bot_paint(&s); });
+}
+
+/// A line typed in its chat to try it: what it'd say and do, nothing sent, nothing done
+fn bot_try(shared: &Shared, text: &str) {
+    BOT_TRIED.with(|t| { let mut t = t.borrow_mut(); t.push(("You".into(), text.to_string())); });
+    let Some(p) = plugrun::get(botpage::BOT) else {
+        BOT_TRIED.with(|t| t.borrow_mut().push(("Bot".into(), "(it's stopped: start it, top right of its card, to try it)".into())));
+        return bot_paint(shared);
+    };
+    bot_paint(shared);
+    let (rt, weak) = { let a = shared.borrow(); (a.rt.clone(), a.ui.clone()) };
+    let text = text.to_string();
+    rt.spawn(async move {
+        let r = p.call("tryChat", vec![serde_json::json!(text), serde_json::json!("twitch"), serde_json::json!(false)]).await;
+        let _ = weak.upgrade_in_event_loop(move |_| {
+            let lines: Vec<String> = match r { Ok(v) => v.as_array().into_iter().flatten().filter_map(|x| x.as_str().map(String::from)).collect(), Err(e) => vec![format!("(couldn't: {e})")] };
+            BOT_TRIED.with(|t| {
+                let mut t = t.borrow_mut();
+                if lines.is_empty() { t.push(("Bot".into(), "(nothing answers that: no command or action matches it)".into())); }
+                for l in lines { t.push(("Bot".into(), l)); }
+                let n = t.len();
+                if n > 8 { t.drain(..n - 8); }
+            });
+            SHARED.with(|s| if let Some(sh) = s.borrow().clone() { bot_paint(&sh); });
+        });
+    });
 }
 
 // ---------- Settings panels (crate::panels): a switch's settings, in the plugins' dialog ----------
@@ -6267,8 +6541,11 @@ fn panel_open(shared: &Shared, name: &str) {
     panel_keys(shared);
     if name == "plugins" { panels::PLUG_PENDING.with(|p| p.borrow_mut().take()); }
     let vals = panels::values(name, &shared.borrow().web.prefs);
+    PF_ORIG.with(|o| *o.borrow_mut() = vals.clone());
     PF_EDIT.with(|e| *e.borrow_mut() = Some((format!("panel:{name}"), vals)));
+    if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_bot_page(false); ui.set_leave_ask(false); }
     pf_paint(shared);
+    pf_mark(shared);
     if let Some(ui) = shared.borrow().ui.upgrade() {
         let head = match name.strip_prefix("alert:") { Some(k) => alerts::name(&shared.borrow().web.prefs, k), None => panels::title(name) };
         let cat = match name {
@@ -6327,7 +6604,7 @@ fn panel_paint(shared: &Shared, name: &str, vals: &serde_json::Map<String, serde
             "info" | "button" => f["value"].as_str().unwrap_or("").to_string(),
             _ => text(&now),
         };
-        PlugField { label: f["label"].as_str().unwrap_or("").into(), note: f["note"].as_str().unwrap_or("").into(), value: value.into(), kind: kind.into(), options: ModelRc::from(Rc::new(VecModel::from(options))), key: key.into(), at }
+        PlugField { changed: kind != "togglecfg" && pf_changed(&key), label: f["label"].as_str().unwrap_or("").into(), note: f["note"].as_str().unwrap_or("").into(), value: value.into(), kind: kind.into(), options: ModelRc::from(Rc::new(VecModel::from(options))), key: key.into(), at }
     }).collect();
     PANEL_FIELDS.with(|p| *p.borrow_mut() = fields);
     if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_pf_fields(ModelRc::from(Rc::new(VecModel::from(rows)))); }
@@ -6893,8 +7170,14 @@ fn pf_open(shared: &Shared, id: &str) {
     let Some(p) = omnipulse_core::plugins::list().into_iter().find(|p| p.manifest.id == id) else { return };
     let now = plugrun::settings_of(&p.manifest, &shared.borrow().web.prefs);
     let vals = now.as_object().cloned().unwrap_or_default();
+    PF_ORIG.with(|o| *o.borrow_mut() = vals.clone());
     PF_EDIT.with(|e| *e.borrow_mut() = Some((id.to_string(), vals)));
+    let bot = id == botpage::BOT;
+    if bot { BOT_SHEET.with(|b| b.borrow_mut().clear()); BOT_FOCUS.with(|f| f.borrow_mut().clear()); BOT_DRAWN.with(|d| *d.borrow_mut() = Default::default()); }
+    if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_bot_page(bot); ui.set_leave_ask(false); }
     pf_paint(shared);
+    pf_mark(shared);
+    if bot { bot_poll(shared); }
     if let Some(ui) = shared.borrow().ui.upgrade() {
         let cat = if p.manifest.section.is_empty() { "Plugins".to_string() } else { p.manifest.section.clone() };
         crumbs_set(&ui, vec![("Settings".into(), "root".into()), (cat.clone(), format!("cat:{cat}"))]);
@@ -6915,6 +7198,7 @@ fn pf_fields(id: &str) -> Vec<serde_json::Value> {
 fn pf_paint(shared: &Shared) {
     let Some((id, vals)) = PF_EDIT.with(|e| e.borrow().clone()) else { return };
     if let Some(name) = id.strip_prefix("panel:") { return panel_paint(shared, name, &vals); }
+    if id == botpage::BOT { return bot_paint(shared); }
     let text = |v: &serde_json::Value| match v { serde_json::Value::String(s) => s.clone(), serde_json::Value::Null => String::new(), x => x.to_string() };
     let rows: Vec<PlugField> = pf_fields(&id).iter().filter_map(|f| {
         let key = f["key"].as_str()?.to_string();
@@ -6923,7 +7207,7 @@ fn pf_paint(shared: &Shared) {
         let at = f["options"].as_array().and_then(|o| o.iter().position(|o| Some(o) == vals.get(&key))).unwrap_or(0) as i32;
         // (the chatbot's Actions: a button that opens their page)
         let (kind, press) = if kind == "actions" { ("button".to_string(), "Open Actions") } else { let p = f["press"].as_str().unwrap_or("Go"); (kind, p) };
-        Some(PlugField { label: f["label"].as_str().unwrap_or(&key).into(), note: f["note"].as_str().unwrap_or("").into(), value: if kind == "button" { press.into() } else { vals.get(&key).map(text).unwrap_or_default().into() }, kind: kind.into(), options: ModelRc::from(Rc::new(VecModel::from(options))), key: key.into(), at })
+        Some(PlugField { changed: pf_changed(&key), label: f["label"].as_str().unwrap_or(&key).into(), note: f["note"].as_str().unwrap_or("").into(), value: if kind == "button" { press.into() } else { vals.get(&key).map(text).unwrap_or_default().into() }, kind: kind.into(), options: ModelRc::from(Rc::new(VecModel::from(options))), key: key.into(), at })
     }).collect();
     if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_pf_fields(ModelRc::from(Rc::new(VecModel::from(rows)))); }
 }
@@ -6990,6 +7274,17 @@ fn pf_save(shared: &Shared) {
     plugrun::stop(&id);
     plugins_start(shared);
     paint_plats(&shared.borrow());
+    if id == botpage::BOT {
+        PF_ORIG.with(|o| *o.borrow_mut() = vals.clone());
+        PF_EDIT.with(|e| *e.borrow_mut() = Some((id, vals)));
+        BOT_DRAWN.with(|d| *d.borrow_mut() = Default::default());
+        pf_mark(shared);
+        bot_paint(shared);
+        if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_status("Chatbot settings saved.".into()); }
+        return;
+    }
+    PF_ORIG.with(|o| o.borrow_mut().clear());
+    pf_mark(shared);
     if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_pf_open(false); ui.set_status("Plugin settings saved.".into()); }
 }
 
@@ -11244,9 +11539,19 @@ fn main() -> Result<(), slint::PlatformError> {
         }
     });
     let s = shared.clone();
-    ui.on_pf_set(move |i, v| pf_set(&s, i as usize, &v));
+    ui.on_pf_set(move |i, v| { pf_set(&s, i as usize, &v); pf_mark(&s); pf_paint_changed(&s); });
     let s = shared.clone();
     ui.on_pf_save(move || pf_save(&s));
+    let s = shared.clone();
+    ui.on_pf_leave(move |to| pf_leave(&s, &to));
+    let s = shared.clone();
+    ui.on_leave_choice(move |c| leave_choice(&s, &c));
+    let s = shared.clone();
+    ui.on_bot_set(move |k, v| bot_set(&s, &k, &v));
+    let s = shared.clone();
+    ui.on_bot_act(move |a| bot_act(&s, &a));
+    let s = shared.clone();
+    ui.on_bot_try(move |t| bot_try(&s, &t));
     paint_settings(&shared.borrow());
     let s = shared.clone();
     ui.on_like_toggle(move || like_toggle(&s));

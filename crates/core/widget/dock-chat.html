@@ -25,6 +25,9 @@
   .chip.kick[aria-pressed="true"] { color: var(--kick); }
   .icon { border: 0; background: transparent; color: var(--dim); padding: 2px 5px; border-radius: 6px; font-size: 14px; line-height: 1; }
   .icon:hover { color: var(--text); background: var(--line); }
+  .icon { position: relative; }
+  .icon[data-tip]:hover::after, .chip[data-tip]:hover::after { content: attr(data-tip); position: absolute; right: 0; top: calc(100% + 6px); white-space: nowrap; background: #000c; color: #fff; font-size: 11px; padding: 4px 8px; border-radius: 6px; pointer-events: none; z-index: 20; }
+  .chip { position: relative; }
 
   #settings { display: none; padding: 8px 10px; background: var(--panel); border-bottom: 1px solid var(--line); gap: 6px 14px; flex-wrap: wrap; font-size: 12px; flex: none; }
   #settings.open { display: flex; }
@@ -53,10 +56,17 @@
   .msg:hover .mod, .mod:focus-within { opacity: 1; }
   body.modhover .mod { display: none; }
   body.modhover .msg:hover .mod, body.modhover .mod:focus-within { display: inline-flex; }
-  .mod button { border: 1px solid var(--line); background: var(--panel); border-radius: 4px; padding: 0 5px; font-size: 10.5px; line-height: 16px; color: var(--dim); }
-  .mod button:hover { color: var(--text); border-color: var(--dim); }
-  .mod button.ban:hover, .mod button.sure { color: #fff; background: var(--danger); border-color: var(--danger); }
-  .mod button.unban:hover { color: #111; background: var(--ok); border-color: var(--ok); }
+  /* icon buttons, and their tips (drawn here: shown above, kept inside the dock) */
+  .ib { position: relative; display: inline-flex; align-items: center; gap: 2px; border: 1px solid var(--line); background: var(--panel); border-radius: 6px; padding: 2px 4px; color: var(--dim); line-height: 1; cursor: pointer; }
+  .ib svg { width: 14px; height: 14px; fill: currentColor; }
+  .ib .w { font-size: 9.5px; font-weight: 700; }
+  .ib:hover { color: var(--text); border-color: var(--dim); }
+  .ib[data-tip]:hover::after { content: attr(data-tip); position: absolute; right: 0; bottom: calc(100% + 6px); white-space: nowrap; background: #000c; color: #fff; font-size: 11px; font-weight: 400; padding: 4px 8px; border-radius: 6px; pointer-events: none; z-index: 20; }
+  .mod .ib.ban:hover, .mod .ib.sure { color: #fff; background: var(--danger); border-color: var(--danger); }
+  .mod .ib.unban:hover { color: #111; background: var(--ok); border-color: var(--ok); }
+  .mod .ib.del:hover { color: #fff; background: #5b6172; }
+  form .ib { padding: 0 10px; background: var(--accent); color: #111; border-color: var(--accent); }
+  form .ib svg { width: 16px; height: 16px; }
 
   #more { position: absolute; left: 50%; transform: translateX(-50%); bottom: 64px; display: none; border: 0; border-radius: 999px; padding: 4px 12px; background: var(--accent); color: #111; font-weight: 600; font-size: 12px; box-shadow: 0 4px 14px #0008; }
   #more.show { display: block; }
@@ -72,9 +82,9 @@
 <body>
 <header>
   <h1>Chat</h1>
-  <button class="chip twitch" id="fTwitch" aria-pressed="true" title="Show Twitch chat">Twitch</button>
-  <button class="chip kick" id="fKick" aria-pressed="true" title="Show Kick chat">Kick</button>
-  <button class="icon" id="gear" title="Settings" aria-label="Settings">&#9881;</button>
+  <button class="chip twitch" id="fTwitch" aria-pressed="true" data-tip="Show or hide Twitch's chat">Twitch</button>
+  <button class="chip kick" id="fKick" aria-pressed="true" data-tip="Show or hide Kick's chat">Kick</button>
+  <button class="icon" id="gear" data-tip="This dock's settings" aria-label="Settings">&#9881;</button>
 </header>
 <div id="settings">
   <label><input type="checkbox" id="oTime"> Times</label>
@@ -90,7 +100,7 @@
 <form id="send" autocomplete="off">
   <select id="to" title="Where it goes"><option value="all">Both</option><option value="twitch">Twitch</option><option value="kick">Kick</option></select>
   <input id="text" maxlength="500" placeholder="Send a message">
-  <button type="submit">Send</button>
+  <button type="submit" class="ib" data-tip="Send it" aria-label="Send it"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg></button>
 </form>
 <script>
   "use strict";
@@ -190,6 +200,34 @@
     return b;
   }
 
+  // ---------- icons, and a tip on hover saying what each does ----------
+  const ICON = {
+    trash: "M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z",
+    timer: "M15 1H9v2h6V1zm-4 13h2V8h-2v6zm8.03-6.61l1.42-1.42c-.43-.51-.9-.99-1.41-1.41l-1.42 1.42A8.96 8.96 0 0 0 12 4c-4.97 0-9 4.03-9 9s4.02 9 9 9 9-4.03 9-9c0-2.12-.74-4.07-1.97-5.61zM12 20c-3.87 0-7-3.13-7-7s3.13-7 7-7 7 3.13 7 7-3.13 7-7 7z",
+    ban: "M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.42 0-8-3.58-8-8 0-1.85.63-3.55 1.69-4.9L16.9 18.31A7.902 7.902 0 0 1 12 20zm6.31-3.1L7.1 5.69A7.902 7.902 0 0 1 12 4c4.42 0 8 3.58 8 8 0 1.85-.63 3.55-1.69 4.9z",
+    undo: "M12.5 8c-2.65 0-5.05.99-6.9 2.6L2 7v9h9l-3.62-3.62c1.39-1.16 3.16-1.88 5.12-1.88 3.54 0 6.55 2.31 7.6 5.5l2.37-.78C21.08 11.03 17.15 8 12.5 8z",
+    send: "M2.01 21L23 12 2.01 3 2 10l15 2-15 2z",
+    replay: "M12 5V1L7 6l5 5V7c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6H4c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8-8z",
+    bolt: "M7 2v11h3v9l7-12h-4l4-8z",
+    check: "M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z",
+    eraser: "M15.14 3c-.51 0-1.02.2-1.41.59L2.59 14.73c-.78.78-.78 2.05 0 2.83L5.03 20h7.66l8.72-8.72c.79-.78.79-2.05 0-2.83l-4.85-4.86c-.39-.39-.9-.59-1.42-.59zM6.24 18l-2.24-2.24 6.07-6.07 4.24 4.24L10.24 18H6.24z",
+  };
+  function svg(name) {
+    const NS = "http://www.w3.org/2000/svg";
+    const s = document.createElementNS(NS, "svg"); s.setAttribute("viewBox", "0 0 24 24"); s.setAttribute("aria-hidden", "true");
+    const p = document.createElementNS(NS, "path"); p.setAttribute("d", ICON[name]); s.append(p);
+    return s;
+  }
+  // (an icon button: its icon, a word beside it if it needs one, and its tip)
+  function iconButton(name, tip, word, cls, go) {
+    const b = document.createElement("button");
+    b.type = "button"; b.className = "ib" + (cls ? " " + cls : ""); b.dataset.tip = tip; b.setAttribute("aria-label", tip);
+    b.append(svg(name));
+    if (word) { const w = document.createElement("span"); w.className = "w"; w.textContent = word; b.append(w); }
+    b.onclick = (e) => { e.stopPropagation(); go(b); };
+    return b;
+  }
+
   function modButtons(m) {
     const box = document.createElement("span");
     box.className = "mod";
@@ -197,18 +235,18 @@
     const ask = (what, extra) => act(Object.assign({ do: what }, base, extra || {}));
     const secs = () => Number(opt.secs) || 600;
     const short = () => { const s = secs(); return s >= 86400 ? s / 86400 + "d" : s >= 3600 ? s / 3600 + "h" : s / 60 + "m"; };
-    if (m.id) box.append(button("Delete", "", "Delete this message", () => ask("delete")));
-    const t = button(short(), "", "", () => ask("timeout", { seconds: secs() }));
-    t.onmouseenter = () => { t.textContent = short(); t.title = "Time out " + m.user + " for " + short(); };
-    t.title = "Time out " + m.user;
-    box.append(button("1m", "", "Time out " + m.user + " for a minute", () => ask("timeout", { seconds: 60 })), t);
+    if (m.id) box.append(iconButton("trash", "Delete this message", "", "del", () => ask("delete")));
+    box.append(iconButton("timer", "Time out " + m.user + " for a minute", "1m", "", () => ask("timeout", { seconds: 60 })));
+    const t = iconButton("timer", "Time out " + m.user + " for " + short(), short(), "", () => ask("timeout", { seconds: secs() }));
+    t.onmouseenter = () => { t.querySelector(".w").textContent = short(); t.dataset.tip = "Time out " + m.user + " for " + short(); };
+    box.append(t);
     // (a ban: asked twice, unless that's switched off)
-    box.append(button("Ban", "ban", "Ban " + m.user, (b) => {
-      if (opt.confirm && !b.classList.contains("sure")) { b.classList.add("sure"); b.textContent = "Sure?"; setTimeout(() => { b.classList.remove("sure"); b.textContent = "Ban"; }, 3000); return; }
-      b.classList.remove("sure"); b.textContent = "Ban";
+    box.append(iconButton("ban", "Ban " + m.user, "", "ban", (b) => {
+      if (opt.confirm && !b.classList.contains("sure")) { b.classList.add("sure"); b.dataset.tip = "Click again to ban " + m.user; setTimeout(() => { b.classList.remove("sure"); b.dataset.tip = "Ban " + m.user; }, 3000); return; }
+      b.classList.remove("sure"); b.dataset.tip = "Ban " + m.user;
       ask("ban");
     }));
-    box.append(button("Unban", "unban", "Let " + m.user + " back in (after a ban or time-out)", () => ask("unban")));
+    box.append(iconButton("undo", "Let " + m.user + " back in (after a ban or time-out)", "", "unban", () => ask("unban")));
     return box;
   }
 

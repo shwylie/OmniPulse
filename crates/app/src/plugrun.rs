@@ -909,6 +909,7 @@ mod tests {
                     while let Some(Ok(Message::Text(t))) = r.next().await {
                         for line in t.split("\r\n").filter(|l| !l.is_empty()) {
                             said.lock().unwrap().push(line.to_string());
+                            if line.starts_with("NICK") { let _ = w.send(Message::Text(":tmi.twitch.tv 001 me :Welcome, GLHF!\r\n".into())).await; }
                             if !line.starts_with("JOIN") { continue; }
                             let msg = |who: &str, id: &str, text: &str| format!("@badges=;display-name={who};id={id};mod=0;user-id=4{} :{l}!{l}@{l}.tmi.twitch.tv PRIVMSG #me :{text}\r\n", who.len(), l = who.to_lowercase());
                             for (who, id, text) in [("Viewer", "a", "!slots 100"), ("Viewer", "b", "!gamble 50"), ("Viewer", "c", "!duel Other 10"), ("Other", "d", "hello all"), ("Viewer", "e", "!rank"),
@@ -971,6 +972,21 @@ mod tests {
         assert!(a.iter().any(|x| x["op"] == "writeFile" && x["args"][0] == "C:\\x\\c.txt" && x["args"][2] == true), "{a:#?}");
         assert!(a.iter().any(|x| x["op"] == "overlay" && x["args"][0]["place"] == "roll" && x["args"][0]["text"].as_str().unwrap_or("").contains("Chatters\nViewer\nOther")), "{a:#?}");
         assert!(has("credits Chatters: Viewer, Other"), "{l:#?}");
+        // (trying it, from the settings page: what it'd say and do, nothing sent or done)
+        let said_before = said.lock().unwrap().len();
+        let tried = rt.block_on(p.call("tryChat", vec![json!("!slots 5"), json!("twitch"), json!(false)])).unwrap();
+        let tried: Vec<String> = tried.as_array().unwrap().iter().filter_map(|x| x.as_str().map(String::from)).collect();
+        assert_eq!(tried, vec!["(would spin the slots)".to_string()], "{tried:?}");
+        let tried = rt.block_on(p.call("tryChat", vec![json!("!rank"), json!("twitch"), json!(false)])).unwrap();
+        assert_eq!(tried, json!(["rank New"]));
+        assert_eq!(rt.block_on(p.call("tryChat", vec![json!("hello there"), json!("twitch"), json!(false)])).unwrap(), json!([]));
+        std::thread::sleep(Duration::from_millis(300));
+        assert_eq!(said.lock().unwrap().len(), said_before, "nothing sent: {:#?}", &said.lock().unwrap()[said_before..]);
+        // (what's going on: running, signed in, its counts and its last doings)
+        let st = rt.block_on(p.call("status", vec![])).unwrap();
+        assert_eq!((st["running"].as_bool(), st["twitch"]["login"].as_str(), st["twitch"]["up"].as_bool()), (Some(true), Some("me"), Some(true)), "{st:#}");
+        assert!(st["counts"]["actions"].as_u64().unwrap_or(0) >= 5 && st["recent"].as_array().map(|r| !r.is_empty()).unwrap_or(false), "{st:#}");
+        assert_eq!(st["actions"]["all"], 9);
         drop(p);
         stop("chatbot");
     }

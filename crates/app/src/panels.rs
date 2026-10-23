@@ -377,6 +377,7 @@ fn fields_of(name: &str, vals: &Map<String, Value>, prefs: &Value, lan: &str) ->
                 // (OBS's docks, from the same server: the chatbot's chat with its moderation, and the activity feed)
                 note("OBS Docks"),
                 info("Chat Dock", &format!("http://127.0.0.1:{port}/dock/chat"), &format!("http://127.0.0.1:{port}/dock/chat"), "In OBS: Docks > Custom Browser Docks, with this address. Twitch and Kick chat as the chatbot hears it, with delete, time-out and ban on every message, and a box to chat back."),
+                info("Multichat (On Stream)", &format!("http://127.0.0.1:{port}/chat"), &format!("http://127.0.0.1:{port}/chat"), "In OBS: a Browser source with this address. Twitch and Kick chat together, see-through. Its settings: right-click the source, Interact, then its gear (or in its address, as the gear shows)."),
                 info("Activity Feed Dock", &format!("http://127.0.0.1:{port}/dock/activity"), &format!("http://127.0.0.1:{port}/dock/activity"), "The same, with this address: follows, subs, bits, raids, rewards and the rest, each kind shown or hidden (its gear), each alert replayed."),
                 // a second Now Playing, for another scene: the same song, a design of its own
                 note("Second Widget"),

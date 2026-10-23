@@ -83,7 +83,13 @@ export struct SetRow { head: string, label: string, note: string, on: bool, key:
 export struct KeyStep { text: string, has-url: bool, copies: [string] }
 /// A key to paste: its label, what's typed, and whether it looks right
 export struct KeyField { label: string, value: string, ok: bool }
-export struct PlugField { key: string, label: string, note: string, kind: string, value: string, options: [string], at: int }
+export struct PlugField { key: string, label: string, note: string, kind: string, value: string, options: [string], at: int, changed: bool }
+// the chatbot's page: a service's tile, a feature's card, a setup step, a line of what it did (or of a try), a sheet's line
+export struct BotTile { id: string, name: string, state: string, line1: string, line2: string }
+export struct BotFeat { id: string, name: string, note: string, on: bool, open: bool, changed: bool }
+export struct BotStep { id: string, title: string, note: string, state: string, optional: bool }
+export struct BotLine { who: string, heard: string, did: string, platform: string }
+export struct BotField { key: string, kind: string, label: string, note: string, value: string, extra: string, changed: bool, n: int }
 // (an artist you follow: whether on SoundCloud and on Spotify, for its menu)
 export struct Item { name: string, sub: string, art: image, plat: string, on-sc: bool, on-sp: bool, on-yt: bool, row: Row }
 /// A page being loaded: each platform it asks, and whether it's answered yet
@@ -111,6 +117,19 @@ global Icons {
     out property <string> star: "M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z";
     out property <string> sets: "M12 3a9 9 0 00-9 9v7c0 1.1.9 2 2 2h4v-8H5v-1a7 7 0 0114 0v1h-4v8h4c1.1 0 2-.9 2-2v-7a9 9 0 00-9-9z";
     out property <string> stats: "M5 9.2h3V19H5zM10.6 5h2.8v14h-2.8zm5.6 8H19v6h-2.8z";
+    out property <string> open: "M19 19H5V5h7V3H5c-1.11 0-2 .9-2 2v14c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2v-7h-2v7zM14 3v2h3.59l-9.83 9.83 1.41 1.41L19 6.41V10h2V3h-7z";
+    out property <string> copy: "M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z";
+    out property <string> link: "M3.9 12c0-1.71 1.39-3.1 3.1-3.1h4V7H7c-2.76 0-5 2.24-5 5s2.24 5 5 5h4v-1.9H7c-1.71 0-3.1-1.39-3.1-3.1zM8 13h8v-2H8v2zm9-6h-4v1.9h4c1.71 0 3.1 1.39 3.1 3.1s-1.39 3.1-3.1 3.1h-4V17h4c2.76 0 5-2.24 5-5s-2.24-5-5-5z";
+    out property <string> logout: "M17 7l-1.41 1.41L18.17 11H8v2h10.17l-2.58 2.58L17 17l5-5zM4 5h8V3H4c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h8v-2H4V5z";
+    out property <string> check: "M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z";
+    out property <string> robot: "M20 9V7c0-1.1-.9-2-2-2h-3c0-1.66-1.34-3-3-3S9 3.34 9 5H6c-1.1 0-2 .9-2 2v2c-1.66 0-3 1.34-3 3s1.34 3 3 3v4c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2v-4c1.66 0 3-1.34 3-3s-1.34-3-3-3zM7.5 11.5c0-.83.67-1.5 1.5-1.5s1.5.67 1.5 1.5S9.83 13 9 13s-1.5-.67-1.5-1.5zM16 17H8v-2h8v2zm-1-4c-.83 0-1.5-.67-1.5-1.5S14.17 10 15 10s1.5.67 1.5 1.5S15.83 13 15 13z";
+    out property <string> send: "M2.01 21L23 12 2.01 3 2 10l15 2-15 2z";
+    out property <string> bell: "M12 22c1.1 0 2-.9 2-2h-4c0 1.1.89 2 2 2zm6-6v-5c0-3.07-1.64-5.64-4.5-6.32V4c0-.83-.67-1.5-1.5-1.5s-1.5.67-1.5 1.5v.68C7.63 5.36 6 7.92 6 11v5l-2 2v1h16v-1l-2-2z";
+    out property <string> coins: "M15 4c-4.42 0-8 3.58-8 8s3.58 8 8 8 8-3.58 8-8-3.58-8-8-8zm0 14c-3.31 0-6-2.69-6-6s2.69-6 6-6 6 2.69 6 6-2.69 6-6 6zM3 12c0-2.61 1.67-4.83 4-5.65V4.26C3.55 5.15 1 8.27 1 12s2.55 6.85 6 7.74v-2.09c-2.33-.82-4-3.04-4-5.65z";
+    out property <string> dice: "M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zM7.5 18c-.83 0-1.5-.67-1.5-1.5S6.67 15 7.5 15s1.5.67 1.5 1.5S8.33 18 7.5 18zm0-9C6.67 9 6 8.33 6 7.5S6.67 6 7.5 6 9 6.67 9 7.5 8.33 9 7.5 9zm4.5 4.5c-.83 0-1.5-.67-1.5-1.5s.67-1.5 1.5-1.5 1.5.67 1.5 1.5-.67 1.5-1.5 1.5zm4.5 4.5c-.83 0-1.5-.67-1.5-1.5s.67-1.5 1.5-1.5 1.5.67 1.5 1.5-.67 1.5-1.5 1.5zm0-9c-.83 0-1.5-.67-1.5-1.5S15.67 6 16.5 6s1.5.67 1.5 1.5S17.33 9 16.5 9z";
+    out property <string> actions: "M22 11V3h-7v3H9V3H2v8h7V8h2v10h4v3h7v-8h-7v3h-2V8h2v3z";
+    out property <string> twitch: "M11.571 4.714h1.715v5.143H11.57zm4.715 0H18v5.143h-1.714zM6 0L1.714 4.286v15.428h5.143V24l4.286-4.286h3.428L22.286 12V0zm14.571 11.143l-3.428 3.428h-3.429l-3 3v-3H6.857V1.714h13.714z";
+    out property <string> kick: "M1.333 0h8v5.333H12V2.667h2.667V0h8v8H20v2.667h-2.667v2.666H20V16h2.667v8h-8v-2.667H12v-2.666H9.333V24h-8z";
     out property <string> broadcast: "M12 9.6a2.4 2.4 0 1 0 0 4.8 2.4 2.4 0 0 0 0-4.8zM7.05 7.05a7 7 0 0 0 0 9.9l1.42-1.42a5 5 0 0 1 0-7.07zm9.9 0-1.42 1.41a5 5 0 0 1 0 7.07l1.42 1.42a7 7 0 0 0 0-9.9zM4.22 4.22a11 11 0 0 0 0 15.56l1.42-1.42a9 9 0 0 1 0-12.72zm15.56 0-1.42 1.42a9 9 0 0 1 0 12.72l1.42 1.42a11 11 0 0 0 0-15.56z";
     out property <string> person: "M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z";
     out property <string> heart-out: "M16.5 3c-1.74 0-3.41.81-4.5 2.09C10.91 3.81 9.24 3 7.5 3 4.42 3 2 5.42 2 8.5c0 3.78 3.4 6.86 8.55 11.54L12 21.35l1.45-1.32C18.6 15.36 22 12.28 22 8.5 22 5.42 19.58 3 16.5 3zm-4.4 15.55l-.1.1-.1-.1C7.14 14.24 4 11.39 4 8.5 4 6.5 5.5 5 7.5 5c1.54 0 3.04.99 3.57 2.36h1.87C13.46 5.99 14.96 5 16.5 5c2 0 3.5 1.5 3.5 3.5 0 2.89-3.14 5.74-7.9 10.05z";
@@ -1678,6 +1697,513 @@ component SetRowView inherits Card {
     }
 }
 
+// ---------- the chatbot's own page (Settings > Streaming > OmniPulse Chatbot) ----------
+// The first time: a path of steps (each service connected, or skipped), the one being done open, its steps
+// numbered. After that: the bot as it is (its card, a chat to try it in), its services as tiles with a light
+// each, what it does as cards with switches, and what it's done lately. A service's details: a sheet over it.
+
+/// The chatbot page's colours and marks, by what they're for (a service, a feature)
+global BotLook {
+    public pure function tint(id: string) -> color {
+        return id == "twitch" || id == "twitchbot" ? #a970ff : id == "kick" || id == "kickbot" ? #53fc18 : id == "obs" ? Theme.accent : id == "streamlabs" ? #4ad295 : id == "streamelements" ? #5ad1ff
+            : id == "requests" ? Theme.accent : id == "alerts" ? #ff6b8a : id == "points" ? #ffb547 : id == "games" ? #5ad1ff : Theme.accent-2;
+    }
+    public pure function icon(id: string) -> string {
+        return id == "twitch" || id == "twitchbot" ? Icons.twitch : id == "kick" || id == "kickbot" ? Icons.kick : id == "obs" ? Icons.broadcast : id == "streamlabs" || id == "streamelements" ? Icons.coins
+            : id == "requests" ? Icons.playlist-add : id == "alerts" ? Icons.bell : id == "points" ? Icons.coins : id == "games" ? Icons.dice : Icons.actions;
+    }
+}
+
+/// (a change not saved yet: a ring round it, breathing, until it's saved or put back)
+component Pulse inherits Rectangle {
+    in property <length> r: 12px;
+    border-radius: root.r;
+    border-width: 2px;
+    property <float> ph: Theme.motion ? (1 - cos(animation-tick() / 1.6s * 360deg)) / 2 : 1;
+    border-color: Theme.accent.with-alpha(0.3 + 0.55 * self.ph);
+    background: Theme.accent.with-alpha(0.04 * self.ph);
+}
+
+/// (a light: green working, amber trying or waiting, grey off, red wrong)
+component Light inherits Rectangle {
+    in property <string> state;
+    width: 8px;
+    height: 8px;
+    border-radius: 4px;
+    background: root.state == "ok" ? #4ad295 : root.state == "warn" ? #ffb547 : root.state == "bad" ? #ff5c6c : #4a5060;
+}
+
+/// One line of a sheet or a step: a heading, a numbered instruction (with its link or something to copy), a
+/// box to type in, a switch, or one of the two accounts with its sign-in icons
+component BotFieldRow inherits VerticalLayout {
+    in property <BotField> f;
+    callback set(string, string);
+    callback act(string);
+    spacing: 4px;
+    if root.f.kind == "head": Text { text: root.f.label; color: Theme.muted; font-size: 12px; font-weight: 700; }
+    if root.f.kind == "note": Text { text: root.f.label; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
+    if root.f.kind == "step": HorizontalLayout {
+        spacing: 10px;
+        Rectangle {
+            width: 22px;
+            height: 22px;
+            y: 2px;
+            border-radius: 7px;
+            background: Theme.elevated;
+            border-width: 1px;
+            border-color: Theme.line;
+            Text { text: "" + root.f.n; color: Theme.muted; font-size: 11px; font-weight: 700; horizontal-alignment: center; vertical-alignment: center; }
+        }
+        VerticalLayout {
+            horizontal-stretch: 1;
+            alignment: center;
+            spacing: 4px;
+            Text { text: root.f.label; color: Theme.text; font-size: 13px; wrap: word-wrap; }
+            // (an address to give it, as it must be: shown, and copied with one click)
+            if root.f.value != "": HorizontalLayout {
+                alignment: start;
+                spacing: 6px;
+                Rectangle {
+                    height: 26px;
+                    width: ct.preferred-width + 18px;
+                    border-radius: 7px;
+                    background: Theme.bg;
+                    border-width: 1px;
+                    border-color: Theme.line;
+                    ct := Text { x: 9px; text: root.f.value; color: Theme.accent.mix(Theme.text, 0.55); font-size: 12px; font-family: "Consolas"; vertical-alignment: center; }
+                }
+                IconButton { d: Icons.copy; size: 26px; tip: "Copy it"; clicked => { root.act("copy:" + root.f.value); } }
+            }
+        }
+        if root.f.extra != "": IconButton { d: Icons.open; size: 30px; tint: Theme.accent; tip: root.f.note != "" ? root.f.note : "Open it in your browser"; clicked => { root.act("url:" + root.f.extra); } }
+    }
+    if root.f.kind == "text" || root.f.kind == "password" || root.f.kind == "number": VerticalLayout {
+        spacing: 4px;
+        Text { text: root.f.label; color: Theme.text; font-weight: 700; font-size: 13px; }
+        if root.f.note != "": Text { text: root.f.note; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
+        Rectangle {
+            height: 36px;
+            border-radius: 9px;
+            background: Theme.bg;
+            border-width: 1px;
+            border-color: inp.has-focus ? Theme.accent : Theme.line;
+            if root.f.changed || inp.touched: Pulse { r: 9px; }
+            inp := TextInput {
+                in-out property <bool> touched;
+                x: 12px;
+                width: parent.width - 24px;
+                height: parent.height;
+                vertical-alignment: center;
+                color: Theme.text;
+                font-size: 13px;
+                single-line: true;
+                input-type: root.f.kind == "password" ? InputType.password : root.f.kind == "number" ? InputType.decimal : InputType.text;
+                text: root.f.value;
+                edited => { self.touched = true; root.set(root.f.key, self.text); }
+            }
+            if inp.text == "" && root.f.extra != "": Text { x: 12px; text: root.f.extra; color: Theme.muted.with-alpha(0.6); font-size: 13px; vertical-alignment: center; }
+        }
+    }
+    if root.f.kind == "toggle": Rectangle {
+        height: tl.preferred-height;
+        if root.f.changed: Pulse { x: -8px; width: parent.width + 16px; height: parent.height + 8px; y: -4px; r: 10px; }
+        tl := HorizontalLayout {
+            spacing: 12px;
+            VerticalLayout {
+                horizontal-stretch: 1;
+                alignment: center;
+                spacing: 2px;
+                Text { text: root.f.label; color: Theme.text; font-weight: 700; font-size: 13px; }
+                if root.f.note != "": Text { text: root.f.note; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
+            }
+            Toggle { checked: root.f.value == "true"; y: (parent.height - self.height) / 2; toggled => { root.set(root.f.key, self.checked ? "true" : "false"); } }
+        }
+    }
+    // an account: who's signed in (or nobody), and its sign-in opened here or copied for another browser
+    if root.f.kind == "account": Rectangle {
+        height: 54px;
+        border-radius: 12px;
+        background: Theme.bg.mix(Theme.panel, 0.5);
+        border-width: 1px;
+        border-color: root.f.value != "" ? BotLook.tint(root.f.extra) : Theme.line;
+        HorizontalLayout {
+            padding-left: 12px;
+            padding-right: 8px;
+            spacing: 10px;
+            Rectangle {
+                width: 30px;
+                height: 30px;
+                y: (parent.height - self.height) / 2;
+                border-radius: 15px;
+                background: root.f.value != "" ? BotLook.tint(root.f.extra).with-alpha(0.18) : Theme.elevated;
+                Glyph { d: root.f.note == "bot" ? Icons.robot : Icons.person; width: 18px; height: 18px; x: 6px; y: 6px; fill: root.f.value != "" ? BotLook.tint(root.f.extra) : Theme.muted; }
+            }
+            VerticalLayout {
+                horizontal-stretch: 1;
+                alignment: center;
+                spacing: 1px;
+                Text { text: root.f.label; color: Theme.text; font-weight: 700; font-size: 13px; }
+                Text { text: root.f.value != "" ? "Signed in as " + root.f.value : (root.f.note == "bot" ? "Optional: without one, replies come from your channel" : "Not signed in"); color: Theme.muted; font-size: 12px; overflow: elide; }
+            }
+            IconButton { d: Icons.open; size: 34px; y: (parent.height - self.height) / 2; tint: Theme.accent; tip: root.f.value != "" ? "Sign in again, here" : "Sign in, in your browser"; clicked => { root.act("in:" + root.f.key); } }
+            IconButton { d: Icons.link; size: 34px; y: (parent.height - self.height) / 2; tip: "Copy the sign-in link instead: open it in a private window, or another browser, to sign in as another account"; clicked => { root.act("link:" + root.f.key); } }
+            if root.f.value != "": IconButton { d: Icons.logout; size: 34px; y: (parent.height - self.height) / 2; tip: "Sign this account out"; clicked => { root.act("out:" + root.f.key); } }
+        }
+    }
+}
+
+/// One of what the chatbot does: its switch (or where it's set up)
+component FeatCard inherits Rectangle {
+    in property <BotFeat> c;
+    callback set(string, string);
+    callback act(string);
+    height: 74px;
+    border-radius: 16px;
+    background: Theme.panel;
+    border-width: 1px;
+    border-color: root.c.on ? BotLook.tint(root.c.id).with-alpha(0.55) : Theme.line;
+    clip: true;
+    if root.c.changed: Pulse { r: 16px; }
+    HorizontalLayout {
+        padding: 14px;
+        spacing: 12px;
+        Rectangle {
+            width: 40px; height: 40px; y: (parent.height - self.height) / 2; border-radius: 12px;
+            background: BotLook.tint(root.c.id).with-alpha(root.c.on ? 0.18 : 0.08);
+            Glyph { d: BotLook.icon(root.c.id); width: 22px; height: 22px; x: 9px; y: 9px; fill: root.c.on ? BotLook.tint(root.c.id) : Theme.muted; }
+        }
+        VerticalLayout {
+            horizontal-stretch: 1;
+            alignment: center;
+            spacing: 2px;
+            Text { text: root.c.name; color: Theme.text; font-weight: 700; font-size: 14px; }
+            Text { text: root.c.note; color: Theme.muted; font-size: 12px; overflow: elide; }
+        }
+        if root.c.open: IconButton { d: Icons.gear; size: 32px; y: (parent.height - self.height) / 2; tip: root.c.name + ": its settings"; clicked => { root.act("sheet:" + root.c.id); } }
+        if root.c.id == "games" || root.c.id == "actions": IconButton { d: Icons.open; size: 32px; filled: root.c.id == "actions"; y: (parent.height - self.height) / 2; tip: root.c.id == "games" ? "Add games from Actions' templates" : "Open your actions"; clicked => { root.act("actions"); } }
+        if root.c.id != "games" && root.c.id != "actions": Toggle { checked: root.c.on; y: (parent.height - self.height) / 2; toggled => { root.set("feat:" + root.c.id, self.checked ? "true" : "false"); } }
+    }
+                }
+
+/// The page
+component BotPage inherits Rectangle {
+    in property <bool> setup;
+    in property <string> name;
+    in property <string> sub;
+    in property <bool> running;
+    in property <string> stats;
+    in property <[BotTile]> tiles;
+    in property <[BotFeat]> feats;
+    in property <[BotStep]> steps;
+    in property <[BotField]> step-fields;
+    in property <[BotLine]> log;
+    in property <[BotLine]> tried;
+    in property <string> sheet;
+    in property <string> sheet-title;
+    in property <[BotField]> sheet-fields;
+    callback set(string, string);
+    callback act(string);
+    callback try-it(string);
+
+
+    // ----- the first time: the path -----
+    if root.setup: ScrollView {
+        width: parent.width;
+        height: parent.height;
+        VerticalLayout {
+            padding-right: 12px;
+            padding-bottom: 24px;
+            spacing: 0px;
+            alignment: start;
+            HorizontalLayout {
+                padding-bottom: 14px;
+                padding-left: 46px;
+                Text { text: "Let's set up your chatbot"; color: Theme.text; font-size: 20px; font-weight: 800; horizontal-stretch: 1; }
+                Text { text: "Skip setup"; color: sk.has-hover ? Theme.text : Theme.muted; font-size: 12px; vertical-alignment: center; sk := TouchArea { mouse-cursor: MouseCursor.pointer; clicked => { root.act("setup:done"); } } }
+            }
+            for st[i] in root.steps: HorizontalLayout {
+                spacing: 12px;
+                // (its place on the path: lit as far as it's come)
+                Rectangle {
+                    width: 34px;
+                    property <bool> lit: st.state == "done" || st.state == "skipped";
+                    if i < root.steps.length - 1: Rectangle { x: (parent.width - 2px) / 2; y: 34px; width: 2px; height: parent.height - 34px; background: parent.lit ? #4ad295 : Theme.line; }
+                    Rectangle {
+                        y: 10px;
+                        x: (parent.width - self.width) / 2;
+                        width: 26px;
+                        height: 26px;
+                        border-radius: 13px;
+                        background: st.state == "done" ? #4ad295 : st.state == "now" ? Theme.accent : st.state == "skipped" ? Theme.elevated : Theme.elevated;
+                        border-width: st.state == "now" ? 4px : 1px;
+                        border-color: st.state == "now" ? Theme.accent.with-alpha(0.3) : Theme.line;
+                        if st.state == "done": Glyph { d: Icons.check; width: 16px; height: 16px; x: 5px; y: 5px; fill: Theme.on-accent; }
+                        if st.state != "done": Text { text: st.state == "skipped" ? "\u{2013}" : "" + (i + 1); color: st.state == "now" ? Theme.on-accent : Theme.muted; font-size: 12px; font-weight: 700; horizontal-alignment: center; vertical-alignment: center; }
+                    }
+                }
+                Rectangle {
+                    horizontal-stretch: 1;
+                    // (the one being done: open; the rest one line each)
+                    height: sc.preferred-height + 12px;
+                    sc := Rectangle {
+                        y: 0;
+                        height: sci.preferred-height;
+                        border-radius: 14px;
+                        background: Theme.panel;
+                        border-width: 1px;
+                        border-color: st.state == "now" ? Theme.accent : Theme.line;
+                        opacity: st.state == "todo" ? 0.7 : 1;
+                        sci := VerticalLayout {
+                            padding: 12px;
+                            padding-left: 14px;
+                            spacing: 10px;
+                            HorizontalLayout {
+                                spacing: 10px;
+                                Glyph { d: st.id == "twitchbot" || st.id == "kickbot" ? Icons.robot : BotLook.icon(st.id == "features" ? "actions" : st.id); width: 20px; height: 20px; y: (parent.height - self.height) / 2; fill: BotLook.tint(st.id); }
+                                VerticalLayout {
+                                    horizontal-stretch: 1;
+                                    spacing: 1px;
+                                    Text { text: st.title; color: Theme.text; font-weight: 700; font-size: 14px; }
+                                    Text { text: st.note; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
+                                }
+                                if st.state != "now": IconButton { d: st.state == "todo" ? Icons.play : Icons.gear; size: 32px; y: (parent.height - self.height) / 2; tip: st.state == "todo" ? "Do this step now" : "Change it"; clicked => { root.act("step:" + st.id); } }
+                            }
+                            if st.state == "now": VerticalLayout {
+                                spacing: 10px;
+                                Rectangle { height: 1px; background: Theme.line; }
+                                for f in root.step-fields: BotFieldRow { f: f; set(k, v) => { root.set(k, v); } act(a) => { root.act(a); } }
+                                HorizontalLayout {
+                                    alignment: end;
+                                    spacing: 8px;
+                                    if st.optional: Pill { label: "Skip"; tip: "Not now: it can be set up later, from its tile"; clicked => { root.act("skip:" + st.id); } }
+                                    Pill { label: st.id == "features" ? "Finish" : "Next"; on: true; clicked => { root.act("next:" + st.id); } }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // ----- after: the control room -----
+    if !root.setup: ScrollView {
+        width: parent.width;
+        height: parent.height;
+        VerticalLayout {
+            padding-right: 12px;
+            padding-bottom: 24px;
+            spacing: 14px;
+            alignment: start;
+            // the bot, and a chat to try it in
+            HorizontalLayout {
+                spacing: 12px;
+                height: 168px;
+                Rectangle {
+                    horizontal-stretch: 1;
+                    border-radius: 18px;
+                    background: Theme.panel;
+                    border-width: 1px;
+                    border-color: Theme.line;
+                    HorizontalLayout {
+                        padding: 16px;
+                        spacing: 16px;
+                        // (rings round it, turning slowly while it's running)
+                        Rectangle {
+                            width: 92px;
+                            height: 92px;
+                            y: (parent.height - self.height) / 2;
+                            property <float> spin: root.running && Theme.motion ? mod(animation-tick() / 1ms, 12000) / 12000 : 0;
+                            Rectangle { border-radius: self.width / 2; border-width: 2px; border-color: Theme.accent.with-alpha(root.running ? 0.35 : 0.12); }
+                            Rectangle { x: 8px; y: 8px; width: parent.width - 16px; height: self.width; border-radius: self.width / 2; border-width: 2px; border-color: Theme.accent-2.with-alpha(root.running ? 0.6 : 0.15); }
+                            if root.running: Rectangle {
+                                x: parent.width / 2 - 4px + (parent.width / 2 - 1px) * cos(parent.spin * 360deg);
+                                y: parent.height / 2 - 4px + (parent.height / 2 - 1px) * sin(parent.spin * 360deg);
+                                width: 8px; height: 8px; border-radius: 4px; background: Theme.accent;
+                            }
+                            Rectangle {
+                                x: 18px; y: 18px; width: parent.width - 36px; height: self.width; border-radius: self.width / 2; background: Theme.elevated;
+                                Glyph { d: Icons.robot; width: 30px; height: 30px; x: (parent.width - 30px) / 2; y: (parent.height - 30px) / 2; fill: root.running ? Theme.accent : Theme.muted; }
+                            }
+                        }
+                        VerticalLayout {
+                            horizontal-stretch: 1;
+                            alignment: center;
+                            spacing: 4px;
+                            HorizontalLayout {
+                                spacing: 8px;
+                                Text { text: root.name; color: Theme.text; font-size: 20px; font-weight: 800; overflow: elide; horizontal-stretch: 1; }
+                                IconButton { d: root.running ? Icons.pause : Icons.play; size: 32px; filled: !root.running; tip: root.running ? "Stop the chatbot" : "Start the chatbot"; clicked => { root.act("run"); } }
+                            }
+                            Text { text: root.sub; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
+                            HorizontalLayout {
+                                spacing: 6px;
+                                alignment: start;
+                                for t in root.tiles: Rectangle {
+                                    visible: t.state != "off";
+                                    width: t.state != "off" ? chip.preferred-width + 30px : 0px;
+                                    height: 22px;
+                                    border-radius: 11px;
+                                    background: BotLook.tint(t.id).with-alpha(0.15);
+                                    chip := Text { x: 22px; text: t.name; color: BotLook.tint(t.id).mix(Theme.text, 0.6); font-size: 11px; vertical-alignment: center; }
+                                    Light { x: 9px; y: 7px; state: t.state; }
+                                }
+                            }
+                            Text { text: root.stats; color: Theme.muted; font-size: 12px; }
+                        }
+                    }
+                }
+                Rectangle {
+                    width: 300px;
+                    border-radius: 18px;
+                    background: Theme.panel;
+                    border-width: 1px;
+                    border-color: Theme.line;
+                    VerticalLayout {
+                        padding: 12px;
+                        spacing: 6px;
+                        Text { text: "Try it: type as a viewer would"; color: Theme.muted; font-size: 12px; }
+                        Rectangle {
+                            vertical-stretch: 1;
+                            clip: true;
+                            VerticalLayout {
+                                alignment: end;
+                                spacing: 4px;
+                                if root.tried.length == 0: Text { text: "Nothing is sent, and nothing's done: it only says what it would."; color: Theme.muted.with-alpha(0.7); font-size: 11px; wrap: word-wrap; }
+                                for b in root.tried: HorizontalLayout {
+                                    alignment: b.who == "You" ? end : start;
+                                    Rectangle {
+                                        width: min(bt.preferred-width + 20px, 250px);
+                                        height: bt.preferred-height + 10px;
+                                        border-radius: 10px;
+                                        background: b.who == "You" ? Theme.elevated : Theme.accent.with-alpha(0.16);
+                                        bt := Text { x: 10px; width: parent.width - 20px; text: b.did; color: b.who == "You" ? Theme.text : Theme.accent.mix(Theme.text, 0.35); font-size: 12px; wrap: word-wrap; vertical-alignment: center; }
+                                    }
+                                }
+                            }
+                        }
+                        HorizontalLayout {
+                            spacing: 6px;
+                            Rectangle {
+                                horizontal-stretch: 1;
+                                height: 32px;
+                                border-radius: 16px;
+                                background: Theme.bg;
+                                border-width: 1px;
+                                border-color: tin.has-focus ? Theme.accent : Theme.line;
+                                tin := TextInput { x: 12px; width: parent.width - 24px; height: parent.height; vertical-alignment: center; color: Theme.text; font-size: 12px; single-line: true; accepted => { if (self.text != "") { root.try-it(self.text); self.text = ""; } } }
+                                if tin.text == "": Text { x: 12px; text: "!sr take on me"; color: Theme.muted.with-alpha(0.6); font-size: 12px; vertical-alignment: center; }
+                            }
+                            IconButton { d: Icons.send; size: 32px; tint: Theme.accent; tip: "Try it (nothing's sent)"; clicked => { if (tin.text != "") { root.try-it(tin.text); tin.text = ""; } } }
+                        }
+                    }
+                }
+            }
+            // where it's connected
+            Text { text: "Connections"; color: Theme.muted; font-size: 12px; font-weight: 700; }
+            HorizontalLayout {
+                spacing: 8px;
+                for t in root.tiles: Rectangle {
+                    horizontal-stretch: 1;
+                    height: 112px;
+                    border-radius: 14px;
+                    background: tta.has-hover ? Theme.elevated : Theme.panel;
+                    border-width: 1px;
+                    border-color: t.state == "off" ? Theme.line : BotLook.tint(t.id).with-alpha(0.7);
+                    tta := TouchArea { mouse-cursor: MouseCursor.pointer; clicked => { root.act("sheet:" + t.id); } }
+                    VerticalLayout {
+                        padding: 12px;
+                        spacing: 5px;
+                        HorizontalLayout {
+                            spacing: 6px;
+                            Glyph { d: BotLook.icon(t.id); width: 16px; height: 16px; fill: t.state == "off" ? Theme.muted : BotLook.tint(t.id); }
+                            Text { text: t.name; color: Theme.text; font-weight: 700; font-size: 13px; overflow: elide; horizontal-stretch: 1; }
+                        }
+                        HorizontalLayout { spacing: 6px; Light { y: 5px; state: t.state; } Text { text: t.line1; color: Theme.text.mix(Theme.muted, 0.4); font-size: 12px; overflow: elide; horizontal-stretch: 1; } }
+                        Text { text: t.line2; color: Theme.muted; font-size: 11px; overflow: elide; }
+                        Rectangle { vertical-stretch: 1; }
+                        HorizontalLayout {
+                            alignment: end;
+                            IconButton { d: t.state == "off" ? Icons.add : Icons.gear; size: 28px; tint: t.state == "off" ? Theme.accent : Theme.muted; tip: t.state == "off" ? "Set up " + t.name : t.name + "'s settings and sign-ins"; clicked => { root.act("sheet:" + t.id); } }
+                        }
+                    }
+                }
+            }
+            // what it does
+            Text { text: "What it does"; color: Theme.muted; font-size: 12px; font-weight: 700; }
+            for r in ceil(root.feats.length / 2): HorizontalLayout {
+                spacing: 10px;
+                FeatCard { horizontal-stretch: 1; preferred-width: 0px; min-width: 0px; c: root.feats[r * 2]; set(k, v) => { root.set(k, v); } act(a) => { root.act(a); } }
+                if r * 2 + 1 < root.feats.length: FeatCard { horizontal-stretch: 1; preferred-width: 0px; min-width: 0px; c: root.feats[r * 2 + 1]; set(k, v) => { root.set(k, v); } act(a) => { root.act(a); } }
+                if r * 2 + 1 >= root.feats.length: Rectangle { horizontal-stretch: 1; preferred-width: 0px; min-width: 0px; }
+            }
+            // what it's been doing
+            Rectangle {
+                border-radius: 14px;
+                background: Theme.panel;
+                border-width: 1px;
+                border-color: Theme.line;
+                height: lg.preferred-height;
+                lg := VerticalLayout {
+                    padding: 12px;
+                    spacing: 6px;
+                    HorizontalLayout {
+                        Text { text: "Lately: what it heard, and what it did"; color: Theme.muted; font-size: 12px; horizontal-stretch: 1; }
+                        Text { text: "Run setup again"; color: rs.has-hover ? Theme.text : Theme.muted; font-size: 11px; rs := TouchArea { mouse-cursor: MouseCursor.pointer; clicked => { root.act("setup:again"); } } }
+                    }
+                    if root.log.length == 0: Text { text: "Nothing yet: once it's running, what it answers shows here."; color: Theme.muted.with-alpha(0.7); font-size: 12px; }
+                    for l in root.log: HorizontalLayout {
+                        spacing: 8px;
+                        Rectangle { width: 3px; border-radius: 1px; background: BotLook.tint(l.platform); }
+                        Text { text: l.who; color: BotLook.tint(l.platform).mix(Theme.text, 0.5); font-size: 12px; font-weight: 700; }
+                        Text { text: l.heard; color: Theme.muted; font-size: 12px; overflow: elide; max-width: 220px; }
+                        Glyph { d: Icons.next; width: 12px; height: 12px; y: 2px; fill: Theme.muted; }
+                        Text { text: l.did; color: Theme.text; font-size: 12px; overflow: elide; horizontal-stretch: 1; }
+                    }
+                }
+            }
+        }
+    }
+
+    // ----- a service's (or a feature's) sheet, over the page -----
+    if root.sheet != "": Rectangle {
+        background: Theme.bg.with-alpha(0.55);
+        TouchArea { clicked => { root.act("sheet:"); } }
+        Rectangle {
+            width: min(parent.width - 40px, 620px);
+            height: min(parent.height - 24px, shc.preferred-height + 100px);
+            x: (parent.width - self.width) / 2;
+            y: 12px;
+            border-radius: 18px;
+            background: Theme.panel;
+            border-width: 1px;
+            border-color: BotLook.tint(root.sheet).with-alpha(0.6);
+            drop-shadow-blur: 30px;
+            drop-shadow-color: #00000080;
+            TouchArea { }
+            VerticalLayout {
+                padding: 18px;
+                spacing: 12px;
+                HorizontalLayout {
+                    spacing: 10px;
+                    Glyph { d: BotLook.icon(root.sheet); width: 22px; height: 22px; y: (parent.height - self.height) / 2; fill: BotLook.tint(root.sheet); }
+                    Text { text: root.sheet-title; color: Theme.text; font-size: 18px; font-weight: 800; horizontal-stretch: 1; vertical-alignment: center; }
+                    IconButton { d: Icons.close; size: 32px; tip: "Done (changes still need Save)"; clicked => { root.act("sheet:"); } }
+                }
+                ScrollView {
+                    vertical-stretch: 1;
+                    shc := VerticalLayout {
+                        padding-right: 10px;
+                        spacing: 12px;
+                        alignment: start;
+                        for f in root.sheet-fields: BotFieldRow { f: f; set(k, v) => { root.set(k, v); } act(a) => { root.act(a); } }
+                    }
+                }
+            }
+        }
+    }
+}
+
 export component AppWindow inherits Window {
     changed width => { Win.w = self.width; root.window-resized(); }
     changed height => { Win.h = self.height; root.window-resized(); }
@@ -1965,6 +2491,31 @@ export component AppWindow inherits Window {
     // a Settings row's own settings (a plugin's): its key; the dialog with its fields
     callback set-more(string);
     in-out property <bool> pf-open;
+    // the chatbot's own page, in place of its list of fields
+    in property <bool> bot-page;
+    in property <bool> bot-setup;
+    in property <string> bot-name;
+    in property <string> bot-sub;
+    in property <bool> bot-running;
+    in property <string> bot-stats;
+    in property <[BotTile]> bot-tiles;
+    in property <[BotFeat]> bot-feats;
+    in property <[BotStep]> bot-steps;
+    in property <[BotField]> bot-step-fields;
+    in property <[BotLine]> bot-log;
+    in property <[BotLine]> bot-tried;
+    in property <string> bot-sheet;
+    in property <string> bot-sheet-title;
+    in property <[BotField]> bot-sheet-fields;
+    callback bot-set(string, string);
+    callback bot-act(string);
+    callback bot-try(string);
+    // a settings page with changes not saved: Save pulsing; leaving it (Back, X, a crumb) asks first
+    in property <bool> pf-dirty;
+    in property <int> pf-changes;
+    in-out property <bool> leave-ask;
+    callback pf-leave(string);
+    callback leave-choice(string);
     // the chatbot's Actions page: its actions, the one picked (its name, on or off, its trigger and steps),
     // and the kinds of trigger and step there are, and New Action's templates
     in-out property <bool> flow-open;
@@ -4169,9 +4720,9 @@ export component AppWindow inherits Window {
                         padding-bottom: 16px;
                         spacing: 12px;
                         HorizontalLayout {
-                            RoundButton { tip: "Back"; d: Icons.back; clicked => { root.pf-open = false; } }
+                            RoundButton { tip: "Back"; d: Icons.back; clicked => { root.pf-leave("back"); } }
                             Rectangle { horizontal-stretch: 1; }
-                            RoundButton { tip: "Close Settings"; d: Icons.close; clicked => { root.settings-close(); } }
+                            RoundButton { tip: "Close Settings"; d: Icons.close; clicked => { root.pf-leave("close"); } }
                         }
                         HorizontalLayout {
                             spacing: 14px;
@@ -4181,17 +4732,37 @@ export component AppWindow inherits Window {
                                 Text {
                                     text: c;
                                     color: pct.has-hover ? Theme.text : Theme.muted;
-                                    font-size: root.pf-crumbs.length >= 3 ? 28px : 44px;
+                                    font-size: root.pf-crumbs.length >= 3 || root.pf-head.character-count > 16 ? 28px : 44px;
                                     font-weight: 800;
                                     // (every part on one line with the last: all centred in the row)
                                     vertical-alignment: center;
-                                    pct := TouchArea { mouse-cursor: MouseCursor.pointer; clicked => { root.crumb-go(i); } }
+                                    pct := TouchArea { mouse-cursor: MouseCursor.pointer; clicked => { root.pf-leave("crumb:" + i); } }
                                 }
-                                Text { text: "\u{203a}"; color: Theme.muted; font-size: root.pf-crumbs.length >= 3 ? 26px : 40px; font-weight: 400; vertical-alignment: center; }
+                                Text { text: "\u{203a}"; color: Theme.muted; font-size: root.pf-crumbs.length >= 3 || root.pf-head.character-count > 16 ? 26px : 40px; font-weight: 400; vertical-alignment: center; }
                             }
-                            Marquee { text: root.pf-head; font-size: root.pf-crumbs.length >= 3 ? 28px : 44px; font-weight: 800; horizontal-stretch: 1; y: (parent.height - self.height) / 2; }
+                            Marquee { text: root.pf-head; font-size: root.pf-crumbs.length >= 3 || root.pf-head.character-count > 16 ? 28px : 44px; font-weight: 800; horizontal-stretch: 1; y: (parent.height - self.height) / 2; }
                         }
-                        ScrollView {
+                        if root.bot-page: BotPage {
+                            vertical-stretch: 1;
+                            setup: root.bot-setup;
+                            name: root.bot-name;
+                            sub: root.bot-sub;
+                            running: root.bot-running;
+                            stats: root.bot-stats;
+                            tiles: root.bot-tiles;
+                            feats: root.bot-feats;
+                            steps: root.bot-steps;
+                            step-fields: root.bot-step-fields;
+                            log: root.bot-log;
+                            tried: root.bot-tried;
+                            sheet: root.bot-sheet;
+                            sheet-title: root.bot-sheet-title;
+                            sheet-fields: root.bot-sheet-fields;
+                            set(k, v) => { root.bot-set(k, v); }
+                            act(a) => { root.bot-act(a); }
+                            try-it(t) => { root.bot-try(t); }
+                        }
+                        if !root.bot-page: ScrollView {
                           vertical-stretch: 1;
                           VerticalLayout {
                           spacing: 12px;
@@ -4201,7 +4772,11 @@ export component AppWindow inherits Window {
                           // (from the top, however tall the window: the room to spare under the last, never
                           // shared out between them)
                           alignment: start;
-                          for f[i] in root.pf-fields: VerticalLayout {
+                          for f[i] in root.pf-fields: Rectangle {
+                           height: fcol.preferred-height;
+                           // (changed, not saved yet: a ring round it, breathing)
+                           if f.changed: Pulse { x: -10px; y: -6px; width: parent.width + 20px; height: parent.height + 12px; r: 10px; }
+                           fcol := VerticalLayout {
                            spacing: 6px;
                            // instructions: just text
                            if f.kind == "note": Text { text: f.label; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
@@ -4326,15 +4901,59 @@ export component AppWindow inherits Window {
                            }
                           }
                           }
+                          }
                         }
-                        HorizontalLayout {
+                        if !root.bot-page || root.pf-dirty: HorizontalLayout {
                             alignment: end;
                             spacing: 8px;
-                            Pill { label: "Cancel"; clicked => { root.pf-open = false; } }
-                            Pill { label: "Save"; on: true; clicked => { root.pf-save(); } }
+                            if root.pf-dirty: Text { text: root.pf-changes == 1 ? "1 change not saved yet" : root.pf-changes + " changes not saved yet"; color: Theme.accent; font-size: 12px; vertical-alignment: center; }
+                            Pill { label: root.pf-dirty ? "Put Back" : "Cancel"; tip: root.pf-dirty ? "Leave it as it was" : ""; clicked => { root.leave-choice(root.pf-dirty ? "discard-stay" : "cancel"); } }
+                            Rectangle {
+                                width: sv.width;
+                                height: sv.height;
+                                if root.pf-dirty: Pulse { x: -3px; y: -3px; width: parent.width + 6px; height: parent.height + 6px; r: 22px; }
+                                sv := Pill { label: "Save"; on: true; clicked => { root.pf-save(); } }
+                            }
                         }
                         // (clear of the player's tab, laid over the page's foot)
                         if root.tab-style: Rectangle { height: 64px; }
+                    }
+                    // leaving with changes not saved: Save them, or leave them, or stay (the page's Save pulsing behind)
+                    if root.leave-ask: Rectangle {
+                        background: Theme.bg.with-alpha(0.6);
+                        TouchArea { clicked => { root.leave-choice("stay"); } }
+                        Rectangle {
+                            width: 420px;
+                            height: lac.preferred-height;
+                            x: (parent.width - self.width) / 2;
+                            y: (parent.height - self.height) / 2;
+                            border-radius: 18px;
+                            background: Theme.elevated;
+                            border-width: 1px;
+                            border-color: Theme.accent.with-alpha(0.6);
+                            drop-shadow-blur: 30px;
+                            drop-shadow-color: #00000090;
+                            TouchArea { }
+                            lac := VerticalLayout {
+                                padding: 20px;
+                                spacing: 10px;
+                                Text { text: "Save your changes?"; color: Theme.text; font-size: 18px; font-weight: 800; }
+                                Text { text: (root.pf-changes == 1 ? "1 setting on this page has" : root.pf-changes + " settings on this page have") + " changed and isn't saved yet."; color: Theme.muted; font-size: 13px; wrap: word-wrap; }
+                                HorizontalLayout {
+                                    alignment: end;
+                                    spacing: 8px;
+                                    padding-top: 6px;
+                                    Pill { label: "Keep Editing"; clicked => { root.leave-choice("stay"); } }
+                                    Pill { label: "Don't Save"; clicked => { root.leave-choice("discard"); } }
+                                    Rectangle {
+                                        width: lsv.width;
+                                        height: lsv.height;
+                                        Pulse { x: -3px; y: -3px; width: parent.width + 6px; height: parent.height + 6px; r: 22px; }
+                                        lsv := Pill { label: "Save"; on: true; clicked => { root.leave-choice("save"); } }
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
                 // the chatbot's Actions: its actions listed, and the one picked as a flow, from what starts it (WHEN),

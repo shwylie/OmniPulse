@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OmniPulse Multichat</title>
+<style>
+  /* OmniPulse's multichat, on stream (an OBS Browser source): Twitch and Kick chat together, see-through.
+     Its settings: the gear (in OBS, right-click the source, Interact), kept for it; or in its address
+     (?size=20&fade=30&from=kick...), which wins */
+  :root { --fs: 20px; --bg: 0; --gap: 6px; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: transparent; overflow: hidden; font: 600 var(--fs) / 1.35 "Segoe UI", system-ui, sans-serif; color: #fff; }
+  #list { position: absolute; inset: 0; display: flex; flex-direction: column; justify-content: flex-end; gap: var(--gap); padding: 12px; }
+  body.top #list { justify-content: flex-start; flex-direction: column-reverse; }
+  .m { display: flex; align-items: flex-start; gap: 8px; padding: 6px 10px; border-radius: 12px; background: rgba(10, 12, 18, var(--bg)); animation: in 0.35s ease-out; max-width: 100%; overflow-wrap: anywhere; }
+  body.shadow .m { text-shadow: 0 2px 6px rgba(0, 0, 0, 0.85), 0 0 2px rgba(0, 0, 0, 0.9); }
+  body.bubbles .m { background: rgba(10, 12, 18, max(var(--bg), 0.55)); border-left: 3px solid var(--pc, #9146ff); border-radius: 4px 12px 12px 4px; }
+  .m.out { animation: out 0.6s ease-in forwards; }
+  @keyframes in { from { opacity: 0; transform: translateY(8px); } }
+  @keyframes out { to { opacity: 0; transform: translateY(-4px); } }
+  .pf { flex: none; width: 1.1em; height: 1.1em; margin-top: 0.12em; fill: var(--pc); }
+  .who { font-weight: 800; white-space: nowrap; }
+  .badge { display: inline-block; font-size: 0.62em; font-weight: 800; padding: 0 0.3em; margin-right: 0.25em; border-radius: 0.25em; vertical-align: 0.15em; color: #111; }
+  .badge.b { background: #ff4f4f; } .badge.m { background: #3ccd6c; } .badge.v { background: #e05ce0; } .badge.s { background: #7aa2ff; }
+  .text { font-weight: 500; }
+  .text img { height: 1.5em; vertical-align: middle; margin: -0.25em 0; }
+
+  /* its settings: only while the pointer's over it (OBS's Interact), never on stream otherwise */
+  #gear { position: fixed; top: 8px; right: 8px; width: 34px; height: 34px; border-radius: 17px; border: 0; background: #000a; color: #fff; font-size: 18px; cursor: pointer; opacity: 0; transition: opacity 0.2s; }
+  body:hover #gear { opacity: 1; }
+  #panel { position: fixed; top: 48px; right: 8px; width: 290px; max-height: calc(100% - 56px); overflow: auto; background: #14161ef2; border: 1px solid #2e323d; border-radius: 14px; padding: 12px 14px; font: 400 13px / 1.4 "Segoe UI", system-ui, sans-serif; color: #e6e8ee; display: none; text-shadow: none; }
+  #panel.open { display: block; }
+  #panel h2 { margin: 6px 0 4px; font-size: 11px; font-weight: 700; color: #8b91a1; letter-spacing: 0.06em; text-transform: uppercase; }
+  #panel label { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 3px 0; }
+  #panel select, #panel input[type=number] { background: #1b1d24; color: #e6e8ee; border: 1px solid #2e323d; border-radius: 6px; padding: 2px 4px; width: 110px; }
+  #panel .addr { margin-top: 8px; font-size: 11px; color: #8b91a1; word-break: break-all; }
+</style>
+</head>
+<body class="shadow">
+<div id="list"></div>
+<button id="gear" aria-label="Its settings" title="Its settings">&#9881;</button>
+<div id="panel">
+  <h2>Show</h2>
+  <label>Chat from <select id="oFrom"><option value="all">Twitch and Kick</option><option value="twitch">Twitch only</option><option value="kick">Kick only</option></select></label>
+  <label>Commands (!sr...) <input type="checkbox" id="oCmds"></label>
+  <label>The bot's own <input type="checkbox" id="oBot" checked></label>
+  <label>Badges <input type="checkbox" id="oBadges" checked></label>
+  <label>Platform marks <input type="checkbox" id="oMarks" checked></label>
+  <h2>Look</h2>
+  <label>Style <select id="oStyle"><option value="plain">Plain</option><option value="bubbles">Bubbles</option></select></label>
+  <label>Text size <input type="number" id="oSize" min="10" max="60" step="1"></label>
+  <label>Background <select id="oBg"><option value="0">None</option><option value="0.35">Faint</option><option value="0.6">Half</option><option value="0.85">Solid</option></select></label>
+  <label>Shadow <input type="checkbox" id="oShadow" checked></label>
+  <label>Newest at the <select id="oDir"><option value="bottom">Bottom</option><option value="top">Top</option></select></label>
+  <h2>Time</h2>
+  <label>Fade after (seconds, 0: never) <input type="number" id="oFade" min="0" max="600" step="1"></label>
+  <label>At most <input type="number" id="oMax" min="1" max="100" step="1"></label>
+  <div class="addr" id="addr"></div>
+</div>
+<script>
+  "use strict";
+  const $ = (id) => document.getElementById(id);
+  const DEFAULTS = { from: "all", cmds: false, bot: true, badges: true, marks: true, style: "plain", size: 20, bg: "0", shadow: true, dir: "bottom", fade: 0, max: 30 };
+  const store = {
+    get() { try { return JSON.parse(localStorage.getItem("omnipulse.multichat") || "{}"); } catch (e) { return {}; } },
+    set(v) { try { localStorage.setItem("omnipulse.multichat", JSON.stringify(v)); } catch (e) {} },
+  };
+  // (the address's settings win over the ones kept: a source per scene, each its own)
+  const fromUrl = {};
+  new URLSearchParams(location.search).forEach((v, k) => { if (k in DEFAULTS) fromUrl[k] = typeof DEFAULTS[k] === "boolean" ? v === "1" || v === "true" : typeof DEFAULTS[k] === "number" ? Number(v) : v; });
+  const opt = Object.assign({}, DEFAULTS, store.get(), fromUrl);
+
+  function apply() {
+    document.documentElement.style.setProperty("--fs", Math.max(10, Math.min(60, Number(opt.size) || 20)) + "px");
+    document.documentElement.style.setProperty("--bg", opt.bg);
+    document.body.classList.toggle("shadow", !!opt.shadow);
+    document.body.classList.toggle("bubbles", opt.style === "bubbles");
+    document.body.classList.toggle("top", opt.dir === "top");
+    $("oFrom").value = opt.from; $("oCmds").checked = opt.cmds; $("oBot").checked = opt.bot; $("oBadges").checked = opt.badges; $("oMarks").checked = opt.marks;
+    $("oStyle").value = opt.style; $("oSize").value = opt.size; $("oBg").value = opt.bg; $("oShadow").checked = opt.shadow; $("oDir").value = opt.dir;
+    $("oFade").value = opt.fade; $("oMax").value = opt.max;
+    // (the same settings as an address, for another source in another scene)
+    const q = Object.keys(DEFAULTS).filter((k) => opt[k] !== DEFAULTS[k]).map((k) => k + "=" + encodeURIComponent(typeof opt[k] === "boolean" ? (opt[k] ? 1 : 0) : opt[k])).join("&");
+    $("addr").textContent = "As an address: " + location.origin + location.pathname + (q ? "?" + q : "");
+  }
+  const bind = (id, key, conv) => { $(id).onchange = (e) => { opt[key] = conv(e.target); store.set(Object.fromEntries(Object.keys(DEFAULTS).filter((k) => !(k in fromUrl)).map((k) => [k, opt[k]]))); apply(); }; };
+  bind("oFrom", "from", (t) => t.value); bind("oCmds", "cmds", (t) => t.checked); bind("oBot", "bot", (t) => t.checked); bind("oBadges", "badges", (t) => t.checked); bind("oMarks", "marks", (t) => t.checked);
+  bind("oStyle", "style", (t) => t.value); bind("oSize", "size", (t) => Number(t.value) || 20); bind("oBg", "bg", (t) => t.value); bind("oShadow", "shadow", (t) => t.checked); bind("oDir", "dir", (t) => t.value);
+  bind("oFade", "fade", (t) => Math.max(0, Number(t.value) || 0)); bind("oMax", "max", (t) => Math.max(1, Number(t.value) || 30));
+  $("gear").onclick = () => $("panel").classList.toggle("open");
+
+  const MARK = {
+    twitch: "M11.571 4.714h1.715v5.143H11.57zm4.715 0H18v5.143h-1.714zM6 0L1.714 4.286v15.428h5.143V24l4.286-4.286h3.428L22.286 12V0zm14.571 11.143l-3.428 3.428h-3.429l-3 3v-3H6.857V1.714h13.714z",
+    kick: "M1.333 0h8v5.333H12V2.667h2.667V0h8v8H20v2.667h-2.667v2.666H20V16h2.667v8h-8v-2.667H12v-2.666H9.333V24h-8z",
+  };
+  const BADGES = [["broadcaster", "b", "B"], ["moderator", "m", "M"], ["vip", "v", "V"], ["subscriber", "s", "S"]];
+  function colourOf(m) {
+    if (/^#[0-9a-f]{6}$/i.test(m.color || "")) return m.color;
+    let h = 0;
+    for (const c of String(m.login || m.user || "")) h = (h * 31 + c.charCodeAt(0)) >>> 0;
+    return "hsl(" + (h % 360) + " 75% 70%)";
+  }
+  function textNodes(m) {
+    const out = [], text = String(m.text || "");
+    const img = (src, name) => { const i = document.createElement("img"); i.src = src; i.alt = name; return i; };
+    if (m.platform === "kick") {
+      const re = /\[emote:(\d+):([^\]]*)\]/g;
+      let at = 0, x;
+      while ((x = re.exec(text))) { if (x.index > at) out.push(document.createTextNode(text.slice(at, x.index))); out.push(img("https://files.kick.com/emotes/" + x[1] + "/fullsize", x[2])); at = x.index + x[0].length; }
+      if (at < text.length) out.push(document.createTextNode(text.slice(at)));
+      return out;
+    }
+    const chars = Array.from(text), spots = [];
+    String(m.emotes || "").split("/").filter(Boolean).forEach((part) => { const [id, places] = part.split(":"); (places || "").split(",").forEach((p) => { const [a, b] = p.split("-").map(Number); if (b >= a) spots.push([a, b, id]); }); });
+    spots.sort((x, y) => x[0] - y[0]);
+    let at = 0;
+    for (const [a, b, id] of spots) { if (a < at) continue; if (a > at) out.push(document.createTextNode(chars.slice(at, a).join(""))); out.push(img("https://static-cdn.jtvnw.net/emoticons/v2/" + encodeURIComponent(id) + "/default/dark/2.0", chars.slice(a, b + 1).join(""))); at = b + 1; }
+    if (at < chars.length) out.push(document.createTextNode(chars.slice(at).join("")));
+    return out;
+  }
+
+  const list = $("list");
+  const rows = new Map();
+  function shown(m) {
+    if (m.notice || m.gone) return false;
+    if (opt.from !== "all" && m.platform !== opt.from) return false;
+    if (!opt.cmds && /^!/.test(String(m.text || "").trim())) return false;
+    if (!opt.bot && m.self) return false;
+    return true;
+  }
+  function add(m) {
+    if (!shown(m)) return;
+    const r = document.createElement("div");
+    r.className = "m";
+    const pc = m.platform === "kick" ? "#53fc18" : "#a970ff";
+    r.style.setProperty("--pc", pc);
+    if (opt.marks) { const NS = "http://www.w3.org/2000/svg"; const s = document.createElementNS(NS, "svg"); s.setAttribute("viewBox", "0 0 24 24"); s.classList.add("pf"); const p = document.createElementNS(NS, "path"); p.setAttribute("d", MARK[m.platform === "kick" ? "kick" : "twitch"]); s.append(p); r.append(s); }
+    const body = document.createElement("div");
+    if (opt.badges) for (const [k, cls, l] of BADGES) if ((m.badges || []).includes(k)) { const b = document.createElement("span"); b.className = "badge " + cls; b.textContent = l; body.append(b); }
+    const who = document.createElement("span"); who.className = "who"; who.textContent = (m.user || m.login || "") + (m.me ? " " : ": "); who.style.color = colourOf(m);
+    const t = document.createElement("span"); t.className = "text"; t.append(...textNodes(m));
+    body.append(who, t);
+    r.append(body);
+    list.append(r);
+    rows.set(m.n, r);
+    while (list.children.length > Math.max(1, Number(opt.max) || 30)) { const x = list.firstChild; for (const [n, v] of rows) if (v === x) rows.delete(n); x.remove(); }
+    if (Number(opt.fade) > 0) setTimeout(() => gone(m.n), Number(opt.fade) * 1000);
+  }
+  function gone(n) { const r = rows.get(n); if (!r) return; rows.delete(n); r.classList.add("out"); setTimeout(() => r.remove(), 600); }
+
+  let last = -1;
+  async function poll() {
+    try {
+      const j = await (await fetch("/dock/chat.json?after=" + Math.max(0, last), { cache: "no-store" })).json();
+      if (j.last < last) last = -1;
+      // (opened now: only the last few, as it'd have shown them, not the whole kept list)
+      const items = j.items || [];
+      const fresh = last < 0 ? items.slice(-Math.max(1, Number(opt.max) || 30)).filter((m) => !(Number(opt.fade) > 0) || Date.now() - m.ts < Number(opt.fade) * 1000) : items;
+      fresh.forEach(add);
+      if (items.length) last = Math.max(last, ...items.map((m) => m.n)); else if (last < 0) last = j.last || 0;
+      for (const n of j.gone || []) gone(n);
+    } catch (e) {}
+    setTimeout(poll, 700);
+  }
+  apply();
+  poll();
+</script>
+</body>
+</html>
