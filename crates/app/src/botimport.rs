@@ -221,6 +221,8 @@ fn sb_trigger(t: &Value, commands: &HashMap<String, Value>, timers: &HashMap<Str
         139 => ev("adbreak", json!({})),
         154 => ev("online", json!({})),
         155 => ev("offline", json!({})),
+        156 => ev("shoutoutin", json!({})),
+        201 => ev("donation", json!({})),
         133 | 35010 => ours(TRIGGERS, "message", json!({ "match": "regex", "text": "." })),
         701 => {
             let timer = timers.get(&s(&t["timerId"])).cloned().unwrap_or(Value::Null);
@@ -469,6 +471,11 @@ fn miu_event(code: u64) -> Option<Value> {
         270 => ev("bits"),
         271 => ev("reward"),
         280 => ev("hypetrain"),
+        282 => ev("hypetrainend"),
+        230 => ev("watchstreak"),
+        231 => ev("shoutoutin"),
+        272 => ev("charity"),
+        1000 | 1100 => ev("donation"),
         _ => return None,
     })
 }

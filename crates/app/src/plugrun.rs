@@ -793,6 +793,66 @@ mod tests {
         stop("chatbot");
     }
 
+    /// Donations, from stand-ins for Streamlabs' socket (socket.io: opened, pinged, an event) and StreamElements'
+    /// (subscribed to tips with its token, then a tip): each an alert, and A Donation's action run
+    #[test]
+    fn the_chatbot_hears_donations() {
+        use futures_util::{SinkExt, StreamExt};
+        use tokio_tungstenite::tungstenite::Message;
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let sl = rt.block_on(tokio::net::TcpListener::bind("127.0.0.1:0")).unwrap();
+        let se = rt.block_on(tokio::net::TcpListener::bind("127.0.0.1:0")).unwrap();
+        let (slp, sep) = (sl.local_addr().unwrap().port(), se.local_addr().unwrap().port());
+        let heard: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+        let (h1, h2) = (heard.clone(), heard.clone());
+        rt.spawn(async move {
+            let (tcp, _) = sl.accept().await.unwrap();
+            let (mut w, mut r) = tokio_tungstenite::accept_async(tcp).await.unwrap().split();
+            let _ = w.send(Message::Text(r#"0{"sid":"x","pingInterval":200,"pingTimeout":5000}"#.into())).await;
+            let _ = w.send(Message::Text("40".into())).await;
+            let _ = w.send(Message::Text(r#"42["event",{"type":"follow","for":"twitch_account","message":[{"name":"NotATip"}]}]"#.into())).await;
+            let _ = w.send(Message::Text(r#"42["event",{"type":"donation","for":"streamlabs","message":[{"name":"Jeff","amount":"13.37","currency":"USD","message":"for the tunes"}]}]"#.into())).await;
+            while let Some(Ok(Message::Text(t))) = r.next().await { h1.lock().unwrap().push(format!("sl {t}")); }
+        });
+        rt.spawn(async move {
+            let (tcp, _) = se.accept().await.unwrap();
+            let (mut w, mut r) = tokio_tungstenite::accept_async(tcp).await.unwrap().split();
+            while let Some(Ok(Message::Text(t))) = r.next().await {
+                h2.lock().unwrap().push(format!("se {t}"));
+                let m: Value = serde_json::from_str(&t).unwrap_or(Value::Null);
+                if m["type"] == "subscribe" && m["data"]["token"] == "jwt1" {
+                    let _ = w.send(Message::Text(json!({ "type": "response", "nonce": m["nonce"], "data": { "message": "ok" } }).to_string().into())).await;
+                    let _ = w.send(Message::Text(json!({ "type": "message", "topic": "channel.tips", "data": { "donation": { "user": { "username": "Ann" }, "amount": 5, "currency": "EUR", "message": "hi" } } }).to_string().into())).await;
+                }
+            }
+        });
+        let asked: Arc<Mutex<Vec<Value>>> = Arc::new(Mutex::new(Vec::new()));
+        let a2 = asked.clone();
+        set_app_handler(Arc::new(move |_p: &str, ask: Value, answer: Box<dyn FnOnce(Value) + Send>| { a2.lock().unwrap().push(ask); answer(json!({ "ok": true })); }));
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../plugins/chatbot");
+        let code = std::fs::read_to_string(root.join("main.js")).unwrap()
+            .replace("wss://sockets.streamlabs.com/socket.io/", &format!("ws://127.0.0.1:{slp}/socket.io/"))
+            .replace("wss://astro.streamelements.com", &format!("ws://127.0.0.1:{sep}/"));
+        let mut m: core::plugins::Manifest = serde_json::from_str(&std::fs::read_to_string(root.join("manifest.json")).unwrap()).unwrap();
+        m.hosts.push("127.0.0.1".into());
+        let pkg = core::plugins::Package { manifest: m, code, digest: String::new(), bundled: true };
+        let mut trig = crate::flows::defaults(crate::flows::TRIGGERS, "event");
+        trig["event"] = json!("donation");
+        let mut show = crate::flows::defaults(crate::flows::STEPS, "overlay");
+        show["text"] = json!("%user% %amount% %currency% %message%");
+        let p = start(&pkg, &json!({ "streamlabsToken": "sl1", "streamelementsToken": "jwt1", "actions": [{ "name": "Tip", "on": true, "trigger": trig, "steps": [show] }] }), rt.handle().clone()).unwrap();
+        let shown = |t: &str| asked.lock().unwrap().iter().any(|a| a["op"] == "overlay" && a["args"][0]["text"] == t);
+        let until = Instant::now() + Duration::from_secs(5);
+        while !(shown("Jeff 13.37 USD for the tunes") && shown("Ann 5 EUR hi") && heard.lock().unwrap().iter().any(|h| h == "sl 2")) && Instant::now() < until { std::thread::sleep(Duration::from_millis(50)); }
+        let (a, h) = (asked.lock().unwrap().clone(), heard.lock().unwrap().clone());
+        assert!(shown("Jeff 13.37 USD for the tunes") && shown("Ann 5 EUR hi"), "{a:#?} {h:#?}");
+        assert!(h.iter().any(|x| x == "sl 2"), "pinged: {h:#?}");
+        assert!(a.iter().any(|x| x["op"] == "alert" && x["args"][0]["type"] == "donation" && x["args"][0]["user"] == "Jeff" && x["args"][0]["amount"] == "USD 13.37"), "{a:#?}");
+        assert!(!a.iter().any(|x| x["args"][0]["user"] == "NotATip" || x["args"][0]["text"].as_str().unwrap_or("").contains("NotATip")), "{a:#?}");
+        drop(p);
+        stop("chatbot");
+    }
+
     /// The chatbot's actions (crate::flows' JSON, run by the plugin), against the stand-in Twitch: a command
     /// that answers, a counter kept between uses, a chat message's, "only go on if" stopping one, a raid
     /// (with its least), and a song requested from a step

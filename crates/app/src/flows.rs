@@ -40,7 +40,7 @@ const EVENTS: &[(&str, &str)] = &[
     ("firstmsg", "A Viewer's First Message"), ("firstwords", "A Viewer's First Words This Stream"),
     ("prediction", "A Prediction Starting"), ("predictionend", "A Prediction Ending"), ("pollend", "A Poll Ending"),
     ("hypetrainend", "A Hype Train Ending"), ("charity", "A Charity Donation"), ("shoutoutin", "A Shoutout to You"),
-    ("vip", "A New VIP"), ("mod", "A New Moderator"), ("watchstreak", "A Watch Streak"), ("online", "Going Live"), ("offline", "Going Offline"), ("adbreak", "An Ad Break"),
+    ("vip", "A New VIP"), ("mod", "A New Moderator"), ("watchstreak", "A Watch Streak"), ("donation", "A Donation (Streamlabs, StreamElements)"), ("online", "Going Live"), ("offline", "Going Offline"), ("adbreak", "An Ad Break"),
 ];
 const OBS_WHEN: &[(&str, &str)] = &[
     ("scene", "The Scene Changes"), ("streamstart", "Streaming Starts"), ("streamstop", "Streaming Stops"),
@@ -101,7 +101,7 @@ pub const TRIGGERS: &[Kind] = &[
         pick("exempt", "Except From", EXEMPT, "subscribers", "Them and anyone above them (you always are)."),
         pick("from", "On", FROM, "any", ""),
     ] },
-    Kind { id: "event", label: "A Channel Event", note: "Gives its steps %user%, %amount% (bits, months, viewers, subs gifted) and %message%.", fields: &[
+    Kind { id: "event", label: "A Channel Event", note: "Gives its steps %user%, %amount% (bits, months, viewers, subs gifted, a donation's) and %message% (a donation's %currency% too).", fields: &[
         pick("event", "Event", EVENTS, "follow", ""),
         f("min", "At Least", "number", "0", "The least it takes, in bits, raiders or subs gifted (0: any)."),
         f("reward", "Reward", "text", "", "For a Channel Points reward: its name (empty: any)."),
@@ -371,6 +371,7 @@ pub fn templates() -> Vec<(&'static str, Value)> {
         ("A Command That Answers", act("Hello", trig("command", json!({ "command": "!hello" })), vec![step("say", json!({ "text": "Hi %user%!" }))])),
         ("Thank New Followers", act("Thank Followers", trig("event", json!({ "event": "follow" })), vec![step("say", json!({ "text": "Thanks for the follow, %user%!", "reply": false }))])),
         ("Thank Subs", act("Thank Subs", trig("event", json!({ "event": "sub" })), vec![step("say", json!({ "text": "Thank you for subscribing, %user%!", "reply": false }))])),
+        ("Thank Donations", act("Thank Donations", trig("event", json!({ "event": "donation" })), vec![step("say", json!({ "text": "Thank you for the %amount% %currency%, %user%!", "reply": false }))])),
         ("Thank Bits", act("Thank Bits", trig("event", json!({ "event": "bits" })), vec![step("say", json!({ "text": "Thanks for the %amount% bits, %user%!", "reply": false }))])),
         ("Welcome Raiders", act("Welcome Raiders", trig("event", json!({ "event": "raid" })), vec![
             step("say", json!({ "text": "Welcome, raiders! Go and check out %user%.", "reply": false })),

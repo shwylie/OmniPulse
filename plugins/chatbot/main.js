@@ -1352,6 +1352,7 @@ async function start() {
   loadActions();
   setPoints();
   obsConnect();
+  tipConnect();
   kickConnect().catch((e) => { OmniPulse.log("kick: " + e.message); OmniPulse.app.say("Kick's chat didn't connect: " + e.message).catch(() => {}); });
   if (!S().token || !S().login) return;
   const token = await fresh("channel");
@@ -1366,6 +1367,57 @@ async function start() {
   retry = 1000;
 }
 
+// ---------- donations: Streamlabs' and StreamElements' own sockets ----------
+let tipSockets = [];
+
+// A donation, from whichever: its alert (if alerts are on) and A Donation's actions
+function onTip(user, amount, currency, message, from) {
+  const value = String(Math.round(num(amount) * 100) / 100);
+  if (S().alerts !== false) OmniPulse.app.alert({ type: "donation", user, amount: (currency ? currency + " " : "") + value, message }).catch((e) => OmniPulse.log("alert: " + e.message));
+  const ctx = { user, userId: "", amount: value, currency: currency || "", message: message || "", rawInput: message || "", platform: "all", service: from };
+  Object.assign(ctx, words(ctx.rawInput));
+  fire("donation", ctx);
+}
+
+// (each kept going: tried again a little later if it closes, while the chatbot runs)
+function tipSocket(url, opened, onmessage, label) {
+  const s = OmniPulse.socket(url);
+  tipSockets.push(s);
+  let ping = null;
+  s.onmessage = (data) => onmessage(s, String(data), (ms) => { if (ping) clearInterval(ping); ping = setInterval(() => s.send("2"), ms); });
+  if (opened) opened(s);
+  s.onclose = () => {
+    if (ping) clearInterval(ping);
+    tipSockets = tipSockets.filter((x) => x !== s);
+    if (!stopped) setTimeout(() => { if (!stopped) tipConnect(label); }, 30000);
+  };
+}
+
+function tipConnect(only) {
+  const sl = String(S().streamlabsToken || "").trim(), se = String(S().streamelementsToken || "").trim();
+  // Streamlabs: socket.io (its version 3): "0" opens (how often to ping), "42" an event
+  if (sl && (!only || only === "streamlabs")) tipSocket("wss://sockets.streamlabs.com/socket.io/?token=" + encodeURIComponent(sl) + "&EIO=3&transport=websocket", null, (s, d, pings) => {
+    if (d.startsWith("0{")) { try { pings(num(JSON.parse(d.slice(1)).pingInterval) || 25000); } catch (e) { pings(25000); } return; }
+    if (!d.startsWith("42")) return;
+    let m;
+    try { m = JSON.parse(d.slice(2)); } catch (e) { return; }
+    const e = m[1] || {};
+    if (m[0] !== "event" || e.type !== "donation") return;
+    for (const t of [].concat(e.message || [])) onTip(t.name || t.from || "Someone", t.amount, t.currency, t.message, "streamlabs");
+  }, "streamlabs");
+  // StreamElements: its Astro socket, tips' topic
+  if (se && (!only || only === "streamelements")) tipSocket("wss://astro.streamelements.com", (s) => {
+    s.send(JSON.stringify({ type: "subscribe", nonce: "omnipulse" + Date.now(), data: { topic: "channel.tips", token: se, token_type: "jwt" } }));
+  }, (s, d) => {
+    let m;
+    try { m = JSON.parse(d); } catch (e) { return; }
+    if (m.type === "error") { OmniPulse.app.say("StreamElements didn't take its token: " + ((m.data && m.data.message) || m.error || "check it in the chatbot's settings")).catch(() => {}); return; }
+    if (m.type !== "message" || m.topic !== "channel.tips") return;
+    const x = m.data || {}, t = x.donation || x;
+    onTip((t.user && (t.user.username || t.user.name)) || t.username || t.name || "Someone", t.amount, t.currency, t.message, "streamelements");
+  }, "streamelements");
+}
+
 function stopAll() {
   stopped = true;
   timers.forEach((id) => clearInterval(id));
@@ -1374,6 +1426,8 @@ function stopAll() {
   if (kickRefresh) { clearInterval(kickRefresh); kickRefresh = null; }
   for (const s of [chat, botChat, events, obs, kick]) { if (s) { s.onclose = null; s.close(); } }
   chat = botChat = events = obs = kick = null;
+  for (const s of tipSockets) { s.onclose = null; s.close(); }
+  tipSockets = [];
   obsReady = false;
 }
 

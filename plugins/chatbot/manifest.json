@@ -1,7 +1,7 @@
 {
   "id": "chatbot",
   "name": "OmniPulse Chatbot",
-  "version": "0.2.3",
+  "version": "0.2.4",
   "author": "OmniPulse",
   "description": "OmniPulse's own chatbot: song requests, alerts, your own actions (a trigger, then its steps) and OBS controls, straight from your chat, no other bot needed. Twitch and Kick; YouTube is on its way.",
   "main": "main.js",
@@ -15,7 +15,9 @@
     "web.kick.com",
     "api.kick.com",
     "id.kick.com",
-    "*.platform.kick.com"
+    "*.platform.kick.com",
+    "sockets.streamlabs.com",
+    "astro.streamelements.com"
   ],
   "capabilities": [
     "sockets",
@@ -200,6 +202,20 @@
       "type": "password",
       "default": "",
       "note": "From the same place in OBS (Show Connect Info)."
+    },
+    {
+      "key": "streamlabsToken",
+      "label": "Streamlabs Donations",
+      "type": "password",
+      "default": "",
+      "note": "Your Socket API Token, from streamlabs.com: Settings > API Settings > API Tokens. Donations then come in as A Donation, and as alerts. Empty: none."
+    },
+    {
+      "key": "streamelementsToken",
+      "label": "StreamElements Tips",
+      "type": "password",
+      "default": "",
+      "note": "Your JWT Token, from streamelements.com: your account's Channels page (Show Secrets). Empty: none."
     },
     {
       "key": "requests",
