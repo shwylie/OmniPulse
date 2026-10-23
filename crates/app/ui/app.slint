@@ -5236,7 +5236,8 @@ export component AppWindow inherits Window {
                            fcol := VerticalLayout {
                            spacing: 6px;
                            // instructions: just text
-                           if f.kind == "note": Text { text: f.label; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
+                           if f.kind == "note" && f.label.character-count <= 32: VerticalLayout { padding-top: 8px; SectionHead { text: f.label; } }
+                           if f.kind == "note" && f.label.character-count > 32: Text { text: f.label; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
                            // a sound's waveform: where its trims are (shares of it), then its outline's 160 heights
                            if f.kind == "wave": VerticalLayout {
                             spacing: 4px;
@@ -5281,7 +5282,7 @@ export component AppWindow inherits Window {
                                 border-color: Theme.line;
                                 Text { x: 10px; width: parent.width - 20px; text: f.value; color: Theme.text; font-size: 12px; overflow: elide; vertical-alignment: center; }
                               }
-                              Pill { label: "Copy"; clicked => { root.pf-copy(i); } }
+                              IconButton { d: Icons.copy; size: 34px; tip: "Copy it"; y: (parent.height - self.height) / 2; clicked => { root.pf-copy(i); } }
                             }
                            }
                            if f.kind != "note" && f.kind != "info" && f.kind != "wave": HorizontalLayout {
@@ -5301,7 +5302,11 @@ export component AppWindow inherits Window {
                     }
                     if f.kind == "row": Toggle { checked: f.value == "true"; y: (parent.height - self.height) / 2; toggled => { root.pf-set(i, self.checked ? "true" : "false"); } }
                             // a choice: a dropdown (as the web app's)
-                            if f.kind == "select": Dropdown { options: f.options; current: f.at; y: (parent.height - self.height) / 2; picked(k) => { root.pf-set(i, "\u{2}" + k); } }
+                            if f.kind == "select" && f.options.length <= 3: HorizontalLayout {
+                                spacing: 4px;
+                                for o[k] in f.options: Chip { label: o; on: k == f.at; y: (parent.height - self.height) / 2; clicked => { root.pf-set(i, "\u{2}" + k); } }
+                            }
+                            if f.kind == "select" && f.options.length > 3: Dropdown { options: f.options; current: f.at; y: (parent.height - self.height) / 2; picked(k) => { root.pf-set(i, "\u{2}" + k); } }
                             // a size or a count: − and + (as the web app's)
                             if f.kind == "stepper": Stepper { value: f.value; can-down: f.at > 0; can-up: f.at < f.options.length - 1; y: (parent.height - self.height) / 2; down => { root.pf-set(i, "\u{2}" + (f.at - 1)); } up => { root.pf-set(i, "\u{2}" + (f.at + 1)); } }
                             // a level: a slider, its value beside it (and with "rangenum", a box to type it in too)
