@@ -88,6 +88,13 @@ export struct PlugField { key: string, label: string, note: string, kind: string
 export struct Item { name: string, sub: string, art: image, plat: string, on-sc: bool, on-sp: bool, on-yt: bool, row: Row }
 /// A page being loaded: each platform it asks, and whether it's answered yet
 export struct LoadStep { plat: string, name: string, done: bool }
+/// The chatbot's Actions page: one thing a trigger or a step asks for (its kind: text, number, select,
+/// toggle; a select's choices and which is picked)
+export struct FlowField { key: string, label: string, note: string, kind: string, value: string, options: [string], at: int }
+/// A trigger or a step: which kind it is (of the page's list of them), what it says, what it asks for
+export struct FlowNode { kind-at: int, note: string, fields: [FlowField] }
+/// An action in the page's list: its name, what starts it and how many steps, on or off
+export struct FlowItem { name: string, summary: string, on: bool }
 /// A slice of the Ring visualiser: its outline, and where it is from the foot (0, the bass) to the top (1)
 export struct RingPiece { d: string, f: float }
 
@@ -881,6 +888,88 @@ component VizRing inherits Rectangle {
         fill: Theme.accent.mix(Theme.accent-2, 1 - p.f).with-alpha(root.strength);
     }
 }
+
+/// An action's trigger's or step's fields, each a row: its label and note, and its box, list or switch
+component FlowFieldsView inherits VerticalLayout {
+    in property <[FlowField]> fields;
+    callback changed(int, string);
+    callback picked(int, int);
+    spacing: 8px;
+    for fl[i] in root.fields: HorizontalLayout {
+        spacing: 12px;
+        VerticalLayout {
+            horizontal-stretch: 1;
+            alignment: center;
+            spacing: 1px;
+            if fl.label != "": Text { text: fl.label; color: Theme.text; font-size: 13px; font-weight: 600; }
+            if fl.note != "": Text { text: fl.note; color: Theme.muted; font-size: 11px; wrap: word-wrap; min-height: self.preferred-height; }
+        }
+        if fl.kind == "text" || fl.kind == "number": Rectangle {
+            width: fl.kind == "number" ? 90px : 280px;
+            height: 32px;
+            y: (parent.height - self.height) / 2;
+            border-radius: 8px;
+            background: Theme.bg;
+            border-width: 1px;
+            border-color: fti.has-focus ? Theme.accent : Theme.line;
+            fti := TextInput { x: 10px; width: parent.width - 20px; height: parent.height; vertical-alignment: center; color: Theme.text; font-size: 13px; single-line: true; input-type: fl.kind == "number" ? InputType.decimal : InputType.text; text: fl.value; edited => { root.changed(i, self.text); } }
+        }
+        if fl.kind == "select": Dropdown { options: fl.options; current: fl.at; y: (parent.height - self.height) / 2; picked(k) => { root.picked(i, k); } }
+        if fl.kind == "toggle": Toggle { checked: fl.value == "true"; y: (parent.height - self.height) / 2; toggled => { root.changed(i, self.checked ? "true" : "false"); } }
+    }
+}
+
+/// A card of an action's flow: its trigger ("WHEN"), or a step (its number): which kind it is, what it
+/// says, its fields; a step's can be moved up or down, or taken out
+component FlowCard inherits Rectangle {
+    in property <string> badge;
+    in property <bool> trigger;
+    in property <[string]> types;
+    in property <int> type-at;
+    in property <string> note;
+    in property <[FlowField]> fields;
+    in property <bool> first;
+    in property <bool> last;
+    callback type-picked(int);
+    callback changed(int, string);
+    callback picked(int, int);
+    callback up();
+    callback down();
+    callback remove();
+    border-radius: 12px;
+    background: Theme.panel;
+    border-width: 1px;
+    border-color: root.trigger ? Theme.accent.with-alpha(0.7) : Theme.line;
+    VerticalLayout {
+        padding: 14px;
+        spacing: 10px;
+        HorizontalLayout {
+            spacing: 10px;
+            Rectangle {
+                width: max(28px, fbt.preferred-width + 18px);
+                height: 24px;
+                y: (parent.height - self.height) / 2;
+                border-radius: 12px;
+                background: root.trigger ? Theme.accent : Theme.elevated;
+                fbt := Text { text: root.badge; color: root.trigger ? Theme.on-accent : Theme.text; font-size: 11px; font-weight: 800; letter-spacing: 1px; }
+            }
+            Dropdown { options: root.types; current: root.type-at; y: (parent.height - self.height) / 2; picked(k) => { root.type-picked(k); } }
+            Rectangle { horizontal-stretch: 1; }
+            if !root.trigger: IconButton { tip: "Move Up"; d: "M7 14l5-5 5 5z"; size: 30px; opacity: root.first ? 0.35 : 1; y: (parent.height - self.height) / 2; clicked => { if (!root.first) { root.up(); } } }
+            if !root.trigger: IconButton { tip: "Move Down"; d: "M7 10l5 5 5-5z"; size: 30px; opacity: root.last ? 0.35 : 1; y: (parent.height - self.height) / 2; clicked => { if (!root.last) { root.down(); } } }
+            if !root.trigger: IconButton { tip: "Take This Step Out"; d: Icons.close; size: 30px; y: (parent.height - self.height) / 2; clicked => { root.remove(); } }
+        }
+        if root.note != "": Text { text: root.note; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
+        FlowFieldsView { fields: root.fields; changed(i, v) => { root.changed(i, v); } picked(i, k) => { root.picked(i, k); } }
+    }
+}
+
+/// The line between two cards of a flow, from one to the next
+component FlowLink inherits Rectangle {
+    height: 20px;
+    Rectangle { x: 27px; width: 2px; height: parent.height; background: Theme.accent.with-alpha(0.45); }
+}
+
 
 /// A page loading: an equaliser's bars moving, and each platform asked, ticked as it answers (so the
 /// slowest is the one still spinning)
@@ -1871,6 +1960,28 @@ export component AppWindow inherits Window {
     // a Settings row's own settings (a plugin's): its key; the dialog with its fields
     callback set-more(string);
     in-out property <bool> pf-open;
+    // the chatbot's Actions page: its actions, the one picked (its name, on or off, its trigger and steps),
+    // and the kinds of trigger and step there are, and New Action's templates
+    in-out property <bool> flow-open;
+    in property <[FlowItem]> flow-items;
+    in property <int> flow-sel: -1;
+    in property <string> flow-name;
+    in property <bool> flow-on;
+    in property <FlowNode> flow-trigger;
+    in property <[FlowNode]> flow-steps;
+    in property <[string]> flow-trigger-types;
+    in property <[string]> flow-step-types;
+    in property <[string]> flow-templates;
+    callback flow-act(string);
+    callback flow-pick(int);
+    callback flow-new(int);
+    callback flow-name-edited(string);
+    callback flow-on-toggled(bool);
+    callback flow-trigger-type(int);
+    callback flow-step-type(int, int);
+    callback flow-field(int, int, string);
+    callback flow-step-add(int);
+    callback flow-step-move(int, int);
     // Settings in a look of its own (App & Look aside: it previews the pages' look as it's changed)
     property <bool> settings-look: (root.page == "settings" || root.pf-open) && root.set-cat != "App & Look";
     property <color> settings-panel: Theme.panel.mix(Theme.bg, 0.45);
@@ -4198,6 +4309,152 @@ export component AppWindow inherits Window {
                             spacing: 8px;
                             Pill { label: "Cancel"; clicked => { root.pf-open = false; } }
                             Pill { label: "Save"; on: true; clicked => { root.pf-save(); } }
+                        }
+                        // (clear of the player's tab, laid over the page's foot)
+                        if root.tab-style: Rectangle { height: 64px; }
+                    }
+                }
+                // the chatbot's Actions: its actions listed, and the one picked as a flow, from what starts it (WHEN),
+                // through its steps in order, to its end
+                if root.flow-open: Rectangle {
+                    background: root.settings-panel;
+                    border-radius: Theme.panel-radius;
+                    clip: true;
+                    TouchArea { }
+                    AccentGlow { settings: true; base: root.settings-panel; }
+                    VerticalLayout {
+                        padding: 24px;
+                        padding-top: 14px;
+                        padding-bottom: 16px;
+                        spacing: 12px;
+                        HorizontalLayout {
+                            RoundButton { tip: "Back"; d: Icons.back; clicked => { root.flow-act("close"); } }
+                            Rectangle { horizontal-stretch: 1; }
+                            RoundButton { tip: "Close Settings"; d: Icons.close; clicked => { root.flow-open = false; root.settings-close(); } }
+                        }
+                        HorizontalLayout {
+                            spacing: 14px;
+                            Text {
+                                text: "Chatbot";
+                                color: fcta.has-hover ? Theme.text : Theme.muted;
+                                font-size: 28px;
+                                font-weight: 800;
+                                vertical-alignment: center;
+                                fcta := TouchArea { mouse-cursor: MouseCursor.pointer; clicked => { root.flow-act("close"); } }
+                            }
+                            Text { text: "\u{203a}"; color: Theme.muted; font-size: 26px; vertical-alignment: center; }
+                            Text { text: "Actions"; color: Theme.text; font-size: 28px; font-weight: 800; vertical-alignment: center; horizontal-stretch: 1; }
+                        }
+                        HorizontalLayout {
+                            vertical-stretch: 1;
+                            spacing: 18px;
+                            // the actions
+                            VerticalLayout {
+                                width: 270px;
+                                spacing: 8px;
+                                Dropdown { width: 270px; options: root.flow-templates; current: -1; placeholder: "+ New Action"; picked(k) => { root.flow-new(k); } }
+                                ScrollView {
+                                    vertical-stretch: 1;
+                                    horizontal-scrollbar-policy: always-off;
+                                    VerticalLayout {
+                                        alignment: start;
+                                        spacing: 6px;
+                                        padding-right: 8px;
+                                        for it[i] in root.flow-items: Rectangle {
+                                            height: 54px;
+                                            border-radius: 10px;
+                                            background: i == root.flow-sel ? Theme.accent.with-alpha(0.16) : fita.has-hover ? Theme.elevated : transparent;
+                                            border-width: 1px;
+                                            border-color: i == root.flow-sel ? Theme.accent.with-alpha(0.6) : Theme.line;
+                                            fita := TouchArea { mouse-cursor: MouseCursor.pointer; clicked => { root.flow-pick(i); } }
+                                            VerticalLayout {
+                                                padding-left: 12px;
+                                                padding-right: 12px;
+                                                alignment: center;
+                                                spacing: 2px;
+                                                Text { text: it.name; color: it.on ? Theme.text : Theme.muted; font-size: 13px; font-weight: 700; overflow: elide; }
+                                                Text { text: (it.on ? "" : "Off \u{b7} ") + it.summary; color: Theme.muted; font-size: 11px; overflow: elide; }
+                                            }
+                                        }
+                                        if root.flow-items.length == 0: Text { text: "No actions yet. Pick one to start from in New Action above: a command, a thank-you for follows, a timer..."; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
+                                        Rectangle { height: 76px; }
+                                    }
+                                }
+                            }
+                            // the one picked: its flow
+                            if root.flow-sel < 0: Text { horizontal-stretch: 1; text: "Pick an action, or start a new one."; color: Theme.muted; vertical-alignment: center; horizontal-alignment: center; }
+                            if root.flow-sel >= 0: ScrollView {
+                                horizontal-stretch: 1;
+                                horizontal-scrollbar-policy: always-off;
+                                VerticalLayout {
+                                    alignment: start;
+                                    padding-right: 14px;
+                                    // its name, on or off, run it now, delete it
+                                    HorizontalLayout {
+                                        spacing: 10px;
+                                        padding-bottom: 14px;
+                                        Rectangle {
+                                            horizontal-stretch: 1;
+                                            height: 38px;
+                                            border-radius: 8px;
+                                            background: Theme.panel;
+                                            border-width: 1px;
+                                            border-color: fnti.has-focus ? Theme.accent : Theme.line;
+                                            fnti := TextInput { x: 12px; width: parent.width - 24px; height: parent.height; vertical-alignment: center; color: Theme.text; font-size: 16px; font-weight: 700; single-line: true; text: root.flow-name; edited => { root.flow-name-edited(self.text); } }
+                                        }
+                                        Toggle { checked: root.flow-on; y: (parent.height - self.height) / 2; toggled => { root.flow-on-toggled(self.checked); } }
+                                        Pill { label: "Run Now"; tip: "Its steps, now, as if you'd started it"; y: (parent.height - self.height) / 2; clicked => { root.flow-act("run"); } }
+                                        Pill { label: "Copy"; tip: "Another action like this one"; y: (parent.height - self.height) / 2; clicked => { root.flow-act("copy"); } }
+                                        Pill { label: "Delete"; y: (parent.height - self.height) / 2; clicked => { root.flow-act("delete"); } }
+                                    }
+                                    FlowCard {
+                                        badge: "WHEN";
+                                        trigger: true;
+                                        types: root.flow-trigger-types;
+                                        type-at: root.flow-trigger.kind-at;
+                                        note: root.flow-trigger.note;
+                                        fields: root.flow-trigger.fields;
+                                        type-picked(k) => { root.flow-trigger-type(k); }
+                                        changed(i, v) => { root.flow-field(-1, i, v); }
+                                        picked(i, k) => { root.flow-field(-1, i, "\u{2}" + k); }
+                                    }
+                                    for st[i] in root.flow-steps: VerticalLayout {
+                                        FlowLink { }
+                                        FlowCard {
+                                            badge: i + 1;
+                                            types: root.flow-step-types;
+                                            type-at: st.kind-at;
+                                            note: st.note;
+                                            fields: st.fields;
+                                            first: i == 0;
+                                            last: i == root.flow-steps.length - 1;
+                                            type-picked(k) => { root.flow-step-type(i, k); }
+                                            changed(f, v) => { root.flow-field(i, f, v); }
+                                            picked(f, k) => { root.flow-field(i, f, "\u{2}" + k); }
+                                            up => { root.flow-step-move(i, -1); }
+                                            down => { root.flow-step-move(i, 1); }
+                                            remove => { root.flow-step-move(i, 0); }
+                                        }
+                                    }
+                                    FlowLink { }
+                                    HorizontalLayout {
+                                        alignment: start;
+                                        Dropdown { width: 260px; options: root.flow-step-types; current: -1; placeholder: "+ Add a Step"; picked(k) => { root.flow-step-add(k); } }
+                                    }
+                                    FlowLink { }
+                                    HorizontalLayout {
+                                        alignment: start;
+                                        Rectangle {
+                                            width: 92px;
+                                            height: 30px;
+                                            border-radius: 15px;
+                                            background: Theme.elevated;
+                                            Text { text: "DONE"; color: Theme.muted; font-size: 11px; font-weight: 800; letter-spacing: 1px; }
+                                        }
+                                    }
+                                    Rectangle { height: 76px; }
+                                }
+                            }
                         }
                         // (clear of the player's tab, laid over the page's foot)
                         if root.tab-style: Rectangle { height: 64px; }

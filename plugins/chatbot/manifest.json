@@ -1,7 +1,7 @@
 {
   "id": "chatbot",
   "name": "OmniPulse Chatbot",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "author": "OmniPulse",
   "description": "OmniPulse's own chatbot: song requests, alerts and your own commands, straight from your chat, no other bot needed. Twitch for now; Kick, YouTube and OBS controls are on their way.",
   "main": "main.js",
@@ -15,9 +15,10 @@
     { "key": "twitchSignIn", "label": "Your Channel", "type": "button", "press": "Sign In with Twitch", "call": "signInChannel", "note": "Your own Twitch account: your chat and its events (follows, subs, bits, raids...)." },
     { "key": "twitchBotSignIn", "label": "Bot Account (optional)", "type": "button", "press": "Sign In the Bot", "call": "signInBot", "note": "A second Twitch account that posts the replies. Without one, they come from your channel." },
     { "key": "twitchSignOut", "label": "Sign Out", "type": "button", "press": "Sign Out of Twitch", "call": "signOut", "note": "Forgets both sign-ins on this PC." },
+    { "key": "actionsOpen", "label": "Actions", "type": "actions", "note": "What your chatbot does and when: each action a trigger (a command, a message, an event, a timer, the music), then its steps, in order." },
     { "key": "requests", "label": "Song Requests", "type": "toggle", "default": true, "note": "!sr (or !request) and a song, !song for what's playing, !wrongsong to take back your last one. Uses Settings > Streaming > Song Requests' limits and replies." },
     { "key": "alerts", "label": "Alerts", "type": "toggle", "default": true, "note": "Follows, subs, resubs, gifts, bits, raids, hype trains and polls, to your alerts on the Stream Widget." },
     { "key": "srCommands", "label": "Request Commands", "type": "text", "default": "!sr, !request", "note": "With commas between." },
-    { "key": "commands", "label": "Your Commands", "type": "text", "default": "!discord = Join the Discord: https://discord.gg/yours; !socials = Find me everywhere as @me", "note": "Each one as \"!name = its reply\", with a semicolon between them. {user} is who asked, {args} what came after the command." }
+    { "key": "commands", "label": "Your Commands (the Old Way)", "type": "text", "default": "!discord = Join the Discord: https://discord.gg/yours; !socials = Find me everywhere as @me", "note": "Moved into Actions the first time they're opened; until then, each one as \"!name = its reply\"." }
   ]
 }

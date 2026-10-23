@@ -524,6 +524,87 @@ mod tests {
         drop(p);
         stop("chatbot");
     }
+
+    /// The chatbot's actions (crate::flows' JSON, run by the plugin), against the stand-in Twitch: a command
+    /// that answers, a counter kept between uses, a chat message's, "only go on if" stopping one, a raid
+    /// (with its least), and a song requested from a step
+    #[test]
+    fn the_chatbots_actions_run_their_steps() {
+        use futures_util::{SinkExt, StreamExt};
+        use tokio_tungstenite::tungstenite::Message;
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let listener = rt.block_on(tokio::net::TcpListener::bind("127.0.0.1:0")).unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let said: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+        let s2 = said.clone();
+        rt.spawn(async move {
+            while let Ok((tcp, _)) = listener.accept().await {
+                let path = Arc::new(Mutex::new(String::new()));
+                let p2 = path.clone();
+                let ws = tokio_tungstenite::accept_hdr_async(tcp, move |req: &tokio_tungstenite::tungstenite::handshake::server::Request, res| { *p2.lock().unwrap() = req.uri().path().to_string(); Ok(res) }).await.unwrap();
+                let (mut w, mut r) = ws.split();
+                let said = s2.clone();
+                if path.lock().unwrap().as_str() == "/irc" {
+                    tokio::spawn(async move {
+                        while let Some(Ok(Message::Text(t))) = r.next().await {
+                            for line in t.split("\r\n").filter(|l| !l.is_empty()) {
+                                said.lock().unwrap().push(line.to_string());
+                                if line.starts_with("JOIN") {
+                                    let msg = |id: &str, text: &str| format!("@badges=;display-name=Viewer;id={id};mod=0;user-id=42 :viewer!viewer@viewer.tmi.twitch.tv PRIVMSG #me :{text}\r\n");
+                                    for (id, text) in [("a", "!hello"), ("b", "!deaths"), ("c", "!deaths"), ("d", "good morning all"), ("e", "!check no"), ("f", "!check yes"), ("g", "!play take on me")] {
+                                        let _ = w.send(Message::Text(msg(id, text).into())).await;
+                                    }
+                                }
+                            }
+                        }
+                    });
+                } else {
+                    let _ = w.send(Message::Text(r#"{"metadata":{"message_type":"session_welcome"},"payload":{"session":{"id":"s1"}}}"#.into())).await;
+                    let _ = w.send(Message::Text(r#"{"metadata":{"message_type":"notification"},"payload":{"subscription":{"type":"channel.raid"},"event":{"from_broadcaster_user_name":"Small","viewers":2}}}"#.into())).await;
+                    let _ = w.send(Message::Text(r#"{"metadata":{"message_type":"notification"},"payload":{"subscription":{"type":"channel.raid"},"event":{"from_broadcaster_user_name":"Big","viewers":30}}}"#.into())).await;
+                    tokio::spawn(async move { while r.next().await.is_some() {} });
+                }
+            }
+        });
+        let asked: Arc<Mutex<Vec<Value>>> = Arc::new(Mutex::new(Vec::new()));
+        let a2 = asked.clone();
+        set_app_handler(Arc::new(move |_p: &str, ask: Value, answer: Box<dyn FnOnce(Value) + Send>| {
+            a2.lock().unwrap().push(ask.clone());
+            answer(match ask["op"].as_str() { Some("request") => json!({ "ok": true, "message": "Added it." }), _ => json!({ "ok": true }) });
+        }));
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../plugins/chatbot");
+        let code = std::fs::read_to_string(root.join("main.js")).unwrap()
+            .replace("wss://irc-ws.chat.twitch.tv:443", &format!("ws://127.0.0.1:{port}/irc"))
+            .replace("wss://eventsub.wss.twitch.tv/ws", &format!("ws://127.0.0.1:{port}/events"))
+            .replace("if (await validate(token)) return token;", "return token;");
+        let mut m: core::plugins::Manifest = serde_json::from_str(&std::fs::read_to_string(root.join("manifest.json")).unwrap()).unwrap();
+        m.hosts.push("127.0.0.1".into());
+        let pkg = core::plugins::Package { manifest: m, code, digest: String::new(), bundled: true };
+        // (the actions as the Actions page keeps them: crate::flows' defaults, with what's changed)
+        let t = |id: &str, set: Value| { let mut d = crate::flows::defaults(crate::flows::TRIGGERS, id); for (k, v) in set.as_object().unwrap() { d[k] = v.clone(); } d };
+        let st = |id: &str, set: Value| { let mut d = crate::flows::defaults(crate::flows::STEPS, id); for (k, v) in set.as_object().unwrap() { d[k] = v.clone(); } d };
+        let actions = json!([
+            { "name": "Hello", "on": true, "trigger": t("command", json!({ "command": "!hello", "cooldown": 0, "usercooldown": 0 })), "steps": [st("say", json!({ "text": "Hi %user%!" }))] },
+            { "name": "Deaths", "on": true, "trigger": t("command", json!({ "command": "!deaths", "cooldown": 0, "usercooldown": 0 })), "steps": [st("addvar", json!({ "name": "deaths", "keep": false })), st("say", json!({ "text": "Deaths: %var:deaths%" }))] },
+            { "name": "Morning", "on": true, "trigger": t("message", json!({ "text": "morning" })), "steps": [st("say", json!({ "text": "Morning, %user%", "reply": false }))] },
+            { "name": "Check", "on": true, "trigger": t("command", json!({ "command": "!check", "cooldown": 0, "usercooldown": 0 })), "steps": [st("if", json!({ "left": "%input0%", "test": "is", "right": "yes" })), st("say", json!({ "text": "Checked: %input0%" }))] },
+            { "name": "Raid", "on": true, "trigger": t("event", json!({ "event": "raid", "min": 5 })), "steps": [st("say", json!({ "text": "Raid of %amount% from %user%", "reply": false }))] },
+            { "name": "Play", "on": true, "trigger": t("command", json!({ "command": "!play", "cooldown": 0, "usercooldown": 0 })), "steps": [st("request", json!({}))] },
+            { "name": "Off", "on": false, "trigger": t("command", json!({ "command": "!hello" })), "steps": [st("say", json!({ "text": "never" }))] },
+        ]);
+        let p = start(&pkg, &json!({ "token": "t", "login": "me", "userId": "1", "twitchClientId": "c", "actions": actions }), rt.handle().clone()).unwrap();
+        let line = |text: &str| { let s = said.lock().unwrap(); s.iter().any(|l| l.ends_with(&format!(":{text}"))) };
+        let until = Instant::now() + Duration::from_secs(10);
+        let done = || line("Hi Viewer!") && line("Deaths: 2") && line("Morning, Viewer") && line("Checked: yes") && line("Raid of 30 from Big") && line("Added it.");
+        while !done() && Instant::now() < until { std::thread::sleep(Duration::from_millis(50)); }
+        let s = said.lock().unwrap().clone();
+        assert!(done(), "chat said {s:#?}");
+        // (stopped where it should: no "no", no small raid, nothing from the action that's off)
+        assert!(!line("Checked: no") && !line("Raid of 2 from Small") && !line("never"), "{s:#?}");
+        assert!(asked.lock().unwrap().iter().any(|x| x["op"] == "request" && x["args"] == json!(["Viewer", "take on me", "twitch"])));
+        drop(p);
+        stop("chatbot");
+    }
 }
 
 
