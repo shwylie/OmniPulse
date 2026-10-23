@@ -788,6 +788,7 @@ mod tests {
                                 said.lock().unwrap().push(line.to_string());
                                 if line.starts_with("JOIN") {
                                     let msg = |id: &str, text: &str| format!("@badges=;display-name=Viewer;id={id};mod=0;user-id=42 :viewer!viewer@viewer.tmi.twitch.tv PRIVMSG #me :{text}\r\n");
+                                    let _ = w.send(Message::Text("@display-name=Viewer;user-id=42;msg-id=viewermilestone;msg-param-category=watch-streak;msg-param-value=7 :tmi.twitch.tv USERNOTICE #me :yay\r\n".into())).await;
                                     for (id, text) in [("a", "!hello"), ("b", "!deaths"), ("c", "!deaths"), ("d", "good morning all"), ("e", "!check no"), ("f", "!check yes"), ("g", "!play take on me"),
                                         ("h", "look at bad.example.com now"), ("i", "!addquote it works on my machine"), ("j", "!quote 1"), ("k", "!enter"), ("l", "!enter"), ("m", "!winner"), ("n", "!buy"), ("o", "!points"),
                                         ("p", "!grade 85"), ("q", "!grade 20"), ("r", "!count")] {
@@ -801,6 +802,7 @@ mod tests {
                     let _ = w.send(Message::Text(r#"{"metadata":{"message_type":"session_welcome"},"payload":{"session":{"id":"s1"}}}"#.into())).await;
                     let _ = w.send(Message::Text(r#"{"metadata":{"message_type":"notification"},"payload":{"subscription":{"type":"channel.raid"},"event":{"from_broadcaster_user_name":"Small","viewers":2}}}"#.into())).await;
                     let _ = w.send(Message::Text(r#"{"metadata":{"message_type":"notification"},"payload":{"subscription":{"type":"channel.raid"},"event":{"from_broadcaster_user_name":"Big","viewers":30}}}"#.into())).await;
+                    let _ = w.send(Message::Text(r#"{"metadata":{"message_type":"notification"},"payload":{"subscription":{"type":"channel.poll.end"},"event":{"title":"Best?","choices":[{"title":"Cats","votes":3},{"title":"Dogs","votes":9}]}}}"#.into())).await;
                     tokio::spawn(async move { while r.next().await.is_some() {} });
                 }
             }
@@ -848,13 +850,16 @@ mod tests {
                 st("stop", json!({})), st("say", json!({ "text": "never stopped", "reply": false })),
             ] },
             { "name": "First", "on": true, "trigger": t("event", json!({ "event": "firstwords" })), "steps": [st("say", json!({ "text": "First words from %user%", "reply": false }))] },
+            { "name": "Streak", "on": true, "trigger": t("event", json!({ "event": "watchstreak" })), "steps": [st("say", json!({ "text": "Streak %amount% for %user%", "reply": false }))] },
+            { "name": "Poll", "on": true, "trigger": t("event", json!({ "event": "pollend" })), "steps": [st("say", json!({ "text": "Poll %message% won by %winner%", "reply": false }))] },
         ]);
         let p = start(&pkg, &json!({ "token": "t", "login": "me", "userId": "1", "twitchClientId": "c", "actions": actions, "points": { "viewer": 70 }, "pointsName": "coins" }), rt.handle().clone()).unwrap();
         let line = |text: &str| { let s = said.lock().unwrap(); s.iter().any(|l| l.ends_with(&format!(":{text}"))) };
         let until = Instant::now() + Duration::from_secs(10);
         let done = || line("Hi Viewer!") && line("Deaths: 2") && line("Morning, Viewer") && line("Checked: yes") && line("Raid of 30 from Big") && line("Added it.")
             && line("No links, Viewer") && line("Quote #1 added") && line("Winner Viewer of 1") && line("Bought") && line("Viewer has 20 coins")
-            && line("Pass 85") && line("Fail 20") && line("Sum 89.5") && line("Loop 3") && line("T Hello Big World") && line("First words from Viewer");
+            && line("Pass 85") && line("Fail 20") && line("Sum 89.5") && line("Loop 3") && line("T Hello Big World") && line("First words from Viewer")
+            && line("Streak 7 for Viewer") && line("Poll Best? won by Dogs");
         while !done() && Instant::now() < until { std::thread::sleep(Duration::from_millis(50)); }
         let s = said.lock().unwrap().clone();
         assert!(done(), "chat said {s:#?}");

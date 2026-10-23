@@ -9,6 +9,9 @@ const TWITCH_SCOPES_CHANNEL = [
   "channel:read:hype_train", "channel:read:polls", "moderator:read:shoutouts", "channel:read:redemptions",
   "moderator:manage:banned_users", "moderator:manage:shoutouts", "moderator:manage:chat_messages",
   "moderator:manage:announcements", "channel:manage:broadcast", "clips:edit", "channel:read:ads",
+  "channel:read:predictions", "channel:read:vips", "moderation:read", "channel:read:charity",
+  "channel:manage:polls", "channel:manage:predictions", "channel:manage:redemptions", "channel:edit:commercial",
+  "channel:manage:raids", "moderator:manage:chat_settings", "channel:manage:vips", "channel:manage:moderators",
 ].join(" ");
 const TWITCH_SCOPES_BOT = "chat:read chat:edit";
 
@@ -161,6 +164,10 @@ function commands() {
 }
 
 async function onChat(m) {
+  if (m.command === "USERNOTICE" && m.tags["msg-id"] === "viewermilestone" && m.tags["msg-param-category"] === "watch-streak") {
+    onEvent("watch.streak", { user_name: m.tags["display-name"] || m.nick, user_id: m.tags["user-id"] || "", streak: m.tags["msg-param-value"] || "", message: { text: m.text || "" } });
+    return;
+  }
   if (m.command !== "PRIVMSG") return;
   const platform = m.platform || "twitch";
   // (the bot's own messages never start anything)
@@ -175,6 +182,7 @@ async function onChat(m) {
   const isMod = m.tags.mod === "1" || badges.includes("broadcaster/");
   const id = m.tags.id;
   seen[(m.nick || user).toLowerCase()] = Date.now();
+  present[platform + "|" + (m.nick || user).toLowerCase()] = { at: Date.now(), user, userId: m.tags["user-id"] || "", platform };
   onActions(m, text, cmd, args, user, id);
   const firstKey = platform + "|" + (m.nick || user).toLowerCase();
   if (!spoken.has(firstKey)) {
@@ -320,6 +328,9 @@ const EVENT_OF = {
   "channel.hype_train.begin": "hypetrain", "channel.poll.begin": "poll",
   "channel.channel_points_custom_reward_redemption.add": "reward",
   "first.message": "firstmsg", "stream.online": "online", "stream.offline": "offline", "channel.ad_break.begin": "adbreak",
+  "channel.prediction.begin": "prediction", "channel.prediction.end": "predictionend", "channel.poll.end": "pollend",
+  "channel.hype_train.end": "hypetrainend", "channel.charity_campaign.donate": "charity", "channel.shoutout.receive": "shoutoutin",
+  "channel.vip.add": "vip", "channel.moderator.add": "mod", "watch.streak": "watchstreak",
 };
 
 // A trigger's platform (On: any, Twitch or Kick), and where this came from
@@ -346,10 +357,15 @@ function onEvent(type, e) {
   if (ev === "offline") isLive = false;
   const a = asAlert(type, e) || {};
   if (ev === "sub" && e.is_gift) return;
-  const amount = ev === "bits" ? String(e.bits || 0) : ev === "raid" ? String(e.viewers || 0) : ev === "gift" ? String(e.total || 1) : ev === "resub" ? String(e.cumulative_months || 1) : ev === "hypetrain" ? String(e.level || 1) : "";
+  // (a poll's or a prediction's winner: its top choice, or the outcome that won)
+  const top = (list) => (list || []).slice().sort((x, y) => num(y.votes || y.channel_points) - num(x.votes || x.channel_points))[0];
+  const won = ev === "predictionend" ? ((e.outcomes || []).find((o) => o.id === e.winning_outcome_id) || {}).title || "" : ev === "pollend" ? (top(e.choices) || {}).title || "" : "";
+  const amount = ev === "bits" ? String(e.bits || 0) : ev === "raid" ? String(e.viewers || 0) : ev === "gift" ? String(e.total || 1) : ev === "resub" ? String(e.cumulative_months || 1)
+    : ev === "hypetrain" || ev === "hypetrainend" ? String(e.level || 1) : ev === "charity" ? String(e.amount ? num(e.amount.value) / Math.pow(10, num(e.amount.decimal_places)) : 0)
+    : ev === "shoutoutin" ? String(e.viewer_count || 0) : ev === "watchstreak" ? String(e.streak || 0) : "";
   const reward = (e.reward && e.reward.title) || "";
-  const said = (e.message && e.message.text) || "";
-  const ctx = { user: a.user || e.user_name || "", userId: e.user_id || e.from_broadcaster_user_id || "", amount: ev === "adbreak" ? String(e.duration_seconds || 0) : amount, message: a.message || said || e.user_input || "", reward, rawInput: e.user_input || said || "", msgId: e.msg_id || "", platform: "twitch" };
+  const said = (e.message && e.message.text) || e.title || "";
+  const ctx = { user: a.user || e.user_name || e.from_broadcaster_user_name || "", userId: e.user_id || e.from_broadcaster_user_id || "", amount: ev === "adbreak" ? String(e.duration_seconds || 0) : amount, message: a.message || said || e.user_input || "", reward, rawInput: e.user_input || said || "", msgId: e.msg_id || "", platform: "twitch", winner: won };
   Object.assign(ctx, words(ctx.rawInput));
   fire(ev, ctx);
 }
@@ -359,6 +375,13 @@ function setTimers() {
   timers.forEach((id) => clearInterval(id));
   timers = [];
   for (const a of live) {
+    if (a.trigger.type === "presence") {
+      timers.push(setInterval(() => {
+        const since = Date.now() - Math.max(1, num(a.trigger.within) || 15) * 60000;
+        for (const p of Object.values(present)) if (p.at >= since) run(a, { user: p.user, userId: p.userId, platform: p.platform });
+      }, Math.max(1, num(a.trigger.minutes) || 10) * 60000));
+      continue;
+    }
     if (a.trigger.type !== "timer") continue;
     let seen = chatLines;
     timers.push(setInterval(() => {
@@ -870,6 +893,8 @@ function onObs(type, d) {
 
 // ---------- points (a currency, as Mix It Up's): for chatting while you're live, kept ----------
 const seen = {};
+// (who's chatted, and when: Each Viewer, Every Few Minutes)
+const present = {};
 let entries = [], pointsTimer = null, saveSoon = null, isLive = false;
 
 function pointsName() { return String(S().pointsName || "points").trim() || "points"; }
@@ -1155,6 +1180,14 @@ const SUBS = (me) => [
   ["stream.online", "1", { broadcaster_user_id: me }],
   ["stream.offline", "1", { broadcaster_user_id: me }],
   ["channel.ad_break.begin", "1", { broadcaster_user_id: me }],
+  ["channel.prediction.begin", "1", { broadcaster_user_id: me }],
+  ["channel.prediction.end", "1", { broadcaster_user_id: me }],
+  ["channel.poll.end", "1", { broadcaster_user_id: me }],
+  ["channel.hype_train.end", "1", { broadcaster_user_id: me }],
+  ["channel.charity_campaign.donate", "1", { broadcaster_user_id: me }],
+  ["channel.shoutout.receive", "1", { broadcaster_user_id: me, moderator_user_id: me }],
+  ["channel.vip.add", "1", { broadcaster_user_id: me }],
+  ["channel.moderator.add", "1", { broadcaster_user_id: me }],
 ];
 
 // An event, as an alert (the alerts' types, as the bots send them)
@@ -1276,6 +1309,11 @@ OmniPulse.register({
   // the app's own: a song starting, a song requested
   appEvent(kind, data) {
     const d = data || {};
+    if (kind === "hotkey") {
+      const keys = (k) => String(k || "").toLowerCase().replace(/\s+/g, "").replace(/win|windows|cmd|command/g, "super").replace(/control/g, "ctrl");
+      for (const a of live) if (a.trigger.type === "hotkey" && keys(a.trigger.keys) === keys(d.keys)) run(a, { user: S().login || S().kickLogin || "", platform: "all" });
+      return true;
+    }
     for (const a of live) {
       if (a.trigger.type !== "song" || (a.trigger.when || "start") !== kind) continue;
       run(a, { user: d.user || "", song: d.title || "", artist: d.artist || "", platform: "all" });

@@ -14,6 +14,8 @@ static CLICKED: Mutex<Vec<&'static str>> = Mutex::new(Vec::new());
 pub struct Desktop {
     _keys: Option<GlobalHotKeyManager>,
     keys: Vec<(u32, &'static str)>,
+    /// the chatbot's hotkeys: each one's id and what it was written as ("Ctrl+Shift+F1")
+    extra: std::cell::RefCell<Vec<(HotKey, String)>>,
     _tray: Option<TrayIcon>,
     menu: Vec<(tray_icon::menu::MenuId, &'static str)>,
 }
@@ -45,28 +47,48 @@ impl Desktop {
             let icon = tray_icon::Icon::from_rgba(png.as_raw().clone(), png.width(), png.height()).ok()?;
             TrayIconBuilder::new().with_menu(Box::new(menu)).with_tooltip("OmniPulse").with_icon(icon).build().ok()
         })();
-        Desktop { _keys: manager, keys, _tray: tray, menu: menu_ids }
+        Desktop { _keys: manager, keys, extra: std::cell::RefCell::new(Vec::new()), _tray: tray, menu: menu_ids }
     }
 
-    /// What's been pressed since last time
-    pub fn poll(&self) -> Vec<&'static str> {
+    /// The chatbot's hotkeys, as its actions have them now (the ones before let go of); those that couldn't
+    /// be had (written wrong, or another app has them)
+    pub fn set_hotkeys(&self, list: &[String]) -> Vec<String> {
+        let Some(m) = self._keys.as_ref() else { return list.to_vec() };
+        for (hk, _) in self.extra.borrow_mut().drain(..) { let _ = m.unregister(hk); }
+        let mut failed = Vec::new();
+        for keys in list {
+            // ("Win" as global-hotkey calls it)
+            let parsed: Option<HotKey> = keys.split('+').map(|t| { let t = t.trim(); if t.eq_ignore_ascii_case("win") || t.eq_ignore_ascii_case("windows") { "super" } else { t } }).collect::<Vec<_>>().join("+").parse().ok();
+            match parsed {
+                Some(hk) if !self.extra.borrow().iter().any(|(h, _)| h.id() == hk.id()) && m.register(hk).is_ok() => self.extra.borrow_mut().push((hk, keys.clone())),
+                Some(hk) if self.extra.borrow().iter().any(|(h, _)| h.id() == hk.id()) => {}
+                _ => failed.push(keys.clone()),
+            }
+        }
+        failed
+    }
+
+    /// What's been pressed since last time (a chatbot hotkey's: "hotkey:" and its keys)
+    pub fn poll(&self) -> Vec<String> {
         let mut out = Vec::new();
         while let Ok(e) = GlobalHotKeyEvent::receiver().try_recv() {
             if e.state == HotKeyState::Pressed {
                 if let Some((_, a)) = self.keys.iter().find(|(id, _)| *id == e.id) {
-                    out.push(*a);
+                    out.push(a.to_string());
+                } else if let Some((_, keys)) = self.extra.borrow().iter().find(|(h, _)| h.id() == e.id) {
+                    out.push(format!("hotkey:{keys}"));
                 }
             }
         }
         while let Ok(e) = MenuEvent::receiver().try_recv() {
             if let Some((_, a)) = self.menu.iter().find(|(id, _)| *id == e.id) {
-                out.push(*a);
+                out.push(a.to_string());
             }
         }
         // (the icon's own clicks: only its menu, which Windows opens; nothing else)
         while TrayIconEvent::receiver().try_recv().is_ok() {}
         if let Ok(mut c) = CLICKED.lock() {
-            out.append(&mut c);
+            out.extend(c.drain(..).map(String::from));
         }
         out
     }
@@ -504,4 +526,15 @@ pub mod dock {
         true
     }
     pub fn keep(_hwnd: isize, _r: (i32, i32, i32, i32)) {}
+}
+
+#[cfg(test)]
+mod hotkey_tests {
+    /// The chatbot's hotkeys as they're written in an action (Win as Super)
+    #[test]
+    fn written_hotkeys_are_understood() {
+        use global_hotkey::hotkey::HotKey;
+        for k in ["Ctrl+Shift+F1", "alt+k", "Super+Alt+7", "F13", "Ctrl+PageUp"] { assert!(k.parse::<HotKey>().is_ok(), "{k}"); }
+        assert!("Ctrl+Shift".parse::<HotKey>().is_err());
+    }
 }

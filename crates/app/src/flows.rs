@@ -37,7 +37,10 @@ const WHO: &[(&str, &str)] = &[("everyone", "Everyone"), ("subscribers", "Subscr
 const EVENTS: &[(&str, &str)] = &[
     ("follow", "A Follow"), ("sub", "A New Sub"), ("resub", "A Resub"), ("gift", "Gifted Subs"), ("bits", "Bits"),
     ("raid", "A Raid"), ("hypetrain", "A Hype Train"), ("poll", "A Poll"), ("reward", "A Channel Points Reward"),
-    ("firstmsg", "A Viewer's First Message"), ("firstwords", "A Viewer's First Words This Stream"), ("online", "Going Live"), ("offline", "Going Offline"), ("adbreak", "An Ad Break"),
+    ("firstmsg", "A Viewer's First Message"), ("firstwords", "A Viewer's First Words This Stream"),
+    ("prediction", "A Prediction Starting"), ("predictionend", "A Prediction Ending"), ("pollend", "A Poll Ending"),
+    ("hypetrainend", "A Hype Train Ending"), ("charity", "A Charity Donation"), ("shoutoutin", "A Shoutout to You"),
+    ("vip", "A New VIP"), ("mod", "A New Moderator"), ("watchstreak", "A Watch Streak"), ("online", "Going Live"), ("offline", "Going Offline"), ("adbreak", "An Ad Break"),
 ];
 const OBS_WHEN: &[(&str, &str)] = &[
     ("scene", "The Scene Changes"), ("streamstart", "Streaming Starts"), ("streamstop", "Streaming Stops"),
@@ -95,6 +98,13 @@ pub const TRIGGERS: &[Kind] = &[
         f("min", "At Least", "number", "0", "The least it takes, in bits, raiders or subs gifted (0: any)."),
         f("reward", "Reward", "text", "", "For a Channel Points reward: its name (empty: any)."),
         pick("from", "On", FROM, "any", "Kick has follows, subs, gifted subs, hosts and going live or offline."),
+    ] },
+    Kind { id: "presence", label: "Each Viewer, Every Few Minutes", note: "Runs once for each viewer who's chatted lately (Streamer.bot's present viewers): %user% is each of them in turn.", fields: &[
+        f("minutes", "Every", "number", "10", "Minutes."),
+        f("within", "Chatted Within", "number", "15", "Minutes: how recently they must have said something."),
+    ] },
+    Kind { id: "hotkey", label: "A Hotkey", note: "A keyboard shortcut, from anywhere (OmniPulse in the background too).", fields: &[
+        f("keys", "Keys", "text", "Ctrl+Shift+F1", "Ctrl, Shift, Alt or Win, with + between, and a key (F1 to F24, A to Z, 0 to 9, Home, PageUp, Space...)."),
     ] },
     Kind { id: "timer", label: "Every Few Minutes", note: "No one's asked: %user% is empty.", fields: &[
         f("minutes", "Every", "number", "15", "Minutes."),
@@ -336,6 +346,8 @@ pub fn summary(a: &Value) -> String {
         "timer" => format!("Every {} minutes", t["minutes"].as_f64().unwrap_or(15.0)),
         "song" => if s("when") == "request" { "When a song is requested".into() } else { "When a song starts".into() },
         "obs" => format!("When OBS: {}", label(OBS_WHEN, &s("when")).to_lowercase()),
+        "presence" => format!("Each viewer, every {} minutes", t["minutes"].as_f64().unwrap_or(10.0)),
+        "hotkey" => format!("On {}", s("keys")),
         "filter" => format!("When a message has {}", label(RULES, &s("rule")).to_lowercase()),
         _ => "Only when run".into(),
     };

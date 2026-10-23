@@ -4429,6 +4429,7 @@ fn flows_save(shared: &Shared) {
         let rt = shared.borrow().rt.clone();
         rt.spawn(async move { let _ = p.call("setActions", vec![serde_json::json!(list)]).await; });
     }
+    hotkeys_update(shared);
 }
 
 /// Back Up: the actions, and the quotes, variables and points the chatbot keeps, in a file of their own
@@ -7020,6 +7021,7 @@ thread_local! {
 
 /// The installed plugins that are on, started (each on its own thread: crate::plugrun); the rest stopped
 fn plugins_start(shared: &Shared) {
+    hotkeys_update(shared);
     let (prefs, rt) = { let a = shared.borrow(); (a.web.prefs.clone(), a.rt.clone()) };
     for p in omnipulse_core::plugins::list() {
         let id = p.manifest.id.clone();
@@ -10270,7 +10272,31 @@ fn minimize(shared: &Shared) {
 /// The devices menu's last line, with Chromecast on: a fresh look for cast devices
 const CAST_SEARCH: &str = "Search for Cast devices";
 
+thread_local! {
+    /// the chatbot's hotkeys, waiting to be registered (the tick has the Desktop that does it)
+    static HOTKEYS_WANTED: RefCell<Option<Vec<String>>> = const { RefCell::new(None) };
+}
+
+/// The chatbot's hotkeys from its actions (on, with it running), to be registered
+fn hotkeys_update(shared: &Shared) {
+    let prefs = &shared.borrow().web.prefs;
+    let on = plugin_runs(prefs, BOT);
+    let list: Vec<String> = if !on { Vec::new() } else {
+        prefs["pluginSettings"][BOT]["actions"].as_array().into_iter().flatten()
+            .filter(|a| a["on"].as_bool() != Some(false) && a["trigger"]["type"] == "hotkey")
+            .filter_map(|a| a["trigger"]["keys"].as_str().map(|k| k.trim().to_string())).filter(|k| !k.is_empty()).collect()
+    };
+    HOTKEYS_WANTED.with(|h| *h.borrow_mut() = Some(list));
+}
+
 fn desktop_action(shared: &Shared, action: &str) {
+    if let Some(keys) = action.strip_prefix("hotkey:") {
+        if let Some(p) = plugrun::get(BOT) {
+            let (keys, rt) = (keys.to_string(), shared.borrow().rt.clone());
+            rt.spawn(async move { let _ = p.call("appEvent", vec![serde_json::json!("hotkey"), serde_json::json!({ "keys": keys })]).await; });
+        }
+        return;
+    }
     match action {
         "play" => toggle(shared),
         "next" => skip_press(shared, 1),
@@ -11861,7 +11887,12 @@ fn main() -> Result<(), slint::PlatformError> {
         n += 1;
         tick(&s, &events, n);
         for a in desk.poll() {
-            desktop_action(&s, a);
+            desktop_action(&s, &a);
+        }
+        // (the chatbot's hotkeys, as its actions have them now)
+        if let Some(list) = HOTKEYS_WANTED.with(|h| h.borrow_mut().take()) {
+            let failed = desk.set_hotkeys(&list);
+            if !failed.is_empty() { if let Some(ui) = s.borrow().ui.upgrade() { ui.set_status(format!("Couldn't have the hotkey {} (written wrong, or another app has it).", failed.join(", ")).into()); } }
         }
     });
     // the taskbar buttons, once the window is up
