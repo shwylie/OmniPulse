@@ -184,9 +184,11 @@ async function onChat(m) {
   seen[(m.nick || user).toLowerCase()] = Date.now();
   present[platform + "|" + (m.nick || user).toLowerCase()] = { at: Date.now(), user, userId: m.tags["user-id"] || "", platform };
   onActions(m, text, cmd, args, user, id);
+  gameChat(user, text, platform);
   const firstKey = platform + "|" + (m.nick || user).toLowerCase();
   if (!spoken.has(firstKey)) {
     spoken.add(firstKey);
+    credit("chat", user);
     fire("firstwords", Object.assign({ user, userId: m.tags["user-id"] || "", message: text, rawInput: text, msgId: id, platform, isMod }, words(text)));
   }
   if (platform === "twitch" && m.tags["first-msg"] === "1") onEvent("first.message", { user_name: user, user_id: m.tags["user-id"] || "", message: { text }, msg_id: id });
@@ -341,10 +343,12 @@ function onPlatform(t, platform) {
 
 // An event (ours: follow, sub...), to the actions waiting for it
 function fire(ev, ctx) {
+  credit(ev, ctx.user);
   for (const x of live) {
     const t = x.trigger;
     if (t.type !== "event" || t.event !== ev || !onPlatform(t, ctx.platform)) continue;
     if (num(t.min) > 0 && num(ctx.amount) < num(t.min)) continue;
+    if (String(t.users || "").trim() && !oneOf(ctx.user, t.users)) continue;
     if (ev === "reward" && String(t.reward || "").trim() && String(t.reward).trim().toLowerCase() !== String(ctx.reward || "").toLowerCase()) continue;
     run(x, ctx);
   }
@@ -353,7 +357,7 @@ function fire(ev, ctx) {
 function onEvent(type, e) {
   const ev = EVENT_OF[type];
   if (!ev) return;
-  if (ev === "online") { isLive = true; spoken.clear(); }
+  if (ev === "online") { isLive = true; spoken.clear(); credits = {}; }
   if (ev === "offline") isLive = false;
   const a = asAlert(type, e) || {};
   if (ev === "sub" && e.is_gift) return;
@@ -423,14 +427,23 @@ function fill(text, ctx) {
     if (k.startsWith("var:")) { const v = getVar(k.slice(4).trim(), ctx.user); return v === "" ? "0" : String(v); }
     if (k === "points") return String(pointsOf(ctx.user));
     if (k === "pointsname") return pointsName();
+    if (k === "rank") return rankOf(ctx.user);
+    if (k === "credits") return creditsLine();
     if (k in ctx) return String(ctx[k] == null ? "" : ctx[k]);
     return k.startsWith("input") ? "" : whole;
   });
 }
 
+// A name in a list (commas between), as it's written or with its @
+function oneOf(who, list) {
+  const w = String(who || "").replace("@", "").trim().toLowerCase();
+  return !!w && String(list || "").split(",").some((x) => x.replace("@", "").trim().toLowerCase() === w);
+}
+
 function test(left, op, right) {
   const l = String(left).trim(), r = String(right).trim();
   switch (op) {
+    case "oneof": return oneOf(l, r);
     case "is": return l.toLowerCase() === r.toLowerCase();
     case "isnt": return l.toLowerCase() !== r.toLowerCase();
     case "contains": return l.toLowerCase().includes(r.toLowerCase());
@@ -484,6 +497,7 @@ function run(a, ctx, depth) {
 async function runNow(a, ctx, depth) {
   depth = depth || 0;
   if (depth > 5) return;
+  if (!ctx.action) ctx.action = a.name;
   try {
     await runBlocks(blocks(a.steps || [], 0, null).list, ctx, depth);
   } catch (e) {
@@ -829,6 +843,112 @@ async function step(st, ctx, depth) {
       addPoints(who, n);
       break;
     }
+    case "gamble":
+    case "slots": {
+      const bet = betOf(f("bet"), ctx.user, num(f("least")), say, ctx);
+      if (bet === null) return false;
+      let pays = 0;
+      if (st.type === "gamble") pays = Math.random() * 100 < num(f("chance")) ? num(f("payout")) : 0;
+      else {
+        const sym = f("symbols").split(/\s+/).filter(Boolean);
+        const reels = [0, 1, 2].map(() => sym[Math.floor(Math.random() * sym.length)] || "?");
+        ctx.reels = reels.join(" ");
+        pays = reels[0] === reels[1] && reels[1] === reels[2] ? num(f("three")) : reels[0] === reels[1] || reels[1] === reels[2] || reels[0] === reels[2] ? num(f("two")) : 0;
+      }
+      const winnings = Math.round(bet * pays);
+      addPoints(ctx.user, winnings - bet);
+      Object.assign(ctx, { bet: String(bet), winnings: String(winnings), won: winnings > bet ? "yes" : "no" });
+      say(ctx.msgId, f(winnings > bet ? "win" : "lose"));
+      break;
+    }
+    case "duel": {
+      const target = f("who").replace("@", "").trim();
+      if (!target || target.toLowerCase() === String(ctx.user).toLowerCase()) break;
+      const bet = betOf(f("bet"), ctx.user, 1, say, ctx);
+      if (bet === null) return false;
+      if (pointsOf(target) < bet) { say(ctx.msgId, "@" + ctx.user + ", " + target + " hasn't " + bet + " " + pointsName() + "."); return false; }
+      const secs = Math.min(300, Math.max(5, num(f("seconds")) || 30));
+      const c = Object.assign({}, ctx, { target, bet: String(bet), accept: f("accept").trim().toLowerCase() || "!accept", seconds: String(secs) });
+      const key = c.platform + "|" + target.toLowerCase();
+      say(null, fill(st.ask, c));
+      duels[key] = { from: ctx.user, bet, word: c.accept, go: () => {
+        delete duels[key];
+        if (pointsOf(ctx.user) < bet || pointsOf(target) < bet) return;
+        const first = Math.random() < 0.5;
+        c.winner = first ? ctx.user : target; c.loser = first ? target : ctx.user;
+        addPoints(c.winner, bet); addPoints(c.loser, -bet);
+        say(null, fill(st.win, c));
+      }, off: setTimeout(() => { if (duels[key]) { delete duels[key]; say(null, fill(st.off, c)); } }, secs * 1000) };
+      break;
+    }
+    case "heist": {
+      const bet = betOf(f("bet"), ctx.user, num(f("least")), say, ctx);
+      if (bet === null) return false;
+      const key = ctx.action || "heist";
+      const h = heists[key];
+      if (h) {
+        if (h.crew.some((x) => x.user.toLowerCase() === String(ctx.user).toLowerCase())) break;
+        addPoints(ctx.user, -bet);
+        h.crew.push({ user: ctx.user, bet });
+        break;
+      }
+      const secs = Math.min(600, Math.max(10, num(f("seconds")) || 60));
+      const c = Object.assign({}, ctx, { seconds: String(secs) });
+      addPoints(ctx.user, -bet);
+      heists[key] = { crew: [{ user: ctx.user, bet }] };
+      say(null, fill(st.start, c));
+      setTimeout(() => {
+        const crew = (heists[key] || { crew: [] }).crew;
+        delete heists[key];
+        const out = [], caught = [];
+        for (const x of crew) {
+          if (Math.random() * 100 < num(fill(st.chance, c))) { const w = Math.round(x.bet * num(fill(st.payout, c))); addPoints(x.user, w); out.push(x.user + " (" + w + ")"); }
+          else caught.push(x.user);
+        }
+        c.winners = out.join(", ") || "no one"; c.losers = caught.join(", ") || "no one";
+        say(null, fill(st.end, c));
+      }, secs * 1000);
+      break;
+    }
+    case "trivia": {
+      if (trivia) break;
+      const r = await OmniPulse.fetch("https://opentdb.com/api.php?amount=1&type=multiple&encode=url3986");
+      const q = r.ok ? ((await r.json()).results || [])[0] : null;
+      if (!q) throw new Error("the Open Trivia Database didn't answer");
+      const d = (x) => decodeURIComponent(String(x || ""));
+      const choices = q.incorrect_answers.map(d).concat([d(q.correct_answer)]).sort(() => Math.random() - 0.5);
+      const letter = "ABCD"[choices.indexOf(d(q.correct_answer))];
+      const secs = Math.min(300, Math.max(5, num(f("seconds")) || 30));
+      const c = Object.assign({}, ctx, { question: d(q.question), choices: choices.map((x, i) => "ABCD"[i] + ") " + x).join("  "), answer: letter + ") " + d(q.correct_answer), prize: String(Math.round(num(f("prize")))), seconds: String(secs) });
+      say(null, fill(st.ask, c));
+      trivia = { right: [letter.toLowerCase(), d(q.correct_answer).toLowerCase()], platform: ctx.platform, won: (who) => {
+        clearTimeout(trivia.off); trivia = null;
+        c.winner = who; addPoints(who, num(c.prize));
+        say(null, fill(st.win, c));
+      }, off: setTimeout(() => { trivia = null; say(null, fill(st.none, c)); }, secs * 1000) };
+      break;
+    }
+    case "strike": {
+      const who = f("who").replace("@", "").trim();
+      if (!who) break;
+      const k = who.toLowerCase(), all = Object.assign({}, S().strikes || {});
+      const had = all[k] && Date.now() - all[k].at < Math.max(1, num(f("forget")) || 24) * 3600000 ? all[k].n : 0;
+      const n = had + 1;
+      all[k] = { n, at: Date.now() };
+      OmniPulse.settings.strikes = all;
+      OmniPulse.app.saveSettings({ strikes: all }).catch(() => {});
+      ctx.strikes = String(n);
+      const banAt = num(f("banat")), outAt = num(f("timeoutat"));
+      const c = Object.assign({}, ctx, { user: who });
+      if (banAt > 0 && n >= banAt) await step(Object.assign({}, st, { type: "ban", what: "ban", who, reason: f("reason") || "strike " + n }), c, depth);
+      else if (outAt > 0 && n >= outAt) {
+        if (onKick) await step(Object.assign({}, st, { type: "ban", what: "ban", who, reason: f("reason") }), c, depth);
+        else await helix("POST", "moderation/bans?broadcaster_id=" + S().userId + "&moderator_id=" + S().userId, { data: { user_id: await twitchUserId(who), duration: Math.max(1, num(f("seconds"))), reason: f("reason") || "strike " + n } });
+      } else say(null, f("warn"));
+      break;
+    }
+    case "writefile": await OmniPulse.app.writeFile(f("file").trim().replace(/^"|"$/g, ""), f("text"), st.how === "append"); break;
+    case "credits": await OmniPulse.app.overlay({ text: creditsRoll(f("title")), place: "roll", seconds: Math.min(120, Math.max(5, num(f("seconds")) || 25)) }); break;
     case "giveenter": {
       if (ctx.user && !entries.some((x) => x.toLowerCase() === ctx.user.toLowerCase())) entries.push(ctx.user);
       break;
@@ -989,6 +1109,47 @@ const seen = {};
 // (who's chatted, and when: Each Viewer, Every Few Minutes)
 const present = {};
 let entries = [], pointsTimer = null, saveSoon = null, isLive = false;
+
+// ---------- Mix It Up's extras: games on points, ranks, the credits ----------
+let duels = {}, heists = {}, trivia = null, credits = {};
+
+// A bet: a number or "all", at least so many, and theirs to bet (taken from them by the game)
+function betOf(text, user, least, say, ctx) {
+  const have = pointsOf(user);
+  const bet = String(text).trim().toLowerCase() === "all" ? have : Math.floor(num(text));
+  if (!(bet > 0) || bet < Math.max(1, least)) { say(ctx.msgId, "@" + user + ", bet at least " + Math.max(1, least) + " " + pointsName() + " (you have " + have + ")."); return null; }
+  if (bet > have) { say(ctx.msgId, "@" + user + ", you have " + have + " " + pointsName() + "."); return null; }
+  return bet;
+}
+
+// (chat: a duel's accept word from whoever was challenged; a trivia question's answer)
+function gameChat(user, text, platform) {
+  const said = text.trim().toLowerCase(), key = platform + "|" + String(user).toLowerCase();
+  const d = duels[key];
+  if (d && said === d.word) { clearTimeout(d.off); d.go(); }
+  if (trivia && trivia.platform === platform && trivia.right.includes(said)) trivia.won(user);
+}
+
+// A viewer's rank, by their points (the settings' list: "0 Newcomer, 100 Regular...")
+function rankOf(user) {
+  const have = pointsOf(user);
+  let best = "";
+  String(S().pointsRanks || "").split(",").map((x) => /^\s*(\d+)\s+(.+?)\s*$/.exec(x)).filter(Boolean)
+    .map((m) => [num(m[1]), m[2]]).sort((a, b) => a[0] - b[0]).forEach(([at, title]) => { if (have >= at) best = title; });
+  return best;
+}
+
+// Who did what since going live, for the credits
+const CREDIT_OF = { follow: "Followers", sub: "Subscribers", resub: "Subscribers", gift: "Gifted Subs", bits: "Cheers", raid: "Raiders", donation: "Donations", charity: "Donations", chat: "Chatters" };
+function credit(ev, user) {
+  const part = CREDIT_OF[ev];
+  if (!part || !user) return;
+  const list = (credits[part] = credits[part] || []);
+  if (!list.some((x) => x.toLowerCase() === String(user).toLowerCase())) list.push(String(user));
+}
+function creditParts() { return Object.values(CREDIT_OF).filter((p, i, a) => a.indexOf(p) === i && credits[p] && credits[p].length); }
+function creditsLine() { return creditParts().map((p) => p + ": " + credits[p].join(", ")).join(" \u{b7} ") || "no one yet"; }
+function creditsRoll(title) { return [title].concat(creditParts().map((p) => "\n" + p + "\n" + credits[p].join("\n"))).join("\n").trim(); }
 
 function pointsName() { return String(S().pointsName || "points").trim() || "points"; }
 function pointsOf(who) { return num((S().points || {})[String(who || "").toLowerCase()]); }
@@ -1427,6 +1588,9 @@ function stopAll() {
   for (const s of [chat, botChat, events, obs, kick]) { if (s) { s.onclose = null; s.close(); } }
   chat = botChat = events = obs = kick = null;
   for (const s of tipSockets) { s.onclose = null; s.close(); }
+  for (const d of Object.values(duels)) clearTimeout(d.off);
+  if (trivia) clearTimeout(trivia.off);
+  duels = {}; heists = {}; trivia = null;
   tipSockets = [];
   obsReady = false;
 }

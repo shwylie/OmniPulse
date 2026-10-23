@@ -62,7 +62,7 @@ const BAN_DO: &[(&str, &str)] = &[("ban", "Ban"), ("unban", "Unban")];
 const ROLE_DO: &[(&str, &str)] = &[("vip", "Make Them a VIP"), ("unvip", "Take Their VIP Away"), ("mod", "Make Them a Moderator"), ("unmod", "Take Their Moderator Away")];
 const RAID_DO: &[(&str, &str)] = &[("start", "Start It"), ("cancel", "Cancel It")];
 const MEDIA_DO: &[(&str, &str)] = &[("play", "Play"), ("pause", "Pause"), ("restart", "Restart"), ("stop", "Stop"), ("next", "Next"), ("previous", "Previous")];
-const PLACES: &[(&str, &str)] = &[("top", "At the Top"), ("middle", "In the Middle"), ("bottom", "At the Bottom")];
+const PLACES: &[(&str, &str)] = &[("top", "At the Top"), ("middle", "In the Middle"), ("bottom", "At the Bottom"), ("roll", "Rolling Up (Like Credits)")];
 const START_STOP: &[(&str, &str)] = &[("start", "Start"), ("stop", "Stop"), ("toggle", "Start or Stop")];
 const SHOW_HIDE: &[(&str, &str)] = &[("show", "Show"), ("hide", "Hide"), ("toggle", "Show or Hide")];
 const MUTE: &[(&str, &str)] = &[("mute", "Mute"), ("unmute", "Unmute"), ("toggle", "Mute or Unmute")];
@@ -71,8 +71,9 @@ const COLOURS: &[(&str, &str)] = &[("primary", "Your Channel's Colour"), ("blue"
 const MATCH: &[(&str, &str)] = &[("contains", "Contains"), ("starts", "Starts With"), ("exact", "Is Exactly"), ("regex", "Matches (Regex)")];
 const TESTS: &[(&str, &str)] = &[
     ("is", "Is"), ("isnt", "Isn't"), ("contains", "Contains"), ("more", "Is More Than"), ("less", "Is Less Than"),
-    ("empty", "Is Empty"), ("notempty", "Isn't Empty"),
+    ("empty", "Is Empty"), ("notempty", "Isn't Empty"), ("oneof", "Is One Of"),
 ];
+const FILE_DO: &[(&str, &str)] = &[("replace", "Replace What's There"), ("append", "Add a Line to the End")];
 const ALERTS: &[(&str, &str)] = &[
     ("follow", "Follow"), ("sub", "Sub"), ("gift", "Gifted Subs"), ("bits", "Bits"), ("donation", "Donation"),
     ("raid", "Raid"), ("hypetrain", "Hype Train"), ("poll", "Poll"),
@@ -106,6 +107,7 @@ pub const TRIGGERS: &[Kind] = &[
         f("min", "At Least", "number", "0", "The least it takes, in bits, raiders or subs gifted (0: any)."),
         f("reward", "Reward", "text", "", "For a Channel Points reward: its name (empty: any)."),
         pick("from", "On", FROM, "any", "Kick has follows, subs, gifted subs, hosts and going live or offline."),
+        f("users", "Only For", "text", "", "Viewers' names, with commas between (an entrance greeting: with First Words). Empty: anyone."),
     ] },
     Kind { id: "presence", label: "Each Viewer, Every Few Minutes", note: "Runs once for each viewer who's chatted lately (Streamer.bot's present viewers): %user% is each of them in turn.", fields: &[
         f("minutes", "Every", "number", "10", "Minutes."),
@@ -329,6 +331,66 @@ pub const STEPS: &[Kind] = &[
         f("who", "Who", "text", "%user%", ""),
         f("amount", "Points", "number", "10", "Take away with a minus."),
     ] },
+    Kind { id: "gamble", label: "Gamble Points", note: "Roulette: a chance to win the bet back several times over. Gives the steps after it %bet%, %winnings% and %won% (yes or no).", fields: &[
+        f("bet", "Bet", "text", "%input0%", "A number, or all."),
+        f("least", "At Least", "number", "10", ""),
+        f("chance", "Chance to Win", "number", "45", "Out of 100."),
+        f("payout", "Pays", "number", "2", "Times the bet."),
+        f("win", "Won", "text", "%user% won %winnings% %pointsname% (%points% now)!", ""),
+        f("lose", "Lost", "text", "%user% lost %bet% %pointsname%.", ""),
+    ] },
+    Kind { id: "slots", label: "Spin the Slots", note: "Three reels of the symbols. Gives %reels%, %bet%, %winnings% and %won%.", fields: &[
+        f("bet", "Bet", "text", "%input0%", "A number, or all."),
+        f("least", "At Least", "number", "10", ""),
+        f("symbols", "Symbols", "text", "\u{1F352} \u{1F34B} \u{1F514} \u{2B50} 7", "With spaces between."),
+        f("three", "Three the Same Pays", "number", "10", "Times the bet."),
+        f("two", "Two the Same Pays", "number", "2", "Times the bet (0: nothing)."),
+        f("win", "Won", "text", "[ %reels% ] %user% won %winnings% %pointsname%!", ""),
+        f("lose", "Lost", "text", "[ %reels% ] no luck, %user%.", ""),
+    ] },
+    Kind { id: "duel", label: "Start a Duel", note: "They accept in chat (with the word below) in time, or it's off. The winner, by chance, takes both bets.", fields: &[
+        f("who", "Against", "text", "%input0%", ""),
+        f("bet", "Bet", "text", "%input1%", "A number, or all."),
+        f("accept", "They Accept With", "text", "!accept", ""),
+        f("seconds", "Within", "number", "30", "Seconds."),
+        f("ask", "Challenge", "text", "@%target%, %user% challenges you to a duel for %bet% %pointsname%! Type %accept% within %seconds% seconds.", ""),
+        f("win", "Result", "text", "%winner% beat %loser% and won %bet% %pointsname%!", ""),
+        f("off", "Not Accepted", "text", "%target% didn't accept the duel.", ""),
+    ] },
+    Kind { id: "heist", label: "Start or Join a Heist", note: "The first starts one; others join with the same command and their bet while it's open. Then each makes it out, or doesn't, by chance.", fields: &[
+        f("bet", "Bet", "text", "%input0%", "A number, or all."),
+        f("least", "At Least", "number", "10", ""),
+        f("seconds", "Open For", "number", "60", "Seconds."),
+        f("chance", "Chance Each", "number", "50", "Out of 100."),
+        f("payout", "Pays", "number", "2", "Times the bet."),
+        f("start", "Starting", "text", "%user% is planning a heist! Join with %command% and a bet within %seconds% seconds.", ""),
+        f("end", "Result", "text", "The heist is over. Made it out: %winners%. Caught: %losers%.", ""),
+    ] },
+    Kind { id: "trivia", label: "Ask a Trivia Question", note: "From the Open Trivia Database. The first to answer right (the answer, or its letter) wins the points.", fields: &[
+        f("prize", "Prize", "number", "50", "Points."),
+        f("seconds", "Within", "number", "30", "Seconds."),
+        f("ask", "Question", "text", "Trivia! %question% %choices%", ""),
+        f("win", "Answered", "text", "%winner% got it: %answer%! +%prize% %pointsname%", ""),
+        f("none", "No One Got It", "text", "No one got it: it was %answer%.", ""),
+    ] },
+    Kind { id: "strike", label: "Give a Strike", note: "Moderation that steps up: a warning, then a time-out, then a ban. Gives %strikes% (how many they have).", fields: &[
+        f("who", "Who", "text", "%user%", ""),
+        f("reason", "Reason", "text", "", ""),
+        f("warn", "Warning", "text", "@%user%, that's strike %strikes%. Please stop.", "Said for the strikes before a time-out."),
+        f("timeoutat", "Time Out At", "number", "2", "Strikes (0: never)."),
+        f("seconds", "Time Out For", "number", "600", "Seconds."),
+        f("banat", "Ban At", "number", "3", "Strikes (0: never)."),
+        f("forget", "Forgotten After", "number", "24", "Hours without one."),
+    ] },
+    Kind { id: "writefile", label: "Write to a File", note: "A text file on this PC (an OBS Text source can show it: a counter, the latest follower).", fields: &[
+        f("file", "File", "text", "C:\\Stream\\latest.txt", "A .txt file's whole place."),
+        f("text", "Text", "text", "%user%", ""),
+        pick("how", "", FILE_DO, "replace", ""),
+    ] },
+    Kind { id: "credits", label: "Roll the Credits", note: "Everyone who followed, subbed, gifted, cheered, raided, donated or chatted since you went live, rolling up the Stream Widget. %credits% has it on one line, for chat.", fields: &[
+        f("title", "Title", "text", "Thanks for watching!", ""),
+        f("seconds", "For", "number", "25", "Seconds."),
+    ] },
     Kind { id: "giveenter", label: "Enter the Giveaway", note: "Once each.", fields: &[] },
     Kind { id: "givepick", label: "Pick a Giveaway Winner", note: "Gives the steps after it %winner% and %entries% (how many were in).", fields: &[f("clear", "Then Start Again", "toggle", "true", "Everyone's entry let go.")] },
     Kind { id: "fetch", label: "Fetch a Web Address", note: "What it answers (plain text, its first 500 letters) for the steps after it.", fields: &[
@@ -371,8 +433,8 @@ pub fn templates() -> Vec<(&'static str, Value)> {
         ("A Command That Answers", act("Hello", trig("command", json!({ "command": "!hello" })), vec![step("say", json!({ "text": "Hi %user%!" }))])),
         ("Thank New Followers", act("Thank Followers", trig("event", json!({ "event": "follow" })), vec![step("say", json!({ "text": "Thanks for the follow, %user%!", "reply": false }))])),
         ("Thank Subs", act("Thank Subs", trig("event", json!({ "event": "sub" })), vec![step("say", json!({ "text": "Thank you for subscribing, %user%!", "reply": false }))])),
-        ("Thank Donations", act("Thank Donations", trig("event", json!({ "event": "donation" })), vec![step("say", json!({ "text": "Thank you for the %amount% %currency%, %user%!", "reply": false }))])),
         ("Thank Bits", act("Thank Bits", trig("event", json!({ "event": "bits" })), vec![step("say", json!({ "text": "Thanks for the %amount% bits, %user%!", "reply": false }))])),
+        ("Thank Donations", act("Thank Donations", trig("event", json!({ "event": "donation" })), vec![step("say", json!({ "text": "Thank you for the %amount% %currency%, %user%!", "reply": false }))])),
         ("Welcome Raiders", act("Welcome Raiders", trig("event", json!({ "event": "raid" })), vec![
             step("say", json!({ "text": "Welcome, raiders! Go and check out %user%.", "reply": false })),
             step("shoutout", json!({ "who": "%user%" })),
@@ -384,6 +446,7 @@ pub fn templates() -> Vec<(&'static str, Value)> {
         ])),
         ("Thank Whoever Requests a Song", act("Request Thanks", trig("song", json!({ "when": "request" })), vec![step("say", json!({ "text": "Thanks %user%, %song% is in the queue.", "reply": false }))])),
         ("Greet First-Time Chatters", act("First Message", trig("event", json!({ "event": "firstmsg" })), vec![step("say", json!({ "text": "Welcome to the stream, %user%!" }))])),
+        ("Entrance Greeting", act("Entrance Greeting", trig("event", json!({ "event": "firstwords", "users": "" })), vec![step("say", json!({ "text": "Welcome back, %user%!", "reply": false }))])),
         ("A !clip Command", act("Clip", trig("command", json!({ "command": "!clip", "cooldown": 60 })), vec![step("clip", json!({})), step("say", json!({ "text": "Clipped: %clip%" }))])),
         ("Show a Camera on a Reward", act("Camera", trig("event", json!({ "event": "reward", "reward": "Show the Cam" })), vec![step("obssource", json!({ "source": "Camera", "show": "show", "for": 30 }))])),
         ("No Links in Chat", act("No Links", trig("filter", json!({ "rule": "links" })), vec![step("delete", json!({})), step("say", json!({ "text": "@%user%, no links in chat please.", "reply": false }))])),
@@ -393,6 +456,11 @@ pub fn templates() -> Vec<(&'static str, Value)> {
         ("Points (!points)", act("Points", trig("command", json!({ "command": "!points" })), vec![step("say", json!({ "text": "%user%, you have %points% %pointsname%." }))])),
         ("A Giveaway (!enter)", act("Enter", trig("command", json!({ "command": "!enter", "cooldown": 0, "usercooldown": 5 })), vec![step("giveenter", json!({}))])),
         ("Pick a Giveaway Winner (!winner)", act("Winner", trig("command", json!({ "command": "!winner", "who": "you" })), vec![step("givepick", json!({})), step("say", json!({ "text": "And the winner, of %entries%, is... %winner%!", "reply": false }))])),
+        ("Slots", act("Slots", trig("command", json!({ "command": "!slots", "cooldown": 0 })), vec![defaults(STEPS, "slots")])),
+        ("Gamble", act("Gamble", trig("command", json!({ "command": "!gamble", "cooldown": 0 })), vec![defaults(STEPS, "gamble")])),
+        ("Duel", act("Duel", trig("command", json!({ "command": "!duel", "cooldown": 0 })), vec![defaults(STEPS, "duel")])),
+        ("Heist", act("Heist", trig("command", json!({ "command": "!heist", "cooldown": 0, "usercooldown": 0 })), vec![defaults(STEPS, "heist")])),
+        ("Trivia", act("Trivia", trig("command", json!({ "command": "!trivia", "who": "mods" })), vec![defaults(STEPS, "trivia")])),
         ("Shout Out on !so", act("Shout Out", trig("command", json!({ "command": "!so", "who": "mods" })), vec![
             step("if", json!({ "left": "%input0%", "test": "notempty" })),
             step("say", json!({ "text": "Go and check out %input0%!", "reply": false })),

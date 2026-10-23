@@ -1,7 +1,7 @@
 {
   "id": "chatbot",
   "name": "OmniPulse Chatbot",
-  "version": "0.2.4",
+  "version": "0.2.5",
   "author": "OmniPulse",
   "description": "OmniPulse's own chatbot: song requests, alerts, your own actions (a trigger, then its steps) and OBS controls, straight from your chat, no other bot needed. Twitch and Kick; YouTube is on its way.",
   "main": "main.js",
@@ -17,7 +17,8 @@
     "id.kick.com",
     "*.platform.kick.com",
     "sockets.streamlabs.com",
-    "astro.streamelements.com"
+    "astro.streamelements.com",
+    "opentdb.com"
   ],
   "capabilities": [
     "sockets",
@@ -174,6 +175,13 @@
       "type": "number",
       "default": 10,
       "note": "Minutes."
+    },
+    {
+      "key": "pointsRanks",
+      "label": "Ranks",
+      "type": "text",
+      "default": "0 Newcomer, 100 Regular, 500 Veteran, 2000 Legend",
+      "note": "Points, then the rank's name, with commas between: %rank% in an action is a viewer's."
     },
     {
       "key": "pointsOffline",

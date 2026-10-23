@@ -10222,6 +10222,19 @@ fn plugin_app(shared: &Shared, plugin: &str, ask: serde_json::Value, answer: Box
             }
             send(match omnipulse_core::widget::overlay_push(&fields) { Ok(_) => serde_json::json!({ "ok": true }), Err(e) => serde_json::json!({ "error": e }) });
         }
+        // (a text file of yours, written: a chatbot's Write to a File, for an OBS Text source)
+        "writeFile" => {
+            if plugin != "chatbot" { return send(serde_json::json!({ "error": "only OmniPulse's chatbot can" })); }
+            let (path, text) = (arg(0), arg(1));
+            let append = args.get(2).and_then(|v| v.as_bool()).unwrap_or(false);
+            let p = std::path::Path::new(&path);
+            if !p.is_absolute() || !p.extension().map(|e| e.eq_ignore_ascii_case("txt")).unwrap_or(false) { return send(serde_json::json!({ "error": "give it a .txt file's whole place (C:\\...\\name.txt)" })); }
+            let wrote = (|| -> std::io::Result<()> {
+                if let Some(d) = p.parent() { std::fs::create_dir_all(d)?; }
+                if append { use std::io::Write; let mut f = std::fs::OpenOptions::new().create(true).append(true).open(p)?; writeln!(f, "{text}") } else { std::fs::write(p, text) }
+            })();
+            send(match wrote { Ok(()) => serde_json::json!({ "ok": true }), Err(e) => serde_json::json!({ "error": format!("couldn't write {path}: {e}") }) });
+        }
         // (a sound file of yours, over the music: a chatbot's Play a Sound)
         "sound" => {
             let vol = args.get(1).and_then(|v| v.as_f64()).unwrap_or(80.0);
@@ -12043,6 +12056,7 @@ fn main() -> Result<(), slint::PlatformError> {
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("albumpage") { vec![(8, "search"), (28, "openalbum"), (38, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("round") { vec![(9, "settings"), (10, "cat_Streaming"), (12, "titleset:youtube"), (14, "prefset:reqBot=moobot"), (15, "panel:requests"), (17, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("flows") { vec![(9, "settings"), (10, "cat_Streaming"), (11, "flows"), (12, "flownew:5"), (14, "flownew:7"), (16, "end")] }
+            else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("flowgames") { vec![(9, "settings"), (10, "cat_Streaming"), (11, "flows"), (12, "flownew:24"), (14, "flownew:11"), (16, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("restored") {
                 let dir = std::env::var("OMNIPULSE_SELFTEST_BOTS").unwrap_or_default();
                 let (sb, miu): (&'static str, &'static str) = (Box::leak(format!("restore:{dir}/streamerbot-backup.zip").into_boxed_str()), Box::leak(format!("restore:{dir}/mixitup.miubackup").into_boxed_str()));

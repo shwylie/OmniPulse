@@ -853,6 +853,95 @@ mod tests {
         stop("chatbot");
     }
 
+    /// Mix It Up's extras, against the stand-in Twitch chat: slots and a gamble (made sure to win), a duel
+    /// accepted, a heist started, a rank, strikes stepping up, an entrance greeting, a file written, the credits
+    #[test]
+    fn the_chatbots_games_and_extras() {
+        use futures_util::{SinkExt, StreamExt};
+        use tokio_tungstenite::tungstenite::Message;
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let listener = rt.block_on(tokio::net::TcpListener::bind("127.0.0.1:0")).unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let said: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+        let s2 = said.clone();
+        rt.spawn(async move {
+            while let Ok((tcp, _)) = listener.accept().await {
+                let path = Arc::new(Mutex::new(String::new()));
+                let p2 = path.clone();
+                let ws = tokio_tungstenite::accept_hdr_async(tcp, move |req: &tokio_tungstenite::tungstenite::handshake::server::Request, res| { *p2.lock().unwrap() = req.uri().path().to_string(); Ok(res) }).await.unwrap();
+                let (mut w, mut r) = ws.split();
+                let said = s2.clone();
+                if path.lock().unwrap().as_str() != "/irc" { tokio::spawn(async move { while r.next().await.is_some() {} }); continue; }
+                tokio::spawn(async move {
+                    while let Some(Ok(Message::Text(t))) = r.next().await {
+                        for line in t.split("\r\n").filter(|l| !l.is_empty()) {
+                            said.lock().unwrap().push(line.to_string());
+                            if !line.starts_with("JOIN") { continue; }
+                            let msg = |who: &str, id: &str, text: &str| format!("@badges=;display-name={who};id={id};mod=0;user-id=4{} :{l}!{l}@{l}.tmi.twitch.tv PRIVMSG #me :{text}\r\n", who.len(), l = who.to_lowercase());
+                            for (who, id, text) in [("Viewer", "a", "!slots 100"), ("Viewer", "b", "!gamble 50"), ("Viewer", "c", "!duel Other 10"), ("Other", "d", "hello all"), ("Viewer", "e", "!rank"),
+                                ("Viewer", "f", "!strike"), ("Viewer", "g", "!strike"), ("Viewer", "h", "!heist 20"), ("Other", "i", "!heist 30"), ("Viewer", "j", "!file")] {
+                                let _ = w.send(Message::Text(msg(who, id, text).into())).await;
+                            }
+                            tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+                            let _ = w.send(Message::Text(msg("Other", "k", "!accept").into())).await;
+                            let _ = w.send(Message::Text(msg("Viewer", "l", "!credits").into())).await;
+                        }
+                    }
+                });
+            }
+        });
+        let asked: Arc<Mutex<Vec<Value>>> = Arc::new(Mutex::new(Vec::new()));
+        let a2 = asked.clone();
+        set_app_handler(Arc::new(move |_p: &str, ask: Value, answer: Box<dyn FnOnce(Value) + Send>| { a2.lock().unwrap().push(ask); answer(json!({ "ok": true })); }));
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../plugins/chatbot");
+        let code = std::fs::read_to_string(root.join("main.js")).unwrap()
+            .replace("wss://irc-ws.chat.twitch.tv:443", &format!("ws://127.0.0.1:{port}/irc"))
+            .replace("wss://eventsub.wss.twitch.tv/ws", &format!("ws://127.0.0.1:{port}/events"))
+            .replace("if (await validate(token)) return token;", "return token;")
+            .replace("else await helix(\"POST\", \"moderation/bans?broadcaster_id=\" + S().userId + \"&moderator_id=\" + S().userId, { data: { user_id: await twitchUserId(who), duration", "else await OmniPulse.app.say(\"helix bans\") || ({ data: { user_id: 42, duration");
+        let mut m: core::plugins::Manifest = serde_json::from_str(&std::fs::read_to_string(root.join("manifest.json")).unwrap()).unwrap();
+        m.hosts.push("127.0.0.1".into());
+        let pkg = core::plugins::Package { manifest: m, code, digest: String::new(), bundled: true };
+        let t = |id: &str, set: Value| { let mut d = crate::flows::defaults(crate::flows::TRIGGERS, id); for (k, v) in set.as_object().unwrap() { d[k] = v.clone(); } d };
+        let st = |id: &str, set: Value| { let mut d = crate::flows::defaults(crate::flows::STEPS, id); for (k, v) in set.as_object().unwrap() { d[k] = v.clone(); } d };
+        let cmd = |c: &str| t("command", json!({ "command": c, "cooldown": 0, "usercooldown": 0 }));
+        let actions = json!([
+            { "name": "Slots", "on": true, "trigger": cmd("!slots"), "steps": [st("slots", json!({ "symbols": "7" }))] },
+            { "name": "Gamble", "on": true, "trigger": cmd("!gamble"), "steps": [st("gamble", json!({ "chance": 100, "payout": 3 })), st("say", json!({ "text": "won %won% %winnings%" }))] },
+            { "name": "Duel", "on": true, "trigger": cmd("!duel"), "steps": [st("duel", json!({}))] },
+            { "name": "Rank", "on": true, "trigger": cmd("!rank"), "steps": [st("say", json!({ "text": "rank %rank%" }))] },
+            { "name": "Strike", "on": true, "trigger": cmd("!strike"), "steps": [st("strike", json!({}))] },
+            { "name": "Heist", "on": true, "trigger": cmd("!heist"), "steps": [st("heist", json!({}))] },
+            { "name": "File", "on": true, "trigger": cmd("!file"), "steps": [st("writefile", json!({ "file": "C:\\x\\c.txt", "text": "%user% %points%", "how": "append" }))] },
+            { "name": "Credits", "on": true, "trigger": cmd("!credits"), "steps": [st("credits", json!({})), st("say", json!({ "text": "credits %credits%" }))] },
+            { "name": "Entrance", "on": true, "trigger": t("event", json!({ "event": "firstwords", "users": "@other, someone" })), "steps": [st("say", json!({ "text": "Welcome %user%" }))] },
+        ]);
+        let p = start(&pkg, &json!({ "token": "t", "login": "me", "userId": "1", "twitchClientId": "c", "points": { "viewer": 1000, "other": 1000 }, "pointsRanks": "0 New, 900 Regular, 5000 Legend", "actions": actions }), rt.handle().clone()).unwrap();
+        let has = |want: &str| said.lock().unwrap().iter().any(|l| l.contains(want));
+        let until = Instant::now() + Duration::from_secs(8);
+        while !(has("credits ") && has("beat")) && Instant::now() < until { std::thread::sleep(Duration::from_millis(50)); }
+        let (l, a) = (said.lock().unwrap().clone(), asked.lock().unwrap().clone());
+        let saved = |k: &str| a.iter().rev().find(|x| x["op"] == "saveSettings" && x["args"][0][k].is_object()).map(|x| x["args"][0][k].clone()).unwrap_or(Value::Null);
+        // (slots of one symbol: three the same, 10x; the gamble sure to win, 3x)
+        assert!(has("[ 7 7 7 ] Viewer won 1000 points!") && has("won yes 150"), "{l:#?}");
+        // (the duel asked and accepted: one of them won the other's 10)
+        assert!(has("@Other, Viewer challenges you to a duel for 10 points! Type !accept within 30 seconds.") && has("beat"), "{l:#?}");
+        // (Viewer's points by now: well over 900, a Regular)
+        assert!(has("rank Regular"), "{l:#?}");
+        // (strikes: a warning, then a time-out through Twitch's API)
+        assert!(has("Viewer, that's strike 1. Please stop.") && a.iter().any(|x| x["op"] == "say" && x["args"][0] == "helix bans"), "{l:#?} {a:#?}");
+        assert_eq!(saved("strikes")["viewer"]["n"], 2);
+        // (the heist: started once, Other joined, not over yet)
+        assert_eq!(l.iter().filter(|x| x.contains("is planning a heist")).count(), 1, "{l:#?}");
+        // (an entrance greeting for Other only, the file, the credits rolled and on one line)
+        assert!(has("Welcome Other") && !has("Welcome Viewer"), "{l:#?}");
+        assert!(a.iter().any(|x| x["op"] == "writeFile" && x["args"][0] == "C:\\x\\c.txt" && x["args"][2] == true), "{a:#?}");
+        assert!(a.iter().any(|x| x["op"] == "overlay" && x["args"][0]["place"] == "roll" && x["args"][0]["text"].as_str().unwrap_or("").contains("Chatters\nViewer\nOther")), "{a:#?}");
+        assert!(has("credits Chatters: Viewer, Other"), "{l:#?}");
+        drop(p);
+        stop("chatbot");
+    }
+
     /// The chatbot's actions (crate::flows' JSON, run by the plugin), against the stand-in Twitch: a command
     /// that answers, a counter kept between uses, a chat message's, "only go on if" stopping one, a raid
     /// (with its least), and a song requested from a step

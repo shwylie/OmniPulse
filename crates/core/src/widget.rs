@@ -91,9 +91,9 @@ fn query_map(q: &str) -> serde_json::Map<String, Value> {
 pub fn overlay_push(fields: &serde_json::Map<String, Value>) -> Result<Value, String> {
     let get = |k: &str| fields.get(k).map(|v| v.as_str().map(String::from).unwrap_or_else(|| v.to_string())).unwrap_or_default();
     let media = |k: &str| Some(get(k)).filter(|u| (u.starts_with("https://") || u.starts_with("http://") || u.starts_with("/overlay/")) && u.len() <= 500).unwrap_or_default();
-    let (text, image, video) = (get("text").chars().take(300).collect::<String>(), media("image"), media("video"));
+    let (text, image, video) = (get("text").chars().take(4000).collect::<String>(), media("image"), media("video"));
     if text.trim().is_empty() && image.is_empty() && video.is_empty() { return Err("nothing to show: give it some text, a picture or a video".into()); }
-    let place = match get("place").as_str() { "top" => "top", "bottom" => "bottom", _ => "middle" };
+    let place = match get("place").as_str() { "top" => "top", "bottom" => "bottom", "roll" => "roll", _ => "middle" };
     let a = json!({
         "id": ALERT_ID.fetch_add(1, Ordering::SeqCst) + 1,
         "ts": crate::now_secs() * 1000,
