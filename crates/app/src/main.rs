@@ -6070,6 +6070,8 @@ fn paint_settings(a: &App) {
     ui.set_set_rows_library(rows("Library"));
     ui.set_set_rows_sound(rows("Sound"));
     ui.set_set_rows_plugins(rows("Plugins"));
+    ui.set_widget_on(set_row_on(&a.web.prefs, "widget", false));
+    ui.set_bot_on(plugin_on(&a.web.prefs, botpage::BOT));
     ui.set_widget_port(a.web.prefs["widgetPort"].as_i64().filter(|p| (1024..65536).contains(p)).unwrap_or(7878) as i32);
     ui.set_set_rows_streaming(rows("Streaming"));
     // the closed categories (the web app's setting too: by their titles)
@@ -6173,6 +6175,7 @@ fn pf_leave(shared: &Shared, to: &str) {
 
 fn leave_do(shared: &Shared, to: &str) {
     if let Some(i) = to.strip_prefix("crumb:").and_then(|i| i.parse::<usize>().ok()) { return crumb_go(shared, i); }
+    if let Some(name) = to.strip_prefix("panel:") { PF_EDIT.with(|e| e.borrow_mut().take()); return panel_open(shared, name); }
     if to == "close" { return settings_close(shared); }
     PF_EDIT.with(|e| e.borrow_mut().take());
     if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_pf_open(false); }
@@ -6308,6 +6311,9 @@ fn bot_act(shared: &Shared, act: &str) {
     }
     if let Some(url) = act.strip_prefix("url:") { let _ = omnipulse_core::open_url(url.to_string()); return; }
     if let Some(text) = act.strip_prefix("copy:") { if share::copy(text).is_ok() { say("Copied."); } return; }
+    // (its widgets: switched here, their settings their own pages, asked first if something here isn't saved)
+    if let Some(key) = act.strip_prefix("row-toggle:") { set_toggle(shared, key); return bot_paint(shared); }
+    if let Some(key) = act.strip_prefix("row-more:") { if let Some(name) = panels::of_switch(key) { pf_leave(shared, &format!("panel:{name}")); } return; }
     if let Some(id) = act.strip_prefix("step:") { BOT_FOCUS.with(|f| *f.borrow_mut() = id.to_string()); BOT_DRAWN.with(|d| *d.borrow_mut() = Default::default()); return bot_paint(shared); }
     match act {
         "run" => { set_toggle(shared, &format!("plugRun_{}", botpage::BOT)); return bot_poll_soon(shared); }
