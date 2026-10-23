@@ -10075,6 +10075,38 @@ Connection: close
     Err("the sign-in wasn't finished in five minutes".into())
 }
 
+/// Words said by Windows' own speech, as a sound file (in the temp folder: the last few kept), in the voice
+/// asked for (a name, or part of one; empty: Windows' own) at that speed
+#[cfg(windows)]
+fn speech_file(text: &str, voice: &str, rate: f64) -> Result<std::path::PathBuf, String> {
+    use windows::Media::SpeechSynthesis::SpeechSynthesizer;
+    use windows::Storage::Streams::DataReader;
+    let _ = unsafe { windows::Win32::System::WinRT::RoInitialize(windows::Win32::System::WinRT::RO_INIT_MULTITHREADED) };
+    let err = |e: windows::core::Error| format!("Windows' speech: {}", e.message());
+    let synth = SpeechSynthesizer::new().map_err(err)?;
+    if !voice.trim().is_empty() {
+        let want = voice.trim().to_lowercase();
+        if let Ok(all) = SpeechSynthesizer::AllVoices() {
+            for v in all {
+                if v.DisplayName().map(|n| n.to_string().to_lowercase().contains(&want)).unwrap_or(false) { synth.SetVoice(&v).map_err(err)?; break; }
+            }
+        }
+    }
+    if let Ok(o) = synth.Options() { let _ = o.SetSpeakingRate(rate.clamp(0.5, 3.0)); }
+    let stream = synth.SynthesizeTextToStreamAsync(&windows::core::HSTRING::from(text)).map_err(err)?.join().map_err(err)?;
+    let size = stream.Size().map_err(err)? as u32;
+    let reader = DataReader::CreateDataReader(&stream.GetInputStreamAt(0).map_err(err)?).map_err(err)?;
+    reader.LoadAsync(size).map_err(err)?.join().map_err(err)?;
+    let mut buf = vec![0u8; size as usize];
+    reader.ReadBytes(&mut buf).map_err(err)?;
+    static N: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let path = std::env::temp_dir().join(format!("omnipulse-speech-{}.wav", N.fetch_add(1, std::sync::atomic::Ordering::Relaxed) % 8));
+    std::fs::write(&path, buf).map_err(|e| format!("couldn't keep the speech: {e}"))?;
+    Ok(path)
+}
+#[cfg(not(windows))]
+fn speech_file(_text: &str, _voice: &str, _rate: f64) -> Result<std::path::PathBuf, String> { Err("speech is Windows' only, for now".into()) }
+
 thread_local! {
     /// the sounds playing (a chatbot's Play a Sound): each kept going until it's over
     static SOUNDS: RefCell<Vec<(Rc<std::cell::Cell<bool>>, slint::Timer)>> = const { RefCell::new(Vec::new()) };
@@ -10167,6 +10199,28 @@ fn plugin_app(shared: &Shared, plugin: &str, ask: serde_json::Value, answer: Box
                 }.await;
                 send(match got { Ok(()) => serde_json::json!({ "ok": true }), Err(e) => serde_json::json!({ "error": e }) });
             });
+        }
+        // (words said out loud: Windows' own speech, made into a sound file, then played as a sound is)
+        "speak" => {
+            if plugin != "chatbot" { return send(serde_json::json!({ "error": "only OmniPulse's chatbot can" })); }
+            let (text, voice) = (arg(0), arg(1));
+            let rate = args.get(2).and_then(|v| v.as_f64()).unwrap_or(1.0);
+            let vol = args.get(3).and_then(|v| v.as_f64()).unwrap_or(80.0);
+            std::thread::spawn(move || {
+                let made = speech_file(&text, &voice, rate);
+                let _ = slint::invoke_from_event_loop(move || send(match made.and_then(|p| play_sound(&p.to_string_lossy(), (vol / 100.0).clamp(0.0, 1.0) as f32)) { Ok(()) => serde_json::json!({ "ok": true }), Err(e) => serde_json::json!({ "error": e }) }));
+            });
+        }
+        // (something shown on stream: the widget's, over its alerts; a picture or video of yours copied for it)
+        "overlay" => {
+            if plugin != "chatbot" { return send(serde_json::json!({ "error": "only OmniPulse's chatbot can" })); }
+            let mut fields = args.first().and_then(|v| v.as_object()).cloned().unwrap_or_default();
+            for key in ["image", "video"] {
+                let v = fields.get(key).and_then(|v| v.as_str()).unwrap_or("").to_string();
+                if v.is_empty() || v.starts_with("https://") || v.starts_with("http://") { continue; }
+                match omnipulse_core::widget::overlay_media(&v, key == "video") { Ok(u) => { fields.insert(key.into(), serde_json::json!(u)); } Err(e) => return send(serde_json::json!({ "error": e })) }
+            }
+            send(match omnipulse_core::widget::overlay_push(&fields) { Ok(_) => serde_json::json!({ "ok": true }), Err(e) => serde_json::json!({ "error": e }) });
         }
         // (a sound file of yours, over the music: a chatbot's Play a Sound)
         "sound" => {
@@ -12770,5 +12824,16 @@ mod link_tests {
     fn invite_pages_as_app_links() {
         assert_eq!(super::app_link("https://relay.test/jam/abcd1234?k=Xy9", "https://d"), "omnipulse://jam/abcd1234?k=Xy9&relay=https%3A%2F%2Frelay.test");
         assert_eq!(super::app_link("omnipulse://jam/abcd1234?k=1", "https://d"), "omnipulse://jam/abcd1234?k=1");
+    }
+}
+
+#[cfg(all(test, windows))]
+mod speech_tests {
+    // (Windows' speech: words made into a sound file, never played here)
+    #[test]
+    fn speech_makes_a_sound_file() {
+        let p = super::speech_file("Thanks for the follow", "", 1.2).unwrap();
+        let b = std::fs::read(&p).unwrap();
+        assert!(b.len() > 10_000 && &b[..4] == b"RIFF" && &b[8..12] == b"WAVE", "{} bytes", b.len());
     }
 }

@@ -581,6 +581,8 @@ async function step(st, ctx, depth) {
     }
     case "wait": await new Promise((ok) => setTimeout(ok, Math.min(3600, Math.max(0, num(f("seconds")))) * 1000)); break;
     case "sound": await OmniPulse.app.sound(f("file").trim().replace(/^"|"$/g, ""), num(f("volume"))); break;
+    case "speak": await OmniPulse.app.speak(f("text").slice(0, 500), f("voice").trim(), Math.min(3, Math.max(0.5, num(f("rate")) || 1)), num(f("volume"))); break;
+    case "overlay": await OmniPulse.app.overlay({ text: f("text").slice(0, 300), image: f("image").trim().replace(/^"|"$/g, ""), video: f("video").trim().replace(/^"|"$/g, ""), place: st.place || "middle", seconds: Math.min(120, Math.max(1, num(f("seconds")) || 6)) }); break;
     case "if": return test(f("left"), st.test, f("right"));
     case "math": ctx[name(st.into, "answer")] = String(maths(f("expr"))); break;
     case "randomnum": {

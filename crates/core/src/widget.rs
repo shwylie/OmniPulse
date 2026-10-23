@@ -86,6 +86,47 @@ fn query_map(q: &str) -> serde_json::Map<String, Value> {
 /// An alert, from a web request's fields or the app's Test button: { type, user, amount, message }.
 /// The type is one of ALERT_KINDS or a custom alert's trigger name (set up in the app); unknown
 /// ones are refused, so a typo shows up in the reply.
+/// Something shown on stream (the chatbot's Show on Stream): its text, picture, video, where and how long,
+/// sent to the widget with the alerts (its type "show": the widget shows it over them, not as one)
+pub fn overlay_push(fields: &serde_json::Map<String, Value>) -> Result<Value, String> {
+    let get = |k: &str| fields.get(k).map(|v| v.as_str().map(String::from).unwrap_or_else(|| v.to_string())).unwrap_or_default();
+    let media = |k: &str| Some(get(k)).filter(|u| (u.starts_with("https://") || u.starts_with("http://") || u.starts_with("/overlay/")) && u.len() <= 500).unwrap_or_default();
+    let (text, image, video) = (get("text").chars().take(300).collect::<String>(), media("image"), media("video"));
+    if text.trim().is_empty() && image.is_empty() && video.is_empty() { return Err("nothing to show: give it some text, a picture or a video".into()); }
+    let place = match get("place").as_str() { "top" => "top", "bottom" => "bottom", _ => "middle" };
+    let a = json!({
+        "id": ALERT_ID.fetch_add(1, Ordering::SeqCst) + 1,
+        "ts": crate::now_secs() * 1000,
+        "type": "show",
+        "text": text, "image": image, "video": video, "place": place,
+        "seconds": fields.get("seconds").and_then(|v| v.as_f64()).unwrap_or(6.0).clamp(1.0, 120.0),
+    });
+    let mut q = ALERTS.lock().unwrap();
+    q.push_back(a.clone());
+    while q.len() > ALERTS_KEPT { q.pop_front(); }
+    Ok(a)
+}
+
+/// A picture or video of yours, for something shown on stream: copied into the widget's own folder (by what's
+/// in it, so it's copied once), and its address on the widget's server
+pub fn overlay_media(path: &str, video: bool) -> Result<String, String> {
+    let p = std::path::Path::new(path);
+    let ext = p.extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
+    let ok: &[&str] = if video { &["mp4", "webm"] } else { &["png", "jpg", "jpeg", "gif", "webp"] };
+    if !ok.contains(&ext.as_str()) { return Err(format!("that isn't a {} ({})", if video { "video" } else { "picture" }, ok.join(", "))); }
+    let bytes = std::fs::read(p).map_err(|e| format!("couldn't read {path}: {e}"))?;
+    if bytes.len() > 200 * 1024 * 1024 { return Err("that file's too big (200 MB at most)".into()); }
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    bytes.hash(&mut h);
+    let name = format!("{:016x}.{ext}", h.finish());
+    let dir = crate::data_dir()?.join("overlay-media");
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let to = dir.join(&name);
+    if !to.exists() { std::fs::write(&to, &bytes).map_err(|e| e.to_string())?; }
+    Ok(format!("/overlay/{name}"))
+}
+
 pub fn alert_push(fields: &serde_json::Map<String, Value>) -> Result<Value, String> {
     let get = |k: &str| fields.get(k).map(|v| v.as_str().map(String::from).unwrap_or_else(|| v.to_string())).unwrap_or_default();
     let kind = get("type").trim().to_lowercase();
@@ -210,6 +251,8 @@ fn media_type(p: &std::path::Path) -> &'static str {
         Some("png") => "image/png",
         Some("webp") => "image/webp",
         Some("jpg") | Some("jpeg") => "image/jpeg",
+        Some("mp4") => "video/mp4",
+        Some("webm") => "video/webm",
         _ => "audio/mpeg",
     }
 }
@@ -262,6 +305,16 @@ pub fn widget_serve(listener: TcpListener, gen: u64) {
                             o.insert("alerts".to_string(), Value::Array(ALERTS.lock().unwrap().iter().cloned().collect()));
                         }
                         reply(&mut stream, "200 OK", "application/json", v.to_string().as_bytes());
+                    }
+                    // (something shown on stream: a picture or video copied for it, by its name: never a place outside)
+                    p if p.starts_with("/overlay/") => {
+                        let name = &p[9..];
+                        let safe = !name.is_empty() && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '.') && !name.starts_with('.');
+                        let file = crate::data_dir().ok().map(|d| d.join("overlay-media").join(name)).filter(|f| safe && f.is_file());
+                        match file.and_then(|f| std::fs::read(&f).ok().map(|b| (b, f))) {
+                            Some((b, f)) => reply(&mut stream, "200 OK", media_type(&f), &b),
+                            None => reply(&mut stream, "404 Not Found", "text/plain", b"Not found."),
+                        }
                     }
                     "/lyrics" | "/lyrics.html" => {
                         reply(&mut stream, "200 OK", "text/html; charset=utf-8", LYRICS_HTML.as_bytes());
@@ -381,5 +434,19 @@ mod tests {
         widget_update(json!({ "alerts_cfg": { "custom": ["hydrate"] } }));
         assert_eq!(alert_push(&query_map("type=Hydrate&user=Me")).unwrap()["type"], "hydrate");
         assert!(kind_ok("hydrate_2") && !kind_ok("../x") && !kind_ok("Ab"));
+    }
+}
+
+#[cfg(test)]
+mod overlay_tests {
+    use super::*;
+    #[test]
+    fn what_is_shown_on_stream_goes_with_the_alerts() {
+        let m = |v: Value| v.as_object().unwrap().clone();
+        assert!(overlay_push(&m(json!({ "text": " " }))).is_err());
+        let a = overlay_push(&m(json!({ "text": "Hi", "image": "file:///C:/x.png", "video": "/overlay/ab.mp4", "place": "top", "seconds": 500 }))).unwrap();
+        assert_eq!((a["type"].as_str(), a["image"].as_str(), a["video"].as_str(), a["place"].as_str(), a["seconds"].as_f64()), (Some("show"), Some(""), Some("/overlay/ab.mp4"), Some("top"), Some(120.0)));
+        assert!(ALERTS.lock().unwrap().iter().any(|x| x["id"] == a["id"]));
+        assert!(overlay_media("C:/Windows/notepad.exe", false).is_err());
     }
 }

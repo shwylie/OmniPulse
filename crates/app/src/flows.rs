@@ -62,6 +62,7 @@ const BAN_DO: &[(&str, &str)] = &[("ban", "Ban"), ("unban", "Unban")];
 const ROLE_DO: &[(&str, &str)] = &[("vip", "Make Them a VIP"), ("unvip", "Take Their VIP Away"), ("mod", "Make Them a Moderator"), ("unmod", "Take Their Moderator Away")];
 const RAID_DO: &[(&str, &str)] = &[("start", "Start It"), ("cancel", "Cancel It")];
 const MEDIA_DO: &[(&str, &str)] = &[("play", "Play"), ("pause", "Pause"), ("restart", "Restart"), ("stop", "Stop"), ("next", "Next"), ("previous", "Previous")];
+const PLACES: &[(&str, &str)] = &[("top", "At the Top"), ("middle", "In the Middle"), ("bottom", "At the Bottom")];
 const START_STOP: &[(&str, &str)] = &[("start", "Start"), ("stop", "Stop"), ("toggle", "Start or Stop")];
 const SHOW_HIDE: &[(&str, &str)] = &[("show", "Show"), ("hide", "Hide"), ("toggle", "Show or Hide")];
 const MUTE: &[(&str, &str)] = &[("mute", "Mute"), ("unmute", "Unmute"), ("toggle", "Mute or Unmute")];
@@ -173,6 +174,19 @@ pub const STEPS: &[Kind] = &[
     ] },
     Kind { id: "userinfo", label: "Look Up the Viewer", note: "Twitch: gives the steps after it %followage%, %followdate%, %accountage%, %accountdate%, %subtier% (empty if not subscribed) and %displayname%.", fields: &[
         f("who", "Viewer", "text", "%user%", ""),
+    ] },
+    Kind { id: "speak", label: "Say It Out Loud", note: "Text to speech, in one of Windows' own voices (Settings > Time & Language > Speech has more), on OmniPulse's speakers.", fields: &[
+        f("text", "Words", "text", "%user% says %rawInput%", "500 letters at most."),
+        f("voice", "Voice", "text", "", "A voice's name, or part of it (David, Zira...). Empty: Windows' own."),
+        f("rate", "Speed", "number", "1", "0.5 (slow) to 3 (fast)."),
+        f("volume", "Volume", "number", "80", "0 to 100."),
+    ] },
+    Kind { id: "overlay", label: "Show on Stream", note: "On the Stream Widget, over its alerts (in OBS: its Alerts Address, as a Browser source the size of your canvas, is best).", fields: &[
+        f("text", "Text", "text", "%user% redeemed it!", ""),
+        f("image", "Picture", "text", "", "A web address, or a picture's place on this PC (png, jpg, gif, webp). Empty: none."),
+        f("video", "Video", "text", "", "A web address, or a video's place on this PC (mp4, webm). Empty: none."),
+        pick("place", "", PLACES, "middle", ""),
+        f("seconds", "For", "number", "6", "Seconds (a video: its length, unless this is shorter)."),
     ] },
     Kind { id: "wait", label: "Wait", note: "", fields: &[f("seconds", "Seconds", "number", "5", "")] },
     Kind { id: "if", label: "Only Go On If", note: "Otherwise the action stops here.", fields: &[

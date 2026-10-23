@@ -47,6 +47,13 @@
   #track { height: 0.25rem; margin-top: 0.7rem; border-radius: 0.25rem; background: rgba(255, 255, 255, 0.22); overflow: hidden; }
   #bar { height: 100%; width: 0; border-radius: 0.25rem; background: rgba(255, 255, 255, 0.92); transition: opacity 0.3s; }
   #card.paused #bar { opacity: 0.5; }
+  /* something shown on stream (the chatbot's Show on Stream): over everything, at the top, middle or bottom */
+  #shows { position: fixed; inset: 0; pointer-events: none; z-index: 50; display: flex; flex-direction: column; align-items: center; }
+  .show { position: absolute; left: 0; right: 0; display: flex; flex-direction: column; align-items: center; gap: 0.6rem; opacity: 0; transition: opacity 0.4s; }
+  .show.on { opacity: 1; }
+  .show.top { top: 4%; } .show.middle { top: 50%; transform: translateY(-50%); } .show.bottom { bottom: 4%; }
+  .show img, .show video { max-width: 60vw; max-height: 60vh; border-radius: 0.6rem; }
+  .show p { margin: 0; padding: 0.4rem 1rem; font: 800 calc(2.2rem * var(--ts, 1)) / 1.2 "Segoe UI", system-ui, sans-serif; color: #fff; text-shadow: 0 0.15rem 0.6rem rgba(0, 0, 0, 0.75); text-align: center; max-width: 80vw; }
   /* a Seamless Mix under way: the one going out's cover, a crossfader, the one coming in's */
   #xf { display: none; align-items: center; gap: 0.4rem; margin-top: 0.3rem; font-size: calc(0.72rem * var(--ts, 1)); opacity: 0.92; }
   #card.xf #xf { display: flex; }
@@ -550,7 +557,25 @@
     return acfg.on && (a.test || (acfg.order || []).includes(a.type));
   }
 
+  // Something shown on stream (not an alert: never waiting for one, never in their order)
+  function showOver(a) {
+    let box = document.getElementById("shows");
+    if (!box) { box = document.createElement("div"); box.id = "shows"; document.body.appendChild(box); }
+    const el = document.createElement("div");
+    el.className = "show " + (["top", "middle", "bottom"].includes(a.place) ? a.place : "middle");
+    let video = null;
+    if (a.image) { const img = document.createElement("img"); img.src = a.image; el.appendChild(img); }
+    if (a.video) { video = document.createElement("video"); video.src = a.video; video.autoplay = true; video.playsInline = true; el.appendChild(video); }
+    if (a.text) { const p = document.createElement("p"); p.textContent = a.text; el.appendChild(p); }
+    box.appendChild(el);
+    requestAnimationFrame(() => el.classList.add("on"));
+    const gone = () => { el.classList.remove("on"); setTimeout(() => el.remove(), 500); };
+    const t = setTimeout(gone, Math.max(1, Number(a.seconds) || 6) * 1000);
+    if (video) video.onended = () => { clearTimeout(t); gone(); };
+  }
+
   function alertQueue(a) {
+    if (a && a.type === "show") { if (acfg.on && !SECOND) showOver(a); return; }
     if (!alertAllowed(a)) return;
     waiting.push(a);
     if (!showing) alertNext();

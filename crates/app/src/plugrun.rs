@@ -750,6 +750,8 @@ mod tests {
                 st("ban", json!({ "who": "baddie", "reason": "spam" })),
                 st("chatmode", json!({ "mode": "slow", "seconds": 20 })),
                 st("discord", json!({ "webhook": "https://discord.com/api/webhooks/1/x", "text": "Live!" })),
+                st("speak", json!({ "text": "Hello %user%", "voice": "Zira", "rate": 9, "volume": 50 })),
+                st("overlay", json!({ "text": "Wow", "image": "\"C:/pics/a.png\"", "place": "bottom", "seconds": 4 })),
             ] },
             { "name": "Hook", "on": true, "trigger": t("web", json!({ "name": "deploy" })), "steps": [st("say", json!({ "text": "Web %user% %rawInput%", "reply": false }))] },
         ]);
@@ -783,6 +785,9 @@ mod tests {
         assert!(has("POST /helix/moderation/bans?broadcaster_id=1&moderator_id=1") && has("\"user_id\":\"99\""), "{x:#?}");
         assert!(has("PATCH /helix/chat/settings") && has("\"slow_mode_wait_time\":20"), "{x:#?}");
         assert!(asked.lock().unwrap().iter().any(|a| a["op"] == "postJson" && a["args"][1]["content"] == "Live!"));
+        // (said out loud, and shown on stream: through the app, as it wants them)
+        assert!(asked.lock().unwrap().iter().any(|a| a["op"] == "speak" && a["args"][1] == "Zira" && a["args"][2] == 3), "{:#?}", asked.lock().unwrap());
+        assert!(asked.lock().unwrap().iter().any(|a| a["op"] == "overlay" && a["args"][0]["image"] == "C:/pics/a.png" && a["args"][0]["place"] == "bottom" && a["args"][0]["seconds"] == 4));
         assert!(said("Web Tool now please"), "{:#?}", posted.lock().unwrap());
         drop(p);
         stop("chatbot");
