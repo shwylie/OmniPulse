@@ -9925,6 +9925,38 @@ fn alert_shown(shared: &Shared, kind: &str) {
     ALERT_TIMER.with(|x| *x.borrow_mut() = Some(t));
 }
 
+thread_local! {
+    /// the sounds playing (a chatbot's Play a Sound): each kept going until it's over
+    static SOUNDS: RefCell<Vec<(Rc<std::cell::Cell<bool>>, slint::Timer)>> = const { RefCell::new(Vec::new()) };
+}
+
+/// A sound file of yours played over the music, on the speakers OmniPulse plays to (at most three minutes)
+fn play_sound(path: &str, vol: f32) -> Result<(), String> {
+    let p = std::path::Path::new(path);
+    let ext = p.extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
+    if !matches!(ext.as_str(), "mp3" | "wav" | "ogg" | "flac" | "m4a" | "aac" | "opus") { return Err("that isn't a sound file (an mp3, wav, ogg or flac)".into()); }
+    if !p.is_file() { return Err(format!("there's no sound file at {path}")); }
+    let src = omnipulse_audio::Decoded::open_file(p).map_err(|e| format!("couldn't play it: {e}"))?;
+    let device = webstate::native_pref("nativeDevice").and_then(|v| v.as_str().map(String::from)).unwrap_or_default();
+    let player = Arc::new(omnipulse_audio::Engine::new(&device).map_err(|e| format!("couldn't play it: {e}"))?);
+    player.load(Box::new(src), 0.0);
+    player.set_volume(vol);
+    player.play();
+    let events = player.events();
+    let done = Rc::new(std::cell::Cell::new(false));
+    let d2 = done.clone();
+    let began = std::time::Instant::now();
+    let t = slint::Timer::default();
+    t.start(slint::TimerMode::Repeated, std::time::Duration::from_millis(250), move || {
+        let _keep = &player;
+        let over = began.elapsed() > std::time::Duration::from_secs(180) || events.as_ref().is_some_and(|rx| rx.try_iter().any(|ev| matches!(ev, omnipulse_audio::Event::Ended | omnipulse_audio::Event::Error(_))));
+        if over { player.pause(); d2.set(true); }
+    });
+    // (the ones that are over let go of, this one kept)
+    SOUNDS.with(|s| { let mut s = s.borrow_mut(); s.retain(|(d, _)| !d.get()); s.push((done, t)); });
+    Ok(())
+}
+
 /// A plugin's OmniPulse.app call (its manifest asked for "app"): the app's work done on its own thread,
 /// the answer sent back. A chatbot's requests go through the same limits and replies as the bot server's.
 fn plugin_app(shared: &Shared, plugin: &str, ask: serde_json::Value, answer: Box<dyn FnOnce(serde_json::Value) + Send>) {
@@ -9944,6 +9976,11 @@ fn plugin_app(shared: &Shared, plugin: &str, ask: serde_json::Value, answer: Box
             wrong_song(shared, std::sync::Arc::new(send), &arg(0), is_mod);
         }
         "nowPlaying" => send(omnipulse_core::requests::now_answer()),
+        // (a sound file of yours, over the music: a chatbot's Play a Sound)
+        "sound" => {
+            let vol = args.get(1).and_then(|v| v.as_f64()).unwrap_or(80.0);
+            send(match play_sound(&arg(0), (vol / 100.0).clamp(0.0, 1.0) as f32) { Ok(()) => serde_json::json!({ "ok": true }), Err(e) => serde_json::json!({ "error": e }) });
+        }
         // (the player: the next song, or play / pause)
         "control" => {
             match arg(0).as_str() { "next" => desktop_action(shared, "next"), "play" => desktop_action(shared, "play"), other => return send(serde_json::json!({ "error": format!("no {other}") })) }

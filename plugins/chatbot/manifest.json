@@ -1,7 +1,7 @@
 {
   "id": "chatbot",
   "name": "OmniPulse Chatbot",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "author": "OmniPulse",
   "description": "OmniPulse's own chatbot: song requests, alerts, your own actions (a trigger, then its steps) and OBS controls, straight from your chat, no other bot needed. Twitch for now; Kick and YouTube are on their way.",
   "main": "main.js",

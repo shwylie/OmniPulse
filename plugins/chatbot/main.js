@@ -410,6 +410,7 @@ async function step(st, ctx, depth) {
       break;
     }
     case "wait": await new Promise((ok) => setTimeout(ok, Math.min(3600, Math.max(0, num(f("seconds")))) * 1000)); break;
+    case "sound": await OmniPulse.app.sound(f("file").trim().replace(/^"|"$/g, ""), num(f("volume"))); break;
     case "if": return test(f("left"), st.test, f("right"));
     case "setvar": setVar(fill(st.name, ctx).trim(), f("value"), yes(st.per), yes(st.keep), ctx.user); break;
     case "addvar": {

@@ -109,6 +109,10 @@ pub const STEPS: &[Kind] = &[
     Kind { id: "random", label: "Send One of These", note: "", fields: &[
         f("lines", "Messages", "text", "Hi %user%! | Hello %user%! | Hey %user%!", "With | between them: one picked at random."),
     ] },
+    Kind { id: "sound", label: "Play a Sound", note: "Over the music, on OmniPulse's speakers (as your alerts' sounds are).", fields: &[
+        f("file", "Sound File", "text", "", "Its place on this PC (an mp3, wav, ogg or flac), as Explorer's Copy as Path gives it."),
+        f("volume", "Volume", "number", "80", "0 to 100."),
+    ] },
     Kind { id: "wait", label: "Wait", note: "", fields: &[f("seconds", "Seconds", "number", "5", "")] },
     Kind { id: "if", label: "Only Go On If", note: "Otherwise the action stops here.", fields: &[
         f("left", "This", "text", "%input0%", ""),
