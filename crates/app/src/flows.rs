@@ -37,7 +37,7 @@ const WHO: &[(&str, &str)] = &[("everyone", "Everyone"), ("subscribers", "Subscr
 const EVENTS: &[(&str, &str)] = &[
     ("follow", "A Follow"), ("sub", "A New Sub"), ("resub", "A Resub"), ("gift", "Gifted Subs"), ("bits", "Bits"),
     ("raid", "A Raid"), ("hypetrain", "A Hype Train"), ("poll", "A Poll"), ("reward", "A Channel Points Reward"),
-    ("firstmsg", "A Viewer's First Message"), ("online", "Going Live"), ("offline", "Going Offline"), ("adbreak", "An Ad Break"),
+    ("firstmsg", "A Viewer's First Message"), ("firstwords", "A Viewer's First Words This Stream"), ("online", "Going Live"), ("offline", "Going Offline"), ("adbreak", "An Ad Break"),
 ];
 const OBS_WHEN: &[(&str, &str)] = &[
     ("scene", "The Scene Changes"), ("streamstart", "Streaming Starts"), ("streamstop", "Streaming Stops"),
@@ -47,6 +47,11 @@ const RULES: &[(&str, &str)] = &[
     ("links", "A Link"), ("caps", "Mostly Capitals"), ("words", "A Banned Word"), ("long", "Too Long"), ("emotes", "Too Many Emotes"),
 ];
 const EXEMPT: &[(&str, &str)] = &[("none", "No One"), ("subscribers", "Subscribers"), ("vips", "VIPs"), ("mods", "Moderators")];
+const TEXT_DO: &[(&str, &str)] = &[
+    ("upper", "In Capitals"), ("lower", "In Small Letters"), ("title", "Each Word Capitalised"), ("trim", "Spaces Trimmed"),
+    ("length", "Its Length"), ("first", "Its First Word"), ("last", "Its Last Word"), ("word", "Word Number..."),
+    ("replace", "With a Word Replaced"), ("rest", "All but Its First Word"),
+];
 const START_STOP: &[(&str, &str)] = &[("start", "Start"), ("stop", "Stop"), ("toggle", "Start or Stop")];
 const SHOW_HIDE: &[(&str, &str)] = &[("show", "Show"), ("hide", "Hide"), ("toggle", "Show or Hide")];
 const MUTE: &[(&str, &str)] = &[("mute", "Mute"), ("unmute", "Unmute"), ("toggle", "Mute or Unmute")];
@@ -117,6 +122,37 @@ pub const STEPS: &[Kind] = &[
     Kind { id: "sound", label: "Play a Sound", note: "Over the music, on OmniPulse's speakers (as your alerts' sounds are).", fields: &[
         f("file", "Sound File", "text", "", "Its place on this PC (an mp3, wav, ogg or flac), as Explorer's Copy as Path gives it."),
         f("volume", "Volume", "number", "80", "0 to 100."),
+    ] },
+    Kind { id: "ifblock", label: "If", note: "The steps after it run only if this is so, up to Otherwise or End If.", fields: &[
+        f("left", "This", "text", "%input0%", ""),
+        pick("test", "", TESTS, "notempty", ""),
+        f("right", "That", "text", "", ""),
+    ] },
+    Kind { id: "else", label: "Otherwise", note: "The steps after it run when the If above isn't so, up to End If.", fields: &[] },
+    Kind { id: "endif", label: "End If", note: "", fields: &[] },
+    Kind { id: "repeat", label: "Repeat", note: "The steps after it, up to End Repeat, again and again (%loop% is which time it is).", fields: &[f("times", "Times", "number", "3", "At most 100.")] },
+    Kind { id: "endrepeat", label: "End Repeat", note: "", fields: &[] },
+    Kind { id: "randomblock", label: "Pick One at Random", note: "Only one of the steps after it runs, picked at random, up to End Pick.", fields: &[] },
+    Kind { id: "endrandom", label: "End Pick", note: "", fields: &[] },
+    Kind { id: "stop", label: "Stop Here", note: "The action ends: nothing after this runs.", fields: &[] },
+    Kind { id: "math", label: "Do Some Maths", note: "+ - * / % ^ and brackets, round(), floor(), ceil(), abs(), min(), max(), random(1, 6). Its answer for the steps after it.", fields: &[
+        f("expr", "Sum", "text", "%var:count% + 1", ""),
+        f("into", "As", "text", "answer", "The variable it's kept in: %answer%, or whatever you name it."),
+    ] },
+    Kind { id: "randomnum", label: "A Random Number", note: "", fields: &[
+        f("min", "From", "number", "1", ""),
+        f("max", "To", "number", "100", ""),
+        f("into", "As", "text", "number", "%number%, or whatever you name it."),
+    ] },
+    Kind { id: "text", label: "Change Text", note: "", fields: &[
+        f("value", "Text", "text", "%rawInput%", ""),
+        pick("do", "Make It", TEXT_DO, "upper", ""),
+        f("n", "Word Number / Find", "text", "1", "For Word Number: which (1 is the first). For Replace: the word to find."),
+        f("with", "Replace With", "text", "", "For Replace."),
+        f("into", "As", "text", "text", "%text%, or whatever you name it."),
+    ] },
+    Kind { id: "userinfo", label: "Look Up the Viewer", note: "Twitch: gives the steps after it %followage%, %followdate%, %accountage%, %accountdate%, %subtier% (empty if not subscribed) and %displayname%.", fields: &[
+        f("who", "Viewer", "text", "%user%", ""),
     ] },
     Kind { id: "wait", label: "Wait", note: "", fields: &[f("seconds", "Seconds", "number", "5", "")] },
     Kind { id: "if", label: "Only Go On If", note: "Otherwise the action stops here.", fields: &[

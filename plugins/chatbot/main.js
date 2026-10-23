@@ -176,6 +176,11 @@ async function onChat(m) {
   const id = m.tags.id;
   seen[(m.nick || user).toLowerCase()] = Date.now();
   onActions(m, text, cmd, args, user, id);
+  const firstKey = platform + "|" + (m.nick || user).toLowerCase();
+  if (!spoken.has(firstKey)) {
+    spoken.add(firstKey);
+    fire("firstwords", Object.assign({ user, userId: m.tags["user-id"] || "", message: text, rawInput: text, msgId: id, platform, isMod }, words(text)));
+  }
   if (platform === "twitch" && m.tags["first-msg"] === "1") onEvent("first.message", { user_name: user, user_id: m.tags["user-id"] || "", message: { text }, msg_id: id });
   if (!text.startsWith("!")) return;
   // (a second from the same viewer: each command at most once every 3 s per viewer)
@@ -283,7 +288,8 @@ function exempt(who, r) {
 
 function onActions(m, text, cmd, args, user, msgId) {
   const r = rank(m.tags);
-  const base = { user, userId: m.tags["user-id"] || "", message: text, msgId, platform: m.platform || "twitch", isMod: r.mod };
+  const months = /subscriber\/(\d+)/.exec(m.tags["badge-info"] || "");
+  const base = { user, userId: m.tags["user-id"] || "", message: text, msgId, platform: m.platform || "twitch", isMod: r.mod, submonths: months ? months[1] : "" };
   for (const a of live) {
     const t = a.trigger;
     if (!onPlatform(t, base.platform)) continue;
@@ -336,7 +342,7 @@ function fire(ev, ctx) {
 function onEvent(type, e) {
   const ev = EVENT_OF[type];
   if (!ev) return;
-  if (ev === "online") isLive = true;
+  if (ev === "online") { isLive = true; spoken.clear(); }
   if (ev === "offline") isLive = false;
   const a = asAlert(type, e) || {};
   if (ev === "sub" && e.is_gift) return;
@@ -412,19 +418,128 @@ function test(left, op, right) {
   }
 }
 
-// An action's steps, in order (one that says stop, stops it)
-async function run(a, ctx, depth) {
+// An action's steps as blocks: If ... Otherwise ... End If, Repeat ... End Repeat, Pick One at Random ...
+// End Pick (one left open runs to the end)
+const OPENS = { ifblock: "endif", repeat: "endrepeat", randomblock: "endrandom" };
+function blocks(steps, from, until) {
+  const out = [];
+  let i = from;
+  while (i < steps.length) {
+    const st = steps[i];
+    if (until && (st.type === until || (until === "endif" && st.type === "else"))) return { list: out, at: i };
+    if (OPENS[st.type]) {
+      const inner = blocks(steps, i + 1, OPENS[st.type]);
+      const node = { st, then: inner.list, otherwise: [] };
+      i = inner.at;
+      if (st.type === "ifblock" && steps[i] && steps[i].type === "else") {
+        const rest = blocks(steps, i + 1, "endif");
+        node.otherwise = rest.list.filter((x) => x.st.type !== "else");
+        i = rest.at;
+      }
+      out.push(node);
+      i++;
+      continue;
+    }
+    if (!["else", "endif", "endrepeat", "endrandom"].includes(st.type)) out.push({ st });
+    i++;
+  }
+  return { list: out, at: i };
+}
+
+// An action's steps, in order (a step that says stop, stops it). Queued (One at a Time): after the one
+// before it's finished
+let queueTail = Promise.resolve();
+function run(a, ctx, depth) {
+  if (a.queued && !depth) {
+    const go = queueTail.then(() => runNow(a, ctx, 0));
+    queueTail = go.catch(() => {});
+    return go;
+  }
+  return runNow(a, ctx, depth);
+}
+
+async function runNow(a, ctx, depth) {
   depth = depth || 0;
   if (depth > 5) return;
-  for (const st of a.steps || []) {
-    try {
-      if ((await step(st, ctx, depth)) === false) return;
-    } catch (e) {
-      OmniPulse.log(a.name + ": " + e.message);
-      OmniPulse.app.say(a.name + ": " + e.message).catch(() => {});
-      return;
-    }
+  try {
+    await runBlocks(blocks(a.steps || [], 0, null).list, ctx, depth);
+  } catch (e) {
+    if (e === STOP) return;
+    OmniPulse.log(a.name + ": " + e.message);
+    OmniPulse.app.say(a.name + ": " + e.message).catch(() => {});
   }
+}
+
+const STOP = { stop: true };
+async function runBlocks(list, ctx, depth) {
+  for (const n of list) {
+    const st = n.st;
+    const f = (k) => fill(st[k], ctx);
+    if (st.type === "ifblock") { await runBlocks(test(f("left"), st.test, f("right")) ? n.then : n.otherwise, ctx, depth); continue; }
+    if (st.type === "repeat") {
+      const times = Math.min(100, Math.max(0, Math.floor(num(f("times")))));
+      for (let k = 1; k <= times; k++) { ctx.loop = String(k); await runBlocks(n.then, ctx, depth); }
+      continue;
+    }
+    if (st.type === "randomblock") { if (n.then.length) await runBlocks([n.then[Math.floor(Math.random() * n.then.length)]], ctx, depth); continue; }
+    if (st.type === "stop") throw STOP;
+    if ((await step(st, ctx, depth)) === false) throw STOP;
+  }
+}
+
+// A step's "As": the variable its answer's kept in (for this run), %name%
+function name(v, dflt) { return String(v || dflt).replace(/%/g, "").trim() || dflt; }
+
+// A sum, worked out safely (numbers, + - * / % ^, brackets, and a few functions): never run as code
+function maths(text) {
+  const t = String(text).replace(/\s+/g, "");
+  let i = 0;
+  const FN = { round: Math.round, floor: Math.floor, ceil: Math.ceil, abs: Math.abs, sqrt: Math.sqrt, min: Math.min, max: Math.max,
+    random: (a, b) => { const lo = Math.ceil(num(a)), hi = Math.floor(b === undefined ? num(a) : num(b)); return b === undefined ? Math.floor(Math.random() * lo) + 1 : lo + Math.floor(Math.random() * (hi - lo + 1)); } };
+  const fail = () => { throw new Error("that sum (" + text + ") isn't one I can do"); };
+  const atom = () => {
+    if (t[i] === "(") { i++; const v = sum(); if (t[i] !== ")") fail(); i++; return v; }
+    if (t[i] === "-") { i++; return -atom(); }
+    if (t[i] === "+") { i++; return atom(); }
+    const name = /^[a-z]+/i.exec(t.slice(i));
+    if (name) {
+      i += name[0].length;
+      const fn = FN[name[0].toLowerCase()];
+      if (!fn || t[i] !== "(") fail();
+      i++;
+      const args = [];
+      if (t[i] !== ")") { args.push(sum()); while (t[i] === ",") { i++; args.push(sum()); } }
+      if (t[i] !== ")") fail();
+      i++;
+      return fn(...args);
+    }
+    const n = /^\d*\.?\d+(e[+-]?\d+)?/i.exec(t.slice(i));
+    if (!n) fail();
+    i += n[0].length;
+    return parseFloat(n[0]);
+  };
+  const power = () => { const b = atom(); if (t[i] === "^") { i++; return Math.pow(b, power()); } return b; };
+  const product = () => { let v = power(); while (t[i] === "*" || t[i] === "/" || t[i] === "%") { const o = t[i++]; const r = power(); v = o === "*" ? v * r : o === "/" ? v / r : v % r; } return v; };
+  const sum = () => { let v = product(); while (t[i] === "+" || t[i] === "-") { const o = t[i++]; const r = product(); v = o === "+" ? v + r : v - r; } return v; };
+  const v = sum();
+  if (i !== t.length || !isFinite(v)) fail();
+  return Math.round(v * 1e6) / 1e6;
+}
+
+// How long ago a date was, in words ("2 years, 3 months")
+function since(date) {
+  const d = new Date(date);
+  if (isNaN(d)) return "";
+  const now = new Date();
+  let months = (now.getFullYear() - d.getFullYear()) * 12 + (now.getMonth() - d.getMonth());
+  if (now.getDate() < d.getDate()) months--;
+  const years = Math.floor(months / 12);
+  months %= 12;
+  const days = Math.floor((now - d) / 86400000);
+  const n = (k, w) => k + " " + w + (k === 1 ? "" : "s");
+  if (years > 0) return n(years, "year") + (months ? ", " + n(months, "month") : "");
+  if (months > 0) return n(months, "month");
+  return n(Math.max(0, days), "day");
 }
 
 async function step(st, ctx, depth) {
@@ -444,6 +559,37 @@ async function step(st, ctx, depth) {
     case "wait": await new Promise((ok) => setTimeout(ok, Math.min(3600, Math.max(0, num(f("seconds")))) * 1000)); break;
     case "sound": await OmniPulse.app.sound(f("file").trim().replace(/^"|"$/g, ""), num(f("volume"))); break;
     case "if": return test(f("left"), st.test, f("right"));
+    case "math": ctx[name(st.into, "answer")] = String(maths(f("expr"))); break;
+    case "randomnum": {
+      const lo = Math.ceil(num(f("min"))), hi = Math.floor(num(f("max")));
+      ctx[name(st.into, "number")] = String(hi < lo ? lo : lo + Math.floor(Math.random() * (hi - lo + 1)));
+      break;
+    }
+    case "text": {
+      const v = f("value"), w = v.trim().split(/\s+/).filter(Boolean);
+      const out = { upper: v.toUpperCase(), lower: v.toLowerCase(), title: v.toLowerCase().replace(/(^|\s)\S/g, (c) => c.toUpperCase()), trim: v.trim(),
+        length: String(v.length), first: w[0] || "", last: w[w.length - 1] || "", word: w[Math.max(0, Math.floor(num(f("n"))) - 1)] || "",
+        replace: f("n") ? v.split(f("n")).join(f("with")) : v, rest: w.slice(1).join(" ") }[st.do || "upper"];
+      ctx[name(st.into, "text")] = out === undefined ? v : out;
+      break;
+    }
+    case "userinfo": {
+      if (onKick || ctx.platform === "kick") { OmniPulse.log("Look Up the Viewer: Twitch's, not Kick's yet"); break; }
+      const login = f("who").replace("@", "").trim().toLowerCase();
+      if (!login) break;
+      const u = (await helix("GET", "users?login=" + encodeURIComponent(login))).data || [];
+      if (!u[0]) throw new Error("there's no Twitch account called " + login);
+      ctx.displayname = u[0].display_name || login;
+      ctx.accountdate = String(u[0].created_at || "").slice(0, 10);
+      ctx.accountage = since(u[0].created_at);
+      const fo = ((await helix("GET", "channels/followers?broadcaster_id=" + S().userId + "&user_id=" + u[0].id)).data || [])[0];
+      ctx.followdate = fo ? String(fo.followed_at || "").slice(0, 10) : "";
+      ctx.followage = fo ? since(fo.followed_at) : "";
+      let sub = null;
+      try { sub = ((await helix("GET", "subscriptions?broadcaster_id=" + S().userId + "&user_id=" + u[0].id)).data || [])[0]; } catch (e) { sub = null; }
+      ctx.subtier = sub ? tierName(sub.tier) : "";
+      break;
+    }
     case "setvar": setVar(fill(st.name, ctx).trim(), f("value"), yes(st.per), yes(st.keep), ctx.user); break;
     case "addvar": {
       const n = fill(st.name, ctx).trim();
@@ -923,6 +1069,8 @@ async function kickConnect() {
 }
 
 const KICK_SEEN = {};
+// (who's spoken this stream: their first words; begun again as you go live)
+const spoken = new Set();
 // What Kick sends: its chat as ours (a Twitch line's shape, its platform Kick), its events as ours
 function onKick(event, d) {
   const ev = event.replace(/^App\\Events\\/, "");
@@ -974,7 +1122,7 @@ function onKick(event, d) {
       go("follow", { user });
       return;
     }
-    case "StreamerIsLive": go("online", {}); return;
+    case "StreamerIsLive": spoken.clear(); go("online", {}); return;
     case "StopStreamBroadcast": go("offline", {}); return;
   }
   // (one Kick sends that OmniPulse hasn't a use for yet: noted once, to add later)

@@ -92,7 +92,7 @@ export struct LoadStep { plat: string, name: string, done: bool }
 /// toggle; a select's choices and which is picked)
 export struct FlowField { key: string, label: string, note: string, kind: string, value: string, options: [string], at: int }
 /// A trigger or a step: which kind it is (of the page's list of them), what it says, what it asks for
-export struct FlowNode { kind-at: int, note: string, fields: [FlowField] }
+export struct FlowNode { kind-at: int, note: string, fields: [FlowField], depth: int }
 /// An action in the page's list: its name, what starts it and how many steps, on or off
 export struct FlowItem { name: string, summary: string, on: bool }
 /// A slice of the Ring visualiser: its outline, and where it is from the foot (0, the bass) to the top (1)
@@ -1967,6 +1967,8 @@ export component AppWindow inherits Window {
     in property <int> flow-sel: -1;
     in property <string> flow-name;
     in property <bool> flow-on;
+    // (One at a Time: its runs queued, each after the one before it)
+    in property <bool> flow-queued;
     in property <FlowNode> flow-trigger;
     in property <[FlowNode]> flow-steps;
     in property <[string]> flow-trigger-types;
@@ -4410,6 +4412,7 @@ export component AppWindow inherits Window {
                                             fnti := TextInput { x: 12px; width: parent.width - 24px; height: parent.height; vertical-alignment: center; color: Theme.text; font-size: 16px; font-weight: 700; single-line: true; text: root.flow-name; edited => { root.flow-name-edited(self.text); } }
                                         }
                                         Toggle { checked: root.flow-on; y: (parent.height - self.height) / 2; toggled => { root.flow-on-toggled(self.checked); } }
+                                        Pill { label: "One at a Time"; on: root.flow-queued; tip: "Its runs queued, each after the one before it's done (as Streamer.bot's queues): alerts that never overlap"; y: (parent.height - self.height) / 2; clicked => { root.flow-act("queued"); } }
                                         Pill { label: "Run Now"; tip: "Its steps, now, as if you'd started it"; y: (parent.height - self.height) / 2; clicked => { root.flow-act("run"); } }
                                         Pill { label: "Copy"; tip: "Another action like this one"; y: (parent.height - self.height) / 2; clicked => { root.flow-act("copy"); } }
                                         Pill { label: "Delete"; y: (parent.height - self.height) / 2; clicked => { root.flow-act("delete"); } }
@@ -4426,8 +4429,12 @@ export component AppWindow inherits Window {
                                         picked(i, k) => { root.flow-field(-1, i, "\u{2}" + k); }
                                     }
                                     for st[i] in root.flow-steps: VerticalLayout {
-                                        FlowLink { }
+                                        FlowLink { x: st.depth * 28px; }
+                                        // (inside an If, a Repeat or a Pick: in under it)
+                                        HorizontalLayout {
+                                        Rectangle { width: st.depth * 28px; }
                                         FlowCard {
+                                            horizontal-stretch: 1;
                                             badge: i + 1;
                                             types: root.flow-step-types;
                                             type-at: st.kind-at;
@@ -4441,6 +4448,7 @@ export component AppWindow inherits Window {
                                             up => { root.flow-step-move(i, -1); }
                                             down => { root.flow-step-move(i, 1); }
                                             remove => { root.flow-step-move(i, 0); }
+                                        }
                                         }
                                     }
                                     FlowLink { }

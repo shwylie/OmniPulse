@@ -4350,7 +4350,7 @@ fn flows_open(shared: &Shared) {
 fn flow_node(list: &'static [flows::Kind], v: &serde_json::Value) -> FlowNode {
     let id = v["type"].as_str().unwrap_or("");
     let at = list.iter().position(|k| k.id == id).map(|i| i as i32).unwrap_or(-1);
-    let Some(k) = flows::kind_of(list, id) else { return FlowNode { kind_at: at, note: "".into(), fields: ModelRc::default() } };
+    let Some(k) = flows::kind_of(list, id) else { return FlowNode { kind_at: at, note: "".into(), fields: ModelRc::default(), depth: 0 } };
     let fields: Vec<FlowField> = k.fields.iter().map(|fl| {
         let now = &v[fl.key];
         let value = match now { serde_json::Value::String(s) => s.clone(), serde_json::Value::Bool(b) => b.to_string(), serde_json::Value::Null => fl.default.to_string(), serde_json::Value::Number(n) => n.as_f64().map(|x| if x.fract() == 0.0 { format!("{}", x as i64) } else { x.to_string() }).unwrap_or_default(), x => x.to_string() };
@@ -4358,7 +4358,7 @@ fn flow_node(list: &'static [flows::Kind], v: &serde_json::Value) -> FlowNode {
         let at = fl.options.iter().position(|o| o.0 == value).map(|i| i as i32).unwrap_or(0);
         FlowField { key: fl.key.into(), label: fl.label.into(), note: fl.note.into(), kind: fl.kind.into(), value: value.into(), options: ModelRc::from(Rc::new(VecModel::from(options))), at }
     }).collect();
-    FlowNode { kind_at: at, note: k.note.into(), fields: ModelRc::from(Rc::new(VecModel::from(fields))) }
+    FlowNode { kind_at: at, note: k.note.into(), fields: ModelRc::from(Rc::new(VecModel::from(fields))), depth: 0 }
 }
 
 fn flow_item(a: &serde_json::Value) -> FlowItem {
@@ -4374,8 +4374,18 @@ fn flows_paint(shared: &Shared) {
     let Some(a) = (sel >= 0).then(|| list.get(sel as usize)).flatten() else { return };
     ui.set_flow_name(a["name"].as_str().unwrap_or("").into());
     ui.set_flow_on(a["on"].as_bool() != Some(false));
+    ui.set_flow_queued(a["queued"].as_bool() == Some(true));
     ui.set_flow_trigger(flow_node(flows::TRIGGERS, &a["trigger"]));
-    let steps: Vec<FlowNode> = a["steps"].as_array().into_iter().flatten().map(|s| flow_node(flows::STEPS, s)).collect();
+    // (each step in under the If, Repeat or Pick it's in: its Otherwise and its end level with its start)
+    let mut depth = 0i32;
+    let steps: Vec<FlowNode> = a["steps"].as_array().into_iter().flatten().map(|s| {
+        let t = s["type"].as_str().unwrap_or("");
+        if matches!(t, "endif" | "endrepeat" | "endrandom" | "else") { depth = (depth - 1).max(0); }
+        let mut n = flow_node(flows::STEPS, s);
+        n.depth = depth;
+        if matches!(t, "ifblock" | "repeat" | "randomblock" | "else") { depth += 1; }
+        n
+    }).collect();
     ui.set_flow_steps(ModelRc::from(Rc::new(VecModel::from(steps))));
 }
 
@@ -4518,6 +4528,7 @@ fn flows_wire(ui: &AppWindow, shared: &Shared) {
                 flows_save(&s);
             }
             "backup" => flows_backup(&s),
+            "queued" => { flow_change(&s, |a| { let on = a["queued"].as_bool() != Some(true); a["queued"] = serde_json::json!(on); }); flows_paint(&s); }
             "restore" => {
                 let Some(path) = rfd::FileDialog::new().set_title("A chatbot backup to restore")
                     .add_filter("Chatbot backups", &["omnibot", "json", "sb", "txt", "zip", "miubackup", "miucommand"])
@@ -4583,7 +4594,11 @@ fn flows_wire(ui: &AppWindow, shared: &Shared) {
         let Some(kind) = flows::STEPS.get(k.max(0) as usize) else { return };
         flow_change(&s, |a| {
             if !a["steps"].is_array() { a["steps"] = serde_json::json!([]); }
-            if let Some(l) = a["steps"].as_array_mut() { l.push(flows::defaults(flows::STEPS, kind.id)); }
+            if let Some(l) = a["steps"].as_array_mut() {
+                l.push(flows::defaults(flows::STEPS, kind.id));
+                let end = match kind.id { "ifblock" => Some("endif"), "repeat" => Some("endrepeat"), "randomblock" => Some("endrandom"), _ => None };
+                if let Some(e) = end { l.push(flows::defaults(flows::STEPS, e)); }
+            }
         });
         flows_paint(&s);
     });
