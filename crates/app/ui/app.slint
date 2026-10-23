@@ -129,6 +129,7 @@ global Icons {
     out property <string> key: "M12.65 10C11.83 7.67 9.61 6 7 6c-3.31 0-6 2.69-6 6s2.69 6 6 6c2.61 0 4.83-1.67 5.65-4H17v4h4v-4h2v-4H12.65zM7 14c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2z";
     out property <string> lastfm: "M10.584 17.21l-.88-2.392s-1.43 1.594-3.573 1.594c-1.897 0-3.244-1.649-3.244-4.288 0-3.382 1.704-4.591 3.381-4.591 2.42 0 3.189 1.567 3.849 3.574l.88 2.749c.88 2.666 2.529 4.81 7.285 4.81 3.409 0 5.718-1.044 5.718-3.793 0-2.227-1.265-3.381-3.63-3.931l-1.758-.385c-1.21-.275-1.567-.77-1.567-1.595 0-.934.742-1.484 1.952-1.484 1.32 0 2.034.495 2.144 1.677l2.749-.33c-.22-2.474-1.924-3.492-4.729-3.492-2.474 0-4.893.935-4.893 3.932 0 1.87.907 3.051 3.189 3.601l1.869.44c1.402.33 1.869.907 1.869 1.704 0 1.017-.99 1.43-2.86 1.43-2.776 0-3.93-1.457-4.59-3.464l-.907-2.75c-1.155-3.573-2.997-4.893-6.653-4.893C2.144 5.333 0 7.89 0 12.233c0 4.18 2.144 6.434 5.993 6.434 3.106 0 4.591-1.457 4.591-1.457z";
     out property <string> download: "M5 20h14v-2H5v2zM19 9h-4V3H9v6H5l7 7 7-7z";
+    out property <string> folder-add: "M20 6h-8l-2-2H4c-1.11 0-1.99.89-1.99 2L2 18c0 1.11.89 2 2 2h16c1.11 0 2-.89 2-2V8c0-1.11-.89-2-2-2zm-1 8h-3v3h-2v-3h-3v-2h3V9h2v3h3v2z";
     out property <string> robot: "M20 9V7c0-1.1-.9-2-2-2h-3c0-1.66-1.34-3-3-3S9 3.34 9 5H6c-1.1 0-2 .9-2 2v2c-1.66 0-3 1.34-3 3s1.34 3 3 3v4c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2v-4c1.66 0 3-1.34 3-3s-1.34-3-3-3zM7.5 11.5c0-.83.67-1.5 1.5-1.5s1.5.67 1.5 1.5S9.83 13 9 13s-1.5-.67-1.5-1.5zM16 17H8v-2h8v2zm-1-4c-.83 0-1.5-.67-1.5-1.5S14.17 10 15 10s1.5.67 1.5 1.5S15.83 13 15 13z";
     out property <string> send: "M2.01 21L23 12 2.01 3 2 10l15 2-15 2z";
     out property <string> bell: "M12 22c1.1 0 2-.9 2-2h-4c0 1.1.89 2 2 2zm6-6v-5c0-3.07-1.64-5.64-4.5-6.32V4c0-.83-.67-1.5-1.5-1.5s-1.5.67-1.5 1.5v.68C7.63 5.36 6 7.92 6 11v5l-2 2v1h16v-1l-2-2z";
@@ -1842,6 +1843,55 @@ component AccountTile inherits Rectangle {
             }
         }
     }
+}
+
+/// Sound's sketch: one song ending and the next beginning, as they're set to: faded over each other (as long as
+/// the fade), a silence jumped, or (Seamless Mix) mixed on the beat
+component ChangeSketch inherits Rectangle {
+    in property <bool> fade;
+    in property <int> fade-ms;
+    in property <int> skip;
+    in property <bool> seamless;
+    height: 74px;
+    border-radius: 12px;
+    background: Theme.bg;
+    border-width: 1px;
+    border-color: Theme.line;
+    clip: true;
+    // (how far the two lie over each other: none, the fade's length, or a long mix)
+    property <float> over: root.seamless ? 0.32 : root.fade ? 0.04 + 0.2 * min(1, root.fade-ms / 8000) : 0;
+    property <length> mid: root.width / 2;
+    property <length> half: root.width * root.over / 2;
+    // the first song, and its end: fading out over the overlap
+    for k in 26: Rectangle {
+        property <length> x0: 12px + k * (root.mid + root.half - 12px) / 26;
+        property <float> into: root.half > 0 ? max(0, (self.x0 - (root.mid - root.half)) / (2 * root.half)) : 0;
+        x: self.x0;
+        width: 4px;
+        height: (16px + 26px * (0.5 + 0.5 * sin(k * 47deg))) * (1 - self.into);
+        y: (root.height - self.height) / 2;
+        border-radius: 2px;
+        background: Theme.accent.with-alpha(0.75);
+    }
+    // the next, coming in over it
+    for k in 26: Rectangle {
+        property <length> x0: root.mid - root.half + k * (root.width - 12px - (root.mid - root.half)) / 26;
+        property <float> into: root.half > 0 ? min(1, (self.x0 - (root.mid - root.half)) / (2 * root.half)) : 1;
+        x: self.x0 + 2px;
+        width: 4px;
+        height: (16px + 26px * (0.5 + 0.5 * cos(k * 53deg))) * self.into;
+        y: (root.height - self.height) / 2;
+        border-radius: 2px;
+        background: Theme.accent-2.with-alpha(0.75);
+    }
+    // (Seamless Mix: its beats, lined up)
+    if root.seamless: Rectangle { for k in 7: Rectangle { x: root.mid - root.half + k * (2 * root.half) / 6; y: 6px; width: 1px; height: root.height - 12px; background: Theme.text.with-alpha(0.18); } }
+    Text {
+        x: 10px; y: 5px;
+        text: root.seamless ? "Mixed on the beat" : root.fade ? "Faded over each other, " + round(root.fade-ms / 1000) + " s" : "One straight after the other";
+        color: Theme.muted; font-size: 10px;
+    }
+    if root.skip > 0: Text { x: parent.width - self.width - 10px; y: 5px; text: "Silences over " + root.skip + " s skipped"; color: Theme.muted; font-size: 10px; }
 }
 
 /// (a line between a group's rows)
@@ -4584,51 +4634,122 @@ export component AppWindow inherits Window {
                                 for r[i] in root.set-rows-plugins: SetRowView { r: r; toggle(k) => { root.set-toggle(k); } more(k) => { root.set-more(k); } }
                             }
                             if root.set-cat == "Library" && root.set-query == "": VerticalLayout {
-                                spacing: 14px;
+                                spacing: 10px;
+                                // ---- your music: its folders ----
+                                SectionHead { text: "Your Music"; }
                                 Card {
                                     VerticalLayout {
                                         padding: 16px;
                                         spacing: 10px;
-                                        HiTitle { text: "Music Folders"; }
-                                        Text { text: root.folders-note; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
-                                        for f[i] in root.folders: HorizontalLayout {
-                                            spacing: 10px;
-                                            Glyph { d: Icons.local; width: 16px; height: 16px; y: (parent.height - self.height) / 2; fill: Theme.muted; }
-                                            Text { text: f; color: Theme.text; font-size: 13px; vertical-alignment: center; overflow: elide; horizontal-stretch: 1; }
-                                            Pill { label: "Remove"; clicked => { root.folder-remove(i); } }
-                                        }
                                         HorizontalLayout {
-                                            alignment: start;
-                                            spacing: 8px;
-                                            Pill { label: "Add folder"; clicked => { root.folder-add(); } }
-                                            if root.folders.length > 0: Pill { label: "Rescan"; clicked => { root.folders-rescan(); } }
-                                        }
-                                    }
-                                }
-                                for r[i] in root.set-rows-library: SetRowView { r: r; toggle(k) => { root.set-toggle(k); } more(k) => { root.set-more(k); } }
-                            }
-                            if root.set-cat == "Sound" && root.set-query == "": VerticalLayout {
-                                spacing: 14px;
-                                Card {
-                                    VerticalLayout {
-                                        padding: 16px;
-                                        spacing: 12px;
-                                        HorizontalLayout {
-                                            spacing: 8px;
+                                            spacing: 6px;
                                             VerticalLayout {
                                                 horizontal-stretch: 1;
                                                 alignment: center;
-                                                HiTitle { text: "Match Loudness"; }
-                                                Text { text: root.loud-on == "off" ? "Tracks play as loud as they were made." : "Every track at the same loudness."; color: Theme.muted; font-size: 12px; }
+                                                spacing: 2px;
+                                                HiTitle { text: "Music Folders"; }
+                                                Text { text: root.folders-note; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
                                             }
-                                            Dropdown {
-                                                options: ["Off", "Quiet", "Normal", "Loud"];
-                                                current: root.loud-on == "off" ? 0 : root.loud-on == "quiet" ? 1 : root.loud-on == "loud" ? 3 : 2;
-                                                y: (parent.height - self.height) / 2;
-                                                picked(k) => { root.loud-pick(["off", "quiet", "normal", "loud"][k]); }
+                                            if root.folders.length > 0: IconButton { d: Icons.refresh; size: 36px; tip: "Look through them again, for new songs"; y: (parent.height - self.height) / 2; clicked => { root.folders-rescan(); } }
+                                            IconButton { d: Icons.folder-add; size: 36px; tint: Theme.accent; tip: "Add a folder (on this PC, or a network drive)"; y: (parent.height - self.height) / 2; clicked => { root.folder-add(); } }
+                                        }
+                                        for f[i] in root.folders: Rectangle {
+                                            height: 34px;
+                                            border-radius: 17px;
+                                            background: Theme.elevated;
+                                            border-width: 1px;
+                                            border-color: Theme.line;
+                                            HorizontalLayout {
+                                                padding-left: 12px;
+                                                padding-right: 2px;
+                                                spacing: 8px;
+                                                Glyph { d: Icons.local; width: 15px; height: 15px; y: (parent.height - self.height) / 2; fill: Theme.muted; }
+                                                Text { text: f; color: Theme.text; font-size: 13px; vertical-alignment: center; overflow: elide; horizontal-stretch: 1; }
+                                                IconButton { d: Icons.close; size: 30px; tip: "Take this folder out (its files stay where they are)"; y: (parent.height - self.height) / 2; clicked => { root.folder-remove(i); } }
                                             }
                                         }
-                                        Rectangle { height: 1px; background: Theme.line; }
+                                    }
+                                }
+                                // ---- what plays next ----
+                                SectionHead { text: "What Plays Next"; }
+                                VerticalLayout {
+                                    for r[i] in root.set-rows-library: VerticalLayout {
+                                        if r.key == "autoplay" || r.key == "avoidRecent" || r.key == "hideOn" || r.key == "queueSets" || r.key == "sbOn": VerticalLayout { padding-bottom: 10px; SetRowView { r: r; toggle(k) => { root.set-toggle(k); } more(k) => { root.set-more(k); } } }
+                                    }
+                                }
+                                // ---- the sidebar's pages: their switches, and the sidebar as they'd have it ----
+                                SectionHead { text: "Pages in Your Sidebar"; }
+                                HorizontalLayout {
+                                    spacing: 12px;
+                                    VerticalLayout {
+                                        horizontal-stretch: 1;
+                                        for r[i] in root.set-rows-library: VerticalLayout {
+                                            if r.key == "favPage" || r.key == "setsOn" || r.key == "statsShown": VerticalLayout { padding-bottom: 10px; SetRowView { r: r; toggle(k) => { root.set-toggle(k); } more(k) => { root.set-more(k); } } }
+                                        }
+                                    }
+                                    Rectangle {
+                                        width: 180px;
+                                        height: sbl.preferred-height + 10px;
+                                        border-radius: Theme.card-radius;
+                                        background: Theme.panel;
+                                        border-width: 1px;
+                                        border-color: Theme.line;
+                                        sbl := VerticalLayout {
+                                            padding: 12px;
+                                            spacing: 4px;
+                                            alignment: start;
+                                            Text { text: "Your sidebar"; color: Theme.muted; font-size: 11px; }
+                                            for n in [{ k: "", t: "Library", d: Icons.library }, { k: "", t: "Discover", d: Icons.discover }, { k: "", t: "Rediscover", d: Icons.rediscover }, { k: "", t: "Artists", d: Icons.person }, { k: "favPage", t: "Favourites", d: Icons.star }, { k: "setsOn", t: "Sets & Podcasts", d: Icons.sets }, { k: "statsShown", t: "Stats", d: Icons.stats }]: VerticalLayout {
+                                                // (a page there if it's always there, or its switch is on: lit, as it's just been switched on)
+                                                for r in root.set-rows-library: VerticalLayout {
+                                                    if n.k != "" && r.key == n.k && r.on: Rectangle {
+                                                        height: 26px;
+                                                        border-radius: 7px;
+                                                        background: Theme.accent.with-alpha(0.14);
+                                                        border-width: 1px;
+                                                        border-color: Theme.accent.with-alpha(0.6);
+                                                        HorizontalLayout { padding-left: 8px; spacing: 8px; Glyph { d: n.d; width: 14px; height: 14px; y: 6px; fill: Theme.accent; } Text { text: n.t; color: Theme.text; font-size: 12px; vertical-alignment: center; } }
+                                                    }
+                                                }
+                                                if n.k == "": Rectangle {
+                                                    height: 26px;
+                                                    HorizontalLayout { padding-left: 8px; spacing: 8px; Glyph { d: n.d; width: 14px; height: 14px; y: 6px; fill: Theme.muted; } Text { text: n.t; color: Theme.text.mix(Theme.muted, 0.6); font-size: 12px; vertical-alignment: center; } }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            if root.set-cat == "Sound" && root.set-query == "": VerticalLayout {
+                                spacing: 10px;
+                                // ---- where it plays ----
+                                SectionHead { text: "Where It Plays"; }
+                                // Output Device (as the web app's, as well as the player bar's menu)
+                                Card {
+                                    HorizontalLayout {
+                                        padding: 16px;
+                                        padding-top: 12px;
+                                        padding-bottom: 12px;
+                                        spacing: 12px;
+                                        VerticalLayout {
+                                            horizontal-stretch: 1;
+                                            alignment: center;
+                                            spacing: 2px;
+                                            HiTitle { text: "Output Device"; }
+                                            Text { text: "Where the sound plays."; color: Theme.muted; font-size: 12px; }
+                                        }
+                                        Dropdown { width: 280px; options: root.outputs; current: root.output-at; y: (parent.height - self.height) / 2; init => { root.devices-want(); } picked(k) => { root.device-pick(k); root.devices-want(); } }
+                                    }
+                                }
+                                // ---- between songs: a sketch of it, as it's set ----
+                                SectionHead { text: "Between Songs"; }
+                                Card {
+                                    VerticalLayout {
+                                        padding: 16px;
+                                        spacing: 10px;
+                                        for r in root.set-rows-sound: VerticalLayout {
+                                            if r.key == "smartOn": ChangeSketch { fade: root.fade-on; fade-ms: root.fade-ms; skip: root.skip-silence; seamless: r.on; }
+                                        }
                                         HorizontalLayout {
                                             VerticalLayout {
                                                 horizontal-stretch: 1;
@@ -4636,26 +4757,45 @@ export component AppWindow inherits Window {
                                                 HiTitle { text: "Fade Between Tracks"; }
                                                 Text { text: "Each track fades out where its sound ends, and the next fades in."; color: Theme.muted; font-size: 12px; }
                                             }
+                                            if root.fade-on: HorizontalLayout {
+                                                spacing: 4px;
+                                                for ms[k] in [1000, 2000, 3000, 5000, 8000]: Chip { label: (ms / 1000) + " s"; on: root.fade-ms == ms || (k == 0 && root.fade-ms < 1000); y: (parent.height - self.height) / 2; clicked => { root.fade-ms-pick(ms); } }
+                                            }
+                                            Rectangle { width: 10px; }
                                             Toggle { checked <=> root.fade-on; y: (parent.height - self.height) / 2; toggled => { root.fade-on-changed(self.checked); } }
                                         }
-                                        if root.fade-on: HorizontalLayout {
-                                            alignment: start;
-                                            spacing: 8px;
-                                            Text { text: "Fade Length"; color: Theme.muted; font-size: 12px; vertical-alignment: center; }
-                                            Dropdown { options: ["1 s", "2 s", "3 s", "5 s", "8 s"]; current: root.fade-ms <= 1000 ? 0 : root.fade-ms <= 2000 ? 1 : root.fade-ms <= 3000 ? 2 : root.fade-ms <= 5000 ? 3 : 4; picked(k) => { root.fade-ms-pick([1000, 2000, 3000, 5000, 8000][k]); } }
-                                        }
-                                        Rectangle { height: 1px; background: Theme.line; }
+                                        GroupLine { }
                                         HorizontalLayout {
-                                            spacing: 8px;
+                                            spacing: 4px;
                                             VerticalLayout {
                                                 horizontal-stretch: 1;
                                                 alignment: center;
                                                 HiTitle { text: "Skip Silences"; }
                                                 Text { text: "Jumps over long silences, and moves on when the rest is silent."; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
                                             }
-                                            Dropdown { options: ["Off", "After 5 s", "After 8 s", "After 15 s", "After 30 s"]; current: root.skip-silence == 0 ? 0 : root.skip-silence <= 5 ? 1 : root.skip-silence <= 8 ? 2 : root.skip-silence <= 15 ? 3 : 4; y: (parent.height - self.height) / 2; picked(k) => { root.skip-pick([0, 5, 8, 15, 30][k]); } }
+                                            for v[k] in [0, 5, 8, 15, 30]: Chip { label: v == 0 ? "Off" : v + " s"; on: k == 0 ? root.skip-silence == 0 : root.skip-silence == v; y: (parent.height - self.height) / 2; clicked => { root.skip-pick(v); } }
                                         }
-                                        Rectangle { height: 1px; background: Theme.line; }
+                                    }
+                                }
+                                // (Seamless Mix: its own row, its settings a gear)
+                                for r[i] in root.set-rows-sound: SetRowView { r: r; toggle(k) => { root.set-toggle(k); } more(k) => { root.set-more(k); } }
+                                // ---- loudness and tone ----
+                                SectionHead { text: "Loudness and Tone"; }
+                                Card {
+                                    VerticalLayout {
+                                        padding: 16px;
+                                        spacing: 12px;
+                                        HorizontalLayout {
+                                            spacing: 4px;
+                                            VerticalLayout {
+                                                horizontal-stretch: 1;
+                                                alignment: center;
+                                                HiTitle { text: "Match Loudness"; }
+                                                Text { text: root.loud-on == "off" ? "Tracks play as loud as they were made." : "Every track at the same loudness."; color: Theme.muted; font-size: 12px; }
+                                            }
+                                            for v[k] in [{ id: "off", n: "Off" }, { id: "quiet", n: "Quiet" }, { id: "normal", n: "Normal" }, { id: "loud", n: "Loud" }]: Chip { label: v.n; on: root.loud-on == v.id; y: (parent.height - self.height) / 2; clicked => { root.loud-pick(v.id); } }
+                                        }
+                                        GroupLine { }
                                         HorizontalLayout {
                                             VerticalLayout {
                                                 horizontal-stretch: 1;
@@ -4669,7 +4809,7 @@ export component AppWindow inherits Window {
                                             alignment: start;
                                             spacing: 8px;
                                             Dropdown { options: root.eq-presets; current: -1; placeholder: "Presets..."; picked(k) => { root.eq-preset(k); } }
-                                            Pill { label: "Reset"; clicked => { root.eq-preset(0); } }
+                                            IconButton { d: Icons.restore; size: 34px; tip: "Flat again: every band at 0 dB"; clicked => { root.eq-preset(0); } }
                                         }
                                         // (the bands from 0 to 24, as the slider doesn't go below zero: 12 is flat)
                                         if root.eq-on: VerticalLayout {
@@ -4683,25 +4823,6 @@ export component AppWindow inherits Window {
                                         }
                                     }
                                 }
-                                // Output Device (as the web app's, as well as the player bar's menu)
-                                Card {
-                                    HorizontalLayout {
-                                        padding: 16px;
-                                        padding-top: 12px;
-                                        padding-bottom: 12px;
-                                        spacing: 12px;
-                                        VerticalLayout {
-                                            horizontal-stretch: 1;
-                                            alignment: center;
-                                            spacing: 2px;
-                                            Text { text: "Output Device"; color: Theme.text; font-weight: 700; }
-                                            Text { text: "Where the sound plays."; color: Theme.muted; font-size: 12px; }
-                                        }
-                                        Dropdown { width: 280px; options: root.outputs; current: root.output-at; y: (parent.height - self.height) / 2; init => { root.devices-want(); } picked(k) => { root.device-pick(k); root.devices-want(); } }
-                                    }
-                                }
-                                // (Seamless Mix and its band handoff)
-                                for r[i] in root.set-rows-sound: SetRowView { r: r; toggle(k) => { root.set-toggle(k); } more(k) => { root.set-more(k); } }
                             }
                             if root.set-cat == "Streaming" && root.set-query == "": VerticalLayout {
                                 spacing: 14px;
