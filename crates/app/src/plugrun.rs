@@ -635,7 +635,8 @@ mod tests {
                                 said.lock().unwrap().push(line.to_string());
                                 if line.starts_with("JOIN") {
                                     let msg = |id: &str, text: &str| format!("@badges=;display-name=Viewer;id={id};mod=0;user-id=42 :viewer!viewer@viewer.tmi.twitch.tv PRIVMSG #me :{text}\r\n");
-                                    for (id, text) in [("a", "!hello"), ("b", "!deaths"), ("c", "!deaths"), ("d", "good morning all"), ("e", "!check no"), ("f", "!check yes"), ("g", "!play take on me")] {
+                                    for (id, text) in [("a", "!hello"), ("b", "!deaths"), ("c", "!deaths"), ("d", "good morning all"), ("e", "!check no"), ("f", "!check yes"), ("g", "!play take on me"),
+                                        ("h", "look at bad.example.com now"), ("i", "!addquote it works on my machine"), ("j", "!quote 1"), ("k", "!enter"), ("l", "!enter"), ("m", "!winner"), ("n", "!buy"), ("o", "!points")] {
                                         let _ = w.send(Message::Text(msg(id, text).into())).await;
                                     }
                                 }
@@ -675,16 +676,25 @@ mod tests {
             { "name": "Raid", "on": true, "trigger": t("event", json!({ "event": "raid", "min": 5 })), "steps": [st("say", json!({ "text": "Raid of %amount% from %user%", "reply": false }))] },
             { "name": "Play", "on": true, "trigger": t("command", json!({ "command": "!play", "cooldown": 0, "usercooldown": 0 })), "steps": [st("request", json!({}))] },
             { "name": "Off", "on": false, "trigger": t("command", json!({ "command": "!hello" })), "steps": [st("say", json!({ "text": "never" }))] },
+            { "name": "No Links", "on": true, "trigger": t("filter", json!({ "rule": "links", "exempt": "mods" })), "steps": [st("say", json!({ "text": "No links, %user%", "reply": false }))] },
+            { "name": "Add Quote", "on": true, "trigger": t("command", json!({ "command": "!addquote", "cooldown": 0, "usercooldown": 0 })), "steps": [st("quoteadd", json!({})), st("say", json!({ "text": "Quote #%quotenumber% added", "reply": false }))] },
+            { "name": "Quote", "on": true, "trigger": t("command", json!({ "command": "!quote", "cooldown": 0, "usercooldown": 0 })), "steps": [st("quote", json!({})), st("say", json!({ "text": "Q %quote%", "reply": false }))] },
+            { "name": "Enter", "on": true, "trigger": t("command", json!({ "command": "!enter", "cooldown": 0, "usercooldown": 0 })), "steps": [st("giveenter", json!({}))] },
+            { "name": "Winner", "on": true, "trigger": t("command", json!({ "command": "!winner", "cooldown": 0, "usercooldown": 0 })), "steps": [st("givepick", json!({})), st("say", json!({ "text": "Winner %winner% of %entries%", "reply": false }))] },
+            { "name": "Buy", "on": true, "trigger": t("command", json!({ "command": "!buy", "cooldown": 0, "usercooldown": 0 })), "steps": [st("points", json!({ "amount": -50 })), st("say", json!({ "text": "Bought", "reply": false }))] },
+            { "name": "Points", "on": true, "trigger": t("command", json!({ "command": "!points", "cooldown": 0, "usercooldown": 0 })), "steps": [st("say", json!({ "text": "%user% has %points% %pointsname%", "reply": false }))] },
         ]);
-        let p = start(&pkg, &json!({ "token": "t", "login": "me", "userId": "1", "twitchClientId": "c", "actions": actions }), rt.handle().clone()).unwrap();
+        let p = start(&pkg, &json!({ "token": "t", "login": "me", "userId": "1", "twitchClientId": "c", "actions": actions, "points": { "viewer": 70 }, "pointsName": "coins" }), rt.handle().clone()).unwrap();
         let line = |text: &str| { let s = said.lock().unwrap(); s.iter().any(|l| l.ends_with(&format!(":{text}"))) };
         let until = Instant::now() + Duration::from_secs(10);
-        let done = || line("Hi Viewer!") && line("Deaths: 2") && line("Morning, Viewer") && line("Checked: yes") && line("Raid of 30 from Big") && line("Added it.");
+        let done = || line("Hi Viewer!") && line("Deaths: 2") && line("Morning, Viewer") && line("Checked: yes") && line("Raid of 30 from Big") && line("Added it.")
+            && line("No links, Viewer") && line("Quote #1 added") && line("Winner Viewer of 1") && line("Bought") && line("Viewer has 20 coins");
         while !done() && Instant::now() < until { std::thread::sleep(Duration::from_millis(50)); }
         let s = said.lock().unwrap().clone();
         assert!(done(), "chat said {s:#?}");
         // (stopped where it should: no "no", no small raid, nothing from the action that's off)
         assert!(!line("Checked: no") && !line("Raid of 2 from Small") && !line("never"), "{s:#?}");
+        assert!(s.iter().any(|l| l.contains(":Q #1: \"it works on my machine\" (")), "{s:#?}");
         assert!(asked.lock().unwrap().iter().any(|x| x["op"] == "request" && x["args"] == json!(["Viewer", "take on me", "twitch"])));
         drop(p);
         stop("chatbot");

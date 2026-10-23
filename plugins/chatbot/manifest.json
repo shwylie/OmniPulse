@@ -1,7 +1,7 @@
 {
   "id": "chatbot",
   "name": "OmniPulse Chatbot",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "author": "OmniPulse",
   "description": "OmniPulse's own chatbot: song requests, alerts, your own actions (a trigger, then its steps) and OBS controls, straight from your chat, no other bot needed. Twitch for now; Kick and YouTube are on their way.",
   "main": "main.js",
@@ -55,6 +55,41 @@
       "label": "Actions",
       "type": "actions",
       "note": "What your chatbot does and when: each action a trigger (a command, a message, an event, a timer, the music), then its steps, in order."
+    },
+    {
+      "key": "pointsOn",
+      "label": "Points",
+      "type": "toggle",
+      "default": false,
+      "note": "A currency of your own, as Mix It Up's: viewers get some for chatting while you're live, to spend in your actions (Give or Take Points)."
+    },
+    {
+      "key": "pointsName",
+      "label": "Points' Name",
+      "type": "text",
+      "default": "points",
+      "note": "What they're called in chat (%pointsname%)."
+    },
+    {
+      "key": "pointsAmount",
+      "label": "Points Each Time",
+      "type": "number",
+      "default": 10,
+      "note": "For each viewer who's chatted since the last time."
+    },
+    {
+      "key": "pointsEvery",
+      "label": "Every",
+      "type": "number",
+      "default": 10,
+      "note": "Minutes."
+    },
+    {
+      "key": "pointsOffline",
+      "label": "Points While Offline Too",
+      "type": "toggle",
+      "default": false,
+      "note": "Off: only while you're live."
     },
     {
       "key": "obsOn",

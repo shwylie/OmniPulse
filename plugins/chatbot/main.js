@@ -158,6 +158,7 @@ async function onChat(m) {
   const badges = m.tags.badges || "";
   const isMod = m.tags.mod === "1" || badges.includes("broadcaster/");
   const id = m.tags.id;
+  seen[(m.nick || user).toLowerCase()] = Date.now();
   onActions(m, text, cmd, args, user, id);
   if (m.tags["first-msg"] === "1") onEvent("first.message", { user_name: user, user_id: m.tags["user-id"] || "", message: { text }, msg_id: id });
   if (!text.startsWith("!")) return;
@@ -233,12 +234,46 @@ function words(rawInput) {
   return w;
 }
 
+// A rule broken (a chat filter): a link, mostly capitals, a banned word, too long, too many emotes
+function breaks(t, text, tags) {
+  switch (t.rule) {
+    case "caps": {
+      const letters = text.replace(/[^A-Za-z]/g, "");
+      return letters.length >= 12 && letters.replace(/[^A-Z]/g, "").length / letters.length >= 0.7;
+    }
+    case "words": {
+      const words = String(t.words || "").split(",").map((x) => x.trim().toLowerCase()).filter(Boolean);
+      const said = " " + text.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ") + " ";
+      return words.some((w) => said.includes(" " + w + " "));
+    }
+    case "long": return text.length > Math.max(1, num(t.most) || 300);
+    case "emotes": {
+      const n = String(tags.emotes || "").split("/").filter(Boolean).reduce((c, e) => c + (e.split(":")[1] || "").split(",").filter(Boolean).length, 0);
+      return n > Math.max(1, num(t.most) || 10);
+    }
+    default: return /(https?:\/\/|www\.)\S+|\b[a-z0-9-]{2,}\.(com|net|org|tv|gg|io|ly|co|me|xyz|app|link|to)\b/i.test(text);
+  }
+}
+
+function exempt(who, r) {
+  if (r.you) return true;
+  switch (who) {
+    case "subscribers": return r.sub;
+    case "vips": return r.vip;
+    case "mods": return r.mod;
+    default: return false;
+  }
+}
+
 function onActions(m, text, cmd, args, user, msgId) {
   const r = rank(m.tags);
   const base = { user, userId: m.tags["user-id"] || "", message: text, msgId, platform: "twitch" };
   for (const a of live) {
     const t = a.trigger;
-    if (t.type === "command") {
+    if (t.type === "filter") {
+      if (exempt(t.exempt, r) || !breaks(t, text, m.tags)) continue;
+      run(a, Object.assign({}, base, { rawInput: text }, words(text)));
+    } else if (t.type === "command") {
       const names = [t.command].concat(String(t.aliases || "").split(",")).map((x) => String(x || "").trim().toLowerCase()).filter(Boolean);
       if (!names.includes(cmd) || !allowed(t.who, r) || !cooled(a, user)) continue;
       run(a, Object.assign({}, base, { command: cmd, rawInput: args }, words(args)));
@@ -267,6 +302,8 @@ const EVENT_OF = {
 function onEvent(type, e) {
   const ev = EVENT_OF[type];
   if (!ev) return;
+  if (ev === "online") isLive = true;
+  if (ev === "offline") isLive = false;
   const a = asAlert(type, e) || {};
   if (ev === "sub" && e.is_gift) return;
   const amount = ev === "bits" ? String(e.bits || 0) : ev === "raid" ? String(e.viewers || 0) : ev === "gift" ? String(e.total || 1) : ev === "resub" ? String(e.cumulative_months || 1) : ev === "hypetrain" ? String(e.level || 1) : "";
@@ -327,6 +364,8 @@ function setVar(name, value, per, keep, user) {
 function fill(text, ctx) {
   return String(text == null ? "" : text).replace(/%([A-Za-z0-9_]+(?::[A-Za-z0-9_ ]+)?)%/g, (whole, k) => {
     if (k.startsWith("var:")) { const v = getVar(k.slice(4).trim(), ctx.user); return v === "" ? "0" : String(v); }
+    if (k === "points") return String(pointsOf(ctx.user));
+    if (k === "pointsname") return pointsName();
     if (k in ctx) return String(ctx[k] == null ? "" : ctx[k]);
     return k.startsWith("input") ? "" : whole;
   });
@@ -444,6 +483,44 @@ async function step(st, ctx, depth) {
     case "obsfilter": await obsCall("SetSourceFilterEnabled", { sourceName: f("source"), filterName: f("filter"), filterEnabled: st.what !== "off" }); break;
     case "obsrecord": await obsCall(st.what === "stop" ? "StopRecord" : st.what === "toggle" ? "ToggleRecord" : "StartRecord"); break;
     case "obsstream": await obsCall(st.what === "stop" ? "StopStream" : st.what === "toggle" ? "ToggleStream" : "StartStream"); break;
+    case "quoteadd": {
+      const text = f("text").trim();
+      if (!text) break;
+      const list = (S().quotes || []).slice();
+      const d = new Date();
+      list.push({ text, by: ctx.user || "", date: d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0") });
+      OmniPulse.settings.quotes = list;
+      await OmniPulse.app.saveSettings({ quotes: list });
+      ctx.quotenumber = String(list.length);
+      break;
+    }
+    case "quote": {
+      const list = S().quotes || [];
+      if (!list.length) { ctx.quote = "No quotes yet."; break; }
+      const n = parseInt(f("number"), 10);
+      const i = n >= 1 && n <= list.length ? n - 1 : Math.floor(Math.random() * list.length);
+      ctx.quote = "#" + (i + 1) + ": \"" + list[i].text + "\" (" + list[i].date + ")";
+      ctx.quotenumber = String(i + 1);
+      break;
+    }
+    case "points": {
+      const who = f("who").replace("@", "").trim();
+      const n = Math.round(num(f("amount")));
+      if (!who) break;
+      if (n < 0 && pointsOf(who) < -n) { reply(ctx.msgId, "@" + who + ", that takes " + -n + " " + pointsName() + " (you have " + pointsOf(who) + ")."); return false; }
+      addPoints(who, n);
+      break;
+    }
+    case "giveenter": {
+      if (ctx.user && !entries.some((x) => x.toLowerCase() === ctx.user.toLowerCase())) entries.push(ctx.user);
+      break;
+    }
+    case "givepick": {
+      ctx.entries = String(entries.length);
+      ctx.winner = entries.length ? entries[Math.floor(Math.random() * entries.length)] : "no one (no one entered)";
+      if (yes(st.clear)) entries = [];
+      break;
+    }
     case "run": {
       const name = f("action").trim().toLowerCase();
       const next = all.find((x) => String(x.name || "").toLowerCase() === name);
@@ -589,6 +666,36 @@ function onObs(type, d) {
   }
 }
 
+// ---------- points (a currency, as Mix It Up's): for chatting while you're live, kept ----------
+const seen = {};
+let entries = [], pointsTimer = null, saveSoon = null, isLive = false;
+
+function pointsName() { return String(S().pointsName || "points").trim() || "points"; }
+function pointsOf(who) { return num((S().points || {})[String(who || "").toLowerCase()]); }
+
+function addPoints(who, n) {
+  const k = String(who || "").toLowerCase();
+  if (!k || !n) return;
+  const all = Object.assign({}, S().points || {});
+  all[k] = Math.max(0, num(all[k]) + n);
+  OmniPulse.settings.points = all;
+  if (saveSoon) clearTimeout(saveSoon);
+  saveSoon = setTimeout(() => { OmniPulse.app.saveSettings({ points: S().points }).catch(() => {}); }, 3000);
+}
+
+// Every so often while you're live (or always, if it's set so): each viewer who's chatted since, given theirs
+function setPoints() {
+  if (pointsTimer) clearInterval(pointsTimer);
+  pointsTimer = null;
+  if (!yes(S().pointsOn)) return;
+  const every = Math.max(1, num(S().pointsEvery) || 10) * 60000;
+  pointsTimer = setInterval(() => {
+    if (!chat || (!isLive && !yes(S().pointsOffline))) return;
+    const since = Date.now() - every;
+    for (const [who, at] of Object.entries(seen)) if (at >= since) addPoints(who, Math.round(num(S().pointsAmount) || 10));
+  }, every);
+}
+
 // Twitch's API, as your channel (its moderation, its shoutouts)
 async function helix(method, path, body) {
   const r = await OmniPulse.fetch("https://api.twitch.tv/helix/" + path, {
@@ -675,6 +782,7 @@ async function start() {
   stopAll();
   stopped = false;
   loadActions();
+  setPoints();
   obsConnect();
   if (!S().token || !S().login) return;
   const token = await fresh("channel");
@@ -693,6 +801,7 @@ function stopAll() {
   stopped = true;
   timers.forEach((id) => clearInterval(id));
   timers = [];
+  if (pointsTimer) { clearInterval(pointsTimer); pointsTimer = null; }
   for (const s of [chat, botChat, events, obs]) { if (s) { s.onclose = null; s.close(); } }
   chat = botChat = events = obs = null;
   obsReady = false;

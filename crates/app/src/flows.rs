@@ -42,6 +42,10 @@ const OBS_WHEN: &[(&str, &str)] = &[
     ("scene", "The Scene Changes"), ("streamstart", "Streaming Starts"), ("streamstop", "Streaming Stops"),
     ("recordstart", "Recording Starts"), ("recordstop", "Recording Stops"),
 ];
+const RULES: &[(&str, &str)] = &[
+    ("links", "A Link"), ("caps", "Mostly Capitals"), ("words", "A Banned Word"), ("long", "Too Long"), ("emotes", "Too Many Emotes"),
+];
+const EXEMPT: &[(&str, &str)] = &[("none", "No One"), ("subscribers", "Subscribers"), ("vips", "VIPs"), ("mods", "Moderators")];
 const START_STOP: &[(&str, &str)] = &[("start", "Start"), ("stop", "Stop"), ("toggle", "Start or Stop")];
 const SHOW_HIDE: &[(&str, &str)] = &[("show", "Show"), ("hide", "Hide"), ("toggle", "Show or Hide")];
 const MUTE: &[(&str, &str)] = &[("mute", "Mute"), ("unmute", "Unmute"), ("toggle", "Mute or Unmute")];
@@ -70,6 +74,12 @@ pub const TRIGGERS: &[Kind] = &[
         pick("match", "When It", MATCH, "contains", ""),
         f("text", "Words", "text", "hello", "Not case-sensitive."),
         pick("who", "From", WHO, "everyone", ""),
+    ] },
+    Kind { id: "filter", label: "A Rule Broken", note: "A chat filter: its steps say what's done (delete it, time them out, warn them). Gives them %user% and %message%.", fields: &[
+        pick("rule", "When a Message Has", RULES, "links", ""),
+        f("words", "Banned Words", "text", "", "For banned words: with commas between (whole words, not case-sensitive)."),
+        f("most", "Most", "number", "300", "Too long: the most letters; too many emotes: the most emotes."),
+        pick("exempt", "Except From", EXEMPT, "subscribers", "Them and anyone above them (you always are)."),
     ] },
     Kind { id: "event", label: "A Channel Event", note: "Gives its steps %user%, %amount% (bits, months, viewers, subs gifted) and %message%.", fields: &[
         pick("event", "Event", EVENTS, "follow", ""),
@@ -168,6 +178,14 @@ pub const STEPS: &[Kind] = &[
     ] },
     Kind { id: "obsrecord", label: "OBS: Recording", note: "", fields: &[pick("what", "", START_STOP, "start", "")] },
     Kind { id: "obsstream", label: "OBS: Streaming", note: "", fields: &[pick("what", "", START_STOP, "start", "")] },
+    Kind { id: "quoteadd", label: "Add a Quote", note: "Kept with the date. Gives the steps after it %quotenumber%.", fields: &[f("text", "Quote", "text", "%rawInput%", "")] },
+    Kind { id: "quote", label: "Pick a Quote", note: "Gives the steps after it %quote% (its words, number and date).", fields: &[f("number", "Number", "text", "%input0%", "Empty, or not a number: one at random.")] },
+    Kind { id: "points", label: "Give or Take Points", note: "Your points currency (the chatbot's settings: its name, and how many for chatting). Taking: stops here if they haven't enough.", fields: &[
+        f("who", "Who", "text", "%user%", ""),
+        f("amount", "Points", "number", "10", "Take away with a minus."),
+    ] },
+    Kind { id: "giveenter", label: "Enter the Giveaway", note: "Once each.", fields: &[] },
+    Kind { id: "givepick", label: "Pick a Giveaway Winner", note: "Gives the steps after it %winner% and %entries% (how many were in).", fields: &[f("clear", "Then Start Again", "toggle", "true", "Everyone's entry let go.")] },
     Kind { id: "run", label: "Run Another Action", note: "", fields: &[f("action", "Action", "text", "", "Its name.")] },
     Kind { id: "status", label: "Show in OmniPulse", note: "On OmniPulse's status line: for trying an action out.", fields: &[f("text", "Text", "text", "%user% used it.", "")] },
 ];
@@ -217,6 +235,13 @@ pub fn templates() -> Vec<(&'static str, Value)> {
         ("Greet First-Time Chatters", act("First Message", trig("event", json!({ "event": "firstmsg" })), vec![step("say", json!({ "text": "Welcome to the stream, %user%!" }))])),
         ("A !clip Command", act("Clip", trig("command", json!({ "command": "!clip", "cooldown": 60 })), vec![step("clip", json!({})), step("say", json!({ "text": "Clipped: %clip%" }))])),
         ("Show a Camera on a Reward", act("Camera", trig("event", json!({ "event": "reward", "reward": "Show the Cam" })), vec![step("obssource", json!({ "source": "Camera", "show": "show", "for": 30 }))])),
+        ("No Links in Chat", act("No Links", trig("filter", json!({ "rule": "links" })), vec![step("delete", json!({})), step("say", json!({ "text": "@%user%, no links in chat please.", "reply": false }))])),
+        ("No Banned Words", act("Banned Words", trig("filter", json!({ "rule": "words", "words": "word1, word2", "exempt": "mods" })), vec![step("delete", json!({})), step("timeout", json!({ "seconds": 60, "reason": "A banned word" }))])),
+        ("Quotes (!quote and !addquote)", act("Quote", trig("command", json!({ "command": "!quote" })), vec![step("quote", json!({})), step("say", json!({ "text": "%quote%" }))])),
+        ("Add Quotes (!addquote)", act("Add Quote", trig("command", json!({ "command": "!addquote", "who": "mods" })), vec![step("quoteadd", json!({})), step("say", json!({ "text": "Quote #%quotenumber% added." }))])),
+        ("Points (!points)", act("Points", trig("command", json!({ "command": "!points" })), vec![step("say", json!({ "text": "%user%, you have %points% %pointsname%." }))])),
+        ("A Giveaway (!enter)", act("Enter", trig("command", json!({ "command": "!enter", "cooldown": 0, "usercooldown": 5 })), vec![step("giveenter", json!({}))])),
+        ("Pick a Giveaway Winner (!winner)", act("Winner", trig("command", json!({ "command": "!winner", "who": "you" })), vec![step("givepick", json!({})), step("say", json!({ "text": "And the winner, of %entries%, is... %winner%!", "reply": false }))])),
         ("Shout Out on !so", act("Shout Out", trig("command", json!({ "command": "!so", "who": "mods" })), vec![
             step("if", json!({ "left": "%input0%", "test": "notempty" })),
             step("say", json!({ "text": "Go and check out %input0%!", "reply": false })),
@@ -256,6 +281,7 @@ pub fn summary(a: &Value) -> String {
         "timer" => format!("Every {} minutes", t["minutes"].as_f64().unwrap_or(15.0)),
         "song" => if s("when") == "request" { "When a song is requested".into() } else { "When a song starts".into() },
         "obs" => format!("When OBS: {}", label(OBS_WHEN, &s("when")).to_lowercase()),
+        "filter" => format!("When a message has {}", label(RULES, &s("rule")).to_lowercase()),
         _ => "Only when run".into(),
     };
     let n = a["steps"].as_array().map(|l| l.len()).unwrap_or(0);
