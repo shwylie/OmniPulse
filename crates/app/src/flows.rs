@@ -55,6 +55,13 @@ const TEXT_DO: &[(&str, &str)] = &[
     ("length", "Its Length"), ("first", "Its First Word"), ("last", "Its Last Word"), ("word", "Word Number..."),
     ("replace", "With a Word Replaced"), ("rest", "All but Its First Word"),
 ];
+const PREDICT_END: &[(&str, &str)] = &[("resolve", "Settle It (the outcome below won)"), ("lock", "Lock It (no more votes)"), ("cancel", "Cancel It (points given back)")];
+const REWARD_DO: &[(&str, &str)] = &[("enable", "Switch It On"), ("disable", "Switch It Off"), ("pause", "Pause It"), ("unpause", "Unpause It"), ("cost", "Change Its Cost"), ("create", "Make It")];
+const CHAT_MODES: &[(&str, &str)] = &[("emote", "Emote-Only"), ("subscriber", "Subscribers-Only"), ("slow", "Slow Mode"), ("follower", "Followers-Only"), ("unique", "Unique Chat")];
+const BAN_DO: &[(&str, &str)] = &[("ban", "Ban"), ("unban", "Unban")];
+const ROLE_DO: &[(&str, &str)] = &[("vip", "Make Them a VIP"), ("unvip", "Take Their VIP Away"), ("mod", "Make Them a Moderator"), ("unmod", "Take Their Moderator Away")];
+const RAID_DO: &[(&str, &str)] = &[("start", "Start It"), ("cancel", "Cancel It")];
+const MEDIA_DO: &[(&str, &str)] = &[("play", "Play"), ("pause", "Pause"), ("restart", "Restart"), ("stop", "Stop"), ("next", "Next"), ("previous", "Previous")];
 const START_STOP: &[(&str, &str)] = &[("start", "Start"), ("stop", "Stop"), ("toggle", "Start or Stop")];
 const SHOW_HIDE: &[(&str, &str)] = &[("show", "Show"), ("hide", "Hide"), ("toggle", "Show or Hide")];
 const MUTE: &[(&str, &str)] = &[("mute", "Mute"), ("unmute", "Unmute"), ("toggle", "Mute or Unmute")];
@@ -116,6 +123,9 @@ pub const TRIGGERS: &[Kind] = &[
     Kind { id: "obs", label: "OBS", note: "Needs OBS switched on in the chatbot's settings. Gives its steps %scene% (the scene now).", fields: &[
         pick("when", "When", OBS_WHEN, "scene", ""),
         f("scene", "Scene", "text", "", "For a scene change: its name (empty: any)."),
+    ] },
+    Kind { id: "web", label: "A Web Address", note: "Another tool (a Stream Deck plugin, a script, a bot) runs it by calling http://127.0.0.1:7879/action?key=YOUR-KEY&name=ITS-NAME (&user= and &input= give it %user% and %rawInput%). The key is Song Requests' secret key (Settings > Streaming > Song Requests, switched on).", fields: &[
+        f("name", "Called As", "text", "", "Empty: the action's own name."),
     ] },
     Kind { id: "manual", label: "Only When Run", note: "From another action's Run Another Action, or Run Now above.", fields: &[] },
 ];
@@ -216,6 +226,67 @@ pub const STEPS: &[Kind] = &[
     Kind { id: "clip", label: "Make a Clip", note: "Of the last 30 seconds or so. Gives the steps after it %clip% (its link). Live only.", fields: &[] },
     Kind { id: "title", label: "Set the Stream Title", note: "", fields: &[f("text", "Title", "text", "%rawInput%", "")] },
     Kind { id: "game", label: "Set the Category", note: "Twitch's category (a game, Just Chatting...), by its name.", fields: &[f("text", "Category", "text", "%rawInput%", "")] },
+    Kind { id: "poll", label: "Start a Poll", note: "Twitch. Needs you signed in again once, for the permission.", fields: &[
+        f("title", "Question", "text", "%rawInput%", ""),
+        f("choices", "Choices", "text", "Yes | No", "With | between them (2 to 5)."),
+        f("seconds", "For", "number", "60", "Seconds (15 to 1800)."),
+    ] },
+    Kind { id: "pollend", label: "End the Poll", note: "The one going now. Twitch.", fields: &[] },
+    Kind { id: "predict", label: "Start a Prediction", note: "Twitch. Needs you signed in again once, for the permission.", fields: &[
+        f("title", "Question", "text", "%rawInput%", ""),
+        f("outcomes", "Outcomes", "text", "Yes | No", "With | between them (2 to 10)."),
+        f("seconds", "Voting For", "number", "120", "Seconds (30 to 1800)."),
+    ] },
+    Kind { id: "predictend", label: "Settle the Prediction", note: "The one going now. Twitch.", fields: &[
+        pick("what", "", PREDICT_END, "resolve", ""),
+        f("winner", "Outcome That Won", "text", "%input0%", "For Settle It: its words, as the prediction has them."),
+    ] },
+    Kind { id: "reward", label: "Change a Reward", note: "A Channel Points reward. Twitch only lets an app change the rewards it made, so make it here first (Make It).", fields: &[
+        f("title", "Reward", "text", "", "Its name."),
+        pick("what", "", REWARD_DO, "enable", ""),
+        f("cost", "Cost", "number", "500", "For Change Its Cost and Make It."),
+    ] },
+    Kind { id: "ad", label: "Run an Ad", note: "Twitch. Live only.", fields: &[f("seconds", "Length", "number", "60", "Seconds: 30, 60, 90, 120, 150 or 180.")] },
+    Kind { id: "raid", label: "Raid a Channel", note: "Twitch: it counts down, then sends your viewers.", fields: &[
+        pick("what", "", RAID_DO, "start", ""),
+        f("who", "Channel", "text", "%input0%", ""),
+    ] },
+    Kind { id: "chatmode", label: "Chat Mode", note: "Twitch.", fields: &[
+        pick("mode", "Mode", CHAT_MODES, "emote", ""),
+        f("on", "On", "toggle", "true", "Off: back to normal."),
+        f("seconds", "Wait", "number", "10", "Slow mode: seconds between messages; followers-only: minutes they must have followed."),
+    ] },
+    Kind { id: "ban", label: "Ban or Unban", note: "", fields: &[
+        f("who", "Viewer", "text", "%input0%", ""),
+        pick("what", "", BAN_DO, "ban", ""),
+        f("reason", "Reason", "text", "", ""),
+    ] },
+    Kind { id: "role", label: "VIP or Moderator", note: "Twitch.", fields: &[
+        f("who", "Viewer", "text", "%input0%", ""),
+        pick("what", "", ROLE_DO, "vip", ""),
+    ] },
+    Kind { id: "discord", label: "Send to Discord", note: "Through a channel's webhook (in Discord: the channel's settings, Integrations, Webhooks, New Webhook, Copy Webhook URL).", fields: &[
+        f("webhook", "Webhook", "text", "https://discord.com/api/webhooks/", ""),
+        f("text", "Message", "text", "%user% is live!", ""),
+        f("name", "As", "text", "", "The name it's posted as (empty: the webhook's own)."),
+    ] },
+    Kind { id: "obsmedia", label: "OBS: Media", note: "A media source (a video or a sound).", fields: &[
+        f("source", "Source", "text", "", ""),
+        pick("what", "", MEDIA_DO, "restart", ""),
+    ] },
+    Kind { id: "obsbrowser", label: "OBS: Browser Source Address", note: "", fields: &[
+        f("source", "Source", "text", "", ""),
+        f("url", "Address", "text", "https://", ""),
+    ] },
+    Kind { id: "obsreplay", label: "OBS: Save the Replay", note: "With OBS's replay buffer on.", fields: &[] },
+    Kind { id: "obsshot", label: "OBS: Screenshot", note: "Of a scene or a source, to a file.", fields: &[
+        f("source", "Scene or Source", "text", "", ""),
+        f("file", "Saved As", "text", "C:\\Screenshots\\shot.png", "A .png file's place on this PC."),
+    ] },
+    Kind { id: "obsraw", label: "OBS: Any Request", note: "Any of obs-websocket's requests, by name, for what the others don't do. Its answer as %obs%.", fields: &[
+        f("request", "Request", "text", "GetVersion", ""),
+        f("data", "With", "text", "{}", "Its request data, as JSON."),
+    ] },
     Kind { id: "obsscene", label: "OBS: Switch Scene", note: "", fields: &[f("scene", "Scene", "text", "", "Its name, as OBS has it.")] },
     Kind { id: "obssource", label: "OBS: Show or Hide", note: "A source in a scene.", fields: &[
         f("source", "Source", "text", "", "Its name, as OBS has it."),
@@ -348,6 +419,7 @@ pub fn summary(a: &Value) -> String {
         "obs" => format!("When OBS: {}", label(OBS_WHEN, &s("when")).to_lowercase()),
         "presence" => format!("Each viewer, every {} minutes", t["minutes"].as_f64().unwrap_or(10.0)),
         "hotkey" => format!("On {}", s("keys")),
+        "web" => format!("When its address is called{}", if s("name").is_empty() { String::new() } else { format!(" ({})", s("name")) }),
         "filter" => format!("When a message has {}", label(RULES, &s("rule")).to_lowercase()),
         _ => "Only when run".into(),
     };

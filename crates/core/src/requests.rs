@@ -120,6 +120,18 @@ pub fn handle_req(mut stream: TcpStream) {
                 ("200 OK", ask_page(serde_json::json!({ "action": "wrongsong", "q": "", "user": who, "mod": is_mod })))
             }
         }
+        // (one of the chatbot's actions, run by its web address: name, and its user and input)
+        "/action" => {
+            let expected = REQ_KEY.lock().map(|k| k.clone()).unwrap_or_default();
+            let key = req_param(&url, "key").unwrap_or_default();
+            if expected.is_empty() || key != expected {
+                ("403 Forbidden", serde_json::json!({ "ok": false, "message": "Wrong or missing key." }))
+            } else {
+                let name = req_param(&url, "name").unwrap_or_default();
+                let input = req_param(&url, "input").unwrap_or_default();
+                ("200 OK", ask_page(serde_json::json!({ "action": "chatbot", "name": name, "q": input, "user": who })))
+            }
+        }
         _ => ("404 Not Found", serde_json::json!({ "ok": false, "message": "Not found." })),
     };
     let (ctype, body) = if as_json {

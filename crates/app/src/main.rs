@@ -10152,6 +10152,22 @@ fn plugin_app(shared: &Shared, plugin: &str, ask: serde_json::Value, answer: Box
             let path = arg(1);
             std::thread::spawn(move || send(match await_redirect(port, &path) { Ok(q) => serde_json::json!({ "ok": true, "query": q }), Err(e) => serde_json::json!({ "error": e }) }));
         }
+        // (JSON posted to a Discord webhook: the chatbot's Send to Discord; Discord's own addresses only)
+        "postJson" => {
+            let url = arg(0);
+            if plugin != "chatbot" { return send(serde_json::json!({ "error": "only OmniPulse's chatbot can" })); }
+            let ok = ["https://discord.com/api/webhooks/", "https://discordapp.com/api/webhooks/", "https://ptb.discord.com/api/webhooks/", "https://canary.discord.com/api/webhooks/"].iter().any(|p| url.starts_with(p));
+            if !ok { return send(serde_json::json!({ "error": "that isn't a Discord webhook's address (https://discord.com/api/webhooks/...)" })); }
+            let body = args.get(1).cloned().unwrap_or(serde_json::Value::Null);
+            let rt = shared.borrow().rt.clone();
+            rt.spawn(async move {
+                let got = async {
+                    let r = reqwest::Client::builder().timeout(std::time::Duration::from_secs(10)).build().map_err(|e| e.to_string())?.post(&url).json(&body).send().await.map_err(|e| e.to_string())?;
+                    if r.status().is_success() { Ok(()) } else { Err(format!("Discord said {}", r.status())) }
+                }.await;
+                send(match got { Ok(()) => serde_json::json!({ "ok": true }), Err(e) => serde_json::json!({ "error": e }) });
+            });
+        }
         // (a sound file of yours, over the music: a chatbot's Play a Sound)
         "sound" => {
             let vol = args.get(1).and_then(|v| v.as_f64()).unwrap_or(80.0);
@@ -10233,6 +10249,17 @@ fn outside_start(shared: &Shared) {
                     let user = ask["user"].as_str().unwrap_or("").to_string();
                     if ask["action"].as_str() == Some("wrongsong") {
                         wrong_song(&sh, to_server(id), &user, ask["mod"].as_bool() == Some(true));
+                    } else if ask["action"].as_str() == Some("chatbot") {
+                        // (an action run by its web address: A Web Address, the chatbot's)
+                        let reply = to_server(id);
+                        let Some(p) = plugrun::get(BOT) else { return reply(serde_json::json!({ "ok": false, "message": "The chatbot isn't on." })) };
+                        let rt = sh.borrow().rt.clone();
+                        let data = serde_json::json!({ "name": ask["name"], "user": user, "input": ask["q"] });
+                        rt.spawn(async move {
+                            let r = p.call("appEvent", vec![serde_json::json!("web"), data]).await;
+                            let msg = match r { Ok(v) => v.as_str().map(String::from).unwrap_or_else(|| "Done.".into()), Err(e) => e };
+                            reply(serde_json::json!({ "ok": !msg.starts_with("There's no"), "message": msg }));
+                        });
                     } else {
                         song_request(&sh, to_server(id), ask["q"].as_str().unwrap_or("").to_string(), user);
                     }

@@ -651,10 +651,11 @@ mod tests {
         let (wp, sp) = (web.local_addr().unwrap().port(), sock.local_addr().unwrap().port());
         // (its web side: the channel, the socket's address and a token, and its chat API, what's posted kept)
         let posted: Arc<Mutex<Vec<Value>>> = Arc::new(Mutex::new(Vec::new()));
-        let p2 = posted.clone();
+        let helixed: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+        let (p2, x2) = (posted.clone(), helixed.clone());
         rt.spawn(async move {
             while let Ok((mut tcp, _)) = web.accept().await {
-                let posted = p2.clone();
+                let (posted, helixed) = (p2.clone(), x2.clone());
                 tokio::spawn(async move {
                     let mut buf = Vec::new();
                     let mut chunk = [0u8; 4096];
@@ -671,7 +672,10 @@ mod tests {
                     let text = String::from_utf8_lossy(&buf).to_string();
                     let line = text.lines().next().unwrap_or("").to_string();
                     let body = text.split_once("\r\n\r\n").map(|x| x.1.to_string()).unwrap_or_default();
-                    let answer = if line.contains("/channels/") { json!({ "id": 5, "user_id": 7, "chatroom": { "id": 9 } }) }
+                    let answer = if line.contains("/helix/") {
+                        helixed.lock().unwrap().push(format!("{} {}", line.split(' ').take(2).collect::<Vec<_>>().join(" "), body));
+                        if line.contains("/helix/users") { json!({ "data": [{ "id": "99", "display_name": "Baddie" }] }) } else { json!({ "data": [] }) }
+                    } else if line.contains("/channels/") { json!({ "id": 5, "user_id": 7, "chatroom": { "id": 9 } }) }
                         else if line.contains("/realtime/connection") { json!({ "data": { "connections": [{ "credentials": { "url": format!("ws://127.0.0.1:{sp}/ws") }, "provider": "centrifugo" }] } }) }
                         else if line.contains("/realtime/auth/connection") { json!({ "data": { "token": "guest" } }) }
                         else if line.contains("/v1/chat") {
@@ -729,7 +733,8 @@ mod tests {
         let code = std::fs::read_to_string(root.join("main.js")).unwrap()
             .replace("https://kick.com/api/v2/channels/", &format!("http://127.0.0.1:{wp}/channels/"))
             .replace("https://web.kick.com/api/v1/realtime/", &format!("http://127.0.0.1:{wp}/realtime/"))
-            .replace("https://api.kick.com/public/v1/", &format!("http://127.0.0.1:{wp}/v1/"));
+            .replace("https://api.kick.com/public/v1/", &format!("http://127.0.0.1:{wp}/v1/"))
+            .replace("https://api.twitch.tv/helix/", &format!("http://127.0.0.1:{wp}/helix/"));
         let mut m: core::plugins::Manifest = serde_json::from_str(&std::fs::read_to_string(root.join("manifest.json")).unwrap()).unwrap();
         m.hosts.push("127.0.0.1".into());
         let pkg = core::plugins::Package { manifest: m, code, digest: String::new(), bundled: true };
@@ -740,8 +745,15 @@ mod tests {
             { "name": "Twitch Only", "on": true, "trigger": t("command", json!({ "command": "!hello", "cooldown": 0, "usercooldown": 0, "from": "twitch" })), "steps": [st("say", json!({ "text": "never" }))] },
             { "name": "Sub", "on": true, "trigger": t("event", json!({ "event": "sub" })), "steps": [st("say", json!({ "text": "Thanks %user%", "reply": false }))] },
             { "name": "Echo", "on": true, "trigger": t("message", json!({ "text": "hi viewer" })), "steps": [st("say", json!({ "text": "looped", "reply": false }))] },
+            { "name": "Manage", "on": true, "trigger": t("manual", json!({})), "steps": [
+                st("poll", json!({ "title": "Best?", "choices": "Cats | Dogs", "seconds": 30 })),
+                st("ban", json!({ "who": "baddie", "reason": "spam" })),
+                st("chatmode", json!({ "mode": "slow", "seconds": 20 })),
+                st("discord", json!({ "webhook": "https://discord.com/api/webhooks/1/x", "text": "Live!" })),
+            ] },
+            { "name": "Hook", "on": true, "trigger": t("web", json!({ "name": "deploy" })), "steps": [st("say", json!({ "text": "Web %user% %rawInput%", "reply": false }))] },
         ]);
-        let p = start(&pkg, &json!({ "kickOn": true, "kickChannel": "me", "kickToken": "kt", "kickUserId": "7", "kickLogin": "MeBot", "kickBotToken": "bt", "kickBotLogin": "TheBot", "actions": actions }), rt.handle().clone()).unwrap();
+        let p = start(&pkg, &json!({ "kickOn": true, "kickChannel": "me", "kickToken": "kt", "kickUserId": "7", "kickLogin": "MeBot", "kickBotToken": "bt", "kickBotLogin": "TheBot", "userId": "1", "twitchClientId": "c", "actions": actions }), rt.handle().clone()).unwrap();
         let said = |text: &str| posted.lock().unwrap().iter().any(|b| b["content"] == text);
         let until = Instant::now() + Duration::from_secs(10);
         let done = || said("Added Take On Me.") && said("Hi Viewer on kick") && said("Thanks NewSub") && asked.lock().unwrap().iter().any(|a| a["op"] == "alert" && a["args"][0]["user"] == "NewSub");
@@ -758,6 +770,20 @@ mod tests {
         assert!(!said("never") && !said("looped"), "{b:#?}");
         assert!(h.iter().any(|x| x == &json!({})), "{h:#?}");
         assert!(h.iter().any(|x| x["subscribe"]["channel"] == "chatrooms.9.v2") && h.iter().any(|x| x["connect"]["token"] == "guest"), "{h:#?}");
+        // (Twitch's management steps: as Twitch's API has them; Discord's webhook through the app)
+        let ran = rt.block_on(p.call("runAction", vec![json!("Manage")])).unwrap();
+        assert_eq!(ran, json!("Ran Manage."));
+        let web = rt.block_on(p.call("appEvent", vec![json!("web"), json!({ "name": "Deploy", "user": "Tool", "input": "now please" })])).unwrap();
+        assert_eq!(web, json!("Ran Hook."));
+        let until = Instant::now() + Duration::from_secs(5);
+        while (helixed.lock().unwrap().len() < 4 || !said("Web Tool now please")) && Instant::now() < until { std::thread::sleep(Duration::from_millis(50)); }
+        let x = helixed.lock().unwrap().clone();
+        let has = |want: &str| x.iter().any(|l| l.contains(want));
+        assert!(has("POST /helix/polls") && has("\"title\":\"Best?\"") && has("\"duration\":30"), "{x:#?}");
+        assert!(has("POST /helix/moderation/bans?broadcaster_id=1&moderator_id=1") && has("\"user_id\":\"99\""), "{x:#?}");
+        assert!(has("PATCH /helix/chat/settings") && has("\"slow_mode_wait_time\":20"), "{x:#?}");
+        assert!(asked.lock().unwrap().iter().any(|a| a["op"] == "postJson" && a["args"][1]["content"] == "Live!"));
+        assert!(said("Web Tool now please"), "{:#?}", posted.lock().unwrap());
         drop(p);
         stop("chatbot");
     }

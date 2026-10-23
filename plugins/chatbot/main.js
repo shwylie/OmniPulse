@@ -688,6 +688,97 @@ async function step(st, ctx, depth) {
       await helix("PATCH", "channels?broadcaster_id=" + S().userId, { game_id: id });
       break;
     }
+    case "poll": {
+      const choices = f("choices").split("|").map((x) => ({ title: x.trim().slice(0, 25) })).filter((x) => x.title).slice(0, 5);
+      if (choices.length < 2) throw new Error("a poll needs two choices at least");
+      await helix("POST", "polls", { broadcaster_id: S().userId, title: f("title").slice(0, 60) || "Poll", choices, duration: Math.min(1800, Math.max(15, num(f("seconds")) || 60)) });
+      break;
+    }
+    case "pollend": {
+      const p = ((await helix("GET", "polls?broadcaster_id=" + S().userId + "&first=1")).data || [])[0];
+      if (!p || p.status !== "ACTIVE") throw new Error("there's no poll going");
+      await helix("PATCH", "polls", { broadcaster_id: S().userId, id: p.id, status: "TERMINATED" });
+      break;
+    }
+    case "predict": {
+      const outcomes = f("outcomes").split("|").map((x) => ({ title: x.trim().slice(0, 25) })).filter((x) => x.title).slice(0, 10);
+      if (outcomes.length < 2) throw new Error("a prediction needs two outcomes at least");
+      await helix("POST", "predictions", { broadcaster_id: S().userId, title: f("title").slice(0, 45) || "Prediction", outcomes, prediction_window: Math.min(1800, Math.max(30, num(f("seconds")) || 120)) });
+      break;
+    }
+    case "predictend": {
+      const p = ((await helix("GET", "predictions?broadcaster_id=" + S().userId + "&first=1")).data || [])[0];
+      if (!p || !["ACTIVE", "LOCKED"].includes(p.status)) throw new Error("there's no prediction going");
+      if (st.what === "lock") { await helix("PATCH", "predictions", { broadcaster_id: S().userId, id: p.id, status: "LOCKED" }); break; }
+      if (st.what === "cancel") { await helix("PATCH", "predictions", { broadcaster_id: S().userId, id: p.id, status: "CANCELED" }); break; }
+      const w = f("winner").trim().toLowerCase();
+      const o = (p.outcomes || []).find((x) => String(x.title).toLowerCase() === w) || (p.outcomes || []).find((x) => String(x.title).toLowerCase().startsWith(w) && w);
+      if (!o) throw new Error("the prediction has no outcome called " + f("winner"));
+      await helix("PATCH", "predictions", { broadcaster_id: S().userId, id: p.id, status: "RESOLVED", winning_outcome_id: o.id });
+      break;
+    }
+    case "reward": {
+      const title = f("title").trim();
+      if (st.what === "create") { await helix("POST", "channel_points/custom_rewards?broadcaster_id=" + S().userId, { title: title.slice(0, 45), cost: Math.max(1, Math.round(num(f("cost")) || 500)) }); break; }
+      const all = (await helix("GET", "channel_points/custom_rewards?broadcaster_id=" + S().userId + "&only_manageable_rewards=true")).data || [];
+      const r = all.find((x) => String(x.title).toLowerCase() === title.toLowerCase());
+      if (!r) throw new Error("there's no reward called " + title + " that OmniPulse made (Twitch only lets an app change its own)");
+      const set = { enable: { is_enabled: true }, disable: { is_enabled: false }, pause: { is_paused: true }, unpause: { is_paused: false }, cost: { cost: Math.max(1, Math.round(num(f("cost")))) } }[st.what || "enable"];
+      await helix("PATCH", "channel_points/custom_rewards?broadcaster_id=" + S().userId + "&id=" + r.id, set);
+      break;
+    }
+    case "ad": await helix("POST", "channels/commercial", { broadcaster_id: S().userId, length: Math.min(180, Math.max(30, Math.round(num(f("seconds")) / 30) * 30 || 60)) }); break;
+    case "raid": {
+      if (st.what === "cancel") { await helix("DELETE", "raids?broadcaster_id=" + S().userId); break; }
+      const id = await twitchUserId(f("who"));
+      await helix("POST", "raids?from_broadcaster_id=" + S().userId + "&to_broadcaster_id=" + id);
+      break;
+    }
+    case "chatmode": {
+      const on = yes(st.on), wait = Math.max(0, Math.round(num(f("seconds"))));
+      const body = { emote: { emote_mode: on }, subscriber: { subscriber_mode: on }, unique: { unique_chat_mode: on },
+        slow: on ? { slow_mode: true, slow_mode_wait_time: Math.min(120, Math.max(3, wait || 10)) } : { slow_mode: false },
+        follower: on ? { follower_mode: true, follower_mode_duration: Math.min(129600, wait) } : { follower_mode: false } }[st.mode || "emote"];
+      await helix("PATCH", "chat/settings?broadcaster_id=" + S().userId + "&moderator_id=" + S().userId, body);
+      break;
+    }
+    case "ban": {
+      const who = f("who").replace("@", "").trim();
+      if (!who) break;
+      if (onKick) {
+        if (who.toLowerCase() !== String(ctx.user || "").toLowerCase() || !ctx.userId) throw new Error("on Kick, only whoever started it can be banned or unbanned (Kick's API has no look-up by name)");
+        if (st.what === "unban") await kickApi("DELETE", "moderation/bans", { broadcaster_user_id: Number(S().kickUserId), user_id: Number(ctx.userId) });
+        else await kickApi("POST", "moderation/bans", { broadcaster_user_id: Number(S().kickUserId), user_id: Number(ctx.userId), reason: f("reason") || undefined });
+        break;
+      }
+      const id = await twitchUserId(who);
+      if (st.what === "unban") await helix("DELETE", "moderation/bans?broadcaster_id=" + S().userId + "&moderator_id=" + S().userId + "&user_id=" + id);
+      else await helix("POST", "moderation/bans?broadcaster_id=" + S().userId + "&moderator_id=" + S().userId, { data: { user_id: id, reason: f("reason") } });
+      break;
+    }
+    case "role": {
+      const id = await twitchUserId(f("who"));
+      const q = "?broadcaster_id=" + S().userId + "&user_id=" + id;
+      const path = { vip: ["POST", "channels/vips"], unvip: ["DELETE", "channels/vips"], mod: ["POST", "moderation/moderators"], unmod: ["DELETE", "moderation/moderators"] }[st.what || "vip"];
+      await helix(path[0], path[1] + q);
+      break;
+    }
+    case "discord": {
+      const body = { content: f("text").slice(0, 2000) };
+      if (f("name").trim()) body.username = f("name").trim().slice(0, 80);
+      await OmniPulse.app.postJson(f("webhook").trim(), body);
+      break;
+    }
+    case "obsmedia": await obsCall("TriggerMediaInputAction", { inputName: f("source"), mediaAction: "OBS_WEBSOCKET_MEDIA_INPUT_ACTION_" + String(st.what || "restart").toUpperCase() }); break;
+    case "obsbrowser": await obsCall("SetInputSettings", { inputName: f("source"), inputSettings: { url: f("url") } }); break;
+    case "obsreplay": await obsCall("SaveReplayBuffer"); break;
+    case "obsshot": await obsCall("SaveSourceScreenshot", { sourceName: f("source"), imageFormat: "png", imageFilePath: f("file") }); break;
+    case "obsraw": {
+      let data = {};
+      try { data = JSON.parse(f("data") || "{}"); } catch (e) { throw new Error("its request data isn't JSON"); }
+      ctx.obs = JSON.stringify(await obsCall(f("request").trim(), data)).slice(0, 500);
+      break;
+    }
     case "obsscene": await obsCall("SetCurrentProgramScene", { sceneName: f("scene") }); break;
     case "obssource": {
       const sceneName = f("scene") || (await obsCall("GetCurrentProgramScene")).currentProgramSceneName;
@@ -1154,6 +1245,15 @@ function onKick(event, d) {
   if (!KICK_SEEN[ev]) { KICK_SEEN[ev] = true; OmniPulse.log("kick event not used yet: " + ev + " " + JSON.stringify(d).slice(0, 300)); }
 }
 
+// A Twitch channel's id, by its name
+async function twitchUserId(name) {
+  const login = String(name || "").replace("@", "").trim().toLowerCase();
+  if (!login) throw new Error("no channel named");
+  const u = ((await helix("GET", "users?login=" + encodeURIComponent(login))).data || [])[0];
+  if (!u) throw new Error("there's no Twitch account called " + login);
+  return u.id;
+}
+
 // Twitch's API, as your channel (its moderation, its shoutouts)
 async function helix(method, path, body) {
   const r = await OmniPulse.fetch("https://api.twitch.tv/helix/" + path, {
@@ -1309,6 +1409,12 @@ OmniPulse.register({
   // the app's own: a song starting, a song requested
   appEvent(kind, data) {
     const d = data || {};
+    if (kind === "web") {
+      const want = String(d.name || "").trim().toLowerCase();
+      const hits = live.filter((a) => a.trigger.type === "web" && String(a.trigger.name || a.name || "").trim().toLowerCase() === want);
+      hits.forEach((a) => run(a, Object.assign({ user: d.user || "", rawInput: d.input || "", message: d.input || "", platform: "all" }, words(d.input || ""))));
+      return hits.length ? "Ran " + hits.map((a) => a.name).join(", ") + "." : "There's no action called " + d.name + " with A Web Address as its trigger.";
+    }
     if (kind === "hotkey") {
       const keys = (k) => String(k || "").toLowerCase().replace(/\s+/g, "").replace(/win|windows|cmd|command/g, "super").replace(/control/g, "ctrl");
       for (const a of live) if (a.trigger.type === "hotkey" && keys(a.trigger.keys) === keys(d.keys)) run(a, { user: S().login || S().kickLogin || "", platform: "all" });
