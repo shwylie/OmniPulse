@@ -66,7 +66,7 @@ export struct Shelf { title: string, tiles: [Tile], open: bool, gone: bool, show
 export struct Line { text: string }
 /// A switch in Settings: under its section's heading (head, on the first of a section)
 /// An account in Settings: its name, what's known (who's signed in, or what it needs), and its button
-export struct Account { name: string, status: string, signed: bool, busy: bool, keys: string, switch: string, on: bool, manage: string, settings: string }
+export struct Account { name: string, status: string, signed: bool, busy: bool, keys: string, switch: string, on: bool, manage: string, settings: string, short: string }
 // Settings' search: a setting found (its path, what it is), where it lives (its category, a panel to
 // open), and its switch if it has one
 export struct SetHit { path: string, label: string, note: string, cat: string, panel: string, key: string, on: bool, toggle: bool }
@@ -125,6 +125,10 @@ global Icons {
     out property <string> flask: "M19.8 18.4L14 10.67V6.5l1.35-1.69c.26-.33.03-.81-.39-.81H9.04c-.42 0-.65.48-.39.81L10 6.5v4.17L4.2 18.4c-.49.66-.02 1.6.8 1.6h14c.82 0 1.29-.94.8-1.6z";
     out property <string> backup: "M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96zM14 13v4h-4v-4H7l5-5 5 5h-3z";
     out property <string> restore: "M13 3a9 9 0 0 0-9 9H1l3.89 3.89.07.14L9 12H6c0-3.87 3.13-7 7-7s7 3.13 7 7-3.13 7-7 7c-1.93 0-3.68-.79-4.94-2.06l-1.42 1.42A8.954 8.954 0 0 0 13 21a9 9 0 0 0 0-18z";
+    out property <string> login: "M11 7L9.6 8.4l2.6 2.6H2v2h10.2l-2.6 2.6L11 17l5-5-5-5zm9 12h-8v2h8c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2h-8v2h8v14z";
+    out property <string> key: "M12.65 10C11.83 7.67 9.61 6 7 6c-3.31 0-6 2.69-6 6s2.69 6 6 6c2.61 0 4.83-1.67 5.65-4H17v4h4v-4h2v-4H12.65zM7 14c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2z";
+    out property <string> lastfm: "M10.584 17.21l-.88-2.392s-1.43 1.594-3.573 1.594c-1.897 0-3.244-1.649-3.244-4.288 0-3.382 1.704-4.591 3.381-4.591 2.42 0 3.189 1.567 3.849 3.574l.88 2.749c.88 2.666 2.529 4.81 7.285 4.81 3.409 0 5.718-1.044 5.718-3.793 0-2.227-1.265-3.381-3.63-3.931l-1.758-.385c-1.21-.275-1.567-.77-1.567-1.595 0-.934.742-1.484 1.952-1.484 1.32 0 2.034.495 2.144 1.677l2.749-.33c-.22-2.474-1.924-3.492-4.729-3.492-2.474 0-4.893.935-4.893 3.932 0 1.87.907 3.051 3.189 3.601l1.869.44c1.402.33 1.869.907 1.869 1.704 0 1.017-.99 1.43-2.86 1.43-2.776 0-3.93-1.457-4.59-3.464l-.907-2.75c-1.155-3.573-2.997-4.893-6.653-4.893C2.144 5.333 0 7.89 0 12.233c0 4.18 2.144 6.434 5.993 6.434 3.106 0 4.591-1.457 4.591-1.457z";
+    out property <string> download: "M5 20h14v-2H5v2zM19 9h-4V3H9v6H5l7 7 7-7z";
     out property <string> robot: "M20 9V7c0-1.1-.9-2-2-2h-3c0-1.66-1.34-3-3-3S9 3.34 9 5H6c-1.1 0-2 .9-2 2v2c-1.66 0-3 1.34-3 3s1.34 3 3 3v4c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2v-4c1.66 0 3-1.34 3-3s-1.34-3-3-3zM7.5 11.5c0-.83.67-1.5 1.5-1.5s1.5.67 1.5 1.5S9.83 13 9 13s-1.5-.67-1.5-1.5zM16 17H8v-2h8v2zm-1-4c-.83 0-1.5-.67-1.5-1.5S14.17 10 15 10s1.5.67 1.5 1.5S15.83 13 15 13z";
     out property <string> send: "M2.01 21L23 12 2.01 3 2 10l15 2-15 2z";
     out property <string> bell: "M12 22c1.1 0 2-.9 2-2h-4c0 1.1.89 2 2 2zm6-6v-5c0-3.07-1.64-5.64-4.5-6.32V4c0-.83-.67-1.5-1.5-1.5s-1.5.67-1.5 1.5v.68C7.63 5.36 6 7.92 6 11v5l-2 2v1h16v-1l-2-2z";
@@ -1788,6 +1792,58 @@ component GroupSwitch inherits HorizontalLayout {
     Toggle { checked <=> root.checked; y: (parent.height - self.height) / 2; toggled => { root.toggled(self.checked); } }
 }
 
+/// An account, as a tile: its mark, a light (signed in, waiting, out), who, its switch, and its icons (its plans,
+/// its keys, its settings, signing in or out); all it says, in a tip over it
+component AccountTile inherits Rectangle {
+    in property <Account> acc;
+    callback act();
+    callback keys();
+    callback settings();
+    callback manage();
+    callback toggle();
+    property <color> tint: root.acc.name == "SoundCloud" ? #ff5500 : root.acc.name == "Spotify" ? #1db954 : root.acc.name == "Last.fm" ? #d51007 : #ff3b3b;
+    height: 112px;
+    border-radius: 14px;
+    background: Theme.panel;
+    border-width: 1px;
+    border-color: root.acc.signed ? root.tint.with-alpha(0.65) : Theme.line;
+    HiGlow { lit: Hi.label != "" && (Hi.label == root.acc.name || Hi.label == "Accounts"); r: 14px; }
+    VerticalLayout {
+        padding: 12px;
+        spacing: 5px;
+        HorizontalLayout {
+            spacing: 7px;
+            Glyph { d: root.acc.name == "SoundCloud" ? Icons.soundcloud : root.acc.name == "Spotify" ? Icons.spotify : root.acc.name == "Last.fm" ? Icons.lastfm : Icons.youtube; width: 16px; height: 16px; y: (parent.height - self.height) / 2; fill: root.tint; }
+            Text { text: root.acc.name; color: Theme.text; font-weight: 700; font-size: 13px; overflow: elide; horizontal-stretch: 1; }
+        }
+        HorizontalLayout {
+            spacing: 6px;
+            Rectangle { width: 7px; height: 7px; y: (parent.height - self.height) / 2; border-radius: 4px; background: root.acc.busy ? #ffb547 : root.acc.signed ? #4ad295 : #4a5060; }
+            Text { text: root.acc.short; color: Theme.text.mix(Theme.muted, 0.4); font-size: 12px; overflow: elide; horizontal-stretch: 1; }
+        }
+        Rectangle {
+            vertical-stretch: 1;
+            tsa := TouchArea { }
+            TipSpot { tip: root.acc.status; hover: tsa.has-hover; }
+        }
+        HorizontalLayout {
+            spacing: 2px;
+            if root.acc.switch != "": Toggle { checked: root.acc.on; y: (parent.height - self.height) / 2; toggled => { root.toggle(); } }
+            Rectangle { horizontal-stretch: 1; }
+            if root.acc.manage != "": IconButton { d: Icons.open; size: 30px; tip: "Manage your subscription, on its site"; clicked => { root.manage(); } }
+            if root.acc.keys != "": IconButton { d: Icons.key; size: 30px; tip: root.acc.keys + ": your own app keys, for requests of your own"; clicked => { root.keys(); } }
+            if root.acc.settings != "": IconButton { d: Icons.gear; size: 30px; tip: root.acc.name + "'s settings"; clicked => { root.settings(); } }
+            IconButton {
+                d: root.acc.signed ? Icons.logout : Icons.login;
+                size: 30px;
+                tint: root.acc.signed ? Theme.muted : Theme.accent;
+                tip: root.acc.busy ? "Waiting: finish signing in in your browser" : root.acc.signed ? "Sign out" : "Sign in";
+                clicked => { if (!root.acc.busy) { root.act(); } }
+            }
+        }
+    }
+}
+
 /// (a line between a group's rows)
 component GroupLine inherits Rectangle { height: 1px; background: Theme.line; }
 
@@ -1848,7 +1904,7 @@ component SetRowView inherits Card {
             // (its height at the width it gets: wrapped onto more lines in a narrow window, all of it counted)
             if root.r.note != "": Text { text: root.r.note; color: Theme.muted; font-size: 12px; wrap: word-wrap; min-height: self.preferred-height; }
         }
-        if root.r.more: Pill { label: "Settings ›"; y: (parent.height - self.height) / 2; clicked => { root.more(root.r.key); } }
+        if root.r.more: IconButton { d: Icons.gear; size: 36px; tip: root.r.label + ": its settings"; y: (parent.height - self.height) / 2; clicked => { root.more(root.r.key); } }
         if root.r.button != "": Pill { label: root.r.button + " ›"; y: (parent.height - self.height) / 2; clicked => { root.more(root.r.key); } }
         if root.r.button == "": Toggle { checked: root.r.on; y: (parent.height - self.height) / 2; toggled => { root.toggle(root.r.key); } }
     }
@@ -4474,67 +4530,54 @@ export component AppWindow inherits Window {
                                 }
                             }
                             if root.set-cat == "Integrations" && root.set-query == "": VerticalLayout {
-                                spacing: 14px;
-                                Card {
-                                    VerticalLayout {
-                                        padding: 16px;
-                                        padding-top: 8px;
-                                        padding-bottom: 8px;
-                                        for acc[i] in root.accounts: VerticalLayout {
-                                            if i > 0: Rectangle { height: 1px; background: Theme.line; }
-                                            // (its name and status the whole width, its buttons on a line of their own under
-                                            // them: never squeezed into a column beside them)
-                                            HorizontalLayout {
-                                                padding-top: 8px;
-                                                padding-bottom: 8px;
-                                                spacing: 12px;
-                                                VerticalLayout {
-                                                    horizontal-stretch: 1;
-                                                    alignment: center;
-                                                    spacing: 2px;
-                                                    Text { text: acc.name; color: Theme.text; font-weight: 700; }
-                                                    Text { text: acc.status; color: Theme.muted; font-size: 12px; wrap: word-wrap; min-height: self.preferred-height; }
-                                                    Rectangle { height: 6px; }
-                                                    HorizontalLayout {
-                                                        alignment: start;
-                                                        spacing: 8px;
-                                                        // (the platform's plans: Go+, Premium, Pro...)
-                                                        if acc.manage != "": Pill { label: "Manage subscription"; clicked => { root.open-web(acc.manage); } }
-                                                        if acc.keys != "": Pill { label: acc.keys; clicked => { root.account-keys(i); } }
-                                                        // (its own settings page: YouTube Music's)
-                                                        if acc.settings != "": Pill { label: "Settings"; clicked => { root.account-settings(acc.settings); } }
-                                                        Pill {
-                                                            label: acc.busy ? "Waiting..." : acc.signed ? "Sign out" : "Sign in";
-                                                            on: !acc.signed && !acc.busy;
-                                                            clicked => { if (!acc.busy) { root.account-act(i); } }
-                                                        }
-                                                    }
-                                                }
-                                                // (its platform, switched on or off here too: SoundCloud, Spotify, YouTube Music,
-                                                // Last.fm's scrobbling)
-                                                if acc.switch != "": Toggle { checked: acc.on; y: 4px; toggled => { root.set-toggle(acc.switch); } }
+                                spacing: 10px;
+                                // ---- your accounts: a tile each ----
+                                SectionHead { text: "Your Accounts"; }
+                                HorizontalLayout {
+                                    spacing: 8px;
+                                    for acc[i] in root.accounts: AccountTile {
+                                        horizontal-stretch: 1;
+                                        preferred-width: 0px;
+                                        min-width: 0px;
+                                        acc: acc;
+                                        act => { root.account-act(i); }
+                                        keys => { root.account-keys(i); }
+                                        settings => { root.account-settings(acc.settings); }
+                                        manage => { root.open-web(acc.manage); }
+                                        toggle => { root.set-toggle(acc.switch); }
+                                    }
+                                }
+                                // ---- finding music ----
+                                SectionHead { text: "Finding Music"; }
+                                VerticalLayout {
+                                    for r[i] in root.set-rows-integrations: VerticalLayout {
+                                        if r.key == "catOn" || r.key == "mbOn": VerticalLayout { padding-bottom: 10px; SetRowView { r: r; toggle(k) => { root.set-toggle(k); } more(k) => { root.set-more(k); } } }
+                                    }
+                                    // (Apple Music: an import, once, read only)
+                                    Card {
+                                        HorizontalLayout {
+                                            padding: 16px;
+                                            padding-top: 12px;
+                                            padding-bottom: 12px;
+                                            spacing: 10px;
+                                            VerticalLayout {
+                                                horizontal-stretch: 1;
+                                                alignment: center;
+                                                spacing: 2px;
+                                                HiTitle { text: "Apple Music"; }
+                                                Text { text: root.apple-note; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
                                             }
+                                            IconButton { d: Icons.download; size: 38px; tint: Theme.accent; tip: root.apple-label + ": your loved songs and playlists, from Apple Music"; y: (parent.height - self.height) / 2; clicked => { root.apple-import(); } }
                                         }
                                     }
                                 }
-                                // Apple Music: an import, once (read only)
-                                Card {
-                                    HorizontalLayout {
-                                        padding: 16px;
-                                        padding-top: 12px;
-                                        padding-bottom: 12px;
-                                        spacing: 10px;
-                                        VerticalLayout {
-                                            horizontal-stretch: 1;
-                                            alignment: center;
-                                            spacing: 2px;
-                                            Text { text: "Apple Music"; color: Theme.text; font-weight: 700; }
-                                            Text { text: root.apple-note; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
-                                        }
-                                        Pill { label: root.apple-label; y: (parent.height - self.height) / 2; clicked => { root.apple-import(); } }
+                                // ---- the rest ----
+                                SectionHead { text: "With Friends, and Elsewhere"; }
+                                VerticalLayout {
+                                    for r[i] in root.set-rows-integrations: VerticalLayout {
+                                        if r.key != "catOn" && r.key != "mbOn": VerticalLayout { padding-bottom: 10px; SetRowView { r: r; toggle(k) => { root.set-toggle(k); } more(k) => { root.set-more(k); } } }
                                     }
                                 }
-                                for r[i] in root.set-rows-integrations: SetRowView { r: r; toggle(k) => { root.set-toggle(k); } more(k) => { root.set-more(k); } }
                             }
                             if root.set-cat == "Plugins" && root.set-query == "": VerticalLayout {
                                 spacing: 14px;

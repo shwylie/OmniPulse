@@ -7618,6 +7618,11 @@ fn accounts_paint(shared: &Shared) {
         let signed = account_signed(key);
         let busy = ACCOUNT_BUSY.with(|b| b.borrow().contains(key));
         let who = if private { None } else { ACCOUNT_NAMES.with(|n| n.borrow().get(key).cloned()).filter(|s| !s.is_empty()) };
+        // (its tile's line: who, short; all of it, in its tip)
+        let short = if busy { "Signing in...".to_string() } else if !signed { "Not signed in".to_string() } else {
+            let plan = if key == "spotify" && omnipulse_core::spotify_engine::spe_signed_in() { match omnipulse_core::spotify_engine::spe_premium() { Some(false) => " · Free", _ => " · Premium" } } else { "" };
+            format!("{}{plan}", who.clone().unwrap_or_else(|| "Signed in".into()))
+        };
         let status = if busy {
             "Finish signing in in your browser.".to_string()
         } else if signed {
@@ -7648,7 +7653,7 @@ fn accounts_paint(shared: &Shared) {
         let on = SET_ROWS.iter().find(|r| r.3 == sw).map(|r| set_row_on(&prefs, sw, r.4)).unwrap_or(true);
         // (each platform's plans, as the web app's Manage subscription links)
         let manage = match key { "soundcloud" => "https://soundcloud.com/you/subscriptions", "spotify" => "https://www.spotify.com/account/subscription/manage/", "youtube" => "https://www.youtube.com/paid_memberships", _ => "https://www.last.fm/settings/subscription" };
-        Account { name: name.into(), status: status.into(), signed, busy, keys: keys.into(), switch: sw.into(), on, manage: if signed { manage.into() } else { "".into() }, settings: if key == "youtube" { "youtube".into() } else { "".into() } }
+        Account { short: short.into(), name: name.into(), status: status.into(), signed, busy, keys: keys.into(), switch: sw.into(), on, manage: if signed { manage.into() } else { "".into() }, settings: if key == "youtube" { "youtube".into() } else { "".into() } }
     }).collect();
     ui.set_accounts(ModelRc::from(Rc::new(VecModel::from(rows))));
 }
