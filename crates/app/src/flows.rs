@@ -36,7 +36,17 @@ const WHO: &[(&str, &str)] = &[("everyone", "Everyone"), ("subscribers", "Subscr
 const EVENTS: &[(&str, &str)] = &[
     ("follow", "A Follow"), ("sub", "A New Sub"), ("resub", "A Resub"), ("gift", "Gifted Subs"), ("bits", "Bits"),
     ("raid", "A Raid"), ("hypetrain", "A Hype Train"), ("poll", "A Poll"), ("reward", "A Channel Points Reward"),
+    ("firstmsg", "A Viewer's First Message"), ("online", "Going Live"), ("offline", "Going Offline"), ("adbreak", "An Ad Break"),
 ];
+const OBS_WHEN: &[(&str, &str)] = &[
+    ("scene", "The Scene Changes"), ("streamstart", "Streaming Starts"), ("streamstop", "Streaming Stops"),
+    ("recordstart", "Recording Starts"), ("recordstop", "Recording Stops"),
+];
+const START_STOP: &[(&str, &str)] = &[("start", "Start"), ("stop", "Stop"), ("toggle", "Start or Stop")];
+const SHOW_HIDE: &[(&str, &str)] = &[("show", "Show"), ("hide", "Hide"), ("toggle", "Show or Hide")];
+const MUTE: &[(&str, &str)] = &[("mute", "Mute"), ("unmute", "Unmute"), ("toggle", "Mute or Unmute")];
+const ON_OFF: &[(&str, &str)] = &[("on", "On"), ("off", "Off")];
+const COLOURS: &[(&str, &str)] = &[("primary", "Your Channel's Colour"), ("blue", "Blue"), ("green", "Green"), ("orange", "Orange"), ("purple", "Purple")];
 const MATCH: &[(&str, &str)] = &[("contains", "Contains"), ("starts", "Starts With"), ("exact", "Is Exactly"), ("regex", "Matches (Regex)")];
 const TESTS: &[(&str, &str)] = &[
     ("is", "Is"), ("isnt", "Isn't"), ("contains", "Contains"), ("more", "Is More Than"), ("less", "Is Less Than"),
@@ -72,6 +82,10 @@ pub const TRIGGERS: &[Kind] = &[
     ] },
     Kind { id: "song", label: "The Music", note: "Gives its steps %song% and %artist%; for a request, %user% (who asked).", fields: &[
         pick("when", "When", &[("start", "A Song Starts"), ("request", "A Song Is Requested")], "start", ""),
+    ] },
+    Kind { id: "obs", label: "OBS", note: "Needs OBS switched on in the chatbot's settings. Gives its steps %scene% (the scene now).", fields: &[
+        pick("when", "When", OBS_WHEN, "scene", ""),
+        f("scene", "Scene", "text", "", "For a scene change: its name (empty: any)."),
     ] },
     Kind { id: "manual", label: "Only When Run", note: "From another action's Run Another Action, or Run Now above.", fields: &[] },
 ];
@@ -123,6 +137,37 @@ pub const STEPS: &[Kind] = &[
     Kind { id: "shoutout", label: "Shout Out", note: "Twitch's own shoutout. Needs you signed in again once, for the permission.", fields: &[
         f("who", "Channel", "text", "%input0%", "Their channel name."),
     ] },
+    Kind { id: "delete", label: "Delete the Message", note: "The message that started it. Needs you signed in again once, for the permission.", fields: &[] },
+    Kind { id: "announce", label: "Send an Announcement", note: "Highlighted in chat. Needs you signed in again once, for the permission.", fields: &[
+        f("text", "Message", "text", "Thanks for being here!", ""),
+        pick("colour", "Colour", COLOURS, "primary", ""),
+    ] },
+    Kind { id: "marker", label: "Add a Stream Marker", note: "Shows in your stream's video, to find later. Live only.", fields: &[f("text", "Note", "text", "%user%: %rawInput%", "")] },
+    Kind { id: "clip", label: "Make a Clip", note: "Of the last 30 seconds or so. Gives the steps after it %clip% (its link). Live only.", fields: &[] },
+    Kind { id: "title", label: "Set the Stream Title", note: "", fields: &[f("text", "Title", "text", "%rawInput%", "")] },
+    Kind { id: "game", label: "Set the Category", note: "Twitch's category (a game, Just Chatting...), by its name.", fields: &[f("text", "Category", "text", "%rawInput%", "")] },
+    Kind { id: "obsscene", label: "OBS: Switch Scene", note: "", fields: &[f("scene", "Scene", "text", "", "Its name, as OBS has it.")] },
+    Kind { id: "obssource", label: "OBS: Show or Hide", note: "A source in a scene.", fields: &[
+        f("source", "Source", "text", "", "Its name, as OBS has it."),
+        f("scene", "In Scene", "text", "", "Empty: the scene that's on."),
+        pick("show", "", SHOW_HIDE, "toggle", ""),
+        f("for", "For", "number", "0", "Seconds, then back as it was (0: it stays)."),
+    ] },
+    Kind { id: "obstext", label: "OBS: Set Text", note: "A Text source's words.", fields: &[
+        f("source", "Source", "text", "", ""),
+        f("text", "Text", "text", "%user%", ""),
+    ] },
+    Kind { id: "obsmute", label: "OBS: Mute or Unmute", note: "An audio source (a mic, desktop audio...).", fields: &[
+        f("source", "Source", "text", "Mic/Aux", ""),
+        pick("what", "", MUTE, "toggle", ""),
+    ] },
+    Kind { id: "obsfilter", label: "OBS: Filter On or Off", note: "", fields: &[
+        f("source", "Source", "text", "", ""),
+        f("filter", "Filter", "text", "", ""),
+        pick("what", "", ON_OFF, "on", ""),
+    ] },
+    Kind { id: "obsrecord", label: "OBS: Recording", note: "", fields: &[pick("what", "", START_STOP, "start", "")] },
+    Kind { id: "obsstream", label: "OBS: Streaming", note: "", fields: &[pick("what", "", START_STOP, "start", "")] },
     Kind { id: "run", label: "Run Another Action", note: "", fields: &[f("action", "Action", "text", "", "Its name.")] },
     Kind { id: "status", label: "Show in OmniPulse", note: "On OmniPulse's status line: for trying an action out.", fields: &[f("text", "Text", "text", "%user% used it.", "")] },
 ];
@@ -169,6 +214,9 @@ pub fn templates() -> Vec<(&'static str, Value)> {
             step("say", json!({ "text": "Deaths so far: %var:deaths%" })),
         ])),
         ("Thank Whoever Requests a Song", act("Request Thanks", trig("song", json!({ "when": "request" })), vec![step("say", json!({ "text": "Thanks %user%, %song% is in the queue.", "reply": false }))])),
+        ("Greet First-Time Chatters", act("First Message", trig("event", json!({ "event": "firstmsg" })), vec![step("say", json!({ "text": "Welcome to the stream, %user%!" }))])),
+        ("A !clip Command", act("Clip", trig("command", json!({ "command": "!clip", "cooldown": 60 })), vec![step("clip", json!({})), step("say", json!({ "text": "Clipped: %clip%" }))])),
+        ("Show a Camera on a Reward", act("Camera", trig("event", json!({ "event": "reward", "reward": "Show the Cam" })), vec![step("obssource", json!({ "source": "Camera", "show": "show", "for": 30 }))])),
         ("Shout Out on !so", act("Shout Out", trig("command", json!({ "command": "!so", "who": "mods" })), vec![
             step("if", json!({ "left": "%input0%", "test": "notempty" })),
             step("say", json!({ "text": "Go and check out %input0%!", "reply": false })),
@@ -207,6 +255,7 @@ pub fn summary(a: &Value) -> String {
         "event" => format!("On {}", label(EVENTS, &s("event")).to_lowercase()),
         "timer" => format!("Every {} minutes", t["minutes"].as_f64().unwrap_or(15.0)),
         "song" => if s("when") == "request" { "When a song is requested".into() } else { "When a song starts".into() },
+        "obs" => format!("When OBS: {}", label(OBS_WHEN, &s("when")).to_lowercase()),
         _ => "Only when run".into(),
     };
     let n = a["steps"].as_array().map(|l| l.len()).unwrap_or(0);

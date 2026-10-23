@@ -525,6 +525,90 @@ mod tests {
         stop("chatbot");
     }
 
+    /// The chatbot's sign-in to OBS (its script's own SHA-256 and base64), as OBS works it out
+    #[test]
+    fn the_chatbot_signs_in_to_obs_as_obs_expects() {
+        use base64::Engine;
+        use sha2::Digest;
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../plugins/chatbot");
+        let code = std::fs::read_to_string(root.join("main.js")).unwrap();
+        let m: core::plugins::Manifest = serde_json::from_str(&std::fs::read_to_string(root.join("manifest.json")).unwrap()).unwrap();
+        let pkg = core::plugins::Package { manifest: m, code, digest: String::new(), bundled: true };
+        let p = start(&pkg, &json!({}), rt.handle().clone()).unwrap();
+        let b64 = |b: &[u8]| base64::engine::general_purpose::STANDARD.encode(b);
+        for (pw, salt, ch) in [("hunter2", "lM1GncleQOaCu9lT1yeUZhFYnqhsLLP1G5lAGo3ixaI=", "+IxH4CnCiqpX1rM9scsNynZzbOe4KhDeYcTNS3PDaeY="), ("", "a", "b"), ("p\u{e4}ss w\u{f6}rd \u{1f3b5}", "salt", "challenge")] {
+            let secret = b64(&sha2::Sha256::digest(format!("{pw}{salt}").as_bytes()));
+            let want = b64(&sha2::Sha256::digest(format!("{secret}{ch}").as_bytes()));
+            let got = rt.block_on(p.call("obsAuth", vec![json!(pw), json!(salt), json!(ch)])).unwrap();
+            assert_eq!(got, json!(want), "{pw:?}");
+        }
+        drop(p);
+        stop("chatbot");
+    }
+
+    /// The chatbot and OBS (a stand-in obs-websocket 5 on this PC): signed in with its password, a scene
+    /// change in OBS starting an action, whose steps switch the scene and set a text source
+    #[test]
+    fn the_chatbot_works_obs() {
+        use base64::Engine;
+        use futures_util::{SinkExt, StreamExt};
+        use sha2::Digest;
+        use tokio_tungstenite::tungstenite::Message;
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let listener = rt.block_on(tokio::net::TcpListener::bind("127.0.0.1:0")).unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let b64 = |b: &[u8]| base64::engine::general_purpose::STANDARD.encode(b);
+        let secret = b64(&sha2::Sha256::digest(b"pw123salty"));
+        let want = b64(&sha2::Sha256::digest(format!("{secret}chally").as_bytes()));
+        let asked: Arc<Mutex<Vec<Value>>> = Arc::new(Mutex::new(Vec::new()));
+        let a2 = asked.clone();
+        let want2 = want.clone();
+        rt.spawn(async move {
+            let (tcp, _) = listener.accept().await.unwrap();
+            let ws = tokio_tungstenite::accept_async(tcp).await.unwrap();
+            let (mut w, mut r) = ws.split();
+            let _ = w.send(Message::Text(r#"{"op":0,"d":{"obsWebSocketVersion":"5.0.0","rpcVersion":1,"authentication":{"salt":"salty","challenge":"chally"}}}"#.into())).await;
+            while let Some(Ok(Message::Text(t))) = r.next().await {
+                let m: Value = serde_json::from_str(&t).unwrap();
+                a2.lock().unwrap().push(m.clone());
+                if m["op"] == 1 {
+                    if m["d"]["authentication"] != json!(want2) { let _ = w.close().await; return; }
+                    let _ = w.send(Message::Text(r#"{"op":2,"d":{"negotiatedRpcVersion":1}}"#.into())).await;
+                    let _ = w.send(Message::Text(r#"{"op":5,"d":{"eventType":"CurrentProgramSceneChanged","eventIntent":4,"eventData":{"sceneName":"Starting Soon"}}}"#.into())).await;
+                } else if m["op"] == 6 {
+                    let back = json!({ "op": 7, "d": { "requestType": m["d"]["requestType"], "requestId": m["d"]["requestId"], "requestStatus": { "result": true, "code": 100 }, "responseData": {} } });
+                    let _ = w.send(Message::Text(back.to_string().into())).await;
+                }
+            }
+        });
+        set_app_handler(Arc::new(|_p: &str, _ask: Value, answer: Box<dyn FnOnce(Value) + Send>| answer(json!({ "ok": true }))));
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../plugins/chatbot");
+        let code = std::fs::read_to_string(root.join("main.js")).unwrap();
+        let m: core::plugins::Manifest = serde_json::from_str(&std::fs::read_to_string(root.join("manifest.json")).unwrap()).unwrap();
+        let pkg = core::plugins::Package { manifest: m, code, digest: String::new(), bundled: true };
+        let t = |id: &str, set: Value| { let mut d = crate::flows::defaults(crate::flows::TRIGGERS, id); for (k, v) in set.as_object().unwrap() { d[k] = v.clone(); } d };
+        let st = |id: &str, set: Value| { let mut d = crate::flows::defaults(crate::flows::STEPS, id); for (k, v) in set.as_object().unwrap() { d[k] = v.clone(); } d };
+        let actions = json!([
+            { "name": "Going Live", "on": true, "trigger": t("obs", json!({ "when": "scene", "scene": "starting soon" })), "steps": [
+                st("obstext", json!({ "source": "Banner", "text": "Live from %scene%" })),
+                st("obsscene", json!({ "scene": "Main" })),
+            ] },
+            { "name": "Other Scene", "on": true, "trigger": t("obs", json!({ "when": "scene", "scene": "Ending" })), "steps": [st("obsscene", json!({ "scene": "Never" }))] },
+        ]);
+        let p = start(&pkg, &json!({ "obsOn": true, "obsAddress": format!("127.0.0.1:{port}"), "obsPassword": "pw123", "actions": actions }), rt.handle().clone()).unwrap();
+        let req = |a: &[Value], kind: &str| a.iter().find(|x| x["op"] == 6 && x["d"]["requestType"] == kind).cloned();
+        let until = Instant::now() + Duration::from_secs(10);
+        while req(&asked.lock().unwrap(), "SetCurrentProgramScene").is_none() && Instant::now() < until { std::thread::sleep(Duration::from_millis(50)); }
+        let a = asked.lock().unwrap().clone();
+        assert_eq!(a.first().map(|x| x["d"]["authentication"].clone()), Some(json!(want)), "{a:#?}");
+        assert_eq!(req(&a, "SetInputSettings").map(|x| x["d"]["requestData"].clone()), Some(json!({ "inputName": "Banner", "inputSettings": { "text": "Live from Starting Soon" } })), "{a:#?}");
+        assert_eq!(req(&a, "SetCurrentProgramScene").map(|x| x["d"]["requestData"]["sceneName"].clone()), Some(json!("Main")), "{a:#?}");
+        assert!(!a.iter().any(|x| x["d"]["requestData"]["sceneName"] == "Never"), "{a:#?}");
+        drop(p);
+        stop("chatbot");
+    }
+
     /// The chatbot's actions (crate::flows' JSON, run by the plugin), against the stand-in Twitch: a command
     /// that answers, a counter kept between uses, a chat message's, "only go on if" stopping one, a raid
     /// (with its least), and a song requested from a step

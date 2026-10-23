@@ -5664,6 +5664,7 @@ dependencies = [
  "rquickjs",
  "serde",
  "serde_json",
+ "sha2",
  "slint",
  "slint-build",
  "tokio",

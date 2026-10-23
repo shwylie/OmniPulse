@@ -1,24 +1,109 @@
 {
   "id": "chatbot",
   "name": "OmniPulse Chatbot",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "author": "OmniPulse",
-  "description": "OmniPulse's own chatbot: song requests, alerts and your own commands, straight from your chat, no other bot needed. Twitch for now; Kick, YouTube and OBS controls are on their way.",
+  "description": "OmniPulse's own chatbot: song requests, alerts, your own actions (a trigger, then its steps) and OBS controls, straight from your chat, no other bot needed. Twitch for now; Kick and YouTube are on their way.",
   "main": "main.js",
-  "hosts": ["id.twitch.tv", "api.twitch.tv", "irc-ws.chat.twitch.tv", "eventsub.wss.twitch.tv"],
-  "capabilities": ["sockets", "app"],
+  "hosts": [
+    "id.twitch.tv",
+    "api.twitch.tv",
+    "irc-ws.chat.twitch.tv",
+    "eventsub.wss.twitch.tv",
+    "127.0.0.1"
+  ],
+  "capabilities": [
+    "sockets",
+    "app"
+  ],
   "section": "Streaming",
   "wip": true,
   "icon": "M4 3h16a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2h-5l-4 4v-4H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2zm3 6a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3zm5 0a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3zm5 0a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3z",
   "settings": [
-    { "key": "twitchClientId", "label": "Twitch Client ID", "type": "text", "note": "Your own, from dev.twitch.tv/console/apps: Register Your Application, any name, OAuth Redirect URL http://localhost, category Chat Bot, Client Type Public. Then copy its Client ID here." },
-    { "key": "twitchSignIn", "label": "Your Channel", "type": "button", "press": "Sign In with Twitch", "call": "signInChannel", "note": "Your own Twitch account: your chat and its events (follows, subs, bits, raids...)." },
-    { "key": "twitchBotSignIn", "label": "Bot Account (optional)", "type": "button", "press": "Sign In the Bot", "call": "signInBot", "note": "A second Twitch account that posts the replies. Without one, they come from your channel." },
-    { "key": "twitchSignOut", "label": "Sign Out", "type": "button", "press": "Sign Out of Twitch", "call": "signOut", "note": "Forgets both sign-ins on this PC." },
-    { "key": "actionsOpen", "label": "Actions", "type": "actions", "note": "What your chatbot does and when: each action a trigger (a command, a message, an event, a timer, the music), then its steps, in order." },
-    { "key": "requests", "label": "Song Requests", "type": "toggle", "default": true, "note": "!sr (or !request) and a song, !song for what's playing, !wrongsong to take back your last one. Uses Settings > Streaming > Song Requests' limits and replies." },
-    { "key": "alerts", "label": "Alerts", "type": "toggle", "default": true, "note": "Follows, subs, resubs, gifts, bits, raids, hype trains and polls, to your alerts on the Stream Widget." },
-    { "key": "srCommands", "label": "Request Commands", "type": "text", "default": "!sr, !request", "note": "With commas between." },
-    { "key": "commands", "label": "Your Commands (the Old Way)", "type": "text", "default": "!discord = Join the Discord: https://discord.gg/yours; !socials = Find me everywhere as @me", "note": "Moved into Actions the first time they're opened; until then, each one as \"!name = its reply\"." }
+    {
+      "key": "twitchClientId",
+      "label": "Twitch Client ID",
+      "type": "text",
+      "note": "Your own, from dev.twitch.tv/console/apps: Register Your Application, any name, OAuth Redirect URL http://localhost, category Chat Bot, Client Type Public. Then copy its Client ID here."
+    },
+    {
+      "key": "twitchSignIn",
+      "label": "Your Channel",
+      "type": "button",
+      "press": "Sign In with Twitch",
+      "call": "signInChannel",
+      "note": "Your own Twitch account: your chat and its events (follows, subs, bits, raids...)."
+    },
+    {
+      "key": "twitchBotSignIn",
+      "label": "Bot Account (optional)",
+      "type": "button",
+      "press": "Sign In the Bot",
+      "call": "signInBot",
+      "note": "A second Twitch account that posts the replies. Without one, they come from your channel."
+    },
+    {
+      "key": "twitchSignOut",
+      "label": "Sign Out",
+      "type": "button",
+      "press": "Sign Out of Twitch",
+      "call": "signOut",
+      "note": "Forgets both sign-ins on this PC."
+    },
+    {
+      "key": "actionsOpen",
+      "label": "Actions",
+      "type": "actions",
+      "note": "What your chatbot does and when: each action a trigger (a command, a message, an event, a timer, the music), then its steps, in order."
+    },
+    {
+      "key": "obsOn",
+      "label": "OBS",
+      "type": "toggle",
+      "default": false,
+      "note": "Your actions can switch scenes, show and hide sources and more. In OBS: Tools > WebSocket Server Settings, Enable WebSocket server; its password below."
+    },
+    {
+      "key": "obsAddress",
+      "label": "OBS Address",
+      "type": "text",
+      "default": "127.0.0.1:4455",
+      "note": "Where OBS's WebSocket server is (this PC, its port)."
+    },
+    {
+      "key": "obsPassword",
+      "label": "OBS Password",
+      "type": "password",
+      "default": "",
+      "note": "From the same place in OBS (Show Connect Info)."
+    },
+    {
+      "key": "requests",
+      "label": "Song Requests",
+      "type": "toggle",
+      "default": true,
+      "note": "!sr (or !request) and a song, !song for what's playing, !wrongsong to take back your last one. Uses Settings > Streaming > Song Requests' limits and replies."
+    },
+    {
+      "key": "alerts",
+      "label": "Alerts",
+      "type": "toggle",
+      "default": true,
+      "note": "Follows, subs, resubs, gifts, bits, raids, hype trains and polls, to your alerts on the Stream Widget."
+    },
+    {
+      "key": "srCommands",
+      "label": "Request Commands",
+      "type": "text",
+      "default": "!sr, !request",
+      "note": "With commas between."
+    },
+    {
+      "key": "commands",
+      "label": "Your Commands (the Old Way)",
+      "type": "text",
+      "default": "!discord = Join the Discord: https://discord.gg/yours; !socials = Find me everywhere as @me",
+      "note": "Moved into Actions the first time they're opened; until then, each one as \"!name = its reply\"."
+    }
   ]
 }

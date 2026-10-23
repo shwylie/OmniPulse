@@ -7,7 +7,8 @@ const S = () => OmniPulse.settings;
 const TWITCH_SCOPES_CHANNEL = [
   "chat:read", "chat:edit", "user:read:chat", "moderator:read:followers", "channel:read:subscriptions", "bits:read",
   "channel:read:hype_train", "channel:read:polls", "moderator:read:shoutouts", "channel:read:redemptions",
-  "moderator:manage:banned_users", "moderator:manage:shoutouts",
+  "moderator:manage:banned_users", "moderator:manage:shoutouts", "moderator:manage:chat_messages",
+  "moderator:manage:announcements", "channel:manage:broadcast", "clips:edit", "channel:read:ads",
 ].join(" ");
 const TWITCH_SCOPES_BOT = "chat:read chat:edit";
 
@@ -158,6 +159,7 @@ async function onChat(m) {
   const isMod = m.tags.mod === "1" || badges.includes("broadcaster/");
   const id = m.tags.id;
   onActions(m, text, cmd, args, user, id);
+  if (m.tags["first-msg"] === "1") onEvent("first.message", { user_name: user, user_id: m.tags["user-id"] || "", message: { text }, msg_id: id });
   if (!text.startsWith("!")) return;
   // (a second from the same viewer: each command at most once every 3 s per viewer)
   const k = cmd + "|" + user.toLowerCase();
@@ -259,6 +261,7 @@ const EVENT_OF = {
   "channel.subscription.gift": "gift", "channel.cheer": "bits", "channel.raid": "raid",
   "channel.hype_train.begin": "hypetrain", "channel.poll.begin": "poll",
   "channel.channel_points_custom_reward_redemption.add": "reward",
+  "first.message": "firstmsg", "stream.online": "online", "stream.offline": "offline", "channel.ad_break.begin": "adbreak",
 };
 
 function onEvent(type, e) {
@@ -268,7 +271,8 @@ function onEvent(type, e) {
   if (ev === "sub" && e.is_gift) return;
   const amount = ev === "bits" ? String(e.bits || 0) : ev === "raid" ? String(e.viewers || 0) : ev === "gift" ? String(e.total || 1) : ev === "resub" ? String(e.cumulative_months || 1) : ev === "hypetrain" ? String(e.level || 1) : "";
   const reward = (e.reward && e.reward.title) || "";
-  const ctx = { user: a.user || e.user_name || "", userId: e.user_id || e.from_broadcaster_user_id || "", amount, message: a.message || e.user_input || "", reward, rawInput: e.user_input || "", platform: "twitch" };
+  const said = (e.message && e.message.text) || "";
+  const ctx = { user: a.user || e.user_name || "", userId: e.user_id || e.from_broadcaster_user_id || "", amount: ev === "adbreak" ? String(e.duration_seconds || 0) : amount, message: a.message || said || e.user_input || "", reward, rawInput: e.user_input || said || "", msgId: e.msg_id || "", platform: "twitch" };
   Object.assign(ctx, words(ctx.rawInput));
   for (const x of live) {
     const t = x.trigger;
@@ -398,6 +402,48 @@ async function step(st, ctx, depth) {
       await helix("POST", "chat/shoutouts?from_broadcaster_id=" + S().userId + "&to_broadcaster_id=" + id + "&moderator_id=" + S().userId);
       break;
     }
+    case "delete": {
+      if (!ctx.msgId) break;
+      await helix("DELETE", "moderation/chat?broadcaster_id=" + S().userId + "&moderator_id=" + S().userId + "&message_id=" + encodeURIComponent(ctx.msgId));
+      break;
+    }
+    case "announce": await helix("POST", "chat/announcements?broadcaster_id=" + S().userId + "&moderator_id=" + S().userId, { message: f("text").slice(0, 500), color: st.colour || "primary" }); break;
+    case "marker": await helix("POST", "streams/markers", { user_id: S().userId, description: f("text").slice(0, 140) }); break;
+    case "clip": {
+      const c = await helix("POST", "clips?broadcaster_id=" + S().userId);
+      const id = c.data && c.data[0] && c.data[0].id;
+      if (!id) throw new Error("Twitch didn't make the clip (are you live?)");
+      ctx.clip = "https://clips.twitch.tv/" + id;
+      break;
+    }
+    case "title": await helix("PATCH", "channels?broadcaster_id=" + S().userId, { title: f("text").slice(0, 140) }); break;
+    case "game": {
+      const g = await helix("GET", "games?name=" + encodeURIComponent(f("text").trim()));
+      const id = g.data && g.data[0] && g.data[0].id;
+      if (!id) throw new Error("Twitch has no category called " + f("text"));
+      await helix("PATCH", "channels?broadcaster_id=" + S().userId, { game_id: id });
+      break;
+    }
+    case "obsscene": await obsCall("SetCurrentProgramScene", { sceneName: f("scene") }); break;
+    case "obssource": {
+      const sceneName = f("scene") || (await obsCall("GetCurrentProgramScene")).currentProgramSceneName;
+      const sceneItemId = (await obsCall("GetSceneItemId", { sceneName, sourceName: f("source") })).sceneItemId;
+      const was = (await obsCall("GetSceneItemEnabled", { sceneName, sceneItemId })).sceneItemEnabled;
+      const on = st.show === "toggle" ? !was : st.show !== "hide";
+      await obsCall("SetSceneItemEnabled", { sceneName, sceneItemId, sceneItemEnabled: on });
+      const back = num(f("for"));
+      if (back > 0) setTimeout(() => { obsCall("SetSceneItemEnabled", { sceneName, sceneItemId, sceneItemEnabled: was }).catch(() => {}); }, Math.min(3600, back) * 1000);
+      break;
+    }
+    case "obstext": await obsCall("SetInputSettings", { inputName: f("source"), inputSettings: { text: f("text") } }); break;
+    case "obsmute": {
+      if (st.what === "toggle") await obsCall("ToggleInputMute", { inputName: f("source") });
+      else await obsCall("SetInputMute", { inputName: f("source"), inputMuted: st.what !== "unmute" });
+      break;
+    }
+    case "obsfilter": await obsCall("SetSourceFilterEnabled", { sourceName: f("source"), filterName: f("filter"), filterEnabled: st.what !== "off" }); break;
+    case "obsrecord": await obsCall(st.what === "stop" ? "StopRecord" : st.what === "toggle" ? "ToggleRecord" : "StartRecord"); break;
+    case "obsstream": await obsCall(st.what === "stop" ? "StopStream" : st.what === "toggle" ? "ToggleStream" : "StartStream"); break;
     case "run": {
       const name = f("action").trim().toLowerCase();
       const next = all.find((x) => String(x.name || "").toLowerCase() === name);
@@ -407,6 +453,140 @@ async function step(st, ctx, depth) {
     case "status": await OmniPulse.app.say(f("text")); break;
   }
   return true;
+}
+
+// ---------- OBS: its own WebSocket server (obs-websocket 5, OBS 28 and later), its password ----------
+let obs = null, obsReady = false, obsN = 0;
+const obsWaiting = {};
+
+// SHA-256 (OBS's sign-in: the script has no crypto of its own), of bytes, as bytes
+function sha256(bytes) {
+  const K = [], H = [];
+  let n = 2, found = 0;
+  const frac = (x) => ((x - Math.floor(x)) * 4294967296) >>> 0;
+  while (found < 64) {
+    let prime = true;
+    for (let d = 2; d * d <= n; d++) if (n % d === 0) { prime = false; break; }
+    if (prime) { if (found < 8) H[found] = frac(Math.pow(n, 1 / 2)); K[found] = frac(Math.pow(n, 1 / 3)); found++; }
+    n++;
+  }
+  const m = bytes.slice();
+  const bits = bytes.length * 8;
+  m.push(0x80);
+  while (m.length % 64 !== 56) m.push(0);
+  m.push(0, 0, 0, 0, (bits >>> 24) & 255, (bits >>> 16) & 255, (bits >>> 8) & 255, bits & 255);
+  const rotr = (x, k) => (x >>> k) | (x << (32 - k));
+  for (let i = 0; i < m.length; i += 64) {
+    const w = [];
+    for (let j = 0; j < 16; j++) w[j] = (m[i + j * 4] << 24) | (m[i + j * 4 + 1] << 16) | (m[i + j * 4 + 2] << 8) | m[i + j * 4 + 3];
+    for (let j = 16; j < 64; j++) {
+      const s0 = rotr(w[j - 15], 7) ^ rotr(w[j - 15], 18) ^ (w[j - 15] >>> 3);
+      const s1 = rotr(w[j - 2], 17) ^ rotr(w[j - 2], 19) ^ (w[j - 2] >>> 10);
+      w[j] = (w[j - 16] + s0 + w[j - 7] + s1) | 0;
+    }
+    let [a, b, c, d, e, f, g, h] = H;
+    for (let j = 0; j < 64; j++) {
+      const t1 = (h + (rotr(e, 6) ^ rotr(e, 11) ^ rotr(e, 25)) + ((e & f) ^ (~e & g)) + K[j] + w[j]) | 0;
+      const t2 = ((rotr(a, 2) ^ rotr(a, 13) ^ rotr(a, 22)) + ((a & b) ^ (a & c) ^ (b & c))) | 0;
+      h = g; g = f; f = e; e = (d + t1) | 0; d = c; c = b; b = a; a = (t1 + t2) | 0;
+    }
+    H[0] = (H[0] + a) | 0; H[1] = (H[1] + b) | 0; H[2] = (H[2] + c) | 0; H[3] = (H[3] + d) | 0;
+    H[4] = (H[4] + e) | 0; H[5] = (H[5] + f) | 0; H[6] = (H[6] + g) | 0; H[7] = (H[7] + h) | 0;
+  }
+  const out = [];
+  H.forEach((x) => out.push((x >>> 24) & 255, (x >>> 16) & 255, (x >>> 8) & 255, x & 255));
+  return out;
+}
+
+function utf8(t) {
+  const out = [];
+  for (const ch of String(t)) {
+    const c = ch.codePointAt(0);
+    if (c < 0x80) out.push(c);
+    else if (c < 0x800) out.push(0xc0 | (c >> 6), 0x80 | (c & 63));
+    else if (c < 0x10000) out.push(0xe0 | (c >> 12), 0x80 | ((c >> 6) & 63), 0x80 | (c & 63));
+    else out.push(0xf0 | (c >> 18), 0x80 | ((c >> 12) & 63), 0x80 | ((c >> 6) & 63), 0x80 | (c & 63));
+  }
+  return out;
+}
+
+function b64(bytes) {
+  const A = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+  let out = "";
+  for (let i = 0; i < bytes.length; i += 3) {
+    const n = (bytes[i] << 16) | ((bytes[i + 1] || 0) << 8) | (bytes[i + 2] || 0);
+    out += A[(n >> 18) & 63] + A[(n >> 12) & 63] + (i + 1 < bytes.length ? A[(n >> 6) & 63] : "=") + (i + 2 < bytes.length ? A[n & 63] : "=");
+  }
+  return out;
+}
+
+// What OBS asks for to sign in: base64(sha256(base64(sha256(password + salt)) + challenge))
+function obsAuth(password, salt, challenge) {
+  return b64(sha256(utf8(b64(sha256(utf8(password + salt))) + challenge)));
+}
+
+function obsConnect() {
+  if (!yes(S().obsOn)) return;
+  const addr = String(S().obsAddress || "127.0.0.1:4455").trim().replace(/^wss?:\/\//, "");
+  const s = OmniPulse.socket("ws://" + addr);
+  obs = s;
+  obsReady = false;
+  s.onmessage = (data) => {
+    let m;
+    try { m = JSON.parse(data); } catch (e) { return; }
+    if (m.op === 0) {
+      // (its scenes' events and its outputs')
+      const d = { rpcVersion: 1, eventSubscriptions: (1 << 2) | (1 << 6) };
+      const a = m.d && m.d.authentication;
+      if (a) d.authentication = obsAuth(String(S().obsPassword || ""), a.salt, a.challenge);
+      s.send(JSON.stringify({ op: 1, d }));
+    } else if (m.op === 2) {
+      obsReady = true;
+    } else if (m.op === 5) {
+      onObs(m.d.eventType, m.d.eventData || {});
+    } else if (m.op === 7) {
+      const w = obsWaiting[m.d.requestId];
+      if (!w) return;
+      delete obsWaiting[m.d.requestId];
+      if (m.d.requestStatus && m.d.requestStatus.result) w.ok(m.d.responseData || {});
+      else w.no(new Error("OBS said: " + ((m.d.requestStatus && m.d.requestStatus.comment) || "no")));
+    }
+  };
+  s.onclose = (why) => {
+    obsReady = false;
+    if (obs !== s) return;
+    obs = null;
+    // (OBS closed, or its password's wrong: tried again a little later while the chatbot runs)
+    if (String(why).includes("4009")) { OmniPulse.app.say("OBS didn't take the password in the chatbot's settings.").catch(() => {}); return; }
+    if (!stopped) setTimeout(() => { if (!obs && !stopped) obsConnect(); }, 15000);
+  };
+}
+
+function obsCall(requestType, requestData) {
+  if (!obs || !obsReady) return Promise.reject(new Error("OBS isn't connected: switch it on in the chatbot's settings, with OBS open (Tools > WebSocket Server Settings: Enable)"));
+  const requestId = "r" + ++obsN;
+  return new Promise((ok, no) => {
+    obsWaiting[requestId] = { ok, no };
+    obs.send(JSON.stringify({ op: 6, d: { requestType, requestId, requestData: requestData || {} } }));
+    setTimeout(() => { if (obsWaiting[requestId]) { delete obsWaiting[requestId]; no(new Error("OBS didn't answer")); } }, 5000);
+  });
+}
+
+// OBS's events, to the actions waiting for them
+function onObs(type, d) {
+  let when = "", scene = d.sceneName || "";
+  if (type === "CurrentProgramSceneChanged") when = "scene";
+  else if (type === "StreamStateChanged" && d.outputState === "OBS_WEBSOCKET_OUTPUT_STARTED") when = "streamstart";
+  else if (type === "StreamStateChanged" && d.outputState === "OBS_WEBSOCKET_OUTPUT_STOPPED") when = "streamstop";
+  else if (type === "RecordStateChanged" && d.outputState === "OBS_WEBSOCKET_OUTPUT_STARTED") when = "recordstart";
+  else if (type === "RecordStateChanged" && d.outputState === "OBS_WEBSOCKET_OUTPUT_STOPPED") when = "recordstop";
+  if (!when) return;
+  for (const a of live) {
+    const t = a.trigger;
+    if (t.type !== "obs" || (t.when || "scene") !== when) continue;
+    if (when === "scene" && String(t.scene || "").trim() && String(t.scene).trim().toLowerCase() !== scene.toLowerCase()) continue;
+    run(a, { user: "", scene, platform: "obs" });
+  }
 }
 
 // Twitch's API, as your channel (its moderation, its shoutouts)
@@ -432,6 +612,9 @@ const SUBS = (me) => [
   ["channel.hype_train.begin", "1", { broadcaster_user_id: me }],
   ["channel.poll.begin", "1", { broadcaster_user_id: me }],
   ["channel.channel_points_custom_reward_redemption.add", "1", { broadcaster_user_id: me }],
+  ["stream.online", "1", { broadcaster_user_id: me }],
+  ["stream.offline", "1", { broadcaster_user_id: me }],
+  ["channel.ad_break.begin", "1", { broadcaster_user_id: me }],
 ];
 
 // An event, as an alert (the alerts' types, as the bots send them)
@@ -490,12 +673,13 @@ function connectEvents(token, url) {
 // ---------- running ----------
 async function start() {
   stopAll();
-  if (!S().token || !S().login) return;
   stopped = false;
+  loadActions();
+  obsConnect();
+  if (!S().token || !S().login) return;
   const token = await fresh("channel");
   if (!token) { OmniPulse.app.say("Your Twitch sign-in has run out: sign in again in its settings."); return; }
   apiToken = token;
-  loadActions();
   chat = connectChat(token, S().login, onChat);
   if (S().botToken && S().botLogin) {
     const bot = await fresh("bot");
@@ -509,8 +693,9 @@ function stopAll() {
   stopped = true;
   timers.forEach((id) => clearInterval(id));
   timers = [];
-  for (const s of [chat, botChat, events]) { if (s) { s.onclose = null; s.close(); } }
-  chat = botChat = events = null;
+  for (const s of [chat, botChat, events, obs]) { if (s) { s.onclose = null; s.close(); } }
+  chat = botChat = events = obs = null;
+  obsReady = false;
 }
 
 function restart() { start().catch((e) => OmniPulse.log("start: " + e.message)); }
@@ -521,11 +706,13 @@ OmniPulse.register({
   signInBot(values) { return signIn("bot", TWITCH_SCOPES_BOT, values); },
   // the Actions page: its actions as they're changed (kept by the app), and Run Now
   setActions(list) { OmniPulse.settings.actions = list; loadActions(); return true; },
+  // (OBS's sign-in, for its test)
+  obsAuth(password, salt, challenge) { return obsAuth(password, salt, challenge); },
   async runAction(name) {
     loadActions();
     const a = all.find((x) => String(x.name || "").toLowerCase() === String(name || "").toLowerCase());
     if (!a) return "There's no action called " + name + ".";
-    if (!chat) return "Not in your chat yet: sign in to Twitch first (in the chatbot's settings).";
+    if (!chat && !obs) return "Not in your chat yet: sign in to Twitch first (in the chatbot's settings).";
     await run(a, { user: S().login || "", rawInput: "", message: "", platform: "twitch" });
     return "Ran " + a.name + ".";
   },
