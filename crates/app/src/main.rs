@@ -36,6 +36,7 @@ mod discover;
 mod lang;
 mod panels;
 mod flows;
+mod botimport;
 mod hide;
 mod lookalike;
 mod apple_import;
@@ -4420,6 +4421,67 @@ fn flows_save(shared: &Shared) {
     }
 }
 
+/// Back Up: the actions, and the quotes, variables and points the chatbot keeps, in a file of their own
+fn flows_backup(shared: &Shared) {
+    flows_save(shared);
+    let list = FLOW.with(|f| f.borrow().0.clone());
+    let kept = shared.borrow().web.prefs["pluginSettings"][BOT].clone();
+    let file = format!("OmniPulse Chatbot {}.omnibot", chrono_date());
+    let Some(path) = rfd::FileDialog::new().set_title("Back up the chatbot").set_file_name(&file).add_filter("OmniPulse chatbot backup", &["omnibot"]).save_file() else { return };
+    let note = match std::fs::write(&path, serde_json::to_string_pretty(&botimport::backup(&list, &kept)).unwrap_or_default()) {
+        Ok(()) => format!("Backed up {} to {}.", plural(list.len(), "action", "actions"), path.file_name().and_then(|n| n.to_str()).unwrap_or("it")),
+        Err(e) => format!("Couldn't back it up: {e}"),
+    };
+    if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_status(note.into()); }
+}
+
+/// Today, as YYYY-MM-DD (a backup's name)
+fn chrono_date() -> String {
+    let days = omnipulse_core::now_secs() / 86400;
+    // (from the days since 1970: the civil date, Howard Hinnant's way)
+    let z = days as i64 + 719468;
+    let era = z.div_euclid(146097);
+    let doe = z - era * 146097;
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    format!("{:04}-{:02}-{:02}", yoe + era * 400 + if m <= 2 { 1 } else { 0 }, m, d)
+}
+
+/// A backup restored: its actions over those of the same name (the rest added), its quotes added, and from
+/// OmniPulse's own its variables and points; kept, and the chatbot started again with them
+fn flows_restored(shared: &Shared, r: Result<botimport::Restored, String>) {
+    let r = match r {
+        Ok(r) => r,
+        Err(e) => { if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_status(format!("Couldn't restore it: {e}").into()); } return; }
+    };
+    let mut list = FLOW.with(|f| f.borrow().0.clone());
+    let all = {
+        let mut a = shared.borrow_mut();
+        let mut all = a.web.prefs["pluginSettings"].as_object().cloned().unwrap_or_default();
+        let mut mine = all.get(BOT).and_then(|v| v.as_object()).cloned().unwrap_or_default();
+        let (n, q) = botimport::merge(&mut list, &mut mine, &r);
+        mine.insert("actions".into(), serde_json::json!(list));
+        all.insert(BOT.into(), serde_json::Value::Object(mine));
+        let all = serde_json::Value::Object(all);
+        if let Some(o) = a.web.prefs.as_object_mut() { o.insert("pluginSettings".into(), all.clone()); }
+        if let Some(ui) = a.ui.upgrade() {
+            let missed = if r.missed.is_empty() { String::new() } else { format!(" {} couldn't be brought over: they're kept as notes in their actions.", plural(r.missed.len(), "step or trigger", "steps or triggers")) };
+            ui.set_status(format!("Restored {}{} from {}.{missed}", plural(n, "action", "actions"), if q > 0 { format!(" and {}", plural(q, "quote", "quotes")) } else { String::new() }, r.from).into());
+        }
+        all
+    };
+    if std::env::var_os("OMNIPULSE_SELFTEST").is_none() { webstate::save_pref("pluginSettings", all); }
+    // (the first of them picked)
+    let first = r.actions.first().and_then(|a| a["name"].as_str()).and_then(|n| list.iter().position(|x| x["name"].as_str().is_some_and(|y| y.eq_ignore_ascii_case(n)))).map(|i| i as i32).unwrap_or(if list.is_empty() { -1 } else { 0 });
+    FLOW.with(|f| *f.borrow_mut() = (list, first));
+    flows_paint(shared);
+    // (its quotes, variables and points: the chatbot started again, to have them)
+    if plugrun::get(BOT).is_some() { plugrun::stop(BOT); plugins_start(shared); }
+}
+
 /// A name no other action has: this one, else with a number after it
 fn flow_name_free(list: &[serde_json::Value], want: &str) -> String {
     let taken = |n: &str| list.iter().any(|a| a["name"].as_str().is_some_and(|x| x.eq_ignore_ascii_case(n)));
@@ -4450,6 +4512,19 @@ fn flows_wire(ui: &AppWindow, shared: &Shared) {
                 });
                 flows_paint(&s);
                 flows_save(&s);
+            }
+            "backup" => flows_backup(&s),
+            "restore" => {
+                let Some(path) = rfd::FileDialog::new().set_title("A chatbot backup to restore")
+                    .add_filter("Chatbot backups", &["omnibot", "json", "sb", "txt", "zip", "miubackup", "miucommand"])
+                    .add_filter("OmniPulse", &["omnibot", "json"]).add_filter("Streamer.bot", &["sb", "txt", "zip", "json"]).add_filter("Mix It Up", &["miubackup", "miucommand"])
+                    .pick_file() else { return };
+                flows_restored(&s, botimport::restore_file(&path));
+            }
+            "paste" => {
+                let text = arboard::Clipboard::new().and_then(|mut c| c.get_text()).unwrap_or_default();
+                if text.trim().is_empty() { if let Some(ui) = s.borrow().ui.upgrade() { ui.set_status("Nothing to paste: in Streamer.bot, Export, then Copy the code it gives you.".into()); } return; }
+                flows_restored(&s, botimport::restore_text(&text));
             }
             "run" => {
                 flows_save(&s);

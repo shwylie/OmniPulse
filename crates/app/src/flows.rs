@@ -191,6 +191,7 @@ pub const STEPS: &[Kind] = &[
     Kind { id: "giveenter", label: "Enter the Giveaway", note: "Once each.", fields: &[] },
     Kind { id: "givepick", label: "Pick a Giveaway Winner", note: "Gives the steps after it %winner% and %entries% (how many were in).", fields: &[f("clear", "Then Start Again", "toggle", "true", "Everyone's entry let go.")] },
     Kind { id: "run", label: "Run Another Action", note: "", fields: &[f("action", "Action", "text", "", "Its name.")] },
+    Kind { id: "note", label: "A Note", note: "Does nothing: for you to read (a restored backup's steps that couldn't be brought over are kept as these).", fields: &[f("text", "Note", "text", "", "")] },
     Kind { id: "status", label: "Show in OmniPulse", note: "On OmniPulse's status line: for trying an action out.", fields: &[f("text", "Text", "text", "%user% used it.", "")] },
 ];
 

@@ -4353,6 +4353,13 @@ export component AppWindow inherits Window {
                                 width: 270px;
                                 spacing: 8px;
                                 Dropdown { width: 270px; options: root.flow-templates; current: -1; placeholder: "+ New Action"; picked(k) => { root.flow-new(k); } }
+                                // (a backup: OmniPulse's own, or Streamer.bot's or Mix It Up's, as if it were)
+                                HorizontalLayout {
+                                    spacing: 6px;
+                                    Pill { label: "Back Up"; tip: "All of these, your quotes, variables and points, in a file"; clicked => { root.flow-act("backup"); } }
+                                    Pill { label: "Restore"; tip: "A backup: OmniPulse's, Streamer.bot's (an export, .sb file or backup zip) or Mix It Up's (.miubackup or .miucommand)"; clicked => { root.flow-act("restore"); } }
+                                    Pill { label: "Paste"; tip: "A Streamer.bot import code, as Streamer.bot's Export copies it"; clicked => { root.flow-act("paste"); } }
+                                }
                                 ScrollView {
                                     vertical-stretch: 1;
                                     horizontal-scrollbar-policy: always-off;
