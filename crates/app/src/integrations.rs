@@ -279,6 +279,10 @@ fn like_note() -> String {
 /// The widget's Hide This Track: the card hidden while this track (its key) plays
 pub static WIDGET_HIDDEN: std::sync::Mutex<String> = std::sync::Mutex::new(String::new());
 
+/// A Seamless Mix under way, for the widget's crossfader: the two songs, when it began (ms since 1970) and
+/// how long it takes; None when there isn't one
+pub static CROSSFADE: std::sync::Mutex<Option<Value>> = std::sync::Mutex::new(None);
+
 pub fn widget_update(prefs: &Value, t: Option<&Track>, by: &str, pos_ms: u64, dur_ms: u64, playing: bool, accent: (&str, &str), lyrics: &[crate::player::Line]) {
     if !set(prefs, "widget") && !set(prefs, "lyricsWidget") {
         return;
@@ -354,6 +358,7 @@ pub fn widget_state(prefs: &Value, t: Option<&Track>, by: &str, pos_ms: u64, dur
             }));
         }
     }
+    if let (Some(o), Some(x)) = (state.as_object_mut(), CROSSFADE.lock().ok().and_then(|c| c.clone())) { o.insert("crossfade".into(), x); }
     state
 }
 

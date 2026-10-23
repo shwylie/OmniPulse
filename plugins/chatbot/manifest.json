@@ -1,12 +1,14 @@
 {
   "id": "chatbot",
   "name": "OmniPulse Chatbot",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "author": "OmniPulse",
   "description": "OmniPulse's own chatbot: song requests, alerts and your own commands, straight from your chat, no other bot needed. Twitch for now; Kick, YouTube and OBS controls are on their way.",
   "main": "main.js",
   "hosts": ["id.twitch.tv", "api.twitch.tv", "irc-ws.chat.twitch.tv", "eventsub.wss.twitch.tv"],
   "capabilities": ["sockets", "app"],
+  "section": "Streaming",
+  "wip": true,
   "icon": "M4 3h16a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2h-5l-4 4v-4H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2zm3 6a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3zm5 0a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3zm5 0a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3z",
   "settings": [
     { "key": "twitchClientId", "label": "Twitch Client ID", "type": "text", "note": "Your own, from dev.twitch.tv/console/apps: Register Your Application, any name, OAuth Redirect URL http://localhost, category Chat Bot, Client Type Public. Then copy its Client ID here." },

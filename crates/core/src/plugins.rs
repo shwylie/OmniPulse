@@ -42,6 +42,13 @@ pub struct Manifest {
     pub icon: String,
     #[serde(default)]
     pub settings: Value,
+    /// the Settings category its settings live in ("Streaming"), with a switch of its own there; empty: on
+    /// the Plugins page, as the rest
+    #[serde(default)]
+    pub section: String,
+    /// still being built: "(WIP)" after its name
+    #[serde(default)]
+    pub wip: bool,
 }
 
 fn default_main() -> String {

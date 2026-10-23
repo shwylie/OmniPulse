@@ -364,7 +364,7 @@ pub fn blend_as(a: &Side, b: &Side, now_ms: u64, forced: bool) -> Option<crate::
     let len = swap_at + (over - swap) / target;
     Some(crate::plan::Plan {
         at_ms: at.round() as u64, ms: len.round() as u64, swap_ms: swap_at.round() as u64, start_ms: bar_ms(mb, from)?.round() as u64,
-        rate, bars: (run + tail) as u32, semitones, beatmatched: true, out_tempo: target, ramp_ms: swap_at.round() as u64, tape_stop: false,
+        rate, bars: (run + tail) as u32, semitones, beatmatched: true, out_tempo: target, ramp_ms: swap_at.round() as u64, tape_stop: false, roll_speed: 1.0,
         style: None, tail_bars: tail as u32,
     })
 }
@@ -456,7 +456,7 @@ pub fn ease_ms(left_ms: u64) -> u64 {
 /// sung together); a roll's, or a tape stop's
 pub fn handoff(p: &crate::plan::Plan, voices: bool) -> omnipulse_audio::Handoff {
     if p.tape_stop { return omnipulse_audio::Handoff::tape(p.swap_ms, p.ramp_ms); }
-    if p.style == Some(ROLL) { return omnipulse_audio::Handoff::roll(p.swap_ms / p.bars.max(1) as u64, p.bars); }
+    if p.style == Some(ROLL) { return omnipulse_audio::Handoff::roll(p.swap_ms / p.bars.max(1) as u64, p.bars, p.roll_speed as f32); }
     // (the one playing's beat carried: the next one rising under it, the bass swapped, then its top fading;
     // the voices, if both sing there, the one playing's faded over the run-up's second half, the next
     // one's up over the bars after the swap)
@@ -489,11 +489,14 @@ const ROLL_BARS: u32 = 4;
 /// The most of the next one's intro left out, so it lands on its main part (bars); longer, it lands on its
 /// first downbeat
 const ROLL_SKIP_MAX: usize = 16;
+/// How far under the main part's level the bar a roll keeps can be (dB): an outro with something in it
+const ROLL_QUIET_DB: f32 = 6.0;
 
 /// A roll out (Traktor's Beatmasher, as a transition): for two songs too far apart to blend, each with
-/// its bars sure. The one playing's last bar before a phrase line (at the end of its main part, not into
-/// its outro) is rolled over 4 bars, a build; the next one lands on the downbeat its main part starts
-/// on (its intro, up to 16 bars, left out), at its own tempo.
+/// its bars sure. The one playing's bar before its last phrase line (by its end, the bar kept not near
+/// silent: its outro played, if it has something in it) is rolled over 4 bars, a build, its speed ridden
+/// to the next one's tempo meanwhile; the next one lands on the downbeat its main part starts on (its
+/// intro, up to 16 bars, left out), at its own tempo.
 pub fn roll(a: &Side, b: &Side, now_ms: u64) -> Option<crate::plan::Plan> {
     if !grid_trusted(a) || !grid_trusted(b) { return None; }
     let (ma, mb) = (a.rhythm?, b.rhythm?);
@@ -502,11 +505,12 @@ pub fn roll(a: &Side, b: &Side, now_ms: u64) -> Option<crate::plan::Plan> {
     let (ga, gb) = (sure_groups(ma)?, sure_groups(mb)?);
     let line = body_line(ma)?;
     let first_body = ma.rhythm.bar_db.iter().position(|d| *d >= line)?;
-    let last_body = ma.rhythm.bar_db.iter().rposition(|d| *d >= line)?;
     let end = if a.audible_ms > 0 && a.audible_ms < a.dur_ms { a.audible_ms } else { a.dur_ms } as f64;
-    // (its end on one of its 16-beat lines: the latest by its main part's end)
-    let fits = |floor: u64| (first_body.max(ROLL_BARS as usize)..=(last_body + 1).min(na.saturating_sub(1))).rev().find(|&e| {
-        e % 4 == ga % 4 && bar_ms(ma, e - ROLL_BARS as usize).is_some_and(|t| t >= now_ms as f64 + 5000.0 && t >= floor as f64) && bar_ms(ma, e).is_some_and(|t| t <= end)
+    // (the bar it keeps and rolls: something in it, not the near-silence at a song's very end)
+    let heard = |k: usize| ma.rhythm.bar_db.get(k).is_some_and(|d| *d >= line - ROLL_QUIET_DB);
+    // (its end on one of its 16-beat lines: the latest by the song's end)
+    let fits = |floor: u64| (first_body.max(ROLL_BARS as usize)..=na.saturating_sub(1)).rev().find(|&e| {
+        e % 4 == ga % 4 && heard(e - ROLL_BARS as usize) && bar_ms(ma, e - ROLL_BARS as usize).is_some_and(|t| t >= now_ms as f64 + 5000.0 && t >= floor as f64) && bar_ms(ma, e).is_some_and(|t| t <= end)
     });
     let end_bar = fits(earliest_ms(end as u64)).or_else(|| fits(never_before_ms(end as u64)))?;
     let (at, to) = (bar_ms(ma, end_bar - ROLL_BARS as usize)?, bar_ms(ma, end_bar)?);
@@ -517,9 +521,11 @@ pub fn roll(a: &Side, b: &Side, now_ms: u64) -> Option<crate::plan::Plan> {
     let main_b = (0..=main_b).rev().find(|&k| k % 4 == gb % 4).unwrap_or(gb % 4);
     let start = bar_ms(mb, main_b)?;
     let len = (to - at).round() as u64;
+    // (its loop's speed by its end: the next one's tempo, as each was measured, within reason)
+    let speed = if ma.rhythm.bpm > 0.0 && mb.rhythm.bpm > 0.0 { (mb.rhythm.bpm / ma.rhythm.bpm).clamp(0.5, 2.0) } else { 1.0 };
     Some(crate::plan::Plan {
         at_ms: at.round() as u64, ms: len + 40, swap_ms: len, start_ms: start.round() as u64, rate: 1.0, bars: ROLL_BARS, semitones: 0,
-        beatmatched: false, out_tempo: 1.0, ramp_ms: 0, tape_stop: false, style: Some(ROLL), tail_bars: 0,
+        beatmatched: false, out_tempo: 1.0, ramp_ms: 0, tape_stop: false, style: Some(ROLL), tail_bars: 0, roll_speed: speed,
     })
 }
 
@@ -743,11 +749,11 @@ mod tests {
         let a = song(120.0, &levels(4, 40, 4), 0.6, "8A");
         let b = song(140.0, &levels(2, 40, 2), 0.6, "3B");
         let p = roll(&Side { dur_ms: 100_000, rhythm: Some(&a), ..Default::default() }, &Side { dur_ms: 90_000, rhythm: Some(&b), ..Default::default() }, 0).expect("a roll");
-        // (its end: bar 44, the main part's end, on a phrase line from bar 4; 4 bars before it)
-        assert_eq!((p.at_ms, p.swap_ms, p.style), (80_000, 8_000, Some(ROLL)));
+        // (its end: bar 48, its outro played (12 dB under its main part: something in it, rolled), on a phrase line from bar 4; 4 bars before it)
+        assert_eq!((p.at_ms, p.swap_ms, p.style), (88_000, 8_000, Some(ROLL)));
         assert_eq!(p.start_ms, (2.0 * 4.0 * 60_000.0 / 140.0_f64).round() as u64);
         let h = handoff(&p, true);
-        assert_eq!(h.roll, Some(omnipulse_audio::Roll { bar: 2_000, bars: 4 }));
+        assert_eq!(h.roll, Some(omnipulse_audio::Roll { bar: 2_000, bars: 4, to_speed: (140.0_f64 / 120.0) as f32 }));
         assert!(not_rejected(&[], ROLL));
     }
 

@@ -18,6 +18,7 @@ pub fn title(name: &str) -> String {
         "replies" => "Chat Replies",
         "limits" => "Limit Requests",
         "smart" => "Seamless Mix (WIP)",
+        "youtube" => "YouTube Music",
         "discord" => "Discord Status",
         "together" => "Listen Along & Jams",
         "lyrics" => "Lyrics",
@@ -42,11 +43,12 @@ pub fn of_switch(key: &str) -> Option<&'static str> {
 fn keys(name: &str) -> Vec<(&'static str, Value)> {
     match name {
         "limits" => vec![("reqMax", json!(10)), ("reqPerUser", json!(2))],
+        "youtube" => vec![("ytMirror", json!(false))],
         "discord" => vec![("presArt", json!(true)), ("presTime", json!(true)), ("presListen", json!(true)), ("presAsk", json!(false)), ("presLink", json!(true))],
         "together" => vec![("togetherName", json!(""))],
         "lyricsw" => vec![("lyricsLines", json!(3)), ("lyricsBefore", json!(false)), ("lyricsScroll", json!("smooth")), ("lyricsScrollMs", json!(600)), ("lyricsScrollPlace", json!("top")), ("lyricsFadeEdges", json!(false)), ("lyricsSize", json!(48)), ("lyricsFont", json!("sans")), ("lyricsAlign", json!("center")), ("lyricsPlace", json!("")), ("lyricsStyle", json!("karaoke")), ("lyricsColor", json!("#ffffff")), ("lyricsTextGrad", json!(false)), ("lyricsColor2", json!("#9ad1ff")), ("lyricsOwnHi", json!(false)), ("lyricsHi", json!("#8e9bff")), ("lyricsHiGrad", json!(false)), ("lyricsHi2", json!("#ff8ad8")), ("lyricsGradDir", json!("90deg")), ("lyricsDim", json!(0.45)), ("lyricsTransform", json!("none")), ("lyricsShadow", json!(true)), ("lyricsOutline", json!(false)), ("lyricsOutlineSize", json!(4)), ("lyricsOutlineColor", json!("#000000")), ("lyricsOutlineOpacity", json!(1.0)), ("lyricsBox", json!(false)), ("lyricsBoxColor", json!("#0a0a0e")), ("lyricsBoxGrad", json!(false)), ("lyricsBoxColor2", json!("#2a1450")), ("lyricsBoxDir", json!("135deg")), ("lyricsBoxOpacity", json!(0.62)), ("lyricsTitle", json!(true)), ("lyricsHideNone", json!(true)), ("lyricsOffset", json!(0)), ("lyricsHidePaused", json!(true))],
         "smart" => vec![("smartBlend", json!(true)), ("smartKeys", json!(true)), ("smartMax", json!(10)), ("smartTape", json!(false)), ("smartRoll", json!(false)), ("smartVoices", json!(true))],
-        "requests" => vec![("reqBot", json!("streamerbot")), ("reqRadioEdit", json!(false)), ("reqNoAi", json!(false)), ("reqLimits", json!(true)), ("reqMax", json!(10)), ("reqPerUser", json!(2)), ("reqPort", json!(7879)), ("botRemote", json!(false))],
+        "requests" => vec![("reqBot", json!("streamerbot")), ("reqRadioEdit", json!(false)), ("reqNoAi", json!(false)), ("reqLimits", json!(true)), ("reqMax", json!(10)), ("reqPerUser", json!(2)), ("reqPort", json!(7879)), ("botRemote", json!(false)), ("reqVarUser", json!("")), ("reqVarSong", json!("")), ("reqVarMod", json!(""))],
         "widget" => vec![("widgetPort", json!(7878)), ("widgetDesign", json!("card")), ("widgetAlign", json!("left")), ("widgetRounded", json!(true)), ("widgetText", json!(1)), ("wFade", json!(true)), ("wScroll", json!(true)), ("wSpin", json!(true)), ("wRequester", json!(true)), ("wColor", json!(1.2)), ("alertSplit", json!(false)), ("widget2Design", json!("pill")), ("widget2Align", json!("left")), ("widget2Rounded", json!(true)), ("widget2Text", json!(1))],
         "alerts" => vec![("alertBot", json!("streamerbot")), ("sbHost", json!("127.0.0.1:8080")), ("sbOn", json!(true)), ("alertTrans", json!("seamless")), ("alertCSize", json!("medium")), ("alertCDir", json!("diag")), ("alertCAngle", json!(0)), ("alertAnim", json!("slide")), ("alertOwnCol", json!(false)), ("alertCol1", json!("#8e9bff")), ("alertCol2", json!("#b38cff")), ("alertDir", json!("115deg")), ("alertIcon", json!(1)), ("alertSecs", json!(5)), ("alertVol", json!(0.8)), ("botRemote", json!(false))],
         "remote" => vec![("remotePort", json!(7880))],
@@ -163,6 +165,35 @@ public class CPHInline
 }
 "#;
 
+/// The bots Song Requests knows, as (id, name, whether it's online (a cloud bot: it reaches the PC over the
+/// internet), its !sr, !song and !wrongsong, its steps). In the commands, {base} is the address up to the
+/// port and {key} the secret key. Each written its own way, as its documentation has it; where that isn't
+/// known for sure, the general address, with its own variables for USERNAME and SONG.
+const REQ_BOTS: &[(&str, &str, bool, &str, &str, &str, &str)] = &[
+    ("streamerbot", "Streamer.bot", false, "{base}/request?key={key}&user=%user%&q=%rawInputUrlEncoded%", "{base}/now", "{base}/wrongsong?key={key}&user=%user%&mod=%isModerator%",
+        "1. Make an Action with a Command trigger, !sr.\n2. Add Core > Network > Fetch URL with the request address, its variable named reply.\n3. Add Core > C# > Execute C# Code with the Reply Code below, and Compile (it answers on the chat that asked).\n4. The same for !song and !wrongsong, with their addresses."),
+    ("mixitup", "Mix It Up", false, "{base}/request?key={key}&user=$username&q=$allargs", "{base}/now", "{base}/wrongsong?key={key}&user=$username&mod=$userroles",
+        "1. Make a Chat Command, !sr.\n2. Add a Web Request action with the request address, its response as plain text.\n3. Add a Chat action that sends $webrequestresult.\n4. The same for !song and !wrongsong, with their addresses."),
+    ("nightbot", "Nightbot", true, "!commands add !sr $(urlfetch {base}/request?key={key}&q=$(querystring))", "!commands add !song $(urlfetch {base}/now)", "!commands add !wrongsong $(urlfetch {base}/wrongsong?key={key})",
+        "Paste each one into your chat, as yourself. (Nightbot says who asked, and whether they're a moderator, by itself.)"),
+    ("streamelements", "StreamElements", true, "!command add !sr $(customapi {base}/request?key={key}&user=$(user)&q=$(queryescape ${1:}))", "!command add !song $(customapi {base}/now)", "!command add !wrongsong $(customapi {base}/wrongsong?key={key}&user=$(user))",
+        "Paste each one into your chat, as yourself."),
+    ("moobot", "Moobot", true, "{base}/request?key={key}&user=USERNAME&q=SONG", "{base}/now", "{base}/wrongsong?key={key}&user=USERNAME",
+        "1. In Moobot's dashboard, make a custom command, !sr, its response URL fetch (full response).\n2. Paste the request address, then put Moobot's \"Username of the user\" tag in place of USERNAME and its \"Command arguments\" tag in place of SONG.\n3. The same for !song and !wrongsong, with their addresses."),
+    ("kickbot", "KickBot", true, "{{request(\"{base}/request?key={key}&format=json&user={{sender.username}}&q={{param}}\").message}}", "{{request(\"{base}/now?format=json\").message}}", "{{request(\"{base}/wrongsong?key={key}&format=json&user={{sender.username}}\").message}}",
+        "1. In KickBot's dashboard, make a custom command, !sr, and paste the first as its response.\n2. The same for !song and !wrongsong.\nIf a command answers with the variable names themselves, KickBot isn't filling them in inside a request: say so, and we'll find another way."),
+    ("streamlabs", "Streamlabs Cloudbot", true, "{base}/request?key={key}&user=USERNAME&q=SONG", "{base}/now", "{base}/wrongsong?key={key}&user=USERNAME",
+        "1. Make a custom command, !sr, whose response reads a web address (Cloudbot's read API variable).\n2. Give it the request address, with Cloudbot's username variable for USERNAME and its message variable for SONG.\n3. The same for !song and !wrongsong."),
+    ("botrix", "Botrix", true, "{base}/request?key={key}&user=USERNAME&q=SONG", "{base}/now", "{base}/wrongsong?key={key}&user=USERNAME",
+        "1. Make a custom command, !sr, whose response fetches a web address (Botrix's fetch variable).\n2. Give it the request address, with Botrix's username variable for USERNAME and its message variable for SONG.\n3. The same for !song and !wrongsong."),
+    ("kicklet", "Kicklet", true, "{base}/request?key={key}&user=USERNAME&q=SONG", "{base}/now", "{base}/wrongsong?key={key}&user=USERNAME",
+        "1. Make a command, !sr, whose response fetches a web address (in its template).\n2. Give it the request address, with Kicklet's username variable for USERNAME and its message variable for SONG.\n3. The same for !song and !wrongsong."),
+    ("casterlabs", "Casterlabs", true, "", "", "",
+        "Casterlabs' chatbot only posts the replies you write for it: it can't call a web address, so it can't take song requests yet. OmniPulse's own chatbot (Settings > Plugins) can."),
+    ("other", "Another Bot", false, "{base}/request?key={key}&user=USERNAME&q=SONG", "{base}/now", "{base}/wrongsong?key={key}&user=USERNAME&mod=MOD",
+        "Any bot that calls a web address and posts what comes back:\n1. /request: key, q (what was asked for, URL-encoded) and user (who asked).\n2. /now for what's playing.\n3. /wrongsong: key, user and mod (true for a moderator).\nAdd &format=json for JSON (ok, message, title, artist, url, position)."),
+];
+
 fn tog(key: &str, label: &str, note: &str) -> Value { json!({ "key": key, "label": label, "note": note, "type": "toggle" }) }
 fn num(key: &str, label: &str, note: &str) -> Value { json!({ "key": key, "label": label, "note": note, "type": "number" }) }
 fn text(key: &str, label: &str, note: &str) -> Value { json!({ "key": key, "label": label, "note": note, "type": "text" }) }
@@ -257,26 +288,52 @@ fn fields_of(name: &str, vals: &Map<String, Value>, prefs: &Value, lan: &str) ->
     let n = |k: &str, d: u64| vals.get(k).and_then(|v| v.as_u64()).unwrap_or(d);
     let s = |k: &str, d: &str| vals.get(k).and_then(|v| v.as_str()).unwrap_or(d).to_string();
     match name {
+        // YouTube Music's own: liking there too, and its helpers (how they are, set up or removed)
+        "youtube" => {
+            let (state, setup, remove) = crate::helpers_state();
+            let mut f = vec![tog("ytMirror", "Like Other Tracks There Too", "With your YouTube account connected: liking a SoundCloud or Spotify track likes the same song on YouTube.")];
+            if !setup.is_empty() { f.push(button("ytHelpersSetup", "Playback Helpers", setup, &state)); }
+            else if remove { f.push(button("ytHelpersRemove", "Playback Helpers", "Remove", &format!("{state} Removed, YouTube Music songs won't play until they're set up again."))); }
+            else { f.push(note(&format!("Playback Helpers: {state}"))); }
+            f
+        }
         "requests" => {
             let bot = s("reqBot", "streamerbot");
             let port = n("reqPort", 7879);
             let key = prefs["reqKey"].as_str().unwrap_or("").to_string();
-            let (u, q, m) = match bot.as_str() { "mixitup" => ("$username", "$allargs", "$userroles"), "other" => ("USERNAME", "SONG", "MOD"), _ => ("%user%", "%rawInputUrlEncoded%", "%isModerator%") };
-            let base = format!("http://127.0.0.1:{port}");
-            let req = |k: &str| format!("{base}/request?key={k}&user={u}&q={q}");
-            let wrong = |k: &str| format!("{base}/wrongsong?key={k}&user={u}&mod={m}");
-            let steps = match bot.as_str() {
-                "mixitup" => "1. Create a Chat Command such as !sr.\n2. Add a Web Request action, paste the request address, and set the response to plain text.\n3. Add a Chat action that sends $webrequestresult.\n4. For !song: the same again with the now playing address.\n5. For !wrongsong: the same again with the wrong song address ($userroles tells it who's a moderator). A viewer takes back their last request; a moderator, or you, takes back the last one anyone made.\nIf $webrequestresult doesn't post anything in your version, check Mix It Up's list of special identifiers for the web request result.",
-                "other" => "Any bot that can call a web address and post the reply in chat will work:\n1. Call /request with key (required, from here), q (what was asked for: search words or a SoundCloud or Spotify link) and user (who asked; used for the per-viewer limit and \"requested by\").\n2. Text in q and user must be URL-encoded (spaces as %20). Most bots have an encoded version of the message variable.\n3. The reply is one line of plain text, ready to post in chat. Add &format=json to get JSON instead: ok, message, title, artist, url and position.\n4. Call /now for the current song (no key needed). It also supports &format=json.\n5. Call /wrongsong with key, user and mod (true for a moderator, or a list of their roles with Moderator or Streamer in it) to take back that viewer's last request; a moderator's takes back the last one anyone made.",
-                _ => "1. Create an Action called Song request, with a Command trigger such as !sr.\n2. Add the sub-action Core > Network > Fetch URL, paste the request address, and set its variable name to reply.\n3. Add the sub-action Core > C# > Execute C# Code, paste the Reply Code below into it, and Compile. It posts %reply% back on the platform the command came from (Twitch, YouTube, Kick or Trovo). A Twitch Send Message sub-action would answer on Twitch, whatever chat asked.\n4. For !song: the same again with the now playing address.\n5. For !wrongsong: the same again with the wrong song address. A viewer takes back their last request; a moderator takes back the last one anyone made.\nIf your version names things slightly differently, look for the sub-action that fetches a URL and saves the reply in a variable.",
-            };
-            let mut f = vec![
-                sel("reqBot", "Chat Bot", "", &[(json!("streamerbot"), "Streamer.bot"), (json!("mixitup"), "Mix It Up"), (json!("other"), "Generic")]),
-                info(match bot.as_str() { "mixitup" => "Web Request Address (special identifiers already filled in)", "other" => "Request Address (replace USERNAME and SONG with your bot's variables)", _ => "Fetch URL Address (variables already filled in)" }, &req(&hide(&key)), &req(&key), ""),
-                info("Now Playing Address (!song)", &format!("{base}/now"), &format!("{base}/now"), ""),
-                info("Wrong Song Address (!wrongsong)", &wrong(&hide(&key)), &wrong(&key), ""),
-                note(steps),
-            ];
+            let (_, _, cloud, rq, now, wrong, steps) = REQ_BOTS.iter().copied().find(|b| b.0 == bot).unwrap_or(REQ_BOTS[REQ_BOTS.len() - 1]);
+            // (an online bot reaches it over the internet: your public IP in the address, kept off stream)
+            let base = if cloud { format!("http://YOUR-PUBLIC-IP:{port}") } else { format!("http://127.0.0.1:{port}") };
+            // (a bot whose variables aren't written in for it: its own, typed in the fields below, in place of
+            // USERNAME, SONG and MOD; each left as that word until it's typed)
+            let var = |k: &str, d: &str| Some(s(k, "")).filter(|v| !v.trim().is_empty()).map(|v| v.trim().to_string()).unwrap_or_else(|| d.to_string());
+            let (vu, vs, vm) = (var("reqVarUser", "USERNAME"), var("reqVarSong", "SONG"), var("reqVarMod", "MOD"));
+            // (each word swapped out first, so a variable with one of the others in it is left as typed)
+            let fill = |t: &str, k: &str| t.replace("{base}", &base).replace("{key}", k)
+                .replace("USERNAME", "\u{1}").replace("SONG", "\u{2}").replace("MOD", "\u{3}")
+                .replace('\u{1}', &vu).replace('\u{2}', &vs).replace('\u{3}', &vm);
+            let blanks = rq.contains("USERNAME");
+            let opts: Vec<(Value, &str)> = REQ_BOTS.iter().map(|b| (json!(b.0), b.1)).collect();
+            let mut f = vec![sel("reqBot", "Chat Bot", "", &opts)];
+            let chat = rq.starts_with('!');
+            // (its variables, each in a field of its own: the addresses below change as they're typed)
+            if blanks {
+                f.push(text("reqVarUser", "Username Variable", "Your bot's variable for who's asking (in place of USERNAME)."));
+                f.push(text("reqVarSong", "Song Variable", "Its variable for what they typed after the command (in place of SONG)."));
+                if wrong.contains("MOD") { f.push(text("reqVarMod", "Moderator Variable", "Its variable for whether they're a moderator (in place of MOD).")); }
+            }
+            if !rq.is_empty() {
+                f.extend([
+                    info(if chat { "Song Request (!sr)" } else { "Request Address (!sr)" }, &fill(rq, &hide(&key)), &fill(rq, &key), "Adds the song a viewer asks for to the queue."),
+                    info(if chat { "Now Playing (!song)" } else { "Now Playing Address (!song)" }, &fill(now, &hide(&key)), &fill(now, &key), "Says what's playing."),
+                    info(if chat { "Wrong Song (!wrongsong)" } else { "Wrong Song Address (!wrongsong)" }, &fill(wrong, &hide(&key)), &fill(wrong, &key), "Takes back the viewer's last request (a moderator's: the last anyone made)."),
+                ]);
+            }
+            f.push(note(steps));
+            // (an online bot: reaching this PC from the internet, the only setup it needs besides the above)
+            if cloud && !rq.is_empty() {
+                f.push(note(&format!("Letting it reach this PC:\n1. Switch on Bots on Other Devices (below).\n2. On your router, forward port {port} (TCP) to this PC, {lan}.\n3. In each of the above, put your public IP address in place of YOUR-PUBLIC-IP (search \"what is my IP\").\nKeep your public IP off stream and out of screenshots: Streamer Mode on while you set this up.")));
+            }
             if bot == "streamerbot" {
                 f.push(info("Reply Code (for Execute C# Code)", "Copy it, then paste it into the sub-action", SB_REPLY_CODE, ""));
             }
@@ -293,7 +350,7 @@ fn fields_of(name: &str, vals: &Map<String, Value>, prefs: &Value, lan: &str) ->
                 num("reqPort", "Port", "1024 to 65535."),
                 button("reqNewKey", "Secret Key", "New Key", "A new key: your bot needs the new addresses after."),
             ]);
-            f.extend(remote_bots(vals, "requests", port, &format!("/request?key={}&user=USERNAME&q=SONG", hide(&key)), lan));
+            if cloud { f.push(remote_bots(vals, "requests", port, "", lan).remove(0)); } else { f.extend(remote_bots(vals, "requests", port, &format!("/request?key={}&user=USERNAME&q=SONG", hide(&key)), lan)); }
             f
         }
         "widget" => {

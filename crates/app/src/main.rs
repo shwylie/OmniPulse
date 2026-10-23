@@ -4158,6 +4158,9 @@ fn mix_started(shared: &Shared) {
         mix_record(&a, &plan, a.queue.current(), a.queue.items.get(n).map(|q| &q.t))
     };
     LAST_MIX.with(|l| *l.borrow_mut() = Some((rec, std::time::Instant::now())));
+    // (its crossfader: the one playing into the next)
+    let pair = { let a = shared.borrow(); a.queue.current().cloned().zip(a.queue.items.get(n).map(|q| q.t.clone())) };
+    if let Some((from, to)) = pair { xf_begin(shared, from, to, plan.ms); }
     if let Some(ui) = shared.borrow().ui.upgrade() {
         match plan.style {
             Some("roll") => ui.set_status("Roll.".into()),
@@ -4304,6 +4307,65 @@ fn paint_marks(ui: &AppWindow, t: &Track) {
         ui.set_now_liked(a.library.iter().any(|x| x.key == t.key));
         ui.set_now_fav(marks::favourites(&a.web.favourites).iter().any(|x| x.key == t.key));
     });
+}
+
+/// A Seamless Mix under way, for its crossfader: the two songs, how long it takes, when it was begun, and
+/// whether the engine's started it yet
+struct Xf { from: Track, to: Track, ms: u64, began: std::time::Instant, engaged: bool }
+
+thread_local! {
+    static XF: RefCell<Option<Xf>> = const { RefCell::new(None) };
+}
+
+/// A Seamless Mix begun (a blend, a roll, a tape stop or its fade): its crossfader shown, with both covers
+fn xf_begin(shared: &Shared, from: Track, to: Track, ms: u64) {
+    let (fa, ta) = (from.art.clone(), to.art.clone());
+    let label = format!("Into {}", to.title);
+    XF.with(|x| *x.borrow_mut() = Some(Xf { from, to, ms, began: std::time::Instant::now(), engaged: false }));
+    let a = shared.borrow();
+    let Some(ui) = a.ui.upgrade() else { return };
+    ui.set_xf_label(label.into());
+    ui.set_xf_frac(0.0);
+    ui.set_xf_from_art(slint::Image::default());
+    ui.set_xf_to_art(slint::Image::default());
+    let weak = a.ui.clone();
+    a.rt.spawn(async move {
+        let (f, t) = tokio::join!(player::fetch_art(fa, art_px(34.0)), player::fetch_art(ta, art_px(34.0)));
+        let _ = weak.upgrade_in_event_loop(move |ui| {
+            if let Some(px) = f { ui.set_xf_from_art(slint::Image::from_rgba8(px)); }
+            if let Some(px) = t { ui.set_xf_to_art(slint::Image::from_rgba8(px)); }
+        });
+    });
+}
+
+/// Each tick: the crossfader where it's up to, shown while the engine's crossfade runs (and a moment
+/// before it starts); gone, and the widget told, once it's over
+fn xf_tick(shared: &Shared, ui: &AppWindow) {
+    let p = shared.borrow().engine.mix_progress();
+    let state = XF.with(|x| x.borrow().as_ref().map(|x| (x.began.elapsed(), x.engaged)));
+    let Some((since, engaged)) = state else {
+        if ui.get_xf_on() { ui.set_xf_on(false); }
+        return;
+    };
+    if p.is_none() && (engaged || since > std::time::Duration::from_secs(4)) {
+        XF.with(|x| *x.borrow_mut() = None);
+        ui.set_xf_on(false);
+        if let Ok(mut c) = integrations::CROSSFADE.lock() { *c = None; }
+        push_out(shared, false);
+        return;
+    }
+    if !ui.get_xf_on() { ui.set_xf_on(true); }
+    ui.set_xf_frac(p.unwrap_or(0.0));
+    // (the engine's begun it: the widget's crossfader timed from where it is)
+    if let Some(p) = p.filter(|_| !engaged) {
+        let x = XF.with(|x| x.borrow_mut().as_mut().map(|x| { x.engaged = true; (x.from.clone(), x.to.clone(), x.ms) }));
+        if let Some((from, to, ms)) = x {
+            let side = |t: &Track| serde_json::json!({ "title": t.title, "artist": t.artist, "artwork": t.art.replace("-t200x200", "-t300x300") });
+            let started = now_ms().saturating_sub((p as f64 * ms as f64) as u64);
+            if let Ok(mut c) = integrations::CROSSFADE.lock() { *c = Some(serde_json::json!({ "from": side(&from), "to": side(&to), "ms": ms, "started_at": started })); }
+            push_out(shared, false);
+        }
+    }
 }
 
 /// The heart: likes or unlikes what's playing, where it's from (put right back if that fails)
@@ -4877,6 +4939,8 @@ fn smart_fade_tick(shared: &Shared, key: &str, pos: u64, dur: u64) -> Option<boo
     // (the voices handed over halfway only if both sing there)
     SMART_XFADE.with(|x| x.set(smart_both_sing(&a.t.key, &b.t.key, (f.out_from_ms, f.out_to_ms), (f.in_from_ms, f.in_from_ms + f.len_ms()))));
     CHANGE_HOW.with(|h| h.set("ended"));
+    // (its crossfader: the one playing into the next)
+    xf_begin(shared, a.t.clone(), b.t.clone(), ms);
     step(shared, 1);
     Some(true)
 }
@@ -5062,6 +5126,7 @@ fn tick(shared: &Shared, events: &std::sync::mpsc::Receiver<Event>, n: u64) {
     // a mix playing: the title bar's button and the progress bar show it
     let mixing = shared.borrow().engine.mixing();
     if ui.get_mixing() != mixing { ui.set_mixing(mixing); }
+    xf_tick(shared, &ui);
     windows_now(shared, &ui);
     // (YouTube Music's helpers being set up: how far, each second, while Settings is open)
     if n.is_multiple_of(4) && ui.get_page() == "settings" && omnipulse_core::tools::progress()["busy"].as_bool() == Some(true) { helpers_paint(shared); }
@@ -5586,7 +5651,7 @@ fn paint_settings(a: &App) {
             // Extended only shows with Streamer Mode on
             .filter(|(_, _, _, key, _)| *key != "streamSafe" || streamer)
             // (the platforms' own switches are with their accounts)
-            .filter(|(_, _, _, key, _)| !matches!(*key, "scOn" | "spOn" | "ytOn" | "scrobble"))
+            .filter(|(_, _, _, key, _)| !matches!(*key, "scOn" | "spOn" | "ytOn" | "scrobble" | "ytMirror"))
             // (Alerts: inside the Stream Widget's page, as its path says, not a row of its own here)
             .filter(|(_, _, _, key, _)| *key != "alertsOn")
             .map(|(_, label, note, key, dflt)| {
@@ -5599,14 +5664,25 @@ fn paint_settings(a: &App) {
         if sec == "Integrations" {
             list.push(SetRow { head: Default::default(), label: "Lyrics".into(), note: "Where lyrics come from, and in which order.".into(), on: false, key: "lyricsSources".into(), sub: false, more: false, button: "Sources".into() });
         }
+        // a plugin whose settings live here (the chatbot's, in Streaming), on on the Plugins page: its own switch
+        // (it running or not) and its settings, there either way
+        if sec != "Plugins" {
+            for p in omnipulse_core::plugins::list() {
+                let m = &p.manifest;
+                if m.section != sec || !plugin_on(&a.web.prefs, &m.id) { continue; }
+                let note = format!("{}{}", if m.description.is_empty() { String::new() } else { format!("{} ", m.description) }, plugin_state(&a.web.prefs, m));
+                list.push(SetRow { head: Default::default(), label: plugin_label(m).into(), note: note.into(), on: plugin_runs(&a.web.prefs, &m.id), key: format!("plugRun_{}", m.id).into(), sub: false, more: !streamer, button: Default::default() });
+            }
+        }
         // the plugins installed (the web app adds and removes them; each one switches on and off here)
         if sec == "Plugins" && !streamer {
             for p in omnipulse_core::plugins::list() {
                 let m = &p.manifest;
-                let state = if !plugin_on(&a.web.prefs, &m.id) { "Off.".to_string() } else if plugrun::get(&m.id).is_some() { "Running.".to_string() } else { PLUG_ERR.with(|e| e.borrow().get(&m.id).cloned()).map(|e| format!("Couldn't start: {e}")).unwrap_or_else(|| "Starting...".into()) };
-                let note = format!("{}{}{}", if m.description.is_empty() { String::new() } else { format!("{} ", m.description) }, if p.bundled { "Comes with OmniPulse. " } else { "" }, state);
-                let more = m.settings.as_array().is_some_and(|l| !l.is_empty());
-                list.push(SetRow { head: Default::default(), label: m.name.clone().into(), note: note.into(), on: plugin_on(&a.web.prefs, &m.id), key: format!("plugOn_{}", m.id).into(), sub: false, more, button: Default::default() });
+                let state = plugin_state(&a.web.prefs, m);
+                let home = if m.section.is_empty() { String::new() } else { format!("Its settings are in Settings > {}; off here, it's gone from there too. ", m.section) };
+                let note = format!("{}{}{home}{}", if m.description.is_empty() { String::new() } else { format!("{} ", m.description) }, if p.bundled { "Comes with OmniPulse. " } else { "" }, state);
+                let more = m.section.is_empty() && m.settings.as_array().is_some_and(|l| !l.is_empty());
+                list.push(SetRow { head: Default::default(), label: plugin_label(m).into(), note: note.into(), on: plugin_on(&a.web.prefs, &m.id), key: format!("plugOn_{}", m.id).into(), sub: false, more, button: Default::default() });
             }
             // (the plugins: adding one, and taking out the ones you've added; it stays at the top)
             list.insert(0, SetRow { head: Default::default(), label: "Add a Plugin".into(), note: "Music sources made by others. Each is walled off and only reaches the sites it lists.".into(), on: false, key: "plugAdd".into(), sub: false, more: false, button: "Add".into() });
@@ -5821,6 +5897,7 @@ fn panel_open(shared: &Shared, name: &str) {
         let head = match name.strip_prefix("alert:") { Some(k) => alerts::name(&shared.borrow().web.prefs, k), None => panels::title(name) };
         let cat = match name {
             "requests" | "replies" | "widget" | "remote" | "offset" | "alerts" | "alertlist" | "safe" | "lyricsw" => "Streaming",
+            "youtube" => "Integrations",
             n if n.starts_with("alert:") => "Streaming",
             "plugins" => "Plugins",
             "smart" => "Sound",
@@ -5884,6 +5961,8 @@ fn panel_paint(shared: &Shared, name: &str, vals: &serde_json::Map<String, serde
 fn panel_set(shared: &Shared, name: &str, mut vals: serde_json::Map<String, serde_json::Value>, i: usize, v: &str) {
     let Some(f) = PANEL_FIELDS.with(|p| p.borrow().get(i).cloned()) else { return };
     let key = f["key"].as_str().unwrap_or("").to_string();
+    // (one of the fields its addresses are made from: those drawn again as it's typed in)
+    let makes_addresses = key.starts_with("reqVar");
     let redraw = match f["type"].as_str().unwrap_or("") {
         "toggle" => { vals.insert(key, serde_json::json!(v == "true")); true }
         "select" | "stepper" => {
@@ -5939,7 +6018,22 @@ fn panel_set(shared: &Shared, name: &str, mut vals: serde_json::Map<String, serd
         _ => { if let Some(x) = panels::typed(&key, v) { vals.insert(key, x); } false }
     };
     PF_EDIT.with(|e| *e.borrow_mut() = Some((format!("panel:{name}"), vals.clone())));
-    if redraw { panel_paint(shared, name, &vals); }
+    if redraw { panel_paint(shared, name, &vals); } else if makes_addresses { panel_infos(shared, name, &vals); }
+}
+
+/// Typed into a field a page's addresses are made from (Song Requests' variables): those addresses drawn
+/// again where they are, nothing else (the field being typed in keeps its place and its cursor)
+fn panel_infos(shared: &Shared, name: &str, vals: &serde_json::Map<String, serde_json::Value>) {
+    let fields = panels::fields(name, vals, &shared.borrow().web.prefs, &omnipulse_core::lan_ip().unwrap_or_else(|| "THIS-PC".into()));
+    let Some(ui) = shared.borrow().ui.upgrade() else { return };
+    let model = ui.get_pf_fields();
+    if model.row_count() != fields.len() { return panel_paint(shared, name, vals); }
+    for (i, f) in fields.iter().enumerate() {
+        if f["type"].as_str() != Some("info") { continue; }
+        let v: slint::SharedString = f["value"].as_str().unwrap_or("").into();
+        if let Some(mut r) = model.row_data(i) { if r.value != v { r.value = v; model.set_row_data(i, r); } }
+    }
+    PANEL_FIELDS.with(|p| *p.borrow_mut() = fields);
 }
 
 /// The alerts' list, as it is (its switches), kept before going elsewhere from it
@@ -5960,6 +6054,8 @@ fn panel_put(shared: &Shared, key: &str, v: serde_json::Value) {
 
 /// A panel's button: done at once
 fn panel_press(shared: &Shared, key: &str) {
+    if key == "ytHelpersSetup" { return helpers_act(shared, "setup"); }
+    if key == "ytHelpersRemove" { return helpers_act(shared, "remove"); }
     let note = match key {
         "reqClear" => {
             let mut a = shared.borrow_mut();
@@ -6424,8 +6520,9 @@ fn pf_open(shared: &Shared, id: &str) {
     PF_EDIT.with(|e| *e.borrow_mut() = Some((id.to_string(), vals)));
     pf_paint(shared);
     if let Some(ui) = shared.borrow().ui.upgrade() {
-        crumbs_set(&ui, vec![("Settings".into(), "root".into()), ("Plugins".into(), "cat:Plugins".into())]);
-        ui.set_pf_head(p.manifest.name.clone().into());
+        let cat = if p.manifest.section.is_empty() { "Plugins".to_string() } else { p.manifest.section.clone() };
+        crumbs_set(&ui, vec![("Settings".into(), "root".into()), (cat.clone(), format!("cat:{cat}"))]);
+        ui.set_pf_head(plugin_label(&p.manifest).into());
         ui.set_pf_open(true);
     }
 }
@@ -6512,9 +6609,26 @@ fn pf_save(shared: &Shared) {
     if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_pf_open(false); ui.set_status("Plugin settings saved.".into()); }
 }
 
-/// A plugin: on unless switched off (the web app's prefs.plugOn_<id>)
+/// A plugin: on unless switched off (the web app's prefs.plugOn_<id>). The Plugins page's switch: its master
+/// switch, off leaving no trace of it anywhere else
 fn plugin_on(prefs: &serde_json::Value, id: &str) -> bool {
     prefs[format!("plugOn_{id}")].as_bool() != Some(false)
+}
+
+/// A plugin running: on (its master switch), and, for one whose settings live in a category of their own
+/// (the chatbot's in Streaming), switched on there too (prefs.plugRun_<id>). Off there, its settings stay
+fn plugin_runs(prefs: &serde_json::Value, id: &str) -> bool {
+    plugin_on(prefs, id) && prefs[format!("plugRun_{id}")].as_bool() != Some(false)
+}
+
+/// A plugin's name as shown: "(WIP)" after it while it's still being built
+fn plugin_label(m: &omnipulse_core::plugins::Manifest) -> String {
+    if m.wip { format!("{} (WIP)", m.name) } else { m.name.clone() }
+}
+
+/// A plugin's state, for its row: off, running, starting or why it couldn't
+fn plugin_state(prefs: &serde_json::Value, m: &omnipulse_core::plugins::Manifest) -> String {
+    if !plugin_runs(prefs, &m.id) { "Off.".to_string() } else if plugrun::get(&m.id).is_some() { "Running.".to_string() } else { PLUG_ERR.with(|e| e.borrow().get(&m.id).cloned()).map(|e| format!("Couldn't start: {e}")).unwrap_or_else(|| "Starting...".into()) }
 }
 
 thread_local! {
@@ -6527,7 +6641,7 @@ fn plugins_start(shared: &Shared) {
     let (prefs, rt) = { let a = shared.borrow(); (a.web.prefs.clone(), a.rt.clone()) };
     for p in omnipulse_core::plugins::list() {
         let id = p.manifest.id.clone();
-        if !plugin_on(&prefs, &id) { plugrun::stop(&id); continue; }
+        if !plugin_runs(&prefs, &id) { plugrun::stop(&id); continue; }
         if plugrun::get(&id).is_some() { continue; }
         match plugrun::start(&p, &plugrun::settings_of(&p.manifest, &prefs), rt.clone()) {
             Ok(_) => PLUG_ERR.with(|e| e.borrow_mut().remove(&id)),
@@ -6574,6 +6688,18 @@ fn nav_move(shared: &Shared, from: &str, before: &str) {
 }
 
 fn set_toggle(shared: &Shared, key: &str) {
+    if let Some(id) = key.strip_prefix("plugRun_") {
+        let on = {
+            let mut a = shared.borrow_mut();
+            let on = !plugin_runs(&a.web.prefs, id);
+            if let Some(o) = a.web.prefs.as_object_mut() { o.insert(key.into(), serde_json::json!(on)); }
+            on
+        };
+        if std::env::var_os("OMNIPULSE_SELFTEST").is_none() { webstate::save_pref(key, serde_json::json!(on)); }
+        plugins_start(shared);
+        paint_settings(&shared.borrow());
+        return;
+    }
     if let Some(id) = key.strip_prefix("plugOn_") {
         let on = {
             let mut a = shared.borrow_mut();
@@ -6833,7 +6959,7 @@ fn accounts_paint(shared: &Shared) {
         let on = SET_ROWS.iter().find(|r| r.3 == sw).map(|r| set_row_on(&prefs, sw, r.4)).unwrap_or(true);
         // (each platform's plans, as the web app's Manage subscription links)
         let manage = match key { "soundcloud" => "https://soundcloud.com/you/subscriptions", "spotify" => "https://www.spotify.com/account/subscription/manage/", "youtube" => "https://www.youtube.com/paid_memberships", _ => "https://www.last.fm/settings/subscription" };
-        Account { name: name.into(), status: status.into(), signed, busy, keys: keys.into(), switch: sw.into(), on, manage: if signed { manage.into() } else { "".into() } }
+        Account { name: name.into(), status: status.into(), signed, busy, keys: keys.into(), switch: sw.into(), on, manage: if signed { manage.into() } else { "".into() }, settings: if key == "youtube" { "youtube".into() } else { "".into() } }
     }).collect();
     ui.set_accounts(ModelRc::from(Rc::new(VecModel::from(rows))));
 }
@@ -8630,6 +8756,8 @@ fn viz_update(shared: &Shared, ui: &AppWindow) {
         ui.set_viz_curve(ModelRc::from(wave.clone()));
         let ring = Rc::new(VecModel::from(vec![RingPiece::default(); viz::RING_PIECES]));
         ui.set_viz_ring(ModelRc::from(ring.clone()));
+        let small = Rc::new(VecModel::from(vec![RingPiece::default(); viz::RING_PIECES]));
+        ui.set_viz_ring_small(ModelRc::from(small.clone()));
         let t = slint::Timer::default();
         let m = model.clone();
         let w = ui.as_weak();
@@ -8643,6 +8771,8 @@ fn viz_update(shared: &Shared, ui: &AppWindow) {
                 ui.set_viz_level(l);
                 if ui.get_viz_style() == "ring" {
                     for (i, (d, f)) in viz::ring_pieces(&b).into_iter().enumerate() { ring.set_row_data(i, RingPiece { d: d.into(), f }); }
+                    // (the player's, round its cover, with In the Player on)
+                    if ui.get_viz_bar() { for (i, (d, f)) in viz::ring_small(&b).into_iter().enumerate() { small.set_row_data(i, RingPiece { d: d.into(), f }); } }
                 }
             }
             TBW.with(|t| if let Ok(t) = t.try_borrow() { if let Some((tw, _, _)) = t.as_ref() { tw.set_viz_level(l); } });
@@ -8656,6 +8786,7 @@ fn viz_update(shared: &Shared, ui: &AppWindow) {
         ui.set_viz_peaks(ModelRc::default());
         ui.set_viz_curve(ModelRc::default());
         ui.set_viz_ring(ModelRc::default());
+        ui.set_viz_ring_small(ModelRc::default());
         ui.set_viz_level(0.0);
     }
 }
@@ -9026,31 +9157,36 @@ thread_local! {
     static MORE_ACTS: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
 }
 
-/// YouTube Music's helpers (yt-dlp and Deno, about 58 MB): how they are, in Settings > Integrations
-fn helpers_paint(shared: &Shared) {
-    let Some(ui) = shared.borrow().ui.upgrade() else { return };
-    let on = plat_on(&shared.borrow().web.prefs, "youtube");
+/// YouTube Music's helpers (two small tools it plays with, about 58 MB): how they are, as its settings page
+/// says it (no tools named), what its button does ("" none) and whether they can be removed
+pub(crate) fn helpers_state() -> (String, &'static str, bool) {
+    let on = SHARED.with(|s| s.borrow().as_ref().map(|s| plat_on(&s.borrow().web.prefs, "youtube"))).unwrap_or(true);
     let pr = omnipulse_core::tools::progress();
     let mb = |b: u64| format!("{:.0}", b as f64 / 1_048_576.0);
     let used = omnipulse_core::tools::disk_use();
+    let busy = pr["busy"].as_bool() == Some(true);
     let have = omnipulse_core::tools::ytdlp_path().is_some();
-    let (note, setup) = if pr["busy"].as_bool() == Some(true) {
+    let (note, setup) = if busy {
         let (done, total) = (pr["done"].as_u64().unwrap_or(0), pr["total"].as_u64().unwrap_or(0));
-        (format!("Setting up: {}{}...", pr["step"].as_str().unwrap_or("").to_lowercase(), if total > 0 { format!(", {} of {} MB", mb(done), mb(total)) } else { String::new() }), "")
-    } else if let Some(e) = pr["error"].as_str() {
-        (format!("Couldn't set up: {e}"), "Try Again")
+        (format!("Setting up{}...", if total > 0 { format!(": {} of {} MB", mb(done), mb(total)) } else { String::new() }), "")
+    } else if pr["error"].as_str().is_some() {
+        ("Couldn't set them up: check your internet connection, then try again.".to_string(), "Try Again")
     } else if have {
-        ("Ready: yt-dlp finds each song's audio and Deno runs YouTube's player code for it, from their official releases (checked against their checksums), kept up to date.".to_string(), "")
+        ("Ready: they find each song's audio on YouTube Music, from their official releases (checked against their checksums), kept up to date.".to_string(), "")
     } else if !on {
         ("YouTube Music is off.".to_string(), "")
     } else if omnipulse_core::yt_stream::on_path_public("yt-dlp") {
-        ("Ready, with your own yt-dlp.".to_string(), "")
+        ("Ready, with the ones already on this PC.".to_string(), "")
     } else {
-        ("Two small tools YouTube Music plays with (yt-dlp and Deno, about 58 MB): set up by themselves.".to_string(), "Set Up")
+        ("Two small tools YouTube Music plays with (about 58 MB): set up by themselves.".to_string(), "Set Up")
     };
-    ui.set_helpers_note(format!("{note}{}", if used > 0 && !pr["busy"].as_bool().unwrap_or(false) { format!(" They take {} MB.", mb(used)) } else { String::new() }).into());
-    ui.set_helpers_setup(setup.into());
-    ui.set_helpers_remove(used > 0 && pr["busy"].as_bool() != Some(true));
+    let note = format!("{note}{}", if used > 0 && !busy { format!(" They take {} MB.", mb(used)) } else { String::new() });
+    (note, setup, used > 0 && !busy)
+}
+
+/// YouTube Music's helpers: their state, on its settings page while it's open
+fn helpers_paint(shared: &Shared) {
+    if PF_EDIT.with(|e| e.borrow().as_ref().is_some_and(|(id, _)| id == "panel:youtube")) { pf_paint(shared); }
 }
 
 /// Set up yt-dlp and Deno if YouTube Music is on and they aren't there (as the web app does at start),
@@ -9066,7 +9202,7 @@ fn helpers_start(shared: &Shared) {
 fn helpers_act(shared: &Shared, act: &str) {
     if act == "setup" { omnipulse_core::tools::start_install(); }
     else {
-        let note = match omnipulse_core::tools::uninstall() { Ok(b) => format!("yt-dlp and Deno are removed ({:.0} MB freed).", b as f64 / 1_048_576.0), Err(e) => format!("Couldn't remove them: {e}") };
+        let note = match omnipulse_core::tools::uninstall() { Ok(b) => format!("YouTube Music's helpers are removed ({:.0} MB freed).", b as f64 / 1_048_576.0), Err(e) => format!("Couldn't remove them: {e}") };
         if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_status(note.into()); }
     }
     helpers_paint(shared);
@@ -9369,8 +9505,10 @@ fn streamer_step(shared: &Shared) {
         safe_set(shared, false);
         if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_status("Streamer Mode off.".into()); }
     }
-    // (who you're signed in as: hidden, or shown again)
+    // (who you're signed in as: hidden, or shown again; and Settings' switches, Streamer Mode's and Extended's,
+    // in step with the title bar's button)
     accounts_paint(shared);
+    paint_settings(&shared.borrow());
 }
 
 fn safe_set(shared: &Shared, on: bool) {
@@ -9741,6 +9879,9 @@ fn taskbar_widget(shared: &Shared, ui: &AppWindow, on: bool) {
         if tw.get_art() != ui.get_now_art() { tw.set_art(ui.get_now_art()); }
         tw.set_playing(ui.get_playing()); tw.set_liked(ui.get_now_liked()); tw.set_can_like(ui.get_can_like());
         tw.set_frac(ui.get_pos_frac()); tw.set_mixing(ui.get_mixing());
+        tw.set_xf_on(ui.get_xf_on()); tw.set_xf_frac(ui.get_xf_frac());
+        if ui.get_xf_on() && tw.get_xf_from_art() != ui.get_xf_from_art() { tw.set_xf_from_art(ui.get_xf_from_art()); }
+        if ui.get_xf_on() && tw.get_xf_to_art() != ui.get_xf_to_art() { tw.set_xf_to_art(ui.get_xf_to_art()); }
         tw.set_show_progress(ui.get_widget_progress()); tw.set_big_art(ui.get_widget_big_art());
         // (its visualiser: the app's bands, as they're updated)
         let viz = if ui.get_widget_viz() { ui.get_viz_style() } else { "off".into() };
@@ -10278,6 +10419,7 @@ fn main() -> Result<(), slint::PlatformError> {
         match what.as_str() {
             "smart" => panel_open(&s, "smart"),
             "local" => ui.set_set_cat("Library".into()),
+            "youtube" => { ui.set_set_cat("Integrations".into()); panel_open(&s, "youtube"); }
             p if p.starts_with("plugin:") => { ui.set_set_cat("Plugins".into()); pf_open(&s, &p[7..]); }
             p if p.starts_with("plugin") => ui.set_set_cat("Plugins".into()),
             _ => ui.set_set_cat("Integrations".into()),
@@ -10432,8 +10574,10 @@ fn main() -> Result<(), slint::PlatformError> {
         ks_take(&s, found);
     });
     let s = shared.clone();
+    ui.on_account_settings(move |p| panel_open(&s, &p));
+    let s = shared.clone();
     ui.on_set_more(move |key| {
-        if let Some(id) = key.strip_prefix("plugOn_") { return pf_open(&s, id); }
+        if let Some(id) = key.strip_prefix("plugOn_").or_else(|| key.strip_prefix("plugRun_")) { return pf_open(&s, id); }
         if let Some(name) = panels::of_switch(&key) { panel_open(&s, name); }
     });
     let s = shared.clone();
@@ -11287,6 +11431,7 @@ fn main() -> Result<(), slint::PlatformError> {
             // (OMNIPULSE_SELFTEST_PLAN=applook: App & Look, nothing played)
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("sayacts") { vec![(6, "sayacts"), (8, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("albumpage") { vec![(8, "search"), (28, "openalbum"), (38, "end")] }
+            else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("round") { vec![(9, "settings"), (10, "cat_Streaming"), (12, "titleset:youtube"), (14, "prefset:reqBot=moobot"), (15, "panel:requests"), (17, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("ring") { vec![(8, "vizprep"), (9, "library"), (11, "play"), (13, "now"), (15, "viz:ring"), (19, "sayacts"), (22, "vizfull"), (25, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("applook") { vec![(9, "settings"), (10, "cat_App & Look"), (12, "end")] }
             // (OMNIPULSE_SELFTEST_PLAN=plugbar: a plugin's icon put in the title bar, then right-clicked for its settings)
@@ -11484,6 +11629,10 @@ fn main() -> Result<(), slint::PlatformError> {
                 "statsong" => { let before = s.borrow().queue.current().map(|t| t.title.clone()); ui.invoke_stats_song(0); println!("selftest: stats top song 0: {:?} -> {:?}, top {:?}", before, s.borrow().queue.current().map(|t| t.title.clone()), STATS_TOP.with(|t| t.borrow().0.iter().map(|x| x.title.clone()).collect::<Vec<_>>())); }
                 w if w.starts_with("setq:") => { ui.set_search_text(w[5..].into()); ui.invoke_search_edited(w[5..].into()); println!("selftest: settings search \"{}\": query \"{}\", cat \"{}\", {} hits", &w[5..], ui.get_set_query(), ui.get_set_cat(), ui.get_set_hits().row_count()); }
                 "unround" => { if let Some(sh) = SHARED.with(|x| x.borrow().clone()) { pref_put(&sh, "appRounded", serde_json::json!(false)); apply_look(&sh); } }
+                // (a setting, for this run only: prefset:key=value)
+                w if w.starts_with("prefset:") => {
+                    if let Some((k, v)) = w[8..].split_once('=') { if let Some(o) = s.borrow_mut().web.prefs.as_object_mut() { o.insert(k.into(), serde_json::json!(v)); } }
+                }
                 w if w.starts_with("panel:") => { if let Some(sh) = SHARED.with(|x| x.borrow().clone()) { panel_open(&sh, &w[6..]); } }
                 w if w.starts_with("cat:") => { ui.set_set_cat(w[4..].into()); }
                 w if w.starts_with("scroll:") => { ui.window().dispatch_event(slint::platform::WindowEvent::PointerScrolled { position: slint::LogicalPosition::new(560.0, 400.0), delta_x: 0.0, delta_y: -(w[7..].parse::<f32>().unwrap_or(0.0)) }); }

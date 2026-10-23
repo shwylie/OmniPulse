@@ -112,59 +112,67 @@ pub fn curve(b: &[f32; BANDS]) -> [f32; CURVE] {
     out
 }
 
-/// The Ring's outline: one solid wave in a circle round the cover, as path commands in a 1000-unit square
-/// (the box it's drawn in), the cover in its middle (RING_COVER of it). Each way round from the foot (the bass)
-/// to the top (the highs), mirrored, out from a circle just clear of the cover's corners as far as the band
-/// there is loud; a smooth curve through it
-pub fn ring_pieces(b: &[f32; BANDS]) -> Vec<(String, f32)> {
-    const N: usize = 120;
-    // (the circle through the cover's corners, and a little out from them)
-    const BASE: f32 = RING_COVER * 500.0 * std::f32::consts::SQRT_2 + 10.0;
-    // (at its loudest, to the box's edge)
-    const DEPTH: f32 = 492.0 - BASE;
-    let pts: Vec<(f32, f32)> = (0..N)
-        .map(|i| {
-            // (from straight down, round the left side, to straight up and back down the right)
-            let th = std::f32::consts::TAU * i as f32 / N as f32;
-            let (dx, dy) = (-th.sin(), th.cos());
-            let away = if th <= std::f32::consts::PI { th } else { std::f32::consts::TAU - th };
-            let x = away / std::f32::consts::PI * (BANDS - 1) as f32;
-            let k = (x.floor() as usize).min(BANDS - 1);
-            let t = x - k as f32;
-            let v = b[k] + (b[(k + 1).min(BANDS - 1)] - b[k]) * t;
-            // (eased up a little, so quieter bands still move it)
-            let r = BASE + DEPTH * v.clamp(0.0, 1.0).powf(0.8);
-            (500.0 + dx * r, 500.0 + dy * r)
-        })
-        .collect();
-    let p = |i: usize| pts[i % N];
-    // (in slices from the middle, each filled with its own step of the accent's gradient, the bass's colour at
-    // the foot, the highs' at the top: the software renderer fills a path with one colour. Each runs a step
-    // into the next, so no seam shows between them)
-    let per = N / RING_PIECES;
+/// The Ring: a spike for each band standing out in a circle round the cover (as Proximity's round its logo),
+/// the bass at the foot, the highs at the top, the left half and the right mirrored; between two spikes it
+/// falls back toward the circle. As path commands in a 1000-unit square (the box it's drawn in), in slices,
+/// each its own step of the accent's gradient (the software renderer fills a path with one colour): each
+/// slice one spike, from the middle, running a little into the next so no seam shows. `inner`: the circle
+/// it stands out from, in those units
+fn ring_shape(b: &[f32; BANDS], inner: f32) -> Vec<(String, f32)> {
+    const OUT: f32 = 494.0;
+    let depth = OUT - inner;
+    // (a band's level at an angle from straight down, round to straight up: 0 the bass, 1 the highs)
+    let at = |th: f32| -> (f32, f32) {
+        let th = th.rem_euclid(std::f32::consts::TAU);
+        let away = if th <= std::f32::consts::PI { th } else { std::f32::consts::TAU - th } / std::f32::consts::PI;
+        let x = away * (BANDS - 1) as f32;
+        let k = (x.round() as usize).min(BANDS - 1);
+        (b[k], away)
+    };
+    // (each band against the others: what they all have taken off, so the loud ones stand out from the rest
+    // however loud the song is, and the louder sharper still)
+    let mean = b.iter().sum::<f32>() / BANDS as f32;
+    let floor = mean * 0.75;
+    let reach = |v: f32| ((v - floor) / (1.0 - floor).max(0.05)).clamp(0.0, 1.0).powf(1.25);
+    let pt = |th: f32, r: f32| (500.0 - th.sin() * r, 500.0 + th.cos() * r);
+    let step = std::f32::consts::TAU / RING_PIECES as f32;
+    // each spike's tip, and the dip before it (its own level and the one before's, the lower, mostly gone)
+    let tips: Vec<((f32, f32), f32)> = (0..RING_PIECES).map(|k| { let th = (k as f32 + 0.5) * step; let (v, away) = at(th); (pt(th, inner + depth * reach(v)), away) }).collect();
+    let dips: Vec<(f32, f32)> = (0..RING_PIECES).map(|k| {
+        let th = k as f32 * step;
+        let (a, _) = at(th - step / 2.0);
+        let (c, _) = at(th + step / 2.0);
+        pt(th, inner + depth * reach(a.min(c)) * 0.15)
+    }).collect();
     (0..RING_PIECES)
-        .map(|w| {
-            let (from, to) = (w * per, (w + 1) * per + 1);
-            let mut d = format!("M 500 500 L {:.1} {:.1}", p(from).0, p(from).1);
-            for i in from..to {
-                let (p0, p1, p2, p3) = (p(i + N - 1), p(i), p(i + 1), p(i + 2));
-                let c1 = (p1.0 + (p2.0 - p0.0) / 6.0, p1.1 + (p2.1 - p0.1) / 6.0);
-                let c2 = (p2.0 - (p3.0 - p1.0) / 6.0, p2.1 - (p3.1 - p1.1) / 6.0);
-                d.push_str(&format!(" C {:.1} {:.1} {:.1} {:.1} {:.1} {:.1}", c1.0, c1.1, c2.0, c2.1, p2.0, p2.1));
-            }
-            d.push_str(" Z");
-            // (how far round from the foot its middle is: 0 the bass, 1 the highs)
-            let mid = (w as f32 + 0.5) / RING_PIECES as f32;
-            (d, 1.0 - (2.0 * mid - 1.0).abs())
+        .map(|k| {
+            let (tip, away) = tips[k];
+            let (d0, d1) = (dips[k], dips[(k + 1) % RING_PIECES]);
+            let next = tips[(k + 1) % RING_PIECES].0;
+            // (into the next a third of the way up its spike: drawn over by it)
+            let over = (d1.0 + (next.0 - d1.0) / 3.0, d1.1 + (next.1 - d1.1) / 3.0);
+            let d = format!("M 500 500 L {:.1} {:.1} L {:.1} {:.1} L {:.1} {:.1} L {:.1} {:.1} Z", d0.0, d0.1, tip.0, tip.1, d1.0, d1.1, over.0, over.1);
+            (d, away)
         })
         .collect()
 }
 
-/// The Ring's slices, each a step of the gradient
-pub const RING_PIECES: usize = 60;
+/// The Ring round Now Playing's cover (and full screen's): from a circle just clear of the cover's corners
+pub fn ring_pieces(b: &[f32; BANDS]) -> Vec<(String, f32)> {
+    ring_shape(b, RING_COVER * 500.0 * std::f32::consts::SQRT_2 + 10.0)
+}
 
-/// The Ring's cover: this much of the box's width, in its middle (the circle round it the rest)
-pub const RING_COVER: f32 = 0.56;
+/// The Ring round the player's cover (smaller for it, 0.7 of its place): its box the place and 10 px each
+/// side, from a circle just clear of the cover's corners
+pub fn ring_small(b: &[f32; BANDS]) -> Vec<(String, f32)> {
+    ring_shape(b, 345.0)
+}
+
+/// The Ring's cover: this much of the box's width, in its middle (the spikes round it the rest)
+pub const RING_COVER: f32 = 0.46;
+
+/// The Ring's spikes, each its own slice and step of the gradient (half each way round: a band each)
+pub const RING_PIECES: usize = 64;
 
 #[cfg(test)]
 mod tests {

@@ -66,7 +66,7 @@ export struct Shelf { title: string, tiles: [Tile], open: bool, gone: bool, show
 export struct Line { text: string }
 /// A switch in Settings: under its section's heading (head, on the first of a section)
 /// An account in Settings: its name, what's known (who's signed in, or what it needs), and its button
-export struct Account { name: string, status: string, signed: bool, busy: bool, keys: string, switch: string, on: bool, manage: string }
+export struct Account { name: string, status: string, signed: bool, busy: bool, keys: string, switch: string, on: bool, manage: string, settings: string }
 // Settings' search: a setting found (its path, what it is), where it lives (its category, a panel to
 // open), and its switch if it has one
 export struct SetHit { path: string, label: string, note: string, cat: string, panel: string, key: string, on: bool, toggle: bool }
@@ -1279,18 +1279,80 @@ component BadgedCover inherits Rectangle {
     }
 }
 
+/// A Seamless Mix under way, as a DJ's crossfader: the one going out's cover (fading), the fader (its knob
+/// across as the mix goes), the one coming in's (brightening); its words beside it unless it's compact
+component Crossfade inherits Rectangle {
+    in property <image> from-art;
+    in property <image> to-art;
+    in property <float> frac;
+    in property <string> label;
+    in property <bool> compact;
+    property <length> c: root.compact ? 18px : 34px;
+    property <float> p: max(0, min(1, root.frac));
+    height: root.compact ? 20px : 44px;
+    HorizontalLayout {
+        alignment: start;
+        spacing: root.compact ? 6px : 10px;
+        Rectangle {
+            width: root.c;
+            height: root.c;
+            y: (parent.height - self.height) / 2;
+            border-radius: 4px;
+            clip: true;
+            background: Theme.elevated;
+            opacity: 1 - 0.65 * root.p;
+            Image { source: root.from-art; width: parent.width; height: parent.height; image-fit: cover; }
+        }
+        Rectangle {
+            width: root.compact ? 52px : 110px;
+            height: 4px;
+            y: (parent.height - self.height) / 2;
+            border-radius: 2px;
+            background: Theme.text.with-alpha(0.15);
+            Rectangle { x: 0; width: parent.width * root.p; height: 100%; border-radius: 2px; background: Theme.accent.mix(Theme.accent-2, 1 - root.p); animate width { duration: Theme.motion ? 260ms : 0ms; } }
+            Rectangle {
+                x: parent.width * root.p - self.width / 2;
+                y: (parent.height - self.height) / 2;
+                width: root.compact ? 7px : 10px;
+                height: root.compact ? 12px : 18px;
+                border-radius: 3px;
+                background: Theme.text;
+                animate x { duration: Theme.motion ? 260ms : 0ms; }
+            }
+        }
+        Rectangle {
+            width: root.c;
+            height: root.c;
+            y: (parent.height - self.height) / 2;
+            border-radius: 4px;
+            clip: true;
+            background: Theme.elevated;
+            opacity: 0.35 + 0.65 * root.p;
+            Image { source: root.to-art; width: parent.width; height: parent.height; image-fit: cover; }
+        }
+        if !root.compact: VerticalLayout {
+            alignment: center;
+            spacing: 1px;
+            Text { text: "MIXING"; color: Theme.accent; font-size: 11px; font-weight: 800; letter-spacing: 1px; }
+            Text { text: root.label; color: Theme.muted; font-size: 12px; overflow: elide; }
+        }
+    }
+}
+
 /// The tab's cover, with the visualiser round it (In the Player on): Glow's rings, or the Ring
 component TabCover inherits Rectangle {
     in property <image> art;
     in property <string> plat;
     in property <string> viz;
     in property <float> level;
+    // (the Ring's spikes round it: viz::ring_small's)
+    in property <[RingPiece]> ring;
+    in property <length> badge: 22px;
     callback badge-clicked();
     width: 44px;
     height: 44px;
     for r in [4, 3, 2, 1]: Rectangle {
-        // (Ring too: the tab's cover too small for its circle)
-        visible: root.viz == "glow" || root.viz == "ring";
+        visible: root.viz == "glow";
         property <length> out: r * (1px + 1.6px * root.level);
         x: -self.out;
         y: -self.out;
@@ -1299,7 +1361,9 @@ component TabCover inherits Rectangle {
         border-radius: 8px + self.out;
         background: Theme.accent.mix(Theme.accent-2, 1 - root.level).with-alpha((0.08 + 0.2 * root.level) * (5 - r) / 4);
     }
-    BadgedCover { art: root.art; initial: ""; plat: root.plat; width: parent.width; height: parent.height; badge-link: true; badge-clicked => { root.badge-clicked(); } }
+    // (Ring: the cover smaller in its place, its spikes round it, out into the 10 px round the place)
+    if root.viz == "ring": VizRing { x: -10px; y: -10px; width: root.width + 20px; height: root.height + 20px; pieces: root.ring; }
+    BadgedCover { art: root.art; initial: ""; plat: root.plat; badge: root.viz == "ring" ? root.badge * 0.8 : root.badge; corner: root.viz == "ring" ? 4px : 6px; width: root.viz == "ring" ? parent.width * 0.7 : parent.width; height: self.width; x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2; badge-link: true; badge-clicked => { root.badge-clicked(); } }
 }
 
 component TileView inherits Rectangle {
@@ -1669,6 +1733,13 @@ export component AppWindow inherits Window {
     property <string> viz-flat: root.viz-style == "ring" ? "centre" : root.viz-style;
     // (the Ring's outline, each frame, while it's the style)
     in property <[RingPiece]> viz-ring;
+    // a Seamless Mix under way: its crossfader (Now Playing, the player, the taskbar widget)
+    in property <bool> xf-on;
+    in property <float> xf-frac;
+    in property <image> xf-from-art;
+    in property <image> xf-to-art;
+    in property <string> xf-label;
+    in property <[RingPiece]> viz-ring-small;
     in property <[float]> viz-bands;
     // (and how loud it is now, 0 to 1: the Glow's)
     in property <float> viz-level;
@@ -1993,6 +2064,8 @@ export component AppWindow inherits Window {
     callback account-act(int);
     /// an account's other button (Spotify's own keys, once signed in)
     callback account-keys(int);
+    // an account's own settings page (YouTube Music's)
+    callback account-settings(string);
     in-out property <bool> rounded: true;
     callback rounded-changed(bool);
     // Settings > Look > List Density: Compact (the web app's setting too)
@@ -2099,226 +2172,229 @@ export component AppWindow inherits Window {
     VerticalLayout {
         // ---------- title bar ----------
         Rectangle {
-            height: 34px;
+            height: 44px;
             TouchArea {
                 pointer-event(e) => { if (e.kind == PointerEventKind.down && e.button == PointerEventButton.left) { keys.focus(); root.drag(); } }
                 double-clicked => { root.maximize(); }
             }
-            HorizontalLayout {
-                padding-left: 14px;
-                spacing: 10px;
-                // (right-click: rename it; signed out of SoundCloud: an invitation to sign in, as the web app's)
-                // (renamed where it is, as the web app's: right-click, type, Enter keeps it, Escape doesn't,
-                // a click elsewhere keeps it too)
-                if root.title-editing: Rectangle {
-                    width: max(120px, tin.preferred-width + 16px);
-                    height: 24px;
-                    y: 5px;
-                    border-radius: 6px;
-                    background: Theme.panel;
-                    border-width: 1px;
-                    border-color: Theme.accent;
-                    tin := TextInput {
-                        x: 8px;
-                        width: parent.width - 16px;
-                        height: parent.height;
-                        vertical-alignment: center;
-                        single-line: true;
-                        color: Theme.text;
-                        font-size: 13px;
-                        font-weight: 700;
-                        text: root.app-name != "" ? root.app-name : "OmniPulse";
-                        init => { self.focus(); self.select-all(); }
-                        accepted => { root.title-editing = false; root.app-name-changed(self.text == "OmniPulse" ? "" : self.text); keys.focus(); }
-                        key-pressed(e) => {
-                            if (e.text == Key.Escape) { root.title-editing = false; keys.focus(); return accept; }
-                            return reject;
+            // (a panel as the player bar is: in from the window's edges by the gap between the panels, rounded,
+            // in its gradient; drags the window where nothing else is under the pointer)
+            Rectangle {
+                x: 8px;
+                y: 8px;
+                width: parent.width - 16px;
+                height: 36px;
+                property <length> r: root.player-style == "float" && Theme.radius > 0 ? 18px : Theme.radius;
+                background: root.player-style == "minimal" ? Theme.panel : @linear-gradient(90deg, Theme.bar-a 0%, Theme.bar-b 100%);
+                border-radius: self.r;
+                clip: true;
+                HorizontalLayout {
+                    padding-left: 14px;
+                    spacing: 10px;
+                    // (right-click: rename it; signed out of SoundCloud: an invitation to sign in, as the web app's)
+                    // (renamed where it is, as the web app's: right-click, type, Enter keeps it, Escape doesn't,
+                    // a click elsewhere keeps it too)
+                    if root.title-editing: Rectangle {
+                        width: max(120px, tin.preferred-width + 16px);
+                        height: 24px;
+                        y: 5px;
+                        border-radius: 6px;
+                        background: Theme.panel;
+                        border-width: 1px;
+                        border-color: Theme.accent;
+                        tin := TextInput {
+                            x: 8px;
+                            width: parent.width - 16px;
+                            height: parent.height;
+                            vertical-alignment: center;
+                            single-line: true;
+                            color: Theme.text;
+                            font-size: 13px;
+                            font-weight: 700;
+                            text: root.app-name != "" ? root.app-name : "OmniPulse";
+                            init => { self.focus(); self.select-all(); }
+                            accepted => { root.title-editing = false; root.app-name-changed(self.text == "OmniPulse" ? "" : self.text); keys.focus(); }
+                            key-pressed(e) => {
+                                if (e.text == Key.Escape) { root.title-editing = false; keys.focus(); return accept; }
+                                return reject;
+                            }
+                            changed has-focus => {
+                                if (!self.has-focus && root.title-editing) { root.title-editing = false; root.app-name-changed(self.text == "OmniPulse" ? "" : self.text); }
+                            }
                         }
-                        changed has-focus => {
-                            if (!self.has-focus && root.title-editing) { root.title-editing = false; root.app-name-changed(self.text == "OmniPulse" ? "" : self.text); }
+                    }
+                    if !root.title-editing: Rectangle {
+                        width: tt.preferred-width;
+                        tt := Text { text: root.title-prompt ? "Sign in to SoundCloud" : (root.app-name != "" ? root.app-name : "OmniPulse"); color: root.title-prompt ? (tta.has-hover ? Theme.text : Theme.accent) : Theme.text; font-weight: 700; font-size: 13px; vertical-alignment: center; height: parent.height; }
+                        tta := TouchArea {
+                            mouse-cursor: root.title-prompt ? MouseCursor.pointer : MouseCursor.default;
+                            clicked => { if (root.title-prompt) { root.title-signin(); } }
+                            // (the name drags the window as the rest of the title bar does)
+                            pointer-event(e) => {
+                                if (e.kind == PointerEventKind.up && e.button == PointerEventButton.right && !root.title-prompt) { root.title-editing = true; }
+                                if (e.kind == PointerEventKind.down && e.button == PointerEventButton.left && !root.title-prompt) { root.drag(); }
+                            }
+                            double-clicked => { if (!root.title-prompt) { root.maximize(); } }
                         }
                     }
-                }
-                if !root.title-editing: Rectangle {
-                    width: tt.preferred-width;
-                    tt := Text { text: root.title-prompt ? "Sign in to SoundCloud" : (root.app-name != "" ? root.app-name : "OmniPulse"); color: root.title-prompt ? (tta.has-hover ? Theme.text : Theme.accent) : Theme.text; font-weight: 700; font-size: 13px; vertical-alignment: center; height: parent.height; }
-                    tta := TouchArea {
-                        mouse-cursor: root.title-prompt ? MouseCursor.pointer : MouseCursor.default;
-                        clicked => { if (root.title-prompt) { root.title-signin(); } }
-                        // (the name drags the window as the rest of the title bar does)
-                        pointer-event(e) => {
-                            if (e.kind == PointerEventKind.up && e.button == PointerEventButton.right && !root.title-prompt) { root.title-editing = true; }
-                            if (e.kind == PointerEventKind.down && e.button == PointerEventButton.left && !root.title-prompt) { root.drag(); }
-                        }
-                        double-clicked => { if (!root.title-prompt) { root.maximize(); } }
-                    }
-                }
-                // Streamer Mode: grey when off; on, it pulses YouTube red, Twitch purple and Kick green
-                // (full height, as the window's own buttons are)
-                Rectangle {
-                    width: 32px;
-                    // (a rounded tile, lit on hover, as the web app's)
-                    Rectangle { width: 28px; height: 28px; x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2; border-radius: 8px; background: sta-s.has-hover ? Theme.elevated : transparent; }
-                    // (pulsing only while there's music, as Seamless Mix's: still, YouTube red)
-                    property <float> phase: (root.streamer || root.stream-safe) && root.playing && Theme.motion ? mod(animation-tick() / 1ms, 3600) / 1200 : 0.0;
-                    Glyph {
-                        d: Icons.broadcast;
-                        width: 16px;
-                        height: 16px;
-                        x: (parent.width - self.width) / 2;
-                        y: (parent.height - self.height) / 2;
-                        fill: !root.streamer && !root.stream-safe ? Theme.muted
-                            : parent.phase < 1 ? #ff0033.mix(#9146ff, 1 - parent.phase)
-                            : parent.phase < 2 ? #9146ff.mix(#53fc18, 2 - parent.phase)
-                            : #53fc18.mix(#ff0033, 3 - parent.phase);
-                        opacity: root.streamer || root.stream-safe ? 1 : 0.55;
-                    }
-                    // Stream-Safe Music on: a dot
-                    if root.stream-safe: Rectangle { x: parent.width / 2 + 5px; y: parent.height / 2 - 11px; width: 7px; height: 7px; border-radius: 3.5px; background: #53fc18; }
-                    TipSpot { hover: sta-s.has-hover; tip: root.stream-safe ? "Streamer Mode, Extended: private info hidden, and only music that's safe on stream. Click to turn it off." : root.streamer ? "Streamer Mode: private info hidden. Click again for Extended (only music that's safe on stream)." : "Streamer Mode: off. Click to hide private info; again for Extended (only music that's safe on stream)."; }
-                    sta-s := TouchArea { clicked => { Tips.on = false; root.streamer-step(); } }
-                }
-                // Seamless Mix: grey when off; on, its colour flows from one accent to the other with a
-                // glow, brighter and quicker while a mix is playing (none while it's parked)
-                if root.mix-available: Rectangle {
-                    width: 32px;
-                    Rectangle { width: 28px; height: 28px; x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2; border-radius: 8px; background: sta-m.has-hover ? Theme.elevated : transparent; }
-                    // (moving only while there's music: the clock read only then, or the window's drawn again every frame,
-                    // nothing playing or not: a third of a core, idle)
-                    property <float> phase: root.mix-on && root.playing && Theme.motion ? mod(animation-tick() / 1ms, root.mixing ? 1200 : 3000) / (root.mixing ? 1200 : 3000) : 0.5;
-                    property <float> swing: phase < 0.5 ? phase * 2 : 2 - phase * 2;
-                    // the glow
-                    if root.mix-on: Rectangle {
-                        x: (parent.width - self.width) / 2;
-                        y: (parent.height - self.height) / 2;
-                        width: 20px;
-                        height: 20px;
-                        border-radius: 10px;
-                        background: Theme.accent.mix(Theme.accent-2, 1 - parent.swing).with-alpha(root.mixing ? 0.30 + 0.25 * parent.swing : 0.16);
-                        drop-shadow-blur: root.mixing ? 10px : 6px;
-                        drop-shadow-color: Theme.accent.mix(Theme.accent-2, parent.swing).with-alpha(root.mixing ? 0.9 : 0.5);
-                    }
-                    Glyph {
-                        d: Icons.mix;
-                        width: 16px;
-                        height: 16px;
-                        x: (parent.width - self.width) / 2;
-                        y: (parent.height - self.height) / 2;
-                        fill: !root.mix-on ? Theme.muted : Theme.accent.mix(Theme.accent-2, 1 - parent.swing);
-                        opacity: root.mix-on ? 1 : 0.55;
-                    }
-                    TipSpot { hover: sta-m.has-hover; tip: root.mix-on ? "Seamless Mix (WIP): on. Click to turn it off, right-click for its settings." : "Seamless Mix (WIP): off. Click to mix songs into each other, on the beat where they can be. Right-click for its settings."; }
-                    sta-m := TouchArea {
-                        clicked => { Tips.on = false; root.mix-toggle(); }
-                        pointer-event(e) => { if (e.kind == PointerEventKind.down && e.button == PointerEventButton.right) { Tips.on = false; root.title-settings("smart"); } }
-                    }
-                }
-                // the platforms: in their colours when on, plain when off
-                // (as the web app's: a rounded pill of rounded tiles, each tinted in its colour when on)
-                if root.plats.length > 1: Rectangle {
-                    width: root.plats.length * 30px + 2px;
+                    // Streamer Mode: grey when off; on, it pulses YouTube red, Twitch purple and Kick green
+                    // (full height, as the window's own buttons are)
                     Rectangle {
-                      y: (parent.height - self.height) / 2;
-                      height: 28px;
-                      border-radius: 8px;
-                      background: Theme.elevated;
-                      HorizontalLayout {
-                        padding: 2px;
-                        spacing: 2px;
-                        for p in root.plats: Rectangle {
-                            width: 28px;
-                            border-radius: 6px;
-                            background: !p.on ? (ta-p.has-hover ? Theme.line : transparent) : p.d != "" ? Theme.accent.with-alpha(0.16) : p.id == "spotify" ? #1ed76029 : p.id == "youtube" ? #ff003329 : p.id == "local" ? #f2b54429 : #ff550029;
-                            // (a plugin shown here: its own icon, from its manifest, in the accent)
-                            if p.d != "": Glyph {
-                                d: p.d;
-                                width: 15px;
-                                height: 15px;
-                                x: (parent.width - self.width) / 2;
-                                y: (parent.height - self.height) / 2;
-                                fill: p.on ? Theme.accent : Theme.text;
-                                opacity: p.on ? 1 : (ta-p.has-hover ? 0.7 : 0.4);
-                            }
-                            if p.d == "": PlatIcon {
-                                plat: p.id;
-                                title-bar: true;
-                                // (SoundCloud's cloud is a wide, flat shape: drawn larger, and lowered by as much as
-                                // it sits above its box's middle (its outline spans 5 to 16.5 of 24), so it's centred)
-                                width: p.id == "soundcloud" ? 19px : 15px;
-                                height: self.width;
-                                x: (parent.width - self.width) / 2;
-                                y: (parent.height - self.height) / 2 + (p.id == "soundcloud" ? self.height * 1.25 / 24 : 0px);
-                                fill: !p.on ? Theme.text : p.id == "spotify" ? #1ed760 : p.id == "youtube" ? #ff0033 : p.id == "local" ? #f2b544 : #ff5500;
-                                opacity: p.on ? 1 : !p.ready ? (ta-p.has-hover ? 0.5 : 0.25) : (ta-p.has-hover ? 0.7 : 0.4);
-                            }
-                            TipSpot { hover: ta-p.has-hover; tip: p.name + (!p.ready ? ": not set up yet. Click to set it up." : p.on ? " is on. Click to hide it everywhere, right-click for its settings." : " is off. Click to show it again, right-click for its settings."); }
-                            ta-p := TouchArea {
-                                clicked => { Tips.on = false; root.plat-toggle(p.id); }
-                                pointer-event(e) => { if (e.kind == PointerEventKind.down && e.button == PointerEventButton.right) { Tips.on = false; root.title-settings(p.id); } }
-                            }
-                        }
-                      }
-                    }
-                }
-                Rectangle { horizontal-stretch: 1; }
-                // someone asking you to start a Jam: in the button's place, with a ring that empties
-                if root.jam-ask != "": Rectangle {
-                    width: ask-row.preferred-width + 16px;
-                    Rectangle {
-                    y: (parent.height - self.height) / 2;
-                    height: 28px;
-                    border-radius: 8px;
-                    background: @linear-gradient(100deg, Theme.accent 0%, Theme.accent-2 100%);
-                    ask-row := HorizontalLayout {
-                        x: 8px;
-                        spacing: 8px;
-                        Rectangle {
+                        width: 32px;
+                        // (a rounded tile, lit on hover, as the web app's)
+                        Rectangle { width: 28px; height: 28px; x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2; border-radius: 8px; background: sta-s.has-hover ? Theme.elevated : transparent; }
+                        // (pulsing only while there's music, as Seamless Mix's: still, YouTube red)
+                        property <float> phase: (root.streamer || root.stream-safe) && root.playing && Theme.motion ? mod(animation-tick() / 1ms, 3600) / 1200 : 0.0;
+                        Glyph {
+                            d: Icons.broadcast;
                             width: 16px;
-                            Path { commands: "M 10 4 A 7 7 0 1 1 9.99 4"; viewbox-width: 20; viewbox-height: 20; width: 16px; height: 16px; y: (parent.height - self.height) / 2; stroke: Theme.on-accent.with-alpha(0.3); stroke-width: 2px; fill: transparent; }
-                            if root.jam-ring != "": Path { commands: root.jam-ring; viewbox-width: 20; viewbox-height: 20; width: 16px; height: 16px; y: (parent.height - self.height) / 2; stroke: Theme.on-accent; stroke-width: 2px; fill: transparent; }
-                        }
-                        Text { text: root.jam-ask; color: Theme.on-accent; font-size: 12px; font-weight: 600; vertical-alignment: center; }
-                        Rectangle {
-                            width: yes-t.preferred-width + 18px;
-                            height: 20px;
+                            height: 16px;
+                            x: (parent.width - self.width) / 2;
                             y: (parent.height - self.height) / 2;
-                            border-radius: 10px;
-                            background: Theme.on-accent;
-                            yes-t := Text { text: "Accept"; color: Theme.accent; font-size: 12px; font-weight: 700; }
-                            TouchArea { clicked => { root.jam-accept(); } }
+                            fill: !root.streamer && !root.stream-safe ? Theme.muted
+                                : parent.phase < 1 ? #ff0033.mix(#9146ff, 1 - parent.phase)
+                                : parent.phase < 2 ? #9146ff.mix(#53fc18, 2 - parent.phase)
+                                : #53fc18.mix(#ff0033, 3 - parent.phase);
+                            opacity: root.streamer || root.stream-safe ? 1 : 0.55;
                         }
-                        Rectangle {
-                            width: no-t.preferred-width + 18px;
-                            height: 20px;
+                        // Stream-Safe Music on: a dot
+                        if root.stream-safe: Rectangle { x: parent.width / 2 + 5px; y: parent.height / 2 - 11px; width: 7px; height: 7px; border-radius: 3.5px; background: #53fc18; }
+                        TipSpot { hover: sta-s.has-hover; tip: root.stream-safe ? "Streamer Mode, Extended: private info hidden, and only music that's safe on stream. Click to turn it off." : root.streamer ? "Streamer Mode: private info hidden. Click again for Extended (only music that's safe on stream)." : "Streamer Mode: off. Click to hide private info; again for Extended (only music that's safe on stream)."; }
+                        sta-s := TouchArea { clicked => { Tips.on = false; root.streamer-step(); } }
+                    }
+                    // Seamless Mix: grey when off; on, its colour flows from one accent to the other, quicker while a
+                    // mix is playing (still while it's parked): the icon alone, as Streamer Mode's
+                    if root.mix-available: Rectangle {
+                        width: 32px;
+                        Rectangle { width: 28px; height: 28px; x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2; border-radius: 8px; background: sta-m.has-hover ? Theme.elevated : transparent; }
+                        // (moving only while there's music: the clock read only then, or the window's drawn again every frame,
+                        // nothing playing or not: a third of a core, idle)
+                        property <float> phase: root.mix-on && root.playing && Theme.motion ? mod(animation-tick() / 1ms, root.mixing ? 1200 : 3000) / (root.mixing ? 1200 : 3000) : 0.5;
+                        property <float> swing: phase < 0.5 ? phase * 2 : 2 - phase * 2;
+                        Glyph {
+                            d: Icons.mix;
+                            width: 16px;
+                            height: 16px;
+                            x: (parent.width - self.width) / 2;
                             y: (parent.height - self.height) / 2;
-                            border-radius: 10px;
-                            background: Theme.on-accent.with-alpha(0.18);
-                            no-t := Text { text: "Decline"; color: Theme.on-accent; font-size: 12px; font-weight: 700; }
-                            TouchArea { clicked => { root.jam-decline(); } }
+                            fill: !root.mix-on ? Theme.muted : Theme.accent.mix(Theme.accent-2, 1 - parent.swing);
+                            opacity: root.mix-on ? 1 : 0.55;
+                        }
+                        TipSpot { hover: sta-m.has-hover; tip: root.mix-on ? "Seamless Mix (WIP): on. Click to turn it off, right-click for its settings." : "Seamless Mix (WIP): off. Click to mix songs into each other, on the beat where they can be. Right-click for its settings."; }
+                        sta-m := TouchArea {
+                            clicked => { Tips.on = false; root.mix-toggle(); }
+                            pointer-event(e) => { if (e.kind == PointerEventKind.down && e.button == PointerEventButton.right) { Tips.on = false; root.title-settings("smart"); } }
                         }
                     }
+                    // the platforms: in their colours when on, plain when off
+                    // (as the web app's: a rounded pill of rounded tiles, each tinted in its colour when on)
+                    if root.plats.length > 1: Rectangle {
+                        width: root.plats.length * 30px + 2px;
+                        Rectangle {
+                          y: (parent.height - self.height) / 2;
+                          height: 28px;
+                          border-radius: 8px;
+                          background: Theme.elevated;
+                          HorizontalLayout {
+                            padding: 2px;
+                            spacing: 2px;
+                            for p in root.plats: Rectangle {
+                                width: 28px;
+                                border-radius: 6px;
+                                background: !p.on ? (ta-p.has-hover ? Theme.line : transparent) : p.d != "" ? Theme.accent.with-alpha(0.16) : p.id == "spotify" ? #1ed76029 : p.id == "youtube" ? #ff003329 : p.id == "local" ? #f2b54429 : #ff550029;
+                                // (a plugin shown here: its own icon, from its manifest, in the accent)
+                                if p.d != "": Glyph {
+                                    d: p.d;
+                                    width: 15px;
+                                    height: 15px;
+                                    x: (parent.width - self.width) / 2;
+                                    y: (parent.height - self.height) / 2;
+                                    fill: p.on ? Theme.accent : Theme.text;
+                                    opacity: p.on ? 1 : (ta-p.has-hover ? 0.7 : 0.4);
+                                }
+                                if p.d == "": PlatIcon {
+                                    plat: p.id;
+                                    title-bar: true;
+                                    // (SoundCloud's cloud is a wide, flat shape: drawn larger, and lowered by as much as
+                                    // it sits above its box's middle (its outline spans 5 to 16.5 of 24), so it's centred)
+                                    width: p.id == "soundcloud" ? 19px : 15px;
+                                    height: self.width;
+                                    x: (parent.width - self.width) / 2;
+                                    y: (parent.height - self.height) / 2 + (p.id == "soundcloud" ? self.height * 1.25 / 24 : 0px);
+                                    fill: !p.on ? Theme.text : p.id == "spotify" ? #1ed760 : p.id == "youtube" ? #ff0033 : p.id == "local" ? #f2b544 : #ff5500;
+                                    opacity: p.on ? 1 : !p.ready ? (ta-p.has-hover ? 0.5 : 0.25) : (ta-p.has-hover ? 0.7 : 0.4);
+                                }
+                                TipSpot { hover: ta-p.has-hover; tip: p.name + (!p.ready ? ": not set up yet. Click to set it up." : p.on ? " is on. Click to hide it everywhere, right-click for its settings." : " is off. Click to show it again, right-click for its settings."); }
+                                ta-p := TouchArea {
+                                    clicked => { Tips.on = false; root.plat-toggle(p.id); }
+                                    pointer-event(e) => { if (e.kind == PointerEventKind.down && e.button == PointerEventButton.right) { Tips.on = false; root.title-settings(p.id); } }
+                                }
+                            }
+                          }
+                        }
                     }
-                }
-                // (rounded, as the platforms' pill beside it)
-                if root.jam-ask == "" && root.jam-label != "" && !root.jam-hidden: Rectangle {
-                    width: jam-t.preferred-width + 28px;
-                    Rectangle {
+                    Rectangle { horizontal-stretch: 1; }
+                    // someone asking you to start a Jam: in the button's place, with a ring that empties
+                    if root.jam-ask != "": Rectangle {
+                        width: ask-row.preferred-width + 16px;
+                        Rectangle {
                         y: (parent.height - self.height) / 2;
                         height: 28px;
                         border-radius: 8px;
-                        background: root.jam-on ? Theme.accent : (jam-ta.has-hover ? Theme.elevated : transparent);
-                        jam-t := Text { text: root.jam-label; color: root.jam-on ? Theme.on-accent : (jam-ta.has-hover ? Theme.text : Theme.muted); font-size: 12px; font-weight: 600; }
-                        jam-ta := TouchArea { clicked => { root.jam-clicked(); } }
+                        background: @linear-gradient(100deg, Theme.accent 0%, Theme.accent-2 100%);
+                        ask-row := HorizontalLayout {
+                            x: 8px;
+                            spacing: 8px;
+                            Rectangle {
+                                width: 16px;
+                                Path { commands: "M 10 4 A 7 7 0 1 1 9.99 4"; viewbox-width: 20; viewbox-height: 20; width: 16px; height: 16px; y: (parent.height - self.height) / 2; stroke: Theme.on-accent.with-alpha(0.3); stroke-width: 2px; fill: transparent; }
+                                if root.jam-ring != "": Path { commands: root.jam-ring; viewbox-width: 20; viewbox-height: 20; width: 16px; height: 16px; y: (parent.height - self.height) / 2; stroke: Theme.on-accent; stroke-width: 2px; fill: transparent; }
+                            }
+                            Text { text: root.jam-ask; color: Theme.on-accent; font-size: 12px; font-weight: 600; vertical-alignment: center; }
+                            Rectangle {
+                                width: yes-t.preferred-width + 18px;
+                                height: 20px;
+                                y: (parent.height - self.height) / 2;
+                                border-radius: 10px;
+                                background: Theme.on-accent;
+                                yes-t := Text { text: "Accept"; color: Theme.accent; font-size: 12px; font-weight: 700; }
+                                TouchArea { clicked => { root.jam-accept(); } }
+                            }
+                            Rectangle {
+                                width: no-t.preferred-width + 18px;
+                                height: 20px;
+                                y: (parent.height - self.height) / 2;
+                                border-radius: 10px;
+                                background: Theme.on-accent.with-alpha(0.18);
+                                no-t := Text { text: "Decline"; color: Theme.on-accent; font-size: 12px; font-weight: 700; }
+                                TouchArea { clicked => { root.jam-decline(); } }
+                            }
+                        }
+                        }
+                    }
+                    // (rounded, as the platforms' pill beside it)
+                    if root.jam-ask == "" && root.jam-label != "" && !root.jam-hidden: Rectangle {
+                        width: jam-t.preferred-width + 28px;
+                        Rectangle {
+                            y: (parent.height - self.height) / 2;
+                            height: 28px;
+                            border-radius: 8px;
+                            background: root.jam-on ? Theme.accent : (jam-ta.has-hover ? Theme.elevated : transparent);
+                            jam-t := Text { text: root.jam-label; color: root.jam-on ? Theme.on-accent : (jam-ta.has-hover ? Theme.text : Theme.muted); font-size: 12px; font-weight: 600; }
+                            jam-ta := TouchArea { clicked => { root.jam-clicked(); } }
+                        }
+                    }
+                    Rectangle { width: 6px; }
+                    for b in [{ d: "M1 6h10", act: "min" }, { d: root.is-max ? "M3.5 3.5V1.5h7v7h-2M1.5 3.5h7v7h-7z" : "M1.5 1.5h9v9h-9z", act: "max" }, { d: "M1.5 1.5l9 9M10.5 1.5l-9 9", act: "close" }]: Rectangle {
+                        width: 46px;
+                        background: wta.has-hover ? (b.act == "close" ? #e81123 : Theme.elevated) : transparent;
+                        Path { commands: b.d; viewbox-width: 12; viewbox-height: 12; width: 11px; height: 11px; stroke: wta.has-hover && b.act == "close" ? white : Theme.muted; stroke-width: 1.2px; fill: transparent; }
+                        TipSpot { hover: wta.has-hover; tip: b.act == "min" ? "Minimize" : b.act == "max" ? (root.is-max ? "Restore" : "Maximize") : "Close"; }
+                        wta := TouchArea { clicked => { Tips.on = false; if (b.act == "min") { root.minimize(); } else if (b.act == "max") { root.maximize(); } else { root.close-window(); } } }
                     }
                 }
-                Rectangle { width: 6px; }
-                for b in [{ d: "M1 6h10", act: "min" }, { d: root.is-max ? "M3.5 3.5V1.5h7v7h-2M1.5 3.5h7v7h-7z" : "M1.5 1.5h9v9h-9z", act: "max" }, { d: "M1.5 1.5l9 9M10.5 1.5l-9 9", act: "close" }]: Rectangle {
-                    width: 46px;
-                    background: wta.has-hover ? (b.act == "close" ? #e81123 : Theme.elevated) : transparent;
-                    Path { commands: b.d; viewbox-width: 12; viewbox-height: 12; width: 11px; height: 11px; stroke: wta.has-hover && b.act == "close" ? white : Theme.muted; stroke-width: 1.2px; fill: transparent; }
-                    TipSpot { hover: wta.has-hover; tip: b.act == "min" ? "Minimize" : b.act == "max" ? (root.is-max ? "Restore" : "Maximize") : "Close"; }
-                    wta := TouchArea { clicked => { Tips.on = false; if (b.act == "min") { root.minimize(); } else if (b.act == "max") { root.maximize(); } else { root.close-window(); } } }
-                }
+                // (its corners rounded over its gradient, and over the close button's red)
+                if root.player-style != "minimal": Caps { r: parent.r; tl: Theme.bar-a; bl: Theme.bar-a; tr: Theme.bar-b; br: Theme.bar-b; bottom: true; }
             }
         }
 
@@ -3595,23 +3671,6 @@ export component AppWindow inherits Window {
                             if root.set-cat == "Integrations" && root.set-query == "": VerticalLayout {
                                 spacing: 14px;
                                 Card {
-                                    HorizontalLayout {
-                                        padding: 16px;
-                                        padding-top: 12px;
-                                        padding-bottom: 12px;
-                                        spacing: 10px;
-                                        VerticalLayout {
-                                            horizontal-stretch: 1;
-                                            alignment: center;
-                                            spacing: 2px;
-                                            Text { text: "YouTube Music's Helpers"; color: Theme.text; font-weight: 700; }
-                                            Text { text: root.helpers-note; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
-                                        }
-                                        if root.helpers-setup != "": Pill { label: root.helpers-setup; on: true; y: (parent.height - self.height) / 2; clicked => { root.helpers-act("setup"); } }
-                                        if root.helpers-remove: Pill { label: "Remove"; y: (parent.height - self.height) / 2; clicked => { root.helpers-act("remove"); } }
-                                    }
-                                }
-                                Card {
                                     VerticalLayout {
                                         padding: 16px;
                                         padding-top: 8px;
@@ -3637,6 +3696,8 @@ export component AppWindow inherits Window {
                                                         // (the platform's plans: Go+, Premium, Pro...)
                                                         if acc.manage != "": Pill { label: "Manage subscription"; clicked => { root.open-web(acc.manage); } }
                                                         if acc.keys != "": Pill { label: acc.keys; clicked => { root.account-keys(i); } }
+                                                        // (its own settings page: YouTube Music's)
+                                                        if acc.settings != "": Pill { label: "Settings"; clicked => { root.account-settings(acc.settings); } }
                                                         Pill {
                                                             label: acc.busy ? "Waiting..." : acc.signed ? "Sign out" : "Sign in";
                                                             on: !acc.signed && !acc.busy;
@@ -3668,7 +3729,6 @@ export component AppWindow inherits Window {
                                         Pill { label: root.apple-label; y: (parent.height - self.height) / 2; clicked => { root.apple-import(); } }
                                     }
                                 }
-                                // YouTube Music's helpers (yt-dlp and Deno): how they are, set up, or taken off
                                 for r[i] in root.set-rows-integrations: SetRowView { r: r; toggle(k) => { root.set-toggle(k); } more(k) => { root.set-more(k); } }
                             }
                             if root.set-cat == "Plugins" && root.set-query == "": VerticalLayout {
@@ -3832,6 +3892,7 @@ export component AppWindow inherits Window {
                                 Pill { label: "Visualiser: " + (root.viz-style == "bars" ? "Bars" : root.viz-style == "mirror" ? "Mirror" : root.viz-style == "peaks" ? "Peaks" : root.viz-style == "blocks" ? "Blocks" : root.viz-style == "wave" ? "Wave" : root.viz-style == "centre" ? "Centre" : root.viz-style == "glow" ? "Glow" : root.viz-style == "ring" ? "Ring" : "Off"); on: root.viz-style != "off"; clicked => { root.viz-cycle(); } }
                                 Pill { label: "Full Screen"; clicked => { root.viz-full = true; root.viz-place("full", true); } }
                             }
+                            if root.xf-on: Crossfade { from-art: root.xf-from-art; to-art: root.xf-to-art; frac: root.xf-frac; label: root.xf-label; }
                             if !npl.slim: Rectangle {
                                 height: parent.side;
                                 width: parent.side;
@@ -3851,8 +3912,8 @@ export component AppWindow inherits Window {
                                 }
                                 property <bool> ring: root.viz-now && root.viz-style == "ring";
                                 if self.ring: VizRing { width: parent.width; height: parent.height; pieces: root.viz-ring; }
-                                // (0.56: viz::RING_COVER)
-                                BadgedCover { art: root.now-art-big; initial: root.now-title; plat: root.now-plat; badge: parent.ring ? 36px : 52px; corner: parent.ring ? 10px : 14px; width: parent.ring ? parent.width * 0.56 : parent.width; height: self.width; x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2; }
+                                // (0.46: viz::RING_COVER)
+                                BadgedCover { art: root.now-art-big; initial: root.now-title; plat: root.now-plat; badge: parent.ring ? 36px : 52px; corner: parent.ring ? 10px : 14px; width: parent.ring ? parent.width * 0.46 : parent.width; height: self.width; x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2; }
                             }
                             // (the sound's bands under the cover, low to high: Bars, Mirror or Peaks)
                             if root.viz-now && root.viz-style != "off" && root.viz-style != "glow" && (root.viz-style != "ring" || npl.slim): VizView {
@@ -4309,6 +4370,7 @@ export component AppWindow inherits Window {
                                 width: parent.width - 38px;
                                 height: 44px;
                                 spacing: 12px;
+                                if root.tab-right && root.xf-on: Crossfade { compact: true; from-art: root.xf-from-art; to-art: root.xf-to-art; frac: root.xf-frac; y: (parent.height - self.height) / 2; }
                                 if root.tab-right && root.can-like: IconButton { tip: root.now-liked ? "Remove from Likes" : "Add to Likes"; d: root.now-liked ? Icons.library : Icons.heart-out; tint: root.now-liked ? Theme.accent : Theme.muted; size: 32px; y: (parent.height - self.height) / 2; clicked => { root.like-toggle(); } }
                                 if root.tab-right: VerticalLayout {
                                     alignment: center;
@@ -4316,14 +4378,15 @@ export component AppWindow inherits Window {
                                     Marquee { text: root.now-title + (root.now-trimmed ? " *" : ""); font-size: 15px; right: root.tab-right; max-width: 420px; }
                                     ArtistLinks { names: root.now-artists; text: root.now-artist; size: 13px; right: root.tab-right; pick(k) => { root.now-act("artist:" + k); } }
                                 }
-                                if !root.tab-right: TabCover { art: root.now-art; plat: root.now-plat; viz: root.viz-bar ? root.viz-style : "off"; level: root.viz-level; badge-clicked => { root.now-act("platform"); } }
-                                if root.tab-right: TabCover { art: root.now-art; plat: root.now-plat; viz: root.viz-bar ? root.viz-style : "off"; level: root.viz-level; badge-clicked => { root.now-act("platform"); } }
+                                if !root.tab-right: TabCover { art: root.now-art; plat: root.now-plat; viz: root.viz-bar ? root.viz-style : "off"; level: root.viz-level; ring: root.viz-ring-small; badge-clicked => { root.now-act("platform"); } }
+                                if root.tab-right: TabCover { art: root.now-art; plat: root.now-plat; viz: root.viz-bar ? root.viz-style : "off"; level: root.viz-level; ring: root.viz-ring-small; badge-clicked => { root.now-act("platform"); } }
                                 if !root.tab-right: VerticalLayout {
                                     alignment: center;
                                     spacing: 2px;
                                     Marquee { text: root.now-title + (root.now-trimmed ? " *" : ""); font-size: 15px; right: root.tab-right; max-width: 420px; }
                                     ArtistLinks { names: root.now-artists; text: root.now-artist; size: 13px; right: root.tab-right; pick(k) => { root.now-act("artist:" + k); } }
                                 }
+                                if !root.tab-right && root.xf-on: Crossfade { compact: true; from-art: root.xf-from-art; to-art: root.xf-to-art; frac: root.xf-frac; y: (parent.height - self.height) / 2; }
                                 if !root.tab-right && root.can-like: IconButton { tip: root.now-liked ? "Remove from Likes" : "Add to Likes"; d: root.now-liked ? Icons.library : Icons.heart-out; tint: root.now-liked ? Theme.accent : Theme.muted; size: 32px; y: (parent.height - self.height) / 2; clicked => { root.like-toggle(); } }
                             }
                         }
@@ -4416,13 +4479,14 @@ export component AppWindow inherits Window {
                             }
                             HorizontalLayout {
                                 spacing: 10px;
-                                BadgedCover { art: root.now-art; initial: ""; plat: root.now-plat; badge: root.player-style == "minimal" ? 18px : 20px; width: root.player-style == "minimal" ? 34px : 40px; height: self.width; y: (parent.height - self.height) / 2; badge-link: true; badge-clicked => { root.now-act("platform"); } }
+                                TabCover { art: root.now-art; plat: root.now-plat; viz: root.viz-bar ? root.viz-style : "off"; level: root.viz-level; ring: root.viz-ring-small; badge: root.player-style == "minimal" ? 18px : 20px; width: root.player-style == "minimal" ? 34px : 40px; height: self.width; y: (parent.height - self.height) / 2; badge-clicked => { root.now-act("platform"); } }
                                 VerticalLayout {
                                     alignment: center;
                                     spacing: 1px;
                                     Marquee { text: root.now-title + (root.now-trimmed ? " *" : ""); font-size: root.player-style == "minimal" ? 13px : 14px; }
                                     ArtistLinks { names: root.now-artists; text: root.now-artist; size: 12px; pick(k) => { root.now-act("artist:" + k); } }
                                 }
+                                if root.xf-on: Crossfade { compact: true; from-art: root.xf-from-art; to-art: root.xf-to-art; frac: root.xf-frac; y: (parent.height - self.height) / 2; }
                             }
                         }
                         if !root.tab-style: Rectangle {
@@ -5124,9 +5188,9 @@ export component AppWindow inherits Window {
                 background: Theme.accent.mix(Theme.accent-2, 1 - root.viz-level).with-alpha((0.05 + 0.13 * root.viz-level) * (7 - r) / 6);
             }
             if root.viz-style == "ring": VizRing { width: parent.width; height: parent.height; pieces: root.viz-ring; }
-            // (Ring: the cover in the middle of the box, the circle round it; 0.56: viz::RING_COVER)
+            // (Ring: the cover in the middle of the box, the circle round it; 0.46: viz::RING_COVER)
             Rectangle {
-                width: root.viz-style == "ring" ? parent.width * 0.56 : parent.width;
+                width: root.viz-style == "ring" ? parent.width * 0.46 : parent.width;
                 height: self.width;
                 x: (parent.width - self.width) / 2;
                 y: (parent.height - self.height) / 2;
@@ -5195,6 +5259,11 @@ export component TaskbarWidget inherits Window {
     in property <[float]> viz-peaks;
     in property <[float]> viz-curve;
     in property <float> viz-level;
+    /// a Seamless Mix under way: its crossfader, in the artist's line
+    in property <bool> xf-on;
+    in property <float> xf-frac;
+    in property <image> xf-from-art;
+    in property <image> xf-to-art;
     callback act(string);
     no-frame: true;
     always-on-top: true;
@@ -5219,7 +5288,8 @@ export component TaskbarWidget inherits Window {
             alignment: center;
             spacing: 1px;
             Marquee { text: root.has-track ? root.song : "OmniPulse"; font-size: 14px; }
-            Marquee { text: root.has-track ? (root.mixing ? "Mixing · " + root.artist : root.artist) : "Nothing playing"; font-size: 12px; font-weight: 400; ink: Theme.muted; }
+            if root.xf-on: Crossfade { compact: true; from-art: root.xf-from-art; to-art: root.xf-to-art; frac: root.xf-frac; }
+            if !root.xf-on: Marquee { text: root.has-track ? (root.mixing ? "Mixing · " + root.artist : root.artist) : "Nothing playing"; font-size: 12px; font-weight: 400; ink: Theme.muted; }
         }
         if root.viz != "off" && root.has-track: Rectangle {
             width: 56px;

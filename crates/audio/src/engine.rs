@@ -319,6 +319,8 @@ struct Shared {
     skew: AtomicU64,
     /// a crossfade under way
     fading_in: AtomicBool,
+    /// how far through it (0 to 10000)
+    mix_prog: AtomicU32,
     /// a mix waiting for its moment
     mix_waiting: AtomicBool,
     /// frames given to the output since the base position (for where a stretched source is)
@@ -398,6 +400,7 @@ impl Engine {
             played: AtomicU64::new(0),
             skew: AtomicU64::new(0),
             fading_in: AtomicBool::new(false),
+            mix_prog: AtomicU32::new(0),
             mix_waiting: AtomicBool::new(false),
             produced: AtomicU64::new(0),
             stretch_off: std::sync::atomic::AtomicI64::new(0),
@@ -540,6 +543,10 @@ impl Engine {
     /// The output's rate (frames a second)
     pub fn rate(&self) -> u32 {
         self.shared.rate.load(Ordering::Relaxed)
+    }
+    /// A crossfade under way: how far through it is (0 to 1); None when there isn't one
+    pub fn mix_progress(&self) -> Option<f32> {
+        self.shared.fading_in.load(Ordering::SeqCst).then(|| self.shared.mix_prog.load(Ordering::Relaxed) as f32 / 10000.0)
     }
     pub fn mixing(&self) -> bool {
         self.shared.mix_waiting.load(Ordering::SeqCst) || self.shared.fading_in.load(Ordering::SeqCst)
@@ -754,6 +761,10 @@ struct Fading {
     pub spin_lag: f64,
     /// each side's loop as it's heard the first time (frames, interleaved), for playing it again
     loops: [Vec<f32>; 2],
+    /// a roll: where it's reading in its loop's piece (frames, between them as its speed changes), and
+    /// which of its bars that's for (each starts its piece over)
+    roll_at: f64,
+    roll_bar: u64,
     /// each side's centre cut (its voice handed over)
     centres: [Centre; 2],
 }
@@ -833,11 +844,14 @@ pub struct Handoff {
 }
 
 /// A roll: `bar` (ms, or frames) from the mix's start played, then over each of the next `bars - 1`
-/// bars, the first 1/2, 1/4, 1/8... of it again and again (a bar's worth each time)
+/// bars, the first 1/2, 1/4, 1/8... of it again and again (a bar's worth each time), read faster or
+/// slower as it goes, from its own speed to `to_speed` (the next one's tempo) by its end, as a DJ rides
+/// the pitch through a roll: the next one lands at the tempo it's been heard going to
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Roll {
     pub bar: u64,
     pub bars: u32,
+    pub to_speed: f32,
 }
 
 /// A repeated piece's seams smoothed (`len` frames long, at frame `k` of it): a millisecond and a half
@@ -848,7 +862,14 @@ fn seam(len: u64, k: u64) -> f32 {
 }
 
 impl Roll {
-    fn frames(&self, rate: u64) -> Self { Self { bar: (self.bar * rate / 1000).max(8), bars: self.bars } }
+    fn frames(&self, rate: u64) -> Self { Self { bar: (self.bar * rate / 1000).max(8), bars: self.bars, to_speed: self.to_speed } }
+    /// how fast its loop is read at frame `f` of the mix: its own speed through the bar it keeps, then eased
+    /// to `to_speed` by its end
+    fn speed(&self, f: u64) -> f64 {
+        let span = (self.bars.saturating_sub(1) as u64 * self.bar).max(1);
+        let p = (f.saturating_sub(self.bar) as f64 / span as f64).clamp(0.0, 1.0);
+        1.0 + (self.to_speed as f64 - 1.0) * p * p * (3.0 - 2.0 * p)
+    }
     /// where frame `f` of the mix is: None, heard as it is (the first bar, being kept); else where in the
     /// kept bar it's playing from, and that piece's length (for its seams)
     fn at(&self, f: u64) -> Option<(u64, u64)> {
@@ -936,12 +957,13 @@ impl Handoff {
     /// A roll out (as Traktor's Beatmasher): the one going out's bar from the mix's start played, then
     /// rolled over `bars - 1` more bars (its first half twice, its first quarter four times...), a
     /// high-pass rising through it, the build; on the roll's end the one coming in lands at once on its
-    /// downbeat (none of it read before), the one going out cut. Each at its own tempo.
-    pub fn roll(bar_ms: u64, bars: u32) -> Self {
+    /// downbeat (none of it read before), the one going out cut. Its loop ridden to `to_speed` (the next
+    /// one's tempo over its own) meanwhile.
+    pub fn roll(bar_ms: u64, bars: u32, to_speed: f32) -> Self {
         let end = bar_ms * bars as u64;
         let side = Ramp { in_at: end, in_len: 8, out_at: end.saturating_sub(12), out_len: 12 };
         let rise = [(0, 20.0), (bar_ms, 20.0), (bar_ms * 2, 120.0), (end.saturating_sub(bar_ms / 2), 900.0), (end, 1400.0)];
-        Self { low: side, mid: side, high: side, out_sweep: Some(Sweep { points: rise, high: true }), brake: None, spin: Some((end, 1)), roll: Some(Roll { bar: bar_ms, bars }), out_voice: None, in_voice: None }
+        Self { low: side, mid: side, high: side, out_sweep: Some(Sweep { points: rise, high: true }), brake: None, spin: Some((end, 1)), roll: Some(Roll { bar: bar_ms, bars, to_speed }), out_voice: None, in_voice: None }
     }
 
     /// A tape stop over `stop`, with a tape start over `start` in its last part: the one going out slows to
@@ -1045,7 +1067,7 @@ impl Fading {
         Self {
             next, total: total.max(1), done: 0, out_buf: VecDeque::new(), in_buf: VecDeque::new(), out_ended: false, in_ended: false,
             handoff: handoff.map(|h| h.frames(rate as u64)), bands: [Bands::new(rate); 2],
-            sweeps: [[Butter::new(rate, 20.0, true); 2]; 2], rate, brake_at: 0.0, spin_at: 0.0, spin_lag: 0.0, loops: [Vec::new(), Vec::new()], centres: [Centre::new(rate); 2],
+            sweeps: [[Butter::new(rate, 20.0, true); 2]; 2], rate, brake_at: 0.0, spin_at: 0.0, spin_lag: 0.0, loops: [Vec::new(), Vec::new()], roll_at: 0.0, roll_bar: 0, centres: [Centre::new(rate); 2],
         }
     }
 }
@@ -1074,10 +1096,20 @@ impl Fading {
             let rolled = roll.and_then(|r| r.at(self.done));
             let (ol, or) = match braking {
                 _ if rolled.is_some() => {
-                    let (k, len) = rolled.unwrap();
-                    let g = seam(len, k);
-                    let i = k as usize * 2;
-                    (self.loops[0].get(i).copied().unwrap_or(0.0) * g, self.loops[0].get(i + 1).copied().unwrap_or(0.0) * g)
+                    let (_, len) = rolled.unwrap();
+                    let r = roll.unwrap();
+                    // (each bar of it starts its piece over, on its beat)
+                    let bar = self.done / r.bar;
+                    if bar != self.roll_bar { self.roll_bar = bar; self.roll_at = 0.0; }
+                    let at = self.roll_at % len as f64;
+                    let i = at.floor() as u64;
+                    let w = (at - i as f64) as f32;
+                    let j = (i + 1) % len;
+                    let g = seam(len, i);
+                    let v = |n: u64, c: usize| self.loops[0].get(n as usize * 2 + c).copied().unwrap_or(0.0);
+                    let out = ((v(i, 0) + (v(j, 0) - v(i, 0)) * w) * g, (v(i, 1) + (v(j, 1) - v(i, 1)) * w) * g);
+                    self.roll_at = at + r.speed(self.done);
+                    out
                 }
                 // (its first bar: heard, and kept)
                 _ if roll.is_some_and(|r| self.done < r.bar) => {
@@ -1188,6 +1220,7 @@ fn begin_fade(shared: &Shared, next: Pipeline, total_frames: u64, handoff: Optio
     shared.duration_ms.store(next.duration_ms().unwrap_or(0), Ordering::SeqCst);
     shared.source_done.store(false, Ordering::SeqCst);
     shared.fading_in.store(true, Ordering::SeqCst);
+    shared.mix_prog.store(0, Ordering::Relaxed);
     Fading::new(next, total_frames, handoff, rate)
 }
 
@@ -1414,6 +1447,7 @@ fn decode_loop(shared: Arc<Shared>, cmds: Receiver<Cmd>, ev: Sender<Event>) {
             let t0 = std::time::Instant::now();
             let r = f.mix(p, &mut mixed, &mut scratch);
             perf_add(&shared, 2, t0, mixed.len() as u64 / 2);
+            shared.mix_prog.store(((f.done as f64 / f.total.max(1) as f64).min(1.0) * 10000.0) as u32, Ordering::Relaxed);
             match r {
                 Ok(over) => {
                     *shared.level.lock().unwrap() = f.next.level;

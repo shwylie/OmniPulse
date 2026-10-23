@@ -34,6 +34,9 @@ pub struct Plan {
     pub style: Option<&'static str>,
     /// of `bars`, the one playing's after the swap (Smart Transitions', its outro going); 0: the usual 4
     pub tail_bars: u32,
+    /// a roll: its loop's speed by its end (the next one's tempo over the one playing's), ridden to from its
+    /// own over the roll, so the next one lands at the tempo it's been heard going to; 1.0 otherwise
+    pub roll_speed: f64,
 }
 
 /// The one playing's tempo `p` (0..1) of the way through a mix that slows it to `target`: eased there

@@ -87,6 +87,16 @@ pub fn handle_req(mut stream: TcpStream) {
     let url = line.split_once(' ').map(|(_, rest)| rest.rfind(" HTTP/").map_or(rest, |at| &rest[..at])).unwrap_or("/").trim().to_string();
     let route = url.split('?').next().unwrap_or("/").to_string();
     let as_json = req_param(&url, "format").as_deref() == Some("json");
+    // (who asked: the address's user, else Nightbot's or Fossabot's own header for it; a moderator: the
+    // address's mod, else Nightbot's userLevel)
+    let head = |name: &str| req.lines().skip(1).take_while(|l| !l.is_empty()).find_map(|l| l.split_once(':').filter(|(k, _)| k.trim().eq_ignore_ascii_case(name)).map(|(_, v)| v.trim().to_string()));
+    let nightbot = head("Nightbot-User").map(|v| format!("?{v}"));
+    let night = |k: &str| nightbot.as_deref().and_then(|v| req_param(v, k));
+    let who = req_param(&url, "user").filter(|u| !u.is_empty())
+        .or_else(|| night("displayName")).or_else(|| night("name"))
+        .or_else(|| head("x-fossabot-message-userdisplayname")).or_else(|| head("x-fossabot-message-userlogin"))
+        .unwrap_or_default();
+    let said_mod = req_param(&url, "mod").filter(|m| !m.is_empty()).or_else(|| night("userLevel")).unwrap_or_default();
 
     let (status, answer) = match route.as_str() {
         "/now" => ("200 OK", now_answer()),
@@ -97,8 +107,7 @@ pub fn handle_req(mut stream: TcpStream) {
                 ("403 Forbidden", serde_json::json!({ "ok": false, "message": "Wrong or missing key." }))
             } else {
                 let q = req_param(&url, "q").unwrap_or_default();
-                let user = req_param(&url, "user").unwrap_or_default();
-                ("200 OK", ask_page(serde_json::json!({ "action": "request", "q": q, "user": user, "mod": false })))
+                ("200 OK", ask_page(serde_json::json!({ "action": "request", "q": q, "user": who, "mod": false })))
             }
         }
         "/wrongsong" => {
@@ -107,9 +116,8 @@ pub fn handle_req(mut stream: TcpStream) {
             if expected.is_empty() || key != expected {
                 ("403 Forbidden", serde_json::json!({ "ok": false, "message": "Wrong or missing key." }))
             } else {
-                let user = req_param(&url, "user").unwrap_or_default();
-                let is_mod = is_moderator(&req_param(&url, "mod").unwrap_or_default());
-                ("200 OK", ask_page(serde_json::json!({ "action": "wrongsong", "q": "", "user": user, "mod": is_mod })))
+                let is_mod = is_moderator(&said_mod);
+                ("200 OK", ask_page(serde_json::json!({ "action": "wrongsong", "q": "", "user": who, "mod": is_mod })))
             }
         }
         _ => ("404 Not Found", serde_json::json!({ "ok": false, "message": "Not found." })),

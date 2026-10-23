@@ -47,6 +47,14 @@
   #track { height: 0.25rem; margin-top: 0.7rem; border-radius: 0.25rem; background: rgba(255, 255, 255, 0.22); overflow: hidden; }
   #bar { height: 100%; width: 0; border-radius: 0.25rem; background: rgba(255, 255, 255, 0.92); transition: opacity 0.3s; }
   #card.paused #bar { opacity: 0.5; }
+  /* a Seamless Mix under way: the one going out's cover, a crossfader, the one coming in's */
+  #xf { display: none; align-items: center; gap: 0.4rem; margin-top: 0.3rem; font-size: calc(0.72rem * var(--ts, 1)); opacity: 0.92; }
+  #card.xf #xf { display: flex; }
+  #xf img { width: 1.4rem; height: 1.4rem; border-radius: 0.25rem; object-fit: cover; flex: none; transition: opacity 0.25s linear; }
+  #xfT { position: relative; flex: 0 0 4.5rem; height: 0.25rem; border-radius: 0.2rem; background: rgba(255, 255, 255, 0.25); }
+  #xfF { position: absolute; left: 0; top: 0; bottom: 0; width: 0; border-radius: 0.2rem; background: var(--hi); }
+  #xfK { position: absolute; top: 50%; left: 0; width: 0.45rem; height: 0.8rem; border-radius: 0.15rem; background: #fff; transform: translate(-50%, -50%); }
+  #xfL { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
   #times { display: flex; justify-content: space-between; margin-top: 0.3rem; font-size: 0.69em; color: rgba(255, 255, 255, 0.7); font-variant-numeric: tabular-nums; }
 
   /* Slim bar */
@@ -260,6 +268,7 @@
   <div id="info">
     <div id="title" class="marq"><span></span></div>
     <div id="who"><svg viewBox="0 0 24 24"><path id="platIcon" d=""/></svg><div id="artist" class="marq"><span></span></div></div>
+    <div id="xf"><img id="xfA" alt=""><div id="xfT"><div id="xfF"></div><div id="xfK"></div></div><img id="xfB" alt=""><span id="xfL"></span></div>
     <div id="track"><div id="bar"></div></div>
     <div id="times"><span id="cur">0:00</span><span id="dur">0:00</span></div>
   </div>
@@ -432,6 +441,14 @@
     }
     checkScroll($("title"));
     checkScroll($("artist"));
+    // a Seamless Mix under way: its crossfader, the two covers either side
+    const xf = s.crossfade;
+    $("card").classList.toggle("xf", !!xf);
+    if (xf) {
+      if ($("xfA").getAttribute("src") !== (xf.from.artwork || "")) $("xfA").setAttribute("src", xf.from.artwork || "");
+      if ($("xfB").getAttribute("src") !== (xf.to.artwork || "")) $("xfB").setAttribute("src", xf.to.artwork || "");
+      $("xfL").textContent = "Mixing into " + (xf.to.title || "");
+    }
     tick();
   }
 
@@ -451,6 +468,14 @@
     $("cur").textContent = fmt(pos);
     $("dur").textContent = fmt(s.duration_ms || 0);
     $("bar").style.width = (s.duration_ms ? Math.min(100, (pos / s.duration_ms) * 100) : 0) + "%";
+    const xf = s.crossfade;
+    if (xf && xf.ms > 0) {
+      const p = Math.max(0, Math.min(1, (Date.now() - xf.started_at) / xf.ms));
+      $("xfF").style.width = p * 100 + "%";
+      $("xfK").style.left = p * 100 + "%";
+      $("xfA").style.opacity = String(1 - 0.65 * p);
+      $("xfB").style.opacity = String(0.35 + 0.65 * p);
+    }
   }
 
 
