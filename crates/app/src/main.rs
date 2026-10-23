@@ -4468,7 +4468,11 @@ fn flows_restored(shared: &Shared, r: Result<botimport::Restored, String>) {
         let all = serde_json::Value::Object(all);
         if let Some(o) = a.web.prefs.as_object_mut() { o.insert("pluginSettings".into(), all.clone()); }
         if let Some(ui) = a.ui.upgrade() {
-            let missed = if r.missed.is_empty() { String::new() } else { format!(" {} couldn't be brought over: they're kept as notes in their actions.", plural(r.missed.len(), "step or trigger", "steps or triggers")) };
+            let triggers = botimport::missed_triggers(&r);
+            let steps = r.missed.len() - triggers;
+            let mut missed = String::new();
+            if steps > 0 { missed += &format!(" {} had no match here: kept as notes in their actions.", plural(steps, "step", "steps")); }
+            if triggers > 0 { missed += &format!(" {} had no match here: those actions are Only When Run.", plural(triggers, "trigger", "triggers")); }
             ui.set_status(format!("Restored {}{} from {}.{missed}", plural(n, "action", "actions"), if q > 0 { format!(" and {}", plural(q, "quote", "quotes")) } else { String::new() }, r.from).into());
         }
         all
@@ -10051,6 +10055,24 @@ fn plugin_app(shared: &Shared, plugin: &str, ask: serde_json::Value, answer: Box
             wrong_song(shared, std::sync::Arc::new(send), &arg(0), is_mod);
         }
         "nowPlaying" => send(omnipulse_core::requests::now_answer()),
+        // (a web address's answer, as text: the chatbot's Fetch a Web Address. OmniPulse's own chatbot only:
+        // any other plugin reaches only its manifest's sites, by its own fetch)
+        "fetchText" => {
+            let url = arg(0);
+            if plugin != "chatbot" { return send(serde_json::json!({ "error": "only OmniPulse's chatbot can" })); }
+            if !(url.starts_with("https://") || url.starts_with("http://")) { return send(serde_json::json!({ "error": "that isn't a web address" })); }
+            let rt = shared.borrow().rt.clone();
+            rt.spawn(async move {
+                let got = async {
+                    let r = reqwest::Client::builder().timeout(std::time::Duration::from_secs(10)).build().map_err(|e| e.to_string())?.get(&url).send().await.map_err(|e| e.to_string())?;
+                    let ok = r.status().is_success();
+                    let text = r.text().await.map_err(|e| e.to_string())?;
+                    if !ok { return Err(format!("the address answered: {}", text.chars().take(120).collect::<String>())); }
+                    Ok::<String, String>(text.trim().chars().take(500).collect())
+                }.await;
+                send(match got { Ok(text) => serde_json::json!({ "ok": true, "text": text }), Err(e) => serde_json::json!({ "error": e }) });
+            });
+        }
         // (a sound file of yours, over the music: a chatbot's Play a Sound)
         "sound" => {
             let vol = args.get(1).and_then(|v| v.as_f64()).unwrap_or(80.0);
@@ -11826,6 +11848,11 @@ fn main() -> Result<(), slint::PlatformError> {
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("albumpage") { vec![(8, "search"), (28, "openalbum"), (38, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("round") { vec![(9, "settings"), (10, "cat_Streaming"), (12, "titleset:youtube"), (14, "prefset:reqBot=moobot"), (15, "panel:requests"), (17, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("flows") { vec![(9, "settings"), (10, "cat_Streaming"), (11, "flows"), (12, "flownew:5"), (14, "flownew:7"), (16, "end")] }
+            else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("restored") {
+                let dir = std::env::var("OMNIPULSE_SELFTEST_BOTS").unwrap_or_default();
+                let (sb, miu): (&'static str, &'static str) = (Box::leak(format!("restore:{dir}/streamerbot-backup.zip").into_boxed_str()), Box::leak(format!("restore:{dir}/mixitup.miubackup").into_boxed_str()));
+                vec![(9, "settings"), (10, "cat_Streaming"), (11, "flows"), (12, sb), (13, "flowpick:3"), (15, miu), (16, "flowpick:30"), (18, "end")]
+            }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("ring") { vec![(8, "vizprep"), (9, "library"), (11, "play"), (13, "now"), (15, "viz:ring"), (19, "sayacts"), (22, "vizfull"), (25, "end")] }
             else if std::env::var("OMNIPULSE_SELFTEST_PLAN").ok().as_deref() == Some("applook") { vec![(9, "settings"), (10, "cat_App & Look"), (12, "end")] }
             // (OMNIPULSE_SELFTEST_PLAN=plugbar: a plugin's icon put in the title bar, then right-clicked for its settings)
@@ -12026,6 +12053,9 @@ fn main() -> Result<(), slint::PlatformError> {
                 // (the chatbot's Actions page, and a new action on it from a template)
                 "flows" => flows_open(&s),
                 w if w.starts_with("flownew:") => ui.invoke_flow_new(w[8..].parse().unwrap_or(0)),
+                // (a backup restored, as Restore would: restore:<its path>; a run like this keeps nothing)
+                w if w.starts_with("restore:") => { flows_restored(&s, botimport::restore_file(std::path::Path::new(&w[8..]))); println!("selftest: {}", ui.get_status()); }
+                w if w.starts_with("flowpick:") => ui.invoke_flow_pick(w[9..].parse().unwrap_or(0)),
                 // (a setting, for this run only: prefset:key=value)
                 w if w.starts_with("prefset:") => {
                     if let Some((k, v)) = w[8..].split_once('=') { if let Some(o) = s.borrow_mut().web.prefs.as_object_mut() { o.insert(k.into(), serde_json::json!(v)); } }

@@ -131,11 +131,16 @@ pub const STEPS: &[Kind] = &[
         f("per", "Each Viewer Their Own", "toggle", "false", ""),
         f("keep", "Keep It", "toggle", "true", "When OmniPulse closes."),
     ] },
-    Kind { id: "request", label: "Request a Song", note: "With Song Requests' limits.", fields: &[
+    Kind { id: "request", label: "Request a Song", note: "With Song Requests' limits. Gives the steps after it %reply% (how it went).", fields: &[
         f("query", "Song", "text", "%rawInput%", "Search words or a link."),
         f("reply", "Say How It Went", "toggle", "true", ""),
     ] },
-    Kind { id: "nowplaying", label: "Say What's Playing", note: "", fields: &[] },
+    Kind { id: "wrongsong", label: "Take Back a Request", note: "The viewer's last one (a moderator's: the last anyone made). Gives the steps after it %reply%.", fields: &[
+        f("say", "Say How It Went", "toggle", "true", ""),
+    ] },
+    Kind { id: "nowplaying", label: "Say What's Playing", note: "Gives the steps after it %reply% (what's playing).", fields: &[
+        f("say", "Say It", "toggle", "true", "Off: only %reply%, for a step after it."),
+    ] },
     Kind { id: "skip", label: "Skip the Song", note: "", fields: &[] },
     Kind { id: "playpause", label: "Play or Pause", note: "", fields: &[] },
     Kind { id: "alert", label: "Show an Alert", note: "On the Stream Widget.", fields: &[
@@ -190,6 +195,10 @@ pub const STEPS: &[Kind] = &[
     ] },
     Kind { id: "giveenter", label: "Enter the Giveaway", note: "Once each.", fields: &[] },
     Kind { id: "givepick", label: "Pick a Giveaway Winner", note: "Gives the steps after it %winner% and %entries% (how many were in).", fields: &[f("clear", "Then Start Again", "toggle", "true", "Everyone's entry let go.")] },
+    Kind { id: "fetch", label: "Fetch a Web Address", note: "What it answers (plain text, its first 500 letters) for the steps after it.", fields: &[
+        f("url", "Address", "text", "https://", "%rawInputUrlEncoded% is what came after the command, made safe for an address."),
+        f("into", "As", "text", "reply", "The variable it's kept in: %reply%, or whatever you name it."),
+    ] },
     Kind { id: "run", label: "Run Another Action", note: "", fields: &[f("action", "Action", "text", "", "Its name.")] },
     Kind { id: "note", label: "A Note", note: "Does nothing: for you to read (a restored backup's steps that couldn't be brought over are kept as these).", fields: &[f("text", "Note", "text", "", "")] },
     Kind { id: "status", label: "Show in OmniPulse", note: "On OmniPulse's status line: for trying an action out.", fields: &[f("text", "Text", "text", "%user% used it.", "")] },

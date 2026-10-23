@@ -127,6 +127,11 @@ fn ours(list: &'static [crate::flows::Kind], id: &str, set: Value) -> Value {
     d
 }
 
+/// How many of what couldn't be brought over were triggers (the rest, steps kept as notes)
+pub fn missed_triggers(r: &Restored) -> usize {
+    r.missed.iter().filter(|m| m.starts_with("its trigger") || m.contains(": its event") || m.contains(" command") ).count()
+}
+
 /// What couldn't be brought over, kept in its action as a note
 fn note(from: &str, what: &str, missed: &mut Vec<String>) -> Value {
     missed.push(what.to_string());
@@ -177,14 +182,16 @@ const SB_STEPS: &[(u32, &str)] = &[
     (19, "RunCommercial"), (20, "TimeoutUser"), (23, "Announce"), (29, "SendShoutout"), (30, "ObsSourceVisibility"), (33, "ObsStreaming"),
     (34, "ObsSetActiveScene"), (35, "ObsSourceFilterState"), (38, "ObsSetBrowserSourceUrl"), (39, "ObsSetGdiText"), (42, "ObsSourceMuteState"),
     (45, "ObsRecording"), (46, "ObsRaw"), (99, "ExecuteCode"), (120, "IfElse"), (121, "GetGlobal"), (122, "SetGlobal"), (123, "SetArgument"),
-    (124, "Break"), (127, "Switch"), (128, "While"), (1000, "GetQuote"), (1002, "Delay"), (1003, "GetRandomNumber"), (1007, "FetchUrl"),
-    (1009, "Comment"), (1012, "KeyboardPress"), (1020, "LogEntry"), (1037, "AddQuote"),
+    (124, "Break"), (127, "Switch"), (128, "While"), (560, "ReplyToMessage"), (1000, "GetQuote"), (1002, "Delay"), (1003, "GetRandomNumber"),
+    (1007, "FetchUrl"), (1009, "Comment"), (1011, "SetActionGroupState"), (1012, "KeyboardPress"), (1020, "LogEntry"), (1037, "AddQuote"),
+    (4001, "YouTubeMessage"), (35001, "KickSendMessage"), (35002, "KickReplyToMessage"), (35031, "KickSetChannelCategory"), (99900, "Group"),
 ];
 const SB_TRIGGERS: &[(u32, &str)] = &[
     (101, "TwitchFollow"), (102, "TwitchCheer"), (103, "TwitchSub"), (104, "TwitchReSub"), (105, "TwitchGiftSub"), (106, "TwitchGiftBomb"),
     (107, "TwitchRaid"), (108, "TwitchHypeTrainStart"), (112, "TwitchRewardRedemption"), (119, "TwitchWhisper"), (120, "TwitchFirstWord"),
     (125, "TwitchPollCreated"), (128, "TwitchPredictionCreated"), (133, "TwitchChatMessage"), (139, "TwitchAdRun"), (154, "TwitchStreamOnline"),
     (155, "TwitchStreamOffline"), (156, "TwitchShoutoutReceived"), (201, "StreamlabsDonation"), (401, "CommandTriggered"), (701, "TimedAction"),
+    (703, "ProcessStarted"),
     (14004, "ObsSceneChanged"), (14005, "ObsStreamingStarted"), (14006, "ObsStreamingStopped"), (14007, "ObsRecordingStarted"), (14008, "ObsRecordingStopped"),
     (35010, "KickChatMessage"), (35011, "KickFollow"), (35014, "KickSubscription"),
 ];
@@ -232,6 +239,82 @@ fn sb_trigger(t: &Value, commands: &HashMap<String, Value>, timers: &HashMap<Str
     Some((made, on))
 }
 
+/// A web address's text, %-decoded
+fn unescape(t: &str) -> String {
+    let b = t.as_bytes();
+    let mut out = Vec::new();
+    let mut i = 0;
+    while i < b.len() {
+        if b[i] == b'%' && i + 2 < b.len() + 0 && i + 2 < b.len() + 1 {
+            if let Ok(v) = u8::from_str_radix(std::str::from_utf8(&b[i + 1..(i + 3).min(b.len())]).unwrap_or(""), 16) { out.push(v); i += 3; continue; }
+        }
+        out.push(if b[i] == b'+' { b' ' } else { b[i] });
+        i += 1;
+    }
+    String::from_utf8_lossy(&out).to_string()
+}
+
+/// A bot's web request, as ours: to OmniPulse's own addresses (its song requests, what's playing, a request
+/// taken back, an alert), the step that does it; to anywhere else, Fetch a Web Address. `vars`: the bot's
+/// variables, as ours; `into`: what the answer's called
+fn web_step(url: &str, into: &str, vars: &dyn Fn(&str) -> String) -> Value {
+    let (place, query) = url.split_once('?').unwrap_or((url, ""));
+    let local = ["//127.0.0.1:", "//localhost:"].iter().any(|h| place.contains(h));
+    let path = place.rsplit('/').next().unwrap_or("");
+    let param = |k: &str| query.split('&').find_map(|kv| kv.split_once('=').filter(|(a, _)| *a == k).map(|(_, v)| vars(&unescape(v)).replace("%rawInputUrlEncoded%", "%rawInput%")));
+    if local {
+        match path {
+            "request" => return ours(STEPS, "request", json!({ "query": param("q").unwrap_or_else(|| "%rawInput%".into()), "reply": false })),
+            "now" => return ours(STEPS, "nowplaying", json!({ "say": false })),
+            "wrongsong" => return ours(STEPS, "wrongsong", json!({ "say": false })),
+            "alert" => return ours(STEPS, "alert", json!({ "alert": param("type").unwrap_or_else(|| "follow".into()), "user": param("user").unwrap_or_default(), "amount": param("amount").unwrap_or_default(), "message": param("message").unwrap_or_default() })),
+            _ => {}
+        }
+    }
+    ours(STEPS, "fetch", json!({ "url": vars(url), "into": if into.is_empty() { "reply" } else { into } }))
+}
+
+/// Streamer.bot's steps, in order: groups opened up, an If/Else that only picks which platform answers
+/// taken as Twitch's branch, a last one that only goes on if something's so as Only Go On If
+fn sb_steps(list: &[Value], names: &HashMap<String, String>, missed: &mut Vec<String>) -> Vec<Value> {
+    let mut subs: Vec<&Value> = list.iter().filter(|x| x["enabled"].as_bool() != Some(false)).collect();
+    subs.sort_by_key(|x| x["index"].as_i64().unwrap_or(0));
+    let mut out = Vec::new();
+    for (i, st) in subs.iter().enumerate() {
+        let code = st["type"].as_u64().unwrap_or(0);
+        let inner = st["subActions"].as_array().cloned().unwrap_or_default();
+        match code {
+            // (a group: its steps, one of them at random if it says so)
+            99900..=99902 => {
+                let steps = sb_steps(&inner, names, missed);
+                if st["random"].as_bool() == Some(true) && steps.len() > 1 && steps.iter().all(|x| x["type"] == "say") {
+                    let lines: Vec<String> = steps.iter().map(|x| s(&x["text"]).replace('|', "/")).collect();
+                    out.push(ours(STEPS, "random", json!({ "lines": lines.join(" | ") })));
+                } else { out.extend(steps); }
+            }
+            120 => {
+                let (yes, no) = (inner.iter().find(|x| x["type"] == 99901).cloned(), inner.iter().find(|x| x["type"] == 99902).cloned());
+                let branch = |g: &Option<Value>| g.as_ref().and_then(|g| g["subActions"].as_array().cloned()).unwrap_or_default();
+                let op = st["operation"].as_u64().unwrap_or(0);
+                let input = s(&st["input"]);
+                if input.contains("%userType%") && op <= 1 {
+                    // (which platform answers: Twitch's branch, the one that runs here)
+                    let twitch = s(&st["value"]).eq_ignore_ascii_case("twitch") == (op == 0);
+                    out.extend(sb_steps(&branch(if twitch { &yes } else { &no }), names, missed));
+                } else if i == subs.len() - 1 && branch(&no).is_empty() && op <= 1 {
+                    out.push(ours(STEPS, "if", json!({ "left": sb_vars(&input), "test": if op == 0 { "is" } else { "isnt" }, "right": sb_vars(&s(&st["value"])) })));
+                    out.extend(sb_steps(&branch(&yes), names, missed));
+                } else {
+                    out.push(note("Streamer.bot", "an If/Else (its steps are in Streamer.bot)", missed));
+                }
+            }
+            1007 => out.push(web_step(&s(&st["url"]), &s(&st["variableName"]), &|t: &str| sb_vars(t).replace("%rawInput%", "%rawInputUrlEncoded%"))),
+            _ => if let Some(x) = sb_step(st, names, missed) { out.push(x); },
+        }
+    }
+    out
+}
+
 fn sb_step(st: &Value, names: &HashMap<String, String>, missed: &mut Vec<String>) -> Option<Value> {
     let code = st["type"].as_u64().unwrap_or(0);
     let txt = |k: &str| sb_vars(&s(&st[k]));
@@ -239,7 +322,8 @@ fn sb_step(st: &Value, names: &HashMap<String, String>, missed: &mut Vec<String>
     let state = st["state"].as_u64().unwrap_or(0);
     let three = |a: &str, b: &str| if state == 0 { a.to_string() } else if state == 1 { b.to_string() } else { "toggle".to_string() };
     Some(match code {
-        10 => ours(STEPS, "say", json!({ "text": txt("text"), "reply": false })),
+        10 | 4001 | 35001 => ours(STEPS, "say", json!({ "text": txt("text"), "reply": false })),
+        560 | 35002 => ours(STEPS, "say", json!({ "text": txt("text"), "reply": true })),
         23 => ours(STEPS, "announce", json!({ "text": txt("text") })),
         1002 => ours(STEPS, "wait", json!({ "seconds": (n(&st["value"]) / 1000.0 * 10.0).round() / 10.0 })),
         1 => {
@@ -280,8 +364,7 @@ fn streamerbot(data: &Value) -> Restored {
         // (its steps: subActions; before Streamer.bot 0.2, actions)
         let mut subs: Vec<Value> = a["subActions"].as_array().or_else(|| a["actions"].as_array()).cloned().unwrap_or_default();
         subs.retain(|x| x["parentId"].is_null() || s(&x["parentId"]).is_empty());
-        subs.sort_by_key(|x| x["index"].as_i64().unwrap_or(0));
-        let mut steps: Vec<Value> = subs.iter().filter(|x| x["enabled"].as_bool() != Some(false)).filter_map(|x| sb_step(x, &names, &mut r.missed)).collect();
+        let mut steps = sb_steps(&subs, &names, &mut r.missed);
         // (a random action, or a random group of its steps (before 0.2): one of them; its messages as one of several)
         let random_group = a["actionGroups"].as_array().is_some_and(|g| g.iter().any(|x| x["random"].as_bool() == Some(true)));
         if (a["randomAction"].as_bool() == Some(true) || random_group) && !steps.is_empty() && steps.iter().all(|x| x["type"] == "say") && (steps.len() > 1 || random_group) {
@@ -335,6 +418,8 @@ fn miu_steps(actions: &[Value], names: &HashMap<String, String>, r: &mut Restore
                 1 => ours(STEPS, "obssource", json!({ "source": t("ItemName"), "scene": t("ParentName"), "show": if a["Visible"].as_bool() == Some(false) { "hide" } else { "show" } })),
                 2 => ours(STEPS, "obstext", json!({ "source": t("ItemName"), "text": t("SourceText") })),
                 5 => ours(STEPS, "obsstream", json!({ "what": "toggle" })),
+                8 => ours(STEPS, "obsfilter", json!({ "source": t("ParentName"), "filter": t("ItemName"), "what": if a["Visible"].as_bool() == Some(false) { "off" } else { "on" } })),
+                9 => ours(STEPS, "obsrecord", json!({ "what": "toggle" })),
                 _ => note("Mix It Up", "an OBS step of a kind OmniPulse hasn't got", &mut r.missed),
             },
             "ConsumablesActionModel" if matches!(kind, 0 | 1 | 2 | 4) => {
@@ -342,6 +427,7 @@ fn miu_steps(actions: &[Value], names: &HashMap<String, String>, r: &mut Restore
                 let who = if matches!(kind, 2 | 4) { t("Username") } else { "%user%".into() };
                 ours(STEPS, "points", json!({ "who": who, "amount": if matches!(kind, 1 | 4) { -amount } else { amount } }))
             }
+            "WebRequestActionModel" => web_step(&s(&a["Url"]), "reply", &|x: &str| miu_vars(x)),
             "CommandActionModel" if kind == 0 => ours(STEPS, "run", json!({ "action": names.get(&s(&a["CommandID"])).cloned().unwrap_or_default() })),
             "ModerationActionModel" if kind == 0 => ours(STEPS, "timeout", json!({ "seconds": n(&a["TimeoutAmount"]).max(1.0), "reason": t("ModerationReason") })),
             // (a condition, last: only go on if, then its own steps; anywhere else it'd stop the rest, so a note)
@@ -445,12 +531,25 @@ fn mixitup_db(db: &[u8], settings: &Value) -> Result<Restored, String> {
     out
 }
 
-/// Restored into what's kept: its actions over any of the same name (the rest added), its quotes added
-/// (none twice), and, from OmniPulse's own, its variables and points
+/// Restored into what's kept: its actions over those of the same name from the same place (OmniPulse's own
+/// backup: over any of the same name), one from elsewhere with its place after its name ("Song Request (Mix It
+/// Up)"), the rest added; its quotes added (none twice), and, from OmniPulse's own, its variables and points
 pub fn merge(actions: &mut Vec<Value>, kept: &mut Map<String, Value>, r: &Restored) -> (usize, usize) {
+    let ours = r.from == "an OmniPulse backup";
     for a in &r.actions {
+        let mut a = a.clone();
+        if !ours && a.get("from").is_none() { a["from"] = json!(r.from); }
         let name = s(&a["name"]);
-        match actions.iter_mut().find(|x| s(&x["name"]).eq_ignore_ascii_case(&name)) { Some(x) => *x = a.clone(), None => actions.push(a.clone()) }
+        let from = s(&a["from"]);
+        let same = |x: &Value| s(&x["name"]).eq_ignore_ascii_case(&name);
+        match actions.iter_mut().find(|x| same(x) && (ours || s(&x["from"]) == from)) {
+            Some(x) => *x = a,
+            None => {
+                if actions.iter().any(|x| same(x)) { a["name"] = json!(format!("{name} ({})", r.from)); }
+                let again = s(&a["name"]);
+                match actions.iter_mut().find(|x| s(&x["name"]).eq_ignore_ascii_case(&again)) { Some(x) => *x = a, None => actions.push(a) }
+            }
+        }
     }
     let mut quotes = kept.get("quotes").and_then(|v| v.as_array()).cloned().unwrap_or_default();
     let before = quotes.len();
@@ -481,6 +580,12 @@ mod tests {
                     { "type": 99, "index": 2, "enabled": true, "parentId": null },
                     { "type": 34, "sceneName": "Main", "index": 3, "enabled": true, "parentId": null },
                     { "type": 4, "actionId": "a2", "index": 4, "enabled": true, "parentId": null },
+                    { "type": 1007, "url": "http://127.0.0.1:7879/request?key=k&user=%user%&q=%rawInputUrlEncoded%", "variableName": "reply", "index": 5, "enabled": true, "parentId": null },
+                    { "type": 120, "input": "%userType%", "operation": 0, "value": "Twitch", "index": 6, "enabled": true, "parentId": null, "subActions": [
+                        { "type": 99901, "subActions": [{ "type": 560, "text": "%reply%", "enabled": true }], "enabled": true },
+                        { "type": 99902, "subActions": [{ "type": 35002, "text": "%reply%", "enabled": true }], "enabled": true },
+                    ] },
+                    { "type": 1007, "url": "https://example.com/api?q=%rawInputUrlEncoded%&u=%userName%", "variableName": "answer", "index": 7, "enabled": true, "parentId": null },
                   ] },
                 { "id": "a2", "name": "Timer", "enabled": false, "triggers": [{ "type": 701, "timerId": "t1", "enabled": true }], "subActions": [] },
             ],
@@ -513,6 +618,11 @@ mod tests {
         assert_eq!(steps[2]["type"], json!("note"));
         assert_eq!(steps[3]["scene"], json!("Main"));
         assert_eq!(steps[4]["action"], json!("Timer"));
+        assert_eq!((steps[5]["type"].clone(), steps[5]["query"].clone(), steps[5]["reply"].clone()), (json!("request"), json!("%rawInput%"), json!(false)));
+        // (the platform's If/Else: Twitch's branch, a reply)
+        assert_eq!((steps[6]["type"].clone(), steps[6]["text"].clone(), steps[6]["reply"].clone()), (json!("say"), json!("%reply%"), json!(true)));
+        assert_eq!(steps.len(), 8, "{steps:#?}");
+        assert_eq!((steps[7]["type"].clone(), steps[7]["url"].clone(), steps[7]["into"].clone()), (json!("fetch"), json!("https://example.com/api?q=%rawInputUrlEncoded%&u=%user%"), json!("answer")));
         assert_eq!(r.missed, vec!["Execute Code".to_string()]);
         // (the timer: every 10 minutes, off as it was)
         assert_eq!((r.actions[2]["trigger"]["minutes"].clone(), r.actions[2]["on"].clone()), (json!(10.0), json!(false)));
@@ -595,5 +705,10 @@ mod tests {
         assert_eq!(now.len(), 1);
         assert_eq!(now[0]["on"], json!(true));
         assert_eq!(kept["points"]["viewer"], json!(5));
+        // (another bot's of the same name: beside it, its place after its name; again: over that one)
+        let other = Restored { from: "Mix It Up", actions: vec![json!({ "name": "A", "on": false, "trigger": defaults(TRIGGERS, "manual"), "steps": [] })], ..Default::default() };
+        merge(&mut now, &mut kept, &other);
+        merge(&mut now, &mut kept, &other);
+        assert_eq!(now.iter().map(|a| s(&a["name"])).collect::<Vec<_>>(), vec!["A".to_string(), "A (Mix It Up)".to_string()]);
     }
 }

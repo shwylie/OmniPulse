@@ -267,7 +267,7 @@ function exempt(who, r) {
 
 function onActions(m, text, cmd, args, user, msgId) {
   const r = rank(m.tags);
-  const base = { user, userId: m.tags["user-id"] || "", message: text, msgId, platform: "twitch" };
+  const base = { user, userId: m.tags["user-id"] || "", message: text, msgId, platform: "twitch", isMod: r.mod };
   for (const a of live) {
     const t = a.trigger;
     if (t.type === "filter") {
@@ -276,7 +276,7 @@ function onActions(m, text, cmd, args, user, msgId) {
     } else if (t.type === "command") {
       const names = [t.command].concat(String(t.aliases || "").split(",")).map((x) => String(x || "").trim().toLowerCase()).filter(Boolean);
       if (!names.includes(cmd) || !allowed(t.who, r) || !cooled(a, user)) continue;
-      run(a, Object.assign({}, base, { command: cmd, rawInput: args }, words(args)));
+      run(a, Object.assign({}, base, { command: cmd, rawInput: args, rawInputUrlEncoded: encodeURIComponent(args) }, words(args)));
     } else if (t.type === "message") {
       const want = String(t.text || "").toLowerCase(), said = text.toLowerCase();
       let hit = false;
@@ -421,10 +421,26 @@ async function step(st, ctx, depth) {
     }
     case "request": {
       const r = await OmniPulse.app.request(ctx.user || S().login || "", f("query"), "twitch");
+      ctx.reply = r.message;
       if (yes(st.reply)) reply(ctx.msgId, r.message);
       break;
     }
-    case "nowplaying": reply(ctx.msgId, (await OmniPulse.app.nowPlaying()).message); break;
+    case "wrongsong": {
+      const r = await OmniPulse.app.wrongSong(ctx.user || S().login || "", !!ctx.isMod);
+      ctx.reply = r.message;
+      if (st.say !== false && st.say !== "false") reply(ctx.msgId, r.message);
+      break;
+    }
+    case "nowplaying": {
+      ctx.reply = (await OmniPulse.app.nowPlaying()).message;
+      if (st.say !== false && st.say !== "false") reply(ctx.msgId, ctx.reply);
+      break;
+    }
+    case "fetch": {
+      const r = await OmniPulse.app.fetchText(f("url").trim());
+      ctx[String(st.into || "reply").replace(/%/g, "").trim() || "reply"] = r.text;
+      break;
+    }
     case "skip": await OmniPulse.app.control("next"); break;
     case "playpause": await OmniPulse.app.control("play"); break;
     case "alert": await OmniPulse.app.alert({ type: st.alert || "follow", user: f("user"), amount: f("amount"), message: f("message") }); break;
