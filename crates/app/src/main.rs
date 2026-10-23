@@ -10137,6 +10137,12 @@ fn plugin_app(shared: &Shared, plugin: &str, ask: serde_json::Value, answer: Box
             let fields = args.first().and_then(|v| v.as_object()).cloned().unwrap_or_default();
             send(match omnipulse_core::widget::alert_push(&fields) { Ok(a) => serde_json::json!({ "ok": true, "alert": a }), Err(e) => serde_json::json!({ "error": e }) });
         }
+        // (a sign-in's link, copied for a browser of your choosing: https only)
+        "copyText" => {
+            let text = arg(0);
+            if !text.starts_with("https://") { return send(serde_json::json!({ "error": "only https addresses" })); }
+            send(match share::copy(&text) { Ok(()) => serde_json::json!({ "ok": true }), Err(e) => serde_json::json!({ "error": e }) });
+        }
         // (a sign-in page: https only, in the browser)
         "openUrl" => {
             let url = arg(0);

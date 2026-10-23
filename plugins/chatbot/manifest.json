@@ -1,7 +1,7 @@
 {
   "id": "chatbot",
   "name": "OmniPulse Chatbot",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "author": "OmniPulse",
   "description": "OmniPulse's own chatbot: song requests, alerts, your own actions (a trigger, then its steps) and OBS controls, straight from your chat, no other bot needed. Twitch and Kick; YouTube is on its way.",
   "main": "main.js",
@@ -40,12 +40,28 @@
       "note": "Your own Twitch account: your chat and its events (follows, subs, bits, raids...)."
     },
     {
+      "key": "twitchSignInCopy",
+      "label": "Your Channel, Another Browser",
+      "type": "button",
+      "press": "Copy Sign-In Link",
+      "call": "signInChannelCopy",
+      "note": "The sign-in link copied instead, to open where you like."
+    },
+    {
       "key": "twitchBotSignIn",
       "label": "Bot Account (optional)",
       "type": "button",
       "press": "Sign In the Bot",
       "call": "signInBot",
       "note": "A second Twitch account that posts the replies. Without one, they come from your channel."
+    },
+    {
+      "key": "twitchBotSignInCopy",
+      "label": "Bot Account, Another Browser",
+      "type": "button",
+      "press": "Copy Sign-In Link",
+      "call": "signInBotCopy",
+      "note": "Paste it into a private window and sign in as the bot there: your own account stays signed in in your browser."
     },
     {
       "key": "twitchSignOut",
@@ -90,6 +106,14 @@
       "press": "Sign In with Kick",
       "call": "signInKick",
       "note": "Your Kick account: the chatbot answers as it."
+    },
+    {
+      "key": "kickSignInCopy",
+      "label": "Kick, Another Browser",
+      "type": "button",
+      "press": "Copy Sign-In Link",
+      "call": "signInKickCopy",
+      "note": "The sign-in link copied instead: open it in a private window on this PC."
     },
     {
       "key": "kickSignOut",

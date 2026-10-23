@@ -23,20 +23,31 @@ async function form(url, fields) {
 
 // Signing in: the code given at once (a call gets 25 s, and signing in takes as long as it takes), the
 // rest waited for in the background, said on the app's status line when it's done
-async function signIn(who, scopes, values) {
+// (copy: its link copied, not opened, for a browser of your choice: a private window, signed in as the bot
+// while your own account stays signed in where it is)
+async function signIn(who, scopes, values, copy) {
   let said = null;
   const first = new Promise((ok) => { said = ok; });
-  signInFlow(who, scopes, values, said).then((msg) => { if (msg) { said(msg); OmniPulse.app.say(msg); } }, (e) => { said("Couldn't sign in: " + e.message); });
+  signInFlow(who, scopes, values, said, copy).then((msg) => { if (msg) { said(msg); OmniPulse.app.say(msg); } }, (e) => { said("Couldn't sign in: " + e.message); });
   return first;
 }
 
-async function signInFlow(who, scopes, values, said) {
+// A sign-in's page: opened in your browser, or its link copied for you to open where you like
+async function signInPage(url, copy) {
+  if (copy) await OmniPulse.app.copyText(url);
+  else OmniPulse.app.openUrl(url);
+}
+
+async function signInFlow(who, scopes, values, said, copy) {
   const clientId = ((values && values.twitchClientId) || S().twitchClientId || "").trim();
   if (!clientId) return "Put your Twitch Client ID in first (its note says where), then sign in.";
   const d = await form("https://id.twitch.tv/oauth2/device", { client_id: clientId, scopes });
   if (!d.ok) return "Twitch didn't take that Client ID: " + (d.j.message || d.status) + ". Check its Client Type is Public.";
-  OmniPulse.app.openUrl(d.j.verification_uri);
-  said("Sign in on Twitch's page that's opened (" + (who === "bot" ? "as the bot account" : "as your channel") + "): its code is " + d.j.user_code + ". This says when it's done.");
+  await signInPage(d.j.verification_uri, copy);
+  const as = who === "bot" ? "as the bot account" : "as your channel";
+  said(copy
+    ? "The sign-in link is copied: paste it into a private window (or another browser) and sign in " + as + " there. Its code is " + d.j.user_code + ". This says when it's done."
+    : "Sign in on Twitch's page that's opened (" + as + "): its code is " + d.j.user_code + ". This says when it's done.");
   // waited for: Twitch says when it's done
   const until = Date.now() + (d.j.expires_in || 1800) * 1000;
   let every = Math.max(5, d.j.interval || 5) * 1000;
@@ -741,217 +752,219 @@ function setPoints() {
   }, every);
 }
 
-
-// ---------- Kick: signed in with its OAuth (your own app's Client ID and secret, PKCE), chat read from
-// Kick's own realtime socket (as kick.com's page reads it: a guest's), sent through its API ----------
-const KICK_SCOPES = "user:read channel:read channel:write chat:write moderation:ban moderation:chat_message:manage";
-const KICK_REDIRECT_PORT = 8476;
-const KICK_REDIRECT = "http://localhost:" + KICK_REDIRECT_PORT + "/kick";
-let kick = null, kickRoom = 0, kickChannelId = 0, kickRefresh = null, kickN = 10, kickRetry = 2000;
-const kickSent = [];
-
-function b64url(bytes) { return b64(bytes).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, ""); }
-function randomText(n) {
-  const A = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~";
-  let out = "";
-  for (let i = 0; i < n; i++) out += A[Math.floor(Math.random() * A.length)];
-  return out;
-}
-
-function signInKick(values) {
-  let said = null;
-  const first = new Promise((ok) => { said = ok; });
-  kickSignInFlow(values, said).then((msg) => { if (msg) { said(msg); OmniPulse.app.say(msg); } }, (e) => { said("Couldn't sign in to Kick: " + e.message); OmniPulse.app.say("Couldn't sign in to Kick: " + e.message); });
-  return first;
-}
-
-async function kickSignInFlow(values, said) {
-  const v = Object.assign({}, S(), values || {});
-  const id = String(v.kickClientId || "").trim(), secret = String(v.kickClientSecret || "").trim();
-  if (!id || !secret) return "Put your Kick app's Client ID and Client Secret in first (their note says where), then sign in.";
-  const verifier = randomText(64), state = randomText(24);
-  const q = { client_id: id, response_type: "code", redirect_uri: KICK_REDIRECT, scope: KICK_SCOPES, state, code_challenge: b64url(sha256(utf8(verifier))), code_challenge_method: "S256" };
-  const waiting = OmniPulse.app.awaitRedirect(KICK_REDIRECT_PORT, "/kick");
-  OmniPulse.app.openUrl("https://id.kick.com/oauth/authorize?" + Object.entries(q).map(([k, x]) => k + "=" + encodeURIComponent(x)).join("&"));
-  said("Sign in on Kick's page that's opened. This says when it's done.");
-  const back = await waiting;
-  const got = {};
-  String(back.query || "").split("&").forEach((kv) => { const i = kv.indexOf("="); if (i > 0) got[kv.slice(0, i)] = decodeURIComponent(kv.slice(i + 1).replace(/\+/g, " ")); });
-  if (got.error) return "Kick's sign-in didn't finish: " + (got.error_description || got.error);
-  if (got.state !== state || !got.code) return "Kick's sign-in didn't come back as it should: try again.";
-  const t = await form("https://id.kick.com/oauth/token", { grant_type: "authorization_code", client_id: id, client_secret: secret, redirect_uri: KICK_REDIRECT, code: got.code, code_verifier: verifier });
-  if (!t.ok || !t.j.access_token) return "Kick didn't take the sign-in: " + (t.j.error_description || t.j.message || t.status) + ". Check its Client Secret, and that its Redirect URL is " + KICK_REDIRECT + ".";
-  const keep = { kickClientId: id, kickClientSecret: secret, kickToken: t.j.access_token, kickRefreshToken: t.j.refresh_token || "" };
-  Object.assign(OmniPulse.settings, keep);
-  const me = await kickApi("GET", "users");
-  const u = me.data && me.data[0];
-  if (!u) return "Signed in, but Kick didn't say who as: try again.";
-  keep.kickUserId = String(u.user_id);
-  keep.kickLogin = String(u.name || "");
-  if (!String(v.kickChannel || "").trim()) keep.kickChannel = String(u.name || "").toLowerCase();
-  await OmniPulse.app.saveSettings(keep);
-  Object.assign(OmniPulse.settings, keep);
-  restart();
-  return "Signed in to Kick as " + (u.name || "you") + ".";
-}
-
-// Kick's API, as you (a token that's run out, renewed once)
-async function kickApi(method, path, body, again) {
-  if (!S().kickToken) throw new Error("sign in to Kick first (in the chatbot's settings)");
-  const r = await OmniPulse.fetch("https://api.kick.com/public/v1/" + path, {
-    method,
-    headers: { Authorization: "Bearer " + S().kickToken, "Content-Type": "application/json", Accept: "application/json" },
-    body: body ? JSON.stringify(body) : undefined,
-  });
-  if (r.status === 401 && !again && (await kickRenew())) return kickApi(method, path, body, true);
-  if (!r.ok) {
-    let why = "";
-    try { why = (await r.json()).message || ""; } catch (e) {}
-    throw new Error("Kick said " + r.status + (why ? ": " + why : "") + (r.status === 401 || r.status === 403 ? " (sign in to Kick again, in the chatbot's settings)" : ""));
-  }
-  if (r.status === 204) return {};
-  try { return await r.json(); } catch (e) { return {}; }
-}
-
-async function kickRenew() {
-  const s = S();
-  if (!s.kickRefreshToken || !s.kickClientId || !s.kickClientSecret) return false;
-  const t = await form("https://id.kick.com/oauth/token", { grant_type: "refresh_token", client_id: s.kickClientId, client_secret: s.kickClientSecret, refresh_token: s.kickRefreshToken });
-  if (!t.ok || !t.j.access_token) return false;
-  const keep = { kickToken: t.j.access_token, kickRefreshToken: t.j.refresh_token || s.kickRefreshToken };
-  await OmniPulse.app.saveSettings(keep);
-  Object.assign(OmniPulse.settings, keep);
-  return true;
-}
-
-// A message in your Kick chat (to the one it answers), as you; kept a moment, so its echo isn't taken as chat
-function kickSay(to, text) {
-  if (!kick || !S().kickToken) return;
-  const channel = Number(S().kickUserId || 0);
-  String(text).split("\n").filter(Boolean).forEach((line) => {
-    const content = line.slice(0, 500);
-    kickSent.push({ content, at: Date.now() });
-    while (kickSent.length > 30) kickSent.shift();
-    const body = { content, type: "user", broadcaster_user_id: channel };
-    if (to) body.reply_to_message_id = to;
-    kickApi("POST", "chat", body).catch((e) => OmniPulse.log("kick chat: " + e.message));
-  });
-}
-
-async function kickPost(path, body) {
-  const r = await OmniPulse.fetch("https://web.kick.com/api/v1/realtime/" + path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-  if (!r.ok) throw new Error("Kick's chat said " + r.status);
-  return (await r.json()).data || {};
-}
-
-// Kick's chat and its channel's events: a guest's connection (Centrifugo), kept going
-async function kickConnect() {
-  if (!yes(S().kickOn) || !String(S().kickChannel || "").trim()) return;
-  const slug = String(S().kickChannel).trim().toLowerCase().replace(/_/g, "-");
+
+// ---------- Kick: signed in with its OAuth (your own app's Client ID and secret, PKCE), chat read from
+// Kick's own realtime socket (as kick.com's page reads it: a guest's), sent through its API ----------
+const KICK_SCOPES = "user:read channel:read channel:write chat:write moderation:ban moderation:chat_message:manage";
+const KICK_REDIRECT_PORT = 8476;
+const KICK_REDIRECT = "http://localhost:" + KICK_REDIRECT_PORT + "/kick";
+let kick = null, kickRoom = 0, kickChannelId = 0, kickRefresh = null, kickN = 10, kickRetry = 2000;
+const kickSent = [];
+
+function b64url(bytes) { return b64(bytes).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, ""); }
+function randomText(n) {
+  const A = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~";
+  let out = "";
+  for (let i = 0; i < n; i++) out += A[Math.floor(Math.random() * A.length)];
+  return out;
+}
+
+function signInKick(values, copy) {
+  let said = null;
+  const first = new Promise((ok) => { said = ok; });
+  kickSignInFlow(values, said, copy).then((msg) => { if (msg) { said(msg); OmniPulse.app.say(msg); } }, (e) => { said("Couldn't sign in to Kick: " + e.message); OmniPulse.app.say("Couldn't sign in to Kick: " + e.message); });
+  return first;
+}
+
+async function kickSignInFlow(values, said, copy) {
+  const v = Object.assign({}, S(), values || {});
+  const id = String(v.kickClientId || "").trim(), secret = String(v.kickClientSecret || "").trim();
+  if (!id || !secret) return "Put your Kick app's Client ID and Client Secret in first (their note says where), then sign in.";
+  const verifier = randomText(64), state = randomText(24);
+  const q = { client_id: id, response_type: "code", redirect_uri: KICK_REDIRECT, scope: KICK_SCOPES, state, code_challenge: b64url(sha256(utf8(verifier))), code_challenge_method: "S256" };
+  const waiting = OmniPulse.app.awaitRedirect(KICK_REDIRECT_PORT, "/kick");
+  await signInPage("https://id.kick.com/oauth/authorize?" + Object.entries(q).map(([k, x]) => k + "=" + encodeURIComponent(x)).join("&"), copy);
+  said(copy
+    ? "The sign-in link is copied: paste it into a private window (or another browser) on this PC and sign in to Kick there, within five minutes. This says when it's done."
+    : "Sign in on Kick's page that's opened. This says when it's done.");
+  const back = await waiting;
+  const got = {};
+  String(back.query || "").split("&").forEach((kv) => { const i = kv.indexOf("="); if (i > 0) got[kv.slice(0, i)] = decodeURIComponent(kv.slice(i + 1).replace(/\+/g, " ")); });
+  if (got.error) return "Kick's sign-in didn't finish: " + (got.error_description || got.error);
+  if (got.state !== state || !got.code) return "Kick's sign-in didn't come back as it should: try again.";
+  const t = await form("https://id.kick.com/oauth/token", { grant_type: "authorization_code", client_id: id, client_secret: secret, redirect_uri: KICK_REDIRECT, code: got.code, code_verifier: verifier });
+  if (!t.ok || !t.j.access_token) return "Kick didn't take the sign-in: " + (t.j.error_description || t.j.message || t.status) + ". Check its Client Secret, and that its Redirect URL is " + KICK_REDIRECT + ".";
+  const keep = { kickClientId: id, kickClientSecret: secret, kickToken: t.j.access_token, kickRefreshToken: t.j.refresh_token || "" };
+  Object.assign(OmniPulse.settings, keep);
+  const me = await kickApi("GET", "users");
+  const u = me.data && me.data[0];
+  if (!u) return "Signed in, but Kick didn't say who as: try again.";
+  keep.kickUserId = String(u.user_id);
+  keep.kickLogin = String(u.name || "");
+  if (!String(v.kickChannel || "").trim()) keep.kickChannel = String(u.name || "").toLowerCase();
+  await OmniPulse.app.saveSettings(keep);
+  Object.assign(OmniPulse.settings, keep);
+  restart();
+  return "Signed in to Kick as " + (u.name || "you") + ".";
+}
+
+// Kick's API, as you (a token that's run out, renewed once)
+async function kickApi(method, path, body, again) {
+  if (!S().kickToken) throw new Error("sign in to Kick first (in the chatbot's settings)");
+  const r = await OmniPulse.fetch("https://api.kick.com/public/v1/" + path, {
+    method,
+    headers: { Authorization: "Bearer " + S().kickToken, "Content-Type": "application/json", Accept: "application/json" },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  if (r.status === 401 && !again && (await kickRenew())) return kickApi(method, path, body, true);
+  if (!r.ok) {
+    let why = "";
+    try { why = (await r.json()).message || ""; } catch (e) {}
+    throw new Error("Kick said " + r.status + (why ? ": " + why : "") + (r.status === 401 || r.status === 403 ? " (sign in to Kick again, in the chatbot's settings)" : ""));
+  }
+  if (r.status === 204) return {};
+  try { return await r.json(); } catch (e) { return {}; }
+}
+
+async function kickRenew() {
+  const s = S();
+  if (!s.kickRefreshToken || !s.kickClientId || !s.kickClientSecret) return false;
+  const t = await form("https://id.kick.com/oauth/token", { grant_type: "refresh_token", client_id: s.kickClientId, client_secret: s.kickClientSecret, refresh_token: s.kickRefreshToken });
+  if (!t.ok || !t.j.access_token) return false;
+  const keep = { kickToken: t.j.access_token, kickRefreshToken: t.j.refresh_token || s.kickRefreshToken };
+  await OmniPulse.app.saveSettings(keep);
+  Object.assign(OmniPulse.settings, keep);
+  return true;
+}
+
+// A message in your Kick chat (to the one it answers), as you; kept a moment, so its echo isn't taken as chat
+function kickSay(to, text) {
+  if (!kick || !S().kickToken) return;
+  const channel = Number(S().kickUserId || 0);
+  String(text).split("\n").filter(Boolean).forEach((line) => {
+    const content = line.slice(0, 500);
+    kickSent.push({ content, at: Date.now() });
+    while (kickSent.length > 30) kickSent.shift();
+    const body = { content, type: "user", broadcaster_user_id: channel };
+    if (to) body.reply_to_message_id = to;
+    kickApi("POST", "chat", body).catch((e) => OmniPulse.log("kick chat: " + e.message));
+  });
+}
+
+async function kickPost(path, body) {
+  const r = await OmniPulse.fetch("https://web.kick.com/api/v1/realtime/" + path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  if (!r.ok) throw new Error("Kick's chat said " + r.status);
+  return (await r.json()).data || {};
+}
+
+// Kick's chat and its channel's events: a guest's connection (Centrifugo), kept going
+async function kickConnect() {
+  if (!yes(S().kickOn) || !String(S().kickChannel || "").trim()) return;
+  const slug = String(S().kickChannel).trim().toLowerCase().replace(/_/g, "-");
   // (its front door turns away a request that doesn't say what it is)
   const r = await OmniPulse.fetch("https://kick.com/api/v2/channels/" + encodeURIComponent(slug), { headers: { Accept: "application/json", "User-Agent": "OmniPulse" } });
   if (!r.ok) throw new Error("Kick didn't answer for " + slug + " (" + r.status + ")");
-  const ch = await r.json();
-  kickRoom = ch.chatroom && ch.chatroom.id;
-  kickChannelId = ch.id;
-  if (!kickRoom) throw new Error("Kick has no channel called " + slug);
-  if (!S().kickUserId && ch.user_id) OmniPulse.settings.kickUserId = String(ch.user_id);
-  const client = randomText(8) + "-" + randomText(4) + "-4" + randomText(3) + "-a" + randomText(3) + "-" + randomText(12);
-  const conn = await kickPost("connection", { client: { id: client, type: "web" }, capabilities: { accepted_providers: [{ provider: "centrifugo" }] } });
-  const url = conn.connections && conn.connections[0] && conn.connections[0].credentials && conn.connections[0].credentials.url;
-  if (!url) throw new Error("Kick's chat didn't say where to connect");
-  const token = (await kickPost("auth/connection", { client_id: client })).token;
-  const s = OmniPulse.socket(url);
-  kick = s;
-  s.onopen = () => {
-    s.send(JSON.stringify({ connect: { token, name: "js" }, id: 1 }));
-    s.send(JSON.stringify({ subscribe: { channel: "chatrooms." + kickRoom + ".v2" }, id: 2 }));
-    s.send(JSON.stringify({ subscribe: { channel: "channel." + kickChannelId }, id: 3 }));
-    kickRetry = 2000;
-  };
-  s.onmessage = (data) => String(data).split("\n").filter(Boolean).forEach((line) => {
-    if (line === "{}") { s.send("{}"); return; }
-    let m;
-    try { m = JSON.parse(line); } catch (e) { return; }
-    // (its guest token, renewed before it runs out)
-    if (m.id === 1 && m.connect && m.connect.ttl) {
-      if (kickRefresh) clearInterval(kickRefresh);
-      kickRefresh = setInterval(() => {
-        kickPost("auth/connection", { client_id: client }).then((t) => { if (kick === s) s.send(JSON.stringify({ refresh: { token: t.token }, id: ++kickN })); }).catch((e) => OmniPulse.log("kick token: " + e.message));
-      }, Math.max(60, m.connect.ttl * 0.75) * 1000);
-    }
-    const pub = m.push && m.push.pub && m.push.pub.data;
-    if (!pub) return;
-    let d = pub.data;
-    if (typeof d === "string") { try { d = JSON.parse(d); } catch (e) { d = {}; } }
-    onKick(String(pub.event || ""), d || {});
-  });
-  s.onclose = (why) => {
-    if (kick !== s) return;
-    kick = null;
-    if (kickRefresh) { clearInterval(kickRefresh); kickRefresh = null; }
-    if (!stopped && yes(S().kickOn)) { OmniPulse.log("kick closed: " + why); setTimeout(() => { if (!kick && !stopped) kickConnect().catch((e) => OmniPulse.log("kick: " + e.message)); }, kickRetry); kickRetry = Math.min(kickRetry * 2, 60000); }
-  };
-}
-
-const KICK_SEEN = {};
-// What Kick sends: its chat as ours (a Twitch line's shape, its platform Kick), its events as ours
-function onKick(event, d) {
-  const ev = event.replace(/^App\\Events\\/, "");
-  if (ev === "ChatMessageEvent") {
-    const sender = d.sender || {};
-    const content = String(d.content || "");
-    // (our own message coming back: not chat)
-    if (S().kickLogin && String(sender.username || "").toLowerCase() === String(S().kickLogin).toLowerCase()) {
-      const k = kickSent.findIndex((x) => x.content === content && Date.now() - x.at < 30000);
-      if (k >= 0) { kickSent.splice(k, 1); return; }
-    }
-    const types = ((sender.identity && sender.identity.badges) || []).map((b) => String(b.type || "").toLowerCase());
-    const badges = types.map((t) => (t === "moderator" ? "moderator" : t === "founder" || t === "og" ? "founder" : t) + "/1").join(",");
-    const emotes = (content.match(/\[emote:\d+:[^\]]*\]/g) || []).length;
-    onChat({
-      command: "PRIVMSG", platform: "kick", nick: String(sender.slug || sender.username || "").toLowerCase(), text: content.replace(/\[emote:\d+:([^\]]*)\]/g, "$1"),
-      tags: { "display-name": sender.username || "", badges, mod: types.includes("moderator") ? "1" : "0", subscriber: types.includes("subscriber") ? "1" : "0", id: String(d.id || ""), "user-id": String(sender.id || ""), emotes: emotes ? "kick:" + new Array(emotes).fill("0-0").join(",") : "" },
-    });
-    return;
-  }
-  const alert = (a) => { if (S().alerts !== false) OmniPulse.app.alert(Object.assign({ platform: "kick" }, a)).catch((e) => OmniPulse.log("alert: " + e.message)); };
-  const go = (ours, ctx) => { const c = Object.assign({ platform: "kick", rawInput: "", message: "", amount: "" }, ctx); Object.assign(c, words(c.rawInput)); fire(ours, c); };
-  switch (ev) {
-    case "SubscriptionEvent": {
-      const months = num(d.months);
-      const user = d.username || "";
-      alert({ type: "sub", user, amount: months > 1 ? months + " months" : "" });
-      go(months > 1 ? "resub" : "sub", { user, amount: String(months || 1) });
-      return;
-    }
-    case "GiftedSubscriptionsEvent": {
-      const n = (d.gifted_usernames || []).length || 1;
-      const user = d.gifter_username || "Anonymous";
-      alert({ type: "gift", user, amount: String(n) });
-      go("gift", { user, amount: String(n) });
-      return;
-    }
-    case "StreamHostEvent": {
-      const user = d.host_username || "";
-      alert({ type: "raid", user, amount: String(d.number_viewers || 0) });
-      go("raid", { user, amount: String(d.number_viewers || 0), message: d.optional_message || "" });
-      return;
-    }
-    case "FollowersUpdated": {
-      const user = d.username || "";
-      if (d.followed === false || !user) return;
-      alert({ type: "follow", user });
-      go("follow", { user });
-      return;
-    }
-    case "StreamerIsLive": go("online", {}); return;
-    case "StopStreamBroadcast": go("offline", {}); return;
-  }
-  // (one Kick sends that OmniPulse hasn't a use for yet: noted once, to add later)
-  if (!KICK_SEEN[ev]) { KICK_SEEN[ev] = true; OmniPulse.log("kick event not used yet: " + ev + " " + JSON.stringify(d).slice(0, 300)); }
-}
-
+  const ch = await r.json();
+  kickRoom = ch.chatroom && ch.chatroom.id;
+  kickChannelId = ch.id;
+  if (!kickRoom) throw new Error("Kick has no channel called " + slug);
+  if (!S().kickUserId && ch.user_id) OmniPulse.settings.kickUserId = String(ch.user_id);
+  const client = randomText(8) + "-" + randomText(4) + "-4" + randomText(3) + "-a" + randomText(3) + "-" + randomText(12);
+  const conn = await kickPost("connection", { client: { id: client, type: "web" }, capabilities: { accepted_providers: [{ provider: "centrifugo" }] } });
+  const url = conn.connections && conn.connections[0] && conn.connections[0].credentials && conn.connections[0].credentials.url;
+  if (!url) throw new Error("Kick's chat didn't say where to connect");
+  const token = (await kickPost("auth/connection", { client_id: client })).token;
+  const s = OmniPulse.socket(url);
+  kick = s;
+  s.onopen = () => {
+    s.send(JSON.stringify({ connect: { token, name: "js" }, id: 1 }));
+    s.send(JSON.stringify({ subscribe: { channel: "chatrooms." + kickRoom + ".v2" }, id: 2 }));
+    s.send(JSON.stringify({ subscribe: { channel: "channel." + kickChannelId }, id: 3 }));
+    kickRetry = 2000;
+  };
+  s.onmessage = (data) => String(data).split("\n").filter(Boolean).forEach((line) => {
+    if (line === "{}") { s.send("{}"); return; }
+    let m;
+    try { m = JSON.parse(line); } catch (e) { return; }
+    // (its guest token, renewed before it runs out)
+    if (m.id === 1 && m.connect && m.connect.ttl) {
+      if (kickRefresh) clearInterval(kickRefresh);
+      kickRefresh = setInterval(() => {
+        kickPost("auth/connection", { client_id: client }).then((t) => { if (kick === s) s.send(JSON.stringify({ refresh: { token: t.token }, id: ++kickN })); }).catch((e) => OmniPulse.log("kick token: " + e.message));
+      }, Math.max(60, m.connect.ttl * 0.75) * 1000);
+    }
+    const pub = m.push && m.push.pub && m.push.pub.data;
+    if (!pub) return;
+    let d = pub.data;
+    if (typeof d === "string") { try { d = JSON.parse(d); } catch (e) { d = {}; } }
+    onKick(String(pub.event || ""), d || {});
+  });
+  s.onclose = (why) => {
+    if (kick !== s) return;
+    kick = null;
+    if (kickRefresh) { clearInterval(kickRefresh); kickRefresh = null; }
+    if (!stopped && yes(S().kickOn)) { OmniPulse.log("kick closed: " + why); setTimeout(() => { if (!kick && !stopped) kickConnect().catch((e) => OmniPulse.log("kick: " + e.message)); }, kickRetry); kickRetry = Math.min(kickRetry * 2, 60000); }
+  };
+}
+
+const KICK_SEEN = {};
+// What Kick sends: its chat as ours (a Twitch line's shape, its platform Kick), its events as ours
+function onKick(event, d) {
+  const ev = event.replace(/^App\\Events\\/, "");
+  if (ev === "ChatMessageEvent") {
+    const sender = d.sender || {};
+    const content = String(d.content || "");
+    // (our own message coming back: not chat)
+    if (S().kickLogin && String(sender.username || "").toLowerCase() === String(S().kickLogin).toLowerCase()) {
+      const k = kickSent.findIndex((x) => x.content === content && Date.now() - x.at < 30000);
+      if (k >= 0) { kickSent.splice(k, 1); return; }
+    }
+    const types = ((sender.identity && sender.identity.badges) || []).map((b) => String(b.type || "").toLowerCase());
+    const badges = types.map((t) => (t === "moderator" ? "moderator" : t === "founder" || t === "og" ? "founder" : t) + "/1").join(",");
+    const emotes = (content.match(/\[emote:\d+:[^\]]*\]/g) || []).length;
+    onChat({
+      command: "PRIVMSG", platform: "kick", nick: String(sender.slug || sender.username || "").toLowerCase(), text: content.replace(/\[emote:\d+:([^\]]*)\]/g, "$1"),
+      tags: { "display-name": sender.username || "", badges, mod: types.includes("moderator") ? "1" : "0", subscriber: types.includes("subscriber") ? "1" : "0", id: String(d.id || ""), "user-id": String(sender.id || ""), emotes: emotes ? "kick:" + new Array(emotes).fill("0-0").join(",") : "" },
+    });
+    return;
+  }
+  const alert = (a) => { if (S().alerts !== false) OmniPulse.app.alert(Object.assign({ platform: "kick" }, a)).catch((e) => OmniPulse.log("alert: " + e.message)); };
+  const go = (ours, ctx) => { const c = Object.assign({ platform: "kick", rawInput: "", message: "", amount: "" }, ctx); Object.assign(c, words(c.rawInput)); fire(ours, c); };
+  switch (ev) {
+    case "SubscriptionEvent": {
+      const months = num(d.months);
+      const user = d.username || "";
+      alert({ type: "sub", user, amount: months > 1 ? months + " months" : "" });
+      go(months > 1 ? "resub" : "sub", { user, amount: String(months || 1) });
+      return;
+    }
+    case "GiftedSubscriptionsEvent": {
+      const n = (d.gifted_usernames || []).length || 1;
+      const user = d.gifter_username || "Anonymous";
+      alert({ type: "gift", user, amount: String(n) });
+      go("gift", { user, amount: String(n) });
+      return;
+    }
+    case "StreamHostEvent": {
+      const user = d.host_username || "";
+      alert({ type: "raid", user, amount: String(d.number_viewers || 0) });
+      go("raid", { user, amount: String(d.number_viewers || 0), message: d.optional_message || "" });
+      return;
+    }
+    case "FollowersUpdated": {
+      const user = d.username || "";
+      if (d.followed === false || !user) return;
+      alert({ type: "follow", user });
+      go("follow", { user });
+      return;
+    }
+    case "StreamerIsLive": go("online", {}); return;
+    case "StopStreamBroadcast": go("offline", {}); return;
+  }
+  // (one Kick sends that OmniPulse hasn't a use for yet: noted once, to add later)
+  if (!KICK_SEEN[ev]) { KICK_SEEN[ev] = true; OmniPulse.log("kick event not used yet: " + ev + " " + JSON.stringify(d).slice(0, 300)); }
+}
+
 // Twitch's API, as your channel (its moderation, its shoutouts)
 async function helix(method, path, body) {
   const r = await OmniPulse.fetch("https://api.twitch.tv/helix/" + path, {
@@ -1071,7 +1084,10 @@ OmniPulse.register({
   start() { restart(); return true; },
   signInChannel(values) { return signIn("channel", TWITCH_SCOPES_CHANNEL, values); },
   signInBot(values) { return signIn("bot", TWITCH_SCOPES_BOT, values); },
+  signInChannelCopy(values) { return signIn("channel", TWITCH_SCOPES_CHANNEL, values, true); },
+  signInBotCopy(values) { return signIn("bot", TWITCH_SCOPES_BOT, values, true); },
   signInKick(values) { return signInKick(values); },
+  signInKickCopy(values) { return signInKick(values, true); },
   async signOutKick() {
     const none = { kickToken: "", kickRefreshToken: "", kickUserId: "", kickLogin: "" };
     await OmniPulse.app.saveSettings(none);
