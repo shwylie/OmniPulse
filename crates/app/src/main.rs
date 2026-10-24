@@ -6715,7 +6715,9 @@ fn panel_open(shared: &Shared, name: &str) {
     pf_paint(shared);
     pf_mark(shared);
     if let Some(ui) = shared.borrow().ui.upgrade() {
-        let head = match name.strip_prefix("alert:") { Some(k) => alerts::name(&shared.borrow().web.prefs, k), None => panels::title(name) };
+        let head = match name.strip_prefix("alert:") { Some(k) => alerts::name(&shared.borrow().web.prefs, k), None => panels::output_of(name).map(|(_, n)| format!("Output {n}")).unwrap_or_else(|| panels::title(name)) };
+        let output = panels::output_of(name).map(|(k, _)| k.to_string());
+        let name = output.as_deref().unwrap_or(name);
         let cat = match name {
             "requests" | "replies" | "widget" | "remote" | "offset" | "alerts" | "alertlist" | "safe" | "lyricsw" => "Streaming",
             "youtube" => "Integrations",
@@ -6741,6 +6743,8 @@ fn panel_open(shared: &Shared, name: &str) {
             }
             _ => {}
         }
+        // (an output's page: its widget's page above it)
+        if output.is_some() { path.push((panels::title(name), format!("panel:{name}"))); }
         crumbs_set(&ui, path);
         ui.set_pf_head(head.into());
         ui.set_pf_open(true);
@@ -6806,7 +6810,7 @@ fn panel_paint(shared: &Shared, name: &str, vals: &serde_json::Map<String, serde
             "select" | "designpick" | "stepper" => f["labels"][at.max(0) as usize].as_str().unwrap_or("").to_string(),
             "range" | "rangenum" => now.as_f64().unwrap_or(f["min"].as_f64().unwrap_or(0.0)).to_string(),
             "toggle" => if now.as_bool() == Some(true) { "true".into() } else { "false".into() },
-            "info" | "button" => f["value"].as_str().unwrap_or("").to_string(),
+            "info" | "output" | "button" => f["value"].as_str().unwrap_or("").to_string(),
             _ => text(&now),
         };
         PlugField { changed: kind != "togglecfg" && pf_changed(&key), label: f["label"].as_str().unwrap_or("").into(), note: f["note"].as_str().unwrap_or("").into(), value: value.into(), kind: kind.into(), options: ModelRc::from(Rc::new(VecModel::from(options))), key: key.into(), at }
@@ -6866,6 +6870,12 @@ fn panel_set(shared: &Shared, name: &str, mut vals: serde_json::Map<String, serd
             return pf_paint(shared);
         }
         "button" => { PF_EDIT.with(|e| *e.borrow_mut() = Some((format!("panel:{name}"), vals.clone()))); panel_press(shared, &key); return pf_paint(shared); }
+        // (another output's card: its look, or taken away)
+        "output" => {
+            PF_EDIT.with(|e| *e.borrow_mut() = Some((format!("panel:{name}"), vals.clone())));
+            let rest = key.strip_prefix("out:").unwrap_or("");
+            return panel_press(shared, &format!("{}:{rest}", if v == "btn:del" { "outDel" } else { "outEdit" }));
+        }
         // a row of a list (the alerts'): its switch, or one of its buttons
         "row" => {
             if let Some(n) = v.strip_prefix("btn:").and_then(|n| n.parse::<usize>().ok()) {
@@ -6899,8 +6909,34 @@ fn panel_put(shared: &Shared, key: &str, v: serde_json::Value) {
 }
 
 /// A panel's button: done at once
+/// A widget's other outputs, as they are now (what's listed), kept
+fn outputs_put(shared: &Shared, kind: &str, outs: Vec<serde_json::Map<String, serde_json::Value>>) {
+    let key = if kind == "lyricsw" { "lyricsOutputs" } else { "widgetOutputs" };
+    pref_put(shared, key, serde_json::Value::Array(outs.into_iter().map(serde_json::Value::Object).collect()));
+    push_out(shared, true);
+}
+
 fn panel_press(shared: &Shared, key: &str) {
     if key == "ytHelpersSetup" { return helpers_act(shared, "setup"); }
+    // (a widget's other outputs: another added (looking as the first does), one taken away, or its look changed)
+    if let Some(kind) = key.strip_prefix("outAdd:") {
+        let mut outs = integrations::outputs_of(&shared.borrow().web.prefs, kind);
+        outs.push(serde_json::Map::new());
+        let n = outs.len() + 1;
+        outputs_put(shared, kind, outs);
+        if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_status(format!("Output {n} added. Copy its address into OBS.").into()); }
+        return pf_paint(shared);
+    }
+    if let Some((kind, n)) = key.strip_prefix("outDel:").and_then(|r| r.split_once(':')).and_then(|(k, n)| n.parse::<usize>().ok().map(|n| (k.to_string(), n))) {
+        let mut outs = integrations::outputs_of(&shared.borrow().web.prefs, &kind);
+        if n >= 2 && n - 2 < outs.len() { outs.remove(n - 2); }
+        outputs_put(shared, &kind, outs);
+        if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_status(format!("Output {n} removed. The ones after it moved up a number.").into()); }
+        return pf_paint(shared);
+    }
+    if let Some(rest) = key.strip_prefix("outEdit:") {
+        if let Some((kind, n)) = rest.split_once(':') { return pf_leave(shared, &format!("panel:{kind}@{n}")); }
+    }
     if key == "ytHelpersRemove" { return helpers_act(shared, "remove"); }
     let note = match key {
         "reqClear" => {
@@ -7301,6 +7337,21 @@ fn widget_preview_open(shared: &Shared, name: &str) {
 }
 
 fn panel_save(shared: &Shared, name: &str, vals: serde_json::Map<String, serde_json::Value>) {
+    // (an output's look: kept as what differs from the first's, then back to the widget's page)
+    if let Some((kind, n)) = panels::output_of(name) {
+        let first = panels::values(kind, &shared.borrow().web.prefs);
+        let over: serde_json::Map<String, serde_json::Value> = panels::look_keys(kind).into_iter()
+            .filter_map(|k| vals.get(k).filter(|v| first.get(k).is_none_or(|f| !panels::same(f, v))).map(|v| (k.to_string(), v.clone())))
+            .collect();
+        let mut outs = integrations::outputs_of(&shared.borrow().web.prefs, kind);
+        while outs.len() < n - 1 { outs.push(serde_json::Map::new()); }
+        outs[n - 2] = over;
+        outputs_put(shared, kind, outs);
+        PF_EDIT.with(|e| e.borrow_mut().take());
+        if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_status(format!("Output {n}'s look saved.").into()); }
+        let kind = kind.to_string();
+        return panel_open(shared, &kind);
+    }
     // (the alerts: the ones switched off; an alert's page, its own settings, then back to the list)
     if name == "alertlist" || name.starts_with("alert:") {
         let changes = { let p = &shared.borrow().web.prefs; if let Some(k) = name.strip_prefix("alert:") { alerts::edit_save(p, k, &vals) } else { alerts::list_save(p, &vals) } };

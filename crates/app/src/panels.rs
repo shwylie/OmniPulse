@@ -10,7 +10,43 @@
 
 use serde_json::{json, Map, Value};
 
+/// A widget's look: what each of its outputs can have of its own (the rest, its address and port, are the first's)
+pub fn look_keys(kind: &str) -> Vec<&'static str> {
+    match kind {
+        "widget" => vec!["widgetDesign", "widgetAlign", "widgetRounded", "widgetText", "wFade", "wScroll", "wSpin", "wRequester", "wColor", "widgetOwnCol", "widgetCol1", "widgetCol2"],
+        "lyricsw" => keys("lyricsw").into_iter().map(|(k, _)| k).collect(),
+        _ => Vec::new(),
+    }
+}
+
+/// An output's page: "widget@2" is the Stream Widget's second output (its kind, and its number)
+pub fn output_of(name: &str) -> Option<(&str, usize)> {
+    let (kind, n) = name.split_once('@')?;
+    Some((kind, n.parse().ok().filter(|n| *n >= 2)?))
+}
+
+/// The other outputs, listed on a widget's page: each one's address, its look, Remove; then Add
+fn outputs_list(prefs: &Value, kind: &str, base: &str) -> Vec<Value> {
+    let mut f = vec![note("More Outputs")];
+    let outs = crate::integrations::outputs_of(prefs, kind);
+    if outs.is_empty() {
+        f.push(note("Add another output for another scene, or for a second copy on screen at once. Each one has its own address and its own look."));
+    }
+    for i in 0..outs.len() {
+        let n = i + 2;
+        let url = format!("{base}{n}");
+        // (one card: its address, copied; its look; taken away)
+        let mut o = info(&format!("Output {n}"), &url, &url, "Its own look, playing the same song. Add its address as another Browser source in OBS.");
+        o["type"] = json!("output");
+        o["key"] = json!(format!("out:{kind}:{n}"));
+        f.push(o);
+    }
+    f.push(button(&format!("outAdd:{kind}"), "Another Output", "Add", "Starts out looking like this one."));
+    f
+}
+
 pub fn title(name: &str) -> String {
+    if let Some((kind, n)) = output_of(name) { return format!("{}, Output {n}", title(kind)); }
     if name == "alertlist" { return "Alerts and Their Order".into(); }
     if let Some(k) = name.strip_prefix("alert:") { return format!("Alert: {}", crate::alerts::name(&Value::Null, k)); }
     match name {
@@ -49,7 +85,7 @@ fn keys(name: &str) -> Vec<(&'static str, Value)> {
         "lyricsw" => vec![("lyricsLines", json!(3)), ("lyricsBefore", json!(false)), ("lyricsScroll", json!("smooth")), ("lyricsScrollMs", json!(600)), ("lyricsScrollPlace", json!("top")), ("lyricsFadeEdges", json!(false)), ("lyricsSize", json!(48)), ("lyricsFont", json!("sans")), ("lyricsAlign", json!("center")), ("lyricsPlace", json!("")), ("lyricsStyle", json!("karaoke")), ("lyricsColor", json!("#ffffff")), ("lyricsTextGrad", json!(false)), ("lyricsColor2", json!("#9ad1ff")), ("lyricsOwnHi", json!(false)), ("lyricsHi", json!("#8e9bff")), ("lyricsHiGrad", json!(false)), ("lyricsHi2", json!("#ff8ad8")), ("lyricsGradDir", json!("90deg")), ("lyricsDim", json!(0.45)), ("lyricsTransform", json!("none")), ("lyricsShadow", json!(true)), ("lyricsOutline", json!(false)), ("lyricsOutlineSize", json!(4)), ("lyricsOutlineColor", json!("#000000")), ("lyricsOutlineOpacity", json!(1.0)), ("lyricsBox", json!(false)), ("lyricsBoxColor", json!("#0a0a0e")), ("lyricsBoxGrad", json!(false)), ("lyricsBoxColor2", json!("#2a1450")), ("lyricsBoxDir", json!("135deg")), ("lyricsBoxOpacity", json!(0.62)), ("lyricsTitle", json!(true)), ("lyricsHideNone", json!(true)), ("lyricsOffset", json!(0)), ("lyricsHidePaused", json!(true))],
         "smart" => vec![("shareRatings", json!(true)), ("smartBlend", json!(true)), ("smartKeys", json!(true)), ("smartMax", json!(10)), ("smartTape", json!(false)), ("smartRoll", json!(false)), ("smartVoices", json!(true))],
         "requests" => vec![("reqBot", json!("streamerbot")), ("reqRadioEdit", json!(false)), ("reqNoAi", json!(false)), ("reqLimits", json!(true)), ("reqMax", json!(10)), ("reqPerUser", json!(2)), ("reqPort", json!(7879)), ("botRemote", json!(false))],
-        "widget" => vec![("widgetPort", json!(7878)), ("widgetDesign", json!("card")), ("widgetAlign", json!("left")), ("widgetRounded", json!(true)), ("widgetText", json!(1)), ("wFade", json!(true)), ("wScroll", json!(true)), ("wSpin", json!(true)), ("wRequester", json!(true)), ("wColor", json!(1.2)), ("alertSplit", json!(false)), ("widget2Design", json!("pill")), ("widget2Align", json!("left")), ("widget2Rounded", json!(true)), ("widget2Text", json!(1))],
+        "widget" => vec![("widgetPort", json!(7878)), ("widgetDesign", json!("card")), ("widgetAlign", json!("left")), ("widgetRounded", json!(true)), ("widgetText", json!(1)), ("wFade", json!(true)), ("wScroll", json!(true)), ("wSpin", json!(true)), ("wRequester", json!(true)), ("wColor", json!(1.2)), ("alertSplit", json!(false)), ("widgetOwnCol", json!(false)), ("widgetCol1", json!("#8e9bff")), ("widgetCol2", json!("#b48eff"))],
         "alerts" => vec![("alertBot", json!("streamerbot")), ("sbHost", json!("127.0.0.1:8080")), ("sbOn", json!(true)), ("alertTrans", json!("seamless")), ("alertCSize", json!("medium")), ("alertCDir", json!("diag")), ("alertCAngle", json!(0)), ("alertAnim", json!("slide")), ("alertOwnCol", json!(false)), ("alertCol1", json!("#8e9bff")), ("alertCol2", json!("#b38cff")), ("alertDir", json!("115deg")), ("alertIcon", json!(1)), ("alertSecs", json!(5)), ("alertVol", json!(0.8)), ("botRemote", json!(false))],
         "remote" => vec![("remotePort", json!(7880))],
         "offset" => vec![("out2Offset", json!(0)), ("out2Volume", json!(1))],
@@ -122,6 +158,12 @@ pub fn values(name: &str, prefs: &Value) -> Map<String, Value> {
     if name == "alertlist" { return crate::alerts::list_values(prefs); }
     if name == "safe" { return crate::streamsafe::panel_values(prefs); }
     if let Some(k) = name.strip_prefix("alert:") { return crate::alerts::edit_values(prefs, k); }
+    if let Some((kind, n)) = output_of(name) {
+        let over = crate::integrations::outputs_of(prefs, kind).get(n - 2).cloned().unwrap_or_default();
+        let merged = crate::integrations::merged(prefs, &over);
+        let all = values(kind, &merged);
+        return look_keys(kind).into_iter().filter_map(|k| all.get(k).map(|v| (k.to_string(), v.clone()))).collect();
+    }
     let mut m = Map::new();
     if name == "requests" {
         let bot = &prefs["pluginSettings"][crate::botpage::BOT];
@@ -275,6 +317,28 @@ const GENERIC_EVENTS: [(&str, &str); 11] = [
 
 /// A panel's fields, for the values as they are in it (prefs: for the keys, Streamer Mode, the LAN address)
 pub fn fields(name: &str, vals: &Map<String, Value>, prefs: &Value, lan: &str) -> Vec<Value> {
+    // (an output's page: its address, then the first's page cut down to its look, its sections' headings kept
+    // only where something's left under them)
+    if let Some((kind, n)) = output_of(name) {
+        let port = prefs["widgetPort"].as_u64().unwrap_or(7878);
+        let url = if kind == "lyricsw" { format!("http://127.0.0.1:{port}/lyrics/{n}") } else { format!("http://127.0.0.1:{port}/{n}") };
+        let keys = look_keys(kind);
+        // (the first's whole page, its own look over it: the page reads more than its look)
+        let mut full = values(kind, prefs);
+        for (k, v) in vals { full.insert(k.clone(), v.clone()); }
+        let all = fields(kind, &full, prefs, lan);
+        let mut out = vec![info("Address", &url, &url, "Add this address as a Browser source in OBS. It plays the same song as the first, in its own look.")];
+        let mut head: Option<Value> = None;
+        for f in all {
+            let k = f["key"].as_str().unwrap_or("");
+            if f["type"] == "note" && f["label"].as_str().map(|l| l.chars().count() <= 32).unwrap_or(false) { head = Some(f); continue; }
+            if !k.is_empty() && keys.contains(&k) {
+                if let Some(h) = head.take() { out.push(h); }
+                out.push(f);
+            }
+        }
+        return out;
+    }
     let mut f = fields_of(name, vals, prefs, lan);
     // (the Stream Widget's and its alerts' pages: a pop-out preview first, as the Lyrics Widget's has)
     if matches!(name, "widget" | "alerts" | "alertlist") || name.starts_with("alert:") {
@@ -387,15 +451,15 @@ fn fields_of(name: &str, vals: &Map<String, Value>, prefs: &Value, lan: &str) ->
             f.extend([
                 tog("wRequester", "Show Who Requested It", ""),
                 sel("wColor", "Colour Change", "", &[(json!(0), "Instant"), (json!(0.5), "Fast"), (json!(1.2), "Normal"), (json!(2.5), "Slow")]),
-                button("widgetHide", "Hide This Track", "Hide", "Until the next track."),
-                // a second Now Playing, for another scene: the same song, a design of its own
-                note("Second Widget"),
-                info("Second Widget Address", &format!("http://127.0.0.1:{port}/2"), &format!("http://127.0.0.1:{port}/2"), "Another Now Playing, for another scene in OBS, in a design of its own (the rest as above)."),
-                design("widget2Design", "Its Design"),
-                sel("widget2Align", "Its Alignment", "", &[(json!("left"), "Left"), (json!("right"), "Right")]),
-                tog("widget2Rounded", "Its Rounded Corners", ""),
-                stepper("widget2Text", "Its Text Size", "", pct(0.7, 1.6, 0.1)),
+                tog("widgetOwnCol", "Its Own Colours", "When this is off, it uses the app's accent colours, or the cover's."),
             ]);
+            if vals["widgetOwnCol"].as_bool() == Some(true) {
+                f.push(color("widgetCol1", "Accent Colour", ""));
+                f.push(color("widgetCol2", "Second Colour", ""));
+            }
+            f.push(button("widgetHide", "Hide This Track", "Hide", "Until the next track."));
+            // (more copies of it, each in a look of its own: another scene, or two on screen at once)
+            f.extend(outputs_list(prefs, "widget", &format!("http://127.0.0.1:{port}/")));
             let _ = alerts_on;
             f
         }
@@ -502,7 +566,7 @@ fn fields_of(name: &str, vals: &Map<String, Value>, prefs: &Value, lan: &str) ->
             let port = prefs["widgetPort"].as_u64().unwrap_or(7878);
             let url = format!("http://127.0.0.1:{port}/lyrics");
             let dirs = [(json!("90deg"), "Left to right"), (json!("180deg"), "Top to bottom"), (json!("135deg"), "Diagonal"), (json!("270deg"), "Right to left"), (json!("0deg"), "Bottom to top")];
-            vec![
+            let mut f = vec![
                 info("Address", &url, &url, "Add this address as a Browser source in OBS. About 1280 × 400 fits 3 lines. It uses the Stream Widget's port."),
                 button("previewOpen", "Preview", "Pop Out Preview", "Opens a window that shows how it will look. It updates as you change these, before you save."),
                 note("What's shown"),
@@ -548,7 +612,9 @@ fn fields_of(name: &str, vals: &Map<String, Value>, prefs: &Value, lan: &str) ->
                 range("lyricsBoxOpacity", "Box Opacity", "", 0.0, 1.0, 0.05, "%", false),
                 note("Timing"),
                 num("lyricsOffset", "Timing", "In milliseconds, from -5000 to 5000. Use a positive number to show lyrics later, or a negative one to show them earlier. Match it to your stream delay, or to a song whose lyrics run early."),
-            ]
+            ];
+            f.extend(outputs_list(prefs, "lyricsw", &format!("http://127.0.0.1:{port}/lyrics/")));
+            f
         }
         // Smart Transitions' own page
         "smart" => vec![
@@ -692,6 +758,18 @@ pub fn new_key() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn an_output_has_its_own_look() {
+        let prefs = json!({ "widgetDesign": "card", "widgetOutputs": [{ "widgetDesign": "vinyl" }] });
+        let v = values("widget@2", &prefs);
+        assert_eq!(v["widgetDesign"], "vinyl");
+        assert_eq!(title("widget@2"), "Stream Widget, Output 2");
+        let f = fields("widget@2", &v, &prefs, "");
+        assert!(f[0]["value"].as_str().unwrap().ends_with("/2"));
+        assert!(f.iter().any(|x| x["key"] == "widgetDesign") && !f.iter().any(|x| x["key"] == "widgetPort"));
+        assert!(fields("widget", &values("widget", &prefs), &prefs, "").iter().any(|x| x["type"] == "output"));
+    }
+
     #[test]
     fn panels_start_from_prefs_and_defaults() {
         // (the chatbot off: another bot's lines to paste)

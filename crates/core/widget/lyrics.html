@@ -246,6 +246,9 @@
     try {
       const r = await fetch("/now.json" + (preview ? "?preview=1" : ""), { cache: "no-store" });
       s = await r.json();
+      // (/lyrics/2, /lyrics/3...: an output of its own, its look over the first's)
+      const out = (location.pathname.match(/^\/lyrics\/(\d+)/) || [])[1];
+      if (out && s.lyrics && s.lyricsOutputs && s.lyricsOutputs[out]) Object.assign(s.lyrics, s.lyricsOutputs[out]);
       const l = s.lyrics || {};
       look(l);
       const sample = preview && !s.title;

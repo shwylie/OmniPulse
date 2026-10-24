@@ -345,11 +345,12 @@ pub fn widget_serve(listener: TcpListener, gen: u64) {
                         let (status, v) = match answer { Ok(m) => ("200 OK", json!({ "ok": true, "message": m })), Err(e) => ("400 Bad Request", json!({ "ok": false, "error": e })) };
                         reply_own(&mut stream, status, "application/json", v.to_string().as_bytes());
                     }
-                    "/lyrics" | "/lyrics.html" => {
+                    p if p == "/lyrics" || p == "/lyrics.html" || p.strip_prefix("/lyrics/").is_some_and(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit())) => {
                         reply(&mut stream, "200 OK", "text/html; charset=utf-8", LYRICS_HTML.as_bytes());
                     }
-                    // (the widget; its second, in a design of its own; and the alerts alone: one page, each as its address says)
-                    "/" | "/index.html" | "/2" | "/alerts" => {
+                    // (the widget; its other outputs (/2, /3...), each in a look of its own; and the alerts alone: one
+                    // page, each as its address says)
+                    p if p == "/" || p == "/index.html" || p == "/alerts" || (p.len() > 1 && p.len() < 5 && p[1..].bytes().all(|b| b.is_ascii_digit())) => {
                         reply(&mut stream, "200 OK", "text/html; charset=utf-8", WIDGET_HTML.replace("__WIDGET_VERSION__", &widget_version()).as_bytes());
                     }
                     // an alert: GET with ?type=&user=&amount=&message=, or POST with those as JSON

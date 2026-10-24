@@ -5826,7 +5826,7 @@ export component AppWindow inherits Window {
                             }
                            }
                            // an address: shown, and copied
-                           if f.kind == "info": VerticalLayout {
+                           if f.kind == "info" || f.kind == "output": VerticalLayout {
                             spacing: 4px;
                             Text { text: f.label; color: Theme.text; font-weight: 700; }
                             if f.note != "": Text { text: f.note; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
@@ -5842,6 +5842,9 @@ export component AppWindow inherits Window {
                                 Text { x: 10px; width: parent.width - 20px; text: f.value; color: Theme.text; font-size: 12px; overflow: elide; vertical-alignment: center; }
                               }
                               VerticalLayout { alignment: center; IconButton { d: Icons.copy; size: 34px; tip: "Copy it"; clicked => { root.pf-copy(i); } } }
+                              // (another output: its look, or taken away)
+                              if f.kind == "output": VerticalLayout { alignment: center; IconButton { d: Icons.gear; size: 34px; tip: "Change its look"; clicked => { root.pf-set(i, "btn:edit"); } } }
+                              if f.kind == "output": VerticalLayout { alignment: center; IconButton { d: Icons.close; size: 34px; tip: "Remove this output"; clicked => { root.pf-set(i, "btn:del"); } } }
                             }
                            }
                            if f.kind == "designpick": VerticalLayout {
@@ -5852,7 +5855,7 @@ export component AppWindow inherits Window {
                                 for c in 4: DesignSketch { horizontal-stretch: 1; preferred-width: 0px; min-width: 0px; k: r * 4 + c; name: f.options[r * 4 + c]; on: f.at == r * 4 + c; clicked => { root.pf-set(i, "\u{2}" + (r * 4 + c)); } }
                             }
                            }
-                           if f.kind != "note" && f.kind != "info" && f.kind != "wave" && f.kind != "designpick": HorizontalLayout {
+                           if f.kind != "note" && f.kind != "info" && f.kind != "output" && f.kind != "wave" && f.kind != "designpick": HorizontalLayout {
                             spacing: 12px;
                             VerticalLayout {
                                 horizontal-stretch: 1;

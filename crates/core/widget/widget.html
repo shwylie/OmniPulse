@@ -1057,14 +1057,20 @@
   // playing, and the alert being edited shown every few seconds
   const PREVIEW = /[?&]preview=1/.test(location.search);
   // which one this is: the widget (/), the second (/2: its own look), or the alerts alone (/alerts)
-  const SECOND = location.pathname.startsWith("/2"), ONLY_ALERTS = location.pathname.startsWith("/alerts");
+  // (/2, /3...: an output of its own, its look over the first's)
+  const OUT = Number((location.pathname.match(/^\/(\d+)/) || [])[1] || 1), SECOND = OUT > 1, ONLY_ALERTS = location.pathname.startsWith("/alerts");
   if (PREVIEW) document.body.classList.add("preview");
   let previewAlertAt = 0;
   async function poll() {
     try {
       const r = await fetch("/now.json" + (PREVIEW ? "?preview=1" : ""), { cache: "no-store" });
       s = await r.json();
-      if (SECOND && s.second) Object.assign(s, s.second);
+      const own = SECOND && s.outputs && s.outputs[OUT];
+      if (own) {
+        const anim = Object.assign({}, s.anim || {}, own.anim || {});
+        Object.assign(s, own, { anim });
+        if (own.show_requester !== undefined) s.requested_by = own.show_requester ? (s.requested_by_any || "") : "";
+      }
       // the alerts alone: no song shown, as when nothing's playing; the alerts split off: none over the song
       if (ONLY_ALERTS) { delete s.title; s.playing = false; }
       else if (s.alert_split && !PREVIEW) { s.alerts = []; delete s.preview_alert; if (s.alerts_cfg) s.alerts_cfg = Object.assign({}, s.alerts_cfg, { on: false }); }

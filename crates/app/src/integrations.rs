@@ -290,41 +290,79 @@ pub fn widget_update(prefs: &Value, t: Option<&Track>, by: &str, pos_ms: u64, du
     core::widget::widget_update(widget_state(prefs, t, by, pos_ms, dur_ms, playing, accent, lyrics));
 }
 
+/// A widget's outputs beyond its first (Settings > Streaming > Stream Widget / Lyrics Widget > Add): each one
+/// its own settings that differ from the first's ("widgetOutputs", "lyricsOutputs"). The Stream Widget's old
+/// Second Widget is its first of them, until there's a list.
+pub fn outputs_of(prefs: &Value, kind: &str) -> Vec<serde_json::Map<String, Value>> {
+    let key = if kind == "lyricsw" { "lyricsOutputs" } else { "widgetOutputs" };
+    if let Some(a) = prefs[key].as_array() { return a.iter().map(|x| x.as_object().cloned().unwrap_or_default()).collect(); }
+    if kind == "widget" && prefs["widget2Design"].is_string() {
+        let mut m = serde_json::Map::new();
+        for (from, to) in [("widget2Design", "widgetDesign"), ("widget2Align", "widgetAlign"), ("widget2Rounded", "widgetRounded"), ("widget2Text", "widgetText")] {
+            if !prefs[from].is_null() { m.insert(to.into(), prefs[from].clone()); }
+        }
+        return vec![m];
+    }
+    Vec::new()
+}
+
+/// The settings with an output's own over them
+pub fn merged(prefs: &Value, over: &serde_json::Map<String, Value>) -> Value {
+    let mut p = prefs.clone();
+    if let Some(o) = p.as_object_mut() { for (k, v) in over { o.insert(k.clone(), v.clone()); } }
+    p
+}
+
+/// The Stream Widget's look, as these settings have it: its design and size, its colours (its own, or the
+/// app's), its motion
+fn np_look(prefs: &Value, accent: (&str, &str)) -> Value {
+    let own = set(prefs, "widgetOwnCol");
+    json!({
+        "accent": if own { prefs["widgetCol1"].as_str().unwrap_or("#8e9bff") } else { accent.0 },
+        "accent2": if own { prefs["widgetCol2"].as_str().unwrap_or("#b48eff") } else { accent.1 },
+        "design": prefs["widgetDesign"].as_str().unwrap_or("card"),
+        "rounded": on(prefs, "widgetRounded"),
+        "align": if prefs["widgetAlign"].as_str() == Some("right") { "right" } else { "left" },
+        "text_scale": prefs["widgetText"].as_f64().unwrap_or(1.0),
+    })
+}
+
+fn np_anim(prefs: &Value) -> Value {
+    json!({ "fade": on(prefs, "wFade"), "scroll": on(prefs, "wScroll"), "spin": on(prefs, "wSpin"), "color": prefs["wColor"].as_f64().unwrap_or(1.2) })
+}
+
 /// What the widgets are sent: the track, where it's up to, its look, the alerts' settings, the lyrics
 #[allow(clippy::too_many_arguments)]
 pub fn widget_state(prefs: &Value, t: Option<&Track>, by: &str, pos_ms: u64, dur_ms: u64, playing: bool, accent: (&str, &str), lyrics: &[crate::player::Line]) -> Value {
     // (hidden until the next track)
     let t = t.filter(|t| WIDGET_HIDDEN.lock().map(|h| h.is_empty() || *h != t.key).unwrap_or(true));
-    let look = json!({
-        "accent": accent.0, "accent2": accent.1,
-        "design": prefs["widgetDesign"].as_str().unwrap_or("card"),
-        "rounded": on(prefs, "widgetRounded"),
-        "align": if prefs["widgetAlign"].as_str() == Some("right") { "right" } else { "left" },
-        "text_scale": prefs["widgetText"].as_f64().unwrap_or(1.0),
-        "alerts_cfg": alerts_cfg(prefs),
+    let mut look = np_look(prefs, accent);
+    if let Some(o) = look.as_object_mut() {
+        o.insert("alerts_cfg".into(), alerts_cfg(prefs));
         // alerts in a Browser source of their own (/alerts), not over Now Playing
-        "alert_split": set(prefs, "alertSplit"),
-        // the second widget's own look (/2)
-        "second": {
-            "design": prefs["widget2Design"].as_str().unwrap_or("pill"),
-            "rounded": prefs["widget2Rounded"].as_bool() != Some(false),
-            "align": if prefs["widget2Align"].as_str() == Some("right") { "right" } else { "left" },
-            "text_scale": prefs["widget2Text"].as_f64().unwrap_or(1.0),
-        },
-    });
+        o.insert("alert_split".into(), json!(set(prefs, "alertSplit")));
+        // each other output's own look (/2, /3...): its settings over the first's
+        let outs: serde_json::Map<String, Value> = outputs_of(prefs, "widget").iter().enumerate().map(|(i, over)| {
+            let p = merged(prefs, over);
+            let mut l = np_look(&p, accent);
+            l["anim"] = np_anim(&p);
+            l["show_requester"] = json!(on(&p, "wRequester"));
+            ((i + 2).to_string(), l)
+        }).collect();
+        o.insert("outputs".into(), Value::Object(outs));
+    }
     let mut state = match t {
         None => json!({ "playing": false }),
         Some(t) => json!({
             "playing": playing,
             "title": t.title, "artist": t.artist, "artwork": big_art(t), "url": t.web_link(), "platform": t.plat(),
             "requested_by": if on(prefs, "wRequester") { by } else { "" },
+            // (for an output that shows it when the first doesn't)
+            "requested_by_any": by,
             "like_note": if by.is_empty() { String::new() } else { like_note() },
             "duration_ms": if dur_ms > 0 { dur_ms } else { t.ms }, "position_ms": pos_ms,
             "updated_at": core::now_secs() * 1000 + (std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.subsec_millis() as u64).unwrap_or(0)),
-            "anim": {
-                "fade": on(prefs, "wFade"), "scroll": on(prefs, "wScroll"), "spin": on(prefs, "wSpin"),
-                "color": prefs["wColor"].as_f64().unwrap_or(1.2),
-            },
+            "anim": np_anim(prefs),
         }),
     };
     if let (Some(o), Some(l)) = (state.as_object_mut(), look.as_object()) {
@@ -334,10 +372,23 @@ pub fn widget_state(prefs: &Value, t: Option<&Track>, by: &str, pos_ms: u64, dur
     if set(prefs, "lyricsWidget") {
         let none = Track::default();
         if let (Some(o), Some(t)) = (state.as_object_mut(), t.or(Some(&none))) {
+            let mut l = lyrics_look(prefs, accent);
+            l["key"] = json!(t.key);
+            l["lines_n"] = json!(lyrics.len());
+            l["text"] = json!(lyrics.iter().map(|l| json!([l.ms, l.text])).collect::<Vec<_>>());
+            o.insert("lyrics".into(), l);
+            let outs: serde_json::Map<String, Value> = outputs_of(prefs, "lyricsw").iter().enumerate().map(|(i, over)| ((i + 2).to_string(), lyrics_look(&merged(prefs, over), accent))).collect();
+            o.insert("lyricsOutputs".into(), Value::Object(outs));
+        }
+    }
+    if let (Some(o), Some(x)) = (state.as_object_mut(), CROSSFADE.lock().ok().and_then(|c| c.clone())) { o.insert("crossfade".into(), x); }
+    state
+}
+
+/// The Lyrics Widget's look, as these settings have it (its lines aside)
+fn lyrics_look(prefs: &Value, accent: (&str, &str)) -> Value {
             let s = |k: &str, d: &str| prefs[k].as_str().unwrap_or(d).to_string();
-            o.insert("lyrics".into(), json!({
-                "key": t.key, "lines_n": lyrics.len(),
-                "text": lyrics.iter().map(|l| json!([l.ms, l.text])).collect::<Vec<_>>(),
+            json!({
                 "lines": prefs["lyricsLines"].as_u64().unwrap_or(3), "before": set(prefs, "lyricsBefore"),
                 "scroll": s("lyricsScroll", "smooth"), "scrollMs": prefs["lyricsScrollMs"].as_u64().unwrap_or(600),
                 "scrollPlace": s("lyricsScrollPlace", "top"), "fadeEdges": set(prefs, "lyricsFadeEdges"),
@@ -355,11 +406,7 @@ pub fn widget_state(prefs: &Value, t: Option<&Track>, by: &str, pos_ms: u64, dur
                 "outlineOpacity": prefs["lyricsOutlineOpacity"].as_f64().unwrap_or(1.0),
                 "boxColor": s("lyricsBoxColor", "#0a0a0e"), "boxGrad": set(prefs, "lyricsBoxGrad"), "boxColor2": s("lyricsBoxColor2", "#2a1450"),
                 "boxDir": s("lyricsBoxDir", "135deg"), "boxOpacity": prefs["lyricsBoxOpacity"].as_f64().unwrap_or(0.62),
-            }));
-        }
-    }
-    if let (Some(o), Some(x)) = (state.as_object_mut(), CROSSFADE.lock().ok().and_then(|c| c.clone())) { o.insert("crossfade".into(), x); }
-    state
+            })
 }
 
 /// Two colours from a cover (its upper-left and lower-right halves), bright enough to tint the
