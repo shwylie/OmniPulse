@@ -6119,6 +6119,7 @@ thread_local! {
     static BOT_STATUS: RefCell<serde_json::Value> = const { RefCell::new(serde_json::Value::Null) };
     static BOT_SHEET: RefCell<String> = const { RefCell::new(String::new()) };
     static BOT_FOCUS: RefCell<String> = const { RefCell::new(String::new()) };
+    static BOT_RESTART: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
     static BOT_TRIED: RefCell<Vec<(String, String)>> = const { RefCell::new(Vec::new()) };
     static BOT_DRAWN: RefCell<(String, String)> = const { RefCell::new((String::new(), String::new())) };
 }
@@ -6296,11 +6297,28 @@ fn bot_keep(shared: &Shared, key: &str, value: serde_json::Value) {
     PF_ORIG.with(|o| { o.borrow_mut().insert(key.into(), value); });
 }
 
+/// What setup kept as it went: the chatbot restarted with it (once you move on, so a sign-in isn't cut off)
+fn bot_restart_kept(shared: &Shared) {
+    if !BOT_RESTART.with(|r| r.replace(false)) { return; }
+    if plugrun::get(botpage::BOT).is_some() { plugrun::stop(botpage::BOT); plugins_start(shared); }
+}
+
 fn bot_set(shared: &Shared, key: &str, v: &str) {
     let key = botpage::key_of(key).to_string();
     let manifest = bot_manifest().map(|m| m.settings).unwrap_or_default();
     let value = botpage::value_of(&manifest, &key, v);
     let toggle = value.is_boolean();
+    // (during setup: kept as it's set, no Save needed; the chatbot restarted with it when you move on)
+    let cur = bot_current(shared);
+    let in_setup = !cur.get("setupDone").and_then(|v| v.as_bool()).unwrap_or(false)
+        && botpage::steps(&cur).iter().any(|x| botpage::step_fields(x.0, &cur).iter().any(|f| f.key == key));
+    if in_setup {
+        bot_keep(shared, &key, value);
+        BOT_RESTART.with(|r| r.set(true));
+        pf_mark(shared);
+        if toggle { bot_paint(shared); }
+        return;
+    }
     PF_EDIT.with(|e| if let Some((_, vals)) = e.borrow_mut().as_mut() { vals.insert(key, value); });
     pf_mark(shared);
     // (a switch: seen at once, pulsing; typing: left as it's typed)
@@ -6322,13 +6340,14 @@ fn bot_act(shared: &Shared, act: &str) {
     match act {
         "run" => { set_toggle(shared, &format!("plugRun_{}", botpage::BOT)); return bot_poll_soon(shared); }
         "actions" => return flows_open(shared),
-        "setup:done" => { bot_keep(shared, "setupDone", serde_json::json!(true)); BOT_FOCUS.with(|f| f.borrow_mut().clear()); return bot_paint(shared); }
+        "setup:done" => { bot_restart_kept(shared); bot_keep(shared, "setupDone", serde_json::json!(true)); BOT_FOCUS.with(|f| f.borrow_mut().clear()); return bot_paint(shared); }
         "setup:again" => { bot_keep(shared, "setupDone", serde_json::json!(false)); bot_keep(shared, "setupSkip", serde_json::json!([])); BOT_FOCUS.with(|f| f.borrow_mut().clear()); BOT_DRAWN.with(|d| *d.borrow_mut() = Default::default()); return bot_paint(shared); }
         _ => {}
     }
     if let Some(id) = act.strip_prefix("skip:").or_else(|| act.strip_prefix("next:")) {
         // (Next: what's been set on the step saved first; a step not done: skipped for now)
         if act.starts_with("next:") && pf_changes() > 0 { pf_save(shared); }
+        bot_restart_kept(shared);
         let cur = bot_current(shared);
         let done = botpage::steps(&cur).into_iter().find(|x| x.0 == id).map(|x| x.3).unwrap_or(false);
         if id == "features" && act.starts_with("next:") { bot_keep(shared, "setupDone", serde_json::json!(true)); }
@@ -6343,7 +6362,7 @@ fn bot_act(shared: &Shared, act: &str) {
     }
     // an account's icon: its sign-in (here, or its link copied) or its sign-out, with the page's values as they are
     let Some(method) = botpage::method(act) else { return };
-    if act.contains(":kick:") && !act.starts_with("out:") { PF_EDIT.with(|e| if let Some((_, v)) = e.borrow_mut().as_mut() { v.insert("kickOn".into(), serde_json::json!(true)); }); pf_mark(shared); }
+    if act.contains(":kick:") && !act.starts_with("out:") { bot_keep(shared, "kickOn", serde_json::json!(true)); pf_mark(shared); }
     let Some(p) = plugrun::get(botpage::BOT) else {
         // (not running: started, then asked again)
         if !plugin_runs(&shared.borrow().web.prefs, botpage::BOT) { set_toggle(shared, &format!("plugRun_{}", botpage::BOT)); }
@@ -10651,6 +10670,10 @@ fn plugin_app(shared: &Shared, plugin: &str, ask: serde_json::Value, answer: Box
                 let mut a = shared.borrow_mut();
                 let mut all = a.web.prefs["pluginSettings"].as_object().cloned().unwrap_or_default();
                 let mut mine = all.get(plugin).and_then(|v| v.as_object()).cloned().unwrap_or_default();
+                // (its page open: what it kept shown there at once, as saved, not as a change to save)
+                PF_EDIT.with(|e| if let Some((id, v)) = e.borrow_mut().as_mut() {
+                    if id == plugin { for (k, x) in &values { v.insert(k.clone(), x.clone()); } PF_ORIG.with(|o| { let mut o = o.borrow_mut(); for (k, x) in &values { o.insert(k.clone(), x.clone()); } }); }
+                });
                 for (k, v) in values { mine.insert(k, v); }
                 all.insert(plugin.to_string(), serde_json::Value::Object(mine));
                 let all = serde_json::Value::Object(all);
@@ -10659,6 +10682,7 @@ fn plugin_app(shared: &Shared, plugin: &str, ask: serde_json::Value, answer: Box
             };
             if std::env::var_os("OMNIPULSE_SELFTEST").is_none() { webstate::save_pref("pluginSettings", all); }
             send(serde_json::json!({ "ok": true }));
+            if plugin == botpage::BOT { BOT_DRAWN.with(|d| *d.borrow_mut() = Default::default()); bot_paint(shared); }
         }
         other => send(serde_json::json!({ "error": format!("the app has no {other}") })),
     }

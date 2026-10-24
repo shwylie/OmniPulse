@@ -46,11 +46,14 @@ async function signInFlow(who, scopes, values, said, copy) {
   if (!clientId) return "Put your Twitch Client ID in first (its note says where), then sign in.";
   const d = await form("https://id.twitch.tv/oauth2/device", { client_id: clientId, scopes });
   if (!d.ok) return "Twitch didn't take that Client ID: " + (d.j.message || d.status) + ". Check its Client Type is Public.";
-  await signInPage(d.j.verification_uri, copy);
+  // (the link carries its code, so there's nothing to type)
+  let link = d.j.verification_uri || "https://www.twitch.tv/activate";
+  if (!/device-code=/.test(link)) link += (link.includes("?") ? "&" : "?") + "device-code=" + encodeURIComponent(d.j.user_code || "");
+  await signInPage(link, copy);
   const as = who === "bot" ? "as the bot account" : "as your channel";
   said(copy
-    ? "The sign-in link is copied: paste it into a private window (or another browser) and sign in " + as + " there. Its code is " + d.j.user_code + ". This says when it's done."
-    : "Sign in on Twitch's page that's opened (" + as + "): its code is " + d.j.user_code + ". This says when it's done.");
+    ? "Sign-in link copied. Paste it into a private window, sign in " + as + ", and click Authorize."
+    : "Twitch is open in your browser. Sign in " + as + " and click Authorize.");
   // waited for: Twitch says when it's done
   const until = Date.now() + (d.j.expires_in || 1800) * 1000;
   let every = Math.max(5, d.j.interval || 5) * 1000;
@@ -1280,8 +1283,8 @@ async function kickSignInFlow(values, said, copy, who) {
   await signInPage("https://id.kick.com/oauth/authorize?" + Object.entries(q).map(([k, x]) => k + "=" + encodeURIComponent(x)).join("&"), copy);
   const as = bot ? "as the bot account" : "as your channel";
   said(copy
-    ? "The sign-in link is copied: paste it into a private window (or another browser) on this PC and sign in to Kick " + as + " there, within five minutes. This says when it's done."
-    : "Sign in on Kick's page that's opened (" + as + "). This says when it's done.");
+    ? "Sign-in link copied. Within five minutes, paste it into a private window on this PC, sign in " + as + ", and click Allow."
+    : "Kick is open in your browser. Sign in " + as + " and click Allow.");
   const back = await waiting;
   const got = {};
   String(back.query || "").split("&").forEach((kv) => { const i = kv.indexOf("="); if (i > 0) got[kv.slice(0, i)] = decodeURIComponent(kv.slice(i + 1).replace(/\+/g, " ")); });
