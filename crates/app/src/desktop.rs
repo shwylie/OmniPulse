@@ -50,6 +50,14 @@ impl Desktop {
         Desktop { _keys: manager, keys, extra: std::cell::RefCell::new(Vec::new()), _tray: tray, menu: menu_ids }
     }
 
+    /// The tray icon's hover tip: its name, and how much memory it's using
+    pub fn show_memory(&self) {
+        let Some(t) = self._tray.as_ref() else { return };
+        let mb = memory_mb();
+        let _ = t.set_tooltip(Some(if mb > 0.0 { format!("OmniPulse
+RAM: {mb:.0} MB") } else { "OmniPulse".into() }));
+    }
+
     /// The chatbot's hotkeys, as its actions have them now (the ones before let go of); those that couldn't
     /// be had (written wrong, or another app has them)
     pub fn set_hotkeys(&self, list: &[String]) -> Vec<String> {
@@ -537,4 +545,16 @@ mod hotkey_tests {
         for k in ["Ctrl+Shift+F1", "alt+k", "Super+Alt+7", "F13", "Ctrl+PageUp"] { assert!(k.parse::<HotKey>().is_ok(), "{k}"); }
         assert!("Ctrl+Shift".parse::<HotKey>().is_err());
     }
+}
+
+/// The memory OmniPulse is using (its working set, as Task Manager shows it), in MB; 0 if it can't be read
+pub fn memory_mb() -> f64 {
+    #[cfg(windows)]
+    {
+        #[repr(C)] #[derive(Default)] struct Pmc { cb: u32, faults: u32, peak_ws: usize, ws: usize, qpp: usize, qp: usize, qnpp: usize, qnp: usize, pagefile: usize, peak_pagefile: usize, private: usize }
+        #[link(name = "kernel32")] extern "system" { fn GetCurrentProcess() -> isize; fn K32GetProcessMemoryInfo(h: isize, p: *mut Pmc, cb: u32) -> i32; }
+        let mut p = Pmc { cb: std::mem::size_of::<Pmc>() as u32, ..Default::default() };
+        if unsafe { K32GetProcessMemoryInfo(GetCurrentProcess(), &mut p, p.cb) } != 0 { return p.ws as f64 / 1_048_576.0; }
+    }
+    0.0
 }

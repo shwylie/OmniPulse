@@ -36,18 +36,38 @@ pub async fn token_request(params: &[(&str, &str)]) -> Result<Tokens, String> {
     })
 }
 
+/// A sign-in finished or renewed: with your own app's secret, straight to SoundCloud; with OmniPulse's own
+/// app, by the relay, which keeps its secret (what = "token" or "refresh")
+async fn token_for(cfg: &Config, what: &str, params: &[(&str, &str)]) -> Result<Tokens, String> {
+    if !cfg.client_secret.trim().is_empty() || cfg.sc_relay.is_empty() {
+        let mut all = vec![("client_id", cfg.client_id.as_str()), ("client_secret", cfg.client_secret.as_str())];
+        all.extend_from_slice(params);
+        return token_request(&all).await;
+    }
+    let body: serde_json::Map<String, Value> = params.iter().map(|(k, v)| (k.to_string(), Value::from(*v))).collect();
+    let res = reqwest::Client::new()
+        .post(format!("{}/api/soundcloud/{what}", cfg.sc_relay.trim_end_matches('/')))
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| format!("Couldn't reach OmniPulse's relay: {e}"))?;
+    let status = res.status();
+    let body: Value = res.json().await.map_err(|e| e.to_string())?;
+    if !status.is_success() {
+        return Err(format!("Token error {status}: {body}"));
+    }
+    Ok(Tokens {
+        access_token: body["access_token"].as_str().ok_or("No access_token in response")?.to_string(),
+        refresh_token: body["refresh_token"].as_str().map(String::from),
+    })
+}
+
 pub async fn refresh(cfg: &Config, old: &Tokens) -> Result<Tokens, String> {
     let rt = old
         .refresh_token
         .as_deref()
         .ok_or("No refresh token, please sign in again")?;
-    let new = token_request(&[
-        ("grant_type", "refresh_token"),
-        ("client_id", cfg.client_id.as_str()),
-        ("client_secret", cfg.client_secret.as_str()),
-        ("refresh_token", rt),
-    ])
-    .await?;
+    let new = token_for(cfg, "refresh", &[("grant_type", "refresh_token"), ("refresh_token", rt)]).await?;
     let merged = Tokens {
         access_token: new.access_token,
         refresh_token: new.refresh_token.or_else(|| old.refresh_token.clone()),
@@ -163,14 +183,16 @@ pub async fn login() -> Result<(), String> {
         return Err("Sign-in state did not match, please try again".to_string());
     }
 
-    let tokens = token_request(&[
-        ("grant_type", "authorization_code"),
-        ("client_id", cfg.client_id.as_str()),
-        ("client_secret", cfg.client_secret.as_str()),
-        ("redirect_uri", cfg.redirect_uri.as_str()),
-        ("code_verifier", verifier.as_str()),
-        ("code", code.as_str()),
-    ])
+    let tokens = token_for(
+        &cfg,
+        "token",
+        &[
+            ("grant_type", "authorization_code"),
+            ("redirect_uri", cfg.redirect_uri.as_str()),
+            ("code_verifier", verifier.as_str()),
+            ("code", code.as_str()),
+        ],
+    )
     .await?;
     save_tokens(&tokens)
 }

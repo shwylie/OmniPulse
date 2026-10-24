@@ -4046,8 +4046,39 @@ fn mix_feedback(shared: &Shared, good: bool) -> Result<String, &'static str> {
     let _ = &began;
     let n = std::fs::read_to_string(dir.join("mix-feedback.jsonl")).map(|s| s.lines().count()).unwrap_or(0);
     let note = format!("Transition rated {}: {what} ({}). {n} ratings so far.", if good { "good" } else { "bad" }, rec["kind"].as_str().unwrap_or(""));
+    if std::env::var_os("OMNIPULSE_SELFTEST").is_none() && set_row_on(&shared.borrow().web.prefs, "shareRatings", true) { mix_ratings_send(shared, dir.clone()); }
     if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_status(note.clone().into()); }
     Ok(note)
+}
+
+/// Your ratings not yet sent, sent to the developer (the relay keeps them): all of them after the last one
+/// that got there (state/mix-feedback-sent: how many lines have), so one missed while offline goes next time
+fn mix_ratings_send(shared: &Shared, dir: std::path::PathBuf) {
+    let rt = shared.borrow().rt.clone();
+    rt.spawn(async move {
+        let Ok(text) = std::fs::read_to_string(dir.join("mix-feedback.jsonl")) else { return };
+        let sent: usize = std::fs::read_to_string(dir.join("mix-feedback-sent")).ok().and_then(|s| s.trim().parse().ok()).unwrap_or(0);
+        let lines: Vec<serde_json::Value> = text.lines().skip(sent).take(200).filter_map(|l| serde_json::from_str(l).ok()).collect();
+        if lines.is_empty() { return; }
+        // (this install: a random name, made once, so one tester's ratings can be told apart, not who they are)
+        let id_file = dir.join("install-id");
+        let install = match std::fs::read_to_string(&id_file) {
+            Ok(s) if s.trim().len() >= 8 => s.trim().to_string(),
+            _ => {
+                let id: String = (0..16u64).map(|k| { use std::hash::{BuildHasher, Hasher}; let mut h = std::collections::hash_map::RandomState::new().build_hasher(); h.write_u64(k); char::from_digit((h.finish() % 36) as u32, 36).unwrap_or('0') }).collect();
+                let _ = std::fs::write(&id_file, &id);
+                id
+            }
+        };
+        let n = text.lines().skip(sent).take(200).count();
+        let r = reqwest::Client::new()
+            .post(format!("{}/api/mix-ratings", share::RELAY_URL))
+            .json(&serde_json::json!({ "install": install, "lines": lines }))
+            .timeout(std::time::Duration::from_secs(20))
+            .send()
+            .await;
+        if r.is_ok_and(|r| r.status().is_success()) { let _ = std::fs::write(dir.join("mix-feedback-sent"), (sent + n).to_string()); }
+    });
 }
 
 // ---------- what's shown while a mix is under way ----------
@@ -6372,7 +6403,9 @@ fn bot_act(shared: &Shared, act: &str) {
         slint::Timer::single_shot(std::time::Duration::from_millis(900), move || if plugrun::get(botpage::BOT).is_some() { bot_act(&s2, &a2); });
         return;
     };
-    let vals = serde_json::Value::Object(bot_current(shared));
+    let mut vals = bot_current(shared);
+    botpage::sign_in_extras(&mut vals, share::RELAY_URL);
+    let vals = serde_json::Value::Object(vals);
     let (rt, weak) = { let a = shared.borrow(); (a.rt.clone(), a.ui.clone()) };
     let method = method.to_string();
     rt.spawn(async move {
@@ -8053,6 +8086,7 @@ fn sound_paint(a: &App) {
     ui.set_fade_on(a.web.prefs["fadeOn"].as_bool() == Some(true));
     ui.set_fade_ms(a.web.prefs["fadeMs"].as_u64().unwrap_or(3000) as i32);
     ui.set_skip_silence((sound::skip_silence_ms(&a.web.prefs) / 1000) as i32);
+    ui.set_smart_max(a.web.prefs["smartMax"].as_u64().unwrap_or(10) as i32);
     let bands = sound::eq_bands(&a.web.prefs);
     for (i, g) in bands.iter().enumerate() {
         if a.eq_model.row_data(i) != Some(*g) { a.eq_model.set_row_data(i, *g); }
@@ -11409,6 +11443,8 @@ fn main() -> Result<(), slint::PlatformError> {
     ui.set_mix_available(true);
     let s = shared.clone();
     ui.on_mix_toggle(move || set_toggle(&s, "smartOn"));
+    let s = shared.clone();
+    ui.on_mix_rate(move |good| if let Err(e) = mix_feedback(&s, good) { if let Some(ui) = s.borrow().ui.upgrade() { ui.set_status(e.into()); } });
     // (Now Playing: the lyrics or the description, as last picked)
     ui.set_now_pane(if shared.borrow().web.prefs["nowPane"].as_str() == Some("desc") { "desc".into() } else { "lyrics".into() });
     let s = shared.clone();
@@ -12422,6 +12458,8 @@ fn main() -> Result<(), slint::PlatformError> {
         for a in desk.poll() {
             desktop_action(&s, &a);
         }
+        // (the tray icon's hover tip: the memory in use, every few seconds)
+        if n % 12 == 1 { desk.show_memory(); }
         // (the chatbot's hotkeys, as its actions have them now)
         if let Some(list) = HOTKEYS_WANTED.with(|h| h.borrow_mut().take()) {
             let failed = desk.set_hotkeys(&list);

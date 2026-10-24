@@ -7,6 +7,29 @@ use serde_json::{json, Map, Value};
 
 pub const BOT: &str = "chatbot";
 
+/// OmniPulse's own apps, so you only sign in: their Client IDs (empty: not registered yet, so you make your own).
+/// Kick's secret isn't here: the relay keeps it and finishes Kick's sign-ins (jam-server, /api/kick/*)
+pub const TWITCH_ID: &str = "";
+pub const KICK_ID: &str = "";
+
+/// Your own app wanted instead (or OmniPulse's not there yet)
+fn own_app(cur: &Map<String, Value>, plat: &str) -> bool {
+    let built = if plat == "kick" { KICK_ID } else { TWITCH_ID };
+    built.is_empty() || on(cur, if plat == "kick" { "kickOwnApp" } else { "twitchOwnApp" }, false)
+}
+
+/// What a sign-in's given besides the page's values: OmniPulse's apps, and where to finish a Kick sign-in
+pub fn sign_in_extras(vals: &mut Map<String, Value>, relay: &str) {
+    if !own_app(vals, "twitch") { vals.insert("twitchClientId".into(), json!(TWITCH_ID)); }
+    if !own_app(vals, "kick") {
+        vals.insert("kickClientId".into(), json!(KICK_ID));
+        vals.insert("kickClientSecret".into(), json!(""));
+        vals.insert("kickRelay".into(), json!(relay));
+    } else {
+        vals.insert("kickRelay".into(), json!(""));
+    }
+}
+
 /// One line of a sheet or a step, as the page draws it (BotField)
 pub struct Field { pub key: String, pub kind: &'static str, pub label: String, pub note: String, pub value: String, pub extra: String, pub n: i32 }
 
@@ -34,7 +57,7 @@ pub fn sheet(id: &str, cur: &Map<String, Value>) -> (String, Vec<Field>) {
     let step = |k: i32, label: &str, value: &str, url: &str, tip: &str| { let mut x = f("step", "", label, tip, value, url); x.n = k; x };
     let account = |key: &str, label: &str, who: &str, bot: bool, plat: &str| f("account", key, label, if bot { "bot" } else { "channel" }, who, plat);
     match id {
-        "twitch" => ("Twitch".into(), vec![
+        "twitch" => ("Twitch".into(), { let own = own_app(cur, "twitch"); let mut v = vec![
             f("head", "", "Make your own Twitch app (once, about 3 minutes)", "", "", ""),
             step(1, "Open the Twitch developer console and click Register Your Application. Give it any name.", "", "https://dev.twitch.tv/console/apps/create", "Open the Twitch developer console"),
             step(2, "Under OAuth Redirect URLs, add this address:", "http://localhost", "", ""),
@@ -45,8 +68,12 @@ pub fn sheet(id: &str, cur: &Map<String, Value>) -> (String, Vec<Field>) {
             account("twitch:channel", "Your channel", s(cur, "login"), false, "twitch"),
             account("twitch:bot", "Bot account", s(cur, "botLogin"), true, "twitch"),
             f("note", "", "To sign in as a different account, copy the link instead. Then open it in a private window or another browser.", "", "", ""),
-        ]),
-        "kick" => ("Kick".into(), vec![
+        ];
+            // (OmniPulse's own app: nothing to make, only the sign-ins)
+            if !own { v.drain(0..6); }
+            if !TWITCH_ID.is_empty() { v.push(f("toggle", "twitchOwnApp", "Use my own Twitch app", "For developers. Most people can leave this off.", if own { "true" } else { "false" }, "")); }
+            v }),
+        "kick" => ("Kick".into(), { let own = own_app(cur, "kick"); let mut v = vec![
             f("toggle", "kickOn", "Use Kick", "The chatbot also answers your Kick chat.", if on(cur, "kickOn", false) { "true" } else { "false" }, ""),
             f("head", "", "Make your own Kick app (once, about 3 minutes)", "", "", ""),
             step(1, "Open Kick's developer settings and click Create App.", "", "https://kick.com/settings/developer", "Open Kick's developer settings"),
@@ -60,7 +87,10 @@ pub fn sheet(id: &str, cur: &Map<String, Value>) -> (String, Vec<Field>) {
             account("kick:channel", "Your channel", s(cur, "kickLogin"), false, "kick"),
             account("kick:bot", "Bot account", s(cur, "kickBotLogin"), true, "kick"),
             f("note", "", "To sign in as a different account, copy the link instead. Then open it in a private window on this PC.", "", "", ""),
-        ]),
+        ];
+            if !own { v.drain(1..8); }
+            if !KICK_ID.is_empty() { v.push(f("toggle", "kickOwnApp", "Use my own Kick app", "For developers. Most people can leave this off.", if own { "true" } else { "false" }, "")); }
+            v }),
         "obs" => ("OBS".into(), vec![
             f("toggle", "obsOn", "Connect to OBS", "Your actions can switch scenes, show or hide sources, and more.", if on(cur, "obsOn", false) { "true" } else { "false" }, ""),
             step(1, "In OBS, open Tools, then WebSocket Server Settings. Tick Enable WebSocket server.", "", "", ""),

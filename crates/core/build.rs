@@ -1,13 +1,11 @@
-// The app's own SoundCloud keys, built in: read from keys.local.json beside this file (never in git:
-// see .gitignore) and written into the build scrambled, so neither key shows up as text in the
-// program. Without the file the build still works, and SoundCloud needs keys in config.json instead.
+// The app's own SoundCloud app, built in: its client id and sign-in address, read from keys.local.json
+// beside this file (never in git: see .gitignore) and written into the build scrambled. Without the
+// file the build still works, and SoundCloud needs keys in config.json instead.
 //
-// keys.local.json: { "soundcloud_client_id": "...", "soundcloud_client_secret": "...",
-//                    "soundcloud_redirect_uri": "http://localhost:8080/callback" }
+// keys.local.json: { "soundcloud_client_id": "...", "soundcloud_redirect_uri": "http://localhost:8080/callback" }
 //
-// Scrambling only makes the keys harder to find: a program has to send its secret to SoundCloud to
-// sign in, so anyone determined (watching their own traffic, or stepping through the program) can
-// still get it. A server that keeps the secret and does the sign-in exchange is the real fix.
+// Its secret is never built in (a "soundcloud_client_secret" in the file is ignored): the relay keeps
+// it (npx wrangler secret put SC_CLIENT_SECRET, in jam-server) and finishes sign-ins and renewals.
 
 use std::collections::hash_map::RandomState;
 use std::hash::{BuildHasher, Hasher};
@@ -48,7 +46,6 @@ fn main() {
     let json = std::fs::read_to_string(&here).unwrap_or_default();
     let out = [
         scramble("SC_ID", &field(&json, "soundcloud_client_id")),
-        scramble("SC_SECRET", &field(&json, "soundcloud_client_secret")),
         scramble("SC_REDIRECT", &field(&json, "soundcloud_redirect_uri")),
     ]
     .concat();

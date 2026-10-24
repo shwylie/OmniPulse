@@ -124,6 +124,8 @@ global Icons {
     out property <string> link: "M3.9 12c0-1.71 1.39-3.1 3.1-3.1h4V7H7c-2.76 0-5 2.24-5 5s2.24 5 5 5h4v-1.9H7c-1.71 0-3.1-1.39-3.1-3.1zM8 13h8v-2H8v2zm9-6h-4v1.9h4c1.71 0 3.1 1.39 3.1 3.1s-1.39 3.1-3.1 3.1h-4V17h4c2.76 0 5-2.24 5-5s-2.24-5-5-5z";
     out property <string> logout: "M17 7l-1.41 1.41L18.17 11H8v2h10.17l-2.58 2.58L17 17l5-5zM4 5h8V3H4c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h8v-2H4V5z";
     out property <string> check: "M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z";
+    out property <string> thumb-up: "M1 21h4V9H1v12zm22-11c0-1.1-.9-2-2-2h-6.31l.95-4.57.03-.32c0-.41-.17-.79-.44-1.06L14.17 1 7.59 7.59C7.22 7.95 7 8.45 7 9v10c0 1.1.9 2 2 2h9c.83 0 1.54-.5 1.84-1.22l3.02-7.05c.09-.23.14-.47.14-.73v-2z";
+    out property <string> thumb-down: "M15 3H6c-.83 0-1.54.5-1.84 1.22l-3.02 7.05c-.09.23-.14.47-.14.73v2c0 1.1.9 2 2 2h6.31l-.95 4.57-.03.32c0 .41.17.79.44 1.06L9.83 23l6.59-6.59c.36-.36.58-.86.58-1.41V5c0-1.1-.9-2-2-2zm4 0v12h4V3h-4z";
     out property <string> flask: "M19.8 18.4L14 10.67V6.5l1.35-1.69c.26-.33.03-.81-.39-.81H9.04c-.42 0-.65.48-.39.81L10 6.5v4.17L4.2 18.4c-.49.66-.02 1.6.8 1.6h14c.82 0 1.29-.94.8-1.6z";
     out property <string> backup: "M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96zM14 13v4h-4v-4H7l5-5 5 5h-3z";
     out property <string> restore: "M13 3a9 9 0 0 0-9 9H1l3.89 3.89.07.14L9 12H6c0-3.87 3.13-7 7-7s7 3.13 7 7-3.13 7-7 7c-1.93 0-3.68-.79-4.94-2.06l-1.42 1.42A8.954 8.954 0 0 0 13 21a9 9 0 0 0 0-18z";
@@ -1705,7 +1707,7 @@ component LookPreview inherits Rectangle {
     property <length> foot: root.style == "tab" ? 34px : root.style == "minimal" ? 16px : 24px;
     property <length> body: root.height - 28px - root.foot - 12px;
     // the title bar
-    Rectangle { x: 8px; y: 8px; width: parent.width - 16px; height: 14px; border-radius: root.r; background: root.title == "plain" || root.style == "minimal" ? Theme.panel : @linear-gradient(90deg, root.ca 0%, root.cb 100%); }
+    Rectangle { x: 8px; y: 8px; width: parent.width - 16px; height: 14px; border-radius: root.r; background: root.title == "plain" ? Theme.panel : @linear-gradient(90deg, root.ca 0%, root.cb 100%); }
     // the sidebar and the page
     Rectangle {
         x: 8px; y: 28px; width: 82px; height: root.body; border-radius: root.r; background: Theme.panel;
@@ -1865,46 +1867,53 @@ component ChangeSketch inherits Rectangle {
     in property <int> fade-ms;
     in property <int> skip;
     in property <bool> seamless;
-    height: 74px;
+    in property <int> smart-max: 10;
+    // (as it's set: a 40 s stretch, to scale. The song playing ends in the middle; how long the two play
+    // over each other, how long its fade is, and the quiet end skipped first)
+    property <float> span: 40;
+    property <float> over: root.seamless ? root.smart-max : root.fade ? root.fade-ms / 1000 : 0;
+    property <length> left: 70px;
+    property <length> inner: root.width - root.left - 14px;
+    property <length> per: root.inner / root.span;
+    property <length> end: root.left + root.inner * 0.55;
+    property <length> start: root.end - root.over * root.per;
+    property <length> gap: root.skip > 0 ? min(root.skip, 8) * root.per : 0;
+    property <length> lane: 18px;
+    property <length> top: 26px;
+    height: 104px;
     border-radius: 12px;
     background: Theme.bg;
     border-width: 1px;
     border-color: Theme.line;
     clip: true;
-    // (how far the two lie over each other: none, the fade's length, or a long mix)
-    property <float> over: root.seamless ? 0.32 : root.fade ? 0.04 + 0.2 * min(1, root.fade-ms / 8000) : 0;
-    property <length> mid: root.width / 2;
-    property <length> half: root.width * root.over / 2;
-    // the first song, and its end: fading out over the overlap
-    for k in 26: Rectangle {
-        property <length> x0: 12px + k * (root.mid + root.half - 12px) / 26;
-        property <float> into: root.half > 0 ? max(0, (self.x0 - (root.mid - root.half)) / (2 * root.half)) : 0;
-        x: self.x0;
-        width: 4px;
-        height: (16px + 26px * (0.5 + 0.5 * sin(k * 47deg))) * (1 - self.into);
-        y: (root.height - self.height) / 2;
-        border-radius: 2px;
-        background: Theme.accent.with-alpha(0.75);
+    Text { x: 12px; y: 7px; text: root.seamless ? "Blended on the beat, up to " + root.smart-max + " s" : root.fade ? "Faded over each other for " + round(root.fade-ms / 1000) + " s" : "One straight after the other"; color: Theme.text; font-size: 11px; font-weight: 600; }
+    if root.skip > 0: Text { x: parent.width - self.width - 12px; y: 7px; text: "Quiet endings over " + root.skip + " s skipped"; color: Theme.muted; font-size: 11px; }
+    // the two lanes' names
+    Text { x: 12px; y: root.top + (root.lane - self.height) / 2; text: "This song"; color: Theme.muted; font-size: 10px; }
+    Text { x: 12px; y: root.top + root.lane + 8px + (root.lane - self.height) / 2; text: "Next song"; color: Theme.muted; font-size: 10px; }
+    // this song: full, then fading out over the overlap
+    Rectangle { x: root.left; y: root.top; width: max(0, root.start - root.left); height: root.lane; border-radius: 4px; background: Theme.accent.with-alpha(0.8); }
+    if root.over > 0: Rectangle { x: root.start; y: root.top; width: root.end - root.start; height: root.lane; background: @linear-gradient(90deg, Theme.accent.with-alpha(0.8) 0%, Theme.accent.with-alpha(0.05) 100%); }
+    // its quiet ending, skipped: struck out after the end
+    if root.skip > 0: Rectangle {
+        x: root.end; y: root.top + 4px; width: root.gap; height: root.lane - 8px;
+        border-radius: 3px; border-width: 1px; border-color: Theme.muted.with-alpha(0.5); background: transparent;
+        Rectangle { y: parent.height / 2; height: 1px; background: Theme.muted.with-alpha(0.7); }
     }
-    // the next, coming in over it
-    for k in 26: Rectangle {
-        property <length> x0: root.mid - root.half + k * (root.width - 12px - (root.mid - root.half)) / 26;
-        property <float> into: root.half > 0 ? min(1, (self.x0 - (root.mid - root.half)) / (2 * root.half)) : 1;
-        x: self.x0 + 2px;
-        width: 4px;
-        height: (16px + 26px * (0.5 + 0.5 * cos(k * 53deg))) * self.into;
-        y: (root.height - self.height) / 2;
-        border-radius: 2px;
-        background: Theme.accent-2.with-alpha(0.75);
+    // the next: fading in over the overlap, then full
+    if root.over > 0: Rectangle { x: root.start; y: root.top + root.lane + 8px; width: root.end - root.start; height: root.lane; background: @linear-gradient(90deg, Theme.accent-2.with-alpha(0.05) 0%, Theme.accent-2.with-alpha(0.8) 100%); }
+    Rectangle { x: root.end; y: root.top + root.lane + 8px; width: root.left + root.inner - root.end; height: root.lane; border-radius: 4px; background: Theme.accent-2.with-alpha(0.8); }
+    // (on the beat: the bars they're lined up on)
+    if root.seamless: Rectangle { for k in 6: Rectangle { x: root.start + k * (root.end - root.start) / 5; y: root.top - 3px; width: 1px; height: 2 * root.lane + 14px; background: Theme.text.with-alpha(0.25); } }
+    // (no overlap: the cut)
+    if root.over == 0: Rectangle { x: root.end; y: root.top - 3px; width: 1px; height: 2 * root.lane + 14px; background: Theme.text.with-alpha(0.4); }
+    // the time: every 5 s, to scale
+    for k in 9: Rectangle {
+        x: root.left + k * 5 * root.per;
+        y: root.top + 2 * root.lane + 14px;
+        width: 1px; height: 4px; background: Theme.muted.with-alpha(0.5);
     }
-    // (Seamless Mix: its beats, lined up)
-    if root.seamless: Rectangle { for k in 7: Rectangle { x: root.mid - root.half + k * (2 * root.half) / 6; y: 6px; width: 1px; height: root.height - 12px; background: Theme.text.with-alpha(0.18); } }
-    Text {
-        x: 10px; y: 5px;
-        text: root.seamless ? "Mixed on the beat" : root.fade ? "Faded over each other, " + round(root.fade-ms / 1000) + " s" : "One straight after the other";
-        color: Theme.muted; font-size: 10px;
-    }
-    if root.skip > 0: Text { x: parent.width - self.width - 10px; y: 5px; text: "Silences over " + root.skip + " s skipped"; color: Theme.muted; font-size: 10px; }
+    Text { x: root.left; y: root.height - self.height - 6px; text: "5 s a mark"; color: Theme.muted; font-size: 10px; }
 }
 
 /// Something that goes on stream (the Stream Widget, the Lyrics Widget): a tile with its light, its address (copied
@@ -3275,6 +3284,7 @@ export component AppWindow inherits Window {
     in-out property <bool> fade-on;
     in property <int> fade-ms;
     in property <int> skip-silence;
+    in property <int> smart-max: 10;
     callback fade-on-changed(bool);
     callback fade-ms-pick(int);
     callback skip-pick(int);
@@ -3388,6 +3398,7 @@ export component AppWindow inherits Window {
     in property <int> device-offset: -1;
     in property <bool> mixing;
     callback mix-toggle();
+    callback mix-rate(bool);
     // a right-click on the title bar's Seamless Mix button, or a platform's: its settings ("smart", or the platform)
     callback title-settings(string);
     // an edge or corner pressed: the window resized from it (0 top ... 7 bottom-right)
@@ -3409,7 +3420,7 @@ export component AppWindow inherits Window {
                 width: parent.width - 16px;
                 height: 36px;
                 property <length> r: root.player-style == "float" && Theme.radius > 0 ? 18px : Theme.radius;
-                property <bool> plain: root.player-style == "minimal" || root.title-colour == "plain";
+                property <bool> plain: root.title-colour == "plain";
                 // (the close button under the pointer: its corners red too)
                 property <bool> close-hot;
                 property <color> ca: root.title-colour == "subtle" ? Theme.panel.mix(Theme.bar-a, 0.6) : Theme.bar-a;
@@ -3493,9 +3504,29 @@ export component AppWindow inherits Window {
                     }
                     // Seamless Mix: grey when off; on, its colour flows from one accent to the other, quicker while a
                     // mix is playing (still while it's parked): the icon alone, as Streamer Mode's
-                    if root.mix-available: Rectangle {
-                        width: 32px;
-                        Rectangle { width: 28px; height: 28px; x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2; border-radius: 8px; background: sta-m.has-hover ? Theme.elevated : transparent; }
+                    // (on: it opens out, with a like and a dislike for the last transition, no Stream Deck needed)
+                    if root.mix-available: mixbox := Rectangle {
+                        width: root.mix-on ? 92px : 32px;
+                        animate width { duration: Theme.motion ? 220ms : 0ms; easing: ease-out; }
+                        clip: true;
+                        property <string> rated;
+                        Rectangle { width: parent.width - 4px; height: 28px; x: 2px; y: (parent.height - self.height) / 2; border-radius: 14px; background: root.mix-on ? Theme.elevated.with-alpha(0.55) : transparent; }
+                        Rectangle { width: 28px; height: 28px; x: 2px; y: (parent.height - self.height) / 2; border-radius: 14px; background: sta-m.has-hover ? Theme.elevated : transparent; }
+                        for b[k] in [{ good: true, d: Icons.thumb-up, tip: "Good transition. Keep mixing songs like these this way." }, { good: false, d: Icons.thumb-down, tip: "Could be better. There's a better way to mix these two songs." }]: Rectangle {
+                            x: 34px + k * 28px;
+                            width: 26px;
+                            height: 26px;
+                            y: (parent.height - self.height) / 2;
+                            border-radius: 13px;
+                            property <bool> lit: mixbox.rated == (b.good ? "good" : "bad");
+                            background: self.lit ? (b.good ? #3fb950 : #f85149).with-alpha(0.3) : rt.has-hover ? Theme.elevated : transparent;
+                            opacity: root.mix-on ? 1 : 0;
+                            Glyph { d: b.d; width: 13px; height: 13px; x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2; fill: parent.lit ? (b.good ? #3fb950 : #f85149) : Theme.muted; }
+                            TipSpot { hover: rt.has-hover; tip: b.tip; }
+                            rt := TouchArea { enabled: root.mix-on; clicked => { Tips.on = false; mixbox.rated = b.good ? "good" : "bad"; root.mix-rate(b.good); } }
+                        }
+                        // (lit a moment after a press: it's been rated)
+                        Timer { interval: 1500ms; running: mixbox.rated != ""; triggered => { mixbox.rated = ""; } }
                         // (moving only while there's music: the clock read only then, or the window's drawn again every frame,
                         // nothing playing or not: a third of a core, idle)
                         property <float> phase: root.mix-on && root.playing && Theme.motion ? mod(animation-tick() / 1ms, root.mixing ? 1200 : 3000) / (root.mixing ? 1200 : 3000) : 0.5;
@@ -3504,13 +3535,15 @@ export component AppWindow inherits Window {
                             d: Icons.mix;
                             width: 16px;
                             height: 16px;
-                            x: (parent.width - self.width) / 2;
+                            x: 2px + (28px - self.width) / 2;
                             y: (parent.height - self.height) / 2;
                             fill: !root.mix-on ? Theme.muted : Theme.accent.mix(Theme.accent-2, 1 - parent.swing);
                             opacity: root.mix-on ? 1 : 0.55;
                         }
                         TipSpot { hover: sta-m.has-hover; tip: root.mix-on ? "Seamless Mix (WIP) is on. Click to turn it off. Right-click for its settings." : "Seamless Mix (WIP) is off. Click to mix songs into each other, on the beat when possible. Right-click for its settings."; }
                         sta-m := TouchArea {
+                            x: 2px;
+                            width: 28px;
                             clicked => { Tips.on = false; root.mix-toggle(); }
                             pointer-event(e) => { if (e.kind == PointerEventKind.down && e.button == PointerEventButton.right) { Tips.on = false; root.title-settings("smart"); } }
                         }
@@ -4677,11 +4710,11 @@ export component AppWindow inherits Window {
                                                 alignment: center;
                                                 spacing: 2px;
                                                 HiTitle { text: "Title Bar Colour"; }
-                                                Text { text: root.player-style == "minimal" ? "Minimal keeps it in the panel's colour." : "Changing with the cover, faintly, or not at all."; color: Theme.muted; font-size: 12px; }
+                                                Text { text: "Changing with the cover, faintly, or not at all."; color: Theme.muted; font-size: 12px; }
                                             }
-                                            VerticalLayout { alignment: center; Chip { label: "Like the Player Bar"; on: root.title-colour == "match" && root.player-style != "minimal"; clicked => { root.title-colour-picked("match"); } } }
-                                            VerticalLayout { alignment: center; Chip { label: "Subtle"; on: root.title-colour == "subtle" && root.player-style != "minimal"; clicked => { root.title-colour-picked("subtle"); } } }
-                                            VerticalLayout { alignment: center; Chip { label: "Plain"; on: root.title-colour == "plain" || root.player-style == "minimal"; clicked => { root.title-colour-picked("plain"); } } }
+                                            VerticalLayout { alignment: center; Chip { label: root.player-style == "minimal" ? "Cover Colours" : "Like the Player Bar"; on: root.title-colour == "match"; clicked => { root.title-colour-picked("match"); } } }
+                                            VerticalLayout { alignment: center; Chip { label: "Subtle"; on: root.title-colour == "subtle"; clicked => { root.title-colour-picked("subtle"); } } }
+                                            VerticalLayout { alignment: center; Chip { label: "Plain"; on: root.title-colour == "plain"; clicked => { root.title-colour-picked("plain"); } } }
                                         }
                                         if root.tab-style: GroupLine { }
                                         if root.tab-style: HorizontalLayout {
@@ -5018,7 +5051,7 @@ export component AppWindow inherits Window {
                                         padding: 16px;
                                         spacing: 10px;
                                         for r in root.set-rows-sound: VerticalLayout {
-                                            if r.key == "smartOn": ChangeSketch { fade: root.fade-on; fade-ms: root.fade-ms; skip: root.skip-silence; seamless: r.on; }
+                                            if r.key == "smartOn": ChangeSketch { fade: root.fade-on; fade-ms: root.fade-ms; skip: root.skip-silence; seamless: r.on; smart-max: root.smart-max; }
                                         }
                                         HorizontalLayout {
                                             VerticalLayout {

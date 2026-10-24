@@ -137,11 +137,67 @@ async function readJson(req) {
   try { return { body: JSON.parse(text) }; } catch (e) { return { error: json({ error: "not JSON" }, 400) }; }
 }
 
+const KICK_REDIRECT = "http://localhost:8476/kick";
+
 export default {
   async fetch(req, env) {
     const url = new URL(req.url);
     const parts = url.pathname.split("/").filter(Boolean);
     if (req.method === "OPTIONS") return new Response(null, { headers: { "access-control-allow-origin": "*", "access-control-allow-methods": "GET, POST, PUT", "access-control-allow-headers": "content-type" } });
+
+    // Kick sign-ins for OmniPulse's own Kick app: Kick wants the app's secret to finish one, and a secret
+    // in the app could be read out of it, so it's kept here (KICK_CLIENT_SECRET, set with wrangler secret put)
+    if (req.method === "POST" && (url.pathname === "/api/kick/token" || url.pathname === "/api/kick/refresh")) {
+      if (!env.KICK_CLIENT_ID || !env.KICK_CLIENT_SECRET) return json({ error: "OmniPulse's Kick app isn't set up on this relay" }, 503);
+      const r = await readJson(req);
+      if (r.error) return r.error;
+      const b = r.body || {};
+      const form = { client_id: env.KICK_CLIENT_ID, client_secret: env.KICK_CLIENT_SECRET };
+      if (url.pathname === "/api/kick/token") {
+        // (only the app's own address: a sign-in finished here goes back to the PC that started it)
+        if (b.redirect_uri !== KICK_REDIRECT) return json({ error: "not that redirect address" }, 400);
+        Object.assign(form, { grant_type: "authorization_code", code: String(b.code || ""), code_verifier: String(b.code_verifier || ""), redirect_uri: KICK_REDIRECT });
+      } else {
+        Object.assign(form, { grant_type: "refresh_token", refresh_token: String(b.refresh_token || "") });
+      }
+      const got = await fetch("https://id.kick.com/oauth/token", { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" }, body: new URLSearchParams(form).toString() });
+      return new Response(await got.text(), { status: got.status, headers: { "content-type": "application/json", "cache-control": "no-store" } });
+    }
+
+    // SoundCloud sign-ins for OmniPulse's own SoundCloud app, the same way (SC_CLIENT_SECRET, set with
+    // wrangler secret put): the app sends the code (or the refresh token), this adds the app's keys
+    if (req.method === "POST" && (url.pathname === "/api/soundcloud/token" || url.pathname === "/api/soundcloud/refresh")) {
+      if (!env.SC_CLIENT_ID || !env.SC_CLIENT_SECRET) return json({ error: "OmniPulse's SoundCloud app isn't set up on this relay" }, 503);
+      const r = await readJson(req);
+      if (r.error) return r.error;
+      const b = r.body || {};
+      const form = { client_id: env.SC_CLIENT_ID, client_secret: env.SC_CLIENT_SECRET };
+      if (url.pathname === "/api/soundcloud/token") {
+        if (b.redirect_uri !== (env.SC_REDIRECT || "http://localhost:8080/callback")) return json({ error: "not that redirect address" }, 400);
+        Object.assign(form, { grant_type: "authorization_code", code: String(b.code || ""), code_verifier: String(b.code_verifier || ""), redirect_uri: b.redirect_uri });
+      } else {
+        Object.assign(form, { grant_type: "refresh_token", refresh_token: String(b.refresh_token || "") });
+      }
+      const got = await fetch("https://secure.soundcloud.com/oauth/token", { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded", accept: "application/json; charset=utf-8" }, body: new URLSearchParams(form).toString() });
+      return new Response(await got.text(), { status: got.status, headers: { "content-type": "application/json", "cache-control": "no-store" } });
+    }
+
+    // Seamless Mix ratings from testers' apps, kept for the developer (read with RATINGS_KEY, a secret)
+    if (url.pathname === "/api/mix-ratings") {
+      const stub = env.RATINGS.get(env.RATINGS.idFromName("all"));
+      if (req.method === "POST") {
+        const text = await req.text();
+        if (text.length > 512 * 1024) return json({ error: "too big" }, 413);
+        let b = null;
+        try { b = JSON.parse(text); } catch (e) {}
+        if (!b || typeof b.install !== "string" || !/^[a-z0-9]{8,40}$/.test(b.install) || !Array.isArray(b.lines) || b.lines.length > 200) return json({ error: "not ratings" }, 400);
+        return stub.fetch("https://ratings/add", { method: "POST", body: JSON.stringify({ install: b.install, lines: b.lines.filter((l) => l && typeof l === "object") }) });
+      }
+      if (req.method === "GET") {
+        if (!env.RATINGS_KEY || req.headers.get("x-ratings-key") !== env.RATINGS_KEY) return json({ error: "not yours to read" }, 403);
+        return stub.fetch("https://ratings/all?after=" + encodeURIComponent(url.searchParams.get("after") || "0"));
+      }
+    }
 
     // shared playlists
     if (url.pathname === "/api/shares" && req.method === "POST") {
@@ -504,5 +560,28 @@ export class Share {
       return;
     }
     await this.ctx.storage.deleteAll();
+  }
+}
+
+// Seamless Mix ratings: one list of them, each with the install it came from and when it arrived
+export class Ratings {
+  constructor(ctx) {
+    this.sql = ctx.storage.sql;
+    this.sql.exec("CREATE TABLE IF NOT EXISTS r (n INTEGER PRIMARY KEY AUTOINCREMENT, install TEXT, got INTEGER, line TEXT)");
+  }
+
+  async fetch(req) {
+    const url = new URL(req.url);
+    if (url.pathname === "/add") {
+      const b = await req.json();
+      const now = Date.now();
+      for (const l of b.lines) this.sql.exec("INSERT INTO r (install, got, line) VALUES (?, ?, ?)", b.install, now, JSON.stringify(l).slice(0, 64 * 1024));
+      return json({ ok: true, kept: b.lines.length });
+    }
+    // (as JSON lines, after the one numbered "after": so a download can carry on where the last stopped)
+    const after = Number(url.searchParams.get("after") || 0) || 0;
+    const rows = this.sql.exec("SELECT n, install, got, line FROM r WHERE n > ? ORDER BY n LIMIT 5000", after).toArray();
+    const out = rows.map((x) => JSON.stringify({ n: x.n, install: x.install, got: x.got, rating: JSON.parse(x.line) })).join("\n");
+    return new Response(out + (out ? "\n" : ""), { headers: { "content-type": "application/x-ndjson", "cache-control": "no-store" } });
   }
 }

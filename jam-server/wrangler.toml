@@ -7,6 +7,11 @@ compatibility_date = "2025-09-01"
 # where the join page's "Download OmniPulse" button points (change it any time, here or in the dashboard)
 DOWNLOAD_URL = ""
 APP_SCHEME = "omnipulse"
+# OmniPulse's own Kick app (its Client ID; its secret is set with: npx wrangler secret put KICK_CLIENT_SECRET)
+KICK_CLIENT_ID = ""
+# OmniPulse's own SoundCloud app (public: it's in every sign-in link). Its secret: npx wrangler secret put SC_CLIENT_SECRET
+SC_CLIENT_ID = "SET_IN_CLOUDFLARE"
+SC_REDIRECT = "http://localhost:8080/callback"
 
 [[durable_objects.bindings]]
 name = "ROOMS"
@@ -16,6 +21,10 @@ class_name = "Room"
 name = "SHARES"
 class_name = "Share"
 
+[[durable_objects.bindings]]
+name = "RATINGS"
+class_name = "Ratings"
+
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["Room"]
@@ -24,3 +33,8 @@ new_sqlite_classes = ["Room"]
 [[migrations]]
 tag = "v2"
 new_sqlite_classes = ["Share"]
+
+# testers' Seamless Mix ratings (read them with RATINGS_KEY: npx wrangler secret put RATINGS_KEY)
+[[migrations]]
+tag = "v3"
+new_sqlite_classes = ["Ratings"]

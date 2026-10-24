@@ -92,6 +92,9 @@ pub struct Config {
     pub youtube_client_id: String,
     #[serde(default)]
     pub youtube_client_secret: String,
+    /// OmniPulse's own SoundCloud app: no secret here, so its sign-ins are finished by this relay
+    #[serde(skip)]
+    pub sc_relay: String,
 }
 
 pub fn default_spotify_redirect() -> String {
@@ -195,9 +198,8 @@ fn tidy_config(dir: &std::path::Path) {
             gone = true;
         }
     };
-    if let Some((id, secret, redirect)) = bundled::soundcloud() {
+    if let Some((id, redirect)) = bundled::soundcloud() {
         drop_if("client_id", &id);
-        drop_if("client_secret", &secret);
         drop_if("redirect_uri", &redirect);
     }
     drop_if("discord_client_id", bundled::DISCORD_CLIENT_ID);
@@ -214,9 +216,10 @@ pub fn load_config() -> Result<Config, String> {
         _ => serde_json::from_str("{}").map_err(|e| e.to_string())?,
     };
     if cfg.client_id.trim().is_empty() || cfg.client_secret.trim().is_empty() {
-        if let Some((id, secret, redirect)) = bundled::soundcloud() {
+        if let Some((id, redirect)) = bundled::soundcloud() {
             cfg.client_id = id;
-            cfg.client_secret = secret;
+            cfg.client_secret = String::new();
+            cfg.sc_relay = bundled::RELAY_URL.to_string();
             if !fs::read_to_string(&path).unwrap_or_default().contains("\"redirect_uri\"") {
                 cfg.redirect_uri = redirect;
             }
@@ -421,9 +424,8 @@ mod config_tests {
         fs::create_dir_all(tmp.join("sc-client")).unwrap();
         let theirs = bundled::soundcloud();
         let mut old = serde_json::json!({ "spotify_client_id": "mine", "discord_client_id": bundled::DISCORD_CLIENT_ID });
-        if let Some((id, secret, _)) = &theirs {
+        if let Some((id, _)) = &theirs {
             old["client_id"] = serde_json::json!(id);
-            old["client_secret"] = serde_json::json!(secret);
         }
         fs::write(tmp.join("sc-client").join("config.json"), old.to_string()).unwrap();
         fs::write(tmp.join("sc-client").join("tokens.json"), "{}").unwrap();
@@ -437,7 +439,10 @@ mod config_tests {
         assert_eq!(kept["spotify_client_id"], "mine");
         assert!(kept.get("discord_client_id").is_none());
         if theirs.is_some() {
-            assert!(kept.get("client_secret").is_none());
+            assert!(kept.get("client_id").is_none());
+            // (the app's own: finished by the relay, no secret in it)
+            let cfg = load_config().unwrap();
+            assert!(cfg.client_secret.is_empty() && cfg.sc_relay == bundled::RELAY_URL);
         }
         // and the app's own still fill in, unwritten
         assert_eq!(load_config().unwrap().discord_client_id, bundled::DISCORD_CLIENT_ID);

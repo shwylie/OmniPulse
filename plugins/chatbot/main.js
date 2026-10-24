@@ -1276,7 +1276,9 @@ async function kickSignInFlow(values, said, copy, who) {
   const bot = who === "bot";
   const v = Object.assign({}, S(), values || {});
   const id = String(v.kickClientId || "").trim(), secret = String(v.kickClientSecret || "").trim();
-  if (!id || !secret) return "Put your Kick app's Client ID and Client Secret in first (their note says where), then sign in.";
+  // (OmniPulse's own app: no secret here, the relay finishes the sign-in)
+  const relay = secret ? "" : String(v.kickRelay || "").trim();
+  if (!id || (!secret && !relay)) return "Put your Kick app's Client ID and Client Secret in first, then sign in.";
   const verifier = randomText(64), state = randomText(24);
   const q = { client_id: id, response_type: "code", redirect_uri: KICK_REDIRECT, scope: bot ? KICK_BOT_SCOPES : KICK_SCOPES, state, code_challenge: b64url(sha256(utf8(verifier))), code_challenge_method: "S256" };
   const waiting = OmniPulse.app.awaitRedirect(KICK_REDIRECT_PORT, "/kick");
@@ -1290,10 +1292,12 @@ async function kickSignInFlow(values, said, copy, who) {
   String(back.query || "").split("&").forEach((kv) => { const i = kv.indexOf("="); if (i > 0) got[kv.slice(0, i)] = decodeURIComponent(kv.slice(i + 1).replace(/\+/g, " ")); });
   if (got.error) return "Kick's sign-in didn't finish: " + (got.error_description || got.error);
   if (got.state !== state || !got.code) return "Kick's sign-in didn't come back as it should: try again.";
-  const t = await form("https://id.kick.com/oauth/token", { grant_type: "authorization_code", client_id: id, client_secret: secret, redirect_uri: KICK_REDIRECT, code: got.code, code_verifier: verifier });
-  if (!t.ok || !t.j.access_token) return "Kick didn't take the sign-in: " + (t.j.error_description || t.j.message || t.status) + ". Check its Client Secret, and that its Redirect URL is " + KICK_REDIRECT + ".";
+  const t = relay
+    ? await viaRelay(relay, "token", { code: got.code, code_verifier: verifier, redirect_uri: KICK_REDIRECT })
+    : await form("https://id.kick.com/oauth/token", { grant_type: "authorization_code", client_id: id, client_secret: secret, redirect_uri: KICK_REDIRECT, code: got.code, code_verifier: verifier });
+  if (!t.ok || !t.j.access_token) return "Kick didn't take the sign-in: " + (t.j.error_description || t.j.message || t.j.error || t.status) + (relay ? ". Try again in a moment." : ". Check your app's Client Secret, and that its Redirect URL is " + KICK_REDIRECT + ".");
   const p = bot ? "kickBot" : "kick";
-  const keep = { kickClientId: id, kickClientSecret: secret, [p + "Token"]: t.j.access_token, [p + "RefreshToken"]: t.j.refresh_token || "" };
+  const keep = { kickClientId: id, kickClientSecret: secret, kickRelay: relay, [p + "Token"]: t.j.access_token, [p + "RefreshToken"]: t.j.refresh_token || "" };
   Object.assign(OmniPulse.settings, keep);
   const me = await kickApi("GET", "users", null, false, who);
   const u = me.data && me.data[0];
@@ -1331,11 +1335,21 @@ async function kickApi(method, path, body, again, who) {
   try { return await r.json(); } catch (e) { return {}; }
 }
 
+// A Kick sign-in (or renewal) finished by OmniPulse's relay, which keeps its app's secret
+async function viaRelay(relay, what, body) {
+  const r = await OmniPulse.fetch(relay.replace(/\/$/, "") + "/api/kick/" + what, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  let j = {};
+  try { j = await r.json(); } catch (e) {}
+  return { ok: r.ok, status: r.status, j };
+}
+
 async function kickRenew(who) {
   const s = S();
   const p = who === "bot" ? "kickBot" : "kick";
-  if (!s[p + "RefreshToken"] || !s.kickClientId || !s.kickClientSecret) return false;
-  const t = await form("https://id.kick.com/oauth/token", { grant_type: "refresh_token", client_id: s.kickClientId, client_secret: s.kickClientSecret, refresh_token: s[p + "RefreshToken"] });
+  if (!s[p + "RefreshToken"] || !s.kickClientId || (!s.kickClientSecret && !s.kickRelay)) return false;
+  const t = s.kickClientSecret
+    ? await form("https://id.kick.com/oauth/token", { grant_type: "refresh_token", client_id: s.kickClientId, client_secret: s.kickClientSecret, refresh_token: s[p + "RefreshToken"] })
+    : await viaRelay(s.kickRelay, "refresh", { refresh_token: s[p + "RefreshToken"] });
   if (!t.ok || !t.j.access_token) return false;
   const keep = { [p + "Token"]: t.j.access_token, [p + "RefreshToken"]: t.j.refresh_token || s[p + "RefreshToken"] };
   await OmniPulse.app.saveSettings(keep);
@@ -1781,7 +1795,7 @@ OmniPulse.register({
     return {
       running: !stopped,
       twitch: { clientId: !!String(S().twitchClientId || "").trim(), login: S().login || "", bot: S().botLogin || "", up: !!(chat && chat.up) },
-      kick: { on: yes(S().kickOn), app: !!String(S().kickClientId || "").trim() && !!String(S().kickClientSecret || "").trim(), login: S().kickLogin || "", bot: S().kickBotLogin || "", channel: S().kickChannel || "", up: !!(kick && kick.up) },
+      kick: { on: yes(S().kickOn), app: !!String(S().kickClientId || "").trim() && (!!String(S().kickClientSecret || "").trim() || !!String(S().kickRelay || "").trim()), login: S().kickLogin || "", bot: S().kickBotLogin || "", channel: S().kickChannel || "", up: !!(kick && kick.up) },
       obs: { on: yes(S().obsOn), up: !!obsReady },
       streamlabs: { on: !!String(S().streamlabsToken || "").trim(), up: tip("streamlabs") },
       streamelements: { on: !!String(S().streamelementsToken || "").trim(), up: tip("streamelements") },

@@ -53,3 +53,16 @@ page or open apps by itself, so the relay's page does that.
 ## Trying it on this PC
 
 `npx wrangler dev --port 8787` runs it locally. Set the Relay Address to `http://127.0.0.1:8787`.
+
+## Sign-ins that need a secret (SoundCloud, Kick)
+
+OmniPulse's own SoundCloud and Kick apps need their secret to finish a sign-in or renew one. The secrets
+live here, not in the app: the app sends the sign-in's code (or its refresh token) to `/api/soundcloud/*`
+or `/api/kick/*`, and the relay adds the app's keys and asks SoundCloud or Kick.
+
+The Client IDs are in `wrangler.toml` (`SC_CLIENT_ID`, `KICK_CLIENT_ID`). Set the secrets once, yourself:
+
+    npx wrangler secret put SC_CLIENT_SECRET
+    npx wrangler secret put KICK_CLIENT_SECRET
+
+Until a secret is set, its sign-ins answer 503 ("isn't set up on this relay").
