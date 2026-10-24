@@ -4046,13 +4046,13 @@ fn mix_feedback(shared: &Shared, good: bool) -> Result<String, &'static str> {
     let _ = &began;
     let n = std::fs::read_to_string(dir.join("mix-feedback.jsonl")).map(|s| s.lines().count()).unwrap_or(0);
     let note = format!("Transition rated {}: {what} ({}). {n} ratings so far.", if good { "good" } else { "bad" }, rec["kind"].as_str().unwrap_or(""));
-    if std::env::var_os("OMNIPULSE_SELFTEST").is_none() && set_row_on(&shared.borrow().web.prefs, "shareRatings", true) { mix_ratings_send(shared, dir.clone()); }
     if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_status(note.clone().into()); }
     Ok(note)
 }
 
-/// Your ratings not yet sent, sent to the developer (the relay keeps them): all of them after the last one
-/// that got there (state/mix-feedback-sent: how many lines have), so one missed while offline goes next time
+/// Your ratings not yet sent, sent to the developer (the relay keeps them), once each launch: all of them
+/// after the last one that got there (state/mix-feedback-sent: how many lines have), so if it couldn't be
+/// reached they go next launch (200 at a time)
 fn mix_ratings_send(shared: &Shared, dir: std::path::PathBuf) {
     let rt = shared.borrow().rt.clone();
     rt.spawn(async move {
@@ -10195,8 +10195,9 @@ thread_local! {
 fn update_check(shared: &Shared, said: bool) {
     let (rt, weak) = { let a = shared.borrow(); (a.rt.clone(), a.ui.clone()) };
     if let Some(ui) = weak.upgrade() { ui.set_update_note("Checking...".into()); }
+    let beta = shared.borrow().web.prefs["betaUpdates"].as_bool().unwrap_or(false);
     rt.spawn(async move {
-        let r = updater::check().await;
+        let r = updater::check(beta).await;
         let _ = weak.upgrade_in_event_loop(move |ui| {
             match r {
                 Ok(Some(rel)) => {
@@ -11163,6 +11164,7 @@ fn apply_look(shared: &Shared) {
     ui.set_art_accent(integrations::set(prefs, "artAccent"));
     ui.set_tab_right(prefs["tabAlign"].as_str() == Some("right"));
     ui.set_player_style(prefs["playerStyle"].as_str().filter(|s| matches!(*s, "bar" | "float" | "minimal")).unwrap_or("tab").into());
+    ui.set_beta_updates(prefs["betaUpdates"].as_bool().unwrap_or(false));
     ui.set_title_colour(prefs["titleColour"].as_str().filter(|s| matches!(*s, "subtle" | "plain")).unwrap_or("match").into());
 }
 
@@ -11387,6 +11389,12 @@ fn main() -> Result<(), slint::PlatformError> {
     if std::env::var_os("OMNIPULSE_SELFTEST").is_none() {
         let s = shared.clone();
         slint::Timer::single_shot(std::time::Duration::from_secs(20), move || update_check(&s, false));
+        // (and the Seamless Mix ratings made since the last launch, sent once: with Send My Ratings on)
+        let s = shared.clone();
+        slint::Timer::single_shot(std::time::Duration::from_secs(30), move || {
+            if !set_row_on(&s.borrow().web.prefs, "shareRatings", true) { return; }
+            if let Ok(d) = omnipulse_core::data_dir() { mix_ratings_send(&s, d.join("state")); }
+        });
     }
     let s = shared.clone();
     ui.on_name_done(move |name| name_done(&s, &name));
@@ -11443,6 +11451,13 @@ fn main() -> Result<(), slint::PlatformError> {
     ui.set_mix_available(true);
     let s = shared.clone();
     ui.on_mix_toggle(move || set_toggle(&s, "smartOn"));
+    let s = shared.clone();
+    // (Beta Updates: kept, and checked again on that channel at once)
+    ui.on_beta_updates_set(move |on| {
+        set_look_pref(&s, "betaUpdates", serde_json::json!(on));
+        if let Some(ui) = s.borrow().ui.upgrade() { ui.set_beta_updates(on); }
+        update_check(&s, false);
+    });
     let s = shared.clone();
     ui.on_mix_rate(move |good| if let Err(e) = mix_feedback(&s, good) { if let Some(ui) = s.borrow().ui.upgrade() { ui.set_status(e.into()); } });
     // (Now Playing: the lyrics or the description, as last picked)

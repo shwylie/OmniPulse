@@ -182,6 +182,23 @@ export default {
       return new Response(await got.text(), { status: got.status, headers: { "content-type": "application/json", "cache-control": "no-store" } });
     }
 
+    // the native app's stable updates, from R2 (put there by scripts/release-native.mjs): latest.json and
+    // the installers (betas are on GitHub). Only what's signed with OmniPulse's key is ever run by the app
+    if (req.method === "GET" && parts[0] === "updates" && env.UPDATES) {
+      const key = parts.slice(1).join("/");
+      const ok = /^stable\/latest\.json$/.test(key) || /^download\/\d+\.\d+\.\d+\/OmniPulse_[\w.-]+\.exe$/.test(key);
+      if (!ok) return json({ error: "not found" }, 404);
+      const obj = await env.UPDATES.get(key);
+      if (!obj) return json({ error: "not found" }, 404);
+      const latest = key.endsWith(".json");
+      return new Response(obj.body, { headers: {
+        "content-type": latest ? "application/json" : "application/octet-stream",
+        "content-length": String(obj.size),
+        // (the list: checked fresh; an installer: never changes)
+        "cache-control": latest ? "no-cache" : "public, max-age=31536000, immutable",
+      } });
+    }
+
     // Seamless Mix ratings from testers' apps, kept for the developer (read with RATINGS_KEY, a secret)
     if (url.pathname === "/api/mix-ratings") {
       const stub = env.RATINGS.get(env.RATINGS.idFromName("all"));
@@ -575,6 +592,9 @@ export class Ratings {
     if (url.pathname === "/add") {
       const b = await req.json();
       const now = Date.now();
+      // (the app sends once each launch: more than one a minute from an install isn't the app)
+      const last = this.sql.exec("SELECT MAX(got) AS t FROM r WHERE install = ?", b.install).toArray()[0];
+      if (last && last.t && now - last.t < 60000) return json({ error: "too soon" }, 429);
       for (const l of b.lines) this.sql.exec("INSERT INTO r (install, got, line) VALUES (?, ?, ?)", b.install, now, JSON.stringify(l).slice(0, 64 * 1024));
       return json({ ok: true, kept: b.lines.length });
     }

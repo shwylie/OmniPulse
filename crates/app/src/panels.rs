@@ -551,7 +551,7 @@ fn fields_of(name: &str, vals: &Map<String, Value>, prefs: &Value, lan: &str) ->
             tog("smartVoices", "Vocal Handoff", "Stops two songs' vocals from overlapping. The current song's voice drops out as the next song's voice comes in. It works like a karaoke switch, so it can also quiet other sounds in the centre of the mix. Bass and low drums aren't affected."),
             tog("smartRoll", "Rolls", "For songs too different to blend, the current song's last bar loops, halving each time (a bar, a half, a quarter, an eighth) to build up. The next song then lands on its first beat at its own tempo. It turns itself off if most of your ratings for it (at least 5) are bad."),
             tog("smartTape", "Tape Stops", "For songs too different to blend, the current song slows to a stop and the next one spins up. It only starts once most of your ratings for it (at least 5) are good."),
-            tog("shareRatings", "Send My Ratings to the Developer", "Your Mix Good and Mix Bad ratings go to OmniPulse's developer, to help tune Seamless Mix. Each one has the two songs' names and how they were mixed. Nothing about your accounts is sent."),
+            tog("shareRatings", "Send My Ratings to the Developer", "Each time you open OmniPulse, your new Mix Good and Mix Bad ratings go to OmniPulse's developer, to help tune Seamless Mix. Each one has the two songs' names and how they were mixed. Nothing about your accounts is sent."),
         ],
         // Limit Requests' own page (as the web app's, under it)
         "limits" => vec![

@@ -17,6 +17,11 @@ SC_REDIRECT = "http://localhost:8080/callback"
 name = "ROOMS"
 class_name = "Room"
 
+# the native app's updates (scripts/release-native.mjs puts them there)
+[[r2_buckets]]
+binding = "UPDATES"
+bucket_name = "omnipulse-updates"
+
 [[durable_objects.bindings]]
 name = "SHARES"
 class_name = "Share"

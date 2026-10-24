@@ -3398,6 +3398,8 @@ export component AppWindow inherits Window {
     in property <int> device-offset: -1;
     in property <bool> mixing;
     callback mix-toggle();
+    in property <bool> beta-updates;
+    callback beta-updates-set(bool);
     callback mix-rate(bool);
     // a right-click on the title bar's Seamless Mix button, or a platform's: its settings ("smart", or the platform)
     callback title-settings(string);
@@ -4575,6 +4577,22 @@ export component AppWindow inherits Window {
                                         VerticalLayout { alignment: center; Pill { label: root.update-label; on: root.update-label == "Update"; clicked => { root.update-act(); } } }
                                     }
                                 }
+                                Card {
+                                    HorizontalLayout {
+                                        padding: 16px;
+                                        padding-top: 12px;
+                                        padding-bottom: 12px;
+                                        spacing: 10px;
+                                        VerticalLayout {
+                                            horizontal-stretch: 1;
+                                            alignment: center;
+                                            spacing: 2px;
+                                            HiTitle { text: "Beta Updates"; }
+                                            Text { text: "Get test versions as soon as they're ready, before everyone else. They may have bugs. You still get every stable version."; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
+                                        }
+                                        CenterToggle { checked: root.beta-updates; toggled => { root.beta-updates-set(self.checked); } }
+                                    }
+                                }
                                 for c in [
                                     { name: "App & Look", note: "Theme, colours, player style, name, tray, taskbar widget, animations, backups", d: Icons.gear },
                                     { name: "Integrations", note: "Accounts, platforms, catalogues, following, Listen Along & Jams, Last.fm", d: Icons.person },
@@ -5459,8 +5477,9 @@ export component AppWindow inherits Window {
                           // shared out between them)
                           alignment: start;
                           if root.pf-preview == "lyrics": LyricsPreview { look: root.pf-lyrics; }
+                          // (its height from its layout, which knows how its notes wrap: a preferred height
+                          // reads them as one line)
                           for f[i] in root.pf-fields: Rectangle {
-                           height: fcol.preferred-height;
                            background: f.kind == "note" ? transparent : Theme.panel;
                            border-radius: f.kind == "note" ? 0px : 12px;
                            border-width: f.kind == "note" ? 0px : 1px;

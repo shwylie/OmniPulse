@@ -42,7 +42,9 @@ writeFileSync(extra, JSON.stringify({ bundle: { createUpdaterArtifacts: true } }
 run("npm", ["run", "build", "--", "--config", JSON.stringify(extra)], { env: { ...process.env, TAURI_SIGNING_PRIVATE_KEY: readFileSync(KEY, "utf8"), TAURI_SIGNING_PRIVATE_KEY_PASSWORD: "" } });
 
 // 3. no SoundCloud key in it
-if (readFileSync("target/release/OmniPulse.exe").includes("gk1rHbyz5QpT4")) { console.error("The SoundCloud key is in the build: not publishing."); process.exit(1); }
+// (its secret, as keys.local.json has it: never in the code, and never in a build, as the relay keeps it)
+const scSecret = (() => { try { return String(JSON.parse(readFileSync("crates/core/keys.local.json", "utf8")).soundcloud_client_secret || ""); } catch (e) { return ""; } })();
+if (scSecret && readFileSync("target/release/OmniPulse.exe").includes(scSecret)) { console.error("The SoundCloud secret is in the build: not publishing."); process.exit(1); }
 
 }
 
