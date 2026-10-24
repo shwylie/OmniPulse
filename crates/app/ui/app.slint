@@ -803,6 +803,15 @@ component Toggle inherits Rectangle {
     TouchArea { clicked => { root.checked = !root.checked; root.toggled(); } }
 }
 
+/// A switch in a row: centred in it, however tall the row (a layout doesn't heed a switch's own y)
+component CenterToggle inherits VerticalLayout {
+    in-out property <bool> checked;
+    callback toggled();
+    alignment: center;
+    Toggle { checked <=> root.checked; toggled => { root.toggled(); } }
+}
+
+
 component PlatIcon inherits Rectangle {
     in property <string> plat;
     in property <bool> title-bar;   // (YouTube Music's own mark there)
@@ -945,7 +954,7 @@ component FlowFieldsView inherits VerticalLayout {
             fti := TextInput { x: 10px; width: parent.width - 20px; height: parent.height; vertical-alignment: center; color: Theme.text; font-size: 13px; single-line: true; input-type: fl.kind == "number" ? InputType.decimal : InputType.text; text: fl.value; edited => { root.changed(i, self.text); } }
         }
         if fl.kind == "select": Dropdown { options: fl.options; current: fl.at; y: (parent.height - self.height) / 2; picked(k) => { root.picked(i, k); } }
-        if fl.kind == "toggle": Toggle { checked: fl.value == "true"; y: (parent.height - self.height) / 2; toggled => { root.changed(i, self.checked ? "true" : "false"); } }
+        if fl.kind == "toggle": CenterToggle { checked: fl.value == "true"; toggled => { root.changed(i, self.checked ? "true" : "false"); } }
     }
 }
 
@@ -1792,7 +1801,7 @@ component GroupSwitch inherits HorizontalLayout {
         HiTitle { text: root.name; }
         if root.note != "": Text { text: root.note; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
     }
-    Toggle { checked <=> root.checked; y: (parent.height - self.height) / 2; toggled => { root.toggled(self.checked); } }
+    CenterToggle { checked <=> root.checked; toggled => { root.toggled(self.checked); } }
 }
 
 /// An account, as a tile: its mark, a light (signed in, waiting, out), who, its switch, and its icons (its plans,
@@ -1831,7 +1840,7 @@ component AccountTile inherits Rectangle {
         }
         HorizontalLayout {
             spacing: 2px;
-            if root.acc.switch != "": Toggle { checked: root.acc.on; y: (parent.height - self.height) / 2; toggled => { root.toggle(); } }
+            if root.acc.switch != "": CenterToggle { checked: root.acc.on; toggled => { root.toggle(); } }
             Rectangle { horizontal-stretch: 1; }
             if root.acc.manage != "": IconButton { d: Icons.open; size: 30px; tip: "Manage your subscription, on its site"; clicked => { root.manage(); } }
             if root.acc.keys != "": IconButton { d: Icons.key; size: 30px; tip: root.acc.keys + ": your own app keys, for requests of your own"; clicked => { root.keys(); } }
@@ -1924,7 +1933,7 @@ component StreamTile inherits Rectangle {
         Rectangle { vertical-stretch: 1; }
         HorizontalLayout {
             spacing: 2px;
-            Toggle { checked: root.r.on; y: (parent.height - self.height) / 2; toggled => { root.toggle(root.r.key); } }
+            CenterToggle { checked: root.r.on; toggled => { root.toggle(root.r.key); } }
             Rectangle { horizontal-stretch: 1; }
             if root.r.on && root.addr != "": IconButton { d: Icons.copy; size: 30px; tip: "Copy its address, for a Browser source in OBS"; clicked => { root.copy(root.addr); } }
             if root.r.more: IconButton { d: Icons.gear; size: 30px; tip: root.r.label + ": its settings"; clicked => { root.more(root.r.key); } }
@@ -1970,7 +1979,7 @@ component PluginTile inherits Rectangle {
         }
         if !root.add: HorizontalLayout {
             spacing: 2px;
-            Toggle { checked: root.r.on; y: (parent.height - self.height) / 2; toggled => { root.toggle(root.r.key); } }
+            CenterToggle { checked: root.r.on; toggled => { root.toggle(root.r.key); } }
             Rectangle { horizontal-stretch: 1; }
             if root.r.more: IconButton { d: Icons.gear; size: 30px; tip: root.r.label + ": its settings"; clicked => { root.more(root.r.key); } }
         }
@@ -2039,7 +2048,7 @@ component SetRowView inherits Card {
         }
         if root.r.more: IconButton { d: Icons.gear; size: 36px; tip: root.r.label + ": its settings"; y: (parent.height - self.height) / 2; clicked => { root.more(root.r.key); } }
         if root.r.button != "": Pill { label: root.r.button + " ›"; y: (parent.height - self.height) / 2; clicked => { root.more(root.r.key); } }
-        if root.r.button == "": Toggle { checked: root.r.on; y: (parent.height - self.height) / 2; toggled => { root.toggle(root.r.key); } }
+        if root.r.button == "": CenterToggle { checked: root.r.on; toggled => { root.toggle(root.r.key); } }
     }
     HiGlow { lit: Hi.label != "" && Hi.label == root.r.label; r: Theme.card-radius; }
 }
@@ -2163,7 +2172,7 @@ component BotFieldRow inherits VerticalLayout {
                 Text { text: root.f.label; color: Theme.text; font-weight: 700; font-size: 13px; }
                 if root.f.note != "": Text { text: root.f.note; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
             }
-            Toggle { checked: root.f.value == "true"; y: (parent.height - self.height) / 2; toggled => { root.set(root.f.key, self.checked ? "true" : "false"); } }
+            CenterToggle { checked: root.f.value == "true"; toggled => { root.set(root.f.key, self.checked ? "true" : "false"); } }
         }
     }
     // an account: who's signed in (or nobody), and its sign-in opened here or copied for another browser
@@ -2228,7 +2237,7 @@ component FeatCard inherits Rectangle {
         }
         if root.c.open: IconButton { d: Icons.gear; size: 32px; y: (parent.height - self.height) / 2; tip: root.c.name + ": its settings"; clicked => { root.act("sheet:" + root.c.id); } }
         if root.c.id == "games" || root.c.id == "actions": IconButton { d: Icons.open; size: 32px; filled: root.c.id == "actions"; y: (parent.height - self.height) / 2; tip: root.c.id == "games" ? "Add games from Actions' templates" : "Open your actions"; clicked => { root.act("actions"); } }
-        if root.c.id != "games" && root.c.id != "actions": Toggle { checked: root.c.on; y: (parent.height - self.height) / 2; toggled => { root.set("feat:" + root.c.id, self.checked ? "true" : "false"); } }
+        if root.c.id != "games" && root.c.id != "actions": CenterToggle { checked: root.c.on; toggled => { root.set("feat:" + root.c.id, self.checked ? "true" : "false"); } }
     }
                 }
 
@@ -2252,6 +2261,7 @@ component BotPage inherits Rectangle {
     in property <int> port: 7878;
     in property <bool> widget-on;
     in property <[SetRow]> stream-rows;
+    in property <length> foot: 24px;
     callback set(string, string);
     callback act(string);
     callback try-it(string);
@@ -2263,7 +2273,7 @@ component BotPage inherits Rectangle {
         height: parent.height;
         VerticalLayout {
             padding-right: 12px;
-            padding-bottom: 24px;
+            padding-bottom: root.foot;
             spacing: 0px;
             alignment: start;
             HorizontalLayout {
@@ -2343,7 +2353,7 @@ component BotPage inherits Rectangle {
         height: parent.height;
         VerticalLayout {
             padding-right: 12px;
-            padding-bottom: 24px;
+            padding-bottom: root.foot;
             spacing: 14px;
             alignment: start;
             // the bot, and a chat to try it in
@@ -4390,7 +4400,7 @@ export component AppWindow inherits Window {
                                             Text { text: h.label; color: Theme.text; font-weight: 700; }
                                             if h.note != "": Text { text: h.note; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
                                         }
-                                        if h.toggle: Toggle { checked: h.on; y: (parent.height - self.height) / 2; toggled => { root.set-toggle(h.key); } }
+                                        if h.toggle: CenterToggle { checked: h.on; toggled => { root.set-toggle(h.key); } }
                                         if !h.toggle: Text { text: "\u{203a}"; color: Theme.muted; font-size: 22px; vertical-alignment: center; }
                                     }
                                     TouchArea { width: h.toggle ? parent.width - 80px : parent.width; x: 0; mouse-cursor: MouseCursor.pointer; clicked => { root.set-hit(i); } }
@@ -4671,7 +4681,7 @@ export component AppWindow inherits Window {
                                                 Text { text: "Progress Bar"; color: Theme.text; font-weight: 700; }
                                                 Text { text: "Where the song is, along the widget's foot."; color: Theme.muted; font-size: 12px; wrap: word-wrap; min-height: self.preferred-height; }
                                             }
-                                            Toggle { checked <=> root.widget-progress; y: (parent.height - self.height) / 2; toggled => { root.app-pref("widgetProgress", self.checked); } }
+                                            CenterToggle { checked <=> root.widget-progress; toggled => { root.app-pref("widgetProgress", self.checked); } }
                                         }
                                         HorizontalLayout {
                                             spacing: 12px;
@@ -4681,7 +4691,7 @@ export component AppWindow inherits Window {
                                                 Text { text: "Full-Height Cover"; color: Theme.text; font-weight: 700; }
                                                 Text { text: "The cover as tall as the taskbar, at the widget's edge. Off: a smaller one."; color: Theme.muted; font-size: 12px; wrap: word-wrap; min-height: self.preferred-height; }
                                             }
-                                            Toggle { checked <=> root.widget-big-art; y: (parent.height - self.height) / 2; toggled => { root.app-pref("widgetBigArt", self.checked); } }
+                                            CenterToggle { checked <=> root.widget-big-art; toggled => { root.app-pref("widgetBigArt", self.checked); } }
                                         }
                                         HorizontalLayout {
                                             spacing: 12px;
@@ -4691,7 +4701,7 @@ export component AppWindow inherits Window {
                                                 HiTitle { text: "Visualiser"; }
                                                 Text { text: "The visualiser's style (above) in the widget, in a little space of its own beside the song's name. Ring is shown as Centre there."; color: Theme.muted; font-size: 12px; wrap: word-wrap; min-height: self.preferred-height; }
                                             }
-                                            Toggle { checked <=> root.widget-viz; y: (parent.height - self.height) / 2; toggled => { root.app-pref("widgetViz", self.checked); } }
+                                            CenterToggle { checked <=> root.widget-viz; toggled => { root.app-pref("widgetViz", self.checked); } }
                                         }
                                     }
                                 }
@@ -4905,7 +4915,7 @@ export component AppWindow inherits Window {
                                                 for ms[k] in [1000, 2000, 3000, 5000, 8000]: Chip { label: (ms / 1000) + " s"; on: root.fade-ms == ms || (k == 0 && root.fade-ms < 1000); y: (parent.height - self.height) / 2; clicked => { root.fade-ms-pick(ms); } }
                                             }
                                             Rectangle { width: 10px; }
-                                            Toggle { checked <=> root.fade-on; y: (parent.height - self.height) / 2; toggled => { root.fade-on-changed(self.checked); } }
+                                            CenterToggle { checked <=> root.fade-on; toggled => { root.fade-on-changed(self.checked); } }
                                         }
                                         GroupLine { }
                                         HorizontalLayout {
@@ -4946,7 +4956,7 @@ export component AppWindow inherits Window {
                                                 HiTitle { text: "Equalizer"; }
                                                 Text { text: "Ten bands."; color: Theme.muted; font-size: 12px; }
                                             }
-                                            Toggle { checked <=> root.eq-on; y: (parent.height - self.height) / 2; toggled => { root.eq-on-changed(self.checked); } }
+                                            CenterToggle { checked <=> root.eq-on; toggled => { root.eq-on-changed(self.checked); } }
                                         }
                                         if root.eq-on: HorizontalLayout {
                                             alignment: start;
@@ -4995,7 +5005,7 @@ export component AppWindow inherits Window {
                                                 Text { text: r.on ? "Streamer Mode is on" : r.label; color: Theme.text; font-weight: 700; }
                                                 Text { text: r.note; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
                                             }
-                                            Toggle { checked: r.on; y: (parent.height - self.height) / 2; toggled => { root.set-toggle(r.key); } }
+                                            CenterToggle { checked: r.on; toggled => { root.set-toggle(r.key); } }
                                         }
                                     }
                                     if r.key == "streamSafe": VerticalLayout { padding-top: 10px; SetRowView { r: r; toggle(k) => { root.set-toggle(k); } more(k) => { root.set-more(k); } } }
@@ -5281,6 +5291,7 @@ export component AppWindow inherits Window {
                             port: root.widget-port;
                             widget-on: root.widget-on;
                             stream-rows: root.set-rows-streaming;
+                            foot: root.tab-style && !root.pf-dirty ? 110px : 24px;
                             set(k, v) => { root.bot-set(k, v); }
                             act(a) => { root.bot-act(a); }
                             try-it(t) => { root.bot-try(t); }
@@ -5363,13 +5374,13 @@ export component AppWindow inherits Window {
                                 Text { text: f.label; color: Theme.text; font-weight: 700; }
                                 if f.note != "": Text { text: f.note; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
                             }
-                            if f.kind == "toggle": Toggle { checked: f.value == "true"; y: (parent.height - self.height) / 2; toggled => { root.pf-set(i, self.checked ? "true" : "false"); } }
+                            if f.kind == "toggle": CenterToggle { checked: f.value == "true"; toggled => { root.pf-set(i, self.checked ? "true" : "false"); } }
                     // a list's row: its buttons, then its switch
                     if f.kind == "row": HorizontalLayout {
                         spacing: 6px;
                         for o[k] in f.options: Pill { label: o; y: (parent.height - self.height) / 2; clicked => { root.pf-set(i, "btn:" + k); } }
                     }
-                    if f.kind == "row": Toggle { checked: f.value == "true"; y: (parent.height - self.height) / 2; toggled => { root.pf-set(i, self.checked ? "true" : "false"); } }
+                    if f.kind == "row": CenterToggle { checked: f.value == "true"; toggled => { root.pf-set(i, self.checked ? "true" : "false"); } }
                             // a choice: a dropdown (as the web app's)
                             if f.kind == "select" && f.options.length <= 3: HorizontalLayout {
                                 spacing: 4px;
@@ -5416,7 +5427,7 @@ export component AppWindow inherits Window {
                             }
                             // a switch with its own settings beside it (Alerts: Configure, with it on)
                             if f.kind == "togglecfg" && f.value == "true": Pill { label: f.options.length > 0 ? f.options[0] : "Configure"; y: (parent.height - self.height) / 2; clicked => { root.pf-set(i, "btn:0"); } }
-                            if f.kind == "togglecfg": Toggle { checked: f.value == "true"; y: (parent.height - self.height) / 2; toggled => { root.pf-set(i, self.checked ? "true" : "false"); } }
+                            if f.kind == "togglecfg": CenterToggle { checked: f.value == "true"; toggled => { root.pf-set(i, self.checked ? "true" : "false"); } }
                             if f.kind == "text" || f.kind == "password" || f.kind == "number": Rectangle {
                                 width: 180px;
                                 height: 34px;
@@ -5447,7 +5458,7 @@ export component AppWindow inherits Window {
                             }
                         }
                         // (clear of the player's tab, laid over the page's foot)
-                        if root.tab-style: Rectangle { height: 64px; }
+                        if root.tab-style && (!root.bot-page || root.pf-dirty): Rectangle { height: 64px; }
                     }
                     // leaving with changes not saved: Save them, or leave them, or stay (the page's Save pulsing behind)
                     if root.leave-ask: Rectangle {
@@ -5582,7 +5593,7 @@ export component AppWindow inherits Window {
                                             border-color: fnti.has-focus ? Theme.accent : Theme.line;
                                             fnti := TextInput { x: 12px; width: parent.width - 24px; height: parent.height; vertical-alignment: center; color: Theme.text; font-size: 16px; font-weight: 700; single-line: true; text: root.flow-name; edited => { root.flow-name-edited(self.text); } }
                                         }
-                                        Toggle { checked: root.flow-on; y: (parent.height - self.height) / 2; toggled => { root.flow-on-toggled(self.checked); } }
+                                        CenterToggle { checked: root.flow-on; toggled => { root.flow-on-toggled(self.checked); } }
                                         Pill { label: "One at a Time"; on: root.flow-queued; tip: "Its runs queued, each after the one before it's done (as Streamer.bot's queues): alerts that never overlap"; y: (parent.height - self.height) / 2; clicked => { root.flow-act("queued"); } }
                                         Pill { label: "Run Now"; tip: "Its steps, now, as if you'd started it"; y: (parent.height - self.height) / 2; clicked => { root.flow-act("run"); } }
                                         Pill { label: "Copy"; tip: "Another action like this one"; y: (parent.height - self.height) / 2; clicked => { root.flow-act("copy"); } }
@@ -5669,7 +5680,7 @@ export component AppWindow inherits Window {
                         if root.queue-requests > 0: Pill { label: "Clear requests"; y: (parent.height - self.height) / 2; clicked => { root.queue-clear(true); } }
                         if root.queue-room == "" || root.queue-room-host: Pill { label: "Clear"; y: (parent.height - self.height) / 2; clicked => { root.queue-clear(false); } }
                         Text { text: "Autoplay"; color: Theme.muted; font-size: 12px; vertical-alignment: center; }
-                        Toggle { checked <=> root.autoplay; y: (parent.height - self.height) / 2; toggled => { root.autoplay-changed(self.checked); } }
+                        CenterToggle { checked <=> root.autoplay; toggled => { root.autoplay-changed(self.checked); } }
                     }
                     if root.queue-room != "": Rectangle {
                         height: 40px;
@@ -6046,7 +6057,7 @@ export component AppWindow inherits Window {
                                             padding-left: 10px;
                                             padding-right: 6px;
                                             Text { text: "Chromecast"; color: Theme.text; font-size: 13px; vertical-alignment: center; horizontal-stretch: 1; }
-                                            Toggle { checked: root.cast-on; y: (parent.height - self.height) / 2; toggled => { root.cast-toggle(); } }
+                                            CenterToggle { checked: root.cast-on; toggled => { root.cast-toggle(); } }
                                         }
                                     }
                                 }

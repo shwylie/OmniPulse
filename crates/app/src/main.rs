@@ -6177,6 +6177,10 @@ fn leave_do(shared: &Shared, to: &str) {
     if let Some(i) = to.strip_prefix("crumb:").and_then(|i| i.parse::<usize>().ok()) { return crumb_go(shared, i); }
     if let Some(name) = to.strip_prefix("panel:") { PF_EDIT.with(|e| e.borrow_mut().take()); return panel_open(shared, name); }
     if to == "close" { return settings_close(shared); }
+    if to == "back" {
+        let up = PF_CRUMBS.with(|c| c.borrow().len());
+        if up > 0 { return crumb_go(shared, up - 1); }
+    }
     PF_EDIT.with(|e| e.borrow_mut().take());
     if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_pf_open(false); }
 }
@@ -6309,7 +6313,7 @@ fn bot_act(shared: &Shared, act: &str) {
         BOT_SHEET.with(|b| *b.borrow_mut() = id.to_string());
         return bot_paint(shared);
     }
-    if let Some(url) = act.strip_prefix("url:") { let _ = omnipulse_core::open_url(url.to_string()); return; }
+    if let Some(url) = act.strip_prefix("url:") { if let Err(e) = omnipulse_core::open_url(url.to_string()) { say(&e); } return; }
     if let Some(text) = act.strip_prefix("copy:") { if share::copy(text).is_ok() { say("Copied."); } return; }
     // (its widgets: switched here, their settings their own pages, asked first if something here isn't saved)
     if let Some(key) = act.strip_prefix("row-toggle:") { set_toggle(shared, key); return bot_paint(shared); }
@@ -6431,6 +6435,11 @@ fn crumb_go(shared: &Shared, i: usize) {
     let Some(to) = PF_CRUMBS.with(|c| c.borrow().get(i).cloned()) else { return };
     let Some(ui) = shared.borrow().ui.upgrade() else { return };
     if let Some(n) = to.strip_prefix("panel:") { panel_open(shared, n); return; }
+    if let Some(id) = to.strip_prefix("plugin:") {
+        PF_EDIT.with(|e| e.borrow_mut().take());
+        if let Some(sec) = omnipulse_core::plugins::list().into_iter().find(|p| p.manifest.id == id).map(|p| p.manifest.section).filter(|x| !x.is_empty()) { ui.set_set_cat(sec.into()); }
+        return pf_open(shared, id);
+    }
     PF_EDIT.with(|e| e.borrow_mut().take());
     ui.set_pf_open(false);
     ui.set_set_cat(to.strip_prefix("cat:").unwrap_or("").into());
@@ -6574,11 +6583,16 @@ fn panel_open(shared: &Shared, name: &str) {
             _ => "Library",
         };
         let mut path = vec![("Settings".to_string(), "root".to_string()), (cat.to_string(), format!("cat:{cat}"))];
+        let widgety = matches!(name, "widget" | "lyricsw" | "alerts" | "alertlist") || name.starts_with("alert:");
+        if widgety && plugin_on(&shared.borrow().web.prefs, botpage::BOT) {
+            if let Some(m) = bot_manifest() { path.push((plugin_label(&m), format!("plugin:{}", botpage::BOT))); }
+        }
         match name {
             "alerts" => path.push((panels::title("widget"), "panel:widget".into())),
-            "alertlist" => path.push((panels::title("alerts"), "panel:alerts".into())),
+            "alertlist" => { path.push((panels::title("widget"), "panel:widget".into())); path.push((panels::title("alerts"), "panel:alerts".into())); }
             "replies" => path.push((panels::title("requests"), "panel:requests".into())),
             n if n.starts_with("alert:") => {
+                path.push((panels::title("widget"), "panel:widget".into()));
                 path.push((panels::title("alerts"), "panel:alerts".into()));
                 path.push((panels::title("alertlist"), "panel:alertlist".into()));
             }
@@ -10586,8 +10600,7 @@ fn plugin_app(shared: &Shared, plugin: &str, ask: serde_json::Value, answer: Box
         "openUrl" => {
             let url = arg(0);
             if !url.starts_with("https://") { return send(serde_json::json!({ "error": "only https addresses" })); }
-            let _ = omnipulse_core::open_url(url);
-            send(serde_json::json!({ "ok": true }));
+            send(match omnipulse_core::open_url(url) { Ok(()) => serde_json::json!({ "ok": true }), Err(e) => serde_json::json!({ "error": e }) });
         }
         "say" => {
             let name = omnipulse_core::plugins::list().into_iter().find(|p| p.manifest.id == plugin).map(|p| p.manifest.name).unwrap_or_default();

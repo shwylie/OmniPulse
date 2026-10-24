@@ -317,9 +317,17 @@ pub fn open_url(url: String) -> Result<(), String> {
         || url.starts_with("https://sponsor.ajay.app/")
         // (where your own keys are made: the key setup's pages)
         || url.starts_with("https://developer.spotify.com/")
-        || url.starts_with("https://console.cloud.google.com/"))
+        || url.starts_with("https://console.cloud.google.com/")
+        // (the chatbot's: Twitch's and Kick's sign-ins and developer pages, and the donation services' settings)
+        || url.starts_with("https://www.twitch.tv/")
+        || url.starts_with("https://id.twitch.tv/")
+        || url.starts_with("https://dev.twitch.tv/")
+        || url.starts_with("https://kick.com/")
+        || url.starts_with("https://id.kick.com/")
+        || url.starts_with("https://streamlabs.com/")
+        || url.starts_with("https://streamelements.com/"))
     {
-        return Err("Only SoundCloud, Spotify, YouTube, MusicBrainz, Deezer, Apple Music, Wikipedia and Last.fm links can be opened".to_string());
+        return Err("Only links to the services OmniPulse works with can be opened from it".to_string());
     }
     open_browser(&url)
 }
