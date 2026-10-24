@@ -2,6 +2,8 @@
 name = "omnipulse-jam"
 main = "src/index.js"
 compatibility_date = "2025-09-01"
+# (a deploy leaves variables set in the dashboard alone: a secret added there as Text isn't wiped)
+keep_vars = true
 
 [vars]
 # where the join page's "Download OmniPulse" button points (change it any time, here or in the dashboard)
@@ -9,6 +11,8 @@ DOWNLOAD_URL = ""
 APP_SCHEME = "omnipulse"
 # OmniPulse's own Kick app (its Client ID; its secret is set with: npx wrangler secret put KICK_CLIENT_SECRET)
 KICK_CLIENT_ID = "01M5NZG55J6HQ93XPKVQ8CHRY8"
+# OmniPulse's own Twitch app (Confidential; its secret, TWITCH_CLIENT_SECRET, set in the dashboard)
+TWITCH_CLIENT_ID = "122hyd1hxg8qpi1nfzwc4oa85lolgd"
 # OmniPulse's own SoundCloud app (public: it's in every sign-in link). Its secret: npx wrangler secret put SC_CLIENT_SECRET
 SC_CLIENT_ID = "SET_IN_CLOUDFLARE"
 SC_REDIRECT = "http://localhost:8080/callback"

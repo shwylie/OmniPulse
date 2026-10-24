@@ -138,6 +138,7 @@ async function readJson(req) {
 }
 
 const KICK_REDIRECT = "http://localhost:8476/kick";
+const TWITCH_REDIRECT = "http://localhost:8476/twitch";
 
 export default {
   async fetch(req, env) {
@@ -161,6 +162,24 @@ export default {
         Object.assign(form, { grant_type: "refresh_token", refresh_token: String(b.refresh_token || "") });
       }
       const got = await fetch("https://id.kick.com/oauth/token", { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" }, body: new URLSearchParams(form).toString() });
+      return new Response(await got.text(), { status: got.status, headers: { "content-type": "application/json", "cache-control": "no-store" } });
+    }
+
+    // Twitch sign-ins for OmniPulse's own Twitch app (a Confidential one, so Twitch's own Authorize page, no
+    // code to type), the same way: TWITCH_CLIENT_SECRET, set in the dashboard
+    if (req.method === "POST" && (url.pathname === "/api/twitch/token" || url.pathname === "/api/twitch/refresh")) {
+      if (!env.TWITCH_CLIENT_ID || !env.TWITCH_CLIENT_SECRET) return json({ error: "OmniPulse's Twitch app isn't set up on this relay" }, 503);
+      const r = await readJson(req);
+      if (r.error) return r.error;
+      const b = r.body || {};
+      const form = { client_id: env.TWITCH_CLIENT_ID, client_secret: env.TWITCH_CLIENT_SECRET };
+      if (url.pathname === "/api/twitch/token") {
+        if (b.redirect_uri !== TWITCH_REDIRECT) return json({ error: "not that redirect address" }, 400);
+        Object.assign(form, { grant_type: "authorization_code", code: String(b.code || ""), redirect_uri: TWITCH_REDIRECT });
+      } else {
+        Object.assign(form, { grant_type: "refresh_token", refresh_token: String(b.refresh_token || "") });
+      }
+      const got = await fetch("https://id.twitch.tv/oauth2/token", { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" }, body: new URLSearchParams(form).toString() });
       return new Response(await got.text(), { status: got.status, headers: { "content-type": "application/json", "cache-control": "no-store" } });
     }
 
