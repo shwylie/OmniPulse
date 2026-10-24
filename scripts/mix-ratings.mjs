@@ -1,13 +1,15 @@
 // Testers' Seamless Mix ratings, from the relay: appended to state/remote-mix-feedback.jsonl in your data
 // folder (each line: its number, the install it came from, when it arrived, and the rating as the app wrote
-// it). Carries on after the last one fetched. Needs the relay's RATINGS_KEY:
-//   RATINGS_KEY=... node scripts/mix-ratings.mjs
+// it). Carries on after the last one fetched. Needs the relay's RATINGS_KEY, from ratings-key.txt in your
+// data folder (%APPDATA%\OmniPulse), or the RATINGS_KEY variable:
+//   node scripts/mix-ratings.mjs
 import fs from "node:fs";
 import path from "node:path";
 
 const relay = process.env.RELAY_URL || "https://omnipulse-jam.shwylie101.workers.dev";
-const key = process.env.RATINGS_KEY;
-if (!key) { console.error("Set RATINGS_KEY first (the one set on the relay with wrangler secret put)."); process.exit(1); }
+const keyFile = path.join(process.env.APPDATA, "OmniPulse", "ratings-key.txt");
+const key = (process.env.RATINGS_KEY || (fs.existsSync(keyFile) ? fs.readFileSync(keyFile, "utf8") : "")).trim();
+if (!key) { console.error("Put the relay's RATINGS_KEY in " + keyFile + " first."); process.exit(1); }
 const dir = path.join(process.env.APPDATA, "OmniPulse", "state");
 fs.mkdirSync(dir, { recursive: true });
 const file = path.join(dir, "remote-mix-feedback.jsonl");
