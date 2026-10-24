@@ -322,20 +322,8 @@ fn fields_of(name: &str, vals: &Map<String, Value>, prefs: &Value, lan: &str) ->
             // the OmniPulse Chatbot on: it takes the requests itself, set up here as fully as another bot would be
             // (installed, and switched on)
             if crate::plugin_runs(prefs, crate::botpage::BOT) && crate::bot_manifest().is_some() {
-                let mut f = vec![
-                    button("botOpen", "OmniPulse Chatbot", "Open", "Your chatbot takes the requests, on Twitch and Kick. Nothing else to set up."),
-                    note("Commands"),
-                    tog("bot:requests", "Song Requests", "Viewers can ask for songs in chat."),
-                    text("bot:srCommands", "Request", "What viewers type, then a song. With commas between, like !sr, !request."),
-                    text("bot:songCommands", "Now Playing", "Says what's playing."),
-                    text("bot:wrongCommands", "Wrong Song", "Takes back the viewer's last request. For a moderator, the last one anyone made."),
-                    note("Who and How Often"),
-                    sel("bot:srWho", "Who Can Request", "", &[(json!("everyone"), "Everyone"), (json!("subscribers"), "Subscribers"), (json!("vips"), "VIPs"), (json!("mods"), "Moderators")]),
-                    num("bot:srCooldown", "Wait Between Requests", "Seconds before the same viewer can request again. 0 for no wait."),
-                ];
-                if prefs["pluginSettings"][crate::botpage::BOT]["pointsOn"].as_bool() == Some(true) {
-                    f.push(num("bot:srCost", "Points per Request", "Taken when the song is added. 0 for free."));
-                }
+                // (its commands, who and how often: in its own page; here, what's the app's)
+                let mut f = Vec::new();
                 songs(&mut f);
                 return f;
             }

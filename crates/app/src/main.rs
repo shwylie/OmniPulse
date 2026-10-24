@@ -1666,7 +1666,7 @@ fn open_discover_fresh(shared: &Shared) {
         let a = shared.borrow();
         let likes = !a.web.favourites.is_empty() || a.library.iter().any(|t| t.plat() != "local");
         ui.set_likes_prompt(!likes);
-        ui.set_taste_label(if discover::taste_genres(&a.web.prefs).is_empty() { "Pick genres".into() } else { "Your genres".into() });
+        ui.set_taste_label("Get Better Recommendations".into());
         let lang = discover::lang_of(&a.web.prefs);
         ui.set_lang_label(lang::CHOICES.iter().find(|(v, _)| *v == lang).map(|(_, n)| *n).unwrap_or("Any language").into());
         ui.set_lang_at(lang::CHOICES.iter().position(|(v, _)| *v == lang).unwrap_or(0) as i32);
@@ -1838,7 +1838,7 @@ fn taste_done(shared: &Shared) {
     let (g, sg) = (discover::taste_genres(&prefs), discover::taste_subgenres(&prefs));
     if let Some(ui) = shared.borrow().ui.upgrade() {
         ui.set_taste_open(false);
-        ui.set_taste_label(if g.is_empty() { "Pick genres".into() } else { "Your genres".into() });
+        ui.set_taste_label("Get Better Recommendations".into());
         ui.set_status(if g.is_empty() { "No genres picked.".into() } else { format!("Thanks. Discover starts from {} now.", if sg.is_empty() { g.join(", ") } else { sg.join(", ") }).into() });
     }
     open_discover_fresh(shared);
@@ -3034,7 +3034,51 @@ fn track_act(shared: &Shared, t: &Track, act: &str) -> bool {
     true
 }
 
+/// The song coming next (DJ decks): its name, its artist and its cover, once the cover's in
+fn paint_next(a: &App) {
+    let Some(ui) = a.ui.upgrade() else { return };
+    let next = a.queue.qi.and_then(|i| a.queue.items.get(i + 1)).map(|q| &q.t);
+    ui.set_next_title(next.map(|t| t.title.clone()).unwrap_or_default().into());
+    ui.set_next_artist(next.map(|t| t.artist.clone()).unwrap_or_default().into());
+    if let Some(img) = next.and_then(|t| ROW_ART.with(|c| c.borrow().map.get(&thumb_url(t)).cloned())) { ui.set_next_art(img); }
+}
+
+/// The playing song's shape, for Waveform: each bar's loudness from Seamless Mix's measuring, 0 to 1 (at most
+/// 160 of them); none until it's been measured
+fn paint_wave(ui: &AppWindow, key: &str) {
+    let m = rhythm_full(key).or_else(|| omnipulse_core::rhythm::known(key));
+    let db: Vec<f32> = m.map(|m| m.rhythm.bar_db.clone()).unwrap_or_default();
+    WAVE_FOR.with(|w| *w.borrow_mut() = (key.to_string(), db.len()));
+    if db.is_empty() { ui.set_now_wave(ModelRc::default()); return; }
+    let step = (db.len() as f32 / 160.0).max(1.0);
+    let n = ((db.len() as f32) / step).floor().max(1.0) as usize;
+    let top = db.iter().cloned().fold(f32::MIN, f32::max);
+    let v: Vec<f32> = (0..n).map(|i| {
+        let a = (i as f32 * step) as usize;
+        let b = (((i + 1) as f32 * step) as usize).clamp(a + 1, db.len());
+        let x = db[a..b].iter().sum::<f32>() / (b - a) as f32;
+        // (24 dB under the loudest bar: silent; the loudest: full)
+        ((x - (top - 24.0)) / 24.0).clamp(0.06, 1.0)
+    }).collect();
+    ui.set_now_wave(ModelRc::from(Rc::new(VecModel::from(v))));
+}
+
+thread_local! {
+    /// the song the waveform's of, and how many bars it had (measured since: drawn again)
+    static WAVE_FOR: RefCell<(String, usize)> = const { RefCell::new((String::new(), 0)) };
+}
+
+/// The cover, blurred (Cover Strip): shrunk to a few pixels, which the bar stretches back out smoothly
+fn art_blur(ui: &AppWindow) {
+    let Some(px) = ui.get_now_art().to_rgba8() else { return ui.set_now_art_blur(slint::Image::default()) };
+    let Some(img) = image::RgbaImage::from_raw(px.width(), px.height(), px.as_bytes().to_vec()) else { return };
+    let small = image::imageops::resize(&img, 12, 6, image::imageops::FilterType::Triangle);
+    let out = slint::SharedPixelBuffer::<slint::Rgba8Pixel>::clone_from_slice(small.as_raw(), small.width(), small.height());
+    ui.set_now_art_blur(slint::Image::from_rgba8(out));
+}
+
 fn paint_queue(a: &mut App) {
+    paint_next(a);
     rhythm_wanted_set(a);
     // (a mix under way: the queue as it was, the one going out playing, the one coming in lit)
     let real = a.queue.qi;
@@ -4282,6 +4326,7 @@ fn preload_next(shared: &Shared) {
 /// The player bar's track, without playing it (a restored session shows it paused)
 fn show_now(ui: &AppWindow, t: &Track) {
     paint_marks(ui, t);
+    paint_wave(ui, &t.key);
     let trimmed = SHARED.with(|s| s.borrow().as_ref().and_then(|sh| sh.try_borrow().ok().map(|a| { let (st, en) = trim_of(&a.web.prefs, &t.key); st > 0 || en.is_some() }))).unwrap_or(false);
     ui.set_now_trimmed(trimmed);
     ui.set_now_title(t.title.clone().into());
@@ -5485,8 +5530,41 @@ fn autoplay_done(shared: &Shared, seed: &Track, picks: Vec<Track>) {
 
 // four times a second: the position, the lyric being sung, counting the play, autoplay, the
 // session, the track's end
+thread_local! {
+    /// the graphic EQ's curve box, as wide for its height as the page draws it
+    static EQ_ASPECT: std::cell::Cell<f32> = const { std::cell::Cell::new(4.0) };
+}
+
+/// The graphic EQ's curve through its bands (in a box 240 high, as wide as the page's: +12 dB at the top, -12 at
+/// the foot), smooth between them; and the same closed down to 0 dB, for the wash under it
+fn eq_curve(bands: &[f32]) -> (String, String) {
+    if bands.len() < 2 { return (String::new(), String::new()); }
+    let n = bands.len() - 1;
+    let w = 240.0 * EQ_ASPECT.with(|a| a.get());
+    let pt = |i: usize| (i as f32 * w / n as f32, (12.0 - bands[i].clamp(-12.0, 12.0)) / 24.0 * 240.0);
+    let mut d = { let (x, y) = pt(0); format!("M {x:.1} {y:.1}") };
+    // (each stretch a curve, its handles from the bands either side: Catmull-Rom, as Bézier)
+    for i in 0..n {
+        let (p0, p1, p2, p3) = (pt(i.saturating_sub(1)), pt(i), pt(i + 1), pt((i + 2).min(n)));
+        let c1 = (p1.0 + (p2.0 - p0.0) / 6.0, p1.1 + (p2.1 - p0.1) / 6.0);
+        let c2 = (p2.0 - (p3.0 - p1.0) / 6.0, p2.1 - (p3.1 - p1.1) / 6.0);
+        d += &format!(" C {:.1} {:.1} {:.1} {:.1} {:.1} {:.1}", c1.0, c1.1, c2.0, c2.1, p2.0, p2.1);
+    }
+    let fill = format!("{d} L {w:.1} 120 L 0 120 Z");
+    (d, fill)
+}
+
 fn tick(shared: &Shared, events: &std::sync::mpsc::Receiver<Event>, n: u64) {
     let Some(ui) = shared.borrow().ui.upgrade() else { return };
+    // (every couple of seconds: the next song's cover once it's in, and the song's shape once it's measured)
+    if n % 8 == 4 {
+        let a = shared.borrow();
+        paint_next(&a);
+        if let Some(t) = a.queue.current() {
+            let now = rhythm_full(&t.key).or_else(|| omnipulse_core::rhythm::known(&t.key)).map(|m| m.rhythm.bar_db.len()).unwrap_or(0);
+            if WAVE_FOR.with(|w| { let w = w.borrow(); w.0 != t.key || w.1 != now }) { paint_wave(&ui, &t.key); }
+        }
+    }
     // (album-art colours: your own accent while paused, the cover's again on play)
     {
         // (paused by you: not a song being loaded after a skip, which held the engine still long enough to
@@ -5898,11 +5976,18 @@ type ReqReply = std::sync::Arc<dyn Fn(serde_json::Value) + Send + Sync>;
 
 fn to_server(id: u64) -> ReqReply { std::sync::Arc::new(move |v| omnipulse_core::requests::request_result(id, v)) }
 
-fn wrong_song(shared: &Shared, reply: ReqReply, user: &str, is_mod: bool) {
+/// Song requests open: Settings > Streaming's switch, or, from the OmniPulse Chatbot while it's on, the
+/// chatbot's own (its Song Requests, in its page: Streaming's is put away while it's on)
+fn req_open(prefs: &serde_json::Value, from_bot: bool) -> bool {
+    if from_bot && plugin_runs(prefs, botpage::BOT) { return prefs["pluginSettings"][botpage::BOT]["requests"].as_bool() != Some(false); }
+    integrations::set(prefs, "req")
+}
+
+fn wrong_song(shared: &Shared, reply: ReqReply, user: &str, is_mod: bool, from_bot: bool) {
     let prefs = shared.borrow().web.prefs.clone();
     let who = if user.trim().is_empty() { "chat".to_string() } else { user.trim().to_string() };
     let base = vec![("user", who.clone())];
-    if !integrations::set(&prefs, "req") { reply(req_fail(&prefs, &base, "closed", vec![])); return; }
+    if !req_open(&prefs, from_bot) { reply(req_fail(&prefs, &base, "closed", vec![])); return; }
     // the last one asked for: requests are queued in turn, so the last of them in the queue
     let found = {
         let a = shared.borrow();
@@ -5926,7 +6011,7 @@ fn wrong_song(shared: &Shared, reply: ReqReply, user: &str, is_mod: bool) {
 }
 
 /// A song request from chat (through core's requests server); the reply goes back to the bot
-fn song_request(shared: &Shared, reply: ReqReply, q: String, user: String) {
+fn song_request(shared: &Shared, reply: ReqReply, q: String, user: String, from_bot: bool) {
     let a = shared.borrow();
     let prefs = a.web.prefs.clone();
     let q: String = q.trim().chars().take(200).collect();
@@ -5945,7 +6030,7 @@ fn song_request(shared: &Shared, reply: ReqReply, q: String, user: String) {
     if !plugrun::players().is_empty() { plats.push("plugins"); }
     let names = plats.iter().map(|p| match *p { "soundcloud" => "SoundCloud", "spotify" => "Spotify", "local" => "your files", "musicbrainz" => "MusicBrainz", "catalog" => "the catalogues", "plugins" => "your plugins", _ => "YouTube Music" }).collect::<Vec<_>>().join(" or ");
     let base = vec![("user", who.clone()), ("query", q.clone()), ("platform", names)];
-    if !integrations::set(&prefs, "req") || plats.is_empty() { reply(req_fail(&prefs, &base, "closed", vec![])); return; }
+    if !req_open(&prefs, from_bot) || plats.is_empty() { reply(req_fail(&prefs, &base, "closed", vec![])); return; }
     if q.is_empty() { reply(req_fail(&prefs, &base, "empty", vec![])); return; }
     let pending: Vec<String> = a.queue.pending_requests().map(|x| x.by.to_lowercase()).collect();
     // Limit Requests (on unless switched off): the most waiting, and the most per viewer
@@ -6343,7 +6428,7 @@ fn bot_set(shared: &Shared, key: &str, v: &str) {
     let key = botpage::key_of(key).to_string();
     let manifest = bot_manifest().map(|m| m.settings).unwrap_or_default();
     let value = botpage::value_of(&manifest, &key, v);
-    let toggle = value.is_boolean();
+    let toggle = value.is_boolean() || key == "srWho";
     // (during setup: kept as it's set, no Save needed; the chatbot restarted with it when you move on)
     let cur = bot_current(shared);
     let in_setup = !cur.get("setupDone").and_then(|v| v.as_bool()).unwrap_or(false)
@@ -6357,7 +6442,7 @@ fn bot_set(shared: &Shared, key: &str, v: &str) {
     }
     PF_EDIT.with(|e| if let Some((_, vals)) = e.borrow_mut().as_mut() { vals.insert(key, value); });
     pf_mark(shared);
-    // (a switch: seen at once, pulsing; typing: left as it's typed)
+    // (a switch, or who can request: seen at once, pulsing; typing: left as it's typed)
     if toggle { bot_paint(shared); }
 }
 
@@ -6641,7 +6726,7 @@ fn panel_open(shared: &Shared, name: &str) {
             _ => "Library",
         };
         let mut path = vec![("Settings".to_string(), "root".to_string()), (cat.to_string(), format!("cat:{cat}"))];
-        let widgety = matches!(name, "widget" | "lyricsw" | "alerts" | "alertlist") || name.starts_with("alert:");
+        let widgety = matches!(name, "widget" | "lyricsw" | "alerts" | "alertlist" | "requests" | "replies") || name.starts_with("alert:");
         if widgety && plugin_on(&shared.borrow().web.prefs, botpage::BOT) {
             if let Some(m) = bot_manifest() { path.push((plugin_label(&m), format!("plugin:{}", botpage::BOT))); }
         }
@@ -8103,6 +8188,9 @@ fn sound_paint(a: &App) {
     for (i, g) in bands.iter().enumerate() {
         if a.eq_model.row_data(i) != Some(*g) { a.eq_model.set_row_data(i, *g); }
     }
+    let (line, fill) = eq_curve(&bands);
+    ui.set_eq_curve(line.into());
+    ui.set_eq_curve_fill(fill.into());
     a.engine.set_eq(&sound::eq_heard(&a.web.prefs));
 }
 
@@ -10584,12 +10672,13 @@ fn plugin_app(shared: &Shared, plugin: &str, ask: serde_json::Value, answer: Box
         // (a song request from chat: the platform it came from is noted with who asked)
         "request" => {
             let reply: ReqReply = std::sync::Arc::new(send);
-            if !integrations::set(&shared.borrow().web.prefs, "req") { return reply(serde_json::json!({ "ok": false, "message": requests::msg(&shared.borrow().web.prefs, "closed", &[]) })); }
-            song_request(shared, reply, arg(1), arg(0));
+            let from_bot = plugin == botpage::BOT;
+            if !req_open(&shared.borrow().web.prefs, from_bot) { return reply(serde_json::json!({ "ok": false, "message": requests::msg(&shared.borrow().web.prefs, "closed", &[]) })); }
+            song_request(shared, reply, arg(1), arg(0), from_bot);
         }
         "wrongSong" => {
             let is_mod = args.get(1).and_then(|v| v.as_bool()) == Some(true);
-            wrong_song(shared, std::sync::Arc::new(send), &arg(0), is_mod);
+            wrong_song(shared, std::sync::Arc::new(send), &arg(0), is_mod, plugin == botpage::BOT);
         }
         "nowPlaying" => send(omnipulse_core::requests::now_answer()),
         // (a web address's answer, as text: the chatbot's Fetch a Web Address. OmniPulse's own chatbot only:
@@ -10780,7 +10869,7 @@ fn outside_start(shared: &Shared) {
                     let Some(sh) = s.borrow().clone() else { return };
                     let user = ask["user"].as_str().unwrap_or("").to_string();
                     if ask["action"].as_str() == Some("wrongsong") {
-                        wrong_song(&sh, to_server(id), &user, ask["mod"].as_bool() == Some(true));
+                        wrong_song(&sh, to_server(id), &user, ask["mod"].as_bool() == Some(true), false);
                     } else if ask["action"].as_str() == Some("chatbot") {
                         // (an action run by its web address: A Web Address, the chatbot's)
                         let reply = to_server(id);
@@ -10793,7 +10882,7 @@ fn outside_start(shared: &Shared) {
                             reply(serde_json::json!({ "ok": !msg.starts_with("There's no"), "message": msg }));
                         });
                     } else {
-                        song_request(&sh, to_server(id), ask["q"].as_str().unwrap_or("").to_string(), user);
+                        song_request(&sh, to_server(id), ask["q"].as_str().unwrap_or("").to_string(), user, false);
                     }
                 }));
             }));
@@ -11101,8 +11190,14 @@ fn apply_look(shared: &Shared) {
     let Some(ui) = a.ui.upgrade() else { return };
     let prefs = &a.web.prefs;
     let (step, hue, strength) = look::from_prefs(prefs);
-    let p = look::palette(step, hue, strength);
+    // a theme of its own (Neon, unless one's picked), else Custom: the step and tint
+    let preset = look::preset(prefs);
+    let p = preset.map(|t| t.palette()).unwrap_or_else(|| look::palette(step, hue, strength));
     let t = ui.global::<Theme>();
+    t.set_head_font(preset.map(|t| t.font).unwrap_or("").into());
+    t.set_glow(preset.is_some_and(|t| t.glow));
+    t.set_aurora(preset.is_some_and(|t| t.aurora));
+    t.set_round_art(preset.is_some_and(|t| t.round_art));
     // Settings > App > Rounded Corners (the web app's setting too)
     let rounded = prefs["appRounded"].as_bool() != Some(false);
     t.set_panel_radius(if rounded { 10.0 } else { 0.0 });
@@ -11133,10 +11228,12 @@ fn apply_look(shared: &Shared) {
     if ui.get_app_name().trim() != name { ui.set_app_name(name.into()); }
     ui.set_side_collapsed(prefs["sideCollapsed"].as_bool() == Some(true));
     t.set_bg(p.bg.slint());
-    t.set_panel(p.panel.slint());
-    // (the accents' blends go into the theme without its tint)
-    t.set_plain_panel(look::palette(step, hue, 0).panel.slint());
-    t.set_elevated(p.elevated.slint());
+    // (Aurora: its panels see-through, over the glow behind them)
+    let see = |c: look::Rgb, a: u8| if preset.is_some_and(|t| t.aurora) { slint::Color::from_argb_u8(a, c.0, c.1, c.2) } else { c.slint() };
+    t.set_panel(see(p.panel, 190));
+    // (the accents' blends go into the theme without its tint; a theme of its own's, into its panel)
+    t.set_plain_panel(if preset.is_some() { p.panel.slint() } else { look::palette(step, hue, 0).panel.slint() });
+    t.set_elevated(see(p.elevated, 215));
     t.set_line(p.line.slint());
     t.set_text(p.text.slint());
     t.set_muted(p.muted.slint());
@@ -11148,6 +11245,10 @@ fn apply_look(shared: &Shared) {
         // (one colour on the cover: a shade of it, as the web app's)
         let c2 = look::Rgb::parse(&a.accent.1).map(|c| look::tune_art(c, p.light)).or(first.map(|c| look::tune_art_shade(c, p.light)));
         (c1, c2)
+    } else if let Some(t) = preset.filter(|_| prefs["themeOwnAccents"].as_bool() != Some(false)) {
+        // (a theme of its own: its accents, unless you've turned them off for yours)
+        let (a, b) = t.accents();
+        (Some(a), Some(b))
     } else {
         let mine = look::Rgb::parse(prefs["accent"].as_str().unwrap_or(ACCENTS[0]));
         (mine, prefs["accent2"].as_str().and_then(look::Rgb::parse).or(mine))
@@ -11169,13 +11270,28 @@ fn apply_look(shared: &Shared) {
     }
     ui.set_tint_preview(if strength > 0 { look::hsl(hue, 0.7, if p.light { 55.0 } else { 60.0 }).slint() } else { slint::Color::from_argb_u8(0, 0, 0, 0) });
     ui.set_accent_list(ModelRc::from(Rc::new(VecModel::from(ACCENTS.iter().filter_map(|c| look::Rgb::parse(c)).map(|c| c.slint()).collect::<Vec<_>>()))));
+    // the themes to pick, three to a row: its own ones, then Custom (as the step and tint are set now)
+    let custom = look::palette(step, hue, strength);
+    let ca = look::Rgb::parse(prefs["accent"].as_str().unwrap_or(ACCENTS[0])).unwrap_or(look::Rgb(0x8e, 0x9b, 0xff));
+    let mut opts: Vec<ThemeOpt> = look::PRESETS.iter().map(|t| { let (a, b) = t.accents(); let q = t.palette(); ThemeOpt { id: t.id.into(), name: t.name.into(), bg: q.bg.slint(), panel: q.panel.slint(), text: q.text.slint(), a: a.slint(), b: b.slint() } }).collect();
+    opts.push(ThemeOpt { id: "custom".into(), name: "Custom".into(), bg: custom.bg.slint(), panel: custom.panel.slint(), text: custom.text.slint(), a: ca.slint(), b: prefs["accent2"].as_str().and_then(look::Rgb::parse).unwrap_or(ca).slint() });
+    let rows: Vec<ThemeRow> = opts.chunks(3).map(|c| ThemeRow { items: ModelRc::from(Rc::new(VecModel::from(c.to_vec()))) }).collect();
+    ui.set_theme_rows(ModelRc::from(Rc::new(VecModel::from(rows))));
+    ui.set_theme_name(preset.map(|t| t.id).unwrap_or("custom").into());
+    ui.set_theme_own_accents(prefs["themeOwnAccents"].as_bool() != Some(false));
+    // (your own colours, not among the ones offered: a swatch of their own)
+    let mine = |k: &str| prefs[k].as_str().map(|c| c.to_lowercase()).filter(|c| !ACCENTS.contains(&c.as_str())).and_then(|c| look::Rgb::parse(&c));
+    ui.set_accent_mine_on(mine("accent").is_some());
+    ui.set_accent_mine(mine("accent").unwrap_or(look::Rgb(0, 0, 0)).slint());
+    ui.set_accent2_mine_on(mine("accent2").is_some());
+    ui.set_accent2_mine(mine("accent2").unwrap_or(look::Rgb(0, 0, 0)).slint());
     let picked = prefs["accent"].as_str().unwrap_or(ACCENTS[0]).to_lowercase();
     ui.set_accent_on(ACCENTS.iter().position(|c| *c == picked).map_or(-1, |i| i as i32));
     let picked2 = prefs["accent2"].as_str().unwrap_or("").to_lowercase();
     ui.set_accent2_on(ACCENTS.iter().position(|c| *c == picked2).map_or(-1, |i| i as i32));
     ui.set_art_accent(integrations::set(prefs, "artAccent"));
     ui.set_tab_right(prefs["tabAlign"].as_str() == Some("right"));
-    ui.set_player_style(prefs["playerStyle"].as_str().filter(|s| matches!(*s, "bar" | "float" | "minimal")).unwrap_or("tab").into());
+    ui.set_player_style(prefs["playerStyle"].as_str().filter(|s| matches!(*s, "bar" | "float" | "minimal" | "turntable" | "island" | "sidebar" | "decks" | "waveform" | "strip")).unwrap_or("tab").into());
     ui.set_beta_updates(prefs["betaUpdates"].as_bool().unwrap_or(false));
     ui.set_title_colour(prefs["titleColour"].as_str().filter(|s| matches!(*s, "subtle" | "plain")).unwrap_or("match").into());
 }
@@ -11292,6 +11408,18 @@ fn main() -> Result<(), slint::PlatformError> {
         }
     });
     let s = shared.clone();
+    // a theme picked (Custom: the step and tint); its own colours, or yours
+    ui.on_theme_picked(move |id| set_look_pref(&s, "themeName", serde_json::json!(id.as_str())));
+    let s = shared.clone();
+    ui.on_theme_own_accents_changed(move |on| set_look_pref(&s, "themeOwnAccents", serde_json::json!(on)));
+    let s = shared.clone();
+    // your own accent colour: Windows' colour picker, from the one there now
+    ui.on_accent_custom(move |which| {
+        let key = if which == 2 { "accent2" } else { "accent" };
+        let now = s.borrow().web.prefs[key].as_str().or(s.borrow().web.prefs["accent"].as_str()).unwrap_or(ACCENTS[0]).to_string();
+        if let Some(c) = desktop::pick_color(&now) { set_look_pref(&s, key, serde_json::json!(c.to_lowercase())); }
+    });
+    let s = shared.clone();
     // the second accent (null: one colour, as the web app's setAccent2)
     ui.on_accent2_picked(move |i| {
         let v = ACCENTS.get(i.max(0) as usize).filter(|_| i >= 0).map_or(serde_json::Value::Null, |c| serde_json::json!(c));
@@ -11380,6 +11508,14 @@ fn main() -> Result<(), slint::PlatformError> {
     let s = shared.clone();
     ui.on_eq_on_changed(move |on| sound_set(&s, "eqOn", serde_json::json!(on)));
     let s = shared.clone();
+    // (the EQ's box resized: its curve made again to fit)
+    ui.on_eq_shape(move |a| {
+        if (EQ_ASPECT.with(|x| x.get()) - a).abs() < 0.001 || a <= 0.0 { return; }
+        EQ_ASPECT.with(|x| x.set(a));
+        let (line, fill) = eq_curve(&sound::eq_bands(&s.borrow().web.prefs));
+        if let Some(ui) = s.borrow().ui.upgrade() { ui.set_eq_curve(line.into()); ui.set_eq_curve_fill(fill.into()); }
+    });
+    let s = shared.clone();
     ui.on_eq_band(move |i, g| {
         let mut bands = sound::eq_bands(&s.borrow().web.prefs);
         if let Some(b) = bands.get_mut(i as usize) { *b = g.clamp(-12.0, 12.0); }
@@ -11463,6 +11599,9 @@ fn main() -> Result<(), slint::PlatformError> {
     ui.set_mix_available(true);
     let s = shared.clone();
     ui.on_mix_toggle(move || set_toggle(&s, "smartOn"));
+    // (Cover Strip: each cover, blurred, as it's shown)
+    let w = ui.as_weak();
+    ui.on_now_art_shown(move || if let Some(ui) = w.upgrade() { if ui.get_player_style() == "strip" { art_blur(&ui); } });
     let s = shared.clone();
     // (Beta Updates: kept, and checked again on that channel at once)
     ui.on_beta_updates_set(move |on| {
@@ -11538,7 +11677,10 @@ fn main() -> Result<(), slint::PlatformError> {
     let s = shared.clone();
     ui.on_density_changed(move |c| set_look_pref(&s, "density", serde_json::json!(if c { "compact" } else { "comfortable" })));
     let s = shared.clone();
-    ui.on_player_style_picked(move |style| set_look_pref(&s, "playerStyle", serde_json::json!(style.as_str())));
+    ui.on_player_style_picked(move |style| {
+        set_look_pref(&s, "playerStyle", serde_json::json!(style.as_str()));
+        if style == "strip" { if let Some(ui) = s.borrow().ui.upgrade() { art_blur(&ui); } }
+    });
     let s = shared.clone();
     ui.on_title_colour_picked(move |c| set_look_pref(&s, "titleColour", serde_json::json!(c.as_str())));
     let s = shared.clone();
@@ -12776,8 +12918,10 @@ fn main() -> Result<(), slint::PlatformError> {
                 w if w.starts_with("flowpick:") => ui.invoke_flow_pick(w[9..].parse().unwrap_or(0)),
                 // (a setting, for this run only: prefset:key=value)
                 w if w.starts_with("prefset:") => {
-                    if let Some((k, v)) = w[8..].split_once('=') { if let Some(o) = s.borrow_mut().web.prefs.as_object_mut() { o.insert(k.into(), serde_json::json!(v)); } }
+                    if let Some((k, v)) = w[8..].split_once('=') { if let Some(o) = s.borrow_mut().web.prefs.as_object_mut() { o.insert(k.into(), serde_json::from_str(v).unwrap_or_else(|_| serde_json::json!(v))); } }
                 }
+                // (the look drawn again, after a prefset: a theme or a player style tried)
+                "look" => { if let Some(sh) = SHARED.with(|x| x.borrow().clone()) { apply_look(&sh); sound_paint(&sh.borrow()); } }
                 w if w.starts_with("panel:") => { if let Some(sh) = SHARED.with(|x| x.borrow().clone()) { panel_open(&sh, &w[6..]); } }
                 w if w.starts_with("cat:") => { ui.set_set_cat(w[4..].into()); }
                 // (Settings' search typed, and its n-th result picked)

@@ -109,10 +109,22 @@ pub fn sheet(id: &str, cur: &Map<String, Value>) -> (String, Vec<Field>) {
             step(2, "Copy your JWT Token and paste it below.", "", "", ""),
             f("password", "streamelementsToken", "JWT Token", "Tips then show as alerts, and can start your actions. Leave it empty to turn this off.", s(cur, "streamelementsToken"), "Paste your JWT Token here"),
         ]),
-        "requests" => ("Song Requests".into(), vec![
-            f("toggle", "requests", "Song requests from chat", "Viewers can ask for songs. Limits and replies are in Settings > Streaming > Song Requests.", if on(cur, "requests", true) { "true" } else { "false" }, ""),
-            f("text", "srCommands", "Request commands", "Separate them with commas. !song says what's playing, and !wrongsong takes back a request.", s(cur, "srCommands"), "!sr, !request"),
-        ]),
+        // (all here while the chatbot's on: it takes the requests itself, so there are no addresses to set up)
+        "requests" => ("Song Requests".into(), {
+            let mut v = vec![
+                f("toggle", "requests", "Song requests from chat", "Viewers can ask for songs in your Twitch and Kick chat.", if on(cur, "requests", true) { "true" } else { "false" }, ""),
+                f("head", "", "Commands", "", "", ""),
+                f("text", "srCommands", "Request", "What viewers type, then a song. Separate them with commas.", s(cur, "srCommands"), "!sr, !request"),
+                f("text", "songCommands", "Now playing", "Says what's playing.", s(cur, "songCommands"), "!song"),
+                f("text", "wrongCommands", "Wrong song", "Takes back the viewer's last request. For a moderator, the last one anyone made.", s(cur, "wrongCommands"), "!wrongsong"),
+                f("head", "", "Who and how often", "", "", ""),
+                f("who", "srWho", "Who can request", "", if s(cur, "srWho").is_empty() { "everyone" } else { s(cur, "srWho") }, ""),
+                f("number", "srCooldown", "Wait between requests", "Seconds before the same viewer can request again. 0 for no wait.", &n(cur, "srCooldown"), "0"),
+            ];
+            if on(cur, "pointsOn", false) { v.push(f("number", "srCost", "Points per request", "Taken when the song is added. 0 for free.", &n(cur, "srCost"), "0")); }
+            v.push(f("link", "", "Which songs, limits and replies", "Radio edits, keeping out AI music, how many can wait, and what's said back in chat.", "", "row-more:req"));
+            v
+        }),
         "points" => ("Points".into(), vec![
             f("toggle", "pointsOn", "Points", "Your own currency. Viewers earn it by chatting, and spend it in your actions and games.", if on(cur, "pointsOn", false) { "true" } else { "false" }, ""),
             f("text", "pointsName", "Name", "What points are called in chat.", s(cur, "pointsName"), "points"),
@@ -193,7 +205,10 @@ pub fn feats(cur: &Map<String, Value>, st: &Value) -> Vec<(&'static str, String,
     let (all, live) = (st["actions"]["all"].as_u64(), st["actions"]["on"].as_u64());
     let name = if s(cur, "pointsName").is_empty() { "points".to_string() } else { s(cur, "pointsName").to_string() };
     vec![
-        ("requests", "Song requests".into(), if s(cur, "srCommands").is_empty() { "!sr, !song, !wrongsong".into() } else { format!("{}, !song, !wrongsong", s(cur, "srCommands")) }, on(cur, "requests", true), true),
+        ("requests", "Song requests".into(), {
+            let or = |k: &str, d: &str| if s(cur, k).is_empty() { d.to_string() } else { s(cur, k).to_string() };
+            format!("{}, {}, {}", or("srCommands", "!sr, !request"), or("songCommands", "!song"), or("wrongCommands", "!wrongsong"))
+        }, on(cur, "requests", true), true),
         ("alerts", "Alerts".into(), "Follows, subs, bits and raids on the Stream Widget".into(), on(cur, "alerts", true), false),
         ("points", "Points and ranks".into(), format!("{} {name} every {} minutes", if n(cur, "pointsAmount").is_empty() { "10".into() } else { n(cur, "pointsAmount") }, if n(cur, "pointsEvery").is_empty() { "10".into() } else { n(cur, "pointsEvery") }), on(cur, "pointsOn", false), true),
         ("games", "Games".into(), "Slots, duels, heists and trivia. Add them from Actions.".into(), false, false),

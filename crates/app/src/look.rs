@@ -105,6 +105,55 @@ pub fn palette(step: usize, hue: f32, strength: usize) -> Palette {
     p
 }
 
+/// A theme of its own (Settings > App & Look > Theme): its surfaces and accents set, not worked out from a
+/// step and a tint, and how it looks besides its colours. "custom" is the step and tint as before.
+pub struct Preset {
+    pub id: &'static str,
+    pub name: &'static str,
+    pub light: bool,
+    /// background, panel, raised, lines, text, muted text, accent, second accent
+    pub c: [u32; 8],
+    /// its headings' font ("": the app's own)
+    pub font: &'static str,
+    /// what's playing glows in the accent
+    pub glow: bool,
+    /// see-through panels over a soft glow from the accents (Aurora)
+    pub aurora: bool,
+    /// covers round, as records (Vinyl)
+    pub round_art: bool,
+}
+
+pub const PRESETS: [Preset; 8] = [
+    Preset { id: "neon", name: "Neon", light: false, c: [0x0b0716, 0x140c24, 0x1e1334, 0x2e1f4d, 0xf1ecff, 0xb3a6d9, 0x00e5ff, 0xff2bd6], font: "", glow: true, aurora: false, round_art: false },
+    Preset { id: "vinyl", name: "Vinyl Lounge", light: false, c: [0x1c1410, 0x261b15, 0x33251c, 0x4a3828, 0xf6ead6, 0xc9b394, 0xe8a33d, 0xd2643a], font: "Georgia", glow: false, aurora: false, round_art: true },
+    Preset { id: "paper", name: "Paper", light: true, c: [0xf4efe4, 0xfffdf8, 0xebe4d4, 0xd9d0bd, 0x1d1b17, 0x5a5346, 0xc8372d, 0x8a3a2f], font: "Georgia", glow: false, aurora: false, round_art: false },
+    Preset { id: "studio", name: "Studio", light: false, c: [0x16181a, 0x1e2124, 0x272b2f, 0x363b40, 0xe3e6e8, 0xa2a9af, 0x46e07a, 0xf2b33d], font: "Consolas", glow: false, aurora: false, round_art: false },
+    Preset { id: "phosphor", name: "Phosphor", light: false, c: [0x020703, 0x06120a, 0x0b1f12, 0x14391f, 0x8dffb2, 0x4fd47c, 0x39ff7a, 0xb6ff5e], font: "Consolas", glow: true, aurora: false, round_art: false },
+    Preset { id: "aurora", name: "Aurora", light: false, c: [0x0d1b2a, 0x13263a, 0x1a3149, 0x29435e, 0xe6f4ff, 0xa3bcd3, 0x5ef0c8, 0xa58bff], font: "", glow: false, aurora: true, round_art: false },
+    Preset { id: "sunset", name: "Sunset", light: true, c: [0xfff4ec, 0xffffff, 0xffe9dc, 0xf3d0bc, 0x2b1d1a, 0x6a4e46, 0xe0503a, 0x7c4ff0], font: "", glow: false, aurora: false, round_art: false },
+    Preset { id: "contrast", name: "High Contrast", light: false, c: [0x000000, 0x000000, 0x161616, 0xffffff, 0xffffff, 0xe6e6e6, 0xffd400, 0xffffff], font: "", glow: false, aurora: false, round_art: false },
+];
+
+fn rgb(n: u32) -> Rgb { Rgb((n >> 16) as u8, (n >> 8) as u8, n as u8) }
+
+impl Preset {
+    pub fn palette(&self) -> Palette {
+        Palette { bg: rgb(self.c[0]), panel: rgb(self.c[1]), elevated: rgb(self.c[2]), line: rgb(self.c[3]), text: rgb(self.c[4]), muted: rgb(self.c[5]), light: self.light }
+    }
+    pub fn accents(&self) -> (Rgb, Rgb) { (rgb(self.c[6]), rgb(self.c[7])) }
+}
+
+/// The theme picked: one of its own, or None for Custom (the step and tint). Nothing picked yet: Neon for a
+/// new install, Custom for one that's set a step or an old named theme (it stays as it was)
+pub fn preset(prefs: &Value) -> Option<&'static Preset> {
+    let id = match prefs["themeName"].as_str() {
+        Some(id) => id,
+        None if prefs["themeStep"].is_number() || prefs["theme"].is_string() => "custom",
+        None => "neon",
+    };
+    PRESETS.iter().find(|p| p.id == id)
+}
+
 /// Readable text on an accent colour: dark or light
 pub fn on_accent(c: Rgb) -> Rgb {
     if 0.299 * c.0 as f32 + 0.587 * c.1 as f32 + 0.114 * c.2 as f32 > 150.0 { Rgb(0x11, 0x13, 0x18) } else { Rgb(255, 255, 255) }
@@ -174,5 +223,23 @@ mod tests {
         // and the old default comes out as it was: a near-black blue
         let p = palette(3, 225.0, 1);
         assert_eq!(p.bg.hex(), "#090a0e");
+        // the themes of their own read as well (and their accents stand out from where they're shown)
+        for t in &PRESETS {
+            let p = t.palette();
+            for s in [p.bg, p.panel, p.elevated] {
+                assert!(contrast(p.text, s) >= 7.0, "{} text {:.1}", t.id, contrast(p.text, s));
+                assert!(contrast(p.muted, s) >= 4.5, "{} muted {:.1}", t.id, contrast(p.muted, s));
+            }
+            assert!(contrast(t.accents().0, p.panel) >= 3.0, "{} accent", t.id);
+        }
+    }
+
+    #[test]
+    fn neon_for_a_new_install_custom_for_one_set_up() {
+        assert_eq!(preset(&serde_json::json!({})).map(|p| p.id), Some("neon"));
+        assert!(preset(&serde_json::json!({ "themeStep": 3 })).is_none());
+        assert!(preset(&serde_json::json!({ "theme": "forest" })).is_none());
+        assert_eq!(preset(&serde_json::json!({ "themeStep": 3, "themeName": "paper" })).map(|p| p.id), Some("paper"));
+        assert!(preset(&serde_json::json!({ "themeName": "custom" })).is_none());
     }
 }
