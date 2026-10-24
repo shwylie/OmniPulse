@@ -10,7 +10,7 @@ pub const BOT: &str = "chatbot";
 /// OmniPulse's own apps, so you only sign in: their Client IDs (empty: not registered yet, so you make your own).
 /// Kick's secret isn't here: the relay keeps it and finishes Kick's sign-ins (jam-server, /api/kick/*)
 pub const TWITCH_ID: &str = "";
-pub const KICK_ID: &str = "";
+pub const KICK_ID: &str = "01M5NZG55J6HQ93XPKVQ8CHRY8";
 
 /// Your own app wanted instead (or OmniPulse's not there yet)
 fn own_app(cur: &Map<String, Value>, plat: &str) -> bool {

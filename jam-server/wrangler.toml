@@ -8,7 +8,7 @@ compatibility_date = "2025-09-01"
 DOWNLOAD_URL = ""
 APP_SCHEME = "omnipulse"
 # OmniPulse's own Kick app (its Client ID; its secret is set with: npx wrangler secret put KICK_CLIENT_SECRET)
-KICK_CLIENT_ID = ""
+KICK_CLIENT_ID = "01M5NZG55J6HQ93XPKVQ8CHRY8"
 # OmniPulse's own SoundCloud app (public: it's in every sign-in link). Its secret: npx wrangler secret put SC_CLIENT_SECRET
 SC_CLIENT_ID = "SET_IN_CLOUDFLARE"
 SC_REDIRECT = "http://localhost:8080/callback"
