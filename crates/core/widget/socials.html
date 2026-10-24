@@ -1,0 +1,183 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<!--
+  OmniPulse's Social Plug, for OBS (a Browser source at /socials): your handles on other platforms, one at a time
+  in turn (or all together in a row), each with its platform's icon and colours, or your own. Set in the app:
+  Settings > Streaming > Social Plug (or the chatbot's page, while it's on). It reads /now.json's "socials".
+-->
+<title>OmniPulse Social Plug</title>
+<style>
+  html, body { margin: 0; height: 100%; background: transparent; overflow: hidden; }
+  body { font-family: "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif; }
+  body.preview { background: #2a2a2e repeating-conic-gradient(#3a3a40 0 25%, #2a2a2e 0 50%) 0 0 / 32px 32px; }
+  #stage { position: absolute; inset: 0; display: flex; align-items: center; }
+  body.right #stage { justify-content: flex-end; }
+  body.centre #stage { justify-content: center; }
+  .plug {
+    display: flex; align-items: center; gap: 0.75rem; padding: 0.55rem 1.1rem 0.55rem 0.55rem; box-sizing: border-box;
+    border-radius: 0.9rem; color: #fff; background: rgba(10, 8, 20, 0.82); max-width: 100%;
+    box-shadow: 0 0.3rem 1rem rgba(0, 0, 0, 0.35);
+  }
+  .plug .ic {
+    flex: none; width: 2.6rem; height: 2.6rem; border-radius: 0.7rem; display: flex; align-items: center; justify-content: center;
+    background: linear-gradient(135deg, var(--c1), var(--c2));
+  }
+  .plug .ic svg { width: 62%; height: 62%; fill: #fff; }
+  .plug .ic img { width: 100%; height: 100%; object-fit: cover; border-radius: inherit; }
+  .plug .ic b { font: 800 1.35rem/1 "Segoe UI", system-ui, sans-serif; }
+  .plug .tx { display: flex; flex-direction: column; min-width: 0; }
+  .plug .h { font-weight: 700; font-size: 1.15rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .plug .p { font-size: 0.8rem; opacity: 0.75; letter-spacing: 0.04em; text-transform: uppercase; }
+  /* Pill: round ends; Minimal: no panel, just the icon and words over the stream */
+  body.pill .plug { border-radius: 999px; padding-right: 1.4rem; }
+  body.pill .plug .ic { border-radius: 50%; }
+  body.minimal .plug { background: none; box-shadow: none; }
+  body.minimal .plug .tx { text-shadow: 0 0.06rem 0.35rem rgba(0, 0, 0, 0.9); }
+  /* Coloured: the card itself in the platform's colours */
+  body.coloured .plug { background: linear-gradient(115deg, var(--c1), var(--c2)); }
+  body.coloured .plug .ic { background: rgba(0, 0, 0, 0.22); }
+  body.sharp .plug, body.sharp .plug .ic { border-radius: 0; }
+  /* one at a time: each one in, then out, in turn; how, as set (Rise, Slide, Flip, Pop, Typewriter) */
+  #stage.one .plug { position: absolute; }
+  .plug.in { animation: var(--in, rise-in) 0.65s cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+  .plug.out { animation: var(--out, rise-out) 0.5s ease-in both; }
+  @keyframes rise-in { from { opacity: 0; transform: translateY(0.9rem); } }
+  @keyframes rise-out { to { opacity: 0; transform: translateY(-0.6rem); } }
+  @keyframes slide-in { from { opacity: 0; transform: translateX(var(--from, -2rem)); } }
+  @keyframes slide-out { to { opacity: 0; transform: translateX(var(--to, 2rem)); } }
+  @keyframes flip-in { from { opacity: 0; transform: perspective(30rem) rotateX(-85deg); } }
+  @keyframes flip-out { to { opacity: 0; transform: perspective(30rem) rotateX(85deg); } }
+  @keyframes pop-in { 0% { opacity: 0; transform: scale(0.5); } 70% { opacity: 1; transform: scale(1.08); } }
+  @keyframes pop-out { to { opacity: 0; transform: scale(0.7); } }
+  @keyframes fade-out { to { opacity: 0; } }
+  /* Typewriter: the icon pops in, then the handle's typed out letter by letter */
+  .plug.type .h { border-right: 0.12em solid currentColor; animation: caret 0.8s steps(1) infinite; }
+  @keyframes caret { 50% { border-color: transparent; } }
+  /* the icon's own little pulse as each one arrives */
+  .plug.in .ic { animation: ic-in 0.7s 0.15s cubic-bezier(0.2, 0.9, 0.3, 1.4) both; }
+  @keyframes ic-in { from { transform: scale(0.4) rotate(-20deg); } }
+  /* all together: side by side, each in a moment after the last, then a slow glow running along them */
+  #stage.all { gap: 0.6rem; flex-wrap: wrap; align-content: center; }
+  #stage.all .plug.in { animation-delay: calc(var(--i, 0) * 0.12s); }
+  #stage.all .plug .ic { animation: glow 4s ease-in-out infinite; animation-delay: calc(var(--i, 0) * 0.5s); }
+  @keyframes glow { 0%, 100% { box-shadow: 0 0 0 rgba(255, 255, 255, 0); } 50% { box-shadow: 0 0 0.9rem var(--c1); } }
+  body.still .plug, body.still .plug .ic, body.still .plug .h { animation: none !important; }
+</style>
+</head>
+<body>
+<div id="stage"></div>
+<script>
+  "use strict";
+  // the platforms it knows: their icons (24 x 24) and colours; anything else, its first letter, or your own icon
+  const ICONS = {
+    twitch: "M11.571 4.714h1.715v5.143H11.57zm4.715 0H18v5.143h-1.714zM6 0L1.714 4.286v15.428h5.143V24l4.286-4.286h3.428L22.286 12V0zm14.571 11.143l-3.428 3.428h-3.429l-3 3v-3H6.857V1.714h13.714z",
+    kick: "M1.333 0h8v5.333H12V2.667h2.667V0h8v8H20v2.667h-2.667v2.666H20V16h2.667v8h-8v-2.667H12v-2.666H9.333V24h-8z",
+    youtube: "M21.6 7.2a2.7 2.7 0 0 0-1.9-1.9C18 4.8 12 4.8 12 4.8s-6 0-7.7.5a2.7 2.7 0 0 0-1.9 1.9C2 8.9 2 12 2 12s0 3.1.4 4.8a2.7 2.7 0 0 0 1.9 1.9c1.7.5 7.7.5 7.7.5s6 0 7.7-.5a2.7 2.7 0 0 0 1.9-1.9c.4-1.7.4-4.8.4-4.8s0-3.1-.4-4.8zM10 15V9l5.2 3z",
+    tiktok: "M16.5 2h-3.3v13.2a2.9 2.9 0 1 1-2.1-2.8V9.1a6.2 6.2 0 1 0 5.4 6.1V8.4a7.8 7.8 0 0 0 4.5 1.4V6.5a4.5 4.5 0 0 1-4.5-4.5z",
+    instagram: "M7 2h10a5 5 0 0 1 5 5v10a5 5 0 0 1-5 5H7a5 5 0 0 1-5-5V7a5 5 0 0 1 5-5zm0 2a3 3 0 0 0-3 3v10a3 3 0 0 0 3 3h10a3 3 0 0 0 3-3V7a3 3 0 0 0-3-3zm5 3.5a4.5 4.5 0 1 1 0 9 4.5 4.5 0 0 1 0-9zm0 2a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5zM17.5 5.8a1 1 0 1 1 0 2 1 1 0 0 1 0-2z",
+    x: "M3 3h4.6l4.6 6.3L17.6 3H21l-7.2 8.4L21.5 21h-4.6l-5-6.8L6 21H2.6l7.7-9z",
+    discord: "M19.6 5.4A17 17 0 0 0 15.4 4l-.5 1a15 15 0 0 0-5.8 0L8.6 4a17 17 0 0 0-4.2 1.4C1.7 9.4 1 13.3 1.3 17.2A17 17 0 0 0 6.5 20l1.1-1.8a11 11 0 0 1-1.8-.9l.4-.3a12 12 0 0 0 11.6 0l.4.3c-.6.3-1.2.6-1.8.9l1.1 1.8a17 17 0 0 0 5.2-2.8c.4-4.5-.7-8.4-3.1-11.8zM8.7 14.8c-1 0-1.9-1-1.9-2.1s.8-2.1 1.9-2.1 1.9 1 1.9 2.1-.8 2.1-1.9 2.1zm6.6 0c-1 0-1.9-1-1.9-2.1s.8-2.1 1.9-2.1 1.9 1 1.9 2.1-.8 2.1-1.9 2.1z",
+    bluesky: "M5.2 3.6C7.8 5.5 10.6 9.4 12 11.4c1.4-2 4.2-5.9 6.8-7.8 1.9-1.4 4.9-2.4 4.9.9 0 .7-.4 5.5-.6 6.3-.8 2.8-3.6 3.5-6.1 3 4.4.8 5.5 3.3 3.1 5.8-4.6 4.7-6.6-1.2-7.1-2.7l-.1-.3-.1.3c-.5 1.5-2.5 7.4-7.1 2.7-2.4-2.5-1.3-5 3.1-5.8-2.5.5-5.3-.2-6.1-3C1.5 9.9 1.1 5.1 1.1 4.4c0-3.3 2.2-2.3 4.1-.8z",
+    facebook: "M14 8V6.5c0-.8.6-1.5 1.5-1.5H17V2h-2.5A4.5 4.5 0 0 0 10 6.5V8H7.5v3H10v11h4V11h2.7l.5-3z",
+    spotify: "M12 2a10 10 0 100 20 10 10 0 000-20zm4.6 14.4c-.2.3-.6.4-.9.2-2.5-1.5-5.6-1.9-9.3-1-.3.1-.7-.1-.8-.5-.1-.3.1-.7.5-.8 4-.9 7.5-.5 10.3 1.2.3.2.4.6.2.9zm1.2-2.7c-.2.4-.7.5-1.1.3-2.9-1.8-7.2-2.3-10.6-1.2-.4.1-.9-.1-1-.5-.1-.4.1-.9.5-1 3.9-1.2 8.7-.6 12 1.4.4.2.5.7.2 1zm.1-2.8C14.5 8.8 8.9 8.6 5.6 9.6c-.5.2-1.1-.1-1.2-.6-.2-.5.1-1.1.6-1.2 3.8-1.1 10-.9 13.9 1.4.5.3.6.9.4 1.4-.3.4-.9.6-1.4.3z",
+    soundcloud: "M1 14.5c0-1.1.8-2 1.9-2.1.4-2.5 2.5-4.4 5.1-4.4.6 0 1.2.1 1.7.3C10.6 6.4 12.6 5 15 5c3.3 0 6 2.7 6 6 0 .2 0 .4-.1.6.7.5 1.1 1.3 1.1 2.2 0 1.5-1.2 2.7-2.7 2.7H3.6C2.2 16.5 1 15.6 1 14.5z",
+    patreon: "M15 3a6 6 0 1 1 0 12 6 6 0 0 1 0-12zM3 3h3.5v18H3z",
+    kofi: "M3 6h14v7a5 5 0 0 1-5 5H8a5 5 0 0 1-5-5zm14 1h1.5a3.5 3.5 0 0 1 0 7H17v-2h1.5a1.5 1.5 0 0 0 0-3H17zM8 9.5c-1 0-1.6.8-1.6 1.6 0 1.6 2.6 3.2 3.1 3.4.5-.2 3.1-1.8 3.1-3.4 0-.8-.6-1.6-1.6-1.6-.6 0-1.1.3-1.5.8-.4-.5-.9-.8-1.5-.8z",
+    website: "M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm6.9 6h-2.9a15 15 0 0 0-1.4-3.9A8 8 0 0 1 18.9 8zM12 4c.9 1.2 1.6 2.6 2 4h-4c.4-1.4 1.1-2.8 2-4zM4.3 14a8 8 0 0 1 0-4h3.4a16 16 0 0 0 0 4zm.8 2h2.9c.3 1.4.8 2.7 1.4 3.9A8 8 0 0 1 5.1 16zM8 8H5.1a8 8 0 0 1 4.3-3.9C8.8 5.3 8.3 6.6 8 8zm4 12c-.9-1.2-1.6-2.6-2-4h4c-.4 1.4-1.1 2.8-2 4zm2.3-6H9.7a14 14 0 0 1 0-4h4.6a14 14 0 0 1 0 4zm.3 5.9c.6-1.2 1.1-2.5 1.4-3.9h2.9a8 8 0 0 1-4.3 3.9zM16.3 14a16 16 0 0 0 0-4h3.4a8 8 0 0 1 0 4z",
+  };
+  const $ = (id) => document.getElementById(id);
+  const PREVIEW = /[?&]preview=1/.test(location.search);
+  if (PREVIEW) document.body.classList.add("preview");
+  let cfg = null, list = [], at = 0, sig = "", turnT = null;
+
+  function card(p) {
+    const el = document.createElement("div");
+    el.className = "plug";
+    el.style.setProperty("--c1", p.col1 || "#8e9bff");
+    el.style.setProperty("--c2", p.col2 || p.col1 || "#b48eff");
+    const ic = document.createElement("div");
+    ic.className = "ic";
+    if (p.icon) { const im = document.createElement("img"); im.src = p.icon; im.alt = ""; ic.appendChild(im); }
+    else if (ICONS[p.platform]) {
+      ic.innerHTML = '<svg viewBox="0 0 24 24"><path fill-rule="evenodd" d=""/></svg>';
+      ic.querySelector("path").setAttribute("d", ICONS[p.platform]);
+    } else { const b = document.createElement("b"); b.textContent = (p.name || "?").trim().charAt(0).toUpperCase(); ic.appendChild(b); }
+    const tx = document.createElement("div");
+    tx.className = "tx";
+    const h = document.createElement("span"); h.className = "h"; h.textContent = p.handle || "";
+    const n = document.createElement("span"); n.className = "p"; n.textContent = p.name || "";
+    tx.append(h, n);
+    el.append(ic, tx);
+    return el;
+  }
+
+  // (how each comes and goes: its animations, as set)
+  const MOTIONS = { rise: ["rise-in", "rise-out"], slide: ["slide-in", "slide-out"], flip: ["flip-in", "flip-out"], pop: ["pop-in", "pop-out"], type: ["pop-in", "fade-out"] };
+  function moving(el) {
+    const m = MOTIONS[(cfg && cfg.motion) || "rise"] || MOTIONS.rise;
+    el.style.setProperty("--in", m[0]);
+    el.style.setProperty("--out", m[1]);
+    const right = cfg && cfg.align === "right";
+    el.style.setProperty("--from", right ? "2rem" : "-2rem");
+    el.style.setProperty("--to", right ? "-2rem" : "2rem");
+  }
+  // (Typewriter: the handle typed out, a letter at a time)
+  function typeOut(el) {
+    const h = el.querySelector(".h"), full = h.textContent;
+    el.classList.add("type");
+    h.textContent = "";
+    let k = 0;
+    const t = setInterval(() => { k++; h.textContent = full.slice(0, k); if (k >= full.length) { clearInterval(t); setTimeout(() => el.classList.remove("type"), 1200); } }, 70);
+  }
+
+  // (one at a time: the next in, the last one out, every few seconds)
+  function turn() {
+    clearTimeout(turnT);
+    const stage = $("stage");
+    if (!cfg || !list.length) { stage.innerHTML = ""; return; }
+    if (cfg.all) return;
+    const old = stage.querySelector(".plug:not(.out)");
+    if (old) { old.classList.remove("in"); moving(old); old.classList.add("out"); setTimeout(() => old.remove(), 600); }
+    const el = card(list[at % list.length]);
+    moving(el);
+    el.classList.add("in");
+    stage.appendChild(el);
+    if (cfg.motion === "type") typeOut(el);
+    at = (at + 1) % list.length;
+    if (list.length > 1) turnT = setTimeout(turn, Math.max(2, Number(cfg.secs) || 8) * 1000);
+  }
+
+  function fit() {
+    // (drawn at 460 x 90; everything scales from that)
+    const k = Math.max(0.3, Math.min(innerWidth / 460, innerHeight / 90));
+    document.documentElement.style.fontSize = 16 * k + "px";
+  }
+  addEventListener("resize", fit);
+  fit();
+
+  async function poll() {
+    try {
+      const s = await (await fetch("/now.json" + (PREVIEW ? "?preview=1" : ""), { cache: "no-store" })).json();
+      cfg = s.socials || null;
+      const next = (cfg && cfg.list) || [];
+      const now = JSON.stringify([next, cfg && cfg.style, cfg && cfg.align, cfg && cfg.all, cfg && cfg.rounded, cfg && cfg.coloured, cfg && cfg.secs, cfg && cfg.motion]);
+      if (now !== sig) {
+        sig = now;
+        list = next;
+        document.body.className = (PREVIEW ? "preview " : "") + ((cfg && cfg.style) || "card") + (cfg && cfg.align === "right" ? " right" : cfg && cfg.align === "centre" ? " centre" : "") + (cfg && cfg.rounded === false ? " sharp" : "") + (cfg && cfg.coloured ? " coloured" : "") + (cfg && cfg.motion === "none" ? " still" : "");
+        const stage = $("stage");
+        stage.className = cfg && cfg.all ? "all" : "one";
+        stage.innerHTML = "";
+        at = 0;
+        if (cfg && cfg.all) list.forEach((p, i) => { const el = card(p); el.style.setProperty("--i", i); moving(el); el.classList.add("in"); stage.appendChild(el); });
+        else turn();
+      }
+    } catch (e) {}
+  }
+  setInterval(poll, PREVIEW ? 500 : 3000);
+  poll();
+</script>
+</body>
+</html>

@@ -38,6 +38,14 @@ fn f(kind: &'static str, key: &str, label: &str, note: &str, value: &str, extra:
     Field { key: key.into(), kind, label: label.into(), note: note.into(), value: value.into(), extra: extra.into(), n: 0 }
 }
 
+/// A widget's address in OBS, copied with its icon (the widget server's port, as set)
+fn addr(path: &str, note: &str) -> Field {
+    let port = crate::SHARED.with(|s| s.borrow().as_ref().and_then(|sh| sh.try_borrow().ok().map(|a| a.web.prefs["widgetPort"].as_u64().unwrap_or(7878)))).unwrap_or(7878);
+    // (the raid's clip plays only from localhost: Twitch's player checks where it's opened)
+    let host = if path == "/raid" { "localhost" } else { "127.0.0.1" };
+    f("addr", "", "Address", note, &format!("http://{host}:{port}{path}"), "")
+}
+
 /// What's set: the settings as saved, with the page's own changes (what differs from when it opened) over them
 pub fn current(saved: &Map<String, Value>, edit: &Map<String, Value>, orig: &Map<String, Value>) -> Map<String, Value> {
     let mut cur = saved.clone();
@@ -125,6 +133,67 @@ pub fn sheet(id: &str, cur: &Map<String, Value>) -> (String, Vec<Field>) {
             v.push(f("link", "", "Which songs, limits and replies", "Radio edits, keeping out AI music, how many can wait, and what's said back in chat.", "", "row-more:req"));
             v
         }),
+        // (the Suite's widgets: where each goes in OBS, then how it's set; Try It sends a pretend one)
+        "goals" => ("Goals".into(), {
+            let mut v = vec![
+                addr("/goals", "About 920 × 520. Counts follows, subs, bits and donations as they come in."),
+                f("reset", "goalReset", "Start again", "", if s(cur, "goalReset").is_empty() { "stream" } else { s(cur, "goalReset") }, ""),
+                f("chips2", "goalStyle", "Look", "", if s(cur, "goalStyle").is_empty() { "bars" } else { s(cur, "goalStyle") }, "bars=Bars|rings=Rings"),
+            ];
+            for (k, name, dflt) in [("Follow", "Followers", "10"), ("Sub", "Subs", "5"), ("Bits", "Bits", "1000"), ("Dono", "Donations", "50")] {
+                v.push(f("head", "", name, "", "", ""));
+                v.push(f("toggle", &format!("goal{k}On"), "Show it", "", if on(cur, &format!("goal{k}On"), true) { "true" } else { "false" }, ""));
+                v.push(f("text", &format!("goal{k}Label"), "Its name", "", s(cur, &format!("goal{k}Label")), ""));
+                v.push(f("number", &format!("goal{k}Target"), "Its target", "", &n(cur, &format!("goal{k}Target")), dflt));
+            }
+            v.push(f("text", "goalCurrency", "Donation currency", "Shown before amounts, like $ or £.", s(cur, "goalCurrency"), "$"));
+            v.push(f("link", "", "Try it", "Adds one of each, to see it fill.", "", "call:suiteTest:goals"));
+            v
+        }),
+        "timer" => ("Timer".into(), {
+            let mut v = vec![
+                addr("/timer", "About 720 × 280. Moderators can use its command in chat: start, pause, add 5, remove 5, reset."),
+                f("toggle", "timerStopwatch", "Count up", "A stopwatch. When this is off, it counts down.", if on(cur, "timerStopwatch", false) { "true" } else { "false" }, ""),
+                f("number", "timerStart", "Starting time (minutes)", "Where the countdown starts, and goes back to on reset.", &n(cur, "timerStart"), "60"),
+                f("text", "timerLabel", "Its label", "Shown above it. Leave it empty for none.", s(cur, "timerLabel"), "Subathon"),
+                f("text", "timerCommand", "Its command", "", s(cur, "timerCommand"), "!timer"),
+                f("link", "", "Start or resume", "", "", "call:suiteTimer:start"),
+                f("link", "", "Pause", "", "", "call:suiteTimer:pause"),
+                f("link", "", "Add 5 minutes", "", "", "call:suiteTimer:add:5"),
+                f("link", "", "Reset", "", "", "call:suiteTimer:reset"),
+                f("head", "", "Subathon", "", "", ""),
+                f("toggle", "timerSubathon", "Add time as things happen", "Each sub, bits, donation and follow adds the time set here.", if on(cur, "timerSubathon", false) { "true" } else { "false" }, ""),
+            ];
+            if on(cur, "timerSubathon", false) {
+                v.extend([
+                    f("number", "timerSub1", "Minutes per tier 1 sub", "Gifted subs count each one.", &n(cur, "timerSub1"), "5"),
+                    f("number", "timerSub2", "Minutes per tier 2 sub", "", &n(cur, "timerSub2"), "10"),
+                    f("number", "timerSub3", "Minutes per tier 3 sub", "", &n(cur, "timerSub3"), "25"),
+                    f("number", "timerBits", "Minutes per 100 bits", "", &n(cur, "timerBits"), "1"),
+                    f("number", "timerDono", "Minutes per 1 donated", "In your donations' currency.", &n(cur, "timerDono"), "1"),
+                    f("number", "timerFollow", "Seconds per follow", "0 for none.", &n(cur, "timerFollow"), "0"),
+                    f("number", "timerCap", "Most added (hours)", "0 for no limit.", &n(cur, "timerCap"), "0"),
+                ]);
+            }
+            v
+        }),
+        "latest" => ("Latest Follow and Sub".into(), vec![
+            addr("/latest-follow", "Who followed last. About 840 × 180."),
+            addr("/latest-sub", "Who subscribed last, with their months or gifts. About 840 × 180."),
+            f("link", "", "Try a follow", "", "", "call:suiteTest:follow"),
+            f("link", "", "Try a sub", "", "", "call:suiteTest:sub"),
+        ]),
+        "raid" => ("Raid Shoutout".into(), vec![
+            f("note", "", "Your latest raider is remembered. Press Raid Shoutout on your Stream Deck (or Show Shoutout here) to put them on screen, with one of their clips and a follow them animation.", "", "", ""),
+            addr("/raid", "About 1120 × 840. Open it as localhost (as here), or Twitch won't play the clip."),
+            f("number", "raidMin", "Smallest raid", "Raids with fewer viewers than this aren't remembered for a shoutout.", &n(cur, "raidMin"), "1"),
+            f("number", "raidSecs", "Shown for (seconds)", "Longer if their clip is.", &n(cur, "raidSecs"), "20"),
+            f("toggle", "raidChat", "Shout out in chat too", "Said when you show the shoutout.", if on(cur, "raidChat", true) { "true" } else { "false" }, ""),
+            f("text", "raidMessage", "Its message", "{user} is the raider, {login} their channel name, {viewers} how many came.", s(cur, "raidMessage"), "Thanks for the raid, {user}!"),
+            f("toggle", "raidClip", "Play one of their clips", "A random clip of theirs from the last 60 days (Twitch only).", if on(cur, "raidClip", false) { "true" } else { "false" }, ""),
+            f("link", "", "Show shoutout", "Your latest raider, now.", "", "call:suiteShoutout"),
+            f("link", "", "Try it", "A pretend raider, to see how it looks.", "", "call:suiteTest:raid"),
+        ]),
         "points" => ("Points".into(), vec![
             f("toggle", "pointsOn", "Points", "Your own currency. Viewers earn it by chatting, and spend it in your actions and games.", if on(cur, "pointsOn", false) { "true" } else { "false" }, ""),
             f("text", "pointsName", "Name", "What points are called in chat.", s(cur, "pointsName"), "points"),

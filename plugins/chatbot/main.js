@@ -249,6 +249,7 @@ async function onChat(m) {
   const k = cmd + "|" + user.toLowerCase();
   if (cooldowns[k] && Date.now() - cooldowns[k] < 3000) return;
   cooldowns[k] = Date.now();
+  if (await suiteCommand(cmd, args, rank(m.tags), id, platform)) return;
   if (S().requests !== false) {
     const rq = reqCommands();
     if (rq.sr.includes(cmd)) {
@@ -463,7 +464,7 @@ function onPlatform(t, platform) {
 
 // An event (ours: follow, sub...), to the actions waiting for it
 function fire(ev, ctx) {
-  if (!ctx.replay) { credit(ev, ctx.user); feed(ev, ctx); }
+  if (!ctx.replay) { credit(ev, ctx.user); feed(ev, ctx); suiteHear(ev, ctx); }
   ctx.fromEvent = ev;
   for (const x of live) {
     const t = x.trigger;
@@ -490,7 +491,7 @@ function onEvent(type, e) {
     : ev === "shoutoutin" ? String(e.viewer_count || 0) : ev === "watchstreak" ? String(e.streak || 0) : "";
   const reward = (e.reward && e.reward.title) || "";
   const said = (e.message && e.message.text) || e.title || "";
-  const ctx = { user: a.user || e.user_name || e.from_broadcaster_user_name || "", userId: e.user_id || e.from_broadcaster_user_id || "", amount: ev === "adbreak" ? String(e.duration_seconds || 0) : amount, message: a.message || said || e.user_input || "", reward, rawInput: e.user_input || said || "", msgId: e.msg_id || "", platform: "twitch", winner: won };
+  const ctx = { user: a.user || e.user_name || e.from_broadcaster_user_name || "", userId: e.user_id || e.from_broadcaster_user_id || "", amount: ev === "adbreak" ? String(e.duration_seconds || 0) : amount, message: a.message || said || e.user_input || "", reward, rawInput: e.user_input || said || "", msgId: e.msg_id || "", platform: "twitch", winner: won, tier: String(e.tier || "") };
   Object.assign(ctx, words(ctx.rawInput));
   fire(ev, ctx);
 }
@@ -1668,6 +1669,9 @@ async function start() {
   stopAll();
   stopped = false;
   loadActions();
+  // (the Suite's widgets: what's kept, sent to the app as it starts)
+  suite = null;
+  suitePush();
   setPoints();
   obsConnect();
   tipConnect();
@@ -1683,6 +1687,150 @@ async function start() {
   }
   events = connectEvents(token);
   retry = 1000;
+}
+
+// ---------- the Suite's widgets: goals, a timer, the latest follow and sub, a raid's shoutout ----------
+// Each event heard is counted here, kept (suiteState), and sent to the app for its pages (/goals, /timer,
+// /latest-follow, /latest-sub, /raid). What each shows and how is in the Suite's settings.
+let suite = null, suiteSaveT = null, suitePushT = null;
+const today = () => new Date().toISOString().slice(0, 10);
+function suiteNow() {
+  if (!suite) {
+    const k = S().suiteState || {};
+    suite = {
+      goals: Object.assign({ follow: 0, sub: 0, bits: 0, donation: 0, day: today() }, k.goals || {}),
+      latest: Object.assign({ follow: null, sub: null }, k.latest || {}),
+      timer: Object.assign({ running: false, leftMs: num(S().timerStart || 60) * 60000, endsAt: 0, startedAt: 0, elapsedMs: 0, addedMs: 0 }, k.timer || {}),
+      raid: null,
+      lastRaid: k.lastRaid || null,
+    };
+  }
+  // (goals reset each day, if that's how they're set)
+  if (String(S().goalReset || "stream") === "daily" && suite.goals.day !== today()) Object.assign(suite.goals, { follow: 0, sub: 0, bits: 0, donation: 0, day: today() });
+  return suite;
+}
+function suiteKeep() {
+  clearTimeout(suiteSaveT);
+  suiteSaveT = setTimeout(() => { const k = { goals: suite.goals, latest: suite.latest, timer: suite.timer, lastRaid: suite.lastRaid }; OmniPulse.settings.suiteState = k; OmniPulse.app.saveSettings({ suiteState: k }).catch(() => {}); }, 4000);
+}
+// (to the app, for the pages: what's counted, and how each is set)
+function suitePush() {
+  clearTimeout(suitePushT);
+  suitePushT = setTimeout(() => {
+    const st = suiteNow(), x = S();
+    const goal = (k, label, dflt) => ({ on: yes(x["goal" + k + "On"] === undefined ? true : x["goal" + k + "On"]), label: String(x["goal" + k + "Label"] || label), target: Math.max(1, num(x["goal" + k + "Target"]) || dflt) });
+    OmniPulse.app.suiteWidget({
+      goals: { counts: st.goals, follow: goal("Follow", "Follower goal", 10), sub: goal("Sub", "Sub goal", 5), bits: goal("Bits", "Bits goal", 1000), donation: goal("Dono", "Donation goal", 50), currency: String(x.goalCurrency || "$"), style: String(x.goalStyle || "bars") },
+      latest: { follow: st.latest.follow, sub: st.latest.sub },
+      timer: Object.assign({ stopwatch: yes(x.timerStopwatch), label: String(x.timerLabel || ""), now: Date.now() }, st.timer),
+      raid: st.raid,
+      anim: String(x.suiteAnim || "rise"),
+    }).catch(() => {});
+  }, 250);
+}
+function money(v) { const n = parseFloat(String(v || "").replace(/[^0-9.]/g, "")); return isNaN(n) ? 0 : n; }
+function tierOf(t) { return t === "3000" ? 3 : t === "2000" ? 2 : 1; }
+
+// (the subathon: time added for what's happened, up to its cap)
+function timerAdd(ms) {
+  const t = suiteNow().timer, x = S();
+  if (yes(x.timerStopwatch) || ms <= 0) return;
+  const cap = num(x.timerCap) * 3600000;
+  if (cap > 0) ms = Math.max(0, Math.min(ms, cap - t.addedMs));
+  if (!ms) return;
+  t.addedMs += ms;
+  if (t.running) t.endsAt += ms; else t.leftMs += ms;
+}
+
+function suiteHear(ev, ctx) {
+  const st = suiteNow(), x = S(), g = st.goals;
+  if (ev === "online" && String(x.goalReset || "stream") === "stream") Object.assign(g, { follow: 0, sub: 0, bits: 0, donation: 0, day: today() });
+  const sub = ev === "sub" || ev === "resub" || ev === "gift";
+  if (ev === "follow") { g.follow++; st.latest.follow = { user: ctx.user, platform: ctx.platform, at: Date.now() }; if (yes(x.timerSubathon)) timerAdd(num(x.timerFollow) * 1000); }
+  if (sub) {
+    const n = ev === "gift" ? Math.max(1, num(ctx.amount)) : 1, tier = tierOf(ctx.tier);
+    g.sub += n;
+    st.latest.sub = { user: ctx.user, platform: ctx.platform, tier, months: ev === "resub" ? num(ctx.amount) : 0, gift: ev === "gift" ? n : 0, at: Date.now() };
+    if (yes(x.timerSubathon)) timerAdd(n * num(x["timerSub" + tier] || [0, 5, 10, 25][tier]) * 60000);
+  }
+  if (ev === "bits") { g.bits += num(ctx.amount); if (yes(x.timerSubathon)) timerAdd(num(ctx.amount) / 100 * num(x.timerBits) * 60000); }
+  if (ev === "donation") { g.donation += money(ctx.amount); if (yes(x.timerSubathon)) timerAdd(money(ctx.amount) * num(x.timerDono) * 60000); }
+  if (ev === "raid" && num(ctx.amount) >= Math.max(1, num(x.raidMin) || 1)) st.lastRaid = { user: ctx.user, userId: ctx.userId, viewers: num(ctx.amount), platform: ctx.platform, at: Date.now() };
+  if (["follow", "bits", "donation", "raid", "online"].includes(ev) || sub) { suiteKeep(); suitePush(); }
+}
+
+// (the shoutout, when it's asked for (the Stream Deck's Raid Shoutout, or its sheet): your latest raider shown,
+// one of their recent clips if it's set to, and said in chat if that's on)
+async function shoutout() {
+  const st = suiteNow();
+  if (!st.lastRaid) return "No one's raided yet.";
+  await raidIn(st.lastRaid);
+  return "Shouting out " + st.lastRaid.user + ".";
+}
+async function raidIn(ctx) {
+  const st = suiteNow(), x = S();
+  st.raid = { user: ctx.user, login: String(ctx.user || "").toLowerCase(), viewers: num(ctx.viewers != null ? ctx.viewers : ctx.amount), platform: ctx.platform, at: Date.now(), secs: Math.max(5, num(x.raidSecs) || 20), clip: null };
+  if (ctx.viewers != null) ctx = Object.assign({}, ctx, { amount: ctx.viewers });
+  if (yes(x.raidChat === undefined ? true : x.raidChat)) {
+    const said = String(x.raidMessage || "Thanks for the raid, {user}! Go follow them at twitch.tv/{login} 💜").replace(/\{user\}/g, ctx.user).replace(/\{login\}/g, String(ctx.user || "").toLowerCase()).replace(/\{viewers\}/g, String(num(ctx.amount)));
+    reply(null, said, ctx.platform === "kick" ? "kick" : "twitch");
+  }
+  if (yes(x.raidClip) && ctx.platform === "twitch" && ctx.userId) {
+    try {
+      const since = new Date(Date.now() - 60 * 86400000).toISOString();
+      let r = await helix("GET", "clips?broadcaster_id=" + encodeURIComponent(ctx.userId) + "&first=20&started_at=" + encodeURIComponent(since));
+      if (!r.data || !r.data.length) r = await helix("GET", "clips?broadcaster_id=" + encodeURIComponent(ctx.userId) + "&first=20");
+      const c = (r.data || [])[Math.floor(Math.random() * Math.max(1, (r.data || []).length))];
+      if (c) {
+        st.raid.clip = { id: c.id, title: c.title || "", secs: Math.ceil(num(c.duration) || 20) };
+        st.raid.secs = Math.max(st.raid.secs, st.raid.clip.secs + 4);
+      }
+    } catch (e) { OmniPulse.log("raid clip: " + e.message); }
+  }
+  suitePush();
+}
+
+// (the timer's command: start, pause, add or take away minutes, reset; moderators and you)
+async function suiteCommand(cmd, args, r, id, platform) {
+  const c = String(S().timerCommand || "!timer").trim().toLowerCase();
+  if (!c || cmd !== c) return false;
+  if (!r.mod) return true;
+  const [what, n] = String(args || "").toLowerCase().split(/\s+/);
+  const t = suiteNow().timer;
+  const said = timerDo(what, num(n));
+  if (said) reply(id, said, platform);
+  return true;
+}
+function timerDo(what, n) {
+  const t = suiteNow().timer, x = S(), now = Date.now();
+  const left = () => t.running ? Math.max(0, t.endsAt - now) : t.leftMs;
+  if (what === "start" || what === "resume") {
+    if (t.running) return "The timer's already running.";
+    t.running = true;
+    if (yes(x.timerStopwatch)) t.startedAt = now - t.elapsedMs; else t.endsAt = now + t.leftMs;
+  } else if (what === "pause" || what === "stop") {
+    if (!t.running) return "The timer's already paused.";
+    t.running = false;
+    if (yes(x.timerStopwatch)) t.elapsedMs = now - t.startedAt; else t.leftMs = left();
+  } else if (what === "add" || what === "remove") {
+    const ms = (what === "remove" ? -1 : 1) * Math.max(0, n) * 60000;
+    if (t.running) t.endsAt += ms; else t.leftMs = Math.max(0, t.leftMs + ms);
+  } else if (what === "reset") {
+    Object.assign(t, { running: false, leftMs: num(x.timerStart || 60) * 60000, endsAt: 0, startedAt: 0, elapsedMs: 0, addedMs: 0 });
+  } else return "Use " + (x.timerCommand || "!timer") + " start, pause, add 5, remove 5 or reset.";
+  suiteKeep();
+  suitePush();
+  return what === "add" || what === "remove" ? "Timer: " + (what === "add" ? "added " : "took off ") + n + " min." : "Timer: " + what + ".";
+}
+// (a widget tried from its sheet: a follow, a sub, a raid, as if it had happened; not counted for keeps)
+function suiteTest(kind) {
+  const st = suiteNow();
+  if (kind === "follow") st.latest.follow = { user: "TestFollower", platform: "twitch", at: Date.now() };
+  if (kind === "sub") st.latest.sub = { user: "TestSubscriber", platform: "twitch", tier: 1, months: 6, gift: 0, at: Date.now() };
+  if (kind === "raid") st.raid = { user: "TestRaider", login: "testraider", viewers: 42, platform: "twitch", at: Date.now(), secs: Math.max(5, num(S().raidSecs) || 20), clip: null };
+  if (kind === "goals") { st.goals.follow++; st.goals.sub++; st.goals.bits += 100; st.goals.donation += 5; suiteKeep(); }
+  suitePush();
+  return "Sent to the widget.";
 }
 
 // ---------- OBS's docks: the chat (its moderation buttons) and the activity feed ----------
@@ -1834,6 +1982,10 @@ function restart() { start().catch((e) => OmniPulse.log("start: " + e.message));
 OmniPulse.register({
   start() { restart(); return true; },
   dock(cmd) { return dockDo(cmd || {}); },
+  suiteTest(kind) { return suiteTest(String(kind || "")); },
+  suiteShoutout() { return shoutout(); },
+  suiteTimer(what) { return timerDo(String(what || "").split(":")[0], num(String(what || "").split(":")[1])) || "Done."; },
+  suiteRefresh() { suitePush(); return "ok"; },
   signInChannel(values) { return signIn("channel", TWITCH_SCOPES_CHANNEL, values); },
   signInBot(values) { return signIn("bot", TWITCH_SCOPES_BOT, values); },
   signInChannelCopy(values) { return signIn("channel", TWITCH_SCOPES_CHANNEL, values, true); },

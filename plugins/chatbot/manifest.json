@@ -1,9 +1,9 @@
 {
   "id": "chatbot",
-  "name": "OmniPulse Chatbot",
-  "version": "0.2.10",
+  "name": "OmniPulse Stream Suite",
+  "version": "0.3.0",
   "author": "OmniPulse",
-  "description": "OmniPulse's own chatbot. Song requests, alerts, your own actions and OBS controls, straight from your chat, with no other bot needed. Works with Twitch and Kick, and YouTube is coming.",
+  "description": "Everything for your stream in one place: a chatbot with song requests, your own actions and OBS controls; alerts, goals, timers and on-stream widgets; and OBS docks. Works with Twitch and Kick, and YouTube is coming.",
   "main": "main.js",
   "hosts": [
     "id.twitch.tv",
@@ -266,7 +266,12 @@
       "label": "Who Can Request",
       "type": "select",
       "default": "everyone",
-      "options": ["everyone", "subscribers", "vips", "mods"]
+      "options": [
+        "everyone",
+        "subscribers",
+        "vips",
+        "mods"
+      ]
     },
     {
       "key": "srCooldown",
@@ -281,6 +286,205 @@
       "type": "number",
       "default": 0,
       "note": "With Points on. 0 for free."
+    },
+    {
+      "key": "suiteAnim",
+      "label": "Widget Animation",
+      "type": "select",
+      "default": "rise",
+      "note": "How the Suite's widgets come in."
+    },
+    {
+      "key": "goalReset",
+      "label": "Goals Start Again",
+      "type": "select",
+      "default": "stream"
+    },
+    {
+      "key": "goalStyle",
+      "label": "Goals Look",
+      "type": "select",
+      "default": "bars"
+    },
+    {
+      "key": "goalCurrency",
+      "label": "Donation Currency",
+      "type": "text",
+      "default": "$"
+    },
+    {
+      "key": "goalFollowOn",
+      "label": "Follower Goal",
+      "type": "toggle",
+      "default": true
+    },
+    {
+      "key": "goalFollowLabel",
+      "label": "Its Name",
+      "type": "text",
+      "default": "Follower goal"
+    },
+    {
+      "key": "goalFollowTarget",
+      "label": "Its Target",
+      "type": "number",
+      "default": 10
+    },
+    {
+      "key": "goalSubOn",
+      "label": "Sub Goal",
+      "type": "toggle",
+      "default": true
+    },
+    {
+      "key": "goalSubLabel",
+      "label": "Its Name",
+      "type": "text",
+      "default": "Sub goal"
+    },
+    {
+      "key": "goalSubTarget",
+      "label": "Its Target",
+      "type": "number",
+      "default": 5
+    },
+    {
+      "key": "goalBitsOn",
+      "label": "Bits Goal",
+      "type": "toggle",
+      "default": true
+    },
+    {
+      "key": "goalBitsLabel",
+      "label": "Its Name",
+      "type": "text",
+      "default": "Bits goal"
+    },
+    {
+      "key": "goalBitsTarget",
+      "label": "Its Target",
+      "type": "number",
+      "default": 1000
+    },
+    {
+      "key": "goalDonoOn",
+      "label": "Donation Goal",
+      "type": "toggle",
+      "default": true
+    },
+    {
+      "key": "goalDonoLabel",
+      "label": "Its Name",
+      "type": "text",
+      "default": "Donation goal"
+    },
+    {
+      "key": "goalDonoTarget",
+      "label": "Its Target",
+      "type": "number",
+      "default": 50
+    },
+    {
+      "key": "timerStopwatch",
+      "label": "Count Up",
+      "type": "toggle",
+      "default": false
+    },
+    {
+      "key": "timerStart",
+      "label": "Starting Time (minutes)",
+      "type": "number",
+      "default": 60
+    },
+    {
+      "key": "timerLabel",
+      "label": "Its Label",
+      "type": "text",
+      "default": ""
+    },
+    {
+      "key": "timerCommand",
+      "label": "Its Command",
+      "type": "text",
+      "default": "!timer"
+    },
+    {
+      "key": "timerSubathon",
+      "label": "Subathon",
+      "type": "toggle",
+      "default": false
+    },
+    {
+      "key": "timerSub1",
+      "label": "Minutes per Tier 1 Sub",
+      "type": "number",
+      "default": 5
+    },
+    {
+      "key": "timerSub2",
+      "label": "Minutes per Tier 2 Sub",
+      "type": "number",
+      "default": 10
+    },
+    {
+      "key": "timerSub3",
+      "label": "Minutes per Tier 3 Sub",
+      "type": "number",
+      "default": 25
+    },
+    {
+      "key": "timerBits",
+      "label": "Minutes per 100 Bits",
+      "type": "number",
+      "default": 1
+    },
+    {
+      "key": "timerDono",
+      "label": "Minutes per 1 Donated",
+      "type": "number",
+      "default": 1
+    },
+    {
+      "key": "timerFollow",
+      "label": "Seconds per Follow",
+      "type": "number",
+      "default": 0
+    },
+    {
+      "key": "timerCap",
+      "label": "Most Added (hours)",
+      "type": "number",
+      "default": 0
+    },
+    {
+      "key": "raidMin",
+      "label": "Smallest Raid",
+      "type": "number",
+      "default": 1
+    },
+    {
+      "key": "raidSecs",
+      "label": "Shown For (seconds)",
+      "type": "number",
+      "default": 20
+    },
+    {
+      "key": "raidChat",
+      "label": "Shout Out in Chat",
+      "type": "toggle",
+      "default": true
+    },
+    {
+      "key": "raidMessage",
+      "label": "Its Message",
+      "type": "text",
+      "default": "Thanks for the raid, {user}! Go follow them at twitch.tv/{login} 💜"
+    },
+    {
+      "key": "raidClip",
+      "label": "Play One of Their Clips",
+      "type": "toggle",
+      "default": false
     },
     {
       "key": "commands",

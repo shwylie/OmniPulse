@@ -47,6 +47,10 @@ fn outputs_list(prefs: &Value, kind: &str, base: &str) -> Vec<Value> {
 
 pub fn title(name: &str) -> String {
     if let Some((kind, n)) = output_of(name) { return format!("{}, Output {n}", title(kind)); }
+    if name == "socials" { return "Social Plug".into(); }
+    if let Some(id) = name.strip_prefix("social:") {
+        return crate::socials::list(&crate::SHARED.with(|s| s.borrow().as_ref().map(|sh| sh.borrow().web.prefs.clone())).unwrap_or_default()).iter().find(|m| m["id"] == id).map(crate::socials::name_of).unwrap_or_else(|| "Platform".into());
+    }
     if name == "alertlist" { return "Alerts and Their Order".into(); }
     if let Some(k) = name.strip_prefix("alert:") { return format!("Alert: {}", crate::alerts::name(&Value::Null, k)); }
     match name {
@@ -72,7 +76,7 @@ pub fn title(name: &str) -> String {
 
 /// The panel a switch's Settings button opens (by the switch's pref)
 pub fn of_switch(key: &str) -> Option<&'static str> {
-    Some(match key { "streamSafe" => "safe", "req" => "requests", "smartOn" => "smart", "presence" => "discord", "jamsOn" => "together", "lyricsSources" => "lyrics", "widget" => "widget", "lyricsWidget" => "lyricsw", "alertsOn" => "alerts", "remoteOn" => "remote", "out2On" => "offset", "avoidRecent" => "recent", "hideOn" => "hidden", "plugAdd" => "plugins", _ => return None })
+    Some(match key { "streamSafe" => "safe", "req" => "requests", "smartOn" => "smart", "presence" => "discord", "jamsOn" => "together", "lyricsSources" => "lyrics", "widget" => "widget", "lyricsWidget" => "lyricsw", "alertsOn" => "alerts", "remoteOn" => "remote", "out2On" => "offset", "socials" => "socials", "avoidRecent" => "recent", "hideOn" => "hidden", "plugAdd" => "plugins", _ => return None })
 }
 
 /// What a panel edits, and each one's default (the web app's)
@@ -85,6 +89,7 @@ fn keys(name: &str) -> Vec<(&'static str, Value)> {
         "lyricsw" => vec![("lyricsLines", json!(3)), ("lyricsBefore", json!(false)), ("lyricsScroll", json!("smooth")), ("lyricsScrollMs", json!(600)), ("lyricsScrollPlace", json!("top")), ("lyricsFadeEdges", json!(false)), ("lyricsSize", json!(48)), ("lyricsFont", json!("sans")), ("lyricsAlign", json!("center")), ("lyricsPlace", json!("")), ("lyricsStyle", json!("karaoke")), ("lyricsColor", json!("#ffffff")), ("lyricsTextGrad", json!(false)), ("lyricsColor2", json!("#9ad1ff")), ("lyricsOwnHi", json!(false)), ("lyricsHi", json!("#8e9bff")), ("lyricsHiGrad", json!(false)), ("lyricsHi2", json!("#ff8ad8")), ("lyricsGradDir", json!("90deg")), ("lyricsDim", json!(0.45)), ("lyricsTransform", json!("none")), ("lyricsShadow", json!(true)), ("lyricsOutline", json!(false)), ("lyricsOutlineSize", json!(4)), ("lyricsOutlineColor", json!("#000000")), ("lyricsOutlineOpacity", json!(1.0)), ("lyricsBox", json!(false)), ("lyricsBoxColor", json!("#0a0a0e")), ("lyricsBoxGrad", json!(false)), ("lyricsBoxColor2", json!("#2a1450")), ("lyricsBoxDir", json!("135deg")), ("lyricsBoxOpacity", json!(0.62)), ("lyricsTitle", json!(true)), ("lyricsHideNone", json!(true)), ("lyricsOffset", json!(0)), ("lyricsHidePaused", json!(true))],
         "smart" => vec![("shareRatings", json!(true)), ("smartBlend", json!(true)), ("smartKeys", json!(true)), ("smartMax", json!(10)), ("smartTape", json!(false)), ("smartRoll", json!(false)), ("smartVoices", json!(true))],
         "requests" => vec![("reqBot", json!("streamerbot")), ("reqRadioEdit", json!(false)), ("reqNoAi", json!(false)), ("reqLimits", json!(true)), ("reqMax", json!(10)), ("reqPerUser", json!(2)), ("reqPort", json!(7879)), ("botRemote", json!(false))],
+        "socials" => vec![("socialStyle", json!("card")), ("socialAlign", json!("left")), ("socialSecs", json!(8)), ("socialAll", json!(false)), ("socialRounded", json!(true)), ("socialColoured", json!(false)), ("socialMotion", json!("rise"))],
         "widget" => vec![("widgetPort", json!(7878)), ("widgetDesign", json!("card")), ("widgetAlign", json!("left")), ("widgetRounded", json!(true)), ("widgetText", json!(1)), ("wFade", json!(true)), ("wScroll", json!(true)), ("wSpin", json!(true)), ("wRequester", json!(true)), ("wColor", json!(1.2)), ("alertSplit", json!(false)), ("widgetOwnCol", json!(false)), ("widgetCol1", json!("#8e9bff")), ("widgetCol2", json!("#b48eff"))],
         "alerts" => vec![("alertBot", json!("streamerbot")), ("sbHost", json!("127.0.0.1:8080")), ("sbOn", json!(true)), ("alertTrans", json!("seamless")), ("alertCSize", json!("medium")), ("alertCDir", json!("diag")), ("alertCAngle", json!(0)), ("alertAnim", json!("slide")), ("alertOwnCol", json!(false)), ("alertCol1", json!("#8e9bff")), ("alertCol2", json!("#b38cff")), ("alertDir", json!("115deg")), ("alertIcon", json!(1)), ("alertSecs", json!(5)), ("alertVol", json!(0.8)), ("botRemote", json!(false))],
         "remote" => vec![("remotePort", json!(7880))],
@@ -158,6 +163,12 @@ pub fn values(name: &str, prefs: &Value) -> Map<String, Value> {
     if name == "alertlist" { return crate::alerts::list_values(prefs); }
     if name == "safe" { return crate::streamsafe::panel_values(prefs); }
     if let Some(k) = name.strip_prefix("alert:") { return crate::alerts::edit_values(prefs, k); }
+    if let Some(id) = name.strip_prefix("social:") { return crate::socials::edit_values(prefs, id); }
+    if name == "socials" {
+        let mut m = crate::socials::list_values(prefs);
+        for (k, d) in keys("socials") { m.insert(k.to_string(), if prefs[k].is_null() { d } else { prefs[k].clone() }); }
+        return m;
+    }
     if let Some((kind, n)) = output_of(name) {
         let over = crate::integrations::outputs_of(prefs, kind).get(n - 2).cloned().unwrap_or_default();
         let merged = crate::integrations::merged(prefs, &over);
@@ -241,7 +252,8 @@ fn sel(key: &str, label: &str, note: &str, opts: &[(Value, &str)]) -> Value {
 }
 /// A widget's design: picked from sketches of each (the page draws them, in the options' order)
 fn design(key: &str, label: &str) -> Value {
-    let mut v = sel(key, label, "", &[(json!("card"), "Card"), (json!("bar"), "Slim Bar"), (json!("square"), "Square"), (json!("minimal"), "Minimal"), (json!("pill"), "Pill"), (json!("vinyl"), "Vinyl"), (json!("poster"), "Poster"), (json!("ticker"), "Ticker")]);
+    let mut v = sel(key, label, "", &[(json!("card"), "Card"), (json!("bar"), "Slim Bar"), (json!("square"), "Square"), (json!("minimal"), "Minimal"), (json!("pill"), "Pill"), (json!("vinyl"), "Vinyl"), (json!("poster"), "Poster"), (json!("ticker"), "Ticker"),
+        (json!("neon"), "Neon Sign"), (json!("lower"), "Lower Third"), (json!("cassette"), "Cassette"), (json!("equaliser"), "Equaliser"), (json!("nownext"), "Now and Next"), (json!("polaroid"), "Polaroid"), (json!("frosted"), "Frosted Glass"), (json!("vertical"), "Vertical")]);
     v["type"] = json!("designpick");
     v
 }
@@ -317,6 +329,53 @@ const GENERIC_EVENTS: [(&str, &str); 11] = [
 
 /// A panel's fields, for the values as they are in it (prefs: for the keys, Streamer Mode, the LAN address)
 pub fn fields(name: &str, vals: &Map<String, Value>, prefs: &Value, lan: &str) -> Vec<Value> {
+    // the Social Plug: its look, then its platforms in turn (each one's own page from there)
+    if name == "socials" {
+        let port = prefs["widgetPort"].as_u64().unwrap_or(7878);
+        let url = format!("http://127.0.0.1:{port}/socials");
+        let mut f = vec![
+            info("Address", &url, &url, "Add this address as a Browser source in OBS. About 920 × 180 fits one at a time."),
+            note("How It Looks"),
+            sel("socialStyle", "Style", "", &[(json!("card"), "Card"), (json!("pill"), "Pill"), (json!("minimal"), "Minimal")]),
+            tog("socialColoured", "In Each Platform's Colours", "The whole card in the platform's colours, not just its icon."),
+            sel("socialAlign", "Alignment", "", &[(json!("left"), "Left"), (json!("centre"), "Centre"), (json!("right"), "Right")]),
+            tog("socialRounded", "Rounded Corners", ""),
+            tog("socialAll", "All at Once", "Shows every platform side by side. When this is off, they show one at a time, in turn."),
+        ];
+        if vals["socialAll"].as_bool() == Some(true) {
+            f.push(sel("socialMotion", "Animation", "How they come in, one after another, before a slow glow runs along them.", &[(json!("rise"), "Rise"), (json!("slide"), "Slide"), (json!("flip"), "Flip"), (json!("pop"), "Pop"), (json!("none"), "None")]));
+        }
+        if vals["socialAll"].as_bool() != Some(true) {
+            f.push(sel("socialSecs", "Each One For", "", &[(json!(5), "5 s"), (json!(8), "8 s"), (json!(12), "12 s"), (json!(20), "20 s"), (json!(30), "30 s")]));
+            f.push(sel("socialMotion", "Animation", "How each one comes in and goes out.", &[(json!("rise"), "Rise"), (json!("slide"), "Slide"), (json!("flip"), "Flip"), (json!("pop"), "Pop"), (json!("type"), "Typewriter"), (json!("none"), "None")]));
+        }
+        f.push(note("Platforms"));
+        f.extend(crate::socials::list_rows(prefs));
+        return f;
+    }
+    if let Some(id) = name.strip_prefix("social:") {
+        let m = crate::socials::list(prefs).into_iter().find(|m| m["id"] == id).unwrap_or_default();
+        let opts: Vec<(Value, &str)> = crate::socials::PLATFORMS.iter().map(|p| (json!(p.0), p.1)).collect();
+        let other = vals["platform"] == "other";
+        let mut f = vec![sel("platform", "Platform", "", &opts)];
+        if other { f.push(text("name", "Its Name", "What it's called, shown under your handle.")); }
+        f.push(text("handle", "Your Handle", "As you want it shown, like @yourname or yourname.tv."));
+        f.push(note("Icon and Colours"));
+        match crate::socials::icon_of(&m) {
+            Some(file) => {
+                f.push(button(&format!("socIcon:{id}"), &format!("Your Icon: {file}"), "Change", ""));
+                f.push(button(&format!("socIconClear:{id}"), "", if other { "Use Its First Letter" } else { "Use Its Own Icon" }, ""));
+            }
+            None => f.push(button(&format!("socIcon:{id}"), "Your Own Icon", "Choose...", if other { "Without one, it shows the first letter of its name." } else { "In place of the platform's icon (a PNG with a clear background works best)." })),
+        }
+        if !other { f.push(tog("ownCol", "Your Own Colours", "When this is off, it uses the platform's colours.")); }
+        if other || vals["ownCol"].as_bool() == Some(true) {
+            f.push(color("col1", "Colour", ""));
+            f.push(color("col2", "Second Colour", "The two make its gradient."));
+        }
+        f.push(button(&format!("socDel:{id}"), "", "Remove This Platform", ""));
+        return f;
+    }
     // (an output's page: its address, then the first's page cut down to its look, its sections' headings kept
     // only where something's left under them)
     if let Some((kind, n)) = output_of(name) {
@@ -401,7 +460,7 @@ fn fields_of(name: &str, vals: &Map<String, Value>, prefs: &Value, lan: &str) ->
             let chat = rq.starts_with('!');
             let mut f = vec![
                 note("Your Bot"),
-                sel("reqBot", "Chat Bot", "The bot that answers !sr in your chat. Or turn on the OmniPulse Chatbot in Plugins, and it does this for you.", &opts),
+                sel("reqBot", "Chat Bot", "The bot that answers !sr in your chat. Or turn on the OmniPulse Stream Suite in Plugins, and its chatbot does this for you.", &opts),
                 note(steps),
                 info(if chat { "Song Request (!sr)" } else { "Request Address (!sr)" }, &fill(rq, &hide(&key)), &fill(rq, &key), "Adds the song a viewer asks for to the queue."),
                 info(if chat { "Now Playing (!song)" } else { "Now Playing Address (!song)" }, &fill(now, &hide(&key)), &fill(now, &key), "Says what's playing."),
@@ -642,6 +701,18 @@ fn fields_of(name: &str, vals: &Map<String, Value>, prefs: &Value, lan: &str) ->
                 info("Address", &url(&hide(&key)), &url(&key), "The Stream Deck plugin finds it by itself; other devices use this address (action: toggle, next, previous, like...)."),
                 num("remotePort", "Port", "1024 to 65535."),
                 button("remoteNewKey", "Secret Key", "New Key", "A new key: anything using the old address needs the new one."),
+                // (the plugin itself: the app's own, given to Stream Deck; kept up to date as the app starts)
+                {
+                    let have = crate::streamdeck::installed();
+                    let ours = crate::streamdeck::version();
+                    let (label, note) = match (crate::streamdeck::present(), have.as_deref()) {
+                        (false, _) => ("Install", "Stream Deck isn't installed on this PC. Install it first, from elgato.com."),
+                        (true, None) => ("Install", "Adds OmniPulse's keys to Stream Deck. Stream Deck asks you to confirm."),
+                        (true, Some(v)) if crate::streamdeck::newer(ours, v) => ("Update", "A newer version came with the app. It updates by itself as OmniPulse starts, or here now."),
+                        (true, Some(_)) => ("Install Again", "Up to date. It's kept up to date as the app updates."),
+                    };
+                    button("sdInstall", "Stream Deck Plugin", label, note)
+                },
             ]
         }
         "hidden" => crate::hide::fields(prefs),

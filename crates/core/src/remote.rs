@@ -33,6 +33,8 @@ const ACTIONS: &[&str] = &[
     "clear-requests", "clear-queue", "sets", "state",
     // Seamless Mix feedback: the last transition, rated (logged with how it was mixed)
     "mix-good", "mix-bad",
+    // the Stream Suite's Raid Shoutout: your latest raider, shown with one of their clips
+    "raid-shoutout",
 ];
 
 static GEN: AtomicU64 = AtomicU64::new(0);

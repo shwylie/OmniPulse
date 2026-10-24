@@ -120,7 +120,8 @@ pub fn lastfm_scrobble(rt: &tokio::runtime::Handle, prefs: &Value, t: &Track, st
 
 // ---------- the OBS widget ----------
 pub fn widget_start(prefs: &Value) -> Option<String> {
-    if !set(prefs, "widget") && !set(prefs, "lyricsWidget") {
+    // (and the Suite's widgets, while it's running)
+    if !set(prefs, "widget") && !set(prefs, "lyricsWidget") && !set(prefs, "socials") && !crate::plugin_runs(prefs, crate::botpage::BOT) {
         return None;
     }
     // (bots on other devices: alerts from them too, with the alerts' key, as the web app's)
@@ -284,7 +285,7 @@ pub static WIDGET_HIDDEN: std::sync::Mutex<String> = std::sync::Mutex::new(Strin
 pub static CROSSFADE: std::sync::Mutex<Option<Value>> = std::sync::Mutex::new(None);
 
 pub fn widget_update(prefs: &Value, t: Option<&Track>, by: &str, pos_ms: u64, dur_ms: u64, playing: bool, accent: (&str, &str), lyrics: &[crate::player::Line]) {
-    if !set(prefs, "widget") && !set(prefs, "lyricsWidget") {
+    if !set(prefs, "widget") && !set(prefs, "lyricsWidget") && !set(prefs, "socials") && !crate::plugin_runs(prefs, crate::botpage::BOT) {
         return;
     }
     core::widget::widget_update(widget_state(prefs, t, by, pos_ms, dur_ms, playing, accent, lyrics));
@@ -304,6 +305,19 @@ pub fn outputs_of(prefs: &Value, kind: &str) -> Vec<serde_json::Map<String, Valu
         return vec![m];
     }
     Vec::new()
+}
+
+/// The Stream Suite's widgets, as it last sent them (its goals, timer, latest follow and sub, a raid)
+pub static SUITE: std::sync::Mutex<Option<Value>> = std::sync::Mutex::new(None);
+
+pub fn set_suite(v: Value) { if let Ok(mut g) = SUITE.lock() { *g = Some(v); } }
+
+/// The song coming next (Now and Next: its name, artist, cover and who asked for it), as the queue has it
+pub static NEXT: std::sync::Mutex<Option<Value>> = std::sync::Mutex::new(None);
+
+pub fn set_next(t: Option<&Track>, by: &str) {
+    let v = t.map(|t| json!({ "title": t.title, "artist": t.artist, "artwork": big_art(t), "requested_by": by }));
+    if let Ok(mut g) = NEXT.lock() { *g = v; }
 }
 
 /// The settings with an output's own over them
@@ -382,6 +396,10 @@ pub fn widget_state(prefs: &Value, t: Option<&Track>, by: &str, pos_ms: u64, dur
         }
     }
     if let (Some(o), Some(x)) = (state.as_object_mut(), CROSSFADE.lock().ok().and_then(|c| c.clone())) { o.insert("crossfade".into(), x); }
+    if let (Some(o), Some(x)) = (state.as_object_mut(), NEXT.lock().ok().and_then(|c| c.clone())) { o.insert("next".into(), x); }
+    if let (Some(o), Some(x)) = (state.as_object_mut(), SUITE.lock().ok().and_then(|c| c.clone())) { o.insert("suite".into(), x); }
+    // (the Social Plug's platforms and look, with it on)
+    if set(prefs, "socials") { if let Some(o) = state.as_object_mut() { o.insert("socials".into(), crate::socials::widget_json(prefs)); } }
     state
 }
 

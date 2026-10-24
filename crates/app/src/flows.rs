@@ -123,7 +123,7 @@ pub const TRIGGERS: &[Kind] = &[
     Kind { id: "song", label: "The Music", note: "Gives the steps %song% and %artist%. For a request, %user% is who asked.", fields: &[
         pick("when", "When", &[("start", "A Song Starts"), ("request", "A Song Is Requested")], "start", ""),
     ] },
-    Kind { id: "obs", label: "OBS", note: "Needs OBS switched on in the chatbot's settings. Gives its steps %scene% (the scene now).", fields: &[
+    Kind { id: "obs", label: "OBS", note: "Needs OBS switched on in the Suite's settings. Gives its steps %scene% (the scene now).", fields: &[
         pick("when", "When", OBS_WHEN, "scene", ""),
         f("scene", "Scene", "text", "", "For a scene change, enter the scene's name. Leave it empty for any scene."),
     ] },
@@ -327,7 +327,7 @@ pub const STEPS: &[Kind] = &[
     Kind { id: "obsstream", label: "OBS: Streaming", note: "", fields: &[pick("what", "", START_STOP, "start", "")] },
     Kind { id: "quoteadd", label: "Add a Quote", note: "Kept with the date. Gives the steps after it %quotenumber%.", fields: &[f("text", "Quote", "text", "%rawInput%", "")] },
     Kind { id: "quote", label: "Pick a Quote", note: "Gives the next steps %quote%, with its words, number and date.", fields: &[f("number", "Number", "text", "%input0%", "Empty, or not a number: one at random.")] },
-    Kind { id: "points", label: "Give or Take Points", note: "Your own points currency. Set its name and how many viewers get for chatting in the chatbot's settings. When taking points, the action stops here if they don't have enough.", fields: &[
+    Kind { id: "points", label: "Give or Take Points", note: "Your own points currency. Set its name and how many viewers get for chatting in the Suite's settings. When taking points, the action stops here if they don't have enough.", fields: &[
         f("who", "Who", "text", "%user%", ""),
         f("amount", "Points", "number", "10", "Take away with a minus."),
     ] },

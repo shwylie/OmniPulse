@@ -62,9 +62,12 @@
   "use strict";
   const $ = (id) => document.getElementById(id);
   const DEFAULTS = { from: "all", cmds: false, bot: true, badges: true, marks: true, style: "plain", size: 20, bg: "0", shadow: true, dir: "bottom", fade: 0, max: 30 };
+  // (/chat/2, /chat/3...: another output, its settings kept apart from the first's)
+  const OUT = (location.pathname.match(/^\/chat\/(\d+)/) || [])[1];
+  const KEY = "omnipulse.multichat" + (OUT ? "." + OUT : "");
   const store = {
-    get() { try { return JSON.parse(localStorage.getItem("omnipulse.multichat") || "{}"); } catch (e) { return {}; } },
-    set(v) { try { localStorage.setItem("omnipulse.multichat", JSON.stringify(v)); } catch (e) {} },
+    get() { try { return JSON.parse(localStorage.getItem(KEY) || "{}"); } catch (e) { return {}; } },
+    set(v) { try { localStorage.setItem(KEY, JSON.stringify(v)); } catch (e) {} },
   };
   // (the address's settings win over the ones kept: a source per scene, each its own)
   const fromUrl = {};

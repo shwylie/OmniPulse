@@ -29,6 +29,8 @@ mod memcount {
 mod aimusic;
 mod loading;
 mod viz;
+mod streamdeck;
+mod socials;
 mod smart;
 use omnipulse_mix::plan::Plan;
 mod updater;
@@ -3037,7 +3039,10 @@ fn track_act(shared: &Shared, t: &Track, act: &str) -> bool {
 /// The song coming next (DJ decks): its name, its artist and its cover, once the cover's in
 fn paint_next(a: &App) {
     let Some(ui) = a.ui.upgrade() else { return };
-    let next = a.queue.qi.and_then(|i| a.queue.items.get(i + 1)).map(|q| &q.t);
+    let nq = a.queue.qi.and_then(|i| a.queue.items.get(i + 1));
+    // (and for the Stream Widget's Now and Next: who asked for it too)
+    integrations::set_next(nq.map(|q| &q.t), nq.map(|q| q.by.as_str()).unwrap_or(""));
+    let next = nq.map(|q| &q.t);
     ui.set_next_title(next.map(|t| t.title.clone()).unwrap_or_default().into());
     ui.set_next_artist(next.map(|t| t.artist.clone()).unwrap_or_default().into());
     if let Some(img) = next.and_then(|t| ROW_ART.with(|c| c.borrow().map.get(&thumb_url(t)).cloned())) { ui.set_next_art(img); }
@@ -4514,8 +4519,8 @@ fn flows_backup(shared: &Shared) {
     flows_save(shared);
     let list = FLOW.with(|f| f.borrow().0.clone());
     let kept = shared.borrow().web.prefs["pluginSettings"][BOT].clone();
-    let file = format!("OmniPulse Chatbot {}.omnibot", chrono_date());
-    let Some(path) = rfd::FileDialog::new().set_title("Back up the chatbot").set_file_name(&file).add_filter("OmniPulse chatbot backup", &["omnibot"]).save_file() else { return };
+    let file = format!("OmniPulse Stream Suite {}.omnibot", chrono_date());
+    let Some(path) = rfd::FileDialog::new().set_title("Back up the Stream Suite").set_file_name(&file).add_filter("OmniPulse Stream Suite backup", &["omnibot"]).save_file() else { return };
     let note = match std::fs::write(&path, serde_json::to_string_pretty(&botimport::backup(&list, &kept)).unwrap_or_default()) {
         Ok(()) => format!("Backed up {} to {}.", plural(list.len(), "action", "actions"), path.file_name().and_then(|n| n.to_str()).unwrap_or("it")),
         Err(e) => format!("Couldn't back it up: {e}"),
@@ -5865,7 +5870,7 @@ fn push_out(shared: &Shared, presence: bool) {
     let (pos, dur) = if a.ui.upgrade().is_some_and(|u| u.get_track_loading()) { (0, 0) } else { (pos, dur) };
     let t = a.queue.current();
     let prefs = &a.web.prefs;
-    if integrations::set(prefs, "widget") || integrations::set(prefs, "req") || integrations::set(prefs, "lyricsWidget") {
+    if integrations::set(prefs, "widget") || integrations::set(prefs, "req") || integrations::set(prefs, "lyricsWidget") || integrations::set(prefs, "socials") {
         let by = a.queue.qi.and_then(|i| a.queue.items.get(i)).map(|q| q.by.as_str()).unwrap_or("");
         integrations::widget_update(prefs, t, by, pos, dur, playing, (&a.accent.0, &a.accent.1), &a.lyrics);
     }
@@ -5939,6 +5944,19 @@ fn remote_action(shared: &Shared, id: u64, action: &str) {
         }
         "state" => {}
         "mix-good" | "mix-bad" => if let Err(e) = mix_feedback(shared, action == "mix-good") { note = Some(e) },
+        // (the Suite's Raid Shoutout: its latest raider shown, said back on the app's status line)
+        "raid-shoutout" => {
+            match plugrun::get(botpage::BOT) {
+                Some(p) => {
+                    let (rt, weak) = { let a = shared.borrow(); (a.rt.clone(), a.ui.clone()) };
+                    rt.spawn(async move {
+                        let said = p.call("suiteShoutout", vec![]).await.map(|v| v.as_str().unwrap_or("").to_string()).unwrap_or_else(|e| e);
+                        let _ = weak.upgrade_in_event_loop(move |ui| ui.set_status(said.into()));
+                    });
+                }
+                None => note = Some("Turn the Stream Suite on first."),
+            }
+        }
         // (a Chatbot Action key: that action run, as the Actions page's Run Now runs it)
         a if a.starts_with("chatbot:") => match plugrun::get(BOT) {
             Some(p) => {
@@ -6099,7 +6117,7 @@ fn song_request(shared: &Shared, reply: ReqReply, q: String, user: String, from_
 /// The servers the web app's settings have on: the widget, the Stream Deck's remote, chat requests
 // ---------- Settings: the switches beyond Look ----------
 // (section, label, note, key, on unless switched off)
-const SET_ROWS: [(&str, &str, &str, &str, bool); 28] = [
+const SET_ROWS: [(&str, &str, &str, &str, bool); 29] = [
     ("Library", "Sets & Podcasts in the Queue", "Lists and autoplay include anything over 15 minutes. When this is off, they only play when you pick one.", "queueSets", false),
     ("Library", "Autoplay", "Plays similar tracks when the queue runs out.", "autoplay", true),
     ("Library", "Hidden & Not Recommended", "Right-click a track to stop it, its album or its artist from being recommended. When this is off, nothing is left out, but your lists are kept.", "hideOn", true),
@@ -6124,6 +6142,7 @@ const SET_ROWS: [(&str, &str, &str, &str, bool); 28] = [
     ("Integrations", "Discord Status", "Shows what you're playing on your Discord profile.", "presence", false),
     ("Streaming", "Stream Widget", "A now-playing card for OBS, with alerts.", "widget", false),
     ("Streaming", "Lyrics Widget", "Shows the playing song's lyrics in OBS, karaoke style. The line being sung lights up, with the next lines below it.", "lyricsWidget", false),
+    ("Streaming", "Social Plug", "Your handles on other platforms, in turn, for OBS.", "socials", false),
     ("Streaming", "Alerts", "Shows follows, subs, bits, raids and more from your bot, on the widget.", "alertsOn", false),
     ("Streaming", "Song Requests", "Chat asks for songs through your bot.", "req", false),
     ("Streaming", "OmniPulse Offset", "Your music a second time, as its own app (\"OmniPulse Offset\"), to send to a stream mix only, with an offset and a volume of its own. Use this to sync up with mic delay.", "out2On", false),
@@ -6163,7 +6182,7 @@ fn paint_settings(a: &App) {
                 let m = &p.manifest;
                 if m.section != sec || !plugin_on(&a.web.prefs, &m.id) { continue; }
                 let note = format!("{}{}", if m.description.is_empty() { String::new() } else { format!("{} ", m.description) }, plugin_state(&a.web.prefs, m));
-                list.push(SetRow { head: Default::default(), label: plugin_label(m).into(), note: note.into(), on: plugin_runs(&a.web.prefs, &m.id), key: format!("plugRun_{}", m.id).into(), sub: false, more: !streamer, button: Default::default() });
+                list.push(SetRow { head: Default::default(), label: place_label(m).into(), note: note.into(), on: plugin_runs(&a.web.prefs, &m.id), key: format!("plugRun_{}", m.id).into(), sub: false, more: !streamer, button: Default::default() });
             }
         }
         // the plugins installed (the web app adds and removes them; each one switches on and off here)
@@ -6428,7 +6447,7 @@ fn bot_set(shared: &Shared, key: &str, v: &str) {
     let key = botpage::key_of(key).to_string();
     let manifest = bot_manifest().map(|m| m.settings).unwrap_or_default();
     let value = botpage::value_of(&manifest, &key, v);
-    let toggle = value.is_boolean() || key == "srWho";
+    let toggle = value.is_boolean() || matches!(key.as_str(), "srWho" | "goalReset" | "goalStyle");
     // (during setup: kept as it's set, no Save needed; the chatbot restarted with it when you move on)
     let cur = bot_current(shared);
     let in_setup = !cur.get("setupDone").and_then(|v| v.as_bool()).unwrap_or(false)
@@ -6457,6 +6476,18 @@ fn bot_act(shared: &Shared, act: &str) {
     // (its widgets: switched here, their settings their own pages, asked first if something here isn't saved)
     if let Some(key) = act.strip_prefix("row-toggle:") { set_toggle(shared, key); return bot_paint(shared); }
     if let Some(key) = act.strip_prefix("row-more:") { if let Some(name) = panels::of_switch(key) { pf_leave(shared, &format!("panel:{name}")); } return; }
+    if let Some(rest) = act.strip_prefix("call:") {
+        let (method, arg) = rest.split_once(':').unwrap_or((rest, ""));
+        let (method, arg) = (method.to_string(), arg.to_string());
+        let Some(p) = plugrun::get(botpage::BOT) else { return say("Turn the Suite on first.") };
+        let (rt, weak) = { let a = shared.borrow(); (a.rt.clone(), a.ui.clone()) };
+        rt.spawn(async move {
+            let r = p.call(&method, vec![serde_json::json!(arg)]).await;
+            let note = match r { Ok(v) => v.as_str().unwrap_or("Done.").to_string(), Err(e) => e };
+            let _ = weak.upgrade_in_event_loop(move |ui| ui.set_status(note.into()));
+        });
+        return;
+    }
     if let Some(id) = act.strip_prefix("step:") { BOT_FOCUS.with(|f| *f.borrow_mut() = id.to_string()); BOT_DRAWN.with(|d| *d.borrow_mut() = Default::default()); return bot_paint(shared); }
     match act {
         "run" => { set_toggle(shared, &format!("plugRun_{}", botpage::BOT)); return bot_poll_soon(shared); }
@@ -6719,7 +6750,8 @@ fn panel_open(shared: &Shared, name: &str) {
         let output = panels::output_of(name).map(|(k, _)| k.to_string());
         let name = output.as_deref().unwrap_or(name);
         let cat = match name {
-            "requests" | "replies" | "widget" | "remote" | "offset" | "alerts" | "alertlist" | "safe" | "lyricsw" => "Streaming",
+            "requests" | "replies" | "widget" | "remote" | "offset" | "alerts" | "alertlist" | "safe" | "lyricsw" | "socials" => "Streaming",
+            n if n.starts_with("social:") => "Streaming",
             "youtube" => "Integrations",
             n if n.starts_with("alert:") => "Streaming",
             "plugins" => "Plugins",
@@ -6728,14 +6760,15 @@ fn panel_open(shared: &Shared, name: &str) {
             _ => "Library",
         };
         let mut path = vec![("Settings".to_string(), "root".to_string()), (cat.to_string(), format!("cat:{cat}"))];
-        let widgety = matches!(name, "widget" | "lyricsw" | "alerts" | "alertlist" | "requests" | "replies") || name.starts_with("alert:");
+        let widgety = matches!(name, "widget" | "lyricsw" | "alerts" | "alertlist" | "requests" | "replies" | "socials") || name.starts_with("alert:") || name.starts_with("social:");
         if widgety && plugin_on(&shared.borrow().web.prefs, botpage::BOT) {
-            if let Some(m) = bot_manifest() { path.push((plugin_label(&m), format!("plugin:{}", botpage::BOT))); }
+            if let Some(m) = bot_manifest() { path.push((place_label(&m), format!("plugin:{}", botpage::BOT))); }
         }
         match name {
             "alerts" => path.push((panels::title("widget"), "panel:widget".into())),
             "alertlist" => { path.push((panels::title("widget"), "panel:widget".into())); path.push((panels::title("alerts"), "panel:alerts".into())); }
             "replies" => path.push((panels::title("requests"), "panel:requests".into())),
+            n if n.starts_with("social:") => path.push((panels::title("socials"), "panel:socials".into())),
             n if n.starts_with("alert:") => {
                 path.push((panels::title("widget"), "panel:widget".into()));
                 path.push((panels::title("alerts"), "panel:alerts".into()));
@@ -6918,6 +6951,52 @@ fn outputs_put(shared: &Shared, kind: &str, outs: Vec<serde_json::Map<String, se
 
 fn panel_press(shared: &Shared, key: &str) {
     if key == "ytHelpersSetup" { return helpers_act(shared, "setup"); }
+    // (the Stream Deck plugin: given to Stream Deck to install, as it asks)
+    if key == "sdInstall" {
+        let note = match streamdeck::install() { Ok(()) => "Opened in Stream Deck. Confirm there to install it.".to_string(), Err(e) => e };
+        if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_status(note.into()); }
+        return;
+    }
+    // (the Social Plug's platforms)
+    if key == "socAdd" {
+        let (id, all) = socials::added(&shared.borrow().web.prefs);
+        pref_put(shared, "socials", all);
+        push_out(shared, true);
+        return pf_leave(shared, &format!("panel:social:{id}"));
+    }
+    if let Some(id) = key.strip_prefix("socEdit:") { return pf_leave(shared, &format!("panel:social:{id}")); }
+    if let Some((id, by)) = key.strip_prefix("socUp:").map(|i| (i, -1)).or_else(|| key.strip_prefix("socDown:").map(|i| (i, 1))) {
+        let all = socials::moved(&shared.borrow().web.prefs, id, by);
+        pref_put(shared, "socials", all);
+        push_out(shared, true);
+        return pf_paint(shared);
+    }
+    if let Some(id) = key.strip_prefix("socIcon:") {
+        let Some(path) = rfd::FileDialog::new().set_title("Choose an icon for this platform").add_filter("Pictures", &omnipulse_core::widget::IMAGE_EXTS).pick_file() else { return };
+        match omnipulse_core::widget::alert_media_set(&format!("social-{id}"), "image", &path.display().to_string()) {
+            Ok(file) => {
+                let all = socials::with(&shared.borrow().web.prefs, id, |m| { m.insert("icon".into(), serde_json::json!(file)); m.insert("iconAt".into(), serde_json::json!(now_ms())); });
+                pref_put(shared, "socials", all);
+                push_out(shared, true);
+                if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_status("Icon added.".into()); }
+            }
+            Err(e) => if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_status(e.into()); },
+        }
+        return pf_paint(shared);
+    }
+    if let Some(id) = key.strip_prefix("socIconClear:") {
+        let all = socials::with(&shared.borrow().web.prefs, id, |m| { m.remove("icon"); });
+        pref_put(shared, "socials", all);
+        push_out(shared, true);
+        return pf_paint(shared);
+    }
+    if let Some(id) = key.strip_prefix("socDel:") {
+        let all = socials::without(&shared.borrow().web.prefs, id);
+        pref_put(shared, "socials", all);
+        push_out(shared, true);
+        PF_EDIT.with(|e| e.borrow_mut().take());
+        return panel_open(shared, "socials");
+    }
     // (a widget's other outputs: another added (looking as the first does), one taken away, or its look changed)
     if let Some(kind) = key.strip_prefix("outAdd:") {
         let mut outs = integrations::outputs_of(&shared.borrow().web.prefs, kind);
@@ -7337,6 +7416,18 @@ fn widget_preview_open(shared: &Shared, name: &str) {
 }
 
 fn panel_save(shared: &Shared, name: &str, vals: serde_json::Map<String, serde_json::Value>) {
+    if let Some(id) = name.strip_prefix("social:") {
+        let all = socials::edit_save(&shared.borrow().web.prefs, id, &vals);
+        pref_put(shared, "socials", all);
+        push_out(shared, true);
+        PF_EDIT.with(|e| e.borrow_mut().take());
+        if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_status("Saved.".into()); }
+        return panel_open(shared, "socials");
+    }
+    if name == "socials" {
+        let all = socials::list_save(&shared.borrow().web.prefs, &vals);
+        pref_put(shared, "socials", all);
+    }
     // (an output's look: kept as what differs from the first's, then back to the widget's page)
     if let Some((kind, n)) = panels::output_of(name) {
         let first = panels::values(kind, &shared.borrow().web.prefs);
@@ -7448,7 +7539,7 @@ fn pf_open(shared: &Shared, id: &str) {
     if let Some(ui) = shared.borrow().ui.upgrade() {
         let cat = if p.manifest.section.is_empty() { "Plugins".to_string() } else { p.manifest.section.clone() };
         crumbs_set(&ui, vec![("Settings".into(), "root".into()), (cat.clone(), format!("cat:{cat}"))]);
-        ui.set_pf_head(plugin_label(&p.manifest).into());
+        ui.set_pf_head(place_label(&p.manifest).into());
         ui.set_pf_open(true);
     }
 }
@@ -7572,6 +7663,11 @@ fn plugin_label(m: &omnipulse_core::plugins::Manifest) -> String {
     if m.wip { format!("{} (WIP)", m.name) } else { m.name.clone() }
 }
 
+/// Where a plugin's page is, as its path says it: the Stream Suite is "Suite" (Settings > Streaming > Suite)
+fn place_label(m: &omnipulse_core::plugins::Manifest) -> String {
+    if m.id == botpage::BOT { "Suite".into() } else { plugin_label(m) }
+}
+
 /// A plugin's state, for its row: off, running, starting or why it couldn't
 fn plugin_state(prefs: &serde_json::Value, m: &omnipulse_core::plugins::Manifest) -> String {
     if !plugin_runs(prefs, &m.id) { "Off.".to_string() } else if plugrun::get(&m.id).is_some() { "Running.".to_string() } else { PLUG_ERR.with(|e| e.borrow().get(&m.id).cloned()).map(|e| format!("Couldn't start: {e}")).unwrap_or_else(|| "Starting...".into()) }
@@ -7690,13 +7786,13 @@ fn set_toggle(shared: &Shared, key: &str) {
             }
             // the servers stop, and start again with what's set now
             match key {
-                "widget" | "alertsOn" | "lyricsWidget" => omnipulse_core::widget::widget_stop(),
+                "widget" | "alertsOn" | "lyricsWidget" | "socials" => omnipulse_core::widget::widget_stop(),
                 "req" => omnipulse_core::requests::requests_stop(),
                 "remoteOn" => omnipulse_core::remote::remote_stop(),
                 "presence" if !on => integrations::presence(&shared.borrow().rt, &shared.borrow().web.prefs, None, 0, false, None),
                 _ => {}
             }
-            if matches!(key, "widget" | "req" | "remoteOn" | "alertsOn" | "lyricsWidget") && (on || key == "alertsOn" || key == "lyricsWidget") { panel_keys(shared); outside_start(shared); }
+            if matches!(key, "widget" | "req" | "remoteOn" | "alertsOn" | "lyricsWidget" | "socials") && (on || matches!(key, "alertsOn" | "lyricsWidget" | "socials")) { panel_keys(shared); outside_start(shared); }
             if key == "mbOn" { go_plus_set(&shared.borrow().web.prefs); }
             if key == "out2On" { offset_apply(shared); }
             // Listen Along & Jams off: out of any room, and the Jam button goes
@@ -9682,11 +9778,17 @@ fn fade_out_ms(a: &App) -> Option<u64> {
 /// A skip by hand (the buttons, media keys, the remote): listening, it goes to the Jam's host
 /// The visualiser on or off, as Now Playing is: on only while it's shown, playing, a style picked (the
 /// engine's tap and its timer stopped otherwise: nothing of it running for nothing)
+/// The Stream Widget's Equaliser design in use (its first output, or another): its levels wanted
+fn eq_widget(p: &serde_json::Value) -> bool {
+    integrations::set(p, "widget")
+        && (p["widgetDesign"].as_str() == Some("equaliser") || integrations::outputs_of(p, "widget").iter().any(|o| o.get("widgetDesign").and_then(|d| d.as_str()) == Some("equaliser")))
+}
+
 fn viz_update(shared: &Shared, ui: &AppWindow) {
-    let (style, on_now, on_bar, on_widget) = {
+    let (style, on_now, on_bar, on_widget, on_stream) = {
         let p = &shared.borrow().web.prefs;
         (p["nowViz"].as_str().unwrap_or("off").to_string(), p["vizNow"].as_bool() != Some(false), p["vizBar"].as_bool() == Some(true),
-         p["taskbarWidget"].as_bool() == Some(true) && p["widgetViz"].as_bool() == Some(true))
+         p["taskbarWidget"].as_bool() == Some(true) && (p["widgetViz"].as_bool() == Some(true) || p["tbDesign"].as_str() == Some("viz")), eq_widget(p))
     };
     if ui.get_viz_style() != style.as_str() { ui.set_viz_style(style.clone().into()); }
     if ui.get_viz_now() != on_now { ui.set_viz_now(on_now); }
@@ -9697,7 +9799,9 @@ fn viz_update(shared: &Shared, ui: &AppWindow) {
         let shown = ui.get_viz_full() || (on_now && a.page == "now") || on_bar;
         // (the taskbar widget's is in sight with the window minimized or in the tray)
         let in_sight = shown && ui.window().is_visible() && !ui.window().is_minimized();
-        style != "off" && (in_sight || on_widget) && a.loaded && !a.engine.is_paused()
+        // (the taskbar widget's Visualiser design: its bars, whatever the app's style)
+        let tb_viz = a.web.prefs["taskbarWidget"].as_bool() == Some(true) && a.web.prefs["tbDesign"].as_str() == Some("viz");
+        ((style != "off" && (in_sight || on_widget)) || on_stream || tb_viz) && a.loaded && !a.engine.is_paused()
     };
     let running = VIZ.with(|v| v.borrow().is_some());
     if want == running { return; }
@@ -9732,11 +9836,14 @@ fn viz_update(shared: &Shared, ui: &AppWindow) {
                 }
             }
             TBW.with(|t| if let Ok(t) = t.try_borrow() { if let Some((tw, _, _)) = t.as_ref() { tw.set_viz_level(l); } });
+            // (the Stream Widget's Equaliser: its levels, for /levels.json)
+            if on_stream { omnipulse_core::widget::set_levels(b.to_vec()); }
         });
         VIZ.with(|v| *v.borrow_mut() = Some((t, model)));
     } else {
         engine.set_tap("viz", None);
         viz::stop();
+        omnipulse_core::widget::set_levels(Vec::new());
         VIZ.with(|v| *v.borrow_mut() = None);
         ui.set_viz_bands(ModelRc::default());
         ui.set_viz_peaks(ModelRc::default());
@@ -10758,6 +10865,13 @@ fn plugin_app(shared: &Shared, plugin: &str, ask: serde_json::Value, answer: Box
             let path = arg(1);
             std::thread::spawn(move || send(match await_redirect(port, &path) { Ok(q) => serde_json::json!({ "ok": true, "query": q }), Err(e) => serde_json::json!({ "error": e }) }));
         }
+        // (the Suite's widgets, as they are now: passed on to OBS's pages)
+        "suiteWidget" => {
+            if plugin != "chatbot" { return send(serde_json::json!({ "error": "only OmniPulse's Stream Suite can" })); }
+            integrations::set_suite(args.first().cloned().unwrap_or(serde_json::Value::Null));
+            push_out(shared, true);
+            send(serde_json::json!({ "ok": true }));
+        }
         // (JSON posted to a Discord webhook: the chatbot's Send to Discord; Discord's own addresses only)
         "postJson" => {
             let url = arg(0);
@@ -11105,13 +11219,24 @@ fn taskbar_widget(shared: &Shared, ui: &AppWindow, on: bool) {
         if ui.get_xf_on() && tw.get_xf_from_art() != ui.get_xf_from_art() { tw.set_xf_from_art(ui.get_xf_from_art()); }
         if ui.get_xf_on() && tw.get_xf_to_art() != ui.get_xf_to_art() { tw.set_xf_to_art(ui.get_xf_to_art()); }
         tw.set_show_progress(ui.get_widget_progress()); tw.set_big_art(ui.get_widget_big_art());
+        let design = ui.get_tb_design();
+        if tw.get_design() != design {
+            tw.set_design(design.clone());
+            // (a new width: placed again)
+            if *shown { let _ = tw.hide(); *shown = false; }
+        }
+        let (ca, cb) = { let a = shared.borrow(); (look::Rgb::parse(&a.accent.0), look::Rgb::parse(&a.accent.1).or(look::Rgb::parse(&a.accent.0))) };
+        if let Some(c) = ca { tw.set_art_a(c.slint()); }
+        if let Some(c) = cb { tw.set_art_b(c.slint()); }
         // (its visualiser: the app's bands, as they're updated)
-        let viz = if ui.get_widget_viz() { ui.get_viz_style() } else { "off".into() };
+        let viz = if ui.get_widget_viz() || design == "viz" { ui.get_viz_style() } else { "off".into() };
         if tw.get_viz() != viz { tw.set_viz(viz); }
         if tw.get_viz_bands() != ui.get_viz_bands() { tw.set_viz_bands(ui.get_viz_bands()); tw.set_viz_peaks(ui.get_viz_peaks()); tw.set_viz_curve(ui.get_viz_curve()); }
         // where: by the clock, over the taskbar (put back over it each time, as it comes up over us when clicked)
         let scale = if *hwnd != 0 { tw.window().scale_factor() } else { ui.window().scale_factor() };
-        let spot = desktop::dock::spot((340.0 * scale) as i32, scale).filter(|_| !desktop::dock::busy());
+        // (as wide as its design needs)
+        let wide = match design.as_str() { "compact" => 96.0, "bigtext" => 290.0, "ticker" => 320.0, _ => 340.0 };
+        let spot = desktop::dock::spot((wide * scale) as f32 as i32, scale).filter(|_| !desktop::dock::busy());
         match spot {
             None => { if *shown { let _ = tw.hide(); *shown = false; } }
             Some((x, y, wd, ht)) => {
@@ -11270,6 +11395,7 @@ fn apply_look(shared: &Shared) {
     ui.set_widget_progress(prefs["widgetProgress"].as_bool() != Some(false));
     ui.set_widget_viz(prefs["widgetViz"].as_bool() == Some(true));
     ui.set_widget_big_art(prefs["widgetBigArt"].as_bool() != Some(false));
+    ui.set_tb_design(prefs["tbDesign"].as_str().unwrap_or("standard").into());
     ui.set_gpu_on(prefs["nativeGpu"].as_bool() == Some(true));
     LISTEN_NUDGE.store(nudge_of(prefs), std::sync::atomic::Ordering::Relaxed);
     let nudge = nudge_of(prefs).to_string();
@@ -11586,6 +11712,15 @@ fn main() -> Result<(), slint::PlatformError> {
     ui.on_update_act(move || update_act(&s));
     // a newer version: asked about a little after starting (not in the self-test)
     if std::env::var_os("OMNIPULSE_SELFTEST").is_none() {
+        // (and the Stream Deck plugin, if it's older than the one that came with the app: once per version)
+        let s = shared.clone();
+        slint::Timer::single_shot(std::time::Duration::from_secs(12), move || {
+            let offered = s.borrow().web.prefs["sdOffered"].as_str().unwrap_or("").to_string();
+            if let Some(v) = streamdeck::update_on_start(&offered) {
+                pref_put(&s, "sdOffered", serde_json::json!(v));
+                if let Some(ui) = s.borrow().ui.upgrade() { ui.set_status("The Stream Deck plugin has an update. Confirm it in Stream Deck.".into()); }
+            }
+        });
         let s = shared.clone();
         slint::Timer::single_shot(std::time::Duration::from_secs(20), move || update_check(&s, false));
         // (and the Seamless Mix ratings made since the last launch, sent once: with Send My Ratings on)
@@ -11650,6 +11785,8 @@ fn main() -> Result<(), slint::PlatformError> {
     ui.set_mix_available(true);
     let s = shared.clone();
     ui.on_mix_toggle(move || set_toggle(&s, "smartOn"));
+    let s = shared.clone();
+    ui.on_tb_design_picked(move |d| set_look_pref(&s, "tbDesign", serde_json::json!(d.as_str())));
     // (Cover Strip: each cover, blurred, as it's shown)
     let w = ui.as_weak();
     ui.on_now_art_shown(move || if let Some(ui) = w.upgrade() { if ui.get_player_style() == "strip" { art_blur(&ui); } });

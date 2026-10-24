@@ -1,0 +1,247 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<!--
+  The Stream Suite's widgets, for OBS: one page, each its own address (a Browser source each).
+    /goals          the goals (follows, subs, bits, donations), filling up as they come in
+    /timer          a countdown, or a stopwatch (a subathon's time added as things happen)
+    /latest-follow  who followed last
+    /latest-sub     who subscribed last
+    /raid           a raid's shoutout (and one of the raider's clips, if it's set to)
+  Set in the app: Settings > Streaming > Suite. It reads /now.json's "suite", which the Suite sends.
+-->
+<title>OmniPulse Suite</title>
+<style>
+  html, body { margin: 0; height: 100%; background: transparent; overflow: hidden; }
+  body { font-family: "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif; color: #fff; --c1: #8e9bff; --c2: #b48eff; }
+  body.preview { background: #2a2a2e repeating-conic-gradient(#3a3a40 0 25%, #2a2a2e 0 50%) 0 0 / 32px 32px; }
+  #stage { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; }
+  .panel { background: rgba(10, 8, 20, 0.82); border-radius: 0.9rem; padding: 0.8rem 1rem; box-sizing: border-box; box-shadow: 0 0.3rem 1rem rgba(0, 0, 0, 0.35); }
+  .lbl { font-size: 0.78rem; letter-spacing: 0.08em; text-transform: uppercase; opacity: 0.75; }
+  .big { font-size: 1.5rem; font-weight: 800; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+  /* how they come in (the Suite's Widget Animation) */
+  .in { animation: var(--in, rise-in) 0.7s cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+  .out { animation: var(--out, rise-out) 0.5s ease-in both; }
+  @keyframes rise-in { from { opacity: 0; transform: translateY(1rem); } }
+  @keyframes rise-out { to { opacity: 0; transform: translateY(-0.7rem); } }
+  @keyframes slide-in { from { opacity: 0; transform: translateX(-2.2rem); } }
+  @keyframes slide-out { to { opacity: 0; transform: translateX(2.2rem); } }
+  @keyframes flip-in { from { opacity: 0; transform: perspective(30rem) rotateX(-85deg); } }
+  @keyframes flip-out { to { opacity: 0; transform: perspective(30rem) rotateX(85deg); } }
+  @keyframes pop-in { 0% { opacity: 0; transform: scale(0.5); } 70% { opacity: 1; transform: scale(1.07); } }
+  @keyframes pop-out { to { opacity: 0; transform: scale(0.7); } }
+  body.still .in, body.still .out { animation: none !important; }
+
+  /* goals: a bar each (or rings), filling smoothly; a burst when one's reached */
+  #goals { display: flex; flex-direction: column; gap: 0.55rem; width: 92%; }
+  .goal { position: relative; }
+  .goal .row { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 0.3rem; }
+  .goal .nm { font-weight: 700; font-size: 1rem; }
+  .goal .ct { font-variant-numeric: tabular-nums; font-size: 0.9rem; opacity: 0.85; }
+  .goal .tr { height: 0.7rem; border-radius: 0.4rem; background: rgba(255, 255, 255, 0.16); overflow: hidden; }
+  .goal .fl { height: 100%; width: 0; border-radius: inherit; background: linear-gradient(90deg, var(--c1), var(--c2)); transition: width 1.2s cubic-bezier(0.2, 0.8, 0.2, 1); position: relative; }
+  .goal .fl::after { content: ""; position: absolute; inset: 0; background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.45), transparent); transform: translateX(-100%); animation: shine 2.6s ease-in-out infinite; }
+  @keyframes shine { 60%, 100% { transform: translateX(100%); } }
+  .goal.done .fl { background: linear-gradient(90deg, #3ddc84, #b6ff5e); }
+  .goal.burst::before { content: ""; position: absolute; inset: -0.4rem; border-radius: 0.8rem; border: 0.15rem solid #b6ff5e; animation: burst 1.2s ease-out both; }
+  @keyframes burst { from { opacity: 1; transform: scale(0.96); } to { opacity: 0; transform: scale(1.08); } }
+  body.rings #goals { flex-direction: row; justify-content: center; gap: 1.2rem; }
+  body.rings .goal { display: flex; flex-direction: column; align-items: center; gap: 0.3rem; }
+  body.rings .goal .tr { width: 5rem; height: 5rem; border-radius: 50%; background: conic-gradient(var(--c1) calc(var(--p, 0) * 1%), rgba(255, 255, 255, 0.16) 0); display: flex; align-items: center; justify-content: center; transition: --p 1.2s; }
+  body.rings .goal .tr::after { content: attr(data-pct); width: 3.9rem; height: 3.9rem; border-radius: 50%; background: rgba(10, 8, 20, 0.9); display: flex; align-items: center; justify-content: center; font-weight: 800; }
+  body.rings .goal .fl { display: none; }
+  body.rings .goal .row { flex-direction: column; align-items: center; margin: 0; }
+  body.rings .goal .nm { white-space: nowrap; font-size: 0.85rem; }
+  @property --p { syntax: "<number>"; inherits: false; initial-value: 0; }
+
+  /* the timer: its digits, ticking; a pulse as time's added */
+  #timer { text-align: center; }
+  #timer .t { font-size: 3.2rem; font-weight: 800; font-variant-numeric: tabular-nums; letter-spacing: 0.02em; text-shadow: 0 0 1rem color-mix(in srgb, var(--c1) 60%, transparent); }
+  #timer.paused .t { opacity: 0.55; }
+  #timer .add { position: absolute; left: 50%; top: 18%; transform: translateX(-50%); font-weight: 800; color: #b6ff5e; animation: added 2s ease-out both; }
+  @keyframes added { from { opacity: 0; transform: translate(-50%, 0.6rem); } 20% { opacity: 1; } to { opacity: 0; transform: translate(-50%, -1.6rem); } }
+
+  /* the latest follow or sub: who, sliding in each time it changes */
+  .latest { display: flex; align-items: center; gap: 0.8rem; min-width: 60%; max-width: 96%; }
+  .latest .ic { flex: none; width: 2.6rem; height: 2.6rem; border-radius: 0.7rem; background: linear-gradient(135deg, var(--c1), var(--c2)); display: flex; align-items: center; justify-content: center; }
+  .latest .ic svg { width: 60%; height: 60%; fill: #fff; }
+  .latest .tx { min-width: 0; display: flex; flex-direction: column; }
+
+  /* a raid's shoutout, and maybe a clip of theirs */
+  #raid { display: flex; flex-direction: column; align-items: center; gap: 0.7rem; width: 94%; }
+  #raid .head { text-align: center; display: flex; flex-direction: column; align-items: center; gap: 0.15rem; }
+  #raid .go { font-weight: 900; font-size: 1rem; letter-spacing: 0.35em; text-transform: uppercase; color: var(--c1); animation: go-in 0.8s 0.2s cubic-bezier(0.2, 0.9, 0.3, 1.3) both; }
+  @keyframes go-in { from { opacity: 0; letter-spacing: 1.2em; } }
+  #raid .head .big { font-size: 2.3rem; background: linear-gradient(90deg, #fff 0%, var(--c1) 30%, #fff 50%, var(--c2) 70%, #fff 100%); background-size: 250% 100%; -webkit-background-clip: text; background-clip: text; color: transparent; animation: name-shine 3.2s linear infinite, name-in 0.7s 0.35s cubic-bezier(0.2, 0.9, 0.3, 1.2) both; }
+  @keyframes name-shine { to { background-position: -250% 0; } }
+  @keyframes name-in { from { opacity: 0; transform: scale(0.6); } }
+  #raid .where { display: flex; align-items: center; gap: 0.45rem; font-weight: 700; font-size: 1.05rem; padding: 0.35rem 0.9rem; border-radius: 999px; background: linear-gradient(90deg, var(--c1), var(--c2)); animation: name-in 0.6s 0.6s both; }
+  #raid .where svg { width: 1.1rem; height: 1.1rem; fill: #fff; animation: beat 1.1s ease-in-out infinite; }
+  @keyframes beat { 0%, 100% { transform: scale(1); } 20% { transform: scale(1.25); } 40% { transform: scale(0.95); } }
+  #raid iframe { width: 100%; aspect-ratio: 16 / 9; border: 0; border-radius: 0.7rem; background: #000; }
+</style>
+</head>
+<body>
+<div id="stage"></div>
+<script>
+  "use strict";
+  const $ = (id) => document.getElementById(id);
+  const PATH = location.pathname.replace(/\.html$/, "").replace(/\/$/, "") || "/goals";
+  const PREVIEW = /[?&]preview=1/.test(location.search);
+  if (PREVIEW) document.body.classList.add("preview");
+  const HEART = "M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54z";
+  const STAR = "M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z";
+  const MOTIONS = { rise: ["rise-in", "rise-out"], slide: ["slide-in", "slide-out"], flip: ["flip-in", "flip-out"], pop: ["pop-in", "pop-out"] };
+  let suite = null, shown = "", timerT = null, lastAdded = -1, raidT = null;
+
+  function fit(w, h) {
+    const k = Math.max(0.3, Math.min(innerWidth / w, innerHeight / h));
+    document.documentElement.style.fontSize = 16 * k + "px";
+  }
+  function moving(el) {
+    const m = MOTIONS[(suite && suite.anim) || "rise"] || MOTIONS.rise;
+    el.style.setProperty("--in", m[0]);
+    el.style.setProperty("--out", m[1]);
+  }
+  // (one shown in place of another: the old one out, the new one in)
+  function swap(el) {
+    const stage = $("stage");
+    const old = stage.firstElementChild;
+    if (old) { moving(old); old.classList.remove("in"); old.classList.add("out"); setTimeout(() => old.remove(), 500); }
+    moving(el);
+    el.classList.add("in");
+    stage.appendChild(el);
+  }
+  function esc(t) { const d = document.createElement("div"); d.textContent = t == null ? "" : String(t); return d.innerHTML; }
+
+  // ---------- goals ----------
+  const GOALS = [["follow", ""], ["sub", ""], ["bits", ""], ["donation", "money"]];
+  function goals() {
+    const g = suite.goals;
+    document.body.classList.toggle("rings", g.style === "rings");
+    let box = $("goals");
+    if (!box) { box = document.createElement("div"); box.id = "goals"; box.className = "panel"; swap(box); }
+    const on = GOALS.filter(([k]) => g[k] && g[k].on);
+    const sig = on.map(([k]) => k).join(",");
+    if (box.dataset.sig !== sig) {
+      box.dataset.sig = sig;
+      box.innerHTML = on.map(([k]) => '<div class="goal" id="g-' + k + '"><div class="row"><span class="nm"></span><span class="ct"></span></div><div class="tr"><div class="fl"></div></div></div>').join("");
+    }
+    for (const [k, kind] of on) {
+      const el = $("g-" + k), have = Number(g.counts[k] || 0), want = g[k].target;
+      const pct = Math.min(100, (have / want) * 100);
+      el.querySelector(".nm").textContent = g[k].label;
+      const fmt = (n) => kind === "money" ? (g.currency || "") + (Math.round(n * 100) / 100) : Math.round(n);
+      el.querySelector(".ct").textContent = fmt(have) + " / " + fmt(want);
+      el.querySelector(".fl").style.width = pct + "%";
+      const tr = el.querySelector(".tr");
+      tr.style.setProperty("--p", pct);
+      tr.dataset.pct = Math.round(pct) + "%";
+      const done = have >= want;
+      if (done && !el.classList.contains("done")) { el.classList.add("done", "burst"); setTimeout(() => el.classList.remove("burst"), 1300); }
+      if (!done) el.classList.remove("done");
+    }
+  }
+
+  // ---------- the timer ----------
+  function clock(ms) {
+    const s = Math.max(0, Math.floor(ms / 1000)), h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), x = s % 60;
+    const two = (n) => String(n).padStart(2, "0");
+    return (h ? h + ":" + two(m) : m) + ":" + two(x);
+  }
+  function timer() {
+    const t = suite.timer;
+    let box = $("timer");
+    if (!box) {
+      box = document.createElement("div"); box.id = "timer"; box.className = "panel";
+      box.innerHTML = '<div class="lbl"></div><div class="t">0:00</div>';
+      swap(box);
+    }
+    box.querySelector(".lbl").textContent = t.label || "";
+    box.querySelector(".lbl").style.display = t.label ? "" : "none";
+    box.classList.toggle("paused", !t.running);
+    // (time added since it was last seen: shown rising off it)
+    if (lastAdded >= 0 && t.addedMs > lastAdded) {
+      const a = document.createElement("div"); a.className = "add"; a.textContent = "+" + clock(t.addedMs - lastAdded);
+      box.appendChild(a); setTimeout(() => a.remove(), 2100);
+    }
+    lastAdded = t.addedMs;
+    // (its clock against this PC's: how far the app's is off)
+    const skew = Date.now() - (t.now || Date.now());
+    clearInterval(timerT);
+    const tick = () => {
+      const now = Date.now() - skew;
+      const ms = t.stopwatch ? (t.running ? now - t.startedAt : t.elapsedMs) : (t.running ? t.endsAt - now : t.leftMs);
+      box.querySelector(".t").textContent = clock(ms);
+    };
+    tick();
+    if (t.running) timerT = setInterval(tick, 250);
+  }
+
+  // ---------- the latest follow and sub ----------
+  function latest(kind) {
+    const l = suite.latest[kind];
+    const sig = l ? l.user + "|" + l.at : "";
+    if (sig === shown) return;
+    shown = sig;
+    const el = document.createElement("div");
+    el.className = "panel latest";
+    const what = kind === "follow" ? "Latest follower" : "Latest subscriber";
+    const extra = !l ? "" : kind === "sub" ? (l.gift ? " gifted " + l.gift : l.months ? " · " + l.months + " months" : "") + (l.tier > 1 ? " · Tier " + l.tier : "") : "";
+    el.innerHTML = '<div class="ic"><svg viewBox="0 0 24 24"><path d="' + (kind === "follow" ? HEART : STAR) + '"/></svg></div><div class="tx"><span class="lbl">' + what + '</span><span class="big">' + esc(l ? l.user : "No one yet") + '</span>' + (extra ? '<span class="lbl" style="opacity:.85">' + esc(extra.replace(/^ · /, "")) + "</span>" : "") + "</div>";
+    swap(el);
+  }
+
+  // ---------- a raid's shoutout ----------
+  function raid() {
+    const r = suite.raid;
+    const sig = r ? r.user + "|" + r.at + "|" + (r.clip ? r.clip.id : "") : "";
+    if (sig === shown) return;
+    shown = sig;
+    clearTimeout(raidT);
+    if (!r || Date.now() - r.at > r.secs * 1000 + 3000) { const old = $("stage").firstElementChild; if (old) { moving(old); old.classList.add("out"); setTimeout(() => old.remove(), 500); } return; }
+    const el = document.createElement("div");
+    el.id = "raid";
+    el.className = "panel";
+    const site = r.platform === "kick" ? "kick.com/" : "twitch.tv/";
+    el.innerHTML = '<div class="head"><div class="go">Go follow</div><div class="big">' + esc(r.user) + '</div><div class="where"><svg viewBox="0 0 24 24"><path d="' + HEART + '"/></svg>' + esc(site + (r.login || String(r.user || "").toLowerCase())) + '</div>' + (r.viewers ? '<div class="lbl" style="opacity:.8">Raided with ' + esc(r.viewers) + "</div>" : "") + "</div>";
+    // (one of their clips, through Twitch's own player: its address must be opened as localhost)
+    if (r.clip && r.clip.id) {
+      const f = document.createElement("iframe");
+      f.allow = "autoplay";
+      f.src = "https://clips.twitch.tv/embed?clip=" + encodeURIComponent(r.clip.id) + "&parent=" + encodeURIComponent(location.hostname) + "&autoplay=true&muted=false";
+      el.appendChild(f);
+    }
+    swap(el);
+    raidT = setTimeout(() => { moving(el); el.classList.remove("in"); el.classList.add("out"); setTimeout(() => el.remove(), 500); }, Math.max(5, r.secs) * 1000);
+  }
+
+  function draw() {
+    if (!suite) return;
+    document.body.classList.toggle("still", suite.anim === "none");
+    if (PATH === "/goals") { fit(460, 260); goals(); }
+    else if (PATH === "/timer") { fit(360, 140); timer(); }
+    else if (PATH === "/latest-follow") { fit(420, 90); latest("follow"); }
+    else if (PATH === "/latest-sub") { fit(420, 90); latest("sub"); }
+    else if (PATH === "/raid") { fit(560, 420); raid(); }
+  }
+  addEventListener("resize", draw);
+
+  let sig = "";
+  async function poll() {
+    try {
+      const s = await (await fetch("/now.json" + (PREVIEW ? "?preview=1" : ""), { cache: "no-store" })).json();
+      // (in your accent colours, as the Stream Widget is)
+      if (s.accent) document.body.style.setProperty("--c1", s.accent);
+      if (s.accent2) document.body.style.setProperty("--c2", s.accent2);
+      const next = JSON.stringify(s.suite || null);
+      if (next !== sig) { sig = next; suite = s.suite || null; draw(); }
+    } catch (e) {}
+  }
+  setInterval(poll, PREVIEW ? 500 : 1500);
+  poll();
+</script>
+</body>
+</html>

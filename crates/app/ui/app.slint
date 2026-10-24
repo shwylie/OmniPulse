@@ -2156,7 +2156,7 @@ component DesignSketch inherits VerticalLayout {
     in property <bool> on;
     callback clicked();
     spacing: 5px;
-    Rectangle {
+    sk := Rectangle {
         height: 60px;
         border-radius: 10px;
         background: Theme.bg;
@@ -2196,7 +2196,48 @@ component DesignSketch inherits VerticalLayout {
         // ticker
         if root.k == 7: Rectangle { x: 0; y: 25px; width: parent.width; height: 10px; background: parent.fill;
             Rectangle { x: 6px; y: 3px; width: 70%; height: 4px; border-radius: 2px; background: Theme.text.with-alpha(0.8); } }
+        // neon sign
+        if root.k == 8: Rectangle { x: 14px; y: 14px; width: parent.width - 28px; height: 32px; border-radius: 6px; border-width: 2px; border-color: Theme.accent-2; background: #00000060;
+            Rectangle { x: 8px; y: 9px; width: 55%; height: 5px; border-radius: 2px; background: Theme.accent; }
+            Rectangle { x: 8px; y: 18px; width: 35%; height: 4px; border-radius: 2px; background: Theme.accent-2; } }
+        // lower third
+        if root.k == 9: Rectangle { x: 0; y: 34px; width: parent.width * 0.8; height: 18px; background: #000000b0;
+            Rectangle { width: 4px; height: parent.height; background: Theme.accent; }
+            Rectangle { x: 10px; y: 5px; width: 50%; height: 4px; border-radius: 2px; background: Theme.text.with-alpha(0.85); }
+            Rectangle { x: 10px; y: 11px; width: 30%; height: 3px; border-radius: 2px; background: Theme.text.with-alpha(0.45); } }
+        // cassette
+        if root.k == 10: Rectangle { x: (parent.width - 64px) / 2; y: 8px; width: 64px; height: 44px; border-radius: 5px; background: #2d2d33; border-width: 1px; border-color: #55555d;
+            Rectangle { x: 6px; y: 5px; width: parent.width - 12px; height: 14px; border-radius: 2px; background: #f3e6d0; Rectangle { x: 5px; y: 5px; width: 60%; height: 3px; background: Theme.accent; } }
+            Rectangle { x: 10px; y: 24px; width: 14px; height: 14px; border-radius: 7px; border-width: 3px; border-color: #0d0d10; background: #9a9aa2; }
+            Rectangle { x: parent.width - 24px; y: 24px; width: 14px; height: 14px; border-radius: 7px; border-width: 3px; border-color: #0d0d10; background: #9a9aa2; } }
+        // equaliser
+        if root.k == 11: Rectangle { x: 10px; y: 8px; width: parent.width - 20px; height: 44px; border-radius: 6px; background: #00000060;
+            for b in 10: Rectangle { x: 4px + b * (parent.width - 8px) / 10; width: (parent.width - 8px) / 10 * 0.7; height: parent.height * (0.25 + 0.6 * abs(sin(b * 53deg))); y: parent.height - self.height - 2px; background: Theme.accent.with-alpha(0.6); }
+            Rectangle { x: (parent.width - self.width) / 2; y: 16px; width: 50%; height: 5px; border-radius: 2px; background: Theme.text.with-alpha(0.9); } }
+        // now and next
+        if root.k == 12: Rectangle { x: 10px; y: 8px; width: parent.width - 20px; height: 44px; border-radius: 6px; background: parent.fill;
+            Rectangle { x: 6px; y: 7px; width: 55%; height: 5px; border-radius: 2px; background: Theme.text.with-alpha(0.85); }
+            Rectangle { x: 6px; y: 16px; width: 35%; height: 3px; border-radius: 2px; background: Theme.text.with-alpha(0.45); }
+            Rectangle { x: 6px; y: 24px; width: parent.width - 12px; height: 1px; background: Theme.text.with-alpha(0.3); }
+            Rectangle { x: 6px; y: 30px; width: 9px; height: 9px; border-radius: 2px; background: Theme.text.with-alpha(0.5); }
+            Rectangle { x: 19px; y: 33px; width: 40%; height: 3px; border-radius: 2px; background: Theme.text.with-alpha(0.55); } }
+        // polaroid
+        if root.k == 13: Rectangle { x: (parent.width - 34px) / 2; y: 6px; width: 34px; height: 44px; background: #fafafa; transform-rotation: -6deg;
+            Rectangle { x: 3px; y: 3px; width: 28px; height: 28px; background: sk.fill; }
+            Rectangle { x: 7px; y: 35px; width: 20px; height: 3px; background: #444; } }
+        // frosted glass
+        if root.k == 14: Rectangle { x: 0; y: 0; width: parent.width; height: parent.height; background: @linear-gradient(135deg, Theme.accent.with-alpha(0.5) 0%, Theme.accent-2.with-alpha(0.4) 100%);
+            Rectangle { x: 12px; y: 15px; width: parent.width - 24px; height: 30px; border-radius: 8px; background: #ffffff30; border-width: 1px; border-color: #ffffff50;
+                Rectangle { x: 4px; y: 4px; width: 22px; height: 22px; border-radius: 5px; background: Theme.text.with-alpha(0.55); }
+                Rectangle { x: 32px; y: 9px; width: 40%; height: 4px; border-radius: 2px; background: Theme.text.with-alpha(0.9); } } }
+        // vertical
+        if root.k == 15: Rectangle { x: (parent.width - 30px) / 2; y: 4px; width: 30px; height: 52px; border-radius: 5px; background: parent.fill;
+            Rectangle { x: 4px; y: 4px; width: 22px; height: 22px; border-radius: 3px; background: Theme.text.with-alpha(0.5); }
+            Rectangle { x: 5px; y: 31px; width: 20px; height: 3px; border-radius: 2px; background: Theme.text.with-alpha(0.85); }
+            Rectangle { x: 8px; y: 37px; width: 14px; height: 3px; border-radius: 2px; background: Theme.text.with-alpha(0.45); } }
         dsa := TouchArea { mouse-cursor: MouseCursor.pointer; clicked => { root.clicked(); } }
+        // (its recommended Browser source size in OBS, as you point at it: its own shape, sharp at 1080p)
+        TipSpot { hover: dsa.has-hover; tip: root.name + ". Recommended Browser source size: " + ["920 × 260", "1120 × 128", "600 × 760", "920 × 220", "960 × 160", "920 × 300", "960 × 540", "1280 × 96", "960 × 280", "1240 × 180", "840 × 440", "1040 × 300", "920 × 300", "600 × 720", "920 × 260", "480 × 840"][root.k] + " px."; }
     }
     Text { text: root.name; color: root.on ? Theme.text : Theme.muted; font-size: 12px; font-weight: root.on ? 700 : 400; horizontal-alignment: center; }
 }
@@ -2431,6 +2472,33 @@ component BotFieldRow inherits VerticalLayout {
             }
             if inp.text == "" && root.f.extra != "": Text { x: 12px; text: root.f.extra; color: Theme.muted.with-alpha(0.6); font-size: 13px; vertical-alignment: center; }
         }
+    }
+    if root.f.kind == "addr": VerticalLayout {
+        spacing: 4px;
+        if root.f.note != "": Text { text: root.f.note; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
+        HorizontalLayout {
+            spacing: 8px;
+            Rectangle {
+                horizontal-stretch: 1;
+                height: 32px;
+                border-radius: 8px;
+                background: Theme.panel;
+                border-width: 1px;
+                border-color: Theme.line;
+                Text { x: 10px; width: parent.width - 20px; text: root.f.value; color: Theme.text; font-size: 12px; font-family: "Consolas"; overflow: elide; vertical-alignment: center; }
+            }
+            VerticalLayout { alignment: center; IconButton { d: Icons.copy; size: 32px; tip: "Copy it"; clicked => { root.act("copy:" + root.f.value); } } }
+        }
+    }
+    if root.f.kind == "reset": HorizontalLayout {
+        spacing: 12px;
+        VerticalLayout { horizontal-stretch: 1; alignment: center; Text { text: root.f.label; color: Theme.text; font-weight: 700; font-size: 13px; } }
+        for c in [{ id: "daily", n: "Each Day" }, { id: "stream", n: "Each Stream" }, { id: "never", n: "Never" }]: VerticalLayout { alignment: center; Chip { label: c.n; on: root.f.value == c.id; clicked => { root.set(root.f.key, c.id); } } }
+    }
+    if root.f.kind == "chips2": HorizontalLayout {
+        spacing: 12px;
+        VerticalLayout { horizontal-stretch: 1; alignment: center; Text { text: root.f.label; color: Theme.text; font-weight: 700; font-size: 13px; } }
+        for c in [{ id: "bars", n: "Bars" }, { id: "rings", n: "Rings" }]: VerticalLayout { alignment: center; Chip { label: c.n; on: root.f.value == c.id; clicked => { root.set(root.f.key, c.id); } } }
     }
     if root.f.kind == "who": HorizontalLayout {
         spacing: 12px;
@@ -2811,12 +2879,13 @@ component BotPage inherits Rectangle {
             HorizontalLayout {
                 spacing: 0px;
                 for r in root.stream-rows: HorizontalLayout {
-                    horizontal-stretch: (r.key == "widget" || r.key == "lyricsWidget") ? 1 : 0;
+                    horizontal-stretch: (r.key == "widget" || r.key == "lyricsWidget" || r.key == "socials") ? 1 : 0;
                     preferred-width: 0px;
                     min-width: 0px;
-                    padding-right: r.key == "widget" ? 8px : 0px;
+                    padding-right: r.key == "widget" || r.key == "lyricsWidget" ? 8px : 0px;
                     if r.key == "widget": StreamTile { horizontal-stretch: 1; r: r; d: Icons.broadcast; addr: "http://127.0.0.1:" + root.port + "/"; toggle(k) => { root.act("row-toggle:" + k); } more(k) => { root.act("row-more:" + k); } copy(a) => { root.act("copy:" + a); } }
                     if r.key == "lyricsWidget": StreamTile { horizontal-stretch: 1; r: r; d: Icons.lyrics; addr: "http://127.0.0.1:" + root.port + "/lyrics"; toggle(k) => { root.act("row-toggle:" + k); } more(k) => { root.act("row-more:" + k); } copy(a) => { root.act("copy:" + a); } }
+                    if r.key == "socials": StreamTile { horizontal-stretch: 1; r: r; d: Icons.link; addr: "http://127.0.0.1:" + root.port + "/socials"; toggle(k) => { root.act("row-toggle:" + k); } more(k) => { root.act("row-more:" + k); } copy(a) => { root.act("copy:" + a); } }
                 }
             }
             HorizontalLayout {
@@ -2824,7 +2893,7 @@ component BotPage inherits Rectangle {
                 for d in [
                     { n: "Chat Dock", t: "Twitch and Kick chat, with delete, time-out and ban on every message, and a box to chat back. In OBS: Docks > Custom Browser Docks.", p: "/dock/chat", i: Icons.chat },
                     { n: "Activity Feed", t: "Follows, subs, bits, raids, rewards and the rest, each kind shown or hidden, each alert replayed. A custom browser dock too.", p: "/dock/activity", i: Icons.bell },
-                    { n: "Multichat Overlay", t: "Twitch and Kick chat together on stream, with a see-through background. Add it as a Browser source. To change its settings, right-click it in OBS, choose Interact, then click its gear.", p: "/chat", i: Icons.broadcast },
+                    { n: "Multichat Overlay", t: "Twitch and Kick chat together on stream, with a see-through background. Add it as a Browser source. To change its settings, right-click it in OBS, choose Interact, then click its gear. For another with its own settings, add /2 to the end of the address (then /3, and so on).", p: "/chat", i: Icons.broadcast },
                 ]: Rectangle {
                     horizontal-stretch: 1;
                     preferred-width: 0px;
@@ -2850,8 +2919,40 @@ component BotPage inherits Rectangle {
                     }
                 }
             }
+            // the Suite's own widgets: what's happened on stream, shown
+            HorizontalLayout {
+                spacing: 8px;
+                for w in [
+                    { n: "Goals", p: "/goals", s: "goals", i: Icons.check, h: "127.0.0.1" },
+                    { n: "Timer", p: "/timer", s: "timer", i: Icons.refresh, h: "127.0.0.1" },
+                    { n: "Latest Follow", p: "/latest-follow", s: "latest", i: Icons.heart-out, h: "127.0.0.1" },
+                    { n: "Latest Sub", p: "/latest-sub", s: "latest", i: Icons.star-out, h: "127.0.0.1" },
+                    { n: "Raid Shoutout", p: "/raid", s: "raid", i: Icons.broadcast, h: "localhost" },
+                ]: Rectangle {
+                    horizontal-stretch: 1;
+                    preferred-width: 0px;
+                    min-width: 0px;
+                    height: 74px;
+                    border-radius: 14px;
+                    background: Theme.panel;
+                    border-width: 1px;
+                    border-color: Theme.line;
+                    VerticalLayout {
+                        padding: 10px;
+                        spacing: 4px;
+                        HorizontalLayout {
+                            spacing: 6px;
+                            VerticalLayout { alignment: center; Glyph { d: w.i; width: 15px; height: 15px; fill: Theme.accent; } }
+                            Text { text: w.n; color: Theme.text; font-weight: 700; font-size: 12px; horizontal-stretch: 1; overflow: elide; vertical-alignment: center; }
+                            IconButton { d: Icons.copy; size: 28px; tip: "Copy its address, for OBS"; clicked => { root.act("copy:http://" + w.h + ":" + root.port + w.p); } }
+                            IconButton { d: Icons.gear; size: 28px; tip: "Its settings"; clicked => { root.act("sheet:" + w.s); } }
+                        }
+                        Text { text: "http://" + w.h + ":" + root.port + w.p; color: Theme.accent.mix(Theme.text, 0.55); font-size: 10px; font-family: "Consolas"; overflow: elide; }
+                    }
+                }
+            }
             // what it does
-            Text { text: "What it does"; color: Theme.muted; font-size: 12px; font-weight: 700; }
+            Text { text: "Chatbot"; color: Theme.muted; font-size: 12px; font-weight: 700; }
             for r in ceil(root.feats.length / 2): HorizontalLayout {
                 spacing: 10px;
                 FeatCard { horizontal-stretch: 1; preferred-width: 0px; min-width: 0px; c: root.feats[r * 2]; set(k, v) => { root.set(k, v); } act(a) => { root.act(a); } }
@@ -3583,6 +3684,8 @@ export component AppWindow inherits Window {
     in property <int> device-offset: -1;
     in property <bool> mixing;
     callback mix-toggle();
+    in property <string> tb-design: "standard";
+    callback tb-design-picked(string);
     in property <[ThemeRow]> theme-rows;
     in property <string> theme-name;
     callback theme-picked(string);
@@ -5144,6 +5247,16 @@ export component AppWindow inherits Window {
                                         padding-bottom: 10px;
                                         padding-left: 34px;
                                         spacing: 10px;
+                                        // (its design: what it shows by the clock)
+                                        Text { text: "Design"; color: Theme.text; font-weight: 700; }
+                                        for row in [
+                                            [{ id: "standard", n: "Standard" }, { id: "compact", n: "Compact" }, { id: "ticker", n: "Ticker" }, { id: "viz", n: "Visualiser" }],
+                                            [{ id: "record", n: "Mini Record" }, { id: "bigtext", n: "Big Text" }, { id: "colours", n: "Cover Colours" }],
+                                        ]: HorizontalLayout {
+                                            alignment: start;
+                                            spacing: 6px;
+                                            for d in row: Chip { label: d.n; on: root.tb-design == d.id; clicked => { root.tb-design-picked(d.id); } }
+                                        }
                                         HorizontalLayout {
                                             spacing: 12px;
                                             VerticalLayout {
@@ -5478,6 +5591,13 @@ export component AppWindow inherits Window {
                                     if r.key == "streamSafe": VerticalLayout { padding-top: 10px; SetRowView { r: r; toggle(k) => { root.set-toggle(k); } more(k) => { root.set-more(k); } } }
                                 }
                                 }
+                                // ---- the Stream Suite: its own switch and settings, first ----
+                                if root.bot-on: SectionHead { text: "Suite"; }
+                                if root.bot-on: VerticalLayout {
+                                    for r in root.set-rows-streaming: VerticalLayout {
+                                        if r.key == "plugRun_chatbot": SetRowView { r: r; toggle(k) => { root.set-toggle(k); } more(k) => { root.set-more(k); } }
+                                    }
+                                }
                                 // ---- on stream: tiles (in the chatbot's page while it's on) ----
                                 SectionHead { text: "On Stream"; }
                                 if root.bot-on: Card {
@@ -5492,20 +5612,21 @@ export component AppWindow inherits Window {
                                             alignment: center;
                                             spacing: 2px;
                                             HiTitle { text: "Widgets, Docks and Song Requests"; }
-                                            Text { text: "The Stream Widget, the Lyrics Widget, OBS's docks and Song Requests are in the chatbot's page while it's on."; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
+                                            Text { text: "The Stream Widget, the Lyrics Widget, the Social Plug, OBS's docks and Song Requests are in the Suite while it's on."; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
                                         }
-                                        VerticalLayout { alignment: center; IconButton { d: Icons.open; size: 36px; tint: Theme.accent; tip: "Open the chatbot's page, at its widgets and docks"; clicked => { root.set-more("plugRun_chatbot"); } } }
+                                        VerticalLayout { alignment: center; IconButton { d: Icons.open; size: 36px; tint: Theme.accent; tip: "Open the Suite, at its widgets and docks"; clicked => { root.set-more("plugRun_chatbot"); } } }
                                     }
                                 }
                                 if !root.bot-on: HorizontalLayout {
                                     spacing: 0px;
                                     for r in root.set-rows-streaming: HorizontalLayout {
-                                        horizontal-stretch: (r.key == "widget" || r.key == "lyricsWidget") ? 1 : 0;
+                                        horizontal-stretch: (r.key == "widget" || r.key == "lyricsWidget" || r.key == "socials") ? 1 : 0;
                                         preferred-width: 0px;
                                         min-width: 0px;
-                                        padding-right: r.key == "widget" ? 8px : 0px;
+                                        padding-right: r.key == "widget" || r.key == "lyricsWidget" ? 8px : 0px;
                                         if r.key == "widget": StreamTile { horizontal-stretch: 1; r: r; d: Icons.broadcast; addr: stv.base + "/"; toggle(k) => { root.set-toggle(k); } more(k) => { root.set-more(k); } copy(a) => { root.copy-text(a); } }
                                         if r.key == "lyricsWidget": StreamTile { horizontal-stretch: 1; r: r; d: Icons.lyrics; addr: stv.base + "/lyrics"; toggle(k) => { root.set-toggle(k); } more(k) => { root.set-more(k); } copy(a) => { root.copy-text(a); } }
+                                        if r.key == "socials": StreamTile { horizontal-stretch: 1; r: r; d: Icons.link; addr: stv.base + "/socials"; toggle(k) => { root.set-toggle(k); } more(k) => { root.set-more(k); } copy(a) => { root.copy-text(a); } }
                                     }
                                 }
                                 if !root.bot-on && root.widget-on: Card {
@@ -5529,7 +5650,7 @@ export component AppWindow inherits Window {
                                 SectionHead { text: "Your Chat"; }
                                 VerticalLayout {
                                     for r in root.set-rows-streaming: VerticalLayout {
-                                        if (r.key == "req" && !root.bot-on) || (r.key != "req" && r.key != "streamerMode" && r.key != "streamSafe" && r.key != "widget" && r.key != "lyricsWidget" && r.key != "out2On" && r.key != "remoteOn"): VerticalLayout { padding-bottom: 10px; SetRowView { r: r; toggle(k) => { root.set-toggle(k); } more(k) => { root.set-more(k); } } }
+                                        if (r.key == "req" && !root.bot-on) || (r.key != "req" && r.key != "streamerMode" && r.key != "streamSafe" && r.key != "widget" && r.key != "lyricsWidget" && r.key != "socials" && r.key != "out2On" && r.key != "remoteOn" && !(root.bot-on && r.key == "plugRun_chatbot")): VerticalLayout { padding-bottom: 10px; SetRowView { r: r; toggle(k) => { root.set-toggle(k); } more(k) => { root.set-more(k); } } }
                                     }
                                 }
                                 // ---- your setup ----
@@ -5850,7 +5971,7 @@ export component AppWindow inherits Window {
                            if f.kind == "designpick": VerticalLayout {
                             spacing: 8px;
                             Text { text: f.label; color: Theme.text; font-weight: 700; }
-                            for r in 2: HorizontalLayout {
+                            for r in 4: HorizontalLayout {
                                 spacing: 10px;
                                 for c in 4: DesignSketch { horizontal-stretch: 1; preferred-width: 0px; min-width: 0px; k: r * 4 + c; name: f.options[r * 4 + c]; on: f.at == r * 4 + c; clicked => { root.pf-set(i, "\u{2}" + (r * 4 + c)); } }
                             }
@@ -7261,42 +7382,56 @@ export component TaskbarWidget inherits Window {
     in property <float> xf-frac;
     in property <image> xf-from-art;
     in property <image> xf-to-art;
+    /// Settings > App & Look > Taskbar Widget > Design: standard, compact (the cover and play), ticker (one
+    /// line, scrolling), viz (bars behind it all), record (the cover spinning), bigtext (no cover, big words),
+    /// colours (in the cover's colours)
+    in property <string> design: "standard";
+    in property <color> art-a: #5a2a7a;
+    in property <color> art-b: #2a1a4a;
     callback act(string);
     no-frame: true;
     always-on-top: true;
     title: "OmniPulse Taskbar Widget";
-    background: root.glass ? transparent : Theme.panel;
+    background: root.design == "colours" ? @linear-gradient(90deg, root.art-a.darker(0.35) 0%, root.art-b.darker(0.5) 100%) : root.glass ? transparent : Theme.panel;
     preferred-width: 340px;
     preferred-height: 48px;
+    property <bool> words: root.design != "compact";
+    property <bool> cover: root.design != "bigtext" && root.design != "ticker";
+    property <bool> few: root.design == "compact" || root.design == "bigtext" || root.design == "ticker";
+    // (Visualiser: the bars behind everything, faint)
+    if root.design == "viz" && root.has-track: VizView { x: 0; y: 4px; width: root.width; height: root.height - 6px; style: "bars"; bands: root.viz-bands; peaks: root.viz-peaks; curve: root.viz-curve; strength: 0.45; }
     HorizontalLayout {
-        padding-left: root.big-art ? 0px : 6px;
+        padding-left: root.big-art && root.cover && root.design != "record" ? 0px : 6px;
         padding-right: 4px;
         spacing: 10px;
         alignment: stretch;
-        // (its cover: the taskbar's full height, at its left edge, or a smaller one)
-        VerticalLayout { alignment: center; Rectangle {
+        // (its cover: the taskbar's full height, at its left edge, or a smaller one; Mini Record: a turning record)
+        if root.cover && root.design != "record": VerticalLayout { alignment: center; Rectangle {
             width: root.big-art ? root.bar-h : min(36px, root.bar-h - 8px);
             height: self.width;
-           
             BadgedCover { art: root.art; plat: root.plat; badge: 15px; corner: root.big-art ? 0px : 4px; initial: root.song == "" ? "" : "♪"; width: parent.width; height: parent.height; }
         } }
-        VerticalLayout {
+        if root.design == "record": VerticalLayout { alignment: center; Record { size: min(40px, root.bar-h - 6px); art: root.art; spin: root.playing; } }
+        if root.design == "ticker": VerticalLayout { alignment: center; IconButton { d: root.playing ? Icons.pause : Icons.play; size: 30px; tint: Theme.text; clicked => { root.act("play"); } } }
+        if root.words && root.design != "ticker": VerticalLayout {
             horizontal-stretch: 1;
             alignment: center;
             spacing: 1px;
-            Marquee { text: root.has-track ? root.song : "OmniPulse"; font-size: 14px; }
+            Marquee { text: root.has-track ? root.song : "OmniPulse"; font-size: root.design == "bigtext" ? 16px : 14px; }
             if root.xf-on: Crossfade { compact: true; from-art: root.xf-from-art; to-art: root.xf-to-art; frac: root.xf-frac; }
-            if !root.xf-on: Marquee { text: root.has-track ? (root.mixing ? "Mixing · " + root.artist : root.artist) : "Nothing playing"; font-size: 12px; font-weight: 400; ink: Theme.muted; }
+            if !root.xf-on: Marquee { text: root.has-track ? (root.mixing ? "Mixing · " + root.artist : root.artist) : "Nothing playing"; font-size: root.design == "bigtext" ? 13px : 12px; font-weight: 400; ink: root.design == "colours" ? Theme.text.with-alpha(0.8) : Theme.muted; }
         }
-        if root.viz != "off" && root.has-track: Rectangle {
+        // (Ticker: the song and its artist on one line, scrolling, as a radio's display)
+        if root.design == "ticker": VerticalLayout { horizontal-stretch: 1; alignment: center; Marquee { text: root.has-track ? root.song + "  ·  " + root.artist : "OmniPulse · Nothing playing"; font-size: 13px; } }
+        if !root.few && root.viz != "off" && root.design != "viz" && root.has-track: Rectangle {
             width: 56px;
             if root.viz == "glow": Rectangle { y: (parent.height - self.height) / 2; height: 18px; border-radius: 9px; background: Theme.accent.mix(Theme.accent-2, 1 - root.viz-level).with-alpha(0.12 + 0.5 * root.viz-level); }
             if root.viz != "glow": VizView { y: 10px; height: parent.height - 20px; style: root.viz == "ring" ? "centre" : root.viz; bands: root.viz-bands; peaks: root.viz-peaks; curve: root.viz-curve; strength: 0.9; }
         }
-        if root.can-like: VerticalLayout { alignment: center; IconButton { d: root.liked ? Icons.library : Icons.heart-out; size: 30px; tint: root.liked ? Theme.accent : Theme.muted; clicked => { root.act("like"); } } }
-        VerticalLayout { alignment: center; IconButton { d: Icons.prev; size: 30px; clicked => { root.act("prev"); } } }
-        VerticalLayout { alignment: center; IconButton { d: root.playing ? Icons.pause : Icons.play; size: 34px; tint: Theme.text; clicked => { root.act("play"); } } }
-        VerticalLayout { alignment: center; IconButton { d: Icons.next; size: 30px; clicked => { root.act("next"); } } }
+        if !root.few && root.can-like: VerticalLayout { alignment: center; IconButton { d: root.liked ? Icons.library : Icons.heart-out; size: 30px; tint: root.liked ? Theme.accent : Theme.muted; clicked => { root.act("like"); } } }
+        if !root.few: VerticalLayout { alignment: center; IconButton { d: Icons.prev; size: 30px; clicked => { root.act("prev"); } } }
+        if root.design != "ticker": VerticalLayout { alignment: center; IconButton { d: root.playing ? Icons.pause : Icons.play; size: 34px; tint: Theme.text; clicked => { root.act("play"); } } }
+        if !root.few: VerticalLayout { alignment: center; IconButton { d: Icons.next; size: 30px; clicked => { root.act("next"); } } }
     }
     // where it is, along its foot (the mix sweeping through it, as the player bar's), if wanted
     if root.show-progress: Rectangle {
@@ -7319,8 +7454,9 @@ export component TaskbarWidget inherits Window {
             }
         }
     }
-    // the cover and the names: the app's window, shown
-    TouchArea { x: 0; width: root.width - (root.can-like ? 170px : 136px); height: parent.height - 2px; clicked => { root.act("show"); } }
+    // the cover and the names: the app's window, shown (Compact: the title, as you point at it)
+    hta := TouchArea { x: 0; width: root.width - (root.few ? 40px : root.can-like ? 170px : 136px); height: parent.height - 2px; clicked => { root.act("show"); } }
+    if root.design == "compact" && hta.has-hover && root.has-track: TipSpot { hover: true; tip: root.song + " · " + root.artist; }
 }
 
 // Apple Music's sign-in (Settings > Integrations > Apple Music > Import): Apple's own page, in a window of

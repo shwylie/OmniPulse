@@ -21,6 +21,10 @@ pub static WIDGET_GEN: AtomicU64 = AtomicU64::new(0);
 pub const WIDGET_HTML: &str = include_str!("../widget/widget.html");
 /// The lyrics widget (/lyrics): the playing song's timed lyrics, for karaoke
 pub const LYRICS_HTML: &str = include_str!("../widget/lyrics.html");
+/// The Social Plug (/socials): your handles on other platforms, in turn
+const SOCIALS_HTML: &str = include_str!("../widget/socials.html");
+/// The Stream Suite's widgets (/goals, /timer, /latest-follow, /latest-sub, /raid): one page, each as its address says
+const SUITE_HTML: &str = include_str!("../widget/suite.html");
 
 /// The kinds of alert, as /alert?type= names them
 /// (custom ones, set up in the app, come on top: see custom_kinds)
@@ -330,7 +334,7 @@ pub fn widget_serve(listener: TcpListener, gen: u64) {
                     }
                     // (OBS's docks: the chat, with its moderation; the activity feed, its alerts replayed)
                     "/dock/chat" => reply_own(&mut stream, "200 OK", "text/html; charset=utf-8", crate::docks::CHAT_HTML.as_bytes()),
-                    "/chat" => reply_own(&mut stream, "200 OK", "text/html; charset=utf-8", crate::docks::MULTICHAT_HTML.as_bytes()),
+                    p if p == "/chat" || p.strip_prefix("/chat/").is_some_and(|n| !n.is_empty() && n.len() < 4 && n.bytes().all(|b| b.is_ascii_digit())) => reply_own(&mut stream, "200 OK", "text/html; charset=utf-8", crate::docks::MULTICHAT_HTML.as_bytes()),
                     "/dock/activity" => reply_own(&mut stream, "200 OK", "text/html; charset=utf-8", crate::docks::ACTIVITY_HTML.as_bytes()),
                     "/dock/chat.json" | "/dock/activity.json" => {
                         let after = query_map(query).get("after").and_then(|v| v.as_str().and_then(|a| a.parse().ok())).unwrap_or(0);
@@ -344,6 +348,12 @@ pub fn widget_serve(listener: TcpListener, gen: u64) {
                         };
                         let (status, v) = match answer { Ok(m) => ("200 OK", json!({ "ok": true, "message": m })), Err(e) => ("400 Bad Request", json!({ "ok": false, "error": e })) };
                         reply_own(&mut stream, status, "application/json", v.to_string().as_bytes());
+                    }
+                    "/socials" | "/socials.html" => reply(&mut stream, "200 OK", "text/html; charset=utf-8", SOCIALS_HTML.as_bytes()),
+                    "/goals" | "/timer" | "/latest-follow" | "/latest-sub" | "/raid" => reply(&mut stream, "200 OK", "text/html; charset=utf-8", SUITE_HTML.as_bytes()),
+                    "/levels.json" => {
+                        let v = LEVELS.lock().map(|g| g.clone()).unwrap_or_default();
+                        reply_own(&mut stream, "200 OK", "application/json", serde_json::to_string(&v).unwrap_or_else(|_| "[]".into()).as_bytes());
                     }
                     p if p == "/lyrics" || p == "/lyrics.html" || p.strip_prefix("/lyrics/").is_some_and(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit())) => {
                         reply(&mut stream, "200 OK", "text/html; charset=utf-8", LYRICS_HTML.as_bytes());
@@ -438,6 +448,13 @@ pub fn widget_start(port: u16, remote: bool, key: &str) -> Result<String, String
 
 pub fn widget_stop() {
     WIDGET_GEN.fetch_add(1, Ordering::SeqCst);
+}
+
+/// The music's levels, 0 to 1, low to high (the app's, while the Equaliser design is in use): /levels.json
+pub static LEVELS: Mutex<Vec<f32>> = Mutex::new(Vec::new());
+
+pub fn set_levels(v: Vec<f32>) {
+    if let Ok(mut g) = LEVELS.lock() { *g = v; }
 }
 
 pub fn widget_update(state: Value) {
