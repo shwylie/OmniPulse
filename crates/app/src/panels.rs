@@ -320,7 +320,8 @@ fn fields_of(name: &str, vals: &Map<String, Value>, prefs: &Value, lan: &str) ->
                 ]);
             };
             // the OmniPulse Chatbot on: it takes the requests itself, set up here as fully as another bot would be
-            if crate::plugin_runs(prefs, crate::botpage::BOT) {
+            // (installed, and switched on)
+            if crate::plugin_runs(prefs, crate::botpage::BOT) && crate::bot_manifest().is_some() {
                 let mut f = vec![
                     button("botOpen", "OmniPulse Chatbot", "Open", "Your chatbot takes the requests, on Twitch and Kick. Nothing else to set up."),
                     note("Commands"),
@@ -705,7 +706,8 @@ mod tests {
     use super::*;
     #[test]
     fn panels_start_from_prefs_and_defaults() {
-        let prefs = json!({ "reqBot": "mixitup", "reqKey": "abc", "widgetText": 1.2 });
+        // (the chatbot off: another bot's lines to paste)
+        let prefs = json!({ "reqBot": "mixitup", "reqKey": "abc", "widgetText": 1.2, "plugOn_chatbot": false });
         let v = values("requests", &prefs);
         assert_eq!(v["reqBot"], "mixitup");
         assert_eq!(v["reqMax"], 10);
@@ -717,9 +719,14 @@ mod tests {
         assert_eq!(typed("reqMax", "12"), Some(json!(12)));
         assert_eq!(new_key().len(), 24);
         // Streamer Mode: the key hidden where it's shown, copied whole
-        let f = fields("requests", &v, &json!({ "reqKey": "abc", "streamerMode": true }), "");
+        let f = fields("requests", &v, &json!({ "reqKey": "abc", "streamerMode": true, "plugOn_chatbot": false }), "");
         let addr = f.iter().find(|x| x["type"] == "info").unwrap();
         assert!(!addr["value"].as_str().unwrap().contains("abc") && addr["copy"].as_str().unwrap().contains("abc"));
+        // (a bot no longer listed: the first one's lines)
+        let f = fields("requests", &values("requests", &json!({ "reqBot": "moobot" })), &json!({ "reqBot": "moobot", "plugOn_chatbot": false }), "");
+        assert!(f.iter().any(|x| x["type"] == "info" && x["copy"].as_str().unwrap_or("").contains("%rawInputUrlEncoded%")));
+        // (the chatbot's own settings among its values, its defaults where it has none)
+        assert_eq!(values("requests", &prefs)["bot:songCommands"], "!song");
         // the alerts' bot follows the requests' one until it's picked
         assert_eq!(values("alerts", &prefs)["alertBot"], "mixitup");
     }
