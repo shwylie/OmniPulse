@@ -37,7 +37,8 @@ for (const toml of ["crates/app/Cargo.toml", "crates/core/Cargo.toml"]) {
   writeFileSync(toml, readFileSync(toml, "utf8").replace(/^version = "[^"]*"/m, `version = "${version}"`));
 }
 
-// 2. the build
+// 2. the build (the Stream Deck plugin packed first: the app carries it, and updates the one installed)
+run("node", ["scripts/streamdeck-pack.mjs"]);
 run("cargo", ["build", "--release", "-p", "omnipulse", "-p", "omnipulse-offset"]);
 
 // 3. no SoundCloud key in it

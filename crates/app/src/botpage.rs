@@ -194,6 +194,11 @@ pub fn sheet(id: &str, cur: &Map<String, Value>) -> (String, Vec<Field>) {
             f("link", "", "Show shoutout", "Your latest raider, now.", "", "call:suiteShoutout"),
             f("link", "", "Try it", "A pretend raider, to see how it looks.", "", "call:suiteTest:raid"),
         ]),
+        "import" => ("Import from Another Bot".into(), vec![
+            f("note", "", "Your commands, timers and actions from another bot become the Suite's actions. Nothing in the other bot changes.", "", "", ""),
+            f("link", "", "From a backup file", "Streamer.bot (an export, a .sb file or its backup zip) or Mix It Up (a .miubackup or .miucommand).", "", "import:file"),
+            f("link", "", "Paste from Streamer.bot", "In Streamer.bot, click Export and copy the code it gives you. Then click this.", "", "import:paste"),
+        ]),
         "points" => ("Points".into(), vec![
             f("toggle", "pointsOn", "Points", "Your own currency. Viewers earn it by chatting, and spend it in your actions and games.", if on(cur, "pointsOn", false) { "true" } else { "false" }, ""),
             f("text", "pointsName", "Name", "What points are called in chat.", s(cur, "pointsName"), "points"),
@@ -216,6 +221,7 @@ pub fn steps(cur: &Map<String, Value>) -> Vec<(&'static str, String, String, boo
         ("kick", "Kick".into(), if kk.is_empty() { "Optional. Connect your Kick chat too.".into() } else { format!("Signed in as {kk}") }, !kk.is_empty(), true),
         ("kickbot", "A bot account for Kick".into(), if s(cur, "kickBotLogin").is_empty() { "Optional. A second Kick account that posts the replies.".into() } else { format!("{} posts the replies", s(cur, "kickBotLogin")) }, !s(cur, "kickBotLogin").is_empty(), true),
         ("obs", "OBS".into(), if on(cur, "obsOn", false) { "Connected to OBS.".into() } else { "Optional. Lets your actions change scenes and sources.".into() }, on(cur, "obsOn", false), true),
+        ("import", "Coming from another bot?".into(), if on(cur, "imported", false) { "Your commands and actions came across.".into() } else { "Optional. Bring your commands and actions from Streamer.bot or Mix It Up.".into() }, on(cur, "imported", false), true),
         ("features", "Choose what it does".into(), "Song requests, alerts and points. You can add games, timers and more in Actions later.".into(), on(cur, "setupDone", false), false),
     ]
 }
@@ -232,6 +238,7 @@ pub fn step_fields(id: &str, cur: &Map<String, Value>) -> Vec<Field> {
             v
         }
         "obs" => sheet("obs", cur).1,
+        "import" => sheet("import", cur).1,
         "features" => vec![
             f("toggle", "requests", "Song requests", "Viewers can ask for songs with !sr.", if on(cur, "requests", true) { "true" } else { "false" }, ""),
             f("toggle", "alerts", "Alerts", "Shows follows, subs, bits and raids on the Stream Widget.", if on(cur, "alerts", true) { "true" } else { "false" }, ""),
@@ -274,6 +281,7 @@ pub fn feats(cur: &Map<String, Value>, st: &Value) -> Vec<(&'static str, String,
     let (all, live) = (st["actions"]["all"].as_u64(), st["actions"]["on"].as_u64());
     let name = if s(cur, "pointsName").is_empty() { "points".to_string() } else { s(cur, "pointsName").to_string() };
     vec![
+        ("import", "Import from another bot".into(), "Streamer.bot or Mix It Up".into(), on(cur, "imported", false), true),
         ("requests", "Song requests".into(), {
             let or = |k: &str, d: &str| if s(cur, k).is_empty() { d.to_string() } else { s(cur, k).to_string() };
             format!("{}, {}, {}", or("srCommands", "!sr, !request"), or("songCommands", "!song"), or("wrongCommands", "!wrongsong"))

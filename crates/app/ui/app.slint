@@ -1860,6 +1860,77 @@ component SectionHead inherits Text {
     font-weight: 700;
 }
 
+/// The Stream Suite, in Settings > Streaming while it's on: a card of its own, in the accents, glowing
+component SuiteHero inherits Rectangle {
+    in property <SetRow> r;
+    // (the page's colour behind it: its corners rounded over the gradient, which some renderers draw square)
+    in property <color> outside: Theme.panel;
+    callback toggle(string);
+    callback open(string);
+    height: 196px;
+    border-radius: Theme.card-radius;
+    clip: true;
+    background: @linear-gradient(120deg, Theme.accent.mix(Theme.bg, 0.42) 0%, Theme.accent-2.mix(Theme.bg, 0.5) 100%);
+    // (light drifting across it, slowly, while it runs)
+    property <float> ph: root.r.on && Theme.motion ? mod(animation-tick() / 1ms, 9000) / 9000 : 0.3;
+    Rectangle { x: root.width * (0.1 + 0.7 * root.ph) - 160px; y: -120px; width: 380px; height: 380px; background: @radial-gradient(circle, #ffffff30 0%, transparent 65%); }
+    Rectangle { x: root.width - 230px; y: 40px; width: 300px; height: 300px; background: @radial-gradient(circle, Theme.accent-2.with-alpha(0.45) 0%, transparent 70%); }
+    // (rings behind its icon)
+    for k in 3: Rectangle { x: 54px - (k + 1) * 22px; y: (root.height - self.height) / 2; width: 64px + (k + 1) * 44px; height: self.width; border-radius: self.width / 2; border-width: 1px; border-color: #ffffff18; }
+    HorizontalLayout {
+        padding: 26px;
+        spacing: 22px;
+        VerticalLayout { alignment: center; Rectangle {
+            width: 76px; height: 76px; border-radius: 38px;
+            background: @linear-gradient(135deg, #ffffff40 0%, #ffffff10 100%);
+            border-width: 1px; border-color: #ffffff50;
+            Glyph { d: Icons.robot; width: 40px; height: 40px; x: 18px; y: 18px; fill: #ffffff; }
+        } }
+        VerticalLayout {
+            horizontal-stretch: 1;
+            alignment: center;
+            spacing: 6px;
+            HorizontalLayout {
+                spacing: 10px;
+                alignment: start;
+                Text { text: "Stream Suite"; color: #ffffff; font-size: 30px; font-weight: 800; font-family: Theme.head-font; }
+                VerticalLayout { alignment: center; Rectangle {
+                    height: 22px; width: st.preferred-width + 18px; border-radius: 11px;
+                    background: root.r.on ? #3ddc8440 : #ffffff20;
+                    st := Text { x: 9px; height: parent.height; vertical-alignment: center; text: root.r.on ? "Running" : "Off"; color: #ffffff; font-size: 11px; font-weight: 700; }
+                } }
+            }
+            Text { text: "Your chatbot, alerts, goals, timers, widgets and OBS docks, all in one place."; color: #ffffffd8; font-size: 13px; wrap: word-wrap; }
+            HorizontalLayout {
+                spacing: 6px;
+                alignment: start;
+                for t in ["Chatbot", "Song Requests", "Alerts", "Goals and Timers", "Widgets", "Docks"]: Rectangle {
+                    height: 24px; width: tt.preferred-width + 20px; border-radius: 12px;
+                    background: #00000030; border-width: 1px; border-color: #ffffff30;
+                    tt := Text { x: 10px; height: parent.height; vertical-alignment: center; text: t; color: #ffffff; font-size: 11px; font-weight: 600; }
+                }
+            }
+        }
+        VerticalLayout {
+            alignment: center;
+            spacing: 12px;
+            HorizontalLayout { alignment: end; CenterToggle { checked: root.r.on; toggled => { root.toggle(root.r.key); } } }
+            Rectangle {
+                width: 170px; height: 42px; border-radius: 21px;
+                background: oa.has-hover ? #ffffff : #ffffffe6;
+                drop-shadow-blur: 14px; drop-shadow-color: #00000050;
+                HorizontalLayout {
+                    alignment: center;
+                    spacing: 8px;
+                    VerticalLayout { alignment: center; Text { text: "Open the Suite"; color: Theme.accent.mix(#000000, 0.45); font-size: 14px; font-weight: 800; } }
+                }
+                oa := TouchArea { mouse-cursor: MouseCursor.pointer; clicked => { root.open(root.r.key); } }
+            }
+        }
+    }
+    Caps { r: Theme.card-radius; outside: root.outside; tl: Theme.accent.mix(Theme.bg, 0.42); bl: Theme.accent.mix(Theme.bg, 0.42); tr: Theme.accent-2.mix(Theme.bg, 0.5); br: Theme.accent-2.mix(Theme.bg, 0.5); bottom: true; }
+}
+
 /// A theme, as a little app to pick: its sidebar, its text, its accents
 component ThemeTile inherits VerticalLayout {
     preferred-width: 0px;
@@ -2593,7 +2664,7 @@ component FeatCard inherits Rectangle {
         }
         if root.c.open: VerticalLayout { alignment: center; IconButton { d: Icons.gear; size: 32px; tip: root.c.name + ": its settings"; clicked => { root.act("sheet:" + root.c.id); } } }
         if root.c.id == "games" || root.c.id == "actions": VerticalLayout { alignment: center; IconButton { d: Icons.open; size: 32px; filled: root.c.id == "actions"; tip: root.c.id == "games" ? "Add games from Actions' templates" : "Open your actions"; clicked => { root.act("actions"); } } }
-        if root.c.id != "games" && root.c.id != "actions": CenterToggle { checked: root.c.on; toggled => { root.set("feat:" + root.c.id, self.checked ? "true" : "false"); } }
+        if root.c.id != "games" && root.c.id != "actions" && root.c.id != "import": CenterToggle { checked: root.c.on; toggled => { root.set("feat:" + root.c.id, self.checked ? "true" : "false"); } }
     }
                 }
 
@@ -3507,6 +3578,9 @@ export component AppWindow inherits Window {
     // the playing song right-clicked in the player bar: the "..." menu
     callback now-menu();
     in-out property <int> now-menu-asks;
+    // (where the playing song was right-clicked, in the window: its menu opens there)
+    in-out property <length> now-menu-x;
+    in-out property <length> now-menu-y;
     /// the "..." menu's Add to Playlist: the player bar's playlist list shown
     in-out property <int> pl-menu-asks;
     /// the open playlist's own links (the Share button's right-click)
@@ -3550,6 +3624,12 @@ export component AppWindow inherits Window {
     callback streamer-changed(bool);
     // the Streamer Mode button's next step: off -> private info hidden -> and safe music only -> off
     callback streamer-step();
+    /// (Streamer Mode's right-click: only music that's safe on stream, or everything again)
+    callback streamer-music();
+    // the Stream Suite's button, beside Streamer Mode: shown with its icon in the title bar asked for, lit while it runs
+    in property <bool> suite-shown;
+    in property <bool> suite-on;
+    in property <string> suite-icon;
     in property <bool> stream-safe;
     // the Library's order: "artist" / "title" (1 A to Z, -1 Z to A), or "" as you liked them
     in property <string> sort-by;
@@ -3684,6 +3764,12 @@ export component AppWindow inherits Window {
     in property <int> device-offset: -1;
     in property <bool> mixing;
     callback mix-toggle();
+    // the first-run setup: shown once, the first time OmniPulse opens (Settings > App & Look > Run Setup Again)
+    in-out property <bool> setup-open;
+    in property <int> setup-at;
+    in property <bool> setup-taste;
+    in property <bool> setup-web;
+    callback setup-go(string);
     in property <string> tb-design: "standard";
     callback tb-design-picked(string);
     in property <[ThemeRow]> theme-rows;
@@ -3806,8 +3892,34 @@ export component AppWindow inherits Window {
                         }
                         // Stream-Safe Music on: a dot
                         if root.stream-safe: Rectangle { x: parent.width / 2 + 5px; y: parent.height / 2 - 11px; width: 7px; height: 7px; border-radius: 3.5px; background: #53fc18; }
-                        TipSpot { hover: sta-s.has-hover; tip: root.stream-safe ? "Streamer Mode Extended is on. Private info is hidden, and only music that's safe on stream plays. Click to turn it off." : root.streamer ? "Streamer Mode is on, so private info is hidden. Click again for Extended, which also plays only music that's safe on stream." : "Streamer Mode is off. Click to hide private info. Click again for Extended, which also plays only music that's safe on stream."; }
-                        sta-s := TouchArea { clicked => { Tips.on = false; root.streamer-step(); } }
+                        TipSpot { hover: sta-s.has-hover; tip: (root.streamer || root.stream-safe ? "Streamer Mode is on, so private info is hidden. Click to turn it off." : "Streamer Mode is off. Click to hide private info.") + (root.stream-safe ? " Only music that's safe on stream is playing: right-click to play everything again." : " Right-click to play only music that's safe on stream."); }
+                        sta-s := TouchArea {
+                            clicked => { Tips.on = false; root.streamer-step(); }
+                            pointer-event(e) => { if (e.kind == PointerEventKind.down && e.button == PointerEventButton.right) { Tips.on = false; root.streamer-music(); } }
+                        }
+                    }
+                    // the Stream Suite: grey when off; running, lit as Streamer Mode is (YouTube red, Twitch purple, Kick green)
+                    if root.suite-shown: Rectangle {
+                        width: 32px;
+                        Rectangle { width: 28px; height: 28px; x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2; border-radius: 8px; background: sta-b.has-hover ? Theme.elevated : transparent; }
+                        property <float> phase: root.suite-on && root.playing && Theme.motion ? mod(animation-tick() / 1ms + 600, 3600) / 1200 : 0.0;
+                        Glyph {
+                            d: root.suite-icon;
+                            width: 16px;
+                            height: 16px;
+                            x: (parent.width - self.width) / 2;
+                            y: (parent.height - self.height) / 2;
+                            fill: !root.suite-on ? Theme.muted
+                                : parent.phase < 1 ? #ff0033.mix(#9146ff, 1 - parent.phase)
+                                : parent.phase < 2 ? #9146ff.mix(#53fc18, 2 - parent.phase)
+                                : #53fc18.mix(#ff0033, 3 - parent.phase);
+                            opacity: root.suite-on ? 1 : 0.55;
+                        }
+                        TipSpot { hover: sta-b.has-hover; tip: root.suite-on ? "The Stream Suite is running. Click to stop it, right-click for its settings." : "The Stream Suite is stopped. Click to start it, right-click for its settings."; }
+                        sta-b := TouchArea {
+                            clicked => { Tips.on = false; root.plat-toggle("suite"); }
+                            pointer-event(e) => { if (e.kind == PointerEventKind.down && e.button == PointerEventButton.right) { Tips.on = false; root.title-settings("plugin:chatbot"); } }
+                        }
                     }
                     // Seamless Mix: grey when off; on, its colour flows from one accent to the other, quicker while a
                     // mix is playing (still while it's parked): the icon alone, as Streamer Mode's
@@ -4132,7 +4244,7 @@ export component AppWindow inherits Window {
                                 clip: true;
                                 background: Theme.elevated;
                                 Image { source: root.now-art; width: parent.width; height: parent.height; image-fit: cover; }
-                                TouchArea { mouse-cursor: MouseCursor.pointer; clicked => { root.nav(root.page == "now" ? "library" : "now"); } pointer-event(e) => { if (e.kind == PointerEventKind.up && e.button == PointerEventButton.right) { root.now-menu(); } } }
+                                TouchArea { mouse-cursor: MouseCursor.pointer; clicked => { root.nav(root.page == "now" ? "library" : "now"); } pointer-event(e) => { if (e.kind == PointerEventKind.up && e.button == PointerEventButton.right) { root.now-menu-x = self.absolute-position.x + self.mouse-x; root.now-menu-y = self.absolute-position.y + self.mouse-y; root.now-menu(); } } }
                             }
                         }
                         Marquee { text: root.now-title + (root.now-trimmed ? " *" : ""); font-size: 14px; }
@@ -4340,7 +4452,19 @@ export component AppWindow inherits Window {
                             Glyph { d: Icons.play; width: 24px; height: 24px; fill: Theme.on-accent; }
                             pa := TouchArea { enabled: root.rows.length > 0; clicked => { root.play-page(); } }
                         }
-                        Pill { label: "Shuffle"; y: 7px; clicked => { root.shuffle(); } }
+                        // (shuffled: the play button's twin, an icon; Rediscover's is its own already, so none there)
+                        if root.page != "rediscover": Rectangle {
+                            width: 52px;
+                            height: 52px;
+                            border-radius: 26px;
+                            background: sha.has-hover ? Theme.elevated.brighter(0.1) : Theme.elevated;
+                            border-width: 1px;
+                            border-color: Theme.line;
+                            opacity: root.rows.length > 0 ? 1 : 0.5;
+                            Glyph { d: Icons.shuffle; width: 22px; height: 22px; fill: Theme.text; }
+                            TipSpot { hover: sha.has-hover; tip: "Shuffle"; }
+                            sha := TouchArea { enabled: root.rows.length > 0; clicked => { Tips.on = false; root.shuffle(); } }
+                        }
                         // a playlist's own: Share, Invite collaborators (or its invite link), Delete playlist, as the web app's
                         // (right-click: its SoundCloud or Spotify link on its own, as the web app's)
                         if root.page == "playlist" && root.pl-share: Rectangle {
@@ -5308,6 +5432,22 @@ export component AppWindow inherits Window {
                                         VerticalLayout { alignment: center; IconButton { d: Icons.restore; size: 38px; tip: "Restore: from a backup .zip"; clicked => { root.backup-restore(); } } }
                                     }
                                 }
+                                Card {
+                                    HorizontalLayout {
+                                        padding: 16px;
+                                        padding-top: 12px;
+                                        padding-bottom: 12px;
+                                        spacing: 6px;
+                                        VerticalLayout {
+                                            horizontal-stretch: 1;
+                                            alignment: center;
+                                            spacing: 2px;
+                                            HiTitle { text: "Run Setup Again"; }
+                                            Text { text: "The steps from when OmniPulse first opened: your theme, your music, how it sounds and streaming."; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
+                                        }
+                                        VerticalLayout { alignment: center; Pill { label: "Run Setup"; clicked => { root.setup-go("again"); } } }
+                                    }
+                                }
                             }
                             if root.set-cat == "Integrations" && root.set-query == "": VerticalLayout {
                                 spacing: 10px;
@@ -5591,32 +5731,14 @@ export component AppWindow inherits Window {
                                     if r.key == "streamSafe": VerticalLayout { padding-top: 10px; SetRowView { r: r; toggle(k) => { root.set-toggle(k); } more(k) => { root.set-more(k); } } }
                                 }
                                 }
-                                // ---- the Stream Suite: its own switch and settings, first ----
-                                if root.bot-on: SectionHead { text: "Suite"; }
+                                // ---- the Stream Suite: a card of its own, first (all that's for your stream is in it) ----
                                 if root.bot-on: VerticalLayout {
                                     for r in root.set-rows-streaming: VerticalLayout {
-                                        if r.key == "plugRun_chatbot": SetRowView { r: r; toggle(k) => { root.set-toggle(k); } more(k) => { root.set-more(k); } }
+                                        if r.key == "plugRun_chatbot": SuiteHero { r: r; outside: root.settings-look ? root.settings-panel : Theme.panel; toggle(k) => { root.set-toggle(k); } open(k) => { root.set-more(k); } }
                                     }
                                 }
-                                // ---- on stream: tiles (in the chatbot's page while it's on) ----
-                                SectionHead { text: "On Stream"; }
-                                if root.bot-on: Card {
-                                    HorizontalLayout {
-                                        padding: 16px;
-                                        padding-top: 12px;
-                                        padding-bottom: 12px;
-                                        spacing: 10px;
-                                        VerticalLayout { alignment: center; Glyph { d: Icons.robot; width: 22px; height: 22px; fill: Theme.accent; } }
-                                        VerticalLayout {
-                                            horizontal-stretch: 1;
-                                            alignment: center;
-                                            spacing: 2px;
-                                            HiTitle { text: "Widgets, Docks and Song Requests"; }
-                                            Text { text: "The Stream Widget, the Lyrics Widget, the Social Plug, OBS's docks and Song Requests are in the Suite while it's on."; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
-                                        }
-                                        VerticalLayout { alignment: center; IconButton { d: Icons.open; size: 36px; tint: Theme.accent; tip: "Open the Suite, at its widgets and docks"; clicked => { root.set-more("plugRun_chatbot"); } } }
-                                    }
-                                }
+                                // ---- on stream: tiles (in the Suite while it's on, so nothing here then) ----
+                                if !root.bot-on: SectionHead { text: "On Stream"; }
                                 if !root.bot-on: HorizontalLayout {
                                     spacing: 0px;
                                     for r in root.set-rows-streaming: HorizontalLayout {
@@ -5647,7 +5769,8 @@ export component AppWindow inherits Window {
                                     }
                                 }
                                 // ---- your chat ----
-                                SectionHead { text: "Your Chat"; }
+                                // (the Suite on: nothing left here, its own heading above)
+                                if !root.bot-on: SectionHead { text: "Your Chat"; }
                                 VerticalLayout {
                                     for r in root.set-rows-streaming: VerticalLayout {
                                         if (r.key == "req" && !root.bot-on) || (r.key != "req" && r.key != "streamerMode" && r.key != "streamSafe" && r.key != "widget" && r.key != "lyricsWidget" && r.key != "socials" && r.key != "out2On" && r.key != "remoteOn" && !(root.bot-on && r.key == "plugRun_chatbot")): VerticalLayout { padding-bottom: 10px; SetRowView { r: r; toggle(k) => { root.set-toggle(k); } more(k) => { root.set-more(k); } } }
@@ -5702,15 +5825,15 @@ export component AppWindow inherits Window {
                                 property <float> bass: root.viz-level;
                                 // (rings round it, each a little further out and fainter, as far out as it's loud: drawn
                                 // the same by either renderer, the software one having no drop shadows)
-                                for r in [6, 5, 4, 3, 2, 1]: Rectangle {
+                                for r in [12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1]: Rectangle {
                                     visible: root.viz-now && root.viz-style == "glow";
-                                    property <length> out: r * (3px + 7px * parent.bass);
+                                    property <length> out: r * (1.5px + 3.5px * parent.bass);
                                     x: -self.out;
                                     y: -self.out;
                                     width: parent.width + 2 * self.out;
                                     height: parent.height + 2 * self.out;
                                     border-radius: 14px + self.out;
-                                    background: Theme.accent.mix(Theme.accent-2, 1 - parent.bass).with-alpha((0.05 + 0.13 * parent.bass) * (7 - r) / 6);
+                                    background: Theme.accent.mix(Theme.accent-2, 1 - parent.bass).with-alpha((0.05 + 0.13 * parent.bass) * (13 - r) / 24);
                                 }
                                 property <bool> ring: root.viz-now && root.viz-style == "ring";
                                 if self.ring: VizRing { width: parent.width; height: parent.height; pieces: root.viz-ring; }
@@ -6426,7 +6549,7 @@ export component AppWindow inherits Window {
                                 data: Dnd.payload("now");
                                 TouchArea {
                                     clicked => { root.nav(root.page == "now" ? "library" : "now"); }
-                                    pointer-event(e) => { if (e.kind == PointerEventKind.up && e.button == PointerEventButton.right) { root.now-menu(); } }
+                                    pointer-event(e) => { if (e.kind == PointerEventKind.up && e.button == PointerEventButton.right) { root.now-menu-x = self.absolute-position.x + self.mouse-x; root.now-menu-y = self.absolute-position.y + self.mouse-y; root.now-menu(); } }
                                 }
                             }
                             // (mirrored on the right: the cover at the window's edge, the text lined up beside it)
@@ -6570,7 +6693,7 @@ export component AppWindow inherits Window {
                                 data: Dnd.payload("now");
                                 TouchArea {
                                     clicked => { root.nav(root.page == "now" ? "library" : "now"); }
-                                    pointer-event(e) => { if (e.kind == PointerEventKind.up && e.button == PointerEventButton.right) { root.now-menu(); } }
+                                    pointer-event(e) => { if (e.kind == PointerEventKind.up && e.button == PointerEventButton.right) { root.now-menu-x = self.absolute-position.x + self.mouse-x; root.now-menu-y = self.absolute-position.y + self.mouse-y; root.now-menu(); } }
                                 }
                             }
                             HorizontalLayout {
@@ -6726,15 +6849,18 @@ export component AppWindow inherits Window {
                             }
                         }
                         // the track's menu: open it on its platform, look for its artist
-                        Rectangle {
+                        mbx := Rectangle {
                             width: 36px;
-                            IconButton { tip: "More options for this track"; d: Icons.more; y: (parent.height - self.height) / 2; clicked => { root.more-want(); more-menu.show(); } }
-                            // (right-clicking the playing song shows it too)
+                            IconButton { tip: "More options for this track"; d: Icons.more; y: (parent.height - self.height) / 2; clicked => { mbx.at-pointer = false; root.more-want(); more-menu.show(); } }
+                            // (right-clicking the playing song shows it too, where it was clicked: kept in the window)
                             property <int> menu-asked: root.now-menu-asks;
-                            changed menu-asked => { root.more-want(); more-menu.show(); }
+                            property <bool> at-pointer;
+                            property <length> menu-h: root.more-items.length * 32px + 16px;
+                            changed menu-asked => { mbx.at-pointer = true; root.more-want(); more-menu.show(); }
                             more-menu := PopupWindow {
-                                x: parent.width - 240px;
-                                y: -12px - root.more-items.length * 32px - 16px;
+                                x: mbx.at-pointer ? max(8px, min(root.now-menu-x, Win.w - 248px)) - mbx.absolute-position.x : parent.width - 240px;
+                                y: !mbx.at-pointer ? -12px - mbx.menu-h
+                                    : (root.now-menu-y + mbx.menu-h > Win.h - 8px ? max(8px, root.now-menu-y - mbx.menu-h) : root.now-menu-y) - mbx.absolute-position.y;
                                 width: 240px;
                                 Rectangle {
                                     background: Theme.elevated;
@@ -6771,6 +6897,192 @@ export component AppWindow inherits Window {
                 }
             }
         }
+        }
+    }
+    // ---------- the first-run setup ----------
+    if root.setup-open: Rectangle {
+        x: 0; y: 0; width: root.width; height: root.height;
+        background: Theme.bg;
+        TouchArea { }
+        // (a glow of the accents behind it)
+        Rectangle { x: -root.width * 0.2; y: -root.height * 0.4; width: root.width * 0.9; height: root.width * 0.9; background: @radial-gradient(circle, Theme.accent.with-alpha(0.18) 0%, transparent 70%); }
+        Rectangle { x: root.width * 0.45; y: root.height * 0.35; width: root.width * 0.8; height: root.width * 0.8; background: @radial-gradient(circle, Theme.accent-2.with-alpha(0.14) 0%, transparent 70%); }
+        HorizontalLayout {
+            padding: 40px;
+            spacing: 34px;
+            // its steps
+            VerticalLayout {
+                width: 250px;
+                spacing: 6px;
+                alignment: start;
+                Text { text: "OmniPulse"; color: Theme.text; font-size: 26px; font-weight: 800; font-family: Theme.head-font; }
+                Text { text: "Let's set you up. Skip anything you like: it's all in Settings later."; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
+                Rectangle { height: 14px; }
+                for st[k] in [
+                    { n: "Welcome", d: Icons.star-out }, { n: "Your music", d: Icons.library }, { n: "Bring it with you", d: Icons.download },
+                    { n: "Your taste", d: Icons.discover }, { n: "How it sounds", d: Icons.volume }, { n: "Do you stream?", d: Icons.broadcast }, { n: "All set", d: Icons.check },
+                ]: Rectangle {
+                    visible: k != 3 || root.setup-taste;
+                    height: k != 3 || root.setup-taste ? 40px : 0px;
+                    border-radius: 10px;
+                    background: root.setup-at == k ? Theme.accent.with-alpha(0.16) : transparent;
+                    HorizontalLayout {
+                        padding-left: 10px;
+                        spacing: 10px;
+                        VerticalLayout { alignment: center; Rectangle {
+                            width: 24px; height: 24px; border-radius: 12px;
+                            background: root.setup-at > k ? Theme.accent : root.setup-at == k ? Theme.accent.with-alpha(0.25) : Theme.elevated;
+                            Glyph { d: root.setup-at > k ? Icons.check : st.d; width: 14px; height: 14px; x: 5px; y: 5px; fill: root.setup-at > k ? Theme.on-accent : root.setup-at == k ? Theme.accent : Theme.muted; }
+                        } }
+                        Text { text: st.n; color: root.setup-at == k ? Theme.text : Theme.muted; font-weight: root.setup-at == k ? 700 : 400; font-size: 14px; vertical-alignment: center; }
+                    }
+                }
+            }
+            // the step you're on
+            VerticalLayout {
+                horizontal-stretch: 1;
+                spacing: 16px;
+                ScrollView {
+                    vertical-stretch: 1;
+                    VerticalLayout {
+                        spacing: 14px;
+                        padding-right: 12px;
+                        // 1. welcome: your name, a theme
+                        if root.setup-at == 0: VerticalLayout {
+                            spacing: 14px;
+                            Text { text: "Welcome to OmniPulse"; color: Theme.text; font-size: 34px; font-weight: 800; font-family: Theme.head-font; }
+                            Text { text: "All your music in one place: SoundCloud, Spotify, YouTube Music and the files on this PC. First, make it yours."; color: Theme.muted; font-size: 14px; wrap: word-wrap; }
+                            Text { text: "Your name"; color: Theme.text; font-weight: 700; }
+                            Text { text: "Shown in the title bar, and to friends when you listen together."; color: Theme.muted; font-size: 12px; }
+                            Rectangle {
+                                height: 40px; width: 340px; border-radius: 10px;
+                                background: Theme.panel; border-width: 1px; border-color: Theme.line;
+                                TextInput { x: 12px; width: parent.width - 24px; height: parent.height; vertical-alignment: center; text: root.app-name; color: Theme.text; font-size: 14px; single-line: true; edited => { root.app-name-changed(self.text); } }
+                            }
+                            Text { text: "A theme"; color: Theme.text; font-weight: 700; }
+                            for r in root.theme-rows: HorizontalLayout {
+                                spacing: 10px;
+                                for t in r.items: ThemeTile { horizontal-stretch: 1; preferred-width: 0px; t: t; on: root.theme-name == t.id; clicked => { root.theme-picked(t.id); } }
+                            }
+                        }
+                        // 2. your music: the accounts, the folders
+                        if root.setup-at == 1: VerticalLayout {
+                            spacing: 14px;
+                            Text { text: "Your music"; color: Theme.text; font-size: 34px; font-weight: 800; font-family: Theme.head-font; }
+                            Text { text: "Sign in to any of these to bring in your likes and playlists. Each is optional, and you can add the rest later."; color: Theme.muted; font-size: 14px; wrap: word-wrap; }
+                            HorizontalLayout {
+                                spacing: 8px;
+                                // (the music ones: Last.fm's later, in Settings)
+                                for acc[i] in root.accounts: HorizontalLayout {
+                                    horizontal-stretch: i < 3 ? 1 : 0;
+                                    preferred-width: 0px;
+                                    min-width: 0px;
+                                    if i < 3: AccountTile {
+                                    horizontal-stretch: 1;
+                                    acc: acc;
+                                    act => { root.account-act(i); }
+                                    keys => { root.account-keys(i); }
+                                    settings => { root.account-settings(acc.settings); }
+                                    manage => { root.open-web(acc.manage); }
+                                    }
+                                }
+                            }
+                            Text { text: "Music on this PC"; color: Theme.text; font-weight: 700; }
+                            Text { text: root.folders.length == 0 ? "Add the folders your music's in. OmniPulse finds the songs in them and keeps up as you add more." : root.folders-note; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
+                            for f[i] in root.folders: HorizontalLayout { spacing: 8px; Text { text: f; color: Theme.text; font-size: 13px; vertical-alignment: center; horizontal-stretch: 1; overflow: elide; } IconButton { d: Icons.close; size: 28px; tip: "Take this folder out"; clicked => { root.folder-remove(i); } } }
+                            HorizontalLayout { alignment: start; Pill { label: "Add a Folder"; on: true; clicked => { root.folder-add(); } } }
+                        }
+                        // 3. bring it with you: the web app's (already in), Apple Music, playlist files
+                        if root.setup-at == 2: VerticalLayout {
+                            spacing: 14px;
+                            Text { text: "Bring it with you"; color: Theme.text; font-size: 34px; font-weight: 800; font-family: Theme.head-font; }
+                            if root.setup-web: Text { text: "Your favourites, playlists and settings from the OmniPulse web app came across already."; color: Theme.accent; font-size: 14px; wrap: word-wrap; }
+                            Text { text: "Moving from somewhere else? Bring your music along."; color: Theme.muted; font-size: 14px; wrap: word-wrap; }
+                            HorizontalLayout { spacing: 12px; alignment: start;
+                                Pill { label: "Import from Apple Music"; clicked => { root.apple-import(); } }
+                                Pill { label: "Import a Playlist File"; clicked => { root.pl-import(); } }
+                            }
+                            Text { text: "A playlist file can be an M3U, a CSV, or one exported from another app."; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
+                        }
+                        // 4. your taste (only with no accounts to start from)
+                        if root.setup-at == 3: VerticalLayout {
+                            spacing: 14px;
+                            Text { text: "Your taste"; color: Theme.text; font-size: 34px; font-weight: 800; font-family: Theme.head-font; }
+                            Text { text: "With nothing to start from yet, pick a few genres you like. Discover and autoplay begin there, and learn from what you play. You can change them on Discover any time."; color: Theme.muted; font-size: 14px; wrap: word-wrap; }
+                            HorizontalLayout { alignment: start; Pill { label: "Pick Genres"; on: true; clicked => { root.taste-pick(); } } }
+                        }
+                        // 5. how it sounds
+                        if root.setup-at == 4: VerticalLayout {
+                            spacing: 14px;
+                            Text { text: "How it sounds"; color: Theme.text; font-size: 34px; font-weight: 800; font-family: Theme.head-font; }
+                            Text { text: "Match Loudness"; color: Theme.text; font-weight: 700; }
+                            Text { text: "Every song at the same loudness, so nothing jumps out or gets lost. Normal suits most people."; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
+                            HorizontalLayout { spacing: 6px; alignment: start;
+                                for v in [{ id: "off", n: "Off" }, { id: "quiet", n: "Quiet" }, { id: "normal", n: "Normal" }, { id: "loud", n: "Loud" }]: Chip { label: v.n; on: root.loud-on == v.id; clicked => { root.loud-pick(v.id); } }
+                            }
+                            HorizontalLayout {
+                                spacing: 12px;
+                                VerticalLayout {
+                                    horizontal-stretch: 1;
+                                    spacing: 2px;
+                                    Text { text: "Seamless Mix"; color: Theme.text; font-weight: 700; }
+                                    Text { text: "Songs flow into each other like a DJ's set: on the beat, in key, with no gaps. It's still being built, so some changes may not sound right yet. When it's off, songs fade into each other."; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
+                                }
+                                CenterToggle { checked: root.mix-on; toggled => { root.mix-toggle(); } }
+                            }
+                        }
+                        // 6. do you stream?
+                        if root.setup-at == 5: VerticalLayout {
+                            spacing: 14px;
+                            Text { text: "Do you stream?"; color: Theme.text; font-size: 34px; font-weight: 800; font-family: Theme.head-font; }
+                            Text { text: "OmniPulse has everything for streamers built in: song requests, alerts, goals, a chatbot and OBS widgets. If you don't stream, it all stays out of your way."; color: Theme.muted; font-size: 14px; wrap: word-wrap; }
+                            HorizontalLayout {
+                                spacing: 14px;
+                                for c in [{ id: "yes", n: "Yes, I stream", t: "Turns on the Stream Suite, and sets up its chatbot next. Coming from Streamer.bot or Mix It Up? You can bring your commands with you.", d: Icons.broadcast }, { id: "no", n: "No, just listening", t: "Nothing to set up. Streaming stays in Settings if you ever want it.", d: Icons.library }]: Rectangle {
+                                    horizontal-stretch: 1;
+                                    height: 150px;
+                                    border-radius: 16px;
+                                    background: sca.has-hover ? Theme.elevated : Theme.panel;
+                                    border-width: 1px;
+                                    border-color: sca.has-hover ? Theme.accent : Theme.line;
+                                    VerticalLayout {
+                                        padding: 18px;
+                                        spacing: 8px;
+                                        Glyph { d: c.d; width: 26px; height: 26px; fill: Theme.accent; }
+                                        Text { text: c.n; color: Theme.text; font-size: 17px; font-weight: 800; }
+                                        Text { text: c.t; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
+                                    }
+                                    sca := TouchArea { mouse-cursor: MouseCursor.pointer; clicked => { root.setup-go("stream-" + c.id); } }
+                                }
+                            }
+                        }
+                        // 7. all set: where things are
+                        if root.setup-at == 6: VerticalLayout {
+                            spacing: 14px;
+                            Text { text: "All set"; color: Theme.text; font-size: 34px; font-weight: 800; font-family: Theme.head-font; }
+                            Text { text: "A few things worth knowing:"; color: Theme.muted; font-size: 14px; }
+                            for t in [
+                                { d: Icons.library, n: "The sidebar", s: "Your Library, Discover, Rediscover, artists and stats, with your playlists below." },
+                                { d: Icons.play, n: "The player", s: "At the bottom. Click what's playing to open Now Playing and its lyrics." },
+                                { d: Icons.mix, n: "Seamless Mix", s: "Its button is in the title bar. With it on, rate each change with the thumbs beside it." },
+                                { d: Icons.gear, n: "Settings", s: "The gear at the top right of each page. Its search finds any setting." },
+                            ]: HorizontalLayout {
+                                spacing: 12px;
+                                VerticalLayout { alignment: center; Rectangle { width: 36px; height: 36px; border-radius: 10px; background: Theme.accent.with-alpha(0.15); Glyph { d: t.d; width: 18px; height: 18px; x: 9px; y: 9px; fill: Theme.accent; } } }
+                                VerticalLayout { horizontal-stretch: 1; alignment: center; spacing: 2px; Text { text: t.n; color: Theme.text; font-weight: 700; } Text { text: t.s; color: Theme.muted; font-size: 12px; wrap: word-wrap; } }
+                            }
+                        }
+                    }
+                }
+                // Back, Skip, Next
+                HorizontalLayout {
+                    spacing: 10px;
+                    if root.setup-at > 0: Pill { label: "Back"; clicked => { root.setup-go("back"); } }
+                    Rectangle { horizontal-stretch: 1; }
+                    if root.setup-at < 6: Pill { label: "Skip Setup"; clicked => { root.setup-go("done"); } }
+                    if root.setup-at != 5: Pill { label: root.setup-at == 6 ? "Start Listening" : "Next"; on: true; clicked => { root.setup-go(root.setup-at == 6 ? "done" : "next"); } }
+                }
+            }
         }
     }
     // Pick genres, then Fine-tune
@@ -7295,15 +7607,15 @@ export component AppWindow inherits Window {
             y: parent.height * 0.12;
             width: parent.side;
             height: parent.side;
-            for r in [6, 5, 4, 3, 2, 1]: Rectangle {
+            for r in [12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1]: Rectangle {
                 visible: root.viz-style == "glow";
-                property <length> out: r * (5px + 12px * root.viz-level);
+                property <length> out: r * (2.5px + 6px * root.viz-level);
                 x: -self.out;
                 y: -self.out;
                 width: parent.width + 2 * self.out;
                 height: parent.height + 2 * self.out;
                 border-radius: 18px + self.out;
-                background: Theme.accent.mix(Theme.accent-2, 1 - root.viz-level).with-alpha((0.05 + 0.13 * root.viz-level) * (7 - r) / 6);
+                background: Theme.accent.mix(Theme.accent-2, 1 - root.viz-level).with-alpha((0.05 + 0.13 * root.viz-level) * (13 - r) / 24);
             }
             if root.viz-style == "ring": VizRing { width: parent.width; height: parent.height; pieces: root.viz-ring; }
             // (Ring: the cover in the middle of the box, the circle round it; 0.46: viz::RING_COVER)

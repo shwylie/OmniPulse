@@ -56,6 +56,28 @@ pub fn stop() {
     *SOUND.lock().unwrap() = None;
     *SHOWN.lock().unwrap() = [0.0; BANDS];
     *PEAKS.lock().unwrap() = [(0.0, 0); BANDS];
+    *RING_TOP.lock().unwrap() = 0.2;
+    *RING_EASE.lock().unwrap() = [Vec::new(), Vec::new()];
+}
+
+/// The self-test's music (OMNIPULSE_SELFTEST: never heard, only drawn): a beat put straight into the tap's
+/// sound, `t` seconds in (a kick on each beat, a bass note, hi-hats between), a frame's worth each call
+pub fn test_feed(t: f32) {
+    let Ok(mut g) = SOUND.lock() else { return };
+    let Some(r) = g.as_mut() else { return };
+    let rate = r.rate as f32;
+    let n = (rate / 30.0) as usize;
+    for i in 0..n {
+        let x = t + i as f32 / rate;
+        let beat = (x * 2.0).fract();
+        let kick = (std::f32::consts::TAU * (55.0 + 90.0 * (-beat * 30.0).exp()) * x).sin() * (-beat * 9.0).exp() * 0.8;
+        let bass = (std::f32::consts::TAU * 82.0 * x).sin() * 0.25 * (0.6 + 0.4 * (x * 0.5).sin());
+        let half = ((x * 4.0).fract() - 0.5).abs();
+        let hat = ((x * 9_871.0).sin() * (x * 13_331.0).sin()) * (-half * 40.0).exp() * 0.25;
+        let pad = (std::f32::consts::TAU * 440.0 * x).sin() * 0.05 + (std::f32::consts::TAU * 2_200.0 * x).sin() * 0.03;
+        r.buf[r.at] = kick + bass + hat + pad;
+        r.at = (r.at + 1) % RING;
+    }
 }
 
 /// The bands now: from the sound just sent to the speakers (the tap is fed as it's played), each 0 to 1
@@ -112,60 +134,84 @@ pub fn curve(b: &[f32; BANDS]) -> [f32; CURVE] {
     out
 }
 
-/// The Ring: a spike for each band standing out in a circle round the cover (as Proximity's round its logo),
-/// the bass at the foot, the highs at the top, the left half and the right mirrored; between two spikes it
-/// falls back toward the circle. As path commands in a 1000-unit square (the box it's drawn in), in slices,
-/// each its own step of the accent's gradient (the software renderer fills a path with one colour): each
-/// slice one spike, from the middle, running a little into the next so no seam shows. `inner`: the circle
-/// it stands out from, in those units
-fn ring_shape(b: &[f32; BANDS], inner: f32) -> Vec<(String, f32)> {
+/// The Ring: a smooth halo round the cover (as Proximity's round its logo), swelling with the music: the bass
+/// at the foot, the highs at the top, the left half and the right mirrored. Its edge one smooth curve through
+/// a point for each slice (each point its band and the bands beside it, eased frame to frame), so it breathes
+/// rather than spikes; how far it swells, measured against the song's own recent loudest, so a quiet song
+/// moves it as much as a loud one. As path commands in a 1000-unit square (the box it's drawn in), in
+/// slices, each its own step of the accent's gradient (the software renderer fills a path with one colour),
+/// each running a little into the next so no seam shows. `inner`: the circle it swells from, in those units
+fn ring_shape(b: &[f32; BANDS], inner: f32, slot: usize) -> Vec<(String, f32)> {
     const OUT: f32 = 494.0;
     let depth = OUT - inner;
-    // (a band's level at an angle from straight down, round to straight up: 0 the bass, 1 the highs)
-    let at = |th: f32| -> (f32, f32) {
+    let n = RING_PIECES;
+    let step = std::f32::consts::TAU / n as f32;
+    // (a band's level at an angle from straight down, round to straight up: 0 the bass, 1 the highs; between
+    // bands, the two either side blended, and a little of their neighbours)
+    let level = |th: f32| -> (f32, f32) {
         let th = th.rem_euclid(std::f32::consts::TAU);
         let away = if th <= std::f32::consts::PI { th } else { std::f32::consts::TAU - th } / std::f32::consts::PI;
         let x = away * (BANDS - 1) as f32;
-        let k = (x.round() as usize).min(BANDS - 1);
-        (b[k], away)
+        let k = x.floor() as usize;
+        let t = x - k as f32;
+        let at = |i: isize| b[(i.clamp(0, BANDS as isize - 1)) as usize];
+        let (k, ki) = (k as isize, k as isize);
+        let here = at(k) * (1.0 - t) + at(k + 1) * t;
+        let around = (at(ki - 1) + at(ki + 2)) * 0.5;
+        (0.75 * here + 0.25 * around, away)
     };
-    // (each band against the others: what they all have taken off, so the loud ones stand out from the rest
-    // however loud the song is, and the louder sharper still)
-    let mean = b.iter().sum::<f32>() / BANDS as f32;
-    let floor = mean * 0.75;
-    let reach = |v: f32| ((v - floor) / (1.0 - floor).max(0.05)).clamp(0.0, 1.0).powf(1.25);
+    // (how far it swells: against the loudest it's been lately, slowly forgotten, so every song moves it)
+    let now_top = b.iter().cloned().fold(0.0f32, f32::max);
+    let top = {
+        let mut m = RING_TOP.lock().unwrap();
+        *m = (*m * 0.996).max(now_top).max(0.2);
+        *m
+    };
+    let raw: Vec<(f32, f32)> = (0..n).map(|k| { let (v, away) = level((k as f32 + 0.5) * step); ((v / top).clamp(0.0, 1.0).powf(1.7), away) }).collect();
+    // (eased, frame to frame: up quickly, down gently)
+    let reach: Vec<f32> = {
+        let mut all = RING_EASE.lock().unwrap();
+        let e = &mut all[slot];
+        if e.len() != n { *e = vec![0.0; n]; }
+        for (k, (v, _)) in raw.iter().enumerate() { e[k] += (v - e[k]) * if *v > e[k] { 0.45 } else { 0.16 }; }
+        e.clone()
+    };
     let pt = |th: f32, r: f32| (500.0 - th.sin() * r, 500.0 + th.cos() * r);
-    let step = std::f32::consts::TAU / RING_PIECES as f32;
-    // each spike's tip, and the dip before it (its own level and the one before's, the lower, mostly gone)
-    let tips: Vec<((f32, f32), f32)> = (0..RING_PIECES).map(|k| { let th = (k as f32 + 0.5) * step; let (v, away) = at(th); (pt(th, inner + depth * reach(v)), away) }).collect();
-    let dips: Vec<(f32, f32)> = (0..RING_PIECES).map(|k| {
-        let th = k as f32 * step;
-        let (a, _) = at(th - step / 2.0);
-        let (c, _) = at(th + step / 2.0);
-        pt(th, inner + depth * reach(a.min(c)) * 0.15)
-    }).collect();
-    (0..RING_PIECES)
+    let pts: Vec<(f32, f32)> = (0..n).map(|k| pt((k as f32 + 0.5) * step, inner + depth * reach[k])).collect();
+    let p = |k: isize| pts[k.rem_euclid(n as isize) as usize];
+    (0..n)
         .map(|k| {
-            let (tip, away) = tips[k];
-            let (d0, d1) = (dips[k], dips[(k + 1) % RING_PIECES]);
-            let next = tips[(k + 1) % RING_PIECES].0;
-            // (into the next a third of the way up its spike: drawn over by it)
-            let over = (d1.0 + (next.0 - d1.0) / 3.0, d1.1 + (next.1 - d1.1) / 3.0);
-            let d = format!("M 500 500 L {:.1} {:.1} L {:.1} {:.1} L {:.1} {:.1} L {:.1} {:.1} Z", d0.0, d0.1, tip.0, tip.1, d1.0, d1.1, over.0, over.1);
-            (d, away)
+            let k = k as isize;
+            let (p0, p1, p2, p3) = (p(k - 1), p(k), p(k + 1), p(k + 2));
+            // (the curve from this point to the next, its handles from the points either side: Catmull-Rom, as Bézier)
+            let c1 = (p1.0 + (p2.0 - p0.0) / 6.0, p1.1 + (p2.1 - p0.1) / 6.0);
+            let c2 = (p2.0 - (p3.0 - p1.0) / 6.0, p2.1 - (p3.1 - p1.1) / 6.0);
+            // (and a little on, into the next slice, at its edge: drawn over by it, so no seam and no notch)
+            let th1 = (k as f32 + 0.5) * step;
+            let th2 = (k as f32 + 1.5) * step + step * 0.12;
+            let on = pt(th2, inner + depth * reach[((k + 1) as usize) % n]);
+            // (a band, from the circle the cover sits in: hollow, so it's a halo with no cover too)
+            let (i1, i2) = (pt(th1, inner - 2.0), pt(th2, inner - 2.0));
+            let d = format!("M {:.1} {:.1} L {:.1} {:.1} C {:.1} {:.1} {:.1} {:.1} {:.1} {:.1} L {:.1} {:.1} L {:.1} {:.1} Z", i1.0, i1.1, p1.0, p1.1, c1.0, c1.1, c2.0, c2.1, p2.0, p2.1, on.0, on.1, i2.0, i2.1);
+            (d, raw[k as usize].1)
         })
         .collect()
 }
 
+/// (the Ring's: its loudest lately, and each slice's reach as it's eased)
+static RING_TOP: Mutex<f32> = Mutex::new(0.2);
+/// (the cover's Ring, and the player's, each eased on its own)
+static RING_EASE: Mutex<[Vec<f32>; 2]> = Mutex::new([Vec::new(), Vec::new()]);
+
 /// The Ring round Now Playing's cover (and full screen's): from a circle just clear of the cover's corners
 pub fn ring_pieces(b: &[f32; BANDS]) -> Vec<(String, f32)> {
-    ring_shape(b, RING_COVER * 500.0 * std::f32::consts::SQRT_2 + 10.0)
+    ring_shape(b, RING_COVER * 500.0 * std::f32::consts::SQRT_2 + 10.0, 0)
 }
 
 /// The Ring round the player's cover (smaller for it, 0.7 of its place): its box the place and 10 px each
 /// side, from a circle just clear of the cover's corners
 pub fn ring_small(b: &[f32; BANDS]) -> Vec<(String, f32)> {
-    ring_shape(b, 345.0)
+    ring_shape(b, 345.0, 1)
 }
 
 /// The Ring's cover: this much of the box's width, in its middle (the spikes round it the rest)

@@ -35,16 +35,26 @@ it's added:
 - `"sockets"`: live connections (WebSockets) to its sites: `OmniPulse.socket("wss://...")` gives
   `{ send(text), close(), onopen, onmessage(text), onclose(why) }`. Only `wss://` to the sites in its
   manifest, or `ws://` to this PC (`127.0.0.1` in its hosts: OBS's WebSocket server, say).
-- `"app"`: the app itself, each call a promise of its answer: `OmniPulse.app.request(user, query, platform)`
-  (a song request, with Song Requests' limits and replies), `.wrongSong(user, isMod)`, `.nowPlaying()`,
-  `.alert({ type, user, amount, message })`, `.openUrl("https://...")` (a sign-in page), `.say(text)`
-  (the app's status line), `.saveSettings({ ... })` (its own settings kept: a sign-in's tokens).
+- `"app"`: the app itself, each call a promise of its answer:
+  - `OmniPulse.app.request(user, query, platform)`: a song request, with Song Requests' limits and replies.
+  - `.wrongSong(user, isMod)`: takes back the viewer's last request (a moderator's: the last anyone made).
+  - `.nowPlaying()`: what's playing, as a sentence for chat.
+  - `.control("next" | "play")`: the next song, or play / pause.
+  - `.alert({ type, user, amount, message })`: an alert on the Stream Widget, as a bot's `/alert` sends.
+  - `.sound(path, volume)`: a sound file on this PC (MP3, WAV, Ogg, FLAC, M4A, AAC, Opus) over the music,
+    its volume 0 to 100.
+  - `.openUrl("https://...")`: a page in your browser (a sign-in, say); `.copyText("https://...")`: the
+    address copied instead, for a browser of your choosing. Both https only.
+  - `.say(text)`: a line on the app's status line.
+  - `.saveSettings({ ... })`: its own settings kept (a sign-in's tokens, say).
 
 Every plugin also has `setTimeout`, `setInterval` and their clears, and can register `start()`, called
 once it's running. A settings field of type `"button"` (with `"press"`: its label, and `"call"`: the
 method it calls with the page's values) runs one of its methods, a sign-in say; what it returns is shown.
 
-`chatbot/` here is OmniPulse's own chatbot, made this way.
+`chatbot/` here is OmniPulse's own **Stream Suite** (its chatbot, alerts, goals, timers, widgets and OBS
+docks), made this way. A few calls are kept for it alone and aren't open to other plugins: OBS's docks,
+the Suite's widgets, Show on Stream, speech, web requests outside its manifest, and writing files.
 
 ## manifest.json
 
@@ -70,8 +80,9 @@ method it calls with the page's values) runs one of its methods, a sign-in say; 
 - `id`: lower-case letters, digits and dashes.
 - `hosts`: site names, optionally `*.` for their subdomains. Only https (or http to 127.0.0.1).
 - `icon`: SVG path data for a 24x24 icon.
-- `settings` types: `text`, `password`, `number`, `toggle`, `select`. They show under the plugin in
-  Settings; values are kept on this PC.
+- `settings` types: `text`, `password`, `number`, `toggle`, `select` (with `"options"`: its values), and
+  `button` (see above). Each can have a `"note"`, shown under it, and a `"default"`. They show under the
+  plugin in Settings > Plugins (its gear); values are kept on this PC.
 
 ## main.js
 

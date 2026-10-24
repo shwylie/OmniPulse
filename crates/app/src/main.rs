@@ -571,10 +571,18 @@ fn paint_plats(a: &App) {
     add("spotify", "Spotify", omnipulse_core::spotify::spotify_signed_in());
     add("youtube", "YouTube Music", omnipulse_core::tools::ytdlp_path().is_some());
     // (and the plugins asked to be here, each its own icon: on and off as it's switched in Settings > Plugins)
+    ui.set_suite_shown(false);
     for p in omnipulse_core::plugins::list() {
         let m = &p.manifest;
         if plugrun::settings_of(m, &a.web.prefs)[PLUG_TITLE_BAR].as_bool() != Some(true) { continue; }
         let d = if m.icon.trim().is_empty() { "M12 2a10 10 0 1 0 0 20 10 10 0 1 0 0-20z".to_string() } else { m.icon.clone() };
+        // (the Stream Suite: its own button, beside Streamer Mode, lit while it runs)
+        if m.id == botpage::BOT {
+            ui.set_suite_shown(true);
+            ui.set_suite_icon(d.into());
+            ui.set_suite_on(plugin_runs(&a.web.prefs, &m.id));
+            continue;
+        }
         list.push(Plat { id: format!("plugin:{}", m.id).into(), on: plugin_on(&a.web.prefs, &m.id), name: m.name.clone().into(), ready: true, d: d.into() });
     }
     ui.set_plats(ModelRc::from(Rc::new(VecModel::from(list))));
@@ -620,6 +628,11 @@ fn go_plus_set(prefs: &serde_json::Value) {
 const PLUG_TITLE_BAR: &str = "_titleBar";
 
 fn plat_toggle(shared: &Shared, plat: &str) {
+    // (the Suite's button: started or stopped, as its own switch in Streaming)
+    if plat == "suite" {
+        set_toggle(shared, &format!("plugRun_{}", botpage::BOT));
+        return paint_plats(&shared.borrow());
+    }
     // (a plugin's: switched on or off, as in Settings > Plugins)
     if let Some(id) = plat.strip_prefix("plugin:") {
         set_toggle(shared, &format!("plugOn_{id}"));
@@ -4550,6 +4563,7 @@ fn flows_restored(shared: &Shared, r: Result<botimport::Restored, String>) {
         Ok(r) => r,
         Err(e) => { if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_status(format!("Couldn't restore it: {e}").into()); } return; }
     };
+    bot_keep(shared, "imported", serde_json::json!(true));
     let mut list = FLOW.with(|f| f.borrow().0.clone());
     let all = {
         let mut a = shared.borrow_mut();
@@ -5559,6 +5573,59 @@ fn eq_curve(bands: &[f32]) -> (String, String) {
     (d, fill)
 }
 
+// ---------- the first-run setup: its steps, the first time OmniPulse opens ----------
+// 0 welcome, 1 your music, 2 bring it with you, 3 your taste (only with no accounts signed in: nothing to
+// start from), 4 how it sounds, 5 do you stream?, 6 all set. Each is kept as it's set (its own settings, as
+// Settings keeps them); finished or skipped, it's not shown again (Run Setup Again, in App & Look).
+
+/// To be shown: never set up (a new install: nothing signed in, nothing in the library, no theme picked)
+fn setup_wanted(a: &App) -> bool {
+    if a.web.prefs["firstRunDone"].as_bool() == Some(true) || std::env::var_os("OMNIPULSE_SELFTEST").is_some() { return false; }
+    let fresh = !omnipulse_core::soundcloud::signed_in() && !account_signed("spotify") && a.web.prefs["themeStep"].is_null() && a.web.prefs["themeName"].is_null() && a.web.prefs["theme"].is_null();
+    fresh
+}
+
+/// Its taste step: wanted only with no account to start from
+fn setup_taste() -> bool { !omnipulse_core::soundcloud::signed_in() && !account_signed("spotify") && !account_signed("youtube") }
+
+fn setup_show(shared: &Shared, at: i32) {
+    let Some(ui) = shared.borrow().ui.upgrade() else { return };
+    ui.set_setup_taste(setup_taste());
+    ui.set_setup_web(omnipulse_core::load_web_export().is_some());
+    ui.set_setup_at(at);
+    ui.set_setup_open(true);
+}
+
+fn setup_done(shared: &Shared) {
+    pref_put(shared, "firstRunDone", serde_json::json!(true));
+    if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_setup_open(false); }
+}
+
+fn setup_go(shared: &Shared, how: &str) {
+    let Some(ui) = shared.borrow().ui.upgrade() else { return };
+    let at = ui.get_setup_at();
+    // (the taste step passed over, with an account to start from)
+    let skip_taste = |n: i32| if n == 3 && !setup_taste() { if at > 3 { 2 } else { 4 } } else { n };
+    match how {
+        "next" => setup_show(shared, skip_taste((at + 1).min(6))),
+        "back" => setup_show(shared, skip_taste((at - 1).max(0))),
+        "done" => setup_done(shared),
+        "again" => setup_show(shared, 0),
+        // (streaming: the Suite turned on, its own setup opened next; or nothing)
+        "stream-yes" => {
+            setup_done(shared);
+            if !plugin_on(&shared.borrow().web.prefs, botpage::BOT) { set_toggle(shared, &format!("plugOn_{}", botpage::BOT)); }
+            if !plugin_runs(&shared.borrow().web.prefs, botpage::BOT) { set_toggle(shared, &format!("plugRun_{}", botpage::BOT)); }
+            plugins_start(shared);
+            open_page_now(shared, "settings");
+            ui.set_set_cat("Streaming".into());
+            pf_open(shared, botpage::BOT);
+        }
+        "stream-no" => setup_show(shared, 6),
+        _ => {}
+    }
+}
+
 fn tick(shared: &Shared, events: &std::sync::mpsc::Receiver<Event>, n: u64) {
     let Some(ui) = shared.borrow().ui.upgrade() else { return };
     // (every couple of seconds: the next song's cover once it's in, and the song's shape once it's measured)
@@ -6476,6 +6543,11 @@ fn bot_act(shared: &Shared, act: &str) {
     // (its widgets: switched here, their settings their own pages, asked first if something here isn't saved)
     if let Some(key) = act.strip_prefix("row-toggle:") { set_toggle(shared, key); return bot_paint(shared); }
     if let Some(key) = act.strip_prefix("row-more:") { if let Some(name) = panels::of_switch(key) { pf_leave(shared, &format!("panel:{name}")); } return; }
+    if let Some(how) = act.strip_prefix("import:") {
+        flows_open(shared);
+        if let Some(ui) = shared.borrow().ui.upgrade() { ui.invoke_flow_act(if how == "paste" { "paste".into() } else { "restore".into() }); }
+        return;
+    }
     if let Some(rest) = act.strip_prefix("call:") {
         let (method, arg) = rest.split_once(':').unwrap_or((rest, ""));
         let (method, arg) = (method.to_string(), arg.to_string());
@@ -9778,6 +9850,9 @@ fn fade_out_ms(a: &App) -> Option<u64> {
 /// A skip by hand (the buttons, media keys, the remote): listening, it goes to the Jam's host
 /// The visualiser on or off, as Now Playing is: on only while it's shown, playing, a style picked (the
 /// engine's tap and its timer stopped otherwise: nothing of it running for nothing)
+/// (the self-test's made-up music: the visualiser on for it, without anything playing)
+static VIZ_TEST: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 /// The Stream Widget's Equaliser design in use (its first output, or another): its levels wanted
 fn eq_widget(p: &serde_json::Value) -> bool {
     integrations::set(p, "widget")
@@ -9801,7 +9876,8 @@ fn viz_update(shared: &Shared, ui: &AppWindow) {
         let in_sight = shown && ui.window().is_visible() && !ui.window().is_minimized();
         // (the taskbar widget's Visualiser design: its bars, whatever the app's style)
         let tb_viz = a.web.prefs["taskbarWidget"].as_bool() == Some(true) && a.web.prefs["tbDesign"].as_str() == Some("viz");
-        ((style != "off" && (in_sight || on_widget)) || on_stream || tb_viz) && a.loaded && !a.engine.is_paused()
+        let test = VIZ_TEST.load(std::sync::atomic::Ordering::Relaxed);
+        (((style != "off" && (in_sight || on_widget)) || on_stream || tb_viz) && a.loaded && !a.engine.is_paused()) || (test && style != "off")
     };
     let running = VIZ.with(|v| v.borrow().is_some());
     if want == running { return; }
@@ -10557,16 +10633,14 @@ fn streamer_step(shared: &Shared) {
         if std::env::var_os("OMNIPULSE_SELFTEST").is_none() { webstate::save_pref("streamerMode", serde_json::json!(on)); }
         if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_streamer(on); }
     };
-    if !private && !safe {
+    let _ = safe;
+    if !private {
         set_private(true);
         if let Some(ui) = shared.borrow().ui.upgrade() {
-            ui.set_status("Streamer Mode is on. Account names, keys and addresses are hidden. Click again to also leave out copyrighted music.".into());
+            ui.set_status("Streamer Mode is on. Account names, keys and addresses are hidden. Right-click it to play only music that's safe on stream.".into());
         }
-    } else if private && !safe {
-        safe_set(shared, true);
     } else {
         set_private(false);
-        safe_set(shared, false);
         if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_status("Streamer Mode off.".into()); }
     }
     // (who you're signed in as: hidden, or shown again; and Settings' switches, Streamer Mode's and Extended's,
@@ -11710,6 +11784,16 @@ fn main() -> Result<(), slint::PlatformError> {
     ui.on_pl_import(move || pl_import(&s));
     let s = shared.clone();
     ui.on_update_act(move || update_act(&s));
+    // (the first-run setup: a new install, as soon as the window's up)
+    {
+        let s = shared.clone();
+        slint::Timer::single_shot(std::time::Duration::from_millis(600), move || {
+            let wanted = setup_wanted(&s.borrow());
+            if wanted { setup_show(&s, 0); }
+            // (one set up already: never shown it, on updating to a version with it)
+            else if s.borrow().web.prefs["firstRunDone"].is_null() && std::env::var_os("OMNIPULSE_SELFTEST").is_none() { pref_put(&s, "firstRunDone", serde_json::json!(true)); }
+        });
+    }
     // a newer version: asked about a little after starting (not in the self-test)
     if std::env::var_os("OMNIPULSE_SELFTEST").is_none() {
         // (and the Stream Deck plugin, if it's older than the one that came with the app: once per version)
@@ -11785,6 +11869,8 @@ fn main() -> Result<(), slint::PlatformError> {
     ui.set_mix_available(true);
     let s = shared.clone();
     ui.on_mix_toggle(move || set_toggle(&s, "smartOn"));
+    let s = shared.clone();
+    ui.on_setup_go(move |how| setup_go(&s, &how));
     let s = shared.clone();
     ui.on_tb_design_picked(move |d| set_look_pref(&s, "tbDesign", serde_json::json!(d.as_str())));
     // (Cover Strip: each cover, blurred, as it's shown)
@@ -11880,6 +11966,9 @@ fn main() -> Result<(), slint::PlatformError> {
     ui.set_stream_safe(streamsafe::on(&shared.borrow().web.prefs));
     let s = shared.clone();
     ui.on_streamer_step(move || streamer_step(&s));
+    let s = shared.clone();
+    // (Streamer Mode's right-click: only music that's safe on stream, or everything again)
+    ui.on_streamer_music(move || { let on = streamsafe::on(&s.borrow().web.prefs); safe_set(&s, !on); });
     let s = shared.clone();
     ui.on_streamer_changed(move |on| {
         if let Some(o) = s.borrow_mut().web.prefs.as_object_mut() { o.insert("streamerMode".into(), serde_json::json!(on)); }
@@ -13110,6 +13199,18 @@ fn main() -> Result<(), slint::PlatformError> {
                 }
                 // (the look drawn again, after a prefset: a theme or a player style tried)
                 "look" => { if let Some(sh) = SHARED.with(|x| x.borrow().clone()) { apply_look(&sh); sound_paint(&sh.borrow()); } }
+                // (the visualiser's music, made up: its tap fed a beat, nothing played; viz on wherever it's shown)
+                "vizfeed" => {
+                    if let Some(sh) = SHARED.with(|x| x.borrow().clone()) {
+                        let _ = &sh;
+                        VIZ_TEST.store(true, std::sync::atomic::Ordering::Relaxed);
+                        let started = std::time::Instant::now();
+                        let t = slint::Timer::default();
+                        t.start(slint::TimerMode::Repeated, std::time::Duration::from_millis(33), move || viz::test_feed(started.elapsed().as_secs_f32()));
+                        std::mem::forget(t);
+                    }
+                }
+                w if w.starts_with("setup:") => { if let Some(sh) = SHARED.with(|x| x.borrow().clone()) { setup_show(&sh, w[6..].parse().unwrap_or(0)); } }
                 w if w.starts_with("panel:") => { if let Some(sh) = SHARED.with(|x| x.borrow().clone()) { panel_open(&sh, &w[6..]); } }
                 w if w.starts_with("cat:") => { ui.set_set_cat(w[4..].into()); }
                 // (Settings' search typed, and its n-th result picked)
