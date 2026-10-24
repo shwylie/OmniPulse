@@ -215,14 +215,28 @@ async function onChat(m) {
   if (cooldowns[k] && Date.now() - cooldowns[k] < 3000) return;
   cooldowns[k] = Date.now();
   if (S().requests !== false) {
-    const sr = String(S().srCommands || "!sr, !request").split(",").map((x) => x.trim().toLowerCase()).filter(Boolean);
-    if (sr.includes(cmd)) {
+    const rq = reqCommands();
+    if (rq.sr.includes(cmd)) {
       if (!args) return reply(id, "@" + user + " what song? " + cmd + " song by artist", platform);
-      try { const r = await OmniPulse.app.request(user, args, platform); counts.requests++; noted(user, cmd + " " + args, r.message, platform); reply(id, r.message, platform); } catch (e) { OmniPulse.log("request: " + e.message); }
+      // (who may, how often, and what it costs: as Settings > Streaming > Song Requests has them)
+      const who = String(S().srWho || "everyone");
+      if (!allowed(who, rank(m.tags))) return reply(id, "@" + user + " song requests are for " + WHO_NAMES[who] + " right now.", platform);
+      const wait = Math.max(0, num(S().srCooldown)) * 1000, k = user.toLowerCase();
+      if (wait && srLast[k] && Date.now() - srLast[k] < wait) return reply(id, "@" + user + " you can request again in " + Math.ceil((wait - (Date.now() - srLast[k])) / 1000) + " s.", platform);
+      const cost = yes(S().pointsOn) ? Math.max(0, num(S().srCost)) : 0;
+      if (cost && pointsOf(user) < cost) return reply(id, "@" + user + " a request costs " + cost + " " + (S().pointsName || "points") + ". You have " + pointsOf(user) + ".", platform);
+      try {
+        const r = await OmniPulse.app.request(user, args, platform);
+        counts.requests++;
+        // (taken only for a song that's been added)
+        if (r.ok !== false) { srLast[k] = Date.now(); if (cost) addPoints(user, -cost); }
+        noted(user, cmd + " " + args, r.message, platform);
+        reply(id, r.message, platform);
+      } catch (e) { OmniPulse.log("request: " + e.message); }
       return;
     }
-    if (cmd === "!song") { try { reply(id, (await OmniPulse.app.nowPlaying()).message, platform); } catch (e) {} return; }
-    if (cmd === "!wrongsong") { try { reply(id, (await OmniPulse.app.wrongSong(user, isMod)).message, platform); } catch (e) {} return; }
+    if (rq.song.includes(cmd)) { try { reply(id, (await OmniPulse.app.nowPlaying()).message, platform); } catch (e) {} return; }
+    if (rq.wrong.includes(cmd)) { try { reply(id, (await OmniPulse.app.wrongSong(user, isMod)).message, platform); } catch (e) {} return; }
   }
 }
 
@@ -245,6 +259,14 @@ function loadActions() {
 
 const yes = (v) => v === true || v === "true";
 const num = (v) => { const n = Number(v); return isFinite(n) ? n : 0; };
+
+// The request commands, as set (each a list, with commas between)
+const srLast = {};
+const WHO_NAMES = { everyone: "everyone", subscribers: "subscribers", vips: "VIPs", mods: "moderators" };
+function reqCommands() {
+  const list = (v, d) => String(v == null || v === "" ? d : v).split(",").map((x) => x.trim().toLowerCase()).filter(Boolean).map((x) => (x.startsWith("!") ? x : "!" + x));
+  return { sr: list(S().srCommands, "!sr, !request"), song: list(S().songCommands, "!song"), wrong: list(S().wrongCommands, "!wrongsong") };
+}
 
 // Who they are in your channel, from their badges
 function rank(tags) {
@@ -369,10 +391,10 @@ async function tryChat(text, platform, asMod) {
   const cmd = (space < 0 ? t : t.slice(0, space)).toLowerCase();
   const args = space < 0 ? "" : t.slice(space + 1).trim();
   if (S().requests !== false && t.startsWith("!")) {
-    const sr = String(S().srCommands || "!sr, !request").split(",").map((x) => x.trim().toLowerCase()).filter(Boolean);
-    if (sr.includes(cmd)) out.push(args ? "(would request \u201c" + args + "\u201d, and say what it found)" : "@" + user + " what song? " + cmd + " song by artist");
-    else if (cmd === "!song") { try { out.push((await OmniPulse.app.nowPlaying()).message); } catch (e) {} }
-    else if (cmd === "!wrongsong") out.push("(would take back your last request)");
+    const rq = reqCommands();
+    if (rq.sr.includes(cmd)) out.push(args ? "(would request \u201c" + args + "\u201d, and say what it found)" : "@" + user + " what song? " + cmd + " song by artist");
+    else if (rq.song.includes(cmd)) { try { out.push((await OmniPulse.app.nowPlaying()).message); } catch (e) {} }
+    else if (rq.wrong.includes(cmd)) out.push("(would take back your last request)");
   }
   const tags = { "display-name": user, badges: asMod ? "moderator/1" : "", mod: asMod ? "1" : "0" };
   const r = rank(tags);

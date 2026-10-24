@@ -1,7 +1,7 @@
 {
   "id": "chatbot",
   "name": "OmniPulse Chatbot",
-  "version": "0.2.8",
+  "version": "0.2.9",
   "author": "OmniPulse",
   "description": "OmniPulse's own chatbot. Song requests, alerts, your own actions and OBS controls, straight from your chat, with no other bot needed. Works with Twitch and Kick, and YouTube is coming.",
   "main": "main.js",
@@ -246,6 +246,41 @@
       "type": "text",
       "default": "!sr, !request",
       "note": "With commas between."
+    },
+    {
+      "key": "songCommands",
+      "label": "Now Playing Commands",
+      "type": "text",
+      "default": "!song",
+      "note": "With commas between."
+    },
+    {
+      "key": "wrongCommands",
+      "label": "Wrong Song Commands",
+      "type": "text",
+      "default": "!wrongsong",
+      "note": "With commas between."
+    },
+    {
+      "key": "srWho",
+      "label": "Who Can Request",
+      "type": "select",
+      "default": "everyone",
+      "options": ["everyone", "subscribers", "vips", "mods"]
+    },
+    {
+      "key": "srCooldown",
+      "label": "Wait Between Requests",
+      "type": "number",
+      "default": 0,
+      "note": "Seconds before the same viewer can request again. 0 for no wait."
+    },
+    {
+      "key": "srCost",
+      "label": "Points per Request",
+      "type": "number",
+      "default": 0,
+      "note": "With Points on. 0 for free."
     },
     {
       "key": "commands",

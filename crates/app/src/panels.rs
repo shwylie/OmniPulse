@@ -48,7 +48,7 @@ fn keys(name: &str) -> Vec<(&'static str, Value)> {
         "together" => vec![("togetherName", json!(""))],
         "lyricsw" => vec![("lyricsLines", json!(3)), ("lyricsBefore", json!(false)), ("lyricsScroll", json!("smooth")), ("lyricsScrollMs", json!(600)), ("lyricsScrollPlace", json!("top")), ("lyricsFadeEdges", json!(false)), ("lyricsSize", json!(48)), ("lyricsFont", json!("sans")), ("lyricsAlign", json!("center")), ("lyricsPlace", json!("")), ("lyricsStyle", json!("karaoke")), ("lyricsColor", json!("#ffffff")), ("lyricsTextGrad", json!(false)), ("lyricsColor2", json!("#9ad1ff")), ("lyricsOwnHi", json!(false)), ("lyricsHi", json!("#8e9bff")), ("lyricsHiGrad", json!(false)), ("lyricsHi2", json!("#ff8ad8")), ("lyricsGradDir", json!("90deg")), ("lyricsDim", json!(0.45)), ("lyricsTransform", json!("none")), ("lyricsShadow", json!(true)), ("lyricsOutline", json!(false)), ("lyricsOutlineSize", json!(4)), ("lyricsOutlineColor", json!("#000000")), ("lyricsOutlineOpacity", json!(1.0)), ("lyricsBox", json!(false)), ("lyricsBoxColor", json!("#0a0a0e")), ("lyricsBoxGrad", json!(false)), ("lyricsBoxColor2", json!("#2a1450")), ("lyricsBoxDir", json!("135deg")), ("lyricsBoxOpacity", json!(0.62)), ("lyricsTitle", json!(true)), ("lyricsHideNone", json!(true)), ("lyricsOffset", json!(0)), ("lyricsHidePaused", json!(true))],
         "smart" => vec![("shareRatings", json!(true)), ("smartBlend", json!(true)), ("smartKeys", json!(true)), ("smartMax", json!(10)), ("smartTape", json!(false)), ("smartRoll", json!(false)), ("smartVoices", json!(true))],
-        "requests" => vec![("reqBot", json!("streamerbot")), ("reqRadioEdit", json!(false)), ("reqNoAi", json!(false)), ("reqLimits", json!(true)), ("reqMax", json!(10)), ("reqPerUser", json!(2)), ("reqPort", json!(7879)), ("botRemote", json!(false)), ("reqVarUser", json!("")), ("reqVarSong", json!("")), ("reqVarMod", json!(""))],
+        "requests" => vec![("reqBot", json!("streamerbot")), ("reqRadioEdit", json!(false)), ("reqNoAi", json!(false)), ("reqLimits", json!(true)), ("reqMax", json!(10)), ("reqPerUser", json!(2)), ("reqPort", json!(7879)), ("botRemote", json!(false))],
         "widget" => vec![("widgetPort", json!(7878)), ("widgetDesign", json!("card")), ("widgetAlign", json!("left")), ("widgetRounded", json!(true)), ("widgetText", json!(1)), ("wFade", json!(true)), ("wScroll", json!(true)), ("wSpin", json!(true)), ("wRequester", json!(true)), ("wColor", json!(1.2)), ("alertSplit", json!(false)), ("widget2Design", json!("pill")), ("widget2Align", json!("left")), ("widget2Rounded", json!(true)), ("widget2Text", json!(1))],
         "alerts" => vec![("alertBot", json!("streamerbot")), ("sbHost", json!("127.0.0.1:8080")), ("sbOn", json!(true)), ("alertTrans", json!("seamless")), ("alertCSize", json!("medium")), ("alertCDir", json!("diag")), ("alertCAngle", json!(0)), ("alertAnim", json!("slide")), ("alertOwnCol", json!(false)), ("alertCol1", json!("#8e9bff")), ("alertCol2", json!("#b38cff")), ("alertDir", json!("115deg")), ("alertIcon", json!(1)), ("alertSecs", json!(5)), ("alertVol", json!(0.8)), ("botRemote", json!(false))],
         "remote" => vec![("remotePort", json!(7880))],
@@ -123,6 +123,10 @@ pub fn values(name: &str, prefs: &Value) -> Map<String, Value> {
     if name == "safe" { return crate::streamsafe::panel_values(prefs); }
     if let Some(k) = name.strip_prefix("alert:") { return crate::alerts::edit_values(prefs, k); }
     let mut m = Map::new();
+    if name == "requests" {
+        let bot = &prefs["pluginSettings"][crate::botpage::BOT];
+        for (k, d) in bot_req_keys() { m.insert(format!("bot:{k}"), if bot[k].is_null() { d } else { bot[k].clone() }); }
+    }
     for (k, d) in keys(name) {
         let v = if prefs[k].is_null() { d } else { prefs[k].clone() };
         m.insert(k.to_string(), v);
@@ -169,6 +173,11 @@ public class CPHInline
 /// internet), its !sr, !song and !wrongsong, its steps). In the commands, {base} is the address up to the
 /// port and {key} the secret key. Each written its own way, as its documentation has it; where that isn't
 /// known for sure, the general address, with its own variables for USERNAME and SONG.
+/// The chatbot's own request settings (its manifest's keys and defaults): on the Song Requests page while it's on
+pub fn bot_req_keys() -> Vec<(&'static str, Value)> {
+    vec![("requests", json!(true)), ("srCommands", json!("!sr, !request")), ("songCommands", json!("!song")), ("wrongCommands", json!("!wrongsong")), ("srWho", json!("everyone")), ("srCooldown", json!(0)), ("srCost", json!(0))]
+}
+
 const REQ_BOTS: &[(&str, &str, bool, &str, &str, &str, &str)] = &[
     ("streamerbot", "Streamer.bot", false, "{base}/request?key={key}&user=%user%&q=%rawInputUrlEncoded%", "{base}/now", "{base}/wrongsong?key={key}&user=%user%&mod=%isModerator%",
         "1. Make an action with a Command trigger for !sr.\n2. Add Core > Network > Fetch URL with the request address, and name its variable reply.\n3. Add Core > C# > Execute C# Code with the Reply Code below, then click Compile. It answers in the chat that asked.\n4. Do the same for !song and !wrongsong, with their addresses."),
@@ -178,12 +187,8 @@ const REQ_BOTS: &[(&str, &str, bool, &str, &str, &str, &str)] = &[
         "Paste each one into your chat, as yourself. (Nightbot says who asked, and whether they're a moderator, by itself.)"),
     ("streamelements", "StreamElements", true, "!command add !sr $(customapi {base}/request?key={key}&user=$(user)&q=$(queryescape ${1:}))", "!command add !song $(customapi {base}/now)", "!command add !wrongsong $(customapi {base}/wrongsong?key={key}&user=$(user))",
         "Paste each one into your chat, as yourself."),
-    ("moobot", "Moobot", true, "{base}/request?key={key}&user=USERNAME&q=SONG", "{base}/now", "{base}/wrongsong?key={key}&user=USERNAME",
-        "1. In Moobot's dashboard, make a custom command, !sr, its response URL fetch (full response).\n2. Paste the request address, then put Moobot's \"Username of the user\" tag in place of USERNAME and its \"Command arguments\" tag in place of SONG.\n3. The same for !song and !wrongsong, with their addresses."),
     ("kickbot", "KickBot", true, "{{request(\"{base}/request?key={key}&format=json&user={{sender.username}}&q={{param}}\").message}}", "{{request(\"{base}/now?format=json\").message}}", "{{request(\"{base}/wrongsong?key={key}&format=json&user={{sender.username}}\").message}}",
         "1. In KickBot's dashboard, make a custom command, !sr, and paste the first as its response.\n2. The same for !song and !wrongsong.\nIf a command answers with the variable names themselves, KickBot isn't filling them in inside a request: say so, and we'll find another way."),
-    ("other", "Another Bot", false, "{base}/request?key={key}&user=USERNAME&q=SONG", "{base}/now", "{base}/wrongsong?key={key}&user=USERNAME&mod=MOD",
-        "Works with any bot that can call a web address and post the answer:\n1. /request takes key, q (what was asked for, URL-encoded) and user (who asked).\n2. /now says what's playing.\n3. /wrongsong takes key, user, and mod (true for a moderator).\nAdd &format=json to get JSON (ok, message, title, artist, url, position)."),
 ];
 
 fn tog(key: &str, label: &str, note: &str) -> Value { json!({ "key": key, "label": label, "note": note, "type": "toggle" }) }
@@ -296,59 +301,73 @@ fn fields_of(name: &str, vals: &Map<String, Value>, prefs: &Value, lan: &str) ->
             f
         }
         "requests" => {
-            let bot = s("reqBot", "streamerbot");
             let port = n("reqPort", 7879);
             let key = prefs["reqKey"].as_str().unwrap_or("").to_string();
-            let (_, _, cloud, rq, now, wrong, steps) = REQ_BOTS.iter().copied().find(|b| b.0 == bot).unwrap_or(REQ_BOTS[REQ_BOTS.len() - 1]);
+            // (the songs it plays, its limits and its replies: the same whichever bot takes the requests)
+            let songs = |f: &mut Vec<Value>| {
+                f.extend([
+                    note("Which Songs"),
+                    tog("reqRadioEdit", "Prefer Radio Edits", "Plays a long song's radio edit, if there is one."),
+                    tog("reqNoAi", "Keep Out AI Music", "Requests never play AI-made music: artists on Soul Over AI's list of confirmed AI artists (souloverai.com, CC BY 4.0, updated daily), and anything whose title or artist says it's AI, like Suno, Udio or an \"AI cover\". Only whole artist names count, so a few may slip through."),
+                    note("Limits"),
+                    tog("reqLimits", "Limit Requests", "The most songs waiting, and the most per viewer. When this is off, chat can request as many songs as it likes."),
+                    stepper("reqMax", "Most Waiting", "How many requests can wait at once.", counts(1, 50)),
+                    stepper("reqPerUser", "Most per Viewer", "How many of one viewer's can wait at once.", counts(1, 10)),
+                    button("reqLimitsReset", "", "Reset to Defaults", "On, 10 waiting, 2 per viewer."),
+                    button("reqClear", "Waiting Now", "Clear Requests", "Takes the requested songs out of the queue."),
+                    note("Chat"),
+                    button("repliesOpen", "Chat Replies", "Configure", "What's posted back in chat, in your own words."),
+                ]);
+            };
+            // the OmniPulse Chatbot on: it takes the requests itself, set up here as fully as another bot would be
+            if crate::plugin_runs(prefs, crate::botpage::BOT) {
+                let mut f = vec![
+                    button("botOpen", "OmniPulse Chatbot", "Open", "Your chatbot takes the requests, on Twitch and Kick. Nothing else to set up."),
+                    note("Commands"),
+                    tog("bot:requests", "Song Requests", "Viewers can ask for songs in chat."),
+                    text("bot:srCommands", "Request", "What viewers type, then a song. With commas between, like !sr, !request."),
+                    text("bot:songCommands", "Now Playing", "Says what's playing."),
+                    text("bot:wrongCommands", "Wrong Song", "Takes back the viewer's last request. For a moderator, the last one anyone made."),
+                    note("Who and How Often"),
+                    sel("bot:srWho", "Who Can Request", "", &[(json!("everyone"), "Everyone"), (json!("subscribers"), "Subscribers"), (json!("vips"), "VIPs"), (json!("mods"), "Moderators")]),
+                    num("bot:srCooldown", "Wait Between Requests", "Seconds before the same viewer can request again. 0 for no wait."),
+                ];
+                if prefs["pluginSettings"][crate::botpage::BOT]["pointsOn"].as_bool() == Some(true) {
+                    f.push(num("bot:srCost", "Points per Request", "Taken when the song is added. 0 for free."));
+                }
+                songs(&mut f);
+                return f;
+            }
+            let bot = s("reqBot", "streamerbot");
+            // (a bot no longer listed: the first one)
+            let (_, _, cloud, rq, now, wrong, steps) = REQ_BOTS.iter().copied().find(|b| b.0 == bot).unwrap_or(REQ_BOTS[0]);
             // (an online bot reaches it over the internet: your public IP in the address, kept off stream)
             let base = if cloud { format!("http://YOUR-PUBLIC-IP:{port}") } else { format!("http://127.0.0.1:{port}") };
-            // (a bot whose variables aren't written in for it: its own, typed in the fields below, in place of
-            // USERNAME, SONG and MOD; each left as that word until it's typed)
-            let var = |k: &str, d: &str| Some(s(k, "")).filter(|v| !v.trim().is_empty()).map(|v| v.trim().to_string()).unwrap_or_else(|| d.to_string());
-            let (vu, vs, vm) = (var("reqVarUser", "USERNAME"), var("reqVarSong", "SONG"), var("reqVarMod", "MOD"));
-            // (each word swapped out first, so a variable with one of the others in it is left as typed)
-            let fill = |t: &str, k: &str| t.replace("{base}", &base).replace("{key}", k)
-                .replace("USERNAME", "\u{1}").replace("SONG", "\u{2}").replace("MOD", "\u{3}")
-                .replace('\u{1}', &vu).replace('\u{2}', &vs).replace('\u{3}', &vm);
-            let blanks = rq.contains("USERNAME");
+            let fill = |t: &str, k: &str| t.replace("{base}", &base).replace("{key}", k);
             let opts: Vec<(Value, &str)> = REQ_BOTS.iter().map(|b| (json!(b.0), b.1)).collect();
-            let mut f = vec![sel("reqBot", "Chat Bot", "", &opts)];
             let chat = rq.starts_with('!');
-            // (its variables, each in a field of its own: the addresses below change as they're typed)
-            if blanks {
-                f.push(text("reqVarUser", "Username Variable", "Your bot's variable for the viewer's name. It replaces USERNAME."));
-                f.push(text("reqVarSong", "Song Variable", "Your bot's variable for what the viewer typed after the command. It replaces SONG."));
-                if wrong.contains("MOD") { f.push(text("reqVarMod", "Moderator Variable", "Your bot's variable for whether the viewer is a moderator. It replaces MOD.")); }
-            }
-            if !rq.is_empty() {
-                f.extend([
-                    info(if chat { "Song Request (!sr)" } else { "Request Address (!sr)" }, &fill(rq, &hide(&key)), &fill(rq, &key), "Adds the song a viewer asks for to the queue."),
-                    info(if chat { "Now Playing (!song)" } else { "Now Playing Address (!song)" }, &fill(now, &hide(&key)), &fill(now, &key), "Says what's playing."),
-                    info(if chat { "Wrong Song (!wrongsong)" } else { "Wrong Song Address (!wrongsong)" }, &fill(wrong, &hide(&key)), &fill(wrong, &key), "Takes back the viewer's last request. For a moderator, it takes back the last request anyone made."),
-                ]);
-            }
-            f.push(note(steps));
-            // (an online bot: reaching this PC from the internet, the only setup it needs besides the above)
-            if cloud && !rq.is_empty() {
-                f.push(note(&format!("To let it reach this PC:\n1. Turn on Bots on Other Devices (below).\n2. On your router, forward port {port} (TCP) to this PC, {lan}.\n3. In each address above, replace YOUR-PUBLIC-IP with your public IP address (search \"what is my IP\").\nKeep your public IP off stream and out of screenshots. Turn on Streamer Mode while you set this up.")));
-            }
+            let mut f = vec![
+                note("Your Bot"),
+                sel("reqBot", "Chat Bot", "The bot that answers !sr in your chat. Or turn on the OmniPulse Chatbot in Plugins, and it does this for you.", &opts),
+                note(steps),
+                info(if chat { "Song Request (!sr)" } else { "Request Address (!sr)" }, &fill(rq, &hide(&key)), &fill(rq, &key), "Adds the song a viewer asks for to the queue."),
+                info(if chat { "Now Playing (!song)" } else { "Now Playing Address (!song)" }, &fill(now, &hide(&key)), &fill(now, &key), "Says what's playing."),
+                info(if chat { "Wrong Song (!wrongsong)" } else { "Wrong Song Address (!wrongsong)" }, &fill(wrong, &hide(&key)), &fill(wrong, &key), "Takes back the viewer's last request. For a moderator, it takes back the last request anyone made."),
+            ];
             if bot == "streamerbot" {
                 f.push(info("Reply Code (for Execute C# Code)", "Copy it, then paste it into the sub-action", SB_REPLY_CODE, ""));
             }
+            // (an online bot: reaching this PC from the internet, the only setup it needs besides the above)
+            if cloud {
+                f.push(note(&format!("To let it reach this PC:\n1. Turn on Bots on Other Devices (below).\n2. On your router, forward port {port} (TCP) to this PC, {lan}.\n3. In each line above, replace YOUR-PUBLIC-IP with your public IP address (search \"what is my IP\").\nKeep your public IP off stream and out of screenshots. Turn on Streamer Mode while you set this up.")));
+            }
+            songs(&mut f);
             f.extend([
-                tog("reqRadioEdit", "Prefer Radio Edits", "Plays a long song's radio edit, if there is one."),
-                tog("reqNoAi", "Keep Out AI Music", "Requests never play AI-made music. That means artists on Soul Over AI's list of confirmed AI artists (souloverai.com, CC BY 4.0, updated daily), and anything whose title or artist says it's AI, like Suno, Udio or an \"AI cover\". Only whole artist names count, so a few may slip through."),
-                note("Limits"),
-                tog("reqLimits", "Limit Requests", "The most songs waiting, and the most per viewer. When this is off, chat can request as many songs as it likes."),
-                stepper("reqMax", "Most Waiting", "How many requests can wait at once.", counts(1, 50)),
-                stepper("reqPerUser", "Most per Viewer", "How many of one viewer's can wait at once.", counts(1, 10)),
-                button("reqLimitsReset", "", "Reset to Defaults", "On, 10 waiting, 2 per viewer."),
-                button("reqClear", "Waiting Now", "Clear Requests", "Takes the requested songs out of the queue."),
-                button("repliesOpen", "Chat Replies", "Configure", "What your bot posts back in chat, in your own words."),
+                note("Connection"),
                 num("reqPort", "Port", "1024 to 65535."),
                 button("reqNewKey", "Secret Key", "New Key", "A new key: your bot needs the new addresses after."),
             ]);
-            if cloud { f.push(remote_bots(vals, "requests", port, "", lan).remove(0)); } else { f.extend(remote_bots(vals, "requests", port, &format!("/request?key={}&user=USERNAME&q=SONG", hide(&key)), lan)); }
+            if cloud { f.push(remote_bots(vals, "requests", port, "", lan).remove(0)); } else { f.extend(remote_bots(vals, "requests", port, &format!("/request?key={}&user=NAME&q=SONG", hide(&key)), lan)); }
             f
         }
         "widget" => {

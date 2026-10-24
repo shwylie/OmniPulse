@@ -3107,6 +3107,7 @@ export component AppWindow inherits Window {
     in property <string> pf-crumb;
     // (the panel's path, each part a way back to it)
     in property <[string]> pf-crumbs;
+    in property <int> pf-crumb-chars;
     callback crumb-go(int);
     // Settings: closed (the X), and searched (its own search: settings, not music)
     callback settings-close();
@@ -5421,23 +5422,28 @@ export component AppWindow inherits Window {
                             Rectangle { horizontal-stretch: 1; }
                             RoundButton { tip: "Close Settings"; d: Icons.close; clicked => { root.pf-leave("close"); } }
                         }
-                        HorizontalLayout {
+                        crow := HorizontalLayout {
                             spacing: 14px;
+                            // (its size: as it was, unless the whole path won't fit the width, then smaller to fit;
+                            // a bold letter's about 0.6 of its size wide, each separator about a letter and its gaps)
+                            property <length> tier: root.pf-crumbs.length >= 3 ? 22px : root.pf-head.character-count > 16 ? 28px : 44px;
+                            property <length> fit: (self.width - root.pf-crumbs.length * 28px) / max(1, (root.pf-crumb-chars + root.pf-head.character-count) * 0.6 + root.pf-crumbs.length * 0.9);
+                            property <length> size: max(16px, min(self.tier, self.fit));
                             for c[i] in root.pf-crumbs: HorizontalLayout {
                                 spacing: 14px;
                                 horizontal-stretch: 0;
                                 Text {
                                     text: c;
                                     color: pct.has-hover ? Theme.text : Theme.muted;
-                                    font-size: root.pf-crumbs.length >= 3 ? 22px : root.pf-head.character-count > 16 ? 28px : 44px;
+                                    font-size: crow.size;
                                     font-weight: 800;
                                     // (every part on one line with the last: all centred in the row)
                                     vertical-alignment: center;
                                     pct := TouchArea { mouse-cursor: MouseCursor.pointer; clicked => { root.pf-leave("crumb:" + i); } }
                                 }
-                                Text { text: "\u{203a}"; color: Theme.muted; font-size: root.pf-crumbs.length >= 3 ? 20px : root.pf-head.character-count > 16 ? 26px : 40px; font-weight: 400; vertical-alignment: center; }
+                                Text { text: "\u{203a}"; color: Theme.muted; font-size: crow.size * 0.9; font-weight: 400; vertical-alignment: center; }
                             }
-                            Marquee { text: root.pf-head; font-size: root.pf-crumbs.length >= 3 ? 22px : root.pf-head.character-count > 16 ? 28px : 44px; font-weight: 800; horizontal-stretch: 1; y: (parent.height - self.height) / 2; }
+                            Marquee { text: root.pf-head; font-size: crow.size; font-weight: 800; horizontal-stretch: 1; y: (parent.height - self.height) / 2; }
                         }
                         if root.bot-page: BotPage {
                             vertical-stretch: 1;

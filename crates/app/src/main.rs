@@ -6208,6 +6208,11 @@ fn pf_leave(shared: &Shared, to: &str) {
 fn leave_do(shared: &Shared, to: &str) {
     if let Some(i) = to.strip_prefix("crumb:").and_then(|i| i.parse::<usize>().ok()) { return crumb_go(shared, i); }
     if let Some(name) = to.strip_prefix("panel:") { PF_EDIT.with(|e| e.borrow_mut().take()); return panel_open(shared, name); }
+    if let Some(id) = to.strip_prefix("plugin:") {
+        PF_EDIT.with(|e| e.borrow_mut().take());
+        if let (Some(ui), Some(sec)) = (shared.borrow().ui.upgrade(), omnipulse_core::plugins::list().into_iter().find(|p| p.manifest.id == id).map(|p| p.manifest.section).filter(|x| !x.is_empty())) { ui.set_set_cat(sec.into()); }
+        return pf_open(shared, id);
+    }
     if to == "close" { return settings_close(shared); }
     if to == "back" {
         let up = PF_CRUMBS.with(|c| c.borrow().len());
@@ -6479,6 +6484,7 @@ thread_local! {
 
 fn crumbs_set(ui: &AppWindow, path: Vec<(String, String)>) {
     ui.set_pf_crumbs(ModelRc::from(Rc::new(VecModel::from(path.iter().map(|(l, _)| slint::SharedString::from(l.as_str())).collect::<Vec<_>>()))));
+    ui.set_pf_crumb_chars(path.iter().map(|(l, _)| l.chars().count() as i32).sum());
     PF_CRUMBS.with(|c| *c.borrow_mut() = path.into_iter().map(|(_, t)| t).collect());
 }
 
@@ -6733,8 +6739,6 @@ fn panel_paint(shared: &Shared, name: &str, vals: &serde_json::Map<String, serde
 fn panel_set(shared: &Shared, name: &str, mut vals: serde_json::Map<String, serde_json::Value>, i: usize, v: &str) {
     let Some(f) = PANEL_FIELDS.with(|p| p.borrow().get(i).cloned()) else { return };
     let key = f["key"].as_str().unwrap_or("").to_string();
-    // (one of the fields its addresses are made from: those drawn again as it's typed in)
-    let makes_addresses = key.starts_with("reqVar");
     let redraw = match f["type"].as_str().unwrap_or("") {
         "toggle" => { vals.insert(key, serde_json::json!(v == "true")); true }
         "select" | "designpick" | "stepper" => {
@@ -6790,22 +6794,7 @@ fn panel_set(shared: &Shared, name: &str, mut vals: serde_json::Map<String, serd
         _ => { if let Some(x) = panels::typed(&key, v) { vals.insert(key, x); } false }
     };
     PF_EDIT.with(|e| *e.borrow_mut() = Some((format!("panel:{name}"), vals.clone())));
-    if redraw { panel_paint(shared, name, &vals); } else if makes_addresses { panel_infos(shared, name, &vals); }
-}
-
-/// Typed into a field a page's addresses are made from (Song Requests' variables): those addresses drawn
-/// again where they are, nothing else (the field being typed in keeps its place and its cursor)
-fn panel_infos(shared: &Shared, name: &str, vals: &serde_json::Map<String, serde_json::Value>) {
-    let fields = panels::fields(name, vals, &shared.borrow().web.prefs, &omnipulse_core::lan_ip().unwrap_or_else(|| "THIS-PC".into()));
-    let Some(ui) = shared.borrow().ui.upgrade() else { return };
-    let model = ui.get_pf_fields();
-    if model.row_count() != fields.len() { return panel_paint(shared, name, vals); }
-    for (i, f) in fields.iter().enumerate() {
-        if f["type"].as_str() != Some("info") { continue; }
-        let v: slint::SharedString = f["value"].as_str().unwrap_or("").into();
-        if let Some(mut r) = model.row_data(i) { if r.value != v { r.value = v; model.set_row_data(i, r); } }
-    }
-    PANEL_FIELDS.with(|p| *p.borrow_mut() = fields);
+    if redraw { panel_paint(shared, name, &vals); }
 }
 
 /// The alerts' list, as it is (its switches), kept before going elsewhere from it
@@ -6878,6 +6867,8 @@ fn panel_press(shared: &Shared, key: &str) {
             return;
         }
         // (Chat Replies: from Song Requests, its page saved first)
+        // (Song Requests, the chatbot taking them: its own page, asked first if something here isn't saved)
+        "botOpen" => { pf_leave(shared, &format!("plugin:{}", botpage::BOT)); return; }
         "repliesOpen" => {
             if let Some((_, vals)) = PF_EDIT.with(|e| e.borrow().clone()) { for k in panels::keys_of("requests") { if let Some(v) = vals.get(k) { pref_put(shared, k, v.clone()); } } }
             panel_open(shared, "replies");
@@ -7270,6 +7261,27 @@ fn panel_save(shared: &Shared, name: &str, vals: serde_json::Map<String, serde_j
     }
     for k in panels::keys_of(name) {
         if let Some(v) = vals.get(k) { pref_put(shared, k, v.clone()); }
+    }
+    if name == "requests" && vals.keys().any(|k| k.starts_with("bot:")) {
+        let all = {
+            let mut a = shared.borrow_mut();
+            let mut all = a.web.prefs["pluginSettings"].as_object().cloned().unwrap_or_default();
+            let mut mine = all.get(botpage::BOT).and_then(|v| v.as_object()).cloned().unwrap_or_default();
+            let mut changed = false;
+            for (k, v) in vals.iter().filter_map(|(k, v)| k.strip_prefix("bot:").map(|k| (k, v))) {
+                // (numbers typed as text: kept as numbers, as the chatbot's own page keeps them)
+                let v = match (k, v) { ("srCooldown" | "srCost", serde_json::Value::String(t)) => serde_json::json!(t.trim().parse::<u64>().unwrap_or(0)), _ => v.clone() };
+                if mine.get(k) != Some(&v) { mine.insert(k.into(), v); changed = true; }
+            }
+            all.insert(botpage::BOT.into(), serde_json::Value::Object(mine));
+            let all = serde_json::Value::Object(all);
+            if let Some(o) = a.web.prefs.as_object_mut() { o.insert("pluginSettings".into(), all.clone()); }
+            changed.then_some(all)
+        };
+        if let Some(all) = all {
+            if std::env::var_os("OMNIPULSE_SELFTEST").is_none() { webstate::save_pref("pluginSettings", all); }
+            if plugrun::get(botpage::BOT).is_some() { plugrun::stop(botpage::BOT); plugins_start(shared); }
+        }
     }
     panel_keys(shared);
     match name {
