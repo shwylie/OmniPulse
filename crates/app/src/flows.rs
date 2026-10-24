@@ -53,9 +53,9 @@ const EXEMPT: &[(&str, &str)] = &[("none", "No One"), ("subscribers", "Subscribe
 const TEXT_DO: &[(&str, &str)] = &[
     ("upper", "In Capitals"), ("lower", "In Small Letters"), ("title", "Each Word Capitalised"), ("trim", "Spaces Trimmed"),
     ("length", "Its Length"), ("first", "Its First Word"), ("last", "Its Last Word"), ("word", "Word Number..."),
-    ("replace", "With a Word Replaced"), ("rest", "All but Its First Word"),
+    ("replace", "With a Word Replaced"), ("rest", "All but the First Word"),
 ];
-const PREDICT_END: &[(&str, &str)] = &[("resolve", "Settle It (the outcome below won)"), ("lock", "Lock It (no more votes)"), ("cancel", "Cancel It (points given back)")];
+const PREDICT_END: &[(&str, &str)] = &[("resolve", "Settle it (the outcome below wins)"), ("lock", "Lock It (no more votes)"), ("cancel", "Cancel It (points given back)")];
 const REWARD_DO: &[(&str, &str)] = &[("enable", "Switch It On"), ("disable", "Switch It Off"), ("pause", "Pause It"), ("unpause", "Unpause It"), ("cost", "Change Its Cost"), ("create", "Make It")];
 const CHAT_MODES: &[(&str, &str)] = &[("emote", "Emote-Only"), ("subscriber", "Subscribers-Only"), ("slow", "Slow Mode"), ("follower", "Followers-Only"), ("unique", "Unique Chat")];
 const BAN_DO: &[(&str, &str)] = &[("ban", "Ban"), ("unban", "Unban")];
@@ -95,19 +95,19 @@ pub const TRIGGERS: &[Kind] = &[
         pick("who", "From", WHO, "everyone", ""),
         pick("from", "On", FROM, "any", ""),
     ] },
-    Kind { id: "filter", label: "A Rule Broken", note: "A chat filter: its steps say what's done (delete it, time them out, warn them). Gives them %user% and %message%.", fields: &[
+    Kind { id: "filter", label: "A Rule Broken", note: "Catches messages that break a rule. Its steps decide what happens, like deleting the message, timing them out or warning them. Gives the steps %user% and %message%.", fields: &[
         pick("rule", "When a Message Has", RULES, "links", ""),
-        f("words", "Banned Words", "text", "", "For banned words: with commas between (whole words, not case-sensitive)."),
-        f("most", "Most", "number", "300", "Too long: the most letters; too many emotes: the most emotes."),
+        f("words", "Banned Words", "text", "", "For banned words. Separate them with commas. Whole words only, and capitals don't matter."),
+        f("most", "Most", "number", "300", "For Too Long, the most letters allowed. For Too Many Emotes, the most emotes allowed."),
         pick("exempt", "Except From", EXEMPT, "subscribers", "Them and anyone above them (you always are)."),
         pick("from", "On", FROM, "any", ""),
     ] },
-    Kind { id: "event", label: "A Channel Event", note: "Gives its steps %user%, %amount% (bits, months, viewers, subs gifted, a donation's) and %message% (a donation's %currency% too).", fields: &[
+    Kind { id: "event", label: "A Channel Event", note: "Gives the steps %user%, %amount% (bits, months, viewers, subs gifted or the donation) and %message%. Donations also give %currency%.", fields: &[
         pick("event", "Event", EVENTS, "follow", ""),
-        f("min", "At Least", "number", "0", "The least it takes, in bits, raiders or subs gifted (0: any)."),
-        f("reward", "Reward", "text", "", "For a Channel Points reward: its name (empty: any)."),
+        f("min", "At Least", "number", "0", "The smallest amount that counts, in bits, raiders or subs gifted. Use 0 for any amount."),
+        f("reward", "Reward", "text", "", "For a Channel Points reward, enter its name. Leave it empty for any reward."),
         pick("from", "On", FROM, "any", "Kick has follows, subs, gifted subs, hosts and going live or offline."),
-        f("users", "Only For", "text", "", "Viewers' names, with commas between (an entrance greeting: with First Words). Empty: anyone."),
+        f("users", "Only For", "text", "", "Viewers' names, separated by commas. Use this with First Words for an entrance greeting. Leave it empty for anyone."),
     ] },
     Kind { id: "presence", label: "Each Viewer, Every Few Minutes", note: "Runs once for each viewer who's chatted lately (Streamer.bot's present viewers): %user% is each of them in turn.", fields: &[
         f("minutes", "Every", "number", "10", "Minutes."),
@@ -120,15 +120,15 @@ pub const TRIGGERS: &[Kind] = &[
         f("minutes", "Every", "number", "15", "Minutes."),
         f("lines", "Chat Messages Since", "number", "5", "At least this many since the last time, so it never talks to an empty chat."),
     ] },
-    Kind { id: "song", label: "The Music", note: "Gives its steps %song% and %artist%; for a request, %user% (who asked).", fields: &[
+    Kind { id: "song", label: "The Music", note: "Gives the steps %song% and %artist%. For a request, %user% is who asked.", fields: &[
         pick("when", "When", &[("start", "A Song Starts"), ("request", "A Song Is Requested")], "start", ""),
     ] },
     Kind { id: "obs", label: "OBS", note: "Needs OBS switched on in the chatbot's settings. Gives its steps %scene% (the scene now).", fields: &[
         pick("when", "When", OBS_WHEN, "scene", ""),
-        f("scene", "Scene", "text", "", "For a scene change: its name (empty: any)."),
+        f("scene", "Scene", "text", "", "For a scene change, enter the scene's name. Leave it empty for any scene."),
     ] },
-    Kind { id: "web", label: "A Web Address", note: "Another tool (a Stream Deck plugin, a script, a bot) runs it by calling http://127.0.0.1:7879/action?key=YOUR-KEY&name=ITS-NAME (&user= and &input= give it %user% and %rawInput%). The key is Song Requests' secret key (Settings > Streaming > Song Requests, switched on).", fields: &[
-        f("name", "Called As", "text", "", "Empty: the action's own name."),
+    Kind { id: "web", label: "A Web Address", note: "Another tool, like a Stream Deck plugin, a script or a bot, can run it by calling http://127.0.0.1:7879/action?key=YOUR-KEY&name=ITS-NAME. Add &user= and &input= to set %user% and %rawInput%. The key is Song Requests' secret key, in Settings > Streaming > Song Requests (turned on).", fields: &[
+        f("name", "Called As", "text", "", "Leave it empty to use the action's own name."),
     ] },
     Kind { id: "manual", label: "Only When Run", note: "From another action's Run Another Action, or Run Now above.", fields: &[] },
 ];
@@ -142,8 +142,8 @@ pub const STEPS: &[Kind] = &[
     Kind { id: "random", label: "Send One of These", note: "", fields: &[
         f("lines", "Messages", "text", "Hi %user%! | Hello %user%! | Hey %user%!", "With | between them: one picked at random."),
     ] },
-    Kind { id: "sound", label: "Play a Sound", note: "Over the music, on OmniPulse's speakers (as your alerts' sounds are).", fields: &[
-        f("file", "Sound File", "text", "", "Its place on this PC (an mp3, wav, ogg or flac), as Explorer's Copy as Path gives it."),
+    Kind { id: "sound", label: "Play a Sound", note: "Plays over the music through OmniPulse's speakers, like your alert sounds.", fields: &[
+        f("file", "Sound File", "text", "", "Where the file is on this PC (mp3, wav, ogg or flac). In File Explorer, right-click it and choose Copy as Path."),
         f("volume", "Volume", "number", "80", "0 to 100."),
     ] },
     Kind { id: "ifblock", label: "If", note: "The steps after it run only if this is so, up to Otherwise or End If.", fields: &[
@@ -158,7 +158,7 @@ pub const STEPS: &[Kind] = &[
     Kind { id: "randomblock", label: "Pick One at Random", note: "Only one of the steps after it runs, picked at random, up to End Pick.", fields: &[] },
     Kind { id: "endrandom", label: "End Pick", note: "", fields: &[] },
     Kind { id: "stop", label: "Stop Here", note: "The action ends: nothing after this runs.", fields: &[] },
-    Kind { id: "math", label: "Do Some Maths", note: "+ - * / % ^ and brackets, round(), floor(), ceil(), abs(), min(), max(), random(1, 6). Its answer for the steps after it.", fields: &[
+    Kind { id: "math", label: "Do Some Maths", note: "You can use + - * / % ^, brackets, round(), floor(), ceil(), abs(), min(), max() and random(1, 6). The answer is passed to the next steps.", fields: &[
         f("expr", "Sum", "text", "%var:count% + 1", ""),
         f("into", "As", "text", "answer", "The variable it's kept in: %answer%, or whatever you name it."),
     ] },
@@ -170,25 +170,25 @@ pub const STEPS: &[Kind] = &[
     Kind { id: "text", label: "Change Text", note: "", fields: &[
         f("value", "Text", "text", "%rawInput%", ""),
         pick("do", "Make It", TEXT_DO, "upper", ""),
-        f("n", "Word Number / Find", "text", "1", "For Word Number: which (1 is the first). For Replace: the word to find."),
+        f("n", "Word Number / Find", "text", "1", "For Word Number, which word (1 is the first). For Replace, the word to find."),
         f("with", "Replace With", "text", "", "For Replace."),
         f("into", "As", "text", "text", "%text%, or whatever you name it."),
     ] },
-    Kind { id: "userinfo", label: "Look Up the Viewer", note: "Twitch: gives the steps after it %followage%, %followdate%, %accountage%, %accountdate%, %subtier% (empty if not subscribed) and %displayname%.", fields: &[
+    Kind { id: "userinfo", label: "Look Up the Viewer", note: "Twitch only. Gives the next steps %followage%, %followdate%, %accountage%, %accountdate%, %subtier% (empty if not subscribed) and %displayname%.", fields: &[
         f("who", "Viewer", "text", "%user%", ""),
     ] },
     Kind { id: "speak", label: "Say It Out Loud", note: "Text to speech, in one of Windows' own voices (Settings > Time & Language > Speech has more), on OmniPulse's speakers.", fields: &[
         f("text", "Words", "text", "%user% says %rawInput%", "500 letters at most."),
-        f("voice", "Voice", "text", "", "A voice's name, or part of it (David, Zira...). Empty: Windows' own."),
+        f("voice", "Voice", "text", "", "A voice's name, or part of it (David, Zira...). Leave it empty for Windows' default voice."),
         f("rate", "Speed", "number", "1", "0.5 (slow) to 3 (fast)."),
         f("volume", "Volume", "number", "80", "0 to 100."),
     ] },
-    Kind { id: "overlay", label: "Show on Stream", note: "On the Stream Widget, over its alerts (in OBS: its Alerts Address, as a Browser source the size of your canvas, is best).", fields: &[
+    Kind { id: "overlay", label: "Show on Stream", note: "Shows on the Stream Widget, over its alerts. In OBS, the Alerts Address as a Browser source the size of your canvas works best.", fields: &[
         f("text", "Text", "text", "%user% redeemed it!", ""),
-        f("image", "Picture", "text", "", "A web address, or a picture's place on this PC (png, jpg, gif, webp). Empty: none."),
-        f("video", "Video", "text", "", "A web address, or a video's place on this PC (mp4, webm). Empty: none."),
+        f("image", "Picture", "text", "", "A web address, or where the picture is on this PC (png, jpg, gif, webp). Leave it empty for none."),
+        f("video", "Video", "text", "", "A web address, or where the video is on this PC (mp4, webm). Leave it empty for none."),
         pick("place", "", PLACES, "middle", ""),
-        f("seconds", "For", "number", "6", "Seconds (a video: its length, unless this is shorter)."),
+        f("seconds", "For", "number", "6", "Seconds. For a video, it plays to the end unless this is shorter."),
     ] },
     Kind { id: "wait", label: "Wait", note: "", fields: &[f("seconds", "Seconds", "number", "5", "")] },
     Kind { id: "if", label: "Only Go On If", note: "Otherwise the action stops here.", fields: &[
@@ -212,11 +212,11 @@ pub const STEPS: &[Kind] = &[
         f("query", "Song", "text", "%rawInput%", "Search words or a link."),
         f("reply", "Say How It Went", "toggle", "true", ""),
     ] },
-    Kind { id: "wrongsong", label: "Take Back a Request", note: "The viewer's last one (a moderator's: the last anyone made). Gives the steps after it %reply%.", fields: &[
+    Kind { id: "wrongsong", label: "Take Back a Request", note: "Takes back the viewer's last request. For a moderator, the last request anyone made. Gives the next steps %reply%.", fields: &[
         f("say", "Say How It Went", "toggle", "true", ""),
     ] },
     Kind { id: "nowplaying", label: "Say What's Playing", note: "Gives the steps after it %reply% (what's playing).", fields: &[
-        f("say", "Say It", "toggle", "true", "Off: only %reply%, for a step after it."),
+        f("say", "Say It", "toggle", "true", "When this is off, it only saves the answer in %reply% for a later step."),
     ] },
     Kind { id: "skip", label: "Skip the Song", note: "", fields: &[] },
     Kind { id: "playpause", label: "Play or Pause", note: "", fields: &[] },
@@ -241,7 +241,7 @@ pub const STEPS: &[Kind] = &[
     Kind { id: "marker", label: "Add a Stream Marker", note: "Shows in your stream's video, to find later. Live only.", fields: &[f("text", "Note", "text", "%user%: %rawInput%", "")] },
     Kind { id: "clip", label: "Make a Clip", note: "Of the last 30 seconds or so. Gives the steps after it %clip% (its link). Live only.", fields: &[] },
     Kind { id: "title", label: "Set the Stream Title", note: "", fields: &[f("text", "Title", "text", "%rawInput%", "")] },
-    Kind { id: "game", label: "Set the Category", note: "Twitch's category (a game, Just Chatting...), by its name.", fields: &[f("text", "Category", "text", "%rawInput%", "")] },
+    Kind { id: "game", label: "Set the Category", note: "Twitch's category, like a game or Just Chatting, by its name.", fields: &[f("text", "Category", "text", "%rawInput%", "")] },
     Kind { id: "poll", label: "Start a Poll", note: "Twitch. Needs you signed in again once, for the permission.", fields: &[
         f("title", "Question", "text", "%rawInput%", ""),
         f("choices", "Choices", "text", "Yes | No", "With | between them (2 to 5)."),
@@ -255,7 +255,7 @@ pub const STEPS: &[Kind] = &[
     ] },
     Kind { id: "predictend", label: "Settle the Prediction", note: "The one going now. Twitch.", fields: &[
         pick("what", "", PREDICT_END, "resolve", ""),
-        f("winner", "Outcome That Won", "text", "%input0%", "For Settle It: its words, as the prediction has them."),
+        f("winner", "Outcome That Won", "text", "%input0%", "For Settle It, the outcome's words, as the prediction has them."),
     ] },
     Kind { id: "reward", label: "Change a Reward", note: "A Channel Points reward. Twitch only lets an app change the rewards it made, so make it here first (Make It).", fields: &[
         f("title", "Reward", "text", "", "Its name."),
@@ -269,8 +269,8 @@ pub const STEPS: &[Kind] = &[
     ] },
     Kind { id: "chatmode", label: "Chat Mode", note: "Twitch.", fields: &[
         pick("mode", "Mode", CHAT_MODES, "emote", ""),
-        f("on", "On", "toggle", "true", "Off: back to normal."),
-        f("seconds", "Wait", "number", "10", "Slow mode: seconds between messages; followers-only: minutes they must have followed."),
+        f("on", "On", "toggle", "true", "When this is off, it goes back to normal."),
+        f("seconds", "Wait", "number", "10", "For Slow Mode, the seconds between messages. For Followers-Only, how many minutes they must have followed."),
     ] },
     Kind { id: "ban", label: "Ban or Unban", note: "", fields: &[
         f("who", "Viewer", "text", "%input0%", ""),
@@ -281,10 +281,10 @@ pub const STEPS: &[Kind] = &[
         f("who", "Viewer", "text", "%input0%", ""),
         pick("what", "", ROLE_DO, "vip", ""),
     ] },
-    Kind { id: "discord", label: "Send to Discord", note: "Through a channel's webhook (in Discord: the channel's settings, Integrations, Webhooks, New Webhook, Copy Webhook URL).", fields: &[
+    Kind { id: "discord", label: "Send to Discord", note: "Posts through a channel's webhook. In Discord, open the channel's settings, then Integrations > Webhooks > New Webhook, and click Copy Webhook URL.", fields: &[
         f("webhook", "Webhook", "text", "https://discord.com/api/webhooks/", ""),
         f("text", "Message", "text", "%user% is live!", ""),
-        f("name", "As", "text", "", "The name it's posted as (empty: the webhook's own)."),
+        f("name", "As", "text", "", "The name it posts as. Leave it empty to use the webhook's own name."),
     ] },
     Kind { id: "obsmedia", label: "OBS: Media", note: "A media source (a video or a sound).", fields: &[
         f("source", "Source", "text", "", ""),
@@ -299,14 +299,14 @@ pub const STEPS: &[Kind] = &[
         f("source", "Scene or Source", "text", "", ""),
         f("file", "Saved As", "text", "C:\\Screenshots\\shot.png", "A .png file's place on this PC."),
     ] },
-    Kind { id: "obsraw", label: "OBS: Any Request", note: "Any of obs-websocket's requests, by name, for what the others don't do. Its answer as %obs%.", fields: &[
+    Kind { id: "obsraw", label: "OBS: Any Request", note: "Sends any obs-websocket request by name, for things the other steps don't do. The answer is in %obs%.", fields: &[
         f("request", "Request", "text", "GetVersion", ""),
-        f("data", "With", "text", "{}", "Its request data, as JSON."),
+        f("data", "With", "text", "{}", "The request's data, as JSON."),
     ] },
-    Kind { id: "obsscene", label: "OBS: Switch Scene", note: "", fields: &[f("scene", "Scene", "text", "", "Its name, as OBS has it.")] },
+    Kind { id: "obsscene", label: "OBS: Switch Scene", note: "", fields: &[f("scene", "Scene", "text", "", "The name, as it appears in OBS.")] },
     Kind { id: "obssource", label: "OBS: Show or Hide", note: "A source in a scene.", fields: &[
-        f("source", "Source", "text", "", "Its name, as OBS has it."),
-        f("scene", "In Scene", "text", "", "Empty: the scene that's on."),
+        f("source", "Source", "text", "", "The name, as it appears in OBS."),
+        f("scene", "In Scene", "text", "", "Leave it empty to use the current scene."),
         pick("show", "", SHOW_HIDE, "toggle", ""),
         f("for", "For", "number", "0", "Seconds, then back as it was (0: it stays)."),
     ] },
@@ -314,7 +314,7 @@ pub const STEPS: &[Kind] = &[
         f("source", "Source", "text", "", ""),
         f("text", "Text", "text", "%user%", ""),
     ] },
-    Kind { id: "obsmute", label: "OBS: Mute or Unmute", note: "An audio source (a mic, desktop audio...).", fields: &[
+    Kind { id: "obsmute", label: "OBS: Mute or Unmute", note: "An audio source, like a mic or desktop audio.", fields: &[
         f("source", "Source", "text", "Mic/Aux", ""),
         pick("what", "", MUTE, "toggle", ""),
     ] },
@@ -326,12 +326,12 @@ pub const STEPS: &[Kind] = &[
     Kind { id: "obsrecord", label: "OBS: Recording", note: "", fields: &[pick("what", "", START_STOP, "start", "")] },
     Kind { id: "obsstream", label: "OBS: Streaming", note: "", fields: &[pick("what", "", START_STOP, "start", "")] },
     Kind { id: "quoteadd", label: "Add a Quote", note: "Kept with the date. Gives the steps after it %quotenumber%.", fields: &[f("text", "Quote", "text", "%rawInput%", "")] },
-    Kind { id: "quote", label: "Pick a Quote", note: "Gives the steps after it %quote% (its words, number and date).", fields: &[f("number", "Number", "text", "%input0%", "Empty, or not a number: one at random.")] },
-    Kind { id: "points", label: "Give or Take Points", note: "Your points currency (the chatbot's settings: its name, and how many for chatting). Taking: stops here if they haven't enough.", fields: &[
+    Kind { id: "quote", label: "Pick a Quote", note: "Gives the next steps %quote%, with its words, number and date.", fields: &[f("number", "Number", "text", "%input0%", "Empty, or not a number: one at random.")] },
+    Kind { id: "points", label: "Give or Take Points", note: "Your own points currency. Set its name and how many viewers get for chatting in the chatbot's settings. When taking points, the action stops here if they don't have enough.", fields: &[
         f("who", "Who", "text", "%user%", ""),
         f("amount", "Points", "number", "10", "Take away with a minus."),
     ] },
-    Kind { id: "gamble", label: "Gamble Points", note: "Roulette: a chance to win the bet back several times over. Gives the steps after it %bet%, %winnings% and %won% (yes or no).", fields: &[
+    Kind { id: "gamble", label: "Gamble Points", note: "Roulette: a chance to win back several times the bet. Gives the next steps %bet%, %winnings% and %won% (yes or no).", fields: &[
         f("bet", "Bet", "text", "%input0%", "A number, or all."),
         f("least", "At Least", "number", "10", ""),
         f("chance", "Chance to Win", "number", "45", "Out of 100."),
@@ -348,7 +348,7 @@ pub const STEPS: &[Kind] = &[
         f("win", "Won", "text", "[ %reels% ] %user% won %winnings% %pointsname%!", ""),
         f("lose", "Lost", "text", "[ %reels% ] no luck, %user%.", ""),
     ] },
-    Kind { id: "duel", label: "Start a Duel", note: "They accept in chat (with the word below) in time, or it's off. The winner, by chance, takes both bets.", fields: &[
+    Kind { id: "duel", label: "Start a Duel", note: "The other viewer accepts by typing the word below in chat, in time, or the duel is off. The winner is picked by chance and takes both bets.", fields: &[
         f("who", "Against", "text", "%input0%", ""),
         f("bet", "Bet", "text", "%input1%", "A number, or all."),
         f("accept", "They Accept With", "text", "!accept", ""),
@@ -357,7 +357,7 @@ pub const STEPS: &[Kind] = &[
         f("win", "Result", "text", "%winner% beat %loser% and won %bet% %pointsname%!", ""),
         f("off", "Not Accepted", "text", "%target% didn't accept the duel.", ""),
     ] },
-    Kind { id: "heist", label: "Start or Join a Heist", note: "The first starts one; others join with the same command and their bet while it's open. Then each makes it out, or doesn't, by chance.", fields: &[
+    Kind { id: "heist", label: "Start or Join a Heist", note: "The first viewer starts a heist. Others join with the same command and a bet while it's open. Then each one makes it out or gets caught, by chance.", fields: &[
         f("bet", "Bet", "text", "%input0%", "A number, or all."),
         f("least", "At Least", "number", "10", ""),
         f("seconds", "Open For", "number", "60", "Seconds."),
@@ -366,14 +366,14 @@ pub const STEPS: &[Kind] = &[
         f("start", "Starting", "text", "%user% is planning a heist! Join with %command% and a bet within %seconds% seconds.", ""),
         f("end", "Result", "text", "The heist is over. Made it out: %winners%. Caught: %losers%.", ""),
     ] },
-    Kind { id: "trivia", label: "Ask a Trivia Question", note: "From the Open Trivia Database. The first to answer right (the answer, or its letter) wins the points.", fields: &[
+    Kind { id: "trivia", label: "Ask a Trivia Question", note: "Questions from the Open Trivia Database. The first viewer to answer correctly, with the answer or its letter, wins the points.", fields: &[
         f("prize", "Prize", "number", "50", "Points."),
         f("seconds", "Within", "number", "30", "Seconds."),
         f("ask", "Question", "text", "Trivia! %question% %choices%", ""),
         f("win", "Answered", "text", "%winner% got it: %answer%! +%prize% %pointsname%", ""),
         f("none", "No One Got It", "text", "No one got it: it was %answer%.", ""),
     ] },
-    Kind { id: "strike", label: "Give a Strike", note: "Moderation that steps up: a warning, then a time-out, then a ban. Gives %strikes% (how many they have).", fields: &[
+    Kind { id: "strike", label: "Give a Strike", note: "Moderation that steps up: first a warning, then a time-out, then a ban. Gives %strikes%, how many strikes they have.", fields: &[
         f("who", "Who", "text", "%user%", ""),
         f("reason", "Reason", "text", "", ""),
         f("warn", "Warning", "text", "@%user%, that's strike %strikes%. Please stop.", "Said for the strikes before a time-out."),
@@ -382,7 +382,7 @@ pub const STEPS: &[Kind] = &[
         f("banat", "Ban At", "number", "3", "Strikes (0: never)."),
         f("forget", "Forgotten After", "number", "24", "Hours without one."),
     ] },
-    Kind { id: "writefile", label: "Write to a File", note: "A text file on this PC (an OBS Text source can show it: a counter, the latest follower).", fields: &[
+    Kind { id: "writefile", label: "Write to a File", note: "A text file on this PC. An OBS Text source can show it, like a counter or the latest follower.", fields: &[
         f("file", "File", "text", "C:\\Stream\\latest.txt", "A .txt file's whole place."),
         f("text", "Text", "text", "%user%", ""),
         pick("how", "", FILE_DO, "replace", ""),
@@ -393,12 +393,12 @@ pub const STEPS: &[Kind] = &[
     ] },
     Kind { id: "giveenter", label: "Enter the Giveaway", note: "Once each.", fields: &[] },
     Kind { id: "givepick", label: "Pick a Giveaway Winner", note: "Gives the steps after it %winner% and %entries% (how many were in).", fields: &[f("clear", "Then Start Again", "toggle", "true", "Everyone's entry let go.")] },
-    Kind { id: "fetch", label: "Fetch a Web Address", note: "What it answers (plain text, its first 500 letters) for the steps after it.", fields: &[
+    Kind { id: "fetch", label: "Fetch a Web Address", note: "Passes what it answers to the next steps, as plain text (the first 500 letters).", fields: &[
         f("url", "Address", "text", "https://", "%rawInputUrlEncoded% is what came after the command, made safe for an address."),
         f("into", "As", "text", "reply", "The variable it's kept in: %reply%, or whatever you name it."),
     ] },
     Kind { id: "run", label: "Run Another Action", note: "", fields: &[f("action", "Action", "text", "", "Its name.")] },
-    Kind { id: "note", label: "A Note", note: "Does nothing: for you to read (a restored backup's steps that couldn't be brought over are kept as these).", fields: &[f("text", "Note", "text", "", "")] },
+    Kind { id: "note", label: "A Note", note: "Does nothing. It's a note for you to read. Steps from a restored backup that couldn't be brought over are kept as notes.", fields: &[f("text", "Note", "text", "", "")] },
     Kind { id: "status", label: "Show in OmniPulse", note: "On OmniPulse's status line: for trying an action out.", fields: &[f("text", "Text", "text", "%user% used it.", "")] },
 ];
 

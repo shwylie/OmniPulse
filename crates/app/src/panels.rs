@@ -77,7 +77,7 @@ const FONTS: [(&str, &str); 43] = [
 fn lyrics_fields(vals: &Map<String, Value>) -> Vec<Value> {
     let order: Vec<String> = vals.get("order").and_then(|o| o.as_array()).into_iter().flatten().filter_map(|x| x.as_str().map(String::from)).collect();
     let n = order.len();
-    let mut f = vec![note("Where lyrics come from, asked in this order: the first with timed lyrics is used. In Now Playing, a song's lyrics can switch to another of these.")];
+    let mut f = vec![note("OmniPulse asks these sources for lyrics in this order, and uses the first one with timed lyrics. In Now Playing, you can switch a song's lyrics to another source.")];
     for (i, id) in order.iter().enumerate() {
         let (mut acts, mut labels) = (Vec::new(), Vec::new());
         if i > 0 { acts.push(format!("lyUp:{id}")); labels.push("\u{2191}".to_string()); }
@@ -171,7 +171,7 @@ public class CPHInline
 /// known for sure, the general address, with its own variables for USERNAME and SONG.
 const REQ_BOTS: &[(&str, &str, bool, &str, &str, &str, &str)] = &[
     ("streamerbot", "Streamer.bot", false, "{base}/request?key={key}&user=%user%&q=%rawInputUrlEncoded%", "{base}/now", "{base}/wrongsong?key={key}&user=%user%&mod=%isModerator%",
-        "1. Make an Action with a Command trigger, !sr.\n2. Add Core > Network > Fetch URL with the request address, its variable named reply.\n3. Add Core > C# > Execute C# Code with the Reply Code below, and Compile (it answers on the chat that asked).\n4. The same for !song and !wrongsong, with their addresses."),
+        "1. Make an action with a Command trigger for !sr.\n2. Add Core > Network > Fetch URL with the request address, and name its variable reply.\n3. Add Core > C# > Execute C# Code with the Reply Code below, then click Compile. It answers in the chat that asked.\n4. Do the same for !song and !wrongsong, with their addresses."),
     ("mixitup", "Mix It Up", false, "{base}/request?key={key}&user=$username&q=$allargs", "{base}/now", "{base}/wrongsong?key={key}&user=$username&mod=$userroles",
         "1. Make a Chat Command, !sr.\n2. Add a Web Request action with the request address, its response as plain text.\n3. Add a Chat action that sends $webrequestresult.\n4. The same for !song and !wrongsong, with their addresses."),
     ("nightbot", "Nightbot", true, "!commands add !sr $(urlfetch {base}/request?key={key}&q=$(querystring))", "!commands add !song $(urlfetch {base}/now)", "!commands add !wrongsong $(urlfetch {base}/wrongsong?key={key})",
@@ -183,7 +183,7 @@ const REQ_BOTS: &[(&str, &str, bool, &str, &str, &str, &str)] = &[
     ("kickbot", "KickBot", true, "{{request(\"{base}/request?key={key}&format=json&user={{sender.username}}&q={{param}}\").message}}", "{{request(\"{base}/now?format=json\").message}}", "{{request(\"{base}/wrongsong?key={key}&format=json&user={{sender.username}}\").message}}",
         "1. In KickBot's dashboard, make a custom command, !sr, and paste the first as its response.\n2. The same for !song and !wrongsong.\nIf a command answers with the variable names themselves, KickBot isn't filling them in inside a request: say so, and we'll find another way."),
     ("other", "Another Bot", false, "{base}/request?key={key}&user=USERNAME&q=SONG", "{base}/now", "{base}/wrongsong?key={key}&user=USERNAME&mod=MOD",
-        "Any bot that calls a web address and posts what comes back:\n1. /request: key, q (what was asked for, URL-encoded) and user (who asked).\n2. /now for what's playing.\n3. /wrongsong: key, user and mod (true for a moderator).\nAdd &format=json for JSON (ok, message, title, artist, url, position)."),
+        "Works with any bot that can call a web address and post the answer:\n1. /request takes key, q (what was asked for, URL-encoded) and user (who asked).\n2. /now says what's playing.\n3. /wrongsong takes key, user, and mod (true for a moderator).\nAdd &format=json to get JSON (ok, message, title, artist, url, position)."),
 ];
 
 fn tog(key: &str, label: &str, note: &str) -> Value { json!({ "key": key, "label": label, "note": note, "type": "toggle" }) }
@@ -191,6 +191,12 @@ fn num(key: &str, label: &str, note: &str) -> Value { json!({ "key": key, "label
 fn text(key: &str, label: &str, note: &str) -> Value { json!({ "key": key, "label": label, "note": note, "type": "text" }) }
 fn sel(key: &str, label: &str, note: &str, opts: &[(Value, &str)]) -> Value {
     json!({ "key": key, "label": label, "note": note, "type": "select", "options": opts.iter().map(|o| o.0.clone()).collect::<Vec<_>>(), "labels": opts.iter().map(|o| o.1).collect::<Vec<_>>() })
+}
+/// A widget's design: picked from sketches of each (the page draws them, in the options' order)
+fn design(key: &str, label: &str) -> Value {
+    let mut v = sel(key, label, "", &[(json!("card"), "Card"), (json!("bar"), "Slim Bar"), (json!("square"), "Square"), (json!("minimal"), "Minimal"), (json!("pill"), "Pill"), (json!("vinyl"), "Vinyl"), (json!("poster"), "Poster"), (json!("ticker"), "Ticker")]);
+    v["type"] = json!("designpick");
+    v
 }
 fn info(label: &str, value: &str, copy: &str, note: &str) -> Value { json!({ "key": "", "label": label, "note": note, "type": "info", "value": value, "copy": copy }) }
 fn note(t: &str) -> Value { json!({ "key": "", "label": t, "note": "", "type": "note" }) }
@@ -225,9 +231,9 @@ fn sel_owned(key: &str, label: &str, note: &str, opts: Vec<(Value, String)>) -> 
 
 /// Bots elsewhere (the web app's botRemoteBlock): the switch, and with it on, how
 fn remote_bots(vals: &Map<String, Value>, what: &str, port: u64, path: &str, lan: &str) -> Vec<Value> {
-    let mut out = vec![tog("botRemote", "Bots on Other Devices", &format!("Off: only programs on this PC can reach these addresses. On: other devices can too{}", if what == "alerts" { " (with the key in their address)." } else { " (with the key)." }))];
+    let mut out = vec![tog("botRemote", "Bots on Other Devices", &format!("When this is off, only programs on this PC can use these addresses. When it's on, other devices can too{}", if what == "alerts" { ", with the key in their address." } else { " (with the key)." }))];
     if vals["botRemote"].as_bool() == Some(true) {
-        out.push(note(&format!("1. A bot on another computer at home: give it http://{lan}:{port}{path} in place of 127.0.0.1.\n2. An online bot (one that isn't on your network): on your router, forward port {port} (TCP) to this PC, {lan}. Then give the bot the same address with your public IP address in place of {lan}.\nCareful: your public IP address points to your home. Don't show it on stream or in screenshots, and don't share it; keep Streamer Mode on while you set this up. With it and the key, anyone could {}.", if what == "alerts" { "send alerts to your stream" } else { "request songs" })));
+        out.push(note(&format!("1. For a bot on another computer at home, use http://{lan}:{port}{path} instead of 127.0.0.1.\n2. For an online bot (one outside your network), forward port {port} (TCP) on your router to this PC, {lan}. Then give the bot the same address with your public IP address instead of {lan}.\nCareful: your public IP address points to your home. Don't show it on stream or in screenshots, and don't share it. Keep Streamer Mode on while you set this up. With it and the key, anyone could {}.", if what == "alerts" { "send alerts to your stream" } else { "request songs" })));
     }
     out
 }
@@ -267,7 +273,7 @@ pub fn fields(name: &str, vals: &Map<String, Value>, prefs: &Value, lan: &str) -
     let mut f = fields_of(name, vals, prefs, lan);
     // (the Stream Widget's and its alerts' pages: a pop-out preview first, as the Lyrics Widget's has)
     if matches!(name, "widget" | "alerts" | "alertlist") || name.starts_with("alert:") {
-        f.insert(0, button("previewOpen", "Preview", "Pop Out Preview", "A window showing it as it'll look, changing as you change these (before you save them)."));
+        f.insert(0, button("previewOpen", "Preview", "Pop Out Preview", "Opens a window that shows how it will look. It updates as you change these, before you save."));
     }
     f
 }
@@ -283,7 +289,7 @@ fn fields_of(name: &str, vals: &Map<String, Value>, prefs: &Value, lan: &str) ->
         // YouTube Music's own: liking there too, and its helpers (how they are, set up or removed)
         "youtube" => {
             let (state, setup, remove) = crate::helpers_state();
-            let mut f = vec![tog("ytMirror", "Like Other Tracks There Too", "With your YouTube account connected: liking a SoundCloud or Spotify track likes the same song on YouTube.")];
+            let mut f = vec![tog("ytMirror", "Like Other Tracks There Too", "When your YouTube account is connected, liking a SoundCloud or Spotify track also likes it on YouTube.")];
             if !setup.is_empty() { f.push(button("ytHelpersSetup", "Playback Helpers", setup, &state)); }
             else if remove { f.push(button("ytHelpersRemove", "Playback Helpers", "Remove", &format!("{state} Removed, YouTube Music songs won't play until they're set up again."))); }
             else { f.push(note(&format!("Playback Helpers: {state}"))); }
@@ -310,30 +316,30 @@ fn fields_of(name: &str, vals: &Map<String, Value>, prefs: &Value, lan: &str) ->
             let chat = rq.starts_with('!');
             // (its variables, each in a field of its own: the addresses below change as they're typed)
             if blanks {
-                f.push(text("reqVarUser", "Username Variable", "Your bot's variable for who's asking (in place of USERNAME)."));
-                f.push(text("reqVarSong", "Song Variable", "Its variable for what they typed after the command (in place of SONG)."));
-                if wrong.contains("MOD") { f.push(text("reqVarMod", "Moderator Variable", "Its variable for whether they're a moderator (in place of MOD).")); }
+                f.push(text("reqVarUser", "Username Variable", "Your bot's variable for the viewer's name. It replaces USERNAME."));
+                f.push(text("reqVarSong", "Song Variable", "Your bot's variable for what the viewer typed after the command. It replaces SONG."));
+                if wrong.contains("MOD") { f.push(text("reqVarMod", "Moderator Variable", "Your bot's variable for whether the viewer is a moderator. It replaces MOD.")); }
             }
             if !rq.is_empty() {
                 f.extend([
                     info(if chat { "Song Request (!sr)" } else { "Request Address (!sr)" }, &fill(rq, &hide(&key)), &fill(rq, &key), "Adds the song a viewer asks for to the queue."),
                     info(if chat { "Now Playing (!song)" } else { "Now Playing Address (!song)" }, &fill(now, &hide(&key)), &fill(now, &key), "Says what's playing."),
-                    info(if chat { "Wrong Song (!wrongsong)" } else { "Wrong Song Address (!wrongsong)" }, &fill(wrong, &hide(&key)), &fill(wrong, &key), "Takes back the viewer's last request (a moderator's: the last anyone made)."),
+                    info(if chat { "Wrong Song (!wrongsong)" } else { "Wrong Song Address (!wrongsong)" }, &fill(wrong, &hide(&key)), &fill(wrong, &key), "Takes back the viewer's last request. For a moderator, it takes back the last request anyone made."),
                 ]);
             }
             f.push(note(steps));
             // (an online bot: reaching this PC from the internet, the only setup it needs besides the above)
             if cloud && !rq.is_empty() {
-                f.push(note(&format!("Letting it reach this PC:\n1. Switch on Bots on Other Devices (below).\n2. On your router, forward port {port} (TCP) to this PC, {lan}.\n3. In each of the above, put your public IP address in place of YOUR-PUBLIC-IP (search \"what is my IP\").\nKeep your public IP off stream and out of screenshots: Streamer Mode on while you set this up.")));
+                f.push(note(&format!("To let it reach this PC:\n1. Turn on Bots on Other Devices (below).\n2. On your router, forward port {port} (TCP) to this PC, {lan}.\n3. In each address above, replace YOUR-PUBLIC-IP with your public IP address (search \"what is my IP\").\nKeep your public IP off stream and out of screenshots. Turn on Streamer Mode while you set this up.")));
             }
             if bot == "streamerbot" {
                 f.push(info("Reply Code (for Execute C# Code)", "Copy it, then paste it into the sub-action", SB_REPLY_CODE, ""));
             }
             f.extend([
                 tog("reqRadioEdit", "Prefer Radio Edits", "Plays a long song's radio edit, if there is one."),
-                tog("reqNoAi", "Keep Out AI Music", "Requests never play AI-made music: artists on Soul Over AI's list of confirmed AI artists (souloverai.com, CC BY 4.0, kept up to date once a day), and anything whose title or artist says it's AI (Suno, Udio, an \"AI cover\"). Only whole artist names count, so a few may get through."),
+                tog("reqNoAi", "Keep Out AI Music", "Requests never play AI-made music. That means artists on Soul Over AI's list of confirmed AI artists (souloverai.com, CC BY 4.0, updated daily), and anything whose title or artist says it's AI, like Suno, Udio or an \"AI cover\". Only whole artist names count, so a few may slip through."),
                 note("Limits"),
-                tog("reqLimits", "Limit Requests", "The most waiting, and the most per viewer. Off: chat can request as many songs as it likes."),
+                tog("reqLimits", "Limit Requests", "The most songs waiting, and the most per viewer. When this is off, chat can request as many songs as it likes."),
                 stepper("reqMax", "Most Waiting", "How many requests can wait at once.", counts(1, 50)),
                 stepper("reqPerUser", "Most per Viewer", "How many of one viewer's can wait at once.", counts(1, 10)),
                 button("reqLimitsReset", "", "Reset to Defaults", "On, 10 waiting, 2 per viewer."),
@@ -349,19 +355,19 @@ fn fields_of(name: &str, vals: &Map<String, Value>, prefs: &Value, lan: &str) ->
             let port = n("widgetPort", 7878);
             let alerts_on = prefs["alertsOn"].as_bool() == Some(true);
             let f = vec![
-                info("Address", &format!("http://127.0.0.1:{port}/"), &format!("http://127.0.0.1:{port}/"), "In OBS: a Browser source with this address."),
+                info("Address", &format!("http://127.0.0.1:{port}/"), &format!("http://127.0.0.1:{port}/"), "Add this address as a Browser source in OBS."),
                 num("widgetPort", "Port", "1024 to 65535."),
                 // Alerts: on the widget, so here (Settings > Streaming > Stream Widget > Alerts): a switch, as
                 // every other, with Configure beside it; first, under where the widget's found
-                toggle_cfg("alertsOn", "Alerts", "On the widget: follows, subs, bits, raids and more, from your bot.", "alertsOpen"),
-                tog("alertSplit", "Alerts on Their Own", "In a Browser source of their own (its address below), not over Now Playing: each where you want it in OBS."),
+                toggle_cfg("alertsOn", "Alerts", "Shows follows, subs, bits, raids and more from your bot, on the widget.", "alertsOpen"),
+                tog("alertSplit", "Alerts on Their Own", "Shows the alerts in their own Browser source instead of over Now Playing, so you can place each one where you like in OBS."),
             ];
             let mut f = f;
             if vals["alertSplit"].as_bool() == Some(true) {
-                f.push(info("Alerts Address", &format!("http://127.0.0.1:{port}/alerts"), &format!("http://127.0.0.1:{port}/alerts"), "In OBS: a Browser source with this address, for the alerts alone."));
+                f.push(info("Alerts Address", &format!("http://127.0.0.1:{port}/alerts"), &format!("http://127.0.0.1:{port}/alerts"), "Add this address as a Browser source in OBS to show only the alerts."));
             }
             f.extend([
-                sel("widgetDesign", "Design", "", &[(json!("card"), "Card (460 × 130)"), (json!("bar"), "Slim bar (560 × 64)"), (json!("square"), "Square (300 × 380)"), (json!("minimal"), "Minimal (460 × 110)"), (json!("pill"), "Pill (480 × 80)"), (json!("vinyl"), "Vinyl (460 × 150)"), (json!("poster"), "Poster (480 × 270)"), (json!("ticker"), "Ticker (640 × 48)")]),
+                design("widgetDesign", "Design"),
                 sel("widgetAlign", "Alignment", "", &[(json!("left"), "Left"), (json!("right"), "Right")]),
                 tog("widgetRounded", "Rounded Corners", ""),
                 stepper("widgetText", "Text Size", "", pct(0.7, 1.6, 0.1)),
@@ -377,7 +383,7 @@ fn fields_of(name: &str, vals: &Map<String, Value>, prefs: &Value, lan: &str) ->
                 // a second Now Playing, for another scene: the same song, a design of its own
                 note("Second Widget"),
                 info("Second Widget Address", &format!("http://127.0.0.1:{port}/2"), &format!("http://127.0.0.1:{port}/2"), "Another Now Playing, for another scene in OBS, in a design of its own (the rest as above)."),
-                sel("widget2Design", "Its Design", "", &[(json!("card"), "Card (460 × 130)"), (json!("bar"), "Slim bar (560 × 64)"), (json!("square"), "Square (300 × 380)"), (json!("minimal"), "Minimal (460 × 110)"), (json!("pill"), "Pill (480 × 80)"), (json!("vinyl"), "Vinyl (460 × 150)"), (json!("poster"), "Poster (480 × 270)"), (json!("ticker"), "Ticker (640 × 48)")]),
+                design("widget2Design", "Its Design"),
                 sel("widget2Align", "Its Alignment", "", &[(json!("left"), "Left"), (json!("right"), "Right")]),
                 tog("widget2Rounded", "Its Rounded Corners", ""),
                 stepper("widget2Text", "Its Text Size", "", pct(0.7, 1.6, 0.1)),
@@ -397,9 +403,9 @@ fn fields_of(name: &str, vals: &Map<String, Value>, prefs: &Value, lan: &str) ->
             let mut look: Vec<Value> = vec![button("alList", "Alerts and Their Order", "Open", "Which alerts show and which goes first, and each one's words, picture and sound.")];
             let mut f = vec![sel("alertBot", "Your Bot", "", &[(json!("streamerbot"), "Streamer.bot"), (json!("mixitup"), "Mix It Up"), (json!("generic"), "Generic")])];
             if bot == "streamerbot" {
-                f.push(text("sbHost", "Streamer.bot", "Its WebSocket Server's address and port."));
+                f.push(text("sbHost", "Streamer.bot", "The address and port of Streamer.bot's WebSocket server."));
                 f.push(tog("sbOn", "Connect to Streamer.bot", ""));
-                f.push(note("1. In Streamer.bot: Servers/Clients > WebSocket Server. Tick Auto Start, then Start Server.\n2. Put its address and port here (127.0.0.1:8080 unless you've changed it), and switch it on.\n3. That's all: follows, subs, bits, raids and the rest come through by themselves."));
+                f.push(note("1. In Streamer.bot, open Servers/Clients > WebSocket Server. Tick Auto Start, then click Start Server.\n2. Enter its address and port here (127.0.0.1:8080 unless you changed it), and turn it on.\n3. That's it. Follows, subs, bits, raids and the rest come through on their own."));
             } else if bot == "mixitup" {
                 // one address for each, ready to paste: its event, its type and Mix It Up's own special
                 // identifiers already in (its documented ones for each event)
@@ -417,7 +423,7 @@ fn fields_of(name: &str, vals: &Map<String, Value>, prefs: &Value, lan: &str) ->
                 f.push(note("Polls, bans and watch streaks have no Mix It Up event to send them from."));
             } else if bot == "generic" {
                 // (as Mix It Up's: one address for each, its type in; only the bot's own variables to put in)
-                f.push(note("Have your bot open each address below when that happens, with its own variables in place of the words in capitals (NAME: the viewer's name; MESSAGE, and the amounts, where it has them, or left empty)."));
+                f.push(note("Have your bot open the matching address below when something happens. Replace the words in capitals with your bot's own variables: NAME is the viewer's name. Fill in MESSAGE and the amounts if your bot has them, or leave them empty."));
                 let at = |k: &str, rest: &str| format!("http://127.0.0.1:{port}/alert?{}type={rest}", part(k));
                 for (event, rest) in GENERIC_EVENTS {
                     f.push(info(event, &at(&hide(&key), rest), &at(&key, rest), ""));
@@ -431,9 +437,9 @@ fn fields_of(name: &str, vals: &Map<String, Value>, prefs: &Value, lan: &str) ->
             } else {
                 f.push(info("Web Request", &url(&hide(&key)), &url(&key), "Your bot opens this address when something happens."));
                 f.push(note(&if bot == "mixitup" {
-                    format!("1. In Mix It Up, open the event to alert on (a follow, a sub, bits...) and add a Web Request action.\n2. Paste the address above, with type= set to that event: {types}.\n3. Put Mix It Up's special identifiers in: user=$username, and the amount and message for that event (its list of special identifiers has the right names, such as the bits or months).")
+                    format!("1. In Mix It Up, open the event you want an alert for (a follow, a sub, bits...) and add a Web Request action.\n2. Paste the address above, with type= set to that event: {types}.\n3. Add Mix It Up's special identifiers: user=$username, plus the amount and message for that event. Mix It Up's list of special identifiers has the right names, such as bits or months.")
                 } else {
-                    format!("1. When something happens, have your bot open the address above.\n2. Swap NAME for your bot's name for the viewer, and fill in amount and message if it has them (or leave them empty).\n3. type says what happened: {types}, or one of your own alerts' triggers.")
+                    format!("1. When something happens, have your bot open the address above.\n2. Replace NAME with your bot's variable for the viewer's name. Fill in amount and message if your bot has them, or leave them empty.\n3. type says what happened: {types}, or one of your own alerts' triggers.")
                 }));
                 if bot != "mixitup" { f.extend(remote_bots(vals, "alerts", port, &format!("/alert?{}{vars}", part(&hide(&key))), lan)); }
             }
@@ -450,7 +456,7 @@ fn fields_of(name: &str, vals: &Map<String, Value>, prefs: &Value, lan: &str) ->
             if s("alertTrans", "seamless") == "overlay" {
                 f.push(sel("alertAnim", "Animation", "", &[(json!("slide"), "Slide"), (json!("pop"), "Pop"), (json!("fade"), "Fade"), (json!("bounce"), "Bounce"), (json!("flip"), "Flip")]));
             }
-            f.push(tog("alertOwnCol", "Their Own Colours", "Off: the alerts take the album art's colours, as the widget does."));
+            f.push(tog("alertOwnCol", "Their Own Colours", "When this is off, alerts use the album art's colours, like the widget does."));
             if vals["alertOwnCol"].as_bool() == Some(true) {
                 f.push(color("alertCol1", "Accent Colour", ""));
                 f.push(color("alertCol2", "Second Colour", ""));
@@ -472,12 +478,12 @@ fn fields_of(name: &str, vals: &Map<String, Value>, prefs: &Value, lan: &str) ->
         ],
         // Listen Along & Jams: the name the others see
         "together" => vec![
-            text("togetherName", "Your Name", "What others see when you listen along or Jam. Empty: your account's name."),
+            text("togetherName", "Your Name", "The name others see when you listen along or Jam. Leave it empty to use your account's name."),
         ],
         // Lyrics: where they come from, in order (as the web app's)
         "lyrics" => lyrics_fields(vals),
         "replies" => {
-            let mut f = vec![note("What your bot posts back for each. Empty: the default, shown under it.\nPlaceholders: {title} {artist} {user} {position} {platform} {query} {count} {by}")];
+            let mut f = vec![note("What your bot posts back for each one. Leave it empty to use the default shown under it.\nYou can use: {title} {artist} {user} {position} {platform} {query} {count} {by}")];
             for (k, label) in crate::requests::MSG_KEYS { f.push(text(&format!("msg:{k}"), label, crate::requests::default_msg(k))); }
             f.push(button("repliesReset", "", "Reset to Defaults", "Every reply back to its default (Save keeps it)."));
             f
@@ -489,19 +495,19 @@ fn fields_of(name: &str, vals: &Map<String, Value>, prefs: &Value, lan: &str) ->
             let url = format!("http://127.0.0.1:{port}/lyrics");
             let dirs = [(json!("90deg"), "Left to right"), (json!("180deg"), "Top to bottom"), (json!("135deg"), "Diagonal"), (json!("270deg"), "Right to left"), (json!("0deg"), "Bottom to top")];
             vec![
-                info("Address", &url, &url, "In OBS: a Browser source with this address (about 1280 × 400 suits 3 lines). Uses the Stream Widget's port."),
-                button("previewOpen", "Preview", "Pop Out Preview", "A window showing it as it'll look, changing as you change these (before you save them)."),
+                info("Address", &url, &url, "Add this address as a Browser source in OBS. About 1280 × 400 fits 3 lines. It uses the Stream Widget's port."),
+                button("previewOpen", "Preview", "Pop Out Preview", "Opens a window that shows how it will look. It updates as you change these, before you save."),
                 note("What's shown"),
-                sel("lyricsStyle", "Style", "", &[(json!("karaoke"), "Karaoke (the line fills in as it's sung)"), (json!("highlight"), "Highlight (the line lit at once)"), (json!("plain"), "Plain (only brighter)")]),
+                sel("lyricsStyle", "Style", "", &[(json!("karaoke"), "Karaoke (each line fills in as it's sung)"), (json!("highlight"), "Highlight (each line lights up all at once)"), (json!("plain"), "Plain (only brighter)")]),
                 stepper("lyricsLines", "Lines Shown", "The one being sung and the next ones.", counts(1, 9)),
                 tog("lyricsBefore", "Show the Line Before", "The line just sung, above the one being sung."),
                 note("Auto Scroll"),
-                sel("lyricsScroll", "Scrolling", "How the lines move on as each one's sung.", &[(json!("smooth"), "Smooth (slides up)"), (json!("jump"), "Jump (straight to the next)")]),
+                sel("lyricsScroll", "Scrolling", "How the lines move on as each one's sung.", &[(json!("smooth"), "Smooth (slides up)"), (json!("jump"), "Jump (straight to the next line)")]),
                 stepper("lyricsScrollMs", "Scroll Speed", "How long each slide takes.", (100..=1500).step_by(100).map(|x| (json!(x), format!("{:.1} s", x as f64 / 1000.0))).collect()),
-                sel("lyricsScrollPlace", "Sung Line Sits At", "", &[(json!("top"), "The top (the next ones under it)"), (json!("middle"), "The middle (the ones sung above it)")]),
+                sel("lyricsScrollPlace", "Sung Line Sits At", "", &[(json!("top"), "At the top, with the next lines below"), (json!("middle"), "In the middle, with sung lines above")]),
                 tog("lyricsFadeEdges", "Fade the Edges", "Lines dissolve in at the bottom and out at the top, instead of being cut off."),
-                tog("lyricsTitle", "Track Info", "The song and artist above the lines. Off: only the lyrics."),
-                tog("lyricsHideNone", "Hide When There Are No Lyrics", "Nothing at all for a song without timed lyrics (not even its track info)."),
+                tog("lyricsTitle", "Track Info", "Shows the song and artist above the lines. When this is off, only the lyrics show."),
+                tog("lyricsHideNone", "Hide When There Are No Lyrics", "Shows nothing for songs without timed lyrics, not even the track info."),
                 tog("lyricsHidePaused", "Hide While Paused", ""),
                 note("The lines fade in a moment before their first words are sung, out after the last, and out over a long instrumental part."),
                 note("Text"),
@@ -513,7 +519,7 @@ fn fields_of(name: &str, vals: &Map<String, Value>, prefs: &Value, lan: &str) ->
                 color("lyricsColor", "Text Colour", ""),
                 tog("lyricsTextGrad", "Text Gradient", "From the text colour to a second one."),
                 color("lyricsColor2", "Text Gradient's Second Colour", ""),
-                tog("lyricsOwnHi", "Own Highlight Colour", "Off: the app's accent (from the album art, if that's on)."),
+                tog("lyricsOwnHi", "Own Highlight Colour", "When this is off, it uses the app's accent colour (from the album art, if that's on)."),
                 color("lyricsHi", "Highlight Colour", "The words being sung."),
                 tog("lyricsHiGrad", "Highlight Gradient", "From the highlight colour to a second one."),
                 color("lyricsHi2", "Highlight Gradient's Second Colour", ""),
@@ -533,18 +539,18 @@ fn fields_of(name: &str, vals: &Map<String, Value>, prefs: &Value, lan: &str) ->
                 sel("lyricsBoxDir", "Box Gradient Direction", "", &dirs),
                 range("lyricsBoxOpacity", "Box Opacity", "", 0.0, 1.0, 0.05, "%", false),
                 note("Timing"),
-                num("lyricsOffset", "Timing", "In ms, -5000 to 5000: later (above 0) or earlier, to match your stream's delay or a song whose lyrics run early."),
+                num("lyricsOffset", "Timing", "In milliseconds, from -5000 to 5000. Use a positive number to show lyrics later, or a negative one to show them earlier. Match it to your stream delay, or to a song whose lyrics run early."),
             ]
         }
         // Smart Transitions' own page
         "smart" => vec![
-            note("Seamless Mix is WIP: still being built, so some transitions may not sound right yet. Rating them (Stream Deck: Mix Good / Mix Bad) helps."),
+            note("Seamless Mix is still being built, so some transitions may not sound right yet. Rating them on your Stream Deck (Mix Good or Mix Bad) helps."),
             sel("smartMax", "Longest Fade", "The most the two songs play over each other. Each pair gets as long as the shorter of the song playing's outro and the next one's intro, up to this.", &[(json!(6), "6 s"), (json!(8), "8 s"), (json!(10), "10 s"), (json!(12), "12 s"), (json!(16), "16 s"), (json!(20), "20 s")]),
-            tog("smartBlend", "Beatmatched Blends", "Two songs with a clear beat, within 4% of each other's tempo and in keys that go together, blend on the beat: the next one at the playing one's tempo (its pitch kept), on a phrase, the bass swapped on a bar line. Off: always a fade."),
-            tog("smartKeys", "Match Keys", "Two songs in keys that clash: the next one comes in shifted into the playing one's key, then both are moved together over the blend, as the tempo is, to the next one's own key by the time it takes over. They're in key with each other all the way. Off: never shifted (a clash kept brief instead)."),
-            tog("smartVoices", "Vocal Handoff", "The two songs' vocals are never sung over each other: the one playing's voice drops out as the next one's comes in (on a blend's bar line, or halfway through a fade). It takes out what's in the middle of the mix, as a karaoke switch does, so it can thin other centred sounds too; the bass and drums' low end stay."),
-            tog("smartRoll", "Rolls", "Songs too far apart to blend: the one playing's last bar before a phrase line loops, halving (a bar, a half, a quarter, an eighth) as a build, and the next one lands on its downbeat at its own tempo. Stops by itself if your ratings turn it down (5 rated, most of them bad)."),
-            tog("smartTape", "Tape Stops", "Songs too far apart to blend: the one playing slows to a halt and the next spins up. Only once your ratings back them (at least 5 rated, most of them good)."),
+            tog("smartBlend", "Beatmatched Blends", "Songs with a clear beat, close in tempo (within 4%) and in matching keys, blend on the beat. The next song plays at the current song's tempo without changing pitch, starts on a phrase, and takes over the bass on a bar line. When this is off, songs always fade."),
+            tog("smartKeys", "Match Keys", "When two songs' keys clash, the next song comes in shifted to the current song's key. Both then move to the next song's own key during the blend, so they stay in key the whole time. When this is off, keys aren't shifted and clashes are kept short."),
+            tog("smartVoices", "Vocal Handoff", "Stops two songs' vocals from overlapping. The current song's voice drops out as the next song's voice comes in. It works like a karaoke switch, so it can also quiet other sounds in the centre of the mix. Bass and low drums aren't affected."),
+            tog("smartRoll", "Rolls", "For songs too different to blend, the current song's last bar loops, halving each time (a bar, a half, a quarter, an eighth) to build up. The next song then lands on its first beat at its own tempo. It turns itself off if most of your ratings for it (at least 5) are bad."),
+            tog("smartTape", "Tape Stops", "For songs too different to blend, the current song slows to a stop and the next one spins up. It only starts once most of your ratings for it (at least 5) are good."),
         ],
         // Limit Requests' own page (as the web app's, under it)
         "limits" => vec![
@@ -567,7 +573,7 @@ fn fields_of(name: &str, vals: &Map<String, Value>, prefs: &Value, lan: &str) ->
         "safe" => crate::streamsafe::panel_fields(prefs),
         "plugins" => plugin_fields(prefs),
         "offset" => vec![
-            num("out2Offset", "Offset", "In ms, -5000 to 5000: how much later (or, below 0, earlier) OmniPulse Offset plays than you hear."),
+            num("out2Offset", "Offset", "In milliseconds, from -5000 to 5000. How much later OmniPulse Offset plays than what you hear. Use a negative number for earlier."),
             range("out2Volume", "Volume", "", 0.0, 1.0, 0.01, "%", false),
             button("out2Restart", "Not Being Heard?", "Restart OmniPulse Offset", "Starts OmniPulse Offset again, fresh, without stopping your music."),
         ],
@@ -598,11 +604,11 @@ pub fn plug_access(m: &omnipulse_core::plugins::Manifest) -> (Vec<String>, Vec<S
     if caps.contains("play") || caps.is_empty() { can.push("Play its songs, from its own sites, and know when you play one".into()); }
     if caps.contains("library") { can.push("Add its saved songs to your Library".into()); }
     if caps.contains("sockets") { can.push("Keep live connections open to its sites (a chat, its events)".into()); }
-    if caps.contains("app") { warn.push("It can use the app: add songs to your queue as requests, show alerts, read what's playing, open its sign-in pages in your browser and keep its own settings. Only allow this for a plugin you trust.".into()); }
+    if caps.contains("app") { warn.push("Lets the plugin use the app: add songs to your queue as requests, show alerts, read what's playing, open its sign-in pages in your browser, and keep its own settings. Only allow this for plugins you trust.".into()); }
     if !web.is_empty() { can.push(format!("Connect to {}", web.join(", "))); }
     if !local.is_empty() { warn.push(format!("It can connect to programs running on this PC ({}). Only allow this if you know what it talks to.", local.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(", "))); }
     let sets = m.settings.as_array().cloned().unwrap_or_default();
-    if sets.iter().any(|x| x["type"] == "password") { can.push("Keep a password or key you give it, on this PC; it can send that to the sites above".into()); }
+    if sets.iter().any(|x| x["type"] == "password") { can.push("Saves a password or key you give it on this PC. The plugin can send it to the sites above.".into()); }
     else if !sets.is_empty() { can.push("Keep its own settings, on this PC".into()); }
     cannot.push(if m.hosts.is_empty() { "Connect to the internet".into() } else { "Connect to any other site".into() });
     cannot.extend(["See your accounts or sign-ins (SoundCloud, Spotify, YouTube Music, Last.fm, Discord)", "Open, read or change your files", "See your playlists, Library, listening history or settings", "Change anything else in the app"].map(String::from));
@@ -612,7 +618,7 @@ pub fn plug_access(m: &omnipulse_core::plugins::Manifest) -> (Vec<String>, Vec<S
 fn plugin_fields(_prefs: &Value) -> Vec<Value> {
     let mut f = vec![
         note("Music sources made by others. Each is walled off and only reaches the sites it lists."),
-        text("plugSource", "Add a Plugin", "Its manifest.json: a web address, or a file on this PC."),
+        text("plugSource", "Add a Plugin", "The plugin's manifest.json, as a web address or a file on this PC."),
         button("plugFile", "", "Choose File...", ""),
         button("plugCheck", "", "Read It", "Shows what it would be able to do, before anything's added."),
     ];

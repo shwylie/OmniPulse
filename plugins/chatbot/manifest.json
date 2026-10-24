@@ -3,7 +3,7 @@
   "name": "OmniPulse Chatbot",
   "version": "0.2.7",
   "author": "OmniPulse",
-  "description": "OmniPulse's own chatbot: song requests, alerts, your own actions (a trigger, then its steps) and OBS controls, straight from your chat, no other bot needed. Twitch and Kick; YouTube is on its way.",
+  "description": "OmniPulse's own chatbot. Song requests, alerts, your own actions and OBS controls, straight from your chat, with no other bot needed. Works with Twitch and Kick, and YouTube is coming.",
   "main": "main.js",
   "hosts": [
     "id.twitch.tv",
@@ -40,7 +40,7 @@
       "type": "button",
       "press": "Sign In with Twitch",
       "call": "signInChannel",
-      "note": "Your own Twitch account: your chat and its events (follows, subs, bits, raids...)."
+      "note": "Your own Twitch account, for your chat and its events (follows, subs, bits, raids...)."
     },
     {
       "key": "twitchSignInCopy",
@@ -64,7 +64,7 @@
       "type": "button",
       "press": "Copy Sign-In Link",
       "call": "signInBotCopy",
-      "note": "Paste it into a private window and sign in as the bot there: your own account stays signed in in your browser."
+      "note": "Paste it into a private window and sign in as the bot there. You stay signed in to your own account in your normal browser."
     },
     {
       "key": "twitchSignOut",
@@ -79,21 +79,21 @@
       "label": "Kick",
       "type": "toggle",
       "default": false,
-      "note": "Your Kick chat too: song requests, your actions and alerts from it."
+      "note": "The chatbot also answers your Kick chat, with song requests, your actions and alerts."
     },
     {
       "key": "kickChannel",
       "label": "Kick Channel",
       "type": "text",
       "default": "",
-      "note": "Its name, as in kick.com/name (filled in when you sign in)."
+      "note": "The name in your kick.com address. It's filled in when you sign in."
     },
     {
       "key": "kickClientId",
       "label": "Kick Client ID",
       "type": "text",
       "default": "",
-      "note": "Your own Kick app: kick.com, Settings > Developer, Create App, its Redirect URL http://localhost:8476/kick, all its scopes ticked. Then copy its Client ID here."
+      "note": "Your own Kick app. On kick.com, open Settings > Developer and click Create App. Set its Redirect URL to http://localhost:8476/kick and tick all its scopes. Then copy its Client ID here."
     },
     {
       "key": "kickClientSecret",
@@ -108,7 +108,7 @@
       "type": "button",
       "press": "Sign In with Kick",
       "call": "signInKick",
-      "note": "Your Kick account: the chatbot answers as it."
+      "note": "Your Kick account. The chatbot answers as you."
     },
     {
       "key": "kickSignInCopy",
@@ -116,7 +116,7 @@
       "type": "button",
       "press": "Copy Sign-In Link",
       "call": "signInKickCopy",
-      "note": "The sign-in link copied instead: open it in a private window on this PC."
+      "note": "Copies the sign-in link instead. Open it in a private window on this PC."
     },
     {
       "key": "kickBotSignIn",
@@ -132,7 +132,7 @@
       "type": "button",
       "press": "Copy Sign-In Link",
       "call": "signInKickBotCopy",
-      "note": "Paste it into a private window on this PC and sign in as the bot there: your own account stays signed in in your browser."
+      "note": "Paste it into a private window on this PC and sign in as the bot there. You stay signed in to your own account in your normal browser."
     },
     {
       "key": "kickSignOut",
@@ -146,14 +146,14 @@
       "key": "actionsOpen",
       "label": "Actions",
       "type": "actions",
-      "note": "What your chatbot does and when: each action a trigger (a command, a message, an event, a timer, the music), then its steps, in order."
+      "note": "What your chatbot does and when. Each action has a trigger (a command, a message, an event, a timer or the music), then steps that run in order."
     },
     {
       "key": "pointsOn",
       "label": "Points",
       "type": "toggle",
       "default": false,
-      "note": "A currency of your own, as Mix It Up's: viewers get some for chatting while you're live, to spend in your actions (Give or Take Points)."
+      "note": "Your own currency, like Mix It Up's. Viewers earn some for chatting while you're live, and spend them in your actions."
     },
     {
       "key": "pointsName",
@@ -188,14 +188,14 @@
       "label": "Points While Offline Too",
       "type": "toggle",
       "default": false,
-      "note": "Off: only while you're live."
+      "note": "When this is off, viewers only earn points while you're live."
     },
     {
       "key": "obsOn",
       "label": "OBS",
       "type": "toggle",
       "default": false,
-      "note": "Your actions can switch scenes, show and hide sources and more. In OBS: Tools > WebSocket Server Settings, Enable WebSocket server; its password below."
+      "note": "Your actions can switch scenes, show or hide sources, and more. In OBS, open Tools > WebSocket Server Settings, tick Enable WebSocket server, and enter its password below."
     },
     {
       "key": "obsAddress",
@@ -216,14 +216,14 @@
       "label": "Streamlabs Donations",
       "type": "password",
       "default": "",
-      "note": "Your Socket API Token, from streamlabs.com: Settings > API Settings > API Tokens. Donations then come in as A Donation, and as alerts. Empty: none."
+      "note": "Your Socket API Token. On streamlabs.com, open Settings > API Settings > API Tokens. Donations then start A Donation actions and show as alerts. Leave it empty to turn this off."
     },
     {
       "key": "streamelementsToken",
       "label": "StreamElements Tips",
       "type": "password",
       "default": "",
-      "note": "Your JWT Token, from streamelements.com: your account's Channels page (Show Secrets). Empty: none."
+      "note": "Your JWT Token. On streamelements.com, open your account's Channels page and click Show Secrets. Leave it empty to turn this off."
     },
     {
       "key": "requests",
@@ -251,7 +251,7 @@
       "label": "Your Commands (the Old Way)",
       "type": "text",
       "default": "!discord = Join the Discord: https://discord.gg/yours; !socials = Find me everywhere as @me",
-      "note": "Moved into Actions the first time they're opened; until then, each one as \"!name = its reply\"."
+      "note": "These move into Actions the first time you open Actions. Until then, write each one as \"!name = its reply\"."
     }
   ]
 }

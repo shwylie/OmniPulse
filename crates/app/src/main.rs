@@ -482,7 +482,7 @@ fn open_page_now(shared: &Shared, page: &str) {
         }
         "favourites" => {
             let fav = marks::favourites(&shared.borrow().web.favourites);
-            let sub = if fav.is_empty() { "Starred tracks show here (from the web app, until this one can star them).".to_string() } else { format!("Starred tracks from every platform. {}.", plural(fav.len(), "track", "tracks")) };
+            let sub = if fav.is_empty() { "Your starred tracks show here. Until this app can star tracks, they come from the web app.".to_string() } else { format!("Starred tracks from every platform. {}.", plural(fav.len(), "track", "tracks")) };
             show_tracks(shared, "favourites", "Favourites", sub, fav, true);
         }
         "sets" => {
@@ -512,7 +512,7 @@ fn open_page_now(shared: &Shared, page: &str) {
             let pool = queue::alternate_platforms(pool);
             let none = { let a = shared.borrow(); a.web.favourites.is_empty() && !a.library.iter().any(|t| t.plat() != "local") };
             // (nothing liked yet: asked for some, as the web app's card)
-            let sub = if none { "Get better recommendations: add some music to your likes or favourites (the heart or the star on any song), and Discover and Rediscover will be built around it.".to_string() } else if pool.is_empty() { "You've played all your likes recently.".to_string() } else { "Likes you haven't heard in a month or more, the longest-forgotten first.".to_string() };
+            let sub = if none { "For better recommendations, add some music to your likes or favourites with the heart or the star on any song. Discover and Rediscover will be built around it.".to_string() } else if pool.is_empty() { "You've played all your likes recently.".to_string() } else { "Likes you haven't heard in a month or more, the longest-forgotten first.".to_string() };
             show_tracks(shared, "rediscover", "Rediscover", sub, pool, true);
             page_albums_load(shared, "rediscover", "Rediscover");
         }
@@ -929,7 +929,7 @@ fn library_albums(shared: &Shared) {
             if ui.get_page_kind() != "albumgrid" { return; }
             let model = Rc::new(VecModel::from(list.iter().map(|f| { let (t, sub, _, plat) = f.tile(); Tile { title: t.into(), sub: sub.into(), art: slint::Image::default(), plat: plat.into(), genre: false, c1: Default::default(), c2: Default::default(), track: false, liked: false, row: Default::default(), miss: false } }).collect::<Vec<_>>()));
             ui.set_album_tiles(ModelRc::from(model.clone()));
-            ui.set_page_sub(if n == 0 { "No saved albums yet: save some on Spotify, like some on SoundCloud, or add music files with their album names.".to_string() } else { format!("{}: saved on Spotify, liked on SoundCloud, and your files'.", plural(n, "album", "albums")) }.into());
+            ui.set_page_sub(if n == 0 { "No saved albums yet. Save some on Spotify, like some on SoundCloud, or add music files that have album names.".to_string() } else { format!("{}: saved on Spotify, liked on SoundCloud, and your files'.", plural(n, "album", "albums")) }.into());
             ALBUM_MODEL.with(|m| *m.borrow_mut() = Some(model));
             ALBUMS.with(|a| *a.borrow_mut() = list);
         });
@@ -2287,7 +2287,7 @@ fn open_streamer(shared: &Shared) {
     ui.set_page("streamer".into());
     ui.set_page_kind("discover".into());
     ui.set_page_title("Streamer Mode".into());
-    ui.set_page_sub("Music that's safe on stream: artists and labels cleared for streaming, Creative Commons music, and your safe likes.".into());
+    ui.set_page_sub("Music that's safe on stream: artists and labels cleared for streaming, Creative Commons music, and the likes you've marked safe.".into());
     ui.set_chips(ModelRc::default());
     let prefs = shared.borrow().web.prefs.clone();
     let shelves: Vec<(String, Vec<(String, StreamColl)>)> = vec![
@@ -2962,7 +2962,7 @@ fn queue_add(shared: &Shared, t: Track, next: bool) {
     }
     if let Some(kind) = listening() {
         let note = if kind != "jam" {
-            "You're listening along: only a Jam takes songs from listeners.".to_string()
+            "You're listening along. Only a Jam takes songs from listeners.".to_string()
         } else {
             listen_send(serde_json::json!({ "type": "add", "track": t.to_snapshot(), "next": next }));
             format!("Sent \"{}\" to the Jam{}", t.title, if next { ", to play next." } else { "." })
@@ -3084,7 +3084,7 @@ fn paint_queue_rows(a: &mut App, coming: Option<usize>) {
 
 fn autoplay_note(a: &App) -> String {
     if !a.autoplay {
-        "Off: playback stops at the end of your queue.".into()
+        "When this is off, playback stops at the end of your queue.".into()
     } else if a.ap_busy {
         "Finding similar tracks...".into()
     } else if a.ap_failed.is_some() && a.ap_failed.as_deref() == a.queue.current().map(|t| t.key.as_str()) {
@@ -3647,7 +3647,7 @@ fn sb_tick(shared: &Shared, pos: u64, dur: u64) -> bool {
     let ui = shared.borrow().ui.upgrade();
     // a part that runs to the end: the song's over
     if dur > 0 && seg.1 * 1000.0 >= dur as f64 - 1500.0 {
-        if let Some(ui) = ui { ui.set_status(format!("Skipped the last {secs} s (not music, marked on SponsorBlock).").into()); }
+        if let Some(ui) = ui { ui.set_status(format!("Skipped the last {secs} s, which isn't music (marked on SponsorBlock).").into()); }
         step(shared, 1);
         return true;
     }
@@ -3701,7 +3701,7 @@ async fn full_elsewhere(t: &Track, h: tokio::runtime::Handle) -> (Result<Option<
         if let Some(id) = mirror::counterpart(t, "spotify").await {
             let uri = if id.contains(':') { id } else { format!("spotify:track:{id}") };
             let sp = Track { src: track::Src::Spotify(uri.clone()), key: format!("sp:{}", uri.rsplit(':').next().unwrap_or("")), ..t.clone() };
-            omnipulse_core::diag::note(&format!("Go+: \"{}\" plays from Spotify (no YouTube Music version)", t.title));
+            omnipulse_core::diag::note(&format!("Go+: \"{}\" plays from Spotify, as there's no YouTube Music version", t.title));
             return (player::open_source(&sp, h).await.map(Some), None);
         }
     }
@@ -3928,7 +3928,7 @@ fn mix_tick(shared: &Shared, pos: u64, dur: u64) {
                 }
                 // (it couldn't be got ready: the usual way, then)
                 Err(e) => {
-                    omnipulse_core::diag::note(&format!("Seamless Mix: couldn't get the next one ready: {e}"));
+                    omnipulse_core::diag::note(&format!("Seamless Mix couldn't get the next song ready: {e}"));
                     MIX.with(|m| *m.borrow_mut() = None);
                     // (Smart Transitions: a fade instead)
                     if smart { SMART_PAIR.with(|s| { if let Some(x) = s.borrow_mut().as_mut() { x.2 = None; x.3 = format!("couldn't be got ready: {e}"); } }); }
@@ -4146,7 +4146,7 @@ fn mix_started(shared: &Shared) {
     // (where the mix begins in the one going out: its place, shown, from there)
     let plan_at = plan.at_ms;
     let at = shared.borrow().queue.qi.map(|i| i + 1).filter(|&n| shared.borrow().queue.items.get(n).is_some_and(|q| q.t.key == key));
-    let Some(n) = at else { omnipulse_core::diag::note("Seamless Mix: its moment came, but the next one wasn't next any more"); return };
+    let Some(n) = at else { omnipulse_core::diag::note("Seamless Mix: the next song changed before the mix started"); return };
     // (each beat of the one coming in, at its own tempo, for easing back over sixteen of them)
     let ease_ms = omnipulse_core::rhythm::known(&key).map(|m| (16.0 * m.rhythm.period_ms) as u64).unwrap_or(8000);
     // (Smart Transitions' blends: back to its own tempo slowly enough not to be heard)
@@ -4540,7 +4540,7 @@ fn flows_wire(ui: &AppWindow, shared: &Shared) {
             }
             "paste" => {
                 let text = arboard::Clipboard::new().and_then(|mut c| c.get_text()).unwrap_or_default();
-                if text.trim().is_empty() { if let Some(ui) = s.borrow().ui.upgrade() { ui.set_status("Nothing to paste: in Streamer.bot, Export, then Copy the code it gives you.".into()); } return; }
+                if text.trim().is_empty() { if let Some(ui) = s.borrow().ui.upgrade() { ui.set_status("Nothing to paste. In Streamer.bot, click Export, then copy the code it gives you.".into()); } return; }
                 flows_restored(&s, botimport::restore_text(&text));
             }
             "run" => {
@@ -4814,7 +4814,7 @@ fn play_list(shared: &Shared, list: Vec<Track>, i: usize) {
                 listen_send(serde_json::json!({ "type": "add", "track": t.to_snapshot(), "next": true }));
                 format!("Sent \"{}\" to the Jam, to play next.", t.title)
             }
-            _ => "You're listening along: leave first (the button at the top) to play your own music.".to_string(),
+            _ => "You're listening along. To play your own music, leave first with the button at the top.".to_string(),
         };
         if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_status(note.into()); }
         return;
@@ -5293,7 +5293,7 @@ fn smart_fade_tick(shared: &Shared, key: &str, pos: u64, dur: u64) -> Option<boo
     let ms = f.len_ms().min((left.max(0) as u64).max(smart::MIN_FADE_MS));
     let why = SMART_PAIR.with(|s| s.borrow().as_ref().map(|x| x.3.clone())).unwrap_or_default();
     // (in the log too, why it's a fade and not a blend: what to look at when they're all fades)
-    omnipulse_core::diag::note(&format!("Seamless Mix: a fade, not a blend ({} into {}): {}", a.t.title, b.t.title, if why.is_empty() { "neither measured yet" } else { why.as_str() }));
+    omnipulse_core::diag::note(&format!("Seamless Mix used a fade instead of a blend ({} into {}): {}", a.t.title, b.t.title, if why.is_empty() { "neither measured yet" } else { why.as_str() }));
     MIX_WHY.with(|m| *m.borrow_mut() = Some((a.t.key.clone(), b.t.key.clone(), format!("smart fade: {ms} ms from {} to {}, the next one from {} ms (not on the beat: {why})", f.out_from_ms, f.out_to_ms, f.in_from_ms))));
     FADE.with(|fd| *fd.borrow_mut() = (true, key.to_string()));
     XFADE.with(|x| *x.borrow_mut() = Some((ms, std::time::Instant::now())));
@@ -5839,7 +5839,7 @@ fn remote_action(shared: &Shared, id: u64, action: &str) {
                     let _ = weak.upgrade_in_event_loop(move |ui| ui.set_status(match r { Ok(v) => v.as_str().map(String::from).unwrap_or_else(|| "Done.".into()), Err(e) => e }.into()));
                 });
             }
-            None => note = Some("The chatbot isn't on: switch it on in OmniPulse (Settings > Plugins)."),
+            None => note = Some("The chatbot isn't on. Turn it on in Settings > Plugins."),
         },
         _ => note = Some("That button isn't in the native app yet."),
     }
@@ -5984,31 +5984,31 @@ fn song_request(shared: &Shared, reply: ReqReply, q: String, user: String) {
 // ---------- Settings: the switches beyond Look ----------
 // (section, label, note, key, on unless switched off)
 const SET_ROWS: [(&str, &str, &str, &str, bool); 28] = [
-    ("Library", "Sets & Podcasts in the Queue", "Lists and autoplay include anything over 15 minutes. Off: only when you pick one.", "queueSets", false),
+    ("Library", "Sets & Podcasts in the Queue", "Lists and autoplay include anything over 15 minutes. When this is off, they only play when you pick one.", "queueSets", false),
     ("Library", "Autoplay", "Plays similar tracks when the queue runs out.", "autoplay", true),
-    ("Library", "Hidden & Not Recommended", "Right-click a track to stop it, its album or its artist being recommended. Off: nothing is left out; the lists are kept.", "hideOn", true),
+    ("Library", "Hidden & Not Recommended", "Right-click a track to stop it, its album or its artist from being recommended. When this is off, nothing is left out, but your lists are kept.", "hideOn", true),
     ("Library", "Avoid Recent Plays", "Skips songs you've heard lately in what the app picks for you. What you choose yourself still plays.", "avoidRecent", true),
-    ("Sound", "Seamless Mix (WIP)", "WIP: songs change over as DJ software does it: on the beat and on a phrase, the tempo and keys ridden together. Its gear: how. Off: they change over as Fade Between Tracks is set.", "smartOn", false),
-    ("Library", "Skip non-music parts", "What plays from YouTube skips the parts of music videos that aren't music (a skit before the song, an interview after it), as marked on SponsorBlock.", "sbOn", true),
+    ("Sound", "Seamless Mix (WIP)", "Still being built. Songs change over like DJ software does it: on the beat and on a phrase, with tempo and key matched. Use the gear to adjust it. When it's off, songs change over as Fade Between Tracks is set.", "smartOn", false),
+    ("Library", "Skip non-music parts", "When music plays from YouTube, skips the parts of music videos that aren't music, like a skit before the song or an interview after it, as marked on SponsorBlock.", "sbOn", true),
     ("Library", "Favourites Page", "Your starred tracks on a page of their own, in the sidebar. The stars stay either way.", "favPage", true),
     ("Library", "Sets & Podcasts Page", "A page for anything over 15 minutes, in the sidebar. Right-click it there to hide it.", "setsOn", true),
     ("Library", "Stats", "Your listening, in the sidebar. Right-click it there to hide it.", "statsShown", true),
-    ("Integrations", "SoundCloud", "Its likes, playlists and search.", "scOn", true),
-    ("Integrations", "Spotify", "Its likes, playlists and search.", "spOn", true),
+    ("Integrations", "SoundCloud", "Your likes, playlists and search.", "scOn", true),
+    ("Integrations", "Spotify", "Your likes, playlists and search.", "spOn", true),
     ("Integrations", "YouTube Music", "Search, radio, and Go+ tracks in full.", "ytOn", true),
-    ("Integrations", "Deezer and Apple Music catalogues", "Open music catalogues, no account needed: search, Discover and artist pages find their songs, and they play from YouTube Music.", "catOn", true),
-    ("Integrations", "MusicBrainz", "An open music catalogue: search finds its songs too, and they play from YouTube Music.", "mbOn", true),
-    ("Integrations", "Listen Along & Jams", "Listen together with friends, from your Discord status or a Jam invite. Off: no Jam button, and invites and requests are turned away (song requests aren't affected).", "jamsOn", true),
+    ("Integrations", "Deezer and Apple Music catalogues", "Open music catalogues, with no account needed. Search, Discover and artist pages find their songs, and they play from YouTube Music.", "catOn", true),
+    ("Integrations", "MusicBrainz", "An open music catalogue. Search finds its songs too, and they play from YouTube Music.", "mbOn", true),
+    ("Integrations", "Listen Along & Jams", "Listen together with friends, from your Discord status or a Jam invite. When this is off, there's no Jam button, and invites and requests are turned away. Song requests aren't affected.", "jamsOn", true),
     ("Integrations", "Last.fm Scrobbling", "What you play goes to your Last.fm profile.", "scrobble", true),
-    ("Integrations", "Like Other Tracks There Too", "With your YouTube account connected: liking a SoundCloud or Spotify track likes the same song on YouTube.", "ytMirror", false),
+    ("Integrations", "Like Other Tracks There Too", "When your YouTube account is connected, liking a SoundCloud or Spotify track also likes it on YouTube.", "ytMirror", false),
     ("Integrations", "Follow Everywhere", "Following an artist on one platform follows them on the others.", "followEverywhere", true),
-    ("Integrations", "Chromecast", "Speakers and TVs on your network, to play to: they show with Windows' devices, where the sound plays.", "castOn", false),
+    ("Integrations", "Chromecast", "Play to speakers and TVs on your network. They show up with Windows' sound devices.", "castOn", false),
     ("Streaming", "Streamer Mode", "Hides account names, keys, addresses and plugin settings. The title bar's button does this too.", "streamerMode", false),
-    ("Streaming", "Extended", "Also leaves out music that isn't safe on stream: only open licences, and artists and labels cleared for streaming.", "streamSafe", false),
+    ("Streaming", "Extended", "Also leaves out music that isn't safe on stream. Only openly licensed music, and artists and labels cleared for streaming, play.", "streamSafe", false),
     ("Integrations", "Discord Status", "Shows what you're playing on your Discord profile.", "presence", false),
     ("Streaming", "Stream Widget", "A now-playing card for OBS, with alerts.", "widget", false),
-    ("Streaming", "Lyrics Widget", "The playing song's lyrics for OBS, for karaoke: the line being sung lit up as it's sung, the next ones under it. Settings for its look.", "lyricsWidget", false),
-    ("Streaming", "Alerts", "On the widget: follows, subs, bits, raids and more, from your bot.", "alertsOn", false),
+    ("Streaming", "Lyrics Widget", "Shows the playing song's lyrics in OBS, karaoke style. The line being sung lights up, with the next lines below it.", "lyricsWidget", false),
+    ("Streaming", "Alerts", "Shows follows, subs, bits, raids and more from your bot, on the widget.", "alertsOn", false),
     ("Streaming", "Song Requests", "Chat asks for songs through your bot.", "req", false),
     ("Streaming", "OmniPulse Offset", "Your music a second time, as its own app (\"OmniPulse Offset\"), to send to a stream mix only, with an offset and a volume of its own. Use this to sync up with mic delay.", "out2On", false),
     ("Streaming", "Stream Deck & Remote", "Control the app from a Stream Deck or another device.", "remoteOn", false),
@@ -6055,7 +6055,7 @@ fn paint_settings(a: &App) {
             for p in omnipulse_core::plugins::list() {
                 let m = &p.manifest;
                 let state = plugin_state(&a.web.prefs, m);
-                let home = if m.section.is_empty() { String::new() } else { format!("Its settings are in Settings > {}; off here, it's gone from there too. ", m.section) };
+                let home = if m.section.is_empty() { String::new() } else { format!("Its settings are in Settings > {}. Turning it off here removes it from there too. ", m.section) };
                 let note = format!("{}{}{home}{}", if m.description.is_empty() { String::new() } else { format!("{} ", m.description) }, if p.bundled { "Comes with OmniPulse. " } else { "" }, state);
                 // (its settings, from here too: a plugin with a page elsewhere (the chatbot's, in Streaming) goes there, once it's on)
                 let more = if m.section.is_empty() { m.settings.as_array().is_some_and(|l| !l.is_empty()) } else { plugin_on(&a.web.prefs, &m.id) };
@@ -6372,7 +6372,7 @@ fn bot_poll_soon(shared: &Shared) {
 fn bot_try(shared: &Shared, text: &str) {
     BOT_TRIED.with(|t| { let mut t = t.borrow_mut(); t.push(("You".into(), text.to_string())); });
     let Some(p) = plugrun::get(botpage::BOT) else {
-        BOT_TRIED.with(|t| t.borrow_mut().push(("Bot".into(), "(it's stopped: start it, top right of its card, to try it)".into())));
+        BOT_TRIED.with(|t| t.borrow_mut().push(("Bot".into(), "(The chatbot is stopped. Start it with the button on its card to try it.)".into())));
         return bot_paint(shared);
     };
     bot_paint(shared);
@@ -6384,7 +6384,7 @@ fn bot_try(shared: &Shared, text: &str) {
             let lines: Vec<String> = match r { Ok(v) => v.as_array().into_iter().flatten().filter_map(|x| x.as_str().map(String::from)).collect(), Err(e) => vec![format!("(couldn't: {e})")] };
             BOT_TRIED.with(|t| {
                 let mut t = t.borrow_mut();
-                if lines.is_empty() { t.push(("Bot".into(), "(nothing answers that: no command or action matches it)".into())); }
+                if lines.is_empty() { t.push(("Bot".into(), "(Nothing would answer that. No command or action matches it.)".into())); }
                 for l in lines { t.push(("Bot".into(), l)); }
                 let n = t.len();
                 if n > 8 { t.drain(..n - 8); }
@@ -6475,11 +6475,11 @@ const SET_HAND: [(&str, &str, &str); 24] = [
     ("App & Look", "List Density", "How tightly tracks are listed. Compact fits more on screen."),
     ("App & Look", "Visualiser", "The music as it plays: Bars, Mirror, Peaks, Blocks, Wave, Centre or a Glow, on Now Playing, in the player, or full screen."),
     ("App & Look", "Display Name", "Shown in the title bar and taskbar."),
-    ("App & Look", "Minimize to Tray", "Minimizing hides the window to the tray; music keeps playing. Open it again, or quit, from the tray's menu."),
+    ("App & Look", "Minimize to Tray", "Minimizing hides the window in the tray, and the music keeps playing. Use the tray's menu to open it again or quit."),
     ("App & Look", "Taskbar Widget", "What's playing, always on show in the taskbar by the clock, with its controls."),
     ("App & Look", "Hardware Acceleration", "Draws the app with your graphics card. Takes effect the next time OmniPulse starts."),
     ("App & Look", "Animations", "Fades and motion."),
-    ("App & Look", "Rounded Corners", "On the sidebar, the page and the queue. Off: square."),
+    ("App & Look", "Rounded Corners", "Rounds the corners of the sidebar, the page and the queue. Turn it off for square corners."),
     ("App & Look", "Back Up & Restore", "Your settings, keys, favourites, playlists, stats and alerts, in one .zip."),
     ("Integrations", "Accounts", "SoundCloud, Spotify, YouTube Music and Last.fm: signing in and out, and each one's switch."),
     ("Library", "Music Folders", "Folders on this PC or a network drive. Their music shows in your Library."),
@@ -6604,6 +6604,38 @@ fn panel_open(shared: &Shared, name: &str) {
     }
 }
 
+/// The Lyrics Widget's look as it's set, for its page's preview
+fn lyrics_look(v: &serde_json::Map<String, serde_json::Value>) -> LyricsLook {
+    let col = |k: &str, d: &str| {
+        let h = v.get(k).and_then(|x| x.as_str()).unwrap_or(d).trim_start_matches('#').to_string();
+        let n = u32::from_str_radix(if h.len() == 6 { &h } else { d.trim_start_matches('#') }, 16).unwrap_or(0xffffff);
+        slint::Color::from_rgb_u8((n >> 16) as u8, (n >> 8) as u8, n as u8)
+    };
+    let on = |k: &str, d: bool| v.get(k).and_then(|x| x.as_bool()).unwrap_or(d);
+    let num = |k: &str, d: f64| v.get(k).and_then(|x| x.as_f64()).unwrap_or(d);
+    let st = |k: &str, d: &str| v.get(k).and_then(|x| x.as_str()).unwrap_or(d).to_string();
+    LyricsLook {
+        color: col("lyricsColor", "#ffffff"),
+        hi: col("lyricsHi", "#8e9bff"),
+        own_hi: on("lyricsOwnHi", false),
+        dim: num("lyricsDim", 0.45) as f32,
+        size: num("lyricsSize", 48.0) as f32,
+        align: st("lyricsAlign", "center").into(),
+        style: st("lyricsStyle", "karaoke").into(),
+        shadow: on("lyricsShadow", true),
+        outline: on("lyricsOutline", false),
+        outline_color: col("lyricsOutlineColor", "#000000"),
+        boxed: on("lyricsBox", false),
+        box_color: col("lyricsBoxColor", "#0a0a0e"),
+        box_opacity: num("lyricsBoxOpacity", 0.62) as f32,
+        title: on("lyricsTitle", true),
+        before: on("lyricsBefore", false),
+        lines: num("lyricsLines", 3.0) as i32,
+        upper: st("lyricsTransform", "none") == "uppercase",
+        place: st("lyricsPlace", "").into(),
+    }
+}
+
 fn panel_paint(shared: &Shared, name: &str, vals: &serde_json::Map<String, serde_json::Value>) {
     let fields = panels::fields(name, vals, &shared.borrow().web.prefs, &omnipulse_core::lan_ip().unwrap_or_else(|| "THIS-PC".into()));
     let text = |v: &serde_json::Value| match v { serde_json::Value::String(s) => s.clone(), serde_json::Value::Null => String::new(), x => x.to_string() };
@@ -6615,20 +6647,20 @@ fn panel_paint(shared: &Shared, name: &str, vals: &serde_json::Map<String, serde
         let now = if kind == "togglecfg" { serde_json::json!(set_row_on(&shared.borrow().web.prefs, &key, false)) } else { vals.get(&key).cloned().unwrap_or_default() };
         let labels = || -> Vec<slint::SharedString> { f["labels"].as_array().into_iter().flatten().filter_map(|x| x.as_str().map(slint::SharedString::from)).collect() };
         let options: Vec<slint::SharedString> = match kind.as_str() {
-            "row" | "select" | "stepper" | "wave" => labels(),
+            "row" | "select" | "designpick" | "stepper" | "wave" => labels(),
             "range" | "rangenum" => vec![f["min"].to_string().into(), f["max"].to_string().into(), f["step"].to_string().into(), f["unit"].as_str().unwrap_or("").into()],
             "togglecfg" => vec!["Configure".into()],
             _ => Vec::new(),
         };
         // (where it is among its options; a colour: its value as 0xRRGGBB, -1 if it isn't one)
         let at: i32 = match kind.as_str() {
-            "select" | "stepper" => f["options"].as_array().and_then(|o| o.iter().position(|o| panels::same(o, &now))).unwrap_or(0) as i32,
+            "select" | "designpick" | "stepper" => f["options"].as_array().and_then(|o| o.iter().position(|o| panels::same(o, &now))).unwrap_or(0) as i32,
             "color" => now.as_str().and_then(|c| c.strip_prefix('#')).filter(|c| c.len() == 6).and_then(|c| i32::from_str_radix(c, 16).ok()).unwrap_or(-1),
             _ => 0,
         };
         let value = match kind.as_str() {
             "row" | "togglecfg" => if now.as_bool() == Some(true) { "true".into() } else { "false".into() },
-            "select" | "stepper" => f["labels"][at.max(0) as usize].as_str().unwrap_or("").to_string(),
+            "select" | "designpick" | "stepper" => f["labels"][at.max(0) as usize].as_str().unwrap_or("").to_string(),
             "range" | "rangenum" => now.as_f64().unwrap_or(f["min"].as_f64().unwrap_or(0.0)).to_string(),
             "toggle" => if now.as_bool() == Some(true) { "true".into() } else { "false".into() },
             "info" | "button" => f["value"].as_str().unwrap_or("").to_string(),
@@ -6637,7 +6669,12 @@ fn panel_paint(shared: &Shared, name: &str, vals: &serde_json::Map<String, serde
         PlugField { changed: kind != "togglecfg" && pf_changed(&key), label: f["label"].as_str().unwrap_or("").into(), note: f["note"].as_str().unwrap_or("").into(), value: value.into(), kind: kind.into(), options: ModelRc::from(Rc::new(VecModel::from(options))), key: key.into(), at }
     }).collect();
     PANEL_FIELDS.with(|p| *p.borrow_mut() = fields);
-    if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_pf_fields(ModelRc::from(Rc::new(VecModel::from(rows)))); }
+    if let Some(ui) = shared.borrow().ui.upgrade() {
+        ui.set_pf_fields(ModelRc::from(Rc::new(VecModel::from(rows))));
+        // (the Lyrics Widget's page: a preview of its look, as it's set)
+        ui.set_pf_preview(if name == "lyricsw" { "lyrics".into() } else { "".into() });
+        if name == "lyricsw" { ui.set_pf_lyrics(lyrics_look(vals)); }
+    }
 }
 
 /// A field changed (a choice: on to its next; a button: pressed, at once)
@@ -6648,7 +6685,7 @@ fn panel_set(shared: &Shared, name: &str, mut vals: serde_json::Map<String, serd
     let makes_addresses = key.starts_with("reqVar");
     let redraw = match f["type"].as_str().unwrap_or("") {
         "toggle" => { vals.insert(key, serde_json::json!(v == "true")); true }
-        "select" | "stepper" => {
+        "select" | "designpick" | "stepper" => {
             let opts = f["options"].as_array().cloned().unwrap_or_default();
             let now = vals.get(&key).cloned().unwrap_or_default();
             // (picked from its list, or − / +: by its place; else on to the next)
@@ -6758,7 +6795,7 @@ fn panel_press(shared: &Shared, key: &str) {
             pref_put(shared, pref, serde_json::json!(panels::new_key()));
             if key == "reqNewKey" { omnipulse_core::requests::requests_stop(); } else { omnipulse_core::remote::remote_stop(); }
             outside_start(shared);
-            "A new key: the addresses have it.".to_string()
+            "Made a new key. The addresses now use it.".to_string()
         }
         // ---------- the alerts (from the Stream Widget's page) ----------
         k if k.starts_with("lyUp:") || k.starts_with("lyDown:") => {
@@ -6913,7 +6950,7 @@ fn panel_press(shared: &Shared, key: &str) {
                 pref_put(shared, key, serde_json::Value::Object(all));
             }
             push_out(shared, true);
-            if image { "Its icon shows again.".to_string() } else { "Its sound is gone.".to_string() }
+            if image { "Its icon is showing again.".to_string() } else { "Its sound is removed.".to_string() }
         }
         k if k.starts_with("alDelete:") => {
             let kind = k[9..].to_string();
@@ -6982,7 +7019,7 @@ fn panel_press(shared: &Shared, key: &str) {
             let id = &k["plugRemove:".len()..];
             let name = omnipulse_core::plugins::list().into_iter().find(|p| p.manifest.id == id).map(|p| p.manifest.name).unwrap_or_else(|| id.to_string());
             let id = id.to_string();
-            let text = format!("Remove {name}? Its songs leave your search and Library.");
+            let text = format!("Remove {name}? Its songs will be removed from your search and Library.");
             return ask(shared, "Remove plugin", &text, "Remove", move |sh| {
                 plugrun::stop(&id);
                 let r = omnipulse_core::plugins::remove(&id);
@@ -7132,7 +7169,7 @@ fn widget_preview_open(shared: &Shared, name: &str) {
     let profile = omnipulse_core::data_dir().map(|d| d.join("widget-preview")).unwrap_or_default();
     let edge = std::process::Command::new("cmd").args(["/C", "start", "", "msedge", &format!("--app={url}"), "--autoplay-policy=no-user-gesture-required", &format!("--window-size={w},{h}"), &format!("--user-data-dir={}", profile.display())]).spawn();
     if edge.is_err() { let _ = std::process::Command::new("cmd").args(["/C", "start", "", &url]).spawn(); }
-    if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_status("The preview's open: it changes as you change the settings, before you save them.".into()); }
+    if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_status("The preview is open. It updates as you change the settings, before you save.".into()); }
 }
 
 fn panel_save(shared: &Shared, name: &str, vals: serde_json::Map<String, serde_json::Value>) {
@@ -7220,7 +7257,7 @@ fn pf_fields(id: &str) -> Vec<serde_json::Value> {
     let Some(p) = omnipulse_core::plugins::list().into_iter().find(|p| p.manifest.id == id) else { return Vec::new() };
     // (every plugin's: whether its icon is in the title bar; then its manifest's own)
     let mut f = vec![serde_json::json!({ "key": PLUG_TITLE_BAR, "label": "Show in the Title Bar", "type": "toggle", "default": false,
-        "note": "Its icon beside SoundCloud, Spotify and YouTube Music: click it to switch the plugin on and off, right-click for these settings." })];
+        "note": "Shows its icon next to SoundCloud, Spotify and YouTube Music. Click the icon to turn the plugin on or off, and right-click it for these settings." })];
     f.extend(p.manifest.settings.as_array().cloned().unwrap_or_default());
     f
 }
@@ -7613,7 +7650,7 @@ fn account_switch(key: &str) -> &'static str { match key { "soundcloud" => "scOn
 /// set once Spotify has turned its own sign-in down (a free account): the next sign-in is your app's
 static SP_FREE_SEEN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
-const SP_FREE: &str = "That's a free Spotify account. Spotify only lets Premium accounts sign in straight away; a free one signs in with the Spotify app of someone with Premium who adds you to it: the steps are open.";
+const SP_FREE: &str = "That's a free Spotify account. Spotify only lets Premium accounts sign in directly. A free account can sign in through the Spotify app of someone with Premium who adds you to it. The steps are open.";
 
 thread_local! {
     /// who's signed in where (as the platforms say), and the sign-ins under way
@@ -7653,8 +7690,8 @@ fn accounts_paint(shared: &Shared) {
                 ("spotify", Some(w)) => format!("Signed in as {w} · Free: Spotify tracks play from YouTube Music."),
                 (_, Some(w)) => format!("Signed in as {w}."),
                 ("spotify", None) if private && omnipulse_core::spotify_engine::spe_premium() == Some(false) => "Signed in (your name's hidden in Streamer Mode) · Free: Spotify songs play from YouTube Music.".to_string(),
-                ("spotify", None) if private => "Signed in (your name's hidden in Streamer Mode) · Premium: Spotify plays in full here.".to_string(),
-                _ if private => "Signed in (your name's hidden in Streamer Mode).".to_string(),
+                ("spotify", None) if private => "Signed in (your name is hidden in Streamer Mode) · Premium, so Spotify plays in full here.".to_string(),
+                _ if private => "Signed in (your name is hidden in Streamer Mode).".to_string(),
                 _ => "Signed in.".to_string(),
             }
         } else {
@@ -7781,7 +7818,7 @@ thread_local! {
     static KS_SIGNED_IN: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
-const SP_OWN_KEYS: &str = "Optional. Spotify limits requests per app, and its own sign-in (the one you used) shares one allowance with everyone signed in that way, so when it's busy, OmniPulse has to wait. Keys of your own give you an allowance of your own: your requests go through them, with Spotify's sign-in kept as a backup. Spotify needs an app's owner to have Premium; with a free account, use the Client ID of someone with Premium who's added you.";
+const SP_OWN_KEYS: &str = "Optional. Spotify limits how many requests each app can make. The normal sign-in shares one limit with everyone who uses it, so OmniPulse sometimes has to wait. Your own keys give you a limit of your own, and the normal sign-in stays as a backup. Spotify requires the app's owner to have Premium. With a free account, use the Client ID of someone with Premium who has added you.";
 
 fn ks_open(shared: &Shared, plat: &str, account: usize) {
     let Some(s) = keysetup::setup(plat) else { return };
@@ -7818,7 +7855,7 @@ fn ks_save(shared: &Shared) {
     let Some(s) = keysetup::setup(&plat) else { return };
     let Some(ui) = shared.borrow().ui.upgrade() else { return };
     if s.fields.iter().zip(&vals).any(|((_, _, re), v)| !keysetup::looks_right(re, v)) {
-        ui.set_ks_note("Not yet: each key has to look right (a tick beside it) before it's saved.".into());
+        ui.set_ks_note("Not yet. Each key needs a tick beside it before it can be saved.".into());
         return;
     }
     let mut fields = serde_json::Map::new();
@@ -7834,7 +7871,7 @@ fn ks_save(shared: &Shared) {
                 rt.spawn(async move {
                     let r = omnipulse_core::spotify::spotify_login().await;
                     let _ = weak.upgrade_in_event_loop(move |ui| SHARED.with(|s| {
-                        ui.set_status(match &r { Ok(()) => "Signed in with your own Spotify keys: your requests go through them now.".to_string(), Err(e) => format!("Couldn't sign in with your keys: {e}") }.into());
+                        ui.set_status(match &r { Ok(()) => "Signed in with your own Spotify keys. Your requests now go through them.".to_string(), Err(e) => format!("Couldn't sign in with your keys: {e}") }.into());
                         if let Some(sh) = s.borrow().clone() { accounts_refresh(&sh); }
                     }));
                 });
@@ -8355,7 +8392,7 @@ fn collab_invite(shared: &Shared, p: sources::Playlist) {
                     if copy.is_some() { hidden_set(&shared, &mirror::side_id(p.plat, &p.id), true); }
                     xpl_changed(&shared);
                     share_status(&shared, match share::copy(&link) {
-                        Ok(()) => format!("Invite link copied: friends who open it can add songs to \"{}\" and take them out, from their own OmniPulse.", pl.title),
+                        Ok(()) => format!("Invite link copied. Friends who open it can add songs to \"{}\" and remove them, from their own OmniPulse.", pl.title),
                         Err(e) => e,
                     });
                 }
@@ -8442,7 +8479,7 @@ fn collab_join(shared: &Shared, code: String, relay: String, e: String) {
             let Some(share) = share else { ui.set_status("That playlist isn't shared any more.".into()); return };
             let title = share["title"].as_str().unwrap_or("Playlist").to_string();
             let by = share["by"].as_str().map(|b| format!(" from {b}")).unwrap_or_default();
-            let text = format!("Join \"{title}\"{by}? It's a collaborative playlist: you can add songs to it and take them out, and see everyone else's changes.");
+            let text = format!("Join \"{title}\"{by}? It's a shared playlist. You can add and remove songs, and see everyone else's changes.");
             ask(&shared, "Join playlist", &text, "Join", move |shared| {
                 let tracks: Vec<Track> = share["tracks"].as_array().into_iter().flatten().map(collab::with_who(&share)).filter_map(|s| Track::from_snapshot(&s)).filter(|t| t.plat() != "local").collect();
                 let id = xpl::create(&mut shared.borrow_mut().xpl, &title, &tracks);
@@ -8588,7 +8625,7 @@ fn drop_do(shared: &Shared, target: &str, what: Dragged) {
             // (in a Jam: sent to it, as Add to Queue does)
             if let Some(kind) = listening() {
                 if kind == "jam" { for t in &list { listen_send(serde_json::json!({ "type": "add", "track": t.to_snapshot(), "next": false })); } }
-                if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_status(if kind == "jam" { format!("Sent {} to the Jam.", plural(n, "track", "tracks")) } else { "You're listening along: only a Jam takes songs from listeners.".to_string() }.into()); }
+                if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_status(if kind == "jam" { format!("Sent {} to the Jam.", plural(n, "track", "tracks")) } else { "You're listening along. Only a Jam takes songs from listeners.".to_string() }.into()); }
                 return;
             }
             let empty = {
@@ -8923,7 +8960,7 @@ fn share_playlist(shared: &Shared, p: sources::Playlist) {
                         }
                     }
                     share_status(&shared, match share::copy(&url) {
-                        Ok(()) => format!("Link copied: anyone can see its songs on every platform, and open it in OmniPulse.{}", if same { " (The same link as before, now up to date.)" } else { "" }),
+                        Ok(()) => format!("Link copied. Anyone can see its songs on every platform and open it in OmniPulse.{}", if same { " (The same link as before, now up to date.)" } else { "" }),
                         Err(e) => e,
                     });
                 }
@@ -9283,7 +9320,7 @@ fn jam_paint(shared: &Shared) {
         ui.set_jam_on(true);
         ui.set_jam_hidden(false);
         ui.set_jam_label(if kind == "jam" { "Leave Jam" } else { "Leave Listen Along" }.into());
-        ui.set_queue_room(if kind == "jam" { "In a Jam: the host's queue".into() } else { "Listening along: the host's queue".into() });
+        ui.set_queue_room(if kind == "jam" { "In a Jam: you're seeing the host's queue".into() } else { "Listening along: you're seeing the host's queue".into() });
         ui.set_queue_room_host(false);
         return;
     }
@@ -9885,15 +9922,15 @@ pub(crate) fn helpers_state() -> (String, &'static str, bool) {
         let (done, total) = (pr["done"].as_u64().unwrap_or(0), pr["total"].as_u64().unwrap_or(0));
         (format!("Setting up{}...", if total > 0 { format!(": {} of {} MB", mb(done), mb(total)) } else { String::new() }), "")
     } else if pr["error"].as_str().is_some() {
-        ("Couldn't set them up: check your internet connection, then try again.".to_string(), "Try Again")
+        ("Couldn't set them up. Check your internet connection, then try again.".to_string(), "Try Again")
     } else if have {
-        ("Ready: they find each song's audio on YouTube Music, from their official releases (checked against their checksums), kept up to date.".to_string(), "")
+        ("Ready. They find each song's audio on YouTube Music from official releases (checked against their checksums), and stay up to date.".to_string(), "")
     } else if !on {
         ("YouTube Music is off.".to_string(), "")
     } else if omnipulse_core::yt_stream::on_path_public("yt-dlp") {
         ("Ready, with the ones already on this PC.".to_string(), "")
     } else {
-        ("Two small tools YouTube Music plays with (about 58 MB): set up by themselves.".to_string(), "Set Up")
+        ("Two small tools that YouTube Music needs (about 58 MB). They set themselves up.".to_string(), "Set Up")
     };
     let note = format!("{note}{}", if used > 0 && !busy { format!(" They take {} MB.", mb(used)) } else { String::new() });
     (note, setup, used > 0 && !busy)
@@ -9934,7 +9971,7 @@ fn apple_paint(shared: &Shared) {
     let Some(ui) = shared.borrow().ui.upgrade() else { return };
     let when = shared.borrow().web.prefs["appleImported"].as_u64().unwrap_or(0);
     let on = if when > 0 { let d = ((when / 3_600_000) as i64 + local_offset_hours()).div_euclid(24); let (y, m, dd) = civil_date(d); format!(" Last imported {dd}/{m}/{y}.") } else { String::new() };
-    ui.set_apple_note(format!("Once: your loved songs become likes on your other platforms, and your playlists become playlists on this PC. Nothing on Apple Music is changed, and your sign-in is forgotten after.{on}").into());
+    ui.set_apple_note(format!("A one-time import. Your loved songs become likes on your other platforms, and your playlists become playlists on this PC. Nothing on Apple Music is changed, and your sign-in is forgotten afterwards.{on}").into());
     ui.set_apple_label(if APPLE_BUSY.with(|b| b.get()) { "Importing...".into() } else if when > 0 { "Import again".into() } else { "Import".into() });
 }
 
@@ -9952,8 +9989,8 @@ fn apple_start(shared: &Shared) {
             let Some(sh) = s.borrow().clone() else { return };
             if let Err(e) = ok { return apple_fail(&sh, &format!("Couldn't reach Apple Music: {e}")); }
             if let Err(e) = apple_window(&sh) { return apple_fail(&sh, &e); }
-            ui.set_status("Sign in to Apple Music in the window that opened (only to read your music: nothing there is changed)...".into());
-            STATUS_HOLD.with(|h| *h.borrow_mut() = Some("Sign in to Apple Music in the window that opened (only to read your music: nothing there is changed)...".into()));
+            ui.set_status("Sign in to Apple Music in the window that opened. OmniPulse only reads your music and changes nothing there...".into());
+            STATUS_HOLD.with(|h| *h.borrow_mut() = Some("Sign in to Apple Music in the window that opened. OmniPulse only reads your music and changes nothing there...".into()));
         }));
     });
 }
@@ -10211,7 +10248,7 @@ fn streamer_step(shared: &Shared) {
     if !private && !safe {
         set_private(true);
         if let Some(ui) = shared.borrow().ui.upgrade() {
-            ui.set_status("Streamer Mode: account names, keys and addresses are hidden. Click again to leave out copyrighted music too.".into());
+            ui.set_status("Streamer Mode is on. Account names, keys and addresses are hidden. Click again to also leave out copyrighted music.".into());
         }
     } else if private && !safe {
         safe_set(shared, true);
@@ -10246,7 +10283,7 @@ fn safe_set(shared: &Shared, on: bool) {
         if let Some(ui) = a.ui.upgrade() {
             ui.set_stream_safe(on);
             let private = integrations::set(&a.web.prefs, "streamerMode");
-            ui.set_status(if on { format!("Streamer Mode: only music that's safe on stream shows and plays{}", if private { ", and private info is hidden." } else { "." }) } else { "Stream-Safe Music off.".to_string() }.into());
+            ui.set_status(if on { format!("Streamer Mode is on. Only music that's safe on stream shows and plays{}", if private { ", and private info is hidden." } else { "." }) } else { "Stream-Safe Music off.".to_string() }.into());
         }
     }
     // the Streamer Mode page takes the place of the pages it stands in for while it's on (and on one of
@@ -10390,7 +10427,7 @@ Connection: close
 ");
                     continue;
                 }
-                let page = "<!doctype html><meta charset=utf-8><title>OmniPulse</title><body style='font-family:sans-serif;background:#111;color:#eee;display:grid;place-items:center;height:90vh'><p>Done: you can close this tab and go back to OmniPulse.</p>";
+                let page = "<!doctype html><meta charset=utf-8><title>OmniPulse</title><body style='font-family:sans-serif;background:#111;color:#eee;display:grid;place-items:center;height:90vh'><p>Done. You can close this tab and go back to OmniPulse.</p>";
                 let _ = tcp.write_all(format!("HTTP/1.1 200 OK
 Content-Type: text/html; charset=utf-8
 Content-Length: {}
@@ -10447,7 +10484,7 @@ thread_local! {
 fn play_sound(path: &str, vol: f32) -> Result<(), String> {
     let p = std::path::Path::new(path);
     let ext = p.extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
-    if !matches!(ext.as_str(), "mp3" | "wav" | "ogg" | "flac" | "m4a" | "aac" | "opus") { return Err("that isn't a sound file (an mp3, wav, ogg or flac)".into()); }
+    if !matches!(ext.as_str(), "mp3" | "wav" | "ogg" | "flac" | "m4a" | "aac" | "opus") { return Err("that isn't a sound file (mp3, wav, ogg or flac)".into()); }
     if !p.is_file() { return Err(format!("there's no sound file at {path}")); }
     let src = omnipulse_audio::Decoded::open_file(p).map_err(|e| format!("couldn't play it: {e}"))?;
     let device = webstate::native_pref("nativeDevice").and_then(|v| v.as_str().map(String::from)).unwrap_or_default();
@@ -10520,7 +10557,7 @@ fn plugin_app(shared: &Shared, plugin: &str, ask: serde_json::Value, answer: Box
             let url = arg(0);
             if plugin != "chatbot" { return send(serde_json::json!({ "error": "only OmniPulse's chatbot can" })); }
             let ok = ["https://discord.com/api/webhooks/", "https://discordapp.com/api/webhooks/", "https://ptb.discord.com/api/webhooks/", "https://canary.discord.com/api/webhooks/"].iter().any(|p| url.starts_with(p));
-            if !ok { return send(serde_json::json!({ "error": "that isn't a Discord webhook's address (https://discord.com/api/webhooks/...)" })); }
+            if !ok { return send(serde_json::json!({ "error": "that isn't a Discord webhook address (https://discord.com/api/webhooks/...)" })); }
             let body = args.get(1).cloned().unwrap_or(serde_json::Value::Null);
             let rt = shared.borrow().rt.clone();
             rt.spawn(async move {
@@ -10651,7 +10688,7 @@ fn outside_start(shared: &Shared) {
                         }
                     });
                 }
-                None => omnipulse_core::docks::notice("The chatbot isn't on: switch it on in OmniPulse (Settings > Streaming)."),
+                None => omnipulse_core::docks::notice("The chatbot isn't on. Turn it on in Settings > Streaming."),
             }
         }));
     }));
@@ -12105,7 +12142,7 @@ fn main() -> Result<(), slint::PlatformError> {
                 let who = seed.artist.clone();
                 let _ = weak.upgrade_in_event_loop(move |ui| SHARED.with(|s| if let Some(sh) = s.borrow().clone() {
                     play_list(&sh, list, 0);
-                    ui.set_status(format!("Feeling lucky: new music like {who}, none of it in your likes.").into());
+                    ui.set_status(format!("Feeling lucky: new music like {who} that isn't in your likes yet.").into());
                 }));
                 return;
             }
@@ -12364,7 +12401,7 @@ fn main() -> Result<(), slint::PlatformError> {
         // (the chatbot's hotkeys, as its actions have them now)
         if let Some(list) = HOTKEYS_WANTED.with(|h| h.borrow_mut().take()) {
             let failed = desk.set_hotkeys(&list);
-            if !failed.is_empty() { if let Some(ui) = s.borrow().ui.upgrade() { ui.set_status(format!("Couldn't have the hotkey {} (written wrong, or another app has it).", failed.join(", ")).into()); } }
+            if !failed.is_empty() { if let Some(ui) = s.borrow().ui.upgrade() { ui.set_status(format!("Couldn't set up the hotkey {}. It may be written wrong, or another app already uses it.", failed.join(", ")).into()); } }
         }
     });
     // the taskbar buttons, once the window is up

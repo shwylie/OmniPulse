@@ -83,6 +83,8 @@ export struct SetRow { head: string, label: string, note: string, on: bool, key:
 export struct KeyStep { text: string, has-url: bool, copies: [string] }
 /// A key to paste: its label, what's typed, and whether it looks right
 export struct KeyField { label: string, value: string, ok: bool }
+// the Lyrics Widget's look, for its page's preview
+export struct LyricsLook { color: color, hi: color, own-hi: bool, dim: float, size: float, align: string, style: string, shadow: bool, outline: bool, outline-color: color, boxed: bool, box-color: color, box-opacity: float, title: bool, before: bool, lines: int, upper: bool, place: string }
 export struct PlugField { key: string, label: string, note: string, kind: string, value: string, options: [string], at: int, changed: bool }
 // the chatbot's page: a service's tile, a feature's card, a setup step, a line of what it did (or of a try), a sheet's line
 export struct BotTile { id: string, name: string, state: string, line1: string, line2: string }
@@ -268,7 +270,7 @@ component Pill inherits Rectangle {
     HorizontalLayout {
         spacing: 6px;
         alignment: center;
-        if root.d != "": Glyph { d: root.d; width: 14px; height: 14px; y: (parent.height - self.height) / 2; fill: root.on ? Theme.accent : Theme.muted; }
+        if root.d != "": VerticalLayout { alignment: center; Glyph { d: root.d; width: 14px; height: 14px; fill: root.on ? Theme.accent : Theme.muted; } }
         t := Text { text: root.label; color: Theme.text; font-size: 13px; font-weight: 600; vertical-alignment: center; }
     }
     TipSpot { tip: root.tip; hover: ta.has-hover; }
@@ -673,7 +675,7 @@ component Dropdown inherits Rectangle {
         padding-right: 10px;
         spacing: 8px;
         Text { text: root.current >= 0 && root.current < root.options.length ? root.options[root.current] : root.placeholder; color: root.current >= 0 ? Theme.text : Theme.muted; font-size: 13px; vertical-alignment: center; overflow: elide; horizontal-stretch: 1; }
-        Path { commands: "M 2 4 L 6 8 L 10 4"; viewbox-width: 12; viewbox-height: 12; width: 10px; height: 10px; y: (parent.height - self.height) / 2; stroke: Theme.muted; stroke-width: 1.6px; fill: transparent; }
+        VerticalLayout { alignment: center; Path { commands: "M 2 4 L 6 8 L 10 4"; viewbox-width: 12; viewbox-height: 12; width: 10px; height: 10px; stroke: Theme.muted; stroke-width: 1.6px; fill: transparent; } }
     }
     dta := TouchArea { enabled: root.enabled; mouse-cursor: MouseCursor.pointer; clicked => { pop.show(); } }
     pop := PopupWindow {
@@ -709,9 +711,9 @@ component Stepper inherits HorizontalLayout {
     callback up();
     spacing: 6px;
     alignment: end;
-    Pill { label: "\u{2212}"; opacity: root.can-down ? 1 : 0.4; y: (parent.height - self.height) / 2; clicked => { if (root.can-down) { root.down(); } } }
+    VerticalLayout { alignment: center; Pill { label: "\u{2212}"; opacity: root.can-down ? 1 : 0.4; clicked => { if (root.can-down) { root.down(); } } } }
     Text { text: root.value; min-width: 52px; color: Theme.text; font-size: 13px; font-weight: 700; horizontal-alignment: center; vertical-alignment: center; }
-    Pill { label: "+"; opacity: root.can-up ? 1 : 0.4; y: (parent.height - self.height) / 2; clicked => { if (root.can-up) { root.up(); } } }
+    VerticalLayout { alignment: center; Pill { label: "+"; opacity: root.can-up ? 1 : 0.4; clicked => { if (root.can-up) { root.up(); } } } }
 }
 
 /// A song's menu, the same wherever it's right-clicked (a page's row, a tile, Stats, the queue), as
@@ -953,7 +955,7 @@ component FlowFieldsView inherits VerticalLayout {
             border-color: fti.has-focus ? Theme.accent : Theme.line;
             fti := TextInput { x: 10px; width: parent.width - 20px; height: parent.height; vertical-alignment: center; color: Theme.text; font-size: 13px; single-line: true; input-type: fl.kind == "number" ? InputType.decimal : InputType.text; text: fl.value; edited => { root.changed(i, self.text); } }
         }
-        if fl.kind == "select": Dropdown { options: fl.options; current: fl.at; y: (parent.height - self.height) / 2; picked(k) => { root.picked(i, k); } }
+        if fl.kind == "select": VerticalLayout { alignment: center; Dropdown { options: fl.options; current: fl.at; picked(k) => { root.picked(i, k); } } }
         if fl.kind == "toggle": CenterToggle { checked: fl.value == "true"; toggled => { root.changed(i, self.checked ? "true" : "false"); } }
     }
 }
@@ -984,19 +986,19 @@ component FlowCard inherits Rectangle {
         spacing: 10px;
         HorizontalLayout {
             spacing: 10px;
-            Rectangle {
+            VerticalLayout { alignment: center; Rectangle {
                 width: max(28px, fbt.preferred-width + 18px);
                 height: 24px;
-                y: (parent.height - self.height) / 2;
+               
                 border-radius: 12px;
                 background: root.trigger ? Theme.accent : Theme.elevated;
                 fbt := Text { text: root.badge; color: root.trigger ? Theme.on-accent : Theme.text; font-size: 11px; font-weight: 800; letter-spacing: 1px; }
-            }
-            Dropdown { options: root.types; current: root.type-at; y: (parent.height - self.height) / 2; picked(k) => { root.type-picked(k); } }
+            } }
+            VerticalLayout { alignment: center; Dropdown { options: root.types; current: root.type-at; picked(k) => { root.type-picked(k); } } }
             Rectangle { horizontal-stretch: 1; }
-            if !root.trigger: IconButton { tip: "Move Up"; d: "M7 14l5-5 5 5z"; size: 30px; opacity: root.first ? 0.35 : 1; y: (parent.height - self.height) / 2; clicked => { if (!root.first) { root.up(); } } }
-            if !root.trigger: IconButton { tip: "Move Down"; d: "M7 10l5 5 5-5z"; size: 30px; opacity: root.last ? 0.35 : 1; y: (parent.height - self.height) / 2; clicked => { if (!root.last) { root.down(); } } }
-            if !root.trigger: IconButton { tip: "Take This Step Out"; d: Icons.close; size: 30px; y: (parent.height - self.height) / 2; clicked => { root.remove(); } }
+            if !root.trigger: VerticalLayout { alignment: center; IconButton { tip: "Move Up"; d: "M7 14l5-5 5 5z"; size: 30px; opacity: root.first ? 0.35 : 1; clicked => { if (!root.first) { root.up(); } } } }
+            if !root.trigger: VerticalLayout { alignment: center; IconButton { tip: "Move Down"; d: "M7 10l5 5 5-5z"; size: 30px; opacity: root.last ? 0.35 : 1; clicked => { if (!root.last) { root.down(); } } } }
+            if !root.trigger: VerticalLayout { alignment: center; IconButton { tip: "Take This Step Out"; d: Icons.close; size: 30px; clicked => { root.remove(); } } }
         }
         if root.note != "": Text { text: root.note; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
         FlowFieldsView { fields: root.fields; changed(i, v) => { root.changed(i, v); } picked(i, k) => { root.picked(i, k); } }
@@ -1050,7 +1052,7 @@ component LoadingView inherits Rectangle {
                     padding-left: 12px;
                     padding-right: 12px;
                     spacing: 8px;
-                    PlatIcon { plat: st.plat; width: 14px; height: 14px; y: (parent.height - self.height) / 2; }
+                    VerticalLayout { alignment: center; PlatIcon { plat: st.plat; width: 14px; height: 14px; } }
                     Text { text: st.name; color: st.done ? Theme.text : Theme.muted; font-size: 12px; vertical-alignment: center; }
                     // (a tick once it's answered; a dot going round till then)
                     Rectangle {
@@ -1088,9 +1090,9 @@ component PlatPill inherits Rectangle {
     row := HorizontalLayout {
         x: 16px;
         spacing: 7px;
-        if root.from != "": PlatIcon { plat: root.from; width: 15px; height: 15px; y: (parent.height - self.height) / 2; }
+        if root.from != "": VerticalLayout { alignment: center; PlatIcon { plat: root.from; width: 15px; height: 15px; } }
         if root.from != "": Text { text: "\u{2192}"; color: Theme.muted; font-size: 13px; vertical-alignment: center; }
-        PlatIcon { plat: root.to; width: 15px; height: 15px; y: (parent.height - self.height) / 2; }
+        VerticalLayout { alignment: center; PlatIcon { plat: root.to; width: 15px; height: 15px; } }
         Text { text: root.label; color: Theme.text; font-size: 13px; font-weight: 600; vertical-alignment: center; }
     }
     pta := TouchArea { mouse-cursor: MouseCursor.pointer; clicked => { Tips.on = false; root.clicked(); } }
@@ -1174,16 +1176,16 @@ component TrackRow inherits Rectangle {
             if !ta.has-hover && !root.item.playing: Text { text: root.item.version ? "" : index + 1; width: parent.width; height: parent.height; color: Theme.muted; horizontal-alignment: center; vertical-alignment: center; font-size: 13px; }
             if ta.has-hover || root.item.playing: Path { commands: Icons.play; x: (parent.width - 16px) / 2; y: (parent.height - 16px) / 2; width: 16px; height: 16px; fill: Theme.accent; }
         }
-        Rectangle {
+        VerticalLayout { alignment: center; Rectangle {
             width: Theme.row-art;
             height: Theme.row-art;
-            y: (parent.height - self.height) / 2;
+           
             border-radius: 4px;
             clip: true;
             background: Theme.elevated;
             Image { source: root.item.art; width: parent.width; height: parent.height; image-fit: cover; }
-        }
-        PlatIcon { plat: root.item.plat; width: 18px; height: 18px; y: (parent.height - self.height) / 2; fill: Theme.muted; opacity: ta.has-hover || root.item.picked ? 1 : 0; animate opacity { duration: Theme.motion ? 150ms : 0ms; } }
+        } }
+        VerticalLayout { alignment: center; PlatIcon { plat: root.item.plat; width: 18px; height: 18px; fill: Theme.muted; opacity: ta.has-hover || root.item.picked ? 1 : 0; animate opacity { duration: Theme.motion ? 150ms : 0ms; } } }
         VerticalLayout {
             alignment: center;
             spacing: 2px;
@@ -1193,17 +1195,17 @@ component TrackRow inherits Rectangle {
                 art-t := Text { text: root.item.artist; color: root.over-artist ? Theme.text : Theme.muted; font-size: 13px; overflow: elide; horizontal-stretch: 1; max-width: self.preferred-width; }
                 // (a collaborative playlist: who added it, as you hover over it)
                 if (ta.has-hover || root.item.picked) && root.item.added-by != "": Text { text: "Added by " + root.item.added-by; color: Theme.muted; font-size: 12px; overflow: elide; vertical-alignment: center; }
-                for g in root.item.genres: Rectangle {
+                for g in root.item.genres: VerticalLayout { alignment: center; Rectangle {
                     visible: root.show-genres;
                     height: 18px;
-                    y: (parent.height - self.height) / 2;
+                   
                     width: root.show-genres ? gt.preferred-width + 12px : 0px;
                     border-radius: 9px;
                     border-width: 1px;
                     border-color: gta.has-hover ? Theme.accent : Theme.line;
                     gt := Text { text: g; color: gta.has-hover ? Theme.text : Theme.muted; font-size: 11px; }
                     gta := TouchArea { clicked => { root.genre(g); } }
-                }
+                } }
                 Rectangle { horizontal-stretch: 0; }
             }
         }
@@ -1287,7 +1289,7 @@ component TrackRow inherits Rectangle {
         background: vta.has-hover ? Theme.elevated : transparent;
         Text { text: root.item.versions; color: vta.has-hover ? Theme.text : Theme.muted; font-size: 12px; font-weight: 600; }
         vta := TouchArea { mouse-cursor: MouseCursor.pointer; clicked => { root.act("versions"); } }
-        TipSpot { tip: "Its other versions: remixes, edits and the like"; hover: vta.has-hover; }
+        TipSpot { tip: "Other versions of this song, like remixes and edits"; hover: vta.has-hover; }
     }
 }
 
@@ -1308,15 +1310,15 @@ component AlbumStrip inherits Rectangle {
         padding-left: 8px;
         padding-right: 16px;
         spacing: 14px;
-        Rectangle {
+        VerticalLayout { alignment: center; Rectangle {
             width: 52px;
             height: 52px;
-            y: (parent.height - self.height) / 2;
+           
             border-radius: 6px;
             clip: true;
             background: Theme.elevated;
             Image { source: root.art; width: parent.width; height: parent.height; image-fit: cover; }
-        }
+        } }
         VerticalLayout {
             alignment: center;
             spacing: 2px;
@@ -1324,13 +1326,13 @@ component AlbumStrip inherits Rectangle {
             HorizontalLayout {
                 spacing: 5px;
                 alignment: start;
-                PlatIcon { plat: root.plat; width: 12px; height: 12px; y: (parent.height - self.height) / 2; }
+                VerticalLayout { alignment: center; PlatIcon { plat: root.plat; width: 12px; height: 12px; } }
                 Text { text: "ALBUM"; color: Theme.muted; font-size: 10px; font-weight: 800; letter-spacing: 1px; }
             }
             Text { text: root.title; color: Theme.text; font-weight: 700; font-size: 14px; overflow: elide; }
             Text { text: root.by; color: Theme.muted; font-size: 12px; overflow: elide; }
         }
-        IconButton { tip: "Play album"; d: Icons.play; filled: true; size: 34px; y: (parent.height - self.height) / 2; clicked => { root.play(); } }
+        VerticalLayout { alignment: center; IconButton { tip: "Play album"; d: Icons.play; filled: true; size: 34px; clicked => { root.play(); } } }
     }
 }
 
@@ -1421,16 +1423,16 @@ component Crossfade inherits Rectangle {
     HorizontalLayout {
         alignment: start;
         spacing: root.compact ? 6px : 10px;
-        Rectangle {
+        VerticalLayout { alignment: center; Rectangle {
             width: root.c;
             height: root.c;
-            y: (parent.height - self.height) / 2;
+           
             border-radius: 4px;
             clip: true;
             background: Theme.elevated;
             opacity: 1 - 0.65 * root.p;
             Image { source: root.from-art; width: parent.width; height: parent.height; image-fit: cover; }
-        }
+        } }
         Rectangle {
             width: root.compact ? 52px : 110px;
             height: 4px;
@@ -1448,16 +1450,16 @@ component Crossfade inherits Rectangle {
                 animate x { duration: Theme.motion ? 260ms : 0ms; }
             }
         }
-        Rectangle {
+        VerticalLayout { alignment: center; Rectangle {
             width: root.c;
             height: root.c;
-            y: (parent.height - self.height) / 2;
+           
             border-radius: 4px;
             clip: true;
             background: Theme.elevated;
             opacity: 0.35 + 0.65 * root.p;
             Image { source: root.to-art; width: parent.width; height: parent.height; image-fit: cover; }
-        }
+        } }
         if !root.compact: VerticalLayout {
             alignment: center;
             spacing: 1px;
@@ -1825,12 +1827,12 @@ component AccountTile inherits Rectangle {
         spacing: 5px;
         HorizontalLayout {
             spacing: 7px;
-            Glyph { d: root.acc.name == "SoundCloud" ? Icons.soundcloud : root.acc.name == "Spotify" ? Icons.spotify : root.acc.name == "Last.fm" ? Icons.lastfm : Icons.youtube; width: 16px; height: 16px; y: (parent.height - self.height) / 2; fill: root.tint; }
+            VerticalLayout { alignment: center; Glyph { d: root.acc.name == "SoundCloud" ? Icons.soundcloud : root.acc.name == "Spotify" ? Icons.spotify : root.acc.name == "Last.fm" ? Icons.lastfm : Icons.youtube; width: 16px; height: 16px; fill: root.tint; } }
             Text { text: root.acc.name; color: Theme.text; font-weight: 700; font-size: 13px; overflow: elide; horizontal-stretch: 1; }
         }
         HorizontalLayout {
             spacing: 6px;
-            Rectangle { width: 7px; height: 7px; y: (parent.height - self.height) / 2; border-radius: 4px; background: root.acc.busy ? #ffb547 : root.acc.signed ? #4ad295 : #4a5060; }
+            VerticalLayout { alignment: center; Rectangle { width: 7px; height: 7px; border-radius: 4px; background: root.acc.busy ? #ffb547 : root.acc.signed ? #4ad295 : #4a5060; } }
             Text { text: root.acc.short; color: Theme.text.mix(Theme.muted, 0.4); font-size: 12px; overflow: elide; horizontal-stretch: 1; }
         }
         Rectangle {
@@ -1925,7 +1927,7 @@ component StreamTile inherits Rectangle {
         spacing: 5px;
         HorizontalLayout {
             spacing: 8px;
-            Glyph { d: root.d; width: 16px; height: 16px; y: (parent.height - self.height) / 2; fill: root.r.on ? Theme.accent : Theme.muted; }
+            VerticalLayout { alignment: center; Glyph { d: root.d; width: 16px; height: 16px; fill: root.r.on ? Theme.accent : Theme.muted; } }
             Text { text: root.r.label; color: Theme.text; font-weight: 700; font-size: 13px; overflow: elide; horizontal-stretch: 1; }
         }
         Text { text: root.r.note; color: Theme.muted; font-size: 12px; overflow: elide; }
@@ -1966,7 +1968,7 @@ component PluginTile inherits Rectangle {
                 Glyph { d: root.add ? Icons.add : Icons.plugin; width: 18px; height: 18px; x: 6px; y: 6px; fill: root.add || root.r.on ? Theme.accent : Theme.muted; }
             }
             Text { text: root.r.label; color: Theme.text; font-weight: 700; font-size: 13px; overflow: elide; horizontal-stretch: 1; vertical-alignment: center; }
-            if !root.add: Rectangle { width: 7px; height: 7px; y: (parent.height - self.height) / 2; border-radius: 4px; background: root.r.on ? #4ad295 : #4a5060; }
+            if !root.add: VerticalLayout { alignment: center; Rectangle { width: 7px; height: 7px; border-radius: 4px; background: root.r.on ? #4ad295 : #4a5060; } }
         }
         Rectangle {
             vertical-stretch: 1;
@@ -1984,6 +1986,116 @@ component PluginTile inherits Rectangle {
             if root.r.more: IconButton { d: Icons.gear; size: 30px; tip: root.r.label + ": its settings"; clicked => { root.more(root.r.key); } }
         }
     }
+}
+
+/// A widget's design, as a little sketch to pick (in the options' order: card, bar, square, minimal, pill, vinyl,
+/// poster, ticker)
+component DesignSketch inherits VerticalLayout {
+    in property <int> k;
+    in property <string> name;
+    in property <bool> on;
+    callback clicked();
+    spacing: 5px;
+    Rectangle {
+        height: 60px;
+        border-radius: 10px;
+        background: Theme.bg;
+        border-width: root.on ? 2px : 1px;
+        border-color: root.on ? Theme.accent : Theme.line;
+        clip: true;
+        property <brush> fill: @linear-gradient(90deg, Theme.accent.with-alpha(0.55) 0%, Theme.accent-2.with-alpha(0.55) 100%);
+        // card
+        if root.k == 0: Rectangle { x: 10px; y: 16px; width: parent.width - 20px; height: 28px; border-radius: 6px; background: parent.fill;
+            Rectangle { x: 4px; y: 4px; width: 20px; height: 20px; border-radius: 3px; background: Theme.text.with-alpha(0.5); }
+            Rectangle { x: 30px; y: 7px; width: 40%; height: 5px; border-radius: 2px; background: Theme.text.with-alpha(0.8); }
+            Rectangle { x: 30px; y: 16px; width: 25%; height: 4px; border-radius: 2px; background: Theme.text.with-alpha(0.45); } }
+        // slim bar
+        if root.k == 1: Rectangle { x: 8px; y: 24px; width: parent.width - 16px; height: 12px; border-radius: 3px; background: parent.fill;
+            Rectangle { x: 6px; y: 4px; width: 45%; height: 4px; border-radius: 2px; background: Theme.text.with-alpha(0.8); } }
+        // square
+        if root.k == 2: Rectangle { x: (parent.width - 38px) / 2; y: 6px; width: 38px; height: 48px; border-radius: 6px; background: parent.fill;
+            Rectangle { x: 5px; y: 5px; width: 28px; height: 26px; border-radius: 3px; background: Theme.text.with-alpha(0.5); }
+            Rectangle { x: 5px; y: 36px; width: 22px; height: 4px; border-radius: 2px; background: Theme.text.with-alpha(0.8); } }
+        // minimal
+        if root.k == 3: Rectangle { x: 10px; y: 20px; width: parent.width - 20px; height: 20px;
+            Rectangle { width: 14px; height: 14px; y: 3px; border-radius: 3px; background: Theme.text.with-alpha(0.5); }
+            Rectangle { x: 20px; y: 5px; width: 45%; height: 5px; border-radius: 2px; background: Theme.text.with-alpha(0.85); }
+            Rectangle { x: 20px; y: 13px; width: 30%; height: 3px; border-radius: 2px; background: Theme.text.with-alpha(0.4); } }
+        // pill
+        if root.k == 4: Rectangle { x: 8px; y: 20px; width: parent.width - 16px; height: 20px; border-radius: 10px; background: parent.fill;
+            Rectangle { x: 3px; y: 3px; width: 14px; height: 14px; border-radius: 7px; background: Theme.text.with-alpha(0.5); }
+            Rectangle { x: 22px; y: 8px; width: 45%; height: 4px; border-radius: 2px; background: Theme.text.with-alpha(0.8); } }
+        // vinyl
+        if root.k == 5: Rectangle { x: 10px; y: 14px; width: parent.width - 20px; height: 32px; border-radius: 6px; background: parent.fill;
+            Rectangle { x: 4px; y: 3px; width: 26px; height: 26px; border-radius: 13px; background: #111; Rectangle { x: 10px; y: 10px; width: 6px; height: 6px; border-radius: 3px; background: Theme.accent; } }
+            Rectangle { x: 36px; y: 10px; width: 40%; height: 5px; border-radius: 2px; background: Theme.text.with-alpha(0.8); } }
+        // poster
+        if root.k == 6: Rectangle { x: 10px; y: 6px; width: parent.width - 20px; height: 48px; border-radius: 6px; background: parent.fill;
+            Rectangle { x: 0; y: 0; width: parent.width; height: 30px; border-radius: 6px; background: Theme.text.with-alpha(0.35); }
+            Rectangle { x: 5px; y: 35px; width: 50%; height: 5px; border-radius: 2px; background: Theme.text.with-alpha(0.85); } }
+        // ticker
+        if root.k == 7: Rectangle { x: 0; y: 25px; width: parent.width; height: 10px; background: parent.fill;
+            Rectangle { x: 6px; y: 3px; width: 70%; height: 4px; border-radius: 2px; background: Theme.text.with-alpha(0.8); } }
+        dsa := TouchArea { mouse-cursor: MouseCursor.pointer; clicked => { root.clicked(); } }
+    }
+    Text { text: root.name; color: root.on ? Theme.text : Theme.muted; font-size: 12px; font-weight: root.on ? 700 : 400; horizontal-alignment: center; }
+}
+
+/// The Lyrics Widget's preview: a few lines in its look (colours, size, alignment, style, outline, box), as it's set
+component LyricsPreview inherits Rectangle {
+    in property <LyricsLook> look;
+    height: 190px;
+    border-radius: 14px;
+    background: #1d2230;
+    border-width: 1px;
+    border-color: Theme.line;
+    clip: true;
+    // (a game behind it, to read it over)
+    Rectangle { background: @linear-gradient(135deg, #2b3550 0%, #3d2b45 55%, #1f3a3a 100%); }
+    property <length> fs: clamp(root.look.size * 0.42, 12, 34) * 1px;
+    property <color> hi: root.look.own-hi ? root.look.hi : Theme.accent;
+    property <TextHorizontalAlignment> al: root.look.align == "left" ? TextHorizontalAlignment.left : root.look.align == "right" ? TextHorizontalAlignment.right : TextHorizontalAlignment.center;
+    property <[string]> words: root.look.upper ? ["THE LINE JUST SUNG", "THE LINE BEING SUNG", "THE NEXT LINE", "AND THE ONE AFTER"] : ["The line just sung", "The line being sung", "The next line", "And the one after"];
+    lcol := VerticalLayout {
+        padding: 16px;
+        spacing: 2px;
+        alignment: root.look.place == "top" ? LayoutAlignment.start : root.look.place == "bottom" ? LayoutAlignment.end : LayoutAlignment.center;
+        if root.look.title: Text { text: "Song name · Artist"; color: root.look.color.with-alpha(0.7); font-size: root.fs * 0.45; horizontal-alignment: root.al; }
+        Rectangle {
+            height: lines.preferred-height + (root.look.boxed ? 16px : 0px);
+            if root.look.boxed: Rectangle { border-radius: 10px; background: root.look.box-color.with-alpha(root.look.box-opacity); }
+            lines := VerticalLayout {
+                y: root.look.boxed ? 8px : 0px;
+                padding-left: root.look.boxed ? 12px : 0px;
+                padding-right: root.look.boxed ? 12px : 0px;
+                spacing: 2px;
+                for t[k] in root.words: Rectangle {
+                    // (which show: the line before, if on; the sung one; then as many as it shows)
+                    property <bool> shown: (k == 0 && root.look.before) || k == 1 || (k >= 2 && k - 1 < max(1, root.look.lines));
+                    height: self.shown ? lt.preferred-height : 0px;
+                    visible: self.shown;
+                    if root.look.outline: Text { x: 1px; y: 1px; width: parent.width; text: t; font-size: root.fs * (k == 1 ? 1 : 0.85); font-weight: 800; color: root.look.outline-color; horizontal-alignment: root.al; }
+                    if root.look.shadow: Text { x: 0px; y: 2px; width: parent.width; text: t; font-size: root.fs * (k == 1 ? 1 : 0.85); font-weight: 800; color: #00000080; horizontal-alignment: root.al; }
+                    lt := Text {
+                        width: parent.width;
+                        text: t;
+                        font-size: root.fs * (k == 1 ? 1 : 0.85);
+                        font-weight: 800;
+                        horizontal-alignment: root.al;
+                        // (the sung line: lit, or (karaoke) its first half lit, the rest its own colour)
+                        color: k == 1 ? (root.look.style == "highlight" ? root.hi : root.look.color) : root.look.color.with-alpha(max(0.15, root.look.dim));
+                    }
+                    if k == 1 && root.look.style != "highlight": Rectangle {
+                        clip: true;
+                        width: parent.width * 0.55;
+                        x: root.look.align == "right" ? parent.width * 0.45 : 0px;
+                        Text { x: root.look.align == "right" ? -parent.x : 0px; width: lt.width; text: t; font-size: root.fs; font-weight: 800; horizontal-alignment: root.al; color: root.hi; }
+                    }
+                }
+            }
+        }
+    }
+    Text { x: parent.width - self.width - 10px; y: parent.height - self.height - 8px; text: "Preview"; color: #ffffff70; font-size: 10px; }
 }
 
 /// (a line between a group's rows)
@@ -2010,7 +2122,7 @@ component CatCard inherits Card {
         padding-left: 20px;
         padding-right: 20px;
         spacing: 18px;
-        Glyph { d: root.d; width: 24px; height: 24px; y: (parent.height - self.height) / 2; fill: Theme.accent; }
+        VerticalLayout { alignment: center; Glyph { d: root.d; width: 24px; height: 24px; fill: Theme.accent; } }
         VerticalLayout {
             horizontal-stretch: 1;
             alignment: center;
@@ -2046,8 +2158,8 @@ component SetRowView inherits Card {
             // (its height at the width it gets: wrapped onto more lines in a narrow window, all of it counted)
             if root.r.note != "": Text { text: root.r.note; color: Theme.muted; font-size: 12px; wrap: word-wrap; min-height: self.preferred-height; }
         }
-        if root.r.more: IconButton { d: Icons.gear; size: 36px; tip: root.r.label + ": its settings"; y: (parent.height - self.height) / 2; clicked => { root.more(root.r.key); } }
-        if root.r.button != "": Pill { label: root.r.button + " ›"; y: (parent.height - self.height) / 2; clicked => { root.more(root.r.key); } }
+        if root.r.more: VerticalLayout { alignment: center; IconButton { d: Icons.gear; size: 36px; tip: root.r.label + ": its settings"; clicked => { root.more(root.r.key); } } }
+        if root.r.button != "": VerticalLayout { alignment: center; Pill { label: root.r.button + " ›"; clicked => { root.more(root.r.key); } } }
         if root.r.button == "": CenterToggle { checked: root.r.on; toggled => { root.toggle(root.r.key); } }
     }
     HiGlow { lit: Hi.label != "" && Hi.label == root.r.label; r: Theme.card-radius; }
@@ -2201,9 +2313,9 @@ component BotFieldRow inherits VerticalLayout {
                 Text { text: root.f.label; color: Theme.text; font-weight: 700; font-size: 13px; }
                 Text { text: root.f.value != "" ? "Signed in as " + root.f.value : (root.f.note == "bot" ? "Optional: without one, replies come from your channel" : "Not signed in"); color: Theme.muted; font-size: 12px; overflow: elide; }
             }
-            IconButton { d: Icons.open; size: 34px; y: (parent.height - self.height) / 2; tint: Theme.accent; tip: root.f.value != "" ? "Sign in again, here" : "Sign in, in your browser"; clicked => { root.act("in:" + root.f.key); } }
-            IconButton { d: Icons.link; size: 34px; y: (parent.height - self.height) / 2; tip: "Copy the sign-in link instead: open it in a private window, or another browser, to sign in as another account"; clicked => { root.act("link:" + root.f.key); } }
-            if root.f.value != "": IconButton { d: Icons.logout; size: 34px; y: (parent.height - self.height) / 2; tip: "Sign this account out"; clicked => { root.act("out:" + root.f.key); } }
+            VerticalLayout { alignment: center; IconButton { d: Icons.open; size: 34px; tint: Theme.accent; tip: root.f.value != "" ? "Sign in again, here" : "Sign in, in your browser"; clicked => { root.act("in:" + root.f.key); } } }
+            VerticalLayout { alignment: center; IconButton { d: Icons.link; size: 34px; tip: "Copy the sign-in link instead. Open it in a private window or another browser to sign in as a different account."; clicked => { root.act("link:" + root.f.key); } } }
+            if root.f.value != "": VerticalLayout { alignment: center; IconButton { d: Icons.logout; size: 34px; tip: "Sign this account out"; clicked => { root.act("out:" + root.f.key); } } }
         }
     }
 }
@@ -2235,8 +2347,8 @@ component FeatCard inherits Rectangle {
             Text { text: root.c.name; color: Theme.text; font-weight: 700; font-size: 14px; }
             Text { text: root.c.note; color: Theme.muted; font-size: 12px; overflow: elide; }
         }
-        if root.c.open: IconButton { d: Icons.gear; size: 32px; y: (parent.height - self.height) / 2; tip: root.c.name + ": its settings"; clicked => { root.act("sheet:" + root.c.id); } }
-        if root.c.id == "games" || root.c.id == "actions": IconButton { d: Icons.open; size: 32px; filled: root.c.id == "actions"; y: (parent.height - self.height) / 2; tip: root.c.id == "games" ? "Add games from Actions' templates" : "Open your actions"; clicked => { root.act("actions"); } }
+        if root.c.open: VerticalLayout { alignment: center; IconButton { d: Icons.gear; size: 32px; tip: root.c.name + ": its settings"; clicked => { root.act("sheet:" + root.c.id); } } }
+        if root.c.id == "games" || root.c.id == "actions": VerticalLayout { alignment: center; IconButton { d: Icons.open; size: 32px; filled: root.c.id == "actions"; tip: root.c.id == "games" ? "Add games from Actions' templates" : "Open your actions"; clicked => { root.act("actions"); } } }
         if root.c.id != "games" && root.c.id != "actions": CenterToggle { checked: root.c.on; toggled => { root.set("feat:" + root.c.id, self.checked ? "true" : "false"); } }
     }
                 }
@@ -2320,14 +2432,14 @@ component BotPage inherits Rectangle {
                             spacing: 10px;
                             HorizontalLayout {
                                 spacing: 10px;
-                                Glyph { d: st.id == "twitchbot" || st.id == "kickbot" ? Icons.robot : BotLook.icon(st.id == "features" ? "actions" : st.id); width: 20px; height: 20px; y: (parent.height - self.height) / 2; fill: BotLook.tint(st.id); }
+                                VerticalLayout { alignment: center; Glyph { d: st.id == "twitchbot" || st.id == "kickbot" ? Icons.robot : BotLook.icon(st.id == "features" ? "actions" : st.id); width: 20px; height: 20px; fill: BotLook.tint(st.id); } }
                                 VerticalLayout {
                                     horizontal-stretch: 1;
                                     spacing: 1px;
                                     Text { text: st.title; color: Theme.text; font-weight: 700; font-size: 14px; }
                                     Text { text: st.note; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
                                 }
-                                if st.state != "now": IconButton { d: st.state == "todo" ? Icons.play : Icons.gear; size: 32px; y: (parent.height - self.height) / 2; tip: st.state == "todo" ? "Do this step now" : "Change it"; clicked => { root.act("step:" + st.id); } }
+                                if st.state != "now": VerticalLayout { alignment: center; IconButton { d: st.state == "todo" ? Icons.play : Icons.gear; size: 32px; tip: st.state == "todo" ? "Do this step now" : "Change it"; clicked => { root.act("step:" + st.id); } } }
                             }
                             if st.state == "now": VerticalLayout {
                                 spacing: 10px;
@@ -2426,7 +2538,7 @@ component BotPage inherits Rectangle {
                         // (a chat of its own, to try commands in: only you see it)
                         HorizontalLayout {
                             spacing: 6px;
-                            Glyph { d: Icons.flask; width: 16px; height: 16px; y: (parent.height - self.height) / 2; fill: Theme.accent; }
+                            VerticalLayout { alignment: center; Glyph { d: Icons.flask; width: 16px; height: 16px; fill: Theme.accent; } }
                             Text { text: "Test chat"; color: Theme.text; font-size: 13px; font-weight: 700; horizontal-stretch: 1; vertical-alignment: center; }
                             Rectangle {
                                 width: pv.preferred-width + 14px;
@@ -2536,7 +2648,7 @@ component BotPage inherits Rectangle {
                 for d in [
                     { n: "Chat Dock", t: "Twitch and Kick chat, with delete, time-out and ban on every message, and a box to chat back. In OBS: Docks > Custom Browser Docks.", p: "/dock/chat", i: Icons.chat },
                     { n: "Activity Feed", t: "Follows, subs, bits, raids, rewards and the rest, each kind shown or hidden, each alert replayed. A custom browser dock too.", p: "/dock/activity", i: Icons.bell },
-                    { n: "Multichat", t: "Twitch and Kick chat together, see-through, on stream: a Browser source. Its settings: Interact, then its gear.", p: "/chat", i: Icons.broadcast },
+                    { n: "Multichat", t: "Twitch and Kick chat together on stream, with a see-through background. Add it as a Browser source. To change its settings, right-click it in OBS, choose Interact, then click its gear.", p: "/chat", i: Icons.broadcast },
                 ]: Rectangle {
                     horizontal-stretch: 1;
                     preferred-width: 0px;
@@ -2553,12 +2665,12 @@ component BotPage inherits Rectangle {
                         spacing: 4px;
                         HorizontalLayout {
                             spacing: 7px;
-                            Glyph { d: d.i; width: 16px; height: 16px; y: (parent.height - self.height) / 2; fill: root.widget-on ? Theme.accent : Theme.muted; }
+                            VerticalLayout { alignment: center; Glyph { d: d.i; width: 16px; height: 16px; fill: root.widget-on ? Theme.accent : Theme.muted; } }
                             Text { text: d.n; color: Theme.text; font-weight: 700; font-size: 13px; horizontal-stretch: 1; overflow: elide; }
                             IconButton { d: Icons.copy; size: 30px; tip: "Copy its address, for OBS"; clicked => { root.act("copy:http://127.0.0.1:" + root.port + d.p); } }
                         }
                         Text { text: "http://127.0.0.1:" + root.port + d.p; color: Theme.accent.mix(Theme.text, 0.55); font-size: 11px; font-family: "Consolas"; overflow: elide; }
-                        Text { text: root.widget-on ? d.t : "Needs the Stream Widget on (Settings > Streaming): it's served from there."; color: Theme.muted; font-size: 11px; overflow: elide; }
+                        Text { text: root.widget-on ? d.t : "Turn on the Stream Widget first (Settings > Streaming). This is served from it."; color: Theme.muted; font-size: 11px; overflow: elide; }
                     }
                 }
             }
@@ -2619,9 +2731,9 @@ component BotPage inherits Rectangle {
                 spacing: 12px;
                 HorizontalLayout {
                     spacing: 10px;
-                    Glyph { d: BotLook.icon(root.sheet); width: 22px; height: 22px; y: (parent.height - self.height) / 2; fill: BotLook.tint(root.sheet); }
+                    VerticalLayout { alignment: center; Glyph { d: BotLook.icon(root.sheet); width: 22px; height: 22px; fill: BotLook.tint(root.sheet); } }
                     Text { text: root.sheet-title; color: Theme.text; font-size: 18px; font-weight: 800; horizontal-stretch: 1; vertical-alignment: center; }
-                    IconButton { d: Icons.close; size: 32px; tip: "Done (changes still need Save)"; clicked => { root.act("sheet:"); } }
+                    IconButton { d: Icons.close; size: 32px; tip: "Done. Your changes still need saving."; clicked => { root.act("sheet:"); } }
                 }
                 ScrollView {
                     vertical-stretch: 1;
@@ -2924,6 +3036,9 @@ export component AppWindow inherits Window {
     // a Settings row's own settings (a plugin's): its key; the dialog with its fields
     callback set-more(string);
     in-out property <bool> pf-open;
+    // a sub-page's own preview at its top ("lyrics": the Lyrics Widget's look)
+    in property <string> pf-preview;
+    in property <LyricsLook> pf-lyrics;
     // the chatbot's own page, in place of its list of fields
     in property <bool> bot-page;
     in property <bool> bot-setup;
@@ -3295,6 +3410,8 @@ export component AppWindow inherits Window {
                 height: 36px;
                 property <length> r: root.player-style == "float" && Theme.radius > 0 ? 18px : Theme.radius;
                 property <bool> plain: root.player-style == "minimal" || root.title-colour == "plain";
+                // (the close button under the pointer: its corners red too)
+                property <bool> close-hot;
                 property <color> ca: root.title-colour == "subtle" ? Theme.panel.mix(Theme.bar-a, 0.6) : Theme.bar-a;
                 property <color> cb: root.title-colour == "subtle" ? Theme.panel.mix(Theme.bar-b, 0.6) : Theme.bar-b;
                 background: self.plain ? Theme.panel : @linear-gradient(90deg, self.ca 0%, self.cb 100%);
@@ -3371,7 +3488,7 @@ export component AppWindow inherits Window {
                         }
                         // Stream-Safe Music on: a dot
                         if root.stream-safe: Rectangle { x: parent.width / 2 + 5px; y: parent.height / 2 - 11px; width: 7px; height: 7px; border-radius: 3.5px; background: #53fc18; }
-                        TipSpot { hover: sta-s.has-hover; tip: root.stream-safe ? "Streamer Mode, Extended: private info hidden, and only music that's safe on stream. Click to turn it off." : root.streamer ? "Streamer Mode: private info hidden. Click again for Extended (only music that's safe on stream)." : "Streamer Mode: off. Click to hide private info; again for Extended (only music that's safe on stream)."; }
+                        TipSpot { hover: sta-s.has-hover; tip: root.stream-safe ? "Streamer Mode Extended is on. Private info is hidden, and only music that's safe on stream plays. Click to turn it off." : root.streamer ? "Streamer Mode is on, so private info is hidden. Click again for Extended, which also plays only music that's safe on stream." : "Streamer Mode is off. Click to hide private info. Click again for Extended, which also plays only music that's safe on stream."; }
                         sta-s := TouchArea { clicked => { Tips.on = false; root.streamer-step(); } }
                     }
                     // Seamless Mix: grey when off; on, its colour flows from one accent to the other, quicker while a
@@ -3392,7 +3509,7 @@ export component AppWindow inherits Window {
                             fill: !root.mix-on ? Theme.muted : Theme.accent.mix(Theme.accent-2, 1 - parent.swing);
                             opacity: root.mix-on ? 1 : 0.55;
                         }
-                        TipSpot { hover: sta-m.has-hover; tip: root.mix-on ? "Seamless Mix (WIP): on. Click to turn it off, right-click for its settings." : "Seamless Mix (WIP): off. Click to mix songs into each other, on the beat where they can be. Right-click for its settings."; }
+                        TipSpot { hover: sta-m.has-hover; tip: root.mix-on ? "Seamless Mix (WIP) is on. Click to turn it off. Right-click for its settings." : "Seamless Mix (WIP) is off. Click to mix songs into each other, on the beat when possible. Right-click for its settings."; }
                         sta-m := TouchArea {
                             clicked => { Tips.on = false; root.mix-toggle(); }
                             pointer-event(e) => { if (e.kind == PointerEventKind.down && e.button == PointerEventButton.right) { Tips.on = false; root.title-settings("smart"); } }
@@ -3463,24 +3580,24 @@ export component AppWindow inherits Window {
                                 if root.jam-ring != "": Path { commands: root.jam-ring; viewbox-width: 20; viewbox-height: 20; width: 16px; height: 16px; y: (parent.height - self.height) / 2; stroke: Theme.on-accent; stroke-width: 2px; fill: transparent; }
                             }
                             Text { text: root.jam-ask; color: Theme.on-accent; font-size: 12px; font-weight: 600; vertical-alignment: center; }
-                            Rectangle {
+                            VerticalLayout { alignment: center; Rectangle {
                                 width: yes-t.preferred-width + 18px;
                                 height: 20px;
-                                y: (parent.height - self.height) / 2;
+                               
                                 border-radius: 10px;
                                 background: Theme.on-accent;
                                 yes-t := Text { text: "Accept"; color: Theme.accent; font-size: 12px; font-weight: 700; }
                                 TouchArea { clicked => { root.jam-accept(); } }
-                            }
-                            Rectangle {
+                            } }
+                            VerticalLayout { alignment: center; Rectangle {
                                 width: no-t.preferred-width + 18px;
                                 height: 20px;
-                                y: (parent.height - self.height) / 2;
+                               
                                 border-radius: 10px;
                                 background: Theme.on-accent.with-alpha(0.18);
                                 no-t := Text { text: "Decline"; color: Theme.on-accent; font-size: 12px; font-weight: 700; }
                                 TouchArea { clicked => { root.jam-decline(); } }
-                            }
+                            } }
                         }
                         }
                     }
@@ -3502,11 +3619,11 @@ export component AppWindow inherits Window {
                         background: wta.has-hover ? (b.act == "close" ? #e81123 : Theme.elevated) : transparent;
                         Path { commands: b.d; viewbox-width: 12; viewbox-height: 12; width: 11px; height: 11px; stroke: wta.has-hover && b.act == "close" ? white : Theme.muted; stroke-width: 1.2px; fill: transparent; }
                         TipSpot { hover: wta.has-hover; tip: b.act == "min" ? "Minimize" : b.act == "max" ? (root.is-max ? "Restore" : "Maximize") : "Close"; }
-                        wta := TouchArea { clicked => { Tips.on = false; if (b.act == "min") { root.minimize(); } else if (b.act == "max") { root.maximize(); } else { root.close-window(); } } }
+                        wta := TouchArea { changed has-hover => { if (b.act == "close") { tbar.close-hot = self.has-hover; } } clicked => { Tips.on = false; if (b.act == "min") { root.minimize(); } else if (b.act == "max") { root.maximize(); } else { root.close-window(); } } }
                     }
                 }
                 // (its corners rounded over its gradient, and over the close button's red)
-                if !tbar.plain: Caps { r: tbar.r; tl: tbar.ca; bl: tbar.ca; tr: tbar.cb; br: tbar.cb; bottom: true; }
+                Caps { r: tbar.r; tl: tbar.plain ? Theme.panel : tbar.ca; bl: tbar.plain ? Theme.panel : tbar.ca; tr: tbar.close-hot ? #e81123 : tbar.plain ? Theme.panel : tbar.cb; br: tbar.close-hot ? #e81123 : tbar.plain ? Theme.panel : tbar.cb; bottom: true; }
             }
         }
 
@@ -3602,7 +3719,7 @@ export component AppWindow inherits Window {
                                 padding-left: root.slim-side ? 0px : 12px;
                                 spacing: 10px;
                                 alignment: root.slim-side ? center : start;
-                                PlatIcon { plat: s.plat; width: 14px; height: 14px; y: (parent.height - self.height) / 2; }
+                                VerticalLayout { alignment: center; PlatIcon { plat: s.plat; width: 14px; height: 14px; } }
                                 if !root.slim-side: Text { text: s.title; color: root.side-on == i ? Theme.text : Theme.muted; font-size: 13px; vertical-alignment: center; overflow: elide; }
                             }
                             sdz := DropArea {
@@ -3745,7 +3862,7 @@ export component AppWindow inherits Window {
                             HorizontalLayout {
                                 alignment: start;
                                 spacing: 6px;
-                                PlatIcon { plat: root.album-head-plat; width: 14px; height: 14px; y: (parent.height - self.height) / 2; }
+                                VerticalLayout { alignment: center; PlatIcon { plat: root.album-head-plat; width: 14px; height: 14px; } }
                                 Text { text: "ALBUM"; color: Theme.muted; font-size: 12px; font-weight: 700; letter-spacing: 1.5px; vertical-alignment: center; }
                             }
                             Text { text: root.page-title; color: Theme.text; font-size: 40px; font-weight: 800; wrap: word-wrap; overflow: elide; max-height: 104px; }
@@ -3768,15 +3885,15 @@ export component AppWindow inherits Window {
                     if root.page-kind != "now" && !root.album-head: HorizontalLayout {
                         spacing: 14px;
                         // (an artist's picture, as the web app's)
-                        if root.page == "artist" && root.page-art-on: Rectangle {
+                        if root.page == "artist" && root.page-art-on: VerticalLayout { alignment: center; Rectangle {
                             width: 64px;
                             height: 64px;
-                            y: (parent.height - self.height) / 2;
+                           
                             border-radius: 32px;
                             clip: true;
                             background: Theme.elevated;
                             Image { source: root.page-art; width: parent.width; height: parent.height; image-fit: cover; }
-                        }
+                        } }
                         if !(root.page == "settings" && root.set-cat != "" && root.set-query == ""): Text { text: root.page == "settings" && root.set-query != "" ? "Settings" : root.page-title; color: Theme.text; font-size: 44px; font-weight: 800; overflow: elide; horizontal-stretch: 0; }
                         if root.page == "settings" && root.set-cat != "" && root.set-query == "": HorizontalLayout {
                             spacing: 14px;
@@ -3791,12 +3908,12 @@ export component AppWindow inherits Window {
                             Text { text: "›"; color: Theme.muted; font-size: 40px; font-weight: 400; vertical-alignment: center; }
                             Text { text: root.set-cat; color: Theme.text; font-size: 44px; font-weight: 800; overflow: elide; vertical-alignment: center; }
                         }
-                        if root.page == "discover" || root.page == "rediscover" || root.page == "sets" || root.page == "artists" || root.page == "mix": RoundButton {
+                        if root.page == "discover" || root.page == "rediscover" || root.page == "sets" || root.page == "artists" || root.page == "mix": VerticalLayout { alignment: center; RoundButton {
                             tip: "New recommendations";
                             d: Icons.refresh;
-                            y: (parent.height - self.height) / 2;
+                           
                             clicked => { root.refresh(); }
-                        }
+                        } }
                         Rectangle { horizontal-stretch: 1; }
                     }
                     if root.page-kind != "now" && !root.album-head && root.page-sub != "": Text { text: root.page-sub; color: Theme.muted; font-size: 14px; wrap: word-wrap; overflow: elide; max-height: 60px; }
@@ -3806,7 +3923,7 @@ export component AppWindow inherits Window {
                         spacing: 16px;
                         for o in root.artist-on: HorizontalLayout {
                             spacing: 6px;
-                            PlatIcon { plat: o.plat; width: 15px; height: 15px; y: (parent.height - self.height) / 2; }
+                            VerticalLayout { alignment: center; PlatIcon { plat: o.plat; width: 15px; height: 15px; } }
                             Text { text: o.text; color: Theme.muted; font-size: 13px; vertical-alignment: center; }
                         }
                     }
@@ -3854,13 +3971,13 @@ export component AppWindow inherits Window {
                         // (right-click: its SoundCloud or Spotify link on its own, as the web app's)
                         if root.page == "playlist" && root.pl-share: Rectangle {
                             width: shp.width;
-                            shp := Pill { tip: "Share: songs from every platform together. Right-click for its SoundCloud or Spotify link."; label: "Share"; y: 7px; right-click(x, y) => { shm.open(x, y); } clicked => { root.page-pl("share"); } }
+                            shp := Pill { tip: "Share songs from every platform together. Right-click for the SoundCloud or Spotify link."; label: "Share"; y: 7px; right-click(x, y) => { shm.open(x, y); } clicked => { root.page-pl("share"); } }
                             shm := CtxMenu {
                                 width: 100%; height: 100%;
                                 items: [
                                     { label: "Copy SoundCloud Link", show: root.pl-sc },
                                     { label: "Copy Spotify Link", show: root.pl-sp },
-                                    { label: "It isn't on SoundCloud or Spotify yet: add a song from there first.", show: !root.pl-sc && !root.pl-sp }
+                                    { label: "This isn't on SoundCloud or Spotify yet. Add a song from one of them first.", show: !root.pl-sc && !root.pl-sp }
                                 ];
                                 picked(n, k) => {
                                     if (n == 0) { root.page-pl("link:soundcloud"); }
@@ -3869,7 +3986,7 @@ export component AppWindow inherits Window {
                             }
                         }
                         if root.page == "playlist" && root.pl-collab != "": Pill { label: root.pl-collab; y: 7px; clicked => { root.page-pl("collab"); } }
-                        if root.page == "playlist" && root.pl-own: Pill { label: "Export"; tip: "Its SoundCloud songs to a playlist on SoundCloud, its Spotify songs to one on Spotify (again: brought up to date)"; y: 7px; clicked => { root.page-pl("export"); } }
+                        if root.page == "playlist" && root.pl-own: Pill { label: "Export"; tip: "Sends the SoundCloud songs to a SoundCloud playlist and the Spotify songs to a Spotify playlist. Doing it again updates them."; y: 7px; clicked => { root.page-pl("export"); } }
                         if root.page == "playlist" && root.pl-merged: Pill { label: "Unmerge"; tip: "Take out what each playlist combined into this one brought"; y: 7px; clicked => { root.page-pl("unmerge"); } }
                         if root.page == "playlist" && root.pl-own: Pill { label: "Delete playlist"; y: 7px; clicked => { root.page-pl("delete"); } }
                         Rectangle { horizontal-stretch: 1; }
@@ -4104,10 +4221,10 @@ export component AppWindow inherits Window {
                                         alignment: center;
                                         spacing: 2px;
                                         Text { text: "Get better recommendations"; color: Theme.text; font-weight: 700; }
-                                        Text { text: "Add some music to your likes or favourites (the heart or the star on any song), and Discover and Rediscover will be built around it."; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
+                                        Text { text: "Add some music to your likes or favourites with the heart or the star on any song. Discover and Rediscover will be built around it."; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
                                     }
-                                    Pill { label: "Pick genres"; y: (parent.height - self.height) / 2; clicked => { root.taste-pick(); } }
-                                    Pill { label: "Find music"; y: (parent.height - self.height) / 2; clicked => { ti.focus(); } }
+                                    VerticalLayout { alignment: center; Pill { label: "Pick genres"; clicked => { root.taste-pick(); } } }
+                                    VerticalLayout { alignment: center; Pill { label: "Find music"; clicked => { ti.focus(); } } }
                                 }
                             }
                             for sh[s] in root.shelves: ShelfView { shelf: sh; lists: root.own-lists; tile-clicked(k) => { root.tile(s, k); } tile-act(k, a) => { root.tile-act(s, k, a); } }
@@ -4168,7 +4285,7 @@ export component AppWindow inherits Window {
                                                     padding-right: 6px;
                                                     spacing: 12px;
                                                     Text { text: r.rank; width: 28px; color: Theme.accent; font-size: 18px; font-weight: 800; vertical-alignment: center; }
-                                                    Cover { art: r.art; initial: r.name; width: 42px; height: 42px; y: (parent.height - self.height) / 2; }
+                                                    VerticalLayout { alignment: center; Cover { art: r.art; initial: r.name; width: 42px; height: 42px; } }
                                                     VerticalLayout {
                                                         alignment: center;
                                                         horizontal-stretch: 1;
@@ -4232,7 +4349,7 @@ export component AppWindow inherits Window {
                                         HorizontalLayout {
                                             padding: 20px;
                                             spacing: 16px;
-                                            Cover { art: root.st-top-art; initial: root.st-top-name; width: 100px; height: 100px; border-radius: 50px; y: (parent.height - self.height) / 2; }
+                                            VerticalLayout { alignment: center; Cover { art: root.st-top-art; initial: root.st-top-name; width: 100px; height: 100px; border-radius: 50px; } }
                                             VerticalLayout {
                                                 alignment: center;
                                                 Text { text: "YOUR TOP ARTIST"; color: #ffffffcc; font-size: 12px; font-weight: 800; letter-spacing: 1.5px; }
@@ -4422,13 +4539,13 @@ export component AppWindow inherits Window {
                                             HiTitle { text: "Updates"; }
                                             Text { text: root.update-note; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
                                         }
-                                        Pill { label: root.update-label; on: root.update-label == "Update"; y: (parent.height - self.height) / 2; clicked => { root.update-act(); } }
+                                        VerticalLayout { alignment: center; Pill { label: root.update-label; on: root.update-label == "Update"; clicked => { root.update-act(); } } }
                                     }
                                 }
                                 for c in [
                                     { name: "App & Look", note: "Theme, colours, player style, name, tray, taskbar widget, animations, backups", d: Icons.gear },
                                     { name: "Integrations", note: "Accounts, platforms, catalogues, following, Listen Along & Jams, Last.fm", d: Icons.person },
-                                    { name: "Plugins", note: "Music sources made by others: switched on and off, their settings, adding and removing them", d: Icons.plugin },
+                                    { name: "Plugins", note: "Music sources and more made by others. Turn them on or off, change their settings, and add or remove them.", d: Icons.plugin },
                                     { name: "Library", note: "Pages, autoplay, recent plays, hidden and not recommended, music folders", d: Icons.library },
                                     { name: "Sound", note: "Loudness, fades, silences, equalizer, seamless mixing", d: Icons.volume },
                                     { name: "Streaming", note: "Streamer Mode, the widget and alerts, song requests, Stream Deck, OmniPulse Offset", d: Icons.broadcast },
@@ -4506,7 +4623,7 @@ export component AppWindow inherits Window {
                                         }
                                         Rectangle { height: 8px; }
                                         Text { text: "Second Accent"; color: Theme.text; font-weight: 700; }
-                                        Text { text: root.art-accent ? "Turn off Colours from Album Art to choose your own colours." : "Used alongside the first, in gradients and highlights. One Colour: the first one only."; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
+                                        Text { text: root.art-accent ? "Turn off Colours from Album Art to choose your own colours." : "Used with the first accent in gradients and highlights. Choose One Colour to use only the first."; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
                                         HorizontalLayout {
                                             alignment: start;
                                             spacing: 10px;
@@ -4548,9 +4665,9 @@ export component AppWindow inherits Window {
                                         HorizontalLayout {
                                             spacing: 10px;
                                             StyleSketch { horizontal-stretch: 1; name: "Tab"; style: "tab"; on: root.player-style == "tab"; tip: "What's playing on a tab above the controls"; clicked => { root.player-style-picked("tab"); } }
-                                            StyleSketch { horizontal-stretch: 1; name: "Classic Bar"; style: "bar"; on: root.player-style == "bar"; tip: "One full-width bar (the window at least 1000 px wide)"; clicked => { root.player-style-picked("bar"); } }
-                                            StyleSketch { horizontal-stretch: 1; name: "Floating"; style: "float"; on: root.player-style == "float"; tip: "One bar, floating, rounded ends (at least 1040 px wide)"; clicked => { root.player-style-picked("float"); } }
-                                            StyleSketch { horizontal-stretch: 1; name: "Minimal"; style: "minimal"; on: root.player-style == "minimal"; tip: "A slim row, its progress a thin line (at least 1000 px wide)"; clicked => { root.player-style-picked("minimal"); } }
+                                            StyleSketch { horizontal-stretch: 1; name: "Classic Bar"; style: "bar"; on: root.player-style == "bar"; tip: "One full-width bar (the window must be at least 1000 px wide)"; clicked => { root.player-style-picked("bar"); } }
+                                            StyleSketch { horizontal-stretch: 1; name: "Floating"; style: "float"; on: root.player-style == "float"; tip: "One floating bar with rounded ends (the window must be at least 1040 px wide)"; clicked => { root.player-style-picked("float"); } }
+                                            StyleSketch { horizontal-stretch: 1; name: "Minimal"; style: "minimal"; on: root.player-style == "minimal"; tip: "A slim row with the progress as a thin line (the window must be at least 1000 px wide)"; clicked => { root.player-style-picked("minimal"); } }
                                         }
                                         GroupLine { }
                                         HorizontalLayout {
@@ -4562,9 +4679,9 @@ export component AppWindow inherits Window {
                                                 HiTitle { text: "Title Bar Colour"; }
                                                 Text { text: root.player-style == "minimal" ? "Minimal keeps it in the panel's colour." : "Changing with the cover, faintly, or not at all."; color: Theme.muted; font-size: 12px; }
                                             }
-                                            Chip { label: "Like the Player Bar"; on: root.title-colour == "match" && root.player-style != "minimal"; y: (parent.height - self.height) / 2; clicked => { root.title-colour-picked("match"); } }
-                                            Chip { label: "Subtle"; on: root.title-colour == "subtle" && root.player-style != "minimal"; y: (parent.height - self.height) / 2; clicked => { root.title-colour-picked("subtle"); } }
-                                            Chip { label: "Plain"; on: root.title-colour == "plain" || root.player-style == "minimal"; y: (parent.height - self.height) / 2; clicked => { root.title-colour-picked("plain"); } }
+                                            VerticalLayout { alignment: center; Chip { label: "Like the Player Bar"; on: root.title-colour == "match" && root.player-style != "minimal"; clicked => { root.title-colour-picked("match"); } } }
+                                            VerticalLayout { alignment: center; Chip { label: "Subtle"; on: root.title-colour == "subtle" && root.player-style != "minimal"; clicked => { root.title-colour-picked("subtle"); } } }
+                                            VerticalLayout { alignment: center; Chip { label: "Plain"; on: root.title-colour == "plain" || root.player-style == "minimal"; clicked => { root.title-colour-picked("plain"); } } }
                                         }
                                         if root.tab-style: GroupLine { }
                                         if root.tab-style: HorizontalLayout {
@@ -4575,8 +4692,8 @@ export component AppWindow inherits Window {
                                                 HiTitle { text: "Track Info Tab"; }
                                                 Text { text: "Which end of the player bar the tab sits at."; color: Theme.muted; font-size: 12px; }
                                             }
-                                            Chip { label: "Left"; on: !root.tab-right; y: (parent.height - self.height) / 2; clicked => { root.tab-align-picked("left"); } }
-                                            Chip { label: "Right"; on: root.tab-right; y: (parent.height - self.height) / 2; clicked => { root.tab-align-picked("right"); } }
+                                            VerticalLayout { alignment: center; Chip { label: "Left"; on: !root.tab-right; clicked => { root.tab-align-picked("left"); } } }
+                                            VerticalLayout { alignment: center; Chip { label: "Right"; on: root.tab-right; clicked => { root.tab-align-picked("right"); } } }
                                         }
                                         GroupLine { }
                                         HorizontalLayout {
@@ -4588,11 +4705,11 @@ export component AppWindow inherits Window {
                                                 HiTitle { text: "List Density"; }
                                                 Text { text: "How tightly tracks are listed. Compact fits more on screen."; color: Theme.muted; font-size: 12px; }
                                             }
-                                            Chip { label: "Comfortable"; on: !root.compact-rows; y: (parent.height - self.height) / 2; clicked => { root.compact-rows = false; root.density-changed(false); } }
-                                            Chip { label: "Compact"; on: root.compact-rows; y: (parent.height - self.height) / 2; clicked => { root.compact-rows = true; root.density-changed(true); } }
+                                            VerticalLayout { alignment: center; Chip { label: "Comfortable"; on: !root.compact-rows; clicked => { root.compact-rows = false; root.density-changed(false); } } }
+                                            VerticalLayout { alignment: center; Chip { label: "Compact"; on: root.compact-rows; clicked => { root.compact-rows = true; root.density-changed(true); } } }
                                         }
                                         GroupLine { }
-                                        GroupSwitch { name: "Rounded Corners"; note: "On the sidebar, the page and the queue. Off: square."; checked <=> root.rounded; toggled(v) => { root.rounded-changed(v); } }
+                                        GroupSwitch { name: "Rounded Corners"; note: "Rounds the corners of the sidebar, the page and the queue. Turn it off for square corners."; checked <=> root.rounded; toggled(v) => { root.rounded-changed(v); } }
                                         GroupLine { }
                                         GroupSwitch { name: "Animations"; note: "Fades and motion."; checked <=> root.anim-on; toggled(v) => { root.anim-changed(v); } }
                                     }
@@ -4625,9 +4742,9 @@ export component AppWindow inherits Window {
                                             VerticalLayout {
                                                 horizontal-stretch: 1;
                                                 HiTitle { text: "Full Screen"; }
-                                                Text { text: "The whole window: the cover, what's playing and the visualiser. Escape closes it."; color: Theme.muted; font-size: 12px; }
+                                                Text { text: "Fills the whole window with the cover, what's playing and the visualiser. Press Escape to close it."; color: Theme.muted; font-size: 12px; }
                                             }
-                                            IconButton { d: Icons.open; size: 36px; tint: Theme.accent; tip: "Open it full screen"; y: (parent.height - self.height) / 2; clicked => { root.viz-full = true; root.viz-place("full", true); } }
+                                            VerticalLayout { alignment: center; IconButton { d: Icons.open; size: 36px; tint: Theme.accent; tip: "Open it full screen"; clicked => { root.viz-full = true; root.viz-place("full", true); } } }
                                         }
                                     }
                                 }
@@ -4659,11 +4776,11 @@ export component AppWindow inherits Window {
                                         }
                                         }
                                         GroupLine { }
-                                        GroupSwitch { name: "Minimize to Tray"; note: "Minimizing hides the window to the tray; music keeps playing. Open it again, or quit, from the tray's menu. The X always quits."; checked <=> root.close-to-tray; toggled(v) => { root.close-to-tray-changed(v); } }
+                                        GroupSwitch { name: "Minimize to Tray"; note: "Minimizing hides the window in the tray, and the music keeps playing. Use the tray's menu to open it again or quit. The X button always quits."; checked <=> root.close-to-tray; toggled(v) => { root.close-to-tray-changed(v); } }
                                         GroupLine { }
                                         GroupSwitch { name: "Taskbar Widget"; note: "What's playing, always on show in the taskbar by the clock, with its controls. Hidden while a game or video is full screen."; checked <=> root.taskbar-widget; toggled(v) => { root.app-pref("taskbarWidget", v); } }
                                         GroupLine { }
-                                        GroupSwitch { name: "Hardware Acceleration"; note: "Draws the app with your graphics card: smoother on big screens, about 100 MB more memory. Turn off if you see glitches. Takes effect the next time OmniPulse starts."; checked <=> root.gpu-on; toggled(v) => { root.app-pref("nativeGpu", v); } }
+                                        GroupSwitch { name: "Hardware Acceleration"; note: "Uses your graphics card to draw the app. It's smoother on big screens but uses about 100 MB more memory. Turn it off if you see glitches. The change applies the next time OmniPulse starts."; checked <=> root.gpu-on; toggled(v) => { root.app-pref("nativeGpu", v); } }
                                     }
                                 }
                                 if root.taskbar-widget: Card {
@@ -4689,7 +4806,7 @@ export component AppWindow inherits Window {
                                                 horizontal-stretch: 1;
                                                 alignment: center;
                                                 Text { text: "Full-Height Cover"; color: Theme.text; font-weight: 700; }
-                                                Text { text: "The cover as tall as the taskbar, at the widget's edge. Off: a smaller one."; color: Theme.muted; font-size: 12px; wrap: word-wrap; min-height: self.preferred-height; }
+                                                Text { text: "Makes the cover as tall as the taskbar, at the widget's edge. Turn it off for a smaller cover."; color: Theme.muted; font-size: 12px; wrap: word-wrap; min-height: self.preferred-height; }
                                             }
                                             CenterToggle { checked <=> root.widget-big-art; toggled => { root.app-pref("widgetBigArt", self.checked); } }
                                         }
@@ -4720,8 +4837,8 @@ export component AppWindow inherits Window {
                                             HiTitle { text: "Back Up & Restore"; }
                                             Text { text: "Your settings, keys, favourites, playlists, stats and alerts, in one .zip. Sign-ins aren't in it."; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
                                         }
-                                        IconButton { d: Icons.backup; size: 38px; tint: Theme.accent; tip: "Back up: save it all to a .zip"; y: (parent.height - self.height) / 2; clicked => { root.backup-make(); } }
-                                        IconButton { d: Icons.restore; size: 38px; tip: "Restore: from a backup .zip"; y: (parent.height - self.height) / 2; clicked => { root.backup-restore(); } }
+                                        VerticalLayout { alignment: center; IconButton { d: Icons.backup; size: 38px; tint: Theme.accent; tip: "Back up: save it all to a .zip"; clicked => { root.backup-make(); } } }
+                                        VerticalLayout { alignment: center; IconButton { d: Icons.restore; size: 38px; tip: "Restore: from a backup .zip"; clicked => { root.backup-restore(); } } }
                                     }
                                 }
                             }
@@ -4763,7 +4880,7 @@ export component AppWindow inherits Window {
                                                 HiTitle { text: "Apple Music"; }
                                                 Text { text: root.apple-note; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
                                             }
-                                            IconButton { d: Icons.download; size: 38px; tint: Theme.accent; tip: root.apple-label + ": your loved songs and playlists, from Apple Music"; y: (parent.height - self.height) / 2; clicked => { root.apple-import(); } }
+                                            VerticalLayout { alignment: center; IconButton { d: Icons.download; size: 38px; tint: Theme.accent; tip: root.apple-label + ": your loved songs and playlists, from Apple Music"; clicked => { root.apple-import(); } } }
                                         }
                                     }
                                 }
@@ -4777,7 +4894,7 @@ export component AppWindow inherits Window {
                             }
                             if root.set-cat == "Plugins" && root.set-query == "": VerticalLayout {
                                 spacing: 10px;
-                                Text { text: "Music sources and more, made by others (and some that come with OmniPulse). Each is walled off, and only reaches the sites it lists."; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
+                                Text { text: "Music sources and more, made by others. Some come with OmniPulse. Each plugin is kept separate, and can only reach the sites it lists."; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
                                 // (two to a row)
                                 for k in ceil(root.set-rows-plugins.length / 2): HorizontalLayout {
                                     spacing: 10px;
@@ -4803,8 +4920,8 @@ export component AppWindow inherits Window {
                                                 HiTitle { text: "Music Folders"; }
                                                 Text { text: root.folders-note; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
                                             }
-                                            if root.folders.length > 0: IconButton { d: Icons.refresh; size: 36px; tip: "Look through them again, for new songs"; y: (parent.height - self.height) / 2; clicked => { root.folders-rescan(); } }
-                                            IconButton { d: Icons.folder-add; size: 36px; tint: Theme.accent; tip: "Add a folder (on this PC, or a network drive)"; y: (parent.height - self.height) / 2; clicked => { root.folder-add(); } }
+                                            if root.folders.length > 0: VerticalLayout { alignment: center; IconButton { d: Icons.refresh; size: 36px; tip: "Look through them again, for new songs"; clicked => { root.folders-rescan(); } } }
+                                            VerticalLayout { alignment: center; IconButton { d: Icons.folder-add; size: 36px; tint: Theme.accent; tip: "Add a folder on this PC or a network drive"; clicked => { root.folder-add(); } } }
                                         }
                                         for f[i] in root.folders: Rectangle {
                                             height: 34px;
@@ -4816,9 +4933,9 @@ export component AppWindow inherits Window {
                                                 padding-left: 12px;
                                                 padding-right: 2px;
                                                 spacing: 8px;
-                                                Glyph { d: Icons.local; width: 15px; height: 15px; y: (parent.height - self.height) / 2; fill: Theme.muted; }
+                                                VerticalLayout { alignment: center; Glyph { d: Icons.local; width: 15px; height: 15px; fill: Theme.muted; } }
                                                 Text { text: f; color: Theme.text; font-size: 13px; vertical-alignment: center; overflow: elide; horizontal-stretch: 1; }
-                                                IconButton { d: Icons.close; size: 30px; tip: "Take this folder out (its files stay where they are)"; y: (parent.height - self.height) / 2; clicked => { root.folder-remove(i); } }
+                                                VerticalLayout { alignment: center; IconButton { d: Icons.close; size: 30px; tip: "Remove this folder. Its files stay where they are."; clicked => { root.folder-remove(i); } } }
                                             }
                                         }
                                     }
@@ -4891,7 +5008,7 @@ export component AppWindow inherits Window {
                                             HiTitle { text: "Output Device"; }
                                             Text { text: "Where the sound plays."; color: Theme.muted; font-size: 12px; }
                                         }
-                                        Dropdown { width: 280px; options: root.outputs; current: root.output-at; y: (parent.height - self.height) / 2; init => { root.devices-want(); } picked(k) => { root.device-pick(k); root.devices-want(); } }
+                                        VerticalLayout { alignment: center; Dropdown { width: 280px; options: root.outputs; current: root.output-at; init => { root.devices-want(); } picked(k) => { root.device-pick(k); root.devices-want(); } } }
                                     }
                                 }
                                 // ---- between songs: a sketch of it, as it's set ----
@@ -4912,7 +5029,7 @@ export component AppWindow inherits Window {
                                             }
                                             if root.fade-on: HorizontalLayout {
                                                 spacing: 4px;
-                                                for ms[k] in [1000, 2000, 3000, 5000, 8000]: Chip { label: (ms / 1000) + " s"; on: root.fade-ms == ms || (k == 0 && root.fade-ms < 1000); y: (parent.height - self.height) / 2; clicked => { root.fade-ms-pick(ms); } }
+                                                for ms[k] in [1000, 2000, 3000, 5000, 8000]: VerticalLayout { alignment: center; Chip { label: (ms / 1000) + " s"; on: root.fade-ms == ms || (k == 0 && root.fade-ms < 1000); clicked => { root.fade-ms-pick(ms); } } }
                                             }
                                             Rectangle { width: 10px; }
                                             CenterToggle { checked <=> root.fade-on; toggled => { root.fade-on-changed(self.checked); } }
@@ -4926,7 +5043,7 @@ export component AppWindow inherits Window {
                                                 HiTitle { text: "Skip Silences"; }
                                                 Text { text: "Jumps over long silences, and moves on when the rest is silent."; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
                                             }
-                                            for v[k] in [0, 5, 8, 15, 30]: Chip { label: v == 0 ? "Off" : v + " s"; on: k == 0 ? root.skip-silence == 0 : root.skip-silence == v; y: (parent.height - self.height) / 2; clicked => { root.skip-pick(v); } }
+                                            for v[k] in [0, 5, 8, 15, 30]: VerticalLayout { alignment: center; Chip { label: v == 0 ? "Off" : v + " s"; on: k == 0 ? root.skip-silence == 0 : root.skip-silence == v; clicked => { root.skip-pick(v); } } }
                                         }
                                     }
                                 }
@@ -4946,7 +5063,7 @@ export component AppWindow inherits Window {
                                                 HiTitle { text: "Match Loudness"; }
                                                 Text { text: root.loud-on == "off" ? "Tracks play as loud as they were made." : "Every track at the same loudness."; color: Theme.muted; font-size: 12px; }
                                             }
-                                            for v[k] in [{ id: "off", n: "Off" }, { id: "quiet", n: "Quiet" }, { id: "normal", n: "Normal" }, { id: "loud", n: "Loud" }]: Chip { label: v.n; on: root.loud-on == v.id; y: (parent.height - self.height) / 2; clicked => { root.loud-pick(v.id); } }
+                                            for v[k] in [{ id: "off", n: "Off" }, { id: "quiet", n: "Quiet" }, { id: "normal", n: "Normal" }, { id: "loud", n: "Loud" }]: VerticalLayout { alignment: center; Chip { label: v.n; on: root.loud-on == v.id; clicked => { root.loud-pick(v.id); } } }
                                         }
                                         GroupLine { }
                                         HorizontalLayout {
@@ -5019,7 +5136,7 @@ export component AppWindow inherits Window {
                                         padding-top: 12px;
                                         padding-bottom: 12px;
                                         spacing: 10px;
-                                        Glyph { d: Icons.robot; width: 22px; height: 22px; y: (parent.height - self.height) / 2; fill: Theme.accent; }
+                                        VerticalLayout { alignment: center; Glyph { d: Icons.robot; width: 22px; height: 22px; fill: Theme.accent; } }
                                         VerticalLayout {
                                             horizontal-stretch: 1;
                                             alignment: center;
@@ -5027,7 +5144,7 @@ export component AppWindow inherits Window {
                                             HiTitle { text: "Widgets and Docks"; }
                                             Text { text: "The Stream Widget, the Lyrics Widget and OBS's docks are in the chatbot's page while it's on."; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
                                         }
-                                        IconButton { d: Icons.open; size: 36px; tint: Theme.accent; tip: "Open the chatbot's page, at its widgets and docks"; y: (parent.height - self.height) / 2; clicked => { root.set-more("plugRun_chatbot"); } }
+                                        VerticalLayout { alignment: center; IconButton { d: Icons.open; size: 36px; tint: Theme.accent; tip: "Open the chatbot's page, at its widgets and docks"; clicked => { root.set-more("plugRun_chatbot"); } } }
                                     }
                                 }
                                 if !root.bot-on: HorizontalLayout {
@@ -5047,15 +5164,15 @@ export component AppWindow inherits Window {
                                         padding-top: 10px;
                                         padding-bottom: 10px;
                                         spacing: 6px;
-                                        Glyph { d: Icons.bell; width: 18px; height: 18px; y: (parent.height - self.height) / 2; fill: Theme.accent; }
+                                        VerticalLayout { alignment: center; Glyph { d: Icons.bell; width: 18px; height: 18px; fill: Theme.accent; } }
                                         VerticalLayout {
                                             horizontal-stretch: 1;
                                             alignment: center;
                                             spacing: 2px;
                                             HiTitle { text: "Activity Feed Dock"; }
-                                            Text { text: "Your alerts as they come (from Streamer.bot, Mix It Up or any bot), each replayed with a click. In OBS: Docks > Custom Browser Docks."; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
+                                            Text { text: "Shows your alerts as they come in, from Streamer.bot, Mix It Up or any bot. Click one to replay it. In OBS, add it under Docks > Custom Browser Docks."; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
                                         }
-                                        IconButton { d: Icons.copy; size: 34px; tip: "Copy its address, for OBS"; y: (parent.height - self.height) / 2; clicked => { root.copy-text(stv.base + "/dock/activity"); } }
+                                        VerticalLayout { alignment: center; IconButton { d: Icons.copy; size: 34px; tip: "Copy its address, for OBS"; clicked => { root.copy-text(stv.base + "/dock/activity"); } } }
                                     }
                                 }
                                 // ---- your chat ----
@@ -5261,15 +5378,15 @@ export component AppWindow inherits Window {
                                 Text {
                                     text: c;
                                     color: pct.has-hover ? Theme.text : Theme.muted;
-                                    font-size: root.pf-crumbs.length >= 3 || root.pf-head.character-count > 16 ? 28px : 44px;
+                                    font-size: root.pf-crumbs.length >= 3 ? 22px : root.pf-head.character-count > 16 ? 28px : 44px;
                                     font-weight: 800;
                                     // (every part on one line with the last: all centred in the row)
                                     vertical-alignment: center;
                                     pct := TouchArea { mouse-cursor: MouseCursor.pointer; clicked => { root.pf-leave("crumb:" + i); } }
                                 }
-                                Text { text: "\u{203a}"; color: Theme.muted; font-size: root.pf-crumbs.length >= 3 || root.pf-head.character-count > 16 ? 26px : 40px; font-weight: 400; vertical-alignment: center; }
+                                Text { text: "\u{203a}"; color: Theme.muted; font-size: root.pf-crumbs.length >= 3 ? 20px : root.pf-head.character-count > 16 ? 26px : 40px; font-weight: 400; vertical-alignment: center; }
                             }
-                            Marquee { text: root.pf-head; font-size: root.pf-crumbs.length >= 3 || root.pf-head.character-count > 16 ? 28px : 44px; font-weight: 800; horizontal-stretch: 1; y: (parent.height - self.height) / 2; }
+                            Marquee { text: root.pf-head; font-size: root.pf-crumbs.length >= 3 ? 22px : root.pf-head.character-count > 16 ? 28px : 44px; font-weight: 800; horizontal-stretch: 1; y: (parent.height - self.height) / 2; }
                         }
                         if root.bot-page: BotPage {
                             vertical-stretch: 1;
@@ -5308,12 +5425,18 @@ export component AppWindow inherits Window {
                           // (from the top, however tall the window: the room to spare under the last, never
                           // shared out between them)
                           alignment: start;
+                          if root.pf-preview == "lyrics": LyricsPreview { look: root.pf-lyrics; }
                           for f[i] in root.pf-fields: Rectangle {
                            height: fcol.preferred-height;
+                           background: f.kind == "note" ? transparent : Theme.panel;
+                           border-radius: f.kind == "note" ? 0px : 12px;
+                           border-width: f.kind == "note" ? 0px : 1px;
+                           border-color: Theme.line;
                            // (changed, not saved yet: a ring round it, breathing)
                            if f.changed: Pulse { x: -10px; y: -6px; width: parent.width + 20px; height: parent.height + 12px; r: 10px; }
                            HiGlow { x: -10px; y: -6px; width: parent.width + 20px; height: parent.height + 12px; r: 10px; lit: Hi.label != "" && Hi.label == f.label; }
                            fcol := VerticalLayout {
+                           padding: f.kind == "note" ? 0px : 14px;
                            spacing: 6px;
                            // instructions: just text
                            if f.kind == "note" && f.label.character-count <= 32: VerticalLayout { padding-top: 8px; SectionHead { text: f.label; } }
@@ -5362,10 +5485,18 @@ export component AppWindow inherits Window {
                                 border-color: Theme.line;
                                 Text { x: 10px; width: parent.width - 20px; text: f.value; color: Theme.text; font-size: 12px; overflow: elide; vertical-alignment: center; }
                               }
-                              IconButton { d: Icons.copy; size: 34px; tip: "Copy it"; y: (parent.height - self.height) / 2; clicked => { root.pf-copy(i); } }
+                              VerticalLayout { alignment: center; IconButton { d: Icons.copy; size: 34px; tip: "Copy it"; clicked => { root.pf-copy(i); } } }
                             }
                            }
-                           if f.kind != "note" && f.kind != "info" && f.kind != "wave": HorizontalLayout {
+                           if f.kind == "designpick": VerticalLayout {
+                            spacing: 8px;
+                            Text { text: f.label; color: Theme.text; font-weight: 700; }
+                            for r in 2: HorizontalLayout {
+                                spacing: 10px;
+                                for c in 4: DesignSketch { horizontal-stretch: 1; preferred-width: 0px; min-width: 0px; k: r * 4 + c; name: f.options[r * 4 + c]; on: f.at == r * 4 + c; clicked => { root.pf-set(i, "\u{2}" + (r * 4 + c)); } }
+                            }
+                           }
+                           if f.kind != "note" && f.kind != "info" && f.kind != "wave" && f.kind != "designpick": HorizontalLayout {
                             spacing: 12px;
                             VerticalLayout {
                                 horizontal-stretch: 1;
@@ -5378,17 +5509,17 @@ export component AppWindow inherits Window {
                     // a list's row: its buttons, then its switch
                     if f.kind == "row": HorizontalLayout {
                         spacing: 6px;
-                        for o[k] in f.options: Pill { label: o; y: (parent.height - self.height) / 2; clicked => { root.pf-set(i, "btn:" + k); } }
+                        for o[k] in f.options: VerticalLayout { alignment: center; Pill { label: o; clicked => { root.pf-set(i, "btn:" + k); } } }
                     }
                     if f.kind == "row": CenterToggle { checked: f.value == "true"; toggled => { root.pf-set(i, self.checked ? "true" : "false"); } }
                             // a choice: a dropdown (as the web app's)
                             if f.kind == "select" && f.options.length <= 3: HorizontalLayout {
                                 spacing: 4px;
-                                for o[k] in f.options: Chip { label: o; on: k == f.at; y: (parent.height - self.height) / 2; clicked => { root.pf-set(i, "\u{2}" + k); } }
+                                for o[k] in f.options: VerticalLayout { alignment: center; Chip { label: o; on: k == f.at; clicked => { root.pf-set(i, "\u{2}" + k); } } }
                             }
-                            if f.kind == "select" && f.options.length > 3: Dropdown { options: f.options; current: f.at; y: (parent.height - self.height) / 2; picked(k) => { root.pf-set(i, "\u{2}" + k); } }
+                            if f.kind == "select" && f.options.length > 3: VerticalLayout { alignment: center; Dropdown { options: f.options; current: f.at; picked(k) => { root.pf-set(i, "\u{2}" + k); } } }
                             // a size or a count: − and + (as the web app's)
-                            if f.kind == "stepper": Stepper { value: f.value; can-down: f.at > 0; can-up: f.at < f.options.length - 1; y: (parent.height - self.height) / 2; down => { root.pf-set(i, "\u{2}" + (f.at - 1)); } up => { root.pf-set(i, "\u{2}" + (f.at + 1)); } }
+                            if f.kind == "stepper": VerticalLayout { alignment: center; Stepper { value: f.value; can-down: f.at > 0; can-up: f.at < f.options.length - 1; down => { root.pf-set(i, "\u{2}" + (f.at - 1)); } up => { root.pf-set(i, "\u{2}" + (f.at + 1)); } } }
                             // a level: a slider, its value beside it (and with "rangenum", a box to type it in too)
                             if f.kind == "range" || f.kind == "rangenum": rrow := HorizontalLayout {
                                 spacing: 10px;
@@ -5426,7 +5557,7 @@ export component AppWindow inherits Window {
                                 Pill { label: "Choose..."; clicked => { root.pf-set(i, "\u{3}pick"); } }
                             }
                             // a switch with its own settings beside it (Alerts: Configure, with it on)
-                            if f.kind == "togglecfg" && f.value == "true": Pill { label: f.options.length > 0 ? f.options[0] : "Configure"; y: (parent.height - self.height) / 2; clicked => { root.pf-set(i, "btn:0"); } }
+                            if f.kind == "togglecfg" && f.value == "true": VerticalLayout { alignment: center; Pill { label: f.options.length > 0 ? f.options[0] : "Configure"; clicked => { root.pf-set(i, "btn:0"); } } }
                             if f.kind == "togglecfg": CenterToggle { checked: f.value == "true"; toggled => { root.pf-set(i, self.checked ? "true" : "false"); } }
                             if f.kind == "text" || f.kind == "password" || f.kind == "number": Rectangle {
                                 width: 180px;
@@ -5439,7 +5570,7 @@ export component AppWindow inherits Window {
                                 TextInput { x: 10px; width: parent.width - 20px; height: parent.height; vertical-alignment: center; color: Theme.text; font-size: 14px; single-line: true; input-type: f.kind == "password" ? InputType.password : f.kind == "number" ? InputType.decimal : InputType.text; text: f.value; edited => { root.pf-set(i, self.text); } }
                             }
                             // a button: done at once
-                            if f.kind == "button": Pill { label: f.value; y: (parent.height - self.height) / 2; clicked => { root.pf-set(i, "press"); } }
+                            if f.kind == "button": VerticalLayout { alignment: center; Pill { label: f.value; clicked => { root.pf-set(i, "press"); } } }
                            }
                           }
                           }
@@ -5541,7 +5672,7 @@ export component AppWindow inherits Window {
                                 HorizontalLayout {
                                     spacing: 6px;
                                     Pill { label: "Back Up"; tip: "All of these, your quotes, variables and points, in a file"; clicked => { root.flow-act("backup"); } }
-                                    Pill { label: "Restore"; tip: "A backup: OmniPulse's, Streamer.bot's (an export, .sb file or backup zip) or Mix It Up's (.miubackup or .miucommand)"; clicked => { root.flow-act("restore"); } }
+                                    Pill { label: "Restore"; tip: "Choose a backup from OmniPulse, Streamer.bot (an export, .sb file or backup zip) or Mix It Up (.miubackup or .miucommand)"; clicked => { root.flow-act("restore"); } }
                                     Pill { label: "Paste"; tip: "A Streamer.bot import code, as Streamer.bot's Export copies it"; clicked => { root.flow-act("paste"); } }
                                 }
                                 ScrollView {
@@ -5567,7 +5698,7 @@ export component AppWindow inherits Window {
                                                 Text { text: (it.on ? "" : "Off \u{b7} ") + it.summary; color: Theme.muted; font-size: 11px; overflow: elide; }
                                             }
                                         }
-                                        if root.flow-items.length == 0: Text { text: "No actions yet. Pick one to start from in New Action above: a command, a thank-you for follows, a timer..."; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
+                                        if root.flow-items.length == 0: Text { text: "No actions yet. Choose one to start from in New Action above, like a command, a thank-you for follows, or a timer."; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
                                         Rectangle { height: 76px; }
                                     }
                                 }
@@ -5594,10 +5725,10 @@ export component AppWindow inherits Window {
                                             fnti := TextInput { x: 12px; width: parent.width - 24px; height: parent.height; vertical-alignment: center; color: Theme.text; font-size: 16px; font-weight: 700; single-line: true; text: root.flow-name; edited => { root.flow-name-edited(self.text); } }
                                         }
                                         CenterToggle { checked: root.flow-on; toggled => { root.flow-on-toggled(self.checked); } }
-                                        Pill { label: "One at a Time"; on: root.flow-queued; tip: "Its runs queued, each after the one before it's done (as Streamer.bot's queues): alerts that never overlap"; y: (parent.height - self.height) / 2; clicked => { root.flow-act("queued"); } }
-                                        Pill { label: "Run Now"; tip: "Its steps, now, as if you'd started it"; y: (parent.height - self.height) / 2; clicked => { root.flow-act("run"); } }
-                                        Pill { label: "Copy"; tip: "Another action like this one"; y: (parent.height - self.height) / 2; clicked => { root.flow-act("copy"); } }
-                                        Pill { label: "Delete"; y: (parent.height - self.height) / 2; clicked => { root.flow-act("delete"); } }
+                                        VerticalLayout { alignment: center; Pill { label: "One at a Time"; on: root.flow-queued; tip: "Runs one at a time. Each run waits until the one before it is done, like Streamer.bot's queues, so alerts never overlap."; clicked => { root.flow-act("queued"); } } }
+                                        VerticalLayout { alignment: center; Pill { label: "Run Now"; tip: "Run its steps now, as if it had been started"; clicked => { root.flow-act("run"); } } }
+                                        VerticalLayout { alignment: center; Pill { label: "Copy"; tip: "Another action like this one"; clicked => { root.flow-act("copy"); } } }
+                                        VerticalLayout { alignment: center; Pill { label: "Delete"; clicked => { root.flow-act("delete"); } } }
                                     }
                                     FlowCard {
                                         badge: "WHEN";
@@ -5677,8 +5808,8 @@ export component AppWindow inherits Window {
                         spacing: 6px;
                         Text { text: "Queue"; color: Theme.text; font-size: 18px; font-weight: 800; vertical-alignment: center; horizontal-stretch: 1; }
                         // (as the web app's: waiting chat requests out; everything but what's playing out)
-                        if root.queue-requests > 0: Pill { label: "Clear requests"; y: (parent.height - self.height) / 2; clicked => { root.queue-clear(true); } }
-                        if root.queue-room == "" || root.queue-room-host: Pill { label: "Clear"; y: (parent.height - self.height) / 2; clicked => { root.queue-clear(false); } }
+                        if root.queue-requests > 0: VerticalLayout { alignment: center; Pill { label: "Clear requests"; clicked => { root.queue-clear(true); } } }
+                        if root.queue-room == "" || root.queue-room-host: VerticalLayout { alignment: center; Pill { label: "Clear"; clicked => { root.queue-clear(false); } } }
                         Text { text: "Autoplay"; color: Theme.muted; font-size: 12px; vertical-alignment: center; }
                         CenterToggle { checked <=> root.autoplay; toggled => { root.autoplay-changed(self.checked); } }
                     }
@@ -5714,7 +5845,7 @@ export component AppWindow inherits Window {
                                     padding-left: 6px;
                                     spacing: 10px;
                                     // (its cover with the platform's badge, as the web app's queue)
-                                    BadgedCover { art: q.art; initial: q.title; plat: q.plat; badge: 16px; corner: 4px; width: 38px; height: 38px; y: (parent.height - self.height) / 2; opacity: q.auto || q.dim ? 0.6 : 1; }
+                                    VerticalLayout { alignment: center; BadgedCover { art: q.art; initial: q.title; plat: q.plat; badge: 16px; corner: 4px; width: 38px; height: 38px; opacity: q.auto || q.dim ? 0.6 : 1; } }
                                     VerticalLayout {
                                         alignment: center;
                                         opacity: q.dim ? 0.5 : 1;
@@ -5824,8 +5955,8 @@ export component AppWindow inherits Window {
                                 width: parent.width - 38px;
                                 height: 44px;
                                 spacing: 12px;
-                                if root.tab-right && root.xf-on: Crossfade { compact: true; from-art: root.xf-from-art; to-art: root.xf-to-art; frac: root.xf-frac; y: (parent.height - self.height) / 2; }
-                                if root.tab-right && root.can-like: IconButton { tip: root.now-liked ? "Remove from Likes" : "Add to Likes"; d: root.now-liked ? Icons.library : Icons.heart-out; tint: root.now-liked ? Theme.accent : Theme.muted; size: 32px; y: (parent.height - self.height) / 2; clicked => { root.like-toggle(); } }
+                                if root.tab-right && root.xf-on: VerticalLayout { alignment: center; Crossfade { compact: true; from-art: root.xf-from-art; to-art: root.xf-to-art; frac: root.xf-frac; } }
+                                if root.tab-right && root.can-like: VerticalLayout { alignment: center; IconButton { tip: root.now-liked ? "Remove from Likes" : "Add to Likes"; d: root.now-liked ? Icons.library : Icons.heart-out; tint: root.now-liked ? Theme.accent : Theme.muted; size: 32px; clicked => { root.like-toggle(); } } }
                                 if root.tab-right: VerticalLayout {
                                     alignment: center;
                                     spacing: 2px;
@@ -5840,8 +5971,8 @@ export component AppWindow inherits Window {
                                     Marquee { text: root.now-title + (root.now-trimmed ? " *" : ""); font-size: 15px; right: root.tab-right; max-width: 420px; }
                                     ArtistLinks { names: root.now-artists; text: root.now-artist; size: 13px; right: root.tab-right; pick(k) => { root.now-act("artist:" + k); } }
                                 }
-                                if !root.tab-right && root.xf-on: Crossfade { compact: true; from-art: root.xf-from-art; to-art: root.xf-to-art; frac: root.xf-frac; y: (parent.height - self.height) / 2; }
-                                if !root.tab-right && root.can-like: IconButton { tip: root.now-liked ? "Remove from Likes" : "Add to Likes"; d: root.now-liked ? Icons.library : Icons.heart-out; tint: root.now-liked ? Theme.accent : Theme.muted; size: 32px; y: (parent.height - self.height) / 2; clicked => { root.like-toggle(); } }
+                                if !root.tab-right && root.xf-on: VerticalLayout { alignment: center; Crossfade { compact: true; from-art: root.xf-from-art; to-art: root.xf-to-art; frac: root.xf-frac; } }
+                                if !root.tab-right && root.can-like: VerticalLayout { alignment: center; IconButton { tip: root.now-liked ? "Remove from Likes" : "Add to Likes"; d: root.now-liked ? Icons.library : Icons.heart-out; tint: root.now-liked ? Theme.accent : Theme.muted; size: 32px; clicked => { root.like-toggle(); } } }
                             }
                         }
                     }
@@ -5898,14 +6029,14 @@ export component AppWindow inherits Window {
                             height: sbox.full - 9px;
                             spacing: 10px;
                             property <bool> bad: root.status-bad;
-                            Rectangle { width: 8px; height: 8px; y: (parent.height - self.height) / 2; border-radius: 4px; background: parent.bad ? #ff8a80 : Theme.accent; }
+                            Rectangle { y: (parent.height - self.height) / 2; width: 8px; height: 8px; border-radius: 4px; background: parent.bad ? #ff8a80 : Theme.accent; }
                             // (a click on it puts it away, as the web app's)
                             Rectangle {
                                 horizontal-stretch: 1;
                                 Text { x: 0; width: parent.width; height: parent.height; text: sbox.said; color: root.status-bad ? #ff8a80 : Theme.text; font-size: 13px; vertical-alignment: center; overflow: elide; }
                                 TouchArea { mouse-cursor: MouseCursor.pointer; clicked => { root.status-dismiss(); } }
                             }
-                            for a[i] in root.status-actions: Pill { label: a; y: (parent.height - self.height) / 2; on: i == 0; clicked => { root.status-act(i); } }
+                            for a[i] in root.status-actions: VerticalLayout { alignment: center; Pill { label: a; on: i == 0; clicked => { root.status-act(i); } } }
                         }
                         Rectangle { height: 1px; background: Theme.line; }
                     }
@@ -5933,14 +6064,14 @@ export component AppWindow inherits Window {
                             }
                             HorizontalLayout {
                                 spacing: 10px;
-                                TabCover { art: root.now-art; plat: root.now-plat; viz: root.viz-bar ? root.viz-style : "off"; level: root.viz-level; ring: root.viz-ring-small; badge: root.player-style == "minimal" ? 18px : 20px; width: root.player-style == "minimal" ? 34px : 40px; height: self.width; y: (parent.height - self.height) / 2; badge-clicked => { root.now-act("platform"); } }
+                                VerticalLayout { alignment: center; TabCover { art: root.now-art; plat: root.now-plat; viz: root.viz-bar ? root.viz-style : "off"; level: root.viz-level; ring: root.viz-ring-small; badge: root.player-style == "minimal" ? 18px : 20px; width: root.player-style == "minimal" ? 34px : 40px; height: self.width; badge-clicked => { root.now-act("platform"); } } }
                                 VerticalLayout {
                                     alignment: center;
                                     spacing: 1px;
                                     Marquee { text: root.now-title + (root.now-trimmed ? " *" : ""); font-size: root.player-style == "minimal" ? 13px : 14px; }
                                     ArtistLinks { names: root.now-artists; text: root.now-artist; size: 12px; pick(k) => { root.now-act("artist:" + k); } }
                                 }
-                                if root.xf-on: Crossfade { compact: true; from-art: root.xf-from-art; to-art: root.xf-to-art; frac: root.xf-frac; y: (parent.height - self.height) / 2; }
+                                if root.xf-on: VerticalLayout { alignment: center; Crossfade { compact: true; from-art: root.xf-from-art; to-art: root.xf-to-art; frac: root.xf-frac; } }
                             }
                         }
                         if !root.tab-style: Rectangle {
@@ -5955,11 +6086,11 @@ export component AppWindow inherits Window {
                                 if root.viz-style != "glow": VizView { style: root.viz-flat; bands: root.viz-bands; peaks: root.viz-peaks; curve: root.viz-curve; strength: 0.55; }
                             }
                         }
-                        IconButton { tip: root.playing ? "Pause" : "Play"; d: root.playing ? Icons.pause : Icons.play; filled: true; size: 40px; y: (parent.height - self.height) / 2; clicked => { root.toggle(); } }
+                        VerticalLayout { alignment: center; IconButton { tip: root.playing ? "Pause" : "Play"; d: root.playing ? Icons.pause : Icons.play; filled: true; size: 40px; clicked => { root.toggle(); } } }
                         Rectangle { width: 6px; }
-                        IconButton { tip: "Previous"; d: Icons.prev; y: (parent.height - self.height) / 2; clicked => { root.prev(); } }
-                        IconButton { tip: "Next"; d: Icons.next; y: (parent.height - self.height) / 2; clicked => { root.next(); } }
-                        IconButton { tip: root.shuffle-on ? "Shuffle on" : "Shuffle off"; d: Icons.shuffle; tint: root.shuffle-on ? Theme.accent : Theme.muted; y: (parent.height - self.height) / 2; clicked => { root.shuffle-toggle(); } }
+                        VerticalLayout { alignment: center; IconButton { tip: "Previous"; d: Icons.prev; clicked => { root.prev(); } } }
+                        VerticalLayout { alignment: center; IconButton { tip: "Next"; d: Icons.next; clicked => { root.next(); } } }
+                        VerticalLayout { alignment: center; IconButton { tip: root.shuffle-on ? "Shuffle on" : "Shuffle off"; d: Icons.shuffle; tint: root.shuffle-on ? Theme.accent : Theme.muted; clicked => { root.shuffle-toggle(); } } }
                         Rectangle {
                             width: 36px;
                             IconButton { tip: root.repeat-mode == "one" ? "Repeat this track" : root.repeat-mode == "all" ? "Repeat the queue" : "Repeat off"; d: Icons.repeat; tint: root.repeat-mode != "off" ? Theme.accent : Theme.muted; y: (parent.height - self.height) / 2; clicked => { root.repeat-cycle(); } }
@@ -5982,7 +6113,7 @@ export component AppWindow inherits Window {
                                 }
                             }
                         }
-                        Range { width: root.narrow ? 64px : 84px; y: (parent.height - self.height) / 2; minimum: 0; maximum: 100; value: root.volume; changed(v) => { root.volume = v; root.volume-changed(v / 100); } }
+                        VerticalLayout { alignment: center; Range { width: root.narrow ? 64px : 84px; minimum: 0; maximum: 100; value: root.volume; changed(v) => { root.volume = v; root.volume-changed(v / 100); } } }
                         Rectangle {
                             horizontal-stretch: 1;
                             // (In the Player: the visualiser in this gap only, clear of the controls either side)
@@ -5996,8 +6127,8 @@ export component AppWindow inherits Window {
                             }
                         }
                         // like and favourite, as the web app's (on the track that's playing)
-                        if root.can-like: IconButton { tip: root.now-liked ? "Remove from Likes" : "Add to Likes"; d: root.now-liked ? Icons.library : Icons.heart-out; tint: root.now-liked ? Theme.accent : Theme.muted; y: (parent.height - self.height) / 2; clicked => { root.like-toggle(); } }
-                        if root.can-like: IconButton { tip: root.now-fav ? "Remove from Favourites" : "Add to Favourites"; d: root.now-fav ? Icons.star : Icons.star-out; tint: root.now-fav ? Theme.accent : Theme.muted; y: (parent.height - self.height) / 2; clicked => { root.fav-toggle(); } }
+                        if root.can-like: VerticalLayout { alignment: center; IconButton { tip: root.now-liked ? "Remove from Likes" : "Add to Likes"; d: root.now-liked ? Icons.library : Icons.heart-out; tint: root.now-liked ? Theme.accent : Theme.muted; clicked => { root.like-toggle(); } } }
+                        if root.can-like: VerticalLayout { alignment: center; IconButton { tip: root.now-fav ? "Remove from Favourites" : "Add to Favourites"; d: root.now-fav ? Icons.star : Icons.star-out; tint: root.now-fav ? Theme.accent : Theme.muted; clicked => { root.fav-toggle(); } } }
                         if root.now-plat != "": Rectangle {
                             width: 36px;
                             IconButton { tip: "Add to playlist"; d: Icons.playlist-add; y: (parent.height - self.height) / 2; clicked => { pl-menu.show(); } }
@@ -6022,7 +6153,7 @@ export component AppWindow inherits Window {
                                 }
                             }
                         }
-                        IconButton { tip: root.page == "now" ? "Close Now Playing" : "Now Playing and lyrics"; d: Icons.lyrics; tint: root.page == "now" ? Theme.accent : Theme.muted; y: (parent.height - self.height) / 2; clicked => { root.nav(root.page == "now" ? "library" : "now"); } }
+                        VerticalLayout { alignment: center; IconButton { tip: root.page == "now" ? "Close Now Playing" : "Now Playing and lyrics"; d: Icons.lyrics; tint: root.page == "now" ? Theme.accent : Theme.muted; clicked => { root.nav(root.page == "now" ? "library" : "now"); } } }
                         // where the sound plays
                         Rectangle {
                             width: 36px;
@@ -6086,19 +6217,19 @@ export component AppWindow inherits Window {
                                 }
                             }
                         }
-                        Rectangle { width: 1px; height: 24px; y: (parent.height - self.height) / 2; background: Theme.line; }
+                        VerticalLayout { alignment: center; Rectangle { width: 1px; height: 24px; background: Theme.line; } }
                         // (tracks dropped on it go in the queue, as the web app's)
-                        IconButton {
+                        VerticalLayout { alignment: center; IconButton {
                             tip: root.queue-open ? "Close the queue" : "Queue";
                             d: Icons.queue;
                             tint: root.queue-open || qbd.has-drag ? Theme.accent : Theme.muted;
-                            y: (parent.height - self.height) / 2;
+                           
                             clicked => { root.queue-open = !root.queue-open; }
                             qbd := DropArea {
                                 can-drop(e) => { return Dnd.accepts("queue", e.data) ? DragAction.copy : DragAction.none; }
                                 dropped(e) => { Dnd.dropped("queue", e.data); return e.proposed-action; }
                             }
-                        }
+                        } }
                     }
                     // the progress: click or drag along it (along the top, in Minimal)
                     if root.player-style != "minimal": Progress { value: root.pos-frac; length-secs: root.dur-secs; loading: root.track-loading; preloading: root.preloading; mixing: root.mixing; released(v) => { root.seek(v); } }
@@ -6132,7 +6263,7 @@ export component AppWindow inherits Window {
                 spacing: 10px;
                 Text { text: root.taste-step == 1 ? "What do you like?" : "Fine-tune"; color: Theme.text; font-size: 18px; font-weight: 800; }
                 Text {
-                    text: root.taste-step == 1 ? "Pick a few genres, and Discover starts from them: stations for their artists, their charts and their mixes. What you like and play counts for more as you go. Change them here any time."
+                    text: root.taste-step == 1 ? "Pick a few genres and Discover will start from them, with stations, charts and mixes. What you like and play counts more over time. You can change them here any time."
                         : "Any of these you like most? Each one you pick gets a mix of its own on Discover. You can skip this.";
                     color: Theme.muted; font-size: 12px; wrap: word-wrap;
                 }
@@ -6220,7 +6351,7 @@ export component AppWindow inherits Window {
                 HorizontalLayout {
                     alignment: end;
                     spacing: 8px;
-                    Pill { label: "From a File..."; tip: "A file with the keys in it, such as Google's credentials file: they're filled in for you"; clicked => { root.ks-file(); } }
+                    Pill { label: "From a File..."; tip: "A file with the keys in it, such as Google's credentials file. They're filled in for you."; clicked => { root.ks-file(); } }
                     Pill { label: "Cancel"; clicked => { root.ks-open = false; } }
                     Pill { label: "Save and sign in"; on: true; clicked => { root.ks-save(); } }
                 }
@@ -6263,7 +6394,7 @@ export component AppWindow inherits Window {
                         if f.which == 1: TextInput { x: 10px; width: parent.width - 20px; height: parent.height; vertical-alignment: center; color: Theme.text; font-size: 14px; single-line: true; text <=> root.tp-artist; }
                     }
                 }
-                Text { text: "Start and end (m:ss; empty for its own)"; color: Theme.muted; font-size: 12px; }
+                Text { text: "Start and end, as m:ss. Leave empty to use the song's own."; color: Theme.muted; font-size: 12px; }
                 HorizontalLayout {
                     spacing: 8px;
                     Rectangle {
@@ -6326,14 +6457,14 @@ export component AppWindow inherits Window {
                     spacing: 8px;
                     alignment: start;
                     Text { text: "Phrases start"; color: Theme.text; font-size: 13px; vertical-alignment: center; }
-                    Pill { label: "Earlier"; tip: "Its phrases (16 beats) start a bar earlier"; clicked => { root.tp-phrase = max(-3, root.tp-phrase - 1); } }
+                    Pill { label: "Earlier"; tip: "Move its phrases (16 beats) a bar earlier"; clicked => { root.tp-phrase = max(-3, root.tp-phrase - 1); } }
                     Text {
                         text: root.tp-phrase == 0 ? "as measured" : (abs(root.tp-phrase) + (abs(root.tp-phrase) == 1 ? " bar " : " bars ") + (root.tp-phrase < 0 ? "earlier" : "later"));
                         color: root.tp-phrase == 0 ? Theme.muted : Theme.text; font-size: 13px; vertical-alignment: center; min-width: 110px; horizontal-alignment: center;
                     }
-                    Pill { label: "Later"; tip: "Its phrases start a bar later"; clicked => { root.tp-phrase = min(3, root.tp-phrase + 1); } }
+                    Pill { label: "Later"; tip: "Move its phrases a bar later"; clicked => { root.tp-phrase = min(3, root.tp-phrase + 1); } }
                 }
-                if root.tp-beat-shown: Text { text: "If Seamless Mix blends this song off: a beat or two out, move Beat 1 to where you hear the bar start; on the beat but a bar out, move where its phrases start (a quiet or filtered bar can start one)."; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
+                if root.tp-beat-shown: Text { text: "If Seamless Mix blends this song badly: when it's a beat or two off, move Beat 1 to where you hear the bar start. When it's on the beat but a bar off, move where its phrases start. A quiet or filtered bar can start a phrase."; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
                 if root.tp-note != "": Text { text: root.tp-note; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
                 if root.tp-versions.length > 0: Text { text: "Plays from YouTube Music"; color: Theme.muted; font-size: 12px; }
                 for v[k] in root.tp-versions: Rectangle {
@@ -6406,7 +6537,7 @@ export component AppWindow inherits Window {
                                 Marquee { text: "New: " + r.new; font-size: 13px; font-weight: 400; }
                                 Marquee { text: "There: " + r.old; font-size: 12px; font-weight: 400; ink: Theme.muted; }
                             }
-                            Pill { label: r.choice; y: (parent.height - self.height) / 2; clicked => { root.la-cycle(i); } }
+                            VerticalLayout { alignment: center; Pill { label: r.choice; clicked => { root.la-cycle(i); } } }
                         }
                     }
                 }
@@ -6531,7 +6662,7 @@ export component AppWindow inherits Window {
                 padding: 20px;
                 spacing: 12px;
                 Text { text: "Your Jam"; color: Theme.text; font-size: 18px; font-weight: 800; }
-                Text { text: "Send this invite to the friends you want in. They hear what you play, and can add songs; you pick what plays."; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
+                Text { text: "Send this invite to friends you want to join. They hear what you play and can add songs. You choose what plays."; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
                 Rectangle {
                     height: 34px;
                     border-radius: 8px;
@@ -6731,12 +6862,12 @@ export component TaskbarWidget inherits Window {
         spacing: 10px;
         alignment: stretch;
         // (its cover: the taskbar's full height, at its left edge, or a smaller one)
-        Rectangle {
+        VerticalLayout { alignment: center; Rectangle {
             width: root.big-art ? root.bar-h : min(36px, root.bar-h - 8px);
             height: self.width;
-            y: (parent.height - self.height) / 2;
+           
             BadgedCover { art: root.art; plat: root.plat; badge: 15px; corner: root.big-art ? 0px : 4px; initial: root.song == "" ? "" : "♪"; width: parent.width; height: parent.height; }
-        }
+        } }
         VerticalLayout {
             horizontal-stretch: 1;
             alignment: center;
@@ -6750,10 +6881,10 @@ export component TaskbarWidget inherits Window {
             if root.viz == "glow": Rectangle { y: (parent.height - self.height) / 2; height: 18px; border-radius: 9px; background: Theme.accent.mix(Theme.accent-2, 1 - root.viz-level).with-alpha(0.12 + 0.5 * root.viz-level); }
             if root.viz != "glow": VizView { y: 10px; height: parent.height - 20px; style: root.viz == "ring" ? "centre" : root.viz; bands: root.viz-bands; peaks: root.viz-peaks; curve: root.viz-curve; strength: 0.9; }
         }
-        if root.can-like: IconButton { d: root.liked ? Icons.library : Icons.heart-out; size: 30px; tint: root.liked ? Theme.accent : Theme.muted; y: (parent.height - self.height) / 2; clicked => { root.act("like"); } }
-        IconButton { d: Icons.prev; size: 30px; y: (parent.height - self.height) / 2; clicked => { root.act("prev"); } }
-        IconButton { d: root.playing ? Icons.pause : Icons.play; size: 34px; tint: Theme.text; y: (parent.height - self.height) / 2; clicked => { root.act("play"); } }
-        IconButton { d: Icons.next; size: 30px; y: (parent.height - self.height) / 2; clicked => { root.act("next"); } }
+        if root.can-like: VerticalLayout { alignment: center; IconButton { d: root.liked ? Icons.library : Icons.heart-out; size: 30px; tint: root.liked ? Theme.accent : Theme.muted; clicked => { root.act("like"); } } }
+        VerticalLayout { alignment: center; IconButton { d: Icons.prev; size: 30px; clicked => { root.act("prev"); } } }
+        VerticalLayout { alignment: center; IconButton { d: root.playing ? Icons.pause : Icons.play; size: 34px; tint: Theme.text; clicked => { root.act("play"); } } }
+        VerticalLayout { alignment: center; IconButton { d: Icons.next; size: 30px; clicked => { root.act("next"); } } }
     }
     // where it is, along its foot (the mix sweeping through it, as the player bar's), if wanted
     if root.show-progress: Rectangle {
@@ -6783,7 +6914,7 @@ export component TaskbarWidget inherits Window {
 // Apple Music's sign-in (Settings > Integrations > Apple Music > Import): Apple's own page, in a window of
 // its own, only until you're signed in (then your music's read once, and the sign-in forgotten)
 export component AppleSignIn inherits Window {
-    title: "Sign in to Apple Music (once, to import your music)";
+    title: "Sign in to Apple Music, once, to import your music";
     icon: @image-url("../../../src-tauri/icons/128x128.png");
     preferred-width: 1000px;
     preferred-height: 760px;
