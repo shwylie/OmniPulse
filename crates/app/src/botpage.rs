@@ -9,7 +9,7 @@ pub const BOT: &str = "chatbot";
 
 /// OmniPulse's own apps, so you only sign in: their Client IDs (empty: not registered yet, so you make your own).
 /// Kick's secret isn't here: the relay keeps it and finishes Kick's sign-ins (jam-server, /api/kick/*)
-pub const TWITCH_ID: &str = "qgs2bz59rmqfzzdni2qf1l8imbnx2c";
+pub const TWITCH_ID: &str = "122hyd1hxg8qpi1nfzwc4oa85lolgd";
 pub const KICK_ID: &str = "01M5NZG55J6HQ93XPKVQ8CHRY8";
 
 /// Your own app wanted instead (or OmniPulse's not there yet)
@@ -20,7 +20,8 @@ fn own_app(cur: &Map<String, Value>, plat: &str) -> bool {
 
 /// What a sign-in's given besides the page's values: OmniPulse's apps, and where to finish a Kick sign-in
 pub fn sign_in_extras(vals: &mut Map<String, Value>, relay: &str) {
-    if !own_app(vals, "twitch") { vals.insert("twitchClientId".into(), json!(TWITCH_ID)); }
+    // (Twitch's: its Authorize page, finished by the relay; your own public app: by device code, as before)
+    if !own_app(vals, "twitch") { vals.insert("twitchClientId".into(), json!(TWITCH_ID)); vals.insert("twitchRelay".into(), json!(relay)); } else { vals.insert("twitchRelay".into(), json!("")); }
     if !own_app(vals, "kick") {
         vals.insert("kickClientId".into(), json!(KICK_ID));
         vals.insert("kickClientSecret".into(), json!(""));
@@ -294,7 +295,7 @@ mod tests {
         // (and a sign-in's given them, Kick's to be finished by the relay)
         let mut v = m(json!({}));
         sign_in_extras(&mut v, "https://relay");
-        assert_eq!((v["twitchClientId"].as_str(), v["kickClientId"].as_str(), v["kickClientSecret"].as_str(), v["kickRelay"].as_str()), (Some(TWITCH_ID), Some(KICK_ID), Some(""), Some("https://relay")));
+        assert_eq!((v["twitchClientId"].as_str(), v["twitchRelay"].as_str(), v["kickClientId"].as_str(), v["kickClientSecret"].as_str(), v["kickRelay"].as_str()), (Some(TWITCH_ID), Some("https://relay"), Some(KICK_ID), Some(""), Some("https://relay")));
         let mut own = m(json!({ "kickOwnApp": true, "kickClientId": "mine", "kickClientSecret": "s" }));
         sign_in_extras(&mut own, "https://relay");
         assert_eq!((own["kickClientId"].as_str(), own["kickRelay"].as_str()), (Some("mine"), Some("")));

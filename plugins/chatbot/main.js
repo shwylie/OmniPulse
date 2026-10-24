@@ -41,9 +41,38 @@ async function signInPage(url, copy) {
   else OmniPulse.app.openUrl(url);
 }
 
+// OmniPulse's own Twitch app: Twitch's Authorize page, its answer caught on this PC, finished by the relay
+const TWITCH_REDIRECT = "http://localhost:" + 8476 + "/twitch";
+async function twitchCodeFlow(who, scopes, clientId, relay, said, copy) {
+  const state = randomText(24);
+  // (the bot: Twitch asked to show whose account it is, so it isn't signed in as you by mistake)
+  const q = { client_id: clientId, redirect_uri: TWITCH_REDIRECT, response_type: "code", scope: scopes, state };
+  if (who === "bot") q.force_verify = "true";
+  const waiting = OmniPulse.app.awaitRedirect(8476, "/twitch");
+  await signInPage("https://id.twitch.tv/oauth2/authorize?" + Object.entries(q).map(([k, x]) => k + "=" + encodeURIComponent(x)).join("&"), copy);
+  const as = who === "bot" ? "as the bot account" : "as your channel";
+  said(copy
+    ? "Sign-in link copied. Within five minutes, paste it into a private window on this PC, sign in " + as + ", and click Authorize."
+    : "Twitch is open in your browser. Sign in " + as + " and click Authorize.");
+  const back = await waiting;
+  const got = {};
+  String(back.query || "").split("&").forEach((kv) => { const i = kv.indexOf("="); if (i > 0) got[kv.slice(0, i)] = decodeURIComponent(kv.slice(i + 1).replace(/\+/g, " ")); });
+  if (got.error) return "Twitch's sign-in didn't finish: " + (got.error_description || got.error);
+  if (got.state !== state || !got.code) return "Twitch's sign-in didn't come back as it should: try again.";
+  const t = await viaRelay(relay, "twitch", "token", { code: got.code, redirect_uri: TWITCH_REDIRECT });
+  if (!t.ok || !t.j.access_token) return "Twitch didn't take the sign-in: " + (t.j.message || t.j.error || t.status) + ". Try again in a moment.";
+  return t.j;
+}
+
 async function signInFlow(who, scopes, values, said, copy) {
   const clientId = ((values && values.twitchClientId) || S().twitchClientId || "").trim();
   if (!clientId) return "Put your Twitch Client ID in first (its note says where), then sign in.";
+  const relay = String((values && values.twitchRelay) || "").trim();
+  if (relay) {
+    const t = await twitchCodeFlow(who, scopes, clientId, relay, said, copy);
+    if (typeof t === "string") return t;
+    return twitchSignedIn(who, clientId, relay, t);
+  }
   const d = await form("https://id.twitch.tv/oauth2/device", { client_id: clientId, scopes });
   if (!d.ok) return "Twitch didn't take that Client ID: " + (d.j.message || d.status) + ". Check its Client Type is Public.";
   // (the link carries its code, so there's nothing to type)
@@ -60,22 +89,26 @@ async function signInFlow(who, scopes, values, said, copy) {
   while (Date.now() < until) {
     await new Promise((ok) => setTimeout(ok, every));
     const t = await form("https://id.twitch.tv/oauth2/token", { client_id: clientId, scopes, device_code: d.j.device_code, grant_type: "urn:ietf:params:oauth:grant-type:device_code" });
-    if (t.ok && t.j.access_token) {
-      const me = await validate(t.j.access_token);
-      if (!me) return "Signed in, but Twitch didn't say who as: try again.";
-      const keep = who === "bot"
-        ? { twitchClientId: clientId, botToken: t.j.access_token, botRefresh: t.j.refresh_token, botLogin: me.login }
-        : { twitchClientId: clientId, token: t.j.access_token, refresh: t.j.refresh_token, login: me.login, userId: me.user_id };
-      await OmniPulse.app.saveSettings(keep);
-      Object.assign(OmniPulse.settings, keep);
-      restart();
-      return "Signed in to Twitch as " + me.login + (who === "bot" ? " (the bot)." : ".");
-    }
+    if (t.ok && t.j.access_token) return twitchSignedIn(who, clientId, "", t.j);
     const msg = (t.j.message || "").toLowerCase();
     if (msg.includes("slow_down")) every += 5000;
     else if (!msg.includes("pending")) return "Twitch's sign-in didn't finish: " + (t.j.message || t.status);
   }
   return "The sign-in wasn't finished in time: try again.";
+}
+
+// A Twitch sign-in done: who it is, kept (with how it's renewed: by the relay, or your own public app)
+async function twitchSignedIn(who, clientId, relay, j) {
+  const me = await validate(j.access_token);
+  if (!me) return "Signed in, but Twitch didn't say who as: try again.";
+  if (who === "bot" && S().login && me.login === String(S().login).toLowerCase()) return "That's your channel's own account: sign in the bot with its own Twitch account (a private window keeps you signed in as you).";
+  const keep = who === "bot"
+    ? { twitchClientId: clientId, twitchRelay: relay, botToken: j.access_token, botRefresh: j.refresh_token, botLogin: me.login }
+    : { twitchClientId: clientId, twitchRelay: relay, token: j.access_token, refresh: j.refresh_token, login: me.login, userId: me.user_id };
+  await OmniPulse.app.saveSettings(keep);
+  Object.assign(OmniPulse.settings, keep);
+  restart();
+  return "Signed in to Twitch as " + me.login + (who === "bot" ? " (the bot)." : ".");
 }
 
 async function validate(token) {
@@ -88,7 +121,9 @@ async function renew(who) {
   const s = S();
   const refresh = who === "bot" ? s.botRefresh : s.refresh;
   if (!refresh || !s.twitchClientId) return false;
-  const t = await form("https://id.twitch.tv/oauth2/token", { client_id: s.twitchClientId, grant_type: "refresh_token", refresh_token: refresh });
+  const t = s.twitchRelay
+    ? await viaRelay(s.twitchRelay, "twitch", "refresh", { refresh_token: refresh })
+    : await form("https://id.twitch.tv/oauth2/token", { client_id: s.twitchClientId, grant_type: "refresh_token", refresh_token: refresh });
   if (!t.ok || !t.j.access_token) return false;
   const keep = who === "bot" ? { botToken: t.j.access_token, botRefresh: t.j.refresh_token || refresh } : { token: t.j.access_token, refresh: t.j.refresh_token || refresh };
   await OmniPulse.app.saveSettings(keep);
@@ -1315,7 +1350,7 @@ async function kickSignInFlow(values, said, copy, who) {
   if (got.error) return "Kick's sign-in didn't finish: " + (got.error_description || got.error);
   if (got.state !== state || !got.code) return "Kick's sign-in didn't come back as it should: try again.";
   const t = relay
-    ? await viaRelay(relay, "token", { code: got.code, code_verifier: verifier, redirect_uri: KICK_REDIRECT })
+    ? await viaRelay(relay, "kick", "token", { code: got.code, code_verifier: verifier, redirect_uri: KICK_REDIRECT })
     : await form("https://id.kick.com/oauth/token", { grant_type: "authorization_code", client_id: id, client_secret: secret, redirect_uri: KICK_REDIRECT, code: got.code, code_verifier: verifier });
   if (!t.ok || !t.j.access_token) return "Kick didn't take the sign-in: " + (t.j.error_description || t.j.message || t.j.error || t.status) + (relay ? ". Try again in a moment." : ". Check your app's Client Secret, and that its Redirect URL is " + KICK_REDIRECT + ".");
   const p = bot ? "kickBot" : "kick";
@@ -1357,9 +1392,9 @@ async function kickApi(method, path, body, again, who) {
   try { return await r.json(); } catch (e) { return {}; }
 }
 
-// A Kick sign-in (or renewal) finished by OmniPulse's relay, which keeps its app's secret
-async function viaRelay(relay, what, body) {
-  const r = await OmniPulse.fetch(relay.replace(/\/$/, "") + "/api/kick/" + what, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+// A sign-in (or renewal) finished by OmniPulse's relay, which keeps its app's secret (platform: kick, twitch)
+async function viaRelay(relay, platform, what, body) {
+  const r = await OmniPulse.fetch(relay.replace(/\/$/, "") + "/api/" + platform + "/" + what, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
   let j = {};
   try { j = await r.json(); } catch (e) {}
   return { ok: r.ok, status: r.status, j };
@@ -1371,7 +1406,7 @@ async function kickRenew(who) {
   if (!s[p + "RefreshToken"] || !s.kickClientId || (!s.kickClientSecret && !s.kickRelay)) return false;
   const t = s.kickClientSecret
     ? await form("https://id.kick.com/oauth/token", { grant_type: "refresh_token", client_id: s.kickClientId, client_secret: s.kickClientSecret, refresh_token: s[p + "RefreshToken"] })
-    : await viaRelay(s.kickRelay, "refresh", { refresh_token: s[p + "RefreshToken"] });
+    : await viaRelay(s.kickRelay, "kick", "refresh", { refresh_token: s[p + "RefreshToken"] });
   if (!t.ok || !t.j.access_token) return false;
   const keep = { [p + "Token"]: t.j.access_token, [p + "RefreshToken"]: t.j.refresh_token || s[p + "RefreshToken"] };
   await OmniPulse.app.saveSettings(keep);
