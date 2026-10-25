@@ -11,6 +11,7 @@
     "irc-ws.chat.twitch.tv",
     "eventsub.wss.twitch.tv",
     "127.0.0.1",
+    "www.youtube.com",
     "kick.com",
     "web.kick.com",
     "api.kick.com",
@@ -500,6 +501,8 @@
       "type": "toggle",
       "default": false
     },
+    { "key": "ytOn", "label": "YouTube", "type": "toggle", "default": false },
+    { "key": "ytChannel", "label": "Your YouTube Channel", "type": "text", "default": "" },
     { "key": "meldOn", "label": "Meld Studio", "type": "toggle", "default": false },
     { "key": "meldAddress", "label": "Meld Studio's Address", "type": "text", "default": "127.0.0.1:13376" },
     { "key": "slobsOn", "label": "Streamlabs Desktop", "type": "toggle", "default": false },

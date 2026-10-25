@@ -58,7 +58,7 @@
 <button id="gear" aria-label="Its settings" title="Its settings">&#9881;</button>
 <div id="panel">
   <h2>Show</h2>
-  <label>Chat from <select id="oFrom"><option value="all">Twitch and Kick</option><option value="twitch">Twitch only</option><option value="kick">Kick only</option></select></label>
+  <label>Chat from <select id="oFrom"><option value="all">Every platform</option><option value="twitch">Twitch only</option><option value="kick">Kick only</option><option value="youtube">YouTube only</option></select></label>
   <label>Commands (!sr...) <input type="checkbox" id="oCmds"></label>
   <label>The bot's own <input type="checkbox" id="oBot" checked></label>
   <label>Badges <input type="checkbox" id="oBadges" checked></label>
@@ -132,6 +132,7 @@
   const MARK = {
     twitch: "M11.571 4.714h1.715v5.143H11.57zm4.715 0H18v5.143h-1.714zM6 0L1.714 4.286v15.428h5.143V24l4.286-4.286h3.428L22.286 12V0zm14.571 11.143l-3.428 3.428h-3.429l-3 3v-3H6.857V1.714h13.714z",
     kick: "M1.333 0h8v5.333H12V2.667h2.667V0h8v8H20v2.667h-2.667v2.666H20V16h2.667v8h-8v-2.667H12v-2.666H9.333V24h-8z",
+    youtube: "M21.6 7.2a2.7 2.7 0 0 0-1.9-1.9C18 4.8 12 4.8 12 4.8s-6 0-7.7.5a2.7 2.7 0 0 0-1.9 1.9C2 8.9 2 12 2 12s0 3.1.4 4.8a2.7 2.7 0 0 0 1.9 1.9c1.7.5 7.7.5 7.7.5s6 0 7.7-.5a2.7 2.7 0 0 0 1.9-1.9c.4-1.7.4-4.8.4-4.8s0-3.1-.4-4.8zM10 15V9l5.2 3z",
   };
   const BADGES = [["broadcaster", "b", "B"], ["moderator", "m", "M"], ["vip", "v", "V"], ["subscriber", "s", "S"]];
   function colourOf(m) {
@@ -206,9 +207,9 @@
     if (!shown(m)) return;
     const r = document.createElement("div");
     r.className = "m";
-    const pc = m.platform === "kick" ? "#53fc18" : "#a970ff";
+    const pc = m.platform === "kick" ? "#53fc18" : m.platform === "youtube" ? "#ff3355" : "#a970ff";
     r.style.setProperty("--pc", pc);
-    if (opt.marks) { const NS = "http://www.w3.org/2000/svg"; const s = document.createElementNS(NS, "svg"); s.setAttribute("viewBox", "0 0 24 24"); s.classList.add("pf"); const p = document.createElementNS(NS, "path"); p.setAttribute("d", MARK[m.platform === "kick" ? "kick" : "twitch"]); s.append(p); r.append(s); }
+    if (opt.marks) { const NS = "http://www.w3.org/2000/svg"; const s = document.createElementNS(NS, "svg"); s.setAttribute("viewBox", "0 0 24 24"); s.classList.add("pf"); const p = document.createElementNS(NS, "path"); p.setAttribute("d", MARK[m.platform === "kick" ? "kick" : m.platform === "youtube" ? "youtube" : "twitch"]); s.append(p); r.append(s); }
     const body = document.createElement("div");
     if (opt.badges) for (const [k, cls, l] of BADGES) if ((m.badges || []).includes(k)) { const b = document.createElement("span"); b.className = "badge " + cls; b.textContent = l; body.append(b); }
     const who = document.createElement("span"); who.className = "who"; who.textContent = (m.user || m.login || "") + (m.me ? " " : ": "); who.style.color = colourOf(m);

@@ -3072,11 +3072,11 @@ global BotLook {
         return Theme.tints.length > 0 ? Theme.tints[mod(n, Theme.tints.length)] : Theme.accent;
     }
     public pure function tint(id: string) -> color {
-        return id == "twitch" || id == "twitchbot" ? #a970ff : id == "kick" || id == "kickbot" ? #53fc18 : id == "obs" ? Theme.accent : id == "meld" ? #ff7a59 : id == "slobs" ? #80f5d2 : id == "streamlabs" ? #4ad295 : id == "streamelements" ? #5ad1ff
+        return id == "twitch" || id == "twitchbot" ? #a970ff : id == "kick" || id == "kickbot" ? #53fc18 : id == "youtube" ? #ff3355 : id == "obs" ? Theme.accent : id == "meld" ? #ff7a59 : id == "slobs" ? #80f5d2 : id == "streamlabs" ? #4ad295 : id == "streamelements" ? #5ad1ff
             : id == "requests" ? Theme.accent : id == "alerts" ? #ff6b8a : id == "points" ? #ffb547 : id == "games" ? #5ad1ff : Theme.accent-2;
     }
     public pure function icon(id: string) -> string {
-        return id == "twitch" || id == "twitchbot" ? Icons.twitch : id == "kick" || id == "kickbot" ? Icons.kick : id == "obs" || id == "meld" || id == "slobs" ? Icons.broadcast : id == "streamlabs" || id == "streamelements" ? Icons.coins
+        return id == "twitch" || id == "twitchbot" ? Icons.twitch : id == "kick" || id == "kickbot" ? Icons.kick : id == "youtube" ? Icons.youtube-mark : id == "obs" || id == "meld" || id == "slobs" ? Icons.broadcast : id == "streamlabs" || id == "streamelements" ? Icons.coins
             : id == "requests" ? Icons.playlist-add : id == "alerts" ? Icons.bell : id == "points" ? Icons.coins : id == "games" ? Icons.dice : id == "moderation" ? Icons.shield
             : id == "hype" ? Icons.broadcast : id == "voteskip" ? Icons.next : id == "wheel" ? Icons.dice : id == "leaderboard" ? Icons.coins : id == "emoterain" ? Icons.chat
             : id == "goals" ? Icons.check : id == "timer" ? Icons.refresh : id == "latest" ? Icons.heart-out : id == "raid" ? Icons.broadcast : Icons.actions;

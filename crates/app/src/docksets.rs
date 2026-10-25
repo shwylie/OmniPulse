@@ -146,7 +146,7 @@ pub fn fields(panel: &str, vals: &Map<String, Value>, port: u64) -> Vec<Value> {
                 tog("shadow", "Shadow", "Makes the words easier to read over a busy picture."),
                 sel("dir", "Newest At The", "", &[(json!("bottom"), "Bottom"), (json!("top"), "Top")]),
                 note("What It Shows"),
-                sel("from", "Chat From", "", &[(json!("all"), "Twitch and Kick"), (json!("twitch"), "Twitch"), (json!("kick"), "Kick")]),
+                sel("from", "Chat From", "", &[(json!("all"), "Every Platform"), (json!("twitch"), "Twitch"), (json!("kick"), "Kick"), (json!("youtube"), "YouTube")]),
                 tog("badges", "Badges", "Subscriber, moderator and VIP badges next to names."),
                 tog("marks", "Platform Marks", "A small Twitch or Kick mark before each name."),
                 tog("bot", "The Bot's Own Messages", ""),

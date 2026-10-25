@@ -115,6 +115,11 @@ pub fn sheet(id: &str, cur: &Map<String, Value>) -> (String, Vec<Field>) {
             f("password", "obsPassword", "Password", "", s(cur, "obsPassword"), "Paste the OBS password here"),
             f("text", "obsAddress", "Address", "Leave this as it is if OBS runs on this PC.", s(cur, "obsAddress"), "127.0.0.1:4455"),
         ]),
+        "youtube" => ("YouTube".into(), vec![
+            f("toggle", "ytOn", "Read your YouTube live chat", "Its chat shows in your Chat Dock and the Multichat Overlay, its commands start your actions, and Super Chats, new members and gifted memberships become alerts.", if on(cur, "ytOn", false) { "true" } else { "false" }, ""),
+            f("text", "ytChannel", "Your channel", "Your @handle, like @yourname, or your channel's link. OmniPulse finds your stream once you're live. A stream's own link works too.", s(cur, "ytChannel"), "@yourname"),
+            f("note", "", "No sign-in needed: it reads your chat as YouTube's own chat window does. For now it's read only, so the Suite doesn't post replies in YouTube's chat.", "", "", ""),
+        ]),
         "meld" => ("Meld Studio".into(), vec![
             f("toggle", "meldOn", "Connect to Meld Studio", "Your actions can switch scenes, show or hide layers, turn effects on or off, record clips, and more. Its scene changes and going live can start actions too.", if on(cur, "meldOn", false) { "true" } else { "false" }, ""),
             step(1, "Open Meld Studio on this PC. Nothing needs setting up in it: OmniPulse finds it.", "", "", ""),
@@ -370,6 +375,7 @@ pub fn tiles(cur: &Map<String, Value>, st: &Value, running: bool) -> Vec<(&'stat
     vec![
         ("twitch", "Twitch".into(), light(!tw.is_empty(), "twitch"), if tw.is_empty() { "Not signed in".into() } else if up("twitch") { tw.to_string() } else { format!("{tw}: {}", wait.to_lowercase()) }, if s(cur, "botLogin").is_empty() { "No bot account".into() } else { format!("Bot: {}", s(cur, "botLogin")) }),
         ("kick", "Kick".into(), light(on(cur, "kickOn", false) && !kk.is_empty(), "kick"), if !on(cur, "kickOn", false) { "Off".into() } else if kk.is_empty() { "Not signed in".into() } else if up("kick") { kk.to_string() } else { format!("{kk}: {}", wait.to_lowercase()) }, if s(cur, "kickBotLogin").is_empty() { "No bot account".into() } else { format!("Bot: {}", s(cur, "kickBotLogin")) }),
+        ("youtube", "YouTube".into(), light(on(cur, "ytOn", false) && !s(cur, "ytChannel").is_empty(), "youtube"), if !on(cur, "ytOn", false) { "Off".into() } else if s(cur, "ytChannel").is_empty() { "Needs your channel".into() } else if up("youtube") { "Reading your live chat".into() } else { "Waiting for you to go live".into() }, "Chat, Super Chats, members".into()),
         ("obs", "OBS".into(), light(on(cur, "obsOn", false), "obs"), if !on(cur, "obsOn", false) { "Off".into() } else if up("obs") { "Connected".into() } else { "Waiting for OBS to open".into() }, "Scenes and sources".into()),
         ("meld", "Meld Studio".into(), light(on(cur, "meldOn", false), "meld"), if !on(cur, "meldOn", false) { "Off".into() } else if up("meld") { "Connected".into() } else { "Waiting for Meld to open".into() }, "Scenes, layers, effects".into()),
         ("slobs", "Streamlabs Desktop".into(), light(on(cur, "slobsOn", false) && !s(cur, "slobsToken").is_empty(), "slobs"), if !on(cur, "slobsOn", false) { "Off".into() } else if s(cur, "slobsToken").is_empty() { "Needs its token".into() } else if up("slobs") { "Connected".into() } else { "Waiting for Streamlabs to open".into() }, "Scenes and sources".into()),
@@ -510,7 +516,8 @@ mod tests {
     fn tiles_light_as_the_chatbot_says() {
         let cur = m(json!({ "login": "Me", "kickOn": true, "kickLogin": "", "obsOn": true }));
         let t = tiles(&cur, &json!({ "twitch": { "up": true }, "obs": { "up": false } }), true);
-        assert_eq!((t[0].2, t[1].2, t[2].2, t[3].2), ("ok", "off", "warn", "off"));
+        let light = |id: &str| t.iter().find(|x| x.0 == id).map(|x| x.2).unwrap_or("");
+        assert_eq!((light("twitch"), light("kick"), light("obs"), light("youtube"), light("streamlabs")), ("ok", "off", "warn", "off", "off"));
         assert_eq!(t[0].3, "Me");
         assert!(method("link:kick:bot") == Some("signInKickBotCopy") && method("out:twitch:channel") == Some("signOutChannel"));
     }

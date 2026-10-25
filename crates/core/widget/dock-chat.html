@@ -38,6 +38,7 @@
   .msg:hover { background: #ffffff08; }
   .msg.twitch { border-left-color: #9146ff55; }
   .msg.kick { border-left-color: #53fc1855; }
+  .msg.youtube { border-left-color: #ff335566; }
   .msg.first { background: #7aa2ff14; }
   .msg.gone .text { text-decoration: line-through; color: var(--dim); }
   .msg.me .text { font-style: italic; }
@@ -306,8 +307,9 @@
   function addMessage(m) {
     if (m.notice) return addNotice(m.notice, /^Couldn't/.test(m.notice));
     const r = document.createElement("div");
-    r.className = "msg " + (m.platform === "kick" ? "kick" : "twitch") + (m.first ? " first" : "") + (m.me ? " me" : "") + (m.gone ? " gone" : "");
-    r.dataset.platform = m.platform === "kick" ? "kick" : "twitch";
+    const pl = m.platform === "kick" ? "kick" : m.platform === "youtube" ? "youtube" : "twitch";
+    r.className = "msg " + pl + (m.first ? " first" : "") + (m.me ? " me" : "") + (m.gone ? " gone" : "");
+    r.dataset.platform = pl;
     const time = document.createElement("span"); time.className = "time"; time.textContent = stamp(m.ts); r.append(time);
     for (const [key, cls, label, title] of BADGES) {
       if ((m.badges || []).includes(key)) { const b = document.createElement("span"); b.className = "badge " + cls; b.textContent = label; b.title = title; r.append(b); }
@@ -319,7 +321,8 @@
     r.append(name, document.createTextNode(m.me ? " " : ": "));
     const text = document.createElement("span"); text.className = "text"; text.append(...textNodes(m)); r.append(text);
     if (m.first) { const tag = document.createElement("span"); tag.className = "tag"; tag.textContent = "first message"; r.append(tag); }
-    if (!m.self) r.append(modButtons(m));
+    // (YouTube's: read only for now, so no buttons to moderate it with)
+    if (!m.self && m.platform !== "youtube") r.append(modButtons(m));
     rows.set(m.n, r);
     show(r);
     place(r);

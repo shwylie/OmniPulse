@@ -32,7 +32,7 @@ const fn pick(key: &'static str, label: &'static str, options: &'static [(&'stat
     Field { key, label, kind: "select", options, default, note }
 }
 
-const FROM: &[(&str, &str)] = &[("any", "Any Platform"), ("twitch", "Twitch"), ("kick", "Kick")];
+const FROM: &[(&str, &str)] = &[("any", "Any Platform"), ("twitch", "Twitch"), ("kick", "Kick"), ("youtube", "YouTube")];
 /// (where a channel change goes: where the action came from, or a platform, or both)
 const WHERE: &[(&str, &str)] = &[("here", "Where It Came From"), ("twitch", "Twitch"), ("kick", "Kick"), ("both", "Twitch and Kick")];
 const GROUP_DO: &[(&str, &str)] = &[("on", "Turn On"), ("off", "Turn Off"), ("toggle", "Switch")];

@@ -189,6 +189,8 @@ function reply(to, text, platform) {
   if (!text) return;
   counts.replies++;
   const p = platform || "twitch";
+  // (YouTube's chat: read only, for now: nothing said back there, and never to Twitch instead)
+  if (p === "youtube") { OmniPulse.log("youtube (not sent: read only): " + String(text).slice(0, 120)); return; }
   if (p === "kick" || p === "all") kickSay(p === "kick" ? to : null, text);
   if (p === "kick") return;
   const s = botChat || chat;
@@ -1511,6 +1513,113 @@ function slobsCall(method, resource, args, early) {
     setTimeout(() => { if (slobsWaiting[id]) { delete slobsWaiting[id]; no(new Error("Streamlabs Desktop didn't answer")); } }, 5000);
   });
 }
+// ---------- YouTube: its live chat, read as its own chat window reads it (no key, no sign-in): chat, Super
+// Chats and Stickers, new members and their milestones, gifted memberships. Read only for now: nothing's sent
+// back to YouTube. Your channel looked at every minute until it's live; its chat then asked for every few
+// seconds, as YouTube says to ----------
+let yt = null, ytUp = false, ytLookT = null;
+const YT_HEAD = { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36", "Accept-Language": "en-US,en;q=0.9" };
+function ytOn() { return yes(S().ytOn) && !!String(S().ytChannel || "").trim(); }
+function ytChannelUrl() {
+  const c = String(S().ytChannel || "").trim().replace(/\/+$/, "");
+  if (/^https?:\/\//.test(c)) return c.replace(/\/(live|featured|videos|streams)$/, "");
+  if (/^UC[\w-]{20,}$/.test(c)) return "https://www.youtube.com/channel/" + c;
+  return "https://www.youtube.com/" + (c.startsWith("@") ? c : "@" + c);
+}
+async function ytLook() {
+  ytLookT = null;
+  if (stopped || !ytOn() || yt) return;
+  try {
+    let video = "";
+    const c = String(S().ytChannel || "").trim();
+    const m = c.match(/(?:[?&]v=|youtu\.be\/|\/live\/|\/watch\/)([\w-]{11})/);
+    if (m) video = m[1];
+    else {
+      const r = await OmniPulse.fetch(ytChannelUrl() + "/live", { headers: YT_HEAD });
+      const html = await r.text();
+      const v = html.match(/<link rel="canonical" href="https:\/\/www\.youtube\.com\/watch\?v=([\w-]{11})"/) || html.match(/"videoId":"([\w-]{11})"/);
+      if (v && /"isLive(Now|Content)?":true/.test(html)) video = v[1];
+    }
+    if (video) await ytStart(video);
+  } catch (e) { OmniPulse.log("youtube: " + e.message); }
+  if (!yt && !stopped && ytOn()) ytLookT = setTimeout(ytLook, 60000);
+}
+async function ytStart(video) {
+  const r = await OmniPulse.fetch("https://www.youtube.com/live_chat?is_popout=1&v=" + video, { headers: YT_HEAD });
+  const html = await r.text();
+  const key = (html.match(/"INNERTUBE_API_KEY":"([^"]+)"/) || [])[1];
+  const version = (html.match(/"INNERTUBE_CLIENT_VERSION":"([^"]+)"/) || [])[1] || "2.20240101.00.00";
+  const cont = (html.match(/"continuation":"([^"]+)"/) || [])[1];
+  if (!key || !cont) throw new Error("its chat isn't open (is the stream live, with chat on?)");
+  yt = { video, key, version, cont, seen: new Set(), timer: null };
+  ytUp = true;
+  OmniPulse.app.say("YouTube's chat is connected.").catch(() => {});
+  ytPoll(true);
+}
+async function ytPoll(first) {
+  if (!yt || stopped) return;
+  let wait = 3000;
+  try {
+    const r = await OmniPulse.fetch("https://www.youtube.com/youtubei/v1/live_chat/get_live_chat?prettyPrint=false&key=" + yt.key, {
+      method: "POST",
+      headers: Object.assign({ "Content-Type": "application/json" }, YT_HEAD),
+      body: JSON.stringify({ context: { client: { clientName: "WEB", clientVersion: yt.version, hl: "en" } }, continuation: yt.cont }),
+    });
+    if (!r.ok) throw new Error("YouTube said " + r.status);
+    const j = await r.json();
+    const lc = j.continuationContents && j.continuationContents.liveChatContinuation;
+    if (!lc) throw new Error("the stream's chat has ended");
+    const c = (lc.continuations || [])[0] || {};
+    const next = c.invalidationContinuationData || c.timedContinuationData || c.reloadContinuationData || {};
+    if (next.continuation) yt.cont = next.continuation;
+    wait = Math.max(1500, Math.min(10000, num(next.timeoutMs) || 3000));
+    // (the first answer: what was said before OmniPulse came, not acted on again)
+    for (const a of lc.actions || []) { const it = a.addChatItemAction && a.addChatItemAction.item; const d = it && it[Object.keys(it)[0]]; if (d && d.id) { if (first) yt.seen.add(d.id); else ytItem(it); } }
+  } catch (e) {
+    OmniPulse.log("youtube chat: " + e.message);
+    yt = null;
+    ytUp = false;
+    if (!stopped && ytOn()) ytLookT = setTimeout(ytLook, 30000);
+    return;
+  }
+  yt.timer = setTimeout(() => ytPoll(false), wait);
+}
+function ytText(runs) { return (runs || []).map((r) => r.text != null ? r.text : r.emoji ? ((r.emoji.shortcuts || [])[0] || r.emoji.emojiId || "") : "").join(""); }
+function ytItem(item) {
+  const k = Object.keys(item)[0], d = item[k] || {};
+  if (!d.id || yt.seen.has(d.id)) return;
+  yt.seen.add(d.id);
+  if (yt.seen.size > 3000) yt.seen = new Set([...yt.seen].slice(-1000));
+  const user = (d.authorName && d.authorName.simpleText) || "";
+  const userId = d.authorExternalChannelId || "";
+  const badges = (d.authorBadges || []).map((b) => { const t = b.liveChatAuthorBadgeRenderer || {}; const ic = (t.icon && t.icon.iconType) || ""; return ic === "OWNER" ? "broadcaster" : ic === "MODERATOR" ? "moderator" : ic === "VERIFIED" ? "verified" : t.customThumbnail ? "member" : ""; }).filter(Boolean);
+  const text = ytText(d.message && d.message.runs);
+  if (k === "liveChatTextMessageRenderer") {
+    OmniPulse.app.dockChat({ platform: "youtube", id: d.id, user, login: user.toLowerCase(), userId, color: "", badges, text, self: false }).catch(() => {});
+    onChat({ command: "PRIVMSG", platform: "youtube", nick: user.toLowerCase(), text, tags: { "display-name": user, badges: badges.map((b) => (b === "member" ? "subscriber" : b) + "/1").join(","), mod: badges.includes("moderator") ? "1" : "0", subscriber: badges.includes("member") ? "1" : "0", id: d.id, "user-id": userId } });
+    return;
+  }
+  const alert = (a) => { if (S().alerts !== false) sendAlert(Object.assign({ platform: "youtube" }, a)); };
+  const go = (ev, ctx) => { const c = Object.assign({ platform: "youtube", user, userId, rawInput: text, message: text, amount: "" }, ctx); Object.assign(c, words(c.rawInput)); fire(ev, c); };
+  if (k === "liveChatPaidMessageRenderer" || k === "liveChatPaidStickerRenderer") {
+    const amt = (d.purchaseAmountText && d.purchaseAmountText.simpleText) || "";
+    alert({ type: "donation", user, amount: amt, message: text });
+    go("donation", { amount: amt });
+  } else if (k === "liveChatMembershipItemRenderer") {
+    const head = d.headerPrimaryText ? ytText(d.headerPrimaryText.runs) : "";
+    const months = (head.match(/(\d+)\s*month/i) || [])[1] || "";
+    if (months) { alert({ type: "sub", user, amount: months + " months", message: text }); go("resub", { amount: months }); }
+    else { alert({ type: "sub", user, amount: "" }); go("sub", { amount: "1" }); }
+  } else if (k === "liveChatSponsorshipsGiftPurchaseAnnouncementRenderer") {
+    const h = d.header && d.header.liveChatSponsorshipsHeaderRenderer;
+    const n = ((h && ytText(h.primaryText && h.primaryText.runs)) || "").match(/(\d+)/);
+    const giver = (h && h.authorName && h.authorName.simpleText) || user;
+    alert({ type: "gift", user: giver, amount: String(n ? n[1] : 1) });
+    go("gift", { user: giver, amount: String(n ? n[1] : 1) });
+  }
+}
+function ytStop() { if (yt && yt.timer) clearTimeout(yt.timer); if (ytLookT) clearTimeout(ytLookT); yt = null; ytUp = false; ytLookT = null; }
+
 async function slobsScene(name) {
   const all = (await slobsCall("getScenes", "ScenesService")) || [];
   const sc = all.find((x) => String(x.name || "").toLowerCase() === String(name || "").trim().toLowerCase());
@@ -1970,6 +2079,7 @@ async function start() {
   obsConnect();
   meldConnect();
   slobsConnect();
+  ytLook();
   tipConnect();
   kickConnect().catch((e) => { OmniPulse.log("kick: " + e.message); OmniPulse.app.say("Kick's chat didn't connect: " + e.message).catch(() => {}); });
   if (!S().token || !S().login) return;
@@ -2377,6 +2487,7 @@ function stopAll() {
   for (const s of [chat, botChat, events, obs, kick, meld, slobs]) { if (s) { s.onclose = null; s.close(); } }
   chat = botChat = events = obs = kick = meld = slobs = null;
   meldReady = slobsReady = false;
+  ytStop();
   for (const s of tipSockets) { s.onclose = null; s.close(); }
   for (const d of Object.values(duels)) clearTimeout(d.off);
   if (trivia) clearTimeout(trivia.off);
@@ -2467,6 +2578,7 @@ OmniPulse.register({
       kick: { on: yes(S().kickOn), app: !!String(S().kickClientId || "").trim() && (!!String(S().kickClientSecret || "").trim() || !!String(S().kickRelay || "").trim()), login: S().kickLogin || "", bot: S().kickBotLogin || "", channel: S().kickChannel || "", up: !!(kick && kick.up) },
       obs: { on: yes(S().obsOn), up: !!obsReady },
       meld: { on: yes(S().meldOn), up: !!meldReady },
+      youtube: { on: ytOn(), up: ytUp },
       slobs: { on: yes(S().slobsOn), up: !!slobsReady },
       streamlabs: { on: !!String(S().streamlabsToken || "").trim(), up: tip("streamlabs") },
       streamelements: { on: !!String(S().streamelementsToken || "").trim(), up: tip("streamelements") },
