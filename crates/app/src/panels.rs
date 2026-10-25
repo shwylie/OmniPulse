@@ -76,7 +76,7 @@ pub fn title(name: &str) -> String {
 
 /// The panel a switch's Settings button opens (by the switch's pref)
 pub fn of_switch(key: &str) -> Option<&'static str> {
-    Some(match key { "streamSafe" => "safe", "req" => "requests", "smartOn" => "smart", "presence" => "discord", "jamsOn" => "together", "lyricsSources" => "lyrics", "widget" => "widget", "lyricsWidget" => "lyricsw", "alertsOn" => "alerts", "remoteOn" => "remote", "out2On" => "offset", "socials" => "socials", "avoidRecent" => "recent", "hideOn" => "hidden", "plugAdd" => "plugins", _ => return None })
+    Some(match key { "streamSafe" => "safe", "req" => "requests", "smartOn" => "smart", "presence" => "discord", "jamsOn" => "together", "lyricsSources" => "lyrics", "widget" => "widget", "lyricsWidget" => "lyricsw", "alertsOn" => "alerts", "remoteOn" => "remote", "out2On" => "offset", "socials" => "socials", "hideOn" => "hidden", "plugAdd" => "plugins", _ => return None })
 }
 
 /// What a panel edits, and each one's default (the web app's)

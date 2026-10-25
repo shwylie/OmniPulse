@@ -4673,6 +4673,7 @@ fn flows_wire(ui: &AppWindow, shared: &Shared) {
         flows_save(&s);
     });
     let s = shared.clone();
+    ui.on_recent_window_set({ let s = shared.clone(); move |w| { pref_put(&s, "recentWindow", serde_json::json!(w.as_str())); if let Some(ui) = s.borrow().ui.upgrade() { ui.set_recent_window(w); } } });
     ui.on_flow_name_edited(move |t| { flow_change(&s, |a| a["name"] = serde_json::json!(t.as_str())); flows_item_paint(&s); });
     let s = shared.clone();
     ui.on_flow_group_edited(move |t| { flow_change(&s, |a| a["group"] = serde_json::json!(t.trim())); flows_item_paint(&s); });
@@ -6274,6 +6275,7 @@ fn paint_settings(a: &App) {
     };
     ui.set_set_rows_integrations(rows("Integrations"));
     ui.set_set_rows_library(rows("Library"));
+    ui.set_recent_window(a.web.prefs["recentWindow"].as_str().unwrap_or("week").into());
     ui.set_set_rows_sound(rows("Sound"));
     ui.set_set_rows_plugins(rows("Plugins"));
     ui.set_widget_on(set_row_on(&a.web.prefs, "widget", false));

@@ -3445,6 +3445,9 @@ export component AppWindow inherits Window {
     callback flow-pick(int);
     callback flow-new(int);
     callback flow-name-edited(string);
+    /// (Avoid Recent Plays: how far back counts as heard lately)
+    in property <string> recent-window: "week";
+    callback recent-window-set(string);
     /// (an action's group: Streamer.bot's, turned on or off together by Turn a Group On or Off)
     in property <string> flow-group;
     callback flow-group-edited(string);
@@ -5575,6 +5578,15 @@ export component AppWindow inherits Window {
                                 VerticalLayout {
                                     for r[i] in root.set-rows-library: VerticalLayout {
                                         if r.key == "autoplay" || r.key == "avoidRecent" || r.key == "hideOn" || r.key == "queueSets" || r.key == "sbOn": VerticalLayout { padding-bottom: 10px; SetRowView { r: r; toggle(k) => { root.set-toggle(k); } more(k) => { root.set-more(k); } } }
+                                        // (Avoid Recent Plays' one choice, right under it: no page of its own)
+                                        if r.key == "avoidRecent" && r.on: HorizontalLayout {
+                                            padding-left: 16px;
+                                            padding-bottom: 12px;
+                                            spacing: 6px;
+                                            alignment: start;
+                                            VerticalLayout { alignment: center; Text { text: "Heard in the"; color: Theme.muted; font-size: 12px; } }
+                                            for w in [{ k: "day", t: "Past Day" }, { k: "week", t: "Past Week" }, { k: "month", t: "Past Month" }]: Pill { label: w.t; on: root.recent-window == w.k; clicked => { root.recent-window-set(w.k); } }
+                                        }
                                     }
                                 }
                                 // ---- the sidebar's pages: their switches, and the sidebar as they'd have it ----
