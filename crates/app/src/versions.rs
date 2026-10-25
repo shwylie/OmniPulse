@@ -125,12 +125,13 @@ fn match_words(s: &str) -> Vec<String> {
     s.split(|c: char| !c.is_alphanumeric()).filter(|w| !w.is_empty()).map(String::from).collect()
 }
 
-/// The artist is credited, or named in the title: not a cover
+/// The artist is credited, or named in the title: not a cover. Every word of their name ("the" aside), so
+/// Alex Goot isn't Alex Melton
 pub fn artist_hit(t: &Track, c: &YtTrack) -> bool {
     let (ga, _) = guess_names(t);
-    let artist = match_words(if ga.is_empty() { &t.artist } else { &ga });
+    let artist: Vec<String> = match_words(if ga.is_empty() { &t.artist } else { &ga }).into_iter().filter(|w| w != "the").collect();
     let place: HashSet<String> = match_words(&format!("{} {}", c.artists, c.title)).into_iter().collect();
-    artist.is_empty() || artist.iter().any(|w| place.contains(w))
+    artist.is_empty() || artist.iter().all(|w| place.contains(w))
 }
 
 pub fn score(t: &Track, c: &YtTrack) -> f32 {
@@ -198,7 +199,10 @@ pub async fn find(t: &Track) -> Option<Version> {
     // (and once more since never-the-song versions (instrumentals...) and explicit ones counted ("xv"))
     let before = saved.as_ref().filter(|s| s["chosen"].as_bool() != Some(true) && ((featured && s["fv"].is_null()) || s["xv"].is_null())).and_then(from_snap);
     if before.is_none() {
-        if let Some(v) = saved.as_ref().and_then(from_snap) {
+        // (one found by itself that isn't by them after all, as a name shared with someone else let through
+        // before: looked for again; yours stay)
+        let yours = saved.as_ref().is_some_and(|s| s["chosen"].as_bool() == Some(true));
+        if let Some(v) = saved.as_ref().and_then(from_snap).filter(|v| yours || artist_hit(t, v)) {
             return Some(Version { yt: v, exact: true });
         }
     }
@@ -281,6 +285,17 @@ mod tests {
         assert!(solo > 0.0);
         // (a song named with "with" in it isn't someone featured)
         assert!(score(&sc("Stay With Me", "Sam Smith", 172_000), &yt("Stay With Me", "Sam Smith", 172_000)) >= 1.0);
+    }
+
+    #[test]
+    fn someone_sharing_a_first_name_is_someone_else() {
+        // (Alex Melton's Drops of Jupiter isn't Alex Goot's, though both are Alex)
+        let t = Track { src: Src::Spotify("x".into()), key: "sp:x".into(), title: "Drops of Jupiter".into(), artist: "Alex Melton".into(), ms: 230_000, ..Default::default() };
+        assert!(!artist_hit(&t, &yt("Drops Of Jupiter", "Alex Goot, Kurt Hugo Schneider", 233_000)));
+        assert!(artist_hit(&t, &yt("Drops of Jupiter", "Alex Melton", 230_000)));
+        // ("the" left out: The Weeknd's own upload credits Weeknd sometimes)
+        let w = Track { src: Src::Spotify("y".into()), key: "sp:y".into(), title: "Blinding Lights".into(), artist: "The Weeknd".into(), ms: 200_000, ..Default::default() };
+        assert!(artist_hit(&w, &yt("Blinding Lights", "Weeknd", 200_000)));
     }
 
     #[test]

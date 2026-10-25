@@ -39,6 +39,7 @@ mod lang;
 mod panels;
 mod flows;
 mod botimport;
+mod procwatch;
 mod botpage;
 mod hide;
 mod lookalike;
@@ -4468,6 +4469,7 @@ fn flows_paint(shared: &Shared) {
     ui.set_flow_sel(sel);
     let Some(a) = (sel >= 0).then(|| list.get(sel as usize)).flatten() else { return };
     ui.set_flow_name(a["name"].as_str().unwrap_or("").into());
+    ui.set_flow_group(a["group"].as_str().unwrap_or("").into());
     ui.set_flow_on(a["on"].as_bool() != Some(false));
     ui.set_flow_queued(a["queued"].as_bool() == Some(true));
     ui.set_flow_trigger(flow_node(flows::TRIGGERS, &a["trigger"]));
@@ -4672,6 +4674,8 @@ fn flows_wire(ui: &AppWindow, shared: &Shared) {
     });
     let s = shared.clone();
     ui.on_flow_name_edited(move |t| { flow_change(&s, |a| a["name"] = serde_json::json!(t.as_str())); flows_item_paint(&s); });
+    let s = shared.clone();
+    ui.on_flow_group_edited(move |t| { flow_change(&s, |a| a["group"] = serde_json::json!(t.trim())); flows_item_paint(&s); });
     let s = shared.clone();
     ui.on_flow_on_toggled(move |on| { flow_change(&s, |a| a["on"] = serde_json::json!(on)); flows_item_paint(&s); });
     let s = shared.clone();
@@ -5984,7 +5988,7 @@ fn remote_action(shared: &Shared, id: u64, action: &str) {
         "shuffle" => shuffle_toggle(shared),
         "like" => { let t = shared.borrow().queue.current().cloned(); if let Some(t) = t { like_track(shared, t); } }
         "favourite" => { let t = shared.borrow().queue.current().cloned(); if let Some(t) = t { fav_track(shared, t); } }
-        "repeat" => { if let Some(ui) = shared.borrow().ui.upgrade() { ui.invoke_repeat_cycle(); } }
+        "repeat" => { let ui = shared.borrow().ui.upgrade(); if let Some(ui) = ui { ui.invoke_repeat_cycle(); } }
         // (only what's playing stays, as the web app's)
         "clear-queue" => {
             let mut a = shared.borrow_mut();
@@ -6534,6 +6538,8 @@ fn bot_set(shared: &Shared, key: &str, v: &str) {
 
 fn bot_act(shared: &Shared, act: &str) {
     let say = |t: &str| if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_status(t.into()); };
+    // (Alerts: their settings are the Stream Widget's Alerts page, the same as without the Suite)
+    if act == "sheet:alerts" { return panel_open(shared, "alerts"); }
     if let Some(id) = act.strip_prefix("sheet:") {
         BOT_SHEET.with(|b| *b.borrow_mut() = id.to_string());
         return bot_paint(shared);
@@ -6545,7 +6551,9 @@ fn bot_act(shared: &Shared, act: &str) {
     if let Some(key) = act.strip_prefix("row-more:") { if let Some(name) = panels::of_switch(key) { pf_leave(shared, &format!("panel:{name}")); } return; }
     if let Some(how) = act.strip_prefix("import:") {
         flows_open(shared);
-        if let Some(ui) = shared.borrow().ui.upgrade() { ui.invoke_flow_act(if how == "paste" { "paste".into() } else { "restore".into() }); }
+        // (the window taken first: its Paste and Restore borrow the app's state themselves)
+        let ui = shared.borrow().ui.upgrade();
+        if let Some(ui) = ui { ui.invoke_flow_act(if how == "paste" { "paste".into() } else { "restore".into() }); }
         return;
     }
     if let Some(rest) = act.strip_prefix("call:") {
@@ -10939,6 +10947,16 @@ fn plugin_app(shared: &Shared, plugin: &str, ask: serde_json::Value, answer: Box
             let path = arg(1);
             std::thread::spawn(move || send(match await_redirect(port, &path) { Ok(q) => serde_json::json!({ "ok": true, "query": q }), Err(e) => serde_json::json!({ "error": e }) }));
         }
+        // (the Suite's Press Keys: as if typed, into whatever's in front)
+        "pressKeys" => {
+            if plugin != botpage::BOT { return send(serde_json::json!({ "error": "only the Stream Suite can" })); }
+            send(match procwatch::press(&arg(0)) { Ok(()) => serde_json::json!({ "ok": true }), Err(e) => serde_json::json!({ "error": e }) });
+        }
+        // (the Suite's Open a File or Web Address: a program, a file or a web page, as double-clicking it)
+        "openThing" => {
+            if plugin != botpage::BOT { return send(serde_json::json!({ "error": "only the Stream Suite can" })); }
+            send(match procwatch::open(&arg(0), &arg(1)) { Ok(()) => serde_json::json!({ "ok": true }), Err(e) => serde_json::json!({ "error": e }) });
+        }
         // (the Suite's widgets, as they are now: passed on to OBS's pages)
         "suiteWidget" => {
             if plugin != "chatbot" { return send(serde_json::json!({ "error": "only OmniPulse's Stream Suite can" })); }
@@ -11041,6 +11059,7 @@ fn plugin_app(shared: &Shared, plugin: &str, ask: serde_json::Value, answer: Box
         // (its own settings, kept: a sign-in's tokens; merged into what's kept, never running it again)
         "saveSettings" => {
             let values = args.first().and_then(|v| v.as_object()).cloned().unwrap_or_default();
+            let had_actions = values.contains_key("actions");
             let all = {
                 let mut a = shared.borrow_mut();
                 let mut all = a.web.prefs["pluginSettings"].as_object().cloned().unwrap_or_default();
@@ -11058,6 +11077,13 @@ fn plugin_app(shared: &Shared, plugin: &str, ask: serde_json::Value, answer: Box
             if std::env::var_os("OMNIPULSE_SELFTEST").is_none() { webstate::save_pref("pluginSettings", all); }
             send(serde_json::json!({ "ok": true }));
             if plugin == botpage::BOT { BOT_DRAWN.with(|d| *d.borrow_mut() = Default::default()); bot_paint(shared); }
+            if plugin == botpage::BOT && had_actions {
+                let list = flows_load(shared);
+                FLOW.with(|f| f.borrow_mut().0 = list);
+                let open = shared.borrow().ui.upgrade().is_some_and(|ui| ui.get_flow_open());
+                if open { flows_paint(shared); }
+                hotkeys_update(shared);
+            }
         }
         other => send(serde_json::json!({ "error": format!("the app has no {other}") })),
     }
@@ -11174,6 +11200,16 @@ fn hotkeys_update(shared: &Shared) {
             .filter_map(|a| a["trigger"]["keys"].as_str().map(|k| k.trim().to_string())).filter(|k| !k.is_empty()).collect()
     };
     HOTKEYS_WANTED.with(|h| *h.borrow_mut() = Some(list));
+    // (and the programs its actions wait for: told to it as each starts)
+    let progs: Vec<String> = if !on { Vec::new() } else {
+        prefs["pluginSettings"][BOT]["actions"].as_array().into_iter().flatten()
+            .filter(|a| a["on"].as_bool() != Some(false) && a["trigger"]["type"] == "process")
+            .filter_map(|a| a["trigger"]["name"].as_str().map(|k| k.trim().to_string())).filter(|k| !k.is_empty()).collect()
+    };
+    let rt = shared.borrow().rt.clone();
+    procwatch::want(progs, move |name, path| {
+        if let Some(p) = plugrun::get(BOT) { rt.spawn(async move { let _ = p.call("appEvent", vec![serde_json::json!("process"), serde_json::json!({ "name": name, "path": path })]).await; }); }
+    });
 }
 
 fn desktop_action(shared: &Shared, action: &str) {

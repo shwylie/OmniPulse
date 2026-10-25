@@ -33,6 +33,9 @@ const fn pick(key: &'static str, label: &'static str, options: &'static [(&'stat
 }
 
 const FROM: &[(&str, &str)] = &[("any", "Any Platform"), ("twitch", "Twitch"), ("kick", "Kick")];
+/// (where a channel change goes: where the action came from, or a platform, or both)
+const WHERE: &[(&str, &str)] = &[("here", "Where It Came From"), ("twitch", "Twitch"), ("kick", "Kick"), ("both", "Twitch and Kick")];
+const GROUP_DO: &[(&str, &str)] = &[("on", "Turn On"), ("off", "Turn Off"), ("toggle", "Switch")];
 const WHO: &[(&str, &str)] = &[("everyone", "Everyone"), ("subscribers", "Subscribers"), ("vips", "VIPs"), ("mods", "Moderators"), ("you", "Only You")];
 const EVENTS: &[(&str, &str)] = &[
     ("follow", "A Follow"), ("sub", "A New Sub"), ("resub", "A Resub"), ("gift", "Gifted Subs"), ("bits", "Bits"),
@@ -106,6 +109,7 @@ pub const TRIGGERS: &[Kind] = &[
         pick("event", "Event", EVENTS, "follow", ""),
         f("min", "At Least", "number", "0", "The smallest amount that counts, in bits, raiders or subs gifted. Use 0 for any amount."),
         f("reward", "Reward", "text", "", "For a Channel Points reward, enter its name. Leave it empty for any reward."),
+        f("rewardid", "Reward ID", "text", "", "Filled in by an import from Streamer.bot. It matches that reward even if you rename it. Leave it empty to go by the name."),
         pick("from", "On", FROM, "any", "Kick has follows, subs, gifted subs, hosts and going live or offline."),
         f("users", "Only For", "text", "", "Viewers' names, separated by commas. Use this with First Words for an entrance greeting. Leave it empty for anyone."),
     ] },
@@ -129,6 +133,9 @@ pub const TRIGGERS: &[Kind] = &[
     ] },
     Kind { id: "web", label: "A Web Address", note: "Another tool, like a Stream Deck plugin, a script or a bot, can run it by calling http://127.0.0.1:7879/action?key=YOUR-KEY&name=ITS-NAME. Add &user= and &input= to set %user% and %rawInput%. The key is Song Requests' secret key, in Settings > Streaming > Song Requests (turned on).", fields: &[
         f("name", "Called As", "text", "", "Leave it empty to use the action's own name."),
+    ] },
+    Kind { id: "process", label: "A Program Starting", note: "When a program opens on this PC, like a game. Gives the steps %path% (where the program is) and %process% (its name).", fields: &[
+        f("name", "Program", "text", "", "Its name, as in Task Manager's Details tab, like destiny2launcher. The .exe on the end doesn't matter."),
     ] },
     Kind { id: "manual", label: "Only When Run", note: "From another action's Run Another Action, or Run Now above.", fields: &[] },
 ];
@@ -241,7 +248,10 @@ pub const STEPS: &[Kind] = &[
     Kind { id: "marker", label: "Add a Stream Marker", note: "Shows in your stream's video, to find later. Live only.", fields: &[f("text", "Note", "text", "%user%: %rawInput%", "")] },
     Kind { id: "clip", label: "Make a Clip", note: "Of the last 30 seconds or so. Gives the steps after it %clip% (its link). Live only.", fields: &[] },
     Kind { id: "title", label: "Set the Stream Title", note: "", fields: &[f("text", "Title", "text", "%rawInput%", "")] },
-    Kind { id: "game", label: "Set the Category", note: "Twitch's category, like a game or Just Chatting, by its name.", fields: &[f("text", "Category", "text", "%rawInput%", "")] },
+    Kind { id: "game", label: "Set the Category", note: "The category, like a game or Just Chatting, by its name.", fields: &[
+        f("text", "Category", "text", "%rawInput%", ""),
+        pick("where", "On", WHERE, "here", "Where It Came From is the platform its chat or event came from. Run another way, it's Twitch."),
+    ] },
     Kind { id: "poll", label: "Start a Poll", note: "Twitch. Needs you signed in again once, for the permission.", fields: &[
         f("title", "Question", "text", "%rawInput%", ""),
         f("choices", "Choices", "text", "Yes | No", "With | between them (2 to 5)."),
@@ -398,6 +408,17 @@ pub const STEPS: &[Kind] = &[
         f("into", "As", "text", "reply", "The variable it's kept in: %reply%, or whatever you name it."),
     ] },
     Kind { id: "run", label: "Run Another Action", note: "", fields: &[f("action", "Action", "text", "", "Its name.")] },
+    Kind { id: "groupstate", label: "Turn a Group On or Off", note: "Every action in the group at once. Give actions a group next to their name.", fields: &[
+        f("group", "Group", "text", "", "Its name."),
+        pick("what", "", GROUP_DO, "on", ""),
+    ] },
+    Kind { id: "keys", label: "Press Keys", note: "As if you'd pressed them, in whatever window is in front.", fields: &[
+        f("keys", "Keys", "text", "Ctrl+Shift+F1", "Ctrl, Shift, Alt or Win, with + between, and a key (F1 to F24, A to Z, 0 to 9, Space, Enter, PageUp...)."),
+    ] },
+    Kind { id: "open", label: "Open a File or Web Address", note: "A program, a file or a web page, as if you'd double-clicked it. Chat can't change what it opens.", fields: &[
+        f("target", "Open", "text", "https://", "A web address, or a file's or program's whole place, like C:\\Games\\game.exe."),
+        f("args", "With", "text", "", "For a program: what to start it with. Most need nothing."),
+    ] },
     Kind { id: "note", label: "A Note", note: "Does nothing. It's a note for you to read. Steps from a restored backup that couldn't be brought over are kept as notes.", fields: &[f("text", "Note", "text", "", "")] },
     Kind { id: "status", label: "Show in OmniPulse", note: "On OmniPulse's status line: for trying an action out.", fields: &[f("text", "Text", "text", "%user% used it.", "")] },
 ];
@@ -502,6 +523,7 @@ pub fn summary(a: &Value) -> String {
         "obs" => format!("When OBS: {}", label(OBS_WHEN, &s("when")).to_lowercase()),
         "presence" => format!("Each viewer, every {} minutes", t["minutes"].as_f64().unwrap_or(10.0)),
         "hotkey" => format!("On {}", s("keys")),
+        "process" => format!("When {} starts", if s("name").is_empty() { "a program".to_string() } else { s("name") }),
         "web" => format!("When its address is called{}", if s("name").is_empty() { String::new() } else { format!(" ({})", s("name")) }),
         "filter" => format!("When a message has {}", label(RULES, &s("rule")).to_lowercase()),
         _ => "Only when run".into(),

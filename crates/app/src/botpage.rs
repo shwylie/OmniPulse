@@ -286,7 +286,7 @@ pub fn feats(cur: &Map<String, Value>, st: &Value) -> Vec<(&'static str, String,
             let or = |k: &str, d: &str| if s(cur, k).is_empty() { d.to_string() } else { s(cur, k).to_string() };
             format!("{}, {}, {}", or("srCommands", "!sr, !request"), or("songCommands", "!song"), or("wrongCommands", "!wrongsong"))
         }, on(cur, "requests", true), true),
-        ("alerts", "Alerts".into(), "Follows, subs, bits and raids on the Stream Widget".into(), on(cur, "alerts", true), false),
+        ("alerts", "Alerts".into(), "Follows, subs, bits and raids on the Stream Widget".into(), on(cur, "alerts", true), true),
         ("points", "Points and ranks".into(), format!("{} {name} every {} minutes", if n(cur, "pointsAmount").is_empty() { "10".into() } else { n(cur, "pointsAmount") }, if n(cur, "pointsEvery").is_empty() { "10".into() } else { n(cur, "pointsEvery") }), on(cur, "pointsOn", false), true),
         ("games", "Games".into(), "Slots, duels, heists and trivia. Add them from Actions.".into(), false, false),
         ("actions", "Actions".into(), match (all, live) { (Some(a), Some(l)) => format!("{a} made, {l} on"), _ => "Commands, timers, events".into() }, true, false),

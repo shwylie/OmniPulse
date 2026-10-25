@@ -3445,6 +3445,9 @@ export component AppWindow inherits Window {
     callback flow-pick(int);
     callback flow-new(int);
     callback flow-name-edited(string);
+    /// (an action's group: Streamer.bot's, turned on or off together by Turn a Group On or Off)
+    in property <string> flow-group;
+    callback flow-group-edited(string);
     callback flow-on-toggled(bool);
     callback flow-trigger-type(int);
     callback flow-step-type(int, int);
@@ -4285,7 +4288,7 @@ export component AppWindow inherits Window {
                     spacing: 6px;
                     HorizontalLayout {
                         spacing: 12px;
-                        RoundButton { tip: "Back"; d: Icons.back; enabled: root.can-back || (root.page == "settings" && root.set-cat != ""); clicked => { if (root.page == "settings" && root.set-cat != "") { root.set-cat = ""; } else { root.back(); } } }
+                        RoundButton { tip: root.page == "now" && !root.can-back ? "Close Now Playing" : "Back"; d: Icons.back; enabled: root.can-back || root.page == "now" || (root.page == "settings" && root.set-cat != ""); clicked => { if (root.page == "settings" && root.set-cat != "") { root.set-cat = ""; } else if (root.page == "now" && !root.can-back) { root.nav("library"); } else { root.back(); } } }
                         Rectangle { horizontal-stretch: 1; }
                         // the search bar: a pill in the middle
                         Rectangle {
@@ -5502,6 +5505,26 @@ export component AppWindow inherits Window {
                             if root.set-cat == "Plugins" && root.set-query == "": VerticalLayout {
                                 spacing: 10px;
                                 Text { text: "Music sources and more, made by others. Some come with OmniPulse. Each plugin is kept separate, and can only reach the sites it lists."; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
+                                // (Streamer Mode on: the plugins hidden, as their settings can show keys; a way to turn it off here)
+                                if root.streamer: Rectangle {
+                                    border-radius: 12px;
+                                    background: Theme.panel.with-alpha(0.6);
+                                    border-width: 1px;
+                                    border-color: Theme.line;
+                                    HorizontalLayout {
+                                        padding: 16px;
+                                        spacing: 12px;
+                                        VerticalLayout { alignment: center; Glyph { d: Icons.broadcast; width: 22px; height: 22px; fill: Theme.muted; } }
+                                        VerticalLayout {
+                                            horizontal-stretch: 1;
+                                            alignment: center;
+                                            spacing: 2px;
+                                            Text { text: "Plugins are hidden while Streamer Mode is on"; color: Theme.muted; font-size: 14px; font-weight: 700; wrap: word-wrap; }
+                                            Text { text: "Their settings can show keys and account names. Turn Streamer Mode off to see them."; color: Theme.muted.with-alpha(0.8); font-size: 12px; wrap: word-wrap; }
+                                        }
+                                        VerticalLayout { alignment: center; Pill { label: "Turn Off Streamer Mode"; clicked => { root.streamer-step(); } } }
+                                    }
+                                }
                                 // (two to a row)
                                 for k in ceil(root.set-rows-plugins.length / 2): HorizontalLayout {
                                     spacing: 10px;
@@ -6326,6 +6349,16 @@ export component AppWindow inherits Window {
                                             border-width: 1px;
                                             border-color: fnti.has-focus ? Theme.accent : Theme.line;
                                             fnti := TextInput { x: 12px; width: parent.width - 24px; height: parent.height; vertical-alignment: center; color: Theme.text; font-size: 16px; font-weight: 700; single-line: true; text: root.flow-name; edited => { root.flow-name-edited(self.text); } }
+                                        }
+                                        Rectangle {
+                                            width: 150px;
+                                            height: 38px;
+                                            border-radius: 8px;
+                                            background: Theme.panel;
+                                            border-width: 1px;
+                                            border-color: fgti.has-focus ? Theme.accent : Theme.line;
+                                            if fgti.text == "": Text { x: 12px; height: parent.height; vertical-alignment: center; text: "Group"; color: Theme.muted; font-size: 13px; }
+                                            fgti := TextInput { x: 12px; width: parent.width - 24px; height: parent.height; vertical-alignment: center; color: Theme.text; font-size: 13px; single-line: true; text: root.flow-group; edited => { root.flow-group-edited(self.text); } }
                                         }
                                         CenterToggle { checked: root.flow-on; toggled => { root.flow-on-toggled(self.checked); } }
                                         VerticalLayout { alignment: center; Pill { label: "One at a Time"; on: root.flow-queued; tip: "Runs one at a time. Each run waits until the one before it is done, like Streamer.bot's queues, so alerts never overlap."; clicked => { root.flow-act("queued"); } } }

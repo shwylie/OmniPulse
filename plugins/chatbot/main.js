@@ -471,7 +471,8 @@ function fire(ev, ctx) {
     if (t.type !== "event" || t.event !== ev || !onPlatform(t, ctx.platform)) continue;
     if (num(t.min) > 0 && num(ctx.amount) < num(t.min)) continue;
     if (String(t.users || "").trim() && !oneOf(ctx.user, t.users)) continue;
-    if (ev === "reward" && String(t.reward || "").trim() && String(t.reward).trim().toLowerCase() !== String(ctx.reward || "").toLowerCase()) continue;
+    if (ev === "reward" && String(t.rewardid || "").trim()) { if (String(t.rewardid).trim() !== String(ctx.rewardId || "")) continue; }
+    else if (ev === "reward" && String(t.reward || "").trim() && String(t.reward).trim().toLowerCase() !== String(ctx.reward || "").toLowerCase()) continue;
     run(x, ctx);
   }
 }
@@ -490,8 +491,9 @@ function onEvent(type, e) {
     : ev === "hypetrain" || ev === "hypetrainend" ? String(e.level || 1) : ev === "charity" ? String(e.amount ? num(e.amount.value) / Math.pow(10, num(e.amount.decimal_places)) : 0)
     : ev === "shoutoutin" ? String(e.viewer_count || 0) : ev === "watchstreak" ? String(e.streak || 0) : "";
   const reward = (e.reward && e.reward.title) || "";
+  const rewardId = (e.reward && e.reward.id) || "";
   const said = (e.message && e.message.text) || e.title || "";
-  const ctx = { user: a.user || e.user_name || e.from_broadcaster_user_name || "", userId: e.user_id || e.from_broadcaster_user_id || "", amount: ev === "adbreak" ? String(e.duration_seconds || 0) : amount, message: a.message || said || e.user_input || "", reward, rawInput: e.user_input || said || "", msgId: e.msg_id || "", platform: "twitch", winner: won, tier: String(e.tier || "") };
+  const ctx = { user: a.user || e.user_name || e.from_broadcaster_user_name || "", userId: e.user_id || e.from_broadcaster_user_id || "", amount: ev === "adbreak" ? String(e.duration_seconds || 0) : amount, message: a.message || said || e.user_input || "", reward, rewardId, rawInput: e.user_input || said || "", msgId: e.msg_id || "", platform: "twitch", winner: won, tier: String(e.tier || "") };
   Object.assign(ctx, words(ctx.rawInput));
   fire(ev, ctx);
 }
@@ -817,17 +819,21 @@ async function step(st, ctx, depth) {
     }
     case "title": if (onKick) { await kickApi("PATCH", "channels", { stream_title: f("text").slice(0, 140) }); break; } await helix("PATCH", "channels?broadcaster_id=" + S().userId, { title: f("text").slice(0, 140) }); break;
     case "game": {
-      if (onKick) {
+      const where = st.where || "here";
+      const toKick = where === "kick" || where === "both" || (where === "here" && onKick);
+      const toTwitch = where === "twitch" || where === "both" || (where === "here" && !onKick);
+      if (toKick) {
         const c = await kickApi("GET", "categories?q=" + encodeURIComponent(f("text").trim()));
         const id = c.data && c.data[0] && c.data[0].id;
         if (!id) throw new Error("Kick has no category called " + f("text"));
         await kickApi("PATCH", "channels", { category_id: id });
-        break;
       }
-      const g = await helix("GET", "games?name=" + encodeURIComponent(f("text").trim()));
-      const id = g.data && g.data[0] && g.data[0].id;
-      if (!id) throw new Error("Twitch has no category called " + f("text"));
-      await helix("PATCH", "channels?broadcaster_id=" + S().userId, { game_id: id });
+      if (toTwitch) {
+        const g = await helix("GET", "games?name=" + encodeURIComponent(f("text").trim()));
+        const id = g.data && g.data[0] && g.data[0].id;
+        if (!id) throw new Error("Twitch has no category called " + f("text"));
+        await helix("PATCH", "channels?broadcaster_id=" + S().userId, { game_id: id });
+      }
       break;
     }
     case "poll": {
@@ -1092,6 +1098,19 @@ async function step(st, ctx, depth) {
       break;
     }
     case "status": await OmniPulse.app.say(f("text")); break;
+    case "groupstate": {
+      const g = f("group").trim().toLowerCase();
+      const list = (S().actions || []).map((x) => {
+        if (String(x.group || "").trim().toLowerCase() !== g) return x;
+        return Object.assign({}, x, { on: st.what === "toggle" ? x.on === false : st.what !== "off" });
+      });
+      OmniPulse.settings.actions = list;
+      loadActions();
+      await OmniPulse.app.saveSettings({ actions: list });
+      break;
+    }
+    case "keys": await OmniPulse.app.pressKeys(String(st.keys || "")); break;
+    case "open": await OmniPulse.app.openThing(String(st.target || ""), String(st.args || "")); break;
   }
   return true;
 }
@@ -1549,6 +1568,12 @@ function onKick(event, d) {
       if (d.followed === false || !user) return;
       alert({ type: "follow", user });
       go("follow", { user });
+      return;
+    }
+    case "RewardRedeemedEvent": {
+      const user = d.username || (d.redeemer && d.redeemer.username) || "";
+      const input = String(d.user_input || "");
+      go("reward", { user, reward: d.reward_title || (d.reward && d.reward.title) || "", rewardId: String(d.reward_id || (d.reward && d.reward.id) || ""), rawInput: input, message: input });
       return;
     }
     case "StreamerIsLive": spoken.clear(); go("online", {}); return;
@@ -2038,6 +2063,11 @@ OmniPulse.register({
       const hits = live.filter((a) => a.trigger.type === "web" && String(a.trigger.name || a.name || "").trim().toLowerCase() === want);
       hits.forEach((a) => run(a, Object.assign({ user: d.user || "", rawInput: d.input || "", message: d.input || "", platform: "all" }, words(d.input || ""))));
       return hits.length ? "Ran " + hits.map((a) => a.name).join(", ") + "." : "There's no action called " + d.name + " with A Web Address as its trigger.";
+    }
+    if (kind === "process") {
+      const plain = (n) => String(n || "").trim().toLowerCase().replace(/^.*[\\/]/, "").replace(/\.exe$/, "");
+      for (const a of live) if (a.trigger.type === "process" && plain(a.trigger.name) === plain(d.name)) run(a, { user: S().login || S().kickLogin || "", platform: "all", path: d.path || "", process: d.name || "" });
+      return true;
     }
     if (kind === "hotkey") {
       const keys = (k) => String(k || "").toLowerCase().replace(/\s+/g, "").replace(/win|windows|cmd|command/g, "super").replace(/control/g, "ctrl");

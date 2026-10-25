@@ -191,7 +191,7 @@ const SB_TRIGGERS: &[(u32, &str)] = &[
     (107, "TwitchRaid"), (108, "TwitchHypeTrainStart"), (112, "TwitchRewardRedemption"), (119, "TwitchWhisper"), (120, "TwitchFirstWord"),
     (125, "TwitchPollCreated"), (128, "TwitchPredictionCreated"), (133, "TwitchChatMessage"), (139, "TwitchAdRun"), (154, "TwitchStreamOnline"),
     (155, "TwitchStreamOffline"), (156, "TwitchShoutoutReceived"), (201, "StreamlabsDonation"), (401, "CommandTriggered"), (701, "TimedAction"),
-    (703, "ProcessStarted"),
+    (703, "ProcessStarted"), (35024, "KickRewardRedemption"),
     (14004, "ObsSceneChanged"), (14005, "ObsStreamingStarted"), (14006, "ObsStreamingStopped"), (14007, "ObsRecordingStarted"), (14008, "ObsRecordingStopped"),
     (35010, "KickChatMessage"), (35011, "KickFollow"), (35014, "KickSubscription"),
 ];
@@ -215,7 +215,14 @@ fn sb_trigger(t: &Value, commands: &HashMap<String, Value>, timers: &HashMap<Str
         105 | 106 => ev("gift", json!({})),
         107 => ev("raid", json!({ "min": n(&t["min"]) })),
         108 => ev("hypetrain", json!({})),
-        112 => ev("reward", json!({ "reward": s(&t["rewardTitle"]).trim().to_string() })),
+        // (Streamer.bot keeps a reward's id, and its name only sometimes: matched by the id)
+        112 => ev("reward", json!({ "reward": s(&t["rewardTitle"]).trim().to_string(), "rewardid": s(&t["rewardId"]).trim().to_string(), "from": "twitch" })),
+        35024 => ev("reward", json!({ "reward": s(&t["rewardTitle"]).trim().to_string(), "rewardid": s(&t["rewardId"]).trim().to_string(), "from": "kick" })),
+        703 => {
+            let name = s(&t["processName"]).trim().to_string();
+            if name.is_empty() { missed.push("its trigger Process Started, with no program named".into()); return None; }
+            ours(TRIGGERS, "process", json!({ "name": name }))
+        }
         120 => ev("firstmsg", json!({})),
         125 => ev("poll", json!({})),
         139 => ev("adbreak", json!({})),
@@ -300,14 +307,32 @@ fn sb_steps(list: &[Value], names: &HashMap<String, String>, missed: &mut Vec<St
                 let op = st["operation"].as_u64().unwrap_or(0);
                 let input = s(&st["input"]);
                 if input.contains("%userType%") && op <= 1 {
-                    // (which platform answers: Twitch's branch, the one that runs here)
-                    let twitch = s(&st["value"]).eq_ignore_ascii_case("twitch") == (op == 0);
-                    out.extend(sb_steps(&branch(if twitch { &yes } else { &no }), names, missed));
+                    // (which platform answers: ours answer where they were asked already, so one branch does
+                    // when both say the same; otherwise each platform's own, by %platform%)
+                    let is_value = op == 0;
+                    let (on_value, off_value) = (sb_steps(&branch(&yes), names, missed), sb_steps(&branch(&no), names, missed));
+                    let (twitch, other) = if s(&st["value"]).eq_ignore_ascii_case("twitch") == is_value { (on_value, off_value) } else { (off_value, on_value) };
+                    let said = |l: &Vec<Value>| l.iter().map(|x| format!("{}{}", x["type"], s(&x["text"]))).collect::<Vec<_>>();
+                    if other.is_empty() || said(&twitch) == said(&other) { out.extend(twitch); } else {
+                        out.push(ours(STEPS, "ifblock", json!({ "left": "%platform%", "test": "is", "right": "twitch" })));
+                        out.extend(twitch);
+                        out.push(ours(STEPS, "else", json!({})));
+                        out.extend(other);
+                        out.push(ours(STEPS, "endif", json!({})));
+                    }
                 } else if i == subs.len() - 1 && branch(&no).is_empty() && op <= 1 {
                     out.push(ours(STEPS, "if", json!({ "left": sb_vars(&input), "test": if op == 0 { "is" } else { "isnt" }, "right": sb_vars(&s(&st["value"])) })));
                     out.extend(sb_steps(&branch(&yes), names, missed));
+                } else if let Some((test, flip)) = sb_test(op) {
+                    // (Doesn't Contain: Contains, its branches the other way round)
+                    let (a, b) = if flip { (&no, &yes) } else { (&yes, &no) };
+                    out.push(ours(STEPS, "ifblock", json!({ "left": sb_vars(&input), "test": test, "right": sb_vars(&s(&st["value"])) })));
+                    out.extend(sb_steps(&branch(a), names, missed));
+                    let other = sb_steps(&branch(b), names, missed);
+                    if !other.is_empty() { out.push(ours(STEPS, "else", json!({}))); out.extend(other); }
+                    out.push(ours(STEPS, "endif", json!({})));
                 } else {
-                    out.push(note("Streamer.bot", "an If/Else (its steps are in Streamer.bot)", missed));
+                    out.push(note("Streamer.bot", "an If/Else with a test OmniPulse doesn't have (its steps are in Streamer.bot)", missed));
                 }
             }
             1007 => out.push(web_step(&s(&st["url"]), &s(&st["variableName"]), &|t: &str| sb_vars(t).replace("%rawInput%", "%rawInputUrlEncoded%"))),
@@ -315,6 +340,11 @@ fn sb_steps(list: &[Value], names: &HashMap<String, String>, missed: &mut Vec<St
         }
     }
     out
+}
+
+/// Streamer.bot's If/Else tests, as ours: (our test, its branches swapped)
+fn sb_test(op: u64) -> Option<(&'static str, bool)> {
+    Some(match op { 0 => ("is", false), 1 => ("isnt", false), 2 => ("contains", false), 3 => ("contains", true), 6 => ("more", false), 8 => ("less", false), _ => return None })
 }
 
 fn sb_step(st: &Value, names: &HashMap<String, String>, missed: &mut Vec<String>) -> Option<Value> {
@@ -334,7 +364,22 @@ fn sb_step(st: &Value, names: &HashMap<String, String>, missed: &mut Vec<String>
         }
         4 => ours(STEPS, "run", json!({ "action": names.get(&s(&st["actionId"])).cloned().unwrap_or_default() })),
         15 => ours(STEPS, "title", json!({ "text": txt("title") })),
-        16 => ours(STEPS, "game", json!({ "text": txt("game") })),
+        16 => ours(STEPS, "game", json!({ "text": txt("game"), "where": "twitch" })),
+        35031 => ours(STEPS, "game", json!({ "text": txt("categoryName"), "where": "kick" })),
+        19 => { let d = n(&st["duration"]); ours(STEPS, "ad", json!({ "seconds": if d > 0.0 { d } else { 60.0 } })) }
+        1011 => ours(STEPS, "groupstate", json!({ "group": s(&st["groupName"]), "what": match st["state"].as_u64().unwrap_or(0) { 0 => "on", 1 => "off", _ => "toggle" } })),
+        1012 => {
+            // (its held keys: Windows' hotkey flags, or .NET's)
+            let m = st["modifiers"].as_u64().unwrap_or(0);
+            let mut keys = Vec::new();
+            if m & 2 != 0 || m & 0x20000 != 0 { keys.push("Ctrl".to_string()); }
+            if m & 4 != 0 || m & 0x10000 != 0 { keys.push("Shift".to_string()); }
+            if m & 1 != 0 || m & 0x40000 != 0 { keys.push("Alt".to_string()); }
+            if m & 8 != 0 { keys.push("Win".to_string()); }
+            keys.push(crate::procwatch::key_name(st["key"].as_u64().unwrap_or(0)));
+            ours(STEPS, "keys", json!({ "keys": keys.join("+") }))
+        }
+        6 => ours(STEPS, "open", json!({ "target": s(&st["command"]), "args": s(&st["arguments"]) })),
         17 => ours(STEPS, "marker", json!({ "text": txt("description") })),
         18 => ours(STEPS, "clip", json!({})),
         20 => ours(STEPS, "timeout", json!({ "seconds": n(&st["duration"]).max(1.0), "reason": txt("reason") })),
@@ -373,8 +418,15 @@ fn streamerbot(data: &Value) -> Restored {
             let lines: Vec<String> = steps.iter().map(|x| s(&x["text"]).replace('|', "/")).collect();
             steps = vec![ours(STEPS, "random", json!({ "lines": lines.join(" | ") }))];
         }
+        let before = r.missed.len();
         let triggers: Vec<(Value, bool)> = a["triggers"].as_array().into_iter().flatten().filter_map(|t| sb_trigger(t, &commands, &timers, &mut r.missed)).collect();
+        for m in r.missed[before..].to_vec().iter().rev() {
+            steps.insert(0, ours(STEPS, "note", json!({ "text": format!("Not brought over from Streamer.bot: {m}") })));
+        }
+        let from = r.actions.len();
         per_trigger(&s(&a["name"]), a["enabled"].as_bool() != Some(false), triggers, &steps, &mut r.actions);
+        let group = s(&a["group"]).trim().to_string();
+        if !group.is_empty() { for x in &mut r.actions[from..] { x["group"] = json!(group); } }
     }
     r
 }
@@ -717,5 +769,42 @@ mod tests {
         merge(&mut now, &mut kept, &other);
         merge(&mut now, &mut kept, &other);
         assert_eq!(now.iter().map(|a| s(&a["name"])).collect::<Vec<_>>(), vec!["A".to_string(), "A (Mix It Up)".to_string()]);
+    }
+    #[test]
+    fn streamer_bot_games_rewards_and_desktop_steps_come_across() {
+        let st = |t: u64, idx: i64, extra: Value| { let mut x = json!({ "type": t, "index": idx, "enabled": true, "parentId": null }); for (k, v) in extra.as_object().unwrap() { x[k] = v.clone(); } x };
+        let branch = |t: u64, subs: Vec<Value>| json!({ "type": t, "subActions": subs });
+        let data = json!({ "actions": [
+            { "id": "a1", "name": "Category > Game", "group": "Category Switching", "enabled": true,
+              "triggers": [{ "type": 703, "processName": "gamelauncher", "enabled": true }, { "type": 703, "processName": "", "enabled": true }],
+              "subActions": [
+                st(35031, 0, json!({ "categoryName": "Some Game" })),
+                st(1011, 1, json!({ "groupName": "Game > Some", "state": 0 })),
+                st(6, 2, json!({ "command": "https://example.com/inventory", "arguments": null })),
+                st(120, 3, json!({ "input": "%path%", "operation": 2, "value": "Some Game", "subActions": [branch(99901, vec![st(16, 0, json!({ "game": "Some Game" }))]), branch(99902, vec![st(10, 0, json!({ "text": "Not that one" }))])] })),
+              ] },
+            { "id": "a2", "name": "Reward", "enabled": true, "triggers": [{ "type": 112, "rewardId": "abc-123", "enabled": true }],
+              "subActions": [st(1012, 0, json!({ "key": 86, "modifiers": 0 })), st(19, 1, json!({ "duration": 90 }))] },
+            { "id": "a3", "name": "Reply", "enabled": true, "triggers": [],
+              "subActions": [st(120, 0, json!({ "input": "%userType%", "operation": 0, "value": "Twitch", "subActions": [branch(99901, vec![st(560, 0, json!({ "text": "Hi" }))]), branch(99902, vec![st(35002, 0, json!({ "text": "Hi" }))])] }))] },
+        ] });
+        let r = streamerbot(&data);
+        let a = &r.actions[0];
+        assert_eq!(a["group"], json!("Category Switching"));
+        assert_eq!(a["trigger"]["type"], json!("process"));
+        assert_eq!(a["trigger"]["name"], json!("gamelauncher"));
+        let types: Vec<String> = a["steps"].as_array().unwrap().iter().map(|x| s(&x["type"])).collect();
+        assert_eq!(types, vec!["note", "game", "groupstate", "open", "ifblock", "game", "else", "say", "endif"]);
+        assert_eq!(a["steps"][1]["where"], json!("kick"));
+        assert_eq!(a["steps"][2]["group"], json!("Game > Some"));
+        assert_eq!(a["steps"][3]["target"], json!("https://example.com/inventory"));
+        assert_eq!(a["steps"][4]["test"], json!("contains"));
+        let b = &r.actions[1];
+        assert_eq!(b["trigger"]["rewardid"], json!("abc-123"));
+        assert_eq!(b["steps"][0]["keys"], json!("V"));
+        assert_eq!(b["steps"][1]["type"], json!("ad"));
+        assert_eq!(b["steps"][1]["seconds"], json!(90.0));
+        // (the same reply on either platform: one step, ours answering where it was asked)
+        assert_eq!(r.actions[2]["steps"].as_array().unwrap().len(), 1);
     }
 }
