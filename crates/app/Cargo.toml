@@ -1,6 +1,6 @@
 [package]
 name = "omnipulse"
-version = "0.3.30"
+version = "0.3.31"
 edition = "2021"
 description = "OmniPulse, native: one window, one process (Slint), beside the web app until it does everything"
 
