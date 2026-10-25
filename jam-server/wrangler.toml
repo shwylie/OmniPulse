@@ -34,6 +34,10 @@ class_name = "Share"
 name = "RATINGS"
 class_name = "Ratings"
 
+[[durable_objects.bindings]]
+name = "REPORTS"
+class_name = "Reports"
+
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["Room"]
@@ -47,3 +51,9 @@ new_sqlite_classes = ["Share"]
 [[migrations]]
 tag = "v3"
 new_sqlite_classes = ["Ratings"]
+
+# bug reports and feature requests from the app (read them with REPORTS_KEY: scripts/reports.mjs; posted to
+# Discord too if REPORTS_WEBHOOK is set, both secrets set in the dashboard)
+[[migrations]]
+tag = "v4"
+new_sqlite_classes = ["Reports"]

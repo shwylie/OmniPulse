@@ -215,6 +215,19 @@
   // (the GIF, as set for the widget this page is; room made for it beside or above)
   const GIF_OF = { "/goals": "goals", "/timer": "timer", "/latest-follow": "latest", "/latest-sub": "latest", "/raid": "raid", "/hype": "hype", "/voteskip": "voteskip", "/wheel": "wheel", "/leaderboard": "leaderboard", "/tune": "tune" };
   function gifNow() { return (suite && suite.gifs && suite.gifs[GIF_OF[PATH]]) || ""; }
+  // (a theme's font, from Google Fonts: loaded once, then used)
+  const fontsLoaded = new Set();
+  function useFont(name, el) {
+    name = String(name || "").replace(/[^A-Za-z0-9 ]/g, "").trim();
+    if (name && !fontsLoaded.has(name)) {
+      fontsLoaded.add(name);
+      const l = document.createElement("link"); l.rel = "stylesheet";
+      l.href = "https://fonts.googleapis.com/css2?family=" + encodeURIComponent(name).replace(/%20/g, "+") + ":wght@400;600;700;800;900&display=swap";
+      document.head.appendChild(l);
+    }
+    (el || document.body).style.fontFamily = name ? '"' + name + '", "Segoe UI", system-ui, sans-serif' : "";
+    return name;
+  }
   function fit(w, h) {
     if (gifNow()) { const p = (suite && suite.gifPlace) || "top"; if (p === "top") h *= 1.55; else if (p === "corner") { h *= 1.2; w *= 1.1; } else w *= 1.4; }
     const k = Math.max(0.3, Math.min(innerWidth / w, innerHeight / h));
@@ -674,6 +687,7 @@
     if (!suite) return;
     document.body.classList.toggle("still", suite.anim === "none");
     ["glass", "neon", "comic", "minimal", "pastel", "y2k", "pixel", "edge", "sticker"].forEach((t) => document.body.classList.toggle("t-" + t, suite.theme === t));
+    useFont((suite.fonts || {})[suite.theme || "dark"]);
     // (a palette, or your own colours, over your accent)
     if (suite.colors && suite.colors.c1) { document.body.style.setProperty("--c1", suite.colors.c1); document.body.style.setProperty("--c2", suite.colors.c2); }
     else if (accent) { document.body.style.setProperty("--c1", accent[0]); document.body.style.setProperty("--c2", accent[1]); }

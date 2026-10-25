@@ -89,6 +89,7 @@
   .badge { display: inline-block; font-size: 0.62em; font-weight: 800; padding: 0 0.3em; margin-right: 0.25em; border-radius: 0.25em; vertical-align: 0.15em; color: #111; }
   .badge.b-b { background: #ff4f4f; } .badge.b-m { background: #3ccd6c; } .badge.b-v { background: #e05ce0; } .badge.b-s { background: #7aa2ff; }
   .text { font-weight: 500; }
+  .from { display: inline-block; font-size: 0.62em; font-weight: 800; padding: 0 0.4em; margin-right: 0.3em; border-radius: 999px; background: rgba(145, 70, 255, 0.35); vertical-align: 0.2em; }
   .text img { height: 1.5em; vertical-align: middle; margin: -0.25em 0; }
 
   /* its settings: only while the pointer's over it (OBS's Interact), never on stream otherwise */
@@ -271,6 +272,7 @@
     r.style.setProperty("--pc", pc);
     if (opt.marks) { const NS = "http://www.w3.org/2000/svg"; const s = document.createElementNS(NS, "svg"); s.setAttribute("viewBox", "0 0 24 24"); s.classList.add("pf"); const p = document.createElementNS(NS, "path"); p.setAttribute("d", MARK[m.platform === "kick" ? "kick" : m.platform === "youtube" ? "youtube" : "twitch"]); s.append(p); r.append(s); }
     const body = document.createElement("div");
+    if (m.shared && opt.shared !== false) { const f = document.createElement("span"); f.className = "from"; f.textContent = m.sharedFrom ? "@" + m.sharedFrom : "Shared"; body.append(f); }
     if (opt.badges) for (const [k, cls, l] of BADGES) if ((m.badges || []).includes(k)) { const b = document.createElement("span"); b.className = "badge b-" + cls; b.textContent = l; body.append(b); }
     // (no colon when the name's on a line of its own)
     const own = opt.name === "above" || ["cards", "y2k", "pastel"].includes(opt.style);

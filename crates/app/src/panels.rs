@@ -62,6 +62,7 @@ pub fn title(name: &str) -> String {
         "youtube" => "YouTube Music",
         "discord" => "Discord Status",
         "together" => "Listen Along & Jams",
+        "report" => "Report a Bug or Suggest a Feature",
         "lyrics" => "Lyrics",
         "widget" => "Stream Widget",
         "lyricsw" => "Lyrics Widget",
@@ -92,6 +93,7 @@ fn keys(name: &str) -> Vec<(&'static str, Value)> {
         "requests" => vec![("reqBot", json!("streamerbot")), ("reqRadioEdit", json!(false)), ("reqNoAi", json!(false)), ("reqLimits", json!(true)), ("reqMax", json!(10)), ("reqPerUser", json!(2)), ("reqPort", json!(7879)), ("botRemote", json!(false))],
         "socials" => vec![("socialStyle", json!("card")), ("socialAlign", json!("left")), ("socialSecs", json!(8)), ("socialAll", json!(false)), ("socialRounded", json!(true)), ("socialColoured", json!(false)), ("socialMotion", json!("rise"))],
         "widget" => vec![("widgetPort", json!(7878)), ("widgetDesign", json!("card")), ("widgetAlign", json!("left")), ("widgetRounded", json!(true)), ("widgetText", json!(1)), ("wFade", json!(true)), ("wScroll", json!(true)), ("wSpin", json!(true)), ("wRequester", json!(true)), ("wColor", json!(1.2)), ("alertInWidget", json!(false)), ("widgetOwnCol", json!(false)), ("widgetCol1", json!("#8e9bff")), ("widgetCol2", json!("#b48eff"))],
+        "report" => vec![("reportKind", json!("bug")), ("reportTitle", json!("")), ("reportText", json!("")), ("reportContact", json!("")), ("reportInfo", json!(true))],
         "alerts" => vec![("alertsOn", json!(false)), ("alertInWidget", json!(false)), ("alertGif", json!("")), ("alertTheme", json!("widget")), ("alertBot", json!("streamerbot")), ("sbHost", json!("127.0.0.1:8080")), ("sbOn", json!(true)), ("alertTrans", json!("seamless")), ("alertCSize", json!("medium")), ("alertCDir", json!("diag")), ("alertCAngle", json!(0)), ("alertAnim", json!("slide")), ("alertOwnCol", json!(false)), ("alertCol1", json!("#8e9bff")), ("alertCol2", json!("#b38cff")), ("alertDir", json!("115deg")), ("alertIcon", json!(1)), ("alertSecs", json!(5)), ("alertVol", json!(0.8)), ("botRemote", json!(false))],
         "remote" => vec![("remotePort", json!(7880))],
         "offset" => vec![("out2Offset", json!(0)), ("out2Volume", json!(1))],
@@ -279,6 +281,8 @@ fn design(key: &str, label: &str) -> Value {
     v
 }
 fn info(label: &str, value: &str, copy: &str, note: &str) -> Value { json!({ "key": "", "label": label, "note": note, "type": "info", "value": value, "copy": copy }) }
+/// A box for a few lines (a report's words)
+fn area(key: &str, label: &str, note: &str) -> Value { json!({ "key": key, "label": label, "note": note, "type": "area" }) }
 fn note(t: &str) -> Value { json!({ "key": "", "label": t, "note": "", "type": "note" }) }
 fn button(key: &str, label: &str, press: &str, note: &str) -> Value { json!({ "key": key, "label": label, "note": note, "type": "button", "value": press }) }
 fn pct(from: f64, to: f64, step: f64) -> Vec<(Value, String)> {
@@ -643,6 +647,20 @@ fn fields_of(name: &str, vals: &Map<String, Value>, prefs: &Value, lan: &str) ->
                 f.extend(setup);
             }
             f
+        }
+        // a bug or an idea, sent to the developer through the relay; anything needing pictures, to Discord
+        "report" => {
+            let bug = s("reportKind", "bug") == "bug";
+            vec![
+                sel("reportKind", "What It Is", "", &[(json!("bug"), "Something's Wrong (a Bug)"), (json!("feature"), "An Idea (a Feature)")]),
+                text("reportTitle", "In a Few Words", if bug { "Like: the queue skips a song after a crossfade." } else { "Like: a sleep timer in the player." }),
+                area("reportText", if bug { "What Happened" } else { "Your Idea" }, if bug { "What you did, what you expected, and what happened instead. The more steps, the easier it is to fix." } else { "What you'd like, and what it'd help you do." }),
+                text("reportContact", "Your Discord or Email (If You Like)", "So the developer can ask you about it. Leave it empty to stay anonymous."),
+                tog("reportInfo", "Include My App's Details", "Your OmniPulse version, Windows version, player style and which plugins are on. Nothing else: no account names, songs or files."),
+                button("reportSend", "Send It", "Send", "Sent to OmniPulse's developer."),
+                note(if bug { "For a complicated bug, or one you'd need to show a picture or video of, message @shwylie on Discord instead: you can share screenshots there." } else { "Want to talk it through, or show a picture of what you mean? Message @shwylie on Discord." }),
+                info("Discord", "@shwylie", "shwylie", "Click Copy, then add them on Discord."),
+            ]
         }
         // Discord Status: what it shows (as the web app's)
         "discord" => vec![

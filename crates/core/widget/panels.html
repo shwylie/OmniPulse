@@ -52,6 +52,7 @@
     question: "M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm1 15h-2v-2h2zm2.1-7.7l-.9.9c-.7.7-1.2 1.3-1.2 2.8h-2v-.5c0-1.1.5-2.1 1.2-2.8l1.2-1.3A2 2 0 1 0 10 10H8a4 4 0 1 1 7.1 2.3z",
     game: "M7 6h10a5 5 0 0 1 0 10c-1.5 0-2.4-.7-3.2-1.6h-3.6C9.4 15.3 8.5 16 7 16A5 5 0 0 1 7 6zm-1 3v2H4v2h2v2h2v-2h2v-2H8V9z",
     pulse: "M2 13h4l2.5-6 4 12 3-9 1.5 3H22v-2h-3.7L16 6.5l-3 9-4-12L5.3 11H2z",
+    omni: "M13.4 1.6c.7 0 1.2.5 1.3 1.1.4 2.3 1.9 3.8 3.4 5.2 1.9 1.7 2.6 4.3 1.5 6.6l-.9 1.6c-.2-.7 0-1.4.2-2 .6-1.5.1-3.1-1.1-4.1-1.1-.9-2.2-1.8-3.1-2.9v11.6c0 2.6-2.4 4.7-5.2 4.7S4.3 21.9 4.3 19.3s2.4-4.7 5.2-4.7c1 0 1.9.3 2.7.7V2.9c0-.7.5-1.3 1.2-1.3z",
   };
   const ICON_OF = [[/about|me|bio|who/i, "user"], [/schedule|times|when|days/i, "calendar"], [/rule/i, "shield"], [/social|follow|twitter|insta|tiktok|link/i, "link"],
     [/donat|tip|support|sub/i, "heart"], [/discord|chat|command/i, "chat"], [/merch|shop|store/i, "bag"], [/setup|pc|spec|gear/i, "pc"], [/music|song|request/i, "music"],
@@ -59,6 +60,27 @@
   const iconFor = (t) => (ICON_OF.find(([re]) => re.test(t)) || [0, "star"])[1];
 
   function rounded(c, x, y, w, h, r) { c.beginPath(); c.roundRect(x, y, w, h, r); }
+  // (your own icons: loaded first, as a canvas draws only what's loaded; one from another site only if it
+  // allows it, or saving the panel wouldn't work: then the icon its title picks)
+  const pics = new Map();
+  function pic(src) {
+    if (!pics.has(src)) pics.set(src, new Promise((ok) => { const i = new Image(); if (!src.startsWith("/")) i.crossOrigin = "anonymous"; i.onload = () => ok(i); i.onerror = () => ok(null); i.src = src; }));
+    return pics.get(src);
+  }
+  // (a picture in a tile, covering it, its corners as the tile's)
+  function picIn(c, img, x, y, s, r) {
+    c.save(); rounded(c, x, y, s, s, r); c.clip();
+    const k = Math.max(s / img.width, s / img.height);
+    c.drawImage(img, x + (s - img.width * k) / 2, y + (s - img.height * k) / 2, img.width * k, img.height * k);
+    c.restore();
+  }
+  // (OmniPulse's mark, at x, y, s across: the set's colours, OmniPulse's own, or plain)
+  function logo(c, x, y, s, set, c1, c2, ink) {
+    const g = c.createLinearGradient(x, y + s, x + s, y);
+    const own = set.logoColours === "omnipulse", plain = set.logoColours === "plain";
+    g.addColorStop(0, own ? "#00e5ff" : c1); g.addColorStop(1, own ? "#ff2bd0" : c2);
+    c.save(); c.translate(x, y); c.scale(s / 24, s / 24); c.fillStyle = plain ? ink : g; c.fill(new Path2D(ICONS.omni)); c.restore();
+  }
   // (an extended panel's words: wrapped to its width, " / " starting a new paragraph)
   function wrap(c, text, width) {
     const out = [];
@@ -72,7 +94,9 @@
     }
     return out;
   }
-  const FONT = (th) => th === "pixel" ? '"Cascadia Mono", Consolas, monospace' : th === "comic" ? '"Comic Sans MS", "Segoe UI", sans-serif' : '"Segoe UI Variable Display", "Segoe UI", sans-serif';
+  // (the set's font, if one's picked for its theme (a Google Font), else the theme's own)
+  let SET_FONT = "";
+  const FONT = (th) => SET_FONT ? '"' + SET_FONT + '", "Segoe UI", sans-serif' : th === "pixel" ? '"Cascadia Mono", Consolas, monospace' : th === "comic" ? '"Comic Sans MS", "Segoe UI", sans-serif' : '"Segoe UI Variable Display", "Segoe UI", sans-serif';
   // One panel: its title (and line under it), in the set's theme and shape; extended, its words under the title
   function draw(cv, p, set) {
     // (extended, as set; or its line won't fit on one line beside its title, so it's extended to fit it all)
@@ -122,11 +146,15 @@
     if (ext) {
       const top = th === "y2k" ? 24 : 0, font = FONT(th);
       let x = 22;
-      if (set.icons !== false) {
+      if (p.logo) { logo(c, x - 2, top + 15, 40, set, c1, c2, ink); x += 52; }
+      else if (set.icons !== false) {
         const s = 36;
-        c.fillStyle = th === "comic" || th === "pastel" || th === "y2k" ? c1 : g;
-        if (th === "pixel") c.fillRect(x, top + 18, s, s); else { rounded(c, x, top + 18, s, s, th === "pastel" ? s / 2 : 9); c.fill(); }
-        c.save(); c.translate(x + s * 0.2, top + 18 + s * 0.2); c.scale((s * 0.6) / 24, (s * 0.6) / 24); c.fillStyle = "#fff"; c.fill(new Path2D(ICONS[p.icon || iconFor(p.title)] || ICONS.star)); c.restore();
+        if (p.imgEl) picIn(c, p.imgEl, x, top + 18, s, th === "pixel" ? 0 : th === "pastel" ? s / 2 : 9);
+        else {
+          c.fillStyle = th === "comic" || th === "pastel" || th === "y2k" ? c1 : g;
+          if (th === "pixel") c.fillRect(x, top + 18, s, s); else { rounded(c, x, top + 18, s, s, th === "pastel" ? s / 2 : 9); c.fill(); }
+          c.save(); c.translate(x + s * 0.2, top + 18 + s * 0.2); c.scale((s * 0.6) / 24, (s * 0.6) / 24); c.fillStyle = "#fff"; c.fill(new Path2D(ICONS[p.icon || iconFor(p.title)] || ICONS.star)); c.restore();
+        }
         x += s + 14;
       }
       c.textAlign = "left"; c.textBaseline = "middle";
@@ -146,16 +174,23 @@
     // (its icon, in a tile of its colours)
     const top = th === "y2k" ? 24 : 0;
     let x = 22;
-    if (set.icons !== false) {
+    if (p.logo) {
+      const s = Math.min(54, H - top - 26);
+      logo(c, x - 4, top + (H - top - s) / 2, s, set, c1, c2, ink);
+      x += s + 10;
+    } else if (set.icons !== false) {
       const s = Math.min(46, H - top - 34);
       const iy = top + (H - top - s) / 2;
-      c.fillStyle = th === "comic" || th === "pastel" || th === "y2k" ? c1 : g;
-      if (th === "pixel") c.fillRect(x, iy, s, s); else { rounded(c, x, iy, s, s, th === "pastel" ? s / 2 : 10); c.fill(); }
-      c.save(); c.translate(x + s * 0.2, iy + s * 0.2); c.scale((s * 0.6) / 24, (s * 0.6) / 24); c.fillStyle = "#fff"; c.fill(new Path2D(ICONS[p.icon || iconFor(p.title)] || ICONS.star)); c.restore();
+      if (p.imgEl) picIn(c, p.imgEl, x, iy, s, th === "pixel" ? 0 : th === "pastel" ? s / 2 : 10);
+      else {
+        c.fillStyle = th === "comic" || th === "pastel" || th === "y2k" ? c1 : g;
+        if (th === "pixel") c.fillRect(x, iy, s, s); else { rounded(c, x, iy, s, s, th === "pastel" ? s / 2 : 10); c.fill(); }
+        c.save(); c.translate(x + s * 0.2, iy + s * 0.2); c.scale((s * 0.6) / 24, (s * 0.6) / 24); c.fillStyle = "#fff"; c.fill(new Path2D(ICONS[p.icon || iconFor(p.title)] || ICONS.star)); c.restore();
+      }
       x += s + 16;
     }
     // (its words)
-    const font = th === "pixel" ? '"Cascadia Mono", Consolas, monospace' : th === "comic" ? '"Comic Sans MS", "Segoe UI", sans-serif' : '"Segoe UI Variable Display", "Segoe UI", sans-serif';
+    const font = FONT(th);
     c.textAlign = "left"; c.textBaseline = "middle";
     const big = Math.min(30, (H - top) * 0.32);
     let fs = big;
@@ -193,12 +228,26 @@
       if (set) {
         if (!set.colors && s.accent) set.colors = { c1: s.accent, c2: s.accent2 || s.accent };
         SCALE = Number(set.scale) === 1 ? 1 : 2;
+        // (its font: loaded before they're drawn, as a canvas draws only what's loaded)
+        SET_FONT = String(set.font || "").replace(/[^A-Za-z0-9 ]/g, "").trim();
+        if (SET_FONT && !document.getElementById("gf-" + SET_FONT.replace(/ /g, "-"))) {
+          const l = document.createElement("link"); l.rel = "stylesheet"; l.id = "gf-" + SET_FONT.replace(/ /g, "-");
+          l.href = "https://fonts.googleapis.com/css2?family=" + encodeURIComponent(SET_FONT).replace(/%20/g, "+") + ":wght@400;500;600;700;800&display=swap";
+          document.head.appendChild(l);
+        }
+        if (SET_FONT) { try { await Promise.all(["500 14px", "800 28px"].map((w) => document.fonts.load(w + ' "' + SET_FONT + '"'))); } catch (e) {} }
         const next = JSON.stringify(set);
         if (next !== sig) {
           sig = next;
           const list = $("list"); list.innerHTML = ""; made = [];
           const all = (set.panels || []).slice();
-          if (set.powered) all.push({ title: "Powered by OmniPulse", line: set.extended ? "This stream's music, chatbot, alerts and overlays all run on OmniPulse." + (set.site ? " / Get it at " + set.site : "") : (set.site || "Music, chatbot and stream tools in one app"), icon: "pulse" });
+          if (set.powered) all.push({ title: "Powered by OmniPulse", line: set.extended ? "This stream's music, chatbot, alerts and overlays all run on OmniPulse." + (set.site ? " / Get it at " + set.site : "") : (set.site || "Music, chatbot and stream tools in one app"), icon: "omni", logo: true });
+          for (const p of all) if (p.img) {
+            const im = await pic(p.img);
+            let clean = !!im;
+            if (im && !p.img.startsWith("/")) { try { const t = document.createElement("canvas"); t.width = t.height = 2; const tc = t.getContext("2d"); tc.drawImage(im, 0, 0, 2, 2); tc.getImageData(0, 0, 1, 1); } catch (e) { clean = false; } }
+            p.imgEl = clean ? im : null;
+          }
           for (const p of all) {
             const row = document.createElement("div"); row.className = "row";
             const cv = document.createElement("canvas"); draw(cv, p, set);

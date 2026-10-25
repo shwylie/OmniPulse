@@ -240,6 +240,9 @@ async function onChat(m) {
   // waits, so nothing else is held up for it)
   const banned = autobanHit(m, text, user, platform);
   if (banned) { autoban(m, text, user, id, platform, banned); return; }
+  // (Shared Chat: a partner channel's chatter can't use your commands, requests, games or points unless you
+  // let them; their messages still show, and Auto-Ban still takes them down)
+  if (platform === "twitch" && sharedFrom(m) && !yes(S().sharedCommands)) return;
   seen[(m.nick || user).toLowerCase()] = Date.now();
   present[platform + "|" + (m.nick || user).toLowerCase()] = { at: Date.now(), user, userId: m.tags["user-id"] || "", platform };
   onActions(m, text, cmd, args, user, id);
@@ -2180,6 +2183,7 @@ function suitePush() {
       anim: String(x.suiteAnim || "rise"),
       theme: String(x.suiteTheme || "dark"),
       colors: suiteColors(),
+      fonts: themeFonts(),
       creators: [camOverlay(), panelSet(), hudSet()],
       sponsors: sponsorPlug(),
       // (moderation, for the Chat Dock's panel: Auto-Ban's terms, Twitch's chat modes and Shield Mode, a lockdown)
@@ -2196,7 +2200,7 @@ function camOverlay() {
   const x = S(), v = (k, d) => (x[k] === undefined || x[k] === "" ? d : x[k]);
   return {
     id: "main", kind: "cam", spot: String(v("camSpot", "br")), x: num(v("camX", 72)), y: num(v("camY", 62)), w: num(v("camW", 26)), h: num(v("camH", 34)),
-    shape: String(v("camShape", "rounded")), border: String(v("camBorder", "glow")), theme: String(v("camTheme", "dark")), colors: suiteColors(),
+    shape: String(v("camShape", "rounded")), border: String(v("camBorder", "glow")), theme: String(v("camTheme", "dark")), colors: suiteColors(), font: themeFonts()[String(v("camTheme", "dark"))] || "",
     parts: CAM_PARTS.filter(([id, on]) => yes(v("camP_" + id, on))).map(([id, , place, size]) => ({
       type: id, place: String(v("camP_" + id + "Place", place)), size: String(v("camP_" + id + "Size", size)),
       text: id === "name" ? String(v("camNameText", x.login || "Your Name")) : "", img: id === "sticker" ? String(v("camStickerImg", "")) : "",
@@ -2228,10 +2232,13 @@ function panelSet() {
   const x = S(), v = (k, d) => (x[k] === undefined || x[k] === "" ? d : x[k]);
   const list = String(v("panelList", "About Me | My Music | PC Specs | Sponsors | Donate")).split("|").map((p) => p.trim()).filter(Boolean).slice(0, 12);
   return {
-    id: "panels", kind: "panels", scale: num(v("panelScale", 2)) === 1 ? 1 : 2, extended: yes(v("panelExtended", false)), powered: yes(v("panelPowered", true)), site: OMNIPULSE_SITE, theme: String(v("panelTheme", "dark")), shape: String(v("panelShape", "rounded")), height: String(v("panelHeight", "medium")), icons: yes(v("panelIcons", true)), colors: suiteColors(),
-    panels: list.map((p) => { const i = p.indexOf(":"); return i < 0 ? { title: p, line: "" } : { title: p.slice(0, i).trim(), line: p.slice(i + 1).trim() }; }),
+    id: "panels", kind: "panels", logoColours: String(v("panelLogoColours", "theme")), font: themeFonts()[String(v("panelTheme", "dark"))] || "", scale: num(v("panelScale", 2)) === 1 ? 1 : 2, extended: yes(v("panelExtended", false)), powered: yes(v("panelPowered", true)), site: OMNIPULSE_SITE, theme: String(v("panelTheme", "dark")), shape: String(v("panelShape", "rounded")), height: String(v("panelHeight", "medium")), icons: yes(v("panelIcons", true)), colors: suiteColors(),
+    // (your own icons, in the panels' order: a picture copied in (/overlay/...), or one's address)
+    panels: list.map((p, n) => { const i = p.indexOf(":"), img = (String(v("panelOwnIcons", "")).split("|")[n] || "").trim(); return Object.assign(i < 0 ? { title: p, line: "" } : { title: p.slice(0, i).trim(), line: p.slice(i + 1).trim() }, /^(\/overlay\/|https?:\/\/)/.test(img) ? { img } : {}); }),
   };
 }
+// (each theme's font, as picked: a Google Font's name, by theme)
+function themeFonts() { try { const m = JSON.parse(String(S().themeFonts || "{}")); return m && typeof m === "object" ? m : {}; } catch (e) { return {}; } }
 // (the widgets' colours: your accent (none sent), one of the palettes, or your own two)
 const PALETTES = { sunset: ["#ff8a5c", "#ff4f8b"], ocean: ["#3ec7ff", "#5a6bff"], candy: ["#ff8fd8", "#b48eff"], mint: ["#5ef2b8", "#3ab0ff"], fire: ["#ffb03a", "#ff3d3d"], gold: ["#ffd76e", "#ff9f43"], mono: ["#f2f2f2", "#9a9aa6"] };
 function suiteColors() {
@@ -2619,6 +2626,17 @@ function feed(ev, ctx) {
 
 function dockGone(platform, id, login) { OmniPulse.app.dockGone({ platform, id, login }).catch(() => {}); }
 
+// (Twitch Shared Chat: a partner channel's name by its id, looked up once and kept)
+const sharedNames = {};
+function sharedFrom(m) {
+  const room = String((m.tags && m.tags["source-room-id"]) || "");
+  if (!room || room === String(S().userId || "") || room === String((m.tags && m.tags["room-id"]) || room)) return null;
+  if (!(room in sharedNames)) {
+    sharedNames[room] = "";
+    helix("GET", "users?id=" + encodeURIComponent(room)).then((r) => { sharedNames[room] = ((r.data || [])[0] || {}).display_name || ""; }).catch(() => {});
+  }
+  return { room, name: sharedNames[room] };
+}
 function dockTwitch(m) {
   const login = String(m.nick || "").toLowerCase();
   let text = String(m.text || "");
@@ -2626,7 +2644,9 @@ function dockTwitch(m) {
   if (me) text = me[1].replace(/\u0001$/, "");
   OmniPulse.app.dockChat({
     platform: "twitch", id: m.tags.id || "", user: m.tags["display-name"] || login, login, userId: m.tags["user-id"] || "", color: m.tags.color || "",
-    badges: String(m.tags.badges || "").split(",").map((b) => b.split("/")[0]).filter(Boolean), text, emotes: m.tags.emotes || "", first: m.tags["first-msg"] === "1", me: !!me,
+    // (from a Shared Chat partner: their badges in their own channel, and whose chat it is)
+    badges: String((sharedFrom(m) && m.tags["source-badges"]) || m.tags.badges || "").split(",").map((b) => b.split("/")[0]).filter(Boolean), text, emotes: m.tags.emotes || "", first: m.tags["first-msg"] === "1", me: !!me,
+    shared: !!sharedFrom(m), sharedFrom: (sharedFrom(m) || {}).name || "",
     self: [S().login, S().botLogin].some((x) => x && String(x).toLowerCase() === login),
   }).catch(() => {});
 }

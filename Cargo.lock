@@ -5817,6 +5817,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "omnipulse-setup"
+version = "1.0.0"
+dependencies = [
+ "base64 0.22.1",
+ "embed-resource",
+ "minisign-verify",
+ "serde_json",
+ "ureq",
+ "windows 0.62.2",
+]
+
+[[package]]
 name = "omnipulse-vis"
 version = "0.1.0"
 dependencies = [
@@ -7401,6 +7413,7 @@ version = "0.23.45"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0d41d731c7d2f962d1ccc364cec258de3c0e93b38c2fb3ba97ac74513048d634"
 dependencies = [
+ "log",
  "once_cell",
  "ring",
  "rustls-pki-types",
@@ -9992,6 +10005,21 @@ name = "unty"
 version = "0.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6d49784317cd0d1ee7ec5c716dd598ec5b4483ea832a2dced265471cc0f690ae"
+
+[[package]]
+name = "ureq"
+version = "2.12.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "02d1a66277ed75f640d608235660df48c8e3c19f3b4edb6a263315626cc3c01d"
+dependencies = [
+ "base64 0.22.1",
+ "log",
+ "once_cell",
+ "rustls 0.23.45",
+ "rustls-pki-types",
+ "url",
+ "webpki-roots 0.26.11",
+]
 
 [[package]]
 name = "url"

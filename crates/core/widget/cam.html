@@ -95,9 +95,23 @@
     x = Math.max(0, Math.min(W - w, x)); y = Math.max(0, Math.min(H - h, y));
     Object.assign(el.style, { left: x + "px", top: y + "px", width: w + "px", height: h + "px" });
   }
+  // (a theme's font, from Google Fonts: loaded once, then used)
+  const fontsLoaded = new Set();
+  function useFont(name, el) {
+    name = String(name || "").replace(/[^A-Za-z0-9 ]/g, "").trim();
+    if (name && !fontsLoaded.has(name)) {
+      fontsLoaded.add(name);
+      const l = document.createElement("link"); l.rel = "stylesheet";
+      l.href = "https://fonts.googleapis.com/css2?family=" + encodeURIComponent(name).replace(/%20/g, "+") + ":wght@400;600;700;800;900&display=swap";
+      document.head.appendChild(l);
+    }
+    (el || document.body).style.fontFamily = name ? '"' + name + '", "Segoe UI", system-ui, sans-serif' : "";
+    return name;
+  }
   function draw(c, now) {
     document.body.className = (PREVIEW ? "preview " : "") + "t-" + (c.theme || "dark") + (now && now.suite && now.suite.anim === "none" ? " still" : "");
     if (c.colors && c.colors.c1) { document.body.style.setProperty("--c1", c.colors.c1); document.body.style.setProperty("--c2", c.colors.c2); }
+    useFont(c.font);
     const b = box(c), stage = $("stage");
     const next = JSON.stringify(c) + innerWidth + "x" + innerHeight;
     if (next === sig) return tick(c);

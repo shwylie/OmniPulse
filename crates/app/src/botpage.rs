@@ -122,7 +122,7 @@ pub fn cam_layout(cur: &Map<String, Value>) -> Vec<(String, String, f32, f32, f3
 pub fn panel_icon(title: &str) -> &'static str {
     let t = title.to_lowercase();
     // (the OmniPulse panel's own mark first)
-    if t.contains("omnipulse") { return "M2 13h4l2.5-6 4 12 3-9 1.5 3H22v-2h-3.7L16 6.5l-3 9-4-12L5.3 11H2z"; }
+    if t.contains("omnipulse") { return "M13.4 1.6c.7 0 1.2.5 1.3 1.1.4 2.3 1.9 3.8 3.4 5.2 1.9 1.7 2.6 4.3 1.5 6.6l-.9 1.6c-.2-.7 0-1.4.2-2 .6-1.5.1-3.1-1.1-4.1-1.1-.9-2.2-1.8-3.1-2.9v11.6c0 2.6-2.4 4.7-5.2 4.7S4.3 21.9 4.3 19.3s2.4-4.7 5.2-4.7c1 0 1.9.3 2.7.7V2.9c0-.7.5-1.3 1.2-1.3z"; }
     if ["about", "me", "bio", "who"].iter().any(|w| t.contains(w)) { return "M12 12a5 5 0 1 0 0-10 5 5 0 0 0 0 10zm0 2c-4.4 0-8 2.2-8 5v3h16v-3c0-2.8-3.6-5-8-5z"; }
     if ["schedule", "times", "when", "days"].iter().any(|w| t.contains(w)) { return "M7 2v2H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2h-2V2h-2v2H9V2zm-2 8h14v10H5z"; }
     if ["rule"].iter().any(|w| t.contains(w)) { return "M12 2l8 3v6c0 5-3.4 9.4-8 11-4.6-1.6-8-6-8-11V5z"; }
@@ -150,9 +150,41 @@ pub fn suite_colours(cur: &Map<String, Value>) -> Option<(String, String)> {
     Some((a.into(), b.into()))
 }
 
+/// The fonts offered for a theme (any other Google Font can be typed in)
+pub const FONTS: [&str; 14] = ["Inter", "Poppins", "Montserrat", "Rubik", "Fredoka", "Baloo 2", "Bebas Neue", "Bangers", "Orbitron", "Press Start 2P", "Pacifico", "Permanent Marker", "Space Grotesk", "Righteous"];
+
+/// Each theme's own font, as picked (themeFonts): none, the theme's own
+pub fn theme_font(cur: &Map<String, Value>, theme: &str) -> String {
+    serde_json::from_str::<Value>(s(cur, "themeFonts")).ok().and_then(|m| m[theme].as_str().map(String::from)).unwrap_or_default()
+}
+
 /// A Suite widget's sheet, with its look's choices after its theme: the colours, and a GIF with it
 pub fn sheet(id: &str, cur: &Map<String, Value>) -> (String, Vec<Field>) {
     let (title, mut v) = sheet_of(id, cur);
+    // (Colours, wherever it is: "Yours" is the app theme's own two, and Your Own shows its two boxes)
+    for x in v.iter_mut().filter(|x| x.key == "suiteColors") {
+        x.extra = x.extra.replace("accent=Yours", "accent=Your Theme's");
+        x.note = "Your Theme's are your app theme's own two colours (App & Look), not the album art's.".into();
+    }
+    if s(cur, "suiteColors") == "custom" && !v.iter().any(|x| x.key == "suiteC1") {
+        if let Some(at) = v.iter().position(|x| x.key == "suiteColors") {
+            v.insert(at + 1, f("text", "suiteC2", "Second colour", "", s(cur, "suiteC2"), "#ff7ac8"));
+            v.insert(at + 1, f("text", "suiteC1", "First colour", "As hex, like #8e9bff. Your theme's colours and the album art's don't change it.", s(cur, "suiteC1"), "#8e9bff"));
+        }
+    }
+    // (a font for the theme picked here: kept for that theme, any Google Font)
+    if let Some(at) = v.iter().position(|x| matches!(x.key.as_str(), "suiteTheme" | "panelTheme" | "camTheme")) {
+        let theme = if v[at].value.is_empty() { "dark".to_string() } else { v[at].value.clone() };
+        let now = theme_font(cur, &theme);
+        let opts = std::iter::once(format!("{theme}|=Theme's Own")).chain(FONTS.iter().map(|n| format!("{theme}|{n}={n}"))).collect::<Vec<_>>().join("|");
+        let picked = if now.is_empty() || FONTS.contains(&now.as_str()) { format!("{theme}|{now}") } else { String::new() };
+        let fonts = vec![
+            f("chips", "fontPick", "Font", "For this theme. Each theme keeps its own.", &picked, &opts),
+            f("text", "fontCustom", "Or any Google Font", "Its name as fonts.google.com has it, like Lobster. Press Enter.", if picked.is_empty() { &now } else { "" }, "Lobster"),
+        ];
+        let after = v.iter().position(|x| x.key == "suiteColors").filter(|c| *c > at).map(|c| c + if s(cur, "suiteColors") == "custom" { 3 } else { 1 }).unwrap_or(at + 1);
+        v.splice(after..after, fonts);
+    }
     let gif = match id { "goals" => "gifGoals", "timer" => "gifTimer", "latest" => "gifLatest", "raid" => "gifRaid", "hype" => "gifHype", "voteskip" => "gifVoteskip", "wheel" => "gifWheel", "leaderboard" => "gifLeaderboard", "tune" => "gifTune", _ => "" };
     if let Some(at) = v.iter().position(|x| x.key == "suiteTheme") {
         let pal = if s(cur, "suiteColors").is_empty() { "accent" } else { s(cur, "suiteColors") };
@@ -196,6 +228,9 @@ fn sheet_of(id: &str, cur: &Map<String, Value>) -> (String, Vec<Field>) {
             // (OmniPulse's own app: nothing to make, only the sign-ins)
             if !own { v.drain(0..6); }
             if !TWITCH_ID.is_empty() { v.push(f("toggle", "twitchOwnApp", "Use my own Twitch app", "For developers. Most people can leave this off.", if own { "true" } else { "false" }, "")); }
+            // (Twitch Shared Chat: a partner's chatters in your chat)
+            v.push(f("head", "", "Shared Chat", "", "", ""));
+            v.push(f("toggle", "sharedCommands", "Their chatters can use your commands", "When you share chat with another streamer, their viewers' messages show in your Chat Dock, marked with their channel. With this off, they can't use your song requests, actions, games or points. Auto-Ban applies to them either way.", if on(cur, "sharedCommands", false) { "true" } else { "false" }, ""));
             v }),
         "kick" => ("Kick".into(), { let own = own_app(cur, "kick"); let mut v = vec![
             f("toggle", "kickOn", "Use Kick", "The chatbot also answers your Kick chat.", if on(cur, "kickOn", false) { "true" } else { "false" }, ""),
@@ -301,35 +336,39 @@ fn sheet_of(id: &str, cur: &Map<String, Value>) -> (String, Vec<Field>) {
             // (your saved templates: their names, to load or delete)
             let tpls: Vec<String> = serde_json::from_str::<Value>(s(cur, "panelTemplates")).ok().and_then(|v| v.as_array().cloned()).unwrap_or_default().iter().filter_map(|t| t["name"].as_str().map(String::from)).collect();
             let chips = tpls.iter().map(|n| format!("{}={}", n.replace(['|', '='], " "), n.replace(['|', '='], " "))).collect::<Vec<_>>().join("|");
+            // (the preview and Save are the page's right half: these are its left)
             let mut v = vec![
-                f("toggle", "panelExtended", "With their words in them", "Each panel's line becomes words drawn into the panel under its title, as tall as they need. Use / to start a new paragraph.", if on(cur, "panelExtended", false) { "true" } else { "false" }, ""),
-                f("head", "", "Templates", "", "", ""),
-                f("text", "panelTplName", "Save these as a template", "A name for this look and these panels, to come back to and change later.", s(cur, "panelTplName"), "My panels"),
-                f("link", "", "Save the template", "Saved with its name. One with the same name is replaced.", "", "tpl:save"),
-            ];
-            if !tpls.is_empty() {
-                v.push(f("chips", "panelTplLoad", "Load one", "Its look and its panels come back, to change and save again.", "", &chips));
-                v.push(f("chips", "panelTplDel", "Delete one", "", "", &chips));
-            }
-            let mut rest = vec![
-                f("panelpreview", "", "", "", "", ""),
-                f("link", "", "Save them as pictures", "Opens them in your browser, each with Save as PNG. Then add them on Twitch (your channel, About, Edit Panels) or Kick.", "", "url:http://127.0.0.1:{port}/panels"),
-                f("list", "panelList", "Your panels", "One each. Put a colon after its title for a line under it, like About Me: Music and good vibes. Its icon is picked from its title.", s(cur, "panelList"), "About Me | My Music | PC Specs | Sponsors | Donate"),
-                f("toggle", "panelPowered", "A Powered by OmniPulse panel", "One more at the end, in the same look, saying your stream runs on OmniPulse, so viewers can find it.", if on(cur, "panelPowered", true) { "true" } else { "false" }, ""),
-                f("head", "", "Their look", "", "", ""),
+                f("note", "", "Make your channel's panels here, watch them change on the right, then click Save Them as Pictures and add them on Twitch (your channel, About, Edit Panels) or Kick.", "", "", ""),
+                f("head", "", "1. Your panels", "", "", ""),
+                f("list", "panelList", "Panels", "A title for each, like Schedule. To add words under it, type a colon after the title, like About Me: Music and good vibes. Each one's icon is picked from its title.", s(cur, "panelList"), "About Me | My Music | PC Specs | Sponsors | Donate"),
+                f("piclist", "panelOwnIcons", "Your own icons", "If you like: a picture for any panel, in the same order as the panels above. Click Choose... to pick one from your PC. Leave a row empty for the icon its title picks.", s(cur, "panelOwnIcons"), ""),
+                f("toggle", "panelExtended", "Put the words inside each panel", "Each panel shows its title with all its words under it, as tall as they need (up to Twitch's 600). Type / to start a new paragraph. When this is off, a panel with long words grows to fit anyway.", if on(cur, "panelExtended", false) { "true" } else { "false" }, ""),
+                f("toggle", "panelPowered", "Add a Powered by OmniPulse panel", "One more at the end, in the same look, with OmniPulse's logo, so viewers can find the app your stream runs on.", if on(cur, "panelPowered", true) { "true" } else { "false" }, ""),
+                f("chips", "panelLogoColours", "Its logo's colours", "", if s(cur, "panelLogoColours").is_empty() { "theme" } else { s(cur, "panelLogoColours") }, "theme=Your Colours|omnipulse=OmniPulse's Own|plain=Plain"),
+                f("head", "", "2. How they look", "", "", ""),
                 f("chips", "panelTheme", "Theme", "", &or("panelTheme", "dark"), "dark=Dark|glass=Glass|neon=Neon|comic=Comic|pastel=Pastel|y2k=Y2K|pixel=Pixel|gradient=Gradient|minimal=Minimal"),
-                f("chips", "suiteColors", "Colours", "Shared with the Suite's widgets.", if s(cur, "suiteColors").is_empty() { "accent" } else { s(cur, "suiteColors") }, "accent=Yours|sunset=Sunset|ocean=Ocean|candy=Candy|mint=Mint|fire=Fire|gold=Gold|mono=Mono|custom=Your Own"),
-                f("chips", "panelShape", "Shape", "", &or("panelShape", "rounded"), "rounded=Rounded|square=Square|pill=Pill"),
-                f("chips", "panelHeight", "Height", "Twitch's own panels are 320 × 100 (Header). Square is 320 × 320, for a badge or a partner's logo.", &or("panelHeight", "medium"), "short=Short (80)|medium=Header (100)|tall=Tall (160)|square=Square (320)"),
-                f("toggle", "panelIcons", "Icons", "", if on(cur, "panelIcons", true) { "true" } else { "false" }, ""),
-                f("chips", "panelScale", "Resolution", "Sharp saves them at twice Twitch's size (640 wide, up to 1200 tall), so words and logos stay crisp on high-density and Retina screens. Twitch shows them at 320 either way.", &or("panelScale", "2"), "2=Sharp (2x)|1=Standard (1x)"),
+                f("chips", "suiteColors", "Colours", "The same colours as your Suite widgets.", if s(cur, "suiteColors").is_empty() { "accent" } else { s(cur, "suiteColors") }, "accent=Yours|sunset=Sunset|ocean=Ocean|candy=Candy|mint=Mint|fire=Fire|gold=Gold|mono=Mono|custom=Your Own"),
             ];
-            // (the preview and saving first, then what's above, then their look)
-            let first: Vec<Field> = rest.drain(..2).collect();
-            let mut out = first;
-            out.append(&mut v);
-            out.append(&mut rest);
-            out
+            // (the logo's colours: only with its panel on)
+            if !on(cur, "panelPowered", true) { v.retain(|x| x.key != "panelLogoColours"); }
+            if s(cur, "suiteColors") == "custom" {
+                v.push(f("text", "suiteC1", "First colour", "As hex, like #8e9bff.", s(cur, "suiteC1"), "#8e9bff"));
+                v.push(f("text", "suiteC2", "Second colour", "", s(cur, "suiteC2"), "#ff7ac8"));
+            }
+            v.extend([
+                f("chips", "panelShape", "Corners", "", &or("panelShape", "rounded"), "rounded=Rounded|square=Square|pill=Round Ends"),
+                f("chips", "panelHeight", "Size", "Header is Twitch's usual 320 × 100. Square (320 × 320) suits a badge or a partner's logo.", &or("panelHeight", "medium"), "short=Short|medium=Header|tall=Tall|square=Square"),
+                f("toggle", "panelIcons", "Icons", "An icon beside each title.", if on(cur, "panelIcons", true) { "true" } else { "false" }, ""),
+                f("chips", "panelScale", "Sharpness", "Sharp saves them at twice the size, so words and logos stay crisp on high-density screens. Twitch shows them the same size either way.", &or("panelScale", "2"), "2=Sharp|1=Standard"),
+                f("head", "", "3. Templates", "", "", ""),
+                f("text", "panelTplName", "Template name", "Save this look and these panels under a name, to come back and change them later.", s(cur, "panelTplName"), "My panels"),
+                f("link", "", "Save as a template", "A template with the same name is replaced.", "", "tpl:save"),
+            ]);
+            if !tpls.is_empty() {
+                v.push(f("chips", "panelTplLoad", "Load a template", "Its look and its panels come back.", "", &chips));
+                v.push(f("chips", "panelTplDel", "Delete a template", "", "", &chips));
+            }
+            v
         }),
         "cam" => ("Webcam Overlay".into(), {
             let or = |k: &str, d: &'static str| if s(cur, k).is_empty() { d.to_string() } else { s(cur, k).to_string() };
@@ -853,7 +892,8 @@ mod tests {
     fn omnipulses_own_apps_need_only_a_sign_in() {
         // (nothing to make: no Client ID to paste, only the accounts and the switch for your own app)
         let keys = |id: &str, cur: &Map<String, Value>| sheet(id, cur).1.into_iter().map(|x| x.key).filter(|k| !k.is_empty()).collect::<Vec<_>>();
-        assert_eq!(keys("twitch", &m(json!({}))), vec!["twitch:channel", "twitch:bot", "twitchOwnApp"]);
+        // (and Shared Chat's switch: whether a partner's chatters use your commands)
+        assert_eq!(keys("twitch", &m(json!({}))), vec!["twitch:channel", "twitch:bot", "twitchOwnApp", "sharedCommands"]);
         assert_eq!(keys("kick", &m(json!({}))), vec!["kickOn", "kickChannel", "kick:channel", "kick:bot", "kickOwnApp"]);
         assert!(keys("twitch", &m(json!({ "twitchOwnApp": true }))).contains(&"twitchClientId".to_string()));
         // (and a sign-in's given them, Kick's to be finished by the relay)

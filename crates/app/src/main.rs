@@ -4129,16 +4129,7 @@ fn mix_ratings_send(shared: &Shared, dir: std::path::PathBuf) {
         let sent: usize = std::fs::read_to_string(dir.join("mix-feedback-sent")).ok().and_then(|s| s.trim().parse().ok()).unwrap_or(0);
         let lines: Vec<serde_json::Value> = text.lines().skip(sent).take(200).filter_map(|l| serde_json::from_str(l).ok()).collect();
         if lines.is_empty() { return; }
-        // (this install: a random name, made once, so one tester's ratings can be told apart, not who they are)
-        let id_file = dir.join("install-id");
-        let install = match std::fs::read_to_string(&id_file) {
-            Ok(s) if s.trim().len() >= 8 => s.trim().to_string(),
-            _ => {
-                let id: String = (0..16u64).map(|k| { use std::hash::{BuildHasher, Hasher}; let mut h = std::collections::hash_map::RandomState::new().build_hasher(); h.write_u64(k); char::from_digit((h.finish() % 36) as u32, 36).unwrap_or('0') }).collect();
-                let _ = std::fs::write(&id_file, &id);
-                id
-            }
-        };
+        let install = install_id(&dir);
         let n = text.lines().skip(sent).take(200).count();
         let r = reqwest::Client::new()
             .post(format!("{}/api/mix-ratings", share::RELAY_URL))
@@ -6792,7 +6783,13 @@ fn leave_choice(shared: &Shared, c: &str) {
 // ---------- the chatbot's own page ----------
 
 fn bot_manifest() -> Option<omnipulse_core::plugins::Manifest> {
-    omnipulse_core::plugins::list().into_iter().find(|p| p.manifest.id == botpage::BOT).map(|p| p.manifest)
+    // (kept for a few seconds: listing the plugins reads every one's files, its code too, and a click on its
+    // page asks for this several times)
+    thread_local! { static KEPT: RefCell<Option<(std::time::Instant, Option<omnipulse_core::plugins::Manifest>)>> = const { RefCell::new(None) }; }
+    if let Some(m) = KEPT.with(|k| k.borrow().as_ref().filter(|(at, _)| at.elapsed() < std::time::Duration::from_secs(5)).map(|(_, m)| m.clone())) { return m; }
+    let m = omnipulse_core::plugins::list().into_iter().find(|p| p.manifest.id == botpage::BOT).map(|p| p.manifest);
+    KEPT.with(|k| *k.borrow_mut() = Some((std::time::Instant::now(), m.clone())));
+    m
 }
 
 /// The chatbot's settings as the page shows them: as saved, the page's changes over them
@@ -6809,10 +6806,10 @@ fn bot_fields(list: Vec<botpage::Field>) -> (Vec<BotField>, String) {
     let rows = list.into_iter().map(|x| {
         let (ids, names): (Vec<String>, Vec<String>) = if x.kind == "chips" { x.extra.split('|').filter_map(|o| o.split_once('=')).map(|(i, n)| (i.to_string(), n.to_string())).unzip() }
             // (a list: its items, from what's kept, or the default in extra)
-            else if x.kind == "list" { (Vec::new(), botpage::list_items(if x.value.is_empty() { &x.extra } else { &x.value })) }
+            else if x.kind == "list" || x.kind == "piclist" { (Vec::new(), botpage::list_items(if x.value.is_empty() { &x.extra } else { &x.value })) }
             else { (Vec::new(), Vec::new()) };
         // (a Suite preview's colours: "#a,#b" in its note; none, the accent)
-        let (c1, c2) = x.note.split_once(',').filter(|_| x.kind == "suiteprev")
+        let (c1, c2) = x.note.split_once(',').filter(|_| x.kind == "suiteprev" && !x.note.is_empty())
             .map(|(a, b)| (look::Rgb::parse(a).map(|c| c.slint()).unwrap_or_default(), look::Rgb::parse(b).map(|c| c.slint()).unwrap_or_default()))
             .unwrap_or_default();
         BotField { changed: !x.key.is_empty() && !x.key.contains(':') && pf_changed(&x.key), key: x.key.into(), kind: x.kind.into(), label: x.label.into(), note: x.note.into(), value: x.value.into(), extra: x.extra.into(), n: x.n, opts: strs(names), opt_ids: strs(ids), c1, c2 }
@@ -6845,6 +6842,7 @@ fn bot_paint(shared: &Shared) {
     // (a sheet's and the step's lines: drawn again only when they've changed, so what's being typed stays put)
     let sheet = BOT_SHEET.with(|b| b.borrow().clone());
     let (title, mut lines) = botpage::sheet(&sheet, &cur);
+    { let m = theme_accents(&shared.borrow().web.prefs); for l in lines.iter_mut().filter(|l| l.kind == "suiteprev" && l.note.is_empty()) { l.note = format!("{},{}", m.0, m.1); } }
     let port = shared.borrow().web.prefs["widgetPort"].as_u64().unwrap_or(7878);
     for l in lines.iter_mut() { if l.extra.contains("{port}") { l.extra = l.extra.replace("{port}", &port.to_string()); } }
     // (Game HUD Frames' editor: the screenshot, and each frame as fractions of it)
@@ -6865,7 +6863,7 @@ fn bot_paint(shared: &Shared) {
         }).collect();
         g.set_frames(ModelRc::from(Rc::new(VecModel::from(rects))));
         let t = ui.global::<Theme>();
-        g.set_c1(botpage::suite_colours(&cur).and_then(|(a, _)| look::Rgb::parse(&a)).map(|c| c.slint()).unwrap_or(t.get_accent()));
+        g.set_c1(botpage::suite_colours(&cur).and_then(|(a, _)| look::Rgb::parse(&a)).or_else(|| look::Rgb::parse(&theme_accents(&shared.borrow().web.prefs).0)).map(|c| c.slint()).unwrap_or(t.get_accent()));
     }
     // (the panels' preview: each one's title and line, the set's look)
     if sheet == "panels" {
@@ -6878,9 +6876,16 @@ fn bot_paint(shared: &Shared) {
         let item = |title: &str, line: &str| {
             let long = !line.is_empty() && (ext || line.chars().count() > if icons { 36 } else { 44 });
             let lines = line.split(" / ").map(|p| p.chars().count().div_ceil(44).max(1)).sum::<usize>() as i32;
-            PanelItem { title: title.into(), line: line.replace(" / ", "\n").into(), body: long, lines, icon: botpage::panel_icon(title).into() }
+            PanelItem { title: title.into(), line: line.replace(" / ", "\n").into(), body: long, lines, icon: botpage::panel_icon(title).into(), img: Default::default(), has_img: false }
         };
         let mut items: Vec<PanelItem> = list.split('|').map(|p| p.trim()).filter(|p| !p.is_empty()).take(12).map(|p| match p.split_once(':') { Some((a, b)) => item(a.trim(), b.trim()), None => item(p, "") }).collect();
+        // (your own icons, in the panels' order: a picture copied in, shown in its place)
+        let own = cur.get("panelOwnIcons").and_then(|v| v.as_str()).unwrap_or("").to_string();
+        for (it, u) in items.iter_mut().zip(own.split('|').map(|u| u.trim().to_string())) {
+            if let Some(name) = u.strip_prefix("/overlay/") {
+                if let Some(img) = omnipulse_core::data_dir().ok().map(|d| d.join("overlay-media").join(name)).and_then(|f| slint::Image::load_from_path(&f).ok()) { it.img = img; it.has_img = true; }
+            }
+        }
         if cur.get("panelPowered").and_then(|v| v.as_bool()) != Some(false) { items.push(item("Powered by OmniPulse", if ext { "This stream's music, chatbot, alerts and overlays all run on OmniPulse." } else { "Music, chatbot and stream tools in one app" })); }
         g.set_items(ModelRc::from(Rc::new(VecModel::from(items))));
         let or = |k: &str, d: &str| cur.get(k).and_then(|v| v.as_str()).filter(|v| !v.is_empty()).unwrap_or(d).to_string();
@@ -6888,8 +6893,9 @@ fn bot_paint(shared: &Shared) {
         g.set_shape(or("panelShape", "rounded").into());
         g.set_height(or("panelHeight", "medium").into());
         g.set_icons(cur.get("panelIcons").and_then(|v| v.as_bool()) != Some(false));
+        g.set_logo_colours(or("panelLogoColours", "theme").into());
         let t = ui.global::<Theme>();
-        let (c1, c2) = botpage::suite_colours(&cur).map(|(a, b)| (look::Rgb::parse(&a).map(|c| c.slint()).unwrap_or(t.get_accent()), look::Rgb::parse(&b).map(|c| c.slint()).unwrap_or(t.get_accent_2()))).unwrap_or((t.get_accent(), t.get_accent_2()));
+        let (c1, c2) = botpage::suite_colours(&cur).map(|(a, b)| (look::Rgb::parse(&a).map(|c| c.slint()).unwrap_or(t.get_accent()), look::Rgb::parse(&b).map(|c| c.slint()).unwrap_or(t.get_accent_2()))).unwrap_or_else(|| { let m = theme_accents(&shared.borrow().web.prefs); (look::Rgb::parse(&m.0).map(|c| c.slint()).unwrap_or(t.get_accent()), look::Rgb::parse(&m.1).map(|c| c.slint()).unwrap_or(t.get_accent_2())) });
         g.set_c1(c1);
         g.set_c2(c2);
     }
@@ -6903,14 +6909,20 @@ fn bot_paint(shared: &Shared) {
         g.set_border(or("camBorder", "glow").into());
         g.set_theme(or("camTheme", "dark").into());
         let t = ui.global::<Theme>();
-        let (c1, c2) = botpage::suite_colours(&cur).map(|(a, b)| (look::Rgb::parse(&a).map(|c| c.slint()).unwrap_or(t.get_accent()), look::Rgb::parse(&b).map(|c| c.slint()).unwrap_or(t.get_accent_2()))).unwrap_or((t.get_accent(), t.get_accent_2()));
+        let (c1, c2) = botpage::suite_colours(&cur).map(|(a, b)| (look::Rgb::parse(&a).map(|c| c.slint()).unwrap_or(t.get_accent()), look::Rgb::parse(&b).map(|c| c.slint()).unwrap_or(t.get_accent_2()))).unwrap_or_else(|| { let m = theme_accents(&shared.borrow().web.prefs); (look::Rgb::parse(&m.0).map(|c| c.slint()).unwrap_or(t.get_accent()), look::Rgb::parse(&m.1).map(|c| c.slint()).unwrap_or(t.get_accent_2())) });
         g.set_c1(c1);
         g.set_c2(c2);
     }
     let (rows, sig) = bot_fields(lines);
     let (srows, ssig) = bot_fields(if setup { botpage::step_fields(&now, &cur) } else { Vec::new() });
     let (was, swas) = BOT_DRAWN.with(|d| d.borrow().clone());
-    if sig != was || sheet != ui.get_bot_sheet().as_str() { ui.set_bot_sheet_fields(model(rows)); }
+    if sig != was || sheet != ui.get_bot_sheet().as_str() {
+        let same = sheet == ui.get_bot_sheet().as_str();
+        let now = ui.get_bot_sheet_fields();
+        let fits = same && now.row_count() == rows.len() && (0..rows.len()).all(|i| now.row_data(i).is_some_and(|r| r.kind == rows[i].kind && r.key == rows[i].key));
+        if fits { for (i, r) in rows.into_iter().enumerate() { if now.row_data(i).as_ref() != Some(&r) { now.set_row_data(i, r); } } }
+        else { ui.set_bot_sheet_fields(model(rows)); }
+    }
     if ssig != swas { ui.set_bot_step_fields(model(srows)); }
     BOT_DRAWN.with(|d| *d.borrow_mut() = (sig, ssig));
     ui.set_bot_sheet(sheet.into());
@@ -6973,6 +6985,19 @@ const PANEL_TPL_KEYS: [&str; 9] = ["panelTheme", "panelShape", "panelHeight", "p
 
 fn bot_set(shared: &Shared, key: &str, v: &str) {
     let key = botpage::key_of(key).to_string();
+    // (a theme's font: "theme|font" picked, or typed (any Google Font), kept in themeFonts for that theme)
+    if key == "fontPick" || key == "fontCustom" {
+        let cur = bot_current(shared);
+        let theme = if key == "fontPick" { v.split_once('|').map(|x| x.0).unwrap_or("dark").to_string() } else {
+            ["suiteTheme", "panelTheme", "camTheme"].iter().find(|k| botpage::sheet(&BOT_SHEET.with(|b| b.borrow().clone()), &cur).1.iter().any(|f| f.key == **k)).and_then(|k| cur.get(*k).and_then(|x| x.as_str()).filter(|x| !x.is_empty()).map(String::from)).unwrap_or_else(|| "dark".into())
+        };
+        let font: String = if key == "fontPick" { v.split_once('|').map(|x| x.1).unwrap_or("").to_string() } else { v.trim().chars().filter(|c| c.is_alphanumeric() || *c == ' ').take(60).collect() };
+        let mut all: serde_json::Map<String, serde_json::Value> = cur.get("themeFonts").and_then(|t| t.as_str()).and_then(|t| serde_json::from_str(t).ok()).unwrap_or_default();
+        if font.is_empty() { all.remove(&theme); } else { all.insert(theme, serde_json::json!(font)); }
+        bot_set(shared, "themeFonts", &serde_json::Value::Object(all).to_string());
+        if key == "fontPick" { bot_paint(shared); }
+        return;
+    }
     // (a HUD frame's own (the picked one's), or a nudge: in hudFrames, not settings of their own)
     if key.starts_with("hudF_") || key == "hudNudge" {
         let cur = bot_current(shared);
@@ -7055,6 +7080,14 @@ fn bot_act(shared: &Shared, act: &str) {
             ("set", Some(i)) if i < items.len() => { items[i] = parts.next().unwrap_or("").replace('|', "/"); }
             ("del", Some(i)) if i < items.len() => { items.remove(i); }
             ("add", _) if items.len() < 16 => { items.push(String::new()); }
+            // (a picture of yours for the row: chosen, and copied into the widget's own folder (its address there))
+            ("pick", Some(i)) => {
+                let Some(p) = rfd::FileDialog::new().set_title("A picture for this panel's icon").add_filter("Pictures", &["png", "jpg", "jpeg", "gif", "webp"]).pick_file() else { return };
+                match omnipulse_core::widget::overlay_media(&p.to_string_lossy(), false) {
+                    Ok(url) => { while items.len() <= i { items.push(String::new()); } items[i] = url; }
+                    Err(e) => { say(&e); return; }
+                }
+            }
             _ => return,
         }
         // (an empty row kept while it's being typed into: "a |  | c")
@@ -7728,7 +7761,75 @@ fn outputs_put(shared: &Shared, kind: &str, outs: Vec<serde_json::Map<String, se
     push_out(shared, true);
 }
 
+/// The app theme's own two accents (App & Look), whatever the album art's doing: "Your Theme's" colours
+fn theme_accents(prefs: &serde_json::Value) -> (String, String) {
+    let hex = |k: &str, d: &str| prefs[k].as_str().filter(|v| v.len() == 7 && v.starts_with('#')).unwrap_or(d).to_string();
+    (hex("accent", "#8e9bff"), hex("accent2", "#b48eff"))
+}
+
+/// This install's name: random, made once, so a tester's ratings or reports can be told apart (not who they are)
+fn install_id(dir: &std::path::Path) -> String {
+    let id_file = dir.join("install-id");
+    match std::fs::read_to_string(&id_file) {
+        Ok(s) if s.trim().len() >= 8 => s.trim().to_string(),
+        _ => {
+            let id: String = (0..16u64).map(|k| { use std::hash::{BuildHasher, Hasher}; let mut h = std::collections::hash_map::RandomState::new().build_hasher(); h.write_u64(k); char::from_digit((h.finish() % 36) as u32, 36).unwrap_or('0') }).collect();
+            let _ = std::fs::write(&id_file, &id);
+            id
+        }
+    }
+}
+
+/// A bug report or an idea, from its page: to the relay, for the developer; the page emptied once it's there
+fn report_send(shared: &Shared) {
+    let vals = PF_EDIT.with(|e| e.borrow().as_ref().map(|(_, v)| v.clone())).unwrap_or_default();
+    let get = |k: &str| vals.get(k).and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
+    let say = |t: &str| if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_status(t.into()); };
+    let (title, text) = (get("reportTitle"), get("reportText"));
+    if text.len() < 10 { return say("Say a little more about it first, in the big box."); }
+    let kind = if get("reportKind") == "feature" { "feature" } else { "bug" };
+    let with_info = vals.get("reportInfo").and_then(|v| v.as_bool()) != Some(false);
+    let (dir, prefs, rt) = { let a = shared.borrow(); (omnipulse_core::data_dir().ok().map(|d| d.join("state")), a.web.prefs.clone(), a.rt.clone()) };
+    let Some(dir) = dir else { return say("Couldn't find OmniPulse's folder to send it from.") };
+    let os = if with_info { windows_version() } else { String::new() };
+    let extra = if with_info {
+        let plugs: Vec<String> = prefs.as_object().map(|o| o.iter().filter(|(k, v)| k.starts_with("plugOn_") && v.as_bool() == Some(true)).map(|(k, _)| k[7..].to_string()).collect()).unwrap_or_default();
+        format!("player: {}; theme: {}; plugins: {}", prefs["playerStyle"].as_str().unwrap_or("tab"), prefs["theme"].as_str().unwrap_or("default"), if plugs.is_empty() { "none".into() } else { plugs.join(", ") })
+    } else { String::new() };
+    let body = serde_json::json!({ "install": install_id(&dir), "kind": kind, "title": title, "text": text, "contact": get("reportContact"), "version": if with_info { env!("CARGO_PKG_VERSION") } else { "" }, "os": os, "extra": extra });
+    say("Sending...");
+    let weak = shared.borrow().ui.clone();
+    rt.spawn(async move {
+        let r = reqwest::Client::new().post(format!("{}/api/reports", share::RELAY_URL)).json(&body).timeout(std::time::Duration::from_secs(20)).send().await;
+        let msg = match r {
+            Ok(r) if r.status().is_success() => Ok(()),
+            Ok(r) => Err(r.json::<serde_json::Value>().await.ok().and_then(|v| v["error"].as_str().map(String::from)).unwrap_or_else(|| "the relay didn't take it".into())),
+            Err(_) => Err("couldn't reach OmniPulse's relay (are you online?)".into()),
+        };
+        let _ = slint::invoke_from_event_loop(move || {
+            let Some(ui) = weak.upgrade() else { return };
+            match msg {
+                Ok(()) => {
+                    ui.set_status(if kind == "bug" { "Sent. Thank you: that helps fix it." } else { "Sent. Thank you for the idea!" }.into());
+                    // (emptied, ready for another)
+                    PF_EDIT.with(|e| if let Some((_, v)) = e.borrow_mut().as_mut() { for k in ["reportTitle", "reportText"] { v.insert(k.into(), serde_json::json!("")); } });
+                    SHARED.with(|x| if let Some(sh) = x.borrow().clone() { pf_paint(&sh); });
+                }
+                Err(e) => ui.set_status(format!("Not sent: {e}").into()),
+            }
+        });
+    });
+}
+
+/// Windows' version, as "Windows 11 (26200)"
+fn windows_version() -> String {
+    let build = std::process::Command::new("cmd").args(["/c", "ver"]).output().ok().map(|o| String::from_utf8_lossy(&o.stdout).to_string()).unwrap_or_default();
+    let n = build.split('.').nth(2).and_then(|b| b.trim_end_matches(|c: char| !c.is_ascii_digit()).parse::<u32>().ok()).unwrap_or(0);
+    if n == 0 { "Windows".into() } else { format!("Windows {} ({n})", if n >= 22000 { 11 } else { 10 }) }
+}
+
 fn panel_press(shared: &Shared, key: &str) {
+    if key == "reportSend" { return report_send(shared); }
     if key == "ytHelpersSetup" { return helpers_act(shared, "setup"); }
     // (the Stream Deck plugin: given to Stream Deck to install, as it asks)
     if key == "sdInstall" {
@@ -8188,9 +8289,13 @@ fn widget_preview_open(shared: &Shared, name: &str) {
     widget_preview(shared);
     let (path, w, h) = if name == "lyricsw" { ("lyrics", 1100, 420) } else { ("", 720, 360) };
     let url = format!("http://127.0.0.1:{port}/{path}?preview=1");
-    let profile = omnipulse_core::data_dir().map(|d| d.join("widget-preview")).unwrap_or_default();
-    let edge = std::process::Command::new("cmd").args(["/C", "start", "", "msedge", &format!("--app={url}"), "--autoplay-policy=no-user-gesture-required", &format!("--window-size={w},{h}"), &format!("--user-data-dir={}", profile.display())]).spawn();
-    if edge.is_err() { let _ = std::process::Command::new("cmd").args(["/C", "start", "", &url]).spawn(); }
+    // (in OmniPulse's own window, named for it: Task Manager lists it under OmniPulse; the browser only if
+    // that can't open)
+    let title = format!("{} Preview", panels::title(if name.starts_with("alert") { "alerts" } else { name }));
+    if let Err(e) = web_preview(name, &title, &url, w, h) {
+        eprintln!("preview window: {e}");
+        let _ = std::process::Command::new("cmd").args(["/C", "start", "", &url]).spawn();
+    }
     if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_status("The preview is open. It updates as you change the settings, before you save.".into()); }
 }
 
@@ -11071,6 +11176,56 @@ fn helpers_act(shared: &Shared, act: &str) {
     helpers_paint(shared);
 }
 
+// ---------- the widgets' pop-out previews: in windows of OmniPulse's own ----------
+thread_local! {
+    /// each open preview: what it's of, its window, its web view (put in once the window's there), the timer keeping it sized
+    static PREVIEWS: RefCell<Vec<(String, WebPreview, Option<wry::WebView>, slint::Timer)>> = const { RefCell::new(Vec::new()) };
+}
+
+/// A widget's preview in a window of its own (WebView2: its processes listed under OmniPulse in Task Manager),
+/// the window named for it; one already open for it brought back, its page loaded again
+fn web_preview(key: &str, title: &str, url: &str, w: u32, h: u32) -> Result<(), String> {
+    // (WebView2's own folder: OmniPulse's data folder, not beside the app (Program Files can't be written))
+    if let Ok(d) = omnipulse_core::data_dir() { unsafe { std::env::set_var("WEBVIEW2_USER_DATA_FOLDER", d.join("webview")); } }
+    let open = PREVIEWS.with(|p| {
+        let mut p = p.borrow_mut();
+        p.retain(|(_, win, _, _)| win.window().is_visible());
+        if let Some((_, win, view, _)) = p.iter().find(|x| x.0 == key) {
+            if let Some(v) = view { let _ = v.load_url(url); }
+            let _ = win.show();
+            return true;
+        }
+        false
+    });
+    if open { return Ok(()); }
+    let win = WebPreview::new().map_err(|e| e.to_string())?;
+    win.set_name(title.into());
+    win.window().set_size(slint::LogicalSize::new(w as f32, h as f32));
+    // (a self-test's: off the screen, as its main window is)
+    if std::env::var_os("OMNIPULSE_SELFTEST").is_some() { win.window().set_position(slint::PhysicalPosition::new(-4000, 0)); }
+    win.show().map_err(|e| e.to_string())?;
+    // (every quarter second: the page put in once the window's there, and kept the window's size)
+    let timer = slint::Timer::default();
+    let (key2, url2) = (key.to_string(), url.to_string());
+    timer.start(slint::TimerMode::Repeated, std::time::Duration::from_millis(250), move || {
+        PREVIEWS.with(|p| {
+            let mut p = p.borrow_mut();
+            let Some(at) = p.iter().position(|x| x.0 == key2) else { return };
+            // (closed: its web view and window let go)
+            if !p[at].1.window().is_visible() { p[at].2.take(); p[at].3.stop(); return; }
+            let (win, view) = (&p[at].1, &p[at].2);
+            let size = win.window().size();
+            let rect = wry::Rect { position: wry::dpi::PhysicalPosition::new(0, 0).into(), size: wry::dpi::PhysicalSize::new(size.width, size.height).into() };
+            if let Some(v) = view { let _ = v.set_bounds(rect); return; }
+            use slint::winit_030::WinitWindowAccessor;
+            let made = win.window().with_winit_window(|w| wry::WebViewBuilder::new().with_url(&url2).with_autoplay(true).with_bounds(rect).build_as_child(w).ok()).flatten();
+            p[at].2 = made;
+        });
+    });
+    PREVIEWS.with(|p| p.borrow_mut().push((key.to_string(), win, None, timer)));
+    Ok(())
+}
+
 // ---------- Apple Music, once (crate::apple_import) ----------
 thread_local! {
     /// the sign-in window, its web view of Apple's page, and the timer watching it (while signing in)
@@ -11250,10 +11405,15 @@ thread_local! {
     static UPDATE: RefCell<Option<updater::Release>> = const { RefCell::new(None) };
 }
 
+/// Beta Updates: offered (its switch shown under Updates, and betas given with it on). Off for now: the
+/// switch and all it does stay built, for when there are betas to test
+const BETA_OFFERED: bool = false;
+
 fn update_check(shared: &Shared, said: bool) {
     let (rt, weak) = { let a = shared.borrow(); (a.rt.clone(), a.ui.clone()) };
     if let Some(ui) = weak.upgrade() { ui.set_update_note("Checking...".into()); }
-    let beta = shared.borrow().web.prefs["betaUpdates"].as_bool().unwrap_or(false);
+    // (betas only while Beta Updates is offered: hidden for now, so a switch left on doesn't keep giving them)
+    let beta = BETA_OFFERED && shared.borrow().web.prefs["betaUpdates"].as_bool().unwrap_or(false);
     rt.spawn(async move {
         let r = updater::check(beta).await;
         let _ = weak.upgrade_in_event_loop(move |ui| {
@@ -11682,7 +11842,13 @@ fn plugin_app(shared: &Shared, plugin: &str, ask: serde_json::Value, answer: Box
         // (the Suite's widgets, as they are now: passed on to OBS's pages)
         "suiteWidget" => {
             if plugin != "chatbot" { return send(serde_json::json!({ "error": "only OmniPulse's Stream Suite can" })); }
-            integrations::set_suite(args.first().cloned().unwrap_or(serde_json::Value::Null));
+            // ("Your Theme's" colours: the app theme's own two (App & Look), never the album art's; filled in
+            // wherever the Suite sent none: its widgets and each creator)
+            let mut v = args.first().cloned().unwrap_or(serde_json::Value::Null);
+            let mine = theme_accents(&shared.borrow().web.prefs);
+            let fill = |x: &mut serde_json::Value| if x.get("colors").map(|c| c.is_null()).unwrap_or(true) { x["colors"] = serde_json::json!({ "c1": mine.0, "c2": mine.1 }); };
+            if v.is_object() { fill(&mut v); if let Some(list) = v.get_mut("creators").and_then(|c| c.as_array_mut()) { list.iter_mut().filter(|c| c.is_object()).for_each(fill); } }
+            integrations::set_suite(v);
             push_out(shared, true);
             send(serde_json::json!({ "ok": true }));
         }
@@ -12942,7 +13108,14 @@ fn main() -> Result<(), slint::PlatformError> {
         ks_take(&s, found);
     });
     let s = shared.clone();
-    ui.on_account_settings(move |p| panel_open(&s, &p));
+    ui.on_account_settings(move |p| {
+        // (Bugs and Ideas: its page, with the kind picked as clicked)
+        if let Some(kind) = p.strip_prefix("report:") {
+            if let Some(o) = s.borrow_mut().web.prefs.as_object_mut() { o.insert("reportKind".into(), serde_json::json!(kind)); }
+            return panel_open(&s, "report");
+        }
+        panel_open(&s, &p)
+    });
     flows_wire(&ui, &shared);
     let s = shared.clone();
     ui.on_set_more(move |key| {
@@ -14069,6 +14242,8 @@ fn main() -> Result<(), slint::PlatformError> {
                     }
                 }
                 w if w.starts_with("setup:") => { if let Some(sh) = SHARED.with(|x| x.borrow().clone()) { setup_show(&sh, w[6..].parse().unwrap_or(0)); } }
+                // (a widget's pop-out preview, in its own window: "wpreview:widget")
+                w if w.starts_with("wpreview:") => { if let Some(sh) = SHARED.with(|x| x.borrow().clone()) { widget_preview_open(&sh, &w[9..]); } }
                 w if w.starts_with("panel:") => { if let Some(sh) = SHARED.with(|x| x.borrow().clone()) { panel_open(&sh, &w[6..]); } }
                 // (a plugin's own page, like the Suite's)
                 w if w.starts_with("plug:") => { if let Some(sh) = SHARED.with(|x| x.borrow().clone()) { pf_open(&sh, &w[5..]); } }

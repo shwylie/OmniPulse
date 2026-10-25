@@ -141,7 +141,7 @@ const KICK_REDIRECT = "http://localhost:8476/kick";
 const TWITCH_REDIRECT = "http://localhost:8476/twitch";
 
 export default {
-  async fetch(req, env) {
+  async fetch(req, env, ctx) {
     const url = new URL(req.url);
     const parts = url.pathname.split("/").filter(Boolean);
     if (req.method === "OPTIONS") return new Response(null, { headers: { "access-control-allow-origin": "*", "access-control-allow-methods": "GET, POST, PUT", "access-control-allow-headers": "content-type" } });
@@ -201,6 +201,19 @@ export default {
       return new Response(await got.text(), { status: got.status, headers: { "content-type": "application/json", "cache-control": "no-store" } });
     }
 
+    // OmniPulse's web installer: the one file to download, the same for every version (so SmartScreen comes to
+    // know it); it fetches the latest installer itself. /get is the address to share
+    if ((req.method === "GET" || req.method === "HEAD") && (url.pathname === "/get" || url.pathname === "/updates/setup/OmniPulse-Setup.exe") && env.UPDATES) {
+      const obj = await env.UPDATES.get("setup/OmniPulse-Setup.exe");
+      if (!obj) return json({ error: "not there yet" }, 404);
+      return new Response(obj.body, { headers: {
+        "content-type": "application/vnd.microsoft.portable-executable",
+        "content-length": String(obj.size),
+        "content-disposition": 'attachment; filename="OmniPulse-Setup.exe"',
+        "cache-control": "public, max-age=3600",
+      } });
+    }
+
     // the native app's stable updates, from R2 (put there by scripts/release-native.mjs): latest.json and
     // the installers (betas are on GitHub). Only what's signed with OmniPulse's key is ever run by the app
     if (req.method === "GET" && parts[0] === "updates" && env.UPDATES) {
@@ -232,6 +245,33 @@ export default {
       if (req.method === "GET") {
         if (!env.RATINGS_KEY || req.headers.get("x-ratings-key") !== env.RATINGS_KEY) return json({ error: "not yours to read" }, 403);
         return stub.fetch("https://ratings/all?after=" + encodeURIComponent(url.searchParams.get("after") || "0"));
+      }
+    }
+
+    // bug reports and feature requests from the app, kept for the developer (read with REPORTS_KEY, a secret);
+    // posted to a Discord channel too, if its webhook (REPORTS_WEBHOOK, a secret) is set
+    if (url.pathname === "/api/reports") {
+      const stub = env.REPORTS.get(env.REPORTS.idFromName("all"));
+      if (req.method === "POST") {
+        const text = await req.text();
+        if (text.length > 64 * 1024) return json({ error: "too long" }, 413);
+        let b = null;
+        try { b = JSON.parse(text); } catch (e) {}
+        const s = (v, n) => String(v == null ? "" : v).slice(0, n);
+        if (!b || typeof b.install !== "string" || !/^[a-z0-9]{8,40}$/.test(b.install) || !["bug", "feature"].includes(b.kind) || !s(b.text, 8000).trim()) return json({ error: "not a report" }, 400);
+        const r = { install: b.install, kind: b.kind, title: s(b.title, 200), text: s(b.text, 8000), contact: s(b.contact, 100), version: s(b.version, 40), os: s(b.os, 120), extra: s(b.extra, 2000) };
+        const res = await stub.fetch("https://reports/add", { method: "POST", body: JSON.stringify(r) });
+        if (res.ok && env.REPORTS_WEBHOOK) {
+          const head = (r.kind === "bug" ? "🐞 Bug" : "💡 Feature") + (r.title ? ": " + r.title : "");
+          const body = [head, r.text, "", "Version " + (r.version || "?") + (r.os ? " · " + r.os : "") + (r.contact ? " · contact: " + r.contact : "")].join("\n").slice(0, 1900);
+          ctx.waitUntil(fetch(env.REPORTS_WEBHOOK, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ content: body, allowed_mentions: { parse: [] } }) }).catch(() => {}));
+        }
+        return res;
+      }
+      if (req.method === "GET") {
+        const key = env.REPORTS_KEY || env.RATINGS_KEY;
+        if (!key || req.headers.get("x-reports-key") !== key) return json({ error: "not yours to read" }, 403);
+        return stub.fetch("https://reports/all?after=" + encodeURIComponent(url.searchParams.get("after") || "0"));
       }
     }
 
@@ -600,6 +640,31 @@ export class Share {
 }
 
 // Seamless Mix ratings: one list of them, each with the install it came from and when it arrived
+export class Reports {
+  constructor(ctx) {
+    this.sql = ctx.storage.sql;
+    this.sql.exec("CREATE TABLE IF NOT EXISTS r (n INTEGER PRIMARY KEY AUTOINCREMENT, install TEXT, got INTEGER, report TEXT)");
+  }
+
+  async fetch(req) {
+    const url = new URL(req.url);
+    if (url.pathname === "/add") {
+      const b = await req.json();
+      const now = Date.now();
+      // (one a minute from an install, and 20 a day: enough for anyone, not enough to flood it)
+      const last = this.sql.exec("SELECT MAX(got) AS t, COUNT(*) AS c FROM r WHERE install = ? AND got > ?", b.install, now - 86400000).toArray()[0];
+      if (last && last.t && now - last.t < 60000) return json({ error: "Wait a minute before sending another." }, 429);
+      if (last && last.c >= 20) return json({ error: "That's a lot of reports today: try again tomorrow, or message @shwylie on Discord." }, 429);
+      this.sql.exec("INSERT INTO r (install, got, report) VALUES (?, ?, ?)", b.install, now, JSON.stringify(b));
+      return json({ ok: true });
+    }
+    const after = Number(url.searchParams.get("after") || 0) || 0;
+    const rows = this.sql.exec("SELECT n, install, got, report FROM r WHERE n > ? ORDER BY n LIMIT 2000", after).toArray();
+    const out = rows.map((x) => JSON.stringify(Object.assign({ n: x.n, got: x.got }, JSON.parse(x.report)))).join("\n");
+    return new Response(out + (out ? "\n" : ""), { headers: { "content-type": "application/x-ndjson", "cache-control": "no-store" } });
+  }
+}
+
 export class Ratings {
   constructor(ctx) {
     this.sql = ctx.storage.sql;

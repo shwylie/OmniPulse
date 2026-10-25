@@ -49,6 +49,8 @@
   .name:hover { text-decoration: underline; }
   .text img { height: 1.6em; vertical-align: middle; margin: -0.3em 0; }
   .tag { font-size: 0.75em; color: var(--accent); margin-left: 4px; }
+  .from { display: inline-block; font-size: 0.72em; font-weight: 700; padding: 0 5px; margin-right: 4px; border-radius: 999px; background: #9146ff33; color: #c9a8ff; vertical-align: 1px; }
+  .msg.shared { border-left-color: #c9a8ff88; }
   .notice { color: var(--dim); font-style: italic; padding: 3px 10px; }
   .notice.bad { color: var(--warn); }
 
@@ -398,9 +400,11 @@
     if (m.notice) return addNotice(m.notice, /^Couldn't/.test(m.notice));
     const r = document.createElement("div");
     const pl = m.platform === "kick" ? "kick" : m.platform === "youtube" ? "youtube" : "twitch";
-    r.className = "msg " + pl + (m.first ? " first" : "") + (m.me ? " me" : "") + (m.gone ? " gone" : "");
+    r.className = "msg " + pl + (m.first ? " first" : "") + (m.me ? " me" : "") + (m.gone ? " gone" : "") + (m.shared ? " shared" : "");
     r.dataset.platform = pl;
     const time = document.createElement("span"); time.className = "time"; time.textContent = stamp(m.ts); r.append(time);
+    // (from a Shared Chat partner's channel: whose)
+    if (m.shared) { const f = document.createElement("span"); f.className = "from"; f.textContent = m.sharedFrom ? "@" + m.sharedFrom : "Shared chat"; f.title = "From " + (m.sharedFrom || "the channel you're sharing chat with"); r.append(f); }
     for (const [key, cls, label, title] of BADGES) {
       if ((m.badges || []).includes(key)) { const b = document.createElement("span"); b.className = "badge " + cls; b.textContent = label; b.title = title; r.append(b); }
     }

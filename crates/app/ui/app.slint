@@ -111,9 +111,11 @@ export global HudLook {
     in-out property <color> c1;
 }
 /// A channel panel, for the Panels' preview
-export struct PanelItem { title: string, line: string, body: bool, lines: int, icon: string }
+export struct PanelItem { title: string, line: string, body: bool, lines: int, icon: string, img: image, has-img: bool }
 export global PanelLook {
     in-out property <[PanelItem]> items;
+    // (the Powered by OmniPulse panel's mark: theme, omnipulse or plain)
+    in-out property <string> logo-colours: "theme";
     in-out property <string> theme;
     in-out property <string> shape;
     in-out property <string> height;
@@ -814,9 +816,21 @@ component AccentGlow inherits Rectangle {
     height: root.settings ? 220px : 340px;
     property <color> c1: root.settings ? Theme.plain-panel.mix(Theme.accent-2, 0.82) : Theme.plain-panel.mix(Theme.accent, 0.66);
     property <color> c2: root.settings ? Theme.plain-panel.mix(Theme.accent, 0.82) : Theme.plain-panel.mix(Theme.accent-2, 0.66);
-    Rectangle { background: @linear-gradient(90deg, root.c1 0%, root.c2 100%); }
-    Rectangle { background: @linear-gradient(180deg, root.base.with-alpha(0) 0%, root.base 100%); }
-    Caps { r: Theme.panel-radius; tl: root.c1; tr: root.c2; }
+    // (solid panels: the accents across it, fading down into the panel, which is the same colour all the way)
+    if !Theme.aurora: Rectangle { background: @linear-gradient(90deg, root.c1 0%, root.c2 100%); }
+    if !Theme.aurora: Rectangle { background: @linear-gradient(180deg, root.base.with-alpha(0) 0%, root.base 100%); }
+    if !Theme.aurora: Caps { r: Theme.panel-radius; tl: root.c1; tr: root.c2; }
+    // (Aurora's see-through panels: a fade to the panel's colour would end in a band where the page shows the
+    // aurora through it; so two soft glows of the accents instead, see-through all the way out, as the aurora's)
+    if Theme.aurora: Rectangle {
+        clip: true;
+        border-radius: Theme.panel-radius;
+        property <length> s: root.height * 2.4;
+        Rectangle { x: parent.width * 0.18 - parent.s / 2; y: -parent.s / 2; width: parent.s; height: parent.s;
+            background: @radial-gradient(circle, (root.settings ? Theme.accent-2 : Theme.accent).with-alpha(root.settings ? 0.28 : 0.42) 0%, transparent 70%); }
+        Rectangle { x: parent.width * 0.82 - parent.s / 2; y: -parent.s / 2; width: parent.s; height: parent.s;
+            background: @radial-gradient(circle, (root.settings ? Theme.accent : Theme.accent-2).with-alpha(root.settings ? 0.28 : 0.42) 0%, transparent 70%); }
+    }
 }
 
 /// A choice from a list, as the web app's dropdowns: what's chosen, and a ▾; a click shows the list, in a
@@ -936,6 +950,7 @@ component GroupedPicker inherits Rectangle {
                 padding: 6px;
                 spacing: 4px;
                 Rectangle {
+                    clip: true;
                     height: 32px;
                     border-radius: 8px;
                     background: Theme.bg;
@@ -943,7 +958,7 @@ component GroupedPicker inherits Rectangle {
                     border-color: gpq.has-focus ? Theme.accent : Theme.line;
                     Glyph { d: Icons.search; x: 9px; width: 13px; height: 13px; y: (parent.height - self.height) / 2; fill: Theme.muted; }
                     if root.q == "": Text { x: 30px; height: parent.height; vertical-alignment: center; text: "Find one"; color: Theme.muted; font-size: 12px; }
-                    gpq := TextInput { x: 30px; width: parent.width - 40px; height: parent.height; vertical-alignment: center; color: Theme.text; font-size: 12px; single-line: true; edited => { root.q = self.text; root.query(self.text); } }
+                    gpq := TextInput { property <length> sx; cursor-position-changed(p) => { if (p.x + self.sx < 0px) { self.sx = -p.x; } else if (p.x + self.sx > parent.width - 40px - 2px) { self.sx = parent.width - 40px - 2px - p.x; } }  x: 30px + min(0px, max(parent.width - 40px - self.width, self.sx)); width: max(parent.width - 40px, self.preferred-width + 4px); height: parent.height; vertical-alignment: center; color: Theme.text; font-size: 12px; single-line: true; edited => { root.q = self.text; root.query(self.text); } }
                 }
                 ScrollView {
                     horizontal-scrollbar-policy: always-off;
@@ -1250,6 +1265,7 @@ component FlowFieldsView inherits VerticalLayout {
             if fl.note != "": Text { text: fl.note; color: Theme.muted; font-size: 11px; wrap: word-wrap; min-height: self.preferred-height; }
         }
         if fl.kind == "text" || fl.kind == "number": Rectangle {
+            clip: true;
             width: fl.kind == "number" ? 90px : 280px;
             height: 32px;
             y: (parent.height - self.height) / 2;
@@ -1257,7 +1273,7 @@ component FlowFieldsView inherits VerticalLayout {
             background: Theme.bg;
             border-width: 1px;
             border-color: fti.has-focus ? Theme.accent : Theme.line;
-            fti := TextInput { x: 10px; width: parent.width - 20px; height: parent.height; vertical-alignment: center; color: Theme.text; font-size: 13px; single-line: true; input-type: fl.kind == "number" ? InputType.decimal : InputType.text; text: fl.value; edited => { root.changed(i, self.text); } }
+            fti := TextInput { property <length> sx; cursor-position-changed(p) => { if (p.x + self.sx < 0px) { self.sx = -p.x; } else if (p.x + self.sx > parent.width - 20px - 2px) { self.sx = parent.width - 20px - 2px - p.x; } }  x: 10px + min(0px, max(parent.width - 20px - self.width, self.sx)); width: max(parent.width - 20px, self.preferred-width + 4px); height: parent.height; vertical-alignment: center; color: Theme.text; font-size: 13px; single-line: true; input-type: fl.kind == "number" ? InputType.decimal : InputType.text; text: fl.value; edited => { root.changed(i, self.text); } }
         }
         if fl.kind == "select": VerticalLayout { alignment: center; Dropdown { options: fl.options; current: fl.at; picked(k) => { root.picked(i, k); } } }
         // (a program: typed, or picked from the ones open now)
@@ -1265,13 +1281,14 @@ component FlowFieldsView inherits VerticalLayout {
             alignment: center;
             spacing: 6px;
             Rectangle {
+                clip: true;
                 width: 280px;
                 height: 32px;
                 border-radius: 8px;
                 background: Theme.bg;
                 border-width: 1px;
                 border-color: fpti.has-focus ? Theme.accent : Theme.line;
-                fpti := TextInput { x: 10px; width: parent.width - 20px; height: parent.height; vertical-alignment: center; color: Theme.text; font-size: 13px; single-line: true; text: fl.value; edited => { root.changed(i, self.text); } }
+                fpti := TextInput { property <length> sx; cursor-position-changed(p) => { if (p.x + self.sx < 0px) { self.sx = -p.x; } else if (p.x + self.sx > parent.width - 20px - 2px) { self.sx = parent.width - 20px - 2px - p.x; } }  x: 10px + min(0px, max(parent.width - 20px - self.width, self.sx)); width: max(parent.width - 20px, self.preferred-width + 4px); height: parent.height; vertical-alignment: center; color: Theme.text; font-size: 13px; single-line: true; text: fl.value; edited => { root.changed(i, self.text); } }
             }
             Dropdown { width: 280px; options: fl.options; current: -1;
                 placeholder: fl.kind == "program" ? (fl.options.length > 0 ? "Pick one that's open now" : "No other programs open") : fl.kind == "reward" ? "Pick a reward, or make one"
@@ -2822,14 +2839,24 @@ component PanelPreview inherits Rectangle {
                     padding-right: 16px;
                     padding-top: pi.th == "y2k" ? 22px : 0px;
                     spacing: 16px;
-                    if PanelLook.icons: VerticalLayout {
+                    if p.title == "Powered by OmniPulse": VerticalLayout {
+                        alignment: center;
+                        Glyph {
+                            d: p.icon;
+                            width: min(54px, root.ph - 26px);
+                            height: self.width;
+                            fill: PanelLook.logo-colours == "omnipulse" ? @linear-gradient(45deg, #00e5ff 0%, #ff2bd0 100%) : PanelLook.logo-colours == "plain" ? pi.ink : @linear-gradient(45deg, PanelLook.c1 0%, PanelLook.c2 100%);
+                        }
+                    }
+                    if PanelLook.icons && p.title != "Powered by OmniPulse": VerticalLayout {
                         alignment: center;
                         Rectangle {
                             width: min(46px, root.ph - 34px);
                             height: self.width;
                             border-radius: pi.th == "pixel" ? 0px : pi.th == "pastel" ? self.width / 2 : 10px;
                             background: PanelLook.c1.mix(PanelLook.c2, 0.4);
-                            Glyph { d: p.icon; width: parent.width * 0.6; height: self.width; fill: #ffffff; }
+                            if !p.has-img: Glyph { d: p.icon; width: parent.width * 0.6; height: self.width; fill: #ffffff; }
+                            if p.has-img: Image { width: parent.width; height: parent.height; source: p.img; image-fit: cover; }
                         }
                     }
                     VerticalLayout {
@@ -2848,12 +2875,19 @@ component PanelPreview inherits Rectangle {
                     alignment: start;
                     HorizontalLayout {
                         spacing: 14px;
-                        if PanelLook.icons: Rectangle {
+                        if p.title == "Powered by OmniPulse": Glyph {
+                            d: p.icon;
+                            width: 40px;
+                            height: 40px;
+                            fill: PanelLook.logo-colours == "omnipulse" ? @linear-gradient(45deg, #00e5ff 0%, #ff2bd0 100%) : PanelLook.logo-colours == "plain" ? pi.ink : @linear-gradient(45deg, PanelLook.c1 0%, PanelLook.c2 100%);
+                        }
+                        if PanelLook.icons && p.title != "Powered by OmniPulse": Rectangle {
                             width: 36px;
                             height: 36px;
                             border-radius: pi.th == "pixel" ? 0px : pi.th == "pastel" ? 18px : 9px;
                             background: PanelLook.c1.mix(PanelLook.c2, 0.4);
-                            Glyph { d: p.icon; width: 22px; height: 22px; fill: #ffffff; }
+                            if !p.has-img: Glyph { d: p.icon; width: 22px; height: 22px; fill: #ffffff; }
+                            if p.has-img: Image { width: parent.width; height: parent.height; source: p.img; image-fit: cover; }
                         }
                         Text { text: pi.th == "pixel" ? p.title.to-uppercase() : p.title; color: pi.ink; font-size: min(24px, (PanelLook.icons ? 226px : 276px) / max(1, p.title.character-count) * 1.75); font-weight: 800; vertical-alignment: center; font-family: pi.th == "pixel" ? "Consolas" : ""; }
                     }
@@ -3635,16 +3669,17 @@ component BotFieldRow inherits VerticalLayout {
         Text { text: root.f.label; color: Theme.text; font-weight: 700; font-size: 13px; }
         if root.f.note != "": Text { text: root.f.note; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
         Rectangle {
+            clip: true;
             height: 36px;
             border-radius: 9px;
             background: Theme.bg;
             border-width: 1px;
             border-color: inp.has-focus ? Theme.accent : Theme.line;
             if root.f.changed || inp.touched: Pulse { r: 9px; }
-            inp := TextInput {
+            inp := TextInput { property <length> sx; cursor-position-changed(p) => { if (p.x + self.sx < 0px) { self.sx = -p.x; } else if (p.x + self.sx > parent.width - 24px - 2px) { self.sx = parent.width - 24px - 2px - p.x; } } 
                 in-out property <bool> touched;
-                x: 12px;
-                width: parent.width - 24px;
+                x: 12px + min(0px, max(parent.width - 24px - self.width, self.sx));
+                width: max(parent.width - 24px, self.preferred-width + 4px);
                 height: parent.height;
                 vertical-alignment: center;
                 color: Theme.text;
@@ -3658,7 +3693,7 @@ component BotFieldRow inherits VerticalLayout {
         }
     }
     // (a list, a row each: typed into, taken out, one more added; kept as "a | b | c")
-    if root.f.kind == "list": VerticalLayout {
+    if root.f.kind == "list" || root.f.kind == "piclist": VerticalLayout {
         spacing: 6px;
         Text { text: root.f.label; color: Theme.text; font-weight: 700; font-size: 13px; }
         if root.f.note != "": Text { text: root.f.note; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
@@ -3666,15 +3701,16 @@ component BotFieldRow inherits VerticalLayout {
             spacing: 8px;
             Text { width: 22px; text: (i + 1) + "."; color: Theme.muted; font-size: 12px; vertical-alignment: center; horizontal-alignment: right; }
             Rectangle {
+                clip: true;
                 horizontal-stretch: 1;
                 height: 34px;
                 border-radius: 9px;
                 background: Theme.bg;
                 border-width: 1px;
                 border-color: li.has-focus ? Theme.accent : Theme.line;
-                li := TextInput {
-                    x: 12px;
-                    width: parent.width - 24px;
+                li := TextInput { property <length> sx; cursor-position-changed(p) => { if (p.x + self.sx < 0px) { self.sx = -p.x; } else if (p.x + self.sx > parent.width - 24px - 2px) { self.sx = parent.width - 24px - 2px - p.x; } } 
+                    x: 12px + min(0px, max(parent.width - 24px - self.width, self.sx));
+                    width: max(parent.width - 24px, self.preferred-width + 4px);
                     height: parent.height;
                     vertical-alignment: center;
                     color: Theme.text;
@@ -3684,6 +3720,8 @@ component BotFieldRow inherits VerticalLayout {
                     edited => { root.act("list:" + root.f.key + ":set:" + i + ":" + self.text); }
                 }
             }
+            // (a list of pictures: one of yours chosen for the row, copied into OmniPulse)
+            if root.f.kind == "piclist": VerticalLayout { alignment: center; Pill { label: "Choose..."; clicked => { root.act("list:" + root.f.key + ":pick:" + i); } } }
             VerticalLayout { alignment: center; IconButton { d: Icons.close; size: 30px; tip: "Take it out"; clicked => { root.act("list:" + root.f.key + ":del:" + i); } } }
         }
         HorizontalLayout {
@@ -4068,13 +4106,14 @@ component BotPage inherits Rectangle {
                             HorizontalLayout {
                                 spacing: 6px;
                                 Rectangle {
+                                    clip: true;
                                     horizontal-stretch: 1;
                                     height: 32px;
                                     border-radius: 16px;
                                     background: Theme.bg;
                                     border-width: 1px;
                                     border-color: tin.has-focus ? Theme.accent : Theme.line;
-                                    tin := TextInput { x: 12px; width: parent.width - 24px; height: parent.height; vertical-alignment: center; color: Theme.text; font-size: 12px; single-line: true; accepted => { if (self.text != "") { root.try-it(self.text); self.text = ""; } } }
+                                    tin := TextInput { property <length> sx; cursor-position-changed(p) => { if (p.x + self.sx < 0px) { self.sx = -p.x; } else if (p.x + self.sx > parent.width - 24px - 2px) { self.sx = parent.width - 24px - 2px - p.x; } }  x: 12px + min(0px, max(parent.width - 24px - self.width, self.sx)); width: max(parent.width - 24px, self.preferred-width + 4px); height: parent.height; vertical-alignment: center; color: Theme.text; font-size: 12px; single-line: true; accepted => { if (self.text != "") { root.try-it(self.text); self.text = ""; } } }
                                     if tin.text == "": Text { x: 12px; text: "Type a command"; color: Theme.muted.with-alpha(0.6); font-size: 12px; vertical-alignment: center; }
                                 }
                                 IconButton { d: Icons.send; size: 32px; tint: Theme.accent; tip: "Test it (only you see it)"; clicked => { if (tin.text != "") { root.try-it(tin.text); tin.text = ""; } } }
@@ -4434,7 +4473,60 @@ component BotPage inherits Rectangle {
 
     // ----- a service's (or a feature's, or a widget's) settings: a page of their own, as every page in Settings
     // is, its name in the page's title and crumbs (Back goes to where it was opened from) -----
-    if root.sheet != "": Rectangle {
+    // (Panels: split down the middle, its settings on the left, the preview and Save on the right, staying put)
+    if root.sheet == "panels": Rectangle {
+        background: root.page-bg;
+        HorizontalLayout {
+            spacing: 18px;
+            padding-bottom: root.foot;
+            // (the settings: the width that's left, whatever their words' length)
+            ScrollView {
+                horizontal-stretch: 1;
+                preferred-width: 0px;
+                min-width: 0px;
+                horizontal-scrollbar-policy: always-off;
+                // (as wide inside as it shows: the notes wrap, the boxes fit)
+                viewport-width: self.visible-width;
+                VerticalLayout {
+                    width: parent.width;
+                    padding-right: 12px;
+                    padding-bottom: 12px;
+                    spacing: 12px;
+                    alignment: start;
+                    for f in root.sheet-fields: VerticalLayout {
+                        // (a heading, a note and a preview as they are; everything else in a card of its own)
+                        if f.kind == "head" || f.kind == "note" || f.kind == "suiteprev": BotFieldRow { f: f; set(k, v) => { root.set(k, v); } act(a) => { root.act(a); } }
+                        if f.kind != "head" && f.kind != "note" && f.kind != "suiteprev": Rectangle {
+                            background: Theme.panel;
+                            border-radius: 12px;
+                            border-width: 1px;
+                            border-color: Theme.line;
+                            height: sfp.preferred-height;
+                            sfp := VerticalLayout { padding: 14px; BotFieldRow { f: f; set(k, v) => { root.set(k, v); } act(a) => { root.act(a); } } }
+                        }
+                    }
+                }
+            }
+            // (the preview: its own column, as tall as the page, scrolled on its own if the panels are taller)
+            VerticalLayout {
+                width: 372px;
+                spacing: 10px;
+                HorizontalLayout {
+                    spacing: 10px;
+                    alignment: start;
+                    Pill { label: "Save Them as Pictures"; on: true; clicked => { root.act("url:http://127.0.0.1:" + root.port + "/panels"); } }
+                    VerticalLayout { alignment: center; Text { text: "Opens in your browser, each with Save as PNG."; color: Theme.muted; font-size: 11px; wrap: word-wrap; } }
+                }
+                ScrollView {
+                    vertical-stretch: 1;
+                    horizontal-scrollbar-policy: always-off;
+                    viewport-width: self.visible-width;
+                    PanelPreview { width: 360px; }
+                }
+            }
+        }
+    }
+    if root.sheet != "" && root.sheet != "panels": Rectangle {
         background: root.page-bg;
         ScrollView {
             horizontal-scrollbar-policy: always-off;
@@ -5173,6 +5265,7 @@ export component AppWindow inherits Window {
     in property <bool> accent2-mine-on;
     callback accent-custom(int);
     in property <bool> beta-updates;
+    in property <bool> beta-offered: false;
     callback beta-updates-set(bool);
     callback mix-rate(bool);
     // a right-click on the title bar's Seamless Mix button, or a platform's: its settings ("smart", or the platform)
@@ -5211,12 +5304,15 @@ export component AppWindow inherits Window {
                 border-radius: self.r;
                 clip: true;
                 HorizontalLayout {
-                    padding-left: 14px;
+                    // (clear of its rounded ends: the corner caps (drawn over it, r square) would paint over the
+                    // name's first letter on the Floating bar)
+                    padding-left: max(14px, parent.r + 4px);
                     spacing: 10px;
                     // (right-click: rename it; signed out of SoundCloud: an invitation to sign in, as the web app's)
                     // (renamed where it is, as the web app's: right-click, type, Enter keeps it, Escape doesn't,
                     // a click elsewhere keeps it too)
                     if root.title-editing: Rectangle {
+                        clip: true;
                         width: max(120px, tin.preferred-width + 16px);
                         height: 24px;
                         y: 5px;
@@ -5224,9 +5320,9 @@ export component AppWindow inherits Window {
                         background: Theme.panel;
                         border-width: 1px;
                         border-color: Theme.accent;
-                        tin := TextInput {
-                            x: 8px;
-                            width: parent.width - 16px;
+                        tin := TextInput { property <length> sx; cursor-position-changed(p) => { if (p.x + self.sx < 0px) { self.sx = -p.x; } else if (p.x + self.sx > parent.width - 16px - 2px) { self.sx = parent.width - 16px - 2px - p.x; } } 
+                            x: 8px + min(0px, max(parent.width - 16px - self.width, self.sx));
+                            width: max(parent.width - 16px, self.preferred-width + 4px);
                             height: parent.height;
                             vertical-alignment: center;
                             single-line: true;
@@ -5689,6 +5785,7 @@ export component AppWindow inherits Window {
                         Rectangle { horizontal-stretch: 1; }
                         // the search bar: a pill in the middle
                         Rectangle {
+                            clip: true;
                             preferred-width: 440px;
                             min-width: 180px;
                             horizontal-stretch: 0;
@@ -5705,9 +5802,9 @@ export component AppWindow inherits Window {
                                 font-size: 14px;
                                 vertical-alignment: center;
                             }
-                            ti := TextInput {
-                                x: 48px;
-                                width: parent.width - 64px;
+                            ti := TextInput { property <length> sx; cursor-position-changed(p) => { if (p.x + self.sx < 0px) { self.sx = -p.x; } else if (p.x + self.sx > parent.width - 64px - 2px) { self.sx = parent.width - 64px - 2px - p.x; } } 
+                                x: 48px + min(0px, max(parent.width - 64px - self.width, self.sx));
+                                width: max(parent.width - 64px, self.preferred-width + 4px);
                                 height: parent.height;
                                 vertical-alignment: center;
                                 color: Theme.text;
@@ -6052,6 +6149,7 @@ export component AppWindow inherits Window {
                             alignment: start;
                             // (its own big search box, as the web app's: the same search as the bar's)
                             Rectangle {
+                                clip: true;
                                 height: 56px;
                                 border-radius: 28px;
                                 background: Theme.bg.mix(Theme.panel, 0.55);
@@ -6059,9 +6157,9 @@ export component AppWindow inherits Window {
                                 border-color: bq.has-focus ? Theme.accent.with-alpha(0.7) : Theme.line;
                                 Glyph { d: Icons.search; x: 20px; width: 24px; height: 24px; fill: Theme.muted; }
                                 if root.search-text == "": Text { x: 58px; text: "Artists, tracks, remixes..."; color: Theme.muted; font-size: 18px; vertical-alignment: center; }
-                                bq := TextInput {
-                                    x: 58px;
-                                    width: parent.width - 78px;
+                                bq := TextInput { property <length> sx; cursor-position-changed(p) => { if (p.x + self.sx < 0px) { self.sx = -p.x; } else if (p.x + self.sx > parent.width - 78px - 2px) { self.sx = parent.width - 78px - 2px - p.x; } } 
+                                    x: 58px + min(0px, max(parent.width - 78px - self.width, self.sx));
+                                    width: max(parent.width - 78px, self.preferred-width + 4px);
                                     height: parent.height;
                                     vertical-alignment: center;
                                     color: Theme.text;
@@ -6440,7 +6538,8 @@ export component AppWindow inherits Window {
                                         VerticalLayout { alignment: center; Pill { label: root.update-label; on: root.update-label == "Update"; clicked => { root.update-act(); } } }
                                     }
                                 }
-                                Card {
+                                // (Beta Updates: built, but not offered for now; the app sets beta-offered when it is)
+                                if root.beta-offered: Card {
                                     HorizontalLayout {
                                         padding: 16px;
                                         padding-top: 12px;
@@ -6456,6 +6555,24 @@ export component AppWindow inherits Window {
                                         CenterToggle { checked: root.beta-updates; toggled => { root.beta-updates-set(self.checked); } }
                                     }
                                 }
+                                // (something wrong, or an idea: to the developer)
+                                Card {
+                                    HorizontalLayout {
+                                        padding: 16px;
+                                        padding-top: 12px;
+                                        padding-bottom: 12px;
+                                        spacing: 10px;
+                                        VerticalLayout {
+                                            horizontal-stretch: 1;
+                                            alignment: center;
+                                            spacing: 2px;
+                                            HiTitle { text: "Bugs and Ideas"; }
+                                            Text { text: "Found something wrong, or have an idea? Tell the developer here. For anything you'd need to show a picture of, message @shwylie on Discord."; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
+                                        }
+                                        VerticalLayout { alignment: center; Pill { label: "Report a Bug"; clicked => { root.account-settings("report:bug"); } } }
+                                        VerticalLayout { alignment: center; Pill { label: "Suggest a Feature"; clicked => { root.account-settings("report:feature"); } } }
+                                    }
+                                }
                                 for c in [
                                     { name: "App & Look", note: "Theme, colours, player style, name, tray, taskbar widget, animations, backups", d: Icons.gear },
                                     { name: "Integrations", note: "Accounts, platforms, catalogues, following, Listen Along & Jams, Last.fm", d: Icons.person },
@@ -6464,6 +6581,27 @@ export component AppWindow inherits Window {
                                     { name: "Sound", note: "Loudness, fades, silences, equalizer, seamless mixing", d: Icons.volume },
                                     { name: "Streaming", note: "Streamer Mode, the widget and alerts, song requests, Stream Deck, OmniPulse Offset", d: Icons.broadcast },
                                 ]: CatCard { name: c.name; note: c.note; d: c.d; clicked => { root.set-cat = c.name; } }
+                                // (last of all: a way to support the work)
+                                Card {
+                                    HorizontalLayout {
+                                        padding: 16px;
+                                        padding-top: 12px;
+                                        padding-bottom: 12px;
+                                        spacing: 12px;
+                                        VerticalLayout {
+                                            alignment: center;
+                                            Glyph { d: Icons.heart-out; width: 22px; height: 22px; fill: Theme.accent; }
+                                        }
+                                        VerticalLayout {
+                                            horizontal-stretch: 1;
+                                            alignment: center;
+                                            spacing: 2px;
+                                            HiTitle { text: "Support OmniPulse"; }
+                                            Text { text: "OmniPulse is made by one person, @shwylie. If it's made your streams or your listening better, you can say thanks with a coffee on Ko-fi."; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
+                                        }
+                                        VerticalLayout { alignment: center; Pill { label: "Contribute on Ko-fi"; on: true; clicked => { root.open-web("https://ko-fi.com/shwylie"); } } }
+                                    }
+                                }
                             }
                             if root.set-cat == "App & Look" && root.set-query == "": VerticalLayout {
                                 spacing: 10px;
@@ -6747,6 +6885,7 @@ export component AppWindow inherits Window {
                                                 Text { text: "Shown in the title bar and taskbar."; color: Theme.muted; font-size: 12px; }
                                             }
                                         Rectangle {
+                                            clip: true;
                                             width: 220px;
                                             height: 34px;
                                             y: (parent.height - self.height) / 2;
@@ -6755,7 +6894,7 @@ export component AppWindow inherits Window {
                                             border-width: 1px;
                                             border-color: Theme.line;
                                             if root.app-name == "": Text { x: 10px; text: "OmniPulse"; color: Theme.muted; font-size: 14px; vertical-alignment: center; height: parent.height; }
-                                            TextInput { x: 10px; width: parent.width - 20px; height: parent.height; vertical-alignment: center; color: Theme.text; font-size: 14px; single-line: true; text <=> root.app-name; edited => { root.app-name-changed(self.text); } accepted => { keys.focus(); } key-pressed(e) => { if (e.text == Key.Escape) { keys.focus(); return accept; } return reject; } }
+                                            TextInput { property <length> sx; cursor-position-changed(p) => { if (p.x + self.sx < 0px) { self.sx = -p.x; } else if (p.x + self.sx > parent.width - 20px - 2px) { self.sx = parent.width - 20px - 2px - p.x; } }  x: 10px + min(0px, max(parent.width - 20px - self.width, self.sx)); width: max(parent.width - 20px, self.preferred-width + 4px); height: parent.height; vertical-alignment: center; color: Theme.text; font-size: 14px; single-line: true; text <=> root.app-name; edited => { root.app-name-changed(self.text); } accepted => { keys.focus(); } key-pressed(e) => { if (e.text == Key.Escape) { keys.focus(); return accept; } return reject; } }
                                         }
                                         }
                                         GroupLine { }
@@ -7572,13 +7711,14 @@ export component AppWindow inherits Window {
                                 Range { horizontal-stretch: 1; minimum: f.options[0].to-float(); maximum: f.options[1].to-float(); value: f.value.to-float(); changed(v) => { rrow.live = v; root.pf-set(i, "\u{4}" + v); } }
                                 if f.kind == "range": Text { text: f.options[3] == "%" ? round(rrow.live * 100) + "%" : round(rrow.live) + f.options[3]; min-width: 44px; color: Theme.text; font-size: 13px; horizontal-alignment: right; vertical-alignment: center; }
                                 if f.kind == "rangenum": Rectangle {
+                                    clip: true;
                                     width: 64px;
                                     height: 30px;
                                     border-radius: 8px;
                                     background: Theme.panel;
                                     border-width: 1px;
                                     border-color: Theme.line;
-                                    TextInput { x: 8px; width: parent.width - 16px; height: parent.height; vertical-alignment: center; color: Theme.text; font-size: 13px; single-line: true; input-type: InputType.decimal; text: round(rrow.live); accepted => { root.pf-set(i, "\u{5}" + self.text); keys.focus(); } }
+                                    TextInput { property <length> sx; cursor-position-changed(p) => { if (p.x + self.sx < 0px) { self.sx = -p.x; } else if (p.x + self.sx > parent.width - 16px - 2px) { self.sx = parent.width - 16px - 2px - p.x; } }  x: 8px + min(0px, max(parent.width - 16px - self.width, self.sx)); width: max(parent.width - 16px, self.preferred-width + 4px); height: parent.height; vertical-alignment: center; color: Theme.text; font-size: 13px; single-line: true; input-type: InputType.decimal; text: round(rrow.live); accepted => { root.pf-set(i, "\u{5}" + self.text); keys.focus(); } }
                                 }
                             }
                             // a colour: its swatch, its code, and Windows' colour picker (as the web app's)
@@ -7588,13 +7728,14 @@ export component AppWindow inherits Window {
                                 Rectangle { width: 30px; height: 30px; border-radius: 6px; border-width: 1px; border-color: Theme.line; background: transparent;
                                     Rectangle { x: 3px; y: 3px; width: parent.width - 6px; height: parent.height - 6px; border-radius: 4px; background: f.at >= 0 ? Colors.rgb(floor(f.at / 65536), mod(floor(f.at / 256), 256), mod(f.at, 256)) : transparent; } }
                                 Rectangle {
+                                    clip: true;
                                     width: 96px;
                                     height: 30px;
                                     border-radius: 8px;
                                     background: Theme.panel;
                                     border-width: 1px;
                                     border-color: Theme.line;
-                                    TextInput { x: 8px; width: parent.width - 16px; height: parent.height; vertical-alignment: center; color: Theme.text; font-size: 13px; single-line: true; text: f.value; accepted => { root.pf-set(i, self.text); keys.focus(); } }
+                                    TextInput { property <length> sx; cursor-position-changed(p) => { if (p.x + self.sx < 0px) { self.sx = -p.x; } else if (p.x + self.sx > parent.width - 16px - 2px) { self.sx = parent.width - 16px - 2px - p.x; } }  x: 8px + min(0px, max(parent.width - 16px - self.width, self.sx)); width: max(parent.width - 16px, self.preferred-width + 4px); height: parent.height; vertical-alignment: center; color: Theme.text; font-size: 13px; single-line: true; text: f.value; accepted => { root.pf-set(i, self.text); keys.focus(); } }
                                 }
                                 Pill { label: "Choose..."; clicked => { root.pf-set(i, "\u{3}pick"); } }
                             }
@@ -7602,6 +7743,7 @@ export component AppWindow inherits Window {
                             if f.kind == "togglecfg" && f.value == "true": VerticalLayout { alignment: center; Pill { label: f.options.length > 0 ? f.options[0] : "Configure"; clicked => { root.pf-set(i, "btn:0"); } } }
                             if f.kind == "togglecfg": CenterToggle { checked: f.value == "true"; toggled => { root.pf-set(i, self.checked ? "true" : "false"); } }
                             if f.kind == "text" || f.kind == "password" || f.kind == "number": Rectangle {
+                                clip: true;
                                 width: 180px;
                                 height: 34px;
                                 y: (parent.height - self.height) / 2;
@@ -7609,7 +7751,17 @@ export component AppWindow inherits Window {
                                 background: Theme.panel;
                                 border-width: 1px;
                                 border-color: Theme.line;
-                                TextInput { x: 10px; width: parent.width - 20px; height: parent.height; vertical-alignment: center; color: Theme.text; font-size: 14px; single-line: true; input-type: f.kind == "password" ? InputType.password : f.kind == "number" ? InputType.decimal : InputType.text; text: f.value; edited => { root.pf-set(i, self.text); } }
+                                TextInput { property <length> sx; cursor-position-changed(p) => { if (p.x + self.sx < 0px) { self.sx = -p.x; } else if (p.x + self.sx > parent.width - 20px - 2px) { self.sx = parent.width - 20px - 2px - p.x; } }  x: 10px + min(0px, max(parent.width - 20px - self.width, self.sx)); width: max(parent.width - 20px, self.preferred-width + 4px); height: parent.height; vertical-alignment: center; color: Theme.text; font-size: 14px; single-line: true; input-type: f.kind == "password" ? InputType.password : f.kind == "number" ? InputType.decimal : InputType.text; text: f.value; edited => { root.pf-set(i, self.text); } }
+                            }
+                            // a box for a few lines (a report's words)
+                            if f.kind == "area": Rectangle {
+                                width: 380px;
+                                height: 132px;
+                                border-radius: 8px;
+                                background: Theme.panel;
+                                border-width: 1px;
+                                border-color: ar.has-focus ? Theme.accent : Theme.line;
+                                ar := TextInput { x: 10px; y: 8px; width: parent.width - 20px; height: parent.height - 16px; color: Theme.text; font-size: 13px; single-line: false; wrap: word-wrap; text: f.value; edited => { root.pf-set(i, self.text); } }
                             }
                             // a button: done at once
                             if f.kind == "button": VerticalLayout { alignment: center; Pill { label: f.value; clicked => { root.pf-set(i, "press"); } } }
@@ -7721,6 +7873,7 @@ export component AppWindow inherits Window {
                                 }
                                 // (finding one: by its name, its group or what starts it)
                                 Rectangle {
+                                    clip: true;
                                     height: 34px;
                                     border-radius: 8px;
                                     background: Theme.panel;
@@ -7728,7 +7881,7 @@ export component AppWindow inherits Window {
                                     border-color: ffti.has-focus ? Theme.accent : Theme.line;
                                     Glyph { d: Icons.search; x: 10px; width: 14px; height: 14px; y: (parent.height - self.height) / 2; fill: Theme.muted; }
                                     if ffti.text == "": Text { x: 32px; height: parent.height; vertical-alignment: center; text: "Find an action"; color: Theme.muted; font-size: 12px; }
-                                    ffti := TextInput { x: 32px; width: parent.width - 42px; height: parent.height; vertical-alignment: center; color: Theme.text; font-size: 12px; single-line: true; edited => { root.flow-find(self.text); } }
+                                    ffti := TextInput { property <length> sx; cursor-position-changed(p) => { if (p.x + self.sx < 0px) { self.sx = -p.x; } else if (p.x + self.sx > parent.width - 42px - 2px) { self.sx = parent.width - 42px - 2px - p.x; } }  x: 32px + min(0px, max(parent.width - 42px - self.width, self.sx)); width: max(parent.width - 42px, self.preferred-width + 4px); height: parent.height; vertical-alignment: center; color: Theme.text; font-size: 12px; single-line: true; edited => { root.flow-find(self.text); } }
                                 }
                                 // (the list's keys, once one's clicked: Delete, Ctrl+Z / Ctrl+Y, Ctrl+C / X / V, Ctrl+D, Up and Down)
                                 flkeys := FocusScope {
@@ -7805,15 +7958,17 @@ export component AppWindow inherits Window {
                                         spacing: 10px;
                                         padding-bottom: 14px;
                                         Rectangle {
+                                            clip: true;
                                             horizontal-stretch: 1;
                                             height: 38px;
                                             border-radius: 8px;
                                             background: Theme.panel;
                                             border-width: 1px;
                                             border-color: fnti.has-focus ? Theme.accent : Theme.line;
-                                            fnti := TextInput { x: 12px; width: parent.width - 24px; height: parent.height; vertical-alignment: center; color: Theme.text; font-size: 16px; font-weight: 700; single-line: true; text: root.flow-name; edited => { root.flow-name-edited(self.text); } }
+                                            fnti := TextInput { property <length> sx; cursor-position-changed(p) => { if (p.x + self.sx < 0px) { self.sx = -p.x; } else if (p.x + self.sx > parent.width - 24px - 2px) { self.sx = parent.width - 24px - 2px - p.x; } }  x: 12px + min(0px, max(parent.width - 24px - self.width, self.sx)); width: max(parent.width - 24px, self.preferred-width + 4px); height: parent.height; vertical-alignment: center; color: Theme.text; font-size: 16px; font-weight: 700; single-line: true; text: root.flow-name; edited => { root.flow-name-edited(self.text); } }
                                         }
                                         Rectangle {
+                                            clip: true;
                                             width: 150px;
                                             height: 38px;
                                             border-radius: 8px;
@@ -7821,7 +7976,7 @@ export component AppWindow inherits Window {
                                             border-width: 1px;
                                             border-color: fgti.has-focus ? Theme.accent : Theme.line;
                                             if fgti.text == "": Text { x: 12px; height: parent.height; vertical-alignment: center; text: "Group"; color: Theme.muted; font-size: 13px; }
-                                            fgti := TextInput { x: 12px; width: parent.width - 24px; height: parent.height; vertical-alignment: center; color: Theme.text; font-size: 13px; single-line: true; text: root.flow-group; edited => { root.flow-group-edited(self.text); } }
+                                            fgti := TextInput { property <length> sx; cursor-position-changed(p) => { if (p.x + self.sx < 0px) { self.sx = -p.x; } else if (p.x + self.sx > parent.width - 24px - 2px) { self.sx = parent.width - 24px - 2px - p.x; } }  x: 12px + min(0px, max(parent.width - 24px - self.width, self.sx)); width: max(parent.width - 24px, self.preferred-width + 4px); height: parent.height; vertical-alignment: center; color: Theme.text; font-size: 13px; single-line: true; text: root.flow-group; edited => { root.flow-group-edited(self.text); } }
                                         }
                                         CenterToggle { checked: root.flow-on; toggled => { root.flow-on-toggled(self.checked); } }
                                         VerticalLayout { alignment: center; Pill { label: "One at a Time"; on: root.flow-queued; tip: "Runs one at a time. Each run waits until the one before it is done, like Streamer.bot's queues, so alerts never overlap."; clicked => { root.flow-act("queued"); } } }
@@ -7923,12 +8078,13 @@ export component AppWindow inherits Window {
                                     Text { text: q.l; color: Theme.text; font-size: 13px; font-weight: 700; }
                                     Text { text: q.n; color: Theme.muted; font-size: 11px; }
                                     Rectangle {
+                                        clip: true;
                                         height: 34px;
                                         border-radius: 8px;
                                         background: Theme.bg;
                                         border-width: 1px;
                                         border-color: rwti.has-focus ? Theme.accent : Theme.line;
-                                        rwti := TextInput { x: 10px; width: parent.width - 20px; height: parent.height; vertical-alignment: center; color: Theme.text; font-size: 13px; single-line: true; text: q.v; input-type: q.k == "cost" ? InputType.number : InputType.text;
+                                        rwti := TextInput { property <length> sx; cursor-position-changed(p) => { if (p.x + self.sx < 0px) { self.sx = -p.x; } else if (p.x + self.sx > parent.width - 20px - 2px) { self.sx = parent.width - 20px - 2px - p.x; } }  x: 10px + min(0px, max(parent.width - 20px - self.width, self.sx)); width: max(parent.width - 20px, self.preferred-width + 4px); height: parent.height; vertical-alignment: center; color: Theme.text; font-size: 13px; single-line: true; text: q.v; input-type: q.k == "cost" ? InputType.number : InputType.text;
                                             edited => { if (q.k == "title") { rwf.title = self.text; } else if (q.k == "cost") { rwf.cost = self.text; } else { rwf.prompt = self.text; } } }
                                     }
                                 }
@@ -7959,6 +8115,7 @@ export component AppWindow inherits Window {
                                     spacing: 10px;
                                     VerticalLayout { horizontal-stretch: 1; alignment: center; Text { text: q.l; color: Theme.text; font-size: 13px; } Text { text: q.n; color: Theme.muted; font-size: 11px; } }
                                     Rectangle {
+                                        clip: true;
                                         width: 90px;
                                         height: 32px;
                                         y: (parent.height - self.height) / 2;
@@ -7966,7 +8123,7 @@ export component AppWindow inherits Window {
                                         background: Theme.bg;
                                         border-width: 1px;
                                         border-color: rwni.has-focus ? Theme.accent : Theme.line;
-                                        rwni := TextInput { x: 10px; width: parent.width - 20px; height: parent.height; vertical-alignment: center; color: Theme.text; font-size: 13px; single-line: true; text: "0"; input-type: InputType.number;
+                                        rwni := TextInput { property <length> sx; cursor-position-changed(p) => { if (p.x + self.sx < 0px) { self.sx = -p.x; } else if (p.x + self.sx > parent.width - 20px - 2px) { self.sx = parent.width - 20px - 2px - p.x; } }  x: 10px + min(0px, max(parent.width - 20px - self.width, self.sx)); width: max(parent.width - 20px, self.preferred-width + 4px); height: parent.height; vertical-alignment: center; color: Theme.text; font-size: 13px; single-line: true; text: "0"; input-type: InputType.number;
                                             edited => { if (q.k == "cooldown") { rwf.cooldown = self.text; } else if (q.k == "per-stream") { rwf.per-stream = self.text; } else { rwf.per-user = self.text; } } }
                                     }
                                 }
@@ -8548,9 +8705,10 @@ export component AppWindow inherits Window {
                             Text { text: "Your name"; color: Theme.text; font-weight: 700; }
                             Text { text: "Shown in the title bar, and to friends when you listen together."; color: Theme.muted; font-size: 12px; }
                             Rectangle {
+                                clip: true;
                                 height: 40px; width: 340px; border-radius: 10px;
                                 background: Theme.panel; border-width: 1px; border-color: Theme.line;
-                                TextInput { x: 12px; width: parent.width - 24px; height: parent.height; vertical-alignment: center; text: root.app-name; color: Theme.text; font-size: 14px; single-line: true; edited => { root.app-name-changed(self.text); } }
+                                TextInput { property <length> sx; cursor-position-changed(p) => { if (p.x + self.sx < 0px) { self.sx = -p.x; } else if (p.x + self.sx > parent.width - 24px - 2px) { self.sx = parent.width - 24px - 2px - p.x; } }  x: 12px + min(0px, max(parent.width - 24px - self.width, self.sx)); width: max(parent.width - 24px, self.preferred-width + 4px); height: parent.height; vertical-alignment: center; text: root.app-name; color: Theme.text; font-size: 14px; single-line: true; edited => { root.app-name-changed(self.text); } }
                             }
                             Text { text: "A theme"; color: Theme.text; font-weight: 700; }
                             for r in root.theme-rows: HorizontalLayout {
@@ -8777,12 +8935,13 @@ export component AppWindow inherits Window {
                     spacing: 4px;
                     Text { text: f.label + (f.value == "" ? "" : f.ok ? "  \u{2713}" : "  (doesn't look right yet)"); color: f.ok ? Theme.accent : Theme.muted; font-size: 12px; }
                     Rectangle {
+                        clip: true;
                         height: 34px;
                         border-radius: 8px;
                         background: Theme.panel;
                         border-width: 1px;
                         border-color: f.ok ? Theme.accent : Theme.line;
-                        TextInput { x: 10px; width: parent.width - 20px; height: parent.height; vertical-alignment: center; color: Theme.text; font-size: 13px; single-line: true; text: f.value; edited => { root.ks-set(i, self.text); } }
+                        TextInput { property <length> sx; cursor-position-changed(p) => { if (p.x + self.sx < 0px) { self.sx = -p.x; } else if (p.x + self.sx > parent.width - 20px - 2px) { self.sx = parent.width - 20px - 2px - p.x; } }  x: 10px + min(0px, max(parent.width - 20px - self.width, self.sx)); width: max(parent.width - 20px, self.preferred-width + 4px); height: parent.height; vertical-alignment: center; color: Theme.text; font-size: 13px; single-line: true; text: f.value; edited => { root.ks-set(i, self.text); } }
                     }
                 }
                 Text { text: root.ks-note; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
@@ -8823,34 +8982,37 @@ export component AppWindow inherits Window {
                     spacing: 4px;
                     Text { text: f.label; color: Theme.muted; font-size: 12px; }
                     Rectangle {
+                        clip: true;
                         height: 34px;
                         border-radius: 8px;
                         background: Theme.panel;
                         border-width: 1px;
                         border-color: Theme.line;
-                        if f.which == 0: TextInput { x: 10px; width: parent.width - 20px; height: parent.height; vertical-alignment: center; color: Theme.text; font-size: 14px; single-line: true; text <=> root.tp-title; }
-                        if f.which == 1: TextInput { x: 10px; width: parent.width - 20px; height: parent.height; vertical-alignment: center; color: Theme.text; font-size: 14px; single-line: true; text <=> root.tp-artist; }
+                        if f.which == 0: TextInput { property <length> sx; cursor-position-changed(p) => { if (p.x + self.sx < 0px) { self.sx = -p.x; } else if (p.x + self.sx > parent.width - 20px - 2px) { self.sx = parent.width - 20px - 2px - p.x; } }  x: 10px + min(0px, max(parent.width - 20px - self.width, self.sx)); width: max(parent.width - 20px, self.preferred-width + 4px); height: parent.height; vertical-alignment: center; color: Theme.text; font-size: 14px; single-line: true; text <=> root.tp-title; }
+                        if f.which == 1: TextInput { property <length> sx; cursor-position-changed(p) => { if (p.x + self.sx < 0px) { self.sx = -p.x; } else if (p.x + self.sx > parent.width - 20px - 2px) { self.sx = parent.width - 20px - 2px - p.x; } }  x: 10px + min(0px, max(parent.width - 20px - self.width, self.sx)); width: max(parent.width - 20px, self.preferred-width + 4px); height: parent.height; vertical-alignment: center; color: Theme.text; font-size: 14px; single-line: true; text <=> root.tp-artist; }
                     }
                 }
                 Text { text: "Start and end, as m:ss. Leave empty to use the song's own."; color: Theme.muted; font-size: 12px; }
                 HorizontalLayout {
                     spacing: 8px;
                     Rectangle {
+                        clip: true;
                         height: 34px;
                         border-radius: 8px;
                         background: Theme.panel;
                         border-width: 1px;
                         border-color: Theme.line;
-                        TextInput { x: 10px; width: parent.width - 20px; height: parent.height; vertical-alignment: center; color: Theme.text; font-size: 14px; single-line: true; text <=> root.tp-start; edited => { root.tp-drag(-1, -1); } }
+                        TextInput { property <length> sx; cursor-position-changed(p) => { if (p.x + self.sx < 0px) { self.sx = -p.x; } else if (p.x + self.sx > parent.width - 20px - 2px) { self.sx = parent.width - 20px - 2px - p.x; } }  x: 10px + min(0px, max(parent.width - 20px - self.width, self.sx)); width: max(parent.width - 20px, self.preferred-width + 4px); height: parent.height; vertical-alignment: center; color: Theme.text; font-size: 14px; single-line: true; text <=> root.tp-start; edited => { root.tp-drag(-1, -1); } }
                     }
                     Pill { label: "Now"; clicked => { root.tp-now(0); } }
                     Rectangle {
+                        clip: true;
                         height: 34px;
                         border-radius: 8px;
                         background: Theme.panel;
                         border-width: 1px;
                         border-color: Theme.line;
-                        TextInput { x: 10px; width: parent.width - 20px; height: parent.height; vertical-alignment: center; color: Theme.text; font-size: 14px; single-line: true; text <=> root.tp-end; edited => { root.tp-drag(-1, -1); } }
+                        TextInput { property <length> sx; cursor-position-changed(p) => { if (p.x + self.sx < 0px) { self.sx = -p.x; } else if (p.x + self.sx > parent.width - 20px - 2px) { self.sx = parent.width - 20px - 2px - p.x; } }  x: 10px + min(0px, max(parent.width - 20px - self.width, self.sx)); width: max(parent.width - 20px, self.preferred-width + 4px); height: parent.height; vertical-alignment: center; color: Theme.text; font-size: 14px; single-line: true; text <=> root.tp-end; edited => { root.tp-drag(-1, -1); } }
                     }
                     Pill { label: "Now"; clicked => { root.tp-now(1); } }
                 }
@@ -8913,13 +9075,14 @@ export component AppWindow inherits Window {
                     vta := TouchArea { clicked => { root.tp-version(k); } }
                 }
                 if root.tp-versions.length > 0: Rectangle {
+                    clip: true;
                     height: 34px;
                     border-radius: 8px;
                     background: Theme.panel;
                     border-width: 1px;
                     border-color: Theme.line;
                     if tpl.text == "": Text { x: 10px; text: "Or paste a YouTube or YouTube Music link"; color: Theme.muted; font-size: 13px; vertical-alignment: center; height: parent.height; }
-                    tpl := TextInput { x: 10px; width: parent.width - 20px; height: parent.height; vertical-alignment: center; color: Theme.text; font-size: 13px; single-line: true; edited => { if (self.text != "") { root.tp-link(self.text); } } accepted => { root.tp-search(self.text); } }
+                    tpl := TextInput { property <length> sx; cursor-position-changed(p) => { if (p.x + self.sx < 0px) { self.sx = -p.x; } else if (p.x + self.sx > parent.width - 20px - 2px) { self.sx = parent.width - 20px - 2px - p.x; } }  x: 10px + min(0px, max(parent.width - 20px - self.width, self.sx)); width: max(parent.width - 20px, self.preferred-width + 4px); height: parent.height; vertical-alignment: center; color: Theme.text; font-size: 13px; single-line: true; edited => { if (self.text != "") { root.tp-link(self.text); } } accepted => { root.tp-search(self.text); } }
                 }
                 HorizontalLayout {
                     spacing: 8px;
@@ -9010,14 +9173,15 @@ export component AppWindow inherits Window {
                 spacing: 14px;
                 Text { text: root.name-head; color: Theme.text; font-size: 18px; font-weight: 800; }
                 Rectangle {
+                    clip: true;
                     height: 38px;
                     border-radius: 8px;
                     background: Theme.panel;
                     border-width: 1px;
                     border-color: Theme.accent;
-                    TextInput {
-                        x: 12px;
-                        width: parent.width - 24px;
+                    TextInput { property <length> sx; cursor-position-changed(p) => { if (p.x + self.sx < 0px) { self.sx = -p.x; } else if (p.x + self.sx > parent.width - 24px - 2px) { self.sx = parent.width - 24px - 2px - p.x; } } 
+                        x: 12px + min(0px, max(parent.width - 24px - self.width, self.sx));
+                        width: max(parent.width - 24px, self.preferred-width + 4px);
                         height: parent.height;
                         vertical-alignment: center;
                         color: Theme.text;
@@ -9366,6 +9530,16 @@ export component TaskbarWidget inherits Window {
 
 // Apple Music's sign-in (Settings > Integrations > Apple Music > Import): Apple's own page, in a window of
 // its own, only until you're signed in (then your music's read once, and the sign-in forgotten)
+/// A widget's pop-out preview: its page (?preview=1) in a web view of OmniPulse's own, the window named for it
+export component WebPreview inherits Window {
+    in property <string> name: "Preview";
+    title: root.name + " - OmniPulse";
+    icon: @image-url("../../../src-tauri/icons/128x128.png");
+    preferred-width: 720px;
+    preferred-height: 360px;
+    background: #2a2a2e;
+}
+
 export component AppleSignIn inherits Window {
     title: "Sign in to Apple Music, once, to import your music";
     icon: @image-url("../../../src-tauri/icons/128x128.png");
