@@ -233,10 +233,15 @@ async function onChat(m) {
   const badges = m.tags.badges || "";
   const isMod = m.tags.mod === "1" || badges.includes("broadcaster/");
   const id = m.tags.id;
+  // (moderation first: a message Auto-Ban takes down starts nothing; the check is at once, only taking it down
+  // waits, so nothing else is held up for it)
+  const banned = autobanHit(m, text, user, platform);
+  if (banned) { autoban(m, text, user, id, platform, banned); return; }
   seen[(m.nick || user).toLowerCase()] = Date.now();
   present[platform + "|" + (m.nick || user).toLowerCase()] = { at: Date.now(), user, userId: m.tags["user-id"] || "", platform };
   onActions(m, text, cmd, args, user, id);
   gameChat(user, text, platform);
+  funChat(user);
   const firstKey = platform + "|" + (m.nick || user).toLowerCase();
   if (!spoken.has(firstKey)) {
     spoken.add(firstKey);
@@ -249,7 +254,7 @@ async function onChat(m) {
   const k = cmd + "|" + user.toLowerCase();
   if (cooldowns[k] && Date.now() - cooldowns[k] < 3000) return;
   cooldowns[k] = Date.now();
-  if (await suiteCommand(cmd, args, rank(m.tags), id, platform)) return;
+  if (await suiteCommand(cmd, args, rank(m.tags), id, platform, user)) return;
   if (S().requests !== false) {
     const rq = reqCommands();
     if (rq.sr.includes(cmd)) {
@@ -305,6 +310,52 @@ function reqCommands() {
 }
 
 // Who they are in your channel, from their badges
+// ---------- moderation: Auto-Ban ----------
+// A message with one of your terms in it (or one of the common spam ones, if that's on): taken down, and its
+// sender banned, timed out, or only that, as set. Loosely, by default: capitals, spaces, dots and symbols don't
+// count, nor letters swapped for numbers, so "stream . ai" is "streamai" and "fr3e v1ews" is "free views".
+const SPAM_PACK = [
+  "buy followers", "buy viewers", "buy views", "cheap viewers", "cheap followers", "best viewers on", "get viewers", "free viewers", "free followers",
+  "followers primes and viewers", "primes and viewers", "wanna become famous", "boost your stream", "promote your stream", "remove the space",
+  "dogehype", "bigfollows", "streamboo", "viewerlabs", "twitchboost", "streamviewers", "viewbotting",
+];
+const LEET = { "@": "a", "4": "a", "$": "s", "5": "s", "0": "o", "1": "i", "!": "i", "|": "i", "3": "e", "7": "t", "8": "b" };
+function loose(t) {
+  return String(t || "").toLowerCase().normalize("NFKD").replace(/[̀-ͯ]/g, "")
+    .replace(/[@4$50!|1378]/g, (c) => LEET[c] || c).replace(/[^a-z0-9]/g, "");
+}
+function autobanTerms() {
+  const own = String(S().abTerms || "").split(/\r?\n|\|/).map((x) => x.trim()).filter(Boolean);
+  return yes(S().abPack === undefined ? true : S().abPack) ? own.concat(SPAM_PACK) : own;
+}
+let autobanned = 0;
+// (the term a message has, if Auto-Ban's to take it down: "" if not)
+function autobanHit(m, text, user, platform) {
+  const x = S();
+  if (!yes(x.abOn)) return "";
+  const r = rank(m.tags || {});
+  // (you and your moderators always; VIPs or subscribers too, if it's set to)
+  const spare = String(x.abSpare || "mods");
+  if (r.mod || (spare === "vips" && r.vip) || (spare === "subs" && r.sub)) return "";
+  if (yes(x.abFirstOnly) && !(m.tags["first-msg"] === "1" || !spoken.has(platform + "|" + String(m.nick || user).toLowerCase()))) return "";
+  const lax = yes(x.abLoose === undefined ? true : x.abLoose);
+  const hay = lax ? loose(text) : String(text).toLowerCase();
+  return autobanTerms().find((t) => { const n = lax ? loose(t) : t.toLowerCase(); return n.length >= 3 && hay.includes(n); }) || "";
+}
+async function autoban(m, text, user, id, platform, hit) {
+  const x = S();
+  const what = ["ban", "timeout", "delete"].includes(x.abDo) ? x.abDo : "ban";
+  const base = { platform, id, userId: (m.tags && m.tags["user-id"]) || "", user, login: m.nick, reason: String(x.abReason || "Spam (auto-ban)") };
+  try { if (id) await dockDo(Object.assign({ do: "delete" }, base)); } catch (e) { OmniPulse.log("auto-ban delete: " + e.message); }
+  let said = "";
+  try { if (what !== "delete") said = await dockDo(Object.assign({ do: what, seconds: Math.max(1, num(x.abSecs) || 600) }, base)); } catch (e) { OmniPulse.log("auto-ban: " + e.message); said = "Couldn't " + (what === "ban" ? "ban " : "time out ") + user + ": " + e.message; }
+  autobanned++;
+  // (said in the Chat Dock, and kept in the Activity Feed, with the term that caught it)
+  OmniPulse.app.dockChat({ platform, id: "", user: "Auto-Ban", login: "", text: (said || "Deleted " + user + "'s message.") + " Matched: " + hit, self: true, badges: [] }).catch(() => {});
+  feed("ban", { user, platform, message: "Auto-Ban: " + hit, rawInput: text, amount: "" });
+  return true;
+}
+
 function rank(tags) {
   const b = tags.badges || "";
   const you = b.includes("broadcaster/");
@@ -1102,6 +1153,10 @@ async function step(st, ctx, depth) {
       break;
     }
     case "status": await OmniPulse.app.say(f("text")); break;
+    // (the fun's steps: a free spin for whoever started it; hype added; a burst of emotes)
+    case "spin": await wheelSpin(ctx.user || "", ctx.msgId || null, ctx.platform, true); break;
+    case "hypeadd": hypeAdd(Math.max(0, num(f("amount")))); break;
+    case "emoterain": fun.burst++; suitePush(); break;
     case "groupstate": {
       const g = f("group").trim().toLowerCase();
       const list = (S().actions || []).map((x) => {
@@ -1329,7 +1384,7 @@ function setPoints() {
 
 // ---------- Kick: signed in with its OAuth (your own app's Client ID and secret, PKCE), chat read from
 // Kick's own realtime socket (as kick.com's page reads it: a guest's), sent through its API ----------
-const KICK_SCOPES = "user:read channel:read channel:write chat:write moderation:ban moderation:chat_message:manage";
+const KICK_SCOPES = "user:read channel:read channel:write chat:write moderation:ban moderation:chat_message:manage channel:rewards:read channel:rewards:write";
 // (a bot account: only what posting needs, as Mix It Up's)
 const KICK_BOT_SCOPES = "user:read chat:write";
 const KICK_REDIRECT_PORT = 8476;
@@ -1753,7 +1808,15 @@ function suitePush() {
       latest: { follow: st.latest.follow, sub: st.latest.sub },
       timer: Object.assign({ stopwatch: yes(x.timerStopwatch), label: String(x.timerLabel || ""), now: Date.now() }, st.timer),
       raid: st.raid,
+      // (the fun's: the meter's level and how full, the skip votes, the wheel's last spin, the top points, and
+      // emote rain's bursts)
+      hype: { on: funOn("hypeOn"), level: fun.level, fill: (fun.hype % hypeStep()) / hypeStep(), levelAt: fun.levelAt, label: String(x.hypeLabel || "Hype") },
+      voteskip: { on: yes(x.skipOn), votes: fun.votes.size, need: Math.max(1, num(x.skipVotes) || 5), song: fun.song, command: String(x.skipCommand || "!skip") },
+      wheel: Object.assign({ prizes: wheelPrizes(), command: String(x.wheelCommand || "!spin") }, fun.wheel || {}),
+      leaderboard: { list: leaders(), name: pointsName() },
+      burst: fun.burst,
       anim: String(x.suiteAnim || "rise"),
+      theme: String(x.suiteTheme || "dark"),
     }).catch(() => {});
   }, 250);
 }
@@ -1785,6 +1848,13 @@ function suiteHear(ev, ctx) {
   if (ev === "bits") { g.bits += num(ctx.amount); if (yes(x.timerSubathon)) timerAdd(num(ctx.amount) / 100 * num(x.timerBits) * 60000); }
   if (ev === "donation") { g.donation += money(ctx.amount); if (yes(x.timerSubathon)) timerAdd(money(ctx.amount) * num(x.timerDono) * 60000); }
   if (ev === "raid" && num(ctx.amount) >= Math.max(1, num(x.raidMin) || 1)) st.lastRaid = { user: ctx.user, userId: ctx.userId, viewers: num(ctx.amount), platform: ctx.platform, at: Date.now() };
+  // (the hype meter: what happens fills it more than chat does; a sub, a raid or a good cheer pours emotes)
+  if (ev === "follow") hypeAdd(10);
+  if (sub) hypeAdd(25 * (ev === "gift" ? Math.max(1, num(ctx.amount)) : 1));
+  if (ev === "bits") hypeAdd(num(ctx.amount) / 10);
+  if (ev === "donation") hypeAdd(money(ctx.amount) * 10);
+  if (ev === "raid") hypeAdd(Math.max(10, num(ctx.amount)));
+  if (sub || ev === "raid" || (ev === "bits" && num(ctx.amount) >= 100)) fun.burst++;
   if (["follow", "bits", "donation", "raid", "online"].includes(ev) || sub) { suiteKeep(); suitePush(); }
 }
 
@@ -1819,8 +1889,98 @@ async function raidIn(ctx) {
   suitePush();
 }
 
-// (the timer's command: start, pause, add or take away minutes, reset; moderators and you)
-async function suiteCommand(cmd, args, r, id, platform) {
+// ---------- the Suite's fun: a hype meter, vote skip, a wheel, emote rain's bursts, a leaderboard ----------
+// Each shown by its own page (/hype, /voteskip, /wheel, /leaderboard, /emotes), sent with the others in suitePush.
+const fun = { hype: 0, level: 0, levelAt: 0, chatAt: {}, votes: new Set(), song: "", wheel: null, spunAt: {}, burst: 0 };
+const funOn = (k) => yes(S()[k] === undefined ? true : S()[k]);
+const hypeStep = () => Math.max(10, num(S().hypeLevel) || 100);
+
+// (the meter: chat and what happens fill it; each level reached, said and celebrated, and actions run)
+function hypeAdd(n) {
+  if (!funOn("hypeOn") || n <= 0) return;
+  fun.hype += n;
+  const lvl = Math.floor(fun.hype / hypeStep());
+  if (lvl > fun.level) {
+    fun.level = lvl;
+    fun.levelAt = Date.now();
+    fun.burst++;
+    if (funOn("hypeChat")) reply(null, String(S().hypeMessage || "Hype level {level}! 🔥").replace(/\{level\}/g, String(lvl)), "all");
+    fire("hypelevel", { user: "", amount: String(lvl), message: "", rawInput: "", platform: "all", replay: true });
+  }
+  suitePush();
+}
+// (a message: a little each, at most once every 10 s per viewer, so one can't fill it alone)
+function funChat(user) {
+  const k = String(user || "").toLowerCase();
+  if (!fun.chatAt[k] || Date.now() - fun.chatAt[k] > 10000) { fun.chatAt[k] = Date.now(); hypeAdd(Math.max(0, num(S().hypeChatPts) || 2)); }
+}
+// (and it cools, slowly: a level's lost again only once it's well under it)
+setInterval(() => {
+  if (fun.hype <= 0) return;
+  const step = hypeStep();
+  fun.hype = Math.max(0, fun.hype - step * Math.max(0, num(S().hypeCool) || 2) / 100);
+  const lvl = Math.floor(fun.hype / step);
+  if (lvl < fun.level) fun.level = lvl;
+  suitePush();
+}, 5000);
+
+// (vote skip: each viewer once a song; enough of them, and it's skipped)
+function voteSkip(user, id, platform) {
+  const x = S();
+  const k = String(user || "").toLowerCase();
+  if (fun.votes.has(k)) return reply(id, "@" + user + " you've voted to skip this one already.", platform);
+  fun.votes.add(k);
+  const need = Math.max(1, num(x.skipVotes) || 5);
+  if (fun.votes.size >= need) {
+    fun.votes.clear();
+    OmniPulse.app.control("next").catch(() => {});
+    reply(null, "Chat voted: skipped. ⏭", "all");
+    fire("voteskip", { user, amount: String(need), message: fun.song, rawInput: fun.song, platform: "all", replay: true });
+  } else reply(id, "@" + user + " voted to skip (" + fun.votes.size + "/" + need + ").", platform);
+  suitePush();
+}
+
+// (the wheel: its prizes, one picked; shown spinning, then said, and the actions waiting for it run with %prize%)
+function wheelPrizes() { return String(S().wheelPrizes || "A shoutout | 100 points | Pick the next song | Nothing! | Hydrate").split("|").map((p) => p.trim()).filter(Boolean).slice(0, 16); }
+async function wheelSpin(user, id, platform, free) {
+  const x = S(), k = String(user || "").toLowerCase();
+  const prizes = wheelPrizes();
+  if (prizes.length < 2) return reply(id, "The wheel needs two prizes at least (in the Suite's Spin the Wheel).", platform);
+  if (fun.wheel && Date.now() - fun.wheel.at < 9000) return reply(id, "@" + user + " the wheel's still spinning.", platform);
+  if (!free) {
+    const wait = Math.max(0, num(x.wheelCooldown)) * 1000;
+    if (wait && fun.spunAt[k] && Date.now() - fun.spunAt[k] < wait) return reply(id, "@" + user + " you can spin again in " + Math.ceil((wait - (Date.now() - fun.spunAt[k])) / 1000) + " s.", platform);
+    const cost = Math.max(0, num(x.wheelCost));
+    if (cost && yes(x.pointsOn)) {
+      if (pointsOf(user) < cost) return reply(id, "@" + user + " a spin costs " + cost + " " + pointsName() + ".", platform);
+      addPoints(user, -cost);
+    }
+    fun.spunAt[k] = Date.now();
+  }
+  const pick = Math.floor(Math.random() * prizes.length);
+  fun.wheel = { prizes, pick, user, at: Date.now() };
+  suitePush();
+  // (said once the wheel's stopped, as the page has it spin for 6 s)
+  setTimeout(() => {
+    const prize = prizes[pick];
+    if (funOn("wheelChat")) reply(null, String(x.wheelMessage || "{user} spun the wheel: {prize}!").replace(/\{user\}/g, user || "The wheel").replace(/\{prize\}/g, prize), platform || "all");
+    fire("wheel", { user: user || "", amount: String(pick + 1), message: prize, rawInput: prize, prize, platform: platform || "all", replay: true });
+  }, 6500);
+}
+
+// (the leaderboard: the most points, from the points kept)
+function leaders() {
+  const all = S().points || {};
+  return Object.keys(all).map((k) => ({ user: k, points: num(all[k]) })).filter((x) => x.points > 0).sort((a, b) => b.points - a.points).slice(0, Math.min(10, Math.max(3, num(S().boardCount) || 5)));
+}
+
+// (the timer's command: start, pause, add or take away minutes, reset; moderators and you. And the fun's own:
+// vote skip and the wheel)
+async function suiteCommand(cmd, args, r, id, platform, user) {
+  const x = S();
+  // (both off until they're switched on: neither takes a command you might already use)
+  if (yes(x.skipOn) && cmd === String(x.skipCommand || "!skip").trim().toLowerCase()) { voteSkip(user, id, platform); return true; }
+  if (yes(x.wheelOn) && cmd === String(x.wheelCommand || "!spin").trim().toLowerCase()) { await wheelSpin(user, id, platform, false); return true; }
   const c = String(S().timerCommand || "!timer").trim().toLowerCase();
   if (!c || cmd !== c) return false;
   if (!r.mod) return true;
@@ -1858,6 +2018,11 @@ function suiteTest(kind) {
   if (kind === "sub") st.latest.sub = { user: "TestSubscriber", platform: "twitch", tier: 1, months: 6, gift: 0, at: Date.now() };
   if (kind === "raid") st.raid = { user: "TestRaider", login: "testraider", viewers: 42, platform: "twitch", at: Date.now(), secs: Math.max(5, num(S().raidSecs) || 20), clip: null };
   if (kind === "goals") { st.goals.follow++; st.goals.sub++; st.goals.bits += 100; st.goals.donation += 5; suiteKeep(); }
+  // (the fun's: a level's worth of hype, a couple of skip votes, a free spin, a burst of emotes)
+  if (kind === "hype") { hypeAdd(hypeStep()); return "Added a level's worth of hype."; }
+  if (kind === "voteskip") { fun.votes.add("test-a"); fun.votes.add("test-b"); suitePush(); return "Two test votes added. The next song clears them."; }
+  if (kind === "wheel") { wheelSpin("You", null, "all", true); return "Spinning."; }
+  if (kind === "emoterain") { fun.burst++; suitePush(); return "Raining emotes."; }
   suitePush();
   return "Sent to the widget.";
 }
@@ -1917,12 +2082,13 @@ async function dockDo(cmd) {
       if (kick) {
         if (!cmd.userId) throw new Error("Kick didn't say who that is");
         const body = { broadcaster_user_id: Number(S().kickUserId), user_id: Number(cmd.userId) };
+        if (cmd.reason && cmd.do !== "unban") body.reason = String(cmd.reason).slice(0, 100);
         if (cmd.do === "unban") await kickApi("DELETE", "moderation/bans", body);
         else await kickApi("POST", "moderation/bans", Object.assign(body, cmd.do === "timeout" ? { duration: Math.max(1, Math.round(secs / 60)) } : {}));
       } else {
         const id = cmd.userId || (await twitchUserId(cmd.login || cmd.user));
         if (cmd.do === "unban") await helix("DELETE", "moderation/bans?" + twitchMod + "&user_id=" + id);
-        else await helix("POST", "moderation/bans?" + twitchMod, { data: Object.assign({ user_id: id }, cmd.do === "timeout" ? { duration: secs } : {}) });
+        else await helix("POST", "moderation/bans?" + twitchMod, { data: Object.assign({ user_id: id }, cmd.do === "timeout" ? { duration: secs } : {}, cmd.reason ? { reason: String(cmd.reason).slice(0, 500) } : {}) });
       }
       const long = secs % 3600 === 0 ? secs / 3600 + (secs === 3600 ? " hour" : " hours") : secs % 60 === 0 ? secs / 60 + (secs === 60 ? " minute" : " minutes") : secs + " seconds";
       return cmd.do === "timeout" ? "Timed out " + who + " for " + long + "." : cmd.do === "ban" ? "Banned " + who + "." : "Let " + who + " back in.";
@@ -2015,6 +2181,48 @@ OmniPulse.register({
   suiteShoutout() { return shoutout(); },
   suiteTimer(what) { return timerDo(String(what || "").split(":")[0], num(String(what || "").split(":")[1])) || "Done."; },
   suiteRefresh() { suitePush(); return "ok"; },
+  // the Actions page's pickers: your rewards on Twitch and Kick, and OBS's scenes and sources (each one only
+  // if it's reachable now)
+  async pickLists() {
+    const out = { rewards: [], scenes: [], sources: [] };
+    const jobs = [];
+    if (S().token && S().userId) jobs.push(helix("GET", "channel_points/custom_rewards?broadcaster_id=" + S().userId).then((j) => (j.data || []).forEach((r) => out.rewards.push({ platform: "twitch", id: r.id, title: r.title, cost: r.cost }))).catch(() => {}));
+    if (S().kickToken) jobs.push(kickApi("GET", "channels/rewards").then((j) => (j.data || []).forEach((r) => out.rewards.push({ platform: "kick", id: String(r.id), title: r.title, cost: r.cost }))).catch(() => {}));
+    if (obs && obsReady) {
+      jobs.push(obsCall("GetSceneList").then((d) => { out.scenes = (d.scenes || []).map((x) => x.sceneName).reverse(); }).catch(() => {}));
+      jobs.push(obsCall("GetInputList").then((d) => { out.sources = (d.inputs || []).map((x) => x.inputName).sort((a, b) => a.localeCompare(b)); }).catch(() => {}));
+    }
+    await Promise.all(jobs);
+    return out;
+  },
+  // a new Channel Points reward, from the Actions page's wizard: on Twitch, Kick or both
+  async createReward(f) {
+    const made = [], failed = [];
+    if (f.where !== "kick") {
+      try {
+        if (!S().token) throw new Error("sign in to Twitch first");
+        const body = { title: String(f.title).slice(0, 45), cost: Math.max(1, Math.round(num(f.cost))), prompt: String(f.prompt || "").slice(0, 200), is_user_input_required: !!f.input, background_color: f.colour,
+          is_global_cooldown_enabled: num(f.cooldown) > 0, global_cooldown_seconds: Math.max(1, Math.round(num(f.cooldown))),
+          is_max_per_stream_enabled: num(f.perStream) > 0, max_per_stream: Math.max(1, Math.round(num(f.perStream))),
+          is_max_per_user_per_stream_enabled: num(f.perUser) > 0, max_per_user_per_stream: Math.max(1, Math.round(num(f.perUser))),
+          should_redemptions_skip_request_queue: !!f.skip };
+        const j = await helix("POST", "channel_points/custom_rewards?broadcaster_id=" + S().userId, body);
+        const r = (j.data || [])[0];
+        if (!r) throw new Error("Twitch didn't say");
+        made.push({ platform: "twitch", id: r.id });
+      } catch (e) { failed.push("Twitch: " + e.message); }
+    }
+    if (f.where !== "twitch") {
+      try {
+        if (!S().kickToken) throw new Error("sign in to Kick first");
+        const j = await kickApi("POST", "channels/rewards", { title: String(f.title).slice(0, 50), cost: Math.max(1, Math.round(num(f.cost))), description: String(f.prompt || ""), is_user_input_required: !!f.input, background_color: f.colour, should_redemptions_skip_request_queue: !!f.skip });
+        const r = j.data || {};
+        if (!r.id) throw new Error("Kick didn't say");
+        made.push({ platform: "kick", id: String(r.id) });
+      } catch (e) { failed.push("Kick: " + e.message + (/403|scope|permission/i.test(e.message) ? " (sign in to Kick again in the Suite, for the permission)" : "")); }
+    }
+    return { made, failed: failed.join("; ") };
+  },
   signInChannel(values) { return signIn("channel", TWITCH_SCOPES_CHANNEL, values); },
   signInBot(values) { return signIn("bot", TWITCH_SCOPES_BOT, values); },
   signInChannelCopy(values) { return signIn("channel", TWITCH_SCOPES_CHANNEL, values, true); },
@@ -2078,6 +2286,8 @@ OmniPulse.register({
       for (const a of live) if (a.trigger.type === "hotkey" && keys(a.trigger.keys) === keys(d.keys)) run(a, { user: S().login || S().kickLogin || "", platform: "all" });
       return true;
     }
+    // (a new song: the skip votes start again)
+    if (kind === "start") { fun.votes.clear(); fun.song = [d.title, d.artist].filter(Boolean).join(" — "); suitePush(); }
     for (const a of live) {
       if (a.trigger.type !== "song" || (a.trigger.when || "start") !== kind) continue;
       run(a, { user: d.user || "", song: d.title || "", artist: d.artist || "", platform: "all" });

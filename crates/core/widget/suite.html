@@ -18,6 +18,37 @@
   body.preview { background: #2a2a2e repeating-conic-gradient(#3a3a40 0 25%, #2a2a2e 0 50%) 0 0 / 32px 32px; }
   #stage { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; }
   .panel { background: rgba(10, 8, 20, 0.82); border-radius: 0.9rem; padding: 0.8rem 1rem; box-sizing: border-box; box-shadow: 0 0.3rem 1rem rgba(0, 0, 0, 0.35); }
+  /* the fun's: the hype meter, vote skip, the wheel, the leaderboard, emote rain */
+  #hype, #skip { width: 94%; }
+  #hype .row, #skip .row { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 0.35rem; }
+  #hype .lv { font-weight: 800; font-size: 1.1rem; }
+  #skip .ct { font-weight: 800; font-variant-numeric: tabular-nums; }
+  #skip .song { font-size: 0.85rem; opacity: 0.8; margin-bottom: 0.35rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #hype .tr, #skip .tr { height: 0.9rem; border-radius: 0.5rem; background: rgba(255, 255, 255, 0.16); overflow: hidden; }
+  #hype .fl, #skip .fl { height: 100%; width: 0; border-radius: inherit; background: linear-gradient(90deg, var(--c1), var(--c2)); transition: width 0.8s cubic-bezier(0.2, 0.8, 0.2, 1); }
+  #hype.up { animation: flare 1.2s ease-out; }
+  @keyframes flare { 0% { box-shadow: 0 0 0 0 var(--c1); transform: scale(1); } 30% { box-shadow: 0 0 2.4rem 0.6rem var(--c1); transform: scale(1.04); } 100% { box-shadow: 0 0.3rem 1rem rgba(0, 0, 0, 0.35); transform: scale(1); } }
+  #wheel { position: relative; width: 30rem; height: 30rem; }
+  #wheel .disc { position: absolute; inset: 1.5rem 0 0 0; margin: 0 auto; width: 28rem; height: 28rem; border-radius: 50%; box-shadow: 0 0 0 0.4rem rgba(255, 255, 255, 0.85), 0 0.6rem 2rem rgba(0, 0, 0, 0.5); overflow: hidden; }
+  #wheel .disc span { position: absolute; left: 50%; top: 0; height: 50%; transform-origin: 50% 100%; display: flex; justify-content: center; padding-top: 1.1rem; width: 0; }
+  #wheel .disc b { writing-mode: vertical-rl; transform: rotate(180deg); font-size: 1rem; font-weight: 800; color: #fff; text-shadow: 0 1px 3px rgba(0, 0, 0, 0.7); white-space: nowrap; max-height: 11rem; overflow: hidden; text-overflow: ellipsis; }
+  #wheel .pin { position: absolute; left: 50%; top: 0.2rem; transform: translateX(-50%); width: 0; height: 0; border-left: 1rem solid transparent; border-right: 1rem solid transparent; border-top: 1.8rem solid #fff; z-index: 2; filter: drop-shadow(0 2px 3px rgba(0, 0, 0, 0.6)); }
+  #wheel .won { position: absolute; left: 50%; top: 52%; transform: translate(-50%, -50%) scale(0.6); background: rgba(10, 8, 20, 0.9); padding: 0.6rem 1.1rem; border-radius: 0.8rem; font-size: 1.3rem; font-weight: 800; opacity: 0; transition: all 0.4s cubic-bezier(0.2, 0.9, 0.3, 1.3); white-space: nowrap; }
+  #wheel .won.show { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+  #board { width: 92%; }
+  #board .ln { display: flex; gap: 0.7rem; align-items: center; padding: 0.3rem 0; font-size: 1.05rem; }
+  #board .rk { width: 1.6rem; height: 1.6rem; border-radius: 50%; background: linear-gradient(135deg, var(--c1), var(--c2)); display: grid; place-items: center; font-weight: 800; font-size: 0.85rem; flex: none; }
+  #board .nm { flex: 1; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #board .pt { font-variant-numeric: tabular-nums; opacity: 0.85; }
+  body.rainy #stage { display: block; overflow: hidden; }
+  img.rain { position: absolute; top: -4rem; animation: fall linear forwards; pointer-events: none; }
+  @keyframes fall { 0% { transform: translate(0, 0) rotate(0deg); opacity: 0; } 10% { opacity: 1; } 100% { transform: translate(var(--sway), calc(100vh + 6rem)) rotate(25deg); opacity: 0.9; } }
+  /* their themes (each widget's settings in the Suite): Dark as above, the rest their own */
+  body.t-glass .panel { background: rgba(255, 255, 255, 0.14); border: 1px solid rgba(255, 255, 255, 0.28); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); box-shadow: none; }
+  body.t-neon .panel { background: rgba(8, 6, 20, 0.88); border: 2px solid var(--c1); box-shadow: 0 0 16px var(--c1); }
+  body.t-comic .panel { background: #fff; color: #111; border: 3px solid #111; box-shadow: 4px 4px 0 #111; }
+  body.t-comic .goal .tr { background: rgba(0, 0, 0, 0.12); }
+  body.t-minimal .panel { background: none; box-shadow: none; text-shadow: 0 2px 6px rgba(0, 0, 0, 0.9), 0 0 2px rgba(0, 0, 0, 0.9); }
   .lbl { font-size: 0.78rem; letter-spacing: 0.08em; text-transform: uppercase; opacity: 0.75; }
   .big { font-size: 1.5rem; font-weight: 800; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
@@ -218,14 +249,128 @@
     raidT = setTimeout(() => { moving(el); el.classList.remove("in"); el.classList.add("out"); setTimeout(() => el.remove(), 500); }, Math.max(5, r.secs) * 1000);
   }
 
+  // ---------- the fun: the hype meter, vote skip, the wheel, the leaderboard, emote rain ----------
+  let hypeLevel = -1;
+  function hype() {
+    const h = suite.hype || {};
+    let box = $("hype");
+    if (!box) { box = document.createElement("div"); box.id = "hype"; box.className = "panel"; box.innerHTML = '<div class="row"><span class="lbl"></span><span class="lv"></span></div><div class="tr"><div class="fl"></div></div>'; swap(box); }
+    box.querySelector(".lbl").textContent = h.label || "Hype";
+    box.querySelector(".lv").textContent = "Level " + (h.level || 0);
+    box.querySelector(".fl").style.width = Math.round((h.fill || 0) * 100) + "%";
+    // (a level reached: the meter flares)
+    if (hypeLevel >= 0 && (h.level || 0) > hypeLevel) { box.classList.remove("up"); void box.offsetWidth; box.classList.add("up"); }
+    hypeLevel = h.level || 0;
+  }
+  function voteskip() {
+    const v = suite.voteskip || {};
+    let box = $("skip");
+    // (only while there are votes: nothing on stream otherwise)
+    if (!v.on || !v.votes) { if (box) { moving(box); box.classList.add("out"); setTimeout(() => box.remove(), 500); } return; }
+    if (!box) { box = document.createElement("div"); box.id = "skip"; box.className = "panel"; box.innerHTML = '<div class="row"><span class="lbl"></span><span class="ct"></span></div><div class="song"></div><div class="tr"><div class="fl"></div></div>'; swap(box); }
+    box.querySelector(".lbl").textContent = "Skip this song? Type " + (v.command || "!skip");
+    box.querySelector(".ct").textContent = v.votes + " / " + v.need;
+    box.querySelector(".song").textContent = v.song || "";
+    box.querySelector(".fl").style.width = Math.min(100, (v.votes / Math.max(1, v.need)) * 100) + "%";
+  }
+  let wheelAt = 0;
+  function wheel() {
+    const w = suite.wheel || {};
+    const prizes = w.prizes || [];
+    let box = $("wheel");
+    const sig = prizes.join("|");
+    if (!box || box.dataset.sig !== sig) {
+      if (box) box.remove();
+      box = document.createElement("div"); box.id = "wheel"; box.dataset.sig = sig;
+      const n = Math.max(1, prizes.length), seg = 360 / n;
+      const stops = prizes.map((_, i) => "color-mix(in srgb, var(--c1) " + Math.round(100 - (i / n) * 70) + "%, var(--c2)) " + (i * seg) + "deg " + ((i + 1) * seg) + "deg").join(", ");
+      box.innerHTML = '<div class="pin"></div><div class="disc" style="background: conic-gradient(' + stops + ')">' +
+        prizes.map((p, i) => '<span style="transform: rotate(' + (i * seg + seg / 2) + 'deg)"><b>' + esc(p) + '</b></span>').join("") + '</div><div class="won"></div>';
+      swap(box);
+    }
+    // (a new spin: round several times, landing with its prize under the pin at the top)
+    if (w.at && w.at !== wheelAt) {
+      const n = Math.max(1, prizes.length), seg = 360 / n;
+      const turns = 5 + Math.floor(Math.random() * 3);
+      const to = turns * 360 + (360 - (w.pick * seg + seg / 2));
+      const disc = box.querySelector(".disc");
+      const fresh = Date.now() - w.at < 5000;
+      disc.style.transition = fresh ? "transform 6s cubic-bezier(0.12, 0.7, 0.2, 1)" : "none";
+      disc.style.transform = "rotate(" + to + "deg)";
+      const won = box.querySelector(".won");
+      won.textContent = "";
+      won.classList.remove("show");
+      setTimeout(() => { won.textContent = (w.user ? w.user + ": " : "") + (prizes[w.pick] || ""); won.classList.add("show"); }, fresh ? 6100 : 0);
+      wheelAt = w.at;
+    }
+  }
+  function leaderboard() {
+    const b = suite.leaderboard || {};
+    let box = $("board");
+    if (!box) { box = document.createElement("div"); box.id = "board"; box.className = "panel"; swap(box); }
+    const list = b.list || [];
+    box.innerHTML = '<div class="lbl">Top ' + esc(b.name || "points") + '</div>' + (list.length ? list.map((x, i) => '<div class="ln"><span class="rk">' + (i + 1) + '</span><span class="nm">' + esc(x.user) + '</span><span class="pt">' + Math.round(x.points) + '</span></div>').join("") : '<div class="ln"><span class="nm">No one yet</span></div>');
+  }
+  // (emote rain: chat's emotes, as the Chat Dock has them (Twitch's, Kick's, and 7TV, BTTV and FFZ's), falling;
+  // a burst (a sub, a raid, a big cheer, or the step) pours the latest ones)
+  let rainAfter = -1, rainBurst = -1, rainThird = new Map(), recent = [];
+  async function rainPoll() {
+    try {
+      if (!rainThird.size) { const e = await (await fetch("/dock/emotes.json", { cache: "no-store" })).json(); (e.list || []).forEach((x) => rainThird.set(x.c, x.u)); }
+      // (the first look: from now on, so a refresh in OBS doesn't rain what was said before)
+      if (rainAfter < 0) { const j0 = await (await fetch("/dock/chat.json?after=999999999", { cache: "no-store" })).json(); rainAfter = Number(j0.last || 0); return; }
+      const j = await (await fetch("/dock/chat.json?after=" + rainAfter, { cache: "no-store" })).json();
+      for (const m of j.items || []) {
+        rainAfter = Math.max(rainAfter, Number(m.n || 0));
+        if (m.notice || m.gone) continue;
+        emotesOf(m).slice(0, 6).forEach((u) => { drop(u); recent.push(u); });
+      }
+      recent = recent.slice(-30);
+    } catch (e) {}
+  }
+  function emotesOf(m) {
+    const out = [], text = String(m.text || "");
+    if (m.platform === "kick") { const re = /\[emote:(\d+):[^\]]*\]/g; let x; while ((x = re.exec(text))) out.push("https://files.kick.com/emotes/" + x[1] + "/fullsize"); }
+    else String(m.emotes || "").split("/").filter(Boolean).forEach((part) => { const [id, places] = part.split(":"); (places || "").split(",").forEach(() => out.push("https://static-cdn.jtvnw.net/emoticons/v2/" + encodeURIComponent(id) + "/default/dark/2.0")); });
+    text.split(/\s+/).forEach((w) => { const u = rainThird.get(w); if (u) out.push(u); });
+    return out;
+  }
+  function drop(u) {
+    const stage = $("stage");
+    if (stage.childElementCount > 60) return;
+    const i = document.createElement("img");
+    i.src = u; i.className = "rain";
+    i.style.left = Math.random() * 92 + "%";
+    i.style.animationDuration = 4 + Math.random() * 3 + "s";
+    i.style.setProperty("--sway", (Math.random() * 80 - 40) + "px");
+    i.style.width = 36 + Math.random() * 28 + "px";
+    i.addEventListener("animationend", () => i.remove());
+    stage.appendChild(i);
+  }
+  function emoterain() {
+    const b = suite.burst || 0;
+    if (rainBurst >= 0 && b > rainBurst) {
+      const pool = recent.length ? recent : ["https://static-cdn.jtvnw.net/emoticons/v2/25/default/dark/2.0"];
+      for (let k = 0; k < 28; k++) setTimeout(() => drop(pool[Math.floor(Math.random() * pool.length)]), k * 90);
+    }
+    rainBurst = b;
+  }
+  if (PATH === "/emotes") { document.body.classList.add("rainy"); setInterval(rainPoll, 1500); rainPoll(); }
+
   function draw() {
     if (!suite) return;
     document.body.classList.toggle("still", suite.anim === "none");
+    ["glass", "neon", "comic", "minimal"].forEach((t) => document.body.classList.toggle("t-" + t, suite.theme === t));
     if (PATH === "/goals") { fit(460, 260); goals(); }
     else if (PATH === "/timer") { fit(360, 140); timer(); }
     else if (PATH === "/latest-follow") { fit(420, 90); latest("follow"); }
     else if (PATH === "/latest-sub") { fit(420, 90); latest("sub"); }
     else if (PATH === "/raid") { fit(560, 420); raid(); }
+    else if (PATH === "/hype") { fit(520, 110); hype(); }
+    else if (PATH === "/voteskip") { fit(520, 130); voteskip(); }
+    else if (PATH === "/wheel") { fit(520, 560); wheel(); }
+    else if (PATH === "/leaderboard") { fit(420, 380); leaderboard(); }
+    else if (PATH === "/emotes") emoterain();
   }
   addEventListener("resize", draw);
 

@@ -243,6 +243,27 @@
     color: #fff; visibility: hidden; pointer-events: none;
   }
   #alert.glow { background: radial-gradient(circle at 25% 30%, var(--bg1), var(--bg2) 75%); }
+  /* the alerts' themes (Settings > Streaming > Stream Widget > Alerts): Widget as above; the rest their own.
+     Seamless keeps the widget's own card, so they show with the other transitions */
+  #alert[data-theme="glass"] { background: rgba(255, 255, 255, 0.14); border: 1px solid rgba(255, 255, 255, 0.28); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); }
+  #alert[data-theme="glass"] #aIcon { background: rgba(255, 255, 255, 0.18); }
+  #alert[data-theme="neon"] { background: rgba(8, 6, 20, 0.88); border: 2px solid var(--bg1); box-shadow: 0 0 18px var(--bg1), inset 0 0 14px rgba(255, 255, 255, 0.05); }
+  #alert[data-theme="neon"] #aHead { color: var(--bg1); }
+  #alert[data-theme="neon"] #aMain { text-shadow: 0 0 10px var(--bg1); }
+  #alert[data-theme="neon"] #aIcon { background: transparent; border: 2px solid var(--bg1); box-shadow: 0 0 12px var(--bg1); }
+  #alert[data-theme="banner"] { background: var(--bg1); }
+  #alert[data-theme="banner"] #aHead { color: rgba(255, 255, 255, 0.92); font-size: 0.8em; }
+  #alert[data-theme="banner"] #aMain { font-size: 1.45em; }
+  #alert[data-theme="banner"] #aIcon { background: rgba(0, 0, 0, 0.22); }
+  #alert[data-theme="split"] { background: #111520; }
+  #alert[data-theme="split"] #aIcon { background: linear-gradient(160deg, var(--bg1), var(--bg2)); }
+  #alert[data-theme="split"] #aHead { color: var(--bg1); }
+  #alert[data-theme="comic"] { background: #fff; color: #111; border: 3px solid #111; box-shadow: 4px 4px 0 #111; }
+  #alert[data-theme="comic"] #aHead, #alert[data-theme="comic"] #aMsg { color: rgba(17, 17, 17, 0.78); }
+  #alert[data-theme="comic"] #aIcon { background: var(--bg1); border: 2px solid #111; }
+  #alert[data-theme="minimal"] { background: none; }
+  #alert[data-theme="minimal"] #aText { text-shadow: 0 2px 6px rgba(0, 0, 0, 0.9), 0 0 2px rgba(0, 0, 0, 0.9); }
+  #alert[data-theme="minimal"] #aIcon { background: rgba(0, 0, 0, 0.35); }
   #alert.on { visibility: visible; }
   #aIcon {
     height: 100%; aspect-ratio: 1; max-width: 45%; flex: none; display: grid; place-items: center;
@@ -1134,6 +1155,8 @@
 
   function alertConfig(c) {
     acfg = c || { on: false };
+    // (its theme: on the alert itself)
+    document.getElementById("alert").dataset.theme = acfg.theme || "widget";
     if (!acfg.on) waiting.length = 0;
     sbConnect();
   }

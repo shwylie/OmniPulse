@@ -62,6 +62,14 @@ fn skipped(cur: &Map<String, Value>) -> Vec<String> {
 }
 
 /// A service's (or a feature's) sheet: its title, and its lines
+/// The Suite's widgets' theme, as it's set now (one for all of them)
+fn theme_of(cur: &Map<String, Value>) -> String { if s(cur, "suiteTheme").is_empty() { "dark".into() } else { s(cur, "suiteTheme").to_string() } }
+
+/// Its choice, on each widget's sheet (one setting, shared)
+fn theme_field(cur: &Map<String, Value>) -> Field {
+    f("chips", "suiteTheme", "Theme", "For all of the Suite's widgets.", &theme_of(cur), "dark=Dark|glass=Glass|neon=Neon|comic=Comic|minimal=Minimal")
+}
+
 pub fn sheet(id: &str, cur: &Map<String, Value>) -> (String, Vec<Field>) {
     let step = |k: i32, label: &str, value: &str, url: &str, tip: &str| { let mut x = f("step", "", label, tip, value, url); x.n = k; x };
     let account = |key: &str, label: &str, who: &str, bot: bool, plat: &str| f("account", key, label, if bot { "bot" } else { "channel" }, who, plat);
@@ -135,10 +143,13 @@ pub fn sheet(id: &str, cur: &Map<String, Value>) -> (String, Vec<Field>) {
         }),
         // (the Suite's widgets: where each goes in OBS, then how it's set; Try It sends a pretend one)
         "goals" => ("Goals".into(), {
+            let style = if s(cur, "goalStyle").is_empty() { "bars" } else { s(cur, "goalStyle") };
             let mut v = vec![
-                addr("/goals", "About 920 × 520. Counts follows, subs, bits and donations as they come in."),
+                f("suiteprev", "", style, "", "goals", &theme_of(cur)),
+                f("chips2", "goalStyle", "Look", "", style, "bars=Bars|rings=Rings"),
+                theme_field(cur),
                 f("reset", "goalReset", "Start again", "", if s(cur, "goalReset").is_empty() { "stream" } else { s(cur, "goalReset") }, ""),
-                f("chips2", "goalStyle", "Look", "", if s(cur, "goalStyle").is_empty() { "bars" } else { s(cur, "goalStyle") }, "bars=Bars|rings=Rings"),
+                addr("/goals", "About 920 × 520. Counts follows, subs, bits and donations as they come in."),
             ];
             for (k, name, dflt) in [("Follow", "Followers", "10"), ("Sub", "Subs", "5"), ("Bits", "Bits", "1000"), ("Dono", "Donations", "50")] {
                 v.push(f("head", "", name, "", "", ""));
@@ -152,6 +163,8 @@ pub fn sheet(id: &str, cur: &Map<String, Value>) -> (String, Vec<Field>) {
         }),
         "timer" => ("Timer".into(), {
             let mut v = vec![
+                f("suiteprev", "", "", "", "timer", &theme_of(cur)),
+                theme_field(cur),
                 addr("/timer", "About 720 × 280. Moderators can use its command in chat: start, pause, add 5, remove 5, reset."),
                 f("toggle", "timerStopwatch", "Count up", "A stopwatch. When this is off, it counts down.", if on(cur, "timerStopwatch", false) { "true" } else { "false" }, ""),
                 f("number", "timerStart", "Starting time (minutes)", "Where the countdown starts, and goes back to on reset.", &n(cur, "timerStart"), "60"),
@@ -178,12 +191,16 @@ pub fn sheet(id: &str, cur: &Map<String, Value>) -> (String, Vec<Field>) {
             v
         }),
         "latest" => ("Latest Follow and Sub".into(), vec![
+            f("suiteprev", "", "", "", "latest", &theme_of(cur)),
+            theme_field(cur),
             addr("/latest-follow", "Who followed last. About 840 × 180."),
             addr("/latest-sub", "Who subscribed last, with their months or gifts. About 840 × 180."),
             f("link", "", "Try a follow", "", "", "call:suiteTest:follow"),
             f("link", "", "Try a sub", "", "", "call:suiteTest:sub"),
         ]),
         "raid" => ("Raid Shoutout".into(), vec![
+            f("suiteprev", "", "", "", "raid", &theme_of(cur)),
+            theme_field(cur),
             f("note", "", "Your latest raider is remembered. Press Raid Shoutout on your Stream Deck (or Show Shoutout here) to put them on screen, with one of their clips and a follow them animation.", "", "", ""),
             addr("/raid", "About 1120 × 840. Open it as localhost (as here), or Twitch won't play the clip."),
             f("number", "raidMin", "Smallest raid", "Raids with fewer viewers than this aren't remembered for a shoutout.", &n(cur, "raidMin"), "1"),
@@ -193,6 +210,77 @@ pub fn sheet(id: &str, cur: &Map<String, Value>) -> (String, Vec<Field>) {
             f("toggle", "raidClip", "Play one of their clips", "A random clip of theirs from the last 60 days (Twitch only).", if on(cur, "raidClip", false) { "true" } else { "false" }, ""),
             f("link", "", "Show shoutout", "Your latest raider, now.", "", "call:suiteShoutout"),
             f("link", "", "Try it", "A pretend raider, to see how it looks.", "", "call:suiteTest:raid"),
+        ]),
+        // (moderation: Auto-Ban, then where the other rules are)
+        "moderation" => ("Moderation".into(), {
+            let what = if s(cur, "abDo").is_empty() { "ban" } else { s(cur, "abDo") };
+            let mut v = vec![
+                f("head", "", "Auto-Ban", "", "", ""),
+                f("toggle", "abOn", "Take down spam at once", "A message with one of the terms below is deleted, and its sender dealt with as you choose. You and your moderators are never affected.", if on(cur, "abOn", false) { "true" } else { "false" }, ""),
+                f("text", "abTerms", "Your terms", "With | between them, like: buy free views | stream.ai. Shorter catches more: the address alone catches every message with it.", s(cur, "abTerms"), ""),
+                f("toggle", "abPack", "Common spam too", "Phrases viewer-bot and follower sellers use, like buy followers and best viewers on.", if on(cur, "abPack", true) { "true" } else { "false" }, ""),
+                f("toggle", "abLoose", "Match loosely", "Capitals, spaces, dots and symbols don't count, nor numbers for letters, so stream . ai and STR3AM.ai are both caught.", if on(cur, "abLoose", true) { "true" } else { "false" }, ""),
+                f("chips", "abDo", "What happens", "", what, "ban=Ban|timeout=Time Out|delete=Delete the Message"),
+            ];
+            if what == "timeout" { v.push(f("number", "abSecs", "Time-out length (seconds)", "600 is 10 minutes.", &n(cur, "abSecs"), "600")); }
+            if what != "delete" { v.push(f("text", "abReason", "Reason", "Shown to them, and in your ban list.", s(cur, "abReason"), "Spam (auto-ban)")); }
+            v.extend([
+                f("chips", "abSpare", "Never affects", "You and your moderators always. VIPs and subscribers too, if you choose.", if s(cur, "abSpare").is_empty() { "mods" } else { s(cur, "abSpare") }, "mods=Moderators|vips=VIPs Too|subs=Subscribers Too"),
+                f("toggle", "abFirstOnly", "First-time chatters only", "Most spam is someone's first message. With this on, regulars are never checked.", if on(cur, "abFirstOnly", false) { "true" } else { "false" }, ""),
+                f("note", "", "Each one taken down is said in your Chat Dock with the term that caught it, and kept in the Activity Feed.", "", "", ""),
+                f("head", "", "Other rules", "", "", ""),
+                f("note", "", "Links, too many capitals or emotes, too long, or words of your own: make an action with A Rule Broken (in Chat), then choose what happens, like deleting the message or a time-out.", "", "", ""),
+                f("link", "", "Open Actions", "", "", "actions"),
+            ]);
+            v
+        }),
+        // (the fun's: chat playing along)
+        "hype" => ("Hype Meter".into(), vec![
+            f("suiteprev", "", "", "", "hype", &theme_of(cur)),
+            theme_field(cur),
+            f("toggle", "hypeOn", "Fill it", "Chat, follows, subs, bits, donations and raids fill it. It cools slowly while things are quiet.", if on(cur, "hypeOn", true) { "true" } else { "false" }, ""),
+            f("text", "hypeLabel", "Its name", "Shown above it.", s(cur, "hypeLabel"), "Hype"),
+            f("number", "hypeLevel", "Points per level", "A follow is 10, a sub 25, 100 bits 10, a raid 1 per viewer.", &n(cur, "hypeLevel"), "100"),
+            f("number", "hypeChatPts", "Per chatter", "For each viewer who chats, at most once every 10 seconds.", &n(cur, "hypeChatPts"), "2"),
+            f("number", "hypeCool", "Cooling", "How fast it empties while quiet, in percent of a level every 5 seconds.", &n(cur, "hypeCool"), "2"),
+            f("toggle", "hypeChat", "Say each level in chat", "", if on(cur, "hypeChat", true) { "true" } else { "false" }, ""),
+            f("text", "hypeMessage", "Its message", "{level} is the level reached. Actions can run on it too: Fun > A Hype Level Reached.", s(cur, "hypeMessage"), "Hype level {level}! 🔥"),
+            addr("/hype", "About 1040 × 220."),
+            f("link", "", "Try it", "Adds a level's worth of hype.", "", "call:suiteTest:hype"),
+        ]),
+        "voteskip" => ("Vote Skip".into(), vec![
+            f("suiteprev", "", "", "", "voteskip", &theme_of(cur)),
+            theme_field(cur),
+            f("toggle", "skipOn", "Let chat vote to skip", "Off until you switch it on, so it doesn't take a command you already use.", if on(cur, "skipOn", false) { "true" } else { "false" }, ""),
+            f("text", "skipCommand", "Its command", "", s(cur, "skipCommand"), "!skip"),
+            f("number", "skipVotes", "Votes needed", "Each viewer once a song. A new song starts the count again.", &n(cur, "skipVotes"), "5"),
+            addr("/voteskip", "About 1040 × 260. It only shows while there are votes."),
+            f("link", "", "Try it", "Two test votes, to see it.", "", "call:suiteTest:voteskip"),
+        ]),
+        "wheel" => ("Spin the Wheel".into(), vec![
+            f("suiteprev", "", "", "", "wheel", &theme_of(cur)),
+            f("toggle", "wheelOn", "Let chat spin it", "With its command. Actions can spin it too, with the Spin the Wheel step (from a reward, say).", if on(cur, "wheelOn", false) { "true" } else { "false" }, ""),
+            f("text", "wheelPrizes", "Its prizes", "With | between them, 2 to 16.", s(cur, "wheelPrizes"), "A shoutout | 100 points | Pick the next song | Nothing! | Hydrate"),
+            f("text", "wheelCommand", "Its command", "", s(cur, "wheelCommand"), "!spin"),
+            f("number", "wheelCost", "Points per spin", "With Points on. 0 for free.", &n(cur, "wheelCost"), "0"),
+            f("number", "wheelCooldown", "Wait between spins", "Seconds before the same viewer can spin again.", &n(cur, "wheelCooldown"), "0"),
+            f("toggle", "wheelChat", "Say what it lands on", "", if on(cur, "wheelChat", true) { "true" } else { "false" }, ""),
+            f("text", "wheelMessage", "Its message", "{user} spun it, {prize} is what it landed on. Actions can run on it: Fun > The Wheel Landing, with %message% the prize.", s(cur, "wheelMessage"), "{user} spun the wheel: {prize}!"),
+            addr("/wheel", "About 1040 × 1120."),
+            f("link", "", "Try it", "A free spin.", "", "call:suiteTest:wheel"),
+        ]),
+        "leaderboard" => ("Leaderboard".into(), vec![
+            f("suiteprev", "", "", "", "leaderboard", &theme_of(cur)),
+            theme_field(cur),
+            f("note", "", "The viewers with the most points. Points need to be on (Chatbot > Points and ranks).", "", "", ""),
+            f("number", "boardCount", "How many", "3 to 10.", &n(cur, "boardCount"), "5"),
+            addr("/leaderboard", "About 840 × 760."),
+        ]),
+        "emoterain" => ("Emote Rain".into(), vec![
+            f("suiteprev", "", "", "", "emoterain", &theme_of(cur)),
+            f("note", "", "Emotes from chat fall down your stream: Twitch's, Kick's, and 7TV, BetterTTV and FrankerFaceZ ones. A sub, a raid, a cheer of 100 or more, a new hype level, or the Make It Rain Emotes step pours them.", "", "", ""),
+            addr("/emotes", "Make it as big as your canvas (1920 × 1080), on top. It's see-through."),
+            f("link", "", "Try it", "A burst of the latest emotes.", "", "call:suiteTest:emoterain"),
         ]),
         "import" => ("Import from Another Bot".into(), vec![
             f("note", "", "Your commands, timers and actions from another bot become the Suite's actions. Nothing in the other bot changes.", "", "", ""),
@@ -288,6 +376,11 @@ pub fn feats(cur: &Map<String, Value>, st: &Value) -> Vec<(&'static str, String,
         }, on(cur, "requests", true), true),
         ("alerts", "Alerts".into(), "Follows, subs, bits and raids on the Stream Widget".into(), on(cur, "alerts", true), true),
         ("points", "Points and ranks".into(), format!("{} {name} every {} minutes", if n(cur, "pointsAmount").is_empty() { "10".into() } else { n(cur, "pointsAmount") }, if n(cur, "pointsEvery").is_empty() { "10".into() } else { n(cur, "pointsEvery") }), on(cur, "pointsOn", false), true),
+        // (moderation: Auto-Ban first; the rules, for links, caps and emote spam, are Actions' A Rule Broken)
+        ("moderation", "Moderation".into(), if on(cur, "abOn", false) {
+            let own = s(cur, "abTerms").split(['|', '\n']).filter(|x| !x.trim().is_empty()).count();
+            format!("Auto-Ban on: {own} of your terms{}", if on(cur, "abPack", true) { ", and common spam" } else { "" })
+        } else { "Auto-Ban spam and anything you name".into() }, on(cur, "abOn", false), true),
         ("games", "Games".into(), "Slots, duels, heists and trivia. Add them from Actions.".into(), false, false),
         ("actions", "Actions".into(), match (all, live) { (Some(a), Some(l)) => format!("{a} made, {l} on"), _ => "Commands, timers, events".into() }, true, false),
     ]
@@ -327,7 +420,7 @@ pub fn examples(cur: &Map<String, Value>) -> Vec<String> {
 
 /// A page key as the settings have it (a feature's switch: its setting's own name)
 pub fn key_of(k: &str) -> &str {
-    match k { "feat:requests" => "requests", "feat:alerts" => "alerts", "feat:points" => "pointsOn", x => x }
+    match k { "feat:requests" => "requests", "feat:alerts" => "alerts", "feat:points" => "pointsOn", "feat:moderation" => "abOn", x => x }
 }
 
 /// A value as its field's type keeps it

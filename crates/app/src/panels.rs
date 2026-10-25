@@ -87,12 +87,12 @@ fn keys(name: &str) -> Vec<(&'static str, Value)> {
         "youtube" => vec![("ytMirror", json!(false))],
         "discord" => vec![("presArt", json!(true)), ("presTime", json!(true)), ("presListen", json!(true)), ("presAsk", json!(false)), ("presLink", json!(true))],
         "together" => vec![("togetherName", json!(""))],
-        "lyricsw" => vec![("lyricsLines", json!(3)), ("lyricsBefore", json!(false)), ("lyricsScroll", json!("smooth")), ("lyricsScrollMs", json!(600)), ("lyricsScrollPlace", json!("top")), ("lyricsFadeEdges", json!(false)), ("lyricsSize", json!(48)), ("lyricsFont", json!("sans")), ("lyricsAlign", json!("center")), ("lyricsPlace", json!("")), ("lyricsStyle", json!("karaoke")), ("lyricsColor", json!("#ffffff")), ("lyricsTextGrad", json!(false)), ("lyricsColor2", json!("#9ad1ff")), ("lyricsOwnHi", json!(false)), ("lyricsHi", json!("#8e9bff")), ("lyricsHiGrad", json!(false)), ("lyricsHi2", json!("#ff8ad8")), ("lyricsGradDir", json!("90deg")), ("lyricsDim", json!(0.45)), ("lyricsTransform", json!("none")), ("lyricsShadow", json!(true)), ("lyricsOutline", json!(false)), ("lyricsOutlineSize", json!(4)), ("lyricsOutlineColor", json!("#000000")), ("lyricsOutlineOpacity", json!(1.0)), ("lyricsBox", json!(false)), ("lyricsBoxColor", json!("#0a0a0e")), ("lyricsBoxGrad", json!(false)), ("lyricsBoxColor2", json!("#2a1450")), ("lyricsBoxDir", json!("135deg")), ("lyricsBoxOpacity", json!(0.62)), ("lyricsTitle", json!(true)), ("lyricsHideNone", json!(true)), ("lyricsOffset", json!(0)), ("lyricsHidePaused", json!(true))],
+        "lyricsw" => vec![("lyricsTheme", json!("custom")), ("lyricsLines", json!(3)), ("lyricsBefore", json!(false)), ("lyricsScroll", json!("smooth")), ("lyricsScrollMs", json!(600)), ("lyricsScrollPlace", json!("top")), ("lyricsFadeEdges", json!(false)), ("lyricsSize", json!(48)), ("lyricsFont", json!("sans")), ("lyricsAlign", json!("center")), ("lyricsPlace", json!("")), ("lyricsStyle", json!("karaoke")), ("lyricsColor", json!("#ffffff")), ("lyricsTextGrad", json!(false)), ("lyricsColor2", json!("#9ad1ff")), ("lyricsOwnHi", json!(false)), ("lyricsHi", json!("#8e9bff")), ("lyricsHiGrad", json!(false)), ("lyricsHi2", json!("#ff8ad8")), ("lyricsGradDir", json!("90deg")), ("lyricsDim", json!(0.45)), ("lyricsTransform", json!("none")), ("lyricsShadow", json!(true)), ("lyricsOutline", json!(false)), ("lyricsOutlineSize", json!(4)), ("lyricsOutlineColor", json!("#000000")), ("lyricsOutlineOpacity", json!(1.0)), ("lyricsBox", json!(false)), ("lyricsBoxColor", json!("#0a0a0e")), ("lyricsBoxGrad", json!(false)), ("lyricsBoxColor2", json!("#2a1450")), ("lyricsBoxDir", json!("135deg")), ("lyricsBoxOpacity", json!(0.62)), ("lyricsTitle", json!(true)), ("lyricsHideNone", json!(true)), ("lyricsOffset", json!(0)), ("lyricsHidePaused", json!(true))],
         "smart" => vec![("shareRatings", json!(true)), ("smartBlend", json!(true)), ("smartKeys", json!(true)), ("smartMax", json!(10)), ("smartTape", json!(false)), ("smartRoll", json!(false)), ("smartVoices", json!(true))],
         "requests" => vec![("reqBot", json!("streamerbot")), ("reqRadioEdit", json!(false)), ("reqNoAi", json!(false)), ("reqLimits", json!(true)), ("reqMax", json!(10)), ("reqPerUser", json!(2)), ("reqPort", json!(7879)), ("botRemote", json!(false))],
         "socials" => vec![("socialStyle", json!("card")), ("socialAlign", json!("left")), ("socialSecs", json!(8)), ("socialAll", json!(false)), ("socialRounded", json!(true)), ("socialColoured", json!(false)), ("socialMotion", json!("rise"))],
         "widget" => vec![("widgetPort", json!(7878)), ("widgetDesign", json!("card")), ("widgetAlign", json!("left")), ("widgetRounded", json!(true)), ("widgetText", json!(1)), ("wFade", json!(true)), ("wScroll", json!(true)), ("wSpin", json!(true)), ("wRequester", json!(true)), ("wColor", json!(1.2)), ("alertSplit", json!(false)), ("widgetOwnCol", json!(false)), ("widgetCol1", json!("#8e9bff")), ("widgetCol2", json!("#b48eff"))],
-        "alerts" => vec![("alertBot", json!("streamerbot")), ("sbHost", json!("127.0.0.1:8080")), ("sbOn", json!(true)), ("alertTrans", json!("seamless")), ("alertCSize", json!("medium")), ("alertCDir", json!("diag")), ("alertCAngle", json!(0)), ("alertAnim", json!("slide")), ("alertOwnCol", json!(false)), ("alertCol1", json!("#8e9bff")), ("alertCol2", json!("#b38cff")), ("alertDir", json!("115deg")), ("alertIcon", json!(1)), ("alertSecs", json!(5)), ("alertVol", json!(0.8)), ("botRemote", json!(false))],
+        "alerts" => vec![("alertTheme", json!("widget")), ("alertBot", json!("streamerbot")), ("sbHost", json!("127.0.0.1:8080")), ("sbOn", json!(true)), ("alertTrans", json!("seamless")), ("alertCSize", json!("medium")), ("alertCDir", json!("diag")), ("alertCAngle", json!(0)), ("alertAnim", json!("slide")), ("alertOwnCol", json!(false)), ("alertCol1", json!("#8e9bff")), ("alertCol2", json!("#b38cff")), ("alertDir", json!("115deg")), ("alertIcon", json!(1)), ("alertSecs", json!(5)), ("alertVol", json!(0.8)), ("botRemote", json!(false))],
         "remote" => vec![("remotePort", json!(7880))],
         "offset" => vec![("out2Offset", json!(0)), ("out2Volume", json!(1))],
         "hidden" => vec![],
@@ -103,6 +103,24 @@ fn keys(name: &str) -> Vec<(&'static str, Value)> {
 }
 
 /// The lyrics widget's fonts: the system's (on every Windows PC), then some from Google Fonts (web)
+/// The Lyrics Widget's themes: their look, set all at once when one's picked (anything of it changed after:
+/// Custom)
+pub const LYRICS_THEME_KEYS: [&str; 17] = ["lyricsFont", "lyricsTransform", "lyricsColor", "lyricsTextGrad", "lyricsOwnHi", "lyricsHi", "lyricsHiGrad", "lyricsHi2", "lyricsDim", "lyricsShadow",
+    "lyricsOutline", "lyricsOutlineSize", "lyricsOutlineColor", "lyricsBox", "lyricsBoxColor", "lyricsBoxOpacity", "lyricsStyle"];
+
+pub fn lyrics_theme(name: &str) -> Vec<(&'static str, Value)> {
+    let v = match name {
+        "neon" => json!({ "lyricsFont": "montserrat", "lyricsTransform": "none", "lyricsColor": "#e8e2ff", "lyricsTextGrad": false, "lyricsOwnHi": true, "lyricsHi": "#ff3df2", "lyricsHiGrad": true, "lyricsHi2": "#3df2ff", "lyricsDim": 0.45, "lyricsShadow": true, "lyricsOutline": false, "lyricsOutlineSize": 2, "lyricsOutlineColor": "#000000", "lyricsBox": false, "lyricsBoxColor": "#000000", "lyricsBoxOpacity": 0.4, "lyricsStyle": "karaoke" }),
+        "clean" => json!({ "lyricsFont": "inter", "lyricsTransform": "none", "lyricsColor": "#ffffff", "lyricsTextGrad": false, "lyricsOwnHi": true, "lyricsHi": "#ffffff", "lyricsHiGrad": false, "lyricsHi2": "#ffffff", "lyricsDim": 0.4, "lyricsShadow": true, "lyricsOutline": false, "lyricsOutlineSize": 2, "lyricsOutlineColor": "#000000", "lyricsBox": false, "lyricsBoxColor": "#000000", "lyricsBoxOpacity": 0.4, "lyricsStyle": "highlight" }),
+        "outline" => json!({ "lyricsFont": "anton", "lyricsTransform": "uppercase", "lyricsColor": "#ffffff", "lyricsTextGrad": false, "lyricsOwnHi": true, "lyricsHi": "#ffd24a", "lyricsHiGrad": false, "lyricsHi2": "#ffd24a", "lyricsDim": 0.6, "lyricsShadow": false, "lyricsOutline": true, "lyricsOutlineSize": 5, "lyricsOutlineColor": "#000000", "lyricsBox": false, "lyricsBoxColor": "#000000", "lyricsBoxOpacity": 0.4, "lyricsStyle": "karaoke" }),
+        "glass" => json!({ "lyricsFont": "poppins", "lyricsTransform": "none", "lyricsColor": "#ffffff", "lyricsTextGrad": false, "lyricsOwnHi": false, "lyricsHi": "#8e9bff", "lyricsHiGrad": false, "lyricsHi2": "#b48eff", "lyricsDim": 0.5, "lyricsShadow": false, "lyricsOutline": false, "lyricsOutlineSize": 2, "lyricsOutlineColor": "#000000", "lyricsBox": true, "lyricsBoxColor": "#1a1d2e", "lyricsBoxOpacity": 0.55, "lyricsStyle": "karaoke" }),
+        "retro" => json!({ "lyricsFont": "mono", "lyricsTransform": "uppercase", "lyricsColor": "#b6ffbe", "lyricsTextGrad": false, "lyricsOwnHi": true, "lyricsHi": "#3cff6e", "lyricsHiGrad": false, "lyricsHi2": "#3cff6e", "lyricsDim": 0.45, "lyricsShadow": false, "lyricsOutline": false, "lyricsOutlineSize": 2, "lyricsOutlineColor": "#000000", "lyricsBox": true, "lyricsBoxColor": "#000000", "lyricsBoxOpacity": 0.75, "lyricsStyle": "highlight" }),
+        "minimal" => json!({ "lyricsFont": "sans", "lyricsTransform": "none", "lyricsColor": "#ffffff", "lyricsTextGrad": false, "lyricsOwnHi": false, "lyricsHi": "#ffffff", "lyricsHiGrad": false, "lyricsHi2": "#ffffff", "lyricsDim": 0.3, "lyricsShadow": true, "lyricsOutline": false, "lyricsOutlineSize": 2, "lyricsOutlineColor": "#000000", "lyricsBox": false, "lyricsBoxColor": "#000000", "lyricsBoxOpacity": 0.4, "lyricsStyle": "plain" }),
+        _ => return Vec::new(),
+    };
+    LYRICS_THEME_KEYS.iter().filter_map(|k| v.get(*k).map(|x| (*k, x.clone()))).collect()
+}
+
 const FONTS: [(&str, &str); 43] = [
     ("sans", "Clean (system)"), ("segoe", "Segoe UI"), ("arial", "Arial"), ("verdana", "Verdana"), ("tahoma", "Tahoma"), ("trebuchet", "Trebuchet MS"),
     ("calibri", "Calibri"), ("bahnschrift", "Bahnschrift"), ("franklin", "Franklin Gothic"), ("bold", "Impact"), ("black", "Arial Black"),
@@ -342,8 +360,8 @@ pub fn fields(name: &str, vals: &Map<String, Value>, prefs: &Value, lan: &str) -
         let mut f = vec![note("Your Platforms")];
         f.extend(crate::socials::list_rows(prefs));
         f.push(note("How It Looks"));
-        f.push(sel("socialStyle", "Style", "Card and Pill sit on a dark panel. Minimal is just the icon and words over your stream.", &[(json!("card"), "Card"), (json!("pill"), "Pill"), (json!("minimal"), "Minimal")]));
-        if vals["socialStyle"].as_str() != Some("minimal") {
+        f.push(sel("socialStyle", "Style", "Card and Pill sit on a dark panel. Glass is frosted, Neon glows in each platform's colour, Comic is a white speech bubble, and Minimal is just the icon and words over your stream.", &[(json!("card"), "Card"), (json!("pill"), "Pill"), (json!("glass"), "Glass"), (json!("neon"), "Neon"), (json!("comic"), "Comic"), (json!("minimal"), "Minimal")]));
+        if matches!(vals["socialStyle"].as_str().unwrap_or("card"), "card" | "pill") {
             f.push(tog("socialColoured", "In Each Platform's Colours", "The whole card in the platform's colours, not just its icon."));
         }
         f.push(sel("socialAlign", "Alignment", "", &[(json!("left"), "Left"), (json!("centre"), "Centre"), (json!("right"), "Right")]));
@@ -492,36 +510,35 @@ fn fields_of(name: &str, vals: &Map<String, Value>, prefs: &Value, lan: &str) ->
         "widget" => {
             let port = n("widgetPort", 7878);
             let alerts_on = prefs["alertsOn"].as_bool() == Some(true);
-            let f = vec![
-                info("Address", &format!("http://127.0.0.1:{port}/"), &format!("http://127.0.0.1:{port}/"), "Add this address as a Browser source in OBS."),
-                num("widgetPort", "Port", "1024 to 65535."),
-                // Alerts: on the widget, so here (Settings > Streaming > Stream Widget > Alerts): a switch, as
-                // every other, with Configure beside it; first, under where the widget's found
-                toggle_cfg("alertsOn", "Alerts", "Shows follows, subs, bits, raids and more from your bot, on the widget.", "alertsOpen"),
-                tog("alertSplit", "Alerts on Their Own", "Shows the alerts in their own Browser source instead of over Now Playing, so you can place each one where you like in OBS."),
-            ];
-            let mut f = f;
-            if vals["alertSplit"].as_bool() == Some(true) {
-                f.push(info("Alerts Address", &format!("http://127.0.0.1:{port}/alerts"), &format!("http://127.0.0.1:{port}/alerts"), "Add this address as a Browser source in OBS to show only the alerts."));
-            }
+            // (how it looks first, the preview above showing it; what it shows; its alerts; in OBS last)
+            let mut f = vec![note("How It Looks"), design("widgetDesign", "Design")];
             f.extend([
-                design("widgetDesign", "Design"),
                 sel("widgetAlign", "Alignment", "", &[(json!("left"), "Left"), (json!("right"), "Right")]),
                 tog("widgetRounded", "Rounded Corners", ""),
                 stepper("widgetText", "Text Size", "", pct(0.7, 1.6, 0.1)),
-                tog("wFade", "Fade Between Tracks", ""),
-                tog("wScroll", "Scroll Long Text", ""),
-                // (only the Vinyl design has a record to spin, as the web app's)
             ]);
             if s("widgetDesign", "card") == "vinyl" { f.push(tog("wSpin", "Spin the Record", "")); }
-            f.extend([
-                tog("wRequester", "Show Who Requested It", ""),
-                sel("wColor", "Colour Change", "", &[(json!(0), "Instant"), (json!(0.5), "Fast"), (json!(1.2), "Normal"), (json!(2.5), "Slow")]),
-                tog("widgetOwnCol", "Its Own Colours", "When this is off, it uses the app's accent colours, or the cover's."),
-            ]);
+            f.push(tog("widgetOwnCol", "Its Own Colours", "When this is off, it uses the app's accent colours, or the cover's."));
             if vals["widgetOwnCol"].as_bool() == Some(true) {
                 f.push(color("widgetCol1", "Accent Colour", ""));
                 f.push(color("widgetCol2", "Second Colour", ""));
+            }
+            f.extend([
+                note("What It Shows"),
+                tog("wRequester", "Who Requested It", "Their name beside the artist, for a requested song."),
+                tog("wScroll", "Scroll Long Text", ""),
+                tog("wFade", "Fade Between Tracks", ""),
+                sel("wColor", "Colour Change", "How quickly it takes the next cover's colours.", &[(json!(0), "Instant"), (json!(0.5), "Fast"), (json!(1.2), "Normal"), (json!(2.5), "Slow")]),
+                // Alerts: on the widget, so here: a switch, with Configure beside it
+                note("Alerts"),
+                toggle_cfg("alertsOn", "Alerts", "Shows follows, subs, bits, raids and more on the widget.", "alertsOpen"),
+                tog("alertSplit", "Alerts on Their Own", "Shows the alerts in their own Browser source instead of over Now Playing, so you can place each one where you like in OBS."),
+                note("In OBS"),
+                info("Address", &format!("http://127.0.0.1:{port}/"), &format!("http://127.0.0.1:{port}/"), "Add this address as a Browser source in OBS."),
+                num("widgetPort", "Port", "1024 to 65535. Every widget's address uses it."),
+            ]);
+            if vals["alertSplit"].as_bool() == Some(true) {
+                f.push(info("Alerts Address", &format!("http://127.0.0.1:{port}/alerts"), &format!("http://127.0.0.1:{port}/alerts"), "Add this address as a Browser source in OBS to show only the alerts."));
             }
             f.push(button("widgetHide", "Hide This Track", "Hide", "Until the next track."));
             // (more copies of it, each in a look of its own: another scene, or two on screen at once)
@@ -538,7 +555,11 @@ fn fields_of(name: &str, vals: &Map<String, Value>, prefs: &Value, lan: &str) ->
             let url = |k: &str| format!("http://127.0.0.1:{port}/alert?{}{vars}", part(k));
             let types = "follow, sub, gift, bits, kicks, donation, raid, hypetrain, poll, ban, watchstreak, liked, game";
             // (the alerts and how they look first; how your bot sends them after, in `setup`)
-            let mut look: Vec<Value> = vec![button("alList", "Alerts and Their Order", "Open", "Which alerts show and which goes first, and each one's words, picture and sound.")];
+            let mut look: Vec<Value> = vec![
+                button("alList", "Alerts and Their Order", "Open", "Which alerts show and which goes first, and each one's words, picture and sound."),
+                note("How They Look"),
+                sel("alertTheme", "Theme", "The preview above plays made-up alerts in it. Seamless, below, keeps the widget's own card instead.", &[(json!("widget"), "Widget"), (json!("glass"), "Glass"), (json!("neon"), "Neon"), (json!("banner"), "Banner"), (json!("split"), "Split"), (json!("comic"), "Comic"), (json!("minimal"), "Minimal")]),
+            ];
             let mut f = vec![sel("alertBot", "Your Bot", "", &[(json!("streamerbot"), "Streamer.bot"), (json!("mixitup"), "Mix It Up"), (json!("generic"), "Generic")])];
             if bot == "streamerbot" {
                 f.push(text("sbHost", "Streamer.bot", "The address and port of Streamer.bot's WebSocket server."));
@@ -603,6 +624,10 @@ fn fields_of(name: &str, vals: &Map<String, Value>, prefs: &Value, lan: &str) ->
             f.push(stepper("alertIcon", "Icon Size", "", pct(0.6, 2.0, 0.2)));
             f.push(sel("alertSecs", "Show For", "", &[(json!(3), "3 s"), (json!(5), "5 s"), (json!(8), "8 s"), (json!(12), "12 s")]));
             f.push(range("alertVol", "Sound Volume", "", 0.0, 1.0, 0.01, "%", false));
+            f.push(note("Where They Come From"));
+            if crate::SHARED.with(|s| s.borrow().as_ref().is_some_and(|sh| crate::plugin_runs(&sh.borrow().web.prefs, crate::botpage::BOT))) {
+                f.push(note("The Stream Suite's chatbot sends its own alerts, so you don't need anything below. Set it up only if another bot sends alerts too."));
+            }
             f.extend(setup);
             f
         }
@@ -632,53 +657,63 @@ fn fields_of(name: &str, vals: &Map<String, Value>, prefs: &Value, lan: &str) ->
             let port = prefs["widgetPort"].as_u64().unwrap_or(7878);
             let url = format!("http://127.0.0.1:{port}/lyrics");
             let dirs = [(json!("90deg"), "Left to right"), (json!("180deg"), "Top to bottom"), (json!("135deg"), "Diagonal"), (json!("270deg"), "Right to left"), (json!("0deg"), "Bottom to top")];
+            let on = |k: &str| vals[k].as_bool() == Some(true);
             let mut f = vec![
-                info("Address", &url, &url, "Add this address as a Browser source in OBS. About 1280 × 400 fits 3 lines. It uses the Stream Widget's port."),
-                button("previewOpen", "Preview", "Pop Out Preview", "Opens a window that shows how it will look. It updates as you change these, before you save."),
-                note("What's shown"),
+                note("How It Looks"),
+                sel("lyricsTheme", "Theme", "Sets the font, colours, outline and box at once. Change any of them after and it's Custom.", &[(json!("custom"), "Custom"), (json!("neon"), "Neon Karaoke"), (json!("clean"), "Clean White"), (json!("outline"), "Bold Outline"), (json!("glass"), "Glass Box"), (json!("retro"), "Retro"), (json!("minimal"), "Minimal")]),
                 sel("lyricsStyle", "Style", "", &[(json!("karaoke"), "Karaoke (each line fills in as it's sung)"), (json!("highlight"), "Highlight (each line lights up all at once)"), (json!("plain"), "Plain (only brighter)")]),
-                stepper("lyricsLines", "Lines Shown", "The one being sung and the next ones.", counts(1, 9)),
-                tog("lyricsBefore", "Show the Line Before", "The line just sung, above the one being sung."),
-                note("Auto Scroll"),
-                sel("lyricsScroll", "Scrolling", "How the lines move on as each one's sung.", &[(json!("smooth"), "Smooth (slides up)"), (json!("jump"), "Jump (straight to the next line)")]),
-                stepper("lyricsScrollMs", "Scroll Speed", "How long each slide takes.", (100..=1500).step_by(100).map(|x| (json!(x), format!("{:.1} s", x as f64 / 1000.0))).collect()),
-                sel("lyricsScrollPlace", "Sung Line Sits At", "", &[(json!("top"), "At the top, with the next lines below"), (json!("middle"), "In the middle, with sung lines above")]),
-                tog("lyricsFadeEdges", "Fade the Edges", "Lines dissolve in at the bottom and out at the top, instead of being cut off."),
-                tog("lyricsTitle", "Track Info", "Shows the song and artist above the lines. When this is off, only the lyrics show."),
-                tog("lyricsHideNone", "Hide When There Are No Lyrics", "Shows nothing for songs without timed lyrics, not even the track info."),
-                tog("lyricsHidePaused", "Hide While Paused", ""),
-                note("The lines fade in a moment before their first words are sung, out after the last, and out over a long instrumental part."),
-                note("Text"),
                 sel_owned("lyricsFont", "Font", "Those marked (web) come from Google Fonts.", FONTS.iter().map(|(k, n)| (json!(k), n.to_string())).collect()),
                 stepper("lyricsSize", "Text Size", "In pixels.", (16..=120).step_by(4).map(|x| (json!(x), format!("{x}px"))).collect()),
                 sel("lyricsTransform", "Text Transform", "", &[(json!("none"), "None"), (json!("uppercase"), "Uppercase"), (json!("lowercase"), "Lowercase"), (json!("capitalize"), "Start Case")]),
                 sel("lyricsAlign", "Alignment", "", &[(json!("center"), "Centre"), (json!("left"), "Left"), (json!("right"), "Right")]),
                 sel("lyricsPlace", "Position", "Where the lines sit in the source.", &[(json!(""), "Middle"), (json!("top"), "Top"), (json!("bottom"), "Bottom")]),
+                note("Colours"),
                 color("lyricsColor", "Text Colour", ""),
                 tog("lyricsTextGrad", "Text Gradient", "From the text colour to a second one."),
-                color("lyricsColor2", "Text Gradient's Second Colour", ""),
-                tog("lyricsOwnHi", "Own Highlight Colour", "When this is off, it uses the app's accent colour (from the album art, if that's on)."),
-                color("lyricsHi", "Highlight Colour", "The words being sung."),
-                tog("lyricsHiGrad", "Highlight Gradient", "From the highlight colour to a second one."),
-                color("lyricsHi2", "Highlight Gradient's Second Colour", ""),
-                sel("lyricsGradDir", "Gradient Direction", "For the text's and the highlight's.", &dirs),
-                range("lyricsDim", "Other Lines", "How bright the lines not being sung are.", 0.0, 1.0, 0.05, "%", false),
-                tog("lyricsShadow", "Shadow", "Keeps it readable over the game."),
-                note("Outline"),
-                tog("lyricsOutline", "Outline", "A line round each letter, as OBS's text outline."),
-                stepper("lyricsOutlineSize", "Outline Size", "", (1..=20).map(|x| (json!(x), format!("{x}px"))).collect()),
-                color("lyricsOutlineColor", "Outline Colour", ""),
-                range("lyricsOutlineOpacity", "Outline Opacity", "", 0.0, 1.0, 0.05, "%", false),
-                note("Background Box"),
-                tog("lyricsBox", "Background Box", "A box behind the lines."),
-                color("lyricsBoxColor", "Box Colour", ""),
-                tog("lyricsBoxGrad", "Box Gradient", "From the box colour to a second one."),
-                color("lyricsBoxColor2", "Box Gradient's Second Colour", ""),
-                sel("lyricsBoxDir", "Box Gradient Direction", "", &dirs),
-                range("lyricsBoxOpacity", "Box Opacity", "", 0.0, 1.0, 0.05, "%", false),
+            ];
+            if on("lyricsTextGrad") { f.push(color("lyricsColor2", "Text Gradient's Second Colour", "")); }
+            f.push(tog("lyricsOwnHi", "Own Highlight Colour", "When this is off, it uses the app's accent colour (from the album art, if that's on)."));
+            if on("lyricsOwnHi") {
+                f.push(color("lyricsHi", "Highlight Colour", "The words being sung."));
+                f.push(tog("lyricsHiGrad", "Highlight Gradient", "From the highlight colour to a second one."));
+                if on("lyricsHiGrad") { f.push(color("lyricsHi2", "Highlight Gradient's Second Colour", "")); }
+            }
+            if on("lyricsTextGrad") || (on("lyricsOwnHi") && on("lyricsHiGrad")) { f.push(sel("lyricsGradDir", "Gradient Direction", "For the text's and the highlight's.", &dirs)); }
+            f.push(range("lyricsDim", "Other Lines", "How bright the lines not being sung are.", 0.0, 1.0, 0.05, "%", false));
+            f.push(tog("lyricsShadow", "Shadow", "Keeps it readable over the game."));
+            f.push(tog("lyricsOutline", "Outline", "A line round each letter, as OBS's text outline."));
+            if on("lyricsOutline") {
+                f.push(stepper("lyricsOutlineSize", "Outline Size", "", (1..=20).map(|x| (json!(x), format!("{x}px"))).collect()));
+                f.push(color("lyricsOutlineColor", "Outline Colour", ""));
+                f.push(range("lyricsOutlineOpacity", "Outline Opacity", "", 0.0, 1.0, 0.05, "%", false));
+            }
+            f.push(tog("lyricsBox", "Background Box", "A box behind the lines."));
+            if on("lyricsBox") {
+                f.push(color("lyricsBoxColor", "Box Colour", ""));
+                f.push(tog("lyricsBoxGrad", "Box Gradient", "From the box colour to a second one."));
+                if on("lyricsBoxGrad") { f.push(color("lyricsBoxColor2", "Box Gradient's Second Colour", "")); f.push(sel("lyricsBoxDir", "Box Gradient Direction", "", &dirs)); }
+                f.push(range("lyricsBoxOpacity", "Box Opacity", "", 0.0, 1.0, 0.05, "%", false));
+            }
+            f.extend([
+                note("Lines"),
+                stepper("lyricsLines", "Lines Shown", "The one being sung and the next ones.", counts(1, 9)),
+                tog("lyricsBefore", "Show the Line Before", "The line just sung, above the one being sung."),
+                note("Scrolling"),
+                sel("lyricsScroll", "Scrolling", "How the lines move on as each one's sung.", &[(json!("smooth"), "Smooth (slides up)"), (json!("jump"), "Jump (straight to the next line)")]),
+                stepper("lyricsScrollMs", "Scroll Speed", "How long each slide takes.", (100..=1500).step_by(100).map(|x| (json!(x), format!("{:.1} s", x as f64 / 1000.0))).collect()),
+                sel("lyricsScrollPlace", "Sung Line Sits At", "", &[(json!("top"), "At the top, with the next lines below"), (json!("middle"), "In the middle, with sung lines above")]),
+                tog("lyricsFadeEdges", "Fade the Edges", "Lines dissolve in at the bottom and out at the top, instead of being cut off."),
+                note("What Shows, and When"),
+                tog("lyricsTitle", "Track Info", "Shows the song and artist above the lines. When this is off, only the lyrics show."),
+                tog("lyricsHideNone", "Hide When There Are No Lyrics", "Shows nothing for songs without timed lyrics, not even the track info."),
+                tog("lyricsHidePaused", "Hide While Paused", ""),
+                note("The lines fade in a moment before their first words are sung, out after the last, and out over a long instrumental part."),
                 note("Timing"),
                 num("lyricsOffset", "Timing", "In milliseconds, from -5000 to 5000. Use a positive number to show lyrics later, or a negative one to show them earlier. Match it to your stream delay, or to a song whose lyrics run early."),
-            ];
+                note("In OBS"),
+                info("Address", &url, &url, "Add this address as a Browser source in OBS. About 1280 × 400 fits 3 lines. It uses the Stream Widget's port."),
+                button("previewOpen", "Preview", "Pop Out Preview", "Opens a window that shows how it will look. It updates as you change these, before you save."),
+            ]);
             f.extend(outputs_list(prefs, "lyricsw", &format!("http://127.0.0.1:{port}/lyrics/")));
             f
         }

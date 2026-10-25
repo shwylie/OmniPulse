@@ -15,7 +15,23 @@
   body.top #list { justify-content: flex-start; flex-direction: column-reverse; }
   .m { display: flex; align-items: flex-start; gap: 8px; padding: 6px 10px; border-radius: 12px; background: rgba(10, 12, 18, var(--bg)); animation: in 0.35s ease-out; max-width: 100%; overflow-wrap: anywhere; }
   body.shadow .m { text-shadow: 0 2px 6px rgba(0, 0, 0, 0.85), 0 0 2px rgba(0, 0, 0, 0.9); }
-  body.bubbles .m { background: rgba(10, 12, 18, max(var(--bg), 0.55)); border-left: 3px solid var(--pc, #9146ff); border-radius: 4px 12px 12px 4px; }
+  /* its themes (Settings > Streaming > Suite > Widgets > Multichat Overlay, or the gear): Plain uses the
+     Background as set; the rest bring their own */
+  body.t-bubbles .m { background: rgba(10, 12, 18, max(var(--bg), 0.55)); border-left: 3px solid var(--pc, #9146ff); border-radius: 4px 12px 12px 4px; }
+  body.t-glass .m { background: rgba(255, 255, 255, 0.12); border: 1px solid rgba(255, 255, 255, 0.22); border-radius: 14px; backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); }
+  body.t-neon .m { background: rgba(6, 4, 18, 0.72); border: 1px solid var(--pc); border-radius: 12px; box-shadow: 0 0 10px var(--pc), inset 0 0 8px rgba(255, 255, 255, 0.05); }
+  body.t-neon .who { text-shadow: 0 0 8px currentColor; }
+  body.t-cards .m { background: #191c28; border-radius: 10px; border-top: 3px solid var(--pc); box-shadow: 0 4px 14px rgba(0, 0, 0, 0.45); }
+  body.t-cards .m > div > .who { display: block; font-size: 0.8em; margin-bottom: 0.1em; }
+  body.t-terminal, body.t-terminal .who { font-family: "Cascadia Mono", Consolas, "Courier New", monospace; }
+  body.t-terminal .m { background: rgba(0, 0, 0, 0.78); border-radius: 3px; color: #b6ffbe; border-left: 2px solid #3cff6e; }
+  body.t-terminal .text { color: #b6ffbe; }
+  body.t-comic .m { background: #fff; color: #111; border: 2px solid #111; border-radius: 18px 18px 18px 4px; box-shadow: 3px 3px 0 #111; text-shadow: none !important; }
+  body.t-comic .text { color: #111; font-weight: 600; }
+  body.t-comic .who { -webkit-text-stroke: 0.4px #111; }
+  body.t-minimal .m { background: transparent; padding: 2px 4px; }
+  body.t-minimal .m { text-shadow: 0 2px 6px rgba(0, 0, 0, 0.9), 0 0 2px rgba(0, 0, 0, 0.95); }
+  body.t-minimal .who { font-size: 0.85em; }
   .m.out { animation: out 0.6s ease-in forwards; }
   @keyframes in { from { opacity: 0; transform: translateY(8px); } }
   @keyframes out { to { opacity: 0; transform: translateY(-4px); } }
@@ -48,7 +64,7 @@
   <label>Badges <input type="checkbox" id="oBadges" checked></label>
   <label>Platform marks <input type="checkbox" id="oMarks" checked></label>
   <h2>Look</h2>
-  <label>Style <select id="oStyle"><option value="plain">Plain</option><option value="bubbles">Bubbles</option></select></label>
+  <label>Theme <select id="oStyle"><option value="plain">Plain</option><option value="bubbles">Bubbles</option><option value="glass">Glass</option><option value="neon">Neon</option><option value="cards">Cards</option><option value="terminal">Terminal</option><option value="comic">Comic</option><option value="minimal">Minimal</option></select></label>
   <label>Text size <input type="number" id="oSize" min="10" max="60" step="1"></label>
   <label>Background <select id="oBg"><option value="0">None</option><option value="0.35">Faint</option><option value="0.6">Half</option><option value="0.85">Solid</option></select></label>
   <label>Shadow <input type="checkbox" id="oShadow" checked></label>
@@ -78,7 +94,7 @@
     document.documentElement.style.setProperty("--fs", Math.max(10, Math.min(60, Number(opt.size) || 20)) + "px");
     document.documentElement.style.setProperty("--bg", opt.bg);
     document.body.classList.toggle("shadow", !!opt.shadow);
-    document.body.classList.toggle("bubbles", opt.style === "bubbles");
+    ["plain", "bubbles", "glass", "neon", "cards", "terminal", "comic", "minimal"].forEach((t) => document.body.classList.toggle("t-" + t, (opt.style || "plain") === t));
     document.body.classList.toggle("top", opt.dir === "top");
     $("oFrom").value = opt.from; $("oCmds").checked = opt.cmds; $("oBot").checked = opt.bot; $("oBadges").checked = opt.badges; $("oMarks").checked = opt.marks;
     $("oStyle").value = opt.style; $("oSize").value = opt.size; $("oBg").value = opt.bg; $("oShadow").checked = opt.shadow; $("oDir").value = opt.dir;

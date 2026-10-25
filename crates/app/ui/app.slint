@@ -9,6 +9,8 @@ export global Theme {
     in-out property <color> bg: #08090c;
     in-out property <color> panel: #111318;
     in-out property <color> elevated: #1a1d25;
+    /// (menus' and pop-ups' own: always solid, even with Aurora's see-through panels)
+    in-out property <color> menu: #1a1d25;
     in-out property <color> line: #262a35;
     in-out property <color> text: #e9ebf2;
     in-out property <color> muted: #9097a8;
@@ -96,6 +98,17 @@ export struct KeyStep { text: string, has-url: bool, copies: [string] }
 /// A key to paste: its label, what's typed, and whether it looks right
 export struct KeyField { label: string, value: string, ok: bool }
 // the Lyrics Widget's look, for its page's preview
+/// The Stream Widget's preview: its design and look as they're set
+export struct WidgetLook { design: string, right: bool, rounded: bool, text: float, c1: color, c2: color, spin: bool, requester: bool }
+
+/// The alerts' preview: their theme and colours as they're set
+export struct AlertLook { theme: string, c1: color, c2: color, glow: bool, icon: float, transition: string }
+
+/// The Multichat Overlay's preview: its look as it's set
+export struct ChatLook { style: string, size: float, bg: float, shadow: bool, top: bool, badges: bool, marks: bool, from: string }
+/// (a made-up message, for the preview)
+export struct ChatSample { name: string, text: string, kick: bool, colour: color, badge: string }
+
 /// The Social Plug's preview: each platform shown (its icon, as the widget's, or its first letter), and its look
 export struct SocialItem { name: string, handle: string, c1: color, c2: color, d: string, letter: string }
 export struct SocialLook { style: string, coloured: bool, align: string, rounded: bool, all: bool, secs: int, motion: string, sample: bool }
@@ -106,7 +119,7 @@ export struct BotTile { id: string, name: string, state: string, line1: string, 
 export struct BotFeat { id: string, name: string, note: string, on: bool, open: bool, changed: bool }
 export struct BotStep { id: string, title: string, note: string, state: string, optional: bool }
 export struct BotLine { who: string, heard: string, did: string, platform: string }
-export struct BotField { key: string, kind: string, label: string, note: string, value: string, extra: string, changed: bool, n: int }
+export struct BotField { key: string, kind: string, label: string, note: string, value: string, extra: string, changed: bool, n: int, opts: [string], opt-ids: [string] }
 // (an artist you follow: whether on SoundCloud and on Spotify, for its menu)
 export struct Item { name: string, sub: string, art: image, plat: string, on-sc: bool, on-sp: bool, on-yt: bool, row: Row }
 /// A page being loaded: each platform it asks, and whether it's answered yet
@@ -115,10 +128,14 @@ export struct LoadStep { plat: string, name: string, done: bool }
 /// toggle; a select's choices and which is picked)
 export struct FlowField { key: string, label: string, note: string, kind: string, value: string, options: [string], at: int }
 /// A trigger or a step: which kind it is (of the page's list of them), what it says, what it asks for
-export struct FlowNode { kind-at: int, note: string, fields: [FlowField], depth: int }
+export struct FlowNode { kind-at: int, note: string, fields: [FlowField], depth: int, label: string }
+/// A trigger's or a step's menu: a category's heading, or one in it (hit: what's searched for)
+export struct MenuEntry { cat: string, label: string, head: bool, hit: bool }
 /// An action in the page's list: its name, what starts it and how many steps, on or off
 /// An action in the Actions list: its group's heading above it when it's the group's first (`head`), and
 /// shown unless its group is folded or it isn't what's searched for
+/// A Channel Points reward to make (Twitch, Kick or both), and whether an action's made for it
+export struct RewardForm { title: string, cost: string, prompt: string, input: bool, cooldown: string, per-stream: string, per-user: string, skip: bool, where: string, colour: color, action: bool }
 export struct FlowItem { name: string, summary: string, on: bool, group: string, head: bool, shown: bool, count: int, shut: bool }
 /// A slice of the Ring visualiser: its outline, and where it is from the foot (0, the bass) to the top (1)
 export struct RingPiece { d: string, f: float }
@@ -692,7 +709,7 @@ component CtxMenu inherits Rectangle {
         width: 250px;
         close-policy: PopupClosePolicy.close-on-click-outside;
         frame := Rectangle {
-            background: Theme.elevated;
+            background: Theme.menu;
             border-radius: 10px;
             border-width: 1px;
             border-color: Theme.line;
@@ -797,24 +814,131 @@ component Dropdown inherits Rectangle {
         VerticalLayout { alignment: center; Path { commands: "M 2 4 L 6 8 L 10 4"; viewbox-width: 12; viewbox-height: 12; width: 10px; height: 10px; stroke: Theme.muted; stroke-width: 1.6px; fill: transparent; } }
     }
     dta := TouchArea { enabled: root.enabled; mouse-cursor: MouseCursor.pointer; clicked => { pop.show(); } }
+    // (a long list: at most 330 px of it, scrolled; and no taller than the window has room for, above or below)
+    property <length> room-below: Win.h - 8px - (root.absolute-position.y + root.height + 4px);
+    property <length> room-above: root.absolute-position.y - 12px;
+    // (its list's height, from how many there are: a menu row is 32 px, 6 px round them)
+    property <length> full-h: root.options.length * 32px + 12px;
+    property <bool> up: self.full-h > self.room-below && self.room-above > self.room-below;
+    property <length> list-h: min(self.full-h, 330px, max(120px, self.up ? self.room-above : self.room-below));
     pop := PopupWindow {
         x: 0;
-        y: root.absolute-position.y + root.height + 4px + list.preferred-height > Win.h - 8px ? -list.preferred-height - 4px : root.height + 4px;
+        y: root.up ? -root.list-h - 4px : root.height + 4px;
         width: max(root.width, 200px);
+        height: root.list-h;
         close-policy: PopupClosePolicy.close-on-click-outside;
         list := Rectangle {
-            background: Theme.elevated;
+            background: Theme.menu;
             border-radius: 10px;
             border-width: 1px;
             border-color: Theme.line;
             drop-shadow-blur: 18px;
             drop-shadow-color: #00000070;
-            preferred-height: min(col.preferred-height, 330px);
-            Flickable {
-                content-height: col.preferred-height;
+            height: root.list-h;
+            clip: true;
+            ScrollView {
+                horizontal-scrollbar-policy: always-off;
+                vertical-scrollbar-policy: root.full-h > root.list-h ? ScrollBarPolicy.as-needed : ScrollBarPolicy.always-off;
                 col := VerticalLayout {
                     padding: 6px;
                     for o[k] in root.options: MenuRow { label: o; on: k == root.current; clicked => { root.picked(k); pop.close(); } }
+                }
+            }
+        }
+    }
+}
+
+/// A fold's arrow: > folded, v open (drawn as the dropdowns' arrow is)
+component Chevron inherits Path {
+    in property <bool> open;
+    in property <color> tint: Theme.muted;
+    width: 10px;
+    height: 10px;
+    commands: root.open ? "M 2 4 L 6 8 L 10 4" : "M 4 2 L 8 6 L 4 10";
+    viewbox-width: 12;
+    viewbox-height: 12;
+    stroke: root.tint;
+    stroke-width: 1.6px;
+    fill: transparent;
+}
+
+/// A menu in categories, as Streamer.bot's: each opened with a click; a search over them all
+component GroupedPicker inherits Rectangle {
+    in property <[MenuEntry]> entries;
+    in property <string> label;
+    in property <string> placeholder;
+    callback picked(int);
+    callback query(string);
+    property <string> open-cat;
+    property <string> q;
+    width: 260px;
+    height: 34px;
+    border-radius: 8px;
+    background: gpa.has-hover ? Theme.elevated : Theme.panel;
+    border-width: 1px;
+    border-color: gpa.has-hover ? Theme.accent.with-alpha(0.6) : Theme.line;
+    HorizontalLayout {
+        padding-left: 12px;
+        padding-right: 10px;
+        spacing: 8px;
+        Text { text: root.label != "" ? root.label : root.placeholder; color: root.label != "" ? Theme.text : Theme.muted; font-size: 13px; vertical-alignment: center; overflow: elide; horizontal-stretch: 1; }
+        VerticalLayout { alignment: center; Path { commands: "M 2 4 L 6 8 L 10 4"; viewbox-width: 12; viewbox-height: 12; width: 10px; height: 10px; stroke: Theme.muted; stroke-width: 1.6px; fill: transparent; } }
+    }
+    gpa := TouchArea { mouse-cursor: MouseCursor.pointer; clicked => { pop.show(); } }
+    property <length> room-below: Win.h - 8px - (root.absolute-position.y + root.height + 4px);
+    property <bool> up: root.room-below < 260px && root.absolute-position.y - 12px > root.room-below;
+    property <length> most: min(400px, max(160px, root.up ? root.absolute-position.y - 12px : root.room-below));
+    pop := PopupWindow {
+        x: 0;
+        y: root.up ? -gpl.height - 4px : root.height + 4px;
+        width: max(root.width, 300px);
+        close-policy: PopupClosePolicy.close-on-click-outside;
+        gpl := Rectangle {
+            height: min(root.most, gpc.preferred-height + 50px);
+            background: Theme.menu;
+            border-radius: 10px;
+            border-width: 1px;
+            border-color: Theme.line;
+            drop-shadow-blur: 18px;
+            drop-shadow-color: #00000070;
+            clip: true;
+            VerticalLayout {
+                padding: 6px;
+                spacing: 4px;
+                Rectangle {
+                    height: 32px;
+                    border-radius: 8px;
+                    background: Theme.bg;
+                    border-width: 1px;
+                    border-color: gpq.has-focus ? Theme.accent : Theme.line;
+                    Glyph { d: Icons.search; x: 9px; width: 13px; height: 13px; y: (parent.height - self.height) / 2; fill: Theme.muted; }
+                    if root.q == "": Text { x: 30px; height: parent.height; vertical-alignment: center; text: "Find one"; color: Theme.muted; font-size: 12px; }
+                    gpq := TextInput { x: 30px; width: parent.width - 40px; height: parent.height; vertical-alignment: center; color: Theme.text; font-size: 12px; single-line: true; edited => { root.q = self.text; root.query(self.text); } }
+                }
+                ScrollView {
+                    horizontal-scrollbar-policy: always-off;
+                    gpc := VerticalLayout {
+                        for e[i] in root.entries: VerticalLayout {
+                            // (a category: opened or closed)
+                            if e.head && root.q == "": Rectangle {
+                                height: 32px;
+                                border-radius: 6px;
+                                background: gph.has-hover ? Theme.panel : transparent;
+                                gph := TouchArea { mouse-cursor: MouseCursor.pointer; clicked => { root.open-cat = root.open-cat == e.cat ? "" : e.cat; } }
+                                HorizontalLayout {
+                                    padding-left: 10px;
+                                    padding-right: 10px;
+                                    spacing: 8px;
+                                    Text { text: e.cat; color: Theme.text; font-size: 13px; font-weight: 700; vertical-alignment: center; horizontal-stretch: 1; }
+                                    VerticalLayout { alignment: center; Chevron { open: root.open-cat == e.cat; tint: Theme.muted; } }
+                                }
+                            }
+                            if !e.head && ((root.q == "" && root.open-cat == e.cat) || (root.q != "" && e.hit)): HorizontalLayout {
+                                padding-left: root.q == "" ? 12px : 0px;
+                                MenuRow { horizontal-stretch: 1; label: root.q != "" ? e.cat + " \u{203a} " + e.label : e.label; on: root.q == "" && e.cat + " \u{203a} " + e.label == root.label; clicked => { root.picked(i); pop.close(); } }
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -1076,7 +1200,7 @@ component FlowFieldsView inherits VerticalLayout {
         }
         if fl.kind == "select": VerticalLayout { alignment: center; Dropdown { options: fl.options; current: fl.at; picked(k) => { root.picked(i, k); } } }
         // (a program: typed, or picked from the ones open now)
-        if fl.kind == "program": VerticalLayout {
+        if fl.kind == "program" || fl.kind == "scene" || fl.kind == "source" || fl.kind == "reward": VerticalLayout {
             alignment: center;
             spacing: 6px;
             Rectangle {
@@ -1088,7 +1212,9 @@ component FlowFieldsView inherits VerticalLayout {
                 border-color: fpti.has-focus ? Theme.accent : Theme.line;
                 fpti := TextInput { x: 10px; width: parent.width - 20px; height: parent.height; vertical-alignment: center; color: Theme.text; font-size: 13px; single-line: true; text: fl.value; edited => { root.changed(i, self.text); } }
             }
-            Dropdown { width: 280px; options: fl.options; current: -1; placeholder: fl.options.length > 0 ? "Pick one that's open now" : "No other programs open"; picked(k) => { root.picked(i, k); } }
+            Dropdown { width: 280px; options: fl.options; current: -1;
+                placeholder: fl.kind == "program" ? (fl.options.length > 0 ? "Pick one that's open now" : "No other programs open") : fl.kind == "reward" ? "Pick a reward, or make one" : fl.kind == "scene" ? "Pick a scene" : "Pick a source";
+                picked(k) => { root.picked(i, k); } }
         }
         if fl.kind == "toggle": CenterToggle { checked: fl.value == "true"; toggled => { root.changed(i, self.checked ? "true" : "false"); } }
     }
@@ -1097,6 +1223,9 @@ component FlowFieldsView inherits VerticalLayout {
 /// A card of an action's flow: its trigger ("WHEN"), or a step (its number): which kind it is, what it
 /// says, its fields; a step's can be moved up or down, or taken out
 component FlowCard inherits Rectangle {
+    in property <[MenuEntry]> menu;
+    in property <string> label;
+    callback menu-query(string);
     in property <string> badge;
     in property <bool> trigger;
     in property <[string]> types;
@@ -1128,7 +1257,7 @@ component FlowCard inherits Rectangle {
                 background: root.trigger ? Theme.accent : Theme.elevated;
                 fbt := Text { text: root.badge; color: root.trigger ? Theme.on-accent : Theme.text; font-size: 11px; font-weight: 800; letter-spacing: 1px; }
             } }
-            VerticalLayout { alignment: center; Dropdown { options: root.types; current: root.type-at; picked(k) => { root.type-picked(k); } } }
+            VerticalLayout { alignment: center; GroupedPicker { entries: root.menu; label: root.label; picked(k) => { root.type-picked(k); } query(t) => { root.menu-query(t); } } }
             Rectangle { horizontal-stretch: 1; }
             if !root.trigger: VerticalLayout { alignment: center; IconButton { tip: "Move Up"; d: "M7 14l5-5 5 5z"; size: 30px; opacity: root.first ? 0.35 : 1; clicked => { if (!root.first) { root.up(); } } } }
             if !root.trigger: VerticalLayout { alignment: center; IconButton { tip: "Move Down"; d: "M7 10l5 5 5-5z"; size: 30px; opacity: root.last ? 0.35 : 1; clicked => { if (!root.last) { root.down(); } } } }
@@ -1904,7 +2033,8 @@ component SuiteHero inherits Rectangle {
         spacing: 22px;
         VerticalLayout { alignment: center; Rectangle {
             width: 76px; height: 76px; border-radius: 38px;
-            background: @linear-gradient(135deg, #ffffff40 0%, #ffffff10 100%);
+            // (solid, not a gradient: the software renderer draws a gradient square, a square behind the circle)
+            background: #ffffff26;
             border-width: 1px; border-color: #ffffff50;
             Glyph { d: Icons.robot; width: 40px; height: 40px; x: 18px; y: 18px; fill: #ffffff; }
         } }
@@ -2338,17 +2468,404 @@ component DesignSketch inherits VerticalLayout {
 }
 
 /// The Lyrics Widget's preview: a few lines in its look (colours, size, alignment, style, outline, box), as it's set
+/// The Stream Widget as it'll look in OBS, near enough: what's playing (or a made-up song), in its design's
+/// shape (a row, a column, a slim bar) and its touches (round ends, no panel, a glow, a record)
+component WidgetPreview inherits Rectangle {
+    in property <WidgetLook> look;
+    in property <image> art;
+    in property <string> title;
+    in property <string> artist;
+    height: 190px;
+    border-radius: 14px;
+    border-width: 1px;
+    border-color: Theme.line;
+    clip: true;
+    Rectangle { background: @linear-gradient(135deg, #2b3550 0%, #3a2b48 100%); }
+    Caps { r: 14px; outside: Theme.bg; tl: #2b3550; tr: #33304c; bl: #33304c; br: #3a2b48; top: true; bottom: true; }
+    Text { x: 12px; y: 8px; text: "A preview, near enough. Pop Out Preview below shows it exactly."; color: #ffffffa0; font-size: 11px; }
+    property <string> d: root.look.design;
+    property <bool> column: root.d == "square" || root.d == "poster" || root.d == "polaroid" || root.d == "vertical";
+    property <bool> slim: root.d == "bar" || root.d == "ticker";
+    property <bool> bare: root.d == "minimal";
+    property <bool> round-art: root.d == "vinyl";
+    property <length> fs: 15px * clamp(root.look.text, 0.7, 1.6);
+    property <float> p: Theme.motion ? mod(animation-tick() / 1ms, 60000) / 60000 : 0.35;
+    card := Rectangle {
+        property <length> w: root.column ? 170px : root.slim ? min(root.width - 48px, 520px) : min(root.width - 48px, 440px);
+        property <length> h: root.column ? 150px : root.slim ? 38px : 96px;
+        width: self.w;
+        height: self.h;
+        x: root.look.right ? root.width - self.w - 24px : 24px;
+        y: (root.height - self.h) / 2 + 8px;
+        border-radius: !root.look.rounded ? 0px : root.d == "pill" ? self.h / 2 : root.slim ? 6px : 14px;
+        // (a solid blend of its two colours: a gradient would lose its rounded corners in the software renderer)
+        background: root.bare ? transparent : root.d == "frosted" ? #ffffff26 : root.d == "neon" ? #08061ae6 : root.look.c1.mix(root.look.c2, 0.5).mix(#0a0814, 0.5);
+        border-width: root.d == "neon" ? 2px : root.d == "frosted" ? 1px : 0px;
+        border-color: root.d == "neon" ? root.look.c1 : #ffffff48;
+        drop-shadow-blur: root.d == "neon" ? 16px : 0px;
+        drop-shadow-color: root.look.c1;
+        clip: true;
+        // (its cover: square, or a record that turns)
+        Rectangle {
+            property <length> s: root.column ? 92px : root.slim ? 28px : 72px;
+            width: self.s;
+            height: self.s;
+            x: root.column ? (parent.width - self.s) / 2 : root.look.right ? parent.width - self.s - 12px : (root.slim ? 5px : 12px);
+            y: root.column ? 10px : (parent.height - self.s) / 2;
+            border-radius: root.round-art || root.d == "pill" ? self.s / 2 : 8px;
+            clip: true;
+            background: root.look.c1.with-alpha(0.5);
+            Image { source: root.art; width: parent.width; height: parent.height; image-fit: cover; transform-rotation: root.round-art && root.look.spin && Theme.motion ? mod(animation-tick() / 1ms, 4000) / 4000 * 360deg : 0deg; }
+        }
+        VerticalLayout {
+            x: root.column ? 10px : root.look.right ? 12px : (root.slim ? 42px : 98px);
+            y: root.column ? 108px : 0px;
+            width: root.column ? parent.width - 20px : parent.width - (root.slim ? 54px : 112px);
+            height: root.column ? 36px : parent.height;
+            alignment: center;
+            spacing: 2px;
+            Text { text: root.title; color: #ffffff; font-size: root.slim ? root.fs * 0.9 : root.fs * 1.15; font-weight: 800; overflow: elide; horizontal-alignment: root.column ? center : root.look.right ? right : left; }
+            if !root.slim: Text { text: root.artist + (root.look.requester ? "  \u{b7}  for PixelPanda" : ""); color: #ffffffc0; font-size: root.fs * 0.85; overflow: elide; horizontal-alignment: root.column ? center : root.look.right ? right : left; }
+            if !root.slim && !root.column: Rectangle {
+                height: 4px;
+                border-radius: 2px;
+                background: #ffffff30;
+                Rectangle { x: 0; width: parent.width * root.p; border-radius: 2px; background: @linear-gradient(90deg, root.look.c1 0%, root.look.c2 100%); }
+            }
+        }
+    }
+}
+
+/// The alerts as they'll look in the Stream Widget: a made-up one every few seconds (a follow, a sub, bits, a
+/// raid), in their theme
+component AlertPreview inherits Rectangle {
+    in property <AlertLook> look;
+    height: 170px;
+    border-radius: 14px;
+    border-width: 1px;
+    border-color: Theme.line;
+    clip: true;
+    Rectangle { background: @linear-gradient(135deg, #2b3550 0%, #3a2b48 100%); }
+    Caps { r: 14px; outside: Theme.bg; tl: #2b3550; tr: #33304c; bl: #33304c; br: #3a2b48; top: true; bottom: true; }
+    Text { x: 12px; y: 8px; text: "A preview, with made-up alerts"; color: #ffffffa0; font-size: 11px; }
+    property <[{ head: string, main: string, msg: string, d: string }]> samples: [
+        { head: "New Follower", main: "PixelPanda", msg: "", d: Icons.heart-out },
+        { head: "New Subscriber", main: "Nova", msg: "Tier 1 \u{b7} 6 months", d: Icons.star-out },
+        { head: "Bits", main: "Zed cheered 500 bits", msg: "Great stream!", d: Icons.coins },
+        { head: "Raid", main: "RaidLeader", msg: "with 42 viewers", d: Icons.broadcast },
+    ];
+    property <int> turn: Theme.motion ? floor(animation-tick() / 3500ms) : 1;
+    property <float> into: Theme.motion ? mod(animation-tick() / 1ms, 3500) : 1000;
+    property <float> come: clamp(root.into / 500, 0, 1);
+    property <float> go: clamp((root.into - 3000) / 500, 0, 1);
+    property <{ head: string, main: string, msg: string, d: string }> it: root.samples[mod(root.turn, 4)];
+    property <string> th: root.look.theme;
+    al := Rectangle {
+        width: min(parent.width - 48px, 520px);
+        height: 92px;
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2 + 8px + (1 - root.come) * 14px - root.go * 10px;
+        opacity: root.come * (1 - root.go);
+        border-radius: root.th == "comic" ? 6px : 14px;
+        background: root.th == "glass" ? #ffffff24 : root.th == "neon" ? #080614e0 : root.th == "banner" ? root.look.c1 : root.th == "split" ? #111520 : root.th == "comic" ? #ffffff : root.th == "minimal" ? transparent
+            // (a solid blend: a gradient would lose its rounded corners in the software renderer)
+            : root.look.glow ? root.look.c1.mix(root.look.c2, 0.65) : root.look.c1.mix(root.look.c2, 0.5);
+        border-width: root.th == "neon" || root.th == "comic" ? (root.th == "comic" ? 3px : 2px) : root.th == "glass" ? 1px : 0px;
+        border-color: root.th == "neon" ? root.look.c1 : root.th == "comic" ? #111111 : #ffffff48;
+        drop-shadow-blur: root.th == "neon" ? 18px : 0px;
+        drop-shadow-color: root.look.c1;
+        HorizontalLayout {
+            padding: 12px;
+            spacing: 14px;
+            Rectangle {
+                width: self.height;
+                border-radius: 10px;
+                background: root.th == "split" ? root.look.c1.mix(root.look.c2, 0.5) : root.th == "comic" ? root.look.c1 : root.th == "neon" ? transparent
+                    : root.th == "glass" ? #ffffff2e : root.th == "minimal" ? #00000059 : root.th == "banner" ? #00000038 : root.look.c1.mix(#ffffff, 0.55).with-alpha(0.7);
+                border-width: root.th == "neon" || root.th == "comic" ? 2px : 0px;
+                border-color: root.th == "neon" ? root.look.c1 : #111111;
+                Glyph { d: root.it.d; width: parent.width * 0.5 * clamp(root.look.icon, 0.6, 2); height: self.width; fill: #ffffff; }
+            }
+            VerticalLayout {
+                horizontal-stretch: 1;
+                alignment: center;
+                spacing: 2px;
+                Text { text: root.it.head.to-uppercase(); color: root.th == "neon" || root.th == "split" ? root.look.c1 : root.th == "comic" ? #111111c8 : #ffffffc8; font-size: 12px; font-weight: 800; letter-spacing: 1.5px; }
+                Text { text: root.it.main; color: root.th == "comic" ? #111111 : #ffffff; font-size: root.th == "banner" ? 24px : 20px; font-weight: 800; overflow: elide; }
+                if root.it.msg != "": Text { text: root.it.msg; color: root.th == "comic" ? #111111c8 : #ffffffd0; font-size: 13px; overflow: elide; }
+            }
+        }
+    }
+}
+
+/// A Suite widget as it'll look in OBS (Goals, Timer, Latest Follow or Sub, Raid Shoutout), with made-up
+/// numbers, in its theme (dark, glass, neon, comic, minimal)
+component SuitePreview inherits Rectangle {
+    in property <string> which;
+    in property <string> theme;
+    in property <bool> rings;
+    height: root.which == "raid" || root.which == "wheel" || root.which == "emoterain" ? 220px : root.which == "goals" || root.which == "leaderboard" ? 200px : 130px;
+    border-radius: 14px;
+    border-width: 1px;
+    border-color: Theme.line;
+    clip: true;
+    Rectangle { background: @linear-gradient(135deg, #2b3550 0%, #3a2b48 100%); }
+    Caps { r: 14px; outside: Theme.panel; tl: #2b3550; tr: #33304c; bl: #33304c; br: #3a2b48; top: true; bottom: true; }
+    Text { x: 12px; y: 8px; text: "A preview, with made-up numbers"; color: #ffffffa0; font-size: 11px; }
+    property <string> t: root.theme == "" ? "dark" : root.theme;
+    property <bool> comic: root.t == "comic";
+    property <color> c1: Theme.accent;
+    property <color> c2: Theme.accent-2;
+    property <color> ink: root.comic ? #111111 : #ffffff;
+    // (the goals' bars filling, again and again)
+    property <float> fill: Theme.motion ? mod(animation-tick() / 1ms, 6000) / 6000 : 0.6;
+    // (the wheel: turning; emote rain: falling, with no panel of its own)
+    if root.which == "wheel": Rectangle {
+        width: 170px;
+        height: 170px;
+        x: (parent.width - self.width) / 2;
+        y: 32px;
+        border-radius: 85px;
+        background: root.c1.mix(root.c2, 0.5);
+        border-width: 5px;
+        border-color: #ffffffd8;
+        clip: true;
+        property <angle> turn: Theme.motion ? mod(animation-tick() / 1ms, 7000) / 7000 * 360deg : 20deg;
+        // (its spokes: one path, its ends worked out from the turn, as a rectangle can't be turned here)
+        Path {
+            width: parent.width;
+            height: parent.height;
+            viewbox-width: 100;
+            viewbox-height: 100;
+            stroke: #ffffffa0;
+            stroke-width: 2.5px;
+            fill: transparent;
+            property <angle> a: parent.turn;
+            commands: "M " + (50 + 50 * cos(self.a)) + " " + (50 + 50 * sin(self.a)) + " L " + (50 - 50 * cos(self.a)) + " " + (50 - 50 * sin(self.a))
+                + " M " + (50 + 50 * cos(self.a + 60deg)) + " " + (50 + 50 * sin(self.a + 60deg)) + " L " + (50 - 50 * cos(self.a + 60deg)) + " " + (50 - 50 * sin(self.a + 60deg))
+                + " M " + (50 + 50 * cos(self.a + 120deg)) + " " + (50 + 50 * sin(self.a + 120deg)) + " L " + (50 - 50 * cos(self.a + 120deg)) + " " + (50 - 50 * sin(self.a + 120deg));
+        }
+        Rectangle { width: 26px; height: 26px; border-radius: 13px; background: #ffffff; }
+    }
+    if root.which == "wheel": Path { x: (parent.width - 20px) / 2; y: 24px; width: 20px; height: 22px; commands: "M 0 0 L 20 0 L 10 22 Z"; fill: #ffffff; viewbox-width: 20; viewbox-height: 22; }
+    if root.which == "emoterain": Rectangle {
+        y: 22px;
+        height: parent.height - 22px;
+        for k in 9: Glyph {
+            property <float> lag: mod(k * 0.37, 1);
+            property <float> t: Theme.motion ? mod(animation-tick() / 1ms / 4200 + self.lag, 1) : self.lag;
+            d: mod(k, 3) == 0 ? Icons.heart-out : mod(k, 3) == 1 ? Icons.star-out : Icons.chat;
+            width: 26px;
+            height: 26px;
+            x: parent.width * (0.06 + mod(k * 0.29, 0.9));
+            y: -30px + self.t * (parent.height + 40px);
+            fill: mod(k, 2) == 0 ? root.c1 : root.c2;
+            opacity: 0.95;
+        }
+    }
+    pan := Rectangle {
+        visible: root.which != "wheel" && root.which != "emoterain";
+        width: root.which == "goals" ? min(parent.width - 40px, 420px) : root.which == "raid" ? min(parent.width - 40px, 380px) : min(parent.width - 40px, 360px);
+        height: inner.preferred-height;
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2 + 8px;
+        border-radius: root.comic ? 6px : 14px;
+        background: root.t == "glass" ? #ffffff24 : root.t == "neon" ? #080614e0 : root.comic ? #ffffff : root.t == "minimal" ? transparent : #0a0814d1;
+        border-width: root.t == "glass" ? 1px : root.t == "neon" ? 2px : root.comic ? 3px : 0px;
+        border-color: root.t == "neon" ? root.c1 : root.comic ? #111111 : #ffffff48;
+        drop-shadow-blur: root.t == "neon" ? 16px : 0px;
+        drop-shadow-color: root.c1;
+        inner := VerticalLayout {
+            padding: 14px;
+            spacing: 8px;
+            if root.which == "goals" && !root.rings: VerticalLayout {
+                spacing: 8px;
+                for g[i] in [{ n: "Followers", a: 7, b: 10 }, { n: "Subs", a: 3, b: 5 }, { n: "Bits", a: 650, b: 1000 }]: VerticalLayout {
+                    spacing: 3px;
+                    HorizontalLayout { Text { text: g.n; color: root.ink; font-size: 13px; font-weight: 700; horizontal-stretch: 1; } Text { text: g.a + " / " + g.b; color: root.ink.with-alpha(0.8); font-size: 12px; } }
+                    Rectangle {
+                        height: 9px;
+                        border-radius: 5px;
+                        background: root.comic ? #0000001f : #ffffff29;
+                        Rectangle { x: 0; width: parent.width * min(1, g.a / g.b * (0.6 + 0.4 * root.fill)); border-radius: 5px; background: root.c1.mix(root.c2, 1 - i * 0.3); }
+                    }
+                }
+            }
+            if root.which == "goals" && root.rings: HorizontalLayout {
+                alignment: center;
+                spacing: 22px;
+                for g in [{ n: "Followers", p: 70 }, { n: "Subs", p: 60 }, { n: "Bits", p: 65 }]: VerticalLayout {
+                    spacing: 4px;
+                    Rectangle {
+                        width: 64px;
+                        height: 64px;
+                        border-radius: 32px;
+                        border-width: 6px;
+                        border-color: root.c1;
+                        Text { text: g.p + "%"; color: root.ink; font-size: 14px; font-weight: 800; }
+                    }
+                    Text { text: g.n; color: root.ink; font-size: 11px; horizontal-alignment: center; }
+                }
+            }
+            if root.which == "hype" || root.which == "voteskip": VerticalLayout {
+                spacing: 6px;
+                HorizontalLayout {
+                    Text { text: root.which == "hype" ? "Hype" : "Skip this song? Type !skip"; color: root.ink; font-size: 14px; font-weight: 700; horizontal-stretch: 1; }
+                    Text { text: root.which == "hype" ? "Level 3" : "3 / 5"; color: root.ink; font-size: 15px; font-weight: 800; }
+                }
+                Rectangle {
+                    height: 12px;
+                    border-radius: 6px;
+                    background: root.comic ? #0000001f : #ffffff29;
+                    Rectangle { x: 0; width: parent.width * (root.which == "hype" ? 0.25 + 0.7 * root.fill : 0.6); border-radius: 6px; background: root.c1.mix(root.c2, 0.4); }
+                }
+            }
+            if root.which == "leaderboard": VerticalLayout {
+                spacing: 5px;
+                Text { text: "TOP POINTS"; color: root.ink.with-alpha(0.75); font-size: 11px; letter-spacing: 1.2px; }
+                for p[i] in [{ n: "PixelPanda", s: 4820 }, { n: "Nova", s: 3610 }, { n: "Zed", s: 2950 }, { n: "quietcat", s: 1200 }]: HorizontalLayout {
+                    spacing: 10px;
+                    Rectangle { width: 22px; height: 22px; border-radius: 11px; background: root.c1.mix(root.c2, 1 - i * 0.25); Text { text: i + 1; color: #ffffff; font-size: 11px; font-weight: 800; } }
+                    Text { text: p.n; color: root.ink; font-size: 14px; font-weight: 700; horizontal-stretch: 1; vertical-alignment: center; }
+                    Text { text: p.s; color: root.ink.with-alpha(0.85); font-size: 13px; vertical-alignment: center; }
+                }
+            }
+            if root.which == "timer": VerticalLayout {
+                alignment: center;
+                Text { text: "SUBATHON"; color: root.ink.with-alpha(0.75); font-size: 11px; letter-spacing: 1.5px; horizontal-alignment: center; }
+                Text { text: Theme.motion ? "59:" + (59 - mod(floor(animation-tick() / 1000ms), 60) < 10 ? "0" : "") + (59 - mod(floor(animation-tick() / 1000ms), 60)) : "59:32"; color: root.ink; font-size: 40px; font-weight: 800; horizontal-alignment: center; }
+            }
+            if root.which == "latest": HorizontalLayout {
+                spacing: 12px;
+                Rectangle { width: 44px; height: 44px; border-radius: 10px; background: root.c1.mix(root.c2, 0.5); Glyph { d: Icons.heart-out; width: 24px; height: 24px; fill: #ffffff; } }
+                VerticalLayout { alignment: center; Text { text: "LATEST FOLLOWER"; color: root.ink.with-alpha(0.75); font-size: 11px; letter-spacing: 1.2px; } Text { text: "PixelPanda"; color: root.ink; font-size: 20px; font-weight: 800; } }
+            }
+            if root.which == "raid": VerticalLayout {
+                spacing: 6px;
+                alignment: center;
+                Text { text: "GO FOLLOW"; color: root.c1; font-size: 13px; font-weight: 900; letter-spacing: 4px; horizontal-alignment: center; }
+                Text { text: "RaidLeader"; color: root.ink; font-size: 28px; font-weight: 800; horizontal-alignment: center; }
+                HorizontalLayout {
+                    alignment: center;
+                    Rectangle {
+                        width: rt.preferred-width + 28px;
+                        height: 30px;
+                        border-radius: 15px;
+                        background: root.c1.mix(root.c2, 0.5);
+                        rt := Text { text: "twitch.tv/raidleader"; color: #ffffff; font-size: 13px; font-weight: 700; }
+                    }
+                }
+                Rectangle { height: 60px; border-radius: 8px; background: #000000; Text { text: "Their clip plays here"; color: #ffffff80; font-size: 11px; } }
+            }
+        }
+    }
+}
+
+/// One message, as the Multichat Overlay draws it in its theme
+component ChatRow inherits Rectangle {
+    in property <ChatSample> m;
+    in property <ChatLook> look;
+    property <length> fs: clamp(root.look.size * 0.7, 10, 30) * 1px;
+    property <color> pc: root.m.kick ? #53fc18 : #a970ff;
+    property <string> st: root.look.style;
+    property <bool> comic: root.st == "comic";
+    property <bool> term: root.st == "terminal";
+    height: rowl.preferred-height;
+    border-radius: root.st == "bubbles" ? 4px : root.st == "terminal" ? 3px : root.st == "comic" ? 16px : root.st == "minimal" ? 0px : 11px;
+    background: root.st == "plain" ? #0a0c12.with-alpha(root.look.bg) : root.st == "bubbles" ? #0a0c12.with-alpha(max(root.look.bg, 0.55)) : root.st == "glass" ? #ffffff1f
+        : root.st == "neon" ? #060412b8 : root.st == "cards" ? #191c28 : root.term ? #000000c7 : root.comic ? #ffffff : transparent;
+    border-width: root.st == "glass" || root.st == "neon" || root.comic ? (root.comic ? 2px : 1px) : 0px;
+    border-color: root.st == "neon" ? root.pc : root.comic ? #111111 : #ffffff38;
+    drop-shadow-blur: root.st == "neon" ? 10px : root.st == "cards" ? 12px : 0px;
+    drop-shadow-color: root.st == "neon" ? root.pc : #00000070;
+    // (Bubbles', Cards' and Terminal's coloured edge)
+    if root.st == "bubbles" || root.term: Rectangle { x: 0; width: root.term ? 2px : 3px; background: root.term ? #3cff6e : root.pc; border-radius: 2px; }
+    if root.st == "cards": Rectangle { y: 0; height: 3px; background: root.pc; }
+    rowl := HorizontalLayout {
+        padding-left: root.st == "minimal" ? 4px : 10px;
+        padding-right: 10px;
+        padding-top: root.st == "minimal" ? 2px : 6px;
+        padding-bottom: root.st == "minimal" ? 2px : 6px;
+        spacing: 7px;
+        if root.look.marks: VerticalLayout { alignment: start; padding-top: 2px; Glyph { d: root.m.kick ? Icons.kick : Icons.twitch; width: root.fs; height: root.fs; fill: root.pc; } }
+        VerticalLayout {
+            horizontal-stretch: 1;
+            spacing: 1px;
+            HorizontalLayout {
+                spacing: 4px;
+                alignment: start;
+                if root.look.badges && root.m.badge != "": Rectangle {
+                    width: bt.preferred-width + 6px;
+                    height: root.fs * 0.8;
+                    y: (parent.height - self.height) / 2;
+                    border-radius: 3px;
+                    background: root.m.badge == "MOD" ? #3ccd6c : root.m.badge == "VIP" ? #e05ce0 : root.m.badge == "SUB" ? #7aa2ff : #ff4f4f;
+                    bt := Text { text: root.m.badge; color: #111111; font-size: root.fs * 0.55; font-weight: 800; }
+                }
+                Text { text: root.m.name + (root.st == "cards" ? "" : ":"); color: root.m.colour; font-size: root.st == "cards" ? root.fs * 0.8 : root.st == "minimal" ? root.fs * 0.85 : root.fs; font-weight: 800;
+                    font-family: root.term ? "Consolas" : ""; }
+                if root.st != "cards": Text { text: root.m.text; color: root.comic ? #111111 : root.term ? #b6ffbe : #ffffff; font-size: root.fs; font-weight: 500; wrap: word-wrap; horizontal-stretch: 1; font-family: root.term ? "Consolas" : ""; }
+            }
+            if root.st == "cards": Text { text: root.m.text; color: #ffffff; font-size: root.fs; font-weight: 500; wrap: word-wrap; }
+        }
+    }
+}
+
+/// The Multichat Overlay as it'll look in OBS: over a stream, made-up chat coming in every couple of seconds
+component ChatPreview inherits Rectangle {
+    in property <ChatLook> look;
+    in property <[ChatSample]> samples;
+    height: 230px;
+    border-radius: 14px;
+    border-width: 1px;
+    border-color: Theme.line;
+    clip: true;
+    // (two colours only: a third stop drew a seam across it in the software renderer)
+    Rectangle { background: @linear-gradient(135deg, #2b3550 0%, #3a2b48 100%); }
+    Caps { r: 14px; outside: Theme.bg; tl: #2b3550; tr: #33304c; bl: #33304c; br: #3a2b48; top: true; bottom: true; }
+    Text { x: 12px; y: 8px; text: "A preview, with made-up chat"; color: #ffffffa0; font-size: 11px; }
+    // (a new one every 2 s: the newest is the turn's, the rest the ones before it)
+    property <int> n: max(1, root.samples.length);
+    property <int> turn: Theme.motion ? floor(animation-tick() / 2000ms) : 4;
+    property <float> into: Theme.motion ? mod(animation-tick() / 1ms, 2000) / 350 : 1;
+    property <float> come: clamp(root.into, 0, 1);
+    VerticalLayout {
+        x: 14px;
+        y: 26px;
+        width: parent.width * 0.55;
+        height: parent.height - 34px;
+        alignment: root.look.top ? LayoutAlignment.start : LayoutAlignment.end;
+        spacing: 6px;
+        // (newest at the bottom: the oldest first; at the top, the newest first)
+        for k in 5: ChatRow {
+            property <int> age: root.look.top ? k : 4 - k;
+            m: root.samples[mod(root.turn - self.age + root.n * 100, root.n)];
+            look: root.look;
+            opacity: self.age == 0 ? root.come : 1;
+        }
+    }
+}
+
 /// One platform, as the Social Plug draws it (Card, Pill or Minimal; in its colours or not)
 component SocialCard inherits Rectangle {
     in property <SocialItem> it;
     in property <SocialLook> look;
     property <bool> pill: root.look.style == "pill";
     property <bool> bare: root.look.style == "minimal";
+    property <bool> glass: root.look.style == "glass";
+    property <bool> neon: root.look.style == "neon";
+    property <bool> comic: root.look.style == "comic";
+    // (Coloured: only Card's and Pill's panel; the others have their own)
+    property <bool> coloured: root.look.coloured && (root.look.style == "card" || root.pill);
     height: 58px;
     width: row.preferred-width;
     border-radius: !root.look.rounded ? 0px : root.pill ? self.height / 2 : 12px;
-    background: root.bare ? transparent : root.look.coloured ? @linear-gradient(115deg, root.it.c1 0%, root.it.c2 100%) : #0a0814d1;
-    clip: true;
+    background: root.bare ? transparent : root.glass ? #ffffff24 : root.neon ? #080614e0 : root.comic ? #ffffff : root.coloured ? root.it.c1.mix(root.it.c2, 0.5) : #0a0814d1;
+    border-width: root.glass ? 1px : root.neon ? 2px : root.comic ? 3px : 0px;
+    border-color: root.neon ? root.it.c1 : root.comic ? #111111 : #ffffff48;
+    drop-shadow-blur: root.neon ? 14px : 0px;
+    drop-shadow-color: root.it.c1;
+    clip: !root.neon;
     row := HorizontalLayout {
         padding: 9px;
         padding-right: root.pill ? 22px : 16px;
@@ -2357,14 +2874,17 @@ component SocialCard inherits Rectangle {
             width: 40px;
             height: 40px;
             border-radius: !root.look.rounded ? 0px : root.pill ? 20px : 10px;
-            background: root.look.coloured && !root.bare ? #00000038 : @linear-gradient(135deg, root.it.c1 0%, root.it.c2 100%);
+            // (solid blends, not gradients: the software renderer would draw them square-cornered)
+            background: root.neon ? transparent : root.coloured && !root.bare ? #00000038 : root.it.c1.mix(root.it.c2, 0.5);
+            border-width: root.neon || root.comic ? 2px : 0px;
+            border-color: root.neon ? root.it.c1 : #111111;
             if root.it.d != "": Glyph { d: root.it.d; width: 25px; height: 25px; fill: #ffffff; }
             if root.it.d == "": Text { text: root.it.letter; color: #ffffff; font-size: 21px; font-weight: 800; }
         }
         VerticalLayout {
             alignment: center;
-            Text { text: root.it.handle; color: #ffffff; font-size: 17px; font-weight: 700; overflow: elide; }
-            Text { text: root.it.name.to-uppercase(); color: #ffffffbf; font-size: 11px; letter-spacing: 0.5px; }
+            Text { text: root.it.handle; color: root.comic ? #111111 : #ffffff; font-size: 17px; font-weight: 700; overflow: elide; }
+            Text { text: root.it.name.to-uppercase(); color: root.comic ? #111111bf : #ffffffbf; font-size: 11px; letter-spacing: 0.5px; }
         }
     }
 }
@@ -2424,8 +2944,8 @@ component LyricsPreview inherits Rectangle {
     border-width: 1px;
     border-color: Theme.line;
     clip: true;
-    // (a game behind it, to read it over)
-    Rectangle { background: @linear-gradient(135deg, #2b3550 0%, #3d2b45 55%, #1f3a3a 100%); }
+    // (a game behind it, to read it over; two colours only: a third stop drew a seam across it)
+    Rectangle { background: @linear-gradient(135deg, #2b3550 0%, #3a2b48 100%); }
     property <length> fs: clamp(root.look.size * 0.42, 12, 34) * 1px;
     property <color> hi: root.look.own-hi ? root.look.hi : Theme.accent;
     property <TextHorizontalAlignment> al: root.look.align == "left" ? TextHorizontalAlignment.left : root.look.align == "right" ? TextHorizontalAlignment.right : TextHorizontalAlignment.center;
@@ -2556,7 +3076,9 @@ global BotLook {
     }
     public pure function icon(id: string) -> string {
         return id == "twitch" || id == "twitchbot" ? Icons.twitch : id == "kick" || id == "kickbot" ? Icons.kick : id == "obs" ? Icons.broadcast : id == "streamlabs" || id == "streamelements" ? Icons.coins
-            : id == "requests" ? Icons.playlist-add : id == "alerts" ? Icons.bell : id == "points" ? Icons.coins : id == "games" ? Icons.dice : Icons.actions;
+            : id == "requests" ? Icons.playlist-add : id == "alerts" ? Icons.bell : id == "points" ? Icons.coins : id == "games" ? Icons.dice : id == "moderation" ? Icons.shield
+            : id == "hype" ? Icons.broadcast : id == "voteskip" ? Icons.next : id == "wheel" ? Icons.dice : id == "leaderboard" ? Icons.coins : id == "emoterain" ? Icons.chat
+            : id == "goals" ? Icons.check : id == "timer" ? Icons.refresh : id == "latest" ? Icons.heart-out : id == "raid" ? Icons.broadcast : Icons.actions;
     }
 }
 
@@ -2672,6 +3194,15 @@ component BotFieldRow inherits VerticalLayout {
         VerticalLayout { horizontal-stretch: 1; alignment: center; Text { text: root.f.label; color: Theme.text; font-weight: 700; font-size: 13px; } }
         for c in [{ id: "daily", n: "Each Day" }, { id: "stream", n: "Each Stream" }, { id: "never", n: "Never" }]: VerticalLayout { alignment: center; Chip { label: c.n; on: root.f.value == c.id; clicked => { root.set(root.f.key, c.id); } } }
     }
+    // (a row of choices, as many as it has)
+    if root.f.kind == "chips": VerticalLayout {
+        spacing: 6px;
+        Text { text: root.f.label; color: Theme.text; font-weight: 700; font-size: 13px; }
+        if root.f.note != "": Text { text: root.f.note; color: Theme.muted; font-size: 11px; wrap: word-wrap; }
+        HorizontalLayout { spacing: 6px; alignment: start; for c[i] in root.f.opts: Chip { label: c; on: root.f.value == root.f.opt-ids[i]; clicked => { root.set(root.f.key, root.f.opt-ids[i]); } } }
+    }
+    // (a Suite widget's preview: which one, its theme in extra, the Goals' look in label)
+    if root.f.kind == "suiteprev": SuitePreview { which: root.f.value; theme: root.f.extra; rings: root.f.label == "rings"; }
     if root.f.kind == "chips2": HorizontalLayout {
         spacing: 12px;
         VerticalLayout { horizontal-stretch: 1; alignment: center; Text { text: root.f.label; color: Theme.text; font-weight: 700; font-size: 13px; } }
@@ -3229,6 +3760,39 @@ component BotPage inherits Rectangle {
                         }
                     }
                 }
+                // the fun: chat playing along, shown
+                if root.widgets-view == "widgets": Text { text: "Fun"; color: Theme.muted; font-size: 12px; font-weight: 700; }
+                if root.widgets-view == "widgets": HorizontalLayout {
+                    spacing: 8px;
+                    for w[wi] in [
+                        { n: "Hype Meter", p: "/hype", s: "hype", i: Icons.broadcast },
+                        { n: "Vote Skip", p: "/voteskip", s: "voteskip", i: Icons.next },
+                        { n: "Spin the Wheel", p: "/wheel", s: "wheel", i: Icons.dice },
+                        { n: "Leaderboard", p: "/leaderboard", s: "leaderboard", i: Icons.coins },
+                        { n: "Emote Rain", p: "/emotes", s: "emoterain", i: Icons.chat },
+                    ]: Rectangle {
+                        horizontal-stretch: 1;
+                        preferred-width: 0px;
+                        min-width: 0px;
+                        height: 74px;
+                        border-radius: 14px;
+                        background: Theme.panel.mix(BotLook.tile(wi + 3), 0.9);
+                        border-width: 1px;
+                        border-color: BotLook.tile(wi + 3).with-alpha(0.3);
+                        VerticalLayout {
+                            padding: 10px;
+                            spacing: 4px;
+                            HorizontalLayout {
+                                spacing: 6px;
+                                VerticalLayout { alignment: center; Glyph { d: w.i; width: 15px; height: 15px; fill: Theme.accent; } }
+                                Text { text: w.n; color: Theme.text; font-weight: 700; font-size: 12px; horizontal-stretch: 1; overflow: elide; vertical-alignment: center; }
+                                IconButton { d: Icons.copy; size: 28px; tip: "Copy its address, for OBS"; clicked => { root.act("copy:http://127.0.0.1:" + root.port + w.p); } }
+                                IconButton { d: Icons.gear; size: 28px; tip: "Its settings"; clicked => { root.act("sheet:" + w.s); } }
+                            }
+                            Text { text: "http://127.0.0.1:" + root.port + w.p; color: Theme.accent.mix(Theme.text, 0.55); font-size: 10px; font-family: "Consolas"; overflow: elide; }
+                        }
+                    }
+                }
                 // what it does
             }
         }
@@ -3579,6 +4143,10 @@ export component AppWindow inherits Window {
     in property <string> bot-widgets;
     in property <LyricsLook> pf-lyrics;
     in property <[SocialItem]> pf-social-items;
+    in property <ChatLook> pf-chat;
+    in property <AlertLook> pf-alert;
+    in property <WidgetLook> pf-widget;
+    in property <[ChatSample]> pf-chat-samples;
     in property <SocialLook> pf-social;
     // the chatbot's own page, in place of its list of fields
     in property <bool> bot-page;
@@ -3619,6 +4187,10 @@ export component AppWindow inherits Window {
     in property <[FlowNode]> flow-steps;
     in property <[string]> flow-trigger-types;
     in property <[string]> flow-step-types;
+    /// (the triggers' and steps' menus, in categories; and a search over one of them)
+    in property <[MenuEntry]> flow-trigger-menu;
+    in property <[MenuEntry]> flow-step-menu;
+    callback flow-menu-query(bool, string);
     in property <[string]> flow-templates;
     callback flow-act(string);
     callback flow-pick(int);
@@ -3633,6 +4205,9 @@ export component AppWindow inherits Window {
     /// (the list: a group folded or opened, and what's searched for)
     callback flow-group-fold(string);
     callback flow-find(string);
+    /// (the reward wizard: open, and what's made)
+    in-out property <bool> reward-make-open;
+    callback reward-make(RewardForm);
     callback flow-on-toggled(bool);
     callback flow-trigger-type(int);
     callback flow-step-type(int, int);
@@ -4089,7 +4664,7 @@ export component AppWindow inherits Window {
                             pointer-event(e) => { if (e.kind == PointerEventKind.down && e.button == PointerEventButton.right) { Tips.on = false; root.streamer-music(); } }
                         }
                     }
-                    // the Stream Suite: grey when off; running, lit as Streamer Mode is (YouTube red, Twitch purple, Kick green)
+                    // the chatbot (the Suite's): grey when stopped; running, lit as Streamer Mode is (YouTube red, Twitch purple, Kick green)
                     if root.suite-shown: Rectangle {
                         width: 32px;
                         Rectangle { width: 28px; height: 28px; x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2; border-radius: 8px; background: sta-b.has-hover ? Theme.elevated : transparent; }
@@ -4106,7 +4681,7 @@ export component AppWindow inherits Window {
                                 : #53fc18.mix(#ff0033, 3 - parent.phase).mix(Theme.muted, 0.75);
                             opacity: root.suite-on ? 1 : 0.55;
                         }
-                        TipSpot { hover: sta-b.has-hover; tip: root.suite-on ? "The Stream Suite is running. Click to stop it, right-click for its settings." : "The Stream Suite is stopped. Click to start it, right-click for its settings."; }
+                        TipSpot { hover: sta-b.has-hover; tip: root.suite-on ? "Your chatbot is running. Click to stop it. Right-click for its settings." : "Your chatbot is stopped. Click to start it. Right-click for its settings."; }
                         sta-b := TouchArea {
                             clicked => { Tips.on = false; root.plat-toggle("suite"); }
                             pointer-event(e) => { if (e.kind == PointerEventKind.down && e.button == PointerEventButton.right) { Tips.on = false; root.title-settings("plugin:chatbot"); } }
@@ -4421,6 +4996,8 @@ export component AppWindow inherits Window {
                     }
                     // (Sidebar: the player here, the status above it; the whole width left for the pages)
                     if root.side-player: VerticalLayout {
+                        // (only as tall as it is: the playlists above take the rest)
+                        vertical-stretch: 0;
                         spacing: 6px;
                         padding-top: 8px;
                         Rectangle { height: 1px; background: Theme.line; }
@@ -4429,20 +5006,26 @@ export component AppWindow inherits Window {
                             Text { text: root.status; color: root.status-bad ? #ff8a80 : Theme.text; font-size: 12px; wrap: word-wrap; TouchArea { mouse-cursor: MouseCursor.pointer; clicked => { root.status-dismiss(); } } }
                             HorizontalLayout { spacing: 6px; alignment: start; for a[i] in root.status-actions: Pill { label: a; on: i == 0; clicked => { root.status-act(i); } } }
                         }
+                        // (compact: its cover beside its name, so the playlists keep the room)
                         HorizontalLayout {
-                            alignment: center;
+                            spacing: 10px;
                             Rectangle {
-                                // (smaller on a short window: the playlists keep their room)
-                                width: root.height > 900px ? 150px : 96px; height: self.width;
-                                border-radius: 10px;
+                                width: 60px;
+                                height: 60px;
+                                border-radius: 8px;
                                 clip: true;
                                 background: Theme.elevated;
                                 Image { source: root.now-art; width: parent.width; height: parent.height; image-fit: cover; }
                                 TouchArea { mouse-cursor: MouseCursor.pointer; clicked => { root.nav(root.page == "now" ? "library" : "now"); } pointer-event(e) => { if (e.kind == PointerEventKind.up && e.button == PointerEventButton.right) { root.now-menu-x = self.absolute-position.x + self.mouse-x; root.now-menu-y = self.absolute-position.y + self.mouse-y; root.now-menu(); } } }
                             }
+                            VerticalLayout {
+                                horizontal-stretch: 1;
+                                alignment: center;
+                                spacing: 2px;
+                                Marquee { text: root.now-title + (root.now-trimmed ? " *" : ""); font-size: 14px; }
+                                ArtistLinks { names: root.now-artists; text: root.now-artist; size: 12px; pick(k) => { root.now-act("artist:" + k); } }
+                            }
                         }
-                        Marquee { text: root.now-title + (root.now-trimmed ? " *" : ""); font-size: 14px; }
-                        ArtistLinks { names: root.now-artists; text: root.now-artist; size: 12px; pick(k) => { root.now-act("artist:" + k); } }
                         Progress { value: root.pos-frac; length-secs: root.dur-secs; loading: root.track-loading; preloading: root.preloading; mixing: root.mixing; released(v) => { root.seek(v); } }
                         HorizontalLayout {
                             alignment: center;
@@ -6172,7 +6755,9 @@ export component AppWindow inherits Window {
                 // a switch's or a plugin's settings: the page (and the queue's room) taken over, as a page of
                 // its own, back to where you were
                 if root.pf-open: Rectangle {
-                    background: root.settings-look ? root.settings-panel : Theme.panel;
+                    // (over the page under it: solid first, so with Aurora's see-through panels nothing of that one shows through)
+                    background: Theme.bg;
+                    Rectangle { background: root.settings-look ? root.settings-panel : Theme.panel; border-radius: Theme.panel-radius; }
                     border-radius: Theme.panel-radius;
                     clip: true;
                     TouchArea { }
@@ -6252,6 +6837,9 @@ export component AppWindow inherits Window {
                           alignment: start;
                           if root.pf-preview == "lyrics": LyricsPreview { look: root.pf-lyrics; }
                           if root.pf-preview == "socials": SocialPreview { items: root.pf-social-items; look: root.pf-social; }
+                          if root.pf-preview == "multichat": ChatPreview { look: root.pf-chat; samples: root.pf-chat-samples; }
+                          if root.pf-preview == "alerts": AlertPreview { look: root.pf-alert; }
+                          if root.pf-preview == "widget": WidgetPreview { look: root.pf-widget; art: root.now-art; title: root.now-title == "Nothing playing" || root.now-title == "" ? "A Song You Love" : root.now-title; artist: root.now-artist == "" ? "Your Favourite Artist" : root.now-artist; }
                           // (its height from its layout, which knows how its notes wrap: a preferred height
                           // reads them as one line)
                           for f[i] in root.pf-fields: Rectangle {
@@ -6462,7 +7050,9 @@ export component AppWindow inherits Window {
                 // the chatbot's Actions: its actions listed, and the one picked as a flow, from what starts it (WHEN),
                 // through its steps in order, to its end
                 if root.flow-open: Rectangle {
-                    background: root.settings-panel;
+                    // (over the page under it: solid first, so with Aurora's see-through panels nothing of that one shows through)
+                    background: Theme.bg;
+                    Rectangle { background: root.settings-panel; border-radius: Theme.panel-radius; }
                     border-radius: Theme.panel-radius;
                     clip: true;
                     TouchArea { }
@@ -6516,15 +7106,33 @@ export component AppWindow inherits Window {
                                     if ffti.text == "": Text { x: 32px; height: parent.height; vertical-alignment: center; text: "Find an action"; color: Theme.muted; font-size: 12px; }
                                     ffti := TextInput { x: 32px; width: parent.width - 42px; height: parent.height; vertical-alignment: center; color: Theme.text; font-size: 12px; single-line: true; edited => { root.flow-find(self.text); } }
                                 }
+                                // (the list's keys, once one's clicked: Delete, Ctrl+Z / Ctrl+Y, Ctrl+C / X / V, Ctrl+D, Up and Down)
+                                flkeys := FocusScope {
+                                  vertical-stretch: 1;
+                                  key-pressed(e) => {
+                                    if (e.text == Key.Delete) { root.flow-act("key-delete"); return accept; }
+                                    if (e.text == Key.UpArrow) { root.flow-act("key-up"); return accept; }
+                                    if (e.text == Key.DownArrow) { root.flow-act("key-down"); return accept; }
+                                    if (e.modifiers.control) {
+                                        if (e.text == "z" || e.text == "Z") { root.flow-act(e.modifiers.shift ? "redo" : "undo"); return accept; }
+                                        if (e.text == "y" || e.text == "Y") { root.flow-act("redo"); return accept; }
+                                        if (e.text == "c" || e.text == "C") { root.flow-act("clip-copy"); return accept; }
+                                        if (e.text == "x" || e.text == "X") { root.flow-act("clip-cut"); return accept; }
+                                        if (e.text == "v" || e.text == "V") { root.flow-act("clip-paste"); return accept; }
+                                        if (e.text == "d" || e.text == "D") { root.flow-act("copy"); return accept; }
+                                    }
+                                    return reject;
+                                  }
                                 ScrollView {
-                                    vertical-stretch: 1;
                                     horizontal-scrollbar-policy: always-off;
                                     VerticalLayout {
                                         alignment: start;
-                                        spacing: 6px;
+                                        // (the space under each one that shows: a folded group's hidden ones take none)
+                                        spacing: 0px;
                                         padding-right: 8px;
                                         for it[i] in root.flow-items: VerticalLayout {
                                           spacing: 6px;
+                                          padding-bottom: it.head || it.shown ? 6px : 0px;
                                           // (its group's heading: folded or open with a click)
                                           if it.head: Rectangle {
                                             height: 26px;
@@ -6532,7 +7140,7 @@ export component AppWindow inherits Window {
                                             HorizontalLayout {
                                                 padding-left: 4px;
                                                 spacing: 6px;
-                                                Text { text: it.shut ? "\u{25b8}" : "\u{25be}"; color: fgh.has-hover ? Theme.text : Theme.muted; font-size: 12px; vertical-alignment: center; width: 10px; }
+                                                VerticalLayout { alignment: center; Chevron { open: !it.shut; tint: fgh.has-hover ? Theme.text : Theme.muted; } }
                                                 Text { text: it.group == "" ? "Ungrouped" : it.group; color: fgh.has-hover ? Theme.text : Theme.muted; font-size: 12px; font-weight: 700; vertical-alignment: center; overflow: elide; horizontal-stretch: 1; }
                                                 Text { text: it.count; color: Theme.muted; font-size: 11px; vertical-alignment: center; }
                                             }
@@ -6543,7 +7151,7 @@ export component AppWindow inherits Window {
                                             background: i == root.flow-sel ? Theme.accent.with-alpha(0.16) : fita.has-hover ? Theme.elevated : transparent;
                                             border-width: 1px;
                                             border-color: i == root.flow-sel ? Theme.accent.with-alpha(0.6) : Theme.line;
-                                            fita := TouchArea { mouse-cursor: MouseCursor.pointer; clicked => { root.flow-pick(i); } }
+                                            fita := TouchArea { mouse-cursor: MouseCursor.pointer; clicked => { flkeys.focus(); root.flow-pick(i); } }
                                             VerticalLayout {
                                                 padding-left: 12px;
                                                 padding-right: 12px;
@@ -6557,6 +7165,7 @@ export component AppWindow inherits Window {
                                         if root.flow-items.length == 0: Text { text: "No actions yet. Choose one to start from in New Action above, like a command, a thank-you for follows, or a timer."; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
                                         Rectangle { height: 76px; }
                                     }
+                                }
                                 }
                             }
                             // the one picked: its flow
@@ -6599,8 +7208,9 @@ export component AppWindow inherits Window {
                                     FlowCard {
                                         badge: "WHEN";
                                         trigger: true;
-                                        types: root.flow-trigger-types;
-                                        type-at: root.flow-trigger.kind-at;
+                                        menu: root.flow-trigger-menu;
+                                        label: root.flow-trigger.label;
+                                        menu-query(t) => { root.flow-menu-query(true, t); }
                                         note: root.flow-trigger.note;
                                         fields: root.flow-trigger.fields;
                                         type-picked(k) => { root.flow-trigger-type(k); }
@@ -6615,8 +7225,9 @@ export component AppWindow inherits Window {
                                         FlowCard {
                                             horizontal-stretch: 1;
                                             badge: i + 1;
-                                            types: root.flow-step-types;
-                                            type-at: st.kind-at;
+                                            menu: root.flow-step-menu;
+                                            label: st.label;
+                                            menu-query(t) => { root.flow-menu-query(false, t); }
                                             note: st.note;
                                             fields: st.fields;
                                             first: i == 0;
@@ -6633,7 +7244,7 @@ export component AppWindow inherits Window {
                                     FlowLink { }
                                     HorizontalLayout {
                                         alignment: start;
-                                        Dropdown { width: 260px; options: root.flow-step-types; current: -1; placeholder: "+ Add a Step"; picked(k) => { root.flow-step-add(k); } }
+                                        GroupedPicker { entries: root.flow-step-menu; label: ""; placeholder: "+ Add a Step"; picked(k) => { root.flow-step-add(k); } query(t) => { root.flow-menu-query(false, t); } }
                                     }
                                     FlowLink { }
                                     HorizontalLayout {
@@ -6652,6 +7263,101 @@ export component AppWindow inherits Window {
                         }
                         // (clear of the player's tab, laid over the page's foot)
                         if root.over-foot: Rectangle { height: 64px; }
+                    }
+                    // ---- a new Channel Points reward: what it's called and costs, and how it behaves ----
+                    if root.reward-make-open: Rectangle {
+                        background: Theme.bg.with-alpha(0.6);
+                        TouchArea { clicked => { root.reward-make-open = false; } }
+                        rwcard := Rectangle {
+                            width: min(parent.width - 48px, 560px);
+                            height: min(parent.height - 40px, rwc.preferred-height);
+                            x: (parent.width - self.width) / 2;
+                            y: 20px;
+                            border-radius: 18px;
+                            background: Theme.panel;
+                            border-width: 1px;
+                            border-color: Theme.accent.with-alpha(0.5);
+                            drop-shadow-blur: 30px;
+                            drop-shadow-color: #00000080;
+                            clip: true;
+                            TouchArea { }
+                            property <string> where: "twitch";
+                            property <bool> input;
+                            property <bool> skip;
+                            property <bool> action: true;
+                            property <color> colour: #9147ff;
+                            ScrollView {
+                              horizontal-scrollbar-policy: always-off;
+                              rwc := VerticalLayout {
+                                padding: 22px;
+                                spacing: 12px;
+                                Text { text: "Make a Channel Points Reward"; color: Theme.text; font-size: 20px; font-weight: 800; }
+                                Text { text: "It's made on your channel straight away. You can change it later on Twitch or Kick, and OmniPulse can change it with the Channel Points step."; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
+                                // (a field: its name, and a box)
+                                for q[qi] in [{ k: "title", l: "Name", n: "What viewers see, like Hydrate!", v: "" }, { k: "cost", l: "Cost", n: "In channel points.", v: "500" }, { k: "prompt", l: "Description", n: "Shown under its name. Optional.", v: "" }]: VerticalLayout {
+                                    spacing: 4px;
+                                    Text { text: q.l; color: Theme.text; font-size: 13px; font-weight: 700; }
+                                    Text { text: q.n; color: Theme.muted; font-size: 11px; }
+                                    Rectangle {
+                                        height: 34px;
+                                        border-radius: 8px;
+                                        background: Theme.bg;
+                                        border-width: 1px;
+                                        border-color: rwti.has-focus ? Theme.accent : Theme.line;
+                                        rwti := TextInput { x: 10px; width: parent.width - 20px; height: parent.height; vertical-alignment: center; color: Theme.text; font-size: 13px; single-line: true; text: q.v; input-type: q.k == "cost" ? InputType.number : InputType.text;
+                                            edited => { if (q.k == "title") { rwf.title = self.text; } else if (q.k == "cost") { rwf.cost = self.text; } else { rwf.prompt = self.text; } } }
+                                    }
+                                }
+                                rwf := Rectangle { height: 0px; property <string> title; property <string> cost: "500"; property <string> prompt; property <string> cooldown: "0"; property <string> per-stream: "0"; property <string> per-user: "0"; }
+                                Text { text: "On"; color: Theme.text; font-size: 13px; font-weight: 700; }
+                                HorizontalLayout {
+                                    spacing: 6px;
+                                    alignment: start;
+                                    for w in [{ k: "twitch", t: "Twitch" }, { k: "kick", t: "Kick" }, { k: "both", t: "Twitch and Kick" }]: Pill { label: w.t; on: rwcard.where == w.k; clicked => { rwcard.where = w.k; } }
+                                }
+                                Text { text: "Colour"; color: Theme.text; font-size: 13px; font-weight: 700; }
+                                HorizontalLayout {
+                                    spacing: 8px;
+                                    alignment: start;
+                                    for c in [#9147ff, #ff4f8b, #ff8f4a, #ffd24a, #4ad295, #5ad1ff, #2f6bff, #8b91a1]: Rectangle {
+                                        width: 28px;
+                                        height: 28px;
+                                        border-radius: 14px;
+                                        background: c;
+                                        border-width: 2px;
+                                        border-color: rwcard.colour == c ? Theme.text : rwcs.has-hover ? Theme.muted : transparent;
+                                        rwcs := TouchArea { clicked => { rwcard.colour = c; } }
+                                    }
+                                }
+                                HorizontalLayout { spacing: 10px; Text { text: "Viewers Type Something"; color: Theme.text; font-size: 13px; horizontal-stretch: 1; vertical-alignment: center; } CenterToggle { checked: rwcard.input; toggled => { rwcard.input = self.checked; } } }
+                                HorizontalLayout { spacing: 10px; Text { text: "Skip the Requests Queue"; color: Theme.text; font-size: 13px; horizontal-stretch: 1; vertical-alignment: center; } CenterToggle { checked: rwcard.skip; toggled => { rwcard.skip = self.checked; } } }
+                                for q in [{ k: "cooldown", l: "Cooldown", n: "Seconds before anyone can redeem it again. 0 for none." }, { k: "per-stream", l: "Most per Stream", n: "0 for no limit." }, { k: "per-user", l: "Most per Viewer per Stream", n: "0 for no limit." }]: HorizontalLayout {
+                                    spacing: 10px;
+                                    VerticalLayout { horizontal-stretch: 1; alignment: center; Text { text: q.l; color: Theme.text; font-size: 13px; } Text { text: q.n; color: Theme.muted; font-size: 11px; } }
+                                    Rectangle {
+                                        width: 90px;
+                                        height: 32px;
+                                        y: (parent.height - self.height) / 2;
+                                        border-radius: 8px;
+                                        background: Theme.bg;
+                                        border-width: 1px;
+                                        border-color: rwni.has-focus ? Theme.accent : Theme.line;
+                                        rwni := TextInput { x: 10px; width: parent.width - 20px; height: parent.height; vertical-alignment: center; color: Theme.text; font-size: 13px; single-line: true; text: "0"; input-type: InputType.number;
+                                            edited => { if (q.k == "cooldown") { rwf.cooldown = self.text; } else if (q.k == "per-stream") { rwf.per-stream = self.text; } else { rwf.per-user = self.text; } } }
+                                    }
+                                }
+                                HorizontalLayout { spacing: 10px; Text { text: "Make an Action for It"; color: Theme.text; font-size: 13px; horizontal-stretch: 1; vertical-alignment: center; } CenterToggle { checked: rwcard.action; toggled => { rwcard.action = self.checked; } } }
+                                HorizontalLayout {
+                                    spacing: 8px;
+                                    alignment: end;
+                                    Pill { label: "Cancel"; clicked => { root.reward-make-open = false; } }
+                                    Pill { label: "Make It"; on: true; clicked => {
+                                        root.reward-make({ title: rwf.title, cost: rwf.cost, prompt: rwf.prompt, input: rwcard.input, cooldown: rwf.cooldown, per-stream: rwf.per-stream, per-user: rwf.per-user, skip: rwcard.skip, where: rwcard.where, colour: rwcard.colour, action: rwcard.action });
+                                    } }
+                                }
+                              }
+                            }
+                        }
                     }
                 }
             }
@@ -7057,7 +7763,7 @@ export component AppWindow inherits Window {
                                 y: -12px - (root.own-lists.length + 2) * 32px - 16px;
                                 width: 240px;
                                 Rectangle {
-                                    background: Theme.elevated;
+                                    background: Theme.menu;
                                     border-radius: 10px;
                                     border-width: 1px;
                                     border-color: Theme.line;
@@ -7082,7 +7788,7 @@ export component AppWindow inherits Window {
                                 // (open while Chromecast is switched; a device picked closes it)
                                 close-policy: PopupClosePolicy.close-on-click-outside;
                                 Rectangle {
-                                    background: Theme.elevated;
+                                    background: Theme.menu;
                                     border-radius: 10px;
                                     border-width: 1px;
                                     border-color: Theme.line;
@@ -7126,7 +7832,7 @@ export component AppWindow inherits Window {
                                     : (root.now-menu-y + mbx.menu-h > Win.h - 8px ? max(8px, root.now-menu-y - mbx.menu-h) : root.now-menu-y) - mbx.absolute-position.y;
                                 width: 240px;
                                 Rectangle {
-                                    background: Theme.elevated;
+                                    background: Theme.menu;
                                     border-radius: 10px;
                                     border-width: 1px;
                                     border-color: Theme.line;

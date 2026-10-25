@@ -4419,6 +4419,13 @@ thread_local! {
     static FLOW: RefCell<(Vec<serde_json::Value>, i32)> = const { RefCell::new((Vec::new(), -1)) };
     /// (the Actions list: its folded groups, and what's searched for)
     static FLOW_FIND: RefCell<String> = const { RefCell::new(String::new()) };
+    /// (the list as it was before each change to it (a delete, a paste...), for Ctrl+Z; and what was undone,
+    /// for Ctrl+Y)
+    static FLOW_UNDO: RefCell<Vec<(Vec<serde_json::Value>, i32)>> = const { RefCell::new(Vec::new()) };
+    /// (what the Actions page's pickers list, from the Suite: your rewards on Twitch and Kick, OBS's scenes and
+    /// sources)
+    static PICKS: RefCell<serde_json::Value> = const { RefCell::new(serde_json::Value::Null) };
+    static FLOW_REDO: RefCell<Vec<(Vec<serde_json::Value>, i32)>> = const { RefCell::new(Vec::new()) };
     /// a save waiting (a moment after the last change), by its number
     static FLOW_SAVE: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
 }
@@ -4444,25 +4451,59 @@ fn flows_open(shared: &Shared) {
     let strs = |v: Vec<&str>| ModelRc::from(Rc::new(VecModel::from(v.into_iter().map(slint::SharedString::from).collect::<Vec<_>>())));
     ui.set_flow_trigger_types(strs(flows::TRIGGERS.iter().map(|k| k.label).collect()));
     ui.set_flow_step_types(strs(flows::STEPS.iter().map(|k| k.label).collect()));
+    ui.set_flow_trigger_menu(ModelRc::from(Rc::new(VecModel::from(menu_entries(&flows::trigger_menu(), "")))));
+    ui.set_flow_step_menu(ModelRc::from(Rc::new(VecModel::from(menu_entries(&flows::step_menu(), "")))));
     ui.set_flow_templates(strs(flows::templates().into_iter().map(|t| t.0).collect()));
     flows_paint(shared);
     ui.set_flow_open(true);
+    picks_refresh(shared);
+}
+
+/// A menu's entries: each category's heading, then what's in it; hit: what matches the search (its name or
+/// its category's)
+fn menu_entries(menu: &[flows::MenuItem], find: &str) -> Vec<MenuEntry> {
+    let find = find.trim().to_lowercase();
+    let mut out = Vec::new();
+    let mut last = "";
+    for m in menu {
+        if m.cat != last { out.push(MenuEntry { cat: m.cat.into(), label: "".into(), head: true, hit: false }); last = m.cat; }
+        let hit = !find.is_empty() && format!("{} {}", m.cat, m.label).to_lowercase().contains(&find);
+        out.push(MenuEntry { cat: m.cat.into(), label: m.label.clone().into(), head: false, hit });
+    }
+    out
+}
+
+/// The menu item at an entry (its headings counted, as the page has them)
+fn menu_at(menu: &[flows::MenuItem], k: i32) -> Option<&flows::MenuItem> {
+    let mut n = -1;
+    let mut last = "";
+    for m in menu {
+        if m.cat != last { n += 1; last = m.cat; if n == k { return None; } }
+        n += 1;
+        if n == k { return Some(m); }
+    }
+    None
 }
 
 /// A trigger or a step, for its card: which kind (of the list), what it says, its fields as they're set
 fn flow_node(list: &'static [flows::Kind], v: &serde_json::Value) -> FlowNode {
     let id = v["type"].as_str().unwrap_or("");
     let at = list.iter().position(|k| k.id == id).map(|i| i as i32).unwrap_or(-1);
-    let Some(k) = flows::kind_of(list, id) else { return FlowNode { kind_at: at, note: "".into(), fields: ModelRc::default(), depth: 0 } };
+    // (its name, as its menu has it: "Twitch > Channel Points Reward")
+    let menu = if std::ptr::eq(list, flows::TRIGGERS) { flows::trigger_menu() } else { flows::step_menu() };
+    let label: slint::SharedString = flows::menu_find(&menu, v).map(|m| format!("{} \u{203a} {}", m.cat, m.label)).unwrap_or_default().into();
+    let Some(k) = flows::kind_of(list, id) else { return FlowNode { kind_at: at, note: "".into(), fields: ModelRc::default(), depth: 0, label } };
     let fields: Vec<FlowField> = k.fields.iter().map(|fl| {
         let now = &v[fl.key];
         let value = match now { serde_json::Value::String(s) => s.clone(), serde_json::Value::Bool(b) => b.to_string(), serde_json::Value::Null => fl.default.to_string(), serde_json::Value::Number(n) => n.as_f64().map(|x| if x.fract() == 0.0 { format!("{}", x as i64) } else { x.to_string() }).unwrap_or_default(), x => x.to_string() };
         // (a program's: the ones open now, as the card's painted)
-        let options: Vec<slint::SharedString> = if fl.kind == "program" { procwatch::programs().into_iter().map(Into::into).collect() } else { fl.options.iter().map(|o| o.1.into()).collect() };
+        let options: Vec<slint::SharedString> = if fl.kind == "program" { procwatch::programs().into_iter().map(Into::into).collect() }
+            else if matches!(fl.kind, "scene" | "source" | "reward") { pick_options(fl.kind).into_iter().map(Into::into).collect() }
+            else { fl.options.iter().map(|o| o.1.into()).collect() };
         let at = fl.options.iter().position(|o| o.0 == value).map(|i| i as i32).unwrap_or(0);
         FlowField { key: fl.key.into(), label: fl.label.into(), note: fl.note.into(), kind: fl.kind.into(), value: value.into(), options: ModelRc::from(Rc::new(VecModel::from(options))), at }
     }).collect();
-    FlowNode { kind_at: at, note: k.note.into(), fields: ModelRc::from(Rc::new(VecModel::from(fields))), depth: 0 }
+    FlowNode { kind_at: at, note: k.note.into(), fields: ModelRc::from(Rc::new(VecModel::from(fields))), depth: 0, label }
 }
 
 fn flow_group(a: &serde_json::Value) -> String { a["group"].as_str().unwrap_or("").trim().to_string() }
@@ -4653,17 +4694,220 @@ fn flow_name_free(list: &[serde_json::Value], want: &str) -> String {
     (2..).map(|k| format!("{want} {k}")).find(|n| !taken(n)).unwrap_or_else(|| want.to_string())
 }
 
+const PICK_AGAIN: &str = "\u{21bb} Look Again";
+const PICK_NEW_REWARD: &str = "+ Make a New Reward\u{2026}";
+
+/// A reward picker's rewards: each name once, with where it's from and its ids
+fn pick_rewards() -> Vec<(String, Vec<String>, Vec<String>, i64)> {
+    let mut out: Vec<(String, Vec<String>, Vec<String>, i64)> = Vec::new();
+    PICKS.with(|p| for r in p.borrow()["rewards"].as_array().into_iter().flatten() {
+        let (title, id, plat) = (r["title"].as_str().unwrap_or("").to_string(), r["id"].as_str().unwrap_or("").to_string(), r["platform"].as_str().unwrap_or("twitch").to_string());
+        if title.is_empty() { continue; }
+        match out.iter_mut().find(|x| x.0.eq_ignore_ascii_case(&title)) {
+            Some(x) => { x.1.push(plat); x.2.push(id); }
+            None => out.push((title, vec![plat], vec![id], r["cost"].as_i64().unwrap_or(0))),
+        }
+    });
+    out
+}
+
+/// The options a picker shows: what's there, then Look Again (and for a reward, Make a New Reward first)
+fn pick_options(kind: &str) -> Vec<String> {
+    let mut o: Vec<String> = match kind {
+        "reward" => pick_rewards().into_iter().map(|(t, plats, _, cost)| format!("{t}  \u{b7}  {}{}", plats.iter().map(|p| if p == "kick" { "Kick" } else { "Twitch" }).collect::<Vec<_>>().join(", "), if cost > 0 { format!(", {cost}") } else { String::new() })).collect(),
+        "scene" => PICKS.with(|p| p.borrow()["scenes"].as_array().into_iter().flatten().filter_map(|x| x.as_str().map(String::from)).collect()),
+        "source" => PICKS.with(|p| p.borrow()["sources"].as_array().into_iter().flatten().filter_map(|x| x.as_str().map(String::from)).collect()),
+        _ => Vec::new(),
+    };
+    if kind == "reward" { o.push(PICK_NEW_REWARD.into()); }
+    o.push(PICK_AGAIN.into());
+    o
+}
+
+/// The pickers' lists, asked of the Suite again (the Actions page opening, or Look Again)
+fn picks_refresh(shared: &Shared) {
+    let Some(p) = plugrun::get(BOT) else { return };
+    let rt = shared.borrow().rt.clone();
+    rt.spawn(async move {
+        let Ok(v) = p.call("pickLists", vec![]).await else { return };
+        let _ = slint::invoke_from_event_loop(move || SHARED.with(|s| {
+            PICKS.with(|x| *x.borrow_mut() = v);
+            let Some(sh) = s.borrow().clone() else { return };
+            let open = sh.borrow().ui.upgrade().is_some_and(|ui| ui.get_flow_open());
+            if open { flows_paint(&sh); }
+        }));
+    });
+}
+
+/// A reward picked: its name, its ids (Twitch's and Kick's, if both have it) and where it's from
+fn reward_set(t: &mut serde_json::Value, title: &str, plats: &[String], ids: &[String]) {
+    t["reward"] = serde_json::json!(title);
+    t["rewardid"] = serde_json::json!(ids.iter().filter(|x| !x.is_empty()).cloned().collect::<Vec<_>>().join(", "));
+    let twitch = plats.iter().any(|p| p != "kick");
+    let kick = plats.iter().any(|p| p == "kick");
+    t["from"] = serde_json::json!(if twitch && kick { "any" } else if kick { "kick" } else { "twitch" });
+}
+
+/// The wizard's reward: made by the Suite on your channel; then given to the action whose trigger is a
+/// reward (the one open), or an action made for it
+fn reward_make(shared: &Shared, f: RewardForm) {
+    let Some(p) = plugrun::get(BOT) else {
+        if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_status("Switch the Suite on first, and sign in to Twitch or Kick.".into()); }
+        return;
+    };
+    let c = f.colour;
+    let form = serde_json::json!({
+        "title": f.title.trim(), "cost": f.cost.trim().parse::<i64>().unwrap_or(500).max(1), "prompt": f.prompt.trim(), "input": f.input,
+        "cooldown": f.cooldown.trim().parse::<i64>().unwrap_or(0).max(0), "perStream": f.per_stream.trim().parse::<i64>().unwrap_or(0).max(0),
+        "perUser": f.per_user.trim().parse::<i64>().unwrap_or(0).max(0), "skip": f.skip, "where": f.r#where.as_str(),
+        "colour": format!("#{:02X}{:02X}{:02X}", c.red(), c.green(), c.blue()),
+    });
+    if form["title"].as_str().unwrap_or("").is_empty() { if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_status("Give it a name first.".into()); } return; }
+    let want_action = f.action;
+    let rt = shared.borrow().rt.clone();
+    if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_status("Making it...".into()); }
+    rt.spawn(async move {
+        let got = p.call("createReward", vec![form.clone()]).await;
+        let _ = slint::invoke_from_event_loop(move || SHARED.with(|s| {
+            let Some(sh) = s.borrow().clone() else { return };
+            let say = |t: String| if let Some(ui) = sh.borrow().ui.upgrade() { ui.set_status(t.into()); };
+            let v = match got { Ok(v) => v, Err(e) => return say(format!("Couldn't make it: {e}")) };
+            let made: Vec<(String, String)> = v["made"].as_array().into_iter().flatten().filter_map(|m| Some((m["platform"].as_str()?.to_string(), m["id"].as_str()?.to_string()))).collect();
+            let failed = v["failed"].as_str().unwrap_or("").to_string();
+            if made.is_empty() { return say(format!("Couldn't make it: {failed}")); }
+            if let Some(ui) = sh.borrow().ui.upgrade() { ui.set_reward_make_open(false); }
+            let title = form["title"].as_str().unwrap_or("").to_string();
+            let (plats, ids): (Vec<String>, Vec<String>) = made.into_iter().unzip();
+            // (the open action's trigger, if it's a reward; else a new action, if asked for)
+            let open_is_reward = FLOW.with(|fl| { let fl = fl.borrow(); (fl.1 >= 0).then(|| fl.0.get(fl.1 as usize).map(|a| a["trigger"]["type"] == "event" && a["trigger"]["event"] == "reward")).flatten().unwrap_or(false) });
+            if open_is_reward {
+                flow_snap();
+                flow_change(&sh, |a| reward_set(&mut a["trigger"], &title, &plats, &ids));
+            } else if want_action {
+                flow_snap();
+                let mut trig = flows::defaults(flows::TRIGGERS, "event");
+                trig["event"] = serde_json::json!("reward");
+                reward_set(&mut trig, &title, &plats, &ids);
+                let mut step = flows::defaults(flows::STEPS, "status");
+                step["text"] = serde_json::json!(format!("%user% redeemed {title}"));
+                FLOW.with(|fl| {
+                    let mut fl = fl.borrow_mut();
+                    let name = flow_name_free(&fl.0, &title);
+                    fl.0.push(serde_json::json!({ "name": name, "on": true, "trigger": trig, "steps": [step] }));
+                    fl.1 = fl.0.len() as i32 - 1;
+                });
+                flows_save(&sh);
+            }
+            flows_paint(&sh);
+            picks_refresh(&sh);
+            say(if failed.is_empty() { format!("Made {title}.") } else { format!("Made {title}, but not everywhere: {failed}") });
+        }));
+    });
+}
+
+/// The list as it is, kept to come back to (Ctrl+Z), before it's changed; what was undone forgotten
+fn flow_snap() {
+    let now = FLOW.with(|f| f.borrow().clone());
+    FLOW_UNDO.with(|u| { let mut u = u.borrow_mut(); u.push(now); if u.len() > 50 { u.remove(0); } });
+    FLOW_REDO.with(|r| r.borrow_mut().clear());
+}
+
+/// Ctrl+Z (back: true) or Ctrl+Y: the list as it was, or as it was undone
+fn flow_undo(shared: &Shared, back: bool) {
+    let (from, to) = if back { (&FLOW_UNDO, &FLOW_REDO) } else { (&FLOW_REDO, &FLOW_UNDO) };
+    let Some(was) = from.with(|x| x.borrow_mut().pop()) else {
+        if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_status(if back { "Nothing to undo." } else { "Nothing to redo." }.into()); }
+        return;
+    };
+    let now = FLOW.with(|f| std::mem::replace(&mut *f.borrow_mut(), was));
+    to.with(|x| x.borrow_mut().push(now));
+    flows_paint(shared);
+    flows_save(shared);
+    if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_status(if back { "Undone. Ctrl+Y does it again." } else { "Done again." }.into()); }
+}
+
+/// The picked action, for the clipboard: as OmniPulse's own, so Ctrl+V knows it
+fn flow_clip(shared: &Shared, cut: bool) {
+    let Some(a) = FLOW.with(|f| { let f = f.borrow(); (f.1 >= 0).then(|| f.0.get(f.1 as usize).cloned()).flatten() }) else { return };
+    let text = serde_json::to_string_pretty(&serde_json::json!({ "omnipulseAction": 1, "action": a })).unwrap_or_default();
+    let ok = arboard::Clipboard::new().and_then(|mut c| c.set_text(text)).is_ok();
+    let name = a["name"].as_str().unwrap_or("it").to_string();
+    if cut && ok {
+        flow_snap();
+        FLOW.with(|f| { let mut f = f.borrow_mut(); let sel = f.1; if sel >= 0 && (sel as usize) < f.0.len() { f.0.remove(sel as usize); } f.1 = (sel.min(f.0.len() as i32 - 1)).max(if f.0.is_empty() { -1 } else { 0 }); });
+        flows_paint(shared);
+        flows_save(shared);
+    }
+    if let Some(ui) = shared.borrow().ui.upgrade() {
+        ui.set_status(if !ok { "Couldn't copy it.".to_string() } else if cut { format!("Cut {name}. Ctrl+V puts it back, Ctrl+Z too.") } else { format!("Copied {name}. Ctrl+V pastes a copy.") }.into());
+    }
+}
+
+/// Ctrl+V: an action copied from OmniPulse, as a new one after the picked one (a name of its own); anything
+/// else, as Paste does (a Streamer.bot import code)
+fn flow_clip_paste(shared: &Shared) {
+    let text = arboard::Clipboard::new().and_then(|mut c| c.get_text()).unwrap_or_default();
+    let v: serde_json::Value = serde_json::from_str(text.trim()).unwrap_or(serde_json::Value::Null);
+    let list: Vec<serde_json::Value> = if v["omnipulseAction"].is_number() { vec![v["action"].clone()] }
+        else if v["trigger"].is_object() && v["steps"].is_array() { vec![v.clone()] }
+        else { Vec::new() };
+    if list.is_empty() {
+        if text.trim().is_empty() { if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_status("Nothing to paste.".into()); } return; }
+        flow_snap();
+        return flows_restored(shared, botimport::restore_text(&text));
+    }
+    flow_snap();
+    FLOW.with(|f| {
+        let mut f = f.borrow_mut();
+        let mut at = if f.1 >= 0 { f.1 as usize + 1 } else { f.0.len() };
+        for mut a in list {
+            let name = flow_name_free(&f.0, a["name"].as_str().unwrap_or("Action"));
+            a["name"] = serde_json::json!(name);
+            at = at.min(f.0.len());
+            f.0.insert(at, a);
+            f.1 = at as i32;
+            at += 1;
+        }
+    });
+    flows_paint(shared);
+    flows_save(shared);
+    if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_status("Pasted. Ctrl+Z takes it away again.".into()); }
+}
+
 fn flows_wire(ui: &AppWindow, shared: &Shared) {
     let s = shared.clone();
     ui.on_flow_act(move |act| {
         match act.as_str() {
             "close" => { flows_save(&s); if let Some(ui) = s.borrow().ui.upgrade() { ui.set_flow_open(false); } }
+            "undo" => flow_undo(&s, true),
+            "redo" => flow_undo(&s, false),
+            "clip-copy" => flow_clip(&s, false),
+            "clip-cut" => flow_clip(&s, true),
+            "clip-paste" => flow_clip_paste(&s),
+            // (Up and Down: the one before or after, in the list as it's shown)
+            "key-up" | "key-down" => {
+                flows_save(&s);
+                FLOW.with(|f| { let mut f = f.borrow_mut(); let n = f.0.len() as i32; if n > 0 { f.1 = if act == "key-up" { (f.1 - 1).max(0) } else { (f.1 + 1).min(n - 1) }; } });
+                flows_paint(&s);
+            }
+            // (the Delete key: gone, with a way back)
+            "key-delete" => {
+                let name = FLOW.with(|f| { let f = f.borrow(); (f.1 >= 0).then(|| f.0.get(f.1 as usize).and_then(|a| a["name"].as_str().map(String::from))).flatten() });
+                let Some(name) = name else { return };
+                flow_snap();
+                FLOW.with(|f| { let mut f = f.borrow_mut(); let sel = f.1; if sel >= 0 && (sel as usize) < f.0.len() { f.0.remove(sel as usize); } f.1 = (sel.min(f.0.len() as i32 - 1)).max(if f.0.is_empty() { -1 } else { 0 }); });
+                flows_paint(&s);
+                flows_save(&s);
+                if let Some(ui) = s.borrow().ui.upgrade() { ui.set_status(format!("Deleted {name}. Ctrl+Z brings it back.").into()); }
+            }
             "delete" => {
+                flow_snap();
                 FLOW.with(|f| { let mut f = f.borrow_mut(); let sel = f.1; if sel >= 0 && (sel as usize) < f.0.len() { f.0.remove(sel as usize); } f.1 = (sel.min(f.0.len() as i32 - 1)).max(if f.0.is_empty() { -1 } else { 0 }); });
                 flows_paint(&s);
                 flows_save(&s);
             }
             "copy" => {
+                flow_snap();
                 FLOW.with(|f| {
                     let mut f = f.borrow_mut();
                     let sel = f.1;
@@ -4684,11 +4928,13 @@ fn flows_wire(ui: &AppWindow, shared: &Shared) {
                     .add_filter("Chatbot backups", &["omnibot", "json", "sb", "txt", "zip", "miubackup", "miucommand"])
                     .add_filter("OmniPulse", &["omnibot", "json"]).add_filter("Streamer.bot", &["sb", "txt", "zip", "json"]).add_filter("Mix It Up", &["miubackup", "miucommand"])
                     .pick_file() else { return };
+                flow_snap();
                 flows_restored(&s, botimport::restore_file(&path));
             }
             "paste" => {
                 let text = arboard::Clipboard::new().and_then(|mut c| c.get_text()).unwrap_or_default();
                 if text.trim().is_empty() { if let Some(ui) = s.borrow().ui.upgrade() { ui.set_status("Nothing to paste. In Streamer.bot, click Export, then copy the code it gives you.".into()); } return; }
+                flow_snap();
                 flows_restored(&s, botimport::restore_text(&text));
             }
             "run" => {
@@ -4710,9 +4956,11 @@ fn flows_wire(ui: &AppWindow, shared: &Shared) {
     });
     let s = shared.clone();
     ui.on_flow_pick(move |i| { flows_save(&s); FLOW.with(|f| f.borrow_mut().1 = i); flows_paint(&s); });
+    ui.on_reward_make({ let s = shared.clone(); move |f| reward_make(&s, f) });
     let s = shared.clone();
     ui.on_flow_new(move |k| {
         let Some((_, mut a)) = flows::templates().into_iter().nth(k.max(0) as usize) else { return };
+        flow_snap();
         FLOW.with(|f| {
             let mut f = f.borrow_mut();
             let name = flow_name_free(&f.0, a["name"].as_str().unwrap_or("New Action"));
@@ -4741,19 +4989,30 @@ fn flows_wire(ui: &AppWindow, shared: &Shared) {
     ui.on_flow_on_toggled(move |on| { flow_change(&s, |a| a["on"] = serde_json::json!(on)); flows_item_paint(&s); });
     let s = shared.clone();
     ui.on_flow_trigger_type(move |k| {
-        let Some(kind) = flows::TRIGGERS.get(k.max(0) as usize) else { return };
-        flow_change(&s, |a| a["trigger"] = flows::defaults(flows::TRIGGERS, kind.id));
+        let menu = flows::trigger_menu();
+        let Some(m) = menu_at(&menu, k) else { return };
+        let mut t = flows::defaults(flows::TRIGGERS, m.id);
+        if let (Some(o), Some(p)) = (t.as_object_mut(), m.preset.as_object()) { for (k, v) in p { o.insert(k.clone(), v.clone()); } }
+        flow_change(&s, |a| a["trigger"] = t);
         flows_paint(&s);
     });
     let s = shared.clone();
+    ui.on_flow_menu_query(move |trigger, t| {
+        let Some(ui) = s.borrow().ui.upgrade() else { return };
+        if trigger { ui.set_flow_trigger_menu(ModelRc::from(Rc::new(VecModel::from(menu_entries(&flows::trigger_menu(), &t))))); }
+        else { ui.set_flow_step_menu(ModelRc::from(Rc::new(VecModel::from(menu_entries(&flows::step_menu(), &t))))); }
+    });
+    let s = shared.clone();
     ui.on_flow_step_type(move |i, k| {
-        let Some(kind) = flows::STEPS.get(k.max(0) as usize) else { return };
+        let menu = flows::step_menu();
+        let Some(kind) = menu_at(&menu, k).and_then(|m| flows::kind_of(flows::STEPS, m.id)) else { return };
         flow_change(&s, |a| { if let Some(st) = a["steps"].get_mut(i as usize) { *st = flows::defaults(flows::STEPS, kind.id); } });
         flows_paint(&s);
     });
     let s = shared.clone();
     ui.on_flow_step_add(move |k| {
-        let Some(kind) = flows::STEPS.get(k.max(0) as usize) else { return };
+        let menu = flows::step_menu();
+        let Some(kind) = menu_at(&menu, k).and_then(|m| flows::kind_of(flows::STEPS, m.id)) else { return };
         flow_change(&s, |a| {
             if !a["steps"].is_array() { a["steps"] = serde_json::json!([]); }
             if let Some(l) = a["steps"].as_array_mut() {
@@ -4787,6 +5046,22 @@ fn flows_wire(ui: &AppWindow, shared: &Shared) {
         let Some(fl) = kind.fields.get(i.max(0) as usize) else { return };
         let value = match fl.kind {
             "select" => { let k = v.strip_prefix('\u{2}').and_then(|k| k.parse::<usize>().ok()).unwrap_or(0); serde_json::json!(fl.options.get(k).map(|o| o.0).unwrap_or(fl.default)) }
+            // (a scene, a source or a reward picked; or Look Again, or Make a New Reward)
+            "scene" | "source" | "reward" => match v.strip_prefix('\u{2}').and_then(|k| k.parse::<usize>().ok()) {
+                Some(k) => {
+                    let opts = pick_options(fl.kind);
+                    let Some(o) = opts.get(k) else { return };
+                    if o == PICK_AGAIN { picks_refresh(&s); if let Some(ui) = s.borrow().ui.upgrade() { ui.set_status("Looking again...".into()); } return; }
+                    if o == PICK_NEW_REWARD { if let Some(ui) = s.borrow().ui.upgrade() { ui.set_reward_make_open(true); } return; }
+                    if fl.kind == "reward" {
+                        let Some((title, plats, ids, _)) = pick_rewards().into_iter().nth(k) else { return };
+                        flow_change(&s, |a| { let t = if node < 0 { &mut a["trigger"] } else { &mut a["steps"][node as usize] }; reward_set(t, &title, &plats, &ids); });
+                        return flows_paint(&s);
+                    }
+                    serde_json::json!(o)
+                }
+                None => serde_json::json!(v.as_str()),
+            },
             // (one picked from the open ones: as they were listed, its name)
             "program" => match v.strip_prefix('\u{2}').and_then(|k| k.parse::<usize>().ok()) {
                 Some(k) => match procwatch::programs_listed().get(k) { Some(n) => serde_json::json!(n), None => return },
@@ -4798,7 +5073,7 @@ fn flows_wire(ui: &AppWindow, shared: &Shared) {
         };
         let key = fl.key;
         flow_change(&s, |a| { let t = if node < 0 { &mut a["trigger"] } else { &mut a["steps"][node as usize] }; t[key] = value; });
-        if matches!(fl.kind, "select" | "toggle") || (fl.kind == "program" && v.starts_with('\u{2}')) { flows_paint(&s); } else { flows_item_paint(&s); }
+        if matches!(fl.kind, "select" | "toggle") || (matches!(fl.kind, "program" | "scene" | "source") && v.starts_with('\u{2}')) { flows_paint(&s); } else { flows_item_paint(&s); }
     });
 }
 
@@ -6500,7 +6775,12 @@ fn bot_current(shared: &Shared) -> serde_json::Map<String, serde_json::Value> {
 
 fn bot_fields(list: Vec<botpage::Field>) -> (Vec<BotField>, String) {
     let sig = list.iter().map(|x| format!("{}|{}|{}|{}", x.key, x.kind, x.value, x.label)).collect::<Vec<_>>().join("\n");
-    let rows = list.into_iter().map(|x| BotField { changed: !x.key.is_empty() && !x.key.contains(':') && pf_changed(&x.key), key: x.key.into(), kind: x.kind.into(), label: x.label.into(), note: x.note.into(), value: x.value.into(), extra: x.extra.into(), n: x.n }).collect();
+    // (a row of choices: its extra, as "id=Name|id=Name", for the page to draw)
+    let strs = |v: Vec<String>| ModelRc::from(Rc::new(VecModel::from(v.into_iter().map(slint::SharedString::from).collect::<Vec<_>>())));
+    let rows = list.into_iter().map(|x| {
+        let (ids, names): (Vec<String>, Vec<String>) = if x.kind == "chips" { x.extra.split('|').filter_map(|o| o.split_once('=')).map(|(i, n)| (i.to_string(), n.to_string())).unzip() } else { (Vec::new(), Vec::new()) };
+        BotField { changed: !x.key.is_empty() && !x.key.contains(':') && pf_changed(&x.key), key: x.key.into(), kind: x.kind.into(), label: x.label.into(), note: x.note.into(), value: x.value.into(), extra: x.extra.into(), n: x.n, opts: strs(names), opt_ids: strs(ids) }
+    }).collect();
     (rows, sig)
 }
 
@@ -6940,6 +7220,29 @@ fn panel_open(shared: &Shared, name: &str) {
 }
 
 /// The Lyrics Widget's look as it's set, for its page's preview
+/// The Multichat Overlay's preview: its look as its page has it now, with made-up chat (Twitch's and Kick's,
+/// as Chat From says)
+fn chat_preview(ui: &AppWindow, vals: &serde_json::Map<String, serde_json::Value>) {
+    let num = |k: &str, d: f64| vals.get(k).and_then(|v| v.as_f64().or_else(|| v.as_str().and_then(|s| s.parse().ok()))).unwrap_or(d);
+    let on = |k: &str| vals.get(k).and_then(|v| v.as_bool()) != Some(false);
+    let from = vals.get("from").and_then(|v| v.as_str()).unwrap_or("all").to_string();
+    ui.set_pf_chat(ChatLook {
+        style: vals.get("style").and_then(|v| v.as_str()).unwrap_or("plain").into(),
+        size: num("size", 20.0) as f32, bg: num("bg", 0.0) as f32, shadow: on("shadow"),
+        top: vals.get("dir").and_then(|v| v.as_str()) == Some("top"), badges: on("badges"), marks: on("marks"), from: from.clone().into(),
+    });
+    let c = |h: &str| look::Rgb::parse(h).map(|x| x.slint()).unwrap_or(slint::Color::from_rgb_u8(255, 255, 255));
+    let all = [
+        ("PixelPanda", "that transition was so clean", false, "#ff7a59", "SUB"), ("kickfan_92", "hello from Kick!", true, "#53fc18", ""),
+        ("ModMaya", "remember to hydrate chat", false, "#3ccd6c", "MOD"), ("lofi_larry", "what's this song?", false, "#7aa2ff", ""),
+        ("Zed", "GG that was close", true, "#ffd24a", "VIP"), ("Nova", "first time here, love the vibes", false, "#e05ce0", ""),
+        ("RaidLeader", "we came from the raid!", false, "#ff4f8b", "SUB"), ("quietcat", "lurking but enjoying it", true, "#5ad1ff", ""),
+    ];
+    let list: Vec<ChatSample> = all.iter().filter(|m| from == "all" || (from == "kick") == m.2)
+        .map(|m| ChatSample { name: m.0.into(), text: m.1.into(), kick: m.2, colour: c(m.3), badge: m.4.into() }).collect();
+    ui.set_pf_chat_samples(ModelRc::from(Rc::new(VecModel::from(list))));
+}
+
 /// The Social Plug's preview, as its page has it now (before it's saved): its platforms switched on with a
 /// handle, or samples while there are none
 fn social_preview(ui: &AppWindow, prefs: &serde_json::Value, vals: &serde_json::Map<String, serde_json::Value>) {
@@ -7046,9 +7349,36 @@ fn panel_paint(shared: &Shared, name: &str, vals: &serde_json::Map<String, serde
     if let Some(ui) = shared.borrow().ui.upgrade() {
         ui.set_pf_fields(ModelRc::from(Rc::new(VecModel::from(rows))));
         // (the Lyrics Widget's page: a preview of its look, as it's set)
-        ui.set_pf_preview(if name == "lyricsw" { "lyrics".into() } else if name == "socials" { "socials".into() } else { "".into() });
+        ui.set_pf_preview(if name == "lyricsw" { "lyrics".into() } else if name == "socials" { "socials".into() } else if name == "multichat" { "multichat".into() } else if name == "alerts" { "alerts".into() } else if name == "widget" { "widget".into() } else { "".into() });
         if name == "lyricsw" { ui.set_pf_lyrics(lyrics_look(vals)); }
         if name == "socials" { social_preview(&ui, &shared.borrow().web.prefs, vals); }
+        if name == "multichat" { chat_preview(&ui, vals); }
+        if name == "widget" {
+            let t = ui.global::<Theme>();
+            let own = vals.get("widgetOwnCol").and_then(|v| v.as_bool()) == Some(true);
+            let col = |k: &str, d: slint::Color| if own { vals.get(k).and_then(|v| v.as_str()).and_then(look::Rgb::parse).map(|c| c.slint()).unwrap_or(d) } else { d };
+            let on = |k: &str, d: bool| vals.get(k).and_then(|v| v.as_bool()).unwrap_or(d);
+            ui.set_pf_widget(WidgetLook {
+                design: vals.get("widgetDesign").and_then(|v| v.as_str()).unwrap_or("card").into(),
+                right: vals.get("widgetAlign").and_then(|v| v.as_str()) == Some("right"),
+                rounded: on("widgetRounded", true),
+                text: vals.get("widgetText").and_then(|v| v.as_f64()).unwrap_or(1.0) as f32,
+                c1: col("widgetCol1", t.get_accent()), c2: col("widgetCol2", t.get_accent_2()),
+                spin: on("wSpin", true), requester: on("wRequester", true),
+            });
+        }
+        if name == "alerts" {
+            let t = ui.global::<Theme>();
+            let own = vals.get("alertOwnCol").and_then(|v| v.as_bool()) == Some(true);
+            let col = |k: &str, d: slint::Color| if own { vals.get(k).and_then(|v| v.as_str()).and_then(look::Rgb::parse).map(|c| c.slint()).unwrap_or(d) } else { d };
+            ui.set_pf_alert(AlertLook {
+                theme: vals.get("alertTheme").and_then(|v| v.as_str()).unwrap_or("widget").into(),
+                c1: col("alertCol1", t.get_accent()), c2: col("alertCol2", t.get_accent_2()),
+                glow: vals.get("alertDir").and_then(|v| v.as_str()) == Some("glow"),
+                icon: vals.get("alertIcon").and_then(|v| v.as_f64()).unwrap_or(1.0) as f32,
+                transition: vals.get("alertTrans").and_then(|v| v.as_str()).unwrap_or("seamless").into(),
+            });
+        }
     }
 }
 
@@ -7056,6 +7386,7 @@ fn panel_paint(shared: &Shared, name: &str, vals: &serde_json::Map<String, serde
 fn panel_set(shared: &Shared, name: &str, mut vals: serde_json::Map<String, serde_json::Value>, i: usize, v: &str) {
     let Some(f) = PANEL_FIELDS.with(|p| p.borrow().get(i).cloned()) else { return };
     let key = f["key"].as_str().unwrap_or("").to_string();
+    let changed = key.clone();
     let redraw = match f["type"].as_str().unwrap_or("") {
         "toggle" => { vals.insert(key, serde_json::json!(v == "true")); true }
         "select" | "designpick" | "stepper" => {
@@ -7116,6 +7447,17 @@ fn panel_set(shared: &Shared, name: &str, mut vals: serde_json::Map<String, serd
         }
         _ => { if let Some(x) = panels::typed(&key, v) { vals.insert(key, x); } false }
     };
+    // (the Lyrics Widget's theme: its whole look at once; a part of it changed after, Custom)
+    let mut redraw = redraw;
+    if name == "lyricsw" || panels::output_of(name).is_some_and(|(k, _)| k == "lyricsw") {
+        if changed == "lyricsTheme" {
+            for (k, x) in panels::lyrics_theme(vals.get("lyricsTheme").and_then(|t| t.as_str()).unwrap_or("custom")) { vals.insert(k.to_string(), x); }
+            redraw = true;
+        } else if panels::LYRICS_THEME_KEYS.contains(&changed.as_str()) && vals.get("lyricsTheme").and_then(|t| t.as_str()).unwrap_or("custom") != "custom" {
+            vals.insert("lyricsTheme".into(), serde_json::json!("custom"));
+            redraw = true;
+        }
+    }
     PF_EDIT.with(|e| *e.borrow_mut() = Some((format!("panel:{name}"), vals.clone())));
     if redraw { panel_paint(shared, name, &vals); }
 }
@@ -11705,6 +12047,7 @@ fn apply_look(shared: &Shared) {
     // (the accents' blends go into the theme without its tint; a theme of its own's, into its panel)
     t.set_plain_panel(if preset.is_some() { p.panel.slint() } else { look::palette(step, hue, 0).panel.slint() });
     t.set_elevated(see(p.elevated, 215));
+    t.set_menu(p.elevated.slint());
     t.set_line(p.line.slint());
     t.set_text(p.text.slint());
     t.set_muted(p.muted.slint());

@@ -44,6 +44,7 @@ const EVENTS: &[(&str, &str)] = &[
     ("prediction", "A Prediction Starting"), ("predictionend", "A Prediction Ending"), ("pollend", "A Poll Ending"),
     ("hypetrainend", "A Hype Train Ending"), ("charity", "A Charity Donation"), ("shoutoutin", "A Shoutout to You"),
     ("vip", "A New VIP"), ("mod", "A New Moderator"), ("watchstreak", "A Watch Streak"), ("donation", "A Donation (Streamlabs, StreamElements)"), ("online", "Going Live"), ("offline", "Going Offline"), ("adbreak", "An Ad Break"),
+    ("hypelevel", "A Hype Level Reached"), ("wheel", "The Wheel Landing"), ("voteskip", "Chat Skipping a Song"),
 ];
 const OBS_WHEN: &[(&str, &str)] = &[
     ("scene", "The Scene Changes"), ("streamstart", "Streaming Starts"), ("streamstop", "Streaming Stops"),
@@ -108,7 +109,7 @@ pub const TRIGGERS: &[Kind] = &[
     Kind { id: "event", label: "A Channel Event", note: "Gives the steps %user%, %amount% (bits, months, viewers, subs gifted or the donation) and %message%. Donations also give %currency%.", fields: &[
         pick("event", "Event", EVENTS, "follow", ""),
         f("min", "At Least", "number", "0", "The smallest amount that counts, in bits, raiders or subs gifted. Use 0 for any amount."),
-        f("reward", "Reward", "text", "", "For a Channel Points reward, enter its name. Leave it empty for any reward."),
+        f("reward", "Reward", "reward", "", "For a Channel Points reward: pick one of yours, or make a new one. Leave it empty for any reward."),
         f("rewardid", "Reward ID", "text", "", "Filled in by an import from Streamer.bot. It matches that reward even if you rename it. Several, separated by commas, match any of them, like a Twitch one and a Kick one. Leave it empty to go by the name."),
         pick("from", "On", FROM, "any", "Kick has follows, subs, gifted subs, hosts and going live or offline."),
         f("users", "Only For", "text", "", "Viewers' names, separated by commas. Use this with First Words for an entrance greeting. Leave it empty for anyone."),
@@ -129,7 +130,7 @@ pub const TRIGGERS: &[Kind] = &[
     ] },
     Kind { id: "obs", label: "OBS", note: "Needs OBS switched on in the Suite's settings. Gives its steps %scene% (the scene now).", fields: &[
         pick("when", "When", OBS_WHEN, "scene", ""),
-        f("scene", "Scene", "text", "", "For a scene change, enter the scene's name. Leave it empty for any scene."),
+        f("scene", "Scene", "scene", "", "For a scene change: pick it, or type its name. Leave it empty for any scene."),
     ] },
     Kind { id: "web", label: "A Web Address", note: "Another tool, like a Stream Deck plugin, a script or a bot, can run it by calling http://127.0.0.1:7879/action?key=YOUR-KEY&name=ITS-NAME. Add &user= and &input= to set %user% and %rawInput%. The key is Song Requests' secret key, in Settings > Streaming > Song Requests (turned on).", fields: &[
         f("name", "Called As", "text", "", "Leave it empty to use the action's own name."),
@@ -298,11 +299,11 @@ pub const STEPS: &[Kind] = &[
         f("name", "As", "text", "", "The name it posts as. Leave it empty to use the webhook's own name."),
     ] },
     Kind { id: "obsmedia", label: "OBS: Media", note: "A media source (a video or a sound).", fields: &[
-        f("source", "Source", "text", "", ""),
+        f("source", "Source", "source", "", ""),
         pick("what", "", MEDIA_DO, "restart", ""),
     ] },
     Kind { id: "obsbrowser", label: "OBS: Browser Source Address", note: "", fields: &[
-        f("source", "Source", "text", "", ""),
+        f("source", "Source", "source", "", ""),
         f("url", "Address", "text", "https://", ""),
     ] },
     Kind { id: "obsreplay", label: "OBS: Save the Replay", note: "With OBS's replay buffer on.", fields: &[] },
@@ -314,23 +315,23 @@ pub const STEPS: &[Kind] = &[
         f("request", "Request", "text", "GetVersion", ""),
         f("data", "With", "text", "{}", "The request's data, as JSON."),
     ] },
-    Kind { id: "obsscene", label: "OBS: Switch Scene", note: "", fields: &[f("scene", "Scene", "text", "", "The name, as it appears in OBS.")] },
+    Kind { id: "obsscene", label: "OBS: Switch Scene", note: "", fields: &[f("scene", "Scene", "scene", "", "Pick it, or type its name as OBS shows it.")] },
     Kind { id: "obssource", label: "OBS: Show or Hide", note: "A source in a scene.", fields: &[
-        f("source", "Source", "text", "", "The name, as it appears in OBS."),
-        f("scene", "In Scene", "text", "", "Leave it empty to use the current scene."),
+        f("source", "Source", "source", "", "Pick it, or type its name as OBS shows it."),
+        f("scene", "In Scene", "scene", "", "Leave it empty to use the current scene."),
         pick("show", "", SHOW_HIDE, "toggle", ""),
         f("for", "For", "number", "0", "Seconds, then back as it was (0: it stays)."),
     ] },
     Kind { id: "obstext", label: "OBS: Set Text", note: "A Text source's words.", fields: &[
-        f("source", "Source", "text", "", ""),
+        f("source", "Source", "source", "", ""),
         f("text", "Text", "text", "%user%", ""),
     ] },
     Kind { id: "obsmute", label: "OBS: Mute or Unmute", note: "An audio source, like a mic or desktop audio.", fields: &[
-        f("source", "Source", "text", "Mic/Aux", ""),
+        f("source", "Source", "source", "Mic/Aux", ""),
         pick("what", "", MUTE, "toggle", ""),
     ] },
     Kind { id: "obsfilter", label: "OBS: Filter On or Off", note: "", fields: &[
-        f("source", "Source", "text", "", ""),
+        f("source", "Source", "source", "", ""),
         f("filter", "Filter", "text", "", ""),
         pick("what", "", ON_OFF, "on", ""),
     ] },
@@ -409,6 +410,9 @@ pub const STEPS: &[Kind] = &[
         f("into", "As", "text", "reply", "The variable it's kept in: %reply%, or whatever you name it."),
     ] },
     Kind { id: "run", label: "Run Another Action", note: "", fields: &[f("action", "Action", "text", "", "Its name.")] },
+    Kind { id: "spin", label: "Spin the Wheel", note: "A free spin, for whoever started the action. Its prizes are in the Suite's Spin the Wheel.", fields: &[] },
+    Kind { id: "hypeadd", label: "Add Hype", note: "Fills the hype meter by this much. A level's 100 unless you've changed it.", fields: &[f("amount", "Amount", "number", "20", "")] },
+    Kind { id: "emoterain", label: "Make It Rain Emotes", note: "A burst of the latest emotes on the Emote Rain widget.", fields: &[] },
     Kind { id: "groupstate", label: "Turn a Group On or Off", note: "Every action in the group at once. Give actions a group next to their name.", fields: &[
         f("group", "Group", "text", "", "Its name."),
         pick("what", "", GROUP_DO, "on", ""),
@@ -423,6 +427,77 @@ pub const STEPS: &[Kind] = &[
     Kind { id: "note", label: "A Note", note: "Does nothing. It's a note for you to read. Steps from a restored backup that couldn't be brought over are kept as notes.", fields: &[f("text", "Note", "text", "", "")] },
     Kind { id: "status", label: "Show in OmniPulse", note: "On OmniPulse's status line: for trying an action out.", fields: &[f("text", "Text", "text", "%user% used it.", "")] },
 ];
+
+/// A trigger or a step as its menu lists it: its category, its name there, which kind it is, and what it's set
+/// to when picked ("Twitch > Channel Points Reward": A Channel Event, its event a reward, on Twitch)
+pub struct MenuItem { pub cat: &'static str, pub label: String, pub id: &'static str, pub preset: Value }
+
+fn item(cat: &'static str, label: &str, id: &'static str, preset: Value) -> MenuItem { MenuItem { cat, label: label.to_string(), id, preset } }
+
+/// (an event's name for a menu: "A Follow" as "Follow")
+fn bare(label: &str) -> String { label.strip_prefix("A ").or_else(|| label.strip_prefix("An ")).unwrap_or(label).to_string() }
+
+/// What can start an action, by where it comes from
+pub fn trigger_menu() -> Vec<MenuItem> {
+    let mut m = vec![
+        item("Chat", "A Chat Command", "command", json!({})),
+        item("Chat", "A Chat Message", "message", json!({})),
+        item("Chat", "A Rule Broken", "filter", json!({})),
+    ];
+    // (the Suite's fun: its own events, any platform)
+    const FUN: [&str; 3] = ["hypelevel", "wheel", "voteskip"];
+    for (e, l) in EVENTS.iter().filter(|e| e.0 != "donation" && !FUN.contains(&e.0)) { m.push(item("Twitch", &bare(l), "event", json!({ "event": e, "from": "twitch" }))); }
+    for (e, l) in EVENTS.iter().filter(|e| FUN.contains(&e.0)) { m.push(item("Fun", &bare(l), "event", json!({ "event": e, "from": "any" }))); }
+    for (e, l) in [("follow", "Follow"), ("sub", "New Sub"), ("resub", "Resub"), ("gift", "Gifted Subs"), ("raid", "Host"), ("reward", "Channel Points Reward"), ("online", "Going Live"), ("offline", "Going Offline")] {
+        m.push(item("Kick", l, "event", json!({ "event": e, "from": "kick" })));
+    }
+    for (e, l) in [("follow", "Follow"), ("sub", "New Sub"), ("gift", "Gifted Subs"), ("raid", "Raid or Host"), ("reward", "Channel Points Reward"), ("online", "Going Live"), ("offline", "Going Offline")] {
+        m.push(item("Twitch or Kick", l, "event", json!({ "event": e, "from": "any" })));
+    }
+    m.push(item("Donations", "Streamlabs or StreamElements", "event", json!({ "event": "donation", "from": "any" })));
+    m.push(item("Donations", "Twitch Charity", "event", json!({ "event": "charity", "from": "twitch" })));
+    for (w, l) in OBS_WHEN { m.push(item("OBS", l, "obs", json!({ "when": w }))); }
+    m.push(item("OmniPulse", "A Song Starting", "song", json!({ "when": "start" })));
+    m.push(item("OmniPulse", "A Song Requested", "song", json!({ "when": "request" })));
+    m.push(item("OmniPulse", "A Web Address", "web", json!({})));
+    m.push(item("OmniPulse", "Only When Run", "manual", json!({})));
+    m.push(item("This PC", "A Hotkey", "hotkey", json!({})));
+    m.push(item("This PC", "A Program Starting", "process", json!({})));
+    m.push(item("Timers", "Every Few Minutes", "timer", json!({})));
+    m.push(item("Timers", "Each Viewer, Every Few Minutes", "presence", json!({})));
+    m
+}
+
+/// What an action can do, by what it's for
+pub fn step_menu() -> Vec<MenuItem> {
+    let cats: &[(&'static str, &[&'static str])] = &[
+        ("Chat", &["say", "random", "announce", "delete", "timeout", "ban", "shoutout", "chatmode", "role"]),
+        ("Logic", &["ifblock", "else", "endif", "if", "repeat", "endrepeat", "randomblock", "endrandom", "wait", "stop", "run", "groupstate", "note"]),
+        ("Variables", &["setvar", "addvar", "math", "randomnum", "text", "userinfo"]),
+        ("Twitch and Kick", &["title", "game", "marker", "clip", "poll", "pollend", "predict", "predictend", "reward", "ad", "raid"]),
+        ("OBS", &["obsscene", "obssource", "obstext", "obsmute", "obsfilter", "obsmedia", "obsbrowser", "obsreplay", "obsshot", "obsrecord", "obsstream", "obsraw"]),
+        ("OmniPulse", &["request", "wrongsong", "nowplaying", "skip", "playpause", "alert", "overlay", "speak", "sound", "status", "credits"]),
+        ("Points and Games", &["points", "gamble", "slots", "duel", "heist", "trivia", "strike", "quote", "quoteadd", "giveenter", "givepick"]),
+        ("Fun", &["spin", "hypeadd", "emoterain"]),
+        ("This PC and the Web", &["keys", "open", "writefile", "fetch", "discord"]),
+    ];
+    let mut m = Vec::new();
+    for (cat, ids) in cats {
+        for id in *ids {
+            let Some(k) = STEPS.iter().find(|k| k.id == *id) else { continue };
+            m.push(item(cat, k.label.strip_prefix("OBS: ").unwrap_or(k.label), k.id, json!({})));
+        }
+    }
+    m
+}
+
+/// The menu item a trigger or step is: of its kind, the one whose presets it matches most of
+pub fn menu_find<'a>(menu: &'a [MenuItem], v: &Value) -> Option<&'a MenuItem> {
+    let id = v["type"].as_str().unwrap_or("");
+    menu.iter().filter(|m| m.id == id)
+        .filter(|m| m.preset.as_object().is_none_or(|p| p.iter().all(|(k, x)| v.get(k).is_some_and(|y| y == x) || (k == "from" && x == "any" && v[k].is_null()))))
+        .max_by_key(|m| m.preset.as_object().map_or(0, |p| p.len()))
+}
 
 pub fn kind_of(list: &'static [Kind], id: &str) -> Option<&'static Kind> {
     list.iter().find(|k| k.id == id)
@@ -556,6 +631,18 @@ mod tests {
         assert_eq!(a[1]["trigger"]["command"], json!("!hi"));
         assert_eq!(a[1]["steps"][0]["text"], json!("Hi %user%, you said %rawInput%"));
         assert!(summary(&a[0]).starts_with("When someone types !discord"));
+    }
+
+    #[test]
+    fn every_step_is_in_one_menu_category_and_every_trigger_kind_in_one() {
+        let steps = step_menu();
+        for k in STEPS { assert_eq!(steps.iter().filter(|m| m.id == k.id).count(), 1, "{}", k.id); }
+        let trig = trigger_menu();
+        for k in TRIGGERS { assert!(trig.iter().any(|m| m.id == k.id), "{}", k.id); }
+        // (a reward on Twitch: found as Twitch's)
+        let t = json!({ "type": "event", "event": "reward", "from": "twitch" });
+        let m = menu_find(&trig, &t).unwrap();
+        assert_eq!((m.cat, m.label.as_str()), ("Twitch", "Channel Points Reward"));
     }
 
     #[test]

@@ -35,6 +35,12 @@
   body.pill .plug .ic { border-radius: 50%; }
   body.minimal .plug { background: none; box-shadow: none; }
   body.minimal .plug .tx { text-shadow: 0 0.06rem 0.35rem rgba(0, 0, 0, 0.9); }
+  /* Glass: frosted; Neon: a glowing edge in the platform's colour; Comic: a white speech bubble */
+  body.glass .plug { background: rgba(255, 255, 255, 0.14); border: 1px solid rgba(255, 255, 255, 0.28); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); box-shadow: none; }
+  body.neon .plug { background: rgba(8, 6, 20, 0.88); border: 2px solid var(--c1); box-shadow: 0 0 14px var(--c1); }
+  body.neon .plug .ic { background: transparent; border: 2px solid var(--c1); box-shadow: 0 0 10px var(--c1); }
+  body.comic .plug { background: #fff; color: #111; border: 3px solid #111; box-shadow: 4px 4px 0 #111; }
+  body.comic .plug .ic { border: 2px solid #111; }
   /* Coloured: the card itself in the platform's colours */
   body.coloured .plug { background: linear-gradient(115deg, var(--c1), var(--c2)); }
   body.coloured .plug .ic { background: rgba(0, 0, 0, 0.22); }

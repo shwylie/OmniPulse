@@ -355,7 +355,7 @@ pub fn widget_serve(listener: TcpListener, gen: u64) {
                         reply_own(&mut stream, status, "application/json", v.to_string().as_bytes());
                     }
                     "/socials" | "/socials.html" => reply(&mut stream, "200 OK", "text/html; charset=utf-8", SOCIALS_HTML.as_bytes()),
-                    "/goals" | "/timer" | "/latest-follow" | "/latest-sub" | "/raid" => reply(&mut stream, "200 OK", "text/html; charset=utf-8", SUITE_HTML.as_bytes()),
+                    "/goals" | "/timer" | "/latest-follow" | "/latest-sub" | "/raid" | "/hype" | "/voteskip" | "/wheel" | "/leaderboard" | "/emotes" => reply(&mut stream, "200 OK", "text/html; charset=utf-8", SUITE_HTML.as_bytes()),
                     "/levels.json" => {
                         let v = LEVELS.lock().map(|g| g.clone()).unwrap_or_default();
                         reply_own(&mut stream, "200 OK", "application/json", serde_json::to_string(&v).unwrap_or_else(|_| "[]".into()).as_bytes());

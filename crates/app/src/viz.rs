@@ -56,8 +56,9 @@ pub fn stop() {
     *SOUND.lock().unwrap() = None;
     *SHOWN.lock().unwrap() = [0.0; BANDS];
     *PEAKS.lock().unwrap() = [(0.0, 0); BANDS];
-    *RING_TOP.lock().unwrap() = 0.2;
+    *RING_TOP.lock().unwrap() = 0.08;
     *RING_EASE.lock().unwrap() = [Vec::new(), Vec::new()];
+    *RING_BASS.lock().unwrap() = [0.0, 0.0];
 }
 
 /// The self-test's music (OMNIPULSE_SELFTEST: never heard, only drawn): a beat put straight into the tap's
@@ -162,18 +163,30 @@ fn ring_shape(b: &[f32; BANDS], inner: f32, slot: usize) -> Vec<(String, f32)> {
     };
     // (how far it swells: against the loudest it's been lately, slowly forgotten, so every song moves it)
     let now_top = b.iter().cloned().fold(0.0f32, f32::max);
+    // (forgotten within a couple of seconds: a quiet part after a loud one still moves it)
     let top = {
         let mut m = RING_TOP.lock().unwrap();
-        *m = (*m * 0.996).max(now_top).max(0.2);
+        *m = (*m * 0.985).max(now_top).max(0.08);
         *m
     };
-    let raw: Vec<(f32, f32)> = (0..n).map(|k| { let (v, away) = level((k as f32 + 0.5) * step); ((v / top).clamp(0.0, 1.0).powf(1.7), away) }).collect();
-    // (eased, frame to frame: up quickly, down gently)
+    let raw: Vec<(f32, f32)> = (0..n).map(|k| { let (v, away) = level((k as f32 + 0.5) * step); ((v / top).clamp(0.0, 1.0).powf(1.15), away) }).collect();
+    // (a kick: the bass over its own recent level, pushing the whole ring out for a moment)
+    let bass = b[..3.min(BANDS)].iter().sum::<f32>() / 3.0;
+    let punch = {
+        let mut slow = RING_BASS.lock().unwrap();
+        let p = ((bass - slow[slot]) / top).clamp(0.0, 1.0);
+        slow[slot] += (bass - slow[slot]) * 0.08;
+        p
+    };
+    // (eased, frame to frame: up at once, down quickly but not in a jump)
     let reach: Vec<f32> = {
         let mut all = RING_EASE.lock().unwrap();
         let e = &mut all[slot];
         if e.len() != n { *e = vec![0.0; n]; }
-        for (k, (v, _)) in raw.iter().enumerate() { e[k] += (v - e[k]) * if *v > e[k] { 0.45 } else { 0.16 }; }
+        for (k, (v, _)) in raw.iter().enumerate() {
+            let v = (v + punch * 0.45).min(1.0);
+            e[k] += (v - e[k]) * if v > e[k] { 0.75 } else { 0.3 };
+        }
         e.clone()
     };
     let pt = |th: f32, r: f32| (500.0 - th.sin() * r, 500.0 + th.cos() * r);
@@ -200,6 +213,8 @@ fn ring_shape(b: &[f32; BANDS], inner: f32, slot: usize) -> Vec<(String, f32)> {
 
 /// (the Ring's: its loudest lately, and each slice's reach as it's eased)
 static RING_TOP: Mutex<f32> = Mutex::new(0.2);
+/// (each Ring's bass, as it's been lately: a kick is the bass over it)
+static RING_BASS: Mutex<[f32; 2]> = Mutex::new([0.0, 0.0]);
 /// (the cover's Ring, and the player's, each eased on its own)
 static RING_EASE: Mutex<[Vec<f32>; 2]> = Mutex::new([Vec::new(), Vec::new()]);
 

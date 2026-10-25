@@ -79,7 +79,6 @@ pub fn from_page(prefs: &Value, page: &str, opt: &Value) -> Value {
 }
 
 fn tog(key: &str, label: &str, note: &str) -> Value { json!({ "key": key, "label": label, "note": note, "type": "toggle" }) }
-fn num(key: &str, label: &str, note: &str) -> Value { json!({ "key": key, "label": label, "note": note, "type": "number" }) }
 fn note(t: &str) -> Value { json!({ "key": "", "label": t, "note": "", "type": "note" }) }
 fn info(label: &str, value: &str, n: &str) -> Value { json!({ "key": "", "label": label, "note": n, "type": "info", "value": value, "copy": value }) }
 fn sel(key: &str, label: &str, n: &str, opts: &[(Value, &str)]) -> Value {
@@ -135,26 +134,30 @@ pub fn fields(panel: &str, vals: &Map<String, Value>, port: u64) -> Vec<Value> {
             f
         }
         _ => {
+            let plain = vals.get("style").and_then(|v| v.as_str()).unwrap_or("plain") == "plain";
             let mut f = vec![
+                note("How It Looks"),
+                sel("style", "Theme", "The preview above shows it with made-up chat.", &[(json!("plain"), "Plain"), (json!("bubbles"), "Bubbles"), (json!("glass"), "Glass"), (json!("neon"), "Neon"), (json!("cards"), "Cards"), (json!("terminal"), "Terminal"), (json!("comic"), "Comic"), (json!("minimal"), "Minimal")]),
+                sel("size", "Text Size", "", &[(json!(16), "Small"), (json!(20), "Normal"), (json!(26), "Large"), (json!(34), "Huge")]),
+            ];
+            // (only Plain has a background of your choosing: the others bring their own)
+            if plain { f.push(sel("bg", "Background", "Behind each message. None lets your stream show through.", &[(json!("0"), "None"), (json!("0.35"), "Faint"), (json!("0.6"), "Half"), (json!("0.85"), "Solid")])); }
+            f.extend([
+                tog("shadow", "Shadow", "Makes the words easier to read over a busy picture."),
+                sel("dir", "Newest At The", "", &[(json!("bottom"), "Bottom"), (json!("top"), "Top")]),
                 note("What It Shows"),
                 sel("from", "Chat From", "", &[(json!("all"), "Twitch and Kick"), (json!("twitch"), "Twitch"), (json!("kick"), "Kick")]),
-                tog("cmds", "Commands", "Messages starting with !, like !sr. Most streamers leave them out."),
-                tog("bot", "The Bot's Own Messages", ""),
-                tog("badges", "Badges", ""),
+                tog("badges", "Badges", "Subscriber, moderator and VIP badges next to names."),
                 tog("marks", "Platform Marks", "A small Twitch or Kick mark before each name."),
-                note("How It Looks"),
-                sel("style", "Style", "", &[(json!("plain"), "Plain"), (json!("bubbles"), "Bubbles")]),
-                num("size", "Text Size", "In pixels, 10 to 60."),
-                sel("bg", "Background", "Behind the messages. None lets your stream show through.", &[(json!("0"), "None"), (json!("0.35"), "Faint"), (json!("0.6"), "Half"), (json!("0.85"), "Solid")]),
-                tog("shadow", "Shadow", "Makes the words easier to read over a busy picture."),
+                tog("bot", "The Bot's Own Messages", ""),
+                tog("cmds", "Commands", "Messages starting with !, like !sr. Most streamers leave them out."),
                 tog("stv", "7TV Emotes", "Your channel's and 7TV's global ones, on Twitch and Kick."),
                 tog("bttv", "BetterTTV Emotes", "Your channel's and BetterTTV's global ones."),
                 tog("ffz", "FrankerFaceZ Emotes", "Your channel's and FrankerFaceZ's global ones."),
-                sel("dir", "Newest At The", "", &[(json!("bottom"), "Bottom"), (json!("top"), "Top")]),
                 note("How Long They Stay"),
-                num("fade", "Fade After", "Seconds. 0 keeps them until newer ones push them out."),
-                num("max", "At Most", "How many messages show at once, 1 to 100."),
-            ];
+                sel("fade", "Fade After", "", &[(json!(0), "Never"), (json!(15), "15 seconds"), (json!(30), "30 seconds"), (json!(60), "1 minute"), (json!(120), "2 minutes")]),
+                sel("max", "At Most", "How many show at once.", &[(json!(10), "10"), (json!(20), "20"), (json!(30), "30"), (json!(50), "50"), (json!(100), "100")]),
+            ]);
             f.push(note("In OBS"));
             f.push(info("Address", &format!("{base}/chat"), "Add it as a Browser source. Changes here show there within a few seconds. For another with its own settings, add /2 to the end of the address, then change those in OBS: right-click it, choose Interact, and click its gear."));
             let _ = vals;

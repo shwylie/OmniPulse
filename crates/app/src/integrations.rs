@@ -227,6 +227,7 @@ pub fn alerts_cfg(prefs: &Value) -> Value {
         "kinds": kinds,
         "anim": prefs["alertAnim"].as_str().unwrap_or("slide"),
         "transition": prefs["alertTrans"].as_str().unwrap_or("seamless"),
+        "theme": prefs["alertTheme"].as_str().unwrap_or("widget"),
         "collage": { "size": prefs["alertCSize"].as_str().unwrap_or("medium"), "dir": prefs["alertCDir"].as_str().unwrap_or("diag"), "angle": prefs["alertCAngle"].as_f64().unwrap_or(0.0) },
         "accent": if set(prefs, "alertOwnCol") { prefs["alertCol1"].as_str().unwrap_or("#8e9bff") } else { "" },
         "accent2": if set(prefs, "alertOwnCol") { prefs["alertCol2"].as_str().or(prefs["alertCol1"].as_str()).unwrap_or("#b38cff") } else { "" },

@@ -168,7 +168,8 @@ pub fn widget_json(prefs: &Value) -> Value {
         "align": prefs["socialAlign"].as_str().unwrap_or("left"),
         "all": prefs["socialAll"].as_bool() == Some(true),
         "rounded": prefs["socialRounded"].as_bool() != Some(false),
-        "coloured": prefs["socialColoured"].as_bool() == Some(true),
+        // (the platform's colours over the whole card: only Card's and Pill's panel, the others having their own)
+        "coloured": prefs["socialColoured"].as_bool() == Some(true) && matches!(prefs["socialStyle"].as_str().unwrap_or("card"), "card" | "pill"),
         "motion": prefs["socialMotion"].as_str().unwrap_or("rise"),
     })
 }
