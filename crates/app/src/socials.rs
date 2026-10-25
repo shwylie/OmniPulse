@@ -128,6 +128,23 @@ pub fn edit_save(prefs: &Value, id: &str, vals: &Map<String, Value>) -> Value {
     })
 }
 
+/// A platform's icon (24 x 24), as the widget draws it: read from the widget's own page, so the two never
+/// differ; "" for one it hasn't (your own: its first letter)
+pub fn icon_path(platform: &str) -> String {
+    static ICONS: std::sync::OnceLock<Vec<(String, String)>> = std::sync::OnceLock::new();
+    let all = ICONS.get_or_init(|| {
+        let page = include_str!("../../core/widget/socials.html");
+        let Some(start) = page.find("const ICONS = {") else { return Vec::new() };
+        let body = &page[start..];
+        let body = &body[..body.find("};").unwrap_or(body.len())];
+        body.lines().filter_map(|l| {
+            let (k, v) = l.trim().split_once(": \"")?;
+            Some((k.trim().to_string(), v.trim_end_matches(',').trim_end_matches('"').to_string()))
+        }).collect()
+    });
+    all.iter().find(|(k, _)| k == platform).map(|(_, v)| v.clone()).unwrap_or_default()
+}
+
 /// Its own icon, if one's been copied in: its file's name
 pub fn icon_of(m: &Map<String, Value>) -> Option<&str> { m.get("icon").and_then(|v| v.as_str()).filter(|v| !v.is_empty()) }
 

@@ -4,6 +4,8 @@
 import { ListView, Slider, LineEdit, ScrollView, Switch, Palette } from "std-widgets.slint";
 
 export global Theme {
+    /// (tiles' own colours, set from the theme's accent: Suite's cards, each different)
+    in-out property <[color]> tints: [#8e9bff, #b48eff, #5ad1ff, #4ad295, #ffb547, #ff6b8a];
     in-out property <color> bg: #08090c;
     in-out property <color> panel: #111318;
     in-out property <color> elevated: #1a1d25;
@@ -94,6 +96,9 @@ export struct KeyStep { text: string, has-url: bool, copies: [string] }
 /// A key to paste: its label, what's typed, and whether it looks right
 export struct KeyField { label: string, value: string, ok: bool }
 // the Lyrics Widget's look, for its page's preview
+/// The Social Plug's preview: each platform shown (its icon, as the widget's, or its first letter), and its look
+export struct SocialItem { name: string, handle: string, c1: color, c2: color, d: string, letter: string }
+export struct SocialLook { style: string, coloured: bool, align: string, rounded: bool, all: bool, secs: int, motion: string, sample: bool }
 export struct LyricsLook { color: color, hi: color, own-hi: bool, dim: float, size: float, align: string, style: string, shadow: bool, outline: bool, outline-color: color, boxed: bool, box-color: color, box-opacity: float, title: bool, before: bool, lines: int, upper: bool, place: string }
 export struct PlugField { key: string, label: string, note: string, kind: string, value: string, options: [string], at: int, changed: bool }
 // the chatbot's page: a service's tile, a feature's card, a setup step, a line of what it did (or of a try), a sheet's line
@@ -112,7 +117,9 @@ export struct FlowField { key: string, label: string, note: string, kind: string
 /// A trigger or a step: which kind it is (of the page's list of them), what it says, what it asks for
 export struct FlowNode { kind-at: int, note: string, fields: [FlowField], depth: int }
 /// An action in the page's list: its name, what starts it and how many steps, on or off
-export struct FlowItem { name: string, summary: string, on: bool }
+/// An action in the Actions list: its group's heading above it when it's the group's first (`head`), and
+/// shown unless its group is folded or it isn't what's searched for
+export struct FlowItem { name: string, summary: string, on: bool, group: string, head: bool, shown: bool, count: int, shut: bool }
 /// A slice of the Ring visualiser: its outline, and where it is from the foot (0, the bass) to the top (1)
 export struct RingPiece { d: string, f: float }
 
@@ -1068,6 +1075,21 @@ component FlowFieldsView inherits VerticalLayout {
             fti := TextInput { x: 10px; width: parent.width - 20px; height: parent.height; vertical-alignment: center; color: Theme.text; font-size: 13px; single-line: true; input-type: fl.kind == "number" ? InputType.decimal : InputType.text; text: fl.value; edited => { root.changed(i, self.text); } }
         }
         if fl.kind == "select": VerticalLayout { alignment: center; Dropdown { options: fl.options; current: fl.at; picked(k) => { root.picked(i, k); } } }
+        // (a program: typed, or picked from the ones open now)
+        if fl.kind == "program": VerticalLayout {
+            alignment: center;
+            spacing: 6px;
+            Rectangle {
+                width: 280px;
+                height: 32px;
+                border-radius: 8px;
+                background: Theme.bg;
+                border-width: 1px;
+                border-color: fpti.has-focus ? Theme.accent : Theme.line;
+                fpti := TextInput { x: 10px; width: parent.width - 20px; height: parent.height; vertical-alignment: center; color: Theme.text; font-size: 13px; single-line: true; text: fl.value; edited => { root.changed(i, self.text); } }
+            }
+            Dropdown { width: 280px; options: fl.options; current: -1; placeholder: fl.options.length > 0 ? "Pick one that's open now" : "No other programs open"; picked(k) => { root.picked(i, k); } }
+        }
         if fl.kind == "toggle": CenterToggle { checked: fl.value == "true"; toggled => { root.changed(i, self.checked ? "true" : "false"); } }
     }
 }
@@ -2141,6 +2163,8 @@ component ChangeSketch inherits Rectangle {
 /// Something that goes on stream (the Stream Widget, the Lyrics Widget): a tile with its light, its address (copied
 /// with a click), its settings, its switch
 component StreamTile inherits Rectangle {
+    /// (its own colour, from the theme's: a wash behind it, and its edge)
+    in property <color> tint: Theme.accent;
     in property <SetRow> r;
     in property <string> addr;
     in property <string> d;
@@ -2149,9 +2173,9 @@ component StreamTile inherits Rectangle {
     callback copy(string);
     height: 124px;
     border-radius: 14px;
-    background: Theme.panel;
+    background: Theme.panel.mix(root.tint, 0.9);
     border-width: 1px;
-    border-color: root.r.on ? Theme.accent.with-alpha(0.6) : Theme.line;
+    border-color: root.r.on ? root.tint.with-alpha(0.65) : root.tint.with-alpha(0.25);
     HiGlow { lit: Hi.label != "" && Hi.label == root.r.label; r: 14px; }
     VerticalLayout {
         padding: 12px;
@@ -2314,6 +2338,84 @@ component DesignSketch inherits VerticalLayout {
 }
 
 /// The Lyrics Widget's preview: a few lines in its look (colours, size, alignment, style, outline, box), as it's set
+/// One platform, as the Social Plug draws it (Card, Pill or Minimal; in its colours or not)
+component SocialCard inherits Rectangle {
+    in property <SocialItem> it;
+    in property <SocialLook> look;
+    property <bool> pill: root.look.style == "pill";
+    property <bool> bare: root.look.style == "minimal";
+    height: 58px;
+    width: row.preferred-width;
+    border-radius: !root.look.rounded ? 0px : root.pill ? self.height / 2 : 12px;
+    background: root.bare ? transparent : root.look.coloured ? @linear-gradient(115deg, root.it.c1 0%, root.it.c2 100%) : #0a0814d1;
+    clip: true;
+    row := HorizontalLayout {
+        padding: 9px;
+        padding-right: root.pill ? 22px : 16px;
+        spacing: 11px;
+        Rectangle {
+            width: 40px;
+            height: 40px;
+            border-radius: !root.look.rounded ? 0px : root.pill ? 20px : 10px;
+            background: root.look.coloured && !root.bare ? #00000038 : @linear-gradient(135deg, root.it.c1 0%, root.it.c2 100%);
+            if root.it.d != "": Glyph { d: root.it.d; width: 25px; height: 25px; fill: #ffffff; }
+            if root.it.d == "": Text { text: root.it.letter; color: #ffffff; font-size: 21px; font-weight: 800; }
+        }
+        VerticalLayout {
+            alignment: center;
+            Text { text: root.it.handle; color: #ffffff; font-size: 17px; font-weight: 700; overflow: elide; }
+            Text { text: root.it.name.to-uppercase(); color: #ffffffbf; font-size: 11px; letter-spacing: 0.5px; }
+        }
+    }
+}
+
+/// The Social Plug as it'll look in OBS: over a stream, one at a time in turn (coming in as its Animation
+/// says) or all together; shown while its settings are, as they're changed
+component SocialPreview inherits Rectangle {
+    in property <[SocialItem]> items;
+    in property <SocialLook> look;
+    height: 150px;
+    border-radius: 14px;
+    border-width: 1px;
+    border-color: Theme.line;
+    clip: true;
+    // (two colours only: a third stop drew a seam across it in the software renderer)
+    Rectangle { background: @linear-gradient(135deg, #2b3550 0%, #3a2b48 100%); }
+    // (its corners rounded off over the stream behind it: the software renderer draws a gradient square)
+    Caps { r: 14px; outside: Theme.bg; tl: #2b3550; tr: #33304c; bl: #33304c; br: #3a2b48; top: true; bottom: true; }
+    if root.look.sample: Text { x: 12px; y: 8px; text: "Sample platforms: add yours below to see them here."; color: #ffffffb0; font-size: 11px; }
+    // (one at a time: which one's up, and how far into its turn)
+    property <int> secs: max(3, root.look.secs);
+    property <int> ms: Theme.motion ? mod(animation-tick() / 1ms, root.secs * 1000 * max(1, root.items.length)) : 1000;
+    property <int> at: root.items.length > 0 ? floor(root.ms / (root.secs * 1000)) : 0;
+    property <float> into: root.ms - root.at * root.secs * 1000;
+    // (0 to 1: coming in over its first 0.65 s, going out over its last 0.5 s)
+    property <float> come: !Theme.motion || root.look.motion == "none" ? 1 : clamp(root.into / 650, 0, 1);
+    property <float> go: !Theme.motion || root.look.motion == "none" ? 0 : clamp((root.into - (root.secs * 1000 - 500)) / 500, 0, 1);
+    property <float> ease: 1 - (1 - root.come) * (1 - root.come) * (1 - root.come);
+    property <length> pad: 24px;
+    if !root.look.all && root.items.length > 0: SocialCard {
+        it: root.items[root.at];
+        look: root.look;
+        property <length> home: root.look.align == "left" ? root.pad : root.look.align == "right" ? root.width - self.width - root.pad : (root.width - self.width) / 2;
+        x: self.home + (root.look.motion == "slide" ? (1 - root.ease) * -32px + root.go * 32px : 0px);
+        y: (root.height - self.height) / 2 + (root.look.motion == "rise" || root.look.motion == "type" ? (1 - root.ease) * 14px - root.go * 10px : 0px);
+        opacity: root.come * (1 - root.go);
+        // (Pop and Flip: grown or turned in from nothing, as near as a flat preview shows it)
+        transform-scale-x: root.look.motion == "pop" ? 0.5 + 0.5 * root.ease : 1;
+        transform-scale-y: root.look.motion == "pop" ? 0.5 + 0.5 * root.ease : root.look.motion == "flip" ? max(0.05, root.ease) * (1 - root.go) + (root.go > 0 ? 0 : 0) : 1;
+    }
+    // (all together: only made while it's chosen, so nothing of it's drawn otherwise)
+    if root.look.all: HorizontalLayout {
+        x: root.look.align == "left" ? root.pad : root.look.align == "right" ? root.width - self.preferred-width - root.pad : (root.width - self.preferred-width) / 2;
+        y: (root.height - 58px) / 2;
+        width: self.preferred-width;
+        height: 58px;
+        spacing: 10px;
+        for it in root.items: SocialCard { it: it; look: root.look; }
+    }
+}
+
 component LyricsPreview inherits Rectangle {
     in property <LyricsLook> look;
     height: 190px;
@@ -2444,6 +2546,10 @@ component SetRowView inherits Card {
 
 /// The chatbot page's colours and marks, by what they're for (a service, a feature)
 global BotLook {
+    /// (a tile's own colour, the nth of the theme's)
+    public pure function tile(n: int) -> color {
+        return Theme.tints.length > 0 ? Theme.tints[mod(n, Theme.tints.length)] : Theme.accent;
+    }
     public pure function tint(id: string) -> color {
         return id == "twitch" || id == "twitchbot" ? #a970ff : id == "kick" || id == "kickbot" ? #53fc18 : id == "obs" ? Theme.accent : id == "streamlabs" ? #4ad295 : id == "streamelements" ? #5ad1ff
             : id == "requests" ? Theme.accent : id == "alerts" ? #ff6b8a : id == "points" ? #ffb547 : id == "games" ? #5ad1ff : Theme.accent-2;
@@ -2638,13 +2744,14 @@ component BotFieldRow inherits VerticalLayout {
 /// One of what the chatbot does: its switch (or where it's set up)
 component FeatCard inherits Rectangle {
     in property <BotFeat> c;
+    in property <color> tint: Theme.accent;
     callback set(string, string);
     callback act(string);
     height: 74px;
     border-radius: 16px;
-    background: Theme.panel;
+    background: Theme.panel.mix(root.tint, 0.9);
     border-width: 1px;
-    border-color: root.c.on ? BotLook.tint(root.c.id).with-alpha(0.55) : Theme.line;
+    border-color: root.c.on ? root.tint.with-alpha(0.6) : root.tint.with-alpha(0.22);
     clip: true;
     if root.c.changed: Pulse { r: 16px; }
     HorizontalLayout {
@@ -2652,8 +2759,8 @@ component FeatCard inherits Rectangle {
         spacing: 12px;
         Rectangle {
             width: 40px; height: 40px; y: (parent.height - self.height) / 2; border-radius: 12px;
-            background: BotLook.tint(root.c.id).with-alpha(root.c.on ? 0.18 : 0.08);
-            Glyph { d: BotLook.icon(root.c.id); width: 22px; height: 22px; x: 9px; y: 9px; fill: root.c.on ? BotLook.tint(root.c.id) : Theme.muted; }
+            background: root.tint.with-alpha(root.c.on ? 0.18 : 0.08);
+            Glyph { d: BotLook.icon(root.c.id); width: 22px; height: 22px; x: 9px; y: 9px; fill: root.c.on ? root.tint : Theme.muted; }
         }
         VerticalLayout {
             horizontal-stretch: 1;
@@ -2670,6 +2777,8 @@ component FeatCard inherits Rectangle {
 
 /// The page
 component BotPage inherits Rectangle {
+    /// (its Widgets, or its Docks, as a page of their own ("widgets", "docks"): the rest of it hidden)
+    in property <string> widgets-view;
     in property <bool> setup;
     in property <string> name;
     in property <string> sub;
@@ -2783,277 +2892,344 @@ component BotPage inherits Rectangle {
             padding-bottom: root.foot;
             spacing: 14px;
             alignment: start;
-            // the bot, and a chat to try it in
-            HorizontalLayout {
-                spacing: 12px;
-                height: 168px;
-                Rectangle {
-                    horizontal-stretch: 1;
-                    border-radius: 18px;
-                    background: Theme.panel;
-                    border-width: 1px;
-                    border-color: Theme.line;
-                    HorizontalLayout {
-                        padding: 16px;
-                        spacing: 16px;
-                        // (rings round it, turning slowly while it's running)
-                        Rectangle {
-                            width: 92px;
-                            height: 92px;
-                            y: (parent.height - self.height) / 2;
-                            property <float> spin: root.running && Theme.motion ? mod(animation-tick() / 1ms, 12000) / 12000 : 0;
-                            Rectangle { border-radius: self.width / 2; border-width: 2px; border-color: Theme.accent.with-alpha(root.running ? 0.35 : 0.12); }
-                            Rectangle { x: 8px; y: 8px; width: parent.width - 16px; height: self.width; border-radius: self.width / 2; border-width: 2px; border-color: Theme.accent-2.with-alpha(root.running ? 0.6 : 0.15); }
-                            if root.running: Rectangle {
-                                x: parent.width / 2 - 4px + (parent.width / 2 - 1px) * cos(parent.spin * 360deg);
-                                y: parent.height / 2 - 4px + (parent.height / 2 - 1px) * sin(parent.spin * 360deg);
-                                width: 8px; height: 8px; border-radius: 4px; background: Theme.accent;
+            if root.widgets-view == "": VerticalLayout {
+                spacing: 14px;
+                // the bot, and a chat to try it in
+                HorizontalLayout {
+                    spacing: 12px;
+                    height: 168px;
+                    Rectangle {
+                        horizontal-stretch: 1;
+                        border-radius: 18px;
+                        background: Theme.panel;
+                        border-width: 1px;
+                        border-color: Theme.line;
+                        HorizontalLayout {
+                            padding: 16px;
+                            spacing: 16px;
+                            // (rings round it, turning slowly while it's running)
+                            Rectangle {
+                                width: 92px;
+                                height: 92px;
+                                y: (parent.height - self.height) / 2;
+                                property <float> spin: root.running && Theme.motion ? mod(animation-tick() / 1ms, 12000) / 12000 : 0;
+                                Rectangle { border-radius: self.width / 2; border-width: 2px; border-color: Theme.accent.with-alpha(root.running ? 0.35 : 0.12); }
+                                Rectangle { x: 8px; y: 8px; width: parent.width - 16px; height: self.width; border-radius: self.width / 2; border-width: 2px; border-color: Theme.accent-2.with-alpha(root.running ? 0.6 : 0.15); }
+                                if root.running: Rectangle {
+                                    x: parent.width / 2 - 4px + (parent.width / 2 - 1px) * cos(parent.spin * 360deg);
+                                    y: parent.height / 2 - 4px + (parent.height / 2 - 1px) * sin(parent.spin * 360deg);
+                                    width: 8px; height: 8px; border-radius: 4px; background: Theme.accent;
+                                }
+                                Rectangle {
+                                    x: 18px; y: 18px; width: parent.width - 36px; height: self.width; border-radius: self.width / 2; background: Theme.elevated;
+                                    Glyph { d: Icons.robot; width: 30px; height: 30px; x: (parent.width - 30px) / 2; y: (parent.height - 30px) / 2; fill: root.running ? Theme.accent : Theme.muted; }
+                                }
+                            }
+                            VerticalLayout {
+                                horizontal-stretch: 1;
+                                alignment: center;
+                                spacing: 4px;
+                                HorizontalLayout {
+                                    spacing: 8px;
+                                    Text { text: root.name; color: Theme.text; font-size: 20px; font-weight: 800; overflow: elide; horizontal-stretch: 1; }
+                                    IconButton { d: root.running ? Icons.pause : Icons.play; size: 32px; filled: !root.running; tip: root.running ? "Stop the chatbot" : "Start the chatbot"; clicked => { root.act("run"); } }
+                                }
+                                Text { text: root.sub; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
+                                HorizontalLayout {
+                                    spacing: 6px;
+                                    alignment: start;
+                                    for t in root.tiles: Rectangle {
+                                        visible: t.state != "off";
+                                        width: t.state != "off" ? chip.preferred-width + 30px : 0px;
+                                        height: 22px;
+                                        border-radius: 11px;
+                                        background: BotLook.tint(t.id).with-alpha(0.15);
+                                        chip := Text { x: 22px; text: t.name; color: BotLook.tint(t.id).mix(Theme.text, 0.6); font-size: 11px; vertical-alignment: center; }
+                                        Light { x: 9px; y: 7px; state: t.state; }
+                                    }
+                                }
+                                Text { text: root.stats; color: Theme.muted; font-size: 12px; }
+                            }
+                        }
+                    }
+                    Rectangle {
+                        width: 300px;
+                        border-radius: 18px;
+                        background: Theme.panel;
+                        border-width: 1px;
+                        border-color: Theme.line;
+                        VerticalLayout {
+                            padding: 12px;
+                            spacing: 6px;
+                            // (a chat of its own, to try commands in: only you see it)
+                            HorizontalLayout {
+                                spacing: 6px;
+                                VerticalLayout { alignment: center; Glyph { d: Icons.flask; width: 16px; height: 16px; fill: Theme.accent; } }
+                                Text { text: "Test chat"; color: Theme.text; font-size: 13px; font-weight: 700; horizontal-stretch: 1; vertical-alignment: center; }
+                                Rectangle {
+                                    width: pv.preferred-width + 14px;
+                                    height: 18px;
+                                    y: (parent.height - self.height) / 2;
+                                    border-radius: 9px;
+                                    background: Theme.elevated;
+                                    pv := Text { x: 7px; text: "private"; color: Theme.muted; font-size: 10px; vertical-alignment: center; }
+                                }
                             }
                             Rectangle {
-                                x: 18px; y: 18px; width: parent.width - 36px; height: self.width; border-radius: self.width / 2; background: Theme.elevated;
-                                Glyph { d: Icons.robot; width: 30px; height: 30px; x: (parent.width - 30px) / 2; y: (parent.height - 30px) / 2; fill: root.running ? Theme.accent : Theme.muted; }
+                                vertical-stretch: 1;
+                                clip: true;
+                                VerticalLayout {
+                                    alignment: end;
+                                    spacing: 4px;
+                                    if root.tried.length == 0: Text { text: "Try a command. Only you see this."; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
+                                    // (some to try, from what it answers: a click tries it)
+                                    if root.tried.length == 0: HorizontalLayout {
+                                        spacing: 5px;
+                                        alignment: start;
+                                        for ex in root.examples: Rectangle {
+                                            width: ext.preferred-width + 18px;
+                                            height: 22px;
+                                            border-radius: 11px;
+                                            background: exa.has-hover ? Theme.accent.with-alpha(0.18) : Theme.elevated;
+                                            border-width: 1px;
+                                            border-color: Theme.line;
+                                            ext := Text { x: 9px; text: ex; color: Theme.accent.mix(Theme.text, 0.4); font-size: 11px; vertical-alignment: center; }
+                                            exa := TouchArea { mouse-cursor: MouseCursor.pointer; clicked => { root.try-it(ex); } }
+                                        }
+                                    }
+                                    for b in root.tried: HorizontalLayout {
+                                        alignment: b.who == "You" ? end : start;
+                                        Rectangle {
+                                            width: min(bt.preferred-width + 20px, 250px);
+                                            height: bt.preferred-height + 10px;
+                                            border-radius: 10px;
+                                            background: b.who == "You" ? Theme.elevated : Theme.accent.with-alpha(0.16);
+                                            bt := Text { x: 10px; width: parent.width - 20px; text: b.did; color: b.who == "You" ? Theme.text : Theme.accent.mix(Theme.text, 0.35); font-size: 12px; wrap: word-wrap; vertical-alignment: center; }
+                                        }
+                                    }
+                                }
                             }
+                            HorizontalLayout {
+                                spacing: 6px;
+                                Rectangle {
+                                    horizontal-stretch: 1;
+                                    height: 32px;
+                                    border-radius: 16px;
+                                    background: Theme.bg;
+                                    border-width: 1px;
+                                    border-color: tin.has-focus ? Theme.accent : Theme.line;
+                                    tin := TextInput { x: 12px; width: parent.width - 24px; height: parent.height; vertical-alignment: center; color: Theme.text; font-size: 12px; single-line: true; accepted => { if (self.text != "") { root.try-it(self.text); self.text = ""; } } }
+                                    if tin.text == "": Text { x: 12px; text: "Type a command"; color: Theme.muted.with-alpha(0.6); font-size: 12px; vertical-alignment: center; }
+                                }
+                                IconButton { d: Icons.send; size: 32px; tint: Theme.accent; tip: "Test it (only you see it)"; clicked => { if (tin.text != "") { root.try-it(tin.text); tin.text = ""; } } }
+                            }
+                        }
+                    }
+                }
+                // where it's connected
+                Text { text: "Connections"; color: Theme.muted; font-size: 12px; font-weight: 700; }
+                HorizontalLayout {
+                    spacing: 8px;
+                    for t[ti] in root.tiles: Rectangle {
+                        horizontal-stretch: 1;
+                        height: 112px;
+                        border-radius: 14px;
+                        background: tta.has-hover ? Theme.elevated.mix(BotLook.tile(ti), 0.84) : Theme.panel.mix(BotLook.tile(ti), 0.9);
+                        border-width: 1px;
+                        border-color: t.state == "off" ? BotLook.tile(ti).with-alpha(0.28) : BotLook.tint(t.id).with-alpha(0.7);
+                        tta := TouchArea { mouse-cursor: MouseCursor.pointer; clicked => { root.act("sheet:" + t.id); } }
+                        VerticalLayout {
+                            padding: 12px;
+                            spacing: 5px;
+                            HorizontalLayout {
+                                spacing: 6px;
+                                Glyph { d: BotLook.icon(t.id); width: 16px; height: 16px; fill: t.state == "off" ? Theme.muted : BotLook.tint(t.id); }
+                                Text { text: t.name; color: Theme.text; font-weight: 700; font-size: 13px; overflow: elide; horizontal-stretch: 1; }
+                            }
+                            HorizontalLayout { spacing: 6px; Light { y: 5px; state: t.state; } Text { text: t.line1; color: Theme.text.mix(Theme.muted, 0.4); font-size: 12px; overflow: elide; horizontal-stretch: 1; } }
+                            Text { text: t.line2; color: Theme.muted; font-size: 11px; overflow: elide; }
+                            Rectangle { vertical-stretch: 1; }
+                            HorizontalLayout {
+                                alignment: end;
+                                IconButton { d: t.state == "off" ? Icons.add : Icons.gear; size: 28px; tint: t.state == "off" ? Theme.accent : Theme.muted; tip: t.state == "off" ? "Set up " + t.name : t.name + "'s settings and sign-ins"; clicked => { root.act("sheet:" + t.id); } }
+                            }
+                        }
+                    }
+                }
+                Text { text: "Chatbot"; color: Theme.muted; font-size: 12px; font-weight: 700; }
+                for r in ceil(root.feats.length / 2): HorizontalLayout {
+                    spacing: 10px;
+                    FeatCard { tint: BotLook.tile(r * 2 + 2); horizontal-stretch: 1; preferred-width: 0px; min-width: 0px; c: root.feats[r * 2]; set(k, v) => { root.set(k, v); } act(a) => { root.act(a); } }
+                    if r * 2 + 1 < root.feats.length: FeatCard { tint: BotLook.tile(r * 2 + 3); horizontal-stretch: 1; preferred-width: 0px; min-width: 0px; c: root.feats[r * 2 + 1]; set(k, v) => { root.set(k, v); } act(a) => { root.act(a); } }
+                    if r * 2 + 1 >= root.feats.length: Rectangle { horizontal-stretch: 1; preferred-width: 0px; min-width: 0px; }
+                }
+                // the widgets (in a scene, for your viewers) and the docks (in OBS, for you): a card for each, their own pages from them
+                Text { text: "Widgets"; color: Theme.muted; font-size: 12px; font-weight: 700; }
+                Rectangle {
+                    height: 74px;
+                    border-radius: 16px;
+                    background: widgetsa.has-hover ? Theme.elevated.mix(BotLook.tile(4), 0.86) : Theme.panel.mix(BotLook.tile(4), 0.9);
+                    border-width: 1px;
+                    border-color: BotLook.tile(4).with-alpha(0.45);
+                    widgetsa := TouchArea { mouse-cursor: MouseCursor.pointer; clicked => { root.act("widgets"); } }
+                    HorizontalLayout {
+                        padding: 14px;
+                        spacing: 12px;
+                        Rectangle {
+                            width: 40px;
+                            height: 40px;
+                            y: (parent.height - self.height) / 2;
+                            border-radius: 12px;
+                            background: BotLook.tile(4).with-alpha(0.18);
+                            Glyph { d: Icons.broadcast; width: 22px; height: 22px; x: 9px; y: 9px; fill: BotLook.tile(4); }
                         }
                         VerticalLayout {
                             horizontal-stretch: 1;
                             alignment: center;
-                            spacing: 4px;
-                            HorizontalLayout {
-                                spacing: 8px;
-                                Text { text: root.name; color: Theme.text; font-size: 20px; font-weight: 800; overflow: elide; horizontal-stretch: 1; }
-                                IconButton { d: root.running ? Icons.pause : Icons.play; size: 32px; filled: !root.running; tip: root.running ? "Stop the chatbot" : "Start the chatbot"; clicked => { root.act("run"); } }
-                            }
-                            Text { text: root.sub; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
-                            HorizontalLayout {
-                                spacing: 6px;
-                                alignment: start;
-                                for t in root.tiles: Rectangle {
-                                    visible: t.state != "off";
-                                    width: t.state != "off" ? chip.preferred-width + 30px : 0px;
-                                    height: 22px;
-                                    border-radius: 11px;
-                                    background: BotLook.tint(t.id).with-alpha(0.15);
-                                    chip := Text { x: 22px; text: t.name; color: BotLook.tint(t.id).mix(Theme.text, 0.6); font-size: 11px; vertical-alignment: center; }
-                                    Light { x: 9px; y: 7px; state: t.state; }
-                                }
-                            }
-                            Text { text: root.stats; color: Theme.muted; font-size: 12px; }
+                            spacing: 2px;
+                            Text { text: "Your Widgets"; color: Theme.text; font-size: 14px; font-weight: 700; }
+                            Text { text: "Browser sources for your scenes: the Stream Widget, Lyrics, Social Plug, Multichat Overlay, Goals, Timer and the rest."; color: Theme.muted; font-size: 12px; overflow: elide; }
                         }
+                        VerticalLayout { alignment: center; Pill { label: "Open"; clicked => { root.act("widgets"); } } }
                     }
                 }
+                Text { text: "Docks"; color: Theme.muted; font-size: 12px; font-weight: 700; }
                 Rectangle {
-                    width: 300px;
-                    border-radius: 18px;
+                    height: 74px;
+                    border-radius: 16px;
+                    background: docksa.has-hover ? Theme.elevated.mix(BotLook.tile(5), 0.86) : Theme.panel.mix(BotLook.tile(5), 0.9);
+                    border-width: 1px;
+                    border-color: BotLook.tile(5).with-alpha(0.45);
+                    docksa := TouchArea { mouse-cursor: MouseCursor.pointer; clicked => { root.act("docks"); } }
+                    HorizontalLayout {
+                        padding: 14px;
+                        spacing: 12px;
+                        Rectangle {
+                            width: 40px;
+                            height: 40px;
+                            y: (parent.height - self.height) / 2;
+                            border-radius: 12px;
+                            background: BotLook.tile(5).with-alpha(0.18);
+                            Glyph { d: Icons.chat; width: 22px; height: 22px; x: 9px; y: 9px; fill: BotLook.tile(5); }
+                        }
+                        VerticalLayout {
+                            horizontal-stretch: 1;
+                            alignment: center;
+                            spacing: 2px;
+                            Text { text: "Your Docks"; color: Theme.text; font-size: 14px; font-weight: 700; }
+                            Text { text: "Panels inside OBS, just for you: the Chat Dock, to read and moderate chat, and the Activity Feed."; color: Theme.muted; font-size: 12px; overflow: elide; }
+                        }
+                        VerticalLayout { alignment: center; Pill { label: "Open"; clicked => { root.act("docks"); } } }
+                    }
+                }
+                // what it's been doing
+                Rectangle {
+                    border-radius: 14px;
                     background: Theme.panel;
                     border-width: 1px;
                     border-color: Theme.line;
-                    VerticalLayout {
+                    height: lg.preferred-height;
+                    lg := VerticalLayout {
                         padding: 12px;
                         spacing: 6px;
-                        // (a chat of its own, to try commands in: only you see it)
                         HorizontalLayout {
-                            spacing: 6px;
-                            VerticalLayout { alignment: center; Glyph { d: Icons.flask; width: 16px; height: 16px; fill: Theme.accent; } }
-                            Text { text: "Test chat"; color: Theme.text; font-size: 13px; font-weight: 700; horizontal-stretch: 1; vertical-alignment: center; }
-                            Rectangle {
-                                width: pv.preferred-width + 14px;
-                                height: 18px;
-                                y: (parent.height - self.height) / 2;
-                                border-radius: 9px;
-                                background: Theme.elevated;
-                                pv := Text { x: 7px; text: "private"; color: Theme.muted; font-size: 10px; vertical-alignment: center; }
+                            Text { text: "Lately: what it heard, and what it did"; color: Theme.muted; font-size: 12px; horizontal-stretch: 1; }
+                            Text { text: "Run setup again"; color: rs.has-hover ? Theme.text : Theme.muted; font-size: 11px; rs := TouchArea { mouse-cursor: MouseCursor.pointer; clicked => { root.act("setup:again"); } } }
+                        }
+                        if root.log.length == 0: Text { text: "Nothing yet: once it's running, what it answers shows here."; color: Theme.muted.with-alpha(0.7); font-size: 12px; }
+                        for l in root.log: HorizontalLayout {
+                            spacing: 8px;
+                            Rectangle { width: 3px; border-radius: 1px; background: BotLook.tint(l.platform); }
+                            Text { text: l.who; color: BotLook.tint(l.platform).mix(Theme.text, 0.5); font-size: 12px; font-weight: 700; }
+                            Text { text: l.heard; color: Theme.muted; font-size: 12px; overflow: elide; max-width: 220px; }
+                            Glyph { d: Icons.next; width: 12px; height: 12px; y: 2px; fill: Theme.muted; }
+                            Text { text: l.did; color: Theme.text; font-size: 12px; overflow: elide; horizontal-stretch: 1; }
+                        }
+                    }
+                }
+            }
+            // (Widgets and Docks, on a page of their own)
+            if root.widgets-view != "": VerticalLayout {
+                spacing: 14px;
+                // the widgets (here while the chatbot's on), its OBS docks, and chat on stream
+                if root.widgets-view == "widgets": HorizontalLayout {
+                    spacing: 0px;
+                    for r in root.stream-rows: HorizontalLayout {
+                        horizontal-stretch: (r.key == "widget" || r.key == "lyricsWidget" || r.key == "socials") ? 1 : 0;
+                        preferred-width: 0px;
+                        min-width: 0px;
+                        padding-right: r.key == "widget" || r.key == "lyricsWidget" ? 8px : 0px;
+                        if r.key == "widget": StreamTile { tint: BotLook.tile(0); horizontal-stretch: 1; r: r; d: Icons.broadcast; addr: "http://127.0.0.1:" + root.port + "/"; toggle(k) => { root.act("row-toggle:" + k); } more(k) => { root.act("row-more:" + k); } copy(a) => { root.act("copy:" + a); } }
+                        if r.key == "lyricsWidget": StreamTile { tint: BotLook.tile(1); horizontal-stretch: 1; r: r; d: Icons.lyrics; addr: "http://127.0.0.1:" + root.port + "/lyrics"; toggle(k) => { root.act("row-toggle:" + k); } more(k) => { root.act("row-more:" + k); } copy(a) => { root.act("copy:" + a); } }
+                        if r.key == "socials": StreamTile { tint: BotLook.tile(2); horizontal-stretch: 1; r: r; d: Icons.link; addr: "http://127.0.0.1:" + root.port + "/socials"; toggle(k) => { root.act("row-toggle:" + k); } more(k) => { root.act("row-more:" + k); } copy(a) => { root.act("copy:" + a); } }
+                    }
+                }
+                HorizontalLayout {
+                    spacing: 8px;
+                    for d[di] in root.widgets-view == "docks" ? [
+                        { n: "Chat Dock", t: "Twitch and Kick chat in OBS, with delete, time-out and ban on every message, and a box to chat back.", p: "/dock/chat", i: Icons.chat, k: "dockchat" },
+                        { n: "Activity Feed", t: "Follows, subs, bits, raids, rewards and the rest in OBS, each alert replayed with a click.", p: "/dock/activity", i: Icons.bell, k: "dockfeed" },
+                    ] : [
+                        { n: "Multichat Overlay", t: "Twitch and Kick chat together on stream, with a see-through background.", p: "/chat", i: Icons.broadcast, k: "multichat" },
+                    ]: Rectangle {
+                        horizontal-stretch: 1;
+                        preferred-width: 0px;
+                        min-width: 0px;
+                        height: 92px;
+                        border-radius: 14px;
+                        background: Theme.panel.mix(BotLook.tile(di + 3), 0.9);
+                        border-width: 1px;
+                        border-color: BotLook.tile(di + 3).with-alpha(0.3);
+                        dta := TouchArea { }
+                        TipSpot { tip: d.t; hover: dta.has-hover; }
+                        VerticalLayout {
+                            padding: 12px;
+                            spacing: 4px;
+                            HorizontalLayout {
+                                spacing: 7px;
+                                VerticalLayout { alignment: center; Glyph { d: d.i; width: 16px; height: 16px; fill: root.widget-on ? Theme.accent : Theme.muted; } }
+                                Text { text: d.n; color: Theme.text; font-weight: 700; font-size: 13px; horizontal-stretch: 1; overflow: elide; }
+                                IconButton { d: Icons.copy; size: 30px; tip: "Copy its address, for OBS"; clicked => { root.act("copy:http://127.0.0.1:" + root.port + d.p); } }
+                                IconButton { d: Icons.gear; size: 30px; tip: d.n + ": its settings"; clicked => { root.act("dockset:" + d.k); } }
                             }
+                            Text { text: "http://127.0.0.1:" + root.port + d.p; color: Theme.accent.mix(Theme.text, 0.55); font-size: 11px; font-family: "Consolas"; overflow: elide; }
+                            Text { text: root.widget-on ? d.t : "Turn on the Stream Widget first (Settings > Streaming). This is served from it."; color: Theme.muted; font-size: 11px; overflow: elide; }
                         }
-                        Rectangle {
-                            vertical-stretch: 1;
-                            clip: true;
-                            VerticalLayout {
-                                alignment: end;
-                                spacing: 4px;
-                                if root.tried.length == 0: Text { text: "Try a command. Only you see this."; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
-                                // (some to try, from what it answers: a click tries it)
-                                if root.tried.length == 0: HorizontalLayout {
-                                    spacing: 5px;
-                                    alignment: start;
-                                    for ex in root.examples: Rectangle {
-                                        width: ext.preferred-width + 18px;
-                                        height: 22px;
-                                        border-radius: 11px;
-                                        background: exa.has-hover ? Theme.accent.with-alpha(0.18) : Theme.elevated;
-                                        border-width: 1px;
-                                        border-color: Theme.line;
-                                        ext := Text { x: 9px; text: ex; color: Theme.accent.mix(Theme.text, 0.4); font-size: 11px; vertical-alignment: center; }
-                                        exa := TouchArea { mouse-cursor: MouseCursor.pointer; clicked => { root.try-it(ex); } }
-                                    }
-                                }
-                                for b in root.tried: HorizontalLayout {
-                                    alignment: b.who == "You" ? end : start;
-                                    Rectangle {
-                                        width: min(bt.preferred-width + 20px, 250px);
-                                        height: bt.preferred-height + 10px;
-                                        border-radius: 10px;
-                                        background: b.who == "You" ? Theme.elevated : Theme.accent.with-alpha(0.16);
-                                        bt := Text { x: 10px; width: parent.width - 20px; text: b.did; color: b.who == "You" ? Theme.text : Theme.accent.mix(Theme.text, 0.35); font-size: 12px; wrap: word-wrap; vertical-alignment: center; }
-                                    }
-                                }
+                    }
+                }
+                // the Suite's own widgets: what's happened on stream, shown
+                if root.widgets-view == "widgets": HorizontalLayout {
+                    spacing: 8px;
+                    for w[wi] in [
+                        { n: "Goals", p: "/goals", s: "goals", i: Icons.check, h: "127.0.0.1" },
+                        { n: "Timer", p: "/timer", s: "timer", i: Icons.refresh, h: "127.0.0.1" },
+                        { n: "Latest Follow", p: "/latest-follow", s: "latest", i: Icons.heart-out, h: "127.0.0.1" },
+                        { n: "Latest Sub", p: "/latest-sub", s: "latest", i: Icons.star-out, h: "127.0.0.1" },
+                        { n: "Raid Shoutout", p: "/raid", s: "raid", i: Icons.broadcast, h: "localhost" },
+                    ]: Rectangle {
+                        horizontal-stretch: 1;
+                        preferred-width: 0px;
+                        min-width: 0px;
+                        height: 74px;
+                        border-radius: 14px;
+                        background: Theme.panel.mix(BotLook.tile(wi + 1), 0.9);
+                        border-width: 1px;
+                        border-color: BotLook.tile(wi + 1).with-alpha(0.3);
+                        VerticalLayout {
+                            padding: 10px;
+                            spacing: 4px;
+                            HorizontalLayout {
+                                spacing: 6px;
+                                VerticalLayout { alignment: center; Glyph { d: w.i; width: 15px; height: 15px; fill: Theme.accent; } }
+                                Text { text: w.n; color: Theme.text; font-weight: 700; font-size: 12px; horizontal-stretch: 1; overflow: elide; vertical-alignment: center; }
+                                IconButton { d: Icons.copy; size: 28px; tip: "Copy its address, for OBS"; clicked => { root.act("copy:http://" + w.h + ":" + root.port + w.p); } }
+                                IconButton { d: Icons.gear; size: 28px; tip: "Its settings"; clicked => { root.act("sheet:" + w.s); } }
                             }
-                        }
-                        HorizontalLayout {
-                            spacing: 6px;
-                            Rectangle {
-                                horizontal-stretch: 1;
-                                height: 32px;
-                                border-radius: 16px;
-                                background: Theme.bg;
-                                border-width: 1px;
-                                border-color: tin.has-focus ? Theme.accent : Theme.line;
-                                tin := TextInput { x: 12px; width: parent.width - 24px; height: parent.height; vertical-alignment: center; color: Theme.text; font-size: 12px; single-line: true; accepted => { if (self.text != "") { root.try-it(self.text); self.text = ""; } } }
-                                if tin.text == "": Text { x: 12px; text: "Type a command"; color: Theme.muted.with-alpha(0.6); font-size: 12px; vertical-alignment: center; }
-                            }
-                            IconButton { d: Icons.send; size: 32px; tint: Theme.accent; tip: "Test it (only you see it)"; clicked => { if (tin.text != "") { root.try-it(tin.text); tin.text = ""; } } }
+                            Text { text: "http://" + w.h + ":" + root.port + w.p; color: Theme.accent.mix(Theme.text, 0.55); font-size: 10px; font-family: "Consolas"; overflow: elide; }
                         }
                     }
                 }
-            }
-            // where it's connected
-            Text { text: "Connections"; color: Theme.muted; font-size: 12px; font-weight: 700; }
-            HorizontalLayout {
-                spacing: 8px;
-                for t in root.tiles: Rectangle {
-                    horizontal-stretch: 1;
-                    height: 112px;
-                    border-radius: 14px;
-                    background: tta.has-hover ? Theme.elevated : Theme.panel;
-                    border-width: 1px;
-                    border-color: t.state == "off" ? Theme.line : BotLook.tint(t.id).with-alpha(0.7);
-                    tta := TouchArea { mouse-cursor: MouseCursor.pointer; clicked => { root.act("sheet:" + t.id); } }
-                    VerticalLayout {
-                        padding: 12px;
-                        spacing: 5px;
-                        HorizontalLayout {
-                            spacing: 6px;
-                            Glyph { d: BotLook.icon(t.id); width: 16px; height: 16px; fill: t.state == "off" ? Theme.muted : BotLook.tint(t.id); }
-                            Text { text: t.name; color: Theme.text; font-weight: 700; font-size: 13px; overflow: elide; horizontal-stretch: 1; }
-                        }
-                        HorizontalLayout { spacing: 6px; Light { y: 5px; state: t.state; } Text { text: t.line1; color: Theme.text.mix(Theme.muted, 0.4); font-size: 12px; overflow: elide; horizontal-stretch: 1; } }
-                        Text { text: t.line2; color: Theme.muted; font-size: 11px; overflow: elide; }
-                        Rectangle { vertical-stretch: 1; }
-                        HorizontalLayout {
-                            alignment: end;
-                            IconButton { d: t.state == "off" ? Icons.add : Icons.gear; size: 28px; tint: t.state == "off" ? Theme.accent : Theme.muted; tip: t.state == "off" ? "Set up " + t.name : t.name + "'s settings and sign-ins"; clicked => { root.act("sheet:" + t.id); } }
-                        }
-                    }
-                }
-            }
-            // the widgets (here while the chatbot's on), its OBS docks, and chat on stream
-            Text { text: "Widgets and Docks"; color: Theme.muted; font-size: 12px; font-weight: 700; }
-            HorizontalLayout {
-                spacing: 0px;
-                for r in root.stream-rows: HorizontalLayout {
-                    horizontal-stretch: (r.key == "widget" || r.key == "lyricsWidget" || r.key == "socials") ? 1 : 0;
-                    preferred-width: 0px;
-                    min-width: 0px;
-                    padding-right: r.key == "widget" || r.key == "lyricsWidget" ? 8px : 0px;
-                    if r.key == "widget": StreamTile { horizontal-stretch: 1; r: r; d: Icons.broadcast; addr: "http://127.0.0.1:" + root.port + "/"; toggle(k) => { root.act("row-toggle:" + k); } more(k) => { root.act("row-more:" + k); } copy(a) => { root.act("copy:" + a); } }
-                    if r.key == "lyricsWidget": StreamTile { horizontal-stretch: 1; r: r; d: Icons.lyrics; addr: "http://127.0.0.1:" + root.port + "/lyrics"; toggle(k) => { root.act("row-toggle:" + k); } more(k) => { root.act("row-more:" + k); } copy(a) => { root.act("copy:" + a); } }
-                    if r.key == "socials": StreamTile { horizontal-stretch: 1; r: r; d: Icons.link; addr: "http://127.0.0.1:" + root.port + "/socials"; toggle(k) => { root.act("row-toggle:" + k); } more(k) => { root.act("row-more:" + k); } copy(a) => { root.act("copy:" + a); } }
-                }
-            }
-            HorizontalLayout {
-                spacing: 8px;
-                for d in [
-                    { n: "Chat Dock", t: "Twitch and Kick chat, with delete, time-out and ban on every message, and a box to chat back. In OBS: Docks > Custom Browser Docks.", p: "/dock/chat", i: Icons.chat },
-                    { n: "Activity Feed", t: "Follows, subs, bits, raids, rewards and the rest, each kind shown or hidden, each alert replayed. A custom browser dock too.", p: "/dock/activity", i: Icons.bell },
-                    { n: "Multichat Overlay", t: "Twitch and Kick chat together on stream, with a see-through background. Add it as a Browser source. To change its settings, right-click it in OBS, choose Interact, then click its gear. For another with its own settings, add /2 to the end of the address (then /3, and so on).", p: "/chat", i: Icons.broadcast },
-                ]: Rectangle {
-                    horizontal-stretch: 1;
-                    preferred-width: 0px;
-                    min-width: 0px;
-                    height: 92px;
-                    border-radius: 14px;
-                    background: Theme.panel;
-                    border-width: 1px;
-                    border-color: Theme.line;
-                    dta := TouchArea { }
-                    TipSpot { tip: d.t; hover: dta.has-hover; }
-                    VerticalLayout {
-                        padding: 12px;
-                        spacing: 4px;
-                        HorizontalLayout {
-                            spacing: 7px;
-                            VerticalLayout { alignment: center; Glyph { d: d.i; width: 16px; height: 16px; fill: root.widget-on ? Theme.accent : Theme.muted; } }
-                            Text { text: d.n; color: Theme.text; font-weight: 700; font-size: 13px; horizontal-stretch: 1; overflow: elide; }
-                            IconButton { d: Icons.copy; size: 30px; tip: "Copy its address, for OBS"; clicked => { root.act("copy:http://127.0.0.1:" + root.port + d.p); } }
-                        }
-                        Text { text: "http://127.0.0.1:" + root.port + d.p; color: Theme.accent.mix(Theme.text, 0.55); font-size: 11px; font-family: "Consolas"; overflow: elide; }
-                        Text { text: root.widget-on ? d.t : "Turn on the Stream Widget first (Settings > Streaming). This is served from it."; color: Theme.muted; font-size: 11px; overflow: elide; }
-                    }
-                }
-            }
-            // the Suite's own widgets: what's happened on stream, shown
-            HorizontalLayout {
-                spacing: 8px;
-                for w in [
-                    { n: "Goals", p: "/goals", s: "goals", i: Icons.check, h: "127.0.0.1" },
-                    { n: "Timer", p: "/timer", s: "timer", i: Icons.refresh, h: "127.0.0.1" },
-                    { n: "Latest Follow", p: "/latest-follow", s: "latest", i: Icons.heart-out, h: "127.0.0.1" },
-                    { n: "Latest Sub", p: "/latest-sub", s: "latest", i: Icons.star-out, h: "127.0.0.1" },
-                    { n: "Raid Shoutout", p: "/raid", s: "raid", i: Icons.broadcast, h: "localhost" },
-                ]: Rectangle {
-                    horizontal-stretch: 1;
-                    preferred-width: 0px;
-                    min-width: 0px;
-                    height: 74px;
-                    border-radius: 14px;
-                    background: Theme.panel;
-                    border-width: 1px;
-                    border-color: Theme.line;
-                    VerticalLayout {
-                        padding: 10px;
-                        spacing: 4px;
-                        HorizontalLayout {
-                            spacing: 6px;
-                            VerticalLayout { alignment: center; Glyph { d: w.i; width: 15px; height: 15px; fill: Theme.accent; } }
-                            Text { text: w.n; color: Theme.text; font-weight: 700; font-size: 12px; horizontal-stretch: 1; overflow: elide; vertical-alignment: center; }
-                            IconButton { d: Icons.copy; size: 28px; tip: "Copy its address, for OBS"; clicked => { root.act("copy:http://" + w.h + ":" + root.port + w.p); } }
-                            IconButton { d: Icons.gear; size: 28px; tip: "Its settings"; clicked => { root.act("sheet:" + w.s); } }
-                        }
-                        Text { text: "http://" + w.h + ":" + root.port + w.p; color: Theme.accent.mix(Theme.text, 0.55); font-size: 10px; font-family: "Consolas"; overflow: elide; }
-                    }
-                }
-            }
-            // what it does
-            Text { text: "Chatbot"; color: Theme.muted; font-size: 12px; font-weight: 700; }
-            for r in ceil(root.feats.length / 2): HorizontalLayout {
-                spacing: 10px;
-                FeatCard { horizontal-stretch: 1; preferred-width: 0px; min-width: 0px; c: root.feats[r * 2]; set(k, v) => { root.set(k, v); } act(a) => { root.act(a); } }
-                if r * 2 + 1 < root.feats.length: FeatCard { horizontal-stretch: 1; preferred-width: 0px; min-width: 0px; c: root.feats[r * 2 + 1]; set(k, v) => { root.set(k, v); } act(a) => { root.act(a); } }
-                if r * 2 + 1 >= root.feats.length: Rectangle { horizontal-stretch: 1; preferred-width: 0px; min-width: 0px; }
-            }
-            // what it's been doing
-            Rectangle {
-                border-radius: 14px;
-                background: Theme.panel;
-                border-width: 1px;
-                border-color: Theme.line;
-                height: lg.preferred-height;
-                lg := VerticalLayout {
-                    padding: 12px;
-                    spacing: 6px;
-                    HorizontalLayout {
-                        Text { text: "Lately: what it heard, and what it did"; color: Theme.muted; font-size: 12px; horizontal-stretch: 1; }
-                        Text { text: "Run setup again"; color: rs.has-hover ? Theme.text : Theme.muted; font-size: 11px; rs := TouchArea { mouse-cursor: MouseCursor.pointer; clicked => { root.act("setup:again"); } } }
-                    }
-                    if root.log.length == 0: Text { text: "Nothing yet: once it's running, what it answers shows here."; color: Theme.muted.with-alpha(0.7); font-size: 12px; }
-                    for l in root.log: HorizontalLayout {
-                        spacing: 8px;
-                        Rectangle { width: 3px; border-radius: 1px; background: BotLook.tint(l.platform); }
-                        Text { text: l.who; color: BotLook.tint(l.platform).mix(Theme.text, 0.5); font-size: 12px; font-weight: 700; }
-                        Text { text: l.heard; color: Theme.muted; font-size: 12px; overflow: elide; max-width: 220px; }
-                        Glyph { d: Icons.next; width: 12px; height: 12px; y: 2px; fill: Theme.muted; }
-                        Text { text: l.did; color: Theme.text; font-size: 12px; overflow: elide; horizontal-stretch: 1; }
-                    }
-                }
+                // what it does
             }
         }
     }
@@ -3400,7 +3576,10 @@ export component AppWindow inherits Window {
     in-out property <bool> pf-open;
     // a sub-page's own preview at its top ("lyrics": the Lyrics Widget's look)
     in property <string> pf-preview;
+    in property <string> bot-widgets;
     in property <LyricsLook> pf-lyrics;
+    in property <[SocialItem]> pf-social-items;
+    in property <SocialLook> pf-social;
     // the chatbot's own page, in place of its list of fields
     in property <bool> bot-page;
     in property <bool> bot-setup;
@@ -3451,6 +3630,9 @@ export component AppWindow inherits Window {
     /// (an action's group: Streamer.bot's, turned on or off together by Turn a Group On or Off)
     in property <string> flow-group;
     callback flow-group-edited(string);
+    /// (the list: a group folded or opened, and what's searched for)
+    callback flow-group-fold(string);
+    callback flow-find(string);
     callback flow-on-toggled(bool);
     callback flow-trigger-type(int);
     callback flow-step-type(int, int);
@@ -3691,6 +3873,9 @@ export component AppWindow inherits Window {
     callback open-web(string);
     in-out property <bool> anim-on: true;
     callback anim-changed(bool);
+    /// Performance Mode: no animations, no glowing backgrounds, the visualiser at half its rate
+    in-out property <bool> perf-on;
+    callback perf-changed(bool);
     // Updates: what's known (this version, or a newer one), and its button ("Check" or "Update")
     in property <string> update-note: "Checks for a newer version a little after it starts.";
     in property <string> update-label: "Check";
@@ -3883,7 +4068,7 @@ export component AppWindow inherits Window {
                         // (a rounded tile, lit on hover, as the web app's)
                         Rectangle { width: 28px; height: 28px; x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2; border-radius: 8px; background: sta-s.has-hover ? Theme.elevated : transparent; }
                         // (pulsing only while there's music, as Seamless Mix's: still, YouTube red)
-                        property <float> phase: (root.streamer || root.stream-safe) && root.playing && Theme.motion ? mod(animation-tick() / 1ms, 3600) / 1200 : 0.0;
+                        property <float> phase: (root.streamer || root.stream-safe) && root.playing && Theme.motion ? mod(animation-tick() / 1ms, 10800) / 3600 : 0.0;
                         Glyph {
                             d: Icons.broadcast;
                             width: 16px;
@@ -3891,9 +4076,9 @@ export component AppWindow inherits Window {
                             x: (parent.width - self.width) / 2;
                             y: (parent.height - self.height) / 2;
                             fill: !root.streamer && !root.stream-safe ? Theme.muted
-                                : parent.phase < 1 ? #ff0033.mix(#9146ff, 1 - parent.phase)
-                                : parent.phase < 2 ? #9146ff.mix(#53fc18, 2 - parent.phase)
-                                : #53fc18.mix(#ff0033, 3 - parent.phase);
+                                : parent.phase < 1 ? #ff0033.mix(#9146ff, 1 - parent.phase).mix(Theme.muted, 0.75)
+                                : parent.phase < 2 ? #9146ff.mix(#53fc18, 2 - parent.phase).mix(Theme.muted, 0.75)
+                                : #53fc18.mix(#ff0033, 3 - parent.phase).mix(Theme.muted, 0.75);
                             opacity: root.streamer || root.stream-safe ? 1 : 0.55;
                         }
                         // Stream-Safe Music on: a dot
@@ -3908,7 +4093,7 @@ export component AppWindow inherits Window {
                     if root.suite-shown: Rectangle {
                         width: 32px;
                         Rectangle { width: 28px; height: 28px; x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2; border-radius: 8px; background: sta-b.has-hover ? Theme.elevated : transparent; }
-                        property <float> phase: root.suite-on && root.playing && Theme.motion ? mod(animation-tick() / 1ms + 600, 3600) / 1200 : 0.0;
+                        property <float> phase: root.suite-on && root.playing && Theme.motion ? mod(animation-tick() / 1ms + 1800, 10800) / 3600 : 0.0;
                         Glyph {
                             d: root.suite-icon;
                             width: 16px;
@@ -3916,9 +4101,9 @@ export component AppWindow inherits Window {
                             x: (parent.width - self.width) / 2;
                             y: (parent.height - self.height) / 2;
                             fill: !root.suite-on ? Theme.muted
-                                : parent.phase < 1 ? #ff0033.mix(#9146ff, 1 - parent.phase)
-                                : parent.phase < 2 ? #9146ff.mix(#53fc18, 2 - parent.phase)
-                                : #53fc18.mix(#ff0033, 3 - parent.phase);
+                                : parent.phase < 1 ? #ff0033.mix(#9146ff, 1 - parent.phase).mix(Theme.muted, 0.75)
+                                : parent.phase < 2 ? #9146ff.mix(#53fc18, 2 - parent.phase).mix(Theme.muted, 0.75)
+                                : #53fc18.mix(#ff0033, 3 - parent.phase).mix(Theme.muted, 0.75);
                             opacity: root.suite-on ? 1 : 0.55;
                         }
                         TipSpot { hover: sta-b.has-hover; tip: root.suite-on ? "The Stream Suite is running. Click to stop it, right-click for its settings." : "The Stream Suite is stopped. Click to start it, right-click for its settings."; }
@@ -3974,20 +4159,23 @@ export component AppWindow inherits Window {
                         }
                     }
                     // the platforms: in their colours when on, plain when off
-                    // (as the web app's: a rounded pill of rounded tiles, each tinted in its colour when on)
+                    // (a round-ended pill of round tiles, each tinted in its colour when on, as Seamless Mix's)
                     if root.plats.length > 1: Rectangle {
                         width: root.plats.length * 30px + 2px;
                         Rectangle {
                           y: (parent.height - self.height) / 2;
                           height: 28px;
-                          border-radius: 8px;
-                          background: Theme.elevated;
+                          // (rounded right round, as Seamless Mix's beside it)
+                          border-radius: 14px;
+                          background: Theme.elevated.with-alpha(0.55);
                           HorizontalLayout {
-                            padding: 2px;
+                            padding: 1px;
                             spacing: 2px;
                             for p in root.plats: Rectangle {
                                 width: 28px;
-                                border-radius: 6px;
+                                height: 26px;
+                                y: 1px;
+                                border-radius: 13px;
                                 background: !p.on ? (ta-p.has-hover ? Theme.line : transparent) : p.d != "" ? Theme.accent.with-alpha(0.16) : p.id == "spotify" ? #1ed76029 : p.id == "youtube" ? #ff003329 : p.id == "local" ? #f2b54429 : #ff550029;
                                 // (a plugin shown here: its own icon, from its manifest, in the accent)
                                 if p.d != "": Glyph {
@@ -4059,14 +4247,14 @@ export component AppWindow inherits Window {
                         }
                         }
                     }
-                    // (rounded, as the platforms' pill beside it)
+                    // (round-ended, as the platforms' and Seamless Mix's pills beside it)
                     if root.jam-ask == "" && root.jam-label != "" && !root.jam-hidden: Rectangle {
                         width: jam-t.preferred-width + 28px;
                         Rectangle {
                             y: (parent.height - self.height) / 2;
                             height: 28px;
-                            border-radius: 8px;
-                            background: root.jam-on ? Theme.accent : (jam-ta.has-hover ? Theme.elevated : transparent);
+                            border-radius: 14px;
+                            background: root.jam-on ? Theme.accent : (jam-ta.has-hover ? Theme.elevated : Theme.elevated.with-alpha(0.55));
                             jam-t := Text { text: root.jam-label; color: root.jam-on ? Theme.on-accent : (jam-ta.has-hover ? Theme.text : Theme.muted); font-size: 12px; font-weight: 600; }
                             jam-ta := TouchArea { clicked => { root.jam-clicked(); } }
                         }
@@ -5298,7 +5486,9 @@ export component AppWindow inherits Window {
                                         GroupLine { }
                                         GroupSwitch { name: "Rounded Corners"; note: "Rounds the corners of the sidebar, the page and the queue. Turn it off for square corners."; checked <=> root.rounded; toggled(v) => { root.rounded-changed(v); } }
                                         GroupLine { }
-                                        GroupSwitch { name: "Animations"; note: "Fades and motion."; checked <=> root.anim-on; toggled(v) => { root.anim-changed(v); } }
+                                        GroupSwitch { name: "Animations"; note: root.perf-on ? "Fades and motion. Performance Mode has them off for now." : "Fades and motion."; checked <=> root.anim-on; toggled(v) => { root.anim-changed(v); } }
+                                        GroupLine { }
+                                        GroupSwitch { name: "Performance Mode"; note: "Uses less of your PC: animations and glowing backgrounds off, and the visualiser updates half as often. Music sounds the same."; checked <=> root.perf-on; toggled(v) => { root.perf-changed(v); } }
                                     }
                                 }
                                 // ---- the visualiser ----
@@ -5781,9 +5971,9 @@ export component AppWindow inherits Window {
                                         preferred-width: 0px;
                                         min-width: 0px;
                                         padding-right: r.key == "widget" || r.key == "lyricsWidget" ? 8px : 0px;
-                                        if r.key == "widget": StreamTile { horizontal-stretch: 1; r: r; d: Icons.broadcast; addr: stv.base + "/"; toggle(k) => { root.set-toggle(k); } more(k) => { root.set-more(k); } copy(a) => { root.copy-text(a); } }
-                                        if r.key == "lyricsWidget": StreamTile { horizontal-stretch: 1; r: r; d: Icons.lyrics; addr: stv.base + "/lyrics"; toggle(k) => { root.set-toggle(k); } more(k) => { root.set-more(k); } copy(a) => { root.copy-text(a); } }
-                                        if r.key == "socials": StreamTile { horizontal-stretch: 1; r: r; d: Icons.link; addr: stv.base + "/socials"; toggle(k) => { root.set-toggle(k); } more(k) => { root.set-more(k); } copy(a) => { root.copy-text(a); } }
+                                        if r.key == "widget": StreamTile { tint: BotLook.tile(0); horizontal-stretch: 1; r: r; d: Icons.broadcast; addr: stv.base + "/"; toggle(k) => { root.set-toggle(k); } more(k) => { root.set-more(k); } copy(a) => { root.copy-text(a); } }
+                                        if r.key == "lyricsWidget": StreamTile { tint: BotLook.tile(1); horizontal-stretch: 1; r: r; d: Icons.lyrics; addr: stv.base + "/lyrics"; toggle(k) => { root.set-toggle(k); } more(k) => { root.set-more(k); } copy(a) => { root.copy-text(a); } }
+                                        if r.key == "socials": StreamTile { tint: BotLook.tile(2); horizontal-stretch: 1; r: r; d: Icons.link; addr: stv.base + "/socials"; toggle(k) => { root.set-toggle(k); } more(k) => { root.set-more(k); } copy(a) => { root.copy-text(a); } }
                                     }
                                 }
                                 if !root.bot-on && root.widget-on: Card {
@@ -6025,6 +6215,7 @@ export component AppWindow inherits Window {
                         if root.bot-page: BotPage {
                             vertical-stretch: 1;
                             setup: root.bot-setup;
+                            widgets-view: root.bot-widgets;
                             name: root.bot-name;
                             sub: root.bot-sub;
                             running: root.bot-running;
@@ -6060,6 +6251,7 @@ export component AppWindow inherits Window {
                           // shared out between them)
                           alignment: start;
                           if root.pf-preview == "lyrics": LyricsPreview { look: root.pf-lyrics; }
+                          if root.pf-preview == "socials": SocialPreview { items: root.pf-social-items; look: root.pf-social; }
                           // (its height from its layout, which knows how its notes wrap: a preferred height
                           // reads them as one line)
                           for f[i] in root.pf-fields: Rectangle {
@@ -6313,6 +6505,17 @@ export component AppWindow inherits Window {
                                     Pill { label: "Restore"; tip: "Choose a backup from OmniPulse, Streamer.bot (an export, .sb file or backup zip) or Mix It Up (.miubackup or .miucommand)"; clicked => { root.flow-act("restore"); } }
                                     Pill { label: "Paste"; tip: "A Streamer.bot import code, as Streamer.bot's Export copies it"; clicked => { root.flow-act("paste"); } }
                                 }
+                                // (finding one: by its name, its group or what starts it)
+                                Rectangle {
+                                    height: 34px;
+                                    border-radius: 8px;
+                                    background: Theme.panel;
+                                    border-width: 1px;
+                                    border-color: ffti.has-focus ? Theme.accent : Theme.line;
+                                    Glyph { d: Icons.search; x: 10px; width: 14px; height: 14px; y: (parent.height - self.height) / 2; fill: Theme.muted; }
+                                    if ffti.text == "": Text { x: 32px; height: parent.height; vertical-alignment: center; text: "Find an action"; color: Theme.muted; font-size: 12px; }
+                                    ffti := TextInput { x: 32px; width: parent.width - 42px; height: parent.height; vertical-alignment: center; color: Theme.text; font-size: 12px; single-line: true; edited => { root.flow-find(self.text); } }
+                                }
                                 ScrollView {
                                     vertical-stretch: 1;
                                     horizontal-scrollbar-policy: always-off;
@@ -6320,7 +6523,21 @@ export component AppWindow inherits Window {
                                         alignment: start;
                                         spacing: 6px;
                                         padding-right: 8px;
-                                        for it[i] in root.flow-items: Rectangle {
+                                        for it[i] in root.flow-items: VerticalLayout {
+                                          spacing: 6px;
+                                          // (its group's heading: folded or open with a click)
+                                          if it.head: Rectangle {
+                                            height: 26px;
+                                            fgh := TouchArea { mouse-cursor: MouseCursor.pointer; clicked => { root.flow-group-fold(it.group); } }
+                                            HorizontalLayout {
+                                                padding-left: 4px;
+                                                spacing: 6px;
+                                                Text { text: it.shut ? "\u{25b8}" : "\u{25be}"; color: fgh.has-hover ? Theme.text : Theme.muted; font-size: 12px; vertical-alignment: center; width: 10px; }
+                                                Text { text: it.group == "" ? "Ungrouped" : it.group; color: fgh.has-hover ? Theme.text : Theme.muted; font-size: 12px; font-weight: 700; vertical-alignment: center; overflow: elide; horizontal-stretch: 1; }
+                                                Text { text: it.count; color: Theme.muted; font-size: 11px; vertical-alignment: center; }
+                                            }
+                                          }
+                                          if it.shown: Rectangle {
                                             height: 54px;
                                             border-radius: 10px;
                                             background: i == root.flow-sel ? Theme.accent.with-alpha(0.16) : fita.has-hover ? Theme.elevated : transparent;
@@ -6335,6 +6552,7 @@ export component AppWindow inherits Window {
                                                 Text { text: it.name; color: it.on ? Theme.text : Theme.muted; font-size: 13px; font-weight: 700; overflow: elide; }
                                                 Text { text: (it.on ? "" : "Off \u{b7} ") + it.summary; color: Theme.muted; font-size: 11px; overflow: elide; }
                                             }
+                                          }
                                         }
                                         if root.flow-items.length == 0: Text { text: "No actions yet. Choose one to start from in New Action above, like a command, a thank-you for follows, or a timer."; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
                                         Rectangle { height: 76px; }

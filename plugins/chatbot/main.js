@@ -471,7 +471,8 @@ function fire(ev, ctx) {
     if (t.type !== "event" || t.event !== ev || !onPlatform(t, ctx.platform)) continue;
     if (num(t.min) > 0 && num(ctx.amount) < num(t.min)) continue;
     if (String(t.users || "").trim() && !oneOf(ctx.user, t.users)) continue;
-    if (ev === "reward" && String(t.rewardid || "").trim()) { if (String(t.rewardid).trim() !== String(ctx.rewardId || "")) continue; }
+    // (by its id, or one of several: a Twitch reward's and a Kick reward's in one action)
+    if (ev === "reward" && String(t.rewardid || "").trim()) { if (!String(t.rewardid).split(",").map((x) => x.trim()).filter(Boolean).includes(String(ctx.rewardId || ""))) continue; }
     else if (ev === "reward" && String(t.reward || "").trim() && String(t.reward).trim().toLowerCase() !== String(ctx.reward || "").toLowerCase()) continue;
     run(x, ctx);
   }
@@ -707,7 +708,10 @@ function since(date) {
 
 async function step(st, ctx, depth) {
   const f = (k) => fill(st[k], ctx);
-  const say = (to, text) => { if (!text) return; ctx._said = String(text).slice(0, 100); if (ctx.dry) ctx.dry.push(String(text)); else reply(to, text, ctx.platform); };
+  // (Send To: where it came from, or Twitch, Kick or both; a reply only in the chat it's replying to)
+  const where = st.where || "here";
+  const sendTo = where === "here" ? ctx.platform : where === "both" ? "all" : where;
+  const say = (to, text) => { if (!text) return; ctx._said = String(text).slice(0, 100); if (ctx.dry) ctx.dry.push(String(text)); else reply(sendTo === ctx.platform ? to : null, text, sendTo); };
   if (ctx.dry && !DRY_SAFE.has(st.type)) { ctx.dry.push("(would " + (DRY_SAYS[st.type] || "do its " + st.type + " step") + ")"); return true; }
   if (ctx.dry && st.type === "wait") return true;
   const onKick = ctx.platform === "kick";

@@ -40,6 +40,7 @@ mod panels;
 mod flows;
 mod botimport;
 mod procwatch;
+mod docksets;
 mod botpage;
 mod hide;
 mod lookalike;
@@ -578,10 +579,12 @@ fn paint_plats(a: &App) {
         if plugrun::settings_of(m, &a.web.prefs)[PLUG_TITLE_BAR].as_bool() != Some(true) { continue; }
         let d = if m.icon.trim().is_empty() { "M12 2a10 10 0 1 0 0 20 10 10 0 1 0 0-20z".to_string() } else { m.icon.clone() };
         // (the Stream Suite: its own button, beside Streamer Mode, lit while it runs)
+        // (switched off in Settings > Plugins: not shown at all)
         if m.id == botpage::BOT {
-            ui.set_suite_shown(true);
+            let on = plugin_on(&a.web.prefs, &m.id);
+            ui.set_suite_shown(on);
             ui.set_suite_icon(d.into());
-            ui.set_suite_on(plugin_runs(&a.web.prefs, &m.id));
+            ui.set_suite_on(on && plugin_runs(&a.web.prefs, &m.id));
             continue;
         }
         list.push(Plat { id: format!("plugin:{}", m.id).into(), on: plugin_on(&a.web.prefs, &m.id), name: m.name.clone().into(), ready: true, d: d.into() });
@@ -3458,7 +3461,9 @@ thread_local! {
 /// A song's lyrics shown, with where they're from and the other places to try ("Lyrics from KuGou.
 /// Other sources: LRCLIB, NetEase, ..."), as the web app's
 fn show_lyrics(shared: &Shared, ui: &AppWindow, prefs: &serde_json::Value, lyrics: Vec<player::Line>, from: &str) {
-    ui.set_lyrics_note(if lyrics.is_empty() { "No lyrics found for this one.".into() } else if lyrics.iter().all(|l| l.ms == 0) { "These lyrics aren't timed.".into() } else { "".into() });
+    // (a remix with none of its own: the original song's, said so)
+    let (from, original) = match from.strip_suffix("+original") { Some(f) => (f, true), None => (from, false) };
+    ui.set_lyrics_note(if lyrics.is_empty() { "No lyrics found for this one.".into() } else if original { "These are the original song's lyrics, so they may not match this remix. They aren't timed.".into() } else if lyrics.iter().all(|l| l.ms == 0) { "These lyrics aren't timed.".into() } else { "".into() });
     ui.set_lyrics_from(if from.is_empty() { "".into() } else { format!("Lyrics from {}.", player::lyrics_name(from)).into() });
     let others: Vec<String> = player::lyrics_order(prefs).into_iter().filter(|p| p != from).collect();
     ui.set_lyrics_others(ModelRc::from(Rc::new(VecModel::from(others.iter().map(|p| slint::SharedString::from(player::lyrics_name(p))).collect::<Vec<_>>()))));
@@ -4412,6 +4417,8 @@ fn paint_marks(ui: &AppWindow, t: &Track) {
 thread_local! {
     /// the actions as they're being changed, and which is picked (-1: none)
     static FLOW: RefCell<(Vec<serde_json::Value>, i32)> = const { RefCell::new((Vec::new(), -1)) };
+    /// (the Actions list: its folded groups, and what's searched for)
+    static FLOW_FIND: RefCell<String> = const { RefCell::new(String::new()) };
     /// a save waiting (a moment after the last change), by its number
     static FLOW_SAVE: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
 }
@@ -4450,22 +4457,58 @@ fn flow_node(list: &'static [flows::Kind], v: &serde_json::Value) -> FlowNode {
     let fields: Vec<FlowField> = k.fields.iter().map(|fl| {
         let now = &v[fl.key];
         let value = match now { serde_json::Value::String(s) => s.clone(), serde_json::Value::Bool(b) => b.to_string(), serde_json::Value::Null => fl.default.to_string(), serde_json::Value::Number(n) => n.as_f64().map(|x| if x.fract() == 0.0 { format!("{}", x as i64) } else { x.to_string() }).unwrap_or_default(), x => x.to_string() };
-        let options: Vec<slint::SharedString> = fl.options.iter().map(|o| o.1.into()).collect();
+        // (a program's: the ones open now, as the card's painted)
+        let options: Vec<slint::SharedString> = if fl.kind == "program" { procwatch::programs().into_iter().map(Into::into).collect() } else { fl.options.iter().map(|o| o.1.into()).collect() };
         let at = fl.options.iter().position(|o| o.0 == value).map(|i| i as i32).unwrap_or(0);
         FlowField { key: fl.key.into(), label: fl.label.into(), note: fl.note.into(), kind: fl.kind.into(), value: value.into(), options: ModelRc::from(Rc::new(VecModel::from(options))), at }
     }).collect();
     FlowNode { kind_at: at, note: k.note.into(), fields: ModelRc::from(Rc::new(VecModel::from(fields))), depth: 0 }
 }
 
-fn flow_item(a: &serde_json::Value) -> FlowItem {
-    FlowItem { name: a["name"].as_str().unwrap_or("").into(), summary: flows::summary(a).into(), on: a["on"].as_bool() != Some(false) }
+fn flow_group(a: &serde_json::Value) -> String { a["group"].as_str().unwrap_or("").trim().to_string() }
+
+/// The groups folded in the Actions list (kept, as Settings' other choices)
+fn flow_shut(prefs: &serde_json::Value) -> Vec<String> {
+    prefs["flowFolded"].as_array().into_iter().flatten().filter_map(|g| g.as_str().map(String::from)).collect()
+}
+
+/// The list in order: by group (A to Z, the ungrouped last), each as it was within its group; the picked one
+/// still picked
+fn flows_sort(sel: i32, list: &mut Vec<serde_json::Value>) -> i32 {
+    let mut keyed: Vec<(usize, serde_json::Value)> = std::mem::take(list).into_iter().enumerate().collect();
+    keyed.sort_by_key(|(_, a)| { let g = flow_group(a); (g.is_empty(), g.to_lowercase()) });
+    let at = keyed.iter().position(|(i, _)| *i as i32 == sel).map_or(-1, |p| p as i32);
+    *list = keyed.into_iter().map(|(_, a)| a).collect();
+    at
+}
+
+/// Each action for the list: its group's heading on the first of each, hidden in a folded group or when it
+/// isn't what's searched for (searching opens every group)
+fn flow_items(list: &[serde_json::Value], shut: &[String], find: &str) -> Vec<FlowItem> {
+    let find = find.trim().to_lowercase();
+    let fits = |a: &serde_json::Value| find.is_empty() || format!("{} {} {}", a["name"].as_str().unwrap_or(""), flow_group(a), flows::summary(a)).to_lowercase().contains(&find);
+    let grouped = list.iter().any(|a| !flow_group(a).is_empty());
+    let mut out = Vec::with_capacity(list.len());
+    let mut last: Option<String> = None;
+    for a in list {
+        let g = flow_group(a);
+        let count = list.iter().filter(|x| flow_group(x).eq_ignore_ascii_case(&g) && fits(x)).count();
+        let head = grouped && count > 0 && fits(a) && last.as_deref().is_none_or(|l| !l.eq_ignore_ascii_case(&g));
+        if head { last = Some(g.clone()); }
+        let is_shut = find.is_empty() && shut.iter().any(|s| s.eq_ignore_ascii_case(&g));
+        out.push(FlowItem { name: a["name"].as_str().unwrap_or("").into(), summary: flows::summary(a).into(), on: a["on"].as_bool() != Some(false), group: g.into(), head, shown: fits(a) && !(grouped && is_shut), count: count as i32, shut: is_shut });
+    }
+    out
 }
 
 /// The page drawn again: the list, and the picked one's flow
 fn flows_paint(shared: &Shared) {
     let Some(ui) = shared.borrow().ui.upgrade() else { return };
-    let (list, sel) = FLOW.with(|f| f.borrow().clone());
-    ui.set_flow_items(ModelRc::from(Rc::new(VecModel::from(list.iter().map(flow_item).collect::<Vec<_>>()))));
+    // (in their groups' order: put there as it's painted, not as a group's typed in)
+    let (list, sel) = FLOW.with(|f| { let mut f = f.borrow_mut(); let (mut list, sel) = (std::mem::take(&mut f.0), f.1); let sel = flows_sort(sel, &mut list); *f = (list, sel); f.clone() });
+    let shut = flow_shut(&shared.borrow().web.prefs);
+    let find = FLOW_FIND.with(|f| f.borrow().clone());
+    ui.set_flow_items(ModelRc::from(Rc::new(VecModel::from(flow_items(&list, &shut, &find)))));
     ui.set_flow_sel(sel);
     let Some(a) = (sel >= 0).then(|| list.get(sel as usize)).flatten() else { return };
     ui.set_flow_name(a["name"].as_str().unwrap_or("").into());
@@ -4490,9 +4533,17 @@ fn flows_paint(shared: &Shared) {
 fn flows_item_paint(shared: &Shared) {
     let Some(ui) = shared.borrow().ui.upgrade() else { return };
     let (list, sel) = FLOW.with(|f| f.borrow().clone());
-    if let Some(a) = (sel >= 0).then(|| list.get(sel as usize)).flatten() {
+    if (sel >= 0) && (sel as usize) < list.len() {
         let m = ui.get_flow_items();
-        if (sel as usize) < m.row_count() { m.set_row_data(sel as usize, flow_item(a)); }
+        let shut = flow_shut(&shared.borrow().web.prefs);
+        let find = FLOW_FIND.with(|f| f.borrow().clone());
+        let mut items = flow_items(&list, &shut, &find);
+        // (the picked one's row only: the rest as they were, headings and all, till it's painted again)
+        if (sel as usize) < m.row_count() {
+            let mut it = items.swap_remove(sel as usize);
+            if let Some(was) = m.row_data(sel as usize) { it.head = was.head; it.shown = true; it.count = was.count; it.shut = was.shut; }
+            m.set_row_data(sel as usize, it);
+        }
     }
 }
 
@@ -4676,6 +4727,15 @@ fn flows_wire(ui: &AppWindow, shared: &Shared) {
     ui.on_recent_window_set({ let s = shared.clone(); move |w| { pref_put(&s, "recentWindow", serde_json::json!(w.as_str())); if let Some(ui) = s.borrow().ui.upgrade() { ui.set_recent_window(w); } } });
     ui.on_flow_name_edited(move |t| { flow_change(&s, |a| a["name"] = serde_json::json!(t.as_str())); flows_item_paint(&s); });
     let s = shared.clone();
+    ui.on_flow_group_fold(move |g| {
+        let mut shut = flow_shut(&s.borrow().web.prefs);
+        if let Some(i) = shut.iter().position(|x| x.eq_ignore_ascii_case(&g)) { shut.remove(i); } else { shut.push(g.to_string()); }
+        pref_put(&s, "flowFolded", serde_json::json!(shut));
+        flows_paint(&s);
+    });
+    let s = shared.clone();
+    ui.on_flow_find(move |t| { FLOW_FIND.with(|f| *f.borrow_mut() = t.to_string()); flows_paint(&s); });
+    let s = shared.clone();
     ui.on_flow_group_edited(move |t| { flow_change(&s, |a| a["group"] = serde_json::json!(t.trim())); flows_item_paint(&s); });
     let s = shared.clone();
     ui.on_flow_on_toggled(move |on| { flow_change(&s, |a| a["on"] = serde_json::json!(on)); flows_item_paint(&s); });
@@ -4727,13 +4787,18 @@ fn flows_wire(ui: &AppWindow, shared: &Shared) {
         let Some(fl) = kind.fields.get(i.max(0) as usize) else { return };
         let value = match fl.kind {
             "select" => { let k = v.strip_prefix('\u{2}').and_then(|k| k.parse::<usize>().ok()).unwrap_or(0); serde_json::json!(fl.options.get(k).map(|o| o.0).unwrap_or(fl.default)) }
+            // (one picked from the open ones: as they were listed, its name)
+            "program" => match v.strip_prefix('\u{2}').and_then(|k| k.parse::<usize>().ok()) {
+                Some(k) => match procwatch::programs_listed().get(k) { Some(n) => serde_json::json!(n), None => return },
+                None => serde_json::json!(v.as_str()),
+            },
             "toggle" => serde_json::json!(v == "true"),
             "number" => v.trim().parse::<f64>().map(|n| serde_json::json!(n)).unwrap_or_else(|_| serde_json::json!(v.as_str())),
             _ => serde_json::json!(v.as_str()),
         };
         let key = fl.key;
         flow_change(&s, |a| { let t = if node < 0 { &mut a["trigger"] } else { &mut a["steps"][node as usize] }; t[key] = value; });
-        if matches!(fl.kind, "select" | "toggle") { flows_paint(&s); } else { flows_item_paint(&s); }
+        if matches!(fl.kind, "select" | "toggle") || (fl.kind == "program" && v.starts_with('\u{2}')) { flows_paint(&s); } else { flows_item_paint(&s); }
     });
 }
 
@@ -6385,6 +6450,8 @@ fn pf_leave(shared: &Shared, to: &str) {
 fn leave_do(shared: &Shared, to: &str) {
     if let Some(i) = to.strip_prefix("crumb:").and_then(|i| i.parse::<usize>().ok()) { return crumb_go(shared, i); }
     if let Some(name) = to.strip_prefix("panel:") { PF_EDIT.with(|e| e.borrow_mut().take()); return panel_open(shared, name); }
+    // (back to the Suite's Widgets or Docks, from one's own page)
+    if to == "botwidgets" || to == "botdocks" { PF_EDIT.with(|e| e.borrow_mut().take()); pf_open(shared, botpage::BOT); return bot_widgets_open(shared, &to[3..]); }
     if let Some(id) = to.strip_prefix("plugin:") {
         PF_EDIT.with(|e| e.borrow_mut().take());
         if let (Some(ui), Some(sec)) = (shared.borrow().ui.upgrade(), omnipulse_core::plugins::list().into_iter().find(|p| p.manifest.id == id).map(|p| p.manifest.section).filter(|x| !x.is_empty())) { ui.set_set_cat(sec.into()); }
@@ -6542,6 +6609,10 @@ fn bot_act(shared: &Shared, act: &str) {
     let say = |t: &str| if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_status(t.into()); };
     // (Alerts: their settings are the Stream Widget's Alerts page, the same as without the Suite)
     if act == "sheet:alerts" { return panel_open(shared, "alerts"); }
+    // (a dock's or the Multichat Overlay's gear: its own page)
+    if let Some(p) = act.strip_prefix("dockset:") { return panel_open(shared, p); }
+    // (Widgets, or Docks: their own page, under the Suite's)
+    if act == "widgets" || act == "docks" { return bot_widgets_open(shared, act); }
     if let Some(id) = act.strip_prefix("sheet:") {
         BOT_SHEET.with(|b| *b.borrow_mut() = id.to_string());
         return bot_paint(shared);
@@ -6832,7 +6903,7 @@ fn panel_open(shared: &Shared, name: &str) {
         let output = panels::output_of(name).map(|(k, _)| k.to_string());
         let name = output.as_deref().unwrap_or(name);
         let cat = match name {
-            "requests" | "replies" | "widget" | "remote" | "offset" | "alerts" | "alertlist" | "safe" | "lyricsw" | "socials" => "Streaming",
+            "requests" | "replies" | "widget" | "remote" | "offset" | "alerts" | "alertlist" | "safe" | "lyricsw" | "socials" | "dockchat" | "dockfeed" | "multichat" => "Streaming",
             n if n.starts_with("social:") => "Streaming",
             "youtube" => "Integrations",
             n if n.starts_with("alert:") => "Streaming",
@@ -6842,9 +6913,11 @@ fn panel_open(shared: &Shared, name: &str) {
             _ => "Library",
         };
         let mut path = vec![("Settings".to_string(), "root".to_string()), (cat.to_string(), format!("cat:{cat}"))];
-        let widgety = matches!(name, "widget" | "lyricsw" | "alerts" | "alertlist" | "requests" | "replies" | "socials") || name.starts_with("alert:") || name.starts_with("social:");
+        let widgety = matches!(name, "widget" | "lyricsw" | "alerts" | "alertlist" | "requests" | "replies" | "socials" | "dockchat" | "dockfeed" | "multichat") || name.starts_with("alert:") || name.starts_with("social:");
         if widgety && plugin_on(&shared.borrow().web.prefs, botpage::BOT) {
             if let Some(m) = bot_manifest() { path.push((place_label(&m), format!("plugin:{}", botpage::BOT))); }
+            let which = BOT_WIDGETS.with(|w| w.borrow().clone());
+            if !which.is_empty() && name != "requests" && name != "replies" { path.push((widgets_title(&which).into(), format!("bot{which}"))); }
         }
         match name {
             "alerts" => path.push((panels::title("widget"), "panel:widget".into())),
@@ -6867,6 +6940,45 @@ fn panel_open(shared: &Shared, name: &str) {
 }
 
 /// The Lyrics Widget's look as it's set, for its page's preview
+/// The Social Plug's preview, as its page has it now (before it's saved): its platforms switched on with a
+/// handle, or samples while there are none
+fn social_preview(ui: &AppWindow, prefs: &serde_json::Value, vals: &serde_json::Map<String, serde_json::Value>) {
+    let mut p = prefs.clone();
+    if let Some(o) = p.as_object_mut() {
+        for (k, v) in vals { if !k.starts_with("on:") { o.insert(k.clone(), v.clone()); } }
+        o.insert("socials".into(), socials::list_save(prefs, vals));
+    }
+    let w = socials::widget_json(&p);
+    let colour = |s: &str| look::Rgb::parse(s).map(|c| c.slint()).unwrap_or(slint::Color::from_rgb_u8(0x8e, 0x9b, 0xff));
+    let mut list: Vec<serde_json::Value> = w["list"].as_array().cloned().unwrap_or_default();
+    let sample = list.is_empty();
+    if sample {
+        list = ["twitch", "youtube", "tiktok"].iter().map(|id| { let pl = socials::platform(id); serde_json::json!({ "platform": id, "name": pl.1, "handle": "@yourname", "col1": pl.2, "col2": pl.3 }) }).collect();
+    }
+    let items: Vec<SocialItem> = list.iter().map(|x| {
+        let name = x["name"].as_str().unwrap_or("").to_string();
+        SocialItem {
+            name: name.clone().into(),
+            handle: x["handle"].as_str().unwrap_or("").into(),
+            c1: colour(x["col1"].as_str().unwrap_or("")),
+            c2: colour(x["col2"].as_str().unwrap_or("")),
+            d: socials::icon_path(x["platform"].as_str().unwrap_or("")).into(),
+            letter: name.chars().next().map(|c| c.to_uppercase().to_string()).unwrap_or_default().into(),
+        }
+    }).collect();
+    ui.set_pf_social_items(ModelRc::from(Rc::new(VecModel::from(items))));
+    ui.set_pf_social(SocialLook {
+        style: w["style"].as_str().unwrap_or("card").into(),
+        coloured: w["coloured"].as_bool() == Some(true),
+        align: w["align"].as_str().unwrap_or("left").into(),
+        rounded: w["rounded"].as_bool() != Some(false),
+        all: w["all"].as_bool() == Some(true),
+        secs: w["secs"].as_u64().unwrap_or(8) as i32,
+        motion: w["motion"].as_str().unwrap_or("rise").into(),
+        sample,
+    });
+}
+
 fn lyrics_look(v: &serde_json::Map<String, serde_json::Value>) -> LyricsLook {
     let col = |k: &str, d: &str| {
         let h = v.get(k).and_then(|x| x.as_str()).unwrap_or(d).trim_start_matches('#').to_string();
@@ -6934,8 +7046,9 @@ fn panel_paint(shared: &Shared, name: &str, vals: &serde_json::Map<String, serde
     if let Some(ui) = shared.borrow().ui.upgrade() {
         ui.set_pf_fields(ModelRc::from(Rc::new(VecModel::from(rows))));
         // (the Lyrics Widget's page: a preview of its look, as it's set)
-        ui.set_pf_preview(if name == "lyricsw" { "lyrics".into() } else { "".into() });
+        ui.set_pf_preview(if name == "lyricsw" { "lyrics".into() } else if name == "socials" { "socials".into() } else { "".into() });
         if name == "lyricsw" { ui.set_pf_lyrics(lyrics_look(vals)); }
+        if name == "socials" { social_preview(&ui, &shared.borrow().web.prefs, vals); }
     }
 }
 
@@ -7510,6 +7623,14 @@ fn panel_save(shared: &Shared, name: &str, vals: serde_json::Map<String, serde_j
         let all = socials::list_save(&shared.borrow().web.prefs, &vals);
         pref_put(shared, "socials", all);
     }
+    if docksets::page_of(name).is_some() {
+        let all = docksets::saved(&shared.borrow().web.prefs, name, &vals);
+        omnipulse_core::docks::page_settings_set(all.clone());
+        pref_put(shared, "dockSet", all);
+        PF_EDIT.with(|e| e.borrow_mut().take());
+        if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_pf_open(false); ui.set_status(format!("{} saved. OBS shows it within a few seconds.", docksets::title(name)).into()); }
+        return;
+    }
     // (an output's look: kept as what differs from the first's, then back to the widget's page)
     if let Some((kind, n)) = panels::output_of(name) {
         let first = panels::values(kind, &shared.borrow().web.prefs);
@@ -7613,7 +7734,8 @@ fn pf_open(shared: &Shared, id: &str) {
     PF_ORIG.with(|o| *o.borrow_mut() = vals.clone());
     PF_EDIT.with(|e| *e.borrow_mut() = Some((id.to_string(), vals)));
     let bot = id == botpage::BOT;
-    if bot { BOT_SHEET.with(|b| b.borrow_mut().clear()); BOT_FOCUS.with(|f| f.borrow_mut().clear()); BOT_DRAWN.with(|d| *d.borrow_mut() = Default::default()); }
+    if bot { BOT_SHEET.with(|b| b.borrow_mut().clear()); BOT_FOCUS.with(|f| f.borrow_mut().clear()); BOT_DRAWN.with(|d| *d.borrow_mut() = Default::default()); BOT_WIDGETS.with(|w| w.borrow_mut().clear()); }
+    if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_bot_widgets("".into()); }
     if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_bot_page(bot); ui.set_leave_ask(false); }
     pf_paint(shared);
     pf_mark(shared);
@@ -7823,6 +7945,7 @@ fn set_toggle(shared: &Shared, key: &str) {
         if std::env::var_os("OMNIPULSE_SELFTEST").is_none() { webstate::save_pref(key, serde_json::json!(on)); }
         plugins_start(shared);
         paint_settings(&shared.borrow());
+        paint_plats(&shared.borrow());
         return;
     }
     if let Some(id) = key.strip_prefix("plugOn_") {
@@ -7834,6 +7957,8 @@ fn set_toggle(shared: &Shared, key: &str) {
         };
         if std::env::var_os("OMNIPULSE_SELFTEST").is_none() { webstate::save_pref(key, serde_json::json!(on)); }
         plugins_start(shared);
+        // (the title bar's button for it: gone or back)
+        paint_plats(&shared.borrow());
         return;
     }
     let Some(&(_, label, _, key, dflt)) = SET_ROWS.iter().find(|r| r.3 == key) else { return };
@@ -9907,7 +10032,9 @@ fn viz_update(shared: &Shared, ui: &AppWindow) {
         let t = slint::Timer::default();
         let m = model.clone();
         let w = ui.as_weak();
-        t.start(slint::TimerMode::Repeated, std::time::Duration::from_millis(33), move || {
+        // (30 a second; 15 in Performance Mode)
+        let every = if shared.borrow().web.prefs["perfMode"].as_bool() == Some(true) { 66 } else { 33 };
+        t.start(slint::TimerMode::Repeated, std::time::Duration::from_millis(every), move || {
             let b = viz::bands();
             for (i, v) in b.into_iter().enumerate() { m.set_row_data(i, v); }
             for (i, v) in viz::peaks(&b).into_iter().enumerate() { tops.set_row_data(i, v); }
@@ -11079,6 +11206,7 @@ fn plugin_app(shared: &Shared, plugin: &str, ask: serde_json::Value, answer: Box
             if std::env::var_os("OMNIPULSE_SELFTEST").is_none() { webstate::save_pref("pluginSettings", all); }
             send(serde_json::json!({ "ok": true }));
             if plugin == botpage::BOT { BOT_DRAWN.with(|d| *d.borrow_mut() = Default::default()); bot_paint(shared); }
+            if plugin == botpage::BOT { emotes_refresh(shared, false); }
             if plugin == botpage::BOT && had_actions {
                 let list = flows_load(shared);
                 FLOW.with(|f| f.borrow_mut().0 = list);
@@ -11102,9 +11230,23 @@ fn outside_start(shared: &Shared) {
         let _ = slint::invoke_from_event_loop(move || SHARED.with(|s| { if let Some(sh) = s.borrow().clone() { alert_shown(&sh, &kind); } }));
     }));
     // (a dock's button: given to the chatbot, its answer or why not said back in the chat dock)
+    omnipulse_core::docks::page_settings_set(prefs["dockSet"].clone());
+    emotes_refresh(&shared, true);
+    {
+        let s = shared.clone();
+        let t = slint::Timer::default();
+        t.start(slint::TimerMode::Repeated, std::time::Duration::from_secs(1800), move || emotes_refresh(&s, true));
+        EMOTES_TIMER.with(|x| *x.borrow_mut() = Some(t));
+    }
     omnipulse_core::docks::set_dock_handler(std::sync::Arc::new(|cmd: serde_json::Value| {
         let _ = slint::invoke_from_event_loop(move || SHARED.with(|s| {
             let Some(sh) = s.borrow().clone() else { return };
+            if cmd["do"] == "settings" {
+                let all = docksets::from_page(&sh.borrow().web.prefs, cmd["page"].as_str().unwrap_or(""), &cmd["opt"]);
+                omnipulse_core::docks::page_settings_set(all.clone());
+                pref_put(&sh, "dockSet", all);
+                return;
+            }
             match plugrun::get(BOT) {
                 Some(p) => {
                     let rt = sh.borrow().rt.clone();
@@ -11188,8 +11330,44 @@ fn minimize(shared: &Shared) {
 const CAST_SEARCH: &str = "Search for Cast devices";
 
 thread_local! {
+    /// (the Suite's Widgets or Docks page, open ("widgets", "docks"; "" for neither): what's opened from there
+    /// goes back to it)
+    static BOT_WIDGETS: RefCell<String> = const { RefCell::new(String::new()) };
+    /// (BTTV, FFZ and 7TV's lists: fetched again every half hour; the accounts they were last fetched for)
+    static EMOTES_TIMER: RefCell<Option<slint::Timer>> = const { RefCell::new(None) };
+    static EMOTES_FOR: RefCell<Option<(String, String)>> = const { RefCell::new(None) };
+    /// (the volume's save, waiting for the slider to settle)
+    static VOLUME_SAVE: RefCell<Option<slint::Timer>> = const { RefCell::new(None) };
     /// the chatbot's hotkeys, waiting to be registered (the tick has the Desktop that does it)
     static HOTKEYS_WANTED: RefCell<Option<Vec<String>>> = const { RefCell::new(None) };
+}
+
+fn widgets_title(which: &str) -> &'static str { if which == "docks" { "Docks" } else { "Widgets" } }
+
+/// The Suite's Widgets, or its Docks, as a page of their own: Settings > Streaming > Suite > Widgets
+fn bot_widgets_open(shared: &Shared, which: &str) {
+    BOT_WIDGETS.with(|w| *w.borrow_mut() = which.to_string());
+    let Some(ui) = shared.borrow().ui.upgrade() else { return };
+    let label = bot_manifest().map(|m| place_label(&m)).unwrap_or_else(|| "Suite".into());
+    crumbs_set(&ui, vec![("Settings".into(), "root".into()), ("Streaming".into(), "cat:Streaming".into()), (label, format!("plugin:{}", botpage::BOT))]);
+    ui.set_pf_head(widgets_title(which).into());
+    ui.set_bot_widgets(which.into());
+}
+
+/// BTTV's, FFZ's and 7TV's emotes, for the docks and the Multichat Overlay: fetched for your Twitch and Kick
+/// accounts (the Suite's), again when they change (`always`: whether or not they have)
+fn emotes_refresh(shared: &Shared, always: bool) {
+    let (twitch, kick, rt) = {
+        let a = shared.borrow();
+        let m = &a.web.prefs["pluginSettings"][BOT];
+        (m["userId"].as_str().unwrap_or("").to_string(), match &m["kickUserId"] { serde_json::Value::String(s) => s.clone(), serde_json::Value::Number(n) => n.to_string(), _ => String::new() }, a.rt.clone())
+    };
+    let now = (twitch.clone(), kick.clone());
+    let same = EMOTES_FOR.with(|e| e.borrow().as_ref() == Some(&now));
+    if same && !always { return; }
+    EMOTES_FOR.with(|e| *e.borrow_mut() = Some(now));
+    if std::env::var_os("OMNIPULSE_SELFTEST").is_some() { return; }
+    rt.spawn(async move { omnipulse_core::emotes::refresh(&twitch, &kick).await; });
 }
 
 /// The chatbot's hotkeys from its actions (on, with it running), to be registered
@@ -11483,8 +11661,11 @@ fn apply_look(shared: &Shared) {
     let p = preset.map(|t| t.palette()).unwrap_or_else(|| look::palette(step, hue, strength));
     let t = ui.global::<Theme>();
     t.set_head_font(preset.map(|t| t.font).unwrap_or("").into());
-    t.set_glow(preset.is_some_and(|t| t.glow));
-    t.set_aurora(preset.is_some_and(|t| t.aurora));
+    // (Performance Mode: no glow or aurora behind things, no motion, below)
+    let perf = prefs["perfMode"].as_bool() == Some(true);
+    ui.set_perf_on(perf);
+    t.set_glow(!perf && preset.is_some_and(|t| t.glow));
+    t.set_aurora(!perf && preset.is_some_and(|t| t.aurora));
     t.set_round_art(preset.is_some_and(|t| t.round_art));
     // Settings > App > Rounded Corners (the web app's setting too)
     let rounded = prefs["appRounded"].as_bool() != Some(false);
@@ -11499,9 +11680,10 @@ fn apply_look(shared: &Shared) {
     t.set_row_art(if compact { 32.0 } else { 44.0 });
     ui.set_compact_rows(compact);
     // Settings > App: Animations, Close to Tray
-    let motion = prefs["animOn"].as_bool() != Some(false);
+    let anim = prefs["animOn"].as_bool() != Some(false);
+    let motion = anim && !perf;
     t.set_motion(motion);
-    ui.set_anim_on(motion);
+    ui.set_anim_on(anim);
     ui.set_close_to_tray(min_to_tray(prefs));
     ui.set_taskbar_widget(prefs["taskbarWidget"].as_bool() == Some(true));
     ui.set_widget_progress(prefs["widgetProgress"].as_bool() != Some(false));
@@ -11544,6 +11726,9 @@ fn apply_look(shared: &Shared) {
     };
     let c1 = c1.unwrap_or(look::Rgb(0x8e, 0x9b, 0xff));
     accent_fade(&ui, c1.slint(), c2.unwrap_or(c1).slint(), look::on_accent(c1).slint(), motion);
+    // (the Suite page's tiles: each its own colour, from the theme's)
+    let tints: Vec<slint::Color> = look::tints(c1, p.light).into_iter().map(|c| c.slint()).collect();
+    t.set_tints(ModelRc::from(Rc::new(VecModel::from(tints))));
     ui.set_light_theme(p.light);
     // and Settings > Look shows where things are
     ui.set_theme_step(step as f32);
@@ -11647,7 +11832,10 @@ fn main() -> Result<(), slint::PlatformError> {
     let ui = AppWindow::new()?;
     let engine = Arc::new(Engine::new("").map_err(slint::PlatformError::Other)?);
     let events = engine.events().expect("events");
-    engine.set_volume(0.8);
+    // (the volume you left it at; 80% the first time)
+    let start_vol = webstate::native_pref("nativeVolume").and_then(|v| v.as_f64()).filter(|v| v.is_finite()).map_or(80.0, |v| v.clamp(0.0, 100.0));
+    engine.set_volume((start_vol / 100.0) as f32);
+    ui.set_volume(start_vol as f32);
     // the output device picked last time (in the bar's menu), if it's still there
     if let Some(name) = webstate::native_pref("nativeDevice").and_then(|v| v.as_str().map(String::from)).filter(|n| !n.is_empty()) {
         let _ = engine.set_device(&name);
@@ -11985,6 +12173,15 @@ fn main() -> Result<(), slint::PlatformError> {
     });
     let s = shared.clone();
     ui.on_anim_changed(move |on| set_look_pref(&s, "animOn", serde_json::json!(on)));
+    let s = shared.clone();
+    // (and the visualiser started again, at its new rate)
+    ui.on_perf_changed(move |on| {
+        set_look_pref(&s, "perfMode", serde_json::json!(on));
+        let was = VIZ.with(|v| v.borrow_mut().take()).is_some();
+        if was { let e = s.borrow().engine.clone(); e.set_tap("viz", None); }
+        let ui = s.borrow().ui.upgrade();
+        if let Some(ui) = ui { viz_update(&s, &ui); }
+    });
     nav_paint(&shared);
     let s = shared.clone();
     ui.on_density_changed(move |c| set_look_pref(&s, "density", serde_json::json!(if c { "compact" } else { "comfortable" })));
@@ -12136,6 +12333,8 @@ fn main() -> Result<(), slint::PlatformError> {
     flows_wire(&ui, &shared);
     let s = shared.clone();
     ui.on_set_more(move |key| {
+        // (from a Settings page itself, not the Suite's Widgets and Docks: its crumbs as usual)
+        BOT_WIDGETS.with(|w| w.borrow_mut().clear());
         if let Some(id) = key.strip_prefix("plugOn_").or_else(|| key.strip_prefix("plugRun_")) {
             // (its page where it lives: Settings > Streaming for the chatbot, so Back goes there)
             if let Some(sec) = omnipulse_core::plugins::list().into_iter().find(|p| p.manifest.id == id).map(|p| p.manifest.section).filter(|x| !x.is_empty()) {
@@ -12887,7 +13086,15 @@ fn main() -> Result<(), slint::PlatformError> {
         }
     });
     // (casting: the slider is the device's volume)
-    ui.on_volume_changed({ let engine = engine.clone(); move |v| if casting().is_some() { omnipulse_core::cast::set_volume(v as f64) } else { engine.set_volume(v) } });
+    ui.on_volume_changed({ let engine = engine.clone(); move |v| if casting().is_some() { omnipulse_core::cast::set_volume(v as f64) } else {
+        engine.set_volume(v);
+        // (kept for next time, once the slider's let go of: it opened at 80% every time before)
+        if std::env::var_os("OMNIPULSE_SELFTEST").is_none() {
+            let t = slint::Timer::default();
+            t.start(slint::TimerMode::SingleShot, std::time::Duration::from_millis(800), move || webstate::save_pref("nativeVolume", serde_json::json!((v * 100.0).round())));
+            VOLUME_SAVE.with(|x| *x.borrow_mut() = Some(t));
+        }
+    } });
 
     // the window: dragged by the title bar, its own buttons
     ui.on_drag({
@@ -13250,6 +13457,9 @@ fn main() -> Result<(), slint::PlatformError> {
                 }
                 w if w.starts_with("setup:") => { if let Some(sh) = SHARED.with(|x| x.borrow().clone()) { setup_show(&sh, w[6..].parse().unwrap_or(0)); } }
                 w if w.starts_with("panel:") => { if let Some(sh) = SHARED.with(|x| x.borrow().clone()) { panel_open(&sh, &w[6..]); } }
+                // (a plugin's own page, like the Suite's)
+                w if w.starts_with("plug:") => { if let Some(sh) = SHARED.with(|x| x.borrow().clone()) { pf_open(&sh, &w[5..]); } }
+                w if w.starts_with("botact:") => { if let Some(sh) = SHARED.with(|x| x.borrow().clone()) { bot_act(&sh, &w[7..]); } }
                 w if w.starts_with("cat:") => { ui.set_set_cat(w[4..].into()); }
                 // (Settings' search typed, and its n-th result picked)
                 w if w.starts_with("setsearch:") => { if let Some(sh) = SHARED.with(|x| x.borrow().clone()) { settings_search(&sh, &w[10..]); } }

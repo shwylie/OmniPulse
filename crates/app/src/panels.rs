@@ -48,6 +48,7 @@ fn outputs_list(prefs: &Value, kind: &str, base: &str) -> Vec<Value> {
 pub fn title(name: &str) -> String {
     if let Some((kind, n)) = output_of(name) { return format!("{}, Output {n}", title(kind)); }
     if name == "socials" { return "Social Plug".into(); }
+    if crate::docksets::page_of(name).is_some() { return crate::docksets::title(name).into(); }
     if let Some(id) = name.strip_prefix("social:") {
         return crate::socials::list(&crate::SHARED.with(|s| s.borrow().as_ref().map(|sh| sh.borrow().web.prefs.clone())).unwrap_or_default()).iter().find(|m| m["id"] == id).map(crate::socials::name_of).unwrap_or_else(|| "Platform".into());
     }
@@ -96,6 +97,7 @@ fn keys(name: &str) -> Vec<(&'static str, Value)> {
         "offset" => vec![("out2Offset", json!(0)), ("out2Volume", json!(1))],
         "hidden" => vec![],
         "plugins" => vec![("plugSource", json!(""))],
+        "dockchat" | "dockfeed" | "multichat" => vec![],
         _ => vec![("recentWindow", json!("week"))],
     }
 }
@@ -161,6 +163,7 @@ pub fn values(name: &str, prefs: &Value) -> Map<String, Value> {
         return crate::requests::MSG_KEYS.iter().map(|(k, _)| (format!("msg:{k}"), json!(prefs["reqMsgs"][*k].as_str().unwrap_or("")))).collect();
     }
     if name == "alertlist" { return crate::alerts::list_values(prefs); }
+    if crate::docksets::page_of(name).is_some() { return crate::docksets::values(prefs, name); }
     if name == "safe" { return crate::streamsafe::panel_values(prefs); }
     if let Some(k) = name.strip_prefix("alert:") { return crate::alerts::edit_values(prefs, k); }
     if let Some(id) = name.strip_prefix("social:") { return crate::socials::edit_values(prefs, id); }
@@ -329,19 +332,23 @@ const GENERIC_EVENTS: [(&str, &str); 11] = [
 
 /// A panel's fields, for the values as they are in it (prefs: for the keys, Streamer Mode, the LAN address)
 pub fn fields(name: &str, vals: &Map<String, Value>, prefs: &Value, lan: &str) -> Vec<Value> {
+    // the Chat Dock, the Activity Feed, the Multichat Overlay
+    if crate::docksets::page_of(name).is_some() { return crate::docksets::fields(name, vals, prefs["widgetPort"].as_u64().unwrap_or(7878)); }
     // the Social Plug: its look, then its platforms in turn (each one's own page from there)
     if name == "socials" {
         let port = prefs["widgetPort"].as_u64().unwrap_or(7878);
         let url = format!("http://127.0.0.1:{port}/socials");
-        let mut f = vec![
-            info("Address", &url, &url, "Add this address as a Browser source in OBS. About 920 × 180 fits one at a time."),
-            note("How It Looks"),
-            sel("socialStyle", "Style", "", &[(json!("card"), "Card"), (json!("pill"), "Pill"), (json!("minimal"), "Minimal")]),
-            tog("socialColoured", "In Each Platform's Colours", "The whole card in the platform's colours, not just its icon."),
-            sel("socialAlign", "Alignment", "", &[(json!("left"), "Left"), (json!("centre"), "Centre"), (json!("right"), "Right")]),
-            tog("socialRounded", "Rounded Corners", ""),
-            tog("socialAll", "All at Once", "Shows every platform side by side. When this is off, they show one at a time, in turn."),
-        ];
+        // (your platforms first: the preview above shows them as they're added)
+        let mut f = vec![note("Your Platforms")];
+        f.extend(crate::socials::list_rows(prefs));
+        f.push(note("How It Looks"));
+        f.push(sel("socialStyle", "Style", "Card and Pill sit on a dark panel. Minimal is just the icon and words over your stream.", &[(json!("card"), "Card"), (json!("pill"), "Pill"), (json!("minimal"), "Minimal")]));
+        if vals["socialStyle"].as_str() != Some("minimal") {
+            f.push(tog("socialColoured", "In Each Platform's Colours", "The whole card in the platform's colours, not just its icon."));
+        }
+        f.push(sel("socialAlign", "Alignment", "", &[(json!("left"), "Left"), (json!("centre"), "Centre"), (json!("right"), "Right")]));
+        f.push(tog("socialRounded", "Rounded Corners", ""));
+        f.push(tog("socialAll", "All at Once", "Shows every platform side by side. When this is off, they show one at a time, in turn."));
         if vals["socialAll"].as_bool() == Some(true) {
             f.push(sel("socialMotion", "Animation", "How they come in, one after another, before a slow glow runs along them.", &[(json!("rise"), "Rise"), (json!("slide"), "Slide"), (json!("flip"), "Flip"), (json!("pop"), "Pop"), (json!("none"), "None")]));
         }
@@ -349,8 +356,8 @@ pub fn fields(name: &str, vals: &Map<String, Value>, prefs: &Value, lan: &str) -
             f.push(sel("socialSecs", "Each One For", "", &[(json!(5), "5 s"), (json!(8), "8 s"), (json!(12), "12 s"), (json!(20), "20 s"), (json!(30), "30 s")]));
             f.push(sel("socialMotion", "Animation", "How each one comes in and goes out.", &[(json!("rise"), "Rise"), (json!("slide"), "Slide"), (json!("flip"), "Flip"), (json!("pop"), "Pop"), (json!("type"), "Typewriter"), (json!("none"), "None")]));
         }
-        f.push(note("Platforms"));
-        f.extend(crate::socials::list_rows(prefs));
+        f.push(note("In OBS"));
+        f.push(info("Address", &url, &url, "Add this address as a Browser source in OBS. About 920 × 180 fits one at a time; give it more width for All at Once."));
         return f;
     }
     if let Some(id) = name.strip_prefix("social:") {

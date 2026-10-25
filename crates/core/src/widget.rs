@@ -341,6 +341,11 @@ pub fn widget_serve(listener: TcpListener, gen: u64) {
                         let v = if path == "/dock/chat.json" { crate::docks::chat_json(after) } else { crate::docks::activity_json(after) };
                         reply_own(&mut stream, "200 OK", "application/json", v.to_string().as_bytes());
                     }
+                    "/dock/emotes.json" => reply_own(&mut stream, "200 OK", "application/json", crate::emotes::json().to_string().as_bytes()),
+                    "/dock/settings.json" => {
+                        let page = query_map(query).get("page").and_then(|v| v.as_str().map(String::from)).unwrap_or_default();
+                        reply_own(&mut stream, "200 OK", "application/json", crate::docks::page_settings(&page).to_string().as_bytes());
+                    }
                     "/dock/do" => {
                         let body = req.split_once("\r\n\r\n").map(|x| x.1).unwrap_or("");
                         let answer = if method != "POST" || !crate::docks::trusted(&req, port) { Err("only OmniPulse's own docks can".to_string()) } else {

@@ -53,6 +53,27 @@ pub fn hsl(h: f32, s: f32, l: f32) -> Rgb {
     Rgb(f(h + 1.0 / 3.0), f(h), f(h - 1.0 / 3.0))
 }
 
+/// A colour's hue (degrees), saturation (0 to 1) and lightness (0 to 100), as hsl() takes them
+pub fn to_hsl(c: Rgb) -> (f32, f32, f32) {
+    let (r, g, b) = (c.0 as f32 / 255.0, c.1 as f32 / 255.0, c.2 as f32 / 255.0);
+    let (max, min) = (r.max(g).max(b), r.min(g).min(b));
+    let l = (max + min) / 2.0;
+    if max == min { return (0.0, 0.0, l * 100.0); }
+    let d = max - min;
+    let s = if l > 0.5 { d / (2.0 - max - min) } else { d / (max + min) };
+    let h = if max == r { (g - b) / d + if g < b { 6.0 } else { 0.0 } } else if max == g { (b - r) / d + 2.0 } else { (r - g) / d + 4.0 };
+    (h * 60.0, s, l * 100.0)
+}
+
+/// Tiles' own colours, from the theme's accent: six hues spread round it, as bright and as strong as it
+/// (a little stronger if it's nearly grey), so cards side by side differ and still look like the theme
+pub fn tints(accent: Rgb, light: bool) -> Vec<Rgb> {
+    let (h, s, _) = to_hsl(accent);
+    let s = s.clamp(0.45, 0.85);
+    let l = if light { 46.0 } else { 64.0 };
+    [0.0, 48.0, 105.0, 165.0, 225.0, 290.0].iter().map(|o| hsl(h + o, s, l)).collect()
+}
+
 fn luminance(c: Rgb) -> f32 {
     let ch = |v: u8| {
         let v = v as f32 / 255.0;

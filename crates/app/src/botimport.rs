@@ -145,9 +145,31 @@ fn n(v: &Value) -> f64 {
     v.as_f64().or_else(|| v.as_str().and_then(|x| x.trim().parse().ok())).unwrap_or(0.0)
 }
 
-/// An action for each of its triggers (ours have one each): "Name", then "Name 2"...
+/// Triggers the same but for their platform and their reward's id (a Twitch reward and a Kick one, a
+/// follow on each): one, on any platform, matching either reward
+fn merge_triggers(list: Vec<(Value, bool)>) -> Vec<(Value, bool)> {
+    let bare = |t: &Value| { let mut x = t.clone(); if let Some(o) = x.as_object_mut() { o.remove("from"); o.remove("rewardid"); o.remove("reward"); } x };
+    let mut out: Vec<(Value, bool)> = Vec::new();
+    for (t, on) in list {
+        let same = out.iter_mut().find(|(u, _)| bare(u) == bare(&t) && (u["type"] == "event" || u["type"] == "message") && (u["event"] != "reward" || (!s(&u["rewardid"]).is_empty() && !s(&t["rewardid"]).is_empty())));
+        match same {
+            Some((u, u_on)) => {
+                if u["from"] != t["from"] { u["from"] = json!("any"); }
+                let ids: Vec<String> = s(&u["rewardid"]).split(',').chain(s(&t["rewardid"]).split(',')).map(|x| x.trim().to_string()).filter(|x| !x.is_empty()).fold(Vec::new(), |mut v, x| { if !v.contains(&x) { v.push(x); } v });
+                if !ids.is_empty() { u["rewardid"] = json!(ids.join(", ")); }
+                if s(&u["reward"]).is_empty() { u["reward"] = t["reward"].clone(); }
+                *u_on = *u_on || on;
+            }
+            None => out.push((t, on)),
+        }
+    }
+    out
+}
+
+/// An action for each of its triggers (ours have one each): "Name", then "Name 2"...; the same trigger on
+/// Twitch and Kick, one
 fn per_trigger(name: &str, on: bool, triggers: Vec<(Value, bool)>, steps: &[Value], out: &mut Vec<Value>) {
-    let triggers = if triggers.is_empty() { vec![(defaults(TRIGGERS, "manual"), true)] } else { triggers };
+    let triggers = if triggers.is_empty() { vec![(defaults(TRIGGERS, "manual"), true)] } else { merge_triggers(triggers) };
     for (k, (t, t_on)) in triggers.into_iter().enumerate() {
         let name = if k == 0 { name.to_string() } else { format!("{name} {}", k + 1) };
         out.push(json!({ "name": name, "on": on && t_on, "trigger": t, "steps": steps }));
@@ -313,7 +335,8 @@ fn sb_steps(list: &[Value], names: &HashMap<String, String>, missed: &mut Vec<St
                     let (on_value, off_value) = (sb_steps(&branch(&yes), names, missed), sb_steps(&branch(&no), names, missed));
                     let (twitch, other) = if s(&st["value"]).eq_ignore_ascii_case("twitch") == is_value { (on_value, off_value) } else { (off_value, on_value) };
                     let said = |l: &Vec<Value>| l.iter().map(|x| format!("{}{}", x["type"], s(&x["text"]))).collect::<Vec<_>>();
-                    if other.is_empty() || said(&twitch) == said(&other) { out.extend(twitch); } else {
+                    // (one for both: where it came from, not Twitch's own chat)
+                    if other.is_empty() || said(&twitch) == said(&other) { out.extend(twitch.into_iter().map(|mut x| { if let Some(o) = x.as_object_mut() { o.remove("where"); } x })); } else {
                         out.push(ours(STEPS, "ifblock", json!({ "left": "%platform%", "test": "is", "right": "twitch" })));
                         out.extend(twitch);
                         out.push(ours(STEPS, "else", json!({})));
@@ -354,7 +377,10 @@ fn sb_step(st: &Value, names: &HashMap<String, String>, missed: &mut Vec<String>
     let state = st["state"].as_u64().unwrap_or(0);
     let three = |a: &str, b: &str| if state == 0 { a.to_string() } else if state == 1 { b.to_string() } else { "toggle".to_string() };
     Some(match code {
-        10 | 4001 | 35001 => ours(STEPS, "say", json!({ "text": txt("text"), "reply": false })),
+        // (Twitch's and Kick's own: each to its own chat)
+        10 => ours(STEPS, "say", json!({ "text": txt("text"), "reply": false, "where": "twitch" })),
+        35001 => ours(STEPS, "say", json!({ "text": txt("text"), "reply": false, "where": "kick" })),
+        4001 => ours(STEPS, "say", json!({ "text": txt("text"), "reply": false })),
         560 | 35002 => ours(STEPS, "say", json!({ "text": txt("text"), "reply": true })),
         23 => ours(STEPS, "announce", json!({ "text": txt("text") })),
         1002 => ours(STEPS, "wait", json!({ "seconds": (n(&st["value"]) / 1000.0 * 10.0).round() / 10.0 })),
@@ -595,6 +621,17 @@ fn mixitup_db(db: &[u8], settings: &Value) -> Result<Restored, String> {
 /// Up)"), the rest added; its quotes added (none twice), and, from OmniPulse's own, its variables and points
 pub fn merge(actions: &mut Vec<Value>, kept: &mut Map<String, Value>, r: &Restored) -> (usize, usize) {
     let ours = r.from == "an OmniPulse backup";
+    // (an earlier import's extra copies, "Name 2"..., one for each trigger it then had: gone, as this
+    // import's are one action now)
+    if !ours {
+        let made: Vec<String> = r.actions.iter().map(|a| s(&a["name"]).to_lowercase()).collect();
+        actions.retain(|x| {
+            if s(&x["from"]) != r.from { return true; }
+            let name = s(&x["name"]).to_lowercase();
+            let Some((base, n)) = name.rsplit_once(' ') else { return true };
+            !(n.parse::<u32>().is_ok_and(|n| n >= 2) && made.iter().any(|m| m == base) && !made.contains(&name))
+        });
+    }
     for a in &r.actions {
         let mut a = a.clone();
         if !ours && a.get("from").is_none() { a["from"] = json!(r.from); }
@@ -783,7 +820,7 @@ mod tests {
                 st(6, 2, json!({ "command": "https://example.com/inventory", "arguments": null })),
                 st(120, 3, json!({ "input": "%path%", "operation": 2, "value": "Some Game", "subActions": [branch(99901, vec![st(16, 0, json!({ "game": "Some Game" }))]), branch(99902, vec![st(10, 0, json!({ "text": "Not that one" }))])] })),
               ] },
-            { "id": "a2", "name": "Reward", "enabled": true, "triggers": [{ "type": 112, "rewardId": "abc-123", "enabled": true }],
+            { "id": "a2", "name": "Reward", "enabled": true, "triggers": [{ "type": 112, "rewardId": "abc-123", "enabled": true }, { "type": 35024, "rewardId": "01KICK", "enabled": true }],
               "subActions": [st(1012, 0, json!({ "key": 86, "modifiers": 0 })), st(19, 1, json!({ "duration": 90 }))] },
             { "id": "a3", "name": "Reply", "enabled": true, "triggers": [],
               "subActions": [st(120, 0, json!({ "input": "%userType%", "operation": 0, "value": "Twitch", "subActions": [branch(99901, vec![st(560, 0, json!({ "text": "Hi" }))]), branch(99902, vec![st(35002, 0, json!({ "text": "Hi" }))])] }))] },
@@ -800,7 +837,10 @@ mod tests {
         assert_eq!(a["steps"][3]["target"], json!("https://example.com/inventory"));
         assert_eq!(a["steps"][4]["test"], json!("contains"));
         let b = &r.actions[1];
-        assert_eq!(b["trigger"]["rewardid"], json!("abc-123"));
+        // (its Twitch reward and its Kick one: one action, either reward)
+        assert_eq!(b["trigger"]["rewardid"], json!("abc-123, 01KICK"));
+        assert_eq!(b["trigger"]["from"], json!("any"));
+        assert_eq!(r.actions[2]["name"], json!("Reply"));
         assert_eq!(b["steps"][0]["keys"], json!("V"));
         assert_eq!(b["steps"][1]["type"], json!("ad"));
         assert_eq!(b["steps"][1]["seconds"], json!(90.0));

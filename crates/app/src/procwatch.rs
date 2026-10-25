@@ -60,6 +60,31 @@ fn place(pid: u32, name: &str) -> String {
 #[cfg(not(windows))]
 fn place(_: u32, name: &str) -> String { name.to_string() }
 
+static LISTED: Mutex<Vec<String>> = Mutex::new(Vec::new());
+
+/// The programs open now, by name (A to Z, once each), for picking one: Windows' own left out (what's in
+/// its folder, and the processes every PC has)
+pub fn programs() -> Vec<String> {
+    const SKIP: [&str; 18] = ["system", "idle", "registry", "smss", "csrss", "wininit", "winlogon", "services", "lsass", "svchost", "fontdrvhost", "dwm", "conhost", "sihost", "taskhostw", "runtimebroker", "dllhost", "omnipulse-native"];
+    let win = std::env::var("SystemRoot").unwrap_or_else(|_| "C:\\Windows".into()).to_lowercase();
+    let mut seen = HashSet::new();
+    let mut out: Vec<String> = Vec::new();
+    for (pid, name) in running() {
+        let n = plain(&name);
+        if n.is_empty() || SKIP.contains(&n.as_str()) || !seen.insert(n.clone()) { continue; }
+        let at = place(pid, &name).to_lowercase();
+        // (Windows' own, and the ones it won't say where they are: not a program you opened)
+        if at.starts_with(&win) || !at.contains('\\') { continue; }
+        out.push(n);
+    }
+    out.sort();
+    *LISTED.lock().unwrap() = out.clone();
+    out
+}
+
+/// The list as it was last shown, for the one picked from it
+pub fn programs_listed() -> Vec<String> { LISTED.lock().unwrap().clone() }
+
 /// Every three seconds, while there's something to wait for: what's started since (not what was running
 /// when it began looking, as Streamer.bot's)
 fn watch(heard: impl Fn(String, String)) {

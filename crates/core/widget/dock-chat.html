@@ -114,6 +114,7 @@
   const opt = {
     twitch: store.get("twitch", true), kick: store.get("kick", true), time: store.get("time", false), badges: store.get("badges", true),
     hover: store.get("hover", false), confirm: store.get("confirm", true), secs: store.get("secs", "600"), size: store.get("size", "13"), to: store.get("to", "all"),
+    bttv: store.get("bttv", true), ffz: store.get("ffz", true), stv: store.get("stv", true),
   };
   let last = 0, cleared = 0;
   const rows = new Map();
@@ -127,7 +128,25 @@
     document.body.classList.toggle("modhover", opt.hover);
     for (const [, r] of rows) show(r);
   }
-  function setOpt(k, v) { opt[k] = v; store.set(k, v); applyOpts(); }
+  function setOpt(k, v) { opt[k] = v; store.set(k, v); applyOpts(); sendSettings(); }
+  const PAGE = "chat";
+  const SENT = () => opt;
+  const TAKE = (o) => { Object.keys(opt).forEach((k) => { if (k in o) { opt[k] = o[k]; store.set(k, o[k]); } }); applyOpts(); };
+  // (its settings kept by OmniPulse, on its Suite page: these follow them, and a change made here goes back)
+  let setN = -1;
+  function sendSettings() {
+    fetch("/dock/do", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ do: "settings", page: PAGE, opt: SENT() }) }).catch(() => {});
+  }
+  async function pullSettings() {
+    try {
+      const j = await (await fetch("/dock/settings.json?page=" + PAGE, { cache: "no-store" })).json();
+      if (j.n === setN) return;
+      setN = j.n;
+      if (j.opt && typeof j.opt === "object") { TAKE(j.opt); } else { sendSettings(); }
+    } catch (e) {}
+  }
+  setInterval(pullSettings, 3000);
+  pullSettings();
   function show(r) {
     const p = r.dataset.platform;
     r.hidden = (p === "twitch" && !opt.twitch) || (p === "kick" && !opt.kick);
@@ -149,7 +168,41 @@
 
   // ---------- a message: its emotes as pictures (Twitch's by place, Kick's by their [emote:id:name]) ----------
   function emoteImg(src, name) { const i = document.createElement("img"); i.src = src; i.alt = name; i.title = name; return i; }
-  function textNodes(m) {
+
+  // (BetterTTV, FrankerFaceZ and 7TV emotes: their words in a message as pictures, as its switches say;
+  // OmniPulse fetches the lists, global and your channel's, and they're taken again as they change)
+  let emotes = new Map(), emotesN = -1;
+  async function pullEmotes() {
+    try {
+      const j = await (await fetch("/dock/emotes.json", { cache: "no-store" })).json();
+      if (j.n === emotesN) return;
+      emotesN = j.n;
+      const m = new Map();
+      (j.list || []).forEach((e) => m.set(e.c, e));
+      emotes = m;
+    } catch (e) {}
+  }
+  pullEmotes();
+  setInterval(pullEmotes, 60000);
+  function thirdParty(nodes, img) {
+    if (!emotes.size) return nodes;
+    const on = { bttv: opt.bttv !== false, ffz: opt.ffz !== false, "7tv": opt.stv !== false };
+    const out = [];
+    for (const n of nodes) {
+      if (n.nodeType !== 3) { out.push(n); continue; }
+      const parts = n.textContent.split(/(\s+)/);
+      let text = "";
+      for (const w of parts) {
+        const e = w && emotes.get(w);
+        if (e && on[e.f]) { if (text) out.push(document.createTextNode(text)); text = ""; out.push(img(e.u, w)); }
+        else text += w;
+      }
+      if (text) out.push(document.createTextNode(text));
+    }
+    return out;
+  }
+  function textNodes(m) { return thirdParty(ownNodes(m), emoteImg); }
+  function ownNodes(m) {
     const out = [];
     const text = String(m.text || "");
     if (m.platform === "kick") {

@@ -109,7 +109,7 @@ pub const TRIGGERS: &[Kind] = &[
         pick("event", "Event", EVENTS, "follow", ""),
         f("min", "At Least", "number", "0", "The smallest amount that counts, in bits, raiders or subs gifted. Use 0 for any amount."),
         f("reward", "Reward", "text", "", "For a Channel Points reward, enter its name. Leave it empty for any reward."),
-        f("rewardid", "Reward ID", "text", "", "Filled in by an import from Streamer.bot. It matches that reward even if you rename it. Leave it empty to go by the name."),
+        f("rewardid", "Reward ID", "text", "", "Filled in by an import from Streamer.bot. It matches that reward even if you rename it. Several, separated by commas, match any of them, like a Twitch one and a Kick one. Leave it empty to go by the name."),
         pick("from", "On", FROM, "any", "Kick has follows, subs, gifted subs, hosts and going live or offline."),
         f("users", "Only For", "text", "", "Viewers' names, separated by commas. Use this with First Words for an entrance greeting. Leave it empty for anyone."),
     ] },
@@ -135,7 +135,7 @@ pub const TRIGGERS: &[Kind] = &[
         f("name", "Called As", "text", "", "Leave it empty to use the action's own name."),
     ] },
     Kind { id: "process", label: "A Program Starting", note: "When a program opens on this PC, like a game. Gives the steps %path% (where the program is) and %process% (its name).", fields: &[
-        f("name", "Program", "text", "", "Its name, as in Task Manager's Details tab, like destiny2launcher. The .exe on the end doesn't matter."),
+        f("name", "Program", "program", "", "Pick it from the ones open now, or type its name as in Task Manager's Details tab, like destiny2launcher. The .exe on the end doesn't matter."),
     ] },
     Kind { id: "manual", label: "Only When Run", note: "From another action's Run Another Action, or Run Now above.", fields: &[] },
 ];
@@ -144,7 +144,8 @@ pub const TRIGGERS: &[Kind] = &[
 pub const STEPS: &[Kind] = &[
     Kind { id: "say", label: "Send a Message", note: "", fields: &[
         f("text", "Message", "text", "Hi %user%!", ""),
-        f("reply", "As a Reply", "toggle", "true", "To the message that started it."),
+        pick("where", "Send To", WHERE, "here", "Where It Came From is the chat its message or event came from. Run another way, it's both."),
+        f("reply", "As a Reply", "toggle", "true", "To the message that started it, when it goes to that chat."),
     ] },
     Kind { id: "random", label: "Send One of These", note: "", fields: &[
         f("lines", "Messages", "text", "Hi %user%! | Hello %user%! | Hey %user%!", "With | between them: one picked at random."),

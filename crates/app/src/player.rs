@@ -334,19 +334,50 @@ async fn lyrics_query(t: &Track) -> (String, String, u64, String) {
     (artist, title, t.ms / 1000, video)
 }
 
+/// A remix's tag ("Someone Flip", "VIP", "Extended Edit"): what its title says beyond the song's own name, in
+/// brackets or after " - ", when it says it's a version of the song
+pub fn remix_tag(title: &str) -> Option<String> {
+    static TAG: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    let rx = TAG.get_or_init(|| regex::Regex::new(r"(?i)[(\[]([^)\]]*\b(?:remix|rmx|flip|bootleg|rework|refix|vip|edit|mashup|remake|redo)\b[^)\]]*)[)\]]|\s[-\x{2013}\x{2014}]\s([^-\x{2013}\x{2014}]*\b(?:remix|rmx|flip|bootleg|rework|refix|vip|edit|mashup|remake|redo)\b[^-\x{2013}\x{2014}]*)$").unwrap());
+    let c = rx.captures(title)?;
+    let tag = c.get(1).or(c.get(2))?.as_str().trim().to_string();
+    // ("Radio Edit" and "Original Mix" are the song itself, its lyrics the same)
+    let l = tag.to_lowercase();
+    if l == "radio edit" || l == "edit" || l.contains("original mix") || l.contains("clean edit") || l.contains("explicit edit") { return None; }
+    Some(tag)
+}
+
 /// A track's lyrics (as the web app's findLyrics): the first timed ones, asking each place in your
 /// order (LRCLIB, NetEase Cloud Music, KuGou, YouTube Music; the one you picked for the song first),
-/// else the first plain ones; and the place they're from ("" for none)
+/// else the first plain ones; and the place they're from ("" for none). A remix: its own lyrics if a
+/// place has them; if not, the original song's, untimed (their timing is the original's, not the
+/// remix's), and the place's name with "+original" after it
 pub async fn lyrics(t: &Track, prefs: &Value) -> (Vec<Line>, String) {
     let (artist, title, secs, video) = lyrics_query(t).await;
     let mut order = lyrics_order(prefs);
-    if let Some(p) = lyrics_pick(&t.key).filter(|p| PROVIDERS.contains(&p.as_str())) {
+    let picked = lyrics_pick(&t.key).filter(|p| PROVIDERS.contains(&p.as_str()));
+    if let Some(p) = picked.clone() {
         order.retain(|x| *x != p);
         order.insert(0, p);
     }
+    if let Some(tag) = remix_tag(&t.title).filter(|_| picked.is_none()) {
+        let named = format!("{title} {tag}");
+        for p in order.iter().filter(|p| p.as_str() != "youtube") {
+            let Ok(v) = core::lyrics::from(p, &artist, &named, secs, "").await else { continue };
+            if let Some(l) = timed(&v) { return (l, p.clone()); }
+        }
+        let (lines, from) = original_lyrics(&order, &artist, &title, secs, &video).await;
+        if lines.is_empty() { return (lines, from); }
+        return (lines.into_iter().map(|l| Line { ms: 0, text: l.text }).filter(|l| !l.text.is_empty()).collect(), format!("{from}+original"));
+    }
+    original_lyrics(&order, &artist, &title, secs, &video).await
+}
+
+async fn original_lyrics(order: &[String], artist: &str, title: &str, secs: u64, video: &str) -> (Vec<Line>, String) {
+    let order = order.to_vec();
     let mut plain: Option<(Value, String)> = None;
     for p in order {
-        let Ok(v) = core::lyrics::from(&p, &artist, &title, secs, &video).await else { continue };
+        let Ok(v) = core::lyrics::from(&p, artist, title, secs, video).await else { continue };
         if v.is_null() { continue; }
         // (timed ones only if they are: a place can answer with an empty or untimed "synced")
         if let Some(l) = timed(&v) { return (l, p); }
@@ -415,5 +446,20 @@ mod lyrics_live {
             println!("{}: {} lines, timed {}", super::lyrics_name(p), l.len(), l.iter().any(|x| x.ms > 0));
         }
         assert!(!first.is_empty() && !from.is_empty());
+    }
+}
+
+#[cfg(test)]
+mod remix_tests {
+    use super::remix_tag;
+    #[test]
+    fn a_flip_or_a_remix_is_one_a_radio_edit_isnt() {
+        assert_eq!(remix_tag("Drops of Jupiter (Someone Flip)").as_deref(), Some("Someone Flip"));
+        assert_eq!(remix_tag("Song [VIP]").as_deref(), Some("VIP"));
+        assert_eq!(remix_tag("Song - Artist Remix").as_deref(), Some("Artist Remix"));
+        assert_eq!(remix_tag("Song (Radio Edit)"), None);
+        assert_eq!(remix_tag("Song (Original Mix)"), None);
+        assert_eq!(remix_tag("Song (feat. Someone)"), None);
+        assert_eq!(remix_tag("Flipside"), None);
     }
 }

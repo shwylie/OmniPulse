@@ -61,7 +61,7 @@
 <script>
   "use strict";
   const $ = (id) => document.getElementById(id);
-  const DEFAULTS = { from: "all", cmds: false, bot: true, badges: true, marks: true, style: "plain", size: 20, bg: "0", shadow: true, dir: "bottom", fade: 0, max: 30 };
+  const DEFAULTS = { from: "all", cmds: false, bot: true, badges: true, marks: true, style: "plain", size: 20, bg: "0", shadow: true, dir: "bottom", fade: 0, max: 30, bttv: true, ffz: true, stv: true };
   // (/chat/2, /chat/3...: another output, its settings kept apart from the first's)
   const OUT = (location.pathname.match(/^\/chat\/(\d+)/) || [])[1];
   const KEY = "omnipulse.multichat" + (OUT ? "." + OUT : "");
@@ -87,7 +87,27 @@
     const q = Object.keys(DEFAULTS).filter((k) => opt[k] !== DEFAULTS[k]).map((k) => k + "=" + encodeURIComponent(typeof opt[k] === "boolean" ? (opt[k] ? 1 : 0) : opt[k])).join("&");
     $("addr").textContent = "As an address: " + location.origin + location.pathname + (q ? "?" + q : "");
   }
-  const bind = (id, key, conv) => { $(id).onchange = (e) => { opt[key] = conv(e.target); store.set(Object.fromEntries(Object.keys(DEFAULTS).filter((k) => !(k in fromUrl)).map((k) => [k, opt[k]]))); apply(); }; };
+  const kept = () => Object.fromEntries(Object.keys(DEFAULTS).filter((k) => !(k in fromUrl)).map((k) => [k, opt[k]]));
+  const bind = (id, key, conv) => { $(id).onchange = (e) => { opt[key] = conv(e.target); store.set(kept()); apply(); sendSettings(); }; };
+  // (its output's own: /chat/2 is multichat2; the address's settings still win)
+  const PAGE = "multichat" + (OUT || "");
+  const SENT = kept;
+  const TAKE = (o) => { Object.keys(DEFAULTS).forEach((k) => { if (k in o && !(k in fromUrl)) opt[k] = o[k]; }); store.set(kept()); apply(); };
+  // (its settings kept by OmniPulse, on its Suite page: these follow them, and a change made here goes back)
+  let setN = -1;
+  function sendSettings() {
+    fetch("/dock/do", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ do: "settings", page: PAGE, opt: SENT() }) }).catch(() => {});
+  }
+  async function pullSettings() {
+    try {
+      const j = await (await fetch("/dock/settings.json?page=" + PAGE, { cache: "no-store" })).json();
+      if (j.n === setN) return;
+      setN = j.n;
+      if (j.opt && typeof j.opt === "object") { TAKE(j.opt); } else { sendSettings(); }
+    } catch (e) {}
+  }
+  setInterval(pullSettings, 3000);
+  pullSettings();
   bind("oFrom", "from", (t) => t.value); bind("oCmds", "cmds", (t) => t.checked); bind("oBot", "bot", (t) => t.checked); bind("oBadges", "badges", (t) => t.checked); bind("oMarks", "marks", (t) => t.checked);
   bind("oStyle", "style", (t) => t.value); bind("oSize", "size", (t) => Number(t.value) || 20); bind("oBg", "bg", (t) => t.value); bind("oShadow", "shadow", (t) => t.checked); bind("oDir", "dir", (t) => t.value);
   bind("oFade", "fade", (t) => Math.max(0, Number(t.value) || 0)); bind("oMax", "max", (t) => Math.max(1, Number(t.value) || 30));
@@ -104,7 +124,41 @@
     for (const c of String(m.login || m.user || "")) h = (h * 31 + c.charCodeAt(0)) >>> 0;
     return "hsl(" + (h % 360) + " 75% 70%)";
   }
-  function textNodes(m) {
+
+  // (BetterTTV, FrankerFaceZ and 7TV emotes: their words in a message as pictures, as its switches say;
+  // OmniPulse fetches the lists, global and your channel's, and they're taken again as they change)
+  let emotes = new Map(), emotesN = -1;
+  async function pullEmotes() {
+    try {
+      const j = await (await fetch("/dock/emotes.json", { cache: "no-store" })).json();
+      if (j.n === emotesN) return;
+      emotesN = j.n;
+      const m = new Map();
+      (j.list || []).forEach((e) => m.set(e.c, e));
+      emotes = m;
+    } catch (e) {}
+  }
+  pullEmotes();
+  setInterval(pullEmotes, 60000);
+  function thirdParty(nodes, img) {
+    if (!emotes.size) return nodes;
+    const on = { bttv: opt.bttv !== false, ffz: opt.ffz !== false, "7tv": opt.stv !== false };
+    const out = [];
+    for (const n of nodes) {
+      if (n.nodeType !== 3) { out.push(n); continue; }
+      const parts = n.textContent.split(/(\s+)/);
+      let text = "";
+      for (const w of parts) {
+        const e = w && emotes.get(w);
+        if (e && on[e.f]) { if (text) out.push(document.createTextNode(text)); text = ""; out.push(img(e.u, w)); }
+        else text += w;
+      }
+      if (text) out.push(document.createTextNode(text));
+    }
+    return out;
+  }
+  function textNodes(m) { return thirdParty(ownNodes(m), (src, name) => { const i = document.createElement("img"); i.src = src; i.alt = name; return i; }); }
+  function ownNodes(m) {
     const out = [], text = String(m.text || "");
     const img = (src, name) => { const i = document.createElement("img"); i.src = src; i.alt = name; return i; };
     if (m.platform === "kick") {

@@ -75,8 +75,9 @@ if (channel === "stable") {
   console.log("On Cloudflare.");
 }
 
-// GitHub: beta releases (and a stable one with --also-github)
-if (channel === "beta" || process.argv.includes("--also-github")) {
+// GitHub: every release, with its notes (a stable one on Cloudflare too)
+// (every release on GitHub too, as the user asked on 2026-10-25: stable on both, --no-github to skip it)
+if (channel === "beta" || !process.argv.includes("--no-github")) {
   const latest = join(tmpdir(), "latest.json");
   writeFileSync(latest, latestFor(`https://github.com/${REPO}/releases/download/${tag}/${name}`));
   run("gh", ["release", "create", tag, exe, latest, "--repo", REPO, "--title", "OmniPulse " + version, "--notes", notes || "OmniPulse " + version]);

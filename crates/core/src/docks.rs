@@ -109,6 +109,23 @@ pub fn activity_json(after: u64) -> Value {
     with_activity(|list| json!({ "items": list.iter().filter(|x| x["n"].as_u64().unwrap_or(0) > after).collect::<Vec<_>>(), "last": ACTIVITY_N.load(Ordering::SeqCst) }))
 }
 
+/// The docks' and the Multichat Overlay's settings, as OmniPulse keeps them (its Suite page): each page's by
+/// its name ("chat", "activity", "multichat", "multichat2"...), and a count that goes up with each change, so a
+/// page knows when to take them again
+static PAGE_SETTINGS: Mutex<Option<Value>> = Mutex::new(None);
+static PAGE_SETTINGS_N: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+
+pub fn page_settings_set(all: Value) {
+    *PAGE_SETTINGS.lock().unwrap() = Some(all);
+    PAGE_SETTINGS_N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// One page's: { n, opt } (opt null: none kept yet, the page's own are sent to be kept)
+pub fn page_settings(page: &str) -> Value {
+    let opt = PAGE_SETTINGS.lock().unwrap().as_ref().map(|a| a[page].clone()).unwrap_or(Value::Null);
+    json!({ "n": PAGE_SETTINGS_N.load(std::sync::atomic::Ordering::Relaxed), "opt": opt })
+}
+
 /// Who may ask a dock to do something: a page of the widget's own server (OBS's dock), never another site
 /// (any web page can send a request to this PC; its Origin says where it's from) or another name for this PC
 pub fn trusted(req: &str, port: u16) -> bool {
@@ -133,7 +150,8 @@ pub fn dock_do(cmd: Value) -> Result<String, String> {
             with_activity(|list| { list.clear(); activity_save(list); });
             Ok("Cleared.".into())
         }
-        "delete" | "timeout" | "ban" | "unban" | "say" | "rerun" => {
+        // (its settings changed on the page itself, its gear in OBS: kept by OmniPulse, as its own page's)
+        "delete" | "timeout" | "ban" | "unban" | "say" | "rerun" | "settings" => {
             let mut cmd = cmd;
             // (an action run again: the event as it was kept, from the feed)
             if cmd["do"] == "rerun" {
