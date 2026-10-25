@@ -17,6 +17,10 @@ use std::{
 };
 
 pub static WIDGET_STATE: Mutex<Option<Value>> = Mutex::new(None);
+
+/// Name That Tune: while a round's on, what's playing isn't shown (the Stream Widget says "Name That Tune")
+static TUNE_MASK: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+pub fn tune_mask(on: bool) { TUNE_MASK.store(on, std::sync::atomic::Ordering::Relaxed); }
 pub static WIDGET_GEN: AtomicU64 = AtomicU64::new(0);
 pub const WIDGET_HTML: &str = include_str!("../widget/widget.html");
 /// The lyrics widget (/lyrics): the playing song's timed lyrics, for karaoke
@@ -317,6 +321,15 @@ pub fn widget_serve(listener: TcpListener, gen: u64) {
                             if let (Some(o), Some(Value::Object(p))) = (v.as_object_mut(), PREVIEW.lock().ok().and_then(|g| g.clone())) { o.extend(p); }
                         }
                         if let Some(o) = v.as_object_mut() {
+                            // (Name That Tune: what's playing kept from the stream while chat guesses it)
+                            if !preview && TUNE_MASK.load(std::sync::atomic::Ordering::Relaxed) {
+                                o.insert("title".into(), json!("Name That Tune"));
+                                o.insert("artist".into(), json!("Guess the song in chat!"));
+                                o.insert("artwork".into(), json!(""));
+                                o.insert("requested_by".into(), json!(""));
+                                // (the lyrics would give it away too)
+                                if let Some(Value::Object(l)) = o.get_mut("lyrics") { l.insert("text".into(), json!([])); l.insert("key".into(), json!("tune")); }
+                            }
                             o.insert("v".to_string(), Value::String(widget_version()));
                             o.insert("alerts".to_string(), Value::Array(ALERTS.lock().unwrap().iter().cloned().collect()));
                         }
@@ -355,7 +368,7 @@ pub fn widget_serve(listener: TcpListener, gen: u64) {
                         reply_own(&mut stream, status, "application/json", v.to_string().as_bytes());
                     }
                     "/socials" | "/socials.html" => reply(&mut stream, "200 OK", "text/html; charset=utf-8", SOCIALS_HTML.as_bytes()),
-                    "/goals" | "/timer" | "/latest-follow" | "/latest-sub" | "/raid" | "/hype" | "/voteskip" | "/wheel" | "/leaderboard" | "/emotes" => reply(&mut stream, "200 OK", "text/html; charset=utf-8", SUITE_HTML.as_bytes()),
+                    "/goals" | "/timer" | "/latest-follow" | "/latest-sub" | "/raid" | "/hype" | "/voteskip" | "/wheel" | "/leaderboard" | "/emotes" | "/tune" => reply(&mut stream, "200 OK", "text/html; charset=utf-8", SUITE_HTML.as_bytes()),
                     "/levels.json" => {
                         let v = LEVELS.lock().map(|g| g.clone()).unwrap_or_default();
                         reply_own(&mut stream, "200 OK", "application/json", serde_json::to_string(&v).unwrap_or_else(|_| "[]".into()).as_bytes());

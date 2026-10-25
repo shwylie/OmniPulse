@@ -535,6 +535,12 @@
     { "key": "wheelChat", "label": "Say What It Lands On", "type": "toggle", "default": true },
     { "key": "wheelMessage", "label": "Its Message", "type": "text", "default": "{user} spun the wheel: {prize}!" },
     { "key": "boardCount", "label": "How Many", "type": "number", "default": 5 },
+    { "key": "tuneOn", "label": "Name That Tune", "type": "toggle", "default": false },
+    { "key": "tuneCommand", "label": "Its Command", "type": "text", "default": "!tune" },
+    { "key": "tuneAnyone", "label": "Anyone Can Start It", "type": "toggle", "default": false },
+    { "key": "tuneSecs", "label": "Seconds to Guess", "type": "number", "default": 60 },
+    { "key": "tunePoints", "label": "Points for Winning", "type": "number", "default": 100 },
+    { "key": "tuneMessage", "label": "Its Message", "type": "text", "default": "🎵 Name That Tune! First to type the song's name or its artist wins {points} {pointsname}." },
     {
       "key": "commands",
       "label": "Your Commands (the Old Way)",

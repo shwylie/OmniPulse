@@ -44,7 +44,7 @@ const EVENTS: &[(&str, &str)] = &[
     ("prediction", "A Prediction Starting"), ("predictionend", "A Prediction Ending"), ("pollend", "A Poll Ending"),
     ("hypetrainend", "A Hype Train Ending"), ("charity", "A Charity Donation"), ("shoutoutin", "A Shoutout to You"),
     ("vip", "A New VIP"), ("mod", "A New Moderator"), ("watchstreak", "A Watch Streak"), ("donation", "A Donation (Streamlabs, StreamElements)"), ("online", "Going Live"), ("offline", "Going Offline"), ("adbreak", "An Ad Break"),
-    ("hypelevel", "A Hype Level Reached"), ("wheel", "The Wheel Landing"), ("voteskip", "Chat Skipping a Song"),
+    ("hypelevel", "A Hype Level Reached"), ("wheel", "The Wheel Landing"), ("voteskip", "Chat Skipping a Song"), ("tunewin", "Name That Tune Won"),
 ];
 const OBS_WHEN: &[(&str, &str)] = &[
     ("scene", "The Scene Changes"), ("streamstart", "Streaming Starts"), ("streamstop", "Streaming Stops"),
@@ -455,6 +455,7 @@ pub const STEPS: &[Kind] = &[
     Kind { id: "slobsreplay", label: "Streamlabs: Save the Replay", note: "Its replay buffer needs to be running.", fields: &[] },
     Kind { id: "spin", label: "Spin the Wheel", note: "A free spin, for whoever started the action. Its prizes are in the Suite's Spin the Wheel.", fields: &[] },
     Kind { id: "hypeadd", label: "Add Hype", note: "Fills the hype meter by this much. A level's 100 unless you've changed it.", fields: &[f("amount", "Amount", "number", "20", "")] },
+    Kind { id: "tune", label: "Start Name That Tune", note: "A round on what's playing now: chat guesses its name or artist. It's set up in the Suite's Name That Tune.", fields: &[] },
     Kind { id: "emoterain", label: "Make It Rain Emotes", note: "A burst of the latest emotes on the Emote Rain widget.", fields: &[] },
     Kind { id: "groupstate", label: "Turn a Group On or Off", note: "Every action in the group at once. Give actions a group next to their name.", fields: &[
         f("group", "Group", "text", "", "Its name."),
@@ -488,7 +489,7 @@ pub fn trigger_menu() -> Vec<MenuItem> {
         item("Chat", "A Rule Broken", "filter", json!({})),
     ];
     // (the Suite's fun: its own events, any platform)
-    const FUN: [&str; 3] = ["hypelevel", "wheel", "voteskip"];
+    const FUN: [&str; 4] = ["hypelevel", "wheel", "voteskip", "tunewin"];
     for (e, l) in EVENTS.iter().filter(|e| e.0 != "donation" && !FUN.contains(&e.0)) { m.push(item("Twitch", &bare(l), "event", json!({ "event": e, "from": "twitch" }))); }
     for (e, l) in EVENTS.iter().filter(|e| FUN.contains(&e.0)) { m.push(item("Fun", &bare(l), "event", json!({ "event": e, "from": "any" }))); }
     for (e, l) in [("follow", "Follow"), ("sub", "New Sub"), ("resub", "Resub"), ("gift", "Gifted Subs"), ("raid", "Host"), ("reward", "Channel Points Reward"), ("online", "Going Live"), ("offline", "Going Offline")] {
@@ -527,7 +528,7 @@ pub fn step_menu() -> Vec<MenuItem> {
         ("Streamlabs Desktop", &["slobsscene", "slobssource", "slobsmute", "slobsstream", "slobsrecord", "slobsreplay"]),
         ("OmniPulse", &["request", "wrongsong", "nowplaying", "skip", "playpause", "alert", "overlay", "speak", "sound", "status", "credits"]),
         ("Points and Games", &["points", "gamble", "slots", "duel", "heist", "trivia", "strike", "quote", "quoteadd", "giveenter", "givepick"]),
-        ("Fun", &["spin", "hypeadd", "emoterain"]),
+        ("Fun", &["spin", "hypeadd", "emoterain", "tune"]),
         ("This PC and the Web", &["keys", "open", "writefile", "fetch", "discord"]),
     ];
     let mut m = Vec::new();

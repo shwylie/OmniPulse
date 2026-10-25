@@ -244,6 +244,8 @@ async function onChat(m) {
   onActions(m, text, cmd, args, user, id);
   gameChat(user, text, platform);
   funChat(user);
+  // (a guess at Name That Tune, while a round's on)
+  if (tune && !text.startsWith("!")) tuneGuess(user, text);
   const firstKey = platform + "|" + (m.nick || user).toLowerCase();
   if (!spoken.has(firstKey)) {
     spoken.add(firstKey);
@@ -1234,6 +1236,7 @@ async function step(st, ctx, depth) {
     case "spin": await wheelSpin(ctx.user || "", ctx.msgId || null, ctx.platform, true); break;
     case "hypeadd": hypeAdd(Math.max(0, num(f("amount")))); break;
     case "emoterain": fun.burst++; suitePush(); break;
+    case "tune": tuneStart(ctx.user || "", null, ctx.platform); break;
     case "groupstate": {
       const g = f("group").trim().toLowerCase();
       const list = (S().actions || []).map((x) => {
@@ -2136,6 +2139,7 @@ function suitePush() {
       voteskip: { on: yes(x.skipOn), votes: fun.votes.size, need: Math.max(1, num(x.skipVotes) || 5), song: fun.song, command: String(x.skipCommand || "!skip") },
       wheel: Object.assign({ prizes: wheelPrizes(), command: String(x.wheelCommand || "!spin") }, fun.wheel || {}),
       leaderboard: { list: leaders(), name: pointsName() },
+      tune: fun.tune || null,
       burst: fun.burst,
       anim: String(x.suiteAnim || "rise"),
       theme: String(x.suiteTheme || "dark"),
@@ -2290,6 +2294,66 @@ async function wheelSpin(user, id, platform, free) {
   }, 6500);
 }
 
+// (Name That Tune: chat guesses what's playing. Its name and artist are hidden from the Stream Widget, a hint
+// shows more of the name as time goes, and the first to type the name or the artist wins points)
+let tune = null;
+function tuneClean(t) { return String(t || "").replace(/\s*[\(\[][^\)\]]*[\)\]]/g, "").replace(/\s+(feat\.?|ft\.?|featuring)\s.*$/i, "").replace(/\s+-\s+.*$/, "").trim(); }
+function tuneHint(title, shown) {
+  // (letters hidden, some shown: the first of each word first, then others, as the round goes on)
+  const chars = Array.from(title);
+  const letters = chars.map((c, i) => (/[a-z0-9]/i.test(c) ? i : -1)).filter((i) => i >= 0);
+  const firsts = letters.filter((i) => i === 0 || !/[a-z0-9]/i.test(chars[i - 1]));
+  const order = firsts.concat(letters.filter((i) => !firsts.includes(i)).sort((a, b) => ((a * 7919) % 13) - ((b * 7919) % 13)));
+  const keep = new Set(order.slice(0, Math.round(order.length * shown)));
+  return chars.map((c, i) => (/[a-z0-9]/i.test(c) ? (keep.has(i) ? c : "_") : c)).join("");
+}
+function tunePush() {
+  const now = Date.now();
+  fun.tune = tune ? { on: true, hint: tuneHint(tune.title, tune.shown), endsAt: tune.endsAt, secs: tune.secs, now } : fun.tune && fun.tune.on ? Object.assign({}, fun.tune, { on: false }) : fun.tune;
+  suitePush();
+}
+function tuneStart(user, id, platform) {
+  const x = S();
+  if (tune) return reply(id, "A round's on already: guess the song!", platform);
+  if (!fun.title) return reply(id, "Play a song first, then start Name That Tune.", platform);
+  const secs = Math.max(15, Math.min(300, num(x.tuneSecs) || 60));
+  tune = { title: tuneClean(fun.title), artist: String(fun.artist || "").split(/,|&| x | and /i)[0].trim(), full: fun.title, by: fun.artist, secs, endsAt: Date.now() + secs * 1000, shown: 0, platform: platform || "all" };
+  fun.tune = null;
+  OmniPulse.app.tuneMask(true).catch(() => {});
+  reply(null, String(x.tuneMessage || "🎵 Name That Tune! First to type the song's name or its artist wins {points} {pointsname}.").replace(/\{points\}/g, String(Math.max(0, num(x.tunePoints) || 100))).replace(/\{pointsname\}/g, pointsName()), "all");
+  // (a little more of the name every so often; out of time, the answer)
+  tune.tick = setInterval(() => {
+    if (!tune) return;
+    const left = tune.endsAt - Date.now();
+    if (left <= 0) return tuneEnd(null);
+    tune.shown = Math.min(0.6, (1 - left / (tune.secs * 1000)) * 0.75);
+    tunePush();
+  }, 5000);
+  tunePush();
+}
+function tuneGuess(user, text) {
+  if (!tune) return false;
+  const g = loose(text);
+  const hit = (a) => { const n = loose(a); return n.length >= 3 && g.includes(n); };
+  if (hit(tune.title) || hit(tune.artist)) { tuneEnd(user); return true; }
+  return false;
+}
+function tuneEnd(winner) {
+  if (!tune) return;
+  clearInterval(tune.tick);
+  const t = tune;
+  tune = null;
+  OmniPulse.app.tuneMask(false).catch(() => {});
+  const pts = Math.max(0, num(S().tunePoints) || 100);
+  if (winner) {
+    if (pts && yes(S().pointsOn)) addPoints(winner, pts);
+    reply(null, "🎉 " + winner + " got it! It's " + t.full + (t.by ? " by " + t.by : "") + "." + (pts && yes(S().pointsOn) ? " +" + pts + " " + pointsName() : ""), "all");
+    fire("tunewin", { user: winner, amount: String(pts), message: t.full, rawInput: t.full, platform: t.platform, replay: true });
+  } else reply(null, "⏱ Nobody got it: it was " + t.full + (t.by ? " by " + t.by : "") + ".", "all");
+  fun.tune = { on: false, winner: winner || "", title: t.full, artist: t.by || "", at: Date.now() };
+  suitePush();
+}
+
 // (the leaderboard: the most points, from the points kept)
 function leaders() {
   const all = S().points || {};
@@ -2303,6 +2367,12 @@ async function suiteCommand(cmd, args, r, id, platform, user) {
   // (both off until they're switched on: neither takes a command you might already use)
   if (yes(x.skipOn) && cmd === String(x.skipCommand || "!skip").trim().toLowerCase()) { voteSkip(user, id, platform); return true; }
   if (yes(x.wheelOn) && cmd === String(x.wheelCommand || "!spin").trim().toLowerCase()) { await wheelSpin(user, id, platform, false); return true; }
+  // (Name That Tune: started by you or a moderator, or anyone if it's set to)
+  if (yes(x.tuneOn) && cmd === String(x.tuneCommand || "!tune").trim().toLowerCase()) {
+    if (!r.mod && !yes(x.tuneAnyone)) return true;
+    tuneStart(user, id, platform);
+    return true;
+  }
   const c = String(S().timerCommand || "!timer").trim().toLowerCase();
   if (!c || cmd !== c) return false;
   if (!r.mod) return true;
@@ -2345,6 +2415,7 @@ function suiteTest(kind) {
   if (kind === "voteskip") { fun.votes.add("test-a"); fun.votes.add("test-b"); suitePush(); return "Two test votes added. The next song clears them."; }
   if (kind === "wheel") { wheelSpin("You", null, "all", true); return "Spinning."; }
   if (kind === "emoterain") { fun.burst++; suitePush(); return "Raining emotes."; }
+  if (kind === "tune") { if (!fun.title) return "Play a song first."; tuneStart("You", null, "all"); return "A round's started: what's playing is hidden from the Stream Widget."; }
   suitePush();
   return "Sent to the widget.";
 }
@@ -2492,6 +2563,7 @@ function stopAll() {
   for (const d of Object.values(duels)) clearTimeout(d.off);
   if (trivia) clearTimeout(trivia.off);
   duels = {}; heists = {}; trivia = null;
+  if (tune) { clearInterval(tune.tick); tune = null; OmniPulse.app.tuneMask(false).catch(() => {}); }
   tipSockets = [];
   obsReady = false;
 }
@@ -2624,7 +2696,15 @@ OmniPulse.register({
       return true;
     }
     // (a new song: the skip votes start again)
-    if (kind === "start") { fun.votes.clear(); fun.song = [d.title, d.artist].filter(Boolean).join(" — "); suitePush(); }
+    if (kind === "start") {
+      fun.votes.clear();
+      fun.song = [d.title, d.artist].filter(Boolean).join(" — ");
+      // (Name That Tune: the song it's on; a new one mid-round ends it, with the answer)
+      if (tune && d.title !== tune.full) tuneEnd(null);
+      fun.title = d.title || "";
+      fun.artist = d.artist || "";
+      suitePush();
+    }
     for (const a of live) {
       if (a.trigger.type !== "song" || (a.trigger.when || "start") !== kind) continue;
       run(a, { user: d.user || "", song: d.title || "", artist: d.artist || "", platform: "all" });

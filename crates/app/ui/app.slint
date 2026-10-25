@@ -2708,6 +2708,25 @@ component SuitePreview inherits Rectangle {
                     Text { text: g.n; color: root.ink; font-size: 11px; horizontal-alignment: center; }
                 }
             }
+            // (Name That Tune: the hint filling in, the time running down)
+            if root.which == "tune": VerticalLayout {
+                spacing: 6px;
+                Text { text: "NAME THAT TUNE: TYPE THE SONG OR THE ARTIST"; color: root.ink.with-alpha(0.75); font-size: 10px; horizontal-alignment: center; }
+                Text {
+                    text: root.fill < 0.33 ? "M_ _____ ___" : root.fill < 0.66 ? "Mr B______ ___" : "Mr Bl_e S_y";
+                    color: root.ink;
+                    font-size: 22px;
+                    font-weight: 800;
+                    letter-spacing: 3px;
+                    horizontal-alignment: center;
+                }
+                Rectangle {
+                    height: 7px;
+                    border-radius: 4px;
+                    background: root.comic ? #0000001f : #ffffff29;
+                    Rectangle { x: 0; width: parent.width * (1 - root.fill); border-radius: 4px; background: root.c1.mix(root.c2, 0.5); }
+                }
+            }
             if root.which == "hype" || root.which == "voteskip": VerticalLayout {
                 spacing: 6px;
                 HorizontalLayout {
@@ -3078,7 +3097,7 @@ global BotLook {
     public pure function icon(id: string) -> string {
         return id == "twitch" || id == "twitchbot" ? Icons.twitch : id == "kick" || id == "kickbot" ? Icons.kick : id == "youtube" ? Icons.youtube-mark : id == "obs" || id == "meld" || id == "slobs" ? Icons.broadcast : id == "streamlabs" || id == "streamelements" ? Icons.coins
             : id == "requests" ? Icons.playlist-add : id == "alerts" ? Icons.bell : id == "points" ? Icons.coins : id == "games" ? Icons.dice : id == "moderation" ? Icons.shield
-            : id == "hype" ? Icons.broadcast : id == "voteskip" ? Icons.next : id == "wheel" ? Icons.dice : id == "leaderboard" ? Icons.coins : id == "emoterain" ? Icons.chat
+            : id == "hype" ? Icons.broadcast : id == "voteskip" ? Icons.next : id == "wheel" ? Icons.dice : id == "leaderboard" ? Icons.coins : id == "emoterain" ? Icons.chat : id == "tune" ? Icons.lyrics
             : id == "goals" ? Icons.check : id == "timer" ? Icons.refresh : id == "latest" ? Icons.heart-out : id == "raid" ? Icons.broadcast : Icons.actions;
     }
 }
@@ -3765,23 +3784,27 @@ component BotPage inherits Rectangle {
                 }
                 // the fun: chat playing along, shown
                 if root.widgets-view == "widgets": Text { text: "Fun"; color: Theme.muted; font-size: 12px; font-weight: 700; }
-                if root.widgets-view == "widgets": HorizontalLayout {
-                    spacing: 8px;
-                    for w[wi] in [
-                        { n: "Hype Meter", p: "/hype", s: "hype", i: Icons.broadcast },
+                // (two rows of three: six in one cut their names short)
+                if root.widgets-view == "widgets": VerticalLayout {
+                  spacing: 8px;
+                  for row[ri] in [
+                    [{ n: "Hype Meter", p: "/hype", s: "hype", i: Icons.broadcast },
                         { n: "Vote Skip", p: "/voteskip", s: "voteskip", i: Icons.next },
-                        { n: "Spin the Wheel", p: "/wheel", s: "wheel", i: Icons.dice },
-                        { n: "Leaderboard", p: "/leaderboard", s: "leaderboard", i: Icons.coins },
+                        { n: "Spin the Wheel", p: "/wheel", s: "wheel", i: Icons.dice }],
+                    [{ n: "Leaderboard", p: "/leaderboard", s: "leaderboard", i: Icons.coins },
                         { n: "Emote Rain", p: "/emotes", s: "emoterain", i: Icons.chat },
-                    ]: Rectangle {
+                        { n: "Name That Tune", p: "/tune", s: "tune", i: Icons.lyrics }],
+                  ]: HorizontalLayout {
+                    spacing: 8px;
+                    for w[wi] in row: Rectangle {
                         horizontal-stretch: 1;
                         preferred-width: 0px;
                         min-width: 0px;
                         height: 74px;
                         border-radius: 14px;
-                        background: Theme.panel.mix(BotLook.tile(wi + 3), 0.9);
+                        background: Theme.panel.mix(BotLook.tile(wi + ri * 3 + 3), 0.9);
                         border-width: 1px;
-                        border-color: BotLook.tile(wi + 3).with-alpha(0.3);
+                        border-color: BotLook.tile(wi + ri * 3 + 3).with-alpha(0.3);
                         VerticalLayout {
                             padding: 10px;
                             spacing: 4px;
@@ -3795,6 +3818,7 @@ component BotPage inherits Rectangle {
                             Text { text: "http://127.0.0.1:" + root.port + w.p; color: Theme.accent.mix(Theme.text, 0.55); font-size: 10px; font-family: "Consolas"; overflow: elide; }
                         }
                     }
+                  }
                 }
                 // what it does
             }

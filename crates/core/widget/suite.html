@@ -26,6 +26,14 @@
   #skip .song { font-size: 0.85rem; opacity: 0.8; margin-bottom: 0.35rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   #hype .tr, #skip .tr { height: 0.9rem; border-radius: 0.5rem; background: rgba(255, 255, 255, 0.16); overflow: hidden; }
   #hype .fl, #skip .fl { height: 100%; width: 0; border-radius: inherit; background: linear-gradient(90deg, var(--c1), var(--c2)); transition: width 0.8s cubic-bezier(0.2, 0.8, 0.2, 1); }
+  /* Name That Tune: the hint, a countdown, and who got it */
+  #tune { width: 94%; text-align: center; }
+  #tune .lbl { font-size: 0.85rem; letter-spacing: 0.12em; text-transform: uppercase; opacity: 0.75; }
+  #tune .hint { font-size: 1.9rem; font-weight: 800; letter-spacing: 0.18em; margin: 0.3rem 0 0.5rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-variant-numeric: tabular-nums; }
+  #tune .tr { height: 0.6rem; border-radius: 0.5rem; background: rgba(255, 255, 255, 0.16); overflow: hidden; }
+  #tune .fl { height: 100%; border-radius: inherit; background: linear-gradient(90deg, var(--c1), var(--c2)); transition: width 1s linear; }
+  #tune.done .hint { letter-spacing: 0.02em; font-size: 1.5rem; }
+  #tune.done .tr { display: none; }
   #hype.up { animation: flare 1.2s ease-out; }
   @keyframes flare { 0% { box-shadow: 0 0 0 0 var(--c1); transform: scale(1); } 30% { box-shadow: 0 0 2.4rem 0.6rem var(--c1); transform: scale(1.04); } 100% { box-shadow: 0 0.3rem 1rem rgba(0, 0, 0, 0.35); transform: scale(1); } }
   #wheel { position: relative; width: 30rem; height: 30rem; }
@@ -262,6 +270,29 @@
     if (hypeLevel >= 0 && (h.level || 0) > hypeLevel) { box.classList.remove("up"); void box.offsetWidth; box.classList.add("up"); }
     hypeLevel = h.level || 0;
   }
+  let tuneTick = null;
+  function tune() {
+    const n = suite.tune || {};
+    let box = $("tune");
+    // (on stream while a round's on, and for a few seconds after with the answer)
+    const recent = !n.on && n.at && Date.now() - n.at < 10000;
+    if (!n.on && !recent) { if (box) { moving(box); box.classList.add("out"); setTimeout(() => box.remove(), 500); } return; }
+    if (!box) { box = document.createElement("div"); box.id = "tune"; box.className = "panel"; box.innerHTML = '<div class="lbl"></div><div class="hint"></div><div class="tr"><div class="fl"></div></div>'; swap(box); }
+    box.classList.toggle("done", !n.on);
+    if (n.on) {
+      box.querySelector(".lbl").textContent = "Name That Tune: type the song or the artist";
+      box.querySelector(".hint").textContent = n.hint || "";
+      const left = () => Math.max(0, (n.endsAt - Date.now()) / (n.secs * 1000));
+      box.querySelector(".fl").style.width = left() * 100 + "%";
+      clearInterval(tuneTick);
+      tuneTick = setInterval(() => { const f = box.querySelector(".fl"); if (f) f.style.width = left() * 100 + "%"; }, 1000);
+    } else {
+      clearInterval(tuneTick);
+      box.querySelector(".lbl").textContent = n.winner ? n.winner + " got it!" : "Nobody got it";
+      box.querySelector(".hint").textContent = n.title + (n.artist ? " — " + n.artist : "");
+      setTimeout(draw, 10500);
+    }
+  }
   function voteskip() {
     const v = suite.voteskip || {};
     let box = $("skip");
@@ -370,6 +401,7 @@
     else if (PATH === "/voteskip") { fit(520, 130); voteskip(); }
     else if (PATH === "/wheel") { fit(520, 560); wheel(); }
     else if (PATH === "/leaderboard") { fit(420, 380); leaderboard(); }
+    else if (PATH === "/tune") { fit(520, 180); tune(); }
     else if (PATH === "/emotes") emoterain();
   }
   addEventListener("resize", draw);

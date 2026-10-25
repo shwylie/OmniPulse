@@ -11449,6 +11449,12 @@ fn plugin_app(shared: &Shared, plugin: &str, ask: serde_json::Value, answer: Box
             let path = arg(1);
             std::thread::spawn(move || send(match await_redirect(port, &path) { Ok(q) => serde_json::json!({ "ok": true, "query": q }), Err(e) => serde_json::json!({ "error": e }) }));
         }
+        // (the Suite's Name That Tune: what's playing hidden from the Stream Widget while chat guesses it)
+        "tuneMask" => {
+            if plugin != botpage::BOT { return send(serde_json::json!({ "error": "only the Stream Suite can" })); }
+            omnipulse_core::widget::tune_mask(args.first().and_then(|v| v.as_bool()).unwrap_or(false));
+            send(serde_json::json!({ "ok": true }));
+        }
         // (the Suite's Press Keys: as if typed, into whatever's in front)
         "pressKeys" => {
             if plugin != botpage::BOT { return send(serde_json::json!({ "error": "only the Stream Suite can" })); }
