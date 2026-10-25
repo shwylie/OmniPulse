@@ -129,6 +129,8 @@ struct App {
     ap_failed: Option<String>,
     /// a restored session: where to start its track when it's played
     resume_ms: Option<u64>,
+    /// the track that place is in: another track started (you picked something else) starts from its beginning
+    resume_key: String,
     /// something has been loaded into the engine (not just restored)
     loaded: bool,
     /// the cover's colours, for the widget
@@ -3232,7 +3234,9 @@ fn start(shared: &Shared) {
         a.last_pos = 0;
         a.lyrics.clear();
         a.loaded = true;
-        let resume = a.resume_ms.take().filter(|&ms| ms > 3000 && (t.ms == 0 || ms + 3000 < t.ms)).unwrap_or(0);
+        // (the place kept for the restored track: only if it's that track starting, not another you picked)
+        let for_this = std::mem::take(&mut a.resume_key) == t.key;
+        let resume = a.resume_ms.take().filter(|&ms| for_this && ms > 3000 && (t.ms == 0 || ms + 3000 < t.ms)).unwrap_or(0);
         paint_queue(&mut a);
         save_session(&a);
         (t, a.token, a.engine.clone(), a.rt.clone(), a.ui.clone(), resume)
@@ -6258,6 +6262,7 @@ fn restore_session(shared: &Shared) {
     let safe = streamsafe::on(&a.web.prefs);
     autoplay_for_safe(&mut a, safe);
     a.resume_ms = Some(pos);
+    a.resume_key = a.queue.current().map(|c| c.key.clone()).unwrap_or_default();
     paint_queue(&mut a);
     let Some(t) = a.queue.current().cloned() else { return };
     let Some(ui) = a.ui.upgrade() else { return };
@@ -6912,8 +6917,18 @@ fn bot_paint(shared: &Shared) {
     // (the webcam overlay's preview: its layout, as the page lays it out)
     if sheet == "cam" {
         let g = ui.global::<CamLook>();
-        let rects: Vec<CamRect> = botpage::cam_layout(&cur).into_iter().map(|(id, label, x, y, w, h)| CamRect { id: id.into(), label: label.into(), x, y, w, h }).collect();
+        // (only the webcam's area: round the camera and its parts, with a little room, not the whole canvas;
+        // each piece as a fraction of that, and its shape as tall as it is wide)
+        let all = botpage::cam_layout(&cur);
+        let (mut x0, mut y0, mut x1, mut y1) = (1f32, 1f32, 0f32, 0f32);
+        for (_, _, x, y, w, h) in &all { x0 = x0.min(*x); y0 = y0.min(*y); x1 = x1.max(x + w); y1 = y1.max(y + h); }
+        let pad = 0.02;
+        let (x0, y0, x1, y1) = ((x0 - pad).max(0.0), (y0 - pad * 1.78).max(0.0), (x1 + pad).min(1.0), (y1 + pad * 1.78).min(1.0));
+        let (bw, bh) = ((x1 - x0).max(0.05), (y1 - y0).max(0.05));
+        let rects: Vec<CamRect> = all.into_iter().map(|(id, label, x, y, w, h)| CamRect { id: id.into(), label: label.into(), x: (x - x0) / bw, y: (y - y0) / bh, w: w / bw, h: h / bh }).collect();
         g.set_rects(ModelRc::from(Rc::new(VecModel::from(rects))));
+        // (its height for its width, as the canvas is 16:9)
+        g.set_ratio((bh * 9.0) / (bw * 16.0));
         let or = |k: &str, d: &str| cur.get(k).and_then(|v| v.as_str()).filter(|v| !v.is_empty()).unwrap_or(d).to_string();
         g.set_shape(or("camShape", "rounded").into());
         g.set_border(or("camBorder", "glow").into());
@@ -7008,6 +7023,8 @@ fn bot_set(shared: &Shared, key: &str, v: &str) {
         if key == "fontPick" { bot_paint(shared); }
         return;
     }
+    // (a HUD frame picked from its list, as a click on it is)
+    if key == "hudPick" { bot_set(shared, "hudSel", v); bot_paint(shared); return; }
     // (a HUD frame's own (the picked one's), or a nudge: in hudFrames, not settings of their own)
     if key.starts_with("hudF_") || key == "hudNudge" {
         let cur = bot_current(shared);
@@ -7120,8 +7137,19 @@ fn bot_act(shared: &Shared, act: &str) {
         let gray = || image::open(&path).ok().map(|i| i.to_luma8());
         let sel = cur.get("hudSel").and_then(|v| v.as_f64()).unwrap_or(-1.0);
         let nums = |s: &str| s.split(',').filter_map(|x| x.parse::<f32>().ok()).collect::<Vec<_>>();
-        if rest == "shot" {
-            let Some(p) = rfd::FileDialog::new().set_title("A screenshot of your game").add_filter("Pictures", &["png", "jpg", "jpeg", "webp"]).pick_file() else { return };
+        // (a screenshot pasted: the clipboard's picture, kept as a PNG in OmniPulse's folder, then as a chosen one)
+        let pasted = if rest == "paste" {
+            let img = arboard::Clipboard::new().and_then(|mut c| c.get_image());
+            let Ok(img) = img else { say("There's no picture on the clipboard. Take one with Win+Shift+S over your game, then paste."); return };
+            let Some(buf) = image::RgbaImage::from_raw(img.width as u32, img.height as u32, img.bytes.into_owned()) else { say("That picture couldn't be read."); return };
+            let Some(dir) = omnipulse_core::data_dir().ok().map(|d| d.join("hud")) else { return };
+            let _ = std::fs::create_dir_all(&dir);
+            let file = dir.join(format!("screenshot-{}.png", omnipulse_core::now_secs()));
+            if let Err(e) = buf.save(&file) { say(&format!("Couldn't keep the screenshot: {e}")); return; }
+            Some(file)
+        } else { None };
+        if rest == "shot" || pasted.is_some() {
+            let p = match pasted { Some(p) => p, None => { let Some(p) = rfd::FileDialog::new().set_title("A screenshot of your game").add_filter("Pictures", &["png", "jpg", "jpeg", "webp"]).pick_file() else { return }; p } };
             let file = p.to_string_lossy().to_string();
             let Ok((w, h)) = image::image_dimensions(&p) else { say("That picture couldn't be read."); return };
             match omnipulse_core::widget::overlay_media(&file, false) {
@@ -11032,6 +11060,7 @@ fn listen_follow(shared: &Shared, st: serde_json::Value) {
             a.queue.items = std::iter::once(target).chain(next).map(queue::QItem::mine).collect();
             a.queue.qi = Some(0);
             a.resume_ms = Some(listen_host_pos());
+            a.resume_key = a.queue.current().map(|c| c.key.clone()).unwrap_or_default();
         }
         LISTEN.with(|l| { if let Some(l) = l.borrow_mut().as_mut() { l.synced = None; } });
         start(shared);
@@ -12640,7 +12669,7 @@ fn main() -> Result<(), slint::PlatformError> {
         library: Vec::new(), playlists: Vec::new(), web: webstate::load(), page: "library".into(),
         page_all: Vec::new(), page_tracks: Vec::new(), chip: 0, shelves: Vec::new(), queue: queue::Queue::default(), panel_map: Vec::new(), side_map: Vec::new(),
         here: None, history: Vec::new(), artists: None, fav_only: false, page_query: String::new(), picked: Default::default(), pick_anchor: None, shuffle_on: false, shuffle_backup: None, repeat: "off".into(), closest: None,
-        autoplay: true, ap_busy: false, ap_then_play: false, ap_failed: None, resume_ms: None, loaded: false, accent: ("#8e9bff".into(), "#8e9bff".into()), started_secs: 0, token: 0,
+        autoplay: true, ap_busy: false, ap_then_play: false, ap_failed: None, resume_ms: None, resume_key: String::new(), loaded: false, accent: ("#8e9bff".into(), "#8e9bff".into()), started_secs: 0, token: 0,
         lyrics: Vec::new(), heard: (String::new(), 0.0, false), last_pos: 0, xpl: xpl::load(), naming: None,
         loud: HashMap::new(), eq_model: Rc::new(VecModel::from(vec![0.0f32; 10])), add_map: Vec::new(), queue_spaced: false, analysis: HashMap::new(), cur_loud: None,
     }));

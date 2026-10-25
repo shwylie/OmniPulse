@@ -292,26 +292,41 @@ fn sheet_of(id: &str, cur: &Map<String, Value>) -> (String, Vec<Field>) {
             let frames = crate::hud::frames(s(cur, "hudFrames"));
             let sel = n(cur, "hudSel").parse::<f64>().unwrap_or(-1.0) as i64;
             let shot = !s(cur, "hudShotPath").is_empty();
-            let mut v = vec![
-                f("note", "", "Take a screenshot of your game (at the resolution you stream it), choose it here, then drag a box round a part of its HUD: the minimap, health, ammo. The box snaps to its edges, and a frame goes round it, in your colours.", "", "", ""),
-                f("link", "", if shot { "Choose another screenshot" } else { "Choose a screenshot" }, "A PNG or JPG of your game. Its frames stay; move them if its HUD's moved.", "", "hud:shot"),
-            ];
-            if shot { v.push(f("hudedit", "", "", "", "", "")); }
+            let mut v = Vec::new();
+            if !shot {
+                // (nothing yet: how it's done, and the two ways to start)
+                v.push(f("note", "", "Frames round parts of your game's HUD (the minimap, health, ammo), on stream, in your colours. Here's how:", "", "", ""));
+                v.push(step(1, "Take a screenshot of your game, at the resolution you stream it. Win+Shift+S (or the Print Screen key) works.", "", "", ""));
+                v.push(step(2, "Paste it here, or choose the file if you saved one.", "", "", ""));
+                v.push(step(3, "Drag a box round each part of the HUD you'd like framed. It snaps to the part's edges.", "", "", ""));
+                v.push(f("link", "", "Paste a Screenshot", "From the clipboard: what you just took with Win+Shift+S or Print Screen.", "", "hud:paste"));
+                v.push(f("link", "", "Choose a Screenshot", "A PNG or JPG of your game, from your PC.", "", "hud:shot"));
+                return ("Game HUD Frames".into(), v);
+            }
+            v.push(f("note", "", if frames.is_empty() { "Drag a box on your screenshot round a part of the HUD. It snaps to its edges, and a frame goes round it." } else { "Drag a box for another frame, or click one to change it." }, "", "", ""));
+            v.push(f("hudedit", "", "", "", "", ""));
+            // (each frame, to pick it here as well as on the picture)
+            if !frames.is_empty() {
+                let opts = frames.iter().enumerate().map(|(i, fr)| { let l = fr["label"].as_str().filter(|l| !l.is_empty()).map(|l| format!(": {l}")).unwrap_or_default(); format!("{i}=Frame {}{}", i + 1, l.replace(['|', '='], " ")) }).collect::<Vec<_>>().join("|");
+                v.push(f("chips", "hudPick", "Your frames", "", &sel.to_string(), &opts));
+            }
             if let Some(fr) = usize::try_from(sel).ok().and_then(|i| frames.get(i)) {
                 let g = |k: &str, d: &str| fr[k].as_str().map(String::from).unwrap_or_else(|| d.to_string());
                 v.push(f("head", "", &format!("Frame {}", sel + 1), "", "", ""));
                 v.push(f("chips", "hudF_style", "Style", "", &g("style", "brackets"), "brackets=Corner Brackets|glow=Glow|neon=Neon|tech=Tech|soft=Soft"));
-                v.push(f("text", "hudF_label", "Its label", "Words above it, like MAP. Leave it empty for none.", &g("label", ""), "MAP"));
+                v.push(f("text", "hudF_label", "Label", "Words above it, like MAP. Leave it empty for none.", &g("label", ""), "MAP"));
                 v.push(f("chips", "hudF_pad", "Room round it", "", &fr["pad"].as_f64().unwrap_or(6.0).to_string(), "0=None|6=A Little|14=More|24=Lots"));
                 v.push(f("toggle", "hudF_pulse", "A slow pulse", "", if fr["pulse"].as_bool() == Some(true) { "true" } else { "false" }, ""));
-                v.push(f("chips", "hudNudge", "Move it", "A pixel of the screenshot at a time (10 with Bigger Steps).", "", "left=Left|right=Right|up=Up|down=Down|wider=Wider|narrower=Narrower|taller=Taller|shorter=Shorter|big=Bigger Steps"));
-                v.push(f("link", "", "Snap it again", "To the edges inside it, if you've moved it.", "", "hud:snap"));
-                v.push(f("link", "", "Take it away", "", "", "hud:del"));
-            } else if shot {
-                v.push(f("note", "", if frames.is_empty() { "Drag a box on the screenshot round a part of the HUD." } else { "Click a frame to change it, or drag a box for another." }, "", "", ""));
+                v.push(f("chips", "hudNudge", "Move it", "A pixel at a time (10 with Bigger Steps), if the snap's a little off.", "", "left=Left|right=Right|up=Up|down=Down|wider=Wider|narrower=Narrower|taller=Taller|shorter=Shorter|big=Bigger Steps"));
+                v.push(f("link", "", "Snap it again", "To the edges inside it, after moving it.", "", "hud:snap"));
+                v.push(f("link", "", "Take this frame away", "", "", "hud:del"));
             }
+            v.push(f("head", "", "Look", "", "", ""));
             v.push(f("chips", "suiteColors", "Colours", "Shared with the Suite's widgets.", if s(cur, "suiteColors").is_empty() { "accent" } else { s(cur, "suiteColors") }, "accent=Yours|sunset=Sunset|ocean=Ocean|candy=Candy|mint=Mint|fire=Fire|gold=Gold|mono=Mono|custom=Your Own"));
-            v.push(addr("/hud", "Add it as a Browser source the size of your canvas, above the game. It only lines up while the game runs at the screenshot's resolution and HUD scale."));
+            v.push(f("head", "", "In OBS", "", "", ""));
+            v.push(addr("/hud", "Add it as a Browser source the size of your canvas, above your game. It lines up while the game runs at the screenshot's resolution and HUD scale; if you change either, take a new screenshot."));
+            v.push(f("link", "", "Paste a new screenshot", "Your frames stay; move them if the HUD's moved.", "", "hud:paste"));
+            v.push(f("link", "", "Choose a new screenshot", "", "", "hud:shot"));
             v
         }),
         "sponsors" => ("Sponsor Plug".into(), {
@@ -374,7 +389,6 @@ fn sheet_of(id: &str, cur: &Map<String, Value>) -> (String, Vec<Field>) {
             let or = |k: &str, d: &'static str| if s(cur, k).is_empty() { d.to_string() } else { s(cur, k).to_string() };
             let spot = or("camSpot", "br");
             let mut v = vec![
-                f("campreview", "", "", "", "", ""),
                 addr("/cam/main", "Add it as a Browser source the size of your canvas (1920 × 1080), above your camera. It's see-through: the frame goes round your camera, and the parts you switch on below come with it, live ones included, so it's all one source."),
                 f("head", "", "Your camera", "", "", ""),
                 f("chips", "camSpot", "Where it is", "Put your camera there in OBS, or choose Your Own Spot and match it.", &spot, "br=Bottom Right|bl=Bottom Left|tr=Top Right|tl=Top Left|custom=Your Own Spot"),

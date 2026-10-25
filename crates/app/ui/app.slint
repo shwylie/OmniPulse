@@ -128,6 +128,8 @@ export struct CamRect { id: string, label: string, x: float, y: float, w: float,
 /// The webcam overlay being set up: its layout and look (the app sets it as its page opens and changes)
 export global CamLook {
     in-out property <[CamRect]> rects;
+    // (the area shown's height for its width: the camera's and its parts', not the canvas's)
+    in-out property <float> ratio: 0.5625;
     in-out property <string> shape;
     in-out property <string> border;
     in-out property <string> theme;
@@ -2901,7 +2903,7 @@ component PanelPreview inherits Rectangle {
 
 /// The webcam overlay on a 16:9 canvas: a made-up camera in its frame, each part a stand-in where it'll go
 component CamPreview inherits Rectangle {
-    height: self.width * 9 / 16;
+    height: self.width * CamLook.ratio;
     border-radius: 14px;
     border-width: 1px;
     border-color: Theme.line;
@@ -4473,12 +4475,13 @@ component BotPage inherits Rectangle {
 
     // ----- a service's (or a feature's, or a widget's) settings: a page of their own, as every page in Settings
     // is, its name in the page's title and crumbs (Back goes to where it was opened from) -----
-    // (Panels: split down the middle, its settings on the left, the preview and Save on the right, staying put)
-    if root.sheet == "panels": Rectangle {
-        background: root.page-bg;
+    // (Panels and the Webcam Overlay: split down the middle, the settings on the left, the preview (and
+    // Panels' Save) on the right, staying put)
+    if root.sheet == "panels" || root.sheet == "cam": Rectangle {
+        // (see-through: the page's own gradient behind the settings, as on every page; the preview has its own)
+        // (to the page's foot, as the other pages are: the player's room is at the end of what scrolls)
         HorizontalLayout {
             spacing: 18px;
-            padding-bottom: root.foot;
             // (the settings: the width that's left, whatever their words' length)
             ScrollView {
                 horizontal-stretch: 1;
@@ -4490,7 +4493,7 @@ component BotPage inherits Rectangle {
                 VerticalLayout {
                     width: parent.width;
                     padding-right: 12px;
-                    padding-bottom: 12px;
+                    padding-bottom: root.foot;
                     spacing: 12px;
                     alignment: start;
                     for f in root.sheet-fields: VerticalLayout {
@@ -4511,23 +4514,30 @@ component BotPage inherits Rectangle {
             VerticalLayout {
                 width: 372px;
                 spacing: 10px;
-                HorizontalLayout {
+                if root.sheet == "cam": VerticalLayout {
+                    spacing: 6px;
+                    Text { text: "Your webcam's area, with a made-up camera"; color: Theme.muted; font-size: 11px; }
+                    CamPreview { }
+                    Text { text: "It's where your camera is on your stream, with the parts round it. The frame and the parts change here as you change them."; color: Theme.muted; font-size: 11px; wrap: word-wrap; }
+                }
+                if root.sheet == "panels": HorizontalLayout {
                     spacing: 10px;
                     alignment: start;
                     Pill { label: "Save Them as Pictures"; on: true; clicked => { root.act("url:http://127.0.0.1:" + root.port + "/panels"); } }
                     VerticalLayout { alignment: center; Text { text: "Opens in your browser, each with Save as PNG."; color: Theme.muted; font-size: 11px; wrap: word-wrap; } }
                 }
-                ScrollView {
+                if root.sheet == "panels": ScrollView {
                     vertical-stretch: 1;
                     horizontal-scrollbar-policy: always-off;
                     viewport-width: self.visible-width;
-                    PanelPreview { width: 360px; }
+                    VerticalLayout { padding-bottom: root.foot; PanelPreview { width: 360px; } }
                 }
             }
         }
     }
-    if root.sheet != "" && root.sheet != "panels": Rectangle {
-        background: root.page-bg;
+    if root.sheet != "" && root.sheet != "panels" && root.sheet != "cam": Rectangle {
+        // (see-through, as the split pages: the page's gradient behind its cards; the page under it is hidden
+        // while a sheet's open)
         ScrollView {
             horizontal-scrollbar-policy: always-off;
             VerticalLayout {
