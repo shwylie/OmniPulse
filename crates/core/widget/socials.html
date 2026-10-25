@@ -6,6 +6,10 @@
   OmniPulse's Social Plug, for OBS (a Browser source at /socials): your handles on other platforms, one at a time
   in turn (or all together in a row), each with its platform's icon and colours, or your own. Set in the app:
   Settings > Streaming > Social Plug (or the chatbot's page, while it's on). It reads /now.json's "socials".
+  At /sponsors it's the Sponsor Plug: your sponsors in turn, each with its logo, name and line (a code, say), set
+  in the Stream Suite (Widgets > Sponsor Plug); it reads /now.json's suite.sponsors.
+  At /sponsors it's the Sponsor Plug: your sponsors in turn, each with its logo, name and line (a code, say), set
+  in the Stream Suite (Widgets > Sponsor Plug); it reads /now.json's suite.sponsors.
 -->
 <title>OmniPulse Social Plug</title>
 <style>
@@ -30,6 +34,16 @@
   .plug .tx { display: flex; flex-direction: column; min-width: 0; }
   .plug .h { font-weight: 700; font-size: 1.15rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .plug .p { font-size: 0.8rem; opacity: 0.75; letter-spacing: 0.04em; text-transform: uppercase; }
+  /* the Sponsor Plug's: a bigger logo, its line as written (a code reads better that way) */
+  body.sponsors .plug .ic { width: 3.1rem; height: 3.1rem; background: #fff; }
+  body.sponsors .plug .ic img { object-fit: contain; padding: 0.25rem; box-sizing: border-box; }
+  body.sponsors .plug .p { text-transform: none; letter-spacing: 0; font-size: 0.9rem; opacity: 0.9; }
+  body.sponsors .plug .tag { font-size: 0.62rem; font-weight: 800; letter-spacing: 0.14em; text-transform: uppercase; opacity: 0.6; }
+  /* the Sponsor Plug's: a bigger logo, its line as written (a code reads better that way) */
+  body.sponsors .plug .ic { width: 3.1rem; height: 3.1rem; background: #fff; }
+  body.sponsors .plug .ic img { object-fit: contain; padding: 0.25rem; box-sizing: border-box; }
+  body.sponsors .plug .p { text-transform: none; letter-spacing: 0; font-size: 0.9rem; opacity: 0.9; }
+  body.sponsors .plug .tag { font-size: 0.62rem; font-weight: 800; letter-spacing: 0.14em; text-transform: uppercase; opacity: 0.6; }
   /* Pill: round ends; Minimal: no panel, just the icon and words over the stream */
   body.pill .plug { border-radius: 999px; padding-right: 1.4rem; }
   body.pill .plug .ic { border-radius: 50%; }
@@ -95,6 +109,7 @@
   };
   const $ = (id) => document.getElementById(id);
   const PREVIEW = /[?&]preview=1/.test(location.search);
+  const SPONSORS = location.pathname.startsWith("/sponsors");
   if (PREVIEW) document.body.classList.add("preview");
   let cfg = null, list = [], at = 0, sig = "", turnT = null;
 
@@ -112,6 +127,8 @@
     } else { const b = document.createElement("b"); b.textContent = (p.name || "?").trim().charAt(0).toUpperCase(); ic.appendChild(b); }
     const tx = document.createElement("div");
     tx.className = "tx";
+    if (SPONSORS && cfg && cfg.tag) { const t = document.createElement("span"); t.className = "tag"; t.textContent = cfg.tag; tx.append(t); }
+    if (SPONSORS && cfg && cfg.tag) { const t = document.createElement("span"); t.className = "tag"; t.textContent = cfg.tag; tx.append(t); }
     const h = document.createElement("span"); h.className = "h"; h.textContent = p.handle || "";
     const n = document.createElement("span"); n.className = "p"; n.textContent = p.name || "";
     tx.append(h, n);
@@ -166,13 +183,13 @@
   async function poll() {
     try {
       const s = await (await fetch("/now.json" + (PREVIEW ? "?preview=1" : ""), { cache: "no-store" })).json();
-      cfg = s.socials || null;
+      cfg = SPONSORS ? (s.suite && s.suite.sponsors) || null : s.socials || null;
       const next = (cfg && cfg.list) || [];
       const now = JSON.stringify([next, cfg && cfg.style, cfg && cfg.align, cfg && cfg.all, cfg && cfg.rounded, cfg && cfg.coloured, cfg && cfg.secs, cfg && cfg.motion]);
       if (now !== sig) {
         sig = now;
         list = next;
-        document.body.className = (PREVIEW ? "preview " : "") + ((cfg && cfg.style) || "card") + (cfg && cfg.align === "right" ? " right" : cfg && cfg.align === "centre" ? " centre" : "") + (cfg && cfg.rounded === false ? " sharp" : "") + (cfg && cfg.coloured ? " coloured" : "") + (cfg && cfg.motion === "none" ? " still" : "");
+        document.body.className = (PREVIEW ? "preview " : "") + (SPONSORS ? "sponsors " : "") + (SPONSORS ? "sponsors " : "") + ((cfg && cfg.style) || "card") + (cfg && cfg.align === "right" ? " right" : cfg && cfg.align === "centre" ? " centre" : "") + (cfg && cfg.rounded === false ? " sharp" : "") + (cfg && cfg.coloured ? " coloured" : "") + (cfg && cfg.motion === "none" ? " still" : "");
         const stage = $("stage");
         stage.className = cfg && cfg.all ? "all" : "one";
         stage.innerHTML = "";

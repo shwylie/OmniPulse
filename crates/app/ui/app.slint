@@ -102,6 +102,36 @@ export struct KeyField { label: string, value: string, ok: bool }
 export struct WidgetLook { design: string, right: bool, rounded: bool, text: float, c1: color, c2: color, spin: bool, requester: bool }
 
 /// The alerts' preview: their theme and colours as they're set
+/// A HUD frame, for its editor: where it is on the screenshot (fractions), and whether it's the one picked
+export struct HudRect { x: float, y: float, w: float, h: float, label: string, picked: bool }
+export global HudLook {
+    in-out property <image> shot;
+    in-out property <float> ratio: 0.5625;
+    in-out property <[HudRect]> frames;
+    in-out property <color> c1;
+}
+/// A channel panel, for the Panels' preview
+export struct PanelItem { title: string, line: string, body: bool, lines: int, icon: string }
+export global PanelLook {
+    in-out property <[PanelItem]> items;
+    in-out property <string> theme;
+    in-out property <string> shape;
+    in-out property <string> height;
+    in-out property <bool> icons;
+    in-out property <color> c1;
+    in-out property <color> c2;
+}
+/// A webcam overlay's piece, for its preview: the camera, or a part (fractions of the canvas)
+export struct CamRect { id: string, label: string, x: float, y: float, w: float, h: float }
+/// The webcam overlay being set up: its layout and look (the app sets it as its page opens and changes)
+export global CamLook {
+    in-out property <[CamRect]> rects;
+    in-out property <string> shape;
+    in-out property <string> border;
+    in-out property <string> theme;
+    in-out property <color> c1;
+    in-out property <color> c2;
+}
 export struct AlertLook { theme: string, c1: color, c2: color, glow: bool, icon: float, transition: string, anim: string, in-widget: bool }
 
 /// The Multichat Overlay's preview: its look as it's set
@@ -2059,7 +2089,8 @@ component SuiteHero inherits Rectangle {
     Rectangle { x: root.width * (0.1 + 0.7 * root.ph) - 160px; y: -120px; width: 380px; height: 380px; background: @radial-gradient(circle, #ffffff30 0%, transparent 65%); }
     Rectangle { x: root.width - 230px; y: 40px; width: 300px; height: 300px; background: @radial-gradient(circle, Theme.accent-2.with-alpha(0.45) 0%, transparent 70%); }
     // (rings behind its icon)
-    for k in 3: Rectangle { x: 54px - (k + 1) * 22px; y: (root.height - self.height) / 2; width: 64px + (k + 1) * 44px; height: self.width; border-radius: self.width / 2; border-width: 1px; border-color: #ffffff18; }
+    // (centred on the icon: its middle is the padding (26) and half its width (38) in)
+    for k in 3: Rectangle { x: 64px - self.width / 2; y: (root.height - self.height) / 2; width: 76px + (k + 1) * 44px; height: self.width; border-radius: self.width / 2; border-width: 1px; border-color: #ffffff18; }
     HorizontalLayout {
         padding: 26px;
         spacing: 22px;
@@ -2691,6 +2722,196 @@ component AlertPreview inherits Rectangle {
                     stroke: root.th == "meme" ? #000000 : transparent; stroke-width: root.th == "meme" ? 2px : 0px; }
                 if root.it.msg != "": Text { text: root.it.msg; color: root.th == "comic" ? #111111c8 : #ffffffd0; font-size: 13px; overflow: elide; horizontal-alignment: root.th == "meme" ? center : left; }
             }
+        }
+    }
+}
+
+/// Game HUD Frames' editor: your screenshot, its frames on it; drag a box for a new one, click one to pick it
+component HudEditor inherits Rectangle {
+    callback act(string);
+    height: self.width * HudLook.ratio;
+    border-radius: 10px;
+    clip: true;
+    background: #000000;
+    Image { width: parent.width; height: parent.height; source: HudLook.shot; image-fit: fill; }
+    for f in HudLook.frames: Rectangle {
+        x: parent.width * f.x;
+        y: parent.height * f.y;
+        width: parent.width * f.w;
+        height: parent.height * f.h;
+        border-width: f.picked ? 3px : 2px;
+        border-color: f.picked ? #ffffff : HudLook.c1;
+        background: f.picked ? HudLook.c1.with-alpha(0.18) : transparent;
+        if f.label != "": Text { x: 0; y: -16px; text: f.label; color: HudLook.c1; font-size: 11px; font-weight: 800; }
+    }
+    // (the box being drawn)
+    property <length> sx;
+    property <length> sy;
+    property <bool> dragging;
+    if root.dragging: Rectangle {
+        x: min(root.sx, ta.mouse-x);
+        y: min(root.sy, ta.mouse-y);
+        width: abs(ta.mouse-x - root.sx);
+        height: abs(ta.mouse-y - root.sy);
+        border-width: 2px;
+        border-color: #ffffff;
+        background: #ffffff22;
+    }
+    ta := TouchArea {
+        mouse-cursor: MouseCursor.crosshair;
+        pointer-event(e) => {
+            if e.kind == PointerEventKind.down && e.button == PointerEventButton.left { root.sx = self.mouse-x; root.sy = self.mouse-y; root.dragging = true; }
+            if e.kind == PointerEventKind.up && root.dragging {
+                root.dragging = false;
+                // (a click, not a drag: the frame under it picked)
+                if abs(self.mouse-x - root.sx) < 6px && abs(self.mouse-y - root.sy) < 6px {
+                    root.act("hud:pick:" + (self.mouse-x / root.width) + "," + (self.mouse-y / root.height));
+                } else {
+                    root.act("hud:add:" + (root.sx / root.width) + "," + (root.sy / root.height) + "," + (clamp(self.mouse-x, 0px, root.width) / root.width) + "," + (clamp(self.mouse-y, 0px, root.height) / root.height));
+                }
+            }
+        }
+    }
+}
+
+/// The panels as they'll look, at Twitch's width (320), two to a row
+component PanelPreview inherits Rectangle {
+    property <length> ph: PanelLook.height == "short" ? 80px : PanelLook.height == "tall" ? 160px : PanelLook.height == "square" ? 320px : 100px;
+    height: pl.preferred-height;
+    border-radius: 14px;
+    border-width: 1px;
+    border-color: Theme.line;
+    background: #16141f;
+    pl := VerticalLayout {
+        padding: 14px;
+        padding-top: 28px;
+        spacing: 10px;
+        alignment: start;
+        Text { text: "A preview: your panels at Twitch's size (a long one grows to fit its words)"; color: #ffffffa0; font-size: 11px; }
+        for p[i] in PanelLook.items: HorizontalLayout {
+            alignment: start;
+            pi := Rectangle {
+                property <string> th: PanelLook.theme;
+                property <bool> light: self.th == "comic" || self.th == "pastel" || self.th == "y2k";
+                property <color> ink: self.light ? (self.th == "pastel" ? #3a2a4a : #2b1b40) : #ffffff;
+                width: 320px;
+                // (as tall as its words, up to Twitch's 600)
+                height: p.body ? min(600px, 74px + p.lines * 17px + 18px + (self.th == "y2k" ? 22px : 0px)) : root.ph;
+                clip: true;
+                border-radius: PanelLook.shape == "square" || self.th == "pixel" ? 0px : PanelLook.shape == "pill" && !p.body ? self.height / 2 : 14px;
+                background: self.th == "comic" || self.th == "y2k" ? (self.th == "y2k" ? #fdf6ff : #ffffff) : self.th == "pastel" ? #fff6fb : self.th == "glass" ? #ffffff29 : self.th == "neon" ? #080614f0
+                    : self.th == "pixel" ? #1b1030 : self.th == "gradient" ? PanelLook.c1.mix(PanelLook.c2, 0.5) : self.th == "minimal" ? transparent : #14111f;
+                border-width: self.th == "comic" ? 3px : self.th == "y2k" || self.th == "neon" ? 2px : self.th == "pastel" || self.th == "pixel" ? 3px : self.th == "glass" ? 1px : 0px;
+                border-color: self.th == "comic" || self.th == "y2k" ? #2b1b40 : self.th == "pastel" ? PanelLook.c1.mix(#ffffff, 0.55) : self.th == "pixel" ? #f4f0ff : self.th == "neon" ? PanelLook.c1 : #ffffff66;
+                drop-shadow-blur: self.th == "neon" ? 12px : 0px;
+                drop-shadow-offset-x: self.th == "comic" || self.th == "y2k" ? 4px : 0px;
+                drop-shadow-offset-y: self.th == "comic" || self.th == "y2k" ? 4px : 0px;
+                drop-shadow-color: self.th == "neon" ? PanelLook.c1 : #111111;
+                if pi.th == "dark": Rectangle { y: 0; x: 12px; width: parent.width - 24px; height: 3px; background: PanelLook.c1.mix(PanelLook.c2, 0.5); }
+                if pi.th == "minimal": Rectangle { y: parent.height - 4px; height: 4px; background: PanelLook.c1.mix(PanelLook.c2, 0.5); }
+                if pi.th == "y2k": Rectangle {
+                    y: 0;
+                    height: 22px;
+                    background: @linear-gradient(90deg, #ff9ad5 0%, #9ad0ff 100%);
+                    Rectangle { y: parent.height - 2px; height: 2px; background: #2b1b40; }
+                    Text { x: parent.width - self.width - 8px; text: "–  □  ×"; color: #2b1b40; font-size: 10px; font-weight: 900; }
+                }
+                // (a short one: its icon, title and line side by side)
+                if !p.body: HorizontalLayout {
+                    padding-left: 22px;
+                    padding-right: 16px;
+                    padding-top: pi.th == "y2k" ? 22px : 0px;
+                    spacing: 16px;
+                    if PanelLook.icons: VerticalLayout {
+                        alignment: center;
+                        Rectangle {
+                            width: min(46px, root.ph - 34px);
+                            height: self.width;
+                            border-radius: pi.th == "pixel" ? 0px : pi.th == "pastel" ? self.width / 2 : 10px;
+                            background: PanelLook.c1.mix(PanelLook.c2, 0.4);
+                            Glyph { d: p.icon; width: parent.width * 0.6; height: self.width; fill: #ffffff; }
+                        }
+                    }
+                    VerticalLayout {
+                        alignment: center;
+                        spacing: 2px;
+                        Text { text: pi.th == "pixel" ? p.title.to-uppercase() : p.title; color: pi.ink; font-size: min(28px, root.ph * 0.3, (PanelLook.icons ? 214px : 276px) / max(1, p.title.character-count) * 1.75); font-weight: 800; font-family: pi.th == "pixel" ? "Consolas" : ""; }
+                        if p.line != "": Text { text: p.line; color: pi.ink.with-alpha(0.78); font-size: 11px; }
+                    }
+                }
+                // (a long one, or extended: its header, a line in its colours, then all its words)
+                if p.body: VerticalLayout {
+                    padding-left: 22px;
+                    padding-right: 22px;
+                    padding-top: pi.th == "y2k" ? 36px : 14px;
+                    spacing: 10px;
+                    alignment: start;
+                    HorizontalLayout {
+                        spacing: 14px;
+                        if PanelLook.icons: Rectangle {
+                            width: 36px;
+                            height: 36px;
+                            border-radius: pi.th == "pixel" ? 0px : pi.th == "pastel" ? 18px : 9px;
+                            background: PanelLook.c1.mix(PanelLook.c2, 0.4);
+                            Glyph { d: p.icon; width: 22px; height: 22px; fill: #ffffff; }
+                        }
+                        Text { text: pi.th == "pixel" ? p.title.to-uppercase() : p.title; color: pi.ink; font-size: min(24px, (PanelLook.icons ? 226px : 276px) / max(1, p.title.character-count) * 1.75); font-weight: 800; vertical-alignment: center; font-family: pi.th == "pixel" ? "Consolas" : ""; }
+                    }
+                    Rectangle { height: 2px; background: PanelLook.c1.mix(PanelLook.c2, 0.5); }
+                    Text { text: p.line; color: pi.ink.with-alpha(0.8); font-size: 12.5px; wrap: word-wrap; }
+                }
+            }
+        }
+    }
+}
+
+/// The webcam overlay on a 16:9 canvas: a made-up camera in its frame, each part a stand-in where it'll go
+component CamPreview inherits Rectangle {
+    height: self.width * 9 / 16;
+    border-radius: 14px;
+    border-width: 1px;
+    border-color: Theme.line;
+    clip: true;
+    background: #2a2e3c;
+    Rectangle { background: @linear-gradient(135deg, #2b3550 0%, #3a2b48 100%); }
+    Text { x: 12px; y: 8px; text: "A preview: your canvas, a made-up camera"; color: #ffffffa0; font-size: 11px; }
+    for r in CamLook.rects: Rectangle {
+        x: parent.width * r.x;
+        y: parent.height * r.y;
+        width: parent.width * r.w;
+        height: parent.height * r.h;
+        property <bool> cam: r.id == "cam";
+        property <bool> light: CamLook.theme == "comic" || CamLook.theme == "pastel";
+        border-radius: self.cam ? (CamLook.shape == "circle" ? min(self.width, self.height) / 2 : CamLook.shape == "square" || CamLook.shape == "hex" ? 0px : 12px) : 6px;
+        background: self.cam ? #3b4766 : r.id == "live" ? #e5243b : r.id == "name" || r.id == "clock" ? (self.light ? #ffffff : CamLook.theme == "gradient" ? CamLook.c1.mix(CamLook.c2, 0.5) : #0a0814d9) : #ffffff1f;
+        border-width: self.cam ? (CamLook.border == "thick" ? 5px : CamLook.border == "double" ? 4px : CamLook.border == "brackets" ? 0px : 2.5px) : r.id == "name" && CamLook.theme == "neon" ? 2px : 1px;
+        border-color: self.cam ? CamLook.c1 : r.id == "name" && CamLook.theme == "neon" ? CamLook.c1 : #ffffff55;
+        drop-shadow-blur: self.cam && (CamLook.border == "glow" || CamLook.border == "edge") ? 14px : 0px;
+        drop-shadow-color: CamLook.c1;
+        // (the camera: someone in it)
+        if self.cam: Rectangle {
+            Rectangle { width: parent.height * 0.26; height: self.width; border-radius: self.width / 2; x: (parent.width - self.width) / 2; y: parent.height * 0.22; background: #7f8bb0; }
+            Rectangle { width: parent.width * 0.5; height: parent.height * 0.34; border-radius: self.width / 2; x: (parent.width - self.width) / 2; y: parent.height * 0.72; background: #6b7699; }
+        }
+        // (Corner Brackets: only the corners)
+        if self.cam && CamLook.border == "brackets": Rectangle {
+            Rectangle { x: 0; y: 0; width: parent.width * 0.18; height: 3px; background: CamLook.c1; }
+            Rectangle { x: 0; y: 0; width: 3px; height: parent.height * 0.18; background: CamLook.c1; }
+            Rectangle { x: parent.width - self.width; y: 0; width: parent.width * 0.18; height: 3px; background: CamLook.c1; }
+            Rectangle { x: parent.width - 3px; y: 0; width: 3px; height: parent.height * 0.18; background: CamLook.c1; }
+            Rectangle { x: 0; y: parent.height - 3px; width: parent.width * 0.18; height: 3px; background: CamLook.c2; }
+            Rectangle { x: 0; y: parent.height - self.height; width: 3px; height: parent.height * 0.18; background: CamLook.c2; }
+            Rectangle { x: parent.width - self.width; y: parent.height - 3px; width: parent.width * 0.18; height: 3px; background: CamLook.c2; }
+            Rectangle { x: parent.width - 3px; y: parent.height - self.height; width: 3px; height: parent.height * 0.18; background: CamLook.c2; }
+        }
+        if !self.cam: Text {
+            text: r.id == "live" ? "\u{25cf} LIVE" : r.label;
+            color: r.id == "name" && parent.light ? #111111 : #ffffff;
+            font-size: clamp(parent.height * 0.42, 7px, 14px);
+            font-weight: 800;
+            overflow: elide;
+            width: parent.width - 6px;
+            horizontal-alignment: center;
         }
     }
 }
@@ -3501,6 +3722,9 @@ component BotFieldRow inherits VerticalLayout {
         HorizontalLayout { spacing: 6px; alignment: start; for c[i] in root.f.opts: Chip { label: c; on: root.f.value == root.f.opt-ids[i]; clicked => { root.set(root.f.key, root.f.opt-ids[i]); } } }
     }
     // (a Suite widget's preview: which one, its theme in extra, the Goals' look in label)
+    if root.f.kind == "campreview": CamPreview { }
+    if root.f.kind == "panelpreview": PanelPreview { }
+    if root.f.kind == "hudedit": HudEditor { act(a) => { root.act(a); } }
     if root.f.kind == "suiteprev": SuitePreview { which: root.f.value; theme: root.f.extra; rings: root.f.label == "rings"; look: root.f.label; own-c1: root.f.c1; own-c2: root.f.c2; gif: root.f.n == 1; spot: root.f.key; }
     if root.f.kind == "chips2": HorizontalLayout {
         spacing: 12px;
@@ -3895,44 +4119,81 @@ component BotPage inherits Rectangle {
                     if r * 2 + 1 < root.feats.length: FeatCard { tint: BotLook.tile(r * 2 + 3); horizontal-stretch: 1; preferred-width: 0px; min-width: 0px; c: root.feats[r * 2 + 1]; set(k, v) => { root.set(k, v); } act(a) => { root.act(a); } }
                     if r * 2 + 1 >= root.feats.length: Rectangle { horizontal-stretch: 1; preferred-width: 0px; min-width: 0px; }
                 }
-                // the widgets (in a scene, for your viewers) and the docks (in OBS, for you): a card for each, their own pages from them
-                Text { text: "Widgets"; color: Theme.muted; font-size: 12px; font-weight: 700; }
-                Rectangle {
-                    height: 74px;
-                    border-radius: 16px;
-                    background: widgetsa.has-hover ? Theme.elevated.mix(BotLook.tile(4), 0.86) : Theme.panel.mix(BotLook.tile(4), 0.9);
-                    border-width: 1px;
-                    border-color: BotLook.tile(4).with-alpha(0.45);
-                    widgetsa := TouchArea { mouse-cursor: MouseCursor.pointer; clicked => { root.act("widgets"); } }
-                    HorizontalLayout {
-                        padding: 14px;
-                        spacing: 12px;
-                        Rectangle {
-                            width: 40px;
-                            height: 40px;
-                            y: (parent.height - self.height) / 2;
-                            border-radius: 12px;
-                            background: BotLook.tile(4).with-alpha(0.18);
-                            Glyph { d: Icons.broadcast; width: 22px; height: 22px; x: 9px; y: 9px; fill: BotLook.tile(4); }
+                // the widgets (in a scene, for your viewers) and the docks (in OBS, for you): side by side, their own pages from them
+                Text { text: "Widgets and Docks"; color: Theme.muted; font-size: 12px; font-weight: 700; }
+                HorizontalLayout {
+                    spacing: 10px;
+                    Rectangle {
+                        horizontal-stretch: 1;
+                        preferred-width: 0px;
+                        min-width: 0px;
+                        height: 74px;
+                        border-radius: 16px;
+                        background: widgetsa.has-hover ? Theme.elevated.mix(BotLook.tile(4), 0.86) : Theme.panel.mix(BotLook.tile(4), 0.9);
+                        border-width: 1px;
+                        border-color: BotLook.tile(4).with-alpha(0.45);
+                        widgetsa := TouchArea { mouse-cursor: MouseCursor.pointer; clicked => { root.act("widgets"); } }
+                        HorizontalLayout {
+                            padding: 14px;
+                            spacing: 12px;
+                            Rectangle {
+                                width: 40px;
+                                height: 40px;
+                                y: (parent.height - self.height) / 2;
+                                border-radius: 12px;
+                                background: BotLook.tile(4).with-alpha(0.18);
+                                Glyph { d: Icons.broadcast; width: 22px; height: 22px; x: 9px; y: 9px; fill: BotLook.tile(4); }
+                            }
+                            VerticalLayout {
+                                horizontal-stretch: 1;
+                                alignment: center;
+                                spacing: 2px;
+                                Text { text: "Your Widgets"; color: Theme.text; font-size: 14px; font-weight: 700; overflow: elide; }
+                                Text { text: "Browser sources for your scenes: the Stream Widget, alerts, goals and the rest."; color: Theme.muted; font-size: 12px; overflow: elide; }
+                            }
+                            VerticalLayout { alignment: center; Pill { label: "Open"; clicked => { root.act("widgets"); } } }
                         }
-                        VerticalLayout {
-                            horizontal-stretch: 1;
-                            alignment: center;
-                            spacing: 2px;
-                            Text { text: "Your Widgets"; color: Theme.text; font-size: 14px; font-weight: 700; }
-                            Text { text: "Browser sources for your scenes: the Stream Widget, Lyrics, Social Plug, Multichat Overlay, Goals, Timer and the rest."; color: Theme.muted; font-size: 12px; overflow: elide; }
+                    }
+                    Rectangle {
+                        horizontal-stretch: 1;
+                        preferred-width: 0px;
+                        min-width: 0px;
+                        height: 74px;
+                        border-radius: 16px;
+                        background: docksa.has-hover ? Theme.elevated.mix(BotLook.tile(5), 0.86) : Theme.panel.mix(BotLook.tile(5), 0.9);
+                        border-width: 1px;
+                        border-color: BotLook.tile(5).with-alpha(0.45);
+                        docksa := TouchArea { mouse-cursor: MouseCursor.pointer; clicked => { root.act("docks"); } }
+                        HorizontalLayout {
+                            padding: 14px;
+                            spacing: 12px;
+                            Rectangle {
+                                width: 40px;
+                                height: 40px;
+                                y: (parent.height - self.height) / 2;
+                                border-radius: 12px;
+                                background: BotLook.tile(5).with-alpha(0.18);
+                                Glyph { d: Icons.chat; width: 22px; height: 22px; x: 9px; y: 9px; fill: BotLook.tile(5); }
+                            }
+                            VerticalLayout {
+                                horizontal-stretch: 1;
+                                alignment: center;
+                                spacing: 2px;
+                                Text { text: "Your Docks"; color: Theme.text; font-size: 14px; font-weight: 700; overflow: elide; }
+                                Text { text: "Panels in OBS, just for you: the Chat Dock and the Activity Feed."; color: Theme.muted; font-size: 12px; overflow: elide; }
+                            }
+                            VerticalLayout { alignment: center; Pill { label: "Open"; clicked => { root.act("docks"); } } }
                         }
-                        VerticalLayout { alignment: center; Pill { label: "Open"; clicked => { root.act("widgets"); } } }
                     }
                 }
-                Text { text: "Docks"; color: Theme.muted; font-size: 12px; font-weight: 700; }
+                Text { text: "Creators"; color: Theme.muted; font-size: 12px; font-weight: 700; }
                 Rectangle {
                     height: 74px;
                     border-radius: 16px;
-                    background: docksa.has-hover ? Theme.elevated.mix(BotLook.tile(5), 0.86) : Theme.panel.mix(BotLook.tile(5), 0.9);
+                    background: creatorsa.has-hover ? Theme.elevated.mix(BotLook.tile(6), 0.86) : Theme.panel.mix(BotLook.tile(6), 0.9);
                     border-width: 1px;
-                    border-color: BotLook.tile(5).with-alpha(0.45);
-                    docksa := TouchArea { mouse-cursor: MouseCursor.pointer; clicked => { root.act("docks"); } }
+                    border-color: BotLook.tile(6).with-alpha(0.45);
+                    creatorsa := TouchArea { mouse-cursor: MouseCursor.pointer; clicked => { root.act("creators"); } }
                     HorizontalLayout {
                         padding: 14px;
                         spacing: 12px;
@@ -3941,17 +4202,17 @@ component BotPage inherits Rectangle {
                             height: 40px;
                             y: (parent.height - self.height) / 2;
                             border-radius: 12px;
-                            background: BotLook.tile(5).with-alpha(0.18);
-                            Glyph { d: Icons.chat; width: 22px; height: 22px; x: 9px; y: 9px; fill: BotLook.tile(5); }
+                            background: BotLook.tile(6).with-alpha(0.18);
+                            Glyph { d: Icons.star-out; width: 22px; height: 22px; x: 9px; y: 9px; fill: BotLook.tile(6); }
                         }
                         VerticalLayout {
                             horizontal-stretch: 1;
                             alignment: center;
                             spacing: 2px;
-                            Text { text: "Your Docks"; color: Theme.text; font-size: 14px; font-weight: 700; }
-                            Text { text: "Panels inside OBS, just for you: the Chat Dock, to read and moderate chat, and the Activity Feed."; color: Theme.muted; font-size: 12px; overflow: elide; }
+                            Text { text: "Your Creators"; color: Theme.text; font-size: 14px; font-weight: 700; }
+                            Text { text: "Make your own: a webcam overlay with your widgets built in, and your channel panels."; color: Theme.muted; font-size: 12px; overflow: elide; }
                         }
-                        VerticalLayout { alignment: center; Pill { label: "Open"; clicked => { root.act("docks"); } } }
+                        VerticalLayout { alignment: center; Pill { label: "Open"; clicked => { root.act("creators"); } } }
                     }
                 }
                 // what it's been doing
@@ -3966,7 +4227,12 @@ component BotPage inherits Rectangle {
                         spacing: 6px;
                         HorizontalLayout {
                             Text { text: "Lately: what it heard, and what it did"; color: Theme.muted; font-size: 12px; horizontal-stretch: 1; }
-                            Text { text: "Run setup again"; color: rs.has-hover ? Theme.text : Theme.muted; font-size: 11px; rs := TouchArea { mouse-cursor: MouseCursor.pointer; clicked => { root.act("setup:again"); } } }
+                            // (now and then: your commands and actions from another bot, or setup again)
+                            HorizontalLayout {
+                                spacing: 14px;
+                                Text { text: "Import from another bot"; color: im.has-hover ? Theme.text : Theme.muted; font-size: 11px; im := TouchArea { mouse-cursor: MouseCursor.pointer; clicked => { root.act("sheet:import"); } } }
+                                Text { text: "Run setup again"; color: rs.has-hover ? Theme.text : Theme.muted; font-size: 11px; rs := TouchArea { mouse-cursor: MouseCursor.pointer; clicked => { root.act("setup:again"); } } }
+                            }
                         }
                         if root.log.length == 0: Text { text: "Nothing yet: once it's running, what it answers shows here."; color: Theme.muted.with-alpha(0.7); font-size: 12px; }
                         for l in root.log: HorizontalLayout {
@@ -3996,11 +4262,12 @@ component BotPage inherits Rectangle {
                         if r.key == "socials": StreamTile { tint: BotLook.tile(2); horizontal-stretch: 1; r: r; d: Icons.link; addr: "http://127.0.0.1:" + root.port + "/socials"; toggle(k) => { root.act("row-toggle:" + k); } more(k) => { root.act("row-more:" + k); } copy(a) => { root.act("copy:" + a); } }
                     }
                 }
-                HorizontalLayout {
+                if root.widgets-view != "creators": HorizontalLayout {
                     spacing: 8px;
                     for d[di] in root.widgets-view == "docks" ? [
                         { n: "Chat Dock", t: "Twitch and Kick chat in OBS, with delete, time-out and ban on every message, and a box to chat back.", p: "/dock/chat", i: Icons.chat, k: "dockchat" },
                         { n: "Activity Feed", t: "Follows, subs, bits, raids, rewards and the rest in OBS, each alert replayed with a click.", p: "/dock/activity", i: Icons.bell, k: "dockfeed" },
+                        { n: "Moderation Dock", t: "Pile-Up, Raid Lockdown, chat modes, Shield Mode and Auto-Ban on their own, beside your chat. Its settings are the Chat Dock's.", p: "/dock/mod", i: Icons.shield, k: "dockchat" },
                     ] : [
                         { n: "Multichat Overlay", t: "Twitch and Kick chat together on stream, with a see-through background.", p: "/chat", i: Icons.broadcast, k: "multichat" },
                     ]: Rectangle {
@@ -4062,6 +4329,66 @@ component BotPage inherits Rectangle {
                     }
                 }
                 // the fun: chat playing along, shown
+                // the Creators: what you've made, each its own source
+                if root.widgets-view == "creators": Rectangle {
+                    height: 92px;
+                    border-radius: 14px;
+                    background: Theme.panel.mix(BotLook.tile(6), 0.9);
+                    border-width: 1px;
+                    border-color: BotLook.tile(6).with-alpha(0.3);
+                    VerticalLayout {
+                        padding: 12px;
+                        spacing: 4px;
+                        HorizontalLayout {
+                            spacing: 7px;
+                            VerticalLayout { alignment: center; Glyph { d: Icons.star-out; width: 16px; height: 16px; fill: Theme.accent; } }
+                            Text { text: "Webcam Overlay"; color: Theme.text; font-weight: 700; font-size: 13px; horizontal-stretch: 1; overflow: elide; }
+                            IconButton { d: Icons.copy; size: 30px; tip: "Copy its address, for OBS"; clicked => { root.act("copy:http://127.0.0.1:" + root.port + "/cam/main"); } }
+                            IconButton { d: Icons.gear; size: 30px; tip: "Make it yours"; clicked => { root.act("sheet:cam"); } }
+                        }
+                        Text { text: "http://127.0.0.1:" + root.port + "/cam/main"; color: Theme.accent.mix(Theme.text, 0.55); font-size: 11px; font-family: "Consolas"; overflow: elide; }
+                        Text { text: "A frame round your camera, with your name, alerts, Now Playing, chat and more on it: one Browser source."; color: Theme.muted; font-size: 11px; overflow: elide; }
+                    }
+                }
+                if root.widgets-view == "creators": Rectangle {
+                    height: 92px;
+                    border-radius: 14px;
+                    background: Theme.panel.mix(BotLook.tile(7), 0.9);
+                    border-width: 1px;
+                    border-color: BotLook.tile(7).with-alpha(0.3);
+                    VerticalLayout {
+                        padding: 12px;
+                        spacing: 4px;
+                        HorizontalLayout {
+                            spacing: 7px;
+                            VerticalLayout { alignment: center; Glyph { d: Icons.actions; width: 16px; height: 16px; fill: Theme.accent; } }
+                            Text { text: "Panels"; color: Theme.text; font-weight: 700; font-size: 13px; horizontal-stretch: 1; overflow: elide; }
+                            IconButton { d: Icons.open; size: 30px; tip: "Open them to save as pictures"; clicked => { root.act("url:http://127.0.0.1:" + root.port + "/panels"); } }
+                            IconButton { d: Icons.gear; size: 30px; tip: "Make them yours"; clicked => { root.act("sheet:panels"); } }
+                        }
+                        Text { text: "Your channel's panels (About, Schedule, Rules...) in one theme, saved as pictures for Twitch or Kick."; color: Theme.muted; font-size: 11px; overflow: elide; }
+                    }
+                }
+                if root.widgets-view == "creators": Rectangle {
+                    height: 92px;
+                    border-radius: 14px;
+                    background: Theme.panel.mix(BotLook.tile(8), 0.9);
+                    border-width: 1px;
+                    border-color: BotLook.tile(8).with-alpha(0.3);
+                    VerticalLayout {
+                        padding: 12px;
+                        spacing: 4px;
+                        HorizontalLayout {
+                            spacing: 7px;
+                            VerticalLayout { alignment: center; Glyph { d: Icons.broadcast; width: 16px; height: 16px; fill: Theme.accent; } }
+                            Text { text: "Game HUD Frames"; color: Theme.text; font-weight: 700; font-size: 13px; horizontal-stretch: 1; overflow: elide; }
+                            IconButton { d: Icons.copy; size: 30px; tip: "Copy its address, for OBS"; clicked => { root.act("copy:http://127.0.0.1:" + root.port + "/hud"); } }
+                            IconButton { d: Icons.gear; size: 30px; tip: "Make them"; clicked => { root.act("sheet:hud"); } }
+                        }
+                        Text { text: "http://127.0.0.1:" + root.port + "/hud"; color: Theme.accent.mix(Theme.text, 0.55); font-size: 11px; font-family: "Consolas"; overflow: elide; }
+                        Text { text: "Frames round your game's minimap, health and the rest, marked on a screenshot of it."; color: Theme.muted; font-size: 11px; overflow: elide; }
+                    }
+                }
                 if root.widgets-view == "widgets": Text { text: "Fun"; color: Theme.muted; font-size: 12px; font-weight: 700; }
                 // (two rows of three: six in one cut their names short)
                 if root.widgets-view == "widgets": VerticalLayout {
@@ -4073,6 +4400,7 @@ component BotPage inherits Rectangle {
                     [{ n: "Leaderboard", p: "/leaderboard", s: "leaderboard", i: Icons.coins },
                         { n: "Emote Rain", p: "/emotes", s: "emoterain", i: Icons.chat },
                         { n: "Name That Tune", p: "/tune", s: "tune", i: Icons.lyrics }],
+                    [{ n: "Sponsor Plug", p: "/sponsors", s: "sponsors", i: Icons.link }],
                   ]: HorizontalLayout {
                     spacing: 8px;
                     for w[wi] in row: Rectangle {

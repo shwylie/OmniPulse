@@ -78,6 +78,50 @@
   form input:focus, form select:focus { outline: none; border-color: var(--accent); }
   form button { border: 0; border-radius: 6px; padding: 0 12px; background: var(--accent); color: #111; font-weight: 600; }
   #empty { color: var(--dim); text-align: center; padding: 24px 16px; font-size: 12px; }
+  /* Moderation: its panel, under the header while it's shown */
+  #mod { display: none; padding: 8px 10px; background: #221c26; border-bottom: 1px solid #4a2f45; flex: none; font-size: 12px; max-height: 55%; overflow-y: auto; }
+  #mod.open { display: block; }
+  #mod section { margin-bottom: 8px; }
+  #mod section:last-child { margin-bottom: 0; }
+  #mod h2 { display: flex; align-items: center; gap: 8px; margin: 0 0 5px; font-size: 11px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--dim); }
+  #mod h2 span { margin-left: auto; text-transform: none; letter-spacing: 0; font-weight: 400; }
+  #mod .row { display: flex; flex-wrap: wrap; gap: 4px; }
+  .sw { border: 1px solid var(--line); border-radius: 999px; padding: 2px 10px; background: transparent; color: var(--dim); font-size: 11px; }
+  .sw:hover { color: var(--text); border-color: var(--dim); }
+  .sw.on { background: var(--accent); border-color: var(--accent); color: #111; }
+  .sw.red.on, .sw.red.sure { background: var(--danger); border-color: var(--danger); color: #fff; }
+  .sw.big { padding: 4px 14px; font-weight: 700; }
+  #mod select { background: var(--bg); border: 1px solid var(--line); border-radius: 6px; font-size: 11px; color: var(--text); }
+  #mod form { padding: 0; background: none; border: 0; margin-bottom: 6px; }
+  #mod form button { background: var(--danger); color: #fff; }
+  #mod .terms { display: flex; flex-wrap: wrap; gap: 4px; max-height: 84px; overflow-y: auto; }
+  #mod .term { display: inline-flex; align-items: center; gap: 4px; border: 1px solid #5a2a35; background: #3a2028; border-radius: 999px; padding: 1px 4px 1px 9px; font-size: 11px; }
+  #mod .term button { border: 0; background: transparent; color: var(--dim); padding: 0 3px; line-height: 1; }
+  #mod .term button:hover { color: #fff; }
+  #mod .none { color: var(--dim); }
+  #modBtn.on { color: var(--danger); }
+  #modBtn .lbl { font-size: 11px; margin-left: 3px; vertical-align: 1px; }
+  #modHide { float: right; margin: -2px 0 0 8px; }
+  /* the Moderation dock (/dock/mod): only the panel and Pile-Up's cards, the panel filling it */
+  body.modonly #log, body.modonly #more, body.modonly #send, body.modonly #modBtn, body.modonly #modHide { display: none !important; }
+  body.modonly #mod { display: block; flex: 1; max-height: none; border-bottom: 0; }
+  body.modonly #piles { max-height: 45%; order: -1; }
+  body.modonly header { order: -2; }
+  .mod .ib.ab:hover { color: #fff; background: #8a3a48; border-color: #8a3a48; }
+  #settings .head { flex-basis: 100%; color: var(--text); font-weight: 600; margin-top: 4px; }
+  /* Pile-Up: the same message from many accounts, one card each, above chat */
+  #piles { flex: none; max-height: 40%; overflow-y: auto; background: #2a1f14; border-bottom: 1px solid #5a4020; display: none; }
+  #piles.some { display: block; }
+  .pile { padding: 6px 10px; border-bottom: 1px solid #3d2e1c; font-size: 12px; }
+  .pile .top { display: flex; align-items: center; gap: 6px; }
+  .pile .n { flex: none; min-width: 26px; text-align: center; border-radius: 999px; background: var(--warn); color: #111; font-weight: 800; font-size: 11px; padding: 0 6px; }
+  .pile .t { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .pile .who { color: var(--dim); font-size: 11px; margin-top: 3px; display: none; word-break: break-word; }
+  .pile.open .who { display: block; }
+  .pile .acts { display: flex; gap: 4px; margin-top: 5px; flex-wrap: wrap; }
+  .pile.done { opacity: 0.55; }
+  .msg.piled { display: none; }
+  #pileBtn.on { background: var(--warn); border-color: var(--warn); color: #111; }
 </style>
 </head>
 <body>
@@ -85,8 +129,29 @@
   <h1>Chat</h1>
   <button class="chip twitch" id="fTwitch" aria-pressed="true" data-tip="Show or hide Twitch's chat">Twitch</button>
   <button class="chip kick" id="fKick" aria-pressed="true" data-tip="Show or hide Kick's chat">Kick</button>
+  <button class="icon" id="modBtn" data-tip="Show or hide Moderation: Pile-Up, lockdown, chat modes, Auto-Ban" aria-label="Moderation">&#128737;<span class="lbl">Mod</span></button>
   <button class="icon" id="gear" data-tip="This dock's settings" aria-label="Settings">&#9881;</button>
 </header>
+<div id="mod">
+  <button class="sw" id="modHide" type="button" title="Hide these (the shield in the header shows them again)">Hide</button>
+  <section id="mPile"><h2>Pile-Up<span id="pileSays">the same message from many accounts, folded into one</span></h2><div class="row">
+    <button class="sw" id="pileBtn" type="button">Pile-Up: off</button>
+    <select id="pileMin" title="How many accounts before it folds them"><option value="2">2 accounts</option><option value="3" selected>3 accounts</option><option value="5">5 accounts</option></select>
+  </div></section>
+  <section id="mLock"><h2>Raid Lockdown<span id="lockSays"></span></h2><div class="row"><button class="sw red big" id="lockBtn" type="button">Lock down chat</button></div></section>
+  <section id="mModes"><h2>Chat modes<span>Twitch</span></h2><div class="row">
+    <button class="sw" id="cmSlow" type="button">Slow</button><select id="cmSlowSecs" title="Seconds between messages"><option value="3">3 s</option><option value="10" selected>10 s</option><option value="30">30 s</option><option value="60">1 min</option><option value="120">2 min</option></select>
+    <button class="sw" id="cmFollow" type="button">Followers only</button><select id="cmFollowMins" title="How long they must have followed"><option value="0">Any</option><option value="10" selected>10 min</option><option value="60">1 hour</option><option value="1440">1 day</option><option value="10080">1 week</option></select>
+    <button class="sw" id="cmSub" type="button">Subscribers only</button>
+    <button class="sw" id="cmEmote" type="button">Emotes only</button>
+    <button class="sw" id="cmUnique" type="button">Unique chat</button>
+  </div></section>
+  <section id="mShield"><h2>Shield Mode<span>Twitch</span></h2><div class="row"><button class="sw red" id="shieldBtn" type="button">Shield Mode</button><button class="sw red" id="clearBtn" type="button">Clear chat</button></div></section>
+  <section id="mAb"><h2>Auto-Ban<span id="abSays"></span><button class="sw red" id="abOn" type="button">Off</button></h2>
+    <form id="abAdd" autocomplete="off"><input id="abTerm" maxlength="100" placeholder="A word or phrase to ban on sight"><button type="submit">Ban it</button></form>
+    <div class="terms" id="abTerms"></div>
+  </section>
+</div>
 <div id="settings">
   <label><input type="checkbox" id="oTime"> Times</label>
   <label><input type="checkbox" id="oBadges" checked> Badges</label>
@@ -95,7 +160,21 @@
   <label>Time-out <select id="oSecs"><option value="60">1 min</option><option value="300">5 min</option><option value="600" selected>10 min</option><option value="3600">1 hour</option><option value="86400">1 day</option></select></label>
   <label>Text <select id="oSize"><option value="12">Small</option><option value="13" selected>Normal</option><option value="15">Large</option><option value="17">Larger</option></select></label>
   <button class="chip" id="clearView" type="button">Clear the View</button>
+  <span class="head">Moderation shows</span>
+  <label><input type="checkbox" id="oModLock" checked> Raid Lockdown</label>
+  <label><input type="checkbox" id="oModModes" checked> Chat modes</label>
+  <label><input type="checkbox" id="oModShield" checked> Shield Mode and Clear Chat</label>
+  <label><input type="checkbox" id="oModAb" checked> Auto-Ban</label>
+  <label><input type="checkbox" id="oModPile" checked> Pile-Up</label>
+  <span class="head">Raid Lockdown turns on</span>
+  <label><input type="checkbox" id="oLkPile" checked> Pile-Up</label>
+  <label><input type="checkbox" id="oLkShield" checked> Shield Mode</label>
+  <label><input type="checkbox" id="oLkFollow" checked> Followers only</label>
+  <label><input type="checkbox" id="oLkSlow" checked> Slow</label>
+  <label><input type="checkbox" id="oLkEmote"> Emotes only</label>
+  <label><input type="checkbox" id="oLkSub"> Subscribers only</label>
 </div>
+<div id="piles"></div>
 <div id="log"><div id="empty">Chat shows here while OmniPulse's chatbot is on (Settings &gt; Streaming), signed in to Twitch or Kick.</div></div>
 <button id="more" type="button">New messages &#8595;</button>
 <form id="send" autocomplete="off">
@@ -116,6 +195,9 @@
     twitch: store.get("twitch", true), kick: store.get("kick", true), time: store.get("time", false), badges: store.get("badges", true),
     hover: store.get("hover", false), confirm: store.get("confirm", true), secs: store.get("secs", "600"), size: store.get("size", "13"), to: store.get("to", "all"),
     bttv: store.get("bttv", true), ffz: store.get("ffz", true), stv: store.get("stv", true),
+    modLock: store.get("modLock", true), modModes: store.get("modModes", true), modShield: store.get("modShield", true), modAb: store.get("modAb", true),
+    modPile: store.get("modPile", true), lkPile: store.get("lkPile", true), pileMin: store.get("pileMin", "3"),
+    lkShield: store.get("lkShield", true), lkFollow: store.get("lkFollow", true), lkSlow: store.get("lkSlow", true), lkEmote: store.get("lkEmote", false), lkSub: store.get("lkSub", false),
   };
   let last = 0, cleared = 0;
   const rows = new Map();
@@ -127,6 +209,10 @@
     $("oSecs").value = opt.secs; $("oSize").value = opt.size; $("to").value = opt.to;
     document.documentElement.style.setProperty("--fs", opt.size + "px");
     document.body.classList.toggle("modhover", opt.hover);
+    // (moderation's parts: those switched on, and what the lockdown turns on)
+    [["oModPile", "modPile", "mPile"], ["oModLock", "modLock", "mLock"], ["oModModes", "modModes", "mModes"], ["oModShield", "modShield", "mShield"], ["oModAb", "modAb", "mAb"]].forEach(([c, k, s]) => { $(c).checked = opt[k]; $(s).hidden = !opt[k]; });
+    $("pileMin").value = opt.pileMin;
+    [["oLkPile", "lkPile"], ["oLkShield", "lkShield"], ["oLkFollow", "lkFollow"], ["oLkSlow", "lkSlow"], ["oLkEmote", "lkEmote"], ["oLkSub", "lkSub"]].forEach(([c, k]) => ($(c).checked = opt[k]));
     for (const [, r] of rows) show(r);
   }
   function setOpt(k, v) { opt[k] = v; store.set(k, v); applyOpts(); sendSettings(); }
@@ -162,6 +248,8 @@
   $("oBadges").onchange = (e) => setOpt("badges", e.target.checked);
   $("oHover").onchange = (e) => setOpt("hover", e.target.checked);
   $("oConfirm").onchange = (e) => setOpt("confirm", e.target.checked);
+  [["oModPile", "modPile"], ["oLkPile", "lkPile"], ["oModLock", "modLock"], ["oModModes", "modModes"], ["oModShield", "modShield"], ["oModAb", "modAb"], ["oLkShield", "lkShield"], ["oLkFollow", "lkFollow"], ["oLkSlow", "lkSlow"], ["oLkEmote", "lkEmote"], ["oLkSub", "lkSub"]]
+    .forEach(([c, k]) => ($(c).onchange = (e) => setOpt(k, e.target.checked)));
   $("oSecs").onchange = (e) => setOpt("secs", e.target.value);
   $("oSize").onchange = (e) => setOpt("size", e.target.value);
   $("to").onchange = (e) => setOpt("to", e.target.value);
@@ -264,6 +352,7 @@
     replay: "M12 5V1L7 6l5 5V7c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6H4c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8-8z",
     bolt: "M7 2v11h3v9l7-12h-4l4-8z",
     check: "M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z",
+    shield: "M12 2l8 3v6c0 5-3.4 9.4-8 11-4.6-1.6-8-6-8-11V5z",
     eraser: "M15.14 3c-.51 0-1.02.2-1.41.59L2.59 14.73c-.78.78-.78 2.05 0 2.83L5.03 20h7.66l8.72-8.72c.79-.78.79-2.05 0-2.83l-4.85-4.86c-.39-.39-.9-.59-1.42-.59zM6.24 18l-2.24-2.24 6.07-6.07 4.24 4.24L10.24 18H6.24z",
   };
   function svg(name) {
@@ -301,6 +390,7 @@
       ask("ban");
     }));
     box.append(iconButton("undo", "Let " + m.user + " back in (after a ban or time-out)", "", "unban", () => ask("unban")));
+    box.append(iconButton("shield", "Auto-Ban this message's words", "", "ab", () => { modOpen(true); $("abTerm").value = String(m.text || "").replace(/\[emote:\d+:[^\]]*\]/g, "").trim().slice(0, 100); $("abTerm").focus(); $("abTerm").select(); }));
     return box;
   }
 
@@ -326,6 +416,7 @@
     rows.set(m.n, r);
     show(r);
     place(r);
+    if (!m.self) pileUp(m, r);
   }
 
   function addNotice(text, bad) {
@@ -378,6 +469,152 @@
     }
     setTimeout(poll, failing ? 3000 : 700);
   }
+  // ---------- Pile-Up: the same words from several accounts, close together, folded into one card ----------
+  // (off until it's switched on, here or by Raid Lockdown: a friendly raid's message repeats too, and that's not to be banned)
+  let pileOn = false;
+  const recent = new Map(), piles = new Map();
+  // (the words as one: no emotes, case, accents, repeats or the odd character added to dodge a filter)
+  function pileKey(m) {
+    const t = String(m.text || "").replace(/\[emote:\d+:[^\]]*\]/g, " ").normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toLowerCase()
+      .replace(/[^a-z0-9]+/g, "").replace(/(.)\1{2,}/g, "$1$1");
+    return t.length >= 4 ? t.slice(0, 60) : "";
+  }
+  let pileUp = function (m, r) {
+    const k = pileKey(m);
+    if (!k) return;
+    const now = Date.now();
+    // (seen in the last 2 minutes, from whom)
+    const seen = recent.get(k) || { at: now, msgs: [] };
+    seen.msgs = seen.msgs.filter((x) => now - x.at < 120000);
+    seen.msgs.push({ at: now, m, r });
+    recent.set(k, seen);
+    if (recent.size > 600) for (const [key, v] of recent) { if (now - v.msgs[v.msgs.length - 1].at > 120000) recent.delete(key); }
+    if (!pileOn) return;
+    const who = new Set(seen.msgs.map((x) => (x.m.platform || "") + "|" + String(x.m.login || x.m.user).toLowerCase()));
+    if (who.size < Number(opt.pileMin || 3) && !piles.has(k)) return;
+    let p = piles.get(k);
+    if (!p) { p = { key: k, text: m.text, msgs: [], el: null, done: false }; piles.set(k, p); }
+    for (const x of seen.msgs) if (!p.msgs.includes(x)) { p.msgs.push(x); x.r.classList.add("piled"); }
+    pileDraw(p);
+  };
+  function pileDraw(p) {
+    const box = $("piles");
+    if (!p.el) {
+      p.el = document.createElement("div"); p.el.className = "pile";
+      p.el.innerHTML = '<div class="top"><span class="n"></span><span class="t"></span></div><div class="who"></div><div class="acts"></div>';
+      p.el.querySelector(".t").textContent = p.text;
+      const acts = p.el.querySelector(".acts");
+      const users = () => [...new Map(p.msgs.map((x) => [(x.m.platform || "") + "|" + String(x.m.login || x.m.user).toLowerCase(), x.m])).values()];
+      const banAll = () => { for (const m of users()) if (m.platform !== "youtube") act({ do: "ban", platform: m.platform, id: m.id, user: m.user, login: m.login, userId: m.userId, reason: "Pile-Up: " + p.text.slice(0, 80) }); p.done = true; pileDraw(p); };
+      const btn = (label, cls, go) => { const b = document.createElement("button"); b.type = "button"; b.className = "sw " + cls; b.textContent = label; b.onclick = () => go(b); acts.append(b); return b; };
+      // (a ban for all of them: asked twice, as a ban is)
+      btn("Ban them all", "red", (b) => {
+        if (opt.confirm && !b.classList.contains("sure")) { b.classList.add("sure"); b.textContent = "Click again to ban " + users().length; setTimeout(() => { b.classList.remove("sure"); b.textContent = "Ban them all"; }, 3000); return; }
+        banAll();
+      });
+      btn("Auto-Ban the words, and ban them", "red", (b) => {
+        if (opt.confirm && !b.classList.contains("sure")) { b.classList.add("sure"); b.textContent = "Click again: Auto-Ban and ban " + users().length; setTimeout(() => { b.classList.remove("sure"); b.textContent = "Auto-Ban the words, and ban them"; }, 3000); return; }
+        const term = String(p.text || "").replace(/\[emote:\d+:[^\]]*\]/g, "").trim().slice(0, 100);
+        if (term) { edited = Date.now(); if (!mod.autoban.terms.includes(term)) mod.autoban.terms.push(term); mod.autoban.on = true; modDraw(); act({ do: "autoban", op: "add", term }); }
+        banAll();
+      });
+      btn("Who", "", () => p.el.classList.toggle("open"));
+      // (let them through: back in chat, the card gone)
+      btn("Not a raid", "", () => { p.msgs.forEach((x) => x.r.classList.remove("piled")); p.el.remove(); piles.delete(p.key); p.ignored = true; pileIgnore.add(p.key); pileBar(); });
+      box.prepend(p.el);
+    }
+    const us = new Set(p.msgs.map((x) => x.m.user || x.m.login));
+    p.el.querySelector(".n").textContent = "\u00d7" + us.size;
+    p.el.querySelector(".who").textContent = [...us].join(", ");
+    p.el.classList.toggle("done", p.done);
+    pileBar();
+  }
+  const pileIgnore = new Set();
+  function pileBar() { $("piles").classList.toggle("some", piles.size > 0); }
+  function pileSet(on) {
+    pileOn = on;
+    $("pileBtn").textContent = "Pile-Up: " + (on ? "on" : "off");
+    $("pileBtn").classList.toggle("on", on);
+    // (off: everything back in chat, the cards gone)
+    if (!on) { for (const p of piles.values()) { p.msgs.forEach((x) => x.r.classList.remove("piled")); p.el && p.el.remove(); } piles.clear(); pileBar(); }
+  }
+  $("pileBtn").onclick = () => pileSet(!pileOn);
+  $("pileMin").onchange = (e) => setOpt("pileMin", e.target.value);
+  const pileUpWas = pileUp;
+  pileUp = (m, r) => { if (pileIgnore.has(pileKey(m))) return; pileUpWas(m, r); };
+
+  // ---------- Moderation: as the Suite has it (taken every few seconds); changed here, at once ----------
+  let mod = { autoban: { on: false, terms: [] }, chat: {}, shield: false, lock: false, twitch: false };
+  let edited = 0;
+  function modOpen(open) {
+    $("mod").classList.toggle("open", open);
+    try { localStorage.setItem("omnipulse.dock.mod", open ? "1" : "0"); } catch (e) {}
+  }
+  function on(id, v) { $(id).classList.toggle("on", !!v); }
+  function modDraw() {
+    const ab = mod.autoban || { on: false, terms: [] }, c = mod.chat || {};
+    $("abOn").textContent = ab.on ? "On" : "Off"; on("abOn", ab.on);
+    $("abSays").textContent = ab.on ? (ab.terms.length ? ab.terms.length + (ab.terms.length === 1 ? " term" : " terms") : "common spam only") : "";
+    on("cmSlow", c.slow); on("cmFollow", c.follow); on("cmSub", c.sub); on("cmEmote", c.emote); on("cmUnique", c.unique); on("shieldBtn", mod.shield);
+    if (c.slowSecs) $("cmSlowSecs").value = String(c.slowSecs);
+    if (c.follow && c.followMins != null) $("cmFollowMins").value = String(c.followMins);
+    on("lockBtn", mod.lock);
+    $("lockBtn").textContent = mod.lock ? "Lift the lockdown" : "Lock down chat";
+    $("lockSays").textContent = mod.lock ? "on" : "";
+    $("modBtn").classList.toggle("on", !!(ab.on || mod.shield || mod.lock));
+    ["mModes", "mShield", "mLock"].forEach((s) => $(s).querySelectorAll("button, select").forEach((b) => (b.disabled = !mod.twitch)));
+    if (!mod.twitch) $("lockSays").textContent = "sign in to Twitch first";
+    const list = $("abTerms");
+    list.innerHTML = "";
+    if (!ab.terms.length) { const n = document.createElement("span"); n.className = "none"; n.textContent = "None of your own yet."; list.append(n); }
+    for (const t of ab.terms) {
+      const ch = document.createElement("span"); ch.className = "term";
+      const w = document.createElement("span"); w.textContent = t;
+      const x = document.createElement("button"); x.type = "button"; x.textContent = "\u00d7"; x.title = "Take it off the list";
+      x.onclick = () => { ab.terms = ab.terms.filter((v) => v !== t); edited = Date.now(); modDraw(); act({ do: "autoban", op: "remove", term: t }); };
+      ch.append(w, x); list.append(ch);
+    }
+  }
+  const change = (cmd, after) => { edited = Date.now(); if (after) after(); modDraw(); act(cmd); };
+  $("modBtn").onclick = () => modOpen(!$("mod").classList.contains("open"));
+  $("modHide").onclick = () => modOpen(false);
+  // (the Moderation dock: the panel only, its heading its own)
+  if (location.pathname.startsWith("/dock/mod")) { document.body.classList.add("modonly"); document.querySelector("header h1").textContent = "Moderation"; document.title = "OmniPulse Moderation"; }
+  $("abOn").onclick = () => change({ do: "autoban", op: mod.autoban.on ? "off" : "on" }, () => (mod.autoban.on = !mod.autoban.on));
+  $("abAdd").onsubmit = (e) => {
+    e.preventDefault();
+    const t = $("abTerm").value.trim();
+    if (!t) return;
+    change({ do: "autoban", op: "add", term: t }, () => { if (!mod.autoban.terms.some((v) => v.toLowerCase() === t.toLowerCase())) mod.autoban.terms.push(t); mod.autoban.on = true; });
+    $("abTerm").value = "";
+  };
+  // (a chat mode: on or off, with its seconds or minutes)
+  const MODES = { cmSlow: "slow", cmFollow: "follow", cmSub: "sub", cmEmote: "emote", cmUnique: "unique" };
+  for (const [id, k] of Object.entries(MODES)) $(id).onclick = () => change({ do: "chatmode", mode: k, on: !mod.chat[k], secs: Number($("cmSlowSecs").value), mins: Number($("cmFollowMins").value) }, () => (mod.chat[k] = !mod.chat[k]));
+  $("cmSlowSecs").onchange = () => { if (mod.chat.slow) change({ do: "chatmode", mode: "slow", on: true, secs: Number($("cmSlowSecs").value) }); };
+  $("cmFollowMins").onchange = () => { if (mod.chat.follow) change({ do: "chatmode", mode: "follow", on: true, mins: Number($("cmFollowMins").value) }); };
+  $("shieldBtn").onclick = () => change({ do: "shield", on: !mod.shield }, () => (mod.shield = !mod.shield));
+  // (Clear Chat: asked twice)
+  $("clearBtn").onclick = () => {
+    const b = $("clearBtn");
+    if (!b.classList.contains("sure")) { b.classList.add("sure"); b.textContent = "Click again to clear it"; setTimeout(() => { b.classList.remove("sure"); b.textContent = "Clear chat"; }, 3000); return; }
+    b.classList.remove("sure"); b.textContent = "Clear chat";
+    act({ do: "clearchat" });
+  };
+  // (Raid Lockdown: what it's set to turn on, at once; lifted, back as they were)
+  $("lockBtn").addEventListener("click", () => { if (opt.lkPile) pileSet(!mod.lock); });
+  $("lockBtn").onclick = () => change({ do: "lockdown", on: !mod.lock, shield: opt.lkShield, follow: opt.lkFollow, slow: opt.lkSlow, emote: opt.lkEmote, sub: opt.lkSub, secs: Number($("cmSlowSecs").value), mins: Number($("cmFollowMins").value) }, () => (mod.lock = !mod.lock));
+  async function modPoll() {
+    try {
+      const s = await (await fetch("/now.json", { cache: "no-store" })).json();
+      const m = s.suite && s.suite.mod;
+      if (m && Date.now() - edited > 5000) { mod = Object.assign({ autoban: { on: false, terms: [] }, chat: {} }, m); modDraw(); }
+    } catch (e) {}
+    setTimeout(modPoll, 3000);
+  }
+  try { if (localStorage.getItem("omnipulse.dock.mod") === "1") modOpen(true); } catch (e) {}
+  modDraw();
+  modPoll();
   applyOpts();
   poll();
 </script>

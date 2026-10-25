@@ -17,7 +17,8 @@ pub fn title(panel: &str) -> &'static str {
 /// Each page's settings as the page starts them
 fn defaults(page: &str) -> Map<String, Value> {
     let v = match page {
-        "chat" => json!({ "twitch": true, "kick": true, "time": false, "badges": true, "hover": false, "confirm": true, "secs": "600", "size": "13", "to": "all", "bttv": true, "ffz": true, "stv": true }),
+        "chat" => json!({ "twitch": true, "kick": true, "time": false, "badges": true, "hover": false, "confirm": true, "secs": "600", "size": "13", "to": "all", "bttv": true, "ffz": true, "stv": true,
+            "modPile": true, "lkPile": true, "pileMin": "3", "modLock": true, "modModes": true, "modShield": true, "modAb": true, "lkShield": true, "lkFollow": true, "lkSlow": true, "lkEmote": false, "lkSub": false }),
         "activity" => json!({ "hidden": ["firstwords"], "newest": true, "compact": false, "platform": true, "msg": true, "size": "13", "from": "all" }),
         _ => json!({ "from": "all", "cmds": false, "bot": true, "badges": true, "marks": true, "style": "plain", "size": 20, "bg": "0", "shadow": true, "dir": "bottom", "fade": 0, "max": 30, "bttv": true, "ffz": true, "stv": true, "name": "beside", "anim": "rise", "events": false, "pronouns": false, "first": true }),
     };
@@ -103,11 +104,25 @@ pub fn fields(panel: &str, vals: &Map<String, Value>, port: u64) -> Vec<Value> {
             note("Moderating"),
             sel("secs", "Time-Out Length", "How long the time-out button times someone out for.", &[(json!("60"), "1 minute"), (json!("300"), "5 minutes"), (json!("600"), "10 minutes"), (json!("3600"), "1 hour"), (json!("86400"), "1 day")]),
             tog("confirm", "Ask Before Banning", "A ban asks you to click again first, so a slip doesn't ban anyone."),
+            note("Moderation (the dock's shield)"),
+            tog("modPile", "Pile-Up", "Its switch in the panel. While it's on, the same message from several accounts folds into one card above chat, to ban them all at once. It's off until you switch it on, as a friendly raid's message repeats too."),
+            tog("modLock", "Raid Lockdown", "One button for a hate raid: it turns on what you choose below, and turns them off again."),
+            tog("modModes", "Chat Modes", "Slow, followers only, subscribers only, emotes only and unique chat, each a click. Twitch's."),
+            tog("modShield", "Shield Mode and Clear Chat", "Twitch's Shield Mode, and clearing chat (asked twice)."),
+            tog("modAb", "Auto-Ban", "Your banned words and phrases: add one in a moment, or take one off. Each message's shield button puts its words in."),
+            note("Raid Lockdown Turns On"),
+            tog("lkPile", "Pile-Up", ""),
+            tog("lkShield", "Shield Mode", ""),
+            tog("lkFollow", "Followers Only", "For as long as its own choice in the dock says (10 minutes at first)."),
+            tog("lkSlow", "Slow", ""),
+            tog("lkEmote", "Emotes Only", ""),
+            tog("lkSub", "Subscribers Only", ""),
             tog("hover", "Buttons Only on Hover", "Delete, time-out and ban show when you point at a message. Off, they're always there."),
             note("Chatting Back"),
             sel("to", "Your Messages Go To", "Where what you type in the dock is sent.", &[(json!("all"), "Twitch and Kick"), (json!("twitch"), "Twitch"), (json!("kick"), "Kick")]),
             note("In OBS"),
             info("Address", &format!("{base}/dock/chat"), "In OBS, open Docks > Custom Browser Docks, give it a name and paste this address. Changes here show there within a few seconds."),
+            info("Moderation Dock", &format!("{base}/dock/mod"), "Moderation on its own: Pile-Up, Raid Lockdown, chat modes, Shield Mode and Auto-Ban, as a dock beside your chat. These settings are its too."),
         ],
         "dockfeed" => {
             let mut f = vec![

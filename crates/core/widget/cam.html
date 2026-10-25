@@ -1,0 +1,164 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<!--
+  A webcam overlay you made in the Stream Suite (Settings > Streaming > Suite > Creators): one OBS Browser
+  source the size of your canvas, see-through. Its frame goes round where your camera is; its parts (a name tag,
+  a sticker, a LIVE badge, a clock, and live ones: Now Playing, alerts, the latest follow or sub, goals, the hype
+  train, chat) sit round it. The live parts are the widgets' own pages, each in its slot, so they update just as
+  the separate widgets do. /cam/<id>; it reads /now.json's suite.creators.
+-->
+<title>OmniPulse Webcam Overlay</title>
+<style>
+  html, body { margin: 0; height: 100%; background: transparent; overflow: hidden; }
+  body { font-family: "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif; color: #fff; --c1: #8e9bff; --c2: #ff7ac8; }
+  body.preview { background: #2a2a2e repeating-conic-gradient(#3a3a40 0 25%, #2a2a2e 0 50%) 0 0 / 32px 32px; }
+  #stage { position: absolute; inset: 0; }
+  /* the frame: round the camera's box, in its shape and border */
+  #frame { position: absolute; box-sizing: border-box; pointer-events: none; }
+  #frame .edge { position: absolute; inset: 0; border-radius: var(--r, 1.4rem); }
+  .s-square { --r: 0; } .s-rounded { --r: 1.4rem; } .s-circle { --r: 50%; } .s-arch { --r: 50% 50% 1.2rem 1.2rem / 40% 40% 1.2rem 1.2rem; }
+  .s-hex .edge { border-radius: 0 !important; clip-path: polygon(12% 0, 88% 0, 100% 50%, 88% 100%, 12% 100%, 0 50%); }
+  .b-thin .edge { box-shadow: inset 0 0 0 0.25rem var(--c1); }
+  .b-thick .edge { box-shadow: inset 0 0 0 0.6rem var(--c1), inset 0 0 0 0.75rem rgba(0, 0, 0, 0.35); }
+  .b-double .edge { box-shadow: inset 0 0 0 0.25rem var(--c1), inset 0 0 0 0.55rem transparent, inset 0 0 0 0.8rem var(--c2); }
+  .b-glow .edge { box-shadow: inset 0 0 0 0.3rem var(--c1), 0 0 1.6rem 0.2rem var(--c1), inset 0 0 1.2rem var(--c1); }
+  .b-gradient .edge { padding: 0.4rem; background: linear-gradient(135deg, var(--c1), var(--c2)); -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor; mask-composite: exclude; }
+  /* Corner Brackets: only the corners, game-HUD style */
+  .b-brackets .edge { background:
+      linear-gradient(var(--c1), var(--c1)) top left / 18% 0.35rem no-repeat, linear-gradient(var(--c1), var(--c1)) top left / 0.35rem 18% no-repeat,
+      linear-gradient(var(--c1), var(--c1)) top right / 18% 0.35rem no-repeat, linear-gradient(var(--c1), var(--c1)) top right / 0.35rem 18% no-repeat,
+      linear-gradient(var(--c2), var(--c2)) bottom left / 18% 0.35rem no-repeat, linear-gradient(var(--c2), var(--c2)) bottom left / 0.35rem 18% no-repeat,
+      linear-gradient(var(--c2), var(--c2)) bottom right / 18% 0.35rem no-repeat, linear-gradient(var(--c2), var(--c2)) bottom right / 0.35rem 18% no-repeat; border-radius: 0 !important; }
+  /* Edge Light: a stroke of light running round it */
+  @property --edge { syntax: "<angle>"; initial-value: 0deg; inherits: false; }
+  .b-edge .edge { padding: 0.35rem; background: conic-gradient(from var(--edge), var(--c1) 0%, transparent 25%, var(--c2) 50%, transparent 75%, var(--c1) 100%);
+    -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor; mask-composite: exclude; animation: edge 4s linear infinite; }
+  @keyframes edge { to { --edge: 360deg; } }
+  body.still .b-edge .edge { animation: none; }
+  /* the parts */
+  .part { position: absolute; box-sizing: border-box; }
+  .part iframe { width: 100%; height: 100%; border: 0; background: transparent; }
+  .tag { display: flex; align-items: center; justify-content: center; padding: 0 1rem; border-radius: 0.8rem; font-weight: 800; font-size: var(--fs, 1.6rem); letter-spacing: 0.02em; white-space: nowrap; overflow: hidden; }
+  .t-dark .tag { background: rgba(10, 8, 20, 0.85); }
+  .t-glass .tag { background: rgba(255, 255, 255, 0.14); border: 1px solid rgba(255, 255, 255, 0.3); backdrop-filter: blur(10px); }
+  .t-neon .tag { background: rgba(8, 6, 20, 0.88); border: 2px solid var(--c1); box-shadow: 0 0 1rem var(--c1); text-shadow: 0 0 0.6rem var(--c1); }
+  .t-comic .tag { background: #fff; color: #111; border: 3px solid #111; box-shadow: 4px 4px 0 #111; }
+  .t-pastel .tag { background: color-mix(in srgb, var(--c1) 14%, #fffafc); color: #3a2a4a; border: 0.2rem solid color-mix(in srgb, var(--c1) 45%, #fff); border-radius: 999px; }
+  .t-gradient .tag, .t-minimal .tag { background: linear-gradient(90deg, var(--c1), var(--c2)); }
+  .t-minimal .tag { background: none; text-shadow: 0 2px 6px rgba(0, 0, 0, 0.9); }
+  .badge { display: flex; align-items: center; justify-content: center; gap: 0.4rem; border-radius: 0.5rem; background: #e5243b; font-weight: 900; letter-spacing: 0.12em; font-size: 1.2rem; }
+  .badge::before { content: ""; width: 0.6rem; height: 0.6rem; border-radius: 50%; background: #fff; animation: blink 1.4s infinite; }
+  @keyframes blink { 50% { opacity: 0.25; } }
+  .sticker { background: var(--img) center / contain no-repeat; filter: drop-shadow(0 0.3rem 0.5rem rgba(0, 0, 0, 0.45)); }
+  .clock { font-variant-numeric: tabular-nums; }
+  /* the camera stand-in, only in the app's preview (?preview=1) */
+  #cam { position: absolute; background: linear-gradient(160deg, #3b4766, #2a2f45); display: none; overflow: hidden; }
+  body.preview #cam { display: block; }
+  #cam::after { content: ""; position: absolute; left: 50%; bottom: -8%; width: 52%; height: 78%; transform: translateX(-50%); background: radial-gradient(circle at 50% 28%, #7f8bb0 0 18%, transparent 18.5%), radial-gradient(ellipse at 50% 100%, #6b7699 0 45%, transparent 45.5%); }
+</style>
+</head>
+<body>
+<div id="stage"></div>
+<script>
+  "use strict";
+  const $ = (id) => document.getElementById(id);
+  const ID = decodeURIComponent((location.pathname.match(/^\/cam\/([^/?#]+)/) || [])[1] || "");
+  const PREVIEW = /[?&]preview=1/.test(location.search);
+  if (PREVIEW) document.body.classList.add("preview");
+  const SPOTS = { br: [72, 62, 26, 34], bl: [2, 62, 26, 34], tr: [72, 4, 26, 34], tl: [2, 4, 26, 34] };
+  // (each live part: its widget's page, and the shape of its slot as wide : tall)
+  const LIVE = { now: ["/", 3.6], alerts: ["/alerts", 3.6], follow: ["/latest-follow", 4.6], sub: ["/latest-sub", 4.6], goals: ["/goals", 1.8], hype: ["/hype", 4.6], chat: ["/chat", 0.7], socials: ["/socials", 4.2] };
+  const SIZES = { small: 0.6, medium: 0.85, large: 1.1 };
+  let sig = "";
+
+  function box(c) {
+    const s = c.spot === "custom" ? [Number(c.x) || 70, Number(c.y) || 60, Number(c.w) || 26, Number(c.h) || 34] : SPOTS[c.spot] || SPOTS.br;
+    return { x: s[0], y: s[1], w: s[2], h: s[3] };
+  }
+  // (a part's place round the camera: its slot's size from the camera's width, then put where it's set)
+  function placed(el, p, b, ratio) {
+    const W = innerWidth, H = innerHeight, bx = (b.x / 100) * W, by = (b.y / 100) * H, bw = (b.w / 100) * W, bh = (b.h / 100) * H;
+    const k = SIZES[p.size] || SIZES.medium;
+    let w = bw * k, h = w / ratio;
+    if (p.type === "chat") { h = bh; w = h * ratio; }
+    const gap = 10;
+    let x = bx + (bw - w) / 2, y = by + bh + gap;
+    if (p.place === "above") y = by - h - gap;
+    if (p.place === "left") { x = bx - w - gap; y = by + (bh - h) / 2; }
+    if (p.place === "right") { x = bx + bw + gap; y = by + (bh - h) / 2; }
+    if (p.place === "in-top") y = by + gap;
+    if (p.place === "in-bottom") y = by + bh - h - gap;
+    if (p.place === "corner") { w *= 0.45; h *= 0.45; x = bx + bw - w * 0.6; y = by - h * 0.45; }
+    // (kept on the canvas)
+    x = Math.max(0, Math.min(W - w, x)); y = Math.max(0, Math.min(H - h, y));
+    Object.assign(el.style, { left: x + "px", top: y + "px", width: w + "px", height: h + "px" });
+  }
+  function draw(c, now) {
+    document.body.className = (PREVIEW ? "preview " : "") + "t-" + (c.theme || "dark") + (now && now.suite && now.suite.anim === "none" ? " still" : "");
+    if (c.colors && c.colors.c1) { document.body.style.setProperty("--c1", c.colors.c1); document.body.style.setProperty("--c2", c.colors.c2); }
+    const b = box(c), stage = $("stage");
+    const next = JSON.stringify(c) + innerWidth + "x" + innerHeight;
+    if (next === sig) return tick(c);
+    sig = next;
+    // (the live parts kept as they are when only their place changes, so they don't reload)
+    const keep = {};
+    stage.querySelectorAll(".part.live").forEach((e) => (keep[e.dataset.src] = e));
+    stage.innerHTML = "";
+    const W = innerWidth, H = innerHeight;
+    const cam = document.createElement("div"); cam.id = "cam";
+    const fr = document.createElement("div"); fr.id = "frame"; fr.className = "s-" + (c.shape || "rounded") + " b-" + (c.border || "thin");
+    [cam, fr].forEach((e) => Object.assign(e.style, { left: (b.x / 100) * W + "px", top: (b.y / 100) * H + "px", width: (b.w / 100) * W + "px", height: (b.h / 100) * H + "px" }));
+    cam.style.borderRadius = getComputedStyle(document.body).getPropertyValue("--r") || "";
+    fr.innerHTML = '<div class="edge"></div>';
+    stage.append(cam, fr);
+    for (const p of c.parts || []) {
+      if (p.on === false) continue;
+      let el;
+      if (LIVE[p.type]) {
+        const src = LIVE[p.type][0] + (PREVIEW ? "?preview=1" : "");
+        el = keep[src] || Object.assign(document.createElement("div"), { innerHTML: '<iframe src="' + src + '" allowtransparency="true"></iframe>' });
+        el.className = "part live"; el.dataset.src = src;
+        placed(el, p, b, LIVE[p.type][1]);
+      } else if (p.type === "name") {
+        el = document.createElement("div"); el.className = "part tag"; el.textContent = p.text || "Your Name";
+        placed(el, p, b, 4.4);
+        el.style.setProperty("--fs", parseFloat(el.style.height) * 0.48 + "px");
+      } else if (p.type === "live") {
+        el = document.createElement("div"); el.className = "part badge"; el.textContent = "LIVE";
+        placed(el, Object.assign({ size: "small" }, p), b, 3.2);
+      } else if (p.type === "clock") {
+        el = document.createElement("div"); el.className = "part tag clock";
+        placed(el, Object.assign({ size: "small" }, p), b, 3.2);
+        el.style.setProperty("--fs", parseFloat(el.style.height) * 0.5 + "px");
+      } else if (p.type === "sticker" && p.img) {
+        el = document.createElement("div"); el.className = "part sticker"; el.style.setProperty("--img", 'url("' + String(p.img).replace(/["\\]/g, "") + '")');
+        placed(el, p, b, 1);
+      }
+      if (el) stage.append(el);
+    }
+    tick(c);
+  }
+  function tick() {
+    const t = new Date();
+    document.querySelectorAll(".clock").forEach((e) => (e.textContent = t.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })));
+  }
+  setInterval(tick, 10000);
+
+  let last = null;
+  async function poll() {
+    try {
+      const s = await (await fetch("/now.json" + (PREVIEW ? "?preview=1" : ""), { cache: "no-store" })).json();
+      if (s.accent) { document.body.style.setProperty("--c1", s.accent); document.body.style.setProperty("--c2", s.accent2 || s.accent); }
+      const all = (s.suite && s.suite.creators) || [];
+      const c = all.find((x) => x.id === ID) || all.find((x) => x.kind === "cam") || null;
+      if (c) { last = [c, s]; draw(c, s); }
+    } catch (e) {}
+    setTimeout(poll, 1500);
+  }
+  addEventListener("resize", () => { sig = ""; if (last) draw(last[0], last[1]); });
+  poll();
+</script>
+</body>
+</html>

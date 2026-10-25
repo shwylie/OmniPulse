@@ -1,0 +1,218 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<!--
+  Your channel panels, made in the Stream Suite (Settings > Streaming > Suite > Creators > Panels): each one
+  drawn here at Twitch's panel size (320 wide, at twice that for sharpness), in one theme, with Save as PNG for
+  each and for all of them. Upload them on Twitch (your channel, About, Edit Panels) or Kick. /panels; it reads
+  /now.json's suite.creators.
+-->
+<title>OmniPulse Panels</title>
+<style>
+  html, body { margin: 0; min-height: 100%; background: #16141f; color: #e8e6f0; font-family: "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif; }
+  main { max-width: 760px; margin: 0 auto; padding: 28px 20px 60px; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  p.lede { margin: 0 0 22px; color: #a9a5ba; font-size: 14px; }
+  .row { display: flex; align-items: center; gap: 16px; margin: 0 0 14px; }
+  canvas { width: 320px; border-radius: 6px; background: repeating-conic-gradient(#2a2733 0 25%, #221f2b 0 50%) 0 0 / 16px 16px; }
+  button { font: 600 13px "Segoe UI", sans-serif; color: #fff; background: #3a3550; border: 1px solid #555070; border-radius: 9px; padding: 8px 14px; cursor: pointer; }
+  button:hover { background: #4a4466; }
+  button.all { background: linear-gradient(135deg, #8e9bff, #ff7ac8); border: 0; margin-bottom: 22px; }
+  .name { color: #a9a5ba; font-size: 12px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Your panels</h1>
+  <p class="lede">Save each one as a picture, then add it on Twitch (your channel, About, then Edit Panels) or Kick. Change them in OmniPulse: Settings &gt; Streaming &gt; Suite &gt; Creators &gt; Panels.</p>
+  <button class="all" id="all">Save them all</button>
+  <div id="list"></div>
+</main>
+<script>
+  "use strict";
+  const $ = (id) => document.getElementById(id);
+  // (Twitch's panels: 320 wide, up to 600 tall)
+  const W = 320, MAX_H = 600;
+  // (each one drawn at Twitch's size, or twice it (640 wide), so its words and logos stay sharp on high-density
+  // screens: Twitch shows it at 320 either way)
+  let SCALE = 2;
+  // (an icon for each, picked from its title's words)
+  const ICONS = {
+    user: "M12 12a5 5 0 1 0 0-10 5 5 0 0 0 0 10zm0 2c-4.4 0-8 2.2-8 5v3h16v-3c0-2.8-3.6-5-8-5z",
+    calendar: "M7 2v2H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2h-2V2h-2v2H9V2zm-2 8h14v10H5z",
+    shield: "M12 2l8 3v6c0 5-3.4 9.4-8 11-4.6-1.6-8-6-8-11V5z",
+    link: "M10.6 13.4a1 1 0 0 1 0-1.4l3.5-3.5a3 3 0 1 1 4.2 4.2l-2 2-1.4-1.4 2-2a1 1 0 0 0-1.4-1.4L12 13.4a1 1 0 0 1-1.4 0zM13.4 10.6a1 1 0 0 1 0 1.4l-3.5 3.5a3 3 0 1 1-4.2-4.2l2-2 1.4 1.4-2 2a1 1 0 0 0 1.4 1.4L12 10.6a1 1 0 0 1 1.4 0z",
+    heart: "M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54z",
+    chat: "M4 4h16a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H8l-4 4V6a2 2 0 0 1 2-2z",
+    bag: "M7 7V6a5 5 0 0 1 10 0v1h3l-1 15H5L4 7zm2 0h6V6a3 3 0 0 0-6 0z",
+    pc: "M3 4h18v12H3zm6 14h6v2H9z",
+    star: "M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z",
+    music: "M9 3v12.3A3.5 3.5 0 1 0 11 18V8h6V3z",
+    question: "M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm1 15h-2v-2h2zm2.1-7.7l-.9.9c-.7.7-1.2 1.3-1.2 2.8h-2v-.5c0-1.1.5-2.1 1.2-2.8l1.2-1.3A2 2 0 1 0 10 10H8a4 4 0 1 1 7.1 2.3z",
+    game: "M7 6h10a5 5 0 0 1 0 10c-1.5 0-2.4-.7-3.2-1.6h-3.6C9.4 15.3 8.5 16 7 16A5 5 0 0 1 7 6zm-1 3v2H4v2h2v2h2v-2h2v-2H8V9z",
+    pulse: "M2 13h4l2.5-6 4 12 3-9 1.5 3H22v-2h-3.7L16 6.5l-3 9-4-12L5.3 11H2z",
+  };
+  const ICON_OF = [[/about|me|bio|who/i, "user"], [/schedule|times|when|days/i, "calendar"], [/rule/i, "shield"], [/social|follow|twitter|insta|tiktok|link/i, "link"],
+    [/donat|tip|support|sub/i, "heart"], [/discord|chat|command/i, "chat"], [/merch|shop|store/i, "bag"], [/setup|pc|spec|gear/i, "pc"], [/music|song|request/i, "music"],
+    [/faq|question|help/i, "question"], [/game|play/i, "game"]];
+  const iconFor = (t) => (ICON_OF.find(([re]) => re.test(t)) || [0, "star"])[1];
+
+  function rounded(c, x, y, w, h, r) { c.beginPath(); c.roundRect(x, y, w, h, r); }
+  // (an extended panel's words: wrapped to its width, " / " starting a new paragraph)
+  function wrap(c, text, width) {
+    const out = [];
+    for (const para of String(text || "").split(/\s+\/\s+|\n/)) {
+      let line = "";
+      for (const w of para.split(/\s+/).filter(Boolean)) {
+        const next = line ? line + " " + w : w;
+        if (c.measureText(next).width > width && line) { out.push(line); line = w; } else line = next;
+      }
+      out.push(line);
+    }
+    return out;
+  }
+  const FONT = (th) => th === "pixel" ? '"Cascadia Mono", Consolas, monospace' : th === "comic" ? '"Comic Sans MS", "Segoe UI", sans-serif' : '"Segoe UI Variable Display", "Segoe UI", sans-serif';
+  // One panel: its title (and line under it), in the set's theme and shape; extended, its words under the title
+  function draw(cv, p, set) {
+    // (extended, as set; or its line won't fit on one line beside its title, so it's extended to fit it all)
+    const probe = document.createElement("canvas").getContext("2d");
+    probe.font = "500 11px " + FONT(set.theme);
+    const room = W - (set.icons !== false ? 84 : 22) - 18;
+    const ext = !!p.line && (!!set.extended || probe.measureText(p.line).width > room);
+    let H = { short: 80, medium: 100, tall: 160, square: 320 }[set.height] || 100;
+    let body = [];
+    if (ext) {
+      // (as tall as its words need: a header, then the lines)
+      const m = document.createElement("canvas").getContext("2d");
+      m.font = "500 14px " + FONT(set.theme);
+      body = wrap(m, p.line, W - 44);
+      if (body.length > 10) { m.font = "500 12.5px " + FONT(set.theme); body = wrap(m, p.line, W - 44); }
+      p.fs = body.length > 10 ? 12.5 : 14; p.lh = body.length > 10 ? 17 : 20;
+      // (Twitch's tallest is 600: smaller words first, down to 10 px; then the last line ends in ...)
+      const head = 74 + 18 + (set.theme === "y2k" ? 24 : 0);
+      while (head + body.length * p.lh > MAX_H && p.fs > 10) { p.fs -= 0.5; p.lh = Math.round(p.fs * 1.36); m.font = "500 " + p.fs + "px " + FONT(set.theme); body = wrap(m, p.line, W - 44); }
+      const fit = Math.floor((MAX_H - head) / p.lh);
+      if (body.length > fit) { body = body.slice(0, fit); let l = body[fit - 1]; while (m.measureText(l + "…").width > W - 44 && l.length) l = l.slice(0, -1); body[fit - 1] = l + "…"; }
+      H = Math.min(MAX_H, head + body.length * p.lh);
+    }
+    cv.width = W * SCALE; cv.height = H * SCALE;
+    const c = cv.getContext("2d");
+    c.scale(SCALE, SCALE);
+    c.clearRect(0, 0, W, H);
+    const c1 = (set.colors && set.colors.c1) || "#8e9bff", c2 = (set.colors && set.colors.c2) || "#ff7ac8";
+    const th = set.theme || "dark", shape = set.shape || "rounded";
+    const r = shape === "square" ? 0 : shape === "pill" ? H / 2 : 14;
+    const m = th === "comic" || th === "y2k" ? 6 : 3;
+    const g = c.createLinearGradient(0, 0, W, H); g.addColorStop(0, c1); g.addColorStop(1, c2);
+    let ink = "#ffffff", sub = "rgba(255,255,255,0.78)";
+    // (its panel)
+    if (th === "comic") { c.fillStyle = "#111"; rounded(c, m + 4, m + 4, W - m * 2 - 4, H - m * 2 - 4, r); c.fill(); c.fillStyle = "#fff"; rounded(c, m, m, W - m * 2 - 4, H - m * 2 - 4, r); c.fill(); c.lineWidth = 3; c.strokeStyle = "#111"; c.stroke(); ink = "#111"; sub = "rgba(17,17,17,0.7)"; }
+    else if (th === "y2k") { c.fillStyle = "#2b1b40"; rounded(c, m + 4, m + 4, W - m * 2 - 4, H - m * 2 - 4, 6); c.fill(); c.fillStyle = "#fdf6ff"; rounded(c, m, m, W - m * 2 - 4, H - m * 2 - 4, 6); c.fill(); c.lineWidth = 2.5; c.strokeStyle = "#2b1b40"; c.stroke();
+      const bar = c.createLinearGradient(0, 0, W, 0); bar.addColorStop(0, "#ff9ad5"); bar.addColorStop(0.55, "#b9a4ff"); bar.addColorStop(1, "#9ad0ff"); c.fillStyle = bar; c.fillRect(m + 1.5, m + 1.5, W - m * 2 - 7, 20); c.fillStyle = "#2b1b40"; c.fillRect(m + 1.5, m + 21, W - m * 2 - 7, 2.5);
+      c.font = "900 11px Segoe UI"; c.textAlign = "right"; c.fillText("–  □  ×", W - m - 12, m + 15); ink = "#2b1b40"; sub = "rgba(43,27,64,0.75)"; }
+    else if (th === "pastel") { c.fillStyle = "#fff6fb"; rounded(c, m, m, W - m * 2, H - m * 2, Math.max(r, 22)); c.fill(); c.lineWidth = 4; c.strokeStyle = c1; c.globalAlpha = 0.55; c.stroke(); c.globalAlpha = 1; ink = "#3a2a4a"; sub = "rgba(58,42,74,0.72)"; }
+    else if (th === "pixel") { c.fillStyle = "#f4f0ff"; c.fillRect(m, m + 4, W - m * 2, H - m * 2 - 8); c.fillRect(m + 4, m, W - m * 2 - 8, H - m * 2); c.fillStyle = "#1b1030"; c.fillRect(m + 4, m + 4, W - m * 2 - 8, H - m * 2 - 8); c.strokeStyle = c1; c.lineWidth = 3; c.strokeRect(m + 8, m + 8, W - m * 2 - 16, H - m * 2 - 16); }
+    else if (th === "neon") { c.fillStyle = "rgba(8,6,20,0.94)"; rounded(c, m + 4, m + 4, W - m * 2 - 8, H - m * 2 - 8, r); c.fill(); c.shadowColor = c1; c.shadowBlur = 14; c.lineWidth = 2.5; c.strokeStyle = c1; c.stroke(); c.shadowBlur = 0; }
+    else if (th === "glass") { c.fillStyle = "rgba(255,255,255,0.16)"; rounded(c, m, m, W - m * 2, H - m * 2, r); c.fill(); c.lineWidth = 1.5; c.strokeStyle = "rgba(255,255,255,0.4)"; c.stroke(); }
+    else if (th === "gradient") { c.fillStyle = g; rounded(c, m, m, W - m * 2, H - m * 2, r); c.fill(); }
+    else if (th === "minimal") { c.fillStyle = g; c.fillRect(m, H - m - 4, W - m * 2, 4); }
+    else { c.fillStyle = "#14111f"; rounded(c, m, m, W - m * 2, H - m * 2, r); c.fill(); c.fillStyle = g; c.fillRect(m + (r ? r * 0.6 : 0), m, W - m * 2 - (r ? r * 1.2 : 0), 3); }
+    // (extended: a header (icon and title) and the words under it, with a line between)
+    if (ext) {
+      const top = th === "y2k" ? 24 : 0, font = FONT(th);
+      let x = 22;
+      if (set.icons !== false) {
+        const s = 36;
+        c.fillStyle = th === "comic" || th === "pastel" || th === "y2k" ? c1 : g;
+        if (th === "pixel") c.fillRect(x, top + 18, s, s); else { rounded(c, x, top + 18, s, s, th === "pastel" ? s / 2 : 9); c.fill(); }
+        c.save(); c.translate(x + s * 0.2, top + 18 + s * 0.2); c.scale((s * 0.6) / 24, (s * 0.6) / 24); c.fillStyle = "#fff"; c.fill(new Path2D(ICONS[p.icon || iconFor(p.title)] || ICONS.star)); c.restore();
+        x += s + 14;
+      }
+      c.textAlign = "left"; c.textBaseline = "middle";
+      let fs = 24;
+      c.font = "800 " + fs + "px " + font;
+      while (c.measureText(p.title).width > W - x - 18 && fs > 12) { fs -= 1; c.font = "800 " + fs + "px " + font; }
+      c.fillStyle = th === "minimal" ? g : ink;
+      if (th === "neon") { c.shadowColor = c1; c.shadowBlur = 10; }
+      c.fillText(th === "pixel" ? p.title.toUpperCase() : p.title, x, top + 36);
+      c.shadowBlur = 0;
+      const lg = c.createLinearGradient(22, 0, W - 22, 0); lg.addColorStop(0, c1); lg.addColorStop(1, c2);
+      c.fillStyle = th === "comic" ? "#111" : lg; c.fillRect(22, top + 64, W - 44, 2);
+      c.font = "500 " + p.fs + "px " + font; c.fillStyle = sub;
+      body.forEach((l, i) => c.fillText(l, 22, top + 84 + i * p.lh));
+      return;
+    }
+    // (its icon, in a tile of its colours)
+    const top = th === "y2k" ? 24 : 0;
+    let x = 22;
+    if (set.icons !== false) {
+      const s = Math.min(46, H - top - 34);
+      const iy = top + (H - top - s) / 2;
+      c.fillStyle = th === "comic" || th === "pastel" || th === "y2k" ? c1 : g;
+      if (th === "pixel") c.fillRect(x, iy, s, s); else { rounded(c, x, iy, s, s, th === "pastel" ? s / 2 : 10); c.fill(); }
+      c.save(); c.translate(x + s * 0.2, iy + s * 0.2); c.scale((s * 0.6) / 24, (s * 0.6) / 24); c.fillStyle = "#fff"; c.fill(new Path2D(ICONS[p.icon || iconFor(p.title)] || ICONS.star)); c.restore();
+      x += s + 16;
+    }
+    // (its words)
+    const font = th === "pixel" ? '"Cascadia Mono", Consolas, monospace' : th === "comic" ? '"Comic Sans MS", "Segoe UI", sans-serif' : '"Segoe UI Variable Display", "Segoe UI", sans-serif';
+    c.textAlign = "left"; c.textBaseline = "middle";
+    const big = Math.min(30, (H - top) * 0.32);
+    let fs = big;
+    c.font = "800 " + fs + "px " + font;
+    while (c.measureText(p.title).width > W - x - 18 && fs > 12) { fs -= 1; c.font = "800 " + fs + "px " + font; }
+    const mid = top + (H - top) / 2;
+    c.fillStyle = th === "minimal" ? g : ink;
+    if (th === "neon") { c.shadowColor = c1; c.shadowBlur = 10; }
+    c.fillText(th === "pixel" ? p.title.toUpperCase() : p.title, x, p.line ? mid - fs * 0.38 : mid);
+    c.shadowBlur = 0;
+    if (p.line) {
+      // (its line, smaller until it fits: never cut off)
+      // (a little smaller first; still too long, two lines, the title moved up for them)
+      const room = W - x - 18;
+      let ls = Math.max(11, fs * 0.46);
+      c.font = "500 " + ls + "px " + font;
+      while (c.measureText(p.line).width > room && ls > 10) { ls -= 0.5; c.font = "500 " + ls + "px " + font; }
+      c.fillStyle = sub;
+      if (c.measureText(p.line).width <= room) c.fillText(p.line, x, mid + fs * 0.5);
+      else {
+        const two = wrap(c, p.line, room);
+        if (two.length > 2) { let l = two[1]; while (c.measureText(l + "…").width > room && l.length) l = l.slice(0, -1); two.splice(1, two.length - 1, l + "…"); }
+        two.forEach((l, i) => c.fillText(l, x, mid + fs * 0.42 + i * (ls + 3)));
+      }
+    }
+  }
+  function save(cv, name) {
+    cv.toBlob((b) => { const a = document.createElement("a"); a.href = URL.createObjectURL(b); a.download = name.replace(/[^\w\- ]+/g, "").trim().replace(/\s+/g, "-").toLowerCase() + ".png"; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 2000); }, "image/png");
+  }
+  let sig = "", made = [];
+  async function poll() {
+    try {
+      const s = await (await fetch("/now.json", { cache: "no-store" })).json();
+      const set = ((s.suite && s.suite.creators) || []).find((x) => x.kind === "panels");
+      if (set) {
+        if (!set.colors && s.accent) set.colors = { c1: s.accent, c2: s.accent2 || s.accent };
+        SCALE = Number(set.scale) === 1 ? 1 : 2;
+        const next = JSON.stringify(set);
+        if (next !== sig) {
+          sig = next;
+          const list = $("list"); list.innerHTML = ""; made = [];
+          const all = (set.panels || []).slice();
+          if (set.powered) all.push({ title: "Powered by OmniPulse", line: set.extended ? "This stream's music, chatbot, alerts and overlays all run on OmniPulse." + (set.site ? " / Get it at " + set.site : "") : (set.site || "Music, chatbot and stream tools in one app"), icon: "pulse" });
+          for (const p of all) {
+            const row = document.createElement("div"); row.className = "row";
+            const cv = document.createElement("canvas"); draw(cv, p, set);
+            const b = document.createElement("button"); b.textContent = "Save as PNG"; b.onclick = () => save(cv, p.title || "panel");
+            row.append(cv, b); list.append(row); made.push([cv, p.title || "panel"]);
+          }
+          if (/[?&]save=1/.test(location.search) && !poll.saved) { poll.saved = true; made.forEach(([cv, n], i) => setTimeout(() => save(cv, n), i * 400)); }
+        }
+      }
+    } catch (e) {}
+    setTimeout(poll, 2000);
+  }
+  $("all").onclick = () => made.forEach(([cv, n], i) => setTimeout(() => save(cv, n), i * 400));
+  poll();
+</script>
+</body>
+</html>

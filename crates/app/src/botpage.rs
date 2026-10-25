@@ -76,6 +76,68 @@ pub fn list_items(v: &str) -> Vec<String> {
     v.split('|').map(|x| x.trim().to_string()).collect()
 }
 
+/// The webcam overlay's parts: (id, name, on at first, place, size)
+pub const CAM_PARTS: [(&str, &str, bool, &str, &str); 12] = [("name", "Name Tag", true, "below", "medium"), ("live", "LIVE Badge", true, "corner", "small"), ("now", "Now Playing", false, "above", "medium"), ("alerts", "Alerts", true, "above", "large"), ("follow", "Latest Follow", false, "left", "medium"), ("sub", "Latest Sub", false, "left", "medium"), ("goals", "Goals", false, "left", "medium"), ("hype", "Hype Train", false, "above", "medium"), ("chat", "Chat", false, "left", "medium"), ("socials", "Social Plug", false, "below", "medium"), ("clock", "Clock", false, "in-top", "small"), ("sticker", "A GIF or Picture", false, "corner", "medium")];
+
+/// The webcam overlay laid out as cam.html lays it out, on a 1920 × 1080 canvas: the camera's box, then each
+/// part that's on: (id, name, x, y, w, h), as fractions of the canvas
+pub fn cam_layout(cur: &Map<String, Value>) -> Vec<(String, String, f32, f32, f32, f32)> {
+    let num = |k: &str, d: f32| cur.get(k).and_then(|v| v.as_f64().or_else(|| v.as_str().and_then(|s| s.parse().ok()))).map(|v| v as f32).unwrap_or(d);
+    let or = |k: &str, d: &'static str| if s(cur, k).is_empty() { d.to_string() } else { s(cur, k).to_string() };
+    let spot = or("camSpot", "br");
+    let (bx, by, bw, bh) = match spot.as_str() {
+        "bl" => (2.0, 62.0, 26.0, 34.0), "tr" => (72.0, 4.0, 26.0, 34.0), "tl" => (2.0, 4.0, 26.0, 34.0),
+        "custom" => (num("camX", 72.0), num("camY", 62.0), num("camW", 26.0), num("camH", 34.0)),
+        _ => (72.0, 62.0, 26.0, 34.0),
+    };
+    let (w0, h0) = (1920.0f32, 1080.0f32);
+    let (bx, by, bw, bh) = (bx / 100.0 * w0, by / 100.0 * h0, bw / 100.0 * w0, bh / 100.0 * h0);
+    let mut out = vec![("cam".to_string(), "Your camera".to_string(), bx / w0, by / h0, bw / w0, bh / h0)];
+    for (id, name, dflt, place0, size0) in CAM_PARTS {
+        if !on(cur, &format!("camP_{id}"), dflt) { continue; }
+        let place = or(&format!("camP_{id}Place"), place0);
+        let k = match or(&format!("camP_{id}Size"), size0).as_str() { "small" => 0.6, "large" => 1.1, _ => 0.85 };
+        let ratio = match id { "now" | "alerts" => 3.6, "follow" | "sub" | "hype" => 4.6, "goals" => 1.8, "chat" => 0.7, "socials" => 4.2, "name" => 4.4, "live" | "clock" => 3.2, _ => 1.0 };
+        let (mut w, mut h) = (bw * k, bw * k / ratio);
+        if id == "chat" { h = bh; w = h * ratio; }
+        let gap = 10.0;
+        let (mut x, mut y) = (bx + (bw - w) / 2.0, by + bh + gap);
+        match place.as_str() {
+            "above" => y = by - h - gap,
+            "left" => { x = bx - w - gap; y = by + (bh - h) / 2.0; }
+            "right" => { x = bx + bw + gap; y = by + (bh - h) / 2.0; }
+            "in-top" => y = by + gap,
+            "in-bottom" => y = by + bh - h - gap,
+            "corner" => { w *= 0.45; h *= 0.45; x = bx + bw - w * 0.6; y = by - h * 0.45; }
+            _ => {}
+        }
+        x = x.clamp(0.0, (w0 - w).max(0.0)); y = y.clamp(0.0, (h0 - h).max(0.0));
+        let label = if id == "name" { or("camNameText", "Your Name") } else { name.to_string() };
+        out.push((id.to_string(), label, x / w0, y / h0, w / w0, h / h0));
+    }
+    out
+}
+
+/// A panel's icon, from its title's words (as panels.html picks it): an SVG path, 24 x 24
+pub fn panel_icon(title: &str) -> &'static str {
+    let t = title.to_lowercase();
+    // (the OmniPulse panel's own mark first)
+    if t.contains("omnipulse") { return "M2 13h4l2.5-6 4 12 3-9 1.5 3H22v-2h-3.7L16 6.5l-3 9-4-12L5.3 11H2z"; }
+    if ["about", "me", "bio", "who"].iter().any(|w| t.contains(w)) { return "M12 12a5 5 0 1 0 0-10 5 5 0 0 0 0 10zm0 2c-4.4 0-8 2.2-8 5v3h16v-3c0-2.8-3.6-5-8-5z"; }
+    if ["schedule", "times", "when", "days"].iter().any(|w| t.contains(w)) { return "M7 2v2H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2h-2V2h-2v2H9V2zm-2 8h14v10H5z"; }
+    if ["rule"].iter().any(|w| t.contains(w)) { return "M12 2l8 3v6c0 5-3.4 9.4-8 11-4.6-1.6-8-6-8-11V5z"; }
+    if ["social", "follow", "twitter", "insta", "tiktok", "link"].iter().any(|w| t.contains(w)) { return "M10.6 13.4a1 1 0 0 1 0-1.4l3.5-3.5a3 3 0 1 1 4.2 4.2l-2 2-1.4-1.4 2-2a1 1 0 0 0-1.4-1.4L12 13.4a1 1 0 0 1-1.4 0zM13.4 10.6a1 1 0 0 1 0 1.4l-3.5 3.5a3 3 0 1 1-4.2-4.2l2-2 1.4 1.4-2 2a1 1 0 0 0 1.4 1.4L12 10.6a1 1 0 0 1 1.4 0z"; }
+    if ["donat", "tip", "support", "sub"].iter().any(|w| t.contains(w)) { return "M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54z"; }
+    if ["discord", "chat", "command"].iter().any(|w| t.contains(w)) { return "M4 4h16a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H8l-4 4V6a2 2 0 0 1 2-2z"; }
+    if ["merch", "shop", "store"].iter().any(|w| t.contains(w)) { return "M7 7V6a5 5 0 0 1 10 0v1h3l-1 15H5L4 7zm2 0h6V6a3 3 0 0 0-6 0z"; }
+    if ["setup", "pc", "spec", "gear"].iter().any(|w| t.contains(w)) { return "M3 4h18v12H3zm6 14h6v2H9z"; }
+    if ["music", "song", "request"].iter().any(|w| t.contains(w)) { return "M9 3v12.3A3.5 3.5 0 1 0 11 18V8h6V3z"; }
+    if ["faq", "question", "help"].iter().any(|w| t.contains(w)) { return "M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm1 15h-2v-2h2zm2.1-7.7l-.9.9c-.7.7-1.2 1.3-1.2 2.8h-2v-.5c0-1.1.5-2.1 1.2-2.8l1.2-1.3A2 2 0 1 0 10 10H8a4 4 0 1 1 7.1 2.3z"; }
+    if ["game", "play"].iter().any(|w| t.contains(w)) { return "M7 6h10a5 5 0 0 1 0 10c-1.5 0-2.4-.7-3.2-1.6h-3.6C9.4 15.3 8.5 16 7 16A5 5 0 0 1 7 6zm-1 3v2H4v2h2v2h2v-2h2v-2H8V9z"; }
+    if ["powered", "omnipulse"].iter().any(|w| t.contains(w)) { return "M2 13h4l2.5-6 4 12 3-9 1.5 3H22v-2h-3.7L16 6.5l-3 9-4-12L5.3 11H2z"; }
+    "M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"
+}
+
 /// The widgets' colours, as hex: a palette's, your own, or none (your accent)
 pub fn suite_colours(cur: &Map<String, Value>) -> Option<(String, String)> {
     let hex = |k: &str, d: &str| { let v = s(cur, k).trim().to_string(); if v.len() == 7 && v.starts_with('#') && v[1..].chars().all(|c| c.is_ascii_hexdigit()) { v } else { d.to_string() } };
@@ -189,6 +251,120 @@ fn sheet_of(id: &str, cur: &Map<String, Value>) -> (String, Vec<Field>) {
                 f("chips", "streamApp", "Your app", "", app, "obs=OBS|meld=Meld Studio|slobs=Streamlabs Desktop"),
             ];
             v.extend(sheet_of(app, cur).1);
+            v
+        }),
+        "hud" => ("Game HUD Frames".into(), {
+            let frames = crate::hud::frames(s(cur, "hudFrames"));
+            let sel = n(cur, "hudSel").parse::<f64>().unwrap_or(-1.0) as i64;
+            let shot = !s(cur, "hudShotPath").is_empty();
+            let mut v = vec![
+                f("note", "", "Take a screenshot of your game (at the resolution you stream it), choose it here, then drag a box round a part of its HUD: the minimap, health, ammo. The box snaps to its edges, and a frame goes round it, in your colours.", "", "", ""),
+                f("link", "", if shot { "Choose another screenshot" } else { "Choose a screenshot" }, "A PNG or JPG of your game. Its frames stay; move them if its HUD's moved.", "", "hud:shot"),
+            ];
+            if shot { v.push(f("hudedit", "", "", "", "", "")); }
+            if let Some(fr) = usize::try_from(sel).ok().and_then(|i| frames.get(i)) {
+                let g = |k: &str, d: &str| fr[k].as_str().map(String::from).unwrap_or_else(|| d.to_string());
+                v.push(f("head", "", &format!("Frame {}", sel + 1), "", "", ""));
+                v.push(f("chips", "hudF_style", "Style", "", &g("style", "brackets"), "brackets=Corner Brackets|glow=Glow|neon=Neon|tech=Tech|soft=Soft"));
+                v.push(f("text", "hudF_label", "Its label", "Words above it, like MAP. Leave it empty for none.", &g("label", ""), "MAP"));
+                v.push(f("chips", "hudF_pad", "Room round it", "", &fr["pad"].as_f64().unwrap_or(6.0).to_string(), "0=None|6=A Little|14=More|24=Lots"));
+                v.push(f("toggle", "hudF_pulse", "A slow pulse", "", if fr["pulse"].as_bool() == Some(true) { "true" } else { "false" }, ""));
+                v.push(f("chips", "hudNudge", "Move it", "A pixel of the screenshot at a time (10 with Bigger Steps).", "", "left=Left|right=Right|up=Up|down=Down|wider=Wider|narrower=Narrower|taller=Taller|shorter=Shorter|big=Bigger Steps"));
+                v.push(f("link", "", "Snap it again", "To the edges inside it, if you've moved it.", "", "hud:snap"));
+                v.push(f("link", "", "Take it away", "", "", "hud:del"));
+            } else if shot {
+                v.push(f("note", "", if frames.is_empty() { "Drag a box on the screenshot round a part of the HUD." } else { "Click a frame to change it, or drag a box for another." }, "", "", ""));
+            }
+            v.push(f("chips", "suiteColors", "Colours", "Shared with the Suite's widgets.", if s(cur, "suiteColors").is_empty() { "accent" } else { s(cur, "suiteColors") }, "accent=Yours|sunset=Sunset|ocean=Ocean|candy=Candy|mint=Mint|fire=Fire|gold=Gold|mono=Mono|custom=Your Own"));
+            v.push(addr("/hud", "Add it as a Browser source the size of your canvas, above the game. It only lines up while the game runs at the screenshot's resolution and HUD scale."));
+            v
+        }),
+        "sponsors" => ("Sponsor Plug".into(), {
+            let or = |k: &str, d: &'static str| if s(cur, k).is_empty() { d.to_string() } else { s(cur, k).to_string() };
+            vec![
+                f("note", "", "Your sponsors, one at a time (or all together), each with its logo, its name and a line: a code, a link or a deal.", "", "", ""),
+                f("list", "sponsorList", "Your sponsors", "One each, its name, a colon, then its line, like Acme Energy: Code SHWYLIE for 10% off.", s(cur, "sponsorList"), ""),
+                f("list", "sponsorLogos", "Their logos", "A logo's address for each, in the same order (a PNG with a see-through background is best). Leave one empty for its first letter.", s(cur, "sponsorLogos"), ""),
+                f("text", "sponsorTag", "Heading", "Shown small above each one. Leave it empty for none.", s(cur, "sponsorTag"), "Sponsored by"),
+                f("head", "", "How it looks", "", "", ""),
+                f("chips", "sponsorStyle", "Style", "", &or("sponsorStyle", "card"), "card=Card|pill=Pill|glass=Glass|neon=Neon|comic=Comic|minimal=Minimal"),
+                f("toggle", "sponsorColoured", "In your colours", "The card in the Suite's colours (Widgets' Colours).", if on(cur, "sponsorColoured", false) { "true" } else { "false" }, ""),
+                f("chips", "sponsorAlign", "Alignment", "", &or("sponsorAlign", "left"), "left=Left|centre=Centre|right=Right"),
+                f("chips", "sponsorMotion", "How each comes in", "", &or("sponsorMotion", "rise"), "rise=Rise|slide=Slide|flip=Flip|pop=Pop|type=Typewriter|none=None"),
+                f("toggle", "sponsorAll", "All together", "Side by side, not one at a time.", if on(cur, "sponsorAll", false) { "true" } else { "false" }, ""),
+                f("chips", "sponsorSecs", "Each one for", "", &or("sponsorSecs", "10"), "5=5 s|10=10 s|15=15 s|30=30 s|60=1 min"),
+                addr("/sponsors", "About 920 × 180."),
+            ]
+        }),
+        "panels" => ("Panels".into(), {
+            let or = |k: &str, d: &'static str| if s(cur, k).is_empty() { d.to_string() } else { s(cur, k).to_string() };
+            // (your saved templates: their names, to load or delete)
+            let tpls: Vec<String> = serde_json::from_str::<Value>(s(cur, "panelTemplates")).ok().and_then(|v| v.as_array().cloned()).unwrap_or_default().iter().filter_map(|t| t["name"].as_str().map(String::from)).collect();
+            let chips = tpls.iter().map(|n| format!("{}={}", n.replace(['|', '='], " "), n.replace(['|', '='], " "))).collect::<Vec<_>>().join("|");
+            let mut v = vec![
+                f("toggle", "panelExtended", "With their words in them", "Each panel's line becomes words drawn into the panel under its title, as tall as they need. Use / to start a new paragraph.", if on(cur, "panelExtended", false) { "true" } else { "false" }, ""),
+                f("head", "", "Templates", "", "", ""),
+                f("text", "panelTplName", "Save these as a template", "A name for this look and these panels, to come back to and change later.", s(cur, "panelTplName"), "My panels"),
+                f("link", "", "Save the template", "Saved with its name. One with the same name is replaced.", "", "tpl:save"),
+            ];
+            if !tpls.is_empty() {
+                v.push(f("chips", "panelTplLoad", "Load one", "Its look and its panels come back, to change and save again.", "", &chips));
+                v.push(f("chips", "panelTplDel", "Delete one", "", "", &chips));
+            }
+            let mut rest = vec![
+                f("panelpreview", "", "", "", "", ""),
+                f("link", "", "Save them as pictures", "Opens them in your browser, each with Save as PNG. Then add them on Twitch (your channel, About, Edit Panels) or Kick.", "", "url:http://127.0.0.1:{port}/panels"),
+                f("list", "panelList", "Your panels", "One each. Put a colon after its title for a line under it, like About Me: Music and good vibes. Its icon is picked from its title.", s(cur, "panelList"), "About Me | My Music | PC Specs | Sponsors | Donate"),
+                f("toggle", "panelPowered", "A Powered by OmniPulse panel", "One more at the end, in the same look, saying your stream runs on OmniPulse, so viewers can find it.", if on(cur, "panelPowered", true) { "true" } else { "false" }, ""),
+                f("head", "", "Their look", "", "", ""),
+                f("chips", "panelTheme", "Theme", "", &or("panelTheme", "dark"), "dark=Dark|glass=Glass|neon=Neon|comic=Comic|pastel=Pastel|y2k=Y2K|pixel=Pixel|gradient=Gradient|minimal=Minimal"),
+                f("chips", "suiteColors", "Colours", "Shared with the Suite's widgets.", if s(cur, "suiteColors").is_empty() { "accent" } else { s(cur, "suiteColors") }, "accent=Yours|sunset=Sunset|ocean=Ocean|candy=Candy|mint=Mint|fire=Fire|gold=Gold|mono=Mono|custom=Your Own"),
+                f("chips", "panelShape", "Shape", "", &or("panelShape", "rounded"), "rounded=Rounded|square=Square|pill=Pill"),
+                f("chips", "panelHeight", "Height", "Twitch's own panels are 320 × 100 (Header). Square is 320 × 320, for a badge or a partner's logo.", &or("panelHeight", "medium"), "short=Short (80)|medium=Header (100)|tall=Tall (160)|square=Square (320)"),
+                f("toggle", "panelIcons", "Icons", "", if on(cur, "panelIcons", true) { "true" } else { "false" }, ""),
+                f("chips", "panelScale", "Resolution", "Sharp saves them at twice Twitch's size (640 wide, up to 1200 tall), so words and logos stay crisp on high-density and Retina screens. Twitch shows them at 320 either way.", &or("panelScale", "2"), "2=Sharp (2x)|1=Standard (1x)"),
+            ];
+            // (the preview and saving first, then what's above, then their look)
+            let first: Vec<Field> = rest.drain(..2).collect();
+            let mut out = first;
+            out.append(&mut v);
+            out.append(&mut rest);
+            out
+        }),
+        "cam" => ("Webcam Overlay".into(), {
+            let or = |k: &str, d: &'static str| if s(cur, k).is_empty() { d.to_string() } else { s(cur, k).to_string() };
+            let spot = or("camSpot", "br");
+            let mut v = vec![
+                f("campreview", "", "", "", "", ""),
+                addr("/cam/main", "Add it as a Browser source the size of your canvas (1920 × 1080), above your camera. It's see-through: the frame goes round your camera, and the parts you switch on below come with it, live ones included, so it's all one source."),
+                f("head", "", "Your camera", "", "", ""),
+                f("chips", "camSpot", "Where it is", "Put your camera there in OBS, or choose Your Own Spot and match it.", &spot, "br=Bottom Right|bl=Bottom Left|tr=Top Right|tl=Top Left|custom=Your Own Spot"),
+            ];
+            if spot == "custom" {
+                v.push(f("number", "camX", "Across (%)", "Its left edge: 0 is the canvas's left, 100 its right.", &n(cur, "camX"), "72"));
+                v.push(f("number", "camY", "Down (%)", "Its top edge: 0 is the canvas's top, 100 its bottom.", &n(cur, "camY"), "62"));
+                v.push(f("number", "camW", "Width (%)", "Of the canvas's width.", &n(cur, "camW"), "26"));
+                v.push(f("number", "camH", "Height (%)", "Of the canvas's height.", &n(cur, "camH"), "34"));
+            }
+            v.extend([
+                f("head", "", "Its frame", "", "", ""),
+                f("chips", "camShape", "Shape", "", &or("camShape", "rounded"), "rounded=Rounded|square=Square|circle=Circle|hex=Hexagon|arch=Arch"),
+                f("chips", "camBorder", "Border", "", &or("camBorder", "glow"), "thin=Thin|thick=Thick|double=Double|glow=Glow|gradient=Gradient|brackets=Corner Brackets|edge=Edge Light"),
+                f("chips", "camTheme", "Theme", "For the name tag and the clock.", &or("camTheme", "dark"), "dark=Dark|glass=Glass|neon=Neon|comic=Comic|pastel=Pastel|gradient=Gradient|minimal=Minimal"),
+                f("chips", "suiteColors", "Colours", "Shared with the Suite's widgets.", if s(cur, "suiteColors").is_empty() { "accent" } else { s(cur, "suiteColors") }, "accent=Yours|sunset=Sunset|ocean=Ocean|candy=Candy|mint=Mint|fire=Fire|gold=Gold|mono=Mono|custom=Your Own"),
+                f("head", "", "What's on it", "", "", ""),
+                f("note", "", "Each one you switch on sits round your camera, where you put it. The live ones are your widgets, as you've set them up on their own pages.", "", "", ""),
+            ]);
+            for (id, name, dflt, place, size) in CAM_PARTS {
+                let k = format!("camP_{id}");
+                let is = on(cur, &k, dflt);
+                v.push(f("toggle", &k, name, "", if is { "true" } else { "false" }, ""));
+                if !is { continue; }
+                if id == "name" { v.push(f("text", "camNameText", "Its words", "Your name, or anything you like.", s(cur, "camNameText"), if s(cur, "login").is_empty() { "Your Name" } else { s(cur, "login") })); }
+                if id == "sticker" { v.push(f("text", "camStickerImg", "Its address", "A GIF's or picture's address (on GIPHY or Tenor: right-click it, Copy Image Address).", s(cur, "camStickerImg"), "https://…/your.gif")); }
+                v.push(f("chips", &format!("{k}Place"), "Where", "", &or(&format!("{k}Place"), place), "above=Above|below=Below|left=Left|right=Right|in-top=Inside, Top|in-bottom=Inside, Bottom|corner=On the Corner"));
+                v.push(f("chips", &format!("{k}Size"), "Size", "", &or(&format!("{k}Size"), size), "small=Small|medium=Medium|large=Large"));
+            }
             v
         }),
         "tips" => ("Tips and Donations".into(), {
@@ -573,7 +749,6 @@ pub fn feats(cur: &Map<String, Value>, st: &Value) -> Vec<(&'static str, String,
     let (all, live) = (st["actions"]["all"].as_u64(), st["actions"]["on"].as_u64());
     let name = if s(cur, "pointsName").is_empty() { "points".to_string() } else { s(cur, "pointsName").to_string() };
     vec![
-        ("import", "Import from another bot".into(), "Streamer.bot or Mix It Up".into(), on(cur, "imported", false), true),
         ("requests", "Song requests".into(), {
             let or = |k: &str, d: &str| if s(cur, k).is_empty() { d.to_string() } else { s(cur, k).to_string() };
             format!("{}, {}, {}", or("srCommands", "!sr, !request"), or("songCommands", "!song"), or("wrongCommands", "!wrongsong"))

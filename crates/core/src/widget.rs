@@ -29,6 +29,12 @@ pub const LYRICS_HTML: &str = include_str!("../widget/lyrics.html");
 const SOCIALS_HTML: &str = include_str!("../widget/socials.html");
 /// The Stream Suite's widgets (/goals, /timer, /latest-follow, /latest-sub, /raid): one page, each as its address says
 const SUITE_HTML: &str = include_str!("../widget/suite.html");
+/// A webcam overlay made in the Suite's Creators (/cam/<id>): its frame and parts, live ones included, as one source
+const CAM_HTML: &str = include_str!("../widget/cam.html");
+/// Your channel panels (/panels), each drawn at Twitch's size, with Save as PNG
+const PANELS_HTML: &str = include_str!("../widget/panels.html");
+/// Frames round a game's HUD (/hud), as marked on a screenshot of it
+const HUD_HTML: &str = include_str!("../widget/hud.html");
 
 /// The kinds of alert, as /alert?type= names them
 /// (custom ones, set up in the app, come on top: see custom_kinds)
@@ -346,7 +352,7 @@ pub fn widget_serve(listener: TcpListener, gen: u64) {
                         }
                     }
                     // (OBS's docks: the chat, with its moderation; the activity feed, its alerts replayed)
-                    "/dock/chat" => reply_own(&mut stream, "200 OK", "text/html; charset=utf-8", crate::docks::CHAT_HTML.as_bytes()),
+                    "/dock/chat" | "/dock/mod" => reply_own(&mut stream, "200 OK", "text/html; charset=utf-8", crate::docks::CHAT_HTML.as_bytes()),
                     p if p == "/chat" || p.strip_prefix("/chat/").is_some_and(|n| !n.is_empty() && n.len() < 4 && n.bytes().all(|b| b.is_ascii_digit())) => reply_own(&mut stream, "200 OK", "text/html; charset=utf-8", crate::docks::MULTICHAT_HTML.as_bytes()),
                     "/dock/activity" => reply_own(&mut stream, "200 OK", "text/html; charset=utf-8", crate::docks::ACTIVITY_HTML.as_bytes()),
                     "/dock/chat.json" | "/dock/activity.json" => {
@@ -367,7 +373,10 @@ pub fn widget_serve(listener: TcpListener, gen: u64) {
                         let (status, v) = match answer { Ok(m) => ("200 OK", json!({ "ok": true, "message": m })), Err(e) => ("400 Bad Request", json!({ "ok": false, "error": e })) };
                         reply_own(&mut stream, status, "application/json", v.to_string().as_bytes());
                     }
-                    "/socials" | "/socials.html" => reply(&mut stream, "200 OK", "text/html; charset=utf-8", SOCIALS_HTML.as_bytes()),
+                    "/hud" => reply(&mut stream, "200 OK", "text/html; charset=utf-8", HUD_HTML.as_bytes()),
+                    "/panels" => reply(&mut stream, "200 OK", "text/html; charset=utf-8", PANELS_HTML.as_bytes()),
+                    p if p == "/cam" || p.starts_with("/cam/") => reply(&mut stream, "200 OK", "text/html; charset=utf-8", CAM_HTML.as_bytes()),
+                    "/socials" | "/socials.html" | "/sponsors" => reply(&mut stream, "200 OK", "text/html; charset=utf-8", SOCIALS_HTML.as_bytes()),
                     "/goals" | "/timer" | "/latest-follow" | "/latest-sub" | "/raid" | "/hype" | "/voteskip" | "/wheel" | "/leaderboard" | "/emotes" | "/tune" => reply(&mut stream, "200 OK", "text/html; charset=utf-8", SUITE_HTML.as_bytes()),
                     "/levels.json" => {
                         let v = LEVELS.lock().map(|g| g.clone()).unwrap_or_default();

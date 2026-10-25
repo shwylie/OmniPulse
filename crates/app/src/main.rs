@@ -43,6 +43,7 @@ mod procwatch;
 mod docksets;
 mod botpage;
 mod hide;
+mod hud;
 mod lookalike;
 mod apple_import;
 mod alerts;
@@ -6731,7 +6732,7 @@ fn suite_inner(shared: &Shared, to: &str) -> bool {
         bot_paint(shared);
         return true;
     }
-    if (target == "botwidgets" || target == "botdocks") && sheet {
+    if (target == "botwidgets" || target == "botdocks" || target == "botcreators") && sheet {
         BOT_SHEET.with(|b| b.borrow_mut().clear());
         bot_widgets_open(shared, &target[3..]);
         bot_paint(shared);
@@ -6754,7 +6755,7 @@ fn leave_do(shared: &Shared, to: &str) {
     if let Some(i) = to.strip_prefix("crumb:").and_then(|i| i.parse::<usize>().ok()) { return crumb_go(shared, i); }
     if let Some(name) = to.strip_prefix("panel:") { PF_EDIT.with(|e| e.borrow_mut().take()); return panel_open(shared, name); }
     // (back to the Suite's Widgets or Docks, from one's own page)
-    if to == "botwidgets" || to == "botdocks" { PF_EDIT.with(|e| e.borrow_mut().take()); pf_open(shared, botpage::BOT); return bot_widgets_open(shared, &to[3..]); }
+    if to == "botwidgets" || to == "botdocks" || to == "botcreators" { PF_EDIT.with(|e| e.borrow_mut().take()); pf_open(shared, botpage::BOT); return bot_widgets_open(shared, &to[3..]); }
     if let Some(id) = to.strip_prefix("plugin:") {
         PF_EDIT.with(|e| e.borrow_mut().take());
         if let (Some(ui), Some(sec)) = (shared.borrow().ui.upgrade(), omnipulse_core::plugins::list().into_iter().find(|p| p.manifest.id == id).map(|p| p.manifest.section).filter(|x| !x.is_empty())) { ui.set_set_cat(sec.into()); }
@@ -6843,7 +6844,69 @@ fn bot_paint(shared: &Shared) {
     ui.set_bot_tried(model(BOT_TRIED.with(|t| t.borrow().iter().map(|(w, x)| BotLine { who: w.as_str().into(), heard: Default::default(), did: x.as_str().into(), platform: "twitch".into() }).collect())));
     // (a sheet's and the step's lines: drawn again only when they've changed, so what's being typed stays put)
     let sheet = BOT_SHEET.with(|b| b.borrow().clone());
-    let (title, lines) = botpage::sheet(&sheet, &cur);
+    let (title, mut lines) = botpage::sheet(&sheet, &cur);
+    let port = shared.borrow().web.prefs["widgetPort"].as_u64().unwrap_or(7878);
+    for l in lines.iter_mut() { if l.extra.contains("{port}") { l.extra = l.extra.replace("{port}", &port.to_string()); } }
+    // (Game HUD Frames' editor: the screenshot, and each frame as fractions of it)
+    if sheet == "hud" {
+        let g = ui.global::<HudLook>();
+        let path = cur.get("hudShotPath").and_then(|v| v.as_str()).unwrap_or("").to_string();
+        let had = HUD_SHOT.with(|h| h.borrow().clone());
+        if had != path {
+            g.set_shot(slint::Image::load_from_path(std::path::Path::new(&path)).unwrap_or_default());
+            HUD_SHOT.with(|h| *h.borrow_mut() = path.clone());
+        }
+        let (iw, ih) = (cur.get("hudW").and_then(|v| v.as_f64()).unwrap_or(1920.0) as f32, cur.get("hudH").and_then(|v| v.as_f64()).unwrap_or(1080.0) as f32);
+        g.set_ratio(ih / iw.max(1.0));
+        let sel = cur.get("hudSel").and_then(|v| v.as_f64()).unwrap_or(-1.0) as i64;
+        let rects: Vec<HudRect> = hud::frames(cur.get("hudFrames").and_then(|v| v.as_str()).unwrap_or("[]")).iter().enumerate().map(|(i, f)| {
+            let a = |k: &str| f[k].as_f64().unwrap_or(0.0) as f32;
+            HudRect { x: a("x") / iw, y: a("y") / ih, w: a("w") / iw, h: a("h") / ih, label: f["label"].as_str().unwrap_or("").into(), picked: i as i64 == sel }
+        }).collect();
+        g.set_frames(ModelRc::from(Rc::new(VecModel::from(rects))));
+        let t = ui.global::<Theme>();
+        g.set_c1(botpage::suite_colours(&cur).and_then(|(a, _)| look::Rgb::parse(&a)).map(|c| c.slint()).unwrap_or(t.get_accent()));
+    }
+    // (the panels' preview: each one's title and line, the set's look)
+    if sheet == "panels" {
+        let g = ui.global::<PanelLook>();
+        let list = cur.get("panelList").and_then(|v| v.as_str()).filter(|v| !v.trim().is_empty()).unwrap_or("About Me | My Music | PC Specs | Sponsors | Donate").to_string();
+        let ext = cur.get("panelExtended").and_then(|v| v.as_bool()) == Some(true);
+        let icons = cur.get("panelIcons").and_then(|v| v.as_bool()) != Some(false);
+        // (a line too long for beside its title (about 36 letters there, 44 without an icon): extended, its lines
+        // as wrapped at about 44 letters, a new paragraph at each " / ")
+        let item = |title: &str, line: &str| {
+            let long = !line.is_empty() && (ext || line.chars().count() > if icons { 36 } else { 44 });
+            let lines = line.split(" / ").map(|p| p.chars().count().div_ceil(44).max(1)).sum::<usize>() as i32;
+            PanelItem { title: title.into(), line: line.replace(" / ", "\n").into(), body: long, lines, icon: botpage::panel_icon(title).into() }
+        };
+        let mut items: Vec<PanelItem> = list.split('|').map(|p| p.trim()).filter(|p| !p.is_empty()).take(12).map(|p| match p.split_once(':') { Some((a, b)) => item(a.trim(), b.trim()), None => item(p, "") }).collect();
+        if cur.get("panelPowered").and_then(|v| v.as_bool()) != Some(false) { items.push(item("Powered by OmniPulse", if ext { "This stream's music, chatbot, alerts and overlays all run on OmniPulse." } else { "Music, chatbot and stream tools in one app" })); }
+        g.set_items(ModelRc::from(Rc::new(VecModel::from(items))));
+        let or = |k: &str, d: &str| cur.get(k).and_then(|v| v.as_str()).filter(|v| !v.is_empty()).unwrap_or(d).to_string();
+        g.set_theme(or("panelTheme", "dark").into());
+        g.set_shape(or("panelShape", "rounded").into());
+        g.set_height(or("panelHeight", "medium").into());
+        g.set_icons(cur.get("panelIcons").and_then(|v| v.as_bool()) != Some(false));
+        let t = ui.global::<Theme>();
+        let (c1, c2) = botpage::suite_colours(&cur).map(|(a, b)| (look::Rgb::parse(&a).map(|c| c.slint()).unwrap_or(t.get_accent()), look::Rgb::parse(&b).map(|c| c.slint()).unwrap_or(t.get_accent_2()))).unwrap_or((t.get_accent(), t.get_accent_2()));
+        g.set_c1(c1);
+        g.set_c2(c2);
+    }
+    // (the webcam overlay's preview: its layout, as the page lays it out)
+    if sheet == "cam" {
+        let g = ui.global::<CamLook>();
+        let rects: Vec<CamRect> = botpage::cam_layout(&cur).into_iter().map(|(id, label, x, y, w, h)| CamRect { id: id.into(), label: label.into(), x, y, w, h }).collect();
+        g.set_rects(ModelRc::from(Rc::new(VecModel::from(rects))));
+        let or = |k: &str, d: &str| cur.get(k).and_then(|v| v.as_str()).filter(|v| !v.is_empty()).unwrap_or(d).to_string();
+        g.set_shape(or("camShape", "rounded").into());
+        g.set_border(or("camBorder", "glow").into());
+        g.set_theme(or("camTheme", "dark").into());
+        let t = ui.global::<Theme>();
+        let (c1, c2) = botpage::suite_colours(&cur).map(|(a, b)| (look::Rgb::parse(&a).map(|c| c.slint()).unwrap_or(t.get_accent()), look::Rgb::parse(&b).map(|c| c.slint()).unwrap_or(t.get_accent_2()))).unwrap_or((t.get_accent(), t.get_accent_2()));
+        g.set_c1(c1);
+        g.set_c2(c2);
+    }
     let (rows, sig) = bot_fields(lines);
     let (srows, ssig) = bot_fields(if setup { botpage::step_fields(&now, &cur) } else { Vec::new() });
     let (was, swas) = BOT_DRAWN.with(|d| d.borrow().clone());
@@ -6898,8 +6961,63 @@ fn bot_restart_kept(shared: &Shared) {
     if plugrun::get(botpage::BOT).is_some() { plugrun::stop(botpage::BOT); plugins_start(shared); }
 }
 
+thread_local! {
+    /// (the HUD editor's screenshot, as loaded: its file)
+    static HUD_SHOT: RefCell<String> = const { RefCell::new(String::new()) };
+    /// (a nudge's step: 1 pixel, or 10)
+    static HUD_STEP: std::cell::Cell<f64> = const { std::cell::Cell::new(1.0) };
+}
+
+/// The panels' look and list, as a template keeps them
+const PANEL_TPL_KEYS: [&str; 9] = ["panelTheme", "panelShape", "panelHeight", "panelIcons", "panelExtended", "panelList", "suiteColors", "suiteC1", "suiteC2"];
+
 fn bot_set(shared: &Shared, key: &str, v: &str) {
     let key = botpage::key_of(key).to_string();
+    // (a HUD frame's own (the picked one's), or a nudge: in hudFrames, not settings of their own)
+    if key.starts_with("hudF_") || key == "hudNudge" {
+        let cur = bot_current(shared);
+        let mut frames = hud::frames(cur.get("hudFrames").and_then(|v| v.as_str()).unwrap_or("[]"));
+        let sel = cur.get("hudSel").and_then(|v| v.as_f64()).unwrap_or(-1.0);
+        let Some(fr) = (sel >= 0.0).then(|| frames.get_mut(sel as usize)).flatten() else { return };
+        let mut paint = true;
+        match key.as_str() {
+            "hudF_style" => fr["style"] = serde_json::json!(v),
+            "hudF_label" => { fr["label"] = serde_json::json!(v); paint = false; }
+            "hudF_pad" => fr["pad"] = serde_json::json!(v.parse::<f64>().unwrap_or(6.0)),
+            "hudF_pulse" => fr["pulse"] = serde_json::json!(v == "true"),
+            _ => {
+                let step = HUD_STEP.with(|s| s.get());
+                if v == "big" { HUD_STEP.with(|s| s.set(if step > 1.0 { 1.0 } else { 10.0 })); bot_paint(shared); return; }
+                let at = |k: &str| fr[k].as_f64().unwrap_or(0.0);
+                let (x, y, w, h) = (at("x"), at("y"), at("w"), at("h"));
+                let (x, y, w, h) = match v { "left" => (x - step, y, w, h), "right" => (x + step, y, w, h), "up" => (x, y - step, w, h), "down" => (x, y + step, w, h),
+                    "wider" => (x - step / 2.0, y, w + step, h), "narrower" => (x + step / 2.0, y, (w - step).max(4.0), h), "taller" => (x, y - step / 2.0, w, h + step), "shorter" => (x, y + step / 2.0, w, (h - step).max(4.0)), _ => (x, y, w, h) };
+                fr["x"] = serde_json::json!(x.round()); fr["y"] = serde_json::json!(y.round()); fr["w"] = serde_json::json!(w.round()); fr["h"] = serde_json::json!(h.round());
+            }
+        }
+        bot_set(shared, "hudFrames", &serde_json::Value::Array(frames).to_string());
+        if paint { bot_paint(shared); }
+        return;
+    }
+    // (a panel template loaded (its settings set again) or deleted, not kept as a setting)
+    if key == "panelTplLoad" || key == "panelTplDel" {
+        let cur = bot_current(shared);
+        let mut all: Vec<serde_json::Value> = cur.get("panelTemplates").and_then(|t| t.as_str()).and_then(|t| serde_json::from_str::<serde_json::Value>(t).ok()).and_then(|t| t.as_array().cloned()).unwrap_or_default();
+        let name = v.to_string();
+        if key == "panelTplDel" {
+            all.retain(|t| t["name"].as_str() != Some(name.as_str()));
+            bot_set(shared, "panelTemplates", &serde_json::Value::Array(all).to_string());
+        } else if let Some(t) = all.iter().find(|t| t["name"].as_str() == Some(name.as_str())) {
+            for k in PANEL_TPL_KEYS {
+                let val = &t["set"][k];
+                let s = match val { serde_json::Value::String(s) => s.clone(), serde_json::Value::Bool(b) => b.to_string(), serde_json::Value::Null => continue, x => x.to_string() };
+                bot_set(shared, k, &s);
+            }
+            bot_set(shared, "panelTplName", &name);
+        }
+        bot_paint(shared);
+        return;
+    }
     let manifest = bot_manifest().map(|m| m.settings).unwrap_or_default();
     let value = botpage::value_of(&manifest, &key, v);
     // (a choice, like a theme's chip: seen at once too, so the preview shows it)
@@ -6949,7 +7067,68 @@ fn bot_act(shared: &Shared, act: &str) {
     // (a dock's or the Multichat Overlay's gear: its own page)
     if let Some(p) = act.strip_prefix("dockset:") { return panel_open(shared, p); }
     // (Widgets, or Docks: their own page, under the Suite's)
-    if act == "widgets" || act == "docks" { return bot_widgets_open(shared, act); }
+    if act == "widgets" || act == "docks" || act == "creators" { return bot_widgets_open(shared, act); }
+    // (Game HUD Frames: a screenshot chosen; a box drawn (snapped), a frame picked, snapped again, taken away)
+    if let Some(rest) = act.strip_prefix("hud:") {
+        let cur = bot_current(shared);
+        let mut frames = hud::frames(cur.get("hudFrames").and_then(|v| v.as_str()).unwrap_or("[]"));
+        let (iw, ih) = (cur.get("hudW").and_then(|v| v.as_f64()).unwrap_or(1920.0) as f32, cur.get("hudH").and_then(|v| v.as_f64()).unwrap_or(1080.0) as f32);
+        let path = cur.get("hudShotPath").and_then(|v| v.as_str()).unwrap_or("").to_string();
+        let gray = || image::open(&path).ok().map(|i| i.to_luma8());
+        let sel = cur.get("hudSel").and_then(|v| v.as_f64()).unwrap_or(-1.0);
+        let nums = |s: &str| s.split(',').filter_map(|x| x.parse::<f32>().ok()).collect::<Vec<_>>();
+        if rest == "shot" {
+            let Some(p) = rfd::FileDialog::new().set_title("A screenshot of your game").add_filter("Pictures", &["png", "jpg", "jpeg", "webp"]).pick_file() else { return };
+            let file = p.to_string_lossy().to_string();
+            let Ok((w, h)) = image::image_dimensions(&p) else { say("That picture couldn't be read."); return };
+            match omnipulse_core::widget::overlay_media(&file, false) {
+                Ok(url) => { bot_set(shared, "hudShot", &url); bot_set(shared, "hudShotPath", &file); bot_set(shared, "hudW", &w.to_string()); bot_set(shared, "hudH", &h.to_string()); bot_set(shared, "hudSel", "-1"); }
+                Err(e) => { say(&e); return; }
+            }
+        } else if let Some(r) = rest.strip_prefix("add:") {
+            // (a box, as fractions of the screenshot: in its pixels, snapped to the element inside)
+            let n = nums(r);
+            if n.len() == 4 {
+                let (x0, y0, x1, y1) = (n[0].min(n[2]) * iw, n[1].min(n[3]) * ih, n[0].max(n[2]) * iw, n[1].max(n[3]) * ih);
+                let (x, y, w, h) = gray().map(|g| hud::snap(&g, x0, y0, x1 - x0, y1 - y0)).unwrap_or((x0, y0, x1 - x0, y1 - y0));
+                let f = hud::frame(x, y, w, h, frames.last());
+                frames.push(f);
+                bot_set(shared, "hudSel", &(frames.len() - 1).to_string());
+            }
+        } else if let Some(r) = rest.strip_prefix("pick:") {
+            let n = nums(r);
+            if n.len() == 2 {
+                let (px, py) = (n[0] * iw, n[1] * ih);
+                let hit = frames.iter().rposition(|f| { let a = |k: &str| f[k].as_f64().unwrap_or(0.0) as f32; px >= a("x") && px <= a("x") + a("w") && py >= a("y") && py <= a("y") + a("h") });
+                bot_set(shared, "hudSel", &hit.map(|i| i as i64).unwrap_or(-1).to_string());
+            }
+        } else if rest == "snap" {
+            if let (Some(g), Some(f)) = (gray(), (sel >= 0.0).then(|| frames.get_mut(sel as usize)).flatten()) {
+                let a = |k: &str| f[k].as_f64().unwrap_or(0.0) as f32;
+                let (x, y, w, h) = hud::snap(&g, a("x"), a("y"), a("w"), a("h"));
+                f["x"] = serde_json::json!(x); f["y"] = serde_json::json!(y); f["w"] = serde_json::json!(w); f["h"] = serde_json::json!(h);
+            }
+        } else if rest == "del" && sel >= 0.0 && (sel as usize) < frames.len() {
+            frames.remove(sel as usize);
+            bot_set(shared, "hudSel", "-1");
+        }
+        bot_set(shared, "hudFrames", &serde_json::Value::Array(frames).to_string());
+        bot_paint(shared);
+        return;
+    }
+    // (the panels' look and list, saved as a template by its name: one of the same name replaced)
+    if act == "tpl:save" {
+        let cur = bot_current(shared);
+        let name = cur.get("panelTplName").and_then(|v| v.as_str()).map(str::trim).filter(|n| !n.is_empty()).unwrap_or("My panels").to_string();
+        let set: serde_json::Map<String, serde_json::Value> = PANEL_TPL_KEYS.iter().filter_map(|k| cur.get(*k).map(|v| (k.to_string(), v.clone()))).collect();
+        let mut all: Vec<serde_json::Value> = cur.get("panelTemplates").and_then(|t| t.as_str()).and_then(|t| serde_json::from_str::<serde_json::Value>(t).ok()).and_then(|t| t.as_array().cloned()).unwrap_or_default();
+        all.retain(|t| t["name"].as_str() != Some(name.as_str()));
+        all.push(serde_json::json!({ "name": name, "set": set }));
+        bot_set(shared, "panelTemplates", &serde_json::Value::Array(all).to_string());
+        bot_paint(shared);
+        say(&format!("Saved the template \"{name}\". Click Save to keep it."));
+        return;
+    }
     if let Some(id) = act.strip_prefix("sheet:") {
         BOT_SHEET.with(|b| *b.borrow_mut() = id.to_string());
         bot_sheet_crumbs(shared, id);
@@ -7101,7 +7280,7 @@ fn crumb_go(shared: &Shared, i: usize) {
     let Some(ui) = shared.borrow().ui.upgrade() else { return };
     if let Some(n) = to.strip_prefix("panel:") { panel_open(shared, n); return; }
     // (the Suite's Widgets or Docks: its page, then that one)
-    if to == "botwidgets" || to == "botdocks" { PF_EDIT.with(|e| e.borrow_mut().take()); pf_open(shared, botpage::BOT); return bot_widgets_open(shared, &to[3..]); }
+    if to == "botwidgets" || to == "botdocks" || to == "botcreators" { PF_EDIT.with(|e| e.borrow_mut().take()); pf_open(shared, botpage::BOT); return bot_widgets_open(shared, &to[3..]); }
     if let Some(id) = to.strip_prefix("plugin:") {
         PF_EDIT.with(|e| e.borrow_mut().take());
         if let Some(sec) = omnipulse_core::plugins::list().into_iter().find(|p| p.manifest.id == id).map(|p| p.manifest.section).filter(|x| !x.is_empty()) { ui.set_set_cat(sec.into()); }
@@ -11775,7 +11954,7 @@ fn bot_sheet_crumbs(shared: &Shared, id: &str) {
     ui.set_pf_head(botpage::sheet(id, &bot_current(shared)).0.into());
 }
 
-fn widgets_title(which: &str) -> &'static str { if which == "docks" { "Docks" } else { "Widgets" } }
+fn widgets_title(which: &str) -> &'static str { match which { "docks" => "Docks", "creators" => "Creators", _ => "Widgets" } }
 
 /// The Suite's Widgets, or its Docks, as a page of their own: Settings > Streaming > Suite > Widgets
 fn bot_widgets_open(shared: &Shared, which: &str) {

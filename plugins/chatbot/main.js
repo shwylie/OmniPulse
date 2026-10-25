@@ -12,6 +12,7 @@ const TWITCH_SCOPES_CHANNEL = [
   "channel:read:predictions", "channel:read:vips", "moderation:read", "channel:read:charity",
   "channel:manage:polls", "channel:manage:predictions", "channel:manage:redemptions", "channel:edit:commercial",
   "channel:manage:raids", "moderator:manage:chat_settings", "channel:manage:vips", "channel:manage:moderators",
+  "moderator:manage:shield_mode", "moderator:read:shield_mode",
 ].join(" ");
 const TWITCH_SCOPES_BOT = "chat:read chat:edit";
 
@@ -2179,11 +2180,57 @@ function suitePush() {
       anim: String(x.suiteAnim || "rise"),
       theme: String(x.suiteTheme || "dark"),
       colors: suiteColors(),
+      creators: [camOverlay(), panelSet(), hudSet()],
+      sponsors: sponsorPlug(),
+      // (moderation, for the Chat Dock's panel: Auto-Ban's terms, Twitch's chat modes and Shield Mode, a lockdown)
+      mod: { autoban: { on: yes(x.abOn), terms: String(x.abTerms || "").split(/\r?\n|\|/).map((t) => t.trim()).filter(Boolean) }, chat: modState.chat, shield: modState.shield, lock: !!modState.lock, twitch: !!(S().userId && apiToken) },
       gifs: { goals: x.gifGoals || "", timer: x.gifTimer || "", latest: x.gifLatest || "", raid: x.gifRaid || "", hype: x.gifHype || "", voteskip: x.gifVoteskip || "", wheel: x.gifWheel || "", leaderboard: x.gifLeaderboard || "", tune: x.gifTune || "" },
       gifPlace: String(x.gifPlace || "top"),
       gifSize: String(x.gifSize || "medium"),
     }).catch(() => {});
   }, 250);
+}
+// (the webcam overlay, from the Creators' settings: where the camera is, its frame, and each part that's on)
+const CAM_PARTS = [["name", true, "below", "medium"], ["live", true, "corner", "small"], ["now", false, "above", "medium"], ["alerts", true, "above", "large"], ["follow", false, "left", "medium"], ["sub", false, "left", "medium"], ["goals", false, "left", "medium"], ["hype", false, "above", "medium"], ["chat", false, "left", "medium"], ["socials", false, "below", "medium"], ["clock", false, "in-top", "small"], ["sticker", false, "corner", "medium"]];
+function camOverlay() {
+  const x = S(), v = (k, d) => (x[k] === undefined || x[k] === "" ? d : x[k]);
+  return {
+    id: "main", kind: "cam", spot: String(v("camSpot", "br")), x: num(v("camX", 72)), y: num(v("camY", 62)), w: num(v("camW", 26)), h: num(v("camH", 34)),
+    shape: String(v("camShape", "rounded")), border: String(v("camBorder", "glow")), theme: String(v("camTheme", "dark")), colors: suiteColors(),
+    parts: CAM_PARTS.filter(([id, on]) => yes(v("camP_" + id, on))).map(([id, , place, size]) => ({
+      type: id, place: String(v("camP_" + id + "Place", place)), size: String(v("camP_" + id + "Size", size)),
+      text: id === "name" ? String(v("camNameText", x.login || "Your Name")) : "", img: id === "sticker" ? String(v("camStickerImg", "")) : "",
+    })),
+  };
+}
+// (OmniPulse's own site, for the Powered by panel: none yet, so the panel says what it is without a link)
+const OMNIPULSE_SITE = "";
+// (game HUD frames: where they're marked on the screenshot, in its pixels)
+function hudSet() {
+  const x = S();
+  let frames = [];
+  try { frames = JSON.parse(String(x.hudFrames || "[]")); } catch (e) {}
+  return { id: "hud", kind: "hud", shot: String(x.hudShot || ""), w: num(x.hudW) || 1920, h: num(x.hudH) || 1080, frames: Array.isArray(frames) ? frames : [], colors: suiteColors() };
+}
+// (the Sponsor Plug: each "Name: its line" in turn, with its logo (the logos' list, in the same order))
+function sponsorPlug() {
+  const x = S(), v = (k, d) => (x[k] === undefined || x[k] === "" ? d : x[k]);
+  const logos = String(v("sponsorLogos", "")).split("|").map((u) => u.trim());
+  const list = String(v("sponsorList", "")).split("|").map((p) => p.trim()).filter(Boolean).slice(0, 16).map((p, i) => {
+    const k = p.indexOf(":"), c = suiteColors() || {};
+    return { handle: k < 0 ? p : p.slice(0, k).trim(), name: k < 0 ? "" : p.slice(k + 1).trim(), icon: /^(https?:\/\/|\/overlay\/)/.test(logos[i] || "") ? logos[i] : "", col1: c.c1 || "", col2: c.c2 || "" };
+  });
+  return { list, tag: String(v("sponsorTag", "Sponsored by")), style: String(v("sponsorStyle", "card")), align: String(v("sponsorAlign", "left")), motion: String(v("sponsorMotion", "rise")),
+    secs: num(v("sponsorSecs", 10)) || 10, all: yes(v("sponsorAll", false)), coloured: yes(v("sponsorColoured", false)), rounded: true };
+}
+// (your channel panels: each "Title: its line", in one theme)
+function panelSet() {
+  const x = S(), v = (k, d) => (x[k] === undefined || x[k] === "" ? d : x[k]);
+  const list = String(v("panelList", "About Me | My Music | PC Specs | Sponsors | Donate")).split("|").map((p) => p.trim()).filter(Boolean).slice(0, 12);
+  return {
+    id: "panels", kind: "panels", scale: num(v("panelScale", 2)) === 1 ? 1 : 2, extended: yes(v("panelExtended", false)), powered: yes(v("panelPowered", true)), site: OMNIPULSE_SITE, theme: String(v("panelTheme", "dark")), shape: String(v("panelShape", "rounded")), height: String(v("panelHeight", "medium")), icons: yes(v("panelIcons", true)), colors: suiteColors(),
+    panels: list.map((p) => { const i = p.indexOf(":"); return i < 0 ? { title: p, line: "" } : { title: p.slice(0, i).trim(), line: p.slice(i + 1).trim() }; }),
+  };
 }
 // (the widgets' colours: your accent (none sent), one of the palettes, or your own two)
 const PALETTES = { sunset: ["#ff8a5c", "#ff4f8b"], ocean: ["#3ec7ff", "#5a6bff"], candy: ["#ff8fd8", "#b48eff"], mint: ["#5ef2b8", "#3ab0ff"], fire: ["#ffb03a", "#ff3d3d"], gold: ["#ffd76e", "#ff9f43"], mono: ["#f2f2f2", "#9a9aa6"] };
@@ -2585,11 +2632,78 @@ function dockTwitch(m) {
 }
 
 // A dock's button: a message taken down, a viewer timed out, banned or let back, something said, an event's actions run again
+// (Twitch's chat modes and Shield Mode, as last read: read again every half minute, and after each change)
+const modState = { chat: {}, shield: false, lock: null };
+async function modRead() {
+  if (!S().userId || !apiToken) return;
+  const q = "broadcaster_id=" + S().userId + "&moderator_id=" + S().userId;
+  try {
+    const c = ((await helix("GET", "chat/settings?" + q)).data || [])[0] || {};
+    modState.chat = { slow: !!c.slow_mode, slowSecs: c.slow_mode_wait_time, follow: !!c.follower_mode, followMins: c.follower_mode_duration, sub: !!c.subscriber_mode, emote: !!c.emote_mode, unique: !!c.unique_chat_mode };
+  } catch (e) {}
+  try { modState.shield = !!(((await helix("GET", "moderation/shield_mode?" + q)).data || [])[0] || {}).is_active; } catch (e) {}
+  suitePush();
+}
+setInterval(modRead, 30000);
+setTimeout(modRead, 4000);
+// (a chat mode's fields, as Twitch's chat settings have them)
+function modeBody(mode, on, secs, mins) {
+  if (mode === "slow") return on ? { slow_mode: true, slow_mode_wait_time: Math.max(3, Math.min(120, num(secs) || 10)) } : { slow_mode: false };
+  if (mode === "follow") return on ? { follower_mode: true, follower_mode_duration: Math.max(0, Math.min(129600, num(mins))) } : { follower_mode: false };
+  if (mode === "sub") return { subscriber_mode: !!on };
+  if (mode === "emote") return { emote_mode: !!on };
+  if (mode === "unique") return { unique_chat_mode: !!on };
+  return {};
+}
 async function dockDo(cmd) {
   const kick = cmd.platform === "kick";
   const who = cmd.user || cmd.login || "them";
   const twitchMod = "broadcaster_id=" + S().userId + "&moderator_id=" + S().userId;
   switch (cmd.do) {
+    // (Auto-Ban from the Chat Dock: on or off, a term added (which turns it on) or taken away; kept at once)
+    case "autoban": {
+      const x = S();
+      let terms = String(x.abTerms || "").split(/\r?\n|\|/).map((t) => t.trim()).filter(Boolean);
+      const term = String(cmd.term || "").trim().slice(0, 100);
+      if (cmd.op === "on" || cmd.op === "off") x.abOn = cmd.op === "on";
+      if (cmd.op === "add" && term) { if (!terms.some((t) => t.toLowerCase() === term.toLowerCase())) terms.push(term); x.abOn = true; }
+      if (cmd.op === "remove") terms = terms.filter((t) => t.toLowerCase() !== term.toLowerCase());
+      x.abTerms = terms.join(" | ");
+      OmniPulse.app.saveSettings({ abOn: !!x.abOn, abTerms: x.abTerms }).catch(() => {});
+      suitePush();
+      OmniPulse.log("Auto-Ban from the Chat Dock: " + cmd.op + (term ? " " + term : ""));
+      return "";
+    }
+    // (Twitch's chat modes, Shield Mode and clearing chat, from the dock)
+    case "chatmode":
+      await helix("PATCH", "chat/settings?" + twitchMod, modeBody(cmd.mode, cmd.on, cmd.secs, cmd.mins));
+      await modRead();
+      return "";
+    case "shield":
+      await helix("PUT", "moderation/shield_mode?" + twitchMod, { is_active: !!cmd.on });
+      await modRead();
+      return "";
+    case "clearchat":
+      await helix("DELETE", "moderation/chat?" + twitchMod);
+      return "";
+    // (a lockdown: what it's set to turn on, the modes as they were kept so lifting it puts them back)
+    case "lockdown": {
+      if (cmd.on) {
+        modState.lock = { chat: Object.assign({}, modState.chat), shield: modState.shield };
+        const body = Object.assign({}, cmd.follow ? modeBody("follow", true, 0, cmd.mins) : {}, cmd.slow ? modeBody("slow", true, cmd.secs) : {}, cmd.emote ? modeBody("emote", true) : {}, cmd.sub ? modeBody("sub", true) : {});
+        if (Object.keys(body).length) await helix("PATCH", "chat/settings?" + twitchMod, body);
+        if (cmd.shield) await helix("PUT", "moderation/shield_mode?" + twitchMod, { is_active: true });
+        OmniPulse.log("Raid Lockdown on, from the Chat Dock");
+      } else if (modState.lock) {
+        const was = modState.lock, c = was.chat || {};
+        modState.lock = null;
+        await helix("PATCH", "chat/settings?" + twitchMod, { follower_mode: !!c.follow, slow_mode: !!c.slow, emote_mode: !!c.emote, subscriber_mode: !!c.sub, ...(c.follow ? { follower_mode_duration: num(c.followMins) } : {}), ...(c.slow ? { slow_mode_wait_time: num(c.slowSecs) || 10 } : {}) });
+        if (!was.shield) await helix("PUT", "moderation/shield_mode?" + twitchMod, { is_active: false });
+        OmniPulse.log("Raid Lockdown lifted, from the Chat Dock");
+      }
+      await modRead();
+      return "";
+    }
     case "say": {
       const text = String(cmd.text || "").trim().slice(0, 500);
       if (text) reply(null, text, cmd.platform === "kick" || cmd.platform === "twitch" ? cmd.platform : "all");

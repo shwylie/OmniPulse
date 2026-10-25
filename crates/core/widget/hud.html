@@ -1,0 +1,91 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<!--
+  Frames round a game's HUD (its minimap, health bar...), made in the Stream Suite (Settings > Streaming > Suite >
+  Creators > Game HUD Frames) from a screenshot of the game: each frame where you marked it, scaled with the
+  source, see-through everywhere else. One OBS Browser source the size of your canvas, above the game. Only
+  lines up while the game runs at the screenshot's resolution and HUD scale. /hud; it reads suite.creators.
+-->
+<title>OmniPulse Game HUD Frames</title>
+<style>
+  html, body { margin: 0; height: 100%; background: transparent; overflow: hidden; }
+  body { font-family: "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif; color: #fff; --c1: #8e9bff; --c2: #ff7ac8; }
+  body.preview { background: #111 var(--shot) center / 100% 100% no-repeat; }
+  .fr { position: absolute; box-sizing: border-box; pointer-events: none; }
+  .fr .lbl { position: absolute; left: 0; bottom: 100%; margin-bottom: 0.35em; padding: 0.15em 0.6em; font-size: var(--ls, 14px); font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase; white-space: nowrap; }
+  /* Corner Brackets */
+  .st-brackets { --t: 3px; --l: 22%; background:
+      linear-gradient(var(--c1), var(--c1)) top left / var(--l) var(--t) no-repeat, linear-gradient(var(--c1), var(--c1)) top left / var(--t) var(--l) no-repeat,
+      linear-gradient(var(--c1), var(--c1)) top right / var(--l) var(--t) no-repeat, linear-gradient(var(--c1), var(--c1)) top right / var(--t) var(--l) no-repeat,
+      linear-gradient(var(--c2), var(--c2)) bottom left / var(--l) var(--t) no-repeat, linear-gradient(var(--c2), var(--c2)) bottom left / var(--t) var(--l) no-repeat,
+      linear-gradient(var(--c2), var(--c2)) bottom right / var(--l) var(--t) no-repeat, linear-gradient(var(--c2), var(--c2)) bottom right / var(--t) var(--l) no-repeat; }
+  .st-brackets .lbl { color: var(--c1); text-shadow: 0 0 6px rgba(0, 0, 0, 0.9); padding-left: 0; }
+  /* Glow: a soft line of light round it */
+  .st-glow { border: 2px solid var(--c1); border-radius: 10px; box-shadow: 0 0 14px var(--c1), inset 0 0 10px color-mix(in srgb, var(--c1) 45%, transparent); }
+  .st-glow .lbl { background: var(--c1); border-radius: 6px 6px 0 0; margin-bottom: 0; color: #fff; }
+  /* Neon: two lines, the inner one the second colour */
+  .st-neon { border: 2px solid var(--c1); border-radius: 6px; box-shadow: 0 0 10px var(--c1), inset 0 0 0 4px transparent, inset 0 0 0 6px var(--c2); }
+  .st-neon .lbl { color: var(--c1); text-shadow: 0 0 8px var(--c1); }
+  /* Tech: cut corners and ticks along its edges */
+  .st-tech { border: 2px solid var(--c1); clip-path: polygon(14px 0, 100% 0, 100% calc(100% - 14px), calc(100% - 14px) 100%, 0 100%, 0 14px); }
+  .st-tech::before, .st-tech::after { content: ""; position: absolute; width: 30%; height: 4px; background: var(--c2); }
+  .st-tech::before { top: -1px; right: 12%; } .st-tech::after { bottom: -1px; left: 12%; }
+  .st-tech .lbl { background: linear-gradient(90deg, var(--c1), var(--c2)); clip-path: polygon(0 0, calc(100% - 10px) 0, 100% 100%, 0 100%); padding-right: 1.4em; }
+  /* Soft: a rounded gradient line */
+  .st-soft { border-radius: 14px; padding: 3px; background: linear-gradient(135deg, var(--c1), var(--c2)); -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor; mask-composite: exclude; }
+  .st-soft .lbl { display: none; }
+  .soft-lbl { position: absolute; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase; padding: 0.15em 0.6em; border-radius: 999px; background: linear-gradient(90deg, var(--c1), var(--c2)); white-space: nowrap; }
+  /* a slow pulse, if it's on */
+  .pulse { animation: pulse 2.4s ease-in-out infinite; }
+  @keyframes pulse { 50% { opacity: 0.55; } }
+  body.still .pulse { animation: none; }
+</style>
+</head>
+<body>
+<div id="stage"></div>
+<script>
+  "use strict";
+  const $ = (id) => document.getElementById(id);
+  const PREVIEW = /[?&]preview=1/.test(location.search);
+  let sig = "";
+  function draw(h) {
+    const next = JSON.stringify(h) + innerWidth + "x" + innerHeight;
+    if (next === sig) return;
+    sig = next;
+    document.body.classList.toggle("preview", PREVIEW && !!h.shot);
+    if (h.shot) document.body.style.setProperty("--shot", 'url("' + String(h.shot).replace(/["\\]/g, "") + '")');
+    if (h.colors && h.colors.c1) { document.body.style.setProperty("--c1", h.colors.c1); document.body.style.setProperty("--c2", h.colors.c2); }
+    // (the screenshot's pixels, stretched to the source)
+    const kx = innerWidth / Math.max(1, h.w || 1920), ky = innerHeight / Math.max(1, h.h || 1080);
+    const stage = $("stage");
+    stage.innerHTML = "";
+    for (const f of h.frames || []) {
+      const pad = Number(f.pad) || 6;
+      const el = document.createElement("div");
+      el.className = "fr st-" + (f.style || "brackets") + (f.pulse ? " pulse" : "");
+      Object.assign(el.style, { left: (f.x - pad) * kx + "px", top: (f.y - pad) * ky + "px", width: (f.w + pad * 2) * kx + "px", height: (f.h + pad * 2) * ky + "px" });
+      el.style.setProperty("--ls", Math.max(10, Math.min(22, 14 * ky)) + "px");
+      if (f.label) {
+        const l = document.createElement("div"); l.className = "lbl"; l.textContent = f.label; el.append(l);
+        if (f.style === "soft") { const s = document.createElement("div"); s.className = "soft-lbl"; s.textContent = f.label; s.style.fontSize = Math.max(10, Math.min(22, 14 * ky)) + "px"; s.style.left = (f.x - pad) * kx + "px"; s.style.top = (f.y - pad) * ky - 28 * ky + "px"; stage.append(s); }
+      }
+      stage.append(el);
+    }
+  }
+  async function poll() {
+    try {
+      const s = await (await fetch("/now.json" + (PREVIEW ? "?preview=1" : ""), { cache: "no-store" })).json();
+      if (s.accent) { document.body.style.setProperty("--c1", s.accent); document.body.style.setProperty("--c2", s.accent2 || s.accent); }
+      document.body.classList.toggle("still", !!(s.suite && s.suite.anim === "none"));
+      const h = ((s.suite && s.suite.creators) || []).find((x) => x.kind === "hud");
+      if (h) draw(h);
+    } catch (e) {}
+    setTimeout(poll, 1500);
+  }
+  addEventListener("resize", () => (sig = ""));
+  poll();
+</script>
+</body>
+</html>
