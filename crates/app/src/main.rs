@@ -3180,12 +3180,22 @@ fn autoplay_for_safe(a: &mut App, safe: bool) {
     if let Some(ui) = a.ui.upgrade() { ui.set_autoplay(a.autoplay); }
 }
 
-fn save_session(a: &App) {
+fn session_of(a: &App) -> serde_json::Value {
     let pos = a.resume_ms.unwrap_or_else(|| a.engine.position_ms());
     let mut v = a.queue.to_session(pos);
     // (your usual autoplay: the stream's is kept as apStream)
     v["autoplay"] = serde_json::json!(AP_USUAL.with(|u| u.get()).unwrap_or(a.autoplay));
-    queue::save_session(&v);
+    v
+}
+
+/// The session kept (written when it's changed, at most every 15 s: see queue::save_session)
+fn save_session(a: &App) {
+    queue::save_session(&session_of(a));
+}
+
+/// The session written at once: the app closing, restarting or going to the tray
+fn save_session_now(a: &App) {
+    queue::save_session_now(&session_of(a));
 }
 
 // ---------- playing ----------
@@ -10319,10 +10329,10 @@ thread_local! {
     static HOST_FRESH_AT: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
 }
 
-/// Still hosting: its time kept fresh (as states are pushed: every 10 s at most)
+/// Still hosting: its time kept fresh (as states are pushed: every 30 s at most, well inside HOST_RESUME_SECS)
 fn host_fresh() {
     let now = omnipulse_core::now_secs();
-    if now.saturating_sub(HOST_FRESH_AT.with(|c| c.get())) < 10 { return; }
+    if now.saturating_sub(HOST_FRESH_AT.with(|c| c.get())) < 30 { return; }
     HOST_FRESH_AT.with(|c| c.set(now));
     let Some(p) = hosting_file() else { return };
     let Some(mut v) = std::fs::read_to_string(&p).ok().and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok()) else { return };
@@ -11392,7 +11402,7 @@ fn status_act(shared: &Shared, i: usize) {
         StatusAct::Leave => listen_leave(shared, false),
         StatusAct::Restart => {
             // (a fresh one started, this one closed: the session kept for it)
-            save_session(&shared.borrow());
+            save_session_now(&shared.borrow());
             if let Ok(exe) = std::env::current_exe() { let _ = std::process::Command::new(exe).env("OMNIPULSE_RESTARTING", "1").spawn(); }
             let _ = slint::quit_event_loop();
         }
@@ -12063,7 +12073,7 @@ fn outside_start(shared: &Shared) {
 /// A media key, the tray's menu or a taskbar button
 /// The window closed (its X): OmniPulse quits, always
 fn close_or_tray(shared: &Shared) {
-    save_session(&shared.borrow());
+    save_session_now(&shared.borrow());
     let _ = slint::quit_event_loop();
 }
 
@@ -12078,7 +12088,7 @@ fn min_to_tray(prefs: &serde_json::Value) -> bool {
 fn minimize(shared: &Shared) {
     let Some(ui) = shared.borrow().ui.upgrade() else { return };
     if min_to_tray(&shared.borrow().web.prefs) {
-        save_session(&shared.borrow());
+        save_session_now(&shared.borrow());
         let _ = ui.window().hide();
     } else {
         ui.window().set_minimized(true);
@@ -12199,7 +12209,7 @@ fn desktop_action(shared: &Shared, action: &str) {
             }
         }
         "quit" => {
-            save_session(&shared.borrow());
+            save_session_now(&shared.borrow());
             let _ = slint::quit_event_loop();
         }
         _ => {}
@@ -14766,6 +14776,8 @@ fn main() -> Result<(), slint::PlatformError> {
     }
     slint::run_event_loop_until_quit()?;
     let _ = ui.hide();
+    // (the session, if a write was still waiting)
+    queue::flush_session();
     // the window closed: OmniPulse ends, the music with it. (Not waiting on the background work: a plugin's
     // connection or a long fetch kept the process, and the music, going after the window had gone)
     rt.shutdown_timeout(std::time::Duration::from_millis(800));

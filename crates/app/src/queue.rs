@@ -260,13 +260,52 @@ fn session_file() -> Option<std::path::PathBuf> {
     Some(d.join("native-session.json"))
 }
 
-pub fn save_session(v: &Value) {
+// (the session as last written, and the latest waiting to be: written at most every SESSION_EVERY, as it's
+// asked for often (each track, each change to the queue, while playing) and it's the whole queue each time)
+static SESSION_WRITTEN: std::sync::Mutex<String> = std::sync::Mutex::new(String::new());
+static SESSION_WAITING: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+static SESSION_AT: std::sync::Mutex<Option<std::time::Instant>> = std::sync::Mutex::new(None);
+const SESSION_EVERY: std::time::Duration = std::time::Duration::from_secs(15);
+
+fn session_write(text: &str) {
     if let Some(p) = session_file() {
         let tmp = p.with_extension("tmp");
-        if std::fs::write(&tmp, v.to_string()).is_ok() {
+        if std::fs::write(&tmp, text).is_ok() {
             let _ = std::fs::rename(tmp, p);
         }
     }
+    *SESSION_WRITTEN.lock().unwrap() = text.to_string();
+    *SESSION_AT.lock().unwrap() = Some(std::time::Instant::now());
+}
+
+/// The session kept: unchanged, nothing written; changed, written now if it's been a while, else once the
+/// while is up (the latest by then: several changes, one write)
+pub fn save_session(v: &Value) {
+    let text = v.to_string();
+    if *SESSION_WRITTEN.lock().unwrap() == text { *SESSION_WAITING.lock().unwrap() = None; return; }
+    let due = SESSION_AT.lock().unwrap().is_none_or(|at| at.elapsed() >= SESSION_EVERY);
+    if due { *SESSION_WAITING.lock().unwrap() = None; return session_write(&text); }
+    // (one waits already: it'll take this one instead, when it's written)
+    let was = SESSION_WAITING.lock().unwrap().replace(text);
+    if was.is_some() { return; }
+    let wait = SESSION_EVERY.saturating_sub(SESSION_AT.lock().unwrap().map(|at| at.elapsed()).unwrap_or_default());
+    std::thread::spawn(move || {
+        std::thread::sleep(wait);
+        if let Some(t) = SESSION_WAITING.lock().unwrap().take() { session_write(&t); }
+    });
+}
+
+/// Anything still waiting, written now (the app ending)
+pub fn flush_session() {
+    let waiting = SESSION_WAITING.lock().unwrap().take();
+    if let Some(t) = waiting { session_write(&t); }
+}
+
+/// The session written at once (the app closing, restarting, going to the tray): nothing left waiting
+pub fn save_session_now(v: &Value) {
+    *SESSION_WAITING.lock().unwrap() = None;
+    let text = v.to_string();
+    if *SESSION_WRITTEN.lock().unwrap() != text { session_write(&text); }
 }
 
 pub fn load_session() -> Option<(Queue, u64)> {
