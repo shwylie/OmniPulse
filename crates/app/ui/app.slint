@@ -1200,7 +1200,7 @@ component FlowFieldsView inherits VerticalLayout {
         }
         if fl.kind == "select": VerticalLayout { alignment: center; Dropdown { options: fl.options; current: fl.at; picked(k) => { root.picked(i, k); } } }
         // (a program: typed, or picked from the ones open now)
-        if fl.kind == "program" || fl.kind == "scene" || fl.kind == "source" || fl.kind == "reward": VerticalLayout {
+        if fl.kind == "program" || fl.kind == "scene" || fl.kind == "source" || fl.kind == "reward" || fl.kind == "mscene" || fl.kind == "mlayer" || fl.kind == "meffect" || fl.kind == "mtrack" || fl.kind == "sscene" || fl.kind == "ssource": VerticalLayout {
             alignment: center;
             spacing: 6px;
             Rectangle {
@@ -1213,7 +1213,8 @@ component FlowFieldsView inherits VerticalLayout {
                 fpti := TextInput { x: 10px; width: parent.width - 20px; height: parent.height; vertical-alignment: center; color: Theme.text; font-size: 13px; single-line: true; text: fl.value; edited => { root.changed(i, self.text); } }
             }
             Dropdown { width: 280px; options: fl.options; current: -1;
-                placeholder: fl.kind == "program" ? (fl.options.length > 0 ? "Pick one that's open now" : "No other programs open") : fl.kind == "reward" ? "Pick a reward, or make one" : fl.kind == "scene" ? "Pick a scene" : "Pick a source";
+                placeholder: fl.kind == "program" ? (fl.options.length > 0 ? "Pick one that's open now" : "No other programs open") : fl.kind == "reward" ? "Pick a reward, or make one"
+                    : fl.kind == "scene" || fl.kind == "mscene" || fl.kind == "sscene" ? "Pick a scene" : fl.kind == "mlayer" ? "Pick a layer" : fl.kind == "meffect" ? "Pick an effect" : fl.kind == "mtrack" ? "Pick an audio track" : "Pick a source";
                 picked(k) => { root.picked(i, k); } }
         }
         if fl.kind == "toggle": CenterToggle { checked: fl.value == "true"; toggled => { root.changed(i, self.checked ? "true" : "false"); } }
@@ -3071,11 +3072,11 @@ global BotLook {
         return Theme.tints.length > 0 ? Theme.tints[mod(n, Theme.tints.length)] : Theme.accent;
     }
     public pure function tint(id: string) -> color {
-        return id == "twitch" || id == "twitchbot" ? #a970ff : id == "kick" || id == "kickbot" ? #53fc18 : id == "obs" ? Theme.accent : id == "streamlabs" ? #4ad295 : id == "streamelements" ? #5ad1ff
+        return id == "twitch" || id == "twitchbot" ? #a970ff : id == "kick" || id == "kickbot" ? #53fc18 : id == "obs" ? Theme.accent : id == "meld" ? #ff7a59 : id == "slobs" ? #80f5d2 : id == "streamlabs" ? #4ad295 : id == "streamelements" ? #5ad1ff
             : id == "requests" ? Theme.accent : id == "alerts" ? #ff6b8a : id == "points" ? #ffb547 : id == "games" ? #5ad1ff : Theme.accent-2;
     }
     public pure function icon(id: string) -> string {
-        return id == "twitch" || id == "twitchbot" ? Icons.twitch : id == "kick" || id == "kickbot" ? Icons.kick : id == "obs" ? Icons.broadcast : id == "streamlabs" || id == "streamelements" ? Icons.coins
+        return id == "twitch" || id == "twitchbot" ? Icons.twitch : id == "kick" || id == "kickbot" ? Icons.kick : id == "obs" || id == "meld" || id == "slobs" ? Icons.broadcast : id == "streamlabs" || id == "streamelements" ? Icons.coins
             : id == "requests" ? Icons.playlist-add : id == "alerts" ? Icons.bell : id == "points" ? Icons.coins : id == "games" ? Icons.dice : id == "moderation" ? Icons.shield
             : id == "hype" ? Icons.broadcast : id == "voteskip" ? Icons.next : id == "wheel" ? Icons.dice : id == "leaderboard" ? Icons.coins : id == "emoterain" ? Icons.chat
             : id == "goals" ? Icons.check : id == "timer" ? Icons.refresh : id == "latest" ? Icons.heart-out : id == "raid" ? Icons.broadcast : Icons.actions;
@@ -3310,6 +3311,8 @@ component FeatCard inherits Rectangle {
 component BotPage inherits Rectangle {
     /// (its Widgets, or its Docks, as a page of their own ("widgets", "docks"): the rest of it hidden)
     in property <string> widgets-view;
+    /// (the page's own colour, behind a settings page of its own)
+    in property <brush> page-bg: Theme.panel;
     in property <bool> setup;
     in property <string> name;
     in property <string> sub;
@@ -3335,7 +3338,7 @@ component BotPage inherits Rectangle {
 
 
     // ----- the first time: the path -----
-    if root.setup: ScrollView {
+    if root.setup && root.sheet == "": ScrollView {
         width: parent.width;
         height: parent.height;
         VerticalLayout {
@@ -3414,8 +3417,8 @@ component BotPage inherits Rectangle {
         }
     }
 
-    // ----- after: the control room -----
-    if !root.setup: ScrollView {
+    // ----- after: the control room (hidden while one of its settings pages is open) -----
+    if !root.setup && root.sheet == "": ScrollView {
         width: parent.width;
         height: parent.height;
         VerticalLayout {
@@ -3798,38 +3801,27 @@ component BotPage inherits Rectangle {
         }
     }
 
-    // ----- a service's (or a feature's) sheet, over the page -----
+    // ----- a service's (or a feature's, or a widget's) settings: a page of their own, as every page in Settings
+    // is, its name in the page's title and crumbs (Back goes to where it was opened from) -----
     if root.sheet != "": Rectangle {
-        background: Theme.bg.with-alpha(0.55);
-        TouchArea { clicked => { root.act("sheet:"); } }
-        Rectangle {
-            width: min(parent.width - 40px, 620px);
-            height: min(parent.height - 24px, shc.preferred-height + 100px);
-            x: (parent.width - self.width) / 2;
-            y: 12px;
-            border-radius: 18px;
-            background: Theme.panel;
-            border-width: 1px;
-            border-color: BotLook.tint(root.sheet).with-alpha(0.6);
-            drop-shadow-blur: 30px;
-            drop-shadow-color: #00000080;
-            TouchArea { }
+        background: root.page-bg;
+        ScrollView {
+            horizontal-scrollbar-policy: always-off;
             VerticalLayout {
-                padding: 18px;
+                padding-right: 12px;
+                padding-bottom: root.foot;
                 spacing: 12px;
-                HorizontalLayout {
-                    spacing: 10px;
-                    VerticalLayout { alignment: center; Glyph { d: BotLook.icon(root.sheet); width: 22px; height: 22px; fill: BotLook.tint(root.sheet); } }
-                    Text { text: root.sheet-title; color: Theme.text; font-size: 18px; font-weight: 800; horizontal-stretch: 1; vertical-alignment: center; }
-                    IconButton { d: Icons.close; size: 32px; tip: "Done. Your changes still need saving."; clicked => { root.act("sheet:"); } }
-                }
-                ScrollView {
-                    vertical-stretch: 1;
-                    shc := VerticalLayout {
-                        padding-right: 10px;
-                        spacing: 12px;
-                        alignment: start;
-                        for f in root.sheet-fields: BotFieldRow { f: f; set(k, v) => { root.set(k, v); } act(a) => { root.act(a); } }
+                alignment: start;
+                for f in root.sheet-fields: VerticalLayout {
+                    // (a heading, a note and a preview as they are; everything else in a card of its own)
+                    if f.kind == "head" || f.kind == "note" || f.kind == "suiteprev": BotFieldRow { f: f; set(k, v) => { root.set(k, v); } act(a) => { root.act(a); } }
+                    if f.kind != "head" && f.kind != "note" && f.kind != "suiteprev": Rectangle {
+                        background: Theme.panel;
+                        border-radius: 12px;
+                        border-width: 1px;
+                        border-color: Theme.line;
+                        height: sfc.preferred-height;
+                        sfc := VerticalLayout { padding: 14px; BotFieldRow { f: f; set(k, v) => { root.set(k, v); } act(a) => { root.act(a); } } }
                     }
                 }
             }
@@ -6801,6 +6793,7 @@ export component AppWindow inherits Window {
                             vertical-stretch: 1;
                             setup: root.bot-setup;
                             widgets-view: root.bot-widgets;
+                            page-bg: root.settings-look ? root.settings-panel : Theme.panel;
                             name: root.bot-name;
                             sub: root.bot-sub;
                             running: root.bot-running;

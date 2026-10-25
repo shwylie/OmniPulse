@@ -4498,7 +4498,7 @@ fn flow_node(list: &'static [flows::Kind], v: &serde_json::Value) -> FlowNode {
         let value = match now { serde_json::Value::String(s) => s.clone(), serde_json::Value::Bool(b) => b.to_string(), serde_json::Value::Null => fl.default.to_string(), serde_json::Value::Number(n) => n.as_f64().map(|x| if x.fract() == 0.0 { format!("{}", x as i64) } else { x.to_string() }).unwrap_or_default(), x => x.to_string() };
         // (a program's: the ones open now, as the card's painted)
         let options: Vec<slint::SharedString> = if fl.kind == "program" { procwatch::programs().into_iter().map(Into::into).collect() }
-            else if matches!(fl.kind, "scene" | "source" | "reward") { pick_options(fl.kind).into_iter().map(Into::into).collect() }
+            else if matches!(fl.kind, "scene" | "source" | "reward" | "mscene" | "mlayer" | "meffect" | "mtrack" | "sscene" | "ssource") { pick_options(fl.kind).into_iter().map(Into::into).collect() }
             else { fl.options.iter().map(|o| o.1.into()).collect() };
         let at = fl.options.iter().position(|o| o.0 == value).map(|i| i as i32).unwrap_or(0);
         FlowField { key: fl.key.into(), label: fl.label.into(), note: fl.note.into(), kind: fl.kind.into(), value: value.into(), options: ModelRc::from(Rc::new(VecModel::from(options))), at }
@@ -4715,8 +4715,11 @@ fn pick_rewards() -> Vec<(String, Vec<String>, Vec<String>, i64)> {
 fn pick_options(kind: &str) -> Vec<String> {
     let mut o: Vec<String> = match kind {
         "reward" => pick_rewards().into_iter().map(|(t, plats, _, cost)| format!("{t}  \u{b7}  {}{}", plats.iter().map(|p| if p == "kick" { "Kick" } else { "Twitch" }).collect::<Vec<_>>().join(", "), if cost > 0 { format!(", {cost}") } else { String::new() })).collect(),
-        "scene" => PICKS.with(|p| p.borrow()["scenes"].as_array().into_iter().flatten().filter_map(|x| x.as_str().map(String::from)).collect()),
-        "source" => PICKS.with(|p| p.borrow()["sources"].as_array().into_iter().flatten().filter_map(|x| x.as_str().map(String::from)).collect()),
+        // (OBS's scenes and sources; Meld Studio's scenes, layers, effects and tracks; Streamlabs Desktop's)
+        k @ ("scene" | "source" | "mscene" | "mlayer" | "meffect" | "mtrack" | "sscene" | "ssource") => {
+            let key = match k { "scene" => "scenes", "source" => "sources", "mscene" => "meldScenes", "mlayer" => "meldLayers", "meffect" => "meldEffects", "mtrack" => "meldTracks", "sscene" => "slobsScenes", _ => "slobsSources" };
+            PICKS.with(|p| p.borrow()[key].as_array().into_iter().flatten().filter_map(|x| x.as_str().map(String::from)).collect())
+        }
         _ => Vec::new(),
     };
     if kind == "reward" { o.push(PICK_NEW_REWARD.into()); }
@@ -5047,7 +5050,7 @@ fn flows_wire(ui: &AppWindow, shared: &Shared) {
         let value = match fl.kind {
             "select" => { let k = v.strip_prefix('\u{2}').and_then(|k| k.parse::<usize>().ok()).unwrap_or(0); serde_json::json!(fl.options.get(k).map(|o| o.0).unwrap_or(fl.default)) }
             // (a scene, a source or a reward picked; or Look Again, or Make a New Reward)
-            "scene" | "source" | "reward" => match v.strip_prefix('\u{2}').and_then(|k| k.parse::<usize>().ok()) {
+            "scene" | "source" | "reward" | "mscene" | "mlayer" | "meffect" | "mtrack" | "sscene" | "ssource" => match v.strip_prefix('\u{2}').and_then(|k| k.parse::<usize>().ok()) {
                 Some(k) => {
                     let opts = pick_options(fl.kind);
                     let Some(o) = opts.get(k) else { return };
@@ -5073,7 +5076,7 @@ fn flows_wire(ui: &AppWindow, shared: &Shared) {
         };
         let key = fl.key;
         flow_change(&s, |a| { let t = if node < 0 { &mut a["trigger"] } else { &mut a["steps"][node as usize] }; t[key] = value; });
-        if matches!(fl.kind, "select" | "toggle") || (matches!(fl.kind, "program" | "scene" | "source") && v.starts_with('\u{2}')) { flows_paint(&s); } else { flows_item_paint(&s); }
+        if matches!(fl.kind, "select" | "toggle") || (matches!(fl.kind, "program" | "scene" | "source" | "mscene" | "mlayer" | "meffect" | "mtrack" | "sscene" | "ssource") && v.starts_with('\u{2}')) { flows_paint(&s); } else { flows_item_paint(&s); }
     });
 }
 
@@ -6713,7 +6716,32 @@ fn pf_mark(shared: &Shared) {
 }
 
 /// Leaving the page (Back, its X, a crumb): asked first when something's unsaved
+/// Within the Suite (one of its settings pages, or its Widgets or Docks, back to another of its pages): nothing
+/// unsaved asked about or lost, as it's all the Suite's, kept until Save
+fn suite_inner(shared: &Shared, to: &str) -> bool {
+    if !PF_EDIT.with(|e| e.borrow().as_ref().is_some_and(|(id, _)| id == botpage::BOT)) { return false; }
+    let target = match to.strip_prefix("crumb:").and_then(|i| i.parse::<usize>().ok()) { Some(i) => PF_CRUMBS.with(|c| c.borrow().get(i).cloned()).unwrap_or_default(), None => to.to_string() };
+    let sheet = BOT_SHEET.with(|b| !b.borrow().is_empty());
+    let widgets = BOT_WIDGETS.with(|w| !w.borrow().is_empty());
+    if target == format!("plugin:{}", botpage::BOT) && (sheet || widgets) {
+        BOT_SHEET.with(|b| b.borrow_mut().clear());
+        BOT_WIDGETS.with(|w| w.borrow_mut().clear());
+        if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_bot_widgets("".into()); }
+        bot_sheet_crumbs(shared, "");
+        bot_paint(shared);
+        return true;
+    }
+    if (target == "botwidgets" || target == "botdocks") && sheet {
+        BOT_SHEET.with(|b| b.borrow_mut().clear());
+        bot_widgets_open(shared, &target[3..]);
+        bot_paint(shared);
+        return true;
+    }
+    false
+}
+
 fn pf_leave(shared: &Shared, to: &str) {
+    if suite_inner(shared, to) { return; }
     if PF_EDIT.with(|e| e.borrow().is_some()) && pf_changes() > 0 {
         LEAVE_TO.with(|l| *l.borrow_mut() = to.to_string());
         if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_leave_ask(true); }
@@ -6895,6 +6923,7 @@ fn bot_act(shared: &Shared, act: &str) {
     if act == "widgets" || act == "docks" { return bot_widgets_open(shared, act); }
     if let Some(id) = act.strip_prefix("sheet:") {
         BOT_SHEET.with(|b| *b.borrow_mut() = id.to_string());
+        bot_sheet_crumbs(shared, id);
         return bot_paint(shared);
     }
     if let Some(url) = act.strip_prefix("url:") { if let Err(e) = omnipulse_core::open_url(url.to_string()) { say(&e); } return; }
@@ -7042,6 +7071,8 @@ fn crumb_go(shared: &Shared, i: usize) {
     let Some(to) = PF_CRUMBS.with(|c| c.borrow().get(i).cloned()) else { return };
     let Some(ui) = shared.borrow().ui.upgrade() else { return };
     if let Some(n) = to.strip_prefix("panel:") { panel_open(shared, n); return; }
+    // (the Suite's Widgets or Docks: its page, then that one)
+    if to == "botwidgets" || to == "botdocks" { PF_EDIT.with(|e| e.borrow_mut().take()); pf_open(shared, botpage::BOT); return bot_widgets_open(shared, &to[3..]); }
     if let Some(id) = to.strip_prefix("plugin:") {
         PF_EDIT.with(|e| e.borrow_mut().take());
         if let Some(sec) = omnipulse_core::plugins::list().into_iter().find(|p| p.manifest.id == id).map(|p| p.manifest.section).filter(|x| !x.is_empty()) { ui.set_set_cat(sec.into()); }
@@ -11682,6 +11713,25 @@ thread_local! {
     static VOLUME_SAVE: RefCell<Option<slint::Timer>> = const { RefCell::new(None) };
     /// the chatbot's hotkeys, waiting to be registered (the tick has the Desktop that does it)
     static HOTKEYS_WANTED: RefCell<Option<Vec<String>>> = const { RefCell::new(None) };
+}
+
+/// One of the Suite's settings pages (a connection's, a feature's, a widget's): its name the page's title, its
+/// crumbs through the Suite (and its Widgets or Docks, if it was opened from there), so Back goes where it came
+/// from; none (""), the Suite's page, or its Widgets or Docks, as it was
+fn bot_sheet_crumbs(shared: &Shared, id: &str) {
+    let Some(ui) = shared.borrow().ui.upgrade() else { return };
+    let label = bot_manifest().map(|m| place_label(&m)).unwrap_or_else(|| "Suite".into());
+    let which = BOT_WIDGETS.with(|w| w.borrow().clone());
+    if id.is_empty() {
+        if !which.is_empty() { return bot_widgets_open(shared, &which); }
+        crumbs_set(&ui, vec![("Settings".into(), "root".into()), ("Streaming".into(), "cat:Streaming".into())]);
+        ui.set_pf_head(label.into());
+        return;
+    }
+    let mut path = vec![("Settings".to_string(), "root".to_string()), ("Streaming".into(), "cat:Streaming".into()), (label, format!("plugin:{}", botpage::BOT))];
+    if !which.is_empty() { path.push((widgets_title(&which).into(), format!("bot{which}"))); }
+    crumbs_set(&ui, path);
+    ui.set_pf_head(botpage::sheet(id, &bot_current(shared)).0.into());
 }
 
 fn widgets_title(which: &str) -> &'static str { if which == "docks" { "Docks" } else { "Widgets" } }

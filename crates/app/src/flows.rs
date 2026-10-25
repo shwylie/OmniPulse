@@ -69,6 +69,15 @@ const MEDIA_DO: &[(&str, &str)] = &[("play", "Play"), ("pause", "Pause"), ("rest
 const PLACES: &[(&str, &str)] = &[("top", "At the Top"), ("middle", "In the Middle"), ("bottom", "At the Bottom"), ("roll", "Rolling Up (Like Credits)")];
 const START_STOP: &[(&str, &str)] = &[("start", "Start"), ("stop", "Stop"), ("toggle", "Start or Stop")];
 const SHOW_HIDE: &[(&str, &str)] = &[("show", "Show"), ("hide", "Hide"), ("toggle", "Show or Hide")];
+const SOFTWARE: &[(&str, &str)] = &[("any", "Any"), ("obs", "OBS"), ("meld", "Meld Studio"), ("slobs", "Streamlabs Desktop")];
+const ON_OFF_TOGGLE: &[(&str, &str)] = &[("on", "On"), ("off", "Off"), ("toggle", "On or Off")];
+const MELD_EVENTS: &[(&str, &str)] = &[
+    ("CONFETTIPOP_TRIGGER", "Confetti Pop"), ("CONFETTIFALL_TRIGGER", "Confetti Fall"), ("WHEELSPIN_SPIN", "Spin Its Wheel"),
+    ("COUNTER_INCREMENT", "Counter Up"), ("COUNTER_DECREMENT", "Counter Down"),
+    ("SUBATHONTIMER_ADDTIME", "Subathon Timer: Add Time"), ("SUBATHONTIMER_PAUSE", "Subathon Timer: Pause"), ("SUBATHONTIMER_RESUME", "Subathon Timer: Resume"), ("SUBATHONTIMER_RESET", "Subathon Timer: Reset"),
+    ("COUNTDOWN_PAUSE", "Countdown: Pause"), ("COUNTDOWN_RESUME", "Countdown: Resume"), ("COUNTDOWN_RESET", "Countdown: Reset"),
+    ("STOPWATCH_PAUSE", "Stopwatch: Pause"), ("STOPWATCH_RESUME", "Stopwatch: Resume"), ("STOPWATCH_RESET", "Stopwatch: Reset"),
+];
 const MUTE: &[(&str, &str)] = &[("mute", "Mute"), ("unmute", "Unmute"), ("toggle", "Mute or Unmute")];
 const ON_OFF: &[(&str, &str)] = &[("on", "On"), ("off", "Off")];
 const COLOURS: &[(&str, &str)] = &[("primary", "Your Channel's Colour"), ("blue", "Blue"), ("green", "Green"), ("orange", "Orange"), ("purple", "Purple")];
@@ -128,8 +137,9 @@ pub const TRIGGERS: &[Kind] = &[
     Kind { id: "song", label: "The Music", note: "Gives the steps %song% and %artist%. For a request, %user% is who asked.", fields: &[
         pick("when", "When", &[("start", "A Song Starts"), ("request", "A Song Is Requested")], "start", ""),
     ] },
-    Kind { id: "obs", label: "OBS", note: "Needs OBS switched on in the Suite's settings. Gives its steps %scene% (the scene now).", fields: &[
+    Kind { id: "obs", label: "Streaming Software", note: "OBS, Meld Studio or Streamlabs Desktop, switched on in the Suite's Connections. Gives its steps %scene% (the scene now) and %software% (which it was).", fields: &[
         pick("when", "When", OBS_WHEN, "scene", ""),
+        pick("app", "In", SOFTWARE, "any", "Any is whichever you have connected."),
         f("scene", "Scene", "scene", "", "For a scene change: pick it, or type its name. Leave it empty for any scene."),
     ] },
     Kind { id: "web", label: "A Web Address", note: "Another tool, like a Stream Deck plugin, a script or a bot, can run it by calling http://127.0.0.1:7879/action?key=YOUR-KEY&name=ITS-NAME. Add &user= and &input= to set %user% and %rawInput%. The key is Song Requests' secret key, in Settings > Streaming > Song Requests (turned on).", fields: &[
@@ -410,6 +420,39 @@ pub const STEPS: &[Kind] = &[
         f("into", "As", "text", "reply", "The variable it's kept in: %reply%, or whatever you name it."),
     ] },
     Kind { id: "run", label: "Run Another Action", note: "", fields: &[f("action", "Action", "text", "", "Its name.")] },
+    // (Meld Studio's: switched on in the Suite's Connections)
+    Kind { id: "meldscene", label: "Meld: Switch Scene", note: "", fields: &[f("scene", "Scene", "mscene", "", "Pick it, or type its name as Meld shows it.")] },
+    Kind { id: "meldlayer", label: "Meld: Show or Hide a Layer", note: "", fields: &[
+        f("layer", "Layer", "mlayer", "", ""),
+        f("scene", "In Scene", "mscene", "", "Leave it empty to use the current scene."),
+        pick("what", "", SHOW_HIDE, "toggle", ""),
+    ] },
+    Kind { id: "meldeffect", label: "Meld: Effect On or Off", note: "", fields: &[
+        f("effect", "Effect", "meffect", "", ""),
+        f("layer", "On Layer", "mlayer", "", ""),
+        f("scene", "In Scene", "mscene", "", "Leave it empty to use the current scene."),
+        pick("what", "", ON_OFF_TOGGLE, "toggle", ""),
+    ] },
+    Kind { id: "meldmute", label: "Meld: Mute or Unmute", note: "", fields: &[f("track", "Audio Track", "mtrack", "", ""), pick("what", "", MUTE, "toggle", "")] },
+    Kind { id: "meldstream", label: "Meld: Streaming", note: "", fields: &[pick("what", "", START_STOP, "toggle", "")] },
+    Kind { id: "meldrecord", label: "Meld: Recording", note: "", fields: &[pick("what", "", START_STOP, "toggle", "")] },
+    Kind { id: "meldclip", label: "Meld: Record a Clip", note: "Of what just happened.", fields: &[f("seconds", "Length", "number", "30", "Seconds, up to 90. 0 for as long as it can.")] },
+    Kind { id: "meldshot", label: "Meld: Screenshot", note: "", fields: &[f("vertical", "Vertical", "toggle", "false", "Its vertical canvas instead.")] },
+    Kind { id: "meldwidget", label: "Meld: Widget Event", note: "Meld's own widgets: confetti, its wheel, its counter and timers.", fields: &[
+        pick("event", "Event", MELD_EVENTS, "CONFETTIPOP_TRIGGER", ""),
+        f("seconds", "Seconds", "number", "60", "For Subathon Timer: Add Time."),
+    ] },
+    // (Streamlabs Desktop's: its Remote Control on, in the Suite's Connections)
+    Kind { id: "slobsscene", label: "Streamlabs: Switch Scene", note: "", fields: &[f("scene", "Scene", "sscene", "", "Pick it, or type its name as Streamlabs shows it.")] },
+    Kind { id: "slobssource", label: "Streamlabs: Show or Hide", note: "", fields: &[
+        f("source", "Source", "ssource", "", ""),
+        f("scene", "In Scene", "sscene", "", "Leave it empty to use the current scene."),
+        pick("show", "", SHOW_HIDE, "toggle", ""),
+    ] },
+    Kind { id: "slobsmute", label: "Streamlabs: Mute or Unmute", note: "", fields: &[f("source", "Audio", "ssource", "", ""), pick("what", "", MUTE, "toggle", "")] },
+    Kind { id: "slobsstream", label: "Streamlabs: Streaming", note: "", fields: &[pick("what", "", START_STOP, "toggle", "")] },
+    Kind { id: "slobsrecord", label: "Streamlabs: Recording", note: "", fields: &[pick("what", "", START_STOP, "toggle", "")] },
+    Kind { id: "slobsreplay", label: "Streamlabs: Save the Replay", note: "Its replay buffer needs to be running.", fields: &[] },
     Kind { id: "spin", label: "Spin the Wheel", note: "A free spin, for whoever started the action. Its prizes are in the Suite's Spin the Wheel.", fields: &[] },
     Kind { id: "hypeadd", label: "Add Hype", note: "Fills the hype meter by this much. A level's 100 unless you've changed it.", fields: &[f("amount", "Amount", "number", "20", "")] },
     Kind { id: "emoterain", label: "Make It Rain Emotes", note: "A burst of the latest emotes on the Emote Rain widget.", fields: &[] },
@@ -456,7 +499,11 @@ pub fn trigger_menu() -> Vec<MenuItem> {
     }
     m.push(item("Donations", "Streamlabs or StreamElements", "event", json!({ "event": "donation", "from": "any" })));
     m.push(item("Donations", "Twitch Charity", "event", json!({ "event": "charity", "from": "twitch" })));
-    for (w, l) in OBS_WHEN { m.push(item("OBS", l, "obs", json!({ "when": w }))); }
+    // (streaming software: whichever's connected, or one of them)
+    for (w, l) in OBS_WHEN { m.push(item("Streaming Software", l, "obs", json!({ "when": w, "app": "any" }))); }
+    for (cat, app) in [("OBS", "obs"), ("Meld Studio", "meld"), ("Streamlabs Desktop", "slobs")] {
+        for (w, l) in OBS_WHEN { m.push(item(cat, l, "obs", json!({ "when": w, "app": app }))); }
+    }
     m.push(item("OmniPulse", "A Song Starting", "song", json!({ "when": "start" })));
     m.push(item("OmniPulse", "A Song Requested", "song", json!({ "when": "request" })));
     m.push(item("OmniPulse", "A Web Address", "web", json!({})));
@@ -476,6 +523,8 @@ pub fn step_menu() -> Vec<MenuItem> {
         ("Variables", &["setvar", "addvar", "math", "randomnum", "text", "userinfo"]),
         ("Twitch and Kick", &["title", "game", "marker", "clip", "poll", "pollend", "predict", "predictend", "reward", "ad", "raid"]),
         ("OBS", &["obsscene", "obssource", "obstext", "obsmute", "obsfilter", "obsmedia", "obsbrowser", "obsreplay", "obsshot", "obsrecord", "obsstream", "obsraw"]),
+        ("Meld Studio", &["meldscene", "meldlayer", "meldeffect", "meldmute", "meldstream", "meldrecord", "meldclip", "meldshot", "meldwidget"]),
+        ("Streamlabs Desktop", &["slobsscene", "slobssource", "slobsmute", "slobsstream", "slobsrecord", "slobsreplay"]),
         ("OmniPulse", &["request", "wrongsong", "nowplaying", "skip", "playpause", "alert", "overlay", "speak", "sound", "status", "credits"]),
         ("Points and Games", &["points", "gamble", "slots", "duel", "heist", "trivia", "strike", "quote", "quoteadd", "giveenter", "givepick"]),
         ("Fun", &["spin", "hypeadd", "emoterain"]),
@@ -495,7 +544,7 @@ pub fn step_menu() -> Vec<MenuItem> {
 pub fn menu_find<'a>(menu: &'a [MenuItem], v: &Value) -> Option<&'a MenuItem> {
     let id = v["type"].as_str().unwrap_or("");
     menu.iter().filter(|m| m.id == id)
-        .filter(|m| m.preset.as_object().is_none_or(|p| p.iter().all(|(k, x)| v.get(k).is_some_and(|y| y == x) || (k == "from" && x == "any" && v[k].is_null()))))
+        .filter(|m| m.preset.as_object().is_none_or(|p| p.iter().all(|(k, x)| v.get(k).is_some_and(|y| y == x) || ((k == "from" || k == "app") && x == "any" && v[k].is_null()))))
         .max_by_key(|m| m.preset.as_object().map_or(0, |p| p.len()))
 }
 

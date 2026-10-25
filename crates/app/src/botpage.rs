@@ -115,6 +115,18 @@ pub fn sheet(id: &str, cur: &Map<String, Value>) -> (String, Vec<Field>) {
             f("password", "obsPassword", "Password", "", s(cur, "obsPassword"), "Paste the OBS password here"),
             f("text", "obsAddress", "Address", "Leave this as it is if OBS runs on this PC.", s(cur, "obsAddress"), "127.0.0.1:4455"),
         ]),
+        "meld" => ("Meld Studio".into(), vec![
+            f("toggle", "meldOn", "Connect to Meld Studio", "Your actions can switch scenes, show or hide layers, turn effects on or off, record clips, and more. Its scene changes and going live can start actions too.", if on(cur, "meldOn", false) { "true" } else { "false" }, ""),
+            step(1, "Open Meld Studio on this PC. Nothing needs setting up in it: OmniPulse finds it.", "", "", ""),
+            f("text", "meldAddress", "Address", "Leave this as it is if Meld runs on this PC. For another PC, turn on Allow remote connections in Meld's Settings > Advanced, and put that PC's address here.", s(cur, "meldAddress"), "127.0.0.1:13376"),
+        ]),
+        "slobs" => ("Streamlabs Desktop".into(), vec![
+            f("toggle", "slobsOn", "Connect to Streamlabs Desktop", "Your actions can switch scenes, show or hide sources, mute, and start or stop the stream. Its scene changes and going live can start actions too.", if on(cur, "slobsOn", false) { "true" } else { "false" }, ""),
+            step(1, "In Streamlabs Desktop, open Settings, then Remote Control.", "", "", ""),
+            step(2, "Click the QR code, then Show Details. Copy the API Token and paste it below.", "", "", ""),
+            f("password", "slobsToken", "API Token", "", s(cur, "slobsToken"), "Paste the API Token here"),
+            f("text", "slobsAddress", "Address", "Leave this as it is if Streamlabs runs on this PC.", s(cur, "slobsAddress"), "127.0.0.1:59650"),
+        ]),
         "streamlabs" => ("Streamlabs".into(), vec![
             step(1, "Open your Streamlabs API settings and go to API Tokens.", "", "https://streamlabs.com/dashboard#/settings/api-settings", "Open Streamlabs' API settings"),
             step(2, "Copy your Socket API Token and paste it below.", "", "", ""),
@@ -359,6 +371,8 @@ pub fn tiles(cur: &Map<String, Value>, st: &Value, running: bool) -> Vec<(&'stat
         ("twitch", "Twitch".into(), light(!tw.is_empty(), "twitch"), if tw.is_empty() { "Not signed in".into() } else if up("twitch") { tw.to_string() } else { format!("{tw}: {}", wait.to_lowercase()) }, if s(cur, "botLogin").is_empty() { "No bot account".into() } else { format!("Bot: {}", s(cur, "botLogin")) }),
         ("kick", "Kick".into(), light(on(cur, "kickOn", false) && !kk.is_empty(), "kick"), if !on(cur, "kickOn", false) { "Off".into() } else if kk.is_empty() { "Not signed in".into() } else if up("kick") { kk.to_string() } else { format!("{kk}: {}", wait.to_lowercase()) }, if s(cur, "kickBotLogin").is_empty() { "No bot account".into() } else { format!("Bot: {}", s(cur, "kickBotLogin")) }),
         ("obs", "OBS".into(), light(on(cur, "obsOn", false), "obs"), if !on(cur, "obsOn", false) { "Off".into() } else if up("obs") { "Connected".into() } else { "Waiting for OBS to open".into() }, "Scenes and sources".into()),
+        ("meld", "Meld Studio".into(), light(on(cur, "meldOn", false), "meld"), if !on(cur, "meldOn", false) { "Off".into() } else if up("meld") { "Connected".into() } else { "Waiting for Meld to open".into() }, "Scenes, layers, effects".into()),
+        ("slobs", "Streamlabs Desktop".into(), light(on(cur, "slobsOn", false) && !s(cur, "slobsToken").is_empty(), "slobs"), if !on(cur, "slobsOn", false) { "Off".into() } else if s(cur, "slobsToken").is_empty() { "Needs its token".into() } else if up("slobs") { "Connected".into() } else { "Waiting for Streamlabs to open".into() }, "Scenes and sources".into()),
         ("streamlabs", "Streamlabs".into(), light(!s(cur, "streamlabsToken").is_empty(), "streamlabs"), if s(cur, "streamlabsToken").is_empty() { "Not set up".into() } else if up("streamlabs") { "Listening".into() } else { "Not connected".into() }, "Donations".into()),
         ("streamelements", "StreamElements".into(), light(!s(cur, "streamelementsToken").is_empty(), "streamelements"), if s(cur, "streamelementsToken").is_empty() { "Not set up".into() } else if up("streamelements") { "Listening".into() } else { "Not connected".into() }, "Tips".into()),
     ]

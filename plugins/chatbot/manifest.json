@@ -500,6 +500,11 @@
       "type": "toggle",
       "default": false
     },
+    { "key": "meldOn", "label": "Meld Studio", "type": "toggle", "default": false },
+    { "key": "meldAddress", "label": "Meld Studio's Address", "type": "text", "default": "127.0.0.1:13376" },
+    { "key": "slobsOn", "label": "Streamlabs Desktop", "type": "toggle", "default": false },
+    { "key": "slobsToken", "label": "Streamlabs Desktop's API Token", "type": "password", "default": "" },
+    { "key": "slobsAddress", "label": "Streamlabs Desktop's Address", "type": "text", "default": "127.0.0.1:59650" },
     { "key": "abOn", "label": "Auto-Ban", "type": "toggle", "default": false },
     { "key": "abTerms", "label": "Banned Terms", "type": "text", "default": "" },
     { "key": "abPack", "label": "Common Spam Too", "type": "toggle", "default": true },

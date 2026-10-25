@@ -1153,6 +1153,81 @@ async function step(st, ctx, depth) {
       break;
     }
     case "status": await OmniPulse.app.say(f("text")); break;
+    // (Meld Studio's: its things found by name; a show or hide only if it isn't already)
+    case "meldscene": {
+      const sc = meldFind("scene", f("scene"));
+      if (!sc) throw new Error("Meld Studio has no scene called " + f("scene"));
+      await meldCall("showScene", [sc.id]);
+      break;
+    }
+    case "meldlayer": case "meldeffect": {
+      const sc = f("scene").trim() ? meldFind("scene", f("scene")) : Object.entries(meldItems()).map(([id, x]) => Object.assign({ id }, x)).find((x) => x.type === "scene" && x.current);
+      if (!sc) throw new Error("Meld Studio has no scene called " + (f("scene") || "(the current one)"));
+      const ly = meldFind("layer", f("layer"), sc.id);
+      if (!ly) throw new Error("that scene has no layer called " + f("layer"));
+      const what = st.what || "toggle";
+      if (st.type === "meldlayer") {
+        const want = what === "show";
+        if (what === "toggle") await meldCall("toggleLayer", [sc.id, ly.id]);
+        else if (!!ly.visible !== want) { if (meldObj.methods.setProperty != null) await meldCall("setProperty", [ly.id, "visible", want]); else await meldCall("toggleLayer", [sc.id, ly.id]); }
+      } else {
+        const fx = meldFind("effect", f("effect"), ly.id);
+        if (!fx) throw new Error("that layer has no effect called " + f("effect"));
+        if (what === "toggle" || !!fx.enabled !== (what === "on")) await meldCall("toggleEffect", [sc.id, ly.id, fx.id]);
+      }
+      break;
+    }
+    case "meldmute": {
+      const tr = meldFind("track", f("track"));
+      if (!tr) throw new Error("Meld Studio has no audio track called " + f("track"));
+      const what = st.what || "toggle";
+      if (what === "toggle" || !!tr.muted !== (what === "mute")) await meldCall("toggleMute", [tr.id]);
+      break;
+    }
+    case "meldstream": case "meldrecord": {
+      const kind = st.type === "meldstream" ? "Streaming" : "Recording";
+      const what = st.what || "toggle";
+      await meldCall("sendCommand", ["meld." + what + kind + "Action"]);
+      break;
+    }
+    case "meldclip": await meldCall("sendCommandWithArgs", ["meld.recordClip", [Math.max(0, Math.min(90, num(f("seconds"))))]]); break;
+    case "meldshot": await meldCall("sendCommand", [st.vertical === true || st.vertical === "true" ? "meld.screenshot.vertical" : "meld.screenshot"]); break;
+    case "meldwidget": {
+      const ev = String(st.event || "CONFETTIPOP_TRIGGER");
+      await meldCall("sendStreamEvent", ev === "SUBATHONTIMER_ADDTIME" ? [ev, { amount: Math.max(0, num(f("seconds"))) }] : [ev]);
+      break;
+    }
+    // (Streamlabs Desktop's: its scenes, sources and audio by name)
+    case "slobsscene": {
+      const sc = await slobsScene(f("scene"));
+      await slobsCall("makeSceneActive", "ScenesService", [sc.id]);
+      break;
+    }
+    case "slobssource": {
+      const sc = f("scene").trim() ? await slobsScene(f("scene")) : await slobsCall("activeScene", "ScenesService");
+      const items = (await slobsCall("getItems", sc.resourceId || 'Scene["' + sc.id + '"]')) || [];
+      const it = items.find((x) => String(x.name || "").toLowerCase() === f("source").trim().toLowerCase());
+      if (!it) throw new Error("that scene has no source called " + f("source"));
+      const what = st.show || "toggle";
+      await slobsCall("setVisibility", it.resourceId, [what === "toggle" ? !it.visible : what === "show"]);
+      break;
+    }
+    case "slobsmute": {
+      const all = (await slobsCall("getSources", "AudioService")) || [];
+      const a = all.find((x) => String(x.name || "").toLowerCase() === f("source").trim().toLowerCase());
+      if (!a) throw new Error("Streamlabs Desktop has no audio called " + f("source"));
+      const what = st.what || "toggle";
+      await slobsCall("setMuted", a.resourceId, [what === "toggle" ? !a.muted : what === "mute"]);
+      break;
+    }
+    case "slobsstream": case "slobsrecord": {
+      const m = (await slobsCall("getModel", "StreamingService")) || {};
+      const on = st.type === "slobsstream" ? m.streamingStatus && m.streamingStatus !== "offline" : m.recordingStatus && m.recordingStatus !== "offline";
+      const what = st.what || "toggle";
+      if (what === "toggle" || (what === "start") !== !!on) await slobsCall(st.type === "slobsstream" ? "toggleStreaming" : "toggleRecording", "StreamingService");
+      break;
+    }
+    case "slobsreplay": await slobsCall("saveReplay", "StreamingService"); break;
     // (the fun's steps: a free spin for whoever started it; hype added; a burst of emotes)
     case "spin": await wheelSpin(ctx.user || "", ctx.msgId || null, ctx.platform, true); break;
     case "hypeadd": hypeAdd(Math.max(0, num(f("amount")))); break;
@@ -1299,13 +1374,148 @@ function onObs(type, d) {
   else if (type === "StreamStateChanged" && d.outputState === "OBS_WEBSOCKET_OUTPUT_STOPPED") when = "streamstop";
   else if (type === "RecordStateChanged" && d.outputState === "OBS_WEBSOCKET_OUTPUT_STARTED") when = "recordstart";
   else if (type === "RecordStateChanged" && d.outputState === "OBS_WEBSOCKET_OUTPUT_STOPPED") when = "recordstop";
-  if (!when) return;
+  if (when) onBroadcast("obs", when, scene);
+}
+
+// Streaming software's events (OBS's, Meld Studio's, Streamlabs Desktop's), to the actions waiting for them:
+// on the one they're set to, or any
+function onBroadcast(app, when, scene) {
   for (const a of live) {
     const t = a.trigger;
     if (t.type !== "obs" || (t.when || "scene") !== when) continue;
-    if (when === "scene" && String(t.scene || "").trim() && String(t.scene).trim().toLowerCase() !== scene.toLowerCase()) continue;
-    run(a, { user: "", scene, platform: "all" });
+    const want = t.app || "any";
+    if (want !== "any" && want !== app) continue;
+    if (when === "scene" && String(t.scene || "").trim() && String(t.scene).trim().toLowerCase() !== String(scene || "").toLowerCase()) continue;
+    run(a, { user: "", scene, platform: "all", software: app });
   }
+}
+
+// ---------- Meld Studio: its WebChannel (Qt's), on this PC at 127.0.0.1:13376 ----------
+// Its object "meld": session.items (its scenes, layers, effects and tracks, by id), isStreaming, isRecording;
+// functions called by their index, as Qt's WebChannel has it (github.com/MeldStudio/streamdeck, WebChannelAPI.md)
+let meld = null, meldReady = false, meldN = 0, meldObj = null;
+const meldWaiting = {};
+function meldConnect() {
+  if (!yes(S().meldOn)) return;
+  const addr = String(S().meldAddress || "127.0.0.1:13376").trim().replace(/^wss?:\/\//, "");
+  const s = OmniPulse.socket("ws://" + addr);
+  meld = s;
+  meldReady = false;
+  s.onopen = () => s.send(JSON.stringify({ type: 3, id: ++meldN }));
+  s.onmessage = (data) => {
+    let m;
+    try { m = JSON.parse(data); } catch (e) { return; }
+    // (its answer to init: the object, its methods, properties and signals)
+    if (m.type === 10 && !meldReady && m.data && m.data.meld) {
+      const o = m.data.meld;
+      meldObj = { methods: {}, props: {}, propIdx: {}, sig: {} };
+      for (const [name, i] of o.methods || []) meldObj.methods[name] = i;
+      for (const [i, name, , value] of o.properties || []) { meldObj.props[name] = value; meldObj.propIdx[i] = name; }
+      for (const [name, i] of o.signals || []) meldObj.sig[name] = i;
+      for (const name of ["sessionChanged", "isStreamingChanged", "isRecordingChanged"]) if (meldObj.sig[name] != null) s.send(JSON.stringify({ type: 7, object: "meld", signal: meldObj.sig[name] }));
+      meldReady = true;
+      meldScene = meldCurrentScene();
+      s.send(JSON.stringify({ type: 4 }));
+      return;
+    }
+    if (m.type === 10) { const w = meldWaiting[m.id]; if (w) { delete meldWaiting[m.id]; w(m.data); } return; }
+    // (what's changed: its properties' new values, and which signals)
+    if (m.type === 2) {
+      const was = { streaming: !!(meldObj && meldObj.props.isStreaming), recording: !!(meldObj && meldObj.props.isRecording) };
+      for (const u of m.data || []) for (const [i, v] of Object.entries(u.properties || {})) { const name = meldObj.propIdx[i]; if (name) meldObj.props[name] = v; }
+      s.send(JSON.stringify({ type: 4 }));
+      const now = { streaming: !!meldObj.props.isStreaming, recording: !!meldObj.props.isRecording };
+      if (now.streaming !== was.streaming) onBroadcast("meld", now.streaming ? "streamstart" : "streamstop", "");
+      if (now.recording !== was.recording) onBroadcast("meld", now.recording ? "recordstart" : "recordstop", "");
+      const sc = meldCurrentScene();
+      if (sc && sc !== meldScene) { meldScene = sc; onBroadcast("meld", "scene", sc); }
+    }
+  };
+  s.onclose = () => {
+    meldReady = false;
+    if (meld !== s) return;
+    meld = null;
+    if (!stopped) setTimeout(() => { if (!meld && !stopped) meldConnect(); }, 15000);
+  };
+}
+let meldScene = "";
+function meldItems() { return (meldObj && meldObj.props.session && meldObj.props.session.items) || {}; }
+function meldCurrentScene() { const it = Object.values(meldItems()).find((x) => x.type === "scene" && x.current); return it ? it.name : ""; }
+// (one of its things by its name: a scene, a layer (in a scene, or any), an effect, a track)
+function meldFind(type, name, parent) {
+  const want = String(name || "").trim().toLowerCase();
+  for (const [id, x] of Object.entries(meldItems())) {
+    if (x.type !== type || String(x.name || "").trim().toLowerCase() !== want) continue;
+    if (parent && x.parent !== parent) continue;
+    return Object.assign({ id }, x);
+  }
+  return null;
+}
+function meldCall(method, args) {
+  if (!meld || !meldReady || !meldObj) return Promise.reject(new Error("Meld Studio isn't connected: switch it on in the Suite's Connections, with Meld open"));
+  const i = meldObj.methods[method];
+  if (i == null) return Promise.reject(new Error("this Meld Studio hasn't " + method + " (update Meld?)"));
+  const id = ++meldN;
+  return new Promise((ok, no) => {
+    meldWaiting[id] = ok;
+    meld.send(JSON.stringify({ type: 6, object: "meld", method: i, args: args || [], id }));
+    setTimeout(() => { if (meldWaiting[id]) { delete meldWaiting[id]; ok(null); } }, 4000);
+  });
+}
+
+// ---------- Streamlabs Desktop: its Remote Control (Settings > Remote Control), JSON-RPC, on port 59650 ----------
+let slobs = null, slobsReady = false, slobsN = 0;
+const slobsWaiting = {};
+function slobsConnect() {
+  if (!yes(S().slobsOn) || !String(S().slobsToken || "").trim()) return;
+  const addr = String(S().slobsAddress || "127.0.0.1:59650").trim().replace(/^wss?:\/\//, "");
+  const s = OmniPulse.socket("ws://" + addr + "/api/websocket");
+  slobs = s;
+  slobsReady = false;
+  s.onopen = async () => {
+    try {
+      await slobsCall("auth", "TcpServerService", [String(S().slobsToken).trim()], true);
+      slobsReady = true;
+      for (const [ev, res] of [["sceneSwitched", "ScenesService"], ["streamingStatusChange", "StreamingService"], ["recordingStatusChange", "StreamingService"]]) slobsCall(ev, res, [], true).catch(() => {});
+    } catch (e) { OmniPulse.app.say("Streamlabs Desktop didn't take its token: " + e.message).catch(() => {}); }
+  };
+  s.onmessage = (data) => {
+    let m;
+    try { m = JSON.parse(data); } catch (e) { return; }
+    // (an event subscribed to: a scene switched, the stream or recording starting or stopping)
+    if (m.result && m.result._type === "EVENT") {
+      const r = m.result.resourceId || "", d = m.result.data;
+      if (r === "ScenesService.sceneSwitched") onBroadcast("slobs", "scene", (d && d.name) || "");
+      if (r === "StreamingService.streamingStatusChange") { if (d === "live") onBroadcast("slobs", "streamstart", ""); if (d === "offline") onBroadcast("slobs", "streamstop", ""); }
+      if (r === "StreamingService.recordingStatusChange") { if (d === "recording") onBroadcast("slobs", "recordstart", ""); if (d === "offline") onBroadcast("slobs", "recordstop", ""); }
+      return;
+    }
+    const w = slobsWaiting[m.id];
+    if (!w) return;
+    delete slobsWaiting[m.id];
+    if (m.error) w.no(new Error(m.error.message || "Streamlabs Desktop said no")); else w.ok(m.result);
+  };
+  s.onclose = () => {
+    slobsReady = false;
+    if (slobs !== s) return;
+    slobs = null;
+    if (!stopped) setTimeout(() => { if (!slobs && !stopped) slobsConnect(); }, 15000);
+  };
+}
+function slobsCall(method, resource, args, early) {
+  if (!slobs || (!slobsReady && !early)) return Promise.reject(new Error("Streamlabs Desktop isn't connected: switch it on in the Suite's Connections, with its Remote Control on"));
+  const id = ++slobsN;
+  return new Promise((ok, no) => {
+    slobsWaiting[id] = { ok, no };
+    slobs.send(JSON.stringify({ jsonrpc: "2.0", id, method, params: { resource, args: args || [] } }));
+    setTimeout(() => { if (slobsWaiting[id]) { delete slobsWaiting[id]; no(new Error("Streamlabs Desktop didn't answer")); } }, 5000);
+  });
+}
+async function slobsScene(name) {
+  const all = (await slobsCall("getScenes", "ScenesService")) || [];
+  const sc = all.find((x) => String(x.name || "").toLowerCase() === String(name || "").trim().toLowerCase());
+  if (!sc) throw new Error("Streamlabs Desktop has no scene called " + name);
+  return sc;
 }
 
 // ---------- points (a currency, as Mix It Up's): for chatting while you're live, kept ----------
@@ -1758,6 +1968,8 @@ async function start() {
   suitePush();
   setPoints();
   obsConnect();
+  meldConnect();
+  slobsConnect();
   tipConnect();
   kickConnect().catch((e) => { OmniPulse.log("kick: " + e.message); OmniPulse.app.say("Kick's chat didn't connect: " + e.message).catch(() => {}); });
   if (!S().token || !S().login) return;
@@ -2162,8 +2374,9 @@ function stopAll() {
   timers = [];
   if (pointsTimer) { clearInterval(pointsTimer); pointsTimer = null; }
   if (kickRefresh) { clearInterval(kickRefresh); kickRefresh = null; }
-  for (const s of [chat, botChat, events, obs, kick]) { if (s) { s.onclose = null; s.close(); } }
-  chat = botChat = events = obs = kick = null;
+  for (const s of [chat, botChat, events, obs, kick, meld, slobs]) { if (s) { s.onclose = null; s.close(); } }
+  chat = botChat = events = obs = kick = meld = slobs = null;
+  meldReady = slobsReady = false;
   for (const s of tipSockets) { s.onclose = null; s.close(); }
   for (const d of Object.values(duels)) clearTimeout(d.off);
   if (trivia) clearTimeout(trivia.off);
@@ -2191,6 +2404,16 @@ OmniPulse.register({
     if (obs && obsReady) {
       jobs.push(obsCall("GetSceneList").then((d) => { out.scenes = (d.scenes || []).map((x) => x.sceneName).reverse(); }).catch(() => {}));
       jobs.push(obsCall("GetInputList").then((d) => { out.sources = (d.inputs || []).map((x) => x.inputName).sort((a, b) => a.localeCompare(b)); }).catch(() => {}));
+    }
+    // (Meld Studio's, from its session as it is; Streamlabs Desktop's, asked for)
+    if (meldReady) {
+      const all = Object.values(meldItems());
+      const names = (t) => [...new Set(all.filter((x) => x.type === t).sort((a, b) => num(a.index) - num(b.index)).map((x) => String(x.name || "")).filter(Boolean))];
+      Object.assign(out, { meldScenes: names("scene"), meldLayers: names("layer"), meldEffects: names("effect"), meldTracks: names("track") });
+    }
+    if (slobsReady) {
+      jobs.push(slobsCall("getScenes", "ScenesService").then((l) => { out.slobsScenes = (l || []).map((x) => x.name); }).catch(() => {}));
+      jobs.push(slobsCall("getSources", "SourcesService").then((l) => { out.slobsSources = [...new Set((l || []).map((x) => x.name))].sort((a, b) => a.localeCompare(b)); }).catch(() => {}));
     }
     await Promise.all(jobs);
     return out;
@@ -2243,6 +2466,8 @@ OmniPulse.register({
       twitch: { clientId: !!String(S().twitchClientId || "").trim(), login: S().login || "", bot: S().botLogin || "", up: !!(chat && chat.up) },
       kick: { on: yes(S().kickOn), app: !!String(S().kickClientId || "").trim() && (!!String(S().kickClientSecret || "").trim() || !!String(S().kickRelay || "").trim()), login: S().kickLogin || "", bot: S().kickBotLogin || "", channel: S().kickChannel || "", up: !!(kick && kick.up) },
       obs: { on: yes(S().obsOn), up: !!obsReady },
+      meld: { on: yes(S().meldOn), up: !!meldReady },
+      slobs: { on: yes(S().slobsOn), up: !!slobsReady },
       streamlabs: { on: !!String(S().streamlabsToken || "").trim(), up: tip("streamlabs") },
       streamelements: { on: !!String(S().streamelementsToken || "").trim(), up: tip("streamelements") },
       counts, recent: recent.slice(-12).reverse(), actions: { all: all.length, on: live.length },
