@@ -91,8 +91,8 @@ fn keys(name: &str) -> Vec<(&'static str, Value)> {
         "smart" => vec![("shareRatings", json!(true)), ("smartBlend", json!(true)), ("smartKeys", json!(true)), ("smartMax", json!(10)), ("smartTape", json!(false)), ("smartRoll", json!(false)), ("smartVoices", json!(true))],
         "requests" => vec![("reqBot", json!("streamerbot")), ("reqRadioEdit", json!(false)), ("reqNoAi", json!(false)), ("reqLimits", json!(true)), ("reqMax", json!(10)), ("reqPerUser", json!(2)), ("reqPort", json!(7879)), ("botRemote", json!(false))],
         "socials" => vec![("socialStyle", json!("card")), ("socialAlign", json!("left")), ("socialSecs", json!(8)), ("socialAll", json!(false)), ("socialRounded", json!(true)), ("socialColoured", json!(false)), ("socialMotion", json!("rise"))],
-        "widget" => vec![("widgetPort", json!(7878)), ("widgetDesign", json!("card")), ("widgetAlign", json!("left")), ("widgetRounded", json!(true)), ("widgetText", json!(1)), ("wFade", json!(true)), ("wScroll", json!(true)), ("wSpin", json!(true)), ("wRequester", json!(true)), ("wColor", json!(1.2)), ("alertSplit", json!(false)), ("widgetOwnCol", json!(false)), ("widgetCol1", json!("#8e9bff")), ("widgetCol2", json!("#b48eff"))],
-        "alerts" => vec![("alertTheme", json!("widget")), ("alertBot", json!("streamerbot")), ("sbHost", json!("127.0.0.1:8080")), ("sbOn", json!(true)), ("alertTrans", json!("seamless")), ("alertCSize", json!("medium")), ("alertCDir", json!("diag")), ("alertCAngle", json!(0)), ("alertAnim", json!("slide")), ("alertOwnCol", json!(false)), ("alertCol1", json!("#8e9bff")), ("alertCol2", json!("#b38cff")), ("alertDir", json!("115deg")), ("alertIcon", json!(1)), ("alertSecs", json!(5)), ("alertVol", json!(0.8)), ("botRemote", json!(false))],
+        "widget" => vec![("widgetPort", json!(7878)), ("widgetDesign", json!("card")), ("widgetAlign", json!("left")), ("widgetRounded", json!(true)), ("widgetText", json!(1)), ("wFade", json!(true)), ("wScroll", json!(true)), ("wSpin", json!(true)), ("wRequester", json!(true)), ("wColor", json!(1.2)), ("alertInWidget", json!(false)), ("widgetOwnCol", json!(false)), ("widgetCol1", json!("#8e9bff")), ("widgetCol2", json!("#b48eff"))],
+        "alerts" => vec![("alertsOn", json!(false)), ("alertInWidget", json!(false)), ("alertGif", json!("")), ("alertTheme", json!("widget")), ("alertBot", json!("streamerbot")), ("sbHost", json!("127.0.0.1:8080")), ("sbOn", json!(true)), ("alertTrans", json!("seamless")), ("alertCSize", json!("medium")), ("alertCDir", json!("diag")), ("alertCAngle", json!(0)), ("alertAnim", json!("slide")), ("alertOwnCol", json!(false)), ("alertCol1", json!("#8e9bff")), ("alertCol2", json!("#b38cff")), ("alertDir", json!("115deg")), ("alertIcon", json!(1)), ("alertSecs", json!(5)), ("alertVol", json!(0.8)), ("botRemote", json!(false))],
         "remote" => vec![("remotePort", json!(7880))],
         "offset" => vec![("out2Offset", json!(0)), ("out2Volume", json!(1))],
         "hidden" => vec![],
@@ -531,15 +531,12 @@ fn fields_of(name: &str, vals: &Map<String, Value>, prefs: &Value, lan: &str) ->
                 sel("wColor", "Colour Change", "How quickly it takes the next cover's colours.", &[(json!(0), "Instant"), (json!(0.5), "Fast"), (json!(1.2), "Normal"), (json!(2.5), "Slow")]),
                 // Alerts: on the widget, so here: a switch, with Configure beside it
                 note("Alerts"),
-                toggle_cfg("alertsOn", "Alerts", "Shows follows, subs, bits, raids and more on the widget.", "alertsOpen"),
-                tog("alertSplit", "Alerts on Their Own", "Shows the alerts in their own Browser source instead of over Now Playing, so you can place each one where you like in OBS."),
+                toggle_cfg("alertsOn", "Alerts", "Follows, subs, bits, raids and more. Click the gear for how they look.", "alertsOpen"),
+                tog("alertInWidget", "Show Alerts in This Widget", "They take Now Playing's place for a moment, then it comes back. When this is off, alerts have their own Browser source (on the Alerts page), so you can place them anywhere."),
                 note("In OBS"),
                 info("Address", &format!("http://127.0.0.1:{port}/"), &format!("http://127.0.0.1:{port}/"), "Add this address as a Browser source in OBS."),
                 num("widgetPort", "Port", "1024 to 65535. Every widget's address uses it."),
             ]);
-            if vals["alertSplit"].as_bool() == Some(true) {
-                f.push(info("Alerts Address", &format!("http://127.0.0.1:{port}/alerts"), &format!("http://127.0.0.1:{port}/alerts"), "Add this address as a Browser source in OBS to show only the alerts."));
-            }
             f.push(button("widgetHide", "Hide This Track", "Hide", "Until the next track."));
             // (more copies of it, each in a look of its own: another scene, or two on screen at once)
             f.extend(outputs_list(prefs, "widget", &format!("http://127.0.0.1:{port}/")));
@@ -555,11 +552,22 @@ fn fields_of(name: &str, vals: &Map<String, Value>, prefs: &Value, lan: &str) ->
             let url = |k: &str| format!("http://127.0.0.1:{port}/alert?{}{vars}", part(k));
             let types = "follow, sub, gift, bits, kicks, donation, raid, hypetrain, poll, ban, watchstreak, liked, game";
             // (the alerts and how they look first; how your bot sends them after, in `setup`)
+            let in_widget = vals["alertInWidget"].as_bool() == Some(true);
+            let theme = s("alertTheme", "widget");
             let mut look: Vec<Value> = vec![
-                button("alList", "Alerts and Their Order", "Open", "Which alerts show and which goes first, and each one's words, picture and sound."),
-                note("How They Look"),
-                sel("alertTheme", "Theme", "The preview above plays made-up alerts in it. Seamless, below, keeps the widget's own card instead.", &[(json!("widget"), "Widget"), (json!("glass"), "Glass"), (json!("neon"), "Neon"), (json!("banner"), "Banner"), (json!("split"), "Split"), (json!("comic"), "Comic"), (json!("minimal"), "Minimal")]),
+                tog("alertsOn", "Alerts", "Follows, subs, bits, raids and more, on stream."),
+                tog("alertInWidget", "Show Them in the Stream Widget", "They take Now Playing's place for a moment. When this is off, they have a Browser source of their own, below, so you can put them anywhere."),
             ];
+            if !in_widget { look.push(info("Alerts Address", &format!("http://127.0.0.1:{port}/alerts"), &format!("http://127.0.0.1:{port}/alerts"), "Add this as a Browser source in OBS, where you'd like your alerts.")); }
+            look.extend([
+                button("alList", "Alerts and Their Order", "Open", "Which alerts show and which goes first, and each one's words, picture, GIF and sound."),
+                note("How They Look"),
+                sel("alertTheme", "Theme", "The preview above plays made-up alerts in it. GIF, GIF Pop-Out and Meme are made for GIFs.", &[(json!("widget"), "Widget"), (json!("glass"), "Glass"), (json!("neon"), "Neon"), (json!("banner"), "Banner"), (json!("split"), "Split"), (json!("comic"), "Comic"), (json!("minimal"), "Minimal"), (json!("gif"), "GIF"), (json!("gifpop"), "GIF Pop-Out"), (json!("meme"), "Meme")]),
+            ]);
+            if matches!(theme.as_str(), "gif" | "gifpop" | "meme") {
+                look.push(text("alertGif", "Their GIF", "A GIF's address, for the alerts without a picture of their own (each alert's own is in Alerts and Their Order). On GIPHY or Tenor, right-click a GIF and choose Copy Image Address."));
+                if theme == "gifpop" { look.push(note("GIF Pop-Out's GIF stands taller than the alert: leave some room above it in OBS.")); }
+            }
             let mut f = vec![sel("alertBot", "Your Bot", "", &[(json!("streamerbot"), "Streamer.bot"), (json!("mixitup"), "Mix It Up"), (json!("generic"), "Generic")])];
             if bot == "streamerbot" {
                 f.push(text("sbHost", "Streamer.bot", "The address and port of Streamer.bot's WebSocket server."));
@@ -604,31 +612,36 @@ fn fields_of(name: &str, vals: &Map<String, Value>, prefs: &Value, lan: &str) ->
             }
             let setup = f;
             let mut f = std::mem::take(&mut look);
-            f.extend([
-                sel("alertTrans", "Transition", "", &[(json!("seamless"), "Seamless"), (json!("crossfade"), "Crossfade"), (json!("push"), "Slide Across"), (json!("flip"), "Flip"), (json!("wipe"), "Wipe"), (json!("collage"), "Collage"), (json!("overlay"), "Over the Top")]),
-            ]);
-            if s("alertTrans", "seamless") == "collage" {
+            // (how they come in: from Now Playing, a transition, in the widget; on their own, their animation)
+            let anims = [(json!("slide"), "Slide"), (json!("pop"), "Pop"), (json!("fade"), "Fade"), (json!("bounce"), "Bounce"), (json!("flip"), "Flip"), (json!("zoom"), "Zoom"), (json!("spin"), "Spin"), (json!("drop"), "Drop"), (json!("rise"), "Rise"), (json!("unfold"), "Unfold"), (json!("swing"), "Swing"), (json!("glitch"), "Glitch"), (json!("elastic"), "Elastic")];
+            f.push(note("How They Come In"));
+            if in_widget {
+                f.push(sel("alertTrans", "Transition", "From Now Playing to the alert, and back. The preview shows it.", &[(json!("seamless"), "Seamless"), (json!("crossfade"), "Crossfade"), (json!("push"), "Slide Across"), (json!("flip"), "Flip"), (json!("wipe"), "Wipe"), (json!("zoom"), "Zoom Through"), (json!("rise"), "Rise"), (json!("collage"), "Collage"), (json!("overlay"), "Over the Top")]));
+            }
+            if !in_widget || s("alertTrans", "seamless") == "overlay" {
+                f.push(sel("alertAnim", "Animation", "The preview shows it.", &anims));
+            }
+            if in_widget && s("alertTrans", "seamless") == "collage" {
                 f.push(sel("alertCSize", "Collage Tiles", "", &[(json!("small"), "Small"), (json!("medium"), "Medium"), (json!("large"), "Large")]));
                 f.push(sel("alertCDir", "Sweep", "", &[(json!("diag"), "Corner to Corner"), (json!("diag-up"), "Corner to Corner, Rising"), (json!("ltr"), "Left to Right"), (json!("rtl"), "Right to Left"), (json!("ttb"), "Top to Bottom"), (json!("btt"), "Bottom to Top"), (json!("centre"), "From the Middle"), (json!("random"), "Scattered")]));
                 f.push(range("alertCAngle", "Angle", "The tiles' tilt, in degrees.", -90.0, 90.0, 5.0, "°", true));
             }
-            if s("alertTrans", "seamless") == "overlay" {
-                f.push(sel("alertAnim", "Animation", "", &[(json!("slide"), "Slide"), (json!("pop"), "Pop"), (json!("fade"), "Fade"), (json!("bounce"), "Bounce"), (json!("flip"), "Flip")]));
-            }
+            f.push(note("Colours"));
             f.push(tog("alertOwnCol", "Their Own Colours", "When this is off, alerts use the album art's colours, like the widget does."));
             if vals["alertOwnCol"].as_bool() == Some(true) {
                 f.push(color("alertCol1", "Accent Colour", ""));
                 f.push(color("alertCol2", "Second Colour", ""));
                 f.push(sel("alertDir", "Gradient", "", &[(json!("115deg"), "Diagonal"), (json!("90deg"), "Left to Right"), (json!("180deg"), "Top to Bottom"), (json!("65deg"), "Diagonal, Rising"), (json!("glow"), "Glow")]));
             }
-            f.push(stepper("alertIcon", "Icon Size", "", pct(0.6, 2.0, 0.2)));
-            f.push(sel("alertSecs", "Show For", "", &[(json!(3), "3 s"), (json!(5), "5 s"), (json!(8), "8 s"), (json!(12), "12 s")]));
+            f.push(note("Time and Sound"));
+            if !matches!(theme.as_str(), "meme") { f.push(stepper("alertIcon", if matches!(theme.as_str(), "gif" | "gifpop") { "GIF Size" } else { "Icon Size" }, "", pct(0.6, 2.0, 0.2))); }
+            f.push(sel("alertSecs", "Show For", "Each alert can have its own time too, in Alerts and Their Order.", &[(json!(3), "3 s"), (json!(5), "5 s"), (json!(8), "8 s"), (json!(12), "12 s")]));
             f.push(range("alertVol", "Sound Volume", "", 0.0, 1.0, 0.01, "%", false));
-            f.push(note("Where They Come From"));
-            if crate::SHARED.with(|s| s.borrow().as_ref().is_some_and(|sh| crate::plugin_runs(&sh.borrow().web.prefs, crate::botpage::BOT))) {
-                f.push(note("The Stream Suite's chatbot sends its own alerts, so you don't need anything below. Set it up only if another bot sends alerts too."));
+            // (the Stream Suite sends its own: no other bot to set up, so none of this)
+            if !crate::SHARED.with(|s| s.borrow().as_ref().is_some_and(|sh| crate::plugin_runs(&sh.borrow().web.prefs, crate::botpage::BOT))) {
+                f.push(note("Where They Come From"));
+                f.extend(setup);
             }
-            f.extend(setup);
             f
         }
         // Discord Status: what it shows (as the web app's)
@@ -915,7 +928,9 @@ mod tests {
         let prefs = json!({ "alertBot": "generic", "alertKey": "k" });
         let f = fields("alerts", &values("alerts", &prefs), &prefs, "");
         let addrs: Vec<&str> = f.iter().filter(|x| x["type"] == "info").filter_map(|x| x["copy"].as_str()).collect();
-        assert_eq!(addrs.len(), 11);
+        // (the alerts on their own, as they start: their own address too)
+        assert_eq!(addrs.len(), 12);
+        assert!(addrs.contains(&"http://127.0.0.1:7878/alerts"));
         assert!(addrs.contains(&"http://127.0.0.1:7878/alert?type=raid&user=NAME&amount=VIEWERS"));
     }
 }

@@ -6802,12 +6802,19 @@ fn bot_current(shared: &Shared) -> serde_json::Map<String, serde_json::Value> {
 }
 
 fn bot_fields(list: Vec<botpage::Field>) -> (Vec<BotField>, String) {
-    let sig = list.iter().map(|x| format!("{}|{}|{}|{}", x.key, x.kind, x.value, x.label)).collect::<Vec<_>>().join("\n");
+    let sig = list.iter().map(|x| format!("{}|{}|{}|{}|{}|{}", x.key, x.kind, x.value, x.label, x.extra, if x.kind == "suiteprev" { format!("{}{}", x.note, x.n) } else { String::new() })).collect::<Vec<_>>().join("\n");
     // (a row of choices: its extra, as "id=Name|id=Name", for the page to draw)
     let strs = |v: Vec<String>| ModelRc::from(Rc::new(VecModel::from(v.into_iter().map(slint::SharedString::from).collect::<Vec<_>>())));
     let rows = list.into_iter().map(|x| {
-        let (ids, names): (Vec<String>, Vec<String>) = if x.kind == "chips" { x.extra.split('|').filter_map(|o| o.split_once('=')).map(|(i, n)| (i.to_string(), n.to_string())).unzip() } else { (Vec::new(), Vec::new()) };
-        BotField { changed: !x.key.is_empty() && !x.key.contains(':') && pf_changed(&x.key), key: x.key.into(), kind: x.kind.into(), label: x.label.into(), note: x.note.into(), value: x.value.into(), extra: x.extra.into(), n: x.n, opts: strs(names), opt_ids: strs(ids) }
+        let (ids, names): (Vec<String>, Vec<String>) = if x.kind == "chips" { x.extra.split('|').filter_map(|o| o.split_once('=')).map(|(i, n)| (i.to_string(), n.to_string())).unzip() }
+            // (a list: its items, from what's kept, or the default in extra)
+            else if x.kind == "list" { (Vec::new(), botpage::list_items(if x.value.is_empty() { &x.extra } else { &x.value })) }
+            else { (Vec::new(), Vec::new()) };
+        // (a Suite preview's colours: "#a,#b" in its note; none, the accent)
+        let (c1, c2) = x.note.split_once(',').filter(|_| x.kind == "suiteprev")
+            .map(|(a, b)| (look::Rgb::parse(a).map(|c| c.slint()).unwrap_or_default(), look::Rgb::parse(b).map(|c| c.slint()).unwrap_or_default()))
+            .unwrap_or_default();
+        BotField { changed: !x.key.is_empty() && !x.key.contains(':') && pf_changed(&x.key), key: x.key.into(), kind: x.kind.into(), label: x.label.into(), note: x.note.into(), value: x.value.into(), extra: x.extra.into(), n: x.n, opts: strs(names), opt_ids: strs(ids), c1, c2 }
     }).collect();
     (rows, sig)
 }
@@ -6895,7 +6902,9 @@ fn bot_set(shared: &Shared, key: &str, v: &str) {
     let key = botpage::key_of(key).to_string();
     let manifest = bot_manifest().map(|m| m.settings).unwrap_or_default();
     let value = botpage::value_of(&manifest, &key, v);
-    let toggle = value.is_boolean() || matches!(key.as_str(), "srWho" | "goalReset" | "goalStyle");
+    // (a choice, like a theme's chip: seen at once too, so the preview shows it)
+    let select = manifest.as_array().into_iter().flatten().any(|x| x["key"] == key.as_str() && x["type"] == "select");
+    let toggle = value.is_boolean() || select || matches!(key.as_str(), "srWho" | "goalReset" | "goalStyle" | "goalShape" | "goalDrops");
     // (during setup: kept as it's set, no Save needed; the chatbot restarted with it when you move on)
     let cur = bot_current(shared);
     let in_setup = !cur.get("setupDone").and_then(|v| v.as_bool()).unwrap_or(false)
@@ -6915,6 +6924,26 @@ fn bot_set(shared: &Shared, key: &str, v: &str) {
 
 fn bot_act(shared: &Shared, act: &str) {
     let say = |t: &str| if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_status(t.into()); };
+    // (a list's row typed into, taken out, or one added: kept as "a | b | c"; the page drawn again unless it's typing)
+    if let Some(rest) = act.strip_prefix("list:") {
+        let mut parts = rest.splitn(4, ':');
+        let (key, what) = (parts.next().unwrap_or(""), parts.next().unwrap_or(""));
+        let cur = bot_current(shared);
+        let had = cur.get(key).and_then(|v| v.as_str()).unwrap_or("").to_string();
+        let shown = botpage::sheet(&BOT_SHEET.with(|b| b.borrow().clone()), &cur).1.into_iter().find(|f| f.key == key).map(|f| f.extra).unwrap_or_default();
+        let mut items = botpage::list_items(if had.is_empty() { &shown } else { &had });
+        let at = parts.next().and_then(|i| i.parse::<usize>().ok());
+        match (what, at) {
+            ("set", Some(i)) if i < items.len() => { items[i] = parts.next().unwrap_or("").replace('|', "/"); }
+            ("del", Some(i)) if i < items.len() => { items.remove(i); }
+            ("add", _) if items.len() < 16 => { items.push(String::new()); }
+            _ => return,
+        }
+        // (an empty row kept while it's being typed into: "a |  | c")
+        bot_set(shared, key, &items.join(" | "));
+        if what != "set" { bot_paint(shared); }
+        return;
+    }
     // (Alerts: their settings are the Stream Widget's Alerts page, the same as without the Suite)
     if act == "sheet:alerts" { return panel_open(shared, "alerts"); }
     // (a dock's or the Multichat Overlay's gear: its own page)
@@ -7261,6 +7290,7 @@ fn chat_preview(ui: &AppWindow, vals: &serde_json::Map<String, serde_json::Value
         style: vals.get("style").and_then(|v| v.as_str()).unwrap_or("plain").into(),
         size: num("size", 20.0) as f32, bg: num("bg", 0.0) as f32, shadow: on("shadow"),
         top: vals.get("dir").and_then(|v| v.as_str()) == Some("top"), badges: on("badges"), marks: on("marks"), from: from.clone().into(),
+        above: vals.get("name").and_then(|v| v.as_str()) == Some("above"),
     });
     let c = |h: &str| look::Rgb::parse(h).map(|x| x.slint()).unwrap_or(slint::Color::from_rgb_u8(255, 255, 255));
     let all = [
@@ -7408,6 +7438,8 @@ fn panel_paint(shared: &Shared, name: &str, vals: &serde_json::Map<String, serde
                 glow: vals.get("alertDir").and_then(|v| v.as_str()) == Some("glow"),
                 icon: vals.get("alertIcon").and_then(|v| v.as_f64()).unwrap_or(1.0) as f32,
                 transition: vals.get("alertTrans").and_then(|v| v.as_str()).unwrap_or("seamless").into(),
+                anim: vals.get("alertAnim").and_then(|v| v.as_str()).unwrap_or("slide").into(),
+                in_widget: vals.get("alertInWidget").and_then(|v| v.as_bool()) == Some(true),
             });
         }
     }
@@ -10411,10 +10443,13 @@ fn viz_update(shared: &Shared, ui: &AppWindow) {
             let b = viz::bands();
             for (i, v) in b.into_iter().enumerate() { m.set_row_data(i, v); }
             for (i, v) in viz::peaks(&b).into_iter().enumerate() { tops.set_row_data(i, v); }
-            for (i, v) in viz::curve(&b).into_iter().enumerate() { wave.set_row_data(i, v); }
+            let cv = viz::curve(&b);
+            for (i, v) in cv.into_iter().enumerate() { wave.set_row_data(i, v); }
             let l = viz::level(&b);
             if let Some(ui) = w.upgrade() {
                 ui.set_viz_level(l);
+                // (the Wave: one smooth line, and the faint area under it)
+                if ui.get_viz_style() == "wave" { let (l, a) = viz::wave_paths(&cv); let g = ui.global::<VizPaths>(); g.set_line(l.into()); g.set_area(a.into()); }
                 if ui.get_viz_style() == "ring" {
                     for (i, (d, f)) in viz::ring_pieces(&b).into_iter().enumerate() { ring.set_row_data(i, RingPiece { d: d.into(), f }); }
                     // (the player's, round its cover, with In the Player on)

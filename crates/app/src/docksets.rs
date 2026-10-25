@@ -19,7 +19,7 @@ fn defaults(page: &str) -> Map<String, Value> {
     let v = match page {
         "chat" => json!({ "twitch": true, "kick": true, "time": false, "badges": true, "hover": false, "confirm": true, "secs": "600", "size": "13", "to": "all", "bttv": true, "ffz": true, "stv": true }),
         "activity" => json!({ "hidden": ["firstwords"], "newest": true, "compact": false, "platform": true, "msg": true, "size": "13", "from": "all" }),
-        _ => json!({ "from": "all", "cmds": false, "bot": true, "badges": true, "marks": true, "style": "plain", "size": 20, "bg": "0", "shadow": true, "dir": "bottom", "fade": 0, "max": 30, "bttv": true, "ffz": true, "stv": true }),
+        _ => json!({ "from": "all", "cmds": false, "bot": true, "badges": true, "marks": true, "style": "plain", "size": 20, "bg": "0", "shadow": true, "dir": "bottom", "fade": 0, "max": 30, "bttv": true, "ffz": true, "stv": true, "name": "beside", "anim": "rise", "events": false, "pronouns": false, "first": true }),
     };
     v.as_object().cloned().unwrap_or_default()
 }
@@ -137,7 +137,9 @@ pub fn fields(panel: &str, vals: &Map<String, Value>, port: u64) -> Vec<Value> {
             let plain = vals.get("style").and_then(|v| v.as_str()).unwrap_or("plain") == "plain";
             let mut f = vec![
                 note("How It Looks"),
-                sel("style", "Theme", "The preview above shows it with made-up chat.", &[(json!("plain"), "Plain"), (json!("bubbles"), "Bubbles"), (json!("glass"), "Glass"), (json!("neon"), "Neon"), (json!("cards"), "Cards"), (json!("terminal"), "Terminal"), (json!("comic"), "Comic"), (json!("minimal"), "Minimal")]),
+                sel("style", "Theme", "The preview above shows it with made-up chat.", &[(json!("plain"), "Plain"), (json!("bubbles"), "Bubbles"), (json!("glass"), "Glass"), (json!("neon"), "Neon"), (json!("cards"), "Cards"), (json!("terminal"), "Terminal"), (json!("comic"), "Comic"), (json!("minimal"), "Minimal"), (json!("edge"), "Edge Light"), (json!("y2k"), "Y2K Window"), (json!("pastel"), "Pastel"), (json!("pixel"), "Pixel")]),
+                sel("name", "Names", "", &[(json!("beside"), "Beside The Message"), (json!("above"), "Above It")]),
+                sel("anim", "How Messages Come In", "", &[(json!("rise"), "Rise"), (json!("slide"), "Slide"), (json!("pop"), "Pop"), (json!("fade"), "Fade")]),
                 sel("size", "Text Size", "", &[(json!(16), "Small"), (json!(20), "Normal"), (json!(26), "Large"), (json!(34), "Huge")]),
             ];
             // (only Plain has a background of your choosing: the others bring their own)
@@ -149,6 +151,9 @@ pub fn fields(panel: &str, vals: &Map<String, Value>, port: u64) -> Vec<Value> {
                 sel("from", "Chat From", "", &[(json!("all"), "Every Platform"), (json!("twitch"), "Twitch"), (json!("kick"), "Kick"), (json!("youtube"), "YouTube")]),
                 tog("badges", "Badges", "Subscriber, moderator and VIP badges next to names."),
                 tog("marks", "Platform Marks", "A small Twitch or Kick mark before each name."),
+                tog("events", "Follows, Subs and Raids", "Shown in with chat, as cards of their own: follows, subs, gifts, cheers, Kicks, donations and raids."),
+                tog("first", "First-Time Chatters Stand Out", "A NEW tag and a glow on someone's first message in your channel, so you can say hello. Twitch tells OmniPulse who they are."),
+                tog("pronouns", "Pronouns", "Twitch viewers' pronouns after their names, as they've set them at pronouns.alejo.io."),
                 tog("bot", "The Bot's Own Messages", ""),
                 tog("cmds", "Commands", "Messages starting with !, like !sr. Most streamers leave them out."),
                 tog("stv", "7TV Emotes", "Your channel's and 7TV's global ones, on Twitch and Kick."),

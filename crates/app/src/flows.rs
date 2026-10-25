@@ -44,7 +44,7 @@ const EVENTS: &[(&str, &str)] = &[
     ("prediction", "A Prediction Starting"), ("predictionend", "A Prediction Ending"), ("pollend", "A Poll Ending"),
     ("hypetrainend", "A Hype Train Ending"), ("charity", "A Charity Donation"), ("shoutoutin", "A Shoutout to You"),
     ("vip", "A New VIP"), ("mod", "A New Moderator"), ("watchstreak", "A Watch Streak"), ("donation", "A Donation (Streamlabs, StreamElements)"), ("online", "Going Live"), ("offline", "Going Offline"), ("adbreak", "An Ad Break"),
-    ("hypelevel", "A Hype Level Reached"), ("wheel", "The Wheel Landing"), ("voteskip", "Chat Skipping a Song"), ("tunewin", "Name That Tune Won"),
+    ("hypelevel", "A Hype Level Reached"), ("wheel", "The Wheel Landing"), ("voteskip", "Chat Skipping a Song"), ("tunewin", "Name That Tune Won"), ("suitetrain", "A Hype Train Starting (Every Platform)"), ("suitetrainend", "A Hype Train Ending (Every Platform)"),
 ];
 const OBS_WHEN: &[(&str, &str)] = &[
     ("scene", "The Scene Changes"), ("streamstart", "Streaming Starts"), ("streamstop", "Streaming Stops"),
@@ -489,7 +489,7 @@ pub fn trigger_menu() -> Vec<MenuItem> {
         item("Chat", "A Rule Broken", "filter", json!({})),
     ];
     // (the Suite's fun: its own events, any platform)
-    const FUN: [&str; 4] = ["hypelevel", "wheel", "voteskip", "tunewin"];
+    const FUN: [&str; 6] = ["hypelevel", "wheel", "voteskip", "tunewin", "suitetrain", "suitetrainend"];
     for (e, l) in EVENTS.iter().filter(|e| e.0 != "donation" && !FUN.contains(&e.0)) { m.push(item("Twitch", &bare(l), "event", json!({ "event": e, "from": "twitch" }))); }
     for (e, l) in EVENTS.iter().filter(|e| FUN.contains(&e.0)) { m.push(item("Fun", &bare(l), "event", json!({ "event": e, "from": "any" }))); }
     for (e, l) in [("follow", "Follow"), ("sub", "New Sub"), ("resub", "Resub"), ("gift", "Gifted Subs"), ("raid", "Host"), ("reward", "Channel Points Reward"), ("online", "Going Live"), ("offline", "Going Offline")] {

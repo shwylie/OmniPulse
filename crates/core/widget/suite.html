@@ -34,6 +34,15 @@
   #tune .fl { height: 100%; border-radius: inherit; background: linear-gradient(90deg, var(--c1), var(--c2)); transition: width 1s linear; }
   #tune.done .hint { letter-spacing: 0.02em; font-size: 1.5rem; }
   #tune.done .tr { display: none; }
+  #hype.train .row { align-items: center; gap: 0.5rem; }
+  #hype.train .ic { flex: none; width: 1.9rem; height: 1.9rem; border-radius: 0.55rem; background: linear-gradient(135deg, var(--c1), var(--c2)); display: flex; align-items: center; justify-content: center; }
+  #hype.train .ic svg { width: 70%; height: 70%; fill: #fff; }
+  #hype.train .lbl { flex: 1; font-weight: 800; }
+  #hype.train .low { margin: 0.35rem 0 0; font-size: 0.85rem; opacity: 0.85; }
+  #hype.train .top { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #hype.train .pf svg { width: 1rem; height: 1rem; fill: currentColor; margin-left: 0.3rem; vertical-align: -0.15rem; }
+  #hype.train .left { font-variant-numeric: tabular-nums; font-weight: 800; margin-left: 0.6rem; }
+  #hype.train.ended .fl { background: linear-gradient(90deg, #3ddc84, #b6ff5e); }
   #hype.up { animation: flare 1.2s ease-out; }
   @keyframes flare { 0% { box-shadow: 0 0 0 0 var(--c1); transform: scale(1); } 30% { box-shadow: 0 0 2.4rem 0.6rem var(--c1); transform: scale(1.04); } 100% { box-shadow: 0 0.3rem 1rem rgba(0, 0, 0, 0.35); transform: scale(1); } }
   #wheel { position: relative; width: 30rem; height: 30rem; }
@@ -43,20 +52,52 @@
   #wheel .pin { position: absolute; left: 50%; top: 0.2rem; transform: translateX(-50%); width: 0; height: 0; border-left: 1rem solid transparent; border-right: 1rem solid transparent; border-top: 1.8rem solid #fff; z-index: 2; filter: drop-shadow(0 2px 3px rgba(0, 0, 0, 0.6)); }
   #wheel .won { position: absolute; left: 50%; top: 52%; transform: translate(-50%, -50%) scale(0.6); background: rgba(10, 8, 20, 0.9); padding: 0.6rem 1.1rem; border-radius: 0.8rem; font-size: 1.3rem; font-weight: 800; opacity: 0; transition: all 0.4s cubic-bezier(0.2, 0.9, 0.3, 1.3); white-space: nowrap; }
   #wheel .won.show { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+  #wheel.light .disc b { color: #2a1a3a; text-shadow: none; }
+  #wheel { transition: opacity 0.6s, transform 0.6s; }
+  #wheel.idle { opacity: 0; transform: scale(0.85); }
   #board { width: 92%; }
   #board .ln { display: flex; gap: 0.7rem; align-items: center; padding: 0.3rem 0; font-size: 1.05rem; }
   #board .rk { width: 1.6rem; height: 1.6rem; border-radius: 50%; background: linear-gradient(135deg, var(--c1), var(--c2)); display: grid; place-items: center; font-weight: 800; font-size: 0.85rem; flex: none; }
   #board .nm { flex: 1; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   #board .pt { font-variant-numeric: tabular-nums; opacity: 0.85; }
   body.rainy #stage { display: block; overflow: hidden; }
-  img.rain { position: absolute; top: -4rem; animation: fall linear forwards; pointer-events: none; }
-  @keyframes fall { 0% { transform: translate(0, 0) rotate(0deg); opacity: 0; } 10% { opacity: 1; } 100% { transform: translate(var(--sway), calc(100vh + 6rem)) rotate(25deg); opacity: 0.9; } }
+  img.rain { position: absolute; left: 0; top: 0; pointer-events: none; will-change: transform, opacity; }
   /* their themes (each widget's settings in the Suite): Dark as above, the rest their own */
   body.t-glass .panel { background: rgba(255, 255, 255, 0.14); border: 1px solid rgba(255, 255, 255, 0.28); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); box-shadow: none; }
   body.t-neon .panel { background: rgba(8, 6, 20, 0.88); border: 2px solid var(--c1); box-shadow: 0 0 16px var(--c1); }
   body.t-comic .panel { background: #fff; color: #111; border: 3px solid #111; box-shadow: 4px 4px 0 #111; }
   body.t-comic .goal .tr { background: rgba(0, 0, 0, 0.12); }
   body.t-minimal .panel { background: none; box-shadow: none; text-shadow: 0 2px 6px rgba(0, 0, 0, 0.9), 0 0 2px rgba(0, 0, 0, 0.9); }
+  .panel { position: relative; }
+  /* Pastel: soft and round, in a light tint of your colour */
+  body.t-pastel .panel { background: color-mix(in srgb, var(--c1) 12%, #fffafc); color: #3a2a4a; border: 0.2rem solid color-mix(in srgb, var(--c1) 45%, #fff); border-radius: 1.4rem; box-shadow: 0 0.4rem 1.2rem rgba(60, 20, 80, 0.28); }
+  body.t-pastel .goal .tr, body.t-pastel #hype .tr, body.t-pastel #skip .tr, body.t-pastel #tune .tr { background: rgba(60, 20, 80, 0.12); }
+  /* Y2K: an old computer's window, its title bar on top */
+  body.t-y2k .panel { background: #fdf6ff; color: #2b1b40; border: 0.15rem solid #2b1b40; border-radius: 0.4rem; box-shadow: 0.3rem 0.3rem 0 #2b1b40; padding-top: 2.1rem; }
+  body.t-y2k .panel::after { content: "\2013  \25A1  \00D7"; position: absolute; left: 0; right: 0; top: 0; height: 1.4rem; line-height: 1.4rem; padding-right: 0.6rem; text-align: right; font-size: 0.8rem; font-weight: 900; letter-spacing: 0.2em; color: #2b1b40; background: linear-gradient(90deg, #ff9ad5, #b9a4ff 55%, #9ad0ff); border-bottom: 0.15rem solid #2b1b40; border-radius: 0.25rem 0.25rem 0 0; }
+  body.t-y2k .goal .tr, body.t-y2k #hype .tr, body.t-y2k #skip .tr, body.t-y2k #tune .tr { background: rgba(43, 27, 64, 0.14); }
+  /* Pixel: an old game's box */
+  body.t-pixel { font-family: "Cascadia Mono", Consolas, "Courier New", monospace; }
+  body.t-pixel .panel { background: #1b1030; border-radius: 0; box-shadow: 0 -0.25rem 0 #f4f0ff, 0 0.25rem 0 #f4f0ff, -0.25rem 0 0 #f4f0ff, 0.25rem 0 0 #f4f0ff, inset 0 0 0 0.22rem var(--c1); }
+  body.t-pixel .tr, body.t-pixel .fl { border-radius: 0 !important; }
+  /* Edge Light: smoked glass, a stroke of light running round its edge */
+  @property --edge { syntax: "<angle>"; initial-value: 0deg; inherits: false; }
+  body.t-edge .panel { background: rgba(12, 10, 24, 0.7); border: 1px solid rgba(255, 255, 255, 0.1); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); }
+  body.t-edge .panel::after { content: ""; position: absolute; inset: -1px; border-radius: inherit; padding: 0.15rem; pointer-events: none;
+    background: conic-gradient(from var(--edge), transparent 0 62%, var(--c1) 80%, #fff 86%, var(--c2) 90%, transparent 96%);
+    -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor; mask-composite: exclude; animation: edge 3.6s linear infinite; }
+  @keyframes edge { to { --edge: 360deg; } }
+  /* Sticker: made for a GIF on top, a white die-cut edge round it all */
+  body.t-sticker .panel { background: #fff; color: #1d1530; border-radius: 1.2rem; box-shadow: 0 0 0 0.3rem #fff, 0 0.5rem 1.4rem rgba(0, 0, 0, 0.45); transform: rotate(-1.5deg); }
+  body.t-sticker .goal .tr, body.t-sticker #hype .tr, body.t-sticker #skip .tr, body.t-sticker #tune .tr { background: rgba(0, 0, 0, 0.1); }
+  body.t-sticker .gifme::before { filter: drop-shadow(0 0 0.18rem #fff) drop-shadow(0 0 0.18rem #fff) drop-shadow(0 0.3rem 0.5rem rgba(0, 0, 0, 0.4)); }
+  /* a GIF with it, wherever it's set to go */
+  .gifme { position: relative; }
+  .gifme::before { content: ""; position: absolute; width: var(--gs); height: var(--gs); background: var(--gif) center / contain no-repeat; pointer-events: none; z-index: 3; }
+  body.gp-top .gifme::before { left: 50%; bottom: 100%; transform: translate(-50%, 22%); }
+  body.gp-left .gifme::before { right: 100%; top: 50%; transform: translate(18%, -50%); }
+  body.gp-right .gifme::before { left: 100%; top: 50%; transform: translate(-18%, -50%); }
+  body.gp-corner .gifme::before { right: 0; top: 0; width: calc(var(--gs) * 0.7); height: calc(var(--gs) * 0.7); transform: translate(40%, -55%); }
   .lbl { font-size: 0.78rem; letter-spacing: 0.08em; text-transform: uppercase; opacity: 0.75; }
   .big { font-size: 1.5rem; font-weight: 800; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
@@ -93,6 +134,42 @@
   body.rings .goal .fl { display: none; }
   body.rings .goal .row { flex-direction: column; align-items: center; margin: 0; }
   body.rings .goal .nm { white-space: nowrap; font-size: 0.85rem; }
+  /* goals as shapes: liquid filling one, a jar of drops piling up, or an hourglass; side by side */
+  body.shapes #goals { flex-direction: row; justify-content: center; align-items: flex-end; gap: 1.4rem; width: auto; max-width: 96%; }
+  body.shapes .goal { display: flex; flex-direction: column; align-items: center; gap: 0.35rem; width: 9rem; }
+  body.shapes .goal .tr, body.shapes .goal .fl { display: none; }
+  body.shapes .goal .row { flex-direction: column; align-items: center; margin: 0; order: 2; }
+  body.shapes .goal .nm { white-space: nowrap; font-size: 0.9rem; }
+  .goal .shape { width: 100%; aspect-ratio: 100 / 110; position: relative; }
+  body.hourglass .goal .shape { aspect-ratio: 100 / 140; width: 75%; }
+  .goal .shape svg { width: 100%; height: 100%; overflow: visible; }
+  .goal .shape .lvl { transition: transform 1.4s cubic-bezier(0.2, 0.8, 0.2, 1); }
+  .goal .shape .wave { animation: wave 3.2s linear infinite; }
+  .goal .shape .wave.back { animation-duration: 5s; animation-direction: reverse; opacity: 0.55; }
+  @keyframes wave { to { transform: translateX(-100px); } }
+  .goal .shape .glass { fill: rgba(255, 255, 255, 0.1); stroke: rgba(255, 255, 255, 0.9); stroke-width: 3; stroke-linejoin: round; }
+  .goal .shape .deco { fill: none; stroke: rgba(255, 255, 255, 0.9); stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; }
+  .goal .shape .eye { fill: rgba(20, 10, 40, 0.85); }
+  .goal .shape .shine { fill: none; stroke: rgba(255, 255, 255, 0.55); stroke-width: 3; stroke-linecap: round; }
+  .goal .shape .pc { font-weight: 900; font-size: 15px; fill: #fff; paint-order: stroke; stroke: rgba(0, 0, 0, 0.45); stroke-width: 3px; }
+  /* your own picture as the shape: the liquid seen through it */
+  .goal .shape .own { position: absolute; inset: 0; -webkit-mask: var(--own) center / contain no-repeat; mask: var(--own) center / contain no-repeat; background: rgba(255, 255, 255, 0.14); overflow: hidden; }
+  .goal .shape .own .liq { position: absolute; left: 0; right: 0; bottom: 0; background: linear-gradient(180deg, var(--c1), var(--c2)); transition: height 1.4s cubic-bezier(0.2, 0.8, 0.2, 1); }
+  .goal .shape .ownpic { position: absolute; inset: 0; background: var(--own) center / contain no-repeat; opacity: 0.35; mix-blend-mode: screen; }
+  /* the jar's drops: each new one falls and squishes as it lands */
+  .goal .shape .drop { animation: jarfall 0.9s cubic-bezier(0.5, 0, 0.75, 0) both, squish 0.5s 0.9s ease-out both; transform-box: fill-box; transform-origin: 50% 100%; }
+  @keyframes jarfall { from { transform: translateY(-120px); } }
+  @keyframes squish { 0% { transform: scale(1.25, 0.75); } 50% { transform: scale(0.92, 1.08); } 100% { transform: scale(1, 1); } }
+  /* the hourglass: sand falling, and turning over when it's full */
+  .goal .shape .stream { stroke: #f6d38a; stroke-width: 2.4; stroke-dasharray: 3 4; animation: pour 0.5s linear infinite; }
+  @keyframes pour { to { stroke-dashoffset: -7; } }
+  .goal .shape.turn svg { animation: turn 1.1s cubic-bezier(0.6, 0, 0.3, 1) both; }
+  @keyframes turn { from { transform: rotate(0deg); } to { transform: rotate(180deg); } }
+  .goal .round { font-size: 0.75rem; opacity: 0.75; }
+  .goal.done .shape .glass { stroke: #b6ff5e; }
+  body.still .goal .shape .wave, body.still .goal .shape .stream { animation: none; }
+  .confetti { position: fixed; width: 0.45rem; height: 0.7rem; border-radius: 0.1rem; z-index: 5; pointer-events: none; animation: confetti 1.6s cubic-bezier(0.2, 0.7, 0.4, 1) forwards; }
+  @keyframes confetti { to { transform: translate(var(--dx), calc(var(--dy) + 9rem)) rotate(var(--rot)); opacity: 0; } }
   @property --p { syntax: "<number>"; inherits: false; initial-value: 0; }
 
   /* the timer: its digits, ticking; a pulse as time's added */
@@ -135,7 +212,11 @@
   const MOTIONS = { rise: ["rise-in", "rise-out"], slide: ["slide-in", "slide-out"], flip: ["flip-in", "flip-out"], pop: ["pop-in", "pop-out"] };
   let suite = null, shown = "", timerT = null, lastAdded = -1, raidT = null;
 
+  // (the GIF, as set for the widget this page is; room made for it beside or above)
+  const GIF_OF = { "/goals": "goals", "/timer": "timer", "/latest-follow": "latest", "/latest-sub": "latest", "/raid": "raid", "/hype": "hype", "/voteskip": "voteskip", "/wheel": "wheel", "/leaderboard": "leaderboard", "/tune": "tune" };
+  function gifNow() { return (suite && suite.gifs && suite.gifs[GIF_OF[PATH]]) || ""; }
   function fit(w, h) {
+    if (gifNow()) { const p = (suite && suite.gifPlace) || "top"; if (p === "top") h *= 1.55; else if (p === "corner") { h *= 1.2; w *= 1.1; } else w *= 1.4; }
     const k = Math.max(0.3, Math.min(innerWidth / w, innerHeight / h));
     document.documentElement.style.fontSize = 16 * k + "px";
   }
@@ -156,32 +237,138 @@
   function esc(t) { const d = document.createElement("div"); d.textContent = t == null ? "" : String(t); return d.innerHTML; }
 
   // ---------- goals ----------
-  const GOALS = [["follow", ""], ["sub", ""], ["bits", ""], ["donation", "money"]];
+  const GOALS = [["follow", ""], ["sub", ""], ["bits", ""], ["donation", "money"], ["common", ""]];
+  // (the shapes, in a 100 × 110 box: the body filled, and lines drawn over it)
+  const SHAPES = {
+    jar: { body: "M22 24 H78 C86 24 90 30 90 38 V92 C90 101 84 106 75 106 H25 C16 106 10 101 10 92 V38 C10 30 14 24 22 24 Z", deco: "M28 8 H72 V20 H28 Z M24 24 H76", shine: "M20 44 V70" },
+    potion: { body: "M40 22 V40 C22 46 8 60 8 76 C8 94 26 106 50 106 C74 106 92 94 92 76 C92 60 78 46 60 40 V22 Z", deco: "M34 6 H66 V16 H34 Z M38 16 V22 M62 16 V22", shine: "M20 72 C20 64 24 58 30 54" },
+    heart: { body: "M50 104 L12 64 C-6 44 6 10 30 12 C40 13 46 20 50 28 C54 20 60 13 70 12 C94 10 106 44 88 64 Z", deco: "", shine: "M18 40 C18 32 22 26 28 24" },
+    cup: { body: "M14 30 H86 L77 106 H23 Z", deco: "M10 24 H90 M60 4 L54 24 M60 4 L68 2", shine: "M24 44 L28 90" },
+    star: { body: "M50 4 L63 38 L98 40 L71 62 L81 98 L50 78 L19 98 L29 62 L2 40 L37 38 Z", deco: "", shine: "" },
+    ghost: { body: "M50 6 C75 6 90 25 90 50 V104 L77 94 L64 104 L50 94 L36 104 L23 94 L10 104 V50 C10 25 25 6 50 6 Z", deco: "", shine: "M22 50 C22 38 28 28 36 24", eyes: true },
+    bubble: { body: "M50 8 A48 48 0 1 0 50.01 8 Z", deco: "", shine: "M22 40 C26 30 32 24 40 20" },
+  };
+  const HOURGLASS = "M18 14 H82 C82 44 56 60 54 70 C56 80 82 96 82 126 H18 C18 96 44 80 46 70 C44 60 18 44 18 14 Z";
+  const WAVE = "M0 0 Q12.5 -5 25 0 T50 0 T75 0 T100 0 T125 0 T150 0 T175 0 T200 0 V140 H0 Z";
+  const DROPS = { heart: HEART, star: STAR, gem: "M6 3h12l4 6-10 13L2 9z", coin: "M12 2a10 10 0 100 20 10 10 0 000-20z", candy: "M12 5a7 7 0 100 14 7 7 0 000-14z" };
+  // (where the jar's nth drop settles: rows from the bottom, each a little offset)
+  function dropAt(i) {
+    const per = 6, r = Math.floor(i / per), c = i % per;
+    return [17 + c * 13 + (r % 2 ? 6.5 : 0) + ((i * 37) % 5) - 2, 100 - r * 11];
+  }
+  let goalRound = {};
+  function shapeSvg(k, g) {
+    if (g.style === "hourglass") return '<svg viewBox="0 0 100 140"><defs><clipPath id="hc-' + k + '"><path d="' + HOURGLASS + '"/></clipPath></defs>' +
+      '<path class="glass" d="' + HOURGLASS + '"/><g clip-path="url(#hc-' + k + ')"><rect class="sand top" x="0" width="100" fill="url(#sg)"/><rect class="sand bot" x="0" width="100" fill="url(#sg)"/>' +
+      '<line class="stream" x1="50" y1="68" x2="50" y2="126"/></g><path class="deco" d="M8 6 H92 V14 H8 Z M8 126 H92 V134 H8 Z M12 14 V126 M88 14 V126"/></svg>';
+    const s = SHAPES[g.shape] || SHAPES.jar;
+    const eyes = s.eyes ? '<circle class="eye" cx="38" cy="46" r="6"/><circle class="eye" cx="62" cy="46" r="6"/>' : "";
+    const over = (s.deco ? '<path class="deco" d="' + s.deco + '"/>' : "") + (s.shine ? '<path class="shine" d="' + s.shine + '"/>' : "") + eyes;
+    if (g.style === "jar") return '<svg viewBox="0 0 100 110"><defs><clipPath id="sc-' + k + '"><path d="' + s.body + '"/></clipPath></defs><path class="glass" d="' + s.body + '"/>' +
+      '<g class="pile" clip-path="url(#sc-' + k + ')"></g>' + over + '</svg>';
+    return '<svg viewBox="0 0 100 110"><defs><clipPath id="sc-' + k + '"><path d="' + s.body + '"/></clipPath></defs><path class="glass" d="' + s.body + '"/>' +
+      '<g clip-path="url(#sc-' + k + ')"><g class="lvl" style="transform:translateY(108px)"><path class="wave back" d="' + WAVE + '" fill="var(--c2)"/><path class="wave" d="' + WAVE + '" fill="url(#lg)"/></g></g>' +
+      over + '<text class="pc" x="50" y="72" text-anchor="middle"></text></svg>';
+  }
   function goals() {
     const g = suite.goals;
+    const shapes = ["liquid", "jar", "hourglass"].includes(g.style);
     document.body.classList.toggle("rings", g.style === "rings");
+    document.body.classList.toggle("shapes", shapes);
+    document.body.classList.toggle("hourglass", g.style === "hourglass");
+    // (the colours the shapes fill with, once)
+    if (!$("goal-defs")) document.body.insertAdjacentHTML("beforeend", '<svg id="goal-defs" width="0" height="0" style="position:absolute"><defs><linearGradient id="lg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="var(--c1)"/><stop offset="1" stop-color="var(--c2)"/></linearGradient><linearGradient id="sg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#f6d38a"/><stop offset="1" stop-color="#d9a450"/></linearGradient></defs></svg>');
     let box = $("goals");
     if (!box) { box = document.createElement("div"); box.id = "goals"; box.className = "panel"; swap(box); }
     const on = GOALS.filter(([k]) => g[k] && g[k].on);
-    const sig = on.map(([k]) => k).join(",");
+    const sig = on.map(([k]) => k).join(",") + "|" + g.style + "|" + g.shape + "|" + g.image + "|" + g.drops;
     if (box.dataset.sig !== sig) {
       box.dataset.sig = sig;
-      box.innerHTML = on.map(([k]) => '<div class="goal" id="g-' + k + '"><div class="row"><span class="nm"></span><span class="ct"></span></div><div class="tr"><div class="fl"></div></div></div>').join("");
+      goalRound = {};
+      const own = g.style === "liquid" && g.image;
+      box.innerHTML = on.map(([k]) => '<div class="goal" id="g-' + k + '"><div class="row"><span class="nm"></span><span class="ct"></span><span class="round"></span></div><div class="tr"><div class="fl"></div></div>' +
+        (shapes ? '<div class="shape">' + (own ? '<div class="own"><div class="liq"></div></div><div class="ownpic"></div>' : shapeSvg(k, g)) + '</div>' : "") + '</div>').join("");
+      if (own) box.querySelectorAll(".shape").forEach((s) => s.style.setProperty("--own", 'url("' + g.image.replace(/"/g, "") + '")'));
     }
     for (const [k, kind] of on) {
       const el = $("g-" + k), have = Number(g.counts[k] || 0), want = g[k].target;
       const pct = Math.min(100, (have / want) * 100);
       el.querySelector(".nm").textContent = g[k].label;
       const fmt = (n) => kind === "money" ? (g.currency || "") + (Math.round(n * 100) / 100) : Math.round(n);
-      el.querySelector(".ct").textContent = fmt(have) + " / " + fmt(want);
+      el.querySelector(".ct").textContent = g.pct ? Math.round(pct) + "%" : fmt(have) + " / " + fmt(want);
       el.querySelector(".fl").style.width = pct + "%";
+      if (shapes) goalShape(el, k, g, have, want, pct);
       const tr = el.querySelector(".tr");
       tr.style.setProperty("--p", pct);
       tr.dataset.pct = Math.round(pct) + "%";
       const done = have >= want;
-      if (done && !el.classList.contains("done")) { el.classList.add("done", "burst"); setTimeout(() => el.classList.remove("burst"), 1300); }
+      if (done && !el.classList.contains("done")) { el.classList.add("done", "burst"); setTimeout(() => el.classList.remove("burst"), 1300); if (seenGoals) confetti(el); }
       if (!done) el.classList.remove("done");
     }
+  }
+
+  // (a goal reached: confetti from it, once; not for the ones already reached when the page opened)
+  let seenGoals = false;
+  setTimeout(() => (seenGoals = true), 3000);
+  function confetti(el) {
+    if (document.body.classList.contains("still")) return;
+    const r = el.getBoundingClientRect(), cols = ["var(--c1)", "var(--c2)", "#ffd36e", "#8ff0d0", "#ff8fc7", "#ffffff"];
+    for (let i = 0; i < 36; i++) {
+      const c = document.createElement("i");
+      c.className = "confetti";
+      c.style.left = r.left + r.width / 2 + "px";
+      c.style.top = r.top + r.height / 3 + "px";
+      c.style.background = cols[i % cols.length];
+      const a = Math.random() * Math.PI * 2, d = 60 + Math.random() * 120;
+      c.style.setProperty("--dx", Math.cos(a) * d + "px");
+      c.style.setProperty("--dy", Math.sin(a) * d - 60 + "px");
+      c.style.setProperty("--rot", Math.random() * 720 - 360 + "deg");
+      c.addEventListener("animationend", () => c.remove());
+      document.body.appendChild(c);
+    }
+  }
+  function goalShape(el, k, g, have, want, pct) {
+    const sh = el.querySelector(".shape");
+    if (!sh) return;
+    // (the hourglass goes round: full, it turns over, and what's over starts the next)
+    if (g.style === "hourglass") {
+      const round = Math.floor(have / want), p = (have % want) / want;
+      const was = goalRound[k];
+      goalRound[k] = round;
+      el.querySelector(".round").textContent = round > 0 ? "Round " + (round + 1) : "";
+      const draw = (q) => {
+        const top = sh.querySelector(".top"), bot = sh.querySelector(".bot"), st = sh.querySelector(".stream");
+        top.setAttribute("y", 70 - (1 - q) * 54); top.setAttribute("height", (1 - q) * 54);
+        bot.setAttribute("y", 126 - q * 54); bot.setAttribute("height", q * 54);
+        st.style.display = q > 0 && q < 1 ? "" : "none";
+        st.setAttribute("y2", 126 - q * 54);
+      };
+      if (was != null && round > was) { draw(1); sh.classList.remove("turn"); void sh.offsetWidth; sh.classList.add("turn"); setTimeout(() => { sh.classList.remove("turn"); draw(p); }, 1150); }
+      else draw(p);
+      const fmt = (n) => (k === "donation" ? (g.currency || "") : "") + Math.round(n * 100) / 100;
+      el.querySelector(".ct").textContent = g.pct ? Math.round(p * 100) + "%" : fmt(have % want) + " / " + fmt(want);
+      return;
+    }
+    if (g.style === "jar") {
+      // (a drop for each step of the way, up to 42 for a full jar; new ones fall in)
+      const n = Math.round((pct / 100) * 42), pile = sh.querySelector(".pile");
+      if (!pile) return;
+      let had = pile.childElementCount;
+      if (n < had) { pile.innerHTML = ""; had = 0; }
+      const kinds = g.drops === "mixed" || !(g.drops in DROPS) ? ["heart", "star", "candy", "gem", "coin"] : [g.drops];
+      const cols = ["var(--c1)", "var(--c2)", "#ff8fc7", "#ffd36e", "#8ff0d0", "#b8a6ff"];
+      for (let i = had; i < n; i++) {
+        const [x, y] = dropAt(i), kind = kinds[i % kinds.length];
+        const lag = (i - had) * 0.12;
+        pile.insertAdjacentHTML("beforeend", '<g transform="translate(' + (x - 7) + ' ' + (y - 13) + ') scale(0.58)"><path class="drop" style="animation-delay:' + lag + 's,' + (lag + 0.9) + 's" d="' + DROPS[kind] + '" fill="' + cols[(i * 7) % cols.length] + '" stroke="rgba(0,0,0,0.25)" stroke-width="1"/></g>');
+      }
+      return;
+    }
+    // (liquid: the level rises to the goal, waves on top)
+    const lvl = sh.querySelector(".lvl"), liq = sh.querySelector(".liq"), pc = sh.querySelector(".pc");
+    if (lvl) lvl.style.transform = "translateY(" + (108 - (pct / 100) * 104) + "px)";
+    if (liq) liq.style.height = pct + "%";
+    if (pc) pc.textContent = Math.round(pct) + "%";
   }
 
   // ---------- the timer ----------
@@ -259,9 +446,45 @@
 
   // ---------- the fun: the hype meter, vote skip, the wheel, the leaderboard, emote rain ----------
   let hypeLevel = -1;
+  const MARKS = {
+    twitch: "M11.571 4.714h1.715v5.143H11.57zm4.715 0H18v5.143h-1.714zM6 0L1.714 4.286v15.428h5.143V24l4.286-4.286h3.428L22.286 12V0zm14.571 11.143l-3.428 3.428h-3.429l-3 3v-3H6.857V1.714h13.714z",
+    kick: "M1.333 0h8v5.333H12V2.667h2.667V0h8v8H20v2.667h-2.667v2.666H20V16h2.667v8h-8v-2.667H12v-2.666H9.333V24h-8z",
+    youtube: "M21.6 7.2a2.7 2.7 0 0 0-1.9-1.9C18 4.8 12 4.8 12 4.8s-6 0-7.7.5a2.7 2.7 0 0 0-1.9 1.9C2 8.9 2 12 2 12s0 3.1.4 4.8a2.7 2.7 0 0 0 1.9 1.9c1.7.5 7.7.5 7.7.5s6 0 7.7-.5a2.7 2.7 0 0 0 1.9-1.9c.4-1.7.4-4.8.4-4.8s0-3.1-.4-4.8zM10 15V9l5.2 3z",
+  };
+  const TRAIN = "M12 2c-4 0-8 .5-8 4v9.5A3.5 3.5 0 0 0 7.5 19L6 20.5v.5h2.2l2-2h3.6l2 2H18v-.5L16.5 19a3.5 3.5 0 0 0 3.5-3.5V6c0-3.5-4-4-8-4zM7.5 17a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3zm3.5-7H6V6h5v4zm2 0V6h5v4h-5zm3.5 7a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3z";
+  let trainTick = null;
+  // (the hype train: shown while one's running (or always, if it's set to), its level, time left, who gave
+  // the most and the platforms it's come from; the meter: as it was)
+  function train(h) {
+    let box = $("hype");
+    const shown = h.running || h.show === "always" || (h.done && Date.now() - h.done.at < 8000);
+    if (!shown) { if (box) { moving(box); box.classList.add("out"); setTimeout(() => box.remove(), 500); } return; }
+    if (!box || !box.classList.contains("train")) {
+      if (box) box.remove();
+      box = document.createElement("div"); box.id = "hype"; box.className = "panel train";
+      box.innerHTML = '<div class="row"><span class="ic"><svg viewBox="0 0 24 24"><path d="' + TRAIN + '"/></svg></span><span class="lbl"></span><span class="lv"></span></div><div class="tr"><div class="fl"></div></div><div class="row low"><span class="top"></span><span class="pf"></span><span class="left"></span></div>';
+      swap(box);
+    }
+    box.querySelector(".lbl").textContent = h.label || "Hype Train";
+    const done = !h.running && h.done;
+    box.classList.toggle("ended", !!done || !h.running);
+    box.querySelector(".lv").textContent = done ? "Ended at level " + h.done.level : h.running ? "Level " + h.level : "Waiting";
+    box.querySelector(".fl").style.width = (h.running ? Math.round((h.fill || 0) * 100) : done ? 100 : 0) + "%";
+    box.querySelector(".top").textContent = done ? (h.done.top ? "Top: " + h.done.top : "Thank you!") : h.top ? "Top: " + h.top : "";
+    box.querySelector(".pf").innerHTML = (h.from || []).map((p) => MARKS[p] ? '<svg viewBox="0 0 24 24"><path d="' + MARKS[p] + '"/></svg>' : "").join("");
+    // (its time left, counted down here between pushes; the plugin's clock, set against this one)
+    const skew = Date.now() - (h.now || Date.now());
+    const tick = () => { const s = Math.max(0, Math.round((h.endsAt + skew - Date.now()) / 1000)); const el = box.querySelector(".left"); if (el) el.textContent = h.running ? Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0") : ""; };
+    clearInterval(trainTick); tick(); if (h.running) trainTick = setInterval(tick, 1000);
+    if (hypeLevel >= 0 && (h.level || 0) > hypeLevel) { box.classList.remove("up"); void box.offsetWidth; box.classList.add("up"); }
+    hypeLevel = h.level || 0;
+    if (done) { clearTimeout(box.goT); box.goT = setTimeout(draw, 8100 - (Date.now() - h.done.at)); }
+  }
   function hype() {
     const h = suite.hype || {};
+    if (h.train) return train(h);
     let box = $("hype");
+    if (box && box.classList.contains("train")) { box.remove(); box = null; }
     if (!box) { box = document.createElement("div"); box.id = "hype"; box.className = "panel"; box.innerHTML = '<div class="row"><span class="lbl"></span><span class="lv"></span></div><div class="tr"><div class="fl"></div></div>'; swap(box); }
     box.querySelector(".lbl").textContent = h.label || "Hype";
     box.querySelector(".lv").textContent = "Level " + (h.level || 0);
@@ -309,29 +532,42 @@
     const w = suite.wheel || {};
     const prizes = w.prizes || [];
     let box = $("wheel");
-    const sig = prizes.join("|");
+    const weights = prizes.map((_, i) => Math.max(1, Number((w.weights || [])[i]) || 1)), total = weights.reduce((a, b) => a + b, 0) || 1;
+    // (each prize's slice, as big as its chance)
+    const starts = weights.map((_, i) => (weights.slice(0, i).reduce((a, b) => a + b, 0) / total) * 360);
+    const sizeOf = (i) => (weights[i] / total) * 360;
+    const sig = prizes.join("|") + "|" + weights.join(",") + "|" + (w.colors || "theme");
+    const PALS = { rainbow: (i, n) => "hsl(" + Math.round((i / n) * 360) + " 80% 58%)", pastel: (i, n) => "hsl(" + Math.round((i / n) * 360) + " 75% 78%)",
+      alternate: (i) => (i % 2 ? "var(--c2)" : "var(--c1)"), theme: (i, n) => "color-mix(in srgb, var(--c1) " + Math.round(100 - (i / n) * 70) + "%, var(--c2))" };
+    const col = PALS[w.colors] || PALS.theme;
     if (!box || box.dataset.sig !== sig) {
       if (box) box.remove();
       box = document.createElement("div"); box.id = "wheel"; box.dataset.sig = sig;
-      const n = Math.max(1, prizes.length), seg = 360 / n;
-      const stops = prizes.map((_, i) => "color-mix(in srgb, var(--c1) " + Math.round(100 - (i / n) * 70) + "%, var(--c2)) " + (i * seg) + "deg " + ((i + 1) * seg) + "deg").join(", ");
+      if (w.colors === "pastel") box.classList.add("light");
+      const n = Math.max(1, prizes.length);
+      const stops = prizes.map((_, i) => col(i, n) + " " + starts[i] + "deg " + (starts[i] + sizeOf(i)) + "deg").join(", ");
       box.innerHTML = '<div class="pin"></div><div class="disc" style="background: conic-gradient(' + stops + ')">' +
-        prizes.map((p, i) => '<span style="transform: rotate(' + (i * seg + seg / 2) + 'deg)"><b>' + esc(p) + '</b></span>').join("") + '</div><div class="won"></div>';
+        prizes.map((p, i) => '<span style="transform: rotate(' + (starts[i] + sizeOf(i) / 2) + 'deg)"><b>' + esc(p) + '</b></span>').join("") + '</div><div class="won"></div>';
       swap(box);
     }
+    const secs = Math.max(3, Math.min(12, Number(w.secs) || 6));
+    // (only while it spins, and a few seconds after, if it's set to)
+    box.classList.toggle("idle", !!w.hide && !(w.at && Date.now() - w.at < secs * 1000 + 6000));
+    if (w.hide && w.at) { clearTimeout(box.hideT); box.hideT = setTimeout(draw, Math.max(0, w.at + secs * 1000 + 6100 - Date.now())); }
     // (a new spin: round several times, landing with its prize under the pin at the top)
     if (w.at && w.at !== wheelAt) {
-      const n = Math.max(1, prizes.length), seg = 360 / n;
       const turns = 5 + Math.floor(Math.random() * 3);
-      const to = turns * 360 + (360 - (w.pick * seg + seg / 2));
+      // (somewhere in its slice, not always its middle)
+      const at = starts[w.pick] + sizeOf(w.pick) * (0.25 + Math.random() * 0.5);
+      const to = turns * 360 + (360 - at);
       const disc = box.querySelector(".disc");
-      const fresh = Date.now() - w.at < 5000;
-      disc.style.transition = fresh ? "transform 6s cubic-bezier(0.12, 0.7, 0.2, 1)" : "none";
+      const fresh = Date.now() - w.at < secs * 1000 - 1000;
+      disc.style.transition = fresh ? "transform " + secs + "s cubic-bezier(0.12, 0.7, 0.2, 1)" : "none";
       disc.style.transform = "rotate(" + to + "deg)";
       const won = box.querySelector(".won");
       won.textContent = "";
       won.classList.remove("show");
-      setTimeout(() => { won.textContent = (w.user ? w.user + ": " : "") + (prizes[w.pick] || ""); won.classList.add("show"); }, fresh ? 6100 : 0);
+      setTimeout(() => { won.textContent = (w.user ? w.user + ": " : "") + (prizes[w.pick] || ""); won.classList.add("show"); }, fresh ? secs * 1000 + 100 : 0);
       wheelAt = w.at;
     }
   }
@@ -354,7 +590,9 @@
       for (const m of j.items || []) {
         rainAfter = Math.max(rainAfter, Number(m.n || 0));
         if (m.notice || m.gone) continue;
-        emotesOf(m).slice(0, 6).forEach((u) => { drop(u); recent.push(u); });
+        // (each one said rains, if it's set to; kept for the bursts either way; your own pictures only: none of chat's)
+        const r = rainSet();
+        emotesOf(m).slice(0, 6).forEach((u) => { if (r.chat && r.src !== "mine") drop(u); recent.push(u); });
       }
       recent = recent.slice(-30);
     } catch (e) {}
@@ -366,23 +604,67 @@
     text.split(/\s+/).forEach((w) => { const u = rainThird.get(w); if (u) out.push(u); });
     return out;
   }
+  // (how it rains, as set: which way, from where (everywhere, or a spot such as your camera), how big and fast)
+  const rainSet = () => Object.assign({ src: "chat", imgs: [], chat: true, dir: "down", from: "all", x: 85, y: 85, size: "medium", speed: "normal", amount: 30, spin: true, max: 80 }, (suite && suite.rain) || {});
+  const SPOTS = { bl: [12, 85], br: [88, 85], tl: [12, 15], tr: [88, 15], c: [50, 50], b: [50, 95] };
   function drop(u) {
-    const stage = $("stage");
-    if (stage.childElementCount > 60) return;
+    const stage = $("stage"), r = rainSet();
+    if (stage.childElementCount > Math.max(10, Number(r.max) || 80)) return;
+    const W = innerWidth, H = innerHeight;
+    const base = { small: 30, medium: 46, large: 70 }[r.size] || 46, s = base * (0.75 + Math.random() * 0.5);
+    const pace = { slow: 1.6, normal: 1, fast: 0.6 }[r.speed] || 1;
+    const spot = r.from === "all" ? null : (r.from === "custom" ? [Number(r.x) || 50, Number(r.y) || 50] : SPOTS[r.from] || SPOTS.br);
+    const sx = spot ? (spot[0] / 100) * W - s / 2 : 0, sy = spot ? (spot[1] / 100) * H - s / 2 : 0;
+    const rnd = (a, b) => a + Math.random() * (b - a);
+    const turn = r.spin ? rnd(-200, 200) : 0;
+    let frames, ms;
+    // (straight across: everywhere along an edge, or out of the spot in a cone that way)
+    const across = (dx, dy) => {
+      let x0, y0;
+      if (spot) { x0 = sx; y0 = sy; } else if (dy) { x0 = rnd(0, W - s); y0 = dy > 0 ? -s : H; } else { x0 = dx > 0 ? -s : W; y0 = rnd(0, H - s); }
+      const a = Math.atan2(dy, dx) + (spot ? rnd(-0.45, 0.45) : rnd(-0.08, 0.08)), d = Math.hypot(W, H) + s;
+      return [{ transform: "translate(" + x0 + "px," + y0 + "px) rotate(0deg)", opacity: 0 }, { opacity: 1, offset: 0.08 }, { transform: "translate(" + (x0 + Math.cos(a) * d) + "px," + (y0 + Math.sin(a) * d) + "px) rotate(" + turn + "deg)", opacity: 0.9 }];
+    };
+    if (r.dir === "up") { frames = across(0, -1); ms = rnd(4000, 6500); }
+    else if (r.dir === "left") { frames = across(-1, 0); ms = rnd(4000, 6500); }
+    else if (r.dir === "right") { frames = across(1, 0); ms = rnd(4000, 6500); }
+    else if (r.dir === "fountain" || r.dir === "burst") {
+      // (thrown out of the spot (the bottom's middle, without one): a fountain arcs up and falls; a burst flies out and fades)
+      const x0 = spot ? sx : W / 2 - s / 2, y0 = spot ? sy : (r.dir === "fountain" ? H : H / 2 - s / 2);
+      const a = r.dir === "fountain" ? -Math.PI / 2 + rnd(-0.55, 0.55) : rnd(0, Math.PI * 2);
+      const v = r.dir === "fountain" ? rnd(0.75, 1.15) * H : rnd(0.25, 0.5) * Math.hypot(W, H), g = r.dir === "fountain" ? 1.9 * H : 0;
+      ms = r.dir === "fountain" ? rnd(2600, 3400) : rnd(1400, 2200);
+      frames = [];
+      for (let k = 0; k <= 12; k++) {
+        const t = k / 12, T = (t * ms) / 1000;
+        const x = x0 + Math.cos(a) * v * T * (r.dir === "burst" ? (1 - t * 0.35) : 1), y = y0 + Math.sin(a) * v * T + 0.5 * g * T * T;
+        frames.push({ transform: "translate(" + x + "px," + y + "px) rotate(" + turn * t + "deg) scale(" + (r.dir === "burst" ? 0.6 + t * 0.6 : 1) + ")", opacity: k === 0 ? 0 : r.dir === "burst" ? 1 - t : k > 10 ? 0.6 : 1 });
+      }
+    } else if (r.dir === "float") {
+      // (bubbles drifting up, swaying)
+      const x0 = spot ? sx : rnd(0, W - s), y0 = spot ? sy : H, rise = spot ? rnd(0.5, 0.9) * H : H + s * 2, sway = rnd(30, 70), ph = rnd(0, 6.28);
+      ms = rnd(6000, 9000);
+      frames = [];
+      for (let k = 0; k <= 10; k++) { const t = k / 10; frames.push({ transform: "translate(" + (x0 + Math.sin(ph + t * 6.28) * sway) + "px," + (y0 - rise * t) + "px) rotate(" + Math.sin(t * 6.28) * 15 + "deg)", opacity: k === 0 ? 0 : spot && k > 7 ? 1 - (t - 0.7) / 0.3 : 1 }); }
+    } else { frames = across(0, 1); frames[2].transform = frames[2].transform.replace(/translate\(([-\d.]+)px/, (m, x) => "translate(" + (Number(x) + rnd(-40, 40)) + "px"); ms = rnd(4000, 7000); }
     const i = document.createElement("img");
     i.src = u; i.className = "rain";
-    i.style.left = Math.random() * 92 + "%";
-    i.style.animationDuration = 4 + Math.random() * 3 + "s";
-    i.style.setProperty("--sway", (Math.random() * 80 - 40) + "px");
-    i.style.width = 36 + Math.random() * 28 + "px";
-    i.addEventListener("animationend", () => i.remove());
+    i.style.width = s + "px";
     stage.appendChild(i);
+    const an = i.animate(frames, { duration: ms * pace, easing: r.dir === "fountain" || r.dir === "float" ? "linear" : r.dir === "burst" ? "cubic-bezier(0.1, 0.7, 0.3, 1)" : "linear", fill: "forwards" });
+    an.onfinish = () => i.remove();
+  }
+  // (what it rains: chat's emotes, your own pictures, or both)
+  function rainPool() {
+    const r = rainSet(), mine = (r.imgs || []).filter(Boolean);
+    const chat = recent.length ? recent : ["https://static-cdn.jtvnw.net/emoticons/v2/25/default/dark/2.0"];
+    return r.src === "mine" && mine.length ? mine : r.src === "both" && mine.length ? chat.concat(mine) : chat;
   }
   function emoterain() {
-    const b = suite.burst || 0;
+    const b = suite.burst || 0, r = rainSet();
     if (rainBurst >= 0 && b > rainBurst) {
-      const pool = recent.length ? recent : ["https://static-cdn.jtvnw.net/emoticons/v2/25/default/dark/2.0"];
-      for (let k = 0; k < 28; k++) setTimeout(() => drop(pool[Math.floor(Math.random() * pool.length)]), k * 90);
+      const pool = rainPool(), n = Math.max(5, Math.min(150, Number(r.amount) || 30));
+      for (let k = 0; k < n; k++) setTimeout(() => drop(pool[Math.floor(Math.random() * pool.length)]), k * (r.dir === "burst" ? 15 : 90));
     }
     rainBurst = b;
   }
@@ -391,28 +673,38 @@
   function draw() {
     if (!suite) return;
     document.body.classList.toggle("still", suite.anim === "none");
-    ["glass", "neon", "comic", "minimal"].forEach((t) => document.body.classList.toggle("t-" + t, suite.theme === t));
-    if (PATH === "/goals") { fit(460, 260); goals(); }
+    ["glass", "neon", "comic", "minimal", "pastel", "y2k", "pixel", "edge", "sticker"].forEach((t) => document.body.classList.toggle("t-" + t, suite.theme === t));
+    // (a palette, or your own colours, over your accent)
+    if (suite.colors && suite.colors.c1) { document.body.style.setProperty("--c1", suite.colors.c1); document.body.style.setProperty("--c2", suite.colors.c2); }
+    else if (accent) { document.body.style.setProperty("--c1", accent[0]); document.body.style.setProperty("--c2", accent[1]); }
+    const gif = gifNow();
+    ["top", "left", "right", "corner"].forEach((p) => document.body.classList.toggle("gp-" + p, (suite.gifPlace || "top") === p));
+    document.body.style.setProperty("--gif", gif ? 'url("' + String(gif).replace(/["\\]/g, "") + '")' : "none");
+    document.body.style.setProperty("--gs", { small: "5rem", medium: "7.5rem", large: "10rem" }[suite.gifSize] || "7.5rem");
+    if (PATH === "/goals") { const sh = ["liquid", "jar", "hourglass"].includes(suite.goals.style); fit(sh ? 620 : 460, sh ? 300 : 260); goals(); }
     else if (PATH === "/timer") { fit(360, 140); timer(); }
     else if (PATH === "/latest-follow") { fit(420, 90); latest("follow"); }
     else if (PATH === "/latest-sub") { fit(420, 90); latest("sub"); }
     else if (PATH === "/raid") { fit(560, 420); raid(); }
-    else if (PATH === "/hype") { fit(520, 110); hype(); }
+    else if (PATH === "/hype") { fit(520, suite.hype && suite.hype.train ? 140 : 110); hype(); }
     else if (PATH === "/voteskip") { fit(520, 130); voteskip(); }
     else if (PATH === "/wheel") { fit(520, 560); wheel(); }
     else if (PATH === "/leaderboard") { fit(420, 380); leaderboard(); }
     else if (PATH === "/tune") { fit(520, 180); tune(); }
     else if (PATH === "/emotes") emoterain();
+    // (the GIF on the widget shown now)
+    const on = [...$("stage").children].filter((e) => !e.classList.contains("out") && !e.classList.contains("rain")).pop();
+    if (on) on.classList.toggle("gifme", !!gif);
   }
   addEventListener("resize", draw);
 
-  let sig = "";
+  let sig = "", accent = null;
   async function poll() {
     try {
       const s = await (await fetch("/now.json" + (PREVIEW ? "?preview=1" : ""), { cache: "no-store" })).json();
       // (in your accent colours, as the Stream Widget is)
-      if (s.accent) document.body.style.setProperty("--c1", s.accent);
-      if (s.accent2) document.body.style.setProperty("--c2", s.accent2);
+      if (s.accent) accent = [s.accent, s.accent2 || s.accent];
+      if (accent && !(s.suite && s.suite.colors)) { document.body.style.setProperty("--c1", accent[0]); document.body.style.setProperty("--c2", accent[1]); }
       const next = JSON.stringify(s.suite || null);
       if (next !== sig) { sig = next; suite = s.suite || null; draw(); }
     } catch (e) {}

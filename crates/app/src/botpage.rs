@@ -67,10 +67,55 @@ fn theme_of(cur: &Map<String, Value>) -> String { if s(cur, "suiteTheme").is_emp
 
 /// Its choice, on each widget's sheet (one setting, shared)
 fn theme_field(cur: &Map<String, Value>) -> Field {
-    f("chips", "suiteTheme", "Theme", "For all of the Suite's widgets.", &theme_of(cur), "dark=Dark|glass=Glass|neon=Neon|comic=Comic|minimal=Minimal")
+    f("chips", "suiteTheme", "Theme", "For all of the Suite's widgets. Sticker is made for a GIF on top.", &theme_of(cur), "dark=Dark|glass=Glass|neon=Neon|comic=Comic|minimal=Minimal|pastel=Pastel|y2k=Y2K|pixel=Pixel|edge=Edge Light|sticker=Sticker")
 }
 
+/// A list's items, as kept ("a | b | c"); an empty one kept, so a row just added shows
+pub fn list_items(v: &str) -> Vec<String> {
+    if v.trim().is_empty() { return Vec::new(); }
+    v.split('|').map(|x| x.trim().to_string()).collect()
+}
+
+/// The widgets' colours, as hex: a palette's, your own, or none (your accent)
+pub fn suite_colours(cur: &Map<String, Value>) -> Option<(String, String)> {
+    let hex = |k: &str, d: &str| { let v = s(cur, k).trim().to_string(); if v.len() == 7 && v.starts_with('#') && v[1..].chars().all(|c| c.is_ascii_hexdigit()) { v } else { d.to_string() } };
+    let (a, b) = match s(cur, "suiteColors") {
+        "sunset" => ("#ff8a5c", "#ff4f8b"), "ocean" => ("#3ec7ff", "#5a6bff"), "candy" => ("#ff8fd8", "#b48eff"), "mint" => ("#5ef2b8", "#3ab0ff"),
+        "fire" => ("#ffb03a", "#ff3d3d"), "gold" => ("#ffd76e", "#ff9f43"), "mono" => ("#f2f2f2", "#9a9aa6"),
+        "custom" => return Some((hex("suiteC1", "#8e9bff"), hex("suiteC2", "#ff7ac8"))),
+        _ => return None,
+    };
+    Some((a.into(), b.into()))
+}
+
+/// A Suite widget's sheet, with its look's choices after its theme: the colours, and a GIF with it
 pub fn sheet(id: &str, cur: &Map<String, Value>) -> (String, Vec<Field>) {
+    let (title, mut v) = sheet_of(id, cur);
+    let gif = match id { "goals" => "gifGoals", "timer" => "gifTimer", "latest" => "gifLatest", "raid" => "gifRaid", "hype" => "gifHype", "voteskip" => "gifVoteskip", "wheel" => "gifWheel", "leaderboard" => "gifLeaderboard", "tune" => "gifTune", _ => "" };
+    if let Some(at) = v.iter().position(|x| x.key == "suiteTheme") {
+        let pal = if s(cur, "suiteColors").is_empty() { "accent" } else { s(cur, "suiteColors") };
+        let mut more = vec![f("chips", "suiteColors", "Colours", "For all of the Suite's widgets. Yours follows the app's accent (or the album art's).", pal, "accent=Yours|sunset=Sunset|ocean=Ocean|candy=Candy|mint=Mint|fire=Fire|gold=Gold|mono=Mono|custom=Your Own")];
+        if pal == "custom" {
+            more.push(f("text", "suiteC1", "First colour", "As hex, like #8e9bff.", s(cur, "suiteC1"), "#8e9bff"));
+            more.push(f("text", "suiteC2", "Second colour", "", s(cur, "suiteC2"), "#ff7ac8"));
+        }
+        if !gif.is_empty() {
+            more.push(f("text", gif, "A GIF with it", "A GIF's address (from GIPHY or Tenor: right-click the GIF, Copy Image Address), shown with this widget. Leave it empty for none.", s(cur, gif), "https://…/your.gif"));
+            if !s(cur, gif).trim().is_empty() {
+                more.push(f("chips", "gifPlace", "Where it goes", "", if s(cur, "gifPlace").is_empty() { "top" } else { s(cur, "gifPlace") }, "top=On Top|left=Left|right=Right|corner=In the Corner"));
+                more.push(f("chips", "gifSize", "Its size", "", if s(cur, "gifSize").is_empty() { "medium" } else { s(cur, "gifSize") }, "small=Small|medium=Medium|large=Large"));
+            }
+        }
+        v.splice(at + 1..at + 1, more);
+    }
+    // (the preview: the colours as hex in its note, and whether there's a GIF)
+    let col = suite_colours(cur).map(|(a, b)| format!("{a},{b}")).unwrap_or_default();
+    let has_gif = !gif.is_empty() && !s(cur, gif).trim().is_empty();
+    for x in v.iter_mut().filter(|x| x.kind == "suiteprev") { x.note = col.clone(); x.n = if has_gif { 1 } else { 0 }; }
+    (title, v)
+}
+
+fn sheet_of(id: &str, cur: &Map<String, Value>) -> (String, Vec<Field>) {
     let step = |k: i32, label: &str, value: &str, url: &str, tip: &str| { let mut x = f("step", "", label, tip, value, url); x.n = k; x };
     let account = |key: &str, label: &str, who: &str, bot: bool, plat: &str| f("account", key, label, if bot { "bot" } else { "channel" }, who, plat);
     match id {
@@ -137,6 +182,25 @@ pub fn sheet(id: &str, cur: &Map<String, Value>) -> (String, Vec<Field>) {
             step(2, "Copy your Socket API Token and paste it below.", "", "", ""),
             f("password", "streamlabsToken", "Socket API Token", "Donations then show as alerts, and can start your actions. Leave it empty to turn this off.", s(cur, "streamlabsToken"), "Paste your Socket API Token here"),
         ]),
+        "software" => ("Streaming Software".into(), {
+            let app = if s(cur, "streamApp").is_empty() { if on(cur, "meldOn", false) { "meld" } else if on(cur, "slobsOn", false) { "slobs" } else { "obs" } } else { s(cur, "streamApp") };
+            let mut v = vec![
+                f("note", "", "The app you stream with. Your actions can switch its scenes, show or hide sources, and more, and its scene changes can start actions. You can connect more than one.", "", "", ""),
+                f("chips", "streamApp", "Your app", "", app, "obs=OBS|meld=Meld Studio|slobs=Streamlabs Desktop"),
+            ];
+            v.extend(sheet_of(app, cur).1);
+            v
+        }),
+        "tips" => ("Tips and Donations".into(), {
+            let mut v = vec![
+                f("note", "", "Tips and donations from Streamlabs or StreamElements show as alerts, and can start your actions. Set up the one you use (or both).", "", "", ""),
+                f("head", "", "Streamlabs", "", "", ""),
+            ];
+            v.extend(sheet_of("streamlabs", cur).1);
+            v.push(f("head", "", "StreamElements", "", "", ""));
+            v.extend(sheet_of("streamelements", cur).1);
+            v
+        }),
         "streamelements" => ("StreamElements".into(), vec![
             step(1, "Open your StreamElements channels page and click Show Secrets.", "", "https://streamelements.com/dashboard/account/channels", "Open StreamElements' channels page"),
             step(2, "Copy your JWT Token and paste it below.", "", "", ""),
@@ -163,11 +227,24 @@ pub fn sheet(id: &str, cur: &Map<String, Value>) -> (String, Vec<Field>) {
             let style = if s(cur, "goalStyle").is_empty() { "bars" } else { s(cur, "goalStyle") };
             let mut v = vec![
                 f("suiteprev", "", style, "", "goals", &theme_of(cur)),
-                f("chips2", "goalStyle", "Look", "", style, "bars=Bars|rings=Rings"),
-                theme_field(cur),
-                f("reset", "goalReset", "Start again", "", if s(cur, "goalReset").is_empty() { "stream" } else { s(cur, "goalReset") }, ""),
-                addr("/goals", "About 920 × 520. Counts follows, subs, bits and donations as they come in."),
+                f("chips", "goalStyle", "Look", "Liquid fills a shape. Jar drops sweets in, a few for each step. Hourglass pours sand, and turns over when it's full to start the next round.", style, "bars=Bars|rings=Rings|liquid=Liquid|jar=Jar|hourglass=Hourglass"),
             ];
+            // (the shape, for the liquid and the jar; the drops, for the jar)
+            let shape = if s(cur, "goalShape").is_empty() { "jar" } else { s(cur, "goalShape") };
+            if style == "liquid" || style == "jar" {
+                v.push(f("chips", "goalShape", "Shape", "", shape, "jar=Jar|potion=Potion|heart=Heart|cup=Cup|star=Star|ghost=Ghost|bubble=Bubble"));
+            }
+            if style == "jar" {
+                v.push(f("chips", "goalDrops", "What drops in", "", if s(cur, "goalDrops").is_empty() { "mixed" } else { s(cur, "goalDrops") }, "mixed=A mix|heart=Hearts|star=Stars|candy=Sweets|gem=Gems|coin=Coins"));
+            }
+            if style == "liquid" {
+                v.push(f("text", "goalImage", "Your own shape", "A picture's address (a PNG with a see-through background). The liquid fills its outline. Leave it empty for the shape above.", s(cur, "goalImage"), "https://…/shape.png"));
+            }
+            v.push(f("toggle", "goalPercent", "Show a percentage", "In place of the count, like 7 / 10.", if on(cur, "goalPercent", false) { "true" } else { "false" }, ""));
+            v.push(theme_field(cur));
+            v.push(f("reset", "goalReset", "Start again", "", if s(cur, "goalReset").is_empty() { "stream" } else { s(cur, "goalReset") }, ""));
+            v.push(f("link", "", "Start again now", "Puts every goal back to 0.", "", "call:suiteTest:goalsreset"));
+            v.push(addr("/goals", "About 920 × 520. Counts follows, subs, bits and donations as they come in."));
             for (k, name, dflt) in [("Follow", "Followers", "10"), ("Sub", "Subs", "5"), ("Bits", "Bits", "1000"), ("Dono", "Donations", "50")] {
                 v.push(f("head", "", name, "", "", ""));
                 v.push(f("toggle", &format!("goal{k}On"), "Show it", "", if on(cur, &format!("goal{k}On"), true) { "true" } else { "false" }, ""));
@@ -175,6 +252,18 @@ pub fn sheet(id: &str, cur: &Map<String, Value>) -> (String, Vec<Field>) {
                 v.push(f("number", &format!("goal{k}Target"), "Its target", "", &n(cur, &format!("goal{k}Target")), dflt));
             }
             v.push(f("text", "goalCurrency", "Donation currency", "Shown before amounts, like $ or £.", s(cur, "goalCurrency"), "$"));
+            // (the Common Goal: one goal everything counts toward)
+            v.push(f("head", "", "Common goal", "", "", ""));
+            v.push(f("toggle", "goalCommonOn", "Show it", "One goal that follows, subs, bits, donations and raids all count toward, from Twitch, Kick and YouTube.", if on(cur, "goalCommonOn", false) { "true" } else { "false" }, ""));
+            if on(cur, "goalCommonOn", false) {
+                v.push(f("text", "goalCommonLabel", "Its name", "", s(cur, "goalCommonLabel"), "Community goal"));
+                v.push(f("number", "goalCommonTarget", "Its target (points)", "", &n(cur, "goalCommonTarget"), "100"));
+                v.push(f("number", "goalPtsFollow", "Points for a follow", "", &n(cur, "goalPtsFollow"), "1"));
+                v.push(f("number", "goalPtsSub", "Points for a sub", "A gift of 5 subs counts 5 times.", &n(cur, "goalPtsSub"), "5"));
+                v.push(f("number", "goalPtsBits", "Points for every 100 bits", "", &n(cur, "goalPtsBits"), "1"));
+                v.push(f("number", "goalPtsDono", "Points for every 1 donated", "", &n(cur, "goalPtsDono"), "1"));
+                v.push(f("number", "goalPtsRaid", "Points for each raider", "0 leaves raids out.", &n(cur, "goalPtsRaid"), "0"));
+            }
             v.push(f("link", "", "Try it", "Adds one of each, to see it fill.", "", "call:suiteTest:goals"));
             v
         }),
@@ -252,19 +341,39 @@ pub fn sheet(id: &str, cur: &Map<String, Value>) -> (String, Vec<Field>) {
             v
         }),
         // (the fun's: chat playing along)
-        "hype" => ("Hype Meter".into(), vec![
-            f("suiteprev", "", "", "", "hype", &theme_of(cur)),
-            theme_field(cur),
-            f("toggle", "hypeOn", "Fill it", "Chat, follows, subs, bits, donations and raids fill it. It cools slowly while things are quiet.", if on(cur, "hypeOn", true) { "true" } else { "false" }, ""),
-            f("text", "hypeLabel", "Its name", "Shown above it.", s(cur, "hypeLabel"), "Hype"),
-            f("number", "hypeLevel", "Points per level", "A follow is 10, a sub 25, 100 bits 10, a raid 1 per viewer.", &n(cur, "hypeLevel"), "100"),
-            f("number", "hypeChatPts", "Per chatter", "For each viewer who chats, at most once every 10 seconds.", &n(cur, "hypeChatPts"), "2"),
-            f("number", "hypeCool", "Cooling", "How fast it empties while quiet, in percent of a level every 5 seconds.", &n(cur, "hypeCool"), "2"),
-            f("toggle", "hypeChat", "Say each level in chat", "", if on(cur, "hypeChat", true) { "true" } else { "false" }, ""),
-            f("text", "hypeMessage", "Its message", "{level} is the level reached. Actions can run on it too: Fun > A Hype Level Reached.", s(cur, "hypeMessage"), "Hype level {level}! 🔥"),
-            addr("/hype", "About 1040 × 220."),
-            f("link", "", "Try it", "Adds a level's worth of hype.", "", "call:suiteTest:hype"),
-        ]),
+        "hype" => ("Hype Train".into(), {
+            let mode = if s(cur, "hypeMode").is_empty() { "train" } else { s(cur, "hypeMode") };
+            let train = mode == "train";
+            let mut v = vec![
+                f("suiteprev", "", mode, "", "hype", &theme_of(cur)),
+                theme_field(cur),
+                f("link", "", "Try it", if train { "Starts a test train." } else { "Adds a level's worth of hype." }, "", "call:suiteTest:hype"),
+                f("toggle", "hypeOn", "Turn it on", "", if on(cur, "hypeOn", true) { "true" } else { "false" }, ""),
+                f("chips", "hypeMode", "It works as", if train { "A hype train for every platform at once: subs, gifts, bits, Kicks, donations and Super Chats from Twitch, Kick and YouTube all keep it going. Twitch's own hype train starts it too." } else { "A meter that's always there: chat, follows, subs, bits, donations and raids fill it, and it cools slowly while things are quiet." }, mode, "train=A Hype Train|meter=An Always-On Meter"),
+            ];
+            if train {
+                v.push(f("chips", "hypeShow", "On stream", "", if s(cur, "hypeShow").is_empty() { "train" } else { s(cur, "hypeShow") }, "train=Only During a Train|always=All the Time"));
+                v.push(f("chips", "hypeStart", "A train starts with", "", if s(cur, "hypeStart").is_empty() { "any" } else { s(cur, "hypeStart") }, "any=Enough on Any Platform|twitch=Twitch's Own Only"));
+                if s(cur, "hypeStart") != "twitch" { v.push(f("number", "hypeStartPts", "Points to start one", "Within 5 minutes. A sub is 25, 100 bits or Kicks 10, each 1 donated 10.", &n(cur, "hypeStartPts"), "50")); }
+                v.push(f("number", "hypeSecs", "How long it waits", "Seconds without anything coming in before it ends. Twitch's waits 5 minutes (300).", &n(cur, "hypeSecs"), "300"));
+                v.push(f("number", "hypeLevel", "Points per level", "", &n(cur, "hypeLevel"), "100"));
+            } else {
+                v.push(f("number", "hypeLevel", "Points per level", "A follow is 10, a sub 25, 100 bits 10, a raid 1 per viewer.", &n(cur, "hypeLevel"), "100"));
+                v.push(f("number", "hypeChatPts", "Per chatter", "For each viewer who chats, at most once every 10 seconds.", &n(cur, "hypeChatPts"), "2"));
+                v.push(f("number", "hypeCool", "Cooling", "How fast it empties while quiet, in percent of a level every 5 seconds.", &n(cur, "hypeCool"), "2"));
+            }
+            v.push(f("text", "hypeLabel", "Its name", "Shown on it.", s(cur, "hypeLabel"), if train { "Hype Train" } else { "Hype" }));
+            v.push(f("head", "", "In chat", "", "", ""));
+            v.push(f("toggle", "hypeChat", "Say it in chat", if train { "When a train starts, at each level, and when it ends." } else { "At each level." }, if on(cur, "hypeChat", true) { "true" } else { "false" }, ""));
+            if on(cur, "hypeChat", true) {
+                if train { v.push(f("text", "hypeStartMessage", "When it starts", "", s(cur, "hypeStartMessage"), "🚂 A hype train's started! Subs, bits, Kicks and donations on any platform keep it going.")); }
+                v.push(f("text", "hypeMessage", "Each level", "{level} is the level reached.", s(cur, "hypeMessage"), "Hype level {level}! 🔥"));
+                if train { v.push(f("text", "hypeEndMessage", "When it ends", "{level} is the level it got to, {top} who gave the most.", s(cur, "hypeEndMessage"), "The hype train ended at level {level}. Thank you!{top}")); }
+            }
+            v.push(f("note", "", "Actions can run on these: Fun > A Hype Level Reached, A Hype Train Starting and A Hype Train Ending.", "", "", ""));
+            v.push(addr("/hype", "About 1040 × 260."));
+            v
+        }),
         "voteskip" => ("Vote Skip".into(), vec![
             f("suiteprev", "", "", "", "voteskip", &theme_of(cur)),
             theme_field(cur),
@@ -274,18 +383,30 @@ pub fn sheet(id: &str, cur: &Map<String, Value>) -> (String, Vec<Field>) {
             addr("/voteskip", "About 1040 × 260. It only shows while there are votes."),
             f("link", "", "Try it", "Two test votes, to see it.", "", "call:suiteTest:voteskip"),
         ]),
-        "wheel" => ("Spin the Wheel".into(), vec![
+        "wheel" => ("Spin the Wheel".into(), { let mut v = vec![
             f("suiteprev", "", "", "", "wheel", &theme_of(cur)),
-            f("toggle", "wheelOn", "Let chat spin it", "With its command. Actions can spin it too, with the Spin the Wheel step (from a reward, say).", if on(cur, "wheelOn", false) { "true" } else { "false" }, ""),
-            f("text", "wheelPrizes", "Its prizes", "With | between them, 2 to 16.", s(cur, "wheelPrizes"), "A shoutout | 100 points | Pick the next song | Nothing! | Hydrate"),
-            f("text", "wheelCommand", "Its command", "", s(cur, "wheelCommand"), "!spin"),
-            f("number", "wheelCost", "Points per spin", "With Points on. 0 for free.", &n(cur, "wheelCost"), "0"),
-            f("number", "wheelCooldown", "Wait between spins", "Seconds before the same viewer can spin again.", &n(cur, "wheelCooldown"), "0"),
-            f("toggle", "wheelChat", "Say what it lands on", "", if on(cur, "wheelChat", true) { "true" } else { "false" }, ""),
-            f("text", "wheelMessage", "Its message", "{user} spun it, {prize} is what it landed on. Actions can run on it: Fun > The Wheel Landing, with %message% the prize.", s(cur, "wheelMessage"), "{user} spun the wheel: {prize}!"),
-            addr("/wheel", "About 1040 × 1120."),
-            f("link", "", "Try it", "A free spin.", "", "call:suiteTest:wheel"),
-        ]),
+            theme_field(cur),
+            f("link", "", "Try it", "A free spin, to see it on the preview's widget in OBS.", "", "call:suiteTest:wheel"),
+            f("chips", "wheelColors", "Its colours", "", if s(cur, "wheelColors").is_empty() { "theme" } else { s(cur, "wheelColors") }, "theme=Your Colours|alternate=Two Colours|rainbow=Rainbow|pastel=Pastel"),
+            f("chips", "wheelSecs", "How long it spins", "", if s(cur, "wheelSecs").is_empty() { "6" } else { s(cur, "wheelSecs") }, "3=3 s|6=6 s|9=9 s|12=12 s"),
+            f("toggle", "wheelHide", "Only show it while it spins", "Hidden the rest of the time, and for a few seconds after it lands.", if on(cur, "wheelHide", false) { "true" } else { "false" }, ""),
+            f("head", "", "Prizes", "", "", ""),
+            f("list", "wheelPrizes", "Prizes", "2 to 16. Add x2 or x3 to the end of one to make it twice or three times as likely, like Nothing! x3.", s(cur, "wheelPrizes"), "A shoutout | 100 points | Pick the next song | Nothing! | Hydrate"),
+            f("head", "", "Who can spin", "", "", ""),
+            f("toggle", "wheelOn", "Chat can spin it", "With its command. Actions can spin it too, with the Spin the Wheel step: from a Channel Points reward, say.", if on(cur, "wheelOn", false) { "true" } else { "false" }, ""),
+        ];
+            if on(cur, "wheelOn", false) {
+                v.push(f("text", "wheelCommand", "Command", "", s(cur, "wheelCommand"), "!spin"));
+                v.push(f("number", "wheelCooldown", "Wait between spins", "Seconds before the same viewer can spin again. 0 for no wait.", &n(cur, "wheelCooldown"), "0"));
+                if on(cur, "pointsOn", false) { v.push(f("number", "wheelCost", "Points for a spin", "0 for free.", &n(cur, "wheelCost"), "0")); }
+            }
+            v.push(f("head", "", "When it lands", "", "", ""));
+            v.push(f("toggle", "wheelChat", "Say it in chat", "", if on(cur, "wheelChat", true) { "true" } else { "false" }, ""));
+            if on(cur, "wheelChat", true) { v.push(f("text", "wheelMessage", "Message", "{user} is who spun it, {prize} what it landed on.", s(cur, "wheelMessage"), "{user} spun the wheel: {prize}!")); }
+            v.push(f("note", "", "To make something happen for a prize, add an action with Fun > The Wheel Landing as its trigger. %message% is the prize.", "", "", ""));
+            v.push(addr("/wheel", "About 1040 × 1120."));
+            v
+        }),
         "leaderboard" => ("Leaderboard".into(), vec![
             f("suiteprev", "", "", "", "leaderboard", &theme_of(cur)),
             theme_field(cur),
@@ -306,12 +427,44 @@ pub fn sheet(id: &str, cur: &Map<String, Value>) -> (String, Vec<Field>) {
             addr("/tune", "About 1040 × 360."),
             f("link", "", "Try it", "A round on what's playing now.", "", "call:suiteTest:tune"),
         ]),
-        "emoterain" => ("Emote Rain".into(), vec![
-            f("suiteprev", "", "", "", "emoterain", &theme_of(cur)),
-            f("note", "", "Emotes from chat fall down your stream: Twitch's, Kick's, and 7TV, BetterTTV and FrankerFaceZ ones. A sub, a raid, a cheer of 100 or more, a new hype level, or the Make It Rain Emotes step pours them.", "", "", ""),
-            addr("/emotes", "Make it as big as your canvas (1920 × 1080), on top. It's see-through."),
-            f("link", "", "Try it", "A burst of the latest emotes.", "", "call:suiteTest:emoterain"),
-        ]),
+        "emoterain" => ("Emote Rain".into(), {
+            let or = |k: &str, d: &'static str| if s(cur, k).is_empty() { d.to_string() } else { s(cur, k).to_string() };
+            let (dir, from, src) = (or("rainDir", "down"), or("rainFrom", "all"), or("rainSource", "chat"));
+            let mut prev = f("suiteprev", &from, &dir, "", "emoterain", &theme_of(cur));
+            prev.key = from.clone();
+            let mut v = vec![
+                prev,
+                f("link", "", "Try it", "A burst, as it's set.", "", "call:suiteTest:emoterain"),
+                f("head", "", "What rains", "", "", ""),
+                f("chips", "rainSource", "Emotes", "Chat's are Twitch's, Kick's, 7TV's, BetterTTV's and FrankerFaceZ's, as your viewers use them.", &src, "chat=Chat's Emotes|mine=Your Own Pictures|both=Both"),
+            ];
+            if src != "chat" { v.push(f("text", "rainImages", "Your pictures", "Their addresses (PNG or GIF), with | between them. Up to 20.", s(cur, "rainImages"), "https://…/heart.png | https://…/star.gif")); }
+            if src != "mine" { v.push(f("toggle", "rainChat", "Each emote said rains", "One for each emote in a chat message. When this is off, only bursts rain.", if on(cur, "rainChat", true) { "true" } else { "false" }, "")); }
+            v.extend([
+                f("head", "", "How it rains", "", "", ""),
+                f("chips", "rainDir", "Which way", "Fountain throws them up from the spot and lets them fall. Burst throws them out all round it. Float drifts them up like bubbles.", &dir, "down=Down|up=Up|left=To the Left|right=To the Right|fountain=Fountain|burst=Burst|float=Float"),
+                f("chips", "rainFrom", "From where", "A spot, such as where your camera is, or all over.", &from, "all=All Over|bl=Bottom Left|br=Bottom Right|tl=Top Left|tr=Top Right|b=Bottom Middle|c=Middle|custom=Your Own Spot"),
+            ]);
+            if from == "custom" {
+                v.push(f("number", "rainX", "Across (%)", "0 is the left edge, 100 the right.", &n(cur, "rainX"), "85"));
+                v.push(f("number", "rainY", "Down (%)", "0 is the top, 100 the bottom.", &n(cur, "rainY"), "85"));
+            }
+            v.extend([
+                f("chips", "rainSize", "Size", "", &or("rainSize", "medium"), "small=Small|medium=Medium|large=Large"),
+                f("chips", "rainSpeed", "Speed", "", &or("rainSpeed", "normal"), "slow=Slow|normal=Normal|fast=Fast"),
+                f("chips", "rainAmount", "A burst's emotes", "", &or("rainAmount", "30"), "15=15|30=30|60=60|100=100"),
+                f("toggle", "rainSpin", "They spin", "", if on(cur, "rainSpin", true) { "true" } else { "false" }, ""),
+                f("head", "", "What pours a burst", "", "", ""),
+                f("toggle", "rainOnSub", "A sub or gift", "", if on(cur, "rainOnSub", true) { "true" } else { "false" }, ""),
+                f("toggle", "rainOnRaid", "A raid", "", if on(cur, "rainOnRaid", true) { "true" } else { "false" }, ""),
+                f("toggle", "rainOnBits", "A cheer of 100 bits or more", "", if on(cur, "rainOnBits", true) { "true" } else { "false" }, ""),
+                f("toggle", "rainOnDono", "A donation", "", if on(cur, "rainOnDono", true) { "true" } else { "false" }, ""),
+                f("toggle", "rainOnFollow", "A follow", "", if on(cur, "rainOnFollow", false) { "true" } else { "false" }, ""),
+                f("note", "", "A new hype level pours one too, and so does the Make It Rain Emotes step in your actions (from a Channel Points reward, say).", "", "", ""),
+                addr("/emotes", "Make it as big as your canvas (1920 × 1080), on top. It's see-through."),
+            ]);
+            v
+        }),
         "import" => ("Import from Another Bot".into(), vec![
             f("note", "", "Your commands, timers and actions from another bot become the Suite's actions. Nothing in the other bot changes.", "", "", ""),
             f("link", "", "From a backup file", "Streamer.bot (an export, a .sb file or its backup zip) or Mix It Up (a .miubackup or .miucommand).", "", "import:file"),
@@ -389,12 +542,30 @@ pub fn tiles(cur: &Map<String, Value>, st: &Value, running: bool) -> Vec<(&'stat
         ("twitch", "Twitch".into(), light(!tw.is_empty(), "twitch"), if tw.is_empty() { "Not signed in".into() } else if up("twitch") { tw.to_string() } else { format!("{tw}: {}", wait.to_lowercase()) }, if s(cur, "botLogin").is_empty() { "No bot account".into() } else { format!("Bot: {}", s(cur, "botLogin")) }),
         ("kick", "Kick".into(), light(on(cur, "kickOn", false) && !kk.is_empty(), "kick"), if !on(cur, "kickOn", false) { "Off".into() } else if kk.is_empty() { "Not signed in".into() } else if up("kick") { kk.to_string() } else { format!("{kk}: {}", wait.to_lowercase()) }, if s(cur, "kickBotLogin").is_empty() { "No bot account".into() } else { format!("Bot: {}", s(cur, "kickBotLogin")) }),
         ("youtube", "YouTube".into(), light(on(cur, "ytOn", false) && !s(cur, "ytChannel").is_empty(), "youtube"), if !on(cur, "ytOn", false) { "Off".into() } else if s(cur, "ytChannel").is_empty() { "Needs your channel".into() } else if up("youtube") { "Reading your live chat".into() } else { "Waiting for you to go live".into() }, "Chat, Super Chats, members".into()),
-        ("obs", "OBS".into(), light(on(cur, "obsOn", false), "obs"), if !on(cur, "obsOn", false) { "Off".into() } else if up("obs") { "Connected".into() } else { "Waiting for OBS to open".into() }, "Scenes and sources".into()),
-        ("meld", "Meld Studio".into(), light(on(cur, "meldOn", false), "meld"), if !on(cur, "meldOn", false) { "Off".into() } else if up("meld") { "Connected".into() } else { "Waiting for Meld to open".into() }, "Scenes, layers, effects".into()),
-        ("slobs", "Streamlabs Desktop".into(), light(on(cur, "slobsOn", false) && !s(cur, "slobsToken").is_empty(), "slobs"), if !on(cur, "slobsOn", false) { "Off".into() } else if s(cur, "slobsToken").is_empty() { "Needs its token".into() } else if up("slobs") { "Connected".into() } else { "Waiting for Streamlabs to open".into() }, "Scenes and sources".into()),
-        ("streamlabs", "Streamlabs".into(), light(!s(cur, "streamlabsToken").is_empty(), "streamlabs"), if s(cur, "streamlabsToken").is_empty() { "Not set up".into() } else if up("streamlabs") { "Listening".into() } else { "Not connected".into() }, "Donations".into()),
-        ("streamelements", "StreamElements".into(), light(!s(cur, "streamelementsToken").is_empty(), "streamelements"), if s(cur, "streamelementsToken").is_empty() { "Not set up".into() } else if up("streamelements") { "Listening".into() } else { "Not connected".into() }, "Tips".into()),
+        software(cur, st),
+        tips(cur, st),
     ]
+}
+
+/// Your streaming software, in one tile: OBS, Meld Studio or Streamlabs Desktop, whichever are on
+fn software(cur: &Map<String, Value>, st: &Value) -> (&'static str, String, &'static str, String, String) {
+    let up = |k: &str| st[k]["up"].as_bool().unwrap_or(false);
+    let apps = [("obs", "OBS", on(cur, "obsOn", false)), ("meld", "Meld Studio", on(cur, "meldOn", false)), ("slobs", "Streamlabs Desktop", on(cur, "slobsOn", false) && !s(cur, "slobsToken").is_empty())];
+    let set: Vec<_> = apps.iter().filter(|a| a.2).collect();
+    if set.is_empty() { return ("software", "Streaming Software".into(), "off", "Not connected".into(), "OBS, Meld Studio or Streamlabs Desktop".into()); }
+    let ok = set.iter().any(|a| up(a.0));
+    let line = set.iter().map(|a| format!("{}: {}", a.1, if up(a.0) { "connected" } else { "waiting for it to open" })).collect::<Vec<_>>().join(", ");
+    ("software", "Streaming Software".into(), if ok { "ok" } else { "warn" }, line, "Scenes, sources and more".into())
+}
+
+/// Tips and donations, in one tile: Streamlabs' and StreamElements'
+fn tips(cur: &Map<String, Value>, st: &Value) -> (&'static str, String, &'static str, String, String) {
+    let up = |k: &str| st[k]["up"].as_bool().unwrap_or(false);
+    let apps = [("streamlabs", "Streamlabs", !s(cur, "streamlabsToken").is_empty()), ("streamelements", "StreamElements", !s(cur, "streamelementsToken").is_empty())];
+    let set: Vec<_> = apps.iter().filter(|a| a.2).collect();
+    if set.is_empty() { return ("tips", "Tips and Donations".into(), "off", "Not set up".into(), "Streamlabs or StreamElements".into()); }
+    let line = set.iter().map(|a| format!("{}: {}", a.1, if up(a.0) { "listening" } else { "not connected" })).collect::<Vec<_>>().join(", ");
+    ("tips", "Tips and Donations".into(), if set.iter().all(|a| up(a.0)) { "ok" } else { "warn" }, line, "As alerts, and for your actions".into())
 }
 
 /// What it does: (id, name, note, on, has a sheet)
@@ -407,7 +578,7 @@ pub fn feats(cur: &Map<String, Value>, st: &Value) -> Vec<(&'static str, String,
             let or = |k: &str, d: &str| if s(cur, k).is_empty() { d.to_string() } else { s(cur, k).to_string() };
             format!("{}, {}, {}", or("srCommands", "!sr, !request"), or("songCommands", "!song"), or("wrongCommands", "!wrongsong"))
         }, on(cur, "requests", true), true),
-        ("alerts", "Alerts".into(), "Follows, subs, bits and raids on the Stream Widget".into(), on(cur, "alerts", true), true),
+        ("alerts", "Alerts".into(), "Follows, subs, bits and raids, on stream".into(), on(cur, "alerts", true), true),
         ("points", "Points and ranks".into(), format!("{} {name} every {} minutes", if n(cur, "pointsAmount").is_empty() { "10".into() } else { n(cur, "pointsAmount") }, if n(cur, "pointsEvery").is_empty() { "10".into() } else { n(cur, "pointsEvery") }), on(cur, "pointsOn", false), true),
         // (moderation: Auto-Ban first; the rules, for links, caps and emote spam, are Actions' A Rule Broken)
         ("moderation", "Moderation".into(), if on(cur, "abOn", false) {
@@ -530,7 +701,7 @@ mod tests {
         let cur = m(json!({ "login": "Me", "kickOn": true, "kickLogin": "", "obsOn": true }));
         let t = tiles(&cur, &json!({ "twitch": { "up": true }, "obs": { "up": false } }), true);
         let light = |id: &str| t.iter().find(|x| x.0 == id).map(|x| x.2).unwrap_or("");
-        assert_eq!((light("twitch"), light("kick"), light("obs"), light("youtube"), light("streamlabs")), ("ok", "off", "warn", "off", "off"));
+        assert_eq!((light("twitch"), light("kick"), light("software"), light("youtube"), light("tips")), ("ok", "off", "warn", "off", "off"));
         assert_eq!(t[0].3, "Me");
         assert!(method("link:kick:bot") == Some("signInKickBotCopy") && method("out:twitch:channel") == Some("signOutChannel"));
     }

@@ -121,6 +121,23 @@ pub fn bands() -> [f32; BANDS] {
 }
 
 /// The Wave's curve: the bands as CURVE points, eased between them (a smooth line, not steps)
+/// The Wave as paths, in a 1000 × 1000 box stretched over the visualiser: its line (a Catmull-Rom curve through
+/// the curve's points) and the area under it, to the foot
+pub fn wave_paths(c: &[f32; CURVE]) -> (String, String) {
+    let n = CURVE;
+    let pt = |i: usize| (i as f32 * 1000.0 / (n - 1) as f32, 1000.0 * ((1.0 - c[i].clamp(0.0, 1.0)) * 0.86 + 0.07));
+    let p = |i: isize| pt(i.clamp(0, n as isize - 1) as usize);
+    let mut line = format!("M {:.1} {:.1}", p(0).0, p(0).1);
+    for i in 0..n as isize - 1 {
+        let (p0, p1, p2, p3) = (p(i - 1), p(i), p(i + 1), p(i + 2));
+        let c1 = (p1.0 + (p2.0 - p0.0) / 6.0, p1.1 + (p2.1 - p0.1) / 6.0);
+        let c2 = (p2.0 - (p3.0 - p1.0) / 6.0, p2.1 - (p3.1 - p1.1) / 6.0);
+        line += &format!(" C {:.1} {:.1} {:.1} {:.1} {:.1} {:.1}", c1.0, c1.1, c2.0, c2.1, p2.0, p2.1);
+    }
+    let area = format!("{line} L 1000 1000 L 0 1000 Z");
+    (line, area)
+}
+
 pub fn curve(b: &[f32; BANDS]) -> [f32; CURVE] {
     let mut out = [0.0; CURVE];
     for (i, o) in out.iter_mut().enumerate() {
@@ -145,7 +162,7 @@ pub fn curve(b: &[f32; BANDS]) -> [f32; CURVE] {
 fn ring_shape(b: &[f32; BANDS], inner: f32, slot: usize) -> Vec<(String, f32)> {
     const OUT: f32 = 494.0;
     let depth = OUT - inner;
-    let n = RING_PIECES;
+    let n = RING_POINTS;
     let step = std::f32::consts::TAU / n as f32;
     // (a band's level at an angle from straight down, round to straight up: 0 the bass, 1 the highs; between
     // bands, the two either side blended, and a little of their neighbours)
@@ -190,25 +207,24 @@ fn ring_shape(b: &[f32; BANDS], inner: f32, slot: usize) -> Vec<(String, f32)> {
         e.clone()
     };
     let pt = |th: f32, r: f32| (500.0 - th.sin() * r, 500.0 + th.cos() * r);
-    let pts: Vec<(f32, f32)> = (0..n).map(|k| pt((k as f32 + 0.5) * step, inner + depth * reach[k])).collect();
+    // (each point's reach, a little of its neighbours' in it: no lone spike, so the edge stays smooth)
+    let soft: Vec<f32> = (0..n).map(|k| { let at = |d: isize| reach[(k as isize + d).rem_euclid(n as isize) as usize]; 0.6 * at(0) + 0.2 * (at(-1) + at(1)) }).collect();
+    let pts: Vec<(f32, f32)> = (0..n).map(|k| pt((k as f32 + 0.5) * step, inner + depth * soft[k])).collect();
     let p = |k: isize| pts[k.rem_euclid(n as isize) as usize];
-    (0..n)
-        .map(|k| {
-            let k = k as isize;
-            let (p0, p1, p2, p3) = (p(k - 1), p(k), p(k + 1), p(k + 2));
-            // (the curve from this point to the next, its handles from the points either side: Catmull-Rom, as Bézier)
-            let c1 = (p1.0 + (p2.0 - p0.0) / 6.0, p1.1 + (p2.1 - p0.1) / 6.0);
-            let c2 = (p2.0 - (p3.0 - p1.0) / 6.0, p2.1 - (p3.1 - p1.1) / 6.0);
-            // (and a little on, into the next slice, at its edge: drawn over by it, so no seam and no notch)
-            let th1 = (k as f32 + 0.5) * step;
-            let th2 = (k as f32 + 1.5) * step + step * 0.12;
-            let on = pt(th2, inner + depth * reach[((k + 1) as usize) % n]);
-            // (a band, from the circle the cover sits in: hollow, so it's a halo with no cover too)
-            let (i1, i2) = (pt(th1, inner - 2.0), pt(th2, inner - 2.0));
-            let d = format!("M {:.1} {:.1} L {:.1} {:.1} C {:.1} {:.1} {:.1} {:.1} {:.1} {:.1} L {:.1} {:.1} L {:.1} {:.1} Z", i1.0, i1.1, p1.0, p1.1, c1.0, c1.1, c2.0, c2.1, p2.0, p2.1, on.0, on.1, i2.0, i2.1);
-            (d, raw[k as usize].1)
-        })
-        .collect()
+    // (one outline all the way round, each point to the next as a Catmull-Rom curve (as Bézier), so there are no
+    // seams or notches between slices to step the edge; its colour is the page's gradient, the bass's at the foot)
+    let mut d = format!("M {:.2} {:.2}", p(0).0, p(0).1);
+    for k in 0..n as isize {
+        let (p0, p1, p2, p3) = (p(k - 1), p(k), p(k + 1), p(k + 2));
+        let c1 = (p1.0 + (p2.0 - p0.0) / 6.0, p1.1 + (p2.1 - p0.1) / 6.0);
+        let c2 = (p2.0 - (p3.0 - p1.0) / 6.0, p2.1 - (p3.1 - p1.1) / 6.0);
+        d += &format!(" C {:.2} {:.2} {:.2} {:.2} {:.2} {:.2}", c1.0, c1.1, c2.0, c2.1, p2.0, p2.1);
+    }
+    // (and the circle the cover sits in, cut out of it: hollow, so it's a halo with no cover too)
+    let r = inner - 2.0;
+    d += &format!(" Z M {:.2} 500 A {r:.2} {r:.2} 0 1 0 {:.2} 500 A {r:.2} {r:.2} 0 1 0 {:.2} 500 Z", 500.0 - r, 500.0 + r, 500.0 - r);
+    let _ = raw;
+    vec![(d, 0.5)]
 }
 
 /// (the Ring's: its loudest lately, and each slice's reach as it's eased)
@@ -232,8 +248,10 @@ pub fn ring_small(b: &[f32; BANDS]) -> Vec<(String, f32)> {
 /// The Ring's cover: this much of the box's width, in its middle (the spikes round it the rest)
 pub const RING_COVER: f32 = 0.46;
 
-/// The Ring's spikes, each its own slice and step of the gradient (half each way round: a band each)
-pub const RING_PIECES: usize = 64;
+/// The Ring's points round it (half each way round: the bands spread over them)
+pub const RING_POINTS: usize = 96;
+/// The Ring's paths: one outline, the cover's circle cut out of it
+pub const RING_PIECES: usize = 1;
 
 #[cfg(test)]
 mod tests {

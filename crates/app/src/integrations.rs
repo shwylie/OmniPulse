@@ -228,6 +228,7 @@ pub fn alerts_cfg(prefs: &Value) -> Value {
         "anim": prefs["alertAnim"].as_str().unwrap_or("slide"),
         "transition": prefs["alertTrans"].as_str().unwrap_or("seamless"),
         "theme": prefs["alertTheme"].as_str().unwrap_or("widget"),
+        "gif": prefs["alertGif"].as_str().map(str::trim).filter(|g| g.starts_with("http")).unwrap_or(""),
         "collage": { "size": prefs["alertCSize"].as_str().unwrap_or("medium"), "dir": prefs["alertCDir"].as_str().unwrap_or("diag"), "angle": prefs["alertCAngle"].as_f64().unwrap_or(0.0) },
         "accent": if set(prefs, "alertOwnCol") { prefs["alertCol1"].as_str().unwrap_or("#8e9bff") } else { "" },
         "accent2": if set(prefs, "alertOwnCol") { prefs["alertCol2"].as_str().or(prefs["alertCol1"].as_str()).unwrap_or("#b38cff") } else { "" },
@@ -355,7 +356,8 @@ pub fn widget_state(prefs: &Value, t: Option<&Track>, by: &str, pos_ms: u64, dur
     if let Some(o) = look.as_object_mut() {
         o.insert("alerts_cfg".into(), alerts_cfg(prefs));
         // alerts in a Browser source of their own (/alerts), not over Now Playing
-        o.insert("alert_split".into(), json!(set(prefs, "alertSplit")));
+        // (on their own (their own source, /alerts) unless they're set to show in the widget)
+        o.insert("alert_split".into(), json!(!set(prefs, "alertInWidget")));
         // each other output's own look (/2, /3...): its settings over the first's
         let outs: serde_json::Map<String, Value> = outputs_of(prefs, "widget").iter().enumerate().map(|(i, over)| {
             let p = merged(prefs, over);

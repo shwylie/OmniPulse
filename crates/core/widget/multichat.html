@@ -13,7 +13,7 @@
   html, body { margin: 0; height: 100%; background: transparent; overflow: hidden; font: 600 var(--fs) / 1.35 "Segoe UI", system-ui, sans-serif; color: #fff; }
   #list { position: absolute; inset: 0; display: flex; flex-direction: column; justify-content: flex-end; gap: var(--gap); padding: 12px; }
   body.top #list { justify-content: flex-start; flex-direction: column-reverse; }
-  .m { display: flex; align-items: flex-start; gap: 8px; padding: 6px 10px; border-radius: 12px; background: rgba(10, 12, 18, var(--bg)); animation: in 0.35s ease-out; max-width: 100%; overflow-wrap: anywhere; }
+  .m { flex-shrink: 0; display: flex; align-items: flex-start; gap: 8px; padding: 6px 10px; border-radius: 12px; background: rgba(10, 12, 18, var(--bg)); animation: in 0.35s ease-out; max-width: 100%; overflow-wrap: anywhere; }
   body.shadow .m { text-shadow: 0 2px 6px rgba(0, 0, 0, 0.85), 0 0 2px rgba(0, 0, 0, 0.9); }
   /* its themes (Settings > Streaming > Suite > Widgets > Multichat Overlay, or the gear): Plain uses the
      Background as set; the rest bring their own */
@@ -32,13 +32,62 @@
   body.t-minimal .m { background: transparent; padding: 2px 4px; }
   body.t-minimal .m { text-shadow: 0 2px 6px rgba(0, 0, 0, 0.9), 0 0 2px rgba(0, 0, 0, 0.95); }
   body.t-minimal .who { font-size: 0.85em; }
+  /* Edge Light: smoked glass, a stroke of light running round its edge in the platform's colour */
+  @property --edge { syntax: "<angle>"; initial-value: 0deg; inherits: false; }
+  body.t-edge .m { position: relative; background: rgba(12, 10, 24, 0.66); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 14px; backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); }
+  body.t-edge .m::before { content: ""; position: absolute; inset: -1px; border-radius: inherit; padding: 2px; pointer-events: none;
+    background: conic-gradient(from var(--edge), transparent 0 62%, var(--pc) 80%, #fff 86%, var(--pc) 90%, transparent 96%);
+    -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor; mask-composite: exclude; animation: edge 3.6s linear infinite; }
+  @keyframes edge { to { --edge: 360deg; } }
+  /* Y2K Window: a little old-computer window, the name in its title bar */
+  body.t-y2k .m { position: relative; flex-direction: column; gap: 0; padding: 0; background: #fdf6ff; color: #2b1b40; border: 2px solid #2b1b40; border-radius: 6px; box-shadow: 4px 4px 0 #2b1b40; text-shadow: none !important; overflow: hidden; }
+  body.t-y2k .m > div { width: 100%; }
+  body.t-y2k .m .who { display: flex; align-items: center; gap: 0.3em; padding: 0.12em 0.5em; background: linear-gradient(90deg, #ff9ad5, #b9a4ff 55%, #9ad0ff); border-bottom: 2px solid #2b1b40; font-size: 0.8em; color: #2b1b40 !important; }
+  body.t-y2k .m .who::after { content: "\2013  \25A1  \00D7"; margin-left: auto; font-weight: 900; letter-spacing: 0.25em; }
+  body.t-y2k .m .text { display: block; padding: 0.25em 0.55em 0.35em; color: #2b1b40; }
+  body.t-y2k .pf { position: absolute; left: 0.45em; top: 0.18em; width: 0.8em; height: 0.8em; fill: #2b1b40; }
+  body.t-y2k.marks .m .who { padding-left: 1.6em; }
+  body.t-y2k .badge { margin: 0; vertical-align: 0; }
+  /* Pastel: soft bubbles in each chatter's colour, the name a pill */
+  body.t-pastel .m { background: color-mix(in srgb, var(--uc) 16%, #fffafc); color: #3a2a4a; border-radius: 18px; box-shadow: 0 3px 10px rgba(40, 20, 60, 0.25); text-shadow: none !important; }
+  body.t-pastel .who { display: inline-block; padding: 0 0.5em; border-radius: 999px; background: color-mix(in srgb, var(--uc) 55%, #fff); color: #2a1a3a !important; font-size: 0.85em; margin-right: 0.3em; }
+  body.t-pastel .text { color: #3a2a4a; }
+  body.t-pastel .pf { fill: color-mix(in srgb, var(--pc) 70%, #3a2a4a); }
+  /* Pixel: an old game's text box, square corners and a stepped edge */
+  body.t-pixel, body.t-pixel .who { font-family: "Cascadia Mono", Consolas, "Courier New", monospace; }
+  body.t-pixel .m { background: #1b1030; border-radius: 0; margin: 4px; padding: 6px 10px; box-shadow: 0 -4px 0 0 #f4f0ff, 0 4px 0 0 #f4f0ff, -4px 0 0 0 #f4f0ff, 4px 0 0 0 #f4f0ff, 0 0 0 4px var(--pc) inset; }
+  body.t-pixel .text { color: #f4f0ff; }
+  /* the name above the message, not beside it (and Cards' and Y2K's always) */
+  body.above .m > div > .who, body.t-cards .m > div > .who { display: block; }
+  body.above.t-pastel .m > div > .who { display: inline-block; margin-bottom: 0.2em; }
+  /* how a message comes in */
+  body.a-slide .m { animation-name: slide; }
+  body.a-pop .m { animation-name: pop; animation-timing-function: cubic-bezier(0.2, 0.9, 0.3, 1.4); }
+  body.a-fade .m { animation-name: fade; }
+  @keyframes slide { from { opacity: 0; transform: translateX(-40px); } }
+  @keyframes pop { from { opacity: 0; transform: scale(0.6); } }
+  @keyframes fade { from { opacity: 0; } }
+  /* events (a follow, a sub, a raid...) in with chat, as their own cards */
+  .m.ev { --pc: var(--ec); align-items: center; }
+  .m.ev .ic { flex: none; width: 1.5em; height: 1.5em; border-radius: 50%; background: var(--ec); color: #111; display: flex; align-items: center; justify-content: center; font-size: 0.8em; font-weight: 900; }
+  .m.ev .text { font-weight: 700; }
+  .m.ev .text b { color: var(--ec); }
+  body.t-plain .m.ev, body.t-minimal .m.ev { background: color-mix(in srgb, var(--ec) 22%, rgba(10, 12, 18, 0.7)); }
+  body.t-comic .m.ev .text b, body.t-y2k .m.ev .text b, body.t-pastel .m.ev .text b { color: #111; }
+  body.t-y2k .m.ev { flex-direction: row; padding: 0.3em 0.5em; }
+  /* pronouns, after the name */
+  .pr { display: inline-block; font-size: 0.6em; font-weight: 700; padding: 0 0.35em; margin-right: 0.3em; border-radius: 0.3em; background: rgba(255, 255, 255, 0.18); vertical-align: 0.2em; }
+  body.t-comic .pr, body.t-pastel .pr, body.t-y2k .pr { background: rgba(0, 0, 0, 0.12); }
+  /* a first-time chatter: a little "new" tag, and a glow, so you notice and say hello */
+  .new { display: inline-block; font-size: 0.6em; font-weight: 900; padding: 0 0.4em; margin-right: 0.3em; border-radius: 0.3em; background: #ffd36e; color: #111; vertical-align: 0.2em; letter-spacing: 0.04em; }
+  .m.first { box-shadow: 0 0 0 2px #ffd36e, 0 0 14px rgba(255, 211, 110, 0.55); }
   .m.out { animation: out 0.6s ease-in forwards; }
   @keyframes in { from { opacity: 0; transform: translateY(8px); } }
   @keyframes out { to { opacity: 0; transform: translateY(-4px); } }
   .pf { flex: none; width: 1.1em; height: 1.1em; margin-top: 0.12em; fill: var(--pc); }
   .who { font-weight: 800; white-space: nowrap; }
   .badge { display: inline-block; font-size: 0.62em; font-weight: 800; padding: 0 0.3em; margin-right: 0.25em; border-radius: 0.25em; vertical-align: 0.15em; color: #111; }
-  .badge.b { background: #ff4f4f; } .badge.m { background: #3ccd6c; } .badge.v { background: #e05ce0; } .badge.s { background: #7aa2ff; }
+  .badge.b-b { background: #ff4f4f; } .badge.b-m { background: #3ccd6c; } .badge.b-v { background: #e05ce0; } .badge.b-s { background: #7aa2ff; }
   .text { font-weight: 500; }
   .text img { height: 1.5em; vertical-align: middle; margin: -0.25em 0; }
 
@@ -63,8 +112,13 @@
   <label>The bot's own <input type="checkbox" id="oBot" checked></label>
   <label>Badges <input type="checkbox" id="oBadges" checked></label>
   <label>Platform marks <input type="checkbox" id="oMarks" checked></label>
+  <label>Pronouns (Twitch) <input type="checkbox" id="oPronouns"></label>
+  <label>Follows, subs and raids <input type="checkbox" id="oEvents"></label>
+  <label>First-time chatters stand out <input type="checkbox" id="oFirst" checked></label>
   <h2>Look</h2>
-  <label>Theme <select id="oStyle"><option value="plain">Plain</option><option value="bubbles">Bubbles</option><option value="glass">Glass</option><option value="neon">Neon</option><option value="cards">Cards</option><option value="terminal">Terminal</option><option value="comic">Comic</option><option value="minimal">Minimal</option></select></label>
+  <label>Theme <select id="oStyle"><option value="plain">Plain</option><option value="bubbles">Bubbles</option><option value="glass">Glass</option><option value="neon">Neon</option><option value="cards">Cards</option><option value="terminal">Terminal</option><option value="comic">Comic</option><option value="minimal">Minimal</option><option value="edge">Edge Light</option><option value="y2k">Y2K Window</option><option value="pastel">Pastel</option><option value="pixel">Pixel</option></select></label>
+  <label>Name <select id="oName"><option value="beside">Beside the message</option><option value="above">Above it</option></select></label>
+  <label>Coming in <select id="oAnim"><option value="rise">Rise</option><option value="slide">Slide</option><option value="pop">Pop</option><option value="fade">Fade</option></select></label>
   <label>Text size <input type="number" id="oSize" min="10" max="60" step="1"></label>
   <label>Background <select id="oBg"><option value="0">None</option><option value="0.35">Faint</option><option value="0.6">Half</option><option value="0.85">Solid</option></select></label>
   <label>Shadow <input type="checkbox" id="oShadow" checked></label>
@@ -77,7 +131,7 @@
 <script>
   "use strict";
   const $ = (id) => document.getElementById(id);
-  const DEFAULTS = { from: "all", cmds: false, bot: true, badges: true, marks: true, style: "plain", size: 20, bg: "0", shadow: true, dir: "bottom", fade: 0, max: 30, bttv: true, ffz: true, stv: true };
+  const DEFAULTS = { from: "all", cmds: false, bot: true, badges: true, marks: true, style: "plain", size: 20, bg: "0", shadow: true, dir: "bottom", fade: 0, max: 30, bttv: true, ffz: true, stv: true, name: "beside", anim: "rise", events: false, pronouns: false, first: true };
   // (/chat/2, /chat/3...: another output, its settings kept apart from the first's)
   const OUT = (location.pathname.match(/^\/chat\/(\d+)/) || [])[1];
   const KEY = "omnipulse.multichat" + (OUT ? "." + OUT : "");
@@ -90,11 +144,16 @@
   new URLSearchParams(location.search).forEach((v, k) => { if (k in DEFAULTS) fromUrl[k] = typeof DEFAULTS[k] === "boolean" ? v === "1" || v === "true" : typeof DEFAULTS[k] === "number" ? Number(v) : v; });
   const opt = Object.assign({}, DEFAULTS, store.get(), fromUrl);
 
+  const THEMES = ["plain", "bubbles", "glass", "neon", "cards", "terminal", "comic", "minimal", "edge", "y2k", "pastel", "pixel"];
   function apply() {
     document.documentElement.style.setProperty("--fs", Math.max(10, Math.min(60, Number(opt.size) || 20)) + "px");
     document.documentElement.style.setProperty("--bg", opt.bg);
     document.body.classList.toggle("shadow", !!opt.shadow);
-    ["plain", "bubbles", "glass", "neon", "cards", "terminal", "comic", "minimal"].forEach((t) => document.body.classList.toggle("t-" + t, (opt.style || "plain") === t));
+    THEMES.forEach((t) => document.body.classList.toggle("t-" + t, (opt.style || "plain") === t));
+    document.body.classList.toggle("above", opt.name === "above");
+    document.body.classList.toggle("marks", !!opt.marks);
+    ["slide", "pop", "fade"].forEach((a) => document.body.classList.toggle("a-" + a, opt.anim === a));
+    $("oName").value = opt.name; $("oAnim").value = opt.anim; $("oEvents").checked = opt.events; $("oPronouns").checked = opt.pronouns; $("oFirst").checked = opt.first;
     document.body.classList.toggle("top", opt.dir === "top");
     $("oFrom").value = opt.from; $("oCmds").checked = opt.cmds; $("oBot").checked = opt.bot; $("oBadges").checked = opt.badges; $("oMarks").checked = opt.marks;
     $("oStyle").value = opt.style; $("oSize").value = opt.size; $("oBg").value = opt.bg; $("oShadow").checked = opt.shadow; $("oDir").value = opt.dir;
@@ -126,6 +185,7 @@
   pullSettings();
   bind("oFrom", "from", (t) => t.value); bind("oCmds", "cmds", (t) => t.checked); bind("oBot", "bot", (t) => t.checked); bind("oBadges", "badges", (t) => t.checked); bind("oMarks", "marks", (t) => t.checked);
   bind("oStyle", "style", (t) => t.value); bind("oSize", "size", (t) => Number(t.value) || 20); bind("oBg", "bg", (t) => t.value); bind("oShadow", "shadow", (t) => t.checked); bind("oDir", "dir", (t) => t.value);
+  bind("oName", "name", (t) => t.value); bind("oAnim", "anim", (t) => t.value); bind("oEvents", "events", (t) => t.checked); bind("oPronouns", "pronouns", (t) => t.checked); bind("oFirst", "first", (t) => t.checked);
   bind("oFade", "fade", (t) => Math.max(0, Number(t.value) || 0)); bind("oMax", "max", (t) => Math.max(1, Number(t.value) || 30));
   $("gear").onclick = () => $("panel").classList.toggle("open");
 
@@ -211,15 +271,83 @@
     r.style.setProperty("--pc", pc);
     if (opt.marks) { const NS = "http://www.w3.org/2000/svg"; const s = document.createElementNS(NS, "svg"); s.setAttribute("viewBox", "0 0 24 24"); s.classList.add("pf"); const p = document.createElementNS(NS, "path"); p.setAttribute("d", MARK[m.platform === "kick" ? "kick" : m.platform === "youtube" ? "youtube" : "twitch"]); s.append(p); r.append(s); }
     const body = document.createElement("div");
-    if (opt.badges) for (const [k, cls, l] of BADGES) if ((m.badges || []).includes(k)) { const b = document.createElement("span"); b.className = "badge " + cls; b.textContent = l; body.append(b); }
-    const who = document.createElement("span"); who.className = "who"; who.textContent = (m.user || m.login || "") + (m.me ? " " : ": "); who.style.color = colourOf(m);
+    if (opt.badges) for (const [k, cls, l] of BADGES) if ((m.badges || []).includes(k)) { const b = document.createElement("span"); b.className = "badge b-" + cls; b.textContent = l; body.append(b); }
+    // (no colon when the name's on a line of its own)
+    const own = opt.name === "above" || ["cards", "y2k", "pastel"].includes(opt.style);
+    const who = document.createElement("span"); who.className = "who"; who.textContent = (m.user || m.login || "") + (m.me || own ? " " : ": "); who.style.color = colourOf(m);
+    r.style.setProperty("--uc", colourOf(m));
+    if (opt.pronouns && m.platform !== "kick" && m.platform !== "youtube" && m.login) pronounsOf(m.login).then((p) => { if (!p) return; const s = document.createElement("span"); s.className = "pr"; s.textContent = p; who.after(s); });
+    if (opt.first && m.first) { r.classList.add("first"); const nw = document.createElement("span"); nw.className = "new"; nw.textContent = "NEW"; body.append(nw); }
     const t = document.createElement("span"); t.className = "text"; t.append(...textNodes(m));
     body.append(who, t);
+    // (Y2K: the badges in the window's title bar, with the name)
+    if (opt.style === "y2k") [...body.querySelectorAll(".badge")].reverse().forEach((b) => who.prepend(b));
     r.append(body);
     list.append(r);
     rows.set(m.n, r);
     while (list.children.length > Math.max(1, Number(opt.max) || 30)) { const x = list.firstChild; for (const [n, v] of rows) if (v === x) rows.delete(n); x.remove(); }
     if (Number(opt.fade) > 0) setTimeout(() => gone(m.n), Number(opt.fade) * 1000);
+  }
+  // (pronouns, as viewers set them at pronouns.alejo.io: the list once, each chatter's once)
+  let pronounList = null;
+  const pronounsSeen = new Map();
+  async function pronounsOf(login) {
+    login = String(login).toLowerCase();
+    if (pronounsSeen.has(login)) return pronounsSeen.get(login);
+    const p = (async () => {
+      try {
+        if (!pronounList) pronounList = await (await fetch("https://api.pronouns.alejo.io/v1/pronouns")).json();
+        const r = await fetch("https://api.pronouns.alejo.io/v1/users/" + encodeURIComponent(login));
+        if (!r.ok) return "";
+        const u = await r.json(), a = pronounList[u.pronoun_id], b = u.alt_pronoun_id && pronounList[u.alt_pronoun_id];
+        if (!a) return "";
+        return b ? a.subject + "/" + b.subject : a.singular ? a.subject : a.subject + "/" + a.object;
+      } catch (e) { return ""; }
+    })();
+    pronounsSeen.set(login, p);
+    return p;
+  }
+
+  // (events in with chat, if that's on: the Activity Feed's, in their colours)
+  const EVENTS = {
+    follow: ["\u2665", "#ff6b8a", (e) => [e.user, " followed!"]],
+    sub: ["\u2605", "#a970ff", (e) => [e.user, " subscribed!"]],
+    resub: ["\u2605", "#a970ff", (e) => [e.user, " resubscribed" + (e.amount ? " for " + e.amount + " months" : "") + "!"]],
+    gift: ["\u2605", "#c084fc", (e) => [e.user || "Someone", " gifted " + (e.amount || 1) + (Number(e.amount) === 1 ? " sub!" : " subs!")]],
+    bits: ["\u25C6", "#5ad1ff", (e) => [e.user || "Someone", " cheered " + e.amount + " bits!"]],
+    kicks: ["\u25C6", "#53fc18", (e) => [e.user, " sent " + e.amount + " Kicks!"]],
+    donation: ["$", "#4ad295", (e) => [e.user || "Someone", " donated " + (e.currency ? e.currency + " " : "") + e.amount + "!"]],
+    raid: ["\u2691", "#ff8f4a", (e) => [e.user, " raided with " + e.amount + " viewers!"]],
+  };
+  function addEvent(e) {
+    const k = EVENTS[e.type];
+    if (!k || (opt.from !== "all" && (e.platform || "twitch") !== opt.from)) return;
+    const r = document.createElement("div");
+    r.className = "m ev";
+    r.style.setProperty("--ec", k[1]);
+    r.style.setProperty("--uc", k[1]);
+    const ic = document.createElement("span"); ic.className = "ic"; ic.textContent = k[0];
+    const [who, what] = k[2](e);
+    const t = document.createElement("span"); t.className = "text";
+    const b = document.createElement("b"); b.textContent = who || "";
+    t.append(b, document.createTextNode(what));
+    r.append(ic, t);
+    list.append(r);
+    const n = "ev" + e.n;
+    rows.set(n, r);
+    while (list.children.length > Math.max(1, Number(opt.max) || 30)) { const x = list.firstChild; for (const [i, v] of rows) if (v === x) rows.delete(i); x.remove(); }
+    if (Number(opt.fade) > 0) setTimeout(() => gone(n), Number(opt.fade) * 1000);
+  }
+  let evLast = -1;
+  async function pollEvents() {
+    if (opt.events) {
+      try {
+        const j = await (await fetch("/dock/activity.json?after=" + Math.max(0, evLast), { cache: "no-store" })).json();
+        if (evLast < 0 || j.last < evLast) evLast = j.last || 0;
+        else { (j.items || []).forEach(addEvent); if ((j.items || []).length) evLast = Math.max(evLast, ...j.items.map((x) => x.n)); }
+      } catch (e) {}
+    }
+    setTimeout(pollEvents, 1000);
   }
   function gone(n) { const r = rows.get(n); if (!r) return; rows.delete(n); r.classList.add("out"); setTimeout(() => r.remove(), 600); }
 
@@ -239,6 +367,7 @@
   }
   apply();
   poll();
+  pollEvents();
 </script>
 </body>
 </html>

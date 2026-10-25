@@ -102,10 +102,10 @@ export struct KeyField { label: string, value: string, ok: bool }
 export struct WidgetLook { design: string, right: bool, rounded: bool, text: float, c1: color, c2: color, spin: bool, requester: bool }
 
 /// The alerts' preview: their theme and colours as they're set
-export struct AlertLook { theme: string, c1: color, c2: color, glow: bool, icon: float, transition: string }
+export struct AlertLook { theme: string, c1: color, c2: color, glow: bool, icon: float, transition: string, anim: string, in-widget: bool }
 
 /// The Multichat Overlay's preview: its look as it's set
-export struct ChatLook { style: string, size: float, bg: float, shadow: bool, top: bool, badges: bool, marks: bool, from: string }
+export struct ChatLook { style: string, size: float, bg: float, shadow: bool, top: bool, badges: bool, marks: bool, from: string, above: bool }
 /// (a made-up message, for the preview)
 export struct ChatSample { name: string, text: string, kick: bool, colour: color, badge: string }
 
@@ -119,7 +119,7 @@ export struct BotTile { id: string, name: string, state: string, line1: string, 
 export struct BotFeat { id: string, name: string, note: string, on: bool, open: bool, changed: bool }
 export struct BotStep { id: string, title: string, note: string, state: string, optional: bool }
 export struct BotLine { who: string, heard: string, did: string, platform: string }
-export struct BotField { key: string, kind: string, label: string, note: string, value: string, extra: string, changed: bool, n: int, opts: [string], opt-ids: [string] }
+export struct BotField { key: string, kind: string, label: string, note: string, value: string, extra: string, changed: bool, n: int, opts: [string], opt-ids: [string], c1: color, c2: color }
 // (an artist you follow: whether on SoundCloud and on Spotify, for its menu)
 export struct Item { name: string, sub: string, art: image, plat: string, on-sc: bool, on-sp: bool, on-yt: bool, row: Row }
 /// A page being loaded: each platform it asks, and whether it's answered yet
@@ -1071,6 +1071,12 @@ component PlatIcon inherits Rectangle {
 /// from the middle, Peaks (Bars, each one's recent top held), Blocks (an LED meter's segments), Wave (a
 /// smooth line through them), Centre (the low end in the middle, mirrored out). Each bar glides to where it's
 /// sent (30 times a second), so it never steps.
+/// The Wave's paths, from the app (viz::wave_paths), for every visualiser showing it
+export global VizPaths {
+    in-out property <string> line;
+    in-out property <string> area;
+}
+
 component VizView inherits Rectangle {
     in property <string> style;
     in property <[float]> bands;
@@ -1121,8 +1127,29 @@ component VizView inherits Rectangle {
             }
         }
     }
-    // Wave: a smooth line through the bands, a dot each step, its glow under it
-    if root.style == "wave": Rectangle {
+    // Wave: one smooth line through the bands, the area under it faint (until the app's sent its paths: a dot
+    // each step)
+    if root.style == "wave" && VizPaths.line != "": Rectangle {
+        Path {
+            width: root.width;
+            height: root.height;
+            viewbox-width: 1000;
+            viewbox-height: 1000;
+            commands: VizPaths.area;
+            fill: @linear-gradient(180deg, Theme.accent-2.with-alpha(0.32 * root.strength) 0%, Theme.accent.with-alpha(0.04 * root.strength) 100%);
+        }
+        Path {
+            width: root.width;
+            height: root.height;
+            viewbox-width: 1000;
+            viewbox-height: 1000;
+            commands: VizPaths.line;
+            fill: transparent;
+            stroke: @linear-gradient(90deg, Theme.accent.with-alpha(root.strength) 0%, Theme.accent-2.with-alpha(root.strength) 100%);
+            stroke-width: max(2.5px, root.height / 40);
+        }
+    }
+    if root.style == "wave" && VizPaths.line == "": Rectangle {
         for v[k] in root.curve: Rectangle {
             property <length> step: root.width / max(1, root.curve.length);
             x: k * self.step;
@@ -1162,14 +1189,18 @@ component VizRing inherits Rectangle {
     // step of the gradient, as the bars are, the bass's colour at the foot and the highs' at the top)
     in property <[RingPiece]> pieces;
     in property <float> strength: 1;
+    // (one outline, the cover's circle cut out (even-odd); its gradient the bars', the bass's colour at the foot
+    // and the highs' at the top; a fine line of the same along its edge, to keep the edge clean)
     for p in root.pieces: Path {
         width: root.width;
         height: root.height;
         viewbox-width: 1000;
         viewbox-height: 1000;
         commands: p.d;
-        // (solid: see-through, where each runs into the next it showed twice, a spoke)
-        fill: Theme.accent.mix(Theme.accent-2, 1 - p.f).with-alpha(root.strength);
+        fill-rule: evenodd;
+        fill: @linear-gradient(0deg, Theme.accent.with-alpha(root.strength) 0%, Theme.accent-2.with-alpha(root.strength) 100%);
+        stroke: @linear-gradient(0deg, Theme.accent.with-alpha(root.strength * 0.55) 0%, Theme.accent-2.with-alpha(root.strength * 0.55) 100%);
+        stroke-width: 1.2px;
     }
 }
 
@@ -2541,59 +2572,124 @@ component WidgetPreview inherits Rectangle {
 /// raid), in their theme
 component AlertPreview inherits Rectangle {
     in property <AlertLook> look;
-    height: 170px;
+    height: 190px;
     border-radius: 14px;
     border-width: 1px;
     border-color: Theme.line;
     clip: true;
     Rectangle { background: @linear-gradient(135deg, #2b3550 0%, #3a2b48 100%); }
     Caps { r: 14px; outside: Theme.bg; tl: #2b3550; tr: #33304c; bl: #33304c; br: #3a2b48; top: true; bottom: true; }
-    Text { x: 12px; y: 8px; text: "A preview, with made-up alerts"; color: #ffffffa0; font-size: 11px; }
+    Text { x: 12px; y: 8px; text: root.look.in-widget ? "A preview: made-up alerts in the Stream Widget" : "A preview: made-up alerts, on their own"; color: #ffffffa0; font-size: 11px; }
     property <[{ head: string, main: string, msg: string, d: string }]> samples: [
         { head: "New Follower", main: "PixelPanda", msg: "", d: Icons.heart-out },
         { head: "New Subscriber", main: "Nova", msg: "Tier 1 \u{b7} 6 months", d: Icons.star-out },
         { head: "Bits", main: "Zed cheered 500 bits", msg: "Great stream!", d: Icons.coins },
         { head: "Raid", main: "RaidLeader", msg: "with 42 viewers", d: Icons.broadcast },
     ];
-    property <int> turn: Theme.motion ? floor(animation-tick() / 3500ms) : 1;
-    property <float> into: Theme.motion ? mod(animation-tick() / 1ms, 3500) : 1000;
-    property <float> come: clamp(root.into / 500, 0, 1);
-    property <float> go: clamp((root.into - 3000) / 500, 0, 1);
+    // (a turn every 5 s: the alert comes in at 1 s, goes at 4 s; between, Now Playing (in the widget) or nothing)
+    property <int> turn: Theme.motion ? floor(animation-tick() / 5000ms) : 1;
+    property <float> at: Theme.motion ? mod(animation-tick() / 1ms, 5000) : 2000;
+    property <float> come: clamp((root.at - 1000) / 550, 0, 1);
+    property <float> go: clamp((root.at - 3500) / 500, 0, 1);
+    property <bool> entering: root.go == 0;
+    // (how far in it is: 0 out, 1 in)
+    property <float> ph: root.entering ? root.come : 1 - root.go;
     property <{ head: string, main: string, msg: string, d: string }> it: root.samples[mod(root.turn, 4)];
     property <string> th: root.look.theme;
+    property <bool> gifs: root.th == "gif" || root.th == "gifpop" || root.th == "meme";
+    // (the way in: in the widget, its transition (Over the Top: its animation); on their own, the animation)
+    property <string> tr: root.look.in-widget ? root.look.transition : "overlay";
+    property <string> way: root.tr == "overlay" ? root.look.anim : root.tr;
+    property <length> w0: min(self.width - 48px, 520px);
+    property <length> h0: 92px;
+    // (each way, as a scale, a shift and a fade)
+    property <float> sc: root.way == "pop" ? 0.6 + 0.4 * root.ph : root.way == "elastic" ? (0.4 + 0.6 * root.ph) + sin(root.ph * 540deg) * 0.08 * (1 - root.ph) * 2
+        : root.way == "zoom" ? (root.entering ? 1 + (1 - root.ph) * 0.7 : 0.4 + 0.6 * root.ph) : root.way == "spin" ? 0.2 + 0.8 * root.ph : 1;
+    property <float> sx: root.way == "unfold" || root.way == "wipe" ? max(0.02, root.ph) : 1;
+    property <float> sy: root.way == "flip" || root.way == "swing" ? max(0.02, root.ph) : root.way == "unfold" ? (root.ph < 0.5 ? 0.12 : 0.12 + (root.ph - 0.5) * 1.76) : 1;
+    property <length> dy: root.way == "slide" ? (1 - root.ph) * (root.entering ? 40px : -40px) : root.way == "bounce" || root.way == "drop" ? (1 - root.ph) * (root.entering ? -60px : 60px)
+        : root.way == "rise" ? (1 - root.ph) * (root.entering ? 24px : -24px) : 0px;
+    property <length> dx: root.way == "push" ? (1 - root.ph) * (root.entering ? root.w0 : root.w0) : root.way == "glitch" ? (1 - root.ph) * (mod(root.at, 120) < 60 ? 14px : -14px) : 0px;
+    property <float> op: root.way == "push" || root.way == "wipe" || root.way == "flip" || root.way == "unfold" || root.way == "swing" ? (root.ph > 0.02 ? 1 : 0) : root.ph;
+    // (Now Playing, in the widget: there between alerts, and going as the transition has it)
+    if root.look.in-widget: Rectangle {
+        property <float> gone: root.at < 1000 || root.at > 4000 ? 0 : root.tr == "push" ? 0 : root.ph;
+        width: root.w0 * (root.tr == "zoom" ? 1 - 0.4 * self.gone : root.tr == "flip" ? 1 : 1);
+        height: root.h0 * (root.tr == "flip" ? max(0.02, 1 - self.gone) : root.tr == "zoom" ? 1 - 0.4 * self.gone : 1);
+        x: (parent.width - self.width) / 2 - (root.tr == "push" && root.at >= 1000 && root.at <= 4000 ? root.ph * root.w0 : 0px);
+        y: (parent.height - self.height) / 2 + 8px - (root.tr == "rise" ? self.gone * 30px : 0px);
+        opacity: root.tr == "push" || root.tr == "flip" || root.tr == "wipe" ? 1 : 1 - self.gone;
+        border-radius: 14px;
+        background: root.look.c1.mix(root.look.c2, 0.5).darker(0.35);
+        HorizontalLayout {
+            padding: 12px;
+            spacing: 14px;
+            Rectangle { width: self.height; border-radius: 10px; background: @linear-gradient(135deg, #8e9bff 0%, #ff7ac8 100%); }
+            VerticalLayout {
+                alignment: center;
+                spacing: 3px;
+                Text { text: "Sample Song"; color: #ffffff; font-size: 18px; font-weight: 800; }
+                Text { text: "OmniPulse"; color: #ffffffc0; font-size: 13px; }
+            }
+        }
+    }
     al := Rectangle {
-        width: min(parent.width - 48px, 520px);
-        height: 92px;
-        x: (parent.width - self.width) / 2;
-        y: (parent.height - self.height) / 2 + 8px + (1 - root.come) * 14px - root.go * 10px;
-        opacity: root.come * (1 - root.go);
-        border-radius: root.th == "comic" ? 6px : 14px;
+        width: root.w0 * root.sc * root.sx;
+        height: root.h0 * root.sc * root.sy;
+        // (Wipe sweeps in from the left; the rest grow from the middle)
+        x: (root.way == "wipe" ? (parent.width - root.w0) / 2 : (parent.width - self.width) / 2) + root.dx;
+        y: (parent.height - self.height) / 2 + 8px + root.dy;
+        visible: root.at >= 1000 && root.at <= 4000;
+        opacity: root.op;
+        clip: root.th != "gifpop";
+        border-radius: root.th == "comic" ? 6px : root.th == "meme" ? 6px : 14px;
         background: root.th == "glass" ? #ffffff24 : root.th == "neon" ? #080614e0 : root.th == "banner" ? root.look.c1 : root.th == "split" ? #111520 : root.th == "comic" ? #ffffff : root.th == "minimal" ? transparent
+            : root.th == "gif" ? #0a0814d1 : root.th == "meme" ? #000000
             // (a solid blend: a gradient would lose its rounded corners in the software renderer)
             : root.look.glow ? root.look.c1.mix(root.look.c2, 0.65) : root.look.c1.mix(root.look.c2, 0.5);
         border-width: root.th == "neon" || root.th == "comic" ? (root.th == "comic" ? 3px : 2px) : root.th == "glass" ? 1px : 0px;
         border-color: root.th == "neon" ? root.look.c1 : root.th == "comic" ? #111111 : #ffffff48;
         drop-shadow-blur: root.th == "neon" ? 18px : 0px;
         drop-shadow-color: root.look.c1;
+        // (Meme: the GIF fills it, the words on top)
+        if root.th == "meme": Rectangle {
+            background: @linear-gradient(135deg, #5b4b7a 0%, #2c3e5a 100%);
+            Text { text: "GIF"; color: #ffffff30; font-size: 34px; font-weight: 900; }
+        }
+        // (GIF Pop-Out: the GIF stands up out of it)
+        if root.th == "gifpop": Rectangle {
+            x: 10px;
+            y: parent.height - self.height - 6px;
+            width: parent.height * 0.95;
+            height: parent.height * 1.55;
+            border-radius: 10px;
+            background: #ffffff2a;
+            border-width: 1px;
+            border-color: #ffffff70;
+            Text { text: "GIF"; color: #ffffff; font-size: 16px; font-weight: 900; }
+        }
         HorizontalLayout {
-            padding: 12px;
+            padding: root.th == "gif" ? 6px : 12px;
+            padding-left: root.th == "gifpop" ? parent.height * 0.95 + 22px : root.th == "gif" ? 6px : 12px;
             spacing: 14px;
-            Rectangle {
-                width: self.height;
+            if root.th != "gifpop" && root.th != "meme": Rectangle {
+                width: root.th == "gif" ? self.height * 1.35 : self.height;
                 border-radius: 10px;
-                background: root.th == "split" ? root.look.c1.mix(root.look.c2, 0.5) : root.th == "comic" ? root.look.c1 : root.th == "neon" ? transparent
+                background: root.th == "gif" ? #ffffff26 : root.th == "split" ? root.look.c1.mix(root.look.c2, 0.5) : root.th == "comic" ? root.look.c1 : root.th == "neon" ? transparent
                     : root.th == "glass" ? #ffffff2e : root.th == "minimal" ? #00000059 : root.th == "banner" ? #00000038 : root.look.c1.mix(#ffffff, 0.55).with-alpha(0.7);
                 border-width: root.th == "neon" || root.th == "comic" ? 2px : 0px;
                 border-color: root.th == "neon" ? root.look.c1 : #111111;
-                Glyph { d: root.it.d; width: parent.width * 0.5 * clamp(root.look.icon, 0.6, 2); height: self.width; fill: #ffffff; }
+                if root.th != "gif": Glyph { d: root.it.d; width: parent.width * 0.5 * clamp(root.look.icon, 0.6, 2); height: self.width; fill: #ffffff; }
+                if root.th == "gif": Text { text: "GIF"; color: #ffffff; font-size: 16px; font-weight: 900; }
             }
             VerticalLayout {
                 horizontal-stretch: 1;
                 alignment: center;
                 spacing: 2px;
-                Text { text: root.it.head.to-uppercase(); color: root.th == "neon" || root.th == "split" ? root.look.c1 : root.th == "comic" ? #111111c8 : #ffffffc8; font-size: 12px; font-weight: 800; letter-spacing: 1.5px; }
-                Text { text: root.it.main; color: root.th == "comic" ? #111111 : #ffffff; font-size: root.th == "banner" ? 24px : 20px; font-weight: 800; overflow: elide; }
-                if root.it.msg != "": Text { text: root.it.msg; color: root.th == "comic" ? #111111c8 : #ffffffd0; font-size: 13px; overflow: elide; }
+                Text { text: root.it.head.to-uppercase(); color: root.th == "neon" || root.th == "split" || root.th == "gif" ? root.look.c1 : root.th == "comic" ? #111111c8 : #ffffffc8; font-size: 12px; font-weight: 800; letter-spacing: 1.5px; horizontal-alignment: root.th == "meme" ? center : left; }
+                Text { text: root.th == "meme" ? root.it.main.to-uppercase() : root.it.main; color: root.th == "comic" ? #111111 : #ffffff; font-size: root.th == "banner" || root.th == "meme" ? 24px : 20px; font-weight: 800; overflow: elide; horizontal-alignment: root.th == "meme" ? center : left;
+                    stroke: root.th == "meme" ? #000000 : transparent; stroke-width: root.th == "meme" ? 2px : 0px; }
+                if root.it.msg != "": Text { text: root.it.msg; color: root.th == "comic" ? #111111c8 : #ffffffd0; font-size: 13px; overflow: elide; horizontal-alignment: root.th == "meme" ? center : left; }
             }
         }
     }
@@ -2605,6 +2701,16 @@ component SuitePreview inherits Rectangle {
     in property <string> which;
     in property <string> theme;
     in property <bool> rings;
+    // (the Goals' look: bars, rings, liquid, jar or hourglass)
+    in property <string> look;
+    property <bool> shapes: root.look == "liquid" || root.look == "jar" || root.look == "hourglass";
+    // (a palette's or your own colours; none (see-through): the accent)
+    in property <color> own-c1;
+    in property <color> own-c2;
+    // (a GIF set for it: a stand-in where it'll go)
+    in property <bool> gif;
+    // (Emote Rain's spot: all, bl, br, tl, tr, b, c, custom)
+    in property <string> spot;
     height: root.which == "raid" || root.which == "wheel" || root.which == "emoterain" ? 220px : root.which == "goals" || root.which == "leaderboard" ? 200px : 130px;
     border-radius: 14px;
     border-width: 1px;
@@ -2615,9 +2721,11 @@ component SuitePreview inherits Rectangle {
     Text { x: 12px; y: 8px; text: "A preview, with made-up numbers"; color: #ffffffa0; font-size: 11px; }
     property <string> t: root.theme == "" ? "dark" : root.theme;
     property <bool> comic: root.t == "comic";
-    property <color> c1: Theme.accent;
-    property <color> c2: Theme.accent-2;
-    property <color> ink: root.comic ? #111111 : #ffffff;
+    // (the light ones, with dark words)
+    property <bool> light: root.comic || root.t == "pastel" || root.t == "y2k" || root.t == "sticker";
+    property <color> c1: root.own-c1.alpha > 0 ? root.own-c1 : Theme.accent;
+    property <color> c2: root.own-c2.alpha > 0 ? root.own-c2 : Theme.accent-2;
+    property <color> ink: root.light ? (root.t == "y2k" ? #2b1b40 : root.t == "pastel" ? #3a2a4a : #111111) : #ffffff;
     // (the goals' bars filling, again and again)
     property <float> fill: Theme.motion ? mod(animation-tick() / 1ms, 6000) / 6000 : 0.6;
     // (the wheel: turning; emote rain: falling, with no panel of its own)
@@ -2649,20 +2757,50 @@ component SuitePreview inherits Rectangle {
         Rectangle { width: 26px; height: 26px; border-radius: 13px; background: #ffffff; }
     }
     if root.which == "wheel": Path { x: (parent.width - 20px) / 2; y: 24px; width: 20px; height: 22px; commands: "M 0 0 L 20 0 L 10 22 Z"; fill: #ffffff; viewbox-width: 20; viewbox-height: 22; }
+    // (emote rain: which way (in look), from where (in spot): all over, or out of a spot)
     if root.which == "emoterain": Rectangle {
         y: 22px;
         height: parent.height - 22px;
-        for k in 9: Glyph {
+        clip: true;
+        property <string> dir: root.look == "" ? "down" : root.look;
+        property <bool> spotted: root.spot != "" && root.spot != "all";
+        property <float> sx: root.spot == "bl" || root.spot == "tl" ? 0.12 : root.spot == "br" || root.spot == "tr" ? 0.88 : 0.5;
+        property <float> sy: root.spot == "tl" || root.spot == "tr" ? 0.15 : root.spot == "c" || root.spot == "custom" ? 0.5 : 0.88;
+        for k in 12: Glyph {
             property <float> lag: mod(k * 0.37, 1);
-            property <float> t: Theme.motion ? mod(animation-tick() / 1ms / 4200 + self.lag, 1) : self.lag;
+            property <float> t: Theme.motion ? mod(animation-tick() / 1ms / (parent.dir == "burst" ? 1800 : parent.dir == "fountain" ? 2600 : 4200) + self.lag, 1) : self.lag;
+            // (a spread for each: along an edge, or an angle out of the spot)
+            property <float> lane: 0.06 + mod(k * 0.29, 0.9);
+            property <angle> a: parent.dir == "burst" ? k * 30deg : parent.dir == "fountain" ? -90deg + (mod(k * 0.53, 1) - 0.5) * 60deg
+                : (parent.dir == "up" ? -90deg : parent.dir == "left" ? 180deg : parent.dir == "right" ? 0deg : 90deg) + (mod(k * 0.41, 1) - 0.5) * 50deg;
+            property <length> ox: parent.spotted || parent.dir == "burst" || parent.dir == "fountain" ? parent.width * (parent.spotted ? parent.sx : 0.5) : 0px;
+            property <length> oy: parent.spotted || parent.dir == "burst" || parent.dir == "fountain" ? parent.height * (parent.spotted ? parent.sy : (parent.dir == "fountain" ? 1 : 0.5)) : 0px;
+            property <length> reach: parent.dir == "burst" ? 110px : parent.width;
             d: mod(k, 3) == 0 ? Icons.heart-out : mod(k, 3) == 1 ? Icons.star-out : Icons.chat;
-            width: 26px;
-            height: 26px;
-            x: parent.width * (0.06 + mod(k * 0.29, 0.9));
-            y: -30px + self.t * (parent.height + 40px);
+            width: 24px;
+            height: 24px;
+            x: parent.dir == "float" ? (parent.spotted ? self.ox : parent.width * self.lane) + sin(self.t * 360deg + k * 40deg) * 14px - 12px
+                : parent.spotted || parent.dir == "burst" || parent.dir == "fountain" ? self.ox + cos(self.a) * self.t * self.reach * (parent.dir == "fountain" ? 0.5 : 1) - 12px
+                : parent.dir == "left" ? parent.width + 30px - self.t * (parent.width + 60px) : parent.dir == "right" ? -30px + self.t * (parent.width + 60px) : parent.width * self.lane;
+            y: parent.dir == "float" ? (parent.spotted ? self.oy : parent.height + 20px) - self.t * (parent.height * 0.9) - 12px
+                : parent.dir == "fountain" ? self.oy - 12px + sin(self.a) * self.t * parent.height * 1.4 + self.t * self.t * parent.height * 1.5
+                : parent.spotted || parent.dir == "burst" ? self.oy + sin(self.a) * self.t * self.reach - 12px
+                : parent.dir == "up" ? parent.height + 30px - self.t * (parent.height + 60px) : parent.dir == "left" || parent.dir == "right" ? parent.height * self.lane - 12px : -30px + self.t * (parent.height + 40px);
             fill: mod(k, 2) == 0 ? root.c1 : root.c2;
-            opacity: 0.95;
+            opacity: parent.dir == "burst" ? 1 - self.t : 0.95;
         }
+    }
+    // (a GIF set: a stand-in for it, where it'll go)
+    if root.gif: Rectangle {
+        width: 46px;
+        height: 40px;
+        x: root.which == "wheel" ? parent.width / 2 + 70px : pan.x + (pan.width - self.width) / 2;
+        y: root.which == "wheel" ? 30px : max(20px, pan.y - 34px);
+        border-radius: 9px;
+        background: #ffffff2e;
+        border-width: 1px;
+        border-color: #ffffff70;
+        Text { text: "GIF"; color: #ffffff; font-size: 13px; font-weight: 900; }
     }
     pan := Rectangle {
         visible: root.which != "wheel" && root.which != "emoterain";
@@ -2670,16 +2808,82 @@ component SuitePreview inherits Rectangle {
         height: inner.preferred-height;
         x: (parent.width - self.width) / 2;
         y: (parent.height - self.height) / 2 + 8px;
-        border-radius: root.comic ? 6px : 14px;
-        background: root.t == "glass" ? #ffffff24 : root.t == "neon" ? #080614e0 : root.comic ? #ffffff : root.t == "minimal" ? transparent : #0a0814d1;
-        border-width: root.t == "glass" ? 1px : root.t == "neon" ? 2px : root.comic ? 3px : 0px;
-        border-color: root.t == "neon" ? root.c1 : root.comic ? #111111 : #ffffff48;
-        drop-shadow-blur: root.t == "neon" ? 16px : 0px;
-        drop-shadow-color: root.c1;
+        border-radius: root.comic ? 6px : root.t == "pastel" ? 20px : root.t == "y2k" ? 6px : root.t == "pixel" ? 0px : root.t == "sticker" ? 18px : 14px;
+        background: root.t == "glass" ? #ffffff24 : root.t == "neon" ? #080614e0 : root.comic || root.t == "sticker" ? #ffffff : root.t == "minimal" ? transparent
+            : root.t == "pastel" ? root.c1.mix(#fffafc, 0.12) : root.t == "y2k" ? #fdf6ff : root.t == "pixel" ? #1b1030 : root.t == "edge" ? #0c0a18b3 : #0a0814d1;
+        border-width: root.t == "glass" ? 1px : root.t == "neon" || root.t == "y2k" ? 2px : root.comic || root.t == "pastel" || root.t == "pixel" ? 3px : root.t == "edge" ? 1.5px : root.t == "sticker" ? 4px : 0px;
+        border-color: root.t == "neon" || root.t == "edge" ? root.c1 : root.comic || root.t == "y2k" ? #2b1b40 : root.t == "pastel" ? root.c1.mix(#ffffff, 0.45) : root.t == "pixel" || root.t == "sticker" ? #f4f0ff : #ffffff48;
+        drop-shadow-blur: root.t == "neon" || root.t == "edge" ? 16px : root.t == "sticker" || root.t == "pastel" ? 12px : 0px;
+        drop-shadow-offset-x: root.t == "y2k" ? 3px : 0px;
+        drop-shadow-offset-y: root.t == "y2k" ? 3px : 0px;
+        drop-shadow-color: root.t == "y2k" ? #2b1b40 : root.t == "sticker" || root.t == "pastel" ? #00000060 : root.c1;
+        // (Y2K's title bar)
+        if root.t == "y2k": Rectangle {
+            y: 0;
+            height: 14px;
+            background: @linear-gradient(90deg, #ff9ad5 0%, #9ad0ff 100%);
+            Rectangle { y: parent.height - 2px; height: 2px; background: #2b1b40; }
+            Text { x: parent.width - self.width - 6px; text: "–  □  ×"; color: #2b1b40; font-size: 8px; font-weight: 900; }
+        }
         inner := VerticalLayout {
             padding: 14px;
             spacing: 8px;
-            if root.which == "goals" && !root.rings: VerticalLayout {
+            // (shapes: three side by side, filling; the liquid's level, the jar's drops, the hourglass's sand)
+            if root.which == "goals" && root.shapes: HorizontalLayout {
+                alignment: center;
+                spacing: 26px;
+                for g[i] in [{ n: "Followers", p: 0.7 }, { n: "Subs", p: 0.45 }, { n: "Bits", p: 0.85 }]: VerticalLayout {
+                    spacing: 4px;
+                    property <float> lv: g.p * (0.55 + 0.45 * root.fill);
+                    Rectangle {
+                        width: 58px;
+                        height: root.look == "hourglass" ? 74px : 62px;
+                        // (the glass, rounded; what's in it rising from the bottom)
+                        if root.look != "hourglass": Rectangle {
+                            border-radius: 12px;
+                            border-width: 2px;
+                            border-color: root.comic ? #111111 : #ffffffe0;
+                            background: #ffffff1a;
+                            clip: true;
+                            if root.look == "liquid": Rectangle {
+                                y: parent.height * (1 - lv);
+                                height: parent.height * lv;
+                                background: root.c1.mix(root.c2, 0.5);
+                            }
+                            if root.look == "jar": Rectangle {
+                                for d in 18: Rectangle {
+                                    property <int> r: floor(d / 6);
+                                    visible: d < round(lv * 18);
+                                    width: 9px;
+                                    height: 9px;
+                                    border-radius: 4.5px;
+                                    x: 4px + mod(d, 6) * 8px + (mod(self.r, 2) == 1 ? 3px : 0px);
+                                    y: parent.height - 12px - self.r * 8px;
+                                    background: mod(d, 3) == 0 ? root.c1 : mod(d, 3) == 1 ? root.c2 : #ffd36e;
+                                }
+                            }
+                        }
+                        if root.look != "hourglass": Rectangle { y: -7px; width: 34px; height: 7px; border-radius: 2px; border-width: 2px; border-color: root.comic ? #111111 : #ffffffe0; }
+                        // (the hourglass: two bulbs, sand leaving the top and piling at the bottom)
+                        if root.look == "hourglass": Rectangle {
+                            Rectangle { x: 14px; y: 36px - (1 - lv) * 26px; width: 30px; height: (1 - lv) * 26px; background: #e9bf6e; }
+                            Rectangle { x: 14px; y: 70px - lv * 26px; width: 30px; height: lv * 26px; background: #e9bf6e; }
+                            Path {
+                                width: 58px;
+                                height: 74px;
+                                viewbox-width: 58;
+                                viewbox-height: 74;
+                                fill: transparent;
+                                stroke: root.comic ? #111111 : #ffffffe0;
+                                stroke-width: 2px;
+                                commands: "M 4 2 L 54 2 M 4 72 L 54 72 M 10 2 C 10 22 26 30 28 37 C 26 44 10 52 10 72 M 48 2 C 48 22 32 30 30 37 C 32 44 48 52 48 72";
+                            }
+                        }
+                    }
+                    Text { text: g.n; color: root.ink; font-size: 11px; font-weight: 700; horizontal-alignment: center; }
+                }
+            }
+            if root.which == "goals" && !root.rings && !root.shapes: VerticalLayout {
                 spacing: 8px;
                 for g[i] in [{ n: "Followers", a: 7, b: 10 }, { n: "Subs", a: 3, b: 5 }, { n: "Bits", a: 650, b: 1000 }]: VerticalLayout {
                     spacing: 3px;
@@ -2730,7 +2934,7 @@ component SuitePreview inherits Rectangle {
             if root.which == "hype" || root.which == "voteskip": VerticalLayout {
                 spacing: 6px;
                 HorizontalLayout {
-                    Text { text: root.which == "hype" ? "Hype" : "Skip this song? Type !skip"; color: root.ink; font-size: 14px; font-weight: 700; horizontal-stretch: 1; }
+                    Text { text: root.which == "hype" ? (root.look == "meter" ? "Hype" : "HYPE TRAIN") : "Skip this song? Type !skip"; color: root.ink; font-size: 14px; font-weight: 700; horizontal-stretch: 1; }
                     Text { text: root.which == "hype" ? "Level 3" : "3 / 5"; color: root.ink; font-size: 15px; font-weight: 800; }
                 }
                 Rectangle {
@@ -2738,6 +2942,14 @@ component SuitePreview inherits Rectangle {
                     border-radius: 6px;
                     background: root.comic ? #0000001f : #ffffff29;
                     Rectangle { x: 0; width: parent.width * (root.which == "hype" ? 0.25 + 0.7 * root.fill : 0.6); border-radius: 6px; background: root.c1.mix(root.c2, 0.4); }
+                }
+                // (the train's: who gave the most, where it's come from, the time it has left)
+                if root.which == "hype" && root.look != "meter": HorizontalLayout {
+                    spacing: 6px;
+                    Text { text: "Top: PixelPanda"; color: root.ink.with-alpha(0.85); font-size: 11px; horizontal-stretch: 1; }
+                    Glyph { d: Icons.twitch; width: 12px; height: 12px; fill: root.ink.with-alpha(0.85); }
+                    Glyph { d: Icons.kick; width: 12px; height: 12px; fill: root.ink.with-alpha(0.85); }
+                    Text { text: (4 - floor(root.fill * 4)) + ":" + (floor(59 - mod(root.fill * 240, 60)) < 10 ? "0" : "") + floor(59 - mod(root.fill * 240, 60)); color: root.ink; font-size: 11px; font-weight: 800; }
                 }
             }
             if root.which == "leaderboard": VerticalLayout {
@@ -2790,27 +3002,47 @@ component ChatRow inherits Rectangle {
     property <string> st: root.look.style;
     property <bool> comic: root.st == "comic";
     property <bool> term: root.st == "terminal";
+    property <bool> y2k: root.st == "y2k";
+    property <bool> pastel: root.st == "pastel";
+    property <bool> pixel: root.st == "pixel";
+    property <bool> mono: root.term || root.pixel;
+    // (light ones, with dark words)
+    property <bool> light: root.comic || root.y2k || root.pastel;
+    // (the name on a line of its own: Cards' and Y2K's always, the rest when it's set to)
+    property <bool> own-line: root.st == "cards" || root.y2k || root.look.above;
     height: rowl.preferred-height;
-    border-radius: root.st == "bubbles" ? 4px : root.st == "terminal" ? 3px : root.st == "comic" ? 16px : root.st == "minimal" ? 0px : 11px;
+    clip: root.y2k;
+    border-radius: root.st == "bubbles" ? 4px : root.term ? 3px : root.comic ? 16px : root.pastel ? 16px : root.y2k ? 6px : root.pixel || root.st == "minimal" ? 0px : root.st == "edge" ? 14px : 11px;
     background: root.st == "plain" ? #0a0c12.with-alpha(root.look.bg) : root.st == "bubbles" ? #0a0c12.with-alpha(max(root.look.bg, 0.55)) : root.st == "glass" ? #ffffff1f
-        : root.st == "neon" ? #060412b8 : root.st == "cards" ? #191c28 : root.term ? #000000c7 : root.comic ? #ffffff : transparent;
-    border-width: root.st == "glass" || root.st == "neon" || root.comic ? (root.comic ? 2px : 1px) : 0px;
-    border-color: root.st == "neon" ? root.pc : root.comic ? #111111 : #ffffff38;
-    drop-shadow-blur: root.st == "neon" ? 10px : root.st == "cards" ? 12px : 0px;
-    drop-shadow-color: root.st == "neon" ? root.pc : #00000070;
-    // (Bubbles', Cards' and Terminal's coloured edge)
+        : root.st == "neon" ? #060412b8 : root.st == "cards" ? #191c28 : root.term ? #000000c7 : root.comic ? #ffffff : root.st == "edge" ? #0c0a18a8
+        : root.y2k ? #fdf6ff : root.pastel ? root.m.colour.mix(#fffafc, 0.18) : root.pixel ? #1b1030 : transparent;
+    border-width: root.st == "glass" || root.st == "neon" ? 1px : root.comic || root.y2k ? 2px : root.st == "edge" ? 1.5px : root.pixel ? 3px : 0px;
+    border-color: root.st == "neon" ? root.pc : root.comic || root.y2k ? #111111 : root.st == "edge" ? root.pc.with-alpha(0.75) : root.pixel ? #f4f0ff : #ffffff38;
+    drop-shadow-blur: root.st == "neon" ? 10px : root.st == "cards" ? 12px : root.st == "edge" ? 8px : 0px;
+    drop-shadow-offset-x: root.y2k ? 3px : 0px;
+    drop-shadow-offset-y: root.y2k ? 3px : 0px;
+    drop-shadow-color: root.st == "neon" || root.st == "edge" ? root.pc.with-alpha(0.6) : root.y2k ? #2b1b40 : #00000070;
+    // (Bubbles', Cards' and Terminal's coloured edge; Y2K's title bar; Pixel's inner edge)
     if root.st == "bubbles" || root.term: Rectangle { x: 0; width: root.term ? 2px : 3px; background: root.term ? #3cff6e : root.pc; border-radius: 2px; }
     if root.st == "cards": Rectangle { y: 0; height: 3px; background: root.pc; }
+    if root.y2k: Rectangle {
+        y: 0;
+        height: root.fs * 0.8 * 1.35 + 6px;
+        background: @linear-gradient(90deg, #ff9ad5 0%, #9ad0ff 100%);
+        Rectangle { y: parent.height - 2px; height: 2px; background: #2b1b40; }
+        Text { x: parent.width - self.width - 8px; text: "–  □  ×"; color: #2b1b40; font-size: root.fs * 0.6; font-weight: 900; }
+    }
+    if root.pixel: Rectangle { x: 3px; y: 3px; width: parent.width - 6px; height: parent.height - 6px; border-width: 2px; border-color: root.pc; }
     rowl := HorizontalLayout {
         padding-left: root.st == "minimal" ? 4px : 10px;
         padding-right: 10px;
-        padding-top: root.st == "minimal" ? 2px : 6px;
+        padding-top: root.st == "minimal" ? 2px : root.y2k ? 3px : 6px;
         padding-bottom: root.st == "minimal" ? 2px : 6px;
         spacing: 7px;
-        if root.look.marks: VerticalLayout { alignment: start; padding-top: 2px; Glyph { d: root.m.kick ? Icons.kick : Icons.twitch; width: root.fs; height: root.fs; fill: root.pc; } }
+        if root.look.marks: VerticalLayout { alignment: start; padding-top: 2px; Glyph { d: root.m.kick ? Icons.kick : Icons.twitch; width: root.y2k ? root.fs * 0.8 : root.fs; height: self.width; fill: root.y2k ? #2b1b40 : root.pc; } }
         VerticalLayout {
             horizontal-stretch: 1;
-            spacing: 1px;
+            spacing: root.y2k ? 5px : 1px;
             HorizontalLayout {
                 spacing: 4px;
                 alignment: start;
@@ -2822,11 +3054,23 @@ component ChatRow inherits Rectangle {
                     background: root.m.badge == "MOD" ? #3ccd6c : root.m.badge == "VIP" ? #e05ce0 : root.m.badge == "SUB" ? #7aa2ff : #ff4f4f;
                     bt := Text { text: root.m.badge; color: #111111; font-size: root.fs * 0.55; font-weight: 800; }
                 }
-                Text { text: root.m.name + (root.st == "cards" ? "" : ":"); color: root.m.colour; font-size: root.st == "cards" ? root.fs * 0.8 : root.st == "minimal" ? root.fs * 0.85 : root.fs; font-weight: 800;
-                    font-family: root.term ? "Consolas" : ""; }
-                if root.st != "cards": Text { text: root.m.text; color: root.comic ? #111111 : root.term ? #b6ffbe : #ffffff; font-size: root.fs; font-weight: 500; wrap: word-wrap; horizontal-stretch: 1; font-family: root.term ? "Consolas" : ""; }
+                // (the name: Pastel's in a pill of its colour)
+                Rectangle {
+                    width: nt.preferred-width + (root.pastel ? 14px : 0px);
+                    height: nt.preferred-height;
+                    border-radius: self.height / 2;
+                    background: root.pastel ? root.m.colour.mix(#ffffff, 0.55) : transparent;
+                    nt := Text {
+                        text: root.m.name + (root.own-line || root.pastel ? "" : ":");
+                        color: root.y2k || root.pastel ? #2a1a3a : root.m.colour;
+                        font-size: root.st == "cards" || root.y2k ? root.fs * 0.8 : root.st == "minimal" || root.pastel ? root.fs * 0.85 : root.fs;
+                        font-weight: 800;
+                        font-family: root.mono ? "Consolas" : "";
+                    }
+                }
+                if !root.own-line: Text { text: root.m.text; color: root.light ? #2b1b40 : root.term ? #b6ffbe : #ffffff; font-size: root.fs; font-weight: 500; wrap: word-wrap; horizontal-stretch: 1; font-family: root.mono ? "Consolas" : ""; }
             }
-            if root.st == "cards": Text { text: root.m.text; color: #ffffff; font-size: root.fs; font-weight: 500; wrap: word-wrap; }
+            if root.own-line: Text { text: root.m.text; color: root.light ? #2b1b40 : root.term ? #b6ffbe : #ffffff; font-size: root.fs; font-weight: 500; wrap: word-wrap; font-family: root.mono ? "Consolas" : ""; }
         }
     }
 }
@@ -3095,7 +3339,7 @@ global BotLook {
             : id == "requests" ? Theme.accent : id == "alerts" ? #ff6b8a : id == "points" ? #ffb547 : id == "games" ? #5ad1ff : Theme.accent-2;
     }
     public pure function icon(id: string) -> string {
-        return id == "twitch" || id == "twitchbot" ? Icons.twitch : id == "kick" || id == "kickbot" ? Icons.kick : id == "youtube" ? Icons.youtube-mark : id == "obs" || id == "meld" || id == "slobs" ? Icons.broadcast : id == "streamlabs" || id == "streamelements" ? Icons.coins
+        return id == "twitch" || id == "twitchbot" ? Icons.twitch : id == "kick" || id == "kickbot" ? Icons.kick : id == "youtube" ? Icons.youtube-mark : id == "obs" || id == "meld" || id == "slobs" || id == "software" ? Icons.broadcast : id == "tips" ? Icons.coins : id == "streamlabs" || id == "streamelements" ? Icons.coins
             : id == "requests" ? Icons.playlist-add : id == "alerts" ? Icons.bell : id == "points" ? Icons.coins : id == "games" ? Icons.dice : id == "moderation" ? Icons.shield
             : id == "hype" ? Icons.broadcast : id == "voteskip" ? Icons.next : id == "wheel" ? Icons.dice : id == "leaderboard" ? Icons.coins : id == "emoterain" ? Icons.chat : id == "tune" ? Icons.lyrics
             : id == "goals" ? Icons.check : id == "timer" ? Icons.refresh : id == "latest" ? Icons.heart-out : id == "raid" ? Icons.broadcast : Icons.actions;
@@ -3192,6 +3436,41 @@ component BotFieldRow inherits VerticalLayout {
             if inp.text == "" && root.f.extra != "": Text { x: 12px; text: root.f.extra; color: Theme.muted.with-alpha(0.6); font-size: 13px; vertical-alignment: center; }
         }
     }
+    // (a list, a row each: typed into, taken out, one more added; kept as "a | b | c")
+    if root.f.kind == "list": VerticalLayout {
+        spacing: 6px;
+        Text { text: root.f.label; color: Theme.text; font-weight: 700; font-size: 13px; }
+        if root.f.note != "": Text { text: root.f.note; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
+        for it[i] in root.f.opts: HorizontalLayout {
+            spacing: 8px;
+            Text { width: 22px; text: (i + 1) + "."; color: Theme.muted; font-size: 12px; vertical-alignment: center; horizontal-alignment: right; }
+            Rectangle {
+                horizontal-stretch: 1;
+                height: 34px;
+                border-radius: 9px;
+                background: Theme.bg;
+                border-width: 1px;
+                border-color: li.has-focus ? Theme.accent : Theme.line;
+                li := TextInput {
+                    x: 12px;
+                    width: parent.width - 24px;
+                    height: parent.height;
+                    vertical-alignment: center;
+                    color: Theme.text;
+                    font-size: 13px;
+                    single-line: true;
+                    text: it;
+                    edited => { root.act("list:" + root.f.key + ":set:" + i + ":" + self.text); }
+                }
+            }
+            VerticalLayout { alignment: center; IconButton { d: Icons.close; size: 30px; tip: "Take it out"; clicked => { root.act("list:" + root.f.key + ":del:" + i); } } }
+        }
+        HorizontalLayout {
+            alignment: start;
+            padding-left: 30px;
+            Chip { label: "+ Add one"; on: false; clicked => { root.act("list:" + root.f.key + ":add"); } }
+        }
+    }
     if root.f.kind == "addr": VerticalLayout {
         spacing: 4px;
         if root.f.note != "": Text { text: root.f.note; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
@@ -3212,7 +3491,7 @@ component BotFieldRow inherits VerticalLayout {
     if root.f.kind == "reset": HorizontalLayout {
         spacing: 12px;
         VerticalLayout { horizontal-stretch: 1; alignment: center; Text { text: root.f.label; color: Theme.text; font-weight: 700; font-size: 13px; } }
-        for c in [{ id: "daily", n: "Each Day" }, { id: "stream", n: "Each Stream" }, { id: "never", n: "Never" }]: VerticalLayout { alignment: center; Chip { label: c.n; on: root.f.value == c.id; clicked => { root.set(root.f.key, c.id); } } }
+        for c in [{ id: "stream", n: "Each Stream" }, { id: "daily", n: "Each Day" }, { id: "weekly", n: "Each Week" }, { id: "monthly", n: "Each Month" }, { id: "never", n: "Never" }]: VerticalLayout { alignment: center; Chip { label: c.n; on: root.f.value == c.id; clicked => { root.set(root.f.key, c.id); } } }
     }
     // (a row of choices, as many as it has)
     if root.f.kind == "chips": VerticalLayout {
@@ -3222,7 +3501,7 @@ component BotFieldRow inherits VerticalLayout {
         HorizontalLayout { spacing: 6px; alignment: start; for c[i] in root.f.opts: Chip { label: c; on: root.f.value == root.f.opt-ids[i]; clicked => { root.set(root.f.key, root.f.opt-ids[i]); } } }
     }
     // (a Suite widget's preview: which one, its theme in extra, the Goals' look in label)
-    if root.f.kind == "suiteprev": SuitePreview { which: root.f.value; theme: root.f.extra; rings: root.f.label == "rings"; }
+    if root.f.kind == "suiteprev": SuitePreview { which: root.f.value; theme: root.f.extra; rings: root.f.label == "rings"; look: root.f.label; own-c1: root.f.c1; own-c2: root.f.c2; gif: root.f.n == 1; spot: root.f.key; }
     if root.f.kind == "chips2": HorizontalLayout {
         spacing: 12px;
         VerticalLayout { horizontal-stretch: 1; alignment: center; Text { text: root.f.label; color: Theme.text; font-weight: 700; font-size: 13px; } }
@@ -3788,7 +4067,7 @@ component BotPage inherits Rectangle {
                 if root.widgets-view == "widgets": VerticalLayout {
                   spacing: 8px;
                   for row[ri] in [
-                    [{ n: "Hype Meter", p: "/hype", s: "hype", i: Icons.broadcast },
+                    [{ n: "Hype Train", p: "/hype", s: "hype", i: Icons.broadcast },
                         { n: "Vote Skip", p: "/voteskip", s: "voteskip", i: Icons.next },
                         { n: "Spin the Wheel", p: "/wheel", s: "wheel", i: Icons.dice }],
                     [{ n: "Leaderboard", p: "/leaderboard", s: "leaderboard", i: Icons.coins },
@@ -4713,7 +4992,7 @@ export component AppWindow inherits Window {
                         property <string> rated;
                         Rectangle { width: parent.width - 4px; height: 28px; x: 2px; y: (parent.height - self.height) / 2; border-radius: 14px; background: root.mix-on ? Theme.elevated.with-alpha(0.55) : transparent; }
                         Rectangle { width: 28px; height: 28px; x: 2px; y: (parent.height - self.height) / 2; border-radius: 14px; background: sta-m.has-hover ? Theme.elevated : transparent; }
-                        for b[k] in [{ good: true, d: Icons.thumb-up, tip: "Good transition. Keep mixing songs like these this way." }, { good: false, d: Icons.thumb-down, tip: "Could be better. There's a better way to mix these two songs." }]: Rectangle {
+                        for b[k] in [{ good: true, d: Icons.thumb-up, tip: "Good mix" }, { good: false, d: Icons.thumb-down, tip: "Could be better" }]: Rectangle {
                             x: 34px + k * 28px;
                             width: 26px;
                             height: 26px;

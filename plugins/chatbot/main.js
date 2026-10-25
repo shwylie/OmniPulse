@@ -507,7 +507,7 @@ const EVENT_OF = {
   "channel.channel_points_custom_reward_redemption.add": "reward",
   "first.message": "firstmsg", "stream.online": "online", "stream.offline": "offline", "channel.ad_break.begin": "adbreak",
   "channel.prediction.begin": "prediction", "channel.prediction.end": "predictionend", "channel.poll.end": "pollend",
-  "channel.hype_train.end": "hypetrainend", "channel.charity_campaign.donate": "charity", "channel.shoutout.receive": "shoutoutin",
+  "channel.hype_train.end": "hypetrainend", "channel.hype_train.progress": "hypetrainprogress", "channel.charity_campaign.donate": "charity", "channel.shoutout.receive": "shoutoutin",
   "channel.vip.add": "vip", "channel.moderator.add": "mod", "watch.streak": "watchstreak",
 };
 
@@ -536,6 +536,9 @@ function fire(ev, ctx) {
 function onEvent(type, e) {
   const ev = EVENT_OF[type];
   if (!ev) return;
+  // (Twitch's own hype train: ours follows it, its level at least Twitch's)
+  if (ev === "hypetrain" || ev === "hypetrainprogress" || ev === "hypetrainend") trainTwitch(ev, e);
+  if (ev === "hypetrainprogress") return;
   if (ev === "online") { isLive = true; spoken.clear(); credits = {}; }
   if (ev === "offline") isLive = false;
   const a = asAlert(type, e) || {};
@@ -2003,6 +2006,7 @@ const SUBS = (me) => [
   ["channel.prediction.end", "1", { broadcaster_user_id: me }],
   ["channel.poll.end", "1", { broadcaster_user_id: me }],
   ["channel.hype_train.end", "1", { broadcaster_user_id: me }],
+  ["channel.hype_train.progress", "1", { broadcaster_user_id: me }],
   ["channel.charity_campaign.donate", "1", { broadcaster_user_id: me }],
   ["channel.shoutout.receive", "1", { broadcaster_user_id: me, moderator_user_id: me }],
   ["channel.vip.add", "1", { broadcaster_user_id: me }],
@@ -2107,16 +2111,37 @@ function suiteNow() {
   if (!suite) {
     const k = S().suiteState || {};
     suite = {
-      goals: Object.assign({ follow: 0, sub: 0, bits: 0, donation: 0, day: today() }, k.goals || {}),
+      goals: Object.assign({ follow: 0, sub: 0, bits: 0, donation: 0, common: 0, day: today() }, k.goals || {}),
       latest: Object.assign({ follow: null, sub: null }, k.latest || {}),
       timer: Object.assign({ running: false, leftMs: num(S().timerStart || 60) * 60000, endsAt: 0, startedAt: 0, elapsedMs: 0, addedMs: 0 }, k.timer || {}),
       raid: null,
       lastRaid: k.lastRaid || null,
     };
   }
-  // (goals reset each day, if that's how they're set)
-  if (String(S().goalReset || "stream") === "daily" && suite.goals.day !== today()) Object.assign(suite.goals, { follow: 0, sub: 0, bits: 0, donation: 0, day: today() });
+  // (goals start again each day, week or month, if that's how they're set: the day kept is the period's first)
+  const per = String(S().goalReset || "stream"), start = periodStart(per);
+  if (start && suite.goals.day !== start) Object.assign(suite.goals, { follow: 0, sub: 0, bits: 0, donation: 0, common: 0, day: start });
   return suite;
+}
+function periodStart(per) {
+  const d = new Date();
+  if (per === "daily") return today();
+  if (per === "weekly") { d.setDate(d.getDate() - ((d.getDay() + 6) % 7)); return d.toISOString().slice(0, 10); }
+  if (per === "monthly") return today().slice(0, 7) + "-01";
+  return "";
+}
+// (the Common Goal: everything counted toward one, at the points each is worth)
+function commonAdd(ev, ctx) {
+  const x = S(), g = suiteNow().goals;
+  const pts = (k, d) => { const v = x[k]; return v === undefined || v === "" ? d : num(v); };
+  let add = 0;
+  if (ev === "follow") add = pts("goalPtsFollow", 1);
+  if (ev === "sub" || ev === "resub") add = pts("goalPtsSub", 5);
+  if (ev === "gift") add = pts("goalPtsSub", 5) * Math.max(1, num(ctx.amount));
+  if (ev === "bits") add = num(ctx.amount) / 100 * pts("goalPtsBits", 1);
+  if (ev === "donation") add = money(ctx.amount) * pts("goalPtsDono", 1);
+  if (ev === "raid") add = num(ctx.amount) * pts("goalPtsRaid", 0);
+  g.common = Math.round((num(g.common) + add) * 100) / 100;
 }
 function suiteKeep() {
   clearTimeout(suiteSaveT);
@@ -2129,22 +2154,44 @@ function suitePush() {
     const st = suiteNow(), x = S();
     const goal = (k, label, dflt) => ({ on: yes(x["goal" + k + "On"] === undefined ? true : x["goal" + k + "On"]), label: String(x["goal" + k + "Label"] || label), target: Math.max(1, num(x["goal" + k + "Target"]) || dflt) });
     OmniPulse.app.suiteWidget({
-      goals: { counts: st.goals, follow: goal("Follow", "Follower goal", 10), sub: goal("Sub", "Sub goal", 5), bits: goal("Bits", "Bits goal", 1000), donation: goal("Dono", "Donation goal", 50), currency: String(x.goalCurrency || "$"), style: String(x.goalStyle || "bars") },
+      goals: { counts: st.goals, follow: goal("Follow", "Follower goal", 10), sub: goal("Sub", "Sub goal", 5), bits: goal("Bits", "Bits goal", 1000), donation: goal("Dono", "Donation goal", 50),
+        common: Object.assign(goal("Common", "Community goal", 100), { on: yes(x.goalCommonOn) }),
+        currency: String(x.goalCurrency || "$"), style: String(x.goalStyle || "bars"), shape: String(x.goalShape || "jar"), image: String(x.goalImage || ""), drops: String(x.goalDrops || "mixed"), pct: yes(x.goalPercent) },
       latest: { follow: st.latest.follow, sub: st.latest.sub },
       timer: Object.assign({ stopwatch: yes(x.timerStopwatch), label: String(x.timerLabel || ""), now: Date.now() }, st.timer),
       raid: st.raid,
       // (the fun's: the meter's level and how full, the skip votes, the wheel's last spin, the top points, and
       // emote rain's bursts)
-      hype: { on: funOn("hypeOn"), level: fun.level, fill: (fun.hype % hypeStep()) / hypeStep(), levelAt: fun.levelAt, label: String(x.hypeLabel || "Hype") },
+      hype: trainMode() ? {
+        on: funOn("hypeOn"), train: true, running: !!fun.train, show: String(x.hypeShow || "train"), level: fun.train ? fun.train.level : 0,
+        fill: fun.train ? (fun.train.pts % hypeStep()) / hypeStep() : 0, levelAt: fun.levelAt, endsAt: fun.train ? fun.train.endsAt : 0, secs: trainSecs(), now: Date.now(),
+        top: fun.train ? (Object.entries(fun.train.by).sort((a, b) => b[1] - a[1])[0] || [""])[0] : "", from: fun.train ? fun.train.from : [], done: fun.trainDone || null,
+        label: String(x.hypeLabel || "Hype Train"),
+      } : { on: funOn("hypeOn"), level: fun.level, fill: (fun.hype % hypeStep()) / hypeStep(), levelAt: fun.levelAt, label: String(x.hypeLabel || "Hype") },
       voteskip: { on: yes(x.skipOn), votes: fun.votes.size, need: Math.max(1, num(x.skipVotes) || 5), song: fun.song, command: String(x.skipCommand || "!skip") },
-      wheel: Object.assign({ prizes: wheelPrizes(), command: String(x.wheelCommand || "!spin") }, fun.wheel || {}),
+      wheel: Object.assign({ prizes: wheelPrizes(), weights: wheelList().map((p) => p.w), command: String(x.wheelCommand || "!spin"), secs: wheelSecs(), colors: String(x.wheelColors || "theme"), hide: yes(x.wheelHide) }, fun.wheel || {}),
       leaderboard: { list: leaders(), name: pointsName() },
       tune: fun.tune || null,
       burst: fun.burst,
+      rain: { src: String(x.rainSource || "chat"), imgs: String(x.rainImages || "").split(/[|\n]/).map((u) => u.trim()).filter((u) => /^https?:\/\//.test(u)).slice(0, 20), chat: yes(x.rainChat === undefined ? true : x.rainChat),
+        dir: String(x.rainDir || "down"), from: String(x.rainFrom || "all"), x: num(x.rainX) || 85, y: num(x.rainY) || 85, size: String(x.rainSize || "medium"), speed: String(x.rainSpeed || "normal"),
+        amount: num(x.rainAmount) || 30, spin: yes(x.rainSpin === undefined ? true : x.rainSpin) },
       anim: String(x.suiteAnim || "rise"),
       theme: String(x.suiteTheme || "dark"),
+      colors: suiteColors(),
+      gifs: { goals: x.gifGoals || "", timer: x.gifTimer || "", latest: x.gifLatest || "", raid: x.gifRaid || "", hype: x.gifHype || "", voteskip: x.gifVoteskip || "", wheel: x.gifWheel || "", leaderboard: x.gifLeaderboard || "", tune: x.gifTune || "" },
+      gifPlace: String(x.gifPlace || "top"),
+      gifSize: String(x.gifSize || "medium"),
     }).catch(() => {});
   }, 250);
+}
+// (the widgets' colours: your accent (none sent), one of the palettes, or your own two)
+const PALETTES = { sunset: ["#ff8a5c", "#ff4f8b"], ocean: ["#3ec7ff", "#5a6bff"], candy: ["#ff8fd8", "#b48eff"], mint: ["#5ef2b8", "#3ab0ff"], fire: ["#ffb03a", "#ff3d3d"], gold: ["#ffd76e", "#ff9f43"], mono: ["#f2f2f2", "#9a9aa6"] };
+function suiteColors() {
+  const x = S(), k = String(x.suiteColors || "accent");
+  const hex = (v, d) => /^#[0-9a-f]{6}$/i.test(String(v || "").trim()) ? String(v).trim() : d;
+  if (k === "custom") return { c1: hex(x.suiteC1, "#8e9bff"), c2: hex(x.suiteC2, "#ff7ac8") };
+  return PALETTES[k] ? { c1: PALETTES[k][0], c2: PALETTES[k][1] } : null;
 }
 function money(v) { const n = parseFloat(String(v || "").replace(/[^0-9.]/g, "")); return isNaN(n) ? 0 : n; }
 function tierOf(t) { return t === "3000" ? 3 : t === "2000" ? 2 : 1; }
@@ -2162,7 +2209,8 @@ function timerAdd(ms) {
 
 function suiteHear(ev, ctx) {
   const st = suiteNow(), x = S(), g = st.goals;
-  if (ev === "online" && String(x.goalReset || "stream") === "stream") Object.assign(g, { follow: 0, sub: 0, bits: 0, donation: 0, day: today() });
+  if (ev === "online" && String(x.goalReset || "stream") === "stream") Object.assign(g, { follow: 0, sub: 0, bits: 0, donation: 0, common: 0, day: today() });
+  if (["follow", "sub", "resub", "gift", "bits", "donation", "raid"].includes(ev)) commonAdd(ev, ctx);
   const sub = ev === "sub" || ev === "resub" || ev === "gift";
   if (ev === "follow") { g.follow++; st.latest.follow = { user: ctx.user, platform: ctx.platform, at: Date.now() }; if (yes(x.timerSubathon)) timerAdd(num(x.timerFollow) * 1000); }
   if (sub) {
@@ -2175,12 +2223,15 @@ function suiteHear(ev, ctx) {
   if (ev === "donation") { g.donation += money(ctx.amount); if (yes(x.timerSubathon)) timerAdd(money(ctx.amount) * num(x.timerDono) * 60000); }
   if (ev === "raid" && num(ctx.amount) >= Math.max(1, num(x.raidMin) || 1)) st.lastRaid = { user: ctx.user, userId: ctx.userId, viewers: num(ctx.amount), platform: ctx.platform, at: Date.now() };
   // (the hype meter: what happens fills it more than chat does; a sub, a raid or a good cheer pours emotes)
-  if (ev === "follow") hypeAdd(10);
-  if (sub) hypeAdd(25 * (ev === "gift" ? Math.max(1, num(ctx.amount)) : 1));
-  if (ev === "bits") hypeAdd(num(ctx.amount) / 10);
-  if (ev === "donation") hypeAdd(money(ctx.amount) * 10);
-  if (ev === "raid") hypeAdd(Math.max(10, num(ctx.amount)));
-  if (sub || ev === "raid" || (ev === "bits" && num(ctx.amount) >= 100)) fun.burst++;
+  if (ev === "follow" && !trainMode()) hypeAdd(10);
+  if (sub) hypeAdd(25 * (ev === "gift" ? Math.max(1, num(ctx.amount)) : 1), ctx.user, ctx.platform);
+  if (ev === "bits") hypeAdd(num(ctx.amount) / 10, ctx.user, ctx.platform);
+  if (ev === "kicks") hypeAdd(num(ctx.amount) / 10, ctx.user, ctx.platform);
+  if (ev === "donation") hypeAdd(money(ctx.amount) * 10, ctx.user, ctx.platform);
+  if (ev === "raid" && !trainMode()) hypeAdd(Math.max(10, num(ctx.amount)));
+  // (what pours emotes, as Emote Rain's set)
+  const pour = (k, d) => yes(x[k] === undefined ? d : x[k]);
+  if ((sub && pour("rainOnSub", true)) || (ev === "raid" && pour("rainOnRaid", true)) || (ev === "bits" && num(ctx.amount) >= 100 && pour("rainOnBits", true)) || (ev === "follow" && pour("rainOnFollow", false)) || (ev === "donation" && pour("rainOnDono", true))) fun.burst++;
   if (["follow", "bits", "donation", "raid", "online"].includes(ev) || sub) { suiteKeep(); suitePush(); }
 }
 
@@ -2217,13 +2268,80 @@ async function raidIn(ctx) {
 
 // ---------- the Suite's fun: a hype meter, vote skip, a wheel, emote rain's bursts, a leaderboard ----------
 // Each shown by its own page (/hype, /voteskip, /wheel, /leaderboard, /emotes), sent with the others in suitePush.
-const fun = { hype: 0, level: 0, levelAt: 0, chatAt: {}, votes: new Set(), song: "", wheel: null, spunAt: {}, burst: 0 };
+const fun = { hype: 0, level: 0, levelAt: 0, chatAt: {}, votes: new Set(), song: "", wheel: null, spunAt: {}, burst: 0, train: null, warm: [] };
 const funOn = (k) => yes(S()[k] === undefined ? true : S()[k]);
 const hypeStep = () => Math.max(10, num(S().hypeLevel) || 100);
 
-// (the meter: chat and what happens fill it; each level reached, said and celebrated, and actions run)
-function hypeAdd(n) {
+// (the hype train, across platforms: subs, gifts, bits, Kicks, donations and Super Chats from Twitch, Kick and
+// YouTube all count. Enough of them close together starts one (or Twitch's own starting does); each one keeps it
+// going, a level at a time, and it ends when nothing's come in for a while)
+const trainMode = () => String(S().hypeMode || "train") === "train";
+const trainSecs = () => Math.max(60, Math.min(900, num(S().hypeSecs) || 300));
+function trainAdd(n, user, platform) {
   if (!funOn("hypeOn") || n <= 0) return;
+  const x = S(), now = Date.now();
+  if (!fun.train) {
+    if (String(x.hypeStart || "any") === "twitch") return;
+    // (not yet: kept for 5 minutes, and a train starts once they reach its start)
+    fun.warm = fun.warm.filter((w) => now - w.at < 300000);
+    fun.warm.push({ at: now, n });
+    if (fun.warm.reduce((a, w) => a + w.n, 0) < Math.max(1, num(x.hypeStartPts) || 50)) return;
+    trainStart(fun.warm.reduce((a, w) => a + w.n, 0) - n);
+  }
+  const t = fun.train;
+  t.pts += n;
+  t.endsAt = now + trainSecs() * 1000;
+  if (user) t.by[user] = (t.by[user] || 0) + n;
+  if (platform && !t.from.includes(platform)) t.from.push(platform);
+  trainLevel();
+  suitePush();
+}
+function trainStart(pts) {
+  fun.warm = [];
+  fun.train = { pts: Math.max(0, pts || 0), level: 1, twitch: 0, startedAt: Date.now(), endsAt: Date.now() + trainSecs() * 1000, by: {}, from: [] };
+  fun.level = 1; fun.levelAt = Date.now(); fun.burst++;
+  if (funOn("hypeChat")) reply(null, String(S().hypeStartMessage || "🚂 A hype train's started! Subs, bits, Kicks and donations on any platform keep it going.").replace(/\{level\}/g, "1"), "all");
+  fire("suitetrain", { user: "", amount: "1", message: "", rawInput: "", platform: "all", replay: true });
+  clearInterval(fun.trainT);
+  fun.trainT = setInterval(() => { if (fun.train && Date.now() > fun.train.endsAt) trainEnd(); }, 1000);
+}
+function trainLevel() {
+  const t = fun.train, lvl = Math.max(t.twitch, 1 + Math.floor(t.pts / hypeStep()));
+  if (lvl > t.level) {
+    t.level = lvl; fun.level = lvl; fun.levelAt = Date.now(); fun.burst++;
+    if (funOn("hypeChat")) reply(null, String(S().hypeMessage || "Hype level {level}! 🔥").replace(/\{level\}/g, String(lvl)), "all");
+    fire("hypelevel", { user: "", amount: String(lvl), message: "", rawInput: "", platform: "all", replay: true });
+  }
+}
+function trainEnd() {
+  const t = fun.train;
+  if (!t) return;
+  clearInterval(fun.trainT);
+  fun.train = null;
+  const top = Object.entries(t.by).sort((a, b) => b[1] - a[1])[0];
+  fun.trainDone = { level: t.level, top: top ? top[0] : "", at: Date.now() };
+  if (funOn("hypeChat")) reply(null, String(S().hypeEndMessage || "The hype train ended at level {level}. Thank you!{top}").replace(/\{level\}/g, String(t.level)).replace(/\{top\}/g, top ? " Top: " + top[0] + "." : ""), "all");
+  fire("suitetrainend", { user: top ? top[0] : "", amount: String(t.level), message: "", rawInput: "", platform: "all", replay: true });
+  fun.level = 0;
+  suitePush();
+}
+function trainTwitch(ev, e) {
+  if (!funOn("hypeOn") || !trainMode()) return;
+  if (ev === "hypetrainend") { if (fun.train && String(S().hypeStart || "any") === "twitch") trainEnd(); return; }
+  if (!fun.train) trainStart(0);
+  fun.train.twitch = Math.max(fun.train.twitch, num(e.level) || 1);
+  fun.train.endsAt = Math.max(fun.train.endsAt, e.expires_at ? Date.parse(e.expires_at) : 0, Date.now() + 30000);
+  if (!fun.train.from.includes("twitch")) fun.train.from.push("twitch");
+  // (Twitch's top contributor)
+  for (const c of e.top_contributions || []) if (c.user_name) fun.train.by[c.user_name] = Math.max(fun.train.by[c.user_name] || 0, num(c.total) / (c.type === "bits" ? 10 : 20));
+  trainLevel();
+  suitePush();
+}
+
+// (the meter: chat and what happens fill it; each level reached, said and celebrated, and actions run)
+function hypeAdd(n, user, platform) {
+  if (!funOn("hypeOn") || n <= 0) return;
+  if (trainMode()) return trainAdd(n, user, platform);
   fun.hype += n;
   const lvl = Math.floor(fun.hype / hypeStep());
   if (lvl > fun.level) {
@@ -2238,11 +2356,12 @@ function hypeAdd(n) {
 // (a message: a little each, at most once every 10 s per viewer, so one can't fill it alone)
 function funChat(user) {
   const k = String(user || "").toLowerCase();
+  if (trainMode()) return;
   if (!fun.chatAt[k] || Date.now() - fun.chatAt[k] > 10000) { fun.chatAt[k] = Date.now(); hypeAdd(Math.max(0, num(S().hypeChatPts) || 2)); }
 }
 // (and it cools, slowly: a level's lost again only once it's well under it)
 setInterval(() => {
-  if (fun.hype <= 0) return;
+  if (fun.hype <= 0 || trainMode()) return;
   const step = hypeStep();
   fun.hype = Math.max(0, fun.hype - step * Math.max(0, num(S().hypeCool) || 2) / 100);
   const lvl = Math.floor(fun.hype / step);
@@ -2267,7 +2386,13 @@ function voteSkip(user, id, platform) {
 }
 
 // (the wheel: its prizes, one picked; shown spinning, then said, and the actions waiting for it run with %prize%)
-function wheelPrizes() { return String(S().wheelPrizes || "A shoutout | 100 points | Pick the next song | Nothing! | Hydrate").split("|").map((p) => p.trim()).filter(Boolean).slice(0, 16); }
+// (the prizes, each with its chance: "Nothing! x3" is three times as likely as one without)
+function wheelList() {
+  return String(S().wheelPrizes || "A shoutout | 100 points | Pick the next song | Nothing! | Hydrate").split("|").map((p) => p.trim()).filter(Boolean).slice(0, 16)
+    .map((p) => { const m = /^(.*?)\s+[x\u00d7](\d{1,2})$/i.exec(p); return m ? { name: m[1].trim(), w: Math.max(1, Math.min(20, Number(m[2]))) } : { name: p, w: 1 }; });
+}
+function wheelPrizes() { return wheelList().map((p) => p.name); }
+function wheelSecs() { return Math.max(3, Math.min(12, num(S().wheelSecs) || 6)); }
 async function wheelSpin(user, id, platform, free) {
   const x = S(), k = String(user || "").toLowerCase();
   const prizes = wheelPrizes();
@@ -2283,15 +2408,18 @@ async function wheelSpin(user, id, platform, free) {
     }
     fun.spunAt[k] = Date.now();
   }
-  const pick = Math.floor(Math.random() * prizes.length);
+  // (by their chances)
+  const list = wheelList(), total = list.reduce((a, p) => a + p.w, 0);
+  let r = Math.random() * total, pick = 0;
+  while (pick < list.length - 1 && r >= list[pick].w) { r -= list[pick].w; pick++; }
   fun.wheel = { prizes, pick, user, at: Date.now() };
   suitePush();
-  // (said once the wheel's stopped, as the page has it spin for 6 s)
+  // (said once the wheel's stopped, as the page has it spin)
   setTimeout(() => {
     const prize = prizes[pick];
     if (funOn("wheelChat")) reply(null, String(x.wheelMessage || "{user} spun the wheel: {prize}!").replace(/\{user\}/g, user || "The wheel").replace(/\{prize\}/g, prize), platform || "all");
     fire("wheel", { user: user || "", amount: String(pick + 1), message: prize, rawInput: prize, prize, platform: platform || "all", replay: true });
-  }, 6500);
+  }, wheelSecs() * 1000 + 500);
 }
 
 // (Name That Tune: chat guesses what's playing. Its name and artist are hidden from the Stream Widget, a hint
@@ -2409,9 +2537,13 @@ function suiteTest(kind) {
   if (kind === "follow") st.latest.follow = { user: "TestFollower", platform: "twitch", at: Date.now() };
   if (kind === "sub") st.latest.sub = { user: "TestSubscriber", platform: "twitch", tier: 1, months: 6, gift: 0, at: Date.now() };
   if (kind === "raid") st.raid = { user: "TestRaider", login: "testraider", viewers: 42, platform: "twitch", at: Date.now(), secs: Math.max(5, num(S().raidSecs) || 20), clip: null };
-  if (kind === "goals") { st.goals.follow++; st.goals.sub++; st.goals.bits += 100; st.goals.donation += 5; suiteKeep(); }
+  if (kind === "goals") { st.goals.follow++; st.goals.sub++; st.goals.bits += 100; st.goals.donation += 5; st.goals.common = num(st.goals.common) + 10; suiteKeep(); }
+  if (kind === "goalsreset") { Object.assign(st.goals, { follow: 0, sub: 0, bits: 0, donation: 0, common: 0 }); suiteKeep(); suitePush(); return "The goals are back to 0."; }
   // (the fun's: a level's worth of hype, a couple of skip votes, a free spin, a burst of emotes)
-  if (kind === "hype") { hypeAdd(hypeStep()); return "Added a level's worth of hype."; }
+  if (kind === "hype") {
+    if (trainMode()) { if (!fun.train) trainStart(0); trainAdd(hypeStep() * 0.6, "You", "twitch"); return "A test hype train: it ends in " + trainSecs() + " s unless more comes in."; }
+    hypeAdd(hypeStep()); return "Added a level's worth of hype.";
+  }
   if (kind === "voteskip") { fun.votes.add("test-a"); fun.votes.add("test-b"); suitePush(); return "Two test votes added. The next song clears them."; }
   if (kind === "wheel") { wheelSpin("You", null, "all", true); return "Spinning."; }
   if (kind === "emoterain") { fun.burst++; suitePush(); return "Raining emotes."; }
