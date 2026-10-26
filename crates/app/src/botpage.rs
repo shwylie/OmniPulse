@@ -55,6 +55,7 @@ mod live_tests {
 }
 
 /// One line of a sheet or a step, as the page draws it (BotField)
+#[derive(Clone)]
 pub struct Field { pub key: String, pub kind: &'static str, pub label: String, pub note: String, pub value: String, pub extra: String, pub n: i32 }
 
 fn f(kind: &'static str, key: &str, label: &str, note: &str, value: &str, extra: &str) -> Field {
@@ -272,6 +273,23 @@ pub fn sheet(id: &str, cur: &Map<String, Value>) -> (String, Vec<Field>) {
         v.push(f("chips", &a, "How it comes in and goes out", "As the Suite's is the Suite's Widget Animation, for every widget.", s(cur, &a), "=As the Suite's|rise=Rise|slide=Slide|flip=Flip|pop=Pop|none=Still"));
         v.push(f("chips", &sp, "How fast", "", if s(cur, &sp).is_empty() { "normal" } else { s(cur, &sp) }, "slow=Slow|normal=Normal|fast=Fast"));
     }
+    // (actions side by side: two or more in a row (not web links), one card of buttons, "act=Label|..."; their
+    // notes, if any, as its note)
+    let mut grouped: Vec<Field> = Vec::with_capacity(v.len());
+    let act = |x: &Field| x.kind == "link" && !x.extra.starts_with("url:") && !x.extra.starts_with("http") && !x.extra.is_empty();
+    let mut i = 0;
+    while i < v.len() {
+        let mut j = i;
+        while j < v.len() && act(&v[j]) { j += 1; }
+        if j - i >= 2 {
+            let run: Vec<Field> = v[i..j].to_vec();
+            let opts = run.iter().map(|x| format!("{}={}", x.extra.replace(['|', '='], " "), x.label)).collect::<Vec<_>>().join("|");
+            let notes = run.iter().filter(|x| !x.note.is_empty()).map(|x| format!("{}: {}", x.label, x.note)).collect::<Vec<_>>().join(" ");
+            grouped.push(f("buttons", "", "", &notes, "", &opts));
+            i = j;
+        } else { grouped.push(v[i].clone()); i += 1; }
+    }
+    let mut v = grouped;
     // (the preview: the colours as hex in its note, and whether there's a GIF)
     let col = suite_colours(cur).map(|(a, b)| format!("{a},{b}")).unwrap_or_default();
     let has_gif = !gif.is_empty() && !s(cur, gif).trim().is_empty();

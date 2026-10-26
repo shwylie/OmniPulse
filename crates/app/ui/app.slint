@@ -3832,6 +3832,16 @@ component BotFieldRow inherits VerticalLayout {
             if inp.text == "" && root.f.extra != "": Text { x: 12px; text: root.f.extra; color: Theme.muted.with-alpha(0.6); font-size: 13px; vertical-alignment: center; }
         }
     }
+    // (actions side by side: a button each, done here, now)
+    if root.f.kind == "buttons": VerticalLayout {
+        spacing: 8px;
+        HorizontalLayout {
+            spacing: 8px;
+            alignment: start;
+            for c[i] in root.f.opts: Pill { label: c; clicked => { root.act(root.f.opt-ids[i]); } }
+        }
+        if root.f.note != "": Text { text: root.f.note; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
+    }
     // (a goal, on one row: shown or not, what it counts, its name and its target)
     if root.f.kind == "goalrow": HorizontalLayout {
         spacing: 10px;

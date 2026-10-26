@@ -7035,7 +7035,7 @@ fn bot_fields(list: Vec<botpage::Field>) -> (Vec<BotField>, String) {
     // (a row of choices: its extra, as "id=Name|id=Name", for the page to draw)
     let strs = |v: Vec<String>| ModelRc::from(Rc::new(VecModel::from(v.into_iter().map(slint::SharedString::from).collect::<Vec<_>>())));
     let rows = list.into_iter().map(|x| {
-        let (ids, names): (Vec<String>, Vec<String>) = if x.kind == "chips" { x.extra.split('|').filter_map(|o| o.split_once('=')).map(|(i, n)| (i.to_string(), n.to_string())).unzip() }
+        let (ids, names): (Vec<String>, Vec<String>) = if x.kind == "chips" || x.kind == "buttons" { x.extra.split('|').filter_map(|o| o.split_once('=')).map(|(i, n)| (i.to_string(), n.to_string())).unzip() }
             // (a list: its items, from what's kept, or the default in extra)
             else if x.kind == "list" || x.kind == "piclist" { (Vec::new(), botpage::list_items(if x.value.is_empty() { &x.extra } else { &x.value })) }
             else { (Vec::new(), Vec::new()) };
