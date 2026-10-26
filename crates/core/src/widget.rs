@@ -222,6 +222,8 @@ fn media_file(kind: &str, slot: &str) -> Option<std::path::PathBuf> {
 
 const SOUND_EXTS: [&str; 6] = ["mp3", "wav", "ogg", "m4a", "aac", "flac"];
 pub const IMAGE_EXTS: [&str; 5] = ["gif", "png", "webp", "jpg", "jpeg"];
+/// (an alert's picture can be a video too: played muted, looping)
+pub const VIDEO_EXTS: [&str; 2] = ["webm", "mp4"];
 
 /// Copies a sound or a picture (a GIF, say) in for one alert, replacing its old one; returns its file name
 pub fn alert_media_set(kind: &str, slot: &str, path: &str) -> Result<String, String> {
@@ -232,7 +234,7 @@ pub fn alert_media_set(kind: &str, slot: &str, path: &str) -> Result<String, Str
     let exts: &[&str] = if pic { &IMAGE_EXTS } else { &SOUND_EXTS };
     let src = std::path::Path::new(path);
     let ext = src.extension().and_then(|e| e.to_str()).map(|e| e.to_lowercase()).unwrap_or_default();
-    if !exts.contains(&ext.as_str()) {
+    if !exts.contains(&ext.as_str()) && !(slot == "image" && VIDEO_EXTS.contains(&ext.as_str())) {
         return Err(format!("Pick {} file ({}).", if pic { "an image or GIF" } else { "a sound" }, exts.join(", ")));
     }
     let size = std::fs::metadata(src).map_err(|e| e.to_string())?.len();

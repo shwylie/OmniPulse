@@ -565,6 +565,7 @@ fn fields_of(name: &str, vals: &Map<String, Value>, prefs: &Value, lan: &str) ->
             if !in_widget { look.push(info("Alerts Address", &format!("http://127.0.0.1:{port}/alerts"), &format!("http://127.0.0.1:{port}/alerts"), "Add this as a Browser source in OBS, where you'd like your alerts.")); }
             look.extend([
                 button("alList", "Alerts and Their Order", "Open", "Which alerts show and which goes first, and each one's words, picture, GIF and sound."),
+                button("alSlImport", "Import from Streamlabs", "Import", "Copies your Streamlabs Alert Box into these alerts: each one's picture, sound, message, how long it shows and its colours."),
                 note("How They Look"),
                 sel("alertTheme", "Theme", "The preview above plays made-up alerts in it. GIF, GIF Pop-Out and Meme are made for GIFs.", &[(json!("widget"), "Widget"), (json!("glass"), "Glass"), (json!("neon"), "Neon"), (json!("banner"), "Banner"), (json!("split"), "Split"), (json!("comic"), "Comic"), (json!("minimal"), "Minimal"), (json!("gif"), "GIF"), (json!("gifpop"), "GIF Pop-Out"), (json!("meme"), "Meme")]),
             ]);

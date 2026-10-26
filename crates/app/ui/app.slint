@@ -5387,6 +5387,8 @@ export component AppWindow inherits Window {
     in-out property <string> ask-input;
     in property <string> ask-input-hint;
     in property <[string]> ask-input-options;
+    /// (a secret asked for: its box hides what's typed)
+    in property <bool> ask-input-secret;
     /// asking to join your Jam, waiting: each let in or declined
     in property <[string]> jam-waiting;
     callback jam-admit(int, bool);
@@ -9488,7 +9490,7 @@ export component AppWindow inherits Window {
                     border-width: 1px;
                     border-color: aiti.has-focus ? Theme.accent : Theme.line;
                     if aiti.text == "": Text { x: 12px; height: parent.height; vertical-alignment: center; text: root.ask-input-hint; color: Theme.muted; font-size: 13px; }
-                    aiti := TextInput { property <length> sx; cursor-position-changed(p) => { if (p.x + self.sx < 0px) { self.sx = -p.x; } else if (p.x + self.sx > parent.width - 24px - 2px) { self.sx = parent.width - 24px - 2px - p.x; } }  x: 12px + min(0px, max(parent.width - 24px - self.width, self.sx)); width: max(parent.width - 24px, self.preferred-width + 4px); height: parent.height; vertical-alignment: center; color: Theme.text; font-size: 13px; single-line: true; text <=> root.ask-input; init => { self.focus(); self.select-all(); } accepted => { root.ask-answer(true); } }
+                    aiti := TextInput { property <length> sx; cursor-position-changed(p) => { if (p.x + self.sx < 0px) { self.sx = -p.x; } else if (p.x + self.sx > parent.width - 24px - 2px) { self.sx = parent.width - 24px - 2px - p.x; } }  x: 12px + min(0px, max(parent.width - 24px - self.width, self.sx)); width: max(parent.width - 24px, self.preferred-width + 4px); height: parent.height; vertical-alignment: center; color: Theme.text; font-size: 13px; single-line: true; input-type: root.ask-input-secret ? InputType.password : InputType.text; text <=> root.ask-input; init => { self.focus(); self.select-all(); } accepted => { root.ask-answer(true); } }
                 }
                 if root.ask-input-on && root.ask-input-options.length > 0: Text { text: "Or pick one there is:"; color: Theme.muted; font-size: 12px; }
                 if root.ask-input-on && root.ask-input-options.length > 0: ScrollView {

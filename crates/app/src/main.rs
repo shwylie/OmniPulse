@@ -6,6 +6,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod keysetup;
+mod slimport;
 mod offset;
 mod plugrun;
 mod collab;
@@ -8048,6 +8049,7 @@ fn windows_version() -> String {
 
 fn panel_press(shared: &Shared, key: &str) {
     if key == "reportSend" { return report_send(shared); }
+    if key == "alSlImport" { return sl_import_ask(shared); }
     if key == "ytHelpersSetup" { return helpers_act(shared, "setup"); }
     // (the Stream Deck plugin: given to Stream Deck to install, as it asks)
     if key == "sdInstall" {
@@ -8219,7 +8221,7 @@ fn panel_press(shared: &Shared, key: &str) {
         }
         k if k.starts_with("alPic:") || k.starts_with("alSnd:") => {
             let (kind, image) = if let Some(x) = k.strip_prefix("alPic:") { (x.to_string(), true) } else { (k[6..].to_string(), false) };
-            let (title, exts): (&str, &[&str]) = if image { ("Choose a picture or GIF for this alert", &["gif", "png", "webp", "jpg", "jpeg"]) } else { ("Choose a sound for this alert", &["mp3", "wav", "ogg", "m4a", "aac", "flac"]) };
+            let (title, exts): (&str, &[&str]) = if image { ("Choose a picture, GIF or video for this alert", &["gif", "png", "webp", "jpg", "jpeg", "webm", "mp4"]) } else { ("Choose a sound for this alert", &["mp3", "wav", "ogg", "m4a", "aac", "flac"]) };
             let Some(path) = ask_path(rfd::FileDialog::new().set_title(title).add_filter(if image { "Pictures" } else { "Sounds" }, exts), Ask::Open, { let (s, k) = (shared.clone(), key.to_string()); move || panel_press(&s, &k) }) else { return };
             match omnipulse_core::widget::alert_media_set(&kind, if image { "image" } else { "sound" }, &path.display().to_string()) {
                 Ok(file) => {
@@ -10326,9 +10328,104 @@ fn ask(shared: &Shared, title: &str, text: &str, ok: &str, then: impl FnOnce(&Sh
 }
 
 fn ask_answer_ui(shared: &Shared, ok: bool) {
-    if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_ask_open(false); ui.set_ask_input_on(false); }
+    if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_ask_open(false); ui.set_ask_input_on(false); ui.set_ask_input_secret(false); }
     let then = ASKED.with(|a| a.borrow_mut().take());
     if ok { if let Some(f) = then { f(shared); } }
+}
+
+// ---------- Import from Streamlabs (slimport) ----------
+
+/// The Alert Box link asked for: filled in from the clipboard if it holds one, hidden as it's typed (it's a secret)
+fn sl_import_ask(shared: &Shared) {
+    let clip = arboard::Clipboard::new().and_then(|mut c| c.get_text()).unwrap_or_default();
+    let now = if slimport::token(&clip).is_some() { clip.trim().to_string() } else { String::new() };
+    ask_input(shared, "Import from Streamlabs", "On streamlabs.com, open Alert Box, click Click to show widget URL, then click Copy, and paste it here. It's kept secret: only Streamlabs sees it. Your alerts' pictures, sounds and messages are replaced with your Streamlabs ones.", "Import", &now, "Paste your Alert Box link here", Vec::new(), |s, link| sl_import(s, link));
+    if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_ask_input_secret(true); }
+}
+
+/// The Alert Box's settings read, and its pictures and sounds fetched (into a folder of their own first)
+fn sl_import(shared: &Shared, link: String) {
+    let say = |t: &str| if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_status(t.into()); };
+    let Some(token) = slimport::token(&link) else { return say("That isn't an Alert Box link. It looks like streamlabs.com/alert-box/v3/ and then letters and numbers.") };
+    say("Importing your Streamlabs alerts...");
+    let (rt, weak) = { let a = shared.borrow(); (a.rt.clone(), a.ui.clone()) };
+    rt.spawn(async move {
+        let got: Result<(Vec<slimport::One>, Vec<(&'static str, bool, std::path::PathBuf)>, usize), String> = async {
+            let c = reqwest::Client::builder().user_agent("Mozilla/5.0 OmniPulse").timeout(std::time::Duration::from_secs(30)).build().map_err(|e| e.to_string())?;
+            let r = c.get(slimport::config_url(&token)).header("referer", format!("https://streamlabs.com/alert-box/v3/{token}")).send().await.map_err(|_| "Couldn't reach Streamlabs.".to_string())?;
+            if !r.status().is_success() { return Err("Streamlabs didn't take that link. Copy it again from Alert Box.".into()); }
+            let cfg: serde_json::Value = r.json().await.map_err(|_| "Streamlabs didn't take that link. Copy it again from Alert Box.".to_string())?;
+            let list = slimport::read(&cfg["settings"]);
+            if list.is_empty() { return Err("That Alert Box has no alerts to import.".into()); }
+            let dir = std::env::temp_dir().join("omnipulse-streamlabs");
+            let _ = std::fs::create_dir_all(&dir);
+            let (mut files, mut skipped) = (Vec::new(), 0usize);
+            for o in &list {
+                for (image, url) in [(true, &o.image), (false, &o.sound)] {
+                    let Some(url) = url else { continue };
+                    // (a video as its picture: not one alerts take)
+                    let Some(ext) = slimport::ext_of(url, image) else { skipped += 1; continue };
+                    let Ok(r) = c.get(url).send().await else { skipped += 1; continue };
+                    let Ok(bytes) = r.bytes().await else { skipped += 1; continue };
+                    if bytes.len() > 20 * 1024 * 1024 { skipped += 1; continue; }
+                    let path = dir.join(format!("{}-{}.{ext}", o.kind, if image { "picture" } else { "sound" }));
+                    if std::fs::write(&path, &bytes).is_ok() { files.push((o.kind, image, path)); }
+                }
+            }
+            Ok((list, files, skipped))
+        }.await;
+        let _ = weak.upgrade_in_event_loop(move |_| SHARED.with(|s| {
+            let Some(sh) = s.borrow().clone() else { return };
+            match got {
+                Ok((list, files, skipped)) => sl_import_apply(&sh, list, files, skipped),
+                Err(e) => if let Some(ui) = sh.borrow().ui.upgrade() { ui.set_status(e.into()); },
+            }
+        }));
+    });
+}
+
+/// What was imported, put in: each picture and sound as if chosen, each message, time and colours as if typed
+fn sl_import_apply(shared: &Shared, list: Vec<slimport::One>, files: Vec<(&'static str, bool, std::path::PathBuf)>, skipped: usize) {
+    let (mut pics, mut sounds) = (0, 0);
+    for (kind, image, path) in &files {
+        let Ok(file) = omnipulse_core::widget::alert_media_set(kind, if *image { "image" } else { "sound" }, &path.display().to_string()) else { continue };
+        let key = if *image { "alertImages" } else { "alertSounds" };
+        let mut all = shared.borrow().web.prefs[key].as_object().cloned().unwrap_or_default();
+        all.insert(kind.to_string(), serde_json::json!({ "name": file, "at": now_ms() }));
+        pref_put(shared, key, serde_json::Value::Object(all));
+        if *image { pics += 1; } else {
+            sounds += 1;
+            // (measured, so it plays about as loud as the others)
+            if let Ok(mut m) = omnipulse_core::loudness::alert_levels(kind) {
+                let mut lv = shared.borrow().web.prefs["alertLevels"].as_object().cloned().unwrap_or_default();
+                m["adj"] = serde_json::json!(0);
+                lv.insert(kind.to_string(), m);
+                pref_put(shared, "alertLevels", serde_json::Value::Object(lv));
+            }
+        }
+        let _ = std::fs::remove_file(path);
+    }
+    // (its words, how long, its colours; a new picture uncropped; on or off as it was there)
+    let mut edits = shared.borrow().web.prefs["alertEdit"].as_object().cloned().unwrap_or_default();
+    let mut offs: Vec<serde_json::Value> = shared.borrow().web.prefs["alertOff"].as_array().cloned().unwrap_or_default();
+    for o in &list {
+        let mut e = edits.get(o.kind).and_then(|v| v.as_object()).cloned().unwrap_or_default();
+        if let Some(m) = &o.main { e.insert("main".into(), serde_json::json!(m)); }
+        if let Some(s) = o.secs { e.insert("secs".into(), serde_json::json!(s)); }
+        if let Some((a, b)) = &o.colours { e.insert("color".into(), serde_json::json!(a)); e.insert("color2".into(), serde_json::json!(b)); }
+        if files.iter().any(|f| f.0 == o.kind && f.1) { e.remove("crop"); }
+        edits.insert(o.kind.into(), serde_json::Value::Object(e));
+        offs.retain(|x| x != o.kind);
+        if !o.on { offs.push(serde_json::json!(o.kind)); }
+    }
+    pref_put(shared, "alertEdit", serde_json::Value::Object(edits));
+    pref_put(shared, "alertOff", serde_json::Value::Array(offs));
+    push_out(shared, true);
+    let names: Vec<&str> = list.iter().filter_map(|o| alerts::KINDS.iter().find(|k| k.0 == o.kind).map(|k| k.1)).collect();
+    let note = format!("Imported from Streamlabs: {} ({} {}, {} {}){}.", names.join(", "), pics, if pics == 1 { "picture" } else { "pictures" }, sounds, if sounds == 1 { "sound" } else { "sounds" },
+        if skipped > 0 { format!(". {skipped} couldn't come across (not a kind alerts take, or over 20 MB): choose those in Alerts and Their Order") } else { String::new() });
+    if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_status(note.into()); }
+    pf_paint(shared);
 }
 
 /// Asks for a name (a box to type it in, filled with `now`, and ones there are to pick from); OK gives `then`

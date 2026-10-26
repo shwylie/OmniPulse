@@ -290,7 +290,7 @@
   #aIcon svg { width: calc(50% * var(--ai, 1)); height: calc(50% * var(--ai, 1)); fill: #fff; }
   #aIcon.pic { background: none; overflow: hidden; }
   #aIcon.pic svg { display: none; }
-  #aIcon img { width: 100%; height: 100%; object-fit: contain; }
+  #aIcon img, #aIcon video { width: 100%; height: 100%; object-fit: contain; }
   #aText { flex: 1; min-width: 0; display: flex; flex-direction: column; justify-content: center; font-size: calc(1rem * var(--ts, 1)); }
   #aHead { font-size: 0.72em; font-weight: 800; letter-spacing: 0.12em; text-transform: uppercase; color: rgba(255, 255, 255, 0.78); }
   #aMain { font-size: 1.25em; font-weight: 800; margin-top: 0.1rem; }
@@ -770,13 +770,24 @@
     $("aMsg").hidden = !msg;
     const icon = $("aIcon");
     icon.classList.toggle("pic", !!(a.image || k.image));
+    if (!(k.image && /\.(webm|mp4)$/i.test(k.image)) || a.image) { const vid = icon.querySelector("video"); if (vid) vid.remove(); }
     if (a.image) {
       // its own picture (a game's cover art)
       const img = icon.querySelector("img") || icon.appendChild(document.createElement("img"));
       img.src = a.image;
       cropImg(img, { fit: "contain" });
+    } else if (k.image && /\.(webm|mp4)$/i.test(k.image)) {
+      // your own video (Streamlabs' animations are) in place of the icon: muted, looping, as a GIF would
+      const old = icon.querySelector("img"); if (old) old.remove();
+      const v = icon.querySelector("video") || icon.appendChild(document.createElement("video"));
+      v.muted = true; v.loop = true; v.autoplay = true; v.playsInline = true;
+      const src = "/image/" + a.type + "?s=" + encodeURIComponent(k.image);
+      if (v.getAttribute("src") !== src) v.src = src;
+      v.currentTime = 0; v.play().catch(() => {});
+      cropImg(v, k.crop);
     } else if (k.image) {
       // your own picture (a GIF, say) in place of the icon; the address changes with the file so a new one shows
+      const vid = icon.querySelector("video"); if (vid) vid.remove();
       const img = icon.querySelector("img") || icon.appendChild(document.createElement("img"));
       img.src = "/image/" + a.type + "?s=" + encodeURIComponent(k.image);
       cropImg(img, k.crop);
@@ -955,7 +966,7 @@
     const { a, k } = look;
     const style = (key) => (k.cstyle && k.cstyle[key]) || {};
     const own = a.image ? { img: a.image, crop: Object.assign({ fit: "contain" }, style("own")), bg: style("own").bg }
-      : k.image ? { img: "/image/" + a.type + "?s=" + encodeURIComponent(k.image), crop: Object.assign({}, k.crop, style("own")), bg: style("own").bg }
+      : k.image && !/\.(webm|mp4)$/i.test(k.image) ? { img: "/image/" + a.type + "?s=" + encodeURIComponent(k.image), crop: Object.assign({}, k.crop, style("own")), bg: style("own").bg }
       : { icon: ALERT_ICONS[k.icon] ? k.icon : ALERT_ICONS[a.type] ? a.type : "bell", fit: style("own"), bg: style("own").bg };
     const pics = (k.cpics || []).map((at, i) => (at ? { img: "/collage/" + a.type + "-" + (i + 1) + "?s=" + encodeURIComponent(at), crop: style("pic:" + (i + 1)), bg: style("pic:" + (i + 1)).bg } : null)).filter(Boolean);
     const icons = (k.cicons || []).filter((n) => ALERT_ICONS[n]).map((n) => ({ icon: n, fit: style("icon:" + n), bg: style("icon:" + n).bg }));
