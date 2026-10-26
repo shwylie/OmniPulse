@@ -712,10 +712,13 @@
   }
   addEventListener("resize", draw);
 
+  // (switched off in OmniPulse (its Widgets page): nothing shown or animating, so OBS spends nothing on it)
+  const offIn = (s, id) => { const off = !!(s && s.suite && Array.isArray(s.suite.off) && s.suite.off.includes(id)); document.documentElement.style.display = off ? "none" : ""; return off; };
   let sig = "", accent = null;
   async function poll() {
     try {
       const s = await (await fetch("/now.json" + (PREVIEW ? "?preview=1" : ""), { cache: "no-store" })).json();
+      if (!PREVIEW && offIn(s, PATH.slice(1))) { sig = ""; return; }
       // (in your accent colours, as the Stream Widget is)
       if (s.accent) accent = [s.accent, s.accent2 || s.accent];
       if (accent && !(s.suite && s.suite.colors)) { document.body.style.setProperty("--c1", accent[0]); document.body.style.setProperty("--c2", accent[1]); }

@@ -161,10 +161,13 @@
   setInterval(tick, 10000);
 
   let last = null;
+  // (switched off in OmniPulse (its Widgets page): nothing shown or animating, so OBS spends nothing on it)
+  const offIn = (s, id) => { const off = !!(s && s.suite && Array.isArray(s.suite.off) && s.suite.off.includes(id)); document.documentElement.style.display = off ? "none" : ""; return off; };
   async function poll() {
     try {
       const s = await (await fetch("/now.json" + (PREVIEW ? "?preview=1" : ""), { cache: "no-store" })).json();
       if (s.accent) { document.body.style.setProperty("--c1", s.accent); document.body.style.setProperty("--c2", s.accent2 || s.accent); }
+      if (!PREVIEW && offIn(s, "cam")) return;
       const all = (s.suite && s.suite.creators) || [];
       const c = all.find((x) => x.id === ID) || all.find((x) => x.kind === "cam") || null;
       if (c) { last = [c, s]; draw(c, s); }

@@ -354,7 +354,17 @@
   function gone(n) { const r = rows.get(n); if (!r) return; rows.delete(n); r.classList.add("out"); setTimeout(() => r.remove(), 600); }
 
   let last = -1;
+  // (switched off in OmniPulse (its Widgets page): nothing shown, chat not fetched; looked at every 5 s)
+  let OFF = false;
+  const PREV = /[?&]preview=1/.test(location.search);
+  async function offCheck() {
+    try { const s = await (await fetch("/now.json", { cache: "no-store" })).json(); OFF = !PREV && !!(s.suite && Array.isArray(s.suite.off) && s.suite.off.includes("multichat")); } catch (e) {}
+    document.documentElement.style.display = OFF ? "none" : "";
+    setTimeout(offCheck, 5000);
+  }
+  offCheck();
   async function poll() {
+    if (OFF) { setTimeout(poll, 2000); return; }
     try {
       const j = await (await fetch("/dock/chat.json?after=" + Math.max(0, last), { cache: "no-store" })).json();
       if (j.last < last) last = -1;

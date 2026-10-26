@@ -7461,6 +7461,21 @@ fn bot_act(shared: &Shared, act: &str) {
         return bot_paint(shared);
     }
     if let Some(url) = act.strip_prefix("url:") { if let Err(e) = omnipulse_core::open_url(url.to_string()) { say(&e); } return; }
+    // (a widget switched on or off: kept in widgetsOff, the running Suite told at once)
+    if let Some(id) = act.strip_prefix("woff:") {
+        let cur = bot_current(shared);
+        let mut off: Vec<String> = cur.get("widgetsOff").and_then(|v| v.as_str()).unwrap_or("").split('|').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect();
+        let now_on = if let Some(i) = off.iter().position(|x| x == id) { off.remove(i); true } else { off.push(id.to_string()); false };
+        let v = off.join("|");
+        bot_keep(shared, "widgetsOff", serde_json::json!(v));
+        if let Some(p) = plugrun::get(botpage::BOT) {
+            let rt = shared.borrow().rt.clone();
+            rt.spawn(async move { let _ = p.call("applySettings", vec![serde_json::json!({ "widgetsOff": v })]).await; });
+        }
+        if let Some(ui) = shared.borrow().ui.upgrade() { let w = ui.global::<Wid>(); w.set_rev(w.get_rev() + 1); }
+        say(if now_on { "Switched on." } else { "Switched off: its page in OBS shows nothing, and costs nothing." });
+        return;
+    }
     // (a platform's row in Tips and Donations: opened, or shut)
     if let Some(id) = act.strip_prefix("fold:") {
         botpage::TIPS_OPEN.with(|o| { let mut o = o.borrow_mut(); if !o.remove(id) { o.insert(id.to_string()); } });
@@ -13846,6 +13861,9 @@ fn main() -> Result<(), slint::PlatformError> {
     ui.on_artist(move |i| go(&s, Place::Artist(i as usize)));
     // drag and drop: carried as plain text, read and acted on here
     {
+        let w = ui.global::<Wid>();
+        let s = shared.clone();
+        w.on_on(move |id, _| !bot_current(&s).get("widgetsOff").and_then(|v| v.as_str()).unwrap_or("").split('|').any(|x| x.trim() == id.as_str()));
         let d = ui.global::<Dnd>();
         d.on_payload(|what| slint::DataTransfer::from(what));
         let s = shared.clone();

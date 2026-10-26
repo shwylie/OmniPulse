@@ -2156,6 +2156,14 @@ function suiteKeep() {
 // leaderboard, emotes, tune, sponsors, cam, hud, multichat, dockchat, dockfeed, dockmod)
 function widgetsOff() { return String(S().widgetsOff || "").split("|").map((s) => s.trim()).filter(Boolean); }
 
+// (each widget's animation and speed, set on its own page: by the page's id, from its settings' <key>Anim and <key>Speed)
+const MOTION_KEYS = { goals: "goals", timer: "timer", "latest-follow": "latest", "latest-sub": "latest", raid: "raid", hype: "hype", voteskip: "voteskip", wheel: "wheel", leaderboard: "leaderboard", tune: "tune" };
+function widgetMotion() {
+  const x = S(), out = {};
+  for (const [id, k] of Object.entries(MOTION_KEYS)) out[id] = { anim: String(x[k + "Anim"] || ""), speed: String(x[k + "Speed"] || "normal") };
+  return out;
+}
+
 function suitePush() {
   clearTimeout(suitePushT);
   suitePushT = setTimeout(() => {
@@ -2186,6 +2194,8 @@ function suitePush() {
         amount: num(x.rainAmount) || 30, spin: yes(x.rainSpin === undefined ? true : x.rainSpin) },
       // (the widgets switched off: their pages blank and idle, so they cost nothing in OBS)
       off: widgetsOff(),
+      // (each widget's own way in and out, and how fast: "" for the Suite's)
+      motion: widgetMotion(),
       anim: String(x.suiteAnim || "rise"),
       theme: String(x.suiteTheme || "dark"),
       colors: suiteColors(),

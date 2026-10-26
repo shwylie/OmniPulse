@@ -180,9 +180,12 @@
   addEventListener("resize", fit);
   fit();
 
+  // (switched off in OmniPulse (its Widgets page): nothing shown or animating, so OBS spends nothing on it)
+  const offIn = (s, id) => { const off = !!(s && s.suite && Array.isArray(s.suite.off) && s.suite.off.includes(id)); document.documentElement.style.display = off ? "none" : ""; return off; };
   async function poll() {
     try {
       const s = await (await fetch("/now.json" + (PREVIEW ? "?preview=1" : ""), { cache: "no-store" })).json();
+      if (SPONSORS && !PREVIEW && offIn(s, "sponsors")) return;
       cfg = SPONSORS ? (s.suite && s.suite.sponsors) || null : s.socials || null;
       const next = (cfg && cfg.list) || [];
       const now = JSON.stringify([next, cfg && cfg.style, cfg && cfg.align, cfg && cfg.all, cfg && cfg.rounded, cfg && cfg.coloured, cfg && cfg.secs, cfg && cfg.motion]);

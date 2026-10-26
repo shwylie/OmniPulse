@@ -55,6 +55,12 @@ export struct ThemeRow { items: [ThemeOpt] }
 // Drag and drop (as the web app's js/dnd.js): a track of the page ("t:<row>") or a playlist of the
 // sidebar ("p:<side>") dragged; dropped on a playlist in the sidebar ("side:<i>"), the queue ("queue")
 // or the open playlist's page ("page"). What's carried, what takes it and the drop are the app's.
+/// Whether a widget's on (its id: goals, timer, wheel...), asked of the app; rev changes as one's switched
+export global Wid {
+    in-out property <int> rev;
+    pure callback on(string, int) -> bool;
+}
+
 export global Dnd {
     pure callback payload(string) -> data-transfer;
     pure callback accepts(string, data-transfer) -> bool;
@@ -4479,6 +4485,7 @@ component BotPage inherits Rectangle {
                                 spacing: 7px;
                                 VerticalLayout { alignment: center; Glyph { d: d.i; width: 16px; height: 16px; fill: root.widget-on ? Theme.accent : Theme.muted; } }
                                 Text { text: d.n; color: Theme.text; font-weight: 700; font-size: 13px; horizontal-stretch: 1; overflow: elide; }
+                                if d.k == "multichat": CenterToggle { checked: Wid.on("multichat", Wid.rev); toggled => { root.act("woff:multichat"); } }
                                 IconButton { d: Icons.copy; size: 30px; tip: "Copy its address, for OBS"; clicked => { root.act("copy:http://127.0.0.1:" + root.port + d.p); } }
                                 IconButton { d: Icons.gear; size: 30px; tip: d.n + ": its settings"; clicked => { root.act("dockset:" + d.k); } }
                             }
@@ -4491,11 +4498,11 @@ component BotPage inherits Rectangle {
                 if root.widgets-view == "widgets": HorizontalLayout {
                     spacing: 8px;
                     for w[wi] in [
-                        { n: "Goals", p: "/goals", s: "goals", i: Icons.check, h: "127.0.0.1" },
-                        { n: "Timer", p: "/timer", s: "timer", i: Icons.refresh, h: "127.0.0.1" },
-                        { n: "Latest Follow", p: "/latest-follow", s: "latest", i: Icons.heart-out, h: "127.0.0.1" },
-                        { n: "Latest Sub", p: "/latest-sub", s: "latest", i: Icons.star-out, h: "127.0.0.1" },
-                        { n: "Raid Shoutout", p: "/raid", s: "raid", i: Icons.broadcast, h: "localhost" },
+                        { n: "Goals", k: "goals", p: "/goals", s: "goals", i: Icons.check, h: "127.0.0.1" },
+                        { n: "Timer", k: "timer", p: "/timer", s: "timer", i: Icons.refresh, h: "127.0.0.1" },
+                        { n: "Latest Follow", k: "latest-follow", p: "/latest-follow", s: "latest", i: Icons.heart-out, h: "127.0.0.1" },
+                        { n: "Latest Sub", k: "latest-sub", p: "/latest-sub", s: "latest", i: Icons.star-out, h: "127.0.0.1" },
+                        { n: "Raid Shoutout", k: "raid", p: "/raid", s: "raid", i: Icons.broadcast, h: "localhost" },
                     ]: Rectangle {
                         horizontal-stretch: 1;
                         preferred-width: 0px;
@@ -4512,6 +4519,7 @@ component BotPage inherits Rectangle {
                                 spacing: 6px;
                                 VerticalLayout { alignment: center; Glyph { d: w.i; width: 15px; height: 15px; fill: Theme.accent; } }
                                 Text { text: w.n; color: Theme.text; font-weight: 700; font-size: 12px; horizontal-stretch: 1; overflow: elide; vertical-alignment: center; }
+CenterToggle { checked: Wid.on(w.k, Wid.rev); toggled => { root.act("woff:" + w.k); } }
                                 IconButton { d: Icons.copy; size: 28px; tip: "Copy its address, for OBS"; clicked => { root.act("copy:http://" + w.h + ":" + root.port + w.p); } }
                                 IconButton { d: Icons.gear; size: 28px; tip: "Its settings"; clicked => { root.act("sheet:" + w.s); } }
                             }
@@ -4534,6 +4542,7 @@ component BotPage inherits Rectangle {
                             spacing: 7px;
                             VerticalLayout { alignment: center; Glyph { d: Icons.star-out; width: 16px; height: 16px; fill: Theme.accent; } }
                             Text { text: "Webcam Overlay"; color: Theme.text; font-weight: 700; font-size: 13px; horizontal-stretch: 1; overflow: elide; }
+CenterToggle { checked: Wid.on("cam", Wid.rev); toggled => { root.act("woff:" + "cam"); } }
                             IconButton { d: Icons.copy; size: 30px; tip: "Copy its address, for OBS"; clicked => { root.act("copy:http://127.0.0.1:" + root.port + "/cam/main"); } }
                             IconButton { d: Icons.gear; size: 30px; tip: "Make it yours"; clicked => { root.act("sheet:cam"); } }
                         }
@@ -4573,6 +4582,7 @@ component BotPage inherits Rectangle {
                             spacing: 7px;
                             VerticalLayout { alignment: center; Glyph { d: Icons.broadcast; width: 16px; height: 16px; fill: Theme.accent; } }
                             Text { text: "Game HUD Frames"; color: Theme.text; font-weight: 700; font-size: 13px; horizontal-stretch: 1; overflow: elide; }
+CenterToggle { checked: Wid.on("hud", Wid.rev); toggled => { root.act("woff:" + "hud"); } }
                             IconButton { d: Icons.copy; size: 30px; tip: "Copy its address, for OBS"; clicked => { root.act("copy:http://127.0.0.1:" + root.port + "/hud"); } }
                             IconButton { d: Icons.gear; size: 30px; tip: "Make them"; clicked => { root.act("sheet:hud"); } }
                         }
@@ -4585,13 +4595,13 @@ component BotPage inherits Rectangle {
                 if root.widgets-view == "widgets": VerticalLayout {
                   spacing: 8px;
                   for row[ri] in [
-                    [{ n: "Hype Train", p: "/hype", s: "hype", i: Icons.broadcast },
-                        { n: "Vote Skip", p: "/voteskip", s: "voteskip", i: Icons.next },
-                        { n: "Spin the Wheel", p: "/wheel", s: "wheel", i: Icons.dice }],
-                    [{ n: "Leaderboard", p: "/leaderboard", s: "leaderboard", i: Icons.coins },
-                        { n: "Emote Rain", p: "/emotes", s: "emoterain", i: Icons.chat },
-                        { n: "Name That Tune", p: "/tune", s: "tune", i: Icons.lyrics }],
-                    [{ n: "Sponsor Plug", p: "/sponsors", s: "sponsors", i: Icons.link }],
+                    [{ n: "Hype Train", k: "hype", p: "/hype", s: "hype", i: Icons.broadcast },
+                        { n: "Vote Skip", k: "voteskip", p: "/voteskip", s: "voteskip", i: Icons.next },
+                        { n: "Spin the Wheel", k: "wheel", p: "/wheel", s: "wheel", i: Icons.dice }],
+                    [{ n: "Leaderboard", k: "leaderboard", p: "/leaderboard", s: "leaderboard", i: Icons.coins },
+                        { n: "Emote Rain", k: "emotes", p: "/emotes", s: "emoterain", i: Icons.chat },
+                        { n: "Name That Tune", k: "tune", p: "/tune", s: "tune", i: Icons.lyrics }],
+                    [{ n: "Sponsor Plug", k: "sponsors", p: "/sponsors", s: "sponsors", i: Icons.link }],
                   ]: HorizontalLayout {
                     spacing: 8px;
                     for w[wi] in row: Rectangle {
@@ -4610,6 +4620,7 @@ component BotPage inherits Rectangle {
                                 spacing: 6px;
                                 VerticalLayout { alignment: center; Glyph { d: w.i; width: 15px; height: 15px; fill: Theme.accent; } }
                                 Text { text: w.n; color: Theme.text; font-weight: 700; font-size: 12px; horizontal-stretch: 1; overflow: elide; vertical-alignment: center; }
+CenterToggle { checked: Wid.on(w.k, Wid.rev); toggled => { root.act("woff:" + w.k); } }
                                 IconButton { d: Icons.copy; size: 28px; tip: "Copy its address, for OBS"; clicked => { root.act("copy:http://127.0.0.1:" + root.port + w.p); } }
                                 IconButton { d: Icons.gear; size: 28px; tip: "Its settings"; clicked => { root.act("sheet:" + w.s); } }
                             }
