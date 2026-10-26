@@ -224,7 +224,7 @@ pub fn sheet(id: &str, cur: &Map<String, Value>) -> (String, Vec<Field>) {
         let picked = if now.is_empty() || FONTS.contains(&now.as_str()) { format!("{theme}:{now}") } else { String::new() };
         let fonts = vec![
             f("chips", "fontPick", "Font", "For this theme. Each theme keeps its own.", &picked, &opts),
-            f("text", "fontCustom", "Or any Google Font", "Its name as fonts.google.com has it, like Lobster. Press Enter.", if picked.is_empty() { &now } else { "" }, "Lobster"),
+            f("text", "fontCustom", "Or any Google Font", "Type the font's name as fonts.google.com shows it, like Lobster, then press Enter.", if picked.is_empty() { &now } else { "" }, "Lobster"),
         ];
         let after = v.iter().position(|x| x.key == "suiteColors").filter(|c| *c > at).map(|c| c + if s(cur, "suiteColors") == "custom" { 3 } else { 1 }).unwrap_or(at + 1);
         v.splice(after..after, fonts);
@@ -241,7 +241,7 @@ pub fn sheet(id: &str, cur: &Map<String, Value>) -> (String, Vec<Field>) {
             more.push(f("text", gif, "A GIF with it", "A GIF's address (from GIPHY or Tenor: right-click the GIF, Copy Image Address), shown with this widget. Leave it empty for none.", s(cur, gif), "https://…/your.gif"));
             if !s(cur, gif).trim().is_empty() {
                 more.push(f("chips", "gifPlace", "Where it goes", "", if s(cur, "gifPlace").is_empty() { "top" } else { s(cur, "gifPlace") }, "top=On Top|left=Left|right=Right|corner=In the Corner"));
-                more.push(f("chips", "gifSize", "Its size", "", if s(cur, "gifSize").is_empty() { "medium" } else { s(cur, "gifSize") }, "small=Small|medium=Medium|large=Large"));
+                more.push(f("chips", "gifSize", "GIF size", "", if s(cur, "gifSize").is_empty() { "medium" } else { s(cur, "gifSize") }, "small=Small|medium=Medium|large=Large"));
             }
         }
         v.splice(at + 1..at + 1, more);
@@ -256,7 +256,7 @@ pub fn sheet(id: &str, cur: &Map<String, Value>) -> (String, Vec<Field>) {
         let (prev, rest): (Vec<Field>, Vec<Field>) = rest.into_iter().partition(|x| x.kind == "suiteprev");
         v = prev;
         if !top.is_empty() { v.push(f("head", "", "In OBS", "", "", "")); v.extend(top); }
-        if !rest.is_empty() && rest.first().is_some_and(|x| x.kind != "head") { v.push(f("head", "", "Its settings", "", "", "")); }
+        if !rest.is_empty() && rest.first().is_some_and(|x| x.kind != "head") { v.push(f("head", "", "Settings", "", "", "")); }
         v.extend(rest);
         let shared = |k: &str| matches!(k, "suiteTheme" | "suiteColors" | "suiteC1" | "suiteC2" | "fontPick" | "fontCustom" | "gifPlace" | "gifSize") || k.starts_with("gif");
         let (look, own): (Vec<Field>, Vec<Field>) = std::mem::take(&mut v).into_iter().partition(|x| shared(&x.key));
@@ -348,17 +348,17 @@ fn sheet_of(id: &str, cur: &Map<String, Value>) -> (String, Vec<Field>) {
             f("text", "obsAddress", "Address", "Leave this as it is if OBS runs on this PC.", s(cur, "obsAddress"), "127.0.0.1:4455"),
         ]),
         "youtube" => ("YouTube".into(), vec![
-            f("toggle", "ytOn", "Read your YouTube live chat", "Its chat shows in your Chat Dock and the Multichat Overlay, its commands start your actions, and Super Chats, new members and gifted memberships become alerts.", if on(cur, "ytOn", false) { "true" } else { "false" }, ""),
+            f("toggle", "ytOn", "Read your YouTube live chat", "YouTube chat shows in your Chat Dock and the Multichat Overlay, its commands start your actions, and Super Chats, new members and gifted memberships become alerts.", if on(cur, "ytOn", false) { "true" } else { "false" }, ""),
             f("text", "ytChannel", "Your channel", "Your @handle, like @yourname, or your channel's link. OmniPulse finds your stream once you're live. A stream's own link works too.", s(cur, "ytChannel"), "@yourname"),
             f("note", "", "No sign-in needed: it reads your chat as YouTube's own chat window does. For now it's read only, so the Suite doesn't post replies in YouTube's chat.", "", "", ""),
         ]),
         "meld" => ("Meld Studio".into(), vec![
-            f("toggle", "meldOn", "Connect to Meld Studio", "Your actions can switch scenes, show or hide layers, turn effects on or off, record clips, and more. Its scene changes and going live can start actions too.", if on(cur, "meldOn", false) { "true" } else { "false" }, ""),
+            f("toggle", "meldOn", "Connect to Meld Studio", "Your actions can switch scenes, show or hide layers, turn effects on or off, record clips, and more. Changing scenes or going live in Meld can start actions too.", if on(cur, "meldOn", false) { "true" } else { "false" }, ""),
             step(1, "Open Meld Studio on this PC. Nothing needs setting up in it: OmniPulse finds it.", "", "", ""),
             f("text", "meldAddress", "Address", "Leave this as it is if Meld runs on this PC. For another PC, turn on Allow remote connections in Meld's Settings > Advanced, and put that PC's address here.", s(cur, "meldAddress"), "127.0.0.1:13376"),
         ]),
         "slobs" => ("Streamlabs Desktop".into(), vec![
-            f("toggle", "slobsOn", "Connect to Streamlabs Desktop", "Your actions can switch scenes, show or hide sources, mute, and start or stop the stream. Its scene changes and going live can start actions too.", if on(cur, "slobsOn", false) { "true" } else { "false" }, ""),
+            f("toggle", "slobsOn", "Connect to Streamlabs Desktop", "Your actions can switch scenes, show or hide sources, mute, and start or stop the stream. Changing scenes or going live in Streamlabs can start actions too.", if on(cur, "slobsOn", false) { "true" } else { "false" }, ""),
             step(1, "In Streamlabs Desktop, open Settings, then Remote Control.", "", "", ""),
             step(2, "Click the QR code, then Show Details. Copy the API Token and paste it below.", "", "", ""),
             f("password", "slobsToken", "API Token", "", s(cur, "slobsToken"), "Paste the API Token here"),
@@ -454,7 +454,7 @@ fn sheet_of(id: &str, cur: &Map<String, Value>) -> (String, Vec<Field>) {
                 f("piclist", "panelOwnIcons", "Your own icons", "If you like: a picture for any panel, in the same order as the panels above. Click Choose... to pick one from your PC. Leave a row empty for the icon its title picks.", s(cur, "panelOwnIcons"), ""),
                 f("toggle", "panelExtended", "Put the words inside each panel", "Each panel shows its title with all its words under it, as tall as they need (up to Twitch's 600). Type / to start a new paragraph. When this is off, a panel with long words grows to fit anyway.", if on(cur, "panelExtended", false) { "true" } else { "false" }, ""),
                 f("toggle", "panelPowered", "Add a Powered by OmniPulse panel", "One more at the end, in the same look, with OmniPulse's logo, so viewers can find the app your stream runs on.", if on(cur, "panelPowered", true) { "true" } else { "false" }, ""),
-                f("chips", "panelLogoColours", "Its logo's colours", "", if s(cur, "panelLogoColours").is_empty() { "theme" } else { s(cur, "panelLogoColours") }, "theme=Your Colours|omnipulse=OmniPulse's Own|plain=Plain"),
+                f("chips", "panelLogoColours", "Logo colours", "", if s(cur, "panelLogoColours").is_empty() { "theme" } else { s(cur, "panelLogoColours") }, "theme=Your Colours|omnipulse=OmniPulse's Own|plain=Plain"),
                 f("head", "", "2. How they look", "", "", ""),
                 f("chips", "panelTheme", "Theme", "", &or("panelTheme", "dark"), "dark=Dark|glass=Glass|neon=Neon|comic=Comic|pastel=Pastel|y2k=Y2K|pixel=Pixel|gradient=Gradient|minimal=Minimal|synthwave=Synthwave|paper=Paper Note|bauhaus=Bauhaus|holo=Holo Foil|terminal=Terminal|watercolour=Watercolour|cyber=Cyber|galaxy=Galaxy|ticket=Ticket"),
                 f("chips", "panelColors", "Colours", "The theme's two colours. Same as Your Widgets uses the Suite widgets' colours.", if s(cur, "panelColors").is_empty() { "suite" } else { s(cur, "panelColors") }, "suite=Same as Your Widgets|accent=OmniPulse's Look|sunset=Sunset|ocean=Ocean|candy=Candy|mint=Mint|fire=Fire|gold=Gold|mono=Mono|custom=Your Own"),
@@ -477,7 +477,7 @@ fn sheet_of(id: &str, cur: &Map<String, Value>) -> (String, Vec<Field>) {
                 f("link", "", "Save as a template", "A template with the same name is replaced.", "", "tpl:save"),
             ]);
             if !tpls.is_empty() {
-                v.push(f("chips", "panelTplLoad", "Load a template", "Its look and its panels come back.", "", &chips));
+                v.push(f("chips", "panelTplLoad", "Load a template", "Brings back the look and the panels you saved.", "", &chips));
                 v.push(f("chips", "panelTplDel", "Delete a template", "", "", &chips));
             }
             v
@@ -493,13 +493,13 @@ fn sheet_of(id: &str, cur: &Map<String, Value>) -> (String, Vec<Field>) {
                 f("chips", "camSpot", "Where it is", "Put your camera there in OBS, or choose Your Own Spot and match it.", &spot, "br=Bottom Right|bl=Bottom Left|tr=Top Right|tl=Top Left|custom=Your Own Spot"),
             ];
             if spot == "custom" {
-                v.push(f("number", "camX", "Across (%)", "Its left edge: 0 is the canvas's left, 100 its right.", &n(cur, "camX"), "72"));
-                v.push(f("number", "camY", "Down (%)", "Its top edge: 0 is the canvas's top, 100 its bottom.", &n(cur, "camY"), "62"));
+                v.push(f("number", "camX", "Across (%)", "Where the left edge sits: 0 is the left of the canvas, 100 the right.", &n(cur, "camX"), "72"));
+                v.push(f("number", "camY", "Down (%)", "Where the top edge sits: 0 is the top of the canvas, 100 the bottom.", &n(cur, "camY"), "62"));
                 v.push(f("number", "camW", "Width (%)", "Of the canvas's width.", &n(cur, "camW"), "26"));
                 v.push(f("number", "camH", "Height (%)", "Of the canvas's height.", &n(cur, "camH"), "34"));
             }
             v.extend([
-                f("head", "", "Its frame", "", "", ""),
+                f("head", "", "Frame", "", "", ""),
                 f("chips", "camShape", "Shape", "", &or("camShape", "rounded"), "rounded=Rounded|square=Square|circle=Circle|hex=Hexagon|arch=Arch"),
                 f("chips", "camBorder", "Border", "", &or("camBorder", "glow"), "thin=Thin|thick=Thick|double=Double|glow=Glow|gradient=Gradient|brackets=Corner Brackets|edge=Edge Light"),
                 f("chips", "camTheme", "Theme", "For the name tag and the clock.", &or("camTheme", "dark"), "dark=Dark|glass=Glass|neon=Neon|comic=Comic|pastel=Pastel|gradient=Gradient|minimal=Minimal"),
@@ -512,8 +512,8 @@ fn sheet_of(id: &str, cur: &Map<String, Value>) -> (String, Vec<Field>) {
                 let is = on(cur, &k, dflt);
                 v.push(f("toggle", &k, name, "", if is { "true" } else { "false" }, ""));
                 if !is { continue; }
-                if id == "name" { v.push(f("text", "camNameText", "Its words", "Your name, or anything you like.", s(cur, "camNameText"), if s(cur, "login").is_empty() { "Your Name" } else { s(cur, "login") })); }
-                if id == "sticker" { v.push(f("text", "camStickerImg", "Its address", "A GIF's or picture's address (on GIPHY or Tenor: right-click it, Copy Image Address).", s(cur, "camStickerImg"), "https://…/your.gif")); }
+                if id == "name" { v.push(f("text", "camNameText", "Name tag text", "Your name, or anything you like.", s(cur, "camNameText"), if s(cur, "login").is_empty() { "Your Name" } else { s(cur, "login") })); }
+                if id == "sticker" { v.push(f("text", "camStickerImg", "Sticker address", "A GIF's or picture's address (on GIPHY or Tenor: right-click it, Copy Image Address).", s(cur, "camStickerImg"), "https://…/your.gif")); }
                 v.push(f("chips", &format!("{k}Place"), "Where", "", &or(&format!("{k}Place"), place), "above=Above|below=Below|left=Left|right=Right|in-top=Inside, Top|in-bottom=Inside, Bottom|corner=On the Corner"));
                 v.push(f("chips", &format!("{k}Size"), "Size", "", &or(&format!("{k}Size"), size), "small=Small|medium=Medium|large=Large"));
             }
@@ -566,7 +566,7 @@ fn sheet_of(id: &str, cur: &Map<String, Value>) -> (String, Vec<Field>) {
             let style = if s(cur, "goalStyle").is_empty() { "bars" } else { s(cur, "goalStyle") };
             // (your goals first, what they count to; then how they look; then when they start again)
             let mut v = vec![f("suiteprev", "", style, "", "goals", &theme_of(cur))];
-            v.push(addr("/goals", "All of them together, about 920 × 520. For one goal alone, as a source of its own, use the copy button on its row below."));
+            v.push(addr("/goals", "All your goals in one source, about 920 × 520. To show one goal on its own, use the copy button on that goal's row."));
             v.push(f("link", "", "Try it", "Adds one of each, to see it fill.", "", "call:suiteTest:goals"));
             // (each goal one row: shown or not, its name, its target; key: its prefix, label: what it counts,
             // value: on, extra: its name, note: its target, n: its default target)
@@ -581,8 +581,8 @@ fn sheet_of(id: &str, cur: &Map<String, Value>) -> (String, Vec<Field>) {
             v.push(f("head", "", "Common goal", "", "", ""));
             v.push(f("toggle", "goalCommonOn", "Show it", "One goal that follows, subs, bits, donations and raids all count toward, from Twitch, Kick and YouTube.", if on(cur, "goalCommonOn", false) { "true" } else { "false" }, ""));
             if on(cur, "goalCommonOn", false) {
-                v.push(f("text", "goalCommonLabel", "Its name", "", s(cur, "goalCommonLabel"), "Community goal"));
-                v.push(f("number", "goalCommonTarget", "Its target (points)", "", &n(cur, "goalCommonTarget"), "100"));
+                v.push(f("text", "goalCommonLabel", "Goal name", "", s(cur, "goalCommonLabel"), "Community goal"));
+                v.push(f("number", "goalCommonTarget", "Target (points)", "", &n(cur, "goalCommonTarget"), "100"));
                 v.push(f("number", "goalPtsFollow", "Points for a follow", "", &n(cur, "goalPtsFollow"), "1"));
                 v.push(f("number", "goalPtsSub", "Points for a sub", "A gift of 5 subs counts 5 times.", &n(cur, "goalPtsSub"), "5"));
                 v.push(f("number", "goalPtsBits", "Points for every 100 bits", "", &n(cur, "goalPtsBits"), "1"));
@@ -613,11 +613,11 @@ fn sheet_of(id: &str, cur: &Map<String, Value>) -> (String, Vec<Field>) {
             let mut v = vec![
                 f("suiteprev", "", "", "", "timer", &theme_of(cur)),
                 theme_field(cur),
-                addr("/timer", "About 720 × 280. Moderators can use its command in chat: start, pause, add 5, remove 5, reset."),
+                addr("/timer", "About 720 × 280. Moderators can control it with the chat command: start, pause, add 5, remove 5, reset."),
                 f("toggle", "timerStopwatch", "Count up", "A stopwatch. When this is off, it counts down.", if on(cur, "timerStopwatch", false) { "true" } else { "false" }, ""),
                 f("number", "timerStart", "Starting time (minutes)", "Where the countdown starts, and goes back to on reset.", &n(cur, "timerStart"), "60"),
-                f("text", "timerLabel", "Its label", "Shown above it. Leave it empty for none.", s(cur, "timerLabel"), "Subathon"),
-                f("text", "timerCommand", "Its command", "", s(cur, "timerCommand"), "!timer"),
+                f("text", "timerLabel", "Title", "Shown above the timer. Leave it empty for none.", s(cur, "timerLabel"), "Subathon"),
+                f("text", "timerCommand", "Chat command", "", s(cur, "timerCommand"), "!timer"),
                 f("link", "", "Start or resume", "", "", "call:suiteTimer:start"),
                 f("link", "", "Pause", "", "", "call:suiteTimer:pause"),
                 f("link", "", "Add 5 minutes", "", "", "call:suiteTimer:add:5"),
@@ -654,7 +654,7 @@ fn sheet_of(id: &str, cur: &Map<String, Value>) -> (String, Vec<Field>) {
             f("number", "raidMin", "Smallest raid", "Raids with fewer viewers than this aren't remembered for a shoutout.", &n(cur, "raidMin"), "1"),
             f("number", "raidSecs", "Shown for (seconds)", "Longer if their clip is.", &n(cur, "raidSecs"), "20"),
             f("toggle", "raidChat", "Shout out in chat too", "Said when you show the shoutout.", if on(cur, "raidChat", true) { "true" } else { "false" }, ""),
-            f("text", "raidMessage", "Its message", "{user} is the raider, {login} their channel name, {viewers} how many came.", s(cur, "raidMessage"), "Thanks for the raid, {user}!"),
+            f("text", "raidMessage", "Shoutout message", "{user} is the raider, {login} their channel name, {viewers} how many came.", s(cur, "raidMessage"), "Thanks for the raid, {user}!"),
             f("toggle", "raidClip", "Play one of their clips", "A random clip of theirs from the last 60 days (Twitch only).", if on(cur, "raidClip", false) { "true" } else { "false" }, ""),
             f("link", "", "Show shoutout", "Your latest raider, now.", "", "call:suiteShoutout"),
             f("link", "", "Try it", "A pretend raider, to see how it looks.", "", "call:suiteTest:raid"),
@@ -703,7 +703,7 @@ fn sheet_of(id: &str, cur: &Map<String, Value>) -> (String, Vec<Field>) {
                 v.push(f("number", "hypeChatPts", "Per chatter", "For each viewer who chats, at most once every 10 seconds.", &n(cur, "hypeChatPts"), "2"));
                 v.push(f("number", "hypeCool", "Cooling", "How fast it empties while quiet, in percent of a level every 5 seconds.", &n(cur, "hypeCool"), "2"));
             }
-            v.push(f("text", "hypeLabel", "Its name", "Shown on it.", s(cur, "hypeLabel"), if train { "Hype Train" } else { "Hype" }));
+            v.push(f("text", "hypeLabel", "Title", "Shown on the meter.", s(cur, "hypeLabel"), if train { "Hype Train" } else { "Hype" }));
             v.push(f("head", "", "In chat", "", "", ""));
             v.push(f("toggle", "hypeChat", "Say it in chat", if train { "When a train starts, at each level, and when it ends." } else { "At each level." }, if on(cur, "hypeChat", true) { "true" } else { "false" }, ""));
             if on(cur, "hypeChat", true) {
@@ -719,7 +719,7 @@ fn sheet_of(id: &str, cur: &Map<String, Value>) -> (String, Vec<Field>) {
             f("suiteprev", "", "", "", "voteskip", &theme_of(cur)),
             theme_field(cur),
             f("toggle", "skipOn", "Let chat vote to skip", "Off until you switch it on, so it doesn't take a command you already use.", if on(cur, "skipOn", false) { "true" } else { "false" }, ""),
-            f("text", "skipCommand", "Its command", "", s(cur, "skipCommand"), "!skip"),
+            f("text", "skipCommand", "Chat command", "", s(cur, "skipCommand"), "!skip"),
             f("number", "skipVotes", "Votes needed", "Each viewer once a song. A new song starts the count again.", &n(cur, "skipVotes"), "5"),
             addr("/voteskip", "About 1040 × 260. It only shows while there are votes."),
             f("link", "", "Try it", "Two test votes, to see it.", "", "call:suiteTest:voteskip"),
@@ -728,7 +728,7 @@ fn sheet_of(id: &str, cur: &Map<String, Value>) -> (String, Vec<Field>) {
             f("suiteprev", "", "", "", "wheel", &theme_of(cur)),
             theme_field(cur),
             f("link", "", "Try it", "A free spin, to see it on the preview's widget in OBS.", "", "call:suiteTest:wheel"),
-            f("chips", "wheelColors", "Its colours", "", if s(cur, "wheelColors").is_empty() { "theme" } else { s(cur, "wheelColors") }, "theme=Your Colours|alternate=Two Colours|rainbow=Rainbow|pastel=Pastel"),
+            f("chips", "wheelColors", "Colours", "", if s(cur, "wheelColors").is_empty() { "theme" } else { s(cur, "wheelColors") }, "theme=Your Colours|alternate=Two Colours|rainbow=Rainbow|pastel=Pastel"),
             f("chips", "wheelSecs", "How long it spins", "", if s(cur, "wheelSecs").is_empty() { "6" } else { s(cur, "wheelSecs") }, "3=3 s|6=6 s|9=9 s|12=12 s"),
             f("toggle", "wheelHide", "Only show it while it spins", "Hidden the rest of the time, and for a few seconds after it lands.", if on(cur, "wheelHide", false) { "true" } else { "false" }, ""),
             f("head", "", "Prizes", "", "", ""),
@@ -758,13 +758,13 @@ fn sheet_of(id: &str, cur: &Map<String, Value>) -> (String, Vec<Field>) {
         "tune" => ("Name That Tune".into(), vec![
             f("suiteprev", "", "", "", "tune", &theme_of(cur)),
             theme_field(cur),
-            f("note", "", "Chat guesses the song you're playing. While a round's on, the Stream Widget hides its name and artist, and this widget shows a little more of the name as time goes. The first viewer to type the name or the artist wins.", "", "", ""),
-            f("toggle", "tuneOn", "Start rounds from chat", "You and your moderators start a round with its command. Actions can start one too, with the Start Name That Tune step (from a reward, say).", if on(cur, "tuneOn", false) { "true" } else { "false" }, ""),
+            f("note", "", "Chat guesses the song you're playing. While a round's on, the Stream Widget hides the song's name and artist, and this widget shows a little more of the name as time goes. The first viewer to type the name or the artist wins.", "", "", ""),
+            f("toggle", "tuneOn", "Start rounds from chat", "You and your moderators can start a round with the chat command. Actions can start one too, with the Start Name That Tune step (from a reward, say).", if on(cur, "tuneOn", false) { "true" } else { "false" }, ""),
             f("text", "tuneCommand", "Command", "", s(cur, "tuneCommand"), "!tune"),
             f("toggle", "tuneAnyone", "Anyone can start a round", "", if on(cur, "tuneAnyone", false) { "true" } else { "false" }, ""),
             f("number", "tuneSecs", "Seconds to guess", "15 to 300. A new song ends the round too.", &n(cur, "tuneSecs"), "60"),
             f("number", "tunePoints", "Points for winning", "With Points on. Actions can run on a win: Fun > Name That Tune Won.", &n(cur, "tunePoints"), "100"),
-            f("text", "tuneMessage", "Its message", "Said when a round starts. {points} is the points, {pointsname} what they're called.", s(cur, "tuneMessage"), "🎵 Name That Tune! First to type the song's name or its artist wins {points} {pointsname}."),
+            f("text", "tuneMessage", "Round message", "Said when a round starts. {points} is the points, {pointsname} what they're called.", s(cur, "tuneMessage"), "🎵 Name That Tune! First to type the song's name or its artist wins {points} {pointsname}."),
             addr("/tune", "About 1040 × 360."),
             f("link", "", "Try it", "A round on what's playing now.", "", "call:suiteTest:tune"),
         ]),

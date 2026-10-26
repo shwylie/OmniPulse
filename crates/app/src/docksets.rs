@@ -105,7 +105,7 @@ pub fn fields(panel: &str, vals: &Map<String, Value>, port: u64) -> Vec<Value> {
             sel("secs", "Time-Out Length", "How long the time-out button times someone out for.", &[(json!("60"), "1 minute"), (json!("300"), "5 minutes"), (json!("600"), "10 minutes"), (json!("3600"), "1 hour"), (json!("86400"), "1 day")]),
             tog("confirm", "Ask Before Banning", "A ban asks you to click again first, so a slip doesn't ban anyone."),
             note("Moderation (the dock's shield)"),
-            tog("modPile", "Pile-Up", "Its switch in the panel. While it's on, the same message from several accounts folds into one card above chat, to ban them all at once. It's off until you switch it on, as a friendly raid's message repeats too."),
+            tog("modPile", "Pile-Up", "The switch is in the panel. While it's on, the same message from several accounts folds into one card above chat, to ban them all at once. It's off until you switch it on, as a friendly raid's message repeats too."),
             tog("modLock", "Raid Lockdown", "One button for a hate raid: it turns on what you choose below, and turns them off again."),
             tog("modModes", "Chat Modes", "Slow, followers only, subscribers only, emotes only and unique chat, each a click. Twitch's."),
             tog("modShield", "Shield Mode and Clear Chat", "Twitch's Shield Mode, and clearing chat (asked twice)."),

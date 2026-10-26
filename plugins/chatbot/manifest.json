@@ -444,13 +444,13 @@
     },
     {
       "key": "goalFollowLabel",
-      "label": "Its Name",
+      "label": "Goal Name",
       "type": "text",
       "default": "Follower goal"
     },
     {
       "key": "goalFollowTarget",
-      "label": "Its Target",
+      "label": "Target",
       "type": "number",
       "default": 10
     },
@@ -462,13 +462,13 @@
     },
     {
       "key": "goalSubLabel",
-      "label": "Its Name",
+      "label": "Goal Name",
       "type": "text",
       "default": "Sub goal"
     },
     {
       "key": "goalSubTarget",
-      "label": "Its Target",
+      "label": "Target",
       "type": "number",
       "default": 5
     },
@@ -480,13 +480,13 @@
     },
     {
       "key": "goalBitsLabel",
-      "label": "Its Name",
+      "label": "Goal Name",
       "type": "text",
       "default": "Bits goal"
     },
     {
       "key": "goalBitsTarget",
-      "label": "Its Target",
+      "label": "Target",
       "type": "number",
       "default": 1000
     },
@@ -498,13 +498,13 @@
     },
     {
       "key": "goalDonoLabel",
-      "label": "Its Name",
+      "label": "Goal Name",
       "type": "text",
       "default": "Donation goal"
     },
     {
       "key": "goalDonoTarget",
-      "label": "Its Target",
+      "label": "Target",
       "type": "number",
       "default": 50
     },
@@ -522,13 +522,13 @@
     },
     {
       "key": "timerLabel",
-      "label": "Its Label",
+      "label": "Title",
       "type": "text",
       "default": ""
     },
     {
       "key": "timerCommand",
-      "label": "Its Command",
+      "label": "Chat Command",
       "type": "text",
       "default": "!timer"
     },
@@ -600,7 +600,7 @@
     },
     {
       "key": "raidMessage",
-      "label": "Its Message",
+      "label": "Shoutout Message",
       "type": "text",
       "default": "Thanks for the raid, {user}! Go follow them at twitch.tv/{login} 💜"
     },
@@ -627,7 +627,7 @@
     { "key": "abSpare", "label": "Never Affects", "type": "select", "default": "mods", "options": ["mods", "vips", "subs"] },
     { "key": "abFirstOnly", "label": "First-Time Chatters Only", "type": "toggle", "default": false },
     { "key": "hypeOn", "label": "Hype Meter", "type": "toggle", "default": true },
-    { "key": "hypeLabel", "label": "Its Name", "type": "text", "default": "" },
+    { "key": "hypeLabel", "label": "Title", "type": "text", "default": "" },
     { "key": "hypeMode", "label": "Hype Meter Works As", "type": "select", "default": "train", "options": ["train", "meter"] },
     { "key": "hypeShow", "label": "Hype Train Shows", "type": "select", "default": "train", "options": ["train", "always"] },
     { "key": "hypeStart", "label": "A Hype Train Starts With", "type": "select", "default": "any", "options": ["any", "twitch"] },
@@ -639,20 +639,20 @@
     { "key": "hypeChatPts", "label": "Per Chatter", "type": "number", "default": 2 },
     { "key": "hypeCool", "label": "Cooling", "type": "number", "default": 2 },
     { "key": "hypeChat", "label": "Say Each Level in Chat", "type": "toggle", "default": true },
-    { "key": "hypeMessage", "label": "Its Message", "type": "text", "default": "Hype level {level}! 🔥" },
+    { "key": "hypeMessage", "label": "Level Message", "type": "text", "default": "Hype level {level}! 🔥" },
     { "key": "skipOn", "label": "Vote Skip", "type": "toggle", "default": false },
-    { "key": "skipCommand", "label": "Its Command", "type": "text", "default": "!skip" },
+    { "key": "skipCommand", "label": "Chat Command", "type": "text", "default": "!skip" },
     { "key": "skipVotes", "label": "Votes Needed", "type": "number", "default": 5 },
     { "key": "wheelOn", "label": "Spin the Wheel", "type": "toggle", "default": false },
-    { "key": "wheelCommand", "label": "Its Command", "type": "text", "default": "!spin" },
-    { "key": "wheelPrizes", "label": "Its Prizes", "type": "text", "default": "A shoutout | 100 points | Pick the next song | Nothing! | Hydrate" },
+    { "key": "wheelCommand", "label": "Chat Command", "type": "text", "default": "!spin" },
+    { "key": "wheelPrizes", "label": "Prizes", "type": "text", "default": "A shoutout | 100 points | Pick the next song | Nothing! | Hydrate" },
     { "key": "wheelSecs", "label": "How Long It Spins", "type": "select", "default": "6", "options": ["3", "6", "9", "12"] },
     { "key": "wheelColors", "label": "Wheel Colours", "type": "select", "default": "theme", "options": ["theme", "alternate", "rainbow", "pastel"] },
     { "key": "wheelHide", "label": "Only While Spinning", "type": "toggle", "default": false },
     { "key": "wheelCost", "label": "Points per Spin", "type": "number", "default": 0 },
     { "key": "wheelCooldown", "label": "Wait Between Spins", "type": "number", "default": 0 },
     { "key": "wheelChat", "label": "Say What It Lands On", "type": "toggle", "default": true },
-    { "key": "wheelMessage", "label": "Its Message", "type": "text", "default": "{user} spun the wheel: {prize}!" },
+    { "key": "wheelMessage", "label": "Prize Message", "type": "text", "default": "{user} spun the wheel: {prize}!" },
     { "key": "boardCount", "label": "How Many", "type": "number", "default": 5 },
     { "key": "rainSource", "label": "Emote Rain Rains", "type": "select", "default": "chat", "options": ["chat", "mine", "both"] },
     { "key": "rainImages", "label": "Your Own Pictures", "type": "text", "default": "" },
@@ -671,11 +671,11 @@
     { "key": "rainOnDono", "label": "Donations Pour", "type": "toggle", "default": true },
     { "key": "rainOnFollow", "label": "Follows Pour", "type": "toggle", "default": false },
     { "key": "tuneOn", "label": "Name That Tune", "type": "toggle", "default": false },
-    { "key": "tuneCommand", "label": "Its Command", "type": "text", "default": "!tune" },
+    { "key": "tuneCommand", "label": "Chat Command", "type": "text", "default": "!tune" },
     { "key": "tuneAnyone", "label": "Anyone Can Start It", "type": "toggle", "default": false },
     { "key": "tuneSecs", "label": "Seconds to Guess", "type": "number", "default": 60 },
     { "key": "tunePoints", "label": "Points for Winning", "type": "number", "default": 100 },
-    { "key": "tuneMessage", "label": "Its Message", "type": "text", "default": "🎵 Name That Tune! First to type the song's name or its artist wins {points} {pointsname}." },
+    { "key": "tuneMessage", "label": "Round Message", "type": "text", "default": "🎵 Name That Tune! First to type the song's name or its artist wins {points} {pointsname}." },
     {
       "key": "commands",
       "label": "Your Commands (the Old Way)",

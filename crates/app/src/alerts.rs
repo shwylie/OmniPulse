@@ -179,13 +179,13 @@ pub fn edit_fields(prefs: &Value, k: &str, vals: &Map<String, Value>) -> Vec<Val
         Some(b) => f.push(field("e.name", "Name", &format!("In Settings. Empty: {}.", b.1), "text")),
         None => {
             f.push(field("e.name", "Name", "", "text"));
-            f.push(json!({ "key": "", "label": "Its Trigger", "note": "Your bot's web request sets it off with this type.", "type": "info", "value": format!("type={k}"), "copy": k }));
+            f.push(json!({ "key": "", "label": "Trigger", "note": "Your bot's web request sets it off with this type.", "type": "info", "value": format!("type={k}"), "copy": k }));
         }
     }
     let (head, main) = b.map(|b| (b.3, b.4)).unwrap_or(("{user}", "{message}"));
     f.push(field("e.head", "Heading", &format!("Empty: \"{head}\". {{user}}, {{amount}} and {{message}} are filled in."), "text"));
     f.push(field("e.main", "Main Line", &format!("Empty: \"{main}\"."), "text"));
-    f.push(field("own", "Its Own Colours", "Off: the colours set for all the alerts.", "toggle"));
+    f.push(field("own", "Own Colours", "Off: the colours set for all the alerts.", "toggle"));
     if vals.get("own").and_then(|v| v.as_bool()) == Some(true) {
         f.push(field("e.color", "Colour", "As #rrggbb: where its gradient starts.", "text"));
         f.push(field("e.color2", "Second Colour", "As #rrggbb: where it ends.", "text"));
@@ -231,14 +231,14 @@ pub fn edit_fields(prefs: &Value, k: &str, vals: &Map<String, Value>) -> Vec<Val
             if let Some(env) = lv["env"].as_array().filter(|e| !e.is_empty()) {
                 let frac = |x: u64| format!("{:.4}", (x as f64 / ms as f64).clamp(0.0, 1.0));
                 let wave: Vec<String> = [frac(ts), frac(te)].into_iter().chain(wave_heights(env)).collect();
-                f.push(json!({ "key": "", "type": "wave", "label": "Its Waveform", "note": "As measured. Shaded: what Trim Start and Trim End leave out.", "labels": wave }));
+                f.push(json!({ "key": "", "type": "wave", "label": "Waveform", "note": "As measured. Shaded: what Trim Start and Trim End leave out.", "labels": wave }));
             }
             f.push(field("e.tstart", "Trim Start", "In ms: this much of its start left out (silence before it, say).", "number"));
             f.push(field("e.tend", "Trim End", "In ms: this much of its end left out.", "number"));
             let mut adj = Vec::new();
             let mut v = -12.0;
             while v <= 12.0 { adj.push((json!(v), format!("{}{v} dB", if v > 0.0 { "+" } else { "" }))); v += 1.0; }
-            f.push(sel("adj", "Its Level", "Yours, on top of what was measured.", adj));
+            f.push(sel("adj", "Volume", "Yours, on top of what was measured.", adj));
             f.push(field("e.sdelay", "Delay", "In ms: how long after the alert shows its sound starts.", "number"));
             f.push(field("e.music", "Musical Alert", "The app plays its sound itself, pausing the music for it and fading the music back in after.", "toggle"));
             f.push(button(format!("alMeasure:{k}"), "", "Measure Again", "Works out its level again (your own adjustment stays)."));

@@ -56,11 +56,11 @@ const RULES: &[(&str, &str)] = &[
 const EXEMPT: &[(&str, &str)] = &[("none", "No One"), ("subscribers", "Subscribers"), ("vips", "VIPs"), ("mods", "Moderators")];
 const TEXT_DO: &[(&str, &str)] = &[
     ("upper", "In Capitals"), ("lower", "In Small Letters"), ("title", "Each Word Capitalised"), ("trim", "Spaces Trimmed"),
-    ("length", "Its Length"), ("first", "Its First Word"), ("last", "Its Last Word"), ("word", "Word Number..."),
+    ("length", "Length"), ("first", "First Word"), ("last", "Last Word"), ("word", "Word Number..."),
     ("replace", "With a Word Replaced"), ("rest", "All but the First Word"),
 ];
 const PREDICT_END: &[(&str, &str)] = &[("resolve", "Settle it (the outcome below wins)"), ("lock", "Lock It (no more votes)"), ("cancel", "Cancel It (points given back)")];
-const REWARD_DO: &[(&str, &str)] = &[("enable", "Switch It On"), ("disable", "Switch It Off"), ("pause", "Pause It"), ("unpause", "Unpause It"), ("cost", "Change Its Cost"), ("create", "Make It")];
+const REWARD_DO: &[(&str, &str)] = &[("enable", "Switch It On"), ("disable", "Switch It Off"), ("pause", "Pause It"), ("unpause", "Unpause It"), ("cost", "Change the Cost"), ("create", "Make It")];
 const CHAT_MODES: &[(&str, &str)] = &[("emote", "Emote-Only"), ("subscriber", "Subscribers-Only"), ("slow", "Slow Mode"), ("follower", "Followers-Only"), ("unique", "Unique Chat")];
 const BAN_DO: &[(&str, &str)] = &[("ban", "Ban"), ("unban", "Unban")];
 const ROLE_DO: &[(&str, &str)] = &[("vip", "Make Them a VIP"), ("unvip", "Take Their VIP Away"), ("mod", "Make Them a Moderator"), ("unmod", "Take Their Moderator Away")];
@@ -72,7 +72,7 @@ const SHOW_HIDE: &[(&str, &str)] = &[("show", "Show"), ("hide", "Hide"), ("toggl
 const SOFTWARE: &[(&str, &str)] = &[("any", "Any"), ("obs", "OBS"), ("meld", "Meld Studio"), ("slobs", "Streamlabs Desktop")];
 const ON_OFF_TOGGLE: &[(&str, &str)] = &[("on", "On"), ("off", "Off"), ("toggle", "On or Off")];
 const MELD_EVENTS: &[(&str, &str)] = &[
-    ("CONFETTIPOP_TRIGGER", "Confetti Pop"), ("CONFETTIFALL_TRIGGER", "Confetti Fall"), ("WHEELSPIN_SPIN", "Spin Its Wheel"),
+    ("CONFETTIPOP_TRIGGER", "Confetti Pop"), ("CONFETTIFALL_TRIGGER", "Confetti Fall"), ("WHEELSPIN_SPIN", "Spin the Wheel"),
     ("COUNTER_INCREMENT", "Counter Up"), ("COUNTER_DECREMENT", "Counter Down"),
     ("SUBATHONTIMER_ADDTIME", "Subathon Timer: Add Time"), ("SUBATHONTIMER_PAUSE", "Subathon Timer: Pause"), ("SUBATHONTIMER_RESUME", "Subathon Timer: Resume"), ("SUBATHONTIMER_RESET", "Subathon Timer: Reset"),
     ("COUNTDOWN_PAUSE", "Countdown: Pause"), ("COUNTDOWN_RESUME", "Countdown: Resume"), ("COUNTDOWN_RESET", "Countdown: Reset"),
@@ -108,7 +108,7 @@ pub const TRIGGERS: &[Kind] = &[
         pick("who", "From", WHO, "everyone", ""),
         pick("from", "On", FROM, "any", ""),
     ] },
-    Kind { id: "filter", label: "A Rule Broken", note: "Catches messages that break a rule. Its steps decide what happens, like deleting the message, timing them out or warning them. Gives the steps %user% and %message%.", fields: &[
+    Kind { id: "filter", label: "A Rule Broken", note: "Catches messages that break a rule. The action's steps decide what happens, like deleting the message, timing them out or warning them. Gives the steps %user% and %message%.", fields: &[
         pick("rule", "When a Message Has", RULES, "links", ""),
         f("words", "Banned Words", "text", "", "For banned words. Separate them with commas. Whole words only, and capitals don't matter."),
         f("most", "Most", "number", "300", "For Too Long, the most letters allowed. For Too Many Emotes, the most emotes allowed."),
@@ -280,9 +280,9 @@ pub const STEPS: &[Kind] = &[
         f("winner", "Outcome That Won", "text", "%input0%", "For Settle It, the outcome's words, as the prediction has them."),
     ] },
     Kind { id: "reward", label: "Change a Reward", note: "A Channel Points reward. Twitch only lets an app change the rewards it made, so make it here first (Make It).", fields: &[
-        f("title", "Reward", "text", "", "Its name."),
+        f("title", "Reward", "text", "", "The reward's name."),
         pick("what", "", REWARD_DO, "enable", ""),
-        f("cost", "Cost", "number", "500", "For Change Its Cost and Make It."),
+        f("cost", "Cost", "number", "500", "For Change the Cost and Make It."),
     ] },
     Kind { id: "ad", label: "Run an Ad", note: "Twitch. Live only.", fields: &[f("seconds", "Length", "number", "60", "Seconds: 30, 60, 90, 120, 150 or 180.")] },
     Kind { id: "raid", label: "Raid a Channel", note: "Twitch: it counts down, then sends your viewers.", fields: &[
@@ -419,7 +419,7 @@ pub const STEPS: &[Kind] = &[
         f("url", "Address", "text", "https://", "%rawInputUrlEncoded% is what came after the command, made safe for an address."),
         f("into", "As", "text", "reply", "The variable it's kept in: %reply%, or whatever you name it."),
     ] },
-    Kind { id: "run", label: "Run Another Action", note: "", fields: &[f("action", "Action", "text", "", "Its name.")] },
+    Kind { id: "run", label: "Run Another Action", note: "", fields: &[f("action", "Action", "text", "", "The action's name.")] },
     // (Meld Studio's: switched on in the Suite's Connections)
     Kind { id: "meldscene", label: "Meld: Switch Scene", note: "", fields: &[f("scene", "Scene", "mscene", "", "Pick it, or type its name as Meld shows it.")] },
     Kind { id: "meldlayer", label: "Meld: Show or Hide a Layer", note: "", fields: &[
@@ -437,7 +437,7 @@ pub const STEPS: &[Kind] = &[
     Kind { id: "meldstream", label: "Meld: Streaming", note: "", fields: &[pick("what", "", START_STOP, "toggle", "")] },
     Kind { id: "meldrecord", label: "Meld: Recording", note: "", fields: &[pick("what", "", START_STOP, "toggle", "")] },
     Kind { id: "meldclip", label: "Meld: Record a Clip", note: "Of what just happened.", fields: &[f("seconds", "Length", "number", "30", "Seconds, up to 90. 0 for as long as it can.")] },
-    Kind { id: "meldshot", label: "Meld: Screenshot", note: "", fields: &[f("vertical", "Vertical", "toggle", "false", "Its vertical canvas instead.")] },
+    Kind { id: "meldshot", label: "Meld: Screenshot", note: "", fields: &[f("vertical", "Vertical", "toggle", "false", "Use the vertical canvas instead.")] },
     Kind { id: "meldwidget", label: "Meld: Widget Event", note: "Meld's own widgets: confetti, its wheel, its counter and timers.", fields: &[
         pick("event", "Event", MELD_EVENTS, "CONFETTIPOP_TRIGGER", ""),
         f("seconds", "Seconds", "number", "60", "For Subathon Timer: Add Time."),
@@ -452,13 +452,13 @@ pub const STEPS: &[Kind] = &[
     Kind { id: "slobsmute", label: "Streamlabs: Mute or Unmute", note: "", fields: &[f("source", "Audio", "ssource", "", ""), pick("what", "", MUTE, "toggle", "")] },
     Kind { id: "slobsstream", label: "Streamlabs: Streaming", note: "", fields: &[pick("what", "", START_STOP, "toggle", "")] },
     Kind { id: "slobsrecord", label: "Streamlabs: Recording", note: "", fields: &[pick("what", "", START_STOP, "toggle", "")] },
-    Kind { id: "slobsreplay", label: "Streamlabs: Save the Replay", note: "Its replay buffer needs to be running.", fields: &[] },
-    Kind { id: "spin", label: "Spin the Wheel", note: "A free spin, for whoever started the action. Its prizes are in the Suite's Spin the Wheel.", fields: &[] },
+    Kind { id: "slobsreplay", label: "Streamlabs: Save the Replay", note: "The replay buffer in Streamlabs needs to be running.", fields: &[] },
+    Kind { id: "spin", label: "Spin the Wheel", note: "A free spin, for whoever started the action. You set the prizes in Stream Suite > Spin the Wheel.", fields: &[] },
     Kind { id: "hypeadd", label: "Add Hype", note: "Fills the hype meter by this much. A level's 100 unless you've changed it.", fields: &[f("amount", "Amount", "number", "20", "")] },
     Kind { id: "tune", label: "Start Name That Tune", note: "A round on what's playing now: chat guesses its name or artist. It's set up in the Suite's Name That Tune.", fields: &[] },
     Kind { id: "emoterain", label: "Make It Rain Emotes", note: "A burst of the latest emotes on the Emote Rain widget.", fields: &[] },
     Kind { id: "groupstate", label: "Turn a Group On or Off", note: "Every action in the group at once. Give actions a group next to their name.", fields: &[
-        f("group", "Group", "text", "", "Its name."),
+        f("group", "Group", "text", "", "The group's name."),
         pick("what", "", GROUP_DO, "on", ""),
     ] },
     Kind { id: "keys", label: "Press Keys", note: "As if you'd pressed them, in whatever window is in front.", fields: &[

@@ -183,7 +183,7 @@ pub fn panel_fields(prefs: &Value) -> Vec<Value> {
     }
     f.push(serde_json::json!({ "key": "", "label": "Add an artist or label you're cleared to play:", "note": "", "type": "note" }));
     f.push(serde_json::json!({ "key": "safeKind", "label": "It's", "note": "", "type": "select", "options": ["artist", "label"], "labels": ["An artist", "A record label"] }));
-    f.push(serde_json::json!({ "key": "safeName", "label": "Its name", "note": "As it's written on their songs.", "type": "text" }));
+    f.push(serde_json::json!({ "key": "safeName", "label": "Artist name", "note": "Spelled as it is on their songs.", "type": "text" }));
     f.push(serde_json::json!({ "key": "safeAdd", "label": "", "note": "", "type": "button", "value": "Add" }));
     f
 }

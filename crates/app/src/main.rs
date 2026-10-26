@@ -5037,7 +5037,7 @@ fn flows_wire(ui: &AppWindow, shared: &Shared) {
             "group-new" | "group-new-here" => {
                 let here = act == "group-new-here";
                 let has = FLOW.with(|f| flow_groups(&f.borrow().0, &s.borrow().web.prefs));
-                ask_input(&s, "New Group", if here { "Its name. This action goes in it." } else { "Its name. Put actions in it from the Group box, or by right-clicking them." }, "Make It", "", "A name, like Alerts", Vec::new(), move |s, name| {
+                ask_input(&s, "New Group", if here { "Name the group. This action goes in it." } else { "Name the group. To add actions, use the Group box or right-click them." }, "Make It", "", "A name, like Alerts", Vec::new(), move |s, name| {
                     let name = name.trim().to_string();
                     if name.is_empty() { return; }
                     if !has.iter().any(|g| g.eq_ignore_ascii_case(&name)) {
@@ -6826,7 +6826,7 @@ fn paint_settings(a: &App) {
             for p in omnipulse_core::plugins::list() {
                 let m = &p.manifest;
                 let state = plugin_state(&a.web.prefs, m);
-                let home = if m.section.is_empty() { String::new() } else { format!("Its settings are in Settings > {}. Turning it off here removes it from there too. ", m.section) };
+                let home = if m.section.is_empty() { String::new() } else { format!("You'll find its settings in Settings > {}. Turning it off here removes it from there too. ", m.section) };
                 let note = format!("{}{}{home}{}", if m.description.is_empty() { String::new() } else { format!("{} ", m.description) }, if p.bundled { "Comes with OmniPulse. " } else { "" }, state);
                 // (its settings, from here too: a plugin with a page elsewhere (the chatbot's, in Streaming) goes there, once it's on)
                 let more = if m.section.is_empty() { m.settings.as_array().is_some_and(|l| !l.is_empty()) } else { plugin_on(&a.web.prefs, &m.id) };
@@ -8410,7 +8410,7 @@ fn panel_press(shared: &Shared, key: &str) {
                 pref_put(shared, key, serde_json::Value::Object(all));
             }
             push_out(shared, true);
-            if image { "Its icon is showing again.".to_string() } else { "Its sound is removed.".to_string() }
+            if image { "The icon is showing again.".to_string() } else { "The sound is removed.".to_string() }
         }
         k if k.starts_with("alDelete:") => {
             let kind = k[9..].to_string();

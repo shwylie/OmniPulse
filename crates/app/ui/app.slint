@@ -1920,7 +1920,7 @@ component TileView inherits Rectangle {
                 { label: "Don't Recommend This Track", show: !root.album },
                 { label: "Don't Recommend This Artist", show: !root.album },
                 { sep: true, show: !root.album },
-                { label: "Open on Its Platform", show: !root.album },
+                { label: "Open on the Platform", show: !root.album },
                 { label: "Track Preferences...", show: !root.album }
             ];
             picked(n, k) => {
@@ -2316,7 +2316,7 @@ component AccountTile inherits Rectangle {
             spacing: 2px;
             if root.acc.switch != "": CenterToggle { checked: root.acc.on; toggled => { root.toggle(); } }
             Rectangle { horizontal-stretch: 1; }
-            if root.acc.manage != "": IconButton { d: Icons.open; size: 30px; tip: "Manage your subscription, on its site"; clicked => { root.manage(); } }
+            if root.acc.manage != "": IconButton { d: Icons.open; size: 30px; tip: "Manage your subscription on the site"; clicked => { root.manage(); } }
             if root.acc.keys != "": IconButton { d: Icons.key; size: 30px; tip: root.acc.keys + ": your own app keys, for requests of your own"; clicked => { root.keys(); } }
             if root.acc.settings != "": IconButton { d: Icons.gear; size: 30px; tip: root.acc.name + "'s settings"; clicked => { root.settings(); } }
             IconButton {
@@ -2418,7 +2418,7 @@ component StreamTile inherits Rectangle {
             spacing: 2px;
             CenterToggle { checked: root.r.on; toggled => { root.toggle(root.r.key); } }
             Rectangle { horizontal-stretch: 1; }
-            if root.r.on && root.addr != "": IconButton { d: Icons.copy; size: 30px; tip: "Copy its address, for a Browser source in OBS"; clicked => { root.copy(root.addr); } }
+            if root.r.on && root.addr != "": IconButton { d: Icons.copy; size: 30px; tip: "Copy the address for a Browser source in OBS"; clicked => { root.copy(root.addr); } }
             if root.r.more: IconButton { d: Icons.gear; size: 30px; tip: root.r.label + ": its settings"; clicked => { root.more(root.r.key); } }
         }
     }
@@ -2820,7 +2820,7 @@ component PanelPreview inherits Rectangle {
         padding-top: 28px;
         spacing: 10px;
         alignment: start;
-        Text { text: "A preview: your panels at Twitch's size (a long one grows to fit its words)"; color: #ffffffa0; font-size: 11px; }
+        Text { text: "A preview: your panels at Twitch's size (a long one grows to fit the words)"; color: #ffffffa0; font-size: 11px; }
         for p[i] in PanelLook.items: HorizontalLayout {
             alignment: start;
             pi := Rectangle {
@@ -3856,7 +3856,7 @@ component BotFieldRow inherits VerticalLayout {
             border-width: 1px;
             border-color: gname.has-focus ? Theme.accent : Theme.line;
             gname := TextInput { x: 12px; width: parent.width - 24px; height: parent.height; vertical-alignment: center; color: Theme.text; font-size: 13px; single-line: true; text: root.f.extra; edited => { root.set(root.f.key + "Label", self.text); } }
-            if gname.text == "": Text { x: 12px; text: "Its name, like " + root.f.label + " goal"; color: Theme.muted.with-alpha(0.6); font-size: 13px; vertical-alignment: center; }
+            if gname.text == "": Text { x: 12px; text: "Name, like " + root.f.label + " goal"; color: Theme.muted.with-alpha(0.6); font-size: 13px; vertical-alignment: center; }
         }
         Text { text: "Target"; color: Theme.muted; font-size: 12px; vertical-alignment: center; }
         Rectangle {
@@ -3871,7 +3871,7 @@ component BotFieldRow inherits VerticalLayout {
             if gtar.text == "": Text { x: 12px; text: root.f.n; color: Theme.muted.with-alpha(0.6); font-size: 13px; vertical-alignment: center; }
         }
         // (this goal alone, as a Browser source of its own: its address copied)
-        VerticalLayout { alignment: center; IconButton { d: Icons.copy; size: 32px; tip: "Copy its own address, for this goal alone in OBS"; clicked => { root.act("goaladdr:" + root.f.key); } } }
+        VerticalLayout { alignment: center; IconButton { d: Icons.copy; size: 32px; tip: "Copy the address for just this goal in OBS"; clicked => { root.act("goaladdr:" + root.f.key); } } }
     }
     // (a list, a row each: typed into, taken out, one more added; kept as "a | b | c")
     if root.f.kind == "list" || root.f.kind == "piclist": VerticalLayout {
@@ -4179,7 +4179,7 @@ component BotPage inherits Rectangle {
                                 HorizontalLayout {
                                     alignment: end;
                                     spacing: 8px;
-                                    if st.optional: Pill { label: "Skip"; tip: "Not now: it can be set up later, from its tile"; clicked => { root.act("skip:" + st.id); } }
+                                    if st.optional: Pill { label: "Skip"; tip: "Skip for now. You can set it up later from the tile"; clicked => { root.act("skip:" + st.id); } }
                                     Pill { label: st.id == "features" ? "Finish" : "Next"; on: true; clicked => { root.act("next:" + st.id); } }
                                 }
                             }
@@ -4519,7 +4519,7 @@ component BotPage inherits Rectangle {
                     for d[di] in root.widgets-view == "docks" ? [
                         { n: "Chat Dock", t: "Twitch and Kick chat in OBS, with delete, time-out and ban on every message, and a box to chat back.", p: "/dock/chat", i: Icons.chat, k: "dockchat" },
                         { n: "Activity Feed", t: "Follows, subs, bits, raids, rewards and the rest in OBS, each alert replayed with a click.", p: "/dock/activity", i: Icons.bell, k: "dockfeed" },
-                        { n: "Moderation Dock", t: "Pile-Up, Raid Lockdown, chat modes, Shield Mode and Auto-Ban on their own, beside your chat. Its settings are the Chat Dock's.", p: "/dock/mod", i: Icons.shield, k: "dockchat" },
+                        { n: "Moderation Dock", t: "Pile-Up, Raid Lockdown, chat modes, Shield Mode and Auto-Ban on their own, beside your chat. You change it in the Chat Dock's settings.", p: "/dock/mod", i: Icons.shield, k: "dockchat" },
                     ] : [
                         { n: "Multichat Overlay", t: "Twitch and Kick chat together on stream, with a see-through background.", p: "/chat", i: Icons.broadcast, k: "multichat" },
                     ]: Rectangle {
@@ -4541,7 +4541,7 @@ component BotPage inherits Rectangle {
                                 VerticalLayout { alignment: center; Glyph { d: d.i; width: 16px; height: 16px; fill: root.widget-on ? Theme.accent : Theme.muted; } }
                                 Text { text: d.n; color: Theme.text; font-weight: 700; font-size: 13px; horizontal-stretch: 1; overflow: elide; }
                                 if d.k == "multichat": CenterToggle { checked: Wid.on("multichat", Wid.rev); toggled => { root.act("woff:multichat"); } }
-                                IconButton { d: Icons.copy; size: 30px; tip: "Copy its address, for OBS"; clicked => { root.act("copy:http://127.0.0.1:" + root.port + d.p); } }
+                                IconButton { d: Icons.copy; size: 30px; tip: "Copy the address for OBS"; clicked => { root.act("copy:http://127.0.0.1:" + root.port + d.p); } }
                                 IconButton { d: Icons.gear; size: 30px; tip: d.n + ": its settings"; clicked => { root.act("dockset:" + d.k); } }
                             }
                             Text { text: "http://127.0.0.1:" + root.port + d.p; color: Theme.accent.mix(Theme.text, 0.55); font-size: 11px; font-family: "Consolas"; overflow: elide; }
@@ -4575,8 +4575,8 @@ component BotPage inherits Rectangle {
                                 VerticalLayout { alignment: center; Glyph { d: w.i; width: 15px; height: 15px; fill: Theme.accent; } }
                                 Text { text: w.n; color: Theme.text; font-weight: 700; font-size: 12px; horizontal-stretch: 1; overflow: elide; vertical-alignment: center; }
 CenterToggle { checked: Wid.on(w.k, Wid.rev); toggled => { root.act("woff:" + w.k); } }
-                                IconButton { d: Icons.copy; size: 28px; tip: "Copy its address, for OBS"; clicked => { root.act("copy:http://" + w.h + ":" + root.port + w.p); } }
-                                IconButton { d: Icons.gear; size: 28px; tip: "Its settings"; clicked => { root.act("sheet:" + w.s); } }
+                                IconButton { d: Icons.copy; size: 28px; tip: "Copy the address for OBS"; clicked => { root.act("copy:http://" + w.h + ":" + root.port + w.p); } }
+                                IconButton { d: Icons.gear; size: 28px; tip: "Settings"; clicked => { root.act("sheet:" + w.s); } }
                             }
                             Text { text: "http://" + w.h + ":" + root.port + w.p; color: Theme.accent.mix(Theme.text, 0.55); font-size: 10px; font-family: "Consolas"; overflow: elide; }
                         }
@@ -4598,7 +4598,7 @@ CenterToggle { checked: Wid.on(w.k, Wid.rev); toggled => { root.act("woff:" + w.
                             VerticalLayout { alignment: center; Glyph { d: Icons.star-out; width: 16px; height: 16px; fill: Theme.accent; } }
                             Text { text: "Webcam Overlay"; color: Theme.text; font-weight: 700; font-size: 13px; horizontal-stretch: 1; overflow: elide; }
 CenterToggle { checked: Wid.on("cam", Wid.rev); toggled => { root.act("woff:" + "cam"); } }
-                            IconButton { d: Icons.copy; size: 30px; tip: "Copy its address, for OBS"; clicked => { root.act("copy:http://127.0.0.1:" + root.port + "/cam/main"); } }
+                            IconButton { d: Icons.copy; size: 30px; tip: "Copy the address for OBS"; clicked => { root.act("copy:http://127.0.0.1:" + root.port + "/cam/main"); } }
                             IconButton { d: Icons.gear; size: 30px; tip: "Make it yours"; clicked => { root.act("sheet:cam"); } }
                         }
                         Text { text: "http://127.0.0.1:" + root.port + "/cam/main"; color: Theme.accent.mix(Theme.text, 0.55); font-size: 11px; font-family: "Consolas"; overflow: elide; }
@@ -4638,7 +4638,7 @@ CenterToggle { checked: Wid.on("cam", Wid.rev); toggled => { root.act("woff:" + 
                             VerticalLayout { alignment: center; Glyph { d: Icons.broadcast; width: 16px; height: 16px; fill: Theme.accent; } }
                             Text { text: "Game HUD Frames"; color: Theme.text; font-weight: 700; font-size: 13px; horizontal-stretch: 1; overflow: elide; }
 CenterToggle { checked: Wid.on("hud", Wid.rev); toggled => { root.act("woff:" + "hud"); } }
-                            IconButton { d: Icons.copy; size: 30px; tip: "Copy its address, for OBS"; clicked => { root.act("copy:http://127.0.0.1:" + root.port + "/hud"); } }
+                            IconButton { d: Icons.copy; size: 30px; tip: "Copy the address for OBS"; clicked => { root.act("copy:http://127.0.0.1:" + root.port + "/hud"); } }
                             IconButton { d: Icons.gear; size: 30px; tip: "Make them"; clicked => { root.act("sheet:hud"); } }
                         }
                         Text { text: "http://127.0.0.1:" + root.port + "/hud"; color: Theme.accent.mix(Theme.text, 0.55); font-size: 11px; font-family: "Consolas"; overflow: elide; }
@@ -4676,8 +4676,8 @@ CenterToggle { checked: Wid.on("hud", Wid.rev); toggled => { root.act("woff:" + 
                                 VerticalLayout { alignment: center; Glyph { d: w.i; width: 15px; height: 15px; fill: Theme.accent; } }
                                 Text { text: w.n; color: Theme.text; font-weight: 700; font-size: 12px; horizontal-stretch: 1; overflow: elide; vertical-alignment: center; }
 CenterToggle { checked: Wid.on(w.k, Wid.rev); toggled => { root.act("woff:" + w.k); } }
-                                IconButton { d: Icons.copy; size: 28px; tip: "Copy its address, for OBS"; clicked => { root.act("copy:http://127.0.0.1:" + root.port + w.p); } }
-                                IconButton { d: Icons.gear; size: 28px; tip: "Its settings"; clicked => { root.act("sheet:" + w.s); } }
+                                IconButton { d: Icons.copy; size: 28px; tip: "Copy the address for OBS"; clicked => { root.act("copy:http://127.0.0.1:" + root.port + w.p); } }
+                                IconButton { d: Icons.gear; size: 28px; tip: "Settings"; clicked => { root.act("sheet:" + w.s); } }
                             }
                             Text { text: "http://127.0.0.1:" + root.port + w.p; color: Theme.accent.mix(Theme.text, 0.55); font-size: 10px; font-family: "Consolas"; overflow: elide; }
                         }
@@ -7397,7 +7397,7 @@ export component AppWindow inherits Window {
                                                 spacing: 8px;
                                                 VerticalLayout { alignment: center; Glyph { d: Icons.local; width: 15px; height: 15px; fill: Theme.muted; } }
                                                 Text { text: f; color: Theme.text; font-size: 13px; vertical-alignment: center; overflow: elide; horizontal-stretch: 1; }
-                                                VerticalLayout { alignment: center; IconButton { d: Icons.close; size: 30px; tip: "Remove this folder. Its files stay where they are."; clicked => { root.folder-remove(i); } } }
+                                                VerticalLayout { alignment: center; IconButton { d: Icons.close; size: 30px; tip: "Remove this folder. The files in it stay where they are."; clicked => { root.folder-remove(i); } } }
                                             }
                                         }
                                     }
@@ -7629,7 +7629,7 @@ export component AppWindow inherits Window {
                                             HiTitle { text: "Activity Feed Dock"; }
                                             Text { text: "Shows your alerts as they come in, from Streamer.bot, Mix It Up or any bot. Click one to replay it. In OBS, add it under Docks > Custom Browser Docks."; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
                                         }
-                                        VerticalLayout { alignment: center; IconButton { d: Icons.copy; size: 34px; tip: "Copy its address, for OBS"; clicked => { root.copy-text(stv.base + "/dock/activity"); } } }
+                                        VerticalLayout { alignment: center; IconButton { d: Icons.copy; size: 34px; tip: "Copy the address for OBS"; clicked => { root.copy-text(stv.base + "/dock/activity"); } } }
                                     }
                                 }
                                 // ---- your chat ----
@@ -7961,7 +7961,7 @@ export component AppWindow inherits Window {
                               }
                               VerticalLayout { alignment: center; IconButton { d: Icons.copy; size: 34px; tip: "Copy it"; clicked => { root.pf-copy(i); } } }
                               // (another output: its look, or taken away)
-                              if f.kind == "output": VerticalLayout { alignment: center; IconButton { d: Icons.gear; size: 34px; tip: "Change its look"; clicked => { root.pf-set(i, "btn:edit"); } } }
+                              if f.kind == "output": VerticalLayout { alignment: center; IconButton { d: Icons.gear; size: 34px; tip: "Change the look"; clicked => { root.pf-set(i, "btn:edit"); } } }
                               if f.kind == "output": VerticalLayout { alignment: center; IconButton { d: Icons.close; size: 34px; tip: "Remove this output"; clicked => { root.pf-set(i, "btn:del"); } } }
                             }
                            }
@@ -8279,7 +8279,7 @@ export component AppWindow inherits Window {
                                         padding: 6px;
                                                         MenuRow { label: it.marked && root.flow-marked > 1 ? "Group the " + root.flow-marked + " Picked..." : "Put It in a Group..."; clicked => { root.flow-act("group-marked:" + i); } }
                                                         MenuRow { label: "New Group..."; clicked => { root.flow-act("group-new"); } }
-                                                        if it.group != "": MenuRow { label: it.marked && root.flow-marked > 1 ? "Take Them Out of Their Groups" : "Take It Out of Its Group"; clicked => { root.flow-act("ungroup:" + i); } }
+                                                        if it.group != "": MenuRow { label: it.marked && root.flow-marked > 1 ? "Take Them Out of Their Groups" : "Take It Out of the Group"; clicked => { root.flow-act("ungroup:" + i); } }
                                                         Text { text: "Ctrl+click actions to pick several."; color: Theme.muted; font-size: 11px; x: 10px; height: 26px; vertical-alignment: center; }
                                                     }
                                                 }
@@ -8366,7 +8366,7 @@ export component AppWindow inherits Window {
                                         }
                                         CenterToggle { checked: root.flow-on; toggled => { root.flow-on-toggled(self.checked); } }
                                         VerticalLayout { alignment: center; Pill { label: "One at a Time"; on: root.flow-queued; tip: "Runs one at a time. Each run waits until the one before it is done, like Streamer.bot's queues, so alerts never overlap."; clicked => { root.flow-act("queued"); } } }
-                                        VerticalLayout { alignment: center; Pill { label: "Run Now"; tip: "Run its steps now, as if it had been started"; clicked => { root.flow-act("run"); } } }
+                                        VerticalLayout { alignment: center; Pill { label: "Run Now"; tip: "Run the steps now, as if it had been started"; clicked => { root.flow-act("run"); } } }
                                         VerticalLayout { alignment: center; Pill { label: "Copy"; tip: "Another action like this one"; clicked => { root.flow-act("copy"); } } }
                                         VerticalLayout { alignment: center; Pill { label: "Delete"; clicked => { root.flow-act("delete"); } } }
                                     }
@@ -9201,8 +9201,8 @@ export component AppWindow inherits Window {
                             for t in [
                                 { d: Icons.library, n: "The sidebar", s: "Your Library, Discover, Rediscover, artists and stats, with your playlists below." },
                                 { d: Icons.play, n: "The player", s: "At the bottom. Click what's playing to open Now Playing and its lyrics." },
-                                { d: Icons.mix, n: "Seamless Mix", s: "Its button is in the title bar. With it on, rate each change with the thumbs beside it." },
-                                { d: Icons.gear, n: "Settings", s: "The gear at the top right of each page. Its search finds any setting." },
+                                { d: Icons.mix, n: "Seamless Mix", s: "The button is in the title bar. With it on, rate each change with the thumbs beside it." },
+                                { d: Icons.gear, n: "Settings", s: "The gear at the top right of each page. The search box there finds any setting." },
                             ]: HorizontalLayout {
                                 spacing: 12px;
                                 VerticalLayout { alignment: center; Rectangle { width: 36px; height: 36px; border-radius: 10px; background: Theme.accent.with-alpha(0.15); Glyph { d: t.d; width: 18px; height: 18px; x: 9px; y: 9px; fill: Theme.accent; } } }
@@ -9443,12 +9443,12 @@ export component AppWindow inherits Window {
                     spacing: 8px;
                     alignment: start;
                     Text { text: "Phrases start"; color: Theme.text; font-size: 13px; vertical-alignment: center; }
-                    Pill { label: "Earlier"; tip: "Move its phrases (16 beats) a bar earlier"; clicked => { root.tp-phrase = max(-3, root.tp-phrase - 1); } }
+                    Pill { label: "Earlier"; tip: "Move the phrases (16 beats) a bar earlier"; clicked => { root.tp-phrase = max(-3, root.tp-phrase - 1); } }
                     Text {
                         text: root.tp-phrase == 0 ? "as measured" : (abs(root.tp-phrase) + (abs(root.tp-phrase) == 1 ? " bar " : " bars ") + (root.tp-phrase < 0 ? "earlier" : "later"));
                         color: root.tp-phrase == 0 ? Theme.muted : Theme.text; font-size: 13px; vertical-alignment: center; min-width: 110px; horizontal-alignment: center;
                     }
-                    Pill { label: "Later"; tip: "Move its phrases a bar later"; clicked => { root.tp-phrase = min(3, root.tp-phrase + 1); } }
+                    Pill { label: "Later"; tip: "Move the phrases a bar later"; clicked => { root.tp-phrase = min(3, root.tp-phrase + 1); } }
                 }
                 if root.tp-beat-shown: Text { text: "If Seamless Mix blends this song badly: when it's a beat or two off, move Beat 1 to where you hear the bar start. When it's on the beat but a bar off, move where its phrases start. A quiet or filtered bar can start a phrase."; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
                 if root.tp-note != "": Text { text: root.tp-note; color: Theme.muted; font-size: 12px; wrap: word-wrap; }

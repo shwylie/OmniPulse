@@ -36,7 +36,7 @@ fn outputs_list(prefs: &Value, kind: &str, base: &str) -> Vec<Value> {
         let n = i + 2;
         let url = format!("{base}{n}");
         // (one card: its address, copied; its look; taken away)
-        let mut o = info(&format!("Output {n}"), &url, &url, "Its own look, playing the same song. Add its address as another Browser source in OBS.");
+        let mut o = info(&format!("Output {n}"), &url, &url, "A second look, playing the same song. Add this address as another Browser source in OBS.");
         o["type"] = json!("output");
         o["key"] = json!(format!("out:{kind}:{n}"));
         f.push(o);
@@ -387,13 +387,13 @@ pub fn fields(name: &str, vals: &Map<String, Value>, prefs: &Value, lan: &str) -
         let opts: Vec<(Value, &str)> = crate::socials::PLATFORMS.iter().map(|p| (json!(p.0), p.1)).collect();
         let other = vals["platform"] == "other";
         let mut f = vec![sel("platform", "Platform", "", &opts)];
-        if other { f.push(text("name", "Its Name", "What it's called, shown under your handle.")); }
+        if other { f.push(text("name", "Name", "What it's called, shown under your handle.")); }
         f.push(text("handle", "Your Handle", "As you want it shown, like @yourname or yourname.tv."));
         f.push(note("Icon and Colours"));
         match crate::socials::icon_of(&m) {
             Some(file) => {
                 f.push(button(&format!("socIcon:{id}"), &format!("Your Icon: {file}"), "Change", ""));
-                f.push(button(&format!("socIconClear:{id}"), "", if other { "Use Its First Letter" } else { "Use Its Own Icon" }, ""));
+                f.push(button(&format!("socIconClear:{id}"), "", if other { "Use the First Letter" } else { "Use the Platform Icon" }, ""));
             }
             None => f.push(button(&format!("socIcon:{id}"), "Your Own Icon", "Choose...", if other { "Without one, it shows the first letter of its name." } else { "In place of the platform's icon (a PNG with a clear background works best)." })),
         }
@@ -522,7 +522,7 @@ fn fields_of(name: &str, vals: &Map<String, Value>, prefs: &Value, lan: &str) ->
                 stepper("widgetText", "Text Size", "", pct(0.7, 1.6, 0.1)),
             ]);
             if s("widgetDesign", "card") == "vinyl" { f.push(tog("wSpin", "Spin the Record", "")); }
-            f.push(tog("widgetOwnCol", "Its Own Colours", "When this is off, it uses the app's accent colours, or the cover's."));
+            f.push(tog("widgetOwnCol", "Own Colours", "When this is off, it uses the app's accent colours, or the cover's."));
             if vals["widgetOwnCol"].as_bool() == Some(true) {
                 f.push(color("widgetCol1", "Accent Colour", ""));
                 f.push(color("widgetCol2", "Second Colour", ""));
@@ -862,7 +862,7 @@ fn plugin_fields(_prefs: &Value) -> Vec<Value> {
     // each one's files (its manifest.json and main.js), to read what it does
     let all = omnipulse_core::plugins::list();
     if !all.is_empty() { f.push(note("Their files:")); }
-    for p in &all { f.push(button(&format!("plugFiles:{}", p.manifest.id), &p.manifest.name, "Show Its Files", "Opens the folder with its manifest.json and main.js.")); }
+    for p in &all { f.push(button(&format!("plugFiles:{}", p.manifest.id), &p.manifest.name, "Show Files", "Opens the plugin's folder, with manifest.json and main.js.")); }
     // the ones you've added (those that come with OmniPulse stay)
     let added: Vec<omnipulse_core::plugins::Package> = omnipulse_core::plugins::list().into_iter().filter(|p| !p.bundled).collect();
     if !added.is_empty() { f.push(note("Added by you:")); }
