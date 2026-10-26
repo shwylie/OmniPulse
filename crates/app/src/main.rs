@@ -7063,15 +7063,20 @@ fn bot_paint(shared: &Shared) {
     ui.set_bot_sub(sub.into());
     ui.set_bot_stats(stats.into());
     ui.set_bot_running(running);
-    ui.set_bot_tiles(model(botpage::tiles(&cur, &st, running).into_iter().map(|(id, name, state, l1, l2)| BotTile { id: id.into(), name: name.into(), state: state.into(), line1: l1.into(), line2: l2.into() }).collect()));
-    ui.set_bot_feats(model(botpage::feats(&cur, &st).into_iter().map(|(id, name, note, on, open)| BotFeat { id: id.into(), name: name.into(), note: note.into(), on, open, changed: pf_changed(botpage::key_of(&format!("feat:{id}"))) && id != "actions" && id != "games" }).collect()));
+    // (a page of its own open (a widget's, say): the Suite's overview under it isn't seen, so it isn't drawn
+    // again with each change there; it is when the page closes)
+    let sheet_open = BOT_SHEET.with(|b| !b.borrow().is_empty());
     let focus = BOT_FOCUS.with(|f| f.borrow().clone());
     let now = botpage::step_now(&cur, &focus);
+    if !sheet_open {
+    ui.set_bot_tiles(model(botpage::tiles(&cur, &st, running).into_iter().map(|(id, name, state, l1, l2)| BotTile { id: id.into(), name: name.into(), state: state.into(), line1: l1.into(), line2: l2.into() }).collect()));
+    ui.set_bot_feats(model(botpage::feats(&cur, &st).into_iter().map(|(id, name, note, on, open)| BotFeat { id: id.into(), name: name.into(), note: note.into(), on, open, changed: pf_changed(botpage::key_of(&format!("feat:{id}"))) && id != "actions" && id != "games" }).collect()));
     ui.set_bot_steps(model(botpage::steps(&cur).into_iter().map(|(id, title, note, done, optional)| BotStep { id: id.into(), title: title.into(), note: note.into(), state: botpage::step_state(&cur, id, done, &now).into(), optional }).collect()));
     let log: Vec<BotLine> = st["recent"].as_array().into_iter().flatten().take(8).map(|l| BotLine { who: l["who"].as_str().unwrap_or("").into(), heard: l["heard"].as_str().unwrap_or("").into(), did: l["did"].as_str().unwrap_or("").into(), platform: l["platform"].as_str().unwrap_or("twitch").into() }).collect();
     ui.set_bot_log(model(log));
     ui.set_bot_examples(model(botpage::examples(&cur).into_iter().map(slint::SharedString::from).collect()));
     ui.set_bot_tried(model(BOT_TRIED.with(|t| t.borrow().iter().map(|(w, x)| BotLine { who: w.as_str().into(), heard: Default::default(), did: x.as_str().into(), platform: "twitch".into() }).collect())));
+    }
     // (a sheet's and the step's lines: drawn again only when they've changed, so what's being typed stays put)
     let sheet = BOT_SHEET.with(|b| b.borrow().clone());
     let (title, mut lines) = botpage::sheet(&sheet, &cur);
@@ -7116,7 +7121,14 @@ fn bot_paint(shared: &Shared) {
         let own = cur.get("panelOwnIcons").and_then(|v| v.as_str()).unwrap_or("").to_string();
         for (it, u) in items.iter_mut().zip(own.split('|').map(|u| u.trim().to_string())) {
             if let Some(name) = u.strip_prefix("/overlay/") {
-                if let Some(img) = omnipulse_core::data_dir().ok().map(|d| d.join("overlay-media").join(name)).and_then(|f| slint::Image::load_from_path(&f).ok()) { it.img = img; it.has_img = true; }
+                // (each picture read from disk once, not on every change to the page)
+                thread_local! { static PICS: RefCell<HashMap<String, slint::Image>> = RefCell::new(HashMap::new()); }
+                let img = PICS.with(|p| p.borrow().get(name).cloned()).or_else(|| {
+                    let img = omnipulse_core::data_dir().ok().map(|d| d.join("overlay-media").join(name)).and_then(|f| slint::Image::load_from_path(&f).ok())?;
+                    PICS.with(|p| p.borrow_mut().insert(name.to_string(), img.clone()));
+                    Some(img)
+                });
+                if let Some(img) = img { it.img = img; it.has_img = true; }
             }
         }
         if cur.get("panelPowered").and_then(|v| v.as_bool()) != Some(false) { items.push(item("Powered by OmniPulse", if ext { "This stream's music, chatbot, alerts and overlays all run on OmniPulse." } else { "Music, chatbot and stream tools in one app" })); }
@@ -8676,20 +8688,28 @@ fn panel_save(shared: &Shared, name: &str, vals: serde_json::Map<String, serde_j
             let mut a = shared.borrow_mut();
             let mut all = a.web.prefs["pluginSettings"].as_object().cloned().unwrap_or_default();
             let mut mine = all.get(botpage::BOT).and_then(|v| v.as_object()).cloned().unwrap_or_default();
-            let mut changed = false;
+            let mut changed = serde_json::Map::new();
             for (k, v) in vals.iter().filter_map(|(k, v)| k.strip_prefix("bot:").map(|k| (k, v))) {
                 // (numbers typed as text: kept as numbers, as the chatbot's own page keeps them)
                 let v = match (k, v) { ("srCooldown" | "srCost", serde_json::Value::String(t)) => serde_json::json!(t.trim().parse::<u64>().unwrap_or(0)), _ => v.clone() };
-                if mine.get(k) != Some(&v) { mine.insert(k.into(), v); changed = true; }
+                if mine.get(k) != Some(&v) { mine.insert(k.into(), v.clone()); changed.insert(k.into(), v); }
             }
             all.insert(botpage::BOT.into(), serde_json::Value::Object(mine));
             let all = serde_json::Value::Object(all);
             if let Some(o) = a.web.prefs.as_object_mut() { o.insert("pluginSettings".into(), all.clone()); }
-            changed.then_some(all)
+            (!changed.is_empty()).then_some((all, changed))
         };
-        if let Some(all) = all {
+        if let Some((all, changed)) = all {
             if std::env::var_os("OMNIPULSE_SELFTEST").is_none() { webstate::save_pref("pluginSettings", all); }
-            if plugrun::get(botpage::BOT).is_some() { plugrun::stop(botpage::BOT); plugins_start(shared); }
+            if let Some(p) = plugrun::get(botpage::BOT) {
+                // (only how things look or behave changed: given to the running Suite, nothing restarted; an
+                // account, a connection or a command changed: restarted, so it connects with them)
+                if changed.keys().all(|k| botpage::live_key(k)) {
+                    let rt = shared.borrow().rt.clone();
+                    let vals = serde_json::Value::Object(changed);
+                    rt.spawn(async move { let _ = p.call("applySettings", vec![vals]).await; });
+                } else { plugrun::stop(botpage::BOT); plugins_start(shared); }
+            }
         }
     }
     panel_keys(shared);

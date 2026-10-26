@@ -723,7 +723,7 @@
       if (next !== sig) { sig = next; suite = s.suite || null; draw(); }
     } catch (e) {}
   }
-  setInterval(poll, PREVIEW ? 500 : 1500);
+  setInterval(poll, PREVIEW ? 250 : 1500);
   poll();
 </script>
 </body>

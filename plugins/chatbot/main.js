@@ -2152,6 +2152,10 @@ function suiteKeep() {
   suiteSaveT = setTimeout(() => { const k = { goals: suite.goals, latest: suite.latest, timer: suite.timer, lastRaid: suite.lastRaid }; OmniPulse.settings.suiteState = k; OmniPulse.app.saveSettings({ suiteState: k }).catch(() => {}); }, 4000);
 }
 // (to the app, for the pages: what's counted, and how each is set)
+// (the widgets switched off, by id: goals, timer, latest-follow, latest-sub, raid, hype, voteskip, wheel,
+// leaderboard, emotes, tune, sponsors, cam, hud, multichat, dockchat, dockfeed, dockmod)
+function widgetsOff() { return String(S().widgetsOff || "").split("|").map((s) => s.trim()).filter(Boolean); }
+
 function suitePush() {
   clearTimeout(suitePushT);
   suitePushT = setTimeout(() => {
@@ -2180,6 +2184,8 @@ function suitePush() {
       rain: { src: String(x.rainSource || "chat"), imgs: String(x.rainImages || "").split(/[|\n]/).map((u) => u.trim()).filter((u) => /^https?:\/\//.test(u)).slice(0, 20), chat: yes(x.rainChat === undefined ? true : x.rainChat),
         dir: String(x.rainDir || "down"), from: String(x.rainFrom || "all"), x: num(x.rainX) || 85, y: num(x.rainY) || 85, size: String(x.rainSize || "medium"), speed: String(x.rainSpeed || "normal"),
         amount: num(x.rainAmount) || 30, spin: yes(x.rainSpin === undefined ? true : x.rainSpin) },
+      // (the widgets switched off: their pages blank and idle, so they cost nothing in OBS)
+      off: widgetsOff(),
       anim: String(x.suiteAnim || "rise"),
       theme: String(x.suiteTheme || "dark"),
       colors: suiteColors(),
@@ -2942,6 +2948,13 @@ OmniPulse.register({
   async signOutKickChannel() { return signOutOf({ kickToken: "", kickRefreshToken: "", kickUserId: "", kickLogin: "" }, "Signed your channel out of Kick."); },
   async signOutKickBot() { return signOutOf({ kickBotToken: "", kickBotRefreshToken: "", kickBotLogin: "" }, "Signed the bot out of Kick."); },
   tryChat(text, platform, asMod) { return tryChat(text, platform, asMod); },
+  // (settings that change only how things look or behave, saved: taken as they are, nothing restarted, the
+  // widgets sent them at once)
+  applySettings(vals) {
+    if (vals && typeof vals === "object") Object.assign(OmniPulse.settings, vals);
+    suitePush();
+    return "Saved.";
+  },
   status() {
     const tip = (label) => tipSockets.some((x) => x.label === label && x.up);
     return {

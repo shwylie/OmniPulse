@@ -169,7 +169,7 @@
       const c = all.find((x) => x.id === ID) || all.find((x) => x.kind === "cam") || null;
       if (c) { last = [c, s]; draw(c, s); }
     } catch (e) {}
-    setTimeout(poll, 1500);
+    setTimeout(poll, /[?&]preview=1/.test(location.search) ? 250 : 1500);
   }
   addEventListener("resize", () => { sig = ""; if (last) draw(last[0], last[1]); });
   poll();

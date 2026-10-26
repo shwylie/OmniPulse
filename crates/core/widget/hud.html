@@ -82,7 +82,7 @@
       const h = ((s.suite && s.suite.creators) || []).find((x) => x.kind === "hud");
       if (h) draw(h);
     } catch (e) {}
-    setTimeout(poll, 1500);
+    setTimeout(poll, /[?&]preview=1/.test(location.search) ? 250 : 1500);
   }
   addEventListener("resize", () => (sig = ""));
   poll();

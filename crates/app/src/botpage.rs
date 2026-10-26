@@ -36,6 +36,24 @@ thread_local! {
     pub static TIPS_OPEN: std::cell::RefCell<std::collections::HashSet<String>> = std::cell::RefCell::new(std::collections::HashSet::new());
 }
 
+/// A setting that changes only how widgets look or behave: taken by the running Suite as it's saved, no
+/// restart. Anything to do with an account, a connection, a sign-in, commands or actions isn't
+pub fn live_key(k: &str) -> bool {
+    const LIVE: [&str; 22] = ["goal", "timer", "suite", "panel", "cam", "hud", "rain", "wheel", "hype", "skip", "sponsor", "gif", "tune", "leader", "latest", "raid", "theme", "ab", "train", "widgetsOff", "social", "fun"];
+    const NEVER: [&str; 12] = ["token", "login", "client", "secret", "relay", "refresh", "kick", "userid", "channel", "botname", "obs", "url"];
+    let low = k.to_lowercase();
+    LIVE.iter().any(|p| k.starts_with(p)) && !NEVER.iter().any(|n| low.contains(n))
+}
+
+#[cfg(test)]
+mod live_tests {
+    #[test]
+    fn looks_are_live_and_accounts_restart() {
+        for k in ["goalStyle", "suiteTheme", "panelTheme", "camBorder", "rainDir", "wheelColors", "hypeShow", "timerLabel", "widgetsOff"] { assert!(super::live_key(k), "{k}"); }
+        for k in ["twitchToken", "kickToken", "botLogin", "kofiToken", "streamlabsToken", "commands", "actions", "obsOn", "kofiUrl"] { assert!(!super::live_key(k), "{k}"); }
+    }
+}
+
 /// One line of a sheet or a step, as the page draws it (BotField)
 pub struct Field { pub key: String, pub kind: &'static str, pub label: String, pub note: String, pub value: String, pub extra: String, pub n: i32 }
 
