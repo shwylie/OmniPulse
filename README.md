@@ -1,36 +1,49 @@
 # OmniPulse
 
-<!-- (edit me) a line or two in your own words: what OmniPulse is and who it's for -->
 A music player and streaming toolkit for Windows. It plays SoundCloud, Spotify, YouTube Music and your own
-files in one library, mixes from one song into the next like a DJ, and comes with a chatbot, alerts,
-overlays and Stream Deck controls for streaming on Twitch, Kick and YouTube.
+files in one library (and imports your Apple Music library), and comes with a chatbot, alerts, overlays,
+docks and Stream Deck controls for streaming on Twitch, Kick and YouTube.
 
-- **Download:** <!-- (edit me) the installer's link -->
-- **Support:** [Ko-fi](https://ko-fi.com/shwylie) · bugs and ideas from Settings > Bugs and Ideas, or
-  @shwylie on Discord
+## Download
 
-## A note on how this was made (AI disclaimer)
+- **[Web installer](https://omnipulse-jam.shwylie101.workers.dev/get)** (recommended): a small download
+  that always fetches the latest version when you run it.
+- **[Releases page](https://github.com/shwylie/omnipulse-native-releases/releases)** (backup): every
+  version's full installer, if the web installer doesn't work for you or you want a particular version.
 
-<!-- (edit me) this is a starting point: say it the way you want it said -->
-OmniPulse is developed by one person, @shwylie, with a great deal of help from AI. Most of the code was
-written by Anthropic's Claude (through Claude Code), working from my ideas, designs, feedback and testing:
-I decide what gets built and how it should look and feel, try every change, and report what's wrong, and
-Claude writes and revises the code. Tuning like Seamless Mix's transitions comes from my own ratings and
-listening.
+## Support and contact
 
-That means:
+- **Support the project:** [![Support OmniPulse at shwyl.ie](https://img.shields.io/badge/Support-shwyl.ie-8e9bff?style=for-the-badge)](https://shwyl.ie) [![Ko-fi](https://img.shields.io/badge/%E2%80%8B-FF5E5B?style=for-the-badge&logo=kofi&logoColor=white)](https://ko-fi.com/shwylie)
+- **Bugs and ideas:** from the app (Settings > Bugs and Ideas), or message shwylie on Discord
+- **Email:** [me@shwyl.ie](mailto:me@shwyl.ie) as a fallback. Please put "OmniPulse" in the subject line.
+
+## A note on how this was made
+
+OmniPulse is developed and maintained by one person. Me. SHWYLiE. With a great deal of help from Claude
+Code. I couldn't have done this alone, as I'm still learning the fundamentals (thanks
+[boot.dev](https://boot.dev) for being amazing). So while some of this code is my own, I've been using
+Claude Code as my supervisor, keeping me right and talking through ideas with, so I can learn how
+something is actually made if I haven't learned it yet through boot.dev.
+
+What this means:
 
 - The code hasn't had a line-by-line review by an experienced human developer. It's tested (automated
   tests, and daily use), but treat it as you would any hobby project.
 - Bugs and odd choices are possible. Reports are welcome.
-- No AI-generated music, art or voices are shipped in the app. <!-- (edit me) check this is true for you -->
+- No AI-generated music, art or voices are shipped in the app.
 
 ## What's in it
 
 - **Music:** one library across SoundCloud, Spotify, YouTube Music and local files; Discover, Rediscover,
   stats, lyrics, playlists across platforms, Apple Music import.
 - **Seamless Mix:** blends songs on the beat (tempo and key matched), measured with Beat This! where it
-  can be.
+  can be. *Spotify's audio is never used for it:* with Seamless Mix on, a Spotify song plays from its
+  YouTube Music version, and only that (or a SoundCloud stream, or your own file) is measured, changed or
+  mixed. Spotify gives only the song's details, your likes and your playlists. Apple Music is used only to
+  import your library: nothing ever plays from it.
+  With Seamless Mix on, music (apart from your own files) comes from third-party sources, and a song from
+  Spotify or an Apple Music import is a version matched on YouTube Music. That match may not always be the
+  exact one its details describe (another edit, remix or upload).
 - **Streaming Suite:** a chatbot with actions (Streamer.bot and Mix It Up imports), alerts (Streamlabs
   import), song requests, widgets and docks for OBS, overlays, panels, Stream Deck plugin.
 - **Visualisers**, themes, and a taskbar widget.
