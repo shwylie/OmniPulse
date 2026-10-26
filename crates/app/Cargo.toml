@@ -1,6 +1,7 @@
 [package]
 name = "omnipulse"
 version = "0.3.33"
+license = "GPL-3.0-or-later"
 edition = "2021"
 description = "OmniPulse, native: one window, one process (Slint), beside the web app until it does everything"
 

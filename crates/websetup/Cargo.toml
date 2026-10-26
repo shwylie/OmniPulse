@@ -4,6 +4,7 @@
 # put: a new one only if what it does has to change (then it's submitted to Microsoft once more).
 name = "omnipulse-setup"
 version = "1.0.0"
+license = "GPL-3.0-or-later"
 edition = "2021"
 publish = false
 

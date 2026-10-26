@@ -1,6 +1,7 @@
 [package]
 name = "omnipulse-offset"
 version = "0.1.0"
+license = "GPL-3.0-or-later"
 edition = "2021"
 description = "OmniPulse Offset: plays the app's sound a second time as its own program, for Wave Link and the like"
 

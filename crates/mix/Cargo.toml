@@ -1,6 +1,7 @@
 [package]
 name = "omnipulse-mix"
 version = "0.1.0"
+license = "GPL-3.0-or-later"
 edition = "2021"
 description = "Seamless Mix's planning, shared by OmniPulse on the desktop and on Android"
 

@@ -54,10 +54,15 @@ Windows, with Rust (stable) and Node.js.
 
 `src-tauri/` and `dist/` are the old web-based app (0.2.x), kept for reference.
 
-## Credits and licences
+## Licence
 
-<!-- (edit me) choose a licence for OmniPulse itself and add a LICENSE file -->
-- [Slint](https://slint.dev) draws the window (Royalty-free License, with its credit in Settings).
+OmniPulse is free software under the [GNU General Public License v3.0](LICENSE) (or any later version).
+You can use, study, share and change it; if you share a changed version, it must stay under the GPL
+with its source available.
+
+## Credits
+
+- [Slint](https://slint.dev) draws the window (used under the GPLv3, as OmniPulse is; its credit is in Settings).
 - [librespot](https://github.com/librespot-org/librespot) (MIT) plays Spotify, from a copy in `vendor/`.
 - [Beat This!](https://github.com/CPJKU/beat_this) (MIT) finds beats and downbeats; its model is in
   `crates/core/models/` with its licence.

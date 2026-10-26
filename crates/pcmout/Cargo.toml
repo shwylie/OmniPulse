@@ -1,6 +1,7 @@
 [package]
 name = "omnipulse-pcmout"
 version = "0.1.0"
+license = "GPL-3.0-or-later"
 edition = "2021"
 description = "Plays PCM sent in pieces on a playback device (OmniPulse's own sound, and OmniPulse Offset)"
 
