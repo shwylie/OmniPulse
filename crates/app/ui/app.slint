@@ -2855,7 +2855,7 @@ component PanelPreview inherits Rectangle {
                         width: parent.sr * 2;
                         height: parent.sr;
                         clip: true;
-                        Rectangle { y: 0; height: parent.width; border-radius: parent.width / 2; background: @linear-gradient(180deg, #ffd36e 0%, PanelLook.c2 100%); }
+                        Path { width: parent.width; height: parent.height; viewbox-width: 100; viewbox-height: 50; commands: "M 0 50 A 50 50 0 0 1 100 50 Z"; fill: @linear-gradient(180deg, #ffd36e 0%, PanelLook.c2 100%); stroke-width: 0; }
                         for k in 4: Rectangle { y: parent.height * (0.5 + k * 0.12); height: 1.5px + k * 1px; background: #3b0a55; }
                     }
                     Path { y: parent.hz; width: parent.width; height: parent.height - parent.hz; viewbox-width: 320; viewbox-height: 100; commands: "M 0 6.5 L 320 6.5 M 0 21.1 L 320 21.1 M 0 42.0 L 320 42.0 M 0 68.4 L 320 68.4 M 0 100.0 L 320 100.0 M 211 0 L -302 100 M 218 0 L -238 100 M 225 0 L -174 100 M 232 0 L -110 100 M 239 0 L -46 100 M 246 0 L 18 100 M 253 0 L 82 100 M 260 0 L 146 100 M 267 0 L 210 100 M 274 0 L 274 100 M 281 0 L 338 100 M 288 0 L 402 100 M 295 0 L 466 100 M 302 0 L 530 100 M 309 0 L 594 100 M 316 0 L 658 100 M 323 0 L 722 100 M 330 0 L 786 100 M 337 0 L 850 100"; stroke: PanelLook.c1.with-alpha(0.85); stroke-width: 1px; fill: transparent; }
@@ -3009,7 +3009,7 @@ component PanelPreview inherits Rectangle {
                             if !p.has-img: Glyph { d: p.icon; width: 22px; height: 22px; fill: pi.th == "terminal" ? pi.ink : #ffffff; }
                             if p.has-img: Image { width: parent.width; height: parent.height; source: p.img; image-fit: cover; }
                         }
-                        Text { text: pi.shown-title; color: pi.ink; font-size: min(24px, ((PanelLook.icons ? 226px : 276px) - (pi.th == "bauhaus" ? 104px : 0px)) / max(1, pi.shown-title.character-count) * 1.75); font-weight: 800; vertical-alignment: center; font-family: pi.ff; }
+                        Text { text: pi.shown-title; color: pi.ink; font-size: min(24px, ((PanelLook.icons ? 226px : 276px) - pi.keep) / max(1, pi.shown-title.character-count) * 1.75); font-weight: 800; vertical-alignment: center; font-family: pi.ff; }
                     }
                     Rectangle { height: 2px; background: pi.th == "comic" || pi.th == "bauhaus" ? #111111 : PanelLook.c1.mix(PanelLook.c2, 0.5); }
                     Text { text: p.line; color: pi.ink.with-alpha(0.8); font-size: 12.5px; wrap: word-wrap; font-family: pi.ff; }

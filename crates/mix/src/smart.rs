@@ -427,6 +427,22 @@ pub fn shifted(m: &Measured, n: i32) -> Measured {
     h
 }
 
+/// Where it's mixed sure, when the whole song isn't: its end's downbeat for the one going out (`end`), its
+/// start's for the next one, if that part's is sure (its bars counted from there, and as sure as it is)
+pub fn local_downbeat(m: &Measured, end: bool) -> Measured {
+    let r = &m.rhythm;
+    let part = if end { r.tail_downbeat } else { r.head_downbeat };
+    match part {
+        Some((d, c)) if r.downbeat_confidence < omnipulse_core::rhythm::DOWNBEAT_TRUSTED && c >= omnipulse_core::rhythm::DOWNBEAT_TRUSTED => {
+            let n = (d as i32 - r.downbeat as i32).rem_euclid(4);
+            let mut s = shifted(m, n);
+            s.rhythm.downbeat_confidence = c;
+            s
+        }
+        _ => m.clone(),
+    }
+}
+
 /// A song counted at half time: every other beat a beat (from its bars' first), two of its bars a bar
 /// (paired so its 16-beat lines start one), its tempo half
 pub fn halved(m: &Measured) -> Measured {
@@ -550,7 +566,7 @@ mod tests {
     fn song(bpm: f64, bars: &[f32], conf: f64, camelot: &str) -> Measured {
         let period = 60_000.0 / bpm;
         let beats: Vec<f64> = (0..bars.len() * 4 + 4).map(|i| i as f64 * period).collect();
-        Measured { from_ms: 0, to_ms: (beats.len() as f64 * period) as u64, rhythm: Rhythm { bpm, first_beat_ms: 0.0, period_ms: period, beats, downbeat: 0, tempo_confidence: conf, key: String::new(), camelot: camelot.into(), key_confidence: 0.8, downbeat_confidence: 1.0, model_bpm: 0.0, beat_db: Vec::new(), phrase_shift: 0, bar_db: bars.to_vec(), bar_beat: vec![1.0; bars.len()], bar_chroma: Vec::new() }, v: omnipulse_core::rhythm::VERSION }
+        Measured { from_ms: 0, to_ms: (beats.len() as f64 * period) as u64, rhythm: Rhythm { bpm, first_beat_ms: 0.0, period_ms: period, beats, downbeat: 0, tempo_confidence: conf, key: String::new(), camelot: camelot.into(), key_confidence: 0.8, downbeat_confidence: 1.0, model_bpm: 0.0, beat_db: Vec::new(), phrase_shift: 0, bar_db: bars.to_vec(), bar_beat: vec![1.0; bars.len()], bar_chroma: Vec::new(), head_downbeat: None, tail_downbeat: None }, v: omnipulse_core::rhythm::VERSION }
     }
 
     fn levels(intro: usize, body: usize, outro: usize) -> Vec<f32> {
@@ -755,6 +771,22 @@ mod tests {
         let h = handoff(&p, true);
         assert_eq!(h.roll, Some(omnipulse_audio::Roll { bar: 2_000, bars: 4, to_speed: (140.0_f64 / 120.0) as f32 }));
         assert!(not_rejected(&[], ROLL));
+    }
+
+    #[test]
+    fn an_unsure_song_is_mixed_where_its_part_is_sure() {
+        let mut m = song(128.0, &[-10.0; 40], 0.8, "8A");
+        m.rhythm.downbeat_confidence = 0.45;
+        m.rhythm.tail_downbeat = Some((1, 0.9));
+        m.rhythm.head_downbeat = Some((0, 0.5));
+        let end = local_downbeat(&m, true);
+        assert_eq!((end.rhythm.downbeat, end.rhythm.downbeat_confidence), (1, 0.9));
+        // (its start not sure either: as it was)
+        let start = local_downbeat(&m, false);
+        assert_eq!((start.rhythm.downbeat, start.rhythm.downbeat_confidence), (0, 0.45));
+        // (a song sure as a whole: never moved)
+        m.rhythm.downbeat_confidence = 0.9;
+        assert_eq!(local_downbeat(&m, true).rhythm.downbeat, 0);
     }
 
     #[test]

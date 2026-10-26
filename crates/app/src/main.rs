@@ -4059,6 +4059,8 @@ fn mix_side(t: &Track) -> serde_json::Value {
             "bpm": m.rhythm.bpm, "tempoConfidence": m.rhythm.tempo_confidence,
             "key": m.rhythm.key, "camelot": m.rhythm.camelot, "keyConfidence": m.rhythm.key_confidence,
             "periodMs": m.rhythm.period_ms, "downbeat": m.rhythm.downbeat,
+            // (how sure its downbeat is, as a whole and at its start and end; Beat This!'s tempo)
+            "downbeatConfidence": m.rhythm.downbeat_confidence, "headDownbeat": m.rhythm.head_downbeat, "tailDownbeat": m.rhythm.tail_downbeat, "modelBpm": m.rhythm.model_bpm,
             // (each bar's loudness, dB, rounded: where its intro, drops and outro are)
             "barDb": m.rhythm.bar_db.iter().map(|x| (*x as f64 * 10.0).round() / 10.0).collect::<Vec<_>>(),
         })),
@@ -4128,7 +4130,8 @@ fn mix_feedback(shared: &Shared, good: bool) -> Result<String, &'static str> {
     writeln!(f, "{line}").map_err(|_| "Couldn't write the feedback file.")?;
     let what = format!("{} into {}", rec["from"]["title"].as_str().unwrap_or("?"), rec["to"]["title"].as_str().unwrap_or("?"));
     let _ = &began;
-    let n = std::fs::read_to_string(dir.join("mix-feedback.jsonl")).map(|s| s.lines().count()).unwrap_or(0);
+    // (all of them: those sent and cleared too)
+    let n = ["mix-feedback.jsonl", "mix-feedback-tally.jsonl"].iter().map(|f| std::fs::read_to_string(dir.join(f)).map(|s| s.lines().count()).unwrap_or(0)).sum::<usize>();
     let note = format!("Transition rated {}: {what} ({}). {n} ratings so far.", if good { "good" } else { "bad" }, rec["kind"].as_str().unwrap_or(""));
     if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_status(note.clone().into()); }
     Ok(note)
@@ -4152,8 +4155,26 @@ fn mix_ratings_send(shared: &Shared, dir: std::path::PathBuf) {
             .timeout(std::time::Duration::from_secs(20))
             .send()
             .await;
-        if r.is_ok_and(|r| r.status().is_success()) { let _ = std::fs::write(dir.join("mix-feedback-sent"), (sent + n).to_string()); }
+        if !r.is_ok_and(|r| r.status().is_success()) { return; }
+        // (they're there: cleared from here, on the window's thread, as ratings are written there)
+        let _ = slint::invoke_from_event_loop(move || mix_ratings_clear(&dir, sent + n));
     });
+}
+
+/// The first `upto` ratings (sent) taken out of mix-feedback.jsonl, any rated since kept; each one's kind and
+/// verdict kept in mix-feedback-tally.jsonl (all Smart Transitions needs of them: smart_ratings)
+fn mix_ratings_clear(dir: &std::path::Path, upto: usize) {
+    let file = dir.join("mix-feedback.jsonl");
+    let Ok(text) = std::fs::read_to_string(&file) else { return };
+    let lines: Vec<&str> = text.lines().collect();
+    let upto = upto.min(lines.len());
+    let tally: String = lines[..upto].iter().filter_map(|l| serde_json::from_str::<serde_json::Value>(l).ok())
+        .map(|v| format!("{}\n", serde_json::json!({ "kind": v["mix"]["kind"], "verdict": v["verdict"] }))).collect();
+    use std::io::Write as _;
+    let Ok(mut t) = std::fs::OpenOptions::new().create(true).append(true).open(dir.join("mix-feedback-tally.jsonl")) else { return };
+    if t.write_all(tally.as_bytes()).is_err() { return; }
+    let rest: String = lines[upto..].iter().map(|l| format!("{l}\n")).collect();
+    if std::fs::write(&file, rest).is_ok() { let _ = std::fs::write(dir.join("mix-feedback-sent"), "0"); }
 }
 
 // ---------- what's shown while a mix is under way ----------
@@ -5775,14 +5796,21 @@ fn smart_pair(a: &App, dur: u64) -> Option<(SmartSong, SmartSong)> {
     // (measured whole, of what it plays from: never a Spotify song measured from its YouTube Music
     // version while Spotify's own playback plays it)
     // (its beat 1 where you've moved it, if you have)
-    let measured = |t: &Track, same: bool| if same && !t.is_mix() { rhythm_full(&t.key).map(|m| { let mut m = smart::shifted(&m, beat_shift(&a.web.prefs, &t.key)); m.rhythm.phrase_shift = phrase_shift(&a.web.prefs, &t.key); m }) } else { None };
+    // (where it's mixed sure if the whole song isn't, unless you've moved its beat 1 yourself: the end of the
+    // one playing, the start of the next one)
+    let measured = |t: &Track, same: bool, end: bool| if same && !t.is_mix() { rhythm_full(&t.key).map(|m| {
+        let shift = beat_shift(&a.web.prefs, &t.key);
+        let mut m = if shift == 0 { smart::local_downbeat(&m, end) } else { smart::shifted(&m, shift) };
+        m.rhythm.phrase_shift = phrase_shift(&a.web.prefs, &t.key);
+        m
+    }) } else { None };
     let an = a.cur_loud.as_ref().and_then(|k| a.analysis.get(k));
     let audible = an.and_then(|x| x["audible_ms"].as_u64()).unwrap_or(0);
-    let a_side = SmartSong { rhythm: measured(&cur, MIX_OUT_OK.with(|c| c.get())), dur_ms: dur, audible_ms: audible, first_ms: 0, stated: stated(&cur), t: cur, key_known: false }.with_key();
+    let a_side = SmartSong { rhythm: measured(&cur, MIX_OUT_OK.with(|c| c.get()), true), dur_ms: dur, audible_ms: audible, first_ms: 0, stated: stated(&cur), t: cur, key_known: false }.with_key();
     let v = if mix_via_youtube(&next) { versions::saved_id(&next.key) } else { None };
     let nan = sound::loud_source(&next, v.as_deref()).and_then(|(k, id)| a.analysis.get(&format!("{k}:{id}")));
     let b_dur = nan.and_then(|x| x["duration_ms"].as_u64()).filter(|&d| d > 0).unwrap_or(next.ms);
-    let b_side = SmartSong { rhythm: measured(&next, smart_same_source(&next)), dur_ms: b_dur, audible_ms: nan.and_then(|x| x["audible_ms"].as_u64()).unwrap_or(0), first_ms: nan.map(first_sound).unwrap_or(0), stated: stated(&next), t: next, key_known: false }.with_key();
+    let b_side = SmartSong { rhythm: measured(&next, smart_same_source(&next), false), dur_ms: b_dur, audible_ms: nan.and_then(|x| x["audible_ms"].as_u64()).unwrap_or(0), first_ms: nan.map(first_sound).unwrap_or(0), stated: stated(&next), t: next, key_known: false }.with_key();
     Some((a_side, b_side))
 }
 
@@ -5815,11 +5843,14 @@ fn smart_lyrics(shared: &Shared, t: &Track) {
     });
 }
 
-/// Your ratings so far (state/mix-feedback.jsonl): each one's kind, and good or not
+/// Your ratings so far: those sent and cleared (state/mix-feedback-tally.jsonl: their kinds and verdicts),
+/// and those not sent yet (state/mix-feedback.jsonl): each one's kind, and good or not
 fn smart_ratings() -> Vec<(String, bool)> {
     let Ok(d) = omnipulse_core::data_dir() else { return Vec::new() };
-    let Ok(text) = std::fs::read_to_string(d.join("state").join("mix-feedback.jsonl")) else { return Vec::new() };
-    text.lines().filter_map(|l| serde_json::from_str::<serde_json::Value>(l).ok()).filter_map(|v| Some((v["mix"]["kind"].as_str()?.to_string(), v["verdict"].as_str()? == "good"))).collect()
+    let read = |f: &str| std::fs::read_to_string(d.join("state").join(f)).unwrap_or_default();
+    let (tally, text) = (read("mix-feedback-tally.jsonl"), read("mix-feedback.jsonl"));
+    let kind = |v: &serde_json::Value| v["kind"].as_str().or_else(|| v["mix"]["kind"].as_str()).map(String::from);
+    tally.lines().chain(text.lines()).filter_map(|l| serde_json::from_str::<serde_json::Value>(l).ok()).filter_map(|v| Some((kind(&v)?, v["verdict"].as_str()? == "good"))).collect()
 }
 
 /// What's decided for the pair coming up, once: a blend on the beat (Some) or a fade (None). A blend's

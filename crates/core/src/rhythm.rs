@@ -71,6 +71,13 @@ pub struct Rhythm {
     /// melody looped against what's coming in)
     #[serde(default)]
     pub bar_chroma: Vec<[f32; 12]>,
+    /// its start's and its end's downbeat (which of the beats, 0..3) and how sure, each from Beat This! on
+    /// its own there (None: not measured apart, as the whole song was sure). A song unsure as a whole (a
+    /// two-beat bar in its breakdown, a mashup, a beat slipped on the way) can be sure where it's mixed
+    #[serde(default)]
+    pub head_downbeat: Option<(usize, f64)>,
+    #[serde(default)]
+    pub tail_downbeat: Option<(usize, f64)>,
 }
 
 const NOTES: [&str; 12] = ["C", "C#", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B"];
@@ -489,6 +496,26 @@ fn model_run(_: &[f32], _: u32) -> Option<ModelBeats> { None }
 /// Which of four beats (from the first) is each bar's first, by Beat This!'s downbeats (each one onto
 /// the nearest beat), and the share of them that agree. None: too few to go by.
 fn model_downbeat(a: &ModelBeats, beats: &[f64]) -> Option<(usize, f64)> {
+    let (best, share, _) = model_downbeat_by(a, beats)?;
+    Some((best, share))
+}
+
+/// Beat This!'s downbeats unsure as one beat, but nearly all on two beats two apart (a half bar out: it
+/// hears a bar of two now and then): the one of them the song's sections change on, if that's clear (half as
+/// many again), as sure as the two together. From the ratings: most "the beat isn't sure" fades were these
+fn half_bar(by: [usize; 4], change: &[f64; 4]) -> Option<(usize, f64)> {
+    let n: usize = by.iter().sum();
+    if n < 8 { return None; }
+    let best = (0..4).max_by_key(|&k| by[k])?;
+    let other = (best + 2) % 4;
+    let pair = (by[best] + by[other]) as f64 / n as f64;
+    if pair < DOWNBEAT_TRUSTED { return None; }
+    let (x, y) = if change[best] >= change[other] { (best, other) } else { (other, best) };
+    (change[x] >= 0.15 && change[x] >= 1.5 * change[y]).then_some((x, pair))
+}
+
+/// As model_downbeat, with how many of its downbeats were on each beat of four
+fn model_downbeat_by(a: &ModelBeats, beats: &[f64]) -> Option<(usize, f64, [usize; 4])> {
     let mut by = [0usize; 4];
     for d in &a.downbeats {
         let t = *d;
@@ -503,7 +530,7 @@ fn model_downbeat(a: &ModelBeats, beats: &[f64]) -> Option<(usize, f64)> {
     if n < 8 { return None; }
     let best = (0..4).max_by_key(|&k| by[k])?;
     if std::env::var_os("OMNIPULSE_RHYTHM_DEBUG").is_some() { eprintln!("rhythm debug: Beat This! downbeats by beat of four {by:?} (of {}), its beats at {:.2} BPM", a.downbeats.len(), a.bpm); }
-    Some((best, by[best] as f64 / n as f64))
+    Some((best, by[best] as f64 / n as f64, by))
 }
 
 /// Where a song's snares (or claps) fall, by beat of four (from its first tracked beat): each beat's
@@ -616,7 +643,18 @@ fn analyse_now(mono: &[f32], rate: u32) -> Option<Rhythm> {
     // (its stretches not enough to be sure which beat is the first: all of it, then)
     if model.as_ref().is_some_and(|m| m.sampled && model_downbeat(m, &beats).is_none_or(|d| d.1 < DOWNBEAT_TRUSTED)) { model = model_windowed(mono, rate); }
     let model_bpm = model.as_ref().map_or(0.0, |m| m.bpm);
-    let (downbeat, downbeat_confidence) = model.as_ref().and_then(|m| model_downbeat(m, &beats)).unwrap_or((downbeat, downbeat_confidence));
+    // (its start's and its end's downbeat, each on its own: the model's whole run only, as only that
+    // covers them; a minute and a half of each, or two fifths of a short song)
+    // (Beat This!'s unsure, but a half bar out at worst: settled by where the sections change, if that's clear)
+    let settled = |d: Option<(usize, f64, [usize; 4])>| d.map(|(b, c, by)| if c < DOWNBEAT_TRUSTED { half_bar(by, &change_share).unwrap_or((b, c)) } else { (b, c) });
+    let len_ms = mono.len() as f64 * 1000.0 / rate.max(1) as f64;
+    let part = |lo: f64, hi: f64| model.as_ref().filter(|m| !m.sampled).and_then(|m| {
+        let there = ModelBeats { beats: Vec::new(), downbeats: m.downbeats.iter().copied().filter(|t| *t >= lo && *t < hi).collect(), bpm: m.bpm, sampled: false };
+        settled(model_downbeat_by(&there, &beats))
+    });
+    let head_downbeat = part(f64::MIN, 90_000.0f64.min(len_ms * 0.4));
+    let tail_downbeat = part((len_ms - 90_000.0).max(len_ms * 0.6), f64::MAX);
+    let (downbeat, downbeat_confidence) = settled(model.as_ref().and_then(|m| model_downbeat_by(m, &beats))).unwrap_or((downbeat, downbeat_confidence));
     // (its beats the model's: as sure of them as of a clear beat of ours)
     let conf = if from_model { conf.max(0.5) } else { conf };
     if std::env::var_os("OMNIPULSE_RHYTHM_DEBUG").is_some() {
@@ -690,6 +728,8 @@ fn analyse_now(mono: &[f32], rate: u32) -> Option<Rhythm> {
         bar_db,
         bar_beat,
         bar_chroma,
+        head_downbeat,
+        tail_downbeat,
     })
 }
 
@@ -708,7 +748,9 @@ pub struct Measured {
 /// (2-3: beats moved half a beat where the bass hit harder between them, wrongly: an off-beat bass
 /// louder than the kick isn't a beat tracked off it; 4: that undone, the downbeat from where the
 /// sections change too)
-pub const VERSION: u32 = 13;
+/// (14: each song's start and end given a downbeat of their own, for mixing where the whole isn't sure)
+/// (15: Beat This!'s downbeats a half bar out settled by where the sections change)
+pub const VERSION: u32 = 15;
 
 static STORE: std::sync::Mutex<Option<std::collections::HashMap<String, Measured>>> = std::sync::Mutex::new(None);
 
@@ -728,7 +770,8 @@ fn with_store<T>(f: impl FnOnce(&mut std::collections::HashMap<String, Measured>
 
 /// A track's measurement (by its key), if it has one of this method
 pub fn known(key: &str) -> Option<Measured> {
-    with_store(|m| m.get(key).filter(|x| x.v == VERSION).cloned())
+    // (13's and 14's are as good as these where the whole song's downbeat was sure: only the unsure measured again)
+    with_store(|m| m.get(key).filter(|x| x.v == VERSION || ((13..VERSION).contains(&x.v) && x.rhythm.downbeat_confidence >= DOWNBEAT_TRUSTED)).cloned())
 }
 
 /// Keeps a track's measurement
@@ -764,6 +807,17 @@ pub fn keys_mix(a: &str, b: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_half_bar_out_is_settled_by_the_sections() {
+        // (as measured from songs: 46 and 47 two beats apart; the sections on the first)
+        assert_eq!(half_bar([46, 2, 47, 2], &[0.34, 0.34, 0.15, 0.18]), Some((0, 93.0 / 97.0)));
+        assert_eq!(half_bar([9, 28, 7, 74], &[0.24, 0.0, 0.51, 0.25]).map(|x| x.0), Some(3));
+        // (the sections not clear between the two: left unsure)
+        assert_eq!(half_bar([46, 2, 47, 2], &[0.3, 0.2, 0.25, 0.25]), None);
+        // (spread over all four: not a half bar out)
+        assert_eq!(half_bar([30, 25, 30, 15], &[0.9, 0.0, 0.1, 0.0]), None);
+    }
 
     /// A beat at `bpm` from `offset_ms`: a kick (low thump) on each downbeat of four, clicks between
     fn beat_track(bpm: f64, offset_ms: f64, secs: f64, rate: u32) -> Vec<f32> {
@@ -853,6 +907,17 @@ mod tests {
 /// OMNIPULSE_WAV=<16-bit stereo wav> cargo test -p omnipulse-core rhythm_of_a_wav -- --ignored --nocapture:
 /// the beat of each 12 s of it (a mix's beats in step show one clear tempo through it)
 #[cfg(test)]
+#[ignore]
+#[tokio::test(flavor = "multi_thread")]
+async fn downbeats_of_youtube_songs() {
+    // (OMNIPULSE_YT: YouTube ids, by commas; each one's downbeat as a whole, at its start and at its end)
+    for id in std::env::var("OMNIPULSE_YT").unwrap().split(',') {
+        let Ok((mono, rate)) = crate::loudness::mono_start("youtube", id, 1200.0).await else { println!("{id}: couldn't get it"); continue };
+        let Some(r) = analyse(&mono, rate) else { println!("{id}: no beat"); continue };
+        println!("{id}: {:.2} BPM, downbeat {} sure {:.2} as a whole; start {:?}, end {:?}", r.bpm, r.downbeat, r.downbeat_confidence, r.head_downbeat, r.tail_downbeat);
+    }
+}
+
 #[test]
 #[ignore]
 fn rhythm_of_a_wav() {
