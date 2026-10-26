@@ -7469,6 +7469,14 @@ fn bot_act(shared: &Shared, act: &str) {
         return bot_paint(shared);
     }
     if let Some(url) = act.strip_prefix("url:") { if let Err(e) = omnipulse_core::open_url(url.to_string()) { say(&e); } return; }
+    // (one goal's own address, for it alone in OBS: /goals/follow, /goals/sub...)
+    if let Some(k) = act.strip_prefix("goaladdr:") {
+        let id = match k { "goalFollow" => "follow", "goalSub" => "sub", "goalBits" => "bits", "goalDono" => "donation", _ => "common" };
+        let port = shared.borrow().web.prefs["widgetPort"].as_u64().unwrap_or(7878);
+        let url = format!("http://127.0.0.1:{port}/goals/{id}");
+        if share::copy(&url).is_ok() { say(&format!("Copied {url}. Add it as a Browser source for this goal alone.")); }
+        return;
+    }
     // (a widget switched on or off: kept in widgetsOff, the running Suite told at once)
     if let Some(id) = act.strip_prefix("woff:") {
         let cur = bot_current(shared);

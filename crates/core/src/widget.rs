@@ -379,6 +379,7 @@ pub fn widget_serve(listener: TcpListener, gen: u64) {
                     "/panels" => reply(&mut stream, "200 OK", "text/html; charset=utf-8", PANELS_HTML.as_bytes()),
                     p if p == "/cam" || p.starts_with("/cam/") => reply(&mut stream, "200 OK", "text/html; charset=utf-8", CAM_HTML.as_bytes()),
                     "/socials" | "/socials.html" | "/sponsors" => reply(&mut stream, "200 OK", "text/html; charset=utf-8", SOCIALS_HTML.as_bytes()),
+                    p if p.starts_with("/goals/") && p.len() < 24 => reply(&mut stream, "200 OK", "text/html; charset=utf-8", SUITE_HTML.as_bytes()),
                     "/goals" | "/timer" | "/latest-follow" | "/latest-sub" | "/raid" | "/hype" | "/voteskip" | "/wheel" | "/leaderboard" | "/emotes" | "/tune" => reply(&mut stream, "200 OK", "text/html; charset=utf-8", SUITE_HTML.as_bytes()),
                     "/levels.json" => {
                         let v = LEVELS.lock().map(|g| g.clone()).unwrap_or_default();

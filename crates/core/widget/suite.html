@@ -234,7 +234,10 @@
     document.documentElement.style.fontSize = 16 * k + "px";
   }
   // (this widget's own way in and out and speed, if it has one; else the Suite's)
-  const own = () => (suite && suite.motion && suite.motion[PATH.slice(1)]) || {};
+  // (the widget this page is: "/goals/sub" is Goals, its sub goal alone)
+  const WID = PATH.split("/")[1] || "goals";
+  const ONLY = PATH.split("/")[2] || "";
+  const own = () => (suite && suite.motion && suite.motion[WID]) || {};
   const animOf = () => own().anim || (suite && suite.anim) || "rise";
   const pace = () => ({ slow: 1.7, normal: 1, fast: 0.55 }[own().speed] || 1);
   const outMs = () => Math.round(500 * pace());
@@ -301,7 +304,8 @@
     if (!$("goal-defs")) document.body.insertAdjacentHTML("beforeend", '<svg id="goal-defs" width="0" height="0" style="position:absolute"><defs><linearGradient id="lg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="var(--c1)"/><stop offset="1" stop-color="var(--c2)"/></linearGradient><linearGradient id="sg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#f6d38a"/><stop offset="1" stop-color="#d9a450"/></linearGradient></defs></svg>');
     let box = $("goals");
     if (!box) { box = document.createElement("div"); box.id = "goals"; box.className = "panel"; swap(box); }
-    const on = GOALS.filter(([k]) => g[k] && g[k].on);
+    // (one goal alone, at its own address (/goals/follow, /goals/sub...), or every one that's shown)
+    const on = GOALS.filter(([k]) => g[k] && (ONLY ? k === ONLY : g[k].on));
     const sig = on.map(([k]) => k).join(",") + "|" + g.style + "|" + g.shape + "|" + g.image + "|" + g.drops;
     if (box.dataset.sig !== sig) {
       box.dataset.sig = sig;
@@ -703,7 +707,7 @@
     ["top", "left", "right", "corner"].forEach((p) => document.body.classList.toggle("gp-" + p, (suite.gifPlace || "top") === p));
     document.body.style.setProperty("--gif", gif ? 'url("' + String(gif).replace(/["\\]/g, "") + '")' : "none");
     document.body.style.setProperty("--gs", { small: "5rem", medium: "7.5rem", large: "10rem" }[suite.gifSize] || "7.5rem");
-    if (PATH === "/goals") { const sh = ["liquid", "jar", "hourglass"].includes(suite.goals.style); fit(sh ? 620 : 460, sh ? 300 : 260); goals(); }
+    if (WID === "goals") { const sh = ["liquid", "jar", "hourglass"].includes(suite.goals.style); fit(sh ? 620 : 460, sh ? 300 : ONLY ? 110 : 260); goals(); }
     else if (PATH === "/timer") { fit(360, 140); timer(); }
     else if (PATH === "/latest-follow") { fit(420, 90); latest("follow"); }
     else if (PATH === "/latest-sub") { fit(420, 90); latest("sub"); }
@@ -726,7 +730,7 @@
   async function poll() {
     try {
       const s = await (await fetch("/now.json" + (PREVIEW ? "?preview=1" : ""), { cache: "no-store" })).json();
-      if (!PREVIEW && offIn(s, PATH.slice(1))) { sig = ""; return; }
+      if (!PREVIEW && offIn(s, WID)) { sig = ""; return; }
       // (in your accent colours, as the Stream Widget is)
       if (s.accent) accent = [s.accent, s.accent2 || s.accent];
       if (accent && !(s.suite && s.suite.colors)) { document.body.style.setProperty("--c1", accent[0]); document.body.style.setProperty("--c2", accent[1]); }

@@ -3870,6 +3870,8 @@ component BotFieldRow inherits VerticalLayout {
             gtar := TextInput { x: 12px; width: parent.width - 24px; height: parent.height; vertical-alignment: center; color: Theme.text; font-size: 13px; single-line: true; input-type: InputType.decimal; text: root.f.note; edited => { root.set(root.f.key + "Target", self.text); } }
             if gtar.text == "": Text { x: 12px; text: root.f.n; color: Theme.muted.with-alpha(0.6); font-size: 13px; vertical-alignment: center; }
         }
+        // (this goal alone, as a Browser source of its own: its address copied)
+        VerticalLayout { alignment: center; IconButton { d: Icons.copy; size: 32px; tip: "Copy its own address, for this goal alone in OBS"; clicked => { root.act("goaladdr:" + root.f.key); } } }
     }
     // (a list, a row each: typed into, taken out, one more added; kept as "a | b | c")
     if root.f.kind == "list" || root.f.kind == "piclist": VerticalLayout {

@@ -564,7 +564,7 @@ fn sheet_of(id: &str, cur: &Map<String, Value>) -> (String, Vec<Field>) {
             let style = if s(cur, "goalStyle").is_empty() { "bars" } else { s(cur, "goalStyle") };
             // (your goals first, what they count to; then how they look; then when they start again)
             let mut v = vec![f("suiteprev", "", style, "", "goals", &theme_of(cur))];
-            v.push(addr("/goals", "About 920 × 520. Counts follows, subs, bits and donations as they come in."));
+            v.push(addr("/goals", "All of them together, about 920 × 520. For one goal alone, as a source of its own, use the copy button on its row below."));
             v.push(f("link", "", "Try it", "Adds one of each, to see it fill.", "", "call:suiteTest:goals"));
             // (each goal one row: shown or not, its name, its target; key: its prefix, label: what it counts,
             // value: on, extra: its name, note: its target, n: its default target)
