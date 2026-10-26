@@ -250,7 +250,9 @@ pub fn sheet(id: &str, cur: &Map<String, Value>) -> (String, Vec<Field>) {
     // its preview; then its own settings; then the look every widget shares; then its Timing and Motion)
     if matches!(id, "goals" | "timer" | "latest" | "raid" | "hype" | "voteskip" | "wheel" | "leaderboard" | "tune" | "emoterain") {
         let obs = |x: &Field| x.kind == "addr" || (x.kind == "link" && x.label.starts_with("Try"));
-        let (top, rest): (Vec<Field>, Vec<Field>) = std::mem::take(&mut v).into_iter().partition(|x| obs(x));
+        let (mut top, rest): (Vec<Field>, Vec<Field>) = std::mem::take(&mut v).into_iter().partition(|x| obs(x));
+        // (its address first, then its Try buttons)
+        top.sort_by_key(|x| x.kind != "addr");
         let (prev, rest): (Vec<Field>, Vec<Field>) = rest.into_iter().partition(|x| x.kind == "suiteprev");
         v = prev;
         if !top.is_empty() { v.push(f("head", "", "In OBS", "", "", "")); v.extend(top); }
@@ -757,7 +759,7 @@ fn sheet_of(id: &str, cur: &Map<String, Value>) -> (String, Vec<Field>) {
             f("suiteprev", "", "", "", "tune", &theme_of(cur)),
             theme_field(cur),
             f("note", "", "Chat guesses the song you're playing. While a round's on, the Stream Widget hides its name and artist, and this widget shows a little more of the name as time goes. The first viewer to type the name or the artist wins.", "", "", ""),
-            f("toggle", "tuneOn", "Its command", "You and your moderators start a round with it. Actions can start one too, with the Start Name That Tune step (from a reward, say).", if on(cur, "tuneOn", false) { "true" } else { "false" }, ""),
+            f("toggle", "tuneOn", "Start rounds from chat", "You and your moderators start a round with its command. Actions can start one too, with the Start Name That Tune step (from a reward, say).", if on(cur, "tuneOn", false) { "true" } else { "false" }, ""),
             f("text", "tuneCommand", "Command", "", s(cur, "tuneCommand"), "!tune"),
             f("toggle", "tuneAnyone", "Anyone can start a round", "", if on(cur, "tuneAnyone", false) { "true" } else { "false" }, ""),
             f("number", "tuneSecs", "Seconds to guess", "15 to 300. A new song ends the round too.", &n(cur, "tuneSecs"), "60"),

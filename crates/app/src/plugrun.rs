@@ -392,6 +392,9 @@ pub fn settings_of(m: &core::plugins::Manifest, prefs: &Value) -> Value {
 
 #[cfg(test)]
 mod tests {
+    // (the app's handler is one for the whole process: tests that set it take turns)
+    static TURN: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    fn one_at_a_time() -> std::sync::MutexGuard<'static, ()> { TURN.lock().unwrap_or_else(|e| e.into_inner()) }
     use super::*;
 
     fn pkg(code: &str) -> core::plugins::Package {
@@ -458,6 +461,7 @@ mod tests {
     /// WebSocket) and its events (EventSub's). A request and a command answered in chat, a follow an alert.
     #[test]
     fn the_chatbot_answers_chat_and_turns_events_into_alerts() {
+        let _one = one_at_a_time();
         use futures_util::{SinkExt, StreamExt};
         use tokio_tungstenite::tungstenite::Message;
         let rt = tokio::runtime::Runtime::new().unwrap();
@@ -528,6 +532,7 @@ mod tests {
     /// The chatbot's sign-in to OBS (its script's own SHA-256 and base64), as OBS works it out
     #[test]
     fn the_chatbot_signs_in_to_obs_as_obs_expects() {
+        let _one = one_at_a_time();
         use base64::Engine;
         use sha2::Digest;
         let rt = tokio::runtime::Runtime::new().unwrap();
@@ -551,6 +556,7 @@ mod tests {
     /// change in OBS starting an action, whose steps switch the scene and set a text source
     #[test]
     fn the_chatbot_works_obs() {
+        let _one = one_at_a_time();
         use base64::Engine;
         use futures_util::{SinkExt, StreamExt};
         use sha2::Digest;
@@ -642,6 +648,7 @@ mod tests {
     /// echo left alone, a sub an alert and an action
     #[test]
     fn the_chatbot_works_kick() {
+        let _one = one_at_a_time();
         use futures_util::{SinkExt, StreamExt};
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
         use tokio_tungstenite::tungstenite::Message;
@@ -830,6 +837,7 @@ mod tests {
     /// (subscribed to tips with its token, then a tip): each an alert, and A Donation's action run
     #[test]
     fn the_chatbot_hears_donations() {
+        let _one = one_at_a_time();
         use futures_util::{SinkExt, StreamExt};
         use tokio_tungstenite::tungstenite::Message;
         let rt = tokio::runtime::Runtime::new().unwrap();
@@ -890,6 +898,7 @@ mod tests {
     /// accepted, a heist started, a rank, strikes stepping up, an entrance greeting, a file written, the credits
     #[test]
     fn the_chatbots_games_and_extras() {
+        let _one = one_at_a_time();
         use futures_util::{SinkExt, StreamExt};
         use tokio_tungstenite::tungstenite::Message;
         let rt = tokio::runtime::Runtime::new().unwrap();
@@ -996,6 +1005,7 @@ mod tests {
     /// (with its least), and a song requested from a step
     #[test]
     fn the_chatbots_actions_run_their_steps() {
+        let _one = one_at_a_time();
         use futures_util::{SinkExt, StreamExt};
         use tokio_tungstenite::tungstenite::Message;
         let rt = tokio::runtime::Runtime::new().unwrap();
