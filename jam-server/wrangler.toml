@@ -13,8 +13,8 @@ APP_SCHEME = "omnipulse"
 KICK_CLIENT_ID = "01M5NZG55J6HQ93XPKVQ8CHRY8"
 # OmniPulse's own Twitch app (Confidential; its secret, TWITCH_CLIENT_SECRET, set in the dashboard)
 TWITCH_CLIENT_ID = "122hyd1hxg8qpi1nfzwc4oa85lolgd"
-# OmniPulse's own SoundCloud app (public: it's in every sign-in link). Its secret: npx wrangler secret put SC_CLIENT_SECRET
-SC_CLIENT_ID = "SET_IN_CLOUDFLARE"
+# OmniPulse's own SoundCloud app: its SC_CLIENT_ID is set in the dashboard (kept by keep_vars above), and its
+# secret with: npx wrangler secret put SC_CLIENT_SECRET
 SC_REDIRECT = "http://localhost:8080/callback"
 
 [[durable_objects.bindings]]

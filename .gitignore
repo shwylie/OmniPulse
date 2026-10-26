@@ -21,3 +21,10 @@ android/app/src/main/java/uniffi/
 mix-demos/
 smart-renders/
 /android/dist/
+
+# kept private (working notes, and features on hold): on this PC only, never in the public repository
+/docs/
+/android/
+/crates/mobile/
+/crates/vis/
+/scripts/android-rust.mjs
