@@ -79,5 +79,5 @@ with its source available.
 - [Beat This!](https://github.com/CPJKU/beat_this) (MIT) finds beats and downbeats; its model is in
   `crates/core/models/` with its licence.
 - [yt-dlp](https://github.com/yt-dlp/yt-dlp) is downloaded on first use, not bundled.
-- OmniPulse isn't affiliated with SoundCloud, Spotify, YouTube, Twitch, Kick, Streamlabs, StreamElements,
-  Ko-fi or Elgato.
+- OmniPulse isn't affiliated with SoundCloud, Spotify, YouTube, Apple, Twitch, Kick, Streamlabs,
+  StreamElements, Streamer.bot, Mix It Up, Ko-fi or Elgato.
