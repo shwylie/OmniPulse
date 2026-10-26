@@ -23,3 +23,13 @@ debug = false
 # vendor/librespot-core/src/session.rs check_catalogue, and VENDORED.md
 [patch.crates-io]
 librespot-core = { path = "vendor/librespot-core" }
+
+# Quick builds, for trying changes (the screenshot self-tests): optimised, but without the slow whole-program
+# steps, and kept between builds. `cargo build --profile quick -p omnipulse` (target/quick/). Releases use release.
+[profile.quick]
+inherits = "release"
+lto = false
+codegen-units = 256
+incremental = true
+opt-level = 1
+strip = false

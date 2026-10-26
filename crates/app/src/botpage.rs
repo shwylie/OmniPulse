@@ -39,7 +39,7 @@ thread_local! {
 /// A setting that changes only how widgets look or behave: taken by the running Suite as it's saved, no
 /// restart. Anything to do with an account, a connection, a sign-in, commands or actions isn't
 pub fn live_key(k: &str) -> bool {
-    const LIVE: [&str; 22] = ["goal", "timer", "suite", "panel", "cam", "hud", "rain", "wheel", "hype", "skip", "sponsor", "gif", "tune", "leader", "latest", "raid", "theme", "ab", "train", "widgetsOff", "social", "fun"];
+    const LIVE: [&str; 23] = ["goal", "timer", "suite", "panel", "cam", "hud", "rain", "wheel", "hype", "skip", "sponsor", "gif", "tune", "leader", "latest", "raid", "theme", "ab", "train", "widgetsOff", "social", "fun", "voteskip"];
     const NEVER: [&str; 12] = ["token", "login", "client", "secret", "relay", "refresh", "kick", "userid", "channel", "botname", "obs", "url"];
     let low = k.to_lowercase();
     LIVE.iter().any(|p| k.starts_with(p)) && !NEVER.iter().any(|n| low.contains(n))
@@ -218,8 +218,9 @@ pub fn sheet(id: &str, cur: &Map<String, Value>) -> (String, Vec<Field>) {
     if let Some(at) = v.iter().position(|x| matches!(x.key.as_str(), "suiteTheme" | "panelTheme" | "camTheme")) {
         let theme = if v[at].value.is_empty() { "dark".to_string() } else { v[at].value.clone() };
         let now = theme_font(cur, &theme);
-        let opts = std::iter::once(format!("{theme}|=Theme's Own")).chain(FONTS.iter().map(|n| format!("{theme}|{n}={n}"))).collect::<Vec<_>>().join("|");
-        let picked = if now.is_empty() || FONTS.contains(&now.as_str()) { format!("{theme}|{now}") } else { String::new() };
+        // (each option "theme:font", as "|" is what's between options)
+        let opts = std::iter::once(format!("{theme}:=Theme's Own")).chain(FONTS.iter().map(|n| format!("{theme}:{n}={n}"))).collect::<Vec<_>>().join("|");
+        let picked = if now.is_empty() || FONTS.contains(&now.as_str()) { format!("{theme}:{now}") } else { String::new() };
         let fonts = vec![
             f("chips", "fontPick", "Font", "For this theme. Each theme keeps its own.", &picked, &opts),
             f("text", "fontCustom", "Or any Google Font", "Its name as fonts.google.com has it, like Lobster. Press Enter.", if picked.is_empty() { &now } else { "" }, "Lobster"),
@@ -243,6 +244,26 @@ pub fn sheet(id: &str, cur: &Map<String, Value>) -> (String, Vec<Field>) {
             }
         }
         v.splice(at + 1..at + 1, more);
+    }
+    // (a widget's page, the same order on each: its own settings first, then the look every widget shares,
+    // then its Timing and Motion)
+    if matches!(id, "goals" | "timer" | "latest" | "raid" | "hype" | "voteskip" | "wheel" | "leaderboard" | "tune" | "emoterain") {
+        let shared = |k: &str| matches!(k, "suiteTheme" | "suiteColors" | "suiteC1" | "suiteC2" | "fontPick" | "fontCustom" | "gifPlace" | "gifSize") || k.starts_with("gif");
+        let (look, own): (Vec<Field>, Vec<Field>) = std::mem::take(&mut v).into_iter().partition(|x| shared(&x.key));
+        v = own;
+        if !look.is_empty() {
+            v.push(f("head", "", "Look, for every widget", "", "", ""));
+            v.push(f("note", "", "The theme, colours and font are shared by all the Suite's widgets, so they match on stream.", "", "", ""));
+            v.extend(look);
+        }
+    }
+    // (its own Timing and Motion, last: how it comes in and goes out, and how fast)
+    let motion = match id { "goals" | "timer" | "latest" | "raid" | "hype" | "voteskip" | "wheel" | "leaderboard" | "tune" => id, _ => "" };
+    if !motion.is_empty() {
+        let (a, sp) = (format!("{motion}Anim"), format!("{motion}Speed"));
+        v.push(f("head", "", "Timing and Motion", "", "", ""));
+        v.push(f("chips", &a, "How it comes in and goes out", "As the Suite's is the Suite's Widget Animation, for every widget.", s(cur, &a), "=As the Suite's|rise=Rise|slide=Slide|flip=Flip|pop=Pop|none=Still"));
+        v.push(f("chips", &sp, "How fast", "", if s(cur, &sp).is_empty() { "normal" } else { s(cur, &sp) }, "slow=Slow|normal=Normal|fast=Fast"));
     }
     // (the preview: the colours as hex in its note, and whether there's a GIF)
     let col = suite_colours(cur).map(|(a, b)| format!("{a},{b}")).unwrap_or_default();

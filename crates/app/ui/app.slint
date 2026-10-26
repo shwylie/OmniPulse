@@ -4046,6 +4046,8 @@ component BotPage inherits Rectangle {
     in property <string> sheet;
     in property <string> sheet-title;
     in property <[BotField]> sheet-fields;
+    /// (a widget's page with a preview: split, the preview on the right)
+    in property <bool> sheet-split;
     in property <int> port: 7878;
     in property <bool> widget-on;
     in property <[SetRow]> stream-rows;
@@ -4638,7 +4640,7 @@ CenterToggle { checked: Wid.on(w.k, Wid.rev); toggled => { root.act("woff:" + w.
     // is, its name in the page's title and crumbs (Back goes to where it was opened from) -----
     // (Panels and the Webcam Overlay: split down the middle, the settings on the left, the preview (and
     // Panels' Save) on the right, staying put)
-    if root.sheet == "panels" || root.sheet == "cam": Rectangle {
+    if root.sheet == "panels" || root.sheet == "cam" || root.sheet-split: Rectangle {
         // (see-through: the page's own gradient behind the settings, as on every page; the preview has its own)
         // (to the page's foot, as the other pages are: the player's room is at the end of what scrolls)
         HorizontalLayout {
@@ -4658,8 +4660,8 @@ CenterToggle { checked: Wid.on(w.k, Wid.rev); toggled => { root.act("woff:" + w.
                     spacing: 12px;
                     alignment: start;
                     for f in root.sheet-fields: VerticalLayout {
-                        // (a heading, a note and a preview as they are; everything else in a card of its own)
-                        if f.kind == "head" || f.kind == "note" || f.kind == "suiteprev": BotFieldRow { f: f; set(k, v) => { root.set(k, v); } act(a) => { root.act(a); } }
+                        // (a heading and a note as they are; the preview's on the right; everything else in a card of its own)
+                        if f.kind == "head" || f.kind == "note": BotFieldRow { f: f; set(k, v) => { root.set(k, v); } act(a) => { root.act(a); } }
                         if f.kind != "head" && f.kind != "note" && f.kind != "suiteprev": Rectangle {
                             background: Theme.panel;
                             border-radius: 12px;
@@ -4689,6 +4691,15 @@ CenterToggle { checked: Wid.on(w.k, Wid.rev); toggled => { root.act("woff:" + w.
                     Pill { label: "Save Them as Pictures"; on: true; clicked => { root.act("url:http://127.0.0.1:" + root.port + "/panels"); } }
                     VerticalLayout { alignment: center; Text { text: "Opens in your browser, each with Save as PNG."; color: Theme.muted; font-size: 11px; wrap: word-wrap; } }
                 }
+                // (a widget's preview: picture-in-picture, at the top, staying put)
+                if root.sheet-split: VerticalLayout {
+                    spacing: 6px;
+                    alignment: start;
+                    vertical-stretch: 1;
+                    for f in root.sheet-fields: VerticalLayout {
+                        if f.kind == "suiteprev": BotFieldRow { f: f; set(k, v) => { root.set(k, v); } act(a) => { root.act(a); } }
+                    }
+                }
                 if root.sheet == "panels": ScrollView {
                     vertical-stretch: 1;
                     horizontal-scrollbar-policy: always-off;
@@ -4698,7 +4709,7 @@ CenterToggle { checked: Wid.on(w.k, Wid.rev); toggled => { root.act("woff:" + w.
             }
         }
     }
-    if root.sheet != "" && root.sheet != "panels" && root.sheet != "cam": Rectangle {
+    if root.sheet != "" && root.sheet != "panels" && root.sheet != "cam" && !root.sheet-split: Rectangle {
         // (see-through, as the split pages: the page's gradient behind its cards; the page under it is hidden
         // while a sheet's open)
         ScrollView {
@@ -5053,6 +5064,7 @@ export component AppWindow inherits Window {
     in property <[BotLine]> bot-tried;
     in property <[string]> bot-examples;
     in property <string> bot-sheet;
+    in property <bool> bot-sheet-split;
     in property <string> bot-sheet-title;
     in property <[BotField]> bot-sheet-fields;
     callback bot-set(string, string);
@@ -7808,6 +7820,7 @@ export component AppWindow inherits Window {
                             sheet: root.bot-sheet;
                             sheet-title: root.bot-sheet-title;
                             sheet-fields: root.bot-sheet-fields;
+                            sheet-split: root.bot-sheet-split;
                             port: root.widget-port;
                             widget-on: root.widget-on;
                             stream-rows: root.set-rows-streaming;

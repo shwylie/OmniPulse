@@ -7029,6 +7029,8 @@ fn bot_current(shared: &Shared) -> serde_json::Map<String, serde_json::Value> {
 }
 
 fn bot_fields(list: Vec<botpage::Field>) -> (Vec<BotField>, String) {
+    // (a page with a preview is split: its column narrow, as Panels' is)
+    let split_page = list.iter().any(|x| x.kind == "suiteprev");
     let sig = list.iter().map(|x| format!("{}|{}|{}|{}|{}|{}", x.key, x.kind, x.value, x.label, x.extra, if x.kind == "suiteprev" { format!("{}{}", x.note, x.n) } else { String::new() })).collect::<Vec<_>>().join("\n");
     // (a row of choices: its extra, as "id=Name|id=Name", for the page to draw)
     let strs = |v: Vec<String>| ModelRc::from(Rc::new(VecModel::from(v.into_iter().map(slint::SharedString::from).collect::<Vec<_>>())));
@@ -7042,7 +7044,7 @@ fn bot_fields(list: Vec<botpage::Field>) -> (Vec<BotField>, String) {
             .map(|(a, b)| (look::Rgb::parse(a).map(|c| c.slint()).unwrap_or_default(), look::Rgb::parse(b).map(|c| c.slint()).unwrap_or_default()))
             .unwrap_or_default();
         // (a split page's column is narrow: a row of choices too wide for it, a dropdown, so none's cut off)
-        let split = BOT_SHEET.with(|b| matches!(b.borrow().as_str(), "panels" | "cam"));
+        let split = BOT_SHEET.with(|b| matches!(b.borrow().as_str(), "panels" | "cam")) || split_page;
         let wide = names.iter().map(|n| n.chars().count() as f32 * 7.4 + 34.0).sum::<f32>() > 440.0;
         let (kind, n) = if x.kind == "chips" && split && wide { ("choose", ids.iter().position(|i| *i == x.value).map_or(-1, |i| i as i32)) } else { (x.kind, x.n) };
         BotField { changed: !x.key.is_empty() && !x.key.contains(':') && pf_changed(&x.key), key: x.key.into(), kind: kind.into(), label: x.label.into(), note: x.note.into(), value: x.value.into(), extra: x.extra.into(), n, opts: strs(names), opt_ids: strs(ids), c1, c2 }
@@ -7188,6 +7190,7 @@ fn bot_paint(shared: &Shared) {
         g.set_c1(c1);
         g.set_c2(c2);
     }
+    let split = sheet != "panels" && sheet != "cam" && lines.iter().any(|l| l.kind == "suiteprev");
     let (rows, sig) = bot_fields(lines);
     let (srows, ssig) = bot_fields(if setup { botpage::step_fields(&now, &cur) } else { Vec::new() });
     let (was, swas) = BOT_DRAWN.with(|d| d.borrow().clone());
@@ -7200,6 +7203,8 @@ fn bot_paint(shared: &Shared) {
     }
     if ssig != swas { ui.set_bot_step_fields(model(srows)); }
     BOT_DRAWN.with(|d| *d.borrow_mut() = (sig, ssig));
+    // (a widget's page with a preview: split, the preview kept in sight on the right)
+    ui.set_bot_sheet_split(split);
     ui.set_bot_sheet(sheet.into());
     ui.set_bot_sheet_title(title.into());
 }
@@ -7260,13 +7265,13 @@ const PANEL_TPL_KEYS: [&str; 14] = ["panelTheme", "panelShape", "panelHeight", "
 
 fn bot_set(shared: &Shared, key: &str, v: &str) {
     let key = botpage::key_of(key).to_string();
-    // (a theme's font: "theme|font" picked, or typed (any Google Font), kept in themeFonts for that theme)
+    // (a theme's font: "theme:font" picked, or typed (any Google Font), kept in themeFonts for that theme)
     if key == "fontPick" || key == "fontCustom" {
         let cur = bot_current(shared);
-        let theme = if key == "fontPick" { v.split_once('|').map(|x| x.0).unwrap_or("dark").to_string() } else {
+        let theme = if key == "fontPick" { v.split_once(':').map(|x| x.0).unwrap_or("dark").to_string() } else {
             ["suiteTheme", "panelTheme", "camTheme"].iter().find(|k| botpage::sheet(&BOT_SHEET.with(|b| b.borrow().clone()), &cur).1.iter().any(|f| f.key == **k)).and_then(|k| cur.get(*k).and_then(|x| x.as_str()).filter(|x| !x.is_empty()).map(String::from)).unwrap_or_else(|| "dark".into())
         };
-        let font: String = if key == "fontPick" { v.split_once('|').map(|x| x.1).unwrap_or("").to_string() } else { v.trim().chars().filter(|c| c.is_alphanumeric() || *c == ' ').take(60).collect() };
+        let font: String = if key == "fontPick" { v.split_once(':').map(|x| x.1).unwrap_or("").to_string() } else { v.trim().chars().filter(|c| c.is_alphanumeric() || *c == ' ').take(60).collect() };
         let mut all: serde_json::Map<String, serde_json::Value> = cur.get("themeFonts").and_then(|t| t.as_str()).and_then(|t| serde_json::from_str(t).ok()).unwrap_or_default();
         if font.is_empty() { all.remove(&theme); } else { all.insert(theme, serde_json::json!(font)); }
         bot_set(shared, "themeFonts", &serde_json::Value::Object(all).to_string());

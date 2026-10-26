@@ -102,8 +102,8 @@
   .big { font-size: 1.5rem; font-weight: 800; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
   /* how they come in (the Suite's Widget Animation) */
-  .in { animation: var(--in, rise-in) 0.7s cubic-bezier(0.2, 0.8, 0.2, 1) both; }
-  .out { animation: var(--out, rise-out) 0.5s ease-in both; }
+  .in { animation: var(--in, rise-in) var(--inT, 0.7s) cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+  .out { animation: var(--out, rise-out) var(--outT, 0.5s) ease-in both; }
   @keyframes rise-in { from { opacity: 0; transform: translateY(1rem); } }
   @keyframes rise-out { to { opacity: 0; transform: translateY(-0.7rem); } }
   @keyframes slide-in { from { opacity: 0; transform: translateX(-2.2rem); } }
@@ -233,16 +233,24 @@
     const k = Math.max(0.3, Math.min(innerWidth / w, innerHeight / h));
     document.documentElement.style.fontSize = 16 * k + "px";
   }
+  // (this widget's own way in and out and speed, if it has one; else the Suite's)
+  const own = () => (suite && suite.motion && suite.motion[PATH.slice(1)]) || {};
+  const animOf = () => own().anim || (suite && suite.anim) || "rise";
+  const pace = () => ({ slow: 1.7, normal: 1, fast: 0.55 }[own().speed] || 1);
+  const outMs = () => Math.round(500 * pace());
   function moving(el) {
-    const m = MOTIONS[(suite && suite.anim) || "rise"] || MOTIONS.rise;
+    const m = MOTIONS[animOf()] || MOTIONS.rise;
+    const k = pace();
     el.style.setProperty("--in", m[0]);
     el.style.setProperty("--out", m[1]);
+    el.style.setProperty("--inT", (0.7 * k).toFixed(2) + "s");
+    el.style.setProperty("--outT", (0.5 * k).toFixed(2) + "s");
   }
   // (one shown in place of another: the old one out, the new one in)
   function swap(el) {
     const stage = $("stage");
     const old = stage.firstElementChild;
-    if (old) { moving(old); old.classList.remove("in"); old.classList.add("out"); setTimeout(() => old.remove(), 500); }
+    if (old) { moving(old); old.classList.remove("in"); old.classList.add("out"); setTimeout(() => old.remove(), outMs()); }
     moving(el);
     el.classList.add("in");
     stage.appendChild(el);
@@ -440,7 +448,7 @@
     if (sig === shown) return;
     shown = sig;
     clearTimeout(raidT);
-    if (!r || Date.now() - r.at > r.secs * 1000 + 3000) { const old = $("stage").firstElementChild; if (old) { moving(old); old.classList.add("out"); setTimeout(() => old.remove(), 500); } return; }
+    if (!r || Date.now() - r.at > r.secs * 1000 + 3000) { const old = $("stage").firstElementChild; if (old) { moving(old); old.classList.add("out"); setTimeout(() => old.remove(), outMs()); } return; }
     const el = document.createElement("div");
     el.id = "raid";
     el.className = "panel";
@@ -685,7 +693,7 @@
 
   function draw() {
     if (!suite) return;
-    document.body.classList.toggle("still", suite.anim === "none");
+    document.body.classList.toggle("still", animOf() === "none");
     ["glass", "neon", "comic", "minimal", "pastel", "y2k", "pixel", "edge", "sticker"].forEach((t) => document.body.classList.toggle("t-" + t, suite.theme === t));
     useFont((suite.fonts || {})[suite.theme || "dark"]);
     // (a palette, or your own colours, over your accent)
