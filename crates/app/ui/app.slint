@@ -198,6 +198,7 @@ global Icons {
     out property <string> link: "M3.9 12c0-1.71 1.39-3.1 3.1-3.1h4V7H7c-2.76 0-5 2.24-5 5s2.24 5 5 5h4v-1.9H7c-1.71 0-3.1-1.39-3.1-3.1zM8 13h8v-2H8v2zm9-6h-4v1.9h4c1.71 0 3.1 1.39 3.1 3.1s-1.39 3.1-3.1 3.1h-4V17h4c2.76 0 5-2.24 5-5s-2.24-5-5-5z";
     out property <string> logout: "M17 7l-1.41 1.41L18.17 11H8v2h10.17l-2.58 2.58L17 17l5-5zM4 5h8V3H4c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h8v-2H4V5z";
     out property <string> check: "M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z";
+    out property <string> info: "M11 7h2v2h-2zm0 4h2v6h-2zm1-9a10 10 0 100 20 10 10 0 000-20zm0 18a8 8 0 110-16 8 8 0 010 16z";
     out property <string> pin: "M16 9V4h1V2H7v2h1v5c0 1.66-1.34 3-3 3v2h5.97v7l1 1 1-1v-7H19v-2c-1.66 0-3-1.34-3-3z";
     out property <string> thumb-up: "M1 21h4V9H1v12zm22-11c0-1.1-.9-2-2-2h-6.31l.95-4.57.03-.32c0-.41-.17-.79-.44-1.06L14.17 1 7.59 7.59C7.22 7.95 7 8.45 7 9v10c0 1.1.9 2 2 2h9c.83 0 1.54-.5 1.84-1.22l3.02-7.05c.09-.23.14-.47.14-.73v-2z";
     out property <string> thumb-down: "M15 3H6c-.83 0-1.54.5-1.84 1.22l-3.02 7.05c-.09.23-.14.47-.14.73v2c0 1.1.9 2 2 2h6.31l-.95 4.57-.03.32c0 .41.17.79.44 1.06L9.83 23l6.59-6.59c.36-.36.58-.86.58-1.41V5c0-1.1-.9-2-2-2zm4 0v12h4V3h-4z";
@@ -2859,6 +2860,8 @@ component PanelPreview inherits Rectangle {
                         Path { width: parent.width; height: parent.height; viewbox-width: 100; viewbox-height: 50; commands: "M 0 50 A 50 50 0 0 1 100 50 Z"; fill: @linear-gradient(180deg, #ffd36e 0%, PanelLook.c2 100%); stroke-width: 0; }
                         for k in 4: Rectangle { y: parent.height * (0.5 + k * 0.12); height: 1.5px + k * 1px; background: #3b0a55; }
                     }
+                    // (a shade behind the words, over the grid)
+                    Rectangle { x: 0; y: p.body ? 0 : parent.hz - 4px; width: parent.width * 0.75; height: p.body ? parent.height : parent.height - parent.hz + 4px; background: @linear-gradient(90deg, #120226b8 0%, #12022600 100%); }
                     Path { y: parent.hz; width: parent.width; height: parent.height - parent.hz; viewbox-width: 320; viewbox-height: 100; commands: "M 0 6.5 L 320 6.5 M 0 21.1 L 320 21.1 M 0 42.0 L 320 42.0 M 0 68.4 L 320 68.4 M 0 100.0 L 320 100.0 M 211 0 L -302 100 M 218 0 L -238 100 M 225 0 L -174 100 M 232 0 L -110 100 M 239 0 L -46 100 M 246 0 L 18 100 M 253 0 L 82 100 M 260 0 L 146 100 M 267 0 L 210 100 M 274 0 L 274 100 M 281 0 L 338 100 M 288 0 L 402 100 M 295 0 L 466 100 M 302 0 L 530 100 M 309 0 L 594 100 M 316 0 L 658 100 M 323 0 L 722 100 M 330 0 L 786 100 M 337 0 L 850 100"; stroke: PanelLook.c1.with-alpha(0.85); stroke-width: 1px; fill: transparent; }
                 }
                 // (Paper: a ruled note, taped on)
@@ -6717,7 +6720,18 @@ export component AppWindow inherits Window {
                             }
                             if root.set-cat == "" && root.set-query == "": VerticalLayout {
                                 spacing: 8px;
-                                // (Updates: pinned at the top)
+                                for c in [
+                                    { name: "About", note: "Updates, bugs and ideas, backups, setup, and supporting OmniPulse", d: Icons.info },
+                                    { name: "App & Look", note: "Theme, colours, player style, name, tray, taskbar widget, animations", d: Icons.gear },
+                                    { name: "Integrations", note: "Accounts, platforms, catalogues, following, Listen Along & Jams, Last.fm", d: Icons.person },
+                                    { name: "Plugins", note: "Music sources and more made by others. Turn them on or off, change their settings, and add or remove them.", d: Icons.plugin },
+                                    { name: "Library", note: "Pages, autoplay, recent plays, hidden and not recommended, music folders", d: Icons.library },
+                                    { name: "Sound", note: "Loudness, fades, silences, equalizer, seamless mixing", d: Icons.volume },
+                                    { name: "Streaming", note: "Streamer Mode, the widget and alerts, song requests, Stream Deck, OmniPulse Offset", d: Icons.broadcast },
+                                ]: CatCard { name: c.name; note: c.note; d: c.d; clicked => { root.set-cat = c.name; } }
+                            }
+                            if root.set-cat == "About" && root.set-query == "": VerticalLayout {
+                                spacing: 10px;
                                 Card {
                                     HorizontalLayout {
                                         padding: 16px;
@@ -6769,14 +6783,42 @@ export component AppWindow inherits Window {
                                         VerticalLayout { alignment: center; Pill { label: "Suggest a Feature"; clicked => { root.account-settings("report:feature"); } } }
                                     }
                                 }
-                                for c in [
-                                    { name: "App & Look", note: "Theme, colours, player style, name, tray, taskbar widget, animations, backups", d: Icons.gear },
-                                    { name: "Integrations", note: "Accounts, platforms, catalogues, following, Listen Along & Jams, Last.fm", d: Icons.person },
-                                    { name: "Plugins", note: "Music sources and more made by others. Turn them on or off, change their settings, and add or remove them.", d: Icons.plugin },
-                                    { name: "Library", note: "Pages, autoplay, recent plays, hidden and not recommended, music folders", d: Icons.library },
-                                    { name: "Sound", note: "Loudness, fades, silences, equalizer, seamless mixing", d: Icons.volume },
-                                    { name: "Streaming", note: "Streamer Mode, the widget and alerts, song requests, Stream Deck, OmniPulse Offset", d: Icons.broadcast },
-                                ]: CatCard { name: c.name; note: c.note; d: c.d; clicked => { root.set-cat = c.name; } }
+                                // ---- backups ----
+                                SectionHead { text: "Backups"; }
+                                Card {
+                                    HorizontalLayout {
+                                        padding: 16px;
+                                        padding-top: 12px;
+                                        padding-bottom: 12px;
+                                        spacing: 6px;
+                                        VerticalLayout {
+                                            horizontal-stretch: 1;
+                                            alignment: center;
+                                            spacing: 2px;
+                                            HiTitle { text: "Back Up & Restore"; }
+                                            Text { text: "Your settings, keys, favourites, playlists, stats and alerts, in one .zip. Sign-ins aren't in it."; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
+                                        }
+                                        VerticalLayout { alignment: center; IconButton { d: Icons.backup; size: 38px; tint: Theme.accent; tip: "Back up: save it all to a .zip"; clicked => { root.backup-make(); } } }
+                                        VerticalLayout { alignment: center; IconButton { d: Icons.restore; size: 38px; tip: "Restore: from a backup .zip"; clicked => { root.backup-restore(); } } }
+                                    }
+                                }
+                                Card {
+                                    HorizontalLayout {
+                                        padding: 16px;
+                                        padding-top: 12px;
+                                        padding-bottom: 12px;
+                                        spacing: 6px;
+                                        VerticalLayout {
+                                            horizontal-stretch: 1;
+                                            alignment: center;
+                                            spacing: 2px;
+                                            HiTitle { text: "Run Setup Again"; }
+                                            Text { text: "The steps from when OmniPulse first opened: your theme, your music, how it sounds and streaming."; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
+                                        }
+                                        VerticalLayout { alignment: center; Pill { label: "Run Setup"; clicked => { root.setup-go("again"); } } }
+                                    }
+                                }
+                                SectionHead { text: "Support"; }
                                 // (last of all: a way to support the work)
                                 Card {
                                     HorizontalLayout {
@@ -6798,21 +6840,17 @@ export component AppWindow inherits Window {
                                         VerticalLayout { alignment: center; Pill { label: "Contribute on Ko-fi"; on: true; clicked => { root.open-web("https://ko-fi.com/shwylie"); } } }
                                     }
                                 }
-                                // (made with Slint: its own credit, as its licence asks)
-                                Card {
-                                    HorizontalLayout {
-                                        padding: 16px;
-                                        padding-top: 12px;
-                                        padding-bottom: 12px;
-                                        spacing: 12px;
-                                        VerticalLayout {
-                                            horizontal-stretch: 1;
-                                            alignment: center;
-                                            spacing: 2px;
-                                            HiTitle { text: "Made with Slint"; }
-                                            Text { text: "OmniPulse's window is drawn with Slint, a toolkit for apps. It's free to use, with this credit."; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
-                                        }
-                                        VerticalLayout { alignment: center; AboutSlint { width: 180px; } }
+                                // (made with Slint: a small line of its own, its link to its site)
+                                HorizontalLayout {
+                                    alignment: start;
+                                    padding-left: 4px;
+                                    spacing: 6px;
+                                    Text { text: "Made with Slint"; color: Theme.muted; font-size: 11px; vertical-alignment: center; }
+                                    slta := TouchArea {
+                                        width: sltx.preferred-width;
+                                        mouse-cursor: MouseCursor.pointer;
+                                        clicked => { root.open-web("https://slint.dev"); }
+                                        sltx := Text { text: "slint.dev"; color: slta.has-hover ? Theme.text : Theme.accent; font-size: 11px; vertical-alignment: center; }
                                     }
                                 }
                             }
@@ -7167,41 +7205,6 @@ export component AppWindow inherits Window {
                                             }
                                             CenterToggle { checked <=> root.widget-viz; toggled => { root.app-pref("widgetViz", self.checked); } }
                                         }
-                                    }
-                                }
-                                // ---- backups ----
-                                SectionHead { text: "Backups"; }
-                                Card {
-                                    HorizontalLayout {
-                                        padding: 16px;
-                                        padding-top: 12px;
-                                        padding-bottom: 12px;
-                                        spacing: 6px;
-                                        VerticalLayout {
-                                            horizontal-stretch: 1;
-                                            alignment: center;
-                                            spacing: 2px;
-                                            HiTitle { text: "Back Up & Restore"; }
-                                            Text { text: "Your settings, keys, favourites, playlists, stats and alerts, in one .zip. Sign-ins aren't in it."; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
-                                        }
-                                        VerticalLayout { alignment: center; IconButton { d: Icons.backup; size: 38px; tint: Theme.accent; tip: "Back up: save it all to a .zip"; clicked => { root.backup-make(); } } }
-                                        VerticalLayout { alignment: center; IconButton { d: Icons.restore; size: 38px; tip: "Restore: from a backup .zip"; clicked => { root.backup-restore(); } } }
-                                    }
-                                }
-                                Card {
-                                    HorizontalLayout {
-                                        padding: 16px;
-                                        padding-top: 12px;
-                                        padding-bottom: 12px;
-                                        spacing: 6px;
-                                        VerticalLayout {
-                                            horizontal-stretch: 1;
-                                            alignment: center;
-                                            spacing: 2px;
-                                            HiTitle { text: "Run Setup Again"; }
-                                            Text { text: "The steps from when OmniPulse first opened: your theme, your music, how it sounds and streaming."; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
-                                        }
-                                        VerticalLayout { alignment: center; Pill { label: "Run Setup"; clicked => { root.setup-go("again"); } } }
                                     }
                                 }
                             }
@@ -7654,8 +7657,9 @@ export component AppWindow inherits Window {
                                 alignment: start;
                                 if root.can-like: Pill { label: root.now-liked ? "Liked" : "Like"; on: root.now-liked; clicked => { root.like-toggle(); } }
                                 Pill { label: root.now-fav ? "In Favourites" : "Add to Favourites"; on: root.now-fav; clicked => { root.fav-toggle(); } }
-                                if root.now-open != "": Pill { label: root.now-open; clicked => { root.now-act("open"); } }
                             }
+                            // (Open in ...: a line of its own, its name never cut off beside the others)
+                            if root.now-title != "" && !npl.slim && root.now-open != "": HorizontalLayout { alignment: start; Pill { label: root.now-open; clicked => { root.now-act("open"); } } }
                             if root.now-title != "" && npl.slim: VerticalLayout {
                                 spacing: 8px;
                                 alignment: start;

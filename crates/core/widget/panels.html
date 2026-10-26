@@ -103,6 +103,8 @@
   // (what each theme takes: room at the top (a title bar), room kept on the right for its art (the title's, the
   // words'), titles in capitals, light behind dark words)
   const TOP = { y2k: 24, terminal: 20 };
+  const PLAIN_BG = { dark: "#14111f", neon: "#080614", comic: "#ffffff", y2k: "#fdf6ff", pastel: "#fff6fb", pixel: "#1b1030", paper: "#fbf6e9", bauhaus: "#f2ede4",
+    terminal: "#0a0f0c", watercolour: "#fffdf8", galaxy: "#05030f", ticket: "#ffe9c7", synthwave: "#2a0846", holo: "#e9e0ff", cyber: "#0b1020", glass: "#2a2733", gradient: "", minimal: "" };
   const KEEP_TITLE = { ticket: 66, bauhaus: 104, synthwave: 50 }, KEEP_BODY = { ticket: 66 };
   const UPPER = new Set(["pixel", "bauhaus", "cyber"]);
   const LIGHT = new Set(["comic", "pastel", "y2k", "paper", "bauhaus", "holo", "watercolour", "ticket"]);
@@ -154,7 +156,11 @@
       c.strokeStyle = c1; c.lineWidth = 1; c.globalAlpha = 0.85;
       for (let k = 1; k <= 5; k++) { const y = hz + (H - hz) * Math.pow(k / 5, 1.7); c.beginPath(); c.moveTo(0, y); c.lineTo(W, y); c.stroke(); }
       for (let k = -9; k <= 9; k++) { c.beginPath(); c.moveTo(sx + k * 7, hz); c.lineTo(sx + k * 64, H); c.stroke(); }
-      c.globalAlpha = 1; c.restore();
+      c.globalAlpha = 1;
+      // (a shade behind the words, over the grid, fading to the right: the words read, the grid still shows)
+      const shade = c.createLinearGradient(0, 0, W * 0.75, 0); shade.addColorStop(0, "rgba(18,2,38,0.72)"); shade.addColorStop(1, "rgba(18,2,38,0)");
+      c.fillStyle = shade; c.fillRect(0, ext ? 0 : hz - 4, W * 0.75, ext ? H : H - hz + 4);
+      c.restore();
       o.glow = c2;
     }
     // (Paper: a ruled note, taped on)
@@ -164,7 +170,7 @@
       c.strokeStyle = "#c9d8ef"; c.lineWidth = 1; for (let y = 28; y < H - 6; y += 18) { c.beginPath(); c.moveTo(m, y + 0.5); c.lineTo(W - m, y + 0.5); c.stroke(); }
       c.strokeStyle = "#eaa3a3"; c.beginPath(); c.moveTo(14.5, m); c.lineTo(14.5, H); c.stroke(); c.restore();
       tape(c, 24, 1, 62, 15, -0.18, c1); tape(c, W - 62, 2, 54, 15, 0.16, c2);
-      o.ink = "#26324a"; o.sub = "rgba(38,50,74,0.8)";
+      o.ink = "#26324a"; o.sub = "rgba(38,50,74,0.95)";
     }
     // (Bauhaus: shapes of your colours, and a black bar)
     else if (th === "bauhaus") {
@@ -211,7 +217,7 @@
       for (let k = 0; k < 6; k++) { const col = k % 2 ? c2 : c1, bx = R() * W, by = R() * H, br = 40 + R() * 80; const rg = c.createRadialGradient(bx, by, 0, bx, by, br); rg.addColorStop(0, alpha(col, 0.42)); rg.addColorStop(0.7, alpha(col, 0.14)); rg.addColorStop(1, alpha(col, 0)); c.fillStyle = rg; c.fillRect(0, 0, W, H); }
       for (let k = 0; k < 16; k++) { c.fillStyle = alpha(k % 2 ? c1 : c2, 0.3 + R() * 0.35); c.beginPath(); c.arc(R() * W, R() * H, 0.8 + R() * 2.6, 0, Math.PI * 2); c.fill(); }
       c.restore();
-      o.ink = "#2b2233"; o.sub = "rgba(43,34,51,0.8)";
+      o.ink = "#2b2233"; o.sub = "rgba(43,34,51,0.92)";
     }
     // (Cyber: cut corners, hazard stripes, a number)
     else if (th === "cyber") {
@@ -275,12 +281,30 @@
   }
 
   // (its title: in its glow or outline; Terminal's with its prompt and cursor)
+  // (a soft halo behind words, so they stay readable over the art: dark on dark designs, light on light
+  // ones; the art-heavy ones a little stronger)
+  const BUSY = new Set(["synthwave", "galaxy", "watercolour", "holo", "cyber", "paper", "bauhaus", "ticket"]);
+  function halo(c, th, ink, on) {
+    if (!on) { c.shadowBlur = 0; c.shadowColor = "transparent"; return; }
+    c.shadowColor = lum(ink) > 0.5 ? (BUSY.has(th) ? "rgba(0,0,0,0.75)" : "rgba(0,0,0,0.45)") : (BUSY.has(th) ? "rgba(255,255,255,0.9)" : "rgba(255,255,255,0.5)");
+    c.shadowBlur = BUSY.has(th) ? 6 : 3;
+    c.shadowOffsetX = 0; c.shadowOffsetY = 0;
+  }
+  // (two colours far enough apart to read one on the other: WCAG's contrast, 3 to 1 at least)
+  function contrast(a, b) {
+    const lin = (v) => { v /= 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); };
+    const rel = (col) => { const m = /^#?([0-9a-f]{6})/i.exec(String(col || "")); if (!m) return 0.5; const n = parseInt(m[1], 16); return 0.2126 * lin(n >> 16) + 0.7152 * lin((n >> 8) & 255) + 0.0722 * lin(n & 255); };
+    const [x, y] = [rel(a), rel(b)].sort((p, q) => q - p);
+    return (x + 0.05) / (y + 0.05);
+  }
+
   function title(c, th, text, x, y, fs, o, fill) {
     const t = (th === "terminal" ? "> " : "") + (UPPER.has(th) ? text.toUpperCase() : text);
     if (o.outline) { c.lineJoin = "round"; c.lineWidth = 4; c.strokeStyle = o.outline; c.strokeText(t, x, y); }
+    halo(c, th, o.ink, true);
     if (o.glow) { c.shadowColor = o.glow; c.shadowBlur = 10; }
     c.fillStyle = fill; c.fillText(t, x, y);
-    c.shadowBlur = 0;
+    halo(c, th, o.ink, false);
     if (th === "terminal") { c.fillStyle = o.ink; c.fillRect(x + c.measureText(t).width + 4, y - fs * 0.4, fs * 0.52, fs * 0.82); }
   }
   const titleText = (th, t) => (th === "terminal" ? "> " : "") + (UPPER.has(th) ? t.toUpperCase() : t) + (th === "terminal" ? "__" : "");
@@ -323,7 +347,11 @@
     const own = (v) => /^#[0-9a-f]{6}$/i.test(String(v || "")) ? v : "";
     const o = panelArt(c, th, p, ext, W, H, m, r, c1, c2, g, own(set.bg));
     // (your own colour for the words, if set)
-    if (own(set.ink)) { o.ink = set.ink; o.sub = alpha(set.ink, 0.8); }
+    if (own(set.ink)) {
+      const behind = own(set.bg) || PLAIN_BG[th];
+      const ink = behind && contrast(set.ink, behind) < 3 ? (lum(behind) > 0.5 ? "#111111" : "#ffffff") : set.ink;
+      o.ink = ink; o.sub = alpha(ink, 0.85);
+    }
     const ink = o.ink, sub = o.sub, font = FONT(th);
     // (extended: a header (icon and title) and the words under it, with a line between)
     if (ext) {
@@ -338,7 +366,9 @@
       const lg = c.createLinearGradient(22, 0, W - 22, 0); lg.addColorStop(0, c1); lg.addColorStop(1, c2);
       c.fillStyle = th === "comic" || th === "bauhaus" ? "#111" : lg; c.fillRect(22, top + 64, bw, 2);
       c.font = "500 " + p.fs + "px " + font; c.fillStyle = sub;
+      halo(c, th, ink, true);
       body.forEach((l, i) => c.fillText(l, 22, top + 84 + i * p.lh));
+      halo(c, th, ink, false);
       return;
     }
     // (its icon, in a tile of its colours)
@@ -368,12 +398,14 @@
       c.font = "500 " + ls + "px " + font;
       while (c.measureText(p.line).width > room && ls > 10) { ls -= 0.5; c.font = "500 " + ls + "px " + font; }
       c.fillStyle = sub;
+      halo(c, th, ink, true);
       if (c.measureText(p.line).width <= room) c.fillText(p.line, x, mid + fs * 0.5);
       else {
         const two = wrap(c, p.line, room);
         if (two.length > 2) { let l = two[1]; while (c.measureText(l + "…").width > room && l.length) l = l.slice(0, -1); two.splice(1, two.length - 1, l + "…"); }
         two.forEach((l, i) => c.fillText(l, x, mid + fs * 0.42 + i * (ls + 3)));
       }
+      halo(c, th, ink, false);
     }
   }
   function save(cv, name) {

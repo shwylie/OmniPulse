@@ -7133,8 +7133,19 @@ fn bot_paint(shared: &Shared) {
         g.set_c2(c2);
         // (your own colours for the words and the background, if they're set)
         let own = |k: &str| botpage::hex_of(&cur, k).and_then(|h| look::Rgb::parse(&h)).map(|c| c.slint());
-        g.set_ink_on(own("panelInk").is_some());
-        g.set_ink(own("panelInk").unwrap_or_default());
+        // (your words' colour, unless it'd be lost on the background: black or white instead, as panels.html)
+        let plain = |th: &str| -> Option<slint::Color> {
+            let hex = match th { "dark" => "#14111f", "neon" => "#080614", "comic" => "#ffffff", "y2k" => "#fdf6ff", "pastel" => "#fff6fb", "pixel" => "#1b1030", "paper" => "#fbf6e9", "bauhaus" => "#f2ede4",
+                "terminal" => "#0a0f0c", "watercolour" => "#fffdf8", "galaxy" => "#05030f", "ticket" => "#ffe9c7", "synthwave" => "#2a0846", "holo" => "#e9e0ff", "cyber" => "#0b1020", "glass" => "#2a2733", _ => return None };
+            look::Rgb::parse(hex).map(|c| c.slint())
+        };
+        let rel = |c: slint::Color| { let l = |v: u8| { let v = v as f64 / 255.0; if v <= 0.03928 { v / 12.92 } else { ((v + 0.055) / 1.055).powf(2.4) } }; 0.2126 * l(c.red()) + 0.7152 * l(c.green()) + 0.0722 * l(c.blue()) };
+        let ink = own("panelInk").map(|ink| match own("panelBg").or_else(|| plain(&or("panelTheme", "dark"))) {
+            Some(bg) => { let (a, b) = (rel(ink), rel(bg)); if (a.max(b) + 0.05) / (a.min(b) + 0.05) < 3.0 { if b > 0.18 { slint::Color::from_rgb_u8(0x11, 0x11, 0x11) } else { slint::Color::from_rgb_u8(0xff, 0xff, 0xff) } } else { ink } }
+            None => ink,
+        });
+        g.set_ink_on(ink.is_some());
+        g.set_ink(ink.unwrap_or_default());
         g.set_bg_on(own("panelBg").is_some());
         g.set_bg(own("panelBg").unwrap_or_default());
         // (Terminal's type: the first colour if it's bright enough to read on black, as panels.html has it)
@@ -7616,8 +7627,11 @@ fn settings_close(shared: &Shared) {
 struct SetFound { path: String, label: String, note: String, cat: String, panel: String, key: String, toggle: bool }
 
 /// The settings drawn by hand (not from SET_ROWS): their category, name and description
-const SET_HAND: [(&str, &str, &str); 24] = [
-    ("", "Updates", "Checks for a newer version a little after it starts, and installs it."),
+const SET_HAND: [(&str, &str, &str); 27] = [
+    ("About", "Updates", "Checks for a newer version a little after it starts, and installs it."),
+    ("About", "Bugs and Ideas", "Report a bug or suggest a feature, to the developer."),
+    ("About", "Run Setup Again", "The steps from when OmniPulse first opened."),
+    ("About", "Support OmniPulse", "Say thanks with a coffee on Ko-fi."),
     ("App & Look", "Theme", "Light to dark."),
     ("App & Look", "Tint", "A colour through the theme."),
     ("App & Look", "Tint Strength", "How much of the tint."),
@@ -7634,7 +7648,7 @@ const SET_HAND: [(&str, &str, &str); 24] = [
     ("App & Look", "Hardware Acceleration", "Draws the app with your graphics card. Takes effect the next time OmniPulse starts."),
     ("App & Look", "Animations", "Fades and motion."),
     ("App & Look", "Rounded Corners", "Rounds the corners of the sidebar, the page and the queue. Turn it off for square corners."),
-    ("App & Look", "Back Up & Restore", "Your settings, keys, favourites, playlists, stats and alerts, in one .zip."),
+    ("About", "Back Up & Restore", "Your settings, keys, favourites, playlists, stats and alerts, in one .zip."),
     ("Integrations", "Accounts", "SoundCloud, Spotify, YouTube Music and Last.fm: signing in and out, and each one's switch."),
     ("Library", "Music Folders", "Folders on this PC or a network drive. Their music shows in your Library."),
     ("Sound", "Match Loudness", "Every track played at the same loudness."),
@@ -12916,6 +12930,18 @@ fn apply_look(shared: &Shared) {
     if ui.get_app_name().trim() != name { ui.set_app_name(name.into()); }
     ui.set_side_collapsed(prefs["sideCollapsed"].as_bool() == Some(true));
     t.set_bg(p.bg.slint());
+    // (Windows' own frame and caption in the theme's background: what shows for a moment as the window's
+    // resized, before it's drawn again, a white strip otherwise)
+    #[cfg(windows)]
+    if let Some(h) = window_hwnd(&ui) {
+        use windows::Win32::Graphics::Dwm::{DwmSetWindowAttribute, DWMWA_BORDER_COLOR, DWMWA_CAPTION_COLOR};
+        let colorref: u32 = p.bg.0 as u32 | ((p.bg.1 as u32) << 8) | ((p.bg.2 as u32) << 16);
+        unsafe {
+            let hw = windows::Win32::Foundation::HWND(h as *mut _);
+            let _ = DwmSetWindowAttribute(hw, DWMWA_CAPTION_COLOR, &colorref as *const u32 as _, 4);
+            let _ = DwmSetWindowAttribute(hw, DWMWA_BORDER_COLOR, &colorref as *const u32 as _, 4);
+        }
+    }
     // (Aurora: its panels see-through, over the glow behind them)
     let see = |c: look::Rgb, a: u8| if preset.is_some_and(|t| t.aurora) { slint::Color::from_argb_u8(a, c.0, c.1, c.2) } else { c.slint() };
     t.set_panel(see(p.panel, 190));
@@ -14769,6 +14795,17 @@ fn main() -> Result<(), slint::PlatformError> {
                     w.dispatch_event(WindowEvent::PointerReleased { position: at(1040.0, 416.0), button: PointerEventButton::Left });
                     println!("selftest: drag onto the queue: {n} -> {} (\"{}\")", s.borrow().queue.items.len(), ui.get_status());
                 }
+                // (a widget page's setting changed, as a click there does, and how long it and the page's redraw took)
+                w if w.starts_with("botset:") => {
+                    if let Some((k, v)) = w[7..].split_once('=') {
+                        let t0 = std::time::Instant::now();
+                        bot_set(&s, k, v);
+                        let set_ms = t0.elapsed().as_secs_f64() * 1000.0;
+                        let t1 = std::time::Instant::now();
+                        bot_paint(&s);
+                        println!("selftest: timing {} {k}: set {set_ms:.1} ms, redraw {:.1} ms", BOT_SHEET.with(|b| b.borrow().clone()), t1.elapsed().as_secs_f64() * 1000.0);
+                    }
+                }
                 "dragasks" => {
                     let d = ui.global::<Dnd>();
                     let ask = |t: &str, what: &str| d.invoke_accepts(t.into(), slint::DataTransfer::from(slint::SharedString::from(what)));
@@ -15034,8 +15071,13 @@ fn main() -> Result<(), slint::PlatformError> {
                 }
                 // a Library song by its title (OMNIPULSE_SELFTEST_TITLE), played
                 "playtitle" => {
+                    // ("title|artist|platform": its artist and where it's from too, if given)
                     let want = std::env::var("OMNIPULSE_SELFTEST_TITLE").unwrap_or_default().to_lowercase();
-                    let list: Vec<Track> = s.borrow().library.iter().filter(|t| t.title.to_lowercase().contains(&want)).take(1).cloned().collect();
+                    let mut w = want.split('|');
+                    let (title, artist, plat) = (w.next().unwrap_or("").to_string(), w.next().unwrap_or("").to_string(), w.next().unwrap_or("").to_string());
+                    // (and a part of its key, to pick one listing of several)
+                    let key = w.next().unwrap_or("").to_string();
+                    let list: Vec<Track> = s.borrow().library.iter().filter(|t| t.title.to_lowercase().contains(&title) && t.artist.to_lowercase().contains(&artist) && (plat.is_empty() || t.plat() == plat) && t.key.to_lowercase().contains(&key)).take(1).cloned().collect();
                     println!("selftest: playing {:?}", list.iter().map(|t| t.title.clone()).collect::<Vec<_>>());
                     play_list(&s, list, 0);
                 }

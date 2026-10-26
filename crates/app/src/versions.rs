@@ -33,6 +33,8 @@ pub fn saved_id(key: &str) -> Option<String> {
 }
 
 fn save_all() {
+    // (a self-test's lookups kept to itself: never your cache, where a miss would stop it being looked for)
+    if std::env::var_os("OMNIPULSE_SELFTEST").is_some() { return; }
     let text = with_saved(|m| serde_json::to_string(m).unwrap_or_default());
     if let Some(p) = file() {
         if let Some(d) = p.parent() { let _ = std::fs::create_dir_all(d); }
