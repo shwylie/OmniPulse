@@ -3356,6 +3356,17 @@ component SuitePreview inherits Rectangle {
                 Rectangle { width: 44px; height: 44px; border-radius: 10px; background: root.c1.mix(root.c2, 0.5); Glyph { d: Icons.heart-out; width: 24px; height: 24px; fill: #ffffff; } }
                 VerticalLayout { alignment: center; Text { text: "LATEST FOLLOWER"; color: root.ink.with-alpha(0.75); font-size: 11px; letter-spacing: 1.2px; } Text { text: "PixelPanda"; color: root.ink; font-size: 20px; font-weight: 800; } }
             }
+            // (Sponsor Plug: the first one's logo (its first letter), name and line)
+            if root.which == "sponsors": HorizontalLayout {
+                spacing: 12px;
+                Rectangle { width: 44px; height: 44px; border-radius: 22px; background: root.c1.mix(root.c2, 0.5); Text { text: root.theme; color: #ffffff; font-size: 20px; font-weight: 900; horizontal-alignment: center; } }
+                VerticalLayout {
+                    alignment: center;
+                    Text { text: "SPONSORED BY"; color: root.ink.with-alpha(0.75); font-size: 11px; letter-spacing: 1.2px; }
+                    Text { text: root.look; color: root.ink; font-size: 18px; font-weight: 800; overflow: elide; }
+                    if root.spot != "": Text { text: root.spot; color: root.ink.with-alpha(0.8); font-size: 12px; overflow: elide; }
+                }
+            }
             if root.which == "raid": VerticalLayout {
                 spacing: 6px;
                 alignment: center;

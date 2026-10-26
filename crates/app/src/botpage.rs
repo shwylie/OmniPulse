@@ -394,7 +394,12 @@ fn sheet_of(id: &str, cur: &Map<String, Value>) -> (String, Vec<Field>) {
         }),
         "sponsors" => ("Sponsor Plug".into(), {
             let or = |k: &str, d: &'static str| if s(cur, k).is_empty() { d.to_string() } else { s(cur, k).to_string() };
+            // (its preview: the first sponsor (or a made-up one), its name in look, its line in spot)
+            let first = list_items(s(cur, "sponsorList")).into_iter().find(|x| !x.trim().is_empty()).unwrap_or_else(|| "Acme Energy: Code SHWYLIE for 10% off".into());
+            let (name, line) = first.split_once(':').map(|(a, b)| (a.trim().to_string(), b.trim().to_string())).unwrap_or((first.trim().to_string(), String::new()));
             vec![
+                // (its logo's letter in extra: the first of its name)
+                f("suiteprev", &line, &name, "", "sponsors", &name.chars().next().map(|c| c.to_uppercase().to_string()).unwrap_or_else(|| "S".into())),
                 f("note", "", "Your sponsors, one at a time (or all together), each with its logo, its name and a line: a code, a link or a deal.", "", "", ""),
                 f("list", "sponsorList", "Your sponsors", "One each, its name, a colon, then its line, like Acme Energy: Code SHWYLIE for 10% off.", s(cur, "sponsorList"), ""),
                 f("list", "sponsorLogos", "Their logos", "A logo's address for each, in the same order (a PNG with a see-through background is best). Leave one empty for its first letter.", s(cur, "sponsorLogos"), ""),
