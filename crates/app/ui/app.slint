@@ -3832,6 +3832,35 @@ component BotFieldRow inherits VerticalLayout {
             if inp.text == "" && root.f.extra != "": Text { x: 12px; text: root.f.extra; color: Theme.muted.with-alpha(0.6); font-size: 13px; vertical-alignment: center; }
         }
     }
+    // (a goal, on one row: shown or not, what it counts, its name and its target)
+    if root.f.kind == "goalrow": HorizontalLayout {
+        spacing: 10px;
+        VerticalLayout { alignment: center; CenterToggle { checked: root.f.value == "true"; toggled => { root.set(root.f.key + "On", self.checked ? "true" : "false"); } } }
+        Text { text: root.f.label; width: 84px; color: root.f.value == "true" ? Theme.text : Theme.muted; font-weight: 700; font-size: 13px; vertical-alignment: center; }
+        Rectangle {
+            horizontal-stretch: 1;
+            clip: true;
+            height: 36px;
+            border-radius: 9px;
+            background: Theme.bg;
+            border-width: 1px;
+            border-color: gname.has-focus ? Theme.accent : Theme.line;
+            gname := TextInput { x: 12px; width: parent.width - 24px; height: parent.height; vertical-alignment: center; color: Theme.text; font-size: 13px; single-line: true; text: root.f.extra; edited => { root.set(root.f.key + "Label", self.text); } }
+            if gname.text == "": Text { x: 12px; text: "Its name, like " + root.f.label + " goal"; color: Theme.muted.with-alpha(0.6); font-size: 13px; vertical-alignment: center; }
+        }
+        Text { text: "Target"; color: Theme.muted; font-size: 12px; vertical-alignment: center; }
+        Rectangle {
+            width: 96px;
+            clip: true;
+            height: 36px;
+            border-radius: 9px;
+            background: Theme.bg;
+            border-width: 1px;
+            border-color: gtar.has-focus ? Theme.accent : Theme.line;
+            gtar := TextInput { x: 12px; width: parent.width - 24px; height: parent.height; vertical-alignment: center; color: Theme.text; font-size: 13px; single-line: true; input-type: InputType.decimal; text: root.f.note; edited => { root.set(root.f.key + "Target", self.text); } }
+            if gtar.text == "": Text { x: 12px; text: root.f.n; color: Theme.muted.with-alpha(0.6); font-size: 13px; vertical-alignment: center; }
+        }
+    }
     // (a list, a row each: typed into, taken out, one more added; kept as "a | b | c")
     if root.f.kind == "list" || root.f.kind == "piclist": VerticalLayout {
         spacing: 6px;

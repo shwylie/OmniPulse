@@ -245,9 +245,16 @@ pub fn sheet(id: &str, cur: &Map<String, Value>) -> (String, Vec<Field>) {
         }
         v.splice(at + 1..at + 1, more);
     }
-    // (a widget's page, the same order on each: its own settings first, then the look every widget shares,
-    // then its Timing and Motion)
+    // (a widget's page, the same order on each: In OBS (its address, and its Try buttons) at the top, under
+    // its preview; then its own settings; then the look every widget shares; then its Timing and Motion)
     if matches!(id, "goals" | "timer" | "latest" | "raid" | "hype" | "voteskip" | "wheel" | "leaderboard" | "tune" | "emoterain") {
+        let obs = |x: &Field| x.kind == "addr" || (x.kind == "link" && x.label.starts_with("Try"));
+        let (top, rest): (Vec<Field>, Vec<Field>) = std::mem::take(&mut v).into_iter().partition(|x| obs(x));
+        let (prev, rest): (Vec<Field>, Vec<Field>) = rest.into_iter().partition(|x| x.kind == "suiteprev");
+        v = prev;
+        if !top.is_empty() { v.push(f("head", "", "In OBS", "", "", "")); v.extend(top); }
+        if !rest.is_empty() && rest.first().is_some_and(|x| x.kind != "head") { v.push(f("head", "", "Its settings", "", "", "")); }
+        v.extend(rest);
         let shared = |k: &str| matches!(k, "suiteTheme" | "suiteColors" | "suiteC1" | "suiteC2" | "fontPick" | "fontCustom" | "gifPlace" | "gifSize") || k.starts_with("gif");
         let (look, own): (Vec<Field>, Vec<Field>) = std::mem::take(&mut v).into_iter().partition(|x| shared(&x.key));
         v = own;
@@ -537,31 +544,17 @@ fn sheet_of(id: &str, cur: &Map<String, Value>) -> (String, Vec<Field>) {
         // (the Suite's widgets: where each goes in OBS, then how it's set; Try It sends a pretend one)
         "goals" => ("Goals".into(), {
             let style = if s(cur, "goalStyle").is_empty() { "bars" } else { s(cur, "goalStyle") };
-            let mut v = vec![
-                f("suiteprev", "", style, "", "goals", &theme_of(cur)),
-                f("chips", "goalStyle", "Look", "Liquid fills a shape. Jar drops sweets in, a few for each step. Hourglass pours sand, and turns over when it's full to start the next round.", style, "bars=Bars|rings=Rings|liquid=Liquid|jar=Jar|hourglass=Hourglass"),
-            ];
-            // (the shape, for the liquid and the jar; the drops, for the jar)
-            let shape = if s(cur, "goalShape").is_empty() { "jar" } else { s(cur, "goalShape") };
-            if style == "liquid" || style == "jar" {
-                v.push(f("chips", "goalShape", "Shape", "", shape, "jar=Jar|potion=Potion|heart=Heart|cup=Cup|star=Star|ghost=Ghost|bubble=Bubble"));
-            }
-            if style == "jar" {
-                v.push(f("chips", "goalDrops", "What drops in", "", if s(cur, "goalDrops").is_empty() { "mixed" } else { s(cur, "goalDrops") }, "mixed=A mix|heart=Hearts|star=Stars|candy=Sweets|gem=Gems|coin=Coins"));
-            }
-            if style == "liquid" {
-                v.push(f("text", "goalImage", "Your own shape", "A picture's address (a PNG with a see-through background). The liquid fills its outline. Leave it empty for the shape above.", s(cur, "goalImage"), "https://…/shape.png"));
-            }
-            v.push(f("toggle", "goalPercent", "Show a percentage", "In place of the count, like 7 / 10.", if on(cur, "goalPercent", false) { "true" } else { "false" }, ""));
-            v.push(theme_field(cur));
-            v.push(f("reset", "goalReset", "Start again", "", if s(cur, "goalReset").is_empty() { "stream" } else { s(cur, "goalReset") }, ""));
-            v.push(f("link", "", "Start again now", "Puts every goal back to 0.", "", "call:suiteTest:goalsreset"));
+            // (your goals first, what they count to; then how they look; then when they start again)
+            let mut v = vec![f("suiteprev", "", style, "", "goals", &theme_of(cur))];
             v.push(addr("/goals", "About 920 × 520. Counts follows, subs, bits and donations as they come in."));
-            for (k, name, dflt) in [("Follow", "Followers", "10"), ("Sub", "Subs", "5"), ("Bits", "Bits", "1000"), ("Dono", "Donations", "50")] {
-                v.push(f("head", "", name, "", "", ""));
-                v.push(f("toggle", &format!("goal{k}On"), "Show it", "", if on(cur, &format!("goal{k}On"), true) { "true" } else { "false" }, ""));
-                v.push(f("text", &format!("goal{k}Label"), "Its name", "", s(cur, &format!("goal{k}Label")), ""));
-                v.push(f("number", &format!("goal{k}Target"), "Its target", "", &n(cur, &format!("goal{k}Target")), dflt));
+            v.push(f("link", "", "Try it", "Adds one of each, to see it fill.", "", "call:suiteTest:goals"));
+            // (each goal one row: shown or not, its name, its target; key: its prefix, label: what it counts,
+            // value: on, extra: its name, note: its target, n: its default target)
+            v.push(f("head", "", "Your goals", "", "", ""));
+            for (k, name, dflt) in [("Follow", "Followers", 10), ("Sub", "Subs", 5), ("Bits", "Bits", 1000), ("Dono", "Donations", 50)] {
+                let mut row = f("goalrow", &format!("goal{k}"), name, &n(cur, &format!("goal{k}Target")), if on(cur, &format!("goal{k}On"), true) { "true" } else { "false" }, s(cur, &format!("goal{k}Label")));
+                row.n = dflt;
+                v.push(row);
             }
             v.push(f("text", "goalCurrency", "Donation currency", "Shown before amounts, like $ or £.", s(cur, "goalCurrency"), "$"));
             // (the Common Goal: one goal everything counts toward)
@@ -576,7 +569,24 @@ fn sheet_of(id: &str, cur: &Map<String, Value>) -> (String, Vec<Field>) {
                 v.push(f("number", "goalPtsDono", "Points for every 1 donated", "", &n(cur, "goalPtsDono"), "1"));
                 v.push(f("number", "goalPtsRaid", "Points for each raider", "0 leaves raids out.", &n(cur, "goalPtsRaid"), "0"));
             }
-            v.push(f("link", "", "Try it", "Adds one of each, to see it fill.", "", "call:suiteTest:goals"));
+            v.push(f("head", "", "How they look", "", "", ""));
+            v.push(f("chips", "goalStyle", "Look", "Liquid fills a shape. Jar drops sweets in, a few for each step. Hourglass pours sand, and turns over when it's full to start the next round.", style, "bars=Bars|rings=Rings|liquid=Liquid|jar=Jar|hourglass=Hourglass"));
+            // (the shape, for the liquid and the jar; the drops, for the jar)
+            let shape = if s(cur, "goalShape").is_empty() { "jar" } else { s(cur, "goalShape") };
+            if style == "liquid" || style == "jar" {
+                v.push(f("chips", "goalShape", "Shape", "", shape, "jar=Jar|potion=Potion|heart=Heart|cup=Cup|star=Star|ghost=Ghost|bubble=Bubble"));
+            }
+            if style == "jar" {
+                v.push(f("chips", "goalDrops", "What drops in", "", if s(cur, "goalDrops").is_empty() { "mixed" } else { s(cur, "goalDrops") }, "mixed=A mix|heart=Hearts|star=Stars|candy=Sweets|gem=Gems|coin=Coins"));
+            }
+            if style == "liquid" {
+                v.push(f("text", "goalImage", "Your own shape", "A picture's address (a PNG with a see-through background). The liquid fills its outline. Leave it empty for the shape above.", s(cur, "goalImage"), "https://…/shape.png"));
+            }
+            v.push(f("toggle", "goalPercent", "Show a percentage", "In place of the count, like 7 / 10.", if on(cur, "goalPercent", false) { "true" } else { "false" }, ""));
+            v.push(theme_field(cur));
+            v.push(f("head", "", "Starting again", "", "", ""));
+            v.push(f("reset", "goalReset", "Start again", "", if s(cur, "goalReset").is_empty() { "stream" } else { s(cur, "goalReset") }, ""));
+            v.push(f("link", "", "Start again now", "Puts every goal back to 0.", "", "call:suiteTest:goalsreset"));
             v
         }),
         "timer" => ("Timer".into(), {
