@@ -2154,6 +2154,8 @@ function suiteKeep() {
 // (to the app, for the pages: what's counted, and how each is set)
 // (the widgets switched off, by id: goals, timer, latest-follow, latest-sub, raid, hype, voteskip, wheel,
 // leaderboard, emotes, tune, sponsors, cam, hud, multichat, dockchat, dockfeed, dockmod)
+// (the hype meter or train: on (its tile's switch, on the Widgets page), and counting)
+function hypeLive() { return funOn("hypeOn") && !widgetsOff().includes("hype"); }
 function widgetsOff() { return String(S().widgetsOff || "").split("|").map((s) => s.trim()).filter(Boolean); }
 
 // (each widget's animation and speed, set on its own page: by the page's id, from its settings' <key>Anim and <key>Speed)
@@ -2179,11 +2181,11 @@ function suitePush() {
       // (the fun's: the meter's level and how full, the skip votes, the wheel's last spin, the top points, and
       // emote rain's bursts)
       hype: trainMode() ? {
-        on: funOn("hypeOn"), train: true, running: !!fun.train, show: String(x.hypeShow || "train"), level: fun.train ? fun.train.level : 0,
+        on: hypeLive(), train: true, running: !!fun.train, show: String(x.hypeShow || "train"), level: fun.train ? fun.train.level : 0,
         fill: fun.train ? (fun.train.pts % hypeStep()) / hypeStep() : 0, levelAt: fun.levelAt, endsAt: fun.train ? fun.train.endsAt : 0, secs: trainSecs(), now: Date.now(),
         top: fun.train ? (Object.entries(fun.train.by).sort((a, b) => b[1] - a[1])[0] || [""])[0] : "", from: fun.train ? fun.train.from : [], done: fun.trainDone || null,
         label: String(x.hypeLabel || "Hype Train"),
-      } : { on: funOn("hypeOn"), level: fun.level, fill: (fun.hype % hypeStep()) / hypeStep(), levelAt: fun.levelAt, label: String(x.hypeLabel || "Hype") },
+      } : { on: hypeLive(), level: fun.level, fill: (fun.hype % hypeStep()) / hypeStep(), levelAt: fun.levelAt, label: String(x.hypeLabel || "Hype") },
       voteskip: { on: yes(x.skipOn), votes: fun.votes.size, need: Math.max(1, num(x.skipVotes) || 5), song: fun.song, command: String(x.skipCommand || "!skip") },
       wheel: Object.assign({ prizes: wheelPrizes(), weights: wheelList().map((p) => p.w), command: String(x.wheelCommand || "!spin"), secs: wheelSecs(), colors: String(x.wheelColors || "theme"), hide: yes(x.wheelHide) }, fun.wheel || {}),
       leaderboard: { list: leaders(), name: pointsName() },
@@ -2357,7 +2359,7 @@ const hypeStep = () => Math.max(10, num(S().hypeLevel) || 100);
 const trainMode = () => String(S().hypeMode || "train") === "train";
 const trainSecs = () => Math.max(60, Math.min(900, num(S().hypeSecs) || 300));
 function trainAdd(n, user, platform) {
-  if (!funOn("hypeOn") || n <= 0) return;
+  if (!hypeLive() || n <= 0) return;
   const x = S(), now = Date.now();
   if (!fun.train) {
     if (String(x.hypeStart || "any") === "twitch") return;
@@ -2405,7 +2407,7 @@ function trainEnd() {
   suitePush();
 }
 function trainTwitch(ev, e) {
-  if (!funOn("hypeOn") || !trainMode()) return;
+  if (!hypeLive() || !trainMode()) return;
   if (ev === "hypetrainend") { if (fun.train && String(S().hypeStart || "any") === "twitch") trainEnd(); return; }
   if (!fun.train) trainStart(0);
   fun.train.twitch = Math.max(fun.train.twitch, num(e.level) || 1);
@@ -2419,7 +2421,7 @@ function trainTwitch(ev, e) {
 
 // (the meter: chat and what happens fill it; each level reached, said and celebrated, and actions run)
 function hypeAdd(n, user, platform) {
-  if (!funOn("hypeOn") || n <= 0) return;
+  if (!hypeLive() || n <= 0) return;
   if (trainMode()) return trainAdd(n, user, platform);
   fun.hype += n;
   const lvl = Math.floor(fun.hype / hypeStep());

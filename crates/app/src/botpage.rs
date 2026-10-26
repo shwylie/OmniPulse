@@ -655,7 +655,6 @@ fn sheet_of(id: &str, cur: &Map<String, Value>) -> (String, Vec<Field>) {
                 f("suiteprev", "", mode, "", "hype", &theme_of(cur)),
                 theme_field(cur),
                 f("link", "", "Try it", if train { "Starts a test train." } else { "Adds a level's worth of hype." }, "", "call:suiteTest:hype"),
-                f("toggle", "hypeOn", "Turn it on", "", if on(cur, "hypeOn", true) { "true" } else { "false" }, ""),
                 f("chips", "hypeMode", "It works as", if train { "A hype train for every platform at once: subs, gifts, bits, Kicks, donations and Super Chats from Twitch, Kick and YouTube all keep it going. Twitch's own hype train starts it too." } else { "A meter that's always there: chat, follows, subs, bits, donations and raids fill it, and it cools slowly while things are quiet." }, mode, "train=A Hype Train|meter=An Always-On Meter"),
             ];
             if train {

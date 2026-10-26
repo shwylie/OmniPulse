@@ -3941,7 +3941,8 @@ component BotFieldRow inherits VerticalLayout {
             Text { text: root.f.label; color: Theme.text; font-weight: 700; font-size: 13px; }
             if root.f.note != "": Text { text: root.f.note; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
         }
-        VerticalLayout { alignment: center; IconButton { d: Icons.open; size: 34px; tint: Theme.accent; tip: "Open"; clicked => { root.act(root.f.extra); } } }
+        // (a web page: opened in your browser; anything else is done here, now)
+        VerticalLayout { alignment: center; IconButton { d: root.f.n == 1 ? Icons.open : Icons.play; size: 34px; tint: Theme.accent; tip: root.f.n == 1 ? "Open it in your browser" : "Do it now"; clicked => { root.act(root.f.extra); } } }
     }
     if root.f.kind == "toggle": Rectangle {
         height: tl.preferred-height;

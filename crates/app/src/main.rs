@@ -7046,7 +7046,10 @@ fn bot_fields(list: Vec<botpage::Field>) -> (Vec<BotField>, String) {
         // (a split page's column is narrow: a row of choices too wide for it, a dropdown, so none's cut off)
         let split = BOT_SHEET.with(|b| matches!(b.borrow().as_str(), "panels" | "cam")) || split_page;
         let wide = names.iter().map(|n| n.chars().count() as f32 * 7.4 + 34.0).sum::<f32>() > 440.0;
-        let (kind, n) = if x.kind == "chips" && split && wide { ("choose", ids.iter().position(|i| *i == x.value).map_or(-1, |i| i as i32)) } else { (x.kind, x.n) };
+        let (kind, n) = if x.kind == "chips" && split && wide { ("choose", ids.iter().position(|i| *i == x.value).map_or(-1, |i| i as i32)) }
+            // (a link row: 1 when it opens a web page, so it shows as one; an action here shows as done here)
+            else if x.kind == "link" { (x.kind, i32::from(x.extra.starts_with("url:") || x.extra.starts_with("http"))) }
+            else { (x.kind, x.n) };
         BotField { changed: !x.key.is_empty() && !x.key.contains(':') && pf_changed(&x.key), key: x.key.into(), kind: kind.into(), label: x.label.into(), note: x.note.into(), value: x.value.into(), extra: x.extra.into(), n, opts: strs(names), opt_ids: strs(ids), c1, c2 }
     }).collect();
     (rows, sig)
@@ -7470,12 +7473,16 @@ fn bot_act(shared: &Shared, act: &str) {
     if let Some(id) = act.strip_prefix("woff:") {
         let cur = bot_current(shared);
         let mut off: Vec<String> = cur.get("widgetsOff").and_then(|v| v.as_str()).unwrap_or("").split('|').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect();
-        let now_on = if let Some(i) = off.iter().position(|x| x == id) { off.remove(i); true } else { off.push(id.to_string()); false };
+        // (the hype meter switched off the old way (hypeOn): on again here is on)
+        let hype_was_off = id == "hype" && cur.get("hypeOn").and_then(|v| v.as_bool()) == Some(false);
+        if hype_was_off { bot_keep(shared, "hypeOn", serde_json::json!(true)); }
+        let now_on = if hype_was_off { off.retain(|x| x != id); true } else if let Some(i) = off.iter().position(|x| x == id) { off.remove(i); true } else { off.push(id.to_string()); false };
         let v = off.join("|");
         bot_keep(shared, "widgetsOff", serde_json::json!(v));
         if let Some(p) = plugrun::get(botpage::BOT) {
             let rt = shared.borrow().rt.clone();
-            rt.spawn(async move { let _ = p.call("applySettings", vec![serde_json::json!({ "widgetsOff": v })]).await; });
+            let vals = if hype_was_off { serde_json::json!({ "widgetsOff": v, "hypeOn": true }) } else { serde_json::json!({ "widgetsOff": v }) };
+            rt.spawn(async move { let _ = p.call("applySettings", vec![vals]).await; });
         }
         if let Some(ui) = shared.borrow().ui.upgrade() { let w = ui.global::<Wid>(); w.set_rev(w.get_rev() + 1); }
         say(if now_on { "Switched on." } else { "Switched off: its page in OBS shows nothing, and costs nothing." });
@@ -13868,7 +13875,12 @@ fn main() -> Result<(), slint::PlatformError> {
     {
         let w = ui.global::<Wid>();
         let s = shared.clone();
-        w.on_on(move |id, _| !bot_current(&s).get("widgetsOff").and_then(|v| v.as_str()).unwrap_or("").split('|').any(|x| x.trim() == id.as_str()));
+        w.on_on(move |id, _| {
+            let cur = bot_current(&s);
+            // (the hype meter's own switch from before (hypeOn) counts too: its tile's is the one now)
+            if id == "hype" && cur.get("hypeOn").and_then(|v| v.as_bool()) == Some(false) { return false; }
+            !cur.get("widgetsOff").and_then(|v| v.as_str()).unwrap_or("").split('|').any(|x| x.trim() == id.as_str())
+        });
         let d = ui.global::<Dnd>();
         d.on_payload(|what| slint::DataTransfer::from(what));
         let s = shared.clone();
