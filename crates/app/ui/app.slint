@@ -4661,10 +4661,10 @@ component BotPage inherits Rectangle {
             VerticalLayout {
                 width: 372px;
                 spacing: 10px;
-                alignment: start;
                 if root.sheet == "cam": VerticalLayout {
                     spacing: 6px;
                     alignment: start;
+                    vertical-stretch: 1;
                     Text { text: "Your webcam's area, with a made-up camera"; color: Theme.muted; font-size: 11px; }
                     CamPreview { }
                     Text { text: "It's where your camera is on your stream, with the parts round it. The frame and the parts change here as you change them."; color: Theme.muted; font-size: 11px; wrap: word-wrap; }
