@@ -1,7 +1,7 @@
 // OmniPulse, native: the window, title bar, sidebar, pages, queue and player bar.
 // Colours, sizes and icons follow the web app's dark theme (dist/style.css).
 
-import { ListView, Slider, LineEdit, ScrollView, Switch, Palette } from "std-widgets.slint";
+import { ListView, Slider, LineEdit, ScrollView, Switch, Palette, AboutSlint } from "std-widgets.slint";
 
 export global Theme {
     /// (tiles' own colours, set from the theme's accent: Suite's cards, each different)
@@ -6765,6 +6765,23 @@ export component AppWindow inherits Window {
                                             Text { text: "OmniPulse is made by one person, @shwylie. If it's made your streams or your listening better, you can say thanks with a coffee on Ko-fi."; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
                                         }
                                         VerticalLayout { alignment: center; Pill { label: "Contribute on Ko-fi"; on: true; clicked => { root.open-web("https://ko-fi.com/shwylie"); } } }
+                                    }
+                                }
+                                // (made with Slint: its own credit, as its licence asks)
+                                Card {
+                                    HorizontalLayout {
+                                        padding: 16px;
+                                        padding-top: 12px;
+                                        padding-bottom: 12px;
+                                        spacing: 12px;
+                                        VerticalLayout {
+                                            horizontal-stretch: 1;
+                                            alignment: center;
+                                            spacing: 2px;
+                                            HiTitle { text: "Made with Slint"; }
+                                            Text { text: "OmniPulse's window is drawn with Slint, a toolkit for apps. It's free to use, with this credit."; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
+                                        }
+                                        VerticalLayout { alignment: center; AboutSlint { width: 180px; } }
                                     }
                                 }
                             }
