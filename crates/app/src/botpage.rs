@@ -361,7 +361,7 @@ fn sheet_of(id: &str, cur: &Map<String, Value>) -> (String, Vec<Field>) {
                 f("toggle", "panelPowered", "Add a Powered by OmniPulse panel", "One more at the end, in the same look, with OmniPulse's logo, so viewers can find the app your stream runs on.", if on(cur, "panelPowered", true) { "true" } else { "false" }, ""),
                 f("chips", "panelLogoColours", "Its logo's colours", "", if s(cur, "panelLogoColours").is_empty() { "theme" } else { s(cur, "panelLogoColours") }, "theme=Your Colours|omnipulse=OmniPulse's Own|plain=Plain"),
                 f("head", "", "2. How they look", "", "", ""),
-                f("chips", "panelTheme", "Theme", "", &or("panelTheme", "dark"), "dark=Dark|glass=Glass|neon=Neon|comic=Comic|pastel=Pastel|y2k=Y2K|pixel=Pixel|gradient=Gradient|minimal=Minimal"),
+                f("chips", "panelTheme", "Theme", "", &or("panelTheme", "dark"), "dark=Dark|glass=Glass|neon=Neon|comic=Comic|pastel=Pastel|y2k=Y2K|pixel=Pixel|gradient=Gradient|minimal=Minimal|synthwave=Synthwave|paper=Paper Note|bauhaus=Bauhaus|holo=Holo Foil|terminal=Terminal|watercolour=Watercolour|cyber=Cyber|galaxy=Galaxy|ticket=Ticket"),
                 f("chips", "suiteColors", "Colours", "The same colours as your Suite widgets.", if s(cur, "suiteColors").is_empty() { "accent" } else { s(cur, "suiteColors") }, "accent=Yours|sunset=Sunset|ocean=Ocean|candy=Candy|mint=Mint|fire=Fire|gold=Gold|mono=Mono|custom=Your Own"),
             ];
             // (the logo's colours: only with its panel on)
@@ -422,14 +422,25 @@ fn sheet_of(id: &str, cur: &Map<String, Value>) -> (String, Vec<Field>) {
         }),
         "tips" => ("Tips and Donations".into(), {
             let mut v = vec![
-                f("note", "", "Tips and donations from Streamlabs or StreamElements show as alerts, and can start your actions. Set up the one you use (or both).", "", "", ""),
+                f("note", "", "Tips and donations from Streamlabs, StreamElements or Ko-fi show as alerts, and can start your actions. Set up the ones you use.", "", "", ""),
                 f("head", "", "Streamlabs", "", "", ""),
             ];
             v.extend(sheet_of("streamlabs", cur).1);
             v.push(f("head", "", "StreamElements", "", "", ""));
             v.extend(sheet_of("streamelements", cur).1);
+            v.push(f("head", "", "Ko-fi", "", "", ""));
+            v.extend(sheet_of("kofi", cur).1);
             v
         }),
+        // (Ko-fi: its webhook to the relay, a hook of your own; Ko-fi's token checked by the chatbot)
+        "kofi" => ("Ko-fi".into(), vec![
+            step(1, "Open Ko-fi's webhooks page (More, then API, then Webhooks).", "", "https://ko-fi.com/manage/webhooks", "Open Ko-fi's webhooks page"),
+            step(2, "Copy your webhook address below and paste it into Webhook URL there. Click Update.", "", "", ""),
+            f("addr", "", "Your webhook address", "It's yours alone. Don't show it on stream.", s(cur, "kofiUrl"), ""),
+            step(3, "On the same page, open Advanced, copy your Verification Token and paste it below.", "", "", ""),
+            f("password", "kofiToken", "Verification Token", "Tips, memberships and shop orders then show as alerts, and can start your actions. Leave it empty to turn this off.", s(cur, "kofiToken"), "Paste your Verification Token here"),
+            f("note", "", "To check it works, save this, then click Send Single Donation Test on Ko-fi's page.", "", "", ""),
+        ]),
         "streamelements" => ("StreamElements".into(), vec![
             step(1, "Open your StreamElements channels page and click Show Secrets.", "", "https://streamelements.com/dashboard/account/channels", "Open StreamElements' channels page"),
             step(2, "Copy your JWT Token and paste it below.", "", "", ""),
@@ -790,9 +801,9 @@ fn software(cur: &Map<String, Value>, st: &Value) -> (&'static str, String, &'st
 /// Tips and donations, in one tile: Streamlabs' and StreamElements'
 fn tips(cur: &Map<String, Value>, st: &Value) -> (&'static str, String, &'static str, String, String) {
     let up = |k: &str| st[k]["up"].as_bool().unwrap_or(false);
-    let apps = [("streamlabs", "Streamlabs", !s(cur, "streamlabsToken").is_empty()), ("streamelements", "StreamElements", !s(cur, "streamelementsToken").is_empty())];
+    let apps = [("streamlabs", "Streamlabs", !s(cur, "streamlabsToken").is_empty()), ("streamelements", "StreamElements", !s(cur, "streamelementsToken").is_empty()), ("kofi", "Ko-fi", !s(cur, "kofiToken").is_empty() && !s(cur, "kofiUrl").is_empty())];
     let set: Vec<_> = apps.iter().filter(|a| a.2).collect();
-    if set.is_empty() { return ("tips", "Tips and Donations".into(), "off", "Not set up".into(), "Streamlabs or StreamElements".into()); }
+    if set.is_empty() { return ("tips", "Tips and Donations".into(), "off", "Not set up".into(), "Streamlabs, StreamElements or Ko-fi".into()); }
     let line = set.iter().map(|a| format!("{}: {}", a.1, if up(a.0) { "listening" } else { "not connected" })).collect::<Vec<_>>().join(", ");
     ("tips", "Tips and Donations".into(), if set.iter().all(|a| up(a.0)) { "ok" } else { "warn" }, line, "As alerts, and for your actions".into())
 }

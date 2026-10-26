@@ -38,6 +38,10 @@ class_name = "Ratings"
 name = "REPORTS"
 class_name = "Reports"
 
+[[durable_objects.bindings]]
+name = "HOOKS"
+class_name = "Hooks"
+
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["Room"]
@@ -57,3 +61,8 @@ new_sqlite_classes = ["Ratings"]
 [[migrations]]
 tag = "v4"
 new_sqlite_classes = ["Reports"]
+
+# webhooks for the app (Ko-fi's tips): /api/hook/kofi/<id>, and its socket /api/hook/kofi/<id>/ws
+[[migrations]]
+tag = "v5"
+new_sqlite_classes = ["Hooks"]

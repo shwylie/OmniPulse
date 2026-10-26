@@ -4275,6 +4275,19 @@ fn mix_started(shared: &Shared) {
             _ => {}
         }
     }
+    // (the slowing of the one going out and the next one with it, kept going on a thread of its own as well:
+    // the same ramp mix_tick sets, so a busy window can't leave the two part-way, the next one stuck slowed)
+    if let Some(o) = out.clone() {
+        let (t, target, ramp) = (tempo.clone(), plan.out_tempo, plan.ramp_ms.max(1));
+        let began = std::time::Instant::now();
+        std::thread::spawn(move || loop {
+            let x = began.elapsed().as_millis() as f64 / ramp as f64;
+            o.set(omnipulse_mix::plan::out_ramp(target, x));
+            t.set(omnipulse_mix::plan::in_ramp(target, x));
+            if x >= 1.0 { break; }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        });
+    }
     MIX.with(|m| *m.borrow_mut() = Some(MixPhase::Mixing { plan, tempo, eased_from: None, ease_ms, out, began: std::time::Instant::now(), pitch }));
     MIXED_IN.with(|m| *m.borrow_mut() = Some((key, version)));
     CHANGE_HOW.with(|h| h.set("mixed"));
@@ -4514,6 +4527,28 @@ fn flow_node(list: &'static [flows::Kind], v: &serde_json::Value) -> FlowNode {
 
 fn flow_group(a: &serde_json::Value) -> String { a["group"].as_str().unwrap_or("").trim().to_string() }
 
+thread_local! {
+    /// the actions Ctrl+clicked (where they are in the list), for grouping several at once
+    static FLOW_MARKS: RefCell<Vec<usize>> = const { RefCell::new(Vec::new()) };
+}
+
+/// The groups there are: the actions', and the ones made with New Group that nothing's in yet (A to Z)
+fn flow_groups(list: &[serde_json::Value], prefs: &serde_json::Value) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    let made = prefs["flowGroups"].as_array().into_iter().flatten().filter_map(|g| g.as_str().map(String::from));
+    for g in list.iter().map(flow_group).chain(made) {
+        if !g.is_empty() && !out.iter().any(|x| x.eq_ignore_ascii_case(&g)) { out.push(g); }
+    }
+    out.sort_by_key(|g| g.to_lowercase());
+    out
+}
+
+/// The groups made with New Group that nothing's in yet
+fn flow_groups_empty(list: &[serde_json::Value], prefs: &serde_json::Value) -> Vec<String> {
+    prefs["flowGroups"].as_array().into_iter().flatten().filter_map(|g| g.as_str().map(String::from))
+        .filter(|g| !list.iter().any(|a| flow_group(a).eq_ignore_ascii_case(g))).collect()
+}
+
 /// The groups folded in the Actions list (kept, as Settings' other choices)
 fn flow_shut(prefs: &serde_json::Value) -> Vec<String> {
     prefs["flowFolded"].as_array().into_iter().flatten().filter_map(|g| g.as_str().map(String::from)).collect()
@@ -4525,6 +4560,8 @@ fn flows_sort(sel: i32, list: &mut Vec<serde_json::Value>) -> i32 {
     let mut keyed: Vec<(usize, serde_json::Value)> = std::mem::take(list).into_iter().enumerate().collect();
     keyed.sort_by_key(|(_, a)| { let g = flow_group(a); (g.is_empty(), g.to_lowercase()) });
     let at = keyed.iter().position(|(i, _)| *i as i32 == sel).map_or(-1, |p| p as i32);
+    // (the ones Ctrl+clicked: where they are now)
+    FLOW_MARKS.with(|m| { let mut m = m.borrow_mut(); *m = m.iter().filter_map(|&x| keyed.iter().position(|(i, _)| *i == x)).collect(); });
     *list = keyed.into_iter().map(|(_, a)| a).collect();
     at
 }
@@ -4543,9 +4580,17 @@ fn flow_items(list: &[serde_json::Value], shut: &[String], find: &str) -> Vec<Fl
         let head = grouped && count > 0 && fits(a) && last.as_deref().is_none_or(|l| !l.eq_ignore_ascii_case(&g));
         if head { last = Some(g.clone()); }
         let is_shut = find.is_empty() && shut.iter().any(|s| s.eq_ignore_ascii_case(&g));
-        out.push(FlowItem { name: a["name"].as_str().unwrap_or("").into(), summary: flows::summary(a).into(), on: a["on"].as_bool() != Some(false), group: g.into(), head, shown: fits(a) && !(grouped && is_shut), count: count as i32, shut: is_shut });
+        let marked = FLOW_MARKS.with(|m| m.borrow().contains(&out.len()));
+        out.push(FlowItem { name: a["name"].as_str().unwrap_or("").into(), summary: flows::summary(a).into(), on: a["on"].as_bool() != Some(false), group: g.into(), head, shown: fits(a) && !(grouped && is_shut), count: count as i32, shut: is_shut, marked });
     }
     out
+}
+
+/// The groups that are empty yet, as headings after the rest (after the actions, so each action's row is
+/// still where it is in the list)
+fn flow_items_empty(empty: &[String], find: &str) -> Vec<FlowItem> {
+    if !find.trim().is_empty() { return Vec::new(); }
+    empty.iter().map(|g| FlowItem { name: "".into(), summary: "".into(), on: true, group: g.as_str().into(), head: true, shown: false, count: 0, shut: false, marked: false }).collect()
 }
 
 /// The page drawn again: the list, and the picked one's flow
@@ -4555,7 +4600,22 @@ fn flows_paint(shared: &Shared) {
     let (list, sel) = FLOW.with(|f| { let mut f = f.borrow_mut(); let (mut list, sel) = (std::mem::take(&mut f.0), f.1); let sel = flows_sort(sel, &mut list); *f = (list, sel); f.clone() });
     let shut = flow_shut(&shared.borrow().web.prefs);
     let find = FLOW_FIND.with(|f| f.borrow().clone());
-    ui.set_flow_items(ModelRc::from(Rc::new(VecModel::from(flow_items(&list, &shut, &find)))));
+    // (New Group's ones, once an action's in them, are the actions' own)
+    let empty = flow_groups_empty(&list, &shared.borrow().web.prefs);
+    let made = shared.borrow().web.prefs["flowGroups"].as_array().map_or(0, |a| a.len());
+    if made != empty.len() { pref_put(shared, "flowGroups", serde_json::json!(empty)); }
+    let mut items = flow_items(&list, &shut, &find);
+    // (headings shown for them alone too, when nothing else is grouped)
+    if !empty.is_empty() && !items.iter().any(|i| i.head) {
+        let mut first = true;
+        for it in items.iter_mut() { if it.shown && first { it.head = true; first = false; } }
+        let n = items.iter().filter(|i| i.shown).count() as i32;
+        if let Some(h) = items.iter_mut().find(|i| i.head) { h.count = n; }
+    }
+    items.extend(flow_items_empty(&empty, &find));
+    ui.set_flow_items(ModelRc::from(Rc::new(VecModel::from(items))));
+    ui.set_flow_groups(ModelRc::from(Rc::new(VecModel::from(flow_groups(&list, &shared.borrow().web.prefs).into_iter().map(slint::SharedString::from).collect::<Vec<_>>()))));
+    ui.set_flow_marked(FLOW_MARKS.with(|m| m.borrow().len()) as i32);
     ui.set_flow_sel(sel);
     let Some(a) = (sel >= 0).then(|| list.get(sel as usize)).flatten() else { return };
     ui.set_flow_name(a["name"].as_str().unwrap_or("").into());
@@ -4627,13 +4687,55 @@ fn flows_save(shared: &Shared) {
     hotkeys_update(shared);
 }
 
+// ---------- file dialogs that don't hold up the window ----------
+// Windows' file dialog waits till it's closed. On the window's own thread everything waits with it (the music
+// goes on, but a Seamless Mix's tempo changes stop part-way), so each opens on a thread of its own instead.
+
+#[derive(Clone, Copy)]
+enum Ask { Open, Save, Folder }
+
+thread_local! {
+    /// a dialog open (one at a time, as when they held the window)
+    static PATH_ASKING: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    /// what to do with the path chosen, kept here (it isn't Send) till the dialog's closed
+    static ASK_THEN: RefCell<Option<Box<dyn FnOnce(std::path::PathBuf)>>> = const { RefCell::new(None) };
+    /// the path chosen, for the action run again (ask_path)
+    static PATH_ASKED: RefCell<Option<std::path::PathBuf>> = const { RefCell::new(None) };
+}
+
+/// The dialog opened on a thread of its own; once a path's chosen, `then` has it (nothing, if it's cancelled)
+fn ask_then(dlg: rfd::FileDialog, how: Ask, then: impl FnOnce(std::path::PathBuf) + 'static) {
+    if PATH_ASKING.with(|a| a.replace(true)) { return; }
+    ASK_THEN.with(|a| *a.borrow_mut() = Some(Box::new(then)));
+    std::thread::spawn(move || {
+        let p = match how { Ask::Open => dlg.pick_file(), Ask::Save => dlg.save_file(), Ask::Folder => dlg.pick_folder() };
+        let _ = slint::invoke_from_event_loop(move || {
+            PATH_ASKING.with(|a| a.set(false));
+            let then = ASK_THEN.with(|a| a.borrow_mut().take());
+            if let (Some(then), Some(p)) = (then, p) { then(p); }
+        });
+    });
+}
+
+/// As ask_then, for an action with more to do after its dialog: the first time, the dialog's opened and it's
+/// None (the action ends there); once a path's chosen the action's run again (`again`), and it's Some this time
+fn ask_path(dlg: rfd::FileDialog, how: Ask, again: impl FnOnce() + 'static) -> Option<std::path::PathBuf> {
+    if let Some(p) = PATH_ASKED.with(|a| a.borrow_mut().take()) { return Some(p); }
+    ask_then(dlg, how, move |p| {
+        PATH_ASKED.with(|a| *a.borrow_mut() = Some(p));
+        again();
+        PATH_ASKED.with(|a| a.borrow_mut().take());
+    });
+    None
+}
+
 /// Back Up: the actions, and the quotes, variables and points the chatbot keeps, in a file of their own
 fn flows_backup(shared: &Shared) {
     flows_save(shared);
     let list = FLOW.with(|f| f.borrow().0.clone());
     let kept = shared.borrow().web.prefs["pluginSettings"][BOT].clone();
     let file = format!("OmniPulse Stream Suite {}.omnibot", chrono_date());
-    let Some(path) = rfd::FileDialog::new().set_title("Back up the Stream Suite").set_file_name(&file).add_filter("OmniPulse Stream Suite backup", &["omnibot"]).save_file() else { return };
+    let Some(path) = ask_path(rfd::FileDialog::new().set_title("Back up the Stream Suite").set_file_name(&file).add_filter("OmniPulse Stream Suite backup", &["omnibot"]), Ask::Save, { let s = shared.clone(); move || flows_backup(&s) }) else { return };
     let note = match std::fs::write(&path, serde_json::to_string_pretty(&botimport::backup(&list, &kept)).unwrap_or_default()) {
         Ok(()) => format!("Backed up {} to {}.", plural(list.len(), "action", "actions"), path.file_name().and_then(|n| n.to_str()).unwrap_or("it")),
         Err(e) => format!("Couldn't back it up: {e}"),
@@ -4893,6 +4995,48 @@ fn flows_wire(ui: &AppWindow, shared: &Shared) {
             "clip-copy" => flow_clip(&s, false),
             "clip-cut" => flow_clip(&s, true),
             "clip-paste" => flow_clip_paste(&s),
+            // (a new group: named, and kept till an action's put in it; from the Group box, the open one put in it)
+            "group-new" | "group-new-here" => {
+                let here = act == "group-new-here";
+                let has = FLOW.with(|f| flow_groups(&f.borrow().0, &s.borrow().web.prefs));
+                ask_input(&s, "New Group", if here { "Its name. This action goes in it." } else { "Its name. Put actions in it from the Group box, or by right-clicking them." }, "Make It", "", "A name, like Alerts", Vec::new(), move |s, name| {
+                    let name = name.trim().to_string();
+                    if name.is_empty() { return; }
+                    if !has.iter().any(|g| g.eq_ignore_ascii_case(&name)) {
+                        let mut made = s.borrow().web.prefs["flowGroups"].as_array().cloned().unwrap_or_default();
+                        made.push(serde_json::json!(name));
+                        pref_put(s, "flowGroups", serde_json::Value::Array(made));
+                    }
+                    if here { flow_change(s, |a| a["group"] = serde_json::json!(name)); flows_save(s); }
+                    flows_paint(s);
+                });
+            }
+            // (an empty group taken away)
+            w if w.starts_with("group-drop:") => {
+                let g = w["group-drop:".len()..].to_string();
+                let made: Vec<serde_json::Value> = s.borrow().web.prefs["flowGroups"].as_array().cloned().unwrap_or_default().into_iter().filter(|x| !x.as_str().is_some_and(|x| x.eq_ignore_ascii_case(&g))).collect();
+                pref_put(&s, "flowGroups", serde_json::Value::Array(made));
+                flows_paint(&s);
+            }
+            // (right-clicked: it, or the ones picked with it, put in a group named, or taken out of theirs)
+            w if w.starts_with("group-marked:") || w.starts_with("ungroup:") => {
+                let out = w.starts_with("ungroup:");
+                let Ok(at) = w.split_once(':').map(|x| x.1).unwrap_or("").parse::<usize>() else { return };
+                let marks = FLOW_MARKS.with(|m| m.borrow().clone());
+                let which: Vec<usize> = if marks.contains(&at) { marks } else { vec![at] };
+                let put = move |s: &Shared, name: String| {
+                    flow_snap();
+                    FLOW.with(|f| { let mut f = f.borrow_mut(); for &i in &which { if let Some(a) = f.0.get_mut(i) { a["group"] = serde_json::json!(name.trim()); } } });
+                    FLOW_MARKS.with(|m| m.borrow_mut().clear());
+                    flows_paint(s);
+                    flows_save(s);
+                };
+                if out { return put(&s, String::new()); }
+                let (has, now) = FLOW.with(|f| { let f = f.borrow(); (flow_groups(&f.0, &s.borrow().web.prefs), f.0.get(at).map(flow_group).unwrap_or_default()) });
+                let n = FLOW_MARKS.with(|m| m.borrow().len()).max(1);
+                let (title, text) = if n > 1 && FLOW_MARKS.with(|m| m.borrow().contains(&at)) { (format!("Group {n} Actions"), "Type a group's name, or pick one. They all go in it.") } else { ("Put It in a Group".to_string(), "Type a group's name, or pick one.") };
+                ask_input(&s, &title, text, "Group", &now, "A name, like Alerts", has, move |s, name| { if !name.trim().is_empty() { put(s, name); } });
+            }
             // (Up and Down: the one before or after, in the list as it's shown)
             "key-up" | "key-down" => {
                 flows_save(&s);
@@ -4933,12 +5077,14 @@ fn flows_wire(ui: &AppWindow, shared: &Shared) {
             "backup" => flows_backup(&s),
             "queued" => { flow_change(&s, |a| { let on = a["queued"].as_bool() != Some(true); a["queued"] = serde_json::json!(on); }); flows_paint(&s); }
             "restore" => {
-                let Some(path) = rfd::FileDialog::new().set_title("A chatbot backup to restore")
+                let dlg = rfd::FileDialog::new().set_title("A chatbot backup to restore")
                     .add_filter("Chatbot backups", &["omnibot", "json", "sb", "txt", "zip", "miubackup", "miucommand"])
-                    .add_filter("OmniPulse", &["omnibot", "json"]).add_filter("Streamer.bot", &["sb", "txt", "zip", "json"]).add_filter("Mix It Up", &["miubackup", "miucommand"])
-                    .pick_file() else { return };
-                flow_snap();
-                flows_restored(&s, botimport::restore_file(&path));
+                    .add_filter("OmniPulse", &["omnibot", "json"]).add_filter("Streamer.bot", &["sb", "txt", "zip", "json"]).add_filter("Mix It Up", &["miubackup", "miucommand"]);
+                let s = s.clone();
+                ask_then(dlg, Ask::Open, move |path| {
+                    flow_snap();
+                    flows_restored(&s, botimport::restore_file(&path));
+                });
             }
             "paste" => {
                 let text = arboard::Clipboard::new().and_then(|mut c| c.get_text()).unwrap_or_default();
@@ -4964,7 +5110,22 @@ fn flows_wire(ui: &AppWindow, shared: &Shared) {
         }
     });
     let s = shared.clone();
-    ui.on_flow_pick(move |i| { flows_save(&s); FLOW.with(|f| f.borrow_mut().1 = i); flows_paint(&s); });
+    ui.on_flow_pick(move |i| { flows_save(&s); FLOW_MARKS.with(|m| m.borrow_mut().clear()); FLOW.with(|f| f.borrow_mut().1 = i); flows_paint(&s); });
+    // (Ctrl+click: picked as well, or let go; the one open counts, the first time)
+    let s = shared.clone();
+    ui.on_flow_mark(move |i| {
+        let i = i.max(0) as usize;
+        let sel = FLOW.with(|f| f.borrow().1);
+        FLOW_MARKS.with(|m| {
+            let mut m = m.borrow_mut();
+            if m.is_empty() && sel >= 0 && sel as usize != i { m.push(sel as usize); }
+            if let Some(p) = m.iter().position(|&x| x == i) { m.remove(p); } else { m.push(i); }
+        });
+        flows_paint(&s);
+    });
+    // (a group picked from the Group box's list: in it, and put where it goes in the list)
+    let s = shared.clone();
+    ui.on_flow_group_set(move |g| { flow_change(&s, |a| a["group"] = serde_json::json!(g.trim())); flows_paint(&s); flows_save(&s); });
     ui.on_reward_make({ let s = shared.clone(); move |f| reward_make(&s, f) });
     let s = shared.clone();
     ui.on_flow_new(move |k| {
@@ -6913,6 +7074,9 @@ fn bot_paint(shared: &Shared) {
         let (c1, c2) = botpage::suite_colours(&cur).map(|(a, b)| (look::Rgb::parse(&a).map(|c| c.slint()).unwrap_or(t.get_accent()), look::Rgb::parse(&b).map(|c| c.slint()).unwrap_or(t.get_accent_2()))).unwrap_or_else(|| { let m = theme_accents(&shared.borrow().web.prefs); (look::Rgb::parse(&m.0).map(|c| c.slint()).unwrap_or(t.get_accent()), look::Rgb::parse(&m.1).map(|c| c.slint()).unwrap_or(t.get_accent_2())) });
         g.set_c1(c1);
         g.set_c2(c2);
+        // (Terminal's type: the first colour if it's bright enough to read on black, as panels.html has it)
+        let lum = 0.299 * c1.red() as f32 + 0.587 * c1.green() as f32 + 0.114 * c1.blue() as f32;
+        g.set_term_ink(if lum / 255.0 > 0.35 { c1 } else { slint::Color::from_rgb_u8(0x5d, 0xff, 0x9c) });
     }
     // (the webcam overlay's preview: its layout, as the page lays it out)
     if sheet == "cam" {
@@ -7109,7 +7273,7 @@ fn bot_act(shared: &Shared, act: &str) {
             ("add", _) if items.len() < 16 => { items.push(String::new()); }
             // (a picture of yours for the row: chosen, and copied into the widget's own folder (its address there))
             ("pick", Some(i)) => {
-                let Some(p) = rfd::FileDialog::new().set_title("A picture for this panel's icon").add_filter("Pictures", &["png", "jpg", "jpeg", "gif", "webp"]).pick_file() else { return };
+                let Some(p) = ask_path(rfd::FileDialog::new().set_title("A picture for this panel's icon").add_filter("Pictures", &["png", "jpg", "jpeg", "gif", "webp"]), Ask::Open, { let (s, a) = (shared.clone(), act.to_string()); move || bot_act(&s, &a) }) else { return };
                 match omnipulse_core::widget::overlay_media(&p.to_string_lossy(), false) {
                     Ok(url) => { while items.len() <= i { items.push(String::new()); } items[i] = url; }
                     Err(e) => { say(&e); return; }
@@ -7149,7 +7313,7 @@ fn bot_act(shared: &Shared, act: &str) {
             Some(file)
         } else { None };
         if rest == "shot" || pasted.is_some() {
-            let p = match pasted { Some(p) => p, None => { let Some(p) = rfd::FileDialog::new().set_title("A screenshot of your game").add_filter("Pictures", &["png", "jpg", "jpeg", "webp"]).pick_file() else { return }; p } };
+            let p = match pasted { Some(p) => p, None => { let Some(p) = ask_path(rfd::FileDialog::new().set_title("A screenshot of your game").add_filter("Pictures", &["png", "jpg", "jpeg", "webp"]), Ask::Open, { let (s, a) = (shared.clone(), act.to_string()); move || bot_act(&s, &a) }) else { return }; p } };
             let file = p.to_string_lossy().to_string();
             let Ok((w, h)) = image::image_dimensions(&p) else { say("That picture couldn't be read."); return };
             match omnipulse_core::widget::overlay_media(&file, false) {
@@ -7201,6 +7365,11 @@ fn bot_act(shared: &Shared, act: &str) {
         return;
     }
     if let Some(id) = act.strip_prefix("sheet:") {
+        // (Ko-fi's: a webhook address of your own on the relay, made the first time)
+        if (id == "tips" || id == "kofi") && bot_current(shared).get("kofiUrl").and_then(|v| v.as_str()).unwrap_or("").is_empty() {
+            let hook: String = (0..24u64).map(|k| { use std::hash::{BuildHasher, Hasher}; let mut h = std::collections::hash_map::RandomState::new().build_hasher(); h.write_u64(k); h.write_u128(std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0)); char::from_digit((h.finish() % 36) as u32, 36).unwrap_or('0') }).collect();
+            bot_keep(shared, "kofiUrl", serde_json::json!(format!("{}/api/hook/kofi/{hook}", share::RELAY_URL)));
+        }
         BOT_SHEET.with(|b| *b.borrow_mut() = id.to_string());
         bot_sheet_crumbs(shared, id);
         return bot_paint(shared);
@@ -7890,7 +8059,7 @@ fn panel_press(shared: &Shared, key: &str) {
         return pf_paint(shared);
     }
     if let Some(id) = key.strip_prefix("socIcon:") {
-        let Some(path) = rfd::FileDialog::new().set_title("Choose an icon for this platform").add_filter("Pictures", &omnipulse_core::widget::IMAGE_EXTS).pick_file() else { return };
+        let Some(path) = ask_path(rfd::FileDialog::new().set_title("Choose an icon for this platform").add_filter("Pictures", &omnipulse_core::widget::IMAGE_EXTS), Ask::Open, { let (s, k) = (shared.clone(), key.to_string()); move || panel_press(&s, &k) }) else { return };
         match omnipulse_core::widget::alert_media_set(&format!("social-{id}"), "image", &path.display().to_string()) {
             Ok(file) => {
                 let all = socials::with(&shared.borrow().web.prefs, id, |m| { m.insert("icon".into(), serde_json::json!(file)); m.insert("iconAt".into(), serde_json::json!(now_ms())); });
@@ -8040,7 +8209,7 @@ fn panel_press(shared: &Shared, key: &str) {
         k if k.starts_with("alPic:") || k.starts_with("alSnd:") => {
             let (kind, image) = if let Some(x) = k.strip_prefix("alPic:") { (x.to_string(), true) } else { (k[6..].to_string(), false) };
             let (title, exts): (&str, &[&str]) = if image { ("Choose a picture or GIF for this alert", &["gif", "png", "webp", "jpg", "jpeg"]) } else { ("Choose a sound for this alert", &["mp3", "wav", "ogg", "m4a", "aac", "flac"]) };
-            let Some(path) = rfd::FileDialog::new().set_title(title).add_filter(if image { "Pictures" } else { "Sounds" }, exts).pick_file() else { return };
+            let Some(path) = ask_path(rfd::FileDialog::new().set_title(title).add_filter(if image { "Pictures" } else { "Sounds" }, exts), Ask::Open, { let (s, k) = (shared.clone(), key.to_string()); move || panel_press(&s, &k) }) else { return };
             match omnipulse_core::widget::alert_media_set(&kind, if image { "image" } else { "sound" }, &path.display().to_string()) {
                 Ok(file) => {
                     let key = if image { "alertImages" } else { "alertSounds" };
@@ -8085,7 +8254,7 @@ fn panel_press(shared: &Shared, key: &str) {
             let mut list: Vec<serde_json::Value> = all.get(kind).and_then(|x| x.as_array()).cloned().unwrap_or_default();
             while list.len() <= n { list.push(serde_json::Value::Null); }
             let note = if add {
-                let Some(path) = rfd::FileDialog::new().set_title("Choose a picture or GIF for this alert's collage").add_filter("Pictures", &["gif", "png", "webp", "jpg", "jpeg"]).pick_file() else { return };
+                let Some(path) = ask_path(rfd::FileDialog::new().set_title("Choose a picture or GIF for this alert's collage").add_filter("Pictures", &["gif", "png", "webp", "jpg", "jpeg"]), Ask::Open, { let (s, k) = (shared.clone(), key.to_string()); move || panel_press(&s, &k) }) else { return };
                 match omnipulse_core::widget::alert_media_set(&file_kind, "collage", &path.display().to_string()) {
                     Ok(file) => { list[n] = serde_json::json!({ "name": file, "at": now_ms() }); format!("{file} is in its collage.") }
                     Err(e) => { if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_status(e.into()); } return; }
@@ -8133,7 +8302,7 @@ fn panel_press(shared: &Shared, key: &str) {
             "Back to how it was.".to_string()
         }
         "plugFile" => {
-            let Some(path) = rfd::FileDialog::new().set_title("A plugin's manifest").add_filter("Plugin manifest", &["json"]).pick_file() else { return };
+            let Some(path) = ask_path(rfd::FileDialog::new().set_title("A plugin's manifest").add_filter("Plugin manifest", &["json"]), Ask::Open, { let (s, k) = (shared.clone(), key.to_string()); move || panel_press(&s, &k) }) else { return };
             panel_put(shared, "plugSource", serde_json::json!(path.display().to_string()));
             return panel_press(shared, "plugCheck");
         }
@@ -9359,7 +9528,7 @@ fn pl_export(shared: &Shared, p: sources::Playlist, kind: &str) {
     let safe = if safe.trim().is_empty() { "Playlist".to_string() } else { safe.trim().to_string() };
     let dlg = rfd::FileDialog::new().set_title(format!("Export {}", p.title)).set_file_name(format!("{safe}.{}", if kind == "csv" { "csv" } else { "m3u8" }));
     let dlg = if kind == "csv" { dlg.add_filter("CSV", &["csv"]) } else { dlg.add_filter("M3U playlist", &["m3u8", "m3u"]) };
-    let Some(dest) = dlg.save_file() else { return };
+    let Some(dest) = ask_path(dlg, Ask::Save, { let (s, p, k) = (shared.clone(), p.clone(), kind.to_string()); move || pl_export(&s, p, &k) }) else { return };
     let (rt, weak, prefs) = { let a = shared.borrow(); (a.rt.clone(), a.ui.clone(), a.web.prefs.clone()) };
     if let Some(ui) = weak.upgrade() { ui.set_status("Exporting...".into()); }
     let csv = kind == "csv";
@@ -9430,8 +9599,8 @@ async fn entry_track(e: &omnipulse_core::playlistfile::Entry, files: &[Track], c
 }
 
 fn pl_import(shared: &Shared) {
-    let Some(src) = rfd::FileDialog::new().set_title("Import a playlist").add_filter("Playlist", &["m3u", "m3u8", "csv", "txt"]).pick_file() else { return };
-    pl_import_file(shared, src);
+    let s = shared.clone();
+    ask_then(rfd::FileDialog::new().set_title("Import a playlist").add_filter("Playlist", &["m3u", "m3u8", "csv", "txt"]), Ask::Open, move |src| pl_import_file(&s, src));
 }
 
 fn pl_import_file(shared: &Shared, src: std::path::PathBuf) {
@@ -10146,9 +10315,24 @@ fn ask(shared: &Shared, title: &str, text: &str, ok: &str, then: impl FnOnce(&Sh
 }
 
 fn ask_answer_ui(shared: &Shared, ok: bool) {
-    if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_ask_open(false); }
+    if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_ask_open(false); ui.set_ask_input_on(false); }
     let then = ASKED.with(|a| a.borrow_mut().take());
     if ok { if let Some(f) = then { f(shared); } }
+}
+
+/// Asks for a name (a box to type it in, filled with `now`, and ones there are to pick from); OK gives `then`
+/// what's typed. The self-test takes what's filled in.
+fn ask_input(shared: &Shared, title: &str, text: &str, ok: &str, now: &str, hint: &str, options: Vec<String>, then: impl FnOnce(&Shared, String) + 'static) {
+    if std::env::var_os("OMNIPULSE_SELFTEST").is_some() { return then(shared, now.to_string()); }
+    let Some(ui) = shared.borrow().ui.upgrade() else { return };
+    ui.set_ask_input(now.into());
+    ui.set_ask_input_hint(hint.into());
+    ui.set_ask_input_options(ModelRc::from(Rc::new(VecModel::from(options.into_iter().map(slint::SharedString::from).collect::<Vec<_>>()))));
+    ui.set_ask_input_on(true);
+    ask(shared, title, text, ok, move |s| {
+        let typed = s.borrow().ui.upgrade().map(|u| u.get_ask_input().to_string()).unwrap_or_default();
+        then(s, typed);
+    });
 }
 
 // ---------- sharing a playlist (crate::share) ----------
@@ -10721,6 +10905,23 @@ fn eq_widget(p: &serde_json::Value) -> bool {
         && (p["widgetDesign"].as_str() == Some("equaliser") || integrations::outputs_of(p, "widget").iter().any(|o| o.get("widgetDesign").and_then(|d| d.as_str()) == Some("equaliser")))
 }
 
+thread_local! {
+    /// (another app full screen, as last looked: looked at once a second at most)
+    static FULL_OTHER: std::cell::Cell<(bool, Option<std::time::Instant>)> = const { std::cell::Cell::new((false, None)) };
+}
+
+/// A game or anything else full screen, in front (looked at once a second at most)
+fn other_full_screen() -> bool {
+    let (was, at) = FULL_OTHER.with(|f| f.get());
+    if at.is_some_and(|t| t.elapsed() < std::time::Duration::from_secs(1)) { return was; }
+    #[cfg(windows)]
+    let now = desktop::dock::other_full_screen();
+    #[cfg(not(windows))]
+    let now = false;
+    FULL_OTHER.with(|f| f.set((now, Some(std::time::Instant::now()))));
+    now
+}
+
 fn viz_update(shared: &Shared, ui: &AppWindow) {
     let (style, on_now, on_bar, on_widget, on_stream) = {
         let p = &shared.borrow().web.prefs;
@@ -10730,7 +10931,11 @@ fn viz_update(shared: &Shared, ui: &AppWindow) {
     if ui.get_viz_style() != style.as_str() { ui.set_viz_style(style.clone().into()); }
     if ui.get_viz_now() != on_now { ui.set_viz_now(on_now); }
     if ui.get_viz_bar() != on_bar { ui.set_viz_bar(on_bar); }
-    // (shown somewhere: full screen, Now Playing open, or the player's; and playing, in sight)
+    let game_pause = shared.borrow().web.prefs["vizGamePause"].as_bool() != Some(false);
+    if ui.get_viz_game_pause() != game_pause { ui.set_viz_game_pause(game_pause); }
+    // (shown somewhere: full screen, Now Playing open, or the player's; and playing, in sight; not while a game's
+    // full screen, unless that's switched off: the stream's levels go on either way)
+    let gaming = game_pause && !ui.get_viz_full() && other_full_screen();
     let want = {
         let a = shared.borrow();
         let shown = ui.get_viz_full() || (on_now && a.page == "now") || on_bar;
@@ -10739,7 +10944,7 @@ fn viz_update(shared: &Shared, ui: &AppWindow) {
         // (the taskbar widget's Visualiser design: its bars, whatever the app's style)
         let tb_viz = a.web.prefs["taskbarWidget"].as_bool() == Some(true) && a.web.prefs["tbDesign"].as_str() == Some("viz");
         let test = VIZ_TEST.load(std::sync::atomic::Ordering::Relaxed);
-        (((style != "off" && (in_sight || on_widget)) || on_stream || tb_viz) && a.loaded && !a.engine.is_paused()) || (test && style != "off")
+        (((style != "off" && (in_sight || on_widget) && !gaming) || on_stream || (tb_viz && !gaming)) && a.loaded && !a.engine.is_paused()) || (test && style != "off")
     };
     let running = VIZ.with(|v| v.borrow().is_some());
     if want == running { return; }
@@ -11513,7 +11718,7 @@ fn backup_make(shared: &Shared) {
         let (dd, mm) = (doy - (153 * mp + 2) / 5 + 1, if mp < 10 { mp + 3 } else { mp - 9 });
         format!("{}-{mm:02}-{dd:02}", yoe + era * 400 + i64::from(mm <= 2))
     };
-    let Some(dest) = rfd::FileDialog::new().set_title("Back up OmniPulse").set_file_name(format!("OmniPulse Backup {day}.zip")).add_filter("OmniPulse backup", &["zip"]).save_file() else { return };
+    let Some(dest) = ask_path(rfd::FileDialog::new().set_title("Back up OmniPulse").set_file_name(format!("OmniPulse Backup {day}.zip")).add_filter("OmniPulse backup", &["zip"]), Ask::Save, { let s = shared.clone(); move || backup_make(&s) }) else { return };
     let msg = match omnipulse_core::backup::create(&dest.to_string_lossy(), &backup_web()) {
         Ok(n) => format!("Backed up: your settings and {n} {}.", if n == 1 { "file" } else { "files" }),
         Err(e) => format!("Couldn't back up: {e}"),
@@ -11522,7 +11727,7 @@ fn backup_make(shared: &Shared) {
 }
 
 fn backup_restore(shared: &Shared) {
-    let Some(src) = rfd::FileDialog::new().set_title("Restore an OmniPulse backup").add_filter("OmniPulse backup", &["zip"]).pick_file() else { return };
+    let Some(src) = ask_path(rfd::FileDialog::new().set_title("Restore an OmniPulse backup").add_filter("OmniPulse backup", &["zip"]), Ask::Open, { let s = shared.clone(); move || backup_restore(&s) }) else { return };
     ask(shared, "Restore this backup?", "Your settings, favourites, playlists, stats and alerts are replaced with the backup's, and OmniPulse starts again.", "Restore", move |shared| backup_restore_from(shared, src));
 }
 
@@ -12776,10 +12981,12 @@ fn main() -> Result<(), slint::PlatformError> {
     folders_paint(&shared);
     let s = shared.clone();
     ui.on_folder_add(move || {
-        let Some(dir) = rfd::FileDialog::new().set_title("Add a music folder").pick_folder() else { return };
-        let mut folders = omnipulse_core::local::local_folders();
-        folders.push(dir.to_string_lossy().into_owned());
-        folders_set(&s, folders);
+        let s = s.clone();
+        ask_then(rfd::FileDialog::new().set_title("Add a music folder"), Ask::Folder, move |dir| {
+            let mut folders = omnipulse_core::local::local_folders();
+            folders.push(dir.to_string_lossy().into_owned());
+            folders_set(&s, folders);
+        });
     });
     let s = shared.clone();
     ui.on_folder_remove(move |i| {
@@ -12947,7 +13154,7 @@ fn main() -> Result<(), slint::PlatformError> {
     });
     let s = shared.clone();
     ui.on_viz_place(move |place, on| {
-        let key = match place.as_str() { "now" => Some("vizNow"), "bar" => Some("vizBar"), _ => None };
+        let key = match place.as_str() { "now" => Some("vizNow"), "bar" => Some("vizBar"), "game" => Some("vizGamePause"), _ => None };
         if let Some(k) = key {
             if let Some(o) = s.borrow_mut().web.prefs.as_object_mut() { o.insert(k.into(), serde_json::json!(on)); }
             if std::env::var_os("OMNIPULSE_SELFTEST").is_none() { webstate::save_pref(k, serde_json::json!(on)); }
@@ -13136,15 +13343,17 @@ fn main() -> Result<(), slint::PlatformError> {
     let s = shared.clone();
     ui.on_ks_file(move || {
         let Some(plat) = KS.with(|k| k.borrow().as_ref().map(|x| x.0.clone())) else { return };
-        let Some(path) = rfd::FileDialog::new().set_title("A file with your keys in it").pick_file() else { return };
-        let text = std::fs::metadata(&path).ok().filter(|m| m.len() < 65536).and_then(|_| std::fs::read_to_string(&path).ok()).unwrap_or_default();
-        let found = keysetup::keys_from(&plat, &text);
-        if found.is_empty() {
-            let name = keysetup::setup(&plat).map(|x| x.name).unwrap_or("it");
-            if let Some(ui) = s.borrow().ui.upgrade() { ui.set_ks_note(format!("That file has no keys for {name} in it.").into()); }
-            return;
-        }
-        ks_take(&s, found);
+        let s = s.clone();
+        ask_then(rfd::FileDialog::new().set_title("A file with your keys in it"), Ask::Open, move |path| {
+            let text = std::fs::metadata(&path).ok().filter(|m| m.len() < 65536).and_then(|_| std::fs::read_to_string(&path).ok()).unwrap_or_default();
+            let found = keysetup::keys_from(&plat, &text);
+            if found.is_empty() {
+                let name = keysetup::setup(&plat).map(|x| x.name).unwrap_or("it");
+                if let Some(ui) = s.borrow().ui.upgrade() { ui.set_ks_note(format!("That file has no keys for {name} in it.").into()); }
+                return;
+            }
+            ks_take(&s, found);
+        });
     });
     let s = shared.clone();
     ui.on_account_settings(move |p| {

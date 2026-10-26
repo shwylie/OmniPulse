@@ -2763,7 +2763,7 @@ async function dockDo(cmd) {
   throw new Error("a dock can't " + cmd.do);
 }
 
-// ---------- donations: Streamlabs' and StreamElements' own sockets ----------
+// ---------- donations: Streamlabs' and StreamElements' own sockets, and Ko-fi's webhook (through the relay) ----------
 let tipSockets = [];
 
 // A donation, from whichever: its alert (if alerts are on) and A Donation's actions
@@ -2813,6 +2813,31 @@ function tipConnect(only) {
     const x = m.data || {}, t = x.donation || x;
     onTip((t.user && (t.user.username || t.user.name)) || t.username || t.name || "Someone", t.amount, t.currency, t.message, "streamelements");
   }, "streamelements");
+  // Ko-fi: its webhook's deliveries, from the relay's socket for your hook; Ko-fi's Verification Token checked
+  const kf = String(S().kofiUrl || "").trim(), kt = String(S().kofiToken || "").trim();
+  const kofiKeep = (n) => { if (n == null) return; S().kofiLast = String(n); OmniPulse.app.saveSettings({ kofiLast: String(n) }).catch(() => {}); };
+  if (kf && kt && (!only || only === "kofi")) tipSocket(kf.replace(/^http/, "ws") + "/ws", (s) => {
+    // (the ones missed while it was off, after the last it had; the first time, none)
+    s.send(JSON.stringify({ after: S().kofiLast ? num(S().kofiLast) : "now" }));
+  }, (s, d, pings) => {
+    let m;
+    try { m = JSON.parse(d); } catch (e) { return; }
+    if (m.caught) { pings(30000); if (!S().kofiLast) kofiKeep(m.n); return; }
+    if (!m.data) return;
+    kofiKeep(m.n);
+    let k;
+    try { k = JSON.parse(m.data); } catch (e) { return; }
+    if (String(k.verification_token || "") !== kt) { OmniPulse.app.say("A Ko-fi tip came in with a different Verification Token, so it wasn't shown. Check the token in Tips and Donations.").catch(() => {}); return; }
+    // (one from long ago (the app was off): counted, not alerted)
+    if (Date.now() - num(m.got) > 10 * 60000) return;
+    // (a private one: no name or message shown, as Ko-fi asks)
+    const open = k.is_public !== false, msg = open ? String(k.message || "") : "";
+    const kind = String(k.type || "Donation");
+    const what = kind === "Subscription" ? (k.is_first_subscription_payment === false ? "Renewed their Ko-fi membership" : "Joined on Ko-fi" + (k.tier_name ? " (" + k.tier_name + ")" : "")) + (msg ? ": " + msg : "")
+      : kind === "Shop Order" ? "Bought from the Ko-fi shop" + (msg ? ": " + msg : "")
+      : kind === "Commission" ? "Commissioned you on Ko-fi" + (msg ? ": " + msg : "") : msg;
+    onTip(open ? String(k.from_name || "Someone") : "Someone", k.amount, k.currency, what, "kofi");
+  }, "kofi");
 }
 
 function stopAll() {
@@ -2920,6 +2945,7 @@ OmniPulse.register({
       slobs: { on: yes(S().slobsOn), up: !!slobsReady },
       streamlabs: { on: !!String(S().streamlabsToken || "").trim(), up: tip("streamlabs") },
       streamelements: { on: !!String(S().streamelementsToken || "").trim(), up: tip("streamelements") },
+      kofi: { on: !!String(S().kofiUrl || "").trim() && !!String(S().kofiToken || "").trim(), up: tip("kofi") },
       counts, recent: recent.slice(-12).reverse(), actions: { all: all.length, on: live.length },
     };
   },

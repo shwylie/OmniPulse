@@ -122,6 +122,7 @@ export global PanelLook {
     in-out property <bool> icons;
     in-out property <color> c1;
     in-out property <color> c2;
+    in-out property <color> term-ink: #5dff9c;
 }
 /// A webcam overlay's piece, for its preview: the camera, or a part (fractions of the canvas)
 export struct CamRect { id: string, label: string, x: float, y: float, w: float, h: float }
@@ -170,7 +171,7 @@ export struct MenuEntry { cat: string, label: string, head: bool, hit: bool }
 /// shown unless its group is folded or it isn't what's searched for
 /// A Channel Points reward to make (Twitch, Kick or both), and whether an action's made for it
 export struct RewardForm { title: string, cost: string, prompt: string, input: bool, cooldown: string, per-stream: string, per-user: string, skip: bool, where: string, colour: color, action: bool }
-export struct FlowItem { name: string, summary: string, on: bool, group: string, head: bool, shown: bool, count: int, shut: bool }
+export struct FlowItem { name: string, summary: string, on: bool, group: string, head: bool, shown: bool, count: int, shut: bool, marked: bool }
 /// A slice of the Ring visualiser: its outline, and where it is from the foot (0, the bass) to the top (1)
 export struct RingPiece { d: string, f: float }
 
@@ -2811,21 +2812,126 @@ component PanelPreview inherits Rectangle {
             alignment: start;
             pi := Rectangle {
                 property <string> th: PanelLook.theme;
-                property <bool> light: self.th == "comic" || self.th == "pastel" || self.th == "y2k";
-                property <color> ink: self.light ? (self.th == "pastel" ? #3a2a4a : #2b1b40) : #ffffff;
+                property <bool> light: self.th == "comic" || self.th == "pastel" || self.th == "y2k" || self.th == "paper" || self.th == "bauhaus" || self.th == "holo" || self.th == "watercolour" || self.th == "ticket";
+                property <color> ink: self.th == "pastel" ? #3a2a4a : self.th == "paper" ? #26324a : self.th == "bauhaus" ? #111111 : self.th == "holo" ? #2a1f45 : self.th == "watercolour" ? #2b2233
+                    : self.th == "ticket" ? #3b2410 : self.th == "terminal" ? PanelLook.term-ink : self.light ? #2b1b40 : #ffffff;
+                // (room at the top for a title bar; room on the right for its art; its type)
+                property <length> top: self.th == "y2k" ? 22px : self.th == "terminal" ? 18px : 0px;
+                property <length> keep: self.th == "ticket" ? 66px : self.th == "bauhaus" ? 104px : self.th == "synthwave" ? 50px : 0px;
+                property <string> ff: self.th == "pixel" || self.th == "terminal" ? "Cascadia Mono" : self.th == "paper" ? "Ink Free" : self.th == "bauhaus" || self.th == "cyber" || self.th == "ticket" ? "Bahnschrift" : self.th == "watercolour" ? "Georgia" : "";
+                property <bool> upper: self.th == "pixel" || self.th == "bauhaus" || self.th == "cyber";
+                property <string> shown-title: (self.th == "terminal" ? "> " : "") + (self.upper ? p.title.to-uppercase() : p.title) + (self.th == "terminal" ? " \u{2588}" : "");
                 width: 320px;
                 // (as tall as its words, up to Twitch's 600)
-                height: p.body ? min(600px, 74px + p.lines * 17px + 18px + (self.th == "y2k" ? 22px : 0px)) : root.ph;
+                height: p.body ? min(600px, 74px + p.lines * 17px + 18px + self.top) : root.ph;
                 clip: true;
-                border-radius: PanelLook.shape == "square" || self.th == "pixel" ? 0px : PanelLook.shape == "pill" && !p.body ? self.height / 2 : 14px;
+                border-radius: PanelLook.shape == "square" || self.th == "pixel" || self.th == "cyber" ? 0px : self.th == "paper" ? 3px : self.th == "bauhaus" ? 6px : self.th == "terminal" || self.th == "ticket" ? 8px : PanelLook.shape == "pill" && !p.body ? self.height / 2 : 14px;
                 background: self.th == "comic" || self.th == "y2k" ? (self.th == "y2k" ? #fdf6ff : #ffffff) : self.th == "pastel" ? #fff6fb : self.th == "glass" ? #ffffff29 : self.th == "neon" ? #080614f0
-                    : self.th == "pixel" ? #1b1030 : self.th == "gradient" ? PanelLook.c1.mix(PanelLook.c2, 0.5) : self.th == "minimal" ? transparent : #14111f;
-                border-width: self.th == "comic" ? 3px : self.th == "y2k" || self.th == "neon" ? 2px : self.th == "pastel" || self.th == "pixel" ? 3px : self.th == "glass" ? 1px : 0px;
-                border-color: self.th == "comic" || self.th == "y2k" ? #2b1b40 : self.th == "pastel" ? PanelLook.c1.mix(#ffffff, 0.55) : self.th == "pixel" ? #f4f0ff : self.th == "neon" ? PanelLook.c1 : #ffffff66;
+                    : self.th == "pixel" ? #1b1030 : self.th == "gradient" ? PanelLook.c1.mix(PanelLook.c2, 0.5) : self.th == "minimal" || self.th == "cyber" ? transparent
+                    : self.th == "synthwave" ? #12021f : self.th == "paper" ? #fbf6e9 : self.th == "bauhaus" ? #f2ede4 : self.th == "holo" ? #e9e0ff : self.th == "terminal" ? #0a0f0c
+                    : self.th == "watercolour" ? #fffdf8 : self.th == "galaxy" ? #05030f : self.th == "ticket" ? #ffe9c7 : #14111f;
+                border-width: self.th == "comic" ? 3px : self.th == "y2k" || self.th == "neon" ? 2px : self.th == "pastel" || self.th == "pixel" ? 3px : self.th == "glass" || self.th == "holo" ? 1.5px : self.th == "terminal" ? 1px : 0px;
+                border-color: self.th == "comic" || self.th == "y2k" ? #2b1b40 : self.th == "pastel" ? PanelLook.c1.mix(#ffffff, 0.55) : self.th == "pixel" ? #f4f0ff : self.th == "neon" ? PanelLook.c1 : self.th == "holo" ? #ffffffe6 : self.th == "terminal" ? #ffffff1f : #ffffff66;
                 drop-shadow-blur: self.th == "neon" ? 12px : 0px;
                 drop-shadow-offset-x: self.th == "comic" || self.th == "y2k" ? 4px : 0px;
                 drop-shadow-offset-y: self.th == "comic" || self.th == "y2k" ? 4px : 0px;
                 drop-shadow-color: self.th == "neon" ? PanelLook.c1 : #111111;
+                // (Synthwave: a striped sun setting on a grid)
+                if pi.th == "synthwave": Rectangle {
+                    property <length> hz: p.body ? parent.height - 24px : parent.height * 0.7;
+                    property <length> sr: p.body ? 24px : min(30px, self.hz - 10px);
+                    Rectangle { y: 0; height: parent.hz; background: @linear-gradient(180deg, #120326 0%, #4a0d67 100%); }
+                    Rectangle {
+                        x: parent.width - 46px - parent.sr;
+                        y: parent.hz - parent.sr;
+                        width: parent.sr * 2;
+                        height: parent.sr;
+                        clip: true;
+                        Rectangle { y: 0; height: parent.width; border-radius: parent.width / 2; background: @linear-gradient(180deg, #ffd36e 0%, PanelLook.c2 100%); }
+                        for k in 4: Rectangle { y: parent.height * (0.5 + k * 0.12); height: 1.5px + k * 1px; background: #3b0a55; }
+                    }
+                    Path { y: parent.hz; width: parent.width; height: parent.height - parent.hz; viewbox-width: 320; viewbox-height: 100; commands: "M 0 6.5 L 320 6.5 M 0 21.1 L 320 21.1 M 0 42.0 L 320 42.0 M 0 68.4 L 320 68.4 M 0 100.0 L 320 100.0 M 211 0 L -302 100 M 218 0 L -238 100 M 225 0 L -174 100 M 232 0 L -110 100 M 239 0 L -46 100 M 246 0 L 18 100 M 253 0 L 82 100 M 260 0 L 146 100 M 267 0 L 210 100 M 274 0 L 274 100 M 281 0 L 338 100 M 288 0 L 402 100 M 295 0 L 466 100 M 302 0 L 530 100 M 309 0 L 594 100 M 316 0 L 658 100 M 323 0 L 722 100 M 330 0 L 786 100 M 337 0 L 850 100"; stroke: PanelLook.c1.with-alpha(0.85); stroke-width: 1px; fill: transparent; }
+                }
+                // (Paper: a ruled note, taped on)
+                if pi.th == "paper": Rectangle {
+                    for k in 34: Rectangle { y: 28px + k * 18px; height: 1px; background: #c9d8ef; visible: self.y < parent.height - 6px; }
+                    Rectangle { x: 14px; width: 1px; background: #eaa3a3; }
+                    Rectangle { x: 24px; y: 1px; width: 62px; height: 15px; background: PanelLook.c1.with-alpha(0.62); transform-rotation: -10deg; }
+                    Rectangle { x: parent.width - 62px; y: 2px; width: 54px; height: 15px; background: PanelLook.c2.with-alpha(0.62); transform-rotation: 9deg; }
+                }
+                // (Bauhaus: shapes of your colours, and a black bar)
+                if pi.th == "bauhaus": Rectangle {
+                    property <length> hh: p.body ? 74px : parent.height;
+                    property <length> s: min(44px, self.hh * 0.44);
+                    Rectangle { x: parent.width - 38px - parent.s; y: parent.hh / 2 - parent.s * 1.3; width: parent.s * 2; height: self.width; border-radius: self.width / 2; background: PanelLook.c1; }
+                    Path { x: parent.width - 106px; y: parent.hh / 2 - parent.s * 0.55; width: 72px; height: parent.s * 1.65; viewbox-width: 72; viewbox-height: 100; commands: "M 0 100 L 36 0 L 72 100 Z"; fill: PanelLook.c2; stroke-width: 0; }
+                    Rectangle { x: parent.width - 118px; y: 13px; width: 7px; height: parent.hh - 26px; background: #111111; }
+                    Rectangle { x: 3px; width: 6px; background: #111111; }
+                }
+                // (Holo: foil that shines)
+                if pi.th == "holo": Rectangle {
+                    Rectangle { background: @linear-gradient(120deg, #ffd1f2 0%, #c7f0ff 25%, #fff6c2 50%, #d9c7ff 75%, #b8fff0 100%); }
+                    Rectangle { background: @linear-gradient(90deg, PanelLook.c1 0%, PanelLook.c2 100%); opacity: 0.2; }
+                    Rectangle { background: @linear-gradient(110deg, #ffffff00 25%, #ffffffa6 45%, #ffffff00 65%); }
+                }
+                // (Terminal: a window of glowing type)
+                if pi.th == "terminal": Rectangle {
+                    y: 0;
+                    height: 18px;
+                    background: #1c2420;
+                    Rectangle { x: 9px; y: 5px; width: 7px; height: 7px; background: PanelLook.c1; }
+                    Rectangle { x: 22px; y: 5px; width: 7px; height: 7px; background: PanelLook.c2; }
+                    Rectangle { x: 35px; y: 5px; width: 7px; height: 7px; background: #ffffff59; }
+                    Text { text: "~/" + p.title.to-lowercase(); color: #ffffff73; font-size: 10px; font-family: "Cascadia Mono"; horizontal-alignment: center; vertical-alignment: center; }
+                }
+                // (Watercolour: soft washes of your colours)
+                if pi.th == "watercolour": Rectangle {
+                    for b in [{ x: 0.15, y: 0.3, r: 70, c: 0 }, { x: 0.72, y: 0.8, r: 90, c: 1 }, { x: 0.9, y: 0.12, r: 60, c: 0 }, { x: 0.45, y: 0.6, r: 55, c: 1 }, { x: 0.3, y: 0.95, r: 65, c: 0 }]: Rectangle {
+                        x: parent.width * Math.mod(b.x + i * 0.37, 1.0) - b.r * 1px;
+                        y: parent.height * b.y - b.r * 1px;
+                        width: b.r * 2px;
+                        height: self.width;
+                        background: @radial-gradient(circle, (b.c == 0 ? PanelLook.c1 : PanelLook.c2).with-alpha(0.42) 0%, (b.c == 0 ? PanelLook.c1 : PanelLook.c2).with-alpha(0.14) 70%, (b.c == 0 ? PanelLook.c1 : PanelLook.c2).with-alpha(0) 100%);
+                    }
+                }
+                // (Cyber: cut corners, hazard stripes, a number)
+                if pi.th == "cyber": Rectangle {
+                    Path {
+                        property <float> w: self.width / 1px;
+                        property <float> h: self.height / 1px;
+                        viewbox-width: self.w;
+                        viewbox-height: self.h;
+                        commands: "M 17 3 L " + (self.w - 3) + " 3 L " + (self.w - 3) + " " + (self.h - 17) + " L " + (self.w - 17) + " " + (self.h - 3) + " L 3 " + (self.h - 3) + " L 3 17 Z";
+                        fill: @linear-gradient(135deg, #0b1020 0%, #171029 100%);
+                        stroke: PanelLook.c1;
+                        stroke-width: 1.5px;
+                    }
+                    Rectangle { x: parent.width - 95px; y: parent.height - 10px; width: 62px; height: 7px; background: PanelLook.c2; }
+                    Rectangle { x: 3px; y: 37px; width: 3px; height: 18px; background: PanelLook.c1; }
+                    Rectangle { x: parent.width - 6px; y: 13px; width: 3px; height: 18px; background: PanelLook.c1; }
+                    Text { x: parent.width - self.width - 13px; y: 9px; text: "// " + (i < 9 ? "0" : "") + (i + 1); color: PanelLook.c2; font-size: 9px; font-family: "Cascadia Mono"; }
+                }
+                // (Galaxy: stars, and nebulae of your colours)
+                if pi.th == "galaxy": Rectangle {
+                    Rectangle { x: parent.width * 0.8 - 200px; y: parent.height * 0.2 - 200px; width: 400px; height: 400px; background: @radial-gradient(circle, PanelLook.c1.with-alpha(0.6) 0%, PanelLook.c1.with-alpha(0) 70%); }
+                    Rectangle { x: parent.width * 0.18 - 200px; y: parent.height * 0.95 - 200px; width: 400px; height: 400px; background: @radial-gradient(circle, PanelLook.c2.with-alpha(0.5) 0%, PanelLook.c2.with-alpha(0) 70%); }
+                    Path { x: 0; y: 0; width: 320px; height: 600px; viewbox-width: 320; viewbox-height: 600; commands: "M 306.3 580.8 h 1.1 v 1.1 h -1.1 Z M 194.8 210.7 h 1.3 v 1.3 h -1.3 Z M 285.9 0.6 h 1.4 v 1.4 h -1.4 Z M 34.5 339.5 h 1.5 v 1.5 h -1.5 Z M 196.9 84.4 h 1.3 v 1.3 h -1.3 Z M 201.4 534.8 h 1.5 v 1.5 h -1.5 Z M 120.3 259.0 h 0.4 v 0.4 h -0.4 Z M 72.4 174.9 h 1.0 v 1.0 h -1.0 Z M 311.2 227.9 h 1.5 v 1.5 h -1.5 Z M 307.6 548.2 h 1.2 v 1.2 h -1.2 Z M 190.7 155.9 h 1.5 v 1.5 h -1.5 Z M 313.9 297.8 h 0.5 v 0.5 h -0.5 Z M 133.0 191.5 h 1.0 v 1.0 h -1.0 Z M 315.0 295.1 h 0.7 v 0.7 h -0.7 Z M 91.6 286.2 h 1.1 v 1.1 h -1.1 Z M 39.0 373.0 h 1.1 v 1.1 h -1.1 Z M 141.9 175.9 h 0.4 v 0.4 h -0.4 Z M 250.1 496.1 h 0.7 v 0.7 h -0.7 Z M 4.2 319.5 h 0.7 v 0.7 h -0.7 Z M 87.6 561.2 h 1.5 v 1.5 h -1.5 Z M 250.2 147.4 h 1.3 v 1.3 h -1.3 Z M 85.7 92.9 h 0.6 v 0.6 h -0.6 Z M 316.4 175.9 h 1.4 v 1.4 h -1.4 Z M 194.6 284.8 h 0.6 v 0.6 h -0.6 Z M 206.4 362.3 h 1.1 v 1.1 h -1.1 Z M 237.9 70.9 h 0.6 v 0.6 h -0.6 Z M 243.3 180.4 h 0.4 v 0.4 h -0.4 Z M 170.7 201.7 h 1.4 v 1.4 h -1.4 Z M 95.0 317.9 h 0.7 v 0.7 h -0.7 Z M 148.6 216.6 h 0.7 v 0.7 h -0.7 Z M 238.4 354.5 h 1.6 v 1.6 h -1.6 Z M 11.7 151.5 h 1.4 v 1.4 h -1.4 Z M 145.8 549.9 h 0.7 v 0.7 h -0.7 Z M 284.1 327.4 h 1.6 v 1.6 h -1.6 Z M 4.7 467.0 h 1.0 v 1.0 h -1.0 Z M 136.9 345.4 h 1.2 v 1.2 h -1.2 Z M 226.6 379.3 h 0.6 v 0.6 h -0.6 Z M 154.2 547.0 h 1.5 v 1.5 h -1.5 Z M 123.4 235.1 h 1.2 v 1.2 h -1.2 Z M 272.6 117.9 h 1.6 v 1.6 h -1.6 Z M 94.9 498.0 h 1.5 v 1.5 h -1.5 Z M 21.1 501.8 h 0.8 v 0.8 h -0.8 Z M 222.3 259.7 h 0.8 v 0.8 h -0.8 Z M 91.6 468.4 h 0.6 v 0.6 h -0.6 Z M 291.4 85.6 h 0.6 v 0.6 h -0.6 Z M 153.1 329.5 h 0.5 v 0.5 h -0.5 Z M 159.3 198.4 h 0.8 v 0.8 h -0.8 Z M 49.1 351.5 h 1.1 v 1.1 h -1.1 Z M 259.8 41.1 h 0.4 v 0.4 h -0.4 Z M 73.6 491.8 h 1.2 v 1.2 h -1.2 Z M 253.4 398.2 h 0.8 v 0.8 h -0.8 Z M 8.2 433.6 h 0.8 v 0.8 h -0.8 Z M 313.2 599.0 h 1.4 v 1.4 h -1.4 Z M 224.4 29.3 h 1.0 v 1.0 h -1.0 Z M 269.5 131.5 h 0.8 v 0.8 h -0.8 Z M 206.6 571.3 h 1.0 v 1.0 h -1.0 Z M 228.0 80.8 h 1.2 v 1.2 h -1.2 Z M 93.6 550.8 h 0.5 v 0.5 h -0.5 Z M 47.9 366.4 h 1.6 v 1.6 h -1.6 Z M 132.5 96.7 h 0.4 v 0.4 h -0.4 Z M 199.2 26.1 h 1.3 v 1.3 h -1.3 Z M 34.6 227.5 h 1.4 v 1.4 h -1.4 Z M 23.0 34.5 h 0.4 v 0.4 h -0.4 Z M 184.1 445.4 h 1.3 v 1.3 h -1.3 Z M 281.1 80.6 h 0.8 v 0.8 h -0.8 Z M 138.1 188.7 h 1.1 v 1.1 h -1.1 Z M 192.1 293.7 h 0.4 v 0.4 h -0.4 Z M 300.3 224.5 h 0.5 v 0.5 h -0.5 Z M 17.8 418.4 h 0.6 v 0.6 h -0.6 Z M 48.4 378.8 h 1.5 v 1.5 h -1.5 Z M 161.9 546.3 h 0.6 v 0.6 h -0.6 Z M 177.6 372.5 h 1.3 v 1.3 h -1.3 Z M 84.2 331.0 h 1.5 v 1.5 h -1.5 Z M 81.3 450.3 h 1.5 v 1.5 h -1.5 Z M 165.4 80.3 h 0.8 v 0.8 h -0.8 Z M 75.0 222.7 h 0.8 v 0.8 h -0.8 Z M 235.8 107.6 h 1.0 v 1.0 h -1.0 Z M 228.3 393.0 h 1.3 v 1.3 h -1.3 Z M 27.3 400.8 h 0.5 v 0.5 h -0.5 Z M 29.2 74.9 h 1.3 v 1.3 h -1.3 Z M 190.1 143.2 h 1.4 v 1.4 h -1.4 Z M 280.6 288.3 h 1.4 v 1.4 h -1.4 Z M 103.5 477.9 h 0.4 v 0.4 h -0.4 Z M 9.4 435.0 h 1.5 v 1.5 h -1.5 Z M 17.2 90.5 h 0.5 v 0.5 h -0.5 Z M 304.7 408.7 h 0.8 v 0.8 h -0.8 Z M 71.4 69.6 h 1.1 v 1.1 h -1.1 Z M 311.3 399.0 h 1.5 v 1.5 h -1.5 Z M 262.6 83.9 h 0.8 v 0.8 h -0.8 Z M 199.9 212.6 h 1.5 v 1.5 h -1.5 Z M 75.2 200.0 h 1.1 v 1.1 h -1.1 Z M 196.4 209.2 h 0.8 v 0.8 h -0.8 Z M 123.4 81.9 h 0.8 v 0.8 h -0.8 Z M 266.0 388.7 h 0.6 v 0.6 h -0.6 Z M 257.4 260.0 h 0.5 v 0.5 h -0.5 Z M 272.5 310.5 h 0.6 v 0.6 h -0.6 Z M 189.6 344.0 h 1.2 v 1.2 h -1.2 Z M 236.9 237.3 h 1.6 v 1.6 h -1.6 Z M 31.0 19.9 h 0.6 v 0.6 h -0.6 Z M 64.8 23.7 h 0.5 v 0.5 h -0.5 Z M 284.6 288.6 h 1.6 v 1.6 h -1.6 Z M 243.3 0.3 h 1.0 v 1.0 h -1.0 Z M 150.5 533.9 h 0.9 v 0.9 h -0.9 Z M 198.2 257.2 h 0.7 v 0.7 h -0.7 Z M 149.0 59.8 h 1.1 v 1.1 h -1.1 Z M 49.5 95.4 h 1.4 v 1.4 h -1.4 Z M 119.9 231.4 h 0.9 v 0.9 h -0.9 Z M 281.7 91.3 h 0.9 v 0.9 h -0.9 Z M 81.3 166.5 h 0.5 v 0.5 h -0.5 Z M 51.7 172.2 h 1.5 v 1.5 h -1.5 Z M 75.3 289.2 h 0.4 v 0.4 h -0.4 Z M 10.3 554.7 h 1.0 v 1.0 h -1.0 Z M 118.1 562.8 h 1.4 v 1.4 h -1.4 Z M 220.1 404.3 h 0.6 v 0.6 h -0.6 Z M 151.0 567.2 h 1.3 v 1.3 h -1.3 Z M 37.7 401.1 h 1.5 v 1.5 h -1.5 Z M 93.2 404.7 h 1.2 v 1.2 h -1.2 Z M 233.4 97.9 h 1.3 v 1.3 h -1.3 Z M 64.3 15.0 h 0.5 v 0.5 h -0.5 Z M 73.8 46.9 h 0.9 v 0.9 h -0.9 Z M 128.3 584.2 h 0.6 v 0.6 h -0.6 Z M 116.6 187.1 h 1.4 v 1.4 h -1.4 Z M 149.8 169.9 h 0.8 v 0.8 h -0.8 Z M 234.4 430.8 h 0.9 v 0.9 h -0.9 Z M 52.3 144.3 h 1.6 v 1.6 h -1.6 Z M 215.1 564.3 h 1.4 v 1.4 h -1.4 Z M 206.7 258.4 h 1.6 v 1.6 h -1.6 Z M 312.1 3.8 h 0.9 v 0.9 h -0.9 Z M 19.5 467.6 h 1.0 v 1.0 h -1.0 Z M 131.3 27.0 h 1.3 v 1.3 h -1.3 Z M 175.5 593.8 h 1.0 v 1.0 h -1.0 Z M 166.1 210.0 h 0.7 v 0.7 h -0.7 Z M 30.0 42.7 h 0.9 v 0.9 h -0.9 Z M 287.6 294.7 h 0.6 v 0.6 h -0.6 Z M 299.4 32.3 h 0.9 v 0.9 h -0.9 Z M 77.9 30.3 h 1.6 v 1.6 h -1.6 Z M 127.1 36.1 h 1.6 v 1.6 h -1.6 Z M 81.7 244.5 h 1.2 v 1.2 h -1.2 Z M 97.9 30.8 h 1.0 v 1.0 h -1.0 Z M 12.0 583.0 h 0.8 v 0.8 h -0.8 Z M 57.4 305.2 h 0.5 v 0.5 h -0.5 Z M 128.8 318.8 h 0.7 v 0.7 h -0.7 Z M 27.0 188.3 h 1.3 v 1.3 h -1.3 Z M 34.6 325.2 h 1.4 v 1.4 h -1.4 Z M 294.8 359.0 h 0.8 v 0.8 h -0.8 Z M 274.2 128.6 h 1.3 v 1.3 h -1.3 Z M 5.6 323.8 h 1.3 v 1.3 h -1.3 Z M 155.7 342.9 h 1.2 v 1.2 h -1.2 Z M 120.5 375.1 h 1.2 v 1.2 h -1.2 Z M 232.2 547.8 h 1.3 v 1.3 h -1.3 Z M 98.4 269.4 h 0.8 v 0.8 h -0.8 Z M 264.5 134.4 h 1.2 v 1.2 h -1.2 Z M 37.0 187.0 h 0.7 v 0.7 h -0.7 Z M 28.0 463.4 h 1.0 v 1.0 h -1.0 Z M 262.2 187.7 h 1.3 v 1.3 h -1.3 Z M 41.5 49.2 h 1.2 v 1.2 h -1.2 Z M 78.4 50.6 h 0.8 v 0.8 h -0.8 Z M 137.2 346.2 h 1.5 v 1.5 h -1.5 Z M 78.5 36.9 h 1.2 v 1.2 h -1.2 Z M 224.2 28.8 h 1.1 v 1.1 h -1.1 Z M 64.0 171.6 h 0.4 v 0.4 h -0.4 Z M 119.6 59.1 h 1.1 v 1.1 h -1.1 Z M 134.6 188.4 h 0.7 v 0.7 h -0.7 Z M 240.7 333.7 h 1.2 v 1.2 h -1.2 Z M 286.7 392.5 h 1.0 v 1.0 h -1.0 Z M 243.1 344.8 h 1.4 v 1.4 h -1.4 Z M 141.5 490.1 h 1.2 v 1.2 h -1.2 Z M 209.7 572.9 h 1.4 v 1.4 h -1.4 Z M 233.0 420.7 h 0.8 v 0.8 h -0.8 Z M 85.7 487.2 h 1.2 v 1.2 h -1.2 Z M 122.4 78.1 h 1.3 v 1.3 h -1.3 Z M 21.1 101.6 h 1.4 v 1.4 h -1.4 Z M 84.0 405.5 h 0.8 v 0.8 h -0.8 Z M 91.4 38.1 h 1.4 v 1.4 h -1.4 Z M 244.4 334.3 h 1.4 v 1.4 h -1.4 Z M 8.8 30.4 h 1.2 v 1.2 h -1.2 Z M 41.6 214.3 h 1.6 v 1.6 h -1.6 Z M 275.1 569.5 h 1.5 v 1.5 h -1.5 Z M 195.8 138.7 h 1.0 v 1.0 h -1.0 Z M 137.2 217.4 h 1.0 v 1.0 h -1.0 Z M 105.7 7.5 h 0.6 v 0.6 h -0.6 Z M 187.0 496.2 h 1.4 v 1.4 h -1.4 Z M 232.6 57.2 h 1.5 v 1.5 h -1.5 Z M 169.7 102.7 h 1.0 v 1.0 h -1.0 Z M 227.0 267.7 h 1.2 v 1.2 h -1.2 Z M 300.3 476.9 h 1.3 v 1.3 h -1.3 Z M 37.8 190.2 h 1.3 v 1.3 h -1.3 Z M 292.8 276.6 h 0.6 v 0.6 h -0.6 Z M 138.9 264.9 h 1.3 v 1.3 h -1.3 Z M 245.6 561.8 h 1.1 v 1.1 h -1.1 Z M 170.4 581.8 h 1.2 v 1.2 h -1.2 Z M 190.7 62.1 h 0.9 v 0.9 h -0.9 Z M 260.6 251.7 h 1.1 v 1.1 h -1.1 Z M 16.7 586.8 h 1.3 v 1.3 h -1.3 Z M 10.5 346.2 h 1.2 v 1.2 h -1.2 Z M 154.2 529.1 h 1.3 v 1.3 h -1.3 Z M 125.7 129.4 h 0.4 v 0.4 h -0.4 Z M 88.7 120.7 h 0.6 v 0.6 h -0.6 Z M 180.0 214.2 h 0.9 v 0.9 h -0.9 Z M 240.3 144.9 h 1.2 v 1.2 h -1.2 Z M 112.6 148.9 h 0.7 v 0.7 h -0.7 Z M 314.4 504.1 h 1.2 v 1.2 h -1.2 Z M 271.9 370.9 h 1.2 v 1.2 h -1.2 Z M 128.3 85.8 h 0.5 v 0.5 h -0.5 Z M 266.1 294.1 h 1.0 v 1.0 h -1.0 Z M 12.1 101.7 h 0.7 v 0.7 h -0.7 Z M 31.6 430.6 h 0.5 v 0.5 h -0.5 Z M 288.1 119.6 h 0.6 v 0.6 h -0.6 Z M 255.1 194.4 h 0.8 v 0.8 h -0.8 Z M 218.5 517.9 h 0.6 v 0.6 h -0.6 Z M 199.4 480.2 h 0.6 v 0.6 h -0.6 Z M 120.5 6.0 h 0.4 v 0.4 h -0.4 Z M 163.8 352.0 h 1.0 v 1.0 h -1.0 Z M 59.1 233.5 h 0.9 v 0.9 h -0.9 Z M 101.5 16.2 h 1.1 v 1.1 h -1.1 Z M 99.9 229.7 h 1.1 v 1.1 h -1.1 Z M 152.4 422.0 h 0.7 v 0.7 h -0.7 Z M 127.7 589.4 h 1.5 v 1.5 h -1.5 Z M 261.0 554.3 h 0.4 v 0.4 h -0.4 Z M 221.7 402.1 h 0.9 v 0.9 h -0.9 Z M 171.7 479.2 h 0.7 v 0.7 h -0.7 Z M 116.1 356.1 h 0.9 v 0.9 h -0.9 Z M 217.4 313.3 h 0.5 v 0.5 h -0.5 Z M 90.9 46.6 h 1.4 v 1.4 h -1.4 Z M 27.9 213.5 h 0.8 v 0.8 h -0.8 Z M 185.7 455.8 h 0.4 v 0.4 h -0.4 Z M 228.6 184.1 h 1.1 v 1.1 h -1.1 Z M 297.3 164.8 h 0.5 v 0.5 h -0.5 Z M 229.1 43.2 h 1.1 v 1.1 h -1.1 Z M 241.1 402.0 h 0.8 v 0.8 h -0.8 Z M 306.2 538.3 h 1.1 v 1.1 h -1.1 Z M 220.1 503.0 h 1.5 v 1.5 h -1.5 Z M 236.4 366.6 h 1.4 v 1.4 h -1.4 Z M 66.8 310.0 h 0.9 v 0.9 h -0.9 Z M 286.8 143.5 h 1.4 v 1.4 h -1.4 Z M 311.9 326.4 h 1.2 v 1.2 h -1.2 Z M 125.9 1.8 h 0.8 v 0.8 h -0.8 Z M 124.9 106.9 h 0.6 v 0.6 h -0.6 Z M 209.0 539.7 h 1.1 v 1.1 h -1.1 Z M 291.3 368.1 h 1.1 v 1.1 h -1.1 Z"; fill: #ffffffc0; stroke-width: 0; }
+                }
+                // (Ticket: admit one, its stub torn along the dots)
+                if pi.th == "ticket": Rectangle {
+                    Rectangle { x: parent.width - 69px; width: 69px; background: @linear-gradient(135deg, PanelLook.c1 0%, PanelLook.c2 100%); }
+                    Rectangle { x: 10px; y: 10px; width: parent.width - 89px; height: parent.height - 20px; border-radius: 5px; border-width: 1.2px; border-color: PanelLook.c1.with-alpha(0.75); }
+                    for k in 90: Rectangle { x: 250px; y: 13px + k * 7px; width: 1.5px; height: 3px; background: #3b24108c; visible: self.y < parent.height - 15px; }
+                    for n in [{ x: 251, y: 0 }, { x: 251, y: 1 }, { x: 3, y: 0.5 }, { x: 317, y: 0.5 }]: Rectangle {
+                        x: n.x * 1px - 7px;
+                        y: (n.y == 0 ? 3px : n.y == 1 ? parent.height - 3px : parent.height / 2) - 7px;
+                        width: 14px;
+                        height: 14px;
+                        border-radius: 7px;
+                        background: #16141f;
+                    }
+                    Text { x: parent.width - 34px - self.width / 2; y: (parent.height - self.height) / 2; text: parent.height > 110px ? "ADMIT ONE" : "No. " + (i < 9 ? "0" : "") + (i + 1); color: #ffffff; font-size: parent.height > 110px ? 15px : 13px; font-weight: 800; font-family: "Bahnschrift"; transform-rotation: -90deg; }
+                }
                 if pi.th == "dark": Rectangle { y: 0; x: 12px; width: parent.width - 24px; height: 3px; background: PanelLook.c1.mix(PanelLook.c2, 0.5); }
                 if pi.th == "minimal": Rectangle { y: parent.height - 4px; height: 4px; background: PanelLook.c1.mix(PanelLook.c2, 0.5); }
                 if pi.th == "y2k": Rectangle {
@@ -2838,8 +2944,8 @@ component PanelPreview inherits Rectangle {
                 // (a short one: its icon, title and line side by side)
                 if !p.body: HorizontalLayout {
                     padding-left: 22px;
-                    padding-right: 16px;
-                    padding-top: pi.th == "y2k" ? 22px : 0px;
+                    padding-top: pi.top;
+                    padding-right: 16px + pi.keep;
                     spacing: 16px;
                     if p.title == "Powered by OmniPulse": VerticalLayout {
                         alignment: center;
@@ -2855,24 +2961,26 @@ component PanelPreview inherits Rectangle {
                         Rectangle {
                             width: min(46px, root.ph - 34px);
                             height: self.width;
-                            border-radius: pi.th == "pixel" ? 0px : pi.th == "pastel" ? self.width / 2 : 10px;
-                            background: PanelLook.c1.mix(PanelLook.c2, 0.4);
-                            if !p.has-img: Glyph { d: p.icon; width: parent.width * 0.6; height: self.width; fill: #ffffff; }
+                            border-radius: pi.th == "pixel" || pi.th == "cyber" ? 0px : pi.th == "pastel" ? self.width / 2 : pi.th == "ticket" ? 5px : 10px;
+                            background: pi.th == "terminal" ? pi.ink.with-alpha(0.14) : pi.light ? PanelLook.c1 : PanelLook.c1.mix(PanelLook.c2, 0.4);
+                            border-width: pi.th == "terminal" ? 1.2px : 0px;
+                            border-color: pi.ink;
+                            if !p.has-img: Glyph { d: p.icon; width: parent.width * 0.6; height: self.width; fill: pi.th == "terminal" ? pi.ink : #ffffff; }
                             if p.has-img: Image { width: parent.width; height: parent.height; source: p.img; image-fit: cover; }
                         }
                     }
                     VerticalLayout {
                         alignment: center;
                         spacing: 2px;
-                        Text { text: pi.th == "pixel" ? p.title.to-uppercase() : p.title; color: pi.ink; font-size: min(28px, root.ph * 0.3, (PanelLook.icons ? 214px : 276px) / max(1, p.title.character-count) * 1.75); font-weight: 800; font-family: pi.th == "pixel" ? "Consolas" : ""; }
-                        if p.line != "": Text { text: p.line; color: pi.ink.with-alpha(0.78); font-size: 11px; }
+                        Text { text: pi.shown-title; color: pi.ink; font-size: min(28px, root.ph * 0.3, ((PanelLook.icons ? 214px : 276px) - pi.keep) / max(1, pi.shown-title.character-count) * 1.75); font-weight: 800; font-family: pi.ff; }
+                        if p.line != "": Text { text: p.line; color: pi.ink.with-alpha(0.78); font-size: 11px; font-family: pi.ff; }
                     }
                 }
                 // (a long one, or extended: its header, a line in its colours, then all its words)
                 if p.body: VerticalLayout {
                     padding-left: 22px;
-                    padding-right: 22px;
-                    padding-top: pi.th == "y2k" ? 36px : 14px;
+                    padding-top: 14px + pi.top;
+                    padding-right: 22px + (pi.th == "ticket" ? 66px : 0px);
                     spacing: 10px;
                     alignment: start;
                     HorizontalLayout {
@@ -2886,15 +2994,17 @@ component PanelPreview inherits Rectangle {
                         if PanelLook.icons && p.title != "Powered by OmniPulse": Rectangle {
                             width: 36px;
                             height: 36px;
-                            border-radius: pi.th == "pixel" ? 0px : pi.th == "pastel" ? 18px : 9px;
-                            background: PanelLook.c1.mix(PanelLook.c2, 0.4);
-                            if !p.has-img: Glyph { d: p.icon; width: 22px; height: 22px; fill: #ffffff; }
+                            border-radius: pi.th == "pixel" || pi.th == "cyber" ? 0px : pi.th == "pastel" ? 18px : pi.th == "ticket" ? 5px : 9px;
+                            background: pi.th == "terminal" ? pi.ink.with-alpha(0.14) : pi.light ? PanelLook.c1 : PanelLook.c1.mix(PanelLook.c2, 0.4);
+                            border-width: pi.th == "terminal" ? 1.2px : 0px;
+                            border-color: pi.ink;
+                            if !p.has-img: Glyph { d: p.icon; width: 22px; height: 22px; fill: pi.th == "terminal" ? pi.ink : #ffffff; }
                             if p.has-img: Image { width: parent.width; height: parent.height; source: p.img; image-fit: cover; }
                         }
-                        Text { text: pi.th == "pixel" ? p.title.to-uppercase() : p.title; color: pi.ink; font-size: min(24px, (PanelLook.icons ? 226px : 276px) / max(1, p.title.character-count) * 1.75); font-weight: 800; vertical-alignment: center; font-family: pi.th == "pixel" ? "Consolas" : ""; }
+                        Text { text: pi.shown-title; color: pi.ink; font-size: min(24px, ((PanelLook.icons ? 226px : 276px) - (pi.th == "bauhaus" ? 104px : 0px)) / max(1, pi.shown-title.character-count) * 1.75); font-weight: 800; vertical-alignment: center; font-family: pi.ff; }
                     }
-                    Rectangle { height: 2px; background: PanelLook.c1.mix(PanelLook.c2, 0.5); }
-                    Text { text: p.line; color: pi.ink.with-alpha(0.8); font-size: 12.5px; wrap: word-wrap; }
+                    Rectangle { height: 2px; background: pi.th == "comic" || pi.th == "bauhaus" ? #111111 : PanelLook.c1.mix(PanelLook.c2, 0.5); }
+                    Text { text: p.line; color: pi.ink.with-alpha(0.8); font-size: 12.5px; wrap: word-wrap; font-family: pi.ff; }
                 }
             }
         }
@@ -4740,6 +4850,8 @@ export component AppWindow inherits Window {
     // where it's shown: Now Playing, the player (behind its controls), full screen (the whole window)
     in-out property <bool> viz-now: true;
     in-out property <bool> viz-bar;
+    /// (paused while a game, or anything else, is full screen)
+    in-out property <bool> viz-game-pause: true;
     in-out property <bool> viz-full;
     callback viz-pick(string);
     callback viz-place(string, bool);
@@ -4927,6 +5039,12 @@ export component AppWindow inherits Window {
     /// (an action's group: Streamer.bot's, turned on or off together by Turn a Group On or Off)
     in property <string> flow-group;
     callback flow-group-edited(string);
+    /// (the groups there are, for the Group box's list; one picked from it)
+    in property <[string]> flow-groups;
+    callback flow-group-set(string);
+    /// (Ctrl+click: an action picked as well, for grouping several; how many are)
+    callback flow-mark(int);
+    in property <int> flow-marked;
     /// (the list: a group folded or opened, and what's searched for)
     callback flow-group-fold(string);
     callback flow-find(string);
@@ -5234,6 +5352,11 @@ export component AppWindow inherits Window {
     in property <string> ask-text;
     in property <string> ask-ok;
     callback ask-answer(bool);
+    /// (and a name asked for: its box, what's in it, and ones to pick from)
+    in property <bool> ask-input-on;
+    in-out property <string> ask-input;
+    in property <string> ask-input-hint;
+    in property <[string]> ask-input-options;
     /// asking to join your Jam, waiting: each let in or declined
     in property <[string]> jam-waiting;
     callback jam-admit(int, bool);
@@ -6869,6 +6992,8 @@ export component AppWindow inherits Window {
                                         GroupLine { }
                                         GroupSwitch { name: "In the Player"; note: "In the player's empty space, either side of the controls, on every page."; checked <=> root.viz-bar; toggled(v) => { root.viz-place("bar", v); } }
                                         GroupLine { }
+                                        GroupSwitch { name: "Pause for Games"; note: "Stops while a game, or anything else, is full screen, so it doesn't take from your game. It starts again when you leave. Your stream's visualisers keep going."; checked <=> root.viz-game-pause; toggled(v) => { root.viz-place("game", v); } }
+                                        GroupLine { }
                                         HorizontalLayout {
                                             VerticalLayout {
                                                 horizontal-stretch: 1;
@@ -7910,6 +8035,23 @@ export component AppWindow inherits Window {
                                     }
                                     return reject;
                                   }
+                                flbg := TouchArea {
+                                  pointer-event(e) => { if (e.kind == PointerEventKind.down && e.button == PointerEventButton.right) { bgmenu.show(); } }
+                                  bgmenu := PopupWindow {
+                                    x: flbg.mouse-x;
+                                    y: flbg.mouse-y;
+                                    width: 210px;
+                                    Rectangle {
+                                    background: Theme.menu;
+                                    border-radius: 10px;
+                                    border-width: 1px;
+                                    border-color: Theme.line;
+                                    VerticalLayout {
+                                        padding: 6px;
+                                            MenuRow { label: "New Group..."; clicked => { root.flow-act("group-new"); } }
+                                        }
+                                    }
+                                  }
                                 ScrollView {
                                     horizontal-scrollbar-policy: always-off;
                                     VerticalLayout {
@@ -7923,7 +8065,23 @@ export component AppWindow inherits Window {
                                           // (its group's heading: folded or open with a click)
                                           if it.head: Rectangle {
                                             height: 26px;
-                                            fgh := TouchArea { mouse-cursor: MouseCursor.pointer; clicked => { root.flow-group-fold(it.group); } }
+                                            fgh := TouchArea { mouse-cursor: MouseCursor.pointer; clicked => { root.flow-group-fold(it.group); } pointer-event(e) => { if (e.kind == PointerEventKind.down && e.button == PointerEventButton.right) { headmenu.show(); } } }
+                                            headmenu := PopupWindow {
+                                                x: fgh.mouse-x;
+                                                y: fgh.mouse-y;
+                                                width: 210px;
+                                                Rectangle {
+                                    background: Theme.menu;
+                                    border-radius: 10px;
+                                    border-width: 1px;
+                                    border-color: Theme.line;
+                                    VerticalLayout {
+                                        padding: 6px;
+                                                        MenuRow { label: "New Group..."; clicked => { root.flow-act("group-new"); } }
+                                                        if it.count == 0 && it.group != "": MenuRow { label: "Remove This Group"; clicked => { root.flow-act("group-drop:" + it.group); } }
+                                                    }
+                                                }
+                                            }
                                             HorizontalLayout {
                                                 padding-left: 4px;
                                                 spacing: 6px;
@@ -7935,10 +8093,36 @@ export component AppWindow inherits Window {
                                           if it.shown: Rectangle {
                                             height: 54px;
                                             border-radius: 10px;
-                                            background: i == root.flow-sel ? Theme.accent.with-alpha(0.16) : fita.has-hover ? Theme.elevated : transparent;
+                                            background: i == root.flow-sel || it.marked ? Theme.accent.with-alpha(0.16) : fita.has-hover ? Theme.elevated : transparent;
                                             border-width: 1px;
-                                            border-color: i == root.flow-sel ? Theme.accent.with-alpha(0.6) : Theme.line;
-                                            fita := TouchArea { mouse-cursor: MouseCursor.pointer; clicked => { flkeys.focus(); root.flow-pick(i); } }
+                                            border-color: i == root.flow-sel || it.marked ? Theme.accent.with-alpha(0.6) : Theme.line;
+                                            fita := TouchArea {
+                                                property <bool> ctl;
+                                                mouse-cursor: MouseCursor.pointer;
+                                                pointer-event(e) => {
+                                                    if (e.kind == PointerEventKind.down) { self.ctl = e.modifiers.control; }
+                                                    if (e.kind == PointerEventKind.down && e.button == PointerEventButton.right) { rowmenu.show(); }
+                                                }
+                                                clicked => { flkeys.focus(); if (self.ctl) { root.flow-mark(i); } else { root.flow-pick(i); } }
+                                            }
+                                            rowmenu := PopupWindow {
+                                                x: fita.mouse-x;
+                                                y: fita.mouse-y;
+                                                width: 240px;
+                                                Rectangle {
+                                    background: Theme.menu;
+                                    border-radius: 10px;
+                                    border-width: 1px;
+                                    border-color: Theme.line;
+                                    VerticalLayout {
+                                        padding: 6px;
+                                                        MenuRow { label: it.marked && root.flow-marked > 1 ? "Group the " + root.flow-marked + " Picked..." : "Put It in a Group..."; clicked => { root.flow-act("group-marked:" + i); } }
+                                                        MenuRow { label: "New Group..."; clicked => { root.flow-act("group-new"); } }
+                                                        if it.group != "": MenuRow { label: it.marked && root.flow-marked > 1 ? "Take Them Out of Their Groups" : "Take It Out of Its Group"; clicked => { root.flow-act("ungroup:" + i); } }
+                                                        Text { text: "Ctrl+click actions to pick several."; color: Theme.muted; font-size: 11px; x: 10px; height: 26px; vertical-alignment: center; }
+                                                    }
+                                                }
+                                            }
                                             VerticalLayout {
                                                 padding-left: 12px;
                                                 padding-right: 12px;
@@ -7952,6 +8136,7 @@ export component AppWindow inherits Window {
                                         if root.flow-items.length == 0: Text { text: "No actions yet. Choose one to start from in New Action above, like a command, a thank-you for follows, or a timer."; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
                                         Rectangle { height: 76px; }
                                     }
+                                }
                                 }
                                 }
                             }
@@ -7978,15 +8163,45 @@ export component AppWindow inherits Window {
                                             fnti := TextInput { property <length> sx; cursor-position-changed(p) => { if (p.x + self.sx < 0px) { self.sx = -p.x; } else if (p.x + self.sx > parent.width - 24px - 2px) { self.sx = parent.width - 24px - 2px - p.x; } }  x: 12px + min(0px, max(parent.width - 24px - self.width, self.sx)); width: max(parent.width - 24px, self.preferred-width + 4px); height: parent.height; vertical-alignment: center; color: Theme.text; font-size: 16px; font-weight: 700; single-line: true; text: root.flow-name; edited => { root.flow-name-edited(self.text); } }
                                         }
                                         Rectangle {
-                                            clip: true;
-                                            width: 150px;
+                                            width: 170px;
                                             height: 38px;
                                             border-radius: 8px;
                                             background: Theme.panel;
                                             border-width: 1px;
-                                            border-color: fgti.has-focus ? Theme.accent : Theme.line;
-                                            if fgti.text == "": Text { x: 12px; height: parent.height; vertical-alignment: center; text: "Group"; color: Theme.muted; font-size: 13px; }
-                                            fgti := TextInput { property <length> sx; cursor-position-changed(p) => { if (p.x + self.sx < 0px) { self.sx = -p.x; } else if (p.x + self.sx > parent.width - 24px - 2px) { self.sx = parent.width - 24px - 2px - p.x; } }  x: 12px + min(0px, max(parent.width - 24px - self.width, self.sx)); width: max(parent.width - 24px, self.preferred-width + 4px); height: parent.height; vertical-alignment: center; color: Theme.text; font-size: 13px; single-line: true; text: root.flow-group; edited => { root.flow-group-edited(self.text); } }
+                                            border-color: fgti.has-focus || fgdd.has-hover ? Theme.accent : Theme.line;
+                                            Rectangle {
+                                                clip: true;
+                                                x: 0;
+                                                width: parent.width - 30px;
+                                                if fgti.text == "": Text { x: 12px; height: parent.height; vertical-alignment: center; text: "Group"; color: Theme.muted; font-size: 13px; }
+                                                fgti := TextInput { property <length> sx; cursor-position-changed(p) => { if (p.x + self.sx < 0px) { self.sx = -p.x; } else if (p.x + self.sx > parent.width - 16px - 2px) { self.sx = parent.width - 16px - 2px - p.x; } }  x: 12px + min(0px, max(parent.width - 16px - self.width, self.sx)); width: max(parent.width - 16px, self.preferred-width + 4px); height: parent.height; vertical-alignment: center; color: Theme.text; font-size: 13px; single-line: true; text: root.flow-group; edited => { root.flow-group-edited(self.text); } }
+                                            }
+                                            // (the groups there are)
+                                            fgdd := TouchArea {
+                                                x: parent.width - 30px;
+                                                width: 30px;
+                                                mouse-cursor: MouseCursor.pointer;
+                                                clicked => { groupmenu.show(); }
+                                                Chevron { open: true; tint: fgdd.has-hover ? Theme.text : Theme.muted; x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2; }
+                                            }
+                                            groupmenu := PopupWindow {
+                                                x: 0;
+                                                y: parent.height + 4px;
+                                                width: 220px;
+                                                Rectangle {
+                                                    background: Theme.menu;
+                                                    border-radius: 10px;
+                                                    border-width: 1px;
+                                                    border-color: Theme.line;
+                                                    VerticalLayout {
+                                                        padding: 6px;
+                                                        if root.flow-groups.length == 0: Text { text: "No groups yet. Type a name, or make one below."; color: Theme.muted; font-size: 12px; x: 10px; height: 32px; vertical-alignment: center; wrap: word-wrap; }
+                                                        for g in root.flow-groups: MenuRow { label: g; on: g == root.flow-group; clicked => { fgti.text = g; root.flow-group-set(g); } }
+                                                        if root.flow-group != "": MenuRow { label: "No Group"; clicked => { fgti.text = ""; root.flow-group-set(""); } }
+                                                        MenuRow { label: "New Group..."; clicked => { root.flow-act("group-new-here"); } }
+                                                    }
+                                                }
+                                            }
                                         }
                                         CenterToggle { checked: root.flow-on; toggled => { root.flow-on-toggled(self.checked); } }
                                         VerticalLayout { alignment: center; Pill { label: "One at a Time"; on: root.flow-queued; tip: "Runs one at a time. Each run waits until the one before it is done, like Streamer.bot's queues, so alerts never overlap."; clicked => { root.flow-act("queued"); } } }
@@ -9235,6 +9450,24 @@ export component AppWindow inherits Window {
                 spacing: 12px;
                 Text { text: root.ask-title; color: Theme.text; font-size: 18px; font-weight: 800; wrap: word-wrap; }
                 Text { text: root.ask-text; color: Theme.muted; font-size: 13px; wrap: word-wrap; }
+                if root.ask-input-on: Rectangle {
+                    clip: true;
+                    height: 38px;
+                    border-radius: 8px;
+                    background: Theme.panel;
+                    border-width: 1px;
+                    border-color: aiti.has-focus ? Theme.accent : Theme.line;
+                    if aiti.text == "": Text { x: 12px; height: parent.height; vertical-alignment: center; text: root.ask-input-hint; color: Theme.muted; font-size: 13px; }
+                    aiti := TextInput { property <length> sx; cursor-position-changed(p) => { if (p.x + self.sx < 0px) { self.sx = -p.x; } else if (p.x + self.sx > parent.width - 24px - 2px) { self.sx = parent.width - 24px - 2px - p.x; } }  x: 12px + min(0px, max(parent.width - 24px - self.width, self.sx)); width: max(parent.width - 24px, self.preferred-width + 4px); height: parent.height; vertical-alignment: center; color: Theme.text; font-size: 13px; single-line: true; text <=> root.ask-input; init => { self.focus(); self.select-all(); } accepted => { root.ask-answer(true); } }
+                }
+                if root.ask-input-on && root.ask-input-options.length > 0: Text { text: "Or pick one there is:"; color: Theme.muted; font-size: 12px; }
+                if root.ask-input-on && root.ask-input-options.length > 0: ScrollView {
+                    height: min(160px, root.ask-input-options.length * 32px + 4px);
+                    horizontal-scrollbar-policy: always-off;
+                    VerticalLayout {
+                        for o in root.ask-input-options: MenuRow { label: o; on: o == root.ask-input; clicked => { root.ask-input = o; } }
+                    }
+                }
                 HorizontalLayout {
                     alignment: end;
                     spacing: 8px;
@@ -9242,7 +9475,7 @@ export component AppWindow inherits Window {
                     Pill { label: root.ask-ok; on: true; clicked => { root.ask-answer(true); } }
                 }
             }
-            FocusScope {
+            if !root.ask-input-on: FocusScope {
                 width: 0; height: 0;
                 init => { self.focus(); }
                 key-pressed(e) => {

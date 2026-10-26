@@ -228,6 +228,13 @@
       "note": "Your JWT Token. On streamelements.com, open your account's Channels page and click Show Secrets. Leave it empty to turn this off."
     },
     {
+      "key": "kofiToken",
+      "label": "Ko-fi Tips",
+      "type": "password",
+      "default": "",
+      "note": "Your Verification Token. On ko-fi.com, open More > API > Webhooks, then Advanced. Paste your webhook address from Tips and Donations there too. Leave it empty to turn this off."
+    },
+    {
       "key": "requests",
       "label": "Song Requests",
       "type": "toggle",
@@ -350,7 +357,7 @@
     {"key": "camP_sticker", "label": "A GIF or Picture", "type": "toggle", "default": false},
     {"key": "camP_stickerPlace", "label": "A GIF or Picture Place", "type": "select", "default": "corner", "options": ["above", "below", "left", "right", "in-top", "in-bottom", "corner"]},
     {"key": "camP_stickerSize", "label": "A GIF or Picture Size", "type": "select", "default": "medium", "options": ["small", "medium", "large"]},
-    {"key": "panelTheme", "label": "Panels Theme", "type": "select", "default": "dark", "options": ["dark", "glass", "neon", "comic", "pastel", "y2k", "pixel", "gradient", "minimal"]},
+    {"key": "panelTheme", "label": "Panels Theme", "type": "select", "default": "dark", "options": ["dark", "glass", "neon", "comic", "pastel", "y2k", "pixel", "gradient", "minimal", "synthwave", "paper", "bauhaus", "holo", "terminal", "watercolour", "cyber", "galaxy", "ticket"]},
     {"key": "panelShape", "label": "Panels Shape", "type": "select", "default": "rounded", "options": ["rounded", "square", "pill"]},
     {"key": "panelHeight", "label": "Panels Height", "type": "select", "default": "medium", "options": ["short", "medium", "tall", "square"]},
     {"key": "panelPowered", "label": "Powered by OmniPulse Panel", "type": "toggle", "default": true},

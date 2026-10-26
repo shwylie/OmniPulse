@@ -482,6 +482,31 @@ pub mod dock {
         unsafe { SHQueryUserNotificationState().map(|s| s == QUNS_BUSY || s == QUNS_RUNNING_D3D_FULL_SCREEN || s == QUNS_PRESENTATION_MODE).unwrap_or(false) }
     }
 
+    /// Something else full screen: Windows' own full-screen state (busy()), or the window in front covering
+    /// its whole screen without a frame (a borderless game), when it isn't OmniPulse's or the desktop's
+    pub fn other_full_screen() -> bool {
+        use windows::Win32::UI::WindowsAndMessaging::{GetClassNameW, GetForegroundWindow, GetWindowThreadProcessId};
+        if busy() { return true; }
+        unsafe {
+            let fg = GetForegroundWindow();
+            if fg.0.is_null() { return false; }
+            let mut pid = 0u32;
+            GetWindowThreadProcessId(fg, Some(&mut pid));
+            if pid == std::process::id() { return false; }
+            let mut name = [0u16; 64];
+            let n = GetClassNameW(fg, &mut name) as usize;
+            let class = String::from_utf16_lossy(&name[..n.min(64)]);
+            if matches!(class.as_str(), "Progman" | "WorkerW" | "Shell_TrayWnd" | "Shell_SecondaryTrayWnd") { return false; }
+            let mut r = RECT::default();
+            if GetWindowRect(fg, &mut r).is_err() { return false; }
+            let mon = MonitorFromWindow(fg, MONITOR_DEFAULTTONEAREST);
+            let mut mi = MONITORINFO { cbSize: std::mem::size_of::<MONITORINFO>() as u32, ..Default::default() };
+            if !GetMonitorInfoW(mon, &mut mi).as_bool() { return false; }
+            let m = mi.rcMonitor;
+            r.left <= m.left && r.top <= m.top && r.right >= m.right && r.bottom >= m.bottom
+        }
+    }
+
     /// Windows' taskbar is dark (Settings > Personalisation > Colours: Windows mode)
     pub fn taskbar_dark() -> bool {
         use windows::Win32::System::Registry::{RegGetValueW, HKEY_CURRENT_USER, RRF_RT_REG_DWORD};

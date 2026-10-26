@@ -96,28 +96,217 @@
   }
   // (the set's font, if one's picked for its theme (a Google Font), else the theme's own)
   let SET_FONT = "";
-  const FONT = (th) => SET_FONT ? '"' + SET_FONT + '", "Segoe UI", sans-serif' : th === "pixel" ? '"Cascadia Mono", Consolas, monospace' : th === "comic" ? '"Comic Sans MS", "Segoe UI", sans-serif' : '"Segoe UI Variable Display", "Segoe UI", sans-serif';
+  const MONO = '"Cascadia Mono", Consolas, monospace';
+  const OWN_FONT = { pixel: MONO, terminal: MONO, comic: '"Comic Sans MS", "Segoe UI", sans-serif', paper: '"Ink Free", "Segoe Print", cursive',
+    bauhaus: 'Bahnschrift, "Segoe UI", sans-serif', cyber: 'Bahnschrift, "Segoe UI", sans-serif', ticket: 'Bahnschrift, "Segoe UI", sans-serif', watercolour: 'Georgia, serif' };
+  const FONT = (th) => SET_FONT ? '"' + SET_FONT + '", "Segoe UI", sans-serif' : OWN_FONT[th] || '"Segoe UI Variable Display", "Segoe UI", sans-serif';
+  // (what each theme takes: room at the top (a title bar), room kept on the right for its art (the title's, the
+  // words'), titles in capitals, light behind dark words)
+  const TOP = { y2k: 24, terminal: 20 };
+  const KEEP_TITLE = { ticket: 66, bauhaus: 104, synthwave: 50 }, KEEP_BODY = { ticket: 66 };
+  const UPPER = new Set(["pixel", "bauhaus", "cyber"]);
+  const LIGHT = new Set(["comic", "pastel", "y2k", "paper", "bauhaus", "holo", "watercolour", "ticket"]);
+  // (a colour, see-through: from #rrggbb)
+  function alpha(col, a) {
+    const m = /^#?([0-9a-f]{6})/i.exec(String(col || ""));
+    if (!m) return col;
+    const n = parseInt(m[1], 16);
+    return "rgba(" + (n >> 16) + "," + ((n >> 8) & 255) + "," + (n & 255) + "," + a + ")";
+  }
+  const lum = (col) => { const m = /^#?([0-9a-f]{6})/i.exec(String(col || "")); if (!m) return 1; const n = parseInt(m[1], 16); return (0.299 * (n >> 16) + 0.587 * ((n >> 8) & 255) + 0.114 * (n & 255)) / 255; };
+  // (the same scatter each time for the same panel: its stars, its splashes)
+  const rng = (seed) => { let s = 7; for (const ch of String(seed)) s = (s * 31 + ch.charCodeAt(0)) >>> 0; return () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 4294967296; }; };
+  // (a strip of washi tape)
+  function tape(c, x, y, w, h, a, col) {
+    c.save(); c.translate(x + w / 2, y + h / 2); c.rotate(a);
+    c.globalAlpha = 0.62; c.fillStyle = col; c.fillRect(-w / 2, -h / 2, w, h);
+    c.globalAlpha = 0.22; c.fillStyle = "#fff"; for (let i = -w / 2; i < w / 2; i += 7) c.fillRect(i, -h / 2, 2.5, h);
+    c.restore();
+  }
+  const slug = (t) => String(t || "panel").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "panel";
+
+  // Its panel, behind its words: drawn in its theme. What it gives back: the words' colours, a glow, an outline
+  function panelArt(c, th, p, ext, W, H, m, r, c1, c2, g) {
+    const o = { ink: "#ffffff", sub: "rgba(255,255,255,0.78)", glow: "", outline: "" };
+    const box = () => rounded(c, m, m, W - m * 2, H - m * 2, r);
+    if (th === "comic") { c.fillStyle = "#111"; rounded(c, m + 4, m + 4, W - m * 2 - 4, H - m * 2 - 4, r); c.fill(); c.fillStyle = "#fff"; rounded(c, m, m, W - m * 2 - 4, H - m * 2 - 4, r); c.fill(); c.lineWidth = 3; c.strokeStyle = "#111"; c.stroke(); o.ink = "#111"; o.sub = "rgba(17,17,17,0.7)"; }
+    else if (th === "y2k") { c.fillStyle = "#2b1b40"; rounded(c, m + 4, m + 4, W - m * 2 - 4, H - m * 2 - 4, 6); c.fill(); c.fillStyle = "#fdf6ff"; rounded(c, m, m, W - m * 2 - 4, H - m * 2 - 4, 6); c.fill(); c.lineWidth = 2.5; c.strokeStyle = "#2b1b40"; c.stroke();
+      const bar = c.createLinearGradient(0, 0, W, 0); bar.addColorStop(0, "#ff9ad5"); bar.addColorStop(0.55, "#b9a4ff"); bar.addColorStop(1, "#9ad0ff"); c.fillStyle = bar; c.fillRect(m + 1.5, m + 1.5, W - m * 2 - 7, 20); c.fillStyle = "#2b1b40"; c.fillRect(m + 1.5, m + 21, W - m * 2 - 7, 2.5);
+      c.font = "900 11px Segoe UI"; c.textAlign = "right"; c.textBaseline = "alphabetic"; c.fillText("–  □  ×", W - m - 12, m + 15); o.ink = "#2b1b40"; o.sub = "rgba(43,27,64,0.75)"; }
+    else if (th === "pastel") { c.fillStyle = "#fff6fb"; rounded(c, m, m, W - m * 2, H - m * 2, Math.max(r, 22)); c.fill(); c.lineWidth = 4; c.strokeStyle = c1; c.globalAlpha = 0.55; c.stroke(); c.globalAlpha = 1; o.ink = "#3a2a4a"; o.sub = "rgba(58,42,74,0.72)"; }
+    else if (th === "pixel") { c.fillStyle = "#f4f0ff"; c.fillRect(m, m + 4, W - m * 2, H - m * 2 - 8); c.fillRect(m + 4, m, W - m * 2 - 8, H - m * 2); c.fillStyle = "#1b1030"; c.fillRect(m + 4, m + 4, W - m * 2 - 8, H - m * 2 - 8); c.strokeStyle = c1; c.lineWidth = 3; c.strokeRect(m + 8, m + 8, W - m * 2 - 16, H - m * 2 - 16); }
+    else if (th === "neon") { c.fillStyle = "rgba(8,6,20,0.94)"; rounded(c, m + 4, m + 4, W - m * 2 - 8, H - m * 2 - 8, r); c.fill(); c.shadowColor = c1; c.shadowBlur = 14; c.lineWidth = 2.5; c.strokeStyle = c1; c.stroke(); c.shadowBlur = 0; o.glow = c1; }
+    else if (th === "glass") { c.fillStyle = "rgba(255,255,255,0.16)"; box(); c.fill(); c.lineWidth = 1.5; c.strokeStyle = "rgba(255,255,255,0.4)"; c.stroke(); }
+    else if (th === "gradient") { c.fillStyle = g; box(); c.fill(); }
+    else if (th === "minimal") { c.fillStyle = g; c.fillRect(m, H - m - 4, W - m * 2, 4); }
+    // (Synthwave: a striped sun setting on a grid)
+    else if (th === "synthwave") {
+      c.save(); box(); c.clip();
+      const hz = ext ? H - 24 : H * 0.7;
+      const sky = c.createLinearGradient(0, 0, 0, hz); sky.addColorStop(0, "#120326"); sky.addColorStop(1, "#4a0d67"); c.fillStyle = sky; c.fillRect(0, 0, W, hz);
+      const sr = ext ? 24 : Math.min(30, hz - 10), sx = W - 46;
+      const sun = c.createLinearGradient(0, hz - sr, 0, hz); sun.addColorStop(0, "#ffd36e"); sun.addColorStop(1, c2);
+      c.shadowColor = c2; c.shadowBlur = 18; c.fillStyle = sun; c.beginPath(); c.arc(sx, hz, sr, Math.PI, 0); c.fill(); c.shadowBlur = 0;
+      c.fillStyle = "#3b0a55"; for (let k = 0; k < 4; k++) c.fillRect(sx - sr, hz - sr * (0.5 - k * 0.12), sr * 2, 1.5 + k);
+      c.fillStyle = "#12021f"; c.fillRect(0, hz, W, H - hz);
+      c.strokeStyle = c1; c.lineWidth = 1; c.globalAlpha = 0.85;
+      for (let k = 1; k <= 5; k++) { const y = hz + (H - hz) * Math.pow(k / 5, 1.7); c.beginPath(); c.moveTo(0, y); c.lineTo(W, y); c.stroke(); }
+      for (let k = -9; k <= 9; k++) { c.beginPath(); c.moveTo(sx + k * 7, hz); c.lineTo(sx + k * 64, H); c.stroke(); }
+      c.globalAlpha = 1; c.restore();
+      o.glow = c2;
+    }
+    // (Paper: a ruled note, taped on)
+    else if (th === "paper") {
+      c.save(); c.shadowColor = "rgba(0,0,0,0.35)"; c.shadowBlur = 8; c.shadowOffsetY = 3; c.fillStyle = "#fbf6e9"; rounded(c, m + 2, m + 4, W - m * 2 - 4, H - m * 2 - 8, 3); c.fill(); c.restore();
+      c.save(); rounded(c, m + 2, m + 4, W - m * 2 - 4, H - m * 2 - 8, 3); c.clip();
+      c.strokeStyle = "#c9d8ef"; c.lineWidth = 1; for (let y = 28; y < H - 6; y += 18) { c.beginPath(); c.moveTo(m, y + 0.5); c.lineTo(W - m, y + 0.5); c.stroke(); }
+      c.strokeStyle = "#eaa3a3"; c.beginPath(); c.moveTo(14.5, m); c.lineTo(14.5, H); c.stroke(); c.restore();
+      tape(c, 24, 1, 62, 15, -0.18, c1); tape(c, W - 62, 2, 54, 15, 0.16, c2);
+      o.ink = "#26324a"; o.sub = "rgba(38,50,74,0.8)";
+    }
+    // (Bauhaus: shapes of your colours, and a black bar)
+    else if (th === "bauhaus") {
+      c.fillStyle = "#f2ede4"; rounded(c, m, m, W - m * 2, H - m * 2, Math.min(r, 6)); c.fill();
+      c.save(); rounded(c, m, m, W - m * 2, H - m * 2, Math.min(r, 6)); c.clip();
+      const hh = ext ? 74 : H, s = Math.min(44, hh * 0.44), cy = hh / 2;
+      c.fillStyle = c1; c.beginPath(); c.arc(W - 38, cy - s * 0.3, s, 0, Math.PI * 2); c.fill();
+      c.fillStyle = c2; c.beginPath(); c.moveTo(W - 106, cy + s * 1.1); c.lineTo(W - 70, cy - s * 0.55); c.lineTo(W - 34, cy + s * 1.1); c.closePath(); c.fill();
+      c.fillStyle = "#111"; c.fillRect(W - 118, m + 10, 7, hh - m * 2 - 20);
+      c.fillRect(m, m, 6, H - m * 2);
+      c.restore();
+      o.ink = "#111"; o.sub = "rgba(17,17,17,0.76)";
+    }
+    // (Holo: foil that shines)
+    else if (th === "holo") {
+      c.save(); box(); c.clip();
+      const hg = c.createLinearGradient(0, 0, W, Math.min(H, 220)); ["#ffd1f2", "#c7f0ff", "#fff6c2", "#d9c7ff", "#b8fff0"].forEach((col, i, a) => hg.addColorStop(i / (a.length - 1), col));
+      c.fillStyle = hg; c.fillRect(0, 0, W, H);
+      c.globalAlpha = 0.2; c.fillStyle = g; c.fillRect(0, 0, W, H); c.globalAlpha = 1;
+      const sh = c.createLinearGradient(W * 0.2, 0, W * 0.62, Math.min(H, 160)); sh.addColorStop(0, "rgba(255,255,255,0)"); sh.addColorStop(0.5, "rgba(255,255,255,0.65)"); sh.addColorStop(1, "rgba(255,255,255,0)");
+      c.fillStyle = sh; c.fillRect(0, 0, W, H);
+      c.restore(); c.lineWidth = 1.5; c.strokeStyle = "rgba(255,255,255,0.9)"; box(); c.stroke();
+      o.ink = "#2a1f45"; o.sub = "rgba(42,31,69,0.78)"; o.outline = "rgba(255,255,255,0.9)";
+    }
+    // (Terminal: a window of glowing type)
+    else if (th === "terminal") {
+      const tr = Math.min(r, 8);
+      c.fillStyle = "#0a0f0c"; rounded(c, m, m, W - m * 2, H - m * 2, tr); c.fill();
+      c.save(); rounded(c, m, m, W - m * 2, H - m * 2, tr); c.clip();
+      c.fillStyle = "#1c2420"; c.fillRect(0, 0, W, m + 17);
+      // (its window's marks: three small squares in your colours)
+      [c1, c2, "rgba(255,255,255,0.35)"].forEach((col, i) => { c.fillStyle = col; c.fillRect(m + 9 + i * 12, m + 5, 7, 7); });
+      c.fillStyle = "rgba(255,255,255,0.45)"; c.font = "500 10px " + MONO; c.textAlign = "center"; c.textBaseline = "middle"; c.fillText("~/" + slug(p.title), W / 2, m + 9);
+      c.fillStyle = "rgba(255,255,255,0.035)"; for (let y = m + 18; y < H; y += 3) c.fillRect(0, y, W, 1);
+      c.restore();
+      c.lineWidth = 1; c.strokeStyle = "rgba(255,255,255,0.12)"; rounded(c, m, m, W - m * 2, H - m * 2, tr); c.stroke();
+      o.ink = lum(c1) > 0.35 ? c1 : "#5dff9c"; o.sub = alpha(o.ink, 0.8); o.glow = o.ink;
+    }
+    // (Watercolour: soft washes of your colours, a splash or two)
+    else if (th === "watercolour") {
+      c.fillStyle = "#fffdf8"; box(); c.fill();
+      c.save(); box(); c.clip();
+      const R = rng(p.title + "wash");
+      for (let k = 0; k < 6; k++) { const col = k % 2 ? c2 : c1, bx = R() * W, by = R() * H, br = 40 + R() * 80; const rg = c.createRadialGradient(bx, by, 0, bx, by, br); rg.addColorStop(0, alpha(col, 0.42)); rg.addColorStop(0.7, alpha(col, 0.14)); rg.addColorStop(1, alpha(col, 0)); c.fillStyle = rg; c.fillRect(0, 0, W, H); }
+      for (let k = 0; k < 16; k++) { c.fillStyle = alpha(k % 2 ? c1 : c2, 0.3 + R() * 0.35); c.beginPath(); c.arc(R() * W, R() * H, 0.8 + R() * 2.6, 0, Math.PI * 2); c.fill(); }
+      c.restore();
+      o.ink = "#2b2233"; o.sub = "rgba(43,34,51,0.8)";
+    }
+    // (Cyber: cut corners, hazard stripes, a number)
+    else if (th === "cyber") {
+      const k = 14, poly = () => { c.beginPath(); c.moveTo(m + k, m); c.lineTo(W - m, m); c.lineTo(W - m, H - m - k); c.lineTo(W - m - k, H - m); c.lineTo(m, H - m); c.lineTo(m, m + k); c.closePath(); };
+      const bg = c.createLinearGradient(0, 0, W, H); bg.addColorStop(0, "#0b1020"); bg.addColorStop(1, "#171029");
+      poly(); c.fillStyle = bg; c.fill();
+      c.save(); poly(); c.clip();
+      c.strokeStyle = alpha(c1, 0.08); c.lineWidth = 1; for (let x = -H; x < W; x += 10) { c.beginPath(); c.moveTo(x, H); c.lineTo(x + H, 0); c.stroke(); }
+      const hx = W - m - 92, hy = H - m - 7;
+      c.save(); c.beginPath(); c.rect(hx, hy, 62, 7); c.clip(); c.fillStyle = c2; c.fillRect(hx, hy, 62, 7);
+      c.fillStyle = "#0b1020"; for (let x = hx - 8; x < hx + 70; x += 9) { c.beginPath(); c.moveTo(x, hy + 7); c.lineTo(x + 4, hy + 7); c.lineTo(x + 11, hy); c.lineTo(x + 7, hy); c.fill(); }
+      c.restore(); c.restore();
+      poly(); c.lineWidth = 1.5; c.strokeStyle = c1; c.stroke();
+      c.fillStyle = c1; c.fillRect(m, m + k + 6, 3, 18); c.fillRect(W - m - 3, m + 10, 3, 18);
+      c.fillStyle = c2; c.font = "600 9px " + MONO; c.textAlign = "right"; c.textBaseline = "top"; c.fillText("// " + String(p.n || 1).padStart(2, "0"), W - m - 10, m + 7);
+      o.ink = "#e9f3ff"; o.sub = "rgba(233,243,255,0.76)";
+    }
+    // (Galaxy: stars, and nebulae of your colours)
+    else if (th === "galaxy") {
+      c.save(); box(); c.clip();
+      c.fillStyle = "#05030f"; c.fillRect(0, 0, W, H);
+      [[W * 0.8, H * 0.2, c1, 0.6], [W * 0.18, H * 0.95, c2, 0.5], [W * 0.5, H * 0.5, c1, 0.16]].forEach(([x, y, col, a]) => { const rg = c.createRadialGradient(x, y, 0, x, y, Math.max(W, H) * 0.55); rg.addColorStop(0, alpha(col, a)); rg.addColorStop(1, alpha(col, 0)); c.fillStyle = rg; c.fillRect(0, 0, W, H); });
+      const R = rng(p.title + "stars");
+      c.fillStyle = "#fff";
+      for (let k = 0, n = Math.round(W * H / 800); k < n; k++) { const x = R() * W, y = R() * H, s = R() * 1.3 + 0.3; c.globalAlpha = 0.3 + R() * 0.7; c.fillRect(x, y, s, s); }
+      c.globalAlpha = 1; c.strokeStyle = "rgba(255,255,255,0.85)"; c.lineWidth = 0.8;
+      for (let k = 0; k < 3; k++) { const x = R() * W, y = R() * H, s = 3 + R() * 4; c.beginPath(); c.moveTo(x - s, y); c.lineTo(x + s, y); c.moveTo(x, y - s); c.lineTo(x, y + s); c.stroke(); }
+      c.restore();
+      o.glow = alpha(c1, 0.8);
+    }
+    // (Ticket: admit one, its stub torn along the dots)
+    else if (th === "ticket") {
+      const stub = W - m - 66, ir = 7;
+      c.save(); c.shadowColor = "rgba(0,0,0,0.3)"; c.shadowBlur = 6; c.shadowOffsetY = 2; c.fillStyle = "#ffe9c7"; rounded(c, m, m, W - m * 2, H - m * 2, 8); c.fill(); c.restore();
+      c.save(); rounded(c, m, m, W - m * 2, H - m * 2, 8); c.clip();
+      const sg = c.createLinearGradient(stub, 0, W, H); sg.addColorStop(0, c1); sg.addColorStop(1, c2); c.fillStyle = sg; c.fillRect(stub, 0, W - stub, H);
+      c.restore();
+      c.globalCompositeOperation = "destination-out";
+      [[stub, m], [stub, H - m], [m, H / 2], [W - m, H / 2]].forEach(([x, y]) => { c.beginPath(); c.arc(x, y, ir, 0, Math.PI * 2); c.fill(); });
+      c.globalCompositeOperation = "source-over";
+      c.setLineDash([3, 4]); c.lineWidth = 1.5; c.strokeStyle = "rgba(59,36,16,0.55)"; c.beginPath(); c.moveTo(stub, m + ir + 3); c.lineTo(stub, H - m - ir - 3); c.stroke();
+      c.setLineDash([5, 3]); c.lineWidth = 1.2; c.strokeStyle = alpha(c1, 0.75); rounded(c, m + 7, m + 7, stub - m - 14, H - m * 2 - 14, 5); c.stroke(); c.setLineDash([]);
+      const no = "No. " + String(p.n || 1).padStart(2, "0");
+      c.save(); c.translate(stub + (W - m - stub) / 2, H / 2); c.rotate(-Math.PI / 2); c.fillStyle = "#fff"; c.textAlign = "center"; c.textBaseline = "middle";
+      if (H > 110) { c.font = "800 15px Bahnschrift, sans-serif"; c.fillText("ADMIT ONE", 0, -7); c.font = "600 10px Bahnschrift, sans-serif"; c.fillText(no, 0, 10); }
+      else { c.font = "800 13px Bahnschrift, sans-serif"; c.fillText(no, 0, 0); }
+      c.restore();
+      o.ink = "#3b2410"; o.sub = "rgba(59,36,16,0.8)";
+    }
+    else { c.fillStyle = "#14111f"; box(); c.fill(); c.fillStyle = g; c.fillRect(m + (r ? r * 0.6 : 0), m, W - m * 2 - (r ? r * 1.2 : 0), 3); }
+    return o;
+  }
+
+  // (its icon's tile: in its colours, as its theme draws them)
+  function tile(c, th, p, x, y, s, c1, g, ink) {
+    const tr = th === "pixel" || th === "cyber" ? 0 : th === "pastel" ? s / 2 : th === "ticket" ? 5 : s * 0.24;
+    if (p.imgEl) return picIn(c, p.imgEl, x, y, s, tr);
+    if (th === "terminal") { c.fillStyle = alpha(ink, 0.14); rounded(c, x, y, s, s, tr); c.fill(); c.lineWidth = 1.2; c.strokeStyle = ink; c.stroke(); }
+    else { c.fillStyle = LIGHT.has(th) ? c1 : g; rounded(c, x, y, s, s, tr); c.fill(); }
+    c.save(); c.translate(x + s * 0.2, y + s * 0.2); c.scale((s * 0.6) / 24, (s * 0.6) / 24); c.fillStyle = th === "terminal" ? ink : "#fff"; c.fill(new Path2D(ICONS[p.icon || iconFor(p.title)] || ICONS.star)); c.restore();
+  }
+
+  // (its title: in its glow or outline; Terminal's with its prompt and cursor)
+  function title(c, th, text, x, y, fs, o, fill) {
+    const t = (th === "terminal" ? "> " : "") + (UPPER.has(th) ? text.toUpperCase() : text);
+    if (o.outline) { c.lineJoin = "round"; c.lineWidth = 4; c.strokeStyle = o.outline; c.strokeText(t, x, y); }
+    if (o.glow) { c.shadowColor = o.glow; c.shadowBlur = 10; }
+    c.fillStyle = fill; c.fillText(t, x, y);
+    c.shadowBlur = 0;
+    if (th === "terminal") { c.fillStyle = o.ink; c.fillRect(x + c.measureText(t).width + 4, y - fs * 0.4, fs * 0.52, fs * 0.82); }
+  }
+  const titleText = (th, t) => (th === "terminal" ? "> " : "") + (UPPER.has(th) ? t.toUpperCase() : t) + (th === "terminal" ? "__" : "");
+
   // One panel: its title (and line under it), in the set's theme and shape; extended, its words under the title
   function draw(cv, p, set) {
+    const th = set.theme || "dark", shape = set.shape || "rounded";
+    const top = TOP[th] || 0, keepT = KEEP_TITLE[th] || 0, keepB = KEEP_BODY[th] || 0;
     // (extended, as set; or its line won't fit on one line beside its title, so it's extended to fit it all)
     const probe = document.createElement("canvas").getContext("2d");
-    probe.font = "500 11px " + FONT(set.theme);
-    const room = W - (set.icons !== false ? 84 : 22) - 18;
+    probe.font = "500 11px " + FONT(th);
+    const room = W - (set.icons !== false ? 84 : 22) - 18 - keepT;
     const ext = !!p.line && (!!set.extended || probe.measureText(p.line).width > room);
     let H = { short: 80, medium: 100, tall: 160, square: 320 }[set.height] || 100;
     let body = [];
+    const bw = W - 44 - keepB;
     if (ext) {
       // (as tall as its words need: a header, then the lines)
       const m = document.createElement("canvas").getContext("2d");
-      m.font = "500 14px " + FONT(set.theme);
-      body = wrap(m, p.line, W - 44);
-      if (body.length > 10) { m.font = "500 12.5px " + FONT(set.theme); body = wrap(m, p.line, W - 44); }
+      m.font = "500 14px " + FONT(th);
+      body = wrap(m, p.line, bw);
+      if (body.length > 10) { m.font = "500 12.5px " + FONT(th); body = wrap(m, p.line, bw); }
       p.fs = body.length > 10 ? 12.5 : 14; p.lh = body.length > 10 ? 17 : 20;
       // (Twitch's tallest is 600: smaller words first, down to 10 px; then the last line ends in ...)
-      const head = 74 + 18 + (set.theme === "y2k" ? 24 : 0);
-      while (head + body.length * p.lh > MAX_H && p.fs > 10) { p.fs -= 0.5; p.lh = Math.round(p.fs * 1.36); m.font = "500 " + p.fs + "px " + FONT(set.theme); body = wrap(m, p.line, W - 44); }
+      const head = 74 + 18 + top;
+      while (head + body.length * p.lh > MAX_H && p.fs > 10) { p.fs -= 0.5; p.lh = Math.round(p.fs * 1.36); m.font = "500 " + p.fs + "px " + FONT(th); body = wrap(m, p.line, bw); }
       const fit = Math.floor((MAX_H - head) / p.lh);
-      if (body.length > fit) { body = body.slice(0, fit); let l = body[fit - 1]; while (m.measureText(l + "…").width > W - 44 && l.length) l = l.slice(0, -1); body[fit - 1] = l + "…"; }
+      if (body.length > fit) { body = body.slice(0, fit); let l = body[fit - 1]; while (m.measureText(l + "…").width > bw && l.length) l = l.slice(0, -1); body[fit - 1] = l + "…"; }
       H = Math.min(MAX_H, head + body.length * p.lh);
     }
     cv.width = W * SCALE; cv.height = H * SCALE;
@@ -125,54 +314,29 @@
     c.scale(SCALE, SCALE);
     c.clearRect(0, 0, W, H);
     const c1 = (set.colors && set.colors.c1) || "#8e9bff", c2 = (set.colors && set.colors.c2) || "#ff7ac8";
-    const th = set.theme || "dark", shape = set.shape || "rounded";
     const r = shape === "square" ? 0 : shape === "pill" ? H / 2 : 14;
     const m = th === "comic" || th === "y2k" ? 6 : 3;
     const g = c.createLinearGradient(0, 0, W, H); g.addColorStop(0, c1); g.addColorStop(1, c2);
-    let ink = "#ffffff", sub = "rgba(255,255,255,0.78)";
     // (its panel)
-    if (th === "comic") { c.fillStyle = "#111"; rounded(c, m + 4, m + 4, W - m * 2 - 4, H - m * 2 - 4, r); c.fill(); c.fillStyle = "#fff"; rounded(c, m, m, W - m * 2 - 4, H - m * 2 - 4, r); c.fill(); c.lineWidth = 3; c.strokeStyle = "#111"; c.stroke(); ink = "#111"; sub = "rgba(17,17,17,0.7)"; }
-    else if (th === "y2k") { c.fillStyle = "#2b1b40"; rounded(c, m + 4, m + 4, W - m * 2 - 4, H - m * 2 - 4, 6); c.fill(); c.fillStyle = "#fdf6ff"; rounded(c, m, m, W - m * 2 - 4, H - m * 2 - 4, 6); c.fill(); c.lineWidth = 2.5; c.strokeStyle = "#2b1b40"; c.stroke();
-      const bar = c.createLinearGradient(0, 0, W, 0); bar.addColorStop(0, "#ff9ad5"); bar.addColorStop(0.55, "#b9a4ff"); bar.addColorStop(1, "#9ad0ff"); c.fillStyle = bar; c.fillRect(m + 1.5, m + 1.5, W - m * 2 - 7, 20); c.fillStyle = "#2b1b40"; c.fillRect(m + 1.5, m + 21, W - m * 2 - 7, 2.5);
-      c.font = "900 11px Segoe UI"; c.textAlign = "right"; c.fillText("–  □  ×", W - m - 12, m + 15); ink = "#2b1b40"; sub = "rgba(43,27,64,0.75)"; }
-    else if (th === "pastel") { c.fillStyle = "#fff6fb"; rounded(c, m, m, W - m * 2, H - m * 2, Math.max(r, 22)); c.fill(); c.lineWidth = 4; c.strokeStyle = c1; c.globalAlpha = 0.55; c.stroke(); c.globalAlpha = 1; ink = "#3a2a4a"; sub = "rgba(58,42,74,0.72)"; }
-    else if (th === "pixel") { c.fillStyle = "#f4f0ff"; c.fillRect(m, m + 4, W - m * 2, H - m * 2 - 8); c.fillRect(m + 4, m, W - m * 2 - 8, H - m * 2); c.fillStyle = "#1b1030"; c.fillRect(m + 4, m + 4, W - m * 2 - 8, H - m * 2 - 8); c.strokeStyle = c1; c.lineWidth = 3; c.strokeRect(m + 8, m + 8, W - m * 2 - 16, H - m * 2 - 16); }
-    else if (th === "neon") { c.fillStyle = "rgba(8,6,20,0.94)"; rounded(c, m + 4, m + 4, W - m * 2 - 8, H - m * 2 - 8, r); c.fill(); c.shadowColor = c1; c.shadowBlur = 14; c.lineWidth = 2.5; c.strokeStyle = c1; c.stroke(); c.shadowBlur = 0; }
-    else if (th === "glass") { c.fillStyle = "rgba(255,255,255,0.16)"; rounded(c, m, m, W - m * 2, H - m * 2, r); c.fill(); c.lineWidth = 1.5; c.strokeStyle = "rgba(255,255,255,0.4)"; c.stroke(); }
-    else if (th === "gradient") { c.fillStyle = g; rounded(c, m, m, W - m * 2, H - m * 2, r); c.fill(); }
-    else if (th === "minimal") { c.fillStyle = g; c.fillRect(m, H - m - 4, W - m * 2, 4); }
-    else { c.fillStyle = "#14111f"; rounded(c, m, m, W - m * 2, H - m * 2, r); c.fill(); c.fillStyle = g; c.fillRect(m + (r ? r * 0.6 : 0), m, W - m * 2 - (r ? r * 1.2 : 0), 3); }
+    const o = panelArt(c, th, p, ext, W, H, m, r, c1, c2, g);
+    const ink = o.ink, sub = o.sub, font = FONT(th);
     // (extended: a header (icon and title) and the words under it, with a line between)
     if (ext) {
-      const top = th === "y2k" ? 24 : 0, font = FONT(th);
       let x = 22;
       if (p.logo) { logo(c, x - 2, top + 15, 40, set, c1, c2, ink); x += 52; }
-      else if (set.icons !== false) {
-        const s = 36;
-        if (p.imgEl) picIn(c, p.imgEl, x, top + 18, s, th === "pixel" ? 0 : th === "pastel" ? s / 2 : 9);
-        else {
-          c.fillStyle = th === "comic" || th === "pastel" || th === "y2k" ? c1 : g;
-          if (th === "pixel") c.fillRect(x, top + 18, s, s); else { rounded(c, x, top + 18, s, s, th === "pastel" ? s / 2 : 9); c.fill(); }
-          c.save(); c.translate(x + s * 0.2, top + 18 + s * 0.2); c.scale((s * 0.6) / 24, (s * 0.6) / 24); c.fillStyle = "#fff"; c.fill(new Path2D(ICONS[p.icon || iconFor(p.title)] || ICONS.star)); c.restore();
-        }
-        x += s + 14;
-      }
+      else if (set.icons !== false) { tile(c, th, p, x, top + 18, 36, c1, g, ink); x += 36 + 14; }
       c.textAlign = "left"; c.textBaseline = "middle";
       let fs = 24;
       c.font = "800 " + fs + "px " + font;
-      while (c.measureText(p.title).width > W - x - 18 && fs > 12) { fs -= 1; c.font = "800 " + fs + "px " + font; }
-      c.fillStyle = th === "minimal" ? g : ink;
-      if (th === "neon") { c.shadowColor = c1; c.shadowBlur = 10; }
-      c.fillText(th === "pixel" ? p.title.toUpperCase() : p.title, x, top + 36);
-      c.shadowBlur = 0;
+      while (c.measureText(titleText(th, p.title)).width > W - x - 18 - keepT && fs > 12) { fs -= 1; c.font = "800 " + fs + "px " + font; }
+      title(c, th, p.title, x, top + 36, fs, o, th === "minimal" ? g : ink);
       const lg = c.createLinearGradient(22, 0, W - 22, 0); lg.addColorStop(0, c1); lg.addColorStop(1, c2);
-      c.fillStyle = th === "comic" ? "#111" : lg; c.fillRect(22, top + 64, W - 44, 2);
+      c.fillStyle = th === "comic" || th === "bauhaus" ? "#111" : lg; c.fillRect(22, top + 64, bw, 2);
       c.font = "500 " + p.fs + "px " + font; c.fillStyle = sub;
       body.forEach((l, i) => c.fillText(l, 22, top + 84 + i * p.lh));
       return;
     }
     // (its icon, in a tile of its colours)
-    const top = th === "y2k" ? 24 : 0;
     let x = 22;
     if (p.logo) {
       const s = Math.min(54, H - top - 26);
@@ -180,31 +344,21 @@
       x += s + 10;
     } else if (set.icons !== false) {
       const s = Math.min(46, H - top - 34);
-      const iy = top + (H - top - s) / 2;
-      if (p.imgEl) picIn(c, p.imgEl, x, iy, s, th === "pixel" ? 0 : th === "pastel" ? s / 2 : 10);
-      else {
-        c.fillStyle = th === "comic" || th === "pastel" || th === "y2k" ? c1 : g;
-        if (th === "pixel") c.fillRect(x, iy, s, s); else { rounded(c, x, iy, s, s, th === "pastel" ? s / 2 : 10); c.fill(); }
-        c.save(); c.translate(x + s * 0.2, iy + s * 0.2); c.scale((s * 0.6) / 24, (s * 0.6) / 24); c.fillStyle = "#fff"; c.fill(new Path2D(ICONS[p.icon || iconFor(p.title)] || ICONS.star)); c.restore();
-      }
+      tile(c, th, p, x, top + (H - top - s) / 2, s, c1, g, ink);
       x += s + 16;
     }
     // (its words)
-    const font = FONT(th);
     c.textAlign = "left"; c.textBaseline = "middle";
     const big = Math.min(30, (H - top) * 0.32);
     let fs = big;
     c.font = "800 " + fs + "px " + font;
-    while (c.measureText(p.title).width > W - x - 18 && fs > 12) { fs -= 1; c.font = "800 " + fs + "px " + font; }
+    while (c.measureText(titleText(th, p.title)).width > W - x - 18 - keepT && fs > 12) { fs -= 1; c.font = "800 " + fs + "px " + font; }
     const mid = top + (H - top) / 2;
-    c.fillStyle = th === "minimal" ? g : ink;
-    if (th === "neon") { c.shadowColor = c1; c.shadowBlur = 10; }
-    c.fillText(th === "pixel" ? p.title.toUpperCase() : p.title, x, p.line ? mid - fs * 0.38 : mid);
-    c.shadowBlur = 0;
+    title(c, th, p.title, x, p.line ? mid - fs * 0.38 : mid, fs, o, th === "minimal" ? g : ink);
     if (p.line) {
       // (its line, smaller until it fits: never cut off)
       // (a little smaller first; still too long, two lines, the title moved up for them)
-      const room = W - x - 18;
+      const room = W - x - 18 - keepT;
       let ls = Math.max(11, fs * 0.46);
       c.font = "500 " + ls + "px " + font;
       while (c.measureText(p.line).width > room && ls > 10) { ls -= 0.5; c.font = "500 " + ls + "px " + font; }
@@ -242,6 +396,7 @@
           const list = $("list"); list.innerHTML = ""; made = [];
           const all = (set.panels || []).slice();
           if (set.powered) all.push({ title: "Powered by OmniPulse", line: set.extended ? "This stream's music, chatbot, alerts and overlays all run on OmniPulse." + (set.site ? " / Get it at " + set.site : "") : (set.site || "Music, chatbot and stream tools in one app"), icon: "omni", logo: true });
+          all.forEach((p, i) => { p.n = i + 1; });
           for (const p of all) if (p.img) {
             const im = await pic(p.img);
             let clean = !!im;

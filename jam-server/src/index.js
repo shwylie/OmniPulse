@@ -275,6 +275,24 @@ export default {
       }
     }
 
+    // Ko-fi's webhooks (a tip, a membership, a shop order): kept for the app whose hook it is, which listens on
+    // the hook's socket. The hook's id is its secret; the app checks Ko-fi's own Verification Token itself.
+    if (parts[0] === "api" && parts[1] === "hook" && parts[2] === "kofi" && (parts.length === 4 || (parts.length === 5 && parts[4] === "ws"))) {
+      const id = parts[3];
+      if (!/^[a-z0-9]{20,40}$/.test(id)) return json({ error: "not found" }, 404);
+      const stub = env.HOOKS.get(env.HOOKS.idFromName("kofi:" + id));
+      if (parts[4] === "ws") return stub.fetch(new Request("https://hook/ws", req));
+      if (req.method !== "POST") return json({ error: "Ko-fi posts here" }, 405);
+      const text = await req.text();
+      if (text.length > 32 * 1024) return json({ error: "too long" }, 413);
+      // (Ko-fi sends a form, its data field the JSON)
+      let data = "";
+      try { data = new URLSearchParams(text).get("data") || ""; } catch (e) {}
+      if (!data) { try { JSON.parse(text); data = text; } catch (e) {} }
+      if (!data) return json({ error: "not a Ko-fi webhook" }, 400);
+      return stub.fetch("https://hook/add", { method: "POST", body: data });
+    }
+
     // shared playlists
     if (url.pathname === "/api/shares" && req.method === "POST") {
       const r = await readJson(req);
@@ -637,6 +655,48 @@ export class Share {
     }
     await this.ctx.storage.deleteAll();
   }
+}
+
+// A webhook's deliveries (Ko-fi's): the last 50, a week at most, sent on to whoever's listening on its socket.
+// A socket says {"after": n} for those after n it missed, or {"after": "now"} for none (where it's up to)
+export class Hooks {
+  constructor(ctx) {
+    this.ctx = ctx;
+    this.sql = ctx.storage.sql;
+    this.sql.exec("CREATE TABLE IF NOT EXISTS h (n INTEGER PRIMARY KEY AUTOINCREMENT, got INTEGER, data TEXT)");
+  }
+
+  last() { return this.sql.exec("SELECT MAX(n) AS n FROM h").toArray()[0].n || 0; }
+
+  async fetch(req) {
+    const url = new URL(req.url);
+    if (url.pathname === "/add") {
+      const data = await req.text(), now = Date.now();
+      this.sql.exec("INSERT INTO h (got, data) VALUES (?, ?)", now, data);
+      const n = this.last();
+      this.sql.exec("DELETE FROM h WHERE got < ? OR n <= ?", now - 7 * 86400000, n - 50);
+      const msg = JSON.stringify({ n, got: now, data });
+      for (const ws of this.ctx.getWebSockets()) { try { ws.send(msg); } catch (e) {} }
+      return json({ ok: true });
+    }
+    if (url.pathname === "/ws") {
+      if (req.headers.get("upgrade") !== "websocket") return json({ error: "a socket only" }, 426);
+      const pair = new WebSocketPair();
+      this.ctx.acceptWebSocket(pair[1]);
+      return new Response(null, { status: 101, webSocket: pair[0] });
+    }
+    return json({ error: "not found" }, 404);
+  }
+
+  async webSocketMessage(ws, msg) {
+    let m = null;
+    try { m = JSON.parse(String(msg)); } catch (e) { return; }
+    if (!m || m.after == null) return;
+    if (m.after !== "now") for (const r of this.sql.exec("SELECT n, got, data FROM h WHERE n > ? ORDER BY n", Number(m.after) || 0).toArray()) ws.send(JSON.stringify(r));
+    ws.send(JSON.stringify({ caught: true, n: this.last() }));
+  }
+
+  async webSocketClose(ws, code) { try { ws.close(code, "bye"); } catch (e) {} }
 }
 
 // Seamless Mix ratings: one list of them, each with the install it came from and when it arrived
