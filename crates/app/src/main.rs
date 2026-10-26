@@ -7071,9 +7071,15 @@ fn bot_paint(shared: &Shared) {
         g.set_icons(cur.get("panelIcons").and_then(|v| v.as_bool()) != Some(false));
         g.set_logo_colours(or("panelLogoColours", "theme").into());
         let t = ui.global::<Theme>();
-        let (c1, c2) = botpage::suite_colours(&cur).map(|(a, b)| (look::Rgb::parse(&a).map(|c| c.slint()).unwrap_or(t.get_accent()), look::Rgb::parse(&b).map(|c| c.slint()).unwrap_or(t.get_accent_2()))).unwrap_or_else(|| { let m = theme_accents(&shared.borrow().web.prefs); (look::Rgb::parse(&m.0).map(|c| c.slint()).unwrap_or(t.get_accent()), look::Rgb::parse(&m.1).map(|c| c.slint()).unwrap_or(t.get_accent_2())) });
+        let (c1, c2) = botpage::panel_colours(&cur).map(|(a, b)| (look::Rgb::parse(&a).map(|c| c.slint()).unwrap_or(t.get_accent()), look::Rgb::parse(&b).map(|c| c.slint()).unwrap_or(t.get_accent_2()))).unwrap_or_else(|| { let m = theme_accents(&shared.borrow().web.prefs); (look::Rgb::parse(&m.0).map(|c| c.slint()).unwrap_or(t.get_accent()), look::Rgb::parse(&m.1).map(|c| c.slint()).unwrap_or(t.get_accent_2())) });
         g.set_c1(c1);
         g.set_c2(c2);
+        // (your own colours for the words and the background, if they're set)
+        let own = |k: &str| botpage::hex_of(&cur, k).and_then(|h| look::Rgb::parse(&h)).map(|c| c.slint());
+        g.set_ink_on(own("panelInk").is_some());
+        g.set_ink(own("panelInk").unwrap_or_default());
+        g.set_bg_on(own("panelBg").is_some());
+        g.set_bg(own("panelBg").unwrap_or_default());
         // (Terminal's type: the first colour if it's bright enough to read on black, as panels.html has it)
         let lum = 0.299 * c1.red() as f32 + 0.587 * c1.green() as f32 + 0.114 * c1.blue() as f32;
         g.set_term_ink(if lum / 255.0 > 0.35 { c1 } else { slint::Color::from_rgb_u8(0x5d, 0xff, 0x9c) });
@@ -7170,7 +7176,7 @@ thread_local! {
 }
 
 /// The panels' look and list, as a template keeps them
-const PANEL_TPL_KEYS: [&str; 9] = ["panelTheme", "panelShape", "panelHeight", "panelIcons", "panelExtended", "panelList", "suiteColors", "suiteC1", "suiteC2"];
+const PANEL_TPL_KEYS: [&str; 14] = ["panelTheme", "panelShape", "panelHeight", "panelIcons", "panelExtended", "panelList", "suiteColors", "suiteC1", "suiteC2", "panelColors", "panelC1", "panelC2", "panelInk", "panelBg"];
 
 fn bot_set(shared: &Shared, key: &str, v: &str) {
     let key = botpage::key_of(key).to_string();
@@ -7375,6 +7381,11 @@ fn bot_act(shared: &Shared, act: &str) {
         return bot_paint(shared);
     }
     if let Some(url) = act.strip_prefix("url:") { if let Err(e) = omnipulse_core::open_url(url.to_string()) { say(&e); } return; }
+    // (a platform's row in Tips and Donations: opened, or shut)
+    if let Some(id) = act.strip_prefix("fold:") {
+        botpage::TIPS_OPEN.with(|o| { let mut o = o.borrow_mut(); if !o.remove(id) { o.insert(id.to_string()); } });
+        return bot_paint(shared);
+    }
     if let Some(text) = act.strip_prefix("copy:") { if share::copy(text).is_ok() { say("Copied."); } return; }
     // (its widgets: switched here, their settings their own pages, asked first if something here isn't saved)
     if let Some(key) = act.strip_prefix("row-toggle:") { set_toggle(shared, key); return bot_paint(shared); }

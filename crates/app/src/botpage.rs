@@ -31,6 +31,11 @@ pub fn sign_in_extras(vals: &mut Map<String, Value>, relay: &str) {
     }
 }
 
+thread_local! {
+    /// Tips and Donations' platforms clicked open
+    pub static TIPS_OPEN: std::cell::RefCell<std::collections::HashSet<String>> = std::cell::RefCell::new(std::collections::HashSet::new());
+}
+
 /// One line of a sheet or a step, as the page draws it (BotField)
 pub struct Field { pub key: String, pub kind: &'static str, pub label: String, pub note: String, pub value: String, pub extra: String, pub n: i32 }
 
@@ -140,11 +145,30 @@ pub fn panel_icon(title: &str) -> &'static str {
 
 /// The widgets' colours, as hex: a palette's, your own, or none (your accent)
 pub fn suite_colours(cur: &Map<String, Value>) -> Option<(String, String)> {
-    let hex = |k: &str, d: &str| { let v = s(cur, k).trim().to_string(); if v.len() == 7 && v.starts_with('#') && v[1..].chars().all(|c| c.is_ascii_hexdigit()) { v } else { d.to_string() } };
-    let (a, b) = match s(cur, "suiteColors") {
+    colours_of(cur, s(cur, "suiteColors"), "suiteC1", "suiteC2")
+}
+
+/// A colour typed in as hex (#rrggbb), if it is one
+pub fn hex_of(cur: &Map<String, Value>, k: &str) -> Option<String> {
+    let v = s(cur, k).trim().to_string();
+    (v.len() == 7 && v.starts_with('#') && v[1..].chars().all(|c| c.is_ascii_hexdigit())).then_some(v)
+}
+
+/// The panels' colours: the Suite widgets' (the default), a palette, or their own two (None: the app's)
+pub fn panel_colours(cur: &Map<String, Value>) -> Option<(String, String)> {
+    match s(cur, "panelColors") {
+        "" | "suite" => suite_colours(cur),
+        k => colours_of(cur, k, "panelC1", "panelC2"),
+    }
+}
+
+/// A palette by name, or "custom": the two typed in (c1, c2 their keys); "accent" or anything else: None
+fn colours_of(cur: &Map<String, Value>, which: &str, c1: &str, c2: &str) -> Option<(String, String)> {
+    let hex = |k: &str, d: &str| hex_of(cur, k).unwrap_or_else(|| d.to_string());
+    let (a, b) = match which {
         "sunset" => ("#ff8a5c", "#ff4f8b"), "ocean" => ("#3ec7ff", "#5a6bff"), "candy" => ("#ff8fd8", "#b48eff"), "mint" => ("#5ef2b8", "#3ab0ff"),
         "fire" => ("#ffb03a", "#ff3d3d"), "gold" => ("#ffd76e", "#ff9f43"), "mono" => ("#f2f2f2", "#9a9aa6"),
-        "custom" => return Some((hex("suiteC1", "#8e9bff"), hex("suiteC2", "#ff7ac8"))),
+        "custom" => return Some((hex(c1, "#8e9bff"), hex(c2, "#ff7ac8"))),
         _ => return None,
     };
     Some((a.into(), b.into()))
@@ -362,15 +386,17 @@ fn sheet_of(id: &str, cur: &Map<String, Value>) -> (String, Vec<Field>) {
                 f("chips", "panelLogoColours", "Its logo's colours", "", if s(cur, "panelLogoColours").is_empty() { "theme" } else { s(cur, "panelLogoColours") }, "theme=Your Colours|omnipulse=OmniPulse's Own|plain=Plain"),
                 f("head", "", "2. How they look", "", "", ""),
                 f("chips", "panelTheme", "Theme", "", &or("panelTheme", "dark"), "dark=Dark|glass=Glass|neon=Neon|comic=Comic|pastel=Pastel|y2k=Y2K|pixel=Pixel|gradient=Gradient|minimal=Minimal|synthwave=Synthwave|paper=Paper Note|bauhaus=Bauhaus|holo=Holo Foil|terminal=Terminal|watercolour=Watercolour|cyber=Cyber|galaxy=Galaxy|ticket=Ticket"),
-                f("chips", "suiteColors", "Colours", "The same colours as your Suite widgets.", if s(cur, "suiteColors").is_empty() { "accent" } else { s(cur, "suiteColors") }, "accent=Yours|sunset=Sunset|ocean=Ocean|candy=Candy|mint=Mint|fire=Fire|gold=Gold|mono=Mono|custom=Your Own"),
+                f("chips", "panelColors", "Colours", "The theme's two colours. Same as Your Widgets uses the Suite widgets' colours.", if s(cur, "panelColors").is_empty() { "suite" } else { s(cur, "panelColors") }, "suite=Same as Your Widgets|accent=OmniPulse's Look|sunset=Sunset|ocean=Ocean|candy=Candy|mint=Mint|fire=Fire|gold=Gold|mono=Mono|custom=Your Own"),
             ];
             // (the logo's colours: only with its panel on)
             if !on(cur, "panelPowered", true) { v.retain(|x| x.key != "panelLogoColours"); }
-            if s(cur, "suiteColors") == "custom" {
-                v.push(f("text", "suiteC1", "First colour", "As hex, like #8e9bff.", s(cur, "suiteC1"), "#8e9bff"));
-                v.push(f("text", "suiteC2", "Second colour", "", s(cur, "suiteC2"), "#ff7ac8"));
+            if s(cur, "panelColors") == "custom" {
+                v.push(f("text", "panelC1", "First colour", "As hex, like #8e9bff.", s(cur, "panelC1"), "#8e9bff"));
+                v.push(f("text", "panelC2", "Second colour", "", s(cur, "panelC2"), "#ff7ac8"));
             }
             v.extend([
+                f("text", "panelInk", "Words colour", "As hex, like #ffffff. Leave it empty for the theme's own.", s(cur, "panelInk"), "The theme's own"),
+                f("text", "panelBg", "Background colour", "Replaces a plain background (Dark, Neon, Comic, Y2K, Pastel, Pixel, Paper Note, Bauhaus, Terminal, Watercolour, Galaxy, Ticket). Leave it empty for the theme's own.", s(cur, "panelBg"), "The theme's own"),
                 f("chips", "panelShape", "Corners", "", &or("panelShape", "rounded"), "rounded=Rounded|square=Square|pill=Round Ends"),
                 f("chips", "panelHeight", "Size", "Header is Twitch's usual 320 × 100. Square (320 × 320) suits a badge or a partner's logo.", &or("panelHeight", "medium"), "short=Short|medium=Header|tall=Tall|square=Square"),
                 f("toggle", "panelIcons", "Icons", "An icon beside each title.", if on(cur, "panelIcons", true) { "true" } else { "false" }, ""),
@@ -422,14 +448,14 @@ fn sheet_of(id: &str, cur: &Map<String, Value>) -> (String, Vec<Field>) {
         }),
         "tips" => ("Tips and Donations".into(), {
             let mut v = vec![
-                f("note", "", "Tips and donations from Streamlabs, StreamElements or Ko-fi show as alerts, and can start your actions. Set up the ones you use.", "", "", ""),
-                f("head", "", "Streamlabs", "", "", ""),
+                f("note", "", "Tips and donations from Streamlabs, StreamElements or Ko-fi show as alerts, and can start your actions. Click the ones you use to set them up.", "", "", ""),
             ];
-            v.extend(sheet_of("streamlabs", cur).1);
-            v.push(f("head", "", "StreamElements", "", "", ""));
-            v.extend(sheet_of("streamelements", cur).1);
-            v.push(f("head", "", "Ko-fi", "", "", ""));
-            v.extend(sheet_of("kofi", cur).1);
+            // (each a row of its own: clicked open for its steps, shut again with another click)
+            for (id, name, set) in [("streamlabs", "Streamlabs", !s(cur, "streamlabsToken").is_empty()), ("streamelements", "StreamElements", !s(cur, "streamelementsToken").is_empty()), ("kofi", "Ko-fi", !s(cur, "kofiToken").is_empty())] {
+                let open = TIPS_OPEN.with(|o| o.borrow().contains(id));
+                v.push(f("fold", id, name, if set { "Set up" } else { "Not set up" }, if set { "ok" } else { "off" }, if open { "open" } else { "shut" }));
+                if open { v.extend(sheet_of(id, cur).1); }
+            }
             v
         }),
         // (Ko-fi: its webhook to the relay, a hook of your own; Ko-fi's token checked by the chatbot)

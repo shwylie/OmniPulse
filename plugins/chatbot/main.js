@@ -2232,7 +2232,7 @@ function panelSet() {
   const x = S(), v = (k, d) => (x[k] === undefined || x[k] === "" ? d : x[k]);
   const list = String(v("panelList", "About Me | My Music | PC Specs | Sponsors | Donate")).split("|").map((p) => p.trim()).filter(Boolean).slice(0, 12);
   return {
-    id: "panels", kind: "panels", logoColours: String(v("panelLogoColours", "theme")), font: themeFonts()[String(v("panelTheme", "dark"))] || "", scale: num(v("panelScale", 2)) === 1 ? 1 : 2, extended: yes(v("panelExtended", false)), powered: yes(v("panelPowered", true)), site: OMNIPULSE_SITE, theme: String(v("panelTheme", "dark")), shape: String(v("panelShape", "rounded")), height: String(v("panelHeight", "medium")), icons: yes(v("panelIcons", true)), colors: suiteColors(),
+    id: "panels", kind: "panels", logoColours: String(v("panelLogoColours", "theme")), font: themeFonts()[String(v("panelTheme", "dark"))] || "", scale: num(v("panelScale", 2)) === 1 ? 1 : 2, extended: yes(v("panelExtended", false)), powered: yes(v("panelPowered", true)), site: OMNIPULSE_SITE, theme: String(v("panelTheme", "dark")), shape: String(v("panelShape", "rounded")), height: String(v("panelHeight", "medium")), icons: yes(v("panelIcons", true)), colors: panelColors(), ink: hexOr(v("panelInk", "")), bg: hexOr(v("panelBg", "")),
     // (your own icons, in the panels' order: a picture copied in (/overlay/...), or one's address)
     panels: list.map((p, n) => { const i = p.indexOf(":"), img = (String(v("panelOwnIcons", "")).split("|")[n] || "").trim(); return Object.assign(i < 0 ? { title: p, line: "" } : { title: p.slice(0, i).trim(), line: p.slice(i + 1).trim() }, /^(\/overlay\/|https?:\/\/)/.test(img) ? { img } : {}); }),
   };
@@ -2247,6 +2247,15 @@ function suiteColors() {
   if (k === "custom") return { c1: hex(x.suiteC1, "#8e9bff"), c2: hex(x.suiteC2, "#ff7ac8") };
   return PALETTES[k] ? { c1: PALETTES[k][0], c2: PALETTES[k][1] } : null;
 }
+// (the panels': the widgets' (the default), a palette, or their own two)
+function panelColors() {
+  const x = S(), k = String(x.panelColors || "suite");
+  const hex = (v, d) => /^#[0-9a-f]{6}$/i.test(String(v || "").trim()) ? String(v).trim() : d;
+  if (k === "suite") return suiteColors();
+  if (k === "custom") return { c1: hex(x.panelC1, "#8e9bff"), c2: hex(x.panelC2, "#ff7ac8") };
+  return PALETTES[k] ? { c1: PALETTES[k][0], c2: PALETTES[k][1] } : null;
+}
+const hexOr = (v) => /^#[0-9a-f]{6}$/i.test(String(v || "").trim()) ? String(v).trim() : "";
 function money(v) { const n = parseFloat(String(v || "").replace(/[^0-9.]/g, "")); return isNaN(n) ? 0 : n; }
 function tierOf(t) { return t === "3000" ? 3 : t === "2000" ? 2 : 1; }
 

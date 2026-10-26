@@ -126,16 +126,18 @@
   const slug = (t) => String(t || "panel").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "panel";
 
   // Its panel, behind its words: drawn in its theme. What it gives back: the words' colours, a glow, an outline
-  function panelArt(c, th, p, ext, W, H, m, r, c1, c2, g) {
+  function panelArt(c, th, p, ext, W, H, m, r, c1, c2, g, bg) {
+    // (a plain background: your own colour instead, if set)
+    const B = (d) => bg || d;
     const o = { ink: "#ffffff", sub: "rgba(255,255,255,0.78)", glow: "", outline: "" };
     const box = () => rounded(c, m, m, W - m * 2, H - m * 2, r);
-    if (th === "comic") { c.fillStyle = "#111"; rounded(c, m + 4, m + 4, W - m * 2 - 4, H - m * 2 - 4, r); c.fill(); c.fillStyle = "#fff"; rounded(c, m, m, W - m * 2 - 4, H - m * 2 - 4, r); c.fill(); c.lineWidth = 3; c.strokeStyle = "#111"; c.stroke(); o.ink = "#111"; o.sub = "rgba(17,17,17,0.7)"; }
-    else if (th === "y2k") { c.fillStyle = "#2b1b40"; rounded(c, m + 4, m + 4, W - m * 2 - 4, H - m * 2 - 4, 6); c.fill(); c.fillStyle = "#fdf6ff"; rounded(c, m, m, W - m * 2 - 4, H - m * 2 - 4, 6); c.fill(); c.lineWidth = 2.5; c.strokeStyle = "#2b1b40"; c.stroke();
+    if (th === "comic") { c.fillStyle = "#111"; rounded(c, m + 4, m + 4, W - m * 2 - 4, H - m * 2 - 4, r); c.fill(); c.fillStyle = B("#fff"); rounded(c, m, m, W - m * 2 - 4, H - m * 2 - 4, r); c.fill(); c.lineWidth = 3; c.strokeStyle = "#111"; c.stroke(); o.ink = "#111"; o.sub = "rgba(17,17,17,0.7)"; }
+    else if (th === "y2k") { c.fillStyle = "#2b1b40"; rounded(c, m + 4, m + 4, W - m * 2 - 4, H - m * 2 - 4, 6); c.fill(); c.fillStyle = B("#fdf6ff"); rounded(c, m, m, W - m * 2 - 4, H - m * 2 - 4, 6); c.fill(); c.lineWidth = 2.5; c.strokeStyle = "#2b1b40"; c.stroke();
       const bar = c.createLinearGradient(0, 0, W, 0); bar.addColorStop(0, "#ff9ad5"); bar.addColorStop(0.55, "#b9a4ff"); bar.addColorStop(1, "#9ad0ff"); c.fillStyle = bar; c.fillRect(m + 1.5, m + 1.5, W - m * 2 - 7, 20); c.fillStyle = "#2b1b40"; c.fillRect(m + 1.5, m + 21, W - m * 2 - 7, 2.5);
       c.font = "900 11px Segoe UI"; c.textAlign = "right"; c.textBaseline = "alphabetic"; c.fillText("–  □  ×", W - m - 12, m + 15); o.ink = "#2b1b40"; o.sub = "rgba(43,27,64,0.75)"; }
-    else if (th === "pastel") { c.fillStyle = "#fff6fb"; rounded(c, m, m, W - m * 2, H - m * 2, Math.max(r, 22)); c.fill(); c.lineWidth = 4; c.strokeStyle = c1; c.globalAlpha = 0.55; c.stroke(); c.globalAlpha = 1; o.ink = "#3a2a4a"; o.sub = "rgba(58,42,74,0.72)"; }
-    else if (th === "pixel") { c.fillStyle = "#f4f0ff"; c.fillRect(m, m + 4, W - m * 2, H - m * 2 - 8); c.fillRect(m + 4, m, W - m * 2 - 8, H - m * 2); c.fillStyle = "#1b1030"; c.fillRect(m + 4, m + 4, W - m * 2 - 8, H - m * 2 - 8); c.strokeStyle = c1; c.lineWidth = 3; c.strokeRect(m + 8, m + 8, W - m * 2 - 16, H - m * 2 - 16); }
-    else if (th === "neon") { c.fillStyle = "rgba(8,6,20,0.94)"; rounded(c, m + 4, m + 4, W - m * 2 - 8, H - m * 2 - 8, r); c.fill(); c.shadowColor = c1; c.shadowBlur = 14; c.lineWidth = 2.5; c.strokeStyle = c1; c.stroke(); c.shadowBlur = 0; o.glow = c1; }
+    else if (th === "pastel") { c.fillStyle = B("#fff6fb"); rounded(c, m, m, W - m * 2, H - m * 2, Math.max(r, 22)); c.fill(); c.lineWidth = 4; c.strokeStyle = c1; c.globalAlpha = 0.55; c.stroke(); c.globalAlpha = 1; o.ink = "#3a2a4a"; o.sub = "rgba(58,42,74,0.72)"; }
+    else if (th === "pixel") { c.fillStyle = "#f4f0ff"; c.fillRect(m, m + 4, W - m * 2, H - m * 2 - 8); c.fillRect(m + 4, m, W - m * 2 - 8, H - m * 2); c.fillStyle = B("#1b1030"); c.fillRect(m + 4, m + 4, W - m * 2 - 8, H - m * 2 - 8); c.strokeStyle = c1; c.lineWidth = 3; c.strokeRect(m + 8, m + 8, W - m * 2 - 16, H - m * 2 - 16); }
+    else if (th === "neon") { c.fillStyle = B("rgba(8,6,20,0.94)"); rounded(c, m + 4, m + 4, W - m * 2 - 8, H - m * 2 - 8, r); c.fill(); c.shadowColor = c1; c.shadowBlur = 14; c.lineWidth = 2.5; c.strokeStyle = c1; c.stroke(); c.shadowBlur = 0; o.glow = c1; }
     else if (th === "glass") { c.fillStyle = "rgba(255,255,255,0.16)"; box(); c.fill(); c.lineWidth = 1.5; c.strokeStyle = "rgba(255,255,255,0.4)"; c.stroke(); }
     else if (th === "gradient") { c.fillStyle = g; box(); c.fill(); }
     else if (th === "minimal") { c.fillStyle = g; c.fillRect(m, H - m - 4, W - m * 2, 4); }
@@ -157,7 +159,7 @@
     }
     // (Paper: a ruled note, taped on)
     else if (th === "paper") {
-      c.save(); c.shadowColor = "rgba(0,0,0,0.35)"; c.shadowBlur = 8; c.shadowOffsetY = 3; c.fillStyle = "#fbf6e9"; rounded(c, m + 2, m + 4, W - m * 2 - 4, H - m * 2 - 8, 3); c.fill(); c.restore();
+      c.save(); c.shadowColor = "rgba(0,0,0,0.35)"; c.shadowBlur = 8; c.shadowOffsetY = 3; c.fillStyle = B("#fbf6e9"); rounded(c, m + 2, m + 4, W - m * 2 - 4, H - m * 2 - 8, 3); c.fill(); c.restore();
       c.save(); rounded(c, m + 2, m + 4, W - m * 2 - 4, H - m * 2 - 8, 3); c.clip();
       c.strokeStyle = "#c9d8ef"; c.lineWidth = 1; for (let y = 28; y < H - 6; y += 18) { c.beginPath(); c.moveTo(m, y + 0.5); c.lineTo(W - m, y + 0.5); c.stroke(); }
       c.strokeStyle = "#eaa3a3"; c.beginPath(); c.moveTo(14.5, m); c.lineTo(14.5, H); c.stroke(); c.restore();
@@ -166,7 +168,7 @@
     }
     // (Bauhaus: shapes of your colours, and a black bar)
     else if (th === "bauhaus") {
-      c.fillStyle = "#f2ede4"; rounded(c, m, m, W - m * 2, H - m * 2, Math.min(r, 6)); c.fill();
+      c.fillStyle = B("#f2ede4"); rounded(c, m, m, W - m * 2, H - m * 2, Math.min(r, 6)); c.fill();
       c.save(); rounded(c, m, m, W - m * 2, H - m * 2, Math.min(r, 6)); c.clip();
       const hh = ext ? 74 : H, s = Math.min(44, hh * 0.44), cy = hh / 2;
       c.fillStyle = c1; c.beginPath(); c.arc(W - 38, cy - s * 0.3, s, 0, Math.PI * 2); c.fill();
@@ -190,7 +192,7 @@
     // (Terminal: a window of glowing type)
     else if (th === "terminal") {
       const tr = Math.min(r, 8);
-      c.fillStyle = "#0a0f0c"; rounded(c, m, m, W - m * 2, H - m * 2, tr); c.fill();
+      c.fillStyle = B("#0a0f0c"); rounded(c, m, m, W - m * 2, H - m * 2, tr); c.fill();
       c.save(); rounded(c, m, m, W - m * 2, H - m * 2, tr); c.clip();
       c.fillStyle = "#1c2420"; c.fillRect(0, 0, W, m + 17);
       // (its window's marks: three small squares in your colours)
@@ -203,7 +205,7 @@
     }
     // (Watercolour: soft washes of your colours, a splash or two)
     else if (th === "watercolour") {
-      c.fillStyle = "#fffdf8"; box(); c.fill();
+      c.fillStyle = B("#fffdf8"); box(); c.fill();
       c.save(); box(); c.clip();
       const R = rng(p.title + "wash");
       for (let k = 0; k < 6; k++) { const col = k % 2 ? c2 : c1, bx = R() * W, by = R() * H, br = 40 + R() * 80; const rg = c.createRadialGradient(bx, by, 0, bx, by, br); rg.addColorStop(0, alpha(col, 0.42)); rg.addColorStop(0.7, alpha(col, 0.14)); rg.addColorStop(1, alpha(col, 0)); c.fillStyle = rg; c.fillRect(0, 0, W, H); }
@@ -230,7 +232,7 @@
     // (Galaxy: stars, and nebulae of your colours)
     else if (th === "galaxy") {
       c.save(); box(); c.clip();
-      c.fillStyle = "#05030f"; c.fillRect(0, 0, W, H);
+      c.fillStyle = B("#05030f"); c.fillRect(0, 0, W, H);
       [[W * 0.8, H * 0.2, c1, 0.6], [W * 0.18, H * 0.95, c2, 0.5], [W * 0.5, H * 0.5, c1, 0.16]].forEach(([x, y, col, a]) => { const rg = c.createRadialGradient(x, y, 0, x, y, Math.max(W, H) * 0.55); rg.addColorStop(0, alpha(col, a)); rg.addColorStop(1, alpha(col, 0)); c.fillStyle = rg; c.fillRect(0, 0, W, H); });
       const R = rng(p.title + "stars");
       c.fillStyle = "#fff";
@@ -243,7 +245,7 @@
     // (Ticket: admit one, its stub torn along the dots)
     else if (th === "ticket") {
       const stub = W - m - 66, ir = 7;
-      c.save(); c.shadowColor = "rgba(0,0,0,0.3)"; c.shadowBlur = 6; c.shadowOffsetY = 2; c.fillStyle = "#ffe9c7"; rounded(c, m, m, W - m * 2, H - m * 2, 8); c.fill(); c.restore();
+      c.save(); c.shadowColor = "rgba(0,0,0,0.3)"; c.shadowBlur = 6; c.shadowOffsetY = 2; c.fillStyle = B("#ffe9c7"); rounded(c, m, m, W - m * 2, H - m * 2, 8); c.fill(); c.restore();
       c.save(); rounded(c, m, m, W - m * 2, H - m * 2, 8); c.clip();
       const sg = c.createLinearGradient(stub, 0, W, H); sg.addColorStop(0, c1); sg.addColorStop(1, c2); c.fillStyle = sg; c.fillRect(stub, 0, W - stub, H);
       c.restore();
@@ -259,7 +261,7 @@
       c.restore();
       o.ink = "#3b2410"; o.sub = "rgba(59,36,16,0.8)";
     }
-    else { c.fillStyle = "#14111f"; box(); c.fill(); c.fillStyle = g; c.fillRect(m + (r ? r * 0.6 : 0), m, W - m * 2 - (r ? r * 1.2 : 0), 3); }
+    else { c.fillStyle = B("#14111f"); box(); c.fill(); c.fillStyle = g; c.fillRect(m + (r ? r * 0.6 : 0), m, W - m * 2 - (r ? r * 1.2 : 0), 3); }
     return o;
   }
 
@@ -318,7 +320,10 @@
     const m = th === "comic" || th === "y2k" ? 6 : 3;
     const g = c.createLinearGradient(0, 0, W, H); g.addColorStop(0, c1); g.addColorStop(1, c2);
     // (its panel)
-    const o = panelArt(c, th, p, ext, W, H, m, r, c1, c2, g);
+    const own = (v) => /^#[0-9a-f]{6}$/i.test(String(v || "")) ? v : "";
+    const o = panelArt(c, th, p, ext, W, H, m, r, c1, c2, g, own(set.bg));
+    // (your own colour for the words, if set)
+    if (own(set.ink)) { o.ink = set.ink; o.sub = alpha(set.ink, 0.8); }
     const ink = o.ink, sub = o.sub, font = FONT(th);
     // (extended: a header (icon and title) and the words under it, with a line between)
     if (ext) {

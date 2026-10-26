@@ -391,6 +391,7 @@
     {"key": "panelLogoColours", "label": "OmniPulse Logo Colours", "type": "select", "default": "theme", "options": ["theme", "omnipulse", "plain"]},
     {"key": "panelOwnIcons", "label": "Panels' Own Icons", "type": "text", "default": ""},
     { "key": "suiteColors", "label": "Widget Colours", "type": "select", "default": "accent", "options": ["accent", "sunset", "ocean", "candy", "mint", "fire", "gold", "mono", "custom"] },
+    { "key": "panelColors", "label": "Panel Colours", "type": "select", "default": "suite", "options": ["suite", "accent", "sunset", "ocean", "candy", "mint", "fire", "gold", "mono", "custom"] },
     { "key": "suiteC1", "label": "Widget Colour", "type": "text", "default": "#8e9bff" },
     { "key": "suiteC2", "label": "Widget Second Colour", "type": "text", "default": "#ff7ac8" },
     { "key": "gifPlace", "label": "Where the GIF Goes", "type": "select", "default": "top", "options": ["top", "left", "right", "corner"] },

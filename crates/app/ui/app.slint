@@ -123,6 +123,11 @@ export global PanelLook {
     in-out property <color> c1;
     in-out property <color> c2;
     in-out property <color> term-ink: #5dff9c;
+    // (your own words' and background's colours, if set)
+    in-out property <bool> ink-on;
+    in-out property <color> ink;
+    in-out property <bool> bg-on;
+    in-out property <color> bg;
 }
 /// A webcam overlay's piece, for its preview: the camera, or a part (fractions of the canvas)
 export struct CamRect { id: string, label: string, x: float, y: float, w: float, h: float }
@@ -2813,7 +2818,7 @@ component PanelPreview inherits Rectangle {
             pi := Rectangle {
                 property <string> th: PanelLook.theme;
                 property <bool> light: self.th == "comic" || self.th == "pastel" || self.th == "y2k" || self.th == "paper" || self.th == "bauhaus" || self.th == "holo" || self.th == "watercolour" || self.th == "ticket";
-                property <color> ink: self.th == "pastel" ? #3a2a4a : self.th == "paper" ? #26324a : self.th == "bauhaus" ? #111111 : self.th == "holo" ? #2a1f45 : self.th == "watercolour" ? #2b2233
+                property <color> ink: PanelLook.ink-on ? PanelLook.ink : self.th == "pastel" ? #3a2a4a : self.th == "paper" ? #26324a : self.th == "bauhaus" ? #111111 : self.th == "holo" ? #2a1f45 : self.th == "watercolour" ? #2b2233
                     : self.th == "ticket" ? #3b2410 : self.th == "terminal" ? PanelLook.term-ink : self.light ? #2b1b40 : #ffffff;
                 // (room at the top for a title bar; room on the right for its art; its type)
                 property <length> top: self.th == "y2k" ? 22px : self.th == "terminal" ? 18px : 0px;
@@ -2826,7 +2831,10 @@ component PanelPreview inherits Rectangle {
                 height: p.body ? min(600px, 74px + p.lines * 17px + 18px + self.top) : root.ph;
                 clip: true;
                 border-radius: PanelLook.shape == "square" || self.th == "pixel" || self.th == "cyber" ? 0px : self.th == "paper" ? 3px : self.th == "bauhaus" ? 6px : self.th == "terminal" || self.th == "ticket" ? 8px : PanelLook.shape == "pill" && !p.body ? self.height / 2 : 14px;
-                background: self.th == "comic" || self.th == "y2k" ? (self.th == "y2k" ? #fdf6ff : #ffffff) : self.th == "pastel" ? #fff6fb : self.th == "glass" ? #ffffff29 : self.th == "neon" ? #080614f0
+                // (a plain background: your own colour instead, if you've set one)
+                property <bool> flat: self.th == "dark" || self.th == "neon" || self.th == "comic" || self.th == "y2k" || self.th == "pastel" || self.th == "pixel" || self.th == "paper" || self.th == "bauhaus"
+                    || self.th == "terminal" || self.th == "watercolour" || self.th == "galaxy" || self.th == "ticket";
+                background: PanelLook.bg-on && self.flat ? PanelLook.bg : self.th == "comic" || self.th == "y2k" ? (self.th == "y2k" ? #fdf6ff : #ffffff) : self.th == "pastel" ? #fff6fb : self.th == "glass" ? #ffffff29 : self.th == "neon" ? #080614f0
                     : self.th == "pixel" ? #1b1030 : self.th == "gradient" ? PanelLook.c1.mix(PanelLook.c2, 0.5) : self.th == "minimal" || self.th == "cyber" ? transparent
                     : self.th == "synthwave" ? #12021f : self.th == "paper" ? #fbf6e9 : self.th == "bauhaus" ? #f2ede4 : self.th == "holo" ? #e9e0ff : self.th == "terminal" ? #0a0f0c
                     : self.th == "watercolour" ? #fffdf8 : self.th == "galaxy" ? #05030f : self.th == "ticket" ? #ffe9c7 : #14111f;
@@ -3702,11 +3710,11 @@ global BotLook {
         return Theme.tints.length > 0 ? Theme.tints[mod(n, Theme.tints.length)] : Theme.accent;
     }
     public pure function tint(id: string) -> color {
-        return id == "twitch" || id == "twitchbot" ? #a970ff : id == "kick" || id == "kickbot" ? #53fc18 : id == "youtube" ? #ff3355 : id == "obs" ? Theme.accent : id == "meld" ? #ff7a59 : id == "slobs" ? #80f5d2 : id == "streamlabs" ? #4ad295 : id == "streamelements" ? #5ad1ff
+        return id == "twitch" || id == "twitchbot" ? #a970ff : id == "kick" || id == "kickbot" ? #53fc18 : id == "youtube" ? #ff3355 : id == "obs" ? Theme.accent : id == "meld" ? #ff7a59 : id == "slobs" ? #80f5d2 : id == "streamlabs" ? #4ad295 : id == "streamelements" ? #5ad1ff : id == "kofi" ? #ff5e5b
             : id == "requests" ? Theme.accent : id == "alerts" ? #ff6b8a : id == "points" ? #ffb547 : id == "games" ? #5ad1ff : Theme.accent-2;
     }
     public pure function icon(id: string) -> string {
-        return id == "twitch" || id == "twitchbot" ? Icons.twitch : id == "kick" || id == "kickbot" ? Icons.kick : id == "youtube" ? Icons.youtube-mark : id == "obs" || id == "meld" || id == "slobs" || id == "software" ? Icons.broadcast : id == "tips" ? Icons.coins : id == "streamlabs" || id == "streamelements" ? Icons.coins
+        return id == "twitch" || id == "twitchbot" ? Icons.twitch : id == "kick" || id == "kickbot" ? Icons.kick : id == "youtube" ? Icons.youtube-mark : id == "obs" || id == "meld" || id == "slobs" || id == "software" ? Icons.broadcast : id == "tips" ? Icons.coins : id == "streamlabs" || id == "streamelements" || id == "kofi" ? Icons.coins
             : id == "requests" ? Icons.playlist-add : id == "alerts" ? Icons.bell : id == "points" ? Icons.coins : id == "games" ? Icons.dice : id == "moderation" ? Icons.shield
             : id == "hype" ? Icons.broadcast : id == "voteskip" ? Icons.next : id == "wheel" ? Icons.dice : id == "leaderboard" ? Icons.coins : id == "emoterain" ? Icons.chat : id == "tune" ? Icons.lyrics
             : id == "goals" ? Icons.check : id == "timer" ? Icons.refresh : id == "latest" ? Icons.heart-out : id == "raid" ? Icons.broadcast : Icons.actions;
@@ -3885,6 +3893,28 @@ component BotFieldRow inherits VerticalLayout {
         spacing: 12px;
         VerticalLayout { horizontal-stretch: 1; alignment: center; Text { text: root.f.label; color: Theme.text; font-weight: 700; font-size: 13px; } }
         for c in [{ id: "everyone", n: "Everyone" }, { id: "subscribers", n: "Subscribers" }, { id: "vips", n: "VIPs" }, { id: "mods", n: "Moderators" }]: VerticalLayout { alignment: center; Chip { label: c.n; on: root.f.value == c.id; clicked => { root.set(root.f.key, c.id); } } }
+    }
+    // (a part that opens: its mark, its name, whether it's set up, and an arrow; clicked, open or shut)
+    if root.f.kind == "fold": Rectangle {
+        height: fdl.preferred-height;
+        fdta := TouchArea { mouse-cursor: MouseCursor.pointer; clicked => { root.act("fold:" + root.f.key); } }
+        fdl := HorizontalLayout {
+            spacing: 12px;
+            VerticalLayout { alignment: center; Glyph { d: BotLook.icon(root.f.key); width: 22px; height: 22px; fill: BotLook.tint(root.f.key); } }
+            VerticalLayout {
+                horizontal-stretch: 1;
+                alignment: center;
+                spacing: 3px;
+                Text { text: root.f.label; color: Theme.text; font-weight: 700; font-size: 14px; }
+                HorizontalLayout {
+                    spacing: 6px;
+                    alignment: start;
+                    VerticalLayout { alignment: center; Light { state: root.f.value; } }
+                    Text { text: root.f.note; color: Theme.muted; font-size: 12px; }
+                }
+            }
+            VerticalLayout { alignment: center; Chevron { open: root.f.extra == "open"; tint: fdta.has-hover ? Theme.text : Theme.muted; } }
+        }
     }
     if root.f.kind == "link": HorizontalLayout {
         spacing: 12px;
