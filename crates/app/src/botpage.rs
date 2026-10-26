@@ -415,7 +415,9 @@ fn sheet_of(id: &str, cur: &Map<String, Value>) -> (String, Vec<Field>) {
             let or = |k: &str, d: &'static str| if s(cur, k).is_empty() { d.to_string() } else { s(cur, k).to_string() };
             let spot = or("camSpot", "br");
             let mut v = vec![
-                addr("/cam/main", "Add it as a Browser source the size of your canvas (1920 × 1080), above your camera. It's see-through: the frame goes round your camera, and the parts you switch on below come with it, live ones included, so it's all one source."),
+                // (its words above its box, not in its card: the card's too narrow to fit them, split as the page is)
+                f("note", "", "Add it as a Browser source the size of your canvas (1920 × 1080), above your camera. It's see-through: the frame goes round your camera, and the parts you switch on below come with it, live ones included, so it's all one source.", "", "", ""),
+                addr("/cam/main", ""),
                 f("head", "", "Your camera", "", "", ""),
                 f("chips", "camSpot", "Where it is", "Put your camera there in OBS, or choose Your Own Spot and match it.", &spot, "br=Bottom Right|bl=Bottom Left|tr=Top Right|tl=Top Left|custom=Your Own Spot"),
             ];

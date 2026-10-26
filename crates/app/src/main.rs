@@ -609,7 +609,16 @@ fn paint_sides(a: &mut App) {
         // (and the playlists, while Stream-Safe Music is on)
         .filter(|_| !streamsafe::on(&prefs))
         .collect();
-    let sides: Vec<Side> = a.side_map.iter().map(|&i| Side { title: a.playlists[i].title.clone().into(), plat: if xpl::is_own(&a.playlists[i].id) { "xpl".into() } else { a.playlists[i].plat.into() }, own: xpl::is_own(&a.playlists[i].id), share: a.playlists[i].plat != "local" || xpl::is_own(&a.playlists[i].id), sc: share::platform_id(&a.playlists[i], &a.xpl, "soundcloud").is_some(), sp: share::platform_id(&a.playlists[i], &a.xpl, "spotify").is_some(), collab: collab_of(&a.xpl, &a.playlists[i].id).is_some(), collab_owner: collab_of(&a.xpl, &a.playlists[i].id).is_some_and(|c| c["owner"].as_bool() == Some(true)), merged: a.xpl.as_array().is_some_and(|l| l.iter().any(|x| x["id"].as_str() == Some(a.playlists[i].id.as_str()) && x["merged"].as_array().is_some_and(|m| !m.is_empty()))) }).collect();
+    // (in your order: pinned ones first, as pinned; then as you've arranged them; new ones after, as they come)
+    let ids = |k: &str| -> Vec<String> { prefs[k].as_array().into_iter().flatten().filter_map(|x| x.as_str().map(String::from)).collect() };
+    let (pinned, order) = (ids("sidePinned"), ids("sideOrder"));
+    let pl = &a.playlists;
+    let sid = |i: usize| mirror::side_id(pl[i].plat, &pl[i].id);
+    let mut map = a.side_map.clone();
+    map.sort_by_key(|&i| { let id = sid(i); (pinned.iter().position(|p| *p == id).unwrap_or(usize::MAX), order.iter().position(|o| *o == id).unwrap_or(usize::MAX)) });
+    let pins: std::collections::HashSet<String> = pinned.into_iter().collect();
+    a.side_map = map;
+    let sides: Vec<Side> = a.side_map.iter().map(|&i| Side { title: a.playlists[i].title.clone().into(), plat: if xpl::is_own(&a.playlists[i].id) { "xpl".into() } else { a.playlists[i].plat.into() }, own: xpl::is_own(&a.playlists[i].id), share: a.playlists[i].plat != "local" || xpl::is_own(&a.playlists[i].id), sc: share::platform_id(&a.playlists[i], &a.xpl, "soundcloud").is_some(), sp: share::platform_id(&a.playlists[i], &a.xpl, "spotify").is_some(), collab: collab_of(&a.xpl, &a.playlists[i].id).is_some(), collab_owner: collab_of(&a.xpl, &a.playlists[i].id).is_some_and(|c| c["owner"].as_bool() == Some(true)), merged: a.xpl.as_array().is_some_and(|l| l.iter().any(|x| x["id"].as_str() == Some(a.playlists[i].id.as_str()) && x["merged"].as_array().is_some_and(|m| !m.is_empty()))), pinned: pins.contains(&mirror::side_id(a.playlists[i].plat, &a.playlists[i].id)) }).collect();
     ui.set_sides(ModelRc::from(Rc::new(VecModel::from(sides))));
     // Add to Playlist: yours here first, then the platforms' (one of those becomes a playlist here)
     let mut order: Vec<usize> = a.side_map.iter().copied().filter(|&i| xpl::is_own(&a.playlists[i].id)).collect();
@@ -3584,17 +3593,24 @@ fn rhythm_ahead(shared: &Shared, t: Track) {
 }
 
 async fn rhythm_measure_whole(t: Track) {
+    // (why one couldn't be measured, and how long one took: in the log, for the ratings' reviews)
+    let note = |w: &str| omnipulse_core::diag::note(&format!("Seamless Mix couldn't measure {}: {w}", t.title));
+    let began = std::time::Instant::now();
     let (kind, id) = match &t.src {
         track::Src::YouTube(id) => ("youtube", id.clone()),
         track::Src::Local(p) => ("local", p.clone()),
         track::Src::SoundCloud(id) if !t.go_plus && omnipulse_core::soundcloud::signed_in() => ("soundcloud", id.to_string()),
-        _ if mix_via_youtube(&t) => match versions::find(&t).await { Some(v) => ("youtube", v.yt.id), None => return },
-        _ => return,
+        track::Src::SoundCloud(_) if t.go_plus => return note("a SoundCloud Go+ song (only its preview can be got)"),
+        _ if mix_via_youtube(&t) => match versions::find(&t).await { Some(v) => ("youtube", v.yt.id), None => return note("no YouTube Music version found") },
+        _ => return note("nothing it plays from can be measured"),
     };
     // (all of it: up to 20 minutes)
-    let Ok((mono, rate)) = omnipulse_core::loudness::mono_start(kind, &id, 1200.0).await else { return };
+    let (mono, rate) = match omnipulse_core::loudness::mono_start(kind, &id, 1200.0).await { Ok(x) => x, Err(e) => return note(&format!("couldn't get its sound ({e})")) };
+    let got = began.elapsed().as_secs_f64();
     let heard = mono.len() as u64 * 1000 / rate.max(1) as u64;
     let r = tokio::task::spawn_blocking(move || omnipulse_core::rhythm::analyse(&mono, rate)).await.ok().flatten();
+    if r.is_none() { return note("no beat found"); }
+    omnipulse_core::diag::note(&format!("Seamless Mix measured {} in {:.0} s ({got:.0} s getting its sound)", t.title, began.elapsed().as_secs_f64()));
     if let Some(r) = r {
         let m = omnipulse_core::rhythm::Measured { from_ms: 0, to_ms: heard, rhythm: r, v: omnipulse_core::rhythm::VERSION };
         if omnipulse_core::rhythm::known(&t.key).is_none() { omnipulse_core::rhythm::keep(&t.key, m.clone()); }
@@ -5886,6 +5902,11 @@ fn smart_decide(shared: &Shared, a: &SmartSong, b: &SmartSong, pos: u64, late: b
             }
         }
     } else if late {
+        // (which wasn't, and whether it was being measured or still waiting its turn: for the reviews)
+        let busy = |k: &str| RHYTHM_FULL_BUSY.lock().map(|b| b.iter().any(|x| x == k)).unwrap_or(false);
+        let state = |s: &SmartSong| if s.rhythm.is_some() { None } else { Some(format!("{} ({})", s.t.title, if busy(&s.t.key) { "being measured or waiting its turn" } else { "not being measured" })) };
+        let which: Vec<String> = [state(a), state(b)].into_iter().flatten().collect();
+        omnipulse_core::diag::note(&format!("Seamless Mix: not measured in time: {}", which.join(", ")));
         Some((None, "not both measured in time".into()))
     } else {
         None
@@ -7020,7 +7041,11 @@ fn bot_fields(list: Vec<botpage::Field>) -> (Vec<BotField>, String) {
         let (c1, c2) = x.note.split_once(',').filter(|_| x.kind == "suiteprev" && !x.note.is_empty())
             .map(|(a, b)| (look::Rgb::parse(a).map(|c| c.slint()).unwrap_or_default(), look::Rgb::parse(b).map(|c| c.slint()).unwrap_or_default()))
             .unwrap_or_default();
-        BotField { changed: !x.key.is_empty() && !x.key.contains(':') && pf_changed(&x.key), key: x.key.into(), kind: x.kind.into(), label: x.label.into(), note: x.note.into(), value: x.value.into(), extra: x.extra.into(), n: x.n, opts: strs(names), opt_ids: strs(ids), c1, c2 }
+        // (a split page's column is narrow: a row of choices too wide for it, a dropdown, so none's cut off)
+        let split = BOT_SHEET.with(|b| matches!(b.borrow().as_str(), "panels" | "cam"));
+        let wide = names.iter().map(|n| n.chars().count() as f32 * 7.4 + 34.0).sum::<f32>() > 440.0;
+        let (kind, n) = if x.kind == "chips" && split && wide { ("choose", ids.iter().position(|i| *i == x.value).map_or(-1, |i| i as i32)) } else { (x.kind, x.n) };
+        BotField { changed: !x.key.is_empty() && !x.key.contains(':') && pf_changed(&x.key), key: x.key.into(), kind: kind.into(), label: x.label.into(), note: x.note.into(), value: x.value.into(), extra: x.extra.into(), n, opts: strs(names), opt_ids: strs(ids), c1, c2 }
     }).collect();
     (rows, sig)
 }
@@ -10255,8 +10280,39 @@ fn pl_row_action(shared: &Shared, act: &str, t: Track) {
     }
 }
 
+/// A sidebar playlist (its place there) moved before another's place (the end: after them all): the order as
+/// shown kept as yours. A pinned one stays among the pinned (and an unpinned one among the rest), its pin
+/// order moved instead if it's dropped among them
+fn side_move(shared: &Shared, from: usize, to: usize) {
+    let (mut ids, pinned) = {
+        let a = shared.borrow();
+        let ids: Vec<String> = a.side_map.iter().map(|&i| mirror::side_id(a.playlists[i].plat, &a.playlists[i].id)).collect();
+        let pinned: Vec<String> = a.web.prefs["sidePinned"].as_array().into_iter().flatten().filter_map(|x| x.as_str().map(String::from)).collect();
+        (ids, pinned)
+    };
+    if from >= ids.len() || to > ids.len() { return; }
+    let id = ids.remove(from);
+    let to = if to > from { to - 1 } else { to };
+    ids.insert(to, id);
+    // (the pinned ones' order: as they now stand)
+    let pinned: Vec<String> = ids.iter().filter(|x| pinned.contains(x)).cloned().collect();
+    pref_put(shared, "sidePinned", serde_json::json!(pinned));
+    pref_put(shared, "sideOrder", serde_json::json!(ids));
+    paint_sides(&mut shared.borrow_mut());
+}
+
 fn side_action(shared: &Shared, i: usize, act: &str) {
     let Some(p) = shared.borrow().side_map.get(i).and_then(|&at| shared.borrow().playlists.get(at).cloned()) else { return };
+    // (pinned to the top, or not: the last pinned, below those pinned before it)
+    if act == "pin" {
+        let id = mirror::side_id(p.plat, &p.id);
+        let mut pinned: Vec<String> = shared.borrow().web.prefs["sidePinned"].as_array().into_iter().flatten().filter_map(|x| x.as_str().map(String::from)).collect();
+        let now = if let Some(k) = pinned.iter().position(|x| *x == id) { pinned.remove(k); false } else { pinned.push(id); true };
+        pref_put(shared, "sidePinned", serde_json::json!(pinned));
+        paint_sides(&mut shared.borrow_mut());
+        if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_status(if now { format!("{} pinned to the top.", p.title) } else { format!("{} unpinned.", p.title) }.into()); }
+        return;
+    }
     if act == "share" {
         return share_playlist(shared, p);
     }
@@ -13750,12 +13806,20 @@ fn main() -> Result<(), slint::PlatformError> {
         d.on_accepts(move |target, data| {
             // (a page of the sidebar, onto another)
             if let Some(over) = target.strip_prefix("nav:") { return data.plain_text().ok().and_then(|t| t.strip_prefix("n:").map(|f| f != over)).unwrap_or(false); }
+            // (a playlist to a gap: anywhere but just before or after itself)
+            if let Some(to) = target.strip_prefix("sidegap:").and_then(|x| x.parse::<usize>().ok()) {
+                return data.plain_text().ok().and_then(|t| t.strip_prefix("p:").and_then(|x| x.parse::<usize>().ok())).is_some_and(|from| to != from && to != from + 1);
+            }
             let a = s.borrow(); dragged(&a, &data).is_some_and(|w| drop_ok(&a, &target, &w))
         });
         let s = shared.clone();
         d.on_dropped(move |target, data| {
             if let Some(over) = target.strip_prefix("nav:") {
                 if let Some(from) = data.plain_text().ok().and_then(|t| t.strip_prefix("n:").map(String::from)) { nav_move(&s, &from, over); }
+                return;
+            }
+            if let Some(to) = target.strip_prefix("sidegap:").and_then(|x| x.parse::<usize>().ok()) {
+                if let Some(from) = data.plain_text().ok().and_then(|t| t.strip_prefix("p:").and_then(|x| x.parse::<usize>().ok())) { side_move(&s, from, to); }
                 return;
             }
             let what = { let a = s.borrow(); dragged(&a, &data).filter(|w| drop_ok(&a, &target, w)) };
@@ -14711,6 +14775,14 @@ fn main() -> Result<(), slint::PlatformError> {
                     let sides = s.borrow().side_map.len();
                     let own: Vec<bool> = (0..sides.min(6)).map(|i| ask(&format!("side:{i}"), "t:0")).collect();
                     println!("selftest: drag asks: track on sides 0-5 {own:?}; playlist 0 on itself {}, on side 1 {}; queue {}, playlist on queue {}", ask("side:0", "p:0"), ask("side:1", "p:0"), ask("queue", "t:0"), ask("queue", "p:0"));
+                    // (the sidebar's order: a playlist before another, not where it already is; moved, pinned)
+                    println!("selftest: drag asks: playlist 0 to gap 0 {}, gap 1 {}, gap 2 {}; track to gap 2 {}", ask("sidegap:0", "p:0"), ask("sidegap:1", "p:0"), ask("sidegap:2", "p:0"), ask("sidegap:2", "t:0"));
+                    let names = |s: &Shared| { let a = s.borrow(); a.side_map.iter().take(4).map(|&i| a.playlists[i].title.clone()).collect::<Vec<_>>() };
+                    let before = names(&s);
+                    d.invoke_dropped("sidegap:2".into(), slint::DataTransfer::from(slint::SharedString::from("p:0")));
+                    let moved = names(&s);
+                    side_action(&s, 2, "pin");
+                    println!("selftest: sidebar order {before:?} -> moved {moved:?} -> third pinned {:?}", names(&s));
                 }
                 "langnext" => { ui.invoke_lang_pick(ui.get_lang_at() + 1); println!("selftest: Discover language now \"{}\"", ui.get_lang_label()); }
                 "comfy" => { ui.invoke_density_changed(false); ui.invoke_nav("library".into()); }
