@@ -80,4 +80,4 @@ with its source available.
   `crates/core/models/` with its licence.
 - [yt-dlp](https://github.com/yt-dlp/yt-dlp) is downloaded on first use, not bundled.
 - OmniPulse isn't affiliated with SoundCloud, Spotify, YouTube, Apple, Twitch, Kick, Streamlabs,
-  StreamElements, Streamer.bot, Mix It Up, Ko-fi or Elgato.
+  StreamElements, Streamer.bot, Mix It Up, Ko-fi or Elgato, although we do love every one of them.
