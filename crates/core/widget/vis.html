@@ -44,6 +44,8 @@
   // same sound, held back by the same Offset; see-through, so they lay over the stream as they are ----------
   const FLAT = ["bars", "mirror", "peaks", "blocks", "dots", "wave", "centre", "halo"];
   if (FLAT.includes(SCENE)) {
+    // (see-through: the page's frame and its body, both black for the GPU scenes)
+    document.documentElement.style.background = "transparent";
     document.body.style.background = "transparent";
     const g = canvas.getContext("2d");
     const N = 48;

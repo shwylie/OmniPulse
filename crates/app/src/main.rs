@@ -2042,8 +2042,15 @@ thread_local! {
 /// versions there, best first, with the one it plays marked
 fn tp_versions(shared: &Shared, t: &Track) {
     TP_VERSIONS.with(|v| v.borrow_mut().clear());
-    if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_tp_versions(ModelRc::default()); ui.set_tp_version_on(-1); }
-    if !(t.go_plus || matches!(t.src, track::Src::Catalog(_))) { return; }
+    // (a Spotify song too, while Seamless Mix plays it from YouTube Music: its version picked here is the one it mixes)
+    let via_mix = matches!(t.src, track::Src::Spotify(_)) && smart_on(&shared.borrow().web.prefs);
+    let shown = t.go_plus || matches!(t.src, track::Src::Catalog(_)) || via_mix;
+    if let Some(ui) = shared.borrow().ui.upgrade() {
+        ui.set_tp_versions(ModelRc::default()); ui.set_tp_version_on(-1);
+        ui.set_tp_versions_shown(shown);
+        ui.set_tp_versions_note(if via_mix { "With Seamless Mix on, this song plays from YouTube Music. Pick the right version, or search for it below." } else { "" }.into());
+    }
+    if !shown { return; }
     let (rt, weak, t) = { let a = shared.borrow(); (a.rt.clone(), a.ui.clone(), t.clone()) };
     rt.spawn(async move {
         let (artist, title) = versions::guess_names(&t);
