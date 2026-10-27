@@ -952,6 +952,9 @@ component GroupedPicker inherits Rectangle {
         x: 0;
         y: root.up ? -gpl.height - 4px : root.height + 4px;
         width: max(root.width, 300px);
+        // (its own height, the list's: left to itself it's taken as taller, and moved up to fit the window,
+        // drawn above where it takes clicks)
+        height: gpl.height;
         close-policy: PopupClosePolicy.close-on-click-outside;
         gpl := Rectangle {
             height: min(root.most, gpc.preferred-height + 50px);
@@ -5501,7 +5504,6 @@ export component AppWindow inherits Window {
     // the first-run setup: shown once, the first time OmniPulse opens (Settings > App & Look > Run Setup Again)
     in-out property <bool> setup-open;
     in property <int> setup-at;
-    in property <bool> setup-taste;
     in property <bool> setup-web;
     callback setup-go(string);
     in property <string> tb-design: "standard";
@@ -7882,188 +7884,198 @@ export component AppWindow inherits Window {
                             act(a) => { root.bot-act(a); }
                             try-it(t) => { root.bot-try(t); }
                         }
-                        if !root.bot-page: ScrollView {
-                          property <int> hin: Hi.n;
-                          changed hin => { self.content-y = max(min(0px, self.content-y - (Hi.y - self.absolute-position.y - 120px)), self.visible-height - self.content-height); }
+                        // (a widget's settings: the preview docked on the right, in sight as they scroll)
+                        if !root.bot-page: HorizontalLayout {
                           vertical-stretch: 1;
-                          VerticalLayout {
-                          spacing: 12px;
-                          padding-right: 10px;
-                          // (room under the last one, clear of Cancel and Save)
-                          padding-bottom: 24px;
-                          // (from the top, however tall the window: the room to spare under the last, never
-                          // shared out between them)
-                          alignment: start;
-                          if root.pf-preview == "lyrics": LyricsPreview { look: root.pf-lyrics; }
-                          if root.pf-preview == "socials": SocialPreview { items: root.pf-social-items; look: root.pf-social; }
-                          if root.pf-preview == "multichat": ChatPreview { look: root.pf-chat; samples: root.pf-chat-samples; }
-                          if root.pf-preview == "alerts": AlertPreview { look: root.pf-alert; }
-                          if root.pf-preview == "widget": WidgetPreview { look: root.pf-widget; art: root.now-art; title: root.now-title == "Nothing playing" || root.now-title == "" ? "A Song You Love" : root.now-title; artist: root.now-artist == "" ? "Your Favourite Artist" : root.now-artist; }
-                          // (its height from its layout, which knows how its notes wrap: a preferred height
-                          // reads them as one line)
-                          for f[i] in root.pf-fields: Rectangle {
-                           background: f.kind == "note" ? transparent : Theme.panel;
-                           border-radius: f.kind == "note" ? 0px : 12px;
-                           border-width: f.kind == "note" ? 0px : 1px;
-                           border-color: Theme.line;
-                           // (changed, not saved yet: a ring round it, breathing)
-                           if f.changed: Pulse { x: -10px; y: -6px; width: parent.width + 20px; height: parent.height + 12px; r: 10px; }
-                           HiGlow { x: -10px; y: -6px; width: parent.width + 20px; height: parent.height + 12px; r: 10px; lit: Hi.label != "" && Hi.label == f.label; }
-                           fcol := VerticalLayout {
-                           padding: f.kind == "note" ? 0px : 14px;
-                           spacing: 6px;
-                           // instructions: just text
-                           if f.kind == "note" && f.label.character-count <= 32: VerticalLayout { padding-top: 8px; SectionHead { text: f.label; } }
-                           if f.kind == "note" && f.label.character-count > 32: Text { text: f.label; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
-                           // a sound's waveform: where its trims are (shares of it), then its outline's 160 heights
-                           if f.kind == "wave": VerticalLayout {
-                            spacing: 4px;
-                            Text { text: f.label; color: Theme.text; font-weight: 700; }
-                            if f.note != "": Text { text: f.note; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
-                            Rectangle {
-                              height: 72px;
-                              border-radius: 8px;
-                              background: Theme.panel;
-                              border-width: 1px;
-                              border-color: Theme.line;
-                              clip: true;
-                              // (a bar for each of its 160 steps, spread across it: options' 3rd on are their heights, 0 to 1)
-                              for v[k] in f.options: Rectangle {
-                                  visible: k >= 2;
-                                  property <length> step: (parent.width - 16px) / max(1, f.options.length - 2);
-                                  x: 8px + (k - 2) * self.step;
-                                  width: max(1px, self.step * 0.72);
-                                  height: max(1px, (parent.height - 14px) * (k >= 2 ? v.to-float() : 0));
-                                  y: (parent.height - self.height) / 2;
-                                  border-radius: 1px;
-                                  background: Theme.accent;
-                              }
-                              // (trimmed off: shaded)
-                              Rectangle { x: 8px; y: 0; height: parent.height; width: (parent.width - 16px) * (f.options.length > 1 ? f.options[0].to-float() : 0); background: Theme.bg.with-alpha(0.72); }
-                              Rectangle { property <float> e: f.options.length > 1 ? f.options[1].to-float() : 0; x: 8px + (parent.width - 16px) * (1 - self.e); y: 0; height: parent.height; width: (parent.width - 16px) * self.e; background: Theme.bg.with-alpha(0.72); }
-                            }
-                           }
-                           // an address: shown, and copied
-                           if f.kind == "info" || f.kind == "output": VerticalLayout {
-                            spacing: 4px;
-                            Text { text: f.label; color: Theme.text; font-weight: 700; }
-                            if f.note != "": Text { text: f.note; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
-                            HorizontalLayout {
-                              spacing: 8px;
-                              Rectangle {
-                                horizontal-stretch: 1;
-                                height: 34px;
-                                border-radius: 8px;
-                                background: Theme.panel;
-                                border-width: 1px;
-                                border-color: Theme.line;
-                                Text { x: 10px; width: parent.width - 20px; text: f.value; color: Theme.text; font-size: 12px; overflow: elide; vertical-alignment: center; }
-                              }
-                              VerticalLayout { alignment: center; IconButton { d: Icons.copy; size: 34px; tip: "Copy it"; clicked => { root.pf-copy(i); } } }
-                              // (another output: its look, or taken away)
-                              if f.kind == "output": VerticalLayout { alignment: center; IconButton { d: Icons.gear; size: 34px; tip: "Change the look"; clicked => { root.pf-set(i, "btn:edit"); } } }
-                              if f.kind == "output": VerticalLayout { alignment: center; IconButton { d: Icons.close; size: 34px; tip: "Remove this output"; clicked => { root.pf-set(i, "btn:del"); } } }
-                            }
-                           }
-                           if f.kind == "designpick": VerticalLayout {
-                            spacing: 8px;
-                            Text { text: f.label; color: Theme.text; font-weight: 700; }
-                            for r in 4: HorizontalLayout {
-                                spacing: 10px;
-                                for c in 4: DesignSketch { horizontal-stretch: 1; preferred-width: 0px; min-width: 0px; k: r * 4 + c; name: f.options[r * 4 + c]; on: f.at == r * 4 + c; clicked => { root.pf-set(i, "\u{2}" + (r * 4 + c)); } }
-                            }
-                           }
-                           if f.kind != "note" && f.kind != "info" && f.kind != "output" && f.kind != "wave" && f.kind != "designpick": HorizontalLayout {
-                            spacing: 12px;
+                          spacing: 20px;
+                          ScrollView {
+                            horizontal-stretch: 1;
+                            property <int> hin: Hi.n;
+                            changed hin => { self.content-y = max(min(0px, self.content-y - (Hi.y - self.absolute-position.y - 120px)), self.visible-height - self.content-height); }
+                            vertical-stretch: 1;
                             VerticalLayout {
-                                horizontal-stretch: 1;
-                                alignment: center;
-                                spacing: 2px;
-                                Text { text: f.label; color: Theme.text; font-weight: 700; }
-                                if f.note != "": Text { text: f.note; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
-                            }
-                            if f.kind == "toggle": CenterToggle { checked: f.value == "true"; toggled => { root.pf-set(i, self.checked ? "true" : "false"); } }
-                    // a list's row: its buttons, then its switch
-                    if f.kind == "row": HorizontalLayout {
-                        spacing: 6px;
-                        for o[k] in f.options: VerticalLayout { alignment: center; Pill { label: o; clicked => { root.pf-set(i, "btn:" + k); } } }
-                    }
-                    if f.kind == "row": CenterToggle { checked: f.value == "true"; toggled => { root.pf-set(i, self.checked ? "true" : "false"); } }
-                            // a choice: a dropdown (as the web app's)
-                            if f.kind == "select" && f.options.length <= 3: HorizontalLayout {
-                                spacing: 4px;
-                                for o[k] in f.options: VerticalLayout { alignment: center; Chip { label: o; on: k == f.at; clicked => { root.pf-set(i, "\u{2}" + k); } } }
-                            }
-                            if f.kind == "select" && f.options.length > 3: VerticalLayout { alignment: center; Dropdown { options: f.options; current: f.at; picked(k) => { root.pf-set(i, "\u{2}" + k); } } }
-                            // a size or a count: − and + (as the web app's)
-                            if f.kind == "stepper": VerticalLayout { alignment: center; Stepper { value: f.value; can-down: f.at > 0; can-up: f.at < f.options.length - 1; down => { root.pf-set(i, "\u{2}" + (f.at - 1)); } up => { root.pf-set(i, "\u{2}" + (f.at + 1)); } } }
-                            // a level: a slider, its value beside it (and with "rangenum", a box to type it in too)
-                            if f.kind == "range" || f.kind == "rangenum": rrow := HorizontalLayout {
-                                spacing: 10px;
-                                width: 260px;
-                                y: (parent.height - self.height) / 2;
-                                // (where it is as it slides: the value shown beside it follows)
-                                property <float> live: f.value.to-float();
-                                Range { horizontal-stretch: 1; minimum: f.options[0].to-float(); maximum: f.options[1].to-float(); value: f.value.to-float(); changed(v) => { rrow.live = v; root.pf-set(i, "\u{4}" + v); } }
-                                if f.kind == "range": Text { text: f.options[3] == "%" ? round(rrow.live * 100) + "%" : round(rrow.live) + f.options[3]; min-width: 44px; color: Theme.text; font-size: 13px; horizontal-alignment: right; vertical-alignment: center; }
-                                if f.kind == "rangenum": Rectangle {
-                                    clip: true;
-                                    width: 64px;
-                                    height: 30px;
-                                    border-radius: 8px;
-                                    background: Theme.panel;
-                                    border-width: 1px;
-                                    border-color: Theme.line;
-                                    TextInput { property <length> sx; cursor-position-changed(p) => { if (p.x + self.sx < 0px) { self.sx = -p.x; } else if (p.x + self.sx > parent.width - 16px - 2px) { self.sx = parent.width - 16px - 2px - p.x; } }  x: 8px + min(0px, max(parent.width - 16px - self.width, self.sx)); width: max(parent.width - 16px, self.preferred-width + 4px); height: parent.height; vertical-alignment: center; color: Theme.text; font-size: 13px; single-line: true; input-type: InputType.decimal; text: round(rrow.live); accepted => { root.pf-set(i, "\u{5}" + self.text); keys.focus(); } }
-                                }
-                            }
-                            // a colour: its swatch, its code, and Windows' colour picker (as the web app's)
-                            if f.kind == "color": HorizontalLayout {
-                                spacing: 8px;
-                                y: (parent.height - self.height) / 2;
-                                Rectangle { width: 30px; height: 30px; border-radius: 6px; border-width: 1px; border-color: Theme.line; background: transparent;
-                                    Rectangle { x: 3px; y: 3px; width: parent.width - 6px; height: parent.height - 6px; border-radius: 4px; background: f.at >= 0 ? Colors.rgb(floor(f.at / 65536), mod(floor(f.at / 256), 256), mod(f.at, 256)) : transparent; } }
-                                Rectangle {
-                                    clip: true;
-                                    width: 96px;
-                                    height: 30px;
-                                    border-radius: 8px;
-                                    background: Theme.panel;
-                                    border-width: 1px;
-                                    border-color: Theme.line;
-                                    TextInput { property <length> sx; cursor-position-changed(p) => { if (p.x + self.sx < 0px) { self.sx = -p.x; } else if (p.x + self.sx > parent.width - 16px - 2px) { self.sx = parent.width - 16px - 2px - p.x; } }  x: 8px + min(0px, max(parent.width - 16px - self.width, self.sx)); width: max(parent.width - 16px, self.preferred-width + 4px); height: parent.height; vertical-alignment: center; color: Theme.text; font-size: 13px; single-line: true; text: f.value; accepted => { root.pf-set(i, self.text); keys.focus(); } }
-                                }
-                                Pill { label: "Choose..."; clicked => { root.pf-set(i, "\u{3}pick"); } }
-                            }
-                            // a switch with its own settings beside it (Alerts: Configure, with it on)
-                            if f.kind == "togglecfg" && f.value == "true": VerticalLayout { alignment: center; Pill { label: f.options.length > 0 ? f.options[0] : "Configure"; clicked => { root.pf-set(i, "btn:0"); } } }
-                            if f.kind == "togglecfg": CenterToggle { checked: f.value == "true"; toggled => { root.pf-set(i, self.checked ? "true" : "false"); } }
-                            if f.kind == "text" || f.kind == "password" || f.kind == "number": Rectangle {
-                                clip: true;
-                                width: 180px;
-                                height: 34px;
-                                y: (parent.height - self.height) / 2;
+                            spacing: 12px;
+                            padding-right: 10px;
+                            // (room under the last one, clear of Cancel and Save)
+                            padding-bottom: 24px;
+                            // (from the top, however tall the window: the room to spare under the last, never
+                            // shared out between them)
+                            alignment: start;
+                            // (its height from its layout, which knows how its notes wrap: a preferred height
+                            // reads them as one line)
+                            for f[i] in root.pf-fields: Rectangle {
+                             background: f.kind == "note" ? transparent : Theme.panel;
+                             border-radius: f.kind == "note" ? 0px : 12px;
+                             border-width: f.kind == "note" ? 0px : 1px;
+                             border-color: Theme.line;
+                             // (changed, not saved yet: a ring round it, breathing)
+                             if f.changed: Pulse { x: -10px; y: -6px; width: parent.width + 20px; height: parent.height + 12px; r: 10px; }
+                             HiGlow { x: -10px; y: -6px; width: parent.width + 20px; height: parent.height + 12px; r: 10px; lit: Hi.label != "" && Hi.label == f.label; }
+                             fcol := VerticalLayout {
+                             padding: f.kind == "note" ? 0px : 14px;
+                             spacing: 6px;
+                             // instructions: just text
+                             if f.kind == "note" && f.label.character-count <= 32: VerticalLayout { padding-top: 8px; SectionHead { text: f.label; } }
+                             if f.kind == "note" && f.label.character-count > 32: Text { text: f.label; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
+                             // a sound's waveform: where its trims are (shares of it), then its outline's 160 heights
+                             if f.kind == "wave": VerticalLayout {
+                              spacing: 4px;
+                              Text { text: f.label; color: Theme.text; font-weight: 700; }
+                              if f.note != "": Text { text: f.note; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
+                              Rectangle {
+                                height: 72px;
                                 border-radius: 8px;
                                 background: Theme.panel;
                                 border-width: 1px;
                                 border-color: Theme.line;
-                                TextInput { property <length> sx; cursor-position-changed(p) => { if (p.x + self.sx < 0px) { self.sx = -p.x; } else if (p.x + self.sx > parent.width - 20px - 2px) { self.sx = parent.width - 20px - 2px - p.x; } }  x: 10px + min(0px, max(parent.width - 20px - self.width, self.sx)); width: max(parent.width - 20px, self.preferred-width + 4px); height: parent.height; vertical-alignment: center; color: Theme.text; font-size: 14px; single-line: true; input-type: f.kind == "password" ? InputType.password : f.kind == "number" ? InputType.decimal : InputType.text; text: f.value; edited => { root.pf-set(i, self.text); } }
+                                clip: true;
+                                // (a bar for each of its 160 steps, spread across it: options' 3rd on are their heights, 0 to 1)
+                                for v[k] in f.options: Rectangle {
+                                    visible: k >= 2;
+                                    property <length> step: (parent.width - 16px) / max(1, f.options.length - 2);
+                                    x: 8px + (k - 2) * self.step;
+                                    width: max(1px, self.step * 0.72);
+                                    height: max(1px, (parent.height - 14px) * (k >= 2 ? v.to-float() : 0));
+                                    y: (parent.height - self.height) / 2;
+                                    border-radius: 1px;
+                                    background: Theme.accent;
+                                }
+                                // (trimmed off: shaded)
+                                Rectangle { x: 8px; y: 0; height: parent.height; width: (parent.width - 16px) * (f.options.length > 1 ? f.options[0].to-float() : 0); background: Theme.bg.with-alpha(0.72); }
+                                Rectangle { property <float> e: f.options.length > 1 ? f.options[1].to-float() : 0; x: 8px + (parent.width - 16px) * (1 - self.e); y: 0; height: parent.height; width: (parent.width - 16px) * self.e; background: Theme.bg.with-alpha(0.72); }
+                              }
+                             }
+                             // an address: shown, and copied
+                             if f.kind == "info" || f.kind == "output": VerticalLayout {
+                              spacing: 4px;
+                              Text { text: f.label; color: Theme.text; font-weight: 700; }
+                              if f.note != "": Text { text: f.note; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
+                              HorizontalLayout {
+                                spacing: 8px;
+                                Rectangle {
+                                  horizontal-stretch: 1;
+                                  height: 34px;
+                                  border-radius: 8px;
+                                  background: Theme.panel;
+                                  border-width: 1px;
+                                  border-color: Theme.line;
+                                  Text { x: 10px; width: parent.width - 20px; text: f.value; color: Theme.text; font-size: 12px; overflow: elide; vertical-alignment: center; }
+                                }
+                                VerticalLayout { alignment: center; IconButton { d: Icons.copy; size: 34px; tip: "Copy it"; clicked => { root.pf-copy(i); } } }
+                                // (another output: its look, or taken away)
+                                if f.kind == "output": VerticalLayout { alignment: center; IconButton { d: Icons.gear; size: 34px; tip: "Change the look"; clicked => { root.pf-set(i, "btn:edit"); } } }
+                                if f.kind == "output": VerticalLayout { alignment: center; IconButton { d: Icons.close; size: 34px; tip: "Remove this output"; clicked => { root.pf-set(i, "btn:del"); } } }
+                              }
+                             }
+                             if f.kind == "designpick": VerticalLayout {
+                              spacing: 8px;
+                              Text { text: f.label; color: Theme.text; font-weight: 700; }
+                              for r in 4: HorizontalLayout {
+                                  spacing: 10px;
+                                  for c in 4: DesignSketch { horizontal-stretch: 1; preferred-width: 0px; min-width: 0px; k: r * 4 + c; name: f.options[r * 4 + c]; on: f.at == r * 4 + c; clicked => { root.pf-set(i, "\u{2}" + (r * 4 + c)); } }
+                              }
+                             }
+                             if f.kind != "note" && f.kind != "info" && f.kind != "output" && f.kind != "wave" && f.kind != "designpick": HorizontalLayout {
+                              spacing: 12px;
+                              VerticalLayout {
+                                  horizontal-stretch: 1;
+                                  alignment: center;
+                                  spacing: 2px;
+                                  Text { text: f.label; color: Theme.text; font-weight: 700; }
+                                  if f.note != "": Text { text: f.note; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
+                              }
+                              if f.kind == "toggle": CenterToggle { checked: f.value == "true"; toggled => { root.pf-set(i, self.checked ? "true" : "false"); } }
+                      // a list's row: its buttons, then its switch
+                      if f.kind == "row": HorizontalLayout {
+                          spacing: 6px;
+                          for o[k] in f.options: VerticalLayout { alignment: center; Pill { label: o; clicked => { root.pf-set(i, "btn:" + k); } } }
+                      }
+                      if f.kind == "row": CenterToggle { checked: f.value == "true"; toggled => { root.pf-set(i, self.checked ? "true" : "false"); } }
+                              // a choice: a dropdown (as the web app's)
+                              if f.kind == "select" && f.options.length <= 3: HorizontalLayout {
+                                  spacing: 4px;
+                                  for o[k] in f.options: VerticalLayout { alignment: center; Chip { label: o; on: k == f.at; clicked => { root.pf-set(i, "\u{2}" + k); } } }
+                              }
+                              if f.kind == "select" && f.options.length > 3: VerticalLayout { alignment: center; Dropdown { options: f.options; current: f.at; picked(k) => { root.pf-set(i, "\u{2}" + k); } } }
+                              // a size or a count: − and + (as the web app's)
+                              if f.kind == "stepper": VerticalLayout { alignment: center; Stepper { value: f.value; can-down: f.at > 0; can-up: f.at < f.options.length - 1; down => { root.pf-set(i, "\u{2}" + (f.at - 1)); } up => { root.pf-set(i, "\u{2}" + (f.at + 1)); } } }
+                              // a level: a slider, its value beside it (and with "rangenum", a box to type it in too)
+                              if f.kind == "range" || f.kind == "rangenum": rrow := HorizontalLayout {
+                                  spacing: 10px;
+                                  width: 260px;
+                                  y: (parent.height - self.height) / 2;
+                                  // (where it is as it slides: the value shown beside it follows)
+                                  property <float> live: f.value.to-float();
+                                  Range { horizontal-stretch: 1; minimum: f.options[0].to-float(); maximum: f.options[1].to-float(); value: f.value.to-float(); changed(v) => { rrow.live = v; root.pf-set(i, "\u{4}" + v); } }
+                                  if f.kind == "range": Text { text: f.options[3] == "%" ? round(rrow.live * 100) + "%" : round(rrow.live) + f.options[3]; min-width: 44px; color: Theme.text; font-size: 13px; horizontal-alignment: right; vertical-alignment: center; }
+                                  if f.kind == "rangenum": Rectangle {
+                                      clip: true;
+                                      width: 64px;
+                                      height: 30px;
+                                      border-radius: 8px;
+                                      background: Theme.panel;
+                                      border-width: 1px;
+                                      border-color: Theme.line;
+                                      TextInput { property <length> sx; cursor-position-changed(p) => { if (p.x + self.sx < 0px) { self.sx = -p.x; } else if (p.x + self.sx > parent.width - 16px - 2px) { self.sx = parent.width - 16px - 2px - p.x; } }  x: 8px + min(0px, max(parent.width - 16px - self.width, self.sx)); width: max(parent.width - 16px, self.preferred-width + 4px); height: parent.height; vertical-alignment: center; color: Theme.text; font-size: 13px; single-line: true; input-type: InputType.decimal; text: round(rrow.live); accepted => { root.pf-set(i, "\u{5}" + self.text); keys.focus(); } }
+                                  }
+                              }
+                              // a colour: its swatch, its code, and Windows' colour picker (as the web app's)
+                              if f.kind == "color": HorizontalLayout {
+                                  spacing: 8px;
+                                  y: (parent.height - self.height) / 2;
+                                  Rectangle { width: 30px; height: 30px; border-radius: 6px; border-width: 1px; border-color: Theme.line; background: transparent;
+                                      Rectangle { x: 3px; y: 3px; width: parent.width - 6px; height: parent.height - 6px; border-radius: 4px; background: f.at >= 0 ? Colors.rgb(floor(f.at / 65536), mod(floor(f.at / 256), 256), mod(f.at, 256)) : transparent; } }
+                                  Rectangle {
+                                      clip: true;
+                                      width: 96px;
+                                      height: 30px;
+                                      border-radius: 8px;
+                                      background: Theme.panel;
+                                      border-width: 1px;
+                                      border-color: Theme.line;
+                                      TextInput { property <length> sx; cursor-position-changed(p) => { if (p.x + self.sx < 0px) { self.sx = -p.x; } else if (p.x + self.sx > parent.width - 16px - 2px) { self.sx = parent.width - 16px - 2px - p.x; } }  x: 8px + min(0px, max(parent.width - 16px - self.width, self.sx)); width: max(parent.width - 16px, self.preferred-width + 4px); height: parent.height; vertical-alignment: center; color: Theme.text; font-size: 13px; single-line: true; text: f.value; accepted => { root.pf-set(i, self.text); keys.focus(); } }
+                                  }
+                                  Pill { label: "Choose..."; clicked => { root.pf-set(i, "\u{3}pick"); } }
+                              }
+                              // a switch with its own settings beside it (Alerts: Configure, with it on)
+                              if f.kind == "togglecfg" && f.value == "true": VerticalLayout { alignment: center; Pill { label: f.options.length > 0 ? f.options[0] : "Configure"; clicked => { root.pf-set(i, "btn:0"); } } }
+                              if f.kind == "togglecfg": CenterToggle { checked: f.value == "true"; toggled => { root.pf-set(i, self.checked ? "true" : "false"); } }
+                              if f.kind == "text" || f.kind == "password" || f.kind == "number": Rectangle {
+                                  clip: true;
+                                  width: 180px;
+                                  height: 34px;
+                                  y: (parent.height - self.height) / 2;
+                                  border-radius: 8px;
+                                  background: Theme.panel;
+                                  border-width: 1px;
+                                  border-color: Theme.line;
+                                  TextInput { property <length> sx; cursor-position-changed(p) => { if (p.x + self.sx < 0px) { self.sx = -p.x; } else if (p.x + self.sx > parent.width - 20px - 2px) { self.sx = parent.width - 20px - 2px - p.x; } }  x: 10px + min(0px, max(parent.width - 20px - self.width, self.sx)); width: max(parent.width - 20px, self.preferred-width + 4px); height: parent.height; vertical-alignment: center; color: Theme.text; font-size: 14px; single-line: true; input-type: f.kind == "password" ? InputType.password : f.kind == "number" ? InputType.decimal : InputType.text; text: f.value; edited => { root.pf-set(i, self.text); } }
+                              }
+                              // a box for a few lines (a report's words)
+                              if f.kind == "area": Rectangle {
+                                  width: 380px;
+                                  height: 132px;
+                                  border-radius: 8px;
+                                  background: Theme.panel;
+                                  border-width: 1px;
+                                  border-color: ar.has-focus ? Theme.accent : Theme.line;
+                                  ar := TextInput { x: 10px; y: 8px; width: parent.width - 20px; height: parent.height - 16px; color: Theme.text; font-size: 13px; single-line: false; wrap: word-wrap; text: f.value; edited => { root.pf-set(i, self.text); } }
+                              }
+                              // a button: done at once
+                              if f.kind == "button": VerticalLayout { alignment: center; Pill { label: f.value; clicked => { root.pf-set(i, "press"); } } }
+                             }
                             }
-                            // a box for a few lines (a report's words)
-                            if f.kind == "area": Rectangle {
-                                width: 380px;
-                                height: 132px;
-                                border-radius: 8px;
-                                background: Theme.panel;
-                                border-width: 1px;
-                                border-color: ar.has-focus ? Theme.accent : Theme.line;
-                                ar := TextInput { x: 10px; y: 8px; width: parent.width - 20px; height: parent.height - 16px; color: Theme.text; font-size: 13px; single-line: false; wrap: word-wrap; text: f.value; edited => { root.pf-set(i, self.text); } }
                             }
-                            // a button: done at once
-                            if f.kind == "button": VerticalLayout { alignment: center; Pill { label: f.value; clicked => { root.pf-set(i, "press"); } } }
-                           }
+                            }
                           }
-                          }
+                          if root.pf-preview != "": VerticalLayout {
+                            width: 460px;
+                            alignment: start;
+                            if root.pf-preview == "lyrics": LyricsPreview { look: root.pf-lyrics; }
+                            if root.pf-preview == "socials": SocialPreview { items: root.pf-social-items; look: root.pf-social; }
+                            if root.pf-preview == "multichat": ChatPreview { look: root.pf-chat; samples: root.pf-chat-samples; }
+                            if root.pf-preview == "alerts": AlertPreview { look: root.pf-alert; }
+                            if root.pf-preview == "widget": WidgetPreview { look: root.pf-widget; art: root.now-art; title: root.now-title == "Nothing playing" || root.now-title == "" ? "A Song You Love" : root.now-title; artist: root.now-artist == "" ? "Your Favourite Artist" : root.now-artist; }
                           }
                         }
                         if !root.bot-page || root.pf-dirty: HorizontalLayout {
@@ -9055,11 +9067,12 @@ export component AppWindow inherits Window {
                 Text { text: "Let's set you up. Skip anything you like: it's all in Settings later."; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
                 Rectangle { height: 14px; }
                 for st[k] in [
-                    { n: "Welcome", d: Icons.star-out }, { n: "Your music", d: Icons.library }, { n: "Bring it with you", d: Icons.download },
-                    { n: "Your taste", d: Icons.discover }, { n: "How it sounds", d: Icons.volume }, { n: "Do you stream?", d: Icons.broadcast }, { n: "All set", d: Icons.check },
+                    { n: "Welcome", d: Icons.star-out }, { n: "Your music", d: Icons.library }, { n: "Discover", d: Icons.discover },
+                    { n: "", d: Icons.discover }, { n: "How it sounds", d: Icons.volume }, { n: "Do you stream?", d: Icons.broadcast }, { n: "All set", d: Icons.check },
                 ]: Rectangle {
-                    visible: k != 3 || root.setup-taste;
-                    height: k != 3 || root.setup-taste ? 40px : 0px;
+                    // (the fourth, the old taste step, now part of Discover)
+                    visible: k != 3;
+                    height: k != 3 ? 40px : 0px;
                     border-radius: 10px;
                     background: root.setup-at == k ? Theme.accent.with-alpha(0.16) : transparent;
                     HorizontalLayout {
@@ -9086,6 +9099,7 @@ export component AppWindow inherits Window {
                         // 1. welcome: your name, a theme
                         if root.setup-at == 0: VerticalLayout {
                             spacing: 14px;
+                            alignment: start;
                             Text { text: "Welcome to OmniPulse"; color: Theme.text; font-size: 34px; font-weight: 800; font-family: Theme.head-font; }
                             Text { text: "All your music in one place: SoundCloud, Spotify, YouTube Music and the files on this PC. First, make it yours."; color: Theme.muted; font-size: 14px; wrap: word-wrap; }
                             Text { text: "Your name"; color: Theme.text; font-weight: 700; }
@@ -9102,9 +9116,10 @@ export component AppWindow inherits Window {
                                 for t in r.items: ThemeTile { horizontal-stretch: 1; preferred-width: 0px; t: t; on: root.theme-name == t.id; clicked => { root.theme-picked(t.id); } }
                             }
                         }
-                        // 2. your music: the accounts, the folders
+                        // 2. your music: the accounts, the folders, and what you bring from elsewhere
                         if root.setup-at == 1: VerticalLayout {
                             spacing: 14px;
+                            alignment: start;
                             Text { text: "Your music"; color: Theme.text; font-size: 34px; font-weight: 800; font-family: Theme.head-font; }
                             Text { text: "Sign in to any of these to bring in your likes and playlists. Each is optional, and you can add the rest later."; color: Theme.muted; font-size: 14px; wrap: word-wrap; }
                             HorizontalLayout {
@@ -9128,56 +9143,133 @@ export component AppWindow inherits Window {
                             Text { text: root.folders.length == 0 ? "Add the folders your music's in. OmniPulse finds the songs in them and keeps up as you add more." : root.folders-note; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
                             for f[i] in root.folders: HorizontalLayout { spacing: 8px; Text { text: f; color: Theme.text; font-size: 13px; vertical-alignment: center; horizontal-stretch: 1; overflow: elide; } IconButton { d: Icons.close; size: 28px; tip: "Take this folder out"; clicked => { root.folder-remove(i); } } }
                             HorizontalLayout { alignment: start; Pill { label: "Add a Folder"; on: true; clicked => { root.folder-add(); } } }
-                        }
-                        // 3. bring it with you: the web app's (already in), Apple Music, playlist files
-                        if root.setup-at == 2: VerticalLayout {
-                            spacing: 14px;
-                            Text { text: "Bring it with you"; color: Theme.text; font-size: 34px; font-weight: 800; font-family: Theme.head-font; }
-                            if root.setup-web: Text { text: "Your favourites, playlists and settings from the OmniPulse web app came across already."; color: Theme.accent; font-size: 14px; wrap: word-wrap; }
-                            Text { text: "Moving from somewhere else? Bring your music along."; color: Theme.muted; font-size: 14px; wrap: word-wrap; }
+                            Text { text: "Moving from somewhere else?"; color: Theme.text; font-weight: 700; }
+                            if root.setup-web: Text { text: "Your favourites, playlists and settings from the OmniPulse web app came across already."; color: Theme.accent; font-size: 12px; wrap: word-wrap; }
+                            Text { text: "Bring your music along. A playlist file can be an M3U, a CSV, or one exported from another app."; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
                             HorizontalLayout { spacing: 12px; alignment: start;
                                 Pill { label: "Import from Apple Music"; clicked => { root.apple-import(); } }
                                 Pill { label: "Import a Playlist File"; clicked => { root.pl-import(); } }
                             }
-                            Text { text: "A playlist file can be an M3U, a CSV, or one exported from another app."; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
                         }
-                        // 4. your taste (only with no accounts to start from)
-                        if root.setup-at == 3: VerticalLayout {
+                        // 3. discover: what it starts from (genres, the language), and how it learns
+                        if root.setup-at == 2: VerticalLayout {
                             spacing: 14px;
-                            Text { text: "Your taste"; color: Theme.text; font-size: 34px; font-weight: 800; font-family: Theme.head-font; }
-                            Text { text: "With nothing to start from yet, pick a few genres you like. Discover and autoplay begin there, and learn from what you play. You can change them on Discover any time."; color: Theme.muted; font-size: 14px; wrap: word-wrap; }
-                            HorizontalLayout { alignment: start; Pill { label: "Pick Genres"; on: true; clicked => { root.taste-pick(); } } }
+                            alignment: start;
+                            Text { text: "Discover"; color: Theme.text; font-size: 34px; font-weight: 800; font-family: Theme.head-font; }
+                            Text { text: "Discover recommends new music for you. Tell it what you like, and it starts closer to your taste. It learns from what you play after that."; color: Theme.muted; font-size: 14px; wrap: word-wrap; }
+                            Rectangle {
+                                border-radius: 16px;
+                                background: Theme.panel;
+                                border-width: 1px;
+                                border-color: Theme.line;
+                                HorizontalLayout {
+                                    padding: 20px;
+                                    spacing: 16px;
+                                    VerticalLayout { alignment: start; Rectangle { width: 44px; height: 44px; border-radius: 12px; background: Theme.accent.with-alpha(0.15); Glyph { d: Icons.discover; width: 22px; height: 22px; x: 11px; y: 11px; fill: Theme.accent; } } }
+                                    VerticalLayout {
+                                        horizontal-stretch: 1;
+                                        spacing: 8px;
+                                        Text { text: "Genres you like"; color: Theme.text; font-size: 17px; font-weight: 800; }
+                                        Text { text: "Pick a few genres, then the styles inside them. Discover and autoplay begin there."; color: Theme.muted; font-size: 13px; wrap: word-wrap; }
+                                        HorizontalLayout { alignment: start; padding-top: 4px; Pill { label: root.taste-label == "Get Better Recommendations" ? "Pick Genres" : root.taste-label; on: true; clicked => { root.taste-pick(); } } }
+                                    }
+                                }
+                            }
+                            Rectangle {
+                                border-radius: 16px;
+                                background: Theme.panel;
+                                border-width: 1px;
+                                border-color: Theme.line;
+                                HorizontalLayout {
+                                    padding: 20px;
+                                    spacing: 16px;
+                                    VerticalLayout { alignment: start; Rectangle { width: 44px; height: 44px; border-radius: 12px; background: Theme.accent.with-alpha(0.15); Glyph { d: Icons.lyrics; width: 22px; height: 22px; x: 11px; y: 11px; fill: Theme.accent; } } }
+                                    VerticalLayout {
+                                        horizontal-stretch: 1;
+                                        spacing: 8px;
+                                        Text { text: "Language"; color: Theme.text; font-size: 17px; font-weight: 800; }
+                                        Text { text: "Songs sung in the language you choose come first. Any language mixes them all."; color: Theme.muted; font-size: 13px; wrap: word-wrap; }
+                                        HorizontalLayout { alignment: start; padding-top: 4px; Dropdown { width: 260px; options: root.lang-options; current: root.lang-at; picked(k) => { root.lang-pick(k); } } }
+                                    }
+                                }
+                            }
+                            Rectangle {
+                                border-radius: 16px;
+                                background: Theme.panel;
+                                border-width: 1px;
+                                border-color: Theme.line;
+                                HorizontalLayout {
+                                    padding: 20px;
+                                    spacing: 16px;
+                                    VerticalLayout { alignment: start; Rectangle { width: 44px; height: 44px; border-radius: 12px; background: Theme.accent.with-alpha(0.15); Glyph { d: Icons.heart-out; width: 22px; height: 22px; x: 11px; y: 11px; fill: Theme.accent; } } }
+                                    VerticalLayout {
+                                        horizontal-stretch: 1;
+                                        spacing: 8px;
+                                        Text { text: "It learns as you go"; color: Theme.text; font-size: 17px; font-weight: 800; }
+                                        Text { text: "Click the heart on songs you love, and the star to add them to your favourites. Discover and Rediscover build around them. To hide a song you don't want to hear, right-click it."; color: Theme.muted; font-size: 13px; wrap: word-wrap; }
+                                    }
+                                }
+                            }
                         }
                         // 5. how it sounds
                         if root.setup-at == 4: VerticalLayout {
                             spacing: 14px;
+                            alignment: start;
                             Text { text: "How it sounds"; color: Theme.text; font-size: 34px; font-weight: 800; font-family: Theme.head-font; }
-                            Text { text: "Match Loudness"; color: Theme.text; font-weight: 700; }
-                            Text { text: "Every song at the same loudness, so nothing jumps out or gets lost. Normal suits most people."; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
-                            HorizontalLayout { spacing: 6px; alignment: start;
-                                for v in [{ id: "off", n: "Off" }, { id: "quiet", n: "Quiet" }, { id: "normal", n: "Normal" }, { id: "loud", n: "Loud" }]: Chip { label: v.n; on: root.loud-on == v.id; clicked => { root.loud-pick(v.id); } }
-                            }
-                            HorizontalLayout {
-                                spacing: 12px;
-                                VerticalLayout {
-                                    horizontal-stretch: 1;
-                                    spacing: 2px;
-                                    Text { text: "Seamless Mix"; color: Theme.text; font-weight: 700; }
-                                    Text { text: "Songs flow into each other like a DJ's set: on the beat, in key, with no gaps. It's still being built, so some changes may not sound right yet. When it's off, songs fade into each other."; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
+                            Text { text: "Two settings shape how your music plays. You can change both later in Settings > Sound."; color: Theme.muted; font-size: 14px; wrap: word-wrap; }
+                            // (each a card: its icon, its name, what it does, and its control)
+                            Rectangle {
+                                border-radius: 16px;
+                                background: Theme.panel;
+                                border-width: 1px;
+                                border-color: Theme.line;
+                                HorizontalLayout {
+                                    padding: 20px;
+                                    spacing: 16px;
+                                    VerticalLayout { alignment: start; Rectangle { width: 44px; height: 44px; border-radius: 12px; background: Theme.accent.with-alpha(0.15); Glyph { d: Icons.volume; width: 22px; height: 22px; x: 11px; y: 11px; fill: Theme.accent; } } }
+                                    VerticalLayout {
+                                        horizontal-stretch: 1;
+                                        spacing: 8px;
+                                        Text { text: "Match Loudness"; color: Theme.text; font-size: 17px; font-weight: 800; }
+                                        Text { text: "Plays every song at the same loudness, so nothing jumps out or gets lost. Normal suits most people."; color: Theme.muted; font-size: 13px; wrap: word-wrap; }
+                                        HorizontalLayout { spacing: 6px; alignment: start; padding-top: 4px;
+                                            for v in [{ id: "off", n: "Off" }, { id: "quiet", n: "Quiet" }, { id: "normal", n: "Normal" }, { id: "loud", n: "Loud" }]: Chip { label: v.n; on: root.loud-on == v.id; clicked => { root.loud-pick(v.id); } }
+                                        }
+                                    }
                                 }
-                                CenterToggle { checked: root.mix-on; toggled => { root.mix-toggle(); } }
+                            }
+                            Rectangle {
+                                border-radius: 16px;
+                                background: Theme.panel;
+                                border-width: 1px;
+                                border-color: Theme.line;
+                                HorizontalLayout {
+                                    padding: 20px;
+                                    spacing: 16px;
+                                    VerticalLayout { alignment: start; Rectangle { width: 44px; height: 44px; border-radius: 12px; background: Theme.accent.with-alpha(0.15); Glyph { d: Icons.mix; width: 22px; height: 22px; x: 11px; y: 11px; fill: Theme.accent; } } }
+                                    VerticalLayout {
+                                        horizontal-stretch: 1;
+                                        spacing: 8px;
+                                        Text { text: "Seamless Mix"; color: Theme.text; font-size: 17px; font-weight: 800; }
+                                        Text { text: "Songs flow into each other like a DJ's set: on the beat, in key, with no gaps. It's still being built, so some changes may not sound right yet. When it's off, songs fade into each other."; color: Theme.muted; font-size: 13px; wrap: word-wrap; }
+                                    }
+                                    VerticalLayout { alignment: center; CenterToggle { checked: root.mix-on; toggled => { root.mix-toggle(); } } }
+                                }
                             }
                         }
                         // 6. do you stream?
                         if root.setup-at == 5: VerticalLayout {
                             spacing: 14px;
+                            alignment: start;
                             Text { text: "Do you stream?"; color: Theme.text; font-size: 34px; font-weight: 800; font-family: Theme.head-font; }
                             Text { text: "OmniPulse has everything for streamers built in: song requests, alerts, goals, a chatbot and OBS widgets. If you don't stream, it all stays out of your way."; color: Theme.muted; font-size: 14px; wrap: word-wrap; }
                             HorizontalLayout {
                                 spacing: 14px;
+                                alignment: start;
                                 for c in [{ id: "yes", n: "Yes, I stream", t: "Turns on the Stream Suite, and sets up its chatbot next. Coming from Streamer.bot or Mix It Up? You can bring your commands with you.", d: Icons.broadcast }, { id: "no", n: "No, just listening", t: "Nothing to set up. Streaming stays in Settings if you ever want it.", d: Icons.library }]: Rectangle {
-                                    horizontal-stretch: 1;
-                                    height: 150px;
+                                    // (wide enough for its words, which fit in four lines)
+                                    width: 300px;
+                                    height: 180px;
                                     border-radius: 16px;
                                     background: sca.has-hover ? Theme.elevated : Theme.panel;
                                     border-width: 1px;
@@ -9185,9 +9277,10 @@ export component AppWindow inherits Window {
                                     VerticalLayout {
                                         padding: 18px;
                                         spacing: 8px;
+                                        alignment: start;
                                         Glyph { d: c.d; width: 26px; height: 26px; fill: Theme.accent; }
                                         Text { text: c.n; color: Theme.text; font-size: 17px; font-weight: 800; }
-                                        Text { text: c.t; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
+                                        Text { text: c.t; color: Theme.muted; font-size: 13px; wrap: word-wrap; }
                                     }
                                     sca := TouchArea { mouse-cursor: MouseCursor.pointer; clicked => { root.setup-go("stream-" + c.id); } }
                                 }
@@ -9196,6 +9289,7 @@ export component AppWindow inherits Window {
                         // 7. all set: where things are
                         if root.setup-at == 6: VerticalLayout {
                             spacing: 14px;
+                            alignment: start;
                             Text { text: "All set"; color: Theme.text; font-size: 34px; font-weight: 800; font-family: Theme.head-font; }
                             Text { text: "A few things worth knowing:"; color: Theme.muted; font-size: 14px; }
                             for t in [

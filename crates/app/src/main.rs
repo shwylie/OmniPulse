@@ -6153,12 +6153,8 @@ fn setup_wanted(a: &App) -> bool {
     fresh
 }
 
-/// Its taste step: wanted only with no account to start from
-fn setup_taste() -> bool { !omnipulse_core::soundcloud::signed_in() && !account_signed("spotify") && !account_signed("youtube") }
-
 fn setup_show(shared: &Shared, at: i32) {
     let Some(ui) = shared.borrow().ui.upgrade() else { return };
-    ui.set_setup_taste(setup_taste());
     ui.set_setup_web(omnipulse_core::load_web_export().is_some());
     ui.set_setup_at(at);
     ui.set_setup_open(true);
@@ -6172,8 +6168,8 @@ fn setup_done(shared: &Shared) {
 fn setup_go(shared: &Shared, how: &str) {
     let Some(ui) = shared.borrow().ui.upgrade() else { return };
     let at = ui.get_setup_at();
-    // (the taste step passed over, with an account to start from)
-    let skip_taste = |n: i32| if n == 3 && !setup_taste() { if at > 3 { 2 } else { 4 } } else { n };
+    // (the fourth step passed over: its genres are on the Discover step now)
+    let skip_taste = |n: i32| if n == 3 { if at > 3 { 2 } else { 4 } } else { n };
     match how {
         "next" => setup_show(shared, skip_taste((at + 1).min(6))),
         "back" => setup_show(shared, skip_taste((at - 1).max(0))),
