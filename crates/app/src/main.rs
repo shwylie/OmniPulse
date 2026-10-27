@@ -13262,12 +13262,15 @@ fn apply_look(shared: &Shared) {
     // resized, before it's drawn again, a white strip otherwise)
     #[cfg(windows)]
     if let Some(h) = window_hwnd(&ui) {
-        use windows::Win32::Graphics::Dwm::{DwmSetWindowAttribute, DWMWA_BORDER_COLOR, DWMWA_CAPTION_COLOR};
+        use windows::Win32::Graphics::Dwm::{DwmSetWindowAttribute, DWMWA_BORDER_COLOR, DWMWA_CAPTION_COLOR, DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_DONOTROUND, DWMWCP_ROUND, DWM_WINDOW_CORNER_PREFERENCE};
         let colorref: u32 = p.bg.0 as u32 | ((p.bg.1 as u32) << 8) | ((p.bg.2 as u32) << 16);
+        // (the window's own corners: round with Rounded Corners on, as Windows 11 rounds its windows; square off)
+        let corners: DWM_WINDOW_CORNER_PREFERENCE = if prefs["appRounded"].as_bool() != Some(false) { DWMWCP_ROUND } else { DWMWCP_DONOTROUND };
         unsafe {
             let hw = windows::Win32::Foundation::HWND(h as *mut _);
             let _ = DwmSetWindowAttribute(hw, DWMWA_CAPTION_COLOR, &colorref as *const u32 as _, 4);
             let _ = DwmSetWindowAttribute(hw, DWMWA_BORDER_COLOR, &colorref as *const u32 as _, 4);
+            let _ = DwmSetWindowAttribute(hw, DWMWA_WINDOW_CORNER_PREFERENCE, &corners as *const DWM_WINDOW_CORNER_PREFERENCE as _, std::mem::size_of::<DWM_WINDOW_CORNER_PREFERENCE>() as u32);
         }
     }
     // (Aurora: its panels see-through, over the glow behind them)
