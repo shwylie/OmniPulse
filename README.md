@@ -22,7 +22,7 @@ docks and Stream Deck controls for streaming on Twitch, Kick and YouTube.
 
 OmniPulse is developed and maintained by one person. Me. SHWYLiE. With a great deal of help from Claude
 Code. I couldn't have done this alone, as I'm still learning the fundamentals (thanks
-[boot.dev](https://boot.dev) for being amazing). So while some of this code is my own, I've been using
+[boot.dev](https://boot.dev) for being amazing, as well as the [rustlings](https://github.com/rust-lang/rustlings/) course). So while some of this code is my own, I've been using
 Claude Code as my supervisor, double-checking and exploring ideas with it, so I can learn how
 something is (or can be) made if I haven't learned it yet through boot.dev.
 
