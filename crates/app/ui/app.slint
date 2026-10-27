@@ -8119,6 +8119,12 @@ export component AppWindow inherits Window {
                             VerticalLayout {
                             spacing: 12px;
                             padding-right: 10px;
+                            // (the preview, on a smaller window: first, above what it shows)
+                            if root.width < 1240px && root.pf-preview == "lyrics": LyricsPreview { look: root.pf-lyrics; }
+                            if root.width < 1240px && root.pf-preview == "socials": SocialPreview { items: root.pf-social-items; look: root.pf-social; }
+                            if root.width < 1240px && root.pf-preview == "multichat": ChatPreview { look: root.pf-chat; samples: root.pf-chat-samples; }
+                            if root.width < 1240px && root.pf-preview == "alerts": AlertPreview { look: root.pf-alert; }
+                            if root.width < 1240px && root.pf-preview == "widget": WidgetPreview { look: root.pf-widget; art: root.now-art; title: root.now-title == "Nothing playing" || root.now-title == "" ? "A Song You Love" : root.now-title; artist: root.now-artist == "" ? "Your Favourite Artist" : root.now-artist; }
                             // (room under the last one, clear of Cancel and Save)
                             padding-bottom: 24px;
                             // (from the top, however tall the window: the room to spare under the last, never
@@ -8291,8 +8297,9 @@ export component AppWindow inherits Window {
                             }
                             }
                           }
-                          if root.pf-preview != "": VerticalLayout {
-                            width: 460px;
+                          // (docked beside them on a wide window; on a smaller one, above them, so they keep their room)
+                          if root.pf-preview != "" && root.width >= 1240px: VerticalLayout {
+                            width: 400px;
                             alignment: start;
                             if root.pf-preview == "lyrics": LyricsPreview { look: root.pf-lyrics; }
                             if root.pf-preview == "socials": SocialPreview { items: root.pf-social-items; look: root.pf-social; }
