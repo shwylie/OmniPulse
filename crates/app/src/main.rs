@@ -8793,7 +8793,9 @@ fn panel_save(shared: &Shared, name: &str, vals: serde_json::Map<String, serde_j
         omnipulse_core::docks::page_settings_set(all.clone());
         pref_put(shared, "dockSet", all);
         PF_EDIT.with(|e| e.borrow_mut().take());
-        if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_pf_open(false); ui.set_status(format!("{} saved. OBS shows it within a few seconds.", docksets::title(name)).into()); }
+        // (you stay where you were: the page again, as it's saved)
+        panel_open(shared, name);
+        if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_status(format!("{} saved. OBS shows it within a few seconds.", docksets::title(name)).into()); }
         return;
     }
     // (an output's look: kept as what differs from the first's, then back to the widget's page)
@@ -8895,8 +8897,10 @@ fn panel_save(shared: &Shared, name: &str, vals: serde_json::Map<String, serde_j
         _ => {}
     }
     PF_EDIT.with(|e| e.borrow_mut().take());
-    if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_pf_open(false); ui.set_status(format!("{} settings saved.", panels::title(name)).into()); }
     paint_settings(&shared.borrow());
+    // (you stay where you were: the page again, as it's saved)
+    panel_open(shared, name);
+    if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_status(format!("{} settings saved.", panels::title(name)).into()); }
 }
 
 /// A plugin's settings dialog: its manifest's fields, as they're set (prefs.pluginSettings, as the web app's)
@@ -9069,7 +9073,17 @@ fn plugins_start(shared: &Shared) {
         let id = p.manifest.id.clone();
         if !plugin_runs(&prefs, &id) { plugrun::stop(&id); continue; }
         if plugrun::get(&id).is_some() { continue; }
-        match plugrun::start(&p, &plugrun::settings_of(&p.manifest, &prefs), rt.clone()) {
+        // (a self-test's: never your accounts: their sign-ins left out and every connection off, so a test never
+        // reaches Twitch, Kick, OBS or the tip services as you)
+        let mut set = plugrun::settings_of(&p.manifest, &prefs);
+        if std::env::var_os("OMNIPULSE_SELFTEST").is_some() {
+            if let Some(o) = set.as_object_mut() {
+                let secret = |k: &str| { let k = k.to_lowercase(); ["token", "secret", "password", "refresh", "verification", "jwt", "userid", "login", "channel", "url", "address"].iter().any(|w| k.contains(w)) };
+                o.retain(|k, _| !secret(k));
+                for k in ["kickOn", "obsOn", "meldOn", "slobsOn", "throneOn", "ytOn", "youtubeOn"] { o.insert(k.into(), serde_json::json!(false)); }
+            }
+        }
+        match plugrun::start(&p, &set, rt.clone()) {
             Ok(_) => PLUG_ERR.with(|e| e.borrow_mut().remove(&id)),
             Err(e) => PLUG_ERR.with(|x| x.borrow_mut().insert(id, e)),
         };
@@ -11386,7 +11400,7 @@ fn viz_update(shared: &Shared, ui: &AppWindow) {
         let set = &a.web.prefs["pluginSettings"][botpage::BOT];
         let pick = |k: &str, d: &str| set[k].as_str().filter(|s| !s.is_empty()).unwrap_or(d).to_string();
         let scene = Some(pick("visScene", "bars")).filter(|s| s != "depths" && s != "phosphor").unwrap_or_else(|| "smoke".into());
-        let opts = serde_json::json!({ "scene": scene, "scale": pick("visScale", "1"), "fps": pick("visFps", "60"), "offset": set["visOffset"].as_bool() != Some(false), "key": set["visKey"].as_bool() != Some(false) }).to_string();
+        let opts = serde_json::json!({ "scene": scene, "scale": pick("visScale", "1"), "fps": pick("visFps", "60"), "offset": set["visOffset"].as_bool() != Some(false) }).to_string();
         if let Ok(mut v) = omnipulse_core::widget::VIS.lock() { v.playing = a.loaded && !a.engine.is_paused(); v.offset = offset; if v.opts != opts { v.opts = opts; } }
     }
     let game_pause = shared.borrow().web.prefs["vizGamePause"].as_bool() != Some(false);

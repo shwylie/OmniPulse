@@ -448,7 +448,7 @@ fn sheet_of(id: &str, cur: &Map<String, Value>) -> (String, Vec<Field>) {
             let chips = tpls.iter().map(|n| format!("{}={}", n.replace(['|', '='], " "), n.replace(['|', '='], " "))).collect::<Vec<_>>().join("|");
             // (the preview and Save are the page's right half: these are its left)
             let mut v = vec![
-                f("note", "", "Make your channel's panels here, watch them change on the right, then click Save Them as Pictures and add them on Twitch (your channel, About, Edit Panels) or Kick.", "", "", ""),
+                f("note", "", "Make your channel's panels here, watch them change on the right, then click Open in Your Browser. Each panel there has a Save as PNG button: add them on Twitch (your channel, About, Edit Panels) or Kick.", "", "", ""),
                 f("head", "", "1. Your panels", "", "", ""),
                 f("list", "panelList", "Panels", "A title for each, like Schedule. To add words under it, type a colon after the title, like About Me: Music and good vibes. Each one's icon is picked from its title.", s(cur, "panelList"), "About Me | My Music | PC Specs | Sponsors | Donate"),
                 f("piclist", "panelOwnIcons", "Your own icons", "If you like: a picture for any panel, in the same order as the panels above. Click Choose... to pick one from your PC. Leave a row empty for the icon its title picks.", s(cur, "panelOwnIcons"), ""),
@@ -773,10 +773,9 @@ fn sheet_of(id: &str, cur: &Map<String, Value>) -> (String, Vec<Field>) {
             let path = "/vis".to_string();
             ("Visualiser".into(), vec![
                 f("note", "", "The app's visualisers on stream, drawn by OBS. The GPU scenes are still being built, so they may change, and some may not look right yet.", "", "", ""),
-                addr(&path, "Add it as a Browser source the size of your canvas, like 1920 × 1080. What you pick below shows in OBS once you click Save. Both kinds lay over your stream as they are."),
+                addr(&path, "Add it as a Browser source the size of your canvas, like 1920 × 1080. What you pick below shows in OBS once you click Save. The app's own styles lay over your stream as they are; a GPU scene fills its source."),
                 f("chips", "visScene", "Style", "The app's own styles, drawn see-through so they lay straight over your stream.", &scene, "bars=Bars|mirror=Mirror|peaks=Peaks|blocks=Blocks|dots=Dots|wave=Wave|centre=Centre|halo=Halo"),
                 f("chips", "visScene", "Or a GPU scene (WIP)", "Fuller pictures, drawn on your graphics card.", &scene, "smoke=Smoke|swarm=Swarm|ink=Ink"),
-                f("toggle", "visKey", "See-through GPU scenes", "Their dark parts let your stream show through, so they lay over it as they are. Turn this off for their black background.", if on(cur, "visKey", true) { "true" } else { "false" }, ""),
                 f("chips", "visScale", "Detail", "Lower draws it smaller and stretches it to fit, for less work on your graphics card.", &scale, "0.5=Low|0.75=Medium|1=Full"),
                 f("chips", "visFps", "Frame rate", "", &fps, "30=30 a second|60=60 a second"),
                 f("toggle", "visOffset", "Keep in time with OmniPulse Offset", "Holds it back by the Offset's delay, so it lands with what viewers hear. This only applies while OmniPulse Offset is on.", if on(cur, "visOffset", true) { "true" } else { "false" }, ""),

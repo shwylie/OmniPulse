@@ -175,6 +175,10 @@
   #next .nx { display: flex; flex-direction: column; min-width: 0; }
   #next .nl { font-size: 0.75em; letter-spacing: 0.06em; text-transform: uppercase; opacity: 0.7; }
   #next .nt { font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  /* (aligned right: still one above the other, each row mirrored, its words to the right) */
+  body.right.nownext #card { flex-direction: column; align-items: stretch; }
+  body.right.nownext #nowRow, body.right.nownext #next.on { flex-direction: row-reverse; }
+  body.right.nownext #next .nx { align-items: flex-end; text-align: right; }
 
   /* Polaroid: the cover as a tilted instant photo, the title written underneath */
   body.polaroid #card { background: none; align-items: center; justify-content: center; }

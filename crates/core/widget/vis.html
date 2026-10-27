@@ -161,9 +161,8 @@
     poll(); look(); requestAnimationFrame(loop);
     return;
   }
-  // (see-through, as set in the app: its dark parts let the stream show through, each colour's brightness its
-  // opacity; else on black)
-  const KEY = opts.key !== false && Q.get("key") !== "0";
+  // (the GPU scenes: on their own background, never see-through)
+  const KEY = false;
   if (KEY) { document.documentElement.style.background = "transparent"; document.body.style.background = "transparent"; }
   const gl = canvas.getContext("webgl2", { alpha: KEY, antialias: false, premultipliedAlpha: true, preserveDrawingBuffer: false });
   if (!gl) { note("This needs WebGL2. In OBS, turn on Browser Source Hardware Acceleration (Settings > Advanced)."); return; }

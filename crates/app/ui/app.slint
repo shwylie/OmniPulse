@@ -4875,8 +4875,8 @@ CenterToggle { checked: Wid.on(w.k, Wid.rev); toggled => { root.act("woff:" + w.
                 if root.sheet == "panels": HorizontalLayout {
                     spacing: 10px;
                     alignment: start;
-                    Pill { label: "Save Them as Pictures"; on: true; clicked => { root.act("url:http://127.0.0.1:" + root.port + "/panels"); } }
-                    VerticalLayout { alignment: center; Text { text: "Opens in your browser, each with Save as PNG."; color: Theme.muted; font-size: 11px; wrap: word-wrap; } }
+                    Pill { label: "Open in Your Browser"; on: true; clicked => { root.act("url:http://127.0.0.1:" + root.port + "/panels"); } }
+                    VerticalLayout { alignment: center; Text { text: "Each panel there has a Save as PNG button."; color: Theme.muted; font-size: 11px; wrap: word-wrap; } }
                 }
                 // (a widget's preview: picture-in-picture, at the top, staying put)
                 if root.sheet-split: VerticalLayout {

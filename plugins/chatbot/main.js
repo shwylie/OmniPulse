@@ -2016,7 +2016,7 @@ const SUBS = (me) => [
   ["channel.subscription.gift", "1", { broadcaster_user_id: me }],
   ["channel.cheer", "1", { broadcaster_user_id: me }],
   ["channel.raid", "1", { to_broadcaster_user_id: me }],
-  ["channel.hype_train.begin", "1", { broadcaster_user_id: me }],
+  ["channel.hype_train.begin", "2", { broadcaster_user_id: me }],
   ["channel.poll.begin", "1", { broadcaster_user_id: me }],
   ["channel.channel_points_custom_reward_redemption.add", "1", { broadcaster_user_id: me }],
   ["stream.online", "1", { broadcaster_user_id: me }],
@@ -2025,8 +2025,8 @@ const SUBS = (me) => [
   ["channel.prediction.begin", "1", { broadcaster_user_id: me }],
   ["channel.prediction.end", "1", { broadcaster_user_id: me }],
   ["channel.poll.end", "1", { broadcaster_user_id: me }],
-  ["channel.hype_train.end", "1", { broadcaster_user_id: me }],
-  ["channel.hype_train.progress", "1", { broadcaster_user_id: me }],
+  ["channel.hype_train.end", "2", { broadcaster_user_id: me }],
+  ["channel.hype_train.progress", "2", { broadcaster_user_id: me }],
   ["channel.charity_campaign.donate", "1", { broadcaster_user_id: me }],
   ["channel.shoutout.receive", "1", { broadcaster_user_id: me, moderator_user_id: me }],
   ["channel.vip.add", "1", { broadcaster_user_id: me }],
@@ -2051,6 +2051,24 @@ function asAlert(type, e) {
 
 function tierName(t) { return t === "3000" ? "Tier 3" : t === "2000" ? "Tier 2" : "Tier 1"; }
 
+// Twitch's subscriptions for this app left from before (a socket closed without them: the app quit, or lost
+// its connection): taken away, as they count against how many it may have and new ones are refused (429)
+async function staleSubsGone(token) {
+  const head = { "Client-Id": S().twitchClientId, Authorization: "Bearer " + token };
+  for (const status of ["websocket_disconnected", "websocket_failed_ping_pong", "websocket_received_inbound_traffic", "websocket_connection_unused", "websocket_internal_error", "websocket_network_timeout", "websocket_network_error"]) {
+    try {
+      let cursor = "", left = 10;
+      do {
+        const r = await OmniPulse.fetch("https://api.twitch.tv/helix/eventsub/subscriptions?status=" + status + (cursor ? "&after=" + cursor : ""), { headers: head });
+        if (!r.ok) break;
+        const j = await r.json();
+        for (const s of j.data || []) await OmniPulse.fetch("https://api.twitch.tv/helix/eventsub/subscriptions?id=" + encodeURIComponent(s.id), { method: "DELETE", headers: head });
+        cursor = (j.pagination && j.pagination.cursor) || "";
+      } while (cursor && --left > 0);
+    } catch (e) {}
+  }
+}
+
 function connectEvents(token, url) {
   const s = OmniPulse.socket(url || "wss://eventsub.wss.twitch.tv/ws");
   s.onmessage = async (data) => {
@@ -2059,6 +2077,7 @@ function connectEvents(token, url) {
     const kind = m.metadata && m.metadata.message_type;
     if (kind === "session_welcome" && !url) {
       const session = m.payload.session.id;
+      await staleSubsGone(token);
       for (const [type, version, condition] of SUBS(S().userId)) {
         const r = await OmniPulse.fetch("https://api.twitch.tv/helix/eventsub/subscriptions", {
           method: "POST",
