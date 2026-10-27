@@ -329,7 +329,12 @@ pub fn open_url(url: String) -> Result<(), String> {
         || url.starts_with("https://kick.com/")
         || url.starts_with("https://id.kick.com/")
         || url.starts_with("https://streamlabs.com/")
-        || url.starts_with("https://streamelements.com/"))
+        || url.starts_with("https://streamelements.com/")
+        || url.starts_with("https://ko-fi.com/")
+        || url.starts_with("https://help.throne.com/")
+        || url.starts_with("https://throne.com/")
+        || url.starts_with("https://docs.fourthwall.com/")
+        || url.starts_with("https://fourthwall.com/"))
     {
         return Err("Only links to the services OmniPulse works with can be opened from it".to_string());
     }
