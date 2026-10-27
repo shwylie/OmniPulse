@@ -846,9 +846,12 @@ component AccentGlow inherits Rectangle {
         clip: true;
         border-radius: Theme.panel-radius;
         property <length> s: root.height * 2.4;
-        Rectangle { visible: !Theme.resizing; x: parent.width * 0.18 - parent.s / 2; y: -parent.s / 2; width: parent.s; height: parent.s;
+        // (each glow's centre kept far enough in that it's faded out (its 70%) before the top corners: the software
+        // renderer clips them square, so a glow reaching a corner would square it off)
+        property <length> reach: self.s * 0.35 + Theme.panel-radius + 4px;
+        Rectangle { visible: !Theme.resizing; x: max(parent.width * 0.18, parent.reach) - parent.s / 2; y: -parent.s / 2; width: parent.s; height: parent.s;
             background: @radial-gradient(circle, (root.settings ? Theme.accent-2 : Theme.accent).with-alpha(root.settings ? 0.28 : 0.42) 0%, transparent 70%); }
-        Rectangle { visible: !Theme.resizing; x: parent.width * 0.82 - parent.s / 2; y: -parent.s / 2; width: parent.s; height: parent.s;
+        Rectangle { visible: !Theme.resizing; x: min(parent.width * 0.82, parent.width - parent.reach) - parent.s / 2; y: -parent.s / 2; width: parent.s; height: parent.s;
             background: @radial-gradient(circle, (root.settings ? Theme.accent : Theme.accent-2).with-alpha(root.settings ? 0.28 : 0.42) 0%, transparent 70%); }
     }
 }
@@ -5715,6 +5718,8 @@ export component AppWindow inherits Window {
     callback title-settings(string);
     // an edge or corner pressed: the window resized from it (0 top ... 7 bottom-right)
     callback resize(int);
+    // F11: the window full screen, or back as it was
+    callback full-screen-toggle();
 
     // (Aurora: two slow glows of the accents behind the see-through panels; resting while it's resized)
     if Theme.aurora && !Theme.resizing: Rectangle {
@@ -10075,6 +10080,8 @@ export component AppWindow inherits Window {
         height: 0;
         init => { self.focus(); }
         key-pressed(e) => {
+            // (F11: the whole screen, and back)
+            if (e.text == Key.F11) { root.full-screen-toggle(); return accept; }
             if (e.modifiers.control && (e.text == "a" || e.text == "A")) { root.pick-all(); return accept; }
             // (as the web app's: the picked tracks copied, and pasted into the playlist that's open, or the queue)
             if (e.modifiers.control && (e.text == "c" || e.text == "C")) { root.picks-copy(); return accept; }

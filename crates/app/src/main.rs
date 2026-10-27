@@ -14738,6 +14738,10 @@ fn main() -> Result<(), slint::PlatformError> {
         }
     });
     { let s = shared.clone(); ui.on_minimize(move || minimize(&s)); }
+    ui.on_full_screen_toggle({
+        let weak = ui.as_weak();
+        move || if let Some(ui) = weak.upgrade() { let w = ui.window(); w.set_fullscreen(!w.is_fullscreen()); }
+    });
     ui.on_maximize({
         let weak = ui.as_weak();
         move || {
@@ -15491,6 +15495,28 @@ fn main() -> Result<(), slint::PlatformError> {
                         win.dispatch_event(WindowEvent::PointerReleased { position, button: PointerEventButton::Left });
                         println!("selftest: clicked {xy:?}");
                     }
+                }
+                // (how often the window's been drawn: frames since the last "fps", and a second's worth)
+                "fps" => {
+                    thread_local! { static COUNT: std::cell::RefCell<Option<(std::rc::Rc<std::cell::Cell<u64>>, std::time::Instant)>> = const { std::cell::RefCell::new(None) }; }
+                    COUNT.with(|c| {
+                        let mut c = c.borrow_mut();
+                        match c.as_mut() {
+                            None => {
+                                let n = std::rc::Rc::new(std::cell::Cell::new(0u64));
+                                let n2 = n.clone();
+                                let _ = ui.window().set_rendering_notifier(move |state, _| { if matches!(state, slint::RenderingState::BeforeRendering) { n2.set(n2.get() + 1); } });
+                                *c = Some((n, std::time::Instant::now()));
+                                println!("selftest: fps counting");
+                            }
+                            Some((n, since)) => {
+                                let secs = since.elapsed().as_secs_f64().max(0.001);
+                                println!("selftest: fps {:.1} ({} frames in {secs:.1} s)", n.get() as f64 / secs, n.get());
+                                n.set(0);
+                                *since = std::time::Instant::now();
+                            }
+                        }
+                    });
                 }
                 // (the settings changed on the open page and not saved yet: which, and to what)
                 "pfedits" => {
