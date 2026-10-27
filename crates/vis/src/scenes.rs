@@ -1,4 +1,4 @@
-// The scenes: smoke from the cover, a swarm of points, marbled ink and phosphor traces, each
+// The scenes: smoke from the cover, a swarm of stars and marbled ink, each
 // made of long-public techniques. Each is GLSL passes (see lib.rs for what they're given). Written to
 // run as they are in WebGL2 too: no arrays of constants, no names GL's ES keeps for itself.
 
@@ -97,8 +97,13 @@ vec4 point(int id, out vec4 col, out float size) {
     float aspect = u.res.x / u.res.y;
     vec4 clip = vec4(pos.x * 1.7 / aspect, pos.y * 1.7, 0.5, z);
     float sp = length(vel);
-    col = vec4(palette(0.55 + sp * 0.08 + MID * 0.3, vec3(0.5), vec3(0.5), vec3(1.0), vec3(0.0, 0.1, 0.2)) * (0.018 + 0.012 * sp) * (2.2 / z), 1.0);
-    size = 1.4 * (3.0 / z) * (1.0 + 0.4 * KICK);
+    vec3 h = hash31(float(id) * 1.37);
+    // (a star's own colour: most blue-white, then gold, rose and violet; the music turning them a little)
+    vec3 star = h.x < 0.45 ? vec3(0.65, 0.8, 1.0) : h.x < 0.65 ? vec3(1.0, 0.82, 0.45) : h.x < 0.82 ? vec3(1.0, 0.45, 0.6) : h.x < 0.94 ? vec3(0.7, 0.5, 1.0) : vec3(0.4, 1.0, 0.9);
+    star = mix(star, palette(h.y + MID * 0.4 + iTime * 0.02, vec3(0.5), vec3(0.5), vec3(1.0), vec3(0.0, 0.33, 0.67)), 0.35);
+    float twinkle = 0.6 + 0.4 * sin(iTime * (2.0 + 5.0 * h.z) + h.y * 30.0);
+    col = vec4(star * (0.02 + 0.016 * sp) * twinkle * (2.2 / z) * (1.0 + 1.5 * HIGH), 1.0);
+    size = (0.9 + 1.6 * h.z * h.z) * (3.0 / z) * (1.0 + 0.5 * KICK);
     return clip;
 }
 "#;
@@ -120,8 +125,11 @@ void mainImage(out vec4 o, in vec2 fc) {
     vec2 px = 2.0 / chRes(0);
     vec3 b = (ch0(uv + px).rgb + ch0(uv - px).rgb + ch0(uv + vec2(px.x, -px.y)).rgb + ch0(uv - vec2(px.x, -px.y)).rgb) * 0.25;
     c += b * 0.8;
-    vec3 bg = vec3(0.01, 0.012, 0.02) * (1.0 + 2.0 * DROP);
-    o = vec4(tonemap(c * 1.6 + bg), 1.0);
+    // (a faint nebula behind them, its colours drifting)
+    vec2 p = (fc - 0.5 * iResolution.xy) / iResolution.y;
+    vec3 neb = palette(fbm(p * 2.0 + iTime * 0.01) + 0.3, vec3(0.5), vec3(0.5), vec3(1.0), vec3(0.2, 0.4, 0.7)) * 0.03 * fbm(p * 3.0 - iTime * 0.02);
+    vec3 bg = vec3(0.006, 0.008, 0.016) * (1.0 + 2.0 * DROP) + neb * (1.0 + LEVEL);
+    o = vec4(tonemap(c * 1.7 + bg), 1.0);
 }
 "#;
 
@@ -152,19 +160,26 @@ void mainImage(out vec4 o, in vec2 fc) {
     vec2 v = ch0(uv).xy;
     float dt = clamp(iTimeDelta, 0.001, 0.05);
     vec3 was = ch1(uv - v * aspect * dt).rgb;
+    // (its paints: any colour on the wheel, the wheel itself turning slowly as the song goes so its colours keep
+    // changing; and a steady share of deep, near-black paint between them, so the contrast stays the same whatever
+    // the colours are)
+    #define INK(t) (palette(t, vec3(0.5), vec3(0.5), vec3(1.0, 1.0, 1.0), vec3(0.0, 0.33, 0.67) + iTime * vec3(0.011, 0.017, 0.007)) * mix(0.07, 1.0, smoothstep(0.15, 0.55, abs(fract((t) * 1.7) - 0.5) * 2.0)))
     if (iFrame < 2) {
-        vec2 p = uv * vec2(iResolution.x / iResolution.y, 1.0) * 3.0;
-        was = palette(fbm(p) * 0.9, vec3(0.35, 0.3, 0.4), vec3(0.35, 0.3, 0.35), vec3(1.0, 0.9, 0.8), vec3(0.6, 0.7, 0.85)) * 0.7;
+        vec2 p = uv * vec2(iResolution.x / iResolution.y, 1.0) * 2.5;
+        was = INK(fbm(p + fbm(p * 1.7)) * 1.3);
     }
-    // (a band of the spectrum's colour seeping in along the bottom, and blots on each snare)
+    // (new paint poured in: along the spectrum's loud parts at the foot, and a pour on each kick and snare, each
+    // a colour of its own, round the paints as the song goes)
     float sp = spectrum(uv.x);
-    vec3 tint = palette(uv.x * 0.35 + iTime * 0.015 + MID * 0.25, vec3(0.4, 0.35, 0.45), vec3(0.4, 0.35, 0.4), vec3(1.0, 0.9, 0.8), vec3(0.6, 0.7, 0.85));
-    float seep = smoothstep(0.08 * sp, 0.0, uv.y) * sp;
+    vec3 tint = INK(uv.x * 0.5 + iTime * 0.02 + MID * 0.3);
+    float seep = smoothstep(0.12 * sp, 0.0, uv.y) * sp;
     vec2 bc = hash31(floor(float(HITS))).xy;
     vec2 bd = (uv - bc) / aspect;
-    float blot = exp(-dot(bd, bd) * 140.0) * SNARE;
-    vec3 c = mix(was, tint, clamp(seep * 0.25 + blot, 0.0, 1.0));
-    o = vec4(c * (1.0 - dt * 0.03), 1.0);
+    float blot = exp(-dot(bd, bd) * 90.0) * max(SNARE, KICK * 0.8);
+    vec3 pour = INK(hash11(floor(float(HITS)) * 3.1) + iTime * 0.01);
+    vec3 c = mix(was, tint, clamp(seep * 0.3, 0.0, 1.0));
+    c = mix(c, pour, clamp(blot, 0.0, 1.0));
+    o = vec4(c, 1.0);
 }
 "#;
 
@@ -179,59 +194,19 @@ void mainImage(out vec4 o, in vec2 fc) {
     vec3 n = normalize(vec3(-hx * 6.0, -hy * 6.0, 1.0));
     float spec = pow(clamp(dot(reflect(normalize(vec3(-0.4, -0.5, -1.0)), n), vec3(0.0, 0.0, 1.0)), 0.0, 1.0), 24.0);
     c = c * (0.85 + 0.3 * n.z) + spec * (0.25 + 0.6 * HIGH);
-    o = vec4(tonemap(c * (1.2 + 0.4 * KICK)), 1.0);
-}
-"#;
-
-// ---------- Phosphor: the stereo wave as a glowing trace, held on the screen as an old scope's ----------
-
-const PHOS_POINTS: &str = r#"
-// pass 0, the trace: points along the wave, left against right (Lissajous), or round a circle; a drop
-// swaps which, kicks open it out
-vec4 point(int id, out vec4 col, out float size) {
-    float n = 16384.0;
-    float t = float(id) / n;
-    vec2 w = wave(t);
-    float mode = mod(floor(BEAT / 32.0) + (DROP > 0.5 ? 1.0 : 0.0), 2.0);
-    vec2 q;
-    if (mode < 1.0) {
-        q = rot(0.785398) * w * (0.7 + 0.3 * KICK);
-    } else {
-        float a = t * 2.0 * PI;
-        float r = 0.55 + 0.35 * (w.x + w.y) * 0.5 + 0.1 * KICK;
-        q = vec2(cos(a), sin(a)) * r;
-    }
-    float aspect = u.res.x / u.res.y;
-    col = vec4(mix(vec3(0.25, 1.0, 0.5), vec3(0.35, 0.75, 1.0), clamp(WIDTH * 1.5, 0.0, 1.0)) * (0.04 + 0.12 * LEVEL), 1.0);
-    size = 2.0 + 2.0 * KICK;
-    return vec4(q.x / aspect * 0.85, q.y * 0.85, 0.5, 1.0);
-}
-"#;
-
-const PHOS_KEEP: &str = r#"
-// pass 1: the trace held, fading as a phosphor does (longer while it builds)
-void mainImage(out vec4 o, in vec2 fc) {
-    vec2 uv = fc / iResolution.xy;
-    vec3 was = ch1(uv).rgb * (0.86 + 0.1 * BUILD);
-    o = vec4(was + ch0(uv).rgb, 1.0);
-}
-"#;
-
-const PHOS_IMAGE: &str = r#"
-void mainImage(out vec4 o, in vec2 fc) {
-    vec2 uv = fc / iResolution.xy;
-    vec3 c = ch0(uv).rgb;
-    vec3 b = vec3(0.0);
-    for (int i = 1; i <= 4; i++) {
-        vec2 d = float(i) * 2.5 / chRes(0);
-        b += ch0(uv + vec2(d.x, 0.0)).rgb + ch0(uv - vec2(d.x, 0.0)).rgb + ch0(uv + vec2(0.0, d.y)).rgb + ch0(uv - vec2(0.0, d.y)).rgb;
-    }
-    c += b * 0.06 * (1.0 + KICK);
-    // (the scope's glass: a faint grid and its curve darkening the corners)
-    vec2 g = abs(fract(uv * vec2(10.0, 8.0)) - 0.5);
-    float grid = smoothstep(0.49, 0.5, max(g.x, g.y)) * 0.025;
-    float v = smoothstep(1.1, 0.35, length(uv - 0.5));
-    o = vec4(tonemap((c + grid) * v * 1.4), 1.0);
+    // (gold veins where one paint meets another, catching the light; flecks of gold leaf in the dark)
+    float edge = clamp(length(vec2(hx, hy)) * 7.0, 0.0, 1.0);
+    vec3 gold = vec3(1.0, 0.78, 0.38) * (0.7 + 0.6 * spec + 0.5 * HIGH);
+    c = mix(c, gold, smoothstep(0.55, 0.95, edge) * 0.75);
+    float fleck = step(0.996, hash21(floor(fc / 2.0))) * (1.0 - dot(c, vec3(0.33))) * (0.5 + 0.5 * sin(iTime * 3.0 + hash21(fc) * 20.0));
+    c += gold * fleck * 0.6;
+    // (deep and rich as wet paint: its colours fuller; and its brightness levelled to one fixed range, from deep to
+    // bright, so the contrast's the same whatever colours are in it)
+    float l = max(dot(c, vec3(0.299, 0.587, 0.114)), 1e-4);
+    c = mix(vec3(l), c, 1.4);
+    float want = mix(0.03, 0.78, smoothstep(0.04, 0.6, l));
+    c = max(c, vec3(0.0)) * (want / l);
+    o = vec4(tonemap(c * (1.25 + 0.3 * KICK)), 1.0);
 }
 "#;
 
@@ -243,10 +218,15 @@ vec2 curl(vec2 p) { float e = 0.02; float a = fbm(p + vec2(0.0, e)); float b = f
 void mainImage(out vec4 o, in vec2 fc) {
     vec2 uv = fc / iResolution.xy;
     vec2 p = (fc - 0.5 * iResolution.xy) / iResolution.y;
-    vec2 v = curl(p * 2.2 + vec2(0.0, -iTime * 0.08)) * (0.02 + 0.1 * LEVEL + 0.08 * MID);
-    // (smoke rises)
-    v.y += 0.03 + 0.05 * LEVEL;
-    v += normalize(p + 1e-4) * (0.5 * KICK * KICK + 1.4 * DROP) * exp(-dot(p, p) * 1.5);
+    vec2 v = curl(p * 2.2 + vec2(0.0, -iTime * 0.08)) * (0.04 + 0.22 * LEVEL + 0.16 * MID + 0.1 * HIGH);
+    // (smoke rises, faster with the music)
+    v.y += 0.03 + 0.09 * LEVEL;
+    // (each kick a puff out from somewhere new; a snare a flick sideways; a drop, everything blown)
+    vec2 at = (hash31(floor(BEAT)).xy - 0.5) * vec2(1.2, 0.7);
+    vec2 d = p - at;
+    v += normalize(d + 1e-4) * (1.3 * KICK * KICK) * exp(-dot(d, d) * 3.0);
+    v.x += SNARE * 0.25 * (mod(float(HITS), 2.0) < 1.0 ? 1.0 : -1.0) * exp(-dot(p, p));
+    v += normalize(p + 1e-4) * 1.6 * DROP * exp(-dot(p, p) * 1.2);
     vec2 last = ch0(uv).xy;
     o = vec4(mix(v, last, iFrame > 0 ? 0.5 : 0.0), 0.0, 1.0);
 }
@@ -256,11 +236,9 @@ void mainImage(out vec4 o, in vec2 fc) {
 const SMOKE_ART: &str = r#"
 vec3 cover(vec2 uv, float zoom) {
     vec2 res = iResolution.xy;
-    vec2 q = (uv * res - 0.5 * res) / (res.y * 0.84 * zoom) + 0.5;
+    vec2 q = (uv * res - 0.5 * res) / (max(res.x, res.y) * zoom) + 0.5;
     if (chRes(2).x < 2.0) return vec3(0.12, 0.1, 0.16) * (1.0 - length(uv - 0.5));
-    vec2 e = smoothstep(vec2(0.0), vec2(0.015), q) * smoothstep(vec2(1.0), vec2(0.985), q);
-    vec3 dark = ch2(vec2(0.5)).rgb * 0.05;
-    return mix(dark, ch2(clamp(q, 0.0, 1.0)).rgb, e.x * e.y);
+    return ch2(clamp(q, 0.0, 1.0)).rgb;
 }
 "#;
 
@@ -272,7 +250,7 @@ void mainImage(out vec4 o, in vec2 fc) {
     vec2 v = ch0(uv).xy;
     float dt = clamp(iTimeDelta, 0.001, 0.05);
     // (breathing with the bass: the cover a little nearer on each kick)
-    vec3 art = cover(uv, 1.0 + 0.03 * BASS + 0.04 * KICK);
+    vec3 art = cover(uv, 1.0 + 0.04 * BASS + 0.05 * KICK);
     if (iFrame < 2) { o = vec4(art, 0.0); return; }
     vec4 was = ch1(uv - v * aspect * dt);
     // (wisps: where the noise says, a little of the smoke thins and lightens as it goes)
@@ -280,7 +258,7 @@ void mainImage(out vec4 o, in vec2 fc) {
     // (only a touch each frame: the smoke keeps the cover's colours, paler at its thin edges)
     vec3 smoke = mix(was.rgb, vec3(dot(was.rgb, vec3(0.33))) * 1.05, (0.004 + 0.012 * w) * was.a);
     // (how fast the cover comes back: quickly when it's quiet, slower as it builds, hardly at a drop)
-    float back = clamp(dt * (4.0 - 2.6 * LEVEL - 1.2 * BUILD - 3.5 * DROP), 0.008, 0.12);
+    float back = clamp(dt * (3.0 - 2.2 * LEVEL - 1.2 * BUILD - 2.5 * DROP), 0.006, 0.09);
     vec3 c = mix(smoke, art, back);
     float amount = clamp(was.a * (1.0 - back * 2.0) + length(v) * dt * 6.0, 0.0, 1.0);
     o = vec4(c, amount);
@@ -297,7 +275,7 @@ void mainImage(out vec4 o, in vec2 fc) {
     vec3 b = (ch1(uv + vec2(px.x, 0.0)).rgb + ch1(uv - vec2(px.x, 0.0)).rgb + ch1(uv + vec2(0.0, px.y)).rgb + ch1(uv - vec2(0.0, px.y)).rgb) * 0.25;
     vec3 c = s.rgb + max(b - 0.35, vec3(0.0)) * (0.5 + 0.8 * KICK) * s.a;
     c = mix(c, art, 0.08 * (1.0 - s.a));
-    float vig = smoothstep(1.15, 0.25, length((uv - 0.5) * vec2(iResolution.x / iResolution.y, 1.0)) * 0.9);
+    float vig = smoothstep(1.4, 0.4, length((uv - 0.5) * vec2(iResolution.x / iResolution.y, 1.0)) * 0.9);
     o = vec4(tonemap(c * vig * (1.05 + 0.25 * KICK + 0.4 * DROP)) + (hash21(fc + iTime) - 0.5) * 0.015, 1.0);
 }
 "#;
@@ -330,11 +308,6 @@ fn make() -> Vec<Scene> {
             pass(Kind::Buffer, Size::Scaled(0.25), [p(0), NONE, NONE, NONE], with(&[COMMON, INK_FLOW])),
             pass(Kind::Buffer, Size::Scaled(0.6), [p(0), p(1), NONE, NONE], with(&[COMMON, INK_DYE])),
             pass(Kind::Image, Size::Scaled(1.0), [NONE, p(1), NONE, NONE], with(&[COMMON, INK_IMAGE])),
-        ] },
-        Scene { id: "phosphor", name: "Phosphor", passes: vec![
-            pass(Kind::Points(16384), Size::Scaled(0.75), [NONE; 4], with(&[COMMON, PHOS_POINTS])),
-            pass(Kind::Buffer, Size::Scaled(0.75), [p(0), p(1), NONE, NONE], with(&[COMMON, PHOS_KEEP])),
-            pass(Kind::Image, Size::Scaled(1.0), [p(1), NONE, NONE, NONE], with(&[COMMON, PHOS_IMAGE])),
         ] },
     ]
 }

@@ -69,7 +69,7 @@ fn every_scene_draws() {
 #[test]
 fn webgl_scenes_and_a_frame() {
     let json = omnipulse_vis::webgl_json();
-    assert!(json.starts_with("{\"prelude\":") && json.contains("\"smoke\":") && json.contains("\"phosphor\":"), "{}", &json[..200.min(json.len())]);
+    assert!(json.starts_with("{\"prelude\":") && json.contains("\"smoke\":") && json.contains("\"ink\":") && !json.contains("\"phosphor\":"), "{}", &json[..200.min(json.len())]);
     let mut a = omnipulse_vis::audio::Analyser::new(48000);
     let l: Vec<f32> = (0..2048).map(|i| (i as f32 * 0.05).sin() * 0.6).collect();
     let audio = a.analyse(&l, &l, 1.0 / 30.0).clone();

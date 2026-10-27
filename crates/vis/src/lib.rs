@@ -294,6 +294,8 @@ pub struct Renderer {
     built: Option<Built>,
     frame: u64,
     last_t: f32,
+    /// (the picture changed: the passes' bindings to be made again, their pictures kept)
+    regroup: bool,
 }
 
 fn glsl(device: &wgpu::Device, label: &str, src: &str, stage: wgpu::naga::ShaderStage) -> Result<wgpu::ShaderModule, String> {
@@ -327,7 +329,7 @@ impl Renderer {
         let audio_view = audio_tex.create_view(&Default::default());
         let fullscreen = glsl(&device, "fullscreen", FULLSCREEN_VS, wgpu::naga::ShaderStage::Vertex)?;
         let points_fs = glsl(&device, "points", POINTS_FS, wgpu::naga::ShaderStage::Fragment)?;
-        Ok(Renderer { device, queue, adapter: name, layout, pipe_layout, sampler, black, audio_tex, audio_view, fullscreen, points_fs, built: None, frame: 0, last_t: 0.0, art: None })
+        Ok(Renderer { device, queue, adapter: name, layout, pipe_layout, sampler, black, audio_tex, audio_view, fullscreen, points_fs, built: None, frame: 0, last_t: 0.0, art: None, regroup: false })
     }
 
     pub fn adapter(&self) -> &str { &self.adapter }
@@ -347,8 +349,8 @@ impl Renderer {
             );
             (tex.create_view(&Default::default()), w, h)
         });
-        // (its bindings made again on the next frame)
-        if let Some(b) = self.built.as_mut() { b.size = (0, 0); }
+        // (its bindings made again on the next frame; the scene goes on as it was, the new picture blending in)
+        self.regroup = true;
     }
 
     /// A scene, its passes' shaders made (a mistake in one: why, and the scene as it was)
@@ -399,6 +401,17 @@ impl Renderer {
             let view = [tex[0].create_view(&Default::default()), tex[1].create_view(&Default::default())];
             Target { tex, view, w: tw, h: th }
         }).collect();
+        b.size = (w, h);
+        let row = (w * 4).div_ceil(256) * 256;
+        b.readback = Some((device.create_buffer(&wgpu::BufferDescriptor { label: Some("vis readback"), size: (row * h) as u64, usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ, mapped_at_creation: false }), row));
+        self.frame = 0;
+        self.make_groups();
+    }
+
+    /// Each pass's bindings: its inputs (the passes' pictures, the cover, the sound) for each of its two pictures
+    fn make_groups(&mut self) {
+        let Some(b) = self.built.as_mut() else { return };
+        let device = &self.device;
         // (pass i, drawing into its picture `par`: an input drawn already this frame is read as it is now, a
         // later one (or itself) as it was last frame)
         let mut groups = Vec::new();
@@ -428,17 +441,14 @@ impl Renderer {
             groups.push([make(0), make(1)]);
         }
         b.groups = groups;
-        b.size = (w, h);
-        let row = (w * 4).div_ceil(256) * 256;
-        b.readback = Some((device.create_buffer(&wgpu::BufferDescriptor { label: Some("vis readback"), size: (row * h) as u64, usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ, mapped_at_creation: false }), row));
-        self.frame = 0;
+        self.regroup = false;
     }
 
     /// A frame, w × h, at `t` seconds, with the sound as it is: its pixels, RGBA, top row first
     pub fn render(&mut self, w: u32, h: u32, t: f32, audio: &Audio) -> Result<Vec<u8>, String> {
         let (w, h) = (w.clamp(16, 4096), h.clamp(16, 4096));
         if self.built.is_none() { return Err("no scene".into()); }
-        if self.built.as_ref().map(|b| b.size) != Some((w, h)) { self.make_targets(w, h); }
+        if self.built.as_ref().map(|b| b.size) != Some((w, h)) { self.make_targets(w, h); } else if self.regroup { self.make_groups(); }
         // (the sound: its spectrum and its waves, as the scenes read them)
         let px = audio_texture(audio);
         self.queue.write_texture(

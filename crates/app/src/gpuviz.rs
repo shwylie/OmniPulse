@@ -1,4 +1,4 @@
-// Now Playing's GPU scenes (omnipulse-vis: Smoke, Swarm, Ink, Phosphor), with Hardware Acceleration on:
+// Now Playing's GPU scenes (omnipulse-vis: Smoke, Swarm, Ink), with Hardware Acceleration on:
 // drawn on a thread of their own (its GPU device its own), a frame asked for each tick and shown when it's done,
 // so the app never waits on the GPU. The sound's read here, as the scenes want it: left and right, its hits,
 // its builds and drops.

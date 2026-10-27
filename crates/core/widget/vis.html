@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <!--
-  OmniPulse's GPU visualiser scenes, for OBS (a Browser source): /vis/<scene>, as Smoke, Swarm, Ink or
+  OmniPulse's GPU visualiser scenes, for OBS (a Browser source): /vis/<scene>, as Smoke, Swarm or Ink, or the app's own styles. Formerly
   Phosphor. The same scenes as the app's (their passes from /vis/scenes.json), run here in WebGL2, so OBS's
   browser draws them on your graphics card; the sound from /vis/frame.json, a frame about 30 times a second.
     It shows what's set in the app (Suite > Visualiser), and starts again when that's changed. For one set up by
@@ -161,7 +161,11 @@
     poll(); look(); requestAnimationFrame(loop);
     return;
   }
-  const gl = canvas.getContext("webgl2", { alpha: false, antialias: false, premultipliedAlpha: false, preserveDrawingBuffer: false });
+  // (see-through, as set in the app: its dark parts let the stream show through, each colour's brightness its
+  // opacity; else on black)
+  const KEY = opts.key !== false && Q.get("key") !== "0";
+  if (KEY) { document.documentElement.style.background = "transparent"; document.body.style.background = "transparent"; }
+  const gl = canvas.getContext("webgl2", { alpha: KEY, antialias: false, premultipliedAlpha: true, preserveDrawingBuffer: false });
   if (!gl) { note("This needs WebGL2. In OBS, turn on Browser Source Hardware Acceleration (Settings > Advanced)."); return; }
   // (the buffers: half floats where the GPU can draw into them, else bytes)
   const half = !!gl.getExtension("EXT_color_buffer_float") || !!gl.getExtension("EXT_color_buffer_half_float");
@@ -309,8 +313,7 @@
           gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
           gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
           artSize = [img.width, img.height, 1, 0];
-          // (the scene starts again from it, as the app's does)
-          size = [0, 0];
+          // (the scene goes on, the new picture blending in: never started again for it)
         };
         img.src = "/vis/art.png?n=" + artN;
       }
@@ -341,14 +344,16 @@
     try {
       const all = await (await fetch("/vis/scenes.json", { cache: "no-store" })).json();
       const s = all.scenes[SCENE];
-      if (!s) { note("There's no scene called " + SCENE + ". Try /vis/smoke, /vis/swarm, /vis/ink or /vis/phosphor."); return; }
+      if (!s) { note("There's no scene called " + SCENE + ". Try /vis/smoke, /vis/swarm or /vis/ink."); return; }
       const full = shader(gl.VERTEX_SHADER, all.fullscreenVs, "fullscreen");
+      // (the picture, see-through: each pixel as opaque as it's bright, its colour kept (premultiplied))
+      const keyMain = all.fragMain.replace("outColor = c;", "float a = clamp(max(c.r, max(c.g, c.b)), 0.0, 1.0); outColor = vec4(c.rgb, a);");
       const pfs = shader(gl.FRAGMENT_SHADER, all.pointsFs, "points");
       s.passes.forEach((p, i) => {
         const label = SCENE + " pass " + i;
         p.prog = p.kind === "points"
           ? program(shader(gl.VERTEX_SHADER, all.prelude + p.src + all.pointsVs, label), pfs, label)
-          : program(full, shader(gl.FRAGMENT_SHADER, all.prelude + p.src + all.fragMain, label), label);
+          : program(full, shader(gl.FRAGMENT_SHADER, all.prelude + p.src + (p.kind === "image" && KEY ? keyMain : all.fragMain), label), label);
       });
       scene = s;
       poll();

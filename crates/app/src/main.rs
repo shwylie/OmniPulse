@@ -11365,8 +11365,8 @@ fn viz_update(shared: &Shared, ui: &AppWindow) {
     };
     // (a GPU scene: only with Hardware Acceleration on; picked without it, nothing)
     let gpu = shared.borrow().web.prefs["nativeGpu"].as_bool() == Some(true);
-    // (Depths was taken out: whoever had it gets Smoke)
-    let style = if style == "depths" { "smoke".to_string() } else { style };
+    // (Depths and Phosphor were taken out: whoever had one gets Smoke)
+    let style = if style == "depths" || style == "phosphor" { "smoke".to_string() } else { style };
     let style = if gpuviz::is_scene(&style) && !gpu { "off".to_string() } else { style };
     let scene = gpuviz::is_scene(&style);
     if ui.get_viz_scene() != scene { ui.set_viz_scene(scene); }
@@ -11385,8 +11385,8 @@ fn viz_update(shared: &Shared, ui: &AppWindow) {
         // (and what it shows, as set on its page: the style, its detail, how often it's drawn, the Offset kept to)
         let set = &a.web.prefs["pluginSettings"][botpage::BOT];
         let pick = |k: &str, d: &str| set[k].as_str().filter(|s| !s.is_empty()).unwrap_or(d).to_string();
-        let scene = Some(pick("visScene", "bars")).filter(|s| s != "depths").unwrap_or_else(|| "smoke".into());
-        let opts = serde_json::json!({ "scene": scene, "scale": pick("visScale", "1"), "fps": pick("visFps", "60"), "offset": set["visOffset"].as_bool() != Some(false) }).to_string();
+        let scene = Some(pick("visScene", "bars")).filter(|s| s != "depths" && s != "phosphor").unwrap_or_else(|| "smoke".into());
+        let opts = serde_json::json!({ "scene": scene, "scale": pick("visScale", "1"), "fps": pick("visFps", "60"), "offset": set["visOffset"].as_bool() != Some(false), "key": set["visKey"].as_bool() != Some(false) }).to_string();
         if let Ok(mut v) = omnipulse_core::widget::VIS.lock() { v.playing = a.loaded && !a.engine.is_paused(); v.offset = offset; if v.opts != opts { v.opts = opts; } }
     }
     let game_pause = shared.borrow().web.prefs["vizGamePause"].as_bool() != Some(false);
@@ -13708,7 +13708,8 @@ fn main() -> Result<(), slint::PlatformError> {
     ui.on_now_art_shown(move || if let Some(ui) = w.upgrade() {
         if ui.get_player_style() == "strip" || ui.get_viz_style() == "halo" { art_blur(&ui); }
         // (a GPU scene's cover: the new one)
-        if ui.get_viz_scene() { let art = gpu_art(&ui); GPU_VIS.with(|g| if let Some(g) = g.borrow().as_ref() { g.set_art(art); }); }
+        // (only once there's a picture: none yet, the old one stays rather than going black)
+        if ui.get_viz_scene() { if let Some(art) = gpu_art(&ui) { GPU_VIS.with(|g| if let Some(g) = g.borrow().as_ref() { g.set_art(Some(art)); }); } }
         // (and the one in OBS)
         if omnipulse_core::widget::vis_wanted() { vis_art(&ui); }
     });
@@ -13768,7 +13769,7 @@ fn main() -> Result<(), slint::PlatformError> {
         let now = s.borrow().web.prefs["nowViz"].as_str().unwrap_or("off").to_string();
         let gpu = s.borrow().web.prefs["nativeGpu"].as_bool() == Some(true);
         let next = match now.as_str() {
-            "halo" if gpu => "smoke", "smoke" => "swarm", "swarm" => "ink", "ink" => "phosphor", "phosphor" => "off", "off" => "bars", "bars" => "mirror", "mirror" => "peaks", "peaks" => "blocks", "blocks" => "dots", "dots" => "wave", "wave" => "centre", "centre" => "glow", "glow" => "ring", "ring" => "halo", _ => "off" };
+            "halo" if gpu => "smoke", "smoke" => "swarm", "swarm" => "ink", "ink" => "off", "off" => "bars", "bars" => "mirror", "mirror" => "peaks", "peaks" => "blocks", "blocks" => "dots", "dots" => "wave", "wave" => "centre", "centre" => "glow", "glow" => "ring", "ring" => "halo", _ => "off" };
         if let Some(o) = s.borrow_mut().web.prefs.as_object_mut() { o.insert("nowViz".into(), serde_json::json!(next)); }
         if std::env::var_os("OMNIPULSE_SELFTEST").is_none() { webstate::save_pref("nowViz", serde_json::json!(next)); }
         if let Some(ui) = s.borrow().ui.upgrade() { viz_update(&s, &ui); }

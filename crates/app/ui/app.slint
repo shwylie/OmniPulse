@@ -7380,7 +7380,7 @@ export component AppWindow inherits Window {
                                             spacing: 6px;
                                             alignment: start;
                                             Text { text: "GPU scenes (WIP)"; color: Theme.muted; font-size: 12px; vertical-alignment: center; width: 64px; wrap: word-wrap; }
-                                            for v in [{ id: "smoke", n: "Smoke", t: "The cover drifting as smoke" }, { id: "swarm", n: "Swarm", t: "Points that scatter on hits and gather again" }, { id: "ink", n: "Ink", t: "Marbled ink, stirred by the kicks" }, { id: "phosphor", n: "Phosphor", t: "Glowing scope lines from the left and right" }]: Rectangle {
+                                            for v in [{ id: "smoke", n: "Smoke", t: "The cover drifting as smoke" }, { id: "swarm", n: "Swarm", t: "Points that scatter on hits and gather again" }, { id: "ink", n: "Ink", t: "Marbled ink, stirred by the kicks" }]: Rectangle {
                                                 width: gsc.width;
                                                 height: gsc.height;
                                                 gsc := Chip { label: v.n; on: root.viz-style == v.id; clicked => { root.viz-pick(v.id); } }
@@ -7389,7 +7389,7 @@ export component AppWindow inherits Window {
                                             }
                                         }
                                         if root.gpu-on: Text { text: "The GPU scenes are still being built, so they may change, and some may not look right yet."; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
-                                        if !root.gpu-on: Text { text: "Turn on Hardware Acceleration (below) for the GPU scenes: Smoke, Swarm, Ink and Phosphor. They're still being built (WIP)."; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
+                                        if !root.gpu-on: Text { text: "Turn on Hardware Acceleration (below) for the GPU scenes: Smoke, Swarm and Ink. They're still being built (WIP)."; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
                                         HorizontalLayout {
                                             spacing: 6px;
                                             alignment: start;
