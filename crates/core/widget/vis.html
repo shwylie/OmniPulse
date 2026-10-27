@@ -6,6 +6,8 @@
   OmniPulse's GPU visualiser scenes, for OBS (a Browser source): /vis/<scene>, as Smoke, Swarm, Ink or
   Phosphor. The same scenes as the app's (their passes from /vis/scenes.json), run here in WebGL2, so OBS's
   browser draws them on your graphics card; the sound from /vis/frame.json, a frame about 30 times a second.
+    It shows what's set in the app (Suite > Visualiser), and starts again when that's changed. For one set up by
+    hand, its address can say instead: /vis/<style>, and
     ?scale=0.5    draw it smaller than the source and stretch it up (0.25 to 1; 1 at first)
     ?fps=30       how often it draws (30 or 60; 60 at first)
     ?offset=0     don't hold it back by the OmniPulse Offset's delay (it is held back, at first)
@@ -22,15 +24,141 @@
 <canvas id="c"></canvas>
 <div id="note"></div>
 <script>
-(() => {
+(async () => {
   const PATH = location.pathname.replace(/\/+$/, "");
-  const SCENE = (PATH.split("/")[2] || "smoke").toLowerCase();
+  // (what it shows, as set in the app; or as its address says, for one set up by hand)
+  const URL_SCENE = (PATH.split("/")[2] || "").toLowerCase();
   const Q = new URLSearchParams(location.search);
-  const SCALE = Math.max(0.25, Math.min(1, Number(Q.get("scale")) || 1));
-  const FPS = Number(Q.get("fps")) === 30 ? 30 : 60;
-  const OFFSET = Q.get("offset") !== "0";
+  let opts = {};
+  try { opts = (await (await fetch("/vis/frame.json", { cache: "no-store" })).json()).opts || {}; } catch (e) {}
+  const START = JSON.stringify(opts);
+  // (changed in the app: the page starts again with it)
+  const recheck = (r) => { if (!URL_SCENE && r && r.opts && JSON.stringify(r.opts) !== START) location.reload(); };
+  const SCENE = URL_SCENE || String(opts.scene || "bars").toLowerCase();
+  const SCALE = Math.max(0.25, Math.min(1, Number(Q.get("scale") || opts.scale) || 1));
+  const FPS = Number(Q.get("fps") || opts.fps) === 30 ? 30 : 60;
+  const OFFSET = Q.has("offset") ? Q.get("offset") !== "0" : opts.offset !== false;
   const note = (t) => { document.getElementById("note").textContent = t || ""; };
   const canvas = document.getElementById("c");
+  // ---------- the app's own styles (Bars, Mirror, Peaks, Blocks, Dots, Wave, Centre, Halo): drawn in 2D, from the
+  // same sound, held back by the same Offset; see-through, so they lay over the stream as they are ----------
+  const FLAT = ["bars", "mirror", "peaks", "blocks", "dots", "wave", "centre", "halo"];
+  if (FLAT.includes(SCENE)) {
+    document.body.style.background = "transparent";
+    const g = canvas.getContext("2d");
+    const N = 48;
+    let bands = new Array(N).fill(0), shown = new Array(N).fill(0), tops = new Array(N).fill(0).map(() => ({ v: 0, held: 0, fall: 0 }));
+    let c1 = "#8e9bff", c2 = "#b48eff", playing = false, delay = 0, idle = 0, kick = 0, cover = null, coverN = -1, off = false;
+    const queue = [];
+    let latest = null;
+    // (a frame's spectrum, from its texture's first row: N bands, low to high)
+    const spectrumOf = (f) => {
+      const raw = atob(f.tex), out = new Array(N).fill(0);
+      for (let k = 0; k < N; k++) {
+        const a = Math.floor(k / N * 256), b = Math.max(a + 1, Math.floor((k + 1) / N * 256));
+        let m = 0;
+        for (let x = a; x < b; x++) m = Math.max(m, raw.charCodeAt(x * 4) / 255);
+        out[k] = m;
+      }
+      return out;
+    };
+    async function poll() {
+      try {
+        const r = await (await fetch("/vis/frame.json", { cache: "no-store" })).json();
+        recheck(r);
+        delay = Math.max(0, Number(r.offset) || 0);
+        playing = !!r.playing;
+        if (r.frame && (!queue.length || r.frame.t > queue[queue.length - 1].t)) { queue.push(r.frame); while (queue.length > 400) queue.shift(); }
+        if (r.art !== coverN && SCENE === "halo") { coverN = r.art; const img = new Image(); img.onload = () => { cover = img; }; img.src = "/vis/art.png?n=" + coverN; }
+      } catch (e) {}
+      setTimeout(poll, 33);
+    }
+    async function look() {
+      try {
+        const s = await (await fetch("/now.json", { cache: "no-store" })).json();
+        if (s.accent) { c1 = s.accent; c2 = s.accent2 || s.accent; }
+        off = !!(s && s.suite && Array.isArray(s.suite.off) && s.suite.off.includes("vis"));
+        document.documentElement.style.display = off ? "none" : "";
+      } catch (e) {}
+      setTimeout(look, 2000);
+    }
+    const mix = (k) => { const p = (h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16)); const a = p(c1), b = p(c2); return "rgb(" + a.map((v, i) => Math.round(v + (b[i] - v) * k)).join(",") + ")"; };
+    const round = (x, y, w, h, r) => { g.beginPath(); g.roundRect ? g.roundRect(x, y, w, h, Math.min(r, w / 2, h / 2)) : g.rect(x, y, w, h); g.fill(); };
+    function draw() {
+      const W = Math.round(innerWidth * devicePixelRatio * SCALE), H = Math.round(innerHeight * devicePixelRatio * SCALE);
+      if (canvas.width !== W || canvas.height !== H) { canvas.width = W; canvas.height = H; }
+      g.clearRect(0, 0, W, H);
+      // (bands eased: up quickly, down slowly, as the app's; tops held, then falling with weight)
+      for (let k = 0; k < N; k++) {
+        shown[k] += (bands[k] - shown[k]) * (bands[k] > shown[k] ? 0.45 : 0.14);
+        const t = tops[k];
+        if (shown[k] >= t.v) { t.v = shown[k]; t.held = 15; t.fall = 0; } else if (t.held > 0) t.held--; else { t.fall += 0.0018; t.v = Math.max(shown[k], t.v - t.fall); }
+      }
+      const step = W / N, bw = step * 0.7;
+      if (SCENE === "bars" || SCENE === "peaks" || SCENE === "mirror") {
+        for (let k = 0; k < N; k++) {
+          const h = Math.max(2, H * 0.9 * shown[k]);
+          g.fillStyle = mix(k / (N - 1));
+          round(k * step + step * 0.15, SCENE === "mirror" ? (H - h) / 2 : H - h, bw, h, bw / 2);
+          if (SCENE === "peaks") { g.fillStyle = "rgba(255,255,255,0.85)"; g.fillRect(k * step + step * 0.15, H - H * 0.9 * tops[k].v - 6, bw, 3); }
+        }
+      } else if (SCENE === "blocks" || SCENE === "dots") {
+        const rows = SCENE === "blocks" ? 14 : Math.max(6, Math.round(H / (step * 1.1))), seg = H / rows;
+        for (let k = 0; k < N; k++) for (let n = 0; n < rows; n++) {
+          const lit = (n + 0.5) / rows <= shown[k];
+          g.globalAlpha = lit ? 1 : 0.08;
+          g.fillStyle = mix(n / (rows - 1));
+          if (SCENE === "blocks") round(k * step + step * 0.12, H - (n + 1) * seg + seg * 0.15, step * 0.76, seg * 0.7, 2);
+          else { const r = Math.min(step, seg) * (lit ? 0.31 : 0.17); g.beginPath(); g.arc(k * step + step / 2, H - (n + 0.5) * seg, r, 0, Math.PI * 2); g.fill(); }
+        }
+        g.globalAlpha = 1;
+      } else if (SCENE === "wave") {
+        const grad = g.createLinearGradient(0, 0, W, 0); grad.addColorStop(0, c1); grad.addColorStop(1, c2);
+        const pts = shown.map((v, k) => [k / (N - 1) * W, H - H * 0.85 * v - H * 0.05]);
+        g.beginPath(); g.moveTo(0, H); pts.forEach(([x, y], i) => { if (i === 0) g.lineTo(x, y); else { const [px, py] = pts[i - 1]; g.quadraticCurveTo(px, py, (px + x) / 2, (py + y) / 2); } }); g.lineTo(W, pts[N - 1][1]); g.lineTo(W, H); g.closePath();
+        g.globalAlpha = 0.3; g.fillStyle = grad; g.fill(); g.globalAlpha = 1;
+        g.beginPath(); pts.forEach(([x, y], i) => { if (i === 0) g.moveTo(x, y); else { const [px, py] = pts[i - 1]; g.quadraticCurveTo(px, py, (px + x) / 2, (py + y) / 2); } });
+        g.strokeStyle = grad; g.lineWidth = Math.max(3, H / 60); g.stroke();
+      } else if (SCENE === "centre") {
+        const half = W / 2, st = half / N;
+        for (let k = 0; k < N; k++) {
+          const h = Math.max(2, H * 0.9 * shown[k]);
+          g.fillStyle = mix(k / (N - 1));
+          round(half + k * st + st * 0.15, (H - h) / 2, st * 0.7, h, st * 0.35);
+          round(half - (k + 1) * st + st * 0.15, (H - h) / 2, st * 0.7, h, st * 0.35);
+        }
+      } else if (SCENE === "halo") {
+        // (the cover at the centre, pulsing with the bass; bars out from it all the way round, the bass at the foot)
+        const bass = (shown[0] + shown[1] + shown[2] + shown[3]) / 4;
+        kick = Math.max(kick * 0.85, bass);
+        const R = Math.min(W, H) * 0.2 * (1 + 0.05 * kick), cx = W / 2, cy = H / 2, n = N * 2;
+        for (let i = 0; i < n; i++) {
+          const band = i < N ? i : n - 1 - i, th = (i + 0.5) / n * Math.PI * 2, v = shown[band];
+          const r0 = R * 1.08, r1 = R * 1.12 + Math.min(W, H) * 0.22 * v;
+          g.strokeStyle = mix(band / (N - 1)); g.lineWidth = Math.max(2, (Math.PI * 2 * R / n) * 0.55); g.lineCap = "round";
+          g.beginPath(); g.moveTo(cx - Math.sin(th) * r0, cy + Math.cos(th) * r0); g.lineTo(cx - Math.sin(th) * r1, cy + Math.cos(th) * r1); g.stroke();
+        }
+        if (cover) { const s = R * 2 * 0.74; g.save(); g.beginPath(); g.roundRect ? g.roundRect(cx - s / 2, cy - s / 2, s, s, s * 0.08) : g.rect(cx - s / 2, cy - s / 2, s, s); g.clip(); g.drawImage(cover, cx - s / 2, cy - s / 2, s, s); g.restore(); }
+      }
+    }
+    let next = 0;
+    function loop(now) {
+      requestAnimationFrame(loop);
+      if (off || now < next) return;
+      next = now + 1000 / FPS - 2;
+      const at = Date.now() - (OFFSET ? delay : 0);
+      let f = null;
+      while (queue.length && queue[0].t <= at) f = queue.shift();
+      if (f && f !== latest) { latest = f; bands = spectrumOf(f); }
+      if (!playing) bands = bands.map((v) => v * 0.9);
+      // (resting while nothing's playing: the last frame held, after a moment)
+      idle = playing ? 0 : idle + 1;
+      if (idle > FPS * 3) return;
+      draw();
+    }
+    poll(); look(); requestAnimationFrame(loop);
+    return;
+  }
   const gl = canvas.getContext("webgl2", { alpha: false, antialias: false, premultipliedAlpha: false, preserveDrawingBuffer: false });
   if (!gl) { note("This needs WebGL2. In OBS, turn on Browser Source Hardware Acceleration (Settings > Advanced)."); return; }
   // (the buffers: half floats where the GPU can draw into them, else bytes)
@@ -162,6 +290,7 @@
   async function poll() {
     try {
       const r = await (await fetch("/vis/frame.json", { cache: "no-store" })).json();
+      recheck(r);
       delay = Math.max(0, Number(r.offset) || 0);
       playing = !!r.playing;
       if (r.frame) take(r.frame);

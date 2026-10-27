@@ -395,7 +395,7 @@ pub fn widget_serve(listener: TcpListener, gen: u64) {
                     "/vis/frame.json" => {
                         let body = VIS.lock().map(|mut v| {
                             v.asked = Some(std::time::Instant::now());
-                            format!(r#"{{"playing":{},"offset":{},"art":{},"frame":{}}}"#, v.playing, v.offset, v.art_n, if v.frame.is_empty() { "null" } else { &v.frame })
+                            format!(r#"{{"playing":{},"offset":{},"art":{},"opts":{},"frame":{}}}"#, v.playing, v.offset, v.art_n, if v.opts.is_empty() { "{}" } else { &v.opts }, if v.frame.is_empty() { "null" } else { &v.frame })
                         }).unwrap_or_else(|_| "{}".into());
                         reply(&mut stream, "200 OK", "application/json", body.as_bytes());
                     }
@@ -513,9 +513,9 @@ pub fn set_levels(v: Vec<f32>) {
 /// something's playing, how far behind viewers hear it (the OmniPulse Offset's delay, ms), the cover (PNG, and
 /// a count that's new with each), and when the page last asked for a frame
 #[derive(Default)]
-pub struct Vis { pub scenes: String, pub frame: String, pub playing: bool, pub offset: i64, pub art: Vec<u8>, pub art_n: u64, pub asked: Option<std::time::Instant> }
+pub struct Vis { pub scenes: String, pub opts: String, pub frame: String, pub playing: bool, pub offset: i64, pub art: Vec<u8>, pub art_n: u64, pub asked: Option<std::time::Instant> }
 
-pub static VIS: Mutex<Vis> = Mutex::new(Vis { scenes: String::new(), frame: String::new(), playing: false, offset: 0, art: Vec::new(), art_n: 0, asked: None });
+pub static VIS: Mutex<Vis> = Mutex::new(Vis { scenes: String::new(), opts: String::new(), frame: String::new(), playing: false, offset: 0, art: Vec::new(), art_n: 0, asked: None });
 
 /// Whether OBS has the visualiser up: a frame asked for in the last few seconds
 pub fn vis_wanted() -> bool { VIS.lock().ok().and_then(|v| v.asked).is_some_and(|t| t.elapsed().as_secs() < 4) }

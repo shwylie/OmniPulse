@@ -8986,7 +8986,13 @@ fn pf_set(shared: &Shared, i: usize, v: &str) {
 fn pf_save(shared: &Shared) {
     let Some((id, vals)) = PF_EDIT.with(|e| e.borrow_mut().take()) else { return };
     if let Some(name) = id.strip_prefix("panel:") { return panel_save(shared, name, vals); }
-    let fields: Vec<String> = pf_fields(&id).iter().filter(|f| !matches!(f["type"].as_str(), Some("button" | "actions"))).filter_map(|f| f["key"].as_str().map(String::from)).collect();
+    let mut fields: Vec<String> = pf_fields(&id).iter().filter(|f| !matches!(f["type"].as_str(), Some("button" | "actions"))).filter_map(|f| f["key"].as_str().map(String::from)).collect();
+    // (the Suite's pages have settings of their own the manifest doesn't list (the visualiser's scene, the credits'
+    // parts...): whatever was changed on the page is kept too)
+    if id == botpage::BOT {
+        let orig = PF_ORIG.with(|o| o.borrow().clone());
+        for (k, v) in &vals { if !fields.contains(k) && orig.get(k) != Some(v) { fields.push(k.clone()); } }
+    }
     let all = {
         let mut a = shared.borrow_mut();
         let mut all = a.web.prefs["pluginSettings"].as_object().cloned().unwrap_or_default();
@@ -11369,7 +11375,12 @@ fn viz_update(shared: &Shared, ui: &AppWindow) {
     {
         let a = shared.borrow();
         let offset = if a.web.prefs["out2On"].as_bool() == Some(true) { a.web.prefs["out2Offset"].as_f64().unwrap_or(0.0).round().max(0.0) as i64 } else { 0 };
-        if let Ok(mut v) = omnipulse_core::widget::VIS.lock() { v.playing = a.loaded && !a.engine.is_paused(); v.offset = offset; }
+        // (and what it shows, as set on its page: the style, its detail, how often it's drawn, the Offset kept to)
+        let set = &a.web.prefs["pluginSettings"][botpage::BOT];
+        let pick = |k: &str, d: &str| set[k].as_str().filter(|s| !s.is_empty()).unwrap_or(d).to_string();
+        let scene = Some(pick("visScene", "bars")).filter(|s| s != "depths").unwrap_or_else(|| "smoke".into());
+        let opts = serde_json::json!({ "scene": scene, "scale": pick("visScale", "1"), "fps": pick("visFps", "60"), "offset": set["visOffset"].as_bool() != Some(false) }).to_string();
+        if let Ok(mut v) = omnipulse_core::widget::VIS.lock() { v.playing = a.loaded && !a.engine.is_paused(); v.offset = offset; if v.opts != opts { v.opts = opts; } }
     }
     let game_pause = shared.borrow().web.prefs["vizGamePause"].as_bool() != Some(false);
     if ui.get_viz_game_pause() != game_pause { ui.set_viz_game_pause(game_pause); }

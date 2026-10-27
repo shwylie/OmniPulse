@@ -768,12 +768,14 @@ fn sheet_of(id: &str, cur: &Map<String, Value>) -> (String, Vec<Field>) {
         // (the GPU scenes in OBS: its address made from what's picked)
         "vis" => {
             let pick = |k: &str, d: &'static str| -> String { let v = s(cur, k); if v.is_empty() { d.to_string() } else { v.to_string() } };
-            let (scene, scale, fps) = (Some(pick("visScene", "smoke")).filter(|s| s != "depths").unwrap_or_else(|| "smoke".into()), pick("visScale", "1"), pick("visFps", "60"));
-            let path = format!("/vis/{scene}?scale={scale}&fps={fps}{}", if on(cur, "visOffset", true) { "" } else { "&offset=0" });
-            ("Visualiser (WIP)".into(), vec![
-                f("note", "", "The app's GPU scenes on stream, drawn by OBS on your graphics card. They're still being built, so they may change, and some may not look right yet.", "", "", ""),
-                addr(&path, "Add it as a Browser source the size of your canvas, like 1920 × 1080. To lay it over your stream, right-click it in OBS, choose Blending Mode, then Screen."),
-                f("chips", "visScene", "Scene", "", &scene, "smoke=Smoke|swarm=Swarm|ink=Ink|phosphor=Phosphor"),
+            let (scene, scale, fps) = (Some(pick("visScene", "bars")).filter(|s| s != "depths").unwrap_or_else(|| "smoke".into()), pick("visScale", "1"), pick("visFps", "60"));
+            // (one address: what it shows is kept here, and OBS's picks it up when it's saved)
+            let path = "/vis".to_string();
+            ("Visualiser".into(), vec![
+                f("note", "", "The app's visualisers on stream, drawn by OBS. The GPU scenes are still being built, so they may change, and some may not look right yet.", "", "", ""),
+                addr(&path, "Add it as a Browser source the size of your canvas, like 1920 × 1080. What you pick below shows in OBS once you click Save. A GPU scene has a black background: to lay it over your stream, right-click it in OBS, choose Blending Mode, then Screen."),
+                f("chips", "visScene", "Style", "The app's own styles, drawn see-through so they lay straight over your stream.", &scene, "bars=Bars|mirror=Mirror|peaks=Peaks|blocks=Blocks|dots=Dots|wave=Wave|centre=Centre|halo=Halo"),
+                f("chips", "visScene", "Or a GPU scene (WIP)", "Fuller pictures, on a black background.", &scene, "smoke=Smoke|swarm=Swarm|ink=Ink|phosphor=Phosphor"),
                 f("chips", "visScale", "Detail", "Lower draws it smaller and stretches it to fit, for less work on your graphics card.", &scale, "0.5=Low|0.75=Medium|1=Full"),
                 f("chips", "visFps", "Frame rate", "", &fps, "30=30 a second|60=60 a second"),
                 f("toggle", "visOffset", "Keep in time with OmniPulse Offset", "Holds it back by the Offset's delay, so it lands with what viewers hear. This only applies while OmniPulse Offset is on.", if on(cur, "visOffset", true) { "true" } else { "false" }, ""),

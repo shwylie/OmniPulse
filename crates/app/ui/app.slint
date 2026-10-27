@@ -1573,7 +1573,7 @@ component NavItem inherits Rectangle {
             transform-origin: { x: self.width / 2, y: self.height / 2 };
             transform-rotation: root.spin && ta.has-hover ? mod(animation-tick() / 1ms, 4000) / 4000 * 360deg : 0deg;
         }
-        if !root.compact: Text { text: root.label; color: active ? Theme.text : Theme.muted; font-size: 14px; font-weight: active ? 700 : 500; vertical-alignment: center; overflow: elide; }
+        if !root.compact: Text { text: root.label; color: active ? Theme.text : Theme.muted; font-size: 14px; font-weight: active ? 700 : 500; font-family: Theme.head-font; vertical-alignment: center; overflow: elide; }
     }
     ta := TouchArea { pointer-event(e) => { if (e.kind == PointerEventKind.down && e.button == PointerEventButton.right) { root.right-click(self.absolute-position.x + self.mouse-x, self.absolute-position.y + self.mouse-y); } } clicked => { root.clicked(); } }
 }
@@ -4447,10 +4447,15 @@ component BotPage inherits Rectangle {
                 }
                 // where it's connected
                 Text { text: "Connections"; color: Theme.muted; font-size: 12px; font-weight: 700; }
-                HorizontalLayout {
-                    spacing: 8px;
+                // (as many across as there's room for, 160 px each at least; the rest on the next row)
+                cgrid := Rectangle {
+                    property <int> cols: max(1, min(root.tiles.length, floor((self.width + 8px) / 168px)));
+                    property <length> cw: (self.width - (self.cols - 1) * 8px) / self.cols;
+                    height: ceil(root.tiles.length / self.cols) * 120px - 8px;
                     for t[ti] in root.tiles: Rectangle {
-                        horizontal-stretch: 1;
+                        x: mod(ti, cgrid.cols) * (cgrid.cw + 8px);
+                        y: floor(ti / cgrid.cols) * 120px;
+                        width: cgrid.cw;
                         height: 112px;
                         border-radius: 14px;
                         background: tta.has-hover ? Theme.elevated.mix(BotLook.tile(ti), 0.84) : Theme.panel.mix(BotLook.tile(ti), 0.9);
@@ -4476,11 +4481,19 @@ component BotPage inherits Rectangle {
                     }
                 }
                 Text { text: "Chatbot"; color: Theme.muted; font-size: 12px; font-weight: 700; }
+                // (two to a row, or one where two won't fit)
+                if root.width < 700px: VerticalLayout {
+                    spacing: 10px;
+                    for f[fi] in root.feats: FeatCard { tint: BotLook.tile(fi + 2); c: f; set(k, v) => { root.set(k, v); } act(a) => { root.act(a); } }
+                }
+                if root.width >= 700px: VerticalLayout {
+                spacing: 10px;
                 for r in ceil(root.feats.length / 2): HorizontalLayout {
                     spacing: 10px;
                     FeatCard { tint: BotLook.tile(r * 2 + 2); horizontal-stretch: 1; preferred-width: 0px; min-width: 0px; c: root.feats[r * 2]; set(k, v) => { root.set(k, v); } act(a) => { root.act(a); } }
                     if r * 2 + 1 < root.feats.length: FeatCard { tint: BotLook.tile(r * 2 + 3); horizontal-stretch: 1; preferred-width: 0px; min-width: 0px; c: root.feats[r * 2 + 1]; set(k, v) => { root.set(k, v); } act(a) => { root.act(a); } }
                     if r * 2 + 1 >= root.feats.length: Rectangle { horizontal-stretch: 1; preferred-width: 0px; min-width: 0px; }
+                }
                 }
                 // the widgets (in a scene, for your viewers) and the docks (in OBS, for you): side by side, their own pages from them
                 Text { text: "Widgets and Docks"; color: Theme.muted; font-size: 12px; font-weight: 700; }
@@ -4656,13 +4669,16 @@ component BotPage inherits Rectangle {
                                 IconButton { d: Icons.gear; size: 30px; tip: d.n + ": its settings"; clicked => { root.act("dockset:" + d.k); } }
                             }
                             Text { text: "http://127.0.0.1:" + root.port + d.p; color: Theme.accent.mix(Theme.text, 0.55); font-size: 11px; font-family: "Consolas"; overflow: elide; }
-                            Text { text: root.widget-on ? d.t : "Turn on the Stream Widget first (Settings > Streaming). This is served from it."; color: Theme.muted; font-size: 11px; overflow: elide; }
+                            Text { text: root.widget-on ? d.t : "Turn on the Stream Suite first. Its addresses work while it's running."; color: Theme.muted; font-size: 11px; overflow: elide; }
                         }
                     }
                 }
                 // the Suite's own widgets: what's happened on stream, shown
-                if root.widgets-view == "widgets": HorizontalLayout {
-                    spacing: 8px;
+                // (as many across as there's room for, 200 px each at least, five at most; the rest on the next row)
+                if root.widgets-view == "widgets": wgrid := Rectangle {
+                    property <int> cols: max(1, min(5, floor((self.width + 8px) / 208px)));
+                    property <length> cw: (self.width - (self.cols - 1) * 8px) / self.cols;
+                    height: ceil(5 / self.cols) * 82px - 8px;
                     for w[wi] in [
                         { n: "Goals", k: "goals", p: "/goals", s: "goals", i: Icons.check, h: "127.0.0.1" },
                         { n: "Timer", k: "timer", p: "/timer", s: "timer", i: Icons.refresh, h: "127.0.0.1" },
@@ -4670,9 +4686,9 @@ component BotPage inherits Rectangle {
                         { n: "Latest Sub", k: "latest-sub", p: "/latest-sub", s: "latest", i: Icons.star-out, h: "127.0.0.1" },
                         { n: "Raid Shoutout", k: "raid", p: "/raid", s: "raid", i: Icons.broadcast, h: "localhost" },
                     ]: Rectangle {
-                        horizontal-stretch: 1;
-                        preferred-width: 0px;
-                        min-width: 0px;
+                        x: mod(wi, wgrid.cols) * (wgrid.cw + 8px);
+                        y: floor(wi / wgrid.cols) * 82px;
+                        width: wgrid.cw;
                         height: 74px;
                         border-radius: 14px;
                         background: Theme.panel.mix(BotLook.tile(wi + 1), 0.9);
@@ -4769,7 +4785,7 @@ CenterToggle { checked: Wid.on("hud", Wid.rev); toggled => { root.act("woff:" + 
                         { n: "Name That Tune", k: "tune", p: "/tune", s: "tune", i: Icons.lyrics }],
                     [{ n: "Sponsor Plug", k: "sponsors", p: "/sponsors", s: "sponsors", i: Icons.link },
                         { n: "Stream Credits", k: "credits", p: "/credits", s: "credits", i: Icons.star },
-                        { n: "Visualiser (WIP)", k: "vis", p: "/vis/smoke", s: "vis", i: Icons.mix }],
+                        { n: "Visualiser", k: "vis", p: "/vis", s: "vis", i: Icons.mix }],
                   ]: HorizontalLayout {
                     spacing: 8px;
                     for w[wi] in row: Rectangle {
@@ -5797,7 +5813,7 @@ export component AppWindow inherits Window {
                     }
                     if !root.title-editing: Rectangle {
                         width: tt.preferred-width;
-                        tt := Text { text: root.title-prompt ? "Sign in to SoundCloud" : (root.app-name != "" ? root.app-name : "OmniPulse"); color: root.title-prompt ? (tta.has-hover ? Theme.text : Theme.accent) : Theme.text; font-weight: 700; font-size: 13px; vertical-alignment: center; height: parent.height; }
+                        tt := Text { text: root.title-prompt ? "Sign in to SoundCloud" : (root.app-name != "" ? root.app-name : "OmniPulse"); color: root.title-prompt ? (tta.has-hover ? Theme.text : Theme.accent) : Theme.text; font-weight: 700; font-family: Theme.head-font; font-size: 13px; vertical-alignment: center; height: parent.height; }
                         tta := TouchArea {
                             mouse-cursor: root.title-prompt ? MouseCursor.pointer : MouseCursor.default;
                             clicked => { if (root.title-prompt) { root.title-signin(); } }
@@ -6081,7 +6097,7 @@ export component AppWindow inherits Window {
                     Rectangle { height: 10px; }
                     if !root.slim-side: HorizontalLayout {
                         padding-left: 12px;
-                        Text { text: "Playlists"; color: Theme.muted; font-size: 12px; font-weight: 700; vertical-alignment: center; horizontal-stretch: 1; }
+                        Text { text: "Playlists"; color: Theme.muted; font-size: 12px; font-weight: 700; font-family: Theme.head-font; vertical-alignment: center; horizontal-stretch: 1; }
                         Rectangle { width: 26px; height: 26px;
                             IconButton { right-click(x, y) => { cm4.open(x, y); } tip: "New playlist"; d: Icons.add; size: 26px; clicked => { root.pl-new(); } }
                             // (on top: it only takes right-clicks, the rest goes through to what's under it)
@@ -8074,7 +8090,8 @@ export component AppWindow inherits Window {
                             sheet-fields: root.bot-sheet-fields;
                             sheet-split: root.bot-sheet-split;
                             port: root.widget-port;
-                            widget-on: root.widget-on;
+                            // (the addresses are served while the Suite runs, as well as with the Stream Widget on)
+                            widget-on: root.widget-on || root.bot-on;
                             stream-rows: root.set-rows-streaming;
                             foot: root.over-foot && !root.pf-dirty ? 110px : 24px;
                             set(k, v) => { root.bot-set(k, v); }
@@ -8754,7 +8771,7 @@ export component AppWindow inherits Window {
                     spacing: 8px;
                     HorizontalLayout {
                         spacing: 6px;
-                        Text { text: "Queue"; color: Theme.text; font-size: 18px; font-weight: 800; vertical-alignment: center; horizontal-stretch: 1; }
+                        Text { text: "Queue"; color: Theme.text; font-size: 18px; font-weight: 800; font-family: Theme.head-font; vertical-alignment: center; horizontal-stretch: 1; }
                         // (as the web app's: waiting chat requests out; everything but what's playing out)
                         if root.queue-requests > 0: VerticalLayout { alignment: center; Pill { label: "Clear requests"; clicked => { root.queue-clear(true); } } }
                         if root.queue-room == "" || root.queue-room-host: VerticalLayout { alignment: center; Pill { label: "Clear"; clicked => { root.queue-clear(false); } } }
@@ -8777,7 +8794,7 @@ export component AppWindow inherits Window {
                     ListView {
                         vertical-stretch: 1;
                         for q[i] in root.queue-rows: VerticalLayout {
-                            if q.head != "": Text { text: q.head; color: Theme.muted; font-size: 11px; font-weight: 800; letter-spacing: 1px; height: 26px; vertical-alignment: bottom; }
+                            if q.head != "": Text { text: q.head; color: Theme.muted; font-size: 11px; font-weight: 800; font-family: Theme.head-font; letter-spacing: 1px; height: 26px; vertical-alignment: bottom; }
                             Rectangle {
                                 height: 48px;
                                 border-radius: 6px;
