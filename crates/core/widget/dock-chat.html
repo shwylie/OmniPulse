@@ -124,6 +124,10 @@
   .pile.done { opacity: 0.55; }
   .msg.piled { display: none; }
   #pileBtn.on { background: var(--warn); border-color: var(--warn); color: #111; }
+  /* the look (Settings > Streaming > Suite, the dock's gear): the app theme's colours, font and corners, or Classic */
+  body.sq *, body.sq *::after { border-radius: 0 !important; }
+  body.d-compact .msg { padding-top: 1px; padding-bottom: 1px; }
+  body.d-roomy .msg { padding-top: 6px; padding-bottom: 6px; }
 </style>
 </head>
 <body>
@@ -197,12 +201,31 @@
     twitch: store.get("twitch", true), kick: store.get("kick", true), time: store.get("time", false), badges: store.get("badges", true),
     hover: store.get("hover", false), confirm: store.get("confirm", true), secs: store.get("secs", "600"), size: store.get("size", "13"), to: store.get("to", "all"),
     bttv: store.get("bttv", true), ffz: store.get("ffz", true), stv: store.get("stv", true),
+    look: store.get("look", "app"), accent: store.get("accent", "app"), font: store.get("font", "app"), corners: store.get("corners", "app"), density: store.get("density", "normal"),
     modLock: store.get("modLock", true), modModes: store.get("modModes", true), modShield: store.get("modShield", true), modAb: store.get("modAb", true),
     modPile: store.get("modPile", true), lkPile: store.get("lkPile", true), pileMin: store.get("pileMin", "3"),
     lkShield: store.get("lkShield", true), lkFollow: store.get("lkFollow", true), lkSlow: store.get("lkSlow", true), lkEmote: store.get("lkEmote", false), lkSub: store.get("lkSub", false),
   };
   let last = 0, cleared = 0;
   const rows = new Map();
+  // (the look: the app theme's colours, its headings' font and its corners (OmniPulse sends them), or Classic, the
+  // dock's own dark grey; an accent of its own; how close together)
+  const CLASSIC = { bg: "#1b1d24", panel: "#23262f", line: "#2e323d", text: "#e6e8ee", muted: "#8b91a1", accent: "#7aa2ff", light: false, rounded: true, font: "" };
+  const PALS = { sunset: "#ff8a5c", ocean: "#3ec7ff", candy: "#ff8fd8", mint: "#5ef2b8", fire: "#ffb03a", gold: "#ffd76e", mono: "#f2f2f2" };
+  let appTheme = null, fontOn = "";
+  function applyLook() {
+    const t = opt.look === "classic" || !appTheme ? CLASSIC : appTheme, r = document.documentElement.style;
+    r.setProperty("--bg", t.bg); r.setProperty("--panel", t.panel); r.setProperty("--line", t.line); r.setProperty("--text", t.text); r.setProperty("--dim", t.muted);
+    r.setProperty("--accent", PALS[opt.accent] || t.accent);
+    document.body.classList.toggle("light", !!t.light);
+    document.body.classList.toggle("sq", opt.corners === "square" || (opt.corners !== "rounded" && !t.rounded));
+    ["compact", "roomy"].forEach((d) => document.body.classList.toggle("d-" + d, opt.density === d));
+    // (the theme's font: from Google Fonts, as OBS won't have it)
+    const f = opt.font === "theme" ? t.font || "" : "";
+    if (f && f !== fontOn) { const l = document.createElement("link"); l.rel = "stylesheet"; l.href = "https://fonts.googleapis.com/css2?family=" + encodeURIComponent(f).replace(/%20/g, "+") + ":wght@400;600;700&display=swap"; document.head.append(l); }
+    fontOn = f;
+    document.body.style.fontFamily = f ? '"' + f + '", "Segoe UI", system-ui, sans-serif' : "";
+  }
 
   function applyOpts() {
     $("fTwitch").setAttribute("aria-pressed", String(opt.twitch));
@@ -211,6 +234,7 @@
     $("oSecs").value = opt.secs; $("oSize").value = opt.size; $("to").value = opt.to;
     document.documentElement.style.setProperty("--fs", opt.size + "px");
     document.body.classList.toggle("modhover", opt.hover);
+    applyLook();
     // (moderation's parts: those switched on, and what the lockdown turns on)
     [["oModPile", "modPile", "mPile"], ["oModLock", "modLock", "mLock"], ["oModModes", "modModes", "mModes"], ["oModShield", "modShield", "mShield"], ["oModAb", "modAb", "mAb"]].forEach(([c, k, s]) => { $(c).checked = opt[k]; $(s).hidden = !opt[k]; });
     $("pileMin").value = opt.pileMin;
@@ -229,6 +253,7 @@
   async function pullSettings() {
     try {
       const j = await (await fetch("/dock/settings.json?page=" + PAGE, { cache: "no-store" })).json();
+      if (JSON.stringify(j.theme || null) !== JSON.stringify(appTheme)) { appTheme = j.theme || null; applyLook(); }
       if (j.n === setN) return;
       setN = j.n;
       if (j.opt && typeof j.opt === "object") { TAKE(j.opt); } else { sendSettings(); }

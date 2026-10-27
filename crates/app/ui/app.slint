@@ -157,7 +157,7 @@ export global CamLook {
 export struct AlertLook { theme: string, c1: color, c2: color, glow: bool, icon: float, transition: string, anim: string, in-widget: bool }
 
 /// The Multichat Overlay's preview: its look as it's set
-export struct ChatLook { style: string, size: float, bg: float, shadow: bool, top: bool, badges: bool, marks: bool, from: string, above: bool }
+export struct ChatLook { style: string, size: float, bg: float, shadow: bool, top: bool, badges: bool, marks: bool, from: string, above: bool, right: bool }
 /// (a made-up message, for the preview)
 export struct ChatSample { name: string, text: string, kick: bool, colour: color, badge: string }
 
@@ -3529,7 +3529,7 @@ component ChatRow inherits Rectangle {
     drop-shadow-offset-y: root.y2k ? 3px : 0px;
     drop-shadow-color: root.st == "neon" || root.st == "edge" ? root.pc.with-alpha(0.6) : root.y2k ? #2b1b40 : #00000070;
     // (Bubbles', Cards' and Terminal's coloured edge; Y2K's title bar; Pixel's inner edge)
-    if root.st == "bubbles" || root.term: Rectangle { x: 0; width: root.term ? 2px : 3px; background: root.term ? #3cff6e : root.pc; border-radius: 2px; }
+    if root.st == "bubbles" || root.term: Rectangle { x: root.look.right ? parent.width - self.width : 0; width: root.term ? 2px : 3px; background: root.term ? #3cff6e : root.pc; border-radius: 2px; }
     if root.st == "cards": Rectangle { y: 0; height: 3px; background: root.pc; }
     if root.y2k: Rectangle {
         y: 0;
@@ -3545,13 +3545,14 @@ component ChatRow inherits Rectangle {
         padding-top: root.st == "minimal" ? 2px : root.y2k ? 3px : 6px;
         padding-bottom: root.st == "minimal" ? 2px : 6px;
         spacing: 7px;
-        if root.look.marks: VerticalLayout { alignment: start; padding-top: 2px; Glyph { d: root.m.kick ? Icons.kick : Icons.twitch; width: root.y2k ? root.fs * 0.8 : root.fs; height: self.width; fill: root.y2k ? #2b1b40 : root.pc; } }
+        if root.look.marks && !root.look.right: VerticalLayout { alignment: start; padding-top: 2px; Glyph { d: root.m.kick ? Icons.kick : Icons.twitch; width: root.y2k ? root.fs * 0.8 : root.fs; height: self.width; fill: root.y2k ? #2b1b40 : root.pc; } }
         VerticalLayout {
             horizontal-stretch: 1;
             spacing: root.y2k ? 5px : 1px;
             HorizontalLayout {
                 spacing: 4px;
-                alignment: start;
+                // (on the right: the name and words pushed over to it)
+                alignment: root.look.right ? end : start;
                 if root.look.badges && root.m.badge != "": Rectangle {
                     width: bt.preferred-width + 6px;
                     height: root.fs * 0.8;
@@ -3574,10 +3575,11 @@ component ChatRow inherits Rectangle {
                         font-family: root.mono ? "Consolas" : "";
                     }
                 }
-                if !root.own-line: Text { text: root.m.text; color: root.light ? #2b1b40 : root.term ? #b6ffbe : #ffffff; font-size: root.fs; font-weight: 500; wrap: word-wrap; horizontal-stretch: 1; font-family: root.mono ? "Consolas" : ""; }
+                if !root.own-line: Text { text: root.m.text; color: root.light ? #2b1b40 : root.term ? #b6ffbe : #ffffff; font-size: root.fs; font-weight: 500; wrap: word-wrap; horizontal-stretch: root.look.right ? 0 : 1; horizontal-alignment: root.look.right ? right : left; font-family: root.mono ? "Consolas" : ""; }
             }
-            if root.own-line: Text { text: root.m.text; color: root.light ? #2b1b40 : root.term ? #b6ffbe : #ffffff; font-size: root.fs; font-weight: 500; wrap: word-wrap; font-family: root.mono ? "Consolas" : ""; }
+            if root.own-line: Text { text: root.m.text; color: root.light ? #2b1b40 : root.term ? #b6ffbe : #ffffff; font-size: root.fs; font-weight: 500; wrap: word-wrap; horizontal-alignment: root.look.right ? right : left; font-family: root.mono ? "Consolas" : ""; }
         }
+        if root.look.marks && root.look.right: VerticalLayout { alignment: start; padding-top: 2px; Glyph { d: root.m.kick ? Icons.kick : Icons.twitch; width: root.y2k ? root.fs * 0.8 : root.fs; height: self.width; fill: root.y2k ? #2b1b40 : root.pc; } }
     }
 }
 

@@ -18,9 +18,10 @@ pub fn title(panel: &str) -> &'static str {
 fn defaults(page: &str) -> Map<String, Value> {
     let v = match page {
         "chat" => json!({ "twitch": true, "kick": true, "time": false, "badges": true, "hover": false, "confirm": true, "secs": "600", "size": "13", "to": "all", "bttv": true, "ffz": true, "stv": true,
-            "modPile": true, "lkPile": true, "pileMin": "3", "modLock": true, "modModes": true, "modShield": true, "modAb": true, "lkShield": true, "lkFollow": true, "lkSlow": true, "lkEmote": false, "lkSub": false }),
-        "activity" => json!({ "hidden": ["firstwords"], "newest": true, "compact": false, "platform": true, "msg": true, "size": "13", "from": "all" }),
-        _ => json!({ "from": "all", "cmds": false, "bot": true, "badges": true, "marks": true, "style": "plain", "size": 20, "bg": "0", "shadow": true, "dir": "bottom", "fade": 0, "max": 30, "bttv": true, "ffz": true, "stv": true, "name": "beside", "anim": "rise", "events": false, "pronouns": false, "first": true }),
+            "modPile": true, "lkPile": true, "pileMin": "3", "modLock": true, "modModes": true, "modShield": true, "modAb": true, "lkShield": true, "lkFollow": true, "lkSlow": true, "lkEmote": false, "lkSub": false,
+            "look": "app", "accent": "app", "font": "app", "corners": "app", "density": "normal" }),
+        "activity" => json!({ "hidden": ["firstwords"], "newest": true, "compact": false, "platform": true, "msg": true, "size": "13", "from": "all", "look": "app", "accent": "app", "font": "app", "corners": "app", "density": "normal" }),
+        _ => json!({ "from": "all", "cmds": false, "bot": true, "badges": true, "marks": true, "style": "plain", "size": 20, "bg": "0", "shadow": true, "dir": "bottom", "align": "left", "fade": 0, "max": 30, "bttv": true, "ffz": true, "stv": true, "name": "beside", "anim": "rise", "events": false, "pronouns": false, "first": true }),
     };
     v.as_object().cloned().unwrap_or_default()
 }
@@ -86,6 +87,19 @@ fn sel(key: &str, label: &str, n: &str, opts: &[(Value, &str)]) -> Value {
     json!({ "key": key, "label": label, "note": n, "type": "select", "options": opts.iter().map(|o| o.0.clone()).collect::<Vec<_>>(), "labels": opts.iter().map(|o| o.1).collect::<Vec<_>>() })
 }
 
+/// A dock's look: the app theme's, or Classic; its accent, font, corners and spacing
+fn look(spacing: bool) -> Vec<Value> {
+    let mut v = vec![
+        note("Look"),
+        sel("look", "Colours", "Your App Theme follows your theme in App & Look as you change it. Classic is the dock's own dark grey.", &[(json!("app"), "Your App Theme"), (json!("classic"), "Classic")]),
+        sel("accent", "Accent", "The colour of links, highlights and pressed buttons.", &[(json!("app"), "Your Theme's"), (json!("sunset"), "Sunset"), (json!("ocean"), "Ocean"), (json!("candy"), "Candy"), (json!("mint"), "Mint"), (json!("fire"), "Fire"), (json!("gold"), "Gold"), (json!("mono"), "Mono")]),
+        sel("font", "Font", "Your Theme's uses your theme's heading font.", &[(json!("app"), "Standard"), (json!("theme"), "Your Theme's")]),
+        sel("corners", "Corners", "As Set in App follows Rounded Corners in Settings > App.", &[(json!("app"), "As Set in App"), (json!("rounded"), "Rounded"), (json!("square"), "Square")]),
+    ];
+    if spacing { v.push(sel("density", "Spacing", "How much room each message gets.", &[(json!("compact"), "Tight"), (json!("normal"), "Normal"), (json!("roomy"), "Roomy")])); }
+    v
+}
+
 /// Its page: what you'd change most first, what it shows, how it looks, then where it goes in OBS
 pub fn fields(panel: &str, vals: &Map<String, Value>, port: u64) -> Vec<Value> {
     let base = format!("http://127.0.0.1:{port}");
@@ -97,6 +111,7 @@ pub fn fields(panel: &str, vals: &Map<String, Value>, port: u64) -> Vec<Value> {
             tog("badges", "Badges", "Subscriber, moderator and VIP badges next to names."),
             tog("time", "Times", "When each message was sent."),
             sel("size", "Text Size", "", &[(json!("12"), "Small"), (json!("13"), "Normal"), (json!("15"), "Large"), (json!("17"), "Larger")]),
+        ].into_iter().chain(look(true)).chain([
             note("Emotes"),
             tog("stv", "7TV Emotes", "Your channel's and 7TV's global ones, on Twitch and Kick."),
             tog("bttv", "BetterTTV Emotes", "Your channel's and BetterTTV's global ones."),
@@ -123,7 +138,7 @@ pub fn fields(panel: &str, vals: &Map<String, Value>, port: u64) -> Vec<Value> {
             note("In OBS"),
             info("Address", &format!("{base}/dock/chat"), "In OBS, open Docks > Custom Browser Docks, give it a name and paste this address. Changes here show there within a few seconds."),
             info("Moderation Dock", &format!("{base}/dock/mod"), "Moderation on its own: Pile-Up, Raid Lockdown, chat modes, Shield Mode and Auto-Ban, as a dock beside your chat. These settings are its too."),
-        ],
+        ]).collect(),
         "dockfeed" => {
             let mut f = vec![
                 note("What It Shows"),
@@ -135,6 +150,7 @@ pub fn fields(panel: &str, vals: &Map<String, Value>, port: u64) -> Vec<Value> {
                 tog("compact", "Compact", "Smaller rows, so more fit."),
                 sel("size", "Text Size", "", &[(json!("12"), "Small"), (json!("13"), "Normal"), (json!("15"), "Large")]),
             ];
+            f.extend(look(false));
             // (the kinds of event: a switch for each, in their groups)
             let all = kinds();
             let mut groups: Vec<String> = Vec::new();
@@ -163,6 +179,7 @@ pub fn fields(panel: &str, vals: &Map<String, Value>, port: u64) -> Vec<Value> {
             if plain { f.push(sel("bg", "Background", "Behind each message. None lets your stream show through.", &[(json!("0"), "None"), (json!("0.35"), "Faint"), (json!("0.6"), "Half"), (json!("0.85"), "Solid")])); }
             f.extend([
                 tog("shadow", "Shadow", "Makes the words easier to read over a busy picture."),
+                sel("align", "Line Up On The", "Right suits chat placed on the right of your stream.", &[(json!("left"), "Left"), (json!("right"), "Right")]),
                 sel("dir", "Newest Messages", "", &[(json!("bottom"), "At the Bottom"), (json!("top"), "At the Top")]),
                 note("What It Shows"),
                 sel("from", "Chat From", "", &[(json!("all"), "Every Platform"), (json!("twitch"), "Twitch"), (json!("kick"), "Kick"), (json!("youtube"), "YouTube")]),

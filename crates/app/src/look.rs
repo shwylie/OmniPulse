@@ -22,7 +22,6 @@ const SAT_LIGHT: [f32; 4] = [0.0, 0.14, 0.26, 0.4];
 pub struct Rgb(pub u8, pub u8, pub u8);
 
 impl Rgb {
-    #[cfg(test)]
     pub fn hex(&self) -> String {
         format!("#{:02x}{:02x}{:02x}", self.0, self.1, self.2)
     }

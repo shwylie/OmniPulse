@@ -784,7 +784,7 @@ fn sheet_of(id: &str, cur: &Map<String, Value>) -> (String, Vec<Field>) {
             let flat = !matches!(scene.as_str(), "smoke" | "swarm" | "ink");
             if flat {
                 let pal = if s(cur, "visColors").is_empty() { "accent" } else { s(cur, "visColors") };
-                v.push(f("chips", "visColors", "Colours", "Your Theme's means the two colours of your app theme (App & Look), as the app's own visualiser.", pal, "accent=Your Theme's|sunset=Sunset|ocean=Ocean|candy=Candy|mint=Mint|fire=Fire|gold=Gold|mono=Mono|custom=Your Own"));
+                v.push(f("chips", "visColors", "Colours", "Your Theme's means the two colours of your app theme (App & Look), never the album art's.", pal, "accent=Your Theme's|sunset=Sunset|ocean=Ocean|candy=Candy|mint=Mint|fire=Fire|gold=Gold|mono=Mono|custom=Your Own"));
                 if pal == "custom" {
                     v.push(f("text", "visC1", "First colour", "As hex, like #8e9bff.", s(cur, "visC1"), "#8e9bff"));
                     v.push(f("text", "visC2", "Second colour", "", s(cur, "visC2"), "#ff7ac8"));

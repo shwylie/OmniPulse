@@ -7978,6 +7978,7 @@ fn chat_preview(ui: &AppWindow, vals: &serde_json::Map<String, serde_json::Value
         size: num("size", 20.0) as f32, bg: num("bg", 0.0) as f32, shadow: on("shadow"),
         top: vals.get("dir").and_then(|v| v.as_str()) == Some("top"), badges: on("badges"), marks: on("marks"), from: from.clone().into(),
         above: vals.get("name").and_then(|v| v.as_str()) == Some("above"),
+        right: vals.get("align").and_then(|v| v.as_str()) == Some("right"),
     });
     let c = |h: &str| look::Rgb::parse(h).map(|x| x.slint()).unwrap_or(slint::Color::from_rgb_u8(255, 255, 255));
     let all = [
@@ -8238,8 +8239,8 @@ fn outputs_put(shared: &Shared, kind: &str, outs: Vec<serde_json::Map<String, se
 
 /// The app theme's own two accents (App & Look), whatever the album art's doing: "Your Theme's" colours
 fn theme_accents(prefs: &serde_json::Value) -> (String, String) {
-    let hex = |k: &str, d: &str| prefs[k].as_str().filter(|v| v.len() == 7 && v.starts_with('#')).unwrap_or(d).to_string();
-    (hex("accent", "#8e9bff"), hex("accent2", "#b48eff"))
+    let (a, b) = theme_rgb(prefs);
+    (a.hex(), b.hex())
 }
 
 /// This install's name: random, made once, so a tester's ratings or reports can be told apart (not who they are)
@@ -11400,9 +11401,10 @@ fn viz_update(shared: &Shared, ui: &AppWindow) {
         let set = &a.web.prefs["pluginSettings"][botpage::BOT];
         let pick = |k: &str, d: &str| set[k].as_str().filter(|s| !s.is_empty()).unwrap_or(d).to_string();
         let scene = Some(pick("visScene", "bars")).filter(|s| s != "depths" && s != "phosphor").unwrap_or_else(|| "smoke".into());
-        let colours = set.as_object().and_then(botpage::vis_colours);
+        // (a palette or your own two; else your theme's accents, never the album art's)
+        let colours = set.as_object().and_then(botpage::vis_colours).unwrap_or_else(|| theme_accents(&a.web.prefs));
         let opts = serde_json::json!({ "scene": scene, "scale": pick("visScale", "1"), "fps": pick("visFps", "60"), "offset": set["visOffset"].as_bool() != Some(false),
-            "colours": colours.map(|(a, b)| [a, b]), "trail": pick("visTrail", "off") }).to_string();
+            "colours": [colours.0, colours.1], "trail": pick("visTrail", "off") }).to_string();
         if let Ok(mut v) = omnipulse_core::widget::VIS.lock() { v.playing = a.loaded && !a.engine.is_paused(); v.offset = offset; if v.opts != opts { v.opts = opts; } }
     }
     let game_pause = shared.borrow().web.prefs["vizGamePause"].as_bool() != Some(false);
@@ -13240,6 +13242,13 @@ fn aurora_bake(ui: &AppWindow) {
     t.set_aurora_baked(true);
 }
 
+/// The accents as your theme has them, or as you picked them: never the album art's
+fn theme_rgb(prefs: &serde_json::Value) -> (look::Rgb, look::Rgb) {
+    if let Some(t) = look::preset(prefs).filter(|_| prefs["themeOwnAccents"].as_bool() != Some(false)) { return t.accents(); }
+    let mine = look::Rgb::parse(prefs["accent"].as_str().unwrap_or(ACCENTS[0])).unwrap_or(look::Rgb(0x8e, 0x9b, 0xff));
+    (mine, prefs["accent2"].as_str().and_then(look::Rgb::parse).unwrap_or(mine))
+}
+
 fn apply_look(shared: &Shared) {
     let a = shared.borrow();
     let Some(ui) = a.ui.upgrade() else { return };
@@ -13334,6 +13343,9 @@ fn apply_look(shared: &Shared) {
         (mine, prefs["accent2"].as_str().and_then(look::Rgb::parse).or(mine))
     };
     let c1 = c1.unwrap_or(look::Rgb(0x8e, 0x9b, 0xff));
+    // (the docks in OBS follow it: its colours, font and corners; the theme's accent or yours, never the album art's)
+    omnipulse_core::docks::app_theme_set(serde_json::json!({ "bg": p.bg.hex(), "panel": p.panel.hex(), "line": p.line.hex(), "text": p.text.hex(), "muted": p.muted.hex(),
+        "accent": theme_rgb(prefs).0.hex(), "light": p.light, "font": font, "rounded": rounded }));
     accent_fade(&ui, c1.slint(), c2.unwrap_or(c1).slint(), look::on_accent(c1).slint(), motion);
     // (the Suite page's tiles: each its own colour, from the theme's)
     let tints: Vec<slint::Color> = look::tints(c1, p.light).into_iter().map(|c| c.slint()).collect();

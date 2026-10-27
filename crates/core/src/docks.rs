@@ -120,10 +120,16 @@ pub fn page_settings_set(all: Value) {
     PAGE_SETTINGS_N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
 }
 
-/// One page's: { n, opt } (opt null: none kept yet, the page's own are sent to be kept)
+/// The app theme's look, for the docks to follow: its colours (bg, panel, line, text, muted, accent), whether
+/// it's light, its headings' font and whether its corners are rounded
+static APP_THEME: Mutex<Value> = Mutex::new(Value::Null);
+
+pub fn app_theme_set(t: Value) { *APP_THEME.lock().unwrap() = t; }
+
+/// One page's: { n, opt, theme } (opt null: none kept yet, the page's own are sent to be kept)
 pub fn page_settings(page: &str) -> Value {
     let opt = PAGE_SETTINGS.lock().unwrap().as_ref().map(|a| a[page].clone()).unwrap_or(Value::Null);
-    json!({ "n": PAGE_SETTINGS_N.load(std::sync::atomic::Ordering::Relaxed), "opt": opt })
+    json!({ "n": PAGE_SETTINGS_N.load(std::sync::atomic::Ordering::Relaxed), "opt": opt, "theme": APP_THEME.lock().unwrap().clone() })
 }
 
 /// Who may ask a dock to do something: a page of the widget's own server (OBS's dock), never another site

@@ -65,6 +65,18 @@
   body.a-pop .m { animation-name: pop; animation-timing-function: cubic-bezier(0.2, 0.9, 0.3, 1.4); }
   body.a-fade .m { animation-name: fade; }
   @keyframes slide { from { opacity: 0; transform: translateX(-40px); } }
+  /* lined up on the right: each message's words to the right, its platform mark after them, sliding in from the right */
+  body.right .m { flex-direction: row-reverse; text-align: right; }
+  body.right.t-y2k .m { flex-direction: column; }
+  body.right.t-y2k .m .who { flex-direction: row-reverse; }
+  body.right.t-y2k .m .who::after { margin-left: 0; margin-right: auto; }
+  body.right.t-y2k .pf { left: auto; right: 0.45em; }
+  body.right.t-y2k.marks .m .who { padding-left: 0.5em; padding-right: 1.6em; }
+  body.right.t-bubbles .m { border-left: 0; border-right: 3px solid var(--pc, #9146ff); border-radius: 12px 4px 4px 12px; }
+  body.right.t-terminal .m { border-left: 0; border-right: 2px solid #3cff6e; }
+  body.right.t-comic .m { border-radius: 18px 18px 4px 18px; }
+  body.right.a-slide .m { animation-name: slideR; }
+  @keyframes slideR { from { opacity: 0; transform: translateX(40px); } }
   @keyframes pop { from { opacity: 0; transform: scale(0.6); } }
   @keyframes fade { from { opacity: 0; } }
   /* events (a follow, a sub, a raid...) in with chat, as their own cards */
@@ -123,6 +135,7 @@
   <label>Text size <input type="number" id="oSize" min="10" max="60" step="1"></label>
   <label>Background <select id="oBg"><option value="0">None</option><option value="0.35">Faint</option><option value="0.6">Half</option><option value="0.85">Solid</option></select></label>
   <label>Shadow <input type="checkbox" id="oShadow" checked></label>
+  <label>Line up on the <select id="oAlign"><option value="left">Left</option><option value="right">Right</option></select></label>
   <label>Newest at the <select id="oDir"><option value="bottom">Bottom</option><option value="top">Top</option></select></label>
   <h2>Time</h2>
   <label>Fade after (seconds, 0: never) <input type="number" id="oFade" min="0" max="600" step="1"></label>
@@ -132,7 +145,7 @@
 <script>
   "use strict";
   const $ = (id) => document.getElementById(id);
-  const DEFAULTS = { from: "all", cmds: false, bot: true, badges: true, marks: true, style: "plain", size: 20, bg: "0", shadow: true, dir: "bottom", fade: 0, max: 30, bttv: true, ffz: true, stv: true, name: "beside", anim: "rise", events: false, pronouns: false, first: true };
+  const DEFAULTS = { from: "all", cmds: false, bot: true, badges: true, marks: true, style: "plain", size: 20, bg: "0", shadow: true, dir: "bottom", align: "left", fade: 0, max: 30, bttv: true, ffz: true, stv: true, name: "beside", anim: "rise", events: false, pronouns: false, first: true };
   // (/chat/2, /chat/3...: another output, its settings kept apart from the first's)
   const OUT = (location.pathname.match(/^\/chat\/(\d+)/) || [])[1];
   const KEY = "omnipulse.multichat" + (OUT ? "." + OUT : "");
@@ -156,6 +169,8 @@
     ["slide", "pop", "fade"].forEach((a) => document.body.classList.toggle("a-" + a, opt.anim === a));
     $("oName").value = opt.name; $("oAnim").value = opt.anim; $("oEvents").checked = opt.events; $("oPronouns").checked = opt.pronouns; $("oFirst").checked = opt.first;
     document.body.classList.toggle("top", opt.dir === "top");
+    document.body.classList.toggle("right", opt.align === "right");
+    $("oAlign").value = opt.align;
     $("oFrom").value = opt.from; $("oCmds").checked = opt.cmds; $("oBot").checked = opt.bot; $("oBadges").checked = opt.badges; $("oMarks").checked = opt.marks;
     $("oStyle").value = opt.style; $("oSize").value = opt.size; $("oBg").value = opt.bg; $("oShadow").checked = opt.shadow; $("oDir").value = opt.dir;
     $("oFade").value = opt.fade; $("oMax").value = opt.max;
@@ -185,7 +200,7 @@
   setInterval(pullSettings, 3000);
   pullSettings();
   bind("oFrom", "from", (t) => t.value); bind("oCmds", "cmds", (t) => t.checked); bind("oBot", "bot", (t) => t.checked); bind("oBadges", "badges", (t) => t.checked); bind("oMarks", "marks", (t) => t.checked);
-  bind("oStyle", "style", (t) => t.value); bind("oSize", "size", (t) => Number(t.value) || 20); bind("oBg", "bg", (t) => t.value); bind("oShadow", "shadow", (t) => t.checked); bind("oDir", "dir", (t) => t.value);
+  bind("oStyle", "style", (t) => t.value); bind("oSize", "size", (t) => Number(t.value) || 20); bind("oBg", "bg", (t) => t.value); bind("oShadow", "shadow", (t) => t.checked); bind("oDir", "dir", (t) => t.value); bind("oAlign", "align", (t) => t.value);
   bind("oName", "name", (t) => t.value); bind("oAnim", "anim", (t) => t.value); bind("oEvents", "events", (t) => t.checked); bind("oPronouns", "pronouns", (t) => t.checked); bind("oFirst", "first", (t) => t.checked);
   bind("oFade", "fade", (t) => Math.max(0, Number(t.value) || 0)); bind("oMax", "max", (t) => Math.max(1, Number(t.value) || 30));
   $("gear").onclick = () => $("panel").classList.toggle("open");
