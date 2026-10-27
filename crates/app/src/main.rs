@@ -13139,9 +13139,12 @@ fn accent_fade(ui: &AppWindow, c1: slint::Color, c2: slint::Color, on: slint::Co
     if !motion {
         ACCENT_FADE.with(|f| f.borrow_mut().take());
         t.set_accent_own(c1); t.set_accent_2_own(c2); t.set_on_accent(on);
+        aurora_bake(ui);
         return;
     }
     ACCENT_FADE.with(|f| *f.borrow_mut() = Some((now, to, std::time::Instant::now())));
+    // (Aurora's background: its glows drawn as they fade, then painted again once they're done)
+    t.set_aurora_baked(false);
     let weak = ui.as_weak();
     ACCENT_TIMER.with(|timer| timer.start(slint::TimerMode::Repeated, std::time::Duration::from_millis(30), move || {
         let Some(ui) = weak.upgrade() else { return };
@@ -13158,7 +13161,7 @@ fn accent_fade(ui: &AppWindow, c1: slint::Color, c2: slint::Color, on: slint::Co
         t.set_accent_2_own(mix(from[1], to[1]));
         // (the text on the accent: dark or light, switched halfway)
         t.set_on_accent(if k < 0.5 { from[2] } else { to[2] });
-        if x >= 1.0 { ACCENT_FADE.with(|f| f.borrow_mut().take()); ACCENT_TIMER.with(|t| t.stop()); }
+        if x >= 1.0 { ACCENT_FADE.with(|f| f.borrow_mut().take()); ACCENT_TIMER.with(|t| t.stop()); aurora_bake(&ui); }
     }));
 }
 
@@ -13169,6 +13172,39 @@ const THEME_FONTS: [(&str, &str); 11] = [
     ("Palatino Linotype", "Palatino"), ("Cambria", "Cambria"), ("Consolas", "Consolas"), ("Cascadia Code", "Cascadia Code"),
     ("Trebuchet MS", "Trebuchet"), ("Segoe Print", "Segoe Print"), ("Impact", "Impact"),
 ];
+
+/// Aurora's background painted once (Theme.aurora-bake): its colour, and its two glows as the page draws them
+/// (each a circle fading from its colour to nothing at 70% of the way to its box's corner), at the window's
+/// logical size; again when the colours or the size change
+fn aurora_bake(ui: &AppWindow) {
+    let t = ui.global::<Theme>();
+    if !t.get_aurora() { if t.get_aurora_baked() { t.set_aurora_baked(false); t.set_aurora_bake(slint::Image::default()); } return; }
+    let size = ui.window().size().to_logical(ui.window().scale_factor());
+    let (w, h) = (size.width.round().max(1.0) as u32, size.height.round().max(1.0) as u32);
+    let key = (w, h, t.get_bg(), t.get_accent_own(), t.get_accent_2_own());
+    thread_local! { static LAST: RefCell<Option<(u32, u32, slint::Color, slint::Color, slint::Color)>> = const { RefCell::new(None) }; }
+    if LAST.with(|l| *l.borrow() == Some(key)) && t.get_aurora_baked() { return; }
+    LAST.with(|l| *l.borrow_mut() = Some(key));
+    let (bg, a, b) = (key.2, key.3, key.4);
+    let (fw, fh) = (w as f32, h as f32);
+    // (each glow: its box's centre and half-diagonal, its colour, how strong it is at its middle)
+    let glows = [((0.25 * fw, 0.15 * fh), 0.5 * (0.81 * fw * fw + 0.81 * fh * fh).sqrt(), a, 0.22f32), ((0.8 * fw, 0.75 * fh), 0.5 * (0.81 * fw * fw + 0.81 * fh * fh).sqrt(), b, 0.2f32)];
+    let mut px = slint::SharedPixelBuffer::<slint::Rgb8Pixel>::new(w, h);
+    let buf = px.make_mut_slice();
+    for y in 0..h {
+        for x in 0..w {
+            let (mut r, mut g, mut bl) = (bg.red() as f32, bg.green() as f32, bg.blue() as f32);
+            for ((cx, cy), rad, c, k) in glows {
+                let d = ((x as f32 - cx).powi(2) + (y as f32 - cy).powi(2)).sqrt() / rad;
+                let al = if d >= 0.7 { 0.0 } else { k * (1.0 - d / 0.7) };
+                if al > 0.0 { r += (c.red() as f32 - r) * al; g += (c.green() as f32 - g) * al; bl += (c.blue() as f32 - bl) * al; }
+            }
+            buf[(y * w + x) as usize] = slint::Rgb8Pixel { r: r as u8, g: g as u8, b: bl as u8 };
+        }
+    }
+    t.set_aurora_bake(slint::Image::from_rgb8(px));
+    t.set_aurora_baked(true);
+}
 
 fn apply_look(shared: &Shared) {
     let a = shared.borrow();
@@ -13304,6 +13340,8 @@ fn apply_look(shared: &Shared) {
     ui.set_player_style(prefs["playerStyle"].as_str().filter(|s| matches!(*s, "bar" | "float" | "minimal" | "turntable" | "island" | "sidebar" | "decks" | "waveform" | "strip")).unwrap_or("tab").into());
     ui.set_beta_updates(prefs["betaUpdates"].as_bool().unwrap_or(false));
     ui.set_title_colour(prefs["titleColour"].as_str().filter(|s| matches!(*s, "subtle" | "plain")).unwrap_or("match").into());
+    // (Aurora's background, painted again for its colours)
+    aurora_bake(&ui);
 }
 
 /// A Look setting changed here: kept (over the web app's), and shown at once
@@ -14716,6 +14754,7 @@ fn main() -> Result<(), slint::PlatformError> {
             let t = ui.global::<Theme>();
             if on { motion.set(t.get_motion()); t.set_motion(false); } else { t.set_motion(motion.get()); }
             t.set_resizing(on);
+            if !on { aurora_bake(&ui); }
         })));
     }
     ui.on_resize({
@@ -14734,6 +14773,12 @@ fn main() -> Result<(), slint::PlatformError> {
             if let Some(ui) = weak.upgrade() {
                 let m = ui.window().is_maximized();
                 if ui.get_is_max() != m { ui.set_is_max(m); }
+                // (a maximize, a snap, F11: Aurora's background painted for the new size, a moment after; while
+                // it's dragged, that waits till it's let go)
+                if !ui.global::<Theme>().get_resizing() {
+                    let w2 = ui.as_weak();
+                    slint::Timer::single_shot(std::time::Duration::from_millis(120), move || if let Some(ui) = w2.upgrade() { aurora_bake(&ui); });
+                }
             }
         }
     });

@@ -45,6 +45,10 @@ export global Theme {
     in-out property <string> head-font;
     in-out property <bool> glow;
     in-out property <bool> aurora;
+    /// Aurora's background (its colour and both glows) painted once by the app, at the window's size: drawn as a
+    /// picture, which the software renderer copies far faster than it works out the glows each frame
+    in-out property <image> aurora-bake;
+    in-out property <bool> aurora-baked;
     /// the window being resized: the costly full-window glows rest, and motion stops, till it's let go
     in-out property <bool> resizing;
     in-out property <bool> round-art;
@@ -5722,7 +5726,9 @@ export component AppWindow inherits Window {
     callback full-screen-toggle();
 
     // (Aurora: two slow glows of the accents behind the see-through panels; resting while it's resized)
-    if Theme.aurora && !Theme.resizing: Rectangle {
+    // (painted once, as a picture, when it's ready and the accents aren't changing over)
+    if Theme.aurora && !Theme.resizing && Theme.aurora-baked && !Theme.pulsing: Image { x: 0; y: 0; width: root.width; height: root.height; source: Theme.aurora-bake; image-fit: fill; }
+    if Theme.aurora && !Theme.resizing && !(Theme.aurora-baked && !Theme.pulsing): Rectangle {
         width: root.width; height: root.height;
         Rectangle { x: -root.width * 0.2; y: -root.height * 0.3; width: root.width * 0.9; height: root.height * 0.9; background: @radial-gradient(circle, Theme.accent.with-alpha(0.22) 0%, transparent 70%); }
         Rectangle { x: root.width * 0.35; y: root.height * 0.3; width: root.width * 0.9; height: root.height * 0.9; background: @radial-gradient(circle, Theme.accent-2.with-alpha(0.2) 0%, transparent 70%); }
