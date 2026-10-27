@@ -114,13 +114,138 @@ layout(location = 0) out vec4 outColor;
 void main() { float d = dot(vQ, vQ); if (d > 1.0) discard; float f = 1.0 - d; outColor = vCol * f * f; }
 "#;
 
-/// The prelude for the Stream Widget's WebGL2: the same names, GL's way
+/// The prelude for OBS's Browser source (WebGL2, /vis): the same names, GL's way. A texture's first row is its
+/// foot in GL, as the scenes' code expects, so nothing's turned over
 pub const PRELUDE_WEBGL: &str = r#"#version 300 es
 precision highp float;
 precision highp int;
 layout(std140) uniform U { vec4 res; vec4 tim; vec4 a0; vec4 a1; vec4 a2; vec4 chres[4]; } u;
 uniform sampler2D T0; uniform sampler2D T1; uniform sampler2D T2; uniform sampler2D T3; uniform sampler2D TA;
+#define iResolution vec3(u.res.xy, 1.0)
+#define iTime u.tim.x
+#define iFrame int(u.tim.y)
+#define iTimeDelta u.tim.z
+#define BASS u.a0.x
+#define MID u.a0.y
+#define HIGH u.a0.z
+#define LEVEL u.a0.w
+#define KICK u.a1.x
+#define SNARE u.a1.y
+#define HAT u.a1.z
+#define BEAT u.a1.w
+#define BUILD u.a2.x
+#define DROP u.a2.y
+#define WIDTH u.a2.z
+#define HITS u.a2.w
+vec4 ch0(vec2 uv) { return texture(T0, uv); }
+vec4 ch1(vec2 uv) { return texture(T1, uv); }
+vec4 ch2(vec2 uv) { return texture(T2, uv); }
+vec4 ch3(vec2 uv) { return texture(T3, uv); }
+vec4 fetch0(ivec2 p) { return texelFetch(T0, p, 0); }
+vec4 fetch1(ivec2 p) { return texelFetch(T1, p, 0); }
+vec2 chRes(int i) { return u.chres[i].xy; }
+float spectrum(float x) { return textureLod(TA, vec2(clamp(x, 0.0, 1.0), 0.25), 0.0).r; }
+vec2 wave(float x) { return textureLod(TA, vec2(clamp(x, 0.0, 1.0), 0.75), 0.0).rg * 2.0 - 1.0; }
 "#;
+
+/// The rest of WebGL2's shaders: a pass's main(), the points' vertex main() and their fragment shader, and the
+/// triangle that covers the view
+pub const FRAG_MAIN_WEBGL: &str = r#"
+out vec4 outColor;
+void main() { vec4 c = vec4(0.0); mainImage(c, gl_FragCoord.xy); outColor = c; }
+"#;
+pub const POINTS_VS_MAIN_WEBGL: &str = r#"
+out vec4 vCol;
+out vec2 vQ;
+void main() {
+    int vi = gl_VertexID;
+    int id = vi / 6;
+    int k = vi - id * 6;
+    vec2 q = k == 0 ? vec2(-1.0, -1.0) : k == 1 ? vec2(1.0, -1.0) : k == 2 ? vec2(-1.0, 1.0) : k == 3 ? vec2(-1.0, 1.0) : k == 4 ? vec2(1.0, -1.0) : vec2(1.0, 1.0);
+    vec4 col = vec4(0.0);
+    float size = 1.0;
+    vec4 p = point(id, col, size);
+    gl_Position = p + vec4(q * size / u.res.xy * p.w, 0.0, 0.0);
+    vCol = col;
+    vQ = q;
+}
+"#;
+pub const POINTS_FS_WEBGL: &str = r#"#version 300 es
+precision highp float;
+in vec4 vCol;
+in vec2 vQ;
+out vec4 outColor;
+void main() { float d = dot(vQ, vQ); if (d > 1.0) discard; float f = 1.0 - d; outColor = vCol * f * f; }
+"#;
+pub const FULLSCREEN_VS_WEBGL: &str = r#"#version 300 es
+void main() { vec2 p = vec2(float((gl_VertexID << 1) & 2), float(gl_VertexID & 2)); gl_Position = vec4(p * 2.0 - 1.0, 0.0, 1.0); }
+"#;
+
+/// A JSON string
+fn js(s: &str) -> String {
+    let mut o = String::with_capacity(s.len() + 2);
+    o.push('"');
+    for c in s.chars() {
+        match c {
+            '"' => o.push_str("\\\""),
+            '\\' => o.push_str("\\\\"),
+            '\n' => o.push_str("\\n"),
+            '\r' => {}
+            '\t' => o.push_str("\\t"),
+            c if (c as u32) < 0x20 => o.push_str(&format!("\\u{:04x}", c as u32)),
+            c => o.push(c),
+        }
+    }
+    o.push('"');
+    o
+}
+
+/// Every scene for WebGL2 (/vis/scenes.json): the shaders' shared parts, and each scene's passes (their kind,
+/// size, inputs and source), as the native renderer runs them
+pub fn webgl_json() -> String {
+    let input = |i: &Input| match i { Input::None => "null".to_string(), Input::Pass(j) => j.to_string(), Input::Art => r#""art""#.into() };
+    let scenes: Vec<String> = scenes::all().iter().map(|s| {
+        let passes: Vec<String> = s.passes.iter().map(|p| {
+            let (kind, n) = match p.kind { Kind::Buffer => ("buffer", 0), Kind::Points(n) => ("points", n), Kind::Image => ("image", 0) };
+            let size = match p.size { Size::Scaled(k) => format!(r#"{{"scale":{k}}}"#), Size::Fixed(w, h) => format!(r#"{{"w":{w},"h":{h}}}"#) };
+            format!(r#"{{"kind":"{kind}","n":{n},"size":{size},"inputs":[{}],"src":{}}}"#, p.inputs.iter().map(input).collect::<Vec<_>>().join(","), js(p.src))
+        }).collect();
+        format!(r#"{}:{{"name":{},"passes":[{}]}}"#, js(s.id), js(s.name), passes.join(","))
+    }).collect();
+    format!(r#"{{"prelude":{},"fragMain":{},"pointsVs":{},"pointsFs":{},"fullscreenVs":{},"scenes":{{{}}}}}"#,
+        js(PRELUDE_WEBGL), js(FRAG_MAIN_WEBGL), js(POINTS_VS_MAIN_WEBGL), js(POINTS_FS_WEBGL), js(FULLSCREEN_VS_WEBGL), scenes.join(","))
+}
+
+/// The sound as the scenes read it: a row of the spectrum, a row of the left and right waves (AUDIO_W × 2, RGBA)
+pub fn audio_texture(audio: &Audio) -> Vec<u8> {
+    let mut px = vec![0u8; (AUDIO_W * 2 * 4) as usize];
+    for x in 0..AUDIO_W as usize {
+        let s = audio.spectrum_at(x as f32 / (AUDIO_W - 1) as f32);
+        px[x * 4] = (s.clamp(0.0, 1.0) * 255.0) as u8;
+        let (l, r) = audio.wave_at(x);
+        let o = (AUDIO_W as usize + x) * 4;
+        px[o] = ((l * 0.5 + 0.5).clamp(0.0, 1.0) * 255.0) as u8;
+        px[o + 1] = ((r * 0.5 + 0.5).clamp(0.0, 1.0) * 255.0) as u8;
+    }
+    px
+}
+
+/// A frame of the sound for /vis/frame.json: when it was heard (ms since 1970), the uniforms' values (bass, mid,
+/// high, level, kick, snare, hat, beat, build, drop, width, hits), and the audio texture (base64)
+pub fn frame_json(audio: &Audio, at_ms: u64) -> String {
+    const B: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let px = audio_texture(audio);
+    let mut b64 = String::with_capacity(px.len() * 4 / 3 + 4);
+    for c in px.chunks(3) {
+        let n = (c[0] as u32) << 16 | (*c.get(1).unwrap_or(&0) as u32) << 8 | *c.get(2).unwrap_or(&0) as u32;
+        b64.push(B[(n >> 18) as usize & 63] as char);
+        b64.push(B[(n >> 12) as usize & 63] as char);
+        b64.push(if c.len() > 1 { B[(n >> 6) as usize & 63] as char } else { '=' });
+        b64.push(if c.len() > 2 { B[n as usize & 63] as char } else { '=' });
+    }
+    let a = [audio.bass, audio.mid, audio.high, audio.level, audio.kick, audio.snare, audio.hat, audio.beat as f32, audio.build, audio.drop, audio.width, audio.hits as f32];
+    format!(r#"{{"t":{at_ms},"a":[{}],"tex":"{b64}"}}"#, a.iter().map(|v| format!("{v:.4}")).collect::<Vec<_>>().join(","))
+}
 
 const BUF_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
 const OUT_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
@@ -315,15 +440,7 @@ impl Renderer {
         if self.built.is_none() { return Err("no scene".into()); }
         if self.built.as_ref().map(|b| b.size) != Some((w, h)) { self.make_targets(w, h); }
         // (the sound: its spectrum and its waves, as the scenes read them)
-        let mut px = vec![0u8; (AUDIO_W * 2 * 4) as usize];
-        for x in 0..AUDIO_W as usize {
-            let s = audio.spectrum_at(x as f32 / (AUDIO_W - 1) as f32);
-            px[x * 4] = (s.clamp(0.0, 1.0) * 255.0) as u8;
-            let (l, r) = audio.wave_at(x);
-            let o = (AUDIO_W as usize + x) * 4;
-            px[o] = ((l * 0.5 + 0.5).clamp(0.0, 1.0) * 255.0) as u8;
-            px[o + 1] = ((r * 0.5 + 0.5).clamp(0.0, 1.0) * 255.0) as u8;
-        }
+        let px = audio_texture(audio);
         self.queue.write_texture(
             wgpu::TexelCopyTextureInfo { texture: &self.audio_tex, mip_level: 0, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
             &px,

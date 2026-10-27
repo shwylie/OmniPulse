@@ -11200,6 +11200,21 @@ thread_local! {
     static GPU_VIS: RefCell<Option<gpuviz::Gpu>> = const { RefCell::new(None) };
 }
 
+thread_local! {
+    /// the GPU visualiser in OBS: its own reading of the sound, and when it last read it
+    static STREAM_VIS: RefCell<Option<(omnipulse_vis::audio::Analyser, std::time::Instant)>> = const { RefCell::new(None) };
+}
+
+/// The cover, for the GPU visualiser in OBS (/vis/art.png): up to 512 pixels, as a PNG, each new one counted
+fn vis_art(ui: &AppWindow) {
+    let Some(px) = ui.get_now_art_big().to_rgba8() else { return };
+    let Some(img) = image::RgbaImage::from_raw(px.width(), px.height(), px.as_bytes().to_vec()) else { return };
+    let img = if img.width() > 512 || img.height() > 512 { image::imageops::resize(&img, 512, 512, image::imageops::FilterType::Triangle) } else { img };
+    let mut png = Vec::new();
+    if image::DynamicImage::ImageRgba8(img).write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png).is_err() { return; }
+    if let Ok(mut v) = omnipulse_core::widget::VIS.lock() { v.art = png; v.art_n += 1; }
+}
+
 /// The cover, for the GPU scenes that use it: RGBA, top row first
 fn gpu_art(ui: &AppWindow) -> Option<(Vec<u8>, u32, u32)> {
     let px = ui.get_now_art_big().to_rgba8()?;
@@ -11210,7 +11225,7 @@ fn viz_update(shared: &Shared, ui: &AppWindow) {
     let (style, on_now, on_bar, on_widget, on_stream) = {
         let p = &shared.borrow().web.prefs;
         (p["nowViz"].as_str().unwrap_or("off").to_string(), p["vizNow"].as_bool() != Some(false), p["vizBar"].as_bool() == Some(true),
-         p["taskbarWidget"].as_bool() == Some(true) && (p["widgetViz"].as_bool() == Some(true) || p["tbDesign"].as_str() == Some("viz")), eq_widget(p))
+         p["taskbarWidget"].as_bool() == Some(true) && (p["widgetViz"].as_bool() == Some(true) || p["tbDesign"].as_str() == Some("viz")), eq_widget(p) || omnipulse_core::widget::vis_wanted())
     };
     // (a GPU scene: only with Hardware Acceleration on; picked without it, nothing)
     let gpu = shared.borrow().web.prefs["nativeGpu"].as_bool() == Some(true);
@@ -11224,6 +11239,13 @@ fn viz_update(shared: &Shared, ui: &AppWindow) {
     if style == "halo" && ui.get_now_art_blur().size().width == 0 { art_blur(ui); }
     if ui.get_viz_now() != on_now { ui.set_viz_now(on_now); }
     if ui.get_viz_bar() != on_bar { ui.set_viz_bar(on_bar); }
+    // (the GPU visualiser in OBS: whether something's playing, and how far behind viewers hear it (the
+    // OmniPulse Offset's delay, when it's on))
+    {
+        let a = shared.borrow();
+        let offset = if a.web.prefs["out2On"].as_bool() == Some(true) { a.web.prefs["out2Offset"].as_f64().unwrap_or(0.0).round().max(0.0) as i64 } else { 0 };
+        if let Ok(mut v) = omnipulse_core::widget::VIS.lock() { v.playing = a.loaded && !a.engine.is_paused(); v.offset = offset; }
+    }
     let game_pause = shared.borrow().web.prefs["vizGamePause"].as_bool() != Some(false);
     if ui.get_viz_game_pause() != game_pause { ui.set_viz_game_pause(game_pause); }
     // (shown somewhere: full screen, Now Playing open, or the player's; and playing, in sight; not while a game's
@@ -11311,11 +11333,26 @@ fn viz_update(shared: &Shared, ui: &AppWindow) {
             TBW.with(|t| if let Ok(t) = t.try_borrow() { if let Some((tw, _, _)) = t.as_ref() { tw.set_viz_level(l); } });
             // (the Stream Widget's Equaliser: its levels, for /levels.json)
             if on_stream { omnipulse_core::widget::set_levels(b.to_vec()); }
+            // (the GPU visualiser in OBS: a frame of the sound, as the scenes read it, when it was heard)
+            if omnipulse_core::widget::vis_wanted() {
+                let (l, r, rate) = viz::stereo(gpuviz::SOUND);
+                let at = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0);
+                let f = STREAM_VIS.with(|s| {
+                    let mut s = s.borrow_mut();
+                    let (an, last) = s.get_or_insert_with(|| (omnipulse_vis::audio::Analyser::new(rate), std::time::Instant::now()));
+                    let dt = last.elapsed().as_secs_f32();
+                    *last = std::time::Instant::now();
+                    omnipulse_vis::frame_json(an.analyse(&l, &r, dt), at)
+                });
+                if let Ok(mut v) = omnipulse_core::widget::VIS.lock() { v.frame = f; }
+                if let Some(ui) = w.upgrade() { if omnipulse_core::widget::VIS.lock().map(|v| v.art_n == 0).unwrap_or(false) { vis_art(&ui); } }
+            }
         });
         VIZ.with(|v| *v.borrow_mut() = Some((t, model)));
     } else {
         engine.set_tap("viz", None);
         viz::stop();
+        STREAM_VIS.with(|s| *s.borrow_mut() = None);
         // (the GPU scene's thread let go, and its device with it)
         GPU_VIS.with(|g| *g.borrow_mut() = None);
         omnipulse_core::widget::set_levels(Vec::new());
@@ -13470,6 +13507,8 @@ fn main() -> Result<(), slint::PlatformError> {
         if ui.get_player_style() == "strip" || ui.get_viz_style() == "halo" { art_blur(&ui); }
         // (a GPU scene's cover: the new one)
         if ui.get_viz_scene() { let art = gpu_art(&ui); GPU_VIS.with(|g| if let Some(g) = g.borrow().as_ref() { g.set_art(art); }); }
+        // (and the one in OBS)
+        if omnipulse_core::widget::vis_wanted() { vis_art(&ui); }
     });
     let s = shared.clone();
     // (Beta Updates: kept, and checked again on that channel at once)
@@ -14259,6 +14298,8 @@ fn main() -> Result<(), slint::PlatformError> {
     ui.on_taste_pick(move || taste_open(&s, 1));
     // Discover's language: the next one, and Discover made again in it
     let s = shared.clone();
+    // (the GPU visualiser's scenes, for OBS's /vis: as WebGL2 runs them)
+    if let Ok(mut v) = omnipulse_core::widget::VIS.lock() { v.scenes = omnipulse_vis::webgl_json(); }
     ui.set_lang_options(ModelRc::from(Rc::new(VecModel::from(lang::CHOICES.iter().map(|(_, l)| slint::SharedString::from(*l)).collect::<Vec<_>>()))));
     ui.on_lang_pick(move |k| {
         let next = {

@@ -39,7 +39,7 @@ thread_local! {
 /// A setting that changes only how widgets look or behave: taken by the running Suite as it's saved, no
 /// restart. Anything to do with an account, a connection, a sign-in, commands or actions isn't
 pub fn live_key(k: &str) -> bool {
-    const LIVE: [&str; 24] = ["goal", "timer", "suite", "panel", "cam", "hud", "rain", "wheel", "hype", "skip", "sponsor", "gif", "tune", "leader", "latest", "raid", "theme", "ab", "train", "widgetsOff", "social", "fun", "voteskip", "credits"];
+    const LIVE: [&str; 25] = ["goal", "timer", "suite", "panel", "cam", "hud", "rain", "wheel", "hype", "skip", "sponsor", "gif", "tune", "leader", "latest", "raid", "theme", "ab", "train", "widgetsOff", "social", "fun", "voteskip", "credits", "vis"];
     const NEVER: [&str; 12] = ["token", "login", "client", "secret", "relay", "refresh", "kick", "userid", "channel", "botname", "obs", "url"];
     let low = k.to_lowercase();
     LIVE.iter().any(|p| k.starts_with(p)) && !NEVER.iter().any(|n| low.contains(n))
@@ -248,7 +248,7 @@ pub fn sheet(id: &str, cur: &Map<String, Value>) -> (String, Vec<Field>) {
     }
     // (a widget's page, the same order on each: In OBS (its address, and its Try buttons) at the top, under
     // its preview; then its own settings; then the look every widget shares; then its Timing and Motion)
-    if matches!(id, "goals" | "timer" | "latest" | "raid" | "hype" | "voteskip" | "wheel" | "leaderboard" | "tune" | "emoterain" | "credits") {
+    if matches!(id, "goals" | "timer" | "latest" | "raid" | "hype" | "voteskip" | "wheel" | "leaderboard" | "tune" | "emoterain" | "credits" | "vis") {
         let obs = |x: &Field| x.kind == "addr" || (x.kind == "link" && x.label.starts_with("Try"));
         let (mut top, rest): (Vec<Field>, Vec<Field>) = std::mem::take(&mut v).into_iter().partition(|x| obs(x));
         // (its address first, then its Try buttons)
@@ -765,6 +765,21 @@ fn sheet_of(id: &str, cur: &Map<String, Value>) -> (String, Vec<Field>) {
             v.push(addr("/wheel", "About 1040 × 1120."));
             v
         }),
+        // (the GPU scenes in OBS: its address made from what's picked)
+        "vis" => {
+            let pick = |k: &str, d: &'static str| -> String { let v = s(cur, k); if v.is_empty() { d.to_string() } else { v.to_string() } };
+            let (scene, scale, fps) = (pick("visScene", "smoke"), pick("visScale", "1"), pick("visFps", "60"));
+            let path = format!("/vis/{scene}?scale={scale}&fps={fps}{}", if on(cur, "visOffset", true) { "" } else { "&offset=0" });
+            ("Visualiser (WIP)".into(), vec![
+                f("note", "", "The app's GPU scenes on stream, drawn by OBS on your graphics card. They're still being built, so they may change, and some may not look right yet.", "", "", ""),
+                addr(&path, "Add it as a Browser source the size of your canvas, like 1920 × 1080. To lay it over your stream, right-click it in OBS, choose Blending Mode, then Screen."),
+                f("chips", "visScene", "Scene", "", &scene, "smoke=Smoke|depths=Depths|swarm=Swarm|ink=Ink|phosphor=Phosphor"),
+                f("chips", "visScale", "Detail", "Lower draws it smaller and stretches it to fit, for less work on your graphics card.", &scale, "0.5=Low|0.75=Medium|1=Full"),
+                f("chips", "visFps", "Frame rate", "", &fps, "30=30 a second|60=60 a second"),
+                f("toggle", "visOffset", "Keep in time with OmniPulse Offset", "Holds it back by the Offset's delay, so it lands with what viewers hear. This only applies while OmniPulse Offset is on.", if on(cur, "visOffset", true) { "true" } else { "false" }, ""),
+                f("note", "", "It rests while nothing's playing, and the app only reads the music while OBS has it open.", "", "", ""),
+            ])
+        }
         "credits" => {
             let mut v = vec![
                 f("suiteprev", "", "", "", "credits", &theme_of(cur)),

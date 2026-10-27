@@ -35,6 +35,8 @@ const CAM_HTML: &str = include_str!("../widget/cam.html");
 const PANELS_HTML: &str = include_str!("../widget/panels.html");
 /// Frames round a game's HUD (/hud), as marked on a screenshot of it
 const HUD_HTML: &str = include_str!("../widget/hud.html");
+/// The GPU visualiser scenes, for OBS (/vis/<scene>), run in WebGL2
+const VIS_HTML: &str = include_str!("../widget/vis.html");
 
 /// The kinds of alert, as /alert?type= names them
 /// (custom ones, set up in the app, come on top: see custom_kinds)
@@ -381,6 +383,26 @@ pub fn widget_serve(listener: TcpListener, gen: u64) {
                     "/socials" | "/socials.html" | "/sponsors" => reply(&mut stream, "200 OK", "text/html; charset=utf-8", SOCIALS_HTML.as_bytes()),
                     p if p.starts_with("/goals/") && p.len() < 24 => reply(&mut stream, "200 OK", "text/html; charset=utf-8", SUITE_HTML.as_bytes()),
                     "/goals" | "/timer" | "/latest-follow" | "/latest-sub" | "/raid" | "/hype" | "/voteskip" | "/wheel" | "/leaderboard" | "/emotes" | "/tune" | "/credits" => reply(&mut stream, "200 OK", "text/html; charset=utf-8", SUITE_HTML.as_bytes()),
+                    // (the GPU visualiser for OBS: its page, its scenes, the sound's latest frame (asking for it
+                    // keeps the app reading the sound), and the cover)
+                    p if p == "/vis" || p.strip_prefix("/vis/").is_some_and(|n| !n.is_empty() && n.len() < 20 && n.bytes().all(|b| b.is_ascii_lowercase())) => {
+                        reply(&mut stream, "200 OK", "text/html; charset=utf-8", VIS_HTML.as_bytes());
+                    }
+                    "/vis/scenes.json" => {
+                        let s = VIS.lock().map(|v| v.scenes.clone()).unwrap_or_default();
+                        reply(&mut stream, "200 OK", "application/json", if s.is_empty() { b"{\"scenes\":{}}".to_vec() } else { s.into_bytes() }.as_slice());
+                    }
+                    "/vis/frame.json" => {
+                        let body = VIS.lock().map(|mut v| {
+                            v.asked = Some(std::time::Instant::now());
+                            format!(r#"{{"playing":{},"offset":{},"art":{},"frame":{}}}"#, v.playing, v.offset, v.art_n, if v.frame.is_empty() { "null" } else { &v.frame })
+                        }).unwrap_or_else(|_| "{}".into());
+                        reply(&mut stream, "200 OK", "application/json", body.as_bytes());
+                    }
+                    "/vis/art.png" => {
+                        let png = VIS.lock().map(|v| v.art.clone()).unwrap_or_default();
+                        if png.is_empty() { reply(&mut stream, "404 Not Found", "text/plain", b"No cover yet") } else { reply(&mut stream, "200 OK", "image/png", &png) }
+                    }
                     "/levels.json" => {
                         let v = LEVELS.lock().map(|g| g.clone()).unwrap_or_default();
                         reply_own(&mut stream, "200 OK", "application/json", serde_json::to_string(&v).unwrap_or_else(|_| "[]".into()).as_bytes());
@@ -486,6 +508,17 @@ pub static LEVELS: Mutex<Vec<f32>> = Mutex::new(Vec::new());
 pub fn set_levels(v: Vec<f32>) {
     if let Ok(mut g) = LEVELS.lock() { *g = v; }
 }
+
+/// The GPU visualiser for OBS (/vis): the scenes (from the app, as JSON), the sound's latest frame, whether
+/// something's playing, how far behind viewers hear it (the OmniPulse Offset's delay, ms), the cover (PNG, and
+/// a count that's new with each), and when the page last asked for a frame
+#[derive(Default)]
+pub struct Vis { pub scenes: String, pub frame: String, pub playing: bool, pub offset: i64, pub art: Vec<u8>, pub art_n: u64, pub asked: Option<std::time::Instant> }
+
+pub static VIS: Mutex<Vis> = Mutex::new(Vis { scenes: String::new(), frame: String::new(), playing: false, offset: 0, art: Vec::new(), art_n: 0, asked: None });
+
+/// Whether OBS has the visualiser up: a frame asked for in the last few seconds
+pub fn vis_wanted() -> bool { VIS.lock().ok().and_then(|v| v.asked).is_some_and(|t| t.elapsed().as_secs() < 4) }
 
 pub fn widget_update(state: Value) {
     if let Ok(mut g) = WIDGET_STATE.lock() {

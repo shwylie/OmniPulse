@@ -1,0 +1,231 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<!--
+  OmniPulse's GPU visualiser scenes, for OBS (a Browser source): /vis/<scene>, as Smoke, Depths, Swarm, Ink or
+  Phosphor. The same scenes as the app's (their passes from /vis/scenes.json), run here in WebGL2, so OBS's
+  browser draws them on your graphics card; the sound from /vis/frame.json, a frame about 30 times a second.
+    ?scale=0.5    draw it smaller than the source and stretch it up (0.25 to 1; 1 at first)
+    ?fps=30       how often it draws (30 or 60; 60 at first)
+    ?offset=0     don't hold it back by the OmniPulse Offset's delay (it is held back, at first)
+  Set in the app: Settings > Streaming > Suite > Visualiser.
+-->
+<title>OmniPulse Visualiser</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #000; overflow: hidden; }
+  canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  #note { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); color: #fff; font: 600 2.4vh "Segoe UI", system-ui, sans-serif; opacity: 0.85; text-align: center; max-width: 80vw; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="note"></div>
+<script>
+(() => {
+  const PATH = location.pathname.replace(/\/+$/, "");
+  const SCENE = (PATH.split("/")[2] || "smoke").toLowerCase();
+  const Q = new URLSearchParams(location.search);
+  const SCALE = Math.max(0.25, Math.min(1, Number(Q.get("scale")) || 1));
+  const FPS = Number(Q.get("fps")) === 30 ? 30 : 60;
+  const OFFSET = Q.get("offset") !== "0";
+  const note = (t) => { document.getElementById("note").textContent = t || ""; };
+  const canvas = document.getElementById("c");
+  const gl = canvas.getContext("webgl2", { alpha: false, antialias: false, premultipliedAlpha: false, preserveDrawingBuffer: false });
+  if (!gl) { note("This needs WebGL2. In OBS, turn on Browser Source Hardware Acceleration (Settings > Advanced)."); return; }
+  // (the buffers: half floats where the GPU can draw into them, else bytes)
+  const half = !!gl.getExtension("EXT_color_buffer_float") || !!gl.getExtension("EXT_color_buffer_half_float");
+  const FMT = half ? [gl.RGBA16F, gl.RGBA, gl.HALF_FLOAT] : [gl.RGBA8, gl.RGBA, gl.UNSIGNED_BYTE];
+
+  function shader(type, src, label) {
+    const s = gl.createShader(type);
+    gl.shaderSource(s, src);
+    gl.compileShader(s);
+    if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(label + ": " + gl.getShaderInfoLog(s));
+    return s;
+  }
+  function program(vs, fs, label) {
+    const p = gl.createProgram();
+    gl.attachShader(p, vs); gl.attachShader(p, fs);
+    gl.linkProgram(p);
+    if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error(label + ": " + gl.getProgramInfoLog(p));
+    const bi = gl.getUniformBlockIndex(p, "U");
+    if (bi !== gl.INVALID_INDEX) gl.uniformBlockBinding(p, bi, 0);
+    gl.useProgram(p);
+    ["T0", "T1", "T2", "T3", "TA"].forEach((n, i) => { const l = gl.getUniformLocation(p, n); if (l) gl.uniform1i(l, i); });
+    return p;
+  }
+  function texture(w, h, fmt, data) {
+    const t = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, t);
+    gl.texImage2D(gl.TEXTURE_2D, 0, fmt[0], w, h, 0, fmt[1], fmt[2], data || null);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    return t;
+  }
+
+  const black = texture(1, 1, [gl.RGBA8, gl.RGBA, gl.UNSIGNED_BYTE], new Uint8Array([0, 0, 0, 0]));
+  const audioTex = texture(256, 2, [gl.RGBA8, gl.RGBA, gl.UNSIGNED_BYTE], new Uint8Array(256 * 2 * 4));
+  let art = null, artSize = [1, 1, 0, 0], artN = -1;
+  const ubo = gl.createBuffer();
+  gl.bindBuffer(gl.UNIFORM_BUFFER, ubo);
+  gl.bufferData(gl.UNIFORM_BUFFER, 9 * 16, gl.DYNAMIC_DRAW);
+  gl.bindBufferBase(gl.UNIFORM_BUFFER, 0, ubo);
+  const vao = gl.createVertexArray();
+  gl.bindVertexArray(vao);
+
+  let scene = null, targets = [], size = [0, 0], frame = 0, start = performance.now(), lastT = 0;
+
+  // (each pass's two pictures (this frame's and the last), made again at the view's size)
+  function makeTargets(w, h) {
+    targets.forEach((t) => t && t.tex.forEach((x, i) => { gl.deleteTexture(x); gl.deleteFramebuffer(t.fb[i]); }));
+    targets = scene.passes.map((p) => {
+      if (p.kind === "image") return null;
+      const tw = p.size.w ? p.size.w : Math.max(1, Math.floor(w * p.size.scale)), th = p.size.h ? p.size.h : Math.max(1, Math.floor(h * p.size.scale));
+      const tex = [texture(tw, th, FMT), texture(tw, th, FMT)];
+      const fb = tex.map((t) => { const f = gl.createFramebuffer(); gl.bindFramebuffer(gl.FRAMEBUFFER, f); gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, t, 0); return f; });
+      return { tex, fb, w: tw, h: th };
+    });
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    size = [w, h];
+    frame = 0;
+  }
+
+  function draw(audio) {
+    const w = Math.max(16, Math.round(innerWidth * devicePixelRatio * SCALE)), h = Math.max(16, Math.round(innerHeight * devicePixelRatio * SCALE));
+    if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; }
+    if (size[0] !== w || size[1] !== h) makeTargets(w, h);
+    const t = (performance.now() - start) / 1000, dt = frame === 0 ? 1 / 60 : Math.min(0.25, Math.max(0, t - lastT));
+    lastT = t;
+    const par = frame % 2;
+    scene.passes.forEach((p, i) => {
+      const tg = targets[i];
+      // (an input drawn already this frame is read as it is now; a later one, or itself, as it was last frame)
+      const chres = new Float32Array(16);
+      p.inputs.forEach((inp, k) => {
+        let tex = black;
+        if (typeof inp === "number" && targets[inp]) { tex = targets[inp].tex[inp < i ? par : 1 - par]; chres.set([targets[inp].w, targets[inp].h, 0, 0], k * 4); }
+        else if (inp === "art") { tex = art || black; chres.set(artSize, k * 4); }
+        gl.activeTexture(gl.TEXTURE0 + k);
+        gl.bindTexture(gl.TEXTURE_2D, tex);
+      });
+      gl.activeTexture(gl.TEXTURE4);
+      gl.bindTexture(gl.TEXTURE_2D, audioTex);
+      const tw = tg ? tg.w : w, th = tg ? tg.h : h;
+      const u = new Float32Array(36);
+      u.set([tw, th, w, h, t, frame, dt, 0], 0);
+      u.set(audio.a.slice(0, 4), 8);
+      u.set(audio.a.slice(4, 8), 12);
+      u.set(audio.a.slice(8, 12), 16);
+      u.set(chres, 20);
+      gl.bindBuffer(gl.UNIFORM_BUFFER, ubo);
+      gl.bufferSubData(gl.UNIFORM_BUFFER, 0, u);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, tg ? tg.fb[par] : null);
+      gl.viewport(0, 0, tw, th);
+      gl.clearColor(0, 0, 0, 0);
+      gl.clear(gl.COLOR_BUFFER_BIT);
+      gl.useProgram(p.prog);
+      if (p.kind === "points") { gl.enable(gl.BLEND); gl.blendFunc(gl.ONE, gl.ONE); gl.drawArrays(gl.TRIANGLES, 0, p.n * 6); gl.disable(gl.BLEND); }
+      else gl.drawArrays(gl.TRIANGLES, 0, 3);
+    });
+    // (the textures unbound from the units, so none's read while it's drawn into next frame)
+    for (let k = 0; k < 5; k++) { gl.activeTexture(gl.TEXTURE0 + k); gl.bindTexture(gl.TEXTURE_2D, null); }
+    frame++;
+  }
+
+  // (the sound: frames as they come, held back by the Offset's delay so they land with what viewers hear)
+  const queue = [];
+  let latest = { t: 0, a: new Array(12).fill(0) }, delay = 0, playing = false, texKey = "";
+  function take(f) {
+    if (!f || !f.t || (queue.length && f.t <= queue[queue.length - 1].t)) return;
+    queue.push(f);
+    while (queue.length > 400) queue.shift();
+  }
+  function pick() {
+    const at = Date.now() - (OFFSET ? delay : 0);
+    let f = null;
+    while (queue.length && queue[0].t <= at) f = queue.shift();
+    if (f) {
+      latest = f;
+      if (f.tex !== texKey) {
+        texKey = f.tex;
+        const raw = atob(f.tex), px = new Uint8Array(raw.length);
+        for (let i = 0; i < raw.length; i++) px[i] = raw.charCodeAt(i);
+        gl.bindTexture(gl.TEXTURE_2D, audioTex);
+        gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, 256, 2, gl.RGBA, gl.UNSIGNED_BYTE, px);
+      }
+    }
+    return latest;
+  }
+  async function poll() {
+    try {
+      const r = await (await fetch("/vis/frame.json", { cache: "no-store" })).json();
+      delay = Math.max(0, Number(r.offset) || 0);
+      playing = !!r.playing;
+      if (r.frame) take(r.frame);
+      // (a new cover: its picture, for the scenes that use it, the right way up for GL)
+      if (r.art !== artN) {
+        artN = r.art;
+        const img = new Image();
+        img.onload = () => {
+          gl.bindTexture(gl.TEXTURE_2D, art || (art = gl.createTexture()));
+          gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
+          gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, gl.RGBA, gl.UNSIGNED_BYTE, img);
+          gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+          gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+          gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+          gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+          artSize = [img.width, img.height, 1, 0];
+          // (the scene starts again from it, as the app's does)
+          size = [0, 0];
+        };
+        img.src = "/vis/art.png?n=" + artN;
+      }
+    } catch (e) {}
+    setTimeout(poll, 33);
+  }
+
+  // (switched off on the Widgets page: nothing drawn, so OBS spends nothing on it)
+  let off = false;
+  async function offPoll() {
+    try { const s = await (await fetch("/now.json", { cache: "no-store" })).json(); off = !!(s && s.suite && Array.isArray(s.suite.off) && s.suite.off.includes("vis")); } catch (e) {}
+    document.documentElement.style.display = off ? "none" : "";
+    setTimeout(offPoll, 2000);
+  }
+
+  let next = 0, idle = 0;
+  function loop(now) {
+    requestAnimationFrame(loop);
+    if (off || now < next) return;
+    next = now + 1000 / FPS - 2;
+    // (resting while nothing's playing: the last frame held, after a moment)
+    idle = playing ? 0 : idle + 1;
+    if (idle > FPS * 2) return;
+    try { draw(pick()); } catch (e) { note(String(e.message || e)); }
+  }
+
+  (async () => {
+    try {
+      const all = await (await fetch("/vis/scenes.json", { cache: "no-store" })).json();
+      const s = all.scenes[SCENE];
+      if (!s) { note("There's no scene called " + SCENE + ". Try /vis/smoke, /vis/depths, /vis/swarm, /vis/ink or /vis/phosphor."); return; }
+      const full = shader(gl.VERTEX_SHADER, all.fullscreenVs, "fullscreen");
+      const pfs = shader(gl.FRAGMENT_SHADER, all.pointsFs, "points");
+      s.passes.forEach((p, i) => {
+        const label = SCENE + " pass " + i;
+        p.prog = p.kind === "points"
+          ? program(shader(gl.VERTEX_SHADER, all.prelude + p.src + all.pointsVs, label), pfs, label)
+          : program(full, shader(gl.FRAGMENT_SHADER, all.prelude + p.src + all.fragMain, label), label);
+      });
+      scene = s;
+      poll();
+      offPoll();
+      requestAnimationFrame(loop);
+    } catch (e) { note(String(e.message || e)); }
+  })();
+})();
+</script>
+</body>
+</html>

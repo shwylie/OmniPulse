@@ -63,3 +63,21 @@ fn every_scene_draws() {
         }
     }
 }
+
+// The scenes as OBS's /vis page reads them, and a frame of made-up sound: written to OMNIPULSE_VIS_WEBGL's folder
+// (scenes.json, frame.json), to try the page against; the JSON checked for its shape either way
+#[test]
+fn webgl_scenes_and_a_frame() {
+    let json = omnipulse_vis::webgl_json();
+    assert!(json.starts_with("{\"prelude\":") && json.contains("\"smoke\":") && json.contains("\"phosphor\":"), "{}", &json[..200.min(json.len())]);
+    let mut a = omnipulse_vis::audio::Analyser::new(48000);
+    let l: Vec<f32> = (0..2048).map(|i| (i as f32 * 0.05).sin() * 0.6).collect();
+    let audio = a.analyse(&l, &l, 1.0 / 30.0).clone();
+    let frame = omnipulse_vis::frame_json(&audio, 1);
+    assert!(frame.contains("\"tex\":\""), "{frame}");
+    if let Some(dir) = std::env::var_os("OMNIPULSE_VIS_WEBGL").map(std::path::PathBuf::from) {
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("scenes.json"), &json).unwrap();
+        std::fs::write(dir.join("frame.json"), &frame).unwrap();
+    }
+}
