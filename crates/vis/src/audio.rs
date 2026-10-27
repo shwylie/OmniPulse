@@ -88,6 +88,8 @@ pub struct Analyser {
     high_long: f32,
     built: f32,
     since_build: f32,
+    /// the waves' loudest of late: risen to at once, let go slowly (so a quiet song's traces fill the view too)
+    wave_top: f32,
 }
 
 fn ease(v: &mut f32, to: f32, dt: f32, up: f32, down: f32) {
@@ -114,6 +116,7 @@ impl Analyser {
             high_long: 0.0,
             built: 0.0,
             since_build: 100.0,
+            wave_top: 0.05,
         }
     }
 
@@ -186,10 +189,15 @@ impl Analyser {
 
         // the waves: from an upward crossing (so a steady tone stands still), every other frame
         let start = (n / 2..n.saturating_sub(WAVE * 2)).rev().find(|&i| i > 0 && l[i - 1] <= 0.0 && l[i] > 0.0).unwrap_or(n.saturating_sub(WAVE * 2));
+        // (levelled: against their loudest of late, up to 8 times, so quiet music still draws big traces; silence
+        // stays still)
+        let peak = (0..WAVE).map(|k| { let i = (start + k * 2).min(n.saturating_sub(1)); l[i].abs().max(r[i].abs()) }).fold(0.0f32, f32::max);
+        self.wave_top = if peak > self.wave_top { peak } else { (self.wave_top * (1.0 - 0.6 * dt)).max(peak).max(0.02) };
+        let gain = (0.85 / self.wave_top).clamp(1.0, 8.0);
         for k in 0..WAVE {
             let i = (start + k * 2).min(n.saturating_sub(1));
-            o.left[k] = l[i].clamp(-1.0, 1.0);
-            o.right[k] = r[i].clamp(-1.0, 1.0);
+            o.left[k] = (l[i] * gain).clamp(-1.0, 1.0);
+            o.right[k] = (r[i] * gain).clamp(-1.0, 1.0);
         }
         &self.out
     }
@@ -279,5 +287,20 @@ mod tests {
         let mut w = 0.0;
         for _ in 0..30 { w = a.analyse(&l, &r, 1.0 / 60.0).width; }
         assert!(w > 0.95, "width {w}");
+    }
+
+    #[test]
+    fn quiet_music_still_draws_big_waves() {
+        let n = WINDOW * 4;
+        let l: Vec<f32> = (0..n).map(|i| (i as f32 * 0.05).sin() * 0.04).collect();
+        let mut a = Analyser::new(RATE);
+        let mut top = 0.0f32;
+        for _ in 0..30 { top = a.analyse(&l, &l, 1.0 / 60.0).left.iter().fold(0.0f32, |m, v| m.max(v.abs())); }
+        assert!(top > 0.25, "a quiet tone's waves reach {top}");
+        // (silence stays still)
+        let quiet = vec![0.0f32; n];
+        let mut a = Analyser::new(RATE);
+        let still = a.analyse(&quiet, &quiet, 1.0 / 60.0).left.iter().fold(0.0f32, |m, v| m.max(v.abs()));
+        assert!(still < 1e-6, "silence's waves reach {still}");
     }
 }
