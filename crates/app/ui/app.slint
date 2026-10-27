@@ -4807,7 +4807,7 @@ CenterToggle { checked: Wid.on(w.k, Wid.rev); toggled => { root.act("woff:" + w.
                 min-width: 0px;
                 horizontal-scrollbar-policy: always-off;
                 // (as wide inside as it shows: the notes wrap, the boxes fit)
-                viewport-width: self.visible-width;
+                content-width: self.visible-width;
                 VerticalLayout {
                     width: parent.width;
                     padding-right: 12px;
@@ -4858,7 +4858,7 @@ CenterToggle { checked: Wid.on(w.k, Wid.rev); toggled => { root.act("woff:" + w.
                 if root.sheet == "panels": ScrollView {
                     vertical-stretch: 1;
                     horizontal-scrollbar-policy: always-off;
-                    viewport-width: self.visible-width;
+                    content-width: self.visible-width;
                     VerticalLayout { padding-bottom: root.foot; PanelPreview { width: 360px; } }
                 }
             }
