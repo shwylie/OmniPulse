@@ -255,8 +255,9 @@ pub fn list() -> Vec<Package> {
 
 // ---------- the plugins that come with OmniPulse ----------
 // They ship as ordinary plugin folders (manifest.json and main.js, readable like any other) beside
-// the app, and are installed from there: the first time, and again when a newer version comes with
-// an update. One you remove stays removed (its id is kept in REMOVED_LIST).
+// the app, and are installed from there: the first time, and again whenever an update brings a
+// different one (its script or manifest changed, whatever its version says). One you remove stays
+// removed (its id is kept in REMOVED_LIST).
 const BUNDLED_MARK: &str = ".bundled";
 const REMOVED_LIST: &str = "removed-bundled.txt";
 
@@ -279,14 +280,17 @@ fn install_bundled_into(src: &Path, dest: &Path) {
         let Ok(code) = std::fs::read_to_string(e.path().join(&m.main)) else { continue };
         let dir = dest.join(&m.id);
         let have: Option<Manifest> = std::fs::read_to_string(dir.join("manifest.json")).ok().and_then(|t| serde_json::from_str(&t).ok());
-        if have.as_ref().is_some_and(|h| h.version == m.version) && dir.join("main.js").exists() {
+        let pretty = serde_json::to_string_pretty(&m).unwrap_or_else(|_| manifest_text.clone());
+        let same = std::fs::read_to_string(dir.join("main.js")).is_ok_and(|c| c == code) && std::fs::read_to_string(dir.join("manifest.json")).is_ok_and(|t| t == pretty);
+        // (the same one already there; or one of your own by its id, not ours, at the same version: left alone)
+        if same || (have.as_ref().is_some_and(|h| h.version == m.version) && !dir.join(BUNDLED_MARK).exists() && dir.join("main.js").exists()) {
             continue;
         }
         if std::fs::create_dir_all(&dir).is_err() {
             continue;
         }
         // (as an installed plugin is kept: its script as main.js)
-        let _ = std::fs::write(dir.join("manifest.json"), serde_json::to_string_pretty(&m).unwrap_or(manifest_text));
+        let _ = std::fs::write(dir.join("manifest.json"), pretty);
         let _ = std::fs::write(dir.join("main.js"), code);
         let _ = std::fs::write(dir.join(BUNDLED_MARK), "Came with OmniPulse. Removing it keeps it removed.\n");
     }
@@ -433,7 +437,7 @@ mod tests {
         let ia = concat!(env!("CARGO_MANIFEST_DIR"), "/../../plugins");
         install_bundled_into(Path::new(ia), &dest);
         assert!(dest.join("internet-archive/main.js").exists() && dest.join("internet-archive").join(BUNDLED_MARK).exists());
-        // a newer one replaces it; the same version is left alone
+        // a changed one replaces it, whatever its version says; a newer one too
         std::fs::create_dir_all(src.join("x")).unwrap();
         let m = |v: &str| format!(r#"{{"id":"demo","name":"Demo","version":"{v}","main":"main.js","hosts":[]}}"#);
         std::fs::write(src.join("x/manifest.json"), m("1.0.0")).unwrap();
@@ -441,10 +445,16 @@ mod tests {
         install_bundled_into(&src, &dest);
         std::fs::write(src.join("x/main.js"), "two").unwrap();
         install_bundled_into(&src, &dest);
-        assert_eq!(std::fs::read_to_string(dest.join("demo/main.js")).unwrap(), "one");
-        std::fs::write(src.join("x/manifest.json"), m("1.1.0")).unwrap();
-        install_bundled_into(&src, &dest);
         assert_eq!(std::fs::read_to_string(dest.join("demo/main.js")).unwrap(), "two");
+        std::fs::write(src.join("x/manifest.json"), m("1.1.0")).unwrap();
+        std::fs::write(src.join("x/main.js"), "three").unwrap();
+        install_bundled_into(&src, &dest);
+        assert_eq!(std::fs::read_to_string(dest.join("demo/main.js")).unwrap(), "three");
+        // one of your own by the same id and version (not marked as ours): left alone
+        std::fs::remove_file(dest.join("demo").join(BUNDLED_MARK)).unwrap();
+        std::fs::write(dest.join("demo/main.js"), "mine").unwrap();
+        install_bundled_into(&src, &dest);
+        assert_eq!(std::fs::read_to_string(dest.join("demo/main.js")).unwrap(), "mine");
         // removed: not put back
         std::fs::remove_dir_all(dest.join("demo")).unwrap();
         std::fs::write(dest.join(REMOVED_LIST), "demo\n").unwrap();

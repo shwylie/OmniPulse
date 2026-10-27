@@ -13484,7 +13484,8 @@ fn main() -> Result<(), slint::PlatformError> {
     SHARED.with(|s| *s.borrow_mut() = Some(shared.clone()));
     // the plugins that are on, each started on its own thread
     // the plugins that come with OmniPulse (beside it, in plugins/): installed, or brought up to date
-    if let Some(dir) = std::env::current_exe().ok().and_then(|e| e.parent().map(|d| d.join("plugins"))).filter(|d| d.is_dir()) {
+    // (not from the self-test: a test build never replaces your installed ones)
+    if let Some(dir) = std::env::current_exe().ok().and_then(|e| e.parent().map(|d| d.join("plugins"))).filter(|d| d.is_dir() && std::env::var_os("OMNIPULSE_SELFTEST").is_none()) {
         omnipulse_core::plugins::install_bundled(&dir);
     }
     plugins_start(&shared);
