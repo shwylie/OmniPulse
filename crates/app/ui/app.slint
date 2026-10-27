@@ -4977,6 +4977,16 @@ export component AppWindow inherits Window {
     callback tp-version(int);
     // a YouTube or YouTube Music link pasted, for what it plays as
     callback tp-link(string);
+    // its cover: the one it has (or the one picked), whether it's been changed, a note, and others found
+    // (Change Cover) to pick from; an image's address pasted
+    in property <image> tp-cover;
+    in property <bool> tp-cover-changed;
+    in property <string> tp-cover-note;
+    in property <[image]> tp-covers;
+    in-out property <bool> tp-covers-open;
+    callback tp-cover-find();
+    callback tp-cover-pick(int);
+    callback tp-cover-url(string);
     callback tp-save();
     callback tp-reset();
     // "now": where the track is playing, for its start (0) or end (1)
@@ -9605,6 +9615,55 @@ export component AppWindow inherits Window {
                         if f.which == 0: TextInput { property <length> sx; cursor-position-changed(p) => { if (p.x + self.sx < 0px) { self.sx = -p.x; } else if (p.x + self.sx > parent.width - 20px - 2px) { self.sx = parent.width - 20px - 2px - p.x; } }  x: 10px + min(0px, max(parent.width - 20px - self.width, self.sx)); width: max(parent.width - 20px, self.preferred-width + 4px); height: parent.height; vertical-alignment: center; color: Theme.text; font-size: 14px; single-line: true; text <=> root.tp-title; }
                         if f.which == 1: TextInput { property <length> sx; cursor-position-changed(p) => { if (p.x + self.sx < 0px) { self.sx = -p.x; } else if (p.x + self.sx > parent.width - 20px - 2px) { self.sx = parent.width - 20px - 2px - p.x; } }  x: 10px + min(0px, max(parent.width - 20px - self.width, self.sx)); width: max(parent.width - 20px, self.preferred-width + 4px); height: parent.height; vertical-alignment: center; color: Theme.text; font-size: 14px; single-line: true; text <=> root.tp-artist; }
                     }
+                }
+                // (its cover: shown, changed for another, or its own again)
+                Text { text: "Cover"; color: Theme.muted; font-size: 12px; }
+                HorizontalLayout {
+                    spacing: 12px;
+                    Rectangle {
+                        width: 56px;
+                        height: 56px;
+                        border-radius: 8px;
+                        clip: true;
+                        background: Theme.panel;
+                        Image { source: root.tp-cover; width: parent.width; height: parent.height; image-fit: cover; }
+                    }
+                    VerticalLayout {
+                        horizontal-stretch: 1;
+                        alignment: center;
+                        spacing: 6px;
+                        Text { text: root.tp-cover-note; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
+                        HorizontalLayout {
+                            spacing: 6px;
+                            alignment: start;
+                            Pill { label: "Change Cover"; clicked => { root.tp-cover-find(); } }
+                            if root.tp-cover-changed: Pill { label: "Its Own Cover"; clicked => { root.tp-cover-pick(-1); } }
+                        }
+                    }
+                }
+                if root.tp-covers.length > 0: HorizontalLayout {
+                    spacing: 6px;
+                    alignment: start;
+                    for c[i] in root.tp-covers: Rectangle {
+                        width: 44px;
+                        height: 44px;
+                        border-radius: 6px;
+                        clip: true;
+                        border-width: tcp.has-hover ? 2px : 0px;
+                        border-color: Theme.accent;
+                        Image { source: c; width: parent.width; height: parent.height; image-fit: cover; }
+                        tcp := TouchArea { mouse-cursor: MouseCursor.pointer; clicked => { root.tp-cover-pick(i); } }
+                    }
+                }
+                if root.tp-covers-open: Rectangle {
+                    clip: true;
+                    height: 34px;
+                    border-radius: 8px;
+                    background: Theme.panel;
+                    border-width: 1px;
+                    border-color: tcu.has-focus ? Theme.accent : Theme.line;
+                    tcu := TextInput { property <length> sx; cursor-position-changed(p) => { if (p.x + self.sx < 0px) { self.sx = -p.x; } else if (p.x + self.sx > parent.width - 20px - 2px) { self.sx = parent.width - 20px - 2px - p.x; } }  x: 10px + min(0px, max(parent.width - 20px - self.width, self.sx)); width: max(parent.width - 20px, self.preferred-width + 4px); height: parent.height; vertical-alignment: center; color: Theme.text; font-size: 13px; single-line: true; accepted => { root.tp-cover-url(self.text); } }
+                    if tcu.text == "": Text { x: 10px; height: parent.height; vertical-alignment: center; text: "Or paste an image's address, then press Enter"; color: Theme.muted.with-alpha(0.7); font-size: 13px; }
                 }
                 Text { text: "Start and end, as m:ss. Leave empty to use the song's own."; color: Theme.muted; font-size: 12px; }
                 HorizontalLayout {

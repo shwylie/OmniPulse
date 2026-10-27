@@ -165,6 +165,25 @@ async fn itunes(term: &str) -> Result<Vec<Value>, String> {
     Ok(v["results"].as_array().into_iter().flatten().filter_map(it_track).collect())
 }
 
+/// Covers a song could have (Track Preferences' Change Cover): its releases' on Deezer and iTunes, the biggest
+/// each gives, with the release's name; the same picture once, eight at most
+pub async fn covers(artist: &str, title: &str) -> Vec<(String, String)> {
+    let q = format!("artist:\"{}\" track:\"{}\"", artist.replace('"', ""), title.replace('"', ""));
+    let dz = deezer(&format!("/search?limit=12&q={}", urlencoding::encode(&q))).await;
+    let it = itunes(&format!("{artist} {title}")).await;
+    let mut out: Vec<(String, String)> = Vec::new();
+    let dz = dz.unwrap_or_default();
+    let found = dz["data"].as_array().into_iter().flatten().map(|t| (t["album"]["cover_xl"].as_str().unwrap_or(""), t["album"]["title"].as_str().unwrap_or("")))
+        .map(|(u, a)| (u.to_string(), a.to_string()))
+        .chain(it.unwrap_or_default().into_iter().map(|t| (t["artwork_url"].as_str().unwrap_or("").to_string(), t["album"].as_str().unwrap_or("").to_string())));
+    for (url, album) in found {
+        if url.is_empty() || out.iter().any(|(u, _)| *u == url) { continue; }
+        out.push((url, album));
+        if out.len() >= 8 { break; }
+    }
+    out
+}
+
 /// How many albums' genres a search looks up (Deezer's search results don't carry one)
 const GENRE_ALBUMS: usize = 12;
 

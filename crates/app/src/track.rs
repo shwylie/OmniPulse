@@ -379,7 +379,8 @@ mod tests {
 }
 
 /// Your own title and artist for tracks (the web app's Track preferences: prefs.trackFixes, by the
-/// track's id, which is its key here too). An empty artist there means its own.
+/// track's id, which is its key here too). An empty artist there means its own. And a cover picked: its
+/// address ("art"; the picture's fetched from there, never kept), its own kept beside it ("artOwn").
 pub fn apply_fixes(prefs: &Value, list: &mut [Track]) {
     let Some(fixes) = prefs["trackFixes"].as_object() else { return };
     if fixes.is_empty() {
@@ -392,6 +393,9 @@ pub fn apply_fixes(prefs: &Value, list: &mut [Track]) {
             }
             if let Some(artist) = fx["artist"].as_str().filter(|s| !s.trim().is_empty()) {
                 t.artist = artist.to_string();
+            }
+            if let Some(art) = fx["art"].as_str().filter(|s| !s.trim().is_empty()) {
+                t.art = art.to_string();
             }
         }
     }
@@ -409,9 +413,11 @@ mod fix_tests {
         assert_eq!(list[0].title, "Song (feat. X)");
         assert_eq!(list[0].artist, "Marc Benjamin");
         // a title-only edit keeps the artist
-        let prefs = serde_json::json!({ "trackFixes": { "yt:abc": { "title": "Other", "artist": null } } });
+        let prefs = serde_json::json!({ "trackFixes": { "yt:abc": { "title": "Other", "artist": null, "art": "https://x/cover.jpg", "artOwn": "https://y/own.jpg" } } });
         apply_fixes(&prefs, &mut list);
         assert_eq!((list[0].title.as_str(), list[0].artist.as_str()), ("Other", "Marc Benjamin"));
+        // (a cover picked: its address, used in place of its own)
+        assert_eq!(list[0].art, "https://x/cover.jpg");
     }
 }
 

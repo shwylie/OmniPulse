@@ -2061,6 +2061,95 @@ fn tp_versions(shared: &Shared, t: &Track) {
     });
 }
 
+thread_local! {
+    /// Track preferences' cover: None as it is, Some("") its own again, Some(address) one picked (only its address
+    /// is ever kept: the picture's fetched from there, as any cover is)
+    static TP_ART: RefCell<Option<String>> = const { RefCell::new(None) };
+    /// the covers found for it (Change Cover), by their addresses, as shown
+    static TP_COVERS: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
+}
+
+/// Track preferences' cover: the one it has now, shown small, and nothing picked yet
+fn tp_cover_open(shared: &Shared, t: &Track) {
+    TP_ART.with(|a| *a.borrow_mut() = None);
+    TP_COVERS.with(|c| c.borrow_mut().clear());
+    let Some(ui) = shared.borrow().ui.upgrade() else { return };
+    let picked = shared.borrow().web.prefs["trackFixes"][&t.key]["art"].as_str().is_some_and(|a| !a.is_empty());
+    ui.set_tp_cover_changed(picked);
+    ui.set_tp_cover_note(if picked { "A cover you picked." } else { "Its own cover." }.into());
+    ui.set_tp_covers(ModelRc::default());
+    ui.set_tp_covers_open(false);
+    ui.set_tp_cover(slint::Image::default());
+    tp_cover_show(shared, t.art.clone(), t.key.clone());
+}
+
+/// The cover at `url`, shown small in Track preferences (while it's still open on `key`)
+fn tp_cover_show(shared: &Shared, url: String, key: String) {
+    let (rt, weak) = { let a = shared.borrow(); (a.rt.clone(), a.ui.clone()) };
+    rt.spawn(async move {
+        let px = player::fetch_art(url, 112).await;
+        let _ = weak.upgrade_in_event_loop(move |ui| {
+            if TP_TRACK.with(|x| x.borrow().as_ref().map(|x| x.key.clone())) != Some(key) { return; }
+            match px {
+                Some(px) => ui.set_tp_cover(slint::Image::from_rgba8(px)),
+                None => ui.set_tp_cover_note("That address isn't a picture OmniPulse can open.".into()),
+            }
+        });
+    });
+}
+
+/// Change Cover: the covers its releases have on Deezer and iTunes, looked for now, shown to pick from
+fn tp_cover_find(shared: &Shared) {
+    let Some(t) = TP_TRACK.with(|x| x.borrow().clone()) else { return };
+    let Some(ui) = shared.borrow().ui.upgrade() else { return };
+    let (artist, title) = (ui.get_tp_artist().to_string(), ui.get_tp_title().to_string());
+    ui.set_tp_covers_open(true);
+    ui.set_tp_cover_note("Looking for covers...".into());
+    let (rt, weak) = { let a = shared.borrow(); (a.rt.clone(), a.ui.clone()) };
+    rt.spawn(async move {
+        let found = omnipulse_core::catalog::covers(&artist, &title).await;
+        let mut shown = Vec::new();
+        for (url, _) in found { if let Some(px) = player::fetch_art(url.clone(), 96).await { shown.push((url, px)); } }
+        let _ = weak.upgrade_in_event_loop(move |ui| {
+            if TP_TRACK.with(|x| x.borrow().as_ref().map(|x| x.key.clone())) != Some(t.key.clone()) { return; }
+            ui.set_tp_cover_note(if shown.is_empty() { "No other covers found. You can paste an image address below." } else { "Click one to use it, or paste an image address below." }.into());
+            TP_COVERS.with(|c| *c.borrow_mut() = shown.iter().map(|(u, _)| u.clone()).collect());
+            let imgs: Vec<slint::Image> = shown.into_iter().map(|(_, px)| slint::Image::from_rgba8(px)).collect();
+            ui.set_tp_covers(ModelRc::from(Rc::new(VecModel::from(imgs))));
+        });
+    });
+}
+
+/// A cover picked from those found (its place), or its own again (-1); kept when Save is clicked
+fn tp_cover_pick(shared: &Shared, i: i32) {
+    let Some(ui) = shared.borrow().ui.upgrade() else { return };
+    if i < 0 {
+        TP_ART.with(|a| *a.borrow_mut() = Some(String::new()));
+        ui.set_tp_cover_changed(false);
+        ui.set_tp_cover_note("Its own cover comes back when you click Save.".into());
+        let own = TP_TRACK.with(|x| x.borrow().clone()).map(|t| (shared.borrow().web.prefs["trackFixes"][&t.key]["artOwn"].as_str().unwrap_or(&t.art).to_string(), t.key));
+        if let Some((url, key)) = own { tp_cover_show(shared, url, key); }
+        return;
+    }
+    let Some(url) = TP_COVERS.with(|c| c.borrow().get(i as usize).cloned()) else { return };
+    if let Some(img) = ui.get_tp_covers().row_data(i as usize) { ui.set_tp_cover(img); }
+    TP_ART.with(|a| *a.borrow_mut() = Some(url));
+    ui.set_tp_cover_changed(true);
+    ui.set_tp_cover_note("It's used once you click Save.".into());
+}
+
+/// An image's address pasted in, for its cover
+fn tp_cover_url(shared: &Shared, url: &str) {
+    let url = url.trim().to_string();
+    let Some(ui) = shared.borrow().ui.upgrade() else { return };
+    if !(url.starts_with("https://") || url.starts_with("http://")) { ui.set_tp_cover_note("Paste an image's address, starting with https://.".into()); return; }
+    let Some(t) = TP_TRACK.with(|x| x.borrow().clone()) else { return };
+    TP_ART.with(|a| *a.borrow_mut() = Some(url.clone()));
+    ui.set_tp_cover_changed(true);
+    ui.set_tp_cover_note("It's used once you click Save.".into());
+    tp_cover_show(shared, url, t.key);
+}
+
 /// m:ss (or m:ss.s, or seconds) to ms; empty is None, nonsense an error
 fn parse_time(s: &str) -> Result<Option<u64>, ()> {
     let s = s.trim();
@@ -2115,6 +2204,7 @@ fn tp_open(shared: &Shared, t: &Track) {
     }
     tp_bar(shared);
     tp_versions(shared, t);
+    tp_cover_open(shared, t);
 }
 
 /// The track's length, for Track preferences' bar: as playing, else as listed
@@ -2232,13 +2322,36 @@ fn tp_save(shared: &Shared, reset: bool) {
     }
     // (a pair already decided with it: decided again)
     SMART_PAIR.with(|p| *p.borrow_mut() = None);
+    // (its cover, if it's changed: the new one's address, for where it's shown now)
+    let mut art_now: Option<String> = None;
+    let mut art_back: Option<String> = None;
     let (fixes, trims) = {
         let mut a = shared.borrow_mut();
         let mut fixes = a.web.prefs["trackFixes"].as_object().cloned().unwrap_or_default();
         let mut trims = a.web.prefs["trackTrims"].as_object().cloned().unwrap_or_default();
-        if reset || (title == t.title && artist == t.artist) { if reset { fixes.remove(&t.key); } } else {
-            fixes.insert(t.key.clone(), serde_json::json!({ "title": title, "artist": artist }));
+        // (its title and artist, as you want them, and its cover: an address picked, its own kept beside it so it can
+        // come back; only addresses, the pictures fetched from there as any cover is)
+        let art = TP_ART.with(|a| a.borrow_mut().take());
+        if reset {
+            // (and its own cover back, if one was picked)
+            art_back = fixes.get(&t.key).and_then(|f| f["artOwn"].as_str()).map(String::from);
+            fixes.remove(&t.key);
+        } else {
+            let mut fx = fixes.get(&t.key).and_then(|v| v.as_object().cloned()).unwrap_or_default();
+            if title == t.title && artist == t.artist { if !fx.contains_key("art") { fx.clear(); } } else { fx.insert("title".into(), serde_json::json!(title)); fx.insert("artist".into(), serde_json::json!(artist)); }
+            match art.as_deref() {
+                Some("") => { if let Some(own) = fx.remove("artOwn") { art_back.replace(own.as_str().unwrap_or("").to_string()); } fx.remove("art"); }
+                Some(url) => { if !fx.contains_key("artOwn") { fx.insert("artOwn".into(), serde_json::json!(t.art)); } fx.insert("art".into(), serde_json::json!(url)); }
+                None => {}
+            }
+            if fx.is_empty() { fixes.remove(&t.key); } else { fixes.insert(t.key.clone(), serde_json::Value::Object(fx)); }
         }
+        let new_art = if reset { art_back.take() } else { match art.as_deref() { Some("") => art_back.take(), Some(u) => Some(u.to_string()), None => None } };
+        if let Some(u) = &new_art {
+            a.queue.items.iter_mut().filter(|q| q.t.key == t.key).for_each(|q| q.t.art = u.clone());
+            a.page_all.iter_mut().filter(|x| x.key == t.key).for_each(|x| x.art = u.clone());
+        }
+        art_now = new_art;
         if start.unwrap_or(0) == 0 && end.is_none() { trims.remove(&t.key); } else {
             trims.insert(t.key.clone(), serde_json::json!({ "start": start.unwrap_or(0), "end": end.unwrap_or(0) }));
         }
@@ -2259,6 +2372,14 @@ fn tp_save(shared: &Shared, reset: bool) {
         webstate::save_pref("trackTrims", trims);
     }
     if let Some(cur) = shared.borrow().queue.current() { if cur.key == t.key { show_now(&ui, cur); } }
+    // (playing now, with a new cover: it's fetched and shown)
+    if let Some(url) = art_now.filter(|_| shared.borrow().queue.current().is_some_and(|c| c.key == t.key)) {
+        let (rt, weak) = { let a = shared.borrow(); (a.rt.clone(), a.ui.clone()) };
+        rt.spawn(async move {
+            let px = player::fetch_art(url, 500).await;
+            let _ = weak.upgrade_in_event_loop(move |ui| if let Some(px) = px { let img = slint::Image::from_rgba8(px); ui.set_now_art(img.clone()); ui.set_now_art_big(img); });
+        });
+    }
     ui.set_tp_open(false);
     ui.set_status(if reset { format!("\"{}\" is back as it was.", t.title) } else { "Track preferences saved.".to_string() }.into());
 }
@@ -13889,6 +14010,13 @@ fn main() -> Result<(), slint::PlatformError> {
         }
     });
     // Track preferences
+    // (its cover: others looked for, one picked, or an image's address pasted)
+    let s = shared.clone();
+    ui.on_tp_cover_find(move || tp_cover_find(&s));
+    let s = shared.clone();
+    ui.on_tp_cover_pick(move |i| tp_cover_pick(&s, i));
+    let s = shared.clone();
+    ui.on_tp_cover_url(move |u| tp_cover_url(&s, &u));
     let s = shared.clone();
     ui.on_tp_save(move || tp_save(&s, false));
     let s = shared.clone();
