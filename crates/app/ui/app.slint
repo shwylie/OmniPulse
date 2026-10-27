@@ -9201,24 +9201,23 @@ export component AppWindow inherits Window {
                 Text { text: "OmniPulse"; color: Theme.text; font-size: 26px; font-weight: 800; font-family: Theme.head-font; }
                 Text { text: "Let's set you up. Skip anything you like: it's all in Settings later."; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
                 Rectangle { height: 14px; }
-                for st[k] in [
-                    { n: "Welcome", d: Icons.star-out }, { n: "Your music", d: Icons.library }, { n: "Discover", d: Icons.discover },
-                    { n: "", d: Icons.discover }, { n: "How it sounds", d: Icons.volume }, { n: "Do you stream?", d: Icons.broadcast }, { n: "All set", d: Icons.check },
+                // (each the step it opens: the fourth, the old taste step, is part of Discover now, so there's no 3)
+                for st in [
+                    { k: 0, n: "Welcome", d: Icons.star-out }, { k: 1, n: "Your music", d: Icons.library }, { k: 2, n: "Discover", d: Icons.discover },
+                    { k: 4, n: "How it sounds", d: Icons.volume }, { k: 5, n: "Do you stream?", d: Icons.broadcast }, { k: 6, n: "All set", d: Icons.check },
                 ]: Rectangle {
-                    // (the fourth, the old taste step, now part of Discover)
-                    visible: k != 3;
-                    height: k != 3 ? 40px : 0px;
+                    height: 40px;
                     border-radius: 10px;
-                    background: root.setup-at == k ? Theme.accent.with-alpha(0.16) : transparent;
+                    background: root.setup-at == st.k ? Theme.accent.with-alpha(0.16) : transparent;
                     HorizontalLayout {
                         padding-left: 10px;
                         spacing: 10px;
                         VerticalLayout { alignment: center; Rectangle {
                             width: 24px; height: 24px; border-radius: 12px;
-                            background: root.setup-at > k ? Theme.accent : root.setup-at == k ? Theme.accent.with-alpha(0.25) : Theme.elevated;
-                            Glyph { d: root.setup-at > k ? Icons.check : st.d; width: 14px; height: 14px; x: 5px; y: 5px; fill: root.setup-at > k ? Theme.on-accent : root.setup-at == k ? Theme.accent : Theme.muted; }
+                            background: root.setup-at > st.k ? Theme.accent : root.setup-at == st.k ? Theme.accent.with-alpha(0.25) : Theme.elevated;
+                            Glyph { d: root.setup-at > st.k ? Icons.check : st.d; width: 14px; height: 14px; x: 5px; y: 5px; fill: root.setup-at > st.k ? Theme.on-accent : root.setup-at == st.k ? Theme.accent : Theme.muted; }
                         } }
-                        Text { text: st.n; color: root.setup-at == k ? Theme.text : Theme.muted; font-weight: root.setup-at == k ? 700 : 400; font-size: 14px; vertical-alignment: center; }
+                        Text { text: st.n; color: root.setup-at == st.k ? Theme.text : Theme.muted; font-weight: root.setup-at == st.k ? 700 : 400; font-size: 14px; vertical-alignment: center; }
                     }
                 }
             }
