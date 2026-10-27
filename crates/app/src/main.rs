@@ -11400,7 +11400,9 @@ fn viz_update(shared: &Shared, ui: &AppWindow) {
         let set = &a.web.prefs["pluginSettings"][botpage::BOT];
         let pick = |k: &str, d: &str| set[k].as_str().filter(|s| !s.is_empty()).unwrap_or(d).to_string();
         let scene = Some(pick("visScene", "bars")).filter(|s| s != "depths" && s != "phosphor").unwrap_or_else(|| "smoke".into());
-        let opts = serde_json::json!({ "scene": scene, "scale": pick("visScale", "1"), "fps": pick("visFps", "60"), "offset": set["visOffset"].as_bool() != Some(false) }).to_string();
+        let colours = set.as_object().and_then(botpage::vis_colours);
+        let opts = serde_json::json!({ "scene": scene, "scale": pick("visScale", "1"), "fps": pick("visFps", "60"), "offset": set["visOffset"].as_bool() != Some(false),
+            "colours": colours.map(|(a, b)| [a, b]), "trail": pick("visTrail", "off") }).to_string();
         if let Ok(mut v) = omnipulse_core::widget::VIS.lock() { v.playing = a.loaded && !a.engine.is_paused(); v.offset = offset; if v.opts != opts { v.opts = opts; } }
     }
     let game_pause = shared.borrow().web.prefs["vizGamePause"].as_bool() != Some(false);

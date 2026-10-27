@@ -181,6 +181,11 @@ pub fn panel_colours(cur: &Map<String, Value>) -> Option<(String, String)> {
     }
 }
 
+/// The visualiser's colours in OBS: a palette, its own two, or None (your theme's, as the app's)
+pub fn vis_colours(cur: &Map<String, Value>) -> Option<(String, String)> {
+    colours_of(cur, s(cur, "visColors"), "visC1", "visC2")
+}
+
 /// A palette by name, or "custom": the two typed in (c1, c2 their keys); "accent" or anything else: None
 fn colours_of(cur: &Map<String, Value>, which: &str, c1: &str, c2: &str) -> Option<(String, String)> {
     let hex = |k: &str, d: &str| hex_of(cur, k).unwrap_or_else(|| d.to_string());
@@ -771,16 +776,29 @@ fn sheet_of(id: &str, cur: &Map<String, Value>) -> (String, Vec<Field>) {
             let (scene, scale, fps) = (Some(pick("visScene", "bars")).filter(|s| s != "depths" && s != "phosphor").unwrap_or_else(|| "smoke".into()), pick("visScale", "1"), pick("visFps", "60"));
             // (one address: what it shows is kept here, and OBS's picks it up when it's saved)
             let path = "/vis".to_string();
-            ("Visualiser".into(), vec![
+            let mut v = vec![
                 f("note", "", "The app's visualisers on stream, drawn by OBS. The GPU scenes are still being built, so they may change, and some may not look right yet.", "", "", ""),
                 addr(&path, "Add it as a Browser source the size of your canvas, like 1920 × 1080. What you pick below shows in OBS once you click Save. The app's own styles lay over your stream as they are; a GPU scene fills its source."),
-                f("chips", "visScene", "Style", "The app's own styles, drawn see-through so they lay straight over your stream.", &scene, "bars=Bars|mirror=Mirror|peaks=Peaks|blocks=Blocks|dots=Dots|wave=Wave|centre=Centre|halo=Halo"),
+                f("chips", "visScene", "Style", "The app's own styles, drawn see-through so they lay straight over your stream.", &scene, "bars=Bars|mirror=Mirror|peaks=Peaks|blocks=Blocks|dots=Dots|wave=Wave|solid=Solid Wave|centre=Centre|halo=Halo"),
+            ];
+            let flat = !matches!(scene.as_str(), "smoke" | "swarm" | "ink");
+            if flat {
+                let pal = if s(cur, "visColors").is_empty() { "accent" } else { s(cur, "visColors") };
+                v.push(f("chips", "visColors", "Colours", "Your Theme's means the two colours of your app theme (App & Look), as the app's own visualiser.", pal, "accent=Your Theme's|sunset=Sunset|ocean=Ocean|candy=Candy|mint=Mint|fire=Fire|gold=Gold|mono=Mono|custom=Your Own"));
+                if pal == "custom" {
+                    v.push(f("text", "visC1", "First colour", "As hex, like #8e9bff.", s(cur, "visC1"), "#8e9bff"));
+                    v.push(f("text", "visC2", "Second colour", "", s(cur, "visC2"), "#ff7ac8"));
+                }
+                v.push(f("chips", "visTrail", "Motion blur", "Leaves a fading trail behind what moves.", if s(cur, "visTrail").is_empty() { "off" } else { s(cur, "visTrail") }, "off=Off|short=Short|long=Long"));
+            }
+            v.extend([
                 f("chips", "visScene", "Or a GPU scene (WIP)", "Fuller pictures, drawn on your graphics card.", &scene, "smoke=Smoke|swarm=Swarm|ink=Ink"),
                 f("chips", "visScale", "Detail", "Lower draws it smaller and stretches it to fit, for less work on your graphics card.", &scale, "0.5=Low|0.75=Medium|1=Full"),
                 f("chips", "visFps", "Frame rate", "", &fps, "30=30 a second|60=60 a second"),
                 f("toggle", "visOffset", "Keep in time with OmniPulse Offset", "Holds it back by the Offset's delay, so it lands with what viewers hear. This only applies while OmniPulse Offset is on.", if on(cur, "visOffset", true) { "true" } else { "false" }, ""),
                 f("note", "", "It rests while nothing's playing, and the app only reads the music while OBS has it open.", "", "", ""),
-            ])
+            ]);
+            ("Visualiser".into(), v)
         }
         "credits" => {
             let mut v = vec![

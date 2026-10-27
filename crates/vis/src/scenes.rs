@@ -102,7 +102,7 @@ vec4 point(int id, out vec4 col, out float size) {
     vec3 star = h.x < 0.45 ? vec3(0.65, 0.8, 1.0) : h.x < 0.65 ? vec3(1.0, 0.82, 0.45) : h.x < 0.82 ? vec3(1.0, 0.45, 0.6) : h.x < 0.94 ? vec3(0.7, 0.5, 1.0) : vec3(0.4, 1.0, 0.9);
     star = mix(star, palette(h.y + MID * 0.4 + iTime * 0.02, vec3(0.5), vec3(0.5), vec3(1.0), vec3(0.0, 0.33, 0.67)), 0.35);
     float twinkle = 0.6 + 0.4 * sin(iTime * (2.0 + 5.0 * h.z) + h.y * 30.0);
-    col = vec4(star * (0.02 + 0.016 * sp) * twinkle * (2.2 / z) * (1.0 + 1.5 * HIGH), 1.0);
+    col = vec4(star * (0.045 + 0.03 * sp) * twinkle * (2.2 / z) * (1.0 + 1.2 * HIGH), 1.0);
     size = (0.9 + 1.6 * h.z * h.z) * (3.0 / z) * (1.0 + 0.5 * KICK);
     return clip;
 }
@@ -122,14 +122,18 @@ const SWARM_IMAGE: &str = r#"
 void mainImage(out vec4 o, in vec2 fc) {
     vec2 uv = fc / iResolution.xy;
     vec3 c = ch0(uv).rgb;
-    vec2 px = 2.0 / chRes(0);
-    vec3 b = (ch0(uv + px).rgb + ch0(uv - px).rgb + ch0(uv + vec2(px.x, -px.y)).rgb + ch0(uv - vec2(px.x, -px.y)).rgb) * 0.25;
-    c += b * 0.8;
+    // (each star's glow: near and far, wide and soft)
+    vec3 b = vec3(0.0);
+    for (int i = 1; i <= 4; i++) {
+        vec2 px = float(i * i) * 1.5 / chRes(0);
+        b += (ch0(uv + px).rgb + ch0(uv - px).rgb + ch0(uv + vec2(px.x, -px.y)).rgb + ch0(uv - vec2(px.x, -px.y)).rgb) * (0.5 / float(i));
+    }
+    c += b * 0.55;
     // (a faint nebula behind them, its colours drifting)
     vec2 p = (fc - 0.5 * iResolution.xy) / iResolution.y;
     vec3 neb = palette(fbm(p * 2.0 + iTime * 0.01) + 0.3, vec3(0.5), vec3(0.5), vec3(1.0), vec3(0.2, 0.4, 0.7)) * 0.03 * fbm(p * 3.0 - iTime * 0.02);
     vec3 bg = vec3(0.006, 0.008, 0.016) * (1.0 + 2.0 * DROP) + neb * (1.0 + LEVEL);
-    o = vec4(tonemap(c * 1.7 + bg), 1.0);
+    o = vec4(tonemap(c * 2.4 + bg), 1.0);
 }
 "#;
 
@@ -141,12 +145,12 @@ vec2 curl(vec2 p) { float e = 0.01; float n1 = fbm(p + vec2(0.0, e)); float n2 =
 void mainImage(out vec4 o, in vec2 fc) {
     vec2 uv = fc / iResolution.xy;
     vec2 p = (fc - 0.5 * iResolution.xy) / iResolution.y;
-    vec2 v = curl(p * 1.6 + iTime * 0.03) * (0.025 + 0.08 * MID);
+    vec2 v = curl(p * 1.6 + iTime * 0.012) * (0.008 + 0.022 * MID + 0.01 * LEVEL);
     // (a swirl where this beat's kick lands, turning one way then the other)
     vec2 c = (hash31(floor(BEAT)).xy - 0.5) * vec2(1.4, 0.8);
     vec2 d = p - c;
     float s = exp(-dot(d, d) * 9.0) * KICK * (mod(BEAT, 2.0) < 1.0 ? 1.0 : -1.0);
-    v += vec2(-d.y, d.x) * s * 1.6;
+    v += vec2(-d.y, d.x) * s * 0.45;
     vec2 last = ch0(uv).xy;
     o = vec4(mix(v, last, iFrame > 0 ? 0.6 : 0.0), 0.0, 1.0);
 }
@@ -194,12 +198,10 @@ void mainImage(out vec4 o, in vec2 fc) {
     vec3 n = normalize(vec3(-hx * 6.0, -hy * 6.0, 1.0));
     float spec = pow(clamp(dot(reflect(normalize(vec3(-0.4, -0.5, -1.0)), n), vec3(0.0, 0.0, 1.0)), 0.0, 1.0), 24.0);
     c = c * (0.85 + 0.3 * n.z) + spec * (0.25 + 0.6 * HIGH);
-    // (gold veins where one paint meets another, catching the light; flecks of gold leaf in the dark)
+    // (gold veins where one paint meets another, catching the light)
     float edge = clamp(length(vec2(hx, hy)) * 7.0, 0.0, 1.0);
     vec3 gold = vec3(1.0, 0.78, 0.38) * (0.7 + 0.6 * spec + 0.5 * HIGH);
     c = mix(c, gold, smoothstep(0.55, 0.95, edge) * 0.75);
-    float fleck = step(0.996, hash21(floor(fc / 2.0))) * (1.0 - dot(c, vec3(0.33))) * (0.5 + 0.5 * sin(iTime * 3.0 + hash21(fc) * 20.0));
-    c += gold * fleck * 0.6;
     // (deep and rich as wet paint: its colours fuller; and its brightness levelled to one fixed range, from deep to
     // bright, so the contrast's the same whatever colours are in it)
     float l = max(dot(c, vec3(0.299, 0.587, 0.114)), 1e-4);
@@ -218,15 +220,15 @@ vec2 curl(vec2 p) { float e = 0.02; float a = fbm(p + vec2(0.0, e)); float b = f
 void mainImage(out vec4 o, in vec2 fc) {
     vec2 uv = fc / iResolution.xy;
     vec2 p = (fc - 0.5 * iResolution.xy) / iResolution.y;
-    vec2 v = curl(p * 2.2 + vec2(0.0, -iTime * 0.08)) * (0.04 + 0.22 * LEVEL + 0.16 * MID + 0.1 * HIGH);
-    // (smoke rises, faster with the music)
-    v.y += 0.03 + 0.09 * LEVEL;
+    vec2 v = curl(p * 2.2 + vec2(0.0, -iTime * 0.08)) * (0.03 + 0.1 * LEVEL + 0.07 * MID + 0.04 * HIGH);
+    // (smoke rises, a little faster with the music)
+    v.y += 0.03 + 0.05 * LEVEL;
     // (each kick a puff out from somewhere new; a snare a flick sideways; a drop, everything blown)
     vec2 at = (hash31(floor(BEAT)).xy - 0.5) * vec2(1.2, 0.7);
     vec2 d = p - at;
-    v += normalize(d + 1e-4) * (1.3 * KICK * KICK) * exp(-dot(d, d) * 3.0);
-    v.x += SNARE * 0.25 * (mod(float(HITS), 2.0) < 1.0 ? 1.0 : -1.0) * exp(-dot(p, p));
-    v += normalize(p + 1e-4) * 1.6 * DROP * exp(-dot(p, p) * 1.2);
+    v += normalize(d + 1e-4) * (0.6 * KICK * KICK) * exp(-dot(d, d) * 3.0);
+    v.x += SNARE * 0.08 * (mod(float(HITS), 2.0) < 1.0 ? 1.0 : -1.0) * exp(-dot(p, p));
+    v += normalize(p + 1e-4) * 0.9 * DROP * exp(-dot(p, p) * 1.2);
     vec2 last = ch0(uv).xy;
     o = vec4(mix(v, last, iFrame > 0 ? 0.5 : 0.0), 0.0, 1.0);
 }
@@ -250,7 +252,7 @@ void mainImage(out vec4 o, in vec2 fc) {
     vec2 v = ch0(uv).xy;
     float dt = clamp(iTimeDelta, 0.001, 0.05);
     // (breathing with the bass: the cover a little nearer on each kick)
-    vec3 art = cover(uv, 1.0 + 0.04 * BASS + 0.05 * KICK);
+    vec3 art = cover(uv, 1.0 + 0.012 * BASS + 0.015 * KICK);
     if (iFrame < 2) { o = vec4(art, 0.0); return; }
     vec4 was = ch1(uv - v * aspect * dt);
     // (wisps: where the noise says, a little of the smoke thins and lightens as it goes)
@@ -273,10 +275,11 @@ void mainImage(out vec4 o, in vec2 fc) {
     // (a soft glow off the smoke, brighter on the beat; the edges darkened)
     vec2 px = 3.0 / chRes(1);
     vec3 b = (ch1(uv + vec2(px.x, 0.0)).rgb + ch1(uv - vec2(px.x, 0.0)).rgb + ch1(uv + vec2(0.0, px.y)).rgb + ch1(uv - vec2(0.0, px.y)).rgb) * 0.25;
-    vec3 c = s.rgb + max(b - 0.35, vec3(0.0)) * (0.5 + 0.8 * KICK) * s.a;
+    // (a steady glow: never brighter on a kick, so nothing flickers as the music's level changes)
+    vec3 c = s.rgb + max(b - 0.35, vec3(0.0)) * 0.55 * s.a;
     c = mix(c, art, 0.08 * (1.0 - s.a));
     float vig = smoothstep(1.4, 0.4, length((uv - 0.5) * vec2(iResolution.x / iResolution.y, 1.0)) * 0.9);
-    o = vec4(tonemap(c * vig * (1.05 + 0.25 * KICK + 0.4 * DROP)) + (hash21(fc + iTime) - 0.5) * 0.015, 1.0);
+    o = vec4(tonemap(c * vig * 1.1) + (hash21(fc + iTime) - 0.5) * 0.01, 1.0);
 }
 "#;
 
