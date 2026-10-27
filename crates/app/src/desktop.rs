@@ -202,8 +202,17 @@ pub mod taskbar {
         ]
     }
 
+    thread_local! {
+        /// Told when the window starts being resized, and when it's let go (on the window's thread)
+        pub static ON_SIZING: std::cell::RefCell<Option<Box<dyn Fn(bool)>>> = const { std::cell::RefCell::new(None) };
+    }
+
     unsafe extern "system" fn subclass_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM, _id: usize, data: usize) -> LRESULT {
         let ctx = &mut *(data as *mut Ctx);
+        // (a resize (or a move) begun, then let go: WM_ENTERSIZEMOVE, WM_EXITSIZEMOVE)
+        if msg == 0x0231 || msg == 0x0232 {
+            ON_SIZING.with(|f| if let Some(f) = f.borrow().as_ref() { f(msg == 0x0231) });
+        }
         let created = CREATED_MSG.load(Ordering::Relaxed);
         // the taskbar button exists (or Explorer restarted): add ours
         if created != 0 && msg == created {
@@ -267,6 +276,9 @@ pub mod taskbar {
 
 #[cfg(not(windows))]
 pub mod taskbar {
+    thread_local! {
+        pub static ON_SIZING: std::cell::RefCell<Option<Box<dyn Fn(bool)>>> = const { std::cell::RefCell::new(None) };
+    }
     pub fn attach(_hwnd: isize) {}
     pub fn state(_playing: bool, _shuffle: bool, _liked: bool, _can_like: bool) {}
 }

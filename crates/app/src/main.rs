@@ -7451,9 +7451,11 @@ fn bot_set(shared: &Shared, key: &str, v: &str) {
     let value = botpage::value_of(&manifest, &key, v);
     // (a choice, like a theme's chip: seen at once too, so the preview shows it)
     let select = manifest.as_array().into_iter().flatten().any(|x| x["key"] == key.as_str() && x["type"] == "select");
-    let toggle = value.is_boolean() || select || matches!(key.as_str(), "srWho" | "goalReset" | "goalStyle" | "goalShape" | "goalDrops");
-    // (during setup: kept as it's set, no Save needed; the chatbot restarted with it when you move on)
     let cur = bot_current(shared);
+    // (and anything picked on the page (a row of chips, a dropdown): seen at once; only what's typed waits)
+    let picked = botpage::sheet(&BOT_SHEET.with(|b| b.borrow().clone()), &cur).1.iter().any(|f| f.key == key && f.kind == "chips");
+    let toggle = value.is_boolean() || select || picked || matches!(key.as_str(), "srWho" | "goalReset" | "goalStyle" | "goalShape" | "goalDrops");
+    // (during setup: kept as it's set, no Save needed; the chatbot restarted with it when you move on)
     let in_setup = !cur.get("setupDone").and_then(|v| v.as_bool()).unwrap_or(false)
         && botpage::steps(&cur).iter().any(|x| botpage::step_fields(x.0, &cur).iter().any(|f| f.key == key));
     if in_setup {
@@ -11350,6 +11352,8 @@ fn viz_update(shared: &Shared, ui: &AppWindow) {
     };
     // (a GPU scene: only with Hardware Acceleration on; picked without it, nothing)
     let gpu = shared.borrow().web.prefs["nativeGpu"].as_bool() == Some(true);
+    // (Depths was taken out: whoever had it gets Smoke)
+    let style = if style == "depths" { "smoke".to_string() } else { style };
     let style = if gpuviz::is_scene(&style) && !gpu { "off".to_string() } else { style };
     let scene = gpuviz::is_scene(&style);
     if ui.get_viz_scene() != scene { ui.set_viz_scene(scene); }
@@ -13705,7 +13709,7 @@ fn main() -> Result<(), slint::PlatformError> {
         let now = s.borrow().web.prefs["nowViz"].as_str().unwrap_or("off").to_string();
         let gpu = s.borrow().web.prefs["nativeGpu"].as_bool() == Some(true);
         let next = match now.as_str() {
-            "halo" if gpu => "smoke", "smoke" => "depths", "depths" => "swarm", "swarm" => "ink", "ink" => "phosphor", "phosphor" => "off", "off" => "bars", "bars" => "mirror", "mirror" => "peaks", "peaks" => "blocks", "blocks" => "dots", "dots" => "wave", "wave" => "centre", "centre" => "glow", "glow" => "ring", "ring" => "halo", _ => "off" };
+            "halo" if gpu => "smoke", "smoke" => "swarm", "swarm" => "ink", "ink" => "phosphor", "phosphor" => "off", "off" => "bars", "bars" => "mirror", "mirror" => "peaks", "peaks" => "blocks", "blocks" => "dots", "dots" => "wave", "wave" => "centre", "centre" => "glow", "glow" => "ring", "ring" => "halo", _ => "off" };
         if let Some(o) = s.borrow_mut().web.prefs.as_object_mut() { o.insert("nowViz".into(), serde_json::json!(next)); }
         if std::env::var_os("OMNIPULSE_SELFTEST").is_none() { webstate::save_pref("nowViz", serde_json::json!(next)); }
         if let Some(ui) = s.borrow().ui.upgrade() { viz_update(&s, &ui); }
@@ -14703,6 +14707,17 @@ fn main() -> Result<(), slint::PlatformError> {
         }
     });
     // resized from an edge or corner (Windows does the dragging, as it does the title bar's)
+    // (being resized: the costly glows rest and motion stops, so each step draws quickly; back when it's let go)
+    {
+        let weak = ui.as_weak();
+        let motion = std::rc::Rc::new(std::cell::Cell::new(true));
+        desktop::taskbar::ON_SIZING.with(|f| *f.borrow_mut() = Some(Box::new(move |on| {
+            let Some(ui) = weak.upgrade() else { return };
+            let t = ui.global::<Theme>();
+            if on { motion.set(t.get_motion()); t.set_motion(false); } else { t.set_motion(motion.get()); }
+            t.set_resizing(on);
+        })));
+    }
     ui.on_resize({
         let weak = ui.as_weak();
         move |d| {
@@ -15476,6 +15491,11 @@ fn main() -> Result<(), slint::PlatformError> {
                         win.dispatch_event(WindowEvent::PointerReleased { position, button: PointerEventButton::Left });
                         println!("selftest: clicked {xy:?}");
                     }
+                }
+                // (the settings changed on the open page and not saved yet: which, and to what)
+                "pfedits" => {
+                    let changed: Vec<String> = PF_EDIT.with(|e| e.borrow().as_ref().map(|(_, v)| v.iter().filter(|(k, _)| pf_changed(k)).map(|(k, x)| format!("{k}={x}")).collect()).unwrap_or_default());
+                    println!("selftest: unsaved {changed:?}");
                 }
                 "pfshow" => {
                     let f = ui.get_pf_fields();

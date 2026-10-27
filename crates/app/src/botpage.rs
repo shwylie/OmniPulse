@@ -378,7 +378,7 @@ fn sheet_of(id: &str, cur: &Map<String, Value>) -> (String, Vec<Field>) {
             v.extend(sheet_of(app, cur).1);
             v
         }),
-        "hud" => ("Game HUD Frames".into(), {
+        "hud" => ("Game HUD Frames (WIP)".into(), {
             let frames = crate::hud::frames(s(cur, "hudFrames"));
             let sel = n(cur, "hudSel").parse::<f64>().unwrap_or(-1.0) as i64;
             let shot = !s(cur, "hudShotPath").is_empty();
@@ -391,7 +391,7 @@ fn sheet_of(id: &str, cur: &Map<String, Value>) -> (String, Vec<Field>) {
                 v.push(step(3, "Drag a box round each part of the HUD you'd like framed. It snaps to the part's edges.", "", "", ""));
                 v.push(f("link", "", "Paste a Screenshot", "Paste brings in what you just took with Win+Shift+S or Print Screen.", "", "hud:paste"));
                 v.push(f("link", "", "Choose a Screenshot", "Choose opens a PNG or JPG of your game from your PC.", "", "hud:shot"));
-                return ("Game HUD Frames".into(), v);
+                return ("Game HUD Frames (WIP)".into(), v);
             }
             v.push(f("note", "", if frames.is_empty() { "Drag a box on your screenshot round a part of the HUD. It snaps to its edges, and a frame goes round it." } else { "Drag a box for another frame, or click one to change it." }, "", "", ""));
             v.push(f("hudedit", "", "", "", "", ""));
@@ -768,12 +768,12 @@ fn sheet_of(id: &str, cur: &Map<String, Value>) -> (String, Vec<Field>) {
         // (the GPU scenes in OBS: its address made from what's picked)
         "vis" => {
             let pick = |k: &str, d: &'static str| -> String { let v = s(cur, k); if v.is_empty() { d.to_string() } else { v.to_string() } };
-            let (scene, scale, fps) = (pick("visScene", "smoke"), pick("visScale", "1"), pick("visFps", "60"));
+            let (scene, scale, fps) = (Some(pick("visScene", "smoke")).filter(|s| s != "depths").unwrap_or_else(|| "smoke".into()), pick("visScale", "1"), pick("visFps", "60"));
             let path = format!("/vis/{scene}?scale={scale}&fps={fps}{}", if on(cur, "visOffset", true) { "" } else { "&offset=0" });
             ("Visualiser (WIP)".into(), vec![
                 f("note", "", "The app's GPU scenes on stream, drawn by OBS on your graphics card. They're still being built, so they may change, and some may not look right yet.", "", "", ""),
                 addr(&path, "Add it as a Browser source the size of your canvas, like 1920 × 1080. To lay it over your stream, right-click it in OBS, choose Blending Mode, then Screen."),
-                f("chips", "visScene", "Scene", "", &scene, "smoke=Smoke|depths=Depths|swarm=Swarm|ink=Ink|phosphor=Phosphor"),
+                f("chips", "visScene", "Scene", "", &scene, "smoke=Smoke|swarm=Swarm|ink=Ink|phosphor=Phosphor"),
                 f("chips", "visScale", "Detail", "Lower draws it smaller and stretches it to fit, for less work on your graphics card.", &scale, "0.5=Low|0.75=Medium|1=Full"),
                 f("chips", "visFps", "Frame rate", "", &fps, "30=30 a second|60=60 a second"),
                 f("toggle", "visOffset", "Keep in time with OmniPulse Offset", "Holds it back by the Offset's delay, so it lands with what viewers hear. This only applies while OmniPulse Offset is on.", if on(cur, "visOffset", true) { "true" } else { "false" }, ""),

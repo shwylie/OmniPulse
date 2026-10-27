@@ -1,4 +1,4 @@
-// The scenes: smoke from the cover, a fractal flight, a swarm of points, marbled ink and phosphor traces, each
+// The scenes: smoke from the cover, a swarm of points, marbled ink and phosphor traces, each
 // made of long-public techniques. Each is GLSL passes (see lib.rs for what they're given). Written to
 // run as they are in WebGL2 too: no arrays of constants, no names GL's ES keeps for itself.
 
@@ -21,77 +21,6 @@ float fbm(vec2 p) { float a = 0.5; float s = 0.0; for (int i = 0; i < 5; i++) { 
 vec3 palette(float t, vec3 a, vec3 b, vec3 c, vec3 d) { return a + b * cos(6.28318 * (c * t + d)); }
 mat2 rot(float a) { float c = cos(a); float s = sin(a); return mat2(c, -s, s, c); }
 vec3 tonemap(vec3 c) { c = max(c, vec3(0.0)); return c / (1.0 + c) * 1.15; }
-"#;
-
-// ---------- Depths: a flight round a Mandelbulb that regrows on the beat ----------
-
-const DEPTHS_MARCH: &str = concat!(r#"
-// (the bulb's power and twist step on each kick, eased between, so its form regrows with the beat)
-float power() { return 7.0 + 2.5 * sin(BEAT * 0.83 + iTime * 0.05) + 0.6 * KICK; }
-float bulb(vec3 p, out float trap) {
-    vec3 z = p; float dr = 1.0; float r = 0.0; float pw = power(); trap = 1e9;
-    for (int i = 0; i < 9; i++) {
-        r = length(z);
-        if (r > 2.0) break;
-        float th = acos(clamp(z.z / r, -1.0, 1.0)) * pw + iTime * 0.07;
-        float ph = atan(z.y, z.x) * pw;
-        dr = pow(r, pw - 1.0) * pw * dr + 1.0;
-        z = pow(r, pw) * vec3(sin(th) * cos(ph), sin(ph) * sin(th), cos(th)) + p;
-        trap = min(trap, dot(z, z));
-    }
-    return 0.5 * log(r) * r / dr;
-}
-float map(vec3 p) { float t; return bulb(p, t); }
-vec3 normal(vec3 p, float e) { vec2 k = vec2(1.0, -1.0); return normalize(k.xyy * map(p + k.xyy * e) + k.yyx * map(p + k.yyx * e) + k.yxy * map(p + k.yxy * e) + k.xxx * map(p + k.xxx * e)); }
-void mainImage(out vec4 o, in vec2 fc) {
-    vec2 uv = (fc - 0.5 * iResolution.xy) / iResolution.y;
-    float t = iTime * 0.12;
-    // (the camera: round and in and out, pushed in a little on each kick)
-    float dist = 3.3 - 0.9 * smoothstep(0.0, 1.0, 0.5 + 0.5 * sin(t * 0.7)) - 0.15 * KICK - 0.2 * DROP;
-    vec3 ro = vec3(dist * cos(t), 0.6 * sin(t * 0.6), dist * sin(t));
-    vec3 fw = normalize(-ro); vec3 rt = normalize(cross(vec3(0.0, 1.0, 0.0), fw)); vec3 up = cross(fw, rt);
-    vec3 rd = normalize(fw * (1.4 + 0.3 * BUILD) + uv.x * rt + uv.y * up);
-    float d = 0.0; float trap = 0.0; float steps = 0.0; bool hit = false;
-    for (int i = 0; i < 110; i++) {
-        vec3 q = ro + rd * d;
-        float h = bulb(q, trap);
-        if (h < 0.0007 * d) { hit = true; break; }
-        d += h * 0.9;
-        steps += 1.0;
-        if (d > 7.0) break;
-    }
-    vec3 bg = palette(0.6 + uv.y * 0.2 + MID * 0.2, vec3(0.03), vec3(0.04), vec3(1.0), vec3(0.6, 0.7, 0.8));
-    vec3 col = bg;
-    vec3 tint = palette(trap * 0.35 + MID * 0.6 + iTime * 0.01, vec3(0.5), vec3(0.5), vec3(1.0, 1.0, 1.0), vec3(0.0, 0.15, 0.3));
-    if (hit) {
-        vec3 pos = ro + rd * d;
-        vec3 n = normal(pos, 0.0005 * d);
-        vec3 l = normalize(vec3(0.6, 0.8, -0.4));
-        float dif = clamp(dot(n, l), 0.0, 1.0);
-        float rim = pow(1.0 - clamp(dot(n, -rd), 0.0, 1.0), 3.0);
-        float ao = clamp(1.0 - steps / 110.0, 0.0, 1.0);
-        col = tint * (0.15 + 0.9 * dif) * ao + rim * (0.4 + 1.2 * HIGH) * palette(0.1 + HIGH, vec3(0.6), vec3(0.4), vec3(1.0), vec3(0.2, 0.4, 0.6));
-        col *= 1.0 + 0.8 * KICK + 0.8 * DROP;
-    }
-    // (a glow where the march came close: the bulb's own light, brighter with the level)
-    col += tint * pow(steps / 110.0, 2.0) * (0.4 + 1.5 * LEVEL);
-    // (last frame's, a little: smoother, a touch of trail)
-    vec3 last = ch0(fc / iResolution.xy).rgb;
-    o = vec4(mix(col, last, iFrame > 0 ? 0.35 : 0.0), 1.0);
-}
-"#);
-
-const DEPTHS_IMAGE: &str = r#"
-void mainImage(out vec4 o, in vec2 fc) {
-    vec2 uv = fc / iResolution.xy;
-    vec3 c = ch0(uv).rgb;
-    // (a soft bloom from the picture, 4 taps out)
-    vec2 px = 3.0 / chRes(0);
-    vec3 b = (ch0(uv + vec2(px.x, 0.0)).rgb + ch0(uv - vec2(px.x, 0.0)).rgb + ch0(uv + vec2(0.0, px.y)).rgb + ch0(uv - vec2(0.0, px.y)).rgb) * 0.25;
-    c += max(b - 0.5, vec3(0.0)) * (0.6 + KICK);
-    float v = smoothstep(1.2, 0.3, length(uv - 0.5));
-    o = vec4(tonemap(c * v * 1.3) + (hash21(fc + iTime) - 0.5) * 0.02, 1.0);
-}
 "#;
 
 // ---------- Swarm: 65,536 points resting as a shape, scattered by hits, gathering again ----------
@@ -389,10 +318,6 @@ fn make() -> Vec<Scene> {
             pass(Kind::Buffer, Size::Scaled(0.25), [p(0), NONE, NONE, NONE], with(&[COMMON, SMOKE_FLOW])),
             pass(Kind::Buffer, Size::Scaled(0.75), [p(0), p(1), Input::Art, NONE], with(&[COMMON, SMOKE_ART, SMOKE_BODY])),
             pass(Kind::Image, Size::Scaled(1.0), [NONE, p(1), Input::Art, NONE], with(&[COMMON, SMOKE_ART, SMOKE_IMAGE])),
-        ] },
-        Scene { id: "depths", name: "Depths", passes: vec![
-            pass(Kind::Buffer, Size::Scaled(0.75), [p(0), NONE, NONE, NONE], with(&[COMMON, DEPTHS_MARCH])),
-            pass(Kind::Image, Size::Scaled(1.0), [p(0), NONE, NONE, NONE], with(&[COMMON, DEPTHS_IMAGE])),
         ] },
         Scene { id: "swarm", name: "Swarm", passes: vec![
             pass(Kind::Buffer, Size::Fixed(256, 256), [p(1), p(0), NONE, NONE], with(&[COMMON, SWARM_SHAPES, SWARM_VEL])),

@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <!--
-  OmniPulse's GPU visualiser scenes, for OBS (a Browser source): /vis/<scene>, as Smoke, Depths, Swarm, Ink or
+  OmniPulse's GPU visualiser scenes, for OBS (a Browser source): /vis/<scene>, as Smoke, Swarm, Ink or
   Phosphor. The same scenes as the app's (their passes from /vis/scenes.json), run here in WebGL2, so OBS's
   browser draws them on your graphics card; the sound from /vis/frame.json, a frame about 30 times a second.
     ?scale=0.5    draw it smaller than the source and stretch it up (0.25 to 1; 1 at first)
@@ -210,7 +210,7 @@
     try {
       const all = await (await fetch("/vis/scenes.json", { cache: "no-store" })).json();
       const s = all.scenes[SCENE];
-      if (!s) { note("There's no scene called " + SCENE + ". Try /vis/smoke, /vis/depths, /vis/swarm, /vis/ink or /vis/phosphor."); return; }
+      if (!s) { note("There's no scene called " + SCENE + ". Try /vis/smoke, /vis/swarm, /vis/ink or /vis/phosphor."); return; }
       const full = shader(gl.VERTEX_SHADER, all.fullscreenVs, "fullscreen");
       const pfs = shader(gl.FRAGMENT_SHADER, all.pointsFs, "points");
       s.passes.forEach((p, i) => {
