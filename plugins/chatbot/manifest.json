@@ -235,6 +235,20 @@
       "note": "Your Verification Token. On ko-fi.com, open More > API > Webhooks, then Advanced. Paste your webhook address from Tips and Donations there too. Leave it empty to turn this off."
     },
     {
+      "key": "throneOn",
+      "label": "Throne Gifts",
+      "type": "toggle",
+      "default": false,
+      "note": "Gifts and contributions from your Throne wishlist, as alerts. Paste your webhook address from Tips and Donations into Throne's webhook settings."
+    },
+    {
+      "key": "fourthwallSecret",
+      "label": "Fourthwall",
+      "type": "password",
+      "default": "",
+      "note": "Your shop's webhook secret, from Settings > For Developers on Fourthwall. Paste your webhook address from Tips and Donations there too. Leave it empty to turn this off."
+    },
+    {
       "key": "requests",
       "label": "Song Requests",
       "type": "toggle",

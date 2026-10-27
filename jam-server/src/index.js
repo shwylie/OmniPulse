@@ -293,6 +293,28 @@ export default {
       return stub.fetch("https://hook/add", { method: "POST", body: data });
     }
 
+    // Throne's and Fourthwall's webhooks, kept for the app whose hook it is (it listens on the hook's socket).
+    // Throne's are checked here, against Throne's own public key; Fourthwall's are kept with their signature,
+    // which the app checks against your shop's secret (never sent here).
+    if (parts[0] === "api" && parts[1] === "hook" && (parts[2] === "throne" || parts[2] === "fourthwall") && (parts.length === 4 || (parts.length === 5 && parts[4] === "ws"))) {
+      const kind = parts[2], id = parts[3];
+      if (!/^[a-z0-9]{20,40}$/.test(id)) return json({ error: "not found" }, 404);
+      const stub = env.HOOKS.get(env.HOOKS.idFromName(kind + ":" + id));
+      if (parts[4] === "ws") return stub.fetch(new Request("https://hook/ws", req));
+      if (req.method !== "POST") return json({ error: "webhooks post here" }, 405);
+      const text = await req.text();
+      if (text.length > 64 * 1024) return json({ error: "too long" }, 413);
+      if (kind === "throne") {
+        const ts = req.headers.get("x-signature-timestamp") || "", sig = req.headers.get("x-signature-ed25519") || "";
+        if (!/^\d+$/.test(ts) || !/^[0-9a-fA-F]{128}$/.test(sig)) return json({ error: "not signed" }, 401);
+        // (a delivery from long ago: not taken, so an old one can't be sent again)
+        if (Math.abs(Date.now() / 1000 - Number(ts)) > 600) return json({ error: "too old" }, 401);
+        if (!(await throneSigned(ts + "." + text, sig))) return json({ error: "not Throne's" }, 401);
+        return stub.fetch("https://hook/add", { method: "POST", body: text });
+      }
+      return stub.fetch("https://hook/add", { method: "POST", body: JSON.stringify({ body: text, sig: req.headers.get("x-fourthwall-hmac-sha256") || "" }) });
+    }
+
     // shared playlists
     if (url.pathname === "/api/shares" && req.method === "POST") {
       const r = await readJson(req);
@@ -659,6 +681,21 @@ export class Share {
 
 // A webhook's deliveries (Ko-fi's): the last 50, a week at most, sent on to whoever's listening on its socket.
 // A socket says {"after": n} for those after n it missed, or {"after": "now"} for none (where it's up to)
+// Throne's webhook key (Ed25519, public: from Throne's webhook help page), and whether a delivery's its
+const THRONE_KEY = "MCowBQYDK2VwAyEAPXbUfxh7XL4SYUVcfhmYMIbxvtR9E9LDd8gPJ1PwSD8=";
+let throneKey = null;
+async function throneSigned(message, sigHex) {
+  try {
+    if (!throneKey) {
+      const der = Uint8Array.from(atob(THRONE_KEY), (c) => c.charCodeAt(0));
+      try { throneKey = await crypto.subtle.importKey("spki", der, { name: "Ed25519" }, false, ["verify"]); }
+      catch (e) { throneKey = await crypto.subtle.importKey("spki", der, { name: "NODE-ED25519", namedCurve: "NODE-ED25519" }, false, ["verify"]); }
+    }
+    const sig = Uint8Array.from(sigHex.match(/../g).map((h) => parseInt(h, 16)));
+    return await crypto.subtle.verify(throneKey.algorithm.name === "Ed25519" ? "Ed25519" : { name: "NODE-ED25519" }, throneKey, sig, new TextEncoder().encode(message));
+  } catch (e) { return false; }
+}
+
 export class Hooks {
   constructor(ctx) {
     this.ctx = ctx;

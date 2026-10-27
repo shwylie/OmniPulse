@@ -7348,6 +7348,11 @@ fn bot_set(shared: &Shared, key: &str, v: &str) {
     if toggle { bot_paint(shared); }
 }
 
+/// A webhook's own id on the relay (Ko-fi's, Throne's, Fourthwall's): 24 random letters and digits, its secret
+fn hook_id() -> String {
+    (0..24u64).map(|k| { use std::hash::{BuildHasher, Hasher}; let mut h = std::collections::hash_map::RandomState::new().build_hasher(); h.write_u64(k); h.write_u128(std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0)); char::from_digit((h.finish() % 36) as u32, 36).unwrap_or('0') }).collect()
+}
+
 fn bot_act(shared: &Shared, act: &str) {
     let say = |t: &str| if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_status(t.into()); };
     // (a list's row typed into, taken out, or one added: kept as "a | b | c"; the page drawn again unless it's typing)
@@ -7458,8 +7463,14 @@ fn bot_act(shared: &Shared, act: &str) {
     }
     if let Some(id) = act.strip_prefix("sheet:") {
         // (Ko-fi's: a webhook address of your own on the relay, made the first time)
+        // (and Throne's and Fourthwall's, each its own, the same way)
+        for (kind, key) in [("throne", "throneUrl"), ("fourthwall", "fourthwallUrl")] {
+            if (id == "tips" || id == kind) && bot_current(shared).get(key).and_then(|v| v.as_str()).unwrap_or("").is_empty() {
+                bot_keep(shared, key, serde_json::json!(format!("{}/api/hook/{kind}/{}", share::RELAY_URL, hook_id())));
+            }
+        }
         if (id == "tips" || id == "kofi") && bot_current(shared).get("kofiUrl").and_then(|v| v.as_str()).unwrap_or("").is_empty() {
-            let hook: String = (0..24u64).map(|k| { use std::hash::{BuildHasher, Hasher}; let mut h = std::collections::hash_map::RandomState::new().build_hasher(); h.write_u64(k); h.write_u128(std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0)); char::from_digit((h.finish() % 36) as u32, 36).unwrap_or('0') }).collect();
+            let hook = hook_id();
             bot_keep(shared, "kofiUrl", serde_json::json!(format!("{}/api/hook/kofi/{hook}", share::RELAY_URL)));
         }
         BOT_SHEET.with(|b| *b.borrow_mut() = id.to_string());

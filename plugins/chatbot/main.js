@@ -2894,6 +2894,58 @@ function tipConnect(only) {
       : kind === "Commission" ? "Commissioned you on Ko-fi" + (msg ? ": " + msg : "") : msg;
     onTip(open ? String(k.from_name || "Someone") : "Someone", k.amount, k.currency, what, "kofi");
   }, "kofi");
+  // Throne and Fourthwall: their webhooks' deliveries, from the relay's socket for each hook (as Ko-fi's)
+  hookSocket("throne", yes(S().throneOn) && String(S().throneUrl || "").trim(), only, (data) => {
+    let t;
+    try { t = JSON.parse(data); } catch (e) { return; }
+    const d = t.data || {}, who = String(d.gifter_username || "Someone"), msg = String(d.message || "");
+    const cents = (v) => num(v) / 100, item = String(d.item_name || "a gift");
+    if (t.event_type === "gift_purchased") onTip(who, cents(d.price), d.currency, (d.is_surprise_gift ? "Sent you a surprise gift" : "Gifted you " + item) + " on Throne" + (msg ? ": " + msg : ""), "throne");
+    else if (t.event_type === "contribution_purchased") onTip(who, cents(d.amount), d.currency, "Chipped in for " + item + " on Throne" + (msg ? ": " + msg : ""), "throne");
+    else if (t.event_type === "gift_crowdfunded") onTip(d.gifter_username ? who : "Chat", cents(d.price), d.currency, (d.is_surprise_gift ? "A surprise gift" : item) + " was fully funded on Throne!", "throne");
+  });
+  const fwSecret = String(S().fourthwallSecret || "").trim();
+  hookSocket("fourthwall", fwSecret && String(S().fourthwallUrl || "").trim(), only, (data) => {
+    let w;
+    try { w = JSON.parse(data); } catch (e) { return; }
+    // (your shop's signature: made with its secret, so only Fourthwall could have sent it)
+    if (hmacB64(fwSecret, String(w.body || "")) !== String(w.sig || "")) { OmniPulse.app.say("A Fourthwall delivery came in with a different signature, so it wasn't shown. Check the secret in Tips and Donations.").catch(() => {}); return; }
+    let f;
+    try { f = JSON.parse(w.body); } catch (e) { return; }
+    const d = f.data || {}, total = (d.amounts && d.amounts.total) || {}, msg = String(d.message || "");
+    const who = String(d.username || d.nickname || "Someone");
+    if (f.type === "DONATION") onTip(who, total.value, total.currency, msg, "fourthwall");
+    else if (f.type === "ORDER_PLACED") onTip(who, total.value, total.currency, "Bought from your Fourthwall shop" + (msg ? ": " + msg : ""), "fourthwall");
+    else if (f.type === "GIFT_PURCHASE") onTip(who, total.value, total.currency, "Gifted " + (num(d.quantity) > 1 ? d.quantity + " of " : "") + String((d.offer && d.offer.name) || "something") + " from your shop" + (msg ? ": " + msg : ""), "fourthwall");
+    else if (f.type === "SUBSCRIPTION_PURCHASED") onTip(who, "", "", "Joined your Fourthwall membership", "fourthwall");
+  });
+}
+
+// A webhook's deliveries, kept on the relay (Throne's, Fourthwall's): the ones missed while it was off after the
+// last it had (the first time, none); one from long ago counted, not alerted; each delivery once
+function hookSocket(id, url, only, take) {
+  if (!url || (only && only !== id)) return;
+  const lastKey = id + "Last", keep = (n) => { if (n == null) return; S()[lastKey] = String(n); OmniPulse.app.saveSettings({ [lastKey]: String(n) }).catch(() => {}); };
+  tipSocket(String(url).replace(/^http/, "ws") + "/ws", (s) => {
+    s.send(JSON.stringify({ after: S()[lastKey] ? num(S()[lastKey]) : "now" }));
+  }, (s, d, pings) => {
+    let m;
+    try { m = JSON.parse(d); } catch (e) { return; }
+    if (m.caught) { pings(30000); if (!S()[lastKey]) keep(m.n); return; }
+    if (!m.data) return;
+    keep(m.n);
+    if (Date.now() - num(m.got) > 10 * 60000) return;
+    take(m.data);
+  }, id);
+}
+
+// HMAC-SHA256 of a message with a key, as base64 (Fourthwall's signature)
+function hmacB64(key, message) {
+  let k = Array.from(utf8(key));
+  if (k.length > 64) k = Array.from(sha256(k));
+  // (as lists of bytes, as sha256 takes them)
+  const pad = (x) => Array.from({ length: 64 }, (_, i) => (k[i] || 0) ^ x);
+  return b64(sha256(pad(0x5c).concat(Array.from(sha256(pad(0x36).concat(Array.from(utf8(message))))))));
 }
 
 function stopAll() {
@@ -3009,6 +3061,8 @@ OmniPulse.register({
       streamlabs: { on: !!String(S().streamlabsToken || "").trim(), up: tip("streamlabs") },
       streamelements: { on: !!String(S().streamelementsToken || "").trim(), up: tip("streamelements") },
       kofi: { on: !!String(S().kofiUrl || "").trim() && !!String(S().kofiToken || "").trim(), up: tip("kofi") },
+      throne: { on: yes(S().throneOn) && !!String(S().throneUrl || "").trim(), up: tip("throne") },
+      fourthwall: { on: !!String(S().fourthwallUrl || "").trim() && !!String(S().fourthwallSecret || "").trim(), up: tip("fourthwall") },
       counts, recent: recent.slice(-12).reverse(), actions: { all: all.length, on: live.length },
     };
   },

@@ -521,10 +521,10 @@ fn sheet_of(id: &str, cur: &Map<String, Value>) -> (String, Vec<Field>) {
         }),
         "tips" => ("Tips and Donations".into(), {
             let mut v = vec![
-                f("note", "", "Tips and donations from Streamlabs, StreamElements or Ko-fi show as alerts, and can start your actions. Click the ones you use to set them up.", "", "", ""),
+                f("note", "", "Tips and donations from Streamlabs, StreamElements, Ko-fi, Throne or Fourthwall show as alerts, and can start your actions. Click the ones you use to set them up.", "", "", ""),
             ];
             // (each a row of its own: clicked open for its steps, shut again with another click)
-            for (id, name, set) in [("streamlabs", "Streamlabs", !s(cur, "streamlabsToken").is_empty()), ("streamelements", "StreamElements", !s(cur, "streamelementsToken").is_empty()), ("kofi", "Ko-fi", !s(cur, "kofiToken").is_empty())] {
+            for (id, name, set) in [("streamlabs", "Streamlabs", !s(cur, "streamlabsToken").is_empty()), ("streamelements", "StreamElements", !s(cur, "streamelementsToken").is_empty()), ("kofi", "Ko-fi", !s(cur, "kofiToken").is_empty()), ("throne", "Throne", on(cur, "throneOn", false)), ("fourthwall", "Fourthwall", !s(cur, "fourthwallSecret").is_empty())] {
                 let open = TIPS_OPEN.with(|o| o.borrow().contains(id));
                 v.push(f("fold", id, name, if set { "Set up" } else { "Not set up" }, if set { "ok" } else { "off" }, if open { "open" } else { "shut" }));
                 if open { v.extend(sheet_of(id, cur).1); }
@@ -539,6 +539,23 @@ fn sheet_of(id: &str, cur: &Map<String, Value>) -> (String, Vec<Field>) {
             step(3, "On the same page, open Advanced, copy your Verification Token and paste it below.", "", "", ""),
             f("password", "kofiToken", "Verification Token", "Tips, memberships and shop orders then show as alerts, and can start your actions. Leave it empty to turn this off.", s(cur, "kofiToken"), "Paste your Verification Token here"),
             f("note", "", "To check it works, save this, then click Send Single Donation Test on Ko-fi's page.", "", "", ""),
+        ]),
+        // (Throne: its webhook to the relay, which checks Throne's signature)
+        "throne" => ("Throne".into(), vec![
+            step(1, "On Throne, open your webhook settings (Throne's help page shows where) and switch webhooks on.", "", "https://help.throne.com/en/articles/15935990-how-do-i-set-up-webhook-integration", "How to find Throne's webhook settings"),
+            step(2, "Copy your webhook address below and paste it in as a subscriber URL there. Save it.", "", "", ""),
+            f("addr", "", "Your webhook address", "It's yours alone. Don't show it on stream.", s(cur, "throneUrl"), ""),
+            f("toggle", "throneOn", "Show Throne gifts", "Gifts, contributions and fully funded gifts then show as alerts, and can start your actions.", if on(cur, "throneOn", false) { "true" } else { "false" }, ""),
+            f("note", "", "Throne signs each one, and only signed ones from Throne are shown.", "", "", ""),
+        ]),
+        // (Fourthwall: its webhook to the relay; its signature checked by the chatbot, with your shop's secret)
+        "fourthwall" => ("Fourthwall".into(), vec![
+            step(1, "In your Fourthwall dashboard, open Settings, then For Developers, and add a webhook.", "", "https://docs.fourthwall.com/webhooks/getting-started", "Fourthwall's webhook guide"),
+            step(2, "Copy your webhook address below and paste it in there. Pick the events Donation, Order placed, Gift purchase and Subscription purchased.", "", "", ""),
+            f("addr", "", "Your webhook address", "It's yours alone. Don't show it on stream.", s(cur, "fourthwallUrl"), ""),
+            step(3, "On the same page, copy your shop's secret key and paste it below.", "", "", ""),
+            f("password", "fourthwallSecret", "Secret key", "Donations, orders, gifts and memberships then show as alerts, and can start your actions. Leave it empty to turn this off.", s(cur, "fourthwallSecret"), "Paste your secret key here"),
+            f("note", "", "To check it works, save this, then send a test from Fourthwall's webhook page.", "", "", ""),
         ]),
         "streamelements" => ("StreamElements".into(), vec![
             step(1, "Open your StreamElements channels page and click Show Secrets.", "", "https://streamelements.com/dashboard/account/channels", "Open StreamElements' channels page"),
@@ -922,9 +939,9 @@ fn software(cur: &Map<String, Value>, st: &Value) -> (&'static str, String, &'st
 /// Tips and donations, in one tile: Streamlabs' and StreamElements'
 fn tips(cur: &Map<String, Value>, st: &Value) -> (&'static str, String, &'static str, String, String) {
     let up = |k: &str| st[k]["up"].as_bool().unwrap_or(false);
-    let apps = [("streamlabs", "Streamlabs", !s(cur, "streamlabsToken").is_empty()), ("streamelements", "StreamElements", !s(cur, "streamelementsToken").is_empty()), ("kofi", "Ko-fi", !s(cur, "kofiToken").is_empty() && !s(cur, "kofiUrl").is_empty())];
+    let apps = [("streamlabs", "Streamlabs", !s(cur, "streamlabsToken").is_empty()), ("streamelements", "StreamElements", !s(cur, "streamelementsToken").is_empty()), ("kofi", "Ko-fi", !s(cur, "kofiToken").is_empty() && !s(cur, "kofiUrl").is_empty()), ("throne", "Throne", on(cur, "throneOn", false) && !s(cur, "throneUrl").is_empty()), ("fourthwall", "Fourthwall", !s(cur, "fourthwallSecret").is_empty() && !s(cur, "fourthwallUrl").is_empty())];
     let set: Vec<_> = apps.iter().filter(|a| a.2).collect();
-    if set.is_empty() { return ("tips", "Tips and Donations".into(), "off", "Not set up".into(), "Streamlabs, StreamElements or Ko-fi".into()); }
+    if set.is_empty() { return ("tips", "Tips and Donations".into(), "off", "Not set up".into(), "Streamlabs, StreamElements, Ko-fi, Throne or Fourthwall".into()); }
     let line = set.iter().map(|a| format!("{}: {}", a.1, if up(a.0) { "listening" } else { "not connected" })).collect::<Vec<_>>().join(", ");
     ("tips", "Tips and Donations".into(), if set.iter().all(|a| up(a.0)) { "ok" } else { "warn" }, line, "As alerts, and for your actions".into())
 }
