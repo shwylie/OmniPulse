@@ -39,6 +39,8 @@ base64 = "0.22"
 tokio-tungstenite = { version = "0.28", features = ["native-tls"] }
 futures-util = "0.3"
 realfft = "3.5"
+# Now Playing's GPU scenes (Hardware Acceleration on)
+omnipulse-vis = { path = "../vis" }
 rquickjs = "0.9"
 
 # Apple Music's sign-in, once, for its import (the web view Tauri uses: Windows' own WebView2)

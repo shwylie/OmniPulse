@@ -962,7 +962,10 @@ mod tests {
         let p = start(&pkg, &json!({ "token": "t", "login": "me", "userId": "1", "twitchClientId": "c", "points": { "viewer": 1000, "other": 1000 }, "pointsRanks": "0 New, 900 Regular, 5000 Legend", "actions": actions }), rt.handle().clone()).unwrap();
         let has = |want: &str| said.lock().unwrap().iter().any(|l| l.contains(want));
         let until = Instant::now() + Duration::from_secs(8);
-        while !(has("credits ") && has("beat")) && Instant::now() < until { std::thread::sleep(Duration::from_millis(50)); }
+        // (rolled on the Credits widget: told to roll, its chatters in it (sent a moment after))
+        let rolled = |x: &Value| x["op"] == "suiteWidget" && x["args"][0]["credits"]["rollAt"].as_f64().unwrap_or(0.0) > 0.0
+            && x["args"][0]["credits"]["parts"].as_array().is_some_and(|p| p.iter().any(|p| p["name"] == "Chatters" && p["list"] == json!(["Viewer", "Other"])));
+        while !(has("credits ") && has("beat") && asked.lock().unwrap().iter().any(rolled)) && Instant::now() < until { std::thread::sleep(Duration::from_millis(50)); }
         let (l, a) = (said.lock().unwrap().clone(), asked.lock().unwrap().clone());
         let saved = |k: &str| a.iter().rev().find(|x| x["op"] == "saveSettings" && x["args"][0][k].is_object()).map(|x| x["args"][0][k].clone()).unwrap_or(Value::Null);
         // (slots of one symbol: three the same, 10x; the gamble sure to win, 3x)
@@ -979,7 +982,7 @@ mod tests {
         // (an entrance greeting for Other only, the file, the credits rolled and on one line)
         assert!(has("Welcome Other") && !has("Welcome Viewer"), "{l:#?}");
         assert!(a.iter().any(|x| x["op"] == "writeFile" && x["args"][0] == "C:\\x\\c.txt" && x["args"][2] == true), "{a:#?}");
-        assert!(a.iter().any(|x| x["op"] == "overlay" && x["args"][0]["place"] == "roll" && x["args"][0]["text"].as_str().unwrap_or("").contains("Chatters\nViewer\nOther")), "{a:#?}");
+        assert!(a.iter().any(rolled), "{a:#?}");
         assert!(has("credits Chatters: Viewer, Other"), "{l:#?}");
         // (trying it, from the settings page: what it'd say and do, nothing sent or done)
         let said_before = said.lock().unwrap().len();

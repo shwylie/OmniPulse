@@ -30,6 +30,7 @@ mod memcount {
 mod aimusic;
 mod loading;
 mod viz;
+mod gpuviz;
 mod streamdeck;
 mod socials;
 mod smart;
@@ -3107,7 +3108,8 @@ thread_local! {
 fn art_blur(ui: &AppWindow) {
     let Some(px) = ui.get_now_art().to_rgba8() else { return ui.set_now_art_blur(slint::Image::default()) };
     let Some(img) = image::RgbaImage::from_raw(px.width(), px.height(), px.as_bytes().to_vec()) else { return };
-    let small = image::imageops::resize(&img, 12, 6, image::imageops::FilterType::Triangle);
+    // (small, then blurred: smooth however far it's stretched, by either renderer)
+    let small = image::imageops::blur(&image::imageops::resize(&img, 96, 48, image::imageops::FilterType::Triangle), 6.0);
     let out = slint::SharedPixelBuffer::<slint::Rgba8Pixel>::clone_from_slice(small.as_raw(), small.width(), small.height());
     ui.set_now_art_blur(slint::Image::from_rgba8(out));
 }
@@ -11182,13 +11184,33 @@ fn other_full_screen() -> bool {
     now
 }
 
+thread_local! {
+    /// the GPU scenes' renderer, while one's shown
+    static GPU_VIS: RefCell<Option<gpuviz::Gpu>> = const { RefCell::new(None) };
+}
+
+/// The cover, for the GPU scenes that use it: RGBA, top row first
+fn gpu_art(ui: &AppWindow) -> Option<(Vec<u8>, u32, u32)> {
+    let px = ui.get_now_art_big().to_rgba8()?;
+    Some((px.as_bytes().to_vec(), px.width(), px.height()))
+}
+
 fn viz_update(shared: &Shared, ui: &AppWindow) {
     let (style, on_now, on_bar, on_widget, on_stream) = {
         let p = &shared.borrow().web.prefs;
         (p["nowViz"].as_str().unwrap_or("off").to_string(), p["vizNow"].as_bool() != Some(false), p["vizBar"].as_bool() == Some(true),
          p["taskbarWidget"].as_bool() == Some(true) && (p["widgetViz"].as_bool() == Some(true) || p["tbDesign"].as_str() == Some("viz")), eq_widget(p))
     };
+    // (a GPU scene: only with Hardware Acceleration on; picked without it, nothing)
+    let gpu = shared.borrow().web.prefs["nativeGpu"].as_bool() == Some(true);
+    let style = if gpuviz::is_scene(&style) && !gpu { "off".to_string() } else { style };
+    let scene = gpuviz::is_scene(&style);
+    if ui.get_viz_scene() != scene { ui.set_viz_scene(scene); }
+    // (marked WIP: they're still being built)
+    if scene { ui.set_viz_scene_name(format!("{} (WIP)", gpuviz::scenes().into_iter().find(|s| s.0 == style).map(|s| s.1).unwrap_or("")).into()); }
     if ui.get_viz_style() != style.as_str() { ui.set_viz_style(style.clone().into()); }
+    // (Halo's blurred cover, behind it full screen: made if it isn't yet)
+    if style == "halo" && ui.get_now_art_blur().size().width == 0 { art_blur(ui); }
     if ui.get_viz_now() != on_now { ui.set_viz_now(on_now); }
     if ui.get_viz_bar() != on_bar { ui.set_viz_bar(on_bar); }
     let game_pause = shared.borrow().web.prefs["vizGamePause"].as_bool() != Some(false);
@@ -11237,6 +11259,38 @@ fn viz_update(shared: &Shared, ui: &AppWindow) {
                 ui.set_viz_level(l);
                 // (the Wave: one smooth line, and the faint area under it)
                 if ui.get_viz_style() == "wave" { let (l, a) = viz::wave_paths(&cv); let g = ui.global::<VizPaths>(); g.set_line(l.into()); g.set_area(a.into()); }
+                // (a GPU scene: its next frame asked for, the newest shown; drawn smaller than shown, full screen)
+                if ui.get_viz_scene() {
+                    let style = ui.get_viz_style().to_string();
+                    let (w, h) = if ui.get_viz_full() {
+                        let s = ui.window().size();
+                        let k = (1280.0 / s.width.max(1) as f32).min(720.0 / s.height.max(1) as f32).min(0.6);
+                        ((s.width as f32 * k) as u32, (s.height as f32 * k) as u32)
+                    } else { (480, 480) };
+                    let (l, r, rate) = viz::stereo(gpuviz::SOUND);
+                    let shown = GPU_VIS.with(|g| {
+                        let mut g = g.borrow_mut();
+                        let gv = g.get_or_insert_with(|| gpuviz::Gpu::start(rate));
+                        if gv.new_scene(&style) { gv.set_art(gpu_art(&ui)); }
+                        gv.tick(&style, w, h, &l, &r)
+                    });
+                    if let Some((px, w, h)) = shown { ui.set_viz_gpu(slint::Image::from_rgba8(slint::SharedPixelBuffer::clone_from_slice(&px, w, h))); }
+                    // (no GPU for it, or one that wouldn't start: said once)
+                    if let Some(e) = GPU_VIS.with(|g| g.borrow().as_ref().and_then(|g| g.failed())) {
+                        thread_local! { static SAID: std::cell::Cell<bool> = const { std::cell::Cell::new(false) }; }
+                        if !SAID.with(|s| s.replace(true)) { ui.set_status(format!("The GPU scene can't draw: {e}").into()); }
+                    }
+                }
+                // (Halo: its bars, its particles, and its cover's pulse and shake)
+                if ui.get_viz_style() == "halo" {
+                    let h = viz::halo(&b);
+                    let g = ui.global::<VizHalo>();
+                    g.set_bars(h.bars.into());
+                    g.set_dots(h.dots.into());
+                    g.set_scale(h.scale);
+                    g.set_dx(h.dx);
+                    g.set_dy(h.dy);
+                }
                 if ui.get_viz_style() == "ring" {
                     for (i, (d, f)) in viz::ring_pieces(&b).into_iter().enumerate() { ring.set_row_data(i, RingPiece { d: d.into(), f }); }
                     // (the player's, round its cover, with In the Player on)
@@ -11251,6 +11305,8 @@ fn viz_update(shared: &Shared, ui: &AppWindow) {
     } else {
         engine.set_tap("viz", None);
         viz::stop();
+        // (the GPU scene's thread let go, and its device with it)
+        GPU_VIS.with(|g| *g.borrow_mut() = None);
         omnipulse_core::widget::set_levels(Vec::new());
         VIZ.with(|v| *v.borrow_mut() = None);
         ui.set_viz_bands(ModelRc::default());
@@ -13398,7 +13454,12 @@ fn main() -> Result<(), slint::PlatformError> {
     ui.on_tb_design_picked(move |d| set_look_pref(&s, "tbDesign", serde_json::json!(d.as_str())));
     // (Cover Strip: each cover, blurred, as it's shown)
     let w = ui.as_weak();
-    ui.on_now_art_shown(move || if let Some(ui) = w.upgrade() { if ui.get_player_style() == "strip" { art_blur(&ui); } });
+    // (the blurred cover: Cover Strip's, and Halo's behind it full screen)
+    ui.on_now_art_shown(move || if let Some(ui) = w.upgrade() {
+        if ui.get_player_style() == "strip" || ui.get_viz_style() == "halo" { art_blur(&ui); }
+        // (a GPU scene's cover: the new one)
+        if ui.get_viz_scene() { let art = gpu_art(&ui); GPU_VIS.with(|g| if let Some(g) = g.borrow().as_ref() { g.set_art(art); }); }
+    });
     let s = shared.clone();
     // (Beta Updates: kept, and checked again on that channel at once)
     ui.on_beta_updates_set(move |on| {
@@ -13422,7 +13483,23 @@ fn main() -> Result<(), slint::PlatformError> {
         let v = serde_json::json!(style.as_str());
         if let Some(o) = s.borrow_mut().web.prefs.as_object_mut() { o.insert("nowViz".into(), v.clone()); }
         if std::env::var_os("OMNIPULSE_SELFTEST").is_none() { webstate::save_pref("nowViz", v); }
-        if let Some(ui) = s.borrow().ui.upgrade() { viz_update(&s, &ui); }
+        if let Some(ui) = s.borrow().ui.upgrade() { viz_update(&s, &ui); if style == "halo" { art_blur(&ui); } }
+    });
+    // (full screen: the song's details shown or hidden, kept)
+    ui.set_viz_full_info(shared.borrow().web.prefs["vizFullInfo"].as_bool() != Some(false));
+    let s = shared.clone();
+    ui.on_viz_info(move |on| {
+        if let Some(o) = s.borrow_mut().web.prefs.as_object_mut() { o.insert("vizFullInfo".into(), serde_json::json!(on)); }
+        if std::env::var_os("OMNIPULSE_SELFTEST").is_none() { webstate::save_pref("vizFullInfo", serde_json::json!(on)); }
+    });
+    // (its colours: yours, or a palette of its own)
+    ui.global::<VizLook>().set_palette(shared.borrow().web.prefs["vizPalette"].as_str().unwrap_or("theme").into());
+    let s = shared.clone();
+    ui.on_viz_palette(move |pal| {
+        let v = serde_json::json!(pal.as_str());
+        if let Some(o) = s.borrow_mut().web.prefs.as_object_mut() { o.insert("vizPalette".into(), v.clone()); }
+        if std::env::var_os("OMNIPULSE_SELFTEST").is_none() { webstate::save_pref("vizPalette", v); }
+        if let Some(ui) = s.borrow().ui.upgrade() { ui.global::<VizLook>().set_palette(pal); }
     });
     let s = shared.clone();
     ui.on_viz_place(move |place, on| {
@@ -13437,7 +13514,9 @@ fn main() -> Result<(), slint::PlatformError> {
     let s = shared.clone();
     ui.on_viz_cycle(move || {
         let now = s.borrow().web.prefs["nowViz"].as_str().unwrap_or("off").to_string();
-        let next = match now.as_str() { "off" => "bars", "bars" => "mirror", "mirror" => "peaks", "peaks" => "blocks", "blocks" => "wave", "wave" => "centre", "centre" => "glow", "glow" => "ring", _ => "off" };
+        let gpu = s.borrow().web.prefs["nativeGpu"].as_bool() == Some(true);
+        let next = match now.as_str() {
+            "halo" if gpu => "smoke", "smoke" => "depths", "depths" => "swarm", "swarm" => "ink", "ink" => "phosphor", "phosphor" => "off", "off" => "bars", "bars" => "mirror", "mirror" => "peaks", "peaks" => "blocks", "blocks" => "dots", "dots" => "wave", "wave" => "centre", "centre" => "glow", "glow" => "ring", "ring" => "halo", _ => "off" };
         if let Some(o) = s.borrow_mut().web.prefs.as_object_mut() { o.insert("nowViz".into(), serde_json::json!(next)); }
         if std::env::var_os("OMNIPULSE_SELFTEST").is_none() { webstate::save_pref("nowViz", serde_json::json!(next)); }
         if let Some(ui) = s.borrow().ui.upgrade() { viz_update(&s, &ui); }

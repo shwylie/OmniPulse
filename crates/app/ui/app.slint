@@ -1141,6 +1141,58 @@ export global VizPaths {
     in-out property <string> area;
 }
 
+/// Halo, a frame of it (from the app, in a 1000-unit square): its bars and particles as paths, how much the
+/// cover's grown, and where a hit's pushed it
+export global VizHalo {
+    in-out property <string> bars;
+    in-out property <string> dots;
+    in-out property <float> scale: 1;
+    in-out property <float> dx;
+    in-out property <float> dy;
+}
+
+/// Halo: the cover at the centre, pulsing with the bass; bars out from it, particles drifting out past
+/// them (0.5: viz::HALO_COVER)
+component VizHaloView inherits Rectangle {
+    in property <image> art;
+    in property <float> strength: 1;
+    if VizHalo.dots != "": Path {
+        width: root.width;
+        height: root.height;
+        viewbox-width: 1000;
+        viewbox-height: 1000;
+        commands: VizHalo.dots;
+        fill: VizLook.b.with-alpha(0.55 * root.strength);
+    }
+    if VizHalo.bars != "": Path {
+        width: root.width;
+        height: root.height;
+        viewbox-width: 1000;
+        viewbox-height: 1000;
+        commands: VizHalo.bars;
+        fill: @linear-gradient(0deg, VizLook.a.with-alpha(root.strength) 0%, VizLook.b.with-alpha(root.strength) 100%);
+    }
+    // (the cover: just inside the circle the bars start from, corners rounded, as Ring's)
+    Rectangle {
+        width: root.width * 0.5 * VizHalo.scale * 0.74;
+        height: self.width;
+        x: (root.width - self.width) / 2 + root.width * VizHalo.dx / 1000;
+        y: (root.height - self.height) / 2 + root.height * VizHalo.dy / 1000;
+        border-radius: self.width * 0.08;
+        clip: true;
+        background: Theme.panel;
+        Image { source: root.art; width: parent.width; height: parent.height; image-fit: cover; }
+    }
+}
+
+/// The visualiser's colours: your app's (or the cover's, with its colours on), or a palette of its own; a is the
+/// bass's end, b the highs'
+export global VizLook {
+    in-out property <string> palette: "theme";
+    out property <color> a: root.palette == "neon" ? #ff3cac : root.palette == "phosphor" ? #7dff8a : root.palette == "sunset" ? #ffb347 : root.palette == "ice" ? #a6f0ff : root.palette == "mono" ? #ffffff : Theme.accent;
+    out property <color> b: root.palette == "neon" ? #2b86ff : root.palette == "phosphor" ? #10a35a : root.palette == "sunset" ? #ff4f7b : root.palette == "ice" ? #5b6cff : root.palette == "mono" ? #8c95a8 : Theme.accent-2;
+}
+
 component VizView inherits Rectangle {
     in property <string> style;
     in property <[float]> bands;
@@ -1159,7 +1211,7 @@ component VizView inherits Rectangle {
             animate height { duration: root.glide; easing: ease-out; }
             y: root.mirror ? (root.height - self.height) / 2 : root.height - self.height;
             border-radius: min(self.width, self.height) / 2;
-            background: Theme.accent.mix(Theme.accent-2, 1 - k / max(1, root.bands.length - 1)).with-alpha(root.strength);
+            background: VizLook.a.mix(VizLook.b, 1 - k / max(1, root.bands.length - 1)).with-alpha(root.strength);
         }
     }
     if root.style == "peaks": Rectangle {
@@ -1186,30 +1238,54 @@ component VizView inherits Rectangle {
                 height: parent.seg * 0.7;
                 border-radius: 1.5px;
                 property <bool> lit: (n + 0.5) / 12 <= v;
-                background: Theme.accent.mix(Theme.accent-2, 1 - n / 11).with-alpha(self.lit ? root.strength : 0.08 * root.strength);
+                background: VizLook.a.mix(VizLook.b, 1 - n / 11).with-alpha(self.lit ? root.strength : 0.08 * root.strength);
                 animate background { duration: Theme.motion ? 120ms : 0ms; }
+            }
+        }
+    }
+    // Dots: a grid, a column a band, each dot lit up to its level (the lit ones fuller, the rest faint)
+    if root.style == "dots": dg := Rectangle {
+        property <int> rows: max(4, min(16, round(root.height / 9px)));
+        for v[k] in root.bands: Rectangle {
+            property <length> step: root.width / max(1, root.bands.length);
+            x: k * self.step;
+            width: self.step;
+            for n in parent.rows: Rectangle {
+                property <length> seg: root.height / dg.rows;
+                property <bool> lit: (n + 0.5) / dg.rows <= v;
+                width: min(parent.width, self.seg) * (self.lit ? 0.62 : 0.34);
+                height: self.width;
+                x: (parent.width - self.width) / 2;
+                y: root.height - (n + 0.5) * self.seg - self.height / 2;
+                border-radius: self.width / 2;
+                background: VizLook.a.mix(VizLook.b, 1 - n / max(1, dg.rows - 1)).with-alpha(self.lit ? root.strength : 0.1 * root.strength);
+                animate background, width { duration: Theme.motion ? 120ms : 0ms; }
             }
         }
     }
     // Wave: one smooth line through the bands, the area under it faint (until the app's sent its paths: a dot
     // each step)
     if root.style == "wave" && VizPaths.line != "": Rectangle {
+        // (stretched to the box: a path otherwise keeps its own shape)
         Path {
             width: root.width;
             height: root.height;
+            fit: fill;
             viewbox-width: 1000;
             viewbox-height: 1000;
             commands: VizPaths.area;
-            fill: @linear-gradient(180deg, Theme.accent-2.with-alpha(0.32 * root.strength) 0%, Theme.accent.with-alpha(0.04 * root.strength) 100%);
+            fill: @linear-gradient(180deg, VizLook.b.with-alpha(0.32 * root.strength) 0%, VizLook.a.with-alpha(0.04 * root.strength) 100%);
         }
+        // (stretched to the box: a path otherwise keeps its own shape)
         Path {
             width: root.width;
             height: root.height;
+            fit: fill;
             viewbox-width: 1000;
             viewbox-height: 1000;
             commands: VizPaths.line;
             fill: transparent;
-            stroke: @linear-gradient(90deg, Theme.accent.with-alpha(root.strength) 0%, Theme.accent-2.with-alpha(root.strength) 100%);
+            stroke: @linear-gradient(90deg, VizLook.a.with-alpha(root.strength) 0%, VizLook.b.with-alpha(root.strength) 100%);
             stroke-width: max(2.5px, root.height / 40);
         }
     }
@@ -1222,13 +1298,13 @@ component VizView inherits Rectangle {
             animate y { duration: root.glide; easing: ease-out; }
             height: self.width;
             border-radius: self.width / 2;
-            background: Theme.accent.mix(Theme.accent-2, 1 - k / max(1, root.curve.length - 1)).with-alpha(root.strength);
+            background: VizLook.a.mix(VizLook.b, 1 - k / max(1, root.curve.length - 1)).with-alpha(root.strength);
             // (the fill under the line, faint)
             Rectangle {
                 y: parent.height / 2;
                 height: max(0px, root.height - parent.y - parent.height / 2);
                 width: parent.width;
-                background: @linear-gradient(180deg, Theme.accent.mix(Theme.accent-2, 1 - k / max(1, root.curve.length - 1)).with-alpha(0.28 * root.strength) 0%, transparent 100%);
+                background: @linear-gradient(180deg, VizLook.a.mix(VizLook.b, 1 - k / max(1, root.curve.length - 1)).with-alpha(0.28 * root.strength) 0%, transparent 100%);
             }
         }
     }
@@ -1238,7 +1314,7 @@ component VizView inherits Rectangle {
             property <length> step: root.width / max(1, root.bands.length * 2);
             property <length> h: max(2px, root.height * v);
             animate h { duration: root.glide; easing: ease-out; }
-            property <color> c: Theme.accent.mix(Theme.accent-2, 1 - k / max(1, root.bands.length - 1)).with-alpha(root.strength);
+            property <color> c: VizLook.a.mix(VizLook.b, 1 - k / max(1, root.bands.length - 1)).with-alpha(root.strength);
             Rectangle { x: root.width / 2 + k * parent.step + parent.step * 0.15; width: parent.step * 0.7; height: parent.h; y: (root.height - self.height) / 2; border-radius: min(self.width, self.height) / 2; background: parent.c; }
             Rectangle { x: root.width / 2 - (k + 1) * parent.step + parent.step * 0.15; width: parent.step * 0.7; height: parent.h; y: (root.height - self.height) / 2; border-radius: min(self.width, self.height) / 2; background: parent.c; }
         }
@@ -1262,8 +1338,8 @@ component VizRing inherits Rectangle {
         viewbox-height: 1000;
         commands: p.d;
         fill-rule: evenodd;
-        fill: @linear-gradient(0deg, Theme.accent.with-alpha(root.strength) 0%, Theme.accent-2.with-alpha(root.strength) 100%);
-        stroke: @linear-gradient(0deg, Theme.accent.with-alpha(root.strength * 0.55) 0%, Theme.accent-2.with-alpha(root.strength * 0.55) 100%);
+        fill: @linear-gradient(0deg, VizLook.a.with-alpha(root.strength) 0%, VizLook.b.with-alpha(root.strength) 100%);
+        stroke: @linear-gradient(0deg, VizLook.a.with-alpha(root.strength * 0.55) 0%, VizLook.b.with-alpha(root.strength * 0.55) 100%);
         stroke-width: 1.2px;
     }
 }
@@ -3098,7 +3174,7 @@ component SuitePreview inherits Rectangle {
     in property <bool> gif;
     // (Emote Rain's spot: all, bl, br, tl, tr, b, c, custom)
     in property <string> spot;
-    height: root.which == "raid" || root.which == "wheel" || root.which == "emoterain" ? 220px : root.which == "goals" || root.which == "leaderboard" ? 200px : 130px;
+    height: root.which == "raid" || root.which == "wheel" || root.which == "emoterain" || root.which == "credits" ? 220px : root.which == "goals" || root.which == "leaderboard" ? 200px : 130px;
     border-radius: 14px;
     border-width: 1px;
     border-color: Theme.line;
@@ -3115,6 +3191,27 @@ component SuitePreview inherits Rectangle {
     property <color> ink: root.light ? (root.t == "y2k" ? #2b1b40 : root.t == "pastel" ? #3a2a4a : #111111) : #ffffff;
     // (the goals' bars filling, again and again)
     property <float> fill: Theme.motion ? mod(animation-tick() / 1ms, 6000) / 6000 : 0.6;
+    // (the credits: rolling up, over and over, with no panel of their own)
+    if root.which == "credits": Rectangle {
+        y: 26px;
+        height: parent.height - 30px;
+        clip: true;
+        property <float> roll: Theme.motion ? mod(animation-tick() / 1ms, 9000) / 9000 : 0.25;
+        VerticalLayout {
+            y: parent.height - self.preferred-height * 0 - (parent.height + 300px) * parent.roll;
+            width: parent.width;
+            spacing: 4px;
+            Text { text: "Thanks for watching!"; color: root.c1; font-size: 20px; font-weight: 800; horizontal-alignment: center; }
+            Rectangle { height: 14px; }
+            for part in [{ h: "FOLLOWERS", n: "PixelPanda · Nova · quietcat" }, { h: "SUBSCRIBERS", n: "RaidLeader · Zed" }, { h: "RAIDERS", n: "TestRaider" }, { h: "CHATTERS", n: "kickfan_92 · lurker_lou · ModMaya" }, { h: "SONGS PLAYED", n: "A Song You Love" }]: VerticalLayout {
+                spacing: 2px;
+                padding-bottom: 12px;
+                Text { text: part.h; color: root.c2; font-size: 10px; letter-spacing: 2px; font-weight: 700; horizontal-alignment: center; }
+                Text { text: part.n; color: #ffffff; font-size: 13px; horizontal-alignment: center; }
+            }
+            Text { text: "See you next stream!"; color: #ffffff; font-size: 15px; font-weight: 800; horizontal-alignment: center; }
+        }
+    }
     // (the wheel: turning; emote rain: falling, with no panel of its own)
     if root.which == "wheel": Rectangle {
         width: 170px;
@@ -3190,7 +3287,7 @@ component SuitePreview inherits Rectangle {
         Text { text: "GIF"; color: #ffffff; font-size: 13px; font-weight: 900; }
     }
     pan := Rectangle {
-        visible: root.which != "wheel" && root.which != "emoterain";
+        visible: root.which != "wheel" && root.which != "emoterain" && root.which != "credits";
         width: root.which == "goals" ? min(parent.width - 40px, 420px) : root.which == "raid" ? min(parent.width - 40px, 380px) : min(parent.width - 40px, 360px);
         height: inner.preferred-height;
         x: (parent.width - self.width) / 2;
@@ -4659,7 +4756,8 @@ CenterToggle { checked: Wid.on("hud", Wid.rev); toggled => { root.act("woff:" + 
                     [{ n: "Leaderboard", k: "leaderboard", p: "/leaderboard", s: "leaderboard", i: Icons.coins },
                         { n: "Emote Rain", k: "emotes", p: "/emotes", s: "emoterain", i: Icons.chat },
                         { n: "Name That Tune", k: "tune", p: "/tune", s: "tune", i: Icons.lyrics }],
-                    [{ n: "Sponsor Plug", k: "sponsors", p: "/sponsors", s: "sponsors", i: Icons.link }],
+                    [{ n: "Sponsor Plug", k: "sponsors", p: "/sponsors", s: "sponsors", i: Icons.link },
+                        { n: "Stream Credits", k: "credits", p: "/credits", s: "credits", i: Icons.star }],
                   ]: HorizontalLayout {
                     spacing: 8px;
                     for w[wi] in row: Rectangle {
@@ -4822,6 +4920,13 @@ export component AppWindow inherits Window {
     in property <image> next-art;
     in property <[float]> now-wave;
     in property <image> now-art-blur;
+    /// a GPU scene's newest frame (the style one of them), and its name
+    in property <image> viz-gpu;
+    in property <bool> viz-scene;
+    in property <string> viz-scene-name;
+    /// full screen: the song's details shown (its title, artist and album), kept
+    in-out property <bool> viz-full-info: true;
+    callback viz-info(bool);
     callback now-art-shown();
     changed now-art => { root.now-art-shown(); }
     // Sidebar: the player in the sidebar's foot (a narrow window, or the sidebar collapsed: the bar as usual)
@@ -4952,7 +5057,7 @@ export component AppWindow inherits Window {
     // Now Playing's visualiser: its style (off, bars, mirror, glow), and its 32 bands, 0 to 1
     in property <string> viz-style: "off";
     // (the style where there's no cover to go round, as in the player's gaps: Ring as Centre)
-    property <string> viz-flat: root.viz-style == "ring" ? "centre" : root.viz-style;
+    property <string> viz-flat: root.viz-style == "ring" || root.viz-style == "halo" || root.viz-scene ? "centre" : root.viz-style;
     // (the Ring's outline, each frame, while it's the style)
     in property <[RingPiece]> viz-ring;
     // a Seamless Mix under way: its crossfader (Now Playing, the player, the taskbar widget)
@@ -4974,6 +5079,7 @@ export component AppWindow inherits Window {
     in-out property <bool> viz-game-pause: true;
     in-out property <bool> viz-full;
     callback viz-pick(string);
+    callback viz-palette(string);
     callback viz-place(string, bool);
     callback viz-cycle();
     in property <string> now-album;
@@ -7175,12 +7281,36 @@ export component AppWindow inherits Window {
                                         HorizontalLayout {
                                             spacing: 6px;
                                             alignment: start;
-                                            for v in [{ id: "off", n: "Off", t: "No visualiser" }, { id: "bars", n: "Bars", t: "Bars" }, { id: "mirror", n: "Mirror", t: "Bars from the middle" }, { id: "peaks", n: "Peaks", t: "Bars with their tops held" }, { id: "blocks", n: "Blocks", t: "An LED meter" }, { id: "wave", n: "Wave", t: "A smooth line" }, { id: "centre", n: "Centre", t: "The bass in the middle" }, { id: "glow", n: "Glow", t: "A glow round the cover" }, { id: "ring", n: "Ring", t: "Each frequency standing out round the cover" }]: Rectangle {
+                                            for v in [{ id: "off", n: "Off", t: "No visualiser" }, { id: "bars", n: "Bars", t: "Bars" }, { id: "mirror", n: "Mirror", t: "Bars from the middle" }, { id: "peaks", n: "Peaks", t: "Bars with their tops held" }, { id: "blocks", n: "Blocks", t: "An LED meter" }, { id: "dots", n: "Dots", t: "A grid of dots" }, { id: "wave", n: "Wave", t: "A smooth line" }, { id: "centre", n: "Centre", t: "The bass in the middle" }, { id: "glow", n: "Glow", t: "A glow round the cover" }, { id: "ring", n: "Ring", t: "Each frequency standing out round the cover" }, { id: "halo", n: "Halo", t: "Bars round the cover, which pulses with the beat" }]: Rectangle {
                                                 width: vc.width;
                                                 height: vc.height;
                                                 vc := Chip { label: v.n; on: root.viz-style == v.id; clicked => { root.viz-pick(v.id); } }
                                                 vca := TouchArea { clicked => { root.viz-pick(v.id); } }
                                                 TipSpot { tip: v.t; hover: vca.has-hover; }
+                                            }
+                                        }
+                                        if root.gpu-on: HorizontalLayout {
+                                            spacing: 6px;
+                                            alignment: start;
+                                            Text { text: "GPU scenes (WIP)"; color: Theme.muted; font-size: 12px; vertical-alignment: center; width: 64px; wrap: word-wrap; }
+                                            for v in [{ id: "smoke", n: "Smoke", t: "The cover drifting as smoke" }, { id: "depths", n: "Depths", t: "A flight through a fractal" }, { id: "swarm", n: "Swarm", t: "Points that scatter on hits and gather again" }, { id: "ink", n: "Ink", t: "Marbled ink, stirred by the kicks" }, { id: "phosphor", n: "Phosphor", t: "Glowing scope lines from the left and right" }]: Rectangle {
+                                                width: gsc.width;
+                                                height: gsc.height;
+                                                gsc := Chip { label: v.n; on: root.viz-style == v.id; clicked => { root.viz-pick(v.id); } }
+                                                gsa := TouchArea { clicked => { root.viz-pick(v.id); } }
+                                                TipSpot { tip: v.t; hover: gsa.has-hover; }
+                                            }
+                                        }
+                                        if root.gpu-on: Text { text: "The GPU scenes are still being built, so they may change, and some may not look right yet."; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
+                                        if !root.gpu-on: Text { text: "Turn on Hardware Acceleration (below) for the GPU scenes: Smoke, Depths, Swarm, Ink and Phosphor. They're still being built (WIP)."; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
+                                        HorizontalLayout {
+                                            spacing: 6px;
+                                            alignment: start;
+                                            Text { text: "Colours"; color: Theme.muted; font-size: 12px; vertical-alignment: center; width: 64px; }
+                                            for c in [{ id: "theme", n: "Your Colours", a: Theme.accent, b: Theme.accent-2 }, { id: "neon", n: "Neon", a: #ff3cac, b: #2b86ff }, { id: "phosphor", n: "Phosphor", a: #7dff8a, b: #10a35a }, { id: "sunset", n: "Sunset", a: #ffb347, b: #ff4f7b }, { id: "ice", n: "Ice", a: #a6f0ff, b: #5b6cff }, { id: "mono", n: "Mono", a: #ffffff, b: #8c95a8 }]: HorizontalLayout {
+                                                spacing: 6px;
+                                                VerticalLayout { alignment: center; Rectangle { width: 14px; height: 14px; border-radius: 7px; background: @linear-gradient(135deg, c.a 0%, c.b 100%); } }
+                                                Chip { label: c.n; on: VizLook.palette == c.id; clicked => { root.viz-palette(c.id); } }
                                             }
                                         }
                                         GroupLine { }
@@ -7680,7 +7810,7 @@ export component AppWindow inherits Window {
                             if root.now-title != "": HorizontalLayout {
                                 alignment: start;
                                 spacing: 6px;
-                                Pill { label: "Visualiser: " + (root.viz-style == "bars" ? "Bars" : root.viz-style == "mirror" ? "Mirror" : root.viz-style == "peaks" ? "Peaks" : root.viz-style == "blocks" ? "Blocks" : root.viz-style == "wave" ? "Wave" : root.viz-style == "centre" ? "Centre" : root.viz-style == "glow" ? "Glow" : root.viz-style == "ring" ? "Ring" : "Off"); on: root.viz-style != "off"; clicked => { root.viz-cycle(); } }
+                                Pill { label: "Visualiser: " + (root.viz-scene ? root.viz-scene-name : root.viz-style == "bars" ? "Bars" : root.viz-style == "mirror" ? "Mirror" : root.viz-style == "peaks" ? "Peaks" : root.viz-style == "blocks" ? "Blocks" : root.viz-style == "dots" ? "Dots" : root.viz-style == "wave" ? "Wave" : root.viz-style == "centre" ? "Centre" : root.viz-style == "glow" ? "Glow" : root.viz-style == "ring" ? "Ring" : root.viz-style == "halo" ? "Halo" : "Off"); on: root.viz-style != "off"; clicked => { root.viz-cycle(); } }
                                 Pill { label: "Full Screen"; clicked => { root.viz-full = true; root.viz-place("full", true); } }
                             }
                             if root.xf-on: Crossfade { from-art: root.xf-from-art; to-art: root.xf-to-art; frac: root.xf-frac; label: root.xf-label; }
@@ -7702,12 +7832,16 @@ export component AppWindow inherits Window {
                                     background: Theme.accent.mix(Theme.accent-2, 1 - parent.bass).with-alpha((0.05 + 0.13 * parent.bass) * (13 - r) / 24);
                                 }
                                 property <bool> ring: root.viz-now && root.viz-style == "ring";
+                                property <bool> halo: root.viz-now && root.viz-style == "halo";
+                                property <bool> scene: root.viz-now && root.viz-scene;
+                                if self.scene: Rectangle { border-radius: 14px; clip: true; background: #000000; Image { source: root.viz-gpu; width: parent.width; height: parent.height; image-fit: cover; } }
                                 if self.ring: VizRing { width: parent.width; height: parent.height; pieces: root.viz-ring; }
+                                if self.halo: VizHaloView { width: parent.width; height: parent.height; art: root.now-art-big; }
                                 // (0.46: viz::RING_COVER)
-                                BadgedCover { art: root.now-art-big; initial: root.now-title; plat: root.now-plat; badge: parent.ring ? 36px : 52px; corner: parent.ring ? 10px : 14px; width: parent.ring ? parent.width * 0.46 : parent.width; height: self.width; x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2; }
+                                BadgedCover { visible: !parent.halo && !parent.scene; art: root.now-art-big; initial: root.now-title; plat: root.now-plat; badge: parent.ring ? 36px : 52px; corner: parent.ring ? 10px : 14px; width: parent.ring ? parent.width * 0.46 : parent.width; height: self.width; x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2; }
                             }
                             // (the sound's bands under the cover, low to high: Bars, Mirror or Peaks)
-                            if root.viz-now && root.viz-style != "off" && root.viz-style != "glow" && (root.viz-style != "ring" || npl.slim): VizView {
+                            if root.viz-now && root.viz-style != "off" && root.viz-style != "glow" && ((root.viz-style != "ring" && root.viz-style != "halo" && !root.viz-scene) || npl.slim): VizView {
                                 height: 46px;
                                 width: npl.slim ? parent.width : parent.side;
                                 style: root.viz-flat;
@@ -9853,11 +9987,17 @@ export component AppWindow inherits Window {
         width: root.width;
         height: root.height;
         background: Theme.bg;
-        Image { source: root.now-art-big; width: parent.width; height: parent.height; image-fit: cover; opacity: 0.18; }
-        Rectangle { background: @linear-gradient(180deg, Theme.bg.with-alpha(0.55) 0%, Theme.bg.with-alpha(0.92) 100%); }
+        if root.viz-style != "halo": Image { source: root.now-art-big; width: parent.width; height: parent.height; image-fit: cover; opacity: 0.18; }
+        // (Halo: the cover, blurred, filling it behind)
+        if root.viz-style == "halo": Image { source: root.now-art-blur; width: parent.width; height: parent.height; image-fit: fill; opacity: 0.55; }
+        if !root.viz-scene: Rectangle { background: @linear-gradient(180deg, Theme.bg.with-alpha(0.55) 0%, Theme.bg.with-alpha(0.92) 100%); }
+        // (a GPU scene: the whole of it, behind; the details over it, shaded a little to read)
+        if root.viz-scene: Image { source: root.viz-gpu; width: parent.width; height: parent.height; image-fit: cover; }
+        if root.viz-scene && root.viz-full-info: Rectangle { background: @linear-gradient(180deg, #00000000 40%, #00000090 100%); }
         TouchArea { double-clicked => { root.viz-full = false; root.viz-place("full", false); } }
         property <length> side: min(root.width * 0.34, root.height * 0.42);
-        Rectangle {
+        // (the cover: with a scene, only with the details)
+        if !root.viz-scene || root.viz-full-info: Rectangle {
             x: (parent.width - parent.side) / 2;
             y: parent.height * 0.12;
             width: parent.side;
@@ -9873,8 +10013,9 @@ export component AppWindow inherits Window {
                 background: Theme.accent.mix(Theme.accent-2, 1 - root.viz-level).with-alpha((0.05 + 0.13 * root.viz-level) * (13 - r) / 24);
             }
             if root.viz-style == "ring": VizRing { width: parent.width; height: parent.height; pieces: root.viz-ring; }
+            if root.viz-style == "halo": VizHaloView { width: parent.width; height: parent.height; art: root.now-art-big; }
             // (Ring: the cover in the middle of the box, the circle round it; 0.46: viz::RING_COVER)
-            Rectangle {
+            if root.viz-style != "halo": Rectangle {
                 width: root.viz-style == "ring" ? parent.width * 0.46 : parent.width;
                 height: self.width;
                 x: (parent.width - self.width) / 2;
@@ -9884,15 +10025,16 @@ export component AppWindow inherits Window {
                 Image { source: root.now-art-big; width: parent.width; height: parent.height; image-fit: cover; }
             }
         }
-        VerticalLayout {
+        if root.viz-full-info: VerticalLayout {
             y: parent.height * 0.12 + parent.side + 28px;
             width: parent.width;
-            height: 80px;
+            height: 100px;
             spacing: 4px;
             Text { text: root.now-title; color: Theme.text; font-size: 30px; font-weight: 800; horizontal-alignment: center; overflow: elide; }
             Text { text: root.now-artist; color: Theme.accent; font-size: 18px; font-weight: 600; horizontal-alignment: center; overflow: elide; }
+            if root.now-album != "": Text { text: root.now-album; color: Theme.muted; font-size: 14px; horizontal-alignment: center; overflow: elide; }
         }
-        if root.viz-style != "glow" && root.viz-style != "ring" && root.viz-style != "off": VizView {
+        if root.viz-style != "glow" && root.viz-style != "ring" && root.viz-style != "halo" && !root.viz-scene && root.viz-style != "off": VizView {
             x: parent.width * 0.06;
             width: parent.width * 0.88;
             height: parent.height * 0.24;
@@ -9905,6 +10047,8 @@ export component AppWindow inherits Window {
         }
         if root.viz-style == "off": Text { y: parent.height - 80px; width: parent.width; horizontal-alignment: center; text: "Pick a visualiser style in Settings > App & Look."; color: Theme.muted; }
         RoundButton { x: parent.width - self.width - 20px; y: 20px; tip: "Close the visualiser"; d: Icons.close; clicked => { root.viz-full = false; root.viz-place("full", false); } }
+        // (the song's details: shown or hidden, kept)
+        RoundButton { x: parent.width - 2 * self.width - 32px; y: 20px; tip: root.viz-full-info ? "Hide the song's details" : "Show the song's details"; d: Icons.info; clicked => { root.viz-full-info = !root.viz-full-info; root.viz-info(root.viz-full-info); } }
         FocusScope {
             width: 0; height: 0;
             init => { self.focus(); }

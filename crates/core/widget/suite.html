@@ -9,6 +9,7 @@
     /latest-follow  who followed last
     /latest-sub     who subscribed last
     /raid           a raid's shoutout (and one of the raider's clips, if it's set to)
+    /credits        the stream's credits, rolled (see-through till then)
   Set in the app: Settings > Streaming > Suite. It reads /now.json's "suite", which the Suite sends.
 -->
 <title>OmniPulse Suite</title>
@@ -55,6 +56,16 @@
   #wheel.light .disc b { color: #2a1a3a; text-shadow: none; }
   #wheel { transition: opacity 0.6s, transform 0.6s; }
   #wheel.idle { opacity: 0; transform: scale(0.85); }
+  /* the credits: the size of the canvas, see-through till they roll, up from below and off the top */
+  #credits { position: absolute; inset: 0; overflow: hidden; text-align: center; font-size: 2.6vh; text-shadow: 0 0.15em 0.5em rgba(0, 0, 0, 0.7); }
+  #credits .roll { position: absolute; left: 0; right: 0; top: 100%; padding: 0 8vw; will-change: transform; }
+  #credits h1 { font-size: 6vh; font-weight: 800; margin: 0 0 9vh; background: linear-gradient(90deg, var(--c1), var(--c2)); -webkit-background-clip: text; background-clip: text; color: transparent; text-shadow: none; }
+  #credits h2 { font-size: 2.2vh; letter-spacing: 0.3em; text-transform: uppercase; margin: 0 0 2vh; color: var(--c1); }
+  #credits .part { margin-bottom: 8vh; }
+  #credits .names { columns: 3 16vw; column-gap: 4vw; }
+  #credits .names div { padding: 0.35vh 0; break-inside: avoid; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #credits .end { font-size: 4vh; font-weight: 800; margin-top: 4vh; }
+  body.t-comic #credits, body.t-pastel #credits, body.t-y2k #credits, body.t-sticker #credits { color: #fff; }
   #board { width: 92%; }
   #board .ln { display: flex; gap: 0.7rem; align-items: center; padding: 0.3rem 0; font-size: 1.05rem; }
   #board .rk { width: 1.6rem; height: 1.6rem; border-radius: 50%; background: linear-gradient(135deg, var(--c1), var(--c2)); display: grid; place-items: center; font-weight: 800; font-size: 0.85rem; flex: none; }
@@ -596,6 +607,32 @@
       wheelAt = w.at;
     }
   }
+  // (the credits: rolled when they're asked for (rollAt), at the speed set; once, or again and again)
+  let creditsAt = -1, creditsSig = "";
+  function credits() {
+    const c = suite.credits || {};
+    let box = $("credits");
+    if (!box) { box = document.createElement("div"); box.id = "credits"; document.body.appendChild(box); }
+    const sig = JSON.stringify([c.title, c.end, c.parts]);
+    if (c.rollAt === creditsAt && sig === creditsSig && box.firstChild) return;
+    const fresh = c.rollAt !== creditsAt;
+    creditsAt = c.rollAt; creditsSig = sig;
+    // (only when asked for: nothing on screen till then)
+    if (!c.rollAt && !PREVIEW) { box.innerHTML = ""; return; }
+    if (!fresh && box.firstChild) return;
+    const parts = (c.parts || []).map((p) => '<div class="part"><h2>' + esc(p.name) + '</h2><div class="names">' + p.list.map((n) => "<div>" + esc(n) + "</div>").join("") + "</div></div>").join("");
+    box.innerHTML = '<div class="roll"><h1>' + esc(c.title || "") + "</h1>" + (parts || '<div class="part"><h2>Thanks</h2><div>To everyone watching</div></div>') + (c.end ? '<div class="end">' + esc(c.end) + "</div>" : "") + "</div>";
+    const roll = box.firstChild, run = () => {
+      const h = roll.offsetHeight + innerHeight, px = { slow: 0.045, normal: 0.075, fast: 0.12 }[c.speed] || 0.075;
+      const secs = h / (innerHeight * px);
+      roll.style.transition = "none"; roll.style.transform = "translateY(0)";
+      void roll.offsetHeight;
+      roll.style.transition = "transform " + secs + "s linear"; roll.style.transform = "translateY(" + -h + "px)";
+      clearTimeout(roll.t);
+      roll.t = setTimeout(() => { if (c.loop || PREVIEW) run(); else box.innerHTML = ""; }, secs * 1000 + 300);
+    };
+    run();
+  }
   function leaderboard() {
     const b = suite.leaderboard || {};
     let box = $("board");
@@ -718,6 +755,7 @@
     else if (PATH === "/leaderboard") { fit(420, 380); leaderboard(); }
     else if (PATH === "/tune") { fit(520, 180); tune(); }
     else if (PATH === "/emotes") emoterain();
+    else if (PATH === "/credits") credits();
     // (the GIF on the widget shown now)
     const on = [...$("stage").children].filter((e) => !e.classList.contains("out") && !e.classList.contains("rain")).pop();
     if (on) on.classList.toggle("gifme", !!gif);

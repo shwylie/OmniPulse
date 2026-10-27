@@ -39,7 +39,7 @@ thread_local! {
 /// A setting that changes only how widgets look or behave: taken by the running Suite as it's saved, no
 /// restart. Anything to do with an account, a connection, a sign-in, commands or actions isn't
 pub fn live_key(k: &str) -> bool {
-    const LIVE: [&str; 23] = ["goal", "timer", "suite", "panel", "cam", "hud", "rain", "wheel", "hype", "skip", "sponsor", "gif", "tune", "leader", "latest", "raid", "theme", "ab", "train", "widgetsOff", "social", "fun", "voteskip"];
+    const LIVE: [&str; 24] = ["goal", "timer", "suite", "panel", "cam", "hud", "rain", "wheel", "hype", "skip", "sponsor", "gif", "tune", "leader", "latest", "raid", "theme", "ab", "train", "widgetsOff", "social", "fun", "voteskip", "credits"];
     const NEVER: [&str; 12] = ["token", "login", "client", "secret", "relay", "refresh", "kick", "userid", "channel", "botname", "obs", "url"];
     let low = k.to_lowercase();
     LIVE.iter().any(|p| k.starts_with(p)) && !NEVER.iter().any(|n| low.contains(n))
@@ -248,7 +248,7 @@ pub fn sheet(id: &str, cur: &Map<String, Value>) -> (String, Vec<Field>) {
     }
     // (a widget's page, the same order on each: In OBS (its address, and its Try buttons) at the top, under
     // its preview; then its own settings; then the look every widget shares; then its Timing and Motion)
-    if matches!(id, "goals" | "timer" | "latest" | "raid" | "hype" | "voteskip" | "wheel" | "leaderboard" | "tune" | "emoterain") {
+    if matches!(id, "goals" | "timer" | "latest" | "raid" | "hype" | "voteskip" | "wheel" | "leaderboard" | "tune" | "emoterain" | "credits") {
         let obs = |x: &Field| x.kind == "addr" || (x.kind == "link" && x.label.starts_with("Try"));
         let (mut top, rest): (Vec<Field>, Vec<Field>) = std::mem::take(&mut v).into_iter().partition(|x| obs(x));
         // (its address first, then its Try buttons)
@@ -748,6 +748,26 @@ fn sheet_of(id: &str, cur: &Map<String, Value>) -> (String, Vec<Field>) {
             v.push(addr("/wheel", "About 1040 × 1120."));
             v
         }),
+        "credits" => {
+            let mut v = vec![
+                f("suiteprev", "", "", "", "credits", &theme_of(cur)),
+                theme_field(cur),
+                f("note", "", "Rolls a thank-you to everyone who followed, subscribed, gifted, cheered, raided, donated or chatted since you went live, and the songs you played. Roll it at the end of your stream.", "", "", ""),
+                addr("/credits", "Add it as a Browser source the size of your canvas, like 1920 × 1080. It's see-through until it rolls."),
+                f("link", "", "Try it", "Rolls them now. With no one in them yet, it uses made-up names.", "", "call:suiteTest:credits"),
+                f("text", "creditsTitle", "Title", "Shown first.", s(cur, "creditsTitle"), "Thanks for watching!"),
+                f("text", "creditsEnd", "Last line", "Shown at the end. Leave it empty for none.", if cur.get("creditsEnd").is_none() { "See you next stream!" } else { s(cur, "creditsEnd") }, ""),
+                f("chips", "creditsSpeed", "Speed", "", if s(cur, "creditsSpeed").is_empty() { "normal" } else { s(cur, "creditsSpeed") }, "slow=Slow|normal=Normal|fast=Fast"),
+                f("toggle", "creditsLoop", "Roll again when it ends", "Keeps rolling, for an ending screen.", if on(cur, "creditsLoop", false) { "true" } else { "false" }, ""),
+                f("text", "creditsCommand", "Chat command", "You and your moderators roll the credits with it. So can an action, with the Roll the Credits step.", s(cur, "creditsCommand"), "!credits"),
+                f("head", "", "What they list", "", "", ""),
+            ];
+            for p in ["Followers", "Subscribers", "Gifted Subs", "Cheers", "Raiders", "Donations", "Chatters", "Songs Played"] {
+                let k = format!("credits_{}", p.replace(' ', ""));
+                v.push(f("toggle", &k, p, "", if on(cur, &k, true) { "true" } else { "false" }, ""));
+            }
+            ("Stream Credits".into(), v)
+        }
         "leaderboard" => ("Leaderboard".into(), vec![
             f("suiteprev", "", "", "", "leaderboard", &theme_of(cur)),
             theme_field(cur),

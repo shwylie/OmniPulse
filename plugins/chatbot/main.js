@@ -1146,7 +1146,7 @@ async function step(st, ctx, depth) {
       break;
     }
     case "writefile": await OmniPulse.app.writeFile(f("file").trim().replace(/^"|"$/g, ""), f("text"), st.how === "append"); break;
-    case "credits": await OmniPulse.app.overlay({ text: creditsRoll(f("title")), place: "roll", seconds: Math.min(120, Math.max(5, num(f("seconds")) || 25)) }); break;
+    case "credits": creditsGo(f("title"), Math.min(120, Math.max(5, num(f("seconds")) || 25))); break;
     case "giveenter": {
       if (ctx.user && !entries.some((x) => x.toLowerCase() === ctx.user.toLowerCase())) entries.push(ctx.user);
       break;
@@ -1673,7 +1673,7 @@ function rankOf(user) {
 }
 
 // Who did what since going live, for the credits
-const CREDIT_OF = { follow: "Followers", sub: "Subscribers", resub: "Subscribers", gift: "Gifted Subs", bits: "Cheers", raid: "Raiders", donation: "Donations", charity: "Donations", chat: "Chatters" };
+const CREDIT_OF = { follow: "Followers", sub: "Subscribers", resub: "Subscribers", gift: "Gifted Subs", bits: "Cheers", raid: "Raiders", donation: "Donations", charity: "Donations", chat: "Chatters", song: "Songs Played" };
 function credit(ev, user) {
   const part = CREDIT_OF[ev];
   if (!part || !user) return;
@@ -1682,6 +1682,22 @@ function credit(ev, user) {
 }
 function creditParts() { return Object.values(CREDIT_OF).filter((p, i, a) => a.indexOf(p) === i && credits[p] && credits[p].length); }
 function creditsLine() { return creditParts().map((p) => p + ": " + credits[p].join(", ")).join(" \u{b7} ") || "no one yet"; }
+// (the Credits widget's: each part that's switched on (all are, at first), in order, with its names; when they
+// were last rolled, and how)
+const CREDIT_PARTS = ["Followers", "Subscribers", "Gifted Subs", "Cheers", "Raiders", "Donations", "Chatters", "Songs Played"];
+function creditsWidget() {
+  const x = S(), on = (p) => x["credits_" + p.replace(/\s+/g, "")] !== false;
+  return {
+    title: String(x.creditsTitle || "Thanks for watching!"), end: String(x.creditsEnd === undefined ? "See you next stream!" : x.creditsEnd),
+    parts: CREDIT_PARTS.filter((p) => on(p) && credits[p] && credits[p].length).map((p) => ({ name: p, list: credits[p].slice(0, 400) })),
+    speed: String(x.creditsSpeed || "normal"), loop: yes(x.creditsLoop), rollAt: fun.creditsAt || 0,
+  };
+}
+// (rolled now: the widget's, if it's on; else as an overlay, as the step always did)
+function creditsGo(title, seconds) {
+  if (!widgetsOff().includes("credits")) { fun.creditsAt = Date.now(); suitePush(); return; }
+  OmniPulse.app.overlay({ text: creditsRoll(title), place: "roll", seconds }).catch(() => {});
+}
 function creditsRoll(title) { return [title].concat(creditParts().map((p) => "\n" + p + "\n" + credits[p].join("\n"))).join("\n").trim(); }
 
 function pointsName() { return String(S().pointsName || "points").trim() || "points"; }
@@ -2189,6 +2205,7 @@ function suitePush() {
       voteskip: { on: yes(x.skipOn), votes: fun.votes.size, need: Math.max(1, num(x.skipVotes) || 5), song: fun.song, command: String(x.skipCommand || "!skip") },
       wheel: Object.assign({ prizes: wheelPrizes(), weights: wheelList().map((p) => p.w), command: String(x.wheelCommand || "!spin"), secs: wheelSecs(), colors: String(x.wheelColors || "theme"), hide: yes(x.wheelHide) }, fun.wheel || {}),
       leaderboard: { list: leaders(), name: pointsName() },
+      credits: creditsWidget(),
       tune: fun.tune || null,
       burst: fun.burst,
       rain: { src: String(x.rainSource || "chat"), imgs: String(x.rainImages || "").split(/[|\n]/).map((u) => u.trim()).filter((u) => /^https?:\/\//.test(u)).slice(0, 20), chat: yes(x.rainChat === undefined ? true : x.rainChat),
@@ -2582,6 +2599,11 @@ async function suiteCommand(cmd, args, r, id, platform, user) {
     tuneStart(user, id, platform);
     return true;
   }
+  // (the credits: rolled by you or a moderator)
+  if (cmd === String(x.creditsCommand || "!credits").trim().toLowerCase()) {
+    if (r.mod) creditsGo(String(x.creditsTitle || "Thanks for watching!"), 25);
+    return true;
+  }
   const c = String(S().timerCommand || "!timer").trim().toLowerCase();
   if (!c || cmd !== c) return false;
   if (!r.mod) return true;
@@ -2628,6 +2650,13 @@ function suiteTest(kind) {
   if (kind === "voteskip") { fun.votes.add("test-a"); fun.votes.add("test-b"); suitePush(); return "Two test votes added. The next song clears them."; }
   if (kind === "wheel") { wheelSpin("You", null, "all", true); return "Spinning."; }
   if (kind === "emoterain") { fun.burst++; suitePush(); return "Raining emotes."; }
+  if (kind === "credits") {
+    const made = !creditParts().length;
+    if (made) Object.assign(credits, { Followers: ["PixelPanda", "Nova", "quietcat"], Subscribers: ["RaidLeader", "Zed"], Cheers: ["ModMaya"], Raiders: ["TestRaider"], Chatters: ["kickfan_92", "lurker_lou", "Nova", "PixelPanda"], "Songs Played": ["A Song You Love — Your Favourite Artist"] });
+    fun.creditsAt = Date.now(); suitePush();
+    if (made) setTimeout(() => { for (const k of Object.keys(credits)) delete credits[k]; suitePush(); }, 1500);
+    return made ? "Rolling, with made-up names (no one's in them yet)." : "Rolling the credits.";
+  }
   if (kind === "tune") { if (!fun.title) return "Play a song first."; tuneStart("You", null, "all"); return "A round's started: what's playing is hidden from the Stream Widget."; }
   suitePush();
   return "Sent to the widget.";
@@ -3025,6 +3054,7 @@ OmniPulse.register({
     if (kind === "start") {
       fun.votes.clear();
       fun.song = [d.title, d.artist].filter(Boolean).join(" — ");
+      if (fun.song) credit("song", fun.song);
       // (Name That Tune: the song it's on; a new one mid-round ends it, with the answer)
       if (tune && d.title !== tune.full) tuneEnd(null);
       fun.title = d.title || "";

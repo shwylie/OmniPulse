@@ -11,20 +11,31 @@ const FFT: usize = 4096;
 pub const CURVE: usize = 96;
 pub const BANDS: usize = 32;
 
-struct Ring { buf: Vec<f32>, at: usize, rate: u32 }
+/// (mono for the bands; left and right too, for the GPU scenes)
+struct Ring { buf: Vec<f32>, left: Vec<f32>, right: Vec<f32>, at: usize, rate: u32 }
 
 static SOUND: Mutex<Option<Ring>> = Mutex::new(None);
 /// each band as it's shown (falling slowly from its peaks), and each one's top (held, then falling)
 static SHOWN: Mutex<[f32; BANDS]> = Mutex::new([0.0; BANDS]);
-static PEAKS: Mutex<[(f32, u32); BANDS]> = Mutex::new([(0.0, 0); BANDS]);
+/// (each top, how many frames it's still held, and how fast it's falling)
+static PEAKS: Mutex<[(f32, u32, f32); BANDS]> = Mutex::new([(0.0, 0, 0.0); BANDS]);
+/// the song's own level, in dB: the loudest band of late, risen to at once and let down slowly (an automatic
+/// gain, so a quiet song fills the view as a loud one does)
+static LEVEL: Mutex<f32> = Mutex::new(-30.0);
 
-/// Each band's recent top (for Peaks): held for half a second, then falling
+/// (how much gravity pulls a falling top down, a frame at 30 a second)
+const GRAVITY: f32 = 0.0018;
+
+/// Each band's recent top (for Peaks): held for half a second, then falling, faster as it goes, as if it had
+/// weight
 pub fn peaks(b: &[f32; BANDS]) -> [f32; BANDS] {
     let mut p = PEAKS.lock().unwrap();
     let mut out = [0.0; BANDS];
     for (k, v) in b.iter().enumerate() {
-        let (top, held) = &mut p[k];
-        if *v >= *top { *top = *v; *held = 15; } else if *held > 0 { *held -= 1; } else { *top = (*top - 0.015).max(*v); }
+        let (top, held, fall) = &mut p[k];
+        if *v >= *top { *top = *v; *held = 15; *fall = 0.0; }
+        else if *held > 0 { *held -= 1; }
+        else { *fall += GRAVITY; *top = (*top - *fall).max(*v); if *top <= *v { *fall = 0.0; } }
         out[k] = *top;
     }
     out
@@ -32,12 +43,14 @@ pub fn peaks(b: &[f32; BANDS]) -> [f32; BANDS] {
 
 /// What the engine's tap feeds (its frames, stereo, at `rate`)
 pub fn tap(rate: u32) -> omnipulse_audio::Tap {
-    *SOUND.lock().unwrap() = Some(Ring { buf: vec![0.0; RING], at: 0, rate: rate.max(1) });
+    *SOUND.lock().unwrap() = Some(Ring { buf: vec![0.0; RING], left: vec![0.0; RING], right: vec![0.0; RING], at: 0, rate: rate.max(1) });
     Box::new(move |frames: &[f32]| {
         let Ok(mut g) = SOUND.lock() else { return };
         let Some(r) = g.as_mut() else { return };
         for f in frames.chunks_exact(2) {
             r.buf[r.at] = (f[0] + f[1]) * 0.5;
+            r.left[r.at] = f[0];
+            r.right[r.at] = f[1];
             r.at = (r.at + 1) % RING;
         }
     })
@@ -55,10 +68,12 @@ pub fn level(b: &[f32; BANDS]) -> f32 {
 pub fn stop() {
     *SOUND.lock().unwrap() = None;
     *SHOWN.lock().unwrap() = [0.0; BANDS];
-    *PEAKS.lock().unwrap() = [(0.0, 0); BANDS];
+    *PEAKS.lock().unwrap() = [(0.0, 0, 0.0); BANDS];
+    *LEVEL.lock().unwrap() = -30.0;
     *RING_TOP.lock().unwrap() = 0.08;
     *RING_EASE.lock().unwrap() = [Vec::new(), Vec::new()];
     *RING_BASS.lock().unwrap() = [0.0, 0.0];
+    *HALO.lock().unwrap() = None;
 }
 
 /// The self-test's music (OMNIPULSE_SELFTEST: never heard, only drawn): a beat put straight into the tap's
@@ -77,8 +92,19 @@ pub fn test_feed(t: f32) {
         let hat = ((x * 9_871.0).sin() * (x * 13_331.0).sin()) * (-half * 40.0).exp() * 0.25;
         let pad = (std::f32::consts::TAU * 440.0 * x).sin() * 0.05 + (std::f32::consts::TAU * 2_200.0 * x).sin() * 0.03;
         r.buf[r.at] = kick + bass + hat + pad;
+        r.left[r.at] = kick + bass + hat + pad;
+        r.right[r.at] = kick + bass + hat * 0.6 + pad;
         r.at = (r.at + 1) % RING;
     }
+}
+
+/// The last `n` frames of the sound, left and right (the GPU scenes'), and its rate
+pub fn stereo(n: usize) -> (Vec<f32>, Vec<f32>, u32) {
+    let g = SOUND.lock().unwrap();
+    let Some(r) = g.as_ref() else { return (vec![0.0; n], vec![0.0; n], 48_000) };
+    let n = n.min(RING);
+    let at = |v: &Vec<f32>| (0..n).map(|i| v[(r.at + RING - n + i) % RING]).collect::<Vec<f32>>();
+    (at(&r.left), at(&r.right), r.rate)
 }
 
 /// The bands now: from the sound just sent to the speakers (the tap is fed as it's played), each 0 to 1
@@ -98,17 +124,24 @@ pub fn bands() -> [f32; BANDS] {
     let mut spec = fft.make_output_vec();
     if fft.process(&mut input, &mut spec).is_err() { return [0.0; BANDS]; }
     let hz_per = rate as f32 / FFT as f32;
-    let mut out = [0.0f32; BANDS];
+    let mut db = [0.0f32; BANDS];
     let (lo, hi) = (40.0f32, 16_000.0f32);
-    for (b, o) in out.iter_mut().enumerate() {
+    for (b, o) in db.iter_mut().enumerate() {
         let f0 = lo * (hi / lo).powf(b as f32 / BANDS as f32);
         let f1 = lo * (hi / lo).powf((b + 1) as f32 / BANDS as f32);
         let (k0, k1) = ((f0 / hz_per) as usize, ((f1 / hz_per) as usize).max((f0 / hz_per) as usize + 1));
         let peak = spec[k0.min(spec.len() - 1)..k1.min(spec.len())].iter().map(|c| c.norm()).fold(0.0f32, f32::max);
-        // (as dB, -60 to 0 of a full-scale tone's, read as 0 to 1; the highs lifted a little, as they're quieter)
-        let db = 20.0 * (peak / (FFT as f32 / 4.0)).max(1e-6).log10() + 6.0 * (b as f32 / BANDS as f32);
-        *o = ((db + 60.0) / 60.0).clamp(0.0, 1.0);
+        *o = 20.0 * (peak / (FFT as f32 / 4.0)).max(1e-6).log10() + tilt(f0 * (f1 / f0).sqrt());
     }
+    // (read against the song's own level: its loudest band near the top, 48 dB under it at the foot)
+    let loudest = db.iter().cloned().fold(-120.0f32, f32::max);
+    let level = {
+        let mut l = LEVEL.lock().unwrap();
+        *l = if loudest > *l { loudest } else { (*l - 0.12).max(loudest).max(-42.0) };
+        *l
+    };
+    let mut out = [0.0f32; BANDS];
+    for (o, d) in out.iter_mut().zip(db) { *o = ((d - level + 48.0) / 48.0 * 0.94).clamp(0.0, 1.0); }
     // smoothed: each band a little of its neighbours (no one bar flickering alone), then eased towards
     // where it is now, rising faster than it falls (a meter's ballistics, not a jump each frame)
     let spread: Vec<f32> = (0..BANDS).map(|k| {
@@ -119,6 +152,10 @@ pub fn bands() -> [f32; BANDS] {
     for (s, v) in shown.iter_mut().zip(spread) { *s += (v - *s) * if v > *s { 0.38 } else { 0.14 }; }
     *shown
 }
+
+/// How much a band at `hz` is lifted (dB): music is quieter the higher it goes, so the highs are lifted
+/// (1.5 dB an octave above 250 Hz, as the widest bands' loudest bins already lift them some), to match the lows
+fn tilt(hz: f32) -> f32 { (1.5 * (hz / 250.0).log2()).clamp(-2.0, 9.0) }
 
 /// The Wave's curve: the bands as CURVE points, eased between them (a smooth line, not steps)
 /// The Wave as paths, in a 1000 × 1000 box stretched over the visualiser: its line (a Catmull-Rom curve through
@@ -252,6 +289,72 @@ pub const RING_COVER: f32 = 0.46;
 pub const RING_POINTS: usize = 96;
 /// The Ring's paths: one outline, the cover's circle cut out of it
 pub const RING_PIECES: usize = 1;
+
+/// Halo's state: its particles (each an angle, how far out it is, 0 to 1, and its own speed), its shake (where
+/// the cover's pushed to, in the box's 1000 units), the bass as it's been lately, and its dice
+struct Halo { dots: Vec<(f32, f32, f32)>, shake: (f32, f32), slow: f32, seed: u32 }
+
+static HALO: Mutex<Option<Halo>> = Mutex::new(None);
+
+/// Halo's cover: this much of its box's width, in its middle
+pub const HALO_COVER: f32 = 0.5;
+/// (its particles, and its bars: a band each, both ways round)
+const HALO_DOTS: usize = 72;
+
+/// One frame of Halo, in a 1000-unit square: its bars and its particles as path commands, how much the cover's
+/// grown (1 at rest) and where a hit's pushed it
+pub struct HaloFrame { pub bars: String, pub dots: String, pub scale: f32, pub dx: f32, pub dy: f32 }
+
+pub fn halo(b: &[f32; BANDS]) -> HaloFrame {
+    let mut g = HALO.lock().unwrap();
+    let h = g.get_or_insert_with(|| Halo { dots: Vec::new(), shake: (0.0, 0.0), slow: 0.0, seed: 0x9e37_79b9 });
+    let dice = |h: &mut Halo| { h.seed ^= h.seed << 13; h.seed ^= h.seed >> 17; h.seed ^= h.seed << 5; (h.seed % 10_000) as f32 / 10_000.0 };
+    // (a hit: the bass over its own recent level)
+    let bass = b[..4].iter().sum::<f32>() / 4.0;
+    let punch = ((bass - h.slow) * 2.2).clamp(0.0, 1.0);
+    h.slow += (bass - h.slow) * 0.12;
+    let energy = b.iter().sum::<f32>() / BANDS as f32;
+    // (the cover: grown with the bass; a hard hit pushes it a little one way, and it settles back)
+    let scale = 1.0 + 0.035 * bass + 0.05 * punch;
+    if punch > 0.45 {
+        let a = dice(h) * std::f32::consts::TAU;
+        h.shake = (a.cos() * 9.0 * punch, a.sin() * 9.0 * punch);
+    } else {
+        h.shake = (h.shake.0 * 0.72, h.shake.1 * 0.72);
+    }
+    let r_cover = HALO_COVER * 500.0 * scale;
+    // (the bars: from just clear of the cover, each as long as its band is loud)
+    let n = BANDS * 2;
+    let step = std::f32::consts::TAU / n as f32;
+    let mut bars = String::new();
+    for k in 0..n {
+        // (straight down is the bass, round both sides to the highs at the top)
+        let band = if k < BANDS { k } else { n - 1 - k };
+        let v = b[band];
+        let th = (k as f32 + 0.5) * step;
+        let (r0, r1) = (r_cover + 14.0, r_cover + 18.0 + 205.0 * v);
+        let half = step * 0.28;
+        let pt = |a: f32, r: f32| (500.0 - a.sin() * r + h.shake.0, 500.0 + a.cos() * r + h.shake.1);
+        let (p0, p1, p2, p3) = (pt(th - half, r0), pt(th + half, r0), pt(th + half * 0.8, r1), pt(th - half * 0.8, r1));
+        bars += &format!("M {:.1} {:.1} L {:.1} {:.1} L {:.1} {:.1} L {:.1} {:.1} Z ", p0.0, p0.1, p1.0, p1.1, p2.0, p2.1, p3.0, p3.1);
+    }
+    // (the particles: out from the cover's edge to past the box's corners, faster as it's louder and on a hit;
+    // each a little bigger as it comes out, as if towards you)
+    while h.dots.len() < HALO_DOTS { let (a, d, s) = (dice(h) * std::f32::consts::TAU, dice(h), 0.4 + dice(h)); h.dots.push((a, d, s)); }
+    let push = 0.0025 + 0.012 * energy + 0.03 * punch;
+    let mut dots = String::new();
+    for i in 0..h.dots.len() {
+        let (a, d, s) = h.dots[i];
+        let d = d + push * s;
+        if d > 1.0 { let (na, ns) = (dice(h) * std::f32::consts::TAU, 0.4 + dice(h)); h.dots[i] = (na, 0.0, ns); continue; }
+        h.dots[i].1 = d;
+        let r = r_cover + 20.0 + (720.0 - r_cover) * d;
+        let (x, y) = (500.0 + a.cos() * r, 500.0 + a.sin() * r);
+        let size = 1.5 + 4.5 * d * s;
+        dots += &format!("M {:.1} {:.1} A {size:.1} {size:.1} 0 1 0 {:.1} {:.1} A {size:.1} {size:.1} 0 1 0 {:.1} {:.1} Z ", x - size, y, x + size, y, x - size, y);
+    }
+    HaloFrame { bars, dots, scale, dx: h.shake.0, dy: h.shake.1 }
+}
 
 #[cfg(test)]
 mod tests {
