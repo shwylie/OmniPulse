@@ -13158,6 +13158,14 @@ fn accent_fade(ui: &AppWindow, c1: slint::Color, c2: slint::Color, on: slint::Co
     }));
 }
 
+/// The Custom theme's headings' fonts: each one Windows has, as Slint names it, and as it's shown ("": the
+/// app's own)
+const THEME_FONTS: [(&str, &str); 11] = [
+    ("", "OmniPulse's Own"), ("Segoe UI Variable Display", "Segoe UI Display"), ("Bahnschrift", "Bahnschrift"), ("Georgia", "Georgia"),
+    ("Palatino Linotype", "Palatino"), ("Cambria", "Cambria"), ("Consolas", "Consolas"), ("Cascadia Code", "Cascadia Code"),
+    ("Trebuchet MS", "Trebuchet"), ("Segoe Print", "Segoe Print"), ("Impact", "Impact"),
+];
+
 fn apply_look(shared: &Shared) {
     let a = shared.borrow();
     let Some(ui) = a.ui.upgrade() else { return };
@@ -13167,7 +13175,11 @@ fn apply_look(shared: &Shared) {
     let preset = look::preset(prefs);
     let p = preset.map(|t| t.palette()).unwrap_or_else(|| look::palette(step, hue, strength));
     let t = ui.global::<Theme>();
-    t.set_head_font(preset.map(|t| t.font).unwrap_or("").into());
+    // (a theme's own headings' font; Custom's, the one you picked)
+    let own = prefs["themeFont"].as_str().unwrap_or("");
+    let font = preset.map(|t| t.font).unwrap_or_else(|| THEME_FONTS.iter().find(|f| f.0 == own).map_or("", |f| f.0));
+    t.set_head_font(font.into());
+    ui.set_theme_font_at(THEME_FONTS.iter().position(|f| f.0 == own).unwrap_or(0) as i32);
     // (Performance Mode: no glow or aurora behind things, no motion, below)
     let perf = prefs["perfMode"].as_bool() == Some(true);
     ui.set_perf_on(perf);
@@ -13393,6 +13405,12 @@ fn main() -> Result<(), slint::PlatformError> {
     // Match Loudness for the Spotify songs Spotify plays: its own levelling, at the same target
     { let (on, target) = sound::spotify_norm(&shared.borrow().web.prefs); omnipulse_core::spotify_engine::spe_set_normalisation(on, target); }
     let s = shared.clone();
+    // (the Custom theme's headings' font: the choices, and one picked)
+    ui.set_theme_fonts(ModelRc::from(Rc::new(VecModel::from(THEME_FONTS.iter().map(|f| slint::SharedString::from(f.1)).collect::<Vec<_>>()))));
+    let s2 = shared.clone();
+    ui.on_theme_font_picked(move |k| {
+        if let Some(f) = THEME_FONTS.get(k.max(0) as usize) { set_look_pref(&s2, "themeFont", serde_json::json!(f.0)); }
+    });
     ui.on_look_changed(move |key, v| {
         // the step settings keep to their steps
         let v = if key == "tintHue" { v.round().clamp(0.0, 359.0) } else { v.round() };
