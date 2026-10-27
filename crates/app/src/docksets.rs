@@ -151,9 +151,11 @@ pub fn fields(panel: &str, vals: &Map<String, Value>, port: u64) -> Vec<Value> {
         _ => {
             let plain = vals.get("style").and_then(|v| v.as_str()).unwrap_or("plain") == "plain";
             let mut f = vec![
+                note("In OBS"),
+                info("Address", &format!("{base}/chat"), "Add it as a Browser source. Changes here show there within a few seconds. For another with its own settings, add /2 to the end of the address, then change those in OBS: right-click it, choose Interact, and click its gear."),
                 note("How It Looks"),
                 sel("style", "Theme", "The preview above shows it with made-up chat.", &[(json!("plain"), "Plain"), (json!("bubbles"), "Bubbles"), (json!("glass"), "Glass"), (json!("neon"), "Neon"), (json!("cards"), "Cards"), (json!("terminal"), "Terminal"), (json!("comic"), "Comic"), (json!("minimal"), "Minimal"), (json!("edge"), "Edge Light"), (json!("y2k"), "Y2K Window"), (json!("pastel"), "Pastel"), (json!("pixel"), "Pixel")]),
-                sel("name", "Names", "", &[(json!("beside"), "Beside The Message"), (json!("above"), "Above It")]),
+                sel("name", "Names", "", &[(json!("beside"), "Beside the Message"), (json!("above"), "Above It")]),
                 sel("anim", "How Messages Come In", "", &[(json!("rise"), "Rise"), (json!("slide"), "Slide"), (json!("pop"), "Pop"), (json!("fade"), "Fade")]),
                 sel("size", "Text Size", "", &[(json!(16), "Small"), (json!(20), "Normal"), (json!(26), "Large"), (json!(34), "Huge")]),
             ];
@@ -161,7 +163,7 @@ pub fn fields(panel: &str, vals: &Map<String, Value>, port: u64) -> Vec<Value> {
             if plain { f.push(sel("bg", "Background", "Behind each message. None lets your stream show through.", &[(json!("0"), "None"), (json!("0.35"), "Faint"), (json!("0.6"), "Half"), (json!("0.85"), "Solid")])); }
             f.extend([
                 tog("shadow", "Shadow", "Makes the words easier to read over a busy picture."),
-                sel("dir", "Newest At The", "", &[(json!("bottom"), "Bottom"), (json!("top"), "Top")]),
+                sel("dir", "Newest Messages", "", &[(json!("bottom"), "At the Bottom"), (json!("top"), "At the Top")]),
                 note("What It Shows"),
                 sel("from", "Chat From", "", &[(json!("all"), "Every Platform"), (json!("twitch"), "Twitch"), (json!("kick"), "Kick"), (json!("youtube"), "YouTube")]),
                 tog("badges", "Badges", "Subscriber, moderator and VIP badges next to names."),
@@ -178,8 +180,6 @@ pub fn fields(panel: &str, vals: &Map<String, Value>, port: u64) -> Vec<Value> {
                 sel("fade", "Fade After", "", &[(json!(0), "Never"), (json!(15), "15 seconds"), (json!(30), "30 seconds"), (json!(60), "1 minute"), (json!(120), "2 minutes")]),
                 sel("max", "At Most", "How many show at once.", &[(json!(10), "10"), (json!(20), "20"), (json!(30), "30"), (json!(50), "50"), (json!(100), "100")]),
             ]);
-            f.push(note("In OBS"));
-            f.push(info("Address", &format!("{base}/chat"), "Add it as a Browser source. Changes here show there within a few seconds. For another with its own settings, add /2 to the end of the address, then change those in OBS: right-click it, choose Interact, and click its gear."));
             let _ = vals;
             f
         }

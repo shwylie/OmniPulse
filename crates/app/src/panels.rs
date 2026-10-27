@@ -514,8 +514,13 @@ fn fields_of(name: &str, vals: &Map<String, Value>, prefs: &Value, lan: &str) ->
         "widget" => {
             let port = n("widgetPort", 7878);
             let alerts_on = prefs["alertsOn"].as_bool() == Some(true);
-            // (how it looks first, the preview above showing it; what it shows; its alerts; in OBS last)
-            let mut f = vec![note("How It Looks"), design("widgetDesign", "Design")];
+            // (in OBS first, then how it looks, the preview above showing it; what it shows; its alerts)
+            let mut f = vec![
+                note("In OBS"),
+                info("Address", &format!("http://127.0.0.1:{port}/"), &format!("http://127.0.0.1:{port}/"), "Add this address as a Browser source in OBS."),
+                note("How It Looks"),
+                design("widgetDesign", "Design"),
+            ];
             f.extend([
                 sel("widgetAlign", "Alignment", "", &[(json!("left"), "Left"), (json!("right"), "Right")]),
                 tog("widgetRounded", "Rounded Corners", ""),
@@ -537,8 +542,6 @@ fn fields_of(name: &str, vals: &Map<String, Value>, prefs: &Value, lan: &str) ->
                 note("Alerts"),
                 toggle_cfg("alertsOn", "Alerts", "Follows, subs, bits, raids and more. Click the gear for how they look.", "alertsOpen"),
                 tog("alertInWidget", "Show Alerts in This Widget", "They take Now Playing's place for a moment, then it comes back. When this is off, alerts have their own Browser source (on the Alerts page), so you can place them anywhere."),
-                note("In OBS"),
-                info("Address", &format!("http://127.0.0.1:{port}/"), &format!("http://127.0.0.1:{port}/"), "Add this address as a Browser source in OBS."),
                 num("widgetPort", "Port", "1024 to 65535. Every widget's address uses it."),
             ]);
             f.push(button("widgetHide", "Hide This Track", "Hide", "Until the next track."));
@@ -691,9 +694,12 @@ fn fields_of(name: &str, vals: &Map<String, Value>, prefs: &Value, lan: &str) ->
             let dirs = [(json!("90deg"), "Left to right"), (json!("180deg"), "Top to bottom"), (json!("135deg"), "Diagonal"), (json!("270deg"), "Right to left"), (json!("0deg"), "Bottom to top")];
             let on = |k: &str| vals[k].as_bool() == Some(true);
             let mut f = vec![
+                note("In OBS"),
+                info("Address", &url, &url, "Add this address as a Browser source in OBS. About 1280 × 400 fits 3 lines. It uses the Stream Widget's port."),
+                button("previewOpen", "Preview", "Pop Out Preview", "Opens a window that shows how it will look. It updates as you change these, before you save."),
                 note("How It Looks"),
                 sel("lyricsTheme", "Theme", "Sets the font, colours, outline and box at once. Change any of them after and it's Custom.", &[(json!("custom"), "Custom"), (json!("neon"), "Neon Karaoke"), (json!("clean"), "Clean White"), (json!("outline"), "Bold Outline"), (json!("glass"), "Glass Box"), (json!("retro"), "Retro"), (json!("minimal"), "Minimal")]),
-                sel("lyricsStyle", "Style", "", &[(json!("karaoke"), "Karaoke (each line fills in as it's sung)"), (json!("highlight"), "Highlight (each line lights up all at once)"), (json!("plain"), "Plain (only brighter)")]),
+                sel("lyricsStyle", "Style", "Karaoke fills each line in as it's sung. Highlight lights up the whole line at once. Plain only makes it brighter.", &[(json!("karaoke"), "Karaoke"), (json!("highlight"), "Highlight"), (json!("plain"), "Plain")]),
                 sel_owned("lyricsFont", "Font", "Those marked (web) come from Google Fonts.", FONTS.iter().map(|(k, n)| (json!(k), n.to_string())).collect()),
                 stepper("lyricsSize", "Text Size", "In pixels.", (16..=120).step_by(4).map(|x| (json!(x), format!("{x}px"))).collect()),
                 sel("lyricsTransform", "Text Transform", "", &[(json!("none"), "None"), (json!("uppercase"), "Uppercase"), (json!("lowercase"), "Lowercase"), (json!("capitalize"), "Start Case")]),
@@ -742,9 +748,6 @@ fn fields_of(name: &str, vals: &Map<String, Value>, prefs: &Value, lan: &str) ->
                 note("The lines fade in a moment before their first words are sung, out after the last, and out over a long instrumental part."),
                 note("Timing"),
                 num("lyricsOffset", "Timing", "In milliseconds, from -5000 to 5000. Use a positive number to show lyrics later, or a negative one to show them earlier. Match it to your stream delay, or to a song whose lyrics run early."),
-                note("In OBS"),
-                info("Address", &url, &url, "Add this address as a Browser source in OBS. About 1280 × 400 fits 3 lines. It uses the Stream Widget's port."),
-                button("previewOpen", "Preview", "Pop Out Preview", "Opens a window that shows how it will look. It updates as you change these, before you save."),
             ]);
             f.extend(outputs_list(prefs, "lyricsw", &format!("http://127.0.0.1:{port}/lyrics/")));
             f

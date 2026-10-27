@@ -207,7 +207,7 @@ pub fn sheet(id: &str, cur: &Map<String, Value>) -> (String, Vec<Field>) {
     // (Colours, wherever it is: "Yours" is the app theme's own two, and Your Own shows its two boxes)
     for x in v.iter_mut().filter(|x| x.key == "suiteColors") {
         x.extra = x.extra.replace("accent=Yours", "accent=Your Theme's");
-        x.note = "Your Theme's are your app theme's own two colours (App & Look), not the album art's.".into();
+        x.note = "Your Theme's means the two colours of your app theme (App & Look), not the album art.".into();
     }
     if s(cur, "suiteColors") == "custom" && !v.iter().any(|x| x.key == "suiteC1") {
         if let Some(at) = v.iter().position(|x| x.key == "suiteColors") {
@@ -286,7 +286,7 @@ pub fn sheet(id: &str, cur: &Map<String, Value>) -> (String, Vec<Field>) {
         if j - i >= 2 {
             let run: Vec<Field> = v[i..j].to_vec();
             let opts = run.iter().map(|x| format!("{}={}", x.extra.replace(['|', '='], " "), x.label)).collect::<Vec<_>>().join("|");
-            let notes = run.iter().filter(|x| !x.note.is_empty()).map(|x| format!("{}: {}", x.label, x.note)).collect::<Vec<_>>().join(" ");
+            let notes = run.iter().filter(|x| !x.note.is_empty()).map(|x| x.note.clone()).collect::<Vec<_>>().join(" ");
             grouped.push(f("buttons", "", "", &notes, "", &opts));
             i = j;
         } else { grouped.push(v[i].clone()); i += 1; }
@@ -389,8 +389,8 @@ fn sheet_of(id: &str, cur: &Map<String, Value>) -> (String, Vec<Field>) {
                 v.push(step(1, "Take a screenshot of your game, at the resolution you stream it. Win+Shift+S (or the Print Screen key) works.", "", "", ""));
                 v.push(step(2, "Paste it here, or choose the file if you saved one.", "", "", ""));
                 v.push(step(3, "Drag a box round each part of the HUD you'd like framed. It snaps to the part's edges.", "", "", ""));
-                v.push(f("link", "", "Paste a Screenshot", "From the clipboard: what you just took with Win+Shift+S or Print Screen.", "", "hud:paste"));
-                v.push(f("link", "", "Choose a Screenshot", "A PNG or JPG of your game, from your PC.", "", "hud:shot"));
+                v.push(f("link", "", "Paste a Screenshot", "Paste brings in what you just took with Win+Shift+S or Print Screen.", "", "hud:paste"));
+                v.push(f("link", "", "Choose a Screenshot", "Choose opens a PNG or JPG of your game from your PC.", "", "hud:shot"));
                 return ("Game HUD Frames".into(), v);
             }
             v.push(f("note", "", if frames.is_empty() { "Drag a box on your screenshot round a part of the HUD. It snaps to its edges, and a frame goes round it." } else { "Drag a box for another frame, or click one to change it." }, "", "", ""));
