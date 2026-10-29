@@ -44,6 +44,12 @@
   .msg.me .text { font-style: italic; }
   .time { color: var(--dim); font-size: 0.85em; margin-right: 4px; font-variant-numeric: tabular-nums; }
   .badge { display: inline-block; min-width: 15px; padding: 0 3px; margin-right: 3px; border-radius: 3px; font-size: 0.75em; font-weight: 700; text-align: center; vertical-align: 1px; color: #111; }
+  /* the platform, as its mark before the name; badges as the platform draws them */
+  .kicknote { margin: 6px 0 0; color: var(--dim); font-size: 11px; }
+  .pm { display: inline-block; width: 1em; height: 1em; margin-right: 4px; vertical-align: -0.15em; }
+  .pm.twitch { fill: #a970ff; } .pm.kick { fill: #53fc18; } .pm.youtube { fill: #ff3355; }
+  body.light .pm.kick { fill: #2f9e0a; }
+  .bimg { height: 1.15em; width: auto; margin-right: 3px; vertical-align: -0.2em; border-radius: 3px; }
   .badge.b { background: #ff4f4f; } .badge.m { background: #3ccd6c; } .badge.v { background: #e05ce0; } .badge.s { background: #7aa2ff; } .badge.f { background: #ffb547; }
   .name { font-weight: 700; cursor: pointer; }
   .name:hover { text-decoration: underline; }
@@ -55,7 +61,7 @@
   .notice.bad { color: var(--warn); }
 
   /* the moderation buttons: on every message (not yours), clearer on the one under the mouse */
-  .mod { display: inline-flex; gap: 2px; margin-left: 6px; vertical-align: 1px; opacity: 0.35; }
+  .mod { display: inline-flex; gap: 2px; float: right; margin: 0 0 2px 8px; opacity: 0.6; }
   .msg:hover .mod, .mod:focus-within { opacity: 1; }
   body.modhover .mod { display: none; }
   body.modhover .msg:hover .mod, body.modhover .mod:focus-within { display: inline-flex; }
@@ -151,8 +157,8 @@
     <button class="sw" id="cmSub" type="button">Subscribers only</button>
     <button class="sw" id="cmEmote" type="button">Emotes only</button>
     <button class="sw" id="cmUnique" type="button">Unique chat</button>
-  </div></section>
-  <section id="mShield"><h2>Shield Mode<span>Twitch</span></h2><div class="row"><button class="sw red" id="shieldBtn" type="button">Shield Mode</button><button class="sw red" id="clearBtn" type="button">Clear chat</button></div></section>
+  </div><p class="kicknote">Kick doesn't let other apps change its chat modes yet: change those on Kick. Clear chat, and deleting, timing out and banning from each message, work on both.</p></section>
+  <section id="mShield"><h2>Shield Mode and clearing<span>Shield Mode: Twitch</span></h2><div class="row"><button class="sw red" id="shieldBtn" type="button">Shield Mode</button><button class="sw red" id="clearBtn" type="button">Clear chat</button></div></section>
   <section id="mAb"><h2>Auto-Ban<span id="abSays"></span><button class="sw red" id="abOn" type="button">Off</button></h2>
     <form id="abAdd" autocomplete="off"><input id="abTerm" maxlength="100" placeholder="A word or phrase to ban on sight"><button type="submit">Ban it</button></form>
     <div class="terms" id="abTerms"></div>
@@ -351,6 +357,12 @@
     return out;
   }
 
+  // (each platform's mark)
+  const MARKS = {
+    twitch: "M4.3 2 3 5.4v13.8h4.7V22h2.7l2.6-2.8h3.8l5.2-5.3V2zm16 11-2.9 3h-4.7l-2.6 2.6V16H6.3V3.7h14zm-2.9-6v5.3h-1.8V7zm-4.8 0v5.3h-1.8V7z",
+    kick: "M3 2h6v6h2V5h2V2h8v8h-2v2h-2v2h2v2h2v6h-8v-3h-2v-3H9v6H3z",
+    youtube: "M21.6 7.2a2.5 2.5 0 0 0-1.8-1.8C18.2 5 12 5 12 5s-6.2 0-7.8.4A2.5 2.5 0 0 0 2.4 7.2C2 8.8 2 12 2 12s0 3.2.4 4.8a2.5 2.5 0 0 0 1.8 1.8c1.6.4 7.8.4 7.8.4s6.2 0 7.8-.4a2.5 2.5 0 0 0 1.8-1.8c.4-1.6.4-4.8.4-4.8s0-3.2-.4-4.8zM10 15V9l5.2 3z",
+  };
   const BADGES = [["broadcaster", "b", "B", "Streamer"], ["moderator", "m", "M", "Moderator"], ["vip", "v", "V", "VIP"], ["founder", "f", "F", "Founder"], ["og", "f", "OG", "OG"], ["subscriber", "s", "S", "Subscriber"]];
   // (a name's colour: its own, or one picked from the name, readable on the dark)
   function colourOf(m) {
@@ -430,7 +442,18 @@
     const time = document.createElement("span"); time.className = "time"; time.textContent = stamp(m.ts); r.append(time);
     // (from a Shared Chat partner's channel: whose)
     if (m.shared) { const f = document.createElement("span"); f.className = "from"; f.textContent = m.sharedFrom ? "@" + m.sharedFrom : "Shared chat"; f.title = "From " + (m.sharedFrom || "the channel you're sharing chat with"); r.append(f); }
+    // (its buttons first, so they sit on the right of its first line)
+    if (!m.self && m.platform !== "youtube") r.append(modButtons(m));
+    const mark = document.createElementNS("http://www.w3.org/2000/svg", "svg"); mark.setAttribute("viewBox", "0 0 24 24"); mark.classList.add("pm", pl);
+    const mp = document.createElementNS("http://www.w3.org/2000/svg", "path"); mp.setAttribute("d", MARKS[pl]); mark.append(mp);
+    const mt = document.createElementNS("http://www.w3.org/2000/svg", "title"); mt.textContent = pl === "kick" ? "Kick" : pl === "youtube" ? "YouTube" : "Twitch"; mark.append(mt);
+    r.append(mark);
+    // (the badges as the platform draws them, where it's sent them; else a letter for each)
+    const imgs = (m.badgeImgs || []).filter((b) => b && /^https:\/\//.test(b.url || ""));
+    for (const b of imgs) { const i = document.createElement("img"); i.className = "bimg"; i.src = b.url; i.alt = b.title || ""; i.title = b.title || ""; r.append(i); }
     for (const [key, cls, label, title] of BADGES) {
+      if (imgs.length && !["moderator", "vip", "broadcaster", "og", "founder"].includes(key)) continue;
+      if (imgs.length && pl === "twitch") continue;
       if ((m.badges || []).includes(key)) { const b = document.createElement("span"); b.className = "badge " + cls; b.textContent = label; b.title = title; r.append(b); }
     }
     const name = document.createElement("span");
@@ -440,8 +463,6 @@
     r.append(name, document.createTextNode(m.me ? " " : ": "));
     const text = document.createElement("span"); text.className = "text"; text.append(...textNodes(m)); r.append(text);
     if (m.first) { const tag = document.createElement("span"); tag.className = "tag"; tag.textContent = "first message"; r.append(tag); }
-    // (YouTube's: read only for now, so no buttons to moderate it with)
-    if (!m.self && m.platform !== "youtube") r.append(modButtons(m));
     rows.set(m.n, r);
     show(r);
     place(r);

@@ -1872,6 +1872,7 @@ async function kickConnect() {
   if (!r.ok) throw new Error("Kick didn't answer for " + slug + " (" + r.status + ")");
   const ch = await r.json();
   kickRoom = ch.chatroom && ch.chatroom.id;
+  kickSubBadges = (ch.subscriber_badges || []).map((b) => ({ months: num(b.months), url: (b.badge_image && b.badge_image.src) || "" })).filter((b) => b.url);
   kickChannelId = ch.id;
   if (!kickRoom) throw new Error("Kick has no channel called " + slug);
   if (!S().kickUserId && ch.user_id) OmniPulse.settings.kickUserId = String(ch.user_id);
@@ -1930,7 +1931,11 @@ function onKick(event, d) {
       const slug = String(sender.slug || sender.username || "").toLowerCase();
       const own = [S().kickLogin, S().kickBotLogin].some((x) => x && String(x).toLowerCase() === String(sender.username || "").toLowerCase());
       const kinds = ((sender.identity && sender.identity.badges) || []).map((b) => String(b.type || "").toLowerCase());
-      OmniPulse.app.dockChat({ platform: "kick", id: String(d.id || ""), user: sender.username || slug, login: slug, userId: String(sender.id || ""), color: (sender.identity && sender.identity.color) || "", badges: kinds, text: content, self: own }).catch(() => {});
+      // (a subscriber's badge as the channel's own picture, for how long they've subscribed)
+      const sub = ((sender.identity && sender.identity.badges) || []).find((b) => String(b.type || "").toLowerCase() === "subscriber");
+      const subImg = sub ? kickSubBadges.filter((b) => b.months <= Math.max(1, num(sub.count))).sort((a, b) => b.months - a.months)[0] : null;
+      const badgeImgs = subImg ? [{ url: subImg.url, title: "Subscriber (" + Math.max(1, num(sub.count)) + " months)" }] : [];
+      OmniPulse.app.dockChat({ platform: "kick", id: String(d.id || ""), user: sender.username || slug, login: slug, userId: String(sender.id || ""), color: (sender.identity && sender.identity.color) || "", badges: kinds, badgeImgs, text: content, self: own }).catch(() => {});
     }
     // (the bot account's messages never start anything; our own message coming back: not chat)
     if (S().kickBotLogin && String(sender.username || "").toLowerCase() === String(S().kickBotLogin).toLowerCase()) return;
@@ -2135,6 +2140,7 @@ async function start() {
   const token = await fresh("channel");
   if (!token) { OmniPulse.app.say("Your Twitch sign-in has run out: sign in again in its settings."); return; }
   apiToken = token;
+  twitchBadgesRead();
   // (your name as Twitch shows it, capitals and all: the sign-in keeps only the lower-case login)
   if (S().userId) helix("GET", "users?id=" + encodeURIComponent(S().userId)).then((r) => { myName = ((r.data || [])[0] || {}).display_name || ""; }).catch(() => {});
   chat = connectChat(token, S().login, onChat);
@@ -2706,6 +2712,19 @@ function feed(ev, ctx) {
 
 function dockGone(platform, id, login) { OmniPulse.app.dockGone({ platform, id, login }).catch(() => {}); }
 
+// (Twitch's badges as pictures, by "set/version": the global ones and your channel's own (its subscriber
+// badges, bits), read once it's signed in)
+let twitchBadges = {};
+async function twitchBadgesRead() {
+  const into = {};
+  const take = (r) => ((r && r.data) || []).forEach((s) => (s.versions || []).forEach((v) => { into[s.set_id + "/" + v.id] = { url: v.image_url_2x || v.image_url_1x || "", title: v.title || s.set_id }; }));
+  try { take(await helix("GET", "chat/badges/global")); } catch (e) {}
+  if (S().userId) { try { take(await helix("GET", "chat/badges?broadcaster_id=" + encodeURIComponent(S().userId))); } catch (e) {} }
+  if (Object.keys(into).length) twitchBadges = into;
+}
+// (Kick's subscriber badges, by months: from the channel, as its chat connects)
+let kickSubBadges = [];
+
 // (Twitch Shared Chat: a partner channel's name by its id, looked up once and kept)
 const sharedNames = {};
 function sharedFrom(m) {
@@ -2724,8 +2743,10 @@ function dockTwitch(m) {
   if (me) text = me[1].replace(/\u0001$/, "");
   OmniPulse.app.dockChat({
     platform: "twitch", id: m.tags.id || "", user: m.tags["display-name"] || login, login, userId: m.tags["user-id"] || "", color: m.tags.color || "",
-    // (from a Shared Chat partner: their badges in their own channel, and whose chat it is)
-    badges: String((sharedFrom(m) && m.tags["source-badges"]) || m.tags.badges || "").split(",").map((b) => b.split("/")[0]).filter(Boolean), text, emotes: m.tags.emotes || "", first: m.tags["first-msg"] === "1", me: !!me,
+    // (from a Shared Chat partner: their badges in their own channel, and whose chat it is; each as Twitch
+    // draws it, where it's known)
+    badges: String((sharedFrom(m) && m.tags["source-badges"]) || m.tags.badges || "").split(",").map((b) => b.split("/")[0]).filter(Boolean),
+    badgeImgs: String((sharedFrom(m) && m.tags["source-badges"]) || m.tags.badges || "").split(",").filter(Boolean).map((b) => twitchBadges[b]).filter((b) => b && b.url), text, emotes: m.tags.emotes || "", first: m.tags["first-msg"] === "1", me: !!me,
     shared: !!sharedFrom(m), sharedFrom: (sharedFrom(m) || {}).name || "",
     self: [S().login, S().botLogin].some((x) => x && String(x).toLowerCase() === login),
   }).catch(() => {});
@@ -2783,9 +2804,14 @@ async function dockDo(cmd) {
       await helix("PUT", "moderation/shield_mode?" + twitchMod, { is_active: !!cmd.on });
       await modRead();
       return "";
-    case "clearchat":
-      await helix("DELETE", "moderation/chat?" + twitchMod);
-      return "";
+    case "clearchat": {
+      // (Twitch's through its API; Kick's as its own /clear command, sent as you, the broadcaster)
+      const done = [];
+      if (S().userId && apiToken) { await helix("DELETE", "moderation/chat?" + twitchMod); done.push("Twitch"); }
+      if (kick && S().kickToken) { await kickApi("POST", "chat", { content: "/clear", type: "user", broadcaster_user_id: Number(S().kickUserId || 0) }, false, "channel"); done.push("Kick"); }
+      if (!done.length) throw new Error("not connected to Twitch or Kick");
+      return "Cleared chat on " + done.join(" and ") + ".";
+    }
     // (a lockdown: what it's set to turn on, the modes as they were kept so lifting it puts them back)
     case "lockdown": {
       if (cmd.on) {
