@@ -2258,6 +2258,7 @@ function suitePush() {
       creators: [camOverlay(), panelSet(), hudSet()],
       sponsors: sponsorPlug(),
       // (moderation, for the Chat Dock's panel: Auto-Ban's terms, Twitch's chat modes and Shield Mode, a lockdown)
+      info: { twitch: streamInfo.twitch, kick: streamInfo.kick, found: streamInfo.found, said: streamInfo.said, at: streamInfo.at, canTwitch: !!(S().userId && apiToken), canKick: !!(S().kickToken && S().kickUserId) },
       mod: { autoban: { on: yes(x.abOn), terms: String(x.abTerms || "").split(/\r?\n|\|/).map((t) => t.trim()).filter(Boolean) }, chat: modState.chat, shield: modState.shield, lock: !!modState.lock, twitch: !!(S().userId && apiToken) },
       gifs: { goals: x.gifGoals || "", timer: x.gifTimer || "", latest: x.gifLatest || "", raid: x.gifRaid || "", hype: x.gifHype || "", voteskip: x.gifVoteskip || "", wheel: x.gifWheel || "", leaderboard: x.gifLeaderboard || "", tune: x.gifTune || "" },
       gifPlace: String(x.gifPlace || "top"),
@@ -2782,11 +2783,64 @@ function modeBody(mode, on, secs, mins) {
   if (mode === "unique") return { unique_chat_mode: !!on };
   return {};
 }
+// ---------- the Stream Info dock: your title and category on Twitch and Kick, read and changed ----------
+const streamInfo = { twitch: null, kick: null, found: { q: "", list: [] }, said: "", at: 0 };
+async function infoRead() {
+  if (S().userId && apiToken) {
+    try { const c = ((await helix("GET", "channels?broadcaster_id=" + S().userId)).data || [])[0] || {}; streamInfo.twitch = { title: c.title || "", category: c.game_name || "" }; } catch (e) { streamInfo.twitch = null; }
+  } else streamInfo.twitch = null;
+  if (S().kickToken && S().kickUserId) {
+    try { const c = ((await kickApi("GET", "channels?broadcaster_user_id=" + encodeURIComponent(S().kickUserId))).data || [])[0] || {}; streamInfo.kick = { title: c.stream_title || "", category: (c.category && c.category.name) || "" }; } catch (e) { streamInfo.kick = null; }
+  } else streamInfo.kick = null;
+  streamInfo.at = Date.now();
+  suitePush();
+}
+
 async function dockDo(cmd) {
   const kick = cmd.platform === "kick";
   const who = cmd.user || cmd.login || "them";
   const twitchMod = "broadcaster_id=" + S().userId + "&moderator_id=" + S().userId;
   switch (cmd.do) {
+    // (the Stream Info dock: read again; categories found as it's typed; the title and category set)
+    case "info": await infoRead(); return "";
+    case "catsearch": {
+      const q = String(cmd.q || "").trim().slice(0, 80);
+      const list = [];
+      if (q && S().userId && apiToken) {
+        try { ((await helix("GET", "search/categories?first=8&query=" + encodeURIComponent(q))).data || []).forEach((c) => list.push({ name: c.name, art: String(c.box_art_url || "").replace("{width}", "52").replace("{height}", "72") })); } catch (e) {}
+      }
+      if (q && S().kickToken) {
+        try { ((await kickApi("GET", "categories?q=" + encodeURIComponent(q))).data || []).slice(0, 8).forEach((c) => { if (!list.some((x) => x.name.toLowerCase() === String(c.name || "").toLowerCase())) list.push({ name: c.name, art: c.thumbnail || "" }); }); } catch (e) {}
+      }
+      streamInfo.found = { q, list };
+      suitePush();
+      return "";
+    }
+    case "setinfo": {
+      const title = String(cmd.title || "").trim().slice(0, 140), cat = String(cmd.category || "").trim();
+      const done = [], failed = [];
+      if (cmd.twitch && S().userId && apiToken) {
+        try {
+          const body = {};
+          if (title) body.title = title;
+          if (cat) { const g = await helix("GET", "games?name=" + encodeURIComponent(cat)); const id = g.data && g.data[0] && g.data[0].id; if (!id) throw new Error("no category called " + cat); body.game_id = id; }
+          if (Object.keys(body).length) await helix("PATCH", "channels?broadcaster_id=" + S().userId, body);
+          done.push("Twitch");
+        } catch (e) { failed.push("Twitch (" + e.message + ")"); }
+      }
+      if (cmd.kick && S().kickToken) {
+        try {
+          const body = {};
+          if (title) body.stream_title = title;
+          if (cat) { const c = await kickApi("GET", "categories?q=" + encodeURIComponent(cat)); const hit = ((c.data || []).find((x) => String(x.name || "").toLowerCase() === cat.toLowerCase())) || (c.data || [])[0]; if (!hit) throw new Error("no category called " + cat); body.category_id = hit.id; }
+          if (Object.keys(body).length) await kickApi("PATCH", "channels", body);
+          done.push("Kick");
+        } catch (e) { failed.push("Kick (" + e.message + ")"); }
+      }
+      streamInfo.said = (done.length ? "Updated on " + done.join(" and ") + "." : "") + (failed.length ? " Couldn't on " + failed.join(", ") + "." : "") || "Nothing to update: pick Twitch or Kick.";
+      await infoRead();
+      return "";
+    }
     // (Auto-Ban from the Chat Dock: on or off, a term added (which turns it on) or taken away; kept at once)
     case "autoban": {
       const x = S();

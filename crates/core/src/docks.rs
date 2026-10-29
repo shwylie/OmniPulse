@@ -13,6 +13,7 @@ use std::{
 
 pub const CHAT_HTML: &str = include_str!("../widget/dock-chat.html");
 pub const ACTIVITY_HTML: &str = include_str!("../widget/dock-activity.html");
+pub const INFO_HTML: &str = include_str!("../widget/dock-info.html");
 /// The multichat, on stream: the same chat, see-through, for a Browser source
 pub const MULTICHAT_HTML: &str = include_str!("../widget/multichat.html");
 
@@ -157,7 +158,7 @@ pub fn dock_do(cmd: Value) -> Result<String, String> {
             Ok("Cleared.".into())
         }
         // (its settings changed on the page itself, its gear in OBS: kept by OmniPulse, as its own page's)
-        "delete" | "timeout" | "ban" | "unban" | "say" | "rerun" | "settings" | "autoban" | "chatmode" | "shield" | "clearchat" | "lockdown" => {
+        "delete" | "timeout" | "ban" | "unban" | "say" | "rerun" | "settings" | "autoban" | "chatmode" | "shield" | "clearchat" | "lockdown" | "info" | "catsearch" | "setinfo" => {
             let mut cmd = cmd;
             // (an action run again: the event as it was kept, from the feed)
             if cmd["do"] == "rerun" {

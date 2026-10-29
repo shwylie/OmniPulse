@@ -4702,6 +4702,7 @@ component BotPage inherits Rectangle {
                         { n: "Chat Dock", t: "Twitch and Kick chat in OBS, with delete, time-out and ban on every message, and a box to chat back.", p: "/dock/chat", i: Icons.chat, k: "dockchat" },
                         { n: "Activity Feed", t: "Follows, subs, bits, raids, rewards and the rest in OBS, each alert replayed with a click.", p: "/dock/activity", i: Icons.bell, k: "dockfeed" },
                         { n: "Moderation Dock", t: "Pile-Up, Raid Lockdown, chat modes, Shield Mode and Auto-Ban on their own, beside your chat. You change it in the Chat Dock's settings.", p: "/dock/mod", i: Icons.shield, k: "dockchat" },
+                        { n: "Stream Info", t: "Your title and category on Twitch and Kick, changed on both at once, without opening their dashboards.", p: "/dock/info", i: Icons.broadcast, k: "" },
                     ]: Rectangle {
                         horizontal-stretch: 1;
                         preferred-width: 0px;
@@ -4721,7 +4722,7 @@ component BotPage inherits Rectangle {
                                 VerticalLayout { alignment: center; Glyph { d: d.i; width: 16px; height: 16px; fill: root.widget-on ? Theme.accent : Theme.muted; } }
                                 Text { text: d.n; color: Theme.text; font-weight: 700; font-size: 13px; horizontal-stretch: 1; overflow: elide; }
                                 IconButton { d: Icons.copy; size: 30px; tip: "Copy the address for OBS"; clicked => { root.act("copy:http://127.0.0.1:" + root.port + d.p); } }
-                                IconButton { d: Icons.gear; size: 30px; tip: d.n + ": its settings"; clicked => { root.act("dockset:" + d.k); } }
+                                if d.k != "": IconButton { d: Icons.gear; size: 30px; tip: d.n + ": its settings"; clicked => { root.act("dockset:" + d.k); } }
                             }
                             Text { text: "http://127.0.0.1:" + root.port + d.p; color: Theme.accent.mix(Theme.text, 0.55); font-size: 11px; font-family: "Consolas"; overflow: elide; }
                             Text { text: root.widget-on ? d.t : "Turn on the Stream Suite first. Its addresses work while it's running."; color: Theme.muted; font-size: 11px; overflow: elide; }
