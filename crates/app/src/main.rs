@@ -10674,6 +10674,49 @@ fn pl_delete(shared: &Shared, p: sources::Playlist) {
     if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_status("Playlist deleted.".into()); }
 }
 
+// ---------- after a crash or a freeze: the log offered to the developer ----------
+
+/// The marker that says OmniPulse is running: made as it starts, taken away as it closes. Still there as it
+/// starts again: last time it crashed, or froze and was ended from Task Manager
+fn crash_marker(on: bool) {
+    let Some(f) = omnipulse_core::data_dir().ok().map(|d| d.join("state").join("running.flag")) else { return };
+    if on { let _ = std::fs::write(f, std::process::id().to_string()); } else { let _ = std::fs::remove_file(f); }
+}
+
+/// Last time ended badly (the marker left behind, or the crash log grown since it was last looked at): asked,
+/// once, whether to send what went wrong. Then the marker's made for this time
+fn crash_check(shared: &Shared) {
+    if std::env::var_os("OMNIPULSE_SELFTEST").is_some() { return; }
+    let Ok(dir) = omnipulse_core::data_dir() else { return };
+    let unclean = dir.join("state").join("running.flag").exists();
+    crash_marker(true);
+    let log = std::fs::read_to_string(dir.join("crash.log")).unwrap_or_default();
+    let seen_file = dir.join("state").join("crash-seen");
+    let seen: usize = std::fs::read_to_string(&seen_file).ok().and_then(|s| s.trim().parse().ok()).unwrap_or(0);
+    let fresh = if log.len() > seen { log.get(seen..).unwrap_or("").to_string() } else { String::new() };
+    let _ = std::fs::write(&seen_file, log.len().to_string());
+    if !unclean && fresh.trim().is_empty() { return; }
+    // (what's sent: the crash's own entry, or, for a freeze, that it was closed without closing; and the last
+    // few lines of the app's own log, anything like a sign-in taken out)
+    let diag = std::fs::read_to_string(dir.join("diag.log")).unwrap_or_default();
+    let secret = regex::Regex::new(r"(?i)(token|secret|bearer|password|oauth:|code=)\S*").unwrap();
+    let tail: Vec<&str> = diag.lines().rev().take(40).collect::<Vec<_>>().into_iter().rev().collect();
+    let tail = secret.replace_all(&tail.join("\n"), "$1<hidden>").to_string();
+    let what = if fresh.trim().is_empty() { "It was closed without closing normally (a freeze ended from Task Manager, or a crash with no log).".to_string() } else { fresh.chars().rev().take(4500).collect::<Vec<_>>().into_iter().rev().collect() };
+    let text = format!("{what}\n\n---- the last lines of diag.log\n{tail}");
+    ask(shared, "OmniPulse Closed Unexpectedly", "Last time, OmniPulse stopped responding or closed by itself. Would you like to send its crash log to the developer, so it can be fixed? It has what went wrong inside the app, its last log lines, and your OmniPulse and Windows versions. Sign-ins are never in it.", "Send It", move |s| crash_send(s, text));
+}
+
+fn crash_send(shared: &Shared, text: String) {
+    let (dir, rt, weak) = { let a = shared.borrow(); (omnipulse_core::data_dir().ok().map(|d| d.join("state")), a.rt.clone(), a.ui.clone()) };
+    let Some(dir) = dir else { return };
+    let body = serde_json::json!({ "install": install_id(&dir), "kind": "bug", "title": "Crash report", "text": text.chars().take(7900).collect::<String>(), "contact": "", "version": env!("CARGO_PKG_VERSION"), "os": windows_version(), "extra": "sent from the crash prompt" });
+    rt.spawn(async move {
+        let ok = reqwest::Client::new().post(format!("{}/api/reports", share::RELAY_URL)).json(&body).timeout(std::time::Duration::from_secs(20)).send().await.is_ok_and(|r| r.status().is_success());
+        let _ = weak.upgrade_in_event_loop(move |ui| ui.set_status(if ok { "Crash log sent. Thank you: that helps fix it." } else { "Couldn't send the crash log (are you online?). You can describe it in Settings > About > Report a Bug." }.into()));
+    });
+}
+
 // ---------- asked first: in the app's own look (not Windows' message box) ----------
 thread_local! {
     /// what an OK does, while it's asked
@@ -13544,6 +13587,11 @@ fn main() -> Result<(), slint::PlatformError> {
         omnipulse_core::plugins::install_bundled(&dir);
     }
     plugins_start(&shared);
+    // (last time crashed or froze: asked, a few seconds in, whether to send its log)
+    {
+        let s = shared.clone();
+        slint::Timer::single_shot(std::time::Duration::from_secs(4), move || crash_check(&s));
+    }
     // OmniPulse Offset, if it's on (not in the self-test: it would play)
     if std::env::var_os("OMNIPULSE_SELFTEST").is_none() { offset_apply(&shared); }
     ui.set_page_sub("Loading your Library...".into());
@@ -15799,6 +15847,8 @@ fn main() -> Result<(), slint::PlatformError> {
         ui.window().set_position(slint::PhysicalPosition::new(-4000, 0));
     }
     slint::run_event_loop_until_quit()?;
+    // (closed as it should be: next time won't ask about a crash)
+    crash_marker(false);
     let _ = ui.hide();
     // (the session, if a write was still waiting)
     queue::flush_session();
