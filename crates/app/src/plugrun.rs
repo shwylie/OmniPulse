@@ -565,6 +565,59 @@ mod tests {
         stop("chatbot");
     }
 
+    /// Twitch shows as connected as soon as its chat welcomes the chatbot (001), with no message in chat yet;
+    /// and with a bot account too, which has its own connection
+    #[test]
+    fn the_chatbot_is_connected_before_anyone_chats() {
+        let _one = one_at_a_time();
+        use futures_util::{SinkExt, StreamExt};
+        use tokio_tungstenite::tungstenite::Message;
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let listener = rt.block_on(tokio::net::TcpListener::bind("127.0.0.1:0")).unwrap();
+        let port = listener.local_addr().unwrap().port();
+        rt.spawn(async move {
+            while let Ok((tcp, _)) = listener.accept().await {
+                let Ok(ws) = tokio_tungstenite::accept_async(tcp).await else { continue };
+                let (mut w, mut r) = ws.split();
+                tokio::spawn(async move {
+                    while let Some(Ok(Message::Text(t))) = r.next().await {
+                        for line in t.split("\r\n").filter(|l| !l.is_empty()) {
+                            let nick = line.strip_prefix("NICK ").map(String::from);
+                            if let Some(n) = nick {
+                                let _ = w.send(Message::Text(format!(":tmi.twitch.tv CAP * ACK :twitch.tv/tags twitch.tv/commands\r\n:tmi.twitch.tv 001 {n} :Welcome, GLHF!\r\n:tmi.twitch.tv 002 {n} :Your host is tmi.twitch.tv\r\n").into())).await;
+                            }
+                            if let Some(ch) = line.strip_prefix("JOIN ") { let _ = w.send(Message::Text(format!(":me!me@me.tmi.twitch.tv JOIN {ch}\r\n@emote-only=0 :tmi.twitch.tv ROOMSTATE {ch}\r\n").into())).await; }
+                        }
+                    }
+                });
+            }
+        });
+        set_app_handler(Arc::new(move |_p: &str, _ask: Value, answer: Box<dyn FnOnce(Value) + Send>| answer(json!({ "ok": true }))));
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../plugins/chatbot");
+        let code = std::fs::read_to_string(root.join("main.js")).unwrap()
+            .replace("wss://irc-ws.chat.twitch.tv:443", &format!("ws://127.0.0.1:{port}/irc"))
+            .replace("wss://eventsub.wss.twitch.tv/ws", &format!("ws://127.0.0.1:{port}/events"))
+            .replace("if (await validate(token)) return token;", "return token;");
+        let mut m: core::plugins::Manifest = serde_json::from_str(&std::fs::read_to_string(root.join("manifest.json")).unwrap()).unwrap();
+        m.hosts.push("127.0.0.1".into());
+        let pkg = core::plugins::Package { manifest: m, code, digest: String::new(), bundled: true };
+        let p = start(&pkg, &json!({ "token": "t", "login": "me", "userId": "1", "twitchClientId": "c", "botToken": "b", "botLogin": "mybot" }), rt.handle().clone()).unwrap();
+        let until = Instant::now() + Duration::from_secs(8);
+        let mut st = Value::Null;
+        while Instant::now() < until {
+            st = rt.block_on(p.call("status", vec![])).unwrap_or(Value::Null);
+            if st["twitch"]["up"] == true { break; }
+            std::thread::sleep(Duration::from_millis(100));
+        }
+        assert_eq!(st["twitch"]["up"], true, "{st:#}");
+        // (and it stays connected: a second look, a few seconds on)
+        std::thread::sleep(Duration::from_secs(3));
+        let st = rt.block_on(p.call("status", vec![])).unwrap_or(Value::Null);
+        assert_eq!(st["twitch"]["up"], true, "{st:#}");
+        drop(p);
+        stop("chatbot");
+    }
+
     /// The chatbot's sign-in to OBS (its script's own SHA-256 and base64), as OBS works it out
     #[test]
     fn the_chatbot_signs_in_to_obs_as_obs_expects() {

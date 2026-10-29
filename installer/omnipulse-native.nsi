@@ -67,6 +67,9 @@ Section "OmniPulse"
   nsExec::Exec 'taskkill /IM OmniPulse.exe /F'
   nsExec::Exec 'taskkill /IM omnipulse-offset.exe /F'
   Sleep 800
+  ; (closed for the update, not crashed: its running marker taken away, so it doesn't ask about a crash next time)
+  Delete "$APPDATA\OmniPulse\state\running.flag"
+  Delete "$APPDATA\sc-client\state\running.flag"
 
   SetOutPath "$INSTDIR"
   File "/oname=OmniPulse.exe" "${SRC}\OmniPulse-native.exe"

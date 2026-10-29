@@ -12481,13 +12481,16 @@ fn update_act(shared: &Shared) {
     rt.spawn(async move {
         let got = updater::download(&rel).await;
         let _ = weak.upgrade_in_event_loop(move |ui| SHARED.with(|s| {
+            // (closing for the update isn't a crash: the running marker's taken away first, as the installer
+            // may close OmniPulse before it's finished closing itself)
+            if got.is_ok() { crash_marker(false); }
             match got.and_then(|p| updater::install(&p)) {
                 Ok(()) => {
                     // (the installer starts the new one when it's done)
                     if let Some(sh) = s.borrow().clone() { save_session(&sh.borrow()); }
                     let _ = slint::quit_event_loop();
                 }
-                Err(e) => { ui.set_update_note(format!("Couldn't update: {e}").into()); ui.set_update_label("Update".into()); }
+                Err(e) => { crash_marker(true); ui.set_update_note(format!("Couldn't update: {e}").into()); ui.set_update_label("Update".into()); }
             }
         }));
     });
