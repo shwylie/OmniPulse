@@ -8062,10 +8062,16 @@ export component AppWindow inherits Window {
                                 }
                               }
                             }
+                            // (the line being sung kept in the middle: as each comes, and straight away when Now
+                            // Playing opens mid-song, it's resized, or the lyrics are shown again after the description)
+                            function follow() { lv.content-y = min(0px, -(max(0, root.lyric-on) * 40px) + lv.visible-height / 2 - 20px); }
                             property <int> on: root.lyric-on;
-                            changed on => {
-                                lv.content-y = min(0px, -(root.lyric-on * 40px) + lv.visible-height / 2 - 20px);
-                            }
+                            property <length> seen: lv.visible-height;
+                            property <bool> desc: npr.show-desc;
+                            changed on => { self.follow(); }
+                            changed seen => { self.follow(); }
+                            changed desc => { if (!self.desc) { self.follow(); } }
+                            init => { self.follow(); }
                         }
                     }
                 }
