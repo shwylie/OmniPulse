@@ -563,7 +563,7 @@ function onEvent(type, e) {
   const reward = (e.reward && e.reward.title) || "";
   const rewardId = (e.reward && e.reward.id) || "";
   const said = (e.message && e.message.text) || e.title || "";
-  const ctx = { user: a.user || e.user_name || e.from_broadcaster_user_name || "", userId: e.user_id || e.from_broadcaster_user_id || "", amount: ev === "adbreak" ? String(e.duration_seconds || 0) : amount, message: a.message || said || e.user_input || "", reward, rewardId, rawInput: e.user_input || said || "", msgId: e.msg_id || "", platform: "twitch", winner: won, tier: String(e.tier || "") };
+  const ctx = { user: a.user || e.user_name || e.from_broadcaster_user_name || "", userId: e.user_id || e.from_broadcaster_user_id || "", amount: ev === "adbreak" ? String(e.duration_seconds || 0) : amount, message: a.message || said || e.user_input || "", reward, rewardId, redemptionId: ev === "reward" ? String(e.id || "") : "", rawInput: e.user_input || said || "", msgId: e.msg_id || "", platform: "twitch", winner: won, tier: String(e.tier || "") };
   Object.assign(ctx, words(ctx.rawInput));
   fire(ev, ctx);
 }
@@ -2712,7 +2712,7 @@ function sendAlert(a) {
 function feed(ev, ctx) {
   let alert = null;
   if (lastAlert && Date.now() - lastAlert.at < 3000 && String(lastAlert.a.user || "").toLowerCase() === String(ctx.user || "").toLowerCase()) { alert = lastAlert.a; lastAlert = null; }
-  const keep = { type: ev, platform: ctx.platform || "twitch", user: ctx.user || "", userId: ctx.userId || "", amount: String(ctx.amount == null ? "" : ctx.amount), message: ctx.message || "", rawInput: ctx.rawInput || "", reward: ctx.reward || "", currency: ctx.currency || "", winner: ctx.winner || "", chatbot: true };
+  const keep = { type: ev, platform: ctx.platform || "twitch", user: ctx.user || "", userId: ctx.userId || "", amount: String(ctx.amount == null ? "" : ctx.amount), message: ctx.message || "", rawInput: ctx.rawInput || "", reward: ctx.reward || "", rewardId: ctx.rewardId || "", redemptionId: ctx.redemptionId || "", currency: ctx.currency || "", winner: ctx.winner || "", chatbot: true };
   if (alert) keep.alert = Object.assign({ feed: false }, alert);
   OmniPulse.app.dockActivity(keep).catch(() => {});
 }
@@ -2801,6 +2801,21 @@ async function dockDo(cmd) {
   const who = cmd.user || cmd.login || "them";
   const twitchMod = "broadcaster_id=" + S().userId + "&moderator_id=" + S().userId;
   switch (cmd.do) {
+    // (a Twitch reward's points given back: its redemption cancelled. Twitch allows it only for rewards this
+    // app made (in OmniPulse), not ones made on its dashboard)
+    case "refund": {
+      const rid = String(cmd.rewardId || ""), id = String(cmd.redemptionId || "");
+      if (!rid || !id) throw new Error("that redemption can't be refunded from here");
+      try {
+        await helix("PATCH", "channel_points/custom_rewards/redemptions?broadcaster_id=" + S().userId + "&reward_id=" + encodeURIComponent(rid) + "&id=" + encodeURIComponent(id), { status: "CANCELED" });
+      } catch (e) {
+        if (/403|404/.test(e.message)) throw new Error("Twitch only lets the app that made a reward refund it. Rewards made in OmniPulse can be refunded here; for ones made on Twitch, refund them in your Reward Requests queue on Twitch");
+        if (/400/.test(e.message)) throw new Error("it's been refunded or completed already");
+        throw e;
+      }
+      OmniPulse.app.dockChat({ notice: "Refunded " + (cmd.user || "their") + "'s points for " + (cmd.reward || "the reward") + "." }).catch(() => {});
+      return "";
+    }
     // (the Stream Info dock: read again; categories found as it's typed; the title and category set)
     case "info": await infoRead(); return "";
     case "catsearch": {

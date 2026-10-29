@@ -225,6 +225,7 @@
     send: "M2.01 21L23 12 2.01 3 2 10l15 2-15 2z",
     replay: "M12 5V1L7 6l5 5V7c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6H4c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8-8z",
     bolt: "M7 2v11h3v9l7-12h-4l4-8z",
+    refund: "M12.5 8c-2.65 0-5.05.99-6.9 2.6L2 7v9h9l-3.62-3.62c1.39-1.16 3.16-1.88 5.12-1.88 3.54 0 6.55 2.31 7.6 5.5l2.37-.78C21.08 11.03 17.15 8 12.5 8z",
     check: "M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z",
     eraser: "M15.14 3c-.51 0-1.02.2-1.41.59L2.59 14.73c-.78.78-.78 2.05 0 2.83L5.03 20h7.66l8.72-8.72c.79-.78.79-2.05 0-2.83l-4.85-4.86c-.39-.39-.9-.59-1.42-.59zM6.24 18l-2.24-2.24 6.07-6.07 4.24 4.24L10.24 18H6.24z",
   };
@@ -272,6 +273,8 @@
     const meta = document.createElement("div"); meta.className = "meta"; meta.textContent = ago(e.ts); meta.dataset.ts = e.ts; what.append(meta);
     const acts = document.createElement("div"); acts.className = "acts";
     if (e.alert) acts.append(iconButton("replay", "Show its alert again", "", "", (b) => act({ do: "replay", n: e.n }, b, "Replayed")));
+    // (a Twitch reward: its points given back, its redemption cancelled)
+    if (e.type === "reward" && e.redemptionId && (e.platform || "twitch") === "twitch") acts.append(iconButton("refund", "Refund " + (e.user || "their") + "'s points", "", "", (b) => act({ do: "refund", rewardId: e.rewardId, redemptionId: e.redemptionId, user: e.user, reward: e.reward }, b, "Refunded")));
     if (e.chatbot) acts.append(iconButton("bolt", "Run the chatbot's actions for it again (its thanks in chat, its sounds...)", "", "", (b) => act({ do: "rerun", n: e.n }, b, "Ran them again")));
     r.append(g, what, acts);
     return r;

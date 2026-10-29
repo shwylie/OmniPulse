@@ -158,7 +158,7 @@ pub fn dock_do(cmd: Value) -> Result<String, String> {
             Ok("Cleared.".into())
         }
         // (its settings changed on the page itself, its gear in OBS: kept by OmniPulse, as its own page's)
-        "delete" | "timeout" | "ban" | "unban" | "say" | "rerun" | "settings" | "autoban" | "chatmode" | "shield" | "clearchat" | "lockdown" | "info" | "catsearch" | "setinfo" => {
+        "delete" | "timeout" | "ban" | "unban" | "say" | "rerun" | "settings" | "autoban" | "chatmode" | "shield" | "clearchat" | "lockdown" | "info" | "catsearch" | "setinfo" | "refund" => {
             let mut cmd = cmd;
             // (an action run again: the event as it was kept, from the feed)
             if cmd["do"] == "rerun" {
