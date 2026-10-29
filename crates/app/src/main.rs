@@ -9281,6 +9281,10 @@ fn library_load(shared: &Shared) {
                         paint_sides(&mut a);
                         paint_plats(&a);
                     }
+                    // (Discover made before your likes came in: made from next to nothing, so made again with them,
+                    // at once if it's open)
+                    FEED_CACHE.with(|c| *c.borrow_mut() = None);
+                    if shared.borrow().page == "discover" { open_discover_fresh(&shared); }
                     // (playlists on this PC stay here: nothing's kept in step by itself; Export puts them on the platforms)
                     // (where you left off last time, once: unless you've gone somewhere since it started)
                     let last = LAST_PLACE_DONE.with(|d| !d.replace(true)).then(|| webstate::native_pref("lastPlace")).flatten();

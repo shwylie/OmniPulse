@@ -33,11 +33,17 @@ fn next_path(v: &Value) -> Option<String> {
 
 /// A SoundCloud list, page after page (up to `max`)
 async fn sc_pages(first: String, max: usize) -> Vec<Track> {
+    sc_pages_whole(first, max).await.0
+}
+
+/// SoundCloud's pages, and whether it read them all (false: a page failed, a rate limit say: what it read
+/// is still given)
+async fn sc_pages_whole(first: String, max: usize) -> (Vec<Track>, bool) {
     let mut out = Vec::new();
     let mut path = first;
     let mut empty = 0;
     while out.len() < max {
-        let Ok(v) = core::soundcloud::api_get(sc_path(path.clone())).await else { break };
+        let Ok(v) = core::soundcloud::api_get(sc_path(path.clone())).await else { return (out, false) };
         let list = items(&v);
         out.extend(list.iter().filter_map(Track::soundcloud));
         // (a page can come back empty, with more after it: a few of those in a row and it stops)
@@ -47,14 +53,36 @@ async fn sc_pages(first: String, max: usize) -> Vec<Track> {
             _ => break,
         }
     }
-    out
+    (out, true)
 }
 
+fn sc_likes_file() -> Option<std::path::PathBuf> {
+    core::data_dir().ok().map(|d| d.join("state").join("native-soundcloud-likes.json"))
+}
+
+/// Your SoundCloud likes: kept each time they're all read, and the kept ones used when SoundCloud turns the
+/// app away (a rate limit, after I'm Feeling Lucky's many requests, say), so the Library and Rediscover aren't
+/// left with a handful till it lets up
 pub async fn soundcloud_likes() -> Vec<Track> {
     if !core::soundcloud::signed_in() {
         return Vec::new();
     }
-    sc_pages("/me/likes/tracks?limit=200&linked_partitioning=true&access=playable".into(), 10_000).await
+    let (got, whole) = sc_pages_whole("/me/likes/tracks?limit=200&linked_partitioning=true&access=playable".into(), 10_000).await;
+    let file = sc_likes_file();
+    if whole {
+        if let Some(p) = &file {
+            if let Some(d) = p.parent() { let _ = std::fs::create_dir_all(d); }
+            let _ = std::fs::write(p, serde_json::json!({ "tracks": got.iter().map(|t| t.to_snapshot()).collect::<Vec<_>>() }).to_string());
+        }
+        return got;
+    }
+    let kept: Vec<Track> = file.and_then(|p| std::fs::read_to_string(p).ok()).and_then(|t| serde_json::from_str::<Value>(&t).ok())
+        .and_then(|v| v["tracks"].as_array().map(|a| a.iter().filter_map(Track::from_snapshot).collect())).unwrap_or_default();
+    // (what came back, newest first, then the rest of the kept ones)
+    let keys: std::collections::HashSet<String> = got.iter().map(|t| t.key.clone()).collect();
+    let mut all = got;
+    all.extend(kept.into_iter().filter(|t| !keys.contains(&t.key)));
+    all
 }
 
 async fn sp_pages(first: String, max: usize, pick: fn(&Value) -> Option<Track>) -> Vec<Track> {
