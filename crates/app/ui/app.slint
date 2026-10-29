@@ -235,6 +235,8 @@ global Icons {
     out property <string> broadcast: "M12 9.6a2.4 2.4 0 1 0 0 4.8 2.4 2.4 0 0 0 0-4.8zM7.05 7.05a7 7 0 0 0 0 9.9l1.42-1.42a5 5 0 0 1 0-7.07zm9.9 0-1.42 1.41a5 5 0 0 1 0 7.07l1.42 1.42a7 7 0 0 0 0-9.9zM4.22 4.22a11 11 0 0 0 0 15.56l1.42-1.42a9 9 0 0 1 0-12.72zm15.56 0-1.42 1.42a9 9 0 0 1 0 12.72l1.42 1.42a11 11 0 0 0 0-15.56z";
     out property <string> person: "M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z";
     out property <string> heart-out: "M16.5 3c-1.74 0-3.41.81-4.5 2.09C10.91 3.81 9.24 3 7.5 3 4.42 3 2 5.42 2 8.5c0 3.78 3.4 6.86 8.55 11.54L12 21.35l1.45-1.32C18.6 15.36 22 12.28 22 8.5 22 5.42 19.58 3 16.5 3zm-4.4 15.55l-.1.1-.1-.1C7.14 14.24 4 11.39 4 8.5 4 6.5 5.5 5 7.5 5c1.54 0 3.04.99 3.57 2.36h1.87C13.46 5.99 14.96 5 16.5 5c2 0 3.5 1.5 3.5 3.5 0 2.89-3.14 5.74-7.9 10.05z";
+    // (Ko-fi's cup, a heart cut out of it)
+    out property <string> kofi: "M2 6h15v6.5A5.5 5.5 0 0 1 11.5 18h-4A5.5 5.5 0 0 1 2 12.5zM17 7.5h1.5a3.5 3.5 0 0 1 0 7H17v-2h1.5a1.5 1.5 0 0 0 0-3H17zM9.5 15.2l-.6-.5C6.8 12.9 5.5 11.8 5.5 10.3 5.5 9.1 6.4 8.2 7.6 8.2c.7 0 1.4.3 1.9.9.5-.6 1.2-.9 1.9-.9 1.2 0 2.1.9 2.1 2.1 0 1.5-1.3 2.6-3.4 4.4z";
     out property <string> star-out: "M22 9.24l-7.19-.62L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21 12 17.27 18.18 21l-1.63-7.03L22 9.24zM12 15.4l-3.76 2.27 1-4.28-3.32-2.88 4.38-.38L12 6.1l1.71 4.04 4.38.38-3.32 2.88 1 4.28L12 15.4z";
     out property <string> output: "M4 6h18V4H4c-1.1 0-2 .9-2 2v11H0v3h14v-3H4V6zm19 2h-6c-.55 0-1 .45-1 1v10c0 .55.45 1 1 1h6c.55 0 1-.45 1-1V9c0-.55-.45-1-1-1zm-1 9h-4v-7h4v7z";
     out property <string> add: "M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z";
@@ -3820,7 +3822,20 @@ component SetRowView inherits Card {
             horizontal-stretch: 1;
             alignment: center;
             spacing: 2px;
-            Text { text: root.r.label; color: Theme.text; font-weight: 700; }
+            HorizontalLayout {
+                spacing: 8px;
+                alignment: start;
+                Text { text: root.r.label; color: Theme.text; font-weight: 700; vertical-alignment: center; }
+                // (what it costs, apart from what it does: Seamless Mix measures each song before it plays)
+                if root.r.key == "smartOn": Rectangle {
+                    width: costt.preferred-width + 12px;
+                    border-radius: 6px;
+                    background: costa.has-hover ? Theme.elevated : Theme.line.with-alpha(0.6);
+                    costt := Text { text: "+CPU  +RAM  +DISK"; color: Theme.muted; font-size: 10px; font-weight: 700; }
+                    TipSpot { tip: "Uses more of your computer: it measures each song before it plays (its beat, key and phrases), which takes processing, memory, and disk space for what it learns."; hover: costa.has-hover; }
+                    costa := TouchArea { }
+                }
+            }
             // (its height at the width it gets: wrapped onto more lines in a narrow window, all of it counted)
             if root.r.note != "": Text { text: root.r.note; color: Theme.muted; font-size: 12px; wrap: word-wrap; min-height: self.preferred-height; }
         }
@@ -7140,9 +7155,14 @@ export component AppWindow inherits Window {
                                             alignment: center;
                                             spacing: 2px;
                                             HiTitle { text: "Support OmniPulse"; }
-                                            Text { text: "OmniPulse is made by one person, @shwylie. If it's made your streams or your listening better, you can say thanks with a coffee on Ko-fi."; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
+                                            Text { text: "OmniPulse is made by one person, @shwylie. If it's made your streams or your listening better, you can say thanks with a contribution."; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
                                         }
-                                        VerticalLayout { alignment: center; Pill { label: "Contribute on Ko-fi"; on: true; clicked => { root.open-web("https://ko-fi.com/shwylie"); } } }
+                                        HorizontalLayout {
+                                            alignment: center;
+                                            spacing: 8px;
+                                            VerticalLayout { alignment: center; IconButton { d: Icons.kofi; tip: "Ko-fi"; tint: #ff5e5b; clicked => { root.open-web("https://ko-fi.com/shwylie"); } } }
+                                            VerticalLayout { alignment: center; Pill { label: "Contribute"; on: true; clicked => { root.open-web("https://shwyl.ie/tip"); } } }
+                                        }
                                     }
                                 }
                                 // (made with Slint: a small line of its own, its link to its site)

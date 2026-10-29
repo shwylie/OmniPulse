@@ -2797,7 +2797,9 @@ fn open_stats(shared: &Shared, period: usize) {
     for p in &list {
         songs.entry(format!("{}|{}", p.title, p.artist)).or_insert((0, p)).0 += 1;
         artists.entry(first_artist(p)).or_insert((0, p)).0 += 1;
-        *plats.entry(if p.src.is_empty() { "soundcloud".into() } else { p.src.clone() }).or_insert(0) += 1;
+        // (where the sound came from: a song found on MusicBrainz, Deezer or Apple Music plays from YouTube Music)
+        let src = match p.src.as_str() { "" => "soundcloud", "musicbrainz" | "deezer" | "itunes" | "catalog" => "youtube", s => s };
+        *plats.entry(src.to_string()).or_insert(0) += 1;
         let local_h = ((p.ts / 3_600_000) as i64 + local_offset_hours()).rem_euclid(24) as usize;
         hours[local_h] += 1.0;
     }
@@ -13325,7 +13327,10 @@ fn apply_look(shared: &Shared) {
         }
     }
     // (Aurora: its panels see-through, over the glow behind them)
-    let see = |c: look::Rgb, a: u8| if preset.is_some_and(|t| t.aurora) { slint::Color::from_argb_u8(a, c.0, c.1, c.2) } else { c.slint() };
+    // (only with Hardware Acceleration on: the software renderer's see-through panels showed seams and square
+    // corners, and scrolled slowly)
+    let gpu = prefs["nativeGpu"].as_bool() == Some(true);
+    let see = |c: look::Rgb, a: u8| if gpu && preset.is_some_and(|t| t.aurora) { slint::Color::from_argb_u8(a, c.0, c.1, c.2) } else { c.slint() };
     t.set_panel(see(p.panel, 190));
     // (the accents' blends go into the theme without its tint; a theme of its own's, into its panel)
     t.set_plain_panel(if preset.is_some() { p.panel.slint() } else { look::palette(step, hue, 0).panel.slint() });

@@ -334,6 +334,7 @@ pub fn open_url(url: String) -> Result<(), String> {
         || url.starts_with("http://127.0.0.1:")
         || url.starts_with("http://localhost:")
         || url.starts_with("https://ko-fi.com/")
+        || url.starts_with("https://shwyl.ie/")
         || url.starts_with("https://help.throne.com/")
         || url.starts_with("https://throne.com/")
         || url.starts_with("https://docs.fourthwall.com/")
