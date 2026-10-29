@@ -5685,7 +5685,7 @@ dependencies = [
 
 [[package]]
 name = "omnipulse"
-version = "0.3.44"
+version = "0.3.45"
 dependencies = [
  "arboard",
  "base64 0.22.1",
@@ -5736,7 +5736,7 @@ dependencies = [
 
 [[package]]
 name = "omnipulse-core"
-version = "0.3.44"
+version = "0.3.45"
 dependencies = [
  "base64 0.22.1",
  "beat-this",
