@@ -175,14 +175,19 @@
   body.nownext #info { flex: none; }
   body.nownext #times { display: none; }
   body.nownext #nowRow { display: flex; }
-  body.nownext #next.on { display: flex; align-items: center; gap: 0.6rem; opacity: 0.8; border-top: 0.06rem solid rgba(255, 255, 255, 0.2); padding-top: 0.45rem; font-size: calc(0.85rem * var(--ts, 1)); }
+  /* (the next song: opened out when it's shown, closed up when it isn't; Near the End: in the song's last 30 s) */
+  body.nownext #next { display: flex; align-items: center; gap: 0.6rem; opacity: 0; max-height: 0; overflow: hidden; border-top: 0.06rem solid transparent; padding-top: 0; font-size: calc(0.85rem * var(--ts, 1));
+    transition: max-height 0.7s cubic-bezier(0.2, 0.8, 0.2, 1), opacity 0.5s ease 0.15s, padding-top 0.7s, border-color 0.7s; }
+  body.nownext #next.on { opacity: 0.85; max-height: 4rem; border-top-color: rgba(255, 255, 255, 0.2); padding-top: 0.45rem; }
+  body.nownext #next.on.soon .nl { animation: upnext 1.6s ease-in-out 3; }
+  @keyframes upnext { 50% { opacity: 1; color: var(--hi, #fff); } }
   #next img { width: 1.9rem; height: 1.9rem; border-radius: 0.3rem; object-fit: cover; flex: none; }
   #next .nx { display: flex; flex-direction: column; min-width: 0; }
   #next .nl { font-size: 0.75em; letter-spacing: 0.06em; text-transform: uppercase; opacity: 0.7; }
   #next .nt { font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   /* (aligned right: still one above the other, each row mirrored, its words to the right) */
   body.right.nownext #card { flex-direction: column; align-items: stretch; }
-  body.right.nownext #nowRow, body.right.nownext #next.on { flex-direction: row-reverse; }
+  body.right.nownext #nowRow, body.right.nownext #next { flex-direction: row-reverse; }
   body.right.nownext #next .nx { align-items: flex-end; text-align: right; }
 
   /* Polaroid: the cover as a tilted instant photo, the title written underneath */
@@ -492,6 +497,7 @@
   let design = "card";
   let theme = "colours";
   let enter = "fade";
+  let upNext = "soon";
   let shownKey = "";
   let shownNote = "";
   let lookCls = "";   // the design classes last set on the page
@@ -515,6 +521,7 @@
       (anim.scroll === false ? " noscroll" : "") + (anim.spin === false ? " nospin" : "");
     theme = th;
     enter = en;
+    upNext = anim.upnext === "always" ? "always" : "soon";
     const cf = (anim.color === undefined ? 1.2 : Number(anim.color)) + "s";
     document.documentElement.style.setProperty("--cf", cf);
     // the look's own classes only: an alert that's showing (alerting) is left as it is
@@ -1342,8 +1349,12 @@
     // (Frosted: the cover, blurred, behind the card)
     if (s && s.artwork) card.style.setProperty("--art", "url(\"" + String(s.artwork).replace(/"/g, "") + "\")");
     // (Now and next: the song coming next, and who asked for it)
+    // (Near the End: shown once the song has 30 s or less left; Always: whenever there's one)
     const nx = s && s.next;
-    $("next").classList.toggle("on", !!(nx && nx.title));
+    const left = s && s.duration_ms ? s.duration_ms - position() : Infinity;
+    const soon = upNext !== "always";
+    $("next").classList.toggle("on", !!(nx && nx.title) && (!soon || (left <= 30000 && left > 0)));
+    $("next").classList.toggle("soon", soon);
     if (nx && nx.title) {
       $("nxTitle").textContent = nx.title + (nx.artist ? " \u00b7 " + nx.artist : "");
       $("nxLabel").textContent = nx.requested_by ? "Next, asked for by " + nx.requested_by : "Next";

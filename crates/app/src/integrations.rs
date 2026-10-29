@@ -372,7 +372,7 @@ fn np_look(prefs: &Value, accent: (&str, &str)) -> Value {
 }
 
 fn np_anim(prefs: &Value) -> Value {
-    json!({ "fade": on(prefs, "wFade"), "enter": prefs["wEnter"].as_str().unwrap_or("fade"), "scroll": on(prefs, "wScroll"), "spin": on(prefs, "wSpin"), "color": prefs["wColor"].as_f64().unwrap_or(1.2) })
+    json!({ "fade": on(prefs, "wFade"), "enter": prefs["wEnter"].as_str().unwrap_or("fade"), "scroll": on(prefs, "wScroll"), "spin": on(prefs, "wSpin"), "upnext": prefs["wUpNext"].as_str().unwrap_or("soon"), "color": prefs["wColor"].as_f64().unwrap_or(1.2) })
 }
 
 /// What the widgets are sent: the track, where it's up to, its look, the alerts' settings, the lyrics
