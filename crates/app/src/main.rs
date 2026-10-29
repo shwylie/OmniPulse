@@ -13507,6 +13507,8 @@ fn aurora_bake(ui: &AppWindow) {
         }
     }
     t.set_aurora_bake(slint::Image::from_rgb8(px));
+    t.set_aurora_w(w as f32);
+    t.set_aurora_h(h as f32);
     t.set_aurora_baked(true);
 }
 

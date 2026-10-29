@@ -49,6 +49,9 @@ export global Theme {
     /// picture, which the software renderer copies far faster than it works out the glows each frame
     in-out property <image> aurora-bake;
     in-out property <bool> aurora-baked;
+    // (the size it was painted at: the window's, to line a piece of it up with the window)
+    in-out property <length> aurora-w;
+    in-out property <length> aurora-h;
     /// the window being resized: the costly full-window glows rest, and motion stops, till it's let go
     in-out property <bool> resizing;
     in-out property <bool> round-art;
@@ -833,13 +836,20 @@ component Caps inherits Rectangle {
     in property <bool> bottom: false;
     in property <bool> left: true;
     in property <bool> right: true;
+    // (on the window's own background in Aurora: what's outside each corner is that piece of the painted glow,
+    // lined up with the window, not the plain background colour, which showed as a dark nick)
+    property <bool> glow: root.outside == Theme.bg && Theme.aurora && Theme.aurora-baked && !Theme.resizing && !Theme.pulsing;
     if root.r > 0 && root.top && root.left: Rectangle { x: 0; y: 0; width: root.r; height: root.r; clip: true; background: root.outside;
+        if root.glow: Image { x: -parent.absolute-position.x; y: -parent.absolute-position.y; width: Theme.aurora-w; height: Theme.aurora-h; source: Theme.aurora-bake; image-fit: fill; }
         Rectangle { x: 0; y: 0; width: root.r * 2; height: root.r * 2; border-radius: root.r; background: root.tl; } }
     if root.r > 0 && root.top && root.right: Rectangle { x: parent.width - root.r; y: 0; width: root.r; height: root.r; clip: true; background: root.outside;
+        if root.glow: Image { x: -parent.absolute-position.x; y: -parent.absolute-position.y; width: Theme.aurora-w; height: Theme.aurora-h; source: Theme.aurora-bake; image-fit: fill; }
         Rectangle { x: -root.r; y: 0; width: root.r * 2; height: root.r * 2; border-radius: root.r; background: root.tr; } }
     if root.r > 0 && root.bottom && root.left: Rectangle { x: 0; y: parent.height - root.r; width: root.r; height: root.r; clip: true; background: root.outside;
+        if root.glow: Image { x: -parent.absolute-position.x; y: -parent.absolute-position.y; width: Theme.aurora-w; height: Theme.aurora-h; source: Theme.aurora-bake; image-fit: fill; }
         Rectangle { x: 0; y: -root.r; width: root.r * 2; height: root.r * 2; border-radius: root.r; background: root.bl; } }
     if root.r > 0 && root.bottom && root.right: Rectangle { x: parent.width - root.r; y: parent.height - root.r; width: root.r; height: root.r; clip: true; background: root.outside;
+        if root.glow: Image { x: -parent.absolute-position.x; y: -parent.absolute-position.y; width: Theme.aurora-w; height: Theme.aurora-h; source: Theme.aurora-bake; image-fit: fill; }
         Rectangle { x: -root.r; y: -root.r; width: root.r * 2; height: root.r * 2; border-radius: root.r; background: root.br; } }
 }
 
