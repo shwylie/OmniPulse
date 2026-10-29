@@ -9789,6 +9789,8 @@ fn sound_paint(a: &App) {
     ui.set_eq_curve(line.into());
     ui.set_eq_curve_fill(fill.into());
     a.engine.set_eq(&sound::eq_heard(&a.web.prefs));
+    // (and the sample, if it's playing: heard as it's changed)
+    SAMPLE.with(|x| if let Some((p, _, _)) = x.borrow().as_ref() { p.set_eq(&sound::eq_heard(&a.web.prefs)); });
 }
 
 fn sound_set(shared: &Shared, key: &str, v: serde_json::Value) {
@@ -9798,6 +9800,70 @@ fn sound_set(shared: &Shared, key: &str, v: serde_json::Value) {
     }
     if std::env::var_os("OMNIPULSE_SELFTEST").is_none() { webstate::save_pref(key, v); }
     sound_paint(&shared.borrow());
+}
+
+thread_local! {
+    /// the sample playing (Hear It): its own player, and its timer; the music to carry on with after
+    static SAMPLE: RefCell<Option<(Arc<omnipulse_audio::Engine>, slint::Timer, bool)>> = const { RefCell::new(None) };
+}
+
+/// The sample track, as it ships in the app (written to the data folder to be read)
+const SOUND_TEST: &[u8] = include_bytes!("../assets/sound-test.ogg");
+
+/// Hear It: the sample track ("loud": a quietly mastered stretch, then a loudly mastered one, as Match Loudness
+/// is set; "eq": a stretch of it as it is), through your Equalizer, which can be changed as it plays. Again while
+/// it plays: stopped. The music's paused meanwhile, and goes on after. Never in the self-test
+fn sample_hear(shared: &Shared, mode: &str) {
+    if std::env::var_os("OMNIPULSE_SELFTEST").is_some() { return; }
+    let say = |t: &str| if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_status(t.into()); };
+    if sample_stop(shared) { return say("Stopped."); }
+    let Some(dir) = omnipulse_core::data_dir().ok().map(|d| d.join("state")) else { return };
+    let ogg = dir.join("sound-test.ogg");
+    if std::fs::metadata(&ogg).map(|m| m.len() as usize).ok() != Some(SOUND_TEST.len()) { let _ = std::fs::write(&ogg, SOUND_TEST); }
+    let src: Box<dyn omnipulse_audio::Source> = match (|| -> Result<Box<dyn omnipulse_audio::Source>, String> {
+        use omnipulse_audio::Source;
+        let mut d = omnipulse_audio::Decoded::open_file(&ogg)?;
+        let rate = d.rate();
+        let _ = d.seek(30_000);
+        if mode == "eq" { return Ok(Box::new(d)); }
+        // (two stretches of 7 s, read one after the other)
+        let want = (7 * rate) as usize * 2;
+        let mut all = Vec::with_capacity(want * 2);
+        while all.len() < want * 2 { if !d.read(&mut all)? { break; } }
+        if all.len() < want * 2 { return Err("the sample's too short".into()); }
+        let wav = sound::preview_wav(&shared.borrow().web.prefs, &all[..want], &all[want..want * 2], rate);
+        let path = dir.join("loudness-preview.wav");
+        std::fs::write(&path, wav).map_err(|e| e.to_string())?;
+        Ok(Box::new(omnipulse_audio::Decoded::open_file(&path)?))
+    })() { Ok(s) => s, Err(e) => return say(&format!("Couldn't play the sample: {e}")) };
+    let device = webstate::native_pref("nativeDevice").and_then(|v| v.as_str().map(String::from)).unwrap_or_default();
+    let Ok(player) = omnipulse_audio::Engine::new(&device) else { return say("Couldn't play the sample.") };
+    let player = Arc::new(player);
+    player.load(src, 0.0);
+    player.set_volume(0.8);
+    player.set_eq(&sound::eq_heard(&shared.borrow().web.prefs));
+    // (the music paused meanwhile, to go on after)
+    let was = { let a = shared.borrow(); let on = a.loaded && !a.engine.is_paused(); if on { a.engine.pause(); } on };
+    player.play();
+    let events = player.events();
+    let began = std::time::Instant::now();
+    let most = std::time::Duration::from_secs(if mode == "eq" { 30 } else { 16 });
+    let s = shared.clone();
+    let t = slint::Timer::default();
+    t.start(slint::TimerMode::Repeated, std::time::Duration::from_millis(250), move || {
+        let over = began.elapsed() > most || events.as_ref().is_some_and(|rx| rx.try_iter().any(|ev| matches!(ev, omnipulse_audio::Event::Ended | omnipulse_audio::Event::Error(_))));
+        if over { sample_stop(&s); }
+    });
+    SAMPLE.with(|x| *x.borrow_mut() = Some((player, t, was)));
+    say(if mode == "eq" { "Playing the sample through your Equalizer. Change it as it plays; Hear It again stops it." } else { "Playing the sample mastered quietly, then loudly, as Match Loudness is set now." });
+}
+
+/// The sample stopped, if it's playing (and the music on again, if it was); whether it was
+fn sample_stop(shared: &Shared) -> bool {
+    let Some((player, _t, was)) = SAMPLE.with(|x| x.borrow_mut().take()) else { return false };
+    player.pause();
+    if was { shared.borrow().engine.play(); }
+    true
 }
 
 fn loud_pick(shared: &Shared, step: &str) {
@@ -13711,6 +13777,10 @@ fn main() -> Result<(), slint::PlatformError> {
     sound_paint(&shared.borrow());
     let s = shared.clone();
     ui.on_loud_pick(move |step| loud_pick(&s, &step));
+    let s = shared.clone();
+    ui.on_loud_hear(move || sample_hear(&s, "loud"));
+    let s = shared.clone();
+    ui.on_eq_hear(move || sample_hear(&s, "eq"));
     let s = shared.clone();
     ui.on_fade_on_changed(move |on| sound_set(&s, "fadeOn", serde_json::json!(on)));
     let s = shared.clone();

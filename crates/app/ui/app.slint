@@ -5670,6 +5670,8 @@ export component AppWindow inherits Window {
     in-out property <bool> eq-on;
     in property <[string]> eq-presets;
     callback loud-pick(string);
+    callback loud-hear();
+    callback eq-hear();
     callback eq-on-changed(bool);
     callback eq-band(int, float);
     in property <string> eq-curve;
@@ -7845,6 +7847,8 @@ export component AppWindow inherits Window {
                                                 Text { text: root.loud-on == "off" ? "Tracks play as loud as they were made." : "Every track at the same loudness."; color: Theme.muted; font-size: 12px; }
                                             }
                                             for v[k] in [{ id: "off", n: "Off" }, { id: "quiet", n: "Quiet" }, { id: "normal", n: "Normal" }, { id: "loud", n: "Loud" }]: VerticalLayout { alignment: center; Chip { label: v.n; on: root.loud-on == v.id; clicked => { root.loud-pick(v.id); } } }
+                                            Rectangle { width: 6px; }
+                                            VerticalLayout { alignment: center; IconButton { d: Icons.play; size: 32px; tip: "Hear it: a sample mastered quietly, then loudly, as it's set"; clicked => { root.loud-hear(); } } }
                                         }
                                         GroupLine { }
                                         HorizontalLayout {
@@ -7854,6 +7858,7 @@ export component AppWindow inherits Window {
                                                 HiTitle { text: "Equalizer"; }
                                                 Text { text: "Ten bands. Drag each one up or down, or double-click it to put it back to 0."; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
                                             }
+                                            VerticalLayout { alignment: center; IconButton { d: Icons.play; size: 32px; tip: "Hear it: a sample through your Equalizer (change it as it plays)"; clicked => { root.eq-hear(); } } }
                                             CenterToggle { checked <=> root.eq-on; toggled => { root.eq-on-changed(self.checked); } }
                                         }
                                         if root.eq-on: HorizontalLayout {
@@ -9624,7 +9629,11 @@ export component AppWindow inherits Window {
                                         Text { text: "Plays every song at the same loudness, so nothing jumps out or gets lost. Normal suits most people."; color: Theme.muted; font-size: 13px; wrap: word-wrap; }
                                         HorizontalLayout { spacing: 6px; alignment: start; padding-top: 4px;
                                             for v in [{ id: "off", n: "Off" }, { id: "quiet", n: "Quiet" }, { id: "normal", n: "Normal" }, { id: "loud", n: "Loud" }]: Chip { label: v.n; on: root.loud-on == v.id; clicked => { root.loud-pick(v.id); } }
+                                            Rectangle { width: 8px; }
+                                            // (heard: a quiet song then a loud one, as it's set; try Off, then Normal)
+                                            Pill { label: "Hear It"; clicked => { root.loud-hear(); } }
                                         }
+                                        Text { text: "Hear It plays a sample track mastered quietly, then loudly. Try it with Off, then with Normal."; color: Theme.muted; font-size: 11px; wrap: word-wrap; }
                                     }
                                 }
                             }
