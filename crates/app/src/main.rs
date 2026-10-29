@@ -530,8 +530,10 @@ fn open_page_now(shared: &Shared, page: &str) {
             omnipulse_core::diag::note(&format!("rediscover: {} likes can play, {forgotten} not heard in a month{}", all.len(), if topped { ", topped up" } else { "" }));
             let mut pool = all;
             pool.truncate(forgotten.max(REDISCOVER_MIN));
-            // (an even split: one platform, then the next, as the web app's alternatePlatforms)
-            let pool = queue::alternate_platforms(pool);
+            // (the platforms taking turns, spread evenly by their shares, every track kept: an even split
+            // stopped when the smallest ran out, so a few forgotten music files or YouTube Music likes cut
+            // Rediscover to twice as many tracks)
+            let pool = queue::spread_platforms(pool);
             let none = { let a = shared.borrow(); a.web.favourites.is_empty() && !a.library.iter().any(|t| t.plat() != "local") };
             // (nothing liked yet: asked for some, as the web app's card)
             let sub = if none { "For better recommendations, add some music to your likes or favourites with the heart or the star on any song. Discover and Rediscover will be built around it.".to_string() } else if safe && pool.len() < REDISCOVER_MIN { format!("Stream-Safe Music is on, so only your likes that are safe on stream are here: {}. Autoplay carries on with safe music after them. To have more, clear more artists or labels in Settings > Streaming > What Counts as Safe.", plural(pool.len(), "song", "songs")) } else if pool.is_empty() { "You've played all your likes recently.".to_string() } else if topped { "Likes you haven't heard in a while, the longest-forgotten first.".to_string() } else { "Likes you haven't heard in a month or more, the longest-forgotten first.".to_string() };

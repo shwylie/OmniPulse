@@ -339,22 +339,6 @@ pub fn fair_shuffle(list: Vec<Track>, last_played: &HashMap<String, u64>) -> Vec
     never
 }
 
-/// Takes turns between platforms: A, B, A, B... each one's own order kept; once only one has tracks
-/// left the list stops there, so the same platform never plays twice in a row, unless it's the only
-/// one in the list (the web app's alternatePlatforms)
-pub fn alternate_platforms(list: Vec<Track>) -> Vec<Track> {
-    let mut by: Vec<(&'static str, std::collections::VecDeque<Track>)> = Vec::new();
-    for t in list {
-        let p = t.plat();
-        match by.iter_mut().find(|x| x.0 == p) { Some(x) => x.1.push_back(t), None => by.push((p, std::collections::VecDeque::from([t]))) }
-    }
-    if by.len() < 2 { return by.into_iter().flat_map(|x| x.1).collect(); }
-    let rounds = by.iter().map(|x| x.1.len()).min().unwrap_or(0);
-    let mut out = Vec::new();
-    for _ in 0..rounds { for x in by.iter_mut() { out.extend(x.1.pop_front()); } }
-    out
-}
-
 /// Every track kept, the platforms taking turns as far as they can (SoundCloud, Spotify, YouTube,
 /// SoundCloud...), each spread evenly through the list by its share of it (one with half the tracks,
 /// every other one): each next from the platform furthest behind its share that isn't the one just
@@ -522,10 +506,13 @@ mod tests {
     }
 
     #[test]
-    fn platforms_take_turns() {
-        let list = vec![t("a1", "x", true), t("a2", "x", true), t("a3", "x", true), t("b1", "y", false), t("b2", "y", false)];
-        let keys: Vec<String> = alternate_platforms(list).into_iter().map(|x| x.key).collect();
-        assert_eq!(keys, ["a1", "b1", "a2", "b2"]);
+    fn rediscover_keeps_every_track_when_one_platform_has_few() {
+        // (a long list from one platform, two from another: all of them kept, the two taking turns early on)
+        let mut list: Vec<Track> = (0..10).map(|k| t(&format!("a{k}"), "x", true)).collect();
+        list.extend([t("b1", "y", false), t("b2", "y", false)]);
+        let out = spread_platforms(list);
+        assert_eq!(out.len(), 12);
+        assert_eq!(out.iter().map(|x| x.key.as_str()).collect::<Vec<_>>(), ["a0", "b1", "a1", "b2", "a2", "a3", "a4", "a5", "a6", "a7", "a8", "a9"]);
     }
 
     fn t(key: &str, artist: &str, sc: bool) -> Track {
