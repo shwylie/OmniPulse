@@ -311,6 +311,31 @@ pub fn outputs_of(prefs: &Value, kind: &str) -> Vec<serde_json::Map<String, Valu
     Vec::new()
 }
 
+/// The Stream Widget's design from before its layout and theme were apart (Neon Sign, Frosted Glass, Minimal):
+/// a Card in that theme. New Song from Fade Between Tracks (off: none) and Neon's flicker. Settings (or one
+/// output's) changed in place; done again, nothing changes
+pub fn widget_split(m: &mut serde_json::Map<String, Value>) {
+    let old = m.get("widgetDesign").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let was = match old.as_str() { "neon" => "neon", "frosted" => "frosted", "minimal" => "clear", _ => "" };
+    if !was.is_empty() {
+        m.insert("widgetDesign".into(), json!("card"));
+        m.entry("widgetTheme").or_insert(json!(was));
+    }
+    if !m.contains_key("wEnter") {
+        if m.get("wFade").and_then(|v| v.as_bool()) == Some(false) { m.insert("wEnter".into(), json!("none")); }
+        else if old == "neon" { m.insert("wEnter".into(), json!("flicker")); }
+    }
+}
+
+/// The settings, and each of the Stream Widget's outputs, with [`widget_split`] done
+pub fn widget_split_all(prefs: &mut Value) {
+    let Some(o) = prefs.as_object_mut() else { return };
+    widget_split(o);
+    if let Some(a) = o.get_mut("widgetOutputs").and_then(|v| v.as_array_mut()) {
+        for x in a { if let Some(m) = x.as_object_mut() { widget_split(m); } }
+    }
+}
+
 /// The Stream Suite's widgets, as it last sent them (its goals, timer, latest follow and sub, a raid)
 pub static SUITE: std::sync::Mutex<Option<Value>> = std::sync::Mutex::new(None);
 
@@ -339,6 +364,7 @@ fn np_look(prefs: &Value, accent: (&str, &str)) -> Value {
         "accent": if own { prefs["widgetCol1"].as_str().unwrap_or("#8e9bff") } else { accent.0 },
         "accent2": if own { prefs["widgetCol2"].as_str().unwrap_or("#b48eff") } else { accent.1 },
         "design": prefs["widgetDesign"].as_str().unwrap_or("card"),
+        "theme": prefs["widgetTheme"].as_str().unwrap_or("colours"),
         "rounded": on(prefs, "widgetRounded"),
         "align": if prefs["widgetAlign"].as_str() == Some("right") { "right" } else { "left" },
         "text_scale": prefs["widgetText"].as_f64().unwrap_or(1.0),
@@ -346,7 +372,7 @@ fn np_look(prefs: &Value, accent: (&str, &str)) -> Value {
 }
 
 fn np_anim(prefs: &Value) -> Value {
-    json!({ "fade": on(prefs, "wFade"), "scroll": on(prefs, "wScroll"), "spin": on(prefs, "wSpin"), "color": prefs["wColor"].as_f64().unwrap_or(1.2) })
+    json!({ "fade": on(prefs, "wFade"), "enter": prefs["wEnter"].as_str().unwrap_or("fade"), "scroll": on(prefs, "wScroll"), "spin": on(prefs, "wSpin"), "color": prefs["wColor"].as_f64().unwrap_or(1.2) })
 }
 
 /// What the widgets are sent: the track, where it's up to, its look, the alerts' settings, the lyrics
@@ -486,6 +512,24 @@ pub fn accents(px: &slint::SharedPixelBuffer<slint::Rgba8Pixel>) -> (String, Str
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Neon Sign, Frosted Glass and Minimal: a Card in that theme (Neon flickering on); done again, the same
+    #[test]
+    fn the_old_designs_become_a_layout_and_a_theme() {
+        let mut p = json!({ "widgetDesign": "neon", "widgetOutputs": [{ "widgetDesign": "minimal", "wFade": false }, { "widgetDesign": "vinyl" }] });
+        widget_split_all(&mut p);
+        assert_eq!((&p["widgetDesign"], &p["widgetTheme"], &p["wEnter"]), (&json!("card"), &json!("neon"), &json!("flicker")));
+        let o = &p["widgetOutputs"];
+        assert_eq!((&o[0]["widgetDesign"], &o[0]["widgetTheme"], &o[0]["wEnter"]), (&json!("card"), &json!("clear"), &json!("none")));
+        assert!(o[1]["widgetTheme"].is_null() && o[1]["widgetDesign"] == "vinyl");
+        // (a theme picked since: kept)
+        let mut q = json!({ "widgetDesign": "frosted", "widgetTheme": "paper" });
+        widget_split_all(&mut q);
+        assert_eq!((&q["widgetDesign"], &q["widgetTheme"]), (&json!("card"), &json!("paper")));
+        let again = p.clone();
+        widget_split_all(&mut p);
+        assert_eq!(p, again);
+    }
 
     #[test]
     fn alerts_follow_the_web_apps_settings() {

@@ -111,7 +111,7 @@ export struct KeyStep { text: string, has-url: bool, copies: [string] }
 export struct KeyField { label: string, value: string, ok: bool }
 // the Lyrics Widget's look, for its page's preview
 /// The Stream Widget's preview: its design and look as they're set
-export struct WidgetLook { design: string, right: bool, rounded: bool, text: float, c1: color, c2: color, spin: bool, requester: bool }
+export struct WidgetLook { design: string, theme: string, right: bool, rounded: bool, text: float, c1: color, c2: color, spin: bool, requester: bool }
 
 /// The alerts' preview: their theme and colours as they're set
 /// A HUD frame, for its editor: where it is on the screenshot (fractions), and whether it's the one picked
@@ -2603,11 +2603,10 @@ component DesignSketch inherits VerticalLayout {
         if root.k == 2: Rectangle { x: (parent.width - 38px) / 2; y: 6px; width: 38px; height: 48px; border-radius: 6px; background: parent.fill;
             Rectangle { x: 5px; y: 5px; width: 28px; height: 26px; border-radius: 3px; background: Theme.text.with-alpha(0.5); }
             Rectangle { x: 5px; y: 36px; width: 22px; height: 4px; border-radius: 2px; background: Theme.text.with-alpha(0.8); } }
-        // minimal
-        if root.k == 3: Rectangle { x: 10px; y: 20px; width: parent.width - 20px; height: 20px;
-            Rectangle { width: 14px; height: 14px; y: 3px; border-radius: 3px; background: Theme.text.with-alpha(0.5); }
-            Rectangle { x: 20px; y: 5px; width: 45%; height: 5px; border-radius: 2px; background: Theme.text.with-alpha(0.85); }
-            Rectangle { x: 20px; y: 13px; width: 30%; height: 3px; border-radius: 2px; background: Theme.text.with-alpha(0.4); } }
+        // text only
+        if root.k == 3: Rectangle { x: 10px; y: 18px; width: parent.width - 20px; height: 24px; border-radius: 6px; background: parent.fill;
+            Rectangle { x: 6px; y: 6px; width: 55%; height: 5px; border-radius: 2px; background: Theme.text.with-alpha(0.85); }
+            Rectangle { x: 6px; y: 15px; width: 35%; height: 3px; border-radius: 2px; background: Theme.text.with-alpha(0.45); } }
         // pill
         if root.k == 4: Rectangle { x: 8px; y: 20px; width: parent.width - 16px; height: 20px; border-radius: 10px; background: parent.fill;
             Rectangle { x: 3px; y: 3px; width: 14px; height: 14px; border-radius: 7px; background: Theme.text.with-alpha(0.5); }
@@ -2623,10 +2622,11 @@ component DesignSketch inherits VerticalLayout {
         // ticker
         if root.k == 7: Rectangle { x: 0; y: 25px; width: parent.width; height: 10px; background: parent.fill;
             Rectangle { x: 6px; y: 3px; width: 70%; height: 4px; border-radius: 2px; background: Theme.text.with-alpha(0.8); } }
-        // neon sign
-        if root.k == 8: Rectangle { x: 14px; y: 14px; width: parent.width - 28px; height: 32px; border-radius: 6px; border-width: 2px; border-color: Theme.accent-2; background: #00000060;
-            Rectangle { x: 8px; y: 9px; width: 55%; height: 5px; border-radius: 2px; background: Theme.accent; }
-            Rectangle { x: 8px; y: 18px; width: 35%; height: 4px; border-radius: 2px; background: Theme.accent-2; } }
+        // split
+        if root.k == 8: Rectangle { x: 10px; y: 12px; width: parent.width - 20px; height: 36px; border-radius: 6px; background: parent.fill; clip: true;
+            Rectangle { x: 0; y: 0; width: 36px; height: 36px; background: Theme.text.with-alpha(0.5); }
+            Rectangle { x: 44px; y: 11px; width: 40%; height: 6px; border-radius: 2px; background: Theme.text.with-alpha(0.85); }
+            Rectangle { x: 44px; y: 22px; width: 25%; height: 3px; border-radius: 2px; background: Theme.text.with-alpha(0.45); } }
         // lower third
         if root.k == 9: Rectangle { x: 0; y: 34px; width: parent.width * 0.8; height: 18px; background: #000000b0;
             Rectangle { width: 4px; height: parent.height; background: Theme.accent; }
@@ -2652,11 +2652,10 @@ component DesignSketch inherits VerticalLayout {
         if root.k == 13: Rectangle { x: (parent.width - 34px) / 2; y: 6px; width: 34px; height: 44px; background: #fafafa; transform-rotation: -6deg;
             Rectangle { x: 3px; y: 3px; width: 28px; height: 28px; background: sk.fill; }
             Rectangle { x: 7px; y: 35px; width: 20px; height: 3px; background: #444; } }
-        // frosted glass
-        if root.k == 14: Rectangle { x: 0; y: 0; width: parent.width; height: parent.height; background: @linear-gradient(135deg, Theme.accent.with-alpha(0.5) 0%, Theme.accent-2.with-alpha(0.4) 100%);
-            Rectangle { x: 12px; y: 15px; width: parent.width - 24px; height: 30px; border-radius: 8px; background: #ffffff30; border-width: 1px; border-color: #ffffff50;
-                Rectangle { x: 4px; y: 4px; width: 22px; height: 22px; border-radius: 5px; background: Theme.text.with-alpha(0.55); }
-                Rectangle { x: 32px; y: 9px; width: 40%; height: 4px; border-radius: 2px; background: Theme.text.with-alpha(0.9); } } }
+        // mini
+        if root.k == 14: Rectangle { x: (parent.width - 44px) / 2; y: 8px; width: 44px; height: 44px; border-radius: 6px; background: Theme.text.with-alpha(0.45); clip: true;
+            Rectangle { y: 30px; height: 14px; background: #00000090;
+                Rectangle { x: 4px; y: 5px; width: 60%; height: 3px; border-radius: 1px; background: #ffffffd0; } } }
         // vertical
         if root.k == 15: Rectangle { x: (parent.width - 30px) / 2; y: 4px; width: 30px; height: 52px; border-radius: 5px; background: parent.fill;
             Rectangle { x: 4px; y: 4px; width: 22px; height: 22px; border-radius: 3px; background: Theme.text.with-alpha(0.5); }
@@ -2664,7 +2663,7 @@ component DesignSketch inherits VerticalLayout {
             Rectangle { x: 8px; y: 37px; width: 14px; height: 3px; border-radius: 2px; background: Theme.text.with-alpha(0.45); } }
         dsa := TouchArea { mouse-cursor: MouseCursor.pointer; clicked => { root.clicked(); } }
         // (its recommended Browser source size in OBS, as you point at it: its own shape, sharp at 1080p)
-        TipSpot { hover: dsa.has-hover; tip: root.name + ". Recommended Browser source size: " + ["920 × 260", "1120 × 128", "600 × 760", "920 × 220", "960 × 160", "920 × 300", "960 × 540", "1280 × 96", "960 × 280", "1240 × 180", "840 × 440", "1040 × 300", "920 × 300", "600 × 720", "920 × 260", "480 × 840"][root.k] + " px."; }
+        TipSpot { hover: dsa.has-hover; tip: root.name + ". Recommended Browser source size: " + ["920 × 260", "1120 × 128", "600 × 760", "920 × 180", "960 × 160", "920 × 300", "960 × 540", "1280 × 96", "1040 × 340", "1240 × 180", "840 × 440", "1040 × 300", "920 × 300", "600 × 720", "440 × 440", "480 × 840"][root.k] + " px."; }
     }
     Text { text: root.name; color: root.on ? Theme.text : Theme.muted; font-size: 12px; font-weight: root.on ? 700 : 400; horizontal-alignment: center; }
 }
@@ -2686,56 +2685,108 @@ component WidgetPreview inherits Rectangle {
     Caps { r: 14px; outside: Theme.bg; tl: #2b3550; tr: #33304c; bl: #33304c; br: #3a2b48; top: true; bottom: true; }
     Text { x: 12px; y: 8px; text: "A preview, near enough. Pop Out Preview below shows it exactly."; color: #ffffffa0; font-size: 11px; }
     property <string> d: root.look.design;
+    property <string> th: root.look.theme;
     property <bool> column: root.d == "square" || root.d == "poster" || root.d == "polaroid" || root.d == "vertical";
     property <bool> slim: root.d == "bar" || root.d == "ticker";
-    property <bool> bare: root.d == "minimal";
+    property <bool> mini: root.d == "mini";
+    property <bool> split: root.d == "split";
+    property <bool> no-art: root.d == "text" || root.d == "ticker" || root.d == "cassette" || root.d == "equaliser" || root.d == "nownext";
+    property <bool> bare: root.th == "clear";
     property <bool> round-art: root.d == "vinyl";
+    property <color> ink: root.th == "paper" && !root.mini ? #1d1b22 : #ffffff;
     property <length> fs: 15px * clamp(root.look.text, 0.7, 1.6);
     property <float> p: Theme.motion ? mod(animation-tick() / 1ms, 60000) / 60000 : 0.35;
+    // (Frosted Glass: the cover's colours, blurred, behind the card)
+    if root.th == "frosted": Rectangle { x: card.x - 20px; y: card.y - 14px; width: card.width + 40px; height: card.height + 28px; border-radius: 30px; background: @linear-gradient(135deg, root.look.c1.with-alpha(0.55) 0%, root.look.c2.with-alpha(0.45) 100%); }
     card := Rectangle {
-        property <length> w: root.column ? 170px : root.slim ? min(root.width - 48px, 520px) : min(root.width - 48px, 440px);
-        property <length> h: root.column ? 150px : root.slim ? 38px : 96px;
+        property <length> w: root.mini ? 120px : root.column ? 170px : root.slim ? min(root.width - 48px, 520px) : min(root.width - 48px, 440px);
+        property <length> h: root.mini ? 120px : root.column ? 150px : root.slim ? 38px : root.d == "text" ? 70px : 96px;
         width: self.w;
         height: self.h;
         x: root.look.right ? root.width - self.w - 24px : 24px;
         y: (root.height - self.h) / 2 + 8px;
         border-radius: !root.look.rounded ? 0px : root.d == "pill" ? self.h / 2 : root.slim ? 6px : 14px;
-        // (a solid blend of its two colours: a gradient would lose its rounded corners in the software renderer)
-        background: root.bare ? transparent : root.d == "frosted" ? #ffffff26 : root.d == "neon" ? #08061ae6 : root.look.c1.mix(root.look.c2, 0.5).mix(#0a0814, 0.5);
-        border-width: root.d == "neon" ? 2px : root.d == "frosted" ? 1px : 0px;
-        border-color: root.d == "neon" ? root.look.c1 : #ffffff48;
-        drop-shadow-blur: root.d == "neon" ? 16px : 0px;
+        // (its theme's panel: a solid blend of its two colours, as a gradient would lose its rounded corners in
+        // the software renderer)
+        background: root.bare ? transparent : root.th == "frosted" ? #ffffff26 : root.th == "neon" ? #08061ae6 : root.th == "solid" ? #0d0d13eb : root.th == "paper" ? #f7f4ee
+            : root.look.c1.mix(root.look.c2, 0.5).mix(#0a0814, 0.5);
+        border-width: root.th == "neon" ? 2px : root.th == "frosted" ? 1px : 0px;
+        border-color: root.th == "neon" ? root.look.c1 : #ffffff48;
+        drop-shadow-blur: root.th == "neon" ? 16px : 0px;
         drop-shadow-color: root.look.c1;
         clip: true;
-        // (its cover: square, or a record that turns)
-        Rectangle {
-            property <length> s: root.column ? 92px : root.slim ? 28px : 72px;
-            width: self.s;
+        // (Dark: a stripe of its accent down its side)
+        if root.th == "solid": Rectangle { x: root.look.right ? parent.width - 4px : 0px; width: 4px; background: root.look.c1; }
+        // (its cover: square, a record that turns, to the edge (Split), or the whole of it (Mini))
+        if !root.no-art: Rectangle {
+            property <length> s: root.mini || root.split ? parent.height : root.column ? 92px : root.slim ? 28px : 72px;
+            width: root.mini ? parent.width : self.s;
             height: self.s;
-            x: root.column ? (parent.width - self.s) / 2 : root.look.right ? parent.width - self.s - 12px : (root.slim ? 5px : 12px);
-            y: root.column ? 10px : (parent.height - self.s) / 2;
-            border-radius: root.round-art || root.d == "pill" ? self.s / 2 : 8px;
+            x: root.mini ? 0px : root.column ? (parent.width - self.s) / 2 : root.split ? (root.look.right ? parent.width - self.s : 0px) : root.look.right ? parent.width - self.s - 12px : (root.slim ? 5px : 12px);
+            y: root.mini || root.split ? 0px : root.column ? 10px : (parent.height - self.s) / 2;
+            border-radius: root.mini || root.split ? 0px : root.round-art || root.d == "pill" ? self.s / 2 : 8px;
             clip: true;
             background: root.look.c1.with-alpha(0.5);
             Image { source: root.art; width: parent.width; height: parent.height; image-fit: cover; transform-rotation: root.round-art && root.look.spin && Theme.motion ? mod(animation-tick() / 1ms, 4000) / 4000 * 360deg : 0deg; }
         }
+        // (Mini: its name over the bottom of the cover)
+        if root.mini: Rectangle { y: parent.height - 40px; height: 40px; background: @linear-gradient(180deg, #00000000 0%, #000000c8 100%); }
         VerticalLayout {
-            x: root.column ? 10px : root.look.right ? 12px : (root.slim ? 42px : 98px);
-            y: root.column ? 108px : 0px;
-            width: root.column ? parent.width - 20px : parent.width - (root.slim ? 54px : 112px);
-            height: root.column ? 36px : parent.height;
+            property <length> lx: root.no-art ? 14px : root.split ? parent.height + 14px : root.slim ? 42px : 98px;
+            x: root.mini || root.column ? 10px : root.look.right ? (root.no-art ? 14px : 12px) : self.lx;
+            y: root.mini ? parent.height - 38px : root.column ? 108px : 0px;
+            width: root.mini || root.column ? parent.width - 20px : parent.width - self.lx - 14px;
+            height: root.mini ? 34px : root.column ? 36px : parent.height;
             alignment: center;
             spacing: 2px;
-            Text { text: root.title; color: #ffffff; font-size: root.slim ? root.fs * 0.9 : root.fs * 1.15; font-weight: 800; overflow: elide; horizontal-alignment: root.column ? center : root.look.right ? right : left; }
-            if !root.slim: Text { text: root.artist + (root.look.requester ? "  \u{b7}  for PixelPanda" : ""); color: #ffffffc0; font-size: root.fs * 0.85; overflow: elide; horizontal-alignment: root.column ? center : root.look.right ? right : left; }
-            if !root.slim && !root.column: Rectangle {
+            Text { text: root.title; font-size: root.mini ? root.fs * 0.8 : root.slim ? root.fs * 0.9 : root.split || root.d == "text" ? root.fs * 1.3 : root.fs * 1.15; font-weight: 800; overflow: elide; horizontal-alignment: root.column ? center : root.look.right ? right : left;
+                color: root.th == "neon" ? #ffffff : root.ink; }
+            if !root.slim: Text { text: root.artist + (root.look.requester && !root.mini ? "  \u{b7}  for PixelPanda" : ""); color: root.th == "neon" ? root.look.c1.mix(#ffffff, 0.4) : root.ink.with-alpha(0.72); font-size: root.mini ? root.fs * 0.7 : root.fs * 0.85; overflow: elide; horizontal-alignment: root.column ? center : root.look.right ? right : left; }
+            if !root.slim && !root.column && !root.mini: Rectangle {
                 height: 4px;
                 border-radius: 2px;
-                background: #ffffff30;
-                Rectangle { x: 0; width: parent.width * root.p; border-radius: 2px; background: @linear-gradient(90deg, root.look.c1 0%, root.look.c2 100%); }
+                background: root.ink.with-alpha(0.2);
+                Rectangle { x: 0; width: parent.width * root.p; border-radius: 2px; background: root.th == "colours" || root.th == "frosted" ? @linear-gradient(90deg, root.look.c1 0%, root.look.c2 100%) : root.look.c1; }
             }
         }
     }
+}
+
+/// A widget theme's sketch, to pick it by: a little card with its panel, colours and touches
+component ThemeSketch inherits VerticalLayout {
+    in property <int> k;
+    in property <string> name;
+    in property <bool> on;
+    callback clicked();
+    spacing: 5px;
+    Rectangle {
+        height: 52px;
+        border-radius: 10px;
+        background: Theme.bg;
+        border-width: root.on ? 2px : 1px;
+        border-color: root.on ? Theme.accent : Theme.line;
+        clip: true;
+        // (Frosted Glass: colours, blurred, behind)
+        if root.k == 4: Rectangle { border-radius: 9px; background: @linear-gradient(135deg, Theme.accent.with-alpha(0.5) 0%, Theme.accent-2.with-alpha(0.4) 100%); }
+        Rectangle {
+            property <color> ink: root.k == 2 ? #1d1b22 : #ffffff;
+            x: 10px;
+            y: 12px;
+            width: parent.width - 20px;
+            height: 28px;
+            border-radius: 6px;
+            background: root.k == 0 ? Theme.accent.mix(Theme.accent-2, 0.5).mix(#0a0814, 0.55) : root.k == 1 ? #0d0d13 : root.k == 2 ? #f7f4ee : root.k == 3 ? #060310d0 : root.k == 4 ? #ffffff30 : transparent;
+            border-width: root.k == 3 ? 1.5px : root.k == 4 ? 1px : 0px;
+            border-color: root.k == 3 ? Theme.accent : #ffffff50;
+            clip: true;
+            if root.k == 1: Rectangle { x: 0; width: 3px; background: Theme.accent; }
+            Rectangle { x: 5px; y: 4px; width: 20px; height: 20px; border-radius: 4px; background: root.k == 2 ? #00000030 : #ffffff60; }
+            Rectangle { x: 31px; y: 8px; width: 45%; height: 5px; border-radius: 2px; background: root.k == 3 ? Theme.accent.mix(#ffffff, 0.4) : parent.ink.with-alpha(0.85); }
+            Rectangle { x: 31px; y: 17px; width: 28%; height: 3px; border-radius: 2px; background: parent.ink.with-alpha(0.5); }
+        }
+        TouchArea { mouse-cursor: MouseCursor.pointer; clicked => { root.clicked(); } }
+    }
+    Text { text: root.name; color: root.on ? Theme.text : Theme.muted; font-size: 12px; font-weight: root.on ? 700 : 400; horizontal-alignment: center; }
 }
 
 /// The alerts as they'll look in the Stream Widget: a made-up one every few seconds (a follow, a sub, bits, a
@@ -8302,7 +8353,15 @@ export component AppWindow inherits Window {
                                   for c in 4: DesignSketch { horizontal-stretch: 1; preferred-width: 0px; min-width: 0px; k: r * 4 + c; name: f.options[r * 4 + c]; on: f.at == r * 4 + c; clicked => { root.pf-set(i, "\u{2}" + (r * 4 + c)); } }
                               }
                              }
-                             if f.kind != "note" && f.kind != "info" && f.kind != "output" && f.kind != "wave" && f.kind != "designpick": HorizontalLayout {
+                             if f.kind == "themepick": VerticalLayout {
+                              spacing: 8px;
+                              Text { text: f.label; color: Theme.text; font-weight: 700; }
+                              for r in 2: HorizontalLayout {
+                                  spacing: 10px;
+                                  for c in 3: ThemeSketch { horizontal-stretch: 1; preferred-width: 0px; min-width: 0px; k: r * 3 + c; name: f.options[r * 3 + c]; on: f.at == r * 3 + c; clicked => { root.pf-set(i, "\u{2}" + (r * 3 + c)); } }
+                              }
+                             }
+                             if f.kind != "note" && f.kind != "info" && f.kind != "output" && f.kind != "wave" && f.kind != "designpick" && f.kind != "themepick": HorizontalLayout {
                               spacing: 12px;
                               VerticalLayout {
                                   horizontal-stretch: 1;

@@ -8,9 +8,10 @@
   the same look, from Streamer.bot (its WebSocket server) or web requests to /alert. For their sounds,
   tick "Control audio via OBS" on the Browser Source to route them.
 
-  Now playing widget for OBS (Browser Source). Pick the design and corners in the app's Settings.
-  Every design scales to whatever size you give the source:
-    Card 460x130, Slim bar 560x64, Square 300x380, Minimal 460x110, Pill 480x80,
+  Now playing widget for OBS (Browser Source). Pick its layout (where the cover and words sit) and its
+  theme (its panel, colours and animations) in the app's Settings; any theme goes with any layout.
+  Every layout scales to whatever size you give the source:
+    Card 460x130, Slim bar 560x64, Square 300x380, Text Only 460x90, Pill 480x80,
     Vinyl 460x150, Poster 480x270, Ticker 640x48 (the sizes they were drawn at).
   It only displays what the app is playing; it never plays audio.
   You can edit the look below; the widget reloads itself when the app is restarted with changes.
@@ -82,12 +83,11 @@
   body.square #info { flex: none; }
   body.square #title { font-size: 1.15em; }
 
-  /* Minimal: no panel, just text over the stream */
-  body.minimal #card { background: none; box-shadow: none; padding: 0.3rem 0.5rem; }
-  body.minimal #art { height: 82%; }
-  body.minimal #title, body.minimal #artist, body.minimal #times { text-shadow: 0 0.06rem 0.3rem rgba(0, 0, 0, 0.85); }
-  body.minimal #track { background: rgba(255, 255, 255, 0.3); }
-  body.minimal #bar { background: var(--hi); }
+  /* Text Only: the words and the progress, no cover */
+  body.text #art { display: none; }
+  body.text #card { padding: 0.6rem 1rem; }
+  body.text #title { font-size: 1.25em; }
+  body.text #track { margin-top: 0.5rem; }
 
   /* Pill */
   body.pill #card { border-radius: 999px; padding: 0.4rem 1.1rem 0.4rem 0.4rem; gap: 0.75rem; }
@@ -121,14 +121,19 @@
   body.ticker #track { position: absolute; left: 0; right: 0; bottom: 0; height: 0.18rem; margin: 0; border-radius: 0; }
   body.ticker #bar { border-radius: 0; }
 
-  /* Neon sign: the title glowing in the accent, flickering on with each new song */
-  body.neon #card { background: rgba(6, 3, 16, 0.62); border: 0.14rem solid var(--hi); box-shadow: 0 0 1.1rem var(--hi), inset 0 0 0.9rem color-mix(in srgb, var(--hi) 55%, transparent); }
-  body.neon #art { border-radius: 0.4rem; box-shadow: 0 0 0.8rem var(--hi); }
-  body.neon #title { color: #fff; text-shadow: 0 0 0.25rem #fff, 0 0 0.7rem var(--hi), 0 0 1.4rem var(--hi); }
-  body.neon #artist { color: color-mix(in srgb, var(--hi) 40%, #fff); text-shadow: 0 0 0.6rem var(--hi); }
-  body.neon #bar { background: var(--hi); box-shadow: 0 0 0.5rem var(--hi); }
-  body.neon #card.flick { animation: flick 1.1s steps(1) both; }
-  @keyframes flick { 0% { opacity: 0.1; } 12% { opacity: 1; } 18% { opacity: 0.3; } 26% { opacity: 1; } 34% { opacity: 0.55; } 40%, 100% { opacity: 1; } }
+  /* Split: the cover filling one side to the edge, big words on the other */
+  body.split #card { padding: 0 1rem 0 0; gap: 1rem; }
+  body.split #art { height: 100%; max-width: 42%; border-radius: 0; }
+  body.split #title { font-size: 1.3em; }
+  body.right.split #card { padding: 0 0 0 1rem; }
+
+  /* Mini: just the cover, its name over it for a few seconds at each new song */
+  body.mini #card { padding: 0; }
+  body.mini #art { position: absolute; inset: 0; width: 100%; height: 100%; max-width: none; aspect-ratio: auto; border-radius: 0; }
+  body.mini #info { position: absolute; left: 0; right: 0; bottom: 0; padding: 1.4rem 0.7rem 0.75rem; font-size: calc(0.8rem * var(--ts, 1)); background: linear-gradient(180deg, transparent, rgba(0, 0, 0, 0.82)); transition: opacity 0.5s ease, transform 0.5s ease; }
+  body.mini #times { display: none; }
+  body.mini #track { position: absolute; left: 0; right: 0; bottom: 0; height: 0.2rem; margin: 0; border-radius: 0; }
+  body.mini #card.tuck #info { opacity: 0; transform: translateY(35%); }
 
   /* Lower third: a TV-style strip, sliding in from its side at each new song, tucked away after a few seconds */
   body.lower #card { border-radius: 0; padding: 0.5rem 1rem 0.5rem 1.2rem; background: rgba(8, 6, 18, 0.88); transition: transform 0.6s cubic-bezier(0.2, 0.8, 0.2, 1), opacity 0.45s; }
@@ -146,7 +151,7 @@
   body.cassette #art { display: none; }
   body.cassette #info { flex: none; background: linear-gradient(180deg, #f3e6d0 0 62%, var(--hi) 62% 70%, #f3e6d0 70%); color: #2a1f16; border-radius: 0.3rem; padding: 0.35rem 0.6rem; }
   body.cassette #artist { color: #5a4a3a; }
-  body.cassette #who svg { fill: #5a4a3a; }
+  body.cassette #who svg path { fill: #5a4a3a; }
   body.cassette #track, body.cassette #times, body.cassette #xf { display: none; }
   body.cassette #reels { display: flex; justify-content: space-between; padding: 0 2.2rem; }
   body.cassette #reels i { width: 2.4rem; height: 2.4rem; border-radius: 50%; box-sizing: border-box; border: 0.55rem solid #0d0d10; background: repeating-conic-gradient(#d8d8de 0 10deg, #4a4a52 10deg 60deg); animation: spin 2.4s linear infinite; animation-play-state: paused; }
@@ -189,11 +194,6 @@
   body.polaroid #artist { font-family: "Segoe Print", "Bradley Hand", cursive; color: #555; }
   body.polaroid #who svg, body.polaroid #track, body.polaroid #times, body.polaroid #xf { display: none; }
 
-  /* Frosted glass: a see-through card over a blurred copy of the cover */
-  body.frosted #card { background: rgba(255, 255, 255, 0.14); border: 0.06rem solid rgba(255, 255, 255, 0.3); backdrop-filter: blur(0.6rem); }
-  body.frosted #card::before { content: ""; position: absolute; inset: -20%; background: var(--art) center / cover; filter: blur(1.6rem) saturate(1.4); opacity: 0.75; z-index: -1; }
-  body.frosted #card { isolation: isolate; }
-  body.frosted #art { border-radius: 0.7rem; box-shadow: 0 0.3rem 1rem rgba(0, 0, 0, 0.35); }
 
   /* Vertical: tall and narrow, for vertical streams or a layout's side */
   body.vertical #card { flex-direction: column; align-items: stretch; justify-content: flex-start; gap: 0.6rem; padding: 0.7rem; }
@@ -201,6 +201,42 @@
   body.vertical #info { flex: none; text-align: center; }
   body.vertical #who { justify-content: center; }
   body.vertical #title { font-size: 1.1em; }
+
+  /* ---------- the themes: the panel, its colours and its touches, over any layout. Colours (the
+     default) is the gradient above; Cassette and Polaroid keep their own panel, the theme's touches only ---------- */
+  body.th-solid:not(.cassette):not(.polaroid) #card { background: rgba(13, 13, 19, 0.92); box-shadow: inset 0.28rem 0 0 var(--hi); }
+  body.th-solid.right:not(.cassette):not(.polaroid) #card { box-shadow: inset -0.28rem 0 0 var(--hi); }
+  body.th-solid #bar { background: var(--hi); }
+  body.th-paper:not(.cassette):not(.polaroid) #card { background: #f7f4ee; box-shadow: 0 0.3rem 1.1rem rgba(0, 0, 0, 0.35); }
+  body.th-paper:not(.cassette):not(.polaroid):not(.poster):not(.mini) #card { color: #1d1b22; }
+  body.th-paper:not(.cassette):not(.polaroid):not(.poster):not(.mini) #artist, body.th-paper:not(.cassette):not(.polaroid) #times { color: rgba(29, 27, 34, 0.68); }
+  body.th-paper:not(.cassette):not(.polaroid):not(.poster):not(.mini) #who svg path { fill: #1d1b22; }
+  body.th-paper #track { background: rgba(0, 0, 0, 0.12); }
+  body.th-paper #bar { background: var(--hi); }
+  body.th-neon:not(.cassette):not(.polaroid) #card { background: rgba(6, 3, 16, 0.62); border: 0.14rem solid var(--hi); box-shadow: 0 0 1.1rem var(--hi), inset 0 0 0.9rem color-mix(in srgb, var(--hi) 55%, transparent); }
+  body.th-neon:not(.vinyl):not(.mini):not(.poster):not(.split) #art { border-radius: 0.4rem; }
+  body.th-neon #art { box-shadow: 0 0 0.8rem var(--hi); }
+  body.th-neon:not(.cassette) #title { color: #fff; text-shadow: 0 0 0.25rem #fff, 0 0 0.7rem var(--hi), 0 0 1.4rem var(--hi); }
+  body.th-neon:not(.cassette) #artist { color: color-mix(in srgb, var(--hi) 40%, #fff); text-shadow: 0 0 0.6rem var(--hi); }
+  body.th-neon #bar { background: var(--hi); box-shadow: 0 0 0.5rem var(--hi); }
+  body.th-frosted:not(.cassette):not(.polaroid) #card { background: rgba(255, 255, 255, 0.14); border: 0.06rem solid rgba(255, 255, 255, 0.3); backdrop-filter: blur(0.6rem); isolation: isolate; }
+  body.th-frosted:not(.cassette):not(.polaroid) #card::before { content: ""; position: absolute; inset: -20%; background: var(--art) center / cover; filter: blur(1.6rem) saturate(1.4); opacity: 0.75; z-index: -1; }
+  body.th-frosted #art { box-shadow: 0 0.3rem 1rem rgba(0, 0, 0, 0.35); }
+  body.th-clear:not(.cassette):not(.polaroid) #card { background: none; border: 0; box-shadow: none; }
+  body.th-clear:not(.cassette) #title, body.th-clear:not(.cassette) #artist, body.th-clear #times { text-shadow: 0 0.06rem 0.3rem rgba(0, 0, 0, 0.85); }
+  body.th-clear #track { background: rgba(255, 255, 255, 0.3); }
+  body.th-clear #bar { background: var(--hi); }
+
+  /* how a new song comes in: Fade (above), Slide, Pop, Flicker, or none */
+  body.en-slide #info:not(.fade) { animation: enSlide 0.55s cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+  body.right.en-slide #info:not(.fade) { animation-name: enSlideR; }
+  body.en-pop #info:not(.fade) { animation: enPop 0.5s cubic-bezier(0.2, 0.9, 0.3, 1.3) both; }
+  body.en-pop:not(.vinyl) #art:not(.fade) { animation: enPop 0.55s cubic-bezier(0.2, 0.9, 0.3, 1.3) both; }
+  @keyframes enSlide { from { opacity: 0; transform: translateX(-1.4rem); } }
+  @keyframes enSlideR { from { opacity: 0; transform: translateX(1.4rem); } }
+  @keyframes enPop { from { opacity: 0; transform: scale(0.82); } }
+  #card.flick { animation: flick 1.1s steps(1) both; }
+  @keyframes flick { 0% { opacity: 0.1; } 12% { opacity: 1; } 18% { opacity: 0.3; } 26% { opacity: 1; } 34% { opacity: 0.55; } 40%, 100% { opacity: 1; } }
 
   /* (centred designs: the artist only as wide as its name, so its platform's icon sits beside it) */
   body.equaliser #artist, body.vertical #artist, body.polaroid #artist { flex: 0 1 auto; }
@@ -309,7 +345,7 @@
   body.alerting[data-tr="overlay"] #card, body.alerting[data-tr="crossfade"] #card { opacity: 0 !important; }
   body[data-tr="crossfade"] #card { transition: opacity 0.6s ease; }
   /* Minimal has no panel behind it: over the top, the card goes at once, so the two never show together */
-  body.minimal.alerting[data-tr="overlay"] #card { transition: none; visibility: hidden; }
+  body.th-clear.alerting[data-tr="overlay"] #card { transition: none; visibility: hidden; }
   /* Seamless: the panel stays where it is; only what's on it changes, and its colours blend */
   body.alerting[data-tr="seamless"] #art, body.alerting[data-tr="seamless"] #info { opacity: 0; filter: blur(6px); }
   body[data-tr="seamless"]:not(.alerting) #art, body[data-tr="seamless"]:not(.alerting) #info { transition-delay: 0.15s; }
@@ -361,9 +397,9 @@
   body.bar #aMsg { display: none; }
   body.square #alert { flex-direction: column; align-items: stretch; text-align: center; }
   body.square #aIcon { width: 100%; height: auto; max-width: none; flex: 1 1 auto; aspect-ratio: auto; }
-  body.minimal #alert { background: none; padding: 0.3rem 0.5rem; }
-  body.minimal #aIcon { height: 82%; }
-  body.minimal #aText { text-shadow: 0 0.06rem 0.3rem rgba(0, 0, 0, 0.85); }
+  body.th-clear #alert { background: none; }
+  body.th-clear #aText { text-shadow: 0 0.06rem 0.3rem rgba(0, 0, 0, 0.85); }
+  body.text #aIcon { display: none; }
   body.pill #alert { border-radius: 999px; padding: 0.4rem 1.1rem 0.4rem 0.4rem; gap: 0.75rem; }
   body.pill #aIcon, body.vinyl #aIcon { border-radius: 50%; }
   body.vinyl #aIcon { height: calc(100% - 0.7rem); margin-left: 0.35rem; box-shadow: 0 0 0 0.3rem rgba(0, 0, 0, 0.55); }
@@ -442,14 +478,20 @@
   };
   // The size each design was drawn at; everything scales from this
   const BASE = {
-    card: [460, 130], bar: [560, 64], square: [300, 380], minimal: [460, 110],
+    card: [460, 130], bar: [560, 64], square: [300, 380], text: [460, 90],
     pill: [480, 80], vinyl: [460, 150], poster: [480, 270], ticker: [640, 48],
-    neon: [480, 140], lower: [620, 90], cassette: [420, 220], equaliser: [520, 150],
-    nownext: [460, 150], polaroid: [300, 360], frosted: [460, 130], vertical: [240, 420],
+    split: [520, 170], lower: [620, 90], cassette: [420, 220], equaliser: [520, 150],
+    nownext: [460, 150], polaroid: [300, 360], mini: [220, 220], vertical: [240, 420],
   };
+  // (the designs from before layouts and themes were apart: a card in that theme)
+  const OLD = { neon: ["card", "neon"], frosted: ["card", "frosted"], minimal: ["card", "clear"] };
+  const THEMES = ["colours", "solid", "paper", "neon", "frosted", "clear"];
+  const ENTERS = ["fade", "slide", "pop", "flicker", "none"];
   const $ = (id) => document.getElementById(id);
   let s = null;
   let design = "card";
+  let theme = "colours";
+  let enter = "fade";
   let shownKey = "";
   let shownNote = "";
   let lookCls = "";   // the design classes last set on the page
@@ -463,11 +505,16 @@
     measure($("artist"));
   }
 
-  function applyLook(d, rounded, anim, align) {
-    if (!BASE[d]) d = "card";
+  function applyLook(d, rounded, anim, align, th) {
     anim = anim || {};
-    const cls = d + (rounded ? "" : " sharp") + (align === "right" ? " right" : "") + (anim.fade === false ? " nofade" : "") +
+    if (OLD[d]) { th = th || OLD[d][1]; d = OLD[d][0]; }
+    if (!BASE[d]) d = "card";
+    if (!THEMES.includes(th)) th = "colours";
+    let en = ENTERS.includes(anim.enter) ? anim.enter : anim.fade === false ? "none" : "fade";
+    const cls = d + " th-" + th + " en-" + en + (rounded ? "" : " sharp") + (align === "right" ? " right" : "") + (en === "none" ? " nofade" : "") +
       (anim.scroll === false ? " noscroll" : "") + (anim.spin === false ? " nospin" : "");
+    theme = th;
+    enter = en;
     const cf = (anim.color === undefined ? 1.2 : Number(anim.color)) + "s";
     document.documentElement.style.setProperty("--cf", cf);
     // the look's own classes only: an alert that's showing (alerting) is left as it is
@@ -570,7 +617,7 @@
     // paused: the card steps away until it plays again (alerts still show)
     $("card").classList.toggle("show", has && !!s.playing);
     if (!has) return;
-    applyLook(s.design || "card", s.rounded !== false, s.anim, s.align);
+    applyLook(s.design || "card", s.rounded !== false, s.anim, s.align, s.theme);
     $("card").classList.toggle("paused", !s.playing);
     const key = s.title + "\u0001" + (s.artist || "") + "\u0001" + (s.artwork || "") + "\u0001" + (s.requested_by || "");
     if (key !== shownKey) {
@@ -885,7 +932,7 @@
       // with no card: a collage still sweeps in; the rest come in with their animation
       if (!playing && t !== "collage") t = "overlay";
       // with no panel (Minimal) the card and alert mustn't show together: those become seamless
-      if (design === "minimal" && (t === "crossfade" || t === "wipe")) t = "seamless";
+      if (theme === "clear" && (t === "crossfade" || t === "wipe")) t = "seamless";
       body.dataset.tr = t;
     }
     const tr = body.dataset.tr;
@@ -1256,7 +1303,7 @@
       alertConfig(s.alerts_cfg);
       if (s.alerts_cfg && s.alerts_cfg.on && !s.title) {
         // nothing playing: alerts still show, in the chosen look and colours
-        applyLook(s.design || "card", s.rounded !== false, s.anim, s.align);
+        applyLook(s.design || "card", s.rounded !== false, s.anim, s.align, s.theme);
         const root = document.documentElement.style;
         root.setProperty("--bg1", mix(s.accent, 0.55));
         root.setProperty("--bg2", mix(s.accent2 || s.accent, 0.42));
@@ -1276,21 +1323,22 @@
   fit();
   poll();
   // ---------- the newer designs' own ----------
-  // (a new song: Neon flickers on, the lower third slides in, then tucks away)
+  // (a new song: Flicker flickers it on; the lower third slides in, then tucks away; Mini shows its name, then
+  // tucks it away)
   let songSeen = "", tuckT = null;
   function designTick() {
     const card = $("card");
     const key = s && s.title ? s.title + "|" + (s.artist || "") : "";
     if (key && key !== songSeen) {
       songSeen = key;
-      if (design === "neon") { card.classList.remove("flick"); void card.offsetWidth; card.classList.add("flick"); }
-      if (design === "lower") {
+      if (enter === "flicker") { card.classList.remove("flick"); void card.offsetWidth; card.classList.add("flick"); }
+      if (design === "lower" || design === "mini") {
         card.classList.remove("tuck");
         clearTimeout(tuckT);
         tuckT = setTimeout(() => card.classList.add("tuck"), 9000);
       }
     }
-    if (design !== "lower") card.classList.remove("tuck");
+    if (design !== "lower" && design !== "mini") card.classList.remove("tuck");
     // (Frosted: the cover, blurred, behind the card)
     if (s && s.artwork) card.style.setProperty("--art", "url(\"" + String(s.artwork).replace(/"/g, "") + "\")");
     // (Now and next: the song coming next, and who asked for it)

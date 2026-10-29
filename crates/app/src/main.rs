@@ -8109,20 +8109,20 @@ fn panel_paint(shared: &Shared, name: &str, vals: &serde_json::Map<String, serde
         let now = if kind == "togglecfg" { serde_json::json!(set_row_on(&shared.borrow().web.prefs, &key, false)) } else { vals.get(&key).cloned().unwrap_or_default() };
         let labels = || -> Vec<slint::SharedString> { f["labels"].as_array().into_iter().flatten().filter_map(|x| x.as_str().map(slint::SharedString::from)).collect() };
         let options: Vec<slint::SharedString> = match kind.as_str() {
-            "row" | "select" | "designpick" | "stepper" | "wave" => labels(),
+            "row" | "select" | "designpick" | "themepick" | "stepper" | "wave" => labels(),
             "range" | "rangenum" => vec![f["min"].to_string().into(), f["max"].to_string().into(), f["step"].to_string().into(), f["unit"].as_str().unwrap_or("").into()],
             "togglecfg" => vec!["Configure".into()],
             _ => Vec::new(),
         };
         // (where it is among its options; a colour: its value as 0xRRGGBB, -1 if it isn't one)
         let at: i32 = match kind.as_str() {
-            "select" | "designpick" | "stepper" => f["options"].as_array().and_then(|o| o.iter().position(|o| panels::same(o, &now))).unwrap_or(0) as i32,
+            "select" | "designpick" | "themepick" | "stepper" => f["options"].as_array().and_then(|o| o.iter().position(|o| panels::same(o, &now))).unwrap_or(0) as i32,
             "color" => now.as_str().and_then(|c| c.strip_prefix('#')).filter(|c| c.len() == 6).and_then(|c| i32::from_str_radix(c, 16).ok()).unwrap_or(-1),
             _ => 0,
         };
         let value = match kind.as_str() {
             "row" | "togglecfg" => if now.as_bool() == Some(true) { "true".into() } else { "false".into() },
-            "select" | "designpick" | "stepper" => f["labels"][at.max(0) as usize].as_str().unwrap_or("").to_string(),
+            "select" | "designpick" | "themepick" | "stepper" => f["labels"][at.max(0) as usize].as_str().unwrap_or("").to_string(),
             "range" | "rangenum" => now.as_f64().unwrap_or(f["min"].as_f64().unwrap_or(0.0)).to_string(),
             "toggle" => if now.as_bool() == Some(true) { "true".into() } else { "false".into() },
             "info" | "output" | "button" => f["value"].as_str().unwrap_or("").to_string(),
@@ -8145,6 +8145,7 @@ fn panel_paint(shared: &Shared, name: &str, vals: &serde_json::Map<String, serde
             let on = |k: &str, d: bool| vals.get(k).and_then(|v| v.as_bool()).unwrap_or(d);
             ui.set_pf_widget(WidgetLook {
                 design: vals.get("widgetDesign").and_then(|v| v.as_str()).unwrap_or("card").into(),
+                theme: vals.get("widgetTheme").and_then(|v| v.as_str()).unwrap_or("colours").into(),
                 right: vals.get("widgetAlign").and_then(|v| v.as_str()) == Some("right"),
                 rounded: on("widgetRounded", true),
                 text: vals.get("widgetText").and_then(|v| v.as_f64()).unwrap_or(1.0) as f32,
@@ -8176,7 +8177,7 @@ fn panel_set(shared: &Shared, name: &str, mut vals: serde_json::Map<String, serd
     let changed = key.clone();
     let redraw = match f["type"].as_str().unwrap_or("") {
         "toggle" => { vals.insert(key, serde_json::json!(v == "true")); true }
-        "select" | "designpick" | "stepper" => {
+        "select" | "designpick" | "themepick" | "stepper" => {
             let opts = f["options"].as_array().cloned().unwrap_or_default();
             let now = vals.get(&key).cloned().unwrap_or_default();
             // (picked from its list, or − / +: by its place; else on to the next)

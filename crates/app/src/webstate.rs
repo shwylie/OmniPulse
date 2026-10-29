@@ -131,6 +131,8 @@ pub fn load() -> WebState {
     if let (Some(mine), Some(all)) = (native_prefs().as_object().cloned(), s.prefs.as_object_mut()) {
         all.extend(mine);
     }
+    // (the Stream Widget's old designs, as a layout and a theme)
+    crate::integrations::widget_split_all(&mut s.prefs);
     // this app's own plays count too
     for p in native_plays() {
         let e = s.last_played.entry(p.id.clone()).or_insert(0);

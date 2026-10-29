@@ -13,7 +13,7 @@ use serde_json::{json, Map, Value};
 /// A widget's look: what each of its outputs can have of its own (the rest, its address and port, are the first's)
 pub fn look_keys(kind: &str) -> Vec<&'static str> {
     match kind {
-        "widget" => vec!["widgetDesign", "widgetAlign", "widgetRounded", "widgetText", "wFade", "wScroll", "wSpin", "wRequester", "wColor", "widgetOwnCol", "widgetCol1", "widgetCol2"],
+        "widget" => vec!["widgetDesign", "widgetTheme", "widgetAlign", "widgetRounded", "widgetText", "wEnter", "wFade", "wScroll", "wSpin", "wRequester", "wColor", "widgetOwnCol", "widgetCol1", "widgetCol2"],
         "lyricsw" => keys("lyricsw").into_iter().map(|(k, _)| k).collect(),
         _ => Vec::new(),
     }
@@ -96,7 +96,7 @@ fn keys(name: &str) -> Vec<(&'static str, Value)> {
         "smart" => vec![("shareRatings", json!(true)), ("smartBlend", json!(true)), ("smartKeys", json!(true)), ("smartMax", json!(10)), ("smartTape", json!(false)), ("smartRoll", json!(false)), ("smartVoices", json!(true))],
         "requests" => vec![("reqBot", json!("streamerbot")), ("reqRadioEdit", json!(false)), ("reqNoAi", json!(false)), ("reqLimits", json!(true)), ("reqMax", json!(10)), ("reqPerUser", json!(2)), ("reqPort", json!(7879)), ("botRemote", json!(false))],
         "socials" => vec![("socialStyle", json!("card")), ("socialAlign", json!("left")), ("socialSecs", json!(8)), ("socialAll", json!(false)), ("socialRounded", json!(true)), ("socialColoured", json!(false)), ("socialMotion", json!("rise"))],
-        "widget" => vec![("widgetPort", json!(7878)), ("widgetDesign", json!("card")), ("widgetAlign", json!("left")), ("widgetRounded", json!(true)), ("widgetText", json!(1)), ("wFade", json!(true)), ("wScroll", json!(true)), ("wSpin", json!(true)), ("wRequester", json!(true)), ("wColor", json!(1.2)), ("alertInWidget", json!(false)), ("widgetOwnCol", json!(false)), ("widgetCol1", json!("#8e9bff")), ("widgetCol2", json!("#b48eff"))],
+        "widget" => vec![("widgetPort", json!(7878)), ("widgetDesign", json!("card")), ("widgetTheme", json!("colours")), ("wEnter", json!("fade")), ("widgetAlign", json!("left")), ("widgetRounded", json!(true)), ("widgetText", json!(1)), ("wFade", json!(true)), ("wScroll", json!(true)), ("wSpin", json!(true)), ("wRequester", json!(true)), ("wColor", json!(1.2)), ("alertInWidget", json!(false)), ("widgetOwnCol", json!(false)), ("widgetCol1", json!("#8e9bff")), ("widgetCol2", json!("#b48eff"))],
         "report" => vec![("reportKind", json!("bug")), ("reportTitle", json!("")), ("reportText", json!("")), ("reportContact", json!("")), ("reportInfo", json!(true))],
         "alerts" => vec![("alertsOn", json!(false)), ("alertInWidget", json!(false)), ("alertGif", json!("")), ("alertTheme", json!("widget")), ("alertBot", json!("streamerbot")), ("sbHost", json!("127.0.0.1:8080")), ("sbOn", json!(true)), ("alertTrans", json!("seamless")), ("alertCSize", json!("medium")), ("alertCDir", json!("diag")), ("alertCAngle", json!(0)), ("alertAnim", json!("slide")), ("alertOwnCol", json!(false)), ("alertCol1", json!("#8e9bff")), ("alertCol2", json!("#b38cff")), ("alertDir", json!("115deg")), ("alertIcon", json!(1)), ("alertSecs", json!(5)), ("alertVol", json!(0.8)), ("botRemote", json!(false))],
         "remote" => vec![("remotePort", json!(7880))],
@@ -277,11 +277,17 @@ fn text(key: &str, label: &str, note: &str) -> Value { json!({ "key": key, "labe
 fn sel(key: &str, label: &str, note: &str, opts: &[(Value, &str)]) -> Value {
     json!({ "key": key, "label": label, "note": note, "type": "select", "options": opts.iter().map(|o| o.0.clone()).collect::<Vec<_>>(), "labels": opts.iter().map(|o| o.1).collect::<Vec<_>>() })
 }
-/// A widget's design: picked from sketches of each (the page draws them, in the options' order)
+/// A widget's layout: picked from sketches of each (the page draws them, in the options' order)
 fn design(key: &str, label: &str) -> Value {
-    let mut v = sel(key, label, "", &[(json!("card"), "Card"), (json!("bar"), "Slim Bar"), (json!("square"), "Square"), (json!("minimal"), "Minimal"), (json!("pill"), "Pill"), (json!("vinyl"), "Vinyl"), (json!("poster"), "Poster"), (json!("ticker"), "Ticker"),
-        (json!("neon"), "Neon Sign"), (json!("lower"), "Lower Third"), (json!("cassette"), "Cassette"), (json!("equaliser"), "Equaliser"), (json!("nownext"), "Now and Next"), (json!("polaroid"), "Polaroid"), (json!("frosted"), "Frosted Glass"), (json!("vertical"), "Vertical")]);
+    let mut v = sel(key, label, "", &[(json!("card"), "Card"), (json!("bar"), "Slim Bar"), (json!("square"), "Square"), (json!("text"), "Text Only"), (json!("pill"), "Pill"), (json!("vinyl"), "Vinyl"), (json!("poster"), "Poster"), (json!("ticker"), "Ticker"),
+        (json!("split"), "Split"), (json!("lower"), "Lower Third"), (json!("cassette"), "Cassette"), (json!("equaliser"), "Equaliser"), (json!("nownext"), "Now and Next"), (json!("polaroid"), "Polaroid"), (json!("mini"), "Mini"), (json!("vertical"), "Vertical")]);
     v["type"] = json!("designpick");
+    v
+}
+/// A widget's theme: picked from sketches of each, in the options' order
+fn themepick(key: &str, label: &str) -> Value {
+    let mut v = sel(key, label, "", &[(json!("colours"), "Colours"), (json!("solid"), "Dark"), (json!("paper"), "Light"), (json!("neon"), "Neon"), (json!("frosted"), "Frosted Glass"), (json!("clear"), "No Panel")]);
+    v["type"] = json!("themepick");
     v
 }
 fn info(label: &str, value: &str, copy: &str, note: &str) -> Value { json!({ "key": "", "label": label, "note": note, "type": "info", "value": value, "copy": copy }) }
@@ -522,26 +528,30 @@ fn fields_of(name: &str, vals: &Map<String, Value>, prefs: &Value, lan: &str) ->
             let mut f = vec![
                 note("In OBS"),
                 info("Address", &format!("http://127.0.0.1:{port}/"), &format!("http://127.0.0.1:{port}/"), "Add this address as a Browser source in OBS."),
-                note("How It Looks"),
-                design("widgetDesign", "Design"),
-            ];
-            f.extend([
+                // (its layout: where the cover and words sit; its theme: its panel, colours and animations. Any
+                // theme goes with any layout)
+                note("Layout"),
+                design("widgetDesign", "Where the Cover and Words Sit"),
                 sel("widgetAlign", "Alignment", "", &[(json!("left"), "Left"), (json!("right"), "Right")]),
                 tog("widgetRounded", "Rounded Corners", ""),
                 stepper("widgetText", "Text Size", "", pct(0.7, 1.6, 0.1)),
-            ]);
-            if s("widgetDesign", "card") == "vinyl" { f.push(tog("wSpin", "Spin the Record", "")); }
-            f.push(tog("widgetOwnCol", "Own Colours", "When this is off, it uses the app's accent colours, or the cover's."));
+                note("Theme"),
+                themepick("widgetTheme", "Its Panel and Colours"),
+                tog("widgetOwnCol", "Own Colours", "When this is off, it uses your app theme's accent colours."),
+            ];
             if vals["widgetOwnCol"].as_bool() == Some(true) {
                 f.push(color("widgetCol1", "Accent Colour", ""));
                 f.push(color("widgetCol2", "Second Colour", ""));
             }
             f.extend([
+                sel("wColor", "Colour Change", "How quickly it changes to new colours.", &[(json!(0), "Instant"), (json!(0.5), "Fast"), (json!(1.2), "Normal"), (json!(2.5), "Slow")]),
+                sel("wEnter", "New Song", "How the next song's name comes in.", &[(json!("fade"), "Fade"), (json!("slide"), "Slide In"), (json!("pop"), "Pop"), (json!("flicker"), "Flicker"), (json!("none"), "None")]),
+                tog("wScroll", "Scroll Long Text", "Long names slide along so you can read all of them."),
+            ]);
+            if s("widgetDesign", "card") == "vinyl" { f.push(tog("wSpin", "Spin the Record", "")); }
+            f.extend([
                 note("What It Shows"),
                 tog("wRequester", "Who Requested It", "Their name beside the artist, for a requested song."),
-                tog("wScroll", "Scroll Long Text", ""),
-                tog("wFade", "Fade Between Tracks", ""),
-                sel("wColor", "Colour Change", "How quickly it takes the next cover's colours.", &[(json!(0), "Instant"), (json!(0.5), "Fast"), (json!(1.2), "Normal"), (json!(2.5), "Slow")]),
                 // Alerts: on the widget, so here: a switch, with Configure beside it
                 note("Alerts"),
                 toggle_cfg("alertsOn", "Alerts", "Follows, subs, bits, raids and more. Click the gear for how they look.", "alertsOpen"),
