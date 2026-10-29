@@ -2712,7 +2712,7 @@ function sendAlert(a) {
 function feed(ev, ctx) {
   let alert = null;
   if (lastAlert && Date.now() - lastAlert.at < 3000 && String(lastAlert.a.user || "").toLowerCase() === String(ctx.user || "").toLowerCase()) { alert = lastAlert.a; lastAlert = null; }
-  const keep = { type: ev, platform: ctx.platform || "twitch", user: ctx.user || "", userId: ctx.userId || "", amount: String(ctx.amount == null ? "" : ctx.amount), message: ctx.message || "", rawInput: ctx.rawInput || "", reward: ctx.reward || "", rewardId: ctx.rewardId || "", redemptionId: ctx.redemptionId || "", currency: ctx.currency || "", winner: ctx.winner || "", chatbot: true };
+  const keep = { type: ev, platform: ctx.platform || "twitch", user: ctx.user || "", userId: ctx.userId || "", amount: String(ctx.amount == null ? "" : ctx.amount), message: ctx.message || "", rawInput: ctx.rawInput || "", reward: ctx.reward || "", rewardId: ctx.rewardId || "", redemptionId: ctx.redemptionId || "", currency: ctx.currency || "", winner: ctx.winner || "", service: ctx.service || "", chatbot: true };
   if (alert) keep.alert = Object.assign({ feed: false }, alert);
   OmniPulse.app.dockActivity(keep).catch(() => {});
 }

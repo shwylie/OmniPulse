@@ -101,15 +101,19 @@
   // Every kind of event: its name in the settings, glyph, colour, group, and its line
   const amt = (e) => String((e.alert && e.alert.amount) || e.amount || "").trim();
   const n = (e) => parseFloat(String(e.amount || "").replace(/[^\d.]/g, "")) || 0;
+  // (where a tip came from, and YouTube's own words for its members and Super Chats)
+  const SERVICE = { kofi: "Ko-fi", throne: "Throne", fourthwall: "Fourthwall", streamlabs: "Streamlabs", streamelements: "StreamElements" };
+  const via = (e) => SERVICE[e.service] ? " on " + SERVICE[e.service] : "";
+  const yt = (e) => e.platform === "youtube";
   const KINDS = [
     ["follow", "Follows", "♥", "#ff6b8a", "Community", (e) => [e.user, " followed"]],
-    ["sub", "New Subs", "★", "#a970ff", "Subs", (e) => { const t = (e.alert && e.alert.amount) || (e.chatbot ? "" : e.amount); return [e.user, " subscribed", t ? " (" + t + ")" : ""]; }],
-    ["resub", "Resubs", "★", "#a970ff", "Subs", (e) => [e.user, " resubscribed", amt(e) ? " · " + amt(e) + (/\D/.test(amt(e)) ? "" : " months") : ""]],
-    ["gift", "Gifted Subs", "\u{1F381}", "#c084fc", "Subs", (e) => [e.user || "Anonymous", " gifted " + (amt(e) || 1) + (n(e) === 1 ? " sub" : " subs")]],
+    ["sub", "New Subs", "★", "#a970ff", "Subs", (e) => { const t = (e.alert && e.alert.amount) || (e.chatbot ? "" : e.amount); return yt(e) ? [e.user, " became a member"] : [e.user, " subscribed", t ? " (" + t + ")" : ""]; }],
+    ["resub", "Resubs", "★", "#a970ff", "Subs", (e) => [e.user, yt(e) ? " is still a member" : " resubscribed", amt(e) ? " · " + amt(e) + (/\D/.test(amt(e)) ? "" : " months") : ""]],
+    ["gift", "Gifted Subs", "\u{1F381}", "#c084fc", "Subs", (e) => [e.user || "Anonymous", " gifted " + (amt(e) || 1) + (yt(e) ? (n(e) === 1 ? " membership" : " memberships") : n(e) === 1 ? " sub" : " subs")]],
     ["watchstreak", "Watch Streaks", "\u{1F525}", "#ffb547", "Community", (e) => [e.user, " is on a " + amt(e) + "-stream watch streak"]],
     ["bits", "Bits", "◆", "#5ad1ff", "Money", (e) => [e.user || "Anonymous", " cheered " + amt(e) + " bits"]],
     ["kicks", "Kicks", "◆", "#53fc18", "Money", (e) => [e.user, " sent " + amt(e) + " Kicks"]],
-    ["donation", "Donations", "$", "#4ad295", "Money", (e) => [e.user || "Someone", " donated " + ((e.currency ? e.currency + " " : "") + (e.chatbot ? e.amount : amt(e)))]],
+    ["donation", "Donations", "$", "#4ad295", "Money", (e) => [e.user || "Someone", (yt(e) ? " sent a Super Chat of " : " donated ") + ((e.currency ? e.currency + " " : "") + (e.chatbot ? e.amount : amt(e))) + via(e)]],
     ["charity", "Charity", "❤", "#4ad295", "Money", (e) => [e.user, " gave " + amt(e) + " to charity"]],
     ["raid", "Raids", "⚑", "#ff8f4a", "Community", (e) => [e.user, " raided with " + amt(e) + (n(e) === 1 ? " viewer" : " viewers")]],
     ["shoutoutin", "Shoutouts to You", "\u{1F4E3}", "#ff8f4a", "Community", (e) => [e.user, " shouted you out"]],
