@@ -2090,16 +2090,25 @@ function connectEvents(token, url) {
     try { m = JSON.parse(data); } catch (e) { return; }
     const kind = m.metadata && m.metadata.message_type;
     if (kind === "session_welcome" && !url) {
+      // (subscribed to at once, all together: Twitch closes a connection with none within 10 seconds, so the
+      // old ones are cleared after, not before, and any refused for being too many (429) tried again then)
       const session = m.payload.session.id;
-      await staleSubsGone(token);
-      for (const [type, version, condition] of SUBS(S().userId)) {
+      const follow = async ([type, version, condition]) => {
         const r = await OmniPulse.fetch("https://api.twitch.tv/helix/eventsub/subscriptions", {
           method: "POST",
           headers: { "Client-Id": S().twitchClientId, Authorization: "Bearer " + token, "Content-Type": "application/json" },
           body: JSON.stringify({ type, version, condition, transport: { method: "websocket", session_id: session } }),
         });
-        if (!r.ok) OmniPulse.log("couldn't follow " + type + ": " + r.status);
-      }
+        if (r.ok || r.status === 409) return null;
+        let why = "";
+        try { why = ((await r.json()) || {}).message || ""; } catch (e) {}
+        return { sub: [type, version, condition], status: r.status, why };
+      };
+      const failed = (await Promise.all(SUBS(S().userId).map((x) => follow(x).catch((e) => ({ sub: x, status: 0, why: e.message }))))).filter(Boolean);
+      await staleSubsGone(token);
+      const again = failed.filter((f) => f.status === 429).map((f) => f.sub);
+      const still = failed.filter((f) => f.status !== 429).concat((await Promise.all(again.map((x) => follow(x).catch((e) => ({ sub: x, status: 0, why: e.message }))))).filter(Boolean));
+      for (const f of still) OmniPulse.log("couldn't follow " + f.sub[0] + ": " + f.status + (f.why ? " (" + f.why + ")" : ""));
     } else if (kind === "session_reconnect") {
       // (Twitch moving it: the new one's opened first, then this one let go)
       const old = s;

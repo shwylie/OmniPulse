@@ -461,6 +461,9 @@ mod tests {
         assert!(socket_allowed(&["irc-ws.chat.twitch.tv".into()], "wss://irc-ws.chat.twitch.tv:443"));
         assert!(socket_allowed(&["127.0.0.1".into()], "ws://127.0.0.1:4455"));
         assert!(!socket_allowed(&["example.com".into()], "ws://example.com/"));
+        // (Twitch moving its events to another of its servers: allowed by the chatbot's own list)
+        let m: core::plugins::Manifest = serde_json::from_str(&std::fs::read_to_string(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../plugins/chatbot/manifest.json")).unwrap()).unwrap();
+        assert!(socket_allowed(&m.hosts, "wss://cell-a.eventsub.wss.twitch.tv/ws?challenge=x&id=y"));
     }
 
     /// Stopped (as Save restarts it): it really stops, its socket closed, though the socket held its inbox; not
@@ -780,6 +783,34 @@ mod tests {
         stop(&p.id);
         assert_eq!(alerts(), 1, "{said:#?}");
         assert!(said.iter().any(|s| s == "Boom!") && said.iter().any(|s| s.contains("ban")), "{said:#?}");
+    }
+
+    /// The chatbot on the real Twitch chat, signed in as Twitch's anonymous reader (justinfan, no account;
+    /// OMNIPULSE_TWITCH_LIVE=1): its status says it's connected, with no chat needed first
+    #[test]
+    #[ignore]
+    fn the_chatbot_connects_to_real_twitch() {
+        if std::env::var_os("OMNIPULSE_TWITCH_LIVE").is_none() { return; }
+        let _one = one_at_a_time();
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        set_app_handler(Arc::new(move |_p: &str, _ask: Value, answer: Box<dyn FnOnce(Value) + Send>| answer(json!({ "ok": true }))));
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../plugins/chatbot");
+        let m: core::plugins::Manifest = serde_json::from_str(&std::fs::read_to_string(root.join("manifest.json")).unwrap()).unwrap();
+        // (no sign-in to check, and no events: only chat)
+        let code = std::fs::read_to_string(root.join("main.js")).unwrap()
+            .replace("if (await validate(token)) return token;", "return token;")
+            .replace("events = connectEvents(token);", "");
+        let pkg = core::plugins::Package { manifest: m, code, digest: String::new(), bundled: true };
+        let p = start(&pkg, &json!({ "token": "anonymous", "login": "justinfan54321", "userId": "", "twitchClientId": "c" }), rt.handle().clone()).unwrap();
+        let until = Instant::now() + Duration::from_secs(15);
+        let mut st = Value::Null;
+        while Instant::now() < until {
+            st = rt.block_on(p.call("status", vec![])).unwrap_or(Value::Null);
+            if st["twitch"]["up"] == json!(true) { break; }
+            std::thread::sleep(Duration::from_millis(300));
+        }
+        stop(&p.id);
+        assert_eq!(st["twitch"]["up"], json!(true), "{st:#?}");
     }
 
     /// The chatbot on the real Kick, as a guest (OMNIPULSE_KICK_LIVE=<channel>, no sign-in): its status says

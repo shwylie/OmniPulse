@@ -10,6 +10,7 @@
     "api.twitch.tv",
     "irc-ws.chat.twitch.tv",
     "eventsub.wss.twitch.tv",
+    "*.eventsub.wss.twitch.tv",
     "127.0.0.1",
     "www.youtube.com",
     "kick.com",
