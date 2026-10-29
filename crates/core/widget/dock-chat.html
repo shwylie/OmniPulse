@@ -12,6 +12,12 @@
     --twitch: #9146ff; --kick: #53fc18; --danger: #ff5c6c; --warn: #ffb547; --ok: #4ad295; --fs: 13px;
   }
   * { box-sizing: border-box; }
+  /* the scroll bars in the dock's colours, as the app's: OBS's browser draws its own light grey ones otherwise */
+  * { scrollbar-width: thin; scrollbar-color: var(--dim) transparent; }
+  ::-webkit-scrollbar { width: 8px; height: 8px; }
+  ::-webkit-scrollbar-track, ::-webkit-scrollbar-corner { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--dim); border-radius: 4px; border: 2px solid var(--bg); }
+  ::-webkit-scrollbar-thumb:hover { background: var(--text); }
   html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); font: var(--fs) / 1.4 "Segoe UI", system-ui, sans-serif; }
   body { display: flex; flex-direction: column; overflow: hidden; }
   button, select, input, textarea { font: inherit; color: inherit; }
