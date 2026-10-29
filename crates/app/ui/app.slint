@@ -5410,6 +5410,14 @@ export component AppWindow inherits Window {
     in-out property <bool> flow-open;
     in property <[FlowItem]> flow-items;
     in property <int> flow-sel: -1;
+    // (Song Requests: the chatbot's own, as a group of their own at the top, folded at first; picked, its
+    // settings on the right, kept as they're changed)
+    in-out property <bool> flow-req-shut: true;
+    in property <bool> flow-req;
+    in property <[BotField]> flow-req-fields;
+    callback flow-req-open();
+    callback flow-req-set(string, string);
+    callback flow-req-act(string);
     in property <string> flow-name;
     in property <bool> flow-on;
     // (One at a Time: its runs queued, each after the one before it)
@@ -8526,6 +8534,37 @@ export component AppWindow inherits Window {
                                         // (the space under each one that shows: a folded group's hidden ones take none)
                                         spacing: 0px;
                                         padding-right: 8px;
+                                        VerticalLayout {
+                                          spacing: 6px;
+                                          padding-bottom: 6px;
+                                          Rectangle {
+                                            height: 26px;
+                                            srh := TouchArea { mouse-cursor: MouseCursor.pointer; clicked => { root.flow-req-shut = !root.flow-req-shut; } }
+                                            HorizontalLayout {
+                                                padding-left: 4px;
+                                                spacing: 6px;
+                                                VerticalLayout { alignment: center; Chevron { open: !root.flow-req-shut; tint: srh.has-hover ? Theme.text : Theme.muted; } }
+                                                Text { text: "Song Requests"; color: srh.has-hover ? Theme.text : Theme.muted; font-size: 12px; font-weight: 700; vertical-alignment: center; horizontal-stretch: 1; }
+                                                Text { text: "built in"; color: Theme.muted; font-size: 11px; vertical-alignment: center; }
+                                            }
+                                          }
+                                          if !root.flow-req-shut: Rectangle {
+                                            height: 54px;
+                                            border-radius: 10px;
+                                            background: root.flow-req ? Theme.accent.with-alpha(0.16) : sra.has-hover ? Theme.elevated : transparent;
+                                            border-width: 1px;
+                                            border-color: root.flow-req ? Theme.accent.with-alpha(0.6) : Theme.line;
+                                            sra := TouchArea { mouse-cursor: MouseCursor.pointer; clicked => { root.flow-req-open(); } }
+                                            VerticalLayout {
+                                                padding-left: 12px;
+                                                padding-right: 12px;
+                                                alignment: center;
+                                                spacing: 2px;
+                                                Text { text: "Request a Song"; color: Theme.text; font-size: 13px; font-weight: 700; overflow: elide; }
+                                                Text { text: "Its commands, who can request, waits and limits"; color: Theme.muted; font-size: 11px; overflow: elide; }
+                                            }
+                                          }
+                                        }
                                         for it[i] in root.flow-items: VerticalLayout {
                                           spacing: 6px;
                                           padding-bottom: it.head || it.shown ? 6px : 0px;
@@ -8560,9 +8599,9 @@ export component AppWindow inherits Window {
                                           if it.shown: Rectangle {
                                             height: 54px;
                                             border-radius: 10px;
-                                            background: i == root.flow-sel || it.marked ? Theme.accent.with-alpha(0.16) : fita.has-hover ? Theme.elevated : transparent;
+                                            background: (i == root.flow-sel && !root.flow-req) || it.marked ? Theme.accent.with-alpha(0.16) : fita.has-hover ? Theme.elevated : transparent;
                                             border-width: 1px;
-                                            border-color: i == root.flow-sel || it.marked ? Theme.accent.with-alpha(0.6) : Theme.line;
+                                            border-color: (i == root.flow-sel && !root.flow-req) || it.marked ? Theme.accent.with-alpha(0.6) : Theme.line;
                                             fita := TouchArea {
                                                 property <bool> ctl;
                                                 mouse-cursor: MouseCursor.pointer;
@@ -8608,8 +8647,31 @@ export component AppWindow inherits Window {
                                 }
                             }
                             // the one picked: its flow
-                            if root.flow-sel < 0: Text { horizontal-stretch: 1; text: "Pick an action, or start a new one."; color: Theme.muted; vertical-alignment: center; horizontal-alignment: center; }
-                            if root.flow-sel >= 0: ScrollView {
+                            // (Song Requests picked: their settings)
+                            if root.flow-req: ScrollView {
+                                horizontal-stretch: 1;
+                                horizontal-scrollbar-policy: always-off;
+                                VerticalLayout {
+                                    alignment: start;
+                                    padding-right: 12px;
+                                    spacing: 12px;
+                                    Text { text: "Song Requests"; color: Theme.text; font-size: 18px; font-weight: 700; }
+                                    Text { text: "Built into the chatbot. Changes here are kept as you make them."; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
+                                    for f in root.flow-req-fields: VerticalLayout {
+                                        if f.kind == "head" || f.kind == "note": BotFieldRow { f: f; set(k, v) => { root.flow-req-set(k, v); } act(a) => { root.flow-req-act(a); } }
+                                        if f.kind != "head" && f.kind != "note": Rectangle {
+                                            background: Theme.panel;
+                                            border-radius: 12px;
+                                            border-width: 1px;
+                                            border-color: Theme.line;
+                                            height: frc.preferred-height;
+                                            frc := VerticalLayout { padding: 12px; BotFieldRow { f: f; set(k, v) => { root.flow-req-set(k, v); } act(a) => { root.flow-req-act(a); } } }
+                                        }
+                                    }
+                                }
+                            }
+                            if !root.flow-req && root.flow-sel < 0: Text { horizontal-stretch: 1; text: "Pick an action, or start a new one."; color: Theme.muted; vertical-alignment: center; horizontal-alignment: center; }
+                            if !root.flow-req && root.flow-sel >= 0: ScrollView {
                                 horizontal-stretch: 1;
                                 horizontal-scrollbar-policy: always-off;
                                 VerticalLayout {

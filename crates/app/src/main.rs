@@ -4643,9 +4643,32 @@ fn flows_open(shared: &Shared) {
     ui.set_flow_trigger_menu(ModelRc::from(Rc::new(VecModel::from(menu_entries(&flows::trigger_menu(), "")))));
     ui.set_flow_step_menu(ModelRc::from(Rc::new(VecModel::from(menu_entries(&flows::step_menu(), "")))));
     ui.set_flow_templates(strs(flows::templates().into_iter().map(|t| t.0).collect()));
+    ui.set_flow_req(false);
     flows_paint(shared);
     ui.set_flow_open(true);
     picks_refresh(shared);
+}
+
+/// Song Requests on the Actions page: their settings (the Suite's sheet for them) on the right
+fn flow_req_paint(shared: &Shared) {
+    let Some(ui) = shared.borrow().ui.upgrade() else { return };
+    let (rows, _) = bot_fields(botpage::sheet("requests", &bot_current(shared)).1);
+    ui.set_flow_req_fields(ModelRc::from(Rc::new(VecModel::from(rows))));
+}
+
+/// One of them changed there: kept at once, and the running chatbot told (nothing to restart for)
+fn flow_req_set(shared: &Shared, key: &str, v: &str) {
+    let key = botpage::key_of(key).to_string();
+    let manifest = bot_manifest().map(|m| m.settings).unwrap_or_default();
+    let value = botpage::value_of(&manifest, &key, v);
+    bot_keep(shared, &key, value.clone());
+    if let Some(p) = plugrun::get(botpage::BOT) {
+        let rt = shared.borrow().rt.clone();
+        let one = serde_json::json!({ key.clone(): value.clone() });
+        rt.spawn(async move { let _ = p.call("applySettings", vec![one]).await; });
+    }
+    // (a switch or a choice: drawn again; what's typed is left as it's typed)
+    if value.is_boolean() || key == "srWho" { flow_req_paint(shared); }
 }
 
 /// A menu's entries: each category's heading, then what's in it; hit: what matches the search (its name or
@@ -5280,7 +5303,14 @@ fn flows_wire(ui: &AppWindow, shared: &Shared) {
         }
     });
     let s = shared.clone();
-    ui.on_flow_pick(move |i| { flows_save(&s); FLOW_MARKS.with(|m| m.borrow_mut().clear()); FLOW.with(|f| f.borrow_mut().1 = i); flows_paint(&s); });
+    ui.on_flow_pick(move |i| { flows_save(&s); FLOW_MARKS.with(|m| m.borrow_mut().clear()); FLOW.with(|f| f.borrow_mut().1 = i); if let Some(ui) = s.borrow().ui.upgrade() { ui.set_flow_req(false); } flows_paint(&s); });
+    // (Song Requests' row: their settings on the right)
+    let s = shared.clone();
+    ui.on_flow_req_open(move || { flows_save(&s); if let Some(ui) = s.borrow().ui.upgrade() { ui.set_flow_req(true); } flow_req_paint(&s); });
+    let s = shared.clone();
+    ui.on_flow_req_set(move |k, v| flow_req_set(&s, &k, &v));
+    let s = shared.clone();
+    ui.on_flow_req_act(move |a| bot_act(&s, &a));
     // (Ctrl+click: picked as well, or let go; the one open counts, the first time)
     let s = shared.clone();
     ui.on_flow_mark(move |i| {
@@ -5300,6 +5330,7 @@ fn flows_wire(ui: &AppWindow, shared: &Shared) {
     let s = shared.clone();
     ui.on_flow_new(move |k| {
         let Some((_, mut a)) = flows::templates().into_iter().nth(k.max(0) as usize) else { return };
+        if let Some(ui) = s.borrow().ui.upgrade() { ui.set_flow_req(false); }
         flow_snap();
         FLOW.with(|f| {
             let mut f = f.borrow_mut();
