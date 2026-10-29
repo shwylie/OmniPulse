@@ -180,6 +180,7 @@ function connectChat(token, login, onLine) {
 // there is one, else your channel; to the message it answers
 // What it's done since it started (the settings page's bot card), and its last few doings (its live list)
 const counts = { replies: 0, requests: 0, alerts: 0, actions: 0 };
+let myName = "";
 const recent = [];
 function noted(who, heard, did, platform) {
   recent.push({ who: String(who || ""), heard: String(heard || "").slice(0, 80), did: String(did || "").slice(0, 120), platform: platform || "twitch", at: Date.now() });
@@ -2132,6 +2133,8 @@ async function start() {
   const token = await fresh("channel");
   if (!token) { OmniPulse.app.say("Your Twitch sign-in has run out: sign in again in its settings."); return; }
   apiToken = token;
+  // (your name as Twitch shows it, capitals and all: the sign-in keeps only the lower-case login)
+  if (S().userId) helix("GET", "users?id=" + encodeURIComponent(S().userId)).then((r) => { myName = ((r.data || [])[0] || {}).display_name || ""; }).catch(() => {});
   chat = connectChat(token, S().login, onChat);
   if (S().botToken && S().botLogin) {
     const bot = await fresh("bot");
@@ -3071,7 +3074,7 @@ OmniPulse.register({
     const tip = (label) => tipSockets.some((x) => x.label === label && x.up);
     return {
       running: !stopped,
-      twitch: { clientId: !!String(S().twitchClientId || "").trim(), login: S().login || "", bot: S().botLogin || "", up: !!(chat && chat.up) },
+      twitch: { clientId: !!String(S().twitchClientId || "").trim(), login: S().login || "", name: myName, bot: S().botLogin || "", up: !!(chat && chat.up) },
       kick: { on: yes(S().kickOn), app: !!String(S().kickClientId || "").trim() && (!!String(S().kickClientSecret || "").trim() || !!String(S().kickRelay || "").trim()), login: S().kickLogin || "", bot: S().kickBotLogin || "", channel: S().kickChannel || "", up: !!(kick && kick.up) },
       obs: { on: yes(S().obsOn), up: !!obsReady },
       meld: { on: yes(S().meldOn), up: !!meldReady },

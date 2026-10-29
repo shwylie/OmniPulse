@@ -948,7 +948,8 @@ pub fn step_state(cur: &Map<String, Value>, id: &str, done: bool, now: &str) -> 
 pub fn tiles(cur: &Map<String, Value>, st: &Value, running: bool) -> Vec<(&'static str, String, &'static str, String, String)> {
     let up = |k: &str| st[k]["up"].as_bool().unwrap_or(false);
     let light = |set: bool, k: &str| if !set { "off" } else if up(k) { "ok" } else { "warn" };
-    let tw = s(cur, "login");
+    // (your name as Twitch shows it, once the chatbot's asked; the lower-case login till then)
+    let tw = st["twitch"]["name"].as_str().filter(|n| !n.is_empty() && n.eq_ignore_ascii_case(s(cur, "login"))).unwrap_or(s(cur, "login"));
     let kk = s(cur, "kickLogin");
     let wait = if running { "Connecting..." } else { "The chatbot is stopped" };
     vec![

@@ -50,6 +50,8 @@ enum Msg {
     Socket(u32, &'static str, String),
     /// the app's answer to an app call (its number, the answer)
     App(u32, String),
+    /// stopped: its thread ends and its sockets close, though they still hold its inbox's senders
+    Stop,
 }
 
 /// The app's side of OmniPulse.app: (the plugin, what's asked as JSON, where its answer goes)
@@ -76,10 +78,10 @@ pub fn get(id: &str) -> Option<Arc<Plugin>> {
 }
 
 pub fn stop(id: &str) {
-    // (dropping its job sender ends its thread)
-    if let Some(m) = RUNNING.lock().unwrap().as_mut() {
-        m.remove(id);
-    }
+    // (told to stop, not only forgotten: its sockets and timers hold senders to its inbox, so dropping ours
+    // alone left it running, a second chatbot reading and answering chat beside the new one)
+    let gone = RUNNING.lock().unwrap().as_mut().and_then(|m| m.remove(id));
+    if let Some(p) = gone { let _ = p.jobs.send(Msg::Stop); }
 }
 
 impl Plugin {
@@ -318,6 +320,7 @@ fn run(id: String, code: String, settings: String, caps: Caps, rt: tokio::runtim
             Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
         }
         while let Ok(m) = inbox.try_recv() { msgs.push(m); }
+        if msgs.iter().any(|m| matches!(m, Msg::Stop)) { break; }
         // one turn: what came, the timers due, then the promises' work till there's none (in its time)
         *deadline.lock().unwrap() = Some(Instant::now() + Duration::from_secs(CALL_SECS));
         ctx.with(|ctx| {
@@ -331,6 +334,7 @@ fn run(id: String, code: String, settings: String, caps: Caps, rt: tokio::runtim
                     }
                     Msg::Fetched(n, r) | Msg::App(n, r) => g.get::<_, Function>("__host_done").and_then(|f| f.call::<_, ()>((n, r))),
                     Msg::Socket(n, kind, data) => g.get::<_, Function>("__sock_event").and_then(|f| f.call::<_, ()>((n, kind, data))),
+                    Msg::Stop => Ok(()),
                 };
                 if let Err(e) = r { eprintln!("[plugin {id}] {}", caught(&ctx, e)); }
             }
@@ -398,8 +402,10 @@ mod tests {
     use super::*;
 
     fn pkg(code: &str) -> core::plugins::Package {
+        static NEXT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
         core::plugins::Package {
-            manifest: core::plugins::Manifest { id: "test-plug".into(), name: "Test".into(), main: "main.js".into(), ..Default::default() },
+            // (each its own id: the tests run side by side, and starting or stopping one stops another by its id)
+            manifest: core::plugins::Manifest { id: format!("test-plug-{}", NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)), name: "Test".into(), main: "main.js".into(), ..Default::default() },
             code: code.into(),
             digest: String::new(),
             bundled: false,
@@ -416,7 +422,7 @@ mod tests {
         assert_eq!(got[0]["artist"], "me");
         let err = rt.block_on(p.call("library", vec![])).unwrap_err();
         assert!(err.contains("no library"), "{err}");
-        stop("test-plug");
+        stop(&p.id);
     }
 
     #[test]
@@ -425,7 +431,7 @@ mod tests {
         // no window, no network of its own
         let p = start(&pkg(r#"OmniPulse.register({ search() { return [typeof fetch, typeof XMLHttpRequest, typeof require]; }, resolve() { return null; } });"#), &json!({}), rt.handle().clone()).unwrap();
         assert_eq!(rt.block_on(p.call("search", vec![])).unwrap(), json!(["undefined", "undefined", "undefined"]));
-        stop("test-plug");
+        stop(&p.id);
     }
 
     #[test]
@@ -434,7 +440,7 @@ mod tests {
         let p = start(&pkg(r#"let n = 0; const t = setInterval(() => { n++; if (n >= 3) clearInterval(t); }, 20);
             OmniPulse.register({ search() { return new Promise((done) => setTimeout(() => done([n]), 150)); }, resolve() { return null; } });"#), &json!({}), rt.handle().clone()).unwrap();
         assert_eq!(rt.block_on(p.call("search", vec![])).unwrap(), json!([3]));
-        stop("test-plug");
+        stop(&p.id);
     }
 
     #[test]
@@ -449,12 +455,42 @@ mod tests {
         let got = rt.block_on(p.call("search", vec![])).unwrap();
         assert_eq!(got[0], "not allowed");
         assert!(got[1].as_str().unwrap().contains("manifest"), "{got}");
-        stop("test-plug");
+        stop(&p.id);
         // (and a socket to a site it doesn't list, refused even with the capability)
         assert!(!socket_allowed(&["irc-ws.chat.twitch.tv".into()], "wss://example.com/"));
         assert!(socket_allowed(&["irc-ws.chat.twitch.tv".into()], "wss://irc-ws.chat.twitch.tv:443"));
         assert!(socket_allowed(&["127.0.0.1".into()], "ws://127.0.0.1:4455"));
         assert!(!socket_allowed(&["example.com".into()], "ws://example.com/"));
+    }
+
+    /// Stopped (as Save restarts it): it really stops, its socket closed, though the socket held its inbox; not
+    /// a second one left reading and answering chat beside the new one
+    #[test]
+    fn a_stopped_plugin_closes_its_sockets() {
+        use futures_util::StreamExt;
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let sock = rt.block_on(tokio::net::TcpListener::bind("127.0.0.1:0")).unwrap();
+        let port = sock.local_addr().unwrap().port();
+        let closed = Arc::new(Mutex::new(false));
+        let c2 = closed.clone();
+        rt.spawn(async move {
+            let (tcp, _) = sock.accept().await.unwrap();
+            let mut ws = tokio_tungstenite::accept_async(tcp).await.unwrap();
+            while let Some(Ok(m)) = ws.next().await { if m.is_close() { break; } }
+            *c2.lock().unwrap() = true;
+        });
+        let code = format!(r#"OmniPulse.register({{ start() {{ OmniPulse.socket("ws://127.0.0.1:{port}/"); setInterval(() => {{}}, 1000); return true; }}, search() {{ return []; }}, resolve() {{ return null; }} }});"#);
+        let mut k = pkg(&code);
+        k.manifest.id = "test-stop".into();
+        k.manifest.capabilities = vec!["sockets".into()];
+        k.manifest.hosts = vec!["127.0.0.1".into()];
+        start(&k, &json!({}), rt.handle().clone()).unwrap();
+        std::thread::sleep(Duration::from_millis(500));
+        assert!(!*closed.lock().unwrap());
+        stop("test-stop");
+        let until = Instant::now() + Duration::from_secs(5);
+        while !*closed.lock().unwrap() && Instant::now() < until { std::thread::sleep(Duration::from_millis(50)); }
+        assert!(*closed.lock().unwrap(), "its socket stayed open after it was stopped");
     }
 
     /// The chatbot plugin (plugins/chatbot) against a stand-in Twitch on this PC: its chat (IRC over a
@@ -642,6 +678,30 @@ mod tests {
         stop("chatbot");
     }
 
+    /// The chatbot on the real Kick, as a guest (OMNIPULSE_KICK_LIVE=<channel>, no sign-in): its status says
+    /// it's connected, with no chat needed first
+    #[test]
+    #[ignore]
+    fn the_chatbot_connects_to_real_kick() {
+        let Ok(channel) = std::env::var("OMNIPULSE_KICK_LIVE") else { return };
+        let _one = one_at_a_time();
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        set_app_handler(Arc::new(move |_p: &str, _ask: Value, answer: Box<dyn FnOnce(Value) + Send>| answer(json!({ "ok": true }))));
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../plugins/chatbot");
+        let m: core::plugins::Manifest = serde_json::from_str(&std::fs::read_to_string(root.join("manifest.json")).unwrap()).unwrap();
+        let pkg = core::plugins::Package { manifest: m, code: std::fs::read_to_string(root.join("main.js")).unwrap(), digest: String::new(), bundled: true };
+        let p = start(&pkg, &json!({ "kickOn": true, "kickChannel": channel }), rt.handle().clone()).unwrap();
+        let until = Instant::now() + Duration::from_secs(15);
+        let mut st = Value::Null;
+        while Instant::now() < until {
+            st = rt.block_on(p.call("status", vec![])).unwrap_or(Value::Null);
+            if st["kick"]["up"] == json!(true) { break; }
+            std::thread::sleep(Duration::from_millis(300));
+        }
+        stop(&p.id);
+        assert_eq!(st["kick"]["up"], json!(true), "{st:#?}");
+    }
+
     /// The chatbot on Kick, against a stand-in Kick on this PC: its channel looked up, its realtime socket
     /// (Centrifugo's protocol: a guest's token, the chatroom subscribed, its keep-alive answered), a request
     /// from its chat answered through its API (as a reply), an action for Kick alone, our own message's
@@ -770,6 +830,9 @@ mod tests {
         while !done() && Instant::now() < until { std::thread::sleep(Duration::from_millis(50)); }
         let (b, a, h) = (posted.lock().unwrap().clone(), asked.lock().unwrap().clone(), heard.lock().unwrap().clone());
         assert!(done(), "posted {b:#?}, asked {a:#?}, heard {h:#?}");
+        // (its status: Kick connected)
+        let st = rt.block_on(p.call("status", vec![])).unwrap();
+        assert_eq!(st["kick"]["up"], json!(true), "{st:#?}");
         // (the request as a Kick one, its answer a reply to its message, to the channel)
         assert!(a.iter().any(|x| x["op"] == "request" && x["args"] == json!(["Viewer", "take on me", "kick"])), "{a:#?}");
         assert!(b.iter().any(|x| x["content"] == "Added Take On Me." && x["reply_to_message_id"] == "k1" && x["broadcaster_user_id"] == 7), "{b:#?}");
