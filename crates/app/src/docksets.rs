@@ -20,7 +20,7 @@ fn defaults(page: &str) -> Map<String, Value> {
         "chat" => json!({ "twitch": true, "kick": true, "time": false, "badges": true, "hover": false, "confirm": true, "secs": "600", "size": "13", "to": "all", "bttv": true, "ffz": true, "stv": true,
             "modPile": true, "lkPile": true, "pileMin": "3", "modLock": true, "modModes": true, "modShield": true, "modAb": true, "lkShield": true, "lkFollow": true, "lkSlow": true, "lkEmote": false, "lkSub": false,
             "look": "app", "accent": "app", "font": "app", "corners": "app", "density": "normal" }),
-        "activity" => json!({ "hidden": ["firstwords"], "newest": true, "compact": false, "platform": true, "msg": true, "size": "13", "from": "all", "look": "app", "accent": "app", "font": "app", "corners": "app", "density": "normal" }),
+        "activity" => json!({ "hidden": ["firstwords"], "newest": true, "compact": false, "platform": true, "msg": true, "cmds": false, "size": "13", "from": "all", "look": "app", "accent": "app", "font": "app", "corners": "app", "density": "normal" }),
         _ => json!({ "from": "all", "cmds": false, "bot": true, "badges": true, "marks": true, "style": "plain", "size": 20, "bg": "0", "shadow": true, "dir": "bottom", "align": "left", "fade": 0, "max": 30, "bttv": true, "ffz": true, "stv": true, "name": "beside", "anim": "rise", "events": false, "pronouns": false, "first": true }),
     };
     v.as_object().cloned().unwrap_or_default()
@@ -145,6 +145,7 @@ pub fn fields(panel: &str, vals: &Map<String, Value>, port: u64) -> Vec<Value> {
                 sel("from", "Platforms", "", &[(json!("all"), "Twitch and Kick"), (json!("twitch"), "Twitch"), (json!("kick"), "Kick")]),
                 tog("msg", "Their Message", "What they wrote with a sub, cheer or reward."),
                 tog("platform", "Platform", "A small Twitch or Kick mark on each."),
+                tog("cmds", "Chat Commands", "Each command someone uses that runs one of your actions, like !discord, with who used it."),
                 note("How It Looks"),
                 tog("newest", "Newest at the Top", ""),
                 tog("compact", "Compact", "Smaller rows, so more fit."),

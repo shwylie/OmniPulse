@@ -458,10 +458,13 @@ function onActions(m, text, cmd, args, user, msgId) {
   const r = rank(m.tags);
   const months = /subscriber\/(\d+)/.exec(m.tags["badge-info"] || "");
   const base = { user, userId: m.tags["user-id"] || "", message: text, msgId, platform: m.platform || "twitch", isMod: r.mod, submonths: months ? months[1] : "" };
+  let used = false;
   for (const a of live) {
     const ctx = matchAction(a, base, r, m.tags, text, cmd, args);
-    if (ctx && cooled(a, user)) run(a, ctx);
+    if (ctx && cooled(a, user)) { run(a, ctx); if (a.trigger.type === "command") used = true; }
   }
+  // (a command that ran something: in the Activity Feed, for those who show commands there)
+  if (used) OmniPulse.app.dockActivity({ type: "command", platform: base.platform, user, userId: base.userId, message: (cmd + " " + args).trim().slice(0, 120), chatbot: true }).catch(() => {});
 }
 
 // ---------- trying it: a line as a viewer would type it, what it'd answer and do, nothing sent or done ----------

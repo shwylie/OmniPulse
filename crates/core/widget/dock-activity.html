@@ -86,6 +86,7 @@
     <label><input type="checkbox" id="oCompact"> Compact</label>
     <label><input type="checkbox" id="oPlatform" checked> Platform</label>
     <label><input type="checkbox" id="oMsg" checked> Their message</label>
+    <label><input type="checkbox" id="oCmds"> Chat commands</label>
     <label>Text <select id="oSize"><option value="12">Small</option><option value="13" selected>Normal</option><option value="15">Large</option></select></label>
     <label>Platforms <select id="oFrom"><option value="all">All</option><option value="twitch">Twitch</option><option value="kick">Kick</option></select></label>
   </div>
@@ -129,6 +130,9 @@
     ["ban", "Bans", "⛔", "#ff5c6c", "Stream", (e) => [e.user, " was banned"]],
     ["liked", "Liked Requests", "♫", "#ff6b8a", "Music", (e) => [e.user, " liked a requested song"]],
     ["game", "Game Changes", "\u{1F3AE}", "#8b91a1", "Stream", (e) => ["", "Now playing " + (e.message || e.amount || "a new game")]],
+    // (chat commands: shown only with Chat Commands switched on, apart from the events above, so it's not
+    // listed among them)
+    /* opt-in */ ["command", "Chat Commands", "!", "#7aa2ff", "Chat", (e) => [e.user, " used " + (e.message || "a command")]],
   ];
   const OFF_FIRST = ["firstwords"];
   const GROUPS = ["Community", "Subs", "Money", "Chat", "Stream", "Music", "Other"];
@@ -138,7 +142,7 @@
     get(k, d) { try { const v = localStorage.getItem("omnipulse.feed." + k); return v == null ? d : JSON.parse(v); } catch (e) { return d; } },
     set(k, v) { try { localStorage.setItem("omnipulse.feed." + k, JSON.stringify(v)); } catch (e) {} },
   };
-  const opt = { hidden: store.get("hidden", OFF_FIRST), newest: store.get("newest", true), compact: store.get("compact", false), platform: store.get("platform", true), msg: store.get("msg", true), size: store.get("size", "13"), from: store.get("from", "all"), look: store.get("look", "app"), accent: store.get("accent", "app"), font: store.get("font", "app"), corners: store.get("corners", "app"), density: store.get("density", "normal") };
+  const opt = { hidden: store.get("hidden", OFF_FIRST), newest: store.get("newest", true), compact: store.get("compact", false), platform: store.get("platform", true), msg: store.get("msg", true), cmds: store.get("cmds", false), size: store.get("size", "13"), from: store.get("from", "all"), look: store.get("look", "app"), accent: store.get("accent", "app"), font: store.get("font", "app"), corners: store.get("corners", "app"), density: store.get("density", "normal") };
   // (the look: the app theme's colours, its headings' font and its corners (OmniPulse sends them), or Classic, the
   // dock's own dark grey; an accent of its own; how close together)
   const CLASSIC = { bg: "#1b1d24", panel: "#23262f", line: "#2e323d", text: "#e6e8ee", muted: "#8b91a1", accent: "#7aa2ff", light: false, rounded: true, font: "" };
@@ -182,7 +186,7 @@
   }
   setInterval(pullSettings, 3000);
   pullSettings();
-  const shown = (e) => !opt.hidden.includes(e.type) && (opt.from === "all" || (e.platform || "twitch") === opt.from);
+  const shown = (e) => (e.type === "command" ? opt.cmds : !opt.hidden.includes(e.type)) && (opt.from === "all" || (e.platform || "twitch") === opt.from);
 
   function drawKinds() {
     const box = $("kinds");
@@ -277,7 +281,7 @@
     document.documentElement.style.setProperty("--fs", opt.size + "px");
     document.body.classList.toggle("compact", opt.compact);
     applyLook();
-    $("oNewest").checked = opt.newest; $("oCompact").checked = opt.compact; $("oPlatform").checked = opt.platform; $("oMsg").checked = opt.msg; $("oSize").value = opt.size; $("oFrom").value = opt.from;
+    $("oNewest").checked = opt.newest; $("oCompact").checked = opt.compact; $("oPlatform").checked = opt.platform; $("oMsg").checked = opt.msg; $("oCmds").checked = opt.cmds; $("oSize").value = opt.size; $("oFrom").value = opt.from;
     const feed = $("feed");
     const list = items.filter(shown);
     feed.querySelectorAll(".item").forEach((x) => x.remove());
@@ -317,6 +321,7 @@
   $("money").onclick = () => setOpt("hidden", [...seenKinds].filter((t) => !["follow", "sub", "resub", "gift", "bits", "kicks", "donation", "charity"].includes(t)));
   $("oNewest").onchange = (e) => setOpt("newest", e.target.checked);
   $("oCompact").onchange = (e) => setOpt("compact", e.target.checked);
+  $("oCmds").onchange = (e) => setOpt("cmds", e.target.checked);
   $("oPlatform").onchange = (e) => setOpt("platform", e.target.checked);
   $("oMsg").onchange = (e) => setOpt("msg", e.target.checked);
   $("oSize").onchange = (e) => setOpt("size", e.target.value);
