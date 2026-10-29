@@ -12717,6 +12717,9 @@ fn plugin_app(shared: &Shared, plugin: &str, ask: serde_json::Value, answer: Box
         "openUrl" => {
             let url = arg(0);
             if !url.starts_with("https://") { return send(serde_json::json!({ "error": "only https addresses" })); }
+            // (the Stream Suite's: any https address, as you set its steps; other plugins only to the services
+            // OmniPulse works with)
+            if plugin == botpage::BOT { return send(match procwatch::open(&url, "") { Ok(()) => serde_json::json!({ "ok": true }), Err(e) => serde_json::json!({ "error": e }) }); }
             send(match omnipulse_core::open_url(url) { Ok(()) => serde_json::json!({ "ok": true }), Err(e) => serde_json::json!({ "error": e }) });
         }
         "say" => {

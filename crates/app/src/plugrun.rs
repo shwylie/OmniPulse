@@ -678,6 +678,30 @@ mod tests {
         stop("chatbot");
     }
 
+    /// A program starting (the app tells the chatbot its name): its action runs, the name compared as Task
+    /// Manager's (any case, with or without .exe or its folder)
+    #[test]
+    fn a_program_starting_runs_its_action() {
+        let _one = one_at_a_time();
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let asked: Arc<Mutex<Vec<Value>>> = Arc::new(Mutex::new(Vec::new()));
+        let a2 = asked.clone();
+        set_app_handler(Arc::new(move |_p: &str, ask: Value, answer: Box<dyn FnOnce(Value) + Send>| { a2.lock().unwrap().push(ask.clone()); answer(json!({ "ok": true })); }));
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../plugins/chatbot");
+        let m: core::plugins::Manifest = serde_json::from_str(&std::fs::read_to_string(root.join("manifest.json")).unwrap()).unwrap();
+        let pkg = core::plugins::Package { manifest: m, code: std::fs::read_to_string(root.join("main.js")).unwrap(), digest: String::new(), bundled: true };
+        let mut t = crate::flows::defaults(crate::flows::TRIGGERS, "process"); t["name"] = json!("destiny2");
+        let mut st = crate::flows::defaults(crate::flows::STEPS, "status"); st["text"] = json!("Started %process%");
+        let p = start(&pkg, &json!({ "actions": [{ "name": "Game", "on": true, "trigger": t, "steps": [st] }] }), rt.handle().clone()).unwrap();
+        rt.block_on(p.call("appEvent", vec![json!("process"), json!({ "name": "Destiny2.exe", "path": "C:/Games/Destiny2.exe" })])).unwrap();
+        let until = Instant::now() + Duration::from_secs(5);
+        let said = || asked.lock().unwrap().iter().any(|a| a["op"] == "say" && a["args"][0].as_str().is_some_and(|s| s.contains("Started")));
+        while !said() && Instant::now() < until { std::thread::sleep(Duration::from_millis(50)); }
+        let a = asked.lock().unwrap().clone();
+        stop(&p.id);
+        assert!(said(), "{a:#?}");
+    }
+
     /// The chatbot on the real Kick, as a guest (OMNIPULSE_KICK_LIVE=<channel>, no sign-in): its status says
     /// it's connected, with no chat needed first
     #[test]

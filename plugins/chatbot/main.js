@@ -1247,6 +1247,8 @@ async function step(st, ctx, depth) {
     case "tune": tuneStart(ctx.user || "", null, ctx.platform); break;
     case "groupstate": {
       const g = f("group").trim().toLowerCase();
+      // (no group named: nothing to switch; an empty name matched every action outside a group)
+      if (!g) break;
       const list = (S().actions || []).map((x) => {
         if (String(x.group || "").trim().toLowerCase() !== g) return x;
         return Object.assign({}, x, { on: st.what === "toggle" ? x.on === false : st.what !== "off" });
