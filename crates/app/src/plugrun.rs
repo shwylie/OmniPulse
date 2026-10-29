@@ -702,6 +702,33 @@ mod tests {
         assert!(said(), "{a:#?}");
     }
 
+    /// The test chat: off, a command's steps only described; Run for Real, they run (an alert shown), its reply
+    /// still kept to the test chat, and a ban on the one trying it still only described
+    #[test]
+    fn the_test_chat_runs_for_real() {
+        let _one = one_at_a_time();
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let asked: Arc<Mutex<Vec<Value>>> = Arc::new(Mutex::new(Vec::new()));
+        let a2 = asked.clone();
+        set_app_handler(Arc::new(move |_p: &str, ask: Value, answer: Box<dyn FnOnce(Value) + Send>| { a2.lock().unwrap().push(ask.clone()); answer(json!({ "ok": true })); }));
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../plugins/chatbot");
+        let m: core::plugins::Manifest = serde_json::from_str(&std::fs::read_to_string(root.join("manifest.json")).unwrap()).unwrap();
+        let pkg = core::plugins::Package { manifest: m, code: std::fs::read_to_string(root.join("main.js")).unwrap(), digest: String::new(), bundled: true };
+        let mut t = crate::flows::defaults(crate::flows::TRIGGERS, "command"); t["command"] = json!("!boom"); t["cooldown"] = json!(0); t["usercooldown"] = json!(0);
+        let mut alert = crate::flows::defaults(crate::flows::STEPS, "alert"); alert["user"] = json!("Tester");
+        let mut say = crate::flows::defaults(crate::flows::STEPS, "say"); say["text"] = json!("Boom!");
+        let ban = crate::flows::defaults(crate::flows::STEPS, "ban");
+        let p = start(&pkg, &json!({ "actions": [{ "name": "Boom", "on": true, "trigger": t, "steps": [alert, say, ban] }] }), rt.handle().clone()).unwrap();
+        let alerts = || asked.lock().unwrap().iter().filter(|a| a["op"] == "alert").count();
+        let dry = rt.block_on(p.call("tryChat", vec![json!("!boom"), json!("twitch"), json!(false), json!(false)])).unwrap();
+        assert_eq!(alerts(), 0, "{dry:#?}");
+        let real = rt.block_on(p.call("tryChat", vec![json!("!boom"), json!("twitch"), json!(false), json!(true)])).unwrap();
+        let said: Vec<String> = real.as_array().unwrap().iter().filter_map(|x| x.as_str().map(String::from)).collect();
+        stop(&p.id);
+        assert_eq!(alerts(), 1, "{said:#?}");
+        assert!(said.iter().any(|s| s == "Boom!") && said.iter().any(|s| s.contains("ban")), "{said:#?}");
+    }
+
     /// The chatbot on the real Kick, as a guest (OMNIPULSE_KICK_LIVE=<channel>, no sign-in): its status says
     /// it's connected, with no chat needed first
     #[test]

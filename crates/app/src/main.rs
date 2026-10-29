@@ -7720,6 +7720,8 @@ fn bot_poll_soon(shared: &Shared) {
 
 /// A line typed in its chat to try it: what it'd say and do, nothing sent, nothing done
 fn bot_try(shared: &Shared, text: &str) {
+    // (Run for Real on: marked with a \u{1} before it)
+    let (real, text) = match text.strip_prefix('\u{1}') { Some(t) => (true, t), None => (false, text) };
     BOT_TRIED.with(|t| { let mut t = t.borrow_mut(); t.push(("You".into(), text.to_string())); });
     let Some(p) = plugrun::get(botpage::BOT) else {
         BOT_TRIED.with(|t| t.borrow_mut().push(("Bot".into(), "(The chatbot is stopped. Start it with the button on its card to try it.)".into())));
@@ -7729,7 +7731,7 @@ fn bot_try(shared: &Shared, text: &str) {
     let (rt, weak) = { let a = shared.borrow(); (a.rt.clone(), a.ui.clone()) };
     let text = text.to_string();
     rt.spawn(async move {
-        let r = p.call("tryChat", vec![serde_json::json!(text), serde_json::json!("twitch"), serde_json::json!(false)]).await;
+        let r = p.call("tryChat", vec![serde_json::json!(text), serde_json::json!("twitch"), serde_json::json!(false), serde_json::json!(real)]).await;
         let _ = weak.upgrade_in_event_loop(move |_| {
             let lines: Vec<String> = match r { Ok(v) => v.as_array().into_iter().flatten().filter_map(|x| x.as_str().map(String::from)).collect(), Err(e) => vec![format!("(couldn't: {e})")] };
             BOT_TRIED.with(|t| {

@@ -4237,6 +4237,7 @@ component BotPage inherits Rectangle {
     in property <[BotField]> step-fields;
     in property <[BotLine]> log;
     in property <[BotLine]> tried;
+    in-out property <bool> try-real;
     in property <[string]> examples;
     in property <string> sheet;
     in property <string> sheet-title;
@@ -4420,13 +4421,16 @@ component BotPage inherits Rectangle {
                                 spacing: 6px;
                                 VerticalLayout { alignment: center; Glyph { d: Icons.flask; width: 16px; height: 16px; fill: Theme.accent; } }
                                 Text { text: "Test chat"; color: Theme.text; font-size: 13px; font-weight: 700; horizontal-stretch: 1; vertical-alignment: center; }
+                                // (Run for Real: its steps really run; replies still only here)
                                 Rectangle {
-                                    width: pv.preferred-width + 14px;
-                                    height: 18px;
+                                    width: pv.preferred-width + 16px;
+                                    height: 20px;
                                     y: (parent.height - self.height) / 2;
-                                    border-radius: 9px;
-                                    background: Theme.elevated;
-                                    pv := Text { x: 7px; text: "private"; color: Theme.muted; font-size: 10px; vertical-alignment: center; }
+                                    border-radius: 10px;
+                                    background: root.try-real ? Theme.accent : pva.has-hover ? Theme.elevated.mix(Theme.text, 0.9) : Theme.elevated;
+                                    pv := Text { x: 8px; text: root.try-real ? "Running for real" : "Run for real"; color: root.try-real ? Theme.on-accent : Theme.muted; font-size: 10px; font-weight: 700; vertical-alignment: center; }
+                                    pva := TouchArea { mouse-cursor: MouseCursor.pointer; clicked => { root.try-real = !root.try-real; } }
+                                    TipSpot { tip: "On: your actions' steps really run (OBS, sounds, alerts, the title...). Replies stay here, and bans, time-outs and points are only described."; hover: pva.has-hover; }
                                 }
                             }
                             Rectangle {
@@ -4435,7 +4439,7 @@ component BotPage inherits Rectangle {
                                 VerticalLayout {
                                     alignment: end;
                                     spacing: 4px;
-                                    if root.tried.length == 0: Text { text: "Try a command. Only you see this."; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
+                                    if root.tried.length == 0: Text { text: root.try-real ? "Try a command. Its steps really run, but its replies only show here." : "Try a command. Only you see this, and nothing is done."; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
                                     // (some to try, from what it answers: a click tries it)
                                     if root.tried.length == 0: HorizontalLayout {
                                         spacing: 5px;
@@ -4448,7 +4452,7 @@ component BotPage inherits Rectangle {
                                             border-width: 1px;
                                             border-color: Theme.line;
                                             ext := Text { x: 9px; text: ex; color: Theme.accent.mix(Theme.text, 0.4); font-size: 11px; vertical-alignment: center; }
-                                            exa := TouchArea { mouse-cursor: MouseCursor.pointer; clicked => { root.try-it(ex); } }
+                                            exa := TouchArea { mouse-cursor: MouseCursor.pointer; clicked => { root.try-it((root.try-real ? "\u{1}" : "") + ex); } }
                                         }
                                     }
                                     for b in root.tried: HorizontalLayout {
@@ -4473,10 +4477,10 @@ component BotPage inherits Rectangle {
                                     background: Theme.bg;
                                     border-width: 1px;
                                     border-color: tin.has-focus ? Theme.accent : Theme.line;
-                                    tin := TextInput { property <length> sx; cursor-position-changed(p) => { if (p.x + self.sx < 0px) { self.sx = -p.x; } else if (p.x + self.sx > parent.width - 24px - 2px) { self.sx = parent.width - 24px - 2px - p.x; } }  x: 12px + min(0px, max(parent.width - 24px - self.width, self.sx)); width: max(parent.width - 24px, self.preferred-width + 4px); height: parent.height; vertical-alignment: center; color: Theme.text; font-size: 12px; single-line: true; accepted => { if (self.text != "") { root.try-it(self.text); self.text = ""; } } }
+                                    tin := TextInput { property <length> sx; cursor-position-changed(p) => { if (p.x + self.sx < 0px) { self.sx = -p.x; } else if (p.x + self.sx > parent.width - 24px - 2px) { self.sx = parent.width - 24px - 2px - p.x; } }  x: 12px + min(0px, max(parent.width - 24px - self.width, self.sx)); width: max(parent.width - 24px, self.preferred-width + 4px); height: parent.height; vertical-alignment: center; color: Theme.text; font-size: 12px; single-line: true; accepted => { if (self.text != "") { root.try-it((root.try-real ? "\u{1}" : "") + self.text); self.text = ""; } } }
                                     if tin.text == "": Text { x: 12px; text: "Type a command"; color: Theme.muted.with-alpha(0.6); font-size: 12px; vertical-alignment: center; }
                                 }
-                                IconButton { d: Icons.send; size: 32px; tint: Theme.accent; tip: "Test it (only you see it)"; clicked => { if (tin.text != "") { root.try-it(tin.text); tin.text = ""; } } }
+                                IconButton { d: Icons.send; size: 32px; tint: Theme.accent; tip: "Test it (only you see it)"; clicked => { if (tin.text != "") { root.try-it((root.try-real ? "\u{1}" : "") + tin.text); tin.text = ""; } } }
                             }
                         }
                     }

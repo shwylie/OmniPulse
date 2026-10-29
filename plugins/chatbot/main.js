@@ -480,7 +480,10 @@ const DRY_SAYS = {
   obsrecord: "start or stop recording", obsstream: "start or stop streaming", obsmedia: "control OBS media", obsbrowser: "change a browser source", obsreplay: "save a replay", obsshot: "take a screenshot", obsraw: "send OBS a request",
 };
 
-async function tryChat(text, platform, asMod) {
+// (run for real: every step runs as it would from chat, but its replies stay in the test chat, and what's
+// aimed at the chatter (a ban, a time-out...) is only said, as the one trying it isn't a real chatter)
+const TRY_NEVER = new Set(["timeout", "ban", "delete", "role", "strike", "points", "gamble", "slots", "duel", "heist", "giveenter"]);
+async function tryChat(text, platform, asMod, real) {
   const out = [];
   const t = String(text || "").trim();
   if (!t) return out;
@@ -497,11 +500,11 @@ async function tryChat(text, platform, asMod) {
   }
   const tags = { "display-name": user, badges: asMod ? "moderator/1" : "", mod: asMod ? "1" : "0" };
   const r = rank(tags);
-  const base = { user, userId: "", message: t, msgId: "", platform: p, isMod: r.mod, submonths: "", dry: out };
+  const base = { user, userId: "", message: t, msgId: "", platform: p, isMod: r.mod, submonths: "", dry: out, real: !!real };
   const jobs = [];
   for (const a of live) {
     const ctx = matchAction(a, base, r, tags, t, cmd, args);
-    if (ctx) { ctx.dry = out; jobs.push(runNow(a, ctx, 0)); }
+    if (ctx) { ctx.dry = out; ctx.real = !!real; jobs.push(runNow(a, ctx, 0)); }
   }
   await Promise.race([Promise.all(jobs), new Promise((ok) => setTimeout(ok, 5000))]);
   return out;
@@ -778,8 +781,8 @@ async function step(st, ctx, depth) {
   const where = st.where || "here";
   const sendTo = where === "here" ? ctx.platform : where === "both" ? "all" : where;
   const say = (to, text) => { if (!text) return; ctx._said = String(text).slice(0, 100); if (ctx.dry) ctx.dry.push(String(text)); else reply(sendTo === ctx.platform ? to : null, text, sendTo); };
-  if (ctx.dry && !DRY_SAFE.has(st.type)) { ctx.dry.push("(would " + (DRY_SAYS[st.type] || "do its " + st.type + " step") + ")"); return true; }
-  if (ctx.dry && st.type === "wait") return true;
+  if (ctx.dry && !DRY_SAFE.has(st.type) && !(ctx.real && !TRY_NEVER.has(st.type))) { ctx.dry.push("(would " + (DRY_SAYS[st.type] || "do its " + st.type + " step") + ")"); return true; }
+  if (ctx.dry && !ctx.real && st.type === "wait") return true;
   const onKick = ctx.platform === "kick";
   // (Twitch's own steps, not Kick's: left out there)
   if (onKick && ["shoutout", "announce", "marker", "clip"].includes(st.type)) { OmniPulse.log(st.type + ": Twitch's own, not done on Kick"); return true; }
@@ -3093,7 +3096,7 @@ OmniPulse.register({
   async signOutBot() { return signOutOf({ botToken: "", botRefresh: "", botLogin: "" }, "Signed the bot out of Twitch."); },
   async signOutKickChannel() { return signOutOf({ kickToken: "", kickRefreshToken: "", kickUserId: "", kickLogin: "" }, "Signed your channel out of Kick."); },
   async signOutKickBot() { return signOutOf({ kickBotToken: "", kickBotRefreshToken: "", kickBotLogin: "" }, "Signed the bot out of Kick."); },
-  tryChat(text, platform, asMod) { return tryChat(text, platform, asMod); },
+  tryChat(text, platform, asMod, real) { return tryChat(text, platform, asMod, real); },
   // (settings that change only how things look or behave, saved: taken as they are, nothing restarted, the
   // widgets sent them at once)
   applySettings(vals) {
