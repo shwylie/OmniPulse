@@ -7241,6 +7241,12 @@ fn bot_paint(shared: &Shared) {
     let st = BOT_STATUS.with(|b| b.borrow().clone());
     let running = plugrun::get(botpage::BOT).is_some() && st["running"].as_bool() != Some(false);
     fn model<T: Clone + 'static>(v: Vec<T>) -> ModelRc<T> { ModelRc::from(Rc::new(VecModel::from(v))) }
+    // (a list drawn again only where it's changed: the page asks the chatbot how it's doing every couple of
+    // seconds, and a new list each time redrew the whole page, fades and all, for nothing)
+    fn kept<T: Clone + PartialEq + 'static>(now: ModelRc<T>, v: Vec<T>, set: impl FnOnce(ModelRc<T>)) {
+        if now.row_count() == v.len() { for (i, r) in v.into_iter().enumerate() { if now.row_data(i).as_ref() != Some(&r) { now.set_row_data(i, r); } } }
+        else { set(ModelRc::from(Rc::new(VecModel::from(v)))); }
+    }
     let setup = !matches!(cur.get("setupDone"), Some(serde_json::Value::Bool(true)));
     ui.set_bot_setup(setup);
     let (name, sub, stats) = botpage::card(&cur, &st, running);
@@ -7255,13 +7261,13 @@ fn bot_paint(shared: &Shared) {
     let focus = BOT_FOCUS.with(|f| f.borrow().clone());
     let now = botpage::step_now(&cur, &focus);
     if !sheet_open {
-    ui.set_bot_tiles(model(botpage::tiles(&cur, &st, running).into_iter().map(|(id, name, state, l1, l2)| BotTile { id: id.into(), name: name.into(), state: state.into(), line1: l1.into(), line2: l2.into() }).collect()));
-    ui.set_bot_feats(model(botpage::feats(&cur, &st).into_iter().map(|(id, name, note, on, open)| BotFeat { id: id.into(), name: name.into(), note: note.into(), on, open, changed: pf_changed(botpage::key_of(&format!("feat:{id}"))) && id != "actions" && id != "games" }).collect()));
-    ui.set_bot_steps(model(botpage::steps(&cur).into_iter().map(|(id, title, note, done, optional)| BotStep { id: id.into(), title: title.into(), note: note.into(), state: botpage::step_state(&cur, id, done, &now).into(), optional }).collect()));
+    kept(ui.get_bot_tiles(), botpage::tiles(&cur, &st, running).into_iter().map(|(id, name, state, l1, l2)| BotTile { id: id.into(), name: name.into(), state: state.into(), line1: l1.into(), line2: l2.into() }).collect(), |m| ui.set_bot_tiles(m));
+    kept(ui.get_bot_feats(), botpage::feats(&cur, &st).into_iter().map(|(id, name, note, on, open)| BotFeat { id: id.into(), name: botpage::title_case(&name).into(), note: note.into(), on, open, changed: pf_changed(botpage::key_of(&format!("feat:{id}"))) && id != "actions" && id != "games" }).collect(), |m| ui.set_bot_feats(m));
+    kept(ui.get_bot_steps(), botpage::steps(&cur).into_iter().map(|(id, title, note, done, optional)| BotStep { id: id.into(), title: title.into(), note: note.into(), state: botpage::step_state(&cur, id, done, &now).into(), optional }).collect(), |m| ui.set_bot_steps(m));
     let log: Vec<BotLine> = st["recent"].as_array().into_iter().flatten().take(8).map(|l| BotLine { who: l["who"].as_str().unwrap_or("").into(), heard: l["heard"].as_str().unwrap_or("").into(), did: l["did"].as_str().unwrap_or("").into(), platform: l["platform"].as_str().unwrap_or("twitch").into() }).collect();
-    ui.set_bot_log(model(log));
-    ui.set_bot_examples(model(botpage::examples(&cur).into_iter().map(slint::SharedString::from).collect()));
-    ui.set_bot_tried(model(BOT_TRIED.with(|t| t.borrow().iter().map(|(w, x)| BotLine { who: w.as_str().into(), heard: Default::default(), did: x.as_str().into(), platform: "twitch".into() }).collect())));
+    kept(ui.get_bot_log(), log, |m| ui.set_bot_log(m));
+    kept(ui.get_bot_examples(), botpage::examples(&cur).into_iter().map(slint::SharedString::from).collect(), |m| ui.set_bot_examples(m));
+    kept(ui.get_bot_tried(), BOT_TRIED.with(|t| t.borrow().iter().map(|(w, x)| BotLine { who: w.as_str().into(), heard: Default::default(), did: x.as_str().into(), platform: "twitch".into() }).collect()), |m| ui.set_bot_tried(m));
     }
     // (a sheet's and the step's lines: drawn again only when they've changed, so what's being typed stays put)
     let sheet = BOT_SHEET.with(|b| b.borrow().clone());
@@ -13569,6 +13575,8 @@ fn apply_look(shared: &Shared) {
     let name = prefs["appName"].as_str().unwrap_or("").trim().to_string();
     ui.set_title_prompt(name.is_empty() && plat_on(prefs, "soundcloud") && !omnipulse_core::soundcloud::signed_in());
     if ui.get_app_name().trim() != name { ui.set_app_name(name.into()); }
+    let yours = prefs["togetherName"].as_str().unwrap_or("").trim().to_string();
+    if ui.get_your_name().trim() != yours { ui.set_your_name(yours.into()); }
     ui.set_side_collapsed(prefs["sideCollapsed"].as_bool() == Some(true));
     t.set_bg(p.bg.slint());
     // (Windows' own frame and caption in the theme's background: what shows for a moment as the window's
@@ -13989,6 +13997,13 @@ fn main() -> Result<(), slint::PlatformError> {
         let v = serde_json::json!(name.trim());
         if let Some(o) = s.borrow_mut().web.prefs.as_object_mut() { o.insert("appName".into(), v.clone()); }
         if std::env::var_os("OMNIPULSE_SELFTEST").is_none() { webstate::save_pref("appName", v); }
+    });
+    // (your name for Listen Along and Jams, from setup: as Settings' Your Name, never the app's)
+    let s = shared.clone();
+    ui.on_your_name_changed(move |name| {
+        let v = serde_json::json!(name.trim());
+        if let Some(o) = s.borrow_mut().web.prefs.as_object_mut() { o.insert("togetherName".into(), v.clone()); }
+        if std::env::var_os("OMNIPULSE_SELFTEST").is_none() { webstate::save_pref("togetherName", v); }
     });
     let s = shared.clone();
     ui.on_listen_nudge_changed(move |text| {

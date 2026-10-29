@@ -2243,8 +2243,12 @@ component SuiteHero inherits Rectangle {
     border-radius: Theme.card-radius;
     clip: true;
     background: @linear-gradient(120deg, Theme.accent.mix(Theme.bg, 0.42) 0%, Theme.accent-2.mix(Theme.bg, 0.5) 100%);
-    // (light drifting across it, slowly, while it runs)
-    property <float> ph: root.r.on && Theme.motion ? mod(animation-tick() / 1ms, 9000) / 9000 : 0.3;
+    // (light drifting across it, slowly, while it runs: a step 10 times a second, from a timer;
+    // the frame clock (animation-tick) kept the app working every frame, even with the page hidden under another,
+    // a quarter of a core for this alone)
+    property <int> step;
+    Timer { interval: 100ms; running: root.r.on && Theme.motion; triggered => { root.step = mod(root.step + 1, 200); } }
+    property <float> ph: root.r.on && Theme.motion ? root.step / 200 : 0.3;
     Rectangle { x: root.width * (0.1 + 0.7 * root.ph) - 160px; y: -120px; width: 380px; height: 380px; background: @radial-gradient(circle, #ffffff30 0%, transparent 65%); }
     Rectangle { x: root.width - 230px; y: 40px; width: 300px; height: 300px; background: @radial-gradient(circle, Theme.accent-2.with-alpha(0.45) 0%, transparent 70%); }
     // (rings behind its icon)
@@ -4621,7 +4625,11 @@ component BotPage inherits Rectangle {
                                 width: 92px;
                                 height: 92px;
                                 y: (parent.height - self.height) / 2;
-                                property <float> spin: root.running && Theme.motion ? mod(animation-tick() / 1ms, 12000) / 12000 : 0;
+                                // (a step 10 times a second, from a timer: smooth enough for a dot, and the app rests
+                                // between them, which the frame clock (animation-tick) never let it)
+                                property <int> step;
+                                Timer { interval: 100ms; running: root.running && Theme.motion; triggered => { parent.step = mod(parent.step + 1, 120); } }
+                                property <float> spin: root.running && Theme.motion ? self.step / 120 : 0;
                                 Rectangle { border-radius: self.width / 2; border-width: 2px; border-color: Theme.accent.with-alpha(root.running ? 0.35 : 0.12); }
                                 Rectangle { x: 8px; y: 8px; width: parent.width - 16px; height: self.width; border-radius: self.width / 2; border-width: 2px; border-color: Theme.accent-2.with-alpha(root.running ? 0.6 : 0.15); }
                                 if root.running: Rectangle {
@@ -5296,6 +5304,8 @@ component CustomThemeControls inherits VerticalLayout {
 }
 
 export component AppWindow inherits Window {
+    // (the title bar's pulses' clock: kept by a timer there)
+    property <int> pulse-ms;
     changed width => { Win.w = self.width; root.window-resized(); }
     changed height => { Win.h = self.height; root.window-resized(); }
     title: root.app-name != "" ? root.app-name : "OmniPulse";
@@ -5304,6 +5314,9 @@ export component AppWindow inherits Window {
     // Settings > App > Display Name: in the title bar and the taskbar (the web app's appName)
     in-out property <string> app-name;
     callback app-name-changed(string);
+    // (your name for Listen Along and Jams (togetherName), apart from the app's: asked in setup)
+    in-out property <string> your-name;
+    callback your-name-changed(string);
     in property <bool> title-prompt;
     callback title-rename();
     /// the name being typed in the title bar
@@ -6153,6 +6166,9 @@ export component AppWindow inherits Window {
                             double-clicked => { if (!root.title-prompt) { root.maximize(); } }
                         }
                     }
+                    // (the title bar's pulses' clock: a step 20 times a second while music plays and one of them's on.
+                    // The frame clock (animation-tick) had the app working every frame while music played, three times over)
+                    Timer { interval: 50ms; running: root.playing && Theme.motion && (root.streamer || root.stream-safe || root.suite-on || root.mix-on); triggered => { root.pulse-ms = mod(root.pulse-ms + 50, 1080000); } }
                     // Streamer Mode: grey when off; on, it pulses YouTube red, Twitch purple and Kick green
                     // (full height, as the window's own buttons are)
                     Rectangle {
@@ -6160,7 +6176,7 @@ export component AppWindow inherits Window {
                         // (a rounded tile, lit on hover, as the web app's)
                         Rectangle { width: 28px; height: 28px; x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2; border-radius: 8px; background: sta-s.has-hover ? Theme.elevated : transparent; }
                         // (pulsing only while there's music, as Seamless Mix's: still, YouTube red)
-                        property <float> phase: (root.streamer || root.stream-safe) && root.playing && Theme.motion ? mod(animation-tick() / 1ms, 10800) / 3600 : 0.0;
+                        property <float> phase: (root.streamer || root.stream-safe) && root.playing && Theme.motion ? mod(root.pulse-ms, 10800) / 3600 : 0.0;
                         Glyph {
                             d: Icons.broadcast;
                             width: 16px;
@@ -6185,7 +6201,7 @@ export component AppWindow inherits Window {
                     if root.suite-shown: Rectangle {
                         width: 32px;
                         Rectangle { width: 28px; height: 28px; x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2; border-radius: 8px; background: sta-b.has-hover ? Theme.elevated : transparent; }
-                        property <float> phase: root.suite-on && root.playing && Theme.motion ? mod(animation-tick() / 1ms + 1800, 10800) / 3600 : 0.0;
+                        property <float> phase: root.suite-on && root.playing && Theme.motion ? mod(root.pulse-ms + 1800, 10800) / 3600 : 0.0;
                         Glyph {
                             d: root.suite-icon;
                             width: 16px;
@@ -6229,9 +6245,8 @@ export component AppWindow inherits Window {
                         }
                         // (lit a moment after a press: it's been rated)
                         Timer { interval: 1500ms; running: mixbox.rated != ""; triggered => { mixbox.rated = ""; } }
-                        // (moving only while there's music: the clock read only then, or the window's drawn again every frame,
-                        // nothing playing or not: a third of a core, idle)
-                        property <float> phase: root.mix-on && root.playing && Theme.motion ? mod(animation-tick() / 1ms, root.mixing ? 1200 : 3000) / (root.mixing ? 1200 : 3000) : 0.5;
+                        // (moving only while there's music, on the title bar's own clock below)
+                        property <float> phase: root.mix-on && root.playing && Theme.motion ? mod(root.pulse-ms, root.mixing ? 1200 : 3000) / (root.mixing ? 1200 : 3000) : 0.5;
                         property <float> swing: phase < 0.5 ? phase * 2 : 2 - phase * 2;
                         Glyph {
                             d: Icons.mix;
@@ -9693,8 +9708,8 @@ export component AppWindow inherits Window {
                 Rectangle { height: 14px; }
                 // (each the step it opens: the fourth, the old taste step, is part of Discover now, so there's no 3)
                 for st in [
-                    { k: 0, n: "Welcome", d: Icons.star-out }, { k: 1, n: "Your music", d: Icons.library }, { k: 2, n: "Discover", d: Icons.discover },
-                    { k: 4, n: "How it sounds", d: Icons.volume }, { k: 5, n: "Do you stream?", d: Icons.broadcast }, { k: 6, n: "All set", d: Icons.check },
+                    { k: 0, n: "Welcome", d: Icons.star-out }, { k: 1, n: "Your Music", d: Icons.library }, { k: 2, n: "Discover", d: Icons.discover },
+                    { k: 4, n: "How It Sounds", d: Icons.volume }, { k: 5, n: "Do You Stream?", d: Icons.broadcast }, { k: 6, n: "All Set", d: Icons.check },
                 ]: Rectangle {
                     height: 40px;
                     border-radius: 10px;
@@ -9726,15 +9741,15 @@ export component AppWindow inherits Window {
                             alignment: start;
                             Text { text: "Welcome to OmniPulse"; color: Theme.text; font-size: 34px; font-weight: 800; font-family: Theme.head-font; }
                             Text { text: "All your music in one place: SoundCloud, Spotify, YouTube Music and the files on this PC. First, make it yours."; color: Theme.muted; font-size: 14px; wrap: word-wrap; }
-                            Text { text: "Your name"; color: Theme.text; font-weight: 700; }
-                            Text { text: "Shown in the title bar, and to friends when you listen together."; color: Theme.muted; font-size: 12px; }
+                            Text { text: "Your Name"; color: Theme.text; font-weight: 700; }
+                            Text { text: "Friends see it when you listen along or Jam. Leave it empty to use your account's name."; color: Theme.muted; font-size: 12px; }
                             Rectangle {
                                 clip: true;
                                 height: 40px; width: 340px; border-radius: 10px;
                                 background: Theme.panel; border-width: 1px; border-color: Theme.line;
-                                TextInput { property <length> sx; cursor-position-changed(p) => { if (p.x + self.sx < 0px) { self.sx = -p.x; } else if (p.x + self.sx > parent.width - 24px - 2px) { self.sx = parent.width - 24px - 2px - p.x; } }  x: 12px + min(0px, max(parent.width - 24px - self.width, self.sx)); width: max(parent.width - 24px, self.preferred-width + 4px); height: parent.height; vertical-alignment: center; text: root.app-name; color: Theme.text; font-size: 14px; single-line: true; edited => { root.app-name-changed(self.text); } }
+                                TextInput { property <length> sx; cursor-position-changed(p) => { if (p.x + self.sx < 0px) { self.sx = -p.x; } else if (p.x + self.sx > parent.width - 24px - 2px) { self.sx = parent.width - 24px - 2px - p.x; } }  x: 12px + min(0px, max(parent.width - 24px - self.width, self.sx)); width: max(parent.width - 24px, self.preferred-width + 4px); height: parent.height; vertical-alignment: center; text: root.your-name; color: Theme.text; font-size: 14px; single-line: true; edited => { root.your-name-changed(self.text); } }
                             }
-                            Text { text: "A theme"; color: Theme.text; font-weight: 700; }
+                            Text { text: "A Theme"; color: Theme.text; font-weight: 700; }
                             for r in root.theme-rows: HorizontalLayout {
                                 spacing: 10px;
                                 for t in r.items: ThemeTile { horizontal-stretch: 1; preferred-width: 0px; t: t; on: root.theme-name == t.id; clicked => { root.theme-picked(t.id); } }
@@ -9758,7 +9773,7 @@ export component AppWindow inherits Window {
                         if root.setup-at == 1: VerticalLayout {
                             spacing: 14px;
                             alignment: start;
-                            Text { text: "Your music"; color: Theme.text; font-size: 34px; font-weight: 800; font-family: Theme.head-font; }
+                            Text { text: "Your Music"; color: Theme.text; font-size: 34px; font-weight: 800; font-family: Theme.head-font; }
                             Text { text: "Sign in to any of these to bring in your likes and playlists. Each is optional, and you can add the rest later."; color: Theme.muted; font-size: 14px; wrap: word-wrap; }
                             HorizontalLayout {
                                 spacing: 8px;
@@ -9777,11 +9792,11 @@ export component AppWindow inherits Window {
                                     }
                                 }
                             }
-                            Text { text: "Music on this PC"; color: Theme.text; font-weight: 700; }
+                            Text { text: "Music on This PC"; color: Theme.text; font-weight: 700; }
                             Text { text: root.folders.length == 0 ? "Add the folders your music's in. OmniPulse finds the songs in them and keeps up as you add more." : root.folders-note; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
                             for f[i] in root.folders: HorizontalLayout { spacing: 8px; Text { text: f; color: Theme.text; font-size: 13px; vertical-alignment: center; horizontal-stretch: 1; overflow: elide; } IconButton { d: Icons.close; size: 28px; tip: "Take this folder out"; clicked => { root.folder-remove(i); } } }
                             HorizontalLayout { alignment: start; Pill { label: "Add a Folder"; on: true; clicked => { root.folder-add(); } } }
-                            Text { text: "Moving from somewhere else?"; color: Theme.text; font-weight: 700; }
+                            Text { text: "Moving From Somewhere Else?"; color: Theme.text; font-weight: 700; }
                             if root.setup-web: Text { text: "Your favourites, playlists and settings from the OmniPulse web app came across already."; color: Theme.accent; font-size: 12px; wrap: word-wrap; }
                             Text { text: "Bring your music along. A playlist file can be an M3U, a CSV, or one exported from another app."; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
                             HorizontalLayout { spacing: 12px; alignment: start;
@@ -9853,7 +9868,7 @@ export component AppWindow inherits Window {
                         if root.setup-at == 4: VerticalLayout {
                             spacing: 14px;
                             alignment: start;
-                            Text { text: "How it sounds"; color: Theme.text; font-size: 34px; font-weight: 800; font-family: Theme.head-font; }
+                            Text { text: "How It Sounds"; color: Theme.text; font-size: 34px; font-weight: 800; font-family: Theme.head-font; }
                             Text { text: "Two settings shape how your music plays. You can change both later in Settings > Sound."; color: Theme.muted; font-size: 14px; wrap: word-wrap; }
                             // (each a card: its icon, its name, what it does, and its control)
                             Rectangle {
@@ -9903,7 +9918,7 @@ export component AppWindow inherits Window {
                         if root.setup-at == 5: VerticalLayout {
                             spacing: 14px;
                             alignment: start;
-                            Text { text: "Do you stream?"; color: Theme.text; font-size: 34px; font-weight: 800; font-family: Theme.head-font; }
+                            Text { text: "Do You Stream?"; color: Theme.text; font-size: 34px; font-weight: 800; font-family: Theme.head-font; }
                             Text { text: "OmniPulse has everything for streamers built in: song requests, alerts, goals, a chatbot and OBS widgets. If you don't stream, it all stays out of your way."; color: Theme.muted; font-size: 14px; wrap: word-wrap; }
                             HorizontalLayout {
                                 spacing: 14px;
@@ -9932,11 +9947,11 @@ export component AppWindow inherits Window {
                         if root.setup-at == 6: VerticalLayout {
                             spacing: 14px;
                             alignment: start;
-                            Text { text: "All set"; color: Theme.text; font-size: 34px; font-weight: 800; font-family: Theme.head-font; }
+                            Text { text: "All Set"; color: Theme.text; font-size: 34px; font-weight: 800; font-family: Theme.head-font; }
                             Text { text: "A few things worth knowing:"; color: Theme.muted; font-size: 14px; }
                             for t in [
-                                { d: Icons.library, n: "The sidebar", s: "Your Library, Discover, Rediscover, artists and stats, with your playlists below." },
-                                { d: Icons.play, n: "The player", s: "At the bottom. Click what's playing to open Now Playing and its lyrics." },
+                                { d: Icons.library, n: "The Sidebar", s: "Your Library, Discover, Rediscover, artists and stats, with your playlists below." },
+                                { d: Icons.play, n: "The Player", s: "At the bottom. Click what's playing to open Now Playing and its lyrics." },
                                 { d: Icons.mix, n: "Seamless Mix", s: "The button is in the title bar. With it on, rate each change with the thumbs beside it." },
                                 { d: Icons.gear, n: "Settings", s: "The gear at the top right of each page. The search box there finds any setting." },
                             ]: HorizontalLayout {
