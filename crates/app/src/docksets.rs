@@ -21,7 +21,7 @@ fn defaults(page: &str) -> Map<String, Value> {
             "modPile": true, "lkPile": true, "pileMin": "3", "modLock": true, "modModes": true, "modShield": true, "modAb": true, "lkShield": true, "lkFollow": true, "lkSlow": true, "lkEmote": false, "lkSub": false,
             "look": "app", "accent": "app", "font": "app", "corners": "app", "density": "normal" }),
         "activity" => json!({ "hidden": ["firstwords"], "newest": true, "compact": false, "platform": true, "msg": true, "cmds": false, "size": "13", "from": "all", "look": "app", "accent": "app", "font": "app", "corners": "app", "density": "normal" }),
-        _ => json!({ "from": "all", "cmds": false, "bot": true, "badges": true, "marks": true, "style": "plain", "size": 20, "bg": "0", "shadow": true, "dir": "bottom", "align": "left", "fade": 0, "max": 30, "bttv": true, "ffz": true, "stv": true, "name": "beside", "anim": "rise", "events": false, "pronouns": false, "first": true }),
+        _ => json!({ "from": "all", "cmds": false, "bot": true, "badges": true, "marks": true, "style": "plain", "size": 20, "bg": "0", "shadow": true, "dir": "bottom", "align": "left", "flow": "stack", "out": "fade", "speed": "normal", "rcol": "sunset", "ricon": "chat", "rdots": true, "rglow": false, "rshine": false, "fade": 0, "max": 30, "bttv": true, "ffz": true, "stv": true, "name": "beside", "anim": "rise", "events": false, "pronouns": false, "first": true }),
     };
     v.as_object().cloned().unwrap_or_default()
 }
@@ -171,11 +171,26 @@ pub fn fields(panel: &str, vals: &Map<String, Value>, port: u64) -> Vec<Value> {
                 note("In OBS"),
                 info("Address", &format!("{base}/chat"), "Add it as a Browser source. Changes here show there within a few seconds. For another with its own settings, add /2 to the end of the address, then change those in OBS: right-click it, choose Interact, and click its gear."),
                 note("How It Looks"),
-                sel("style", "Theme", "The preview above shows it with made-up chat.", &[(json!("plain"), "Plain"), (json!("bubbles"), "Bubbles"), (json!("glass"), "Glass"), (json!("neon"), "Neon"), (json!("cards"), "Cards"), (json!("terminal"), "Terminal"), (json!("comic"), "Comic"), (json!("minimal"), "Minimal"), (json!("edge"), "Edge Light"), (json!("y2k"), "Y2K Window"), (json!("pastel"), "Pastel"), (json!("pixel"), "Pixel")]),
+                sel("style", "Theme", "The preview above shows it with made-up chat.", &[(json!("plain"), "Plain"), (json!("bubbles"), "Bubbles"), (json!("glass"), "Glass"), (json!("neon"), "Neon"), (json!("cards"), "Cards"), (json!("terminal"), "Terminal"), (json!("comic"), "Comic"), (json!("minimal"), "Minimal"), (json!("edge"), "Edge Light"), (json!("y2k"), "Y2K Window"), (json!("pastel"), "Pastel"), (json!("pixel"), "Pixel"), (json!("ribbon"), "Ribbon")]),
                 sel("name", "Names", "", &[(json!("beside"), "Beside the Message"), (json!("above"), "Above It")]),
-                sel("anim", "How Messages Come In", "", &[(json!("rise"), "Rise"), (json!("slide"), "Slide"), (json!("pop"), "Pop"), (json!("fade"), "Fade")]),
-                sel("size", "Text Size", "", &[(json!(16), "Small"), (json!(20), "Normal"), (json!(26), "Large"), (json!(34), "Huge")]),
             ];
+            // (Ribbon's own: its colours, its corner icon, its effects)
+            if vals.get("style").and_then(|v| v.as_str()) == Some("ribbon") {
+                f.extend([
+                    sel("rcol", "Ribbon Colours", "Each card takes the next pair, so the row shifts along.", &[(json!("sunset"), "Sunset"), (json!("ocean"), "Ocean"), (json!("candy"), "Candy"), (json!("forest"), "Forest"), (json!("fire"), "Fire"), (json!("mono"), "Mono"), (json!("theme"), "Your Theme's")]),
+                    sel("ricon", "Corner Icon", "", &[(json!("chat"), "Chat Bubble"), (json!("heart"), "Heart"), (json!("star"), "Star"), (json!("note"), "Music Note"), (json!("platform"), "The Platform's"), (json!("none"), "None")]),
+                    tog("rdots", "Joining Dots", "Little lights between the cards, In a Row."),
+                    tog("rglow", "Glow", "Each card glows in its own colour."),
+                    tog("rshine", "Shine", "A soft light sweeps across each card now and then."),
+                ]);
+            }
+            f.extend([
+                sel("flow", "Layout", "In a Row shows them side by side, like a ticker along the top or bottom of your stream.", &[(json!("stack"), "Stacked"), (json!("row"), "In a Row")]),
+                sel("anim", "How Messages Come In", "", &[(json!("rise"), "Rise"), (json!("slide"), "Slide"), (json!("pop"), "Pop"), (json!("fade"), "Fade"), (json!("none"), "No Animation")]),
+                sel("out", "How Messages Go Out", "When they fade after a while, or there are too many.", &[(json!("fade"), "Fade"), (json!("slide"), "Slide"), (json!("shrink"), "Shrink"), (json!("none"), "No Animation")]),
+                sel("speed", "Animation Speed", "", &[(json!("slow"), "Slow"), (json!("normal"), "Normal"), (json!("fast"), "Fast")]),
+                sel("size", "Text Size", "", &[(json!(16), "Small"), (json!(20), "Normal"), (json!(26), "Large"), (json!(34), "Huge")]),
+            ]);
             // (only Plain has a background of your choosing: the others bring their own)
             if plain { f.push(sel("bg", "Background", "Behind each message. None lets your stream show through.", &[(json!("0"), "None"), (json!("0.35"), "Faint"), (json!("0.6"), "Half"), (json!("0.85"), "Solid")])); }
             f.extend([

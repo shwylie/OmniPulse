@@ -157,7 +157,7 @@ export global CamLook {
 export struct AlertLook { theme: string, c1: color, c2: color, glow: bool, icon: float, transition: string, anim: string, in-widget: bool }
 
 /// The Multichat Overlay's preview: its look as it's set
-export struct ChatLook { style: string, size: float, bg: float, shadow: bool, top: bool, badges: bool, marks: bool, from: string, above: bool, right: bool }
+export struct ChatLook { style: string, size: float, bg: float, shadow: bool, top: bool, badges: bool, marks: bool, from: string, above: bool, right: bool, row: bool }
 /// (a made-up message, for the preview)
 export struct ChatSample { name: string, text: string, kick: bool, colour: color, badge: string }
 
@@ -3535,7 +3535,7 @@ component ChatRow inherits Rectangle {
     height: rowl.preferred-height;
     clip: root.y2k;
     border-radius: root.st == "bubbles" ? 4px : root.term ? 3px : root.comic ? 16px : root.pastel ? 16px : root.y2k ? 6px : root.pixel || root.st == "minimal" ? 0px : root.st == "edge" ? 14px : 11px;
-    background: root.st == "plain" ? #0a0c12.with-alpha(root.look.bg) : root.st == "bubbles" ? #0a0c12.with-alpha(max(root.look.bg, 0.55)) : root.st == "glass" ? #ffffff1f
+    background: root.st == "ribbon" ? @linear-gradient(105deg, #5a3a7a 0%, #c07a3e 100%) : root.st == "plain" ? #0a0c12.with-alpha(root.look.bg) : root.st == "bubbles" ? #0a0c12.with-alpha(max(root.look.bg, 0.55)) : root.st == "glass" ? #ffffff1f
         : root.st == "neon" ? #060412b8 : root.st == "cards" ? #191c28 : root.term ? #000000c7 : root.comic ? #ffffff : root.st == "edge" ? #0c0a18a8
         : root.y2k ? #fdf6ff : root.pastel ? root.m.colour.mix(#fffafc, 0.18) : root.pixel ? #1b1030 : transparent;
     border-width: root.st == "glass" || root.st == "neon" ? 1px : root.comic || root.y2k ? 2px : root.st == "edge" ? 1.5px : root.pixel ? 3px : 0px;
@@ -3617,8 +3617,9 @@ component ChatPreview inherits Rectangle {
     property <int> turn: Theme.motion ? floor(animation-tick() / 2000ms) : 4;
     property <float> into: Theme.motion ? mod(animation-tick() / 1ms, 2000) / 350 : 1;
     property <float> come: clamp(root.into, 0, 1);
-    VerticalLayout {
-        x: 14px;
+    // (stacked: on the side it's lined up on)
+    if !root.look.row: VerticalLayout {
+        x: root.look.right ? parent.width * 0.45 - 14px : 14px;
         y: 26px;
         width: parent.width * 0.55;
         height: parent.height - 34px;
@@ -3630,6 +3631,25 @@ component ChatPreview inherits Rectangle {
             m: root.samples[mod(root.turn - self.age + root.n * 100, root.n)];
             look: root.look;
             opacity: self.age == 0 ? root.come : 1;
+        }
+    }
+    // (in a row: a ticker along the bottom (or top), the newest on the right (on the left, lined up on the right))
+    if root.look.row: HorizontalLayout {
+        x: 14px;
+        y: root.look.top ? 26px : parent.height - self.height - 10px;
+        width: parent.width - 28px;
+        height: 64px;
+        alignment: root.look.right ? LayoutAlignment.start : LayoutAlignment.end;
+        spacing: 6px;
+        for k in 3: VerticalLayout {
+            alignment: root.look.top ? LayoutAlignment.start : LayoutAlignment.end;
+            ChatRow {
+                property <int> age: root.look.right ? k : 2 - k;
+                width: 200px;
+                m: root.samples[mod(root.turn - self.age + root.n * 100, root.n)];
+                look: root.look;
+                opacity: self.age == 0 ? root.come : 1;
+            }
         }
     }
 }

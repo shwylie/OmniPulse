@@ -8014,6 +8014,7 @@ fn chat_preview(ui: &AppWindow, vals: &serde_json::Map<String, serde_json::Value
         top: vals.get("dir").and_then(|v| v.as_str()) == Some("top"), badges: on("badges"), marks: on("marks"), from: from.clone().into(),
         above: vals.get("name").and_then(|v| v.as_str()) == Some("above"),
         right: vals.get("align").and_then(|v| v.as_str()) == Some("right"),
+        row: vals.get("flow").and_then(|v| v.as_str()) == Some("row"),
     });
     let c = |h: &str| look::Rgb::parse(h).map(|x| x.slint()).unwrap_or(slint::Color::from_rgb_u8(255, 255, 255));
     let all = [
