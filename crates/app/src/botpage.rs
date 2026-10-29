@@ -102,6 +102,27 @@ pub fn wheel_slices(list: &str) -> Vec<(String, f32)> {
     items.into_iter().map(|(name, w)| { let start = at; at += w as f32 / total * 360.0; (name, start) }).collect()
 }
 
+/// A label in Title Case, as the whole app has them: each word's first letter a capital, but the short joining
+/// words ("a", "of", "to" and the like) unless first or last, or after a colon. A word already with a capital or
+/// a digit in it is left as it is; a full sentence (ending in . or ?) is left alone
+pub fn title_case(label: &str) -> String {
+    const SMALL: [&str; 17] = ["a", "an", "the", "and", "but", "or", "nor", "for", "so", "as", "at", "by", "in", "of", "on", "per", "to"];
+    if label.ends_with('.') || label.ends_with('?') { return label.to_string(); }
+    let words: Vec<&str> = label.split(' ').collect();
+    let last = words.len().saturating_sub(1);
+    let mut after_colon = false;
+    words.iter().enumerate().map(|(i, w)| {
+        let start = i == 0 || i == last || after_colon;
+        after_colon = w.ends_with(':');
+        let bare = w.trim_matches(|c: char| !c.is_alphanumeric()).to_lowercase();
+        if w.chars().any(|c| c.is_uppercase() || c.is_ascii_digit()) || (!start && SMALL.contains(&bare.as_str())) { return w.to_string(); }
+        let mut out = String::with_capacity(w.len());
+        let mut done = false;
+        for c in w.chars() { if !done && c.is_alphabetic() { out.extend(c.to_uppercase()); done = true; } else { out.push(c); } }
+        out
+    }).collect::<Vec<_>>().join(" ")
+}
+
 /// Its choice, on each widget's sheet (one setting, shared)
 fn theme_field(cur: &Map<String, Value>) -> Field {
     f("chips", "suiteTheme", "Theme", "For all of the Suite's widgets. Sticker is made for a GIF on top.", &theme_of(cur), "dark=Dark|glass=Glass|neon=Neon|comic=Comic|minimal=Minimal|pastel=Pastel|y2k=Y2K|pixel=Pixel|edge=Edge Light|sticker=Sticker")
@@ -1090,6 +1111,17 @@ pub fn method(act: &str) -> Option<&'static str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn labels_in_title_case() {
+        assert_eq!(title_case("Wait between requests"), "Wait Between Requests");
+        assert_eq!(title_case("Points for every 100 bits"), "Points for Every 100 Bits");
+        assert_eq!(title_case("Start or resume"), "Start or Resume");
+        assert_eq!(title_case("Who it's for"), "Who It's For");
+        assert_eq!(title_case("A GIF with it"), "A GIF With It");
+        assert_eq!(title_case("Shown for (seconds)"), "Shown for (Seconds)");
+        assert_eq!(title_case("Leave it empty."), "Leave it empty.");
+    }
 
     #[test]
     fn a_prize_marked_x3_gets_three_times_the_slice() {

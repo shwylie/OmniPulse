@@ -7188,7 +7188,14 @@ fn bot_current(shared: &Shared) -> serde_json::Map<String, serde_json::Value> {
     PF_ORIG.with(|o| botpage::current(&saved, &edit, &o.borrow()))
 }
 
-fn bot_fields(list: Vec<botpage::Field>) -> (Vec<BotField>, String) {
+fn bot_fields(mut list: Vec<botpage::Field>) -> (Vec<BotField>, String) {
+    // (labels, headings, buttons and choices in Title Case, as everywhere in the app; notes and steps are sentences)
+    for x in list.iter_mut().filter(|x| !matches!(x.kind, "note" | "step" | "suiteprev" | "hudedit" | "goalrow" | "addr")) {
+        x.label = botpage::title_case(&x.label);
+        if matches!(x.kind, "chips" | "buttons") {
+            x.extra = x.extra.split('|').map(|o| match o.split_once('=') { Some((id, name)) => format!("{id}={}", botpage::title_case(name)), None => o.to_string() }).collect::<Vec<_>>().join("|");
+        }
+    }
     // (a page with a preview is split: its column narrow, as Panels' is)
     let split_page = list.iter().any(|x| x.kind == "suiteprev");
     let sig = list.iter().map(|x| format!("{}|{}|{}|{}|{}|{}", x.key, x.kind, x.value, x.label, x.extra, if x.kind == "suiteprev" { format!("{}{}", x.note, x.n) } else { String::new() })).collect::<Vec<_>>().join("\n");
@@ -9091,7 +9098,7 @@ fn pf_paint(shared: &Shared) {
         let at = f["options"].as_array().and_then(|o| o.iter().position(|o| Some(o) == vals.get(&key))).unwrap_or(0) as i32;
         // (the chatbot's Actions: a button that opens their page)
         let (kind, press) = if kind == "actions" { ("button".to_string(), "Open Actions") } else { let p = f["press"].as_str().unwrap_or("Go"); (kind, p) };
-        Some(PlugField { changed: pf_changed(&key), label: f["label"].as_str().unwrap_or(&key).into(), note: f["note"].as_str().unwrap_or("").into(), value: if kind == "button" { press.into() } else { vals.get(&key).map(text).unwrap_or_default().into() }, kind: kind.into(), options: ModelRc::from(Rc::new(VecModel::from(options))), key: key.into(), at })
+        Some(PlugField { changed: pf_changed(&key), label: botpage::title_case(f["label"].as_str().unwrap_or(&key)).into(), note: f["note"].as_str().unwrap_or("").into(), value: if kind == "button" { press.into() } else { vals.get(&key).map(text).unwrap_or_default().into() }, kind: kind.into(), options: ModelRc::from(Rc::new(VecModel::from(options))), key: key.into(), at })
     }).collect();
     if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_pf_fields(ModelRc::from(Rc::new(VecModel::from(rows)))); }
 }
