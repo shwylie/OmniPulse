@@ -45,6 +45,25 @@
   #hype.train .left { font-variant-numeric: tabular-nums; font-weight: 800; margin-left: 0.6rem; }
   #hype.train.ended .fl { background: linear-gradient(90deg, #3ddc84, #b6ff5e); }
   #hype.up { animation: flare 1.2s ease-out; }
+  /* the platforms racing: on a train, a lane each, its train as far along as its share of the leader's */
+  #hype .race { display: flex; flex-direction: column; gap: 0.3rem; margin-top: 0.5rem; }
+  #hype .lane { display: flex; align-items: center; gap: 0.5rem; font-size: 0.85rem; }
+  #hype .lane .mk { flex: none; width: 1.1rem; height: 1.1rem; fill: var(--pc); }
+  #hype .lane .tk { position: relative; flex: 1; height: 0.35rem; border-radius: 0.2rem; background: rgba(255, 255, 255, 0.12); }
+  #hype .lane .run { position: absolute; left: 0; top: 0; bottom: 0; border-radius: inherit; background: var(--pc); transition: width 0.9s cubic-bezier(0.2, 0.8, 0.2, 1); }
+  #hype .lane .eng { position: absolute; top: 50%; width: 1.3rem; height: 1.3rem; transform: translate(-60%, -50%); fill: var(--pc); transition: left 0.9s cubic-bezier(0.2, 0.8, 0.2, 1); filter: drop-shadow(0 0 0.3rem var(--pc)); }
+  #hype .lane .pts { flex: none; min-width: 2.4rem; text-align: right; font-weight: 800; font-variant-numeric: tabular-nums; }
+  #hype .lane.lead .pts { color: var(--pc); }
+  /* the meter, fought over: two platforms pull a bar between them; three or more take squares from each other */
+  #hype .tug { position: relative; display: flex; height: 0.9rem; border-radius: 0.5rem; overflow: hidden; background: rgba(255, 255, 255, 0.16); }
+  #hype .tug b { height: 100%; background: var(--pc); transition: flex-grow 0.9s cubic-bezier(0.2, 0.8, 0.2, 1); }
+  #hype .tug i { position: absolute; top: -0.15rem; bottom: -0.15rem; width: 0.25rem; margin-left: -0.125rem; background: #fff; border-radius: 0.2rem; box-shadow: 0 0 0.5rem #fff; transition: left 0.9s cubic-bezier(0.2, 0.8, 0.2, 1); }
+  #hype .tugnames { display: flex; justify-content: space-between; margin-top: 0.3rem; font-size: 0.8rem; font-weight: 700; }
+  #hype .grid { display: grid; grid-template-columns: repeat(18, 1fr); gap: 0.12rem; }
+  #hype .grid s { aspect-ratio: 1; border-radius: 0.15rem; background: rgba(255, 255, 255, 0.14); transition: background-color 0.6s ease, transform 0.6s ease; }
+  #hype .grid s.on { background: var(--pc); }
+  #hype .grid s.took { animation: took 0.6s ease-out; }
+  @keyframes took { 40% { transform: scale(1.35); } }
   @keyframes flare { 0% { box-shadow: 0 0 0 0 var(--c1); transform: scale(1); } 30% { box-shadow: 0 0 2.4rem 0.6rem var(--c1); transform: scale(1.04); } 100% { box-shadow: 0 0.3rem 1rem rgba(0, 0, 0, 0.35); transform: scale(1); } }
   #wheel { position: relative; width: 30rem; height: 30rem; }
   #wheel .disc { position: absolute; inset: 1.5rem 0 0 0; margin: 0 auto; width: 28rem; height: 28rem; border-radius: 50%; box-shadow: 0 0 0 0.4rem rgba(255, 255, 255, 0.85), 0 0.6rem 2rem rgba(0, 0, 0, 0.5); overflow: hidden; }
@@ -522,7 +541,72 @@
     if (hypeLevel >= 0 && (h.level || 0) > hypeLevel) { box.classList.remove("up"); void box.offsetWidth; box.classList.add("up"); }
     hypeLevel = h.level || 0;
     if (done) { clearTimeout(box.goT); box.goT = setTimeout(draw, 8100 - (Date.now() - h.done.at)); }
+    race(box, h.running ? h.race : []);
   }
+  // (each platform's colour, as its brand has it)
+  const PCOL = { twitch: "#9146ff", kick: "#53fc18", youtube: "#ff0033" };
+  const PNAME = { twitch: "Twitch", kick: "Kick", youtube: "YouTube" };
+  // (a train's race: a lane for each platform with some, two or more)
+  function race(box, r) {
+    let el = box.querySelector(".race");
+    if (!r || r.length < 2) { if (el) el.remove(); return; }
+    if (!el) { el = document.createElement("div"); el.className = "race"; box.append(el); }
+    const top = Math.max(1, r[0][1]);
+    for (const [p, pts] of r) {
+      let lane = el.querySelector('[data-p="' + p + '"]');
+      if (!lane) {
+        lane = document.createElement("div"); lane.className = "lane"; lane.dataset.p = p; lane.style.setProperty("--pc", PCOL[p]);
+        lane.innerHTML = '<svg class="mk" viewBox="0 0 24 24"><path d="' + (MARKS[p] || "") + '"/></svg><div class="tk"><div class="run"></div><svg class="eng" viewBox="0 0 24 24"><path d="' + TRAIN + '"/></svg></div><span class="pts"></span>';
+        el.append(lane);
+      }
+      const at = Math.max(4, (pts / top) * 100) + "%";
+      lane.querySelector(".run").style.width = at;
+      lane.querySelector(".eng").style.left = at;
+      lane.querySelector(".pts").textContent = pts;
+      lane.classList.toggle("lead", pts === r[0][1]);
+    }
+    // (the leader on top, as it changes)
+    r.forEach(([p]) => el.append(el.querySelector('[data-p="' + p + '"]')));
+    el.querySelectorAll(".lane").forEach((l) => { if (!r.some(([p]) => p === l.dataset.p)) l.remove(); });
+  }
+  // (the meter fought over: two platforms, a tug of war; three, a grid of squares each takes as its share grows)
+  const SQUARES = 36;
+  // (the order squares are taken in, mixed once, so a share grows in patches across the grid, not in a line)
+  const SQ_ORDER = Array.from({ length: SQUARES }, (_, i) => i).sort((a, b) => ((a * 13) % 37) - ((b * 13) % 37));
+  function fight(box, r) {
+    let tug = box.querySelector(".tug"), names = box.querySelector(".tugnames"), grid = box.querySelector(".grid");
+    const tr = box.querySelector(".tr");
+    if (!r || r.length < 2) { [tug, names, grid].forEach((x) => x && x.remove()); if (tr) tr.style.display = ""; return; }
+    if (tr) tr.style.display = "none";
+    const total = r.reduce((a, x) => a + x[1], 0) || 1;
+    if (r.length === 2) {
+      if (grid) grid.remove();
+      // (always in the same order, so the bar doesn't swap ends when the lead changes)
+      const two = [...r].sort((a, b) => RACE_ORDER.indexOf(a[0]) - RACE_ORDER.indexOf(b[0]));
+      if (!tug) { tug = document.createElement("div"); tug.className = "tug"; tug.innerHTML = "<b></b><b></b><i></i>"; box.append(tug); names = document.createElement("div"); names.className = "tugnames"; box.append(names); }
+      const bs = tug.querySelectorAll("b");
+      two.forEach(([p, pts], k) => { bs[k].style.setProperty("--pc", PCOL[p]); bs[k].style.flexGrow = String(pts / total); });
+      tug.querySelector("i").style.left = (two[0][1] / total) * 100 + "%";
+      names.innerHTML = two.map(([p, pts]) => '<span style="color:' + PCOL[p] + '">' + PNAME[p] + " " + Math.round((pts / total) * 100) + "%</span>").join("");
+      return;
+    }
+    if (tug) { tug.remove(); if (names) names.remove(); }
+    if (!grid) { grid = document.createElement("div"); grid.className = "grid"; grid.innerHTML = "<s></s>".repeat(SQUARES); box.append(grid); }
+    // (each platform's squares, as many as its share; handed out in the mixed order, the leader first)
+    const cells = grid.querySelectorAll("s");
+    const owner = new Array(SQUARES).fill("");
+    let k = 0;
+    for (const [p, pts] of r) { const n = Math.round((pts / total) * SQUARES); for (let j = 0; j < n && k < SQUARES; j++) owner[SQ_ORDER[k++]] = p; }
+    cells.forEach((c, i) => {
+      const was = c.dataset.p || "", now = owner[i];
+      if (was === now) return;
+      c.dataset.p = now;
+      c.classList.toggle("on", !!now);
+      if (now) c.style.setProperty("--pc", PCOL[now]);
+      if (was && now) { c.classList.remove("took"); void c.offsetWidth; c.classList.add("took"); }
+    });
+  }
+  const RACE_ORDER = ["twitch", "kick", "youtube"];
   function hype() {
     const h = suite.hype || {};
     if (h.train) return train(h);
@@ -535,6 +619,10 @@
     // (a level reached: the meter flares)
     if (hypeLevel >= 0 && (h.level || 0) > hypeLevel) { box.classList.remove("up"); void box.offsetWidth; box.classList.add("up"); }
     hypeLevel = h.level || 0;
+    // (fought over: its bar's place taken, so how near the next level is goes with the level)
+    const fought = !!(h.race && h.race.length >= 2);
+    fight(box, h.race);
+    if (fought) box.querySelector(".lv").textContent = "Level " + (h.level || 0) + " · " + Math.round((h.fill || 0) * 100) + "%";
   }
   let tuneTick = null;
   function tune() {

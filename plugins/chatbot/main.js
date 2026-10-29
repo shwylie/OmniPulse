@@ -248,7 +248,7 @@ async function onChat(m) {
   present[platform + "|" + (m.nick || user).toLowerCase()] = { at: Date.now(), user, userId: m.tags["user-id"] || "", platform };
   onActions(m, text, cmd, args, user, id);
   gameChat(user, text, platform);
-  funChat(user);
+  funChat(user, platform);
   // (a guess at Name That Tune, while a round's on)
   if (tune && !text.startsWith("!")) tuneGuess(user, text);
   const firstKey = platform + "|" + (m.nick || user).toLowerCase();
@@ -2235,9 +2235,9 @@ function suitePush() {
       hype: trainMode() ? {
         on: hypeLive(), train: true, running: !!fun.train, show: String(x.hypeShow || "train"), level: fun.train ? fun.train.level : 0,
         fill: fun.train ? (fun.train.pts % hypeStep()) / hypeStep() : 0, levelAt: fun.levelAt, endsAt: fun.train ? fun.train.endsAt : 0, secs: trainSecs(), now: Date.now(),
-        top: fun.train ? (Object.entries(fun.train.by).sort((a, b) => b[1] - a[1])[0] || [""])[0] : "", from: fun.train ? fun.train.from : [], done: fun.trainDone || null,
+        top: fun.train ? (Object.entries(fun.train.by).sort((a, b) => b[1] - a[1])[0] || [""])[0] : "", from: fun.train ? fun.train.from : [], race: fun.train ? raceOf(fun.train.race) : [], done: fun.trainDone || null,
         label: String(x.hypeLabel || "Hype Train"),
-      } : { on: hypeLive(), level: fun.level, fill: (fun.hype % hypeStep()) / hypeStep(), levelAt: fun.levelAt, label: String(x.hypeLabel || "Hype") },
+      } : { on: hypeLive(), level: fun.level, fill: (fun.hype % hypeStep()) / hypeStep(), levelAt: fun.levelAt, label: String(x.hypeLabel || "Hype"), race: raceOf(fun.plat) },
       voteskip: { on: yes(x.skipOn), votes: fun.votes.size, need: Math.max(1, num(x.skipVotes) || 5), song: fun.song, command: String(x.skipCommand || "!skip") },
       wheel: Object.assign({ prizes: wheelPrizes(), weights: wheelList().map((p) => p.w), command: String(x.wheelCommand || "!spin"), secs: wheelSecs(), colors: String(x.wheelColors || "theme"), hide: yes(x.wheelHide) }, fun.wheel || {}),
       leaderboard: { list: leaders(), name: pointsName() },
@@ -2358,12 +2358,12 @@ function suiteHear(ev, ctx) {
   if (ev === "donation") { g.donation += money(ctx.amount); if (yes(x.timerSubathon)) timerAdd(money(ctx.amount) * num(x.timerDono) * 60000); }
   if (ev === "raid" && num(ctx.amount) >= Math.max(1, num(x.raidMin) || 1)) st.lastRaid = { user: ctx.user, userId: ctx.userId, viewers: num(ctx.amount), platform: ctx.platform, at: Date.now() };
   // (the hype meter: what happens fills it more than chat does; a sub, a raid or a good cheer pours emotes)
-  if (ev === "follow" && !trainMode()) hypeAdd(10);
+  if (ev === "follow" && !trainMode()) hypeAdd(10, "", ctx.platform);
   if (sub) hypeAdd(25 * (ev === "gift" ? Math.max(1, num(ctx.amount)) : 1), ctx.user, ctx.platform);
   if (ev === "bits") hypeAdd(num(ctx.amount) / 10, ctx.user, ctx.platform);
   if (ev === "kicks") hypeAdd(num(ctx.amount) / 10, ctx.user, ctx.platform);
   if (ev === "donation") hypeAdd(money(ctx.amount) * 10, ctx.user, ctx.platform);
-  if (ev === "raid" && !trainMode()) hypeAdd(Math.max(10, num(ctx.amount)));
+  if (ev === "raid" && !trainMode()) hypeAdd(Math.max(10, num(ctx.amount)), "", ctx.platform);
   // (what pours emotes, as Emote Rain's set)
   const pour = (k, d) => yes(x[k] === undefined ? d : x[k]);
   if ((sub && pour("rainOnSub", true)) || (ev === "raid" && pour("rainOnRaid", true)) || (ev === "bits" && num(ctx.amount) >= 100 && pour("rainOnBits", true)) || (ev === "follow" && pour("rainOnFollow", false)) || (ev === "donation" && pour("rainOnDono", true))) fun.burst++;
@@ -2403,9 +2403,14 @@ async function raidIn(ctx) {
 
 // ---------- the Suite's fun: a hype meter, vote skip, a wheel, emote rain's bursts, a leaderboard ----------
 // Each shown by its own page (/hype, /voteskip, /wheel, /leaderboard, /emotes), sent with the others in suitePush.
-const fun = { hype: 0, level: 0, levelAt: 0, chatAt: {}, votes: new Set(), song: "", wheel: null, spunAt: {}, burst: 0, train: null, warm: [] };
+const fun = { hype: 0, plat: {}, level: 0, levelAt: 0, chatAt: {}, votes: new Set(), song: "", wheel: null, spunAt: {}, burst: 0, train: null, warm: [] };
 const funOn = (k) => yes(S()[k] === undefined ? true : S()[k]);
 const hypeStep = () => Math.max(10, num(S().hypeLevel) || 100);
+// (the platforms' race: each one's points, Twitch's, Kick's and YouTube's, as [platform, points] with the most
+// first; only those with some, and only with Platforms Race on)
+const RACERS = ["twitch", "kick", "youtube"];
+function raceOf(by) { return !funOn("hypeRace") ? [] : RACERS.filter((p) => num(by[p]) > 0).map((p) => [p, Math.round(num(by[p]))]).sort((a, b) => b[1] - a[1]); }
+function raceAdd(by, n, platform) { if (RACERS.includes(platform)) by[platform] = (by[platform] || 0) + n; }
 
 // (the hype train, across platforms: subs, gifts, bits, Kicks, donations and Super Chats from Twitch, Kick and
 // YouTube all count. Enough of them close together starts one (or Twitch's own starting does); each one keeps it
@@ -2427,13 +2432,14 @@ function trainAdd(n, user, platform) {
   t.pts += n;
   t.endsAt = now + trainSecs() * 1000;
   if (user) t.by[user] = (t.by[user] || 0) + n;
+  raceAdd(t.race, n, platform);
   if (platform && !t.from.includes(platform)) t.from.push(platform);
   trainLevel();
   suitePush();
 }
 function trainStart(pts) {
   fun.warm = [];
-  fun.train = { pts: Math.max(0, pts || 0), level: 1, twitch: 0, startedAt: Date.now(), endsAt: Date.now() + trainSecs() * 1000, by: {}, from: [] };
+  fun.train = { pts: Math.max(0, pts || 0), level: 1, twitch: 0, startedAt: Date.now(), endsAt: Date.now() + trainSecs() * 1000, by: {}, race: {}, from: [] };
   fun.level = 1; fun.levelAt = Date.now(); fun.burst++;
   if (funOn("hypeChat")) reply(null, String(S().hypeStartMessage || "🚂 A hype train's started! Subs, bits, Kicks and donations on any platform keep it going.").replace(/\{level\}/g, "1"), "all");
   fire("suitetrain", { user: "", amount: "1", message: "", rawInput: "", platform: "all", replay: true });
@@ -2478,6 +2484,7 @@ function hypeAdd(n, user, platform) {
   if (!hypeLive() || n <= 0) return;
   if (trainMode()) return trainAdd(n, user, platform);
   fun.hype += n;
+  raceAdd(fun.plat, n, platform);
   const lvl = Math.floor(fun.hype / hypeStep());
   if (lvl > fun.level) {
     fun.level = lvl;
@@ -2489,16 +2496,19 @@ function hypeAdd(n, user, platform) {
   suitePush();
 }
 // (a message: a little each, at most once every 10 s per viewer, so one can't fill it alone)
-function funChat(user) {
+function funChat(user, platform) {
   const k = String(user || "").toLowerCase();
   if (trainMode()) return;
-  if (!fun.chatAt[k] || Date.now() - fun.chatAt[k] > 10000) { fun.chatAt[k] = Date.now(); hypeAdd(Math.max(0, num(S().hypeChatPts) || 2)); }
+  if (!fun.chatAt[k] || Date.now() - fun.chatAt[k] > 10000) { fun.chatAt[k] = Date.now(); hypeAdd(Math.max(0, num(S().hypeChatPts) || 2), "", platform); }
 }
 // (and it cools, slowly: a level's lost again only once it's well under it)
 setInterval(() => {
   if (fun.hype <= 0 || trainMode()) return;
   const step = hypeStep();
+  const was = fun.hype;
   fun.hype = Math.max(0, fun.hype - step * Math.max(0, num(S().hypeCool) || 2) / 100);
+  // (each platform's share cooling with it)
+  for (const p of Object.keys(fun.plat)) fun.plat[p] = was > 0 ? fun.plat[p] * fun.hype / was : 0;
   const lvl = Math.floor(fun.hype / step);
   if (lvl < fun.level) fun.level = lvl;
   suitePush();

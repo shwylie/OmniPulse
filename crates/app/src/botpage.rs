@@ -747,6 +747,7 @@ fn sheet_of(id: &str, cur: &Map<String, Value>) -> (String, Vec<Field>) {
                 v.push(f("number", "hypeChatPts", "Per chatter", "For each viewer who chats, at most once every 10 seconds.", &n(cur, "hypeChatPts"), "2"));
                 v.push(f("number", "hypeCool", "Cooling", "How fast it empties while quiet, in percent of a level every 5 seconds.", &n(cur, "hypeCool"), "2"));
             }
+            v.push(f("toggle", "hypeRace", "Platforms race", if train { "With hype from more than one of Twitch, Kick and YouTube, each gets a lane and its own train, racing the others." } else { "With hype from more than one of Twitch, Kick and YouTube, they fight over the meter: two pull it like a tug of war, three take squares from each other." }, if on(cur, "hypeRace", true) { "true" } else { "false" }, ""));
             v.push(f("text", "hypeLabel", "Title", "Shown on the meter.", s(cur, "hypeLabel"), if train { "Hype Train" } else { "Hype" }));
             v.push(f("head", "", "In chat", "", "", ""));
             v.push(f("toggle", "hypeChat", "Say it in chat", if train { "When a train starts, at each level, and when it ends." } else { "At each level." }, if on(cur, "hypeChat", true) { "true" } else { "false" }, ""));
