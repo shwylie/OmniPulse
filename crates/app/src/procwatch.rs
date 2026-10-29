@@ -175,15 +175,18 @@ pub fn open(target: &str, args: &str) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    /// A program started after it began watching: heard, by name and place (ping, as it opens no window)
+    /// A program started after it began watching: heard, by name and place (ping, with no console window, so
+    /// nothing pops up on screen while the tests run)
     #[test]
     #[cfg(windows)]
     fn hears_a_program_start() {
+        use std::os::windows::process::CommandExt;
         let heard = std::sync::Arc::new(Mutex::new(Vec::<(String, String)>::new()));
         let h2 = heard.clone();
         want(vec!["PING.EXE".into()], move |n, p| h2.lock().unwrap().push((n, p)));
         std::thread::sleep(std::time::Duration::from_millis(3500));
-        let mut c = std::process::Command::new("ping").args(["-n", "8", "127.0.0.1"]).stdout(std::process::Stdio::null()).spawn().unwrap();
+        // (CREATE_NO_WINDOW)
+        let mut c = std::process::Command::new("ping").args(["-n", "8", "127.0.0.1"]).stdout(std::process::Stdio::null()).creation_flags(0x0800_0000).spawn().unwrap();
         let until = std::time::Instant::now() + std::time::Duration::from_secs(9);
         while heard.lock().unwrap().is_empty() && std::time::Instant::now() < until { std::thread::sleep(std::time::Duration::from_millis(100)); }
         let _ = c.kill();
