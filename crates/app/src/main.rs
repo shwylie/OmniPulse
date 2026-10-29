@@ -377,6 +377,9 @@ fn load_into(shared: &Shared, page: &'static str, title: String, fut: impl std::
     });
 }
 
+/// Rediscover at its shortest: topped up to this with the likes heard longest ago
+const REDISCOVER_MIN: usize = 100;
+
 fn plural(n: usize, one: &str, many: &str) -> String {
     format!("{n} {}", if n == 1 { one } else { many })
 }
@@ -512,17 +515,26 @@ fn open_page_now(shared: &Shared, page: &str) {
             });
         }
         "rediscover" => {
-            let (mut pool, h) = { let a = shared.borrow(); (a.library.clone(), heard(&a)) };
+            let (mut all, h) = { let a = shared.borrow(); (a.library.clone(), heard(&a)) };
+            // (what can be played: shown, hidden and switched-off platforms left out, and with Stream-Safe Music
+            // on, only what's safe on stream, so playing the page plays what's on it)
+            let safe = streamsafe::on(&shared.borrow().web.prefs);
+            { let prefs = shared.borrow().web.prefs.clone(); all.retain(|t| hide::rec_ok(&prefs, t) && plat_on(&prefs, t.plat()) && (!safe || streamsafe::ok(&prefs, t))); }
+            queue::shuffle_in_place(&mut all);
+            all.sort_by_key(|t| h.last(t));   // never played first
+            // (those not heard in a month; fewer than 100 of them, and the ones heard longest ago after them, so
+            // playing it gives a proper run before autoplay takes over)
             let cut = now_ms().saturating_sub(MONTH_MS);
-            pool.retain(|t| h.last(t) < cut);
-            { let prefs = shared.borrow().web.prefs.clone(); pool.retain(|t| hide::rec_ok(&prefs, t) && plat_on(&prefs, t.plat())); }
-            queue::shuffle_in_place(&mut pool);
-            pool.sort_by_key(|t| h.last(t));   // never played first
+            let forgotten = all.iter().take_while(|t| h.last(t) < cut).count();
+            let topped = forgotten < REDISCOVER_MIN && all.len() > forgotten;
+            omnipulse_core::diag::note(&format!("rediscover: {} likes can play, {forgotten} not heard in a month{}", all.len(), if topped { ", topped up" } else { "" }));
+            let mut pool = all;
+            pool.truncate(forgotten.max(REDISCOVER_MIN));
             // (an even split: one platform, then the next, as the web app's alternatePlatforms)
             let pool = queue::alternate_platforms(pool);
             let none = { let a = shared.borrow(); a.web.favourites.is_empty() && !a.library.iter().any(|t| t.plat() != "local") };
             // (nothing liked yet: asked for some, as the web app's card)
-            let sub = if none { "For better recommendations, add some music to your likes or favourites with the heart or the star on any song. Discover and Rediscover will be built around it.".to_string() } else if pool.is_empty() { "You've played all your likes recently.".to_string() } else { "Likes you haven't heard in a month or more, the longest-forgotten first.".to_string() };
+            let sub = if none { "For better recommendations, add some music to your likes or favourites with the heart or the star on any song. Discover and Rediscover will be built around it.".to_string() } else if safe && pool.len() < REDISCOVER_MIN { format!("Stream-Safe Music is on, so only your likes that are safe on stream are here: {}. Autoplay carries on with safe music after them. To have more, clear more artists or labels in Settings > Streaming > What Counts as Safe.", plural(pool.len(), "song", "songs")) } else if pool.is_empty() { "You've played all your likes recently.".to_string() } else if topped { "Likes you haven't heard in a while, the longest-forgotten first.".to_string() } else { "Likes you haven't heard in a month or more, the longest-forgotten first.".to_string() };
             show_tracks(shared, "rediscover", "Rediscover", sub, pool, true);
             page_albums_load(shared, "rediscover", "Rediscover");
         }
@@ -5680,9 +5692,12 @@ fn play_list(shared: &Shared, list: Vec<Track>, i: usize) {
             let Some(t) = list.get(i).cloned() else { return };
             a.queue.replace_current(t);
         } else {
+            let given = list.len();
             a.queue.set_list(list, i);
             // (its name, for the queue's heading: "Next From <it>")
             a.queue.name = a.ui.upgrade().map(|u| u.get_page_title().to_string()).unwrap_or_default();
+            // (noted, so a list that runs out early, and autoplay taking over, can be told apart later)
+            omnipulse_core::diag::note(&format!("playing from {} ({}): {} queued of {given} given, from #{}", a.queue.name, a.page, a.queue.items.len(), i + 1));
             a.queue_spaced = a.page == "library" || a.page == "playlist";
             // shuffle on: the rest after the one picked, shuffled (in order, it plays as it is)
             if a.shuffle_on {
@@ -6168,6 +6183,7 @@ fn autoplay_fill(shared: &Shared, then_play: bool) -> bool {
         }
         a.ap_busy = true;
         a.ap_then_play = then_play;
+        omnipulse_core::diag::note(&format!("autoplay: the queue's end ({} of {}, from {}), so more added", a.queue.qi.map_or(0, |i| i + 1), a.queue.items.len(), a.queue.name));
         paint_queue(&mut a);
         let local: Vec<Track> = a.library.iter().filter(|t| t.plat() == "local").cloned().collect();
         let last_plat = a.queue.items.last().map(|q| q.t.plat()).unwrap_or("");

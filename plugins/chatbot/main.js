@@ -2011,12 +2011,15 @@ async function twitchUserId(name) {
 }
 
 // Twitch's API, as your channel (its moderation, its shoutouts)
-async function helix(method, path, body) {
+async function helix(method, path, body, again) {
   const r = await OmniPulse.fetch("https://api.twitch.tv/helix/" + path, {
     method,
     headers: { "Client-Id": S().twitchClientId, Authorization: "Bearer " + apiToken, "Content-Type": "application/json" },
     body: body ? JSON.stringify(body) : undefined,
   });
+  // (Twitch's sign-ins run out after about four hours: renewed with its refresh token, then tried once more,
+  // so a long stream doesn't lose its permissions part way)
+  if (r.status === 401 && !again && (await renew("channel"))) { apiToken = S().token; return helix(method, path, body, true); }
   if (!r.ok) throw new Error("Twitch said " + r.status + (r.status === 401 || r.status === 403 ? ": sign in to your channel again (in its settings), for the permission" : ""));
   if (r.status === 204) return {};
   try { return await r.json(); } catch (e) { return {}; }
@@ -2090,6 +2093,9 @@ function connectEvents(token, url) {
     try { m = JSON.parse(data); } catch (e) { return; }
     const kind = m.metadata && m.metadata.message_type;
     if (kind === "session_welcome" && !url) {
+      // (the sign-in as it is now: renewed if it's run out since the chatbot started, as on a long stream)
+      token = (await fresh("channel")) || token;
+      apiToken = token;
       // (subscribed to at once, all together: Twitch closes a connection with none within 10 seconds, so the
       // old ones are cleared after, not before, and any refused for being too many (429) tried again then)
       const session = m.payload.session.id;
