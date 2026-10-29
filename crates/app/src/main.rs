@@ -8163,7 +8163,9 @@ fn panel_set(shared: &Shared, name: &str, mut vals: serde_json::Map<String, serd
         "color" => {
             if v == "\u{3}pick" {
                 let now = vals.get(&key).and_then(|c| c.as_str()).unwrap_or("#8e9bff").to_string();
-                match desktop::pick_color(&now) { Some(c) => { vals.insert(key, serde_json::json!(c)); } None => return }
+                // (picked on its own thread, then set as if typed in)
+                desktop::pick_color_then(&now, move |c| SHARED.with(|s| if let Some(sh) = s.borrow().clone() { pf_set(&sh, i, &c); }));
+                return;
             } else {
                 let c = v.trim().trim_start_matches('#');
                 if c.len() != 6 || u32::from_str_radix(c, 16).is_err() { return; }
@@ -8892,7 +8894,13 @@ fn panel_save(shared: &Shared, name: &str, vals: serde_json::Map<String, serde_j
     panel_keys(shared);
     match name {
         "requests" => { omnipulse_core::requests::requests_stop(); outside_start(shared); }
-        "widget" | "alerts" => { omnipulse_core::widget::widget_stop(); outside_start(shared); push_out(shared, true); }
+        // (the server restarted only if it's no longer wanted, or its port or access changed: else the docks
+        // in OBS lost it for a moment with every save)
+        "widget" | "alerts" => {
+            if !integrations::widget_wanted(&shared.borrow().web.prefs) { omnipulse_core::widget::widget_stop(); }
+            outside_start(shared);
+            push_out(shared, true);
+        }
         "remote" => { omnipulse_core::remote::remote_stop(); outside_start(shared); }
         "offset" => offset_apply(shared),
         _ => {}
@@ -9187,7 +9195,7 @@ fn set_toggle(shared: &Shared, key: &str) {
             }
             // the servers stop, and start again with what's set now
             match key {
-                "widget" | "alertsOn" | "lyricsWidget" | "socials" => omnipulse_core::widget::widget_stop(),
+                "widget" | "alertsOn" | "lyricsWidget" | "socials" => if !integrations::widget_wanted(&shared.borrow().web.prefs) { omnipulse_core::widget::widget_stop() },
                 "req" => omnipulse_core::requests::requests_stop(),
                 "remoteOn" => omnipulse_core::remote::remote_stop(),
                 "presence" if !on => integrations::presence(&shared.borrow().rt, &shared.borrow().web.prefs, None, 0, false, None),
@@ -13524,7 +13532,7 @@ fn main() -> Result<(), slint::PlatformError> {
     ui.on_accent_custom(move |which| {
         let key = if which == 2 { "accent2" } else { "accent" };
         let now = s.borrow().web.prefs[key].as_str().or(s.borrow().web.prefs["accent"].as_str()).unwrap_or(ACCENTS[0]).to_string();
-        if let Some(c) = desktop::pick_color(&now) { set_look_pref(&s, key, serde_json::json!(c.to_lowercase())); }
+        desktop::pick_color_then(&now, move |c| SHARED.with(|s| if let Some(sh) = s.borrow().clone() { set_look_pref(&sh, key, serde_json::json!(c.to_lowercase())); }));
     });
     let s = shared.clone();
     // the second accent (null: one colour, as the web app's setAccent2)

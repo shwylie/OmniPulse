@@ -126,6 +126,16 @@ pub fn pick_color(now: &str) -> Option<String> {
 #[cfg(not(windows))]
 pub fn pick_color(_now: &str) -> Option<String> { None }
 
+/// The colour picker on a thread of its own, the colour chosen handed to `done` back on the app's own (not
+/// called if it's cancelled). Never on the app's: the dialog's own message loop, run inside a click's handler,
+/// left the window stuck, unable to draw or close
+pub fn pick_color_then(now: &str, done: impl FnOnce(String) + Send + 'static) {
+    let now = now.to_string();
+    std::thread::spawn(move || {
+        if let Some(c) = pick_color(&now) { let _ = slint::invoke_from_event_loop(move || done(c)); }
+    });
+}
+
 // ---------- the taskbar thumbnail's buttons ----------
 #[cfg(windows)]
 pub mod taskbar {

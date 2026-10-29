@@ -119,11 +119,13 @@ pub fn lastfm_scrobble(rt: &tokio::runtime::Handle, prefs: &Value, t: &Track, st
 }
 
 // ---------- the OBS widget ----------
+/// Whether the widget server's wanted: a widget on, or the Suite's widgets, while it's running
+pub fn widget_wanted(prefs: &Value) -> bool {
+    set(prefs, "widget") || set(prefs, "lyricsWidget") || set(prefs, "socials") || crate::plugin_runs(prefs, crate::botpage::BOT)
+}
+
 pub fn widget_start(prefs: &Value) -> Option<String> {
-    // (and the Suite's widgets, while it's running)
-    if !set(prefs, "widget") && !set(prefs, "lyricsWidget") && !set(prefs, "socials") && !crate::plugin_runs(prefs, crate::botpage::BOT) {
-        return None;
-    }
+    if !widget_wanted(prefs) { return None; }
     // (bots on other devices: alerts from them too, with the alerts' key, as the web app's)
     let remote = set(prefs, "botRemote") && set(prefs, "alertsOn");
     core::widget::widget_start(prefs["widgetPort"].as_u64().map(|p| p as u16).unwrap_or(7878), remote, prefs["alertKey"].as_str().unwrap_or("")).ok()

@@ -475,7 +475,14 @@ pub fn preview_on() -> bool {
 }
 
 /// remote: bots on other devices may send alerts too (they need key); otherwise only this PC is heard
+/// The running server's port, whether it's open to other devices, its key, and its generation
+static SERVING: Mutex<Option<(u16, bool, String, u64)>> = Mutex::new(None);
+
 pub fn widget_start(port: u16, remote: bool, key: &str) -> Result<String, String> {
+    // (already running as asked: left running, so the docks and widgets in OBS never lose it for a moment)
+    if SERVING.lock().ok().and_then(|s| s.clone()).is_some_and(|(p, r, k, g)| p == port && r == remote && k == key && g == WIDGET_GEN.load(Ordering::SeqCst)) {
+        return Ok(format!("http://127.0.0.1:{port}/"));
+    }
     // Stops any earlier server first
     let gen = WIDGET_GEN.fetch_add(1, Ordering::SeqCst) + 1;
     if let Ok(mut k) = ALERT_KEY.lock() {
@@ -486,6 +493,7 @@ pub fn widget_start(port: u16, remote: bool, key: &str) -> Result<String, String
     for _ in 0..15 {
         match TcpListener::bind((host, port)) {
             Ok(listener) => {
+                if let Ok(mut s) = SERVING.lock() { *s = Some((port, remote, key.to_string(), gen)); }
                 std::thread::spawn(move || widget_serve(listener, gen));
                 return Ok(format!("http://127.0.0.1:{port}/"));
             }
