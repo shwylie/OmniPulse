@@ -139,6 +139,19 @@ const FONTS: [(&str, &str); 43] = [
     ("playfair", "Playfair Display (web)"), ("pixel", "Press Start 2P (web)"),
 ];
 
+/// A lyrics font as the preview draws it: a system one's family, or (true) a Google Font's, to be fetched
+pub fn lyrics_family(key: &str) -> (&'static str, bool) {
+    let sys = match key {
+        "segoe" => "Segoe UI", "arial" => "Arial", "verdana" => "Verdana", "tahoma" => "Tahoma", "trebuchet" => "Trebuchet MS", "calibri" => "Calibri",
+        "bahnschrift" => "Bahnschrift", "franklin" => "Franklin Gothic Medium", "bold" => "Impact", "black" => "Arial Black", "serif" => "Georgia",
+        "times" => "Times New Roman", "palatino" => "Palatino Linotype", "cambria" => "Cambria", "gabriola" => "Gabriola", "mono" => "Consolas",
+        "courier" => "Courier New", "comic" => "Comic Sans MS", "script" => "Segoe Script", "print" => "Segoe Print", _ => "",
+    };
+    if !sys.is_empty() || key == "sans" { return (sys, false); }
+    // (the web ones: their names, as in the list, without "(web)")
+    FONTS.iter().find(|(k, _)| *k == key).map_or(("", false), |(_, n)| (n.trim_end_matches(" (web)"), true))
+}
+
 /// Lyrics' sources: asked in this order, the first with timed lyrics used; each switchable, moved up or
 /// down (in the panel's values: "order", the ids, and "on:<id>" each)
 fn lyrics_fields(vals: &Map<String, Value>) -> Vec<Value> {

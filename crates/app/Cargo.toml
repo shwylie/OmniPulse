@@ -18,13 +18,13 @@ rusqlite = { version = "0.32", features = ["bundled"] }
 omnipulse-core = { path = "../core" }
 omnipulse-audio = { path = "../audio" }
 omnipulse-mix = { path = "../mix" }
-slint = { version = "1.18", features = ["unstable-winit-030"] }
+slint = { version = "1.18", features = ["unstable-winit-030", "unstable-fontique-011"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync", "fs"] }
 serde_json = "1"
 regex = "1"
 serde = { version = "1", features = ["derive"] }
 reqwest = "0.12"
-image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp"] }
+image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp", "gif"] }
 # the media keys and the tray (the same versions the web app uses, through Tauri)
 global-hotkey = "0.8"
 tray-icon = "0.25"

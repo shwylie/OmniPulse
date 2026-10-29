@@ -89,6 +89,19 @@ fn skipped(cur: &Map<String, Value>) -> Vec<String> {
 /// The Suite's widgets' theme, as it's set now (one for all of them)
 fn theme_of(cur: &Map<String, Value>) -> String { if s(cur, "suiteTheme").is_empty() { "dark".into() } else { s(cur, "suiteTheme").to_string() } }
 
+/// The wheel's prizes as the widget has them (up to 16; "x2" on the end of one, twice as likely), each with
+/// where its slice starts, in degrees from the top, as big as its chance
+pub fn wheel_slices(list: &str) -> Vec<(String, f32)> {
+    let list = if list.trim().is_empty() { "A shoutout | 100 points | Pick the next song | Nothing! | Hydrate" } else { list };
+    let items: Vec<(String, u32)> = list.split('|').map(str::trim).filter(|p| !p.is_empty()).take(16).map(|p| {
+        let w = p.rsplit_once([' ', '\t']).and_then(|(name, end)| end.strip_prefix(['x', 'X', '\u{d7}']).and_then(|k| k.parse::<u32>().ok()).filter(|k| (1..=99).contains(k)).map(|k| (name.trim().to_string(), k.min(20))));
+        w.unwrap_or((p.to_string(), 1))
+    }).collect();
+    let total = items.iter().map(|x| x.1).sum::<u32>().max(1) as f32;
+    let mut at = 0.0;
+    items.into_iter().map(|(name, w)| { let start = at; at += w as f32 / total * 360.0; (name, start) }).collect()
+}
+
 /// Its choice, on each widget's sheet (one setting, shared)
 fn theme_field(cur: &Map<String, Value>) -> Field {
     f("chips", "suiteTheme", "Theme", "For all of the Suite's widgets. Sticker is made for a GIF on top.", &theme_of(cur), "dark=Dark|glass=Glass|neon=Neon|comic=Comic|minimal=Minimal|pastel=Pastel|y2k=Y2K|pixel=Pixel|edge=Edge Light|sticker=Sticker")
@@ -587,7 +600,14 @@ fn sheet_of(id: &str, cur: &Map<String, Value>) -> (String, Vec<Field>) {
         "goals" => ("Goals".into(), {
             let style = if s(cur, "goalStyle").is_empty() { "bars" } else { s(cur, "goalStyle") };
             // (your goals first, what they count to; then how they look; then when they start again)
-            let mut v = vec![f("suiteprev", "", style, "", "goals", &theme_of(cur))];
+            // (the preview: your goals that are on, by name and target, as "name=target|…" in its key)
+            let num = |k: &str, d: i64| n(cur, k).trim().parse::<f64>().map_or(d, |x| x as i64).max(1);
+            let named = |k: &str, d: &str| if s(cur, k).trim().is_empty() { d.to_string() } else { s(cur, k).trim().replace(['|', '='], " ") };
+            let mut shown: Vec<String> = [("Follow", "Followers", 10), ("Sub", "Subs", 5), ("Bits", "Bits", 1000), ("Dono", "Donations", 50)].iter()
+                .filter(|(k, _, _)| on(cur, &format!("goal{k}On"), true))
+                .map(|(k, name, d)| format!("{}={}", named(&format!("goal{k}Label"), name), num(&format!("goal{k}Target"), *d))).collect();
+            if on(cur, "goalCommonOn", false) { shown.push(format!("{}={}", named("goalCommonLabel", "Community goal"), num("goalCommonTarget", 100))); }
+            let mut v = vec![f("suiteprev", &shown.join("|"), style, "", "goals", &theme_of(cur))];
             v.push(addr("/goals", "All your goals in one source, about 920 × 520. To show one goal on its own, use the copy button on that goal's row."));
             v.push(f("link", "", "Try it", "Adds one of each, to see it fill.", "", "call:suiteTest:goals"));
             // (each goal one row: shown or not, its name, its target; key: its prefix, label: what it counts,
@@ -633,7 +653,8 @@ fn sheet_of(id: &str, cur: &Map<String, Value>) -> (String, Vec<Field>) {
         }),
         "timer" => ("Timer".into(), {
             let mut v = vec![
-                f("suiteprev", "", "", "", "timer", &theme_of(cur)),
+                // (the preview: its title, its starting minutes, and which way it counts, as "a|b|c" in its key)
+                f("suiteprev", &format!("{}|{}|{}", s(cur, "timerLabel").replace('|', "/"), n(cur, "timerStart").trim().parse::<f64>().map_or(60, |m| m.max(0.0) as i64), if on(cur, "timerStopwatch", false) { "up" } else { "down" }), "", "", "timer", &theme_of(cur)),
                 theme_field(cur),
                 addr("/timer", "About 720 × 280. Moderators can control it with the chat command: start, pause, add 5, remove 5, reset."),
                 f("toggle", "timerStopwatch", "Count up", "A stopwatch. When this is off, it counts down.", if on(cur, "timerStopwatch", false) { "true" } else { "false" }, ""),
@@ -747,7 +768,9 @@ fn sheet_of(id: &str, cur: &Map<String, Value>) -> (String, Vec<Field>) {
             f("link", "", "Try it", "Two test votes, to see it.", "", "call:suiteTest:voteskip"),
         ]),
         "wheel" => ("Spin the Wheel".into(), { let mut v = vec![
-            f("suiteprev", "", "", "", "wheel", &theme_of(cur)),
+            // (the preview: each prize and where its slice starts, in degrees, as "name=start|…" in its key;
+            // its colours in its look)
+            f("suiteprev", &wheel_slices(s(cur, "wheelPrizes")).iter().map(|(n, a)| format!("{}={a}", n.replace(['|', '='], " "))).collect::<Vec<_>>().join("|"), if s(cur, "wheelColors").is_empty() { "theme" } else { s(cur, "wheelColors") }, "", "wheel", &theme_of(cur)),
             theme_field(cur),
             f("link", "", "Try it", "A free spin, to see it on the preview's widget in OBS.", "", "call:suiteTest:wheel"),
             f("chips", "wheelColors", "Colours", "", if s(cur, "wheelColors").is_empty() { "theme" } else { s(cur, "wheelColors") }, "theme=Your Colours|alternate=Two Colours|rainbow=Rainbow|pastel=Pastel"),
@@ -843,7 +866,8 @@ fn sheet_of(id: &str, cur: &Map<String, Value>) -> (String, Vec<Field>) {
         "emoterain" => ("Emote Rain".into(), {
             let or = |k: &str, d: &'static str| if s(cur, k).is_empty() { d.to_string() } else { s(cur, k).to_string() };
             let (dir, from, src) = (or("rainDir", "down"), or("rainFrom", "all"), or("rainSource", "chat"));
-            let mut prev = f("suiteprev", &from, &dir, "", "emoterain", &theme_of(cur));
+            // (its look: which way, then the size and whether they spin, after "|")
+            let mut prev = f("suiteprev", &from, &format!("{dir}|{}|{}", or("rainSize", "medium"), if on(cur, "rainSpin", true) { "spin" } else { "still" }), "", "emoterain", &theme_of(cur));
             prev.key = from.clone();
             let mut v = vec![
                 prev,
@@ -1064,6 +1088,13 @@ pub fn method(act: &str) -> Option<&'static str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_prize_marked_x3_gets_three_times_the_slice() {
+        let w = wheel_slices("Nothing! x3 | A shoutout");
+        assert_eq!(w, vec![("Nothing!".to_string(), 0.0), ("A shoutout".to_string(), 270.0)]);
+        assert_eq!(wheel_slices("").len(), 5);
+    }
 
     fn m(v: Value) -> Map<String, Value> { v.as_object().unwrap().clone() }
 

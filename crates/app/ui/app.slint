@@ -116,6 +116,11 @@ export struct WidgetLook { design: string, theme: string, right: bool, rounded: 
 /// The alerts' preview: their theme and colours as they're set
 /// A HUD frame, for its editor: where it is on the screenshot (fractions), and whether it's the one picked
 export struct HudRect { x: float, y: float, w: float, h: float, label: string, picked: bool }
+/// Emote Rain's preview: real emotes (the platforms' own, or your pictures), as they're fetched
+export global RainPics {
+    in property <[image]> list;
+}
+
 export global HudLook {
     in-out property <image> shot;
     in-out property <float> ratio: 0.5625;
@@ -164,7 +169,7 @@ export struct ChatSample { name: string, text: string, kick: bool, colour: color
 /// The Social Plug's preview: each platform shown (its icon, as the widget's, or its first letter), and its look
 export struct SocialItem { name: string, handle: string, c1: color, c2: color, d: string, letter: string }
 export struct SocialLook { style: string, coloured: bool, align: string, rounded: bool, all: bool, secs: int, motion: string, sample: bool }
-export struct LyricsLook { color: color, hi: color, own-hi: bool, dim: float, size: float, align: string, style: string, shadow: bool, outline: bool, outline-color: color, boxed: bool, box-color: color, box-opacity: float, title: bool, before: bool, lines: int, upper: bool, place: string }
+export struct LyricsLook { color: color, hi: color, own-hi: bool, dim: float, size: float, align: string, style: string, shadow: bool, outline: bool, outline-color: color, boxed: bool, box-color: color, box-opacity: float, title: bool, before: bool, lines: int, upper: bool, place: string, font: string }
 export struct PlugField { key: string, label: string, note: string, kind: string, value: string, options: [string], at: int, changed: bool }
 // the chatbot's page: a service's tile, a feature's card, a setup step, a line of what it did (or of a try), a sheet's line
 export struct BotTile { id: string, name: string, state: string, line1: string, line2: string }
@@ -3252,7 +3257,18 @@ component SuitePreview inherits Rectangle {
     in property <bool> gif;
     // (Emote Rain's spot: all, bl, br, tl, tr, b, c, custom)
     in property <string> spot;
-    height: root.which == "raid" || root.which == "wheel" || root.which == "emoterain" || root.which == "credits" ? 220px : root.which == "goals" || root.which == "leaderboard" ? 200px : 130px;
+    // (its theme's font: one picked, or Pixel's own)
+    in property <string> font;
+    // (Emote Rain's size, and whether they spin)
+    in property <string> rain-size;
+    in property <bool> rain-spin;
+    // (the goals that are on: their names, and their targets, as typed)
+    in property <[string]> goal-names;
+    in property <[string]> goal-targets;
+    // (how far along each is, made up)
+    property <[float]> part: [0.7, 0.45, 0.85, 0.6, 0.5];
+    property <bool> many: root.goal-names.length > 3;
+    height: root.which == "raid" || root.which == "wheel" || root.which == "emoterain" || root.which == "credits" ? 220px : root.which == "goals" ? 200px + (root.shapes || root.rings ? 0px : max(0, root.goal-names.length - 3) * 34px) : root.which == "leaderboard" ? 200px : 130px;
     border-radius: 14px;
     border-width: 1px;
     border-color: Theme.line;
@@ -3279,15 +3295,15 @@ component SuitePreview inherits Rectangle {
             y: parent.height - self.preferred-height * 0 - (parent.height + 300px) * parent.roll;
             width: parent.width;
             spacing: 4px;
-            Text { text: "Thanks for watching!"; color: root.c1; font-size: 20px; font-weight: 800; horizontal-alignment: center; }
+            Text { font-family: root.font; text: "Thanks for watching!"; color: root.c1; font-size: 20px; font-weight: 800; horizontal-alignment: center; }
             Rectangle { height: 14px; }
             for part in [{ h: "FOLLOWERS", n: "PixelPanda · Nova · quietcat" }, { h: "SUBSCRIBERS", n: "RaidLeader · Zed" }, { h: "RAIDERS", n: "TestRaider" }, { h: "CHATTERS", n: "kickfan_92 · lurker_lou · ModMaya" }, { h: "SONGS PLAYED", n: "A Song You Love" }]: VerticalLayout {
                 spacing: 2px;
                 padding-bottom: 12px;
-                Text { text: part.h; color: root.c2; font-size: 10px; letter-spacing: 2px; font-weight: 700; horizontal-alignment: center; }
-                Text { text: part.n; color: #ffffff; font-size: 13px; horizontal-alignment: center; }
+                Text { font-family: root.font; text: part.h; color: root.c2; font-size: 10px; letter-spacing: 2px; font-weight: 700; horizontal-alignment: center; }
+                Text { font-family: root.font; text: part.n; color: #ffffff; font-size: 13px; horizontal-alignment: center; }
             }
-            Text { text: "See you next stream!"; color: #ffffff; font-size: 15px; font-weight: 800; horizontal-alignment: center; }
+            Text { font-family: root.font; text: "See you next stream!"; color: #ffffff; font-size: 15px; font-weight: 800; horizontal-alignment: center; }
         }
     }
     // (the wheel: turning; emote rain: falling, with no panel of its own)
@@ -3302,19 +3318,38 @@ component SuitePreview inherits Rectangle {
         border-color: #ffffffd8;
         clip: true;
         property <angle> turn: Theme.motion ? mod(animation-tick() / 1ms, 7000) / 7000 * 360deg : 20deg;
-        // (its spokes: one path, its ends worked out from the turn, as a rectangle can't be turned here)
-        Path {
+        // (your prizes: a slice each, as big as its chance, in its colours; worked out from the turn, as a
+        // rectangle can't be turned here; prizes in goal-names, where each slice starts in goal-targets)
+        property <int> n: root.goal-names.length;
+        for g[i] in root.goal-names: Path {
             width: parent.width;
             height: parent.height;
             viewbox-width: 100;
             viewbox-height: 100;
-            stroke: #ffffffa0;
-            stroke-width: 2.5px;
-            fill: transparent;
-            property <angle> a: parent.turn;
-            commands: "M " + (50 + 50 * cos(self.a)) + " " + (50 + 50 * sin(self.a)) + " L " + (50 - 50 * cos(self.a)) + " " + (50 - 50 * sin(self.a))
-                + " M " + (50 + 50 * cos(self.a + 60deg)) + " " + (50 + 50 * sin(self.a + 60deg)) + " L " + (50 - 50 * cos(self.a + 60deg)) + " " + (50 - 50 * sin(self.a + 60deg))
-                + " M " + (50 + 50 * cos(self.a + 120deg)) + " " + (50 + 50 * sin(self.a + 120deg)) + " L " + (50 - 50 * cos(self.a + 120deg)) + " " + (50 - 50 * sin(self.a + 120deg));
+            property <angle> a1: root.goal-targets[i].to-float() * 1deg + parent.turn;
+            property <angle> a2: (i + 1 < parent.n ? root.goal-targets[i + 1].to-float() : 360) * 1deg + parent.turn;
+            fill: root.look == "alternate" ? (mod(i, 2) == 1 ? root.c2 : root.c1) : root.look == "rainbow" ? hsv(i / max(1, parent.n) * 360, 0.73, 0.92)
+                : root.look == "pastel" ? hsv(i / max(1, parent.n) * 360, 0.35, 0.96) : root.c1.mix(root.c2, 1 - i / max(1, parent.n) * 0.7);
+            stroke: #ffffff60;
+            stroke-width: 1px;
+            commands: parent.n < 2 ? "M 0 50 A 50 50 0 1 1 100 50 A 50 50 0 1 1 0 50 Z"
+                : "M 50 50 L " + (50 + 50 * sin(self.a1)) + " " + (50 - 50 * cos(self.a1)) + " A 50 50 0 " + (self.a2 - self.a1 > 180deg ? 1 : 0) + " 1 " + (50 + 50 * sin(self.a2)) + " " + (50 - 50 * cos(self.a2)) + " Z";
+        }
+        // (each prize's name in its slice, kept level to read)
+        for g[i] in root.goal-names: Text {
+            property <angle> mid: ((root.goal-targets[i].to-float() + (i + 1 < parent.n ? root.goal-targets[i + 1].to-float() : 360)) / 2) * 1deg + parent.turn;
+            width: 62px;
+            height: 14px;
+            x: 85px + 47px * sin(self.mid) - self.width / 2;
+            y: 85px - 47px * cos(self.mid) - self.height / 2;
+            text: g;
+            font-family: root.font;
+            font-size: 9px;
+            font-weight: 800;
+            color: root.look == "pastel" ? #2b1b40 : #ffffff;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+            overflow: elide;
         }
         Rectangle { width: 26px; height: 26px; border-radius: 13px; background: #ffffff; }
     }
@@ -3328,7 +3363,8 @@ component SuitePreview inherits Rectangle {
         property <bool> spotted: root.spot != "" && root.spot != "all";
         property <float> sx: root.spot == "bl" || root.spot == "tl" ? 0.12 : root.spot == "br" || root.spot == "tr" ? 0.88 : 0.5;
         property <float> sy: root.spot == "tl" || root.spot == "tr" ? 0.15 : root.spot == "c" || root.spot == "custom" ? 0.5 : 0.88;
-        for k in 12: Glyph {
+        // (real emotes, once they're here; the size and spin as set, in its label: "dir|size|spin")
+        for k in 12: Rectangle {
             property <float> lag: mod(k * 0.37, 1);
             property <float> t: Theme.motion ? mod(animation-tick() / 1ms / (parent.dir == "burst" ? 1800 : parent.dir == "fountain" ? 2600 : 4200) + self.lag, 1) : self.lag;
             // (a spread for each: along an edge, or an angle out of the spot)
@@ -3338,9 +3374,9 @@ component SuitePreview inherits Rectangle {
             property <length> ox: parent.spotted || parent.dir == "burst" || parent.dir == "fountain" ? parent.width * (parent.spotted ? parent.sx : 0.5) : 0px;
             property <length> oy: parent.spotted || parent.dir == "burst" || parent.dir == "fountain" ? parent.height * (parent.spotted ? parent.sy : (parent.dir == "fountain" ? 1 : 0.5)) : 0px;
             property <length> reach: parent.dir == "burst" ? 110px : parent.width;
-            d: mod(k, 3) == 0 ? Icons.heart-out : mod(k, 3) == 1 ? Icons.star-out : Icons.chat;
-            width: 24px;
-            height: 24px;
+            property <length> sz: root.rain-size == "small" ? 18px : root.rain-size == "large" ? 34px : 24px;
+            width: self.sz;
+            height: self.sz;
             x: parent.dir == "float" ? (parent.spotted ? self.ox : parent.width * self.lane) + sin(self.t * 360deg + k * 40deg) * 14px - 12px
                 : parent.spotted || parent.dir == "burst" || parent.dir == "fountain" ? self.ox + cos(self.a) * self.t * self.reach * (parent.dir == "fountain" ? 0.5 : 1) - 12px
                 : parent.dir == "left" ? parent.width + 30px - self.t * (parent.width + 60px) : parent.dir == "right" ? -30px + self.t * (parent.width + 60px) : parent.width * self.lane;
@@ -3348,8 +3384,15 @@ component SuitePreview inherits Rectangle {
                 : parent.dir == "fountain" ? self.oy - 12px + sin(self.a) * self.t * parent.height * 1.4 + self.t * self.t * parent.height * 1.5
                 : parent.spotted || parent.dir == "burst" ? self.oy + sin(self.a) * self.t * self.reach - 12px
                 : parent.dir == "up" ? parent.height + 30px - self.t * (parent.height + 60px) : parent.dir == "left" || parent.dir == "right" ? parent.height * self.lane - 12px : -30px + self.t * (parent.height + 40px);
-            fill: mod(k, 2) == 0 ? root.c1 : root.c2;
             opacity: parent.dir == "burst" ? 1 - self.t : 0.95;
+            if RainPics.list.length > 0: Image {
+                source: RainPics.list[mod(k, RainPics.list.length)];
+                width: parent.width;
+                height: parent.height;
+                image-fit: contain;
+                transform-rotation: root.rain-spin ? parent.t * 360deg * (mod(k, 2) == 0 ? 1 : -1) : 0deg;
+            }
+            if RainPics.list.length == 0: Glyph { d: mod(k, 3) == 0 ? Icons.heart-out : mod(k, 3) == 1 ? Icons.star-out : Icons.chat; width: parent.width; height: parent.height; fill: mod(k, 2) == 0 ? root.c1 : root.c2; }
         }
     }
     // (a GIF set: a stand-in for it, where it'll go)
@@ -3362,7 +3405,7 @@ component SuitePreview inherits Rectangle {
         background: #ffffff2e;
         border-width: 1px;
         border-color: #ffffff70;
-        Text { text: "GIF"; color: #ffffff; font-size: 13px; font-weight: 900; }
+        Text { font-family: root.font; text: "GIF"; color: #ffffff; font-size: 13px; font-weight: 900; }
     }
     pan := Rectangle {
         visible: root.which != "wheel" && root.which != "emoterain" && root.which != "credits";
@@ -3385,18 +3428,20 @@ component SuitePreview inherits Rectangle {
             height: 14px;
             background: @linear-gradient(90deg, #ff9ad5 0%, #9ad0ff 100%);
             Rectangle { y: parent.height - 2px; height: 2px; background: #2b1b40; }
-            Text { x: parent.width - self.width - 6px; text: "–  □  ×"; color: #2b1b40; font-size: 8px; font-weight: 900; }
+            Text { font-family: root.font; x: parent.width - self.width - 6px; text: "–  □  ×"; color: #2b1b40; font-size: 8px; font-weight: 900; }
         }
         inner := VerticalLayout {
             padding: 14px;
             spacing: 8px;
-            // (shapes: three side by side, filling; the liquid's level, the jar's drops, the hourglass's sand)
+            if root.which == "goals" && root.goal-names.length == 0: Text { font-family: root.font; text: "No goals switched on."; color: root.ink; font-size: 13px; horizontal-alignment: center; }
+            // (shapes: side by side, filling; the liquid's level, the jar's drops, the hourglass's sand)
             if root.which == "goals" && root.shapes: HorizontalLayout {
                 alignment: center;
-                spacing: 26px;
-                for g[i] in [{ n: "Followers", p: 0.7 }, { n: "Subs", p: 0.45 }, { n: "Bits", p: 0.85 }]: VerticalLayout {
+                spacing: root.many ? 10px : 26px;
+                for g[i] in root.goal-names: VerticalLayout {
                     spacing: 4px;
-                    property <float> lv: g.p * (0.55 + 0.45 * root.fill);
+                    width: root.many ? 64px : 72px;
+                    property <float> lv: root.part[mod(i, 5)] * (0.55 + 0.45 * root.fill);
                     Rectangle {
                         width: 58px;
                         height: root.look == "hourglass" ? 74px : 62px;
@@ -3442,43 +3487,46 @@ component SuitePreview inherits Rectangle {
                             }
                         }
                     }
-                    Text { text: g.n; color: root.ink; font-size: 11px; font-weight: 700; horizontal-alignment: center; }
+                    Text { font-family: root.font; text: g; color: root.ink; font-size: 11px; font-weight: 700; horizontal-alignment: center; overflow: elide; }
                 }
             }
             if root.which == "goals" && !root.rings && !root.shapes: VerticalLayout {
                 spacing: 8px;
-                for g[i] in [{ n: "Followers", a: 7, b: 10 }, { n: "Subs", a: 3, b: 5 }, { n: "Bits", a: 650, b: 1000 }]: VerticalLayout {
+                for g[i] in root.goal-names: VerticalLayout {
                     spacing: 3px;
-                    HorizontalLayout { Text { text: g.n; color: root.ink; font-size: 13px; font-weight: 700; horizontal-stretch: 1; } Text { text: g.a + " / " + g.b; color: root.ink.with-alpha(0.8); font-size: 12px; } }
+                    property <float> gb: max(1, root.goal-targets[i].to-float());
+                    property <float> ga: round(self.gb * root.part[mod(i, 5)]);
+                    HorizontalLayout { Text { font-family: root.font; text: g; color: root.ink; font-size: 13px; font-weight: 700; horizontal-stretch: 1; overflow: elide; } Text { font-family: root.font; text: ga + " / " + gb; color: root.ink.with-alpha(0.8); font-size: 12px; } }
                     Rectangle {
                         height: 9px;
                         border-radius: 5px;
                         background: root.comic ? #0000001f : #ffffff29;
-                        Rectangle { x: 0; width: parent.width * min(1, g.a / g.b * (0.6 + 0.4 * root.fill)); border-radius: 5px; background: root.c1.mix(root.c2, 1 - i * 0.3); }
+                        Rectangle { x: 0; width: parent.width * min(1, root.part[mod(i, 5)] * (0.6 + 0.4 * root.fill)); border-radius: 5px; background: root.c1.mix(root.c2, max(0, 1 - i * 0.3)); }
                     }
                 }
             }
             if root.which == "goals" && root.rings: HorizontalLayout {
                 alignment: center;
-                spacing: 22px;
-                for g in [{ n: "Followers", p: 70 }, { n: "Subs", p: 60 }, { n: "Bits", p: 65 }]: VerticalLayout {
+                spacing: root.many ? 8px : 22px;
+                for g[i] in root.goal-names: VerticalLayout {
                     spacing: 4px;
+                    width: root.many ? 70px : 76px;
                     Rectangle {
-                        width: 64px;
-                        height: 64px;
-                        border-radius: 32px;
-                        border-width: 6px;
+                        width: root.many ? 52px : 64px;
+                        height: self.width;
+                        border-radius: self.width / 2;
+                        border-width: root.many ? 5px : 6px;
                         border-color: root.c1;
-                        Text { text: g.p + "%"; color: root.ink; font-size: 14px; font-weight: 800; }
+                        Text { font-family: root.font; text: round(root.part[mod(i, 5)] * 100) + "%"; color: root.ink; font-size: 14px; font-weight: 800; }
                     }
-                    Text { text: g.n; color: root.ink; font-size: 11px; horizontal-alignment: center; }
+                    Text { font-family: root.font; text: g; color: root.ink; font-size: 11px; horizontal-alignment: center; overflow: elide; }
                 }
             }
             // (Name That Tune: the hint filling in, the time running down)
             if root.which == "tune": VerticalLayout {
                 spacing: 6px;
-                Text { text: "NAME THAT TUNE: TYPE THE SONG OR THE ARTIST"; color: root.ink.with-alpha(0.75); font-size: 10px; horizontal-alignment: center; }
-                Text {
+                Text { font-family: root.font; text: "NAME THAT TUNE: TYPE THE SONG OR THE ARTIST"; color: root.ink.with-alpha(0.75); font-size: 10px; horizontal-alignment: center; }
+                Text { font-family: root.font;
                     text: root.fill < 0.33 ? "M_ _____ ___" : root.fill < 0.66 ? "Mr B______ ___" : "Mr Bl_e S_y";
                     color: root.ink;
                     font-size: 22px;
@@ -3496,8 +3544,8 @@ component SuitePreview inherits Rectangle {
             if root.which == "hype" || root.which == "voteskip": VerticalLayout {
                 spacing: 6px;
                 HorizontalLayout {
-                    Text { text: root.which == "hype" ? (root.look == "meter" ? "Hype" : "HYPE TRAIN") : "Skip this song? Type !skip"; color: root.ink; font-size: 14px; font-weight: 700; horizontal-stretch: 1; }
-                    Text { text: root.which == "hype" ? "Level 3" : "3 / 5"; color: root.ink; font-size: 15px; font-weight: 800; }
+                    Text { font-family: root.font; text: root.which == "hype" ? (root.look == "meter" ? "Hype" : "HYPE TRAIN") : "Skip this song? Type !skip"; color: root.ink; font-size: 14px; font-weight: 700; horizontal-stretch: 1; }
+                    Text { font-family: root.font; text: root.which == "hype" ? "Level 3" : "3 / 5"; color: root.ink; font-size: 15px; font-weight: 800; }
                 }
                 Rectangle {
                     height: 12px;
@@ -3508,48 +3556,58 @@ component SuitePreview inherits Rectangle {
                 // (the train's: who gave the most, where it's come from, the time it has left)
                 if root.which == "hype" && root.look != "meter": HorizontalLayout {
                     spacing: 6px;
-                    Text { text: "Top: PixelPanda"; color: root.ink.with-alpha(0.85); font-size: 11px; horizontal-stretch: 1; }
+                    Text { font-family: root.font; text: "Top: PixelPanda"; color: root.ink.with-alpha(0.85); font-size: 11px; horizontal-stretch: 1; }
                     Glyph { d: Icons.twitch; width: 12px; height: 12px; fill: root.ink.with-alpha(0.85); }
                     Glyph { d: Icons.kick; width: 12px; height: 12px; fill: root.ink.with-alpha(0.85); }
-                    Text { text: (4 - floor(root.fill * 4)) + ":" + (floor(59 - mod(root.fill * 240, 60)) < 10 ? "0" : "") + floor(59 - mod(root.fill * 240, 60)); color: root.ink; font-size: 11px; font-weight: 800; }
+                    Text { font-family: root.font; text: (4 - floor(root.fill * 4)) + ":" + (floor(59 - mod(root.fill * 240, 60)) < 10 ? "0" : "") + floor(59 - mod(root.fill * 240, 60)); color: root.ink; font-size: 11px; font-weight: 800; }
                 }
             }
             if root.which == "leaderboard": VerticalLayout {
                 spacing: 5px;
-                Text { text: "TOP POINTS"; color: root.ink.with-alpha(0.75); font-size: 11px; letter-spacing: 1.2px; }
+                Text { font-family: root.font; text: "TOP POINTS"; color: root.ink.with-alpha(0.75); font-size: 11px; letter-spacing: 1.2px; }
                 for p[i] in [{ n: "PixelPanda", s: 4820 }, { n: "Nova", s: 3610 }, { n: "Zed", s: 2950 }, { n: "quietcat", s: 1200 }]: HorizontalLayout {
                     spacing: 10px;
-                    Rectangle { width: 22px; height: 22px; border-radius: 11px; background: root.c1.mix(root.c2, 1 - i * 0.25); Text { text: i + 1; color: #ffffff; font-size: 11px; font-weight: 800; } }
-                    Text { text: p.n; color: root.ink; font-size: 14px; font-weight: 700; horizontal-stretch: 1; vertical-alignment: center; }
-                    Text { text: p.s; color: root.ink.with-alpha(0.85); font-size: 13px; vertical-alignment: center; }
+                    Rectangle { width: 22px; height: 22px; border-radius: 11px; background: root.c1.mix(root.c2, 1 - i * 0.25); Text { font-family: root.font; text: i + 1; color: #ffffff; font-size: 11px; font-weight: 800; } }
+                    Text { font-family: root.font; text: p.n; color: root.ink; font-size: 14px; font-weight: 700; horizontal-stretch: 1; vertical-alignment: center; }
+                    Text { font-family: root.font; text: p.s; color: root.ink.with-alpha(0.85); font-size: 13px; vertical-alignment: center; }
                 }
             }
-            if root.which == "timer": VerticalLayout {
+            if root.which == "timer": tm := VerticalLayout {
                 alignment: center;
-                Text { text: "SUBATHON"; color: root.ink.with-alpha(0.75); font-size: 11px; letter-spacing: 1.5px; horizontal-alignment: center; }
-                Text { text: Theme.motion ? "59:" + (59 - mod(floor(animation-tick() / 1000ms), 60) < 10 ? "0" : "") + (59 - mod(floor(animation-tick() / 1000ms), 60)) : "59:32"; color: root.ink; font-size: 40px; font-weight: 800; horizontal-alignment: center; }
+                // (its title, if it has one; its time from where it starts, down (or up, as a stopwatch), as h:mm:ss
+                // past an hour; title, minutes and "up" or "down" in goal-names)
+                property <string> title: root.goal-names.length > 0 ? root.goal-names[0] : "";
+                property <int> from: root.goal-names.length > 1 ? root.goal-names[1].to-float() * 60 : 3600;
+                property <bool> up: root.goal-names.length > 2 && root.goal-names[2] == "up";
+                property <int> ran: Theme.motion ? mod(floor(animation-tick() / 1000ms), 60) : 28;
+                property <int> left: self.up ? self.ran : max(0, self.from - self.ran);
+                property <int> hh: floor(self.left / 3600);
+                property <int> mm: mod(floor(self.left / 60), 60);
+                property <int> ss: mod(self.left, 60);
+                if tm.title != "": Text { font-family: root.font; text: tm.title.to-uppercase(); color: root.ink.with-alpha(0.75); font-size: 11px; letter-spacing: 1.5px; horizontal-alignment: center; overflow: elide; }
+                Text { font-family: root.font; text: (tm.hh > 0 ? tm.hh + ":" + (tm.mm < 10 ? "0" : "") : "") + tm.mm + ":" + (tm.ss < 10 ? "0" : "") + tm.ss; color: root.ink; font-size: 40px; font-weight: 800; horizontal-alignment: center; }
             }
             if root.which == "latest": HorizontalLayout {
                 spacing: 12px;
                 Rectangle { width: 44px; height: 44px; border-radius: 10px; background: root.c1.mix(root.c2, 0.5); Glyph { d: Icons.heart-out; width: 24px; height: 24px; fill: #ffffff; } }
-                VerticalLayout { alignment: center; Text { text: "LATEST FOLLOWER"; color: root.ink.with-alpha(0.75); font-size: 11px; letter-spacing: 1.2px; } Text { text: "PixelPanda"; color: root.ink; font-size: 20px; font-weight: 800; } }
+                VerticalLayout { alignment: center; Text { font-family: root.font; text: "LATEST FOLLOWER"; color: root.ink.with-alpha(0.75); font-size: 11px; letter-spacing: 1.2px; } Text { font-family: root.font; text: "PixelPanda"; color: root.ink; font-size: 20px; font-weight: 800; } }
             }
             // (Sponsor Plug: the first one's logo (its first letter), name and line)
             if root.which == "sponsors": HorizontalLayout {
                 spacing: 12px;
-                Rectangle { width: 44px; height: 44px; border-radius: 22px; background: root.c1.mix(root.c2, 0.5); Text { text: root.theme; color: #ffffff; font-size: 20px; font-weight: 900; horizontal-alignment: center; } }
+                Rectangle { width: 44px; height: 44px; border-radius: 22px; background: root.c1.mix(root.c2, 0.5); Text { font-family: root.font; text: root.theme; color: #ffffff; font-size: 20px; font-weight: 900; horizontal-alignment: center; } }
                 VerticalLayout {
                     alignment: center;
-                    Text { text: "SPONSORED BY"; color: root.ink.with-alpha(0.75); font-size: 11px; letter-spacing: 1.2px; }
-                    Text { text: root.look; color: root.ink; font-size: 18px; font-weight: 800; overflow: elide; }
-                    if root.spot != "": Text { text: root.spot; color: root.ink.with-alpha(0.8); font-size: 12px; overflow: elide; }
+                    Text { font-family: root.font; text: "SPONSORED BY"; color: root.ink.with-alpha(0.75); font-size: 11px; letter-spacing: 1.2px; }
+                    Text { font-family: root.font; text: root.look; color: root.ink; font-size: 18px; font-weight: 800; overflow: elide; }
+                    if root.spot != "": Text { font-family: root.font; text: root.spot; color: root.ink.with-alpha(0.8); font-size: 12px; overflow: elide; }
                 }
             }
             if root.which == "raid": VerticalLayout {
                 spacing: 6px;
                 alignment: center;
-                Text { text: "GO FOLLOW"; color: root.c1; font-size: 13px; font-weight: 900; letter-spacing: 4px; horizontal-alignment: center; }
-                Text { text: "RaidLeader"; color: root.ink; font-size: 28px; font-weight: 800; horizontal-alignment: center; }
+                Text { font-family: root.font; text: "GO FOLLOW"; color: root.c1; font-size: 13px; font-weight: 900; letter-spacing: 4px; horizontal-alignment: center; }
+                Text { font-family: root.font; text: "RaidLeader"; color: root.ink; font-size: 28px; font-weight: 800; horizontal-alignment: center; }
                 HorizontalLayout {
                     alignment: center;
                     Rectangle {
@@ -3557,10 +3615,10 @@ component SuitePreview inherits Rectangle {
                         height: 30px;
                         border-radius: 15px;
                         background: root.c1.mix(root.c2, 0.5);
-                        rt := Text { text: "twitch.tv/raidleader"; color: #ffffff; font-size: 13px; font-weight: 700; }
+                        rt := Text { font-family: root.font; text: "twitch.tv/raidleader"; color: #ffffff; font-size: 13px; font-weight: 700; }
                     }
                 }
-                Rectangle { height: 60px; border-radius: 8px; background: #000000; Text { text: "Their clip plays here"; color: #ffffff80; font-size: 11px; } }
+                Rectangle { height: 60px; border-radius: 8px; background: #000000; Text { font-family: root.font; text: "Their clip plays here"; color: #ffffff80; font-size: 11px; } }
             }
         }
     }
@@ -3709,6 +3767,9 @@ component ChatPreview inherits Rectangle {
 component SocialCard inherits Rectangle {
     in property <SocialItem> it;
     in property <SocialLook> look;
+    // (Typewriter: how much of the handle's typed out, 0 to 1, and its caret shown)
+    in property <float> typed: 1;
+    in property <bool> caret;
     property <bool> pill: root.look.style == "pill";
     property <bool> bare: root.look.style == "minimal";
     property <bool> glass: root.look.style == "glass";
@@ -3742,7 +3803,19 @@ component SocialCard inherits Rectangle {
         }
         VerticalLayout {
             alignment: center;
-            Text { text: root.it.handle; color: root.comic ? #111111 : #ffffff; font-size: 17px; font-weight: 700; overflow: elide; }
+            // (typed out a letter at a time, behind a caret, the card already its full width)
+            Rectangle {
+                height: ht.preferred-height;
+                width: ht.preferred-width + 5px;
+                property <int> n: max(1, root.it.handle.character-count);
+                Rectangle {
+                    x: 0;
+                    width: ht.preferred-width * floor(root.typed * parent.n) / parent.n;
+                    clip: true;
+                    ht := Text { x: 0; width: self.preferred-width; text: root.it.handle; color: root.comic ? #111111 : #ffffff; font-size: 17px; font-weight: 700; }
+                }
+                if root.caret: Rectangle { x: ht.preferred-width * floor(root.typed * parent.n) / parent.n + 1px; width: 2px; height: parent.height * 0.8; background: root.comic ? #111111 : #ffffff; }
+            }
             Text { text: root.it.name.to-uppercase(); color: root.comic ? #111111bf : #ffffffbf; font-size: 11px; letter-spacing: 0.5px; }
         }
     }
@@ -3778,11 +3851,15 @@ component SocialPreview inherits Rectangle {
         look: root.look;
         property <length> home: root.look.align == "left" ? root.pad : root.look.align == "right" ? root.width - self.width - root.pad : (root.width - self.width) / 2;
         x: self.home + (root.look.motion == "slide" ? (1 - root.ease) * -32px + root.go * 32px : 0px);
-        y: (root.height - self.height) / 2 + (root.look.motion == "rise" || root.look.motion == "type" ? (1 - root.ease) * 14px - root.go * 10px : 0px);
+        y: (root.height - self.height) / 2 + (root.look.motion == "rise" ? (1 - root.ease) * 14px - root.go * 10px : 0px);
+        // (Typewriter: popped in, then the handle typed at 70 ms a letter, its caret blinking a while after)
+        property <bool> typing: Theme.motion && root.look.motion == "type";
+        typed: self.typing ? clamp((root.into - 300) / (70 * max(1, self.it.handle.character-count)), 0, 1) : 1;
+        caret: self.typing && root.into < 1500 + 70 * self.it.handle.character-count && mod(root.into, 800) < 400;
         opacity: root.come * (1 - root.go);
         // (Pop and Flip: grown or turned in from nothing, as near as a flat preview shows it)
-        transform-scale-x: root.look.motion == "pop" ? 0.5 + 0.5 * root.ease : 1;
-        transform-scale-y: root.look.motion == "pop" ? 0.5 + 0.5 * root.ease : root.look.motion == "flip" ? max(0.05, root.ease) * (1 - root.go) + (root.go > 0 ? 0 : 0) : 1;
+        transform-scale-x: root.look.motion == "pop" || root.look.motion == "type" ? 0.5 + 0.5 * root.ease : 1;
+        transform-scale-y: root.look.motion == "pop" || root.look.motion == "type" ? 0.5 + 0.5 * root.ease : root.look.motion == "flip" ? max(0.05, root.ease) * (1 - root.go) + (root.go > 0 ? 0 : 0) : 1;
     }
     // (all together: only made while it's chosen, so nothing of it's drawn otherwise)
     if root.look.all: HorizontalLayout {
@@ -3813,7 +3890,7 @@ component LyricsPreview inherits Rectangle {
         padding: 16px;
         spacing: 2px;
         alignment: root.look.place == "top" ? LayoutAlignment.start : root.look.place == "bottom" ? LayoutAlignment.end : LayoutAlignment.center;
-        if root.look.title: Text { text: "Song name · Artist"; color: root.look.color.with-alpha(0.7); font-size: root.fs * 0.45; horizontal-alignment: root.al; }
+        if root.look.title: Text { text: "Song name · Artist"; color: root.look.color.with-alpha(0.7); font-size: root.fs * 0.45; font-family: root.look.font; horizontal-alignment: root.al; }
         Rectangle {
             height: lines.preferred-height + (root.look.boxed ? 16px : 0px);
             if root.look.boxed: Rectangle { border-radius: 10px; background: root.look.box-color.with-alpha(root.look.box-opacity); }
@@ -3827,13 +3904,13 @@ component LyricsPreview inherits Rectangle {
                     property <bool> shown: (k == 0 && root.look.before) || k == 1 || (k >= 2 && k - 1 < max(1, root.look.lines));
                     height: self.shown ? lt.preferred-height : 0px;
                     visible: self.shown;
-                    if root.look.outline: Text { x: 1px; y: 1px; width: parent.width; text: t; font-size: root.fs * (k == 1 ? 1 : 0.85); font-weight: 800; color: root.look.outline-color; horizontal-alignment: root.al; }
-                    if root.look.shadow: Text { x: 0px; y: 2px; width: parent.width; text: t; font-size: root.fs * (k == 1 ? 1 : 0.85); font-weight: 800; color: #00000080; horizontal-alignment: root.al; }
+                    if root.look.outline: Text { x: 1px; y: 1px; width: parent.width; text: t; font-size: root.fs * (k == 1 ? 1 : 0.85); font-weight: 800; font-family: root.look.font; color: root.look.outline-color; horizontal-alignment: root.al; }
+                    if root.look.shadow: Text { x: 0px; y: 2px; width: parent.width; text: t; font-size: root.fs * (k == 1 ? 1 : 0.85); font-weight: 800; font-family: root.look.font; color: #00000080; horizontal-alignment: root.al; }
                     lt := Text {
                         width: parent.width;
                         text: t;
                         font-size: root.fs * (k == 1 ? 1 : 0.85);
-                        font-weight: 800;
+                        font-weight: 800; font-family: root.look.font;
                         horizontal-alignment: root.al;
                         // (the sung line: lit, or (karaoke) its first half lit, the rest its own colour)
                         color: k == 1 ? (root.look.style == "highlight" ? root.hi : root.look.color) : root.look.color.with-alpha(max(0.15, root.look.dim));
@@ -3842,7 +3919,7 @@ component LyricsPreview inherits Rectangle {
                         clip: true;
                         width: parent.width * 0.55;
                         x: root.look.align == "right" ? parent.width * 0.45 : 0px;
-                        Text { x: root.look.align == "right" ? -parent.x : 0px; width: lt.width; text: t; font-size: root.fs; font-weight: 800; horizontal-alignment: root.al; color: root.hi; }
+                        Text { x: root.look.align == "right" ? -parent.x : 0px; width: lt.width; text: t; font-size: root.fs; font-weight: 800; font-family: root.look.font; horizontal-alignment: root.al; color: root.hi; }
                     }
                 }
             }
@@ -4164,7 +4241,7 @@ component BotFieldRow inherits VerticalLayout {
     if root.f.kind == "campreview": CamPreview { }
     if root.f.kind == "panelpreview": PanelPreview { }
     if root.f.kind == "hudedit": HudEditor { act(a) => { root.act(a); } }
-    if root.f.kind == "suiteprev": SuitePreview { which: root.f.value; theme: root.f.extra; rings: root.f.label == "rings"; look: root.f.label; own-c1: root.f.c1; own-c2: root.f.c2; gif: root.f.n == 1; spot: root.f.key; }
+    if root.f.kind == "suiteprev": SuitePreview { which: root.f.value; theme: root.f.extra; font: root.f.note; rain-size: root.f.opts.length > 0 && root.f.value == "emoterain" ? root.f.opts[0] : ""; rain-spin: root.f.value == "emoterain" && root.f.opts.length > 1 && root.f.opts[1] == "spin"; goal-names: root.f.opts; goal-targets: root.f.opt-ids; rings: root.f.label == "rings"; look: root.f.label; own-c1: root.f.c1; own-c2: root.f.c2; gif: root.f.n == 1; spot: root.f.key; }
     if root.f.kind == "chips2": HorizontalLayout {
         spacing: 12px;
         VerticalLayout { horizontal-stretch: 1; alignment: center; Text { text: root.f.label; color: Theme.text; font-weight: 700; font-size: 13px; } }
@@ -8269,11 +8346,11 @@ export component AppWindow inherits Window {
                             spacing: 12px;
                             padding-right: 10px;
                             // (the preview, on a smaller window: first, above what it shows)
-                            if root.width < 1240px && root.pf-preview == "lyrics": LyricsPreview { look: root.pf-lyrics; }
-                            if root.width < 1240px && root.pf-preview == "socials": SocialPreview { items: root.pf-social-items; look: root.pf-social; }
-                            if root.width < 1240px && root.pf-preview == "multichat": ChatPreview { look: root.pf-chat; samples: root.pf-chat-samples; }
-                            if root.width < 1240px && root.pf-preview == "alerts": AlertPreview { look: root.pf-alert; }
-                            if root.width < 1240px && root.pf-preview == "widget": WidgetPreview { look: root.pf-widget; art: root.now-art; title: root.now-title == "Nothing playing" || root.now-title == "" ? "A Song You Love" : root.now-title; artist: root.now-artist == "" ? "Your Favourite Artist" : root.now-artist; }
+                            if root.width < 1440px && root.pf-preview == "lyrics": LyricsPreview { look: root.pf-lyrics; }
+                            if root.width < 1440px && root.pf-preview == "socials": SocialPreview { items: root.pf-social-items; look: root.pf-social; }
+                            if root.width < 1440px && root.pf-preview == "multichat": ChatPreview { look: root.pf-chat; samples: root.pf-chat-samples; }
+                            if root.width < 1440px && root.pf-preview == "alerts": AlertPreview { look: root.pf-alert; }
+                            if root.width < 1440px && root.pf-preview == "widget": WidgetPreview { look: root.pf-widget; art: root.now-art; title: root.now-title == "Nothing playing" || root.now-title == "" ? "A Song You Love" : root.now-title; artist: root.now-artist == "" ? "Your Favourite Artist" : root.now-artist; }
                             // (room under the last one, clear of Cancel and Save)
                             padding-bottom: 24px;
                             // (from the top, however tall the window: the room to spare under the last, never
@@ -8455,7 +8532,7 @@ export component AppWindow inherits Window {
                             }
                           }
                           // (docked beside them on a wide window; on a smaller one, above them, so they keep their room)
-                          if root.pf-preview != "" && root.width >= 1240px: VerticalLayout {
+                          if root.pf-preview != "" && root.width >= 1440px: VerticalLayout {
                             width: 400px;
                             alignment: start;
                             if root.pf-preview == "lyrics": LyricsPreview { look: root.pf-lyrics; }

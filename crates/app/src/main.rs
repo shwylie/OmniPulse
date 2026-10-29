@@ -65,6 +65,7 @@ mod share;
 mod sources;
 mod streamsafe;
 mod track;
+mod webfonts;
 mod webstate;
 mod xpl;
 
@@ -7196,10 +7197,17 @@ fn bot_fields(list: Vec<botpage::Field>) -> (Vec<BotField>, String) {
     let rows = list.into_iter().map(|x| {
         let (ids, names): (Vec<String>, Vec<String>) = if x.kind == "chips" || x.kind == "buttons" { x.extra.split('|').filter_map(|o| o.split_once('=')).map(|(i, n)| (i.to_string(), n.to_string())).unzip() }
             // (a list: its items, from what's kept, or the default in extra)
+            // (the goals' preview: each goal shown, its name, and its target as its id)
+            // (Emote Rain's: its size and spin, after its way in the label)
+            else if x.kind == "suiteprev" && x.value == "timer" { (Vec::new(), x.key.split('|').map(String::from).collect()) }
+            else if x.kind == "suiteprev" && x.value == "emoterain" { (Vec::new(), x.label.split('|').skip(1).map(String::from).collect()) }
+            else if x.kind == "suiteprev" && (x.value == "goals" || x.value == "wheel") { x.key.split('|').filter_map(|o| o.split_once('=')).map(|(n, t)| (t.to_string(), n.to_string())).unzip() }
             else if x.kind == "list" || x.kind == "piclist" { (Vec::new(), botpage::list_items(if x.value.is_empty() { &x.extra } else { &x.value })) }
             else { (Vec::new(), Vec::new()) };
         // (a Suite preview's colours: "#a,#b" in its note; none, the accent)
-        let (c1, c2) = x.note.split_once(',').filter(|_| x.kind == "suiteprev" && !x.note.is_empty())
+        // (and its font, after a ";": the note it's given)
+        let (cols, font) = if x.kind == "suiteprev" { x.note.split_once(';').map(|(a, b)| (a.to_string(), b.to_string())).unwrap_or((x.note.clone(), String::new())) } else { (String::new(), String::new()) };
+        let (c1, c2) = cols.split_once(',').filter(|_| x.kind == "suiteprev" && !cols.is_empty())
             .map(|(a, b)| (look::Rgb::parse(a).map(|c| c.slint()).unwrap_or_default(), look::Rgb::parse(b).map(|c| c.slint()).unwrap_or_default()))
             .unwrap_or_default();
         // (a split page's column is narrow: a row of choices too wide for it, a dropdown, so none's cut off)
@@ -7209,9 +7217,15 @@ fn bot_fields(list: Vec<botpage::Field>) -> (Vec<BotField>, String) {
             // (a link row: 1 when it opens a web page, so it shows as one; an action here shows as done here)
             else if x.kind == "link" { (x.kind, i32::from(x.extra.starts_with("url:") || x.extra.starts_with("http"))) }
             else { (x.kind, x.n) };
-        BotField { changed: !x.key.is_empty() && !x.key.contains(':') && pf_changed(&x.key), key: x.key.into(), kind: kind.into(), label: x.label.into(), note: x.note.into(), value: x.value.into(), extra: x.extra.into(), n, opts: strs(names), opt_ids: strs(ids), c1, c2 }
+        let key = if x.kind == "suiteprev" && (x.value == "goals" || x.value == "wheel" || x.value == "timer") { String::new() } else { x.key };
+        BotField { changed: !key.is_empty() && !key.contains(':') && pf_changed(&key), key: key.into(), kind: kind.into(), label: x.label.split('|').next().unwrap_or("").into(), note: if x.kind == "suiteprev" { font.into() } else { x.note.into() }, value: x.value.into(), extra: x.extra.into(), n, opts: strs(names), opt_ids: strs(ids), c1, c2 }
     }).collect();
     (rows, sig)
+}
+
+thread_local! {
+    // (a setting being typed into: bot_paint draws only the preview)
+    static BOT_TYPING: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
 fn bot_paint(shared: &Shared) {
@@ -7230,6 +7244,7 @@ fn bot_paint(shared: &Shared) {
     // (a page of its own open (a widget's, say): the Suite's overview under it isn't seen, so it isn't drawn
     // again with each change there; it is when the page closes)
     let sheet_open = BOT_SHEET.with(|b| !b.borrow().is_empty());
+    if !sheet_open && BOT_TYPING.with(|t| t.get()) { return; }
     let focus = BOT_FOCUS.with(|f| f.borrow().clone());
     let now = botpage::step_now(&cur, &focus);
     if !sheet_open {
@@ -7245,8 +7260,16 @@ fn bot_paint(shared: &Shared) {
     let sheet = BOT_SHEET.with(|b| b.borrow().clone());
     let (title, mut lines) = botpage::sheet(&sheet, &cur);
     { let m = theme_accents(&shared.borrow().web.prefs); for l in lines.iter_mut().filter(|l| l.kind == "suiteprev" && l.note.is_empty()) { l.note = format!("{},{}", m.0, m.1); } }
+    // (its theme's font, after its colours: a Google Font picked, fetched first; Pixel's own, Cascadia Mono)
+    { let rt = shared.borrow().rt.clone(); for l in lines.iter_mut().filter(|l| l.kind == "suiteprev") {
+        let theme = if l.extra.is_empty() { "dark" } else { l.extra.as_str() };
+        let name = botpage::theme_font(&cur, theme);
+        let fam = if !name.is_empty() { webfonts::family(&rt, &name, fonts_ready) } else if theme == "pixel" { "Cascadia Mono".into() } else { String::new() };
+        l.note = format!("{};{fam}", l.note);
+    } }
     let port = shared.borrow().web.prefs["widgetPort"].as_u64().unwrap_or(7878);
     for l in lines.iter_mut() { if l.extra.contains("{port}") { l.extra = l.extra.replace("{port}", &port.to_string()); } }
+    if sheet == "emoterain" { rain_pics(shared, &cur); }
     // (Game HUD Frames' editor: the screenshot, and each frame as fractions of it)
     if sheet == "hud" {
         let g = ui.global::<HudLook>();
@@ -7360,6 +7383,9 @@ fn bot_paint(shared: &Shared) {
         let same = sheet == ui.get_bot_sheet().as_str();
         let now = ui.get_bot_sheet_fields();
         let fits = same && now.row_count() == rows.len() && (0..rows.len()).all(|i| now.row_data(i).is_some_and(|r| r.kind == rows[i].kind && r.key == rows[i].key));
+        // (while typing: only the preview, so what's being typed stays put; the rest when it's next drawn)
+        let typing = BOT_TYPING.with(|t| t.get());
+        if typing { if fits { for (i, r) in rows.into_iter().enumerate() { if r.kind == "suiteprev" && now.row_data(i).as_ref() != Some(&r) { now.set_row_data(i, r); } } } return; }
         if fits { for (i, r) in rows.into_iter().enumerate() { if now.row_data(i).as_ref() != Some(&r) { now.set_row_data(i, r); } } }
         else { ui.set_bot_sheet_fields(model(rows)); }
     }
@@ -7507,8 +7533,9 @@ fn bot_set(shared: &Shared, key: &str, v: &str) {
     }
     PF_EDIT.with(|e| if let Some((_, vals)) = e.borrow_mut().as_mut() { vals.insert(key, value); });
     pf_mark(shared);
-    // (a switch, or who can request: seen at once, pulsing; typing: left as it's typed)
-    if toggle { bot_paint(shared); }
+    // (a switch, or who can request: seen at once, pulsing; typing: left as it's typed, only the preview drawn
+    // again)
+    if toggle { bot_paint(shared); } else { BOT_TYPING.with(|t| t.set(true)); bot_paint(shared); BOT_TYPING.with(|t| t.set(false)); }
 }
 
 /// A webhook's own id on the relay (Ko-fi's, Throne's, Fourthwall's): 24 random letters and digits, its secret
@@ -8095,7 +8122,57 @@ fn lyrics_look(v: &serde_json::Map<String, serde_json::Value>) -> LyricsLook {
         lines: num("lyricsLines", 3.0) as i32,
         upper: st("lyricsTransform", "none") == "uppercase",
         place: st("lyricsPlace", "").into(),
+        font: font_family(&st("lyricsFont", "sans")).into(),
     }
+}
+
+/// A lyrics font's family for the preview: a Google Font fetched first (drawn in the app's own till then)
+fn font_family(key: &str) -> String {
+    let (name, web) = panels::lyrics_family(key);
+    if !web { return name.into(); }
+    let rt = SHARED.with(|s| s.borrow().as_ref().and_then(|sh| sh.try_borrow().ok().map(|a| a.rt.clone())));
+    rt.map(|rt| webfonts::family(&rt, name, fonts_ready)).unwrap_or_default()
+}
+
+/// Emote Rain's preview: real emotes, fetched once for what's set: Twitch's, BetterTTV's and 7TV's global ones
+/// (no account needed), your own pictures, or both
+fn rain_pics(shared: &Shared, cur: &serde_json::Map<String, serde_json::Value>) {
+    thread_local! { static RAIN_FOR: RefCell<String> = const { RefCell::new(String::new()) }; }
+    let src = cur.get("rainSource").and_then(|v| v.as_str()).filter(|v| !v.is_empty()).unwrap_or("chat").to_string();
+    let mine: Vec<String> = if src == "chat" { Vec::new() } else {
+        cur.get("rainImages").and_then(|v| v.as_str()).unwrap_or("").split('|').map(str::trim).filter(|u| u.starts_with("https://") || u.starts_with("http://")).take(12).map(String::from).collect()
+    };
+    let key = format!("{src}|{}", mine.join("|"));
+    if RAIN_FOR.with(|r| *r.borrow() == key) { return; }
+    RAIN_FOR.with(|r| *r.borrow_mut() = key.clone());
+    let (rt, weak) = { let a = shared.borrow(); (a.rt.clone(), a.ui.clone()) };
+    rt.spawn(async move {
+        let mut urls = mine;
+        if src != "mine" {
+            // (Twitch's globals have fixed addresses; BetterTTV's and 7TV's are listed, their still ones taken)
+            let twitch: Vec<String> = ["25", "305954156", "425618", "41", "64138", "30259", "58127", "81274", "9"].iter().map(|id| format!("https://static-cdn.jtvnw.net/emoticons/v2/{id}/default/dark/2.0")).collect();
+            let get = |u: &'static str| async move { reqwest::get(u).await.ok()?.json::<serde_json::Value>().await.ok() };
+            let bttv: Vec<String> = get("https://api.betterttv.net/3/cached/emotes/global").await.and_then(|v| v.as_array().cloned()).unwrap_or_default().iter()
+                .filter(|e| e["animated"].as_bool() != Some(true)).filter_map(|e| e["id"].as_str()).take(5).map(|id| format!("https://cdn.betterttv.net/emote/{id}/2x.webp")).collect();
+            let seven: Vec<String> = get("https://7tv.io/v3/emote-sets/global").await.and_then(|v| v["emotes"].as_array().cloned()).unwrap_or_default().iter()
+                .filter(|e| e["data"]["animated"].as_bool() != Some(true)).filter_map(|e| e["id"].as_str()).take(5).map(|id| format!("https://cdn.7tv.app/emote/{id}/2x.webp")).collect();
+            // (taken in turn, so each platform's are seen)
+            let lists = [twitch, bttv, seven];
+            for k in 0..9 { for l in &lists { if let Some(u) = l.get(k) { urls.push(u.clone()); } } }
+        }
+        let mut px = Vec::new();
+        for u in urls.into_iter().take(24) { if let Some(p) = player::fetch_art(u, 64).await { px.push(p); } }
+        let _ = weak.upgrade_in_event_loop(move |ui| {
+            if RAIN_FOR.with(|r| *r.borrow() != key) { return; }
+            let list: Vec<slint::Image> = px.into_iter().map(slint::Image::from_rgba8).collect();
+            ui.global::<RainPics>().set_list(ModelRc::from(Rc::new(VecModel::from(list))));
+        });
+    });
+}
+
+/// A font fetched for a preview: the open page drawn again, with it
+fn fonts_ready() {
+    SHARED.with(|s| if let Some(sh) = s.borrow().clone() { pf_paint(&sh); bot_paint(&sh); });
 }
 
 fn panel_paint(shared: &Shared, name: &str, vals: &serde_json::Map<String, serde_json::Value>) {
@@ -15350,6 +15427,16 @@ fn main() -> Result<(), slint::PlatformError> {
                 // (a plugin's own page, like the Suite's)
                 w if w.starts_with("plug:") => { if let Some(sh) = SHARED.with(|x| x.borrow().clone()) { pf_open(&sh, &w[5..]); } }
                 w if w.starts_with("botact:") => { if let Some(sh) = SHARED.with(|x| x.borrow().clone()) { bot_act(&sh, &w[7..]); } }
+                // (a panel's setting changed by its key, unsaved, as a click there does; "@id" picks that option)
+                w if w.starts_with("pfkey:") => {
+                    if let (Some(sh), Some((k, v))) = (SHARED.with(|x| x.borrow().clone()), w[6..].split_once('=')) {
+                        let found = PANEL_FIELDS.with(|p| p.borrow().iter().enumerate().find(|(_, f)| f["key"].as_str() == Some(k)).map(|(i, f)| (i, f["options"].as_array().cloned().unwrap_or_default())));
+                        if let Some((i, opts)) = found {
+                            let v = match v.strip_prefix('@') { Some(id) => format!("\u{2}{}", opts.iter().position(|o| o.as_str() == Some(id) || o[0].as_str() == Some(id) || o["value"].as_str() == Some(id)).unwrap_or(0)), None => v.to_string() };
+                            pf_set(&sh, i, &v); pf_mark(&sh); pf_paint_changed(&sh);
+                        }
+                    }
+                }
                 w if w.starts_with("cat:") => { ui.set_set_cat(w[4..].into()); }
                 // (Settings' search typed, and its n-th result picked)
                 w if w.starts_with("setsearch:") => { if let Some(sh) = SHARED.with(|x| x.borrow().clone()) { settings_search(&sh, &w[10..]); } }
@@ -15421,6 +15508,8 @@ fn main() -> Result<(), slint::PlatformError> {
                     println!("selftest: drag onto the queue: {n} -> {} (\"{}\")", s.borrow().queue.items.len(), ui.get_status());
                 }
                 // (a widget page's setting changed, as a click there does, and how long it and the page's redraw took)
+                // (typed into, as a key press there does: no redraw but what typing makes)
+                w if w.starts_with("bottype:") => { if let Some((k, v)) = w[8..].split_once('=') { bot_set(&s, k, v); } }
                 w if w.starts_with("botset:") => {
                     if let Some((k, v)) = w[7..].split_once('=') {
                         let t0 = std::time::Instant::now();
