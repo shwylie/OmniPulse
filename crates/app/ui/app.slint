@@ -1302,6 +1302,18 @@ component VizView inherits Rectangle {
             stroke-width: max(2.5px, root.height / 40);
         }
     }
+    // Solid Wave: the area under the line filled in full, across from one colour to the other, no line over it
+    if root.style == "solid" && VizPaths.area != "": Rectangle {
+        Path {
+            width: root.width;
+            height: root.height;
+            fit: fill;
+            viewbox-width: 1000;
+            viewbox-height: 1000;
+            commands: VizPaths.area;
+            fill: @linear-gradient(90deg, VizLook.a.with-alpha(root.strength) 0%, VizLook.b.with-alpha(root.strength) 100%);
+        }
+    }
     if root.style == "wave" && VizPaths.line == "": Rectangle {
         for v[k] in root.curve: Rectangle {
             property <length> step: root.width / max(1, root.curve.length);
@@ -7390,7 +7402,7 @@ export component AppWindow inherits Window {
                                         HorizontalLayout {
                                             spacing: 6px;
                                             alignment: start;
-                                            for v in [{ id: "off", n: "Off", t: "No visualiser" }, { id: "bars", n: "Bars", t: "Bars" }, { id: "mirror", n: "Mirror", t: "Bars from the middle" }, { id: "peaks", n: "Peaks", t: "Bars with their tops held" }, { id: "blocks", n: "Blocks", t: "An LED meter" }, { id: "dots", n: "Dots", t: "A grid of dots" }, { id: "wave", n: "Wave", t: "A smooth line" }, { id: "centre", n: "Centre", t: "The bass in the middle" }, { id: "glow", n: "Glow", t: "A glow round the cover" }, { id: "ring", n: "Ring", t: "Each frequency standing out round the cover" }, { id: "halo", n: "Halo", t: "Bars round the cover, which pulses with the beat" }]: Rectangle {
+                                            for v in [{ id: "off", n: "Off", t: "No visualiser" }, { id: "bars", n: "Bars", t: "Bars" }, { id: "mirror", n: "Mirror", t: "Bars from the middle" }, { id: "peaks", n: "Peaks", t: "Bars with their tops held" }, { id: "blocks", n: "Blocks", t: "An LED meter" }, { id: "dots", n: "Dots", t: "A grid of dots" }, { id: "wave", n: "Wave", t: "A smooth line" }, { id: "solid", n: "Solid Wave", t: "The wave, filled in" }, { id: "centre", n: "Centre", t: "The bass in the middle" }, { id: "glow", n: "Glow", t: "A glow round the cover" }, { id: "ring", n: "Ring", t: "Each frequency standing out round the cover" }, { id: "halo", n: "Halo", t: "Bars round the cover, which pulses with the beat" }]: Rectangle {
                                                 width: vc.width;
                                                 height: vc.height;
                                                 vc := Chip { label: v.n; on: root.viz-style == v.id; clicked => { root.viz-pick(v.id); } }
@@ -7919,7 +7931,7 @@ export component AppWindow inherits Window {
                             if root.now-title != "": HorizontalLayout {
                                 alignment: start;
                                 spacing: 6px;
-                                Pill { label: "Visualiser: " + (root.viz-scene ? root.viz-scene-name : root.viz-style == "bars" ? "Bars" : root.viz-style == "mirror" ? "Mirror" : root.viz-style == "peaks" ? "Peaks" : root.viz-style == "blocks" ? "Blocks" : root.viz-style == "dots" ? "Dots" : root.viz-style == "wave" ? "Wave" : root.viz-style == "centre" ? "Centre" : root.viz-style == "glow" ? "Glow" : root.viz-style == "ring" ? "Ring" : root.viz-style == "halo" ? "Halo" : "Off"); on: root.viz-style != "off"; clicked => { root.viz-cycle(); } }
+                                Pill { label: "Visualiser: " + (root.viz-scene ? root.viz-scene-name : root.viz-style == "bars" ? "Bars" : root.viz-style == "mirror" ? "Mirror" : root.viz-style == "peaks" ? "Peaks" : root.viz-style == "blocks" ? "Blocks" : root.viz-style == "dots" ? "Dots" : root.viz-style == "wave" ? "Wave" : root.viz-style == "solid" ? "Solid Wave" : root.viz-style == "centre" ? "Centre" : root.viz-style == "glow" ? "Glow" : root.viz-style == "ring" ? "Ring" : root.viz-style == "halo" ? "Halo" : "Off"); on: root.viz-style != "off"; clicked => { root.viz-cycle(); } }
                                 Pill { label: "Full Screen"; clicked => { root.viz-full = true; root.viz-place("full", true); } }
                             }
                             if root.xf-on: Crossfade { from-art: root.xf-from-art; to-art: root.xf-to-art; frac: root.xf-frac; label: root.xf-label; }

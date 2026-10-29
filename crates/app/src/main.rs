@@ -11462,7 +11462,7 @@ fn viz_update(shared: &Shared, ui: &AppWindow) {
             if let Some(ui) = w.upgrade() {
                 ui.set_viz_level(l);
                 // (the Wave: one smooth line, and the faint area under it)
-                if ui.get_viz_style() == "wave" { let (l, a) = viz::wave_paths(&cv); let g = ui.global::<VizPaths>(); g.set_line(l.into()); g.set_area(a.into()); }
+                if matches!(ui.get_viz_style().as_str(), "wave" | "solid") { let (l, a) = viz::wave_paths(&cv); let g = ui.global::<VizPaths>(); g.set_line(l.into()); g.set_area(a.into()); }
                 // (a GPU scene: its next frame asked for, the newest shown; drawn smaller than shown, full screen)
                 if ui.get_viz_scene() {
                     let style = ui.get_viz_style().to_string();
@@ -13811,7 +13811,7 @@ fn main() -> Result<(), slint::PlatformError> {
         let now = s.borrow().web.prefs["nowViz"].as_str().unwrap_or("off").to_string();
         let gpu = s.borrow().web.prefs["nativeGpu"].as_bool() == Some(true);
         let next = match now.as_str() {
-            "halo" if gpu => "smoke", "smoke" => "swarm", "swarm" => "ink", "ink" => "off", "off" => "bars", "bars" => "mirror", "mirror" => "peaks", "peaks" => "blocks", "blocks" => "dots", "dots" => "wave", "wave" => "centre", "centre" => "glow", "glow" => "ring", "ring" => "halo", _ => "off" };
+            "halo" if gpu => "smoke", "smoke" => "swarm", "swarm" => "ink", "ink" => "off", "off" => "bars", "bars" => "mirror", "mirror" => "peaks", "peaks" => "blocks", "blocks" => "dots", "dots" => "wave", "wave" => "solid", "solid" => "centre", "centre" => "glow", "glow" => "ring", "ring" => "halo", _ => "off" };
         if let Some(o) = s.borrow_mut().web.prefs.as_object_mut() { o.insert("nowViz".into(), serde_json::json!(next)); }
         if std::env::var_os("OMNIPULSE_SELFTEST").is_none() { webstate::save_pref("nowViz", serde_json::json!(next)); }
         if let Some(ui) = s.borrow().ui.upgrade() { viz_update(&s, &ui); }
