@@ -115,7 +115,7 @@ export struct WidgetLook { design: string, theme: string, right: bool, rounded: 
 
 /// The alerts' preview: their theme and colours as they're set
 /// A HUD frame, for its editor: where it is on the screenshot (fractions), and whether it's the one picked
-export struct HudRect { x: float, y: float, w: float, h: float, label: string, picked: bool }
+export struct HudRect { x: float, y: float, w: float, h: float, label: string, picked: bool, style: string, px: float, py: float, pulse: bool }
 /// Emote Rain's preview: real emotes (the platforms' own, or your pictures), as they're fetched
 export global RainPics {
     in property <[image]> list;
@@ -126,6 +126,13 @@ export global HudLook {
     in-out property <float> ratio: 0.5625;
     in-out property <[HudRect]> frames;
     in-out property <color> c1;
+    in-out property <color> c2;
+    // (the picked frame's box, as fractions of the screenshot: moved or resized by dragging it)
+    in-out property <bool> has-sel;
+    in-out property <float> sel-x;
+    in-out property <float> sel-y;
+    in-out property <float> sel-w;
+    in-out property <float> sel-h;
 }
 /// A channel panel, for the Panels' preview
 export struct PanelItem { title: string, line: string, body: bool, lines: int, icon: string, img: image, has-img: bool }
@@ -2922,47 +2929,134 @@ component AlertPreview inherits Rectangle {
 }
 
 /// Game HUD Frames' editor: your screenshot, its frames on it; drag a box for a new one, click one to pick it
+/// One HUD frame as hud.html draws it: Corner Brackets, Glow, Neon, Tech or Soft, its label above
+component HudFrame inherits Rectangle {
+    in property <string> style;
+    in property <string> label;
+    in property <bool> pulse;
+    property <color> c1: HudLook.c1;
+    property <color> c2: HudLook.c2;
+    // (A Slow Pulse: its light rising and falling)
+    opacity: self.pulse && Theme.motion ? 0.7 + 0.3 * sin(animation-tick() / 2400ms * 360deg) : 1;
+    if root.style == "brackets": Rectangle {
+        property <length> lx: parent.width * 0.22;
+        property <length> ly: parent.height * 0.22;
+        Rectangle { x: 0; y: 0; width: parent.lx; height: 3px; background: root.c1; }
+        Rectangle { x: 0; y: 0; width: 3px; height: parent.ly; background: root.c1; }
+        Rectangle { x: parent.width - parent.lx; y: 0; width: parent.lx; height: 3px; background: root.c1; }
+        Rectangle { x: parent.width - 3px; y: 0; width: 3px; height: parent.ly; background: root.c1; }
+        Rectangle { x: 0; y: parent.height - 3px; width: parent.lx; height: 3px; background: root.c1; }
+        Rectangle { x: 0; y: parent.height - parent.ly; width: 3px; height: parent.ly; background: root.c1; }
+        Rectangle { x: parent.width - parent.lx; y: parent.height - 3px; width: parent.lx; height: 3px; background: root.c1; }
+        Rectangle { x: parent.width - 3px; y: parent.height - parent.ly; width: 3px; height: parent.ly; background: root.c1; }
+    }
+    if root.style == "glow": Rectangle { border-width: 2px; border-color: root.c1; border-radius: 10px; drop-shadow-blur: 12px; drop-shadow-color: root.c1; }
+    if root.style == "neon": Rectangle {
+        border-width: 2px;
+        border-color: root.c1;
+        border-radius: 6px;
+        drop-shadow-blur: 10px;
+        drop-shadow-color: root.c1;
+        Rectangle { x: 4px; y: 4px; width: parent.width - 8px; height: parent.height - 8px; border-width: 2px; border-color: root.c2; border-radius: 3px; }
+    }
+    if root.style == "tech": Rectangle {
+        border-width: 2px;
+        border-color: root.c1;
+        Rectangle { x: parent.width * 0.58; y: -1px; width: parent.width * 0.3; height: 4px; background: root.c2; }
+        Rectangle { x: parent.width * 0.12; y: parent.height - 3px; width: parent.width * 0.3; height: 4px; background: root.c2; }
+    }
+    if root.style == "soft": Rectangle { border-width: 3px; border-color: root.c1.mix(root.c2, 0.5); border-radius: 14px; }
+    if root.label != "": Rectangle {
+        property <bool> bare: root.style == "brackets" || root.style == "neon";
+        x: 0;
+        y: -self.height - 2px;
+        width: lt.preferred-width + (self.bare ? 0px : 12px);
+        height: lt.preferred-height + 2px;
+        border-radius: root.style == "soft" ? self.height / 2 : 4px;
+        background: self.bare ? transparent : root.style == "glow" ? root.c1 : root.c1.mix(root.c2, 0.5);
+        lt := Text { text: root.label.to-uppercase(); color: parent.bare ? root.c1 : #ffffff; font-size: 10px; font-weight: 800; letter-spacing: 1px; }
+    }
+}
+
+/// Game HUD Frames' editor: the screenshot, its frames drawn in their styles. Drag on it to draw a frame; drag
+/// the picked one to move it, or its white corner to size it; click one to pick it
 component HudEditor inherits Rectangle {
     callback act(string);
-    height: self.width * HudLook.ratio;
-    border-radius: 10px;
-    clip: true;
-    background: #000000;
-    Image { width: parent.width; height: parent.height; source: HudLook.shot; image-fit: fill; }
-    for f in HudLook.frames: Rectangle {
-        x: parent.width * f.x;
-        y: parent.height * f.y;
-        width: parent.width * f.w;
-        height: parent.height * f.h;
-        border-width: f.picked ? 3px : 2px;
-        border-color: f.picked ? #ffffff : HudLook.c1;
-        background: f.picked ? HudLook.c1.with-alpha(0.18) : transparent;
-        if f.label != "": Text { x: 0; y: -16px; text: f.label; color: HudLook.c1; font-size: 11px; font-weight: 800; }
-    }
-    // (the box being drawn)
+    // (no taller than about a window's third, so the picked frame's settings stay in sight under it)
+    height: min(self.width * HudLook.ratio, 380px);
+    // (what a press there does: draw, move or size; where it started)
+    property <string> mode;
     property <length> sx;
     property <length> sy;
-    property <bool> dragging;
-    if root.dragging: Rectangle {
-        x: min(root.sx, ta.mouse-x);
-        y: min(root.sy, ta.mouse-y);
-        width: abs(ta.mouse-x - root.sx);
-        height: abs(ta.mouse-y - root.sy);
-        border-width: 2px;
-        border-color: #ffffff;
-        background: #ffffff22;
-    }
-    ta := TouchArea {
-        mouse-cursor: MouseCursor.crosshair;
-        pointer-event(e) => {
-            if e.kind == PointerEventKind.down && e.button == PointerEventButton.left { root.sx = self.mouse-x; root.sy = self.mouse-y; root.dragging = true; }
-            if e.kind == PointerEventKind.up && root.dragging {
-                root.dragging = false;
-                // (a click, not a drag: the frame under it picked)
-                if abs(self.mouse-x - root.sx) < 6px && abs(self.mouse-y - root.sy) < 6px {
-                    root.act("hud:pick:" + (self.mouse-x / root.width) + "," + (self.mouse-y / root.height));
-                } else {
-                    root.act("hud:add:" + (root.sx / root.width) + "," + (root.sy / root.height) + "," + (clamp(self.mouse-x, 0px, root.width) / root.width) + "," + (clamp(self.mouse-y, 0px, root.height) / root.height));
+    property <length> dx: ta.mouse-x - root.sx;
+    property <length> dy: ta.mouse-y - root.sy;
+    // (the picked frame's box, on the stage)
+    property <length> bx: stage.width * HudLook.sel-x;
+    property <length> by: stage.height * HudLook.sel-y;
+    property <length> bw: stage.width * HudLook.sel-w;
+    property <length> bh: stage.height * HudLook.sel-h;
+    property <bool> over-corner: HudLook.has-sel && ta.has-hover && abs(ta.mouse-x - (root.bx + root.bw)) < 10px && abs(ta.mouse-y - (root.by + root.bh)) < 10px;
+    property <bool> over-sel: HudLook.has-sel && ta.has-hover && ta.mouse-x >= root.bx && ta.mouse-x <= root.bx + root.bw && ta.mouse-y >= root.by && ta.mouse-y <= root.by + root.bh;
+    // (the box shown while dragging: drawn from where it started, moved, or sized from its corner)
+    property <length> gx: root.mode == "draw" ? max(0px, min(root.sx, ta.mouse-x)) : root.mode == "move" ? clamp(root.bx + root.dx, 0px, stage.width - root.bw) : root.bx;
+    property <length> gy: root.mode == "draw" ? max(0px, min(root.sy, ta.mouse-y)) : root.mode == "move" ? clamp(root.by + root.dy, 0px, stage.height - root.bh) : root.by;
+    property <length> gw: root.mode == "draw" ? abs(clamp(ta.mouse-x, 0px, stage.width) - root.sx) : root.mode == "size" ? clamp(root.bw + root.dx, 8px, stage.width - root.bx) : root.bw;
+    property <length> gh: root.mode == "draw" ? abs(clamp(ta.mouse-y, 0px, stage.height) - root.sy) : root.mode == "size" ? clamp(root.bh + root.dy, 8px, stage.height - root.by) : root.bh;
+    stage := Rectangle {
+        width: min(parent.width, parent.height / HudLook.ratio);
+        height: self.width * HudLook.ratio;
+        x: (parent.width - self.width) / 2;
+        border-radius: 10px;
+        clip: true;
+        background: #000000;
+        Image { width: parent.width; height: parent.height; source: HudLook.shot; image-fit: fill; }
+        for f in HudLook.frames: HudFrame {
+            x: parent.width * (f.x - f.px);
+            y: parent.height * (f.y - f.py);
+            width: parent.width * (f.w + 2 * f.px);
+            height: parent.height * (f.h + 2 * f.py);
+            style: f.style;
+            label: f.label;
+            pulse: f.pulse;
+            // (the picked one, while it isn't being moved: its box outlined, its corner to size it by)
+            if f.picked && root.mode == "": Rectangle {
+                x: parent.width * f.px / (f.w + 2 * f.px);
+                y: parent.height * f.py / (f.h + 2 * f.py);
+                width: parent.width * f.w / (f.w + 2 * f.px);
+                height: parent.height * f.h / (f.h + 2 * f.py);
+                border-width: 1px;
+                border-color: #ffffffc0;
+                Rectangle { x: parent.width - 6px; y: parent.height - 6px; width: 12px; height: 12px; border-radius: 2px; background: #ffffff; border-width: 1px; border-color: #00000080; }
+            }
+        }
+        // (the box being drawn, moved or sized)
+        if root.mode != "": Rectangle {
+            x: root.gx;
+            y: root.gy;
+            width: root.gw;
+            height: root.gh;
+            border-width: 2px;
+            border-color: #ffffff;
+            background: #ffffff22;
+        }
+        ta := TouchArea {
+            mouse-cursor: root.mode == "move" ? MouseCursor.move : root.mode == "size" || root.over-corner ? MouseCursor.nwse-resize : root.over-sel ? MouseCursor.move : MouseCursor.crosshair;
+            pointer-event(e) => {
+                if e.kind == PointerEventKind.down && e.button == PointerEventButton.left {
+                    root.sx = self.mouse-x;
+                    root.sy = self.mouse-y;
+                    root.mode = root.over-corner ? "size" : root.over-sel ? "move" : "draw";
+                }
+                if e.kind == PointerEventKind.up && root.mode != "" {
+                    // (a click, not a drag: the frame under it picked)
+                    if abs(self.mouse-x - root.sx) < 5px && abs(self.mouse-y - root.sy) < 5px {
+                        root.act("hud:pick:" + (self.mouse-x / self.width) + "," + (self.mouse-y / self.height));
+                    } else if root.mode == "draw" {
+                        root.act("hud:add:" + (root.sx / self.width) + "," + (root.sy / self.height) + "," + (clamp(self.mouse-x, 0px, self.width) / self.width) + "," + (clamp(self.mouse-y, 0px, self.height) / self.height));
+                    } else {
+                        root.act("hud:set:" + (root.gx / self.width) + "," + (root.gy / self.height) + "," + (root.gw / self.width) + "," + (root.gh / self.height));
+                    }
+                    root.mode = "";
                 }
             }
         }

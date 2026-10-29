@@ -411,7 +411,7 @@ fn sheet_of(id: &str, cur: &Map<String, Value>) -> (String, Vec<Field>) {
                 v.push(f("link", "", "Choose a Screenshot", "Choose opens a PNG or JPG of your game from your PC.", "", "hud:shot"));
                 return ("Game HUD Frames (WIP)".into(), v);
             }
-            v.push(f("note", "", if frames.is_empty() { "Drag a box on your screenshot round a part of the HUD. It snaps to its edges, and a frame goes round it." } else { "Drag a box for another frame, or click one to change it." }, "", "", ""));
+            v.push(f("note", "", if frames.is_empty() { "Drag a box on your screenshot round a part of the HUD. It snaps to its edges, and a frame goes round it." } else { "Drag a box for another frame. Click a frame to pick it, then drag it to move it, or drag its white corner to change its size." }, "", "", ""));
             v.push(f("hudedit", "", "", "", "", ""));
             // (each frame, to pick it here as well as on the picture)
             if !frames.is_empty() {
@@ -425,7 +425,7 @@ fn sheet_of(id: &str, cur: &Map<String, Value>) -> (String, Vec<Field>) {
                 v.push(f("text", "hudF_label", "Label", "Words above it, like MAP. Leave it empty for none.", &g("label", ""), "MAP"));
                 v.push(f("chips", "hudF_pad", "Room round it", "", &fr["pad"].as_f64().unwrap_or(6.0).to_string(), "0=None|6=A Little|14=More|24=Lots"));
                 v.push(f("toggle", "hudF_pulse", "A slow pulse", "", if fr["pulse"].as_bool() == Some(true) { "true" } else { "false" }, ""));
-                v.push(f("chips", "hudNudge", "Move it", "A pixel at a time (10 with Bigger Steps), if the snap's a little off.", "", "left=Left|right=Right|up=Up|down=Down|wider=Wider|narrower=Narrower|taller=Taller|shorter=Shorter|big=Bigger Steps"));
+                v.push(f("chips", "hudNudge", "Fine-tune", "Drag it on the screenshot, or move it here a pixel at a time (10 with Bigger Steps).", "", "left=Left|right=Right|up=Up|down=Down|wider=Wider|narrower=Narrower|taller=Taller|shorter=Shorter|big=Bigger Steps"));
                 v.push(f("link", "", "Snap it again", "To the edges inside it, after moving it.", "", "hud:snap"));
                 v.push(f("link", "", "Take this frame away", "", "", "hud:del"));
             }

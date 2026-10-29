@@ -7284,11 +7284,19 @@ fn bot_paint(shared: &Shared) {
         let sel = cur.get("hudSel").and_then(|v| v.as_f64()).unwrap_or(-1.0) as i64;
         let rects: Vec<HudRect> = hud::frames(cur.get("hudFrames").and_then(|v| v.as_str()).unwrap_or("[]")).iter().enumerate().map(|(i, f)| {
             let a = |k: &str| f[k].as_f64().unwrap_or(0.0) as f32;
-            HudRect { x: a("x") / iw, y: a("y") / ih, w: a("w") / iw, h: a("h") / ih, label: f["label"].as_str().unwrap_or("").into(), picked: i as i64 == sel }
+            let pad = f["pad"].as_f64().unwrap_or(6.0) as f32;
+            HudRect { x: a("x") / iw, y: a("y") / ih, w: a("w") / iw, h: a("h") / ih, label: f["label"].as_str().unwrap_or("").into(), picked: i as i64 == sel,
+                style: f["style"].as_str().unwrap_or("brackets").into(), px: pad / iw, py: pad / ih, pulse: f["pulse"].as_bool() == Some(true) }
         }).collect();
+        // (the picked one's box, to move or size it by dragging)
+        let picked = usize::try_from(sel).ok().and_then(|i| rects.get(i).cloned());
+        g.set_has_sel(picked.is_some());
+        if let Some(r) = picked { g.set_sel_x(r.x); g.set_sel_y(r.y); g.set_sel_w(r.w); g.set_sel_h(r.h); }
         g.set_frames(ModelRc::from(Rc::new(VecModel::from(rects))));
         let t = ui.global::<Theme>();
-        g.set_c1(botpage::suite_colours(&cur).and_then(|(a, _)| look::Rgb::parse(&a)).or_else(|| look::Rgb::parse(&theme_accents(&shared.borrow().web.prefs).0)).map(|c| c.slint()).unwrap_or(t.get_accent()));
+        let (a, b) = botpage::suite_colours(&cur).unwrap_or_else(|| theme_accents(&shared.borrow().web.prefs));
+        g.set_c1(look::Rgb::parse(&a).map(|c| c.slint()).unwrap_or(t.get_accent()));
+        g.set_c2(look::Rgb::parse(&b).map(|c| c.slint()).unwrap_or(t.get_accent_2()));
     }
     // (the panels' preview: each one's title and line, the set's look)
     if sheet == "panels" {
@@ -7585,7 +7593,14 @@ fn bot_act(shared: &Shared, act: &str) {
         let mut frames = hud::frames(cur.get("hudFrames").and_then(|v| v.as_str()).unwrap_or("[]"));
         let (iw, ih) = (cur.get("hudW").and_then(|v| v.as_f64()).unwrap_or(1920.0) as f32, cur.get("hudH").and_then(|v| v.as_f64()).unwrap_or(1080.0) as f32);
         let path = cur.get("hudShotPath").and_then(|v| v.as_str()).unwrap_or("").to_string();
-        let gray = || image::open(&path).ok().map(|i| i.to_luma8());
+        // (the screenshot in grey, to snap to: read once, kept while it's the one)
+        thread_local! { static GRAY: RefCell<Option<(String, Rc<image::GrayImage>)>> = const { RefCell::new(None) }; }
+        let gray = || GRAY.with(|g| {
+            if let Some((p, img)) = g.borrow().as_ref() { if *p == path { return Some(img.clone()); } }
+            let img = Rc::new(image::open(&path).ok()?.to_luma8());
+            *g.borrow_mut() = Some((path.clone(), img.clone()));
+            Some(img)
+        });
         let sel = cur.get("hudSel").and_then(|v| v.as_f64()).unwrap_or(-1.0);
         let nums = |s: &str| s.split(',').filter_map(|x| x.parse::<f32>().ok()).collect::<Vec<_>>();
         // (a screenshot pasted: the clipboard's picture, kept as a PNG in OmniPulse's folder, then as a chosen one)
@@ -7623,6 +7638,13 @@ fn bot_act(shared: &Shared, act: &str) {
                 let (px, py) = (n[0] * iw, n[1] * ih);
                 let hit = frames.iter().rposition(|f| { let a = |k: &str| f[k].as_f64().unwrap_or(0.0) as f32; px >= a("x") && px <= a("x") + a("w") && py >= a("y") && py <= a("y") + a("h") });
                 bot_set(shared, "hudSel", &hit.map(|i| i as i64).unwrap_or(-1).to_string());
+            }
+        } else if let Some(r) = rest.strip_prefix("set:") {
+            // (the picked frame moved or sized by dragging it: its new box, as fractions of the screenshot, as is)
+            let n = nums(r);
+            if let (4, Some(f)) = (n.len(), (sel >= 0.0).then(|| frames.get_mut(sel as usize)).flatten()) {
+                f["x"] = serde_json::json!((n[0] * iw).round()); f["y"] = serde_json::json!((n[1] * ih).round());
+                f["w"] = serde_json::json!((n[2] * iw).round().max(4.0)); f["h"] = serde_json::json!((n[3] * ih).round().max(4.0));
             }
         } else if rest == "snap" {
             if let (Some(g), Some(f)) = (gray(), (sel >= 0.0).then(|| frames.get_mut(sel as usize)).flatten()) {
@@ -15449,6 +15471,19 @@ fn main() -> Result<(), slint::PlatformError> {
                 w if w.starts_with("hover:") => {
                     let v: Vec<f32> = w[6..].split(':').filter_map(|x| x.parse().ok()).collect();
                     if v.len() == 2 { ui.window().dispatch_event(slint::platform::WindowEvent::PointerMoved { position: slint::LogicalPosition::new(v[0], v[1]) }); }
+                }
+                // (a drag with the left button, from one spot to another, in steps)
+                w if w.starts_with("ldrag:") => {
+                    let v: Vec<f32> = w[6..].split(':').filter_map(|x| x.parse().ok()).collect();
+                    if v.len() == 4 {
+                        let at = |x: f32, y: f32| slint::LogicalPosition::new(x, y);
+                        let win = ui.window();
+                        win.dispatch_event(slint::platform::WindowEvent::PointerMoved { position: at(v[0], v[1]) });
+                        win.dispatch_event(slint::platform::WindowEvent::PointerPressed { position: at(v[0], v[1]), button: slint::platform::PointerEventButton::Left });
+                        for k in 1..=10 { let t = k as f32 / 10.0; win.dispatch_event(slint::platform::WindowEvent::PointerMoved { position: at(v[0] + (v[2] - v[0]) * t, v[1] + (v[3] - v[1]) * t) }); }
+                        win.dispatch_event(slint::platform::WindowEvent::PointerReleased { position: at(v[2], v[3]), button: slint::platform::PointerEventButton::Left });
+                    }
+                    println!("selftest: dragged; frames now {}", SHARED.with(|x| x.borrow().clone()).map(|sh| bot_current(&sh).get("hudFrames").and_then(|f| f.as_str()).unwrap_or("").to_string()).unwrap_or_default());
                 }
                 w if w.starts_with("lclick:") => {
                     let v: Vec<f32> = w[7..].split(':').filter_map(|x| x.parse().ok()).collect();
