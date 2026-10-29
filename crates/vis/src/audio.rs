@@ -52,17 +52,21 @@ impl Audio {
 
 /// A kind of hit: the band it's heard in, how far over its recent average it must jump, how soon another
 /// may come, and how fast its envelope dies away
-struct Hit { lo: f32, hi: f32, over: f32, gap: f32, fade: f32, avg: f32, prev: f32, since: f32, env: f32 }
+struct Hit { lo: f32, hi: f32, over: f32, gap: f32, fade: f32, avg: f32, prev: f32, since: f32, env: f32, raw: f32 }
 
 impl Hit {
-    fn new(lo: f32, hi: f32, over: f32, gap: f32, fade: f32) -> Hit { Hit { lo, hi, over, gap, fade, avg: 0.0, prev: 0.0, since: 10.0, env: 0.0 } }
+    fn new(lo: f32, hi: f32, over: f32, gap: f32, fade: f32) -> Hit { Hit { lo, hi, over, gap, fade, avg: 0.0, prev: 0.0, since: 10.0, env: 0.0, raw: 0.0 } }
 
     /// This frame's energy in its band: whether it's a hit (and its envelope, as it is now)
     fn step(&mut self, e: f32, dt: f32, floor: f32) -> bool {
         self.since += dt;
-        self.env *= (-dt / self.fade).exp();
+        self.raw *= (-dt / self.fade).exp();
         let hit = e > floor && e > self.avg * self.over && e > self.prev * 1.12 && self.since >= self.gap;
-        if hit { self.since = 0.0; self.env = 1.0; }
+        if hit { self.since = 0.0; self.raw = 1.0; }
+        // (what's shown rises to a hit over up to 30 ms (quicker for a short one, a hat), not in one frame, so
+        // nothing jumps; it falls as the hit does)
+        let rise = (self.fade * 0.15).min(0.03);
+        self.env = if self.raw > self.env { self.env + (self.raw - self.env) * (1.0 - (-dt / rise).exp()) } else { self.raw };
         // (its average: over about half a second, so a loud passage raises the bar)
         let k = 1.0 - (-dt / 0.45).exp();
         self.avg += (e - self.avg) * k;
@@ -90,6 +94,17 @@ pub struct Analyser {
     since_build: f32,
     /// the waves' loudest of late: risen to at once, let go slowly (so a quiet song's traces fill the view too)
     wave_top: f32,
+    /// each level's own range of late (bass, mid, high, the whole): its loudest, let go over several seconds,
+    /// and its quietest, so a quiet song moves the scenes as much as a loud one
+    range: [(f32, f32); 4],
+}
+
+/// A level within its own range of late: 0 its quietest, 1 its loudest
+fn within(range: &mut (f32, f32), x: f32, dt: f32) -> f32 {
+    let (top, low) = range;
+    *top = if x > *top { x } else { *top + (x - *top) * (1.0 - (-dt / 6.0).exp()) };
+    *low = if x < *low { x } else { *low + (x - *low) * (1.0 - (-dt / 10.0).exp()) };
+    ((x - *low) / (*top - *low).max(0.12)).clamp(0.0, 1.0)
 }
 
 fn ease(v: &mut f32, to: f32, dt: f32, up: f32, down: f32) {
@@ -117,6 +132,7 @@ impl Analyser {
             built: 0.0,
             since_build: 100.0,
             wave_top: 0.05,
+            range: [(0.5, 0.4); 4],
         }
     }
 
@@ -145,10 +161,14 @@ impl Analyser {
             ease(&mut o.spectrum[b], v, dt, 0.02, 0.18);
         }
         let (bass, mid, high) = (level(power(30.0, 200.0)), level(power(200.0, 3000.0)), level(power(3000.0, 16000.0)));
-        ease(&mut o.bass, bass, dt, 0.03, 0.2);
-        ease(&mut o.mid, mid, dt, 0.03, 0.25);
-        ease(&mut o.high, high, dt, 0.02, 0.2);
-        ease(&mut o.level, (0.6 * bass + 0.3 * mid + 0.2 * high).min(1.0), dt, 0.03, 0.3);
+        // (each against its own range of late, eased so they glide: quiet music moves things as loud music does,
+        // and nothing flickers frame to frame)
+        let whole = (0.6 * bass + 0.3 * mid + 0.2 * high).min(1.0);
+        let (nb, nm, nh, nl) = (within(&mut self.range[0], bass, dt), within(&mut self.range[1], mid, dt), within(&mut self.range[2], high, dt), within(&mut self.range[3], whole, dt));
+        ease(&mut o.bass, nb, dt, 0.06, 0.3);
+        ease(&mut o.mid, nm, dt, 0.08, 0.35);
+        ease(&mut o.high, nh, dt, 0.05, 0.3);
+        ease(&mut o.level, nl, dt, 0.12, 0.5);
 
         // the hits: each band's energy jumping over its recent average
         let floor = 1e-5;
@@ -256,7 +276,8 @@ mod tests {
         let mut last = Audio::default();
         let mut hat_peaks = 0;
         let (mut was, mut most_bass) = (0.0, 0.0f32);
-        run(&l, &r, 60.0, |_, a| { if a.hat > 0.9 && was <= 0.9 { hat_peaks += 1; } was = a.hat; most_bass = most_bass.max(a.bass); last = a.clone(); });
+        // (a hat's envelope rises over a frame or so now, so its peak shows a little under 1)
+        run(&l, &r, 60.0, |_, a| { if a.hat > 0.6 && was <= 0.6 { hat_peaks += 1; } was = a.hat; most_bass = most_bass.max(a.bass); last = a.clone(); });
         // (16 kicks in 8 s: the first may go unheard while its average is still nothing)
         assert!((14..=17).contains(&last.beat), "beats {}", last.beat);
         assert!(hat_peaks >= 10, "hats {hat_peaks}");
@@ -276,6 +297,21 @@ mod tests {
         assert!(most_build > 0.5, "build {most_build}");
         let at = drop_at.expect("a drop");
         assert!((15.9..16.8).contains(&at), "dropped at {at}");
+    }
+
+    /// The same song quiet (a tenth as loud) and loud: its bass swings through much the same range either way,
+    /// so the scenes move with a quiet song too
+    #[test]
+    fn quiet_songs_move_as_loud_ones() {
+        let (l, r) = track(8.0, 0.5, None);
+        let swing = |gain: f32| {
+            let (l, r): (Vec<f32>, Vec<f32>) = (l.iter().map(|v| v * gain).collect(), r.iter().map(|v| v * gain).collect());
+            let (mut lo, mut hi) = (1.0f32, 0.0f32);
+            run(&l, &r, 60.0, |t, a| if t > 4.0 { lo = lo.min(a.bass); hi = hi.max(a.bass); });
+            hi - lo
+        };
+        let (loud, quiet) = (swing(1.0), swing(0.1));
+        assert!(loud > 0.4 && quiet > 0.4 && (loud - quiet).abs() < 0.25, "loud {loud}, quiet {quiet}");
     }
 
     #[test]

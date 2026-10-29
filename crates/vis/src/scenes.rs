@@ -61,10 +61,10 @@ void mainImage(out vec4 o, in vec2 fc) {
     vec3 f = (target - pos) * (6.0 - 4.0 * BUILD);
     // (a swirl: the music's level turns it)
     vec3 h = hash31(id) - 0.5;
-    f += vec3(-pos.z, 0.0, pos.x) * (0.6 + 2.5 * LEVEL) + h * (1.5 + 6.0 * HIGH);
-    // (a kick flings each out from the middle; a drop, much further)
+    f += vec3(-pos.z, 0.0, pos.x) * (0.4 + 1.2 * LEVEL) + h * (1.0 + 2.5 * HIGH);
+    // (a kick breathes them out from the middle; a drop, further: a sway with the beat, not a jolt)
     float kick = KICK * KICK;
-    f += normalize(pos + h * 0.01) * (kick * 14.0 + DROP * 32.0) * (0.4 + hash11(id + floor(BEAT)));
+    f += normalize(pos + h * 0.01) * (kick * 5.0 + DROP * 16.0) * (0.4 + hash11(id + floor(BEAT)));
     vel = vel * exp(-dt * 3.0) + f * dt;
     o = vec4(vel, 1.0);
 }
@@ -260,7 +260,8 @@ void mainImage(out vec4 o, in vec2 fc) {
     // (only a touch each frame: the smoke keeps the cover's colours, paler at its thin edges)
     vec3 smoke = mix(was.rgb, vec3(dot(was.rgb, vec3(0.33))) * 1.05, (0.004 + 0.012 * w) * was.a);
     // (how fast the cover comes back: quickly when it's quiet, slower as it builds, hardly at a drop)
-    float back = clamp(dt * (3.0 - 2.2 * LEVEL - 1.2 * BUILD - 2.5 * DROP), 0.006, 0.09);
+    // (back toward the cover slowly and evenly: not faster when the music's quieter, which looked like it starting again)
+    float back = clamp(dt * (0.9 - 0.4 * BUILD), 0.004, 0.02);
     vec3 c = mix(smoke, art, back);
     float amount = clamp(was.a * (1.0 - back * 2.0) + length(v) * dt * 6.0, 0.0, 1.0);
     o = vec4(c, amount);
