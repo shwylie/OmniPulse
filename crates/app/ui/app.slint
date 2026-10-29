@@ -4565,7 +4565,7 @@ component BotPage inherits Rectangle {
                                 alignment: center;
                                 spacing: 2px;
                                 Text { text: "Your Widgets"; color: Theme.text; font-size: 14px; font-weight: 700; overflow: elide; }
-                                Text { text: "Browser sources for your scenes: the Stream Widget, alerts, goals and the rest."; color: Theme.muted; font-size: 12px; overflow: elide; }
+                                Text { text: "Browser sources for your scenes: Now Playing, alerts, goals and the rest."; color: Theme.muted; font-size: 12px; overflow: elide; }
                             }
                             VerticalLayout { alignment: center; Pill { label: "Open"; clicked => { root.act("widgets"); } } }
                         }
@@ -4631,7 +4631,8 @@ component BotPage inherits Rectangle {
                         VerticalLayout { alignment: center; Pill { label: "Open"; clicked => { root.act("creators"); } } }
                     }
                 }
-                // what it's been doing
+                // what it's been doing: a section like the others, each line who, what they typed, and what it did
+                Text { text: "Recent Activity"; color: Theme.muted; font-size: 12px; font-weight: 700; }
                 Rectangle {
                     border-radius: 14px;
                     background: Theme.panel;
@@ -4639,27 +4640,43 @@ component BotPage inherits Rectangle {
                     border-color: Theme.line;
                     height: lg.preferred-height;
                     lg := VerticalLayout {
-                        padding: 12px;
-                        spacing: 6px;
-                        HorizontalLayout {
-                            Text { text: "Lately: what it heard, and what it did"; color: Theme.muted; font-size: 12px; horizontal-stretch: 1; }
-                            // (now and then: your commands and actions from another bot, or setup again)
+                        padding: 6px;
+                        padding-left: 12px;
+                        padding-right: 12px;
+                        if root.log.length == 0: HorizontalLayout {
+                            padding: 8px;
+                            spacing: 10px;
+                            VerticalLayout { alignment: center; Glyph { d: Icons.chat; width: 18px; height: 18px; fill: Theme.muted.with-alpha(0.6); } }
+                            Text { text: "Nothing yet. Commands it answers and actions it runs show here, newest first."; color: Theme.muted; font-size: 12px; wrap: word-wrap; vertical-alignment: center; horizontal-stretch: 1; }
+                        }
+                        for l[li] in root.log: VerticalLayout {
+                            if li > 0: Rectangle { height: 1px; background: Theme.line.with-alpha(0.6); }
                             HorizontalLayout {
-                                spacing: 14px;
-                                Text { text: "Import from another bot"; color: im.has-hover ? Theme.text : Theme.muted; font-size: 11px; im := TouchArea { mouse-cursor: MouseCursor.pointer; clicked => { root.act("sheet:import"); } } }
-                                Text { text: "Run setup again"; color: rs.has-hover ? Theme.text : Theme.muted; font-size: 11px; rs := TouchArea { mouse-cursor: MouseCursor.pointer; clicked => { root.act("setup:again"); } } }
+                                padding-top: 7px;
+                                padding-bottom: 7px;
+                                spacing: 10px;
+                                VerticalLayout { alignment: center; Glyph { d: l.platform == "kick" ? Icons.kick : l.platform == "youtube" ? Icons.youtube-mark : Icons.twitch; width: 14px; height: 14px; fill: BotLook.tint(l.platform); } }
+                                Text { text: l.who; width: 120px; color: Theme.text; font-size: 12px; font-weight: 700; overflow: elide; vertical-alignment: center; }
+                                // (what they typed, as a chip)
+                                Rectangle {
+                                    width: min(hd.preferred-width + 14px, 200px);
+                                    height: 20px;
+                                    y: (parent.height - self.height) / 2;
+                                    border-radius: 6px;
+                                    background: Theme.elevated;
+                                    hd := Text { x: 7px; width: parent.width - 14px; text: l.heard; color: Theme.accent.mix(Theme.text, 0.45); font-size: 11px; font-family: "Consolas"; overflow: elide; vertical-alignment: center; }
+                                }
+                                Text { text: l.did; color: Theme.muted; font-size: 12px; overflow: elide; horizontal-stretch: 1; vertical-alignment: center; }
                             }
                         }
-                        if root.log.length == 0: Text { text: "Nothing yet: once it's running, what it answers shows here."; color: Theme.muted.with-alpha(0.7); font-size: 12px; }
-                        for l in root.log: HorizontalLayout {
-                            spacing: 8px;
-                            Rectangle { width: 3px; border-radius: 1px; background: BotLook.tint(l.platform); }
-                            Text { text: l.who; color: BotLook.tint(l.platform).mix(Theme.text, 0.5); font-size: 12px; font-weight: 700; }
-                            Text { text: l.heard; color: Theme.muted; font-size: 12px; overflow: elide; max-width: 220px; }
-                            Glyph { d: Icons.next; width: 12px; height: 12px; y: 2px; fill: Theme.muted; }
-                            Text { text: l.did; color: Theme.text; font-size: 12px; overflow: elide; horizontal-stretch: 1; }
-                        }
                     }
+                }
+                // (now and then: your commands and actions from another bot, or setup again)
+                HorizontalLayout {
+                    alignment: end;
+                    spacing: 16px;
+                    Text { text: "Import from another bot"; color: im.has-hover ? Theme.text : Theme.muted; font-size: 11px; im := TouchArea { mouse-cursor: MouseCursor.pointer; clicked => { root.act("sheet:import"); } } }
+                    Text { text: "Run setup again"; color: rs.has-hover ? Theme.text : Theme.muted; font-size: 11px; rs := TouchArea { mouse-cursor: MouseCursor.pointer; clicked => { root.act("setup:again"); } } }
                 }
             }
             // (Widgets and Docks, on a page of their own)
