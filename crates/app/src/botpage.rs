@@ -682,7 +682,8 @@ fn sheet_of(id: &str, cur: &Map<String, Value>) -> (String, Vec<Field>) {
             v
         }),
         "latest" => ("Latest Follow and Sub".into(), vec![
-            f("suiteprev", "", "", "", "latest", &theme_of(cur)),
+            f("suiteprev", "", if s(cur, "latestLook").is_empty() { "card" } else { s(cur, "latestLook") }, "", "latest", &theme_of(cur)),
+            f("chips", "latestLook", "Look", "Just the Name shows only who it was: no panel, icon or label. It suits an overlay that already says Latest Follower.", if s(cur, "latestLook").is_empty() { "card" } else { s(cur, "latestLook") }, "card=Card|text=Just the Name"),
             theme_field(cur),
             addr("/latest-follow", "Who followed last. About 840 × 180."),
             addr("/latest-sub", "Who subscribed last, with their months or gifts. About 840 × 180."),

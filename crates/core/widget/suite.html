@@ -195,6 +195,10 @@
   .latest .ic { flex: none; width: 2.6rem; height: 2.6rem; border-radius: 0.7rem; background: linear-gradient(135deg, var(--c1), var(--c2)); display: flex; align-items: center; justify-content: center; }
   .latest .ic svg { width: 60%; height: 60%; fill: #fff; }
   .latest .tx { min-width: 0; display: flex; flex-direction: column; }
+  /* Just the Name: no panel, icon or label, for an overlay that has its own */
+  body .panel.latest.text { background: none; border: none; box-shadow: none; padding: 0; min-width: 0; }
+  body .panel.latest.text::before, body .panel.latest.text::after { display: none; }
+  .latest.text .big { font-size: 2.4rem; color: #fff; text-shadow: 0 0.1em 0.4em rgba(0, 0, 0, 0.75); }
 
   /* a raid's shoutout, and maybe a clip of theirs */
   #raid { display: flex; flex-direction: column; align-items: center; gap: 0.7rem; width: 94%; }
@@ -445,11 +449,14 @@
   // ---------- the latest follow and sub ----------
   function latest(kind) {
     const l = suite.latest[kind];
-    const sig = l ? l.user + "|" + l.at : "";
+    const text = suite.latest.look === "text";
+    const sig = (l ? l.user + "|" + l.at : "") + "|" + text;
     if (sig === shown) return;
     shown = sig;
     const el = document.createElement("div");
-    el.className = "panel latest";
+    el.className = "panel latest" + (text ? " text" : "");
+    // (Just the Name: who, and nothing else)
+    if (text) { el.innerHTML = '<div class="tx"><span class="big">' + esc(l ? l.user : "No one yet") + "</span></div>"; swap(el); return; }
     const what = kind === "follow" ? "Latest follower" : "Latest subscriber";
     const extra = !l ? "" : kind === "sub" ? (l.gift ? " gifted " + l.gift : l.months ? " · " + l.months + " months" : "") + (l.tier > 1 ? " · Tier " + l.tier : "") : "";
     el.innerHTML = '<div class="ic"><svg viewBox="0 0 24 24"><path d="' + (kind === "follow" ? HEART : STAR) + '"/></svg></div><div class="tx"><span class="lbl">' + what + '</span><span class="big">' + esc(l ? l.user : "No one yet") + '</span>' + (extra ? '<span class="lbl" style="opacity:.85">' + esc(extra.replace(/^ · /, "")) + "</span>" : "") + "</div>";

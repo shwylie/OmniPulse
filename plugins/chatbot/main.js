@@ -2227,7 +2227,7 @@ function suitePush() {
       goals: { counts: st.goals, follow: goal("Follow", "Follower goal", 10), sub: goal("Sub", "Sub goal", 5), bits: goal("Bits", "Bits goal", 1000), donation: goal("Dono", "Donation goal", 50),
         common: Object.assign(goal("Common", "Community goal", 100), { on: yes(x.goalCommonOn) }),
         currency: String(x.goalCurrency || "$"), style: String(x.goalStyle || "bars"), shape: String(x.goalShape || "jar"), image: String(x.goalImage || ""), drops: String(x.goalDrops || "mixed"), pct: yes(x.goalPercent) },
-      latest: { follow: st.latest.follow, sub: st.latest.sub },
+      latest: { follow: st.latest.follow, sub: st.latest.sub, look: String(x.latestLook || "card") },
       timer: Object.assign({ stopwatch: yes(x.timerStopwatch), label: String(x.timerLabel || ""), now: Date.now() }, st.timer),
       raid: st.raid,
       // (the fun's: the meter's level and how full, the skip votes, the wheel's last spin, the top points, and
