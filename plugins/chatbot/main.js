@@ -2816,7 +2816,8 @@ async function infoRead() {
 }
 
 async function dockDo(cmd) {
-  const kick = cmd.platform === "kick";
+  // (the message acted on is Kick's: not `kick`, which is the Kick connection itself)
+  const fromKick = cmd.platform === "kick";
   const who = cmd.user || cmd.login || "them";
   const twitchMod = "broadcaster_id=" + S().userId + "&moderator_id=" + S().userId;
   switch (cmd.do) {
@@ -2902,7 +2903,7 @@ async function dockDo(cmd) {
       // (Twitch's through its API; Kick's as its own /clear command, sent as you, the broadcaster)
       const done = [];
       if (S().userId && apiToken) { await helix("DELETE", "moderation/chat?" + twitchMod); done.push("Twitch"); }
-      if (kick && S().kickToken) { await kickApi("POST", "chat", { content: "/clear", type: "user", broadcaster_user_id: Number(S().kickUserId || 0) }, false, "channel"); done.push("Kick"); }
+      if (yes(S().kickOn) && S().kickToken && S().kickUserId) { await kickApi("POST", "chat", { content: "/clear", type: "user", broadcaster_user_id: Number(S().kickUserId || 0) }, false, "channel"); done.push("Kick"); }
       if (!done.length) throw new Error("not connected to Twitch or Kick");
       return "Cleared chat on " + done.join(" and ") + ".";
     }
@@ -2931,14 +2932,14 @@ async function dockDo(cmd) {
     }
     case "delete":
       if (!cmd.id) throw new Error("that message has no id to delete it by");
-      if (kick) await kickApi("DELETE", "chat/" + encodeURIComponent(cmd.id));
+      if (fromKick) await kickApi("DELETE", "chat/" + encodeURIComponent(cmd.id));
       else await helix("DELETE", "moderation/chat?" + twitchMod + "&message_id=" + encodeURIComponent(cmd.id));
       return "Deleted " + who + "'s message.";
     case "timeout":
     case "ban":
     case "unban": {
       const secs = Math.max(1, Math.min(1209600, Math.round(num(cmd.seconds)) || 600));
-      if (kick) {
+      if (fromKick) {
         if (!cmd.userId) throw new Error("Kick didn't say who that is");
         const body = { broadcaster_user_id: Number(S().kickUserId), user_id: Number(cmd.userId) };
         if (cmd.reason && cmd.do !== "unban") body.reason = String(cmd.reason).slice(0, 100);

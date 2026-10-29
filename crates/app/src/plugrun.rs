@@ -1008,6 +1008,8 @@ mod tests {
             json!({ "do": "timeout", "platform": "kick", "id": "k2", "user": "Viewer", "userId": "42", "seconds": 600 }),
             json!({ "do": "ban", "platform": "twitch", "id": "t1", "user": "Baddie", "userId": "77" }),
             json!({ "do": "unban", "platform": "twitch", "user": "Baddie", "login": "baddie" }),
+            // (Clear Chat: no platform of its own; Twitch's and Kick's both)
+            json!({ "do": "clearchat" }),
         ] {
             let r = rt.block_on(p.call("dock", vec![cmd.clone()]));
             assert!(r.is_ok(), "{cmd} {r:?}");
@@ -1024,6 +1026,8 @@ mod tests {
         assert!(has("POST /v1/moderation/bans") && has("\"duration\":10") && has("\"user_id\":42"), "{x:#?}");
         assert!(has("POST /helix/moderation/bans?broadcaster_id=1&moderator_id=1") && has("\"user_id\":\"77\"") && has("DELETE /helix/moderation/bans?broadcaster_id=1&moderator_id=1&user_id=99"), "{x:#?}");
         assert!(said("from the dock"), "{:#?}", posted.lock().unwrap());
+        // (Kick only: Twitch isn't signed in here)
+        assert!(said("/clear"), "{:#?}", posted.lock().unwrap());
         // (run again: its thanks said again, and not put in the feed twice)
         assert_eq!(posted.lock().unwrap().iter().filter(|b| b["content"] == "Thanks NewSub").count(), 2);
         assert_eq!(asked.lock().unwrap().iter().filter(|x| x["op"] == "dockActivity" && x["args"][0]["user"] == "NewSub").count(), 1);
