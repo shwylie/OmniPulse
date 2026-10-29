@@ -2496,6 +2496,8 @@ component StreamTile inherits Rectangle {
     /// (its own colour, from the theme's: a wash behind it, and its edge)
     in property <color> tint: Theme.accent;
     in property <SetRow> r;
+    // (its name here: the row's, unless it's called something else where it's shown)
+    in property <string> name: root.r.label;
     in property <string> addr;
     in property <string> d;
     callback toggle(string);
@@ -2513,7 +2515,7 @@ component StreamTile inherits Rectangle {
         HorizontalLayout {
             spacing: 8px;
             VerticalLayout { alignment: center; Glyph { d: root.d; width: 16px; height: 16px; fill: root.r.on ? Theme.accent : Theme.muted; } }
-            Text { text: root.r.label; color: Theme.text; font-weight: 700; font-size: 13px; overflow: elide; horizontal-stretch: 1; }
+            Text { text: root.name; color: Theme.text; font-weight: 700; font-size: 13px; overflow: elide; horizontal-stretch: 1; }
         }
         Text { text: root.r.note; color: Theme.muted; font-size: 12px; overflow: elide; }
         if root.r.on && root.addr != "": Text { text: root.addr; color: Theme.accent.mix(Theme.text, 0.55); font-size: 11px; font-family: "Consolas"; overflow: elide; }
@@ -4667,19 +4669,18 @@ component BotPage inherits Rectangle {
                         preferred-width: 0px;
                         min-width: 0px;
                         padding-right: r.key == "widget" || r.key == "lyricsWidget" ? 8px : 0px;
-                        if r.key == "widget": StreamTile { tint: BotLook.tile(0); horizontal-stretch: 1; r: r; d: Icons.broadcast; addr: "http://127.0.0.1:" + root.port + "/"; toggle(k) => { root.act("row-toggle:" + k); } more(k) => { root.act("row-more:" + k); } copy(a) => { root.act("copy:" + a); } }
+                        // (in the Suite, the Stream Widget is its Now Playing)
+                        if r.key == "widget": StreamTile { tint: BotLook.tile(0); horizontal-stretch: 1; r: r; name: "Now Playing"; d: Icons.broadcast; addr: "http://127.0.0.1:" + root.port + "/"; toggle(k) => { root.act("row-toggle:" + k); } more(k) => { root.act("row-more:" + k); } copy(a) => { root.act("copy:" + a); } }
                         if r.key == "lyricsWidget": StreamTile { tint: BotLook.tile(1); horizontal-stretch: 1; r: r; d: Icons.lyrics; addr: "http://127.0.0.1:" + root.port + "/lyrics"; toggle(k) => { root.act("row-toggle:" + k); } more(k) => { root.act("row-more:" + k); } copy(a) => { root.act("copy:" + a); } }
                         if r.key == "socials": StreamTile { tint: BotLook.tile(2); horizontal-stretch: 1; r: r; d: Icons.link; addr: "http://127.0.0.1:" + root.port + "/socials"; toggle(k) => { root.act("row-toggle:" + k); } more(k) => { root.act("row-more:" + k); } copy(a) => { root.act("copy:" + a); } }
                     }
                 }
-                if root.widgets-view != "creators": HorizontalLayout {
+                if root.widgets-view == "docks": HorizontalLayout {
                     spacing: 8px;
-                    for d[di] in root.widgets-view == "docks" ? [
+                    for d[di] in [
                         { n: "Chat Dock", t: "Twitch and Kick chat in OBS, with delete, time-out and ban on every message, and a box to chat back.", p: "/dock/chat", i: Icons.chat, k: "dockchat" },
                         { n: "Activity Feed", t: "Follows, subs, bits, raids, rewards and the rest in OBS, each alert replayed with a click.", p: "/dock/activity", i: Icons.bell, k: "dockfeed" },
                         { n: "Moderation Dock", t: "Pile-Up, Raid Lockdown, chat modes, Shield Mode and Auto-Ban on their own, beside your chat. You change it in the Chat Dock's settings.", p: "/dock/mod", i: Icons.shield, k: "dockchat" },
-                    ] : [
-                        { n: "Multichat Overlay", t: "Twitch and Kick chat together on stream, with a see-through background.", p: "/chat", i: Icons.broadcast, k: "multichat" },
                     ]: Rectangle {
                         horizontal-stretch: 1;
                         preferred-width: 0px;
@@ -4698,7 +4699,6 @@ component BotPage inherits Rectangle {
                                 spacing: 7px;
                                 VerticalLayout { alignment: center; Glyph { d: d.i; width: 16px; height: 16px; fill: root.widget-on ? Theme.accent : Theme.muted; } }
                                 Text { text: d.n; color: Theme.text; font-weight: 700; font-size: 13px; horizontal-stretch: 1; overflow: elide; }
-                                if d.k == "multichat": CenterToggle { checked: Wid.on("multichat", Wid.rev); toggled => { root.act("woff:multichat"); } }
                                 IconButton { d: Icons.copy; size: 30px; tip: "Copy the address for OBS"; clicked => { root.act("copy:http://127.0.0.1:" + root.port + d.p); } }
                                 IconButton { d: Icons.gear; size: 30px; tip: d.n + ": its settings"; clicked => { root.act("dockset:" + d.k); } }
                             }
@@ -4708,17 +4708,20 @@ component BotPage inherits Rectangle {
                     }
                 }
                 // the Suite's own widgets: what's happened on stream, shown
-                // (as many across as there's room for, 200 px each at least, five at most; the rest on the next row)
+                // (as many across as there's room for, 200 px each at least, three at most; the rest on the next row)
                 if root.widgets-view == "widgets": wgrid := Rectangle {
-                    property <int> cols: max(1, min(5, floor((self.width + 8px) / 208px)));
+                    // (three across at most, as the Fun ones below, so their names fit)
+                    property <int> cols: max(1, min(3, floor((self.width + 8px) / 208px)));
                     property <length> cw: (self.width - (self.cols - 1) * 8px) / self.cols;
-                    height: ceil(5 / self.cols) * 82px - 8px;
+                    height: ceil(6 / self.cols) * 82px - 8px;
                     for w[wi] in [
                         { n: "Goals", k: "goals", p: "/goals", s: "goals", i: Icons.check, h: "127.0.0.1" },
                         { n: "Timer", k: "timer", p: "/timer", s: "timer", i: Icons.refresh, h: "127.0.0.1" },
                         { n: "Latest Follow", k: "latest-follow", p: "/latest-follow", s: "latest", i: Icons.heart-out, h: "127.0.0.1" },
                         { n: "Latest Sub", k: "latest-sub", p: "/latest-sub", s: "latest", i: Icons.star-out, h: "127.0.0.1" },
                         { n: "Raid Shoutout", k: "raid", p: "/raid", s: "raid", i: Icons.broadcast, h: "localhost" },
+                        // (chat on stream: a tile like the rest; its settings a page of their own)
+                        { n: "Multichat Overlay", k: "multichat", p: "/chat", s: "", i: Icons.chat, h: "127.0.0.1" },
                     ]: Rectangle {
                         x: mod(wi, wgrid.cols) * (wgrid.cw + 8px);
                         y: floor(wi / wgrid.cols) * 82px;
@@ -4737,7 +4740,7 @@ component BotPage inherits Rectangle {
                                 Text { text: w.n; color: Theme.text; font-weight: 700; font-size: 12px; horizontal-stretch: 1; overflow: elide; vertical-alignment: center; }
 CenterToggle { checked: Wid.on(w.k, Wid.rev); toggled => { root.act("woff:" + w.k); } }
                                 IconButton { d: Icons.copy; size: 28px; tip: "Copy the address for OBS"; clicked => { root.act("copy:http://" + w.h + ":" + root.port + w.p); } }
-                                IconButton { d: Icons.gear; size: 28px; tip: "Settings"; clicked => { root.act("sheet:" + w.s); } }
+                                IconButton { d: Icons.gear; size: 28px; tip: "Settings"; clicked => { root.act(w.k == "multichat" ? "dockset:multichat" : "sheet:" + w.s); } }
                             }
                             Text { text: "http://" + w.h + ":" + root.port + w.p; color: Theme.accent.mix(Theme.text, 0.55); font-size: 10px; font-family: "Consolas"; overflow: elide; }
                         }
@@ -4840,7 +4843,7 @@ CenterToggle { checked: Wid.on("hud", Wid.rev); toggled => { root.act("woff:" + 
                                 Text { text: w.n; color: Theme.text; font-weight: 700; font-size: 12px; horizontal-stretch: 1; overflow: elide; vertical-alignment: center; }
 CenterToggle { checked: Wid.on(w.k, Wid.rev); toggled => { root.act("woff:" + w.k); } }
                                 IconButton { d: Icons.copy; size: 28px; tip: "Copy the address for OBS"; clicked => { root.act("copy:http://127.0.0.1:" + root.port + w.p); } }
-                                IconButton { d: Icons.gear; size: 28px; tip: "Settings"; clicked => { root.act("sheet:" + w.s); } }
+                                IconButton { d: Icons.gear; size: 28px; tip: "Settings"; clicked => { root.act(w.k == "multichat" ? "dockset:multichat" : "sheet:" + w.s); } }
                             }
                             Text { text: "http://127.0.0.1:" + root.port + w.p; color: Theme.accent.mix(Theme.text, 0.55); font-size: 10px; font-family: "Consolas"; overflow: elide; }
                         }

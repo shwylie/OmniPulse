@@ -45,7 +45,11 @@ fn outputs_list(prefs: &Value, kind: &str, base: &str) -> Vec<Value> {
     f
 }
 
+/// Whether the Stream Suite's running: the Stream Widget is then its Now Playing
+pub static SUITE_ON: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 pub fn title(name: &str) -> String {
+    if name == "widget" && SUITE_ON.load(std::sync::atomic::Ordering::Relaxed) { return "Now Playing".into(); }
     if let Some((kind, n)) = output_of(name) { return format!("{}, Output {n}", title(kind)); }
     if name == "socials" { return "Social Plug".into(); }
     if crate::docksets::page_of(name).is_some() { return crate::docksets::title(name).into(); }

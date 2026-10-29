@@ -9080,6 +9080,7 @@ thread_local! {
 fn plugins_start(shared: &Shared) {
     hotkeys_update(shared);
     let (prefs, rt) = { let a = shared.borrow(); (a.web.prefs.clone(), a.rt.clone()) };
+    panels::SUITE_ON.store(plugin_runs(&prefs, botpage::BOT), std::sync::atomic::Ordering::Relaxed);
     for p in omnipulse_core::plugins::list() {
         let id = p.manifest.id.clone();
         if !plugin_runs(&prefs, &id) { plugrun::stop(&id); continue; }
