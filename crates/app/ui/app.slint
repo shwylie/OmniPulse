@@ -2191,7 +2191,8 @@ component HiGlow inherits Rectangle {
 
 /// A hand-made setting's name: lit when a search found it
 /// What each setting outside the Stream Suite uses of your computer, beyond playing music: by the name its
-/// row shows (a plugin's: "Plugin"). Tags only, no figures: what it takes, and in its tip, why
+/// row shows (a plugin's: "Plugin"). Tags only, no figures: what it takes, and in its tip, why. Only settings
+/// you can do without (switched off, or set to Off): one you can't, like the theme, has none
 export global Costs {
     public pure function tags(n: string) -> string {
         return n == "Seamless Mix (WIP)" ? "+CPU  +RAM  +DISK"
@@ -2214,13 +2215,11 @@ export global Costs {
             : n == "Visualiser" ? "+CPU  +GPU"
             : n == "In the Player" ? "+CPU"
             : n == "On Now Playing" ? "+CPU"
-            : n == "Theme" ? "+CPU"
             : n == "Animations" ? "+CPU"
             : n == "Performance Mode" ? "\u{2212}CPU  \u{2212}GPU"
             : n == "Pause for Games" ? "\u{2212}CPU"
             : n == "Hardware Acceleration" ? "+GPU  +RAM"
             : n == "Taskbar Widget" ? "+CPU  +RAM"
-            : n == "Updates" ? "+NET"
             : n == "Plugin" ? "+RAM  +NET"
             : "";
     }
@@ -2245,13 +2244,11 @@ export global Costs {
             : n == "Visualiser" ? "Reads the music many times a second and redraws to it. The scenes marked WIP use your graphics card, and more memory."
             : n == "In the Player" ? "Draws the visualiser in the player too, many times a second."
             : n == "On Now Playing" ? "Draws the visualiser on Now Playing too, many times a second."
-            : n == "Theme" ? "Glowing themes take more drawing each time the window changes. Performance Mode turns the glow off."
             : n == "Animations" ? "Fades and motion redraw the window as they move."
             : n == "Performance Mode" ? "Uses less: animations and glowing backgrounds off, and the visualiser updates half as often."
             : n == "Pause for Games" ? "Uses less while a game is full screen: the visualiser stops until you leave it."
             : n == "Hardware Acceleration" ? "Draws the app on your graphics card: about 100 MB more memory."
             : n == "Taskbar Widget" ? "A small window of its own by the clock, redrawn as the song plays."
-            : n == "Updates" ? "Checks for a new version now and then (a small request), and downloads it when you update."
             : n == "Plugin" ? "Each plugin runs walled off in an engine of its own: some memory, and the sites it lists."
             : "";
     }
