@@ -55,15 +55,13 @@
   body.compact .meta { display: inline; margin-left: 6px; }
   .acts { display: flex; gap: 3px; opacity: 0.45; }
   .item:hover .acts, .acts:focus-within { opacity: 1; }
-  /* icon buttons, and their tips (drawn here: shown above, kept inside the dock) */
+  /* icon buttons (their tips are the dock's one #tip) */
   .ib { position: relative; display: inline-flex; align-items: center; gap: 2px; border: 1px solid var(--line); background: var(--panel); border-radius: 6px; padding: 2px 4px; color: var(--dim); line-height: 1; cursor: pointer; }
   .ib svg { width: 14px; height: 14px; fill: currentColor; }
   .ib .w { font-size: 9.5px; font-weight: 700; }
   .ib:hover { color: var(--text); border-color: var(--dim); }
-  .ib[data-tip]:hover::after { content: attr(data-tip); position: absolute; right: 0; bottom: calc(100% + 6px); white-space: nowrap; background: #000c; color: #fff; font-size: 11px; font-weight: 400; padding: 4px 8px; border-radius: 6px; pointer-events: none; z-index: 20; }
   .acts .ib.done { color: #111; background: var(--accent); border-color: var(--accent); }
   .icon { position: relative; }
-  .icon[data-tip]:hover::after { content: attr(data-tip); position: absolute; right: 0; top: calc(100% + 6px); white-space: nowrap; background: #000c; color: #fff; font-size: 11px; padding: 4px 8px; border-radius: 6px; pointer-events: none; z-index: 20; }
   .pf { display: inline-block; font-size: 0.7em; font-weight: 700; border-radius: 3px; padding: 0 3px; margin-right: 4px; vertical-align: 1px; color: #111; }
   .pf.twitch { background: #a970ff; } .pf.kick { background: #53fc18; } .pf.other { background: #8b91a1; }
   #empty { color: var(--dim); text-align: center; padding: 24px 16px; font-size: 12px; }
@@ -73,6 +71,9 @@
   body.sq *, body.sq *::after { border-radius: 0 !important; }
   body.d-compact .item { padding-top: 3px; padding-bottom: 3px; }
   body.d-roomy .item { padding-top: 10px; padding-bottom: 10px; }
+  /* the tip on hover: one for the whole dock, placed by its script so it always stays inside the dock */
+  #tip { position: fixed; left: 0; top: 0; display: none; max-width: calc(100vw - 8px); box-sizing: border-box; background: #000c; color: #fff; font-size: 11px; font-weight: 400; line-height: 1.35; padding: 4px 8px; border-radius: 6px; pointer-events: none; z-index: 1000; overflow-wrap: anywhere; }
+  #tip.show { display: block; }
 </style>
 </head>
 <body>
@@ -366,6 +367,41 @@
   }
   render();
   poll();
+</script>
+<div id="tip" role="tooltip"></div>
+<script>
+  // ---------- the tip on hover: below what it's for, or above it if there's no room, and moved in from
+  // the sides so it never draws outside the dock (the browser's own title tips are turned into these too) ----------
+  (() => {
+    const tip = document.getElementById("tip");
+    let on = null;
+    const place = () => {
+      if (!on || !on.isConnected || !on.dataset.tip) { tip.classList.remove("show"); on = null; return; }
+      if (tip.textContent !== on.dataset.tip) tip.textContent = on.dataset.tip;
+      tip.classList.add("show");
+      const r = on.getBoundingClientRect(), w = tip.offsetWidth, h = tip.offsetHeight, gap = 6, edge = 4;
+      let y = r.bottom + gap;
+      if (y + h > innerHeight - edge) y = r.top - gap - h;
+      y = Math.min(Math.max(edge, y), innerHeight - h - edge);
+      const x = Math.min(Math.max(edge, r.right - w), innerWidth - w - edge);
+      tip.style.left = Math.max(edge, x) + "px"; tip.style.top = Math.max(edge, y) + "px";
+    };
+    document.addEventListener("mouseover", (e) => {
+      const t = e.target.closest ? e.target.closest("[title],[data-tip]") : null;
+      if (t && t.hasAttribute("title")) {
+        if (t.title) { t.dataset.tip = t.title; if (!t.hasAttribute("aria-label")) t.setAttribute("aria-label", t.title); }
+        t.removeAttribute("title");
+      }
+      const next = t && t.dataset.tip ? t : null;
+      if (next !== on) { on = next; place(); }
+    });
+    document.addEventListener("mouseout", (e) => { if (on && !on.contains(e.relatedTarget)) { on = null; place(); } });
+    document.addEventListener("mousedown", (e) => { if (on && on.tagName === "SELECT") { on = null; place(); } }, true);
+    addEventListener("scroll", () => { if (on) place(); }, true);
+    addEventListener("blur", () => { on = null; place(); });
+    // (a tip that changes while it's showing, like "Click again to ban", is shown changed)
+    new MutationObserver((ms) => { if (on && ms.some((m) => m.target !== tip && !tip.contains(m.target))) place(); }).observe(document.body, { subtree: true, childList: true, attributes: true, attributeFilter: ["data-tip"] });
+  })();
 </script>
 </body>
 </html>

@@ -55,6 +55,9 @@
   .card span { color: var(--dim); font-size: 12px; overflow-wrap: anywhere; }
   .note { color: var(--dim); font-size: 11px; }
   body.sq *, body.sq *::after { border-radius: 0 !important; }
+  /* the tip on hover: one for the whole dock, placed by its script so it always stays inside the dock */
+  #tip { position: fixed; left: 0; top: 0; display: none; max-width: calc(100vw - 8px); box-sizing: border-box; background: #000c; color: #fff; font-size: 11px; font-weight: 400; line-height: 1.35; padding: 4px 8px; border-radius: 6px; pointer-events: none; z-index: 1000; overflow-wrap: anywhere; }
+  #tip.show { display: block; }
 </style>
 </head>
 <body>
@@ -153,6 +156,41 @@
   act({ do: "info" });
   poll();
 })();
+</script>
+<div id="tip" role="tooltip"></div>
+<script>
+  // ---------- the tip on hover: below what it's for, or above it if there's no room, and moved in from
+  // the sides so it never draws outside the dock (the browser's own title tips are turned into these too) ----------
+  (() => {
+    const tip = document.getElementById("tip");
+    let on = null;
+    const place = () => {
+      if (!on || !on.isConnected || !on.dataset.tip) { tip.classList.remove("show"); on = null; return; }
+      if (tip.textContent !== on.dataset.tip) tip.textContent = on.dataset.tip;
+      tip.classList.add("show");
+      const r = on.getBoundingClientRect(), w = tip.offsetWidth, h = tip.offsetHeight, gap = 6, edge = 4;
+      let y = r.bottom + gap;
+      if (y + h > innerHeight - edge) y = r.top - gap - h;
+      y = Math.min(Math.max(edge, y), innerHeight - h - edge);
+      const x = Math.min(Math.max(edge, r.right - w), innerWidth - w - edge);
+      tip.style.left = Math.max(edge, x) + "px"; tip.style.top = Math.max(edge, y) + "px";
+    };
+    document.addEventListener("mouseover", (e) => {
+      const t = e.target.closest ? e.target.closest("[title],[data-tip]") : null;
+      if (t && t.hasAttribute("title")) {
+        if (t.title) { t.dataset.tip = t.title; if (!t.hasAttribute("aria-label")) t.setAttribute("aria-label", t.title); }
+        t.removeAttribute("title");
+      }
+      const next = t && t.dataset.tip ? t : null;
+      if (next !== on) { on = next; place(); }
+    });
+    document.addEventListener("mouseout", (e) => { if (on && !on.contains(e.relatedTarget)) { on = null; place(); } });
+    document.addEventListener("mousedown", (e) => { if (on && on.tagName === "SELECT") { on = null; place(); } }, true);
+    addEventListener("scroll", () => { if (on) place(); }, true);
+    addEventListener("blur", () => { on = null; place(); });
+    // (a tip that changes while it's showing, like "Click again to ban", is shown changed)
+    new MutationObserver((ms) => { if (on && ms.some((m) => m.target !== tip && !tip.contains(m.target))) place(); }).observe(document.body, { subtree: true, childList: true, attributes: true, attributeFilter: ["data-tip"] });
+  })();
 </script>
 </body>
 </html>
