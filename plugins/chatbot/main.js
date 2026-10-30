@@ -1941,7 +1941,9 @@ function onKick(event, d) {
       const sub = ((sender.identity && sender.identity.badges) || []).find((b) => String(b.type || "").toLowerCase() === "subscriber");
       const subImg = sub ? kickSubBadges.filter((b) => b.months <= Math.max(1, num(sub.count))).sort((a, b) => b.months - a.months)[0] : null;
       const badgeImgs = subImg ? [{ url: subImg.url, title: "Subscriber (" + Math.max(1, num(sub.count)) + " months)" }] : [];
-      OmniPulse.app.dockChat({ platform: "kick", id: String(d.id || ""), user: sender.username || slug, login: slug, userId: String(sender.id || ""), color: (sender.identity && sender.identity.color) || "", badges: kinds, badgeImgs, text: content, self: own }).catch(() => {});
+      // (each badge as Kick names it, new ones too (Pioneer...): Kick sends no pictures for them)
+      const badgeList = ((sender.identity && sender.identity.badges) || []).map((b) => ({ type: String(b.type || "").toLowerCase(), text: String(b.text || b.type || ""), count: num(b.count) }));
+      OmniPulse.app.dockChat({ platform: "kick", id: String(d.id || ""), user: sender.username || slug, login: slug, userId: String(sender.id || ""), color: (sender.identity && sender.identity.color) || "", badges: kinds, badgeImgs, badgeList, text: content, self: own }).catch(() => {});
     }
     // (the bot account's messages never start anything; our own message coming back: not chat)
     if (S().kickBotLogin && String(sender.username || "").toLowerCase() === String(S().kickBotLogin).toLowerCase()) return;

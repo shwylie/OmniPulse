@@ -13312,6 +13312,11 @@ fn emotes_refresh(shared: &Shared, always: bool) {
     EMOTES_FOR.with(|e| *e.borrow_mut() = Some(now));
     if std::env::var_os("OMNIPULSE_SELFTEST").is_some() { return; }
     rt.spawn(async move { omnipulse_core::emotes::refresh(&twitch, &kick).await; });
+    // (badges from outside the stream: their lists with the emotes, and 7TV asked about each new chatter
+    // every couple of seconds, from the first time)
+    rt.spawn(async move { omnipulse_core::badges::refresh().await; });
+    static ASKING: std::sync::Once = std::sync::Once::new();
+    ASKING.call_once(|| { rt.spawn(async move { loop { omnipulse_core::badges::fill().await; tokio::time::sleep(std::time::Duration::from_secs(2)).await; } }); });
 }
 
 /// The chatbot's hotkeys from its actions (on, with it running), to be registered

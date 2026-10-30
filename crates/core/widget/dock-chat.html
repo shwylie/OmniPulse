@@ -55,6 +55,10 @@
   .pm.twitch { fill: #a970ff; } .pm.kick { fill: #53fc18; } .pm.youtube { fill: #ff3355; }
   body.light .pm.kick { fill: #2f9e0a; }
   .bimg { height: 1.15em; width: auto; margin-right: 3px; vertical-align: -0.2em; border-radius: 3px; }
+  .badge.bimg { min-width: 0; padding: 0; background: none; height: 1.1em; width: auto; vertical-align: -0.2em; border-radius: 2px; }
+  .xb img { height: 1.1em; width: auto; margin-right: 0.22em; vertical-align: -0.2em; border-radius: 2px; }
+  .badge.kb { background: #3a3f47; color: #e6e8ee; } .badge.kb-moderator, .badge.kb-verified { background: #53fc18; color: #0b0e0f; } .badge.kb-vip { background: #ffc93c; color: #1a1300; }
+  .badge.kb-og { background: #4dd4ff; color: #04202a; } .badge.kb-founder { background: #ff8a3d; color: #1f0d00; } .badge.kb-broadcaster { background: #ff4f4f; color: #fff; } .badge.kb-staff { background: #a970ff; color: #fff; } .badge.kb-subscriber, .badge.kb-sub_gifter { background: #7aa2ff; color: #0a1330; }
   .badge.b { background: #ff4f4f; } .badge.m { background: #3ccd6c; } .badge.v { background: #e05ce0; } .badge.s { background: #7aa2ff; } .badge.f { background: #ffb547; }
   .name { font-weight: 700; cursor: pointer; }
   .name:hover { text-decoration: underline; }
@@ -278,7 +282,7 @@
     const p = r.dataset.platform;
     r.hidden = (p === "twitch" && !opt.twitch) || (p === "kick" && !opt.kick);
     const t = r.querySelector(".time"); if (t) t.hidden = !opt.time;
-    r.querySelectorAll(".badge").forEach((b) => { b.hidden = !opt.badges; });
+    r.querySelectorAll(".badge, .xb").forEach((b) => { b.hidden = !opt.badges; });
   }
 
   $("fTwitch").onclick = () => setOpt("twitch", !opt.twitch);
@@ -370,6 +374,36 @@
     kick: "M3 2h6v6h2V5h2V2h8v8h-2v2h-2v2h2v2h2v6h-8v-3h-2v-3H9v6H3z",
     youtube: "M21.6 7.2a2.5 2.5 0 0 0-1.8-1.8C18.2 5 12 5 12 5s-6.2 0-7.8.4A2.5 2.5 0 0 0 2.4 7.2C2 8.8 2 12 2 12s0 3.2.4 4.8a2.5 2.5 0 0 0 1.8 1.8c1.6.4 7.8.4 7.8.4s6.2 0 7.8-.4a2.5 2.5 0 0 0 1.8-1.8c.4-1.6.4-4.8.4-4.8s0-3.2-.4-4.8zM10 15V9l5.2 3z",
   };
+  // ---------- badges: the platform's own pictures (Twitch's, its global ones too; Kick's subscriber ones), Kick's
+  // others by their own names (Kick sends no pictures for them), and the ones chatters carry from outside the
+  // stream (FrankerFaceZ, BetterTTV, Chatterino, 7TV), looked up by the app ----------
+  const KICK_SHORT = { broadcaster: "Host", moderator: "Mod", vip: "VIP", og: "OG", founder: "Founder", subscriber: "Sub", sub_gifter: "Gifter", verified: "\u2713", staff: "Staff" };
+  function badgeImg(u, t) { const i = document.createElement("img"); i.className = "badge bimg"; i.src = u; i.alt = t || ""; i.title = t || ""; return i; }
+  function platformBadges(m, letters) {
+    const out = [];
+    const imgs = (m.badgeImgs || []).filter((b) => b && /^https:\/\//.test(b.url || ""));
+    for (const b of imgs) out.push(badgeImg(b.url, b.title));
+    if (m.platform === "kick") {
+      for (const b of m.badgeList || (m.badges || []).map((t) => ({ type: t, text: t }))) {
+        const t = String(b.type || "").toLowerCase();
+        if (t === "subscriber" && imgs.length) continue;
+        const s = document.createElement("span"); s.className = "badge kb kb-" + t.replace(/[^a-z_]/g, ""); s.textContent = KICK_SHORT[t] || b.text || t; s.title = (b.text || t) + (b.count > 1 ? " (" + b.count + ")" : ""); out.push(s);
+      }
+    } else if (!imgs.length) out.push(...letters());
+    const x = document.createElement("span"); x.className = "xb"; x.dataset.ub = (m.platform || "twitch") + ":" + (m.userId || ""); extFill(x); out.push(x);
+    return out;
+  }
+  let EXT = {}, extSig = "";
+  function extFill(x) { x.textContent = ""; for (const b of EXT[x.dataset.ub] || []) x.append(badgeImg(b.u, b.t)); }
+  async function extPoll() {
+    try {
+      const j = await (await fetch("/dock/badges.json", { cache: "no-store" })).json();
+      const sig = JSON.stringify(j.users || {});
+      if (sig !== extSig) { extSig = sig; EXT = j.users || {}; document.querySelectorAll(".xb").forEach(extFill); }
+    } catch (e) {}
+    setTimeout(extPoll, 3000);
+  }
+  extPoll();
   const BADGES = [["broadcaster", "b", "B", "Streamer"], ["moderator", "m", "M", "Moderator"], ["vip", "v", "V", "VIP"], ["founder", "f", "F", "Founder"], ["og", "f", "OG", "OG"], ["subscriber", "s", "S", "Subscriber"]];
   // (a name's colour: its own, or one picked from the name, readable on the dark)
   function colourOf(m) {
@@ -456,13 +490,7 @@
     const mt = document.createElementNS("http://www.w3.org/2000/svg", "title"); mt.textContent = pl === "kick" ? "Kick" : pl === "youtube" ? "YouTube" : "Twitch"; mark.append(mt);
     r.append(mark);
     // (the badges as the platform draws them, where it's sent them; else a letter for each)
-    const imgs = (m.badgeImgs || []).filter((b) => b && /^https:\/\//.test(b.url || ""));
-    for (const b of imgs) { const i = document.createElement("img"); i.className = "bimg"; i.src = b.url; i.alt = b.title || ""; i.title = b.title || ""; r.append(i); }
-    for (const [key, cls, label, title] of BADGES) {
-      if (imgs.length && !["moderator", "vip", "broadcaster", "og", "founder"].includes(key)) continue;
-      if (imgs.length && pl === "twitch") continue;
-      if ((m.badges || []).includes(key)) { const b = document.createElement("span"); b.className = "badge " + cls; b.textContent = label; b.title = title; r.append(b); }
-    }
+    r.append(...platformBadges(m, () => BADGES.filter(([key]) => (m.badges || []).includes(key)).map(([, cls, label, title]) => { const b = document.createElement("span"); b.className = "badge " + cls; b.textContent = label; b.title = title; return b; })));
     const name = document.createElement("span");
     name.className = "name"; name.textContent = m.user || m.login || "?"; name.style.color = colourOf(m);
     name.title = (m.platform === "kick" ? "Kick" : "Twitch") + ": click to reply to " + (m.user || "them");

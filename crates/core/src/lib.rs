@@ -6,6 +6,7 @@ pub mod apple;
 pub mod diag;
 pub mod docks;
 pub mod emotes;
+pub mod badges;
 #[cfg(feature = "desktop")]
 pub mod backup;
 pub mod bundled;

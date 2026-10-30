@@ -137,6 +137,11 @@
   .pf { flex: none; width: 1.1em; height: 1.1em; margin-top: 0.12em; fill: var(--pc); }
   .who { font-weight: 800; white-space: nowrap; }
   .badge { display: inline-block; font-size: 0.62em; font-weight: 800; padding: 0 0.3em; margin-right: 0.25em; border-radius: 0.25em; vertical-align: 0.15em; color: #111; }
+  .badge.bimg { min-width: 0; padding: 0; background: none; height: 1.1em; width: auto; vertical-align: -0.2em; border-radius: 2px; }
+  .xb img { height: 1.1em; width: auto; margin-right: 0.22em; vertical-align: -0.2em; border-radius: 2px; }
+  .badge.kb { background: #3a3f47; color: #e6e8ee; } .badge.kb-moderator, .badge.kb-verified { background: #53fc18; color: #0b0e0f; } .badge.kb-vip { background: #ffc93c; color: #1a1300; }
+  .badge.kb-og { background: #4dd4ff; color: #04202a; } .badge.kb-founder { background: #ff8a3d; color: #1f0d00; } .badge.kb-broadcaster { background: #ff4f4f; color: #fff; } .badge.kb-staff { background: #a970ff; color: #fff; } .badge.kb-subscriber, .badge.kb-sub_gifter { background: #7aa2ff; color: #0a1330; }
+  body.t-ribbon .m .badge.bimg { background: none; border: 0; }
   .badge.b-b { background: #ff4f4f; } .badge.b-m { background: #3ccd6c; } .badge.b-v { background: #e05ce0; } .badge.b-s { background: #7aa2ff; }
   .text { font-weight: 500; }
   .from { display: inline-block; font-size: 0.62em; font-weight: 800; padding: 0 0.4em; margin-right: 0.3em; border-radius: 999px; background: rgba(145, 70, 255, 0.35); vertical-align: 0.2em; }
@@ -288,6 +293,36 @@
     youtube: "M21.6 7.2a2.7 2.7 0 0 0-1.9-1.9C18 4.8 12 4.8 12 4.8s-6 0-7.7.5a2.7 2.7 0 0 0-1.9 1.9C2 8.9 2 12 2 12s0 3.1.4 4.8a2.7 2.7 0 0 0 1.9 1.9c1.7.5 7.7.5 7.7.5s6 0 7.7-.5a2.7 2.7 0 0 0 1.9-1.9c.4-1.7.4-4.8.4-4.8s0-3.1-.4-4.8zM10 15V9l5.2 3z",
   };
   const BADGES = [["broadcaster", "b", "B"], ["moderator", "m", "M"], ["vip", "v", "V"], ["subscriber", "s", "S"]];
+  // ---------- badges: the platform's own pictures (Twitch's, its global ones too; Kick's subscriber ones), Kick's
+  // others by their own names (Kick sends no pictures for them), and the ones chatters carry from outside the
+  // stream (FrankerFaceZ, BetterTTV, Chatterino, 7TV), looked up by the app ----------
+  const KICK_SHORT = { broadcaster: "Host", moderator: "Mod", vip: "VIP", og: "OG", founder: "Founder", subscriber: "Sub", sub_gifter: "Gifter", verified: "\u2713", staff: "Staff" };
+  function badgeImg(u, t) { const i = document.createElement("img"); i.className = "badge bimg"; i.src = u; i.alt = t || ""; i.title = t || ""; return i; }
+  function platformBadges(m, letters) {
+    const out = [];
+    const imgs = (m.badgeImgs || []).filter((b) => b && /^https:\/\//.test(b.url || ""));
+    for (const b of imgs) out.push(badgeImg(b.url, b.title));
+    if (m.platform === "kick") {
+      for (const b of m.badgeList || (m.badges || []).map((t) => ({ type: t, text: t }))) {
+        const t = String(b.type || "").toLowerCase();
+        if (t === "subscriber" && imgs.length) continue;
+        const s = document.createElement("span"); s.className = "badge kb kb-" + t.replace(/[^a-z_]/g, ""); s.textContent = KICK_SHORT[t] || b.text || t; s.title = (b.text || t) + (b.count > 1 ? " (" + b.count + ")" : ""); out.push(s);
+      }
+    } else if (!imgs.length) out.push(...letters());
+    const x = document.createElement("span"); x.className = "xb"; x.dataset.ub = (m.platform || "twitch") + ":" + (m.userId || ""); extFill(x); out.push(x);
+    return out;
+  }
+  let EXT = {}, extSig = "";
+  function extFill(x) { x.textContent = ""; for (const b of EXT[x.dataset.ub] || []) x.append(badgeImg(b.u, b.t)); }
+  async function extPoll() {
+    try {
+      const j = await (await fetch("/dock/badges.json", { cache: "no-store" })).json();
+      const sig = JSON.stringify(j.users || {});
+      if (sig !== extSig) { extSig = sig; EXT = j.users || {}; document.querySelectorAll(".xb").forEach(extFill); }
+    } catch (e) {}
+    setTimeout(extPoll, 3000);
+  }
+  extPoll();
   function colourOf(m) {
     if (/^#[0-9a-f]{6}$/i.test(m.color || "")) return m.color;
     let h = 0;
@@ -365,7 +400,7 @@
     if (opt.marks) { const NS = "http://www.w3.org/2000/svg"; const s = document.createElementNS(NS, "svg"); s.setAttribute("viewBox", "0 0 24 24"); s.classList.add("pf"); const p = document.createElementNS(NS, "path"); p.setAttribute("d", MARK[m.platform === "kick" ? "kick" : m.platform === "youtube" ? "youtube" : "twitch"]); s.append(p); r.append(s); }
     const body = document.createElement("div");
     if (m.shared && opt.shared !== false) { const f = document.createElement("span"); f.className = "from"; f.textContent = m.sharedFrom ? "@" + m.sharedFrom : "Shared"; body.append(f); }
-    if (opt.badges) for (const [k, cls, l] of BADGES) if ((m.badges || []).includes(k)) { const b = document.createElement("span"); b.className = "badge b-" + cls; b.textContent = l; body.append(b); }
+    if (opt.badges) body.append(...platformBadges(m, () => BADGES.filter(([k]) => (m.badges || []).includes(k)).map(([, cls, l]) => { const b = document.createElement("span"); b.className = "badge b-" + cls; b.textContent = l; return b; })));
     // (no colon when the name's on a line of its own)
     const own = opt.name === "above" || ["cards", "y2k", "pastel", "ribbon"].includes(opt.style);
     const who = document.createElement("span"); who.className = "who"; who.textContent = (m.user || m.login || "") + (m.me || own ? " " : ": "); who.style.color = colourOf(m);
@@ -475,17 +510,22 @@
   offCheck();
   // (the app's preview of this page: made-up chat, a new line every 2 s, as the page's drawing had it)
   const SAMPLES = [
-    ["PixelPanda", "that transition was so clean", "twitch", "#ff7a59", ["subscriber"]], ["kickfan_92", "hello from Kick!", "kick", "#53fc18", []],
+    ["PixelPanda", "that transition was so clean", "twitch", "#ff7a59", ["subscriber"]], ["kickfan_92", "hello from Kick!", "kick", "#53fc18", ["og"]],
     ["ModMaya", "remember to hydrate chat", "twitch", "#3ccd6c", ["moderator"]], ["lofi_larry", "what's this song?", "twitch", "#7aa2ff", []],
     ["Zed", "GG that was close", "kick", "#ffd24a", ["vip"]], ["Nova", "first time here, love the vibes", "youtube", "#e05ce0", []],
-    ["RaidLeader", "we came from the raid!", "twitch", "#ff4f8b", ["subscriber"]], ["quietcat", "lurking but enjoying it", "kick", "#5ad1ff", []],
+    ["RaidLeader", "we came from the raid!", "twitch", "#ff4f8b", ["vip"]], ["quietcat", "lurking but enjoying it", "kick", "#5ad1ff", ["moderator"]],
   ];
+  // (Twitch's own pictures for its badges; Kick's by name)
+  const TW_BADGE = { subscriber: ["5d9f2208-5dd8-11e7-8513-2ff4adfae661", "Subscriber"], moderator: ["3267646d-33f0-4b17-b3df-f923a41db1d0", "Moderator"], vip: ["b817aba4-fad8-49e2-b88a-7cc744dfa6ec", "VIP"] };
+  const KICK_NAME = { og: "OG", vip: "VIP", moderator: "Moderator" };
   let sampleN = 0;
   function sample(again) {
     const pick = SAMPLES.filter((x) => opt.from === "all" || opt.from === x[2]);
     const x = (pick.length ? pick : SAMPLES)[sampleN % (pick.length || SAMPLES.length)];
     sampleN++;
-    add({ n: sampleN, ts: Date.now(), user: x[0], login: x[0].toLowerCase(), text: x[1], platform: x[2], color: x[3], badges: x[4], first: sampleN === 6 });
+    const badgeImgs = x[2] === "twitch" ? x[4].filter((b) => TW_BADGE[b]).map((b) => ({ url: "https://static-cdn.jtvnw.net/badges/v1/" + TW_BADGE[b][0] + "/2", title: TW_BADGE[b][1] })) : [];
+    const badgeList = x[2] === "kick" ? x[4].map((b) => ({ type: b, text: KICK_NAME[b] || b })) : undefined;
+    add({ n: sampleN, ts: Date.now(), user: x[0], login: x[0].toLowerCase(), text: x[1], platform: x[2], color: x[3], badges: x[4], badgeImgs, badgeList, first: sampleN === 6 });
     const keep = Math.max(1, Number(opt.max) || 30);
     for (const n of [...rows.keys()]) if (n <= sampleN - keep) gone(n);
     if (again) setTimeout(() => sample(true), 2000);

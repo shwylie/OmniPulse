@@ -366,6 +366,7 @@ pub fn widget_serve(listener: TcpListener, gen: u64) {
                         reply_own(&mut stream, "200 OK", "application/json", v.to_string().as_bytes());
                     }
                     "/dock/emotes.json" => reply_own(&mut stream, "200 OK", "application/json", crate::emotes::json().to_string().as_bytes()),
+                    "/dock/badges.json" => reply_own(&mut stream, "200 OK", "application/json", crate::badges::json().to_string().as_bytes()),
                     "/dock/settings.json" => {
                         let page = query_map(query).get("page").and_then(|v| v.as_str().map(String::from)).unwrap_or_default();
                         reply_own(&mut stream, "200 OK", "application/json", crate::docks::page_settings(&page).to_string().as_bytes());

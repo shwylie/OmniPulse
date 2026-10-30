@@ -43,6 +43,8 @@ pub fn chat_push(mut v: Value) {
     o.insert("n".into(), json!(CHAT_N.fetch_add(1, Ordering::SeqCst) + 1));
     o.insert("ts".into(), json!(now_ms()));
     if let Some(t) = o.get("text").and_then(|t| t.as_str()) { let t: String = t.chars().take(600).collect(); o.insert("text".into(), json!(t)); }
+    // (their badges from outside the stream: looked up for them)
+    if let (Some(p), Some(id)) = (o.get("platform").and_then(|x| x.as_str()), o.get("userId").and_then(|x| x.as_str())) { crate::badges::seen(p, id); }
     let mut q = CHAT.lock().unwrap();
     q.push_back(v);
     while q.len() > CHAT_KEPT { q.pop_front(); }
