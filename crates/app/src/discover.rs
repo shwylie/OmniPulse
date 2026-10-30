@@ -166,6 +166,41 @@ async fn dz(path: &str) -> Value {
     core::catalog::deezer(path).await.unwrap_or_default()
 }
 
+/// For a page you opened: ahead of Discover's own loading
+async fn dz_now(path: &str) -> Value {
+    core::catalog::deezer_now(path).await.unwrap_or_default()
+}
+
+// (a subgenre's songs kept a day on this PC, so opening it again is at once; its refresh fetches new ones)
+const GENRE_KEEP_SECS: u64 = 86_400;
+
+fn genre_file() -> Option<std::path::PathBuf> { core::data_dir().ok().map(|d| d.join("state").join("genre-pages.json")) }
+
+fn genre_kept(name: &str) -> Option<Vec<Track>> {
+    let v: Value = serde_json::from_str(&std::fs::read_to_string(genre_file()?).ok()?).ok()?;
+    let e = &v[name.to_lowercase()];
+    let at = e["at"].as_u64()?;
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).ok()?.as_secs();
+    if now.saturating_sub(at) > GENRE_KEEP_SECS { return None; }
+    let list: Vec<Track> = e["list"].as_array()?.iter().filter_map(Track::from_snapshot).collect();
+    (!list.is_empty()).then_some(list)
+}
+
+fn genre_keep(name: &str, list: &[Track]) {
+    let Some(f) = genre_file() else { return };
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+    let mut v: Value = std::fs::read_to_string(&f).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_else(|| serde_json::json!({}));
+    let Some(o) = v.as_object_mut() else { return };
+    // (a day old gone; the 40 newest kept)
+    o.retain(|_, e| now.saturating_sub(e["at"].as_u64().unwrap_or(0)) <= GENRE_KEEP_SECS);
+    o.insert(name.to_lowercase(), serde_json::json!({ "at": now, "list": list.iter().map(Track::to_snapshot).collect::<Vec<_>>() }));
+    while o.len() > 40 {
+        let Some(oldest) = o.iter().min_by_key(|(_, e)| e["at"].as_u64().unwrap_or(0)).map(|(k, _)| k.clone()) else { break };
+        o.remove(&oldest);
+    }
+    let _ = std::fs::write(f, v.to_string());
+}
+
 fn dz_tracks(v: &Value, album: Option<&Value>) -> Vec<Track> {
     v["data"].as_array().into_iter().flatten().filter_map(|t| core::catalog::dz_track(t, album)).filter_map(|t| Track::catalog(&t)).collect()
 }
@@ -310,15 +345,21 @@ fn genre_pick(lists: Vec<Vec<Track>>) -> Vec<Track> {
 
 /// A genre's (or subgenre's) music, as above
 pub async fn subgenre_tracks(name: &str) -> Vec<Track> {
-    let found = dz(&format!("/search/playlist?limit=25&q={}", crate::sources::urlencode(name))).await;
+    if let Some(list) = genre_kept(name) { return list; }
+    subgenre_fetch(name).await
+}
+
+/// A subgenre's songs fetched afresh (and kept a day): its playlists all asked for at once
+async fn subgenre_fetch(name: &str) -> Vec<Track> {
+    let found = dz_now(&format!("/search/playlist?limit=25&q={}", crate::sources::urlencode(name))).await;
     let found: Vec<(String, u64)> = found["data"].as_array().into_iter().flatten()
         .filter(|p| p["nb_tracks"].as_u64().unwrap_or(0) >= 15)
         .filter_map(|p| Some((p["title"].as_str()?.to_string(), p["id"].as_u64()?))).collect();
-    let mut lists = Vec::new();
-    for id in genre_playlists(name, &found) {
-        lists.push(dz_tracks(&dz(&format!("/playlist/{id}/tracks?limit=100")).await, None));
-    }
-    genre_pick(lists)
+    let asks = genre_playlists(name, &found).into_iter().map(|id| async move { dz_tracks(&dz_now(&format!("/playlist/{id}/tracks?limit=100")).await, None) });
+    let lists: Vec<Vec<Track>> = futures_util::future::join_all(asks).await;
+    let list = genre_pick(lists);
+    if !list.is_empty() { genre_keep(name, &list); }
+    list
 }
 
 /// A mix made again (its page's refresh): a subgenre's or a genre's for its title (new music for it),
@@ -327,7 +368,7 @@ pub async fn mix_again(m: &Mix, flags: (bool, bool, bool), liked: &Liked, avoid:
     lang_keep(match &m.how {
         // (drawn again from what the playlists agree on: none of what was showing, if there's enough)
         How::Sub(name) | How::Genre(name) => {
-            let all = subgenre_tracks(name).await;
+            let all = subgenre_fetch(name).await;
             let fresh: Vec<Track> = all.iter().filter(|t| !avoid.contains(&t.key)).cloned().collect();
             if fresh.len() >= 20 { fresh } else { all }
         }
@@ -336,7 +377,7 @@ pub async fn mix_again(m: &Mix, flags: (bool, bool, bool), liked: &Liked, avoid:
 }
 
 async fn album_tracks(id: u64) -> Vec<Track> {
-    let al = dz(&format!("/album/{id}")).await;
+    let al = dz_now(&format!("/album/{id}")).await;
     dz_tracks(&al["tracks"], Some(&al))
 }
 
@@ -905,6 +946,26 @@ mod title_key_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A subgenre page, step by step, against the real Deezer (OMNIPULSE_GENRE=<name>, default 80s Pop)
+    #[test]
+    #[ignore]
+    fn a_subgenre_page_has_songs() {
+        let name = std::env::var("OMNIPULSE_GENRE").unwrap_or_else(|_| "80s Pop".into());
+        tokio::runtime::Runtime::new().unwrap().block_on(async {
+            let found = dz(&format!("/search/playlist?limit=25&q={}", crate::sources::urlencode(&name))).await;
+            let found: Vec<(String, u64)> = found["data"].as_array().into_iter().flatten().filter(|p| p["nb_tracks"].as_u64().unwrap_or(0) >= 15).filter_map(|p| Some((p["title"].as_str()?.to_string(), p["id"].as_u64()?))).collect();
+            println!("playlists found: {}", found.len());
+            let ids = genre_playlists(&name, &found);
+            println!("named for it: {ids:?}");
+            let all = subgenre_tracks(&name).await;
+            println!("picked: {}", all.len());
+            let kept = lang_keep(all);
+            println!("after language and Hidden: {}", kept.len());
+            assert!(!kept.is_empty());
+        });
+    }
+
 
     #[test]
     fn dates_and_order() {

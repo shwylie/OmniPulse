@@ -5577,6 +5577,8 @@ fn like_track(shared: &Shared, t: Track) {
         album_head_paint(&shared.borrow(), &ui);
     }
     { let mut a = shared.borrow_mut(); apply_filter(&mut a); paint_queue(&mut a); }
+    // (the taskbar thumbnail's heart too)
+    if playing { push_out(shared, false); }
     // a requested song: the widget cheers whoever asked for it, for a few seconds
     let by = if playing { shared.borrow().queue.qi.and_then(|i| shared.borrow().queue.items.get(i).map(|q| q.by.clone())).unwrap_or_default() } else { String::new() };
     if on && !by.is_empty() {
@@ -5785,6 +5787,9 @@ fn shuffle_toggle(shared: &Shared) {
     if std::env::var_os("OMNIPULSE_SELFTEST").is_none() { webstate::save_pref("shuffle", serde_json::json!(a.shuffle_on)); }
     paint_queue(&mut a);
     save_session(&a);
+    drop(a);
+    // (the taskbar thumbnail's shuffle button too)
+    push_out(shared, false);
 }
 
 // ---------- autoplay ----------
@@ -6693,7 +6698,10 @@ fn push_out(shared: &Shared, presence: bool) {
         integrations::presence(&a.rt, prefs, t, pos, playing, join);
     }
     host_push(&a);
-    desktop::taskbar::state(playing, false, false, false);
+    // (the taskbar thumbnail's buttons: shuffle, and the heart, as they are)
+    let liked = t.is_some_and(|t| a.library.iter().any(|x| x.key == t.key));
+    let can_like = t.is_some_and(|t| !matches!(t.src, track::Src::Local(_)));
+    desktop::taskbar::state(playing, a.shuffle_on, liked, can_like);
 }
 
 /// The Stream Deck plugin's state, as remoteState in js/remote.js
@@ -9548,6 +9556,9 @@ fn library_load(shared: &Shared) {
                         paint_sides(&mut a);
                         paint_plats(&a);
                     }
+                    // (the song you left off on, opened paused before your likes came in: its heart as it really is)
+                    let cur = shared.borrow().queue.current().cloned();
+                    if let Some(t) = cur { paint_marks(&ui, &t); push_out(&shared, false); }
                     // (Discover made before your likes came in: made from next to nothing, so made again with them,
                     // at once if it's open)
                     FEED_CACHE.with(|c| *c.borrow_mut() = None);

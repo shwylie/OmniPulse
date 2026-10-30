@@ -21,9 +21,11 @@ const CACHE_MAX: usize = 400;
 struct Gate {
     gap: Duration,
     next: Option<Instant>,
+    /// when the last request went (a request you asked for goes right after it, ahead of those waiting)
+    last: Option<Instant>,
 }
-static DZ_GATE: Mutex<Gate> = Mutex::new(Gate { gap: Duration::from_millis(100), next: None });
-static IT_GATE: Mutex<Gate> = Mutex::new(Gate { gap: Duration::from_secs(3), next: None });
+static DZ_GATE: Mutex<Gate> = Mutex::new(Gate { gap: Duration::from_millis(100), next: None, last: None });
+static IT_GATE: Mutex<Gate> = Mutex::new(Gate { gap: Duration::from_secs(3), next: None, last: None });
 type Cache = HashMap<String, (Instant, Value)>;
 static CACHE: Mutex<Option<Cache>> = Mutex::new(None);
 
@@ -37,6 +39,7 @@ async fn turn(gate: &Mutex<Gate>, max: Duration) -> Option<()> {
             return None;
         }
         g.next = Some(at + g.gap);
+        g.last = Some(at);
         at - now
     };
     if !wait.is_zero() {
@@ -70,8 +73,33 @@ fn allowed(path: &str) -> bool {
     ["/search", "/track/", "/album/", "/artist/", "/chart", "/genre", "/editorial", "/radio", "/playlist/"].iter().any(|p| path.starts_with(p)) && !path.contains("..")
 }
 
+/// A request you're waiting on (a page you opened): ahead of the ones Discover makes in the background,
+/// right after the last one sent; those waiting move back to make room, so Deezer's limit still holds
+async fn turn_now(gate: &Mutex<Gate>) {
+    let wait = {
+        let mut g = gate.lock().unwrap();
+        let now = Instant::now();
+        let at = g.last.map_or(now, |l| (l + g.gap).max(now));
+        g.last = Some(at);
+        g.next = Some(g.next.map_or(at, |n| n.max(at)) + g.gap);
+        at - now
+    };
+    if !wait.is_zero() {
+        tokio::time::sleep(wait).await;
+    }
+}
+
+/// One Deezer request for a page you opened (see turn_now): never turned away for the queue
+pub async fn deezer_now(path: &str) -> Result<Value, String> {
+    deezer_with(path, true).await
+}
+
 /// One Deezer request (`path` like "/artist/27/albums?limit=10"), as Deezer answers it
 pub async fn deezer(path: &str) -> Result<Value, String> {
+    deezer_with(path, false).await
+}
+
+async fn deezer_with(path: &str, now: bool) -> Result<Value, String> {
     if !allowed(path) {
         return Err("Not a Deezer catalogue request".into());
     }
@@ -80,7 +108,7 @@ pub async fn deezer(path: &str) -> Result<Value, String> {
         return Ok(v);
     }
     for attempt in 0..2 {
-        turn(&DZ_GATE, Duration::from_secs(10)).await.ok_or("Too many catalogue requests at once: try again in a moment.")?;
+        if now { turn_now(&DZ_GATE).await; } else { turn(&DZ_GATE, Duration::from_secs(10)).await.ok_or("Too many catalogue requests at once: try again in a moment.")?; }
         let res = client().get(&url).send().await.map_err(|e| format!("Couldn't reach Deezer: {e}"))?;
         if !res.status().is_success() {
             return Err(format!("Deezer answered {}", res.status()));
