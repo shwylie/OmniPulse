@@ -291,7 +291,6 @@ mod tests {
             ("new, C3-C6", KeyOpts { range: (48, 84), ..Default::default() }),
             ("new, main part, C2-C6", KeyOpts { body_only: true, range: (36, 84), ..Default::default() }),
         ];
-        let mut chromas: Vec<([f64; 12], usize, bool)> = Vec::new();
         let mut lines = Vec::new();
         for (i, (id, name, tonic, minor)) in songs.iter().enumerate() {
             let Some(x) = audio(id) else { println!("{name}: couldn't be decoded"); continue };
@@ -299,28 +298,21 @@ mod tests {
             let first = crate::rhythm::key_first_reading(&x, RATE);
             add("first reading (now)", (first.0, first.1), want);
             let mut line = format!("{:>3} {name}: {} | now {}", i + 1, k(want.0, want.1), k(first.0, first.1));
+            // (libKeyFinder's method itself, step for step: core::keyfinder)
+            if let Some(r) = crate::keyfinder::read(&x, RATE) {
+                add("KeyFinder, as ported", (r.tonic, r.minor), want);
+                line += &format!(" | KeyFinder {} ({:.2})", k(r.tonic, r.minor), r.confidence);
+            }
             for (vname, o) in &variants {
                 if let Some(r) = estimate(&x, o) {
                     add(vname, (r.tonic, r.minor), want);
-                    if *vname == "new" { line += &format!(" | new {} ({:.2})", k(r.tonic, r.minor), r.confidence); chromas.push((r.chroma, *tonic, *minor)); }
+                    if *vname == "new" { line += &format!(" | new {} ({:.2})", k(r.tonic, r.minor), r.confidence); }
                 }
             }
             println!("{line}");
             lines.push(line);
         }
-        // profiles learned from the others (each song left out of its own): the notes of each key, as heard
-        let mut learned = Score::default();
-        for (i, (c, t, m)) in chromas.iter().enumerate() {
-            let mut prof = ([0.0f64; 12], [0.0f64; 12]);
-            for (j, (c2, t2, m2)) in chromas.iter().enumerate() {
-                if i == j { continue; }
-                let p = if *m2 { &mut prof.1 } else { &mut prof.0 };
-                for q in 0..12 { p[q] += c2[(q + t2) % 12]; }
-            }
-            let (bt, bm, _, _) = best_key(c, &prof);
-            tally(&mut learned, (bt, bm), (*t, *m));
-        }
-        scores.push(("new, profiles learned (left out)".into(), learned));
+        // (nothing learned from these keys: they only score the readings (no unclear-licence training))
         println!();
         let mut report = Vec::new();
         for (name, s) in &scores {
