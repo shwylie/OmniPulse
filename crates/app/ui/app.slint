@@ -7856,8 +7856,10 @@ export component AppWindow inherits Window {
                                             HiTitle { text: "Support OmniPulse"; }
                                             Text { text: "OmniPulse is made by one person, @shwylie. If it's made your streams or your listening better, you can say thanks with a contribution."; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
                                         }
+                                        // (at the card's right edge, as every other card's buttons are)
                                         HorizontalLayout {
-                                            alignment: center;
+                                            horizontal-stretch: 0;
+                                            alignment: end;
                                             spacing: 8px;
                                             VerticalLayout { alignment: center; IconButton { d: Icons.kofi; tip: "Ko-fi"; tint: #ff5e5b; clicked => { root.open-web("https://ko-fi.com/shwylie"); } } }
                                             VerticalLayout { alignment: center; Pill { label: "Contribute"; on: true; clicked => { root.open-web("https://shwyl.ie/tip"); } } }
