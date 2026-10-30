@@ -6399,7 +6399,8 @@ fn tick(shared: &Shared, events: &std::sync::mpsc::Receiver<Event>, n: u64) {
     }
     if n % 40 == 8 { lfm_heard_sync(shared); }
     // (the beat model let go once it's sat unused a minute: loaded again when a song's next measured)
-    if n % 120 == 60 { omnipulse_core::rhythm::release_model(std::time::Duration::from_secs(60)); }
+    // (Beat This!'s model kept while Seamless Mix is on, so each song doesn't load it again; let go if it's off)
+    if n % 120 == 60 && shared.borrow().web.prefs["smartOn"].as_bool() != Some(true) { omnipulse_core::rhythm::release_model(std::time::Duration::from_secs(60)); }
     // Now Playing's visualiser: running only while it's shown, playing, with a style picked
     viz_update(shared, &ui);
     #[cfg(feature = "memcount")]
@@ -15328,6 +15329,8 @@ fn main() -> Result<(), slint::PlatformError> {
         }
     });
 
+    // (the songs' measurements: the one big file of before moved into a small file each, once, in the background)
+    rt.spawn_blocking(omnipulse_core::rhythm::migrate);
     // (the Stream Widget's page: the real widget over its preview, kept in place as the page scrolls)
     let _live = { let t = slint::Timer::default(); let s = shared.clone(); t.start(slint::TimerMode::Repeated, std::time::Duration::from_millis(40), move || live_widget(&s)); t };
 

@@ -16,7 +16,7 @@ mobile = ["reqwest/rustls-tls", "dep:ebur128", "model", "spotify", "librespot-co
 # Spotify's library through librespot's session (likes, playlists, songs): the desktop's and the phone's
 spotify = ["dep:librespot-core", "dep:librespot-metadata", "dep:librespot-protocol", "dep:protobuf"]
 # Beat This! (the beat and downbeat model, pure Rust through rten): on the desktop and the phone alike
-model = ["dep:beat-this", "dep:rten"]
+model = ["dep:beat-this", "dep:rten", "dep:rten-tensor", "dep:anyhow"]
 
 [dependencies]
 log = "0.4"
@@ -48,6 +48,10 @@ realfft = "3.5"
 beat-this = { version = "1.1", default-features = false, optional = true }
 # (its thread pool: one thread, in the background, so a game never loses frames to it)
 rten = { version = "0.24", optional = true }
+rten-tensor = { version = "0.24", optional = true }
+anyhow = { version = "1", optional = true }
+# (the songs' measurements, each kept small)
+flate2 = "1"
 symphonia = { version = "0.5", default-features = false, features = ["aac", "alac", "flac", "isomp4", "mp3", "ogg", "pcm", "vorbis", "wav", "aiff"], optional = true }
 ebur128 = { version = "0.1", optional = true }
 zip = { version = "2", default-features = false, features = ["deflate"], optional = true }

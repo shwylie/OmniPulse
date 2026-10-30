@@ -823,15 +823,13 @@ mod tests {
         }
     }
 
-    /// Why pairs of the songs measured so far would blend or not (state/rhythm.json): each measured song
+    /// Why pairs of the songs measured so far would blend or not (state/rhythm/): each measured song
     /// into the next one measured, counted by reason
     #[test]
     #[ignore]
     fn blend_census() {
-        let d = omnipulse_core::data_dir().unwrap().join("state").join("rhythm.json");
-        let v: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(d).unwrap()).unwrap();
-        let songs: Vec<(String, Measured)> = v.as_object().unwrap().iter().filter(|(k, _)| k.starts_with("full:"))
-            .filter_map(|(k, x)| serde_json::from_value::<Measured>(x.clone()).ok().filter(|m| m.v == omnipulse_core::rhythm::VERSION).map(|m| (k.clone(), m))).collect();
+        let mut songs: Vec<(String, Measured)> = omnipulse_core::rhythm::all().into_iter().filter(|(k, m)| k.starts_with("full:") && m.v == omnipulse_core::rhythm::VERSION).collect();
+        songs.sort_by(|a, b| a.0.cmp(&b.0));
         println!("{} songs measured whole at this version", songs.len());
         let mut why: std::collections::BTreeMap<String, usize> = Default::default();
         let mut n = 0;
@@ -854,6 +852,48 @@ mod tests {
             *own.entry(k).or_default() += 1;
         }
         println!("each song alone: {own:?}");
+    }
+
+    /// The songs' measurements as kept now (compact, each in its own file) plan every blend as the old store's
+    /// did: OMNIPULSE_RHYTHM_OLD=<a copy of the old state/rhythm.json>, each measured song into the next ten
+    #[test]
+    #[ignore]
+    fn the_compact_store_plans_the_same() {
+        let path = std::env::var("OMNIPULSE_RHYTHM_OLD").expect("OMNIPULSE_RHYTHM_OLD");
+        let all: std::collections::HashMap<String, Measured> = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+        let mut songs: Vec<(String, Measured)> = all.into_iter().filter(|(k, m)| k.starts_with("full:") && m.v == omnipulse_core::rhythm::VERSION).collect();
+        songs.sort_by(|a, b| a.0.cmp(&b.0));
+        let compact: Vec<Measured> = songs.iter().map(|(k, m)| omnipulse_core::rhythm::compact(k, m).expect("reads back")).collect();
+        let (mut pairs, mut same, mut close) = (0, 0, 0);
+        let mut worst = 0.0f64;
+        for i in 0..songs.len() {
+            for j in (i + 1)..(i + 11).min(songs.len()) {
+                fn side(m: &Measured) -> Side<'_> { Side { dur_ms: m.to_ms, rhythm: Some(m), ..Default::default() } }
+                let (a0, b0, a1, b1) = (side(&songs[i].1), side(&songs[j].1), side(&compact[i]), side(&compact[j]));
+                pairs += 1;
+                let old = (blend_blocked(&a0, &b0), blend(&a0, &b0, 0));
+                let new = (blend_blocked(&a1, &b1), blend(&a1, &b1, 0));
+                if format!("{old:?}") == format!("{new:?}") { same += 1; continue; }
+                // (the same plan but for numbers a hair apart: the largest difference, in ms or units)
+                let nums = |s: String| s.split(|c: char| !(c.is_ascii_digit() || c == '.' || c == '-')).filter_map(|x| x.parse::<f64>().ok()).collect::<Vec<_>>();
+                let (x, y) = (nums(format!("{old:?}")), nums(format!("{new:?}")));
+                let shape = |s: String| s.chars().filter(|c| !(c.is_ascii_digit() || *c == '.' || *c == '-')).collect::<String>();
+                if x.len() == y.len() && shape(format!("{old:?}")) == shape(format!("{new:?}")) {
+                    close += 1;
+                    let here = x.iter().zip(&y).map(|(p, q)| (p - q).abs()).fold(0.0, f64::max);
+                    if here > 50.0 && std::env::var_os("OMNIPULSE_SHOW").is_some() { println!("far: {} into {} ({here})
+  old {old:?}
+  new {new:?}", songs[i].0, songs[j].0); }
+                    worst = worst.max(here);
+                } else {
+                    println!("differs: {} into {}\n  old {:?}\n  new {:?}", songs[i].0, songs[j].0, old.0, new.0);
+                }
+            }
+        }
+        let bytes: usize = songs.iter().map(|(k, m)| omnipulse_core::rhythm::compact_len(k, m)).sum();
+        println!("{} songs, {:.1} MB, {:.1} KB each", songs.len(), bytes as f64 / 1e6, bytes as f64 / 1024.0 / songs.len() as f64);
+        println!("{pairs} pairs: {same} the same, {close} the same plan with numbers at most {worst:.3} apart, {} different", pairs - same - close);
+        assert_eq!(same + close, pairs);
     }
 
     /// The fallback fade the app uses (main.rs' SMART_FIXED_MS)

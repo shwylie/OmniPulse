@@ -309,10 +309,52 @@ pub fn camelot(tonic: usize, minor: bool) -> String {
 pub fn at_analysis_rate(mono: &[f32], rate: u32) -> Vec<f32> { to_analysis_rate(mono, rate) }
 
 #[cfg(feature = "model")]
-type BeatModel = beat_this::BeatThis<<beat_this::RtenRuntime as beat_this::Runtime>::Model>;
+type BeatModel = beat_this::BeatThis<MemModel>;
 
-/// Beat This!'s model while it's in use: loaded when a song's measured, let go once it's been idle a
-/// while or Seamless Mix is switched off (release_model): none of its memory kept for nothing
+/// One of Beat This!'s two networks, read straight from the app (its bytes are part of it): nothing written
+/// to disk or read back from it, and its weights not copied (they're used where they are)
+#[cfg(feature = "model")]
+struct MemModel {
+    graph: rten::Model,
+    inputs: std::collections::HashMap<String, rten::NodeId>,
+    outputs: Vec<(rten::NodeId, String)>,
+}
+
+#[cfg(feature = "model")]
+impl MemModel {
+    fn load(bytes: &'static [u8]) -> Option<MemModel> {
+        let graph = rten::Model::load_static_slice(bytes).ok()?;
+        let name = |id: rten::NodeId| graph.node_info(id).and_then(|i| i.name().map(String::from));
+        let inputs = graph.input_ids().iter().filter_map(|&id| Some((name(id)?, id))).collect();
+        let outputs = graph.output_ids().iter().map(|&id| (id, name(id).unwrap_or_else(|| format!("output_{id:?}")))).collect();
+        Some(MemModel { graph, inputs, outputs })
+    }
+}
+
+#[cfg(feature = "model")]
+impl beat_this::Model for MemModel {
+    fn run(&mut self, inputs: &[(&str, &beat_this::Tensor)]) -> anyhow::Result<std::collections::HashMap<String, beat_this::Tensor>> {
+        use rten_tensor::Layout;
+        let mut given = Vec::new();
+        for (name, t) in inputs {
+            let id = *self.inputs.get(*name).ok_or_else(|| anyhow::anyhow!("no input called {name}"))?;
+            let view = rten::ValueView::from_shape(t.shape.as_slice(), t.data.as_slice()).map_err(|e| anyhow::anyhow!("input {name}: {e}"))?;
+            given.push((id, view.into()));
+        }
+        let ids: Vec<rten::NodeId> = self.outputs.iter().map(|(id, _)| *id).collect();
+        let got = self.graph.run(given, &ids, None)?;
+        let mut out = std::collections::HashMap::new();
+        for ((_, name), v) in self.outputs.iter().zip(got) {
+            let t = v.into_tensor::<f32>().ok_or_else(|| anyhow::anyhow!("output {name} isn't f32"))?;
+            let shape = t.shape().to_vec();
+            out.insert(name.clone(), beat_this::Tensor { shape, data: t.into_data() });
+        }
+        Ok(out)
+    }
+}
+
+/// Beat This!'s model while it's in use: loaded when a song's first measured, kept while Seamless Mix is
+/// on (so it isn't loaded again for each song), let go when it's switched off (release_model)
 #[cfg(feature = "model")]
 static MODEL: std::sync::Mutex<Option<(BeatModel, std::time::Instant)>> = std::sync::Mutex::new(None);
 
@@ -331,16 +373,11 @@ fn with_model<R>(f: impl FnOnce(&mut BeatModel) -> R) -> Option<R> {
     });
     let mut g = MODEL.lock().ok()?;
     if g.is_none() {
-        let dir = crate::data_dir().ok()?.join("models");
-        std::fs::create_dir_all(&dir).ok()?;
-        let put = |name: &str, bytes: &[u8]| -> Option<std::path::PathBuf> {
-            let p = dir.join(name);
-            if std::fs::metadata(&p).map(|m| m.len() as usize).ok() != Some(bytes.len()) { std::fs::write(&p, bytes).ok()?; }
-            Some(p)
-        };
-        let mel = put("mel_spectrogram.onnx", include_bytes!("../models/mel_spectrogram.onnx"))?;
-        let beats = put("beat_this_small.onnx", include_bytes!("../models/beat_this_small.onnx"))?;
-        *g = Some((beat_this::BeatThis::new(&beat_this::RtenRuntime, &mel, &beats).ok()?, std::time::Instant::now()));
+        let mel = MemModel::load(include_bytes!("../models/mel_spectrogram.onnx"))?;
+        let beats = MemModel::load(include_bytes!("../models/beat_this_small.onnx"))?;
+        *g = Some((beat_this::BeatThis::from_models(mel, beats), std::time::Instant::now()));
+        // (the copies older versions wrote beside the app's data, to load from: not needed now)
+        if let Ok(d) = crate::data_dir() { let _ = std::fs::remove_dir_all(d.join("models")); }
     }
     let (m, used) = g.as_mut()?;
     *used = std::time::Instant::now();
@@ -733,7 +770,7 @@ fn analyse_now(mono: &[f32], rate: u32) -> Option<Rhythm> {
     })
 }
 
-// ---------- what's been measured, by track (state/rhythm.json) ----------
+// ---------- what's been measured, by track (state/rhythm/) ----------
 /// A track's measurement: where in it the measured part starts (its beats are from there)
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct Measured {
@@ -752,35 +789,209 @@ pub struct Measured {
 /// (15: Beat This!'s downbeats a half bar out settled by where the sections change)
 pub const VERSION: u32 = 15;
 
-static STORE: std::sync::Mutex<Option<std::collections::HashMap<String, Measured>>> = std::sync::Mutex::new(None);
+// Each song in a small file of its own (state/rhythm/<its key's hash>.bin), read only when it's wanted:
+// the few numbers as JSON, then its beats (each as the gap since the one before, to a tenth of a ms), each
+// beat's and bar's loudness (to a tenth of a dB), each bar's beat strength and notes (to 1/65535), all
+// deflated: about 2 KB a song. (Once one file of them all, rewritten whole after each song: 96 MB.)
+// A song measured whole is kept once: its "full:" record answers for the part measured as it played too.
 
-fn store_file() -> Option<std::path::PathBuf> {
-    let d = crate::data_dir().ok()?.join("state");
+/// The songs read lately (None: looked for, not there), so a mix's planning reads each once
+static STORE: std::sync::Mutex<Option<std::collections::HashMap<String, Option<Measured>>>> = std::sync::Mutex::new(None);
+const STORE_KEPT: usize = 400;
+
+fn store_dir() -> Option<std::path::PathBuf> {
+    let d = crate::data_dir().ok()?.join("state").join("rhythm");
     std::fs::create_dir_all(&d).ok()?;
-    Some(d.join("rhythm.json"))
+    Some(d)
 }
 
-fn with_store<T>(f: impl FnOnce(&mut std::collections::HashMap<String, Measured>) -> T) -> T {
-    let mut g = STORE.lock().unwrap();
-    if g.is_none() {
-        *g = Some(store_file().and_then(|p| std::fs::read_to_string(p).ok()).and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default());
+/// A key's file name: its FNV-1a hash (the key itself is kept inside, to check)
+fn store_path(key: &str) -> Option<std::path::PathBuf> {
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    for b in key.bytes() { h ^= b as u64; h = h.wrapping_mul(0x0100_0000_01b3); }
+    Some(store_dir()?.join(format!("{h:016x}.bin")))
+}
+
+const MAGIC: &[u8; 4] = b"OPR1";
+
+/// A measurement in its compact form
+fn encode(key: &str, m: &Measured) -> Vec<u8> {
+    use std::io::Write;
+    let mut b: Vec<u8> = Vec::new();
+    let put = |b: &mut Vec<u8>, bytes: &[u8]| { b.extend_from_slice(&(bytes.len() as u32).to_le_bytes()); b.extend_from_slice(bytes); };
+    let r = &m.rhythm;
+    let mut head = m.clone();
+    head.rhythm.beats = Vec::new(); head.rhythm.beat_db = Vec::new(); head.rhythm.bar_db = Vec::new(); head.rhythm.bar_beat = Vec::new(); head.rhythm.bar_chroma = Vec::new();
+    put(&mut b, key.as_bytes());
+    put(&mut b, serde_json::to_string(&head).unwrap_or_default().as_bytes());
+    // (beats: the first, then each gap, in tenths of a ms; a gap over 6.5 s as 0xFFFF and then in full)
+    b.extend_from_slice(&(r.beats.len() as u32).to_le_bytes());
+    let mut last: u64 = 0;
+    for (i, x) in r.beats.iter().enumerate() {
+        let t = (x.max(0.0) * 10.0).round() as u64;
+        if i == 0 { b.extend_from_slice(&(t as u32).to_le_bytes()); } else {
+            let d = t.saturating_sub(last);
+            if d < 0xFFFF { b.extend_from_slice(&(d as u16).to_le_bytes()); } else { b.extend_from_slice(&0xFFFFu16.to_le_bytes()); b.extend_from_slice(&(d as u32).to_le_bytes()); }
+        }
+        last = t;
     }
-    f(g.as_mut().unwrap())
+    // (the loudnesses, beat strengths and notes exactly as measured: a mix's thresholds are on them, and a
+    // hair's rounding can tip one, moving where a blend starts)
+    let f32s = |b: &mut Vec<u8>, v: &mut dyn Iterator<Item = f32>, n: usize| { b.extend_from_slice(&(n as u32).to_le_bytes()); for x in v { b.extend_from_slice(&x.to_le_bytes()); } };
+    // (each beat's loudness is measured to a tenth of a dB: kept to that, it's the same)
+    b.extend_from_slice(&(r.beat_db.len() as u32).to_le_bytes());
+    for x in &r.beat_db { b.extend_from_slice(&((x * 10.0).round().clamp(-32768.0, 32767.0) as i16).to_le_bytes()); }
+    f32s(&mut b, &mut r.bar_db.iter().copied(), r.bar_db.len());
+    f32s(&mut b, &mut r.bar_beat.iter().copied(), r.bar_beat.len());
+    // (each bar's notes, shares of 1: to 1/65535)
+    b.extend_from_slice(&(r.bar_chroma.len() as u32).to_le_bytes());
+    for x in r.bar_chroma.iter().flatten() { b.extend_from_slice(&((x * 65535.0).round().clamp(0.0, 65535.0) as u16).to_le_bytes()); }
+    let mut z = flate2::write::DeflateEncoder::new(Vec::from(&MAGIC[..]), flate2::Compression::default());
+    let _ = z.write_all(&b);
+    z.finish().unwrap_or_default()
 }
 
-/// A track's measurement (by its key), if it has one of this method
-pub fn known(key: &str) -> Option<Measured> {
+/// Reading a record back, a field at a time
+struct Rd<'a> { b: &'a [u8], at: usize }
+impl<'a> Rd<'a> {
+    fn take(&mut self, n: usize) -> Option<&'a [u8]> { let s = self.b.get(self.at..self.at + n)?; self.at += n; Some(s) }
+    fn u16(&mut self) -> Option<u16> { Some(u16::from_le_bytes(self.take(2)?.try_into().ok()?)) }
+    fn u32(&mut self) -> Option<u32> { Some(u32::from_le_bytes(self.take(4)?.try_into().ok()?)) }
+    fn f32(&mut self) -> Option<f32> { Some(f32::from_le_bytes(self.take(4)?.try_into().ok()?)) }
+}
+
+/// A record's bytes, inflated (None: not one of these)
+fn inflate(bytes: &[u8]) -> Option<Vec<u8>> {
+    use std::io::Read;
+    if bytes.get(..4)? != MAGIC { return None; }
+    let mut b = Vec::new();
+    flate2::read::DeflateDecoder::new(&bytes[4..]).read_to_end(&mut b).ok()?;
+    Some(b)
+}
+
+/// A measurement back from its compact form, and its key
+fn decode(bytes: &[u8]) -> Option<(String, Measured)> {
+    let b = inflate(bytes)?;
+    let mut r = Rd { b: &b, at: 0 };
+    let n = r.u32()? as usize;
+    let key = std::str::from_utf8(r.take(n)?).ok()?.to_string();
+    let n = r.u32()? as usize;
+    let mut m: Measured = serde_json::from_slice(r.take(n)?).ok()?;
+    let x = &mut m.rhythm;
+    let n = r.u32()? as usize;
+    let mut last: u64 = 0;
+    for i in 0..n {
+        let t = if i == 0 { r.u32()? as u64 } else {
+            let d = r.u16()?;
+            last + if d == 0xFFFF { r.u32()? as u64 } else { d as u64 }
+        };
+        x.beats.push(t as f64 / 10.0);
+        last = t;
+    }
+    let n = r.u32()? as usize;
+    for _ in 0..n { x.beat_db.push(r.u16()? as i16 as f32 / 10.0); }
+    let n = r.u32()? as usize;
+    for _ in 0..n { x.bar_db.push(r.f32()?); }
+    let n = r.u32()? as usize;
+    for _ in 0..n { x.bar_beat.push(r.f32()?); }
+    let n = r.u32()? as usize;
+    for _ in 0..n {
+        let mut c = [0.0f32; 12];
+        for v in &mut c { *v = r.u16()? as f32 / 65535.0; }
+        x.bar_chroma.push(c);
+    }
+    Some((key, m))
+}
+
+/// A key's measurement as kept (read from its file the first time)
+fn read(key: &str) -> Option<Measured> {
+    migrate();
+    let mut g = STORE.lock().unwrap();
+    let all = g.get_or_insert_with(Default::default);
+    if let Some(m) = all.get(key) { return m.clone(); }
+    let m = store_path(key).and_then(|p| std::fs::read(p).ok()).and_then(|b| decode(&b)).filter(|(k, _)| k == key).map(|(_, m)| m);
+    if all.len() >= STORE_KEPT { all.clear(); }
+    all.insert(key.to_string(), m.clone());
+    m
+}
+
+fn write(key: &str, m: &Measured) {
+    if let Some(p) = store_path(key) {
+        // (written beside it, then put in its place: never half a file)
+        let tmp = p.with_extension("tmp");
+        if std::fs::write(&tmp, encode(key, m)).is_ok() { let _ = std::fs::rename(&tmp, &p); }
+    }
+    if let Ok(mut g) = STORE.lock() { g.get_or_insert_with(Default::default).insert(key.to_string(), Some(m.clone())); }
+}
+
+fn unwrite(key: &str) {
+    if let Some(p) = store_path(key) { let _ = std::fs::remove_file(p); }
+    if let Ok(mut g) = STORE.lock() { g.get_or_insert_with(Default::default).insert(key.to_string(), None); }
+}
+
+/// Whether a measurement is of a method still used
+fn current(m: &Measured) -> bool {
     // (13's and 14's are as good as these where the whole song's downbeat was sure: only the unsure measured again)
-    with_store(|m| m.get(key).filter(|x| x.v == VERSION || ((13..VERSION).contains(&x.v) && x.rhythm.downbeat_confidence >= DOWNBEAT_TRUSTED)).cloned())
+    m.v == VERSION || ((13..VERSION).contains(&m.v) && m.rhythm.downbeat_confidence >= DOWNBEAT_TRUSTED)
 }
 
-/// Keeps a track's measurement
+/// A track's measurement (by its key), if it has one of this method (the part measured as it played: the
+/// whole song's, if it's been measured whole and the part wasn't kept apart)
+pub fn known(key: &str) -> Option<Measured> {
+    read(key).filter(current).or_else(|| if key.starts_with("full:") { None } else { read(&format!("full:{key}")).filter(current) })
+}
+
+/// Keeps a track's measurement (once: a part the same as the whole song's isn't kept apart)
 pub fn keep(key: &str, m: Measured) {
-    let text = with_store(|all| {
-        all.insert(key.to_string(), m);
-        serde_json::to_string(all).ok()
+    if let Some(plain) = key.strip_prefix("full:") {
+        if read(plain).is_some_and(|p| p == m) { unwrite(plain); }
+    } else if read(&format!("full:{key}")).is_some_and(|f| f == m) {
+        unwrite(key);
+        return;
+    }
+    write(key, &m);
+}
+
+/// A measurement through its compact form and back, as a song's file gives it (for checking that nothing a
+/// mix uses changes)
+#[doc(hidden)]
+pub fn compact(key: &str, m: &Measured) -> Option<Measured> { decode(&encode(key, m)).map(|(_, m)| m) }
+#[doc(hidden)]
+pub fn compact_len(key: &str, m: &Measured) -> usize { encode(key, m).len() }
+
+/// Every song kept (for looking over them all: blend_census)
+pub fn all() -> Vec<(String, Measured)> {
+    migrate();
+    let Some(d) = store_dir() else { return Vec::new() };
+    let mut out = Vec::new();
+    for e in std::fs::read_dir(d).into_iter().flatten().flatten() {
+        if let Some(x) = std::fs::read(e.path()).ok().and_then(|b| decode(&b)) { out.push(x); }
+    }
+    out
+}
+
+/// The one-file store of before (state/rhythm.json), moved into the files of now, once: only what's still
+/// used (this method's, and 13's and 14's that are sure), a part the same as its whole song's left out;
+/// the old file removed once all of it's written. Done at the app's start, in the background (the
+/// first song asked for waits for it)
+pub fn migrate() {
+    static DONE: std::sync::Once = std::sync::Once::new();
+    DONE.call_once(|| {
+        // (not from a self-test or a test: the file is yours, moved when you run the app)
+        if cfg!(test) || std::env::var_os("OMNIPULSE_SELFTEST").is_some() { return; }
+        let Some(old) = crate::data_dir().ok().map(|d| d.join("state").join("rhythm.json")) else { return };
+        let Ok(text) = std::fs::read_to_string(&old) else { return };
+        let Ok(all) = serde_json::from_str::<std::collections::HashMap<String, Measured>>(&text) else { return };
+        drop(text);
+        let mut ok = true;
+        for (k, m) in &all {
+            if !current(m) { continue; }
+            if !k.starts_with("full:") && all.get(&format!("full:{k}")).is_some_and(|f| f == m) { continue; }
+            let Some(p) = store_path(k) else { ok = false; break };
+            if std::fs::write(&p, encode(k, m)).is_err() { ok = false; break; }
+        }
+        if ok { let _ = std::fs::remove_file(&old); }
     });
-    if let (Some(p), Some(t)) = (store_file(), text) { let _ = std::fs::write(p, t); }
 }
 
 /// A key's tonic (0 is C) and whether it's minor, from its name ("A minor")
@@ -807,6 +1018,25 @@ pub fn keys_mix(a: &str, b: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_measurement_reads_back_from_its_file() {
+        let m = Measured { from_ms: 0, to_ms: 200_000, v: VERSION, rhythm: Rhythm {
+            bpm: 128.0, first_beat_ms: 12.5, period_ms: 468.75, beats: vec![12.53, 481.27, 950.0, 9000.04, 9468.8], downbeat: 1,
+            key: "A minor".into(), camelot: "8A".into(), beat_db: vec![-12.3, -9.9, 0.0, -40.1], bar_db: vec![-11.234_567], bar_beat: vec![1.034_567],
+            bar_chroma: vec![[0.1, 0.2, 0.0, 0.0, 0.3, 0.0, 0.0, 0.4, 0.0, 0.0, 0.0, 0.0]], head_downbeat: Some((2, 0.8)), ..Default::default() } };
+        let (k, back) = decode(&encode("full:x", &m)).unwrap();
+        assert_eq!(k, "full:x");
+        let (a, b) = (&m.rhythm, &back.rhythm);
+        // (beats to a tenth of a ms, a gap over 6.5 s too; the bars' exactly; the rest as they were)
+        assert!(a.beats.iter().zip(&b.beats).all(|(x, y)| (x - y).abs() <= 0.05), "{:?}", b.beats);
+        assert_eq!(a.beat_db, b.beat_db);
+        assert_eq!(a.bar_db, b.bar_db);
+        assert_eq!(a.bar_beat, b.bar_beat);
+        assert!(a.bar_chroma[0].iter().zip(&b.bar_chroma[0]).all(|(x, y)| (x - y).abs() < 1e-4));
+        assert_eq!((b.bpm, b.downbeat, &b.key, b.head_downbeat, back.to_ms, back.v), (128.0, 1, &a.key, Some((2, 0.8)), 200_000, VERSION));
+        assert!(decode(b"nope").is_none());
+    }
 
     #[test]
     fn a_half_bar_out_is_settled_by_the_sections() {
@@ -839,6 +1069,16 @@ mod tests {
             k += 1;
         }
         x
+    }
+
+    /// Beat This! read straight from the app (no files): its beats of a click track at its tempo
+    #[cfg(feature = "model")]
+    #[test]
+    fn the_beat_model_runs_from_the_app() {
+        let x = beat_track(128.0, 230.0, 20.0, 44_100);
+        let m = model_run(&x, 44_100).expect("the model ran");
+        assert!((m.bpm - 128.0).abs() < 2.0, "{}", m.bpm);
+        assert!(m.beats.len() > 30, "{}", m.beats.len());
     }
 
     #[test]

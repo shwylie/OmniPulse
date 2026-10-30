@@ -5738,9 +5738,11 @@ dependencies = [
 name = "omnipulse-core"
 version = "0.3.47"
 dependencies = [
+ "anyhow",
  "base64 0.22.1",
  "beat-this",
  "ebur128",
+ "flate2",
  "futures",
  "librespot-core",
  "librespot-metadata",
@@ -5760,6 +5762,7 @@ dependencies = [
  "regex",
  "reqwest 0.12.28",
  "rten",
+ "rten-tensor",
  "serde",
  "serde_json",
  "sha2",
