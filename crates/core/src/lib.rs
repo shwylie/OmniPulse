@@ -23,7 +23,6 @@ pub mod meter;
 pub mod lyrics;
 pub mod ranking;
 pub mod keys;
-pub mod keyfinder;
 pub mod rhythm;
 pub mod songbpm;
 pub mod sponsorblock;

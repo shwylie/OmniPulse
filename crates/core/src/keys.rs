@@ -298,11 +298,6 @@ mod tests {
             let first = crate::rhythm::key_first_reading(&x, RATE);
             add("first reading (now)", (first.0, first.1), want);
             let mut line = format!("{:>3} {name}: {} | now {}", i + 1, k(want.0, want.1), k(first.0, first.1));
-            // (libKeyFinder's method itself, step for step: core::keyfinder)
-            if let Some(r) = crate::keyfinder::read(&x, RATE) {
-                add("KeyFinder, as ported", (r.tonic, r.minor), want);
-                line += &format!(" | KeyFinder {} ({:.2})", k(r.tonic, r.minor), r.confidence);
-            }
             for (vname, o) in &variants {
                 if let Some(r) = estimate(&x, o) {
                     add(vname, (r.tonic, r.minor), want);

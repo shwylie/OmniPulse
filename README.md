@@ -78,8 +78,6 @@ with its source available.
 - [librespot](https://github.com/librespot-org/librespot) (MIT) plays Spotify, from a copy in `vendor/`.
 - [Beat This!](https://github.com/CPJKU/beat_this) (MIT) finds beats and downbeats; its model is in
   `crates/core/models/` with its licence.
-- [libKeyFinder](https://github.com/mixxxdj/libkeyfinder) (GPLv3 or later), by Ibrahim Sha'ath: its key-finding
-  method is ported in `crates/core/src/keyfinder.rs`.
 - [yt-dlp](https://github.com/yt-dlp/yt-dlp) is downloaded on first use, not bundled.
 - OmniPulse isn't affiliated with SoundCloud, Spotify, YouTube, Apple, Twitch, Kick, Streamlabs,
   StreamElements, Streamer.bot, Mix It Up, Ko-fi or Elgato, although we do love every one of them.
