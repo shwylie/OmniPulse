@@ -60,6 +60,24 @@ pub fn spotify_norm(prefs: &Value) -> (bool, f64) {
 /// (about -22 LUFS), then the next as if it were mastered loudly (about -8), each turned up or down as Match
 /// Loudness would turn a song made that way. Off: the jump between them as it is; on: the two level. `a` and `b`:
 /// interleaved stereo at `rate`
+/// Hear It's loop: a stretch mastered quietly (-22), half a second's quiet, the next mastered loudly (-8),
+/// half a second's quiet, as a WAV; Match Loudness isn't in it (it's applied as it plays: preview_db, so a
+/// change is heard at once); and where the loud one starts (ms, in the quiet between)
+pub const PREVIEW_QUIET: f64 = -22.0;
+pub const PREVIEW_LOUD: f64 = -8.0;
+
+pub fn preview_loop_wav(a: &[f32], b: &[f32], rate: u32) -> (Vec<u8>, u64) {
+    let split = (a.len() / 2) as u64 * 1000 / rate as u64 + 250;
+    let w = preview_wav(&serde_json::json!({}), a, b, rate);
+    (w, split)
+}
+
+/// The gain Match Loudness gives a stretch of Hear It's loop, as it's set now (dB; Off: none)
+pub fn preview_db(prefs: &Value, loud: bool) -> f32 {
+    let lufs = if loud { PREVIEW_LOUD } else { PREVIEW_QUIET };
+    loud_target(prefs).map_or(0.0, |t| (t - lufs).clamp(-30.0, LOUD_MAX_BOOST)) as f32
+}
+
 pub fn preview_wav(prefs: &Value, a: &[f32], b: &[f32], rate: u32) -> Vec<u8> {
     let target = loud_target(prefs);
     let gain = |lufs: f64| -> f32 { 10f32.powf(target.map_or(0.0, |t| (t - lufs).clamp(-30.0, LOUD_MAX_BOOST)) as f32 / 20.0) };
@@ -70,9 +88,11 @@ pub fn preview_wav(prefs: &Value, a: &[f32], b: &[f32], rate: u32) -> Vec<u8> {
         let (n, fade) = (v.len() / 2, (0.05 * rate as f32) as usize);
         v.iter().enumerate().map(|(i, x)| { let f = i / 2; x * k * ((f.min(n.saturating_sub(1 + f))) as f32 / fade.max(1) as f32).min(1.0) }).collect()
     };
-    let mut all: Vec<f32> = at(a, -22.0).into_iter().map(|x| x * gain(-22.0)).collect();
+    let mut all: Vec<f32> = at(a, PREVIEW_QUIET as f32).into_iter().map(|x| x * gain(PREVIEW_QUIET)).collect();
     all.extend(std::iter::repeat_n(0.0, (0.5 * rate as f32) as usize * 2));
-    all.extend(at(b, -8.0).into_iter().map(|x| x * gain(-8.0)));
+    all.extend(at(b, PREVIEW_LOUD as f32).into_iter().map(|x| x * gain(PREVIEW_LOUD)));
+    // (and the quiet after it, before it goes round again)
+    all.extend(std::iter::repeat_n(0.0, (0.5 * rate as f32) as usize * 2));
     // (a 16-bit stereo WAV)
     let data: Vec<u8> = all.iter().flat_map(|x| ((x.clamp(-1.0, 1.0) * 32000.0) as i16).to_le_bytes()).collect();
     let mut w = Vec::with_capacity(44 + data.len());
@@ -94,6 +114,21 @@ pub fn preview_wav(prefs: &Value, a: &[f32], b: &[f32], rate: u32) -> Vec<u8> {
 
 #[cfg(test)]
 mod preview_tests {
+    /// Hear It's loop, as it plays: Off leaves both stretches as they are; Normal brings both to -14 (the
+    /// quiet one up 8 dB, the loud one down 6), so they end up level
+    #[test]
+    fn the_loop_is_levelled_as_it_plays() {
+        let off = serde_json::json!({ "loudMatch": "off" });
+        let normal = serde_json::json!({ "loudMatch": "normal" });
+        assert_eq!((super::preview_db(&off, false), super::preview_db(&off, true)), (0.0, 0.0));
+        assert_eq!((super::preview_db(&normal, false), super::preview_db(&normal, true)), (8.0, -6.0));
+        // (the loud stretch starts in the quiet between: after 7 s of the quiet one)
+        let tone: Vec<f32> = (0..44100 * 2 * 7).map(|i| ((i / 2) as f32 * 0.05).sin() * 0.3).collect();
+        let (w, split) = super::preview_loop_wav(&tone, &tone, 44100);
+        assert!((7000..7500).contains(&split), "{split}");
+        assert_eq!((w.len() - 44) / 4, 44100 * 15);
+    }
+
     /// Off: the second stretch far louder than the first; Normal: the two within a dB or so
     #[test]
     fn the_preview_levels_when_on() {
