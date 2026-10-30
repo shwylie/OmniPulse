@@ -89,8 +89,13 @@ mod tests {
             let (mut sa, sb) = (open(&ta), open(&tb));
             let a_dur = sa.duration_ms().unwrap_or(0);
             let first = |an: &serde_json::Value| an["silences"].as_array().and_then(|s| s.first()).filter(|s| s[0].as_u64() == Some(0)).and_then(|s| s[1].as_u64()).unwrap_or(0);
-            let a = Side { dur_ms: a_dur, audible_ms: ana["audible_ms"].as_u64().unwrap_or(0), first_ms: 0, rhythm: ma.as_ref(), stated_bpm: None, key_known: ka_ok };
-            let b = Side { dur_ms: anb["duration_ms"].as_u64().unwrap_or(0), audible_ms: anb["audible_ms"].as_u64().unwrap_or(0), first_ms: first(&anb), rhythm: mb.as_ref(), stated_bpm: None, key_known: kb_ok };
+            // (the voices handed over only where both sing, by their timed lyrics, as the app does; and the
+            // blend placed so the one playing's singer isn't cut off: fetched before it's planned)
+            let lyrics = |t: &Track, m: &Option<Measured>| rt.block_on(crate::player::mix_lyrics(t, m.as_ref().map_or(0, |m| m.to_ms / 1000)));
+            let (la, lb) = (lyrics(&ta, &ma), lyrics(&tb, &mb));
+            println!("timed lyrics: {} lines / {} lines", la.len(), lb.len());
+            let a = Side { dur_ms: a_dur, audible_ms: ana["audible_ms"].as_u64().unwrap_or(0), first_ms: 0, rhythm: ma.as_ref(), stated_bpm: None, key_known: ka_ok, lines: &la };
+            let b = Side { dur_ms: anb["duration_ms"].as_u64().unwrap_or(0), audible_ms: anb["audible_ms"].as_u64().unwrap_or(0), first_ms: first(&anb), rhythm: mb.as_ref(), stated_bpm: None, key_known: kb_ok, lines: &lb };
             let db = |t: &Track, an: &serde_json::Value| crate::sound::loud_db(&serde_json::json!({}), t, an["lufs"].as_f64(), false);
             let dbs = (db(&ta, &ana), db(&tb, &anb));
             let blocked = blend_blocked(&a, &b);
@@ -99,9 +104,6 @@ mod tests {
             // (OMNIPULSE_SMART_NUDGE: the next one started this many of its beats later (or, below 0, earlier), to listen for which is right)
             let nudge = std::env::var("OMNIPULSE_SMART_NUDGE").ok().and_then(|v| v.parse::<f64>().ok()).unwrap_or(0.0);
             if let (Some(p), Some(m)) = (plan.as_mut(), mb.as_ref()) { p.start_ms = (p.start_ms as f64 + nudge * m.rhythm.period_ms).max(0.0).round() as u64; }
-            // (the voices handed over only where both sing, by their timed lyrics, as the app does)
-            let lyrics = |t: &Track, m: &Option<Measured>| rt.block_on(crate::player::mix_lyrics(t, m.as_ref().map_or(0, |m| m.to_ms / 1000)));
-            let (la, lb) = (lyrics(&ta, &ma), lyrics(&tb, &mb));
             let both_sing = |a_from: u64, a_to: u64, b_from: u64, b_to: u64| sings(&la, a_from, a_to) && sings(&lb, b_from, b_to);
             let (out, info) = match &plan {
                 Some(p) if p.style == Some(ROLL) => {

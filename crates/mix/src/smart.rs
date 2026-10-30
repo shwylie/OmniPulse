@@ -31,6 +31,8 @@ pub struct Side<'a> {
     /// its key's from outside (SongBPM: Spotify's analysis), not only our own reading: one to shift a
     /// song's pitch by
     pub key_known: bool,
+    /// its timed lyrics (ms, line), where they're known: where it sings, so a blend doesn't cut a line off
+    pub lines: &'a [(u64, String)],
 }
 
 /// Tier 0: the one playing fades from `out_from_ms` to `out_to_ms` (where its sound ends); the next one
@@ -342,12 +344,25 @@ pub fn blend_as(a: &Side, b: &Side, now_ms: u64, forced: bool) -> Option<crate::
     };
     let from = if intro > run { s0 + intro - run } else { s0 };
     if from + run + tail >= nb { return None; }
-    // the one playing: from the line its outro starts on (where its main part ends, snapped back to a
-    // line), a line earlier at a time if that runs past its sound's end; at least 5 s from now
-    // (in its last quarter; else, as late as it fits, but never before halfway)
-    let fits = |floor: u64| (0..=outro.min(na)).rev().find(|&k| {
-        on(k, ga) && k + run + tail <= na && bar_ms(ma, k).is_some_and(|t| t >= now_ms as f64 + 5000.0 && t >= floor as f64) && bar_ms(ma, k + run + tail).is_some_and(|t| t <= end)
-    });
+    // the one playing: as late as the blend fits before its sound ends, so it's heard out (its outro whole,
+    // the next one's intro under it; your ratings, 2026-10-30: the bad blends cut twice as much off its end
+    // as the good ones, about 11 s against 6); of the latest few lines it fits on, the latest where its
+    // singer isn't cut off mid-line as it fades after the swap (by its timed lyrics, where they're known).
+    // At least 5 s from now, in its last quarter; else as late as it fits, but never before halfway.
+    // (OMNIPULSE_SMART_OLDPLACE, for comparing: from the line its outro starts on, as before)
+    let old = std::env::var_os("OMNIPULSE_SMART_OLDPLACE").is_some();
+    let ok = |k: usize, floor: u64| on(k, ga) && k + run + tail <= na && bar_ms(ma, k).is_some_and(|t| t >= now_ms as f64 + 5000.0 && t >= floor as f64) && bar_ms(ma, k + run + tail).is_some_and(|t| t <= end);
+    let voice_kept = |k: usize| match (bar_ms(ma, k + run), bar_ms(ma, k + run + tail)) {
+        (Some(sw), Some(ov)) => !sings(a.lines, sw as u64, ov as u64),
+        _ => true,
+    };
+    let fits = |floor: u64| -> Option<usize> {
+        let top = if old { outro.min(na) } else { na };
+        let mut lines = (0..=top).rev().filter(|&k| ok(k, floor));
+        if old { return lines.next(); }
+        let latest: Vec<usize> = lines.take(VOICE_LOOK_LINES).collect();
+        latest.iter().copied().find(|&k| voice_kept(k)).or(latest.first().copied())
+    };
     let Some(k) = fits(earliest_ms(end as u64)).or_else(|| fits(never_before_ms(end as u64))) else { why(&format!("no line to start on before its outro (bar {outro} of {na})")); return None };
     let (at, swap, over) = (bar_ms(ma, k)?, bar_ms(ma, k + run)?, bar_ms(ma, k + run + tail)?);
     // its tempo as it is over the run-up (a song's drifts), the next one's over its own
@@ -368,6 +383,10 @@ pub fn blend_as(a: &Side, b: &Side, now_ms: u64, forced: bool) -> Option<crate::
         style: None, tail_bars: tail as u32,
     })
 }
+
+/// How many of the latest lines a blend fits on are looked through for one that doesn't cut the one playing's
+/// singer off (a line further back cuts more of its end)
+const VOICE_LOOK_LINES: usize = 3;
 
 /// The longest the two are together (seconds); past it, a phrase less
 const TOGETHER_MAX_S: f64 = 24.0;
@@ -682,6 +701,29 @@ mod tests {
             let c: &'static Measured = Box::leak(Box::new(song(bpm, &levels(8, 48, 8), 0.6, "8A")));
             assert!(blend(&side(a), &side(c), 0).is_none(), "{bpm}");
         }
+    }
+
+    #[test]
+    fn a_blend_plays_the_one_playing_out_and_keeps_its_singer() {
+        // 128 BPM (1.875 s a bar): A, 8 bars in, 48 of its main part, a 16-bar outro; B, an 8-bar intro
+        let a: &'static Measured = Box::leak(Box::new(song(128.0, &levels(8, 48, 16), 0.6, "8A")));
+        let b: &'static Measured = Box::leak(Box::new(song(128.0, &levels(8, 48, 8), 0.6, "8A")));
+        let bar = 60_000.0 / 128.0 * 4.0;
+        let a_end = 72.0 * bar;
+        let side = |m: &'static Measured, lines: &'static [(u64, String)]| Side { dur_ms: (m.rhythm.beats.len() as f64 * 60_000.0 / 128.0) as u64, rhythm: Some(m), lines, ..Default::default() };
+        // (as late as it fits: its outro heard nearly to its end, not cut from where the outro starts)
+        let p = blend(&side(a, &[]), &side(b, &[]), 0).expect("a blend");
+        let ends = (p.at_ms + p.ms) as f64;
+        assert!(a_end - ends < 4.0 * bar, "ends {} bars before its end", (a_end - ends) / bar);
+        // (its singer at a line where that blend would fade it: a line earlier, so the line isn't cut off)
+        let fade_from = p.at_ms + p.swap_ms;
+        let sung: &'static [(u64, String)] = Box::leak(vec![(fade_from + 500, "a line".to_string())].into_boxed_slice());
+        let q = blend(&side(a, sung), &side(b, &[]), 0).expect("a blend");
+        assert!(q.at_ms < p.at_ms, "{} {}", q.at_ms, p.at_ms);
+        assert!(!sings(sung, q.at_ms + q.swap_ms, q.at_ms + q.ms));
+        // (where nothing fits without cutting it, still a blend, as late as it fits)
+        let all: &'static [(u64, String)] = Box::leak((0..72).map(|k| ((k as f64 * bar) as u64, "la".to_string())).collect::<Vec<_>>().into_boxed_slice());
+        assert_eq!(blend(&side(a, all), &side(b, &[]), 0).map(|x| x.at_ms), Some(p.at_ms));
     }
 
     #[test]

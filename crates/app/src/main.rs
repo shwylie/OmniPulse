@@ -5928,11 +5928,13 @@ struct SmartSong {
     stated: Option<f64>,
     /// its key from outside (SongBPM), in place of our own reading
     key_known: bool,
+    /// its timed lyrics, where they're known (empty: none, or not looked up yet)
+    lines: Vec<(u64, String)>,
 }
 
 impl SmartSong {
     fn side(&self) -> smart::Side<'_> {
-        smart::Side { dur_ms: self.dur_ms, audible_ms: self.audible_ms, first_ms: self.first_ms, rhythm: self.rhythm.as_ref(), stated_bpm: self.stated, key_known: self.key_known }
+        smart::Side { dur_ms: self.dur_ms, audible_ms: self.audible_ms, first_ms: self.first_ms, rhythm: self.rhythm.as_ref(), stated_bpm: self.stated, key_known: self.key_known, lines: &self.lines }
     }
     /// Its key known, if our reading and SongBPM's agree. Neither is right often enough alone to shift a
     /// song's pitch by (ours and Spotify's analysis each put a song a fifth or its relative key out), but
@@ -6026,11 +6028,12 @@ fn smart_pair(a: &App, dur: u64) -> Option<(SmartSong, SmartSong)> {
     }) } else { None };
     let an = a.cur_loud.as_ref().and_then(|k| a.analysis.get(k));
     let audible = an.and_then(|x| x["audible_ms"].as_u64()).unwrap_or(0);
-    let a_side = SmartSong { rhythm: measured(&cur, MIX_OUT_OK.with(|c| c.get()), true), dur_ms: dur, audible_ms: audible, first_ms: 0, stated: stated(&cur), t: cur, key_known: false }.with_key();
+    let words = |t: &Track| MIX_WORDS.with(|w| w.borrow().get(&t.key).cloned()).unwrap_or_default();
+    let a_side = SmartSong { rhythm: measured(&cur, MIX_OUT_OK.with(|c| c.get()), true), dur_ms: dur, audible_ms: audible, first_ms: 0, stated: stated(&cur), lines: words(&cur), t: cur, key_known: false }.with_key();
     let v = if mix_via_youtube(&next) { versions::saved_id(&next.key) } else { None };
     let nan = sound::loud_source(&next, v.as_deref()).and_then(|(k, id)| a.analysis.get(&format!("{k}:{id}")));
     let b_dur = nan.and_then(|x| x["duration_ms"].as_u64()).filter(|&d| d > 0).unwrap_or(next.ms);
-    let b_side = SmartSong { rhythm: measured(&next, smart_same_source(&next), false), dur_ms: b_dur, audible_ms: nan.and_then(|x| x["audible_ms"].as_u64()).unwrap_or(0), first_ms: nan.map(first_sound).unwrap_or(0), stated: stated(&next), t: next, key_known: false }.with_key();
+    let b_side = SmartSong { rhythm: measured(&next, smart_same_source(&next), false), dur_ms: b_dur, audible_ms: nan.and_then(|x| x["audible_ms"].as_u64()).unwrap_or(0), first_ms: nan.map(first_sound).unwrap_or(0), stated: stated(&next), lines: words(&next), t: next, key_known: false }.with_key();
     Some((a_side, b_side))
 }
 
@@ -6089,6 +6092,11 @@ fn smart_decide(shared: &Shared, a: &SmartSong, b: &SmartSong, pos: u64, late: b
         Some((None, "not one to blend into".into()))
     } else if a.rhythm.is_some() && b.rhythm.is_some() && !late && set_row_on(&prefs, "smartKeys", true) && (EXT_KEYS_BUSY.with(|k| k.borrow().contains(&a.t.key) || k.borrow().contains(&b.t.key))) {
         // (their keys still being looked for: decided once they're in, for a key ride by them)
+        None
+    } else if a.rhythm.is_some() && b.rhythm.is_some() && !late && !MIX_WORDS.with(|w| w.borrow().contains_key(&a.t.key) && w.borrow().contains_key(&b.t.key)) {
+        // (their lyrics still being looked up: decided once they're in, so the blend's placed where it cuts
+        // no one off, and never starts the next one past its first words. Before, it was decided in the
+        // same moment they were asked for, so almost always without them)
         None
     } else if a.rhythm.is_some() && b.rhythm.is_some() {
         match smart::blend_blocked(&sa, &sb) {
