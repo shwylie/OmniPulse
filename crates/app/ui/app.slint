@@ -119,6 +119,26 @@ export struct WidgetLook { design: string, theme: string, right: bool, rounded: 
 /// The alerts' preview: their theme and colours as they're set
 /// A HUD frame, for its editor: where it is on the screenshot (fractions), and whether it's the one picked
 export struct HudRect { x: float, y: float, w: float, h: float, label: string, picked: bool, style: string, px: float, py: float, pulse: bool }
+/// The Stream Widget's page: where its preview's card is (in the window, logical pixels), for the real widget's
+/// web view to sit on it; whether it's all in sight; a count that moves while any menu is open (the web view
+/// steps aside for it, as it would draw over it); and whether the real one is showing
+export global WLive {
+    in-out property <length> x;
+    in-out property <length> y;
+    in-out property <length> w;
+    in-out property <length> h;
+    in-out property <bool> seen;
+    in-out property <int> beat;
+    in-out property <bool> live;
+}
+
+/// In a menu: while it's open, WLive's count moves
+component PopBeat inherits Rectangle {
+    width: 0;
+    height: 0;
+    Timer { interval: 120ms; running: true; triggered => { WLive.beat += 1; } }
+}
+
 /// Emote Rain's preview: real emotes (the platforms' own, or your pictures), as they're fetched
 export global RainPics {
     in property <[image]> list;
@@ -776,6 +796,7 @@ component CtxMenu inherits Rectangle {
         root.picked(n, k);
     }
     pop := PopupWindow {
+        PopBeat { }
         // (kept in the window: up from the pointer near the bottom, left of it near the right)
         x: root.absolute-position.x + root.px + 250px > Win.w - 8px ? root.px - 250px : root.px;
         y: root.absolute-position.y + root.py + frame.preferred-height > Win.h - 8px ? max(root.py - frame.preferred-height, 8px - root.absolute-position.y) : root.py;
@@ -917,6 +938,7 @@ component Dropdown inherits Rectangle {
     property <bool> up: self.full-h > self.room-below && self.room-above > self.room-below;
     property <length> list-h: min(self.full-h, 330px, max(120px, self.up ? self.room-above : self.room-below));
     pop := PopupWindow {
+        PopBeat { }
         x: 0;
         y: root.up ? -root.list-h - 4px : root.height + 4px;
         width: max(root.width, 200px);
@@ -984,6 +1006,7 @@ component GroupedPicker inherits Rectangle {
     property <bool> up: root.room-below < 260px && root.absolute-position.y - 12px > root.room-below;
     property <length> most: min(400px, max(160px, root.up ? root.absolute-position.y - 12px : root.room-below));
     pop := PopupWindow {
+        PopBeat { }
         x: 0;
         y: root.up ? -gpl.height - 4px : root.height + 4px;
         width: max(root.width, 300px);
@@ -2695,84 +2718,317 @@ component DesignSketch inherits VerticalLayout {
 }
 
 /// The Lyrics Widget's preview: a few lines in its look (colours, size, alignment, style, outline, box), as it's set
-/// The Stream Widget as it'll look in OBS, near enough: what's playing (or a made-up song), in its design's
-/// shape (a row, a column, a slim bar) and its touches (round ends, no panel, a glow, a record)
+/// The Stream Widget's words, as widget.html sets them: the title, the artist (and who asked for it), the
+/// progress and its times
+component WInfo inherits VerticalLayout {
+    in property <string> title;
+    in property <string> who;
+    in property <length> fs;
+    in property <float> big: 1.0625;
+    in property <float> small: 0.875;
+    in property <color> ink;
+    in property <color> ink2;
+    in property <TextHorizontalAlignment> ha;
+    in property <string> font;
+    in property <bool> track: true;
+    in property <bool> times;
+    in property <float> p;
+    in property <brush> fill;
+    in property <color> rail;
+    property <int> secs: floor(root.p * 200);
+    alignment: center;
+    Text { text: root.title; font-size: root.fs * root.big; font-weight: 700; font-family: root.font; color: root.ink; overflow: elide; horizontal-alignment: root.ha; }
+    Rectangle { height: root.fs * 0.2; }
+    Text { text: root.who; font-size: root.fs * root.small; font-family: root.font; color: root.ink2; overflow: elide; horizontal-alignment: root.ha; }
+    if root.track: Rectangle { height: root.fs * 0.7; }
+    if root.track: Rectangle {
+        height: 4px;
+        border-radius: 2px;
+        background: root.rail;
+        Rectangle { x: 0; width: parent.width * root.p; border-radius: 2px; background: root.fill; }
+    }
+    if root.track && root.times: HorizontalLayout {
+        padding-top: root.fs * 0.3;
+        Text { text: floor(root.secs / 60) + ":" + (mod(root.secs, 60) < 10 ? "0" : "") + mod(root.secs, 60); font-size: root.fs * 0.69; color: root.ink.with-alpha(0.7); }
+        Rectangle { }
+        Text { text: "3:20"; font-size: root.fs * 0.69; color: root.ink.with-alpha(0.7); }
+    }
+}
+
+/// The Stream Widget as it will look, layout by layout and theme by theme, from widget.html's own rules: the
+/// sizes are a Browser source's usual shape for each layout (the real one fills whatever size it's given)
 component WidgetPreview inherits Rectangle {
     in property <WidgetLook> look;
     in property <image> art;
     in property <string> title;
     in property <string> artist;
-    height: 190px;
+    // (the part of the page in sight: the real widget is shown only while all of the card is)
+    in property <length> view-top: -100000px;
+    in property <length> view-bottom: 100000px;
+    property <string> d: root.look.design;
+    property <string> th: root.look.theme;
+    // (its size: a Browser source's usual shape for the layout, made bigger for bigger text, as you'd size the
+    // source to fit it)
+    property <float> t: clamp(root.look.text, 0.7, 1.6);
+    property <float> tc: min(root.t, 1.3);
+    property <length> cw: root.d == "square" ? 176px * root.tc : root.d == "vertical" ? 164px * root.tc : root.d == "poster" ? 220px * root.tc : root.d == "mini" ? 140px * root.tc
+        : root.d == "polaroid" ? 190px * root.tc : root.d == "cassette" ? 300px * root.tc : root.d == "bar" || root.d == "ticker" ? min(root.width - 48px, 480px) : min(root.width - 48px, 400px);
+    property <length> ch: root.d == "square" ? 246px * root.tc : root.d == "vertical" ? 240px * root.tc : root.d == "poster" ? 220px * root.tc : root.d == "mini" ? 140px * root.tc
+        : root.d == "polaroid" ? 220px * root.tc + root.fs * 1.4 : root.d == "cassette" ? 150px * root.tc
+        : (root.d == "bar" ? 46px : root.d == "ticker" ? 32px : root.d == "text" ? 82px : root.d == "pill" ? 80px : root.d == "nownext" ? 124px : 100px) * root.t;
+    height: max(190px, root.ch + 52px);
     border-radius: 14px;
     border-width: 1px;
     border-color: Theme.line;
     clip: true;
     Rectangle { background: @linear-gradient(135deg, #2b3550 0%, #3a2b48 100%); }
     Caps { r: 14px; outside: Theme.bg; tl: #2b3550; tr: #33304c; bl: #33304c; br: #3a2b48; top: true; bottom: true; }
-    Text { x: 12px; y: 8px; text: "A preview, near enough. Pop Out Preview below shows it exactly."; color: #ffffffa0; font-size: 11px; }
-    property <string> d: root.look.design;
-    property <string> th: root.look.theme;
-    property <bool> column: root.d == "square" || root.d == "poster" || root.d == "polaroid" || root.d == "vertical";
-    property <bool> slim: root.d == "bar" || root.d == "ticker";
-    property <bool> mini: root.d == "mini";
-    property <bool> split: root.d == "split";
-    property <bool> no-art: root.d == "text" || root.d == "ticker" || root.d == "cassette" || root.d == "equaliser" || root.d == "nownext";
-    property <bool> bare: root.th == "clear";
-    property <bool> round-art: root.d == "vinyl";
-    property <color> ink: root.th == "paper" && !root.mini ? #1d1b22 : #ffffff;
-    property <length> fs: 15px * clamp(root.look.text, 0.7, 1.6);
-    property <float> p: Theme.motion ? mod(animation-tick() / 1ms, 60000) / 60000 : 0.35;
+    Text { x: 12px; y: 8px; text: WLive.live ? "The real widget, as it will look in OBS. Pop Out Preview below shows it bigger." : "A preview, near enough. Pop Out Preview below shows it exactly."; color: #ffffffa0; font-size: 11px; }
+    // (where the card is, for the real widget to be put over it)
+    property <length> lx: card.absolute-position.x;
+    property <length> ly: card.absolute-position.y;
+    property <bool> lseen: self.ly >= root.view-top && self.ly + root.ch <= root.view-bottom;
+    changed lx => { WLive.x = self.lx; }
+    changed ly => { WLive.y = self.ly; }
+    changed cw => { WLive.w = self.cw; }
+    changed ch => { WLive.h = self.ch; }
+    changed lseen => { WLive.seen = self.lseen; }
+    init => { WLive.x = self.lx; WLive.y = self.ly; WLive.w = self.cw; WLive.h = self.ch; WLive.seen = self.lseen; }
+    // (moving as the real one does: the progress, the record, the equaliser's bars; still with Reduce Motion)
+    property <int> step;
+    Timer { interval: 80ms; running: Theme.motion; triggered => { root.step = mod(root.step + 1, 4500); } }
+    property <float> p: Theme.motion ? 0.15 + 0.7 * mod(root.step, 1500) / 1500 : 0.35;
+    property <angle> turn: root.look.spin && Theme.motion ? mod(root.step, 75) / 75 * 360deg : 0deg;
+    // (the theme over the layout: Cassette and Polaroid keep their own panel)
+    property <bool> own-panel: root.d == "cassette" || root.d == "polaroid";
+    property <bool> over-art: root.d == "poster" || root.d == "mini";
+    property <bool> paper: root.th == "paper" && !root.own-panel;
+    property <color> ink: root.paper && !root.over-art ? #1d1b22 : #ffffff;
+    property <color> ink2: root.th == "neon" && !root.own-panel ? root.look.c1.mix(#ffffff, 0.4) : root.ink.with-alpha(root.paper && !root.over-art ? 0.68 : 0.78);
+    property <brush> fill: root.th == "colours" || root.th == "frosted" ? #ffffffeb : root.look.c1;
+    property <color> rail: root.paper ? #0000001f : root.th == "clear" ? #ffffff4d : #ffffff38;
+    property <length> fs: 15px * root.t;
+    property <TextHorizontalAlignment> ha: root.look.right ? right : left;
+    property <string> who: root.artist + (root.look.requester ? "  \u{b7}  requested by PixelPanda" : "");
+    property <length> rad: !root.look.rounded ? 0px : root.d == "pill" ? root.ch / 2 : root.d == "lower" ? 0px : root.d == "cassette" ? 13px : 14px;
+    property <length> cx: root.look.right ? root.width - root.cw - 24px : 24px;
+    property <length> cy: 26px + (root.height - 26px - root.ch) / 2;
     // (Frosted Glass: the cover's colours, blurred, behind the card)
-    if root.th == "frosted": Rectangle { x: card.x - 20px; y: card.y - 14px; width: card.width + 40px; height: card.height + 28px; border-radius: 30px; background: @linear-gradient(135deg, root.look.c1.with-alpha(0.55) 0%, root.look.c2.with-alpha(0.45) 100%); }
+    if root.th == "frosted" && !root.own-panel: Rectangle { x: root.cx - 18px; y: root.cy - 12px; width: root.cw + 36px; height: root.ch + 24px; border-radius: 30px; background: @linear-gradient(135deg, root.look.c1.with-alpha(0.55) 0%, root.look.c2.with-alpha(0.45) 100%); }
     card := Rectangle {
-        property <length> w: root.mini ? 120px : root.column ? 170px : root.slim ? min(root.width - 48px, 520px) : min(root.width - 48px, 440px);
-        property <length> h: root.mini ? 120px : root.column ? 150px : root.slim ? 38px : root.d == "text" ? 70px : 96px;
-        width: self.w;
-        height: self.h;
-        x: root.look.right ? root.width - self.w - 24px : 24px;
-        y: (root.height - self.h) / 2 + 8px;
-        border-radius: !root.look.rounded ? 0px : root.d == "pill" ? self.h / 2 : root.slim ? 6px : 14px;
-        // (its theme's panel: a solid blend of its two colours, as a gradient would lose its rounded corners in
-        // the software renderer)
-        background: root.bare ? transparent : root.th == "frosted" ? #ffffff26 : root.th == "neon" ? #08061ae6 : root.th == "solid" ? #0d0d13eb : root.th == "paper" ? #f7f4ee
-            : root.look.c1.mix(root.look.c2, 0.5).mix(#0a0814, 0.5);
-        border-width: root.th == "neon" ? 2px : root.th == "frosted" ? 1px : 0px;
-        border-color: root.th == "neon" ? root.look.c1 : #ffffff48;
-        drop-shadow-blur: root.th == "neon" ? 16px : 0px;
-        drop-shadow-color: root.look.c1;
+        x: root.cx;
+        y: root.cy;
+        // (drawn only while the real one isn't over it)
+        opacity: WLive.live ? 0 : 1;
+        width: root.cw;
+        height: root.ch;
+        border-radius: root.rad;
+        // (its panel: Colours is the two colours' gradient (blended into one with rounded corners, which the
+        // software renderer can't draw a gradient into), Lower Third and Equaliser their own dark one under it)
+        background: root.d == "polaroid" || root.th == "clear" ? transparent
+            : root.d == "cassette" ? @linear-gradient(180deg, #2d2d33 0%, #1d1d22 100%)
+            : root.th == "frosted" ? #ffffff24 : root.th == "neon" ? #0603109e : root.th == "solid" ? #0d0d13eb : root.th == "paper" ? #f7f4ee
+            : root.d == "lower" ? #080612e0 : root.d == "equaliser" ? #06050e99
+            : root.rad > 0 ? root.look.c1.mix(root.look.c2, 0.5) : @linear-gradient(115deg, root.look.c1 0%, root.look.c2 100%);
+        border-width: root.d == "cassette" ? 2.4px : root.th == "neon" && !root.own-panel ? 2px : root.th == "frosted" && !root.own-panel ? 1px : 0px;
+        border-color: root.d == "cassette" ? #4a4a52 : root.th == "neon" ? root.look.c1 : #ffffff4d;
+        drop-shadow-blur: root.th == "neon" && !root.own-panel ? 16px : root.paper ? 14px : 0px;
+        drop-shadow-color: root.th == "neon" ? root.look.c1 : #00000059;
+        drop-shadow-offset-y: root.paper ? 4px : 0px;
         clip: true;
         // (Dark: a stripe of its accent down its side)
-        if root.th == "solid": Rectangle { x: root.look.right ? parent.width - 4px : 0px; width: 4px; background: root.look.c1; }
-        // (its cover: square, a record that turns, to the edge (Split), or the whole of it (Mini))
-        if !root.no-art: Rectangle {
-            property <length> s: root.mini || root.split ? parent.height : root.column ? 92px : root.slim ? 28px : 72px;
-            width: root.mini ? parent.width : self.s;
-            height: self.s;
-            x: root.mini ? 0px : root.column ? (parent.width - self.s) / 2 : root.split ? (root.look.right ? parent.width - self.s : 0px) : root.look.right ? parent.width - self.s - 12px : (root.slim ? 5px : 12px);
-            y: root.mini || root.split ? 0px : root.column ? 10px : (parent.height - self.s) / 2;
-            border-radius: root.mini || root.split ? 0px : root.round-art || root.d == "pill" ? self.s / 2 : 8px;
-            clip: true;
-            background: root.look.c1.with-alpha(0.5);
-            Image { source: root.art; width: parent.width; height: parent.height; image-fit: cover; transform-rotation: root.round-art && root.look.spin && Theme.motion ? mod(animation-tick() / 1ms, 4000) / 4000 * 360deg : 0deg; }
+        if root.th == "solid" && !root.own-panel && root.d != "lower": Rectangle { x: root.look.right ? parent.width - 4.5px : 0px; width: 4.5px; background: root.look.c1; }
+
+        // ---------- in a row: the cover on its side, the words beside it ----------
+        if root.d == "card" || root.d == "vinyl" || root.d == "split" || root.d == "lower" || root.d == "pill" || root.d == "text" || root.d == "bar": Rectangle {
+            property <bool> has-art: root.d != "text";
+            property <length> s: root.d == "split" ? min(parent.height, parent.width * 0.42) : root.d == "vinyl" ? parent.height - 22px : root.d == "lower" ? (parent.height - 16px) * 0.8
+                : root.d == "pill" ? parent.height - 13px : root.d == "bar" ? parent.height - 15px : parent.height - 24px;
+            property <length> pa: root.d == "split" ? 0px : root.d == "vinyl" ? 11px : root.d == "lower" ? 19px : root.d == "pill" ? 6.5px : root.d == "bar" ? 10px : root.d == "text" ? 16px : 12px;
+            property <length> pb: root.d == "split" || root.d == "lower" || root.d == "text" ? 16px : root.d == "pill" ? 18px : root.d == "bar" ? 10px : 12px;
+            property <length> gap: root.d == "split" ? 16px : root.d == "pill" ? 12px : root.d == "bar" ? 10px : 14px;
+            property <length> ix: root.look.right ? self.pb : self.pa + (self.has-art ? self.s + self.gap : 0px);
+            // (Lower Third: its stripe of colour on the cover's side)
+            if root.d == "lower" && root.th != "solid": Rectangle { x: root.look.right ? parent.width - 8px : 0px; width: 8px; background: @linear-gradient(180deg, root.look.c1 0%, root.look.c2 100%); }
+            if self.has-art: Rectangle {
+                width: parent.s;
+                height: parent.s;
+                x: root.look.right ? parent.width - parent.pa - parent.s : parent.pa;
+                y: (parent.height - parent.s) / 2;
+                // (Vinyl: the record's dark edge and its thin bright rim)
+                if root.d == "vinyl": Rectangle { x: -6px; y: -6px; width: parent.width + 12px; height: parent.height + 12px; border-radius: self.width / 2; background: #0000008c; border-width: 1px; border-color: #ffffff26; }
+                Rectangle {
+                    border-radius: root.d == "vinyl" || root.d == "pill" ? self.width / 2 : root.d == "split" || !root.look.rounded ? 0px : root.d == "lower" ? 5px : root.th == "neon" ? 6px : 10px;
+                    clip: true;
+                    background: #ffffff1f;
+                    Image { source: root.art; width: parent.width; height: parent.height; image-fit: cover; transform-rotation: root.d == "vinyl" ? root.turn : 0deg; }
+                }
+            }
+            WInfo {
+                x: parent.ix;
+                width: parent.width - parent.pa - parent.pb - (parent.has-art ? parent.s + parent.gap : 0px);
+                height: parent.height;
+                title: root.title; who: root.who; fs: root.fs; ink: root.ink; ink2: root.ink2; ha: root.ha; p: root.p; fill: root.fill; rail: root.rail;
+                big: root.d == "bar" ? 0.95 : root.d == "split" ? 1.3 * 1.0625 : root.d == "text" ? 1.25 * 1.0625 : 1.0625;
+                small: root.d == "bar" ? 0.78 : 0.875;
+                track: root.d != "bar";
+                times: root.d == "card" || root.d == "vinyl" || root.d == "split" || root.d == "text";
+            }
+            // (Slim Bar: its progress along the bottom edge)
+            if root.d == "bar": Rectangle { y: parent.height - 3.5px; height: 3.5px; background: root.rail; Rectangle { x: 0; width: parent.width * root.p; background: root.fill; } }
         }
-        // (Mini: its name over the bottom of the cover)
-        if root.mini: Rectangle { y: parent.height - 40px; height: 40px; background: @linear-gradient(180deg, #00000000 0%, #000000c8 100%); }
-        VerticalLayout {
-            property <length> lx: root.no-art ? 14px : root.split ? parent.height + 14px : root.slim ? 42px : 98px;
-            x: root.mini || root.column ? 10px : root.look.right ? (root.no-art ? 14px : 12px) : self.lx;
-            y: root.mini ? parent.height - 38px : root.column ? 108px : 0px;
-            width: root.mini || root.column ? parent.width - 20px : parent.width - self.lx - 14px;
-            height: root.mini ? 34px : root.column ? 36px : parent.height;
+
+        // ---------- Ticker: one line, the progress along the bottom ----------
+        if root.d == "ticker": Rectangle {
+            HorizontalLayout {
+                padding-left: 13px;
+                padding-right: 13px;
+                spacing: 10px;
+                alignment: root.look.right ? end : start;
+                Text { text: root.title; font-size: root.fs; font-weight: 700; color: root.ink; overflow: elide; vertical-alignment: center; max-width: parent.width * 0.6; }
+                Text { text: root.who; font-size: root.fs * 0.875; color: root.ink2; overflow: elide; vertical-alignment: center; }
+            }
+            Rectangle { y: parent.height - 3px; height: 3px; background: root.rail; Rectangle { x: 0; width: parent.width * root.p; background: root.fill; } }
+        }
+
+        // ---------- Square and Vertical: the cover on top, the words under it ----------
+        if root.d == "square" || root.d == "vertical": VerticalLayout {
+            padding: root.d == "vertical" ? 11px : 12px;
+            spacing: 10px;
+            Rectangle {
+                width: parent.width - 2 * parent.padding;
+                height: self.width;
+                border-radius: root.look.rounded ? (root.th == "neon" ? 6px : 10px) : 0px;
+                clip: true;
+                background: #ffffff1f;
+                Image { source: root.art; width: parent.width; height: parent.height; image-fit: cover; }
+            }
+            WInfo {
+                title: root.title; who: root.who; fs: root.fs; ink: root.ink; ink2: root.ink2; p: root.p; fill: root.fill; rail: root.rail; times: true;
+                ha: root.d == "vertical" ? center : root.ha;
+                big: root.d == "square" ? 1.15 * 1.0625 : 1.1 * 1.0625;
+            }
+        }
+
+        // ---------- Poster and Mini: the cover filling it, the words over a dark fade ----------
+        if root.over-art: Rectangle {
+            Image { source: root.art; width: parent.width; height: parent.height; image-fit: cover; opacity: root.d == "poster" ? 0.85 : 1; }
+            Rectangle { y: root.d == "poster" ? parent.height * 0.35 : parent.height * 0.45; height: parent.height - self.y; background: @linear-gradient(180deg, #00000000 0%, #000000d1 100%); }
+            WInfo {
+                x: root.d == "poster" ? 16px : 10px;
+                width: parent.width - 2 * self.x;
+                y: parent.height - self.preferred-height - (root.d == "poster" ? 16px : 12px);
+                height: self.preferred-height;
+                title: root.title; who: root.who; ink: #ffffff; ink2: #ffffffc7; ha: root.ha; p: root.p; fill: root.fill; rail: root.rail;
+                fs: root.d == "mini" ? root.fs * 0.8 : root.fs;
+                big: root.d == "poster" ? 1.4 * 1.0625 : 1.0625;
+                track: root.d == "poster";
+                times: true;
+            }
+            if root.d == "mini": Rectangle { y: parent.height - 3px; height: 3px; background: root.rail; Rectangle { x: 0; width: parent.width * root.p; background: root.fill; } }
+        }
+
+        // ---------- Equaliser: the words over bars moving with the music ----------
+        if root.d == "equaliser": Rectangle {
+            HorizontalLayout {
+                padding: 10px;
+                spacing: 3px;
+                alignment: stretch;
+                for i in 24: Rectangle {
+                    property <float> lv: Theme.motion ? 0.12 + 0.5 * abs(sin((root.step * 31 + i * 57) * 1deg)) * (0.5 + 0.5 * abs(sin((root.step * 13 + i * 23) * 1deg))) : 0.15 + 0.35 * abs(sin(i * 40deg));
+                    opacity: 0.55;
+                    Rectangle { y: parent.height * (1 - parent.lv); height: parent.height * parent.lv; border-radius: 2px; background: @linear-gradient(0deg, root.look.c1 0%, root.look.c2 100%); }
+                }
+            }
+            WInfo {
+                x: 14px; width: parent.width - 28px;
+                title: root.title; who: root.who; fs: root.fs; ink: root.ink; ink2: root.ink2; ha: center; p: root.p; fill: root.fill; rail: root.rail;
+                big: 1.3 * 1.0625;
+                track: false;
+            }
+        }
+
+        // ---------- Now and Next: this song, and under it the next one ----------
+        if root.d == "nownext": VerticalLayout {
+            padding-left: 13px;
+            padding-right: 13px;
+            padding-top: 10px;
+            padding-bottom: 10px;
+            spacing: 8px;
             alignment: center;
-            spacing: 2px;
-            Text { text: root.title; font-size: root.mini ? root.fs * 0.8 : root.slim ? root.fs * 0.9 : root.split || root.d == "text" ? root.fs * 1.3 : root.fs * 1.15; font-weight: 800; overflow: elide; horizontal-alignment: root.column ? center : root.look.right ? right : left;
-                color: root.th == "neon" ? #ffffff : root.ink; }
-            if !root.slim: Text { text: root.artist + (root.look.requester && !root.mini ? "  \u{b7}  for PixelPanda" : ""); color: root.th == "neon" ? root.look.c1.mix(#ffffff, 0.4) : root.ink.with-alpha(0.72); font-size: root.mini ? root.fs * 0.7 : root.fs * 0.85; overflow: elide; horizontal-alignment: root.column ? center : root.look.right ? right : left; }
-            if !root.slim && !root.column && !root.mini: Rectangle {
-                height: 4px;
-                border-radius: 2px;
-                background: root.ink.with-alpha(0.2);
-                Rectangle { x: 0; width: parent.width * root.p; border-radius: 2px; background: root.th == "colours" || root.th == "frosted" ? @linear-gradient(90deg, root.look.c1 0%, root.look.c2 100%) : root.look.c1; }
+            WInfo { title: root.title; who: root.who; fs: root.fs; ink: root.ink; ink2: root.ink2; ha: root.ha; p: root.p; fill: root.fill; rail: root.rail; }
+            Rectangle { height: 1px; background: root.ink.with-alpha(0.2); }
+            HorizontalLayout {
+                spacing: 9px;
+                alignment: root.look.right ? end : start;
+                if !root.look.right: Rectangle { width: 26px; height: 26px; border-radius: 5px; background: root.look.c2.with-alpha(0.6); }
+                VerticalLayout {
+                    alignment: center;
+                    Text { text: "NEXT"; font-size: root.fs * 0.85 * 0.75; letter-spacing: 1px; color: root.ink.with-alpha(0.6); horizontal-alignment: root.ha; }
+                    Text { text: "The Next One  \u{b7}  Someone Else"; font-size: root.fs * 0.85; font-weight: 700; color: root.ink.with-alpha(0.85); overflow: elide; horizontal-alignment: root.ha; }
+                }
+                if root.look.right: Rectangle { width: 26px; height: 26px; border-radius: 5px; background: root.look.c2.with-alpha(0.6); }
+            }
+        }
+
+        // ---------- Cassette: the song on its label, the reels under it ----------
+        if root.d == "cassette": VerticalLayout {
+            padding-left: 14px;
+            padding-right: 14px;
+            padding-top: 9px;
+            padding-bottom: 9px;
+            spacing: 7px;
+            Rectangle {
+                border-radius: 5px;
+                background: @linear-gradient(180deg, #f3e6d0 0%, #f3e6d0 62%, root.look.c1 62%, root.look.c1 70%, #f3e6d0 70%, #f3e6d0 100%);
+                WInfo {
+                    x: 10px; width: parent.width - 20px;
+                    y: 2px; height: parent.height * 0.6 - 2px;
+                    title: root.title; who: root.who; fs: root.fs; ink: #2a1f16; ink2: #5a4a3a; ha: root.ha; p: root.p; fill: root.fill; rail: root.rail;
+                    track: false;
+                }
+            }
+            HorizontalLayout {
+                padding-left: 33px;
+                padding-right: 33px;
+                alignment: space-between;
+                for r in 2: Rectangle {
+                    width: 36px;
+                    height: 36px;
+                    border-radius: 18px;
+                    background: #d8d8de;
+                    border-width: 8px;
+                    border-color: #0d0d10;
+                    Rectangle { width: 8px; height: 8px; border-radius: 4px; background: #4a4a52; }
+                }
+            }
+        }
+
+        // ---------- Polaroid: the cover as an instant photo, the title written under it ----------
+        if root.d == "polaroid": Rectangle {
+            property <length> s: parent.width * 0.78;
+            Rectangle {
+                x: (parent.width - parent.s) / 2;
+                y: 4px;
+                width: parent.s;
+                height: parent.s + 9px + root.fs * 2.6;
+                background: #fafafa;
+                drop-shadow-blur: 18px;
+                drop-shadow-offset-y: 6px;
+                drop-shadow-color: #00000080;
+                Rectangle {
+                    x: 9px; y: 9px; width: parent.width - 18px; height: self.width;
+                    clip: true;
+                    background: #00000014;
+                    Image { source: root.art; width: parent.width; height: parent.height; image-fit: cover; }
+                }
+                WInfo {
+                    x: 6px; width: parent.width - 12px;
+                    y: parent.width + 2px; height: root.fs * 2.6;
+                    title: root.title; who: root.who; fs: root.fs * 0.8; ink: #2a2a2a; ink2: #555555; ha: center; p: root.p; fill: root.fill; rail: root.rail;
+                    font: "Segoe Print";
+                    track: false;
+                }
             }
         }
     }
@@ -6055,6 +6311,8 @@ export component AppWindow inherits Window {
     callback mix-toggle();
     // the first-run setup: shown once, the first time OmniPulse opens (Settings > App & Look > Run Setup Again)
     in-out property <bool> setup-open;
+    // (something over the page: the real Stream Widget's web view, which would draw over it, steps aside)
+    out property <bool> covered: root.setup-open || root.taste-open || root.ks-open || root.tp-open || root.la-open || root.name-open || root.ask-open || root.jam-open || root.viz-full || root.queue-open;
     in property <int> setup-at;
     in property <bool> setup-web;
     callback setup-go(string);
@@ -8459,7 +8717,7 @@ export component AppWindow inherits Window {
                         if !root.bot-page: HorizontalLayout {
                           vertical-stretch: 1;
                           spacing: 20px;
-                          ScrollView {
+                          pfsv := ScrollView {
                             horizontal-stretch: 1;
                             property <int> hin: Hi.n;
                             changed hin => { self.content-y = max(min(0px, self.content-y - (Hi.y - self.absolute-position.y - 120px)), self.visible-height - self.content-height); }
@@ -8472,7 +8730,7 @@ export component AppWindow inherits Window {
                             if root.width < 1440px && root.pf-preview == "socials": SocialPreview { items: root.pf-social-items; look: root.pf-social; }
                             if root.width < 1440px && root.pf-preview == "multichat": ChatPreview { look: root.pf-chat; samples: root.pf-chat-samples; }
                             if root.width < 1440px && root.pf-preview == "alerts": AlertPreview { look: root.pf-alert; }
-                            if root.width < 1440px && root.pf-preview == "widget": WidgetPreview { look: root.pf-widget; art: root.now-art; title: root.now-title == "Nothing playing" || root.now-title == "" ? "A Song You Love" : root.now-title; artist: root.now-artist == "" ? "Your Favourite Artist" : root.now-artist; }
+                            if root.width < 1440px && root.pf-preview == "widget": WidgetPreview { view-top: pfsv.absolute-position.y; view-bottom: pfsv.absolute-position.y + pfsv.visible-height; look: root.pf-widget; art: root.now-art; title: root.now-title == "Nothing playing" || root.now-title == "" ? "A Song You Love" : root.now-title; artist: root.now-artist == "" ? "Your Favourite Artist" : root.now-artist; }
                             // (room under the last one, clear of Cancel and Save)
                             padding-bottom: 24px;
                             // (from the top, however tall the window: the room to spare under the last, never
@@ -8797,6 +9055,7 @@ export component AppWindow inherits Window {
                                 flbg := TouchArea {
                                   pointer-event(e) => { if (e.kind == PointerEventKind.down && e.button == PointerEventButton.right) { bgmenu.show(); } }
                                   bgmenu := PopupWindow {
+                                      PopBeat { }
                                     x: flbg.mouse-x;
                                     y: flbg.mouse-y;
                                     width: 210px;
@@ -8857,6 +9116,7 @@ export component AppWindow inherits Window {
                                             height: 26px;
                                             fgh := TouchArea { mouse-cursor: MouseCursor.pointer; clicked => { root.flow-group-fold(it.group); } pointer-event(e) => { if (e.kind == PointerEventKind.down && e.button == PointerEventButton.right) { headmenu.show(); } } }
                                             headmenu := PopupWindow {
+                                                PopBeat { }
                                                 x: fgh.mouse-x;
                                                 y: fgh.mouse-y;
                                                 width: 210px;
@@ -8896,6 +9156,7 @@ export component AppWindow inherits Window {
                                                 clicked => { flkeys.focus(); if (self.ctl) { root.flow-mark(i); } else { root.flow-pick(i); } }
                                             }
                                             rowmenu := PopupWindow {
+                                                PopBeat { }
                                                 x: fita.mouse-x;
                                                 y: fita.mouse-y;
                                                 width: 240px;
@@ -8998,6 +9259,7 @@ export component AppWindow inherits Window {
                                                 Chevron { open: true; tint: fgdd.has-hover ? Theme.text : Theme.muted; x: (parent.width - self.width) / 2; y: (parent.height - self.height) / 2; }
                                             }
                                             groupmenu := PopupWindow {
+                                                PopBeat { }
                                                 x: 0;
                                                 y: parent.height + 4px;
                                                 width: 220px;
@@ -9578,6 +9840,7 @@ export component AppWindow inherits Window {
                             property <int> pl-asked: root.pl-menu-asks;
                             changed pl-asked => { pl-menu.show(); }
                             pl-menu := PopupWindow {
+                                PopBeat { }
                                 x: parent.width - 240px;
                                 y: -12px - (root.own-lists.length + 2) * 32px - 16px;
                                 width: 240px;
@@ -9601,6 +9864,7 @@ export component AppWindow inherits Window {
                             width: 36px;
                             IconButton { tip: "Output device and casting"; d: Icons.output; y: (parent.height - self.height) / 2; clicked => { root.devices-want(); devices-menu.show(); } }
                             devices-menu := PopupWindow {
+                                PopBeat { }
                                 x: parent.width - 280px;
                                 y: -12px - root.devices.length * 32px - 16px - (root.devices-cast-from >= 0 ? 38px : 0px) - 47px;
                                 width: 280px;
@@ -9646,6 +9910,7 @@ export component AppWindow inherits Window {
                             property <length> menu-h: root.more-items.length * 32px + 16px;
                             changed menu-asked => { mbx.at-pointer = true; root.more-want(); more-menu.show(); }
                             more-menu := PopupWindow {
+                                PopBeat { }
                                 x: mbx.at-pointer ? max(8px, min(root.now-menu-x, Win.w - 248px)) - mbx.absolute-position.x : parent.width - 240px;
                                 y: !mbx.at-pointer ? -12px - mbx.menu-h
                                     : (root.now-menu-y + mbx.menu-h > Win.h - 8px ? max(8px, root.now-menu-y - mbx.menu-h) : root.now-menu-y) - mbx.absolute-position.y;

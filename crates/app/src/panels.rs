@@ -549,7 +549,7 @@ fn fields_of(name: &str, vals: &Map<String, Value>, prefs: &Value, lan: &str) ->
                 tog("widgetRounded", "Rounded Corners", ""),
                 stepper("widgetText", "Text Size", "", pct(0.7, 1.6, 0.1)),
                 note("Theme"),
-                themepick("widgetTheme", "Its Panel and Colours"),
+                themepick("widgetTheme", "Panel and Colours"),
                 tog("widgetOwnCol", "Own Colours", "When this is off, it uses your app theme's accent colours."),
             ];
             if vals["widgetOwnCol"].as_bool() == Some(true) {

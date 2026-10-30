@@ -149,7 +149,7 @@
   #reels { display: none; }
   body.cassette #card { background: linear-gradient(180deg, #2d2d33, #1d1d22); border: 0.15rem solid #4a4a52; border-radius: 0.8rem; flex-direction: column; justify-content: flex-start; align-items: stretch; gap: 0.4rem; padding: 0.55rem 0.9rem; }
   body.cassette #art { display: none; }
-  body.cassette #info { flex: none; background: linear-gradient(180deg, #f3e6d0 0 62%, var(--hi) 62% 70%, #f3e6d0 70%); color: #2a1f16; border-radius: 0.3rem; padding: 0.35rem 0.6rem; }
+  body.cassette #info { flex: none; background: linear-gradient(180deg, #f3e6d0 0 calc(100% - 0.75rem), var(--hi) calc(100% - 0.75rem) calc(100% - 0.4rem), #f3e6d0 calc(100% - 0.4rem)); color: #2a1f16; border-radius: 0.3rem; padding: 0.35rem 0.6rem 1rem; }
   body.cassette #artist { color: #5a4a3a; }
   body.cassette #who svg path { fill: #5a4a3a; }
   body.cassette #track, body.cassette #times, body.cassette #xf { display: none; }
@@ -253,6 +253,9 @@
   body.right.vinyl #art, body.right.vinyl #aIcon { margin-left: 0; margin-right: 0.35rem; }
   body.right.pill #card, body.right.pill #alert { padding: 0.4rem 0.4rem 0.4rem 1.1rem; }
   body.right.square #card, body.right.square #alert, body.right.poster #card, body.right.poster #alert { flex-direction: column; }
+  /* (Cassette and Vertical stay one above the other: the tape over its reels, the cover over its words) */
+  body.right.cassette #card, body.right.vertical #card { flex-direction: column; }
+  body.right.vertical #info { text-align: center; }
   body.right.poster #card { align-items: flex-end; }
   body.right.ticker #info { justify-content: flex-end; }
   body.right.ticker #who, body.right.ticker #artist { flex: 0 1 auto; }
@@ -1286,7 +1289,8 @@
   // which one this is: the widget (/), the second (/2: its own look), or the alerts alone (/alerts)
   // (/2, /3...: an output of its own, its look over the first's)
   const OUT = Number((location.pathname.match(/^\/(\d+)/) || [])[1] || 1), SECOND = OUT > 1, ONLY_ALERTS = location.pathname.startsWith("/alerts");
-  if (PREVIEW) document.body.classList.add("preview");
+  // (in the app's own page, over its preview: no checks behind it, only the page's colours)
+  if (PREVIEW && !/[?&]inline=1/.test(location.search)) document.body.classList.add("preview");
   let previewAlertAt = 0;
   async function poll() {
     try {

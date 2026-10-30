@@ -8923,6 +8923,69 @@ fn widget_preview(shared: &Shared) {
     omnipulse_core::widget::preview_set(Some(state));
 }
 
+thread_local! {
+    /// the real Stream Widget in its page: its web view, whether it's loaded, and where it was last put
+    static LIVE: RefCell<Option<(wry::WebView, Arc<std::sync::atomic::AtomicBool>, (f32, f32, f32, f32, bool))>> = const { RefCell::new(None) };
+    /// the menus' count as last seen, and when it last moved
+    static LIVE_BEAT: std::cell::Cell<(i32, Option<std::time::Instant>)> = const { std::cell::Cell::new((0, None)) };
+}
+
+/// The Stream Widget's page: the real widget (its own page, with what's on the page before you save) in a web
+/// view sitting on the preview's card. It steps aside, showing the drawing under it, while the card isn't all
+/// in sight or a menu or anything else is over the page (a web view draws over everything in the window), and
+/// it's let go when you leave the page
+fn live_widget(shared: &Shared) {
+    let Some(ui) = shared.borrow().ui.upgrade() else { return };
+    let g = ui.global::<WLive>();
+    if !(ui.get_pf_open() && ui.get_pf_preview() == "widget") {
+        if LIVE.with(|l| l.borrow_mut().take().is_some()) { g.set_live(false); }
+        return;
+    }
+    // (a menu open: its count moving, or it moved a moment ago)
+    let beat = g.get_beat();
+    let menu = LIVE_BEAT.with(|b| {
+        let (last, at) = b.get();
+        if beat != last { b.set((beat, Some(std::time::Instant::now()))); return true; }
+        at.is_some_and(|t| t.elapsed() < std::time::Duration::from_millis(400))
+    });
+    let show = g.get_seen() && !menu && !ui.get_covered() && g.get_w() > 1.0 && !ui.window().is_minimized();
+    let at = (g.get_x(), g.get_y(), g.get_w(), g.get_h(), show);
+    let rect = wry::Rect { position: wry::dpi::LogicalPosition::new(at.0 as f64, at.1 as f64).into(), size: wry::dpi::LogicalSize::new(at.2 as f64, at.3 as f64).into() };
+    let made = LIVE.with(|l| l.borrow().is_some());
+    if !made {
+        if !show { return; }
+        let prefs = shared.borrow().web.prefs.clone();
+        let port = prefs["widgetPort"].as_u64().unwrap_or(7878);
+        // (its server, if neither widget's on yet)
+        let mut on = prefs.clone();
+        if let Some(o) = on.as_object_mut() { o.insert("widget".into(), serde_json::json!(true)); }
+        if integrations::widget_start(&prefs).is_none() { let _ = integrations::widget_start(&on); }
+        widget_preview(shared);
+        if let Ok(d) = omnipulse_core::data_dir() { unsafe { std::env::set_var("WEBVIEW2_USER_DATA_FOLDER", d.join("webview")); } }
+        let url = format!("http://127.0.0.1:{port}/?preview=1&inline=1");
+        let loaded = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let l2 = loaded.clone();
+        use slint::winit_030::WinitWindowAccessor;
+        let view = ui.window().with_winit_window(|w| wry::WebViewBuilder::new().with_url(&url).with_transparent(true).with_bounds(rect)
+            .with_on_page_load_handler(move |e, _| if matches!(e, wry::PageLoadEvent::Finished) { l2.store(true, std::sync::atomic::Ordering::Relaxed); })
+            .build_as_child(w).ok()).flatten();
+        let Some(view) = view else { return };
+        LIVE.with(|l| *l.borrow_mut() = Some((view, loaded, at)));
+        return;
+    }
+    LIVE.with(|l| {
+        let mut l = l.borrow_mut();
+        let Some((view, loaded, last)) = l.as_mut() else { return };
+        if *last != at {
+            if show { let _ = view.set_bounds(rect); }
+            if show != last.4 { let _ = view.set_visible(show); }
+            *last = at;
+        }
+        // (the drawing under it hidden once the real one has had a moment to come in)
+        g.set_live(show && loaded.load(std::sync::atomic::Ordering::Relaxed));
+    });
+}
+
 /// The pop-out preview: the widget being set up, in a window of its own (Edge's app window, no browser
 /// around it; else the default browser), as it'll look, changing as the page does
 fn widget_preview_open(shared: &Shared, name: &str) {
@@ -15200,6 +15263,9 @@ fn main() -> Result<(), slint::PlatformError> {
             }
         }
     });
+
+    // (the Stream Widget's page: the real widget over its preview, kept in place as the page scrolls)
+    let _live = { let t = slint::Timer::default(); let s = shared.clone(); t.start(slint::TimerMode::Repeated, std::time::Duration::from_millis(40), move || live_widget(&s)); t };
 
     // OMNIPULSE_SELFTEST=<folder>: visits each page, plays the first track silently, saves a picture of
     // each page and quits (for checking the app without anyone at the screen)
