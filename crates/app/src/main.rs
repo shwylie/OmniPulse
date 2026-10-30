@@ -4661,7 +4661,7 @@ fn flows_open(shared: &Shared) {
     ui.set_flow_req(false);
     flows_paint(shared);
     ui.set_flow_open(true);
-    picks_refresh(shared);
+    picks_refresh(shared, false);
 }
 
 /// Song Requests on the Actions page: their settings (the Suite's sheet for them) on the right
@@ -5043,15 +5043,33 @@ fn pick_options(kind: &str) -> Vec<String> {
     o
 }
 
-/// The pickers' lists, asked of the Suite again (the Actions page opening, or Look Again)
-fn picks_refresh(shared: &Shared) {
-    let Some(p) = plugrun::get(BOT) else { return };
+/// The pickers' lists, asked of the Suite again (the Actions page opening, or Look Again: `tell` says what
+/// came back, or why nothing did)
+fn picks_refresh(shared: &Shared, tell: bool) {
+    let say = |shared: &Shared, t: String| if let Some(ui) = shared.borrow().ui.upgrade() { ui.set_status(t.into()); };
+    let Some(p) = plugrun::get(BOT) else {
+        if tell { say(shared, "The Suite isn't running. Switch it on (Settings > Streaming), then look again.".into()); }
+        return;
+    };
     let rt = shared.borrow().rt.clone();
     rt.spawn(async move {
-        let Ok(v) = p.call("pickLists", vec![]).await else { return };
+        let v = p.call("pickLists", vec![]).await;
         let _ = slint::invoke_from_event_loop(move || SHARED.with(|s| {
-            PICKS.with(|x| *x.borrow_mut() = v);
             let Some(sh) = s.borrow().clone() else { return };
+            let v = match v {
+                Ok(v) => v,
+                Err(e) => { if tell { say(&sh, format!("Couldn't look again: {e}")); } return; }
+            };
+            if tell {
+                let count = |plat: &str| v["rewards"].as_array().map_or(0, |a| a.iter().filter(|r| r["platform"] == plat).count());
+                let asked: Vec<String> = v["asked"].as_array().into_iter().flatten().filter_map(|x| x.as_str().map(String::from)).collect();
+                let found: Vec<String> = asked.iter().map(|p| format!("{} on {}", plural(count(p), "reward", "rewards"), if p == "kick" { "Kick" } else { "Twitch" })).collect();
+                let errors: Vec<String> = v["errors"].as_array().into_iter().flatten().filter_map(|x| x.as_str().map(String::from)).collect();
+                say(&sh, if asked.is_empty() { "Sign in to Twitch or Kick in the Suite's settings first, so it can read your rewards.".into() }
+                    else if !errors.is_empty() { format!("Couldn't read your rewards. {}", errors.join(" ")) }
+                    else { format!("Found {}.", found.join(" and ")) });
+            }
+            PICKS.with(|x| *x.borrow_mut() = v);
             let open = sh.borrow().ui.upgrade().is_some_and(|ui| ui.get_flow_open());
             if open { flows_paint(&sh); }
         }));
@@ -5118,7 +5136,7 @@ fn reward_make(shared: &Shared, f: RewardForm) {
                 flows_save(&sh);
             }
             flows_paint(&sh);
-            picks_refresh(&sh);
+            picks_refresh(&sh, false);
             say(if failed.is_empty() { format!("Made {title}.") } else { format!("Made {title}, but not everywhere: {failed}") });
         }));
     });
@@ -5437,7 +5455,7 @@ fn flows_wire(ui: &AppWindow, shared: &Shared) {
                 Some(k) => {
                     let opts = pick_options(fl.kind);
                     let Some(o) = opts.get(k) else { return };
-                    if o == PICK_AGAIN { picks_refresh(&s); if let Some(ui) = s.borrow().ui.upgrade() { ui.set_status("Looking again...".into()); } return; }
+                    if o == PICK_AGAIN { if let Some(ui) = s.borrow().ui.upgrade() { ui.set_status("Looking again...".into()); } picks_refresh(&s, true); return; }
                     if o == PICK_NEW_REWARD { if let Some(ui) = s.borrow().ui.upgrade() { ui.set_reward_make_open(true); } return; }
                     if fl.kind == "reward" {
                         let Some((title, plats, ids, _)) = pick_rewards().into_iter().nth(k) else { return };

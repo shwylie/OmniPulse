@@ -878,7 +878,8 @@ mod tests {
                     let answer = if line.contains("/helix/") {
                         helixed.lock().unwrap().push(format!("{} {}", line.split(' ').take(2).collect::<Vec<_>>().join(" "), body));
                         if line.contains("/helix/users") { json!({ "data": [{ "id": "99", "display_name": "Baddie" }] }) } else { json!({ "data": [] }) }
-                    } else if line.contains("/channels/") { json!({ "id": 5, "user_id": 7, "chatroom": { "id": 9 } }) }
+                    } else if line.starts_with("GET /v1/channels/rewards") { json!({ "data": [{ "id": 31, "title": "Hydrate", "cost": 100 }] }) }
+                    else if line.contains("/channels/") { json!({ "id": 5, "user_id": 7, "chatroom": { "id": 9 } }) }
                         else if line.contains("/realtime/connection") { json!({ "data": { "connections": [{ "credentials": { "url": format!("ws://127.0.0.1:{sp}/ws") }, "provider": "centrifugo" }] } }) }
                         else if line.contains("/realtime/auth/connection") { json!({ "data": { "token": "guest" } }) }
                         else if line.contains("/v1/chat") {
@@ -978,6 +979,10 @@ mod tests {
         assert!(!said("never") && !said("looped"), "{b:#?}");
         assert!(h.iter().any(|x| x == &json!({})), "{h:#?}");
         assert!(h.iter().any(|x| x["subscribe"]["channel"] == "chatrooms.9.v2") && h.iter().any(|x| x["connect"]["token"] == "guest"), "{h:#?}");
+        // (Look Again's lists: Kick's rewards read, and what was asked, with nothing gone wrong)
+        let picks = rt.block_on(p.call("pickLists", vec![])).unwrap();
+        assert_eq!(picks["rewards"], json!([{ "platform": "kick", "id": "31", "title": "Hydrate", "cost": 100 }]), "{picks:#?}");
+        assert_eq!((picks["asked"].clone(), picks["errors"].clone()), (json!(["kick"]), json!([])), "{picks:#?}");
         // (Twitch's management steps: as Twitch's API has them; Discord's webhook through the app)
         let ran = rt.block_on(p.call("runAction", vec![json!("Manage")])).unwrap();
         assert_eq!(ran, json!("Ran Manage."));

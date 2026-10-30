@@ -3179,10 +3179,11 @@ OmniPulse.register({
   // the Actions page's pickers: your rewards on Twitch and Kick, and OBS's scenes and sources (each one only
   // if it's reachable now)
   async pickLists() {
-    const out = { rewards: [], scenes: [], sources: [] };
+    // (and what couldn't be read, and why: Look Again says so)
+    const out = { rewards: [], scenes: [], sources: [], errors: [], asked: [] };
     const jobs = [];
-    if (S().token && S().userId) jobs.push(helix("GET", "channel_points/custom_rewards?broadcaster_id=" + S().userId).then((j) => (j.data || []).forEach((r) => out.rewards.push({ platform: "twitch", id: r.id, title: r.title, cost: r.cost }))).catch(() => {}));
-    if (S().kickToken) jobs.push(kickApi("GET", "channels/rewards").then((j) => (j.data || []).forEach((r) => out.rewards.push({ platform: "kick", id: String(r.id), title: r.title, cost: r.cost }))).catch(() => {}));
+    if (S().token && S().userId) { out.asked.push("twitch"); jobs.push(helix("GET", "channel_points/custom_rewards?broadcaster_id=" + S().userId).then((j) => (j.data || []).forEach((r) => out.rewards.push({ platform: "twitch", id: r.id, title: r.title, cost: r.cost }))).catch((e) => out.errors.push("Twitch: " + e.message))); }
+    if (S().kickToken) { out.asked.push("kick"); jobs.push(kickApi("GET", "channels/rewards").then((j) => (j.data || []).forEach((r) => out.rewards.push({ platform: "kick", id: String(r.id), title: r.title, cost: r.cost }))).catch((e) => out.errors.push("Kick: " + e.message))); }
     if (obs && obsReady) {
       jobs.push(obsCall("GetSceneList").then((d) => { out.scenes = (d.scenes || []).map((x) => x.sceneName).reverse(); }).catch(() => {}));
       jobs.push(obsCall("GetInputList").then((d) => { out.sources = (d.inputs || []).map((x) => x.inputName).sort((a, b) => a.localeCompare(b)); }).catch(() => {}));
