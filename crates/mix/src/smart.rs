@@ -171,8 +171,8 @@ pub const MAX_RATE: f64 = 0.04;
 /// How far apart two songs' tempos can be for a blend with the tempo ridden from one to the other (as a
 /// DJ ramps between genres: 87 into 120, 105 into 128), the faster over the slower; past 4%, the blend's
 /// always 32 beats, room for it. (Your ratings, 2026-10-17: every ride of 46% or more was bad, the good
-/// ones 22% or less; 50% before.)
-pub const MAX_RAMP_BLEND: f64 = 0.40;
+/// ones 22% or less; 50% before. 2026-10-30: 22% and 25% good, 25% and both of 36% bad: 40% before.)
+pub const MAX_RAMP_BLEND: f64 = 0.30;
 /// A slowdown up to this stays one (Goodbye's 36% sounded wrong); past it, the one playing is counted at half time and sped up instead
 /// (Shooting Stars' 128 into Rocket Girl's 105 was counted as 64 and sped up 64%: rated bad)
 const MAX_SLOWDOWN: f64 = 0.25;
@@ -669,17 +669,19 @@ mod tests {
 
     #[test]
     fn a_big_slowdown_is_a_speedup_from_half_time() {
-        // 174 into 120: counted as 87, both sped up (B in at 87, to its own; A from 87's bars on)
+        // 174 into 110: counted as 87, both sped up (B in at 87, to its own; A from 87's bars on)
         let a = song(174.0, &levels(16, 96, 16), 0.6, "8A");
-        let b = song(120.0, &levels(8, 48, 8), 0.6, "8A");
+        let b = song(110.0, &levels(8, 48, 8), 0.6, "8A");
         // (each as long as its beats)
         let side = |m: &'static Measured| Side { dur_ms: m.to_ms, rhythm: Some(m), ..Default::default() };
         let (a, b): (&'static Measured, &'static Measured) = (Box::leak(Box::new(a)), Box::leak(Box::new(b)));
         let p = blend(&side(a), &side(b), 0).expect("a blend");
-        assert!((p.rate - 87.0 / 120.0).abs() < 0.01 && p.out_tempo > 1.35, "{} {}", p.rate, p.out_tempo);
-        // 174 into 128 (87 sped up 47%): too far, never ridden that far
-        let c: &'static Measured = Box::leak(Box::new(song(128.0, &levels(8, 48, 8), 0.6, "8A")));
-        assert!(blend(&side(a), &side(c), 0).is_none());
+        assert!((p.rate - 87.0 / 110.0).abs() < 0.01 && p.out_tempo > 1.2, "{} {}", p.rate, p.out_tempo);
+        // 174 into 120 (87 sped up 38%) and into 128 (47%): too far, never ridden that far
+        for bpm in [120.0, 128.0] {
+            let c: &'static Measured = Box::leak(Box::new(song(bpm, &levels(8, 48, 8), 0.6, "8A")));
+            assert!(blend(&side(a), &side(c), 0).is_none(), "{bpm}");
+        }
     }
 
     #[test]
