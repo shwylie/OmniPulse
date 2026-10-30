@@ -981,7 +981,8 @@ pub fn migrate() {
         if cfg!(test) || std::env::var_os("OMNIPULSE_SELFTEST").is_some() { return; }
         let Some(old) = crate::data_dir().ok().map(|d| d.join("state").join("rhythm.json")) else { return };
         let Ok(text) = std::fs::read_to_string(&old) else { return };
-        let Ok(all) = serde_json::from_str::<std::collections::HashMap<String, Measured>>(&text) else { return };
+        // (one that can't be read is no use to anyone: gone too, its songs measured again as they play)
+        let Ok(all) = serde_json::from_str::<std::collections::HashMap<String, Measured>>(&text) else { let _ = std::fs::remove_file(&old); return };
         drop(text);
         let mut ok = true;
         for (k, m) in &all {

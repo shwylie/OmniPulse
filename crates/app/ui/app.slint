@@ -105,7 +105,7 @@ export struct LookAlike { new: string, old: string, choice: string }
 export struct StatBar { label: string, v: float, tip: string }
 export struct StatRow { rank: int, name: string, sub: string, share: float, art: image, row: Row, song: bool }
 export struct StatBlock { kind: string, kicker: string, big: string, sub: string, wide: bool, bars: [StatBar], rows: [StatRow], cells: [int] }
-export struct SetRow { head: string, label: string, note: string, on: bool, key: string, sub: bool, more: bool, button: string }
+export struct SetRow { head: string, label: string, note: string, on: bool, key: string, sub: bool, more: bool, button: string, cost: string }
 /// One of a plugin's settings: its kind ("toggle", "text", "password", "number", "select"), what it's
 /// set to (as text; "true"/"false" for a toggle), and a select's options
 /// A step of the key setup: what to do, whether it has a page to open, and values to copy
@@ -2190,12 +2190,96 @@ component HiGlow inherits Rectangle {
 }
 
 /// A hand-made setting's name: lit when a search found it
+/// What each setting outside the Stream Suite uses of your computer, beyond playing music: by the name its
+/// row shows (a plugin's: "Plugin"). Tags only, no figures: what it takes, and in its tip, why
+export global Costs {
+    public pure function tags(n: string) -> string {
+        return n == "Seamless Mix (WIP)" ? "+CPU  +RAM  +DISK"
+            : n == "Beatmatched Blends" ? "+CPU"
+            : n == "Match Keys" ? "+CPU"
+            : n == "Vocal Handoff" ? "+CPU  +NET"
+            : n == "Send My Ratings to the Developer" ? "+NET"
+            : n == "Autoplay" ? "+NET"
+            : n == "Skip non-music parts" ? "+NET"
+            : n == "Deezer and Apple Music catalogues" ? "+NET"
+            : n == "MusicBrainz" ? "+NET"
+            : n == "Listen Along & Jams" ? "+NET"
+            : n == "Follow Everywhere" ? "+NET"
+            : n == "Chromecast" ? "+NET"
+            : n == "Lyrics" ? "+NET"
+            : n == "Music Folders" ? "+CPU  +DISK"
+            : n == "Fade Between Tracks" ? "+CPU"
+            : n == "Skip Silences" ? "+CPU  +NET"
+            : n == "Match Loudness" ? "+CPU  +NET"
+            : n == "Visualiser" ? "+CPU  +GPU"
+            : n == "In the Player" ? "+CPU"
+            : n == "On Now Playing" ? "+CPU"
+            : n == "Theme" ? "+CPU"
+            : n == "Animations" ? "+CPU"
+            : n == "Performance Mode" ? "\u{2212}CPU  \u{2212}GPU"
+            : n == "Pause for Games" ? "\u{2212}CPU"
+            : n == "Hardware Acceleration" ? "+GPU  +RAM"
+            : n == "Taskbar Widget" ? "+CPU  +RAM"
+            : n == "Updates" ? "+NET"
+            : n == "Plugin" ? "+RAM  +NET"
+            : "";
+    }
+    public pure function why(n: string) -> string {
+        return n == "Seamless Mix (WIP)" ? "Measures each song before it plays (its beat, key and phrases): processing as it does, the beat model kept in memory while this is on, and a small file a song on disk for what it learns."
+            : n == "Beatmatched Blends" ? "Stretches both songs to one tempo while they blend, as they play."
+            : n == "Match Keys" ? "Shifts the pitch of both songs while they blend, as they play."
+            : n == "Vocal Handoff" ? "Filters the vocals while two songs blend, and fetches timed lyrics to know where they sing."
+            : n == "Send My Ratings to the Developer" ? "Sends your Mix Good and Mix Bad ratings now and then (a small upload)."
+            : n == "Autoplay" ? "Looks up similar songs online when your queue runs low."
+            : n == "Skip non-music parts" ? "Asks SponsorBlock about each YouTube song as it starts (a small lookup)."
+            : n == "Deezer and Apple Music catalogues" ? "Search, Discover and artist pages ask these catalogues too."
+            : n == "MusicBrainz" ? "Search asks MusicBrainz too."
+            : n == "Listen Along & Jams" ? "Stays connected to the Jam server while you're in a Jam, sending what's playing."
+            : n == "Follow Everywhere" ? "Following an artist also follows them on your other platforms (a request each)."
+            : n == "Chromecast" ? "Looks for speakers and TVs on your network, and while casting sends them your music, uncompressed, over your network."
+            : n == "Lyrics" ? "Fetches each song's lyrics from the sources you pick."
+            : n == "Music Folders" ? "Reads your folders and each file's details when they're scanned, and keeps an index of them on disk."
+            : n == "Fade Between Tracks" ? "Two songs play at once while they fade."
+            : n == "Skip Silences" ? "Measures each song once to find its silences: it's read through (downloaded first from SoundCloud or YouTube)."
+            : n == "Match Loudness" ? "Measures each song once for its loudness: it's read through (downloaded first from SoundCloud or YouTube)."
+            : n == "Visualiser" ? "Reads the music many times a second and redraws to it. The scenes marked WIP use your graphics card, and more memory."
+            : n == "In the Player" ? "Draws the visualiser in the player too, many times a second."
+            : n == "On Now Playing" ? "Draws the visualiser on Now Playing too, many times a second."
+            : n == "Theme" ? "Glowing themes take more drawing each time the window changes. Performance Mode turns the glow off."
+            : n == "Animations" ? "Fades and motion redraw the window as they move."
+            : n == "Performance Mode" ? "Uses less: animations and glowing backgrounds off, and the visualiser updates half as often."
+            : n == "Pause for Games" ? "Uses less while a game is full screen: the visualiser stops until you leave it."
+            : n == "Hardware Acceleration" ? "Draws the app on your graphics card: about 100 MB more memory."
+            : n == "Taskbar Widget" ? "A small window of its own by the clock, redrawn as the song plays."
+            : n == "Updates" ? "Checks for a new version now and then (a small request), and downloads it when you update."
+            : n == "Plugin" ? "Each plugin runs walled off in an engine of its own: some memory, and the sites it lists."
+            : "";
+    }
+}
+
+/// A setting's cost tag (+CPU, +RAM, +DISK, +NET, +GPU; minus what it saves), its tip saying why; nothing
+/// for a setting that takes nothing extra
+component CostTag inherits Rectangle {
+    in property <string> name;
+    property <string> t: Costs.tags(root.name);
+    visible: root.t != "";
+    width: root.t == "" ? 0px : ctt.preferred-width + 12px;
+    height: root.t == "" ? 0px : ctt.preferred-height + 4px;
+    border-radius: 6px;
+    background: cta.has-hover ? Theme.elevated : Theme.line.with-alpha(0.6);
+    ctt := Text { text: root.t; color: Theme.muted; font-size: 10px; font-weight: 700; }
+    TipSpot { tip: Costs.why(root.name); hover: cta.has-hover; }
+    cta := TouchArea { }
+}
+
 component HiTitle inherits Rectangle {
     in property <string> text;
     height: ht.preferred-height;
-    min-width: ht.preferred-width;
+    min-width: ht.preferred-width + (hct.width > 0 ? hct.width + 8px : 0px);
     HiGlow { x: -12px; y: -7px; width: parent.width + 24px; height: parent.height + 14px; lit: Hi.label != "" && Hi.label == root.text; r: 10px; }
-    ht := Text { width: parent.width; text: root.text; color: Hi.label == root.text ? Theme.accent : Theme.text; font-weight: 700; animate color { duration: 300ms; } }
+    ht := Text { x: 0; width: min(self.preferred-width, parent.width - (hct.width > 0 ? hct.width + 8px : 0px)); text: root.text; color: Hi.label == root.text ? Theme.accent : Theme.text; font-weight: 700; animate color { duration: 300ms; } }
+    // (what it costs: +CPU and so on, by its name)
+    hct := CostTag { name: root.text; x: ht.width + 8px; y: (parent.height - self.height) / 2; }
 }
 
 /// App & Look's preview: the app, small, as it's set (its theme, tint, accents, player style, title bar,
@@ -4405,15 +4489,8 @@ component SetRowView inherits Card {
                 spacing: 8px;
                 alignment: start;
                 Text { text: root.r.label; color: Theme.text; font-weight: 700; vertical-alignment: center; }
-                // (what it costs, apart from what it does: Seamless Mix measures each song before it plays)
-                if root.r.key == "smartOn": Rectangle {
-                    width: costt.preferred-width + 12px;
-                    border-radius: 6px;
-                    background: costa.has-hover ? Theme.elevated : Theme.line.with-alpha(0.6);
-                    costt := Text { text: "+CPU  +RAM  +DISK"; color: Theme.muted; font-size: 10px; font-weight: 700; }
-                    TipSpot { tip: "Uses more of your computer: it measures each song before it plays (its beat, key and phrases), which takes processing, memory, and disk space for what it learns."; hover: costa.has-hover; }
-                    costa := TouchArea { }
-                }
+                // (what it costs, apart from what it does: +CPU and so on)
+                VerticalLayout { alignment: center; CostTag { name: root.r.cost != "" ? root.r.cost : root.r.label; } }
             }
             // (its height at the width it gets: wrapped onto more lines in a narrow window, all of it counted)
             if root.r.note != "": Text { text: root.r.note; color: Theme.muted; font-size: 12px; wrap: word-wrap; min-height: self.preferred-height; }
@@ -8775,6 +8852,8 @@ export component AppWindow inherits Window {
                             VerticalLayout {
                             spacing: 12px;
                             padding-right: 10px;
+                            // (what this page's setting uses of your computer, by its name: Seamless Mix's, say)
+                            if Costs.tags(root.pf-head) != "": HorizontalLayout { alignment: start; spacing: 8px; Text { text: "What It Uses"; color: Theme.muted; font-size: 12px; vertical-alignment: center; } VerticalLayout { alignment: center; CostTag { name: root.pf-head; } } }
                             // (the preview, on a smaller window: first, above what it shows)
                             if root.width < 1440px && root.pf-preview == "lyrics": LyricsPreview { view-top: pfsv.absolute-position.y; view-bottom: pfsv.absolute-position.y + pfsv.visible-height; look: root.pf-lyrics; }
                             if root.width < 1440px && root.pf-preview == "socials": SocialPreview { view-top: pfsv.absolute-position.y; view-bottom: pfsv.absolute-position.y + pfsv.visible-height; items: root.pf-social-items; look: root.pf-social; }
@@ -8874,7 +8953,7 @@ export component AppWindow inherits Window {
                                   horizontal-stretch: 1;
                                   alignment: center;
                                   spacing: 2px;
-                                  Text { text: f.label; color: Theme.text; font-weight: 700; }
+                                  HorizontalLayout { spacing: 8px; alignment: start; Text { text: f.label; color: Theme.text; font-weight: 700; } VerticalLayout { alignment: center; CostTag { name: f.label; } } }
                                   if f.note != "": Text { text: f.note; color: Theme.muted; font-size: 12px; wrap: word-wrap; }
                               }
                               if f.kind == "toggle": CenterToggle { checked: f.value == "true"; toggled => { root.pf-set(i, self.checked ? "true" : "false"); } }

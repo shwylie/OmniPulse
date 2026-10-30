@@ -6992,11 +6992,11 @@ fn paint_settings(a: &App) {
                 let on = if *key == "autoplay" { a.autoplay } else { set_row_on(&a.web.prefs, key, *dflt) };
                 // (its settings: in a panel, with it on; Streamer Mode leaves the addresses and keys out)
                 let more = on && panels::of_switch(key).is_some() && !(streamer && matches!(*key, "req" | "remoteOn"));
-                SetRow { head: Default::default(), label: (*label).into(), note: (*note).into(), on, key: (*key).into(), sub: matches!(*key, "streamSafe" | "alertsOn"), more, button: Default::default() }
+                SetRow { cost: Default::default(), head: Default::default(), label: (*label).into(), note: (*note).into(), on, key: (*key).into(), sub: matches!(*key, "streamSafe" | "alertsOn"), more, button: Default::default() }
             }).collect();
         // Lyrics: where they come from, and in which order (its own page, as the web app's)
         if sec == "Integrations" {
-            list.push(SetRow { head: Default::default(), label: "Lyrics".into(), note: "Where lyrics come from, and in which order.".into(), on: false, key: "lyricsSources".into(), sub: false, more: false, button: "Sources".into() });
+            list.push(SetRow { cost: Default::default(), head: Default::default(), label: "Lyrics".into(), note: "Where lyrics come from, and in which order.".into(), on: false, key: "lyricsSources".into(), sub: false, more: false, button: "Sources".into() });
         }
         // a plugin whose settings live here (the chatbot's, in Streaming), on on the Plugins page: its own switch
         // (it running or not) and its settings, there either way
@@ -7005,7 +7005,7 @@ fn paint_settings(a: &App) {
                 let m = &p.manifest;
                 if m.section != sec || !plugin_on(&a.web.prefs, &m.id) { continue; }
                 let note = format!("{}{}", if m.description.is_empty() { String::new() } else { format!("{} ", m.description) }, plugin_state(&a.web.prefs, m));
-                list.push(SetRow { head: Default::default(), label: place_label(m).into(), note: note.into(), on: plugin_runs(&a.web.prefs, &m.id), key: format!("plugRun_{}", m.id).into(), sub: false, more: !streamer, button: Default::default() });
+                list.push(SetRow { cost: Default::default(), head: Default::default(), label: place_label(m).into(), note: note.into(), on: plugin_runs(&a.web.prefs, &m.id), key: format!("plugRun_{}", m.id).into(), sub: false, more: !streamer, button: Default::default() });
             }
         }
         // the plugins installed (the web app adds and removes them; each one switches on and off here)
@@ -7017,10 +7017,10 @@ fn paint_settings(a: &App) {
                 let note = format!("{}{}{home}{}", if m.description.is_empty() { String::new() } else { format!("{} ", m.description) }, if p.bundled { "Comes with OmniPulse. " } else { "" }, state);
                 // (its settings, from here too: a plugin with a page elsewhere (the chatbot's, in Streaming) goes there, once it's on)
                 let more = if m.section.is_empty() { m.settings.as_array().is_some_and(|l| !l.is_empty()) } else { plugin_on(&a.web.prefs, &m.id) };
-                list.push(SetRow { head: Default::default(), label: plugin_label(m).into(), note: note.into(), on: plugin_on(&a.web.prefs, &m.id), key: format!("plugOn_{}", m.id).into(), sub: false, more, button: Default::default() });
+                list.push(SetRow { cost: "Plugin".into(), head: Default::default(), label: plugin_label(m).into(), note: note.into(), on: plugin_on(&a.web.prefs, &m.id), key: format!("plugOn_{}", m.id).into(), sub: false, more, button: Default::default() });
             }
             // (the plugins: adding one, and taking out the ones you've added; it stays at the top)
-            list.insert(0, SetRow { head: Default::default(), label: "Add a Plugin".into(), note: "Music sources made by others. Each is walled off and only reaches the sites it lists.".into(), on: false, key: "plugAdd".into(), sub: false, more: false, button: "Add".into() });
+            list.insert(0, SetRow { cost: Default::default(), head: Default::default(), label: "Add a Plugin".into(), note: "Music sources made by others. Each is walled off and only reaches the sites it lists.".into(), on: false, key: "plugAdd".into(), sub: false, more: false, button: "Add".into() });
         }
         ModelRc::from(Rc::new(VecModel::from(list)))
     };
