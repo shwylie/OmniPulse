@@ -145,6 +145,27 @@
   /* the tip on hover: one for the whole dock, placed by its script so it always stays inside the dock */
   #tip { position: fixed; left: 0; top: 0; display: none; max-width: calc(100vw - 8px); box-sizing: border-box; background: #000c; color: #fff; font-size: 11px; font-weight: 400; line-height: 1.35; padding: 4px 8px; border-radius: 6px; pointer-events: none; z-index: 1000; overflow-wrap: anywhere; }
   #tip.show { display: block; }
+  /* the emote menu (over the box, from its smiley) and the Tab suggestions (over the box, as you type) */
+  #send { position: relative; }
+  form button#emoBtn { padding: 0 8px; background: transparent; border: 1px solid var(--line); color: var(--dim); font-size: 15px; line-height: 1; }
+  form button#emoBtn:hover, form button#emoBtn[aria-expanded="true"] { color: var(--text); border-color: var(--dim); }
+  #emo { position: absolute; left: 8px; right: 8px; bottom: calc(100% + 4px); max-height: min(340px, 60vh); display: none; flex-direction: column; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 8px 24px #0008; z-index: 30; overflow: hidden; }
+  #emo.open { display: flex; }
+  #emo input { flex: none; margin: 8px; padding: 5px 8px; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; color: var(--text); font: inherit; }
+  #emo input:focus { outline: none; border-color: var(--accent); }
+  #emoList { overflow-y: auto; padding: 0 8px 8px; }
+  #emoList h3 { margin: 8px 0 4px; font-size: 11px; font-weight: 600; color: var(--dim); }
+  #emoList .grid { display: flex; flex-wrap: wrap; gap: 2px; }
+  #emoList button { width: 34px; height: 34px; padding: 3px; border: 0; border-radius: 6px; background: transparent; cursor: pointer; display: grid; place-items: center; }
+  #emoList button:hover, #emoList button:focus-visible { background: var(--line); outline: none; }
+  #emoList img { max-width: 28px; max-height: 28px; }
+  #emoList .none { color: var(--dim); font-size: 12px; padding: 10px 2px; }
+  #sugg { position: absolute; left: 8px; right: 8px; bottom: calc(100% + 4px); display: none; flex-wrap: wrap; gap: 4px; padding: 6px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 6px 18px #0007; z-index: 29; }
+  #sugg.open { display: flex; }
+  #sugg span { display: inline-flex; align-items: center; gap: 4px; padding: 2px 6px; border-radius: 5px; color: var(--dim); font-size: 12px; cursor: pointer; }
+  #sugg span img { height: 18px; width: auto; }
+  #sugg span.on { background: var(--line); color: var(--text); }
+  #sugg .how { flex-basis: 100%; font-size: 10.5px; color: var(--dim); padding: 0 2px; }
 </style>
 </head>
 <body>
@@ -202,7 +223,10 @@
 <button id="more" type="button">New messages &#8595;</button>
 <form id="send" autocomplete="off">
   <select id="to" title="Where it goes"><option value="all">Both</option><option value="twitch">Twitch</option><option value="kick">Kick</option></select>
-  <input id="text" maxlength="500" placeholder="Send a message">
+  <input id="text" maxlength="500" placeholder="Send a message (Tab completes @names and emotes)">
+  <button type="button" id="emoBtn" data-tip="Emotes" aria-label="Emotes" aria-expanded="false">&#128578;</button>
+  <div id="emo" role="dialog" aria-label="Emotes"><input id="emoFind" placeholder="Find an emote" autocomplete="off"><div id="emoList"></div></div>
+  <div id="sugg" role="listbox"></div>
   <button type="submit" class="ib" data-tip="Send it" aria-label="Send it"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg></button>
 </form>
 <script>
@@ -476,6 +500,7 @@
 
   function addMessage(m) {
     if (m.notice) return addNotice(m.notice, /^Couldn't/.test(m.notice));
+    heard(m);
     const r = document.createElement("div");
     const pl = m.platform === "kick" ? "kick" : m.platform === "youtube" ? "youtube" : "twitch";
     r.className = "msg " + pl + (m.first ? " first" : "") + (m.me ? " me" : "") + (m.gone ? " gone" : "") + (m.shared ? " shared" : "");
@@ -530,6 +555,117 @@
       if (!j.ok) addNotice("Couldn't: " + (j.error || "no answer"), true);
     } catch (e) { addNotice("OmniPulse isn't answering (is it open, with the Stream Widget on?)", true); }
   }
+
+  // ---------- the emote menu: Twitch's and Kick's own (as where it goes allows), then BetterTTV, FrankerFaceZ
+  // and 7TV's (as words: they show as pictures for viewers with those extensions, and in OBS) ----------
+  let ownEmotes = [], ownN = -1;
+  async function pullOwn() {
+    try {
+      const j = await (await fetch("/dock/emotes.json", { cache: "no-store" })).json();
+      if (j.n === ownN) return;
+      ownN = j.n;
+      ownEmotes = j.own || [];
+      if ($("emo").classList.contains("open")) emoDraw();
+    } catch (e) {}
+  }
+  pullOwn();
+  setInterval(pullOwn, 30000);
+  const THIRD = { bttv: "BetterTTV", ffz: "FrankerFaceZ", "7tv": "7TV" };
+  // (the emotes you can use where the message goes: Twitch's for Twitch, Kick's for Kick, both for Both)
+  function usable() {
+    const to = $("to").value;
+    const on = { bttv: opt.bttv !== false, ffz: opt.ffz !== false, "7tv": opt.stv !== false };
+    const own = ownEmotes.filter((e) => to === "all" || e.f === to);
+    const third = [...emotes.values()].filter((e) => on[e.f]).map((e) => ({ c: e.c, u: e.u, f: e.f, g: THIRD[e.f] }));
+    return own.concat(third);
+  }
+  function insertAt(word) {
+    const i = $("text"), at = i.selectionStart ?? i.value.length, before = i.value.slice(0, at), after = i.value.slice(i.selectionEnd ?? at);
+    const pad = before && !/\s$/.test(before) ? " " : "";
+    i.value = before + pad + word + " " + after.replace(/^\s+/, "");
+    const caret = (before + pad + word + " ").length;
+    i.focus(); i.setSelectionRange(caret, caret);
+  }
+  function emoDraw() {
+    const q = $("emoFind").value.trim().toLowerCase();
+    const list = $("emoList");
+    list.textContent = "";
+    const groups = new Map();
+    for (const e of usable()) { if (q && !e.c.toLowerCase().includes(q)) continue; if (!groups.has(e.g)) groups.set(e.g, []); groups.get(e.g).push(e); }
+    if (!groups.size) { const n = document.createElement("div"); n.className = "none"; n.textContent = ownEmotes.length || emotes.size ? "No emotes match that." : "Emotes show here once the chatbot is signed in to Twitch or Kick."; list.append(n); return; }
+    for (const [g, es] of groups) {
+      const h = document.createElement("h3"); h.textContent = g + " (" + es.length + ")";
+      const grid = document.createElement("div"); grid.className = "grid";
+      for (const e of es.slice(0, 400)) {
+        const b = document.createElement("button"); b.type = "button"; b.title = e.c;
+        const im = document.createElement("img"); im.src = e.u; im.alt = e.c; im.loading = "lazy"; b.append(im);
+        b.onclick = () => { insertAt(e.c); };
+        grid.append(b);
+      }
+      list.append(h, grid);
+    }
+  }
+  function emoOpen(on) {
+    $("emo").classList.toggle("open", on); $("emoBtn").setAttribute("aria-expanded", on ? "true" : "false");
+    if (on) { suggClose(); emoDraw(); $("emoFind").value = ""; $("emoFind").focus(); }
+  }
+  $("emoBtn").onclick = () => emoOpen(!$("emo").classList.contains("open"));
+  $("emoFind").oninput = emoDraw;
+  $("emoFind").onkeydown = (e) => { if (e.key === "Escape") { emoOpen(false); $("text").focus(); } if (e.key === "Enter") { e.preventDefault(); const b = $("emoList").querySelector("button"); if (b) b.click(); } };
+  $("to").addEventListener("change", () => { if ($("emo").classList.contains("open")) emoDraw(); });
+  document.addEventListener("mousedown", (e) => { if (!e.target.closest("#emo, #emoBtn")) emoOpen(false); if (!e.target.closest("#sugg, #text")) suggClose(); });
+
+  // ---------- Tab: completes the word before the caret: "@" and a name from chat (the latest first), else an
+  // emote you can use. Tab again for the next, Shift+Tab for the one before; the choices show above the box ----------
+  const chatters = new Map();
+  function heard(m) { const name = m.user || m.login; if (!name || m.self) return; chatters.delete(name.toLowerCase()); chatters.set(name.toLowerCase(), { name, platform: m.platform }); while (chatters.size > 500) chatters.delete(chatters.keys().next().value); }
+  let comp = null;
+  function suggClose() { comp = null; $("sugg").classList.remove("open"); }
+  function suggDraw() {
+    const s = $("sugg"); s.textContent = "";
+    if (!comp || !comp.list.length) { s.classList.remove("open"); return; }
+    comp.list.slice(0, 12).forEach((c, k) => {
+      const x = document.createElement("span"); if (k === comp.at) x.className = "on";
+      if (c.u) { const im = document.createElement("img"); im.src = c.u; im.alt = ""; x.append(im); }
+      x.append(document.createTextNode(c.word));
+      x.onmousedown = (e) => { e.preventDefault(); comp.at = k; compPut(); suggClose(); };
+      s.append(x);
+    });
+    const how = document.createElement("div"); how.className = "how"; how.textContent = (comp.list.length > 12 ? comp.list.length + " match. " : "") + "Tab for the next, Shift+Tab for the one before."; s.append(how);
+    s.classList.add("open");
+  }
+  function compPut() {
+    const i = $("text"), c = comp.list[comp.at];
+    const before = i.value.slice(0, comp.start) + c.word + " ";
+    i.value = before + comp.rest;
+    i.setSelectionRange(before.length, before.length);
+  }
+  $("text").addEventListener("keydown", (e) => {
+    if (e.key === "Escape") { suggClose(); return; }
+    if (e.key !== "Tab") { if (!["Shift", "Control", "Alt", "Meta"].includes(e.key)) suggClose(); return; }
+    const i = $("text");
+    if (!comp) {
+      const at = i.selectionStart ?? i.value.length, before = i.value.slice(0, at), word = (before.match(/\S+$/) || [""])[0];
+      if (!word) return;
+      e.preventDefault();
+      const start = at - word.length, rest = i.value.slice(at).replace(/^\s+/, "");
+      let list;
+      if (word.startsWith("@")) {
+        const p = word.slice(1).toLowerCase(), to = $("to").value;
+        list = [...chatters.values()].reverse().filter((c) => c.name.toLowerCase().startsWith(p) && (to === "all" || c.platform === to)).map((c) => ({ word: "@" + c.name }));
+      } else {
+        const p = word.toLowerCase(), seen = new Set();
+        list = usable().filter((x) => x.c.toLowerCase().startsWith(p) && !seen.has(x.c) && seen.add(x.c)).sort((a, b) => a.c.length - b.c.length).map((x) => ({ word: x.c, u: x.u }));
+      }
+      if (!list.length) return;
+      comp = { start, rest, list, at: 0 };
+    } else {
+      e.preventDefault();
+      comp.at = (comp.at + (e.shiftKey ? -1 : 1) + comp.list.length) % comp.list.length;
+    }
+    compPut();
+    suggDraw();
+  });
 
   $("send").onsubmit = (e) => {
     e.preventDefault();

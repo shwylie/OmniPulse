@@ -8,6 +8,15 @@ use std::sync::Mutex;
 use std::time::Duration;
 
 static LIST: Mutex<Vec<(String, String, &'static str)>> = Mutex::new(Vec::new());
+/// The platforms' own, as the chatbot reads them with its sign-ins (Twitch's you can use, Kick's global, emoji
+/// and channel ones): [{ c, u, f: twitch | kick, g: its group's name }], for the Chat Dock's emote menu
+static OWN: Mutex<Vec<Value>> = Mutex::new(Vec::new());
+
+/// The platforms' own emotes, from the chatbot
+pub fn own_set(list: Vec<Value>) {
+    *OWN.lock().unwrap() = list;
+    N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+}
 static N: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 fn client() -> reqwest::Client {
@@ -78,7 +87,7 @@ pub async fn refresh(twitch_id: &str, kick_id: &str) {
 /// What a page asks for: the later of two with the same code wins, as fetched in that order
 pub fn json() -> Value {
     let list = LIST.lock().unwrap();
-    json!({ "n": N.load(std::sync::atomic::Ordering::Relaxed), "list": list.iter().map(|(c, u, f)| json!({ "c": c, "u": u, "f": f })).collect::<Vec<_>>() })
+    json!({ "n": N.load(std::sync::atomic::Ordering::Relaxed), "list": list.iter().map(|(c, u, f)| json!({ "c": c, "u": u, "f": f })).collect::<Vec<_>>(), "own": *OWN.lock().unwrap() })
 }
 
 #[cfg(test)]

@@ -13053,6 +13053,15 @@ fn plugin_app(shared: &Shared, plugin: &str, ask: serde_json::Value, answer: Box
             }
             send(match omnipulse_core::widget::overlay_push(&fields) { Ok(_) => serde_json::json!({ "ok": true }), Err(e) => serde_json::json!({ "error": e }) });
         }
+        // (the Chat Dock's emote menu: Twitch's and Kick's own emotes, as the chatbot reads them)
+        "dockEmotes" => {
+            if plugin != "chatbot" { return send(serde_json::json!({ "error": "only OmniPulse's chatbot can" })); }
+            let list: Vec<serde_json::Value> = args.first().and_then(|v| v.as_array()).cloned().unwrap_or_default().into_iter()
+                .filter(|e| e["c"].is_string() && e["u"].as_str().is_some_and(|u| u.starts_with("https://")) && matches!(e["f"].as_str(), Some("twitch" | "kick")))
+                .take(5000).collect();
+            omnipulse_core::emotes::own_set(list);
+            send(serde_json::json!({ "ok": true }));
+        }
         // (OBS's docks: the chat as the chatbot hears it, messages taken down, what happened for the activity feed)
         "dockChat" | "dockGone" | "dockActivity" => {
             if plugin != "chatbot" { return send(serde_json::json!({ "error": "only OmniPulse's chatbot can" })); }

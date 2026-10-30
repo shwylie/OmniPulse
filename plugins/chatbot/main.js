@@ -12,7 +12,7 @@ const TWITCH_SCOPES_CHANNEL = [
   "channel:read:predictions", "channel:read:vips", "moderation:read", "channel:read:charity",
   "channel:manage:polls", "channel:manage:predictions", "channel:manage:redemptions", "channel:edit:commercial",
   "channel:manage:raids", "moderator:manage:chat_settings", "channel:manage:vips", "channel:manage:moderators",
-  "moderator:manage:shield_mode", "moderator:read:shield_mode",
+  "moderator:manage:shield_mode", "moderator:read:shield_mode", "user:read:emotes",
 ].join(" ");
 const TWITCH_SCOPES_BOT = "chat:read chat:edit";
 
@@ -1847,6 +1847,50 @@ async function kickRenew(who) {
   return true;
 }
 
+// (the Chat Dock's emote menu: Twitch's you can use (all of them with the emotes permission, else the global
+// ones and your channel's), and Kick's global, emoji and channel ones; Kick's by name, to send as Kick wants)
+let kickEmoteIds = new Map();
+async function emotesRead() {
+  const out = [];
+  const tw = (e, g) => out.push({ c: e.name, u: "https://static-cdn.jtvnw.net/emoticons/v2/" + e.id + "/default/dark/2.0", f: "twitch", g });
+  if (S().userId && apiToken) {
+    let all = [];
+    try {
+      let after = "";
+      for (let i = 0; i < 20; i++) {
+        const r = await helix("GET", "chat/emotes/user?user_id=" + encodeURIComponent(S().userId) + (after ? "&after=" + encodeURIComponent(after) : ""));
+        all = all.concat(r.data || []);
+        after = (r.pagination && r.pagination.cursor) || "";
+        if (!after) break;
+      }
+    } catch (e) { all = []; }
+    if (all.length) all.forEach((e) => tw(e, e.emote_type === "globals" || e.owner_id === "0" ? "Twitch" : e.owner_id === S().userId ? "Your Channel" : "Twitch: Other Channels"));
+    else {
+      try { ((await helix("GET", "chat/emotes?broadcaster_id=" + encodeURIComponent(S().userId))).data || []).forEach((e) => tw(e, "Your Channel")); } catch (e) {}
+      try { ((await helix("GET", "chat/emotes/global")).data || []).forEach((e) => tw(e, "Twitch")); } catch (e) {}
+    }
+  }
+  if (yes(S().kickOn) && String(S().kickChannel || "").trim()) {
+    const slug = String(S().kickChannel).trim().toLowerCase().replace(/_/g, "-");
+    try {
+      const r = await OmniPulse.fetch("https://kick.com/emotes/" + encodeURIComponent(slug), { headers: { Accept: "application/json", "User-Agent": "OmniPulse" } });
+      const ids = new Map();
+      if (r.ok) for (const grp of (await r.json()) || []) {
+        const g = grp.slug ? "Kick: Your Channel" : grp.name === "Emojis" ? "Kick Emoji" : "Kick";
+        for (const e of grp.emotes || []) { if (!e.name || !e.id) continue; ids.set(e.name, e.id); out.push({ c: e.name, u: "https://files.kick.com/emotes/" + e.id + "/fullsize", f: "kick", g }); }
+      }
+      if (ids.size) kickEmoteIds = ids;
+    } catch (e) {}
+  }
+  if (out.length) OmniPulse.app.dockEmotes(out).catch(() => {});
+}
+
+// Kick's emotes by name in what you send: as Kick wants them ([emote:id:name]), so they show as pictures
+function kickEmotesIn(text) {
+  if (!kickEmoteIds.size) return text;
+  return String(text).split(/(\s+)/).map((w) => (kickEmoteIds.has(w) ? "[emote:" + kickEmoteIds.get(w) + ":" + w + "]" : w)).join("");
+}
+
 // A message in your Kick chat (to the one it answers): from the bot account if there is one, else you; kept
 // a moment, so its echo isn't taken as chat
 function kickSay(to, text) {
@@ -1854,7 +1898,7 @@ function kickSay(to, text) {
   if (!kick || !(who === "bot" ? S().kickBotToken : S().kickToken)) return;
   const channel = Number(S().kickUserId || 0);
   String(text).split("\n").filter(Boolean).forEach((line) => {
-    const content = line.slice(0, 500);
+    const content = kickEmotesIn(line).slice(0, 500);
     kickSent.push({ content, at: Date.now() });
     while (kickSent.length > 30) kickSent.shift();
     const body = { content, type: "user", broadcaster_user_id: channel };
@@ -2159,11 +2203,14 @@ async function start() {
   ytLook();
   tipConnect();
   kickConnect().catch((e) => { OmniPulse.log("kick: " + e.message); OmniPulse.app.say("Kick's chat didn't connect: " + e.message).catch(() => {}); });
+  // (Kick's emotes now; Twitch's join them once it's signed in, below)
+  emotesRead();
   if (!S().token || !S().login) return;
   const token = await fresh("channel");
   if (!token) { OmniPulse.app.say("Your Twitch sign-in has run out: sign in again in its settings."); return; }
   apiToken = token;
   twitchBadgesRead();
+  emotesRead();
   // (your name as Twitch shows it, capitals and all: the sign-in keeps only the lower-case login)
   if (S().userId) helix("GET", "users?id=" + encodeURIComponent(S().userId)).then((r) => { myName = ((r.data || [])[0] || {}).display_name || ""; }).catch(() => {});
   chat = connectChat(token, S().login, onChat);
